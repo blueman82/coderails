@@ -1,0 +1,22 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "coderails",
+  "description": "Gary's Claude Code kit: workflow command chain, planning/orchestration skills, and a self-checking discipline loop.",
+  "owner": {
+    "name": "Gary Harrison",
+    "email": "gjharrison01@gmail.com"
+  },
+  "plugins": [
+    {
+      "name": "coderails",
+      "description": "The prep→push→merge→wiki workflow chain, agentic-loop/planning/premortem/handoff skills, plus a self-checking discipline loop (confidence-label hooks, Did-Not-Verify enforcement, destructive-bash gate, project test gate).",
+      "author": {
+        "name": "Gary Harrison",
+        "email": "gjharrison01@gmail.com"
+      },
+      "category": "productivity",
+      "version": "1.0.0",
+      "source": "./"
+    }
+  ]
+}

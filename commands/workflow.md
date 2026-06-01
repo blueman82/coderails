@@ -1,0 +1,189 @@
+---
+allowed-tools: SlashCommand(/coderails:prep), SlashCommand(/coderails:push), SlashCommand(/pr-review-toolkit:review-pr), SlashCommand(/coderails:merge), SlashCommand(/wiki-ingest), SlashCommand(/wiki-lint), SlashCommand(/strictcode-python), Bash(git*), Bash(./worktree-add*), Bash(cat*)
+argument-hint: <branch> "<description>"
+description: Orchestrate the full feature workflow — prep → code → push → review → merge → wiki-ingest/lint
+---
+
+## Project config
+
+Config: !`GIT_ROOT=$(git rev-parse --show-toplevel 2>/dev/null) && { cat "$GIT_ROOT/projects/$(basename $(pwd))/.claude/workflow.config.yaml" 2>/dev/null || cat "$GIT_ROOT/.claude/workflow.config.yaml" 2>/dev/null || echo "NO_CONFIG"; }`
+
+If the config block above says `NO_CONFIG`, stop and prompt:
+> "No workflow.config.yaml found for this project. Run /coderails:workflow-init to create one, or provide jira project, wiki path, and worktree base manually."
+
+## Raw arguments
+
+```
+$ARGUMENTS
+```
+
+## Purpose
+
+This command is the umbrella for the canonical code-change workflow. The rules it encodes:
+
+- **Worktree before code**: create a worktree for every feature/bug branch — never edit on main
+- **Strictcode pre-flight**: run `/strictcode-python` before pushing if the diff touches paths listed in `config.strictcode_paths` (or any file with ≥20 lines changed)
+- **Adversarial PR review**: use `/pr-review-toolkit:review-pr`, not manual Agent fan-out — runs 4+ specialist agents in parallel
+- **Apply findings inline**: on authorized ship-it, apply blocking and worthwhile review findings directly; do not re-ask per finding
+- **Wiki after merge**: after every merge run BOTH `/wiki-ingest` AND `/wiki-lint` (if `config.wiki_path` is non-null)
+- **Parallel tool calls**: when multiple tool calls or file reads have no dependency between them, issue them in parallel in a single message — not sequentially. Never serialize work that can run concurrently.
+
+Phase 2b (design adversarial review) is distinct from Phase 3 (`/pr-review-toolkit:review-pr`): Phase 2b reviews the *design page* before coding, Phase 3 reviews the *code* before merge. Both are required on non-trivial features.
+
+The workflow has two interactive pauses where Gary drives: (a) the code/iterate loop, (b) the final ship-it authorization. Everything else auto-chains.
+
+## Parse Arguments
+
+`$ARGUMENTS` is whatever Gary typed after `/workflow`. Extract:
+
+1. **Branch name** (required). First token matching `feature/*`, `bug/*`, `bugfix/*`. If absent, ask for it.
+2. **Description** (optional). Everything after the branch name, or the `--summary "..."` flag if present. If absent, humanise the branch name (`feature/foo-bar` → "Implement foo bar").
+
+Accepted shapes (same as `/prep`):
+
+```
+/workflow feature/nrql-host-fix
+/workflow bug/fix-nrql --summary "NRQL host field misreports"
+/workflow feature/csopm-dedup "Dedupe CSOPM notifications by assignee"
+```
+
+If ambiguous, ask one targeted clarifying question — do not guess the branch name.
+
+## Phase 1 — Prep (auto)
+
+Invoke `/coderails:prep` with the parsed args. It handles:
+
+- Worktree creation at `<config.worktree_base>-<description>` (via `config.worktree_script` if set, otherwise plain `git worktree add`)
+- JIRA ticket creation (if `config.jira` is non-null): project `config.jira.project`, epic `config.jira.epic`, 1 story point, GA fix-version
+- Transition to Acknowledged → In Progress
+- `git config branch.<branch>.jira-ticket <KEY>` so `/push` can auto-resolve later
+
+Report the worktree path and JIRA key (if created).
+
+## Phase 2 — Orient (auto, before coding starts)
+
+**Skip this phase if `config.wiki_path` is null.** If skipped, go directly to Phase 2b.
+
+Before handing control to Gary, run a **targeted wiki pre-flight** using `/wiki-query`:
+
+```
+/wiki-query "What does the wiki cover about [feature area derived from branch name]?
+Identify: known constraints, open gaps, adjacent behaviour, superseded decisions.
+Flag anything that looks like an assumption that is NOT enforced in code."
+```
+
+This is `/wiki-query`, not `/wiki-lint`. `/wiki-lint` is a full-vault audit (orphans, stale dates) — wrong scope and too slow at coding time. `/wiki-query` reads only relevant pages and answers a targeted question.
+
+What to look for in the response:
+- **Design gaps**: assumptions baked into the current implementation that this change might violate
+- **Missing constraints**: things the wiki says should be true that aren't visibly enforced
+- **Adjacent behaviour**: related features that interact with this one and could be affected
+
+If the query surfaces a gap worth preserving:
+1. File an investigation page now (`investigations/<topic>_<YYYY-MM-DD>.md`) before coding starts — not after deploy
+2. Update `index.md` and `log.md` (use a worktree per the wiki-ingest skill)
+3. Surface findings to Gary as a short pre-coding brief: "Before we start — I noticed X in the wiki. Is that intentional / in scope?"
+
+If no gap found, report "wiki clear" and hand control to Gary.
+
+**Do not skip this step.** Runtime discoveries (post-deploy surprises) are often detectable from the wiki before a line is written.
+
+## Phase 2b — Design Adversarial Review (conditional, auto)
+
+Run **before handing control to Gary** if the design investigation page filed in Orient meets any of these triggers:
+
+- ≥40 lines, OR
+- spans >1 service (e.g. scheduler + app, app + notifier), OR
+- introduces a new DDB schema or new feature flag pair, OR
+- any LLM call in the data path
+
+If none of those apply, skip this phase and go straight to Code.
+
+**How to run**: launch 2-3 agents in a single message (parallel). Select agents based on what the design actually touches — do not default to a fixed list:
+
+| Design element | Agent to include |
+|---|---|
+| LLM call in the loop (prompt, taxonomy, classification) | `prompt-engineer` |
+| Cross-service data flow, DDB schema, PK design | `architect-reviewer` |
+| User input → write path, Slack-interactive, auth surface | `security-auditor` |
+| New async/concurrent patterns, error propagation | `silent-failure-hunter` |
+| New TypedDI protocol or ServiceSpec registration | `type-design-analyzer` |
+| Novel test surface or integration boundary | `pr-test-analyzer` |
+
+Always pick at least 2. Cap at 3. Brief each agent with the full design investigation page content + the specific sub-questions most relevant to its expertise (not just "review this" — give it attack vectors).
+
+**After the agents report:**
+1. Enumerate every finding — do not skip any.
+2. Classify each as: **accept** (update design page) / **skip** (record reason inline).
+3. Apply accepted changes to the investigation page and commit before coding starts.
+4. Log skipped findings with rationale — in the investigation page's "Adversarial review" section, not in memory.
+
+**This is design review, not code review.** It catches schema flaws, taxonomy gaps, and service-boundary issues that are cheap to fix now and expensive mid-implementation. The PR-time `/pr-review-toolkit:review-pr` is separate and still required.
+
+## Phase 2 — Code (interactive pause)
+
+Hand control back to Gary. He will:
+
+1. Point his editor at the worktree
+2. Implement the change (with your help across any number of turns)
+3. Run the project's test suite during iteration and before pushing
+4. Signal readiness with a phrase like *"push"*, *"ready to push"*, *"done coding"*, *"ship it"*
+
+Do not proceed to Phase 3 until Gary gives that signal. Do not nag.
+
+**Pre-flight when Gary signals ready:** if `config.strictcode_paths` is non-null and the cumulative diff against the base branch touches any of those paths — or any file with ≥20 lines changed — run `/strictcode-python` on those files before calling `/push`.
+
+Note: `/push` already runs this pre-flight itself for paths in `config.strictcode_paths`, so if you forget, `/push` will catch it. The reason to also run it here is to catch non-config-listed large diffs that `/push`'s pre-flight misses.
+
+## Phase 3 — Push + Adversarial Review (auto after ready signal)
+
+Execute in order — do not pause between these:
+
+1. `/coderails:push` — stages, commits, pushes, opens PR with branch-protection reviewers, auto-resolves JIRA on PR creation (if `config.jira` non-null). Capture the PR URL from the output.
+2. `/pr-review-toolkit:review-pr all` — runs the four specialist agents (code-reviewer, pr-test-analyzer, silent-failure-hunter, type-design-analyzer) in parallel.
+3. Apply worthwhile findings inline — do not re-ask per finding. Push the follow-up commit. Classify each finding as:
+   - **Blocking** (apply silently): correctness bug, protocol violation, silent-failure pattern, missing test for changed public contract, DI registration gap
+   - **Worthwhile** (apply silently): readability wins, better names, extracted helpers that clearly reduce duplication
+   - **Cosmetic/subjective** (skip, note in PR body): style preferences, naming opinions without a concrete defect
+4. Post a ledger comment on the PR summarising what was applied vs. skipped and why.
+
+Report the PR URL, review summary, and resolved JIRA key (if applicable).
+
+## Phase 4 — Ship-It (interactive pause)
+
+Wait for Gary to approve the merge. Signals: *"ship it"*, *"merge"*, *"ok to merge"*, *"lgtm go"*.
+
+While waiting, you may: answer review questions, help debug CI failures, iterate on review comments, push additional commits. Do NOT proceed to Phase 5 autonomously.
+
+## Phase 5 — Merge + Wiki (auto after ship signal)
+
+Execute in order:
+
+1. `/coderails:merge` — merges the PR, switches back to `main`, pulls latest. Do not re-ask about merge strategy flags.
+2. **If `config.wiki_path` is non-null**: `/wiki-ingest` — creates the source page in `<config.wiki_path>/sources/pr_<N>_*.md`, updates affected wiki pages, refreshes the index, appends to the log. Never write wiki pages directly — always use the skill.
+3. **If `config.wiki_path` is non-null**: `/wiki-lint` — checks for contradictions, stale pages, orphans, missing cross-references. Fix anything directly related to this PR; defer anything else.
+
+Report: merge commit SHA, wiki source page path (if wiki enabled), any lint findings that need follow-up.
+
+## Worktree cleanup
+
+After Phase 5 completes and the PR is merged, clean up the worktree without asking first:
+
+```bash
+git worktree remove <worktree-path>
+git branch -d <branch-name>
+```
+
+If `git branch -d` refuses because the branch is not fully merged into local `main`, investigate before using `-D`. Don't force-delete to make the refusal go away.
+
+## Escape hatches
+
+- **One-line hotfix / docs-only change:** skip `/workflow` entirely. Those don't need a worktree per the `no-edit-on-main.sh` hook's carve-out (only `.py/.ts/.tsx/.js/.jsx/.go` files are blocked on main).
+- **Phase skip:** Gary can interrupt at any time and tell you to skip a specific phase or re-enter a prior phase. Obey; don't argue for the canonical sequence.
+- **Standalone sub-commands:** every phase's sub-command (`/coderails:prep`, `/coderails:push`, `/pr-review-toolkit:review-pr`, `/coderails:merge`, `/wiki-ingest`, `/wiki-lint`) remains callable on its own for edge cases. `/coderails:workflow` is the happy path, not the only path.
+
+## What this command is NOT
+
+- Not enforcement. Slash commands are advisory — Claude has to choose to invoke them. Mechanical enforcement (refusing `gh pr create` unless `/push` ran, refusing `gh pr merge` unless `/pr-review-toolkit:review-pr` ran) belongs in `PreToolUse` hooks, not here. See the companion enforce-pr-workflow.sh hook design.
+- Not a replacement for reading CLAUDE.md. This command encodes the workflow; the authoritative spec for project-specific standards still lives in `projects/<name>/CLAUDE.md`.
+- Not interactive for the branch name. If Gary doesn't provide a branch, ask once — don't invent one.

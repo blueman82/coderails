@@ -1,0 +1,5 @@
+# macOS
+.DS_Store
+
+# remember-plugin session scratch (machine-local handoff/history buffers)
+.remember/
