@@ -296,7 +296,10 @@ if [[ ${#conflicts[@]} -gt 0 ]]; then
     fi
     read -r answer || answer="n"   # EOF (non-interactive/piped) → skip, don't abort
     printf '\n'
-    if [[ "${answer,,}" == "y" ]]; then
+    # Lowercase via tr, not ${answer,,} — the latter is bash 4+ only and macOS
+    # ships bash 3.2 as /bin/bash, where it errors with "bad substitution".
+    answer=$(printf '%s' "$answer" | tr '[:upper:]' '[:lower:]')
+    if [[ "$answer" == "y" ]]; then
       for cmd in "${conflicts[@]}"; do
         cp "$PLUGIN_DIR/commands/$cmd" "$COMMANDS_DIR/$cmd"
         flash_cp "$cmd"
