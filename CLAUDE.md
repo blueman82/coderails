@@ -20,7 +20,8 @@ installs via `install.sh` + `/plugin install`, and bundles three things:
    unverified claims, destructive bash, and failing tests (`hooks/`)
 
 There is no build step and no compiled artifact. "Source" is markdown (commands,
-skills) and bash (hook scripts, workflow scripts). It is **not a git repository**.
+skills) and bash (hook scripts, workflow scripts). It is version-controlled in the
+private repo `github.com/blueman82/coderails`.
 
 ## How the pieces wire together
 
