@@ -1,6 +1,6 @@
 ---
 name: agentic-loop
-description: Multi-agent orchestration discipline. Load this skill IMMEDIATELY — taking precedence over /workflow, /prep, /push, and any other single-PR slash command — whenever the user authorises a sequence of agent-driven work. Specifically: any time the user says "TeamCreate", "spawn a team", "no human gates", "self-merge", "crack on", "without the human", "no per-PR confirmation", "agentic loop", "multi-PR", or authorises 3+ PRs in one instruction. ALSO load when the user authorises autonomous merge + deploy + verify chains, even for a single PR, if they have explicitly waived per-step confirmation. The 13-phase method covers: reading the authorisation envelope verbatim, delegating planning/premortem skills to spawned agents (not main context), using TeamCreate for ≥3 sequential PRs, verifying artifacts not idle pings, disproving symptom premises before spawning fixes, and matching confirmation cadence to envelope scope. This is NOT /workflow (which is single-PR prep → push → merge → wiki). This is the multi-agent orchestration layer that sits ABOVE /workflow and uses it as a subroutine. The cost of forgetting to delegate, re-asking for authorised confirmation, or trusting an idle ping as failure is enormous in long sessions — fire this skill aggressively rather than miss it.
+description: Multi-agent orchestration discipline. Load this skill IMMEDIATELY — taking precedence over /workflow, /prep, /push, and any other single-PR slash command — whenever the user authorises a sequence of agent-driven work. Specifically: any time the user says "TeamCreate", "spawn a team", "no human gates", "self-merge", "crack on", "without the human", "no per-PR confirmation", "agentic loop", "multi-PR", or authorises 3+ PRs in one instruction. ALSO load when the user authorises autonomous merge + deploy + verify chains, even for a single PR, if they have explicitly waived per-step confirmation. The 13-phase method covers: reading the authorisation envelope verbatim, delegating planning/premortem skills to spawned agents (not main context), keeping main context as a pure orchestrator that NEVER implements — every code change (even a single-file edit) goes to a sonnet agent that does the implementation AND verifies its own artifact, escalating to TeamCreate only for ≥3 sequential PRs or dependency chains, verifying artifacts not idle pings, disproving symptom premises before spawning fixes, and matching confirmation cadence to envelope scope. This is NOT /workflow (which is single-PR prep → push → merge → wiki). This is the multi-agent orchestration layer that sits ABOVE /workflow and uses it as a subroutine. The cost of forgetting to delegate, re-asking for authorised confirmation, or trusting an idle ping as failure is enormous in long sessions — fire this skill aggressively rather than miss it.
 ---
 
 # Agentic Loop
@@ -78,7 +78,16 @@ Spawn this pre-flight agent with `model: sonnet` — it's running skills, not ma
 
 The why: main context fills up fast in long sessions. Pre-flight output is dense and only useful for shaping the next move — perfect for delegation. Agents have skill access; passing the skill name in the prompt is enough.
 
-### Phase 3 — TeamCreate for work with ≥3 sequential units or dependency chains
+### Phase 3 — Delegate all implementation to sonnet agents; TeamCreate when work has ≥3 sequential units or dependency chains
+
+**Default: main context never implements.** It orchestrates — plans, delegates, verifies. Every implementation unit (even a single-file edit, even a tight sequential step) goes to a spawned **sonnet** agent. The two reasons, in order: keep main context clean (opus context is scarce and fills fast in long sessions), and keep cost down (sonnet does the typing, not opus). Treat a file edit done directly in main context as the exception that needs a reason, not the default.
+
+This means the delegation decision is a two-rung ladder, not "delegate vs. do it yourself":
+
+1. **Single sonnet `Agent` for impl + verify** — the default for any self-contained 1–2 unit of work (a bug fix, one PR, a single-file change). One agent does the implementation *and* verifies its own artifact before reporting. TeamCreate would be overkill here; main context doing it directly burns opus context and money for no benefit. See Phase 3a below for the prompt contract.
+2. **TeamCreate** — when the loop has 3+ PRs or any cross-step dependency. See below.
+
+The only work that legitimately stays in main context: reading for orchestration decisions (git status, `gh pr view`, log reads, the Phase 12 artifact checks), and the planning/cadence the skill describes. If you catch yourself running `Edit`/`Write`/`MultiEdit` in main context inside an authorised loop, stop — that work belongs in a sonnet agent.
 
 When the loop has 3+ PRs or any cross-step dependency, **use the `TeamCreate` tool by name** and build a task list with explicit `blockedBy` dependencies via `TaskUpdate`. Don't just describe a "sequential PR loop" — actually invoke `TeamCreate`. The user can see the team in their UI and the task list becomes the shared source of truth.
 
@@ -97,9 +106,24 @@ Each task description must be **self-contained** so the spawned agent can act wi
 Include this line in every agent prompt:
 > "Don't go silently idle — send a completion message via SendMessage. Past agents have failed this way."
 
-For bare 1-2 task work, an `Agent` call is fine — don't over-engineer with TeamCreate.
+For bare 1-2 task work, a single `Agent` call is the right tool — don't over-engineer with TeamCreate (see Phase 3a).
 
-**When to delegate vs. work directly:** use subagents when tasks run in parallel, need isolated context, or are genuinely independent workstreams. For single-file edits, sequential steps, or work that requires shared context across steps, work directly rather than delegating — the handoff overhead costs more than it saves.
+### Phase 3a — Single sonnet agent for impl + verify (the TeamCreate-is-overkill case)
+
+For self-contained work that doesn't justify a team — a bug fix, one PR, a single-file change, a tight sequence of steps with shared context — spawn **one** `Agent` with `model: sonnet` that owns both the implementation **and** the verification, then reports back a confidence-labelled result. Main context stays the orchestrator; it does not make the edit itself.
+
+Why one agent does both impl and verify (not two): the verification (running the test, reading the diff, hitting the endpoint) produces exactly the dense output you delegated to keep out of main context. If main context re-verified every small change, it would refill with the diffs it just pushed away. The agent self-verifies; main context spot-checks only at dependency boundaries (Phase 12) or when the artifact check is cheap and the stakes are high.
+
+The agent's prompt must be self-contained (it can't re-read the conversation) and include:
+- **`model: sonnet`** — non-negotiable, same rule as team workers (Phase 3): cost control, and impl+verify is execution, not architecture.
+- The exact change to make, with file paths and the success criteria stated as something testable.
+- **A verify step the agent runs itself before reporting** — run the test / lint / build, read back the diff, hit the endpoint or read the log. State which one. "Implement X, then verify by running `Y`, and only report success if `Y` passes."
+- **Report-back contract:** return a confidence-labelled summary (Phase 11), state what was run to verify (the command + its result, not just "verified"), and "don't go silently idle — send a completion message" (Phase 4 — sonnet agents go idle without reporting).
+- If the work writes to git, the worktree/branch and a "commit your work" instruction so the artifact is durable for the orchestrator's Phase 4 check.
+
+When the single agent goes idle without reporting, apply Phase 4 verbatim — check the artifact (git diff, PR state, log), not the ping. When it reports success, that's a Phase 12 claim, not evidence — re-check at dependency boundaries.
+
+Escalate from one agent to TeamCreate the moment the work grows a third unit or a cross-unit dependency. Don't run three sequential solo `Agent` calls where a team with a `blockedBy` task list belongs — that's the case Phase 3 reserves for `TeamCreate`.
 
 ### Phase 4 — Spawn workers in waves, never block on idle pings
 
