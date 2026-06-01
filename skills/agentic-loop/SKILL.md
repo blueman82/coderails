@@ -137,6 +137,23 @@ When an agent goes idle without a report:
 
 Only after the artifact check fails should you assume failure. Then respawn — and per Phase 10, give it a new name.
 
+### Phase 4b — PR review uses the six `pr-review-toolkit` agents, in parallel
+
+When a phase reaches "review the PR" (after a `/workflow` agent has pushed a PR, before merge), the review is `/pr-review-toolkit:review-pr all` — fan out these **six specialised reviewers in parallel, in a single message with six `Agent` blocks**, each against the branch diff (`git -C <worktree> diff origin/main...HEAD`):
+
+| # | `subagent_type` | Reviews | Spawn when |
+|---|---|---|---|
+| 1 | `pr-review-toolkit:code-reviewer` | General quality + CLAUDE.md compliance, bugs | always |
+| 2 | `pr-review-toolkit:pr-test-analyzer` | Behavioural test coverage, mock-tautology, critical gaps | test files changed (almost always) |
+| 3 | `pr-review-toolkit:silent-failure-hunter` | Swallowed exceptions, message-loss, spurious-success error paths | error handling / catch blocks / queue-delete semantics changed |
+| 4 | `pr-review-toolkit:type-design-analyzer` | Protocol/type invariants, illegal-states-unrepresentable | new/changed types or protocol surfaces |
+| 5 | `pr-review-toolkit:comment-analyzer` | Comment/docstring accuracy, comment rot | comments/docstrings added or behaviour-changing extractions |
+| 6 | `pr-review-toolkit:code-simplifier` | Dead code from extractions, duplication, over-engineering (report-only, no edits) | always (polish pass) |
+
+Skip a reviewer only when its trigger genuinely doesn't apply (e.g. no type changes → no type-design-analyzer). Default is all six. Spawn `model: sonnet`, read-only, and carry the Phase 11 confidence-label instruction into each prompt. Collect all reports, aggregate into Critical / Important / Suggestion, and feed any MERGE-BLOCKER back to a fix agent (Phase 5/10) BEFORE merge.
+
+**Do not substitute the generic `architect-review` + `debugger` + `ai-engineer` trio here.** That three-agent set is a separate general-purpose adversarial pattern (CLAUDE.md `feedback_three_parallel_adversarial_agents`) for design/architecture stress-tests — it is NOT the PR-review step. The canonical Ketchup workflow's review step is `/pr-review-toolkit:review-pr all` = the six agents above. Past failure: spawned the architect/debugger/ai-engineer trio at PR-review time; corrected to the toolkit six.
+
 ### Phase 5 — Disprove the premise before each fix
 
 Before spawning a "bug fix" agent for any reported regression, the fix agent's prompt must require:
