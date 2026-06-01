@@ -3,3 +3,6 @@
 
 # remember-plugin session scratch (machine-local handoff/history buffers)
 .remember/
+
+# runtime hook logs (machine-local, not source)
+logs/
