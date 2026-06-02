@@ -8,8 +8,13 @@ description: Orchestrate the full feature workflow — prep → code → push �
 
 Config: !`GIT_ROOT=$(git rev-parse --show-toplevel 2>/dev/null) && { cat "$GIT_ROOT/projects/$(basename $(pwd))/.claude/workflow.config.yaml" 2>/dev/null || cat "$GIT_ROOT/.claude/workflow.config.yaml" 2>/dev/null || echo "NO_CONFIG"; }`
 
-If the config block above says `NO_CONFIG`, stop and prompt:
-> "No workflow.config.yaml found for this project. Run /coderails:workflow-init to create one, or provide jira project, wiki path, and worktree base manually."
+If the config block above says `NO_CONFIG`, do NOT stop. Run in minimal mode:
+- Skip Phase 2 (Orient/wiki-query) and Phase 5's wiki steps — `config.wiki_path` is null.
+- Skip Phase 1's Jira creation — `config.jira` is null. /prep still runs for the worktree.
+- Skip the strictcode pre-flight — `config.strictcode_paths` is null.
+- Worktree uses plain `git worktree add` off the git root.
+
+The workflow collapses to: prep (worktree only) → code → push → review → merge.
 
 ## Raw arguments
 

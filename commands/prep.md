@@ -8,8 +8,12 @@ description: Create safety branch, new feature/bug branch, and create a Jira tic
 
 Config: !`GIT_ROOT=$(git rev-parse --show-toplevel 2>/dev/null) && { cat "$GIT_ROOT/projects/$(basename $(pwd))/.claude/workflow.config.yaml" 2>/dev/null || cat "$GIT_ROOT/.claude/workflow.config.yaml" 2>/dev/null || echo "NO_CONFIG"; }`
 
-If the config block above says `NO_CONFIG`, stop and prompt:
-> "No workflow.config.yaml found for this project. Run /workflow-init to create one, or provide jira project, wiki path, and worktree base manually."
+If the config block above says `NO_CONFIG`, do NOT stop. Run in minimal mode with these defaults:
+- `config.jira` = null → skip all Jira steps (Task Part 2)
+- `config.wiki_path` = null → skip wiki phases
+- `config.worktree_base` = `<git-root>` (the repo root from `git rev-parse --show-toplevel`)
+- `config.worktree_script` = null → use plain `git worktree add`
+- `config.strictcode_paths` = null → skip strictcode pre-flight
 
 ## Current Git Status
 
@@ -59,6 +63,7 @@ Feature and bug work must be isolated in a git worktree — never branch off or 
    - Strip the `feature/`, `bug/`, or `bugfix/` prefix from the parsed branch name
    - Path: `<config.worktree_base>-<description>`
    - Example: `bug/fix-nrql` with `worktree_base: /Users/you/Documents/Github/camp-ops-emea` → `/Users/you/Documents/Github/camp-ops-emea-fix-nrql`
+   - In minimal mode (NO_CONFIG), `worktree_base` is the git root, so the worktree is a sibling dir, e.g. `/path/to/repo` → `/path/to/repo-fix-nrql`.
 
 2. Create the worktree:
    - If `config.worktree_script` is non-null, run from the project root:
