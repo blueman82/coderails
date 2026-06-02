@@ -47,7 +47,15 @@ For example, if cwd is `/Users/you/Documents/Github/ops-agent`, write to:
 
 **Do NOT use the path shown in your system prompt's auto-memory section** — that may be a global fallback (`-Users-harrison`) which other project sessions won't load. Always derive from cwd.
 
-If `MEMORY.md` doesn't exist in the target directory, create it with a `# Memory Index` header.
+**Monorepo edge case — verify the store location before deriving a new one.** When cwd is a sub-project inside a larger repo (e.g. you are working in `<repo>/projects/<sub>` or `<repo>/packages/<sub>`), the memory store is often keyed at the **repo root**, not the sub-project cwd. All of that repo's sessions — including this one — share one root store. Blindly deriving the path from a sub-project cwd creates a brand-new, empty `memory/` folder that NO future session will load from, orphaning your handoff. So before writing:
+
+1. Find the existing store. Check the cwd-derived path AND its parent-directory candidates (walk up the path, replacing slashes with dashes), and look at the auto-memory path from the system prompt. Pick the one that already contains a populated `MEMORY.md` + `project_*.md` files.
+2. If exactly one populated store exists, write there — even if it's keyed to a parent/root path rather than your sub-project cwd. Matching the store the session actually loads from beats matching cwd.
+3. Only create a new cwd-derived directory if NO populated store exists for this repo (genuinely first memory for the project).
+
+A quick check: list candidate `memory/` dirs and see which holds existing `*.md` memories. Do not create a competing empty folder next to a populated one.
+
+If `MEMORY.md` doesn't exist in the **chosen** target directory (and you've confirmed no populated store exists at a parent/root path), create it with a `# Memory Index` header.
 
 Write the memory file with type `project`:
 

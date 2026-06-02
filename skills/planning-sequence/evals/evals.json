@@ -1,0 +1,23 @@
+{
+  "skill_name": "planning-sequence",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "I'm planning to migrate our Campaign infrastructure from bare-metal servers to AWS EKS over the next quarter. The team is 3 SREs, we have 15 services, and we can't afford more than 30 minutes of downtime per service. Run the planning sequence on this.",
+      "expected_output": "All three stages completed: Pre-Parade lists concrete success conditions with gap assessment, Premortem gives 2-4 specific failure modes with likelihood/impact/mitigation, Red Team identifies adversary and 2-3 attack vectors, Synthesis converges on one clear priority.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "We're thinking of building an internal AI assistant for our support team. It would answer questions about our product using a RAG pipeline over our docs. We want to launch it in 6 weeks. Stress-test this plan.",
+      "expected_output": "All three stages completed: Pre-Parade surfaces conditions like doc quality, eval framework, human escalation path. Premortem hits failure modes like hallucination trust, RAG retrieval quality. Red Team challenges the 6-week timeline and doc coverage assumptions. Synthesis identifies the highest-confidence gap.",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "put this through the planning sequence: we want to deprecate our legacy auth service and replace it with Auth0. Current service handles SSO for 40 internal tools. Timeline is 3 months.",
+      "expected_output": "All three stages completed with specifics about auth migration risks: Pre-Parade checks SSO compatibility per tool, Premortem hits rollback complexity and token migration, Red Team attacks the 3-month timeline or unmapped tools. Synthesis gives one clear priority action.",
+      "files": []
+    }
+  ]
+}
