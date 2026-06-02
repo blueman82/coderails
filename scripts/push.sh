@@ -5,8 +5,6 @@
 set -euo pipefail
 source "$(dirname "$0")/lib/git-common.sh"
 
-REVIEWERS="${GIT_REVIEWERS:-mhudson,pieczyra,omeara}"
-
 push::main() {
     local msg="${1:-}" br=$(branch)
 
@@ -61,10 +59,6 @@ push::main() {
         [[ -n "$jira_key" ]] && title="${jira_key} ${title}"
         local url=$(gh pr create -t "$title" -b "$(ahead_list | head -10)" -B "$(main)")
         ok "Created │ $url"
-
-        protected && {
-            gh pr edit --add-reviewer "$REVIEWERS" &>/dev/null && ok "Reviewers added" || warn "Some unavailable"
-        }
     fi
 
     banner "Done"

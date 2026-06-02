@@ -1,7 +1,7 @@
 ---
 allowed-tools: ["Bash", "Read", "Skill"]
 argument-hint: [commit message] [--quick]
-description: Add, commit, push changes and create PR with reviewers
+description: Add, commit, push changes and create PR
 ---
 
 ## Project config
@@ -46,10 +46,8 @@ bash "${CLAUDE_PLUGIN_ROOT}/scripts/push.sh" "$ARGUMENTS"
 The script handles:
 1. Staging all changes
 2. Creating commit (with provided message or auto-generated)
-3. Checking if repository requires PR reviewers
-4. Pushing branch to origin
-5. Creating or updating Pull Request
-6. Adding reviewers if required by branch protection
+3. Pushing branch to origin
+4. Creating or updating Pull Request
 
 ## JIRA Auto-Resolve
 
