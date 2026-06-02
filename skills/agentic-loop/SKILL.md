@@ -1,6 +1,6 @@
 ---
 name: agentic-loop
-description: Multi-agent orchestration discipline. Load this skill IMMEDIATELY — taking precedence over /workflow, /prep, /push, and any other single-PR slash command — whenever the user authorises a sequence of agent-driven work. Specifically: any time the user says "TeamCreate", "spawn a team", "no human gates", "self-merge", "crack on", "without the human", "no per-PR confirmation", "agentic loop", "multi-PR", or authorises 3+ PRs in one instruction. ALSO load when the user authorises autonomous merge + deploy + verify chains, even for a single PR, if they have explicitly waived per-step confirmation. The 13-phase method covers: reading the authorisation envelope verbatim, delegating planning/premortem skills to spawned agents (not main context), keeping main context as a pure orchestrator that NEVER implements — every code change (even a single-file edit) goes to a sonnet agent that does the implementation AND verifies its own artifact, escalating to TeamCreate only for ≥3 sequential PRs or dependency chains, verifying artifacts not idle pings, disproving symptom premises before spawning fixes, and matching confirmation cadence to envelope scope. This is NOT /workflow (which is single-PR prep → push → merge → wiki). This is the multi-agent orchestration layer that sits ABOVE /workflow and uses it as a subroutine. The cost of forgetting to delegate, re-asking for authorised confirmation, or trusting an idle ping as failure is enormous in long sessions — fire this skill aggressively rather than miss it.
+description: Multi-agent orchestration discipline. Load this skill IMMEDIATELY — taking precedence over /workflow, /prep, /push, and any other single-PR slash command — whenever the user authorises a sequence of agent-driven work. Specifically: any time the user says "TeamCreate", "spawn a team", "no human gates", "self-merge", "crack on", "without the human", "no per-PR confirmation", "agentic loop", "multi-PR", or authorises 3+ PRs in one instruction. ALSO load when the user authorises autonomous merge + deploy + verify chains, even for a single PR, if they have explicitly waived per-step confirmation. The phased method covers: reading the authorisation envelope verbatim, delegating planning/premortem skills to spawned agents (not main context), keeping main context as a pure orchestrator that NEVER implements — every code change (even a single-file edit) goes to a sonnet agent that does the implementation AND verifies its own artifact, escalating to TeamCreate only for ≥3 sequential PRs or dependency chains, verifying artifacts not idle pings, disproving symptom premises before spawning fixes, and matching confirmation cadence to envelope scope. This is NOT /workflow (which is single-PR prep → push → merge → wiki). This is the multi-agent orchestration layer that sits ABOVE /workflow and uses it as a subroutine. The cost of forgetting to delegate, re-asking for authorised confirmation, or trusting an idle ping as failure is enormous in long sessions — fire this skill aggressively rather than miss it.
 ---
 
 # Agentic Loop
@@ -18,7 +18,7 @@ In long agentic sessions, the assistant tends to drift back into bad habits:
 
 This skill encodes the working method so those failures don't keep happening. The cost of doing it wrong is large: each unnecessary stall is a manual prompt the user has to write to get the loop moving again, and a stalled loop loses the autonomy the user paid for in the first place.
 
-## The 13 phases
+## The phases
 
 The phases below are sequential. Run them in order. Inside an authorised loop, phases 4-7 repeat per PR / per work-unit.
 
@@ -50,6 +50,17 @@ Then respond.
 
 Match the confirmation cadence to the envelope class for the rest of the session. The why: every "do you want me to..." inside an authorised envelope is a stall the user has to clear. Stalls cost more than the occasional over-reach you'd avoid by asking.
 
+### Phase 0.5 — Orchestrator operating rules (the conductor obeys its own rules)
+
+The orchestrator (main context) is subject to the same discipline it imposes on workers. In long sessions the orchestrator itself trips the user's stop hooks — confidence-label and verify-loop blocks — and every block is a stall that costs a manual turn to clear, exactly the cost this skill exists to remove.
+
+Main context must, in its own output (not just in spawned-agent prompts):
+- Confidence-label every substantive status claim — `(verified)` / `(inferred)` / `(guess)` (same taxonomy as Phase 11).
+- Pre-tag any `## Did Not Verify` bullet that genuinely can't be checked, in the same turn it's written — an untagged bullet blocks the stop hook.
+- Never narrate a claim about an artifact (PR merged, deploy live) without having run the check this turn (Phase 12).
+
+The why: a factory whose conductor keeps tripping the wires it strung for the workers is not autonomous — it stalls on itself. Phase 11 disciplines the workers; Phase 0.5 disciplines the orchestrator. Past failure: in a real run the orchestrator tripped ~8 confidence-label / verify-loop blocks, each one a manual turn the user had to clear.
+
 ### Phase 1 — State the plan in bullets, ask once
 
 Before the first agent spawn, write the full plan: phases, which agents per phase, parallel vs sequential, stop conditions. Use bullets. Keep it tight — the user reads this fast and decides whether to redirect.
@@ -60,6 +71,8 @@ If yes → execute silently through to the end of the envelope.
 If no → revise once based on feedback, then re-ask.
 
 Do not loop more than twice on plan negotiation. If the third pass is needed, something is wrong with the envelope itself — surface that.
+
+The harness choice itself — which loop skill drives this (`/agentic-loop` vs a flat loop vs a goal runner) — is part of the authorisation envelope (Phase 0), not a Phase 1 question. Resolve it once when reading the envelope and never re-surface it as "which approach do you want?". Past failure: a real run re-asked "select your approach: /agentic-loop /loop /goal" four times because harness selection leaked out of the envelope and into plan negotiation.
 
 ### Phase 2 — Pre-flight checks via spawned agents, not main context
 
@@ -77,6 +90,23 @@ Include `/wiki-query` in the pre-flight agent's skill list, scoped to the **whol
 Spawn this pre-flight agent with `model: sonnet` — it's running skills, not making architectural decisions, and keeping it off opus controls cost.
 
 The why: main context fills up fast in long sessions. Pre-flight output is dense and only useful for shaping the next move — perfect for delegation. Agents have skill access; passing the skill name in the prompt is enough.
+
+### Phase 2.5 — Resolve design forks before execution, not during it
+
+If the plan contains an unresolved architectural choice (which primitive, which topology, which of several viable shapes), resolve it BEFORE entering Phase 3 — not through live back-and-forth once workers are spawning.
+
+Spawn one design agent (`model: sonnet` for the recon; escalate the synthesis to opus only if the tradeoff is genuinely close) whose prompt requires:
+- Read the actual code paths the alternatives touch — not assumptions about them.
+- Build a head-to-head of the viable shapes with the real constraint each one hits.
+- Return ONE recommended shape, the rejected alternatives with the reason each lost, and the single fact that would flip the recommendation.
+
+What happens with that recommendation depends on the envelope class (Phase 0) — this phase resolves the fork, it does NOT add a new human gate:
+- **Full-autonomous ("crack on / ship N PRs without asking"):** auto-adopt the design agent's recommendation, record the chosen shape and the flip-condition in `progress.json`, and note it at the next approval-gate. Do NOT stall for sign-off — a design fork is neither a verification failure nor a destructive action, so Phase 0 says the loop proceeds.
+- **Narrow-fix / diagnostic / ambiguous envelope:** surface the one recommendation as a single decision — "here's the shape, here's why, approve or redirect" — bounded like Phase 1 (ask once, don't loop), then enter Phase 3.
+
+Either way the fork is closed by ONE design artifact before building starts — the loop does not start half-built while the design is still being argued turn by turn.
+
+The why: a factory closes design questions at one decision point with evidence, not across twenty conversational turns while half-built — and on a full-autonomous envelope it closes them without a human round-trip at all. Past failure: a real run spent ~20 turns debating queue-vs-lease-vs-hybrid as ad-hoc Q&A interleaved with the build — that decision should have been one design-agent artifact resolved once, before any PR work began.
 
 ### Phase 3 — Delegate all implementation to sonnet agents; TeamCreate when work has ≥3 sequential units or dependency chains
 
@@ -247,24 +277,44 @@ This is more rigorous than checking the idle ping (Phase 4) — it's specificall
 
 The cost of one extra tool call before unblocking the next phase is small. The cost of unblocking on a false report is hours.
 
+### Phase 13 — Confirm the factory actually ran (terminal self-audit)
+
+At the end of the loop, before declaring done, the orchestrator audits its own autonomy from the `progress.json` counters and reports:
+- **Human turns inside the envelope** — how many times the human had to intervene on work that was already authorised. Target: approaching zero. These are stalls the factory should have absorbed.
+- **Genuine gates vs avoidable stalls** — split those human turns into (a) legitimate approval-gates and hard-stops (the factory working as designed) and (b) avoidable stalls: re-asks inside scope, orchestrator hook-blocks, design forks litigated live, re-orientation prompts. Only (b) counts against the factory.
+- **Artifacts produced** — PRs merged, deploys done, each with the verifying check (Phase 12), not the agent's claim.
+
+This is the factory's own KPI. It makes "are we a factory yet?" measurable per run instead of asserted, and the avoidable-stall list is the input to the next iteration of this skill. A run with zero avoidable stalls and one approval-gate is the target shape; anything else names exactly what to fix.
+
 ## Context-window persistence
 
 Do not stop work early because the context window is filling or a token budget is approaching. Context will compact and the session will continue — treat that as a non-event, not a stop condition.
 
-Before compaction happens, checkpoint state: commit all in-progress work to git, write a brief progress note to a memory or a `progress.md` in the worktree, and record where the loop is in the phase sequence. Git is the authoritative checkpoint — uncommitted work is unrecoverable state.
+**Loop state lives in a durable artifact, not in the conversation.** Maintain a single `progress.json` in the worktree as the source of truth for where the loop is. It is overwritten (not appended) on every phase boundary and holds: the authorisation envelope verbatim, the current phase, each work-unit's status (`pending`/`in-progress`/`done`/`blocked` with `blockedBy`), verified state carried between units (deployed version, test counts), and the human-turn counters for Phase 13. A single overwritten JSON object — read the whole file in one shot to know current state. Do not use an append-log (`.jsonl`) that has to be replayed to derive position, and that can leave a torn tail line after a crash.
+
+After any compaction, drift, or "wait, where are we" moment, the orchestrator RE-READS `progress.json` — never the conversation — to re-orient. If the user ever has to remind the loop that it's mid-loop, the artifact wasn't being maintained. Git remains the authoritative checkpoint for code (commit all in-progress work before compaction); `progress.json` is the authoritative checkpoint for loop position.
 
 Never artificially truncate a task or declare "done" mid-loop because of token pressure. If a genuine stop condition (see below) is not met, keep going.
 
 ## Stop conditions for the loop
 
-The loop runs autonomously until ANY of:
+Stop conditions come in two classes. The agent must not collapse them into one — a gate is not a wall.
+
+**Hard-stop (abort the loop, wait for the human):**
 1. Verification failure that can't be auto-recovered (Phase 4 or Phase 12 artifact check fails)
 2. Premise disproven (Phase 5 — symptom can't be reproduced via SOT)
 3. Genuinely ambiguous decision outside the authorisation envelope
 4. Destructive/irreversible operation not previously authorised
-5. All authorised work complete
 
-On stop: report current state with confidence labels, propose the next move (don't just stop silently), and wait.
+On a hard-stop: report current state with confidence labels, propose the next move (don't just stop silently), and wait.
+
+**Approval-gate (pause, surface a one-screen summary, PROCEED on yes):**
+A named risk boundary the envelope flagged for human sign-off — e.g. a prod cutover / enable step. This is NOT a hard-stop and NOT a wall. The loop runs autonomously right up to the gate, then pauses, presents a single summary (what's about to happen, the artifacts behind it, what's irreversible about it), and proceeds the moment the human approves — without re-planning or re-asking the steps before it.
+
+Model an approval-gate as "pause-then-proceed", never as "do not start". Past failure: a real run relabelled a prod-enable gate as "do not start / hard wall", which mis-stated its own terminal state and took two human turns to correct. The gate is a pause point inside the envelope, not the edge of it.
+
+**Loop complete:**
+5. All authorised work done and all gates passed — run Phase 13, then stop.
 
 ## A note on cadence
 
