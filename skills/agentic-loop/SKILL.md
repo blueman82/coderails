@@ -167,7 +167,7 @@ When an agent goes idle without a report:
 
 Only after the artifact check fails should you assume failure. Then respawn — and per Phase 10, give it a new name.
 
-### Phase 4b — PR review uses the six `pr-review-toolkit` agents, in parallel
+### Phase 4b — PR review uses the six `pr-review-toolkit` agents plus `/security-review`, in parallel
 
 When a phase reaches "review the PR" (after a `/workflow` agent has pushed a PR, before merge), the review is `/pr-review-toolkit:review-pr all` — fan out these **six specialised reviewers in parallel, in a single message with six `Agent` blocks**, each against the branch diff (`git -C <worktree> diff origin/main...HEAD`):
 
@@ -181,6 +181,8 @@ When a phase reaches "review the PR" (after a `/workflow` agent has pushed a PR,
 | 6 | `pr-review-toolkit:code-simplifier` | Dead code from extractions, duplication, over-engineering (report-only, no edits) | always (polish pass) |
 
 Skip a reviewer only when its trigger genuinely doesn't apply (e.g. no type changes → no type-design-analyzer). Default is all six. Spawn `model: sonnet`, read-only, and carry the Phase 11 confidence-label instruction into each prompt. Collect all reports, aggregate into Critical / Important / Suggestion, and feed any MERGE-BLOCKER back to a fix agent (Phase 5/10) BEFORE merge.
+
+**Plus the native `/security-review` pass.** Alongside the six agents, run Claude Code's built-in `/security-review` on the same branch diff as part of this gate — it is a dedicated security review (auth/authz surfaces, injection, secret leakage, unsafe deserialisation, SSRF) that the six general reviewers do not specialise in. Run it in the worktree so it sees the branch's pending changes. Fold its findings into the same Critical / Important / Suggestion aggregation; any security MERGE-BLOCKER blocks merge exactly like a code finding (Phase 5/10) BEFORE merge.
 
 **Do not substitute the generic `architect-review` + `debugger` + `ai-engineer` trio here.** That three-agent set is a separate general-purpose adversarial pattern (CLAUDE.md `feedback_three_parallel_adversarial_agents`) for design/architecture stress-tests — it is NOT the PR-review step. The canonical Ketchup workflow's review step is `/pr-review-toolkit:review-pr all` = the six agents above. Past failure: spawned the architect/debugger/ai-engineer trio at PR-review time; corrected to the toolkit six.
 
