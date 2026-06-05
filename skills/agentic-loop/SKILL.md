@@ -89,6 +89,12 @@ Include `/wiki-query` in the pre-flight agent's skill list, scoped to the **whol
 
 Spawn this pre-flight agent with `model: sonnet` — it's running skills, not making architectural decisions, and keeping it off opus controls cost.
 
+**Clean-base check (mandatory orchestrator action in main context, before ANY worker is spawned).** Run `git fetch origin` then `git log --oneline origin/main..main` and `git status --short` yourself. If local `main` carries commits `origin/main` does not, or has uncommitted/untracked files, the base is DIRTY — a parallel session (or an earlier uncommitted edit) has polluted it. When the base is dirty:
+- NEVER let a worker branch off local `main`. Every worker MUST create its worktree off freshly-fetched `origin/main` (`git worktree add <path> -b <branch> origin/main`), and the orchestrator must state this explicitly, by name, in the worker prompt.
+- Carry the foreign file names into worker prompts as an explicit "these are not yours — never stage, commit, or include them" exclusion list.
+
+Do this check even when the base looks clean — it is two cheap git reads and it pre-empts the single most expensive failure mode in a parallel-session loop: a worker's PR silently inheriting another session's WIP from a dirty base, which otherwise only surfaces at the merge gate. Past failure: a removal PR's file list silently included two unrelated docs (`durable-queue-design.md` and an architecture-review doc) inherited from a polluted local `main` via the worker branching off it. Phase 12 caught it at the merge gate, but the fix cost a full close-and-rebuild cycle — new branch off `origin/main`, cherry-pick the real commits, reopen the PR, close the contaminated one. A clean-base check at loop start would have forced origin/main-based worktrees from the first spawn and avoided the rebuild entirely.
+
 The why: main context fills up fast in long sessions. Pre-flight output is dense and only useful for shaping the next move — perfect for delegation. Agents have skill access; passing the skill name in the prompt is enough.
 
 ### Phase 2.5 — Resolve design forks before execution, not during it
@@ -131,6 +137,8 @@ Each task description must be **self-contained** so the spawned agent can act wi
 - Verified state from prior tasks (deployed version, test counts, what's already wired)
 - Exact step-by-step sub-steps
 - Verify criteria
+- Manifest — the exact set of files this unit should touch, with the pre-push scope assertion (see Phase 3a)
+- Terminal state — the concrete artifact that means done (PR open / merged); no mid-task hand-backs (see Phase 3a)
 - Report-back instructions
 
 Include this line in every agent prompt:
@@ -150,6 +158,8 @@ The agent's prompt must be self-contained (it can't re-read the conversation) an
 - **A verify step the agent runs itself before reporting** — run the test / lint / build, read back the diff, hit the endpoint or read the log. State which one. "Implement X, then verify by running `Y`, and only report success if `Y` passes."
 - **Report-back contract:** return a confidence-labelled summary (Phase 11), state what was run to verify (the command + its result, not just "verified"), and "don't go silently idle — send a completion message" (Phase 4 — sonnet agents go idle without reporting).
 - If the work writes to git, the worktree/branch and a "commit your work" instruction so the artifact is durable for the orchestrator's Phase 4 check.
+- **A manifest — the exact set of files this change should touch — plus a pre-push scope assertion.** Require: "before you push, run `git diff origin/main --name-only` and confirm the file list equals EXACTLY this manifest. If any file you did not intend to touch appears — especially one you never edited — STOP and report; do not push. A PR that carries files outside its manifest is a contamination, not a change." This catches a dirty base or a stray `git add -A` at push time, one stage before the orchestrator's merge gate, where it is far cheaper to fix. Past failure: a worker pushed a PR whose file list silently included two files from a polluted base; nobody asserted scope before push, so it surfaced only at the merge gate and forced a rebuild.
+- **A terminal state stated as a concrete artifact, with no mid-task hand-backs.** The done-condition is an artifact that exists ("the PR is OPEN" or "the PR is MERGED"), never a sub-step. Add to the prompt: "You own this through that artifact existing. Do NOT hand back to the orchestrator in an intermediate state — after editing but before committing, after strictcode but before pushing, after review but before the PR is open. If you stop before the artifact exists, you have not finished; continue." Past failure: workers repeatedly stopped after running strictcode or an inline review and 'handed back to the orchestrator to push the PR', leaving the work uncommitted with no PR and forcing a resume cycle each time. Stating the terminal state as the artifact, not the sub-step, removes the premature hand-back.
 
 When the single agent goes idle without reporting, apply Phase 4 verbatim — check the artifact (git diff, PR state, log), not the ping. When it reports success, that's a Phase 12 claim, not evidence — re-check at dependency boundaries.
 
@@ -228,6 +238,8 @@ git rebase origin/main
 The rebase will cleanly drop the auto-bumped `docker-compose.yml` version commit (it's already upstream). If the rebase has real conflicts in code, those are real and need resolution.
 
 Without the rebase, push may still succeed but the PR will carry a duplicate docker-compose bump and confuse the diff review.
+
+This rebase handles *staleness* (a base that fell behind as the loop's own PRs landed). It does NOT handle *pollution* (a local `main` carrying another session's commits) — that is the Phase 2 clean-base check's job, and the fix there is to branch workers off `origin/main`, not to rebase a polluted base onto itself. Staleness rebases away; pollution must never enter the worker's base in the first place.
 
 ### Phase 9 — Cluster wiki ingest, don't fragment
 
