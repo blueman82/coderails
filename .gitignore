@@ -6,3 +6,7 @@
 
 # runtime hook logs (machine-local, not source)
 logs/
+
+# per-project workflow config — local, may hold project-specific (e.g. Jira) values; never commit to the generic repo
+.claude/
+**/workflow.config.yaml
