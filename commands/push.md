@@ -26,10 +26,10 @@ If **files match**, run `/strictcode-python` on the changed files matching those
 
 Apply this decision rule to strictcode output:
 
-- **Blocking**: Any deviation from TypedDI protocol patterns, ServiceSpec conventions, barrel export rules, missing registration checklist steps, or missing mock/test updates. Block and prompt.
+- **Blocking**: Any deviation from the project's documented architectural conventions (e.g. DI protocol patterns, module registration rules, required test updates per public contract changes). Block and prompt.
 - **Non-blocking**: Style preferences, readability suggestions, naming opinions. Log the note and proceed.
 
-If blocking findings exist, present them as a numbered list and ask: **"Fix these before pushing, or push as-is?"** Then follow Gary's answer.
+If blocking findings exist, present them as a numbered list and ask: **"Fix these before pushing, or push as-is?"** Then follow the user's answer.
 
 If no blocking findings, proceed silently.
 
@@ -59,8 +59,7 @@ JIRA_KEY=$(git config branch.$BRANCH.jira-ticket 2>/dev/null)
 ```
 
 If `JIRA_KEY` is set, transition the ticket to **Resolved** via whichever Jira route you have:
-- If `mcp__corp-jira__transition_jira_status_by_name` is in your tool list, call it directly with `{issueIdOrKey: JIRA_KEY, statusName: "Resolved", comment: "..."}`.
-- Otherwise route through mcp-exec: `mcp__mcp-exec__execute_code_with_wrappers` with `wrappers: ["corp-jira"]` and code `await corp_jira.transition_jira_status_by_name({ issueIdOrKey: "<KEY>", statusName: "Resolved", comment: "..." });` (the `corp_jira` namespace uses an underscore).
+Call your Jira MCP's `transition_jira_status_by_name` tool (default: `mcp__jira__transition_jira_status_by_name`) with `{issueIdOrKey: JIRA_KEY, statusName: "<config.jira.transitions.resolve>", comment: "..."}`. Update the tool name if your MCP server uses a different namespace.
 
 Then:
 1. Use comment text: `"Resolved via PR merge. Work implemented via AI-assisted development (Claude Code). Branch: $BRANCH."`

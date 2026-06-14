@@ -1,5 +1,5 @@
 ---
-allowed-tools: Bash(./worktree-add*), Bash(git branch*), Bash(git status*), Bash(git config*), Bash(git worktree*), Bash(cat*), mcp__corp-jira__search_jira_issues, mcp__corp-jira__create_jira_issue, mcp__corp-jira__transition_jira_status_by_name, mcp__mcp-exec__execute_code_with_wrappers
+allowed-tools: Bash(./worktree-add*), Bash(git branch*), Bash(git status*), Bash(git config*), Bash(git worktree*), Bash(cat*), mcp__jira__search_jira_issues, mcp__jira__create_jira_issue, mcp__jira__transition_jira_status_by_name (update these to match your Jira MCP server's tool namespace)
 argument-hint: <branch> [--type TYPE] [--summary "..."] [--description "..."]
 description: Create safety branch, new feature/bug branch, and create a Jira ticket
 ---
@@ -48,9 +48,9 @@ All of these must work:
 
 ```
 /prep feature/foo-bar
-/prep bug/fix-nrql --summary "NRQL host field misreports"
-/prep feature/handover-campaign-only Task "Handover: filter AJO channels" "Product-gate in handover generator..."
-/prep feature/handover-campaign-only --type Task --summary "Handover: filter AJO channels" --description "Product-gate..."
+/prep bug/fix-timeout --summary "Request timeout too short"
+/prep feature/add-retry-logic Task "Add retry logic" "Implement exponential back-off..."
+/prep feature/add-retry-logic --type Task --summary "Add retry logic" --description "Implement exponential back-off..."
 ```
 
 If the user's args don't match any of these shapes but the intent is clear, best-effort parse and proceed. If the intent is ambiguous, ask one targeted clarifying question — don't guess the branch name.
@@ -62,8 +62,8 @@ Feature and bug work must be isolated in a git worktree — never branch off or 
 1. Derive the worktree path from the branch description:
    - Strip the `feature/`, `bug/`, or `bugfix/` prefix from the parsed branch name
    - Path: `<config.worktree_base>-<description>`
-   - Example: `bug/fix-nrql` with `worktree_base: /Users/you/Documents/Github/camp-ops-emea` → `/Users/you/Documents/Github/camp-ops-emea-fix-nrql`
-   - In minimal mode (NO_CONFIG), `worktree_base` is the git root, so the worktree is a sibling dir, e.g. `/path/to/repo` → `/path/to/repo-fix-nrql`.
+   - Example: `bug/fix-timeout` with `worktree_base: /Users/you/Documents/Github/my-project` → `/Users/you/Documents/Github/my-project-fix-timeout`
+   - In minimal mode (NO_CONFIG), `worktree_base` is the git root, so the worktree is a sibling dir, e.g. `/path/to/repo` → `/path/to/repo-fix-timeout`.
 
 2. Create the worktree:
    - If `config.worktree_script` is non-null, run from the project root:
@@ -81,14 +81,7 @@ Feature and bug work must be isolated in a git worktree — never branch off or 
 
 **Skip this entire section if `config.jira` is null.**
 
-**How to reach Jira — pick whichever route you actually have:**
-- If `mcp__corp-jira__create_jira_issue` is in your tool list, call the `mcp__corp-jira__*` tools directly.
-- Otherwise, route through mcp-exec: call `mcp__mcp-exec__execute_code_with_wrappers` with `wrappers: ["corp-jira"]` and code that uses the `corp_jira` namespace (underscore). Example:
-  ```js
-  const issue = await corp_jira.create_jira_issue({ fields: { /* same fields object */ } });
-  return issue;
-  ```
-- The `fields` object and the transition arguments below are identical on both routes. If neither route is available, stop and tell the user Jira features need the corp-jira MCP (direct or via mcp-exec); the branches are already created, so this is non-fatal.
+**How to reach Jira:** Call whichever Jira MCP tool you have available (the default expected tool name is `mcp__jira__create_jira_issue` — update `allowed-tools` in the frontmatter if your server uses a different namespace). If no Jira MCP is available, stop and tell the user Jira features need a Jira MCP server configured; the branches are already created, so this is non-fatal.
 
 After successfully creating the branches, create a Jira ticket:
 
@@ -98,16 +91,16 @@ After successfully creating the branches, create a Jira ticket:
    - **Summary**: parsed or generated summary
    - **Assignee**: the currently authenticated Jira user (use `get_current_user` or equivalent; do not hardcode)
    - **Description**: parsed or generated description (always include `Branch: <branch>`)
-   - **Epic link**: Set customfield_11800 to `config.jira.epic` (only if non-null)
+   - **Epic link**: Set `config.jira.epic_field` (e.g. `customfield_12345` — set for your project) to `config.jira.epic` (only if both are non-null)
    - **Component**: Set to `config.jira.component_name` (id: `config.jira.component_id`) — only if both component_name and component_id are non-null
 
 2. Use the update parameter for these fields:
-   - **Fix Version**: `{"fixVersions": [{"set": [{"name": "GA"}]}]}`
-   - **Story points**: `{"customfield_10003": [{"set": 1}]}`
+   - **Fix Version** (only if `config.jira.fix_version` is non-null): `{"fixVersions": [{"set": [{"name": "<config.jira.fix_version>"}]}]}`
+   - **Story points** (only if `config.jira.points_field` is non-null): `{"<config.jira.points_field>": [{"set": 1}]}`  (e.g. `customfield_67890` — set for your project)
 
 3. After successful creation, advance the ticket out of its initial state:
-   - Transition to `"Acknowledged"` using `transition_jira_status_by_name`. (Verified reachable from the initial state on the CPGNCX workflow — adjust the name for your project if it uses different states; `get_jira_transitions` lists what's available.)
-   - **Then** attempt `"In Progress"` the same way, but treat a failure as non-fatal — not every project workflow exposes an "In Progress" transition from "Acknowledged" (CPGNCX, for example, does not list one). If it fails, leave the ticket at "Acknowledged" and continue; do not abort `/prep`.
+   - Transition to `config.jira.transitions.start` (e.g. `"In Progress"` — set for your project in workflow.config.yaml) using `transition_jira_status_by_name`. Run `get_jira_transitions` on one of your project's issues to find the correct name. If `config.jira.transitions.start` is null, skip this step.
+   - **Then** attempt `config.jira.transitions.resolve` the same way, but treat a failure as non-fatal — not every project workflow exposes this transition from the start state. If it fails (or if the field is null), leave the ticket at the start state and continue; do not abort `/prep`.
 
 4. Store the ticket key in git branch config for auto-resolve at push time:
    ```bash

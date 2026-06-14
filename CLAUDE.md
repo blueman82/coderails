@@ -6,8 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **At the start of every conversation**, read `AGENTS.md` in this directory for wiki
 maintenance protocols. The coderails wiki is a persistent, compounding knowledge
-base maintained by Claude and browsed by Gary in Obsidian. The wiki vault lives at
-`/Users/harrison/Documents/Github/coderails-wiki`.
+base maintained by Claude and browsed by the maintainer in Obsidian. The wiki vault lives at
+the wiki vault directory (e.g. `../coderails-wiki` relative to the plugin, or wherever you placed it).
 
 ## What this repo is
 
@@ -21,7 +21,7 @@ installs via `install.sh` + `/plugin install`, and bundles three things:
 
 There is no build step and no compiled artifact. "Source" is markdown (commands,
 skills) and bash (hook scripts, workflow scripts). It is version-controlled in the
-private repo `github.com/blueman82/coderails`.
+version-controlled in your own private fork/repo.
 
 ## How the pieces wire together
 
@@ -102,7 +102,7 @@ cat "$GIT_ROOT/projects/$(basename $(pwd))/.claude/workflow.config.yaml" \  # mo
 ```
 
 If you add a config field, update **all four** of `workflow.md`, `prep.md`,
-`push.md`, and `workflow-init.md` (the scaffolder) — they each read the file
+`push.md`, and `init.md` (the scaffolder) — they each read the file
 independently. `NO_CONFIG` is the sentinel for "not initialised."
 
 **`scripts/` vs `commands/`** — `push.sh`/`merge.sh` hold the deterministic git
@@ -113,19 +113,11 @@ add reusable git/PR primitives there, not inline.
 
 ## Project-specific assumptions baked in (change these when generalising)
 
-These are tuned to Gary's Adobe CPGNCX setup and are the things most likely to
-need editing for another user/project:
+These are the things most likely to need editing for your project:
 
-- **Reviewers**: `push.sh` defaults `REVIEWERS="mhudson,pieczyra,omeara"`
-  (overridable via `$GIT_REVIEWERS`).
-- **Auth host**: `push.sh` hard-requires `gh auth status` to mention
-  `git.corp.adobe.com`.
-- **Jira fields**: `prep.md` uses CPGNCX-specific custom-field IDs
-  (`customfield_11800` epic, `customfield_10003` story points) and transition
-  names (`Acknowledged` is verified; `In Progress` is attempted and treated as
-  non-fatal). See INSTALLATION.md "Notes" for the full caveat.
-- **Jira route**: commands auto-detect `mcp__corp-jira__*` vs the `mcp-exec`
-  wrapper; without either, Jira steps no-op (branches/PRs still work).
+- **Auth host**: `push.sh` requires a `github.com` remote (validated by `require::repo`).
+- **Jira fields**: `prep.md` reads epic and story-points field IDs from `config.jira.epic_field` and `config.jira.points_field` (set for your project in workflow.config.yaml). Transition names are also project-specific; see INSTALLATION.md "Notes".
+- **Jira route**: commands auto-detect your Jira MCP tool namespace (configure in commands if you use a different MCP server name); without a Jira MCP, Jira steps no-op (branches/PRs still work).
 
 ## Working in this repo
 

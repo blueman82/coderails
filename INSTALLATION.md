@@ -8,14 +8,8 @@ self-checking discipline loop.
 
 - Claude Code 2.1.x
 - `gh`, `jq`, `git` on your PATH (the installer checks and stops if any are missing)
-- For `/push` and `/merge`: authenticated with your git host. For Adobe enterprise:
-  `gh auth login --hostname git.corp.adobe.com`
-- **For Jira features** (`/prep`, `/workflow`, `/push` auto-resolve): the `corp-jira`
-  MCP server, reachable either directly (`mcp__corp-jira__*` tools) or via the
-  `mcp-exec` wrapper. The commands auto-detect which route you have. Without either,
-  `/prep` still creates branches and `/push` still opens PRs — only the Jira
-  ticket/resolve steps no-op. The plugin doesn't ship corp-jira; an MCP server is
-  your own machine's config, not something a plugin can bundle.
+- For `/push` and `/merge`: authenticated with your git host. For enterprise GitHub: `gh auth login --hostname <your-git-host>` (e.g. `git.example.com`)
+- **For Jira features** (`/prep`, `/workflow`, `/push` auto-resolve): a Jira MCP server, reachable via your configured MCP tool namespace (the commands default to `mcp__jira__*`; update the `allowed-tools` frontmatter in `commands/prep.md` and `commands/push.md` if your server uses a different name). Without a Jira MCP, `/prep` still creates branches and `/push` still opens PRs — only the Jira ticket/resolve steps no-op.
 
 ## Migrating from the old separate plugins
 
@@ -82,7 +76,7 @@ then `install`.
 **4. Per project (run once per repo):**
 
 ```
-/workflow-init                 # scaffolds .claude/workflow.config.yaml
+/coderails:init               # scaffolds .claude/workflow.config.yaml
 /coderails:test-gate-setup     # optional — blocks commits when tests fail
 ```
 
@@ -90,10 +84,11 @@ then `install`.
 
 | Commands | Skills | Hooks (automatic) |
 |---|---|---|
-| `/workflow` `/prep` `/push` `/merge` `/workflow-init` | agentic-loop | confidence-label check (Stop) |
+| `/workflow` `/prep` `/push` `/merge` `/coderails:init` | agentic-loop | confidence-label check (Stop) |
 | `/assumptions` `/verify` `/notchecked` `/disconfirm` | planning-sequence | Did-Not-Verify catch-up (UserPromptSubmit) |
 | `/test-gate-setup` | premortem | destructive-bash gate (PreToolUse) |
 | | handoff | project test gate (PreToolUse) |
+| | improve-prompt | |
 
 The two UserPromptSubmit hooks nudge: inject_context runs silently, and the
 discipline catch-up injects a reminder into the next turn. The two Stop hooks
@@ -110,15 +105,7 @@ gate also block.
   you — only Claude sees it. To confirm the loop is live: `/help` lists
   `/assumptions /verify /notchecked /disconfirm`, and `~/.claude/discipline.log`
   starts filling with entries after a few responses.
-- **`/prep`'s Jira fields are tuned to the CPGNCX workflow.** The epic field
-  (`customfield_11800`), story points (`customfield_10003` = 1), and `GA` fix
-  version match a specific Jira project. Custom-field IDs are usually consistent
-  across Adobe Jira, but **transition names are project-specific.** `/prep`
-  transitions a new ticket to `Acknowledged` (verified reachable on CPGNCX), then
-  *attempts* `In Progress` and treats failure as non-fatal — CPGNCX's workflow has
-  no "In Progress" transition, so the ticket simply stays at "Acknowledged." If
-  your project uses different state names, run `get_jira_transitions` on one of its
-  issues and adjust `commands/prep.md` Part 2 accordingly.
+- **`/prep`'s Jira fields must be configured for your project.** Set `jira.epic_field` (e.g. `customfield_12345`), `jira.points_field` (e.g. `customfield_67890`), and `jira.fix_version` in `workflow.config.yaml` via `/coderails:init`. Transition names are also project-specific: `/prep` attempts `config.jira.transitions.start` then `config.jira.transitions.resolve`; the resolve transition failure is non-fatal. Run `get_jira_transitions` on one of your project's issues to find the correct names.
 
 ## Uninstall
 

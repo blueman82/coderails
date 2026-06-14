@@ -83,21 +83,6 @@ flash_warn(){ printf "  ${Y}[ ⚠ CONFLICT ]${NC}  %s\n" "$1"; }
 flash_cp()  { printf "  ${BG}[ ✔ COPIED   ]${NC}  ${W}%s${NC}\n" "$1"; }
 flash_skip(){ printf "  ${DIM}[ · SKIP     ]${NC}  ${DIM}%s${NC}\n" "$1"; }
 
-# ── Interactive prompt: echo answer (or default) on stdout, prompt on stderr ──
-# Blank input returns the default (which is "" for skippable fields). Guarded so
-# an EOF (piped/non-interactive) returns the default instead of aborting set -e.
-ask() {
-  local p="$1" d="${2:-}" a
-  if [[ -n "$d" ]]; then
-    printf "  ${C}%s${NC} ${DIM}[%s]${NC}: " "$p" "$d" >&2
-  else
-    printf "  ${C}%s${NC} ${DIM}(blank to skip)${NC}: " "$p" >&2
-  fi
-  read -r a || a=""
-  [[ -z "$a" ]] && a="$d"
-  printf '%s' "$a"
-}
-
 # ── Matrix rain intro (interactive only) ──────────────────────────────────────
 matrix_rain() {
   [[ "$INTERACTIVE" -eq 0 ]] && return
@@ -181,130 +166,13 @@ print_claude_steps() {
   box_blank
   box_line "$(printf "${Y}  ▶  PER PROJECT (for any repo not configured above):${NC}")"
   box_blank
-  box_line "$(printf "  ${BC}4.${NC}  ${W}/workflow-init${NC}  ${DIM}(or re-run this installer)${NC}")"
+  box_line "$(printf "  ${BC}4.${NC}  ${W}/coderails:init${NC}  ${DIM}(scaffolds workflow.config.yaml per project)${NC}")"
   box_line "$(printf "  ${BC}5.${NC}  ${W}/coderails:test-gate-setup${NC}  ${DIM}(optional test gate)${NC}")"
   box_blank
   box_bottom
   printf '\n'
   printf "  ${DIM}marketplace already registered by this script — restart picks it up${NC}\n"
   printf "  ${BC}Full docs:${NC}  ${W}%s/README.md${NC}\n\n" "$PLUGIN_DIR"
-}
-
-# ── workflow.config.yaml emitter ──────────────────────────────────────────────
-# Renders the config from CFG_* variables. Schema MUST match the consumers
-# (prep.md, push.md, workflow.md) and the /workflow-init scaffolder field-for-
-# field — a wrong name/nesting reads as null and "silently skips", which looks
-# exactly like success. Every CFG_* is defaulted (${x:-}) so it is safe under
-# `set -u`. Skippable fields render as null/""; worktree_base is never blank
-# (the caller substitutes a default) because a blank base builds a broken path.
-emit_config() {
-  printf 'project: %s\n' "${CFG_PROJECT:-}"
-  if [[ -n "${CFG_WIKI:-}" ]]; then printf 'wiki_path: %s\n' "$CFG_WIKI"; else printf 'wiki_path: null\n'; fi
-  printf 'worktree_base: %s\n' "${CFG_WT_BASE:-}"
-  if [[ -n "${CFG_WT_SCRIPT:-}" ]]; then printf 'worktree_script: %s\n' "$CFG_WT_SCRIPT"; else printf 'worktree_script: null\n'; fi
-  printf 'git:\n'
-  printf '  host: "%s"\n' "${CFG_GIT_HOST:-}"
-  printf '  reviewers: "%s"\n' "${CFG_GIT_REVIEWERS:-}"
-  if [[ -n "${CFG_JIRA_PROJECT:-}" ]]; then
-    printf 'jira:\n'
-    printf '  project: %s\n' "$CFG_JIRA_PROJECT"
-    if [[ -n "${CFG_JIRA_EPIC:-}" ]]; then printf '  epic: %s\n' "$CFG_JIRA_EPIC"; else printf '  epic: null\n'; fi
-    if [[ -n "${CFG_COMP_NAME:-}" ]]; then printf '  component_name: %s\n' "$CFG_COMP_NAME"; else printf '  component_name: null\n'; fi
-    if [[ -n "${CFG_COMP_ID:-}" ]]; then printf '  component_id: "%s"\n' "$CFG_COMP_ID"; else printf '  component_id: null\n'; fi
-    printf '  epic_field: "%s"\n' "${CFG_EPIC_FIELD:-}"
-    printf '  points_field: "%s"\n' "${CFG_POINTS_FIELD:-}"
-    printf '  fix_version: "%s"\n' "${CFG_FIX_VERSION:-}"
-    printf '  transitions:\n'
-    printf '    start: "%s"\n' "${CFG_TR_START:-}"
-    printf '    resolve: "%s"\n' "${CFG_TR_RESOLVE:-}"
-  else
-    printf 'jira: null\n'
-  fi
-  if [[ -n "${CFG_STRICTCODE:-}" ]]; then
-    printf 'strictcode_paths:\n'
-    local oldifs="$IFS" p
-    IFS=','
-    set -f                       # don't glob-expand ** patterns while splitting
-    for p in $CFG_STRICTCODE; do
-      p=$(printf '%s' "$p" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
-      if [[ -n "$p" ]]; then printf '  - "%s"\n' "$p"; fi
-    done
-    set +f
-    IFS="$oldifs"
-  else
-    printf 'strictcode_paths: null\n'
-  fi
-}
-
-# ── Interactive workflow.config.yaml setup (optional) ─────────────────────────
-# Returns 0 in all non-fatal paths (skip, not-a-repo, kept-existing) so the
-# caller's `config_stage || ...` net keeps the installer alive under set -e.
-config_stage() {
-  printf "${BOLD}  WORKFLOW CONFIG${NC}\n"
-  hline
-
-  local proj_dir
-  printf "  ${W}Project directory to configure${NC} ${DIM}(absolute path, blank to skip)${NC}: "
-  read -r proj_dir || proj_dir=""
-  if [[ -z "$proj_dir" ]]; then
-    flash_skip "no project configured — run /workflow-init later (minimal mode works meanwhile)"
-    printf '\n'; return 0
-  fi
-
-  local git_root
-  git_root=$(git -C "$proj_dir" rev-parse --show-toplevel 2>/dev/null) || git_root=""
-  if [[ -z "$git_root" ]]; then
-    flash_warn "$proj_dir is not a git repository — skipping config"
-    printf '\n'; return 0
-  fi
-
-  local proj_name cfg_dir cfg
-  proj_name=$(basename "$git_root")
-  if [[ -d "$git_root/projects/$proj_name" ]]; then
-    cfg_dir="$git_root/projects/$proj_name/.claude"   # monorepo layout
-  else
-    cfg_dir="$git_root/.claude"                        # standalone repo
-  fi
-  cfg="$cfg_dir/workflow.config.yaml"
-
-  if [[ -f "$cfg" ]]; then
-    local ow
-    printf "  ${Y}%s exists — overwrite? [y/N]${NC} " "$cfg"
-    read -r ow || ow="n"
-    ow=$(printf '%s' "$ow" | tr '[:upper:]' '[:lower:]')
-    [[ "$ow" == "y" ]] || { flash_skip "kept existing config"; printf '\n'; return 0; }
-  fi
-
-  # worktree_base must never be blank — default to the git-root parent.
-  local CFG_PROJECT CFG_WIKI CFG_WT_BASE CFG_WT_SCRIPT CFG_GIT_HOST CFG_GIT_REVIEWERS
-  local CFG_JIRA_PROJECT CFG_JIRA_EPIC CFG_COMP_NAME CFG_COMP_ID CFG_EPIC_FIELD
-  local CFG_POINTS_FIELD CFG_FIX_VERSION CFG_TR_START CFG_TR_RESOLVE CFG_STRICTCODE
-  local wt_default; wt_default=$(dirname "$git_root")
-
-  CFG_PROJECT=$(ask "Project name" "$proj_name")
-  CFG_WIKI=$(ask "Wiki path (relative, e.g. ../my-wiki)" "")
-  CFG_WT_BASE=$(ask "Worktree base (where sibling worktrees go)" "$wt_default")
-  CFG_WT_SCRIPT=$(ask "Worktree script (e.g. ./worktree-add)" "")
-  CFG_GIT_HOST=$(ask "Git host (e.g. git.example.com; blank=public GitHub)" "")
-  CFG_GIT_REVIEWERS=$(ask "PR reviewers (comma-separated; blank=none)" "")
-  CFG_JIRA_PROJECT=$(ask "Jira project key (e.g. ABC; blank=disable Jira)" "")
-  if [[ -n "$CFG_JIRA_PROJECT" ]]; then
-    CFG_JIRA_EPIC=$(ask "  Jira epic key (e.g. ABC-100)" "")
-    CFG_COMP_NAME=$(ask "  Jira component name" "")
-    CFG_COMP_ID=$(ask "  Jira component id (numeric)" "")
-    CFG_EPIC_FIELD=$(ask "  Jira epic-link field id (e.g. customfield_12345)" "")
-    CFG_POINTS_FIELD=$(ask "  Jira story-points field id (e.g. customfield_67890)" "")
-    CFG_FIX_VERSION=$(ask "  Jira fix version (e.g. v1.0)" "")
-    CFG_TR_START=$(ask "  Jira start transition (e.g. In Progress)" "")
-    CFG_TR_RESOLVE=$(ask "  Jira resolve transition (e.g. Resolved)" "")
-  fi
-  CFG_STRICTCODE=$(ask "Strictcode paths (comma-separated globs; blank=none)" "")
-
-  mkdir -p "$cfg_dir" || { flash_warn "could not create $cfg_dir — skipping"; printf '\n'; return 0; }
-  local tmp; tmp=$(mktemp)
-  emit_config > "$tmp" && mv "$tmp" "$cfg" && flash_cp "wrote $cfg"
-  printf '\n'
-  return 0
 }
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -399,7 +267,7 @@ hline
 
 COMMANDS_DIR="$HOME/.claude/commands"
 conflicts=()
-for cmd in workflow.md workflow-init.md prep.md push.md merge.md \
+for cmd in workflow.md init.md prep.md push.md merge.md \
            assumptions.md notchecked.md disconfirm.md verify.md test-gate-setup.md; do
   [[ -f "$COMMANDS_DIR/$cmd" ]] && conflicts+=("$cmd")
 done
@@ -601,23 +469,6 @@ else
 fi
 
 printf '\n'
-
-# ── 7b. Workflow config (optional, interactive only) ──────────────────────────
-# Runs last, after global state (settings.json, CLAUDE.md) is already written, so
-# it MUST NOT abort the installer. Piped/non-interactive and dry-run skip the 15
-# reads wholesale; the interactive path is wrapped in `|| flash_warn` so a stray
-# read/git error degrades to a warning instead of an `set -e` abort.
-if [[ "$DRY_RUN" -eq 1 ]]; then
-  printf "${BOLD}  WORKFLOW CONFIG${NC}\n"; hline
-  flash_dry "offer interactive workflow.config.yaml setup (skipped in dry-run)"
-  printf '\n'
-elif [[ "$INTERACTIVE" -eq 1 ]]; then
-  config_stage || flash_warn "config setup skipped (non-fatal error)"
-else
-  printf "${BOLD}  WORKFLOW CONFIG${NC}\n"; hline
-  flash_skip "non-interactive — run /workflow-init per project"
-  printf '\n'
-fi
 
 # ── 8. Claude Code steps ──────────────────────────────────────────────────────
 print_claude_steps

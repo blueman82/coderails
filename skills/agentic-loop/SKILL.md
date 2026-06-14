@@ -22,6 +22,35 @@ This skill encodes the working method so those failures don't keep happening. Th
 
 The phases below are sequential. Run them in order. Inside an authorised loop, phases 4-7 repeat per PR / per work-unit.
 
+### Phase -1 — Sharpen the authorising prompt
+
+**Run this phase UNLESS the user's prompt explicitly opts out.** Opt-out signals: "just do it", "skip improve-prompt", "don't improve the prompt", or any language that makes the directive unambiguous. On opt-out, skip directly to Phase 0. (Note: improve-prompt itself treats "just do it" as an unconditional skip — align with that.)
+
+**Why this phase exists.** Phase 0 calls misreading the authorisation envelope "the root of most over-asking." Closing ambiguity once, up front, is cheaper than re-asking mid-loop. A sharpened authorising prompt is the cheapest input to a tighter envelope — it is the one intervention that improves every subsequent phase simultaneously.
+
+**Step 1 — Invoke `/coderails:improve-prompt` on the authorising prompt.**
+
+Run the improve-prompt skill against the user's authorising prompt:
+
+> `/coderails:improve-prompt` — apply it to the prompt above.
+
+The skill will surface ambiguities, fill gaps with grounded assumptions, and produce a rewritten prompt that passes its 7-foundation diagnosis. Let it run to completion before proceeding to Step 2.
+
+**Step 2 — Ask the user how to proceed.**
+
+After improve-prompt produces its output, use the `AskUserQuestion` tool to present three options:
+
+> "Here's the improved prompt. How do you want to proceed?
+> A) Proceed with the improved prompt as the authorising envelope
+> B) Tweak it — tell me what to adjust and I'll revise
+> C) Use the original prompt as-is"
+
+On **A**: the improved prompt becomes the authorisation envelope. Phase 0 reads it verbatim.
+On **B**: apply the user's tweak, re-present the revised prompt, and ask again (bounded to two revision passes — if a third is needed, something is wrong with the envelope itself; surface that).
+On **C**: proceed with the original prompt unchanged; Phase 0 reads it verbatim.
+
+The improved-and-approved prompt (or the original, if C was chosen) is what Phase 0 treats as the authorisation envelope. Phase 0's `<thinking>` block quotes it verbatim from here.
+
 ### Phase 0 — Read the authorisation envelope
 
 Before doing anything, ask: what did the user actually authorise?
@@ -196,7 +225,7 @@ Skip a reviewer only when its trigger genuinely doesn't apply (e.g. no type chan
 
 **Plus the native `/security-review` pass.** Alongside the six agents, run Claude Code's built-in `/security-review` on the same branch diff as part of this gate — it is a dedicated security review (auth/authz surfaces, injection, secret leakage, unsafe deserialisation, SSRF) that the six general reviewers do not specialise in. Run it in the worktree so it sees the branch's pending changes. Fold its findings into the same Critical / Important / Suggestion aggregation; any security MERGE-BLOCKER blocks merge exactly like a code finding (Phase 5/10) BEFORE merge.
 
-**Do not substitute the generic `architect-review` + `debugger` + `ai-engineer` trio here.** That three-agent set is a separate general-purpose adversarial pattern (CLAUDE.md `feedback_three_parallel_adversarial_agents`) for design/architecture stress-tests — it is NOT the PR-review step. The canonical Ketchup workflow's review step is `/pr-review-toolkit:review-pr all` = the six agents above. Past failure: spawned the architect/debugger/ai-engineer trio at PR-review time; corrected to the toolkit six.
+**Do not substitute the generic `architect-review` + `debugger` + `ai-engineer` trio here.** That three-agent set is a separate general-purpose adversarial pattern (CLAUDE.md `feedback_three_parallel_adversarial_agents`) for design/architecture stress-tests — it is NOT the PR-review step. The canonical review step is `/pr-review-toolkit:review-pr all` = the six agents above. Past failure: spawned the architect/debugger/ai-engineer trio at PR-review time; corrected to the toolkit six.
 
 ### Phase 5 — Disprove the premise before each fix
 
@@ -204,7 +233,7 @@ Before spawning a "bug fix" agent for any reported regression, the fix agent's p
 
 > Verify the symptom in the source-of-truth FIRST. Slack pin-bar / GitHub PR state / Jira board / browser tabs all cache. Reproduce the bug via API call, prod log, DDB read, or git diff before any code change. If the symptom can't be reproduced via SOT, STOP and report — don't ship a fix to a non-bug.
 
-In a 7-hour Ketchup session this pattern caught 4 false alarms (stale Slack pin-bar views and design artefacts mistaken for regressions). The cost of disproving is one tool call; the cost of shipping a fix to a non-bug is a PR, a deploy, a rollback, and trust.
+In a long multi-agent session this pattern caught false alarms (stale Slack pin-bar views and design artefacts mistaken for regressions). The cost of disproving is one tool call; the cost of shipping a fix to a non-bug is a PR, a deploy, a rollback, and trust.
 
 ### Phase 6 — Match confirmation to authorisation envelope
 

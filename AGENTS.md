@@ -4,7 +4,7 @@ This file is the schema the LLM reads at conversation start to understand how th
 
 ## Wiki location
 
-`/Users/harrison/Documents/Github/coderails-wiki/`
+`<your-wiki-vault-path>/` (set during /wiki-init)
 
 Vault structure:
 ```
@@ -23,9 +23,9 @@ coderails-wiki/
 
 ## Three layers
 
-1. **Raw sources** (immutable): The plugin repo at `/Users/harrison/Documents/Github/coderails/` — commands, hooks, scripts, skills, install.sh, CLAUDE.md. Read from these; never modify source when updating wiki.
+1. **Raw sources** (immutable): The plugin repo at `<plugin-install-path>/` (wherever you unzipped coderails) — commands, hooks, scripts, skills, install.sh, CLAUDE.md. Read from these; never modify source when updating wiki.
 2. **The wiki**: LLM-generated markdown in the vault above. Claude owns this layer entirely — creates pages, updates cross-references, maintains consistency.
-3. **This file (AGENTS.md)**: Tells Claude how the wiki is structured, what conventions to follow, what workflows to run. Co-evolved between Gary and Claude over time. The human edits this file to change conventions; Claude reads it on every session.
+3. **This file (AGENTS.md)**: Tells Claude how the wiki is structured, what conventions to follow, what workflows to run. Co-evolved between the maintainer and Claude over time. The maintainer edits this file to change conventions; Claude reads it on every session.
 
 ## Page types
 
@@ -92,4 +92,4 @@ Fix anything directly related to the current PR; defer unrelated findings.
 
 ## Evolution note
 
-This file is co-evolved. When conventions change — new page types, new frontmatter fields, naming rule changes — update this file first, then update affected pages in the vault. Gary edits this file; Claude reads it. The wiki is a living system, not a snapshot.
+This file is co-evolved. When conventions change — new page types, new frontmatter fields, naming rule changes — update this file first, then update affected pages in the vault. The maintainer edits this file; Claude reads it. The wiki is a living system, not a snapshot.
