@@ -1,5 +1,5 @@
 ---
-allowed-tools: Bash(./worktree-add*), Bash(git branch*), Bash(git status*), Bash(git config*), Bash(git worktree*), Bash(cat*), mcp__jira__search_jira_issues, mcp__jira__create_jira_issue, mcp__jira__transition_jira_status_by_name (update these to match your Jira MCP server's tool namespace)
+allowed-tools: Bash(./worktree-add*), Bash(git branch*), Bash(git status*), Bash(git config*), Bash(git worktree*), Bash(cat*), mcp__jira__search_jira_issues, mcp__jira__create_jira_issue, mcp__jira__transition_jira_status_by_name (zero-config default; for a different Jira MCP set config.jira.mcp_namespace in workflow.config.yaml — no edit here needed; see INSTALLATION.md)
 argument-hint: <branch> [--type TYPE] [--summary "..."] [--description "..."]
 description: Create safety branch, new feature/bug branch, and create a Jira ticket
 ---
