@@ -22,6 +22,11 @@ Create `workflow.config.yaml` in the current project directory. This file is rea
    - **Jira epic key** (e.g. `MYPROJ-100`) — or "none"
    - **Jira component name** (e.g. `MyComponent`) — or "none"
    - **Jira component ID** (numeric, from Jira URL) — or "none"
+   - **Jira epic field ID** (custom field for epic link, e.g. `customfield_12345`) — or blank
+   - **Jira story points field ID** (e.g. `customfield_67890`) — or blank
+   - **Jira fix version name** (e.g. `v1.0`) — or blank
+   - **Jira start transition name** (moves ticket in-progress, e.g. `"In Progress"`) — or blank
+   - **Jira resolve transition name** (on PR merge, e.g. `"Resolved"`) — or blank
    - **Wiki path** (relative to project dir, e.g. `../my-project-wiki`) — or "none"
    - **Worktree base path** — where sibling worktrees will be created. Default: parent directory of the git root (i.e. `dirname $(git rev-parse --show-toplevel)`). Show the resolved default to the user so they can confirm or override.
    - **Worktree script** (path from project root, e.g. `./worktree-add`) — or "none"
@@ -40,6 +45,12 @@ jira:
   epic: MYPROJ-100
   component_name: MyComponent
   component_id: "123456"
+  epic_field: ""      # Jira custom field id for epic link (e.g. customfield_12345). Blank => skip.
+  points_field: ""    # Jira custom field id for story points (e.g. customfield_67890). Blank => skip.
+  fix_version: ""     # Jira fix version name (e.g. v1.0). Blank => skip.
+  transitions:
+    start: ""         # transition to move in-progress (e.g. "In Progress"). Blank => skip.
+    resolve: ""       # transition on PR merge (e.g. "Resolved"). Blank => skip.
 # or: jira: null
 strictcode_paths:
   - "**/container.py"
