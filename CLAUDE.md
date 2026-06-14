@@ -117,7 +117,7 @@ These are the things most likely to need editing for your project:
 
 - **Auth host**: `push.sh` requires a `github.com` remote (validated by `require::repo`).
 - **Jira fields**: `prep.md` reads epic and story-points field IDs from `config.jira.epic_field` and `config.jira.points_field` (set for your project in workflow.config.yaml). Transition names are also project-specific; see INSTALLATION.md "Notes".
-- **Jira route**: commands auto-detect your Jira MCP tool namespace (configure in commands if you use a different MCP server name); without a Jira MCP, Jira steps no-op (branches/PRs still work).
+- **Jira route**: commands build Jira MCP tool names at runtime from `config.jira.mcp_namespace` in `workflow.config.yaml` (default: `jira`, giving `mcp__jira__*`). Set `mcp_namespace` to your server's namespace (e.g. `acme-jira`) — no edits to command files needed. For non-default namespaces, add `"mcp__<namespace>__*"` to `.claude/settings.json` `permissions.allow`; without a Jira MCP, Jira steps no-op (branches/PRs still work). See INSTALLATION.md "Notes".
 
 ## Working in this repo
 

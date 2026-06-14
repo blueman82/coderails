@@ -59,7 +59,7 @@ If ambiguous, ask one targeted clarifying question — do not guess the branch n
 Invoke `/coderails:prep` with the parsed args. It handles:
 
 - Worktree creation at `<config.worktree_base>-<description>` (via `config.worktree_script` if set, otherwise plain `git worktree add`)
-- JIRA ticket creation (if `config.jira` is non-null): project `config.jira.project`, epic `config.jira.epic`, 1 story point, fix-version `config.jira.fix_version` (if set)
+- JIRA ticket creation (if `config.jira` is non-null): project `config.jira.project`, epic `config.jira.epic`, 1 story point, fix-version `config.jira.fix_version` (if set). Jira MCP tool namespace: `config.jira.mcp_namespace` (default: `jira`).
 - Transition to `config.jira.transitions.start` → `config.jira.transitions.resolve`
 - `git config branch.<branch>.jira-ticket <KEY>` so `/push` can auto-resolve later
 

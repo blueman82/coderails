@@ -81,7 +81,12 @@ Feature and bug work must be isolated in a git worktree — never branch off or 
 
 **Skip this entire section if `config.jira` is null.**
 
-**How to reach Jira:** Call whichever Jira MCP tool you have available (the default expected tool name is `mcp__jira__create_jira_issue` — update `allowed-tools` in the frontmatter if your server uses a different namespace). If no Jira MCP is available, stop and tell the user Jira features need a Jira MCP server configured; the branches are already created, so this is non-fatal.
+**How to reach Jira:** Determine the MCP tool namespace from `config.jira.mcp_namespace` (default: `jira` if unset). Build tool names at runtime:
+- Create ticket: `mcp__<mcp_namespace>__create_jira_issue`
+- Transition status: `mcp__<mcp_namespace>__transition_jira_status_by_name`
+- Search/query: `mcp__<mcp_namespace>__search_jira_issues`
+
+The `allowed-tools` frontmatter pre-authorises `mcp__jira__*` for the zero-config default. For a different namespace, calls still work but are governed by the normal permission system (one-time prompt or a `mcp__<mcp_namespace>__*` rule in `settings.json` `permissions.allow` — see INSTALLATION.md). If no Jira MCP is available at all, skip and tell the user Jira features need a Jira MCP server configured; the branches are already created, so this is non-fatal.
 
 After successfully creating the branches, create a Jira ticket:
 
@@ -99,7 +104,7 @@ After successfully creating the branches, create a Jira ticket:
    - **Story points** (only if `config.jira.points_field` is non-null): `{"<config.jira.points_field>": [{"set": 1}]}`  (e.g. `customfield_67890` — set for your project)
 
 3. After successful creation, advance the ticket out of its initial state:
-   - Transition to `config.jira.transitions.start` (e.g. `"In Progress"` — set for your project in workflow.config.yaml) using `transition_jira_status_by_name`. Run `get_jira_transitions` on one of your project's issues to find the correct name. If `config.jira.transitions.start` is null, skip this step.
+   - Transition to `config.jira.transitions.start` (e.g. `"In Progress"` — set for your project in workflow.config.yaml) using `mcp__<mcp_namespace>__transition_jira_status_by_name`. Run `mcp__<mcp_namespace>__get_jira_transitions` on one of your project's issues to find the correct name. If `config.jira.transitions.start` is null, skip this step.
    - **Then** attempt `config.jira.transitions.resolve` the same way, but treat a failure as non-fatal — not every project workflow exposes this transition from the start state. If it fails (or if the field is null), leave the ticket at the start state and continue; do not abort `/prep`.
 
 4. Store the ticket key in git branch config for auto-resolve at push time:
