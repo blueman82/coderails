@@ -30,7 +30,7 @@ bash ~/Documents/Github/coderails/install.sh
 | Command | What it does |
 |---|---|
 | `/workflow` | Orchestrate the full feature workflow: prep → code → push → review → merge → wiki |
-| `/workflow-init` | Scaffold `.claude/workflow.config.yaml` for the current repo |
+| `/coderails:init` | Scaffold `.claude/workflow.config.yaml` for the current repo |
 | `/prep` | Safety branch + feature branch + Jira ticket |
 | `/push` | Stage, commit, push, open PR with reviewers; auto-resolve linked Jira |
 | `/merge` | Merge approved PR, switch to main, pull |
@@ -48,6 +48,7 @@ bash ~/Documents/Github/coderails/install.sh
 | `planning-sequence` | Pre-Parade → Premortem → Red Team on a plan |
 | `premortem` | Assume failure, reason backwards to causes |
 | `handoff` | Structured memory + continuation prompt for a fresh session |
+| `improve-prompt` | Surfaces ambiguities and rewrites underspecified prompts before execution |
 
 ## Hooks
 

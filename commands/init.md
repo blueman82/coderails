@@ -18,9 +18,9 @@ Create `workflow.config.yaml` in the current project directory. This file is rea
 4. Check if that file already exists. If it does, confirm before overwriting.
 
 5. Ask the user for each field (one prompt is fine — list all fields at once):
-   - **Jira project key** (e.g. `CPGNCX`) — or "none"
-   - **Jira epic key** (e.g. `CPGNCX-12345`) — or "none"
-   - **Jira component name** (e.g. `Ketchup`) — or "none"
+   - **Jira project key** (e.g. `MYPROJ`) — or "none"
+   - **Jira epic key** (e.g. `MYPROJ-100`) — or "none"
+   - **Jira component name** (e.g. `MyComponent`) — or "none"
    - **Jira component ID** (numeric, from Jira URL) — or "none"
    - **Wiki path** (relative to project dir, e.g. `../my-project-wiki`) — or "none"
    - **Worktree base path** — where sibling worktrees will be created. Default: parent directory of the git root (i.e. `dirname $(git rev-parse --show-toplevel)`). Show the resolved default to the user so they can confirm or override.
@@ -36,9 +36,9 @@ wiki_path: ../my-project-wiki    # or null
 worktree_base: /Users/john/Downloads  # parent dir of git root, or whatever the user specified
 worktree_script: ./worktree-add   # or null
 jira:
-  project: CPGNCX
-  epic: CPGNCX-12345
-  component_name: MyProject
+  project: MYPROJ
+  epic: MYPROJ-100
+  component_name: MyComponent
   component_id: "123456"
 # or: jira: null
 strictcode_paths:

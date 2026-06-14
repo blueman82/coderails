@@ -45,7 +45,7 @@ Write to the **project-specific** memory directory. The correct path is derived 
 For example, if cwd is `/Users/you/Documents/Github/ops-agent`, write to:
 `~/.claude/projects/-Users-you-Documents-Github-ops-agent/memory/`
 
-**Do NOT use the path shown in your system prompt's auto-memory section** — that may be a global fallback (`-Users-harrison`) which other project sessions won't load. Always derive from cwd.
+**Do NOT use the path shown in your system prompt's auto-memory section** — that may be a global fallback path which other project sessions won't load. Always derive from cwd.
 
 **Monorepo edge case — verify the store location before deriving a new one.** When cwd is a sub-project inside a larger repo (e.g. you are working in `<repo>/projects/<sub>` or `<repo>/packages/<sub>`), the memory store is often keyed at the **repo root**, not the sub-project cwd. All of that repo's sessions — including this one — share one root store. Blindly deriving the path from a sub-project cwd creates a brand-new, empty `memory/` folder that NO future session will load from, orphaning your handoff. So before writing:
 

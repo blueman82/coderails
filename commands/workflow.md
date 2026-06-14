@@ -35,11 +35,11 @@ This command is the umbrella for the canonical code-change workflow. The rules i
 
 Phase 2b (design adversarial review) is distinct from Phase 3 (`/pr-review-toolkit:review-pr`): Phase 2b reviews the *design page* before coding, Phase 3 reviews the *code* before merge. Both are required on non-trivial features.
 
-The workflow has two interactive pauses where Gary drives: (a) the code/iterate loop, (b) the final ship-it authorization. Everything else auto-chains.
+The workflow has two interactive pauses where the developer drives: (a) the code/iterate loop, (b) the final ship-it authorization. Everything else auto-chains.
 
 ## Parse Arguments
 
-`$ARGUMENTS` is whatever Gary typed after `/workflow`. Extract:
+`$ARGUMENTS` is whatever the user typed after `/workflow`. Extract:
 
 1. **Branch name** (required). First token matching `feature/*`, `bug/*`, `bugfix/*`. If absent, ask for it.
 2. **Description** (optional). Everything after the branch name, or the `--summary "..."` flag if present. If absent, humanise the branch name (`feature/foo-bar` → "Implement foo bar").
@@ -47,9 +47,9 @@ The workflow has two interactive pauses where Gary drives: (a) the code/iterate 
 Accepted shapes (same as `/prep`):
 
 ```
-/workflow feature/nrql-host-fix
-/workflow bug/fix-nrql --summary "NRQL host field misreports"
-/workflow feature/csopm-dedup "Dedupe CSOPM notifications by assignee"
+/workflow feature/add-retry-logic
+/workflow bug/fix-timeout --summary "Request timeout too short"
+/workflow feature/my-feature "Add my-feature to the project"
 ```
 
 If ambiguous, ask one targeted clarifying question — do not guess the branch name.
@@ -59,8 +59,8 @@ If ambiguous, ask one targeted clarifying question — do not guess the branch n
 Invoke `/coderails:prep` with the parsed args. It handles:
 
 - Worktree creation at `<config.worktree_base>-<description>` (via `config.worktree_script` if set, otherwise plain `git worktree add`)
-- JIRA ticket creation (if `config.jira` is non-null): project `config.jira.project`, epic `config.jira.epic`, 1 story point, GA fix-version
-- Transition to Acknowledged → In Progress
+- JIRA ticket creation (if `config.jira` is non-null): project `config.jira.project`, epic `config.jira.epic`, 1 story point, fix-version `config.jira.fix_version` (if set)
+- Transition to `config.jira.transitions.start` → `config.jira.transitions.resolve`
 - `git config branch.<branch>.jira-ticket <KEY>` so `/push` can auto-resolve later
 
 Report the worktree path and JIRA key (if created).
@@ -69,7 +69,7 @@ Report the worktree path and JIRA key (if created).
 
 **Skip this phase if `config.wiki_path` is null.** If skipped, go directly to Phase 2b.
 
-Before handing control to Gary, run a **targeted wiki pre-flight** using `/wiki-query`:
+Before handing control to the user, run a **targeted wiki pre-flight** using `/wiki-query`:
 
 ```
 /wiki-query "What does the wiki cover about [feature area derived from branch name]?
@@ -87,15 +87,15 @@ What to look for in the response:
 If the query surfaces a gap worth preserving:
 1. File an investigation page now (`investigations/<topic>_<YYYY-MM-DD>.md`) before coding starts — not after deploy
 2. Update `index.md` and `log.md` (use a worktree per the wiki-ingest skill)
-3. Surface findings to Gary as a short pre-coding brief: "Before we start — I noticed X in the wiki. Is that intentional / in scope?"
+3. Surface findings to the user as a short pre-coding brief: "Before we start — I noticed X in the wiki. Is that intentional / in scope?"
 
-If no gap found, report "wiki clear" and hand control to Gary.
+If no gap found, report "wiki clear" and hand control to the user.
 
 **Do not skip this step.** Runtime discoveries (post-deploy surprises) are often detectable from the wiki before a line is written.
 
 ## Phase 2b — Design Adversarial Review (conditional, auto)
 
-Run **before handing control to Gary** if the design investigation page filed in Orient meets any of these triggers:
+Run **before handing control to the user** if the design investigation page filed in Orient meets any of these triggers:
 
 - ≥40 lines, OR
 - spans >1 service (e.g. scheduler + app, app + notifier), OR
@@ -112,7 +112,7 @@ If none of those apply, skip this phase and go straight to Code.
 | Cross-service data flow, DDB schema, PK design | `architect-reviewer` |
 | User input → write path, Slack-interactive, auth surface | `security-auditor` |
 | New async/concurrent patterns, error propagation | `silent-failure-hunter` |
-| New TypedDI protocol or ServiceSpec registration | `type-design-analyzer` |
+| New dependency-injection protocol or service registration pattern | `type-design-analyzer` |
 | Novel test surface or integration boundary | `pr-test-analyzer` |
 
 Always pick at least 2. Cap at 3. Brief each agent with the full design investigation page content + the specific sub-questions most relevant to its expertise (not just "review this" — give it attack vectors).
@@ -127,16 +127,16 @@ Always pick at least 2. Cap at 3. Brief each agent with the full design investig
 
 ## Phase 2 — Code (interactive pause)
 
-Hand control back to Gary. He will:
+Hand control back to the user. They will:
 
 1. Point his editor at the worktree
 2. Implement the change (with your help across any number of turns)
 3. Run the project's test suite during iteration and before pushing
 4. Signal readiness with a phrase like *"push"*, *"ready to push"*, *"done coding"*, *"ship it"*
 
-Do not proceed to Phase 3 until Gary gives that signal. Do not nag.
+Do not proceed to Phase 3 until the user gives that signal. Do not nag.
 
-**Pre-flight when Gary signals ready:** if `config.strictcode_paths` is non-null and the cumulative diff against the base branch touches any of those paths — or any file with ≥20 lines changed — run `/strictcode-python` on those files before calling `/push`.
+**Pre-flight when the user signals ready:** if `config.strictcode_paths` is non-null and the cumulative diff against the base branch touches any of those paths — or any file with ≥20 lines changed — run `/strictcode-python` on those files before calling `/push`.
 
 Note: `/push` already runs this pre-flight itself for paths in `config.strictcode_paths`, so if you forget, `/push` will catch it. The reason to also run it here is to catch non-config-listed large diffs that `/push`'s pre-flight misses.
 
@@ -147,7 +147,7 @@ Execute in order — do not pause between these:
 1. `/coderails:push` — stages, commits, pushes, opens PR with branch-protection reviewers, auto-resolves JIRA on PR creation (if `config.jira` non-null). Capture the PR URL from the output.
 2. `/pr-review-toolkit:review-pr all` — runs the four specialist agents (code-reviewer, pr-test-analyzer, silent-failure-hunter, type-design-analyzer) in parallel.
 3. Apply worthwhile findings inline — do not re-ask per finding. Push the follow-up commit. Classify each finding as:
-   - **Blocking** (apply silently): correctness bug, protocol violation, silent-failure pattern, missing test for changed public contract, DI registration gap
+   - **Blocking** (apply silently): correctness bug, protocol violation, silent-failure pattern, missing test for changed public contract, missing dependency-injection registration
    - **Worthwhile** (apply silently): readability wins, better names, extracted helpers that clearly reduce duplication
    - **Cosmetic/subjective** (skip, note in PR body): style preferences, naming opinions without a concrete defect
 4. Post a ledger comment on the PR summarising what was applied vs. skipped and why.
@@ -156,7 +156,7 @@ Report the PR URL, review summary, and resolved JIRA key (if applicable).
 
 ## Phase 4 — Ship-It (interactive pause)
 
-Wait for Gary to approve the merge. Signals: *"ship it"*, *"merge"*, *"ok to merge"*, *"lgtm go"*.
+Wait for the user to approve the merge. Signals: *"ship it"*, *"merge"*, *"ok to merge"*, *"lgtm go"*.
 
 While waiting, you may: answer review questions, help debug CI failures, iterate on review comments, push additional commits. Do NOT proceed to Phase 5 autonomously.
 
@@ -184,11 +184,11 @@ If `git branch -d` refuses because the branch is not fully merged into local `ma
 ## Escape hatches
 
 - **One-line hotfix / docs-only change:** skip `/workflow` entirely. Those don't need a worktree per the `no-edit-on-main.sh` hook's carve-out (only `.py/.ts/.tsx/.js/.jsx/.go` files are blocked on main).
-- **Phase skip:** Gary can interrupt at any time and tell you to skip a specific phase or re-enter a prior phase. Obey; don't argue for the canonical sequence.
+- **Phase skip:** The user can interrupt at any time and tell you to skip a specific phase or re-enter a prior phase. Obey; don't argue for the canonical sequence.
 - **Standalone sub-commands:** every phase's sub-command (`/coderails:prep`, `/coderails:push`, `/pr-review-toolkit:review-pr`, `/coderails:merge`, `/wiki-ingest`, `/wiki-lint`) remains callable on its own for edge cases. `/coderails:workflow` is the happy path, not the only path.
 
 ## What this command is NOT
 
 - Not enforcement. Slash commands are advisory — Claude has to choose to invoke them. Mechanical enforcement (refusing `gh pr create` unless `/push` ran, refusing `gh pr merge` unless `/pr-review-toolkit:review-pr` ran) belongs in `PreToolUse` hooks, not here. See the companion enforce-pr-workflow.sh hook design.
 - Not a replacement for reading CLAUDE.md. This command encodes the workflow; the authoritative spec for project-specific standards still lives in `projects/<name>/CLAUDE.md`.
-- Not interactive for the branch name. If Gary doesn't provide a branch, ask once — don't invent one.
+- Not interactive for the branch name. If the user doesn't provide a branch, ask once — don't invent one.

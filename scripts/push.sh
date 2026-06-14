@@ -11,11 +11,6 @@ push::main() {
     require::feature
     require::repo
 
-    # ─── Adobe enterprise auth check ─────────────────────────────────────────
-    if ! gh auth status 2>&1 | grep -q "git.corp.adobe.com"; then
-        err "Not authenticated with git.corp.adobe.com — run: gh auth login --hostname git.corp.adobe.com"
-    fi
-
     # ─── JIRA key from branch config (set by /prep) ───────────────────────────
     local jira_key
     jira_key=$(git config "branch.${br}.jira-ticket" 2>/dev/null || true)
