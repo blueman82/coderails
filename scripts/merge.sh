@@ -39,7 +39,7 @@ merge::main() {
                 ok "Approved"
             }
             step "Merging"
-            gh pr merge "$num" --merge --delete-branch
+            gh pr merge "$num" --merge          # remote merge ONLY — its failure must abort; branch cleanup is separate + non-fatal
             ok "Merged"
             ;;
         *) err "Unknown state" ;;
@@ -49,6 +49,25 @@ merge::main() {
     [[ $br != "$m" ]] && git checkout "$m" &>/dev/null
     git pull origin "$m" --quiet
     ok "Synced to $m"
+
+    # ─── Branch cleanup (best-effort — a merged PR must NEVER report failure) ──
+    # --delete-branch was dropped above: it deletes the local branch too, which
+    # fails (and, under set -e, aborts the whole script) when another worktree has
+    # the branch checked out — reporting an already-merged PR as failed. Cleanup is
+    # decoupled and non-fatal here instead.
+    local head; head=$(gh pr view "$num" --json headRefName -q .headRefName 2>/dev/null || true)
+    if [[ -n "${head:-}" && "$head" != "$m" ]]; then
+        git push origin --delete "$head" &>/dev/null \
+            && ok "Deleted remote branch $head" \
+            || warn "Remote branch $head not deleted (already gone?)"
+        if git branch -D "$head" &>/dev/null; then
+            ok "Deleted local branch $head"
+        else
+            local wt; wt=$(git worktree list --porcelain \
+                | awk -v b="branch refs/heads/$head" '/^worktree /{p=$2} $0==b{print p}' || true)
+            warn "Local branch $head kept${wt:+ (worktree $wt holds it — remove manually)}"
+        fi
+    fi
 
     dim "$(git log --oneline -5 | sed 's/^/  /')"
     banner "Done"
