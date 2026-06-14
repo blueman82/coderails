@@ -27,6 +27,7 @@ Create `workflow.config.yaml` in the current project directory. This file is rea
    - **Jira fix version name** (e.g. `v1.0`) — or blank
    - **Jira start transition name** (moves ticket in-progress, e.g. `"In Progress"`) — or blank
    - **Jira resolve transition name** (on PR merge, e.g. `"Resolved"`) — or blank
+   - **Jira MCP tool namespace** (the `<ns>` between `mcp__` and `__` in your Jira MCP's tool names, e.g. `jira`, `acme-jira`, `atlassian`) — default: `jira`. Only relevant if Jira is configured.
    - **Wiki path** (relative to project dir, e.g. `../my-project-wiki`) — or "none"
    - **Worktree base path** — where sibling worktrees will be created. Default: parent directory of the git root (i.e. `dirname $(git rev-parse --show-toplevel)`). Show the resolved default to the user so they can confirm or override.
    - **Worktree script** (path from project root, e.g. `./worktree-add`) — or "none"
@@ -48,6 +49,7 @@ jira:
   epic_field: ""      # Jira custom field id for epic link (e.g. customfield_12345). Blank => skip.
   points_field: ""    # Jira custom field id for story points (e.g. customfield_67890). Blank => skip.
   fix_version: ""     # Jira fix version name (e.g. v1.0). Blank => skip.
+  mcp_namespace: "jira"   # the <ns> in mcp__<ns>__create_jira_issue — set to match your Jira MCP server
   transitions:
     start: ""         # transition to move in-progress (e.g. "In Progress"). Blank => skip.
     resolve: ""       # transition on PR merge (e.g. "Resolved"). Blank => skip.
@@ -58,3 +60,15 @@ strictcode_paths:
 ```
 
 7. Report the path written and remind the user to commit it.
+
+8. If `config.jira.mcp_namespace` was set to anything other than the default `jira`, tell the user:
+
+   > Your Jira MCP namespace is `<mcp_namespace>`. The `allowed-tools` frontmatter in the workflow commands pre-authorises `mcp__jira__*` for the default namespace; calls to `mcp__<mcp_namespace>__*` will still work but will fall through to the normal permission system (one-time prompt or auto-allowed by a `settings.json` rule).
+   >
+   > To silence the permission prompt, add this line to `.claude/settings.json` under `permissions.allow`:
+   >
+   > ```json
+   > "mcp__<mcp_namespace>__*"
+   > ```
+   >
+   > See INSTALLATION.md for details.

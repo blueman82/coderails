@@ -59,7 +59,7 @@ JIRA_KEY=$(git config branch.$BRANCH.jira-ticket 2>/dev/null)
 ```
 
 If `JIRA_KEY` is set, transition the ticket to **Resolved** via whichever Jira route you have:
-Call your Jira MCP's `transition_jira_status_by_name` tool (default: `mcp__jira__transition_jira_status_by_name`) with `{issueIdOrKey: JIRA_KEY, statusName: "<config.jira.transitions.resolve>", comment: "..."}`. Update the tool name if your MCP server uses a different namespace.
+Read `config.jira.mcp_namespace` from the project config (default: `jira` if unset or config is `NO_CONFIG`). Call `mcp__<mcp_namespace>__transition_jira_status_by_name` with `{issueIdOrKey: JIRA_KEY, statusName: "<config.jira.transitions.resolve>", comment: "..."}`. For non-default namespaces, calls fall through to the normal permission system (one-time prompt or a `mcp__<mcp_namespace>__*` rule in `settings.json` `permissions.allow` — see INSTALLATION.md).
 
 Then:
 1. Use comment text: `"Resolved via PR merge. Work implemented via AI-assisted development (Claude Code). Branch: $BRANCH."`
