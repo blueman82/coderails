@@ -191,6 +191,29 @@ When the Phase 1 plan contains a work-unit that **retires an existing code path*
 
 The why: an unresolved disposition defaults silently to preserve-compat — the cautious answer that keeps a path the change was meant to remove, forcing a redo. Clean-break as the default, closed once before execution, prevents the doubled work. Past failure: a migration kept legacy shims because the model assumed the human wanted them; it had to be re-run with "remove the shims" — double the work.
 
+### Phase 2.7 — Commit the resolved design to a durable `spec.md`
+
+This phase fires ONLY when the loop has **≥3 work-units or a cross-unit dependency** — the same line Phase 3 draws to choose `TeamCreate` over a single agent. A 1–2-unit fix that Phase 3 routes to a single agent needs no separate design docs: the envelope (Phase 0) + `progress.json` + the one self-contained task description already carry everything. If the loop is below that threshold, skip 2.7 and 2.8 entirely.
+
+When it fires, write a durable `spec.md` to the loop-state dir — the path printed by the loop-state path helper (`hooks/scripts/lib/agentic_loop_path.sh`, run at Phase -2), next to `progress.json`, outside the code repo, **not committed** (loop state, not a PR deliverable). This is a **commit of design the loop has already resolved**, not interactive brainstorming — a loop cannot brainstorm with itself; the forks were closed at 2.5 and 2.6. Record:
+- the authorisation envelope verbatim (Phase 0);
+- the design-fork decision and its flip-condition (Phase 2.5);
+- the disposition decision(s) and any named blocker (Phase 2.6);
+- the success criteria — what "done" means for the whole loop;
+- the high-level work-unit boundaries (the detailed decomposition is Phase 2.8's plan).
+
+The `spec.md` is loop state, keyed to this orchestrator's run, exactly like `progress.json` — not a shareable design record. When ad-hoc loop work genuinely needs handing to a human, that is what `coderails:handoff` is for.
+
+### Phase 2.8 — Write the durable `plan.md` via `coderails:writing-plans`
+
+This phase fires under the same complexity guard as 2.7 (**≥3 work-units or a cross-unit dependency**). When it fires, produce a durable `plan.md` in the loop-state dir (next to `spec.md` and `progress.json`, outside the repo, not committed) by invoking **`coderails:writing-plans`** — the same one-line skill-reference idiom Phase 3/3a use for `coderails:test-driven-development`.
+
+`plan.md` is the **static SSOT** for the decomposition; `progress.json` is the **dynamic position** against it. The plan is **consumed, not write-only**, in both directions:
+- **Phase 3 builds its task list directly from `plan.md`** — the TeamCreate task list and the Phase 3/3a worker descriptions derive from the plan's tasks, so the two are consistent by construction rather than re-derived from conversation.
+- **After any compaction the orchestrator re-reads `plan.md` to recover *scope* (what to build)** the same way it re-reads `progress.json` to recover *position* (where we are).
+
+(This is the one place the `plan.md`↔`progress.json` relationship is named. It is stated here, standalone, on purpose — the `## Context-window persistence` section, which describes `progress.json`, is not edited.)
+
 ### Phase 3 — Delegate all implementation to sonnet agents; TeamCreate when work has ≥3 sequential units or dependency chains
 
 **Default: main context never implements.** It orchestrates — plans, delegates, verifies. Every implementation unit (even a single-file edit, even a tight sequential step) goes to a spawned **sonnet** agent. The two reasons, in order: keep main context clean (opus context is scarce and fills fast in long sessions), and keep cost down (sonnet does the typing, not opus). Treat a file edit done directly in main context as the exception that needs a reason, not the default.
