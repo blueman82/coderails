@@ -277,7 +277,7 @@ Sonnet agents (especially in teams) frequently complete work successfully but go
 When an agent goes idle without a report:
 1. Read the worktree `git status` and `git diff --stat`
 2. Check the PR state via `gh pr view <N>` if a PR should exist
-3. Read the prod log via `tsh ssh ...` if a deploy should have happened
+3. Read the prod log via your prod log access (`ssh`, `kubectl logs`, cloud console — whatever the project uses) if a deploy should have happened
 4. Verify the artifact, not the ping
 
 Only after the artifact check fails should you assume failure. Then respawn — and per Phase 10, give it a new name.
@@ -377,7 +377,7 @@ When an agent says "PR-N verified, deployed, working in prod" — treat that as 
 
 Before unblocking the next dependent task in the chain:
 - Read the PR `mergedAt` via `gh pr view`
-- Read the prod log line via `tsh ssh ...`
+- Read the prod log line via your prod log access (`ssh`, `kubectl logs`, cloud console)
 - Read the audit row or DDB record that confirms the new code path executed
 
 **Re-check at the moment of action, not at the moment the report arrived.** State changes in the gap. If the worker says "PR is CONFLICTING" or "ready to merge" and you queue a corrective instruction (rebase, redo, wait), the artifact may have moved by the time the message lands. Always re-run `gh pr view` (or equivalent) at the moment you act on the report, not when you first read it. Past failure: a CONFLICTING state self-healed via an intervening merge before the queued rebase instruction landed — stale on arrival, it triggered redundant work. One extra `gh pr view` between report and instruction is cheap.
