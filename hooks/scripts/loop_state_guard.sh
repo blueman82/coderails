@@ -6,6 +6,9 @@
 # Honest boundary (same as check_verify_loop.sh): this forces the file to exist and
 # be this session's; it cannot force the content to be accurate.
 #
+# Shared loop-detection (invocation count, path, file state) lives in
+# lib/loop_state_common.sh, sourced below and shared with loop_stall_guard.sh (C2).
+#
 # Gates run top to bottom; the first that matches decides. Cheapest skips first.
 #   skip  — no transcript                                       → allow
 #   skip  — already blocked once this turn (loop-guard)         → allow
@@ -14,11 +17,7 @@
 #   skip  — file present, session-owned, not complete           → allow (presence ok)
 #   BLOCK — file absent / session mismatch / stale-complete-after-rearm
 
-LOG_FILE="${CLAUDE_DISCIPLINE_LOG:-$HOME/.claude/discipline.log}"
-MAX_ATTEMPTS="${CLAUDE_HOOK_MAX_ATTEMPTS:-5}"
-SLEEP_S="${CLAUDE_HOOK_SLEEP_S:-0.3}"
-
-log_line() { printf '%s %s\n' "$(date -Iseconds 2>/dev/null || date +%Y-%m-%dT%H:%M:%S%z)" "$1" >> "$LOG_FILE" 2>/dev/null; }
+. "$(dirname "$0")/lib/loop_state_common.sh"
 
 input=$(cat)
 transcript=$(echo "$input" | jq -r '.transcript_path // empty')
@@ -36,67 +35,34 @@ if [ "$stop_hook_active" = "true" ]; then
   exit 0
 fi
 
-# Count agentic-loop Skill invocations across the WHOLE transcript. Recency
-# (re-arm detection) needs the full history, so this does not tail. Structured
-# jq match on a tool_use — never a text grep. Matches both the scoped name
-# ("coderails:agentic-loop") and the bare ("agentic-loop"). Retry for the
-# transcript-flush race until the count stabilises, as check_verify_loop does.
-count_invocations() {
-  jq -s -r '
-    [ .[]?
-      | select(.type == "assistant")
-      | .message.content[]?
-      | select(.type == "tool_use" and .name == "Skill")
-      | (.input.skill // "")
-      | select(test("(^|:)agentic-loop$")) ]
-    | length
-  ' "$transcript" 2>/dev/null
-}
-
-prev=-1; attempts=0; invocations=0
-while [ "$attempts" -lt "$MAX_ATTEMPTS" ]; do
-  invocations=$(count_invocations); [ -z "$invocations" ] && invocations=0
-  if [ "$invocations" -eq "$prev" ]; then break; fi
-  prev=$invocations
-  attempts=$((attempts + 1))
-  [ "$attempts" -lt "$MAX_ATTEMPTS" ] && sleep "$SLEEP_S"
-done
+invocations=$(als_stable_invocations "$transcript"); [ -z "$invocations" ] && invocations=0
 
 # Gate 3 — not a loop: the opt-in marker is absent. No discipline in force.
 if [ "$invocations" -eq 0 ]; then
-  log_line "hook=loop_state_guard session=$session_id invocations=0 active=0 blocked=0"
+  als_log "hook=loop_state_guard session=$session_id invocations=0 active=0 blocked=0"
   exit 0
 fi
 
-# Resolve the path — the hook is the sole path authority. Use the payload cwd
-# (the project dir), falling back to the hook process PWD.
-path=$(bash "$(dirname "$0")/lib/agentic_loop_path.sh" "$cwd" 2>/dev/null)
+# Resolve the path — the hook is the sole path authority.
+path=$(als_resolve_path "$cwd")
 
-# Read file state (empty/0 when absent).
-file_status=""; file_session=""; completed_marker=0
-if [ -n "$path" ] && [ -f "$path" ]; then
-  file_status=$(jq -r '.status // ""' "$path" 2>/dev/null)
-  file_session=$(jq -r '.session_id // ""' "$path" 2>/dev/null)
-  completed_marker=$(jq -r '.completed_marker // 0' "$path" 2>/dev/null)
-  case "$completed_marker" in (''|*[!0-9]*) completed_marker=0;; esac
-fi
+# Read file state (empty/0 when absent) into ALS_STATUS / ALS_SESSION / ALS_MARKER.
+als_read_file_state "$path"
+file_status="$ALS_STATUS"; file_session="$ALS_SESSION"; completed_marker="$ALS_MARKER"
 
-# Re-armed = a new loop invocation occurred after the recorded completion. Because
-# the skill is invoked once per loop, the transcript invocation count equals the
-# loop ordinal, which the orchestrator records as completed_marker at teardown.
+# Re-armed = a new loop invocation occurred after the recorded completion.
 rearmed=0
 if [ "$invocations" -gt "$completed_marker" ]; then rearmed=1; fi
 
-# Gate 4 — genuinely complete: complete, NOT re-armed, and session-owned. (Ownership
-# is required so another session's completed file never silences this session's loop.)
+# Gate 4 — genuinely complete: complete, NOT re-armed, and session-owned.
 if [ "$file_status" = "complete" ] && [ "$rearmed" -eq 0 ] && [ "$file_session" = "$session_id" ]; then
-  log_line "hook=loop_state_guard session=$session_id invocations=$invocations status=complete rearmed=0 owned=1 blocked=0"
+  als_log "hook=loop_state_guard session=$session_id invocations=$invocations status=complete rearmed=0 owned=1 blocked=0"
   exit 0
 fi
 
 # Gate 5 — present, session-owned, and active (not complete).
 if [ -n "$path" ] && [ -f "$path" ] && [ "$file_session" = "$session_id" ] && [ "$file_status" != "complete" ]; then
-  log_line "hook=loop_state_guard session=$session_id invocations=$invocations status=$file_status owned=1 blocked=0"
+  als_log "hook=loop_state_guard session=$session_id invocations=$invocations status=$file_status owned=1 blocked=0"
   exit 0
 fi
 
@@ -124,6 +90,6 @@ loop (status back to \"initialising\"/\"in-progress\", carry completed_marker fo
 before stopping."
 fi
 
-log_line "hook=loop_state_guard session=$session_id invocations=$invocations status=${file_status:-absent} reason=$reason blocked=1"
+als_log "hook=loop_state_guard session=$session_id invocations=$invocations status=${file_status:-absent} reason=$reason blocked=1"
 echo "$msg" >&2
 exit 2

@@ -112,6 +112,7 @@ Main context must, in its own output (not just in spawned-agent prompts):
 - Confidence-label every substantive status claim — `(verified)` / `(inferred)` / `(guess)` (same taxonomy as Phase 11).
 - Pre-tag any `## Did Not Verify` bullet that genuinely can't be checked, in the same turn it's written — an untagged bullet blocks the stop hook.
 - Never narrate a claim about an artifact (PR merged, deploy live) without having run the check this turn (Phase 12).
+- End any stopping turn inside an active loop with a LOOP-STOP declaration line — `LOOP-STOP: <hard-stop|approval-gate|awaiting-input|complete> — <reason>` — emitted in the SAME turn as the confidence-label and Did-Not-Verify requirements above (the `loop_stall_guard` hook blocks a stop that lacks one; bundling all three keeps you from clearing one stop hook only to trip another). Declaring `complete` means the loop is done: also set `progress.json` `status: "complete"` and run the Phase 13 teardown.
 
 The why: a factory whose conductor keeps tripping the wires it strung for the workers is not autonomous — it stalls on itself. Phase 11 disciplines the workers; Phase 0.5 disciplines the orchestrator. Past failure: in a real run the orchestrator tripped ~8 confidence-label / verify-loop blocks, each one a manual turn the user had to clear.
 
@@ -387,6 +388,7 @@ At the end of the loop, before declaring done, the orchestrator audits its own a
 - **Genuine gates vs avoidable stalls** — split those human turns into (a) legitimate approval-gates and hard-stops (the factory working as designed) and (b) avoidable stalls: re-asks inside scope, orchestrator hook-blocks, design forks litigated live, re-orientation prompts. Only (b) counts against the factory.
 - **Artifacts produced** — PRs merged, deploys done, each with the verifying check (Phase 12), not the agent's claim.
 - **Disposition violations** — work-units where `clean-break` was recorded in `progress.json` but a shim/compat path shipped anyway (caught at the Phase 4b gate, or by the human afterward). Audit as a diff between the `progress.json` disposition record and the merged artifact. Critically, distinguish **"0 violations"** from **"no disposition record found"**: the latter is an **audit failure** — the record was not maintained — not a pass, otherwise the metric reads "factory clean" when the record was simply absent. Separately, surface any `preserve-compat` unit whose `removal_ticket` is still **open at loop end** as a compat-debt drift signal, so deferred removals cannot silently rot.
+- **LOOP-STOP declarations by category** — the per-category counts of this loop's `LOOP-STOP` declarations (`progress.json` `loop_stop_counts`). Report the breakdown; a high `awaiting-input` count is a primary avoidable-stall signal — each one is a yield the factory should ideally have absorbed. This is the audit that keeps the anti-stall guard's honest boundary (a model can rubber-stamp `awaiting-input`) from hiding stalls behind a valid-looking tag.
 
 This is the factory's own KPI. It makes "are we a factory yet?" measurable per run instead of asserted, and the avoidable-stall list is the input to the next iteration of this skill. A run with zero avoidable stalls and one approval-gate is the target shape; anything else names exactly what to fix.
 
@@ -394,7 +396,7 @@ This is the factory's own KPI. It makes "are we a factory yet?" measurable per r
 
 Do not stop work early because the context window is filling or a token budget is approaching. Context will compact and the session will continue — treat that as a non-event, not a stop condition.
 
-**Loop state lives in a durable artifact, not in the conversation.** Maintain a single `progress.json` at the path printed by the loop-state path helper (`hooks/scripts/lib/agentic_loop_path.sh`) — outside the code repo, keyed to the project cwd, so it survives session restart/compaction and never pollutes the base every worker branches from. Resolve the path by running the helper (Phase -2); never compute it yourself. It is overwritten (not appended) on every phase boundary and holds: the authorisation envelope verbatim, the current phase, each work-unit's status (`pending`/`in-progress`/`done`/`blocked` with `blockedBy`), verified state carried between units (deployed version, test counts), the human-turn counters for Phase 13, and — for any work-unit that retires an existing code path — its `disposition` (`clean-break` | `preserve-compat`), plus, when `preserve-compat`, the `named_blocker` (the specific consumer still on the old path that justifies keeping it) and the `removal_ticket` tracking the deferred removal. A single overwritten JSON object — read the whole file in one shot to know current state. Do not use an append-log (`.jsonl`) that has to be replayed to derive position, and that can leave a torn tail line after a crash.
+**Loop state lives in a durable artifact, not in the conversation.** Maintain a single `progress.json` at the path printed by the loop-state path helper (`hooks/scripts/lib/agentic_loop_path.sh`) — outside the code repo, keyed to the project cwd, so it survives session restart/compaction and never pollutes the base every worker branches from. Resolve the path by running the helper (Phase -2); never compute it yourself. It is overwritten (not appended) on every phase boundary and holds: the authorisation envelope verbatim, the current phase, each work-unit's status (`pending`/`in-progress`/`done`/`blocked` with `blockedBy`), verified state carried between units (deployed version, test counts), the human-turn counters and per-category `loop_stop_counts` (`{hard-stop, approval-gate, awaiting-input, complete}`) for Phase 13, and — for any work-unit that retires an existing code path — its `disposition` (`clean-break` | `preserve-compat`), plus, when `preserve-compat`, the `named_blocker` (the specific consumer still on the old path that justifies keeping it) and the `removal_ticket` tracking the deferred removal. A single overwritten JSON object — read the whole file in one shot to know current state. Do not use an append-log (`.jsonl`) that has to be replayed to derive position, and that can leave a torn tail line after a crash.
 
 **Lifecycle, enforced by the `loop_state_guard` Stop hook (presence + ownership).** The file moves through a fixed lifecycle, and the guard blocks any stop where an active loop has no session-owned file:
 - **Stub-first (Phase -2):** `status: "initialising"`, stamped with this `session_id`.
@@ -429,6 +431,18 @@ Model an approval-gate as "pause-then-proceed", never as "do not start". Past fa
 
 **Loop complete:**
 5. All authorised work done and all gates passed — run Phase 13, then stop.
+
+**Declaring the stop (the LOOP-STOP contract).** Whichever class applies, a stop inside an active loop must be declared, or the `loop_stall_guard` Stop hook blocks it. End the stopping turn with:
+
+> `LOOP-STOP: <category> — <reason>`
+
+where `<category>` is exactly one of:
+- `hard-stop` — one of the four hard-stop conditions above.
+- `approval-gate` — a named risk boundary awaiting sign-off (pause-then-proceed).
+- `awaiting-input` — a planned interaction point inside the loop (the Phase -1 improve-prompt ask, the Phase 1 plan confirmation). Use this sparingly: Phase 13 counts `awaiting-input` declarations as avoidable stalls.
+- `complete` — all authorised work done. Declaring `complete` is the teardown: also set `progress.json` `status: "complete"` and run Phase 13 in the same turn, or the guards keep treating the loop as active.
+
+The hook checks the declaration is present with a valid category; it cannot check the reason is honest (same boundary as the verify-loop hook). The Phase 13 category counts are the audit on that.
 
 ## A note on cadence
 
