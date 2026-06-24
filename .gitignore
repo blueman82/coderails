@@ -7,6 +7,9 @@
 # runtime hook logs (machine-local, not source)
 logs/
 
+# subagent-driven-development progress ledger (machine-local coordination scratch)
+.superpowers/
+
 # per-project workflow config — local, may hold project-specific (e.g. Jira) values; never commit to the generic repo
 .claude/
 **/workflow.config.yaml
