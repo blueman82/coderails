@@ -22,6 +22,31 @@ This skill encodes the working method so those failures don't keep happening. Th
 
 The phases below are sequential. Run them in order. Inside an authorised loop, phases 4-7 repeat per PR / per work-unit.
 
+### Phase -2 — Stub `progress.json` first (the literal first action)
+
+Before Phase -1 — before anything else — write a `progress.json` stub. This guarantees the loop's durable state file exists before the first stop, so the `loop_state_guard` Stop hook never trips a compliant loop; the block degrades to a backstop for a skipped stub.
+
+**Resolve the path — never compute it yourself.** A cwd-derived key cannot be reproduced by hand. Get the absolute path by running the path helper:
+
+> `bash "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/lib/agentic_loop_path.sh"`
+
+It prints the absolute path. Write the stub there with the Write tool (it creates the parent directory). If `${CLAUDE_PLUGIN_ROOT}` is not set in your shell, do **not** guess the path — proceed without the stub; the `loop_state_guard` hook will block once on your first stop and hand you the exact path to use. Copy that path verbatim. Either way, the path comes from the helper (directly, or via the guard which also calls it) — never from your own derivation.
+
+**The stub:**
+
+```json
+{
+  "schema_version": 1,
+  "session_id": "<this session's id>",
+  "status": "initialising",
+  "created": "<ISO8601 timestamp>",
+  "authorising_prompt_raw": "<the user's authorising prompt, verbatim>",
+  "completed_marker": <carry forward the prior file's completed_marker if one exists at this path, else 0>
+}
+```
+
+If a `progress.json` already exists at the path from an earlier completed loop in this session, read its `completed_marker` and carry it forward into the new stub (do not reset it to 0) — this is what lets the guard tell a genuinely-finished loop from a new one that re-armed it (see the teardown rule below).
+
 ### Phase -1 — Sharpen the authorising prompt
 
 **Run this phase UNLESS the user's prompt explicitly opts out.** Opt-out signals: "just do it", "skip improve-prompt", "don't improve the prompt", or any language that makes the directive unambiguous. On opt-out, skip directly to Phase 0. (Note: improve-prompt itself treats "just do it" as an unconditional skip — align with that.)
@@ -369,7 +394,17 @@ This is the factory's own KPI. It makes "are we a factory yet?" measurable per r
 
 Do not stop work early because the context window is filling or a token budget is approaching. Context will compact and the session will continue — treat that as a non-event, not a stop condition.
 
-**Loop state lives in a durable artifact, not in the conversation.** Maintain a single `progress.json` in the worktree as the source of truth for where the loop is. It is overwritten (not appended) on every phase boundary and holds: the authorisation envelope verbatim, the current phase, each work-unit's status (`pending`/`in-progress`/`done`/`blocked` with `blockedBy`), verified state carried between units (deployed version, test counts), the human-turn counters for Phase 13, and — for any work-unit that retires an existing code path — its `disposition` (`clean-break` | `preserve-compat`), plus, when `preserve-compat`, the `named_blocker` (the specific consumer still on the old path that justifies keeping it) and the `removal_ticket` tracking the deferred removal. A single overwritten JSON object — read the whole file in one shot to know current state. Do not use an append-log (`.jsonl`) that has to be replayed to derive position, and that can leave a torn tail line after a crash.
+**Loop state lives in a durable artifact, not in the conversation.** Maintain a single `progress.json` at the path printed by the loop-state path helper (`hooks/scripts/lib/agentic_loop_path.sh`) — outside the code repo, keyed to the project cwd, so it survives session restart/compaction and never pollutes the base every worker branches from. Resolve the path by running the helper (Phase -2); never compute it yourself. It is overwritten (not appended) on every phase boundary and holds: the authorisation envelope verbatim, the current phase, each work-unit's status (`pending`/`in-progress`/`done`/`blocked` with `blockedBy`), verified state carried between units (deployed version, test counts), the human-turn counters for Phase 13, and — for any work-unit that retires an existing code path — its `disposition` (`clean-break` | `preserve-compat`), plus, when `preserve-compat`, the `named_blocker` (the specific consumer still on the old path that justifies keeping it) and the `removal_ticket` tracking the deferred removal. A single overwritten JSON object — read the whole file in one shot to know current state. Do not use an append-log (`.jsonl`) that has to be replayed to derive position, and that can leave a torn tail line after a crash.
+
+**Lifecycle, enforced by the `loop_state_guard` Stop hook (presence + ownership).** The file moves through a fixed lifecycle, and the guard blocks any stop where an active loop has no session-owned file:
+- **Stub-first (Phase -2):** `status: "initialising"`, stamped with this `session_id`.
+- **Enrich at Phase 0:** record the envelope verbatim; `status: "in-progress"`.
+- **Update at each phase boundary:** current phase, work-unit states, Spec A's disposition fields, the Phase 13 counters, `last_updated`.
+- **Teardown at Phase 13:** `status: "complete"`, and set `completed_marker` to the number of agentic-loop loops run in this session so far — i.e. the prior `completed_marker` (default 0) **plus 1**. Because this skill is invoked once per loop, that ordinal matches the guard's count of agentic-loop invocations, which is how the guard distinguishes a finished loop from a new one.
+
+**Recency — a second loop is not masked by a stale `complete`.** This skill supports multiple loops in one long session. A prior loop's `status: "complete"` must not silence the guard for a later loop. When a new loop starts, Phase -2's stub-first overwrites the file (`status` back to `initialising`), which is the primary re-arm signal. The `completed_marker` is the backstop: if a new loop skips its stub, the guard still sees that the current invocation count exceeds the recorded `completed_marker` and blocks, forcing a re-initialisation. This is why teardown must bump `completed_marker` and stub-first must carry it forward.
+
+**Honest boundary.** The guard guarantees the file *exists* and is *this session's* — not that its content is faithfully maintained (the same limit `check_verify_loop.sh` documents). Keeping the file current is still your job; the guard only catches its absence.
 
 After any compaction, drift, or "wait, where are we" moment, the orchestrator RE-READS `progress.json` — never the conversation — to re-orient. If the user ever has to remind the loop that it's mid-loop, the artifact wasn't being maintained. Git remains the authoritative checkpoint for code (commit all in-progress work before compaction); `progress.json` is the authoritative checkpoint for loop position.
 
