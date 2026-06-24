@@ -16,11 +16,11 @@ In long agentic sessions, the assistant tends to drift back into bad habits:
 - Trusting an agent's "idle" notification as proof-of-failure when the agent often completed the work silently
 - Spawning fix workers without first disproving the symptom premise
 
-This skill encodes the working method so those failures don't keep happening. The cost of doing it wrong is large: each unnecessary stall is a manual prompt the user has to write to get the loop moving again, and a stalled loop loses the autonomy the user paid for in the first place.
+This skill encodes the working method so those failures don't keep happening. Each unnecessary stall is a manual prompt the user has to write — a stalled loop loses the autonomy the session was authorised for.
 
 ## The phases
 
-The phases below are sequential. Run them in order. Inside an authorised loop, phases 4-7 repeat per PR / per work-unit.
+The phases below are sequential. Run them in order. Inside an authorised loop, phases 4-6 repeat per PR / per work-unit.
 
 ### Phase -2 — Stub `progress.json` first (the literal first action)
 
@@ -114,7 +114,7 @@ Main context must, in its own output (not just in spawned-agent prompts):
 - Never narrate a claim about an artifact (PR merged, deploy live) without having run the check this turn (Phase 12).
 - End any stopping turn inside an active loop with a LOOP-STOP declaration line — `LOOP-STOP: <hard-stop|approval-gate|awaiting-input|complete> — <reason>` — emitted in the SAME turn as the confidence-label and Did-Not-Verify requirements above (the `loop_stall_guard` hook blocks a stop that lacks one; bundling all three keeps you from clearing one stop hook only to trip another). Declaring `complete` means the loop is done: also set `progress.json` `status: "complete"` and run the Phase 13 teardown.
 
-The why: a factory whose conductor keeps tripping the wires it strung for the workers is not autonomous — it stalls on itself. Phase 11 disciplines the workers; Phase 0.5 disciplines the orchestrator. Past failure: in a real run the orchestrator tripped ~8 confidence-label / verify-loop blocks, each one a manual turn the user had to clear.
+The why: Phase 11 disciplines the workers; Phase 0.5 disciplines the orchestrator — because a conductor that trips its own hooks stalls the loop just as surely as a worker that does. Past failure: an orchestrator tripped ~8 confidence/verify blocks in one run — each a manual turn to clear.
 
 ### Phase 1 — State the plan in bullets, ask once
 
@@ -127,7 +127,7 @@ If no → revise once based on feedback, then re-ask.
 
 Do not loop more than twice on plan negotiation. If the third pass is needed, something is wrong with the envelope itself — surface that.
 
-The harness choice itself — which loop skill drives this (`/agentic-loop` vs a flat loop vs a goal runner) — is part of the authorisation envelope (Phase 0), not a Phase 1 question. Resolve it once when reading the envelope and never re-surface it as "which approach do you want?". Past failure: a real run re-asked "select your approach: /agentic-loop /loop /goal" four times because harness selection leaked out of the envelope and into plan negotiation.
+The harness choice itself — which loop skill drives this (`/agentic-loop` vs a flat loop vs a goal runner) — is part of the authorisation envelope (Phase 0), not a Phase 1 question. Resolve it once when reading the envelope and never re-surface it as "which approach do you want?". Past failure: a run re-asked "select your approach" 4× because harness choice leaked out of the envelope into plan negotiation.
 
 ### Phase 2 — Pre-flight checks via spawned agents, not main context
 
@@ -140,7 +140,7 @@ Spawn a single pre-flight agent whose prompt includes:
 
 Include `/wiki-query` in the pre-flight agent's skill list, scoped to the **whole plan theme** (not per-PR). The query is something like: "What does the wiki cover about [overall theme of the agentic loop]? Identify cross-PR constraints, gaps, superseded decisions, and anything the plan assumes but isn't enforced in code." This pre-empts the per-PR `/wiki-query` that `/workflow` Phase 2 runs — see Phase 9 for why per-PR wiki steps are suppressed inside this loop.
 
-**Primitive-contract read (mandatory when the plan calls a primitive in a non-standard way).** If the plan calls a lock, queue, transaction, or other shared primitive in any of: nested calls, recursion, parallel from same process, re-entered from the same caller — the pre-flight agent MUST read the primitive's source and document its contract: raise vs. return-bool semantics, reentrancy (PK collision behaviour), owner identity, expiry/steal logic. The schema may have been written before anyone read the primitive's internals. Past failure: a "wrap both call sites with a DistributedLock" schema was structurally impossible because the lock used `attribute_not_exists(PK)` non-reentrant semantics and the two sites were a nested call, not parallel — would have 100%-no-posted on every trigger. Pre-flight caught it by reading `distributed_lock.py` directly; the schema author hadn't.
+**Primitive-contract read (mandatory when the plan calls a primitive in a non-standard way).** If the plan calls a lock, queue, transaction, or other shared primitive in any of: nested calls, recursion, parallel from same process, re-entered from the same caller — the pre-flight agent MUST read the primitive's source and document its contract: raise vs. return-bool semantics, reentrancy (PK collision behaviour), owner identity, expiry/steal logic. The schema may have been written before anyone read the primitive's internals. Past failure: a "wrap both sites with a DistributedLock" schema was impossible — the lock's `attribute_not_exists(PK)` semantics are non-reentrant and the sites were nested, not parallel; only reading the primitive's source caught it.
 
 Spawn this pre-flight agent with `model: sonnet` — it's running skills, not making architectural decisions, and keeping it off opus controls cost.
 
@@ -148,7 +148,7 @@ Spawn this pre-flight agent with `model: sonnet` — it's running skills, not ma
 - NEVER let a worker branch off local `main`. Every worker MUST create its worktree off freshly-fetched `origin/main` (`git worktree add <path> -b <branch> origin/main`), and the orchestrator must state this explicitly, by name, in the worker prompt.
 - Carry the foreign file names into worker prompts as an explicit "these are not yours — never stage, commit, or include them" exclusion list.
 
-Do this check even when the base looks clean — it is two cheap git reads and it pre-empts the single most expensive failure mode in a parallel-session loop: a worker's PR silently inheriting another session's WIP from a dirty base, which otherwise only surfaces at the merge gate. Past failure: a removal PR's file list silently included two unrelated docs (`durable-queue-design.md` and an architecture-review doc) inherited from a polluted local `main` via the worker branching off it. Phase 12 caught it at the merge gate, but the fix cost a full close-and-rebuild cycle — new branch off `origin/main`, cherry-pick the real commits, reopen the PR, close the contaminated one. A clean-base check at loop start would have forced origin/main-based worktrees from the first spawn and avoided the rebuild entirely.
+Do this check even when the base looks clean — it is two cheap git reads and it pre-empts the single most expensive failure mode in a parallel-session loop: a worker's PR silently inheriting another session's WIP from a dirty base, which otherwise only surfaces at the merge gate. Past failure: a removal PR silently carried two unrelated docs inherited from a polluted local `main`; it surfaced only at the merge gate and cost a full close-and-rebuild cycle.
 
 The why: main context fills up fast in long sessions. Pre-flight output is dense and only useful for shaping the next move — perfect for delegation. Agents have skill access; passing the skill name in the prompt is enough.
 
@@ -167,7 +167,7 @@ What happens with that recommendation depends on the envelope class (Phase 0) �
 
 Either way the fork is closed by ONE design artifact before building starts — the loop does not start half-built while the design is still being argued turn by turn.
 
-The why: a factory closes design questions at one decision point with evidence, not across twenty conversational turns while half-built — and on a full-autonomous envelope it closes them without a human round-trip at all. Past failure: a real run spent ~20 turns debating queue-vs-lease-vs-hybrid as ad-hoc Q&A interleaved with the build — that decision should have been one design-agent artifact resolved once, before any PR work began.
+The why: design forks resolved mid-build cost twenty turns of interleaved debate; resolved once up front they cost one. On a full-autonomous envelope, no human round-trip is needed. Past failure: a run spent ~20 turns debating queue-vs-lease-vs-hybrid as ad-hoc Q&A interleaved with the build — it should have been one design artifact resolved before any PR work.
 
 **Where the design artifact is written — never onto local `main`.** Any phase that produces a file — a design investigation page, a recon note, a `progress.json` — writes it *outside the code repo's working tree*: to the wiki vault (`config.wiki_path`) if it is wiki-bound, otherwise a temp dir outside the repo. It is promoted into the PR worktree only at build time (Phase 3); it never lands on local `main`, where an untracked file silently pollutes the base every worker branches from — exactly the contamination the Phase 2 clean-base check then has to catch downstream. The recon/design phase is logically read-only with respect to the code repo; keep it literally so.
 
@@ -189,7 +189,7 @@ When the Phase 1 plan contains a work-unit that **retires an existing code path*
 
 **Record** per work-unit in `progress.json`: `disposition`, and when `preserve-compat`, the `named_blocker` and a mandatory `removal_ticket`.
 
-The why: a retirement with an unresolved disposition is filled silently with the cautious answer, and the cautious answer on a migration is usually wrong — it keeps a path the change was meant to remove, and the work has to be redone clean. Closing the fork once, up front, with clean-break as the default, is the cheapest point to prevent the doubled work. Past failure: a migration defaulted to keeping legacy shims and bridges because the model reasoned the human wanted existing functionality preserved; the loop had to be re-invoked with an explicit "remove the shims" instruction — double the work instead of one clean migration.
+The why: an unresolved disposition defaults silently to preserve-compat — the cautious answer that keeps a path the change was meant to remove, forcing a redo. Clean-break as the default, closed once before execution, prevents the doubled work. Past failure: a migration kept legacy shims because the model assumed the human wanted them; it had to be re-run with "remove the shims" — double the work.
 
 ### Phase 3 — Delegate all implementation to sonnet agents; TeamCreate when work has ≥3 sequential units or dependency chains
 
@@ -228,7 +228,7 @@ For bare 1-2 task work, a single `Agent` call is the right tool — don't over-e
 
 For self-contained work that doesn't justify a team — a bug fix, one PR, a single-file change, a tight sequence of steps with shared context — spawn **one** `Agent` with `model: sonnet` that owns both the implementation **and** the verification, then reports back a confidence-labelled result. Main context stays the orchestrator; it does not make the edit itself.
 
-Why one agent does both impl and verify (not two): the verification (running the test, reading the diff, hitting the endpoint) produces exactly the dense output you delegated to keep out of main context. If main context re-verified every small change, it would refill with the diffs it just pushed away. The agent self-verifies; main context spot-checks only at dependency boundaries (Phase 12) or when the artifact check is cheap and the stakes are high.
+Why one agent does both impl and verify (not two): the verification output is dense — exactly the kind that fills main context. The agent self-verifies; main context spot-checks only at dependency boundaries (Phase 12) or when the artifact check is cheap and the stakes are high.
 
 The agent's prompt must be self-contained (it can't re-read the conversation) and include:
 - **`model: sonnet`** — non-negotiable, same rule as team workers (Phase 3): cost control, and impl+verify is execution, not architecture.
@@ -236,10 +236,10 @@ The agent's prompt must be self-contained (it can't re-read the conversation) an
 - **A verify step the agent runs itself before reporting** — run the test / lint / build, read back the diff, hit the endpoint or read the log. State which one. "Implement X, then verify by running `Y`, and only report success if `Y` passes."
 - **Report-back contract:** return a confidence-labelled summary (Phase 11), state what was run to verify (the command + its result, not just "verified"), and "don't go silently idle — send a completion message" (Phase 4 — sonnet agents go idle without reporting).
 - If the work writes to git, the worktree/branch and a "commit your work" instruction so the artifact is durable for the orchestrator's Phase 4 check.
-- **A manifest — the exact set of files this change should touch — plus a pre-push scope assertion.** Require: "before you push, run `git diff origin/main --name-only` and confirm the file list equals EXACTLY this manifest. If any file you did not intend to touch appears — especially one you never edited — STOP and report; do not push. A PR that carries files outside its manifest is a contamination, not a change." This catches a dirty base or a stray `git add -A` at push time, one stage before the orchestrator's merge gate, where it is far cheaper to fix. Past failure: a worker pushed a PR whose file list silently included two files from a polluted base; nobody asserted scope before push, so it surfaced only at the merge gate and forced a rebuild.
+- **A manifest — the exact set of files this change should touch — plus a pre-push scope assertion.** Require: "before you push, run `git diff origin/main --name-only` and confirm the file list equals EXACTLY this manifest. If any file you did not intend to touch appears — especially one you never edited — STOP and report; do not push. A PR that carries files outside its manifest is a contamination, not a change." This catches a dirty base or a stray `git add -A` at push time, one stage before the orchestrator's merge gate, where it is far cheaper to fix. Past failure: a worker pushed a PR carrying two files from a polluted base — no pre-push scope assertion, so it surfaced only at the merge gate and forced a rebuild.
   When the unit's disposition is `clean-break`, the assertion also covers compat: before push, confirm no compatibility shim, bridge, adapter, or legacy code path for the replaced functionality remains. If one does, clean-break is not finished — remove it or STOP and report. This worker assertion is a **first-pass smell test, not the gate** — the independent reviewer (Phase 4b) is the gate, because the worker that wrote a shim is the party least able to see it as one.
 - **The disposition, verbatim** — for a retirement unit, the `clean-break`/`preserve-compat` decision from Phase 2.6 and (if preserve-compat) the `named_blocker`. The single agent cannot re-read the conversation; the decision must travel in its prompt or it does not exist for the worker.
-- **A terminal state stated as a concrete artifact, with no mid-task hand-backs.** The done-condition is an artifact that exists ("the PR is OPEN" or "the PR is MERGED"), never a sub-step. Add to the prompt: "You own this through that artifact existing. Do NOT hand back to the orchestrator in an intermediate state — after editing but before committing, after strictcode but before pushing, after review but before the PR is open. If you stop before the artifact exists, you have not finished; continue." Past failure: workers repeatedly stopped after running strictcode or an inline review and 'handed back to the orchestrator to push the PR', leaving the work uncommitted with no PR and forcing a resume cycle each time. Stating the terminal state as the artifact, not the sub-step, removes the premature hand-back.
+- **A terminal state stated as a concrete artifact, with no mid-task hand-backs.** The done-condition is an artifact that exists ("the PR is OPEN" or "the PR is MERGED"), never a sub-step. Add to the prompt: "You own this through that artifact existing. Do NOT hand back to the orchestrator in an intermediate state — after editing but before committing, after strictcode but before pushing, after review but before the PR is open. If you stop before the artifact exists, you have not finished; continue." Past failure: workers stopped after strictcode and "handed back to push the PR", leaving work uncommitted with no PR — stating the terminal state as the artifact removes the premature hand-back.
 
 When the single agent goes idle without reporting, apply Phase 4 verbatim — check the artifact (git diff, PR state, log), not the ping. When it reports success, that's a Phase 12 claim, not evidence — re-check at dependency boundaries.
 
@@ -274,7 +274,7 @@ Skip a reviewer only when its trigger genuinely doesn't apply (e.g. no type chan
 
 **Plus the native `/security-review` pass.** Alongside the six agents, run Claude Code's built-in `/security-review` on the same branch diff as part of this gate — it is a dedicated security review (auth/authz surfaces, injection, secret leakage, unsafe deserialisation, SSRF) that the six general reviewers do not specialise in. Run it in the worktree so it sees the branch's pending changes. Fold its findings into the same Critical / Important / Suggestion aggregation; any security MERGE-BLOCKER blocks merge exactly like a code finding (Phase 5/10) BEFORE merge.
 
-**Clean-break gate (when the unit's disposition is `clean-break`).** The `code-simplifier` pass — already independent of the worker (separately spawned, read-only) — is additionally instructed to hunt **relabelled compatibility**: a surviving old code path renamed to "fallback", "adapter", "guard", "transitional", or "bridge". It checks whether an **old code path still executes**, not whether the literal word "shim" appears. On a clean-break unit, its findings of surviving compat are **MERGE-BLOCKERS**, not the report-only suggestions row 6 produces by default. **Override path:** the orchestrator may record "reviewed, not compat — `<reason>`" against a finding to demote a false-positive to a logged note, so a reviewer misfire degrades to a note, never a wall. The why: clean-break enforced by worker self-assertion alone is self-attestation by the party with motive to keep the path; the independent reviewer carries the gate. Past failure: the original shim rework happened precisely because no independent check hunted for the compat the author had rationalised as necessary.
+**Clean-break gate (when the unit's disposition is `clean-break`).** The `code-simplifier` pass — already independent of the worker (separately spawned, read-only) — is additionally instructed to hunt **relabelled compatibility**: a surviving old code path renamed to "fallback", "adapter", "guard", "transitional", or "bridge". It checks whether an **old code path still executes**, not whether the literal word "shim" appears. On a clean-break unit, its findings of surviving compat are **MERGE-BLOCKERS**, not the report-only suggestions row 6 produces by default. **Override path:** the orchestrator may record "reviewed, not compat — `<reason>`" against a finding to demote a false-positive to a logged note, so a reviewer misfire degrades to a note, never a wall. The why: clean-break enforced by worker self-assertion alone is self-attestation by the party with motive to keep the path; the independent reviewer carries the gate. Past failure: the original shim rework happened because no independent check hunted the compat the author had rationalised as necessary.
 
 **Do not substitute the generic `architect-review` + `debugger` + `ai-engineer` trio here.** That three-agent set is a separate general-purpose adversarial pattern (CLAUDE.md `feedback_three_parallel_adversarial_agents`) for design/architecture stress-tests — it is NOT the PR-review step. The canonical review step is `/pr-review-toolkit:review-pr all` = the six agents above. Past failure: spawned the architect/debugger/ai-engineer trio at PR-review time; corrected to the toolkit six.
 
@@ -284,7 +284,7 @@ Before spawning a "bug fix" agent for any reported regression, the fix agent's p
 
 > Verify the symptom in the source-of-truth FIRST. Slack pin-bar / GitHub PR state / Jira board / browser tabs all cache. Reproduce the bug via API call, prod log, DDB read, or git diff before any code change. If the symptom can't be reproduced via SOT, STOP and report — don't ship a fix to a non-bug.
 
-In a long multi-agent session this pattern caught false alarms (stale Slack pin-bar views and design artefacts mistaken for regressions). The cost of disproving is one tool call; the cost of shipping a fix to a non-bug is a PR, a deploy, a rollback, and trust.
+Past failure: this pattern caught false alarms — stale Slack pin-bar views and design artefacts mistaken for regressions. The cost of disproving is one tool call; the cost of shipping a fix to a non-bug is a PR, a deploy, a rollback, and trust.
 
 ### Phase 6 — Match confirmation to authorisation envelope
 
@@ -299,29 +299,9 @@ Inside an authorised loop:
 
 Re-asking is more expensive than over-reaching by a small margin within scope. If the user wants to redirect, they will.
 
-### Phase 7 — Skip-validation when cosmetic blockers trip deploy
+### Phases 7 & 8 — stack-specific deploy/push tactics live in a feedback memory, not here
 
-When `./deploy` is blocked by black/isort/import-order failures AFTER the source-of-truth PR is already merged on main, that's deploy-script noise on cosmetic style — not a real blocker.
-
-Use `./deploy --force --skip-drain --skip-validation`. Don't get stuck on it. Don't try to push a style fix to main (branch protection will reject direct push anyway). Don't open a one-line cosmetic PR mid-loop.
-
-Memory: `feedback_deploy_skip_drain_default` already says skip-drain is the default; this extends to skip-validation in the same spirit.
-
-### Phase 8 — Rebase before push on long parallel sessions
-
-When a worktree's branch was created off main BEFORE the previous PR in the loop landed, its base will be stale. Before push, rebase:
-
-```
-cd <worktree>
-git fetch origin
-git rebase origin/main
-```
-
-The rebase will cleanly drop the auto-bumped `docker-compose.yml` version commit (it's already upstream). If the rebase has real conflicts in code, those are real and need resolution.
-
-Without the rebase, push may still succeed but the PR will carry a duplicate docker-compose bump and confuse the diff review.
-
-This rebase handles *staleness* (a base that fell behind as the loop's own PRs landed). It does NOT handle *pollution* (a local `main` carrying another session's commits) — that is the Phase 2 clean-base check's job, and the fix there is to branch workers off `origin/main`, not to rebase a polluted base onto itself. Staleness rebases away; pollution must never enter the worker's base in the first place.
+Deploy and push gotchas tied to a particular stack — skip-validation flags when a deploy script blocks on cosmetic lint, rebase-before-push when a versioned artifact (e.g. a compose file) bumps on every PR — belong in your own feedback memory for that stack, not in this general skill. Keep this skill stack-agnostic.
 
 ### Phase 9 — Cluster wiki ingest, don't fragment
 
@@ -335,17 +315,17 @@ If the loop's PRs aren't thematically related (rare — TeamCreate usually clust
 
 > "When running /workflow inside this agentic-loop, skip /workflow's wiki sub-steps (Phase 2 `/wiki-query` and Phase 5 `/wiki-ingest`/`/wiki-lint`). The orchestrator runs these at the loop boundary — running them per-PR causes redundant ingests and fragmented wiki context."
 
-**Why first-line, not just "include":** workers comply with whatever sits at the top of their prompt and tend to shortcut past mid-section process notes — they treat the workflow steps as authoritative and treat anything that appears to constrain those steps as "optional polish" if it isn't load-bearing in the prompt structure. Past failure: a worker shipped a per-PR wiki PR despite the suppression instruction being present, because the instruction was below the workflow steps. The next worker, with the same instruction moved to the top of their prompt, complied cleanly. **Scope-suppression instructions go above scope-additive instructions in worker prompts.**
+**Why first-line, not just "include":** workers shortcut past mid-section process notes and treat anything that appears to constrain the workflow steps as "optional polish." Past failure: a worker shipped a per-PR wiki PR because the suppression instruction sat below the workflow steps; moving it to the top fixed it. **Scope-suppression instructions go above scope-additive instructions in worker prompts.**
 
 The orchestrator handles both ends: Phase 2 (plan-level wiki read before coding starts) and Phase 9 (cluster ingest+lint after all PRs are merged). Per-PR wiki steps inside `/workflow` would duplicate Phase 2's context query on stale partial state and fragment Phase 9's cluster ingest into one-per-PR sprawl.
 
-**Wiki commits are artifacts too — verify they reached `origin/main`, and deliver them the way *this* repo accepts.** A delegated wiki agent reports a *commit SHA*, not a merged PR — and a commit is not a push. Close two failure modes at the loop boundary: (1) the agent commits to **local `main`** and never pushes — work stranded; (2) the agent pushes wiki files **direct to `main`**, which a branch-protection ruleset rejects (the protection Phase 7 already notes).
+**Wiki commits are artifacts too — verify they reached `origin/main`, and deliver them the way *this* repo accepts.** A delegated wiki agent reports a *commit SHA*, not a merged PR — and a commit is not a push. Close two failure modes at the loop boundary: (1) the agent commits to **local `main`** and never pushes — work stranded; (2) the agent pushes wiki files **direct to `main`**, which a branch-protection ruleset rejects.
 
 **Delivery is repo-specific.** If `main` is ruleset-protected, the wiki agent must deliver via a branch + PR off freshly-fetched `origin/main`, merged like any other change. Only where a repo *deliberately* permits direct wiki commits (e.g. a wiki dir gated behind a bypass env var) is a direct push acceptable — and even then it must be verified to have landed.
 
 **Then verify, after `git fetch origin`:** confirm the content is on `origin/main` via the wiki PR's `mergedAt` or `git show origin/main:<wiki-file>`. Do **not** confirm a merge with `git merge-base --is-ancestor <agent-sha> origin/main` — a squash-merge rewrites the SHA, so the agent's commit is never an ancestor even when its content landed (`--is-ancestor` is the right probe only for *detecting* an unpushed commit before merge). A committed-but-unpushed SHA is a textbook false-success; the "committed" ping is a claim, not evidence (Phase 12).
 
-Past failure: a wiki agent reported two commits "done"; they were on local `main`, unpushed, and `main` was ruleset-protected so a direct push was rejected. The orchestrator's origin check caught it; the fix was SHA-push → branch → PR → squash-merge → non-destructive `main` restore. Trusting the "committed" ping would have stranded the docs locally and left the next loop on a polluted base.
+Past failure: a wiki agent reported two commits "done" that were unpushed on local `main` (ruleset-protected, so a direct push was rejected); the origin check caught it before the docs were stranded.
 
 ### Phase 10 — Use v2/v3 names when respawning a stuck agent
 
@@ -375,9 +355,9 @@ Before unblocking the next dependent task in the chain:
 - Read the prod log line via `tsh ssh ...`
 - Read the audit row or DDB record that confirms the new code path executed
 
-**Re-check at the moment of action, not at the moment the report arrived.** State changes in the gap. If the worker says "PR is CONFLICTING" or "ready to merge" and you queue a corrective instruction (rebase, redo, wait), the artifact may have moved by the time the message lands. Always re-run `gh pr view` (or equivalent) at the moment you act on the report, not when you first read it. Past failure: orchestrator read CONFLICTING state when the worker first reported "ready", queued a rebase instruction, but by the time the worker received it the conflict had self-healed via an intervening merge commit — the rebase instruction was stale on arrival and triggered redundant work. The cost of one extra `gh pr view` between report and instruction is small.
+**Re-check at the moment of action, not at the moment the report arrived.** State changes in the gap. If the worker says "PR is CONFLICTING" or "ready to merge" and you queue a corrective instruction (rebase, redo, wait), the artifact may have moved by the time the message lands. Always re-run `gh pr view` (or equivalent) at the moment you act on the report, not when you first read it. Past failure: a CONFLICTING state self-healed via an intervening merge before the queued rebase instruction landed — stale on arrival, it triggered redundant work. One extra `gh pr view` between report and instruction is cheap.
 
-This is more rigorous than checking the idle ping (Phase 4) — it's specifically the "next phase blocker" check. Past failure mode: agent reports PR-2 verified, you unblock PR-3, then PR-2 was actually broken (race condition surfaced only on second container restart), and PR-3 is now stacked on a bad base.
+This is more rigorous than checking the idle ping (Phase 4) — it's specifically the "next phase blocker" check. Past failure: an agent reported PR-2 verified, PR-3 was unblocked, then PR-2 proved broken (race surfaced on the 2nd restart) — PR-3 stacked on a bad base.
 
 The cost of one extra tool call before unblocking the next phase is small. The cost of unblocking on a false report is hours.
 
@@ -390,7 +370,7 @@ At the end of the loop, before declaring done, the orchestrator audits its own a
 - **Disposition violations** — work-units where `clean-break` was recorded in `progress.json` but a shim/compat path shipped anyway (caught at the Phase 4b gate, or by the human afterward). Audit as a diff between the `progress.json` disposition record and the merged artifact. Critically, distinguish **"0 violations"** from **"no disposition record found"**: the latter is an **audit failure** — the record was not maintained — not a pass, otherwise the metric reads "factory clean" when the record was simply absent. Separately, surface any `preserve-compat` unit whose `removal_ticket` is still **open at loop end** as a compat-debt drift signal, so deferred removals cannot silently rot.
 - **LOOP-STOP declarations by category** — the per-category counts of this loop's `LOOP-STOP` declarations (`progress.json` `loop_stop_counts`). Report the breakdown; a high `awaiting-input` count is a primary avoidable-stall signal — each one is a yield the factory should ideally have absorbed. This is the audit that keeps the anti-stall guard's honest boundary (a model can rubber-stamp `awaiting-input`) from hiding stalls behind a valid-looking tag.
 
-This is the factory's own KPI. It makes "are we a factory yet?" measurable per run instead of asserted, and the avoidable-stall list is the input to the next iteration of this skill. A run with zero avoidable stalls and one approval-gate is the target shape; anything else names exactly what to fix.
+This is the factory's own KPI — "are we a factory yet?" measured per run, not asserted. Target shape: zero avoidable stalls and one approval-gate; anything else names exactly what to fix. The avoidable-stall list is the input to the next iteration of this skill.
 
 ## Context-window persistence
 
@@ -427,7 +407,7 @@ On a hard-stop: report current state with confidence labels, propose the next mo
 **Approval-gate (pause, surface a one-screen summary, PROCEED on yes):**
 A named risk boundary the envelope flagged for human sign-off — e.g. a prod cutover / enable step. This is NOT a hard-stop and NOT a wall. The loop runs autonomously right up to the gate, then pauses, presents a single summary (what's about to happen, the artifacts behind it, what's irreversible about it), and proceeds the moment the human approves — without re-planning or re-asking the steps before it.
 
-Model an approval-gate as "pause-then-proceed", never as "do not start". Past failure: a real run relabelled a prod-enable gate as "do not start / hard wall", which mis-stated its own terminal state and took two human turns to correct. The gate is a pause point inside the envelope, not the edge of it.
+Model an approval-gate as "pause-then-proceed", never as "do not start". Past failure: a run relabelled a prod-enable gate as "do not start / hard wall" and took two human turns to correct. The gate is a pause point inside the envelope, not the edge of it.
 
 **Loop complete:**
 5. All authorised work done and all gates passed — run Phase 13, then stop.
