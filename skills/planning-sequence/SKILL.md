@@ -1,6 +1,6 @@
 ---
 name: planning-sequence
-description: Run the full three-stage planning sequence — Pre-Parade, Premortem, and Red Team — on a plan, idea, or decision. Use this skill whenever someone wants to stress-test a plan before committing, says "run the planning sequence", "put this through the planning techniques", "stress-test my plan", "Pre-Parade this", or wants anticipatory analysis before a major decision. Also trigger proactively when a user is about to commit to something high-stakes and hasn't done any adversarial planning yet. The three stages run in order: Pre-Parade (success conditions), Premortem (failure modes), Red Team (adversarial challenge).
+description: 'Run the full three-stage planning sequence — Pre-Parade, Premortem, and Red Team — on a plan, idea, or decision. Use this skill whenever someone wants to stress-test a plan before committing, says "run the planning sequence", "put this through the planning techniques", "stress-test my plan", "Pre-Parade this", or wants anticipatory analysis before a major decision. Also trigger proactively when a user is about to commit to something high-stakes and hasn''t done any adversarial planning yet. The three stages run in order: Pre-Parade (success conditions), Premortem (failure modes), Red Team (adversarial challenge).'
 ---
 
 # Planning Sequence
