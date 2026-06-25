@@ -78,6 +78,11 @@ git commit -m "wiki(lint): <summary of fixes>"
 git push -u origin "$BRANCH"
 ${git.bypass_flag} gh pr create --title "wiki(lint): <summary>" --body "Findings: <list>"
 ${git.bypass_flag} gh pr merge --squash --delete-branch
+# Note: enforce_pr_workflow gates `gh pr create`/`gh pr merge` only in a repo that has a
+# workflow.config.yaml (a wiki vault usually has none → no-op). When it does apply, the
+# satisfier is /coderails:push (create) or /pr-review-toolkit:review-pr (merge) having run
+# this session, or a settings.json Bash permission. ${git.bypass_flag} is the wiki's own
+# delivery bypass, separate from that hook.
 git -C "${git.pull_path}" pull
 git -C "$vault" worktree remove "$WORKTREE_PATH"
 ```

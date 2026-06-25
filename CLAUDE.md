@@ -56,6 +56,10 @@ explicitly at the bottom):
 If you're asked to "make X mandatory," that belongs in a `PreToolUse` hook, not a
 command.
 
+### Skills↔hooks seam convention
+
+When a skill instructs an action that a hook gates — e.g. `git merge`/`gh pr create`/`gh pr merge` → `enforce_pr_workflow`; code-file edits on main → `no_edit_on_main`; `git commit` → `test_gate` — the skill must name the gating hook and the resolution path (what the user needs to do, or what bypass flag satisfies it). When you add a hook that gates a common action, update the skills that instruct it.
+
 ## Hook event map (`hooks/hooks.json`)
 
 | Event | Script | Mode |

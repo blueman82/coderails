@@ -22,7 +22,10 @@ if printf '%s' "$cmd" | grep -qE '\bgit +merge +(--abort|--continue|--quit|--ski
 fi
 
 # Gate 3: only act on `gh pr create`, `gh pr merge`, or `git merge`.
-if ! printf '%s' "$cmd" | grep -qE '\bgh +pr +(create|merge)\b|\bgit +merge\b'; then
+# Use `\bgit +merge([[:space:]]|$)` rather than `\bgit +merge\b` so that
+# `git merge-base`, `git merge-file`, and `git merge-tree` (read-only plumbing)
+# are not matched — those are never branch-integration commands.
+if ! printf '%s' "$cmd" | grep -qE '\bgh +pr +(create|merge)\b|\bgit +merge([[:space:]]|$)'; then
   exit 0
 fi
 
@@ -31,8 +34,10 @@ if printf '%s' "$cmd" | grep -qE '\bgh +pr +create\b'; then
   subcommand="create"
 elif printf '%s' "$cmd" | grep -qE '\bgh +pr +merge\b'; then
   subcommand="merge"
-else
+elif printf '%s' "$cmd" | grep -qE '\bgit +merge([[:space:]]|$)'; then
   subcommand="git_merge"
+else
+  exit 0
 fi
 
 # Gate 4: opt-in — if no workflow.config.yaml exists, stand aside.
@@ -99,7 +104,7 @@ else
   ' "$transcript" 2>/dev/null)
   required_step="/pr-review-toolkit:review-pr"
   if [ "$subcommand" = "git_merge" ]; then
-    gate_hint="Use /coderails:merge for the full PR merge workflow, or add a 'git merge' Bash permission to settings.json to bypass."
+    gate_hint="Run /pr-review-toolkit:review-pr first. Or use /coderails:merge for the full PR workflow. Or add a 'git merge' Bash permission to settings.json to bypass."
   else
     gate_hint="Run /pr-review-toolkit:review-pr first (or add a 'gh pr merge' Bash permission to settings.json to bypass)."
   fi

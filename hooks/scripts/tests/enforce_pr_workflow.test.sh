@@ -201,4 +201,12 @@ T=$(mk_transcript "$(mk_skill_line "coderails:push")")
 check "git merge on master WITHOUT review-pr evidence -> deny" DENY \
   "$(run "$(payload "git merge topic" "$T" "$REPO_MASTER")")"
 
+# ── Case 14: git merge-base (read-only plumbing) → ALLOW always ──────────────
+# merge-base is a read-only ancestry query, never a branch integration command.
+# The gate regex must NOT match it. Test on REPO_MAIN (config present, on main,
+# no review-pr evidence) — the harshest context; should still allow.
+T=$(mk_transcript "$(mk_skill_line "coderails:push")")
+check "git merge-base HEAD main on main without evidence -> allow" ALLOW \
+  "$(run "$(payload "git merge-base HEAD main" "$T" "$REPO_MAIN")")"
+
 [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails)"; exit 1; }

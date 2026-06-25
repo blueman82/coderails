@@ -105,6 +105,9 @@ cd "$MAIN_ROOT"
 git checkout <base-branch>
 git pull
 git merge <feature-branch>
+# Note: if the repo has a workflow.config.yaml, the enforce_pr_workflow hook
+# blocks `git merge` on main/master unless /pr-review-toolkit:review-pr ran this
+# session — run it on the feature diff first, or use Option 2 (PR workflow).
 
 # Verify tests on merged result
 <test command>
