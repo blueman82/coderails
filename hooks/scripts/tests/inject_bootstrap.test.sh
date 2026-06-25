@@ -12,9 +12,11 @@ check() { if [ "$2" = "$3" ]; then printf 'ok   - %s\n' "$1"; else printf 'FAIL 
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 
+PLUGIN_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+
 run_hook() {
-  # Run with CLAUDE_PLUGIN_ROOT pointing at the pr6 worktree root.
-  CLAUDE_PLUGIN_ROOT=/Users/harrison/Github/coderails-pr6 bash "$SCRIPT"
+  # Run with CLAUDE_PLUGIN_ROOT resolved relative to the test file (portable).
+  CLAUDE_PLUGIN_ROOT="$PLUGIN_ROOT" bash "$SCRIPT"
 }
 
 run_hook_missing_skill() {
@@ -65,5 +67,25 @@ echo "$out2" | jq . >/dev/null 2>&1
 check "graceful-degrade output is still valid JSON" 0 "$?"
 ctx2=$(echo "$out2" | jq -r '.hookSpecificOutput.additionalContext // empty')
 check "graceful-degrade has additionalContext" "1" "$([ -n "$ctx2" ] && echo 1 || echo 0)"
+
+# ── Gate 10: no double-escaping in additionalContext ─────────────────────────
+# Build a controlled CLAUDE_PLUGIN_ROOT whose SKILL.md contains KNOWN
+# backslash-bearing content.  After jq -r decodes the JSON the decoded value
+# must contain the VERBATIM text (single backslash, not doubled).
+FAKE_ROOT="$TMP/fake_plugin"
+mkdir -p "$FAKE_ROOT/skills/using-coderails"
+# Write a SKILL.md with a literal \n two-char sequence and a literal \" sequence
+# as text (not real escape sequences — just backslash followed by n / quote).
+printf 'Skill line with literal \\n and also literal \\" sequences.\n' \
+  > "$FAKE_ROOT/skills/using-coderails/SKILL.md"
+
+out3=$(CLAUDE_PLUGIN_ROOT="$FAKE_ROOT" bash "$SCRIPT" 2>/dev/null)
+ctx3=$(printf '%s' "$out3" | jq -r '.hookSpecificOutput.additionalContext // empty')
+# After jq -r decoding, the verbatim backslash-n should be present (single \n text).
+printf '%s' "$ctx3" | grep -qF '\n' && _has_backslash_n=1 || _has_backslash_n=0
+check "additionalContext contains verbatim backslash-n after jq decode" "1" "$_has_backslash_n"
+# And it must NOT contain a doubled sequence (\\n as four chars: backslash backslash n).
+printf '%s' "$ctx3" | grep -qF '\\n' && _double_nl=1 || _double_nl=0
+check "additionalContext has no double-escaped newlines" "0" "$_double_nl"
 
 [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails)"; exit 1; }

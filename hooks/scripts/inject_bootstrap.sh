@@ -17,22 +17,21 @@ else
   skill_content="(coderails: using-coderails skill not found at ${SKILL_FILE})"
 fi
 
-# JSON-escape via pure bash parameter substitution — bash-3.2/macOS-safe.
-# Each substitution is a single pass; order matters (backslash first).
-escape_for_json() {
-  local s="$1"
-  s="${s//\\/\\\\}"
-  s="${s//\"/\\\"}"
-  s="${s//$'\n'/\\n}"
-  s="${s//$'\r'/\\r}"
-  s="${s//$'\t'/\\t}"
-  printf '%s' "$s"
-}
+session_context="<EXTREMELY_IMPORTANT>
+You have coderails.
 
-skill_escaped=$(escape_for_json "$skill_content")
-session_context="<EXTREMELY_IMPORTANT>\nYou have coderails.\n\n**Below is the full content of your 'coderails:using-coderails' skill — your introduction to using coderails skills. For all other skills, use the 'Skill' tool:**\n\n${skill_escaped}\n</EXTREMELY_IMPORTANT>"
+**Below is the full content of your 'coderails:using-coderails' skill — your introduction to using coderails skills. For all other skills, use the 'Skill' tool:**
+
+${skill_content}
+</EXTREMELY_IMPORTANT>"
 
 # Emit Claude Code SessionStart format.
-printf '{\n  "hookSpecificOutput": {\n    "hookEventName": "SessionStart",\n    "additionalContext": "%s"\n  }\n}\n' "$session_context" | cat
+# jq handles all JSON escaping exactly once — no manual escaping needed.
+jq -n --arg ctx "$session_context" '{
+  hookSpecificOutput: {
+    hookEventName: "SessionStart",
+    additionalContext: $ctx
+  }
+}'
 
 exit 0

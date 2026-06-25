@@ -140,4 +140,65 @@ check "gh pr create --help -> allow" ALLOW \
 check "gh pr merge --dry-run -> allow" ALLOW \
   "$(run "$(payload "gh pr merge 1 --dry-run" "$T")")"
 
+# ── Case 9: git merge on main WITH review-pr evidence → ALLOW ────────────────
+# Set up a repo on main branch.
+REPO_MAIN="$TMP/repo_main"
+git -C "$TMP" init -q repo_main
+git -C "$REPO_MAIN" config user.email t@t.t
+git -C "$REPO_MAIN" config user.name t
+git -C "$REPO_MAIN" commit -q --allow-empty -m init
+# Rename default branch to main (in case git defaulted to master).
+current_branch=$(git -C "$REPO_MAIN" branch --show-current)
+[ "$current_branch" != "main" ] && git -C "$REPO_MAIN" branch -m "$current_branch" main
+mkdir -p "$REPO_MAIN/.claude"
+printf 'jira: null\n' > "$REPO_MAIN/.claude/workflow.config.yaml"
+
+T=$(mk_transcript \
+  "$(mk_skill_line "coderails:push")" \
+  "$(mk_skill_line "pr-review-toolkit:review-pr")")
+check "git merge feature on main WITH review-pr evidence -> allow" ALLOW \
+  "$(run "$(payload "git merge feature-branch" "$T" "$REPO_MAIN")")"
+
+# ── Case 10: git merge on main WITHOUT review-pr evidence → DENY ─────────────
+T=$(mk_transcript "$(mk_skill_line "coderails:push")")
+check "git merge feature on main WITHOUT review-pr evidence -> deny" DENY \
+  "$(run "$(payload "git merge feature-branch" "$T" "$REPO_MAIN")")"
+
+# ── Case 11: git merge on a FEATURE branch → ALLOW regardless of evidence ────
+REPO_FEAT="$TMP/repo_feat"
+git -C "$TMP" init -q repo_feat
+git -C "$REPO_FEAT" config user.email t@t.t
+git -C "$REPO_FEAT" config user.name t
+git -C "$REPO_FEAT" commit -q --allow-empty -m init
+git -C "$REPO_FEAT" checkout -q -b feature/my-thing
+mkdir -p "$REPO_FEAT/.claude"
+printf 'jira: null\n' > "$REPO_FEAT/.claude/workflow.config.yaml"
+
+T=$(mk_transcript "$(mk_skill_line "coderails:push")")
+check "git merge on feature branch -> allow regardless of evidence" ALLOW \
+  "$(run "$(payload "git merge main" "$T" "$REPO_FEAT")")"
+
+# ── Case 12: git merge --abort on main WITHOUT evidence → ALLOW (exemption) ──
+T=$(mk_transcript "$(mk_skill_line "coderails:prep")")
+check "git merge --abort on main without evidence -> allow" ALLOW \
+  "$(run "$(payload "git merge --abort" "$T" "$REPO_MAIN")")"
+
+# ── Case 13: git merge on master WITHOUT review-pr evidence → DENY ───────────
+# Exercises the master arm — mirrors Case 10 but uses a repo whose default
+# branch is named master rather than main.
+REPO_MASTER="$TMP/repo_master"
+git -C "$TMP" init -q repo_master
+git -C "$REPO_MASTER" config user.email t@t.t
+git -C "$REPO_MASTER" config user.name t
+git -C "$REPO_MASTER" commit -q --allow-empty -m init
+# Rename to master (init may have created main or master depending on git config).
+current_branch=$(git -C "$REPO_MASTER" branch --show-current)
+[ "$current_branch" != "master" ] && git -C "$REPO_MASTER" branch -m "$current_branch" master
+mkdir -p "$REPO_MASTER/.claude"
+printf 'jira: null\n' > "$REPO_MASTER/.claude/workflow.config.yaml"
+
+T=$(mk_transcript "$(mk_skill_line "coderails:push")")
+check "git merge on master WITHOUT review-pr evidence -> deny" DENY \
+  "$(run "$(payload "git merge topic" "$T" "$REPO_MASTER")")"
+
 [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails)"; exit 1; }
