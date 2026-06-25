@@ -69,6 +69,16 @@
             "timeout": 120
           }
         ]
+      },
+      {
+        "matcher": "Write|Edit|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/no_edit_on_main.sh\"",
+            "timeout": 5
+          }
+        ]
       }
     ]
   }
