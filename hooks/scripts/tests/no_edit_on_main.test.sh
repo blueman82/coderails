@@ -40,9 +40,21 @@ for ext in py ts tsx js jsx go; do
   check "main, .$ext edit -> deny" DENY "$(run "$(payload Edit "src/file.$ext")")"
 done
 
-# On main, docs/config pass (the docs-only carve-out = only code exts are blocked).
-check "main, .md edit -> allow"   ALLOW "$(run "$(payload Edit README.md)")"
+# On main, plugin source carried in markdown is gated like code (skills/*/SKILL.md, commands/*.md).
+check "main, skills SKILL.md (relative) -> deny" DENY "$(run "$(payload Edit skills/agentic-loop/SKILL.md)")"
+check "main, skills SKILL.md (absolute) -> deny" DENY "$(run "$(payload Edit "$REPO/skills/foo/SKILL.md")")"
+check "main, commands .md edit -> deny"          DENY "$(run "$(payload Edit commands/push.md)")"
+
+# On main, plain docs/config still pass (carve-out narrowed to plugin source only, not all .md).
+check "main, README.md edit -> allow"        ALLOW "$(run "$(payload Edit README.md)")"
+check "main, docs/REFERENCE.md edit -> allow" ALLOW "$(run "$(payload Edit docs/REFERENCE.md)")"
+check "main, other skill .md (not SKILL) -> allow" ALLOW "$(run "$(payload Edit skills/foo/references/x.md)")"
 check "main, .json edit -> allow" ALLOW "$(run "$(payload Write config.json)")"
+
+# Plugin-source markdown on a feature branch is allowed (branch check still applies).
+checkout feature
+check "feature branch, SKILL.md edit -> allow" ALLOW "$(run "$(payload Edit skills/agentic-loop/SKILL.md)")"
+checkout main
 
 # Empty file_path -> nothing to judge -> allow.
 check "main, empty file_path -> allow" ALLOW "$(run "$(payload Edit "")")"

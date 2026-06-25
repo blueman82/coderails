@@ -98,7 +98,7 @@ coderails is self-contained — it ships the dev-workflow skills it needs. `pr-r
 | `PreToolUse` (Bash) | `destructive_bash_gate.sh` | **block** |
 | `PreToolUse` (Bash) | `enforce_pr_workflow.sh` | **block** — `gh pr create/merge` without the required workflow steps |
 | `PreToolUse` (Bash) | `test_gate.sh` | **block** on `git commit` if tests fail — opt-in per repo |
-| `PreToolUse` (Write/Edit/MultiEdit) | `no_edit_on_main.sh` | **block** — code-file edits directly on main/master |
+| `PreToolUse` (Write/Edit/MultiEdit) | `no_edit_on_main.sh` | **block** — code-file & plugin-source (`SKILL.md`, command `.md`) edits directly on main/master |
 
 ## Requirements
 

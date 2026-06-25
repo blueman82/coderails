@@ -58,7 +58,7 @@ command.
 
 ### Skills↔hooks seam convention
 
-When a skill instructs an action that a hook gates — e.g. `git merge`/`gh pr create`/`gh pr merge` → `enforce_pr_workflow`; code-file edits on main → `no_edit_on_main`; `git commit` → `test_gate` — the skill must name the gating hook and the resolution path (what the user needs to do, or what bypass flag satisfies it). When you add a hook that gates a common action, update the skills that instruct it.
+When a skill instructs an action that a hook gates — e.g. `git merge`/`gh pr create`/`gh pr merge` → `enforce_pr_workflow`; code-file & plugin-source (`SKILL.md`/command) edits on main → `no_edit_on_main`; `git commit` → `test_gate` — the skill must name the gating hook and the resolution path (what the user needs to do, or what bypass flag satisfies it). When you add a hook that gates a common action, update the skills that instruct it.
 
 ## Hook event map (`hooks/hooks.json`)
 
@@ -74,7 +74,7 @@ When a skill instructs an action that a hook gates — e.g. `git merge`/`gh pr c
 | `PreToolUse` (Bash) | `destructive_bash_gate.sh` | **block** |
 | `PreToolUse` (Bash) | `enforce_pr_workflow.sh` | **block** — `gh pr create` without `/coderails:push`; `gh pr merge` without `/pr-review-toolkit:review-pr` — no-op if no `workflow.config.yaml` |
 | `PreToolUse` (Bash) | `test_gate.sh` | **block** on `git commit` if tests fail — opt-in only |
-| `PreToolUse` (Write/Edit/MultiEdit) | `no_edit_on_main.sh` | **block** — code-file edits (`.py`, `.ts`, `.tsx`, `.js`, `.jsx`, `.go`) directly on main/master |
+| `PreToolUse` (Write/Edit/MultiEdit) | `no_edit_on_main.sh` | **block** — code-file edits (`.py`, `.ts`, `.tsx`, `.js`, `.jsx`, `.go`) plus plugin source (`skills/*/SKILL.md`, `commands/*.md`) directly on main/master |
 
 **Hook script conventions** (follow these when editing or adding a script):
 - Read the hook payload from stdin via `input=$(cat)`, parse with `jq`.
