@@ -127,18 +127,18 @@ If no → revise once based on feedback, then re-ask.
 
 Do not loop more than twice on plan negotiation. If the third pass is needed, something is wrong with the envelope itself — surface that.
 
-The harness choice itself — which loop skill drives this (`/agentic-loop` vs a flat loop vs a goal runner) — is part of the authorisation envelope (Phase 0), not a Phase 1 question. Resolve it once when reading the envelope and never re-surface it as "which approach do you want?". Past failure: a run re-asked "select your approach" 4× because harness choice leaked out of the envelope into plan negotiation.
+The harness choice itself — which loop skill drives this (`/coderails:agentic-loop` vs a flat loop vs a goal runner) — is part of the authorisation envelope (Phase 0), not a Phase 1 question. Resolve it once when reading the envelope and never re-surface it as "which approach do you want?". Past failure: a run re-asked "select your approach" 4× because harness choice leaked out of the envelope into plan negotiation.
 
 ### Phase 2 — Pre-flight checks via spawned agents, not main context
 
-Pre-planning skills (`/planning-sequence`, `/premortem`, `/coderails:assumptions`, `/coderails:notchecked`, `/wiki-query`) belong in a delegated agent, not in main context.
+Pre-planning skills (`/coderails:planning-sequence`, `/coderails:premortem`, `/coderails:assumptions`, `/coderails:notchecked`, `/coderails:wiki-query`) belong in a delegated agent, not in main context.
 
 Spawn a single pre-flight agent whose prompt includes:
 - The plan from Phase 1
 - An instruction to invoke each relevant skill via its `Skill` tool call
 - An instruction to return one consolidated report (plan-sequence findings + premortem failure modes + assumptions inventory + wiki findings)
 
-Include `/wiki-query` in the pre-flight agent's skill list, scoped to the **whole plan theme** (not per-PR). The query is something like: "What does the wiki cover about [overall theme of the agentic loop]? Identify cross-PR constraints, gaps, superseded decisions, and anything the plan assumes but isn't enforced in code." This pre-empts the per-PR `/wiki-query` that `/workflow` Phase 2 runs — see Phase 9 for why per-PR wiki steps are suppressed inside this loop.
+Include `/coderails:wiki-query` in the pre-flight agent's skill list, scoped to the **whole plan theme** (not per-PR). The query is something like: "What does the wiki cover about [overall theme of the agentic loop]? Identify cross-PR constraints, gaps, superseded decisions, and anything the plan assumes but isn't enforced in code." This pre-empts the per-PR `/coderails:wiki-query` that `/coderails:workflow` Phase 2 runs — see Phase 9 for why per-PR wiki steps are suppressed inside this loop.
 
 **Primitive-contract read (mandatory when the plan calls a primitive in a non-standard way).** If the plan calls a lock, queue, transaction, or other shared primitive in any of: nested calls, recursion, parallel from same process, re-entered from the same caller — the pre-flight agent MUST read the primitive's source and document its contract: raise vs. return-bool semantics, reentrancy (PK collision behaviour), owner identity, expiry/steal logic. The schema may have been written before anyone read the primitive's internals. Past failure: a "wrap both sites with a DistributedLock" schema was impossible — the lock's `attribute_not_exists(PK)` semantics are non-reentrant and the sites were nested, not parallel; only reading the primitive's source caught it.
 
@@ -202,11 +202,11 @@ When it fires, write a durable `spec.md` to the loop-state dir — the path prin
 - the success criteria — what "done" means for the whole loop;
 - the high-level work-unit boundaries (the detailed decomposition is Phase 2.8's plan).
 
-The `spec.md` is loop state, keyed to this orchestrator's run, exactly like `progress.json` — not a shareable design record. When ad-hoc loop work genuinely needs handing to a human, that is what `coderails:handoff` is for.
+The `spec.md` is loop state, keyed to this orchestrator's run, exactly like `progress.json` — not a shareable design record. When ad-hoc loop work genuinely needs handing to a human, that is what `/coderails:handoff` is for.
 
-### Phase 2.8 — Write the durable `plan.md` via `coderails:writing-plans`
+### Phase 2.8 — Write the durable `plan.md` via `/coderails:writing-plans`
 
-This phase fires under the same complexity guard as 2.7 (**≥3 work-units or a cross-unit dependency**). When it fires, produce a durable `plan.md` in the loop-state dir (next to `spec.md` and `progress.json`, outside the repo, not committed) by invoking **`coderails:writing-plans`** — the same one-line skill-reference idiom Phase 3/3a use for `coderails:test-driven-development`.
+This phase fires under the same complexity guard as 2.7 (**≥3 work-units or a cross-unit dependency**). When it fires, produce a durable `plan.md` in the loop-state dir (next to `spec.md` and `progress.json`, outside the repo, not committed) by invoking **`/coderails:writing-plans`** — the same one-line skill-reference idiom Phase 3/3a use for `/coderails:test-driven-development`.
 
 `plan.md` is the **static SSOT** for the decomposition; `progress.json` is the **dynamic position** against it. The plan is **consumed, not write-only**, in both directions:
 - **Phase 3 builds its task list directly from `plan.md`** — the TeamCreate task list and the Phase 3/3a worker descriptions derive from the plan's tasks, so the two are consistent by construction rather than re-derived from conversation.
@@ -236,7 +236,7 @@ Each task description must be **self-contained** so the spawned agent can act wi
 - JIRA ticket
 - Verified state from prior tasks (deployed version, test counts, what's already wired)
 - Exact step-by-step sub-steps
-- Construction method — when the deliverable is code (the change adds or alters a function, method, or branch that *can* carry a test), instruct the worker to build it test-first via `coderails:test-driven-development` (failing test → minimal code → refactor). This holds even if the unit also touches non-code files. For pure docs/config/prose with no testable code, there is no test to write first — keep the verify-your-artifact contract. For the full worker-prompt construction contract (implementer/reviewer prompt templates + the per-task review loop), see `coderails:subagent-driven-development`.
+- Construction method — when the deliverable is code (the change adds or alters a function, method, or branch that *can* carry a test), instruct the worker to build it test-first via `/coderails:test-driven-development` (failing test → minimal code → refactor). This holds even if the unit also touches non-code files. For pure docs/config/prose with no testable code, there is no test to write first — keep the verify-your-artifact contract. For the full worker-prompt construction contract (implementer/reviewer prompt templates + the per-task review loop), see `/coderails:subagent-driven-development`.
 - Verify criteria
 - Manifest — the exact set of files this unit should touch, with the pre-push scope assertion (see Phase 3a)
 - Disposition — for a retirement unit, the `clean-break`/`preserve-compat` decision from Phase 2.6 copied **verbatim** into the task description, plus (if preserve-compat) the `named_blocker`. The worker acts only on its own prompt; a disposition recorded in `progress.json` but absent from the prompt silently reverts the unit to the model's preserve-default — the exact failure this discipline exists to stop.
@@ -257,7 +257,7 @@ Why one agent does both impl and verify (not two): the verification output is de
 The agent's prompt must be self-contained (it can't re-read the conversation) and include:
 - **`model: sonnet`** — non-negotiable, same rule as team workers (Phase 3): cost control, and impl+verify is execution, not architecture.
 - The exact change to make, with file paths and the success criteria stated as something testable.
-- **Construction method (when the deliverable is code).** If the change adds or alters a function, method, or branch that *can* carry a test, the worker builds it test-first via `coderails:test-driven-development`: write the failing test, watch it fail for the right reason, then the minimal code to pass, then refactor green — even if the PR also touches non-code files. For pure docs/config/prose with no testable code, there is no failing test to write first; the verify step below is by inspection instead.
+- **Construction method (when the deliverable is code).** If the change adds or alters a function, method, or branch that *can* carry a test, the worker builds it test-first via `/coderails:test-driven-development`: write the failing test, watch it fail for the right reason, then the minimal code to pass, then refactor green — even if the PR also touches non-code files. For pure docs/config/prose with no testable code, there is no failing test to write first; the verify step below is by inspection instead.
 - **A verify step the agent runs itself before reporting** — run the test / lint / build, read back the diff, hit the endpoint or read the log. State which one. "Implement X, then verify by running `Y`, and only report success if `Y` passes."
 - **Report-back contract:** return a confidence-labelled summary (Phase 11), state what was run to verify (the command + its result, not just "verified"), and "don't go silently idle — send a completion message" (Phase 4 — sonnet agents go idle without reporting).
 - If the work writes to git, the worktree/branch and a "commit your work" instruction so the artifact is durable for the orchestrator's Phase 4 check.
@@ -282,7 +282,7 @@ When an agent goes idle without a report:
 
 Only after the artifact check fails should you assume failure. Then respawn — and per Phase 10, give it a new name.
 
-### Phase 4b — PR review uses the six `pr-review-toolkit` agents plus `/security-review`, in parallel
+### Phase 4b — PR review uses the six `/pr-review-toolkit` agents plus `/security-review`, in parallel
 
 When a phase reaches "review the PR" (after a `/workflow` agent has pushed a PR, before merge), the review is `/pr-review-toolkit:review-pr all` — fan out these **six specialised reviewers in parallel, in a single message with six `Agent` blocks**, each against the branch diff (`git -C <worktree> diff origin/main...HEAD`):
 
@@ -330,19 +330,19 @@ Deploy and push gotchas tied to a particular stack — skip-validation flags whe
 
 ### Phase 9 — Cluster wiki ingest, don't fragment
 
-Run `/wiki-ingest` AND `/wiki-lint` ONCE at the end of the loop, with all related PRs as a cluster — not once per PR. Per memory `feedback_wiki_ingest_and_lint_post_merge`, lint must always pair with ingest; running one without the other is incomplete.
+Run `/coderails:wiki-ingest` AND `/coderails:wiki-lint` ONCE at the end of the loop, with all related PRs as a cluster — not once per PR. Per memory `feedback_wiki_ingest_and_lint_post_merge`, lint must always pair with ingest; running one without the other is incomplete.
 
 One source page covers the cluster. Updates to entities/services/concepts pages aggregate the cluster's changes. This matches memory `feedback_parallel_wiki_agents` (cluster together, don't fragment).
 
 If the loop's PRs aren't thematically related (rare — TeamCreate usually clusters them), one ingest per cluster theme is fine. Avoid one-per-PR sprawl.
 
-**Suppressing per-PR wiki steps in spawned `/workflow` agents:** place the following line as the **FIRST instruction** in every spawned agent's prompt inside this loop (not buried mid-section, not under the task-specific scope, not after the workflow steps — first):
+**Suppressing per-PR wiki steps in spawned `/coderails:workflow` agents:** place the following line as the **FIRST instruction** in every spawned agent's prompt inside this loop (not buried mid-section, not under the task-specific scope, not after the workflow steps — first):
 
-> "When running /workflow inside this agentic-loop, skip /workflow's wiki sub-steps (Phase 2 `/wiki-query` and Phase 5 `/wiki-ingest`/`/wiki-lint`). The orchestrator runs these at the loop boundary — running them per-PR causes redundant ingests and fragmented wiki context."
+> "When running /workflow inside this agentic-loop, skip /workflow's wiki sub-steps (Phase 2 `/coderails:wiki-query` and Phase 5 `/coderails:wiki-ingest`/`/coderails:wiki-lint`). The orchestrator runs these at the loop boundary — running them per-PR causes redundant ingests and fragmented wiki context."
 
 **Why first-line, not just "include":** workers shortcut past mid-section process notes and treat anything that appears to constrain the workflow steps as "optional polish." Past failure: a worker shipped a per-PR wiki PR because the suppression instruction sat below the workflow steps; moving it to the top fixed it. **Scope-suppression instructions go above scope-additive instructions in worker prompts.**
 
-The orchestrator handles both ends: Phase 2 (plan-level wiki read before coding starts) and Phase 9 (cluster ingest+lint after all PRs are merged). Per-PR wiki steps inside `/workflow` would duplicate Phase 2's context query on stale partial state and fragment Phase 9's cluster ingest into one-per-PR sprawl.
+The orchestrator handles both ends: Phase 2 (plan-level wiki read before coding starts) and Phase 9 (cluster ingest+lint after all PRs are merged). Per-PR wiki steps inside `/coderails:workflow` would duplicate Phase 2's context query on stale partial state and fragment Phase 9's cluster ingest into one-per-PR sprawl.
 
 **Wiki commits are artifacts too — verify they reached `origin/main`, and deliver them the way *this* repo accepts.** A delegated wiki agent reports a *commit SHA*, not a merged PR — and a commit is not a push. Close two failure modes at the loop boundary: (1) the agent commits to **local `main`** and never pushes — work stranded; (2) the agent pushes wiki files **direct to `main`**, which a branch-protection ruleset rejects.
 
