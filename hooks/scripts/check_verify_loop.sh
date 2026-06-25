@@ -25,6 +25,8 @@ TAIL_LINES="${CLAUDE_HOOK_TAIL_LINES:-300}"
 MAX_ATTEMPTS="${CLAUDE_HOOK_MAX_ATTEMPTS:-5}"
 SLEEP_S="${CLAUDE_HOOK_SLEEP_S:-0.3}"
 
+. "$(dirname "$0")/lib/discipline_common.sh"
+
 log_line() { printf '%s %s\n' "$(date -Iseconds 2>/dev/null || date +%Y-%m-%dT%H:%M:%S%z)" "$1" >> "$LOG_FILE" 2>/dev/null; }
 
 input=$(cat)
@@ -64,32 +66,8 @@ fi
 # array is built, so a non-text entry contributes "" and can never win `last` over
 # a real text block. Assistant content in Claude Code transcripts is always an
 # array; the string/else branches are defensive only.
-extract_last_text() {
-  tail -n "$TAIL_LINES" "$transcript" 2>/dev/null | jq -s -r '
-    [.[]?
-     | select(.type == "assistant")
-     | (.message.content
-        | if type == "array" then [ .[]? | select(.type == "text") | .text ] | join(" ")
-          elif type == "string" then .
-          else "" end)
-     | select(type == "string" and length > 0)]
-    | last // ""
-  ' 2>/dev/null
-}
-
-prev_len=-1
-attempts=0
-text=""
-while [ "$attempts" -lt "$MAX_ATTEMPTS" ]; do
-  text=$(extract_last_text)
-  cur_len=${#text}
-  if [ "$cur_len" -eq "$prev_len" ] && [ "$cur_len" -gt 0 ]; then
-    break
-  fi
-  prev_len=$cur_len
-  attempts=$((attempts + 1))
-  [ "$attempts" -lt "$MAX_ATTEMPTS" ] && sleep "$SLEEP_S"
-done
+text=$(dc_stable_text "$transcript" "$TAIL_LINES" "$MAX_ATTEMPTS" "$SLEEP_S")
+attempts=$DC_LAST_ATTEMPTS
 
 # Skip if the last response has no text: nothing was claimed, nothing to inspect.
 if [ -z "$text" ]; then

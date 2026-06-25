@@ -8,6 +8,8 @@ MAX_ATTEMPTS="${CLAUDE_HOOK_MAX_ATTEMPTS:-5}"
 SLEEP_S="${CLAUDE_HOOK_SLEEP_S:-0.3}"
 MIN_LEN="${CLAUDE_HOOK_MIN_LEN:-200}"
 
+. "$(dirname "$0")/lib/discipline_common.sh"
+
 input=$(cat)
 transcript=$(echo "$input" | jq -r '.transcript_path // empty')
 
@@ -15,29 +17,8 @@ if [ -z "$transcript" ] || [ ! -f "$transcript" ]; then
   exit 0
 fi
 
-extract_last_text() {
-  tail -n "$TAIL_LINES" "$transcript" 2>/dev/null | jq -s -r '
-    [.[]? | select(.type == "assistant")
-     | .message.content
-     | if type == "array" then map(select(.type == "text") | .text) | join(" ") else . end
-     | select(length > 0)]
-    | last // ""
-  ' 2>/dev/null
-}
-
-prev_len=-1
-attempts=0
-text=""
-while [ "$attempts" -lt "$MAX_ATTEMPTS" ]; do
-  text=$(extract_last_text)
-  cur_len=${#text}
-  if [ "$cur_len" -eq "$prev_len" ] && [ "$cur_len" -gt 0 ]; then
-    break
-  fi
-  prev_len=$cur_len
-  attempts=$((attempts + 1))
-  [ "$attempts" -lt "$MAX_ATTEMPTS" ] && sleep "$SLEEP_S"
-done
+text=$(dc_stable_text "$transcript" "$TAIL_LINES" "$MAX_ATTEMPTS" "$SLEEP_S")
+attempts=$DC_LAST_ATTEMPTS
 
 session_id=$(echo "$input" | jq -r '.session_id // "?"' 2>/dev/null)
 matched_label=0

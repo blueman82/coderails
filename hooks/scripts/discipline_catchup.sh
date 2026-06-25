@@ -8,6 +8,8 @@ LOG_FILE="${CLAUDE_DISCIPLINE_LOG:-$HOME/.claude/discipline.log}"
 TAIL_LINES="${CLAUDE_HOOK_TAIL_LINES:-200}"
 MIN_LEN="${CLAUDE_HOOK_MIN_LEN:-200}"
 
+. "$(dirname "$0")/lib/discipline_common.sh"
+
 input=$(cat)
 transcript=$(echo "$input" | jq -r '.transcript_path // empty')
 
@@ -15,13 +17,7 @@ if [ -z "$transcript" ] || [ ! -f "$transcript" ]; then
   exit 0
 fi
 
-last_text=$(tail -n "$TAIL_LINES" "$transcript" 2>/dev/null | jq -s -r '
-  [.[]? | select(.type == "assistant")
-   | .message.content
-   | if type == "array" then map(select(.type == "text") | .text) | join(" ") else . end
-   | select(length > 0)]
-  | last // ""
-' 2>/dev/null)
+last_text=$(dc_extract_last_text "$transcript" "$TAIL_LINES")
 
 if [ -z "$last_text" ] || [ "${#last_text}" -lt "$MIN_LEN" ]; then
   exit 0
