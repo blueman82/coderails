@@ -104,7 +104,7 @@ coderails is self-contained — it ships the dev-workflow skills it needs. `pr-r
 
 - Claude Code 2.1.x
 - `gh`, `jq`, `git`
-- For `/push` / `/merge`: an authenticated git host (`gh auth login`)
+- For `/push` / `/merge`: a **GitHub**-hosted repo with an authenticated `gh` CLI (`gh auth login`) — the workflow uses `gh`, so non-GitHub remotes (GitLab/Bitbucket/Gitea) are not supported.
 - `pr-review-toolkit@claude-plugins-official` for the review stage of `/workflow`
 
 ## Uninstall

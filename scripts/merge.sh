@@ -38,6 +38,12 @@ merge::main() {
                 [[ $(pr::review "$num") == APPROVED ]] || err "Not approved ($(pr::review "$num"))"
                 ok "Approved"
             }
+            local git_root; git_root=$(git rev-parse --show-toplevel 2>/dev/null)
+            if [[ -n "$git_root" ]] \
+                && [[ ! -f "$git_root/.claude/workflow.config.yaml" ]] \
+                && [[ ! -f "$git_root/projects/$(basename "$(pwd)")/.claude/workflow.config.yaml" ]]; then
+                info "No workflow.config.yaml — review enforcement (enforce_pr_workflow) is inactive. Run /coderails:init to enable."
+            fi
             step "Merging"
             gh pr merge "$num" --merge          # remote merge ONLY — its failure must abort; branch cleanup is separate + non-fatal
             ok "Merged"
