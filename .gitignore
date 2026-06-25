@@ -8,7 +8,7 @@
 logs/
 
 # subagent-driven-development progress ledger (machine-local coordination scratch)
-.superpowers/
+.coderails/
 
 # per-project workflow config — local, may hold project-specific (e.g. Jira) values; never commit to the generic repo
 .claude/

@@ -77,7 +77,7 @@ These skills were written for coderails and are not vendored from elsewhere.
 
 ### Vendored dev-workflow skills
 
-These skills are vendored from the `superpowers` plugin (now self-contained in coderails). They encode general development discipline, not coderails-specific workflow.
+These are coderails' general development-discipline skills (not coderails-specific workflow) — they ship with the plugin, so no external skill plugin is required.
 
 #### `brainstorming`
 
