@@ -57,7 +57,13 @@ Fix issues inline. If a spec requirement has no task, add the task.
 
 ## Plan header
 
-Every plan starts with:
+Every plan begins with this header verbatim, before the title:
+
+```markdown
+**For agentic workers:** REQUIRED SUB-SKILL: Use `coderails:subagent-driven-development` (recommended) or `coderails:executing-plans` to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+```
+
+Then continue with:
 
 ```markdown
 # [Feature Name] Implementation Plan
