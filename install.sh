@@ -326,7 +326,8 @@ for script in scripts/push.sh scripts/merge.sh scripts/lib/git-common.sh \
               hooks/scripts/loop_stall_guard.sh \
               hooks/scripts/inject_context.sh hooks/scripts/discipline_catchup.sh \
               hooks/scripts/check_confidence_labels.sh hooks/scripts/check_verify_loop.sh \
-              hooks/scripts/destructive_bash_gate.sh hooks/scripts/test_gate.sh; do
+              hooks/scripts/destructive_bash_gate.sh hooks/scripts/test_gate.sh \
+              hooks/scripts/inject_bootstrap.sh; do
   if [[ "$DRY_RUN" -eq 1 ]]; then
     flash_dry "chmod +x $PLUGIN_DIR/$script"
   else
