@@ -320,16 +320,19 @@ printf "${BOLD}  ARMING SCRIPTS${NC}\n"
 hline
 
 # Derive the hook-script list from hooks.json so new hooks auto-chmod without
-# manual edits here.  Three groups:
+# manual edits here.  Four groups:
 #   standalone  — git/PR plumbing scripts not registered as hooks
 #   libs        — sourced helpers (not executed directly, not in hooks.json)
 #   hooks       — every command registered in hooks/hooks.json
+#   skill_sh    — *.sh launchers inside skills/*/scripts/ (run directly; .cjs/.js do not need +x)
 _hook_scripts=$(jq -r '.hooks[][].hooks[].command // empty' "$PLUGIN_DIR/hooks/hooks.json" \
   | sed 's|"${CLAUDE_PLUGIN_ROOT}/||g; s/"//g')
 _lib_scripts=$(cd "$PLUGIN_DIR" && printf '%s\n' hooks/scripts/lib/*.sh 2>/dev/null)
+_skill_scripts=$(cd "$PLUGIN_DIR" && printf '%s\n' skills/*/scripts/*.sh 2>/dev/null)
 for script in scripts/push.sh scripts/merge.sh scripts/lib/git-common.sh \
               $_lib_scripts \
-              $_hook_scripts; do
+              $_hook_scripts \
+              $_skill_scripts; do
   if [[ "$DRY_RUN" -eq 1 ]]; then
     flash_dry "chmod +x $PLUGIN_DIR/$script"
   else
