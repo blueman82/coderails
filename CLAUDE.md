@@ -60,12 +60,17 @@ command.
 
 | Event | Script | Mode |
 |---|---|---|
+| `SessionStart` | `inject_bootstrap.sh` | silent — injects `using-coderails` skill into every new session |
 | `UserPromptSubmit` | `inject_context.sh` | silent — prepends `[ctx]` (cwd, branch, date) |
 | `UserPromptSubmit` | `discipline_catchup.sh` | warn |
 | `Stop` | `check_confidence_labels.sh` | **block** (exit 2) when a substantive response (≥200 chars) carries no `(verified)`/`(inferred)`/`(guess)` label — promoted from warn-mode 2026-05-05 |
 | `Stop` | `check_verify_loop.sh` | **block** (exit 2) when a `## Did Not Verify` bullet names a source-resolvable token (a `file.ext` or `file:line`) — items naming no file pass as genuinely unverifiable |
+| `Stop` | `loop_state_guard.sh` | **block** (exit 2) when an agentic loop is active but no session-owned `progress.json` exists — enforces presence + ownership |
+| `Stop` | `loop_stall_guard.sh` | **block** (exit 2) when an agentic loop is active and incomplete with no valid `LOOP-STOP` declaration in the stopping turn |
 | `PreToolUse` (Bash) | `destructive_bash_gate.sh` | **block** |
+| `PreToolUse` (Bash) | `enforce_pr_workflow.sh` | **block** — `gh pr create` without `/coderails:push`; `gh pr merge` without `/pr-review-toolkit:review-pr` — no-op if no `workflow.config.yaml` |
 | `PreToolUse` (Bash) | `test_gate.sh` | **block** on `git commit` if tests fail — opt-in only |
+| `PreToolUse` (Write/Edit/MultiEdit) | `no_edit_on_main.sh` | **block** — code-file edits (`.py`, `.ts`, `.tsx`, `.js`, `.jsx`, `.go`) directly on main/master |
 
 **Hook script conventions** (follow these when editing or adding a script):
 - Read the hook payload from stdin via `input=$(cat)`, parse with `jq`.

@@ -42,24 +42,63 @@ bash ~/Documents/Github/coderails/install.sh
 
 ## Skills
 
-| Skill | When it fires |
+coderails is self-contained — it vendors the dev-workflow skills it needs. `pr-review-toolkit@claude-plugins-official` is still required for the review stage of `/workflow`; no `superpowers` plugin needed.
+
+23 skills are bundled across three groups. Full catalog: [`docs/REFERENCE.md`](./docs/REFERENCE.md).
+
+**Dev-workflow (vendored from superpowers)**
+
+| Skill | Purpose |
 |---|---|
 | `agentic-loop` | Multi-agent orchestration: TeamCreate, no-human-gates, multi-PR loops |
+| `brainstorming` | Explore intent and requirements before implementation |
+| `dispatching-parallel-agents` | Fan-out independent tasks across agents |
+| `executing-plans` | Drive a written plan to completion |
+| `finishing-a-development-branch` | Final checks before merging |
+| `receiving-code-review` | Apply review feedback systematically |
+| `requesting-code-review` | Prepare a PR for review |
+| `subagent-driven-development` | Delegate implementation tasks to subagents |
+| `systematic-debugging` | Structured root-cause analysis |
+| `test-driven-development` | Red-green-refactor discipline |
+| `using-git-worktrees` | Parallel work via git worktrees |
+| `verification-before-completion` | Final verification pass before declaring done |
+| `writing-plans` | Convert specs into step-by-step plans |
+| `writing-skills` | Scaffold new skills from scratch |
+
+**coderails-original**
+
+| Skill | Purpose |
+|---|---|
+| `handoff` | Structured memory + continuation prompt for a fresh session |
+| `improve-prompt` | Surfaces ambiguities and rewrites underspecified prompts |
 | `planning-sequence` | Pre-Parade → Premortem → Red Team on a plan |
 | `premortem` | Assume failure, reason backwards to causes |
-| `handoff` | Structured memory + continuation prompt for a fresh session |
-| `improve-prompt` | Surfaces ambiguities and rewrites underspecified prompts before execution |
+| `using-coderails` | Self-bootstrap: injected at SessionStart, explains coderails to Claude |
+
+**Wiki**
+
+| Skill | Purpose |
+|---|---|
+| `wiki-ingest` | Write or update wiki pages from a PR/decision |
+| `wiki-init` | Scaffold the wiki vault and index |
+| `wiki-lint` | Validate wiki structure and links |
+| `wiki-query` | Answer questions from the wiki |
 
 ## Hooks
 
-| Event | Hook | Mode |
+| Event | Script | Mode |
 |---|---|---|
-| Stop | confidence-label check | **block** |
-| Stop | verify-loop / Did-Not-Verify check | **block** |
-| UserPromptSubmit | inject `[ctx]` line (cwd, branch, date) | silent |
-| UserPromptSubmit | discipline catch-up reminder | warn |
-| PreToolUse (Bash) | destructive-bash gate | **block** |
-| PreToolUse (Bash) | project test gate (opt-in per repo) | **block** |
+| `SessionStart` | `inject_bootstrap.sh` | silent — injects `using-coderails` skill into every new session |
+| `UserPromptSubmit` | `inject_context.sh` | silent — prepends `[ctx]` (cwd, branch, date) |
+| `UserPromptSubmit` | `discipline_catchup.sh` | warn |
+| `Stop` | `check_confidence_labels.sh` | **block** — response ≥200 chars with no confidence label |
+| `Stop` | `check_verify_loop.sh` | **block** — `## Did Not Verify` bullet naming a resolvable file |
+| `Stop` | `loop_state_guard.sh` | **block** — agentic loop active but no session-owned progress.json |
+| `Stop` | `loop_stall_guard.sh` | **block** — loop incomplete with no valid LOOP-STOP declaration |
+| `PreToolUse` (Bash) | `destructive_bash_gate.sh` | **block** |
+| `PreToolUse` (Bash) | `enforce_pr_workflow.sh` | **block** — `gh pr create/merge` without the required workflow steps |
+| `PreToolUse` (Bash) | `test_gate.sh` | **block** on `git commit` if tests fail — opt-in per repo |
+| `PreToolUse` (Write/Edit/MultiEdit) | `no_edit_on_main.sh` | **block** — code-file edits directly on main/master |
 
 ## Requirements
 

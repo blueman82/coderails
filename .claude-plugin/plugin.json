@@ -1,6 +1,6 @@
 {
   "name": "coderails",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Gary's Claude Code kit: the prep→push→merge→wiki workflow chain, agentic-loop/planning/premortem/handoff skills, plus a self-checking discipline loop (confidence-label hooks, Did-Not-Verify enforcement, destructive-bash gate, project test gate).",
   "author": {
     "name": "Gary Harrison",
