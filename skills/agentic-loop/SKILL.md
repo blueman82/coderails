@@ -160,6 +160,7 @@ Spawn one design agent (`model: sonnet` for the recon; escalate the synthesis to
 - Read the actual code paths the alternatives touch — not assumptions about them.
 - Build a head-to-head of the viable shapes with the real constraint each one hits.
 - Return ONE recommended shape, the rejected alternatives with the reason each lost, and the single fact that would flip the recommendation.
+- Apply `/coderails:brainstorming`'s design-quality discipline *without* its human-approval gates: weigh the viable approaches against each other rather than taking the first that works, cut anything speculative (**YAGNI**), and prefer the shape whose units stay small and independently testable (**design-for-isolation**). The loop can't run brainstorming itself (its steps block on a human — see Phase 2.7); this reuses its *thinking*, not its control flow.
 
 What happens with that recommendation depends on the envelope class (Phase 0) — this phase resolves the fork, it does NOT add a new human gate:
 - **Full-autonomous ("crack on / ship N PRs without asking"):** auto-adopt the design agent's recommendation, record the chosen shape and the flip-condition in `progress.json`, and note it at the next approval-gate. Do NOT stall for sign-off — a design fork is neither a verification failure nor a destructive action, so Phase 0 says the loop proceeds.
