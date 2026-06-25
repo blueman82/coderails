@@ -188,3 +188,18 @@ All proposals respect the codebase's existing design invariants:
 - **Bash 3.2 compatibility**: All proposed bash changes use macOS-compatible syntax (no associative arrays, no `${var,,}`, no `mapfile`).
 - **`install.sh` idempotency**: Removals would be handled by `uninstall.sh` reverse logic; additions would follow the existing `chmod +x` / `hooks.json` registration pattern.
 - **Single-source truths**: The C1/C2 test reinforces the shared library pattern; delegation changes reinforce the single-skill-owns-instruction pattern.
+
+---
+
+## Post-review findings (verified + shipped 2026-06-25)
+
+Three findings raised after the original review (not in the table above), each source-verified then built/merged:
+
+| Finding | Action | Result |
+|---|---|---|
+| **A** | Shared `lib/discipline_common.sh` | **✅ PR #29.** Extracted the duplicated transcript text-extraction jq + retry loop from `check_confidence_labels.sh`, `check_verify_loop.sh`, `discipline_catchup.sh` into `hooks/scripts/lib/discipline_common.sh` (mirrors `lib/loop_state_common.sh`). Behavior-preserving (live block/allow spot-check + 5/5 lib test). |
+| **B** | Derive `install.sh` chmod from `hooks.json` | **✅ PR #28.** Replaced the hardcoded chmod list with `jq '.hooks[][].hooks[].command'` + a `hooks/scripts/lib/*.sh` glob + the 3 explicit standalone scripts. No more drift when a hook is added. Resolved set verified identical to the prior 15. |
+| **C** | Build phantom `enforce-pr-workflow.sh` | **✅ PR #30.** Built `hooks/scripts/enforce_pr_workflow.sh` — PreToolUse(Bash) gate blocking `gh pr create` unless `/coderails:push` ran and `gh pr merge` unless `/pr-review-toolkit:review-pr` ran (robust transcript scan: Skill / `push.sh` Bash forms, verified against real transcripts). NO_CONFIG opt-in, dry-run/help passthrough, transcript-absent inert. TDD 14/14. Resolves the second phantom hook reference at `workflow.md:192`. |
+
+Both phantom-hook references the plugin documented but never built (`no-edit-on-main.sh` → #27, `enforce-pr-workflow.sh` → #30) are now real, tested hooks.
+
