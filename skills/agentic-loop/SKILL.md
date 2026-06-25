@@ -10,7 +10,7 @@ How to run an autonomous multi-agent / multi-PR session so the user doesn't have
 ## Why this skill exists
 
 In long agentic sessions, the assistant tends to drift back into bad habits:
-- Running skills (`/planning-sequence`, `/premortem`, `/claude-guardrails:*`) in main context instead of delegating to agents
+- Running skills (`/planning-sequence`, `/premortem`, `/coderails:assumptions`, `/coderails:notchecked`) in main context instead of delegating to agents
 - Asking "want me to spawn an agent for X?" when X is obviously in scope
 - Holding at human gates that were explicitly removed at session start
 - Trusting an agent's "idle" notification as proof-of-failure when the agent often completed the work silently
@@ -131,7 +131,7 @@ The harness choice itself — which loop skill drives this (`/agentic-loop` vs a
 
 ### Phase 2 — Pre-flight checks via spawned agents, not main context
 
-Pre-planning skills (`/planning-sequence`, `/premortem`, `/claude-guardrails:assumptions`, `/claude-guardrails:notchecked`, `/wiki-query`) belong in a delegated agent, not in main context.
+Pre-planning skills (`/planning-sequence`, `/premortem`, `/coderails:assumptions`, `/coderails:notchecked`, `/wiki-query`) belong in a delegated agent, not in main context.
 
 Spawn a single pre-flight agent whose prompt includes:
 - The plan from Phase 1
@@ -236,7 +236,7 @@ Each task description must be **self-contained** so the spawned agent can act wi
 - JIRA ticket
 - Verified state from prior tasks (deployed version, test counts, what's already wired)
 - Exact step-by-step sub-steps
-- Construction method — when the deliverable is code (the change adds or alters a function, method, or branch that *can* carry a test), instruct the worker to build it test-first via `coderails:test-driven-development` (failing test → minimal code → refactor). This holds even if the unit also touches non-code files. For pure docs/config/prose with no testable code, there is no test to write first — keep the verify-your-artifact contract.
+- Construction method — when the deliverable is code (the change adds or alters a function, method, or branch that *can* carry a test), instruct the worker to build it test-first via `coderails:test-driven-development` (failing test → minimal code → refactor). This holds even if the unit also touches non-code files. For pure docs/config/prose with no testable code, there is no test to write first — keep the verify-your-artifact contract. For the full worker-prompt construction contract (implementer/reviewer prompt templates + the per-task review loop), see `coderails:subagent-driven-development`.
 - Verify criteria
 - Manifest — the exact set of files this unit should touch, with the pre-push scope assertion (see Phase 3a)
 - Disposition — for a retirement unit, the `clean-break`/`preserve-compat` decision from Phase 2.6 copied **verbatim** into the task description, plus (if preserve-compat) the `named_blocker`. The worker acts only on its own prompt; a disposition recorded in `progress.json` but absent from the prompt silently reverts the unit to the model's preserve-default — the exact failure this discipline exists to stop.
