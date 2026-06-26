@@ -4,9 +4,9 @@ description: Enforce engineering principles (YAGNI, KISS, DRY, Fail Fast, SSOT, 
 allowed-tools: Read, Write, Edit, Glob, Grep, Skill, mcp__mcp-exec__*
 ---
 
-# StrictCode - Engineering Principles & Language Standards
+# Engineering Principles & Language Standards
 
-**Version:** 3.0.0
+**Version:** 4.0.0
 **Purpose:** Proactively enforce engineering principles and language-specific idioms. Uses LSP (Serena) for structural verification and reference counting. **Dispatches to language-specific skills for idiom enforcement.**
 
 ## When to Activate
