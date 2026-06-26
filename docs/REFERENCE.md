@@ -97,6 +97,8 @@ These are coderails' general development-discipline skills (not coderails-specif
 
 **Plan storage:** Plans referenced as `docs/coderails/plans/<name>.md` (committed to the repo, not ephemeral). The agentic loop's `plan.md` is a special case — it lives in the loop-state dir outside the repo alongside `progress.json`.
 
+**Next step (required):** After the self-review gate, the plan goes through `/coderails:planning-sequence` (Pre-Parade → Premortem → Red Team) before implementation hands off to `subagent-driven-development`/`executing-plans`. Findings fold back into the plan inline.
+
 ---
 
 #### `subagent-driven-development`
