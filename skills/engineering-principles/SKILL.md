@@ -193,10 +193,10 @@ Read the file extension. **Invoke the matching language skill:**
 - `.py` → `engineering-principles-python`
 - `.ts`/`.tsx` → `engineering-principles-ts`
 
-### Step 2: Analyze with MCP Tools
+### Step 2: Analyze
 - **If Serena available:** Run symbol overview, reference counting, depth analysis (Phase 2)
-- **Cross-file analysis:** Use scout skills (`scout-search` for DRY, `scout-dead-code` for YAGNI, `scout-explain-symbol` for symbol overviews) — Phase 3
-- **If neither available:** Fall back to file-level static analysis via Read/Grep
+- **Cross-file analysis:** Grep/Glob for duplicated signatures (DRY), repeated config keys (SSOT), call sites (YAGNI)
+- **If Serena unavailable:** Fall back entirely to file-level static analysis via Read/Grep/Glob
 
 ### Step 3: Fix or Flag
 
