@@ -128,4 +128,4 @@ The `using-superpowers` bootstrap is not auto-loaded because it is a skill — i
 ## Provenance
 
 - superpowers source: `~/.claude/plugins/cache/claude-plugins-official/superpowers/6.0.3/skills/` (v6.0.3, verified by directory listing 2026-06-25).
-- The "don't vendor SDD" reversal context: `docs/superpowers/specs/2026-06-24-d-construction-seam-design.md` lines 18, 78 — Spec D declined SDD because `agentic-loop` "already embodies it." This initiative supersedes that call by separating the *standalone human-present* use case (the new skill) from the *autonomous* use case (agentic-loop), and by making coderails fully self-contained.
+- The "don't vendor SDD" reversal context: Spec D (the construction-seam design, since removed along with the `docs/superpowers` tree in PR #44) declined SDD because `agentic-loop` "already embodies it." This initiative supersedes that call by separating the *standalone human-present* use case (the new skill) from the *autonomous* use case (agentic-loop), and by making coderails fully self-contained.
