@@ -11,6 +11,11 @@ payload() { # command -> json
   jq -n --arg cmd "$1" '{"tool_name":"Bash","tool_input":{"command":$cmd}}'
 }
 
+# payload_with_cwd <command> <cwd> -> json (for branch-aware tests)
+payload_with_cwd() {
+  jq -n --arg cmd "$1" --arg cwd "$2" '{"tool_name":"Bash","tool_input":{"command":$cmd},"cwd":$cwd}'
+}
+
 run() { # json -> DENY|ALLOW
   local out
   out=$(printf '%s' "$1" | bash "$HOOK" 2>/dev/null)
@@ -50,5 +55,107 @@ check "cat file.txt -> allow"       ALLOW "$(run "$(payload "cat file.txt")")"
 # --- Edge cases ---
 check "empty command -> allow"      ALLOW "$(run '{"tool_input":{"command":""}}')"
 check "no command field -> allow"   ALLOW "$(run '{"tool_input":{}}')"
+
+# --- Change #4: extended destructive blocklist ---
+# git clean with force flags
+check "git clean -fdx -> deny"      DENY  "$(run "$(payload "git clean -fdx")")"
+check "git clean -f -> deny"        DENY  "$(run "$(payload "git clean -f .")")"
+check "git clean -fd -> deny"       DENY  "$(run "$(payload "git clean -fd src/")")"
+check "git clean -xf -> deny"       DENY  "$(run "$(payload "git clean -xf")")"
+# benign git clean lookalikes
+check "git cleanup script -> allow" ALLOW "$(run "$(payload "bash git-cleanup.sh")")"
+check "git clean (no force) -> allow" ALLOW "$(run "$(payload "git clean -n")")"
+check "git clean -n -> allow"       ALLOW "$(run "$(payload "git clean -n -d")")"
+# find --delete / -delete
+check "find -delete -> deny"        DENY  "$(run "$(payload "find . -name '*.tmp' -delete")")"
+check "find --delete -> deny"       DENY  "$(run "$(payload "find /tmp --delete")")"
+# benign find
+check "findings -> allow"           ALLOW "$(run "$(payload "cat findings.txt")")"
+check "find without delete -> allow" ALLOW "$(run "$(payload "find . -name '*.sh'")")"
+# truncate -s
+check "truncate -s0 -> deny"        DENY  "$(run "$(payload "truncate -s0 logfile.txt")")"
+check "truncate -s 0 -> deny"       DENY  "$(run "$(payload "truncate -s 0 logfile.txt")")"
+# shred
+check "shred file -> deny"          DENY  "$(run "$(payload "shred secret.key")")"
+check "shred -u -> deny"            DENY  "$(run "$(payload "shred -u credentials.txt")")"
+
+# --- Change #3: branch-aware in-Bash source edits on main ---
+# Set up a temp git repo on main and one on a feature branch for testing.
+MAIN_REPO="$TMP/main_repo"
+FEAT_REPO="$TMP/feat_repo"
+
+git init "$MAIN_REPO" -q
+git -C "$MAIN_REPO" checkout -b main -q 2>/dev/null || true
+
+git init "$FEAT_REPO" -q
+git -C "$FEAT_REPO" checkout -b feat/my-feature -q 2>/dev/null || git -C "$FEAT_REPO" checkout -b feat/my-feature 2>/dev/null || true
+
+run_cwd() { # payload_json cwd -> DENY|ALLOW
+  local out
+  out=$(printf '%s' "$1" | bash "$HOOK" 2>/dev/null)
+  if printf '%s' "$out" | grep -q '"permissionDecision": *"deny"'; then echo DENY; else echo ALLOW; fi
+}
+
+# on main — sed -i on a source file -> DENY
+check "main: sed -i on .py -> deny"   DENY  "$(run_cwd "$(payload_with_cwd "sed -i 's/a/b/' foo.py" "$MAIN_REPO")" "$MAIN_REPO")"
+# on main — redirect > into a .ts file -> DENY
+check "main: redirect > .ts -> deny"  DENY  "$(run_cwd "$(payload_with_cwd "echo x > bar.ts" "$MAIN_REPO")" "$MAIN_REPO")"
+# on main — tee into a SKILL.md -> DENY
+check "main: tee SKILL.md -> deny"    DENY  "$(run_cwd "$(payload_with_cwd "tee skills/mything/SKILL.md" "$MAIN_REPO")" "$MAIN_REPO")"
+# on main — tee into a command -> DENY
+check "main: tee commands/x.md -> deny" DENY "$(run_cwd "$(payload_with_cwd "tee commands/prep.md" "$MAIN_REPO")" "$MAIN_REPO")"
+# on main — sed -i on README.md (non-source) -> ALLOW
+check "main: sed -i README.md -> allow" ALLOW "$(run_cwd "$(payload_with_cwd "sed -i 's/a/b/' README.md" "$MAIN_REPO")" "$MAIN_REPO")"
+# on feature branch — same commands -> ALLOW
+check "feat: sed -i on .py -> allow"  ALLOW "$(run_cwd "$(payload_with_cwd "sed -i 's/a/b/' foo.py" "$FEAT_REPO")" "$FEAT_REPO")"
+check "feat: redirect > .ts -> allow" ALLOW "$(run_cwd "$(payload_with_cwd "echo x > bar.ts" "$FEAT_REPO")" "$FEAT_REPO")"
+check "feat: tee SKILL.md -> allow"   ALLOW "$(run_cwd "$(payload_with_cwd "tee skills/mything/SKILL.md" "$FEAT_REPO")" "$FEAT_REPO")"
+# perl -i on main -> DENY
+check "main: perl -i on .go -> deny"  DENY  "$(run_cwd "$(payload_with_cwd "perl -i -pe 's/old/new/g' main.go" "$MAIN_REPO")" "$MAIN_REPO")"
+# >> append into source on main -> DENY
+check "main: >> into .js -> deny"     DENY  "$(run_cwd "$(payload_with_cwd "echo 'foo' >> app.js" "$MAIN_REPO")" "$MAIN_REPO")"
+
+# --- F1: git clean long/separated force flags ---
+check "git clean --force -> deny"          DENY  "$(run "$(payload "git clean --force")")"
+check "git clean -d -f -> deny"            DENY  "$(run "$(payload "git clean -d -f")")"
+check "git clean -d --force -> deny"       DENY  "$(run "$(payload "git clean -d --force")")"
+check "git clean bare -> allow"            ALLOW "$(run "$(payload "git clean")")"
+check "git clean --dry-run -> allow"       ALLOW "$(run "$(payload "git clean --dry-run")")"
+check "git clean -i -> allow"              ALLOW "$(run "$(payload "git clean -i")")"
+
+# --- F2: truncate --size long flag ---
+check "truncate --size=0 x -> deny"        DENY  "$(run "$(payload "truncate --size=0 file.txt")")"
+check "truncate --size 0 x -> deny"        DENY  "$(run "$(payload "truncate --size 0 file.txt")")"
+
+# --- F3: cwd fallback (cwd absent, sed -i on .py uses PWD fallback) ---
+# When .cwd is absent, the hook should fall back to $PWD.
+# We test this by passing a payload with no "cwd" field and checking it
+# still evaluates branch from the current working directory (feature branch).
+# This only documents the fallback exists; actual branch outcome depends on $PWD.
+check "no-cwd payload: sed -i -> no crash" ALLOW "$(run "$(payload "sed -i 's/a/b/' foo.py")")"
+
+# --- F3: target-repo resolution (file in feature-branch repo, session cwd on main) ---
+# Target file is in FEAT_REPO (on a feature branch). The hook must not over-block.
+check "F3 feature-repo target, main cwd -> allow" ALLOW "$(run_cwd "$(payload_with_cwd "sed -i 's/a/b/' $FEAT_REPO/foo.py" "$MAIN_REPO")" "$MAIN_REPO")"
+
+# --- F4: redirect extension anchored to end-of-token ---
+check "F4 echo > output.go.log -> allow"        ALLOW "$(run_cwd "$(payload_with_cwd "echo x > output.go.log" "$MAIN_REPO")" "$MAIN_REPO")"
+check "F4 echo > foo.py.bak -> allow"           ALLOW "$(run_cwd "$(payload_with_cwd "echo x > foo.py.bak" "$MAIN_REPO")" "$MAIN_REPO")"
+check "F4 echo > changes.py.txt -> allow"       ALLOW "$(run_cwd "$(payload_with_cwd "echo x > changes.py.txt" "$MAIN_REPO")" "$MAIN_REPO")"
+check "F4 echo > real.py -> deny"               DENY  "$(run_cwd "$(payload_with_cwd "echo x > real.py" "$MAIN_REPO")" "$MAIN_REPO")"
+check "F4 find && echo --delete -> allow"       ALLOW "$(run "$(payload "find . -name x && echo --delete")")"
+check "F4 find; rm --delete-like -> allow"      ALLOW "$(run "$(payload "find . -name tmp; echo done --delete-style")")"
+
+# --- F5: cp/mv/dd write-to-source on main vs feature branch ---
+check "F5 main: cp to foo.py -> deny"           DENY  "$(run_cwd "$(payload_with_cwd "cp /tmp/x foo.py" "$MAIN_REPO")" "$MAIN_REPO")"
+check "F5 main: mv to foo.go -> deny"           DENY  "$(run_cwd "$(payload_with_cwd "mv /tmp/x foo.go" "$MAIN_REPO")" "$MAIN_REPO")"
+check "F5 main: dd of=foo.py -> deny"           DENY  "$(run_cwd "$(payload_with_cwd "dd of=foo.py if=/tmp/x" "$MAIN_REPO")" "$MAIN_REPO")"
+check "F5 feat: cp to foo.py -> allow"          ALLOW "$(run_cwd "$(payload_with_cwd "cp /tmp/x foo.py" "$FEAT_REPO")" "$FEAT_REPO")"
+check "F5 feat: mv to foo.go -> allow"          ALLOW "$(run_cwd "$(payload_with_cwd "mv /tmp/x foo.go" "$FEAT_REPO")" "$FEAT_REPO")"
+check "F5 feat: dd of=foo.py -> allow"          ALLOW "$(run_cwd "$(payload_with_cwd "dd of=foo.py if=/tmp/x" "$FEAT_REPO")" "$FEAT_REPO")"
+check "F5 main: cp to SKILL.md -> deny"         DENY  "$(run_cwd "$(payload_with_cwd "cp /tmp/x skills/mything/SKILL.md" "$MAIN_REPO")" "$MAIN_REPO")"
+check "F5 main: mv to commands/x.md -> deny"    DENY  "$(run_cwd "$(payload_with_cwd "mv /tmp/x commands/prep.md" "$MAIN_REPO")" "$MAIN_REPO")"
+# cp/mv to a non-source file on main -> allow
+check "F5 main: cp to README.md -> allow"       ALLOW "$(run_cwd "$(payload_with_cwd "cp /tmp/x README.md" "$MAIN_REPO")" "$MAIN_REPO")"
 
 [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails)"; exit 1; }
