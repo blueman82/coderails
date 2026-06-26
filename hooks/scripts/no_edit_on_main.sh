@@ -6,31 +6,58 @@
 # Plain docs and config still pass (the narrowed docs carve-out). Escape: create a feature
 # branch first (/coderails:prep or a git worktree), or add a Write/Edit permission rule to
 # settings.json. Emits permissionDecision=deny, the same PreToolUse idiom as destructive_bash_gate.sh.
+#
+# Cross-repo correctness: BOTH the gated-ness and the branch check key off the FILE's own
+# repo, never the session cwd (cwd is used only to resolve a relative path). The markdown arm
+# additionally requires the file's repo to be a plugin — its root must carry
+# `.claude-plugin/plugin.json`. This stops a sibling repo's lookalike commands/ or skills/
+# dirs (e.g. the coderails wiki's doc pages) from being falsely gated, while keeping the code
+# arm a universal "no code on main in any repo" discipline. ${CLAUDE_PLUGIN_ROOT} is NOT used
+# to identify plugin source: it points at the installed plugin copy, not the working checkout.
 
 input=$(cat)
 
 file=$(printf '%s' "$input" | jq -r '.tool_input.file_path // empty')
 [ -z "$file" ] && exit 0
 
-# Gated: code files, plus plugin source carried in markdown (skills/*/SKILL.md and
-# commands/*.md — plugin source, not docs). Everything else (plain docs, config) passes.
+# Classify the edit into a gated arm; everything else (plain docs, config) passes.
 # Path arms are anchored on a "/" boundary so a stray dir like "myskills/" can't match;
 # a bare relative arm covers a path the tool passes without a leading directory.
 case "$file" in
-  *.py|*.ts|*.tsx|*.js|*.jsx|*.go) ;;
-  */skills/*/SKILL.md|skills/*/SKILL.md) ;;
-  */commands/*.md|commands/*.md) ;;
+  *.py|*.ts|*.tsx|*.js|*.jsx|*.go)        arm=code ;;
+  */skills/*/SKILL.md|skills/*/SKILL.md)  arm=md ;;
+  */commands/*.md|commands/*.md)          arm=md ;;
   *) exit 0 ;;
 esac
 
-dir=$(printf '%s' "$input" | jq -r '.cwd // empty')
-[ -z "$dir" ] && dir="$PWD"
+# Resolve the file's OWN repo. cwd is used only to turn a relative file_path absolute —
+# it is NOT the branch source (that was the cross-repo bug).
+cwd=$(printf '%s' "$input" | jq -r '.cwd // empty')
+[ -z "$cwd" ] && cwd="$PWD"
+case "$file" in
+  /*) absfile="$file" ;;
+  *)  absfile="$cwd/$file" ;;
+esac
 
-branch=$(git -C "$dir" branch --show-current 2>/dev/null)
+# The file (and its parent dirs) may not exist yet — walk up to the nearest existing
+# ancestor so `git -C` has a real directory inside the file's repo.
+probe=$(dirname "$absfile")
+while [ ! -d "$probe" ] && [ "$probe" != "/" ] && [ -n "$probe" ]; do
+  probe=$(dirname "$probe")
+done
+
+branch=$(git -C "$probe" branch --show-current 2>/dev/null)
 case "$branch" in
   main|master) ;;
   *) exit 0 ;;
 esac
+
+# Markdown arm only: gate genuine plugin source. The file's repo must carry the plugin
+# marker; a non-plugin repo (wiki/docs) with lookalike commands/ or skills/ dirs passes.
+if [ "$arm" = "md" ]; then
+  root=$(git -C "$probe" rev-parse --show-toplevel 2>/dev/null)
+  { [ -n "$root" ] && [ -f "$root/.claude-plugin/plugin.json" ]; } || exit 0
+fi
 
 reason="Blocked: editing a source file ($file) directly on '$branch'. Create a feature branch first (e.g. /coderails:prep or a git worktree), then edit there. For a genuine one-line hotfix, add a Write/Edit permission rule to settings.json."
 
