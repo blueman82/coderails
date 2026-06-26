@@ -209,16 +209,17 @@ default value /strictcode-python     → /engineering-principles-python
 
 ## Task 10 — Docs sync
 
-**Files:** `docs/REFERENCE.md` (lines ~288, 308, 330), `CLAUDE.md` (config-field note + any `strictcode` mention + skill inventory), `README.md` (skills table + bundled count)
+**Files:** `docs/REFERENCE.md` (lines ~288, 308, 330), `README.md` (skills table + count line 47). `CLAUDE.md` — confirmed **no** `strictcode` references (grep) and no per-skill inventory; expected no-op, verify only.
 
 **Steps:**
 - [ ] `docs/REFERENCE.md`: apply token map at lines 288/308/330 (push pre-flight wording, NO_CONFIG degradation paragraph, config table row). Where the config table names the field, use `engineering_principles_*`.
-- [ ] `CLAUDE.md`: in the "If you add a config field, update all four" note and anywhere `strictcode_skill`/`/strictcode-python` appears, apply the token map. Add the `engineering-principles` family to the skill inventory if one is listed.
-- [ ] `README.md`: add the `engineering-principles` family to the skills table; update the bundled-skill count `23` → `27` (line ~47).
+- [ ] `README.md`: add the four-skill `engineering-principles` family to the skills table (it carries no `strictcode` text today — this is an addition, not a rename); update the bundled-skill count `23 skills` → `27 skills` (line 47).
+- [ ] `CLAUDE.md`: verify it still contains zero `strictcode` and decide if the new family warrants a one-line mention; expected no change.
 
 **Verify:**
-- [ ] `grep -rniE 'strictcode' docs/REFERENCE.md CLAUDE.md README.md` → no matches.
+- [ ] `grep -rniE 'strictcode' docs/REFERENCE.md README.md` → no matches.
 - [ ] `grep -n '27 skills' README.md` → 1 match.
+- [ ] `grep -c 'strictcode' CLAUDE.md` → 0 (unchanged).
 
 ---
 
