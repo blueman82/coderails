@@ -1,34 +1,59 @@
 #!/bin/bash
 # PreToolUse hook (Write|Edit|MultiEdit): block edits to source files on the default branch.
 # Enforces the worktree/branch discipline /workflow describes — main/master is for merges,
-# not direct source edits. Gated: code extensions, plus plugin source that lives in markdown
-# (skills/*/SKILL.md, commands/*.md) — those are source, not docs, so they get the same block.
-# Plain docs and config still pass (the narrowed docs carve-out). Escape: create a feature
-# branch first (/coderails:prep or a git worktree), or add a Write/Edit permission rule to
-# settings.json. Emits permissionDecision=deny, the same PreToolUse idiom as destructive_bash_gate.sh.
+# not direct source edits. Gated: everything EXCEPT an explicit allowlist of doc/config
+# extensions (see below), plus plugin source that lives in markdown (skills/*/SKILL.md,
+# commands/*.md) — those are source, not docs, so they get the same block even though .md
+# is otherwise in the allowlist. Escape: create a feature branch first (/coderails:prep or
+# a git worktree), or add a Write/Edit permission rule to settings.json. Emits
+# permissionDecision=deny, the same PreToolUse idiom as destructive_bash_gate.sh.
+#
+# Allowlist (these stay editable on main):
+#   docs  — .md (plain docs), .txt, .rst
+#   config — .yaml, .yml, .json, .toml, .ini, .cfg
+#   special — .gitignore, LICENSE (bare filename)
+# Everything else on main → block.
 #
 # Cross-repo correctness: BOTH the gated-ness and the branch check key off the FILE's own
 # repo, never the session cwd (cwd is used only to resolve a relative path). The markdown arm
 # additionally requires the file's repo to be a plugin — its root must carry
 # `.claude-plugin/plugin.json`. This stops a sibling repo's lookalike commands/ or skills/
-# dirs (e.g. the coderails wiki's doc pages) from being falsely gated, while keeping the code
-# arm a universal "no code on main in any repo" discipline. ${CLAUDE_PLUGIN_ROOT} is NOT used
-# to identify plugin source: it points at the installed plugin copy, not the working checkout.
+# dirs (e.g. the coderails wiki's doc pages) from being falsely gated, while the code
+# arm is a universal "no source on main in any repo" discipline. ${CLAUDE_PLUGIN_ROOT} is NOT
+# used to identify plugin source: it points at the installed plugin copy, not the working
+# checkout.
 
 input=$(cat)
 
 file=$(printf '%s' "$input" | jq -r '.tool_input.file_path // empty')
 [ -z "$file" ] && exit 0
 
-# Classify the edit into a gated arm; everything else (plain docs, config) passes.
+# ── Markdown plugin-source arm ──────────────────────────────────────────────
+# Check plugin-source markdown FIRST, before the allowlist. skills/*/SKILL.md and
+# commands/*.md are source; they must be blocked even though .md is in the allowlist.
 # Path arms are anchored on a "/" boundary so a stray dir like "myskills/" can't match;
 # a bare relative arm covers a path the tool passes without a leading directory.
 case "$file" in
-  *.py|*.ts|*.tsx|*.js|*.jsx|*.go)        arm=code ;;
-  */skills/*/SKILL.md|skills/*/SKILL.md)  arm=md ;;
-  */commands/*.md|commands/*.md)          arm=md ;;
-  *) exit 0 ;;
+  */skills/*/SKILL.md|skills/*/SKILL.md) arm=md ;;
+  */commands/*.md|commands/*.md)         arm=md ;;
+  *)                                     arm=code ;;
 esac
+
+# ── Allowlist check (code arm only) ─────────────────────────────────────────
+# If the file is in the allowlist, it always passes — no branch check needed.
+# This runs before the repo/branch resolution to keep cheap exits early.
+if [ "$arm" = "code" ]; then
+  basename="${file##*/}"
+  case "$file" in
+    *.md|*.txt|*.rst)                        exit 0 ;;
+    *.yaml|*.yml|*.json|*.toml|*.ini|*.cfg)  exit 0 ;;
+    *.gitignore|*/.gitignore)                exit 0 ;;
+  esac
+  # Bare LICENSE (no extension) — match the filename only, not a path component.
+  case "$basename" in
+    LICENSE) exit 0 ;;
+  esac
+fi
 
 # Resolve the file's OWN repo. cwd is used only to turn a relative file_path absolute —
 # it is NOT the branch source (that was the cross-repo bug).

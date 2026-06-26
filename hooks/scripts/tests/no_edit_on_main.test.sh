@@ -120,4 +120,43 @@ check "plugin commands/*.md on main, cwd=other-on-feature -> deny" \
 check "code file under non-git ancestry -> allow" \
   ALLOW "$(run "$(payload_cwd Edit "$TMP/loose/dir/app.py" "$REPO")")"
 
+# ─── Allowlist-inversion cases (Change #5) ───────────────────────────────────
+# The code arm is now an allowlist (block everything NOT in the allowlist).
+# Languages not in the old blocklist but not in the allowlist must now be denied.
+checkout main
+check "main, .rs edit -> deny"   DENY "$(run "$(payload Edit src/lib.rs)")"
+check "main, .java edit -> deny" DENY "$(run "$(payload Edit src/Main.java)")"
+check "main, .sh edit -> deny"   DENY "$(run "$(payload Edit scripts/run.sh)")"
+check "main, .sql edit -> deny"  DENY "$(run "$(payload Edit migrations/001.sql)")"
+
+# Files in the allowlist must still pass on main.
+check "main, plain .md doc -> allow"   ALLOW "$(run "$(payload Edit README.md)")"
+check "main, .yaml config -> allow"    ALLOW "$(run "$(payload Write config.yaml)")"
+check "main, .yml config -> allow"     ALLOW "$(run "$(payload Write .github/ci.yml)")"
+check "main, .toml config -> allow"    ALLOW "$(run "$(payload Write Cargo.toml)")"
+check "main, .ini config -> allow"     ALLOW "$(run "$(payload Write setup.ini)")"
+check "main, .cfg config -> allow"     ALLOW "$(run "$(payload Write myapp.cfg)")"
+check "main, .txt file -> allow"       ALLOW "$(run "$(payload Write notes.txt)")"
+check "main, .rst file -> allow"       ALLOW "$(run "$(payload Write docs/guide.rst)")"
+check "main, .gitignore -> allow"      ALLOW "$(run "$(payload Write .gitignore)")"
+check "main, LICENSE -> allow"         ALLOW "$(run "$(payload Write LICENSE)")"
+
+# Plugin-source markdown is still blocked even though .md is in the allowlist.
+check "main, plugin skills SKILL.md -> still deny" \
+  DENY "$(run "$(payload Edit skills/agentic-loop/SKILL.md)")"
+check "main, plugin commands .md -> still deny" \
+  DENY "$(run "$(payload Edit commands/push.md)")"
+
+# Feature branch: newly-denied extensions are allowed on a feature branch.
+checkout feature
+check "feature branch, .rs edit -> allow"   ALLOW "$(run "$(payload Edit src/lib.rs)")"
+check "feature branch, .sh edit -> allow"   ALLOW "$(run "$(payload Edit scripts/run.sh)")"
+checkout main
+
+# Sibling non-plugin repo: commands/*.md / skills/*/SKILL.md still pass (PR#52 preserved).
+check "wiki commands/*.md (allowlist inversion), cwd=coderails-on-main -> allow" \
+  ALLOW "$(run "$(payload_cwd Edit "$WIKI/commands/init.md" "$REPO")")"
+check "wiki skills/*/SKILL.md (allowlist inversion), cwd=coderails-on-main -> allow" \
+  ALLOW "$(run "$(payload_cwd Edit "$WIKI/skills/foo/SKILL.md" "$REPO")")"
+
 [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails)"; exit 1; }
