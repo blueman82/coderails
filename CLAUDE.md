@@ -74,7 +74,7 @@ the Stop-hook gates — they can force a declared step to appear, not to be real
 
 ### Skills↔hooks seam convention
 
-When a skill instructs an action that a hook gates — e.g. `git merge`/`gh pr create`/`gh pr merge` → `enforce_pr_workflow`; code-file & plugin-source (`SKILL.md`/command) edits on main → `no_edit_on_main`; `git commit` → `test_gate` — the skill must name the gating hook and the resolution path (what the user needs to do, or what bypass flag satisfies it). When you add a hook that gates a common action, update the skills that instruct it.
+When a skill instructs an action that a hook gates — e.g. `git merge`/`gh pr create`/`gh pr merge` → `enforce_pr_workflow`; code-file & plugin-source (`SKILL.md`/command) edits on main → `no_edit_on_main`; `git commit` → `test_gate` — the skill must name the gating hook and the resolution path (what the user needs to do, or what bypass flag satisfies it). When you add a hook that gates a common action, update the skills that instruct it. The merge gate (`enforce_pr_workflow`) recognises PR-review evidence as the `/pr-review-toolkit:review-pr <PR#>` Skill invocation (with the PR number in args), NOT a manually-spawned agent fanout — so the agentic loop must invoke the Skill to clear the merge gate.
 
 ## Hook event map (`hooks/hooks.json`)
 

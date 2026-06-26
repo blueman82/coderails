@@ -285,20 +285,24 @@ When an agent goes idle without a report:
 
 Only after the artifact check fails should you assume failure. Then respawn — and per Phase 10, give it a new name.
 
-### Phase 4b — PR review uses the six `/pr-review-toolkit` agents plus `/security-review`, in parallel
+### Phase 4b — PR review invokes `/pr-review-toolkit:review-pr <PR#>` as a Skill
 
-When a phase reaches "review the PR" (after a `/workflow` agent has pushed a PR, before merge), the review is `/pr-review-toolkit:review-pr all` — fan out these **six specialised reviewers in parallel, in a single message with six `Agent` blocks**, each against the branch diff (`git -C <worktree> diff origin/main...HEAD`):
+When a phase reaches "review the PR" (after a `/workflow` agent has pushed a PR, before merge), invoke the **`/pr-review-toolkit:review-pr <PR#>`** Skill — passing the PR number as the argument — which itself fans out the six specialised reviewers plus a security pass. Do NOT hand-roll the reviewers as separate `Agent` or `Task` spawns; use the Skill invocation.
 
-| # | `subagent_type` | Reviews | Spawn when |
+**Invoking `/pr-review-toolkit:review-pr <PR#>` with the PR number is REQUIRED to satisfy the merge gate, because `enforce_pr_workflow` only accepts the `review-pr` Skill (with the PR number in args) as merge evidence — a manually-spawned agent fanout leaves no evidence the gate recognises and the merge will block.**
+
+The six review dimensions the Skill covers:
+
+| # | Reviewer | Reviews | Runs when |
 |---|---|---|---|
-| 1 | `pr-review-toolkit:code-reviewer` | General quality + CLAUDE.md compliance, bugs | always |
-| 2 | `pr-review-toolkit:pr-test-analyzer` | Behavioural test coverage, mock-tautology, critical gaps | test files changed (almost always) |
-| 3 | `pr-review-toolkit:silent-failure-hunter` | Swallowed exceptions, message-loss, spurious-success error paths | error handling / catch blocks / queue-delete semantics changed |
-| 4 | `pr-review-toolkit:type-design-analyzer` | Protocol/type invariants, illegal-states-unrepresentable | new/changed types or protocol surfaces |
-| 5 | `pr-review-toolkit:comment-analyzer` | Comment/docstring accuracy, comment rot | comments/docstrings added or behaviour-changing extractions |
-| 6 | `pr-review-toolkit:code-simplifier` | Dead code from extractions, duplication, over-engineering (report-only, no edits) | always (polish pass) |
+| 1 | `code-reviewer` | General quality + CLAUDE.md compliance, bugs | always |
+| 2 | `pr-test-analyzer` | Behavioural test coverage, mock-tautology, critical gaps | test files changed (almost always) |
+| 3 | `silent-failure-hunter` | Swallowed exceptions, message-loss, spurious-success error paths | error handling / catch blocks / queue-delete semantics changed |
+| 4 | `type-design-analyzer` | Protocol/type invariants, illegal-states-unrepresentable | new/changed types or protocol surfaces |
+| 5 | `comment-analyzer` | Comment/docstring accuracy, comment rot | comments/docstrings added or behaviour-changing extractions |
+| 6 | `code-simplifier` | Dead code from extractions, duplication, over-engineering (report-only, no edits) | always (polish pass) |
 
-Skip a reviewer only when its trigger genuinely doesn't apply (e.g. no type changes → no type-design-analyzer). Default is all six. Spawn `model: sonnet`, read-only, and carry the Phase 11 confidence-label instruction into each prompt. Collect all reports, aggregate into Critical / Important / Suggestion, and feed any MERGE-BLOCKER back to a fix agent (Phase 5/10) BEFORE merge.
+Collect all reports, aggregate into Critical / Important / Suggestion, and feed any MERGE-BLOCKER back to a fix agent (Phase 5/10) BEFORE merge.
 
 **Plus the native `/security-review` pass.** Alongside the six agents, run Claude Code's built-in `/security-review` on the same branch diff as part of this gate — it is a dedicated security review (auth/authz surfaces, injection, secret leakage, unsafe deserialisation, SSRF) that the six general reviewers do not specialise in. Run it in the worktree so it sees the branch's pending changes. Fold its findings into the same Critical / Important / Suggestion aggregation; any security MERGE-BLOCKER blocks merge exactly like a code finding (Phase 5/10) BEFORE merge.
 
