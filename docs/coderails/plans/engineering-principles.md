@@ -232,6 +232,7 @@ default value /strictcode-python     → /engineering-principles-python
 - [ ] `grep -rniE 'strictcode|scout-|slimcode' skills/engineering-principles* commands/ docs/REFERENCE.md CLAUDE.md README.md .claude/workflow.config.yaml` → expect **no matches**.
 - [ ] `bash hooks/scripts/tests/run_all.sh` → expect the existing suite to pass unchanged (no hook logic was touched).
 - [ ] `git grep -nE 'strictcode' -- ':!docs/coderails/**'` → no matches outside the design/plan docs (which intentionally narrate the old name).
+- [ ] **Default value positively landed** (planning-sequence Premortem #1): `grep -rn '/engineering-principles-python' commands/push.md commands/workflow.md commands/init.md` → present, AND `grep -rn '/strictcode-python' commands/` → no matches. Confirms the renamed default exists, not just that the old key is gone.
 
 **Verify:**
 - [ ] All three greps return as expected; hook suite green.
