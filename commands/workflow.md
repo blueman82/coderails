@@ -183,7 +183,7 @@ If `git branch -d` refuses because the branch is not fully merged into local `ma
 
 ## Escape hatches
 
-- **Docs-only change:** skip `/workflow` and edit on `main` directly. The `no_edit_on_main.sh` hook only blocks code files (`.py/.ts/.tsx/.js/.jsx/.go`) on `main`/`master`, so docs and config pass freely. A one-line *code* hotfix still needs a branch (run `/coderails:prep`) or a `settings.json` Write/Edit permission override — the hook blocks code edits on `main` regardless of size.
+- **Docs-only change:** skip `/workflow` and edit on `main` directly. The `no_edit_on_main.sh` hook blocks code files (`.py/.ts/.tsx/.js/.jsx/.go`) on `main`/`master`, plus plugin source carried in markdown (`skills/*/SKILL.md`, `commands/*.md`) when you're in a plugin repo — so *plain* docs and config (README, `docs/*.md`, JSON) pass freely, but editing a `SKILL.md` or a command `.md` on `main` is blocked. A one-line *code* (or plugin-source) hotfix still needs a branch (run `/coderails:prep`) or a `settings.json` Write/Edit permission override — the hook blocks regardless of size.
 - **Phase skip:** The user can interrupt at any time and tell you to skip a specific phase or re-enter a prior phase. Obey; don't argue for the canonical sequence.
 - **Standalone sub-commands:** every phase's sub-command (`/coderails:prep`, `/coderails:push`, `/pr-review-toolkit:review-pr`, `/coderails:merge`, `/wiki-ingest`, `/wiki-lint`) remains callable on its own for edge cases. `/coderails:workflow` is the happy path, not the only path.
 
