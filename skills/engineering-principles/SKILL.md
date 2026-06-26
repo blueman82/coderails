@@ -166,14 +166,14 @@ Every code change MUST be checked against these six principles:
 
 | # | Principle | What to Look For | Best Tool |
 |---|-----------|-------------------|-----------|
-| 1 | **YAGNI** | Unused code, speculative features, dead branches | `scout-dead-code` (one-call) OR Serena `find_referencing_symbols` (LSP-precise) |
+| 1 | **YAGNI** | Unused code, speculative features, dead branches | Serena `find_referencing_symbols` (LSP-precise); else Grep for call sites |
 | 2 | **KISS** | Over-engineered abstractions, trivial classes | Serena `find_symbol` depth → single-method classes |
-| 3 | **DRY** | Duplicated logic across files | `scout-search` with function body fragment (semantic similarity) |
+| 3 | **DRY** | Duplicated logic across files | Grep/Glob for repeated signatures or body fragments across files |
 | 4 | **Fail Fast** | Late validation, deep nesting before error checks | Serena `find_symbol` body → nesting depth |
-| 5 | **SSOT** | Duplicated state/config | `scout-search` with config key/value pattern |
+| 5 | **SSOT** | Duplicated state/config | Grep for the same config key/value in 2+ files |
 | 6 | **Law of Demeter** | `a.b.c.d` chains | Serena `find_symbol` body → chain regex |
 
-**Tool selection rule:** Serena for in-file structural analysis (LSP-backed, authoritative); Scout for cross-file semantic analysis (similarity-aware, ranked). They complement — both available, pick per principle.
+**Tool selection rule:** Serena for in-file structural analysis (LSP-backed, authoritative) when available; plain Grep/Glob for cross-file checks and as the fallback when Serena is absent.
 
 ### Code Reduction Rules
 
