@@ -31,8 +31,8 @@ Create `workflow.config.yaml` in the current project directory. This file is rea
    - **Wiki path** (relative to project dir, e.g. `../my-project-wiki`) — or "none"
    - **Worktree base path** — where sibling worktrees will be created. Default: parent directory of the git root (i.e. `dirname $(git rev-parse --show-toplevel)`). Show the resolved default to the user so they can confirm or override.
    - **Worktree script** (path from project root, e.g. `./worktree-add`) — or "none"
-   - **Strictcode paths** (comma-separated glob patterns, e.g. `**/container.py,**/typed_di/**`) — or "none"
-   - **Strictcode skill** (the slash-command to run, e.g. `/strictcode-python`, `/strictcode-go`, `/strictcode-ts`) — detect a sensible default: look for `go.mod` → `/strictcode-go`, `package.json` with `.ts` files → `/strictcode-ts`, otherwise `/strictcode-python`. Ask and let the user override. Answer "none" to disable strictcode entirely.
+   - **Engineering-principles paths** (comma-separated glob patterns, e.g. `**/container.py,**/typed_di/**`) — or "none"
+   - **Engineering-principles skill** (the slash-command to run, e.g. `/engineering-principles-python`, `/engineering-principles-go`, `/engineering-principles-ts`) — detect a sensible default: look for `go.mod` → `/engineering-principles-go`, `package.json` with `.ts` files → `/engineering-principles-ts`, otherwise `/engineering-principles-python`. Ask and let the user override. Answer "none" to disable engineering-principles entirely.
 
 6. Write `workflow.config.yaml` at the resolved config path from step 3 with the collected values. Use `null` for any field answered "none".
 
@@ -55,10 +55,10 @@ jira:
     start: ""         # transition to move in-progress (e.g. "In Progress"). Blank => skip.
     resolve: ""       # transition on PR merge (e.g. "Resolved"). Blank => skip.
 # or: jira: null
-strictcode_paths:
+engineering_principles_paths:
   - "**/container.py"
-# or: strictcode_paths: null
-strictcode_skill: "/strictcode-python"   # nil = skip strictcode entirely; /strictcode-go, /strictcode-ts also supported
+# or: engineering_principles_paths: null
+engineering_principles_skill: "/engineering-principles-python"   # nil = skip engineering-principles entirely; /engineering-principles-go, /engineering-principles-ts also supported
 ```
 
 7. Report the path written and remind the user to commit it.
