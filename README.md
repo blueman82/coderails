@@ -84,6 +84,15 @@ coderails is self-contained — it ships the dev-workflow skills it needs. `pr-r
 | `wiki-lint` | Validate wiki structure and links |
 | `wiki-query` | Answer questions from the wiki |
 
+**Engineering principles**
+
+| Skill | Purpose |
+|---|---|
+| `engineering-principles` | Enforce YAGNI/KISS/DRY/Fail-Fast/SSOT/Law of Demeter; dispatches to a language skill |
+| `engineering-principles-python` | Python idioms and standards |
+| `engineering-principles-go` | Go idioms and standards |
+| `engineering-principles-ts` | TypeScript idioms and standards |
+
 ## Hooks
 
 | Event | Script | Mode |
