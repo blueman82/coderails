@@ -13,3 +13,6 @@ logs/
 # per-project workflow config — local, may hold project-specific (e.g. Jira) values; never commit to the generic repo
 .claude/
 **/workflow.config.yaml
+
+# machine-local git worktree dirs
+.worktrees

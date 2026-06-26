@@ -47,36 +47,36 @@ run() { echo "$2" | bash "$GUARD" >/dev/null 2>&1; echo $?; }
 check() { if [ "$2" = "$3" ]; then printf 'ok   - %s\n' "$1"; else printf 'FAIL - %s (expected exit %s, got %s)\n' "$1" "$2" "$3"; fails=$((fails+1)); fi; }
 reset() { rm -rf "$CLAUDE_AGENTIC_LOOP_DIR"; }
 
-# Gate 1 — no transcript file.
+# als_gate_no_transcript — no transcript file.
 check "no transcript -> allow" 0 "$(run x "$(payload "$TMP/nope.jsonl" S1)")"
 
-# Gate 3 — non-loop skill only -> allow.
+# als_gate_require_active_loop — non-loop skill only -> allow.
 reset; T=$(mk_other_transcript)
 check "non-loop skill -> allow" 0 "$(run x "$(payload "$T" S1)")"
 
-# Gate 4 — complete, not re-armed, owned -> allow (no tag needed).
+# als_gate_loop_complete — complete, not re-armed, owned -> allow (no tag needed).
 reset; T=$(mk_transcript 1 ""); write_file complete S1 1
 check "complete off-switch -> allow" 0 "$(run x "$(payload "$T" S1)")"
 
-# Gate 5 — active, incomplete, last message carries a valid LOOP-STOP tag -> allow.
+# gate_loop_stop_declared — active, incomplete, last message carries a valid LOOP-STOP tag -> allow.
 reset; T=$(mk_transcript 1 "Work paused.
 LOOP-STOP: awaiting-input — waiting on the user's plan confirmation"); write_file in-progress S1 0
 check "valid LOOP-STOP tag -> allow" 0 "$(run x "$(payload "$T" S1)")"
 
-# Gate 5 — complete category tag is also accepted.
+# gate_loop_stop_declared — complete category tag is also accepted.
 reset; T=$(mk_transcript 1 "All done.
 LOOP-STOP: complete — all PRs merged"); write_file in-progress S1 0
 check "complete tag -> allow" 0 "$(run x "$(payload "$T" S1)")"
 
-# Gate 6 — active, incomplete, NO tag -> block.
+# block_missing_declaration — active, incomplete, NO tag -> block.
 reset; T=$(mk_transcript 1 "Here is a status update with no declaration."); write_file in-progress S1 0
 check "no declaration -> block" 2 "$(run x "$(payload "$T" S1)")"
 
-# Gate 6 — tag present but category OUTSIDE the vocab -> block.
+# block_missing_declaration — tag present but category OUTSIDE the vocab -> block.
 reset; T=$(mk_transcript 1 "LOOP-STOP: paused — taking a break"); write_file in-progress S1 0
 check "out-of-vocab category -> block" 2 "$(run x "$(payload "$T" S1)")"
 
-# Gate 2 — already blocked this turn: would-block case allowed via loop-guard.
+# als_gate_stop_loop — already blocked this turn: would-block case allowed via loop-guard.
 reset; T=$(mk_transcript 1 "no declaration here"); write_file in-progress S1 0
 check "stop_hook_active -> allow" 0 "$(run x "$(payload "$T" S1 true)")"
 

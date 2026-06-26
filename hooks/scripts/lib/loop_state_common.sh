@@ -59,3 +59,57 @@ als_read_file_state() {
     case "$ALS_MARKER" in (''|*[!0-9]*) ALS_MARKER=0;; esac
   fi
 }
+
+# ── Shared gate functions (called by both loop guards) ───────────────────────
+# Guard scripts do NOT use set -euo pipefail; gate functions exit directly to
+# skip or block, exactly like require::* helpers in scripts/lib/git-common.sh.
+
+# Gate: skip if no transcript file to inspect.
+als_gate_no_transcript() {
+  local transcript="$1"
+  if [ -z "$transcript" ] || [ ! -f "$transcript" ]; then
+    exit 0
+  fi
+}
+
+# Gate: skip if already blocked this turn to avoid a stop-loop.
+als_gate_stop_loop() {
+  local stop_hook_active="$1"
+  if [ "$stop_hook_active" = "true" ]; then
+    exit 0
+  fi
+}
+
+# Gate: skip if no agentic-loop Skill invocation found — not a loop.
+# Sets global ALS_INVOCATIONS. Logs and exits when invocations = 0.
+# Takes hook name as arg so the log line carries the correct hook= tag.
+als_gate_require_active_loop() {
+  local transcript="$1" hook="$2" session="$3"
+  ALS_INVOCATIONS=$(als_stable_invocations "$transcript"); [ -z "$ALS_INVOCATIONS" ] && ALS_INVOCATIONS=0
+  if [ "$ALS_INVOCATIONS" -eq 0 ]; then
+    als_log "hook=$hook session=$session invocations=0 active=0 blocked=0"
+    exit 0
+  fi
+}
+
+# Setup: resolve progress.json path and read its state into globals.
+# Sets ALS_PATH, ALS_STATUS, ALS_SESSION, ALS_MARKER, ALS_REARMED.
+# Requires ALS_INVOCATIONS to be set (by als_gate_require_active_loop).
+als_load_progress() {
+  local cwd="$1"
+  ALS_PATH=$(als_resolve_path "$cwd")
+  als_read_file_state "$ALS_PATH"
+  ALS_REARMED=0
+  if [ "$ALS_INVOCATIONS" -gt "$ALS_MARKER" ]; then ALS_REARMED=1; fi
+}
+
+# Gate: skip when the loop is genuinely complete — complete, not re-armed, and
+# session-owned (the shared off-switch). Logs and exits 0.
+# Takes hook name as arg so the log line carries the correct hook= tag.
+als_gate_loop_complete() {
+  local hook="$1" session="$2"
+  if [ "$ALS_STATUS" = "complete" ] && [ "$ALS_REARMED" -eq 0 ] && [ "$ALS_SESSION" = "$session" ]; then
+    als_log "hook=$hook session=$session invocations=$ALS_INVOCATIONS status=complete rearmed=0 owned=1 blocked=0"
+    exit 0
+  fi
+}

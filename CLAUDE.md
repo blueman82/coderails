@@ -78,14 +78,21 @@ When a skill instructs an action that a hook gates — e.g. `git merge`/`gh pr c
 
 **Hook script conventions** (follow these when editing or adding a script):
 - Read the hook payload from stdin via `input=$(cat)`, parse with `jq`.
-- **Exit early and often.** `check_verify_loop.sh` uses a documented chain of
-  numbered gates (1–6) where each skip gate `exit 0`s immediately. Preserve that
-  pattern — cheap escape hatches first, expensive transcript parsing last.
-- Block by either `exit 2` with a message on **stderr** (Stop hooks) or by
-  emitting `hookSpecificOutput.permissionDecision: "deny"` JSON (PreToolUse).
+- **Exit early and often.** Three scripts use named gate functions called in order at
+  the bottom of the file: `enforce_pr_workflow.sh` (local `gate_*` functions) and
+  `loop_state_guard.sh` / `loop_stall_guard.sh` (shared-lib `als_gate_*` variant
+  sourced from `lib/loop_state_common.sh`). The other four scripts
+  (`check_verify_loop.sh`, `check_confidence_labels.sh`, `no_edit_on_main.sh`,
+  `destructive_bash_gate.sh`) use inline `if`-blocks — that pattern is equally fine.
+  New scripts should prefer named gate functions. Cheap skip-gates first, expensive
+  transcript-parsing last. Guard scripts do NOT use `set -euo pipefail` — preserve
+  that; gate functions `exit` directly.
+- Block via: `exit 2` with a message on **stderr** for Stop hooks; or emit
+  `hookSpecificOutput.permissionDecision: "deny"` JSON to **stdout** then fall through
+  to `exit 0` for PreToolUse hooks — do NOT use `exit 2` in PreToolUse hooks.
 - Append a structured single-line log entry to `$CLAUDE_DISCIPLINE_LOG`
   (default `~/.claude/discipline.log`) — keep the `key=value` format greppable.
-- Guard against the transcript-flush race: `check_verify_loop.sh` retries
+- Guard against the transcript-flush race: `loop_stall_guard.sh` retries
   `extract_last_text` with backoff until the length stabilises.
 
 ## Workflow command architecture

@@ -23,73 +23,47 @@ input=$(cat)
 transcript=$(echo "$input" | jq -r '.transcript_path // empty')
 session_id=$(echo "$input" | jq -r '.session_id // "?"' 2>/dev/null)
 cwd=$(echo "$input" | jq -r '.cwd // empty' 2>/dev/null)
-
-# Gate 1 — no transcript to inspect.
-if [ -z "$transcript" ] || [ ! -f "$transcript" ]; then
-  exit 0
-fi
-
-# Gate 2 — already blocked once this turn; allow to avoid a stop-loop.
 stop_hook_active=$(echo "$input" | jq -r '.stop_hook_active // false' 2>/dev/null)
-if [ "$stop_hook_active" = "true" ]; then
-  exit 0
-fi
 
-invocations=$(als_stable_invocations "$transcript"); [ -z "$invocations" ] && invocations=0
+gate_present_and_owned() {
+  if [ -n "$ALS_PATH" ] && [ -f "$ALS_PATH" ] && [ "$ALS_SESSION" = "$session_id" ] && [ "$ALS_STATUS" != "complete" ]; then
+    als_log "hook=loop_state_guard session=$session_id invocations=$ALS_INVOCATIONS status=$ALS_STATUS owned=1 blocked=0"
+    exit 0
+  fi
+}
 
-# Gate 3 — not a loop: the opt-in marker is absent. No discipline in force.
-if [ "$invocations" -eq 0 ]; then
-  als_log "hook=loop_state_guard session=$session_id invocations=0 active=0 blocked=0"
-  exit 0
-fi
-
-# Resolve the path — the hook is the sole path authority.
-path=$(als_resolve_path "$cwd")
-
-# Read file state (empty/0 when absent) into ALS_STATUS / ALS_SESSION / ALS_MARKER.
-als_read_file_state "$path"
-file_status="$ALS_STATUS"; file_session="$ALS_SESSION"; completed_marker="$ALS_MARKER"
-
-# Re-armed = a new loop invocation occurred after the recorded completion.
-rearmed=0
-if [ "$invocations" -gt "$completed_marker" ]; then rearmed=1; fi
-
-# Gate 4 — genuinely complete: complete, NOT re-armed, and session-owned.
-if [ "$file_status" = "complete" ] && [ "$rearmed" -eq 0 ] && [ "$file_session" = "$session_id" ]; then
-  als_log "hook=loop_state_guard session=$session_id invocations=$invocations status=complete rearmed=0 owned=1 blocked=0"
-  exit 0
-fi
-
-# Gate 5 — present, session-owned, and active (not complete).
-if [ -n "$path" ] && [ -f "$path" ] && [ "$file_session" = "$session_id" ] && [ "$file_status" != "complete" ]; then
-  als_log "hook=loop_state_guard session=$session_id invocations=$invocations status=$file_status owned=1 blocked=0"
-  exit 0
-fi
-
-# Gate 6 — BLOCK. Distinguish the three failure shapes.
-stub_schema='{ "schema_version": 1, "session_id": "<this-session-id>", "status": "initialising", "created": "<ISO8601>", "authorising_prompt_raw": "<verbatim authorising prompt>", "completed_marker": 0 }'
-if [ ! -f "$path" ]; then
-  reason="absent"
-  msg="[loop-state-guard] Agentic loop active but no progress.json found.
+block_state_failure() {
+  stub_schema='{ "schema_version": 1, "session_id": "<this-session-id>", "status": "initialising", "created": "<ISO8601>", "authorising_prompt_raw": "<verbatim authorising prompt>", "completed_marker": 0 }'
+  if [ ! -f "$ALS_PATH" ]; then
+    reason="absent"
+    msg="[loop-state-guard] Agentic loop active but no progress.json found.
 Create it at this exact path (copy it verbatim — never compute the path yourself):
-  $path
+  $ALS_PATH
 with this stub, then enrich it as the loop progresses:
   $stub_schema"
-elif [ "$file_session" != "$session_id" ]; then
-  reason="session_mismatch"
-  msg="[loop-state-guard] progress.json at:
-  $path
-belongs to session '$file_session', not this session ('$session_id').
+  elif [ "$ALS_SESSION" != "$session_id" ]; then
+    reason="session_mismatch"
+    msg="[loop-state-guard] progress.json at:
+  $ALS_PATH
+belongs to session '$ALS_SESSION', not this session ('$session_id').
 Adopt this loop (re-stamp session_id to '$session_id'), or reinitialise the stub."
-else
-  reason="stale_complete_rearmed"
-  msg="[loop-state-guard] A new agentic loop has started, but progress.json at:
-  $path
+  else
+    reason="stale_complete_rearmed"
+    msg="[loop-state-guard] A new agentic loop has started, but progress.json at:
+  $ALS_PATH
 still records the previous loop as complete. Re-initialise the stub for the new
 loop (status back to \"initialising\"/\"in-progress\", carry completed_marker forward)
 before stopping."
-fi
+  fi
+  als_log "hook=loop_state_guard session=$session_id invocations=$ALS_INVOCATIONS status=${ALS_STATUS:-absent} reason=$reason blocked=1"
+  echo "$msg" >&2
+  exit 2
+}
 
-als_log "hook=loop_state_guard session=$session_id invocations=$invocations status=${file_status:-absent} reason=$reason blocked=1"
-echo "$msg" >&2
-exit 2
+als_gate_no_transcript "$transcript"
+als_gate_stop_loop "$stop_hook_active"
+als_gate_require_active_loop "$transcript" "loop_state_guard" "$session_id"
+als_load_progress "$cwd"
+als_gate_loop_complete "loop_state_guard" "$session_id"
+gate_present_and_owned
+block_state_failure

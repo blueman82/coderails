@@ -46,34 +46,34 @@ check() { # desc expected_code actual_code
 }
 reset() { rm -rf "$CLAUDE_AGENTIC_LOOP_DIR"; }
 
-# Gate 1 — no transcript file.
+# als_gate_no_transcript — no transcript file.
 check "no transcript -> allow" 0 "$(run x "$(payload "$TMP/nope.jsonl" S1)")"
 
-# Gate 3 — transcript with a non-loop Skill only -> allow.
+# als_gate_require_active_loop — transcript with a non-loop Skill only -> allow.
 reset; T=$(mk_other_transcript)
 check "non-loop skill -> allow" 0 "$(run x "$(payload "$T" S1)")"
 
-# Gate 6 absent — loop active, file missing -> BLOCK.
+# block_state_failure (absent) — loop active, file missing -> BLOCK.
 reset; T=$(mk_transcript 1)
 check "loop active, file absent -> block" 2 "$(run x "$(payload "$T" S1)")"
 
-# Gate 6 mismatch — file owned by another session -> BLOCK.
+# block_state_failure (mismatch) — file owned by another session -> BLOCK.
 reset; T=$(mk_transcript 1); write_file in-progress S_OTHER 0
 check "session mismatch -> block" 2 "$(run x "$(payload "$T" S1)")"
 
-# Gate 5 — present, owned, in-progress -> allow.
+# gate_present_and_owned — present, owned, in-progress -> allow.
 reset; T=$(mk_transcript 1); write_file in-progress S1 0
 check "present+owned+in-progress -> allow" 0 "$(run x "$(payload "$T" S1)")"
 
-# Gate 4 — complete, owned, not re-armed (invocations 1 <= marker 1) -> allow.
+# als_gate_loop_complete — complete, owned, not re-armed (invocations 1 <= marker 1) -> allow.
 reset; T=$(mk_transcript 1); write_file complete S1 1
 check "complete, not re-armed -> allow" 0 "$(run x "$(payload "$T" S1)")"
 
-# Gate 6 stale-complete — re-armed (invocations 2 > marker 1), stub skipped -> BLOCK.
+# block_state_failure (stale-complete) — re-armed (invocations 2 > marker 1) -> BLOCK.
 reset; T=$(mk_transcript 2); write_file complete S1 1
 check "complete but re-armed -> block" 2 "$(run x "$(payload "$T" S1)")"
 
-# Gate 2 — already blocked this turn: would-block case allowed via loop-guard.
+# als_gate_stop_loop — already blocked this turn: would-block case allowed via loop-guard.
 reset; T=$(mk_transcript 1)   # file absent => would block, but stop_hook_active short-circuits
 check "stop_hook_active -> allow" 0 "$(run x "$(payload "$T" S1 true)")"
 

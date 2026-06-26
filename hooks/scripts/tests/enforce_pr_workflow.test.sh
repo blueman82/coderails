@@ -233,13 +233,13 @@ T=$(mk_transcript "$(mk_skill_line "coderails:push")")
 check "git push on master WITHOUT review-pr evidence -> deny" DENY \
   "$(run "$(payload "git push origin master" "$T" "$REPO_MASTER")")"
 
-# ── Case 19: git push --dry-run on main → ALLOW (Gate 2 passthrough) ─────────
+# ── Case 19: git push --dry-run on main → ALLOW (gate_safe_passthrough) ──────
 T=$(mk_transcript "$(mk_skill_line "coderails:push")")
 check "git push --dry-run on main -> allow" ALLOW \
   "$(run "$(payload "git push --dry-run origin main" "$T" "$REPO_MAIN")")"
 
 # ── Case 20: refspec push to main FROM A FEATURE BRANCH, no evidence → DENY ──
-# Gate 4b must key off the push DESTINATION, not the checked-out branch: a
+# gate_targets_main: keys off DESTINATION, not the checked-out branch: a
 # `HEAD:main` refspec writes to remote main even while on a feature branch.
 T=$(mk_transcript "$(mk_skill_line "coderails:push")")
 check "git push HEAD:main from feature branch WITHOUT evidence -> deny" DENY \
