@@ -143,9 +143,10 @@ else `/engineering-principles-python`).
   a missing key is treated as null → the pre-flight **silently skips**. No crash, but
   those repos lose the gate until re-init. Acceptable (coderails is the source plugin;
   re-running `/init` fixes it) — document in REFERENCE.md.
-- **`install.sh` / plugin discovery:** confirm the plugin auto-discovers `skills/`
-  and that `install.sh`/`uninstall.sh` need no change for the four new skills
-  (verify during implementation).
+- **`install.sh` / plugin discovery:** resolved — `install.sh` only `chmod +x`'s
+  `skills/*/scripts/*.sh` launchers, the vendored skills ship no scripts (only
+  `SKILL.md`), and `plugin.json` does not enumerate skills (auto-discovery). No
+  install/uninstall/manifest change is needed.
 - **Stripping Scout** loses cross-file semantic DRY/dead-code detection; the Grep
   fallback is coarser. Acceptable for self-containment; users with scout installed
   can still invoke it manually.
