@@ -216,7 +216,7 @@ Read the file extension. **Invoke the matching language skill:**
 ### Step 4: Report
 
 ```
-StrictCode: <filename>
+Engineering Principles: <filename>
   Language: Go → invoked engineering-principles-go
   Fixed: 3 violations
     - Removed redundant else after return (L45)
