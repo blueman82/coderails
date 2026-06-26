@@ -209,4 +209,78 @@ T=$(mk_transcript "$(mk_skill_line "coderails:push")")
 check "git merge-base HEAD main on main without evidence -> allow" ALLOW \
   "$(run "$(payload "git merge-base HEAD main" "$T" "$REPO_MAIN")")"
 
+# ── Case 15: git push on main WITHOUT review-pr evidence → DENY ──────────────
+# A direct push to main bypasses the PR flow; gate it like git merge on main.
+T=$(mk_transcript "$(mk_skill_line "coderails:push")")
+check "git push on main WITHOUT review-pr evidence -> deny" DENY \
+  "$(run "$(payload "git push origin main" "$T" "$REPO_MAIN")")"
+
+# ── Case 16: git push on main WITH review-pr evidence → ALLOW ────────────────
+T=$(mk_transcript \
+  "$(mk_skill_line "coderails:push")" \
+  "$(mk_skill_line "pr-review-toolkit:review-pr")")
+check "git push on main WITH review-pr evidence -> allow" ALLOW \
+  "$(run "$(payload "git push origin main" "$T" "$REPO_MAIN")")"
+
+# ── Case 17: git push on a FEATURE branch → ALLOW regardless of evidence ─────
+# The PR flow REQUIRES pushing feature branches; this gate must never touch them.
+T=$(mk_transcript "$(mk_skill_line "coderails:push")")
+check "git push on feature branch -> allow regardless of evidence" ALLOW \
+  "$(run "$(payload "git push origin feature-x" "$T" "$REPO_FEAT")")"
+
+# ── Case 18: git push on master WITHOUT review-pr evidence → DENY ────────────
+T=$(mk_transcript "$(mk_skill_line "coderails:push")")
+check "git push on master WITHOUT review-pr evidence -> deny" DENY \
+  "$(run "$(payload "git push origin master" "$T" "$REPO_MASTER")")"
+
+# ── Case 19: git push --dry-run on main → ALLOW (Gate 2 passthrough) ─────────
+T=$(mk_transcript "$(mk_skill_line "coderails:push")")
+check "git push --dry-run on main -> allow" ALLOW \
+  "$(run "$(payload "git push --dry-run origin main" "$T" "$REPO_MAIN")")"
+
+# ── Case 20: refspec push to main FROM A FEATURE BRANCH, no evidence → DENY ──
+# Gate 4b must key off the push DESTINATION, not the checked-out branch: a
+# `HEAD:main` refspec writes to remote main even while on a feature branch.
+T=$(mk_transcript "$(mk_skill_line "coderails:push")")
+check "git push HEAD:main from feature branch WITHOUT evidence -> deny" DENY \
+  "$(run "$(payload "git push origin HEAD:main" "$T" "$REPO_FEAT")")"
+
+# ── Case 21: same refspec push to main, WITH review-pr evidence → ALLOW ──────
+T=$(mk_transcript \
+  "$(mk_skill_line "coderails:push")" \
+  "$(mk_skill_line "pr-review-toolkit:review-pr")")
+check "git push HEAD:main from feature branch WITH evidence -> allow" ALLOW \
+  "$(run "$(payload "git push origin HEAD:main" "$T" "$REPO_FEAT")")"
+
+# ── Case 22: refspec push to master (feature:master) from feature → DENY ─────
+T=$(mk_transcript "$(mk_skill_line "coderails:push")")
+check "git push feature:master from feature branch WITHOUT evidence -> deny" DENY \
+  "$(run "$(payload "git push origin feature:master" "$T" "$REPO_FEAT")")"
+
+# ── Case 23: refspec push to a NON-default branch from feature → ALLOW ───────
+# The destination check must not over-match: HEAD:my-feature is not main/master.
+T=$(mk_transcript "$(mk_skill_line "coderails:push")")
+check "git push HEAD:my-feature from feature branch -> allow" ALLOW \
+  "$(run "$(payload "git push origin HEAD:my-feature" "$T" "$REPO_FEAT")")"
+
+# ── Case 24: bare `git push` on main, no evidence → DENY (locks the |$ anchor)
+T=$(mk_transcript "$(mk_skill_line "coderails:push")")
+check "bare git push on main WITHOUT evidence -> deny" DENY \
+  "$(run "$(payload "git push" "$T" "$REPO_MAIN")")"
+
+# ── Case 25: refspec to main abutted by a shell metachar (no space) → DENY ──
+# `HEAD:main;echo` / `HEAD:main&&x` must still gate — the destination anchor must
+# accept shell separators, not only whitespace/EOL, or the gate is trivially evaded.
+T=$(mk_transcript "$(mk_skill_line "coderails:push")")
+check "git push HEAD:main;echo from feature WITHOUT evidence -> deny" DENY \
+  "$(run "$(payload "git push origin HEAD:main;echo hi" "$T" "$REPO_FEAT")")"
+
+check "git push HEAD:main&&x from feature WITHOUT evidence -> deny" DENY \
+  "$(run "$(payload "git push origin HEAD:main&&echo hi" "$T" "$REPO_FEAT")")"
+
+# ── Case 26: metachar must not cause over-match on a non-default destination ──
+T=$(mk_transcript "$(mk_skill_line "coderails:push")")
+check "git push HEAD:maintenance;echo from feature -> allow" ALLOW \
+  "$(run "$(payload "git push origin HEAD:maintenance;echo hi" "$T" "$REPO_FEAT")")"
+
 [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails)"; exit 1; }

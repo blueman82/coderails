@@ -3,8 +3,13 @@
 # Blocks `gh pr create` unless /coderails:push ran this session.
 # Blocks `gh pr merge`  unless /pr-review-toolkit:review-pr ran this session.
 # Blocks `git merge` on main/master unless /pr-review-toolkit:review-pr ran this session.
+# Blocks `git push` to main/master unless /pr-review-toolkit:review-pr ran this session —
+#   fires when on main/master OR when the command targets main/master via an explicit
+#   destination refspec (HEAD:main, feature:master, :refs/heads/main) from any branch.
+#   Closes the common direct-push-to-main bypass. Feature-branch pushes are never gated;
+#   bare positional targets (`git push origin main` from off-main) are not parsed.
 # Opt-in: if no workflow.config.yaml exists (NO_CONFIG), the hook is a no-op.
-# Escape: add a `gh pr create`, `gh pr merge`, or `git merge` Bash permission to settings.json.
+# Escape: add a `gh pr create`, `gh pr merge`, `git merge`, or `git push` Bash permission to settings.json.
 
 input=$(cat)
 cmd=$(printf '%s' "$input" | jq -r '.tool_input.command // empty')
@@ -21,11 +26,12 @@ if printf '%s' "$cmd" | grep -qE '\bgit +merge +(--abort|--continue|--quit|--ski
   exit 0
 fi
 
-# Gate 3: only act on `gh pr create`, `gh pr merge`, or `git merge`.
+# Gate 3: only act on `gh pr create`, `gh pr merge`, `git merge`, or `git push`.
 # Use `\bgit +merge([[:space:]]|$)` rather than `\bgit +merge\b` so that
 # `git merge-base`, `git merge-file`, and `git merge-tree` (read-only plumbing)
-# are not matched — those are never branch-integration commands.
-if ! printf '%s' "$cmd" | grep -qE '\bgh +pr +(create|merge)\b|\bgit +merge([[:space:]]|$)'; then
+# are not matched — those are never branch-integration commands. The same anchor
+# on `git push` keeps the form consistent (no `git push-*` plumbing exists to exclude).
+if ! printf '%s' "$cmd" | grep -qE '\bgh +pr +(create|merge)\b|\bgit +merge([[:space:]]|$)|\bgit +push([[:space:]]|$)'; then
   exit 0
 fi
 
@@ -36,6 +42,8 @@ elif printf '%s' "$cmd" | grep -qE '\bgh +pr +merge\b'; then
   subcommand="merge"
 elif printf '%s' "$cmd" | grep -qE '\bgit +merge([[:space:]]|$)'; then
   subcommand="git_merge"
+elif printf '%s' "$cmd" | grep -qE '\bgit +push([[:space:]]|$)'; then
+  subcommand="git_push"
 else
   exit 0
 fi
@@ -56,13 +64,25 @@ if [ -z "$config_file" ]; then
   exit 0
 fi
 
-# Gate 4b: for `git merge`, only gate when on main or master; feature branches are safe.
-if [ "$subcommand" = "git_merge" ]; then
+# Gate 4b: git_merge / git_push only gate when they actually touch main/master.
+#  - git_merge integrates into the CHECKED-OUT branch → the current branch decides.
+#  - git_push is decided by its DESTINATION → gate when on main/master, OR when the
+#    command names an explicit main/master destination refspec (e.g. `HEAD:main`,
+#    `feature:master`, `:refs/heads/main`) from any branch. Bare positional targets
+#    (`git push origin main` from off-main) are NOT parsed — a documented limitation;
+#    the colon-refspec form is the realistic direct-to-main bypass, and that is closed.
+if [ "$subcommand" = "git_merge" ] || [ "$subcommand" = "git_push" ]; then
   current_branch=$(git -C "$cwd" branch --show-current 2>/dev/null)
-  case "$current_branch" in
-    main|master) ;;  # proceed to evidence check
-    *) exit 0 ;;    # not on main/master — local merges are safe
-  esac
+  gate_it=0
+  case "$current_branch" in main|master) gate_it=1 ;; esac
+  # The destination ref may be terminated by whitespace, EOL, or a shell separator
+  # (`git push origin HEAD:main;echo`), so the anchor accepts `;& |)` too — otherwise
+  # a metachar abutting the ref trivially evades the gate.
+  if [ "$subcommand" = "git_push" ] && \
+     printf '%s' "$cmd" | grep -qE ':(refs/heads/)?(main|master)([[:space:];&|)]|$)'; then
+    gate_it=1
+  fi
+  [ "$gate_it" -eq 0 ] && exit 0   # neither on, nor targeting, main/master — safe
 fi
 
 # Gate 5: no transcript → can't enforce, stand aside.
@@ -105,6 +125,8 @@ else
   required_step="/pr-review-toolkit:review-pr"
   if [ "$subcommand" = "git_merge" ]; then
     gate_hint="Run /pr-review-toolkit:review-pr first. Or use /coderails:merge for the full PR workflow. Or add a 'git merge' Bash permission to settings.json to bypass."
+  elif [ "$subcommand" = "git_push" ]; then
+    gate_hint="Don't push directly to main/master — push a feature branch and open a PR (/coderails:push). Or run /pr-review-toolkit:review-pr first. Or add a 'git push' Bash permission to settings.json to bypass."
   else
     gate_hint="Run /pr-review-toolkit:review-pr first (or add a 'gh pr merge' Bash permission to settings.json to bypass)."
   fi
@@ -115,6 +137,8 @@ fi
 if [ "$step_found" -eq 0 ]; then
   if [ "$subcommand" = "git_merge" ]; then
     reason="Blocked: \`git merge\` on main requires $required_step to have run this session. $gate_hint"
+  elif [ "$subcommand" = "git_push" ]; then
+    reason="Blocked: \`git push\` on main/master requires $required_step to have run this session. $gate_hint"
   else
     reason="Blocked: gh pr $subcommand requires $required_step to have run this session. $gate_hint"
   fi

@@ -72,7 +72,7 @@ When a skill instructs an action that a hook gates — e.g. `git merge`/`gh pr c
 | `Stop` | `loop_state_guard.sh` | **block** (exit 2) when an agentic loop is active but no session-owned `progress.json` exists — enforces presence + ownership |
 | `Stop` | `loop_stall_guard.sh` | **block** (exit 2) when an agentic loop is active and incomplete with no valid `LOOP-STOP` declaration in the stopping turn |
 | `PreToolUse` (Bash) | `destructive_bash_gate.sh` | **block** |
-| `PreToolUse` (Bash) | `enforce_pr_workflow.sh` | **block** — `gh pr create` without `/coderails:push`; `gh pr merge` or `git merge` on main/master without `/pr-review-toolkit:review-pr`; `git merge-base/merge-file/merge-tree` excluded — no-op if no `workflow.config.yaml` |
+| `PreToolUse` (Bash) | `enforce_pr_workflow.sh` | **block** — `gh pr create` without `/coderails:push`; `gh pr merge`, or `git merge`/`git push` on main/master, without `/pr-review-toolkit:review-pr`; `git merge-base/merge-file/merge-tree` excluded — no-op if no `workflow.config.yaml` |
 | `PreToolUse` (Bash) | `test_gate.sh` | **block** on `git commit` if tests fail — opt-in only |
 | `PreToolUse` (Write/Edit/MultiEdit) | `no_edit_on_main.sh` | **block** — code-file edits (`.py`, `.ts`, `.tsx`, `.js`, `.jsx`, `.go`) plus plugin source (`skills/*/SKILL.md`, `commands/*.md`) directly on main/master |
 

@@ -96,7 +96,7 @@ coderails is self-contained — it ships the dev-workflow skills it needs. `pr-r
 | `Stop` | `loop_state_guard.sh` | **block** — agentic loop active but no session-owned progress.json |
 | `Stop` | `loop_stall_guard.sh` | **block** — loop incomplete with no valid LOOP-STOP declaration |
 | `PreToolUse` (Bash) | `destructive_bash_gate.sh` | **block** |
-| `PreToolUse` (Bash) | `enforce_pr_workflow.sh` | **block** — `gh pr create/merge` without the required workflow steps |
+| `PreToolUse` (Bash) | `enforce_pr_workflow.sh` | **block** — `gh pr create/merge`, or `git merge`/`git push` on main/master, without the required workflow steps |
 | `PreToolUse` (Bash) | `test_gate.sh` | **block** on `git commit` if tests fail — opt-in per repo |
 | `PreToolUse` (Write/Edit/MultiEdit) | `no_edit_on_main.sh` | **block** — code-file & plugin-source (`SKILL.md`, command `.md`) edits directly on main/master |
 
