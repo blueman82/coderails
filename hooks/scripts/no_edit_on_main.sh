@@ -40,7 +40,10 @@ case "$file" in
 esac
 
 # The file (and its parent dirs) may not exist yet — walk up to the nearest existing
-# ancestor so `git -C` has a real directory inside the file's repo.
+# ancestor so `git -C` has a real directory inside the file's repo. This relies on the
+# repo's working-tree root always existing on disk, so the walk stays inside the file's
+# own repo; it only reaches a non-repo ancestor when the path points outside any repo,
+# which then fails open below (empty branch → exit 0) — the safe direction for a gate.
 probe=$(dirname "$absfile")
 while [ ! -d "$probe" ] && [ "$probe" != "/" ] && [ -n "$probe" ]; do
   probe=$(dirname "$probe")

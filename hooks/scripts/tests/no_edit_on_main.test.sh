@@ -114,4 +114,10 @@ check "wiki .py on main (no marker) -> deny" \
 check "plugin commands/*.md on main, cwd=other-on-feature -> deny" \
   DENY "$(run "$(payload_cwd Edit "$REPO/commands/push.md" "$OTHER")")"
 
+# Walk-up terminates OUTSIDE any git repo: an absolute path whose entire ancestry is
+# non-git ($TMP itself is not a repo) -> branch comes back empty -> allow (the safe
+# fail-open direction). Exercises the loop's "/" / non-empty guards + the non-repo path.
+check "code file under non-git ancestry -> allow" \
+  ALLOW "$(run "$(payload_cwd Edit "$TMP/loose/dir/app.py" "$REPO")")"
+
 [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails)"; exit 1; }
