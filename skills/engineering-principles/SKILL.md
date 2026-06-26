@@ -28,7 +28,7 @@ allowed-tools: Read, Write, Edit, Glob, Grep, Skill, mcp__mcp-exec__*
 | File Extension | Invoke Skill |
 |----------------|--------------|
 | `.go` | Execute `strictcode-go` skill |
-| `.py` | Execute `strictcode-python` skill |
+| `.py` | Execute `engineering-principles-python` skill |
 | `.ts`, `.tsx` | Execute `strictcode-ts` skill |
 
 **The language-specific skill provides idioms, patterns, and examples. This coordinator provides universal principles and MCP analysis.**
@@ -228,7 +228,7 @@ Every code change MUST be checked against these six principles:
 ### Step 1: Detect Language & Dispatch
 Read the file extension. **Invoke the matching language skill:**
 - `.go` → `strictcode-go`
-- `.py` → `strictcode-python`
+- `.py` → `engineering-principles-python`
 - `.ts`/`.tsx` → `strictcode-ts`
 
 ### Step 2: Analyze with MCP Tools
