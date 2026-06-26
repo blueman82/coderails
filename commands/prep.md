@@ -13,7 +13,7 @@ If the config block above says `NO_CONFIG`, do NOT stop. Run in minimal mode wit
 - `config.wiki_path` = null → skip wiki phases
 - `config.worktree_base` = `<git-root>` (the repo root from `git rev-parse --show-toplevel`)
 - `config.worktree_script` = null → use plain `git worktree add`
-- `config.strictcode_paths` = null → skip strictcode pre-flight
+- `config.engineering_principles_paths` = null → skip engineering-principles pre-flight
 
 ## Current Git Status
 

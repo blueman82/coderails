@@ -1,5 +1,5 @@
 ---
-allowed-tools: SlashCommand(/coderails:prep), SlashCommand(/coderails:push), SlashCommand(/pr-review-toolkit:review-pr), SlashCommand(/coderails:merge), SlashCommand(/wiki-ingest), SlashCommand(/wiki-lint), SlashCommand(/strictcode-python), SlashCommand(/strictcode-go), SlashCommand(/strictcode-ts), Bash(git*), Bash(./worktree-add*), Bash(cat*)
+allowed-tools: SlashCommand(/coderails:prep), SlashCommand(/coderails:push), SlashCommand(/pr-review-toolkit:review-pr), SlashCommand(/coderails:merge), SlashCommand(/wiki-ingest), SlashCommand(/wiki-lint), SlashCommand(/engineering-principles), SlashCommand(/engineering-principles-python), SlashCommand(/engineering-principles-go), SlashCommand(/engineering-principles-ts), SlashCommand(/simplify), Bash(git*), Bash(./worktree-add*), Bash(cat*)
 argument-hint: <branch> "<description>"
 description: Orchestrate the full feature workflow — prep → code → push → review → merge → wiki-ingest/lint
 ---
@@ -11,7 +11,7 @@ Config: !`GIT_ROOT=$(git rev-parse --show-toplevel 2>/dev/null) && { cat "$GIT_R
 If the config block above says `NO_CONFIG`, do NOT stop. Run in minimal mode:
 - Skip Phase 2 (Orient/wiki-query) and Phase 5's wiki steps — `config.wiki_path` is null.
 - Skip Phase 1's Jira creation — `config.jira` is null. /prep still runs for the worktree.
-- Skip the strictcode pre-flight — `config.strictcode_paths` is null.
+- Skip the engineering-principles pre-flight — `config.engineering_principles_paths` is null.
 - Worktree uses plain `git worktree add` off the git root.
 
 The workflow collapses to: prep (worktree only) → code → push → review → merge.
@@ -27,7 +27,7 @@ $ARGUMENTS
 This command is the umbrella for the canonical code-change workflow. The rules it encodes:
 
 - **Worktree before code**: create a worktree for every feature/bug branch — never edit on main
-- **Strictcode pre-flight**: run `config.strictcode_skill` (default: `/strictcode-python`) before pushing if the diff touches paths listed in `config.strictcode_paths` (or any file with ≥20 lines changed)
+- **Engineering-principles pre-flight**: run `config.engineering_principles_skill` (default: `/engineering-principles-python`) before pushing if the diff touches paths listed in `config.engineering_principles_paths` (or any file with ≥20 lines changed)
 - **Adversarial PR review**: use `/pr-review-toolkit:review-pr`, not manual Agent fan-out — runs 4+ specialist agents in parallel
 - **Apply findings inline**: on authorized ship-it, apply blocking and worthwhile review findings directly; do not re-ask per finding
 - **Wiki after merge**: after every merge run BOTH `/wiki-ingest` AND `/wiki-lint` (if `config.wiki_path` is non-null)
@@ -136,9 +136,9 @@ Hand control back to the user. They will:
 
 Do not proceed to Phase 3 until the user gives that signal. Do not nag.
 
-**Pre-flight when the user signals ready:** if `config.strictcode_paths` is non-null and the cumulative diff against the base branch touches any of those paths — or any file with ≥20 lines changed — run `config.strictcode_skill` (default: `/strictcode-python`) on those files before calling `/push`.
+**Pre-flight when the user signals ready:** if `config.engineering_principles_paths` is non-null and the cumulative diff against the base branch touches any of those paths — or any file with ≥20 lines changed — run `config.engineering_principles_skill` (default: `/engineering-principles-python`) on those files before calling `/push`.
 
-Note: `/push` already runs this pre-flight itself for paths in `config.strictcode_paths`, so if you forget, `/push` will catch it. The reason to also run it here is to catch non-config-listed large diffs that `/push`'s pre-flight misses.
+Note: `/push` already runs this pre-flight itself for paths in `config.engineering_principles_paths`, so if you forget, `/push` will catch it. The reason to also run it here is to catch non-config-listed large diffs that `/push`'s pre-flight misses.
 
 ## Phase 3 — Push + Adversarial Review (auto after ready signal)
 
@@ -146,6 +146,8 @@ Execute in order — do not pause between these:
 
 1. `/coderails:push` — stages, commits, pushes, opens PR with branch-protection reviewers, auto-resolves JIRA on PR creation (if `config.jira` non-null). Capture the PR URL from the output.
 2. `/pr-review-toolkit:review-pr all` — runs the four specialist agents (code-reviewer, pr-test-analyzer, silent-failure-hunter, type-design-analyzer) in parallel.
+2b. **Verify engineering principles** — run `/engineering-principles` on the cumulative diff against the base branch. Apply the same rule as `/push`'s pre-flight: deviations from documented architectural conventions are blocking; style notes are non-blocking. Feed any blocking finding into step 3's apply loop.
+2c. **Simplify** — run `/simplify` on the diff (built-in command). `review-pr`'s own `code-simplifier` agent only runs "after passing review" and is not guaranteed, so this is the explicit simplify pass; route its changes through step 3.
 3. Apply worthwhile findings inline — do not re-ask per finding. Push the follow-up commit. Classify each finding as:
    - **Blocking** (apply silently): correctness bug, protocol violation, silent-failure pattern, missing test for changed public contract, missing dependency-injection registration
    - **Worthwhile** (apply silently): readability wins, better names, extracted helpers that clearly reduce duplication

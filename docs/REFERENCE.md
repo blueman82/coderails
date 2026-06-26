@@ -287,7 +287,7 @@ Commands are slash commands invoked by Claude (or the user via `/coderails:<name
 |---|---|---|
 | `/coderails:workflow` | Orchestrate the full feature workflow: `prep → code → push → review → merge → wiki-ingest → wiki-lint`. Two interactive pauses: the code/iterate loop, and final ship-it authorisation. | Delegates to all other commands; reads `workflow.config.yaml`; requires `pr-review-toolkit` plugin for the review stage |
 | `/coderails:prep` | Create a safety branch, a feature/bug branch, and optionally a Jira ticket. | `git worktree`, Jira MCP (optional — skips if `config.jira` is null or no Jira MCP); reads `workflow.config.yaml` |
-| `/coderails:push` | Stage, commit, push changes, and create a PR. Runs a strictcode pre-flight if `config.strictcode_paths` is set. | Shells out to `scripts/push.sh`; requires a GitHub remote; reads `workflow.config.yaml` |
+| `/coderails:push` | Stage, commit, push changes, and create a PR. Runs an engineering-principles pre-flight if `config.engineering_principles_paths` is set. | Shells out to `scripts/push.sh`; requires a GitHub remote; reads `workflow.config.yaml` |
 | `/coderails:merge` | Merge an approved PR, switch to main, and pull latest. | Shells out to `scripts/merge.sh`; requires GitHub remote; checks PR approval if branch protection is on |
 | `/coderails:init` | Scaffold a `workflow.config.yaml` for the current project. Detects monorepo vs standalone layout. | `git rev-parse`, Write tool; idempotent — confirms before overwriting |
 | `/coderails:test-gate-setup` | Configure the test gate for the current project. Detects the test runner (npm, cargo, pytest, go test, etc.) and writes `.claude/test_command`. | Write tool; opt-in gate for `test_gate.sh` hook |
@@ -307,7 +307,7 @@ cat "$GIT_ROOT/projects/$(basename $(pwd))/.claude/workflow.config.yaml" \  # mo
   || echo "NO_CONFIG"
 ```
 
-`NO_CONFIG` is the sentinel for "not initialised." All workflow commands degrade gracefully: Jira steps no-op, wiki steps skip, strictcode pre-flight skips, `enforce_pr_workflow` hook is inactive.
+`NO_CONFIG` is the sentinel for "not initialised." All workflow commands degrade gracefully: Jira steps no-op, wiki steps skip, engineering-principles pre-flight skips, `enforce_pr_workflow` hook is inactive.
 
 ---
 
@@ -329,7 +329,7 @@ cat "$GIT_ROOT/projects/$(basename $(pwd))/.claude/workflow.config.yaml" \  # mo
 
 | Artifact | Location | Committed? | Notes |
 |---|---|---|---|
-| `workflow.config.yaml` | `<git-root>/.claude/workflow.config.yaml` (standalone) or `<git-root>/projects/<name>/.claude/workflow.config.yaml` (monorepo) | Yes | Project-specific config for jira, wiki, worktree, strictcode. Created by `/coderails:init`. |
+| `workflow.config.yaml` | `<git-root>/.claude/workflow.config.yaml` (standalone) or `<git-root>/projects/<name>/.claude/workflow.config.yaml` (monorepo) | Yes | Project-specific config for jira, wiki, worktree, engineering-principles. Created by `/coderails:init`. |
 | `.claude/test_command` | Project working directory | Yes (project-local) | Plain-text file containing the test command. Created by `/coderails:test-gate-setup`. Activates `test_gate.sh`. |
 | Specs from brainstorming | `docs/coderails/specs/YYYY-MM-DD-<topic>-design.md` | Yes | Written by `brainstorming` skill after design resolution. Permanent record. |
 | Plans from writing-plans | `docs/coderails/plans/<name>.md` | Yes | Written by `writing-plans` skill. Permanent plan record. |

@@ -44,7 +44,7 @@ bash ~/Documents/Github/coderails/install.sh
 
 coderails is self-contained — it ships the dev-workflow skills it needs. `pr-review-toolkit@claude-plugins-official` is still required for the review stage of `/workflow`.
 
-23 skills are bundled across three groups. Full catalog: [`docs/REFERENCE.md`](./docs/REFERENCE.md).
+27 skills are bundled across four groups. Full catalog: [`docs/REFERENCE.md`](./docs/REFERENCE.md).
 
 **Dev-workflow skills**
 
@@ -83,6 +83,15 @@ coderails is self-contained — it ships the dev-workflow skills it needs. `pr-r
 | `wiki-init` | Scaffold the wiki vault and index |
 | `wiki-lint` | Validate wiki structure and links |
 | `wiki-query` | Answer questions from the wiki |
+
+**Engineering principles**
+
+| Skill | Purpose |
+|---|---|
+| `engineering-principles` | Enforce YAGNI/KISS/DRY/Fail-Fast/SSOT/Law of Demeter; dispatches to a language skill |
+| `engineering-principles-python` | Python idioms and standards |
+| `engineering-principles-go` | Go idioms and standards |
+| `engineering-principles-ts` | TypeScript idioms and standards |
 
 ## Hooks
 
