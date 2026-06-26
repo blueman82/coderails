@@ -27,7 +27,7 @@ allowed-tools: Read, Write, Edit, Glob, Grep, Skill, mcp__mcp-exec__*
 
 | File Extension | Invoke Skill |
 |----------------|--------------|
-| `.go` | Execute `strictcode-go` skill |
+| `.go` | Execute `engineering-principles-go` skill |
 | `.py` | Execute `engineering-principles-python` skill |
 | `.ts`, `.tsx` | Execute `strictcode-ts` skill |
 
@@ -227,7 +227,7 @@ Every code change MUST be checked against these six principles:
 
 ### Step 1: Detect Language & Dispatch
 Read the file extension. **Invoke the matching language skill:**
-- `.go` → `strictcode-go`
+- `.go` → `engineering-principles-go`
 - `.py` → `engineering-principles-python`
 - `.ts`/`.tsx` → `strictcode-ts`
 
@@ -255,7 +255,7 @@ Read the file extension. **Invoke the matching language skill:**
 
 ```
 StrictCode: <filename>
-  Language: Go → invoked strictcode-go
+  Language: Go → invoked engineering-principles-go
   Fixed: 3 violations
     - Removed redundant else after return (L45)
     - Wrapped error with context (L23)
