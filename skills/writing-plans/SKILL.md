@@ -52,6 +52,7 @@ After the plan is written, re-read it against the spec:
 1. **Spec coverage**: every spec requirement maps to a task. List gaps.
 2. **Placeholder scan**: check for the anti-patterns above. Fix them.
 3. **Type consistency**: a function called `clearLayers()` in Task 3 but `clearFullLayers()` in Task 7 is a bug. Reconcile.
+4. **Engineering principles**: each task's design honours YAGNI/KISS/DRY/Fail-Fast/SSOT/Law of Demeter — no speculative abstraction, no duplicated logic, fail-fast validation. See `/engineering-principles` for the rubric; bake the constraints into tasks now rather than refactoring after review.
 
 Fix issues inline. If a spec requirement has no task, add the task.
 
