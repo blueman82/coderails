@@ -44,7 +44,7 @@ bash ~/Documents/Github/coderails/install.sh
 
 coderails is self-contained — it ships the dev-workflow skills it needs. `pr-review-toolkit@claude-plugins-official` is still required for the review stage of `/workflow`.
 
-23 skills are bundled across three groups. Full catalog: [`docs/REFERENCE.md`](./docs/REFERENCE.md).
+27 skills are bundled across four groups. Full catalog: [`docs/REFERENCE.md`](./docs/REFERENCE.md).
 
 **Dev-workflow skills**
 
