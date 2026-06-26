@@ -11,7 +11,8 @@
 # Allowlist (these stay editable on main):
 #   docs  — .md (plain docs), .txt, .rst
 #   config — .yaml, .yml, .json, .toml, .ini, .cfg
-#   special — .gitignore, LICENSE (bare filename)
+#   special — the literal .gitignore dotfile (by basename), LICENSE (bare filename)
+#             Note: only the exact basename ".gitignore" passes; "deploy.gitignore" does not.
 # Everything else on main → block.
 #
 # Cross-repo correctness: BOTH the gated-ness and the branch check key off the FILE's own
@@ -47,11 +48,11 @@ if [ "$arm" = "code" ]; then
   case "$file" in
     *.md|*.txt|*.rst)                        exit 0 ;;
     *.yaml|*.yml|*.json|*.toml|*.ini|*.cfg)  exit 0 ;;
-    *.gitignore|*/.gitignore)                exit 0 ;;
   esac
-  # Bare LICENSE (no extension) — match the filename only, not a path component.
+  # Bare dotfiles / bare filenames — match the basename only, not an arbitrary suffix.
+  # *.gitignore would allow deploy.gitignore; only the literal .gitignore dotfile passes.
   case "$basename" in
-    LICENSE) exit 0 ;;
+    .gitignore|LICENSE) exit 0 ;;
   esac
 fi
 

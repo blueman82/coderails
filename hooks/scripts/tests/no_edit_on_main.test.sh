@@ -138,8 +138,11 @@ check "main, .ini config -> allow"     ALLOW "$(run "$(payload Write setup.ini)"
 check "main, .cfg config -> allow"     ALLOW "$(run "$(payload Write myapp.cfg)")"
 check "main, .txt file -> allow"       ALLOW "$(run "$(payload Write notes.txt)")"
 check "main, .rst file -> allow"       ALLOW "$(run "$(payload Write docs/guide.rst)")"
-check "main, .gitignore -> allow"      ALLOW "$(run "$(payload Write .gitignore)")"
-check "main, LICENSE -> allow"         ALLOW "$(run "$(payload Write LICENSE)")"
+check "main, .gitignore -> allow"          ALLOW "$(run "$(payload Write .gitignore)")"
+check "main, src/.gitignore -> allow"      ALLOW "$(run "$(payload Write src/.gitignore)")"
+# deploy.gitignore is NOT the literal .gitignore dotfile — it must be denied on main.
+check "main, deploy.gitignore -> deny"     DENY  "$(run "$(payload Write deploy.gitignore)")"
+check "main, LICENSE -> allow"             ALLOW "$(run "$(payload Write LICENSE)")"
 
 # Plugin-source markdown is still blocked even though .md is in the allowlist.
 check "main, plugin skills SKILL.md -> still deny" \

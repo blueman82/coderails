@@ -84,14 +84,43 @@ When a skill instructs an action that a hook gates — e.g. `git merge`/`gh pr c
 | `SessionStart` | `inject_bootstrap.sh` | silent — injects `using-coderails` skill into every new session |
 | `UserPromptSubmit` | `inject_context.sh` | silent — prepends `[ctx]` (cwd, branch, date) |
 | `UserPromptSubmit` | `discipline_catchup.sh` | warn |
-| `Stop` | `check_confidence_labels.sh` | **block** (exit 2) when a substantive response (≥200 chars) carries no `(verified)`/`(inferred)`/`(guess)` label — promoted from warn-mode 2026-05-05 |
-| `Stop` | `check_verify_loop.sh` | **block** (exit 2) when a `## Did Not Verify` bullet is left untagged — every untagged DNV item blocks regardless of content; only an explicit `(unverifiable: <reason>)` tag passes |
+| `Stop` + `SubagentStop` | `check_confidence_labels.sh` | **block** (exit 2) when a substantive response (≥200 chars) carries no `(verified)`/`(inferred)`/`(guess)` label. On `SubagentStop`, reads `last_assistant_message` directly (avoids the parent-transcript flush race). |
+| `Stop` + `SubagentStop` | `check_verify_loop.sh` | **block** (exit 2) when a `## Did Not Verify` bullet is left untagged — enforced regardless of whether files were edited this turn; only an explicit `(unverifiable: <reason>)` tag passes. On `SubagentStop`, reads `last_assistant_message` directly. `loop_state_guard`/`loop_stall_guard` remain Stop-only (loop-state ownership is a parent-session concept). |
 | `Stop` | `loop_state_guard.sh` | **block** (exit 2) when an agentic loop is active but no session-owned `progress.json` exists — enforces presence + ownership |
 | `Stop` | `loop_stall_guard.sh` | **block** (exit 2) when an agentic loop is active and incomplete with no valid `LOOP-STOP` declaration in the stopping turn |
-| `PreToolUse` (Bash) | `destructive_bash_gate.sh` | **block** |
-| `PreToolUse` (Bash) | `enforce_pr_workflow.sh` | **block** — `gh pr create` without `/coderails:push`; `gh pr merge`, or `git merge`/`git push` on main/master, without `/pr-review-toolkit:review-pr`; `git merge-base/merge-file/merge-tree` excluded — no-op if no `workflow.config.yaml` |
+| `PreToolUse` (Bash) | `destructive_bash_gate.sh` | **block** — permanent blocklist: `rm -rf`, `git push --force`, `git reset --hard`, SQL `DROP TABLE/DATABASE/SCHEMA` and `TRUNCATE TABLE`, `dd if=`, `mkfs.*`, `chmod -R 777`, `git commit --no-verify`, `git clean -f/--force`, `find -delete/--delete`, `truncate -s/--size`, `shred`. Also blocks in-Bash source-file edits (`sed -i`, `perl -i`, `>` / `>>` redirects, `tee`, `cp`/`mv`/`dd of=` targeting source extensions or plugin markdown) when on main/master (best-effort). No approval path — settings.json Bash permission rule is the only escape. |
+| `PreToolUse` (Bash) | `enforce_pr_workflow.sh` | **block** — `gh pr create` without `/coderails:push`; `gh pr merge <N>` without `/pr-review-toolkit:review-pr <N>` (per-PR, consume-on-use); `git merge` on main/master without `review-pr` since the last merge; `git push` to main/master (by current branch, colon refspec, or positional bare branch token) without `review-pr`. Scans `agent_transcript_path` in subagent context. `git merge-base/merge-file/merge-tree` and `--abort/--continue/--quit/--skip` excluded. No-op if no `workflow.config.yaml`. |
 | `PreToolUse` (Bash) | `test_gate.sh` | **block** on `git commit` if tests fail — opt-in only |
-| `PreToolUse` (Write/Edit/MultiEdit) | `no_edit_on_main.sh` | **block** — code-file edits (`.py`, `.ts`, `.tsx`, `.js`, `.jsx`, `.go`) in any repo, plus plugin source (`skills/*/SKILL.md`, `commands/*.md`) **only when the file's repo is a plugin** (root has `.claude-plugin/plugin.json`), directly on main/master. Both the gated-ness and the branch check key off the **file's own repo**, not the session cwd — so a sibling repo's lookalike `commands/`/`skills/` docs (e.g. the wiki) are never falsely blocked |
+| `PreToolUse` (Write/Edit/MultiEdit) | `no_edit_on_main.sh` | **block** — on main/master, blocks edits to ANY file EXCEPT an explicit allowlist: `.md`/`.txt`/`.rst` (plain docs), `.yaml`/`.yml`/`.json`/`.toml`/`.ini`/`.cfg` (config), the literal `.gitignore` dotfile (by basename), and `LICENSE`. Plugin source markdown (`skills/*/SKILL.md`, `commands/*.md`) is also blocked (they are source, not docs) when the file's repo carries `.claude-plugin/plugin.json`. Both the gated-ness and the branch check key off the **file's own repo** — a sibling non-plugin repo's `commands/`/`skills/` markdown is never falsely blocked. |
+
+### Enforcement ceilings — what the hooks deliberately do NOT fully cover
+
+These are honest limits by design, not bugs. Document them here so they aren't
+re-opened as findings.
+
+- **Bash blocklists are enumerated families, not exhaustive.** `destructive_bash_gate`
+  and the in-Bash source-edit gate catch known destructive patterns; obfuscated forms,
+  variable filenames, quoted paths with spaces, here-docs, process substitution, and
+  `python -c open(...)` writes remain uncaught. The gate is best-effort.
+- **`no_edit_on_main` allowlist breadth is intentional (fail-safe).** `.sh` is blocked
+  on main while `.json`/`.yaml` config stays editable — an accepted classification.
+  The allowlist may over-block edge cases; the settings.json `Write`/`Edit` permission
+  escape covers any legitimate override.
+- **Wiki/workflow sequence past merge is advisory, not enforced.** The `/workflow`
+  chain (`/wiki-ingest` + `/wiki-lint`) after merge is a slash command — Claude must
+  choose to invoke it. No hook enforces it.
+- **`check_verify_loop` and the two loop guards short-circuit on `stop_hook_active=true`
+  (block at most once per turn).** This is an intentional infinite-loop safety valve.
+  `check_confidence_labels` does NOT read `stop_hook_active` and can re-block on a
+  re-armed Stop.
+- **TDD is not enforced test-first.** `test_gate` only checks that tests pass at
+  commit time; it does not enforce the red-green-refactor sequence.
+- **Skill invocation, ask-on-ambiguity, and verify-memory are structurally
+  unenforceable by hooks.** They depend on Claude choosing to do them; a hook
+  cannot observe or mandate internal reasoning steps.
+- **No `SubagentStart` event exists.** The `inject_bootstrap.sh` SessionStart hook
+  cannot inject the `using-coderails` skill into subagents. Subagents receive it only
+  if it is included in their system prompt by the orchestrator.
 
 **Hook script conventions** (follow these when editing or adding a script):
 - Read the hook payload from stdin via `input=$(cat)`, parse with `jq`.
