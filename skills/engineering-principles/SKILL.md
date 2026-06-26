@@ -238,8 +238,8 @@ Engineering Principles: <filename>
 - When in doubt, flag instead of fix
 - Apply the minimum change needed
 - Don't add features, comments, or docstrings beyond what's needed
-- Trust LSP data (Serena) over heuristics for in-file analysis
-- Use scout skills (`scout-search`, `scout-dead-code`, `scout-explain-symbol`) for cross-file semantic analysis
+- Trust LSP data (Serena) over heuristics for in-file analysis when available
+- Use Grep/Glob for cross-file checks (DRY/SSOT/YAGNI)
 - **Always invoke language-specific skill for idioms**
 
 ---
