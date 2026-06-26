@@ -74,7 +74,7 @@ When a skill instructs an action that a hook gates — e.g. `git merge`/`gh pr c
 | `PreToolUse` (Bash) | `destructive_bash_gate.sh` | **block** |
 | `PreToolUse` (Bash) | `enforce_pr_workflow.sh` | **block** — `gh pr create` without `/coderails:push`; `gh pr merge`, or `git merge`/`git push` on main/master, without `/pr-review-toolkit:review-pr`; `git merge-base/merge-file/merge-tree` excluded — no-op if no `workflow.config.yaml` |
 | `PreToolUse` (Bash) | `test_gate.sh` | **block** on `git commit` if tests fail — opt-in only |
-| `PreToolUse` (Write/Edit/MultiEdit) | `no_edit_on_main.sh` | **block** — code-file edits (`.py`, `.ts`, `.tsx`, `.js`, `.jsx`, `.go`) plus plugin source (`skills/*/SKILL.md`, `commands/*.md`) directly on main/master |
+| `PreToolUse` (Write/Edit/MultiEdit) | `no_edit_on_main.sh` | **block** — code-file edits (`.py`, `.ts`, `.tsx`, `.js`, `.jsx`, `.go`) in any repo, plus plugin source (`skills/*/SKILL.md`, `commands/*.md`) **only when the file's repo is a plugin** (root has `.claude-plugin/plugin.json`), directly on main/master. Both the gated-ness and the branch check key off the **file's own repo**, not the session cwd — so a sibling repo's lookalike `commands/`/`skills/` docs (e.g. the wiki) are never falsely blocked |
 
 **Hook script conventions** (follow these when editing or adding a script):
 - Read the hook payload from stdin via `input=$(cat)`, parse with `jq`.
