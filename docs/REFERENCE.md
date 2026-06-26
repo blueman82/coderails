@@ -287,7 +287,7 @@ Commands are slash commands invoked by Claude (or the user via `/coderails:<name
 |---|---|---|
 | `/coderails:workflow` | Orchestrate the full feature workflow: `prep → code → push → review → merge → wiki-ingest → wiki-lint`. Two interactive pauses: the code/iterate loop, and final ship-it authorisation. | Delegates to all other commands; reads `workflow.config.yaml`; requires `pr-review-toolkit` plugin for the review stage |
 | `/coderails:prep` | Create a safety branch, a feature/bug branch, and optionally a Jira ticket. | `git worktree`, Jira MCP (optional — skips if `config.jira` is null or no Jira MCP); reads `workflow.config.yaml` |
-| `/coderails:push` | Stage, commit, push changes, and create a PR. Runs a engineering-principles pre-flight if `config.engineering_principles_paths` is set. | Shells out to `scripts/push.sh`; requires a GitHub remote; reads `workflow.config.yaml` |
+| `/coderails:push` | Stage, commit, push changes, and create a PR. Runs an engineering-principles pre-flight if `config.engineering_principles_paths` is set. | Shells out to `scripts/push.sh`; requires a GitHub remote; reads `workflow.config.yaml` |
 | `/coderails:merge` | Merge an approved PR, switch to main, and pull latest. | Shells out to `scripts/merge.sh`; requires GitHub remote; checks PR approval if branch protection is on |
 | `/coderails:init` | Scaffold a `workflow.config.yaml` for the current project. Detects monorepo vs standalone layout. | `git rev-parse`, Write tool; idempotent — confirms before overwriting |
 | `/coderails:test-gate-setup` | Configure the test gate for the current project. Detects the test runner (npm, cargo, pytest, go test, etc.) and writes `.claude/test_command`. | Write tool; opt-in gate for `test_gate.sh` hook |
