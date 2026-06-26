@@ -79,6 +79,7 @@ default value /strictcode-python     → /engineering-principles-python
 - [ ] `grep -niE 'strictcode' skills/engineering-principles/SKILL.md` → no matches.
 - [ ] `grep -n 'engineering-principles-' skills/engineering-principles/SKILL.md` → shows the three dispatch targets.
 - [ ] `grep -c 'serena' skills/engineering-principles/SKILL.md` → still > 0 (Serena retained).
+- [ ] **No-Serena degradation intact** (planning-sequence Red Team v1): `grep -niE 'graceful degradation|fall back .*static analysis' skills/engineering-principles/SKILL.md` → ≥1 match, AND `grep -niE 'phase 3|slimcode' skills/engineering-principles/SKILL.md` → no matches (no orphaned cross-ref to the deleted sections). Read the coordinator end-to-end to confirm the body reads coherently without Phase 3.
 
 ---
 
