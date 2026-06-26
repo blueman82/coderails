@@ -8,6 +8,16 @@
 #     and any other type (emit empty) so a non-text entry can never beat a real
 #     text block when `last` runs.
 
+# dc_file_count <transcript-path>
+#   Returns the count of unique Write/Edit/MultiEdit target files in a JSONL transcript.
+#   Returns 0 if the transcript is absent, unreadable, or contains no such tool uses.
+dc_file_count() {
+  local transcript="$1" n
+  n=$(jq -s -r '[.[]? | select(.type=="assistant") | .message.content[]? | select(.type=="tool_use" and (.name=="Write" or .name=="Edit" or .name=="MultiEdit")) | .input.file_path] | unique | length' "$transcript" 2>/dev/null)
+  [ -z "$n" ] && n=0
+  printf '%s' "$n"
+}
+
 # dc_extract_last_text <transcript> <tail_lines>
 #   Extracts the last assistant text block from a JSONL transcript.
 #   Returns the joined text of the last assistant message that has any text content.

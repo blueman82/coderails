@@ -58,4 +58,53 @@ check "no transcript -> allow" 0 "$(run '{"transcript_path":"/nonexistent/path.j
 # Case 7: empty transcript_path -> allow
 check "empty transcript_path -> allow" 0 "$(run '{"session_id":"S1"}')"
 
+# ── SubagentStop cases ────────────────────────────────────────────────────────
+# Build a SubagentStop payload using last_assistant_message directly (no transcript
+# parsing). The parent transcript_path is intentionally a non-existent path to prove
+# the hook reads last_assistant_message, not transcript_path.
+
+subagentstop_payload() { # last_assistant_message -> json
+  local msg="$1"
+  jq -n --arg msg "$msg" '{
+    "hook_event_name": "SubagentStop",
+    "session_id": "S_sub",
+    "agent_id": "agent-test",
+    "transcript_path": "/nonexistent/parent.jsonl",
+    "agent_transcript_path": "/nonexistent/subagent.jsonl",
+    "stop_hook_active": false,
+    "last_assistant_message": $msg
+  }'
+}
+
+# Case 8: SubagentStop with labelled long message -> allow
+check "SubagentStop labelled message -> allow" 0 "$(run "$(subagentstop_payload "${LONG_TEXT} (verified) claim")")"
+
+# Case 9: SubagentStop with unlabelled long message -> block (exit 2)
+check "SubagentStop unlabelled message -> block" 2 "$(run "$(subagentstop_payload "${LONG_TEXT}")")"
+
+# Case 10: SubagentStop with (inferred) label -> allow
+check "SubagentStop inferred label -> allow" 0 "$(run "$(subagentstop_payload "${LONG_TEXT} (inferred) claim")")"
+
+# Case 11: SubagentStop with (guess) label -> allow
+check "SubagentStop guess label -> allow" 0 "$(run "$(subagentstop_payload "${LONG_TEXT} (guess) claim")")"
+
+# Case 12: SubagentStop with short message (< 200 chars) -> allow regardless of labels
+check "SubagentStop short message -> allow" 0 "$(run "$(subagentstop_payload "Short subagent reply.")")"
+
+# Regression: parent transcript is compliant (has a label in its text), but
+# last_assistant_message is NOT compliant — must still BLOCK.
+# This proves the script reads last_assistant_message, not transcript_path.
+COMPLIANT_TRANSCRIPT=$(mk_transcript "${LONG_TEXT} (verified) parent content")
+check "SubagentStop: compliant parent but non-compliant last_assistant_message -> block" 2 "$(
+  jq -n --arg tp "$COMPLIANT_TRANSCRIPT" --arg msg "${LONG_TEXT}" '{
+    "hook_event_name": "SubagentStop",
+    "session_id": "S_reg",
+    "agent_id": "agent-reg",
+    "transcript_path": $tp,
+    "agent_transcript_path": "/nonexistent/subagent.jsonl",
+    "stop_hook_active": false,
+    "last_assistant_message": $msg
+  }' | bash "$HOOK" >/dev/null 2>&1; echo $?
+)"
+
 [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails)"; exit 1; }

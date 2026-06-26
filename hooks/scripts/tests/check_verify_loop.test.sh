@@ -96,4 +96,106 @@ T=$(mk_transcript "Some text here. (verified)
 - ")
 check "bare DNV bullet (no content) -> allow" 0 "$(run "$(payload "$T")")"
 
+# ── SubagentStop cases ────────────────────────────────────────────────────────
+# SubagentStop payloads carry last_assistant_message directly. The hook must read
+# that field, not transcript_path (which is the PARENT session transcript).
+# For file_count, the hook scans agent_transcript_path; if absent/unreadable,
+# file_count is treated as 0 (graceful skip — no false blocks).
+
+subagentstop_payload() { # last_assistant_message [agent_transcript_path] -> json
+  local msg="$1" atp="${2:-/nonexistent/subagent.jsonl}"
+  jq -n --arg msg "$msg" --arg atp "$atp" '{
+    "hook_event_name": "SubagentStop",
+    "session_id": "S_sub",
+    "agent_id": "agent-test",
+    "transcript_path": "/nonexistent/parent.jsonl",
+    "agent_transcript_path": $atp,
+    "stop_hook_active": false,
+    "last_assistant_message": $msg
+  }'
+}
+
+# Build a subagent transcript that includes file edits (so file_count >= 1).
+mk_agent_transcript() { # text -> path
+  local text="$1" out="$TMP/at_$RANDOM.jsonl"
+  printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Edit","input":{"file_path":"/tmp/f.py"}}]}}' > "$out"
+  jq -n --arg t "$text" '{"type":"assistant","message":{"content":[{"type":"text","text":$t}]}}' >> "$out"
+  printf '%s' "$out"
+}
+
+# Case 10: SubagentStop, no DNV in message, agent transcript has edits -> allow
+AT=$(mk_agent_transcript "Work done. (verified)")
+check "SubagentStop no DNV -> allow" 0 "$(run "$(subagentstop_payload "Work done. (verified)" "$AT")")"
+
+# Case 11: SubagentStop, untagged DNV bullet, agent transcript has edits -> block (exit 2)
+DNV_MSG="Some work. (verified)
+## Did Not Verify
+- the integration test was not run"
+AT=$(mk_agent_transcript "$DNV_MSG")
+check "SubagentStop untagged DNV bullet -> block" 2 "$(run "$(subagentstop_payload "$DNV_MSG" "$AT")")"
+
+# Case 12: SubagentStop, all DNV bullets tagged -> allow
+TAGGED_MSG="Some work. (verified)
+## Did Not Verify
+- (unverifiable: external system) deploy pipeline status"
+AT=$(mk_agent_transcript "$TAGGED_MSG")
+check "SubagentStop all bullets tagged -> allow" 0 "$(run "$(subagentstop_payload "$TAGGED_MSG" "$AT")")"
+
+# Case 13: SubagentStop, agent_transcript_path absent/malformed -> must BLOCK (exit 2).
+# The fix: SubagentStop no longer gates on file_count; it polices last_assistant_message
+# directly. So an untagged DNV bullet in the message blocks regardless of whether
+# agent_transcript_path is readable.
+DNV_MSG2="Some work. (verified)
+## Did Not Verify
+- untagged item"
+check "SubagentStop unreadable agent_transcript -> block (untagged DNV in message)" 2 "$(run "$(subagentstop_payload "$DNV_MSG2" "/nonexistent/subagent.jsonl")")"
+
+# Case 14: Repro — agent_transcript_path is a MALFORMED file (one non-JSON line),
+# last_assistant_message has an untagged DNV bullet. Under the old code, jq fails on
+# the malformed file, file_count becomes 0, and the hook silently exits 0 (silent-pass
+# bug). Under the fix, file_count is irrelevant for SubagentStop; the untagged DNV in
+# the message must block (exit 2).
+MALFORMED_TRANSCRIPT="$TMP/malformed_$RANDOM.jsonl"
+printf 'this is not JSON\n' > "$MALFORMED_TRANSCRIPT"
+DNV_MALFORMED="Some work. (verified)
+## Did Not Verify
+- the integration test was not run"
+check "SubagentStop malformed agent_transcript + untagged DNV -> block (repro)" 2 "$(run "$(subagentstop_payload "$DNV_MALFORMED" "$MALFORMED_TRANSCRIPT")")"
+
+# Regression: parent transcript has untagged DNV content, but last_assistant_message
+# does NOT have a DNV section — must ALLOW. Proves we read last_assistant_message,
+# not transcript_path (parent session).
+PARENT_T=$(mk_transcript "Parent text. (verified)
+## Did Not Verify
+- untagged item in parent")
+# The subagentstop message itself is clean; we point transcript_path at the dirty parent
+check "SubagentStop: dirty parent transcript, clean message -> allow" 0 "$(
+  AT2=$(mk_agent_transcript "Clean subagent response. (verified)")
+  jq -n --arg tp "$PARENT_T" --arg msg "Clean subagent response. (verified)" --arg atp "$AT2" '{
+    "hook_event_name": "SubagentStop",
+    "session_id": "S_reg",
+    "agent_id": "agent-reg",
+    "transcript_path": $tp,
+    "agent_transcript_path": $atp,
+    "stop_hook_active": false,
+    "last_assistant_message": $msg
+  }' | bash "$HOOK" >/dev/null 2>&1; echo $?
+)"
+
+# ── Fixture-based test ───────────────────────────────────────────────────────
+# Case 15: Load the real captured SubagentStop fixture, override last_assistant_message
+# to a non-compliant value (untagged DNV bullet), and wire agent_transcript_path to a
+# real transcript that includes file edits. Asserts exit 2.
+# This keeps the fixture load-bearing so it can't drift silently from the actual payload shape.
+FIXTURE="$(cd "$(dirname "$0")" && pwd)/fixtures/subagentstop_payload.json"
+AT_FIX=$(mk_agent_transcript "Work. (verified)")
+DNV_NON_COMPLIANT="Final response. (verified)
+## Did Not Verify
+- untagged item that was not resolved"
+check "fixture SubagentStop non-compliant -> block" 2 "$(
+  jq --arg msg "$DNV_NON_COMPLIANT" --arg atp "$AT_FIX" \
+    '.last_assistant_message = $msg | .agent_transcript_path = $atp' \
+    "$FIXTURE" | bash "$HOOK" >/dev/null 2>&1; echo $?
+)"
+
 [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails)"; exit 1; }

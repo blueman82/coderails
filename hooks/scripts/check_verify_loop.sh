@@ -30,29 +30,48 @@ SLEEP_S="${CLAUDE_HOOK_SLEEP_S:-0.3}"
 log_line() { printf '%s %s\n' "$(date -Iseconds 2>/dev/null || date +%Y-%m-%dT%H:%M:%S%z)" "$1" >> "$LOG_FILE" 2>/dev/null; }
 
 input=$(cat)
-transcript=$(echo "$input" | jq -r '.transcript_path // empty')
+hook_event=$(echo "$input" | jq -r '.hook_event_name // "Stop"' 2>/dev/null)
 session_id=$(echo "$input" | jq -r '.session_id // "?"' 2>/dev/null)
+file_count=0
+attempts=1
 
-# Skip if there is no transcript to inspect.
-if [ -z "$transcript" ] || [ ! -f "$transcript" ]; then
-  exit 0
-fi
+# SubagentStop: the subagent's final text is in last_assistant_message — police it
+# directly, without gating on file_count. The message IS the authoritative output;
+# an untagged DNV bullet in it is proof of deferred verifiable work regardless of
+# whether the subagent transcript is readable.
+# (transcript_path on a SubagentStop payload is the PARENT session transcript —
+# reading it would check the wrong content and silently miss real violations.)
+# NOTE: last_assistant_message is assumed to be a plain string per the SubagentStop
+# payload contract. If CC ever delivers a content-block array here, this would need
+# a join step.
+# NOTE: loop_state_guard and loop_stall_guard are intentionally Stop-only — loop-state
+# ownership is a parent-session concept; a subagent has no progress.json to validate.
+if [ "$hook_event" = "SubagentStop" ]; then
+  text=$(echo "$input" | jq -r '.last_assistant_message // ""' 2>/dev/null)
+else
+  transcript=$(echo "$input" | jq -r '.transcript_path // empty')
 
-# Skip pure-conversation turns: if no files were edited, there is nothing to police.
-# Counts unique Write/Edit/MultiEdit targets; a single edited file is enough to
-# bring the response in scope (a one-file change can still carry unverified claims).
-file_count=$(jq -s -r '
-  [.[]?
-   | select(.type == "assistant")
-   | .message.content[]?
-   | select(.type == "tool_use" and (.name == "Write" or .name == "Edit" or .name == "MultiEdit"))
-   | .input.file_path]
-  | unique | length
-' "$transcript" 2>/dev/null)
-[ -z "$file_count" ] && file_count=0
+  # Skip if there is no transcript to inspect.
+  if [ -z "$transcript" ] || [ ! -f "$transcript" ]; then
+    exit 0
+  fi
 
-if [ "$file_count" -lt 1 ]; then
-  exit 0
+  # Skip pure-conversation turns: if no files were edited, there is nothing to police.
+  # Counts unique Write/Edit/MultiEdit targets; a single edited file is enough to
+  # bring the response in scope (a one-file change can still carry unverified claims).
+  file_count=$(dc_file_count "$transcript")
+
+  if [ "$file_count" -lt 1 ]; then
+    exit 0
+  fi
+
+  # Extract the last assistant text block, retrying for the transcript-flush race.
+  # Each assistant entry is reduced to a STRING (its joined text blocks) before the
+  # array is built, so a non-text entry contributes "" and can never win `last` over
+  # a real text block. Assistant content in Claude Code transcripts is always an
+  # array; the string/else branches are defensive only.
+  text=$(dc_stable_text "$transcript" "$TAIL_LINES" "$MAX_ATTEMPTS" "$SLEEP_S")
+  attempts=$DC_LAST_ATTEMPTS
 fi
 
 # Loop-guard: if we already blocked once this turn, allow the stop to avoid looping.
@@ -60,14 +79,6 @@ stop_hook_active=$(echo "$input" | jq -r '.stop_hook_active // false' 2>/dev/nul
 if [ "$stop_hook_active" = "true" ]; then
   exit 0
 fi
-
-# Extract the last assistant text block, retrying for the transcript-flush race.
-# Each assistant entry is reduced to a STRING (its joined text blocks) before the
-# array is built, so a non-text entry contributes "" and can never win `last` over
-# a real text block. Assistant content in Claude Code transcripts is always an
-# array; the string/else branches are defensive only.
-text=$(dc_stable_text "$transcript" "$TAIL_LINES" "$MAX_ATTEMPTS" "$SLEEP_S")
-attempts=$DC_LAST_ATTEMPTS
 
 # Skip if the last response has no text: nothing was claimed, nothing to inspect.
 if [ -z "$text" ]; then

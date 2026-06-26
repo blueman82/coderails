@@ -11,14 +11,23 @@ MIN_LEN="${CLAUDE_HOOK_MIN_LEN:-200}"
 . "$(dirname "$0")/lib/discipline_common.sh"
 
 input=$(cat)
-transcript=$(echo "$input" | jq -r '.transcript_path // empty')
+hook_event=$(echo "$input" | jq -r '.hook_event_name // "Stop"' 2>/dev/null)
 
-if [ -z "$transcript" ] || [ ! -f "$transcript" ]; then
-  exit 0
+# SubagentStop: the subagent's final text is available directly in last_assistant_message.
+# Prefer it over transcript parsing — it avoids the flush race and reads the right
+# message. (transcript_path on a SubagentStop payload is the PARENT session transcript,
+# not the subagent's — reading it would check the wrong content.)
+if [ "$hook_event" = "SubagentStop" ]; then
+  text=$(echo "$input" | jq -r '.last_assistant_message // ""' 2>/dev/null)
+  attempts=1
+else
+  transcript=$(echo "$input" | jq -r '.transcript_path // empty')
+  if [ -z "$transcript" ] || [ ! -f "$transcript" ]; then
+    exit 0
+  fi
+  text=$(dc_stable_text "$transcript" "$TAIL_LINES" "$MAX_ATTEMPTS" "$SLEEP_S")
+  attempts=$DC_LAST_ATTEMPTS
 fi
-
-text=$(dc_stable_text "$transcript" "$TAIL_LINES" "$MAX_ATTEMPTS" "$SLEEP_S")
-attempts=$DC_LAST_ATTEMPTS
 
 session_id=$(echo "$input" | jq -r '.session_id // "?"' 2>/dev/null)
 matched_label=0

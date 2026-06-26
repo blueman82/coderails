@@ -1,0 +1,15 @@
+{
+  "session_id": "PLACEHOLDER_SESSION_ID",
+  "transcript_path": "/placeholder/path/to/parent-session.jsonl",
+  "cwd": "/placeholder/cwd",
+  "permission_mode": "bypassPermissions",
+  "agent_id": "PLACEHOLDER_AGENT_ID",
+  "agent_type": "",
+  "effort": {"level": "high"},
+  "hook_event_name": "SubagentStop",
+  "stop_hook_active": false,
+  "agent_transcript_path": "/placeholder/path/to/subagents/agent-PLACEHOLDER_AGENT_ID.jsonl",
+  "last_assistant_message": "PLACEHOLDER_LAST_ASSISTANT_MESSAGE",
+  "background_tasks": [],
+  "session_crons": []
+}
