@@ -16,7 +16,7 @@ allowed-tools: Read, Write, Edit, Glob, Grep, Skill, mcp__mcp-exec__*
 - When reviewing code changes before commit
 - When implementing features or fixing bugs
 
-**Explicitly** (user invokes `/strictcode`):
+**Explicitly** (user invokes `/engineering-principles`):
 - Point at a file or directory to audit and fix
 
 ---
@@ -160,44 +160,6 @@ async function checkReturnContracts(functionName) {
 
 ---
 
-## Phase 3: Semantic Analysis via Scout
-
-Scout provides semantic code search, symbol-graph operations, dead-code detection, and a memory bank for cross-file analysis.
-
-### 3.1 DRY Violation Detection
-
-Use the `scout-search` skill with a function body fragment or signature to find semantically-similar code across the repo. Look for results in files OTHER than the source — those are duplicate candidates.
-
-```
-Skill: scout-search
-Query: <distinctive function body or signature>
-```
-
-**DRY rule:** If `scout-search` returns matches in 2+ files (excluding the source), flag for human review. The smart-search auto-selects strategy (semantic / keyword / regex) per query.
-
-### 3.2 Dead Code Detection
-
-Use the `scout-dead-code` skill to enumerate symbols with no references — YAGNI candidates. WARN the user about false positives (dynamic dispatch, reflection, FFI, public APIs).
-
-```
-Skill: scout-dead-code
-```
-
-### 3.3 Symbol Reference Counts
-
-Use `scout-find-references` for any symbol whose deletion is being considered. Returns deduped call/import sites — more reliable than text grep, less overlap-heavy than running Serena's `find_referencing_symbols` for every symbol.
-
-### 3.4 Memory Recall and Store (optional)
-
-If the project has a scout memory bank (`scout-memory-init` already run):
-- **Recall past patterns:** `scout-memory-search` with terms like "strictcode enforcement refactoring."
-- **Store learnings:** `scout-memory-write` after enforcement, capturing what was fixed and why.
-
-Skip this section entirely if `scout-memory-search` returns "memory bank not initialized" — initialize manually with `scout-memory-init` before relying on persistence.
-
-
----
-
 ## Core Principles (Universal)
 
 Every code change MUST be checked against these six principles:
@@ -282,9 +244,3 @@ StrictCode: <filename>
 
 ---
 
-## Integration with SlimCode
-
-- **SlimCode** (`/slimcode`): Deep LSP + semantic analysis for LOC reduction. Read-only report.
-- **StrictCode** (`/strictcode`): Proactive enforcement of principles and standards. Makes changes.
-
-They complement each other: StrictCode ensures new code follows standards. SlimCode finds deeper structural improvements.
