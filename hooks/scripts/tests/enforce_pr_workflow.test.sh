@@ -283,4 +283,25 @@ T=$(mk_transcript "$(mk_skill_line "coderails:push")")
 check "git push HEAD:maintenance;echo from feature -> allow" ALLOW \
   "$(run "$(payload "git push origin HEAD:maintenance;echo hi" "$T" "$REPO_FEAT")")"
 
+# ── Case 27: a command that only MENTIONS a gated command in a string → ALLOW ─
+# `printf 'gh pr create' > f` writes text; it does not RUN gh pr create. The scope
+# match must key off the command being run, not a substring, or it false-blocks.
+T=$(mk_transcript "$(mk_skill_line "coderails:prep")")
+check "printf mentioning gh pr create -> allow" ALLOW \
+  "$(run "$(payload "printf 'gh pr create' > /tmp/x" "$T")")"
+
+# ── Case 28: prose mentioning a gated command (echo) → ALLOW ─────────────────
+check "echo mentioning gh pr create -> allow" ALLOW \
+  "$(run "$(payload "echo remember to gh pr create later" "$T")")"
+
+# ── Case 29: a gated command CHAINED after another still gates → DENY ────────
+# The fix must not over-correct into a false negative: `cd x && gh pr create` is
+# really running gh pr create and must remain gated.
+check "cd dir && gh pr create (no evidence) -> deny" DENY \
+  "$(run "$(payload "cd sub && gh pr create --title foo" "$T")")"
+
+# ── Case 30: git push chained after cd, on main, no evidence → DENY ──────────
+check "cd dir && git push on main (no evidence) -> deny" DENY \
+  "$(run "$(payload "cd sub && git push" "$T" "$REPO_MAIN")")"
+
 [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails)"; exit 1; }

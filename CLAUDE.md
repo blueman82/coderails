@@ -56,6 +56,23 @@ explicitly at the bottom):
 If you're asked to "make X mandatory," that belongs in a `PreToolUse` hook, not a
 command.
 
+### Enforcement ceiling — what a local hook can and can't guarantee
+
+"Enforced regardless of whether Claude cooperates" has a real ceiling, and
+`enforce_pr_workflow` is the clearest case. That hook checks **evidence of
+invocation** — a `/coderails:push` or `/pr-review-toolkit:review-pr` step appears
+in the transcript — **not evidence of completion**. A hollow invocation (the step
+ran but did nothing, or errored) still satisfies it. More fundamentally, a hook
+runs inside the agent's own trust domain: anything the hook checks, the agent can
+also satisfy directly, because there is no privilege boundary between them. So
+treat these gates as a **redirect-and-audit layer** — they steer a cooperating
+agent onto the workflow and leave a greppable trail in `discipline.log` — not as a
+tamper-proof barrier. The real "no unreviewed change reaches `main`" guarantee
+lives **server-side: GitHub branch protection** (required PR + required reviews +
+no direct pushes), which no local agent can fake. The local hook complements
+branch protection; it does not replace it. (The same honest boundary applies to
+the Stop-hook gates — they can force a declared step to appear, not to be real.)
+
 ### Skills↔hooks seam convention
 
 When a skill instructs an action that a hook gates — e.g. `git merge`/`gh pr create`/`gh pr merge` → `enforce_pr_workflow`; code-file & plugin-source (`SKILL.md`/command) edits on main → `no_edit_on_main`; `git commit` → `test_gate` — the skill must name the gating hook and the resolution path (what the user needs to do, or what bypass flag satisfies it). When you add a hook that gates a common action, update the skills that instruct it.

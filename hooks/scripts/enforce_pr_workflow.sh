@@ -29,25 +29,31 @@ gate_safe_passthrough() {
 }
 
 gate_in_scope() {
-  # Only act on `gh pr create`, `gh pr merge`, `git merge`, or `git push`.
-  # Use `\bgit +merge([[:space:]]|$)` rather than `\bgit +merge\b` so that
-  # `git merge-base`, `git merge-file`, and `git merge-tree` (read-only plumbing)
-  # are not matched — those are never branch-integration commands. The same anchor
-  # on `git push` keeps the form consistent (no `git push-*` plumbing exists to exclude).
-  if ! printf '%s' "$cmd" | grep -qE '\bgh +pr +(create|merge)\b|\bgit +merge([[:space:]]|$)|\bgit +push([[:space:]]|$)'; then
-    exit 0
-  fi
-  if printf '%s' "$cmd" | grep -qE '\bgh +pr +create\b'; then
-    subcommand="create"
-  elif printf '%s' "$cmd" | grep -qE '\bgh +pr +merge\b'; then
-    subcommand="merge"
-  elif printf '%s' "$cmd" | grep -qE '\bgit +merge([[:space:]]|$)'; then
-    subcommand="git_merge"
-  elif printf '%s' "$cmd" | grep -qE '\bgit +push([[:space:]]|$)'; then
-    subcommand="git_push"
-  else
-    exit 0
-  fi
+  # Only act on `gh pr create`, `gh pr merge`, `git merge`, or `git push` — and
+  # only when one is the command actually being RUN, not a substring mentioned
+  # inside an argument. Split the command on shell separators (; | & && ||) and
+  # test whether any segment, after leading whitespace, BEGINS with a gated
+  # command. This fixes the false-positive where e.g. `printf 'gh pr create' > f`
+  # (writing text) was blocked, while still catching chained forms like
+  # `cd x && gh pr create`. The `([[:space:]]|$)` tail on `git merge`/`git push`
+  # excludes read-only plumbing (`git merge-base`/`-file`/`-tree`).
+  # Known limit: a gated command wrapped in a subshell `(gh pr create)` or behind
+  # an env/command prefix (`VAR=x gh ...`) is not parsed — the same "we don't
+  # parse every shell form" stance as the refspec note in gate_targets_main.
+  subcommand=""
+  local seg
+  while IFS= read -r seg; do
+    seg="${seg#"${seg%%[![:space:]]*}"}"   # strip leading whitespace
+    if   [[ "$seg" =~ ^gh[[:space:]]+pr[[:space:]]+create([[:space:]]|$) ]]; then subcommand="create";    break
+    elif [[ "$seg" =~ ^gh[[:space:]]+pr[[:space:]]+merge([[:space:]]|$)  ]]; then subcommand="merge";     break
+    elif [[ "$seg" =~ ^git[[:space:]]+merge([[:space:]]|$) ]];             then subcommand="git_merge"; break
+    elif [[ "$seg" =~ ^git[[:space:]]+push([[:space:]]|$) ]];              then subcommand="git_push";  break
+    fi
+  done <<EOF
+$(printf '%s' "$cmd" | awk '{gsub(/&&|\|\||[;|&]/, "\n"); print}')
+EOF
+  # No gated command was actually invoked → stand aside.
+  [ -z "$subcommand" ] && exit 0
   # $subcommand is also read by gate_targets_main and enforce_required_step.
 }
 
