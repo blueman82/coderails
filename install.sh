@@ -462,24 +462,6 @@ fi
 
 printf '\n'
 
-# ── 7. Failure-log template ────────────────────────────────────────────────────
-printf "${BOLD}  FAILURE-LOG TEMPLATE${NC}\n"
-hline
-
-if [[ "$DRY_RUN" -eq 1 ]]; then
-  flash_dry "cp failure_log.md → $HOME/.claude/failure_log.md (skip if exists)"
-else
-  dest="$HOME/.claude/failure_log.md"
-  if [[ -f "$dest" ]]; then
-    flash_skip "failure_log.md (already present, preserving your data)"
-  else
-    cp "$PLUGIN_DIR/templates/failure_log.md" "$dest"
-    flash_cp "failure_log.md"
-  fi
-fi
-
-printf '\n'
-
-# ── 8. Claude Code steps ──────────────────────────────────────────────────────
+# ── 7. Claude Code steps ──────────────────────────────────────────────────────
 print_claude_steps
 victory

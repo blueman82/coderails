@@ -56,7 +56,7 @@ It does everything that has to happen outside Claude Code:
   touches dirs that are stale-named *and* contain no files — your real
   marketplaces are never at risk). Backups are written before each edit.
 - appends the discipline rules to `~/.claude/CLAUDE.md` (idempotent)
-- seeds four feedback memories and a `failure_log.md` template (won't overwrite)
+- seeds four feedback memories (won't overwrite)
 - arms the scripts (`chmod +x`)
 
 `bash install.sh --dry-run` shows everything it would do without touching anything.
@@ -120,4 +120,4 @@ then in Claude Code:
 /plugin uninstall coderails
 ```
 
-Your `failure_log.md`, `discipline.log`, and memory entries are preserved (your data).
+Your `discipline.log` and memory entries are preserved (your data).

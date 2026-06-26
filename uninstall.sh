@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # coderails uninstall — reverses what install.sh changed in your dotfiles.
 # Does NOT remove the plugin itself: run /plugin uninstall coderails for that.
-# Does NOT delete your failure_log.md, discipline.log, or memory entries (your data; preserved).
+# Does NOT delete your discipline.log or memory entries (your data; preserved).
 
 set -u
 
@@ -44,7 +44,6 @@ fi
 
 echo
 echo "=== Note: the following are PRESERVED — your data ==="
-echo "  · ~/.claude/failure_log.md   (your accumulated observations)"
 echo "  · ~/.claude/discipline.log   (diagnostic data)"
 echo "  · feedback memory files in ~/.claude/projects/*/memory/"
 echo

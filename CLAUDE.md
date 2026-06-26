@@ -36,7 +36,6 @@ commands/*.md                   → slash commands (frontmatter + prose instruct
 skills/*/SKILL.md               → skills with triggering descriptions
 instructions/                   → the discipline rules appended to ~/.claude/CLAUDE.md
 starter-memory/                 → feedback memories seeded into the user's memory dir
-templates/failure_log.md        → seeded once, never overwritten
 ```
 
 `${CLAUDE_PLUGIN_ROOT}` in `hooks.json` resolves to this repo's root at runtime —
@@ -189,10 +188,10 @@ These are the things most likely to need editing for your project:
   `~/.claude/discipline.log`. `bash install.sh --dry-run` shows what the
   installer would touch without changing anything.
 - **`install.sh` is idempotent** — re-running won't duplicate CLAUDE.md edits or
-  overwrite seeded memories / `failure_log.md`. Preserve that property.
+  overwrite seeded memories. Preserve that property.
 - **`uninstall.sh` must reverse exactly what `install.sh` adds** (CLAUDE.md
-  block, settings keys) while preserving user data (`failure_log.md`,
-  `discipline.log`, memories). Keep the two scripts in lockstep.
+  block, settings keys) while preserving user data (`discipline.log`,
+  memories). Keep the two scripts in lockstep.
 - The discipline rules in `instructions/self-checking-discipline.md` are the
   authoritative copy that `install.sh` appends to `~/.claude/CLAUDE.md`; edit the
   instructions file, not the installed copy.
