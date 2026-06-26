@@ -34,28 +34,39 @@ repo, so the mismatch never bit.
 
 Gated-ness is computed from the **file's path**; the branch is computed from the
 **cwd's repo**. Fix: make **every** decision key off the **file's own repo**, and
-gate only files that genuinely belong to a plugin.
+require the plugin marker for the markdown arm (the one whose dir-names collide
+with non-plugin repos).
 
 ## Decision
 
-**Both decisions key off the file's repo, and the plugin marker scopes both gated
-arms.** A file is gated only when ALL hold:
+**Both decisions key off the file's repo. The plugin marker scopes ONLY the
+markdown arm — the code arm stays a universal discipline.**
 
-1. Its path matches a gated pattern (code extension OR markdown plugin-source).
-2. Its **own repo** is on `main`/`master`.
-3. Its **own repo** is a plugin — i.e. the repo root contains
-   `.claude-plugin/plugin.json`.
+Two gated arms, two rules:
 
-The marker is the robust discriminator. `${CLAUDE_PLUGIN_ROOT}` is **not** usable
-here: it points at the *installed* plugin copy (`~/.claude/plugins/...`), not the
-working checkout being edited.
+| Arm | Patterns | Gate when |
+|---|---|---|
+| **Code** | `.py .ts .tsx .js .jsx .go` | the **file's repo** is on `main`/`master` |
+| **Markdown plugin-source** | `*/skills/*/SKILL.md`, `*/commands/*.md` | the file's repo is on `main`/`master` **AND** its root has `.claude-plugin/plugin.json` |
 
-### Intended consequence
+Rationale:
 
-This narrows the hook from "no code edits on main in **any** repo" to "no source
-edits on main **only inside plugin repos** (those carrying `.claude-plugin/plugin.json`)."
-A `.py` edit on `main` in an unrelated, non-plugin repo is **no longer blocked**.
-This is deliberate (per the "only ever protect coderails-style plugin repos" choice).
+- **No protection gap.** Code-on-main stays blocked in *every* repo, exactly as
+  before #44. The marker is applied only to the markdown arm, whose dir-names
+  (`commands/`, `skills/`) legitimately appear in non-plugin repos (wikis, docs)
+  where those `.md` files are documentation, not plugin source.
+- The marker is the robust discriminator for "is this genuine plugin source."
+  `${CLAUDE_PLUGIN_ROOT}` is **not** usable: it points at the *installed* plugin
+  copy (`~/.claude/plugins/...`), not the working checkout being edited.
+
+### Net behaviour change vs. today
+
+1. **Wiki (and any non-plugin) `commands/*.md` / `SKILL.md` on main → now allowed.**
+   This is the bug fix.
+2. **Branch check keyed to the file's repo instead of cwd** (both arms). This only
+   makes things *more* correct — it removes a false-positive (editing a
+   feature-branch file while cwd is on main) and closes the latent false-negative.
+   It opens **no** gap.
 
 ## Behaviour matrix
 
@@ -65,8 +76,8 @@ This is deliberate (per the "only ever protect coderails-style plugin repos" cho
 | coderails `app.py` | main | yes | **DENY** |
 | coderails `commands/push.md` | feature | yes | allow |
 | wiki `commands/init.md` | main | **no** | **allow** (fixes reported bug) |
-| wiki `commands/init.md` | feature | no | allow |
-| non-plugin repo `app.py` | main | no | **allow** (intended consequence) |
+| wiki `skills/foo/SKILL.md` | main | no | **allow** |
+| non-plugin repo `app.py` | main | no | **DENY** (no gap — code discipline is universal) |
 | coderails `commands/push.md`, cwd = other repo on feature | main (file's repo) | yes | **DENY** (fixes false-negative) |
 | coderails `README.md` / `docs/*.md` / `*.json` | main | yes | allow (unchanged carve-out) |
 
@@ -74,16 +85,30 @@ This is deliberate (per the "only ever protect coderails-style plugin repos" cho
 
 ```
 file = payload.tool_input.file_path            # absolute or relative; empty -> exit 0
-# 1. Pattern gate (unchanged): code ext OR markdown plugin-source; else exit 0.
-# 2. Resolve the file's own repo:
-cwd     = payload.cwd or PWD                    # used ONLY to resolve a relative path
+
+# 1. Classify into an arm; non-gated paths exit 0.
+case "$file" in
+  *.py|*.ts|*.tsx|*.js|*.jsx|*.go)              arm=code ;;
+  */skills/*/SKILL.md|skills/*/SKILL.md)        arm=md ;;
+  */commands/*.md|commands/*.md)                arm=md ;;
+  *) exit 0 ;;
+esac
+
+# 2. Resolve the file's OWN repo (cwd used only to resolve a relative path):
+cwd     = payload.cwd or PWD
 absfile = (file starts with "/") ? file : "$cwd/$file"
 filedir = dirname(absfile)
-# 3. Branch check on the FILE's repo (not cwd's):
-branch  = git -C "$filedir" branch --show-current ; case not main/master -> exit 0
-# 4. Plugin-marker check on the FILE's repo:
-root    = git -C "$filedir" rev-parse --show-toplevel
-[ -f "$root/.claude-plugin/plugin.json" ] || exit 0
+
+# 3. Branch check on the FILE's repo (not cwd's) — applies to BOTH arms:
+branch  = git -C "$filedir" branch --show-current
+case "$branch" in main|master) ;; *) exit 0 ;; esac
+
+# 4. Markdown arm ONLY: require the plugin marker in the file's repo:
+if [ "$arm" = "md" ]; then
+  root = git -C "$filedir" rev-parse --show-toplevel
+  [ -f "$root/.claude-plugin/plugin.json" ] || exit 0
+fi
+
 # 5. Otherwise: emit permissionDecision=deny (unchanged reason/format + discipline log).
 ```
 
@@ -96,22 +121,25 @@ form) ignore `cwd` entirely.
 `no_edit_on_main.test.sh` changes:
 
 - **Add the marker to the existing `$REPO`** (`.claude-plugin/plugin.json`) so it
-  represents a plugin repo — the existing `deny` cases stay `deny`.
+  represents a plugin repo — the existing markdown `deny` cases (`commands/*.md`,
+  `SKILL.md`) stay `deny`. (Existing code-extension `deny` cases stay `deny`
+  regardless of the marker, since the code arm doesn't check it.)
 - **Add a second marker-less repo `$WIKI`** (its own git repo, on main, with
   `commands/` and `skills/` dirs, no `.claude-plugin/`). New cases:
   - `$WIKI` `commands/x.md` on main → **allow** (the reported bug; fails before fix)
   - `$WIKI` `skills/foo/SKILL.md` on main → **allow**
-  - `$WIKI` `app.py` on main → **allow** (the intended consequence; fails before fix)
+  - `$WIKI` `app.py` on main → **DENY** (proves the code arm has NO gap)
 - **False-negative case:** payload whose `file_path` is in `$REPO` (plugin, on main)
   while `cwd` points at a *different* repo on a feature branch → **DENY**
   (fails before fix).
-- All existing cases stay green after the `$REPO` gets its marker.
+- All existing cases stay green after `$REPO` gets its marker.
 
 ## Docs to update
 
-- `CLAUDE.md` hook-map row for `no_edit_on_main` — note the marker-scoping + file's-repo keying.
+- `CLAUDE.md` hook-map row for `no_edit_on_main` — note the marker-scoping of the
+  markdown arm + file's-repo keying.
 - `docs/REFERENCE.md` `no_edit_on_main` row — same.
-- Hook script header comment — explain file's-repo keying and the marker.
+- Hook script header comment — explain file's-repo keying and the markdown-arm marker.
 
 ## Out of scope / guardrails
 
