@@ -93,6 +93,8 @@ digraph brainstorming {
 - Can someone understand what a unit does without reading its internals? Can you change the internals without breaking consumers? If not, the boundaries need work.
 - Smaller, well-bounded units are also easier for you to work with - you reason better about code you can hold in context at once, and your edits are more reliable when files are focused. When a file grows large, that's often a signal that it's doing too much.
 
+**Design against engineering principles:** as the design takes shape, pressure-test it against YAGNI (cut speculative features), KISS (no over-engineered abstractions), DRY/SSOT (one source of truth), Fail-Fast, and Law of Demeter. These are cheapest to honour now, in the design, not after code review. The `/engineering-principles` skill is the rubric.
+
 **Working in existing codebases:**
 
 - Explore the current structure before proposing changes. Follow existing patterns.
