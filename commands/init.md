@@ -32,6 +32,8 @@ Create `workflow.config.yaml` in the current project directory. This file is rea
    - **Worktree base path** — where sibling worktrees will be created. Default: parent directory of the git root (i.e. `dirname $(git rev-parse --show-toplevel)`). Show the resolved default to the user so they can confirm or override.
    - **Worktree script** (path from project root, e.g. `./worktree-add`) — or "none"
    - **Strictcode paths** (comma-separated glob patterns, e.g. `**/container.py,**/typed_di/**`) — or "none"
+    - **Strictcode skill** (the slash-command to run, e.g. `/strictcode-python`, `/strictcode-go`, `/strictcode-ts`) — detect a sensible default: look for `go.mod` → `/strictcode-go`, `package.json` with `.ts` files → `/strictcode-ts`, otherwise `/strictcode-python`. Ask and let the user override. Answer "none" to disable strictcode entirely.
+    - **Strictcode skill** (the slash-command to run, e.g. `/strictcode-python`, `/strictcode-go`, `/strictcode-ts`) — detect a sensible default: look for `go.mod` → `/strictcode-go`, `package.json` with `.ts` files → `/strictcode-ts`, otherwise `/strictcode-python`. Ask and let the user override. Answer "none" to disable strictcode entirely.
 
 6. Write `workflow.config.yaml` at the resolved config path from step 3 with the collected values. Use `null` for any field answered "none".
 
@@ -57,6 +59,7 @@ jira:
 strictcode_paths:
   - "**/container.py"
 # or: strictcode_paths: null
+strictcode_skill: "/strictcode-python"   # nil = skip strictcode entirely; /strictcode-go, /strictcode-ts also supported
 ```
 
 7. Report the path written and remind the user to commit it.

@@ -1,5 +1,5 @@
 ---
-allowed-tools: SlashCommand(/coderails:prep), SlashCommand(/coderails:push), SlashCommand(/pr-review-toolkit:review-pr), SlashCommand(/coderails:merge), SlashCommand(/wiki-ingest), SlashCommand(/wiki-lint), SlashCommand(/strictcode-python), Bash(git*), Bash(./worktree-add*), Bash(cat*)
+allowed-tools: SlashCommand(/coderails:prep), SlashCommand(/coderails:push), SlashCommand(/pr-review-toolkit:review-pr), SlashCommand(/coderails:merge), SlashCommand(/wiki-ingest), SlashCommand(/wiki-lint), SlashCommand(/strictcode-python), SlashCommand(/strictcode-go), SlashCommand(/strictcode-ts), Bash(git*), Bash(./worktree-add*), Bash(cat*)
 argument-hint: <branch> "<description>"
 description: Orchestrate the full feature workflow — prep → code → push → review → merge → wiki-ingest/lint
 ---
@@ -27,7 +27,7 @@ $ARGUMENTS
 This command is the umbrella for the canonical code-change workflow. The rules it encodes:
 
 - **Worktree before code**: create a worktree for every feature/bug branch — never edit on main
-- **Strictcode pre-flight**: run `/strictcode-python` before pushing if the diff touches paths listed in `config.strictcode_paths` (or any file with ≥20 lines changed)
+- **Strictcode pre-flight**: run `config.strictcode_skill` (default: `/strictcode-python`) before pushing if the diff touches paths listed in `config.strictcode_paths` (or any file with ≥20 lines changed)
 - **Adversarial PR review**: use `/pr-review-toolkit:review-pr`, not manual Agent fan-out — runs 4+ specialist agents in parallel
 - **Apply findings inline**: on authorized ship-it, apply blocking and worthwhile review findings directly; do not re-ask per finding
 - **Wiki after merge**: after every merge run BOTH `/wiki-ingest` AND `/wiki-lint` (if `config.wiki_path` is non-null)
@@ -136,7 +136,7 @@ Hand control back to the user. They will:
 
 Do not proceed to Phase 3 until the user gives that signal. Do not nag.
 
-**Pre-flight when the user signals ready:** if `config.strictcode_paths` is non-null and the cumulative diff against the base branch touches any of those paths — or any file with ≥20 lines changed — run `/strictcode-python` on those files before calling `/push`.
+**Pre-flight when the user signals ready:** if `config.strictcode_paths` is non-null and the cumulative diff against the base branch touches any of those paths — or any file with ≥20 lines changed — run `config.strictcode_skill` (default: `/strictcode-python`) on those files before calling `/push`.
 
 Note: `/push` already runs this pre-flight itself for paths in `config.strictcode_paths`, so if you forget, `/push` will catch it. The reason to also run it here is to catch non-config-listed large diffs that `/push`'s pre-flight misses.
 

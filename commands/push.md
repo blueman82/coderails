@@ -20,7 +20,7 @@ Config: !`GIT_ROOT=$(git rev-parse --show-toplevel 2>/dev/null) && { cat "$GIT_R
 
 If **no files match**, skip to push.
 
-If **files match**, run `/strictcode-python` on the changed files matching those patterns.
+If **files match**, run `config.strictcode_skill` (default: `/strictcode-python`) on the changed files matching those patterns.
 
 ### Interpreting findings
 
