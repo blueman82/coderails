@@ -48,11 +48,21 @@ RESP_NO_DNV="This is a response that edits files but has no Did Not Verify secti
 # Case 1: no transcript file -> allow
 check "no transcript -> allow" 0 "$(run '{"transcript_path":"/nonexistent.jsonl","session_id":"S1","stop_hook_active":false}')"
 
-# Case 2: no files edited (file_count=0) -> allow even with untagged DNV
-T=$(mk_transcript_no_edit "Some text.
+# Case 2: no files edited + NO DNV section -> allow (don't nag pure-conversation turns)
+T=$(mk_transcript_no_edit "Some text. (verified)")
+check "no files edited, no DNV section -> allow" 0 "$(run "$(payload "$T")")"
+
+# Case 2b: no files edited + untagged DNV bullet -> BLOCK (DNV section present = enforce it)
+T=$(mk_transcript_no_edit "Some text. (verified)
 ## Did Not Verify
 - untagged item about something")
-check "no files edited -> allow" 0 "$(run "$(payload "$T")")"
+check "no files edited + untagged DNV -> block" 2 "$(run "$(payload "$T")")"
+
+# Case 2c: no files edited + all bullets tagged (unverifiable) -> allow
+T=$(mk_transcript_no_edit "Some text. (verified)
+## Did Not Verify
+- (unverifiable: prod-only observation) whether the deploy actually succeeded")
+check "no files edited + all bullets tagged -> allow" 0 "$(run "$(payload "$T")")"
 
 # Case 3: stop_hook_active=true -> allow (loop-guard prevents re-block)
 T=$(mk_transcript "Some text.

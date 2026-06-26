@@ -14,11 +14,16 @@
 # Checks run top to bottom; the first that matches decides. All but the last let
 # the model stop — only an untagged DNV item blocks.
 #   skip  — no transcript to inspect                       → allow stop
-#   skip  — no files edited this turn (conversation only)  → allow stop
 #   skip  — already blocked once this turn (loop-guard)    → allow stop
 #   skip  — the last response has no text                  → allow stop
 #   skip  — no "## Did Not Verify" bullets                 → allow stop
 #   BLOCK — any untagged DNV bullet                        → deferred item left open
+#
+# file_count is NOT used as a skip gate on the Stop path. A DNV section that
+# exists must be policed regardless of whether files were edited this turn —
+# a pure-conversation response can carry deferred verifiable claims too.
+# (file_count was previously used to gate the entire check; that gate has been
+# removed to close the escape hatch.)
 
 LOG_FILE="${CLAUDE_DISCIPLINE_LOG:-$HOME/.claude/discipline.log}"
 TAIL_LINES="${CLAUDE_HOOK_TAIL_LINES:-300}"
@@ -56,14 +61,10 @@ else
     exit 0
   fi
 
-  # Skip pure-conversation turns: if no files were edited, there is nothing to police.
-  # Counts unique Write/Edit/MultiEdit targets; a single edited file is enough to
-  # bring the response in scope (a one-file change can still carry unverified claims).
+  # Count unique Write/Edit/MultiEdit targets. file_count is retained for the
+  # log line but is no longer used as a skip gate — a DNV section that exists
+  # is policed regardless of whether files were edited this turn.
   file_count=$(dc_file_count "$transcript")
-
-  if [ "$file_count" -lt 1 ]; then
-    exit 0
-  fi
 
   # Extract the last assistant text block, retrying for the transcript-flush race.
   # Each assistant entry is reduced to a STRING (its joined text blocks) before the
