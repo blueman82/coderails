@@ -29,7 +29,7 @@ allowed-tools: Read, Write, Edit, Glob, Grep, Skill, mcp__mcp-exec__*
 |----------------|--------------|
 | `.go` | Execute `engineering-principles-go` skill |
 | `.py` | Execute `engineering-principles-python` skill |
-| `.ts`, `.tsx` | Execute `strictcode-ts` skill |
+| `.ts`, `.tsx` | Execute `engineering-principles-ts` skill |
 
 **The language-specific skill provides idioms, patterns, and examples. This coordinator provides universal principles and MCP analysis.**
 
@@ -229,7 +229,7 @@ Every code change MUST be checked against these six principles:
 Read the file extension. **Invoke the matching language skill:**
 - `.go` → `engineering-principles-go`
 - `.py` → `engineering-principles-python`
-- `.ts`/`.tsx` → `strictcode-ts`
+- `.ts`/`.tsx` → `engineering-principles-ts`
 
 ### Step 2: Analyze with MCP Tools
 - **If Serena available:** Run symbol overview, reference counting, depth analysis (Phase 2)
