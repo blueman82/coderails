@@ -1,7 +1,7 @@
 # Design: Vendor `engineering-principles` into coderails + 3-touchpoint wiring
 
 **Date:** 2026-06-26
-**Status:** Approved (design) — pending implementation plan
+**Status:** Approved (design) — plan written (`docs/coderails/plans/engineering-principles.md`), pending implementation
 **Topic:** Bring the global `strictcode` skill family into coderails, rename it to
 `engineering-principles`, and wire it into three workflow stages: planning,
 pre-push, and PR review.
