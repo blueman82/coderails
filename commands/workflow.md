@@ -146,6 +146,8 @@ Execute in order — do not pause between these:
 
 1. `/coderails:push` — stages, commits, pushes, opens PR with branch-protection reviewers, auto-resolves JIRA on PR creation (if `config.jira` non-null). Capture the PR URL from the output.
 2. `/pr-review-toolkit:review-pr all` — runs the four specialist agents (code-reviewer, pr-test-analyzer, silent-failure-hunter, type-design-analyzer) in parallel.
+2b. **Verify engineering principles** — run `/engineering-principles` on the cumulative diff against the base branch. Apply the same rule as `/push`'s pre-flight: deviations from documented architectural conventions are blocking; style notes are non-blocking. Feed any blocking finding into step 3's apply loop.
+2c. **Simplify** — run `/simplify` on the diff (built-in command). `review-pr`'s own `code-simplifier` agent only runs "after passing review" and is not guaranteed, so this is the explicit simplify pass; route its changes through step 3.
 3. Apply worthwhile findings inline — do not re-ask per finding. Push the follow-up commit. Classify each finding as:
    - **Blocking** (apply silently): correctness bug, protocol violation, silent-failure pattern, missing test for changed public contract, missing dependency-injection registration
    - **Worthwhile** (apply silently): readability wins, better names, extracted helpers that clearly reduce duplication
