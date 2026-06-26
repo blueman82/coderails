@@ -55,6 +55,14 @@ After the plan is written, re-read it against the spec:
 
 Fix issues inline. If a spec requirement has no task, add the task.
 
+## Stress-test before implementation (required)
+
+After the plan passes the self-review gate, put it through `/coderails:planning-sequence` before any implementation begins. The sequence runs three stages against the plan — Pre-Parade (success conditions), Premortem (failure modes), Red Team (adversarial challenge) — surfacing weaknesses while they are still cheap to fix on paper rather than after code is written.
+
+Feed it the written plan and the spec it derives from. Fold the findings back into the plan inline: add tasks for gaps it exposes, tighten verify-criteria it shows to be weak, and record any failure mode you consciously accept rather than fix. Only once the plan reflects the sequence's output do you hand off to implementation (`coderails:subagent-driven-development` or `coderails:executing-plans`).
+
+In an agentic multi-agent loop, run the sequence in a delegated agent, not main context (per the agentic-loop skill) — the gate is unchanged, only the venue differs.
+
 ## Plan header
 
 Every plan begins with this header verbatim, before the title:
