@@ -108,11 +108,14 @@ T=$(mk_transcript "$(mk_skill_line "coderails:push")")
 check "gh pr merge, no review-pr -> deny" DENY \
   "$(run "$(payload "gh pr merge 42 --squash" "$T")")"
 
-# ── Case 5: gh pr merge, review-pr Skill in transcript → ALLOW ───────────────
+# ── Case 5: gh pr merge 42, review-pr Skill with matching args → ALLOW ────────
+# CHANGE B: per-PR check — review-pr must reference the same PR number.
+# mk_skill_line_with_args is defined later; duplicate the inline form here so
+# the test file remains self-contained (helpers are defined before they're used).
 T=$(mk_transcript \
   "$(mk_skill_line "coderails:push")" \
-  "$(mk_skill_line "pr-review-toolkit:review-pr")")
-check "gh pr merge, review-pr skill present -> allow" ALLOW \
+  "$(printf '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Skill","input":{"skill":"pr-review-toolkit:review-pr","args":"42"}}]}}\n')")
+check "gh pr merge 42, review-pr with matching args -> allow" ALLOW \
   "$(run "$(payload "gh pr merge 42 --squash" "$T")")"
 
 # ── Case 6: non-matching gh pr subcommand → ALLOW ────────────────────────────
@@ -303,5 +306,348 @@ check "cd dir && gh pr create (no evidence) -> deny" DENY \
 # ── Case 30: git push chained after cd, on main, no evidence → DENY ──────────
 check "cd dir && git push on main (no evidence) -> deny" DENY \
   "$(run "$(payload "cd sub && git push" "$T" "$REPO_MAIN")")"
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# CHANGE A: subagent transcript — scan agent_transcript_path when present
+# ────────────────────────────────────────────────────────────────────────────
+
+# Helper: build a PreToolUse payload with both transcript paths.
+# parent_transcript_path is a real file (has no evidence); agent_transcript_path
+# is the subagent's own transcript.
+payload_both_transcripts() {  # command parent_transcript agent_transcript cwd_override
+  local cmd="$1" ptp="$2" atp="$3" cwd_dir="${4:-$REPO}"
+  printf '{"tool_name":"Bash","tool_input":{"command":"%s"},"cwd":"%s","transcript_path":"%s","agent_transcript_path":"%s"}' \
+    "$cmd" "$cwd_dir" "$ptp" "$atp"
+}
+
+# Parent transcript with NO push evidence (only prep step).
+PARENT_NO_EVIDENCE=$(mk_transcript "$(mk_skill_line "coderails:prep")")
+
+# ── Case 31: subagent: push.sh evidence ONLY in agent_transcript_path → ALLOW
+# transcript_path (parent) has no push evidence; agent_transcript_path does.
+# Currently FALSE-BLOCKS because only transcript_path is scanned.
+SUBAGENT_T=$(mk_transcript "$(mk_bash_line "bash scripts\/push.sh main")")
+check "subagent: push.sh only in agent_transcript_path -> allow" ALLOW \
+  "$(run "$(payload_both_transcripts "gh pr create --title foo" "$PARENT_NO_EVIDENCE" "$SUBAGENT_T")")"
+
+# ── Case 32: subagent: evidence only in PARENT transcript_path → ALLOW ────────
+# Push evidence is in parent transcript; agent transcript has none. Should allow.
+PARENT_PUSH=$(mk_transcript "$(mk_bash_line "bash scripts\/push.sh main")")
+AGENT_NO_EVIDENCE=$(mk_transcript "$(mk_skill_line "coderails:prep")")
+check "subagent: push.sh only in parent transcript_path -> allow" ALLOW \
+  "$(run "$(payload_both_transcripts "gh pr create --title foo" "$PARENT_PUSH" "$AGENT_NO_EVIDENCE")")"
+
+# ── Case 33: subagent: review-pr only in agent_transcript → ALLOW (gh pr merge)
+# transcript_path (parent) has no review-pr; agent_transcript_path does.
+SUBAGENT_REVIEW=$(mk_transcript "$(mk_skill_line "pr-review-toolkit:review-pr")")
+check "subagent: review-pr only in agent_transcript_path -> allow (gh pr merge)" ALLOW \
+  "$(run "$(payload_both_transcripts "gh pr merge --squash" "$PARENT_NO_EVIDENCE" "$SUBAGENT_REVIEW")")"
+
+# ── Case 34: subagent: no evidence in either transcript → DENY ───────────────
+AGENT_NO_EVIDENCE2=$(mk_transcript "$(mk_skill_line "coderails:prep")")
+check "subagent: no evidence in either transcript -> deny (gh pr create)" DENY \
+  "$(run "$(payload_both_transcripts "gh pr create --title foo" "$PARENT_NO_EVIDENCE" "$AGENT_NO_EVIDENCE2")")"
+
+# ────────────────────────────────────────────────────────────────────────────
+# CHANGE B: per-PR consume-on-use review
+# ────────────────────────────────────────────────────────────────────────────
+
+# Helper: build a Skill line with args (for review-pr with PR number).
+mk_skill_line_with_args() {  # skill_name args -> jsonl line
+  printf '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Skill","input":{"skill":"%s","args":"%s"}}]}}\n' "$1" "$2"
+}
+
+# Helper: build a Bash tool_use that represents a past git merge (for consume-on-use).
+mk_bash_git_merge_line() {  # command -> jsonl line
+  printf '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"%s"}}]}}\n' "$1"
+}
+
+# ── Case 35: gh pr merge 42, review-pr with args "42" → ALLOW ────────────────
+T=$(mk_transcript \
+  "$(mk_skill_line "coderails:push")" \
+  "$(mk_skill_line_with_args "pr-review-toolkit:review-pr" "42")")
+check "gh pr merge 42, review-pr with args 42 -> allow" ALLOW \
+  "$(run "$(payload "gh pr merge 42 --squash" "$T")")"
+
+# ── Case 36: gh pr merge 42, review-pr with args "43" (wrong PR) → DENY ─────
+T=$(mk_transcript \
+  "$(mk_skill_line "coderails:push")" \
+  "$(mk_skill_line_with_args "pr-review-toolkit:review-pr" "43")")
+check "gh pr merge 42, review-pr for PR 43 (wrong PR) -> deny" DENY \
+  "$(run "$(payload "gh pr merge 42 --squash" "$T")")"
+
+# ── Case 37: gh pr merge 42, review-pr with no args (legacy, no PR ref) → DENY
+# A plain /review-pr with no PR number does NOT satisfy per-PR requirement.
+T=$(mk_transcript \
+  "$(mk_skill_line "coderails:push")" \
+  "$(mk_skill_line "pr-review-toolkit:review-pr")")
+check "gh pr merge 42, review-pr with no args -> deny" DENY \
+  "$(run "$(payload "gh pr merge 42 --squash" "$T")")"
+
+# ── Case 38: git merge on main, review-pr ran after last git merge → ALLOW ───
+# consume-on-use: review-pr must appear AFTER the last git merge in the transcript.
+T=$(mk_transcript \
+  "$(mk_skill_line "coderails:push")" \
+  "$(mk_bash_git_merge_line "git merge old-feature")" \
+  "$(mk_skill_line "pr-review-toolkit:review-pr")")
+check "git merge on main, review-pr after last git merge -> allow" ALLOW \
+  "$(run "$(payload "git merge new-feature" "$T" "$REPO_MAIN")")"
+
+# ── Case 39: git merge on main, review-pr BEFORE last git merge → DENY ───────
+# review-pr ran, then git merge ran — the review is "consumed"; a fresh review needed.
+T=$(mk_transcript \
+  "$(mk_skill_line "coderails:push")" \
+  "$(mk_skill_line "pr-review-toolkit:review-pr")" \
+  "$(mk_bash_git_merge_line "git merge old-feature")")
+check "git merge on main, review-pr before last git merge (consumed) -> deny" DENY \
+  "$(run "$(payload "git merge new-feature" "$T" "$REPO_MAIN")")"
+
+# ── Case 40: gh pr merge without number (bare) — no number, review-pr no args → ALLOW
+# When gh pr merge is called without an explicit PR number, old behaviour (any review-pr) applies.
+T=$(mk_transcript \
+  "$(mk_skill_line "coderails:push")" \
+  "$(mk_skill_line "pr-review-toolkit:review-pr")")
+check "gh pr merge (bare, no number), review-pr no args -> allow" ALLOW \
+  "$(run "$(payload "gh pr merge --squash" "$T")")"
+
+# ────────────────────────────────────────────────────────────────────────────
+# CHANGE C: positional `git push origin main` from off-main branch
+# ────────────────────────────────────────────────────────────────────────────
+
+# ── Case 41: git push origin main from FEATURE branch, no evidence → DENY ───
+# `git push origin main` is positional (no colon refspec) but targets main.
+# gate_targets_main must parse positional args when not on main.
+T=$(mk_transcript "$(mk_skill_line "coderails:push")")
+check "git push origin main from feature branch, no evidence -> deny" DENY \
+  "$(run "$(payload "git push origin main" "$T" "$REPO_FEAT")")"
+
+# ── Case 42: git push origin main from FEATURE branch, with evidence → ALLOW ─
+T=$(mk_transcript \
+  "$(mk_skill_line "coderails:push")" \
+  "$(mk_skill_line "pr-review-toolkit:review-pr")")
+check "git push origin main from feature branch, with evidence -> allow" ALLOW \
+  "$(run "$(payload "git push origin main" "$T" "$REPO_FEAT")")"
+
+# ── Case 43: git push origin master from FEATURE branch, no evidence → DENY ──
+T=$(mk_transcript "$(mk_skill_line "coderails:push")")
+check "git push origin master from feature branch, no evidence -> deny" DENY \
+  "$(run "$(payload "git push origin master" "$T" "$REPO_FEAT")")"
+
+# ── Case 44: git push origin feature-x (non-main) from main → ALLOW ──────────
+# Positional push to a non-main branch target must NOT be gated.
+T=$(mk_transcript "$(mk_skill_line "coderails:push")")
+check "git push origin feature-x from feature branch -> allow" ALLOW \
+  "$(run "$(payload "git push origin feature-x" "$T" "$REPO_FEAT")")"
+
+# ── Case 45: git push someremote main from feature branch, no evidence → DENY
+T=$(mk_transcript "$(mk_skill_line "coderails:push")")
+check "git push someremote main from feature branch, no evidence -> deny" DENY \
+  "$(run "$(payload "git push someremote main" "$T" "$REPO_FEAT")")"
+
+# ────────────────────────────────────────────────────────────────────────────
+# CHANGE D: flag boundary tightening — --dry-run / --help as word boundaries
+# ────────────────────────────────────────────────────────────────────────────
+
+# ── Case 46: command with --dry-run-data (not --dry-run flag) → DENY ─────────
+# A flag named "--dry-run-data" is NOT --dry-run; current loose match would ALLOW.
+T=$(mk_transcript "$(mk_skill_line "coderails:prep")")
+check "gh pr merge 1 --dry-run-data (not --dry-run flag) -> deny" DENY \
+  "$(run "$(payload "gh pr merge 1 --dry-run-data" "$T")")"
+
+# ── Case 47: command with --helpfulness (not --help flag) → DENY ─────────────
+T=$(mk_transcript "$(mk_skill_line "coderails:prep")")
+check "gh pr create --helpfulness (not --help flag) -> deny" DENY \
+  "$(run "$(payload "gh pr create --helpfulness" "$T")")"
+
+# ── Case 48: actual --dry-run flag still passes through → ALLOW ──────────────
+T=$(mk_transcript "$(mk_skill_line "coderails:prep")")
+check "gh pr merge 1 --dry-run (actual flag) -> allow" ALLOW \
+  "$(run "$(payload "gh pr merge 1 --dry-run" "$T")")"
+
+# ── Case 49: actual --help flag still passes through → ALLOW ─────────────────
+T=$(mk_transcript "$(mk_skill_line "coderails:prep")")
+check "gh pr create --help (actual flag) -> allow" ALLOW \
+  "$(run "$(payload "gh pr create --help" "$T")")"
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# FINDING C1: push-to-main misses flag/refspec/extra-positional forms
+# ────────────────────────────────────────────────────────────────────────────
+
+# ── Case 50: git push -u origin main → DENY ──────────────────────────────────
+T=$(mk_transcript "$(mk_skill_line "coderails:push")")
+check "git push -u origin main, no evidence -> deny" DENY \
+  "$(run "$(payload "git push -u origin main" "$T" "$REPO_FEAT")")"
+
+# ── Case 51: git push --set-upstream origin main → DENY ─────────────────────
+T=$(mk_transcript "$(mk_skill_line "coderails:push")")
+check "git push --set-upstream origin main, no evidence -> deny" DENY \
+  "$(run "$(payload "git push --set-upstream origin main" "$T" "$REPO_FEAT")")"
+
+# ── Case 52: git push -f origin main → DENY ──────────────────────────────────
+T=$(mk_transcript "$(mk_skill_line "coderails:push")")
+check "git push -f origin main, no evidence -> deny" DENY \
+  "$(run "$(payload "git push -f origin main" "$T" "$REPO_FEAT")")"
+
+# ── Case 53: git push --force origin main → DENY ─────────────────────────────
+T=$(mk_transcript "$(mk_skill_line "coderails:push")")
+check "git push --force origin main, no evidence -> deny" DENY \
+  "$(run "$(payload "git push --force origin main" "$T" "$REPO_FEAT")")"
+
+# ── Case 54: git push origin +main (force-refspec, no colon) → DENY ──────────
+T=$(mk_transcript "$(mk_skill_line "coderails:push")")
+check "git push origin +main (force-refspec), no evidence -> deny" DENY \
+  "$(run "$(payload "git push origin +main" "$T" "$REPO_FEAT")")"
+
+# ── Case 55: git push origin refs/heads/main (bare ref) → DENY ───────────────
+T=$(mk_transcript "$(mk_skill_line "coderails:push")")
+check "git push origin refs/heads/main, no evidence -> deny" DENY \
+  "$(run "$(payload "git push origin refs/heads/main" "$T" "$REPO_FEAT")")"
+
+# ── Case 56: git push origin tag v1 main (extra positional) → DENY ───────────
+T=$(mk_transcript "$(mk_skill_line "coderails:push")")
+check "git push origin tag v1 main (extra positional), no evidence -> deny" DENY \
+  "$(run "$(payload "git push origin tag v1 main" "$T" "$REPO_FEAT")")"
+
+# ── Case 57: over-match guard: git push origin main-fix → ALLOW ──────────────
+T=$(mk_transcript "$(mk_skill_line "coderails:push")")
+check "git push origin main-fix -> allow (over-match guard)" ALLOW \
+  "$(run "$(payload "git push origin main-fix" "$T" "$REPO_FEAT")")"
+
+# ── Case 58: over-match guard: git push origin maintenance → ALLOW ───────────
+T=$(mk_transcript "$(mk_skill_line "coderails:push")")
+check "git push origin maintenance -> allow (over-match guard)" ALLOW \
+  "$(run "$(payload "git push origin maintenance" "$T" "$REPO_FEAT")")"
+
+# ── Case 59: over-match guard: git push origin feature → ALLOW ───────────────
+T=$(mk_transcript "$(mk_skill_line "coderails:push")")
+check "git push origin feature -> allow (over-match guard)" ALLOW \
+  "$(run "$(payload "git push origin feature" "$T" "$REPO_FEAT")")"
+
+# ── Case 60: git push +master (force-refspec master) → DENY ──────────────────
+T=$(mk_transcript "$(mk_skill_line "coderails:push")")
+check "git push origin +master (force-refspec), no evidence -> deny" DENY \
+  "$(run "$(payload "git push origin +master" "$T" "$REPO_FEAT")")"
+
+# ── Case 61: git push refs/heads/master → DENY ───────────────────────────────
+T=$(mk_transcript "$(mk_skill_line "coderails:push")")
+check "git push origin refs/heads/master, no evidence -> deny" DENY \
+  "$(run "$(payload "git push origin refs/heads/master" "$T" "$REPO_FEAT")")"
+
+# ────────────────────────────────────────────────────────────────────────────
+# FINDING B1: PR number extraction skips flags before the number
+# ────────────────────────────────────────────────────────────────────────────
+
+# ── Case 62: gh pr merge --squash 42, review-pr for 42 → ALLOW ───────────────
+T=$(mk_transcript \
+  "$(mk_skill_line "coderails:push")" \
+  "$(mk_skill_line_with_args "pr-review-toolkit:review-pr" "42")")
+check "gh pr merge --squash 42, review-pr for 42 -> allow" ALLOW \
+  "$(run "$(payload "gh pr merge --squash 42" "$T")")"
+
+# ── Case 63: gh pr merge --squash 42, review-pr for 99 only → DENY ───────────
+T=$(mk_transcript \
+  "$(mk_skill_line "coderails:push")" \
+  "$(mk_skill_line_with_args "pr-review-toolkit:review-pr" "99")")
+check "gh pr merge --squash 42, review-pr for 99 only -> deny" DENY \
+  "$(run "$(payload "gh pr merge --squash 42" "$T")")"
+
+# ── Case 64: gh pr merge --auto 42, review-pr for 42 → ALLOW ─────────────────
+T=$(mk_transcript \
+  "$(mk_skill_line "coderails:push")" \
+  "$(mk_skill_line_with_args "pr-review-toolkit:review-pr" "42")")
+check "gh pr merge --auto 42, review-pr for 42 -> allow" ALLOW \
+  "$(run "$(payload "gh pr merge --auto 42" "$T")")"
+
+# ── Case 65: gh pr merge --squash --merge 42, review-pr for 42 → ALLOW ───────
+T=$(mk_transcript \
+  "$(mk_skill_line "coderails:push")" \
+  "$(mk_skill_line_with_args "pr-review-toolkit:review-pr" "42")")
+check "gh pr merge --squash --merge 42, review-pr for 42 -> allow" ALLOW \
+  "$(run "$(payload "gh pr merge --squash --merge 42" "$T")")"
+
+# ────────────────────────────────────────────────────────────────────────────
+# FINDING B2: Per-PR match must not match incidental number in args
+# ────────────────────────────────────────────────────────────────────────────
+
+# ── Case 66: gh pr merge 12, review-pr args "fixed 12 bugs" → DENY ───────────
+# "12" is an incidental word in a sentence, not the PR number argument.
+T=$(mk_transcript \
+  "$(mk_skill_line "coderails:push")" \
+  "$(mk_skill_line_with_args "pr-review-toolkit:review-pr" "fixed 12 bugs")")
+check "gh pr merge 12, review-pr args 'fixed 12 bugs' (incidental) -> deny" DENY \
+  "$(run "$(payload "gh pr merge 12" "$T")")"
+
+# ── Case 67: gh pr merge 12, review-pr args "12" (leading token) → ALLOW ─────
+T=$(mk_transcript \
+  "$(mk_skill_line "coderails:push")" \
+  "$(mk_skill_line_with_args "pr-review-toolkit:review-pr" "12")")
+check "gh pr merge 12, review-pr args '12' (leading token) -> allow" ALLOW \
+  "$(run "$(payload "gh pr merge 12" "$T")")"
+
+# ── Case 68: gh pr merge 12, review-pr args "12 --squash" → ALLOW ─────────────
+T=$(mk_transcript \
+  "$(mk_skill_line "coderails:push")" \
+  "$(mk_skill_line_with_args "pr-review-toolkit:review-pr" "12 --squash")")
+check "gh pr merge 12, review-pr args '12 --squash' (leading token) -> allow" ALLOW \
+  "$(run "$(payload "gh pr merge 12" "$T")")"
+
+# ── Case 69: boundary: review-pr args "420" must NOT satisfy PR 42 → DENY ────
+T=$(mk_transcript \
+  "$(mk_skill_line "coderails:push")" \
+  "$(mk_skill_line_with_args "pr-review-toolkit:review-pr" "420")")
+check "gh pr merge 42, review-pr args '420' (boundary check) -> deny" DENY \
+  "$(run "$(payload "gh pr merge 42" "$T")")"
+
+# ── Case 70: boundary: review-pr args "142" must NOT satisfy PR 42 → DENY ────
+T=$(mk_transcript \
+  "$(mk_skill_line "coderails:push")" \
+  "$(mk_skill_line_with_args "pr-review-toolkit:review-pr" "142")")
+check "gh pr merge 42, review-pr args '142' (boundary check) -> deny" DENY \
+  "$(run "$(payload "gh pr merge 42" "$T")")"
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# ADDITION: cross-transcript timestamp ordering (B ordering fix)
+# ────────────────────────────────────────────────────────────────────────────
+
+# Helper: build a timestamped assistant entry.
+# Timestamps are ISO-8601; order matters for the security fix.
+mk_bash_line_ts() {  # command timestamp -> jsonl line
+  printf '{"type":"assistant","timestamp":"%s","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"%s"}}]}}\n' "$2" "$1"
+}
+mk_skill_line_ts() {  # skill_name timestamp -> jsonl line
+  printf '{"type":"assistant","timestamp":"%s","message":{"content":[{"type":"tool_use","name":"Skill","input":{"skill":"%s"}}]}}\n' "$2" "$1"
+}
+
+# ── Case 71: cross-transcript stale review — review-pr timestamp BEFORE git merge → DENY
+# Scenario: parent transcript has git merge at T2; agent transcript has review-pr at T1 (T1 < T2).
+# By array-concatenation order (parent-first), review-pr lands at a higher index than the merge
+# and the old code would ALLOW. With timestamp sorting, review-pr is before the merge → DENY.
+PARENT_MERGE=$(mk_transcript \
+  "$(mk_bash_line_ts "git merge feature-branch" "2026-01-01T10:00:00Z")")
+AGENT_STALE_REVIEW=$(mk_transcript \
+  "$(mk_skill_line_ts "pr-review-toolkit:review-pr" "2026-01-01T09:00:00Z")")
+check "cross-transcript: review-pr timestamp BEFORE git merge -> deny" DENY \
+  "$(run "$(payload_both_transcripts "git merge new-feature" "$PARENT_MERGE" "$AGENT_STALE_REVIEW" "$REPO_MAIN")")"
+
+# ── Case 72: cross-transcript fresh review — review-pr timestamp AFTER git merge → ALLOW
+PARENT_MERGE2=$(mk_transcript \
+  "$(mk_bash_line_ts "git merge feature-branch" "2026-01-01T10:00:00Z")")
+AGENT_FRESH_REVIEW=$(mk_transcript \
+  "$(mk_skill_line_ts "pr-review-toolkit:review-pr" "2026-01-01T11:00:00Z")")
+check "cross-transcript: review-pr timestamp AFTER git merge -> allow" ALLOW \
+  "$(run "$(payload_both_transcripts "git merge new-feature" "$PARENT_MERGE2" "$AGENT_FRESH_REVIEW" "$REPO_MAIN")")"
+
+# ────────────────────────────────────────────────────────────────────────────
+# ADDITION: over-match guard for flagged push to non-main branch
+# ────────────────────────────────────────────────────────────────────────────
+
+# ── Case 73: git push -u origin feature-x → ALLOW (flagged push, non-main target)
+# The C1 token-scan must not gate a flag-bearing push to a non-main destination.
+T=$(mk_transcript "$(mk_skill_line "coderails:push")")
+check "git push -u origin feature-x -> allow (flagged push, non-main target)" ALLOW \
+  "$(run "$(payload "git push -u origin feature-x" "$T" "$REPO_FEAT")")"
 
 [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails)"; exit 1; }
