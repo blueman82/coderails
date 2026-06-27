@@ -127,12 +127,14 @@ check "git clean -i -> allow"              ALLOW "$(run "$(payload "git clean -i
 check "truncate --size=0 x -> deny"        DENY  "$(run "$(payload "truncate --size=0 file.txt")")"
 check "truncate --size 0 x -> deny"        DENY  "$(run "$(payload "truncate --size 0 file.txt")")"
 
-# --- F3: cwd fallback (cwd absent, sed -i on .py uses PWD fallback) ---
-# When .cwd is absent, the hook should fall back to $PWD.
-# We test this by passing a payload with no "cwd" field and checking it
-# still evaluates branch from the current working directory (feature branch).
-# This only documents the fallback exists; actual branch outcome depends on $PWD.
-check "no-cwd payload: sed -i -> no crash" ALLOW "$(run "$(payload "sed -i 's/a/b/' foo.py")")"
+# --- F3: cwd fallback (cwd absent → hook resolves branch from $PWD) ---
+# When .cwd is absent, the hook falls back to $PWD (destructive_bash_gate.sh:96).
+# The branch outcome therefore depends on $PWD, so we pin $PWD to a known repo via
+# a subshell `cd` rather than relying on the ambient branch of the coderails
+# checkout — which previously made this test flip ALLOW/DENY depending on whether
+# coderails itself was on main.
+check "no-cwd payload, PWD on feat -> allow" ALLOW "$(cd "$FEAT_REPO" && run "$(payload "sed -i 's/a/b/' foo.py")")"
+check "no-cwd payload, PWD on main -> deny"  DENY  "$(cd "$MAIN_REPO" && run "$(payload "sed -i 's/a/b/' foo.py")")"
 
 # --- F3: target-repo resolution (file in feature-branch repo, session cwd on main) ---
 # Target file is in FEAT_REPO (on a feature branch). The hook must not over-block.
