@@ -91,10 +91,12 @@ then `install`.
 | | improve-prompt | |
 
 The two UserPromptSubmit hooks nudge: inject_context runs silently, and the
-discipline catch-up injects a reminder into the next turn. The two Stop hooks
-(confidence-label check and verify-loop) block via exit 2 — they were promoted
-from warn-mode on 2026-05-05. The destructive-bash gate and the opt-in test
-gate also block.
+discipline catch-up injects a reminder into the next turn. Four Stop hooks block
+via exit 2: confidence-label check, verify-loop check (both promoted from
+warn-mode on 2026-05-05), loop-state guard, and loop-stall guard. The same two
+content-discipline checks (confidence-label and verify-loop) also run on
+SubagentStop — so subagents are held to the same standards as the parent session.
+The destructive-bash gate and the opt-in test gate also block.
 
 ## Notes
 
