@@ -40,6 +40,7 @@ hooks/hooks.json                → maps lifecycle events → hook scripts
 commands/*.md                   → slash commands (frontmatter + prose instructions)
   └─ scripts/*.sh               → bash the commands shell out to (push.sh, merge.sh)
        └─ scripts/lib/git-common.sh → shared git/gh/PR helpers, sourced by both
+       └─ scripts/lib/config.sh     → workflow.config.yaml resolver (single source of truth; see "Config resolution")
 skills/*/SKILL.md               → skills with triggering descriptions
 instructions/                   → the discipline rules appended to ~/.claude/CLAUDE.md
 starter-memory/                 → feedback memories seeded into the user's memory dir
