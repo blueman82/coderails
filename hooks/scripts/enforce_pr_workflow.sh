@@ -19,7 +19,7 @@
 # relative to this script: hooks/scripts/ -> ../../scripts/lib/config.sh.
 . "$(dirname "$0")/../../scripts/lib/config.sh"
 
-input=$(cat)
+IFS= read -r -d '' -t 5 input || true
 cmd=$(printf '%s' "$input" | jq -r '.tool_input.command // empty')
 
 gate_has_command() {

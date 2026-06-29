@@ -19,7 +19,7 @@
 
 . "$(dirname "$0")/lib/loop_state_common.sh"
 
-input=$(cat)
+IFS= read -r -d '' -t 5 input || true
 transcript=$(echo "$input" | jq -r '.transcript_path // empty')
 session_id=$(echo "$input" | jq -r '.session_id // "?"' 2>/dev/null)
 cwd=$(echo "$input" | jq -r '.cwd // empty' 2>/dev/null)

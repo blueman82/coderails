@@ -24,7 +24,7 @@
 # used to identify plugin source: it points at the installed plugin copy, not the working
 # checkout.
 
-input=$(cat)
+IFS= read -r -d '' -t 5 input || true
 
 file=$(printf '%s' "$input" | jq -r '.tool_input.file_path // empty')
 [ -z "$file" ] && exit 0
