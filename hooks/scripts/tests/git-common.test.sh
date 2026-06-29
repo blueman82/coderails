@@ -25,6 +25,10 @@ git -C "$PRIMARY" config user.email t@t.t; git -C "$PRIMARY" config user.name t
 git -C "$PRIMARY" commit -q --allow-empty -m init
 git -C "$PRIMARY" branch -M main
 git -C "$PRIMARY" push -q -u origin main
+# Set origin/HEAD so main() (git symbolic-ref refs/remotes/origin/HEAD) resolves —
+# this is the state a real `gh`/`git clone` leaves behind; a bare `git init` origin
+# does not have it, which would make main() empty and the sync a no-op.
+git -C "$PRIMARY" remote set-head origin main
 git -C "$PRIMARY" checkout -q -b feature
 git -C "$PRIMARY" commit -q --allow-empty -m "feature work"
 git -C "$PRIMARY" push -q -u origin feature
@@ -63,5 +67,35 @@ MERGED2=$(git -C "$SCRATCH2" rev-parse HEAD)
 rc2=$?
 check "sync from primary tree on a feature branch exits 0" 0 "$rc2"
 check "primary tree ends on main, fast-forwarded" "$MERGED2" "$(git -C "$PRIMARY" rev-parse HEAD)"
+
+# ─── Finding 1: a primary-tree path containing a SPACE must not be truncated ──
+# Build a fresh origin + primary-with-a-space + linked worktree, then sync from
+# the worktree. A naive `awk '{print $2}'` truncates the path at the space and
+# the `git -C <truncated>` fails → main never advances.
+SP="$TMP/has space"; mkdir -p "$SP"
+ORIGIN3="$TMP/o3.git"; git init -q --bare "$ORIGIN3"
+PRIMARY3="$SP/primary"; git clone -q "$ORIGIN3" "$PRIMARY3"
+git -C "$PRIMARY3" config user.email t@t.t; git -C "$PRIMARY3" config user.name t
+git -C "$PRIMARY3" commit -q --allow-empty -m init; git -C "$PRIMARY3" branch -M main
+git -C "$PRIMARY3" push -q -u origin main
+git -C "$PRIMARY3" remote set-head origin main
+git -C "$PRIMARY3" checkout -q -b feature3; git -C "$PRIMARY3" commit -q --allow-empty -m work
+git -C "$PRIMARY3" checkout -q main
+WT3="$SP/wt3"; git -C "$PRIMARY3" worktree add -q "$WT3" feature3
+SC3="$TMP/sc3"; git clone -q "$ORIGIN3" "$SC3"
+git -C "$SC3" config user.email t@t.t; git -C "$SC3" config user.name t
+git -C "$SC3" commit -q --allow-empty -m "merged"; git -C "$SC3" push -q origin main
+MERGED3=$(git -C "$SC3" rev-parse HEAD)
+( cd "$WT3" && sync::main_branch ) >/dev/null 2>&1
+check "worktree whose primary path has a space -> main still synced" \
+  "$MERGED3" "$(git -C "$PRIMARY3" rev-parse main)"
+
+# ─── Finding 2: under `set -e` (merge.sh's context), a failing sync must NOT ──
+# abort the caller. Simulate an unreachable origin so the pull fails, and assert
+# the surrounding `set -e` script keeps running to its sentinel.
+git -C "$PRIMARY" remote set-url origin "$TMP/does-not-exist.git"
+git -C "$PRIMARY" checkout -q -b feature4
+survived=$( set -e; ( cd "$PRIMARY" && sync::main_branch ) >/dev/null 2>&1; echo SURVIVED )
+check "failing sync under set -e does not abort the caller" SURVIVED "$survived"
 
 [[ $fails -eq 0 ]] && { echo PASS; exit 0; } || { echo "FAIL ($fails)"; exit 1; }
