@@ -10,7 +10,7 @@ MIN_LEN="${CLAUDE_HOOK_MIN_LEN:-200}"
 
 . "$(dirname "$0")/lib/discipline_common.sh"
 
-IFS= read -r -d '' -t 30 input || true
+IFS= read -r -d '' -t 5 input || true
 transcript=$(echo "$input" | jq -r '.transcript_path // empty')
 
 if [ -z "$transcript" ] || [ ! -f "$transcript" ]; then

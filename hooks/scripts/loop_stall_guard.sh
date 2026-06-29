@@ -20,7 +20,7 @@
 
 TAIL_LINES="${CLAUDE_HOOK_TAIL_LINES:-300}"
 
-IFS= read -r -d '' -t 30 input || true
+IFS= read -r -d '' -t 5 input || true
 transcript=$(echo "$input" | jq -r '.transcript_path // empty')
 session_id=$(echo "$input" | jq -r '.session_id // "?"' 2>/dev/null)
 cwd=$(echo "$input" | jq -r '.cwd // empty' 2>/dev/null)

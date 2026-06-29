@@ -6,7 +6,7 @@
 # on main/master branches — closing the hole that no_edit_on_main (Write/Edit only) misses.
 # Returns permissionDecision="deny" — there is no approval path; use a safer alternative or add a settings.json permission rule.
 
-IFS= read -r -d '' -t 30 input || true
+IFS= read -r -d '' -t 5 input || true
 cmd=$(echo "$input" | jq -r '.tool_input.command // empty')
 
 if [ -z "$cmd" ]; then

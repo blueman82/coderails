@@ -3,12 +3,12 @@
 #
 # Latent risk: `input=$(cat)` blocks until EOF. If Claude Code's parent process
 # dies without closing stdin, the hook hangs forever. The fix is:
-#   IFS= read -r -d '' -t 30 input || true
-# which times out after 30s and returns normally.
+#   IFS= read -r -d '' -t 5 input || true
+# which times out after 5s and returns normally.
 #
 # Test structure:
 #   GUARD — open a pipe, hold the write-end open (no EOF), run the hook against the
-#            read-end, assert the hook exits within 32s. Uses background-process
+#            read-end, assert the hook exits within 8s. Uses background-process
 #            + bounded-poll (no `timeout` — absent on macOS).
 #   FIDELITY — pipe a normal multi-line JSON payload and assert the hook's normal
 #              allow/deny decision is unchanged, proving read -d '' preserves payload.
@@ -63,7 +63,7 @@ run_bounded() {  # hook_script pipe_read max_seconds -> rc | "HANG"
 }
 
 # ---------------------------------------------------------------------------
-# GUARD TESTS — prove each hook exits within 32s on a never-closing stdin.
+# GUARD TESTS — prove each hook exits within 8s on a never-closing stdin.
 # We test test_gate.sh as the representative PreToolUse hook.
 # check_confidence_labels.sh as the representative Stop hook.
 # ---------------------------------------------------------------------------
@@ -83,24 +83,24 @@ sleep 1
 
 # test_gate.sh (PreToolUse hook): should exit quickly even with no EOF on stdin.
 # The hook has no .claude/test_command in TMP, so it will exit 0 once it reads.
-# With input=$(cat) it hangs; with read -d '' -t 30 it exits within 32s.
-HOOK_RESULT=$(run_bounded "$SCRIPTS/test_gate.sh" "$PIPE" 32)
+# With input=$(cat) it hangs; with read -d '' -t 5 it exits within 8s.
+HOOK_RESULT=$(run_bounded "$SCRIPTS/test_gate.sh" "$PIPE" 8)
 if [ "$HOOK_RESULT" = "HANG" ]; then
-  printf 'FAIL - test_gate.sh: stdin with no EOF caused hook to hang (expected exit within 32s)\n'
+  printf 'FAIL - test_gate.sh: stdin with no EOF caused hook to hang (expected exit within 8s)\n'
   fails=$((fails+1))
 else
-  printf 'ok   - test_gate.sh: exited within 32s on never-closing stdin (rc=%s)\n' "$HOOK_RESULT"
+  printf 'ok   - test_gate.sh: exited within 8s on never-closing stdin (rc=%s)\n' "$HOOK_RESULT"
 fi
 
 # check_confidence_labels.sh (Stop hook): same guard.
 # With no transcript in the payload (read from stdin pipe with no EOF), it hangs on
-# input=$(cat); with read -d '' -t 30 it exits quickly.
-HOOK_RESULT=$(run_bounded "$SCRIPTS/check_confidence_labels.sh" "$PIPE" 32)
+# input=$(cat); with read -d '' -t 5 it exits quickly.
+HOOK_RESULT=$(run_bounded "$SCRIPTS/check_confidence_labels.sh" "$PIPE" 8)
 if [ "$HOOK_RESULT" = "HANG" ]; then
   printf 'FAIL - check_confidence_labels.sh: stdin with no EOF caused hook to hang\n'
   fails=$((fails+1))
 else
-  printf 'ok   - check_confidence_labels.sh: exited within 32s on never-closing stdin (rc=%s)\n' "$HOOK_RESULT"
+  printf 'ok   - check_confidence_labels.sh: exited within 8s on never-closing stdin (rc=%s)\n' "$HOOK_RESULT"
 fi
 
 # Tear down the holder process.

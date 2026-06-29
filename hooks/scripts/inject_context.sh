@@ -3,7 +3,7 @@
 # Provides freshness signals on every prompt without depending on Claude's memory.
 # On the first prompt of a session, also re-injects the discipline reminder.
 
-IFS= read -r -d '' -t 30 input || true
+IFS= read -r -d '' -t 5 input || true
 transcript=$(echo "$input" | jq -r '.transcript_path // empty')
 
 ctx="[ctx] $(date '+%Y-%m-%d') | cwd=$(pwd) | branch=$(git branch --show-current 2>/dev/null || echo none)"
