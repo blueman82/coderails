@@ -89,7 +89,7 @@ When a skill instructs an action that a hook gates — e.g. `git merge`/`gh pr c
 | Event | Script | Mode |
 |---|---|---|
 | `SessionStart` | `inject_bootstrap.sh` | silent — injects `using-coderails` skill into every new session |
-| `UserPromptSubmit` | `inject_context.sh` | silent — prepends `[ctx]` (cwd, branch, date) |
+| `UserPromptSubmit` | `inject_context.sh` | silent — prepends `[ctx]` (cwd, branch, date); on the first prompt of a session also appends the discipline reminder |
 | `UserPromptSubmit` | `discipline_catchup.sh` | warn |
 | `Stop` + `SubagentStop` | `check_confidence_labels.sh` | **block** (exit 2) when a substantive response (≥200 chars) carries no `(verified)`/`(inferred)`/`(guess)` label. On `SubagentStop`, reads `last_assistant_message` directly (avoids the parent-transcript flush race). |
 | `Stop` + `SubagentStop` | `check_verify_loop.sh` | **block** (exit 2) when a `## Did Not Verify` bullet is left untagged — enforced regardless of whether files were edited this turn; only an explicit `(unverifiable: <reason>)` tag passes. On `SubagentStop`, reads `last_assistant_message` directly. `loop_state_guard`/`loop_stall_guard` remain Stop-only (loop-state ownership is a parent-session concept). |
@@ -134,9 +134,11 @@ re-opened as findings.
 - **Exit early and often.** Three scripts use named gate functions called in order at
   the bottom of the file: `enforce_pr_workflow.sh` (local `gate_*` functions) and
   `loop_state_guard.sh` / `loop_stall_guard.sh` (shared-lib `als_gate_*` variant
-  sourced from `lib/loop_state_common.sh`). The other four scripts
+  sourced from `lib/loop_state_common.sh`). The other five core gate scripts
   (`check_verify_loop.sh`, `check_confidence_labels.sh`, `no_edit_on_main.sh`,
-  `destructive_bash_gate.sh`) use inline `if`-blocks — that pattern is equally fine.
+  `destructive_bash_gate.sh`, `test_gate.sh`) use inline `if`-blocks — that pattern is equally fine.
+  Support/context scripts (`inject_context.sh`, `inject_bootstrap.sh`, `discipline_catchup.sh`)
+  also use inline blocks but are not part of the gate-pattern convention.
   New scripts should prefer named gate functions. Cheap skip-gates first, expensive
   transcript-parsing last. Guard scripts do NOT use `set -euo pipefail` — preserve
   that; gate functions `exit` directly.

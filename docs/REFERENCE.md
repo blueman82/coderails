@@ -1,6 +1,6 @@
 # coderails Component Reference
 
-Complete catalogue of every coderails component: what it does, when it's active, when it's NOT, and dependencies. Ground truth: all entries verified from source files. See README for a lighter overview.
+Catalogue of every coderails component (27 skills, plus hooks, commands, scripts): what it does, when it's active, when it's NOT, and dependencies. Ground truth: all entries verified from source files. See README for a lighter overview.
 
 ---
 
@@ -10,6 +10,7 @@ Complete catalogue of every coderails component: what it does, when it's active,
    - [Coderails-original skills](#coderails-original-skills)
    - [Vendored dev-workflow skills](#vendored-dev-workflow-skills)
    - [Wiki skills](#wiki-skills)
+   - [Engineering principles skills](#engineering-principles-skills)
 2. [Hook Activation Matrix](#hook-activation-matrix)
 3. [Commands](#commands)
 4. [Scripts and Libraries](#scripts-and-libraries)
@@ -240,6 +241,44 @@ These skills manage the LLM Wiki — a persistent, compounding knowledge base ma
 **When it triggers:** "search wiki", "query wiki", "ask the wiki", "what does the wiki say", requests to find project-specific answers grounded in wiki content.
 
 **When it does NOT apply:** General coding questions unrelated to wiki content, wiki maintenance tasks (adding, filing, ingesting, linting), wiki initialisation.
+
+---
+
+### Engineering principles skills
+
+These skills enforce engineering principles and language-specific coding standards on code being written or modified.
+
+#### `engineering-principles`
+
+**Purpose:** Enforce engineering principles (YAGNI, KISS, DRY, Fail Fast, SSOT, Law of Demeter) and language-specific coding standards across Python, Go, and TypeScript. Uses LSP (Serena) for call site analysis and reference counting. Dispatches to the appropriate language sub-skill after detecting the file extension.
+
+**When it triggers:** Proactively after writing or modifying any code file, or explicitly via `/engineering-principles`. Trigger phrases: "enforce standards", "check principles", "apply standards", "code quality".
+
+**When it does NOT apply:** Docs, config, or prose edits with no code to audit.
+
+---
+
+#### `engineering-principles-python`
+
+**Purpose:** Enforce Python idioms and standards on `.py` files — PEP 8 naming, type hints, EAFP over LBYL, context managers, and Pyright strict compliance.
+
+**When it triggers:** Invoked by `engineering-principles` after detecting `.py` files, or directly for Python-only sessions.
+
+---
+
+#### `engineering-principles-go`
+
+**Purpose:** Enforce Go idioms and standards on `.go` files — accept interfaces/return structs, errors-as-values, table-driven tests, and idiomatic naming.
+
+**When it triggers:** Invoked by `engineering-principles` after detecting `.go` files, or directly for Go-only sessions.
+
+---
+
+#### `engineering-principles-ts`
+
+**Purpose:** Enforce TypeScript idioms and standards on `.ts`/`.tsx` files — strict mode, no `any`, discriminated unions, optional chaining, and exhaustive switch checks.
+
+**When it triggers:** Invoked by `engineering-principles` after detecting `.ts`/`.tsx` files, or directly for TypeScript-only sessions.
 
 ---
 
