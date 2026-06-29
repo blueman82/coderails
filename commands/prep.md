@@ -6,7 +6,7 @@ description: Create safety branch, new feature/bug branch, and create a Jira tic
 
 ## Project config
 
-Config: !`GIT_ROOT=$(git rev-parse --show-toplevel 2>/dev/null) && { d=$(pwd); cfg=""; while :; do [[ -f "$d/.claude/workflow.config.yaml" ]] && { cfg=$(cat "$d/.claude/workflow.config.yaml"); break; }; [[ "$d" == "$GIT_ROOT" ]] && break; d=$(dirname "$d"); done; [[ -n "$cfg" ]] && echo "$cfg" || echo "NO_CONFIG"; } || echo "NO_CONFIG"`
+Config: !`source "${CLAUDE_PLUGIN_ROOT}/scripts/lib/config.sh" && coderails::resolve_config`
 
 If the config block above says `NO_CONFIG`, do NOT stop. Run in minimal mode with these defaults:
 - `config.jira` = null → skip all Jira steps (Task Part 2)

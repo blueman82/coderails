@@ -160,34 +160,32 @@ Two interactive pauses where the user drives: the code/iterate loop, and final
 ship-it authorization. Everything else auto-chains.
 
 **Config resolution** — every workflow command reads `workflow.config.yaml`
-inline via a `!` bash substitution in its frontmatter. Resolution **walks up**
-from the current directory to the git root; the first
-`.claude/workflow.config.yaml` found wins, `NO_CONFIG` if none:
+inline via a `!` bash substitution in its frontmatter. The substitution sources
+a shared resolver and calls it:
 
 ```bash
-GIT_ROOT=$(git rev-parse --show-toplevel 2>/dev/null) && {
-  d=$(pwd); cfg="";
-  while :; do
-    [[ -f "$d/.claude/workflow.config.yaml" ]] && { cfg=$(cat "$d/.claude/workflow.config.yaml"); break; }
-    [[ "$d" == "$GIT_ROOT" ]] && break
-    d=$(dirname "$d")
-  done
-  [[ -n "$cfg" ]] && echo "$cfg" || echo "NO_CONFIG"
-} || echo "NO_CONFIG"
+source "${CLAUDE_PLUGIN_ROOT}/scripts/lib/config.sh" && coderails::resolve_config
 ```
 
-This is layout-agnostic: standalone repos (run from the root), classic
-`projects/<name>/` monorepos, and arbitrary layouts (`apps/web`, `services/api`,
-…) all resolve correctly from any subdir. The same walk-up is duplicated in the
-three command frontmatters, `scripts/merge.sh`'s info-check, and
-`gate_config_present()` in `hooks/scripts/enforce_pr_workflow.sh` — the hook's
-opt-in detection must agree with the commands' resolution, or the merge gate
-would silently go inactive in a non-`projects/` layout. If you add a config
-field, update **all four** of `workflow.md`, `prep.md`, `push.md`, and `init.md`
-(the scaffolder) — they each read the file independently. `NO_CONFIG` is the
-sentinel for "not initialised." (A shared `scripts/lib/config.sh` helper would
-DRY this up, but `$CLAUDE_PLUGIN_ROOT` availability in frontmatter `!`
-substitution context is unconfirmed; inlining avoids a silent-failure mode.)
+`scripts/lib/config.sh` is the **single source of truth** for locating the config.
+`coderails::config_path [dir]` walks up from `dir` (default `$PWD`) to the git
+root and echoes the first `.claude/workflow.config.yaml` found (empty if none);
+`coderails::resolve_config [dir]` echoes its contents or `NO_CONFIG`. The walk-up
+is layout-agnostic: standalone repos, classic `projects/<name>/` monorepos, and
+arbitrary layouts (`apps/web`, `services/api`, …) all resolve from any subdir.
+Nearest wins — replacement, not inheritance/merge.
+
+`${CLAUDE_PLUGIN_ROOT}` is string-substituted by Claude Code in command
+frontmatter (it was a bug that it wasn't for `allowed-tools`, since fixed), so
+the path is always the real plugin dir — for a local/directory marketplace it
+resolves to the source checkout, for an installed plugin to the cache copy; in
+both the lib file exists. The same resolver is sourced (via `$(dirname "$0")`)
+by `scripts/merge.sh` (`lib/config.sh`) and `hooks/scripts/enforce_pr_workflow.sh`
+(`../../scripts/lib/config.sh`) — the hook's opt-in detection MUST use the same
+resolver as the commands, or the merge gate would silently go inactive in a
+non-`projects/` layout. If you add a config field, update **all four** of
+`workflow.md`, `prep.md`, `push.md`, and `init.md` (the scaffolder) — they each
+read the file independently. `NO_CONFIG` is the sentinel for "not initialised."
 
 **`scripts/` vs `commands/`** — `push.sh`/`merge.sh` hold the deterministic git
 plumbing (commit, push, `gh pr create`, merge). The `.md` commands hold the
