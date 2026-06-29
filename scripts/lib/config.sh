@@ -32,10 +32,17 @@ coderails::config_path() {
   local git_root d
   git_root=$(git -C "$start" rev-parse --show-toplevel 2>/dev/null)
   [[ -z "$git_root" ]] && return 0
+  # Canonicalise start so it shares git_root's namespace. `git rev-parse` returns a
+  # symlink-resolved path (macOS /tmp -> /private/tmp); without this, start stays in
+  # the unresolved namespace, `d == git_root` never matches, and the walk-up runs
+  # past the root to "/" — where `dirname /` == "/" loops forever. (bug: PR #67/#71)
+  start=$(cd "$start" 2>/dev/null && pwd -P) || return 0
   d="$start"
   while :; do
     [[ -f "$d/.claude/workflow.config.yaml" ]] && { printf '%s\n' "$d/.claude/workflow.config.yaml"; return 0; }
-    [[ "$d" == "$git_root" ]] && break
+    # Hard floor on "/" as well as git_root: even if a namespace mismatch slips
+    # through, the loop can never spin past the filesystem root.
+    [[ "$d" == "$git_root" || "$d" == "/" ]] && break
     d=$(dirname "$d")
   done
   return 0
