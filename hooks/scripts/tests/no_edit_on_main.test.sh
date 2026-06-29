@@ -184,11 +184,19 @@ check "main, .claude/settings.local.json -> deny" \
 # Gated in any repo regardless of plugin marker, even with a mismatched cwd.
 check "settings.json in wiki repo, cwd=coderails -> deny" \
   DENY "$(run "$(payload_cwd Edit "$WIKI/.claude/settings.json" "$REPO")")"
+# The ./-relative prefix (the most natural form an agent passes) must still deny —
+# it hits the */.claude/... arm via the embedded /.claude/ boundary.
+check "main, ./.claude/settings.json -> deny" \
+  DENY "$(run "$(payload Edit ./.claude/settings.json)")"
 # An unrelated settings.json NOT under .claude/ is not the permission file — allow.
 check "main, app/settings.json (not under .claude) -> allow" \
   ALLOW "$(run "$(payload Write app/settings.json)")"
 # A file merely named settings.json deeper than .claude/ is not the permission file.
 check "main, .claude/sub/settings.json -> allow" \
   ALLOW "$(run "$(payload Write .claude/sub/settings.json)")"
+# Same parent-anchoring negative for the .local.json arm — guards against a future
+# glob "simplification" (e.g. *settings.local.json) silently widening the match.
+check "main, .claude/sub/settings.local.json -> allow" \
+  ALLOW "$(run "$(payload Write .claude/sub/settings.local.json)")"
 
 [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails)"; exit 1; }
