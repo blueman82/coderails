@@ -359,6 +359,16 @@ The orchestrator handles both ends: Phase 2 (plan-level wiki read before coding 
 
 Past failure: a wiki agent reported two commits "done" that were unpushed on local `main` (ruleset-protected, so a direct push was rejected); the origin check caught it before the docs were stranded.
 
+**Docs-drift check — run `/sync-docs` at the loop boundary**
+
+After the cluster wiki ingest+lint, the orchestrator runs `/sync-docs` ONCE at the loop boundary. Wiki ingest updates the external knowledge base; `/sync-docs` is the complement — it audits the repo's own in-tree docs (README.md, AGENTS.md, docs/REFERENCE.md) for drift against the just-merged code.
+
+Run it even if Serena (the `--semantic` discovery backend) is unavailable. Fall back to the traditional file-comparison audit by omitting `--semantic`. The drift audit is still valuable without semantic discovery — do not skip `/sync-docs` just because Serena isn't installed.
+
+Delegate it to a spawned agent, same as the wiki step, to keep orchestrator context clean.
+
+**Disposition of findings:** `/sync-docs` surfaces drift; the orchestrator must triage. Fix only drift the loop's own PRs introduced. Surface pre-existing drift to the user rather than silently folding unrelated doc fixes into the loop — that is scope creep. This mirrors the loop's existing finding-disposition discipline (signal vs. noise; act on genuine drift, surface design decisions, decline symmetry noise).
+
 ### Phase 10 — Use v2/v3 names when respawning a stuck agent
 
 Dead agents continue to emit idle pings until the runtime cleans them up. If you respawn with the same name, you can't tell which idle ping is which.
