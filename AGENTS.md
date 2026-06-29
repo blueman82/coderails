@@ -130,7 +130,7 @@ re-opened as findings.
   if it is included in their system prompt by the orchestrator.
 
 **Hook script conventions** (follow these when editing or adding a script):
-- Read the hook payload from stdin via `input=$(cat)`, parse with `jq`.
+- Read the hook payload from stdin via `IFS= read -r -d '' -t 30 input || true`, then parse with `jq`. The 30-second timeout prevents a hook blocking forever if its parent process dies without closing stdin; `|| true` is mandatory because `read -d ''` returns exit 1 on normal EOF.
 - **Exit early and often.** Three scripts use named gate functions called in order at
   the bottom of the file: `enforce_pr_workflow.sh` (local `gate_*` functions) and
   `loop_state_guard.sh` / `loop_stall_guard.sh` (shared-lib `als_gate_*` variant
