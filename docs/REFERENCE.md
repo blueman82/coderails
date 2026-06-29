@@ -10,6 +10,7 @@ Complete catalogue of every coderails component: what it does, when it's active,
    - [Coderails-original skills](#coderails-original-skills)
    - [Vendored dev-workflow skills](#vendored-dev-workflow-skills)
    - [Wiki skills](#wiki-skills)
+   - [Engineering principles skills](#engineering-principles-skills)
 2. [Hook Activation Matrix](#hook-activation-matrix)
 3. [Commands](#commands)
 4. [Scripts and Libraries](#scripts-and-libraries)
