@@ -74,10 +74,12 @@ gate_config_present() {
     exit 0
   fi
   config_file=""
-  candidate1="$git_root/projects/$(basename "$cwd")/.claude/workflow.config.yaml"
-  candidate2="$git_root/.claude/workflow.config.yaml"
-  [ -f "$candidate1" ] && config_file="$candidate1"
-  [ -z "$config_file" ] && [ -f "$candidate2" ] && config_file="$candidate2"
+  d="$cwd"
+  while :; do
+    [ -f "$d/.claude/workflow.config.yaml" ] && { config_file="$d/.claude/workflow.config.yaml"; break; }
+    [ "$d" = "$git_root" ] && break
+    d=$(dirname "$d")
+  done
   if [ -z "$config_file" ]; then
     exit 0
   fi

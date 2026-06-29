@@ -160,18 +160,34 @@ Two interactive pauses where the user drives: the code/iterate loop, and final
 ship-it authorization. Everything else auto-chains.
 
 **Config resolution** — every workflow command reads `workflow.config.yaml`
-inline via a `!` bash substitution in its frontmatter, using a dual-path lookup:
+inline via a `!` bash substitution in its frontmatter. Resolution **walks up**
+from the current directory to the git root; the first
+`.claude/workflow.config.yaml` found wins, `NO_CONFIG` if none:
 
 ```bash
-GIT_ROOT=$(git rev-parse --show-toplevel)
-cat "$GIT_ROOT/projects/$(basename $(pwd))/.claude/workflow.config.yaml" \  # monorepo layout
-  || cat "$GIT_ROOT/.claude/workflow.config.yaml" \                         # standalone repo
-  || echo "NO_CONFIG"
+GIT_ROOT=$(git rev-parse --show-toplevel 2>/dev/null) && {
+  d=$(pwd); cfg="";
+  while :; do
+    [[ -f "$d/.claude/workflow.config.yaml" ]] && { cfg=$(cat "$d/.claude/workflow.config.yaml"); break; }
+    [[ "$d" == "$GIT_ROOT" ]] && break
+    d=$(dirname "$d")
+  done
+  [[ -n "$cfg" ]] && echo "$cfg" || echo "NO_CONFIG"
+} || echo "NO_CONFIG"
 ```
 
-If you add a config field, update **all four** of `workflow.md`, `prep.md`,
-`push.md`, and `init.md` (the scaffolder) — they each read the file
-independently. `NO_CONFIG` is the sentinel for "not initialised."
+This is layout-agnostic: standalone repos (run from the root), classic
+`projects/<name>/` monorepos, and arbitrary layouts (`apps/web`, `services/api`,
+…) all resolve correctly from any subdir. The same walk-up is duplicated in the
+three command frontmatters, `scripts/merge.sh`'s info-check, and
+`gate_config_present()` in `hooks/scripts/enforce_pr_workflow.sh` — the hook's
+opt-in detection must agree with the commands' resolution, or the merge gate
+would silently go inactive in a non-`projects/` layout. If you add a config
+field, update **all four** of `workflow.md`, `prep.md`, `push.md`, and `init.md`
+(the scaffolder) — they each read the file independently. `NO_CONFIG` is the
+sentinel for "not initialised." (A shared `scripts/lib/config.sh` helper would
+DRY this up, but `$CLAUDE_PLUGIN_ROOT` availability in frontmatter `!`
+substitution context is unconfirmed; inlining avoids a silent-failure mode.)
 
 **`scripts/` vs `commands/`** — `push.sh`/`merge.sh` hold the deterministic git
 plumbing (commit, push, `gh pr create`, merge). The `.md` commands hold the

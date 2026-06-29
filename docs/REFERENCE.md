@@ -289,7 +289,7 @@ Commands are slash commands invoked by Claude (or the user via `/coderails:<name
 | `/coderails:prep` | Create a safety branch, a feature/bug branch, and optionally a Jira ticket. | `git worktree`, Jira MCP (optional — skips if `config.jira` is null or no Jira MCP); reads `workflow.config.yaml` |
 | `/coderails:push` | Stage, commit, push changes, and create a PR. Runs an engineering-principles pre-flight if `config.engineering_principles_paths` is set. | Shells out to `scripts/push.sh`; requires a GitHub remote; reads `workflow.config.yaml` |
 | `/coderails:merge` | Merge an approved PR, switch to main, and pull latest. | Shells out to `scripts/merge.sh`; requires GitHub remote; checks PR approval if branch protection is on |
-| `/coderails:init` | Scaffold a `workflow.config.yaml` for the current project. Detects monorepo vs standalone layout. | `git rev-parse`, Write tool; idempotent — confirms before overwriting |
+| `/coderails:init` | Scaffold a `workflow.config.yaml` for the current project. Writes to `$(pwd)/.claude/` (resolved by walk-up — see Config resolution). | `git rev-parse`, Write tool; idempotent — confirms before overwriting |
 | `/coderails:test-gate-setup` | Configure the test gate for the current project. Detects the test runner (npm, cargo, pytest, go test, etc.) and writes `.claude/test_command`. | Write tool; opt-in gate for `test_gate.sh` hook |
 | `/coderails:assumptions` | List every assumption currently being made (task, codebase, environment, state), marked `(verified)` or `(inferred)`. Pure inventory — does no other work. | None |
 | `/coderails:disconfirm` | Argue against the most recent recommendation — find the strongest case it is wrong. Steelmans the opposition. | None |
@@ -298,16 +298,21 @@ Commands are slash commands invoked by Claude (or the user via `/coderails:<name
 
 ### Config resolution (shared by `workflow`, `prep`, `push`, `init`)
 
-Every workflow command reads `workflow.config.yaml` inline via a bash substitution:
+Every workflow command reads `workflow.config.yaml` inline via a bash substitution that **walks up** from the current directory to the git root — the first `.claude/workflow.config.yaml` found wins, `NO_CONFIG` if none:
 
 ```bash
-GIT_ROOT=$(git rev-parse --show-toplevel)
-cat "$GIT_ROOT/projects/$(basename $(pwd))/.claude/workflow.config.yaml" \  # monorepo layout
-  || cat "$GIT_ROOT/.claude/workflow.config.yaml" \                         # standalone repo
-  || echo "NO_CONFIG"
+GIT_ROOT=$(git rev-parse --show-toplevel 2>/dev/null) && {
+  d=$(pwd); cfg="";
+  while :; do
+    [[ -f "$d/.claude/workflow.config.yaml" ]] && { cfg=$(cat "$d/.claude/workflow.config.yaml"); break; }
+    [[ "$d" == "$GIT_ROOT" ]] && break
+    d=$(dirname "$d")
+  done
+  [[ -n "$cfg" ]] && echo "$cfg" || echo "NO_CONFIG"
+} || echo "NO_CONFIG"
 ```
 
-`NO_CONFIG` is the sentinel for "not initialised." All workflow commands degrade gracefully: Jira steps no-op, wiki steps skip, engineering-principles pre-flight skips, `enforce_pr_workflow` hook is inactive.
+Layout-agnostic: standalone repos, classic `projects/<name>/` monorepos, and arbitrary layouts (`apps/web`, `services/api`, …) all resolve from any subdir. The same walk-up runs in `scripts/merge.sh`'s info-check and `gate_config_present()` in `hooks/scripts/enforce_pr_workflow.sh`. `NO_CONFIG` is the sentinel for "not initialised." All workflow commands degrade gracefully: Jira steps no-op, wiki steps skip, engineering-principles pre-flight skips, `enforce_pr_workflow` hook is inactive.
 
 ---
 
@@ -329,7 +334,7 @@ cat "$GIT_ROOT/projects/$(basename $(pwd))/.claude/workflow.config.yaml" \  # mo
 
 | Artifact | Location | Committed? | Notes |
 |---|---|---|---|
-| `workflow.config.yaml` | `<git-root>/.claude/workflow.config.yaml` (standalone) or `<git-root>/projects/<name>/.claude/workflow.config.yaml` (monorepo) | Yes | Project-specific config for jira, wiki, worktree, engineering-principles. Created by `/coderails:init`. |
+| `workflow.config.yaml` | first `.claude/workflow.config.yaml` found walking from cwd up to git root (`$(pwd)/.claude/` for `/init`) | Yes | Project-specific config for jira, wiki, worktree, engineering-principles. Created by `/coderails:init`. |
 | `.claude/test_command` | Project working directory | Yes (project-local) | Plain-text file containing the test command. Created by `/coderails:test-gate-setup`. Activates `test_gate.sh`. |
 | Specs from brainstorming | `docs/coderails/specs/YYYY-MM-DD-<topic>-design.md` | Yes | Written by `brainstorming` skill after design resolution. Permanent record. |
 | Plans from writing-plans | `docs/coderails/plans/<name>.md` | Yes | Written by `writing-plans` skill. Permanent plan record. |
