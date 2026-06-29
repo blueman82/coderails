@@ -89,7 +89,7 @@ When a skill instructs an action that a hook gates — e.g. `git merge`/`gh pr c
 | Event | Script | Mode |
 |---|---|---|
 | `SessionStart` | `inject_bootstrap.sh` | silent — injects `using-coderails` skill into every new session |
-| `UserPromptSubmit` | `inject_context.sh` | silent — prepends `[ctx]` (cwd, branch, date) |
+| `UserPromptSubmit` | `inject_context.sh` | silent — prepends `[ctx]` (cwd, branch, date); on the first prompt of a session also appends the discipline reminder |
 | `UserPromptSubmit` | `discipline_catchup.sh` | warn |
 | `Stop` + `SubagentStop` | `check_confidence_labels.sh` | **block** (exit 2) when a substantive response (≥200 chars) carries no `(verified)`/`(inferred)`/`(guess)` label. On `SubagentStop`, reads `last_assistant_message` directly (avoids the parent-transcript flush race). |
 | `Stop` + `SubagentStop` | `check_verify_loop.sh` | **block** (exit 2) when a `## Did Not Verify` bullet is left untagged — enforced regardless of whether files were edited this turn; only an explicit `(unverifiable: <reason>)` tag passes. On `SubagentStop`, reads `last_assistant_message` directly. `loop_state_guard`/`loop_stall_guard` remain Stop-only (loop-state ownership is a parent-session concept). |
