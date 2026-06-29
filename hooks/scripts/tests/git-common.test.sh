@@ -98,4 +98,15 @@ git -C "$PRIMARY" checkout -q -b feature4
 survived=$( set -e; ( cd "$PRIMARY" && sync::main_branch ) >/dev/null 2>&1; echo SURVIVED )
 check "failing sync under set -e does not abort the caller" SURVIVED "$survived"
 
+# ─── main() fallback: no origin/HEAD marker must fall back to "main" ──────────
+# A bare `git init` repo has no `refs/remotes/origin/HEAD`, so `git symbolic-ref`
+# fails. The `|| echo main` fallback must then fire. The bug: the `|| ` bound to
+# the whole pipeline, whose exit status is sed's (0 on empty input), so the
+# fallback never fired and main() returned a blank.
+NOMARK="$TMP/nomark"; git init -q "$NOMARK"
+git -C "$NOMARK" config user.email t@t.t; git -C "$NOMARK" config user.name t
+git -C "$NOMARK" commit -q --allow-empty -m init
+check "main() falls back to 'main' when origin/HEAD is unset" \
+  "main" "$( cd "$NOMARK" && main )"
+
 [[ $fails -eq 0 ]] && { echo PASS; exit 0; } || { echo "FAIL ($fails)"; exit 1; }

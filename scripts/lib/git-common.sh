@@ -24,7 +24,7 @@ banner()  { printf '\n%s━━━ %s ━━━%s\n' "$C_GRN" "$1" "$C_RST"; }
 branch()     { git branch --show-current 2>/dev/null; }
 dirty()      { [[ -n $(git status -s 2>/dev/null) ]]; }
 clean()      { ! dirty; }
-main()       { git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@.*/@@' || echo main; }
+main()       { local m; m=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@.*/@@'); echo "${m:-main}"; }
 ahead()      { git rev-list --count "origin/$(main)..HEAD" 2>/dev/null || echo 0; }
 ahead_list() { git log "origin/$(main)..HEAD" --oneline 2>/dev/null; }
 
