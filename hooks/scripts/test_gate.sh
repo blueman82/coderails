@@ -2,7 +2,7 @@
 # PreToolUse Bash hook: block `git commit` if project has .claude/test_command and tests fail.
 # Opt-in per project: if .claude/test_command does not exist, hook is a no-op.
 
-input=$(cat)
+IFS= read -r -d '' -t 30 input || true
 cmd=$(echo "$input" | jq -r '.tool_input.command // empty')
 
 if [ -z "$cmd" ] || ! echo "$cmd" | grep -qE '\bgit +commit\b'; then

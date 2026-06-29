@@ -34,7 +34,7 @@ SLEEP_S="${CLAUDE_HOOK_SLEEP_S:-0.3}"
 
 log_line() { printf '%s %s\n' "$(date -Iseconds 2>/dev/null || date +%Y-%m-%dT%H:%M:%S%z)" "$1" >> "$LOG_FILE" 2>/dev/null; }
 
-input=$(cat)
+IFS= read -r -d '' -t 30 input || true
 hook_event=$(echo "$input" | jq -r '.hook_event_name // "Stop"' 2>/dev/null)
 session_id=$(echo "$input" | jq -r '.session_id // "?"' 2>/dev/null)
 file_count=0

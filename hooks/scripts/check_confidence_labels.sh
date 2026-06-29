@@ -10,7 +10,7 @@ MIN_LEN="${CLAUDE_HOOK_MIN_LEN:-200}"
 
 . "$(dirname "$0")/lib/discipline_common.sh"
 
-input=$(cat)
+IFS= read -r -d '' -t 30 input || true
 hook_event=$(echo "$input" | jq -r '.hook_event_name // "Stop"' 2>/dev/null)
 
 # SubagentStop: the subagent's final text is available directly in last_assistant_message.
