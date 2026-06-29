@@ -122,13 +122,15 @@ run_with_payload() {  # hook_script json -> DENY|ALLOW|rc
   fi
 }
 
-# test_gate.sh fidelity: git commit without .claude/test_command -> allow.
+# test_gate.sh fidelity (deny path): git commit with a failing test_command -> deny.
+# This proves read -d '' preserves the payload AND the gate's real deny logic fires.
 FIDELITY_DIR="$TMP/fidelity_proj"
-mkdir -p "$FIDELITY_DIR"
+mkdir -p "$FIDELITY_DIR/.claude"
+printf 'false\n' > "$FIDELITY_DIR/.claude/test_command"
 PAYLOAD=$(jq -n --arg cmd "git commit -m 'fix'" '{"tool_name":"Bash","tool_input":{"command":$cmd}}')
-# Run from FIDELITY_DIR so test_gate.sh looks there for .claude/test_command.
-FIDELITY_RESULT=$(cd "$FIDELITY_DIR" && printf '%s' "$PAYLOAD" | bash "$SCRIPTS/test_gate.sh" 2>/dev/null && echo "ALLOW" || echo "ALLOW")
-check "fidelity: test_gate.sh normal payload -> allow (no hang, correct decision)" "ALLOW" "$FIDELITY_RESULT"
+# Run from FIDELITY_DIR so test_gate.sh finds the failing .claude/test_command.
+GATE_DENY_RESULT=$(cd "$FIDELITY_DIR" && run_with_payload "$SCRIPTS/test_gate.sh" "$PAYLOAD")
+check "fidelity: test_gate.sh failing test_command -> deny (payload preserved, gate fires)" "DENY" "$GATE_DENY_RESULT"
 
 # destructive_bash_gate.sh fidelity: rm -rf -> deny.
 PAYLOAD_DENY=$(jq -n --arg cmd "rm -rf /tmp/x" '{"tool_name":"Bash","tool_input":{"command":$cmd}}')
@@ -139,6 +141,17 @@ check "fidelity: destructive_bash_gate.sh rm -rf -> deny (payload preserved)" "D
 PAYLOAD_ALLOW=$(jq -n --arg cmd "git status" '{"tool_name":"Bash","tool_input":{"command":$cmd}}')
 ALLOW_RESULT=$(run_with_payload "$SCRIPTS/destructive_bash_gate.sh" "$PAYLOAD_ALLOW")
 check "fidelity: destructive_bash_gate.sh git status -> allow (payload preserved)" "ALLOW" "$ALLOW_RESULT"
+
+# fail-open invariant: empty stdin -> deny-first hook must stand aside (exit 0, no deny).
+# Locks in "empty/stalled input -> allow" so a future fail-closed change is caught.
+FAIL_OPEN_OUT=$(printf '' | bash "$SCRIPTS/destructive_bash_gate.sh" 2>/dev/null)
+FAIL_OPEN_RC=$?
+if [ "$FAIL_OPEN_RC" -eq 0 ] && ! printf '%s' "$FAIL_OPEN_OUT" | grep -q '"permissionDecision": *"deny"'; then
+  FAIL_OPEN_RESULT="ALLOW"
+else
+  FAIL_OPEN_RESULT="BLOCK"
+fi
+check "fail-open: empty stdin -> destructive_bash_gate.sh stands aside (exit 0, no deny)" "ALLOW" "$FAIL_OPEN_RESULT"
 
 # check_confidence_labels.sh fidelity: short payload -> allow (no block on short text).
 # The hook exits 0 (no block) when text < MIN_LEN chars. Feed empty transcript path.
