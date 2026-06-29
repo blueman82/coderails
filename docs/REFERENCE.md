@@ -1,6 +1,6 @@
 # coderails Component Reference
 
-Complete catalogue of every coderails component: what it does, when it's active, when it's NOT, and dependencies. Ground truth: all entries verified from source files. See README for a lighter overview.
+Catalogue of every coderails component (27 skills, plus hooks, commands, scripts): what it does, when it's active, when it's NOT, and dependencies. Ground truth: all entries verified from source files. See README for a lighter overview.
 
 ---
 
