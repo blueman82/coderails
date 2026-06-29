@@ -32,35 +32,34 @@ if [ ! -f "$HOOKS_JSON" ]; then
   exit 1
 fi
 
-# --- Extract all declared timeouts for hooks/scripts/ commands ---
+# --- Extract declared timeouts for hooks/scripts/ commands via jq ---
 # Filter: entries whose command references hooks/scripts/ AND have a non-null timeout.
 # Hooks with no declared timeout default to 60s (safe) and are intentionally excluded.
-declared_timeouts=$(jq -r '
+# jq computes count and min natively (handles floats correctly); bash never does -lt on a float.
+jq_result=$(jq -r --argjson floor "$READ_T_FLOOR" '
   [.hooks | to_entries[] | .value[] | .hooks[]?
    | select(.command | test("hooks/scripts/"))
    | select(.timeout != null)
    | .timeout]
-  | .[]
+  | { count: length, min: (if length > 0 then min else null end),
+      below_floor: (if length > 0 then (min < $floor) else false end) }
+  | "\(.count) \(if .min != null then (.min | tostring) else "null" end) \(.below_floor)"
 ' "$HOOKS_JSON")
 
-if [ -z "$declared_timeouts" ]; then
-  printf 'ok   - no declared timeouts found for hooks/scripts/ entries (all default to 60s — safe)\n'
+count=$(echo "$jq_result" | awk '{print $1}')
+min_timeout=$(echo "$jq_result" | awk '{print $2}')
+below_floor=$(echo "$jq_result" | awk '{print $3}')
+
+# --- Guard: non-empty extraction required ---
+if [ "$count" -eq 0 ]; then
+  printf 'FAIL - no hooks/scripts/ timeouts found — jq filter may be broken or hooks.json structure changed\n'
+  fails=$((fails+1))
   [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails)"; exit 1; }
 fi
 
-# --- Assert each declared timeout >= READ_T_FLOOR ---
-min_timeout=""
-while IFS= read -r t; do
-  [ -z "$t" ] && continue
-  if [ -z "$min_timeout" ] || [ "$t" -lt "$min_timeout" ]; then
-    min_timeout="$t"
-  fi
-done <<EOF
-$declared_timeouts
-EOF
-
-if [ -n "$min_timeout" ] && [ "$min_timeout" -lt "$READ_T_FLOOR" ]; then
-  printf 'FAIL - hooks.json declares a timeout (%d) below the read -t %d in-process backstop floor — lower the read -t bound or raise the timeout\n' \
+# --- Assert each declared timeout >= READ_T_FLOOR (comparison done in jq, float-safe) ---
+if [ "$below_floor" = "true" ]; then
+  printf 'FAIL - hooks.json declares a timeout (%s) below the read -t %d in-process backstop floor — lower the read -t bound or raise the timeout\n' \
     "$min_timeout" "$READ_T_FLOOR"
   fails=$((fails+1))
 else
