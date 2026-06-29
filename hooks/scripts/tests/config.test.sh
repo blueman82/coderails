@@ -26,13 +26,13 @@ resolve() {  # start_dir -> config_path | "" | "TIMEOUT"
     { ( bash -c '. "'"$LIB"'"; coderails::config_path "'"$start"'"' & p=$!
         ( sleep 5; kill -9 $p 2>/dev/null ) & w=$!
         wait $p 2>/dev/null; rc=$?
-        # Tear down the watchdog by reaping its `sleep` child directly. Signalling
-        # the subshell ($w) doesn't work: it is blocked inside `sleep` and ignores
-        # SIGTERM until the sleep ends, so the enclosing $() would stall the full
-        # 5s on every happy-path call. pkill -P $w kills the sleep; the now-childless
-        # subshell then exits, and `wait $w` reaps it. The outer { } 2>/dev/null
-        # suppresses the shell job-control "Terminated: sleep" notice that bash
-        # emits when a background job is killed inside a $() subshell.
+        # Tear down the watchdog by killing its `sleep` child directly. Killing the
+        # subshell ($w) instead orphans the sleep, which keeps the $() pipe's write
+        # fd open until it exits naturally — so $() blocks the full 5s on every
+        # happy-path call. pkill -P $w kills the sleep, closing that fd; the now-
+        # childless subshell exits and `wait $w` reaps it (zombie hygiene only).
+        # The outer { } 2>/dev/null swallows the job-control "Terminated: sleep"
+        # notice the parent shell prints when it reaps the killed background job.
         pkill -P $w 2>/dev/null; wait $w 2>/dev/null
         [ $rc -eq 137 ] && printf 'TIMEOUT'
       )
