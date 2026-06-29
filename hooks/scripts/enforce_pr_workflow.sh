@@ -15,6 +15,10 @@
 # Escape: add a `gh pr create`, `gh pr merge`, `git merge`, or `git push` Bash
 #   permission to settings.json.
 
+# Shared workflow.config.yaml resolver (walk-up from cwd to git root). Sourced
+# relative to this script: hooks/scripts/ -> ../../scripts/lib/config.sh.
+. "$(dirname "$0")/../../scripts/lib/config.sh"
+
 input=$(cat)
 cmd=$(printf '%s' "$input" | jq -r '.tool_input.command // empty')
 
@@ -67,19 +71,12 @@ EOF
 
 gate_config_present() {
   # Opt-in — if no workflow.config.yaml exists, stand aside.
+  # Uses the shared resolver (scripts/lib/config.sh) so the hook's opt-in
+  # detection agrees with the commands' resolution — otherwise the merge gate
+  # would silently go inactive in a non-projects/ layout.
   cwd=$(printf '%s' "$input" | jq -r '.cwd // empty')
   [ -z "$cwd" ] && cwd="$PWD"
-  git_root=$(git -C "$cwd" rev-parse --show-toplevel 2>/dev/null)
-  if [ -z "$git_root" ]; then
-    exit 0
-  fi
-  config_file=""
-  d="$cwd"
-  while :; do
-    [ -f "$d/.claude/workflow.config.yaml" ] && { config_file="$d/.claude/workflow.config.yaml"; break; }
-    [ "$d" = "$git_root" ] && break
-    d=$(dirname "$d")
-  done
+  config_file=$(coderails::config_path "$cwd")
   if [ -z "$config_file" ]; then
     exit 0
   fi

@@ -298,21 +298,13 @@ Commands are slash commands invoked by Claude (or the user via `/coderails:<name
 
 ### Config resolution (shared by `workflow`, `prep`, `push`, `init`)
 
-Every workflow command reads `workflow.config.yaml` inline via a bash substitution that **walks up** from the current directory to the git root — the first `.claude/workflow.config.yaml` found wins, `NO_CONFIG` if none:
+Every workflow command reads `workflow.config.yaml` via a shared resolver sourced from `scripts/lib/config.sh`:
 
 ```bash
-GIT_ROOT=$(git rev-parse --show-toplevel 2>/dev/null) && {
-  d=$(pwd); cfg="";
-  while :; do
-    [[ -f "$d/.claude/workflow.config.yaml" ]] && { cfg=$(cat "$d/.claude/workflow.config.yaml"); break; }
-    [[ "$d" == "$GIT_ROOT" ]] && break
-    d=$(dirname "$d")
-  done
-  [[ -n "$cfg" ]] && echo "$cfg" || echo "NO_CONFIG"
-} || echo "NO_CONFIG"
+source "${CLAUDE_PLUGIN_ROOT}/scripts/lib/config.sh" && coderails::resolve_config
 ```
 
-Layout-agnostic: standalone repos, classic `projects/<name>/` monorepos, and arbitrary layouts (`apps/web`, `services/api`, …) all resolve from any subdir. The same walk-up runs in `scripts/merge.sh`'s info-check and `gate_config_present()` in `hooks/scripts/enforce_pr_workflow.sh`. `NO_CONFIG` is the sentinel for "not initialised." All workflow commands degrade gracefully: Jira steps no-op, wiki steps skip, engineering-principles pre-flight skips, `enforce_pr_workflow` hook is inactive.
+`coderails::config_path [dir]` walks up from `dir` (default `$PWD`) to the git root — the first `.claude/workflow.config.yaml` found wins, empty if none; `coderails::resolve_config` echoes its contents or `NO_CONFIG`. Layout-agnostic: standalone repos, classic `projects/<name>/` monorepos, and arbitrary layouts (`apps/web`, `services/api`, …) all resolve from any subdir. The same resolver is sourced by `scripts/merge.sh` and `gate_config_present()` in `hooks/scripts/enforce_pr_workflow.sh`. `NO_CONFIG` is the sentinel for "not initialised." All workflow commands degrade gracefully: Jira steps no-op, wiki steps skip, engineering-principles pre-flight skips, `enforce_pr_workflow` hook is inactive.
 
 ---
 

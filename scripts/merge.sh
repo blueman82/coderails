@@ -4,6 +4,7 @@
 #═══════════════════════════════════════════════════════════════════════════════
 set -euo pipefail
 source "$(dirname "$0")/lib/git-common.sh"
+source "$(dirname "$0")/lib/config.sh"
 
 merge::main() {
     local arg="${1:-auto}" br=$(branch) m=$(main)
@@ -38,17 +39,7 @@ merge::main() {
                 [[ $(pr::review "$num") == APPROVED ]] || err "Not approved ($(pr::review "$num"))"
                 ok "Approved"
             }
-            local git_root; git_root=$(git rev-parse --show-toplevel 2>/dev/null)
-            cfg_found=""
-            if [[ -n "$git_root" ]]; then
-                d=$(pwd)
-                while :; do
-                    [[ -f "$d/.claude/workflow.config.yaml" ]] && { cfg_found=1; break; }
-                    [[ "$d" == "$git_root" ]] && break
-                    d=$(dirname "$d")
-                done
-            fi
-            if [[ -n "$git_root" && -z "$cfg_found" ]]; then
+            if [[ -z "$(coderails::config_path "$PWD")" ]]; then
                 info "No workflow.config.yaml — review enforcement (enforce_pr_workflow) is inactive. Run /coderails:init to enable."
             fi
             step "Merging"
