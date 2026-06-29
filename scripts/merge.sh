@@ -50,9 +50,10 @@ merge::main() {
     esac
 
     # ─── Sync ─────────────────────────────────────────────────────────────────
-    [[ $br != "$m" ]] && git checkout "$m" &>/dev/null
-    git pull origin "$m" --quiet
-    ok "Synced to $m"
+    # sync::main_branch handles both the primary tree (checkout main; pull) and a
+    # linked worktree (pull main in the primary tree — a checkout here would abort
+    # under set -e because main is already checked out elsewhere). See git-common.sh.
+    sync::main_branch
 
     # ─── Branch cleanup (best-effort — a merged PR must NEVER report failure) ──
     # --delete-branch was dropped above: it deletes the local branch too, which
