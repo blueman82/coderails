@@ -12,9 +12,7 @@ Create `workflow.config.yaml` in the current project directory. This file is rea
 
 1. Determine the git root: `git rev-parse --show-toplevel`
 2. Determine the project name: use `$ARGUMENTS` if provided, otherwise `basename $(pwd)`
-3. Determine the config path:
-   - If `<git-root>/projects/` exists **AND** `<git-root>/projects/<project-name>/` exists → monorepo layout → write to `<git-root>/projects/<project-name>/.claude/workflow.config.yaml` (create `.claude/` if needed)
-   - Otherwise → standalone repo → write to `<git-root>/.claude/workflow.config.yaml` (create `.claude/` if needed)
+3. Determine the config path: `$(pwd)/.claude/workflow.config.yaml` (create `.claude/` if needed). The workflow commands resolve config by walking up from the current directory to the git root — the first `.claude/workflow.config.yaml` found wins (see "Config resolution" in `AGENTS.md`). Run `/init` from the directory whose config you want to set: a project subdir in a monorepo, or the git root for a standalone repo.
 4. Check if that file already exists. If it does, confirm before overwriting.
 
 5. Ask the user for each field (one prompt is fine — list all fields at once):

@@ -39,9 +39,16 @@ merge::main() {
                 ok "Approved"
             }
             local git_root; git_root=$(git rev-parse --show-toplevel 2>/dev/null)
-            if [[ -n "$git_root" ]] \
-                && [[ ! -f "$git_root/.claude/workflow.config.yaml" ]] \
-                && [[ ! -f "$git_root/projects/$(basename "$(pwd)")/.claude/workflow.config.yaml" ]]; then
+            cfg_found=""
+            if [[ -n "$git_root" ]]; then
+                d=$(pwd)
+                while :; do
+                    [[ -f "$d/.claude/workflow.config.yaml" ]] && { cfg_found=1; break; }
+                    [[ "$d" == "$git_root" ]] && break
+                    d=$(dirname "$d")
+                done
+            fi
+            if [[ -n "$git_root" && -z "$cfg_found" ]]; then
                 info "No workflow.config.yaml — review enforcement (enforce_pr_workflow) is inactive. Run /coderails:init to enable."
             fi
             step "Merging"

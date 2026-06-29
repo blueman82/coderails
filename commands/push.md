@@ -6,7 +6,7 @@ description: Add, commit, push changes and create PR
 
 ## Project config
 
-Config: !`GIT_ROOT=$(git rev-parse --show-toplevel 2>/dev/null) && { cat "$GIT_ROOT/projects/$(basename $(pwd))/.claude/workflow.config.yaml" 2>/dev/null || cat "$GIT_ROOT/.claude/workflow.config.yaml" 2>/dev/null || echo "NO_CONFIG"; }`
+Config: !`GIT_ROOT=$(git rev-parse --show-toplevel 2>/dev/null) && { d=$(pwd); cfg=""; while :; do [[ -f "$d/.claude/workflow.config.yaml" ]] && { cfg=$(cat "$d/.claude/workflow.config.yaml"); break; }; [[ "$d" == "$GIT_ROOT" ]] && break; d=$(dirname "$d"); done; [[ -n "$cfg" ]] && echo "$cfg" || echo "NO_CONFIG"; } || echo "NO_CONFIG"`
 
 ## Pre-flight: engineering-principles check
 
