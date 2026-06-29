@@ -162,4 +162,41 @@ check "wiki commands/*.md (allowlist inversion), cwd=coderails-on-main -> allow"
 check "wiki skills/*/SKILL.md (allowlist inversion), cwd=coderails-on-main -> allow" \
   ALLOW "$(run "$(payload_cwd Edit "$WIKI/skills/foo/SKILL.md" "$REPO")")"
 
+# ─── Claude Code permission-file gate ────────────────────────────────────────
+# .claude/settings.json and .claude/settings.local.json hold the permissions.allow
+# rules that can bypass every other gate (an allowlisted Bash rule pre-approves a
+# command upstream of the PreToolUse hooks). Editing them must be blocked on ANY
+# branch, not just main — a settings escape is dangerous everywhere. The gate fires
+# before the allowlist (they are .json, otherwise allowlisted) and before the branch
+# check.
+checkout feature
+check "feature branch, .claude/settings.json -> deny" \
+  DENY "$(run "$(payload Edit .claude/settings.json)")"
+check "feature branch, .claude/settings.local.json -> deny" \
+  DENY "$(run "$(payload Edit .claude/settings.local.json)")"
+checkout main
+check "main, .claude/settings.json -> deny" \
+  DENY "$(run "$(payload Edit .claude/settings.json)")"
+check "main, .claude/settings.json (absolute) -> deny" \
+  DENY "$(run "$(payload Edit "$REPO/.claude/settings.json")")"
+check "main, .claude/settings.local.json -> deny" \
+  DENY "$(run "$(payload Write .claude/settings.local.json)")"
+# Gated in any repo regardless of plugin marker, even with a mismatched cwd.
+check "settings.json in wiki repo, cwd=coderails -> deny" \
+  DENY "$(run "$(payload_cwd Edit "$WIKI/.claude/settings.json" "$REPO")")"
+# The ./-relative prefix (the most natural form an agent passes) must still deny —
+# it hits the */.claude/... arm via the embedded /.claude/ boundary.
+check "main, ./.claude/settings.json -> deny" \
+  DENY "$(run "$(payload Edit ./.claude/settings.json)")"
+# An unrelated settings.json NOT under .claude/ is not the permission file — allow.
+check "main, app/settings.json (not under .claude) -> allow" \
+  ALLOW "$(run "$(payload Write app/settings.json)")"
+# A file merely named settings.json deeper than .claude/ is not the permission file.
+check "main, .claude/sub/settings.json -> allow" \
+  ALLOW "$(run "$(payload Write .claude/sub/settings.json)")"
+# Same parent-anchoring negative for the .local.json arm — guards against a future
+# glob "simplification" (e.g. *settings.local.json) silently widening the match.
+check "main, .claude/sub/settings.local.json -> allow" \
+  ALLOW "$(run "$(payload Write .claude/sub/settings.local.json)")"
+
 [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails)"; exit 1; }

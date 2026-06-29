@@ -29,6 +29,30 @@ input=$(cat)
 file=$(printf '%s' "$input" | jq -r '.tool_input.file_path // empty')
 [ -z "$file" ] && exit 0
 
+# ── Claude Code permission-file arm ─────────────────────────────────────────
+# .claude/settings.json and .claude/settings.local.json hold the permissions.allow
+# rules that pre-approve commands UPSTREAM of every PreToolUse gate — editing them
+# is the one move that can dismantle the whole discipline layer. Block on ANY branch
+# (a settings escape is dangerous everywhere), in any repo, regardless of the plugin
+# marker. Matched on the `.claude/` parent so an unrelated settings.json elsewhere is
+# not caught; only the file directly under .claude/ is the permission file.
+case "$file" in
+  */.claude/settings.json|.claude/settings.json|\
+  */.claude/settings.local.json|.claude/settings.local.json)
+    reason="Blocked: editing the Claude Code permission file ($file). These settings can pre-approve commands and bypass the discipline gates, so they are never edited by the agent. If you genuinely need to change permissions, do it yourself outside the agent."
+    jq -n --arg r "$reason" '{
+      hookSpecificOutput: {
+        hookEventName: "PreToolUse",
+        permissionDecision: "deny",
+        permissionDecisionReason: $r
+      }
+    }'
+    log="${CLAUDE_DISCIPLINE_LOG:-$HOME/.claude/discipline.log}"
+    printf 'hook=no_edit_on_main decision=deny reason=settings_file file=%s\n' "$file" >> "$log" 2>/dev/null
+    exit 0
+    ;;
+esac
+
 # ── Markdown plugin-source arm ──────────────────────────────────────────────
 # Check plugin-source markdown FIRST, before the allowlist. skills/*/SKILL.md and
 # commands/*.md are source; they must be blocked even though .md is in the allowlist.
