@@ -244,6 +244,44 @@ These skills manage the LLM Wiki — a persistent, compounding knowledge base ma
 
 ---
 
+### Engineering principles skills
+
+These skills enforce engineering principles and language-specific coding standards on code being written or modified.
+
+#### `engineering-principles`
+
+**Purpose:** Enforce engineering principles (YAGNI, KISS, DRY, Fail Fast, SSOT, Law of Demeter) and language-specific coding standards across Python, Go, and TypeScript. Uses LSP (Serena) for call site analysis and reference counting. Dispatches to the appropriate language sub-skill after detecting the file extension.
+
+**When it triggers:** Proactively after writing or modifying any code file, or explicitly via `/engineering-principles`. Trigger phrases: "enforce standards", "check principles", "apply standards", "code quality".
+
+**When it does NOT apply:** Docs, config, or prose edits with no code to audit.
+
+---
+
+#### `engineering-principles-python`
+
+**Purpose:** Enforce Python idioms and standards on `.py` files — PEP 8 naming, type hints, EAFP over LBYL, context managers, and Pyright strict compliance.
+
+**When it triggers:** Invoked by `engineering-principles` after detecting `.py` files, or directly for Python-only sessions.
+
+---
+
+#### `engineering-principles-go`
+
+**Purpose:** Enforce Go idioms and standards on `.go` files — accept interfaces/return structs, errors-as-values, table-driven tests, and idiomatic naming.
+
+**When it triggers:** Invoked by `engineering-principles` after detecting `.go` files, or directly for Go-only sessions.
+
+---
+
+#### `engineering-principles-ts`
+
+**Purpose:** Enforce TypeScript idioms and standards on `.ts`/`.tsx` files — strict mode, no `any`, discriminated unions, optional chaining, and exhaustive switch checks.
+
+**When it triggers:** Invoked by `engineering-principles` after detecting `.ts`/`.tsx` files, or directly for TypeScript-only sessions.
+
+---
+
 ## Hook Activation Matrix
 
 Hooks run automatically on lifecycle events. They can **block** (exit 2 / `permissionDecision: deny`), **warn** (inject advisory context), or run **silently** (inject context with no visible signal). Claude has no choice about whether they run — this is the mechanical enforcement layer.
