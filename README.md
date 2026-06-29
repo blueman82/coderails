@@ -98,7 +98,7 @@ coderails is self-contained — it ships the dev-workflow skills it needs. `pr-r
 | Event | Script | Mode |
 |---|---|---|
 | `SessionStart` | `inject_bootstrap.sh` | silent — injects `using-coderails` skill into every new session |
-| `UserPromptSubmit` | `inject_context.sh` | silent — prepends `[ctx]` (cwd, branch, date) |
+| `UserPromptSubmit` | `inject_context.sh` | silent — prepends `[ctx]` (cwd, branch, date); on the first prompt of a session also appends the discipline reminder |
 | `UserPromptSubmit` | `discipline_catchup.sh` | warn |
 | `Stop` + `SubagentStop` | `check_confidence_labels.sh` | **block** — response ≥200 chars with no `(verified)`/`(inferred)`/`(guess)` label; on `SubagentStop` reads `last_assistant_message` directly |
 | `Stop` + `SubagentStop` | `check_verify_loop.sh` | **block** — any untagged `## Did Not Verify` bullet (only an explicit `(unverifiable: <reason>)` tag passes); on `SubagentStop` reads `last_assistant_message` directly |
