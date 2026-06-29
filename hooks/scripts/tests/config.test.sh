@@ -23,12 +23,20 @@ check() {  # desc expected actual
 resolve() {  # start_dir -> config_path | "" | "TIMEOUT"
   local start="$1" out rc
   out=$(
-    ( bash -c '. "'"$LIB"'"; coderails::config_path "'"$start"'"' & p=$!
-      ( sleep 5; kill -9 $p 2>/dev/null ) & w=$!
-      wait $p 2>/dev/null; rc=$?
-      kill $w 2>/dev/null
-      [ $rc -eq 137 ] && printf 'TIMEOUT'
-    )
+    { ( bash -c '. "'"$LIB"'"; coderails::config_path "'"$start"'"' & p=$!
+        ( sleep 5; kill -9 $p 2>/dev/null ) & w=$!
+        wait $p 2>/dev/null; rc=$?
+        # Tear down the watchdog by reaping its `sleep` child directly. Signalling
+        # the subshell ($w) doesn't work: it is blocked inside `sleep` and ignores
+        # SIGTERM until the sleep ends, so the enclosing $() would stall the full
+        # 5s on every happy-path call. pkill -P $w kills the sleep; the now-childless
+        # subshell then exits, and `wait $w` reaps it. The outer { } 2>/dev/null
+        # suppresses the shell job-control "Terminated: sleep" notice that bash
+        # emits when a background job is killed inside a $() subshell.
+        pkill -P $w 2>/dev/null; wait $w 2>/dev/null
+        [ $rc -eq 137 ] && printf 'TIMEOUT'
+      )
+    } 2>/dev/null
   )
   printf '%s' "$out"
 }
