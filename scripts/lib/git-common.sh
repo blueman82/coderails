@@ -46,6 +46,42 @@ pr::title()  { gh pr view "$1" --json title -q .title 2>/dev/null || echo "PR #$
 pr::review() { gh pr view "$1" --json reviewDecision -q .reviewDecision 2>/dev/null || echo NONE; }
 pr::exists() { [[ -n $(pr::num "${1:-}") ]]; }
 
+# ━━━ Sync ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Post-merge sync: bring the default branch up to date with origin. From the
+# primary worktree this is just `checkout main; pull`. From a LINKED worktree,
+# `git checkout main` is impossible (main is already checked out in the primary
+# tree — git refuses), so we sync main *where it lives* via `git -C <primary>`
+# instead of switching this worktree. Never aborts on the worktree case.
+sync::main_branch() {
+    local m; m=$(main)
+    local gd cd; gd=$(git rev-parse --git-dir 2>/dev/null); cd=$(git rev-parse --git-common-dir 2>/dev/null)
+    # Best-effort throughout: the remote merge has already landed by the time this
+    # runs, so a sync failure must NEVER abort the caller (merge.sh runs under
+    # `set -e`). Every git call is guarded; the function always returns 0.
+    if [[ "$gd" != "$cd" ]]; then
+        # Linked worktree: `git checkout main` is impossible here (main is checked
+        # out in the primary tree), so sync main where it lives. Read the primary
+        # tree as the first `worktree ` line, stripped via parameter expansion so a
+        # path containing spaces survives (awk '{print $2}' would truncate it).
+        local primary line
+        line=$(git worktree list --porcelain 2>/dev/null | grep -m1 '^worktree ')
+        primary=${line#worktree }
+        if [[ -n "$primary" ]] \
+            && git -C "$primary" checkout "$m" &>/dev/null \
+            && git -C "$primary" pull origin "$m" --quiet; then
+            ok "Synced $m in primary tree ($primary)"
+        else
+            warn "Could not sync $m in primary tree — sync it manually"
+        fi
+    else
+        { [[ $(branch) != "$m" ]] && ! git checkout "$m" &>/dev/null; } \
+            && { warn "Could not checkout $m — sync it manually"; return 0; }
+        git pull origin "$m" --quiet && ok "Synced to $m" \
+            || warn "Could not pull $m — sync it manually"
+    fi
+    return 0
+}
+
 # ━━━ Guards ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 require::feature() { [[ $(branch) =~ ^(main|master)$ ]] && err "Switch to a feature branch first" || true; }
 require::clean()   { dirty && err "Uncommitted changes - commit or stash first" || true; }
