@@ -168,7 +168,7 @@ re-opened as findings.
 standalone sub-command that also works on its own:
 
 ```
-/workflow  →  /prep → (code) → /push → /pr-review-toolkit:review-pr → /coderails:post-review → /merge → /wiki-ingest + /wiki-lint
+/workflow  →  /prep → (code) → /push → /pr-review-toolkit:review-pr → /coderails:post-review → (ship-it) → /merge → /wiki-ingest + /wiki-lint
 ```
 
 Two interactive pauses where the user drives: the code/iterate loop, and final
