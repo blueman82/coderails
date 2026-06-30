@@ -87,7 +87,7 @@ artifacts:
 
 ```bash
 EXISTING=$(gh api "repos/${REPO}/issues/${ARGUMENTS}/comments" \
-  --jq "[.[] | select(.body | startswith(\"$MARKER\"))] | first | {url:.html_url,id:.id,author:.user.login,created:.created_at}" 2>/dev/null || true)
+  --jq "[.[] | select(.body | startswith(\"$MARKER\"))] | first | select(. != null) | {url:.html_url,id:.id,author:.user.login,created:.created_at}" 2>/dev/null || true)
 ```
 
 If `EXISTING` is non-null and contains a url, the artifact already exists for this SHA. Skip
