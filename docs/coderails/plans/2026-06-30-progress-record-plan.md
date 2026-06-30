@@ -90,7 +90,7 @@
 
 **Files:** `commands/post-review.md` (create).
 
-**Interface consumed:** `post_review::validate_summary` (Task 1), `review_artifact::marker` (Task 0), `post_review::write_cache` (Task 2); `agentic_loop_path.sh` (existing) for the optional progress.json path; `gh pr comment`, `gh pr view --json headRefOid,url` (existing CLI).
+**Interface consumed:** `post_review::validate_summary` (Task 1), `review_artifact::marker` (Task 0), `post_review::write_cache` (Task 2); `agentic_loop_path.sh` (existing) for the optional progress.json path; `gh api …/issues/<PR>/comments`, `gh repo view --json nameWithOwner`, `gh pr view --json headRefOid` (existing CLI).
 
 **Independence from `progress.json` (stress-test fix):** the PR artifact is posted **regardless** of whether a `progress.json` exists. The cache write (`write_cache`) is best-effort — a missing ledger warns and continues, never blocks the post. The truth seam does not depend on the ledger.
 
