@@ -178,7 +178,7 @@
 
 ## Task 8 — Docs: hook map + command table
 
-**Files:** `AGENTS.md` (modify), `docs/REFERENCE.md` (modify), `README.md` (modify if it carries the command/hook tables).
+**Files:** `AGENTS.md` (modify), `docs/REFERENCE.md` (modify), `README.md` (modify — it DOES carry a command table at lines ~30–42; verified).
 
 **This task is prose, verified by inspection.**
 
