@@ -154,7 +154,7 @@
 **This task is prose, verified by inspection.**
 
 **Steps:**
-- [ ] `workflow.md`: in the phase list (line ~148 area) and the `allowed-tools` (line 2), insert `/coderails:post-review` between `/pr-review-toolkit:review-pr` and `/coderails:merge`. Update the prose ordering diagram so post-review runs **before** the ship-it pause (artifact present during the pause).
+- [ ] `workflow.md`: insert `/coderails:post-review <PR#>` as a new step at the **end of Phase 3** ("Push + Adversarial Review", which currently ends after the `/pr-review-toolkit:review-pr all` at step 2 and `/simplify` at step 2c, ~line 148–158) — i.e. after review/simplify complete and **before Phase 4 "Ship-It" (the interactive pause, ~line 159)**. This places the durable artifact on the PR before the ship-it pause. Also add `SlashCommand(/coderails:post-review)` to the `allowed-tools` (line 2). Update the prose ordering so the chain reads `review-pr → post-review → (Phase 4 ship-it pause) → /merge`.
 - [ ] `agentic-loop/SKILL.md`: at Phase 4b, after the `review-pr` invocation, add the instruction to run `/coderails:post-review <PR#>` so the loop posts the same SHA-bound artifact (loop symmetry — same merge gate applies on both paths).
 - [ ] Inspect: grep `workflow.md` shows post-review between review and merge; `SKILL.md` Phase 4b references `/coderails:post-review`.
 
