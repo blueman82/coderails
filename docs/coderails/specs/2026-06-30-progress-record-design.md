@@ -2,8 +2,8 @@
 
 **Date:** 2026-06-30
 **Status:** Approved (design), pre-implementation
-**Files (planned):** `hooks/scripts/progress_record_guard.sh` (new),
-`hooks/scripts/tests/progress_record_guard.test.sh` (new),
+**Files (planned):** `hooks/scripts/progress_record_guard.sh` (new — **DEFERRED, not in the first implementation slice; see the implementation plan's scope decision**),
+`hooks/scripts/tests/progress_record_guard.test.sh` (new — **DEFERRED, see plan**),
 `commands/post-review.md` (new — coderails-owned post-review step),
 `hooks/scripts/lib/loop_state_common.sh` (reuse; possibly small additions),
 `hooks/scripts/lib/agentic_loop_path.sh` (reuse, unchanged),
