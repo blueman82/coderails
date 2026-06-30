@@ -3,6 +3,10 @@
 #  git-common.sh │ Shared utilities for elegant git workflows
 #═══════════════════════════════════════════════════════════════════════════════
 
+# Source review-artifact.sh (sibling lib) for marker matching.
+# BASH_SOURCE-relative so this works regardless of cwd.
+source "$(dirname "${BASH_SOURCE[0]}")/review-artifact.sh"
+
 # ━━━ Terminal ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 [[ -t 1 ]] && {
     readonly C_RED=$'\e[31m' C_GRN=$'\e[32m' C_YLW=$'\e[33m' C_BLU=$'\e[34m'
@@ -45,6 +49,33 @@ pr::state()  { gh pr view "$1" --json state -q .state 2>/dev/null || echo UNKNOW
 pr::title()  { gh pr view "$1" --json title -q .title 2>/dev/null || echo "PR #$1"; }
 pr::review() { gh pr view "$1" --json reviewDecision -q .reviewDecision 2>/dev/null || echo NONE; }
 pr::exists() { [[ -n $(pr::num "${1:-}") ]]; }
+
+# pr::head_sha <num>
+# Echoes the current headRefOid for the given PR. Empty on gh failure.
+pr::head_sha() {
+    gh pr view "$1" --json headRefOid -q .headRefOid 2>/dev/null || true
+}
+
+# pr::has_coderails_review_for_head <num> <sha>
+# Fetches all PR comment bodies and checks whether any LINE (across all comments)
+# is exactly the coderails review marker for <num>/<sha>.
+# Exit codes:
+#   0 = found a matching marker
+#   1 = fetched ok, but no matching marker found
+#   2 = gh fetch failed (fail-closed)
+pr::has_coderails_review_for_head() {
+    local num="$1" sha="$2"
+    local bodies
+    if ! bodies=$(gh pr view "$num" --json comments -q '.comments[].body' 2>/dev/null); then
+        return 2
+    fi
+    while IFS= read -r line; do
+        if review_artifact::matches_marker "$line" "$num" "$sha"; then
+            return 0
+        fi
+    done <<< "$bodies"
+    return 1
+}
 
 # ━━━ Sync ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # Post-merge sync: bring the default branch up to date with origin. From the

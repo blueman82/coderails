@@ -109,4 +109,65 @@ git -C "$NOMARK" commit -q --allow-empty -m init
 check "main() falls back to 'main' when origin/HEAD is unset" \
   "main" "$( cd "$NOMARK" && main )"
 
+# ─── pr::head_sha + pr::has_coderails_review_for_head ───────────────────────
+# These helpers call `gh`. Stub it via a PATH-injected fake script.
+STUB_DIR="$TMP/stubs"
+mkdir -p "$STUB_DIR"
+
+ARTIFACT_LIB="$(cd "$(dirname "$0")/../../.." && pwd)/scripts/lib/review-artifact.sh"
+source "$ARTIFACT_LIB"
+
+GOOD_MARKER=$(review_artifact::marker 42 "deadbeef")
+OTHER_SHA_MARKER=$(review_artifact::marker 42 "othershaX")
+V2_MARKER="<!-- coderails-review-summary v2 pr=42 head_sha=deadbeef -->"
+
+# Helper: write a gh stub and source git-common.sh fresh so it picks up the stub
+run_with_stub() {
+    local stub_body="$1"; shift
+    local stub="$STUB_DIR/gh"
+    printf '#!/bin/bash\n%s\n' "$stub_body" > "$stub"
+    chmod +x "$stub"
+    # Source git-common.sh in a subshell with the stub dir prepended to PATH
+    (
+        export PATH="$STUB_DIR:$PATH"
+        source "$LIB"
+        "$@"
+    )
+}
+
+# Stub: pr view headRefOid → returns "deadbeef"
+HEAD_SHA_STUB='echo "deadbeef"'
+result=$(run_with_stub "$HEAD_SHA_STUB" pr::head_sha 42)
+check "pr::head_sha: returns sha from gh output" "deadbeef" "$result"
+
+# Stub: gh fails (non-zero exit) → pr::head_sha returns empty
+FAIL_STUB='exit 1'
+result=$(run_with_stub "$FAIL_STUB" pr::head_sha 42)
+check "pr::head_sha: gh failure → empty result" "" "$result"
+
+# Stub: comment body contains the exact matching marker
+MATCH_STUB="printf '%s\n' '$GOOD_MARKER'"
+run_with_stub "$MATCH_STUB" pr::has_coderails_review_for_head 42 "deadbeef"
+check "has_coderails_review_for_head: matching marker → exit 0" 0 $?
+
+# Stub: comment body contains a marker for a different SHA → exit 1 (no match)
+WRONG_SHA_STUB="printf '%s\n' '$OTHER_SHA_MARKER'"
+run_with_stub "$WRONG_SHA_STUB" pr::has_coderails_review_for_head 42 "deadbeef"
+check "has_coderails_review_for_head: different sha marker → exit 1" 1 $?
+
+# Stub: comment body contains a v2 marker → exit 1 (fail-closed on unknown version)
+V2_STUB="printf '%s\n' '$V2_MARKER'"
+run_with_stub "$V2_STUB" pr::has_coderails_review_for_head 42 "deadbeef"
+check "has_coderails_review_for_head: v2 marker → exit 1 (fail-closed)" 1 $?
+
+# Stub: no comments (empty output) → exit 1 (no match)
+EMPTY_STUB='printf ""'
+run_with_stub "$EMPTY_STUB" pr::has_coderails_review_for_head 42 "deadbeef"
+check "has_coderails_review_for_head: no comments → exit 1" 1 $?
+
+# Stub: gh fails (non-zero exit) → distinct exit code 2 (fetch-failed)
+run_with_stub "$FAIL_STUB" pr::has_coderails_review_for_head 42 "deadbeef"
+rc=$?
+check "has_coderails_review_for_head: gh failure → exit 2 (fetch-failed, distinct from no-match)" 2 $rc
+
 [[ $fails -eq 0 ]] && { echo PASS; exit 0; } || { echo "FAIL ($fails)"; exit 1; }
