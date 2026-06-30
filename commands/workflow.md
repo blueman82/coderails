@@ -153,6 +153,7 @@ Execute in order — do not pause between these:
    - **Worthwhile** (apply silently): readability wins, better names, extracted helpers that clearly reduce duplication
    - **Cosmetic/subjective** (skip, note in PR body): style preferences, naming opinions without a concrete defect
 4. Post a ledger comment on the PR summarising what was applied vs. skipped and why.
+5. `/coderails:post-review <PR#>` — post the SHA-bound review artifact on the PR. This converts the ephemeral review output into a durable, machine-verifiable GitHub comment that `/merge` requires before merging. Run this after all findings are applied and the follow-up commit is pushed, so the artifact is stamped against the final head SHA. The chain is: `review-pr → (apply findings) → post-review → (Phase 4 ship-it pause) → /merge`.
 
 Report the PR URL, review summary, and resolved JIRA key (if applicable).
 
