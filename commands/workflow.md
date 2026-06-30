@@ -145,7 +145,7 @@ Note: `/push` already runs this pre-flight itself for paths in `config.engineeri
 Execute in order — do not pause between these:
 
 1. `/coderails:push` — stages, commits, pushes, opens PR with branch-protection reviewers, auto-resolves JIRA on PR creation (if `config.jira` non-null). Capture the PR URL from the output.
-2. `/pr-review-toolkit:review-pr all` — runs the four specialist agents (code-reviewer, pr-test-analyzer, silent-failure-hunter, type-design-analyzer) in parallel.
+2. `/pr-review-toolkit:review-pr <PR#>` — runs all applicable specialist agents (code-reviewer, pr-test-analyzer, silent-failure-hunter, type-design-analyzer). Use the PR number captured from `/coderails:push` — the hook requires the args to start with the PR number. Passing just the number is sufficient; the command defaults to all reviews when no aspect keyword is given.
 2b. **Verify engineering principles** — run `/engineering-principles` on the cumulative diff against the base branch. Apply the same rule as `/push`'s pre-flight: deviations from documented architectural conventions are blocking; style notes are non-blocking. Feed any blocking finding into step 3's apply loop.
 2c. **Simplify** — run `/simplify` on the diff (built-in command). `review-pr`'s own `code-simplifier` agent only runs "after passing review" and is not guaranteed, so this is the explicit simplify pass; route its changes through step 3.
 3. Apply worthwhile findings inline — do not re-ask per finding. Push the follow-up commit. Classify each finding as:
