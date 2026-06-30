@@ -8,7 +8,7 @@
 `hooks/scripts/lib/loop_state_common.sh` (reuse; possibly small additions),
 `hooks/scripts/lib/agentic_loop_path.sh` (reuse, unchanged),
 `scripts/lib/git-common.sh` (reuse `pr::*`; possibly add a comment-fetch helper),
-`hooks/hooks.json` (register new Stop hook),
+`hooks/hooks.json` (register new Stop hook — **DEFERRED with the guard, see plan**),
 `commands/prep.md` (write the stub on the non-loop path),
 `commands/workflow.md` (insert `/coderails:post-review` between review and merge),
 `skills/agentic-loop/SKILL.md` (post-review step at Phase 4b),
