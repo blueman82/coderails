@@ -82,7 +82,7 @@ SCRIPTS_DIR="$REPO_ROOT/hooks/scripts"
 backstop_files=$(grep -rl "IFS= read -r -d '' -t" "$SCRIPTS_DIR" --include="*.sh" \
   | grep -v "/tests/" | grep -v "/lib/" | sort)
 
-backstop_count=$(echo "$backstop_files" | grep -c . 2>/dev/null || echo 0)
+backstop_count=$(echo "$backstop_files" | grep -c . 2>/dev/null)
 
 # Assert backstop count == EXPECTED_BACKSTOP_COUNT (10 known hooks).
 if [ "$backstop_count" -ne "$EXPECTED_BACKSTOP_COUNT" ]; then
@@ -96,9 +96,9 @@ fi
 # Assert every hook's read -t value equals READ_T_FLOOR.
 while IFS= read -r hook_file; do
   [ -z "$hook_file" ] && continue
-  # Extract the integer N from `IFS= read -r -d '' -t N input`
+  # Extract the integer N from `IFS= read -r -d '' -t N` — tolerates end-of-line (no trailing token).
   n=$(grep "IFS= read -r -d '' -t" "$hook_file" \
-      | sed "s/.*read -r -d '' -t \([0-9]*\) .*/\1/" | head -1)
+      | grep -oE "read -r -d '' -t [0-9]+" | grep -oE '[0-9]+$' | head -1)
   hook_name=$(basename "$hook_file")
   if [ "$n" != "$READ_T_FLOOR" ]; then
     printf 'FAIL - %s uses read -t %s but floor is %d — both halves of the timeout invariant must match\n' \
