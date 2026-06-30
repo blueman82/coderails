@@ -29,25 +29,40 @@ check() { # desc expected_exit actual_exit
 SCAN_FILES_LIST=$(
   find "$REPO_ROOT/commands" -name '*.md' -type f
   find "$REPO_ROOT/scripts" -name '*.sh' -type f
+  find "$REPO_ROOT/hooks/scripts" -name '*.sh' -type f \
+    ! -path "$REPO_ROOT/hooks/scripts/tests/*"
 )
 
 # ─── Bug class 1: gh api -f key=@ (raw-field with file sigil — literal-string trap) ────────
 #
 # The pattern -f <identifier>=@ tells gh to post the LITERAL string "@<something>" as the
 # field value.  The correct form is -F which reads the file.  The pattern is grep-detectable.
-# We check for `-f <word>=@` (a word boundary before =@ keeps false-positives low).
+# We check for `-f <word>=@` and `--raw-field <word>=@` (both short and long form).
+# Field names may contain letters, digits, and underscores (e.g. `-f key1=@`).
 
 BAD1_FILE="$TMP/bad_gh_raw_field.sh"
 printf '%s\n' 'gh api graphql -f body=@/tmp/comment.md' > "$BAD1_FILE"
 
-grep -qE -- '-f [a-zA-Z_]+=@' "$BAD1_FILE"
+grep -qE -- '(-f |--raw-field )[a-zA-Z0-9_]+=@' "$BAD1_FILE"
 check "self-test: -f key=@ pattern FIRES on bad input (assertion not vacuous)" 0 $?
 
-# Repo scan: no command or script file may contain -f <word>=@ in a gh invocation.
+# Self-test Fix C: field names with digits must also fire.
+BAD1C_FILE="$TMP/bad_gh_raw_field_digit.sh"
+printf '%s\n' 'gh api -f key1=@/tmp/x.txt' > "$BAD1C_FILE"
+grep -qE -- '(-f |--raw-field )[a-zA-Z0-9_]+=@' "$BAD1C_FILE"
+check "self-test: -f key1=@ (digit in field name) FIRES (Fix C non-vacuous)" 0 $?
+
+# Self-test Fix A: --raw-field long form must also fire.
+BAD1A_FILE="$TMP/bad_gh_raw_field_long.sh"
+printf '%s\n' 'gh api --raw-field body=@/tmp/x.md' > "$BAD1A_FILE"
+grep -qE -- '(-f |--raw-field )[a-zA-Z0-9_]+=@' "$BAD1A_FILE"
+check "self-test: --raw-field body=@ (long form) FIRES (Fix A non-vacuous)" 0 $?
+
+# Repo scan: no command or script file may contain -f <word>=@ or --raw-field <word>=@.
 bad1_hit=0
 while IFS= read -r f; do
   [ -z "$f" ] && continue
-  if grep -nE -- '-f [a-zA-Z_]+=@' "$f"; then
+  if grep -nE -- '(-f |--raw-field )[a-zA-Z0-9_]+=@' "$f"; then
     printf '  ^^ gh raw-field file-read trap in: %s\n' "$f"
     bad1_hit=1
   fi
@@ -59,6 +74,9 @@ check "repo scan: no -f key=@ (gh raw-field file-read trap) in command/script fi
 # The enforce_pr_workflow.sh hook validates that review-pr invocations start with a PR number.
 # A bare "review-pr all" argument skips that check incorrectly.  Scoped to workflow.md because
 # that is the authoritative invocation document for this repo's PR workflow.
+# Intentional design: this scan is scoped to workflow.md only — not all commands/*.md — because
+# other files are not authoritative invocation docs and could legitimately reference the pattern
+# in a non-invocation context (e.g. documentation of what NOT to do).
 
 WORKFLOW_FILE="$REPO_ROOT/commands/workflow.md"
 BAD2_FILE="$TMP/bad_workflow.md"
@@ -72,28 +90,44 @@ check "repo scan: workflow.md does NOT contain bare '/pr-review-toolkit:review-p
 
 # ─── Bug class 3: jq `| first | {url:` without select(. != null) guard ──────────────────────
 #
-# When a jq filter produces an empty array, `first` yields `null`.  Piping null into an object
-# projection `{url:.html_url,...}` produces a non-empty JSON object with null fields rather
-# than empty output — causing downstream bash checks to incorrectly conclude a match was found.
+# When a jq filter produces an empty array, `first` or `.[0]` yields `null`.  Piping null into
+# an object projection `{url:.html_url,...}` produces a non-empty JSON object with null fields
+# rather than empty output — causing downstream bash checks to incorrectly conclude a match
+# was found.
 #
-# Narrow heuristic: any line containing `| first | {url:` is the known-dangerous idiom.
-# A line with that idiom MUST also contain `select(. != null)` between `first` and the projection.
-# We check: grep finds the projection idiom on the same line, and that same line also has the guard.
-# Limitation: this catches only the exact `{url:` projection form; other projections after first
-# would not be caught.  This is intentional — narrow enough to avoid false-positives.
+# Narrow heuristic: any line containing `| first | {url:`, `|first|{url:`, `| first|{url:`,
+# or `| .[0] | {url:` is the known-dangerous idiom.
+# A line with that idiom MUST also contain `select(. != null)` between the iterator and the
+# projection.  We check: grep finds the projection idiom on the same line, and that same line
+# also has the guard.
+#
+# Limitation: a line using `| first | select(.foo) | {url:` (a DIFFERENT select, not the null
+# guard) would incorrectly pass this check.  Distinguishing which select is the null guard
+# requires a parser; grep cannot do it.  Accept this as a known residual gap.
+#
+# Limitation: this catches only the exact `{url:` projection form; other projections after
+# first/.[0] would not be caught.  This is intentional — narrow enough to avoid false-positives.
 
 BAD3_FILE="$TMP/bad_jq_first.sh"
 # This line has first | {url: but NO select guard — the dangerous form.
 printf '%s\n' '--jq "[.[] | select(.body | startswith(X))] | first | {url:.html_url,id:.id}"' > "$BAD3_FILE"
 
-grep -qE '\| first \|.*\{url:' "$BAD3_FILE"
+grep -qE '[|] *(first|\.\[[0-9]+\]) *[|].*\{url:' "$BAD3_FILE"
 check "self-test: '| first | {url:' pattern FIRES on bad input (assertion not vacuous)" 0 $?
 
 # Self-test part 2: confirm the guard check correctly identifies the ABSENCE of select(. != null).
-grep -E '\| first \|.*\{url:' "$BAD3_FILE" | grep -qF 'select(. != null)'
+grep -E '[|] *(first|\.\[[0-9]+\]) *[|].*\{url:' "$BAD3_FILE" | grep -qF 'select(. != null)'
 check "self-test: bad input correctly fails the select-guard check (guard is absent)" 1 $?
 
-# Repo scan: any line with | first | {url: MUST also have select(. != null).
+# Self-test Fix B: .[0] variant must also fire.
+BAD3B_FILE="$TMP/bad_jq_index.sh"
+printf '%s\n' '--jq "[.[] | select(.merged)] | .[0] | {url:.html_url,id:.id}"' > "$BAD3B_FILE"
+grep -qE '[|] *(first|\.\[[0-9]+\]) *[|].*\{url:' "$BAD3B_FILE"
+check "self-test: '| .[0] | {url:' pattern FIRES (Fix B non-vacuous)" 0 $?
+grep -E '[|] *(first|\.\[[0-9]+\]) *[|].*\{url:' "$BAD3B_FILE" | grep -qF 'select(. != null)'
+check "self-test: .[0] bad input correctly fails the select-guard check (guard is absent)" 1 $?
+
+# Repo scan: any line with | first/{.[N]} | {url: MUST also have select(. != null).
 bad3_hit=0
 while IFS= read -r f; do
   [ -z "$f" ] && continue
@@ -102,11 +136,11 @@ while IFS= read -r f; do
     [ -z "$line" ] && continue
     if ! printf '%s' "$line" | grep -qF 'select(. != null)'; then
       printf '%s: %s\n' "$f" "$line"
-      printf '  ^^ jq first|{url: projection without select(. != null) guard\n'
+      printf '  ^^ jq first/.[N]|{url: projection without select(. != null) guard\n'
       bad3_hit=1
     fi
-  done <<< "$(grep -nE '\| first \|.*\{url:' "$f" 2>/dev/null)"
+  done <<< "$(grep -nE '[|] *(first|\.\[[0-9]+\]) *[|].*\{url:' "$f" 2>/dev/null)"
 done <<< "$SCAN_FILES_LIST"
-check "repo scan: all '| first | {url:' projections have select(. != null) guard" 0 $((bad3_hit))
+check "repo scan: all '| first/.[N] | {url:' projections have select(. != null) guard" 0 $((bad3_hit))
 
 [[ $fails -eq 0 ]] && { echo PASS; exit 0; } || { echo "FAIL ($fails)"; exit 1; }
