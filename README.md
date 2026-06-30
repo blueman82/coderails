@@ -33,6 +33,7 @@ bash ~/Documents/Github/coderails/install.sh
 | `/coderails:init` | Scaffold `.claude/workflow.config.yaml` for the current repo |
 | `/prep` | Safety branch + feature branch + Jira ticket |
 | `/push` | Stage, commit, push, open PR with reviewers; auto-resolve linked Jira |
+| `/post-review` | Post SHA-bound review artifact on PR; required by `/merge` gate |
 | `/merge` | Merge approved PR, switch to main, pull |
 | `/assumptions` | List every assumption, marked verified or inferred |
 | `/verify` | Re-derive a specific claim from sources only — no recall |
