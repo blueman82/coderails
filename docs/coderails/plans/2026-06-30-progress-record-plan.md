@@ -114,7 +114,7 @@
 
 **Files:** `scripts/lib/git-common.sh` (modify — add after the `pr::*` block, ~line 47), `hooks/scripts/tests/git-common.test.sh` (modify).
 
-**Interface consumed:** `review_artifact::matches_marker` (Task 0 — the SOLE matcher; do NOT re-type the marker literal here). `git-common.sh` sources `scripts/lib/review-artifact.sh`.
+**Interface consumed:** `review_artifact::matches_marker` (Task 0 — the SOLE matcher; do NOT re-type the marker literal here). `git-common.sh` sources the sibling lib via the `BASH_SOURCE`-relative idiom (same pattern `loop_state_common.sh` uses for `agentic_loop_path.sh`): `source "$(dirname "${BASH_SOURCE[0]}")/review-artifact.sh"` — NOT a cwd-relative `source scripts/lib/…` (fragile). The `git-common.test.sh` harness must load `review-artifact.sh` too (it resolves the repo-root absolute path already).
 **Interface produced (for Task 5):**
 - `pr::head_sha <num>` — `gh pr view "$num" --json headRefOid -q .headRefOid 2>/dev/null`; echoes empty on `gh` failure.
 - `pr::has_coderails_review_for_head <num> <sha>` — fetches `gh pr view "$num" --json comments -q '.comments[].body'`; **splits each comment body into lines** (the marker is a single line; iterate `while IFS= read -r line` over the fetched output) and returns exit 0 iff some line satisfies `review_artifact::matches_marker` for `<num>`/`<sha>`. On `gh` failure (fetch returns non-zero / empty) → exit 1 (fail-closed). Distinguish fetch-failure from no-match via a distinct exit code (e.g. 2 = fetch-failed, 1 = fetched-but-no-match) so Task 5 can message them differently.
