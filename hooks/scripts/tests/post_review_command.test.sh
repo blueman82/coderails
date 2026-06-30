@@ -37,4 +37,12 @@ check "workflow.md: bare '/pr-review-toolkit:review-pr all' invocation is absent
 grep -qF '/pr-review-toolkit:review-pr <PR#>' "$WORKFLOW_CMD"
 check "workflow.md: review-pr invocation includes <PR#> placeholder" 0 $?
 
+# ─── Fix 3: dedup --jq filter must guard no-match with select(. != null) ─────
+
+# Without this guard, `[] | first` yields null, and `null | {url:.html_url,...}`
+# produces a non-empty JSON object with null fields — causing the bash dedup check
+# to falsely conclude an artifact already exists and skip posting.
+grep -qF 'select(. != null)' "$POST_REVIEW_CMD"
+check "post-review.md: dedup --jq filter contains select(. != null) no-match guard" 0 $?
+
 [[ $fails -eq 0 ]] && { echo PASS; exit 0; } || { echo "FAIL ($fails)"; exit 1; }
