@@ -140,4 +140,42 @@ check "write_cache: non-existent path → does not create file" 1 $?
 [[ -n "$stderr_out" ]]
 check "write_cache: non-existent path → warns to stderr" 0 $?
 
+# ─── Test A: write_cache jq-failure path ─────────────────────────────────────
+# Feed a corrupted/non-JSON progress.json to write_cache; assert:
+#   (a) exit 1
+#   (b) original file content unchanged
+#   (c) no leftover .tmp file
+
+CORRUPT="$TMP/corrupt_progress.json"
+printf 'THIS IS NOT JSON }{' > "$CORRUPT"
+CORRUPT_ORIGINAL=$(cat "$CORRUPT")
+CORRUPT_TMP="${CORRUPT}.tmp"
+
+post_review::write_cache "$CORRUPT" 42 "deadbeef" "https://x" "bot" "2026-06-30T00:00:00Z" 2>/dev/null
+check "write_cache: jq-failure → exit 1" 1 $?
+check_str "write_cache: jq-failure → original file unchanged" "$CORRUPT_ORIGINAL" "$(cat "$CORRUPT")"
+[[ -f "$CORRUPT_TMP" ]]
+check "write_cache: jq-failure → no leftover .tmp file" 1 $?
+
+# ─── Test B: validate_summary missing-file path ───────────────────────────────
+# Call validate_summary with a path that does not exist; assert exit 1 and
+# a "file not found" message on stderr.
+
+MISSING_FILE="$TMP/does_not_exist_at_all.md"
+stderr_missing=$(post_review::validate_summary "$MISSING_FILE" 2>&1)
+check "validate_summary: missing file → exit 1" 1 $?
+[[ "$stderr_missing" == *"not found"* ]]
+check "validate_summary: missing file → stderr contains 'not found'" 0 $?
+
+# ─── Fix 5: ambiguous ## No findings + structured headings → exit 1 ──────────
+BODY_AMB="$TMP/body_ambiguous.md"
+cat > "$BODY_AMB" <<'BODY'
+## No findings
+
+## Critical
+- something critical
+BODY
+post_review::validate_summary "$BODY_AMB" 2>/dev/null
+check "validate_summary: ambiguous '## No findings' + structured headings → exit 1" 1 $?
+
 [[ $fails -eq 0 ]] && { echo PASS; exit 0; } || { echo "FAIL ($fails)"; exit 1; }

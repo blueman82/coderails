@@ -8,12 +8,15 @@
 source "$(dirname "${BASH_SOURCE[0]}")/review-artifact.sh"
 
 # ━━━ Terminal ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-[[ -t 1 ]] && {
-    readonly C_RED=$'\e[31m' C_GRN=$'\e[32m' C_YLW=$'\e[33m' C_BLU=$'\e[34m'
-    readonly C_DIM=$'\e[2m'  C_BLD=$'\e[1m'  C_RST=$'\e[0m'
-} || {
-    readonly C_RED='' C_GRN='' C_YLW='' C_BLU='' C_DIM='' C_BLD='' C_RST=''
-}
+if [[ -z "${_GIT_COMMON_COLORS_LOADED:-}" ]]; then
+    [[ -t 1 ]] && {
+        readonly C_RED=$'\e[31m' C_GRN=$'\e[32m' C_YLW=$'\e[33m' C_BLU=$'\e[34m'
+        readonly C_DIM=$'\e[2m'  C_BLD=$'\e[1m'  C_RST=$'\e[0m'
+    } || {
+        readonly C_RED='' C_GRN='' C_YLW='' C_BLU='' C_DIM='' C_BLD='' C_RST=''
+    }
+    readonly _GIT_COMMON_COLORS_LOADED=1
+fi
 
 # ━━━ Output ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 info()    { printf '%s• %s%s\n' "$C_BLU" "$1" "$C_RST"; }
@@ -53,7 +56,10 @@ pr::exists() { [[ -n $(pr::num "${1:-}") ]]; }
 # pr::head_sha <num>
 # Echoes the current headRefOid for the given PR. Empty on gh failure.
 pr::head_sha() {
-    gh pr view "$1" --json headRefOid -q .headRefOid 2>/dev/null || true
+    local out
+    if out=$(gh pr view "$1" --json headRefOid -q .headRefOid 2>/dev/null); then
+        printf '%s' "$out"
+    fi
 }
 
 # pr::has_coderails_review_for_head <num> <sha>

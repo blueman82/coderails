@@ -31,6 +31,10 @@ post_review::validate_summary() {
 
     # Check for '## No findings' path
     if grep -qxF '## No findings' "$file"; then
+        if grep -qxF '## Critical' "$file" || grep -qxF '## Important' "$file" || grep -qxF '## Suggestions' "$file"; then
+            printf 'validate_summary: ambiguous — "## No findings" present alongside structured headings\n' >&2
+            return 1
+        fi
         return 0
     fi
 
@@ -98,7 +102,11 @@ post_review::write_cache() {
               summary_author: $author,
               posted_at: $posted_at
           }' "$path" > "$tmp"; then
-        mv "$tmp" "$path"
+        if ! mv "$tmp" "$path"; then
+            printf 'write_cache: mv failed — progress.json left unchanged\n' >&2
+            rm -f "$tmp" 2>/dev/null || true
+            return 1
+        fi
     else
         rm -f "$tmp"
         printf 'write_cache: jq failed — progress.json left unchanged\n' >&2

@@ -40,7 +40,7 @@ merge::main() {
                 ok "Approved"
             }
             if [[ -z "$(coderails::config_path "$PWD")" ]]; then
-                info "No workflow.config.yaml — review enforcement (enforce_pr_workflow) is inactive. Run /coderails:init to enable."
+                info "No workflow.config.yaml — enforce_pr_workflow hook is inactive, but the review artifact gate still applies."
             fi
 
             # ─── Review artifact gate (fail-closed) ───────────────────────────
