@@ -130,6 +130,16 @@ re-opened as findings.
 - **No `SubagentStart` event exists.** The `inject_bootstrap.sh` SessionStart hook
   cannot inject the `using-coderails` skill into subagents. Subagents receive it only
   if it is included in their system prompt by the orchestrator.
+- **`/coderails:post-review` validates summary structure, not provenance.** The
+  review artifact gate proves an auditable, SHA-bound artifact exists on the PR;
+  it does not prove the review was substantive. `/post-review` validates that the
+  summary body satisfies the grammar (headings + bullets or `## No findings`) —
+  it cannot verify that the underlying review effort matched the grammar's weight.
+  The gate is auditable (the artifact is a public GitHub comment), not
+  cryptographic. Follow-up note: the `review-pr` arm of `enforce_pr_workflow` is
+  expected to demote from a block to a nudge once the artifact gate is live and
+  verified in practice — ordering constraint: never before, or a window opens
+  where neither gate is active.
 
 **Hook script conventions** (follow these when editing or adding a script):
 - Read the hook payload from stdin via `IFS= read -r -d '' -t 5 input || true`, then parse with `jq`. The 5-second timeout prevents a hook blocking forever if its parent process dies without closing stdin; `|| true` is mandatory because `read -d ''` returns exit 1 on normal EOF. The `read -t 5` bound is an in-process BACKSTOP for a hook orphaned past its parent's death (reparented to PID 1, where the hooks.json `timeout` can no longer kill it) — it is deliberately <= the smallest hooks.json `timeout` so the two never disagree. Do not "reconcile" them by raising hooks.json. On `read -t` timeout, `input` is empty -> jq yields empty -> the command gate stands aside (exit 0). This fail-open-on-stall is the deliberate, correct posture for a PreToolUse enforcement hook (a stalled hook must not block every tool call); do not add `set -e` or flip the empty-input branch to a deny.
