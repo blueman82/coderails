@@ -106,7 +106,7 @@
 - [ ] Add the `validate`/`write-cache` subcommand dispatch to `scripts/post_review.sh` (a `case "$1"` at the bottom calling the Task 1–2 functions).
 - [ ] Inspect: frontmatter `allowed-tools` covers every Bash call the body makes; the "never fabricate / write `## No findings`" instruction is present.
 
-**Verify-criteria:** grep `commands/post-review.md` shows the `## No findings` anti-fabrication instruction and a `validate` call before the `gh pr comment` call (validation precedes posting).
+**Verify-criteria:** grep `commands/post-review.md` shows the `## No findings` anti-fabrication instruction and a `validate` call before the `gh api …/comments` call (validation precedes posting). The frontmatter `allowed-tools` lists `gh api`/`gh repo view`, NOT `gh pr comment`.
 
 ---
 
