@@ -82,7 +82,7 @@
 - [ ] Run; watch pass.
 - [ ] Commit.
 
-**Verify-criteria:** after `write_cache` on a stub, `jq '.review.head_sha'` == the passed SHA and `jq '.status'` unchanged; `write_cache /nonexistent/progress.json …` exits 0 with a stderr warning and creates no file.
+**Verify-criteria:** after `write_cache` on a stub, `jq '.review.ran'` == `true`, `jq '.review.summary_posted'` == `true`, `jq '.review.head_sha'` == the passed SHA, and `jq '.status'` unchanged; `write_cache /nonexistent/progress.json …` exits 0 with a stderr warning and creates no file.
 
 ---
 
