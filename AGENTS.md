@@ -156,11 +156,19 @@ re-opened as findings.
 standalone sub-command that also works on its own:
 
 ```
-/workflow  →  /prep → (code) → /push → /pr-review-toolkit:review-pr → /merge → /wiki-ingest + /wiki-lint
+/workflow  →  /prep → (code) → /push → /pr-review-toolkit:review-pr → /coderails:post-review → /merge → /wiki-ingest + /wiki-lint
 ```
 
 Two interactive pauses where the user drives: the code/iterate loop, and final
 ship-it authorization. Everything else auto-chains.
+
+`/coderails:post-review <PR#>` sits between `review-pr` and the ship-it pause.
+It converts ephemeral review output into a durable, SHA-bound GitHub comment (the
+review artifact). `/merge` fetches live PR comments and requires a matching
+artifact for the current head SHA before merging — fail-closed. Both the agentic
+loop (Phase 4b) and the non-loop `/workflow` (Phase 3) post the same artifact;
+`/merge` checks both the same way. `scripts/merge.sh` now contains this gate in
+the `OPEN` branch before `gh pr merge`.
 
 **Config resolution** — every workflow command reads `workflow.config.yaml`
 inline via a `!` bash substitution in its frontmatter. The substitution sources
