@@ -77,6 +77,40 @@ Feature and bug work must be isolated in a git worktree — never branch off or 
 
 3. Report the worktree path to the user so they can point their editor at it.
 
+## Task Part 1b: Progress Stub (best-effort, non-blocking)
+
+After the worktree is created, write a `progress.json` stub for the new branch. This is purely a nicety — a failure here does **not** abort `/prep`. No other command depends on this file; it is a run record, not a gate.
+
+Resolve the path by running the path helper — do NOT compute the path yourself:
+
+```bash
+bash "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/lib/agentic_loop_path.sh"
+```
+
+Write the stub at the printed path with these fields:
+
+```json
+{
+  "schema_version": 1,
+  "session_id": "<this session's id>",
+  "status": "in-progress",
+  "created": "<ISO8601 timestamp>",
+  "authorising_prompt_raw": "<the user's /prep invocation, verbatim>",
+  "work": [],
+  "review": {
+    "ran": false,
+    "pr": null,
+    "head_sha": null,
+    "summary_url": null,
+    "summary_author": null,
+    "posted_at": null,
+    "summary_posted": false
+  }
+}
+```
+
+If the path helper is unavailable, or the write fails for any reason, log a warning to the user and continue to Task Part 2. The worktree and branches are already safe at this point.
+
 ## Task Part 2: Jira Ticket Creation
 
 **Skip this entire section if `config.jira` is null.**
