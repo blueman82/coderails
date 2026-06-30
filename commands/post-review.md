@@ -1,5 +1,5 @@
 ---
-allowed-tools: ["Bash(gh pr view*)", "Bash(gh api*)", "Bash(gh repo view*)", "Bash(./scripts/post_review.sh*)", "Bash(cat*)"]
+allowed-tools: ["Bash(gh pr view*)", "Bash(gh api*)", "Bash(gh repo view*)", "Bash(./scripts/post_review.sh*)", "Bash(cat*)", "Bash(bash*)"]
 argument-hint: <PR#>
 description: Validate and post a SHA-bound review summary as a durable PR artifact
 ---

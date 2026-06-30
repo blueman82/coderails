@@ -84,6 +84,8 @@ the Stop-hook gates — they can force a declared step to appear, not to be real
 
 When a skill instructs an action that a hook gates — e.g. `git merge`/`gh pr create`/`gh pr merge` → `enforce_pr_workflow`; code-file & plugin-source (`SKILL.md`/command) edits on main → `no_edit_on_main`; `git commit` → `test_gate` — the skill must name the gating hook and the resolution path (what the user needs to do, or what bypass flag satisfies it). When you add a hook that gates a common action, update the skills that instruct it. The merge gate (`enforce_pr_workflow`) recognises PR-review evidence as the `/pr-review-toolkit:review-pr <PR#>` Skill invocation (with the PR number in args), NOT a manually-spawned agent fanout — so the agentic loop must invoke the Skill to clear the merge gate.
 
+`/coderails:post-review <PR#>` must be run after `review-pr` (and after any findings are applied and the follow-up commit pushed) to post the SHA-bound review artifact. `/merge` (`scripts/merge.sh`) gates on a live-fetched PR comment carrying this artifact for the current head SHA — the gate is fail-closed: a `gh` fetch failure or no matching artifact both block the merge.
+
 ## Hook event map (`hooks/hooks.json`)
 
 | Event | Script | Mode |
@@ -128,6 +130,16 @@ re-opened as findings.
 - **No `SubagentStart` event exists.** The `inject_bootstrap.sh` SessionStart hook
   cannot inject the `using-coderails` skill into subagents. Subagents receive it only
   if it is included in their system prompt by the orchestrator.
+- **`/coderails:post-review` validates summary structure, not provenance.** The
+  review artifact gate proves an auditable, SHA-bound artifact exists on the PR;
+  it does not prove the review was substantive. `/post-review` validates that the
+  summary body satisfies the grammar (headings + bullets or `## No findings`) —
+  it cannot verify that the underlying review effort matched the grammar's weight.
+  The gate is auditable (the artifact is a public GitHub comment), not
+  cryptographic. Follow-up note: the `review-pr` arm of `enforce_pr_workflow` is
+  expected to demote from a block to a nudge once the artifact gate is live and
+  verified in practice — ordering constraint: never before, or a window opens
+  where neither gate is active.
 
 **Hook script conventions** (follow these when editing or adding a script):
 - Read the hook payload from stdin via `IFS= read -r -d '' -t 5 input || true`, then parse with `jq`. The 5-second timeout prevents a hook blocking forever if its parent process dies without closing stdin; `|| true` is mandatory because `read -d ''` returns exit 1 on normal EOF. The `read -t 5` bound is an in-process BACKSTOP for a hook orphaned past its parent's death (reparented to PID 1, where the hooks.json `timeout` can no longer kill it) — it is deliberately <= the smallest hooks.json `timeout` so the two never disagree. Do not "reconcile" them by raising hooks.json. On `read -t` timeout, `input` is empty -> jq yields empty -> the command gate stands aside (exit 0). This fail-open-on-stall is the deliberate, correct posture for a PreToolUse enforcement hook (a stalled hook must not block every tool call); do not add `set -e` or flip the empty-input branch to a deny.
@@ -156,11 +168,19 @@ re-opened as findings.
 standalone sub-command that also works on its own:
 
 ```
-/workflow  →  /prep → (code) → /push → /pr-review-toolkit:review-pr → /merge → /wiki-ingest + /wiki-lint
+/workflow  →  /prep → (code) → /push → /pr-review-toolkit:review-pr → /coderails:post-review → (ship-it) → /merge → /wiki-ingest + /wiki-lint
 ```
 
 Two interactive pauses where the user drives: the code/iterate loop, and final
 ship-it authorization. Everything else auto-chains.
+
+`/coderails:post-review <PR#>` sits between `review-pr` and the ship-it pause.
+It converts ephemeral review output into a durable, SHA-bound GitHub comment (the
+review artifact). `/merge` fetches live PR comments and requires a matching
+artifact for the current head SHA before merging — fail-closed. Both the agentic
+loop (Phase 4b) and the non-loop `/workflow` (Phase 3) post the same artifact;
+`/merge` checks both the same way. `scripts/merge.sh` now contains this gate in
+the `OPEN` branch before `gh pr merge`.
 
 **Config resolution** — every workflow command reads `workflow.config.yaml`
 inline via a `!` bash substitution in its frontmatter. The substitution sources

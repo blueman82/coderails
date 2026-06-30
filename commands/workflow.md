@@ -1,5 +1,5 @@
 ---
-allowed-tools: SlashCommand(/coderails:prep), SlashCommand(/coderails:push), SlashCommand(/pr-review-toolkit:review-pr), SlashCommand(/coderails:merge), SlashCommand(/wiki-ingest), SlashCommand(/wiki-lint), SlashCommand(/engineering-principles), SlashCommand(/engineering-principles-python), SlashCommand(/engineering-principles-go), SlashCommand(/engineering-principles-ts), SlashCommand(/simplify), Bash(git*), Bash(./worktree-add*), Bash(cat*)
+allowed-tools: SlashCommand(/coderails:prep), SlashCommand(/coderails:push), SlashCommand(/pr-review-toolkit:review-pr), SlashCommand(/coderails:post-review), SlashCommand(/coderails:merge), SlashCommand(/wiki-ingest), SlashCommand(/wiki-lint), SlashCommand(/engineering-principles), SlashCommand(/engineering-principles-python), SlashCommand(/engineering-principles-go), SlashCommand(/engineering-principles-ts), SlashCommand(/simplify), Bash(git*), Bash(./worktree-add*), Bash(cat*)
 argument-hint: <branch> "<description>"
 description: Orchestrate the full feature workflow — prep → code → push → review → merge → wiki-ingest/lint
 ---
@@ -35,7 +35,7 @@ This command is the umbrella for the canonical code-change workflow. The rules i
 
 Phase 2b (design adversarial review) is distinct from Phase 3 (`/pr-review-toolkit:review-pr`): Phase 2b reviews the *design page* before coding, Phase 3 reviews the *code* before merge. Both are required on non-trivial features.
 
-The workflow has two interactive pauses where the developer drives: (a) the code/iterate loop, (b) the final ship-it authorization. Everything else auto-chains.
+The workflow has two interactive pauses where the developer drives: (a) the code/iterate loop, (b) the final ship-it authorization. Everything else auto-chains. The Phase 3 review chain runs in order: `review-pr → post-review → (Phase 4 ship-it pause) → /merge`.
 
 ## Parse Arguments
 
@@ -153,6 +153,7 @@ Execute in order — do not pause between these:
    - **Worthwhile** (apply silently): readability wins, better names, extracted helpers that clearly reduce duplication
    - **Cosmetic/subjective** (skip, note in PR body): style preferences, naming opinions without a concrete defect
 4. Post a ledger comment on the PR summarising what was applied vs. skipped and why.
+5. `/coderails:post-review <PR#>` — post the SHA-bound review artifact on the PR. This converts the ephemeral review output into a durable, machine-verifiable GitHub comment that `/merge` requires before merging. Run this after all findings are applied and the follow-up commit is pushed, so the artifact is stamped against the final head SHA. The chain is: `review-pr → (apply findings) → post-review → (Phase 4 ship-it pause) → /merge`.
 
 Report the PR URL, review summary, and resolved JIRA key (if applicable).
 
