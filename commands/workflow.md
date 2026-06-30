@@ -35,7 +35,7 @@ This command is the umbrella for the canonical code-change workflow. The rules i
 
 Phase 2b (design adversarial review) is distinct from Phase 3 (`/pr-review-toolkit:review-pr`): Phase 2b reviews the *design page* before coding, Phase 3 reviews the *code* before merge. Both are required on non-trivial features.
 
-The workflow has two interactive pauses where the developer drives: (a) the code/iterate loop, (b) the final ship-it authorization. Everything else auto-chains.
+The workflow has two interactive pauses where the developer drives: (a) the code/iterate loop, (b) the final ship-it authorization. Everything else auto-chains. The Phase 3 review chain runs in order: `review-pr → post-review → (Phase 4 ship-it pause) → /merge`.
 
 ## Parse Arguments
 
