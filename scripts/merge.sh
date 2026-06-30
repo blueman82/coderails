@@ -40,8 +40,27 @@ merge::main() {
                 ok "Approved"
             }
             if [[ -z "$(coderails::config_path "$PWD")" ]]; then
-                info "No workflow.config.yaml — review enforcement (enforce_pr_workflow) is inactive. Run /coderails:init to enable."
+                info "No workflow.config.yaml — enforce_pr_workflow hook is inactive, but the review artifact gate still applies."
             fi
+
+            # ─── Review artifact gate (fail-closed) ───────────────────────────
+            # Requires a coderails review comment on the PR matching the current
+            # head SHA. No match → block. No fallback to local files.
+            local sha
+            sha=$(pr::head_sha "$num")
+            if [[ -z "$sha" ]]; then
+                err "GitHub fetch failed — could not resolve PR head SHA. Retry, or check gh auth/network."
+            fi
+            local gate_rc
+            gate_rc=0
+            pr::has_coderails_review_for_head "$num" "$sha" || gate_rc=$?
+            if [[ $gate_rc -eq 2 ]]; then
+                err "GitHub fetch failed — could not fetch PR comments. Retry, or check gh auth/network."
+            elif [[ $gate_rc -ne 0 ]]; then
+                err "No coderails review artifact for current head $sha — run /coderails:post-review after /pr-review-toolkit:review-pr (or add a 'gh pr merge' permission to bypass)."
+            fi
+            ok "Review artifact verified (SHA: $sha)"
+
             step "Merging"
             gh pr merge "$num" --merge          # remote merge ONLY — its failure must abort; branch cleanup is separate + non-fatal
             ok "Merged"
