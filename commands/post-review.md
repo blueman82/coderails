@@ -107,7 +107,7 @@ Post the comment and capture the returned metadata:
 
 ```bash
   RESULT=$(gh api "repos/${REPO}/issues/${ARGUMENTS}/comments" \
-    -f body=@/tmp/coderails-review-body-$$.md \
+    -F body=@/tmp/coderails-review-body-$$.md \
     --jq '{url:.html_url,id:.id,author:.user.login,created:.created_at}')
   COMMENT_URL=$(printf '%s' "$RESULT" | jq -r .url)
   COMMENT_AUTHOR=$(printf '%s' "$RESULT" | jq -r .author)
