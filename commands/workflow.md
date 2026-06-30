@@ -1,5 +1,5 @@
 ---
-allowed-tools: SlashCommand(/coderails:prep), SlashCommand(/coderails:push), SlashCommand(/pr-review-toolkit:review-pr), SlashCommand(/coderails:merge), SlashCommand(/wiki-ingest), SlashCommand(/wiki-lint), SlashCommand(/engineering-principles), SlashCommand(/engineering-principles-python), SlashCommand(/engineering-principles-go), SlashCommand(/engineering-principles-ts), SlashCommand(/simplify), Bash(git*), Bash(./worktree-add*), Bash(cat*)
+allowed-tools: SlashCommand(/coderails:prep), SlashCommand(/coderails:push), SlashCommand(/pr-review-toolkit:review-pr), SlashCommand(/coderails:post-review), SlashCommand(/coderails:merge), SlashCommand(/wiki-ingest), SlashCommand(/wiki-lint), SlashCommand(/engineering-principles), SlashCommand(/engineering-principles-python), SlashCommand(/engineering-principles-go), SlashCommand(/engineering-principles-ts), SlashCommand(/simplify), Bash(git*), Bash(./worktree-add*), Bash(cat*)
 argument-hint: <branch> "<description>"
 description: Orchestrate the full feature workflow — prep → code → push → review → merge → wiki-ingest/lint
 ---
