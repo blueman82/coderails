@@ -446,6 +446,8 @@ Do not stop work early because the context window is filling or a token budget i
 
 After any compaction, drift, or "wait, where are we" moment, the orchestrator RE-READS `progress.json` — never the conversation — to re-orient. If the user ever has to remind the loop that it's mid-loop, the artifact wasn't being maintained. Git remains the authoritative checkpoint for code (commit all in-progress work before compaction); `progress.json` is the authoritative checkpoint for loop position.
 
+**Single loop per directory.** `progress.json` is keyed only by project working directory (Phase -2), not by session — two `agentic-loop` sessions running concurrently in the same checkout will race for ownership of the same file, last-writer-wins. `loop_state_guard.sh` fails closed on a session mismatch (the dangerous silent-data-loss case), but does not prevent this race. Isolate concurrent loops via separate git worktrees (`coderails:using-git-worktrees`) — one loop per working directory, not locking machinery.
+
 Never artificially truncate a task or declare "done" mid-loop because of token pressure. If a genuine stop condition (see below) is not met, keep going.
 
 ## Stop conditions for the loop
