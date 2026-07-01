@@ -477,7 +477,7 @@ Model an approval-gate as "pause-then-proceed", never as "do not start". Past fa
 where `<category>` is exactly one of:
 - `hard-stop` — one of the four hard-stop conditions above.
 - `approval-gate` — a named risk boundary awaiting sign-off (pause-then-proceed).
-- `awaiting-input` — a planned interaction point inside the loop (the Phase -1 improve-prompt ask, the Phase 1 plan confirmation). Use this sparingly: Phase 13 counts `awaiting-input` declarations as avoidable stalls.
+- `awaiting-input` — a planned interaction point inside the loop (the Phase -1 improve-prompt ask, the Phase 1 plan confirmation). Use this sparingly: Phase 13 reports the raw `awaiting-input` count as part of its `LOOP-STOP` breakdown.
 - `complete` — all authorised work done. Declaring `complete` is the teardown: also set `progress.json` `status: "complete"` and run Phase 13 in the same turn, or the guards keep treating the loop as active.
 
 The hook checks the declaration is present with a valid category; it cannot check the reason is honest (same boundary as the verify-loop hook). The Phase 13 category counts are the audit on that.
