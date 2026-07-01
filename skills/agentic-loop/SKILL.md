@@ -351,7 +351,7 @@ Deploy and push gotchas tied to a particular stack — skip-validation flags whe
 
 Run `/coderails:wiki-ingest` AND `/coderails:wiki-lint` ONCE at the end of the loop, with all related PRs as a cluster — not once per PR. Lint must always pair with ingest — running one without the other leaves the wiki either unverified (ingest with no lint) or unrefreshed (lint with no ingest); treat the two as one step, not two optional ones.
 
-One source page covers the cluster. Updates to entities/services/concepts pages aggregate the cluster's changes. This matches memory `feedback_parallel_wiki_agents` (cluster together, don't fragment).
+One source page covers the cluster. Updates to entities/services/concepts pages aggregate the cluster's changes. Clustering related updates into one pass keeps the wiki's per-topic pages coherent; running one wiki agent per PR instead fragments a single theme across many small, redundant edits.
 
 If the loop's PRs aren't thematically related (rare — TeamCreate usually clusters them), one ingest per cluster theme is fine. Avoid one-per-PR sprawl.
 
