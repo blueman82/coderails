@@ -313,7 +313,7 @@ Hooks run automatically on lifecycle events. They can **block** (exit 2 / `permi
 | File | Purpose | Consumers |
 |---|---|---|
 | `hooks/scripts/lib/discipline_common.sh` | Shared transcript-extraction utilities: `dc_extract_last_text`, `dc_stable_text` (with retry-backoff for the transcript-flush race) | `check_confidence_labels.sh`, `check_verify_loop.sh`, `discipline_catchup.sh` |
-| `hooks/scripts/lib/loop_state_common.sh` | Shared agentic-loop detection: `LOOP_STOP_VOCAB`, `als_log`, `als_count_invocations`, `als_stable_invocations`, `als_resolve_path`, `als_read_file_state` | `loop_state_guard.sh`, `loop_stall_guard.sh` |
+| `hooks/scripts/lib/loop_state_common.sh` | Shared agentic-loop detection: `LOOP_STOP_VOCAB`, `als_log`, `als_sanitise_session_id`, `als_count_invocations`, `als_stable_invocations`, `als_resolve_path`, `als_read_file_state` | `loop_state_guard.sh`, `loop_stall_guard.sh` |
 | `hooks/scripts/lib/agentic_loop_path.sh` | Sole authority for the `progress.json` path. Computes `<base>/<slug>/<session_id>/progress.json` where slug is cwd with `/` replaced by `-` and session_id defaults to `$CLAUDE_CODE_SESSION_ID` (falling back to a unique generated value when unavailable). Never called directly by Claude — always run via Bash to get the path. | `loop_state_common.sh` (via `als_resolve_path`), the agentic-loop orchestrator (to get the write path) |
 
 ---
