@@ -349,7 +349,7 @@ Deploy and push gotchas tied to a particular stack — skip-validation flags whe
 
 ### Phase 9 — Cluster wiki ingest, don't fragment
 
-Run `/coderails:wiki-ingest` AND `/coderails:wiki-lint` ONCE at the end of the loop, with all related PRs as a cluster — not once per PR. Per memory `feedback_wiki_ingest_and_lint_post_merge`, lint must always pair with ingest; running one without the other is incomplete.
+Run `/coderails:wiki-ingest` AND `/coderails:wiki-lint` ONCE at the end of the loop, with all related PRs as a cluster — not once per PR. Lint must always pair with ingest — running one without the other leaves the wiki either unverified (ingest with no lint) or unrefreshed (lint with no ingest); treat the two as one step, not two optional ones.
 
 One source page covers the cluster. Updates to entities/services/concepts pages aggregate the cluster's changes. This matches memory `feedback_parallel_wiki_agents` (cluster together, don't fragment).
 
