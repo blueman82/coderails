@@ -44,4 +44,14 @@ else printf 'FAIL - %s\n      both resolved to: %s\n' "distinct sessions -> dist
 p3=$(CLAUDE_AGENTIC_LOOP_DIR=/tmp/al bash "$HELPER" /Users/foo/bar S1)
 check "same session_id -> stable path" "$p1" "$p3"
 
+# 7. Two invocations that both have NO real session_id available (empty arg 2,
+#    no CLAUDE_CODE_SESSION_ID env var) must NOT collide on a shared fixed
+#    sentinel — each must get its own unique fallback so two genuinely different
+#    sessions hitting this edge case never share one progress.json.
+unset CLAUDE_CODE_SESSION_ID
+q1=$(CLAUDE_AGENTIC_LOOP_DIR=/tmp/al bash "$HELPER" /Users/foo/bar "")
+q2=$(CLAUDE_AGENTIC_LOOP_DIR=/tmp/al bash "$HELPER" /Users/foo/bar "")
+if [ "$q1" != "$q2" ]; then printf 'ok   - %s\n' "missing session_id -> unique fallback, no collision"
+else printf 'FAIL - %s\n      both resolved to: %s\n' "missing session_id -> unique fallback, no collision" "$q1"; fails=$((fails+1)); fi
+
 [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails)"; exit 1; }
