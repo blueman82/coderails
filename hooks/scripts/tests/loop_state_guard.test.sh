@@ -11,8 +11,8 @@ export CLAUDE_DISCIPLINE_LOG="$TMP/discipline.log"
 export CLAUDE_HOOK_MAX_ATTEMPTS=1   # no flush-race retry sleeps in tests
 CWD="/work/project"
 SLUG="-work-project"
-FILE_DIR="$CLAUDE_AGENTIC_LOOP_DIR/$SLUG"
-FILE="$FILE_DIR/progress.json"
+file_dir() { printf '%s/%s/%s' "$CLAUDE_AGENTIC_LOOP_DIR" "$SLUG" "$1"; }   # session_id -> dir
+file_path() { printf '%s/progress.json' "$(file_dir "$1")"; }              # session_id -> file
 fails=0
 
 # A transcript line containing N agentic-loop Skill invocations.
@@ -35,9 +35,14 @@ payload() { # transcript_path session_id [stop_hook_active]
   printf '{"transcript_path":"%s","session_id":"%s","cwd":"%s","stop_hook_active":%s}' \
     "$1" "$2" "$CWD" "${3:-false}"
 }
-write_file() { # status session_id completed_marker
-  mkdir -p "$FILE_DIR"
-  printf '{"schema_version":1,"status":"%s","session_id":"%s","completed_marker":%s}' "$1" "$2" "$3" > "$FILE"
+write_file() { # status session_id completed_marker [path_session_id]
+  # path_session_id defaults to session_id — the file lives at the path this
+  # session_id resolves to, unless a test wants to write it at a DIFFERENT
+  # session's path (to simulate a copied/corrupted file — see session_mismatch).
+  local path_session="${4:-$2}"
+  local dir; dir=$(file_dir "$path_session")
+  mkdir -p "$dir"
+  printf '{"schema_version":1,"status":"%s","session_id":"%s","completed_marker":%s}' "$1" "$2" "$3" > "$dir/progress.json"
 }
 run() { echo "$2" | bash "$GUARD" >/dev/null 2>&1; echo $?; }   # -> exit code
 check() { # desc expected_code actual_code
@@ -57,9 +62,16 @@ check "non-loop skill -> allow" 0 "$(run x "$(payload "$T" S1)")"
 reset; T=$(mk_transcript 1)
 check "loop active, file absent -> block" 2 "$(run x "$(payload "$T" S1)")"
 
-# block_state_failure (mismatch) — file owned by another session -> BLOCK.
-reset; T=$(mk_transcript 1); write_file in-progress S_OTHER 0
-check "session mismatch -> block" 2 "$(run x "$(payload "$T" S1)")"
+# block_state_failure (mismatch) — a file sitting at S1's own path but stamped
+# with a different session_id inside (copied/corrupted content) -> BLOCK.
+reset; T=$(mk_transcript 1); write_file in-progress S_OTHER 0 S1
+check "session mismatch (corrupted content at own path) -> block" 2 "$(run x "$(payload "$T" S1)")"
+
+# The fix itself: two DIFFERENT sessions in the SAME cwd no longer collide — each
+# gets its own path, so S2's in-progress file is invisible to S1's guard run,
+# which sees no file at its own path and blocks "absent", not "mismatch".
+reset; T=$(mk_transcript 1); write_file in-progress S2 0
+check "distinct session in same cwd -> own path, not visible to S1 (absent)" 2 "$(run x "$(payload "$T" S1)")"
 
 # gate_present_and_owned — present, owned, in-progress -> allow.
 reset; T=$(mk_transcript 1); write_file in-progress S1 0

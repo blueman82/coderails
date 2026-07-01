@@ -46,7 +46,7 @@ als_stable_invocations() {
 }
 
 # Resolve the progress.json path via the sole path authority (sibling script).
-als_resolve_path() { bash "$(dirname "${BASH_SOURCE[0]}")/agentic_loop_path.sh" "$1" 2>/dev/null; }
+als_resolve_path() { bash "$(dirname "${BASH_SOURCE[0]}")/agentic_loop_path.sh" "$1" "$2" 2>/dev/null; }
 
 # Read progress.json state into globals ALS_STATUS / ALS_SESSION / ALS_MARKER.
 # ALS_MARKER is sanitised to a non-negative integer (empty/non-numeric -> 0).
@@ -96,8 +96,8 @@ als_gate_require_active_loop() {
 # Sets ALS_PATH, ALS_STATUS, ALS_SESSION, ALS_MARKER, ALS_REARMED.
 # Requires ALS_INVOCATIONS to be set (by als_gate_require_active_loop).
 als_load_progress() {
-  local cwd="$1"
-  ALS_PATH=$(als_resolve_path "$cwd")
+  local cwd="$1" session="$2"
+  ALS_PATH=$(als_resolve_path "$cwd" "$session")
   als_read_file_state "$ALS_PATH"
   ALS_REARMED=0
   if [ "$ALS_INVOCATIONS" -gt "$ALS_MARKER" ]; then ALS_REARMED=1; fi

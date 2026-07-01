@@ -73,7 +73,7 @@ Declaring \`complete\` means the loop is done: also set progress.json status to
 als_gate_no_transcript "$transcript"
 als_gate_stop_loop "$stop_hook_active"
 als_gate_require_active_loop "$transcript" "loop_stall_guard" "$session_id"
-als_load_progress "$cwd"
+als_load_progress "$cwd" "$session_id"
 als_gate_loop_complete "loop_stall_guard" "$session_id"
 gate_loop_stop_declared
 block_missing_declaration

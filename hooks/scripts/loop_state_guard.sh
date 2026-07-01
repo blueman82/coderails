@@ -45,8 +45,11 @@ with this stub, then enrich it as the loop progresses:
     reason="session_mismatch"
     msg="[loop-state-guard] progress.json at:
   $ALS_PATH
-belongs to session '$ALS_SESSION', not this session ('$session_id').
-Adopt this loop (re-stamp session_id to '$session_id'), or reinitialise the stub."
+has session_id '$ALS_SESSION' recorded inside it, but this session is '$session_id'.
+The path is already session-scoped, so this file should only ever be read by its
+own session — this mismatch means the content was copied, hand-edited, or
+corrupted. Re-stamp session_id to '$session_id' if you are knowingly adopting
+this file, or reinitialise the stub."
   else
     reason="stale_complete_rearmed"
     msg="[loop-state-guard] A new agentic loop has started, but progress.json at:
@@ -63,7 +66,7 @@ before stopping."
 als_gate_no_transcript "$transcript"
 als_gate_stop_loop "$stop_hook_active"
 als_gate_require_active_loop "$transcript" "loop_state_guard" "$session_id"
-als_load_progress "$cwd"
+als_load_progress "$cwd" "$session_id"
 als_gate_loop_complete "loop_state_guard" "$session_id"
 gate_present_and_owned
 block_state_failure
