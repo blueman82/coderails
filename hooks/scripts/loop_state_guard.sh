@@ -21,7 +21,7 @@
 
 IFS= read -r -d '' -t 5 input || true
 transcript=$(echo "$input" | jq -r '.transcript_path // empty')
-session_id=$(echo "$input" | jq -r '.session_id // "?"' 2>/dev/null)
+session_id=$(als_sanitise_session_id "$(echo "$input" | jq -r '.session_id // "?"' 2>/dev/null)")
 cwd=$(echo "$input" | jq -r '.cwd // empty' 2>/dev/null)
 stop_hook_active=$(echo "$input" | jq -r '.stop_hook_active // false' 2>/dev/null)
 

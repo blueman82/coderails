@@ -67,15 +67,59 @@ check "loop active, file absent -> block" 2 "$(run x "$(payload "$T" S1)")"
 reset; T=$(mk_transcript 1); write_file in-progress S_OTHER 0 S1
 check "session mismatch (corrupted content at own path) -> block" 2 "$(run x "$(payload "$T" S1)")"
 
-# The fix itself: two DIFFERENT sessions in the SAME cwd no longer collide — each
-# gets its own path, so S2's in-progress file is invisible to S1's guard run,
-# which sees no file at its own path and blocks "absent", not "mismatch".
+# NOTE: this verifies the GUARD's behaviour given an already-session-scoped
+# absent file — it does NOT discriminate the path-computation fix itself,
+# because file_dir()/write_file() above independently reconstruct the
+# session-scoped path rather than calling agentic_loop_path.sh. It would pass
+# unchanged even against the old cwd-only path helper. The real discriminating
+# test for session-isolation is agentic_loop_path.test.sh's own
+# "distinct sessions -> distinct paths" check, which calls the real helper.
+# What this test DOES prove: S2's in-progress file at S2's own path is
+# invisible to S1's guard run, which sees no file at ITS path and blocks
+# "absent", not "mismatch".
 reset; T=$(mk_transcript 1); write_file in-progress S2 0
 check "distinct session in same cwd -> own path, not visible to S1 (absent)" 2 "$(run x "$(payload "$T" S1)")"
 
 # gate_present_and_owned — present, owned, in-progress -> allow.
 reset; T=$(mk_transcript 1); write_file in-progress S1 0
 check "present+owned+in-progress -> allow" 0 "$(run x "$(payload "$T" S1)")"
+
+# null_payload builds a raw Stop payload whose session_id key is JSON null (the
+# real-world trigger: jq's `.session_id // "?"` maps null AND missing keys to
+# the literal "?" — but leaves an empty STRING "" alone, since only null/false/
+# missing are falsy in jq). payload() above can only emit a quoted string, so
+# this needs its own raw-JSON builder to reach the actual null case.
+null_payload() { # transcript_path -> payload with session_id: null
+  jq -cn --arg t "$1" --arg c "$CWD" '{transcript_path:$t,session_id:null,cwd:$c,stop_hook_active:false}'
+}
+
+# Fix 1 regression test — session_id: null must not collide onto a shared
+# sentinel path. Before the fix, EVERY payload with session_id null (or the key
+# missing) resolved session_id to the fixed literal "?", so a progress.json
+# stamped session_id "?" and sitting at ".../?/progress.json" would look
+# "present + owned" (allow) to ANY session that ever hit this edge case —
+# regardless of which session actually wrote it. Simulate that exact stray
+# file (owned by the "?" sentinel itself, matching what the OLD code would
+# have written for a prior malformed-payload session), then run the guard with
+# session_id: null. Pre-fix this must ALLOW (it is genuinely "present+owned" at
+# the shared sentinel path); post-fix each invocation gets its own unique
+# generated fallback, so the guard never resolves to "?" and must not see that
+# stray file — it blocks "absent" instead.
+reset; T=$(mk_transcript 1); write_file in-progress '?' 0 '?'
+check "null session_id -> unique fallback, not old '?' sentinel (absent, not allow)" 2 "$(run x "$(null_payload "$T")")"
+
+# And two SEPARATE guard runs with session_id: null must not collide with EACH
+# OTHER either: the first run's block message names its own resolved path;
+# write a file there, then confirm a second independent invocation (fresh
+# unique fallback) still does not see it as present+owned.
+reset; T=$(mk_transcript 1)
+first_msg=$(echo "$(null_payload "$T")" | bash "$GUARD" 2>&1 >/dev/null)
+first_path=$(printf '%s\n' "$first_msg" | grep -o "$CLAUDE_AGENTIC_LOOP_DIR/[^ ]*progress.json" | head -1)
+if [ -n "$first_path" ]; then
+  mkdir -p "$(dirname "$first_path")"
+  printf '{"schema_version":1,"status":"in-progress","session_id":"?","completed_marker":0}' > "$first_path"
+fi
+check "two null-session_id runs -> second still blocks (own unique path, not first's)" 2 "$(run x "$(null_payload "$T")")"
 
 # als_gate_loop_complete — complete, owned, not re-armed (invocations 1 <= marker 1) -> allow.
 reset; T=$(mk_transcript 1); write_file complete S1 1

@@ -17,6 +17,22 @@ SLEEP_S="${CLAUDE_HOOK_SLEEP_S:-0.3}"
 # Append a single key=value line to the discipline log (best-effort).
 als_log() { printf '%s %s\n' "$(date -Iseconds 2>/dev/null || date +%Y-%m-%dT%H:%M:%S%z)" "$1" >> "$LOG_FILE" 2>/dev/null; }
 
+# Sanitise a session_id extracted from the Stop-hook JSON payload. If the
+# payload's session_id is missing/null, the jq extraction below falls back to
+# the literal "?" — a FIXED sentinel that would make every malformed-payload
+# session collide onto the identical progress.json path, silently defeating
+# session-scoped isolation. Same fallback style as agentic_loop_path.sh's own
+# default: generate a fresh unique value (PID + high-res timestamp) instead of
+# a shared constant, so two concurrent malformed-payload sessions can't collide.
+als_sanitise_session_id() {
+  local raw="$1"
+  if [ -z "$raw" ] || [ "$raw" = "?" ]; then
+    printf 'unknown-%s-%s' "$$" "$(date +%s%N 2>/dev/null || date +%s)"
+  else
+    printf '%s' "$raw"
+  fi
+}
+
 # Count agentic-loop Skill invocations across the WHOLE transcript (one-shot).
 # Structured jq match on a tool_use — never a text grep. Matches the scoped
 # ("coderails:agentic-loop") and bare ("agentic-loop") skill names.

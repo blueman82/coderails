@@ -26,9 +26,18 @@
 # agentic-loop sessions in the same directory independent progress.json files,
 # while a single session's own file survives its own compaction/restart. See
 # skills/agentic-loop/SKILL.md's "Context-window persistence" section.
+#
+# When no real session_id is available at all (arg 2 empty AND
+# $CLAUDE_CODE_SESSION_ID unset), a FIXED fallback string would make every such
+# call collide onto one shared path, defeating session-scoped isolation for the
+# exact callers that need it most. So the fallback is generated fresh per
+# invocation (PID + high-res timestamp) instead of a shared constant.
 
 cwd="${1:-$PWD}"
-session_id="${2:-${CLAUDE_CODE_SESSION_ID:-unknown-session}}"
+session_id="${2:-${CLAUDE_CODE_SESSION_ID:-}}"
+if [ -z "$session_id" ]; then
+  session_id="unknown-$$-$(date +%s%N 2>/dev/null || date +%s)"
+fi
 base="${CLAUDE_AGENTIC_LOOP_DIR:-$HOME/.claude/agentic-loop}"
 slug=$(printf '%s' "$cwd" | sed 's#/#-#g')
 printf '%s/%s/%s/progress.json\n' "$base" "$slug" "$session_id"
