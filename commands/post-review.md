@@ -117,7 +117,7 @@ fi
 
 ## Step 6 — Best-effort cache write
 
-Locate the progress.json (if any) and write the review cache block:
+Locate the progress.json (if any) and write the review cache block. The helper resolves this session's own file (keyed on cwd + `$CLAUDE_CODE_SESSION_ID`):
 
 ```bash
 PROGRESS_PATH=$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/lib/agentic_loop_path.sh" 2>/dev/null || true)
