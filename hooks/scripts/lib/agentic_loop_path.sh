@@ -14,6 +14,12 @@
 #   slug = cwd with every "/" replaced by "-" (mirrors Claude Code's own project-dir
 #          convention, e.g. /Users/x/y -> -Users-x-y); deterministic, tool-free,
 #          and debuggable (you can read which project a file belongs to).
+#
+# Single-loop-per-directory invariant: this path is keyed on cwd only, not session,
+# so two concurrent agentic-loop sessions in the same directory will race for
+# ownership of the same progress.json (last-writer-wins). Isolate concurrent loops
+# via separate git worktrees (coderails:using-git-worktrees) — this script does not
+# lock.
 
 cwd="${1:-$PWD}"
 base="${CLAUDE_AGENTIC_LOOP_DIR:-$HOME/.claude/agentic-loop}"
