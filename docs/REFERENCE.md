@@ -372,7 +372,7 @@ source "${CLAUDE_PLUGIN_ROOT}/scripts/lib/config.sh" && coderails::resolve_confi
 | `.claude/test_command` | Project working directory | Yes (project-local) | Plain-text file containing the test command. Created by `/coderails:test-gate-setup`. Activates `test_gate.sh`. |
 | Specs from brainstorming | `docs/coderails/specs/YYYY-MM-DD-<topic>-design.md` | Yes | Written by `brainstorming` skill after design resolution. Permanent record. |
 | Plans from writing-plans | `docs/coderails/plans/<name>.md` | Yes | Written by `writing-plans` skill. Permanent plan record. |
-| Agentic loop `progress.json` | `~/.claude/agentic-loop/<cwd-slug>/progress.json` | No — ephemeral loop state, outside the repo | Dynamic position tracker for the loop. Path computed by `agentic_loop_path.sh`. Session-keyed. |
+| Agentic loop `progress.json` | `~/.claude/agentic-loop/<cwd-slug>/<session_id>/progress.json` | No — ephemeral loop state, outside the repo | Dynamic position tracker for the loop. Path computed by `agentic_loop_path.sh`. Session-keyed. |
 | Agentic loop `spec.md` | Same dir as `progress.json` | No — ephemeral loop state | Written by the agentic-loop orchestrator for ≥3-unit loops. Not a PR deliverable. |
 | Agentic loop `plan.md` | Same dir as `progress.json` | No — ephemeral loop state | Written by `coderails:writing-plans` as invoked by the agentic-loop. Consumed, not write-only: the orchestrator re-reads it after compaction to recover scope. |
 | Discipline log | `~/.claude/discipline.log` (or `$CLAUDE_DISCIPLINE_LOG`) | No | Structured `key=value` log appended by hooks on every fire. Never committed. |
