@@ -20,6 +20,16 @@ This skill encodes the working method so those failures don't keep happening. Ea
 
 ## The phases
 
+Nineteen-plus numbered phases (−2 through 13, with lettered sub-phases) is too many to hold in mind cold. Group them into five stages before descending into per-phase detail:
+
+| Stage | Phases |
+|---|---|
+| Setup | -2, -1, 0, 0.5 |
+| Pre-flight | 1, 2, 2.5, 2.6, 2.7 |
+| Build | 3, 3a, 4 |
+| Review & Ship | 4b, 5, 6, 7&8 |
+| Wrap-up | 9, 10, 11, 12, 13 |
+
 The phases below are sequential. Run them in order. Inside an authorised loop, phases 4-6 repeat per PR / per work-unit.
 
 ### Phase -2 — Stub `progress.json` first (the literal first action)
