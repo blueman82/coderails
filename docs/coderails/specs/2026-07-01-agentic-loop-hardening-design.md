@@ -1,7 +1,7 @@
 # Design: Harden `skills/agentic-loop/SKILL.md` — 7 resolved review findings
 
 **Date:** 2026-07-01
-**Status:** Approved (design) — pending implementation plan
+**Status:** Approved (design), implementation plan written
 **Topic:** Resolve seven design issues surfaced by review of `skills/agentic-loop/SKILL.md`
 (the coderails multi-agent orchestration skill): a cold-read scale problem, a phase-numbering
 duplication, a self-attestation loophole in the clean-break gate, a gameable terminal KPI, an
@@ -38,7 +38,7 @@ mind before diving into phase-by-phase detail.
 
 **Options considered:**
 - **Full renumbering** (collapse to a shorter sequential list). Rejected: a check of the numbering
-  found 9 inbound cross-references into specific phase numbers (not the 3 originally estimated),
+  found 9 phase-number references/citations to account for (not the 3 originally estimated),
   plus `docs/coderails-review.md` cites exact `SKILL.md` line numbers (see §3.2) that would go
   stale. The churn is disproportionate to the benefit — the phases are already independently
   addressable by number, and renumbering does not by itself make the *count* easier to hold in
@@ -55,7 +55,7 @@ plain-language stages, with no renumbering and no heading-level changes:
 | Stage | Phases |
 |---|---|
 | Setup | -2, -1, 0, 0.5 |
-| Pre-flight | 1, 2, 2.5, 2.6, 2.7, 2.8 |
+| Pre-flight | 1, 2, 2.5, 2.6, 2.7 |
 | Build | 3, 3a, 4 |
 | Review & Ship | 4b, 5, 6, 7&8 |
 | Wrap-up | 9, 10, 11, 12, 13 |
@@ -252,10 +252,10 @@ closes that gap without adding any new machinery.
 **Problem.** `SKILL.md` cites three feedback-memory files by name as load-bearing justification:
 `feedback_wiki_ingest_and_lint_post_merge` (Phase 9, `SKILL.md:342`), `feedback_parallel_wiki_agents`
 (Phase 9, `SKILL.md:344`), and `feedback_three_parallel_adversarial_agents` (Phase 4b, `SKILL.md:313`,
-cited via `CLAUDE.md`). Verified by listing the actual memory directory
-(`/Users/harrison/.claude/projects/-Users-harrison-Github-coderails/memory/`, 14 files) and grepping
-`~/.claude/CLAUDE.md`: none of the three exist under those names or any plausible variant, right
-now — not a future-rot risk, a present-tense broken citation.
+cited via `CLAUDE.md`). Verified by listing the local project memory directory
+(`$HOME/.claude/projects/<cwd-slug>/memory/`) and grepping `~/.claude/CLAUDE.md`: none of the
+three exist under those names or any plausible variant in the design author's current environment
+— not merely a future-rot risk, a present-tense broken citation in that environment.
 
 **Options considered:**
 - **Leave the citations as-is on the theory they document historical intent.** Rejected — a

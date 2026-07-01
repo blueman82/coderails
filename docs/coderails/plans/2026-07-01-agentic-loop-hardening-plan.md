@@ -31,7 +31,7 @@ The phases below are sequential. Run them in order. Inside an authorised loop, p
 
 **Steps:**
 - [ ] Insert a new paragraph immediately under the `## The phases` heading (line 21), BEFORE the existing "The phases below are sequential…" line (line 23). Do not alter the existing sequential-order line itself.
-- [ ] The inserted text (verbatim, matches spec §3.1's decision table):
+- [ ] The inserted text (post-merge stage map, aligned with spec §3.1 + §3.2):
 
 ```markdown
 Nineteen-plus numbered phases (−2 through 13, with lettered sub-phases) is too many to hold in mind cold. Group them into five stages before descending into per-phase detail:
@@ -45,7 +45,7 @@ Nineteen-plus numbered phases (−2 through 13, with lettered sub-phases) is too
 | Wrap-up | 9, 10, 11, 12, 13 |
 
 ```
-- [ ] Note the Pre-flight row reads `2.7` not `2.7, 2.8` — Task 2 merges 2.8 into 2.7, so the stage-map must reflect the post-merge phase set, not the pre-merge one. Write the table with `2.7` only (do not write `2.7, 2.8` and then edit it again in Task 2).
+- [ ] Note the Pre-flight row reads `2.7` not `2.7, 2.8` — Task 2 merges 2.8 into 2.7, so the stage-map reflects the post-hardening phase set. Write the table with `2.7` only (do not write `2.7, 2.8` and then edit it again in Task 2).
 - [ ] Commit.
 
 **Verify-criteria:**
@@ -322,12 +322,13 @@ After any compaction, drift, or "wait, where are we" moment, the orchestrator RE
 
 **Files:** `skills/agentic-loop/SKILL.md` — Phase 9 (two citations, locate via `grep -n "feedback_wiki_ingest_and_lint_post_merge\|feedback_parallel_wiki_agents"`), Phase 4b (one citation, locate via `grep -n "feedback_three_parallel_adversarial_agents"`).
 
-**Why:** `SKILL.md` cites three feedback-memory files by name as load-bearing justification. None of the three exist under those names (or any plausible variant) in `/Users/harrison/.claude/projects/-Users-harrison-Github-coderails/memory/` right now (verified: 14 files in that directory, none matching) — a present-tense broken citation, not a future-rot risk. Memory is per-user, per-machine state; a skill file should never depend on it being present. Restate each principle inline instead.
+**Why:** `SKILL.md` cites three feedback-memory files by name as load-bearing justification. None of the three exist under those names (or any plausible variant) in the design author's local project memory directory (`$HOME/.claude/projects/<cwd-slug>/memory/`) at design time — a present-tense broken citation in that environment, not merely a future-rot risk. Memory is per-user, per-machine state; a skill file should never depend on it being present. Restate each principle inline instead.
 
 **Verification of current staleness (run before editing, confirms the spec's claim still holds):**
 ```bash
-ls /Users/harrison/.claude/projects/-Users-harrison-Github-coderails/memory/*.md | xargs -n1 basename
-grep -rn "feedback_wiki_ingest_and_lint_post_merge\|feedback_parallel_wiki_agents\|feedback_three_parallel_adversarial_agents" /Users/harrison/.claude/CLAUDE.md /Users/harrison/.claude/projects/-Users-harrison-Github-coderails/memory/
+MEMORY_DIR="$HOME/.claude/projects/$(printf '%s' "$PWD" | sed 's|/|-|g')/memory"
+find "$MEMORY_DIR" -maxdepth 1 -type f -name '*.md' -exec basename {} \; 2>/dev/null
+grep -rn "feedback_wiki_ingest_and_lint_post_merge\|feedback_parallel_wiki_agents\|feedback_three_parallel_adversarial_agents" "$HOME/.claude/CLAUDE.md" "$MEMORY_DIR" 2>/dev/null
 ```
 Expect zero matches in both — confirming the three citations are dead before removing them.
 
@@ -358,7 +359,7 @@ Replacement: `That three-agent set (\`architect-review\` + \`debugger\` + \`ai-e
 
 **Verify-criteria:**
 - `grep -n "feedback_wiki_ingest_and_lint_post_merge\|feedback_parallel_wiki_agents\|feedback_three_parallel_adversarial_agents" skills/agentic-loop/SKILL.md` returns zero matches.
-- `grep -rn "feedback_wiki_ingest_and_lint_post_merge\|feedback_parallel_wiki_agents\|feedback_three_parallel_adversarial_agents" /Users/harrison/.claude/CLAUDE.md` returns zero matches (should already be zero — this task does not edit CLAUDE.md, only confirms no lingering citation there needs a companion fix).
+- `grep -rn "feedback_wiki_ingest_and_lint_post_merge\|feedback_parallel_wiki_agents\|feedback_three_parallel_adversarial_agents" "$HOME/.claude/CLAUDE.md"` returns zero matches (should already be zero — this task does not edit CLAUDE.md, only confirms no lingering citation there needs a companion fix).
 - `grep -n "Lint must always pair with ingest — running one without the other leaves the wiki" skills/agentic-loop/SKILL.md` returns exactly one match.
 - `grep -n "Clustering related updates into one pass keeps the wiki" skills/agentic-loop/SKILL.md` returns exactly one match.
 - `grep -n "architect-review.*+.*debugger.*+.*ai-engineer.*is a separate general-purpose adversarial pattern" skills/agentic-loop/SKILL.md` returns exactly one match.
