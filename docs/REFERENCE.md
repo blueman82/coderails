@@ -314,7 +314,7 @@ Hooks run automatically on lifecycle events. They can **block** (exit 2 / `permi
 |---|---|---|
 | `hooks/scripts/lib/discipline_common.sh` | Shared transcript-extraction utilities: `dc_extract_last_text`, `dc_stable_text` (with retry-backoff for the transcript-flush race) | `check_confidence_labels.sh`, `check_verify_loop.sh`, `discipline_catchup.sh` |
 | `hooks/scripts/lib/loop_state_common.sh` | Shared agentic-loop detection: `LOOP_STOP_VOCAB`, `als_log`, `als_count_invocations`, `als_stable_invocations`, `als_resolve_path`, `als_read_file_state` | `loop_state_guard.sh`, `loop_stall_guard.sh` |
-| `hooks/scripts/lib/agentic_loop_path.sh` | Sole authority for the `progress.json` path. Computes `<base>/<slug>/progress.json` where slug is cwd with `/` replaced by `-`. Never called directly by Claude — always run via Bash to get the path. | `loop_state_common.sh` (via `als_resolve_path`), the agentic-loop orchestrator (to get the write path) |
+| `hooks/scripts/lib/agentic_loop_path.sh` | Sole authority for the `progress.json` path. Computes `<base>/<slug>/<session_id>/progress.json` where slug is cwd with `/` replaced by `-` and session_id defaults to `$CLAUDE_CODE_SESSION_ID` (falling back to a unique generated value when unavailable). Never called directly by Claude — always run via Bash to get the path. | `loop_state_common.sh` (via `als_resolve_path`), the agentic-loop orchestrator (to get the write path) |
 
 ---
 
@@ -372,7 +372,7 @@ source "${CLAUDE_PLUGIN_ROOT}/scripts/lib/config.sh" && coderails::resolve_confi
 | `.claude/test_command` | Project working directory | Yes (project-local) | Plain-text file containing the test command. Created by `/coderails:test-gate-setup`. Activates `test_gate.sh`. |
 | Specs from brainstorming | `docs/coderails/specs/YYYY-MM-DD-<topic>-design.md` | Yes | Written by `brainstorming` skill after design resolution. Permanent record. |
 | Plans from writing-plans | `docs/coderails/plans/<name>.md` | Yes | Written by `writing-plans` skill. Permanent plan record. |
-| Agentic loop `progress.json` | `~/.claude/agentic-loop/<cwd-slug>/progress.json` | No — ephemeral loop state, outside the repo | Dynamic position tracker for the loop. Path computed by `agentic_loop_path.sh`. Session-keyed. |
+| Agentic loop `progress.json` | `~/.claude/agentic-loop/<cwd-slug>/<session_id>/progress.json` | No — ephemeral loop state, outside the repo | Dynamic position tracker for the loop. Path computed by `agentic_loop_path.sh`. Session-keyed. |
 | Agentic loop `spec.md` | Same dir as `progress.json` | No — ephemeral loop state | Written by the agentic-loop orchestrator for ≥3-unit loops. Not a PR deliverable. |
 | Agentic loop `plan.md` | Same dir as `progress.json` | No — ephemeral loop state | Written by `coderails:writing-plans` as invoked by the agentic-loop. Consumed, not write-only: the orchestrator re-reads it after compaction to recover scope. |
 | Discipline log | `~/.claude/discipline.log` (or `$CLAUDE_DISCIPLINE_LOG`) | No | Structured `key=value` log appended by hooks on every fire. Never committed. |

@@ -17,6 +17,22 @@ SLEEP_S="${CLAUDE_HOOK_SLEEP_S:-0.3}"
 # Append a single key=value line to the discipline log (best-effort).
 als_log() { printf '%s %s\n' "$(date -Iseconds 2>/dev/null || date +%Y-%m-%dT%H:%M:%S%z)" "$1" >> "$LOG_FILE" 2>/dev/null; }
 
+# Sanitise a session_id extracted from the Stop-hook JSON payload. If the
+# payload's session_id is missing/null, the jq extraction below falls back to
+# the literal "?" — a FIXED sentinel that would make every malformed-payload
+# session collide onto the identical progress.json path, silently defeating
+# session-scoped isolation. Same fallback style as agentic_loop_path.sh's own
+# default: generate a fresh unique value (PID + high-res timestamp) instead of
+# a shared constant, so two concurrent malformed-payload sessions can't collide.
+als_sanitise_session_id() {
+  local raw="$1"
+  if [ -z "$raw" ] || [ "$raw" = "?" ]; then
+    printf 'unknown-%s-%s' "$$" "$(date +%s%N 2>/dev/null || date +%s)"
+  else
+    printf '%s' "$raw"
+  fi
+}
+
 # Count agentic-loop Skill invocations across the WHOLE transcript (one-shot).
 # Structured jq match on a tool_use — never a text grep. Matches the scoped
 # ("coderails:agentic-loop") and bare ("agentic-loop") skill names.
@@ -46,7 +62,7 @@ als_stable_invocations() {
 }
 
 # Resolve the progress.json path via the sole path authority (sibling script).
-als_resolve_path() { bash "$(dirname "${BASH_SOURCE[0]}")/agentic_loop_path.sh" "$1" 2>/dev/null; }
+als_resolve_path() { bash "$(dirname "${BASH_SOURCE[0]}")/agentic_loop_path.sh" "$1" "$2" 2>/dev/null; }
 
 # Read progress.json state into globals ALS_STATUS / ALS_SESSION / ALS_MARKER.
 # ALS_MARKER is sanitised to a non-negative integer (empty/non-numeric -> 0).
@@ -96,8 +112,8 @@ als_gate_require_active_loop() {
 # Sets ALS_PATH, ALS_STATUS, ALS_SESSION, ALS_MARKER, ALS_REARMED.
 # Requires ALS_INVOCATIONS to be set (by als_gate_require_active_loop).
 als_load_progress() {
-  local cwd="$1"
-  ALS_PATH=$(als_resolve_path "$cwd")
+  local cwd="$1" session="$2"
+  ALS_PATH=$(als_resolve_path "$cwd" "$session")
   als_read_file_state "$ALS_PATH"
   ALS_REARMED=0
   if [ "$ALS_INVOCATIONS" -gt "$ALS_MARKER" ]; then ALS_REARMED=1; fi

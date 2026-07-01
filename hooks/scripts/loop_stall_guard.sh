@@ -22,7 +22,7 @@ TAIL_LINES="${CLAUDE_HOOK_TAIL_LINES:-300}"
 
 IFS= read -r -d '' -t 5 input || true
 transcript=$(echo "$input" | jq -r '.transcript_path // empty')
-session_id=$(echo "$input" | jq -r '.session_id // "?"' 2>/dev/null)
+session_id=$(als_sanitise_session_id "$(echo "$input" | jq -r '.session_id // "?"' 2>/dev/null)")
 cwd=$(echo "$input" | jq -r '.cwd // empty' 2>/dev/null)
 stop_hook_active=$(echo "$input" | jq -r '.stop_hook_active // false' 2>/dev/null)
 
@@ -73,7 +73,7 @@ Declaring \`complete\` means the loop is done: also set progress.json status to
 als_gate_no_transcript "$transcript"
 als_gate_stop_loop "$stop_hook_active"
 als_gate_require_active_loop "$transcript" "loop_stall_guard" "$session_id"
-als_load_progress "$cwd"
+als_load_progress "$cwd" "$session_id"
 als_gate_loop_complete "loop_stall_guard" "$session_id"
 gate_loop_stop_declared
 block_missing_declaration

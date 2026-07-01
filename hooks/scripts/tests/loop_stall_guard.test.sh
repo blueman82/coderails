@@ -11,8 +11,7 @@ export CLAUDE_DISCIPLINE_LOG="$TMP/discipline.log"
 export CLAUDE_HOOK_MAX_ATTEMPTS=1   # no flush-race retry sleeps in tests
 CWD="/work/project"
 SLUG="-work-project"
-FILE_DIR="$CLAUDE_AGENTIC_LOOP_DIR/$SLUG"
-FILE="$FILE_DIR/progress.json"
+file_dir() { printf '%s/%s/%s' "$CLAUDE_AGENTIC_LOOP_DIR" "$SLUG" "$1"; }   # session_id -> dir
 fails=0
 
 # Build a transcript: N agentic-loop Skill invocations, then a final assistant
@@ -40,8 +39,9 @@ payload() { # transcript session_id [stop_hook_active]
     "$1" "$2" "$CWD" "${3:-false}"
 }
 write_file() { # status session_id completed_marker
-  mkdir -p "$FILE_DIR"
-  printf '{"schema_version":1,"status":"%s","session_id":"%s","completed_marker":%s}' "$1" "$2" "$3" > "$FILE"
+  local dir; dir=$(file_dir "$2")
+  mkdir -p "$dir"
+  printf '{"schema_version":1,"status":"%s","session_id":"%s","completed_marker":%s}' "$1" "$2" "$3" > "$dir/progress.json"
 }
 run() { echo "$2" | bash "$GUARD" >/dev/null 2>&1; echo $?; }
 check() { if [ "$2" = "$3" ]; then printf 'ok   - %s\n' "$1"; else printf 'FAIL - %s (expected exit %s, got %s)\n' "$1" "$2" "$3"; fails=$((fails+1)); fi; }

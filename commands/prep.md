@@ -81,7 +81,7 @@ Feature and bug work must be isolated in a git worktree — never branch off or 
 
 After the worktree is created, write a `progress.json` stub for the new branch. This is purely a nicety — a failure here does **not** abort `/prep`. No other command depends on this file; it is a run record, not a gate.
 
-Resolve the path by running the path helper — do NOT compute the path yourself:
+Resolve the path by running the path helper — do NOT compute the path yourself. It keys the path on cwd and `$CLAUDE_CODE_SESSION_ID` (read automatically; no argument needed):
 
 ```bash
 bash "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/lib/agentic_loop_path.sh"
