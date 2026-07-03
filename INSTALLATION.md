@@ -72,13 +72,12 @@ It does everything that has to happen outside Claude Code:
 - seeds four feedback memories (won't overwrite)
 - arms the scripts (`chmod +x`)
 
-`bash install.sh --dry-run` shows everything it would do without touching anything.
-
 **3. Restart Claude Code, then run in order:**
 
 ```
 /plugin marketplace add ~/Documents/Github/coderails
 /plugin install coderails@coderails
+/plugin install pr-review-toolkit@claude-plugins-official
 /reload-plugins
 ```
 
