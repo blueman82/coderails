@@ -45,4 +45,31 @@ check "workflow.md: review-pr invocation includes <PR#> placeholder" 0 $?
 grep -qF 'select(. != null)' "$POST_REVIEW_CMD"
 check "post-review.md: dedup --jq filter contains select(. != null) no-match guard" 0 $?
 
+# ─── Fix 4: numeric-only guard on the $ARGUMENTS PR-number argument ──────────
+
+# The render-time verdict line must gate on a plain-numeric argument via a
+# bash-3.2-safe case pattern (no =~ regex needed), covering the render-time
+# `gh pr view "$ARGUMENTS"` call site.
+grep -qF 'case "$ARGUMENTS" in' "$POST_REVIEW_CMD"
+check "post-review.md: render-time verdict line uses a case-pattern guard on \$ARGUMENTS" 0 $?
+
+grep -qF 'INVALID' "$POST_REVIEW_CMD"
+check "post-review.md: verdict line reports INVALID for non-numeric \$ARGUMENTS" 0 $?
+
+# A "Step 0" gate must appear before "Step 1", instructing the model to stop
+# on an INVALID verdict before executing any subsequent step (covering the
+# Step 3 `gh pr view "$ARGUMENTS"` call site, which a render-time line alone
+# cannot abort).
+grep -qF '## Step 0' "$POST_REVIEW_CMD"
+check "post-review.md: a Step 0 argument gate section exists" 0 $?
+
+step0_line=$(grep -n '## Step 0' "$POST_REVIEW_CMD" | head -1 | cut -d: -f1)
+step1_line=$(grep -n '## Step 1' "$POST_REVIEW_CMD" | head -1 | cut -d: -f1)
+if [[ -n "$step0_line" && -n "$step1_line" && "$step0_line" -lt "$step1_line" ]]; then
+  ordering_ok=0
+else
+  ordering_ok=1
+fi
+check "post-review.md: Step 0 gate appears before Step 1" 0 "$ordering_ok"
+
 [[ $fails -eq 0 ]] && { echo PASS; exit 0; } || { echo "FAIL ($fails)"; exit 1; }
