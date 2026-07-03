@@ -1,6 +1,8 @@
 # coderails
 
-Gary's Claude Code kit, in one plugin. Two halves:
+coderails is a Claude Code workflow plugin: the prep → push → merge → wiki
+command chain plus planning/orchestration skills and a self-checking
+discipline loop. Two halves:
 
 - **Workflow** — the `prep → push → merge → wiki` command chain plus the
   agentic-loop, planning-sequence, premortem, and handoff skills.
