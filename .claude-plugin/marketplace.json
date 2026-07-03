@@ -9,7 +9,7 @@
   "plugins": [
     {
       "name": "coderails",
-      "description": "The prep→push→merge→wiki workflow chain, agentic-loop/planning/premortem/handoff skills, plus a self-checking discipline loop (confidence-label hooks, Did-Not-Verify enforcement, destructive-bash gate, project test gate).",
+      "description": "Claude Code workflow plugin: prep→push→merge→wiki commands, planning/orchestration skills, and self-checking hooks.",
       "author": {
         "name": "Gary Harrison",
         "email": "gjharrison01@gmail.com"
