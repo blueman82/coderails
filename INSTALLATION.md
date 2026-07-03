@@ -34,17 +34,27 @@ you don't have to touch it.
 
 ## Install (4 steps)
 
-**1. Unzip somewhere stable.** Where you unzip is where it lives — the installer
-records that path. Don't unzip to a temp folder you'll clear.
+**1. Clone somewhere stable.** Where you clone is where it lives — the installer
+records that path. Don't clone to a temp folder you'll clear.
+
+```bash
+git clone https://github.com/blueman82/coderails.git ~/Documents/Github/coderails
+```
+
+Prefer git clone. If you'd rather not clone, download a
+[release archive](https://github.com/blueman82/coderails/releases) (a git-archive
+zip of a tagged release, not an ad-hoc zip) and unzip it to the same path instead:
 
 ```bash
 unzip coderails.zip -d ~/Documents/Github/
 ```
 
-**2. Run the installer.**
+**2. Run the installer.** First do a dry run to see what it would change:
 
 ```bash
-bash ~/Documents/Github/coderails/install.sh
+cd ~/Documents/Github/coderails
+bash install.sh --dry-run
+bash install.sh
 ```
 
 It does everything that has to happen outside Claude Code:
