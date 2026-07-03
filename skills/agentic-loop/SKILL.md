@@ -55,7 +55,7 @@ It prints the absolute path. Write the stub there with the Write tool (it create
 }
 ```
 
-If a `progress.json` already exists at the path from an earlier completed loop in this session, read its `completed_marker` and carry it forward into the new stub (do not reset it to 0) — this is what lets the guard tell a genuinely-finished loop from a new one that re-armed it (see the teardown rule below).
+If a `progress.json` already exists at the path from an earlier completed loop in this session, read its `completed_marker` and carry it forward into the new stub (do not reset it to 0) — this is what lets the guard tell a genuinely-finished loop from a new one that re-armed it (see the teardown rule below). Same treatment for `loop_stop_counts` if present in the prior file: it is HOOK-OWNED (see Context-window persistence below) — carry it forward verbatim into the new stub rather than omitting it, so a mid-session second loop doesn't silently reset the count the `loop_stall_guard` hook has been maintaining.
 
 ### Phase -1 — Sharpen the authorising prompt
 
