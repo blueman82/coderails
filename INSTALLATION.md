@@ -92,6 +92,11 @@ then `install`.
 /coderails:test-gate-setup     # optional — blocks commits when tests fail
 ```
 
+`/coderails:init` scaffolds `.claude/workflow.config.yaml` from
+[`examples/workflow.config.yaml`](./examples/workflow.config.yaml). Don't commit
+your own `.claude/workflow.config.yaml` if it holds real project or Jira values —
+treat it as machine-local config, same as `.claude/settings.local.json`.
+
 ## What you get
 
 | Commands | Skills | Hooks (automatic) |
