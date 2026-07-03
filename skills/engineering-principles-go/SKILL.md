@@ -2,6 +2,7 @@
 name: engineering-principles-go
 description: Go-specific coding standards and idioms. Invoked by engineering-principles coordinator or directly for Go files.
 allowed-tools: Read, Write, Edit, Glob, Grep, mcp__mcp-exec__*
+paths: "**/*.go"
 ---
 
 # Engineering Principles Go - Language-Specific Standards

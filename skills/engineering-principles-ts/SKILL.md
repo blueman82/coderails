@@ -2,6 +2,7 @@
 name: engineering-principles-ts
 description: TypeScript-specific coding standards and idioms. Invoked by engineering-principles coordinator or directly for TypeScript files.
 allowed-tools: Read, Write, Edit, Glob, Grep, mcp__mcp-exec__*
+paths: "**/*.ts,**/*.tsx"
 ---
 
 # Engineering Principles TypeScript - Language-Specific Standards
