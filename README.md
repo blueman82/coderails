@@ -19,13 +19,19 @@ ritual.
 See [INSTALLATION.md](./INSTALLATION.md). Short version:
 
 ```bash
-unzip coderails.zip -d ~/Documents/Github/
-bash ~/Documents/Github/coderails/install.sh
+git clone https://github.com/blueman82/coderails.git ~/Documents/Github/coderails
+cd ~/Documents/Github/coderails
+bash install.sh --dry-run
+bash install.sh
 # restart Claude Code, then:
 #   /plugin marketplace add ~/Documents/Github/coderails
 #   /plugin install coderails@coderails
 #   /reload-plugins
 ```
+
+Per project, run once: `/coderails:init` scaffolds `.claude/workflow.config.yaml`
+from [`examples/workflow.config.yaml`](./examples/workflow.config.yaml) — the
+preferred way to set up a new repo.
 
 ## Commands
 
