@@ -6,10 +6,13 @@
 # them on disk every time a user runs the installer).
 #
 # This test copies the real plugin tree to a temp dir, deliberately flips one
-# 100644-in-index file to +x on disk (simulating a stale install) and one
+# 100644-in-index file to +x on disk (simulating a stale install), one
 # 100755-in-index file to -x on disk (simulating a fresh checkout that lost
-# its bit), runs install.sh's sweep logic against the copy, then asserts the
-# disk mode was corrected to match the git index mode in both directions.
+# its bit), and adds one untracked file with no index entry at all
+# (simulating a no-.git release-tarball install), runs install.sh's sweep
+# logic against the copy, then asserts: the two tracked files land on their
+# index-mandated mode, and the untracked file falls back to the old
+# unconditional +x (documented, pre-existing behaviour — not a gap).
 #
 # Uses parallel arrays, not `declare -A`, for bash 3.2 (macOS default) compat
 # — same constraint the other *.test.sh files in this directory respect.
@@ -30,6 +33,11 @@ check() { # desc expected actual
 SOURCE_ONLY_FILE="scripts/lib/git-common.sh"
 # A 100755-in-index file (directly invoked) — sweep must ensure +x on disk.
 EXEC_FILE="scripts/push.sh"
+# A file NOT in the git index at all (e.g. a release-tarball install with no
+# .git) — sweep must fall back to the old unconditional +x. Placed under
+# hooks/scripts/lib/, which the sweep globs directly (hooks/scripts/lib/*.sh),
+# so it's picked up without needing to be tracked.
+UNTRACKED_FILE="hooks/scripts/lib/untracked_scratch.sh"
 
 TMP_TREE="$(mktemp -d)"
 cleanup() {
@@ -51,6 +59,11 @@ cp "$REPO_ROOT/install.sh" "$TMP_TREE/install.sh"
 chmod +x "$TMP_TREE/$SOURCE_ONLY_FILE"   # stale +x that should be removed
 chmod -x "$TMP_TREE/$EXEC_FILE"          # missing +x that should be added
 
+# Untracked scratch file — not `git add`ed, so it has no index mode at all
+# (simulates a no-.git tarball install where every file takes this path).
+printf '#!/bin/bash\ntrue\n' > "$TMP_TREE/$UNTRACKED_FILE"
+chmod -x "$TMP_TREE/$UNTRACKED_FILE"
+
 # Run install.sh's sweep in dry mode is not enough (dry-run doesn't chmod) —
 # run for real, in the temp copy, non-interactively, then inspect disk modes.
 # We invoke the whole script; it only touches files under $PLUGIN_DIR (TMP_TREE),
@@ -70,5 +83,6 @@ check "$EXEC_FILE index mode is 100755 (precondition)" "100755" "$index_mode_exe
 
 check "$SOURCE_ONLY_FILE loses stale +x after sweep (100644-in-index)" "no" "$(is_executable "$TMP_TREE/$SOURCE_ONLY_FILE")"
 check "$EXEC_FILE gains +x after sweep (100755-in-index)" "yes" "$(is_executable "$TMP_TREE/$EXEC_FILE")"
+check "$UNTRACKED_FILE gains +x after sweep (not in index, fallback behaviour)" "yes" "$(is_executable "$TMP_TREE/$UNTRACKED_FILE")"
 
 [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails)"; exit 1; }
