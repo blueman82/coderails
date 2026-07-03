@@ -46,6 +46,8 @@ write_file() { # status session_id completed_marker
 run() { echo "$2" | bash "$GUARD" >/dev/null 2>&1; echo $?; }
 check() { if [ "$2" = "$3" ]; then printf 'ok   - %s\n' "$1"; else printf 'FAIL - %s (expected exit %s, got %s)\n' "$1" "$2" "$3"; fails=$((fails+1)); fi; }
 reset() { rm -rf "$CLAUDE_AGENTIC_LOOP_DIR"; }
+progress_file() { printf '%s/progress.json' "$(file_dir "$1")"; }   # session_id -> progress.json path
+counter() { jq -r --arg c "$2" '.loop_stop_counts[$c] // 0' "$(progress_file "$1")" 2>/dev/null; }   # session_id category
 
 # als_gate_no_transcript — no transcript file.
 check "no transcript -> allow" 0 "$(run x "$(payload "$TMP/nope.jsonl" S1)")"
@@ -79,5 +81,29 @@ check "out-of-vocab category -> block" 2 "$(run x "$(payload "$T" S1)")"
 # als_gate_stop_loop — already blocked this turn: would-block case allowed via loop-guard.
 reset; T=$(mk_transcript 1 "no declaration here"); write_file in-progress S1 0
 check "stop_hook_active -> allow" 0 "$(run x "$(payload "$T" S1 true)")"
+
+# Hook-owned counter — a valid LOOP-STOP declaration increments loop_stop_counts.<category>
+# by exactly 1, starting from a fixture with no loop_stop_counts key at all (initialisation).
+reset; T=$(mk_transcript 1 "Work paused.
+LOOP-STOP: awaiting-input — waiting on the user's plan confirmation"); write_file in-progress S1 0
+run x "$(payload "$T" S1)" >/dev/null
+check "counter initialises missing key to 1" 1 "$(counter S1 awaiting-input)"
+
+# A second declaration of the SAME category accumulates (2), proving increment not overwrite.
+run x "$(payload "$T" S1)" >/dev/null
+check "counter accumulates on repeat -> 2" 2 "$(counter S1 awaiting-input)"
+
+# A different category in the same fixture increments independently, other counts untouched.
+reset; T=$(mk_transcript 1 "All done.
+LOOP-STOP: complete — all PRs merged"); write_file in-progress S1 0
+run x "$(payload "$T" S1)" >/dev/null
+check "distinct category counted separately (complete)" 1 "$(counter S1 complete)"
+check "untouched category stays 0 (hard-stop)" 0 "$(counter S1 hard-stop)"
+
+# Malformed progress.json must not crash the hook or block the stop; counter write is skipped.
+reset; T=$(mk_transcript 1 "Work paused.
+LOOP-STOP: hard-stop — malformed fixture"); dir=$(file_dir S1); mkdir -p "$dir"
+printf '{not valid json' > "$dir/progress.json"
+check "malformed progress.json -> still allow (declared)" 0 "$(run x "$(payload "$T" S1)")"
 
 [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails)"; exit 1; }

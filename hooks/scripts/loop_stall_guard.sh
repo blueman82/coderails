@@ -42,6 +42,24 @@ extract_last_text() {
   ' 2>/dev/null
 }
 
+# Best-effort jq read-modify-write of progress.json's loop_stop_counts.<category>.
+# Sole writer of this field (hook-owned; the orchestrator must never write it).
+# Never fails the stop: any missing file, malformed JSON, or mv failure is logged
+# and swallowed — declaring the stop matters more than the counter write succeeding.
+bump_loop_stop_count() {
+  local category="$1"
+  [ -n "$ALS_PATH" ] && [ -f "$ALS_PATH" ] || return 0
+  local tmp="${ALS_PATH}.tmp"
+  if jq --arg cat "$category" \
+        '.loop_stop_counts[$cat] = ((.loop_stop_counts[$cat] // 0) + 1)' \
+        "$ALS_PATH" > "$tmp" 2>/dev/null; then
+    mv "$tmp" "$ALS_PATH" 2>/dev/null || { rm -f "$tmp" 2>/dev/null; als_log "hook=loop_stall_guard session=$session_id counter_write=mv_failed category=$category"; }
+  else
+    rm -f "$tmp" 2>/dev/null
+    als_log "hook=loop_stall_guard session=$session_id counter_write=jq_failed category=$category"
+  fi
+}
+
 gate_loop_stop_declared() {
   # Retry the extract for the transcript-flush race until the length stabilises.
   prev_len=-1; attempts=0; text=""
@@ -55,6 +73,8 @@ gate_loop_stop_declared() {
   # The regex is built from the single-source vocab; the category must be followed
   # by a non-alphanumeric char or end-of-line so "completed" does not match "complete".
   if printf '%s\n' "$text" | grep -qiE "^[[:space:]]*LOOP-STOP:[[:space:]]*(${LOOP_STOP_VOCAB})([^[:alnum:]]|$)"; then
+    category=$(printf '%s\n' "$text" | grep -oiE "LOOP-STOP:[[:space:]]*(${LOOP_STOP_VOCAB})" | grep -oiE "(${LOOP_STOP_VOCAB})\$" | tail -1)
+    bump_loop_stop_count "$category"
     als_log "hook=loop_stall_guard session=$session_id invocations=$ALS_INVOCATIONS declared=1 blocked=0"
     exit 0
   fi
