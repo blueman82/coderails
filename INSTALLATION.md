@@ -1,15 +1,18 @@
 # Installing coderails
 
-A single Claude Code plugin shipped as a zip — no GitHub, no git remote needed.
-It bundles the workflow command chain, the planning/orchestration skills, and a
-self-checking discipline loop.
+A Claude Code plugin, installed from a GitHub clone. It bundles the workflow
+command chain, the planning/orchestration skills, and a self-checking
+discipline loop. This is a GitHub/`gh`-based workflow, not a generic git-host
+one — `/push` and `/merge` shell out to `gh`.
 
-## Prerequisites
+## Requirements
 
+- macOS
 - Claude Code 2.1.x
-- `gh`, `jq`, `git` on your PATH (the installer checks and stops if any are missing)
-- For `/push` and `/merge`: authenticated with your git host. For enterprise GitHub: `gh auth login --hostname <your-git-host>` (e.g. `git.example.com`)
-- **For Jira features** (`/prep`, `/workflow`, `/push` auto-resolve): a Jira MCP server, reachable via your configured MCP tool namespace. The commands build Jira tool names at runtime from `config.jira.mcp_namespace` in `workflow.config.yaml` (default: `jira`, giving `mcp__jira__*`). Set `mcp_namespace` to match your server (e.g. `acme-jira`, `atlassian`) — no edits to command files needed. For non-default namespaces, add a `permissions.allow` rule to `.claude/settings.json` so calls run without prompting: `"mcp__<namespace>__*"`. Without a Jira MCP, `/prep` still creates branches and `/push` still opens PRs — only the Jira ticket/resolve steps no-op.
+- `git`, `gh`, `jq` on your PATH (the installer checks and stops if any are missing)
+- An authenticated GitHub CLI (`gh auth login`). For enterprise GitHub: `gh auth login --hostname <your-git-host>` (e.g. `git.example.com`)
+- `pr-review-toolkit@claude-plugins-official` installed — required for the review stage of `/workflow`
+- **For Jira features** (`/prep`, `/workflow`, `/push` auto-resolve): a Jira MCP server, reachable via your configured MCP tool namespace. Jira is optional — leave `jira: null` in `workflow.config.yaml` unless you've configured a Jira MCP server. The commands build Jira tool names at runtime from `config.jira.mcp_namespace` in `workflow.config.yaml` (default: `jira`, giving `mcp__jira__*`). Set `mcp_namespace` to match your server (e.g. `acme-jira`, `atlassian`) — no edits to command files needed. For non-default namespaces, add a `permissions.allow` rule to `.claude/settings.json` so calls run without prompting: `"mcp__<namespace>__*"`. Without a Jira MCP, `/prep` still creates branches and `/push` still opens PRs — only the Jira ticket/resolve steps no-op.
 
 ## Migrating from the old separate plugins
 
