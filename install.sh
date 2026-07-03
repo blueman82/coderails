@@ -337,7 +337,7 @@ for script in scripts/push.sh scripts/merge.sh scripts/lib/git-common.sh \
   # doesn't fight the exec-bit invariant (PR #94 set some libs to 100644 on
   # purpose — sourced-only, must never be +x). A file not in the index (e.g.
   # generated) keeps the old unconditional +x behaviour.
-  _index_mode=$(cd "$PLUGIN_DIR" && git ls-files -s -- "$script" 2>/dev/null | awk '{print $1}')
+  _index_mode=$(cd "$PLUGIN_DIR" && git ls-files -s -- "$script" 2>/dev/null | awk '{print $1}') || _index_mode=""
   if [[ "$DRY_RUN" -eq 1 ]]; then
     case "$_index_mode" in
       100644) flash_dry "chmod -x $PLUGIN_DIR/$script (100644 in index)" ;;

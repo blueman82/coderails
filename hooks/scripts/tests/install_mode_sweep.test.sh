@@ -85,4 +85,30 @@ check "$SOURCE_ONLY_FILE loses stale +x after sweep (100644-in-index)" "no" "$(i
 check "$EXEC_FILE gains +x after sweep (100755-in-index)" "yes" "$(is_executable "$TMP_TREE/$EXEC_FILE")"
 check "$UNTRACKED_FILE gains +x after sweep (not in index, fallback behaviour)" "yes" "$(is_executable "$TMP_TREE/$UNTRACKED_FILE")"
 
+# --- No-git-checkout case (release tarball, no .git anywhere) ---
+# `git ls-files -s` exits 128 outside a git repo/worktree. Under install.sh's
+# `set -euo pipefail`, that non-zero exit propagates through the sweep's pipe
+# and (without a guard) kills the whole installer at the very first swept
+# file — everything after the sweep (marketplace registration etc.) silently
+# never runs. This must be caught: the sweep should complete and every file
+# should fall back to the old unconditional +x.
+NOGIT_TREE="$(mktemp -d)"
+cleanup_nogit() { rm -rf "$NOGIT_TREE"; }
+trap 'cleanup; cleanup_nogit' EXIT
+
+cp -r "$TMP_TREE/." "$NOGIT_TREE/"
+rm -rf "$NOGIT_TREE/.git"   # `git worktree add` leaves a `.git` file pointing at the main repo — remove it entirely
+
+# Reset the tracked files to their pre-sweep drift state again (the copy above
+# picked up the already-corrected TMP_TREE) so this run exercises the sweep
+# fresh, independent of the first run.
+chmod +x "$NOGIT_TREE/$SOURCE_ONLY_FILE"
+chmod -x "$NOGIT_TREE/$EXEC_FILE"
+
+nogit_exit=0
+( cd "$NOGIT_TREE" && printf 'n\n' | MEMORY_TARGET="$NOGIT_TREE/.memory-test" bash install.sh >/dev/null 2>&1 ) || nogit_exit=$?
+
+check "install.sh exits 0 in a no-git checkout (does not die mid-sweep)" "0" "$nogit_exit"
+check "$SOURCE_ONLY_FILE gains +x in a no-git checkout (fallback applied to every file)" "yes" "$(is_executable "$NOGIT_TREE/$SOURCE_ONLY_FILE")"
+
 [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails)"; exit 1; }
