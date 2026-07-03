@@ -4,6 +4,11 @@ argument-hint: [pr-number | branch-name | auto]
 description: Merge approved PR, switch to main, and pull latest changes
 ---
 
+## Current state
+
+- Current branch: !`git branch --show-current`
+- Open PRs: !`gh pr list --state open --limit 10`
+
 Execute the merge workflow script:
 
 ```bash
