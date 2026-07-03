@@ -16,3 +16,8 @@ logs/
 
 # machine-local git worktree dirs
 .worktrees
+
+# local-only public-release planning notes (do not publish)
+docs/public-readiness-plan.md
+docs/public-readiness-spec.md
+docs/public-readiness-plan-v2.md
