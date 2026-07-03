@@ -46,20 +46,16 @@ grep -qF 'select(. != null)' "$POST_REVIEW_CMD"
 check "post-review.md: dedup --jq filter contains select(. != null) no-match guard" 0 $?
 
 # ─── Fix 4: numeric-only guard on the $ARGUMENTS PR-number argument ──────────
+# rev97-security EXPERIMENTALLY confirmed that $(...) command-substitution
+# payloads in $ARGUMENTS execute at render time inside ANY render-time
+# `!`cmd`` line — no quoting scheme survives this, because the substitution
+# is a textual splice performed before the shell parses quotes. The only
+# sound fix is removing $ARGUMENTS from render-time lines entirely, and
+# moving the numeric check to a model-level inspection gate (Step 0) that
+# never pastes the argument into a shell command ahead of validation.
 
-# The render-time verdict line must gate on a plain-numeric argument via a
-# bash-3.2-safe case pattern (no =~ regex needed), covering the render-time
-# `gh pr view "$ARGUMENTS"` call site.
-grep -qF 'case "$ARGUMENTS" in' "$POST_REVIEW_CMD"
-check "post-review.md: render-time verdict line uses a case-pattern guard on \$ARGUMENTS" 0 $?
-
-grep -qF 'INVALID' "$POST_REVIEW_CMD"
-check "post-review.md: verdict line reports INVALID for non-numeric \$ARGUMENTS" 0 $?
-
-# A "Step 0" gate must appear before "Step 1", instructing the model to stop
-# on an INVALID verdict before executing any subsequent step (covering the
-# Step 3 `gh pr view "$ARGUMENTS"` call site, which a render-time line alone
-# cannot abort).
+# A "Step 0" gate must appear before "Step 1", instructing the model to
+# validate the argument by inspection before running any step.
 grep -qF '## Step 0' "$POST_REVIEW_CMD"
 check "post-review.md: a Step 0 argument gate section exists" 0 $?
 
@@ -71,5 +67,25 @@ else
   ordering_ok=1
 fi
 check "post-review.md: Step 0 gate appears before Step 1" 0 "$ordering_ok"
+
+# The render-time PR-state line must be argument-free (merge.md's convention).
+grep -qF -- '- Open PRs: !`gh pr list --state open --limit 10`' "$POST_REVIEW_CMD"
+check "post-review.md: render-time line is the argument-free 'Open PRs' form" 0 $?
+
+# No render-time `!`cmd`` line anywhere in post-review.md may contain $ARGUMENTS —
+# this is the specific bug class (render-time textual substitution defeats all quoting).
+grep -qE '!`[^`]*\$ARGUMENTS[^`]*`' "$POST_REVIEW_CMD"
+check "post-review.md: no render-time !\`cmd\` line contains \$ARGUMENTS" 1 $?
+
+# ─── Class-wide: no commands/*.md may put $ARGUMENTS in a render-time line ───
+# Proves the fix is a repo-wide invariant, not a one-off patch on this file.
+class_violation=0
+for f in "$REPO_ROOT"/commands/*.md; do
+  if grep -qE '!`[^`]*\$ARGUMENTS[^`]*`' "$f"; then
+    printf '  violation: %s\n' "$f"
+    class_violation=1
+  fi
+done
+check "commands/*.md: no file has a render-time !\`cmd\` line containing \$ARGUMENTS" 0 "$class_violation"
 
 [[ $fails -eq 0 ]] && { echo PASS; exit 0; } || { echo "FAIL ($fails)"; exit 1; }
