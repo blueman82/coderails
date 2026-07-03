@@ -2,6 +2,7 @@
 name: engineering-principles-python
 description: Python-specific coding standards and idioms. Invoked by engineering-principles coordinator or directly for Python files.
 allowed-tools: Read, Write, Edit, Glob, Grep, mcp__mcp-exec__*
+paths: "**/*.py"
 ---
 
 # Engineering Principles Python - Language-Specific Standards
