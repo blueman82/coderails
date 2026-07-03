@@ -1,7 +1,7 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
   "name": "coderails",
-  "description": "Gary's Claude Code kit: workflow command chain, planning/orchestration skills, and a self-checking discipline loop.",
+  "description": "Claude Code workflow plugin: prep→push→merge→wiki commands, planning/orchestration skills, and self-checking hooks.",
   "owner": {
     "name": "Gary Harrison",
     "email": "gjharrison01@gmail.com"
