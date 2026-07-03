@@ -1,15 +1,18 @@
 # Installing coderails
 
-A single Claude Code plugin shipped as a zip — no GitHub, no git remote needed.
-It bundles the workflow command chain, the planning/orchestration skills, and a
-self-checking discipline loop.
+A Claude Code plugin, installed from a GitHub clone. It bundles the workflow
+command chain, the planning/orchestration skills, and a self-checking
+discipline loop. This is a GitHub/`gh`-based workflow, not a generic git-host
+one — `/push` and `/merge` shell out to `gh`.
 
-## Prerequisites
+## Requirements
 
+- macOS
 - Claude Code 2.1.x
-- `gh`, `jq`, `git` on your PATH (the installer checks and stops if any are missing)
-- For `/push` and `/merge`: authenticated with your git host. For enterprise GitHub: `gh auth login --hostname <your-git-host>` (e.g. `git.example.com`)
-- **For Jira features** (`/prep`, `/workflow`, `/push` auto-resolve): a Jira MCP server, reachable via your configured MCP tool namespace. The commands build Jira tool names at runtime from `config.jira.mcp_namespace` in `workflow.config.yaml` (default: `jira`, giving `mcp__jira__*`). Set `mcp_namespace` to match your server (e.g. `acme-jira`, `atlassian`) — no edits to command files needed. For non-default namespaces, add a `permissions.allow` rule to `.claude/settings.json` so calls run without prompting: `"mcp__<namespace>__*"`. Without a Jira MCP, `/prep` still creates branches and `/push` still opens PRs — only the Jira ticket/resolve steps no-op.
+- `git`, `gh`, `jq` on your PATH (the installer checks and stops if any are missing)
+- An authenticated GitHub CLI (`gh auth login`). For enterprise GitHub: `gh auth login --hostname <your-git-host>` (e.g. `git.example.com`)
+- `pr-review-toolkit@claude-plugins-official` installed — required for the review stage of `/workflow`
+- **For Jira features** (`/prep`, `/workflow`, `/push` auto-resolve): a Jira MCP server, reachable via your configured MCP tool namespace. Jira is optional — leave `jira: null` in `workflow.config.yaml` unless you've configured a Jira MCP server. The commands build Jira tool names at runtime from `config.jira.mcp_namespace` in `workflow.config.yaml` (default: `jira`, giving `mcp__jira__*`). Set `mcp_namespace` to match your server (e.g. `acme-jira`, `atlassian`) — no edits to command files needed. For non-default namespaces, add a `permissions.allow` rule to `.claude/settings.json` so calls run without prompting: `"mcp__<namespace>__*"`. Without a Jira MCP, `/prep` still creates branches and `/push` still opens PRs — only the Jira ticket/resolve steps no-op.
 
 ## Migrating from the old separate plugins
 
@@ -31,17 +34,27 @@ you don't have to touch it.
 
 ## Install (4 steps)
 
-**1. Unzip somewhere stable.** Where you unzip is where it lives — the installer
-records that path. Don't unzip to a temp folder you'll clear.
+**1. Clone somewhere stable.** Where you clone is where it lives — the installer
+records that path. Don't clone to a temp folder you'll clear.
+
+```bash
+git clone https://github.com/blueman82/coderails.git ~/Documents/Github/coderails
+```
+
+Prefer git clone. If you'd rather not clone, download a
+[release archive](https://github.com/blueman82/coderails/releases) (a git-archive
+zip of a tagged release, not an ad-hoc zip) and unzip it to the same path instead:
 
 ```bash
 unzip coderails.zip -d ~/Documents/Github/
 ```
 
-**2. Run the installer.**
+**2. Run the installer.** First do a dry run to see what it would change:
 
 ```bash
-bash ~/Documents/Github/coderails/install.sh
+cd ~/Documents/Github/coderails
+bash install.sh --dry-run
+bash install.sh
 ```
 
 It does everything that has to happen outside Claude Code:
@@ -59,13 +72,12 @@ It does everything that has to happen outside Claude Code:
 - seeds four feedback memories (won't overwrite)
 - arms the scripts (`chmod +x`)
 
-`bash install.sh --dry-run` shows everything it would do without touching anything.
-
 **3. Restart Claude Code, then run in order:**
 
 ```
 /plugin marketplace add ~/Documents/Github/coderails
 /plugin install coderails@coderails
+/plugin install pr-review-toolkit@claude-plugins-official
 /reload-plugins
 ```
 
@@ -79,6 +91,11 @@ then `install`.
 /coderails:init               # scaffolds .claude/workflow.config.yaml
 /coderails:test-gate-setup     # optional — blocks commits when tests fail
 ```
+
+`/coderails:init` scaffolds `.claude/workflow.config.yaml` from
+[`examples/workflow.config.yaml`](./examples/workflow.config.yaml). Don't commit
+your own `.claude/workflow.config.yaml` if it holds real project or Jira values —
+treat it as machine-local config, same as `.claude/settings.local.json`.
 
 ## What you get
 
