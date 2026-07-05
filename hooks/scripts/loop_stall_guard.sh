@@ -21,6 +21,9 @@
 TAIL_LINES="${CLAUDE_HOOK_TAIL_LINES:-300}"
 
 IFS= read -r -d '' -t 5 input || true
+# If jq is absent, this extraction silently yields empty, transcript stays "",
+# and als_gate_no_transcript below allows the stop — fail-open is relied on here,
+# not just an accident of the missing-transcript path.
 transcript=$(echo "$input" | jq -r '.transcript_path // empty')
 session_id=$(als_sanitise_session_id "$(echo "$input" | jq -r '.session_id // "?"' 2>/dev/null)")
 cwd=$(echo "$input" | jq -r '.cwd // empty' 2>/dev/null)
@@ -48,6 +51,7 @@ extract_last_text() {
 # and swallowed — declaring the stop matters more than the counter write succeeding.
 bump_loop_stop_count() {
   local category="$1"
+  command -v jq >/dev/null 2>&1 || return 0
   [ -n "$ALS_PATH" ] && [ -f "$ALS_PATH" ] || return 0
   local tmp="${ALS_PATH}.tmp"
   if jq --arg cat "$category" \
@@ -73,6 +77,10 @@ gate_loop_stop_declared() {
   # The regex is built from the single-source vocab; the category must be followed
   # by a non-alphanumeric char or end-of-line so "completed" does not match "complete".
   if printf '%s\n' "$text" | grep -qiE "^[[:space:]]*LOOP-STOP:[[:space:]]*(${LOOP_STOP_VOCAB})([^[:alnum:]]|$)"; then
+    # If the message carries more than one LOOP-STOP line, `tail -1` counts the
+    # LAST one. This is intentional, not incidental: SKILL.md defines the
+    # declaration as the turn's ENDING line ("End the stopping turn with:"), so
+    # only the final declaration reflects the turn's actual outcome.
     category=$(printf '%s\n' "$text" | grep -oiE "LOOP-STOP:[[:space:]]*(${LOOP_STOP_VOCAB})" | grep -oiE "(${LOOP_STOP_VOCAB})\$" | tail -1)
     bump_loop_stop_count "$category"
     als_log "hook=loop_stall_guard session=$session_id invocations=$ALS_INVOCATIONS declared=1 blocked=0"

@@ -44,10 +44,20 @@ write_file() { # status session_id completed_marker
   printf '{"schema_version":1,"status":"%s","session_id":"%s","completed_marker":%s}' "$1" "$2" "$3" > "$dir/progress.json"
 }
 run() { echo "$2" | bash "$GUARD" >/dev/null 2>&1; echo $?; }
+run_env() { env "$1" bash -c "echo \"\$1\" | bash \"\$2\" >/dev/null 2>&1; echo \$?" _ "$2" "$GUARD"; }  # extra_env payload -> exit code
 check() { if [ "$2" = "$3" ]; then printf 'ok   - %s\n' "$1"; else printf 'FAIL - %s (expected exit %s, got %s)\n' "$1" "$2" "$3"; fails=$((fails+1)); fi; }
 reset() { rm -rf "$CLAUDE_AGENTIC_LOOP_DIR"; }
 progress_file() { printf '%s/progress.json' "$(file_dir "$1")"; }   # session_id -> progress.json path
 counter() { jq -r --arg c "$2" '.loop_stop_counts[$c] // 0' "$(progress_file "$1")" 2>/dev/null; }   # session_id category
+
+# A minimal PATH containing every coreutil the guard/lib needs, but NOT jq —
+# used to prove the hook fails open (never blocks) when jq is unavailable.
+NOJQ_BIN="$TMP/nojq-bin"
+mkdir -p "$NOJQ_BIN"
+for _t in bash sh dirname grep sleep tail printf mv rm cat sed awk date mkdir env basename cut tr paste; do
+  _p=$(command -v "$_t" 2>/dev/null)
+  [ -n "$_p" ] && ln -sf "$_p" "$NOJQ_BIN/$_t"
+done
 
 # als_gate_no_transcript — no transcript file.
 check "no transcript -> allow" 0 "$(run x "$(payload "$TMP/nope.jsonl" S1)")"
@@ -105,5 +115,55 @@ reset; T=$(mk_transcript 1 "Work paused.
 LOOP-STOP: hard-stop — malformed fixture"); dir=$(file_dir S1); mkdir -p "$dir"
 printf '{not valid json' > "$dir/progress.json"
 check "malformed progress.json -> still allow (declared)" 0 "$(run x "$(payload "$T" S1)")"
+
+# No-clobber: an arbitrary nested field alongside the counter must survive
+# byte-semantically after a valid declaration — this is THE property the
+# hook-owned-counter design exists for, encoded as a standing regression guard.
+reset; T=$(mk_transcript 1 "Work paused.
+LOOP-STOP: approval-gate — need human ok"); dir=$(file_dir S1); mkdir -p "$dir"
+jq -n '{schema_version:1,status:"in-progress",session_id:"S1",completed_marker:0,
+        custom_field:{nested:[1,2,3]},work_units:[{id:"A",status:"done"},{id:"B",status:"pending"}]}' \
+  > "$dir/progress.json"
+before=$(jq -S 'del(.loop_stop_counts)' "$dir/progress.json")
+run x "$(payload "$T" S1)" >/dev/null
+after=$(jq -S 'del(.loop_stop_counts)' "$dir/progress.json")
+check "no-clobber: unrelated keys survive byte-identical" "$before" "$after"
+check "no-clobber: counter still incremented" 1 "$(counter S1 approval-gate)"
+
+# jq absent — the counter path must be non-fatal BY DESIGN (command -v guard in
+# bump_loop_stop_count), not merely because transcript extraction happens to fail
+# open too. Run with a PATH that has every coreutil except jq.
+reset; T=$(mk_transcript 1 "Work paused.
+LOOP-STOP: hard-stop — testing jq absence"); write_file in-progress S1 0
+check "jq absent -> still allow (fail-open by design)" 0 "$(run_env "PATH=$NOJQ_BIN" "$(payload "$T" S1)")"
+
+# Multi-declaration tie-break — two LOOP-STOP lines in one message: the LAST
+# one's category is counted (SKILL.md defines the declaration as the turn's
+# ENDING line, so only the final one reflects the turn's actual outcome).
+reset; T=$(mk_transcript 1 "LOOP-STOP: hard-stop — first, ignore this one
+LOOP-STOP: complete — actually this one, the loop is done"); write_file in-progress S1 0
+run x "$(payload "$T" S1)" >/dev/null
+check "multi-declaration: last category wins (complete)" 1 "$(counter S1 complete)"
+check "multi-declaration: first category NOT counted (hard-stop)" 0 "$(counter S1 hard-stop)"
+
+# Unwritable progress dir (chmod 555) — degrades safely: stop still allowed,
+# and jq's redirect never opens the tmp file, so no leftover .tmp.
+reset; T=$(mk_transcript 1 "Work paused.
+LOOP-STOP: hard-stop — testing unwritable dir"); dir=$(file_dir S1); mkdir -p "$dir"
+write_file in-progress S1 0
+chmod 555 "$dir"
+rc=$(run x "$(payload "$T" S1)")
+tmp_leak=$(find "$dir" -name '*.tmp' 2>/dev/null | wc -l | tr -d ' ')
+chmod 755 "$dir"   # restore so the trap's rm -rf can clean up
+check "unwritable progress dir -> still allow" 0 "$rc"
+check "unwritable progress dir -> no .tmp leak" 0 "$tmp_leak"
+
+# ALS_PATH under a nonexistent directory — als_resolve_path computes a path
+# whose parent was never created; the [-f] guard in bump_loop_stop_count
+# returns before ever attempting a write. Stop still allowed, nothing created.
+reset; T=$(mk_transcript 1 "Work paused.
+LOOP-STOP: hard-stop — testing nonexistent progress dir")
+# Deliberately skip write_file/mkdir — CLAUDE_AGENTIC_LOOP_DIR/state itself doesn't exist.
+check "nonexistent progress dir -> still allow" 0 "$(run x "$(payload "$T" S1)")"
 
 [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails)"; exit 1; }
