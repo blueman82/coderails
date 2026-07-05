@@ -70,7 +70,7 @@ It does everything that has to happen outside Claude Code:
   marketplaces are never at risk). Backups are written before each edit.
 - appends the discipline rules to `~/.claude/CLAUDE.md` (idempotent)
 - seeds four feedback memories (won't overwrite)
-- arms the scripts (`chmod +x`)
+- aligns script permissions with their git index mode (tracked executables get `+x`, tracked sourced-only libs stay non-executable; untracked files default to `+x`)
 
 **3. Restart Claude Code, then run in order:**
 
