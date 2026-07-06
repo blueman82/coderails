@@ -182,7 +182,10 @@ pr::_trusted_comment_bodies() {
 pr::_trusted_comment_bodies_or_fail() {
     local num="$1" stderr_file
     unset PR_TRUST_FETCH_FAIL_REASON _PR_TRUSTED_COMMENT_BODIES
-    stderr_file=$(mktemp)
+    if ! stderr_file=$(mktemp); then
+        PR_TRUST_FETCH_FAIL_REASON="tempfile"
+        return 1
+    fi
     if _PR_TRUSTED_COMMENT_BODIES=$(pr::_trusted_comment_bodies "$num" 2>"$stderr_file"); then
         rm -f "$stderr_file"
         return 0

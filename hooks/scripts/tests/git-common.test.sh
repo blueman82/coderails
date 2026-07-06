@@ -372,6 +372,37 @@ check "WU4: permission-fail and comments-fail reasons are DISTINCT" "true" \
 check "WU4: identity-fail and permission-fail reasons are DISTINCT" "true" \
   "$([[ "$(grep '^reason=' "$TMP/identity_fail.out")" != "$(grep '^reason=' "$TMP/permission_fail.out")" ]] && echo true || echo false)"
 
+# ─── WU4 hardening: an mktemp failure inside pr::_trusted_comment_bodies_or_fail
+# must still fail-closed (exit 2) WITHOUT leaking a raw, unguarded coreutils
+# error past the TRUST_FETCH_FAIL_REASON abstraction. A fake failing `mktemp`
+# on PATH (alongside the normal gh stub) reproduces "no writable temp dir" —
+# the wrapper must detect the failure itself and report a dedicated reason
+# rather than silently proceeding with an empty/invalid stderr_file path.
+MKTEMP_FAIL_STUB_DIR="$TMP/mktemp_fail_stubs"
+mkdir -p "$MKTEMP_FAIL_STUB_DIR"
+cat > "$MKTEMP_FAIL_STUB_DIR/mktemp" <<'EOF'
+#!/bin/bash
+exit 1
+EOF
+chmod +x "$MKTEMP_FAIL_STUB_DIR/mktemp"
+GH_STUB="$STUB_DIR/gh"
+printf '#!/bin/bash\n%s\n' "$(gh_stub_rows "$ROWS_TRUSTED_MATCH")" > "$GH_STUB"
+chmod +x "$GH_STUB"
+result=$(
+  export PATH="$MKTEMP_FAIL_STUB_DIR:$STUB_DIR:$PATH"
+  bash -c '
+    source "'"$LIB"'"
+    pr::has_coderails_review_for_head 42 "deadbeef"
+    echo "rc=$?"
+    echo "reason=${PR_TRUST_FETCH_FAIL_REASON:-}"
+  ' 2>"$TMP/mktemp_fail_stderr.out"
+)
+check "has_coderails_review_for_head: mktemp failure → exit 2 (fail-closed, not silently bypassed)" "rc=2" "$(printf '%s\n' "$result" | grep '^rc=')"
+check "has_coderails_review_for_head: mktemp failure → a distinct reason is set (not empty/unset)" "true" \
+  "$([[ -n "$(printf '%s\n' "$result" | sed -n 's/^reason=//p')" ]] && echo true || echo false)"
+check "has_coderails_review_for_head: mktemp failure → no raw coreutils error text reaches stderr" "true" \
+  "$(grep -qi 'no such file or directory' "$TMP/mktemp_fail_stderr.out" && echo false || echo true)"
+
 # ─── Injection: a pre-seeded _PR_TRUSTED_LOGIN must be validated, not trusted
 # blindly ──────────────────────────────────────────────────────────────────
 # pr::_trusted_login skips the gh fetch when _PR_TRUSTED_LOGIN is already set
