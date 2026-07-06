@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { PermissionProfile } from "@/lib/config";
 import { useDashboardContext } from "@/components/DashboardProvider";
 import { useRunLifecycle } from "@/hooks/useRunLifecycle";
