@@ -1,0 +1,80 @@
+{
+  "schema_version": 1,
+  "scope": "pr",
+  "task_ref": "task-evals/wu1-wu5-author-check",
+  "tier": 1,
+  "frozen_at": "2026-07-06T11:45:55Z",
+  "frozen_sha": "7aab163b59481ddb94dd6324375b4155f2014582",
+  "evals": [
+    {
+      "id": "E1",
+      "priority": "P0",
+      "mode": "scripted",
+      "surface": "merged-state",
+      "assert": "An untrusted-login comment carrying a byte-identical valid review marker does not make pr::has_coderails_review_for_head exit 0",
+      "cmd": "PATH stub gh: `api user` returns trusted login X; issues/comments REST returns one row authored by login Y (not X) with authorAssociation CONTRIBUTOR whose body is the exact review marker for pr/sha. Source git-common.sh under the stub, call pr::has_coderails_review_for_head <pr> <sha>, assert exit code == 1.",
+      "negative_control": "Same stub but with author login X and authorAssociation OWNER instead of Y/CONTRIBUTOR — assert exit code == 0, proving the check can distinguish trusted from untrusted and isn't vacuously 1 for all inputs.",
+      "status": "pending",
+      "evidence": ""
+    },
+    {
+      "id": "E2",
+      "priority": "P0",
+      "mode": "scripted",
+      "surface": "merged-state",
+      "assert": "An untrusted-login comment carrying a byte-identical valid eval GO marker does not make pr::has_coderails_eval_for_head exit 0, and newest-match-wins still holds among trusted comments when an untrusted forged marker is newer",
+      "cmd": "PATH stub gh: trusted login X. Rows in creation order: (1) trusted X posts GO marker, (2) trusted X posts NO-GO marker (newer), (3) untrusted Y posts a newer GO marker (forged). Source git-common.sh, call pr::has_coderails_eval_for_head <pr> <sha>, assert exit code == 1 and PR_EVAL_TIER reflects the NO-GO tier (i.e. the forged newer GO from Y must not win).",
+      "negative_control": "Remove row (3) and re-run: assert exit code == 1 unchanged (baseline trusted-only newest-wins still correct) — then swap row ordering so trusted NO-GO precedes trusted GO (both trusted) and assert exit code == 0, proving newest-wins genuinely flips outcome when the newest trusted comment changes, i.e. the harness isn't stuck returning 1 regardless of input.",
+      "status": "pending",
+      "evidence": ""
+    },
+    {
+      "id": "E3",
+      "priority": "P0",
+      "mode": "scripted",
+      "surface": "merged-state",
+      "assert": "Both readers use a paginated REST fetch (`gh api repos/{owner}/{repo}/issues/{n}/comments --paginate`) and no longer call `gh pr view --json comments` anywhere in scripts/lib/git-common.sh (clean-break, no compat fallback)",
+      "cmd": "grep -c 'pr view --json comments' scripts/lib/git-common.sh",
+      "negative_control": "Run the identical grep against the pre-change file at origin/main (git show origin/main:scripts/lib/git-common.sh | grep -c 'pr view --json comments') and confirm it is >= 1 there, proving the grep is capable of detecting the old pattern when present.",
+      "status": "pending",
+      "evidence": ""
+    },
+    {
+      "id": "E4",
+      "priority": "P0",
+      "mode": "scripted",
+      "surface": "merged-state",
+      "assert": "A matching marker posted beyond the 100th comment (i.e. reachable only via a second paginated page) is still found",
+      "cmd": "PATH stub gh: issues/comments REST call returns >100 rows across simulated pages (stub distinguishes by a page-tracking side channel or by returning all rows regardless of page param, since --paginate concatenates client-side); the matching trusted marker is row 101+. Assert the relevant reader exits 0.",
+      "negative_control": "Same stub but the matching row omitted entirely (truncate to 100 rows without the marker) — assert exit code == 1, proving the test can detect a genuine miss and isn't trivially satisfied.",
+      "status": "pending",
+      "evidence": ""
+    },
+    {
+      "id": "E5",
+      "priority": "P0",
+      "mode": "scripted",
+      "surface": "merged-state",
+      "assert": "gh failure (identity fetch or comments fetch) fails closed with exit 2 for both readers",
+      "cmd": "PATH stub gh: `api user` exits non-zero. Call both pr::has_coderails_review_for_head and pr::has_coderails_eval_for_head; assert both exit 2.",
+      "negative_control": "Same stub but `api user` succeeds and the comments REST call instead exits non-zero — assert exit 2 from this failure path too, proving both failure points are actually guarded (not just one accidentally caught by the other).",
+      "status": "pending",
+      "evidence": ""
+    },
+    {
+      "id": "E6",
+      "priority": "P1",
+      "mode": "scripted",
+      "surface": "merged-state",
+      "assert": "Full existing test suite still passes after the change (no regression to pre-existing marker/newest-wins/fail-closed/no-leak behaviour)",
+      "cmd": "bash hooks/scripts/tests/run_all.sh",
+      "negative_control": "Introduce a deliberate one-line break (e.g. invert a return in pr::has_coderails_review_for_head) in a scratch copy and confirm run_all.sh reports a failure — proving the suite is sensitive to regressions in this code path, not just green by omission.",
+      "status": "pending",
+      "evidence": ""
+    }
+  ],
+  "amendments": [],
+  "result": null,
+  "graded_at": null,
+  "head_sha": null
+}
