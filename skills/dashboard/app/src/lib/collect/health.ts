@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { collectUsage, type UsageTotals } from "./usage";
 
 export interface HealthTile {
   key: "usage5h" | "usageWeek" | "hooksFired" | "lintFindings";
@@ -10,10 +11,12 @@ export interface HealthTile {
 
 export interface CollectHealthOptions {
   disciplineLogPath?: string;
+  projectsDir?: string;
   now?: Date;
 }
 
 const DEFAULT_DISCIPLINE_LOG_PATH = join(homedir(), ".claude", "discipline.log");
+const DEFAULT_PROJECTS_DIR = join(homedir(), ".claude", "projects");
 
 // Local calendar-day key (YYYY-MM-DD) for a Date, in that Date's own zone
 // offset — used to compare a log line's leading timestamp against "now"'s
