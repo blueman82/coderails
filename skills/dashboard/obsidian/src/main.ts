@@ -30,72 +30,62 @@ export default class CommandCentrePlugin extends Plugin {
   async onload(): Promise<void> {
     this.registerMarkdownCodeBlockProcessor(
       "agentic-os",
-      (_source: string, el: HTMLElement, _ctx: MarkdownPostProcessorContext) => {
-        const snapshot = this.buildSnapshot();
+      async (_source: string, el: HTMLElement, _ctx: MarkdownPostProcessorContext) => {
+        const snapshot = await this.buildSnapshot();
         el.appendChild(renderCommandCentre(snapshot));
       }
     );
   }
 
-  private buildSnapshot(): CommandCentreSnapshot {
+  private async buildSnapshot(): Promise<CommandCentreSnapshot> {
+    const [metrics, activity] = await Promise.all([this.readMetrics(), this.readActivity()]);
     return {
-      metrics: this.readMetrics(),
-      activity: this.readActivity(),
+      metrics,
+      activity,
       buttons: this.readButtons(),
     };
   }
 
-  private readMetrics(): Metrics | null {
+  private async readMetrics(): Promise<Metrics | null> {
     const file = this.app.vault.getAbstractFileByPath(METRICS_NOTE_PATH);
     if (!(file instanceof TFile)) return null;
 
     try {
-      const raw = this.app.vault.cachedRead
-        ? undefined
-        : undefined;
-      // Obsidian's vault reads are async; the code-block processor callback
-      // is sync, so metrics/activity are read from the metadata cache and
-      // adapter's synchronous read where available, falling back to null
-      // rather than blocking render on a promise.
-      const content = (this.app.vault.adapter as unknown as { readSync?: (p: string) => string })
-        .readSync?.(file.path);
-      if (!content) return null;
+      const content = await this.app.vault.cachedRead(file);
       return JSON.parse(content) as Metrics;
     } catch {
       return null;
     }
   }
 
-  private readActivity(): ActivityItem[] {
+  private async readActivity(): Promise<ActivityItem[]> {
     const folder = this.app.vault.getAbstractFileByPath(DASHBOARD_RUNS_FOLDER);
     if (!(folder instanceof TFolder)) return [];
 
-    const entries: ActivityItem[] = [];
-    for (const child of folder.children) {
-      if (!(child instanceof TFile) || child.extension !== "md") continue;
+    const files = folder.children.filter(
+      (child): child is TFile => child instanceof TFile && child.extension === "md"
+    );
 
-      const cache = this.app.metadataCache.getFileCache(child);
-      const status = (cache?.frontmatter?.status as string) ?? "pending";
+    const entries = await Promise.all(
+      files.map(async (file) => {
+        const cache = this.app.metadataCache.getFileCache(file);
+        const status = (cache?.frontmatter?.status as string) ?? "pending";
+        const content = await this.app.vault.cachedRead(file);
+        return {
+          item: {
+            title: firstBodyLine(content) || file.basename,
+            status,
+            time: formatTime(file.stat.mtime),
+            notePath: file.path,
+          } satisfies ActivityItem,
+          mtime: file.stat.mtime,
+        };
+      })
+    );
 
-      const content = (this.app.vault.adapter as unknown as { readSync?: (p: string) => string })
-        .readSync?.(child.path);
-      const summary = content ? firstBodyLine(content) : child.basename;
-
-      entries.push({
-        title: summary,
-        status,
-        time: formatTime(child.stat.mtime),
-        notePath: child.path,
-      });
-    }
-
-    entries.sort((a, b) => {
-      const fileA = folder.children.find((c) => c instanceof TFile && c.path === a.notePath) as TFile;
-      const fileB = folder.children.find((c) => c instanceof TFile && c.path === b.notePath) as TFile;
-      return fileB.stat.mtime - fileA.stat.mtime;
-    });
-
-    return entries;
+    // Newest-first, matching the mockup's activity feed ordering.
+    entries.sort((a, b) => b.mtime - a.mtime);
+    return entries.map((e) => e.item);
   }
 
   private readButtons(): ButtonItem[] {
