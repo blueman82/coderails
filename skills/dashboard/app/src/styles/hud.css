@@ -1,0 +1,846 @@
+/* Ported from docs/coderails/specs/assets/2026-07-06-observability/dashboard-mockup.html
+   (owner-approved normative visual reference). Static layout only — the sphere background,
+   HUD callouts, and command-deck interactivity land in later tasks (9c/9d). */
+
+:root {
+  --void: #0d0708;
+  --void-2: #120a0c;
+  /* Idle = dusty rose (h=350). Task 9d ramps these on <html> while a run is in flight. */
+  --accent-h: 350;
+  --accent-s: 45%;
+  --accent-l: 72%;
+  --rose: hsl(var(--accent-h) var(--accent-s) var(--accent-l));
+  --rose-dim: hsla(var(--accent-h), var(--accent-s), var(--accent-l), 0.45);
+  --rose-faint: hsla(var(--accent-h), var(--accent-s), var(--accent-l), 0.14);
+  --off-white: #f3ecec;
+  --grey: rgba(255, 255, 255, 0.48);
+  --grey-dim: rgba(255, 255, 255, 0.28);
+  --hairline: hsla(var(--accent-h), var(--accent-s), var(--accent-l), 0.16);
+  --mono: ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
+}
+
+.hud-root {
+  width: 100%;
+  height: 100%;
+  background: radial-gradient(ellipse 70% 60% at 50% 46%, #1a1012 0%, var(--void) 55%, var(--void-2) 100%);
+  color: var(--off-white);
+  font-family: var(--mono);
+  color-scheme: dark;
+}
+
+/* ---------- Background layers (placeholder slots for Task 9c) ---------- */
+.hud-bg-canvas {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.hud-floor-fade {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 30vh;
+  z-index: 1;
+  pointer-events: none;
+  background: linear-gradient(to top, rgba(13, 7, 8, 0.85), transparent);
+}
+
+/* ---------- Stage grid ---------- */
+.hud-stage {
+  position: fixed;
+  inset: 0;
+  z-index: 2;
+  padding: 32px;
+  display: grid;
+  grid-template-columns: 330px 1fr 300px;
+  grid-template-rows: auto 1fr auto;
+  gap: 0 28px;
+  pointer-events: none;
+}
+.hud-stage a,
+.hud-stage button,
+.hud-stage [data-clickable] {
+  pointer-events: auto;
+}
+
+/* ---------- Header band ---------- */
+.hud-header {
+  grid-column: 1 / -1;
+  grid-row: 1;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding-bottom: 18px;
+  border-bottom: 1px solid var(--hairline);
+  margin-bottom: 22px;
+}
+.hud-wordmark {
+  font-size: 34px;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  color: var(--off-white);
+  text-shadow: 0 0 24px hsla(var(--accent-h), var(--accent-s), var(--accent-l), 0.25);
+}
+.hud-wordmark-sub {
+  margin-top: 8px;
+  font-size: 10px;
+  letter-spacing: 0.22em;
+  color: var(--grey-dim);
+  text-transform: uppercase;
+}
+.hud-status-line {
+  align-self: center;
+  font-size: 10.5px;
+  letter-spacing: 0.2em;
+  color: var(--grey);
+  text-transform: uppercase;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+.hud-status-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--rose);
+  box-shadow: 0 0 8px var(--rose);
+  display: inline-block;
+  animation: hud-dot-pulse 2.4s ease-in-out infinite;
+}
+@keyframes hud-dot-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.4;
+  }
+}
+.hud-status-dot.reconnecting {
+  background: var(--grey-dim);
+  box-shadow: none;
+  animation: none;
+}
+.hud-status-last-update {
+  color: var(--grey-dim);
+  font-size: 9.5px;
+}
+.hud-clock-block {
+  text-align: right;
+}
+.hud-clock-big {
+  font-size: 40px;
+  font-weight: 500;
+  color: var(--off-white);
+  letter-spacing: 0.02em;
+  font-variant-numeric: tabular-nums;
+}
+.hud-clock-big .hud-clock-secs {
+  font-size: 22px;
+  color: var(--rose);
+}
+.hud-clock-date {
+  margin-top: 6px;
+  font-size: 10px;
+  letter-spacing: 0.2em;
+  color: var(--grey-dim);
+  text-transform: uppercase;
+}
+
+/* ---------- Section header pattern ---------- */
+.hud-sec-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+.hud-sec-head .hud-title {
+  font-size: 10.5px;
+  letter-spacing: 0.24em;
+  color: var(--off-white);
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.hud-sec-head .hud-suffix {
+  font-size: 9px;
+  letter-spacing: 0.18em;
+  color: var(--grey-dim);
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.hud-sec-head .hud-rule {
+  flex: 1;
+  height: 1px;
+  background: var(--hairline);
+  transform: translateY(1px);
+}
+
+/* ---------- Rails ---------- */
+.hud-rail {
+  pointer-events: auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+.hud-rail-left {
+  grid-column: 1;
+  grid-row: 2;
+}
+.hud-rail-right {
+  grid-column: 3;
+  grid-row: 2;
+}
+
+.hud-block {
+  margin-bottom: 30px;
+}
+.hud-block:last-child {
+  margin-bottom: 0;
+}
+
+/* ---------- KPI modules ---------- */
+.hud-kpi {
+  margin-bottom: 18px;
+}
+.hud-kpi:last-child {
+  margin-bottom: 0;
+}
+.hud-kpi-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+.hud-kpi-label {
+  font-size: 9.5px;
+  letter-spacing: 0.18em;
+  color: var(--grey);
+  text-transform: uppercase;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.hud-kpi-label .hud-bullet {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--rose);
+  box-shadow: 0 0 5px var(--rose);
+  flex-shrink: 0;
+}
+.hud-kpi-delta {
+  font-size: 9.5px;
+  letter-spacing: 0.08em;
+  color: var(--rose);
+}
+.hud-kpi-value {
+  font-size: 30px;
+  color: var(--off-white);
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  margin-bottom: 8px;
+  font-variant-numeric: tabular-nums;
+}
+.hud-kpi-unavailable {
+  font-size: 10px;
+  color: var(--grey-dim);
+  margin-bottom: 8px;
+  line-height: 1.4;
+}
+.hud-kpi-value .hud-unit {
+  font-size: 15px;
+  color: var(--grey);
+}
+.hud-spark {
+  width: 100%;
+  height: 20px;
+  display: block;
+}
+
+/* ---------- Shared empty state ---------- */
+.hud-empty-state {
+  font-size: 10.5px;
+  color: var(--grey-dim);
+  font-style: italic;
+}
+
+/* ---------- Directives (checklist) ---------- */
+.hud-directive-item {
+  display: flex;
+  gap: 9px;
+  align-items: flex-start;
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--grey);
+  margin-bottom: 9px;
+}
+.hud-directive-item .hud-box {
+  font-size: 12px;
+  color: var(--rose-dim);
+  flex-shrink: 0;
+  margin-top: -1px;
+}
+.hud-directive-item.done {
+  opacity: 0.45;
+  text-decoration: line-through;
+  text-decoration-color: var(--grey-dim);
+}
+.hud-directive-item.done .hud-box {
+  color: var(--rose);
+}
+.hud-directive-footer {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--hairline);
+  font-size: 9.5px;
+  letter-spacing: 0.14em;
+  color: var(--grey-dim);
+  text-transform: uppercase;
+}
+
+/* ---------- Documents table ---------- */
+.hud-doc-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 10.5px;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--hairline);
+}
+.hud-doc-row:last-child {
+  border-bottom: none;
+}
+.hud-doc-name {
+  color: var(--grey);
+  word-break: break-all;
+}
+.hud-doc-name b {
+  color: var(--off-white);
+  font-weight: 500;
+}
+.hud-doc-age {
+  color: var(--grey-dim);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+/* ---------- Transcript pill ---------- */
+.hud-transcript-pill {
+  margin-top: auto;
+  align-self: flex-start;
+  padding-top: 18px;
+}
+.hud-transcript-pill span {
+  display: inline-block;
+  border: 1px solid var(--hairline);
+  border-radius: 999px;
+  padding: 7px 16px;
+  font-size: 9px;
+  letter-spacing: 0.2em;
+  color: var(--grey-dim);
+  text-transform: uppercase;
+}
+
+/* ---------- Command deck ---------- */
+.hud-deck-status {
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  color: var(--grey-dim);
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.hud-active-cmd-list:empty {
+  display: none;
+}
+.hud-active-cmd-row {
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  color: var(--rose);
+  text-shadow: 0 0 8px hsla(var(--accent-h), var(--accent-s), var(--accent-l), 0.5);
+  text-transform: uppercase;
+  margin-bottom: 8px;
+}
+.hud-cmd-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px 16px;
+  margin-bottom: 14px;
+}
+.hud-cmd {
+  background: none;
+  border: none;
+  padding: 0;
+  text-align: left;
+  font-family: var(--mono);
+  cursor: pointer;
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  font-size: 10.5px;
+  letter-spacing: 0.1em;
+  color: var(--grey);
+  text-transform: uppercase;
+  transition: color 0.15s ease;
+}
+.hud-cmd .hud-bullet {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--rose);
+  box-shadow: 0 0 5px var(--rose);
+  flex-shrink: 0;
+  transition: box-shadow 0.15s ease;
+}
+.hud-cmd:hover {
+  color: var(--off-white);
+}
+.hud-cmd:hover .hud-label {
+  text-decoration: underline;
+  text-decoration-color: var(--rose-dim);
+  text-underline-offset: 3px;
+}
+.hud-cmd:focus-visible {
+  outline: 1px solid var(--rose);
+  outline-offset: 3px;
+}
+.hud-cmd.running {
+  color: var(--off-white);
+}
+.hud-cmd.running .hud-bullet {
+  box-shadow: 0 0 5px var(--rose);
+  animation: hud-cmd-pulse 0.9s ease-in-out infinite;
+}
+@keyframes hud-cmd-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
+  }
+}
+
+.hud-run-history {
+  margin-bottom: 16px;
+}
+.hud-run-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  padding: 5px 0;
+  color: var(--grey);
+}
+.hud-run-row .hud-glyph {
+  color: var(--rose);
+  margin-right: 6px;
+}
+
+.hud-deck-footnote {
+  font-size: 8.5px;
+  letter-spacing: 0.1em;
+  color: var(--grey-dim);
+  text-transform: uppercase;
+  padding-top: 10px;
+  border-top: 1px solid var(--hairline);
+}
+
+/* ---------- PR gates ---------- */
+.hud-gate-row {
+  padding: 9px 0;
+  border-bottom: 1px solid var(--hairline);
+}
+.hud-gate-row:last-child {
+  border-bottom: none;
+}
+.hud-gate-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 10.5px;
+  color: var(--off-white);
+  margin-bottom: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.hud-gate-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 9.5px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--grey-dim);
+}
+.hud-gate-status.ready {
+  color: var(--rose);
+}
+.hud-gate-status .hud-diamond {
+  font-size: 9px;
+}
+
+.hud-reserved-row {
+  margin-top: 16px;
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  color: var(--grey-dim);
+  text-transform: uppercase;
+}
+
+/* ---------- Bottom centre directive ---------- */
+.hud-bottom-centre {
+  grid-column: 1 / -1;
+  grid-row: 3;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  pointer-events: none;
+  padding-top: 12px;
+}
+.hud-bc-label {
+  font-size: 9.5px;
+  letter-spacing: 0.24em;
+  color: var(--grey-dim);
+  text-transform: uppercase;
+  margin-bottom: 4px;
+}
+.hud-bc-units {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  line-height: 1;
+}
+.hud-bc-value {
+  font-size: 110px;
+  font-weight: 500;
+  color: var(--off-white);
+  letter-spacing: -0.02em;
+  text-shadow: 0 0 40px hsla(var(--accent-h), var(--accent-s), var(--accent-l), 0.2);
+}
+.hud-bc-units-label {
+  font-size: 13px;
+  letter-spacing: 0.2em;
+  color: var(--grey);
+  text-transform: uppercase;
+}
+.hud-bc-ticker {
+  margin-top: 8px;
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  color: var(--grey-dim);
+  text-transform: uppercase;
+}
+
+@media (max-width: 1100px) {
+  .hud-root {
+    overflow-y: auto;
+  }
+  .hud-stage {
+    position: absolute;
+    inset: 0 0 auto 0;
+    height: auto;
+    min-height: 100vh;
+    grid-template-columns: 1fr;
+    grid-template-rows: auto auto auto auto;
+  }
+  .hud-rail-left {
+    grid-column: 1;
+    grid-row: 2;
+  }
+  .hud-rail-right {
+    grid-column: 1;
+    grid-row: 3;
+  }
+  .hud-bottom-centre {
+    grid-row: 4;
+  }
+  .hud-rail {
+    overflow: visible;
+  }
+  /* HUD callouts (merge-ready / progress) land in later tasks; hidden below the breakpoint
+     same as the mockup, kept here so those components inherit the rule once they exist. */
+  .hud-callout,
+  .hud-leader,
+  .hud-progress {
+    display: none;
+  }
+}
+
+/* ---------- Command deck: run-lifecycle states (Task 9d) ---------- */
+/* .hud-cmd.running .hud-bullet is already defined above (Task 9a) — reused as-is. */
+.hud-cmd.flare .hud-label {
+  animation: hud-flare-flash 0.55s ease;
+}
+@keyframes hud-flare-flash {
+  0% {
+    color: var(--off-white);
+    text-shadow: 0 0 14px rgba(255, 255, 255, 0.9);
+  }
+  100% {
+    color: var(--grey);
+    text-shadow: none;
+  }
+}
+.hud-cmd.shake {
+  animation: hud-cmd-shake 0.35s ease;
+}
+@keyframes hud-cmd-shake {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  25% {
+    transform: translateX(-3px);
+  }
+  75% {
+    transform: translateX(3px);
+  }
+}
+.hud-cmd-input {
+  background: none;
+  border: none;
+  border-bottom: 1px solid var(--hairline);
+  color: var(--off-white);
+  font-family: var(--mono);
+  font-size: 9.5px;
+  letter-spacing: 0.04em;
+  padding: 2px 0;
+  width: 100%;
+  margin-top: 4px;
+}
+.hud-cmd-input:focus {
+  outline: none;
+  border-bottom-color: var(--rose);
+}
+.hud-cmd-error {
+  font-size: 8.5px;
+  letter-spacing: 0.04em;
+  color: var(--rose);
+  margin-top: 2px;
+}
+.hud-run-row.new {
+  animation: hud-run-in 0.4s ease;
+}
+@keyframes hud-run-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ---------- HUD callouts (merge-ready + per-run progress), floating over the sphere ---------- */
+.hud-callout {
+  position: fixed;
+  z-index: 3;
+  pointer-events: auto;
+  border: 1px solid var(--hairline);
+  background: rgba(13, 7, 8, 0.92);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  padding: 12px 16px;
+  min-width: 200px;
+  font-size: 10px;
+  cursor: grab;
+  user-select: none;
+}
+.hud-callout.dragging {
+  cursor: grabbing;
+}
+.hud-callout.dismissable {
+  transition: opacity 0.3s ease;
+}
+.hud-callout-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+.hud-callout .hud-diamond {
+  color: var(--rose);
+  font-size: 10px;
+}
+.hud-callout .hud-label {
+  letter-spacing: 0.16em;
+  color: var(--off-white);
+  text-transform: uppercase;
+  flex: 1;
+}
+.hud-callout-close {
+  background: none;
+  border: none;
+  color: var(--grey-dim);
+  cursor: pointer;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1;
+  padding: 2px 4px;
+}
+.hud-callout-close:hover {
+  color: var(--off-white);
+}
+.hud-callout-sub {
+  color: var(--rose-dim);
+  letter-spacing: 0.08em;
+}
+.hud-leader {
+  position: fixed;
+  width: 1px;
+  background: linear-gradient(to bottom, var(--hairline), transparent);
+  z-index: 3;
+  pointer-events: none;
+}
+
+/* ---------- Run-progress callout ---------- */
+.hud-progress {
+  padding-bottom: 15px; /* room for .hud-progress-bar-track, pinned absolutely to the box's bottom edge */
+}
+.hud-progress-status {
+  letter-spacing: 0.06em;
+  color: var(--grey-dim);
+}
+.hud-progress-elapsed {
+  color: var(--grey);
+  font-variant-numeric: tabular-nums;
+}
+.hud-progress-bar-track {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 3px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+.hud-progress-bar-fill {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, var(--rose-dim), var(--rose));
+  box-shadow: 0 0 8px hsla(var(--accent-h), var(--accent-s), var(--accent-l), 0.6);
+  transition: width 0.1s linear;
+}
+.hud-progress.flash .hud-callout-top .hud-label {
+  animation: hud-progress-flash 0.5s ease;
+}
+@keyframes hud-progress-flash {
+  0% {
+    color: var(--off-white);
+    text-shadow: 0 0 16px rgba(255, 255, 255, 0.95);
+  }
+  100% {
+    color: var(--off-white);
+    text-shadow: none;
+  }
+}
+.hud-progress.fade-out {
+  transition: opacity 0.6s ease;
+  opacity: 0;
+}
+
+/* ---------- Intro reveal (Task 9d): staged fade/slide-in, WAAPI/CSS only — no GSAP ---------- */
+.hud-intro-wordmark {
+  animation: hud-intro-wordmark 0.9s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+@keyframes hud-intro-wordmark {
+  from {
+    opacity: 0;
+    letter-spacing: 0.6em;
+    filter: blur(10px);
+  }
+  to {
+    opacity: 1;
+    filter: blur(0);
+  }
+}
+.hud-intro-fade {
+  animation: hud-intro-fade 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation-delay: 0.4s;
+}
+@keyframes hud-intro-fade {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.hud-intro-rail-left {
+  animation: hud-intro-slide-left 0.6s cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation-delay: 0.6s;
+}
+.hud-intro-rail-right {
+  animation: hud-intro-slide-right 0.6s cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation-delay: 0.45s;
+}
+@keyframes hud-intro-slide-left {
+  from {
+    opacity: 0;
+    transform: translateX(-24px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+@keyframes hud-intro-slide-right {
+  from {
+    opacity: 0;
+    transform: translateX(24px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+.hud-intro-bottom {
+  animation: hud-intro-fade-up 0.6s cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation-delay: 0.9s;
+}
+@keyframes hud-intro-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (max-width: 1100px) {
+  .hud-callout,
+  .hud-leader,
+  .hud-progress {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hud-status-dot,
+  .hud-cmd.running .hud-bullet,
+  .hud-cmd.shake,
+  .hud-cmd.flare .hud-label,
+  .hud-run-row.new,
+  .hud-progress.flash .hud-callout-top .hud-label,
+  .hud-intro-wordmark,
+  .hud-intro-fade,
+  .hud-intro-rail-left,
+  .hud-intro-rail-right,
+  .hud-intro-bottom {
+    animation: none;
+  }
+}
