@@ -5,7 +5,7 @@
 
 import { useState, useEffect } from "react";
 import { Sparkline } from "./Sparkline";
-import { useDashboardState, formatRelativeAge } from "@/hooks/useDashboardState";
+import { useDashboardState, formatRelativeAge, selectActiveLoop } from "@/hooks/useDashboardState";
 import type { HealthTile } from "@/lib/collect/health";
 
 // Static decoration only — no history source exists yet to derive a real
