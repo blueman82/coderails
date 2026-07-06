@@ -1,7 +1,6 @@
 "use client";
 
 import { useMemo } from "react";
-import * as THREE from "three";
 
 // Static perspective wireframe floor, rose-tinted, filling the lower third and fading toward the
 // horizon under/behind the sphere. Ported from the normative mockup (see NetworkSphere.tsx).
