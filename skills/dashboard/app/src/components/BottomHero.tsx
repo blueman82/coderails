@@ -9,7 +9,7 @@ export function BottomHero() {
   const nextUnit = loop?.unitTitles.find((u) => !u.done);
 
   return (
-    <div className="hud-bottom-centre">
+    <div className="hud-bottom-centre hud-intro-bottom">
       {loop ? (
         <>
           <div className="hud-bc-label">Primary Directive · {loop.slug}</div>
