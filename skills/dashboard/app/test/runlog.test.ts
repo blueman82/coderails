@@ -85,7 +85,6 @@ describe("appendRun / readRuns", () => {
     const dir = tmpRunsDir();
     appendRun(record({ runId: "run-1" }), { runsDir: dir });
     const path = join(dir, "runs.jsonl");
-    const { appendFileSync } = require("node:fs") as typeof import("node:fs");
     appendFileSync(path, "not valid json\n");
     appendRun(record({ runId: "run-2" }), { runsDir: dir });
     const runs = readRuns(10, { runsDir: dir });
