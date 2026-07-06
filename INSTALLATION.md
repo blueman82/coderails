@@ -120,10 +120,12 @@ warn-mode on 2026-05-05), loop-state guard, and loop-stall guard. The same two
 content-discipline checks (confidence-label and verify-loop) also run on
 SubagentStop — so subagents are held to the same standards as the parent session.
 On PreToolUse, four hooks can block: the destructive-bash gate, the opt-in test
-gate, `enforce_pr_workflow` (enforces the PR chain — e.g. blocks a direct
-`git push` to `main` unless `/coderails:push`/review already ran this session),
-and `no_edit_on_main` (blocks editing source files, but not docs/config, while
-on `main` — use `/coderails:prep` or a worktree instead).
+gate, the config-gated `enforce_pr_workflow` (opt-in via workflow.config.yaml,
+like the test gate — enforces the PR chain, e.g. blocks a direct `git push` to
+`main` unless `/pr-review-toolkit:review-pr` already ran this session), and
+`no_edit_on_main` (blocks editing source files, but not docs/config, while on
+`main` — use `/coderails:prep` or a worktree instead; it also blocks editing
+`.claude/settings.json`/`settings.local.json` on any branch).
 
 ## Notes
 
