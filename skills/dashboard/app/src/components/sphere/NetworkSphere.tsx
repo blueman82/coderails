@@ -9,6 +9,7 @@
 import { useEffect, useMemo, useRef } from "react";
 import { useFrame, useThree } from "@react-three/fiber";
 import * as THREE from "three";
+import { hslToRgb, type AccentHsl } from "@/lib/runHue";
 
 // Network-first sphere: a wired mesh of nodes, not a dot cloud. Structure (plexus wiring, hub
 // hierarchy) is the dominant visual texture, per the normative mockup
