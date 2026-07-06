@@ -55,7 +55,11 @@ merge::main() {
             gate_rc=0
             pr::has_coderails_review_for_head "$num" "$sha" || gate_rc=$?
             if [[ $gate_rc -eq 2 ]]; then
-                err "GitHub fetch failed — could not fetch PR comments. Retry, or check gh auth/network."
+                case "${PR_TRUST_FETCH_FAIL_REASON:-}" in
+                    identity)   err "GitHub fetch failed — could not resolve the authenticated identity (gh api user). Retry, or check gh auth/network." ;;
+                    permission) err "GitHub fetch failed — could not resolve repo permission for the authenticated identity. Retry, or check gh auth/network." ;;
+                    *)          err "GitHub fetch failed — could not fetch PR comments. Retry, or check gh auth/network." ;;
+                esac
             elif [[ $gate_rc -ne 0 ]]; then
                 err "No coderails review artifact for current head $sha — run /coderails:post-review after /pr-review-toolkit:review-pr (or add a 'gh pr merge' permission to bypass)."
             fi
@@ -69,7 +73,11 @@ merge::main() {
             eval_gate_rc=0
             pr::has_coderails_eval_for_head "$num" "$sha" || eval_gate_rc=$?
             if [[ $eval_gate_rc -eq 2 ]]; then
-                err "GitHub fetch failed — could not fetch PR comments for eval artifact. Retry, or check gh auth/network."
+                case "${PR_TRUST_FETCH_FAIL_REASON:-}" in
+                    identity)   err "GitHub fetch failed — could not resolve the authenticated identity (gh api user) for the eval artifact gate. Retry, or check gh auth/network." ;;
+                    permission) err "GitHub fetch failed — could not resolve repo permission for the eval artifact gate. Retry, or check gh auth/network." ;;
+                    *)          err "GitHub fetch failed — could not fetch PR comments for eval artifact. Retry, or check gh auth/network." ;;
+                esac
             elif [[ $eval_gate_rc -ne 0 ]]; then
                 if [[ -n "${PR_EVAL_TIER:-}" ]]; then
                     err "Eval artifact for current head $sha is NO-GO (tier $PR_EVAL_TIER) — resolve failing P0 evals and re-run /coderails:post-evals."

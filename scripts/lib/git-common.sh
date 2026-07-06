@@ -79,8 +79,9 @@ pr::head_sha() {
 # runs once per pr::_trusted_comment_bodies call, not once per process). The
 # variable only guards against redundant fetches within a single subshell's
 # lifetime. This is the identity both gate readers trust — any comment from
-# another login, or from this login without OWNER association, is untrusted
-# and skipped before marker matching (comment-spoofing defence).
+# another login is untrusted and skipped before marker matching
+# (comment-spoofing defence; see pr::_trusted_permission for the second,
+# repo-permission conjunct).
 # The login is validated against GitHub's login charset before use whether it
 # came from cache or a fresh fetch, because it is spliced directly into a jq
 # --jq program string: an unvalidated value (e.g. pre-seeded via env as
@@ -97,25 +98,101 @@ pr::_trusted_login() {
     printf '%s' "$_PR_TRUSTED_LOGIN"
 }
 
+# pr::_trusted_permission
+# Echoes the authenticated identity's permission level on the current repo
+# (ADMIN/MAINTAIN/WRITE/READ/TRIAGE/NONE), via viewerPermission — the
+# permission conjunct of the trust rule (the login conjunct is
+# pr::_trusted_login, unchanged and still the anti-spoof property: a
+# different login is rejected regardless of this value). Same per-subshell
+# reuse-guard shape as pr::_trusted_login (does NOT cache across processes).
+# Returns non-zero if the lookup fails (caller must fail-closed).
+pr::_trusted_permission() {
+    if [[ -z "${_PR_TRUSTED_PERMISSION:-}" ]]; then
+        _PR_TRUSTED_PERMISSION=$(gh repo view "$(repo)" --json viewerPermission -q .viewerPermission 2>/dev/null) || return 1
+    fi
+    [[ -n "$_PR_TRUSTED_PERMISSION" ]] || return 1
+    printf '%s' "$_PR_TRUSTED_PERMISSION"
+}
+
+# pr::_permission_is_write_or_better <permission>
+# True iff <permission> grants write access or better (ADMIN, MAINTAIN, WRITE).
+# READ and TRIAGE do not qualify.
+pr::_permission_is_write_or_better() {
+    case "$1" in
+        ADMIN|MAINTAIN|WRITE) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
 # pr::_trusted_comment_bodies <num>
 # Fetches ALL comments for <num> via the paginated REST endpoint (no 100-comment
-# cap, unlike the old --json comments GraphQL fetch), keeps only comments whose author
-# login matches the trusted identity AND whose authorAssociation is OWNER, and
-# echoes their bodies in creation-ascending order (one body per line, base64
-# encoded so multi-line bodies survive as a single reader line). Untrusted
-# comments are dropped here, before any marker matching, so they can neither
-# win nor suppress a match.
-# NOTE: OWNER assumes the authenticated user personally owns the repo; on an
-# org-owned repo the same user's comments carry MEMBER/COLLABORATOR instead,
-# so this gate would fail closed there (widening the trust floor is a
-# separate owner decision).
-# Returns non-zero if the identity or comments fetch fails (fail-closed).
+# cap, unlike the old --json comments GraphQL fetch), keeps only comments whose
+# author login matches the trusted identity, and echoes their bodies in
+# creation-ascending order (one body per line, base64 encoded so multi-line
+# bodies survive as a single reader line). Untrusted comments are dropped
+# here, before any marker matching, so they can neither win nor suppress a
+# match.
+# Trust rule: the login must match the authenticated identity (anti-spoof —
+# unchanged from before) AND that identity must hold write access or better on
+# this repo (replaces the old repo-ownership-badge conjunct, which failed
+# closed on org-owned repos where the same user's own comments carry a
+# non-owner association instead — see INSTALLATION.md).
+# Insufficient permission (READ/TRIAGE/NONE, successfully looked up) is NOT a
+# fetch failure — it is treated the same as "no trusted comments found": this
+# function echoes nothing and returns 0, so callers see an empty body list
+# (their existing not-found path), not a fail-closed 2. Only an actual lookup
+# FAILURE (the API call itself erroring) is fail-closed, matching the
+# identity-fetch-failure posture.
+# On any FAILURE (identity/permission/comments fetch errors), prints a
+# `TRUST_FETCH_FAIL_REASON=identity|permission|comments` line to STDERR (not
+# swallowed by the inner `2>/dev/null` calls, which only silence `gh`'s own
+# diagnostics) so a caller capturing this function's stderr separately from
+# its stdout can tell which fetch failed. This can't be a plain global
+# variable: every call site invokes this function via `$(...)` command
+# substitution, and — like the documented _PR_TRUSTED_LOGIN cache above — a
+# variable assignment made inside a `$(...)` subshell never survives back to
+# the caller's shell. The return-code contract itself (non-zero, fail-closed)
+# is unchanged; this stderr line is purely an added diagnostic signal.
+# Returns non-zero only if the identity fetch, permission fetch, or comments
+# fetch itself fails (fail-closed).
 pr::_trusted_comment_bodies() {
-    local num="$1" trusted
-    trusted=$(pr::_trusted_login) || return 1
+    local num="$1" trusted permission
+    trusted=$(pr::_trusted_login) || { echo "TRUST_FETCH_FAIL_REASON=identity" >&2; return 1; }
+    permission=$(pr::_trusted_permission) || { echo "TRUST_FETCH_FAIL_REASON=permission" >&2; return 1; }
+    pr::_permission_is_write_or_better "$permission" || return 0
     gh api "repos/$(repo)/issues/${num}/comments" --paginate \
-        --jq '.[] | select(.user.login == "'"$trusted"'" and .author_association == "OWNER") | (.body | @base64)' \
-        2>/dev/null
+        --jq '.[] | select(.user.login == "'"$trusted"'") | (.body | @base64)' \
+        2>/dev/null || { echo "TRUST_FETCH_FAIL_REASON=comments" >&2; return 1; }
+}
+
+# pr::_trusted_comment_bodies_or_fail <num>
+# Thin wrapper around pr::_trusted_comment_bodies that also recovers its
+# stderr-carried failure reason into PR_TRUST_FETCH_FAIL_REASON in THIS
+# (caller's) shell — not inside a command substitution, so the assignment
+# actually survives. Both public readers call this instead of
+# pr::_trusted_comment_bodies directly so the reason-capture plumbing lives in
+# exactly one place. Same return-code contract: non-zero iff the underlying
+# fetch failed.
+# Must NOT be called via `$(...)` — it sets PR_TRUST_FETCH_FAIL_REASON (and,
+# on success, _PR_TRUSTED_COMMENT_BODIES) as globals in the CALLER's shell, and
+# a command-substitution subshell would swallow both, same failure mode as the
+# documented _PR_TRUSTED_LOGIN non-cache above. Callers read
+# _PR_TRUSTED_COMMENT_BODIES after a zero return instead of capturing this
+# function's stdout.
+pr::_trusted_comment_bodies_or_fail() {
+    local num="$1" stderr_file
+    unset PR_TRUST_FETCH_FAIL_REASON _PR_TRUSTED_COMMENT_BODIES
+    if ! stderr_file=$(mktemp); then
+        PR_TRUST_FETCH_FAIL_REASON="tempfile"
+        return 1
+    fi
+    if _PR_TRUSTED_COMMENT_BODIES=$(pr::_trusted_comment_bodies "$num" 2>"$stderr_file"); then
+        rm -f "$stderr_file"
+        return 0
+    fi
+    PR_TRUST_FETCH_FAIL_REASON=$(sed -n 's/^TRUST_FETCH_FAIL_REASON=//p' "$stderr_file" | tail -1)
+    rm -f "$stderr_file"
+    return 1
 }
 
 # pr::has_coderails_review_for_head <num> <sha>
@@ -129,9 +206,10 @@ pr::_trusted_comment_bodies() {
 pr::has_coderails_review_for_head() {
     local num="$1" sha="$2"
     local encoded_bodies
-    if ! encoded_bodies=$(pr::_trusted_comment_bodies "$num"); then
+    if ! pr::_trusted_comment_bodies_or_fail "$num"; then
         return 2
     fi
+    encoded_bodies="$_PR_TRUSTED_COMMENT_BODIES"
     local encoded body line
     while IFS= read -r encoded; do
         [[ -n "$encoded" ]] || continue
@@ -166,9 +244,10 @@ pr::has_coderails_eval_for_head() {
     local num="$1" sha="$2"
     unset PR_EVAL_TIER
     local encoded_bodies
-    if ! encoded_bodies=$(pr::_trusted_comment_bodies "$num"); then
+    if ! pr::_trusted_comment_bodies_or_fail "$num"; then
         return 2
     fi
+    encoded_bodies="$_PR_TRUSTED_COMMENT_BODIES"
     local newest_result=""
     local encoded body line
     while IFS= read -r encoded; do

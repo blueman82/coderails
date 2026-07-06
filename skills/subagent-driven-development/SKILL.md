@@ -89,6 +89,7 @@ Before dispatching Task 1, scan the plan once for conflicts:
 - tasks that contradict each other or the plan's Global Constraints
 - anything the plan explicitly mandates that the review rubric treats as a
   defect (a test that asserts nothing, verbatim duplication of a logic block)
+- evals.json exists for this plan's scope with a non-empty `frozen_at` and `frozen_sha` — if absent, STOP and invoke `/coderails:task-evals` before dispatching Task 1; do not proceed on the assumption evals will be generated later.
 
 Present everything you find to your human partner as one batched question —
 each finding beside the plan text that mandates it, asking which governs —
@@ -250,18 +251,24 @@ controllers that lost their place have re-dispatched entire completed task
 sequences — the single most expensive failure observed. Track progress in
 a ledger file, not only in todos.
 
-- At skill start, check for a ledger:
-  `cat "$(git rev-parse --show-toplevel)/.coderails/sdd/progress.md"`. Tasks listed there
-  as complete are DONE — do not re-dispatch them; resume at the first task
-  not marked complete.
+- The ledger (`sdd-ledger.md`) is task-level truth with commit ranges,
+  controller-owned — a sibling fact to the agentic-loop's own `progress.json`,
+  whose `work_units[id].status` is unit-level truth, orchestrator-owned. Each
+  fact has a single writer; neither file duplicates the other's record.
+- At skill start, check for a ledger: `cat "$(scripts/sdd-workspace)/sdd-ledger.md"`
+  (from this skill's directory, same convention as `scripts/review-package`
+  and `scripts/task-brief` above). Tasks listed there as complete are DONE —
+  do not re-dispatch them; resume at the first task not marked complete.
 - When a task's review comes back clean, append one line to the ledger in
   the same message as your other bookkeeping:
   `Task N: complete (commits <base7>..<head7>, review clean)`.
 - The ledger is your recovery map: the commits it names exist in git even
   when your context no longer remembers creating them. After compaction,
   trust the ledger and `git log` over your own recollection.
-- `git clean -fdx` will destroy the ledger (it's git-ignored scratch); if
-  that happens, recover from `git log`.
+- The ledger lives outside the repo tree (session-keyed loop-state dir), so
+  `git clean -fdx` cannot destroy it — a bare repo checkout with no ledger
+  present means a fresh session, not data loss; recover from `git log`
+  regardless if the ledger and git history ever disagree.
 
 ## Prompt Templates
 

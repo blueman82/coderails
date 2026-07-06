@@ -98,9 +98,13 @@ chmod +x "$STUB_DIR/git"
 # Helper: run merge.sh with customised pr::head_sha and pr::has_coderails_review_for_head
 # $1 = sha to return from pr::head_sha (empty string = simulate failure)
 # $2 = exit code for pr::has_coderails_review_for_head
+# $3 = optional PR_TRUST_FETCH_FAIL_REASON to set before returning (identity/
+#      permission/comments) — lets a test assert merge.sh's case-branch
+#      message actually names the real cause instead of a generic fallback.
 run_gate_test() {
     local sha_return="$1"
     local review_exit="$2"
+    local trust_fail_reason="${3:-}"
     local stderr_file="$TMP/stderr_run"
     local stdout_file="$TMP/stdout_run"
 
@@ -114,6 +118,8 @@ pr::head_sha() {
 }
 
 pr::has_coderails_review_for_head() {
+    PR_TRUST_FETCH_FAIL_REASON="${trust_fail_reason}"
+    [[ -z "\${PR_TRUST_FETCH_FAIL_REASON}" ]] && unset PR_TRUST_FETCH_FAIL_REASON
     return ${review_exit}
 }
 
@@ -170,6 +176,38 @@ run_gate_test "deadbeef" 2
 rc=$?
 check "merge aborts on gh fetch failure (exit non-zero)" 1 $rc
 check_msg "merge: fetch-fail message mentions GitHub fetch" "GitHub fetch" "$LAST_STDERR"
+
+# ─── Test 3b/3c (WU4): PR_TRUST_FETCH_FAIL_REASON=identity/permission produce
+# messages that actually name the real cause, not the generic fallback ───────
+# Regression target: a future edit that swaps the case-branch order, deletes
+# the permission branch, or breaks the reason handoff between git-common.sh
+# and merge.sh would still make Test 3 above pass (its assertion — "mentions
+# GitHub fetch" — matches all three branches) but would fail here.
+run_gate_test "deadbeef" 2 identity
+rc=$?
+check "merge aborts on identity-fetch failure (exit non-zero)" 1 $rc
+check_msg "merge: identity-fetch-fail message names the identity cause" "authenticated identity" "$LAST_STDERR"
+
+run_gate_test "deadbeef" 2 permission
+rc=$?
+check "merge aborts on permission-fetch failure (exit non-zero)" 1 $rc
+check_msg "merge: permission-fetch-fail message names the permission cause" "repo permission" "$LAST_STDERR"
+
+# The two reason-specific messages, and the reason-absent fallback from Test 3
+# above, must all be genuinely distinct strings — proves the case branches
+# aren't three copies of the same text.
+run_gate_test "deadbeef" 2 identity
+IDENTITY_MSG="$LAST_STDERR"
+run_gate_test "deadbeef" 2 permission
+PERMISSION_MSG="$LAST_STDERR"
+run_gate_test "deadbeef" 2
+FALLBACK_MSG="$LAST_STDERR"
+check "merge: identity and permission fetch-fail messages are DISTINCT" "true" \
+  "$([[ "$IDENTITY_MSG" != "$PERMISSION_MSG" ]] && echo true || echo false)"
+check "merge: identity and fallback fetch-fail messages are DISTINCT" "true" \
+  "$([[ "$IDENTITY_MSG" != "$FALLBACK_MSG" ]] && echo true || echo false)"
+check "merge: permission and fallback fetch-fail messages are DISTINCT" "true" \
+  "$([[ "$PERMISSION_MSG" != "$FALLBACK_MSG" ]] && echo true || echo false)"
 
 # ─── Test 4: empty sha (pr::head_sha returns empty) → merge aborts ───────────
 run_gate_test "" 1

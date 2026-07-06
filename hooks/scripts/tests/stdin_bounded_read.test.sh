@@ -103,6 +103,17 @@ else
   printf 'ok   - check_confidence_labels.sh: exited within 8s on never-closing stdin (rc=%s)\n' "$HOOK_RESULT"
 fi
 
+# unregistered_loop_guard.sh (Stop hook): same guard.
+# With no transcript in the payload (read from stdin pipe with no EOF), it hangs on
+# input=$(cat); with read -d '' -t 5 it exits quickly.
+HOOK_RESULT=$(run_bounded "$SCRIPTS/unregistered_loop_guard.sh" "$PIPE" 8)
+if [ "$HOOK_RESULT" = "HANG" ]; then
+  printf 'FAIL - unregistered_loop_guard.sh: stdin with no EOF caused hook to hang\n'
+  fails=$((fails+1))
+else
+  printf 'ok   - unregistered_loop_guard.sh: exited within 8s on never-closing stdin (rc=%s)\n' "$HOOK_RESULT"
+fi
+
 # Tear down the holder process.
 kill "$HOLDER_PID" 2>/dev/null
 wait "$HOLDER_PID" 2>/dev/null

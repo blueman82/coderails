@@ -88,11 +88,13 @@ esac
 GITSTUB
 chmod +x "$STUB_DIR/git"
 
-# run_evals_gate_test: <review_exit> <eval_exit> <eval_tier>
+# run_evals_gate_test: <review_exit> <eval_exit> <eval_tier> [trust_fail_reason]
 # Always uses a valid sha/review pass so only the eval gate's behaviour varies,
 # unless review_exit is set nonzero to prove short-circuit ordering.
+# [trust_fail_reason] (identity/permission/comments) lets a test assert
+# merge.sh's eval-gate case-branch message names the real cause (WU4).
 run_evals_gate_test() {
-    local review_exit="$1" eval_exit="$2" eval_tier="$3"
+    local review_exit="$1" eval_exit="$2" eval_tier="$3" trust_fail_reason="${4:-}"
     local stderr_file="$TMP/stderr_run"
     local stdout_file="$TMP/stdout_run"
 
@@ -110,6 +112,8 @@ pr::has_coderails_review_for_head() {
 
 pr::has_coderails_eval_for_head() {
     PR_EVAL_TIER="${eval_tier}"
+    PR_TRUST_FETCH_FAIL_REASON="${trust_fail_reason}"
+    [[ -z "\${PR_TRUST_FETCH_FAIL_REASON}" ]] && unset PR_TRUST_FETCH_FAIL_REASON
     return ${eval_exit}
 }
 GCSTUB
@@ -169,6 +173,31 @@ rc=$?
 check "merge blocks on eval-gate gh fetch failure" 1 $rc
 check_msg "merge: eval fetch-fail message mentions GitHub fetch" "GitHub fetch" "$LAST_STDERR"
 check_msg "merge: eval fetch-fail message mentions eval artifact" "eval artifact" "$LAST_STDERR"
+
+# ─── Test 4b/4c (WU4): eval-gate identity/permission reasons produce distinct,
+# cause-naming messages, not the generic fallback ─────────────────────────────
+run_evals_gate_test 0 2 "" identity
+rc=$?
+check "merge blocks on eval-gate identity-fetch failure" 1 $rc
+check_msg "merge: eval identity-fetch-fail message names the identity cause" "authenticated identity" "$LAST_STDERR"
+
+run_evals_gate_test 0 2 "" permission
+rc=$?
+check "merge blocks on eval-gate permission-fetch failure" 1 $rc
+check_msg "merge: eval permission-fetch-fail message names the permission cause" "repo permission" "$LAST_STDERR"
+
+run_evals_gate_test 0 2 "" identity
+EVAL_IDENTITY_MSG="$LAST_STDERR"
+run_evals_gate_test 0 2 "" permission
+EVAL_PERMISSION_MSG="$LAST_STDERR"
+run_evals_gate_test 0 2 ""
+EVAL_FALLBACK_MSG="$LAST_STDERR"
+check "merge: eval-gate identity and permission fetch-fail messages are DISTINCT" "true" \
+  "$([[ "$EVAL_IDENTITY_MSG" != "$EVAL_PERMISSION_MSG" ]] && echo true || echo false)"
+check "merge: eval-gate identity and fallback fetch-fail messages are DISTINCT" "true" \
+  "$([[ "$EVAL_IDENTITY_MSG" != "$EVAL_FALLBACK_MSG" ]] && echo true || echo false)"
+check "merge: eval-gate permission and fallback fetch-fail messages are DISTINCT" "true" \
+  "$([[ "$EVAL_PERMISSION_MSG" != "$EVAL_FALLBACK_MSG" ]] && echo true || echo false)"
 
 # ─── Test 5: NO-GO at tier 0 (defensive case — shouldn't normally happen) ────
 run_evals_gate_test 0 1 0

@@ -111,6 +111,37 @@ printf 'not valid json{{{' > "$d/evals.json"
 als_read_loop_evals_result "$d"
 check "malformed JSON -> ABSENT (not NO-GO)" "ABSENT" "$ALS_LOOP_EVALS_RESULT"
 
+# scope loop, tier 0, justified, explicit result NO-GO -> NO-GO. An explicit
+# NO-GO must win at every tier including tier 0 (owner directive 2026-07-06):
+# "an exemption justifies having no evals, not overriding a recorded failure."
+# Prior to this branch, tier 0 + justified short-circuited to TIER0 regardless
+# of an explicit result, silently discarding a recorded failure.
+d=$(mktemp -d "$TMP/loopdir.XXXX")
+jq -n '{scope:"loop", tier:0, tier_justification:"probe", result:"NO-GO"}' > "$d/evals.json"
+als_read_loop_evals_result "$d"
+check "scope=loop tier=0 justified result=NO-GO -> NO-GO (explicit NO-GO wins)" "NO-GO" "$ALS_LOOP_EVALS_RESULT"
+
+# regression: tier 0, justified, no explicit result -> still TIER0 (the
+# legitimate exemption path must be untouched by the new branch).
+d=$(mktemp -d "$TMP/loopdir.XXXX")
+jq -n '{scope:"loop", tier:0, tier_justification:"probe"}' > "$d/evals.json"
+als_read_loop_evals_result "$d"
+check "regression: scope=loop tier=0 justified no result -> TIER0" "TIER0" "$ALS_LOOP_EVALS_RESULT"
+
+# regression: tier 0, justified, result GO -> still GO (GO branch must still
+# be checked before the new NO-GO branch, and before the tier-0 branch).
+d=$(mktemp -d "$TMP/loopdir.XXXX")
+jq -n '{scope:"loop", tier:0, tier_justification:"probe", result:"GO"}' > "$d/evals.json"
+als_read_loop_evals_result "$d"
+check "regression: scope=loop tier=0 justified result=GO -> GO" "GO" "$ALS_LOOP_EVALS_RESULT"
+
+# regression: tier 2 (non-zero), justified, result NO-GO -> still NO-GO (the
+# pre-existing else-branch path for non-tier-0 must be unaffected).
+d=$(mktemp -d "$TMP/loopdir.XXXX")
+jq -n '{scope:"loop", tier:2, tier_justification:"probe", result:"NO-GO"}' > "$d/evals.json"
+als_read_loop_evals_result "$d"
+check "regression: scope=loop tier=2 justified result=NO-GO -> NO-GO" "NO-GO" "$ALS_LOOP_EVALS_RESULT"
+
 # ── gate_loop_evals_required (end-to-end guard invocations) ─────────────────
 # Helpers copied verbatim (in spirit) from loop_state_guard.test.sh, per the
 # plan's instruction that bash test files in this repo are self-contained.

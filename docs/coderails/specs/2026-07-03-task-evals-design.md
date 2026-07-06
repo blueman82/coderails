@@ -101,7 +101,7 @@ Fresh sonnet subagent. Prompt contains: the `evals.json` content, artifact refer
 ### 6. Wiring edits
 
 - **`skills/agentic-loop/SKILL.md`**: Phase 2.7 gains a sub-step — generate and freeze loop-scope evals via `/coderails:task-evals` alongside `spec.md`; worker task descriptions carry per-unit eval refs the same way disposition travels; Phase 13 runs the loop suite before declaring complete and reports amendments unscored (alongside disposition violations). The "no eval record found" vs "evals passed" distinction mirrors Phase 13's existing "0 violations" vs "no record" rule: an absent record is an audit failure, not a pass.
-- **`skills/writing-plans/SKILL.md`**: plans grow a final eval-gate task; per-task verify-criteria remain as cheap inner-loop checks, but the plan's *done* is the eval artifact.
+- **`skills/writing-plans/SKILL.md`**: plans grow a final eval-gate task; per-task verify-criteria remain as cheap inner-loop checks, but the plan's *done* is the eval artifact. [Superseded 2026-07-06 by PR #15: evals are frozen at plan completion, before implementation; the final task only grades+posts.]
 - **`commands/merge.md` / `commands/workflow.md`**: document the eval artifact requirement beside the existing post-review artifact requirement.
 
 ## Tier rules (self-exemption defence)

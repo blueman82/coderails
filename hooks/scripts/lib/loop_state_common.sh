@@ -160,6 +160,12 @@ als_read_work_units() {
 # Legacy flip: pre-existing GO loop artifacts written before this check
 # existed, and lacking tier_justification, now block (owner directive
 # 2026-07-06) rather than silently passing as before.
+#
+# Explicit NO-GO wins at every tier, including tier 0 (owner directive
+# 2026-07-06): an exemption justifies having no evals, not overriding a
+# recorded failure. So a tier-0 artifact with justification but no result
+# field still reads TIER0 (the legitimate exemption), but a tier-0 artifact
+# that explicitly recorded result:"NO-GO" must block like any other tier.
 als_read_loop_evals_result() {
   ALS_LOOP_EVALS_RESULT="ABSENT"
   command -v jq >/dev/null 2>&1 || { als_log "hook=loop_state_guard evals=skipped reason=jq_missing"; return 0; }
@@ -174,6 +180,7 @@ als_read_loop_evals_result() {
   justification=$(jq -r '.tier_justification // "" | gsub("^\\s+|\\s+$"; "")' "$f" 2>/dev/null)
   if [ -z "$justification" ]; then ALS_LOOP_EVALS_RESULT="UNJUSTIFIED"
   elif [ "$result" = "GO" ]; then ALS_LOOP_EVALS_RESULT="GO"
+  elif [ "$result" = "NO-GO" ]; then ALS_LOOP_EVALS_RESULT="NO-GO"
   elif [ "$tier" = "0" ]; then ALS_LOOP_EVALS_RESULT="TIER0"
   else ALS_LOOP_EVALS_RESULT="NO-GO"
   fi

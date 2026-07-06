@@ -72,11 +72,77 @@ done
 printf '#!/bin/bash\ntrue\n' > "$TMP_TREE/$UNTRACKED_FILE"
 chmod -x "$TMP_TREE/$UNTRACKED_FILE"
 
+# install.sh also writes unconditionally under $HOME (installed_plugins.json
+# scan, ~/.claude/commands conflict scan, settings.json / known_marketplaces.json
+# / plugins/marketplaces marketplace registration, ~/.claude/CLAUDE.md append) —
+# none of that is redirected by MEMORY_TARGET. Point HOME at a sandbox for the
+# duration of the invocation so those writes never touch the developer's real
+# home (this previously corrupted a real ~/.claude/settings.json on this
+# machine). The sandbox starts empty (freshly mktemp'd, nothing pre-seeded
+# except where deliberately noted below) and is never the same path as the
+# real HOME captured here before either run.
+REAL_HOME="$HOME"
+HOME_SANDBOX="$TMP_TREE/.home-sandbox"
+mkdir -p "$HOME_SANDBOX"
+[ "$HOME_SANDBOX" != "$REAL_HOME" ] || { echo "FAIL - sandbox HOME must differ from real HOME"; exit 1; }
+
+# Pre-seed the sandboxed settings.json and known_marketplaces.json with a
+# stale marketplace key so the run below exercises install.sh's real jq
+# mutation logic (stage 4: drop stale keys, register coderails, in BOTH
+# files) against the sandbox — proving the sandbox isn't merely inert but is
+# the actual target of the mutation under test. CLAUDE.md is intentionally
+# left absent (its stage-5 append is idempotent-if-present but must also work
+# when the file doesn't exist yet — the untouched-vs-created assertion below
+# covers that path).
+mkdir -p "$HOME_SANDBOX/.claude/plugins"
+printf '{"extraKnownMarketplaces":{"workflow-tools":{"source":{"source":"directory","path":"/nonexistent"}}}}\n' \
+  > "$HOME_SANDBOX/.claude/settings.json"
+printf '{"workflow-tools":{"source":{"source":"directory","path":"/nonexistent"}}}\n' \
+  > "$HOME_SANDBOX/.claude/plugins/known_marketplaces.json"
+
+# Real-HOME files that install.sh writes unconditionally (settings.json,
+# known_marketplaces.json, CLAUDE.md) — snapshot all three before the run so
+# the leak-proof check below covers every one of them, not just settings.json.
+REAL_SETTINGS="$REAL_HOME/.claude/settings.json"
+REAL_KNOWN="$REAL_HOME/.claude/plugins/known_marketplaces.json"
+REAL_CLAUDE_MD="$REAL_HOME/.claude/CLAUDE.md"
+real_settings_cksum_before=""
+real_known_cksum_before=""
+real_claude_md_cksum_before=""
+[ -f "$REAL_SETTINGS" ] && real_settings_cksum_before="$(cksum "$REAL_SETTINGS")"
+[ -f "$REAL_KNOWN" ] && real_known_cksum_before="$(cksum "$REAL_KNOWN")"
+[ -f "$REAL_CLAUDE_MD" ] && real_claude_md_cksum_before="$(cksum "$REAL_CLAUDE_MD")"
+
 # Run install.sh's sweep in dry mode is not enough (dry-run doesn't chmod) —
 # run for real, in the temp copy, non-interactively, then inspect disk modes.
-# We invoke the whole script; it only touches files under $PLUGIN_DIR (TMP_TREE),
-# and needs gh/jq/git on PATH (present — same prerequisites as the real installer).
-( cd "$TMP_TREE" && printf 'n\n' | MEMORY_TARGET="$TMP_TREE/.memory-test" bash install.sh >/dev/null 2>&1 )
+# We invoke the whole script; it only touches files under $PLUGIN_DIR (TMP_TREE)
+# and $HOME (now the sandbox above), and needs jq/git on PATH (install.sh makes
+# no `gh` calls at all, so no auth/token state under HOME is needed here).
+( cd "$TMP_TREE" && printf 'n\n' | HOME="$HOME_SANDBOX" MEMORY_TARGET="$TMP_TREE/.memory-test" bash install.sh >/dev/null 2>&1 )
+
+if [ -n "$real_settings_cksum_before" ]; then
+  real_settings_cksum_after="$(cksum "$REAL_SETTINGS")"
+  check "real HOME settings.json untouched by sandboxed run (cksum)" "$real_settings_cksum_before" "$real_settings_cksum_after"
+fi
+if [ -n "$real_known_cksum_before" ]; then
+  real_known_cksum_after="$(cksum "$REAL_KNOWN")"
+  check "real HOME known_marketplaces.json untouched by sandboxed run (cksum)" "$real_known_cksum_before" "$real_known_cksum_after"
+fi
+if [ -n "$real_claude_md_cksum_before" ]; then
+  real_claude_md_cksum_after="$(cksum "$REAL_CLAUDE_MD")"
+  check "real HOME CLAUDE.md untouched by sandboxed run (cksum)" "$real_claude_md_cksum_before" "$real_claude_md_cksum_after"
+else
+  check "real HOME CLAUDE.md still absent after sandboxed run (no leak-created file)" "no" "$([ -f "$REAL_CLAUDE_MD" ] && echo yes || echo no)"
+fi
+
+check "sandboxed settings.json drops stale workflow-tools key (real jq mutation exercised)" \
+  "null" "$(jq -r '.extraKnownMarketplaces["workflow-tools"] // "null"' "$HOME_SANDBOX/.claude/settings.json" 2>/dev/null)"
+check "sandboxed settings.json registers coderails marketplace pointing at the sandbox tree" \
+  "$TMP_TREE" "$(jq -r '.extraKnownMarketplaces.coderails.source.path // "null"' "$HOME_SANDBOX/.claude/settings.json" 2>/dev/null)"
+check "sandboxed known_marketplaces.json drops stale workflow-tools key (real jq mutation exercised)" \
+  "null" "$(jq -r '.["workflow-tools"] // "null"' "$HOME_SANDBOX/.claude/plugins/known_marketplaces.json" 2>/dev/null)"
+check "sandboxed CLAUDE.md gains the Self-Checking Discipline section (real append exercised)" \
+  "yes" "$(grep -q '## Self-Checking Discipline' "$HOME_SANDBOX/.claude/CLAUDE.md" 2>/dev/null && echo yes || echo no)"
 
 is_executable() { [ -x "$1" ] && echo yes || echo no; }
 
@@ -123,8 +189,28 @@ for f in $OTHER_SOURCE_ONLY_FILES; do
   chmod +x "$NOGIT_TREE/$f"
 done
 
+NOGIT_HOME_SANDBOX="$NOGIT_TREE/.home-sandbox"
+mkdir -p "$NOGIT_HOME_SANDBOX"
+
 nogit_exit=0
-( cd "$NOGIT_TREE" && printf 'n\n' | MEMORY_TARGET="$NOGIT_TREE/.memory-test" bash install.sh >/dev/null 2>&1 ) || nogit_exit=$?
+( cd "$NOGIT_TREE" && printf 'n\n' | HOME="$NOGIT_HOME_SANDBOX" MEMORY_TARGET="$NOGIT_TREE/.memory-test" bash install.sh >/dev/null 2>&1 ) || nogit_exit=$?
+
+if [ -n "$real_settings_cksum_before" ]; then
+  real_settings_cksum_after_nogit="$(cksum "$REAL_SETTINGS")"
+  check "real HOME settings.json still untouched after no-git sandboxed run (cksum)" "$real_settings_cksum_before" "$real_settings_cksum_after_nogit"
+fi
+if [ -n "$real_known_cksum_before" ]; then
+  real_known_cksum_after_nogit="$(cksum "$REAL_KNOWN")"
+  check "real HOME known_marketplaces.json still untouched after no-git sandboxed run (cksum)" "$real_known_cksum_before" "$real_known_cksum_after_nogit"
+fi
+if [ -n "$real_claude_md_cksum_before" ]; then
+  real_claude_md_cksum_after_nogit="$(cksum "$REAL_CLAUDE_MD")"
+  check "real HOME CLAUDE.md still untouched after no-git sandboxed run (cksum)" "$real_claude_md_cksum_before" "$real_claude_md_cksum_after_nogit"
+else
+  check "real HOME CLAUDE.md still absent after no-git sandboxed run (no leak-created file)" "no" "$([ -f "$REAL_CLAUDE_MD" ] && echo yes || echo no)"
+fi
+check "no-git sandboxed CLAUDE.md gains the Self-Checking Discipline section (real append exercised)" \
+  "yes" "$(grep -q '## Self-Checking Discipline' "$NOGIT_HOME_SANDBOX/.claude/CLAUDE.md" 2>/dev/null && echo yes || echo no)"
 
 check "install.sh exits 0 in a no-git checkout (does not die mid-sweep)" "0" "$nogit_exit"
 check "$SOURCE_ONLY_FILE gains +x in a no-git checkout (fallback applied to every file)" "yes" "$(is_executable "$NOGIT_TREE/$SOURCE_ONLY_FILE")"
