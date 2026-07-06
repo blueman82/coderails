@@ -12,14 +12,14 @@ Periodically health-check the wiki. The LLM is good at finding inconsistencies, 
 
 ### Step 0: Load the Schema
 
-Read `AGENTS.md` in the current project directory. Extract:
+`AGENTS.md` at the project's git root is loaded into context at session start (per the project's `CLAUDE.md`) — use that content. If it isn't present in context (e.g. a fresh fork with no prior context), read `AGENTS.md` at the git repository root directly, not the current working directory — a fork's cwd may be a subdirectory. If it doesn't exist there either, tell the user to run `/wiki-init` first.
+
+Extract:
 - `vault` — absolute path to the wiki vault
 - `git.worktree` — whether to use worktree/PR flow (`true`) or write directly (`false`)
 - `git.bypass_flag` — env var for PR creation/merge (e.g. `BYPASS_REVIEW=1`)
 - `git.pull_path` — path to pull after merge
 - `git.stale_days` — days before a page is considered stale (default: 30)
-
-If `AGENTS.md` doesn't exist, tell the user to run `/wiki-init` first.
 
 **If `git.worktree` is `true`** (team repos):
 ```bash
