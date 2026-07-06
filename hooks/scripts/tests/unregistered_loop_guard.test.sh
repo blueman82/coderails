@@ -159,6 +159,21 @@ check "transcript with coderails:agentic-loop Skill call -> 1" "1" "$n"
 n=$(call_fn ulg_has_skill_invocation "$(mk_other_transcript)")
 check "transcript with only non-loop Skill call -> 0" "0" "$n"
 
+# PR A follow-up: ulg_has_skill_invocation delegates to als_count_invocations
+# (lib/loop_state_common.sh), which on jq failure signals a reason tag on
+# STDERR (never logs directly — see its own comment: only als_stable_invocations,
+# the retrying wrapper, decides whether/how to log, to avoid the ambiguous
+# double-log / lost-recovery bug that per-attempt direct logging caused). This
+# one-shot consumer calls als_count_invocations directly, not through the
+# retry wrapper, so it must keep returning "0" unchanged (fail-open, same as
+# before) AND must NOT produce a discipline-log line itself — matching its
+# prior (pre-hardening) behavior of being silent on a parse failure.
+: > "$CLAUDE_DISCIPLINE_LOG"
+n=$(call_fn ulg_has_skill_invocation "$corrupt_t")
+check "malformed transcript -> ulg_has_skill_invocation still returns 0 unchanged" "0" "$n"
+check "malformed transcript, one-shot delegate call -> discipline log NOT touched" 0 \
+  "$(grep -c 'reason=jq_parse_error' "$CLAUDE_DISCIPLINE_LOG" 2>/dev/null; true)"
+
 # =====================================================================
 # Task 3 — end-to-end gate: threshold, registration, nudge delivery
 # =====================================================================

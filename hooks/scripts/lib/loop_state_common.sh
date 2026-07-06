@@ -14,8 +14,15 @@ LOG_FILE="${CLAUDE_DISCIPLINE_LOG:-$HOME/.claude/discipline.log}"
 MAX_ATTEMPTS="${CLAUDE_HOOK_MAX_ATTEMPTS:-5}"
 SLEEP_S="${CLAUDE_HOOK_SLEEP_S:-0.3}"
 
-# Append a single key=value line to the discipline log (best-effort).
-als_log() { printf '%s %s\n' "$(date -Iseconds 2>/dev/null || date +%Y-%m-%dT%H:%M:%S%z)" "$1" >> "$LOG_FILE" 2>/dev/null; }
+# Append a single key=value line to the discipline log (best-effort). Brace-group
+# wraps the printf/redirect so the group's OWN 2>/dev/null also catches the
+# redirection-open error itself (a trailing 2>/dev/null on printf alone does not
+# suppress that error) — no dir auto-creation, stays side-effect-free.
+# Accepted tradeoff: if LOG_FILE's parent directory is missing, a caller's own
+# failure-reporting line (e.g. als_stable_invocations' jq-failure summary) is
+# itself silently swallowed here — only reachable via a misconfigured
+# CLAUDE_DISCIPLINE_LOG override, not a normal operating condition.
+als_log() { { printf '%s %s\n' "$(date -Iseconds 2>/dev/null || date +%Y-%m-%dT%H:%M:%S%z)" "$1" >> "$LOG_FILE"; } 2>/dev/null; }
 
 # Sanitise a session_id extracted from the Stop-hook JSON payload. If the
 # payload's session_id is missing/null, the jq extraction below falls back to
@@ -50,7 +57,24 @@ als_sanitise_session_id() {
 # Count agentic-loop Skill invocations across the WHOLE transcript (one-shot).
 # Structured jq match on a tool_use — never a text grep. Matches the scoped
 # ("coderails:agentic-loop") and bare ("agentic-loop") skill names.
+# Stdout contract is UNCHANGED (empty or an integer) even on jq failure — every
+# consumer still reads that as "0, allow" (fail-open). On jq failure this ALSO
+# writes a distinguishable reason tag ("jq_missing" / "jq_parse_error") to
+# STDERR (never stdout, so the count contract stays untouched) — mirroring
+# unregistered_loop_guard.sh's ULG_PARSE_REASON global, but a global can't be
+# used here: als_stable_invocations (the sole retrying caller) invokes this via
+# `n=$(als_count_invocations ...)` command substitution, which runs in a
+# subshell — any global the function set would vanish with the subshell and
+# never reach the caller. Stderr survives that boundary. This function does
+# NOT log directly: als_stable_invocations decides whether/how to log, since a
+# single call here may be one of several retry attempts, and per-attempt
+# logging is exactly the ambiguous double-log / lost-recovery bug this exists
+# to avoid. One-shot callers (e.g. unregistered_loop_guard.sh's
+# ulg_has_skill_invocation) that call this directly, not through the retry
+# wrapper, simply never read stderr — no logging fires for them, matching
+# their prior (pre-hardening) behavior of being silent on a parse failure.
 als_count_invocations() {
+  command -v jq >/dev/null 2>&1 || { echo "jq_missing" >&2; return; }
   jq -s -r '
     [ .[]?
       | select(.type == "assistant")
@@ -59,19 +83,48 @@ als_count_invocations() {
       | (.input.skill // "")
       | select(test("(^|:)agentic-loop$")) ]
     | length
-  ' "$1" 2>/dev/null
+  ' "$1" 2>/dev/null || echo "jq_parse_error" >&2
 }
 
 # Stable invocation count: retry for the transcript-flush race until it settles.
+# Logs EXACTLY ONE summary line via als_log when any attempt hit a jq failure —
+# never one line per attempt (that was the ambiguous-recovery / double-log bug:
+# a transient failure that recovered on retry was indistinguishable from one
+# that never recovered, and a sustained failure logged once per attempt with no
+# final verdict). outcome=recovered means the LAST attempt succeeded (no reason
+# tag on that attempt); outcome=exhausted means it didn't. attempts=N is the
+# number of jq calls made. Zero lines when every attempt was clean. Gate
+# outcomes (stdout contract, fail-open) are unchanged — this only affects what
+# gets logged.
 als_stable_invocations() {
-  local transcript="$1" prev=-1 attempts=0 n=0
+  local transcript="$1" prev=-1 attempts=0 n=0 last_reason="" seen_reason=""
+  local err_file; err_file=$(mktemp 2>/dev/null) || err_file=""
   while [ "$attempts" -lt "$MAX_ATTEMPTS" ]; do
-    n=$(als_count_invocations "$transcript"); [ -z "$n" ] && n=0
-    if [ "$n" -eq "$prev" ]; then break; fi
-    prev=$n
+    # Single call per attempt: stdout (the count) captured normally, stderr
+    # (the reason tag, if any) redirected to a scratch file and read back —
+    # avoids calling the function twice per attempt, which would re-read the
+    # transcript twice and could observe two different states across the very
+    # flush-race window this retry loop exists to ride out.
+    if [ -n "$err_file" ]; then
+      n=$(als_count_invocations "$transcript" 2>"$err_file")
+      last_reason=$(cat "$err_file" 2>/dev/null)
+    else
+      n=$(als_count_invocations "$transcript" 2>/dev/null)
+      last_reason=""
+    fi
+    [ -z "$n" ] && n=0
     attempts=$((attempts + 1))
+    if [ "$n" -eq "$prev" ] && [ -z "$last_reason" ]; then break; fi
+    prev=$n
+    [ -n "$last_reason" ] && seen_reason="$last_reason"
     [ "$attempts" -lt "$MAX_ATTEMPTS" ] && sleep "$SLEEP_S"
   done
+  [ -n "$err_file" ] && rm -f "$err_file" 2>/dev/null
+  if [ -n "$seen_reason" ]; then
+    local outcome="exhausted"
+    [ -z "$last_reason" ] && outcome="recovered"
+    als_log "hook=als_count_invocations reason=$seen_reason attempts=$attempts outcome=$outcome"
+  fi
   printf '%s' "$n"
 }
 

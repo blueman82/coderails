@@ -23,6 +23,7 @@ IFS= read -r -d '' -t 5 input || true
 transcript=$(echo "$input" | jq -r '.transcript_path // empty')
 session_id=$(als_sanitise_session_id "$(echo "$input" | jq -r '.session_id // "?"' 2>/dev/null)")
 cwd=$(echo "$input" | jq -r '.cwd // empty' 2>/dev/null)
+[ -z "$cwd" ] && cwd="$PWD"  # F3 fix: fall back to $PWD when .cwd is absent
 stop_hook_active=$(echo "$input" | jq -r '.stop_hook_active // false' 2>/dev/null)
 
 gate_present_and_owned() {

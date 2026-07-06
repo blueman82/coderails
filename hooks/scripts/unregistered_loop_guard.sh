@@ -85,9 +85,14 @@ ulg_has_progress_file() {
 # the nudge re-fires at the next Stop, so the extra latency of retrying isn't
 # worth it for a non-blocking nudge (unlike loop_state_guard's blocking gate,
 # which needs the stable count to avoid blocking on a still-flushing write).
+# als_count_invocations signals a jq-failure reason on stderr (see its own
+# comment) for als_stable_invocations to pick up and log — this one-shot
+# caller deliberately does not read or log that reason (matching its prior,
+# pre-hardening silent-on-parse-failure behavior), so stderr is discarded here
+# rather than left to leak to the hook's own stderr.
 ulg_has_skill_invocation() {
   local transcript="$1" n
-  n=$(als_count_invocations "$transcript")
+  n=$(als_count_invocations "$transcript" 2>/dev/null)
   [ -z "$n" ] && n=0
   if [ "$n" -gt 0 ]; then printf '1'; else printf '0'; fi
 }
