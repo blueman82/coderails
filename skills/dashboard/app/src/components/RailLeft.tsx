@@ -28,7 +28,7 @@ function findTile(health: HealthTile[], key: HealthTile["key"]): HealthTile | un
 }
 
 export function RailLeft() {
-  const { snapshot } = useDashboardState();
+  const { snapshot } = useDashboardContext();
   const { health, loops, trail } = snapshot;
   const [now, setNow] = useState<number | null>(null);
 
