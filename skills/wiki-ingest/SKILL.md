@@ -11,13 +11,13 @@ Ingest a new source into the project's LLM Wiki. A single source typically touch
 
 ### Step 0: Load the Schema
 
-Read `AGENTS.md` in the current project directory. This is the single source of truth for:
+`AGENTS.md` at the project's git root is loaded into context at session start (per the project's `CLAUDE.md`) — use that content. If it isn't present in context (e.g. a fresh fork with no prior context), read `AGENTS.md` at the git repository root directly, not the current working directory — a fork's cwd may be a subdirectory. If it doesn't exist there either, tell the user to run `/wiki-init` first.
+
+This is the single source of truth for:
 - `vault` — absolute path to the wiki vault
 - `git.worktree` — whether to use git worktree/PR flow (`true`) or write directly (`false`)
 - `git.bypass_flag` — env var to set when creating/merging PRs (e.g. `BYPASS_REVIEW=1`)
 - `git.pull_path` — path to pull after merge
-
-If `AGENTS.md` doesn't exist, tell the user to run `/wiki-init` first.
 
 **Example AGENTS.md git section (team repo with PR flow):**
 ```yaml
