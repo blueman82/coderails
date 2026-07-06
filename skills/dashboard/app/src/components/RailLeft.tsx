@@ -38,7 +38,7 @@ export function RailLeft() {
   }, []);
 
   const kpiKeys: HealthTile["key"][] = ["usage5h", "usageWeek", "hooksFired", "lintFindings"];
-  const loop = loops[0];
+  const loop = selectActiveLoop(loops);
 
   return (
     <section className="hud-rail hud-rail-left">
