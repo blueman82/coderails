@@ -109,7 +109,7 @@ Enforcement wiring is live: the merge gate lives in `scripts/merge.sh`, reading 
 This skill is invoked at three points:
 
 - **agentic-loop Phase 2.7** — loop scope, alongside `spec.md`/`plan.md`.
-- **writing-plans**, when a plan is written — pr scope, as the plan's final task.
+- **writing-plans**, once the plan has passed self-review and the stress-test pass — pr scope, frozen before implementation dispatch begins; the plan's actual final task only grades and posts via `/coderails:post-evals`.
 - **Directly by the user.**
 
 A plan's or loop's per-work-unit eval refs travel in worker prompts the same way disposition travels under agentic-loop Phase 3's existing pattern: a ref recorded only in `progress.json` and absent from the worker's own prompt does not exist for that worker. Every worker prompt that owns a unit with an eval ref must carry that ref verbatim, not just a pointer to the loop state file.
