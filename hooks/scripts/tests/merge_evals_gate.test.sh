@@ -206,6 +206,15 @@ rc=$?
 check "merge blocks on eval-gate tempfile-allocation failure" 1 $rc
 check_msg "merge: eval tempfile-fail message names the tempfile/local cause" "temporary file" "$LAST_STDERR"
 
+run_evals_gate_test 0 2 "" tempfile
+EVAL_TEMPFILE_MSG="$LAST_STDERR"
+run_evals_gate_test 0 2 ""
+EVAL_FALLBACK_MSG_2="$LAST_STDERR"
+check "merge: eval-gate tempfile and fallback fetch-fail messages are DISTINCT" "true" \
+  "$([[ "$EVAL_TEMPFILE_MSG" != "$EVAL_FALLBACK_MSG_2" ]] && echo true || echo false)"
+check "merge: eval-gate tempfile and identity fetch-fail messages are DISTINCT" "true" \
+  "$([[ "$EVAL_TEMPFILE_MSG" != "$EVAL_IDENTITY_MSG" ]] && echo true || echo false)"
+
 # ─── Test 5: NO-GO at tier 0 (defensive case — shouldn't normally happen) ────
 run_evals_gate_test 0 1 0
 rc=$?
