@@ -1,5 +1,8 @@
-// Static placeholder data — Task 9b binds Command Deck to the runner/argv module and PR Gates
-// to prGates.ts; Task 9d wires the run/click lifecycle onto these buttons.
+"use client";
+
+import { useDashboardState, formatDuration, formatHHMM, runResultLabel, isGateError } from "@/hooks/useDashboardState";
+
+// Buttons stay static labels — Task 9d wires the run/click lifecycle onto these.
 const COMMANDS = [
   { label: "Wiki Lint" },
   { label: "Sync Docs" },
@@ -9,19 +12,10 @@ const COMMANDS = [
   { label: "WK Review" },
 ];
 
-const RUN_HISTORY = [
-  { name: "WIKI-LINT", result: "PASS", meta: "42S · 09:14" },
-  { name: "AM-REPORT", result: "PASS", meta: "3M10S · 07:00" },
-  { name: "SYNC-DOCS", result: "FAIL", meta: "12S · YDAY" },
-];
-
-const GATES = [
-  { title: "coderails #6 Dashboard Skill", ready: true, status: "Merge-Ready" },
-  { title: "coderails #7 Routines", ready: false, status: "Blocked · Eval Missing" },
-  { title: "liftlog #14", ready: false, status: "Stale · Sha Mismatch" },
-];
-
 export function RailRight() {
+  const { snapshot } = useDashboardState();
+  const { runs, gates } = snapshot;
+
   return (
     <section className="hud-rail hud-rail-right">
       <div className="hud-block">
@@ -43,15 +37,25 @@ export function RailRight() {
         </div>
 
         <div className="hud-run-history">
-          {RUN_HISTORY.map((run) => (
-            <div className="hud-run-row" key={run.name}>
-              <span>
-                <span className="hud-glyph">·</span>
-                {run.name} · {run.result}
-              </span>
-              <span>{run.meta}</span>
-            </div>
-          ))}
+          {runs.length > 0 ? (
+            runs.map((run) => {
+              const result = runResultLabel(run);
+              const duration = run.endedAt ? formatDuration(run.startedAt, run.endedAt) : "…";
+              return (
+                <div className="hud-run-row" key={run.runId}>
+                  <span>
+                    <span className="hud-glyph">·</span>
+                    {run.button.toUpperCase()} · {result}
+                  </span>
+                  <span>
+                    {duration} · {formatHHMM(run.startedAt)}
+                  </span>
+                </div>
+              );
+            })
+          ) : (
+            <div className="hud-empty-state">no runs yet</div>
+          )}
         </div>
 
         <div className="hud-deck-footnote">Intents Write to System/Queue — Runner Executes</div>
@@ -63,17 +67,39 @@ export function RailRight() {
           <span className="hud-suffix">Merge.Link</span>
           <span className="hud-rule" />
         </div>
-        {GATES.map((gate) => (
-          <div className="hud-gate-row" key={gate.title}>
-            <div className="hud-gate-top">
-              <span>{gate.title}</span>
-            </div>
-            <div className={`hud-gate-status${gate.ready ? " ready" : ""}`}>
-              <span className="hud-diamond">{gate.ready ? "◆" : "◇"}</span>
-              {gate.status}
-            </div>
-          </div>
-        ))}
+        {gates.length > 0 ? (
+          gates.map((gate) =>
+            isGateError(gate) ? (
+              <div className="hud-gate-row" key={gate.repo}>
+                <div className="hud-gate-top">
+                  <span>{gate.repo}</span>
+                </div>
+                <div className="hud-gate-status">
+                  <span className="hud-diamond">◇</span>
+                  unavailable
+                </div>
+              </div>
+            ) : (
+              <div className="hud-gate-row" key={`${gate.repo}#${gate.number}`}>
+                <div className="hud-gate-top">
+                  <span>
+                    {gate.repo} #{gate.number} {gate.title}
+                  </span>
+                </div>
+                <div className={`hud-gate-status${gate.state === "merge-ready" ? " ready" : ""}`}>
+                  <span className="hud-diamond">{gate.state === "merge-ready" ? "◆" : "◇"}</span>
+                  {gate.state === "merge-ready"
+                    ? "Merge-Ready"
+                    : gate.state === "stale"
+                      ? "Stale · Sha Mismatch"
+                      : `Blocked · Eval ${gate.evals === "missing" ? "Missing" : "Failed"}`}
+                </div>
+              </div>
+            )
+          )
+        ) : (
+          <div className="hud-empty-state">no open PRs</div>
+        )}
         <div className="hud-reserved-row">Assistant.Link · Reserved — Sub-Project 4</div>
       </div>
     </section>
