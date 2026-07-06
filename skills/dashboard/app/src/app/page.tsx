@@ -4,6 +4,15 @@ import { loadConfig } from "@/lib/config";
 import { DashboardApp } from "@/components/DashboardApp";
 import type { DeckButton } from "@/components/DashboardApp";
 
+// Force per-request rendering. Without this, Next.js statically prerenders
+// this page at build time (it has no params/searchParams/cookies access to
+// opt out of static generation on its own) — baking the config's button
+// declarations and run token into the production build. That means a
+// production server would serve whatever buttons existed in
+// ~/.claude/coderails-dashboard.json at `next build` time, forever, until
+// the next rebuild — silently going stale (or empty) on every config edit.
+export const dynamic = "force-dynamic";
+
 // Server component: this is the ONLY place the run token and the config's button declarations
 // are read. Both are handed to the client tree as props — never via any API/SSE payload — per
 // runlog.ts's mintToken comment: an attacker who can only reach the HTTP API must not be able to
