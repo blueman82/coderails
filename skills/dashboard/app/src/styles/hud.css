@@ -76,9 +76,12 @@
      child between whatever the outer two children's content happens to measure —
      here a wide wordmark+subtitle block vs a narrow clock, which skewed the status
      line ~264px right of true page-centre. Equal 1fr tracks give the middle column
-     an actual page-centred slot regardless of sibling width. */
+     an actual page-centred slot regardless of sibling width — minmax(0, 1fr), not a
+     bare 1fr, because a bare 1fr track's minimum defaults to its content's width
+     (`auto`), and the wordmark's long subtitle is wide enough to blow that "equal
+     share" and skew the centre right back off-page. */
   display: grid;
-  grid-template-columns: 1fr auto 1fr;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: flex-start;
   padding-bottom: 18px;
   border-bottom: 1px solid var(--hairline);
