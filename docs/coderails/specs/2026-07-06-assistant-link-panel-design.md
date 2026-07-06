@@ -212,7 +212,10 @@ speculatively.
   reserves a labelled empty slot ("Routines — not yet configured") with no
   data source wired, to be filled in in sub-project 2's own spec/plan cycle.
 
-## Deferred work: Approve/Deny button (historical — now built, see reconciliation)
+## Deferred work: Approve/Deny button
+
+**Historical — this deferral has since been resolved; see
+[Post-freeze reconciliation](#post-freeze-reconciliation-2026-07-06).**
 
 The dashboard-side button that flips a `QueueFileEntry.status` from
 `pending` to `approved`/`denied` was originally deferred until coderails PR
