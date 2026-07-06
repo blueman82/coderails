@@ -8,7 +8,8 @@
 
 ## Global Constraints
 
-- The literal string "v1" must not appear in any file this plan creates (owner mandate).
+- The literal string "v1" must not appear in any file this plan creates (owner mandate). **Exempt: the artifact-marker version token** (`EVAL_ARTIFACT_MARKER_VERSION`/`REVIEW_ARTIFACT_MARKER_VERSION` in `scripts/lib/*.sh`) — it MUST be sourced from those shell libs at test/runtime and never written as a literal in authored TypeScript or fixtures.
+- Both API routes (`/api/events`, `/api/run`) reject requests whose `Origin`/`Host` headers are not localhost — the CSRF token is defence-in-depth, not the only wall.
 - Web UI is dark-only: no light theme, no `prefers-color-scheme` switching.
 - Every HTML document starts with `<meta charset="utf-8">`.
 - Server binds `127.0.0.1` only, never `0.0.0.0`.
