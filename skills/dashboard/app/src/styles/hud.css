@@ -580,6 +580,24 @@
   }
 }
 
+/* Short desktop windows: keep the 3-column layout, but stop clipping rail content at the
+   fold — let the page scroll instead of pinning .hud-stage to a fixed 100vh box. The
+   sphere background (.hud-bg-canvas, position: fixed) stays put either way. */
+@media (max-height: 760px) {
+  .hud-root {
+    overflow-y: auto;
+  }
+  .hud-stage {
+    position: absolute;
+    inset: 0 0 auto 0;
+    height: auto;
+    min-height: 100vh;
+  }
+  .hud-rail {
+    overflow: visible;
+  }
+}
+
 /* ---------- Command deck: run-lifecycle states (Task 9d) ---------- */
 /* .hud-cmd.running .hud-bullet is already defined above (Task 9a) — reused as-is. */
 .hud-cmd.flare .hud-label {
