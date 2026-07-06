@@ -78,6 +78,7 @@
   padding-bottom: 18px;
   border-bottom: 1px solid var(--hairline);
   margin-bottom: 22px;
+  min-width: 0;
 }
 .hud-wordmark {
   font-size: 34px;
