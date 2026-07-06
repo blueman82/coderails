@@ -34,14 +34,129 @@ function formatTime(mtimeMs: number): string {
 }
 
 export default class CommandCentrePlugin extends Plugin {
+  // Live containers for every rendered ```agentic-os``` block, so a vault
+  // "modify" event under dashboard-runs/ (a run note flipping from running
+  // to done/failed — see exec.ts) can re-render each one in place. Obsidian
+  // calls the code-block processor again on its own note-reload path, but
+  // NOT when a note is edited by code rather than by the user in that pane
+  // — this registration is what makes the feed flip without the user
+  // having to reopen the note.
+  private containers = new Set<HTMLElement>();
+
   async onload(): Promise<void> {
     this.registerMarkdownCodeBlockProcessor(
       "agentic-os",
-      async (_source: string, el: HTMLElement, _ctx: MarkdownPostProcessorContext) => {
-        const snapshot = await this.buildSnapshot();
-        el.appendChild(renderCommandCentre(snapshot));
+      async (_source: string, el: HTMLElement, ctx: MarkdownPostProcessorContext) => {
+        await this.renderInto(el);
+        this.containers.add(el);
+        ctx.addChild({
+          load: () => {},
+          onload: () => {},
+          unload: () => this.containers.delete(el),
+          onunload: () => this.containers.delete(el),
+        } as never);
       }
     );
+
+    this.registerEvent(
+      this.app.vault.on("modify", (file) => {
+        if (file instanceof TFile && file.path.startsWith(`${DASHBOARD_RUNS_FOLDER}/`)) {
+          void this.rerenderAll();
+        }
+      })
+    );
+  }
+
+  private async rerenderAll(): Promise<void> {
+    for (const container of this.containers) {
+      container.empty();
+      await this.renderInto(container);
+    }
+  }
+
+  private async renderInto(container: HTMLElement): Promise<void> {
+    const snapshot = await this.buildSnapshot();
+    const root = renderCommandCentre(snapshot);
+    container.appendChild(root);
+    this.wireButtons(root, snapshot.buttons);
+  }
+
+  private wireButtons(root: HTMLElement, buttons: ButtonItem[]): void {
+    const feed = root.querySelector(".cc-activity-feed");
+    root.querySelectorAll<HTMLButtonElement>(".cc-cmd-btn").forEach((btn) => {
+      const name = btn.getAttribute("data-button-name");
+      if (!name) return;
+
+      this.registerDomEvent(btn, "click", () => {
+        void this.handlePress(root, feed, buttons, name);
+      });
+    });
+  }
+
+  private async handlePress(
+    root: HTMLElement,
+    feed: Element | null,
+    buttons: ButtonItem[],
+    name: string
+  ): Promise<void> {
+    const input = root.querySelector<HTMLInputElement>(`.cc-cmd-input[data-button-name="${name}"]`);
+    const errorText = root.querySelector<HTMLElement>(`.cc-cmd-input-error[data-button-name="${name}"]`);
+    const rawInput = input?.value.trim();
+    const value = rawInput ? rawInput : undefined;
+
+    if (errorText) errorText.textContent = "";
+
+    if (value !== undefined && value.startsWith("-")) {
+      if (errorText) errorText.textContent = "input must not start with '-'";
+      return;
+    }
+
+    const result = await pressButton(this.execDeps(), buttons, name, value);
+    if (result.ok) return;
+
+    if (!feed) return;
+    const message =
+      result.reason === "undeclared"
+        ? `unknown button: ${name}`
+        : result.reason === "unresolved"
+          ? `${name}: previous run still in progress`
+          : `${name}: invalid input`;
+    renderErrorRow(feed, message);
+  }
+
+  private execDeps(): ExecDeps {
+    const vault = this.app.vault;
+    return {
+      mkdirIntentDir: () => mkdirSync(QUEUE_DIR, { recursive: true, mode: 0o700 }),
+      writeIntentFile: (path, data) => writeFileSync(join(DASHBOARD_DIR, path), data),
+      findUnresolvedRun: (button) => this.findUnresolvedRun(button),
+      createRunNote: async (path, content) => {
+        await vault.create(path, content);
+      },
+      modifyRunNote: async (path, content) => {
+        const file = vault.getAbstractFileByPath(path);
+        if (file instanceof TFile) await vault.modify(file, content);
+      },
+      execFile: (command, args, options, callback) =>
+        execFileReal(command, args, options, (error, stdout, stderr) => callback(error, stdout, stderr)),
+      now: () => Date.now(),
+      randomRunId: () => randomBytes(8).toString("hex"),
+    };
+  }
+
+  private findUnresolvedRun(button: string): UnresolvedRun | null {
+    const folder = this.app.vault.getAbstractFileByPath(DASHBOARD_RUNS_FOLDER);
+    if (!(folder instanceof TFolder)) return null;
+
+    for (const child of folder.children) {
+      if (!(child instanceof TFile) || child.extension !== "md") continue;
+      const cache = this.app.metadataCache.getFileCache(child);
+      const frontmatter = cache?.frontmatter;
+      if (frontmatter?.status === "running" && frontmatter?.button === button) {
+        return { notePath: child.path };
+      }
+    }
+    return null;
   }
 
   private async buildSnapshot(): Promise<CommandCentreSnapshot> {
