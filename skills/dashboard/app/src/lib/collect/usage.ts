@@ -139,12 +139,14 @@ export async function collectUsage(baseDir: string, now: Date): Promise<UsageSum
   const weekStartMs = nowMs - SEVEN_DAYS_MS;
   const fiveHourStartMs = nowMs - FIVE_HOURS_MS;
 
-  let files: string[] = [];
   try {
-    listDirsRecursive(baseDir, files);
+    readdirSync(baseDir);
   } catch {
     return { last5h: null, week: null };
   }
+
+  const files: string[] = [];
+  listJsonlFiles(baseDir, files);
 
   const candidates = files.filter((path) => {
     try {
