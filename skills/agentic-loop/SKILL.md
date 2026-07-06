@@ -36,7 +36,7 @@ The phases below are sequential. Run them in order. Inside an authorised loop, p
 
 Before Phase -1 — before anything else — write a `progress.json` stub. This guarantees the loop's durable state file exists before the first stop, so the `loop_state_guard` Stop hook never trips a compliant loop; the block degrades to a backstop for a skipped stub.
 
-**Resolve the path — never compute it yourself.** A repo- or cwd-derived key cannot be reproduced by hand. Get the absolute path by running the path helper (the path is keyed to the repo's `git --git-common-dir` when your cwd is inside a git repo, falling back to the raw cwd otherwise — so a mid-loop worktree hop resolves to the SAME path as the checkout it came from):
+**Resolve the path — never compute it yourself.** A repo- or cwd-derived key cannot be reproduced by hand. Get the absolute path by running the path helper (the path is keyed to the repo's `git --git-common-dir` when your cwd is inside a git repo, falling back to the raw cwd otherwise — so a mid-loop worktree hop resolves to the SAME path as the checkout it came from). The helper is stateless and re-derives this key on every call, so a loop that changes its own cwd's repo-ness mid-session (e.g. `git init`s an until-then-non-git cwd) will see its key change too — a rare, self-inflicted edge case, not one the helper guards against:
 
 > `bash "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/lib/agentic_loop_path.sh"`
 
