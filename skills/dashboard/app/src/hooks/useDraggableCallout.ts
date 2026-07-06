@@ -1,7 +1,4 @@
 "use client";
-/* eslint-disable react-hooks/set-state-in-effect --
-   Drag position is a genuinely client-only, pointer-driven value (no SSR equivalent) — same
-   class of exception as Scene.tsx's WebGL probe and Header.tsx's live clock. */
 
 import { useEffect, useRef, useState } from "react";
 
