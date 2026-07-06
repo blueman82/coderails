@@ -58,7 +58,10 @@ export function useRunLifecycle(runs: RunRecord[]): RunLifecycleState {
   const easeRef = useRef(0);
   const lastTickRef = useRef<number | null>(null);
   const runsRef = useRef(runs);
-  runsRef.current = runs;
+
+  useEffect(() => {
+    runsRef.current = runs;
+  }, [runs]);
 
   useEffect(() => {
     const id = setInterval(() => {
