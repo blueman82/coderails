@@ -251,8 +251,7 @@ controllers that lost their place have re-dispatched entire completed task
 sequences — the single most expensive failure observed. Track progress in
 a ledger file, not only in todos.
 
-- At skill start, check for a ledger:
-  `cat "$(git rev-parse --show-toplevel)/.coderails/sdd/progress.md"`. Tasks listed there
+- At skill start, check for a ledger: `cat "$(bash skills/subagent-driven-development/scripts/sdd-workspace)/sdd-ledger.md"`. Tasks listed there
   as complete are DONE — do not re-dispatch them; resume at the first task
   not marked complete.
 - When a task's review comes back clean, append one line to the ledger in
@@ -261,8 +260,10 @@ a ledger file, not only in todos.
 - The ledger is your recovery map: the commits it names exist in git even
   when your context no longer remembers creating them. After compaction,
   trust the ledger and `git log` over your own recollection.
-- `git clean -fdx` will destroy the ledger (it's git-ignored scratch); if
-  that happens, recover from `git log`.
+- The ledger lives outside the repo tree (session-keyed loop-state dir), so
+  `git clean -fdx` cannot destroy it — a bare repo checkout with no ledger
+  present means a fresh session, not data loss; recover from `git log`
+  regardless if the ledger and git history ever disagree.
 
 ## Prompt Templates
 
