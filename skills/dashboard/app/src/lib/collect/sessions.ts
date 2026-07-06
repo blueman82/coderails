@@ -110,6 +110,15 @@ function readUnitTitles(workUnits: unknown): { title: string; done: boolean }[] 
   return [];
 }
 
+// progress.json's "loop" field is a free-text human name (e.g. "observability-dashboard
+// (sub-project 1 of agentic-os evolution)"), not present on every loop. Falls back to the
+// dir slug when absent, blank, or not a string.
+function readLoopName(record: Record<string, unknown>, slug: string): string {
+  const loop = record.loop;
+  if (typeof loop === "string" && loop.trim() !== "") return loop;
+  return slug;
+}
+
 // Mirrors als_read_loop_evals_result (hooks/scripts/lib/loop_state_common.sh):
 // GO or a justified TIER0 exemption count as frozen; NO-GO, UNJUSTIFIED,
 // ABSENT, wrong scope, or malformed JSON do not.
