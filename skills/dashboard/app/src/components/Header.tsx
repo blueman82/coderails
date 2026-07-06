@@ -4,7 +4,7 @@
    via an effect, same shape as Scene.tsx's usePrefersReducedMotion. */
 
 import { useEffect, useState } from "react";
-import { useDashboardState } from "@/hooks/useDashboardState";
+import { useDashboardContext } from "@/components/DashboardProvider";
 import { formatClockTime } from "@/hooks/useDashboardState";
 
 const WEEKDAYS = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
