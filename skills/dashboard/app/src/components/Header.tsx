@@ -4,10 +4,12 @@ import { useEffect, useState } from "react";
 import { useDashboardState } from "@/hooks/useDashboardState";
 import { formatClockTime } from "@/hooks/useDashboardState";
 
-const DATE_FMT = new Intl.DateTimeFormat("en-US", { weekday: "short", month: "short", day: "2-digit" });
+const WEEKDAYS = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
+const MONTHS = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
 
 function formatClockDate(date: Date): string {
-  return DATE_FMT.format(date).toUpperCase().replace(/,/g, "").replace(/\s(\w{3})\s/, " · $1 ");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${WEEKDAYS[date.getDay()]} · ${MONTHS[date.getMonth()]} ${day}`;
 }
 
 export function Header() {
