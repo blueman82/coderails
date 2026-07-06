@@ -155,7 +155,14 @@
   padding: 10px 0;
 }
 
+.cc-cmd-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
 .cc-cmd-btn {
+  width: 100%;
   height: 40px;
   background: var(--cc-bg-card);
   border: 1px solid var(--cc-border);
@@ -171,6 +178,25 @@
 .cc-cmd-btn:hover {
   border-color: var(--cc-amber-dim);
   color: var(--cc-white);
+}
+
+.cc-cmd-input {
+  width: 100%;
+  height: 24px;
+  background: var(--cc-bg-card);
+  border: 1px solid var(--cc-border);
+  border-radius: 3px;
+  color: #c9beb2;
+  font-family: inherit;
+  font-size: 10.5px;
+  padding: 0 6px;
+  box-sizing: border-box;
+}
+
+.cc-cmd-input-error {
+  font-size: 9px;
+  color: var(--cc-red);
+  min-height: 11px;
 }
 
 .cc-activity-feed {
