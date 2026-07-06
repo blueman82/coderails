@@ -49,6 +49,30 @@ describe("parseDashboardConfig", () => {
     expect(config.buttons[0].inputAllowed).toBe(true);
   });
 
+  it("drops a bypass-profile button missing the bypassPermissions: true safety declaration", () => {
+    const raw = JSON.stringify({
+      buttons: [
+        {
+          name: "danger",
+          label: "DANGER",
+          command: "/coderails:danger",
+          cwd: "/Users/harrison/Github/coderails",
+          profile: "bypass",
+        },
+        {
+          name: "danger-ok",
+          label: "DANGER OK",
+          command: "/coderails:danger-ok",
+          cwd: "/Users/harrison/Github/coderails",
+          profile: "bypass",
+          bypassPermissions: true,
+        },
+      ],
+    });
+    const config = parseDashboardConfig(raw);
+    expect(config.buttons.map((b) => b.name)).toEqual(["danger-ok"]);
+  });
+
   it("drops a button missing a required field (command) rather than passing it through malformed", () => {
     const raw = JSON.stringify({
       buttons: [
