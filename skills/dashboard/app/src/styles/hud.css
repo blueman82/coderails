@@ -494,6 +494,47 @@
   text-transform: uppercase;
 }
 
+/* ---------- Assistant.Link queue (pending approvals) ---------- */
+.hud-queue-input-preview {
+  font-family: var(--mono);
+  font-size: 8.5px;
+  letter-spacing: 0.02em;
+  color: var(--grey-dim);
+  white-space: pre-wrap;
+  word-break: break-all;
+  margin: 4px 0;
+}
+.hud-queue-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+.hud-queue-approve,
+.hud-queue-deny {
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  background: none;
+  border: 1px solid var(--hairline);
+  padding: 3px 8px;
+  cursor: pointer;
+  color: var(--grey);
+}
+.hud-queue-approve:hover {
+  color: var(--off-white);
+  border-color: var(--rose);
+}
+.hud-queue-deny:hover {
+  color: var(--off-white);
+  border-color: var(--rose);
+}
+.hud-queue-approve:disabled,
+.hud-queue-deny:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
 /* ---------- Bottom centre directive ---------- */
 .hud-bottom-centre {
   grid-column: 1 / -1;
