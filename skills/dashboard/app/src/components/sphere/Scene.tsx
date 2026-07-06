@@ -82,7 +82,7 @@ export function Scene() {
       frameloop={reducedMotion ? "demand" : "always"}
     >
       <NetworkSphere reducedMotion={reducedMotion} accent={accent} boost={boost} />
-      <GridFloor />
+      <GridFloor accent={accent} />
       {!reducedMotion && (
         <EffectComposer>
           <Bloom luminanceThreshold={0.2} luminanceSmoothing={0.9} intensity={0.6} mipmapBlur />
