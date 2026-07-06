@@ -144,6 +144,9 @@ export function RailRight({ token, buttons }: RailRightProps) {
       data-debug-effect-fires={effectFireCount.current}
       data-debug-active-count={activeCount}
       data-debug-last-effect={lastEffectDebug.current}
+      data-debug-runs-raw={JSON.stringify(
+        runs.map((r) => ({ id: r.runId.slice(0, 6), button: r.button, ended: r.endedAt !== undefined }))
+      )}
     >
       <div className="hud-block">
         <div className="hud-sec-head">
