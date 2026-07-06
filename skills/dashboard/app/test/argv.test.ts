@@ -38,9 +38,9 @@ describe("buildArgv", () => {
     ]);
   });
 
-  it("appends input as exactly one trailing argv element for a standard-profile button", () => {
+  it("appends input as exactly one trailing argv element, after a '--' end-of-options sentinel, for a standard-profile button", () => {
     const argv = buildArgv(button({ profile: "standard" }), "extra context here");
-    expect(argv).toEqual(["-p", "/coderails:wiki-lint", "extra context here"]);
+    expect(argv).toEqual(["-p", "/coderails:wiki-lint", "--", "extra context here"]);
   });
 
   it("never concatenates input into the command string", () => {
@@ -50,15 +50,27 @@ describe("buildArgv", () => {
     expect(argv.some((a) => a.includes("/coderails:wiki-lint; rm -rf /"))).toBe(false);
   });
 
-  it("places input after profile flags for a read-only-profile button", () => {
+  it("places the '--' sentinel and input after profile flags for a read-only-profile button", () => {
     const argv = buildArgv(button({ profile: "read-only" }), "note");
     expect(argv).toEqual([
       "-p",
       "/coderails:wiki-lint",
       "--allowedTools",
       ...READ_ONLY_ALLOWED_TOOLS,
+      "--",
       "note",
     ]);
+  });
+
+  it("rejects input that starts with '-' (flag smuggling) by throwing", () => {
+    expect(() => buildArgv(button({ profile: "standard" }), "--dangerously-skip-permissions")).toThrow();
+    expect(() => buildArgv(button({ profile: "standard" }), "-p")).toThrow();
+  });
+
+  it("does not insert a '--' sentinel when there is no input", () => {
+    const argv = buildArgv(button({ profile: "standard" }));
+    expect(argv).toEqual(["-p", "/coderails:wiki-lint"]);
+    expect(argv).not.toContain("--");
   });
 
   it("returns a fresh array on each call (no shared mutable state)", () => {
