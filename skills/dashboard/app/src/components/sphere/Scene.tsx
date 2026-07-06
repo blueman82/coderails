@@ -12,6 +12,8 @@ import { EffectComposer, Bloom } from "@react-three/postprocessing";
 import { NetworkSphere } from "./NetworkSphere";
 import { GridFloor } from "./GridFloor";
 import { Fallback2D } from "./Fallback2D";
+import { useDashboardContext } from "@/components/DashboardProvider";
+import { useRunLifecycle } from "@/hooks/useRunLifecycle";
 
 // Probes WebGL context creation without mounting a real <Canvas> (R3F/three throw deep inside
 // the render pipeline, not at a boundary React's error boundaries can reliably catch before
