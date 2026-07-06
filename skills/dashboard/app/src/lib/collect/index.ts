@@ -80,6 +80,7 @@ function sortGates(gates: (PrGate | PrGateError)[]): (PrGate | PrGateError)[] {
 export function createAggregator(deps: AggregatorDeps): Aggregator {
   const trailLimit = deps.memoryTrailLimit ?? DEFAULT_TRAIL_LIMIT;
   const runsLimit = deps.runsLimit ?? DEFAULT_RUNS_LIMIT;
+  const queueLimit = deps.queueLimit ?? DEFAULT_QUEUE_LIMIT;
   const gatesPollMs = deps.gatesPollMs ?? DEFAULT_GATES_POLL_MS;
   const activityDebounceMs = deps.activityDebounceMs ?? DEFAULT_ACTIVITY_DEBOUNCE_MS;
   const onError = deps.onError ?? (() => {});
