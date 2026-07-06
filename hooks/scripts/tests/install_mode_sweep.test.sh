@@ -31,6 +31,11 @@ check() { # desc expected actual
 
 # A 100644-in-index file (sourced-only lib) — sweep must ensure -x on disk.
 SOURCE_ONLY_FILE="scripts/lib/git-common.sh"
+# Other sourced-only libs under scripts/lib/ that install.sh's literal list
+# must also name explicitly — the sweep's only lib glob is
+# hooks/scripts/lib/*.sh; there is no scripts/lib/*.sh glob, so anything
+# under scripts/lib/ that isn't named literally is silently never swept at all.
+OTHER_SOURCE_ONLY_FILES="scripts/lib/review-artifact.sh scripts/lib/config.sh"
 # A 100755-in-index file (directly invoked) — sweep must ensure +x on disk.
 EXEC_FILE="scripts/push.sh"
 # A file NOT in the git index at all (e.g. a release-tarball install with no
@@ -58,6 +63,9 @@ cp "$REPO_ROOT/install.sh" "$TMP_TREE/install.sh"
 # Simulate drift in both directions before running the sweep.
 chmod +x "$TMP_TREE/$SOURCE_ONLY_FILE"   # stale +x that should be removed
 chmod -x "$TMP_TREE/$EXEC_FILE"          # missing +x that should be added
+for f in $OTHER_SOURCE_ONLY_FILES; do
+  chmod +x "$TMP_TREE/$f"                # stale +x that should be removed
+done
 
 # Untracked scratch file — not `git add`ed, so it has no index mode at all
 # (simulates a no-.git tarball install where every file takes this path).
@@ -80,10 +88,17 @@ index_mode_exec=$(git -C "$REPO_ROOT" ls-files -s -- "$EXEC_FILE" | awk '{print 
 
 check "$SOURCE_ONLY_FILE index mode is 100644 (precondition)" "100644" "$index_mode_source_only"
 check "$EXEC_FILE index mode is 100755 (precondition)" "100755" "$index_mode_exec"
+for f in $OTHER_SOURCE_ONLY_FILES; do
+  index_mode_other=$(git -C "$REPO_ROOT" ls-files -s -- "$f" | awk '{print $1}')
+  check "$f index mode is 100644 (precondition)" "100644" "$index_mode_other"
+done
 
 check "$SOURCE_ONLY_FILE loses stale +x after sweep (100644-in-index)" "no" "$(is_executable "$TMP_TREE/$SOURCE_ONLY_FILE")"
 check "$EXEC_FILE gains +x after sweep (100755-in-index)" "yes" "$(is_executable "$TMP_TREE/$EXEC_FILE")"
 check "$UNTRACKED_FILE gains +x after sweep (not in index, fallback behaviour)" "yes" "$(is_executable "$TMP_TREE/$UNTRACKED_FILE")"
+for f in $OTHER_SOURCE_ONLY_FILES; do
+  check "$f loses stale +x after sweep (100644-in-index, must be named in install.sh's literal list)" "no" "$(is_executable "$TMP_TREE/$f")"
+done
 
 # --- No-git-checkout case (release tarball, no .git anywhere) ---
 # `git ls-files -s` exits 128 outside a git repo/worktree. Under install.sh's
@@ -104,11 +119,17 @@ rm -rf "$NOGIT_TREE/.git"   # `git worktree add` leaves a `.git` file pointing a
 # fresh, independent of the first run.
 chmod +x "$NOGIT_TREE/$SOURCE_ONLY_FILE"
 chmod -x "$NOGIT_TREE/$EXEC_FILE"
+for f in $OTHER_SOURCE_ONLY_FILES; do
+  chmod +x "$NOGIT_TREE/$f"
+done
 
 nogit_exit=0
 ( cd "$NOGIT_TREE" && printf 'n\n' | MEMORY_TARGET="$NOGIT_TREE/.memory-test" bash install.sh >/dev/null 2>&1 ) || nogit_exit=$?
 
 check "install.sh exits 0 in a no-git checkout (does not die mid-sweep)" "0" "$nogit_exit"
 check "$SOURCE_ONLY_FILE gains +x in a no-git checkout (fallback applied to every file)" "yes" "$(is_executable "$NOGIT_TREE/$SOURCE_ONLY_FILE")"
+for f in $OTHER_SOURCE_ONLY_FILES; do
+  check "$f gains +x in a no-git checkout (fallback applied to every file)" "yes" "$(is_executable "$NOGIT_TREE/$f")"
+done
 
 [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails)"; exit 1; }

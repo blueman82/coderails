@@ -329,7 +329,7 @@ _hook_scripts=$(jq -r '.hooks[][].hooks[].command // empty' "$PLUGIN_DIR/hooks/h
   | sed 's|"${CLAUDE_PLUGIN_ROOT}/||g; s/"//g')
 _lib_scripts=$(cd "$PLUGIN_DIR" && printf '%s\n' hooks/scripts/lib/*.sh 2>/dev/null)
 _skill_scripts=$(cd "$PLUGIN_DIR" && printf '%s\n' skills/*/scripts/*.sh 2>/dev/null)
-for script in scripts/push.sh scripts/merge.sh scripts/lib/git-common.sh scripts/lib/eval-artifact.sh scripts/post_evals.sh \
+for script in scripts/push.sh scripts/merge.sh scripts/lib/git-common.sh scripts/lib/eval-artifact.sh scripts/lib/review-artifact.sh scripts/lib/config.sh scripts/post_evals.sh \
               $_lib_scripts \
               $_hook_scripts \
               $_skill_scripts; do
