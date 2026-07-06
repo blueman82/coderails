@@ -1,4 +1,10 @@
 "use client";
+/* eslint-disable react-hooks/set-state-in-effect --
+   Both effects below resolve genuinely client-only values (matchMedia, WebGL context creation)
+   that do not exist during SSR. A lazy useState initializer can't replace this: React reuses the
+   server-computed initial state through hydration instead of re-running the initializer on the
+   client, so the client's real answer would never land. The one-tick "resolve after mount" delay
+   is the correct, unavoidable shape for this kind of client-only check, not a workaround. */
 
 import { useEffect, useState } from "react";
 import { Canvas } from "@react-three/fiber";
