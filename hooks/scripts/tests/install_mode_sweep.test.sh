@@ -100,6 +100,15 @@ printf '{"extraKnownMarketplaces":{"workflow-tools":{"source":{"source":"directo
 printf '{"workflow-tools":{"source":{"source":"directory","path":"/nonexistent"}}}\n' \
   > "$HOME_SANDBOX/.claude/plugins/known_marketplaces.json"
 
+# Seed one conflicting command file so install.sh's conflict-scan prompt
+# actually fires (an empty commands dir never triggers the prompt at all,
+# so without this the "decline" path below would be silently untested).
+# The test's single stdin answer is 'n' (line ~121), so the copy must be
+# skipped and the pre-existing file must survive untouched.
+mkdir -p "$HOME_SANDBOX/.claude/commands"
+printf '# pre-existing user command, must not be overwritten\n' > "$HOME_SANDBOX/.claude/commands/workflow.md"
+PRE_EXISTING_WORKFLOW_MD_CKSUM="$(cksum "$HOME_SANDBOX/.claude/commands/workflow.md")"
+
 # Real-HOME files that install.sh writes unconditionally (settings.json,
 # known_marketplaces.json, CLAUDE.md) — snapshot all three before the run so
 # the leak-proof check below covers every one of them, not just settings.json.
@@ -143,6 +152,11 @@ check "sandboxed known_marketplaces.json drops stale workflow-tools key (real jq
   "null" "$(jq -r '.["workflow-tools"] // "null"' "$HOME_SANDBOX/.claude/plugins/known_marketplaces.json" 2>/dev/null)"
 check "sandboxed CLAUDE.md gains the Self-Checking Discipline section (real append exercised)" \
   "yes" "$(grep -q '## Self-Checking Discipline' "$HOME_SANDBOX/.claude/CLAUDE.md" 2>/dev/null && echo yes || echo no)"
+
+check "commands dir conflict declined: pre-existing workflow.md is unchanged (cksum)" \
+  "$PRE_EXISTING_WORKFLOW_MD_CKSUM" "$(cksum "$HOME_SANDBOX/.claude/commands/workflow.md" 2>/dev/null)"
+check "commands dir conflict declined: no other command file was copied in" \
+  "1" "$(find "$HOME_SANDBOX/.claude/commands" -type f | wc -l | tr -d ' ')"
 
 is_executable() { [ -x "$1" ] && echo yes || echo no; }
 
@@ -192,6 +206,16 @@ done
 NOGIT_HOME_SANDBOX="$NOGIT_TREE/.home-sandbox"
 mkdir -p "$NOGIT_HOME_SANDBOX"
 
+# Pre-seed with the same stale marketplace key as the tracked run's sandbox
+# (lines 97-101 above) so this run also exercises install.sh's real jq
+# mutation logic in the no-git path, not just an inert empty sandbox —
+# mirrors the tracked-run's anti-vacuity technique.
+mkdir -p "$NOGIT_HOME_SANDBOX/.claude/plugins"
+printf '{"extraKnownMarketplaces":{"workflow-tools":{"source":{"source":"directory","path":"/nonexistent"}}}}\n' \
+  > "$NOGIT_HOME_SANDBOX/.claude/settings.json"
+printf '{"workflow-tools":{"source":{"source":"directory","path":"/nonexistent"}}}\n' \
+  > "$NOGIT_HOME_SANDBOX/.claude/plugins/known_marketplaces.json"
+
 nogit_exit=0
 ( cd "$NOGIT_TREE" && printf 'n\n' | HOME="$NOGIT_HOME_SANDBOX" MEMORY_TARGET="$NOGIT_TREE/.memory-test" bash install.sh >/dev/null 2>&1 ) || nogit_exit=$?
 
@@ -211,6 +235,13 @@ else
 fi
 check "no-git sandboxed CLAUDE.md gains the Self-Checking Discipline section (real append exercised)" \
   "yes" "$(grep -q '## Self-Checking Discipline' "$NOGIT_HOME_SANDBOX/.claude/CLAUDE.md" 2>/dev/null && echo yes || echo no)"
+
+check "no-git sandboxed settings.json drops stale workflow-tools key (real jq mutation exercised)" \
+  "null" "$(jq -r '.extraKnownMarketplaces["workflow-tools"] // "null"' "$NOGIT_HOME_SANDBOX/.claude/settings.json" 2>/dev/null)"
+check "no-git sandboxed settings.json registers coderails marketplace pointing at the nogit tree" \
+  "$NOGIT_TREE" "$(jq -r '.extraKnownMarketplaces.coderails.source.path // "null"' "$NOGIT_HOME_SANDBOX/.claude/settings.json" 2>/dev/null)"
+check "no-git sandboxed known_marketplaces.json drops stale workflow-tools key (real jq mutation exercised)" \
+  "null" "$(jq -r '.["workflow-tools"] // "null"' "$NOGIT_HOME_SANDBOX/.claude/plugins/known_marketplaces.json" 2>/dev/null)"
 
 check "install.sh exits 0 in a no-git checkout (does not die mid-sweep)" "0" "$nogit_exit"
 check "$SOURCE_ONLY_FILE gains +x in a no-git checkout (fallback applied to every file)" "yes" "$(is_executable "$NOGIT_TREE/$SOURCE_ONLY_FILE")"

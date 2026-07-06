@@ -110,6 +110,47 @@ check "MULTIPLE UNTRACKED: does not crash (exit 0)" "0" "$RC"
 check "MULTIPLE UNTRACKED: alpha.txt named in warning" "1" "$(printf '%s' "$OUT" | grep -c 'alpha.txt')"
 check "MULTIPLE UNTRACKED: beta.txt named in warning" "1" "$(printf '%s' "$OUT" | grep -c 'beta.txt')"
 
+# ─── PRE-STAGED NEW FILE: a new file already `git add`ed before push.sh runs ─
+# `git add -u` only touches already-tracked paths; a pre-staged new file has
+# no prior tracked history, but it IS already in the index (mode A), so `git
+# add -u` must leave it staged rather than unstaging it — the previous
+# `git add -A` behaviour and the new `git add -u` behaviour agree here for
+# already-staged content, so this proves the tracked-only migration didn't
+# regress the pre-staged case.
+R=$(new_fixture prestaged_new)
+BEFORE_HEAD=$(git -C "$R" rev-parse HEAD)
+echo "brand new" > "$R/prestaged.txt"
+git -C "$R" add prestaged.txt
+OUT=$( ( cd "$R" && bash "$PUSH_SH" ) 2>&1 )
+RC=$?
+AFTER_HEAD=$(git -C "$R" rev-parse HEAD)
+committed_files=$(git -C "$R" show --name-only -1 --format="" HEAD 2>/dev/null)
+check "PRE-STAGED NEW FILE: does not crash (exit 0)" "0" "$RC"
+check "PRE-STAGED NEW FILE: HEAD advances (a new commit was made)" "1" "$([ "$BEFORE_HEAD" != "$AFTER_HEAD" ] && echo 1 || echo 0)"
+check "PRE-STAGED NEW FILE: the pre-staged file is committed" "1" "$(printf '%s' "$committed_files" | grep -c prestaged.txt)"
+check "PRE-STAGED NEW FILE: no untracked-file warning printed" "0" "$(printf '%s' "$OUT" | grep -c -i 'untracked')"
+
+# ─── DELETED TRACKED FILE: a tracked file removed from disk before push.sh runs ─
+# `git add -u` (unlike a bare `git add -A .` restricted to modified files)
+# must also stage deletions of already-tracked paths — this is the case
+# that would silently leave a deleted file "modified but uncommitted" if a
+# future edit narrowed the staging call to skip removals.
+R=$(new_fixture deleted_tracked)
+echo "to be deleted" > "$R/todelete.txt"
+git -C "$R" add todelete.txt
+git -C "$R" commit -q -m "add todelete.txt"
+BEFORE_HEAD=$(git -C "$R" rev-parse HEAD)
+rm "$R/todelete.txt"
+OUT=$( ( cd "$R" && bash "$PUSH_SH" ) 2>&1 )
+RC=$?
+AFTER_HEAD=$(git -C "$R" rev-parse HEAD)
+committed_files=$(git -C "$R" show --name-only -1 --format="" HEAD 2>/dev/null)
+check "DELETED TRACKED FILE: does not crash (exit 0)" "0" "$RC"
+check "DELETED TRACKED FILE: HEAD advances (a new commit was made)" "1" "$([ "$BEFORE_HEAD" != "$AFTER_HEAD" ] && echo 1 || echo 0)"
+check "DELETED TRACKED FILE: the deletion is committed" "1" "$(printf '%s' "$committed_files" | grep -c todelete.txt)"
+check "DELETED TRACKED FILE: file absent from the resulting tree" "0" "$(git -C "$R" show HEAD:todelete.txt 2>/dev/null | wc -l | tr -d ' ')"
+check "DELETED TRACKED FILE: no untracked-file warning printed" "0" "$(printf '%s' "$OUT" | grep -c -i 'untracked')"
+
 # ─── NEGATIVE CONTROL: script no longer contains git add -A ─────────────────
 check "NEGATIVE CONTROL: push.sh contains zero 'git add -A'" "0" "$(grep -c 'git add -A' "$PUSH_SH")"
 check "NEGATIVE CONTROL: push.sh contains 'git add -u'" "1" "$(grep -c 'git add -u' "$PUSH_SH" | head -1)"

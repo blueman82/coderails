@@ -142,6 +142,19 @@ jq -n '{scope:"loop", tier:2, tier_justification:"probe", result:"NO-GO"}' > "$d
 als_read_loop_evals_result "$d"
 check "regression: scope=loop tier=2 justified result=NO-GO -> NO-GO" "NO-GO" "$ALS_LOOP_EVALS_RESULT"
 
+# tier!=0, justified, result key ABSENT ENTIRELY (not "NO-GO" explicitly,
+# not tier 0) -> NO-GO via the reader's final `else` branch. Distinct from
+# every existing fixture: the closest prior case (line ~136 above) sets
+# result:"GO" explicitly and is caught by the second elif; this fixture has
+# no result key at all, so it must fall through every elif to reach the
+# final else, which is the one branch this file had zero coverage for
+# until now (confirmed by direct execution against pre-change code: this
+# exact fixture already returns NO-GO today — this test locks that in).
+d=$(mktemp -d "$TMP/loopdir.XXXX")
+jq -n '{scope:"loop", tier:2, tier_justification:"probe, no result key at all"}' > "$d/evals.json"
+als_read_loop_evals_result "$d"
+check "scope=loop tier=2 justified, result key absent -> NO-GO (final else)" "NO-GO" "$ALS_LOOP_EVALS_RESULT"
+
 # ── gate_loop_evals_required (end-to-end guard invocations) ─────────────────
 # Helpers copied verbatim (in spirit) from loop_state_guard.test.sh, per the
 # plan's instruction that bash test files in this repo are self-contained.
@@ -317,6 +330,19 @@ check "UNJUSTIFIED (tier 1, blank justification, no result) -> block (exit 2)" 2
 case "$err" in
   *"tier_justification"*) : ;;
   *) fails=$((fails+1)); printf 'FAIL - UNJUSTIFIED e2e stderr missing tier_justification mention: %s\n' "$err" ;;
+esac
+
+# e2e: tier!=0, justified, result key absent entirely -> block via the
+# reader's NO-GO final-else path, same as the reader-level case above but
+# through the full guard invocation.
+reset; T=$(mk_transcript 1); write_file complete S1 1 S1 "$WU3"
+jq -n '{scope:"loop", tier:2, tier_justification:"probe, no result key at all"}' > "$(file_dir S1)/evals.json"
+code=$(run x "$(payload "$T" S1)")
+err=$(run_err x "$(payload "$T" S1)")
+check "e2e: tier=2 justified, result key absent -> block (exit 2, final else NO-GO)" 2 "$code"
+case "$err" in
+  *"$(file_dir S1)/evals.json"*) : ;;
+  *) fails=$((fails+1)); printf 'FAIL - e2e final-else stderr missing loop dir path: %s\n' "$err" ;;
 esac
 
 [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails)"; exit 1; }
