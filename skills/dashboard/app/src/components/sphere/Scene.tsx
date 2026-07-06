@@ -48,6 +48,8 @@ function usePrefersReducedMotion(): boolean {
 export function Scene() {
   const reducedMotion = usePrefersReducedMotion();
   const [webglOK, setWebglOK] = useState<boolean | null>(null);
+  const { snapshot } = useDashboardContext();
+  const { accent, boost } = useRunLifecycle(snapshot.runs);
 
   useEffect(() => {
     let ok = false;
