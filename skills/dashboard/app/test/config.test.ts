@@ -48,6 +48,16 @@ describe("loadConfig", () => {
     expect(() => loadConfig(missingPath)).toThrow(missingPath);
   });
 
+  it("throws ConfigError naming the path when the file has malformed JSON", () => {
+    const dir = mkdtempSync(join(tmpdir(), "dashboard-config-test-"));
+    tmpDirs.push(dir);
+    const path = join(dir, "config.json");
+    writeFileSync(path, "{ not valid json");
+    expect(() => loadConfig(path)).toThrow(ConfigError);
+    expect(() => loadConfig(path)).toThrow(path);
+    expect(() => loadConfig(path)).toThrow(/json/i);
+  });
+
   it("throws when button names are duplicated", () => {
     const path = writeConfig({
       ...validConfig,
