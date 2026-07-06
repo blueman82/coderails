@@ -89,4 +89,47 @@ describe("collectHealth", () => {
   it("never throws even when called with no options (uses real default paths)", () => {
     expect(() => collectHealth()).not.toThrow();
   });
+
+  describe("hooksFired scoped to today", () => {
+    const TODAY = new Date("2026-07-06T18:00:00+01:00");
+
+    it("counts only lines stamped today, excluding older-day lines and a non-timestamp line", () => {
+      const path = makeTmpDisciplineLog([
+        "2026-07-06T09:00:00+01:00 hook=confidence_labels session=abc matched=1 would_block=0",
+        "2026-07-05T23:59:59+01:00 hook=verify_loop session=abc blocked=0",
+        "2026-07-01T12:00:00+01:00 hook=loop_stall_guard session=abc blocked=0",
+        "not-a-timestamp hook=weird session=abc blocked=0",
+        "2026-07-06T17:30:00+01:00 hook=loop_state_guard session=abc blocked=0",
+      ]);
+      const tiles = collectHealth({ disciplineLogPath: path, now: TODAY });
+      const tile = tiles.find((t) => t.key === "hooksFired");
+      expect(tile?.value).toBe("2");
+      expect(tile?.note).toBeUndefined();
+    });
+
+    it("counts a line stamped 00:00:00 today", () => {
+      const path = makeTmpDisciplineLog([
+        "2026-07-06T00:00:00+01:00 hook=confidence_labels session=abc blocked=0",
+      ]);
+      const tiles = collectHealth({ disciplineLogPath: path, now: TODAY });
+      const tile = tiles.find((t) => t.key === "hooksFired");
+      expect(tile?.value).toBe("1");
+    });
+
+    it("excludes a line stamped 23:59:59 yesterday", () => {
+      const path = makeTmpDisciplineLog([
+        "2026-07-05T23:59:59+01:00 hook=confidence_labels session=abc blocked=0",
+      ]);
+      const tiles = collectHealth({ disciplineLogPath: path, now: TODAY });
+      const tile = tiles.find((t) => t.key === "hooksFired");
+      expect(tile?.value).toBe("0");
+    });
+
+    it("excludes lines whose leading token does not parse as a timestamp (fail-honest, does not guess their day)", () => {
+      const path = makeTmpDisciplineLog(["garbage line with no timestamp at all"]);
+      const tiles = collectHealth({ disciplineLogPath: path, now: TODAY });
+      const tile = tiles.find((t) => t.key === "hooksFired");
+      expect(tile?.value).toBe("0");
+    });
+  });
 });
