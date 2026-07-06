@@ -89,6 +89,7 @@ Before dispatching Task 1, scan the plan once for conflicts:
 - tasks that contradict each other or the plan's Global Constraints
 - anything the plan explicitly mandates that the review rubric treats as a
   defect (a test that asserts nothing, verbatim duplication of a logic block)
+- evals.json exists for this plan's scope with a non-empty `frozen_at` and `frozen_sha` — if absent, STOP and invoke `/coderails:task-evals` before dispatching Task 1; do not proceed on the assumption evals will be generated later.
 
 Present everything you find to your human partner as one batched question —
 each finding beside the plan text that mandates it, asking which governs —
