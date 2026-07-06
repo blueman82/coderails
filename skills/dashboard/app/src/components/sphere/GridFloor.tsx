@@ -27,7 +27,10 @@ export function GridFloor({ accent }: { accent: AccentHsl }) {
   const gridVerts = useMemo(() => buildGridVerts(), []);
   const materialRef = useRef<THREE.LineBasicMaterial>(null);
   const accentRef = useRef(accent);
-  accentRef.current = accent;
+
+  useEffect(() => {
+    accentRef.current = accent;
+  }, [accent]);
 
   useFrame(() => {
     const mat = materialRef.current;
