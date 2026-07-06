@@ -42,7 +42,7 @@ export function RailLeft() {
   const loop = selectActiveLoop(loops);
 
   return (
-    <section className="hud-rail hud-rail-left">
+    <section className="hud-rail hud-rail-left hud-intro-rail-left">
       <div className="hud-block">
         <div className="hud-sec-head">
           <span className="hud-title">System Vitals</span>
