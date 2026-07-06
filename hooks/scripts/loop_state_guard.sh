@@ -88,6 +88,8 @@ Generate loop-scope evals via /coderails:task-evals (or a justified tier-0 exemp
           exit 2
           ;;
       esac
+    else
+      als_log "hook=loop_state_guard session=$session_id work_units=$ALS_WORK_UNIT_COUNT evals=skipped-below-threshold blocked=0"
     fi
   fi
 }

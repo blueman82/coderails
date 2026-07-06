@@ -150,6 +150,7 @@ als_read_work_units() {
 # satisfy the loop gate). Sibling to als_read_work_units for the same reason.
 als_read_loop_evals_result() {
   ALS_LOOP_EVALS_RESULT="ABSENT"
+  command -v jq >/dev/null 2>&1 || { als_log "hook=loop_state_guard evals=skipped reason=jq_missing"; return 0; }
   local f="$1/evals.json"
   [ -f "$f" ] || return 0
   jq -e . "$f" >/dev/null 2>&1 || return 0

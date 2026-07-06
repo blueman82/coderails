@@ -187,4 +187,28 @@ case "$err" in
   *) : ;;
 esac
 
+# Session-mismatch path: 3 work_units, no evals.json, but progress.json's
+# session_id doesn't match this session -> block via the PRE-EXISTING
+# session_mismatch message, NOT the new "loop-scope evals" message. The new
+# gate's guard condition requires ALS_SESSION = session_id, so a mismatch
+# should never let it fire.
+reset; T=$(mk_transcript 1); write_file complete OTHER 1 S1 "$WU3"
+code=$(run x "$(payload "$T" S1)")
+err=$(run_err x "$(payload "$T" S1)")
+check "session-mismatch, 3 work_units, no evals.json -> block via PRE-EXISTING session_mismatch gate" 2 "$code"
+case "$err" in
+  *"session_id 'OTHER' recorded inside it, but this session is 'S1'"*) : ;;
+  *) fails=$((fails+1)); printf 'FAIL - stderr missing pre-existing session_mismatch message: %s\n' "$err" ;;
+esac
+case "$err" in
+  *"loop-scope evals"*) fails=$((fails+1)); printf 'FAIL - new gate message wrongly fired on session-mismatch path: %s\n' "$err" ;;
+  *) : ;;
+esac
+
+# evals.json with bare {"scope":"loop"} — no result, no tier — -> NO-GO -> block.
+reset; T=$(mk_transcript 1); write_file complete S1 1 S1 "$WU3"
+jq -n '{scope:"loop"}' > "$(file_dir S1)/evals.json"
+code=$(run x "$(payload "$T" S1)")
+check "bare {scope:loop} (no result, no tier) -> NO-GO -> block (exit 2)" 2 "$code"
+
 [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails)"; exit 1; }
