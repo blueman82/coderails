@@ -128,7 +128,7 @@ export function RailRight({ token, buttons }: RailRightProps) {
   const engagedCount = runningNames.length;
 
   return (
-    <section className="hud-rail hud-rail-right hud-intro-rail-right">
+    <section className="hud-rail hud-rail-right hud-intro-rail-right" data-debug-uistate={JSON.stringify(uiState)}>
       <div className="hud-block">
         <div className="hud-sec-head">
           <span className="hud-title">Command Deck</span>
