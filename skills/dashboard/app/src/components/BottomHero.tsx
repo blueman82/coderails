@@ -1,9 +1,10 @@
 "use client";
 
-import { useDashboardState, selectActiveLoop } from "@/hooks/useDashboardState";
+import { useDashboardContext } from "@/components/DashboardProvider";
+import { selectActiveLoop } from "@/hooks/useDashboardState";
 
 export function BottomHero() {
-  const { snapshot } = useDashboardState();
+  const { snapshot } = useDashboardContext();
   const loop = selectActiveLoop(snapshot.loops);
   const nextUnit = loop?.unitTitles.find((u) => !u.done);
 
