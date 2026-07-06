@@ -169,4 +169,21 @@ describe("getRunToken", () => {
 
     expect(statSync(path).mode & 0o777).toBe(0o600);
   });
+
+  it("still returns the token when chmod fails (e.g. file not owned by this process) rather than throwing", () => {
+    const dir = tmpRunsDir();
+    mkdirSync(dir, { recursive: true });
+    const path = join(dir, "run-token");
+    writeFileSync(path, "existing-token-value", { mode: 0o644 });
+
+    const chmodSpy = vi.spyOn(fs, "chmodSync").mockImplementation(() => {
+      throw new Error("EPERM: operation not permitted");
+    });
+    try {
+      expect(() => getRunToken(dir)).not.toThrow();
+      expect(getRunToken(dir)).toBe("existing-token-value");
+    } finally {
+      chmodSpy.mockRestore();
+    }
+  });
 });
