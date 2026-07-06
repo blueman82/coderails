@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { renderCommandCentre } from "../src/render";
+import { renderCommandCentre, renderErrorRow } from "../src/render";
 import type { CommandCentreSnapshot } from "../src/render";
 
 function emptySnapshot(): CommandCentreSnapshot {
