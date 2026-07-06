@@ -222,9 +222,13 @@ export function buildArgv(btn: ButtonDef, input?: string): string[]; // src/lib/
 
 **Interfaces produced (consumed by Tasks 9, 12):**
 ```ts
-// GET /api/events → text/event-stream. Named events, JSON data:
+// GET /api/events → text/event-stream. Rejects non-localhost Origin/Host with 403 (same check as /api/run).
+// Named events, JSON data:
 // 'snapshot' { sessions: SessionInfo[]; loops: LoopInfo[]; gates: PrGate[]; trail: TrailEntry[];
-//              health: HealthTile[]; runs: RunRecord[]; token: string }
+//              health: HealthTile[]; runs: RunRecord[] }
+// SECURITY (stress-test blocker): the CSRF token is NEVER in any SSE event or API response body —
+// an EventSource opened by a hostile tab would read it and defeat the token entirely. The token
+// reaches the page exclusively via server-render (Task 7's mintToken).
 // 'runs'     RunRecord[]            (on any run start/finish)
 // 'gates'    PrGate[]               (each gh poll, default every 120s)
 // 'activity' { sessions, loops, trail }  (fs-watch driven, debounced 2s)
