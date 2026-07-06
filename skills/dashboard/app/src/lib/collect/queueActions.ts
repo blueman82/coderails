@@ -69,6 +69,3 @@ export function resolveQueueEntry(queueDir: string, hash: string, decision: Deci
   const updated: Record<string, unknown> = { ...parsed, status: decision };
   writeFileSync(path, JSON.stringify(updated));
 }
-
-// Re-exported for consumers that want the shape without importing queue.ts directly.
-export type { QueueEntry };
