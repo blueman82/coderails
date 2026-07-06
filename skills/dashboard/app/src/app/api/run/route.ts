@@ -187,7 +187,9 @@ function getConfig(): DashboardConfig {
 
 // Token caching lives in runlog.ts, not here — see getRunToken's comment
 // there for why a route.ts-local cache is unsafe to share with page.tsx.
-export { getRunToken } from "../../../lib/runlog";
+// Re-exported so existing callers importing getRunToken from this route
+// module keep working.
+export { getRunToken };
 
 export async function POST(request: Request): Promise<Response> {
   return createRunHandler({ config: getConfig(), token: getRunToken() })(request);
