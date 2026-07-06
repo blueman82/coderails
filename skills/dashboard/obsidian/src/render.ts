@@ -132,9 +132,28 @@ function renderCommandGrid(container: HTMLElement, buttons: ButtonItem[]): void 
     grid.appendChild(el("div", "cc-command-grid-empty", "no commands declared — add buttons[] to ~/.claude/coderails-dashboard.json"));
   } else {
     for (const button of buttons) {
+      const item = el("div", "cc-cmd-item");
+
       const btn = el("button", "cc-cmd-btn", button.label);
       btn.setAttribute("data-button-name", button.name);
-      grid.appendChild(btn);
+      item.appendChild(btn);
+
+      if (button.inputAllowed) {
+        const input = document.createElement("input");
+        input.className = "cc-cmd-input";
+        input.type = "text";
+        input.placeholder = "input…";
+        input.setAttribute("data-button-name", button.name);
+        item.appendChild(input);
+
+        // Populated by main.ts's client-side "-"-prefix guard (buildArgv
+        // would throw on this anyway — belt and braces, see exec.ts).
+        const error = el("span", "cc-cmd-input-error");
+        error.setAttribute("data-button-name", button.name);
+        item.appendChild(error);
+      }
+
+      grid.appendChild(item);
     }
   }
   container.appendChild(grid);
