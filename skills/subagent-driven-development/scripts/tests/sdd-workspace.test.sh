@@ -37,4 +37,34 @@ PROGRESS_PATH=$(cd "$TMP" && bash "$REPO_ROOT/hooks/scripts/lib/agentic_loop_pat
 EXPECTED_DIR=$(dirname "$PROGRESS_PATH")
 check "sdd-workspace dir == dirname(agentic_loop_path.sh output)" "$EXPECTED_DIR" "$DIR1"
 
+# Unset/empty CLAUDE_CODE_SESSION_ID -> fail loud (non-idempotent fallback refused).
+STDERR=$(cd "$TMP" && env -u CLAUDE_CODE_SESSION_ID bash "$SCRIPT" 2>&1 >/dev/null)
+RC=0
+(cd "$TMP" && env -u CLAUDE_CODE_SESSION_ID bash "$SCRIPT" >/dev/null 2>&1) || RC=$?
+if [ "$RC" -ne 0 ] && printf '%s' "$STDERR" | grep -q "CLAUDE_CODE_SESSION_ID"; then
+  printf 'ok   - unset CLAUDE_CODE_SESSION_ID -> non-zero exit, stderr names the var\n'
+else
+  printf 'FAIL - unset CLAUDE_CODE_SESSION_ID -> expected non-zero exit + stderr naming the var (rc=%s, stderr=%s)\n' "$RC" "$STDERR"
+  fails=$((fails+1))
+fi
+
+# Helper stubbed to print nothing on exit 0 -> sdd-workspace must fail loud, not
+# silently degrade to cwd. Stub via a temp copy of the repo layout so
+# sdd-workspace's own dirname-based path-to-helper resolution finds the fake.
+STUB_REPO=$(mktemp -d)
+mkdir -p "$STUB_REPO/hooks/scripts/lib" "$STUB_REPO/skills/subagent-driven-development/scripts"
+printf '#!/bin/bash\nexit 0\n' > "$STUB_REPO/hooks/scripts/lib/agentic_loop_path.sh"
+chmod +x "$STUB_REPO/hooks/scripts/lib/agentic_loop_path.sh"
+cp "$SCRIPT" "$STUB_REPO/skills/subagent-driven-development/scripts/sdd-workspace"
+export CLAUDE_CODE_SESSION_ID="sess-A"
+STUB_RC=0
+STUB_STDERR=$(bash "$STUB_REPO/skills/subagent-driven-development/scripts/sdd-workspace" 2>&1 >/dev/null) || STUB_RC=$?
+rm -rf "$STUB_REPO"
+if [ "$STUB_RC" -ne 0 ] && printf '%s' "$STUB_STDERR" | grep -q "agentic_loop_path.sh"; then
+  printf 'ok   - helper prints empty output on exit 0 -> sdd-workspace fails loud\n'
+else
+  printf 'FAIL - helper prints empty output on exit 0 -> expected non-zero exit (rc=%s, stderr=%s)\n' "$STUB_RC" "$STUB_STDERR"
+  fails=$((fails+1))
+fi
+
 [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails)"; exit 1; }
