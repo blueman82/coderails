@@ -164,6 +164,15 @@ function renderActivityFeed(container: HTMLElement, activity: ActivityItem[]): v
   container.appendChild(feed);
 }
 
+// Called by main.ts's click handler after a rejected press (undeclared
+// button, unresolved previous run, or invalid input) — prepended so the
+// most recent rejection is the first thing the user sees, without
+// disturbing the vault-derived rows already rendered.
+export function renderErrorRow(feed: Element, message: string): void {
+  const row = el("div", "cc-activity-row-error", message);
+  feed.insertBefore(row, feed.firstChild);
+}
+
 export function renderCommandCentre(snapshot: CommandCentreSnapshot): HTMLElement {
   const root = el("div", "cc-root");
 
