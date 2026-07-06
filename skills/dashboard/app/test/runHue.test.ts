@@ -35,11 +35,8 @@ describe("accentAt", () => {
 
 describe("hslToRgb", () => {
   it("converts the idle rose to its known RGB", () => {
-    // h=350 s=45% l=72% -> a warm dusty rose, sanity-checked against the mockup's rendered swatch.
-    const rgb = hslToRgb(350, 45, 72);
-    expect(rgb.r).toBeGreaterThan(rgb.g);
-    expect(rgb.r).toBeGreaterThan(rgb.b);
-    expect(rgb.g).toBeCloseTo(rgb.b, 0);
+    // h=350 s=45% l=72% -> #d9909a per the mockup's --rose swatch (NetworkSphere.tsx's ROSE_HEX).
+    expect(hslToRgb(350, 45, 72)).toEqual({ r: 217, g: 151, b: 162 });
   });
 
   it("converts pure green (h=120)", () => {
