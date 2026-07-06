@@ -160,4 +160,29 @@ check "F5 main: mv to commands/x.md -> deny"    DENY  "$(run_cwd "$(payload_with
 # cp/mv to a non-source file on main -> allow
 check "F5 main: cp to README.md -> allow"       ALLOW "$(run_cwd "$(payload_with_cwd "cp /tmp/x README.md" "$MAIN_REPO")" "$MAIN_REPO")"
 
+# --- F6: backtick/$() command-substitution in workflow-script free-text args ---
+# push.sh/merge.sh/post_review.sh/post_evals.sh take a free-text message argument.
+# A backtick or $() inside that argument executes as live command substitution
+# when the invoking command line is interpolated into bash — the same injection
+# class as the $ARGUMENTS render-time bug (PR #97), but triggered by the model's
+# own Bash tool_input rather than a render-time !`cmd` line.
+check "F6 push.sh with backtick in message -> deny" DENY \
+  "$(run "$(payload 'bash "scripts/push.sh" "fix thing, uses \`git rev-parse\` under the hood"')")"
+check "F6 push.sh with \$(...) in message -> deny" DENY \
+  "$(run "$(payload 'bash "scripts/push.sh" "fix thing, runs $(whoami) as part of it"')")"
+check "F6 merge.sh with backtick in message -> deny" DENY \
+  "$(run "$(payload 'bash "scripts/merge.sh" "19" "note: \`rm -rf /\` should never run"')")"
+check "F6 post_review.sh with backtick -> deny" DENY \
+  "$(run "$(payload 'bash "scripts/post_review.sh" validate "/tmp/x" "uses \`foo\`"')")"
+check "F6 post_evals.sh with backtick -> deny" DENY \
+  "$(run "$(payload 'bash "scripts/post_evals.sh" validate-structure "/tmp/x.json" "19" "\`sha\`"')")"
+# Clean invocations (no backtick/$()) must still be allowed.
+check "F6 push.sh clean message -> allow" ALLOW \
+  "$(run "$(payload 'bash "scripts/push.sh" "fix thing, uses git rev-parse show-toplevel under the hood"')")"
+check "F6 merge.sh clean args -> allow" ALLOW \
+  "$(run "$(payload 'bash "scripts/merge.sh" "19"')")"
+# Backticks/$() in unrelated commands (not these 4 scripts) must not be blocked by this check.
+check "F6 unrelated command with backtick -> allow" ALLOW \
+  "$(run "$(payload 'echo "just a note about \`code\` formatting"')")"
+
 [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails)"; exit 1; }
