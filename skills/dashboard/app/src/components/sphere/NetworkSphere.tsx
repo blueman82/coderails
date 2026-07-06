@@ -196,13 +196,6 @@ export function NetworkSphere({ reducedMotion }: { reducedMotion: boolean }) {
     camera.lookAt(0, 0, 0);
 
     void delta;
-    // R3F's render loop is inherently imperative — useFrame mutates the Three.js scene graph
-    // (camera, group transforms, buffer attributes) every frame by design. useThree()'s camera
-    // is a mutable escape hatch the React Compiler's hook-immutability rule can't distinguish
-    // from React-owned state; this is the documented incompatible-library case the rule ships
-    // a lower "warn" severity for elsewhere, so disabling it for this callback is intentional,
-    // not a workaround.
-    // eslint-disable-next-line react-hooks/immutability
   });
 
   return (
