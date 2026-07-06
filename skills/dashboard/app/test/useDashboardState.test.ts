@@ -131,6 +131,34 @@ describe("formatHHMM", () => {
   });
 });
 
+describe("selectActiveLoop", () => {
+  function loop(overrides: Partial<LoopInfo>): LoopInfo {
+    return { slug: "s", sessionId: "id", status: "", workUnitsDone: 0, workUnitsTotal: 0, evalsFrozen: false, unitTitles: [], ...overrides };
+  }
+
+  it("returns undefined for an empty list", () => {
+    expect(selectActiveLoop([])).toBeUndefined();
+  });
+
+  it("prefers an in-progress loop over a 0-unit noise entry ahead of it", () => {
+    const noise = loop({ sessionId: ".git", status: "", workUnitsTotal: 0 });
+    const active = loop({ sessionId: "real", status: "in-progress", workUnitsTotal: 5 });
+    expect(selectActiveLoop([noise, active])).toBe(active);
+  });
+
+  it("falls back to a loop with units when none is in-progress", () => {
+    const noise = loop({ sessionId: ".git", workUnitsTotal: 0 });
+    const complete = loop({ sessionId: "done", status: "complete", workUnitsTotal: 3, workUnitsDone: 3 });
+    expect(selectActiveLoop([noise, complete])).toBe(complete);
+  });
+
+  it("falls back to loops[0] when every loop is 0-unit noise", () => {
+    const a = loop({ sessionId: ".git" });
+    const b = loop({ sessionId: ".DS_Store" });
+    expect(selectActiveLoop([a, b])).toBe(a);
+  });
+});
+
 describe("runResultLabel", () => {
   const base = { runId: "r", button: "b", argv: [], cwd: "/", profile: "standard" as const, startedAt: 0, outputPath: "/tmp/x" };
   it("PASS on exit code 0", () => {
