@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { buildArgv } from "../../../lib/argv";
 import { loadConfig, type DashboardConfig } from "../../../lib/config";
 import { isLocalOrigin } from "../../../lib/requestGuard";
-import { appendRun, mintToken, type RunRecord } from "../../../lib/runlog";
+import { appendRun, getRunToken, type RunRecord } from "../../../lib/runlog";
 
 const STALE_LOCK_MS = 24 * 60 * 60 * 1000;
 const DEFAULT_LOCKS_DIR = join(homedir(), ".claude", "coderails-dashboard", "locks");
