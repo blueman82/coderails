@@ -40,11 +40,20 @@ check "nonexistent path -> 0 (fail-open)" 0 "$ALS_WORK_UNIT_COUNT"
 
 # ── als_read_loop_evals_result ───────────────────────────────────────────────
 
-# scope loop, result GO -> GO.
+# scope loop, result GO, non-empty tier_justification -> GO.
 d=$(mktemp -d "$TMP/loopdir.XXXX")
-jq -n '{scope:"loop", result:"GO"}' > "$d/evals.json"
+jq -n '{scope:"loop", result:"GO", tier:1, tier_justification:"2 work-units, no irreversible surface"}' > "$d/evals.json"
 als_read_loop_evals_result "$d"
-check "scope=loop result=GO -> GO" "GO" "$ALS_LOOP_EVALS_RESULT"
+check "scope=loop result=GO justified -> GO" "GO" "$ALS_LOOP_EVALS_RESULT"
+
+# scope loop, result GO, but tier_justification blank -> NO-GO (owner directive:
+# justification required at every tier, even when result already computed GO —
+# eval_artifact::compute_go never inspects tier_justification, so this reader
+# must catch it independently).
+d=$(mktemp -d "$TMP/loopdir.XXXX")
+jq -n '{scope:"loop", result:"GO", tier:1, tier_justification:""}' > "$d/evals.json"
+als_read_loop_evals_result "$d"
+check "scope=loop result=GO unjustified -> NO-GO" "NO-GO" "$ALS_LOOP_EVALS_RESULT"
 
 # no evals.json file at all -> ABSENT.
 d=$(mktemp -d "$TMP/loopdir.XXXX")
@@ -139,10 +148,17 @@ case "$err" in
   *) fails=$((fails+1)); printf 'FAIL - stderr missing expected evals path/text: %s\n' "$err" ;;
 esac
 
-# evals.json present, scope loop, result GO -> allow (exit 0).
+# evals.json present, scope loop, result GO, justified -> allow (exit 0).
 reset; T=$(mk_transcript 1); write_file complete S1 1 S1 "$WU3"
-jq -n '{scope:"loop", result:"GO"}' > "$(file_dir S1)/evals.json"
-check "GO evals -> allow" 0 "$(run x "$(payload "$T" S1)")"
+jq -n '{scope:"loop", result:"GO", tier:1, tier_justification:"2 work-units, no irreversible surface"}' > "$(file_dir S1)/evals.json"
+check "GO evals justified -> allow" 0 "$(run x "$(payload "$T" S1)")"
+
+# evals.json present, scope loop, result GO, but tier_justification blank ->
+# block (exit 2) — owner directive closes the gap where GO alone bypassed
+# the justification requirement.
+reset; T=$(mk_transcript 1); write_file complete S1 1 S1 "$WU3"
+jq -n '{scope:"loop", result:"GO", tier:1, tier_justification:""}' > "$(file_dir S1)/evals.json"
+check "GO evals unjustified -> block (exit 2)" 2 "$(run x "$(payload "$T" S1)")"
 
 # tier-0 exemption: scope loop, tier 0, non-empty tier_justification, no result -> allow.
 reset; T=$(mk_transcript 1); write_file complete S1 1 S1 "$WU3"

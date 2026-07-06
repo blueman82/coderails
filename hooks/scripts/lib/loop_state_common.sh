@@ -148,6 +148,12 @@ als_read_work_units() {
 # ALS_LOOP_EVALS_RESULT: GO | TIER0 | NO-GO | ABSENT. ABSENT covers no file,
 # malformed JSON, or a non-"loop" scope (a stray pr-scope file must never
 # satisfy the loop gate). Sibling to als_read_work_units for the same reason.
+#
+# tier_justification is required at every tier (owner directive), mirroring
+# post_evals::validate_structure check 2 — eval_artifact::compute_go (the
+# only place .result is derived) never inspects tier_justification, so a
+# blank justification must be caught here or a GO-but-unjustified artifact
+# would silently satisfy the loop gate.
 als_read_loop_evals_result() {
   ALS_LOOP_EVALS_RESULT="ABSENT"
   command -v jq >/dev/null 2>&1 || { als_log "hook=loop_state_guard evals=skipped reason=jq_missing"; return 0; }
@@ -159,9 +165,10 @@ als_read_loop_evals_result() {
   local result tier justification
   result=$(jq -r '.result // ""' "$f" 2>/dev/null)
   tier=$(jq -r '.tier // -1' "$f" 2>/dev/null)
-  justification=$(jq -r '.tier_justification // ""' "$f" 2>/dev/null)
-  if [ "$result" = "GO" ]; then ALS_LOOP_EVALS_RESULT="GO"
-  elif [ "$tier" = "0" ] && [ -n "$justification" ]; then ALS_LOOP_EVALS_RESULT="TIER0"
+  justification=$(jq -r '.tier_justification // "" | gsub("^\\s+|\\s+$"; "")' "$f" 2>/dev/null)
+  if [ -z "$justification" ]; then ALS_LOOP_EVALS_RESULT="NO-GO"
+  elif [ "$result" = "GO" ]; then ALS_LOOP_EVALS_RESULT="GO"
+  elif [ "$tier" = "0" ]; then ALS_LOOP_EVALS_RESULT="TIER0"
   else ALS_LOOP_EVALS_RESULT="NO-GO"
   fi
 }
