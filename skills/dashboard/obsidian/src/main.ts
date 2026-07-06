@@ -5,7 +5,8 @@ import { join } from "node:path";
 import { renderCommandCentre } from "./render";
 import type { ActivityItem, ButtonItem, CommandCentreSnapshot, Metrics } from "./render";
 import { parseDashboardConfig } from "./config";
-import "./styles.css";
+// styles.css lives at the plugin root (not imported here) — Obsidian loads
+// a plugin's styles.css automatically alongside main.js and manifest.json.
 
 const DASHBOARD_RUNS_FOLDER = "dashboard-runs";
 const METRICS_NOTE_PATH = `${DASHBOARD_RUNS_FOLDER}/_metrics.json`;
