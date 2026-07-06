@@ -52,7 +52,6 @@ export function RunProgressLayer() {
 
       return next;
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active, snapshot.runs]);
 
   function handleDone(runId: string) {
