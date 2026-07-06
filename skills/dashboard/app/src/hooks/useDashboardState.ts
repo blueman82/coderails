@@ -161,16 +161,19 @@ export interface EventSourceLike {
 const SSE_EVENT_NAMES: DashboardEvent["event"][] = ["snapshot", "activity", "gates", "runs"];
 
 export function useDashboardState(options: UseDashboardStateOptions = {}): DashboardState {
+  const { createSource, url = "/api/events" } = options;
   const [state, dispatch] = useReducer(
     (s: DashboardState, action: DashboardEvent | { event: "reconnecting" }) =>
       action.event === "reconnecting" ? markReconnecting(s) : mergeDashboardEvent(s, action, Date.now()),
     initialDashboardState
   );
-  const optionsRef = useRef(options);
-  optionsRef.current = options;
 
+  // Connects exactly once per mount, intentionally ignoring later changes to
+  // createSource/url (a caller swapping the SSE endpoint mid-life is not a
+  // supported scenario — this hook always points at the one dashboard
+  // stream for the component's lifetime).
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
-    const { createSource, url = "/api/events" } = optionsRef.current;
     const makeSource = createSource ?? ((u: string) => new EventSource(u) as unknown as EventSourceLike);
     const source = makeSource(url);
 
