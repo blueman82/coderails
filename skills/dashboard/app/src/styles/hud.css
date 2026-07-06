@@ -574,9 +574,276 @@
   }
 }
 
+/* ---------- Command deck: run-lifecycle states (Task 9d) ---------- */
+.hud-cmd.running .hud-bullet {
+  box-shadow: 0 0 5px var(--rose);
+  animation: hud-cmd-pulse 0.9s ease-in-out infinite;
+}
+.hud-cmd.flare .hud-label {
+  animation: hud-flare-flash 0.55s ease;
+}
+@keyframes hud-flare-flash {
+  0% {
+    color: var(--off-white);
+    text-shadow: 0 0 14px rgba(255, 255, 255, 0.9);
+  }
+  100% {
+    color: var(--grey);
+    text-shadow: none;
+  }
+}
+.hud-cmd.shake {
+  animation: hud-cmd-shake 0.35s ease;
+}
+@keyframes hud-cmd-shake {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  25% {
+    transform: translateX(-3px);
+  }
+  75% {
+    transform: translateX(3px);
+  }
+}
+.hud-cmd-input {
+  background: none;
+  border: none;
+  border-bottom: 1px solid var(--hairline);
+  color: var(--off-white);
+  font-family: var(--mono);
+  font-size: 9.5px;
+  letter-spacing: 0.04em;
+  padding: 2px 0;
+  width: 100%;
+  margin-top: 4px;
+}
+.hud-cmd-input:focus {
+  outline: none;
+  border-bottom-color: var(--rose);
+}
+.hud-cmd-error {
+  font-size: 8.5px;
+  letter-spacing: 0.04em;
+  color: var(--rose);
+  margin-top: 2px;
+}
+.hud-run-row.new {
+  animation: hud-run-in 0.4s ease;
+}
+@keyframes hud-run-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ---------- HUD callouts (merge-ready + per-run progress), floating over the sphere ---------- */
+.hud-callout {
+  position: fixed;
+  z-index: 3;
+  pointer-events: auto;
+  border: 1px solid var(--hairline);
+  background: rgba(13, 7, 8, 0.92);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  padding: 12px 16px;
+  min-width: 200px;
+  font-size: 10px;
+  cursor: grab;
+  user-select: none;
+}
+.hud-callout.dragging {
+  cursor: grabbing;
+}
+.hud-callout.dismissable {
+  transition: opacity 0.3s ease;
+}
+.hud-callout-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+.hud-callout .hud-diamond {
+  color: var(--rose);
+  font-size: 10px;
+}
+.hud-callout .hud-label {
+  letter-spacing: 0.16em;
+  color: var(--off-white);
+  text-transform: uppercase;
+  flex: 1;
+}
+.hud-callout-close {
+  background: none;
+  border: none;
+  color: var(--grey-dim);
+  cursor: pointer;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1;
+  padding: 2px 4px;
+}
+.hud-callout-close:hover {
+  color: var(--off-white);
+}
+.hud-callout-sub {
+  color: var(--rose-dim);
+  letter-spacing: 0.08em;
+}
+.hud-leader {
+  position: fixed;
+  width: 1px;
+  background: linear-gradient(to bottom, var(--hairline), transparent);
+  z-index: 3;
+  pointer-events: none;
+}
+
+/* ---------- Run-progress callout ---------- */
+.hud-progress {
+  padding-bottom: 15px; /* room for .hud-progress-bar-track, pinned absolutely to the box's bottom edge */
+}
+.hud-progress-status {
+  letter-spacing: 0.06em;
+  color: var(--grey-dim);
+}
+.hud-progress-elapsed {
+  color: var(--grey);
+  font-variant-numeric: tabular-nums;
+}
+.hud-progress-bar-track {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 3px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+.hud-progress-bar-fill {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, var(--rose-dim), var(--rose));
+  box-shadow: 0 0 8px hsla(var(--accent-h), var(--accent-s), var(--accent-l), 0.6);
+  transition: width 0.1s linear;
+}
+.hud-progress.flash .hud-callout-top .hud-label {
+  animation: hud-progress-flash 0.5s ease;
+}
+@keyframes hud-progress-flash {
+  0% {
+    color: var(--off-white);
+    text-shadow: 0 0 16px rgba(255, 255, 255, 0.95);
+  }
+  100% {
+    color: var(--off-white);
+    text-shadow: none;
+  }
+}
+.hud-progress.fade-out {
+  transition: opacity 0.6s ease;
+  opacity: 0;
+}
+
+/* ---------- Intro reveal (Task 9d): staged fade/slide-in, WAAPI/CSS only — no GSAP ---------- */
+.hud-intro-wordmark {
+  animation: hud-intro-wordmark 0.9s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+@keyframes hud-intro-wordmark {
+  from {
+    opacity: 0;
+    letter-spacing: 0.6em;
+    filter: blur(10px);
+  }
+  to {
+    opacity: 1;
+    filter: blur(0);
+  }
+}
+.hud-intro-fade {
+  animation: hud-intro-fade 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation-delay: 0.4s;
+}
+@keyframes hud-intro-fade {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.hud-intro-rail-left {
+  animation: hud-intro-slide-left 0.6s cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation-delay: 0.6s;
+}
+.hud-intro-rail-right {
+  animation: hud-intro-slide-right 0.6s cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation-delay: 0.45s;
+}
+@keyframes hud-intro-slide-left {
+  from {
+    opacity: 0;
+    transform: translateX(-24px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+@keyframes hud-intro-slide-right {
+  from {
+    opacity: 0;
+    transform: translateX(24px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+.hud-intro-bottom {
+  animation: hud-intro-fade-up 0.6s cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation-delay: 0.9s;
+}
+@keyframes hud-intro-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (max-width: 1100px) {
+  .hud-callout,
+  .hud-leader,
+  .hud-progress {
+    display: none;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .hud-status-dot,
-  .hud-cmd.running .hud-bullet {
+  .hud-cmd.running .hud-bullet,
+  .hud-cmd.shake,
+  .hud-cmd.flare .hud-label,
+  .hud-run-row.new,
+  .hud-progress.flash .hud-callout-top .hud-label,
+  .hud-intro-wordmark,
+  .hud-intro-fade,
+  .hud-intro-rail-left,
+  .hud-intro-rail-right,
+  .hud-intro-bottom {
     animation: none;
   }
 }
