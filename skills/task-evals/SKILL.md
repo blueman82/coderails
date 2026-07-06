@@ -1,6 +1,6 @@
 ---
 name: task-evals
-description: 'Generate a frozen, game-resistant set of end-state success evals for any non-trivial task — inside an agentic loop or not. Invoked at task intake: by agentic-loop at Phase 2.7 (loop scope) and per-work-unit refs in worker prompts (pr scope), by writing-plans when a plan is written (pr scope), or directly by the user. Produces evals.json (schema_version 1) consumed by scripts/post_evals.sh (pr scope, gates /merge) or the loop-state dir (loop scope, gates LOOP-STOP: complete). Not self-verification — evals must not share an oracle with the implementation.'
+description: 'Use at task intake, before implementation starts, to turn any non-trivial task into a frozen, tiered set of independent, game-resistant success evals — inside an agentic loop or not. Trigger at loop scope (per-loop and per-work-unit), when a plan is written, or directly on user request. Produces a frozen evals.json (schema_version 1) defining game-resistant success evals for a task, designed to gate merge at pr scope and loop completion at loop scope. Not self-verification — evals must not share an oracle with the implementation.'
 ---
 
 # Task Evals
@@ -85,7 +85,7 @@ GO requires all P0 evals to pass. P1 failures don't block the gate but must be l
 }
 ```
 
-This is the single documented copy of the schema. `scripts/lib/eval-artifact.sh`, `scripts/post_evals.sh`, and the `loop_state_guard` loop-scope gate all implement against this definition — it does not get restated or drift elsewhere.
+This copy and the design spec's copy are kept in lockstep; the enforcement components (`scripts/lib/eval-artifact.sh`, `scripts/post_evals.sh`, the `loop_state_guard` loop-scope gate) are specified by the design spec (Components 3-6) to implement against this definition and ship in companion PRs.
 
 ## Where evals.json lives
 
@@ -93,6 +93,8 @@ This is the single documented copy of the schema. `scripts/lib/eval-artifact.sh`
 - **PR scope** → the file is working material only. The durable artifact is the SHA-bound PR comment posted by `scripts/post_evals.sh` (marker `<!-- coderails-eval-summary v1 pr=<N> head_sha=<SHA> result=<GO|NO-GO> tier=<0|1|2> -->`) — see the invocation contract below.
 
 ## Invocation contract
+
+Enforcement wiring (merge gate + loop-stop gate) ships in companion PRs per the design spec's Components 3-6.
 
 This skill is invoked at three points:
 
