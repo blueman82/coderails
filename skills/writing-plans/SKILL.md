@@ -56,19 +56,23 @@ After the plan is written, re-read it against the spec:
 
 Fix issues inline. If a spec requirement has no task, add the task.
 
-## Final eval-gate task
-
-Every plan produced by this skill ends with one final task invoking `/coderails:task-evals` (scope: `pr`) to generate and freeze the plan's end-state success evals, tiered per that skill's predicates. Per-task verify-criteria (already required above) remain as cheap inner-loop checks during implementation — they are NOT a substitute for the plan's eval gate. The plan's *done* is the eval artifact (posted via `/coderails:post-evals`, gating `/merge`), not the last task's verify-criteria passing.
-
-This is the one deliberate exception to the "Task right-sizing" section's rule to fold setup, config, and docs into the task whose deliverable needs them: the eval-gate task is always its own final task, never folded into the last implementation task, because it must run AFTER all other tasks' code exists. Freeze-before-build (in `task-evals`) means the evals themselves are frozen before implementation starts, but the artifact-posting step — grading the frozen evals against the finished implementation — happens at the end.
-
 ## Stress-test before implementation (required)
 
 After the plan passes the self-review gate, put it through `/coderails:planning-sequence` before any implementation begins. The sequence runs three stages against the plan — Pre-Parade (success conditions), Premortem (failure modes), Red Team (adversarial challenge) — surfacing weaknesses while they are still cheap to fix on paper rather than after code is written.
 
-Feed it the written plan and the spec it derives from. Fold the findings back into the plan inline: add tasks for gaps it exposes, tighten verify-criteria it shows to be weak, and record any failure mode you consciously accept rather than fix. Only once the plan reflects the sequence's output do you hand off to implementation (`coderails:subagent-driven-development` or `coderails:executing-plans`).
+Feed it the written plan and the spec it derives from. Fold the findings back into the plan inline: add tasks for gaps it exposes, tighten verify-criteria it shows to be weak, and record any failure mode you consciously accept rather than fix. Only once the plan reflects the sequence's output do you freeze evals (next section) and hand off to implementation (`coderails:subagent-driven-development` or `coderails:executing-plans`).
 
 In an agentic multi-agent loop, run the sequence in a delegated agent, not main context (per the agentic-loop skill) — the gate is unchanged, only the venue differs.
+
+## Freeze evals after stress-test, before implementation
+
+Once the plan has passed both the self-review gate above and the stress-test pass above (so the task list is stable and will not change shape again), invoke `/coderails:task-evals` (scope: `pr`) to generate and freeze the plan's end-state success evals, tiered per that skill's predicates. This must happen BEFORE Task 1 is ever dispatched to an implementer — freezing after implementation has started defeats the purpose of a frozen, game-resistant gate. Per-task verify-criteria (already required above) remain as cheap inner-loop checks during implementation; they are NOT a substitute for this frozen eval gate.
+
+## Final task: grade and post only
+
+Every plan produced by this skill ends with one final task invoking `/coderails:post-evals` to grade the already-frozen evals.json (frozen in the step above, before any implementation) against the finished implementation, and post the result. This final task never generates or freezes evals itself — by the time it runs, evals.json already exists and is frozen; this task's only job is grading + posting the artifact that gates `/merge`.
+
+This is the one deliberate exception to the "Task right-sizing" section's rule to fold setup, config, and docs into the task whose deliverable needs them: the grade-and-post task is always its own final task, never folded into the last implementation task, because it must run AFTER all other tasks' code exists.
 
 ## Plan header
 
