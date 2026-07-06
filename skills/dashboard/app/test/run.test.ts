@@ -188,11 +188,13 @@ describe("POST /api/run — concurrency lock", () => {
     ) => unknown;
     const { handler } = makeHandler({ execFileImpl: hangingExecFile as never, locksDir, runsDir });
 
-    const first = handler(req({ token: TOKEN, button: "wiki-lint" }));
+    // Fire-and-forget: this promise never resolves because the fake
+    // execFile never calls its callback, simulating a still-running
+    // process. We intentionally don't await it.
+    void handler(req({ token: TOKEN, button: "wiki-lint" }));
     // second request while the first's lock file still exists
     const second = await handler(req({ token: TOKEN, button: "wiki-lint" }));
     expect(second.status).toBe(409);
-    await first;
   });
 
   it("ignores a stale lock older than 24h and allows the run", async () => {
