@@ -1,0 +1,59 @@
+{
+  "schema_version": 1,
+  "scope": "pr",
+  "task_ref": "workflow-audit/wu1-scan-lib",
+  "tier": 1,
+  "tier_justification": "1 work-unit, no irreversible/outward surface, above tier 0 because no existing check covers the goal state (new script, new privacy boundary)",
+  "frozen_at": "2026-07-06T21:45:38Z",
+  "frozen_sha": "14c7f1cc458d617d2796aa2e085c82bc560819ec",
+  "evals": [
+    {
+      "id": "E1",
+      "priority": "P0",
+      "mode": "scripted",
+      "surface": "merged-state",
+      "assert": "the fixture test suite passes on the branch",
+      "cmd": "bash skills/workflow-audit/scripts/tests/scan_transcripts.test.sh",
+      "negative_control": "corrupt scan_transcripts.sh (e.g. `exit 1` at top) and confirm the suite reports FAILED, not PASS",
+      "status": "pending",
+      "evidence": ""
+    },
+    {
+      "id": "E2",
+      "priority": "P0",
+      "mode": "scripted",
+      "surface": "merged-state",
+      "assert": "the sentinel string planted in a Bash command's arguments never appears in scan output over fixture-sentinel.jsonl",
+      "cmd": "! skills/workflow-audit/scripts/scan_transcripts.sh --project fixture-sentinel 2>/dev/null | grep -q SENTINEL_sk_live_99xyz",
+      "negative_control": "run `grep -q SENTINEL_sk_live_99xyz skills/workflow-audit/scripts/tests/fixtures/fixture-sentinel.jsonl` directly against the fixture (not the script output) to confirm the sentinel is genuinely present in the input, so the script's absence-of-leak is a real filter, not an empty fixture",
+      "status": "pending",
+      "evidence": ""
+    },
+    {
+      "id": "E3",
+      "priority": "P0",
+      "mode": "scripted",
+      "surface": "merged-state",
+      "assert": "a corrupt transcript line produces a distinct jq_parse_error diagnostic on stderr, not silently folded into zero-events",
+      "cmd": "grep -q 'jq_parse_error:' <(skills/workflow-audit/scripts/scan_transcripts.sh --project fixture-corrupt 2>&1 >/dev/null)",
+      "negative_control": "run the same command against a fixture with no corrupt line and confirm jq_parse_error does NOT appear (proves the detector fires only on genuine corruption, not unconditionally)",
+      "status": "pending",
+      "evidence": ""
+    },
+    {
+      "id": "E4",
+      "priority": "P0",
+      "mode": "scripted",
+      "surface": "merged-state",
+      "assert": "session recency/ordering under --last-sessions is derived from in-file message timestamps, not file mtime",
+      "cmd": "touch -t 202001010000 <oldest-timestamped-fixture-file> && skills/workflow-audit/scripts/scan_transcripts.sh --last-sessions 1 --project <fixture-project> | jq -r .session_id",
+      "negative_control": "an implementation using `ls -t` / file mtime for ordering would flip the result after the touch above; the test asserts the order is UNCHANGED post-touch, which a mtime-based implementation would fail",
+      "status": "pending",
+      "evidence": ""
+    }
+  ],
+  "amendments": [],
+  "result": null,
+  "graded_at": null,
+  "head_sha": null
+}
