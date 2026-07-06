@@ -1,12 +1,14 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import { hslToRgb, type AccentHsl } from "@/lib/runHue";
 
 // 2D-canvas plexus sphere: mirrors the WebGL sphere's palette and structure (rose rim, plexus
-// wiring, depth-based fade) for environments where a WebGL context cannot be created.
+// wiring, depth-based fade) for environments where a WebGL context cannot be created. Re-tinted
+// with the live accent hue each frame (via the `accent` prop) so the fallback path stays in sync
+// with the rest of the theme during a run, same as the mockup's 2D fallback reads currentAccent.
 // Ported from docs/coderails/specs/assets/2026-07-06-observability/dashboard-mockup.html.
 const COUNT = 260;
-const ACCENT_RGB = "217,144,154"; // --rose (h=350 idle), matches hud.css --rose at rest
 const LINK_DIST = 46;
 
 type Point3D = { theta: number; phi: number; phase: number; r: number };
