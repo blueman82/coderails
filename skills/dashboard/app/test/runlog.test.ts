@@ -138,7 +138,6 @@ describe("getRunToken", () => {
 
   it("returns the token already on disk rather than minting a new one", () => {
     const dir = tmpRunsDir();
-    const { writeFileSync, mkdirSync } = require("node:fs") as typeof import("node:fs");
     mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, "run-token"), "existing-token-value");
     expect(getRunToken(dir)).toBe("existing-token-value");
