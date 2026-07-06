@@ -5,7 +5,7 @@
    current `runs` prop, then be cleared once that prop confirms the run is no longer relevant.
    No pure-render derivation replaces this; same class of exception as this file's siblings. */
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import type { PermissionProfile } from "@/lib/config";
 import { useDashboardContext } from "@/components/DashboardProvider";
 import { useRunLifecycle } from "@/hooks/useRunLifecycle";
