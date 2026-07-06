@@ -72,20 +72,51 @@ export function mintToken(): string {
   return randomBytes(32).toString("hex");
 }
 
-// Single cached token for the server's lifetime, memoized HERE (a plain lib
-// module) rather than inside src/app/api/run/route.ts: a route.ts file's
-// module-scope state is NOT guaranteed to be the same instance the page's
-// Server Component tree sees — app-router route handlers and Server
-// Components can land in separate module graphs/bundles, so a page.tsx that
-// imports a route.ts export can end up talking to a second, independently-
-// initialized copy of `cachedToken` (confirmed empirically on this machine
-// 2026-07-06: the token embedded in the rendered page did not match what
-// POST /api/run compared against, causing every run to 401). Both the route
-// and the page import this plain module instead, so there is exactly one
-// cachedToken no matter how the two layers are bundled.
+// The run token is persisted to a file rather than kept in a module-scope
+// variable: Next.js's app router compiles Route Handlers (route.ts) and
+// Server Components (page.tsx) as SEPARATE module graphs/bundler layers even
+// when both target the Node.js runtime — confirmed empirically on this
+// machine 2026-07-06, a shared plain-lib module-level `let cachedToken`
+// still ended up as two independently-initialized copies (one per layer),
+// so the token embedded in the rendered page never matched what POST
+// /api/run compared against and every run 401'd. A file is the one thing
+// both layers genuinely share. In-memory caching per-process is layered on
+// top (getRunTokenPath's directory read only happens once per module
+// instance) purely to avoid a disk read on every request; the file itself,
+// not the variable, is the actual source of truth across layers.
+const DEFAULT_TOKEN_DIR = join(homedir(), ".claude", "coderails-dashboard");
+
+function tokenFilePath(dir: string = DEFAULT_TOKEN_DIR): string {
+  return join(dir, "run-token");
+}
+
 let cachedToken: string | undefined;
 
-export function getRunToken(): string {
-  if (!cachedToken) cachedToken = mintToken();
+export function getRunToken(dir: string = DEFAULT_TOKEN_DIR): string {
+  if (cachedToken) return cachedToken;
+
+  const path = tokenFilePath(dir);
+  try {
+    const existing = readFileSync(path, "utf-8").trim();
+    if (existing) {
+      cachedToken = existing;
+      return cachedToken;
+    }
+  } catch {
+    // no token file yet — mint and persist one below
+  }
+
+  const minted = mintToken();
+  mkdirSync(dir, { recursive: true });
+  // "wx" (exclusive create) closes the same race two worker processes
+  // starting simultaneously would otherwise hit: if another process won the
+  // race and already wrote the file between our read and write, re-read
+  // its value instead of clobbering it with a second, different token.
+  try {
+    writeFileSync(path, minted, { flag: "wx" });
+    cachedToken = minted;
+  } catch {
+    cachedToken = readFileSync(path, "utf-8").trim();
+  }
   return cachedToken;
 }
