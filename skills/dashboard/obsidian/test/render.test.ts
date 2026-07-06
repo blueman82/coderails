@@ -132,6 +132,9 @@ describe("renderCommandCentre — status chip mapping", () => {
     ["pass", "cc-chip-pass"],
     ["fail", "cc-chip-fail"],
     ["needs-review", "cc-chip-needs-review"],
+    ["done", "cc-chip-pass"],
+    ["failed", "cc-chip-fail"],
+    ["running", "cc-chip-running"],
   ] as const)("maps status %s to chip class %s", (status, chipClass) => {
     const snapshot: CommandCentreSnapshot = {
       metrics: null,
