@@ -1,4 +1,9 @@
 "use client";
+/* eslint-disable react-hooks/set-state-in-effect --
+   `queued` is a genuinely stateful optimistic flag bridging the gap between a click and the
+   first SSE 'runs' frame confirming it — it must persist across renders independent of the
+   current `runs` prop, then be cleared once that prop confirms the run is no longer relevant.
+   No pure-render derivation replaces this; same class of exception as this file's siblings. */
 
 import { useEffect, useState } from "react";
 import type { PermissionProfile } from "@/lib/config";
