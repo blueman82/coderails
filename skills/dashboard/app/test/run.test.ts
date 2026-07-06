@@ -166,6 +166,29 @@ describe("POST /api/run — origin/host", () => {
     expect(res.status).toBe(200);
     expect(fake!.calls.length).toBe(1);
   });
+
+  it("accepts a request with NO Origin header at all (non-browser client), provided Host is localhost", async () => {
+    const { handler, fake } = makeHandler();
+    const res = await handler(reqNoOrigin({ token: TOKEN, button: "wiki-lint" }, "127.0.0.1:3000"));
+    expect(res.status).toBe(200);
+    expect(fake!.calls.length).toBe(1);
+  });
+
+  it("rejects an Origin header literally 'null' even though Host is localhost", async () => {
+    const { handler, fake } = makeHandler();
+    const res = await handler(req({ token: TOKEN, button: "wiki-lint" }, { origin: "null" }));
+    expect(res.status).toBe(403);
+    expect(fake!.calls.length).toBe(0);
+  });
+
+  it("accepts a bracketed IPv6 Host [::1] consistently with an IPv6 Origin", async () => {
+    const { handler, fake } = makeHandler();
+    const res = await handler(
+      req({ token: TOKEN, button: "wiki-lint" }, { origin: "http://[::1]:3000", host: "[::1]:3000" })
+    );
+    expect(res.status).toBe(200);
+    expect(fake!.calls.length).toBe(1);
+  });
 });
 
 describe("POST /api/run — button validation", () => {
