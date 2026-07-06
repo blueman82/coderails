@@ -97,6 +97,7 @@ export function createAggregator(deps: AggregatorDeps): Aggregator {
     trail: [],
     health: [],
     runs: [],
+    queue: [],
   };
 
   function emit(event: AggregatorEventName, data: unknown): void {
