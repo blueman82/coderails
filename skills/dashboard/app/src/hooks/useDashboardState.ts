@@ -98,6 +98,20 @@ function isGateError(gate: PrGate | PrGateError): gate is PrGateError {
 
 export { isGateError };
 
+// Picks the loop DIRECTIVES/hero should show. `loops[0]` alone isn't
+// reliable: collectLoops (src/lib/collect/sessions.ts) treats every
+// subdirectory under the loops base as a session, including non-loop dirs
+// like a stray `.git`, and sortLoops only orders by slug — so index 0 can
+// land on a 0-unit noise entry ahead of the loop that's actually running.
+// Prefers an in-progress loop; falls back to any loop that has units at
+// all; falls back to loops[0] (or undefined) so an all-noise list still
+// resolves to *something* rather than throwing.
+export function selectActiveLoop(loops: LoopInfo[]): LoopInfo | undefined {
+  return (
+    loops.find((l) => l.status === "in-progress") ?? loops.find((l) => l.workUnitsTotal > 0) ?? loops[0]
+  );
+}
+
 // --- Formatters -------------------------------------------------------
 
 // "HH:MM:SS" in the local zone, zero-padded.
