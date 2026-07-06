@@ -1,0 +1,21 @@
+{
+  "repos": ["blueman82/coderails"],
+  "wikiPaths": ["/Users/harrison/Github/coderails-wiki"],
+  "memoryPaths": ["/Users/harrison/.claude/projects/-Users-harrison-Github-coderails/memory"],
+  "buttons": [
+    {
+      "name": "wiki-lint",
+      "label": "WIKI LINT",
+      "command": "/coderails:wiki-lint",
+      "cwd": "/Users/harrison/Github/coderails",
+      "profile": "standard"
+    },
+    {
+      "name": "sync-docs",
+      "label": "SYNC DOCS",
+      "command": "/coderails:sync-docs",
+      "cwd": "/Users/harrison/Github/coderails",
+      "profile": "read-only"
+    }
+  ]
+}
