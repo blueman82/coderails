@@ -90,17 +90,21 @@ function tokenFilePath(dir: string = DEFAULT_TOKEN_DIR): string {
   return join(dir, "run-token");
 }
 
-let cachedToken: string | undefined;
+// Keyed by dir rather than a single variable — production only ever calls this with the
+// default dir, but keying by dir keeps the cache honest (a call for a different dir always
+// reads/writes that dir's own file, never a different dir's cached value).
+const cachedTokensByDir = new Map<string, string>();
 
 export function getRunToken(dir: string = DEFAULT_TOKEN_DIR): string {
-  if (cachedToken) return cachedToken;
+  const cached = cachedTokensByDir.get(dir);
+  if (cached) return cached;
 
   const path = tokenFilePath(dir);
   try {
     const existing = readFileSync(path, "utf-8").trim();
     if (existing) {
-      cachedToken = existing;
-      return cachedToken;
+      cachedTokensByDir.set(dir, existing);
+      return existing;
     }
   } catch {
     // no token file yet — mint and persist one below
@@ -112,11 +116,13 @@ export function getRunToken(dir: string = DEFAULT_TOKEN_DIR): string {
   // starting simultaneously would otherwise hit: if another process won the
   // race and already wrote the file between our read and write, re-read
   // its value instead of clobbering it with a second, different token.
+  let token: string;
   try {
     writeFileSync(path, minted, { flag: "wx" });
-    cachedToken = minted;
+    token = minted;
   } catch {
-    cachedToken = readFileSync(path, "utf-8").trim();
+    token = readFileSync(path, "utf-8").trim();
   }
-  return cachedToken;
+  cachedTokensByDir.set(dir, token);
+  return token;
 }
