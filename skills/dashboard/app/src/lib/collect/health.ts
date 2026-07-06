@@ -83,12 +83,14 @@ function hooksFiredTile(path: string, now: Date): HealthTile {
 
 // collectHealth never throws: each tile degrades independently to
 // value: null with a note when its source is absent or unreadable.
-export function collectHealth(options: CollectHealthOptions = {}): HealthTile[] {
+export async function collectHealth(options: CollectHealthOptions = {}): Promise<HealthTile[]> {
   const disciplineLogPath = options.disciplineLogPath ?? DEFAULT_DISCIPLINE_LOG_PATH;
+  const projectsDir = options.projectsDir ?? DEFAULT_PROJECTS_DIR;
   const now = options.now ?? new Date();
+  const usage = await collectUsage(projectsDir, now);
   return [
-    usageTile("usage5h"),
-    usageTile("usageWeek"),
+    usageTile("usage5h", usage.last5h),
+    usageTile("usageWeek", usage.week),
     hooksFiredTile(disciplineLogPath, now),
     lintFindingsTile(),
   ];
