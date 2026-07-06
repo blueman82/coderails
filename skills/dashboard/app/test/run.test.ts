@@ -175,6 +175,15 @@ describe("POST /api/run — button validation", () => {
     expect(res.status).toBe(200);
     expect(fake!.calls.length).toBe(1);
   });
+
+  it("rejects input starting with '-' (flag smuggling) with 400 and does not spawn", async () => {
+    const { handler, fake } = makeHandler();
+    const res = await handler(
+      req({ token: TOKEN, button: "with-input", input: "--dangerously-skip-permissions" })
+    );
+    expect(res.status).toBe(400);
+    expect(fake!.calls.length).toBe(0);
+  });
 });
 
 describe("POST /api/run — concurrency lock", () => {
