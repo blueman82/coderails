@@ -9,10 +9,12 @@ import {
   formatDuration,
   formatHHMM,
   runResultLabel,
+  selectActiveLoop,
   type DashboardState,
   type DashboardSnapshot,
 } from "../src/hooks/useDashboardState";
 import type { PrGate, PrGateError } from "../src/lib/collect/prGates";
+import type { LoopInfo } from "../src/lib/collect/sessions";
 import type { RunRecord } from "../src/lib/runlog";
 
 function emptySnapshot(overrides: Partial<DashboardSnapshot> = {}): DashboardSnapshot {
