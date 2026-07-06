@@ -1,8 +1,8 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
-// The eval/review artifact marker grammar's version token ("v1" today) is
-// upstream SSOT in scripts/lib/{eval,review}-artifact.sh — read it from there
+// The eval/review artifact marker grammar's version token is upstream SSOT
+// in scripts/lib/{eval,review}-artifact.sh — read it from there
 // rather than retyping the literal here, so this module can never drift from
 // the shell writer/reader. See scripts/lib/eval-artifact.sh's
 // EVAL_ARTIFACT_MARKER_VERSION and review-artifact.sh's
