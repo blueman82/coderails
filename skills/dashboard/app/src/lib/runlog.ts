@@ -102,6 +102,15 @@ export function getRunToken(dir: string = DEFAULT_TOKEN_DIR): string {
   try {
     const existing = readFileSync(path, "utf-8").trim();
     if (existing) {
+      // Defensive tightening for a file created by an older version of this function (before
+      // the 0o600 fix below existed) or by anything else: a credential file sitting at looser
+      // permissions is worth correcting the moment we notice it, not just at mint time. Best
+      // effort — a permission error here shouldn't block serving the token that's already good.
+      try {
+        if ((statSync(path).mode & 0o777) !== 0o600) chmodSync(path, 0o600);
+      } catch {
+        // not fatal — the token itself is still valid, just couldn't tighten its mode
+      }
       cachedTokensByDir.set(dir, existing);
       return existing;
     }
