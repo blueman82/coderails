@@ -1,4 +1,5 @@
 import "@/styles/hud.css";
+import { DashboardProvider } from "@/components/DashboardProvider";
 import { Header } from "@/components/Header";
 import { RailLeft } from "@/components/RailLeft";
 import { RailRight } from "@/components/RailRight";
@@ -11,12 +12,14 @@ export default function Home() {
       <Scene />
       <div className="hud-floor-fade" />
 
-      <div className="hud-stage">
-        <Header />
-        <RailLeft />
-        <RailRight />
-        <BottomHero />
-      </div>
+      <DashboardProvider>
+        <div className="hud-stage">
+          <Header />
+          <RailLeft />
+          <RailRight />
+          <BottomHero />
+        </div>
+      </DashboardProvider>
     </div>
   );
 }
