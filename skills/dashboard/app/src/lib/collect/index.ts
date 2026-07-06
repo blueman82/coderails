@@ -153,7 +153,7 @@ export function createAggregator(deps: AggregatorDeps): Aggregator {
 
   function scheduleActivityRefresh(): void {
     if (activityDebounceTimer) clearTimeout(activityDebounceTimer);
-    activityDebounceTimer = setTimeout(refreshActivity, activityDebounceMs);
+    activityDebounceTimer = setTimeout(() => void refreshActivity(), activityDebounceMs);
   }
 
   function watchDir(dir: string, onChange: () => void): void {
