@@ -12,7 +12,7 @@ Answer a question against the project's LLM Wiki.
 
 ### Step 1: Load the Schema
 
-Read `AGENTS.md` in the current project directory for vault path and conventions. If it doesn't exist, tell the user to run `/wiki-init` first.
+`AGENTS.md` at the project's git root is loaded into context at session start (per the project's `CLAUDE.md`) — use that content for vault path and conventions. If it isn't present in context (e.g. a fresh fork with no prior context), read `AGENTS.md` at the git repository root directly, not the current working directory — a fork's cwd may be a subdirectory. If it doesn't exist there either, tell the user to run `/wiki-init` first.
 
 ### Step 2: Search the Wiki
 
