@@ -176,6 +176,26 @@ describe("renderCommandCentre — status chip mapping", () => {
   });
 });
 
+describe("renderErrorRow", () => {
+  it("prepends an error row to the activity feed without touching existing rows", () => {
+    const snapshot: CommandCentreSnapshot = {
+      metrics: null,
+      activity: [{ title: "Wiki lint clean", status: "pass", time: "09:14", notePath: "dashboard-runs/x.md" }],
+      buttons: [],
+    };
+    const root = renderCommandCentre(snapshot);
+    const feed = root.querySelector(".cc-activity-feed")!;
+
+    renderErrorRow(feed, "unknown button: not-a-real-button");
+
+    const rows = feed.querySelectorAll(".cc-activity-row, .cc-activity-row-error");
+    expect(rows.length).toBe(2);
+    expect(rows[0].classList.contains("cc-activity-row-error")).toBe(true);
+    expect(rows[0].textContent).toContain("unknown button: not-a-real-button");
+    expect(rows[1].textContent).toContain("Wiki lint clean");
+  });
+});
+
 describe("renderCommandCentre — command grid", () => {
   it("renders one button per config-declared button, config-driven", () => {
     const snapshot: CommandCentreSnapshot = {
