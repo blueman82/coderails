@@ -173,17 +173,24 @@ export function createRunHandler(deps: RunHandlerDeps) {
       }
     }
 
+    // buildArgv throws on flag-smuggling input (e.g. "--dangerously-skip-
+    // permissions") — reject with 400 before ever touching the lock.
+    let argv: string[];
+    try {
+      argv = buildArgv(button, typeof input === "string" ? input : undefined);
+    } catch {
+      return jsonResponse(400, { error: "invalid input" });
+    }
+
     mkdirSync(locksDir, { recursive: true });
     const lockPath = lockPathFor(locksDir, button.name);
-    if (isLockHeld(lockPath)) {
+    if (!acquireLock(lockPath)) {
       return jsonResponse(409, { error: "already running" });
     }
-    writeFileSync(lockPath, String(process.pid));
 
     const runId = randomBytes(8).toString("hex");
     mkdirSync(runsDir, { recursive: true });
     const outputPath = join(runsDir, `${runId}.log`);
-    const argv = buildArgv(button, typeof input === "string" ? input : undefined);
     const startedAt = Date.now();
 
     const startRecord: RunRecord = {
