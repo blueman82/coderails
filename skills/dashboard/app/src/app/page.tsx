@@ -1,5 +1,5 @@
 import "@/styles/hud.css";
-import { getRunToken } from "@/app/api/run/route";
+import { getRunToken } from "@/lib/runlog";
 import { loadConfig } from "@/lib/config";
 import { DashboardApp } from "@/components/DashboardApp";
 import type { DeckButton } from "@/components/DashboardApp";
@@ -9,6 +9,13 @@ import type { DeckButton } from "@/components/DashboardApp";
 // runlog.ts's mintToken comment: an attacker who can only reach the HTTP API must not be able to
 // recover the token. Buttons are narrowed to exactly the fields the client needs (name, label,
 // profile, inputAllowed) — cwd/command never leave the server.
+//
+// getRunToken is imported from lib/runlog.ts, NOT from the api/run route module — importing a
+// route.ts export into a Server Component risks landing in a second, independently-initialized
+// module graph with its own copy of any module-scope cache (confirmed empirically on this
+// machine: doing it that way made this page's embedded token never match what POST /api/run
+// compared against, so every run 401'd). runlog.ts is a plain lib module both layers can safely
+// share one instance of.
 export default function Home() {
   const token = getRunToken();
   const config = loadConfig();
