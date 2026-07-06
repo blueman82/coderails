@@ -239,7 +239,7 @@ export function buildArgv(btn: ButtonDef, input?: string): string[]; // src/lib/
 - [ ] Implement aggregator: fs.watch on the projects base + configured dirs (debounced), `setInterval` gh poll, run-log tap from Task 7. Collector errors degrade to their unavailable forms — the stream itself never dies on a collector throw (log once, keep serving; spec's error-handling rules).
 - [ ] Re-run; commit.
 
-**Verify:** `curl -N localhost:3000/api/events | head` shows the snapshot event; touching a watched file emits `activity`.
+**Verify:** `curl -N localhost:3000/api/events | head` shows the snapshot event with NO `token` key anywhere in it (`grep -c token` on the captured stream = 0); `curl -N -H 'Origin: https://evil.example' localhost:3000/api/events` → 403; touching a watched file emits `activity`.
 
 ---
 
