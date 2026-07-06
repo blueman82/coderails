@@ -1,4 +1,4 @@
-import { Plugin, TFile, TFolder, MarkdownPostProcessorContext } from "obsidian";
+import { MarkdownRenderChild, Plugin, TFile, TFolder, MarkdownPostProcessorContext } from "obsidian";
 import { execFile as execFileReal } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
