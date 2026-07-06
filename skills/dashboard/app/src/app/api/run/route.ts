@@ -159,6 +159,11 @@ export function createRunHandler(deps: RunHandlerDeps) {
     };
     appendRun(startRecord, { runsDir });
 
+    // Intentionally long-lived: this response only resolves once the child
+    // process exits, since the lock is held for its entire lifetime (see
+    // acquireLock above). Frontend state during the run comes from the SSE
+    // stream plus an optimistic flag, not this response — don't convert this
+    // to fire-and-forget without redesigning the lock's release semantics.
     await new Promise<void>((resolve) => {
       execFileImpl("claude", argv, { cwd: button.cwd }, (error, stdout, stderr) => {
         appendFileSync(outputPath, stdout + stderr);
