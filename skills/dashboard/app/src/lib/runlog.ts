@@ -80,10 +80,9 @@ export function mintToken(): string {
 // still ended up as two independently-initialized copies (one per layer),
 // so the token embedded in the rendered page never matched what POST
 // /api/run compared against and every run 401'd. A file is the one thing
-// both layers genuinely share. In-memory caching per-process is layered on
-// top (getRunTokenPath's directory read only happens once per module
-// instance) purely to avoid a disk read on every request; the file itself,
-// not the variable, is the actual source of truth across layers.
+// both layers genuinely share; the in-memory cache below is purely a
+// same-process optimization to avoid a disk read on every request — the
+// file, not the cache, is the real source of truth across layers.
 const DEFAULT_TOKEN_DIR = join(homedir(), ".claude", "coderails-dashboard");
 
 function tokenFilePath(dir: string = DEFAULT_TOKEN_DIR): string {
