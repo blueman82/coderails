@@ -61,6 +61,24 @@ merge::main() {
             fi
             ok "Review artifact verified (SHA: $sha)"
 
+            # ─── Eval artifact gate (fail-closed) ─────────────────────────────
+            # Requires a coderails eval comment on the PR matching the current
+            # head SHA with result=GO. No match → block. No fallback, no
+            # config opt-out (same posture as the review gate).
+            local eval_gate_rc
+            eval_gate_rc=0
+            pr::has_coderails_eval_for_head "$num" "$sha" || eval_gate_rc=$?
+            if [[ $eval_gate_rc -eq 2 ]]; then
+                err "GitHub fetch failed — could not fetch PR comments for eval artifact. Retry, or check gh auth/network."
+            elif [[ $eval_gate_rc -ne 0 ]]; then
+                if [[ -n "${PR_EVAL_TIER:-}" ]]; then
+                    err "Eval artifact for current head $sha is NO-GO (tier $PR_EVAL_TIER) — resolve failing P0 evals and re-run /coderails:post-evals."
+                else
+                    err "No coderails eval artifact for current head $sha — run /coderails:task-evals then /coderails:post-evals after /pr-review-toolkit:review-pr."
+                fi
+            fi
+            ok "Eval artifact verified (SHA: $sha, tier ${PR_EVAL_TIER:-?})"
+
             step "Merging"
             gh pr merge "$num" --merge          # remote merge ONLY — its failure must abort; branch cleanup is separate + non-fatal
             ok "Merged"

@@ -35,11 +35,13 @@ manifest_paths=(
   scripts/lib/git-common.sh
   scripts/lib/config.sh
   scripts/lib/review-artifact.sh
+  scripts/lib/eval-artifact.sh
   hooks/scripts/lib/agentic_loop_path.sh
   hooks/scripts/lib/discipline_common.sh
   hooks/scripts/lib/loop_state_common.sh
   scripts/merge.sh
   scripts/post_review.sh
+  scripts/post_evals.sh
   scripts/push.sh
   hooks/scripts/check_confidence_labels.sh
   hooks/scripts/check_verify_loop.sh
@@ -59,6 +61,8 @@ manifest_modes=(
   100644
   100644
   100644
+  100644
+  100755
   100755
   100755
   100755
