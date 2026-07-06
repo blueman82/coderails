@@ -55,7 +55,8 @@ function hooksFiredTile(path: string, now: Date): HealthTile {
     .split("\n")
     .filter((line) => line.trim().length > 0)
     .filter((line) => {
-      const timestamp = new Date(line.slice(0, line.indexOf(" ")));
+      const leadingToken = line.split(/\s+/, 1)[0];
+      const timestamp = new Date(leadingToken);
       return !Number.isNaN(timestamp.getTime()) && localDayKey(timestamp) === todayKey;
     }).length;
   return { key: "hooksFired", value: String(count) };
