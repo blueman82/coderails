@@ -55,6 +55,10 @@ function latestMtimeMs(dir: string): number {
   return latest;
 }
 
+// baseDir is a ~/.claude/projects-shaped tree: <baseDir>/<slug>/ holding session
+// transcript files directly or nested. Distinct from collectLoops' base below —
+// same param name, different real directory tree; callers must pass each
+// collector its own matching base dir.
 export function collectSessions(baseDir: string, now: number): SessionInfo[] {
   const sessions: SessionInfo[] = [];
   for (const slug of listDirs(baseDir)) {
