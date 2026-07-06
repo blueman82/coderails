@@ -133,4 +133,17 @@ check "complete but re-armed -> block" 2 "$(run x "$(payload "$T" S1)")"
 reset; T=$(mk_transcript 1)   # file absent => would block, but stop_hook_active short-circuits
 check "stop_hook_active -> allow" 0 "$(run x "$(payload "$T" S1 true)")"
 
+# als_sanitise_session_id — malformed raw ids are REPLACED (not fresh-fallback)
+# so a malformed id can't silently orphan its own real session. Source the lib
+# directly in a subshell and call the function under test, same isolation
+# pattern as unregistered_loop_guard.test.sh's call_fn-style checks.
+COMMON_LIB="$(cd "$(dirname "$0")/../lib" && pwd)/loop_state_common.sh"
+sanitised() { ( . "$COMMON_LIB"; als_sanitise_session_id "$1" ); }
+check "sanitise: '/' replaced with '_'" "foo_bar" "$(sanitised "foo/bar")"
+# Transform order is "/" -> "_" first, then ".." collapsed: "../../etc" becomes
+# ".._.._etc" after the "/" replacement, then sed removes both ".." pairs,
+# leaving "__etc". Documented exact expected value per this deterministic order.
+check "sanitise: '..' collapsed/removed" "__etc" "$(sanitised "../../etc")"
+check "sanitise: normal id passes through unchanged" "normal-id-123" "$(sanitised "normal-id-123")"
+
 [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails)"; exit 1; }
