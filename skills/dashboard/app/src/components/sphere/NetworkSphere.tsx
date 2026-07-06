@@ -1,4 +1,10 @@
 "use client";
+/* eslint-disable react-hooks/immutability --
+   R3F's render loop is inherently imperative: useFrame mutates the Three.js scene graph (camera,
+   group transforms, buffer attributes) every frame by design. useThree()'s camera is a mutable
+   escape hatch the React Compiler's hook-immutability rule can't distinguish from React-owned
+   state — the documented "incompatible library" case the plugin ships a separate, lower-severity
+   rule for elsewhere. Disabling this rule for the whole file is intentional, not a workaround. */
 
 import { useEffect, useMemo, useRef } from "react";
 import { useFrame, useThree } from "@react-three/fiber";
