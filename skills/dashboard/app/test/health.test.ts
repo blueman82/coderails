@@ -95,7 +95,7 @@ describe("collectHealth", () => {
     });
     const usage5h = tiles.find((t) => t.key === "usage5h");
     const usageWeek = tiles.find((t) => t.key === "usageWeek");
-    expect(usage5h?.value).toBeNull();
+    expect(usage5h?.value).toBe("0 tok");
     expect(usageWeek?.value).toBe("1.5M tok");
   });
 
