@@ -1,13 +1,6 @@
 import { execFile as execFileReal } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import {
-  existsSync,
-  mkdirSync,
-  statSync,
-  writeFileSync,
-  unlinkSync,
-  appendFileSync,
-} from "node:fs";
+import { mkdirSync, statSync, writeFileSync, unlinkSync, appendFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { buildArgv } from "../../../lib/argv";
