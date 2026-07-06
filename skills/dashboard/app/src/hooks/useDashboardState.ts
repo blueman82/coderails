@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useReducer, useRef } from "react";
+import { useEffect, useReducer } from "react";
 import type { SessionInfo, LoopInfo } from "@/lib/collect/sessions";
 import type { PrGate, PrGateError } from "@/lib/collect/prGates";
 import type { TrailEntry } from "@/lib/collect/memoryTrail";
