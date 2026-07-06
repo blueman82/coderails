@@ -109,10 +109,22 @@ git -C "$NOMARK" commit -q --allow-empty -m init
 check "main() falls back to 'main' when origin/HEAD is unset" \
   "main" "$( cd "$NOMARK" && main )"
 
+# ─── repo(): a dotted repo name must not be truncated at the first dot ───────
+# The capture used to be [^/.]+, which stops at the first dot, so
+# owner/my.repo.git resolved to "owner/my" instead of "owner/my.repo".
+DOTREPO="$TMP/dotrepo"; git init -q "$DOTREPO"
+git -C "$DOTREPO" remote add origin "https://github.com/someowner/my.repo.git"
+check "repo(): dotted repo name is captured in full, .git suffix stripped" \
+  "someowner/my.repo" "$( cd "$DOTREPO" && repo )"
+
 # ─── pr::head_sha + pr::has_coderails_review_for_head ───────────────────────
 # These helpers call `gh`. Stub it via a PATH-injected fake script.
 STUB_DIR="$TMP/stubs"
 mkdir -p "$STUB_DIR"
+# Every gh_stub_rows invocation logs its own "$@" here (one line per call), so
+# a test can assert the exact fetch shape production used (--paginate, the
+# issues/<n>/comments path) instead of only inferring it indirectly.
+STUB_ARGS_LOG="$TMP/gh.args.log"
 
 ARTIFACT_LIB="$(cd "$(dirname "$0")/../../.." && pwd)/scripts/lib/review-artifact.sh"
 source "$ARTIFACT_LIB"
@@ -145,30 +157,219 @@ FAIL_STUB='exit 1'
 result=$(run_with_stub "$FAIL_STUB" pr::head_sha 42)
 check "pr::head_sha: gh failure → empty result" "" "$result"
 
-# Stub: comment body contains the exact matching marker
-MATCH_STUB="printf '%s\n' '$GOOD_MARKER'"
-run_with_stub "$MATCH_STUB" pr::has_coderails_review_for_head 42 "deadbeef"
-check "has_coderails_review_for_head: matching marker → exit 0" 0 $?
+# ─── Trusted-author gh stub builder ──────────────────────────────────────────
+# Both gate readers now call `gh` twice: `gh api user -q .login` (identity,
+# once per process) and the paginated REST comments fetch
+# `gh api repos/{owner}/{repo}/issues/{n}/comments --paginate --jq '...'`.
+# comment_row() builds one raw JSON comment object; gh_stub_rows() builds a
+# stub `gh` script that branches on "$@": returns TRUSTED_LOGIN for `api user`,
+# and for the comments fetch EXTRACTS the --jq program production actually
+# passed out of its own "$@" and executes it verbatim with real `jq -r` over
+# the fixture rows. This means the filter logic lives ONLY in git-common.sh —
+# the stub never re-guesses or duplicates the select expression, so a mutation
+# that weakens or deletes the production filter changes what these tests
+# observe (proven by the negative control below, where deleting the filter
+# from production makes the spoof tests fail).
+TRUSTED_LOGIN="trusted-bot"
+
+# comment_row <login> <assoc> <body>
+# Echoes one JSON object for the comments array (body is JSON-string-escaped
+# via jq -Rs so embedded newlines/quotes in a marker+prose body are safe).
+comment_row() {
+    local login="$1" assoc="$2" body="$3"
+    local body_json; body_json=$(printf '%s' "$body" | jq -Rs .)
+    printf '{"user":{"login":"%s"},"author_association":"%s","body":%s}' "$login" "$assoc" "$body_json"
+}
+
+# gh_stub_rows <rows_json_array>
+# Builds a gh stub body (to hand to run_with_stub) that serves TRUSTED_LOGIN
+# for identity and, for the comments fetch, pulls the --jq argument out of its
+# own "$@" (the exact program production passed) and runs it for real with
+# `jq -r` over the given JSON array of comment rows. Matches any
+# "*/comments --paginate*" invocation generically (both readers use it, across
+# different pr numbers), since the stub no longer needs to special-case pr=42.
+# Every invocation appends its own "$@" (one call per line) to
+# $STUB_ARGS_LOG so a test can assert exactly what production invoked, instead
+# of only inferring it from the case-match succeeding.
+gh_stub_rows() {
+    local rows="$1"
+    cat <<STUB
+args=("\$@")
+printf '%s\n' "\$*" >> "$STUB_ARGS_LOG"
+case "\$*" in
+  "api user -q .login")
+    echo "$TRUSTED_LOGIN"
+    ;;
+  *"comments --paginate"*)
+    # Find the --jq program among our own args and execute it verbatim —
+    # this is what makes the test exercise production's actual filter.
+    for ((i = 0; i < \${#args[@]}; i++)); do
+        if [[ "\${args[\$i]}" == "--jq" ]]; then
+            jq_prog="\${args[\$((i + 1))]}"
+            printf '%s' '$rows' | jq -r "\$jq_prog"
+            exit 0
+        fi
+    done
+    exit 1
+    ;;
+  *)
+    exit 1
+    ;;
+esac
+STUB
+}
+
+# gh_stub_identity_fail
+# Identity fetch itself fails (gh api user exits non-zero) — comments call
+# never has a chance to run.
+IDENTITY_FAIL_STUB='case "$*" in
+  "api user -q .login") exit 1 ;;
+  *) exit 1 ;;
+esac'
+
+# gh_stub_comments_fail
+# Identity succeeds but the comments fetch fails.
+COMMENTS_FAIL_STUB="case \"\$*\" in
+  \"api user -q .login\") echo \"$TRUSTED_LOGIN\" ;;
+  *\"issues/42/comments --paginate\"*) exit 1 ;;
+  *) exit 1 ;;
+esac"
+
+# E1 negative control / trust baseline: trusted OWNER posts a valid marker → exit 0
+ROWS_TRUSTED_MATCH=$(printf '[%s]' "$(comment_row "$TRUSTED_LOGIN" OWNER "$GOOD_MARKER")")
+: > "$STUB_ARGS_LOG"
+run_with_stub "$(gh_stub_rows "$ROWS_TRUSTED_MATCH")" pr::has_coderails_review_for_head 42 "deadbeef"
+check "has_coderails_review_for_head: trusted OWNER matching marker → exit 0" 0 $?
+
+# Fetch-shape assertion: the comments fetch production actually issued must
+# have used pagination and hit the issues/<n>/comments REST path — not just
+# "matched some case branch", which a looser pattern could satisfy by accident.
+FETCH_LINE=$(grep 'comments' "$STUB_ARGS_LOG" | tail -1)
+check "has_coderails_review_for_head: comments fetch used --paginate" "true" \
+  "$([[ "$FETCH_LINE" == *"--paginate"* ]] && echo true || echo false)"
+check "has_coderails_review_for_head: comments fetch hit issues/42/comments" "true" \
+  "$([[ "$FETCH_LINE" == *"issues/42/comments"* ]] && echo true || echo false)"
+
+# E1: untrusted login posts a byte-identical valid marker → exit 1 (spoofing rejected)
+ROWS_SPOOF=$(printf '[%s]' "$(comment_row "attacker" CONTRIBUTOR "$GOOD_MARKER")")
+run_with_stub "$(gh_stub_rows "$ROWS_SPOOF")" pr::has_coderails_review_for_head 42 "deadbeef"
+check "has_coderails_review_for_head: untrusted login byte-identical marker → exit 1 (spoof rejected)" 1 $?
+
+# E1: trusted login but NOT OWNER association → exit 1 (association also enforced)
+ROWS_TRUSTED_NOT_OWNER=$(printf '[%s]' "$(comment_row "$TRUSTED_LOGIN" CONTRIBUTOR "$GOOD_MARKER")")
+run_with_stub "$(gh_stub_rows "$ROWS_TRUSTED_NOT_OWNER")" pr::has_coderails_review_for_head 42 "deadbeef"
+check "has_coderails_review_for_head: trusted login, non-OWNER association → exit 1" 1 $?
+
+# E1: untrusted login WITH OWNER association → exit 1 (isolates the login check
+# from the association check — an association-only filter would wrongly pass
+# this, since OWNER alone is satisfied; the login mismatch must still reject it)
+ROWS_ATTACKER_OWNER=$(printf '[%s]' "$(comment_row "attacker" OWNER "$GOOD_MARKER")")
+run_with_stub "$(gh_stub_rows "$ROWS_ATTACKER_OWNER")" pr::has_coderails_review_for_head 42 "deadbeef"
+check "has_coderails_review_for_head: untrusted login, OWNER association → exit 1 (login check isolated from association check)" 1 $?
 
 # Stub: comment body contains a marker for a different SHA → exit 1 (no match)
-WRONG_SHA_STUB="printf '%s\n' '$OTHER_SHA_MARKER'"
-run_with_stub "$WRONG_SHA_STUB" pr::has_coderails_review_for_head 42 "deadbeef"
+ROWS_WRONG_SHA=$(printf '[%s]' "$(comment_row "$TRUSTED_LOGIN" OWNER "$OTHER_SHA_MARKER")")
+run_with_stub "$(gh_stub_rows "$ROWS_WRONG_SHA")" pr::has_coderails_review_for_head 42 "deadbeef"
 check "has_coderails_review_for_head: different sha marker → exit 1" 1 $?
 
 # Stub: comment body contains a v2 marker → exit 1 (fail-closed on unknown version)
-V2_STUB="printf '%s\n' '$V2_MARKER'"
-run_with_stub "$V2_STUB" pr::has_coderails_review_for_head 42 "deadbeef"
+ROWS_V2=$(printf '[%s]' "$(comment_row "$TRUSTED_LOGIN" OWNER "$V2_MARKER")")
+run_with_stub "$(gh_stub_rows "$ROWS_V2")" pr::has_coderails_review_for_head 42 "deadbeef"
 check "has_coderails_review_for_head: v2 marker → exit 1 (fail-closed)" 1 $?
 
-# Stub: no comments (empty output) → exit 1 (no match)
-EMPTY_STUB='printf ""'
-run_with_stub "$EMPTY_STUB" pr::has_coderails_review_for_head 42 "deadbeef"
+# Stub: no comments (empty array) → exit 1 (no match)
+run_with_stub "$(gh_stub_rows '[]')" pr::has_coderails_review_for_head 42 "deadbeef"
 check "has_coderails_review_for_head: no comments → exit 1" 1 $?
 
-# Stub: gh fails (non-zero exit) → distinct exit code 2 (fetch-failed)
-run_with_stub "$FAIL_STUB" pr::has_coderails_review_for_head 42 "deadbeef"
+# Stub: identity fetch fails → exit 2 (fetch-failed)
+run_with_stub "$IDENTITY_FAIL_STUB" pr::has_coderails_review_for_head 42 "deadbeef"
 rc=$?
-check "has_coderails_review_for_head: gh failure → exit 2 (fetch-failed, distinct from no-match)" 2 $rc
+check "has_coderails_review_for_head: identity fetch failure → exit 2 (fail-closed)" 2 $rc
+
+# Stub: comments fetch fails (identity ok) → exit 2 (fetch-failed)
+run_with_stub "$COMMENTS_FAIL_STUB" pr::has_coderails_review_for_head 42 "deadbeef"
+rc=$?
+check "has_coderails_review_for_head: comments fetch failure → exit 2 (fail-closed)" 2 $rc
+
+# ─── Injection: a pre-seeded _PR_TRUSTED_LOGIN must be validated, not trusted
+# blindly ──────────────────────────────────────────────────────────────────
+# pr::_trusted_login skips the gh fetch when _PR_TRUSTED_LOGIN is already set
+# (its per-subshell reuse guard). If that pre-seeded value were spliced
+# unvalidated into the --jq program, a value like `x" or true` would break out
+# of the string literal and make the trust filter match everything (fail-open).
+# The stub here would only serve a fixture with an "attacker"-authored marker,
+# so the ONLY way this could return exit 0 is if the malicious login bypassed
+# the select. A rejected login makes pr::_trusted_login fail exactly like a
+# failed gh fetch, so the reader fails closed the same way, via exit 2.
+export _PR_TRUSTED_LOGIN='x" or true'
+run_with_stub "$(gh_stub_rows "$ROWS_SPOOF")" pr::has_coderails_review_for_head 42 "deadbeef"
+check "has_coderails_review_for_head: malicious pre-seeded _PR_TRUSTED_LOGIN is rejected (fail-closed, not spliced into jq)" 2 $?
+unset _PR_TRUSTED_LOGIN
+
+# ─── Clean-break: the capped gh pr view --json comments fetch is fully gone ──
+# The old code read `gh pr view "$num" --json comments` — the PR number sits
+# BETWEEN `view` and `--json`, so a literal 'pr view --json comments' string
+# never matched it even before this fix and would pass vacuously against
+# unchanged old code. Use a regex that bridges the argument instead.
+GIT_COMMON_SH="$(cd "$(dirname "$0")/../../.." && pwd)/scripts/lib/git-common.sh"
+count=$(grep -cE 'pr view .*--json comments' "$GIT_COMMON_SH")
+check "clean-break: no remaining 'gh pr view ... --json comments' call in git-common.sh" 0 "$count"
+
+# Control: the SAME -E pattern must find the old call in the pre-change blob,
+# proving this guard can actually fail (i.e. it isn't vacuous the way the
+# literal-string version was). Skipped gracefully if the commit isn't
+# reachable (e.g. a shallow clone) rather than failing the suite.
+OLD_BLOB_SHA="7aab163b59481ddb94dd6324375b4155f2014582"
+if old_blob=$(git show "${OLD_BLOB_SHA}:scripts/lib/git-common.sh" 2>/dev/null); then
+    old_count=$(printf '%s\n' "$old_blob" | grep -cE 'pr view .*--json comments')
+    check "clean-break control: -E pattern finds the old call in the pre-change blob (guard is not vacuous)" "true" \
+      "$([[ "$old_count" -ge 1 ]] && echo true || echo false)"
+else
+    echo "skip - clean-break control: pre-change commit $OLD_BLOB_SHA not reachable (shallow clone?)"
+fi
+
+# ─── Pagination: a matching marker beyond the 100th comment row is found ────
+# Build 105 filler rows (untrusted, non-matching) then a 106th trusted OWNER
+# row carrying the real marker — proves the reader isn't silently truncating
+# to the first 100 comments the way `gh pr view --json comments` did.
+build_many_rows() {
+    local i rows="["
+    for ((i = 1; i <= 105; i++)); do
+        rows+="$(comment_row "filler-$i" NONE "not a marker"),"
+    done
+    rows+="$(comment_row "$TRUSTED_LOGIN" OWNER "$GOOD_MARKER")"
+    rows+="]"
+    printf '%s' "$rows"
+}
+ROWS_BEYOND_100=$(build_many_rows)
+run_with_stub "$(gh_stub_rows "$ROWS_BEYOND_100")" pr::has_coderails_review_for_head 42 "deadbeef"
+check "has_coderails_review_for_head: marker beyond row 100 is still found (pagination)" 0 $?
+
+# Negative control: same 106-row set but WITHOUT the trailing matching row →
+# exit 1, proving the pagination test can actually detect a miss.
+build_many_rows_no_match() {
+    local i rows="["
+    for ((i = 1; i <= 105; i++)); do
+        rows+="$(comment_row "filler-$i" NONE "not a marker")"
+        [[ $i -lt 105 ]] && rows+=","
+    done
+    rows+="]"
+    printf '%s' "$rows"
+}
+ROWS_BEYOND_100_NO_MATCH=$(build_many_rows_no_match)
+run_with_stub "$(gh_stub_rows "$ROWS_BEYOND_100_NO_MATCH")" pr::has_coderails_review_for_head 42 "deadbeef"
+check "has_coderails_review_for_head: negative control — no matching row → exit 1" 1 $?
+
+# ─── Multi-line body: marker on its own line, surrounded by prose ───────────
+# Every fixture body so far has been a bare marker line. Production base64-
+# encodes each body specifically so a multi-line comment survives as a single
+# reader line (see pr::_trusted_comment_bodies) and the marker is then matched
+# line-by-line within it — this is the real-world shape (a human/bot writes
+# prose around the marker), so it must be exercised at least once.
+MULTILINE_BODY=$'Some prose before the marker.\n'"$GOOD_MARKER"$'\nSome prose after the marker.'
+ROWS_MULTILINE=$(printf '[%s]' "$(comment_row "$TRUSTED_LOGIN" OWNER "$MULTILINE_BODY")")
+run_with_stub "$(gh_stub_rows "$ROWS_MULTILINE")" pr::has_coderails_review_for_head 42 "deadbeef"
+check "has_coderails_review_for_head: marker on its own line within a multi-line prose body → exit 0" 0 $?
 
 # ─── pr::has_coderails_eval_for_head ─────────────────────────────────────────
 EVAL_ARTIFACT_LIB="$(cd "$(dirname "$0")/../../.." && pwd)/scripts/lib/eval-artifact.sh"
@@ -178,30 +379,115 @@ GO_MARKER=$(eval_artifact::marker 42 "deadbeef" GO 1)
 NOGO_MARKER=$(eval_artifact::marker 42 "deadbeef" NO-GO 2)
 NOMATCH_MARKER=$(eval_artifact::marker 42 "othersha" GO 1)
 
-# Stub: comment body contains a matching GO marker → exit 0, PR_EVAL_TIER set
-MATCH_GO_STUB="printf '%s\n' '$GO_MARKER'"
-result=$(run_with_stub "$MATCH_GO_STUB" bash -c '
+# The eval reader is exercised against both pr 42 and 999 (PR_EVAL_TIER leak
+# test uses a second pr number) — gh_stub_rows already matches "comments
+# --paginate" generically, so it's reused here rather than duplicated.
+
+# Stub: comment body contains a matching GO marker from a trusted OWNER →
+# exit 0, PR_EVAL_TIER set
+ROWS_GO=$(printf '[%s]' "$(comment_row "$TRUSTED_LOGIN" OWNER "$GO_MARKER")")
+: > "$STUB_ARGS_LOG"
+result=$(run_with_stub "$(gh_stub_rows "$ROWS_GO")" bash -c '
   source "'"$LIB"'"
   pr::has_coderails_eval_for_head 42 "deadbeef"
   echo "rc=$?"
   echo "tier=$PR_EVAL_TIER"
 ')
-check "has_coderails_eval_for_head: matching GO marker → rc=0" "rc=0" "$(printf '%s\n' "$result" | grep '^rc=')"
-check "has_coderails_eval_for_head: matching GO marker → PR_EVAL_TIER=1" "tier=1" "$(printf '%s\n' "$result" | grep '^tier=')"
+check "has_coderails_eval_for_head: trusted matching GO marker → rc=0" "rc=0" "$(printf '%s\n' "$result" | grep '^rc=')"
+check "has_coderails_eval_for_head: trusted matching GO marker → PR_EVAL_TIER=1" "tier=1" "$(printf '%s\n' "$result" | grep '^tier=')"
 
-# Stub: gh fetch fails → exit 2, PR_EVAL_TIER unset/empty
-result=$(run_with_stub "$FAIL_STUB" bash -c '
+# Fetch-shape assertion: same as the review reader's, proving the eval reader
+# also issues a paginated issues/<n>/comments fetch (both readers share
+# pr::_trusted_comment_bodies, but this exercises it from the eval call site).
+FETCH_LINE_EVAL=$(grep 'comments' "$STUB_ARGS_LOG" | tail -1)
+check "has_coderails_eval_for_head: comments fetch used --paginate" "true" \
+  "$([[ "$FETCH_LINE_EVAL" == *"--paginate"* ]] && echo true || echo false)"
+check "has_coderails_eval_for_head: comments fetch hit issues/42/comments" "true" \
+  "$([[ "$FETCH_LINE_EVAL" == *"issues/42/comments"* ]] && echo true || echo false)"
+
+# E-spoof: untrusted login posts a byte-identical valid GO marker → exit 1 (rejected)
+ROWS_SPOOF_GO=$(printf '[%s]' "$(comment_row "attacker" CONTRIBUTOR "$GO_MARKER")")
+result=$(run_with_stub "$(gh_stub_rows "$ROWS_SPOOF_GO")" bash -c '
   source "'"$LIB"'"
   pr::has_coderails_eval_for_head 42 "deadbeef"
   echo "rc=$?"
   echo "tier=${PR_EVAL_TIER:-}"
 ')
-check "has_coderails_eval_for_head: gh fetch fails → rc=2" "rc=2" "$(printf '%s\n' "$result" | grep '^rc=')"
-check "has_coderails_eval_for_head: gh fetch fails → PR_EVAL_TIER empty" "tier=" "$(printf '%s\n' "$result" | grep '^tier=')"
+check "has_coderails_eval_for_head: untrusted GO marker → rc=1 (spoof rejected)" "rc=1" "$(printf '%s\n' "$result" | grep '^rc=')"
+check "has_coderails_eval_for_head: untrusted GO marker → PR_EVAL_TIER empty (never set from untrusted)" "tier=" "$(printf '%s\n' "$result" | grep '^tier=')"
+
+# E-spoof: untrusted login WITH OWNER association → rc=1 (isolates the login
+# check from the association check, same as the review reader's equivalent)
+ROWS_ATTACKER_OWNER_GO=$(printf '[%s]' "$(comment_row "attacker" OWNER "$GO_MARKER")")
+result=$(run_with_stub "$(gh_stub_rows "$ROWS_ATTACKER_OWNER_GO")" bash -c '
+  source "'"$LIB"'"
+  pr::has_coderails_eval_for_head 42 "deadbeef"
+  echo "rc=$?"
+  echo "tier=${PR_EVAL_TIER:-}"
+')
+check "has_coderails_eval_for_head: untrusted login, OWNER association → rc=1 (login check isolated from association check)" "rc=1" "$(printf '%s\n' "$result" | grep '^rc=')"
+check "has_coderails_eval_for_head: untrusted login, OWNER association → PR_EVAL_TIER empty" "tier=" "$(printf '%s\n' "$result" | grep '^tier=')"
+
+# E-assoc: trusted login but NOT OWNER association → rc=1 (association also
+# enforced for the eval reader, not just the review reader)
+ROWS_TRUSTED_NOT_OWNER_GO=$(printf '[%s]' "$(comment_row "$TRUSTED_LOGIN" CONTRIBUTOR "$GO_MARKER")")
+result=$(run_with_stub "$(gh_stub_rows "$ROWS_TRUSTED_NOT_OWNER_GO")" bash -c '
+  source "'"$LIB"'"
+  pr::has_coderails_eval_for_head 42 "deadbeef"
+  echo "rc=$?"
+  echo "tier=${PR_EVAL_TIER:-}"
+')
+check "has_coderails_eval_for_head: trusted login, non-OWNER association → rc=1" "rc=1" "$(printf '%s\n' "$result" | grep '^rc=')"
+check "has_coderails_eval_for_head: trusted login, non-OWNER association → PR_EVAL_TIER empty" "tier=" "$(printf '%s\n' "$result" | grep '^tier=')"
+
+# Stub: no comments (empty array) → rc=1, PR_EVAL_TIER unset (mirrors the
+# review reader's empty-comment-list case, for the eval reader too)
+result=$(run_with_stub "$(gh_stub_rows '[]')" bash -c '
+  source "'"$LIB"'"
+  pr::has_coderails_eval_for_head 42 "deadbeef"
+  echo "rc=$?"
+  echo "tier=${PR_EVAL_TIER:-}"
+')
+check "has_coderails_eval_for_head: no comments → rc=1" "rc=1" "$(printf '%s\n' "$result" | grep '^rc=')"
+check "has_coderails_eval_for_head: no comments → PR_EVAL_TIER empty" "tier=" "$(printf '%s\n' "$result" | grep '^tier=')"
+
+# Multi-line body: GO marker on its own line, surrounded by prose (mirrors the
+# review reader's equivalent — every eval fixture so far has been a bare
+# marker line too).
+MULTILINE_GO_BODY=$'## Eval summary\n\n'"$GO_MARKER"$'\n\nSee PR for details.'
+ROWS_MULTILINE_GO=$(printf '[%s]' "$(comment_row "$TRUSTED_LOGIN" OWNER "$MULTILINE_GO_BODY")")
+result=$(run_with_stub "$(gh_stub_rows "$ROWS_MULTILINE_GO")" bash -c '
+  source "'"$LIB"'"
+  pr::has_coderails_eval_for_head 42 "deadbeef"
+  echo "rc=$?"
+  echo "tier=${PR_EVAL_TIER:-}"
+')
+check "has_coderails_eval_for_head: GO marker on its own line within a multi-line prose body → rc=0" "rc=0" "$(printf '%s\n' "$result" | grep '^rc=')"
+check "has_coderails_eval_for_head: GO marker within multi-line body → PR_EVAL_TIER=1" "tier=1" "$(printf '%s\n' "$result" | grep '^tier=')"
+
+# Stub: identity fetch fails → exit 2, PR_EVAL_TIER unset/empty
+result=$(run_with_stub "$IDENTITY_FAIL_STUB" bash -c '
+  source "'"$LIB"'"
+  pr::has_coderails_eval_for_head 42 "deadbeef"
+  echo "rc=$?"
+  echo "tier=${PR_EVAL_TIER:-}"
+')
+check "has_coderails_eval_for_head: identity fetch fails → rc=2" "rc=2" "$(printf '%s\n' "$result" | grep '^rc=')"
+check "has_coderails_eval_for_head: identity fetch fails → PR_EVAL_TIER empty" "tier=" "$(printf '%s\n' "$result" | grep '^tier=')"
+
+# Stub: comments fetch fails (identity ok) → exit 2, PR_EVAL_TIER unset/empty
+result=$(run_with_stub "$COMMENTS_FAIL_STUB" bash -c '
+  source "'"$LIB"'"
+  pr::has_coderails_eval_for_head 42 "deadbeef"
+  echo "rc=$?"
+  echo "tier=${PR_EVAL_TIER:-}"
+')
+check "has_coderails_eval_for_head: comments fetch fails → rc=2" "rc=2" "$(printf '%s\n' "$result" | grep '^rc=')"
+check "has_coderails_eval_for_head: comments fetch fails → PR_EVAL_TIER empty" "tier=" "$(printf '%s\n' "$result" | grep '^tier=')"
 
 # Stub: matching pr/sha but NO-GO → exit 1, PR_EVAL_TIER still set (so merge.sh can report it)
-MATCH_NOGO_STUB="printf '%s\n' '$NOGO_MARKER'"
-result=$(run_with_stub "$MATCH_NOGO_STUB" bash -c '
+ROWS_NOGO=$(printf '[%s]' "$(comment_row "$TRUSTED_LOGIN" OWNER "$NOGO_MARKER")")
+result=$(run_with_stub "$(gh_stub_rows "$ROWS_NOGO")" bash -c '
   source "'"$LIB"'"
   pr::has_coderails_eval_for_head 42 "deadbeef"
   echo "rc=$?"
@@ -211,8 +497,8 @@ check "has_coderails_eval_for_head: NO-GO marker → rc=1" "rc=1" "$(printf '%s\
 check "has_coderails_eval_for_head: NO-GO marker → PR_EVAL_TIER=2" "tier=2" "$(printf '%s\n' "$result" | grep '^tier=')"
 
 # Stub: no matching marker at all → exit 1, PR_EVAL_TIER empty
-NOMATCH_STUB="printf '%s\n' '$NOMATCH_MARKER'"
-result=$(run_with_stub "$NOMATCH_STUB" bash -c '
+ROWS_NOMATCH=$(printf '[%s]' "$(comment_row "$TRUSTED_LOGIN" OWNER "$NOMATCH_MARKER")")
+result=$(run_with_stub "$(gh_stub_rows "$ROWS_NOMATCH")" bash -c '
   source "'"$LIB"'"
   pr::has_coderails_eval_for_head 42 "deadbeef"
   echo "rc=$?"
@@ -226,11 +512,15 @@ check "has_coderails_eval_for_head: no matching marker → PR_EVAL_TIER empty" "
 # a stale NO-GO from an earlier push, then a fresh GO after fixes). The LAST
 # matching marker line in comment order must be authoritative — a stale GO
 # must never override a newer NO-GO for the same sha, and the legit
-# NO-GO→fix→GO path must still pass because GO is newest.
+# NO-GO→fix→GO path must still pass because GO is newest. All rows here are
+# trusted OWNER comments — this section tests newest-wins in isolation from
+# the author filter.
 
-# (a) GO line then NO-GO line for the same pr/sha → newest (NO-GO) wins → rc=1
-GO_THEN_NOGO_STUB="printf '%s\n%s\n' '$GO_MARKER' '$NOGO_MARKER'"
-result=$(run_with_stub "$GO_THEN_NOGO_STUB" bash -c '
+# (a) GO comment then NO-GO comment (same pr/sha, trusted) → newest (NO-GO) wins → rc=1
+ROWS_GO_THEN_NOGO=$(printf '[%s,%s]' \
+    "$(comment_row "$TRUSTED_LOGIN" OWNER "$GO_MARKER")" \
+    "$(comment_row "$TRUSTED_LOGIN" OWNER "$NOGO_MARKER")")
+result=$(run_with_stub "$(gh_stub_rows "$ROWS_GO_THEN_NOGO")" bash -c '
   source "'"$LIB"'"
   pr::has_coderails_eval_for_head 42 "deadbeef"
   echo "rc=$?"
@@ -239,9 +529,11 @@ result=$(run_with_stub "$GO_THEN_NOGO_STUB" bash -c '
 check "has_coderails_eval_for_head: GO then NO-GO (same sha) → rc=1 (newest wins)" "rc=1" "$(printf '%s\n' "$result" | grep '^rc=')"
 check "has_coderails_eval_for_head: GO then NO-GO (same sha) → PR_EVAL_TIER=2 (from newest)" "tier=2" "$(printf '%s\n' "$result" | grep '^tier=')"
 
-# (b) NO-GO line then GO line for the same pr/sha (legit fix-and-repost path) → newest (GO) wins → rc=0
-NOGO_THEN_GO_STUB="printf '%s\n%s\n' '$NOGO_MARKER' '$GO_MARKER'"
-result=$(run_with_stub "$NOGO_THEN_GO_STUB" bash -c '
+# (b) NO-GO comment then GO comment (same pr/sha, legit fix-and-repost path) → newest (GO) wins → rc=0
+ROWS_NOGO_THEN_GO=$(printf '[%s,%s]' \
+    "$(comment_row "$TRUSTED_LOGIN" OWNER "$NOGO_MARKER")" \
+    "$(comment_row "$TRUSTED_LOGIN" OWNER "$GO_MARKER")")
+result=$(run_with_stub "$(gh_stub_rows "$ROWS_NOGO_THEN_GO")" bash -c '
   source "'"$LIB"'"
   pr::has_coderails_eval_for_head 42 "deadbeef"
   echo "rc=$?"
@@ -250,10 +542,29 @@ result=$(run_with_stub "$NOGO_THEN_GO_STUB" bash -c '
 check "has_coderails_eval_for_head: NO-GO then GO (same sha) → rc=0 (newest wins)" "rc=0" "$(printf '%s\n' "$result" | grep '^rc=')"
 check "has_coderails_eval_for_head: NO-GO then GO (same sha) → PR_EVAL_TIER=1 (from newest)" "tier=1" "$(printf '%s\n' "$result" | grep '^tier=')"
 
+# (c) NEWEST-WINS SURVIVES the author filter: trusted older GO, trusted newer
+# NO-GO, then an UNTRUSTED forged GO newer still → the forged row must be
+# dropped before matching, so the trusted NO-GO remains the newest surviving
+# match → rc=1, not rc=0.
+ROWS_FORGED_NEWEST=$(printf '[%s,%s,%s]' \
+    "$(comment_row "$TRUSTED_LOGIN" OWNER "$GO_MARKER")" \
+    "$(comment_row "$TRUSTED_LOGIN" OWNER "$NOGO_MARKER")" \
+    "$(comment_row "attacker" CONTRIBUTOR "$GO_MARKER")")
+result=$(run_with_stub "$(gh_stub_rows "$ROWS_FORGED_NEWEST")" bash -c '
+  source "'"$LIB"'"
+  pr::has_coderails_eval_for_head 42 "deadbeef"
+  echo "rc=$?"
+  echo "tier=$PR_EVAL_TIER"
+')
+check "has_coderails_eval_for_head: trusted GO, trusted NO-GO, then FORGED newer GO → rc=1 (forgery ignored, newest-wins survives)" "rc=1" "$(printf '%s\n' "$result" | grep '^rc=')"
+check "has_coderails_eval_for_head: forged newer GO ignored → PR_EVAL_TIER=2 (from newest TRUSTED match)" "tier=2" "$(printf '%s\n' "$result" | grep '^tier=')"
+
 # ─── has_coderails_eval_for_head: PR_EVAL_TIER does not leak across calls ────
 # The function must unset PR_EVAL_TIER at entry so a second, non-matching call
 # in the same shell can't inherit a stale value from a prior matching call.
-result=$(run_with_stub "$MATCH_GO_STUB" bash -c '
+# Second call targets a different pr/sha with the SAME rows (no matching
+# marker for pr=999), so any leaked tier would surface as a false positive.
+result=$(run_with_stub "$(gh_stub_rows "$ROWS_GO")" bash -c '
   source "'"$LIB"'"
   pr::has_coderails_eval_for_head 42 "deadbeef" >/dev/null 2>&1
   pr::has_coderails_eval_for_head 999 "othersha" >/dev/null 2>&1

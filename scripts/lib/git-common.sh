@@ -39,7 +39,15 @@ ahead_list() { git log "origin/$(main)..HEAD" --oneline 2>/dev/null; }
 # ━━━ Repository ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 repo() {
     local url; url=$(git remote get-url origin 2>/dev/null) || return 1
-    [[ $url =~ github\.com[:/]([^/]+)/([^/.]+) ]] && echo "${BASH_REMATCH[1]}/${BASH_REMATCH[2]}"
+    # Repo name capture is greedy (dots allowed, e.g. owner/my.repo.git) — a
+    # trailing slash and/or .git suffix is stripped after the match instead of
+    # excluded from it, so a dotted repo name is never truncated.
+    if [[ $url =~ github\.com[:/]([^/]+)/(.+)$ ]]; then
+        local name="${BASH_REMATCH[2]}"
+        name="${name%/}"
+        name="${name%.git}"
+        echo "${BASH_REMATCH[1]}/${name}"
+    fi
 }
 
 protected() {
@@ -63,33 +71,91 @@ pr::head_sha() {
     fi
 }
 
+# pr::_trusted_login
+# Echoes the authenticated gh user's login. NOTE: despite the _PR_TRUSTED_LOGIN
+# variable, this does NOT cache across processes — each reader call site
+# invokes this from a fresh command substitution subshell, so any value set
+# here never survives back to the caller's shell (confirmed: `gh api user`
+# runs once per pr::_trusted_comment_bodies call, not once per process). The
+# variable only guards against redundant fetches within a single subshell's
+# lifetime. This is the identity both gate readers trust — any comment from
+# another login, or from this login without OWNER association, is untrusted
+# and skipped before marker matching (comment-spoofing defence).
+# The login is validated against GitHub's login charset before use whether it
+# came from cache or a fresh fetch, because it is spliced directly into a jq
+# --jq program string: an unvalidated value (e.g. pre-seeded via env as
+# `x" or true`) could break out of the string literal and turn the trust
+# filter into a tautology. A value that fails validation is treated as unset
+# (fail-closed) rather than trusted.
+# Returns non-zero if the identity fetch fails or fails validation (caller
+# must fail-closed).
+pr::_trusted_login() {
+    if [[ -z "${_PR_TRUSTED_LOGIN:-}" ]]; then
+        _PR_TRUSTED_LOGIN=$(gh api user -q .login 2>/dev/null) || return 1
+    fi
+    [[ "$_PR_TRUSTED_LOGIN" =~ ^[A-Za-z0-9-]+$ ]] || return 1
+    printf '%s' "$_PR_TRUSTED_LOGIN"
+}
+
+# pr::_trusted_comment_bodies <num>
+# Fetches ALL comments for <num> via the paginated REST endpoint (no 100-comment
+# cap, unlike the old --json comments GraphQL fetch), keeps only comments whose author
+# login matches the trusted identity AND whose authorAssociation is OWNER, and
+# echoes their bodies in creation-ascending order (one body per line, base64
+# encoded so multi-line bodies survive as a single reader line). Untrusted
+# comments are dropped here, before any marker matching, so they can neither
+# win nor suppress a match.
+# NOTE: OWNER assumes the authenticated user personally owns the repo; on an
+# org-owned repo the same user's comments carry MEMBER/COLLABORATOR instead,
+# so this gate would fail closed there (widening the trust floor is a
+# separate owner decision).
+# Returns non-zero if the identity or comments fetch fails (fail-closed).
+pr::_trusted_comment_bodies() {
+    local num="$1" trusted
+    trusted=$(pr::_trusted_login) || return 1
+    gh api "repos/$(repo)/issues/${num}/comments" --paginate \
+        --jq '.[] | select(.user.login == "'"$trusted"'" and .author_association == "OWNER") | (.body | @base64)' \
+        2>/dev/null
+}
+
 # pr::has_coderails_review_for_head <num> <sha>
-# Fetches all PR comment bodies and checks whether any LINE (across all comments)
-# is exactly the coderails review marker for <num>/<sha>.
+# Checks whether any LINE (across all trusted comment bodies) is exactly the
+# coderails review marker for <num>/<sha>. Comments from untrusted authors are
+# excluded before matching (see pr::_trusted_comment_bodies).
 # Exit codes:
 #   0 = found a matching marker
 #   1 = fetched ok, but no matching marker found
 #   2 = gh fetch failed (fail-closed)
 pr::has_coderails_review_for_head() {
     local num="$1" sha="$2"
-    local bodies
-    if ! bodies=$(gh pr view "$num" --json comments -q '.comments[].body' 2>/dev/null); then
+    local encoded_bodies
+    if ! encoded_bodies=$(pr::_trusted_comment_bodies "$num"); then
         return 2
     fi
-    while IFS= read -r line; do
-        if review_artifact::matches_marker "$line" "$num" "$sha"; then
-            return 0
+    local encoded body line
+    while IFS= read -r encoded; do
+        [[ -n "$encoded" ]] || continue
+        if ! body=$(printf '%s' "$encoded" | base64 -d 2>/dev/null); then
+            printf '%s! Skipping a trusted comment body: base64 decode failed%s\n' "$C_YLW" "$C_RST" >&2
+            continue
         fi
-    done <<< "$bodies"
+        while IFS= read -r line; do
+            if review_artifact::matches_marker "$line" "$num" "$sha"; then
+                return 0
+            fi
+        done <<< "$body"
+    done <<< "$encoded_bodies"
     return 1
 }
 
 # pr::has_coderails_eval_for_head <num> <sha>
-# Fetches all PR comment bodies and checks whether any LINE (across all comments)
-# is the coderails eval marker for <num>/<sha>. A PR can accumulate multiple
-# eval-artifact comments over its lifetime, so the LAST matching marker line in
-# comment order is authoritative — NOT the first. On any matching line, sets the
-# global PR_EVAL_TIER to the parsed tier digit of the newest match.
+# Checks whether any LINE (across all trusted comment bodies) is the coderails
+# eval marker for <num>/<sha>. Comments from untrusted authors are excluded
+# before matching (see pr::_trusted_comment_bodies). A PR can accumulate
+# multiple eval-artifact comments over its lifetime, so the LAST matching
+# marker line in comment order is authoritative — NOT the first. On any
+# matching line, sets the global PR_EVAL_TIER to the parsed tier digit of the
+# newest match.
 # Exit codes (same shape as pr::has_coderails_review_for_head):
 #   0 = newest matching artifact has result=GO
 #   1 = fetched ok, no matching artifact at all, or the newest matching
@@ -99,17 +165,25 @@ pr::has_coderails_review_for_head() {
 pr::has_coderails_eval_for_head() {
     local num="$1" sha="$2"
     unset PR_EVAL_TIER
-    local bodies
-    if ! bodies=$(gh pr view "$num" --json comments -q '.comments[].body' 2>/dev/null); then
+    local encoded_bodies
+    if ! encoded_bodies=$(pr::_trusted_comment_bodies "$num"); then
         return 2
     fi
     local newest_result=""
-    while IFS= read -r line; do
-        if eval_artifact::matches_marker "$line" "$num" "$sha"; then
-            newest_result=$(eval_artifact::parse_result "$line")
-            PR_EVAL_TIER=$(eval_artifact::parse_tier "$line")
+    local encoded body line
+    while IFS= read -r encoded; do
+        [[ -n "$encoded" ]] || continue
+        if ! body=$(printf '%s' "$encoded" | base64 -d 2>/dev/null); then
+            printf '%s! Skipping a trusted comment body: base64 decode failed%s\n' "$C_YLW" "$C_RST" >&2
+            continue
         fi
-    done <<< "$bodies"
+        while IFS= read -r line; do
+            if eval_artifact::matches_marker "$line" "$num" "$sha"; then
+                newest_result=$(eval_artifact::parse_result "$line")
+                PR_EVAL_TIER=$(eval_artifact::parse_tier "$line")
+            fi
+        done <<< "$body"
+    done <<< "$encoded_bodies"
     [[ "$newest_result" == "GO" ]] && return 0
     return 1
 }
