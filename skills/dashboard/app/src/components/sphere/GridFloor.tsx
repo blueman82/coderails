@@ -1,9 +1,6 @@
 "use client";
-/* eslint-disable react-hooks/immutability --
-   useFrame mutates the material's THREE.Color every frame to re-tint it with the live accent hue
-   — the same documented R3F escape hatch NetworkSphere.tsx disables the rule for. */
 
-import { useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import { hslToRgb, type AccentHsl } from "@/lib/runHue";
