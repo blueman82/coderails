@@ -20,7 +20,7 @@ push::main() {
     # ─── Commit ───────────────────────────────────────────────────────────────
     if dirty; then
         git add -u
-        local untracked; untracked=$(git status --porcelain | grep '^??' | cut -c4-)
+        local untracked; untracked=$(git status --porcelain | grep '^??' | cut -c4- || true)
         if [[ -n "$untracked" ]]; then
             warn "Untracked files not staged (run 'git add' explicitly to include them):"
             while IFS= read -r f; do warn "  $f"; done <<< "$untracked"

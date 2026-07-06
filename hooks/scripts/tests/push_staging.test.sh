@@ -54,19 +54,34 @@ new_fixture() {
 }
 
 # ─── TRACKED-ONLY: modified tracked file, no untracked files ────────────────
+# No `??` lines exist here at all, which is the common case and the one that
+# previously crashed push.sh (a bare `grep '^??'` with zero matches exits 1,
+# and under `set -euo pipefail` that aborted the whole script before the
+# commit ever ran) — assert on exit code and HEAD advancing, not just content,
+# so a future regression that skips the commit can't pass silently.
 R=$(new_fixture tracked_only)
+BEFORE_HEAD=$(git -C "$R" rev-parse HEAD)
 echo "changed" > "$R/base.txt"
 OUT=$( ( cd "$R" && bash "$PUSH_SH" ) 2>&1 )
+RC=$?
+AFTER_HEAD=$(git -C "$R" rev-parse HEAD)
 staged=$(git -C "$R" show --name-only -1 --format="" HEAD 2>/dev/null)
+check "TRACKED-ONLY: does not crash (exit 0)" "0" "$RC"
+check "TRACKED-ONLY: HEAD advances (a new commit was made)" "1" "$([ "$BEFORE_HEAD" != "$AFTER_HEAD" ] && echo 1 || echo 0)"
 check "TRACKED-ONLY: modification staged and committed" "base.txt" "$staged"
 check "TRACKED-ONLY: no untracked-file warning printed" "0" "$(printf '%s' "$OUT" | grep -c -i 'untracked')"
 
 # ─── UNTRACKED-PRESENT: modified tracked file AND an untracked file ─────────
 R=$(new_fixture untracked_present)
+BEFORE_HEAD=$(git -C "$R" rev-parse HEAD)
 echo "changed" > "$R/base.txt"
 echo "new" > "$R/newfile.txt"
 OUT=$( ( cd "$R" && bash "$PUSH_SH" ) 2>&1 )
+RC=$?
+AFTER_HEAD=$(git -C "$R" rev-parse HEAD)
 committed_files=$(git -C "$R" show --name-only -1 --format="" HEAD 2>/dev/null)
+check "UNTRACKED-PRESENT: does not crash (exit 0)" "0" "$RC"
+check "UNTRACKED-PRESENT: HEAD advances (a new commit was made)" "1" "$([ "$BEFORE_HEAD" != "$AFTER_HEAD" ] && echo 1 || echo 0)"
 check "UNTRACKED-PRESENT: modification staged and committed" "base.txt" "$committed_files"
 check "UNTRACKED-PRESENT: untracked file NOT staged" "0" "$(printf '%s' "$committed_files" | grep -c newfile.txt)"
 check "UNTRACKED-PRESENT: warning printed" "1" "$(printf '%s' "$OUT" | grep -c -i 'untracked')"
@@ -90,6 +105,8 @@ echo "changed" > "$R/base.txt"
 echo "a" > "$R/alpha.txt"
 echo "b" > "$R/beta.txt"
 OUT=$( ( cd "$R" && bash "$PUSH_SH" ) 2>&1 )
+RC=$?
+check "MULTIPLE UNTRACKED: does not crash (exit 0)" "0" "$RC"
 check "MULTIPLE UNTRACKED: alpha.txt named in warning" "1" "$(printf '%s' "$OUT" | grep -c 'alpha.txt')"
 check "MULTIPLE UNTRACKED: beta.txt named in warning" "1" "$(printf '%s' "$OUT" | grep -c 'beta.txt')"
 
