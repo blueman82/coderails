@@ -118,6 +118,34 @@ describe("parseGates", () => {
     expect(gate.evals).toBe("missing");
   });
 
+  it("rejects an eval marker with an out-of-range tier (shell grammar caps tier at [0-2])", () => {
+    const gate = parseGates(prJson(), [
+      comment(`<!-- coderails-eval-summary ${EVAL_VER} pr=4 head_sha=${HEAD_SHA} result=GO tier=99 -->`),
+    ]);
+    expect(gate.evals).toBe("missing");
+  });
+
+  it("rejects an eval marker with a non-vocabulary result (shell grammar allows only GO|NO-GO)", () => {
+    const gate = parseGates(prJson(), [
+      comment(`<!-- coderails-eval-summary ${EVAL_VER} pr=4 head_sha=${HEAD_SHA} result=MAYBE tier=1 -->`),
+    ]);
+    expect(gate.evals).toBe("missing");
+  });
+
+  it("rejects an eval marker embedded mid-sentence rather than alone on its own line (shell requires whole-line anchoring)", () => {
+    const gate = parseGates(prJson(), [
+      comment(`some preamble text ${evalMarker(4, HEAD_SHA, "GO", 1)} trailing junk`),
+    ]);
+    expect(gate.evals).toBe("missing");
+  });
+
+  it("rejects a review marker embedded mid-sentence rather than alone on its own line (shell requires exact line equality)", () => {
+    const gate = parseGates(prJson(), [
+      comment(`preamble ${reviewMarker(4, HEAD_SHA)} trailing`),
+    ]);
+    expect(gate.review).toBe("missing");
+  });
+
   it("picks the newest-SHA eval marker when multiple eval markers exist for the PR", () => {
     const gate = parseGates(prJson(), [
       comment(evalMarker(4, OLD_SHA, "GO", 1)),
