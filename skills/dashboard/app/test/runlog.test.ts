@@ -156,4 +156,16 @@ describe("getRunToken", () => {
     const mode = statSync(join(dir, "run-token")).mode & 0o777;
     expect(mode).toBe(0o600);
   });
+
+  it("tightens an existing token file's mode to 0600 on read, if it was created looser", () => {
+    const dir = tmpRunsDir();
+    mkdirSync(dir, { recursive: true });
+    const path = join(dir, "run-token");
+    writeFileSync(path, "existing-token-value", { mode: 0o644 });
+    expect(statSync(path).mode & 0o777).toBe(0o644);
+
+    getRunToken(dir);
+
+    expect(statSync(path).mode & 0o777).toBe(0o600);
+  });
 });
