@@ -1,8 +1,4 @@
 "use client";
-/* eslint-disable react-hooks/set-state-in-effect --
-   The accent tick loop reads performance.now() and writes CSS custom properties on <html>
-   every ~50ms while a run is active — a genuinely imperative, time-driven side effect with no
-   pure-render equivalent, same class of exception as Scene.tsx's WebGL probe. */
 
 import { useEffect, useRef, useState } from "react";
 import { accentAt, hslToRgb, expectedDurationMs, progressFraction, ACCENT_IDLE, type AccentHsl } from "@/lib/runHue";
