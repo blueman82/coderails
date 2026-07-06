@@ -29,6 +29,20 @@ als_sanitise_session_id() {
   if [ -z "$raw" ] || [ "$raw" = "?" ]; then
     printf 'unknown-%s-%s' "$$" "$(date +%s%N 2>/dev/null || date +%s)"
   else
+    # session_id is harness-owned (Stop payload / env), not attacker-controlled
+    # — defence-in-depth against payload anomalies, not a security boundary.
+    # REPLACE (not fresh-fallback): a malformed id must not silently orphan its
+    # real session, so strip "/" and collapse ".." in place rather than
+    # discarding the id and generating an unrelated fresh one.
+    # ACCEPTED TRADEOFF: lossy transform — "foo/bar" and "foo_bar" both
+    # sanitise to "foo_bar", so two distinct raw ids can collide. Accepted
+    # given session_id is harness-owned, rather than adding a re-uniquifying
+    # suffix that would make the sanitised form unpredictable across calls.
+    # Keep in lockstep with the duplicate copy in agentic_loop_path.sh (kept
+    # dependency-free by design, so this transform is intentionally
+    # duplicated there rather than sourcing this file) — update both on any change.
+    raw=$(printf '%s' "$raw" | tr '/' '_')
+    raw=$(printf '%s' "$raw" | sed 's/\.\.//g')
     printf '%s' "$raw"
   fi
 }
