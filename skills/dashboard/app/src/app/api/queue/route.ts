@@ -50,8 +50,8 @@ export function createQueueActionHandler(deps: QueueActionHandlerDeps) {
       return jsonResponse(401, { error: "unauthorized" });
     }
 
-    if (typeof payload.hash !== "string" || !payload.hash) {
-      return jsonResponse(400, { error: "missing hash" });
+    if (typeof payload.hash !== "string" || !HASH_PATTERN.test(payload.hash)) {
+      return jsonResponse(400, { error: "invalid hash" });
     }
 
     if (payload.decision !== "approved" && payload.decision !== "denied") {
