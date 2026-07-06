@@ -159,6 +159,18 @@ check "transcript with coderails:agentic-loop Skill call -> 1" "1" "$n"
 n=$(call_fn ulg_has_skill_invocation "$(mk_other_transcript)")
 check "transcript with only non-loop Skill call -> 0" "0" "$n"
 
+# PR A follow-up: ulg_has_skill_invocation delegates to als_count_invocations
+# (lib/loop_state_common.sh), which now logs a distinguishable reason on jq
+# failure. This one-shot consumer has its own justifying comment (see its
+# definition above) and does not itself branch on the reason — it just needs
+# to keep returning "0" unchanged (fail-open, same as before) while the log
+# still picks up the delegated call's reason=jq_parse_error line.
+: > "$CLAUDE_DISCIPLINE_LOG"
+n=$(call_fn ulg_has_skill_invocation "$corrupt_t")
+check "malformed transcript -> ulg_has_skill_invocation still returns 0 unchanged" "0" "$n"
+check "malformed transcript -> discipline log picks up delegated reason=jq_parse_error" 1 \
+  "$(grep -c 'reason=jq_parse_error' "$CLAUDE_DISCIPLINE_LOG" 2>/dev/null || echo 0)"
+
 # =====================================================================
 # Task 3 — end-to-end gate: threshold, registration, nudge delivery
 # =====================================================================

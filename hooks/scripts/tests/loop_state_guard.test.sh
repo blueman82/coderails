@@ -50,6 +50,11 @@ check() { # desc expected_code actual_code
   else printf 'FAIL - %s (expected exit %s, got %s)\n' "$1" "$2" "$3"; fails=$((fails+1)); fi
 }
 reset() { rm -rf "$CLAUDE_AGENTIC_LOOP_DIR"; }
+# grep -c exits 1 on zero matches even though it correctly prints "0" — count()
+# always exits 0 and prints just the count, so a zero-match assertion doesn't
+# need an `|| echo 0` fallback that (on a match count of exactly 0) would print
+# a spurious second "0" line and break the string-equality check in check().
+count() { grep -c "$1" "$2" 2>/dev/null; true; }
 
 # als_gate_no_transcript — no transcript file.
 check "no transcript -> allow" 0 "$(run x "$(payload "$TMP/nope.jsonl" S1)")"
@@ -145,5 +150,152 @@ check "sanitise: '/' replaced with '_'" "foo_bar" "$(sanitised "foo/bar")"
 # leaving "__etc". Documented exact expected value per this deterministic order.
 check "sanitise: '..' collapsed/removed" "__etc" "$(sanitised "../../etc")"
 check "sanitise: normal id passes through unchanged" "normal-id-123" "$(sanitised "normal-id-123")"
+
+# =====================================================================
+# Task A1 — als_count_invocations jq-failure hardening (distinguishable logging)
+# =====================================================================
+# Malformed transcript: 1 valid loop-Skill line + 1 truncated/invalid JSON line.
+# `jq -s` (slurp) aborts the WHOLE parse on the bad line, so als_count_invocations
+# returns empty -> als_gate_require_active_loop treats it as "not a loop" and
+# allows — this fail-open behavior is UNCHANGED by this task (asserted first).
+# The NEW part is the second assertion: the discipline log must now carry a
+# distinguishable reason=jq_parse_error line, where before it logged nothing.
+mk_corrupt_transcript() {
+  local out="$TMP/corrupt_$RANDOM.jsonl"
+  printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Skill","input":{"skill":"coderails:agentic-loop"}}]}}' > "$out"
+  printf '%s\n' '{"type":"assistant", THIS IS NOT VALID JSON' >> "$out"
+  printf '%s' "$out"
+}
+reset; corrupt_t=$(mk_corrupt_transcript)
+check "malformed transcript -> gate still allows (fail-open unchanged)" 0 "$(run x "$(payload "$corrupt_t" S1)")"
+reset; : > "$CLAUDE_DISCIPLINE_LOG"; run x "$(payload "$corrupt_t" S1)" >/dev/null
+check "malformed transcript -> discipline log gains reason=jq_parse_error" 1 \
+  "$(count 'reason=jq_parse_error' "$CLAUDE_DISCIPLINE_LOG")"
+
+# als_count_invocations is now a ONE-SHOT primitive: on jq failure it signals
+# the reason on STDERR (not by logging directly — see its own comment), and
+# does NOT touch the discipline log itself. Source lib/loop_state_common.sh
+# directly (call_fn-style isolation, mirroring unregistered_loop_guard.test.sh)
+# and shadow PATH around the call to confirm this contract.
+LIB="$(cd "$(dirname "$0")/../lib" && pwd)/loop_state_common.sh"
+call_lib_fn() { local fn="$1"; shift; ( . "$LIB"; "$fn" "$@" ); }
+: > "$CLAUDE_DISCIPLINE_LOG"
+some_t=$(mk_transcript 1)
+jq_missing_stderr=$(
+  . "$LIB"
+  export PATH="/nonexistent_empty_dir_for_jq_shadow_test"
+  als_count_invocations "$some_t" 2>&1 1>/dev/null
+)
+check "jq not on PATH -> als_count_invocations signals jq_missing on stderr" "jq_missing" "$jq_missing_stderr"
+check "jq not on PATH, called directly (one-shot) -> discipline log NOT touched" 0 \
+  "$(count 'reason=jq_missing' "$CLAUDE_DISCIPLINE_LOG")"
+
+# als_stable_invocations (the retrying wrapper) is where jq-failure logging
+# actually happens now — EXACTLY ONE summary line per gate call, with
+# attempts=N and outcome=recovered|exhausted, never one line per retry
+# attempt. This is the PR #23 review fix: the prior per-attempt logging inside
+# als_count_invocations left "recovered on retry" indistinguishable from
+# "exhausted, fell back to 0" and double-logged on a sustained failure.
+
+# Exhausted case: jq missing for the WHOLE retry window -> every attempt
+# fails, final outcome is exhausted, exactly one log line. A blanket PATH
+# shadow (like the one-shot test above uses) also breaks sleep/mktemp inside
+# als_stable_invocations itself, since those are external binaries too — build
+# a minimal PATH containing symlinks to everything als_stable_invocations/
+# als_log need EXCEPT jq, so the retry loop's own machinery still runs.
+no_jq_path="$TMP/no_jq_path"
+mkdir -p "$no_jq_path"
+for bin in sleep date cat rm mktemp grep printf dirname basename; do
+  src=$(command -v "$bin" 2>/dev/null)
+  [ -n "$src" ] && ln -sf "$src" "$no_jq_path/$bin"
+done
+: > "$CLAUDE_DISCIPLINE_LOG"
+(
+  # MAX_ATTEMPTS/SLEEP_S are computed ONCE at source time from the env vars
+  # (loop_state_common.sh:14-15) — export the overrides BEFORE sourcing, not
+  # after, or the outer test file's own CLAUDE_HOOK_MAX_ATTEMPTS=1 (line 11,
+  # set for the exit-code tests above) wins and this retry window never opens.
+  export CLAUDE_HOOK_MAX_ATTEMPTS=3
+  export CLAUDE_HOOK_SLEEP_S=0.01
+  export PATH="$no_jq_path"
+  . "$LIB"
+  als_stable_invocations "$some_t" >/dev/null
+)
+check "jq missing for whole retry window -> exactly ONE summary log line" 1 \
+  "$(count 'hook=als_count_invocations' "$CLAUDE_DISCIPLINE_LOG")"
+check "sustained jq failure -> logged outcome=exhausted" 1 \
+  "$(count 'reason=jq_missing attempts=[0-9]* outcome=exhausted' "$CLAUDE_DISCIPLINE_LOG")"
+
+# Recovered case: transcript is malformed on disk initially, then becomes
+# valid before the retry window ends (simulates the flush-race this retry
+# loop exists to ride out) -> final attempt succeeds, outcome=recovered,
+# still exactly one log line (not one per failed attempt beforehand).
+: > "$CLAUDE_DISCIPLINE_LOG"
+flush_t="$TMP/flush_$RANDOM.jsonl"
+printf '%s\n' '{"type":"assistant", TRUNCATED-MID-WRITE' > "$flush_t"
+(
+  # Same export-before-source ordering as the exhausted-case block above.
+  export CLAUDE_HOOK_MAX_ATTEMPTS=5
+  export CLAUDE_HOOK_SLEEP_S=0.05
+  . "$LIB"
+  # Overwrite the transcript with valid content shortly after the loop starts,
+  # so the first attempt(s) see the malformed version and a later attempt
+  # sees the recovered one.
+  ( sleep 0.06; printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Skill","input":{"skill":"coderails:agentic-loop"}}]}}' > "$flush_t" ) &
+  bg_pid=$!
+  als_stable_invocations "$flush_t" >/dev/null
+  wait "$bg_pid" 2>/dev/null
+)
+check "recovered on retry -> exactly ONE summary log line (not one per attempt)" 1 \
+  "$(count 'hook=als_count_invocations' "$CLAUDE_DISCIPLINE_LOG")"
+check "recovered on retry -> logged outcome=recovered" 1 \
+  "$(count 'reason=jq_parse_error attempts=[0-9]* outcome=recovered' "$CLAUDE_DISCIPLINE_LOG")"
+
+# Clean case: no jq failure at any attempt -> zero log lines from this path.
+: > "$CLAUDE_DISCIPLINE_LOG"
+clean_t=$(mk_transcript 1)
+(
+  export CLAUDE_HOOK_MAX_ATTEMPTS=1
+  . "$LIB"
+  als_stable_invocations "$clean_t" >/dev/null
+)
+check "clean transcript, no jq failure -> zero als_count_invocations log lines" 0 \
+  "$(count 'hook=als_count_invocations' "$CLAUDE_DISCIPLINE_LOG")"
+
+# =====================================================================
+# Task A2 — als_log brace-group redirection fix (no stderr leak, no dir auto-create)
+# =====================================================================
+missing_parent_log="$TMP/does-not-exist-$RANDOM/discipline.log"
+stderr_out=$(
+  CLAUDE_DISCIPLINE_LOG="$missing_parent_log" bash -c '. "'"$LIB"'"; als_log "test-message"' 2>&1 >/dev/null
+)
+check "als_log with missing parent dir -> stderr empty" "" "$stderr_out"
+# Exit code contract: als_log's exit status when the redirect itself fails was
+# ALREADY 1 pre-fix (the shell's own failed-redirect status, unmasked by a
+# trailing-only 2>/dev/null) — the fix only suppresses the stray stderr LINE
+# above, not this exit code, so this asserts "unchanged", not "0".
+CLAUDE_DISCIPLINE_LOG="$missing_parent_log" bash -c '. "'"$LIB"'"; als_log "test-message"' 2>/dev/null
+check "als_log with missing parent dir -> exit code unchanged (1, same as pre-fix)" 1 "$?"
+[ ! -d "$(dirname "$missing_parent_log")" ]
+check "als_log does not auto-create the missing parent dir" 0 "$?"
+
+# =====================================================================
+# Task A3 — loop_state_guard.sh cwd fallback to $PWD when payload .cwd absent
+# =====================================================================
+payload_no_cwd() { # transcript_path session_id [stop_hook_active] -- same shape as payload() but no "cwd" key
+  printf '{"transcript_path":"%s","session_id":"%s","stop_hook_active":%s}' \
+    "$1" "$2" "${3:-false}"
+}
+reset
+T=$(mk_transcript 1)
+# Write the progress.json at the path agentic_loop_path.sh resolves for $PWD
+# (not the fixture's $CWD="/work/project"), since with .cwd absent the guard
+# must fall back to $PWD, not the test's synthetic CWD constant.
+PWD_PATH=$(bash "$(cd "$(dirname "$0")/../lib" && pwd)/agentic_loop_path.sh" "$PWD" S1)
+mkdir -p "$(dirname "$PWD_PATH")"
+printf '{"schema_version":1,"status":"in-progress","session_id":"S1","completed_marker":0}' > "$PWD_PATH"
+check "payload with .cwd absent -> resolves via \$PWD fallback (present+owned, allow)" 0 \
+  "$(run x "$(payload_no_cwd "$T" S1)")"
+rm -rf "$(dirname "$PWD_PATH")"
 
 [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails)"; exit 1; }

@@ -14,8 +14,11 @@ LOG_FILE="${CLAUDE_DISCIPLINE_LOG:-$HOME/.claude/discipline.log}"
 MAX_ATTEMPTS="${CLAUDE_HOOK_MAX_ATTEMPTS:-5}"
 SLEEP_S="${CLAUDE_HOOK_SLEEP_S:-0.3}"
 
-# Append a single key=value line to the discipline log (best-effort).
-als_log() { printf '%s %s\n' "$(date -Iseconds 2>/dev/null || date +%Y-%m-%dT%H:%M:%S%z)" "$1" >> "$LOG_FILE" 2>/dev/null; }
+# Append a single key=value line to the discipline log (best-effort). Brace-group
+# wraps the printf/redirect so the group's OWN 2>/dev/null also catches the
+# redirection-open error itself (a trailing 2>/dev/null on printf alone does not
+# suppress that error) — no dir auto-creation, stays side-effect-free.
+als_log() { { printf '%s %s\n' "$(date -Iseconds 2>/dev/null || date +%Y-%m-%dT%H:%M:%S%z)" "$1" >> "$LOG_FILE"; } 2>/dev/null; }
 
 # Sanitise a session_id extracted from the Stop-hook JSON payload. If the
 # payload's session_id is missing/null, the jq extraction below falls back to
@@ -50,7 +53,15 @@ als_sanitise_session_id() {
 # Count agentic-loop Skill invocations across the WHOLE transcript (one-shot).
 # Structured jq match on a tool_use — never a text grep. Matches the scoped
 # ("coderails:agentic-loop") and bare ("agentic-loop") skill names.
+# Stdout contract is UNCHANGED (empty or an integer) even on jq failure — every
+# consumer still reads that as "0, allow" (fail-open). The only change is that a
+# jq failure now ALSO logs a distinguishable reason (jq_missing / jq_parse_error)
+# via als_log, mirroring unregistered_loop_guard.sh's ulg_count_dispatch_turns
+# (which sets ULG_PARSE_REASON for exactly this purpose) — so "genuinely zero
+# invocations" and "jq couldn't tell us" are distinguishable in the log, without
+# adding a new global or changing any caller's branching.
 als_count_invocations() {
+  command -v jq >/dev/null 2>&1 || { als_log "hook=als_count_invocations reason=jq_missing"; return; }
   jq -s -r '
     [ .[]?
       | select(.type == "assistant")
@@ -59,7 +70,7 @@ als_count_invocations() {
       | (.input.skill // "")
       | select(test("(^|:)agentic-loop$")) ]
     | length
-  ' "$1" 2>/dev/null
+  ' "$1" 2>/dev/null || als_log "hook=als_count_invocations reason=jq_parse_error"
 }
 
 # Stable invocation count: retry for the transcript-flush race until it settles.
