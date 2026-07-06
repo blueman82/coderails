@@ -1,6 +1,5 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { QueueEntry } from "./queue";
 
 export class QueueActionError extends Error {
   constructor(message: string) {
@@ -12,6 +11,15 @@ export class QueueActionError extends Error {
 type Decision = "approved" | "denied";
 
 const VALID_DECISIONS: Decision[] = ["approved", "denied"];
+
+// hash is the hex SHA-256 filename stem per the queue contract (see
+// docs/coderails/specs/2026-07-06-assistant-link-panel-design.md). The API
+// route already validates this shape before calling in, but this function is
+// exported and documented as the sole writer of the approved/denied
+// transition — it must not trust a caller to have sanitised `hash`, since
+// `join(queueDir, hash + ".json")` does NOT stop a "../" segment from
+// escaping queueDir. Re-checking here is defense-in-depth, not redundant.
+const HASH_PATTERN = /^[0-9a-f]{64}$/;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -26,9 +34,14 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 // decision-file mechanism, per the spec's own "Deferred work" language.
 //
 // Throws QueueActionError (never silently succeeds, never defaults to
-// approved) when: the decision value is invalid, the target file doesn't
-// exist or can't be read, or the file's contents aren't valid JSON.
+// approved) when: the hash is not a well-formed hex SHA-256 (blocks path
+// traversal), the decision value is invalid, the target file doesn't exist
+// or can't be read, or the file's contents aren't valid JSON.
 export function resolveQueueEntry(queueDir: string, hash: string, decision: Decision): void {
+  if (!HASH_PATTERN.test(hash)) {
+    throw new QueueActionError(`invalid hash: ${hash}`);
+  }
+
   if (!VALID_DECISIONS.includes(decision)) {
     throw new QueueActionError(`invalid decision: ${String(decision)}`);
   }
