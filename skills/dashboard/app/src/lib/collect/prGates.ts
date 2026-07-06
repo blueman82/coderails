@@ -178,7 +178,7 @@ async function fetchOpenPrGates(repo: string, env: NodeJS.ProcessEnv): Promise<P
 // real environment.
 export function collectPrGates(
   cfg: DashboardConfig,
-  envOverride?: NodeJS.ProcessEnv
+  envOverride?: Record<string, string | undefined>
 ): Promise<(PrGate | PrGateError)[]> {
   const env = envOverride ? { ...process.env, ...envOverride } : process.env;
   return Promise.all(
