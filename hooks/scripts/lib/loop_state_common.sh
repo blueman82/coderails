@@ -29,6 +29,13 @@ als_sanitise_session_id() {
   if [ -z "$raw" ] || [ "$raw" = "?" ]; then
     printf 'unknown-%s-%s' "$$" "$(date +%s%N 2>/dev/null || date +%s)"
   else
+    # session_id is harness-owned (Stop payload / env), not attacker-controlled
+    # — defence-in-depth against payload anomalies, not a security boundary.
+    # REPLACE (not fresh-fallback): a malformed id must not silently orphan its
+    # real session, so strip "/" and collapse ".." in place rather than
+    # discarding the id and generating an unrelated fresh one.
+    raw=$(printf '%s' "$raw" | tr '/' '_')
+    raw=$(printf '%s' "$raw" | sed 's/\.\.//g')
     printf '%s' "$raw"
   fi
 }
