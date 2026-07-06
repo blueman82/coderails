@@ -237,12 +237,6 @@ export function NetworkSphere({ reducedMotion }: { reducedMotion: boolean }) {
           <lineBasicMaterial color={ROSE_HEX} transparent opacity={0.55} blending={THREE.AdditiveBlending} />
         </lineSegments>
       </group>
-      <lineSegments ref={gridRef} position={[0, -13, 0]}>
-        <bufferGeometry>
-          <bufferAttribute attach="attributes-position" args={[gridVerts, 3]} />
-        </bufferGeometry>
-        <lineBasicMaterial color={ROSE_HEX} transparent opacity={0.45} />
-      </lineSegments>
     </>
   );
 }
