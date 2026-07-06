@@ -1,8 +1,4 @@
 "use client";
-/* eslint-disable react-hooks/set-state-in-effect --
-   trackedRuns must persist a resolved run past the moment its SSE record disappears from
-   "active" so RunProgress can still show its 2s resolve flash — a derived-from-props value
-   can't do this; it genuinely needs its own lifecycle independent of the current runs slice. */
 
 import { useEffect, useState } from "react";
 import { useDashboardContext } from "@/components/DashboardProvider";
