@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import { hslToRgb, type AccentHsl } from "@/lib/runHue";
+export type { AccentHsl };
 
 // 2D-canvas plexus sphere: mirrors the WebGL sphere's palette and structure (rose rim, plexus
 // wiring, depth-based fade) for environments where a WebGL context cannot be created. Re-tinted
