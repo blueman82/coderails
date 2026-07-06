@@ -42,6 +42,8 @@ preferred way to set up a new repo.
 | `/prep` | Safety branch + feature branch + Jira ticket |
 | `/push` | Stage, commit, push, open PR with reviewers; auto-resolve linked Jira |
 | `/post-review` | Post SHA-bound review artifact on PR; required by `/merge` gate |
+| `/coderails:task-evals` | Generate and freeze a tiered set of success evals for a task |
+| `/coderails:post-evals` | Post SHA-bound eval artifact on PR; required by `/merge` gate |
 | `/merge` | Merge approved PR, switch to main, pull |
 | `/assumptions` | List every assumption, marked verified or inferred |
 | `/verify` | Re-derive a specific claim from sources only — no recall |
@@ -59,7 +61,7 @@ coderails is self-contained — it ships the dev-workflow skills it needs. `pr-r
 
 | Skill | Purpose |
 |---|---|
-| `agentic-loop` | Multi-agent orchestration: TeamCreate, no-human-gates, multi-PR loops |
+| `agentic-loop` | Multi-agent orchestration: spawned teams, no-human-gates, multi-PR loops |
 | `brainstorming` | Explore intent and requirements before implementation |
 | `dispatching-parallel-agents` | Fan-out independent tasks across agents |
 | `executing-plans` | Drive a written plan to completion |

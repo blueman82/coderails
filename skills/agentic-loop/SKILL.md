@@ -1,6 +1,6 @@
 ---
 name: agentic-loop
-description: 'Multi-agent orchestration discipline. Load this skill IMMEDIATELY, taking precedence over /workflow, /prep, /push, and any other single-PR slash command, whenever the user authorises a sequence of agent-driven work. Specifically: any time the user says "TeamCreate", "spawn a team", "no human gates", "self-merge", "crack on", "without the human", "no per-PR confirmation", "agentic loop", "multi-PR", or authorises 3+ PRs in one instruction. ALSO load when the user authorises autonomous merge + deploy + verify chains, even for a single PR, if they have explicitly waived per-step confirmation. This is NOT /workflow (single-PR prep → push → merge → wiki); it sits ABOVE /workflow and uses it as a subroutine. Keep main context a pure orchestrator that never implements: every change goes to a spawned sonnet agent that verifies its own artifact, escalating to TeamCreate only for ≥3 sequential PRs or dependency chains. Verify artifacts not idle pings; disprove symptom premises before spawning fixes; match confirmation cadence to envelope scope. Fire this skill aggressively — forgetting to delegate is costly in long sessions.'
+description: 'Multi-agent orchestration discipline. Load this skill IMMEDIATELY, taking precedence over /workflow, /prep, /push, and any other single-PR slash command, whenever the user authorises a sequence of agent-driven work. Specifically: any time the user says "TeamCreate", "spawn a team", "no human gates", "self-merge", "crack on", "without the human", "no per-PR confirmation", "agentic loop", "multi-PR", or authorises 3+ PRs in one instruction. ALSO load when the user authorises autonomous merge + deploy + verify chains, even for a single PR, if they have explicitly waived per-step confirmation. This is NOT /workflow (single-PR prep → push → merge → wiki); it sits ABOVE /workflow and uses it as a subroutine. Keep main context a pure orchestrator that never implements: every change goes to a spawned sonnet agent that verifies its own artifact, escalating to a spawned team only for ≥3 sequential PRs or dependency chains. Verify artifacts not idle pings; disprove symptom premises before spawning fixes; match confirmation cadence to envelope scope. Fire this skill aggressively — forgetting to delegate is costly in long sessions.'
 ---
 
 # Agentic Loop
@@ -205,7 +205,7 @@ The why: an unresolved disposition defaults silently to preserve-compat — the 
 
 ### Phase 2.7 — Commit the resolved design to durable `spec.md` and `plan.md`
 
-This phase fires ONLY when the loop has **≥3 work-units or a cross-unit dependency** — the same line Phase 3 draws to choose `TeamCreate` over a single agent. A 1–2-unit fix that Phase 3 routes to a single agent needs no separate design docs: the envelope (Phase 0) + `progress.json` + the one self-contained task description already carry everything. If the loop is below that threshold, skip 2.7 (both sub-steps) entirely.
+This phase fires ONLY when the loop has **≥3 work-units or a cross-unit dependency** — the same line Phase 3 draws to choose a spawned team over a single agent. A 1–2-unit fix that Phase 3 routes to a single agent needs no separate design docs: the envelope (Phase 0) + `progress.json` + the one self-contained task description already carry everything. If the loop is below that threshold, skip 2.7 (both sub-steps) entirely.
 
 When it fires, run both sub-steps in order:
 
@@ -221,25 +221,29 @@ The `spec.md` is loop state, keyed to this orchestrator's run, exactly like `pro
 **2.7b — write `plan.md` via `/coderails:writing-plans`.** Produce a durable `plan.md` in the loop-state dir (next to `spec.md` and `progress.json`, outside the repo, not committed) by invoking **`/coderails:writing-plans`** — the same one-line skill-reference idiom Phase 3/3a use for `/coderails:test-driven-development`.
 
 `plan.md` is the **static SSOT** for the decomposition; `progress.json` is the **dynamic position** against it. The plan is **consumed, not write-only**, in both directions:
-- **Phase 3 builds its task list directly from `plan.md`** — the TeamCreate task list and the Phase 3/3a worker descriptions derive from the plan's tasks, so the two are consistent by construction rather than re-derived from conversation.
+- **Phase 3 builds its task list directly from `plan.md`** — the shared task list (`TaskCreate`/`TaskUpdate`) and the Phase 3/3a worker descriptions derive from the plan's tasks, so the two are consistent by construction rather than re-derived from conversation.
 - **After any compaction the orchestrator re-reads `plan.md` to recover *scope* (what to build)** the same way it re-reads `progress.json` to recover *position* (where we are).
+
+**2.7c — generate and freeze loop-scope evals via `/coderails:task-evals`.** Alongside `spec.md`/`plan.md`, invoke **`/coderails:task-evals`** (scope: `loop`) to produce a frozen `evals.json` defining the loop's end-state success evals. Two triggers fire this sub-step, stated explicitly because they're independent: (1) a loop that reaches Phase 2.7 at all is tier-2-eligible on work-unit count alone (2.7 itself only fires at ≥3 work-units); (2) an irreversible-surface trigger (publish, deploy, migration, data deletion, external send) can independently apply even to a <3-unit loop that still reached 2.7 via the cross-unit-dependency clause. The frozen `evals.json` (scope: `loop`) lives beside `progress.json`/`spec.md`/`plan.md` in the loop-state dir — same "never committed, outside the repo" rule as those two files.
+
+The same `/coderails:task-evals` invocation also produces per-work-unit PR-scope eval refs (scope: `pr`, one per work-unit). These travel into worker prompts the same way disposition travels under Phase 3's existing "Disposition — ... copied **verbatim** into the task description" bullet: a ref recorded only in `progress.json`/`plan.md` and absent from the worker prompt does not exist for the worker — identical framing to the disposition rule above.
 
 (This is the one place the `plan.md`↔`progress.json` relationship is named. It is stated here, standalone, on purpose — the `## Context-window persistence` section, which describes `progress.json`, is not edited.)
 
-### Phase 3 — Delegate all implementation to sonnet agents; TeamCreate when work has ≥3 sequential units or dependency chains
+### Phase 3 — Delegate all implementation to sonnet agents; spawn a team when work has ≥3 sequential units or dependency chains
 
 **Default: main context never implements.** It orchestrates — plans, delegates, verifies. Every implementation unit (even a single-file edit, even a tight sequential step) goes to a spawned **sonnet** agent. The two reasons, in order: keep main context clean (opus context is scarce and fills fast in long sessions), and keep cost down (sonnet does the typing, not opus). Treat a file edit done directly in main context as the exception that needs a reason, not the default.
 
 This means the delegation decision is a two-rung ladder, not "delegate vs. do it yourself":
 
-1. **Single sonnet `Agent` for impl + verify** — the default for any self-contained 1–2 unit of work (a bug fix, one PR, a single-file change). One agent does the implementation *and* verifies its own artifact before reporting. TeamCreate would be overkill here; main context doing it directly burns opus context and money for no benefit. See Phase 3a below for the prompt contract.
-2. **TeamCreate** — when the loop has 3+ PRs or any cross-step dependency. See below.
+1. **Single sonnet `Agent` for impl + verify** — the default for any self-contained 1–2 unit of work (a bug fix, one PR, a single-file change). One agent does the implementation *and* verifies its own artifact before reporting. A spawned team would be overkill here; main context doing it directly burns opus context and money for no benefit. See Phase 3a below for the prompt contract.
+2. **Spawn a team** — named teammates via the `Agent` tool, coordinated through a shared task list (`TaskCreate`/`TaskUpdate` with `blockedBy` dependencies) and `SendMessage`, when the loop has 3+ PRs or any cross-step dependency. See below.
 
 The only work that legitimately stays in main context: reading for orchestration decisions (git status, `gh pr view`, log reads, the Phase 12 artifact checks), and the planning/cadence the skill describes. If you catch yourself running `Edit`/`Write`/`MultiEdit` in main context inside an authorised loop, stop — that work belongs in a sonnet agent.
 
-When the loop has 3+ PRs or any cross-step dependency, **use the `TeamCreate` tool by name** and build a task list with explicit `blockedBy` dependencies via `TaskUpdate`. Don't just describe a "sequential PR loop" — actually invoke `TeamCreate`. The user can see the team in their UI and the task list becomes the shared source of truth.
+When the loop has 3+ PRs or any cross-step dependency, spawn each worker as a named teammate via the `Agent` tool and build a task list with explicit `blockedBy` dependencies via `TaskCreate`/`TaskUpdate`. Don't just describe a "sequential PR loop" — actually spawn the named agents and create the task list. The user can see each teammate and the task list becomes the shared source of truth; use `SendMessage` to coordinate between them.
 
-If the user has explicitly named `TeamCreate` in their prompt, it is non-negotiable — invoke it even if a flat `Agent` loop would technically work.
+If the user has explicitly asked for a spawned team in their prompt, it is non-negotiable — spawn named teammates even if a flat sequence of solo `Agent` calls would technically work.
 
 Each task description must be **self-contained** so the spawned agent can act without re-reading the conversation. Include:
 - Worktree path
@@ -259,9 +263,9 @@ Each task description must be **self-contained** so the spawned agent can act wi
 Include this line in every agent prompt:
 > "Don't go silently idle — send a completion message via SendMessage. Past agents have failed this way."
 
-For bare 1-2 task work, a single `Agent` call is the right tool — don't over-engineer with TeamCreate (see Phase 3a).
+For bare 1-2 task work, a single `Agent` call is the right tool — don't over-engineer with a spawned team (see Phase 3a).
 
-### Phase 3a — Single sonnet agent for impl + verify (the TeamCreate-is-overkill case)
+### Phase 3a — Single sonnet agent for impl + verify (the spawned-team-is-overkill case)
 
 For self-contained work that doesn't justify a team — a bug fix, one PR, a single-file change, a tight sequence of steps with shared context — spawn **one** `Agent` with `model: sonnet` that owns both the implementation **and** the verification, then reports back a confidence-labelled result. Main context stays the orchestrator; it does not make the edit itself.
 
@@ -282,7 +286,7 @@ The agent's prompt must be self-contained (it can't re-read the conversation) an
 
 When the single agent goes idle without reporting, apply Phase 4 verbatim — check the artifact (git diff, PR state, log), not the ping. When it reports success, that's a Phase 12 claim, not evidence — re-check at dependency boundaries.
 
-Escalate from one agent to TeamCreate the moment the work grows a third unit or a cross-unit dependency. Don't run three sequential solo `Agent` calls where a team with a `blockedBy` task list belongs — that's the case Phase 3 reserves for `TeamCreate`.
+Escalate from one agent to a spawned team the moment the work grows a third unit or a cross-unit dependency. Don't run three sequential solo `Agent` calls where a set of named teammates with a `blockedBy` task list belongs — that's the case Phase 3 reserves for spawning a team.
 
 ### Phase 4 — Spawn workers in waves, never block on idle pings
 
@@ -354,7 +358,7 @@ Run `/coderails:wiki-ingest` AND `/coderails:wiki-lint` ONCE at the end of the l
 
 One source page covers the cluster. Updates to entities/services/concepts pages aggregate the cluster's changes. Clustering related updates into one pass keeps the wiki's per-topic pages coherent; running one wiki agent per PR instead fragments a single theme across many small, redundant edits.
 
-If the loop's PRs aren't thematically related (rare — TeamCreate usually clusters them), one ingest per cluster theme is fine. Avoid one-per-PR sprawl.
+If the loop's PRs aren't thematically related (rare — a spawned team's task list usually clusters them), one ingest per cluster theme is fine. Avoid one-per-PR sprawl.
 
 **Suppressing per-PR wiki steps in spawned `/coderails:workflow` agents:** place the following line as the **FIRST instruction** in every spawned agent's prompt inside this loop (not buried mid-section, not under the task-specific scope, not after the workflow steps — first):
 
@@ -426,6 +430,7 @@ At the end of the loop, before declaring done, the orchestrator audits its own a
 Also report, unscored, alongside the two facts above:
 - **Artifacts produced** — PRs merged, deploys done, each with the verifying check (Phase 12), not the agent's claim.
 - **Disposition violations** — work-units where `clean-break` was recorded in `progress.json` but a shim/compat path shipped anyway (caught at the Phase 4b gate, or by the human afterward). Audit as a diff between the `progress.json` disposition record and the merged artifact. Critically, distinguish **"0 violations"** from **"no disposition record found"**: the latter is an **audit failure** — the record was not maintained — not a pass, otherwise the report reads "clean" when the record was simply absent. Separately, surface any `preserve-compat` unit whose `removal_ticket` is still **open at loop end** as a compat-debt drift signal, so deferred removals cannot silently rot.
+- **Loop-scope eval result** — the loop's final `evals.json` `result` (`GO`/`NO-GO`/a tier-0-exemption-with-justification), reported unscored, and any `amendments` entries (post-freeze eval edits with recorded reasons), the same way the "Decisions absorbed" bullet above reports the Phase 2.5/2.6 forks — unscored, no self-issued verdict. Distinguish this explicitly, mirroring the disposition-violation framing above: **"no `evals.json` record found" for a ≥3-work-unit loop is an audit failure, not a pass** — distinguish it from a genuine `GO` the same way this section already distinguishes "0 disposition violations" from "no disposition record found".
 
 This is the factory's own audit — raw facts for the human to judge, not a self-issued verdict. A clean-looking scorecard is more dangerous than an honest unscored list because it is more likely to be trusted uncritically; the two facts above can only be gamed by omission, and omission from a flat list is easier for a human to spot than a fabricated pass on a scorecard.
 
@@ -433,7 +438,7 @@ This is the factory's own audit — raw facts for the human to judge, not a self
 
 Do not stop work early because the context window is filling or a token budget is approaching. Context will compact and the session will continue — treat that as a non-event, not a stop condition.
 
-**Loop state lives in a durable artifact, not in the conversation.** Maintain a single `progress.json` at the path printed by the loop-state path helper (`hooks/scripts/lib/agentic_loop_path.sh`) — outside the code repo, keyed to the project cwd **and this session's id**, so it survives this session's own restart/compaction, never pollutes the base every worker branches from, and never collides with another session's file in the same directory. Resolve the path by running the helper (Phase -2); never compute it yourself. The helper reads `$CLAUDE_CODE_SESSION_ID` (set in every Bash tool call) when no session_id argument is given, so you normally don't need to pass one explicitly. It is overwritten (not appended) on every phase boundary and holds: the authorisation envelope verbatim, the current phase, each work-unit's status (`pending`/`in-progress`/`done`/`blocked` with `blockedBy`), verified state carried between units (deployed version, test counts), per-category `loop_stop_counts` (`{hard-stop, approval-gate, awaiting-input, complete}`) for Phase 13 — **HOOK-OWNED**: written solely by the `loop_stall_guard` hook on each valid `LOOP-STOP` declaration; the orchestrator never writes or increments it, and on any wholesale rewrite of this file must re-read the existing `progress.json` first and carry `loop_stop_counts` forward verbatim (same treatment as `completed_marker` below) — and, for any work-unit that retires an existing code path, its `disposition` (`clean-break` | `preserve-compat`), plus, when `preserve-compat`, the `named_blocker` (the specific consumer still on the old path that justifies keeping it) and the `removal_ticket` tracking the deferred removal. A single overwritten JSON object — read the whole file in one shot to know current state. Do not use an append-log (`.jsonl`) that has to be replayed to derive position, and that can leave a torn tail line after a crash.
+**Loop state lives in a durable artifact, not in the conversation.** Maintain a single `progress.json` at the path printed by the loop-state path helper (`hooks/scripts/lib/agentic_loop_path.sh`) — outside the code repo, keyed to the project cwd **and this session's id**, so it survives this session's own restart/compaction, never pollutes the base every worker branches from, and never collides with another session's file in the same directory. Resolve the path by running the helper (Phase -2); never compute it yourself. The helper reads `$CLAUDE_CODE_SESSION_ID` (set in every Bash tool call) when no session_id argument is given, so you normally don't need to pass one explicitly. It is overwritten (not appended) on every phase boundary and holds: the authorisation envelope verbatim, the current phase, a `work_units` field (a JSON object keyed by unit id, each entry carrying at least a `status`: `pending`/`in-progress`/`done`/`blocked` with `blockedBy`) — the loop-scope evals gate (`loop_state_guard`) reads `.work_units | length` off this field to decide whether the ≥3-work-unit eval threshold applies, failing open (no block) when the field is absent, so keep it populated whenever the loop tracks ≥1 work-unit — verified state carried between units (deployed version, test counts), per-category `loop_stop_counts` (`{hard-stop, approval-gate, awaiting-input, complete}`) for Phase 13 — **HOOK-OWNED**: written solely by the `loop_stall_guard` hook on each valid `LOOP-STOP` declaration; the orchestrator never writes or increments it, and on any wholesale rewrite of this file must re-read the existing `progress.json` first and carry `loop_stop_counts` forward verbatim (same treatment as `completed_marker` below) — and, for any work-unit that retires an existing code path, its `disposition` (`clean-break` | `preserve-compat`), plus, when `preserve-compat`, the `named_blocker` (the specific consumer still on the old path that justifies keeping it) and the `removal_ticket` tracking the deferred removal. A single overwritten JSON object — read the whole file in one shot to know current state. Do not use an append-log (`.jsonl`) that has to be replayed to derive position, and that can leave a torn tail line after a crash.
 
 **Lifecycle, enforced by the `loop_state_guard` Stop hook (presence + ownership).** The file moves through a fixed lifecycle, and the guard blocks any stop where an active loop has no session-owned file:
 - **Stub-first (Phase -2):** `status: "initialising"`, stamped with this `session_id`.

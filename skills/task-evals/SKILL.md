@@ -85,7 +85,7 @@ GO requires all P0 evals to pass. P1 failures don't block the gate but must be l
 }
 ```
 
-This copy and the design spec's copy are kept in lockstep; the enforcement components (`scripts/lib/eval-artifact.sh`, `scripts/post_evals.sh`, the `loop_state_guard` loop-scope gate) are specified by the design spec (Components 3-6) to implement against this definition and ship in companion PRs.
+This copy and the design spec's copy are kept in lockstep; the enforcement components implement against this definition: `scripts/lib/eval-artifact.sh` (the marker/result SSOT), `scripts/post_evals.sh` (structural validation + result computation, invoked by `/coderails:post-evals`), and the `loop_state_guard` loop-scope gate (blocks loop completion at ≥3 work-units with no passing loop-scope `evals.json`).
 
 ## Where evals.json lives
 
@@ -94,7 +94,7 @@ This copy and the design spec's copy are kept in lockstep; the enforcement compo
 
 ## Invocation contract
 
-Enforcement wiring (merge gate + loop-stop gate) ships in companion PRs per the design spec's Components 3-6.
+Enforcement wiring is live: the merge gate lives in `scripts/merge.sh`, reading the PR-scope artifact `/coderails:post-evals` posts (via `scripts/post_evals.sh`); the loop-stop gate lives in `loop_state_guard` (`hooks/scripts/loop_state_guard.sh`), reading the loop-scope `evals.json` beside `progress.json`.
 
 This skill is invoked at three points:
 
