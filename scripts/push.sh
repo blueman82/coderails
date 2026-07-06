@@ -19,16 +19,24 @@ push::main() {
 
     # ─── Commit ───────────────────────────────────────────────────────────────
     if dirty; then
-        git add -A
-        if [[ -z "$msg" ]]; then
-            local file_count; file_count=$(git diff --cached --name-only | wc -l | tr -d ' ')
-            msg="Update ${file_count} files"
+        git add -u
+        local untracked; untracked=$(git status --porcelain | grep '^??' | cut -c4-)
+        if [[ -n "$untracked" ]]; then
+            warn "Untracked files not staged (run 'git add' explicitly to include them):"
+            while IFS= read -r f; do warn "  $f"; done <<< "$untracked"
         fi
-        # Prefix commit message with JIRA key so it appears in GitHub commit list
-        # and JIRA's GitHub integration links it even after squash merge
-        [[ -n "$jira_key" ]] && msg="${jira_key} ${msg}"
-        git commit -m "$msg" && ok "Committed: $msg"
-    elif [[ $(ahead) -eq 0 ]]; then
+        if [[ -n $(git diff --cached --name-only) ]]; then
+            if [[ -z "$msg" ]]; then
+                local file_count; file_count=$(git diff --cached --name-only | wc -l | tr -d ' ')
+                msg="Update ${file_count} files"
+            fi
+            # Prefix commit message with JIRA key so it appears in GitHub commit list
+            # and JIRA's GitHub integration links it even after squash merge
+            [[ -n "$jira_key" ]] && msg="${jira_key} ${msg}"
+            git commit -m "$msg" && ok "Committed: $msg"
+        fi
+    fi
+    if [[ $(ahead) -eq 0 ]]; then
         pr::exists && ok "Up to date │ $(pr::url)" || info "Nothing to push"
         return 0
     fi
