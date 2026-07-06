@@ -39,7 +39,15 @@ ahead_list() { git log "origin/$(main)..HEAD" --oneline 2>/dev/null; }
 # ━━━ Repository ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 repo() {
     local url; url=$(git remote get-url origin 2>/dev/null) || return 1
-    [[ $url =~ github\.com[:/]([^/]+)/([^/.]+) ]] && echo "${BASH_REMATCH[1]}/${BASH_REMATCH[2]}"
+    # Repo name capture is greedy (dots allowed, e.g. owner/my.repo.git) — a
+    # trailing slash and/or .git suffix is stripped after the match instead of
+    # excluded from it, so a dotted repo name is never truncated.
+    if [[ $url =~ github\.com[:/]([^/]+)/(.+)$ ]]; then
+        local name="${BASH_REMATCH[2]}"
+        name="${name%/}"
+        name="${name%.git}"
+        echo "${BASH_REMATCH[1]}/${name}"
+    fi
 }
 
 protected() {
@@ -64,17 +72,28 @@ pr::head_sha() {
 }
 
 # pr::_trusted_login
-# Echoes the authenticated gh user's login, resolved once per process and
-# cached in _PR_TRUSTED_LOGIN so repeated reader calls don't refetch. This is
-# the identity both gate readers trust — any comment from another login, or
-# from this login without OWNER association, is untrusted and skipped before
-# marker matching (comment-spoofing defence).
-# Returns non-zero if the identity fetch fails (caller must fail-closed).
+# Echoes the authenticated gh user's login. NOTE: despite the _PR_TRUSTED_LOGIN
+# variable, this does NOT cache across processes — each reader call site
+# invokes this from a fresh command substitution subshell, so any value set
+# here never survives back to the caller's shell (confirmed: `gh api user`
+# runs once per pr::_trusted_comment_bodies call, not once per process). The
+# variable only guards against redundant fetches within a single subshell's
+# lifetime. This is the identity both gate readers trust — any comment from
+# another login, or from this login without OWNER association, is untrusted
+# and skipped before marker matching (comment-spoofing defence).
+# The login is validated against GitHub's login charset before use whether it
+# came from cache or a fresh fetch, because it is spliced directly into a jq
+# --jq program string: an unvalidated value (e.g. pre-seeded via env as
+# `x" or true`) could break out of the string literal and turn the trust
+# filter into a tautology. A value that fails validation is treated as unset
+# (fail-closed) rather than trusted.
+# Returns non-zero if the identity fetch fails or fails validation (caller
+# must fail-closed).
 pr::_trusted_login() {
     if [[ -z "${_PR_TRUSTED_LOGIN:-}" ]]; then
         _PR_TRUSTED_LOGIN=$(gh api user -q .login 2>/dev/null) || return 1
-        [[ -n "$_PR_TRUSTED_LOGIN" ]] || return 1
     fi
+    [[ "$_PR_TRUSTED_LOGIN" =~ ^[A-Za-z0-9-]+$ ]] || return 1
     printf '%s' "$_PR_TRUSTED_LOGIN"
 }
 
@@ -86,6 +105,10 @@ pr::_trusted_login() {
 # encoded so multi-line bodies survive as a single reader line). Untrusted
 # comments are dropped here, before any marker matching, so they can neither
 # win nor suppress a match.
+# NOTE: OWNER assumes the authenticated user personally owns the repo; on an
+# org-owned repo the same user's comments carry MEMBER/COLLABORATOR instead,
+# so this gate would fail closed there (widening the trust floor is a
+# separate owner decision).
 # Returns non-zero if the identity or comments fetch fails (fail-closed).
 pr::_trusted_comment_bodies() {
     local num="$1" trusted
@@ -112,7 +135,10 @@ pr::has_coderails_review_for_head() {
     local encoded body line
     while IFS= read -r encoded; do
         [[ -n "$encoded" ]] || continue
-        body=$(printf '%s' "$encoded" | base64 -d 2>/dev/null)
+        if ! body=$(printf '%s' "$encoded" | base64 -d 2>/dev/null); then
+            printf '%s! Skipping a trusted comment body: base64 decode failed%s\n' "$C_YLW" "$C_RST" >&2
+            continue
+        fi
         while IFS= read -r line; do
             if review_artifact::matches_marker "$line" "$num" "$sha"; then
                 return 0
@@ -147,7 +173,10 @@ pr::has_coderails_eval_for_head() {
     local encoded body line
     while IFS= read -r encoded; do
         [[ -n "$encoded" ]] || continue
-        body=$(printf '%s' "$encoded" | base64 -d 2>/dev/null)
+        if ! body=$(printf '%s' "$encoded" | base64 -d 2>/dev/null); then
+            printf '%s! Skipping a trusted comment body: base64 decode failed%s\n' "$C_YLW" "$C_RST" >&2
+            continue
+        fi
         while IFS= read -r line; do
             if eval_artifact::matches_marker "$line" "$num" "$sha"; then
                 newest_result=$(eval_artifact::parse_result "$line")
