@@ -49,7 +49,6 @@ export function createEventsHandler(deps: EventsHandlerDeps) {
       gatesPollMs: deps.gatesPollMs,
       activityDebounceMs: deps.activityDebounceMs,
       onError: (source, err) => {
-        // eslint-disable-next-line no-console
         console.error(`[api/events] collector "${source}" failed:`, err);
       },
     });
