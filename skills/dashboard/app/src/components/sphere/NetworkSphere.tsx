@@ -123,11 +123,14 @@ export function NetworkSphere({ reducedMotion, accent, boost }: NetworkSpherePro
   const smoothed = useRef({ x: 0, y: 0 });
   const accentRef = useRef(accent);
   const boostRef = useRef(boost);
-  accentRef.current = accent;
-  boostRef.current = boost;
   const sphereColorScratch = useMemo(() => new THREE.Color(), []);
   const hubColorScratch = useMemo(() => new THREE.Color(), []);
   const whiteScratch = useMemo(() => new THREE.Color(0xffffff), []);
+
+  useEffect(() => {
+    accentRef.current = accent;
+    boostRef.current = boost;
+  }, [accent, boost]);
 
   // Camera starts where the mockup places it; parallax nudges from here.
   useEffect(() => {
