@@ -44,10 +44,12 @@ function usePrefersReducedMotion(): boolean {
 }
 
 export function Scene() {
+  console.log("DEBUG_SCENE_RENDER", typeof window);
   const reducedMotion = usePrefersReducedMotion();
   const [webglOK, setWebglOK] = useState<boolean | null>(null);
 
   useEffect(() => {
+    console.log("DEBUG_SCENE_EFFECT_RUNNING");
     let ok = false;
     try {
       ok = canCreateWebGL();
