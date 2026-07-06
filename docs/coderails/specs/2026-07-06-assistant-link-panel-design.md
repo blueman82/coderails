@@ -1,7 +1,7 @@
 # ASSISTANT.LINK Panel + Approval-Queue Contract — Design
 
-**Date:** 2026-07-06
-**Status:** Contract normative (implementation-pending); panel spec approved by owner (D6)
+**Date:** 2026-07-06 (queue contract + button confirmed built 2026-07-06, see [Post-freeze reconciliation](#post-freeze-reconciliation-2026-07-06))
+**Status:** Contract confirmed implemented on both sides (assistant-agent#4, coderails#31); panel spec approved by owner (D6); items 1/2/4 remain unbuilt as designed
 **Sub-project:** 4 of 5 in the agentic-OS evolution sequence (secretary/coderails-kernel integration)
 
 ## Context
