@@ -129,3 +129,39 @@ als_gate_loop_complete() {
     exit 0
   fi
 }
+
+# Read the .work_units count from progress.json into global ALS_WORK_UNIT_COUNT.
+# Fail-open: absent file, absent/null .work_units (legacy loop), or malformed
+# JSON all resolve to 0 — absence must never itself trigger a block. Sibling to
+# als_read_file_state rather than folded into it, since that function's globals
+# are read by loop_stall_guard.sh too, which has no use for work-unit counts.
+als_read_work_units() {
+  ALS_WORK_UNIT_COUNT=0
+  if [ -n "$1" ] && [ -f "$1" ]; then
+    local n; n=$(jq -r '(.work_units // {}) | length' "$1" 2>/dev/null)
+    case "$n" in (''|*[!0-9]*) n=0;; esac
+    ALS_WORK_UNIT_COUNT=$n
+  fi
+}
+
+# Read the loop-scope evals verdict from a sibling evals.json into global
+# ALS_LOOP_EVALS_RESULT: GO | TIER0 | NO-GO | ABSENT. ABSENT covers no file,
+# malformed JSON, or a non-"loop" scope (a stray pr-scope file must never
+# satisfy the loop gate). Sibling to als_read_work_units for the same reason.
+als_read_loop_evals_result() {
+  ALS_LOOP_EVALS_RESULT="ABSENT"
+  command -v jq >/dev/null 2>&1 || { als_log "hook=loop_state_guard evals=skipped reason=jq_missing"; return 0; }
+  local f="$1/evals.json"
+  [ -f "$f" ] || return 0
+  jq -e . "$f" >/dev/null 2>&1 || return 0
+  local scope; scope=$(jq -r '.scope // ""' "$f" 2>/dev/null)
+  [ "$scope" = "loop" ] || return 0
+  local result tier justification
+  result=$(jq -r '.result // ""' "$f" 2>/dev/null)
+  tier=$(jq -r '.tier // -1' "$f" 2>/dev/null)
+  justification=$(jq -r '.tier_justification // ""' "$f" 2>/dev/null)
+  if [ "$result" = "GO" ]; then ALS_LOOP_EVALS_RESULT="GO"
+  elif [ "$tier" = "0" ] && [ -n "$justification" ]; then ALS_LOOP_EVALS_RESULT="TIER0"
+  else ALS_LOOP_EVALS_RESULT="NO-GO"
+  fi
+}
