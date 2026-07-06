@@ -16,7 +16,7 @@ function formatClockDate(date: Date): string {
 }
 
 export function Header() {
-  const { status, lastUpdate } = useDashboardState();
+  const { status, lastUpdate } = useDashboardContext();
   const [now, setNow] = useState<Date | null>(null);
 
   useEffect(() => {
