@@ -63,10 +63,40 @@ before stopping."
   exit 2
 }
 
+gate_loop_evals_required() {
+  # Must run BEFORE als_gate_loop_complete: that shared function exits 0
+  # directly (not just "returns") the instant status=complete, not re-armed,
+  # and session-owned — it IS the off-switch, so calling this gate after it
+  # would never be reached on exactly the path this gate needs to intercept.
+  # Re-check the same three conditions explicitly here since
+  # als_gate_loop_complete has no way to signal "checked, still active" back
+  # to a caller placed after it.
+  if [ "$ALS_STATUS" = "complete" ] && [ "$ALS_REARMED" -eq 0 ] && [ "$ALS_SESSION" = "$session_id" ]; then
+    als_read_work_units "$ALS_PATH"
+    if [ "$ALS_WORK_UNIT_COUNT" -ge 3 ]; then
+      local loop_dir; loop_dir=$(dirname "$ALS_PATH")
+      als_read_loop_evals_result "$loop_dir"
+      case "$ALS_LOOP_EVALS_RESULT" in
+        GO|TIER0)
+          als_log "hook=loop_state_guard session=$session_id work_units=$ALS_WORK_UNIT_COUNT evals=$ALS_LOOP_EVALS_RESULT blocked=0"
+          ;;
+        NO-GO|ABSENT)
+          als_log "hook=loop_state_guard session=$session_id work_units=$ALS_WORK_UNIT_COUNT evals=$ALS_LOOP_EVALS_RESULT blocked=1"
+          echo "[loop-state-guard] Loop complete with $ALS_WORK_UNIT_COUNT work-units, but no passing loop-scope evals.json found at:
+  $loop_dir/evals.json
+Generate loop-scope evals via /coderails:task-evals (or a justified tier-0 exemption) and grade them GO before declaring complete." >&2
+          exit 2
+          ;;
+      esac
+    fi
+  fi
+}
+
 als_gate_no_transcript "$transcript"
 als_gate_stop_loop "$stop_hook_active"
 als_gate_require_active_loop "$transcript" "loop_state_guard" "$session_id"
 als_load_progress "$cwd" "$session_id"
+gate_loop_evals_required
 als_gate_loop_complete "loop_state_guard" "$session_id"
 gate_present_and_owned
 block_state_failure
