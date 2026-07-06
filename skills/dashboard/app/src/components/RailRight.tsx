@@ -143,6 +143,7 @@ export function RailRight({ token, buttons }: RailRightProps) {
       data-debug-runs={runs.length}
       data-debug-effect-fires={effectFireCount.current}
       data-debug-active-count={activeCount}
+      data-debug-last-effect={lastEffectDebug.current}
     >
       <div className="hud-block">
         <div className="hud-sec-head">
