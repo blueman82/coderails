@@ -170,31 +170,29 @@ describe("getRunToken", () => {
     expect(statSync(path).mode & 0o777).toBe(0o600);
   });
 
-  // ESM module namespaces aren't spy-able in-place (vi.spyOn on a named export throws
-  // "Cannot redefine property" — confirmed empirically), so this uses a real filesystem
-  // condition that makes chmod fail rather than mocking node:fs: chmod on a file inside a
-  // directory this process doesn't own write-permission over. Root always bypasses permission
-  // checks, so this test is skipped when running as root (CI/containers sometimes do).
-  it.skipIf(process.getuid?.() === 0)(
-    "still returns the token when chmod fails (e.g. insufficient permission) rather than throwing",
-    () => {
-      const parentDir = tmpRunsDir();
-      const dir = join(parentDir, "token-dir");
-      mkdirSync(dir);
-      const path = join(dir, "run-token");
-      writeFileSync(path, "existing-token-value", { mode: 0o644 });
-      // Strip write permission on the directory: chmod(file) requires write access to the
-      // file's containing directory on most POSIX filesystems when changing metadata... in
-      // practice chmod itself only requires ownership of the file, not directory write access,
-      // so instead directly revoke ownership-equivalent permission the only portable way
-      // available without root: make the file read-only for its owner AND strip the process's
-      // ability to chmod by removing all permission bits, which still succeeds for the owner.
-      // The one portable, reliable way to make chmodSync throw as non-root is a nonexistent
-      // path — reuse that here instead of fighting POSIX chmod semantics.
-      rmSync(path);
+  it("still returns the token when chmod fails, rather than throwing", async () => {
+    // A real chmodSync call can't be made to fail portably as a non-root owner of the file (the
+    // POSIX permission model lets an owner always chmod their own file), so this mocks node:fs
+    // at the module level — vi.spyOn on a named ESM export throws ("Cannot redefine property":
+    // module namespaces aren't configurable), confirmed empirically, but vi.doMock + a fresh
+    // dynamic import of the module under test works because it swaps the whole module binding
+    // before runlog.ts's import statement resolves it.
+    vi.resetModules();
+    vi.doMock("node:fs", async () => {
+      const actual = await vi.importActual<typeof import("node:fs")>("node:fs");
+      return { ...actual, chmodSync: () => { throw new Error("EPERM: operation not permitted"); } };
+    });
 
-      expect(() => getRunToken(dir)).not.toThrow();
-      expect(getRunToken(dir)).toBe(mintToken().length > 0 ? getRunToken(dir) : "");
-    }
-  );
+    const { getRunToken: getRunTokenWithMockedChmod } = await import("../src/lib/runlog");
+    const dir = tmpRunsDir();
+    mkdirSync(dir, { recursive: true });
+    const path = join(dir, "run-token");
+    writeFileSync(path, "existing-token-value", { mode: 0o644 });
+
+    expect(() => getRunTokenWithMockedChmod(dir)).not.toThrow();
+    expect(getRunTokenWithMockedChmod(dir)).toBe("existing-token-value");
+
+    vi.doUnmock("node:fs");
+    vi.resetModules();
+  });
 });
