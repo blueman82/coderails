@@ -1,4 +1,7 @@
 "use client";
+/* eslint-disable react-hooks/set-state-in-effect --
+   "now" (for relative-age formatting) is a genuinely client-only value (SSR has no "now"); it
+   must resolve after mount via an effect, same shape as Scene.tsx's usePrefersReducedMotion. */
 
 import { useState, useEffect } from "react";
 import { Sparkline } from "./Sparkline";
