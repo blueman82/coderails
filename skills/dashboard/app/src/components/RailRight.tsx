@@ -105,6 +105,7 @@ export function RailRight({ token, buttons }: RailRightProps) {
   // `queued` is set the run has very likely already finished and produced a finish record; this
   // effect un-stuffs the flag in either case rather than leaving it stuck true forever).
   useEffect(() => {
+    effectFireCount.current += 1;
     setUiState((prev) => {
       let changed = false;
       const next = { ...prev };
