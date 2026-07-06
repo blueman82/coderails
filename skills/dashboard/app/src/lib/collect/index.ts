@@ -106,19 +106,29 @@ export function createAggregator(deps: AggregatorDeps): Aggregator {
     }
   }
 
-  function collectActivitySlice(): Pick<Snapshot, "sessions" | "loops" | "trail" | "health"> {
+  async function safeCallAsync<T>(source: string, fn: () => Promise<T>, fallback: T): Promise<T> {
+    try {
+      return await fn();
+    } catch (err) {
+      onError(source, err);
+      return fallback;
+    }
+  }
+
+  async function collectActivitySlice(): Promise<Pick<Snapshot, "sessions" | "loops" | "trail" | "health">> {
     const sessions = sortSessions(safeCall("sessions", () => collectSessions(deps.projectsDir, Date.now()), []));
     const loops = sortLoops(safeCall("loops", () => collectLoops(deps.loopsDir), []));
     const trail = safeCall("trail", () => collectMemoryTrail(deps.cfg.memoryPaths, trailLimit), []);
-    // health has no dedicated fs signal to watch (usage tiles are always
-    // unavailable; hooksFired/lintFindings are cheap to recompute) — it
-    // rides along with the activity slice rather than getting its own timer.
-    const health = safeCall("health", () => collectHealth(), []);
+    // health reads usage transcripts (I/O-bound, hence async) and has no
+    // dedicated fs signal of its own to watch beyond the projects dir already
+    // watched for sessions — it rides along with the activity slice rather
+    // than getting its own timer.
+    const health = await safeCallAsync("health", () => collectHealth({ projectsDir: deps.projectsDir }), []);
     return { sessions, loops, trail, health };
   }
 
-  function refreshActivity(): void {
-    const { health, ...activity } = collectActivitySlice();
+  async function refreshActivity(): Promise<void> {
+    const { health, ...activity } = await collectActivitySlice();
     snapshot = { ...snapshot, ...activity, health };
     emit("activity", activity);
   }
