@@ -71,3 +71,21 @@ export function readRuns(limit: number, opts?: RunLogOptions): RunRecord[] {
 export function mintToken(): string {
   return randomBytes(32).toString("hex");
 }
+
+// Single cached token for the server's lifetime, memoized HERE (a plain lib
+// module) rather than inside src/app/api/run/route.ts: a route.ts file's
+// module-scope state is NOT guaranteed to be the same instance the page's
+// Server Component tree sees — app-router route handlers and Server
+// Components can land in separate module graphs/bundles, so a page.tsx that
+// imports a route.ts export can end up talking to a second, independently-
+// initialized copy of `cachedToken` (confirmed empirically on this machine
+// 2026-07-06: the token embedded in the rendered page did not match what
+// POST /api/run compared against, causing every run to 401). Both the route
+// and the page import this plain module instead, so there is exactly one
+// cachedToken no matter how the two layers are bundled.
+let cachedToken: string | undefined;
+
+export function getRunToken(): string {
+  if (!cachedToken) cachedToken = mintToken();
+  return cachedToken;
+}
