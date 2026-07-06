@@ -89,6 +89,10 @@ check "top 1 -> diagnostics notes truncation" "true" "$(printf '%s' "$TOP_OUT" |
 NOTOP_OUT=$(cat "$FIXTURE_3S" | bash "$SCRIPT" --min-sessions 3)
 check "no --top (below default cap) -> diagnostics does not claim truncation" "false" \
   "$(printf '%s' "$NOTOP_OUT" | jq -r '.diagnostics.truncated // false')"
+# --top 0 is nonsensical ("give me the top zero") -> floor to 1 rather than
+# silently reporting empty clusters with truncated:true (misleading diagnostic).
+TOP0_OUT=$(cat "$FIXTURE_3S" | bash "$SCRIPT" --min-sessions 3 --top 0)
+check "--top 0 is floored to 1 (not zero clusters)" "1" "$(printf '%s' "$TOP0_OUT" | jq -r '.clusters | length')"
 
 # ── 6. Ordering is stable across repeated runs ──────────────────────────────
 RUN1=$(cat "$FIXTURE_3S" | bash "$SCRIPT" --min-sessions 3 | jq -c '[.clusters[].ngram]')
@@ -121,6 +125,30 @@ check "output top-level keys are exactly the documented schema" '["clusters","di
 check "cluster object keys are exactly the documented schema" '["count","n","ngram","sessions"]' \
   "$(printf '%s' "$SENTINEL_OUT" | jq -c '.clusters[0] | keys | sort')"
 
+# ── 7b. Sessions with 0 or 1 events contribute zero n-grams without error ──
+SHORTSESSION_IN=$(printf '%s\n%s\n' \
+  '{"session_id":"short-0","project_slug":"p","event_count":0,"events":[]}' \
+  '{"session_id":"short-1","project_slug":"p","event_count":1,"events":[{"tool":"Read"}]}')
+SHORTSESSION_OUT=$(printf '%s\n' "$SHORTSESSION_IN" | bash "$SCRIPT" --min-sessions 1)
+check "0/1-event sessions -> both still counted in scanned_sessions" "2" \
+  "$(printf '%s' "$SHORTSESSION_OUT" | jq -r '.scanned_sessions')"
+check "0/1-event sessions -> contribute zero n-grams (no clusters, nothing below threshold)" "[]" \
+  "$(printf '%s' "$SHORTSESSION_OUT" | jq -c '.clusters')"
+
+# ── 7c. Same n-gram repeated within one session: count reflects raw
+#     occurrences (across all sessions) while sessions stays deduplicated to
+#     distinct-session support — the two fields measure different things. ──
+REPEAT_IN=$(printf '%s\n%s\n%s\n' \
+  '{"session_id":"rep-1","project_slug":"p","event_count":4,"events":[{"tool":"A"},{"tool":"B"},{"tool":"A"},{"tool":"B"}]}' \
+  '{"session_id":"rep-2","project_slug":"p","event_count":2,"events":[{"tool":"A"},{"tool":"B"}]}' \
+  '{"session_id":"rep-3","project_slug":"p","event_count":2,"events":[{"tool":"A"},{"tool":"B"}]}')
+REPEAT_OUT=$(printf '%s\n' "$REPEAT_IN" | bash "$SCRIPT" --min-sessions 3)
+REPEAT_CLUSTER=$(printf '%s' "$REPEAT_OUT" | jq -c '.clusters[] | select(.ngram == ["A","B"])')
+check "same-session-repeated ngram -> count == raw occurrences (2+1+1=4)" "4" \
+  "$(printf '%s' "$REPEAT_CLUSTER" | jq -r '.count')"
+check "same-session-repeated ngram -> sessions stays deduplicated to 3 distinct ids" \
+  '["rep-1","rep-2","rep-3"]' "$(printf '%s' "$REPEAT_CLUSTER" | jq -c '.sessions | sort')"
+
 # ── 8b. Non-string tool/head fields never crash or leak raw JSON (regression
 #     guard for the same type-coercion privacy-boundary hole WU1 hit) ───────
 NONSTRING_HEAD_IN=$(printf '%s\n%s\n%s\n' \
@@ -133,6 +161,30 @@ check "non-string head field -> script still exits 0" "0" "$NONSTRING_RC"
 check_not_contains "non-string head field -> never leaks raw object to stdout" "$NONSTRING_OUT" "should_not_leak"
 NONSTRING_ERR=$(cat /tmp/cluster_ngrams_nonstring.err); rm -f /tmp/cluster_ngrams_nonstring.err
 check_not_contains "non-string head field -> no raw jq crash trace on stderr" "$NONSTRING_ERR" "cannot be added"
+
+# Non-string `tool` with a string `head` must not fabricate a leading-colon
+# event string (":x") — that shape isn't in the documented event grammar.
+NONSTRING_TOOL_IN=$(printf '%s\n%s\n%s\n' \
+  '{"session_id":"nt-1","project_slug":"p","event_count":2,"events":[{"tool":123,"head":"x"},{"tool":"Read"}]}' \
+  '{"session_id":"nt-2","project_slug":"p","event_count":2,"events":[{"tool":123,"head":"x"},{"tool":"Read"}]}' \
+  '{"session_id":"nt-3","project_slug":"p","event_count":2,"events":[{"tool":123,"head":"x"},{"tool":"Read"}]}')
+NONSTRING_TOOL_OUT=$(printf '%s\n' "$NONSTRING_TOOL_IN" | bash "$SCRIPT" --min-sessions 3)
+check_not_contains "non-string tool with string head -> never fabricates a leading-colon event string" \
+  "$NONSTRING_TOOL_OUT" '":x"'
+
+# ── 8c. Valid-but-non-object JSON lines (false/0/string/array/null) are
+#     rejected as jq_parse_error, not silently counted or crashed on ─────────
+NONOBJ_IN=$(printf '%s\n%s\n%s\n%s\n%s\n' 'false' '0' '"x"' '[1,2,3]' 'null')
+NONOBJ_ERR=$(printf '%s\n' "$NONOBJ_IN" | bash "$SCRIPT" 2>&1 >/dev/null)
+NONOBJ_OUT=$(printf '%s\n' "$NONOBJ_IN" | bash "$SCRIPT" 2>/dev/null)
+NONOBJ_RC=$?
+check "non-object JSON lines -> exit 0" "0" "$NONOBJ_RC"
+check "non-object JSON lines -> scanned_sessions == 0 (none are valid sessions)" "0" \
+  "$(printf '%s' "$NONOBJ_OUT" | jq -r '.scanned_sessions')"
+check_contains "non-object JSON line 1 (false) -> jq_parse_error:1" "$NONOBJ_ERR" "jq_parse_error:1"
+check_contains "non-object JSON line 2 (0) -> jq_parse_error:2" "$NONOBJ_ERR" "jq_parse_error:2"
+check_contains "non-object JSON line 5 (null) -> jq_parse_error:5" "$NONOBJ_ERR" "jq_parse_error:5"
+check_not_contains "non-object JSON lines -> no raw jq crash trace on stderr" "$NONOBJ_ERR" "Cannot index"
 
 # ── 9. --help exits 0 ────────────────────────────────────────────────────────
 HELP_OUT=$(bash "$SCRIPT" --help 2>&1)

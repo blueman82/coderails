@@ -49,6 +49,10 @@ done
 # Sanitise numeric args (house contract: fall back to default on non-numeric).
 case "$MIN_SESSIONS" in (''|*[!0-9]*) MIN_SESSIONS=3;; esac
 case "$TOP" in (''|*[!0-9]*) TOP=50;; esac
+# --top 0 ("give me the top zero") is nonsensical input, not a valid request
+# for an empty result — floor to 1 rather than reporting empty clusters with
+# a misleading diagnostics.truncated:true.
+[ "$TOP" -eq 0 ] && TOP=1
 
 # ── Read stdin line-by-line, isolating malformed lines ──────────────────────
 # Each line is parsed independently via `fromjson? // empty`; a corrupt line
@@ -60,7 +64,10 @@ line_no=0
 while IFS= read -r line || [ -n "$line" ]; do
   line_no=$((line_no + 1))
   [ -z "$line" ] && continue
-  parsed=$(printf '%s' "$line" | jq -c '.' 2>/dev/null)
+  # A session record must be a JSON object — valid-but-non-object JSON
+  # (false, 0, "x", [1,2,3], null) is rejected here too, otherwise it would
+  # survive this guard and crash the downstream .events/.session_id access.
+  parsed=$(printf '%s' "$line" | jq -ce 'if type == "object" then . else empty end' 2>/dev/null)
   if [ -z "$parsed" ]; then
     printf 'jq_parse_error:%s\n' "$line_no" >&2
     continue
@@ -94,7 +101,7 @@ NGRAM_STREAM=$(printf '%s' "$VALID_SESSIONS_JSON" | jq -c '
     | map(
         (if (.tool | type) == "string" then .tool else "" end) as $tool
         | (if (.head | type) == "string" then .head else null end) as $head
-        | if $head then ($tool + ":" + $head) else $tool end
+        | if ($head and $tool != "") then ($tool + ":" + $head) else $tool end
       ) as $strs
   | ($strs | length) as $len
   | range(2; 6) as $n
