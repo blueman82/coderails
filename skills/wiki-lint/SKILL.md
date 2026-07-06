@@ -12,7 +12,7 @@ Periodically health-check the wiki. The LLM is good at finding inconsistencies, 
 
 ### Step 0: Load the Schema
 
-`AGENTS.md` at the project's git root is loaded into context at session start (per the project's `CLAUDE.md`) — use that content. If it isn't present in context (e.g. a fresh fork with no prior context), read `AGENTS.md` at the git repository root directly, not the current working directory — a fork's cwd may be a subdirectory. If it doesn't exist there either, tell the user to run `/wiki-init` first.
+`AGENTS.md` at the project's git root is loaded into context at session start (per the project's `CLAUDE.md`) — use that content. If it isn't present in context (e.g. a fresh fork with no prior context), find the git repository root with `git rev-parse --show-toplevel` (not the current working directory — a fork's cwd may be a subdirectory, and may even be inside the wiki vault's own repo rather than the project repo) and read `AGENTS.md` there. If it doesn't exist there either, tell the user to run `/wiki-init` first.
 
 Extract:
 - `vault` — absolute path to the wiki vault
