@@ -150,11 +150,9 @@ export function createRunHandler(deps: RunHandlerDeps) {
     await new Promise<void>((resolve) => {
       execFileImpl("claude", argv, { cwd: button.cwd }, (error, stdout, stderr) => {
         appendFileSync(outputPath, stdout + stderr);
-        const exitCode = error ? ((error as NodeJS.ErrnoException).code as number) ?? 1 : 0;
-        appendRun(
-          { ...startRecord, endedAt: Date.now(), exitCode: typeof exitCode === "number" ? exitCode : 1 },
-          { runsDir }
-        );
+        const errorCode = (error as { code?: unknown } | null)?.code;
+        const exitCode = !error ? 0 : typeof errorCode === "number" ? errorCode : 1;
+        appendRun({ ...startRecord, endedAt: Date.now(), exitCode }, { runsDir });
         try {
           unlinkSync(lockPath);
         } catch {
