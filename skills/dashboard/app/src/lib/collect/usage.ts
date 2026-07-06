@@ -93,7 +93,11 @@ async function collectFileEvents(path: string, seenIds: Set<string>, events: Usa
   }
 }
 
-function listDirsRecursive(dir: string, out: string[]): void {
+// Lists .jsonl files under dir, recursing into subdirectories. Read failures
+// on nested entries are skipped (matches collectSessions' per-entry
+// tolerance); the caller is responsible for treating a failure on the base
+// dir itself as fatal.
+function listJsonlFiles(dir: string, out: string[]): void {
   let entries;
   try {
     entries = readdirSync(dir, { withFileTypes: true });
@@ -104,7 +108,7 @@ function listDirsRecursive(dir: string, out: string[]): void {
     if (entry.name.startsWith(".")) continue;
     const path = join(dir, entry.name);
     if (entry.isDirectory()) {
-      listDirsRecursive(path, out);
+      listJsonlFiles(path, out);
     } else if (entry.name.endsWith(".jsonl")) {
       out.push(path);
     }
