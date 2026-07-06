@@ -1,10 +1,10 @@
 "use client";
 
-import { useDashboardState } from "@/hooks/useDashboardState";
+import { useDashboardState, selectActiveLoop } from "@/hooks/useDashboardState";
 
 export function BottomHero() {
   const { snapshot } = useDashboardState();
-  const loop = snapshot.loops[0];
+  const loop = selectActiveLoop(snapshot.loops);
   const nextUnit = loop?.unitTitles.find((u) => !u.done);
 
   return (
