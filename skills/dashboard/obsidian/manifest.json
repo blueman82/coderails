@@ -1,0 +1,10 @@
+{
+  "id": "coderails-command-centre",
+  "name": "Coderails Command Centre",
+  "version": "0.1.0",
+  "minAppVersion": "1.5.0",
+  "description": "Renders the coderails agentic-loop command centre from vault state inside a fenced agentic-os code block.",
+  "author": "blueman82",
+  "authorUrl": "https://github.com/blueman82/coderails",
+  "isDesktopOnly": true
+}
