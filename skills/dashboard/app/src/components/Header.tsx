@@ -1,5 +1,33 @@
-// Static placeholder — Task 9b binds the live clock, kernel status, and run state.
+"use client";
+
+import { useEffect, useState } from "react";
+import { useDashboardState } from "@/hooks/useDashboardState";
+import { formatClockTime } from "@/hooks/useDashboardState";
+
+const DATE_FMT = new Intl.DateTimeFormat("en-US", { weekday: "short", month: "short", day: "2-digit" });
+
+function formatClockDate(date: Date): string {
+  return DATE_FMT.format(date).toUpperCase().replace(/,/g, "").replace(/\s(\w{3})\s/, " · $1 ");
+}
+
 export function Header() {
+  const { status, lastUpdate } = useDashboardState();
+  const [now, setNow] = useState<Date | null>(null);
+
+  useEffect(() => {
+    setNow(new Date());
+    const id = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  const clock = now ? formatClockTime(now) : "--:--:--";
+  const [hhmm, secs] = clock.includes(":") ? [clock.slice(0, 5), clock.slice(6)] : ["--:--", "--"];
+  const dateLabel = now ? formatClockDate(now) : "";
+
+  const isOnline = status === "online";
+  const statusLabel = isOnline ? "Kernel · Online — Runner · Alive" : "Kernel · Reconnecting…";
+  const lastUpdateLabel = lastUpdate ? `Last Update ${formatClockTime(new Date(lastUpdate))}` : null;
+
   return (
     <header className="hud-header">
       <div>
@@ -7,15 +35,16 @@ export function Header() {
         <div className="hud-wordmark-sub">Agentic Operating System · Observability Terminal</div>
       </div>
       <div className="hud-status-line">
-        <span className="hud-status-dot" />
-        <span>Kernel · Online — Runner · Alive</span>
+        <span className={`hud-status-dot${isOnline ? "" : " reconnecting"}`} />
+        <span>{statusLabel}</span>
+        {lastUpdateLabel && <span className="hud-status-last-update">{lastUpdateLabel}</span>}
       </div>
       <div className="hud-clock-block">
         <div className="hud-clock-big">
-          <span>12:49</span>
-          <span className="hud-clock-secs">:32</span>
+          <span>{hhmm}</span>
+          <span className="hud-clock-secs">:{secs}</span>
         </div>
-        <div className="hud-clock-date">SUN · JUL 06</div>
+        <div className="hud-clock-date">{dateLabel}</div>
       </div>
     </header>
   );
