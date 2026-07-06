@@ -298,7 +298,7 @@ Reference assets for all four: `docs/coderails/specs/assets/2026-07-06-observabi
 - [ ] `start-dashboard.sh`: resolve app dir relative to script; `npm ci` only if `node_modules` absent; `npm run build` only if `.next` absent or `src` newer; `npm run start -- --hostname 127.0.0.1 --port ${DASHBOARD_PORT:-4173}` backgrounded with pidfile under `~/.claude/coderails-dashboard/`; `open http://127.0.0.1:<port>`; follow the house style of `skills/brainstorming/scripts/start-server.sh` (existing precedent for skill-launched servers).
 - [ ] `stop-dashboard.sh`: kill pidfile process, remove pidfile.
 - [ ] SKILL.md usage: start, stop, port override, config bootstrap note (if config missing, the server starts with an empty config and every panel renders its explicit empty state — first-run is not an error).
-- [ ] `chmod +x` both scripts (repo has an exec-bit invariant test — `hooks/scripts/tests/exec_bit_invariant.test.sh`).
+- [ ] `chmod +x` both scripts. (Note: `exec_bit_invariant.test.sh` only globs `scripts/*.sh` and `hooks/scripts/*.sh`, so it does NOT cover this path — the chmod is correct practice on its own merits, not hook-enforced.)
 
 **Verify:** from a shell: `skills/dashboard/scripts/start-dashboard.sh` on a machine state with no `node_modules` reaches a serving dashboard (first-run path); re-run is fast (skips ci/build); **offline assertion (spec testing rule): with networking disabled after a completed first install, the dashboard serves fully — every asset local, no CDN request** (DevTools offline mode or `networksetup` toggle); `stop-dashboard.sh` kills it; `hooks/scripts/tests/run_all.sh` still passes (exec-bit + no hook regressions).
 
