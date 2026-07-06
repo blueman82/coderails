@@ -366,3 +366,4 @@ Reference assets for all four: `docs/coderails/specs/assets/2026-07-06-observabi
 - Usage tiles may ship permanently "unavailable" if no reliable local source exists — accepted; honest absence beats scraping guesses.
 - The Obsidian plugin duplicates a thin config reader rather than importing across bundles — accepted; the JSON shape is the contract, asserted by shared fixtures.
 - Expected-duration pacing starts wrong for new buttons (30s fallback until 5 runs exist) — accepted; the bar is a pacing indicator by design.
+- The intent-file schema (Task 13) is frozen ahead of sub-project 2's runner spec — a contract with one end designed. Accepted: the runner is the committed next sub-project; if its design forces a change, Task 13's shape and the interim exec path are the single revision point.
