@@ -9,6 +9,9 @@ export interface SessionInfo {
 
 export interface LoopInfo {
   slug: string;
+  // Human-readable loop name from progress.json's "loop" field; falls back to
+  // `slug` when absent, blank, or non-string (see readLoopName below).
+  name: string;
   sessionId: string;
   status: string;
   workUnitsDone: number;
