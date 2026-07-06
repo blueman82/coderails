@@ -239,7 +239,7 @@ if echo "$cmd" | grep -qE '(scripts/push\.sh|scripts/merge\.sh|scripts/post_revi
       hookSpecificOutput: {
         hookEventName: "PreToolUse",
         permissionDecision: "deny",
-        permissionDecisionReason: ("Command-substitution character (backtick or $(...)) detected inside a push.sh/merge.sh/post_review.sh/post_evals.sh argument.\nFull command: " + $cmd + "\nThese scripts take a free-text message that becomes a commit/PR title or comment body — a backtick or $(...) in it executes as live shell substitution when this line runs, not literal text. Rewrite the argument without backticks/$() (e.g. spell out `git rev-parse show-toplevel` as prose, not `git rev-parse --show-toplevel`), or write the message to a file first and pass it via -F body=@file instead of inline text.")
+        permissionDecisionReason: ("Command-substitution character (backtick or $(...)) detected inside a push.sh/merge.sh/post_review.sh/post_evals.sh argument.\nFull command: " + $cmd + "\nThese scripts take a free-text message that becomes a commit/PR title or comment body — a backtick or $(...) in it executes as live shell substitution when this line runs, not literal text. None of these scripts read a body from a file, so there is no -F body=@file escape hatch here — rewrite the argument in plain prose with no backticks or $() (e.g. \"git rev-parse show-toplevel\" instead of wrapping it in backticks).")
       }
     }'
     exit 0
