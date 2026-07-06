@@ -355,7 +355,12 @@
   letter-spacing: 0.14em;
   color: var(--grey-dim);
   text-transform: uppercase;
-  white-space: nowrap;
+  /* Dynamic content ("Idle · 0/8 Active · 0 Queued") — nowrap forced it past the fixed
+     300px right rail's edge at every desktop width (the rail's own width doesn't grow
+     with viewport, so `.hud-rule` shrinking to 0 was never enough headroom). Wrapping
+     instead of clipping keeps the count readable rather than silently truncating it. */
+  white-space: normal;
+  min-width: 0;
 }
 .hud-active-cmd-list:empty {
   display: none;
