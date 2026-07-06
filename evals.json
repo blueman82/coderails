@@ -37,8 +37,8 @@
       "assert": "a corrupt transcript line produces a distinct jq_parse_error diagnostic on stderr, not silently folded into zero-events",
       "cmd": "grep -q 'jq_parse_error:' <(skills/workflow-audit/scripts/scan_transcripts.sh --project fixture-corrupt 2>&1 >/dev/null)",
       "negative_control": "run the same command against a fixture with no corrupt line and confirm jq_parse_error does NOT appear (proves the detector fires only on genuine corruption, not unconditionally)",
-      "status": "pending",
-      "evidence": ""
+      "status": "pass",
+      "evidence": "corrupt-line fixture: jq_parse_error: on stderr (match, exit 0); clean fixture: no jq_parse_error (negative control, exit 1/no match)"
     },
     {
       "id": "E4",
