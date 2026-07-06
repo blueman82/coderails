@@ -99,7 +99,7 @@ check "missing transcript path -> count 0" "0" "$n"
 
 # Malformed transcript: 2 valid dispatch lines + 1 truncated/broken JSON line.
 # jq -s (slurp) aborts the WHOLE parse on a single bad line, so this must be
-# distinguishable from a genuine empty/quiet transcript — ULG_PARSE_FAILED is
+# distinguishable from a genuine empty/quiet transcript — ULG_PARSE_REASON is
 # the signal callers use to log that distinction (see hooks_json main body).
 mk_corrupt_transcript() {
   local out="$TMP/corrupt_$RANDOM.jsonl"
@@ -111,8 +111,20 @@ mk_corrupt_transcript() {
 corrupt_t=$(mk_corrupt_transcript)
 n=$( ( . "$GUARD"; ulg_count_dispatch_turns "$corrupt_t" ) )
 check "malformed transcript JSON -> count 0 (fail-safe default)" "0" "$n"
-parse_failed=$( ( . "$GUARD"; ulg_count_dispatch_turns "$corrupt_t" >/dev/null; printf '%s' "$ULG_PARSE_FAILED" ) )
-check "malformed transcript JSON -> ULG_PARSE_FAILED=1 (distinguishable from genuine 0)" "1" "$parse_failed"
+parse_reason=$( ( . "$GUARD"; ulg_count_dispatch_turns "$corrupt_t" >/dev/null; printf '%s' "$ULG_PARSE_REASON" ) )
+check "malformed transcript JSON -> ULG_PARSE_REASON=jq_parse_error (distinguishable from genuine 0)" "jq_parse_error" "$parse_reason"
+
+# jq not on PATH -> ULG_PARSE_REASON=jq_missing, count 0. Source the guard
+# FIRST (while jq is still reachable, since sourcing needs `dirname`), then
+# blank PATH before calling the function under test.
+jq_missing_t=$(mk_dispatch_transcript 3)
+jq_missing_reason=$( (
+  . "$GUARD"
+  export PATH="/nonexistent_empty_dir_for_jq_shadow_test"
+  ulg_count_dispatch_turns "$jq_missing_t" >/dev/null 2>&1
+  printf '%s' "$ULG_PARSE_REASON"
+) )
+check "jq not on PATH -> ULG_PARSE_REASON=jq_missing" "jq_missing" "$jq_missing_reason"
 
 empty_file="$TMP/empty_$RANDOM.jsonl"
 : > "$empty_file"
@@ -226,5 +238,14 @@ code=$(run "$(payload "$corrupt_e2e" S1)")
 out=$(run_stdout "$(payload "$corrupt_e2e" S1)")
 check "malformed transcript end-to-end -> exit 0" "0" "$code"
 check "malformed transcript end-to-end -> silent stdout (fail-open, no spurious nudge)" "" "$out"
+
+# End-to-end: malformed STDIN PAYLOAD (not transcript) -> logs reason=payload_parse_error,
+# stays silent, exit 0. Distinct seam from the transcript-parse-error case above.
+rm -rf "$CLAUDE_AGENTIC_LOOP_DIR"
+malformed_payload='{"transcript_path": "THIS IS NOT VALID JSON'
+code=$(printf '%s' "$malformed_payload" | bash "$GUARD" >/dev/null 2>&1; echo $?)
+out=$(printf '%s' "$malformed_payload" | bash "$GUARD" 2>/dev/null)
+check "malformed stdin payload -> exit 0" "0" "$code"
+check "malformed stdin payload -> silent stdout (fail-open, no spurious nudge)" "" "$out"
 
 [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails)"; exit 1; }

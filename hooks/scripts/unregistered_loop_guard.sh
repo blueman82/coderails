@@ -40,15 +40,19 @@
 # message.id -> counts as 1. Sequential loop-style dispatches (one Agent call
 # per turn, across turns) get distinct message.ids -> counts as N. Tool name
 # is "Agent", never "Task", in this harness.
+# (A null/missing message.id on multiple dispatch turns would collapse them
+# to one via `unique` — not observed in real transcripts, defense-in-depth only.)
 # Pure: prints an integer, no side effects, no exit calls. Sets global
-# ULG_PARSE_FAILED to 1 if jq itself failed (malformed/corrupt transcript
-# JSON) so callers can log that as a distinct reason from a genuine zero —
-# `jq -s` aborts the whole parse on a single bad line, which would otherwise
-# be silently indistinguishable from "0 dispatches, quiet session."
+# ULG_PARSE_REASON to "jq_missing" or "jq_parse_error" if jq itself failed
+# (jq not on PATH, or malformed/corrupt transcript JSON), else "" — so callers
+# can log a distinct reason from a genuine zero. `jq -s` aborts the whole
+# parse on a single bad line, which would otherwise be silently
+# indistinguishable from "0 dispatches, quiet session."
 ulg_count_dispatch_turns() {
   local transcript="$1"
-  ULG_PARSE_FAILED=0
+  ULG_PARSE_REASON=""
   [ -n "$transcript" ] && [ -f "$transcript" ] || { printf '0'; return; }
+  command -v jq >/dev/null 2>&1 || { ULG_PARSE_REASON="jq_missing"; printf '0'; return; }
   local n
   n=$(jq -s -r '
     [ .[]?
@@ -57,7 +61,7 @@ ulg_count_dispatch_turns() {
       | .message.id ]
     | unique
     | length
-  ' "$transcript" 2>/dev/null) || ULG_PARSE_FAILED=1
+  ' "$transcript" 2>/dev/null) || ULG_PARSE_REASON="jq_parse_error"
   case "$n" in (''|*[!0-9]*) n=0;; esac
   printf '%s' "$n"
 }
@@ -76,7 +80,11 @@ ulg_has_progress_file() {
 # coderails:agentic-loop or bare agentic-loop), else 0. Delegates to
 # als_count_invocations (already sourced from lib/loop_state_common.sh) rather
 # than reimplementing its jq match — single source of truth for what counts
-# as a loop-registering Skill invocation.
+# as a loop-registering Skill invocation. Uses the one-shot count, not
+# als_stable_invocations' flush-race retry: a false negative here just means
+# the nudge re-fires at the next Stop, so the extra latency of retrying isn't
+# worth it for a non-blocking nudge (unlike loop_state_guard's blocking gate,
+# which needs the stable count to avoid blocking on a still-flushing write).
 ulg_has_skill_invocation() {
   local transcript="$1" n
   n=$(als_count_invocations "$transcript")
@@ -89,8 +97,13 @@ ulg_has_skill_invocation() {
 # call the three pure functions above in isolation, with no stdin read or
 # gate exit triggered as a side effect of sourcing.
 if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
+  # No stop_hook_active gate here (unlike loop_state_guard.sh): this hook
+  # always exits 0 and never blocks, so it can't drive a stop-loop.
   IFS= read -r -d '' -t 5 input || true
-  transcript=$(echo "$input" | jq -r '.transcript_path // empty' 2>/dev/null)
+  transcript=$(echo "$input" | jq -r '.transcript_path // empty' 2>/dev/null) || {
+    als_log "hook=unregistered_loop_guard nudged=0 reason=payload_parse_error"
+    exit 0
+  }
   session_id=$(als_sanitise_session_id "$(echo "$input" | jq -r '.session_id // "?"' 2>/dev/null)")
   cwd=$(echo "$input" | jq -r '.cwd // empty' 2>/dev/null)
 
@@ -100,8 +113,8 @@ if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
   }
 
   dispatch_turns=$(ulg_count_dispatch_turns "$transcript")
-  if [ "$ULG_PARSE_FAILED" = "1" ]; then
-    als_log "hook=unregistered_loop_guard session=$session_id nudged=0 reason=transcript_parse_failed"
+  if [ -n "$ULG_PARSE_REASON" ]; then
+    als_log "hook=unregistered_loop_guard session=$session_id nudged=0 reason=$ULG_PARSE_REASON"
     exit 0
   fi
   [ "$dispatch_turns" -ge 3 ] || {
