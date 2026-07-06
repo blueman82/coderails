@@ -177,7 +177,9 @@ describe("GET /api/events — activity on fs change", () => {
       gatesPollMs: 999_999,
     });
     const res = handler(req());
-    const framesPromise = readFrames(res.body!, 2); // snapshot + activity
+    const framesPromise = readFramesUntil(res.body!, (frames) =>
+      frames.some((f) => f.event === "activity")
+    );
 
     // give the stream a tick to start() (and thus begin watching) before touching
     await new Promise((r) => setTimeout(r, 50));
