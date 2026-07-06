@@ -51,10 +51,20 @@ const CHIP_CLASS_BY_STATUS: Record<string, string> = {
   pass: "cc-chip-pass",
   fail: "cc-chip-fail",
   "needs-review": "cc-chip-needs-review",
+  // "done"/"failed"/"running" are the run-note frontmatter statuses a
+  // Task 13 button press writes (see exec.ts) — an unresolved run reads as
+  // "running" until execFile's callback flips the note to done/failed.
+  done: "cc-chip-pass",
+  failed: "cc-chip-fail",
+  running: "cc-chip-running",
 };
 
 function chipClassFor(status: ActivityStatus): string {
   return CHIP_CLASS_BY_STATUS[status] ?? "cc-chip-pending";
+}
+
+function chipTextFor(status: ActivityStatus): string {
+  return status === "running" ? "⏳" : status;
 }
 
 function el(tag: string, className: string, text?: string): HTMLElement {
