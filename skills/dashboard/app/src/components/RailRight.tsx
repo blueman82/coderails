@@ -107,17 +107,23 @@ export function RailRight({ token, buttons }: RailRightProps) {
   // effect un-stuffs the flag in either case rather than leaving it stuck true forever).
   useEffect(() => {
     effectFireCount.current += 1;
+    const debugParts: string[] = [];
     setUiState((prev) => {
       let changed = false;
       const next = { ...prev };
       for (const [name, ui] of Object.entries(prev)) {
-        if (!ui.queued) continue;
+        if (!ui.queued) {
+          debugParts.push(`${name}:not-queued`);
+          continue;
+        }
         const stillRelevant = activeByButton.has(name) || runs.some((r) => r.button === name && r.endedAt === undefined);
+        debugParts.push(`${name}:queued,stillRelevant=${stillRelevant}`);
         if (!stillRelevant) {
           next[name] = { ...ui, queued: false };
           changed = true;
         }
       }
+      lastEffectDebug.current = debugParts.length > 0 ? debugParts.join(";") : "no entries in prev";
       return changed ? next : prev;
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
