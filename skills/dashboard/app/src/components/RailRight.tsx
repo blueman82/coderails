@@ -100,11 +100,17 @@ export function RailRight({ token, buttons }: RailRightProps) {
     // so the deck never flickers back to idle between the 200 response and the next SSE frame.
   }
 
-  // Clears the local optimistic `queued` flag once the run either shows up as SSE-confirmed
-  // active (real state has taken over) or has fully disappeared from `runs` finished+unfinished
-  // (the POST awaits full completion before responding — see api/run/route.ts — so by the time
-  // `queued` is set the run has very likely already finished and produced a finish record; this
-  // effect un-stuffs the flag in either case rather than leaving it stuck true forever).
+  // Clears the local optimistic `queued` flag once `runs` (the single source of truth this
+  // effect is keyed on) shows the button either still running or fully finished. Deliberately
+  // does NOT consult `activeByButton`/`active` here: those come from useRunLifecycle's own
+  // internally-ticking setInterval, which can lag the `runs` prop by up to one tick (~50ms) —
+  // mixing that lagging value into an effect keyed only on `[runs]` let `queued` get stuck
+  // permanently true if the effect's one and only post-finish invocation happened to read
+  // `active` a tick before it had caught up (confirmed empirically: `runs` showed every record
+  // finished, `activeByButton` was reported empty by the surrounding render, yet the effect's own
+  // read of `activeByButton.has(name)` came back true on that invocation, and since `runs` never
+  // changed again afterward, the effect never got a chance to re-evaluate and correct it).
+  // `runs` alone is synchronously consistent with itself, so it's the only signal this needs.
   useEffect(() => {
     effectFireCount.current += 1;
     const debugParts: string[] = [];
@@ -116,7 +122,7 @@ export function RailRight({ token, buttons }: RailRightProps) {
           debugParts.push(`${name}:not-queued`);
           continue;
         }
-        const stillRelevant = activeByButton.has(name) || runs.some((r) => r.button === name && r.endedAt === undefined);
+        const stillRelevant = runs.some((r) => r.button === name && r.endedAt === undefined);
         debugParts.push(`${name}:queued,stillRelevant=${stillRelevant}`);
         if (!stillRelevant) {
           next[name] = { ...ui, queued: false };
@@ -126,7 +132,6 @@ export function RailRight({ token, buttons }: RailRightProps) {
       lastEffectDebug.current = debugParts.length > 0 ? debugParts.join(";") : "no entries in prev";
       return changed ? next : prev;
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [runs]);
 
   function isButtonBusy(name: string): boolean {
