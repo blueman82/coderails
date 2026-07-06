@@ -48,7 +48,7 @@ afterEach(() => {
 describe("collectUsage", () => {
   const NOW = new Date("2026-07-06T18:00:00Z");
 
-  it("sums input/output tokens for a single assistant message within the 5h window", () => {
+  it("sums input/output tokens for a single assistant message within the 5h window", async () => {
     const base = makeTmpBase();
     writeTranscript(
       base,
@@ -57,11 +57,11 @@ describe("collectUsage", () => {
       [assistantLine("msg_1", "2026-07-06T17:00:00.000Z", { input_tokens: 10, output_tokens: 20 })],
       NOW
     );
-    const usage = collectUsage(base, NOW);
+    const usage = await collectUsage(base, NOW);
     expect(usage.last5h).toEqual({ inputTokens: 10, outputTokens: 20, totalTokens: 30 });
   });
 
-  it("dedupes repeated lines sharing the same message.id, counting the usage once", () => {
+  it("dedupes repeated lines sharing the same message.id, counting the usage once", async () => {
     const base = makeTmpBase();
     writeTranscript(
       base,
@@ -74,11 +74,11 @@ describe("collectUsage", () => {
       ],
       NOW
     );
-    const usage = collectUsage(base, NOW);
+    const usage = await collectUsage(base, NOW);
     expect(usage.last5h).toEqual({ inputTokens: 1, outputTokens: 100, totalTokens: 101 });
   });
 
-  it("counts cache_creation_input_tokens and cache_read_input_tokens toward inputTokens", () => {
+  it("counts cache_creation_input_tokens and cache_read_input_tokens toward inputTokens", async () => {
     const base = makeTmpBase();
     writeTranscript(
       base,
@@ -94,11 +94,11 @@ describe("collectUsage", () => {
       ],
       NOW
     );
-    const usage = collectUsage(base, NOW);
+    const usage = await collectUsage(base, NOW);
     expect(usage.last5h).toEqual({ inputTokens: 1502, outputTokens: 50, totalTokens: 1552 });
   });
 
-  it("excludes a message stamped just before the 5h window (boundary)", () => {
+  it("excludes a message stamped just before the 5h window (boundary)", async () => {
     const base = makeTmpBase();
     const justOutside = new Date(NOW.getTime() - 5 * 60 * 60_000 - 1000).toISOString();
     writeTranscript(
@@ -108,11 +108,11 @@ describe("collectUsage", () => {
       [assistantLine("msg_1", justOutside, { input_tokens: 10, output_tokens: 20 })],
       NOW
     );
-    const usage = collectUsage(base, NOW);
+    const usage = await collectUsage(base, NOW);
     expect(usage.last5h).toEqual({ inputTokens: 0, outputTokens: 0, totalTokens: 0 });
   });
 
-  it("includes a message stamped exactly at the 5h boundary", () => {
+  it("includes a message stamped exactly at the 5h boundary", async () => {
     const base = makeTmpBase();
     const atBoundary = new Date(NOW.getTime() - 5 * 60 * 60_000).toISOString();
     writeTranscript(
@@ -122,11 +122,11 @@ describe("collectUsage", () => {
       [assistantLine("msg_1", atBoundary, { input_tokens: 10, output_tokens: 20 })],
       NOW
     );
-    const usage = collectUsage(base, NOW);
+    const usage = await collectUsage(base, NOW);
     expect(usage.last5h).toEqual({ inputTokens: 10, outputTokens: 20, totalTokens: 30 });
   });
 
-  it("includes a message stamped just under the 7-day week boundary but excludes one just past it", () => {
+  it("includes a message stamped just under the 7-day week boundary but excludes one just past it", async () => {
     const base = makeTmpBase();
     const insideWeek = new Date(NOW.getTime() - 7 * 24 * 60 * 60_000 + 1000).toISOString();
     const outsideWeek = new Date(NOW.getTime() - 7 * 24 * 60 * 60_000 - 1000).toISOString();
@@ -140,11 +140,11 @@ describe("collectUsage", () => {
       ],
       NOW
     );
-    const usage = collectUsage(base, NOW);
+    const usage = await collectUsage(base, NOW);
     expect(usage.week).toEqual({ inputTokens: 5, outputTokens: 5, totalTokens: 10 });
   });
 
-  it("sums usage across multiple project transcripts", () => {
+  it("sums usage across multiple project transcripts", async () => {
     const base = makeTmpBase();
     writeTranscript(
       base,
@@ -160,11 +160,11 @@ describe("collectUsage", () => {
       [assistantLine("msg_2", "2026-07-06T17:30:00.000Z", { input_tokens: 5, output_tokens: 5 })],
       NOW
     );
-    const usage = collectUsage(base, NOW);
+    const usage = await collectUsage(base, NOW);
     expect(usage.last5h).toEqual({ inputTokens: 15, outputTokens: 25, totalTokens: 40 });
   });
 
-  it("skips malformed JSON lines silently rather than throwing", () => {
+  it("skips malformed JSON lines silently rather than throwing", async () => {
     const base = makeTmpBase();
     writeTranscript(
       base,
@@ -173,12 +173,11 @@ describe("collectUsage", () => {
       ["not valid json {{{", assistantLine("msg_1", "2026-07-06T17:00:00.000Z", { input_tokens: 10, output_tokens: 20 })],
       NOW
     );
-    expect(() => collectUsage(base, NOW)).not.toThrow();
-    const usage = collectUsage(base, NOW);
+    const usage = await collectUsage(base, NOW);
     expect(usage.last5h).toEqual({ inputTokens: 10, outputTokens: 20, totalTokens: 30 });
   });
 
-  it("skips lines of the wrong shape (non-assistant type, missing usage) silently", () => {
+  it("skips lines of the wrong shape (non-assistant type, missing usage) silently", async () => {
     const base = makeTmpBase();
     writeTranscript(
       base,
@@ -192,11 +191,11 @@ describe("collectUsage", () => {
       ],
       NOW
     );
-    const usage = collectUsage(base, NOW);
+    const usage = await collectUsage(base, NOW);
     expect(usage.last5h).toEqual({ inputTokens: 10, outputTokens: 20, totalTokens: 30 });
   });
 
-  it("ignores blank lines", () => {
+  it("ignores blank lines", async () => {
     const base = makeTmpBase();
     writeTranscript(
       base,
@@ -205,29 +204,29 @@ describe("collectUsage", () => {
       ["", assistantLine("msg_1", "2026-07-06T17:00:00.000Z", { input_tokens: 10, output_tokens: 20 }), ""],
       NOW
     );
-    const usage = collectUsage(base, NOW);
+    const usage = await collectUsage(base, NOW);
     expect(usage.last5h).toEqual({ inputTokens: 10, outputTokens: 20, totalTokens: 30 });
   });
 
-  it("only reads non-.jsonl files if present is a no-op (ignores unrelated files)", () => {
+  it("only reads non-.jsonl files if present is a no-op (ignores unrelated files)", async () => {
     const base = makeTmpBase();
     mkdirSync(join(base, "-proj"), { recursive: true });
     writeFileSync(join(base, "-proj", "notes.txt"), "irrelevant content");
-    const usage = collectUsage(base, NOW);
+    const usage = await collectUsage(base, NOW);
     expect(usage.last5h).toEqual({ inputTokens: 0, outputTokens: 0, totalTokens: 0 });
   });
 
-  it("returns null sections with a note when the base dir is unreadable", () => {
-    const usage = collectUsage(join(tmpdir(), "does-not-exist-usage-base"), NOW);
+  it("returns null sections with a note when the base dir is unreadable", async () => {
+    const usage = await collectUsage(join(tmpdir(), "does-not-exist-usage-base"), NOW);
     expect(usage.last5h).toBeNull();
     expect(usage.week).toBeNull();
   });
 
-  it("never throws even when called with a garbage path", () => {
+  it("never throws even when called with a garbage path", async () => {
     expect(() => collectUsage("\0invalid", NOW)).not.toThrow();
   });
 
-  it("prefilters files whose mtime is older than the week window (cheap skip)", () => {
+  it("prefilters files whose mtime is older than the week window (cheap skip)", async () => {
     const base = makeTmpBase();
     const longAgo = new Date(NOW.getTime() - 30 * 24 * 60 * 60_000);
     // File mtime is far older than the window AND its content (if read) would
@@ -240,7 +239,7 @@ describe("collectUsage", () => {
       [assistantLine("msg_old", longAgo.toISOString(), { input_tokens: 999, output_tokens: 999 })],
       longAgo
     );
-    const usage = collectUsage(base, NOW);
+    const usage = await collectUsage(base, NOW);
     expect(usage.week).toEqual({ inputTokens: 0, outputTokens: 0, totalTokens: 0 });
   });
 });
