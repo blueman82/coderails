@@ -223,7 +223,7 @@ describe("collectUsage", () => {
   });
 
   it("never throws even when called with a garbage path", async () => {
-    expect(() => collectUsage("\0invalid", NOW)).not.toThrow();
+    await expect(collectUsage("\0invalid", NOW)).resolves.not.toThrow();
   });
 
   it("prefilters files whose mtime is older than the week window (cheap skip)", async () => {
