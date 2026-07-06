@@ -86,17 +86,55 @@ function lockPathFor(locksDir: string, button: string): string {
   return join(locksDir, `${button}.lock`);
 }
 
-// A lock file older than 24h is treated as abandoned (e.g. left behind by a
-// crashed server) and ignored rather than blocking new runs forever.
-function isLockHeld(lockPath: string): boolean {
+function isStale(lockPath: string): boolean {
   let stat;
   try {
     stat = statSync(lockPath);
   } catch {
     return false;
   }
-  const ageMs = Date.now() - stat.mtimeMs;
-  return ageMs < STALE_LOCK_MS;
+  return Date.now() - stat.mtimeMs >= STALE_LOCK_MS;
+}
+
+// Acquires the lock by attempting an EXCLUSIVE create ("wx": fails with
+// EEXIST if the file already exists). The create itself IS the check —
+// there is no separate "is it held" read before the write, so two worker
+// processes racing to acquire the same lock cannot both succeed: the
+// filesystem serializes the two open(O_EXCL) calls and exactly one of them
+// gets ENOENT-turned-success while the other gets EEXIST. (The prior
+// implementation did statSync-then-writeFileSync, which has a window
+// between the two calls where both processes could observe "absent" and
+// both write.)
+//
+// A lock file older than 24h is treated as abandoned (e.g. left behind by a
+// crashed server) and ignored: on EEXIST, if the existing lock is stale we
+// unlink it and retry the exclusive create exactly once. If that retry also
+// hits EEXIST (a genuine concurrent acquisition, or the file reappeared),
+// the lock is held — return false rather than looping.
+function acquireLock(lockPath: string): boolean {
+  try {
+    writeFileSync(lockPath, String(process.pid), { flag: "wx" });
+    return true;
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+  }
+
+  if (isStale(lockPath)) {
+    try {
+      unlinkSync(lockPath);
+    } catch {
+      // lost the race to remove it; fall through to the retry below anyway
+    }
+    try {
+      writeFileSync(lockPath, String(process.pid), { flag: "wx" });
+      return true;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+      return false;
+    }
+  }
+
+  return false;
 }
 
 export function createRunHandler(deps: RunHandlerDeps) {
