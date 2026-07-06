@@ -109,6 +109,7 @@ describe("collectLoops", () => {
     const loop = loops.find((l) => l.slug === "-work-project");
     expect(loop).toEqual({
       slug: "-work-project",
+      name: "-work-project",
       sessionId: "S1",
       status: "complete",
       workUnitsDone: 2,
