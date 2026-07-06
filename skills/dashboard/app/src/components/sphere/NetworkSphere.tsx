@@ -194,14 +194,27 @@ export function NetworkSphere({ reducedMotion, accent, boost }: NetworkSpherePro
     syncLayer(satPointsRef.current, data.satIdx);
     syncLayer(hubPointsRef.current, data.hubIdx);
 
-    // Twinkle on satellite/hub opacity, small oscillation like the reference.
+    // Hub/satellite/plexus colours lerp toward the live accent hue (hubs read hotter/whiter than
+    // satellites, per the mockup's hubColorScratch.lerp(white, 0.55)); opacity gets a small boost
+    // on top of the existing twinkle while a run is in flight.
+    const accentRgb = hslToRgb(accentRef.current.h, accentRef.current.s, accentRef.current.l);
+    sphereColorScratch.setRGB(accentRgb.r / 255, accentRgb.g / 255, accentRgb.b / 255);
+    hubColorScratch.copy(sphereColorScratch).lerp(whiteScratch, 0.55);
+
     if (satPointsRef.current) {
       const mat = satPointsRef.current.material as THREE.PointsMaterial;
-      mat.opacity = 0.55 + Math.sin(t * 3) * 0.04;
+      mat.color.copy(sphereColorScratch);
+      mat.opacity = 0.55 + Math.sin(t * 3) * 0.04 + boost * 0.08;
     }
     if (hubPointsRef.current) {
       const mat = hubPointsRef.current.material as THREE.PointsMaterial;
-      mat.opacity = 0.9 + Math.sin(t * 2.4 + 1) * 0.05;
+      mat.color.copy(hubColorScratch);
+      mat.opacity = 0.9 + Math.sin(t * 2.4 + 1) * 0.05 + boost * 0.08;
+    }
+    if (plexusRef.current) {
+      const mat = plexusRef.current.material as THREE.LineBasicMaterial;
+      mat.color.copy(sphereColorScratch);
+      mat.opacity = 0.5 + boost * 0.15;
     }
 
     plexusFrameCounter.current++;
