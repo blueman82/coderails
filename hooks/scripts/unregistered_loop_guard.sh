@@ -40,9 +40,14 @@
 # message.id -> counts as 1. Sequential loop-style dispatches (one Agent call
 # per turn, across turns) get distinct message.ids -> counts as N. Tool name
 # is "Agent", never "Task", in this harness.
-# Pure: prints an integer, no side effects, no exit calls.
+# Pure: prints an integer, no side effects, no exit calls. Sets global
+# ULG_PARSE_FAILED to 1 if jq itself failed (malformed/corrupt transcript
+# JSON) so callers can log that as a distinct reason from a genuine zero —
+# `jq -s` aborts the whole parse on a single bad line, which would otherwise
+# be silently indistinguishable from "0 dispatches, quiet session."
 ulg_count_dispatch_turns() {
   local transcript="$1"
+  ULG_PARSE_FAILED=0
   [ -n "$transcript" ] && [ -f "$transcript" ] || { printf '0'; return; }
   local n
   n=$(jq -s -r '
@@ -52,7 +57,7 @@ ulg_count_dispatch_turns() {
       | .message.id ]
     | unique
     | length
-  ' "$transcript" 2>/dev/null)
+  ' "$transcript" 2>/dev/null) || ULG_PARSE_FAILED=1
   case "$n" in (''|*[!0-9]*) n=0;; esac
   printf '%s' "$n"
 }
@@ -85,13 +90,20 @@ ulg_has_skill_invocation() {
 # gate exit triggered as a side effect of sourcing.
 if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
   IFS= read -r -d '' -t 5 input || true
-  transcript=$(echo "$input" | jq -r '.transcript_path // empty')
+  transcript=$(echo "$input" | jq -r '.transcript_path // empty' 2>/dev/null)
   session_id=$(als_sanitise_session_id "$(echo "$input" | jq -r '.session_id // "?"' 2>/dev/null)")
   cwd=$(echo "$input" | jq -r '.cwd // empty' 2>/dev/null)
 
-  [ -n "$transcript" ] && [ -f "$transcript" ] || exit 0
+  [ -n "$transcript" ] && [ -f "$transcript" ] || {
+    als_log "hook=unregistered_loop_guard session=$session_id nudged=0 reason=no_transcript"
+    exit 0
+  }
 
   dispatch_turns=$(ulg_count_dispatch_turns "$transcript")
+  if [ "$ULG_PARSE_FAILED" = "1" ]; then
+    als_log "hook=unregistered_loop_guard session=$session_id nudged=0 reason=transcript_parse_failed"
+    exit 0
+  fi
   [ "$dispatch_turns" -ge 3 ] || {
     als_log "hook=unregistered_loop_guard session=$session_id dispatch_turns=$dispatch_turns nudged=0 reason=below_threshold"
     exit 0

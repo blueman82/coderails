@@ -97,6 +97,23 @@ check "tool_use name Task (not Agent) -> count 0" "0" "$n"
 n=$(call_fn ulg_count_dispatch_turns "$TMP/does-not-exist.jsonl")
 check "missing transcript path -> count 0" "0" "$n"
 
+# Malformed transcript: 2 valid dispatch lines + 1 truncated/broken JSON line.
+# jq -s (slurp) aborts the WHOLE parse on a single bad line, so this must be
+# distinguishable from a genuine empty/quiet transcript — ULG_PARSE_FAILED is
+# the signal callers use to log that distinction (see hooks_json main body).
+mk_corrupt_transcript() {
+  local out="$TMP/corrupt_$RANDOM.jsonl"
+  jq -cn --arg id "msg-0" '{"type":"assistant","message":{"id":$id,"content":[{"type":"tool_use","name":"Agent","input":{}}]}}' > "$out"
+  jq -cn --arg id "msg-1" '{"type":"assistant","message":{"id":$id,"content":[{"type":"tool_use","name":"Agent","input":{}}]}}' >> "$out"
+  printf '%s\n' '{"type":"assistant", THIS IS NOT VALID JSON' >> "$out"
+  printf '%s' "$out"
+}
+corrupt_t=$(mk_corrupt_transcript)
+n=$( ( . "$GUARD"; ulg_count_dispatch_turns "$corrupt_t" ) )
+check "malformed transcript JSON -> count 0 (fail-safe default)" "0" "$n"
+parse_failed=$( ( . "$GUARD"; ulg_count_dispatch_turns "$corrupt_t" >/dev/null; printf '%s' "$ULG_PARSE_FAILED" ) )
+check "malformed transcript JSON -> ULG_PARSE_FAILED=1 (distinguishable from genuine 0)" "1" "$parse_failed"
+
 empty_file="$TMP/empty_$RANDOM.jsonl"
 : > "$empty_file"
 n=$(call_fn ulg_count_dispatch_turns "$empty_file")
@@ -200,5 +217,14 @@ rm -rf "$CLAUDE_AGENTIC_LOOP_DIR"
 T=$(mk_dispatch_transcript 3)
 code=$(printf '%s' "$(payload "$T" S1)" | bash "$GUARD" >/dev/null 2>&1; echo $?)
 check "direct-payload stdin smoke (printf, not echo) -> exit 0" "0" "$code"
+
+# End-to-end: malformed transcript JSON -> stays silent (fail-open design),
+# same as any other skip reason, never a crash/hang and never a spurious nudge.
+rm -rf "$CLAUDE_AGENTIC_LOOP_DIR"
+corrupt_e2e=$(mk_corrupt_transcript)
+code=$(run "$(payload "$corrupt_e2e" S1)")
+out=$(run_stdout "$(payload "$corrupt_e2e" S1)")
+check "malformed transcript end-to-end -> exit 0" "0" "$code"
+check "malformed transcript end-to-end -> silent stdout (fail-open, no spurious nudge)" "" "$out"
 
 [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails)"; exit 1; }
