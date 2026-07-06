@@ -30,9 +30,15 @@ export interface ActivityItem {
   notePath: string;
 }
 
+export type PermissionProfile = "read-only" | "standard" | "bypass";
+
 export interface ButtonItem {
   name: string;
   label: string;
+  command: string;
+  cwd: string;
+  profile: PermissionProfile;
+  inputAllowed?: boolean;
 }
 
 export interface CommandCentreSnapshot {
