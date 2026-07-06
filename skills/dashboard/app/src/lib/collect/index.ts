@@ -113,7 +113,7 @@ export function createAggregator(deps: AggregatorDeps): Aggregator {
     }
   }
 
-  function collectActivitySlice(): Pick<Snapshot, "sessions" | "loops" | "trail" | "health"> {
+  function collectActivitySlice(): Pick<Snapshot, "sessions" | "loops" | "trail" | "health" | "queue"> {
     const sessions = sortSessions(safeCall("sessions", () => collectSessions(deps.projectsDir, Date.now()), []));
     const loops = sortLoops(safeCall("loops", () => collectLoops(deps.loopsDir), []));
     const trail = safeCall("trail", () => collectMemoryTrail(deps.cfg.memoryPaths, trailLimit), []);
@@ -121,7 +121,8 @@ export function createAggregator(deps: AggregatorDeps): Aggregator {
     // unavailable; hooksFired/lintFindings are cheap to recompute) — it
     // rides along with the activity slice rather than getting its own timer.
     const health = safeCall("health", () => collectHealth(), []);
-    return { sessions, loops, trail, health };
+    const queue = deps.queueDir ? safeCall("queue", () => collectQueue(deps.queueDir!, queueLimit), []) : [];
+    return { sessions, loops, trail, health, queue };
   }
 
   function refreshActivity(): void {
