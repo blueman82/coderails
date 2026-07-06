@@ -209,6 +209,26 @@ check "merge: identity and fallback fetch-fail messages are DISTINCT" "true" \
 check "merge: permission and fallback fetch-fail messages are DISTINCT" "true" \
   "$([[ "$PERMISSION_MSG" != "$FALLBACK_MSG" ]] && echo true || echo false)"
 
+# ─── Test 3d (Loop 2 WU-B1): PR_TRUST_FETCH_FAIL_REASON=tempfile produces a
+# dedicated message, not the generic "could not fetch PR comments" fallback.
+# tempfile is set by pr::_trusted_comment_bodies_or_fail in git-common.sh
+# when its own `mktemp` call fails — before any gh API call is attempted —
+# so a message naming "PR comments" is misleading; it should name the local
+# mktemp/tmp-file failure instead.
+run_gate_test "deadbeef" 2 tempfile
+rc=$?
+check "merge aborts on tempfile-allocation failure (exit non-zero)" 1 $rc
+check_msg "merge: tempfile-fail message names the tempfile/local cause" "temporary file" "$LAST_STDERR"
+
+run_gate_test "deadbeef" 2 tempfile
+TEMPFILE_MSG="$LAST_STDERR"
+run_gate_test "deadbeef" 2
+FALLBACK_MSG_2="$LAST_STDERR"
+check "merge: tempfile and fallback fetch-fail messages are DISTINCT" "true" \
+  "$([[ "$TEMPFILE_MSG" != "$FALLBACK_MSG_2" ]] && echo true || echo false)"
+check "merge: tempfile and identity fetch-fail messages are DISTINCT" "true" \
+  "$([[ "$TEMPFILE_MSG" != "$IDENTITY_MSG" ]] && echo true || echo false)"
+
 # ─── Test 4: empty sha (pr::head_sha returns empty) → merge aborts ───────────
 run_gate_test "" 1
 rc=$?
