@@ -29,18 +29,42 @@ export interface RunHandlerDeps {
   runsDir?: string;
 }
 
+// hostname, as returned by `new URL(...).hostname`, always has IPv6 brackets
+// stripped ("::1", never "[::1]"). A bare Host header does not, so callers
+// extracting a hostname from Host must strip brackets themselves before
+// comparing against this.
 function isLocalhost(hostname: string): boolean {
   return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
 }
 
-// Any doubt → reject. A missing/unparsable Origin or Host, or one that
-// doesn't resolve to localhost, is rejected — any open browser tab can
+// Host: "[::1]:3000" → "::1" (brackets stripped, port dropped). Host:
+// "127.0.0.1:3000" → "127.0.0.1". A bare IPv6 host with no port and no
+// brackets shouldn't occur in a real Host header, so no special-case for it.
+function hostnameFromHostHeader(host: string): string {
+  if (host.startsWith("[")) {
+    const end = host.indexOf("]");
+    return end === -1 ? host : host.slice(1, end);
+  }
+  return host.split(":")[0];
+}
+
+// Any doubt → reject, with ONE deliberate exception: a request with no
+// Origin header at all (as opposed to one present but invalid) is treated as
+// a non-browser client (curl, a CLI, a same-machine script) rather than
+// rejected — browsers always send Origin on a cross-origin fetch, so the
+// absence of the header is not itself a spoofable signal, and Host is still
+// required and validated. An Origin header that IS present but doesn't
+// resolve to localhost (including the literal string "null", which browsers
+// send for opaque/sandboxed origins) is rejected — any open browser tab can
 // reach 127.0.0.1, so this is the wall against cross-origin/DNS-rebinding
 // requests reaching the run endpoint.
 function isLocalOrigin(request: Request): boolean {
-  const origin = request.headers.get("origin");
   const host = request.headers.get("host");
-  if (!origin || !host) return false;
+  if (!host) return false;
+  if (!isLocalhost(hostnameFromHostHeader(host))) return false;
+
+  const origin = request.headers.get("origin");
+  if (origin === null) return true;
 
   let originHost: string;
   try {
@@ -48,12 +72,7 @@ function isLocalOrigin(request: Request): boolean {
   } catch {
     return false;
   }
-  if (!isLocalhost(originHost)) return false;
-
-  const hostHostname = host.split(":")[0];
-  if (!isLocalhost(hostHostname)) return false;
-
-  return true;
+  return isLocalhost(originHost);
 }
 
 function jsonResponse(status: number, body: unknown): Response {
