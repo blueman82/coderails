@@ -19,6 +19,7 @@ export interface EventsHandlerDeps {
   projectsDir?: string;
   loopsDir?: string;
   runsDir?: string;
+  queueDir?: string;
   gatesPollMs?: number;
   activityDebounceMs?: number;
 }
