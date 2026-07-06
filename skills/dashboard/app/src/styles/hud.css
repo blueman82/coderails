@@ -573,6 +573,15 @@
   .hud-rail {
     overflow: visible;
   }
+  /* .hud-status-line's white-space: nowrap forces the header's flex row to its full
+     min-content width, which under the single-column .hud-stage above becomes that
+     column's width — wide enough to push .hud-cmd-input (width: 100%, in the right
+     rail's 1fr 1fr command grid) past the viewport edge. Wrapping it here removes that
+     forced minimum so the column — and everything inside it — fits. */
+  .hud-status-line {
+    white-space: normal;
+    flex-wrap: wrap;
+  }
   /* HUD callouts (merge-ready / progress) land in later tasks; hidden below the breakpoint
      same as the mockup, kept here so those components inherit the rule once they exist. */
   .hud-callout,
