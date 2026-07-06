@@ -36,17 +36,28 @@ function lintFindingsTile(): HealthTile {
 }
 
 // discipline.log (written by the hooks in ~/.claude/hooks) is plain text,
-// one line per hook invocation: "<timestamp> hook=<name> ... blocked=<0|1>".
-// Counting non-blank lines counts invocations; an unreadable/missing log
-// degrades to unavailable rather than throwing.
-function hooksFiredTile(path: string): HealthTile {
+// one line per hook invocation, each line starting with an ISO-8601
+// timestamp: "<timestamp> hook=<name> ... blocked=<0|1>". The dashboard
+// tile is labelled "hooks fired today", so we count only lines whose
+// leading timestamp falls on the current local calendar day — a line
+// whose leading token doesn't parse as a date is excluded rather than
+// guessed (fail-honest). An unreadable/missing log degrades to
+// unavailable rather than throwing.
+function hooksFiredTile(path: string, now: Date): HealthTile {
   let contents: string;
   try {
     contents = readFileSync(path, "utf-8");
   } catch {
     return { key: "hooksFired", value: null, note: "unavailable: discipline.log not readable" };
   }
-  const count = contents.split("\n").filter((line) => line.trim().length > 0).length;
+  const todayKey = localDayKey(now);
+  const count = contents
+    .split("\n")
+    .filter((line) => line.trim().length > 0)
+    .filter((line) => {
+      const timestamp = new Date(line.slice(0, line.indexOf(" ")));
+      return !Number.isNaN(timestamp.getTime()) && localDayKey(timestamp) === todayKey;
+    }).length;
   return { key: "hooksFired", value: String(count) };
 }
 
@@ -54,5 +65,11 @@ function hooksFiredTile(path: string): HealthTile {
 // value: null with a note when its source is absent or unreadable.
 export function collectHealth(options: CollectHealthOptions = {}): HealthTile[] {
   const disciplineLogPath = options.disciplineLogPath ?? DEFAULT_DISCIPLINE_LOG_PATH;
-  return [usageTile("usage5h"), usageTile("usageWeek"), hooksFiredTile(disciplineLogPath), lintFindingsTile()];
+  const now = options.now ?? new Date();
+  return [
+    usageTile("usage5h"),
+    usageTile("usageWeek"),
+    hooksFiredTile(disciplineLogPath, now),
+    lintFindingsTile(),
+  ];
 }
