@@ -55,7 +55,7 @@ preferred way to set up a new repo.
 
 coderails is self-contained — it ships the dev-workflow skills it needs. `pr-review-toolkit@claude-plugins-official` is still required for the review stage of `/workflow`.
 
-27 skills are bundled across four groups. Full catalog: [`docs/REFERENCE.md`](./docs/REFERENCE.md).
+28 skills are bundled across four groups. Full catalog: [`docs/REFERENCE.md`](./docs/REFERENCE.md).
 
 **Dev-workflow skills**
 
@@ -84,6 +84,7 @@ coderails is self-contained — it ships the dev-workflow skills it needs. `pr-r
 | `improve-prompt` | Surfaces ambiguities and rewrites underspecified prompts |
 | `planning-sequence` | Pre-Parade → Premortem → Red Team on a plan |
 | `premortem` | Assume failure, reason backwards to causes |
+| `task-evals` | Game-resistant success-eval generation: frozen `evals.json` with negative controls |
 | `using-coderails` | Self-bootstrap: injected at SessionStart, explains coderails to Claude |
 
 **Wiki**

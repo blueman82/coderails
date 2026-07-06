@@ -194,5 +194,6 @@ If `git branch -d` refuses because the branch is not fully merged into local `ma
 ## What this command is NOT
 
 - Not enforcement. Slash commands are advisory — Claude has to choose to invoke them. Mechanical enforcement belongs in `PreToolUse` hooks: `enforce_pr_workflow.sh` blocks `gh pr create` unless `/coderails:push` ran this session, and blocks `gh pr merge` unless `/pr-review-toolkit:review-pr` ran this session.
+- Not where the eval gate lives. `/coderails:task-evals` and `/coderails:post-evals` are invoked from this command (Phase 3, step 6), but the gate itself is enforced by `scripts/merge.sh` inside `/coderails:merge` — a separate enforcement seam from the `PreToolUse` hooks above, not something this command checks.
 - Not a replacement for reading CLAUDE.md. This command encodes the workflow; the authoritative spec for project-specific standards still lives in `projects/<name>/CLAUDE.md`.
 - Not interactive for the branch name. If the user doesn't provide a branch, ask once — don't invent one.
