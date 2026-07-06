@@ -4,6 +4,7 @@ import { readRuns, type RunRecord } from "../runlog";
 import { collectHealth, type HealthTile } from "./health";
 import { collectMemoryTrail, type TrailEntry } from "./memoryTrail";
 import { collectPrGates, type PrGate, type PrGateError } from "./prGates";
+import { collectQueue, type QueueEntry } from "./queue";
 import { collectSessions, collectLoops, type SessionInfo, type LoopInfo } from "./sessions";
 
 export interface Snapshot {
@@ -13,6 +14,7 @@ export interface Snapshot {
   trail: TrailEntry[];
   health: HealthTile[];
   runs: RunRecord[];
+  queue: QueueEntry[];
 }
 
 export interface AggregatorDeps {
@@ -20,8 +22,10 @@ export interface AggregatorDeps {
   projectsDir: string;
   loopsDir: string;
   runsDir?: string;
+  queueDir?: string;
   memoryTrailLimit?: number;
   runsLimit?: number;
+  queueLimit?: number;
   gatesPollMs?: number;
   activityDebounceMs?: number;
   onError?: (source: string, err: unknown) => void;
