@@ -1,6 +1,7 @@
 "use client";
 
-import { useDashboardState, formatDuration, formatHHMM, runResultLabel, isGateError } from "@/hooks/useDashboardState";
+import { useDashboardContext } from "@/components/DashboardProvider";
+import { formatDuration, formatHHMM, runResultLabel, isGateError } from "@/hooks/useDashboardState";
 
 // Buttons stay static labels — Task 9d wires the run/click lifecycle onto these.
 const COMMANDS = [
