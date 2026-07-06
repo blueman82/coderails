@@ -1,0 +1,192 @@
+import { execFile as execFileReal } from "node:child_process";
+import { randomBytes } from "node:crypto";
+import {
+  existsSync,
+  mkdirSync,
+  statSync,
+  writeFileSync,
+  unlinkSync,
+  appendFileSync,
+} from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
+import { buildArgv } from "../../../lib/argv";
+import { loadConfig, type DashboardConfig } from "../../../lib/config";
+import { appendRun, mintToken, type RunRecord } from "../../../lib/runlog";
+
+const STALE_LOCK_MS = 24 * 60 * 60 * 1000;
+const DEFAULT_LOCKS_DIR = join(homedir(), ".claude", "coderails-dashboard", "locks");
+const DEFAULT_RUNS_DIR = join(homedir(), ".claude", "coderails-dashboard", "runs");
+
+// Matches ExecFile's callback-style signature closely enough for this route
+// (and its tests) to treat a real node:child_process.execFile and a fake
+// identically: (command, args, options, callback) => ChildProcess-like.
+type ExecFileFn = (
+  command: string,
+  args: readonly string[],
+  options: { cwd: string },
+  callback: (error: Error | null, stdout: string, stderr: string) => void
+) => unknown;
+
+export interface RunHandlerDeps {
+  config: DashboardConfig;
+  token: string;
+  execFileImpl?: ExecFileFn;
+  locksDir?: string;
+  runsDir?: string;
+}
+
+function isLocalhost(hostname: string): boolean {
+  return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
+}
+
+// Any doubt → reject. A missing/unparsable Origin or Host, or one that
+// doesn't resolve to localhost, is rejected — any open browser tab can
+// reach 127.0.0.1, so this is the wall against cross-origin/DNS-rebinding
+// requests reaching the run endpoint.
+function isLocalOrigin(request: Request): boolean {
+  const origin = request.headers.get("origin");
+  const host = request.headers.get("host");
+  if (!origin || !host) return false;
+
+  let originHost: string;
+  try {
+    originHost = new URL(origin).hostname;
+  } catch {
+    return false;
+  }
+  if (!isLocalhost(originHost)) return false;
+
+  const hostHostname = host.split(":")[0];
+  if (!isLocalhost(hostHostname)) return false;
+
+  return true;
+}
+
+function jsonResponse(status: number, body: unknown): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "content-type": "application/json" },
+  });
+}
+
+function lockPathFor(locksDir: string, button: string): string {
+  return join(locksDir, `${button}.lock`);
+}
+
+// A lock file older than 24h is treated as abandoned (e.g. left behind by a
+// crashed server) and ignored rather than blocking new runs forever.
+function isLockHeld(lockPath: string): boolean {
+  let stat;
+  try {
+    stat = statSync(lockPath);
+  } catch {
+    return false;
+  }
+  const ageMs = Date.now() - stat.mtimeMs;
+  return ageMs < STALE_LOCK_MS;
+}
+
+export function createRunHandler(deps: RunHandlerDeps) {
+  const execFileImpl = deps.execFileImpl ?? (execFileReal as unknown as ExecFileFn);
+  const locksDir = deps.locksDir ?? DEFAULT_LOCKS_DIR;
+  const runsDir = deps.runsDir ?? DEFAULT_RUNS_DIR;
+
+  return async function POST(request: Request): Promise<Response> {
+    if (!isLocalOrigin(request)) {
+      return jsonResponse(403, { error: "forbidden" });
+    }
+
+    let payload: { token?: unknown; button?: unknown; input?: unknown };
+    try {
+      payload = (await request.json()) as typeof payload;
+    } catch {
+      return jsonResponse(400, { error: "invalid JSON body" });
+    }
+
+    if (typeof payload.token !== "string" || payload.token !== deps.token) {
+      return jsonResponse(401, { error: "unauthorized" });
+    }
+
+    if (typeof payload.button !== "string") {
+      return jsonResponse(404, { error: "unknown button" });
+    }
+    const button = deps.config.buttons.find((b) => b.name === payload.button);
+    if (!button) {
+      return jsonResponse(404, { error: "unknown button" });
+    }
+
+    const input = payload.input;
+    if (input !== undefined) {
+      if (typeof input !== "string" || !button.inputAllowed) {
+        return jsonResponse(400, { error: "input not allowed for this button" });
+      }
+    }
+
+    mkdirSync(locksDir, { recursive: true });
+    const lockPath = lockPathFor(locksDir, button.name);
+    if (isLockHeld(lockPath)) {
+      return jsonResponse(409, { error: "already running" });
+    }
+    writeFileSync(lockPath, String(process.pid));
+
+    const runId = randomBytes(8).toString("hex");
+    mkdirSync(runsDir, { recursive: true });
+    const outputPath = join(runsDir, `${runId}.log`);
+    const argv = buildArgv(button, typeof input === "string" ? input : undefined);
+    const startedAt = Date.now();
+
+    const startRecord: RunRecord = {
+      runId,
+      button: button.name,
+      argv,
+      cwd: button.cwd,
+      profile: button.profile,
+      startedAt,
+      outputPath,
+    };
+    appendRun(startRecord, { runsDir });
+
+    await new Promise<void>((resolve) => {
+      execFileImpl("claude", argv, { cwd: button.cwd }, (error, stdout, stderr) => {
+        appendFileSync(outputPath, stdout + stderr);
+        const exitCode = error ? ((error as NodeJS.ErrnoException).code as number) ?? 1 : 0;
+        appendRun(
+          { ...startRecord, endedAt: Date.now(), exitCode: typeof exitCode === "number" ? exitCode : 1 },
+          { runsDir }
+        );
+        try {
+          unlinkSync(lockPath);
+        } catch {
+          // already removed; nothing to clean up
+        }
+        resolve();
+      });
+    });
+
+    return jsonResponse(200, { runId });
+  };
+}
+
+let cachedConfig: DashboardConfig | undefined;
+let cachedToken: string | undefined;
+
+function getConfig(): DashboardConfig {
+  if (!cachedConfig) cachedConfig = loadConfig();
+  return cachedConfig;
+}
+
+function getToken(): string {
+  if (!cachedToken) cachedToken = mintToken();
+  return cachedToken;
+}
+
+// Exported for the server-render page (Task 8/9) to embed the token — never
+// exposed via any API response body.
+export function getRunToken(): string {
+  return getToken();
+}
+
+export async function POST(request: Request): Promise<Response> {
+  return createRunHandler({ config: getConfig(), token: getToken() })(request);
+}
