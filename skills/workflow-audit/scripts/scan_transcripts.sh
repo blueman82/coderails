@@ -110,11 +110,12 @@ JQ_FILTER='
         tool: .name,
         head: (
           if .name == "Bash" then
-            ((.input.command // "") | [splits("\\s+")] | map(select(length > 0)) | .[0:2] | join(" "))
+            ((.input.command // "") | if type == "string" then . else "" end
+             | [splits("\\s+")] | map(select(length > 0)) | .[0:2] | join(" "))
           elif .name == "Skill" then
-            (.input.skill // "")
+            (.input.skill // "" | if type == "string" then . else "" end)
           elif .name == "Agent" then
-            (.input.subagent_type // "")
+            (.input.subagent_type // "" | if type == "string" then . else "" end)
           else
             null
           end
@@ -127,17 +128,53 @@ LATEST_TS_FILTER='
   [ .[]? | select(.type == "assistant" or .type == "user") | .timestamp? // empty ] | max // ""
 '
 
+# Parse each line independently via `fromjson? // empty` (jq -R -n, reading raw
+# lines): a single corrupt line becomes `empty` and is dropped rather than
+# failing the whole file's `jq -s` slurp, so one bad line no longer discards
+# every valid event in the session. valid_records() emits the parsed records
+# as a JSON array on stdout; a corrupt line is detected by comparing the
+# parsed-line count against the file's non-blank line count.
+valid_records() {
+  local file="$1"
+  jq -R -n '[ inputs | fromjson? // empty ]' "$file" 2>/dev/null
+}
+
+has_corrupt_line() {
+  local file="$1" parsed_count="$2"
+  local raw_count
+  raw_count=$(grep -c . "$file" 2>/dev/null)
+  case "$raw_count" in (''|*[!0-9]*) raw_count=0;; esac
+  [ "$parsed_count" -lt "$raw_count" ]
+}
+
 latest_timestamp() {
   local file="$1"
-  jq -s -r "$LATEST_TS_FILTER" "$file" 2>/dev/null
+  local records; records=$(valid_records "$file")
+  if [ -z "$records" ]; then
+    printf 'jq_parse_error:%s\n' "$file" >&2
+    printf ''
+    return 1
+  fi
+  jq -r "$LATEST_TS_FILTER" <<<"$records" 2>/dev/null
 }
 
 emit_session() {
   local file="$1" session_id="$2" slug="$3"
+  local records
+  records=$(valid_records "$file")
+  if [ -z "$records" ]; then
+    printf 'jq_parse_error:%s\n' "$file" >&2
+    return 1
+  fi
+  local parsed_count; parsed_count=$(jq -r 'length' <<<"$records" 2>/dev/null)
+  case "$parsed_count" in (''|*[!0-9]*) parsed_count=0;; esac
+  if has_corrupt_line "$file" "$parsed_count"; then
+    printf 'jq_parse_error:%s\n' "$file" >&2
+  fi
   local events_json
-  events_json=$(jq -s -c "$JQ_FILTER" "$file" 2>/dev/null)
+  events_json=$(jq -c "$JQ_FILTER" <<<"$records" 2>/dev/null)
   local jq_rc=$?
-  if [ "$jq_rc" -ne 0 ] || [ -z "$events_json" ]; then
+  if [ "$jq_rc" -ne 0 ]; then
     printf 'jq_parse_error:%s\n' "$file" >&2
     return 1
   fi

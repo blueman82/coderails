@@ -67,6 +67,26 @@ cp "$FIXTURES/fixture-small.jsonl" "$TMP/proj-clean/55555555-5555-5555-5555-5555
 CLEAN_ERR=$(WORKFLOW_AUDIT_ROOT="$TMP" bash "$SCRIPT" --project proj-clean --days 36500 2>&1 >/dev/null)
 check_not_contains "clean fixture -> no jq_parse_error (negative control)" "$CLEAN_ERR" "jq_parse_error:"
 
+# A corrupt trailing line must still surface jq_parse_error while the valid
+# events earlier in the SAME file are not discarded (per-line isolation, not
+# whole-file slurp failure).
+CORRUPT_OUT=$(WORKFLOW_AUDIT_ROOT="$TMP" bash "$SCRIPT" --project proj-corrupt --days 36500 2>/dev/null)
+check "corrupt trailing line -> valid events from same file still emitted" "4" "$(printf '%s' "$CORRUPT_OUT" | jq -r '.event_count')"
+
+# ── 5b. Non-string head fields (crafted/malformed records) never leak raw JSON
+#     to stdout — regression guard for the privacy-boundary type-coercion fix.
+mkdir -p "$TMP/proj-nonstring"
+NONSTRING_FILE="$TMP/proj-nonstring/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa.jsonl"
+{
+  printf '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"Skill","input":{"skill":{"secret":"should_not_leak"}}}]},"timestamp":"2026-07-05T00:00:00Z"}\n'
+  printf '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"Agent","input":{"subagent_type":["leaked","tokens"]}}]},"timestamp":"2026-07-05T00:00:01Z"}\n'
+  printf '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"Bash","input":{"command":{"nested":"should_not_leak_either"}}}]},"timestamp":"2026-07-05T00:00:02Z"}\n'
+} > "$NONSTRING_FILE"
+NONSTRING_OUT=$(WORKFLOW_AUDIT_ROOT="$TMP" bash "$SCRIPT" --project proj-nonstring --days 36500)
+check_not_contains "non-string Skill input never leaks raw object" "$NONSTRING_OUT" "should_not_leak"
+check_not_contains "non-string Agent input never leaks raw array" "$NONSTRING_OUT" "leaked"
+check_not_contains "non-string Bash command never leaks raw object" "$NONSTRING_OUT" "should_not_leak_either"
+
 # ── 6. --last-sessions ordering uses in-file timestamps, NOT file mtime ─────
 mkdir -p "$TMP/proj-order"
 OLDER="$TMP/proj-order/66666666-6666-6666-6666-666666666666.jsonl"
@@ -88,9 +108,13 @@ OWN_OUT=$(WORKFLOW_AUDIT_ROOT="$TMP" CLAUDE_CODE_SESSION_ID="OWNSESSION" bash "$
 check "own session excluded -> no output for that session" "" "$OWN_OUT"
 check_contains "own session excluded -> stderr names it skipped_own_session" "$OWN_ERR" "skipped_own_session:"
 
-# ── 8. --project narrowing: proj-edge scan must not include proj-small's session ─
+# ── 8. --project narrowing: proj-edge scan must not include proj-small's session,
+#    AND must still include proj-edge's own session (paired positive assertion —
+#    an unpaired negative-only check would pass vacuously if the filter matched
+#    zero directories).
 NARROW_OUT=$(WORKFLOW_AUDIT_ROOT="$TMP" bash "$SCRIPT" --project proj-edge --days 36500)
 check_not_contains "--project narrowing excludes other projects' sessions" "$NARROW_OUT" "11111111-1111-1111-1111-111111111111"
+check_contains "--project narrowing still includes its own project's session (not vacuous)" "$NARROW_OUT" "22222222-2222-2222-2222-222222222222"
 
 # ── 9. --all-projects (default) scans across all project dirs ───────────────
 ALL_OUT=$(WORKFLOW_AUDIT_ROOT="$TMP" bash "$SCRIPT" --all-projects --days 36500)
