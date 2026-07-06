@@ -1,9 +1,16 @@
 "use client";
+/* eslint-disable react-hooks/immutability --
+   useFrame mutates the material's THREE.Color every frame to re-tint it with the live accent hue
+   — the same documented R3F escape hatch NetworkSphere.tsx disables the rule for. */
 
-import { useMemo } from "react";
+import { useMemo, useRef } from "react";
+import { useFrame } from "@react-three/fiber";
+import * as THREE from "three";
+import { hslToRgb, type AccentHsl } from "@/lib/runHue";
 
 // Static perspective wireframe floor, rose-tinted, filling the lower third and fading toward the
-// horizon under/behind the sphere. Ported from the normative mockup (see NetworkSphere.tsx).
+// horizon under/behind the sphere. Re-tinted with the live accent hue each frame (see
+// NetworkSphere.tsx) so it moves with the rest of the theme during a run.
 const ROSE_HEX = 0xd9909a;
 const GRID_SIZE = 140;
 const GRID_DIV = 28;
@@ -19,15 +26,25 @@ function buildGridVerts(): Float32Array {
   return new Float32Array(verts);
 }
 
-export function GridFloor() {
+export function GridFloor({ accent }: { accent: AccentHsl }) {
   const gridVerts = useMemo(() => buildGridVerts(), []);
+  const materialRef = useRef<THREE.LineBasicMaterial>(null);
+  const accentRef = useRef(accent);
+  accentRef.current = accent;
+
+  useFrame(() => {
+    const mat = materialRef.current;
+    if (!mat) return;
+    const rgb = hslToRgb(accentRef.current.h, accentRef.current.s, accentRef.current.l);
+    mat.color.setRGB(rgb.r / 255, rgb.g / 255, rgb.b / 255);
+  });
 
   return (
     <lineSegments position={[0, -13, 0]}>
       <bufferGeometry>
         <bufferAttribute attach="attributes-position" args={[gridVerts, 3]} />
       </bufferGeometry>
-      <lineBasicMaterial color={ROSE_HEX} transparent opacity={0.45} />
+      <lineBasicMaterial ref={materialRef} color={ROSE_HEX} transparent opacity={0.45} />
     </lineSegments>
   );
 }
