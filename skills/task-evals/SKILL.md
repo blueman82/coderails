@@ -11,6 +11,14 @@ How to turn any non-trivial task into a frozen, tiered set of independent, game-
 
 coderails verifies everywhere, but always self-verifies. `writing-plans` gives every task verify-criteria written by the same process that then implements against them. `agentic-loop` Phase 3/3a workers verify their own artifact; Phase 4b reviews code quality, not goal attainment; Phase 13 self-audits process counters, explicitly unscored. The `/merge` gate requires a SHA-bound review artifact — evidence that review happened, not that the task's goal state was reached. The one place coderails-adjacent work has had genuinely game-resistant acceptance evals is the hand-written public-readiness suite (E0–E10): negative controls, end-state assertions against fresh surfaces, independent GO/NO-GO gating, evals defined independently of task self-verification. This skill generalises that pattern. A model that wants to "pass" today writes its own verify-criteria, runs them itself, and grades itself — three conflicts of interest stacked. This skill exists to break that stack.
 
+## Prerequisite: gather context before generating evals
+
+Before drafting a single eval, gather target context — wiki first, codebase only where the wiki doesn't cover it. The project wiki is cheaper to read and often already states the goal state, prior decisions, and known gotchas that a codebase read would have to re-derive. Fall back to the codebase only for what the wiki leaves uncovered.
+
+This read is dispatched to a sonnet agent, not done inline — the same reasoning as the verifier agent contract below: keeping the context-gathering step off the main thread keeps the orchestrator's context clean and makes the read auditable as a discrete, reportable step. The agent returns distilled findings, not raw file dumps.
+
+This is a context-gathering prerequisite, not a verification step — it does not substitute for, and must not be conflated with, the gameability self-check or the five anti-gaming rules below.
+
 ## The five anti-gaming rules
 
 Every eval this skill generates must satisfy all five. These are generation requirements, not descriptions of an ideal — an eval that fails one of them is not a valid eval.
