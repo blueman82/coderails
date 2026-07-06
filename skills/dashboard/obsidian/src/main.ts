@@ -128,7 +128,17 @@ export default class CommandCentrePlugin extends Plugin {
       writeIntentFile: (path, data) => writeFileSync(join(DASHBOARD_DIR, path), data),
       findUnresolvedRun: (button) => this.findUnresolvedRun(button),
       createRunNote: async (path, content) => {
-        await vault.create(path, content);
+        // dashboard-runs/<date>-<button>.md is stable per button per day (per
+        // the brief) — a second resolved run for the same button on the same
+        // day overwrites rather than colliding on vault.create's throw-if-
+        // exists. findUnresolvedRun already blocks a second *concurrent*
+        // press, so this only ever fires after the prior run resolved.
+        const existing = vault.getAbstractFileByPath(path);
+        if (existing instanceof TFile) {
+          await vault.modify(existing, content);
+        } else {
+          await vault.create(path, content);
+        }
       },
       modifyRunNote: async (path, content) => {
         const file = vault.getAbstractFileByPath(path);
