@@ -112,6 +112,8 @@ Concrete predicates, not vibes — same design rationale as agentic-loop Phase 2
 - **Tier 1 (standard):** anything above tier 0 that doesn't meet a tier-2 predicate — 3–5 end-state evals, ≥1 negative control, P0/P1 split.
 - **Tier 2 (full suite):** ≥3 work-units (the line Phase 2.7/Phase 3 already draw) OR any irreversible/outward surface (publish, deploy, migration, data deletion, external send). Full suite with pre+post surfaces where applicable and the GO/NO-GO rule stated in the artifact.
 
+`tier_justification` is required at every tier, not only tier 0: at tier 0 it states why the exemption is legitimate; at tier 1/2 it names which predicate fired (e.g. "2 work-units, no irreversible surface" or "≥3 work-units"). The gates refuse a blank justification regardless of tier.
+
 ## Honest boundaries
 
 The gates verify **existence, SHA binding, and structure** — result field is GO, negative-control and evidence fields non-empty where required. They cannot verify eval *quality* or evidence *honesty*. Same declared boundary as `loop_state_guard` ("presence + ownership, not content") and `check_verify_loop.sh`. Mitigations are structural (freeze + amendments log + neutral result computation + hook-visible negative-control fields) and social (Phase 13 reports amendments and tier-0 exemptions unscored for the human to judge). A determined model can still write weak evals; what it can no longer do is skip, silently edit, or self-grade them.
