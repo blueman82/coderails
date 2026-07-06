@@ -263,6 +263,13 @@
   display: block;
 }
 
+/* ---------- Shared empty state ---------- */
+.hud-empty-state {
+  font-size: 10.5px;
+  color: var(--grey-dim);
+  font-style: italic;
+}
+
 /* ---------- Directives (checklist) ---------- */
 .hud-directive-item {
   display: flex;
