@@ -1,7 +1,4 @@
 "use client";
-/* eslint-disable react-hooks/set-state-in-effect --
-   The elapsed/progress-fraction tick is a genuinely time-driven value (performance.now() each
-   100ms) with no pure-render equivalent — same exception class as useRunLifecycle's accent tick. */
 
 import { useEffect, useState } from "react";
 import { useDraggableCallout } from "@/hooks/useDraggableCallout";
