@@ -116,6 +116,7 @@ coderails is self-contained — it ships the dev-workflow skills it needs. `pr-r
 | `Stop` + `SubagentStop` | `check_verify_loop.sh` | **block** — any untagged `## Did Not Verify` bullet (only an explicit `(unverifiable: <reason>)` tag passes); on `SubagentStop` reads `last_assistant_message` directly |
 | `Stop` | `loop_state_guard.sh` | **block** — agentic loop active but no session-owned progress.json |
 | `Stop` | `loop_stall_guard.sh` | **block** — loop incomplete with no valid LOOP-STOP declaration |
+| `Stop` | `unregistered_loop_guard.sh` | **nudge** — dispatch-heavy session (≥3 Agent-dispatch turns) with no progress.json and no agentic-loop Skill invocation; never blocks |
 | `PreToolUse` (Bash) | `destructive_bash_gate.sh` | **block** — permanent blocklist: `rm -rf`, `git push --force`, `git reset --hard`, SQL DROP/TRUNCATE, `dd if=`, `mkfs.*`, `chmod -R 777`, `git commit --no-verify`, `git clean -f/--force`, `find -delete`, `truncate -s/--size`, `shred`; also blocks in-Bash source-file edits (redirects, `sed -i`, `tee`, `cp`/`mv` to source extensions) when on main/master |
 | `PreToolUse` (Bash) | `enforce_pr_workflow.sh` | **block** — `gh pr create` without `/coderails:push`; `gh pr merge <N>` without `/pr-review-toolkit:review-pr <N>` (per-PR, consume-on-use); `git merge` or `git push` to main/master without `review-pr`; scans subagent transcripts |
 | `PreToolUse` (Bash) | `test_gate.sh` | **block** on `git commit` if tests fail — opt-in per repo |
