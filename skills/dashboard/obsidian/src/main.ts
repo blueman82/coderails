@@ -9,6 +9,7 @@ import type { ActivityItem, ButtonItem, CommandCentreSnapshot, Metrics } from ".
 import { parseDashboardConfig } from "./config";
 import { pressButton } from "./exec";
 import type { ExecDeps, UnresolvedRun } from "./exec";
+import { writeRunNote } from "./notes";
 // styles.css lives at the plugin root (not imported here) — Obsidian loads
 // a plugin's styles.css automatically alongside main.js and manifest.json.
 
