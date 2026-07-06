@@ -160,16 +160,19 @@ n=$(call_fn ulg_has_skill_invocation "$(mk_other_transcript)")
 check "transcript with only non-loop Skill call -> 0" "0" "$n"
 
 # PR A follow-up: ulg_has_skill_invocation delegates to als_count_invocations
-# (lib/loop_state_common.sh), which now logs a distinguishable reason on jq
-# failure. This one-shot consumer has its own justifying comment (see its
-# definition above) and does not itself branch on the reason — it just needs
-# to keep returning "0" unchanged (fail-open, same as before) while the log
-# still picks up the delegated call's reason=jq_parse_error line.
+# (lib/loop_state_common.sh), which on jq failure signals a reason tag on
+# STDERR (never logs directly — see its own comment: only als_stable_invocations,
+# the retrying wrapper, decides whether/how to log, to avoid the ambiguous
+# double-log / lost-recovery bug that per-attempt direct logging caused). This
+# one-shot consumer calls als_count_invocations directly, not through the
+# retry wrapper, so it must keep returning "0" unchanged (fail-open, same as
+# before) AND must NOT produce a discipline-log line itself — matching its
+# prior (pre-hardening) behavior of being silent on a parse failure.
 : > "$CLAUDE_DISCIPLINE_LOG"
 n=$(call_fn ulg_has_skill_invocation "$corrupt_t")
 check "malformed transcript -> ulg_has_skill_invocation still returns 0 unchanged" "0" "$n"
-check "malformed transcript -> discipline log picks up delegated reason=jq_parse_error" 1 \
-  "$(grep -c 'reason=jq_parse_error' "$CLAUDE_DISCIPLINE_LOG" 2>/dev/null || echo 0)"
+check "malformed transcript, one-shot delegate call -> discipline log NOT touched" 0 \
+  "$(grep -c 'reason=jq_parse_error' "$CLAUDE_DISCIPLINE_LOG" 2>/dev/null; true)"
 
 # =====================================================================
 # Task 3 — end-to-end gate: threshold, registration, nudge delivery
