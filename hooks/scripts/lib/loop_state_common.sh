@@ -145,15 +145,21 @@ als_read_work_units() {
 }
 
 # Read the loop-scope evals verdict from a sibling evals.json into global
-# ALS_LOOP_EVALS_RESULT: GO | TIER0 | NO-GO | ABSENT. ABSENT covers no file,
-# malformed JSON, or a non-"loop" scope (a stray pr-scope file must never
-# satisfy the loop gate). Sibling to als_read_work_units for the same reason.
+# ALS_LOOP_EVALS_RESULT: GO | TIER0 | NO-GO | UNJUSTIFIED | ABSENT. ABSENT
+# covers no file, malformed JSON, or a non-"loop" scope (a stray pr-scope file
+# must never satisfy the loop gate). Sibling to als_read_work_units for the
+# same reason.
 #
 # tier_justification is required at every tier (owner directive), mirroring
 # post_evals::validate_structure check 2 — eval_artifact::compute_go (the
 # only place .result is derived) never inspects tier_justification, so a
 # blank justification must be caught here or a GO-but-unjustified artifact
-# would silently satisfy the loop gate.
+# would silently satisfy the loop gate. UNJUSTIFIED is distinct from NO-GO so
+# the guard's block message can name the actual defect (missing
+# tier_justification) instead of misattributing it to a failed eval run.
+# Legacy flip: pre-existing GO loop artifacts written before this check
+# existed, and lacking tier_justification, now block (owner directive
+# 2026-07-06) rather than silently passing as before.
 als_read_loop_evals_result() {
   ALS_LOOP_EVALS_RESULT="ABSENT"
   command -v jq >/dev/null 2>&1 || { als_log "hook=loop_state_guard evals=skipped reason=jq_missing"; return 0; }
@@ -166,7 +172,7 @@ als_read_loop_evals_result() {
   result=$(jq -r '.result // ""' "$f" 2>/dev/null)
   tier=$(jq -r '.tier // -1' "$f" 2>/dev/null)
   justification=$(jq -r '.tier_justification // "" | gsub("^\\s+|\\s+$"; "")' "$f" 2>/dev/null)
-  if [ -z "$justification" ]; then ALS_LOOP_EVALS_RESULT="NO-GO"
+  if [ -z "$justification" ]; then ALS_LOOP_EVALS_RESULT="UNJUSTIFIED"
   elif [ "$result" = "GO" ]; then ALS_LOOP_EVALS_RESULT="GO"
   elif [ "$tier" = "0" ]; then ALS_LOOP_EVALS_RESULT="TIER0"
   else ALS_LOOP_EVALS_RESULT="NO-GO"

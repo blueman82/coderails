@@ -46,14 +46,23 @@ jq -n '{scope:"loop", result:"GO", tier:1, tier_justification:"2 work-units, no 
 als_read_loop_evals_result "$d"
 check "scope=loop result=GO justified -> GO" "GO" "$ALS_LOOP_EVALS_RESULT"
 
-# scope loop, result GO, but tier_justification blank -> NO-GO (owner directive:
-# justification required at every tier, even when result already computed GO —
-# eval_artifact::compute_go never inspects tier_justification, so this reader
-# must catch it independently).
+# scope loop, result GO, but tier_justification blank -> UNJUSTIFIED (owner
+# directive: justification required at every tier, even when result already
+# computed GO — eval_artifact::compute_go never inspects tier_justification,
+# so this reader must catch it independently). Distinct from NO-GO so the
+# guard can name the actual defect rather than misattributing it to a failed
+# eval run (reviewer finding FH).
 d=$(mktemp -d "$TMP/loopdir.XXXX")
 jq -n '{scope:"loop", result:"GO", tier:1, tier_justification:""}' > "$d/evals.json"
 als_read_loop_evals_result "$d"
-check "scope=loop result=GO unjustified -> NO-GO" "NO-GO" "$ALS_LOOP_EVALS_RESULT"
+check "scope=loop result=GO unjustified -> UNJUSTIFIED" "UNJUSTIFIED" "$ALS_LOOP_EVALS_RESULT"
+
+# scope loop, result GO, whitespace-only tier_justification -> UNJUSTIFIED
+# (trim must treat whitespace-only as blank, not merely check non-empty-string).
+d=$(mktemp -d "$TMP/loopdir.XXXX")
+jq -n '{scope:"loop", result:"GO", tier:1, tier_justification:"   "}' > "$d/evals.json"
+als_read_loop_evals_result "$d"
+check "scope=loop result=GO whitespace-only justification -> UNJUSTIFIED" "UNJUSTIFIED" "$ALS_LOOP_EVALS_RESULT"
 
 # no evals.json file at all -> ABSENT.
 d=$(mktemp -d "$TMP/loopdir.XXXX")
@@ -66,11 +75,17 @@ jq -n '{scope:"pr", result:"GO"}' > "$d/evals.json"
 als_read_loop_evals_result "$d"
 check "scope=pr (stray pr-scope file) -> ABSENT" "ABSENT" "$ALS_LOOP_EVALS_RESULT"
 
-# scope loop, result NO-GO -> NO-GO.
+# scope loop, result NO-GO, JUSTIFIED -> NO-GO. Justification present so the
+# blank-justification branch does not short-circuit before reaching the
+# reader's final `else NO-GO` — this is the case that actually exercises that
+# branch (reviewer finding TA-I1: the prior bare-NO-GO fixture had no
+# tier_justification field at all, so it was caught by the blank-justification
+# branch and never reached this else, leaving it with zero coverage even
+# though the suite stayed green).
 d=$(mktemp -d "$TMP/loopdir.XXXX")
-jq -n '{scope:"loop", result:"NO-GO"}' > "$d/evals.json"
+jq -n '{scope:"loop", result:"NO-GO", tier:1, tier_justification:"2 work-units, no irreversible surface"}' > "$d/evals.json"
 als_read_loop_evals_result "$d"
-check "scope=loop result=NO-GO -> NO-GO" "NO-GO" "$ALS_LOOP_EVALS_RESULT"
+check "scope=loop result=NO-GO justified -> NO-GO (exercises final else)" "NO-GO" "$ALS_LOOP_EVALS_RESULT"
 
 # scope loop, tier 0, non-empty tier_justification, no result field -> TIER0.
 d=$(mktemp -d "$TMP/loopdir.XXXX")
@@ -78,11 +93,17 @@ jq -n '{scope:"loop", tier:0, tier_justification:"no user-facing behaviour chang
 als_read_loop_evals_result "$d"
 check "scope=loop tier=0 justified -> TIER0" "TIER0" "$ALS_LOOP_EVALS_RESULT"
 
-# scope loop, tier 0, empty tier_justification -> NO-GO (unjustified tier-0 claim does not pass).
+# scope loop, tier 0, empty tier_justification -> UNJUSTIFIED (unjustified tier-0 claim does not pass).
 d=$(mktemp -d "$TMP/loopdir.XXXX")
 jq -n '{scope:"loop", tier:0, tier_justification:""}' > "$d/evals.json"
 als_read_loop_evals_result "$d"
-check "scope=loop tier=0 unjustified (empty justification) -> NO-GO" "NO-GO" "$ALS_LOOP_EVALS_RESULT"
+check "scope=loop tier=0 unjustified (empty justification) -> UNJUSTIFIED" "UNJUSTIFIED" "$ALS_LOOP_EVALS_RESULT"
+
+# scope loop, tier 0, whitespace-only tier_justification -> UNJUSTIFIED.
+d=$(mktemp -d "$TMP/loopdir.XXXX")
+jq -n '{scope:"loop", tier:0, tier_justification:"   "}' > "$d/evals.json"
+als_read_loop_evals_result "$d"
+check "scope=loop tier=0 whitespace-only justification -> UNJUSTIFIED" "UNJUSTIFIED" "$ALS_LOOP_EVALS_RESULT"
 
 # malformed (non-JSON) file -> ABSENT, not NO-GO (no genuine artifact to grade).
 d=$(mktemp -d "$TMP/loopdir.XXXX")
@@ -155,22 +176,34 @@ check "GO evals justified -> allow" 0 "$(run x "$(payload "$T" S1)")"
 
 # evals.json present, scope loop, result GO, but tier_justification blank ->
 # block (exit 2) — owner directive closes the gap where GO alone bypassed
-# the justification requirement.
+# the justification requirement. Reviewer finding FH: the guard now emits a
+# dedicated UNJUSTIFIED message naming tier_justification explicitly, distinct
+# from the "no passing loop-scope evals.json found" NO-GO/ABSENT message.
 reset; T=$(mk_transcript 1); write_file complete S1 1 S1 "$WU3"
 jq -n '{scope:"loop", result:"GO", tier:1, tier_justification:""}' > "$(file_dir S1)/evals.json"
-check "GO evals unjustified -> block (exit 2)" 2 "$(run x "$(payload "$T" S1)")"
+code=$(run x "$(payload "$T" S1)")
+err=$(run_err x "$(payload "$T" S1)")
+check "GO evals unjustified -> block (exit 2)" 2 "$code"
+case "$err" in
+  *"tier_justification"*) : ;;
+  *) fails=$((fails+1)); printf 'FAIL - UNJUSTIFIED stderr missing tier_justification mention: %s\n' "$err" ;;
+esac
 
 # tier-0 exemption: scope loop, tier 0, non-empty tier_justification, no result -> allow.
 reset; T=$(mk_transcript 1); write_file complete S1 1 S1 "$WU3"
 jq -n '{scope:"loop", tier:0, tier_justification:"docs-only loop, no runtime behaviour"}' > "$(file_dir S1)/evals.json"
 check "TIER0 exemption evals -> allow" 0 "$(run x "$(payload "$T" S1)")"
 
-# evals.json present but NO-GO -> block, stderr mentions the loop dir path.
+# evals.json present but NO-GO, JUSTIFIED -> block, stderr mentions the loop
+# dir path. Justification present so this exercises the reader's final `else
+# NO-GO` branch at the e2e level too (reviewer finding TA-I1) — the prior
+# fixture here carried no tier_justification field, so it was caught by the
+# blank-justification branch first and never reached this else.
 reset; T=$(mk_transcript 1); write_file complete S1 1 S1 "$WU3"
-jq -n '{scope:"loop", result:"NO-GO"}' > "$(file_dir S1)/evals.json"
+jq -n '{scope:"loop", result:"NO-GO", tier:1, tier_justification:"2 work-units, no irreversible surface"}' > "$(file_dir S1)/evals.json"
 code=$(run x "$(payload "$T" S1)")
 err=$(run_err x "$(payload "$T" S1)")
-check "NO-GO evals -> block (exit 2)" 2 "$code"
+check "NO-GO evals (justified) -> block (exit 2)" 2 "$code"
 case "$err" in
   *"$(file_dir S1)/evals.json"*) : ;;
   *) fails=$((fails+1)); printf 'FAIL - stderr missing loop dir path: %s\n' "$err" ;;
@@ -221,10 +254,38 @@ case "$err" in
   *) : ;;
 esac
 
-# evals.json with bare {"scope":"loop"} — no result, no tier — -> NO-GO -> block.
+# evals.json with bare {"scope":"loop"} — no result, no tier, no
+# tier_justification key at all -> UNJUSTIFIED (missing key trims to "", same
+# as an explicit blank) -> block.
 reset; T=$(mk_transcript 1); write_file complete S1 1 S1 "$WU3"
 jq -n '{scope:"loop"}' > "$(file_dir S1)/evals.json"
 code=$(run x "$(payload "$T" S1)")
-check "bare {scope:loop} (no result, no tier) -> NO-GO -> block (exit 2)" 2 "$code"
+check "bare {scope:loop} (no result, no tier, no tier_justification key) -> UNJUSTIFIED -> block (exit 2)" 2 "$code"
+
+# als_read_loop_evals_result directly on the bare fixture -> UNJUSTIFIED
+# (missing-key fixture, reader level, per reviewer request).
+d=$(mktemp -d "$TMP/loopdir.XXXX")
+jq -n '{scope:"loop"}' > "$d/evals.json"
+als_read_loop_evals_result "$d"
+check "scope=loop, tier_justification key absent -> UNJUSTIFIED" "UNJUSTIFIED" "$ALS_LOOP_EVALS_RESULT"
+
+# als_read_loop_evals_result on a GO result with tier_justification key absent
+# entirely (not just blank) -> UNJUSTIFIED (per reviewer request).
+d=$(mktemp -d "$TMP/loopdir.XXXX")
+jq -n '{scope:"loop", result:"GO", tier:1}' > "$d/evals.json"
+als_read_loop_evals_result "$d"
+check "scope=loop result=GO, tier_justification key absent -> UNJUSTIFIED" "UNJUSTIFIED" "$ALS_LOOP_EVALS_RESULT"
+
+# e2e: UNJUSTIFIED path via the guard's dedicated case branch (distinct from
+# NO-GO/ABSENT) — reviewer finding FH. Message must name tier_justification.
+reset; T=$(mk_transcript 1); write_file complete S1 1 S1 "$WU3"
+jq -n '{scope:"loop", tier:1, tier_justification:""}' > "$(file_dir S1)/evals.json"
+code=$(run x "$(payload "$T" S1)")
+err=$(run_err x "$(payload "$T" S1)")
+check "UNJUSTIFIED (tier 1, blank justification, no result) -> block (exit 2)" 2 "$code"
+case "$err" in
+  *"tier_justification"*) : ;;
+  *) fails=$((fails+1)); printf 'FAIL - UNJUSTIFIED e2e stderr missing tier_justification mention: %s\n' "$err" ;;
+esac
 
 [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails)"; exit 1; }

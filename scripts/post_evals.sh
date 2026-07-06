@@ -36,7 +36,7 @@ post_evals::validate_structure() {
     local justification
     justification=$(jq -r '.tier_justification // "" | gsub("^\\s+|\\s+$"; "")' "$path")
     if [[ -z "$justification" ]]; then
-        printf 'post_evals: tier %s requires non-empty tier_justification\n' "$tier" >&2
+        printf 'post_evals: tier %s requires a non-blank tier_justification\n' "${tier:-<unset>}" >&2
         return 1
     fi
 

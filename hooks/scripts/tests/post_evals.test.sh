@@ -124,6 +124,52 @@ check "validate_structure: tier 2 whitespace-only tier_justification → exit 1"
 [[ "$stderr_out" == *"tier 2"*"requires"*"tier_justification"* ]]
 check "validate_structure: tier 2 whitespace-only tier_justification → stderr names tier + reason" 0 $?
 
+# tier>=1 with tier_justification KEY ABSENT entirely (not just blank) →
+# refused, same as an explicit blank (reviewer request: missing-key fixture).
+FIX_TIER1_NO_KEY="$TMP/tier1_no_key.json"
+jq -n --arg sha "$SHA" '{
+  tier: 1,
+  head_sha: $sha,
+  evals: [
+    {id:"e1", priority:"P0", mode:"scripted", status:"pass", cmd:"run-a", negative_control:"run-a-broken", evidence:"log"}
+  ]
+}' > "$FIX_TIER1_NO_KEY"
+stderr_out=$(post_evals::validate_structure "$FIX_TIER1_NO_KEY" 42 "$SHA" 2>&1)
+check "validate_structure: tier 1, tier_justification key absent → exit 1" 1 $?
+[[ "$stderr_out" == *"tier 1"*"requires"*"tier_justification"* ]]
+check "validate_structure: tier 1, tier_justification key absent → stderr names tier + reason" 0 $?
+
+# tier key ALSO absent (alongside tier_justification) → the message's tier
+# interpolation must render a placeholder, not a blank "tier  requires...".
+FIX_NO_TIER_NO_JUST="$TMP/no_tier_no_just.json"
+jq -n --arg sha "$SHA" '{
+  head_sha: $sha,
+  evals: []
+}' > "$FIX_NO_TIER_NO_JUST"
+stderr_out=$(post_evals::validate_structure "$FIX_NO_TIER_NO_JUST" 42 "$SHA" 2>&1)
+check "validate_structure: tier key absent, tier_justification key absent → exit 1" 1 $?
+[[ "$stderr_out" == *"tier <unset> requires"*"tier_justification"* ]]
+check "validate_structure: tier key absent → stderr renders <unset> placeholder, not blank" 0 $?
+
+# non-string tier_justification (a number) → jq's gsub errors on a non-string
+# operand ("number (42) cannot be matched, as it is not a string"), so the
+# $(...) capture is empty and check 2's blank-justification branch fires →
+# refused, fail-closed. Pinned here so a future trim rewrite can't silently
+# start accepting non-string values (reviewer request).
+FIX_NUMERIC_JUST="$TMP/numeric_just.json"
+jq -n --arg sha "$SHA" '{
+  tier: 1,
+  tier_justification: 42,
+  head_sha: $sha,
+  evals: [
+    {id:"e1", priority:"P0", mode:"scripted", status:"pass", cmd:"run-a", negative_control:"run-a-broken", evidence:"log"}
+  ]
+}' > "$FIX_NUMERIC_JUST"
+stderr_out=$(post_evals::validate_structure "$FIX_NUMERIC_JUST" 42 "$SHA" 2>&1)
+check "validate_structure: numeric tier_justification (42) → exit 1 (jq type error, fail-closed)" 1 $?
+[[ "$stderr_out" == *"tier 1"*"requires"*"tier_justification"* ]]
+check "validate_structure: numeric tier_justification → stderr names tier + reason" 0 $?
+
 # tier 1 with a real justification string → passes check 2 (falls through to
 # later structural checks, which this fixture also satisfies, so exit 0).
 FIX_TIER1_REAL_JUST="$TMP/tier1_real_just.json"
