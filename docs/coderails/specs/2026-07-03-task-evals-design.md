@@ -59,7 +59,7 @@ The generation method. Invoked at task intake — by agentic-loop at Phase 2.7 (
   "scope": "pr | loop",
   "task_ref": "<branch/PR# for pr scope; session loop ordinal for loop scope>",
   "tier": 0,
-  "tier_justification": "<required when tier is 0>",
+  "tier_justification": "<required at every tier: tier 0 = why the exemption is legitimate; tier 1/2 = which tier predicate fired>",
   "frozen_at": "<ISO8601>",
   "frozen_sha": "<base SHA at freeze>",
   "evals": [
