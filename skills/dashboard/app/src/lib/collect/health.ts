@@ -25,11 +25,27 @@ function localDayKey(date: Date): string {
   return `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
 }
 
-// No local Claude Code usage/rate-limit file exists on disk to read from
-// (investigated: no ~/.claude/usage*, no ccusage-style cache) — ship these
-// tiles permanently unavailable rather than guess or scrape private files.
-function usageTile(key: "usage5h" | "usageWeek"): HealthTile {
+// Compact token count: 1_234_567 -> "1.2M", 412_000 -> "412K", 850 -> "850".
+// One decimal place, trimmed when it would render as ".0".
+function formatTokenCount(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1).replace(/\.0$/, "")}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1).replace(/\.0$/, "")}K`;
+  return String(n);
+}
+
+// projectsDir is unreadable (no local Claude Code session transcripts to
+// derive usage from) — degrade to unavailable rather than guess.
+function unavailableUsageTile(key: "usage5h" | "usageWeek"): HealthTile {
   return { key, value: null, note: "unavailable: no local usage source" };
+}
+
+function usageTile(key: "usage5h" | "usageWeek", totals: UsageTotals | null): HealthTile {
+  if (!totals) return unavailableUsageTile(key);
+  return {
+    key,
+    value: `${formatTokenCount(totals.totalTokens)} tok`,
+    note: `in ${formatTokenCount(totals.inputTokens)} / out ${formatTokenCount(totals.outputTokens)}`,
+  };
 }
 
 // wiki-lint (skills/wiki-lint/SKILL.md) reports findings conversationally and
