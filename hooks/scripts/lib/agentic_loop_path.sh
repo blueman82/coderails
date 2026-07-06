@@ -23,11 +23,22 @@
 #          checkout, since both share one --git-common-dir. Falls back to cwd with
 #          every "/" replaced by "-" (today's plain transform, mirroring Claude
 #          Code's own project-dir convention) when cwd is outside a repo, or on
-#          ANY git failure (non-zero exit, empty output, git binary missing) — this
+#          any git failure OR non-absolute output (non-zero exit, empty output,
+#          git binary missing, or a pre-2.31 git that doesn't recognise
+#          --path-format and echoes it back with a relative path on exit 0 — the
+#          output is validated to actually be an absolute path before use) — this
 #          keying scheme supersedes PR #86's rejected cwd-keying-instability
 #          concern (2026-07-01) now that mid-session EnterWorktree is a prescribed
 #          part of the shared-checkout workflow; see PR body / SKILL.md for the
 #          fuller rationale.
+#
+# Accepted limitation (design invariant, not a bug): this helper is stateless
+# and re-derives the slug from the CURRENT repo state on every call. If a
+# session changes its own cwd's repo-ness mid-loop (e.g. `git init`s an
+# until-then-non-git cwd, or its .git disappears), the slug changes too, and
+# the loop's progress.json state splits across the old and new slugs. This is
+# rare and self-inflicted (a session altering its own repo state mid-loop) —
+# not fixed here; documented so it isn't mistaken for a fresh bug later.
 #
 # Keying on session_id (stable across compaction/restart within one continuous
 # conversation — Claude Code's own $CLAUDE_CODE_SESSION_ID and the Stop-hook
@@ -52,10 +63,29 @@ fi
 # security boundary. Replace (not fresh-fallback) so a malformed id doesn't
 # silently orphan its real session: strip "/" (no extra path segment / no
 # traversal into a sibling dir) and collapse ".." (no traversal upward).
+# ACCEPTED TRADEOFF: this transform is lossy — e.g. "foo/bar" and "foo_bar"
+# both sanitise to "foo_bar" — so two distinct raw ids can collide. Given
+# session_id is harness-owned, this residual collision is accepted rather
+# than adding a re-uniquifying suffix, which would defeat the "replace, don't
+# orphan" goal by making a malformed id's sanitised form unpredictable/unstable
+# across calls. Keep this transform in lockstep with the duplicate copy in
+# als_sanitise_session_id (hooks/scripts/lib/loop_state_common.sh) — this file
+# stays dependency-free (no `source` of that lib) by design, so the two-line
+# transform is intentionally duplicated, not unified; update both on any change.
 session_id=$(printf '%s' "$session_id" | tr '/' '_')
 session_id=$(printf '%s' "$session_id" | sed 's/\.\.//g')
 base="${CLAUDE_AGENTIC_LOOP_DIR:-$HOME/.claude/agentic-loop}"
 git_common_dir=$(command -v git >/dev/null 2>&1 && git -C "$cwd" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)
+# A git older than 2.31 doesn't recognise --path-format and echoes it back
+# verbatim alongside a RELATIVE .git path, exiting 0 (not a failure by exit
+# code) — trusting any non-empty stdout would collapse every repo on such a
+# host onto one garbage slug. Require the captured value to actually be an
+# absolute path; anything else (garbage, relative, empty) falls through to
+# the cwd-slug fallback below, same as an outright git failure.
+case "$git_common_dir" in
+  /*) ;;
+  *) git_common_dir="" ;;
+esac
 if [ -n "$git_common_dir" ]; then
   slug=$(printf '%s' "$git_common_dir" | sed 's#/#-#g')
 else

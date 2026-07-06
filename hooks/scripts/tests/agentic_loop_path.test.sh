@@ -181,4 +181,47 @@ else
   printf 'FAIL - %s\n      actual: %s\n' "session_id with .. -> collapsed, no path traversal" "$p_dotdot"; fails=$((fails+1))
 fi
 
+# 15. Garbage-git-output-on-exit-0 -> cwd fallback. Real trigger: git <2.31
+#     doesn't recognise --path-format and echoes it back verbatim alongside a
+#     RELATIVE .git path, exiting 0 — every repo on an old-git host would
+#     collapse onto one garbage slug if the helper trusted any non-empty
+#     stdout. A fake `git` here reproduces that shape (relative, non-absolute
+#     output, exit 0) to prove the helper validates the output is an absolute
+#     path before using it, not just that git exited zero.
+FAKE_GIT_GARBAGE_DIR="$FIXTURE_TMP/fake-git-garbage-bin"
+mkdir -p "$FAKE_GIT_GARBAGE_DIR"
+printf '#!/bin/bash\necho "--path-format=absolute .git"\nexit 0\n' > "$FAKE_GIT_GARBAGE_DIR/git"
+chmod +x "$FAKE_GIT_GARBAGE_DIR/git"
+garbage_expected="/tmp/al/$(printf '%s' "$CLONE_A" | sed 's#/#-#g')/S1/progress.json"
+check "git prints non-absolute garbage on exit 0 -> cwd-slug fallback (not garbage slug)" \
+  "$garbage_expected" \
+  "$(CLAUDE_AGENTIC_LOOP_DIR=/tmp/al PATH="$FAKE_GIT_GARBAGE_DIR:$PATH" bash "$HELPER" "$CLONE_A" S1)"
+
+# 16. cwd-with-spaces pin: today's behavior already handles a cwd containing
+#     spaces correctly (quoting throughout); lock it so a future change can't
+#     silently regress word-splitting on an unquoted expansion.
+SPACEY="$FIXTURE_TMP/has spaces/dir"
+mkdir -p "$SPACEY"
+spacey_expected="/tmp/al/$(printf '%s' "$SPACEY" | sed 's#/#-#g')/S1/progress.json"
+check "cwd containing spaces -> resolves correctly (pinned)" \
+  "$spacey_expected" \
+  "$(CLAUDE_AGENTIC_LOOP_DIR=/tmp/al bash "$HELPER" "$SPACEY" S1)"
+
+# 17. Sanitisation collision, documented/pinned: "foo/bar" and "foo_bar" both
+#     sanitise to the same value (accepted tradeoff — session_id is
+#     harness-owned, not attacker-controlled, and replacement was chosen over
+#     fresh-fallback specifically to avoid orphaning a malformed id's real
+#     session; a residual collision between two DIFFERENT malformed/plain ids
+#     is a known, accepted cost of that choice, not a regression).
+p_collide_slash=$(CLAUDE_AGENTIC_LOOP_DIR=/tmp/al bash "$HELPER" "$NONGIT" "foo/bar")
+p_collide_plain=$(CLAUDE_AGENTIC_LOOP_DIR=/tmp/al bash "$HELPER" "$NONGIT" "foo_bar")
+if [ "$p_collide_slash" = "$p_collide_plain" ]; then
+  printf 'ok   - %s\n' "sanitisation collision foo/bar == foo_bar (KNOWN/ACCEPTED, not a regression)"
+else
+  printf 'FAIL - %s\n      foo/bar -> %s\n      foo_bar -> %s\n' \
+    "sanitisation collision foo/bar == foo_bar (expected collision, behavior changed)" \
+    "$p_collide_slash" "$p_collide_plain"
+  fails=$((fails+1))
+fi
+
 [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails)"; exit 1; }
