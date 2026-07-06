@@ -391,7 +391,12 @@ var CommandCentrePlugin = class extends import_obsidian.Plugin {
       writeIntentFile: (path, data) => (0, import_node_fs.writeFileSync)((0, import_node_path.join)(DASHBOARD_DIR, path), data),
       findUnresolvedRun: (button) => this.findUnresolvedRun(button),
       createRunNote: async (path, content) => {
-        await vault.create(path, content);
+        const existing = vault.getAbstractFileByPath(path);
+        if (existing instanceof import_obsidian.TFile) {
+          await vault.modify(existing, content);
+        } else {
+          await vault.create(path, content);
+        }
       },
       modifyRunNote: async (path, content) => {
         const file = vault.getAbstractFileByPath(path);
