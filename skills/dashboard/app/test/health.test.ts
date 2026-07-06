@@ -40,24 +40,63 @@ afterEach(() => {
 
 describe("collectHealth", () => {
   it("always returns exactly the four documented tile keys", async () => {
-    const tiles = await collectHealth({ disciplineLogPath: join(tmpdir(), "does-not-exist.log") });
+    const tiles = await collectHealth({
+      disciplineLogPath: join(tmpdir(), "does-not-exist.log"),
+      projectsDir: MISSING_PROJECTS_DIR,
+    });
     expect(tiles.map((t) => t.key).sort()).toEqual(
       ["hooksFired", "lintFindings", "usage5h", "usageWeek"].sort()
     );
   });
 
-  it("reports usage5h as permanently unavailable (no reliable local source)", async () => {
-    const tiles = await collectHealth({ disciplineLogPath: join(tmpdir(), "does-not-exist.log") });
+  it("reports usage5h as unavailable when the projects dir has no local transcripts", async () => {
+    const tiles = await collectHealth({
+      disciplineLogPath: join(tmpdir(), "does-not-exist.log"),
+      projectsDir: MISSING_PROJECTS_DIR,
+    });
     const tile = tiles.find((t) => t.key === "usage5h");
     expect(tile?.value).toBeNull();
     expect(tile?.note).toMatch(/^unavailable: /);
   });
 
-  it("reports usageWeek as permanently unavailable (no reliable local source)", async () => {
-    const tiles = await collectHealth({ disciplineLogPath: join(tmpdir(), "does-not-exist.log") });
+  it("reports usageWeek as unavailable when the projects dir has no local transcripts", async () => {
+    const tiles = await collectHealth({
+      disciplineLogPath: join(tmpdir(), "does-not-exist.log"),
+      projectsDir: MISSING_PROJECTS_DIR,
+    });
     const tile = tiles.find((t) => t.key === "usageWeek");
     expect(tile?.value).toBeNull();
     expect(tile?.note).toMatch(/^unavailable: /);
+  });
+
+  it("reports usage5h with a compact token count and in/out split from real transcripts", async () => {
+    const now = new Date("2026-07-06T18:00:00Z");
+    const projectsDir = makeTmpProjectsDir([
+      assistantLine("msg_1", "2026-07-06T17:00:00.000Z", 400_000, 12_000),
+    ]);
+    const tiles = await collectHealth({
+      disciplineLogPath: join(tmpdir(), "does-not-exist.log"),
+      projectsDir,
+      now,
+    });
+    const tile = tiles.find((t) => t.key === "usage5h");
+    expect(tile?.value).toBe("412K tok");
+    expect(tile?.note).toBe("in 400K / out 12K");
+  });
+
+  it("reports usageWeek summed independently of the 5h window", async () => {
+    const now = new Date("2026-07-06T18:00:00Z");
+    const sixDaysAgo = new Date(now.getTime() - 6 * 24 * 60 * 60_000).toISOString();
+    const projectsDir = makeTmpProjectsDir([assistantLine("msg_1", sixDaysAgo, 1_000_000, 500_000)]);
+    const tiles = await collectHealth({
+      disciplineLogPath: join(tmpdir(), "does-not-exist.log"),
+      projectsDir,
+      now,
+    });
+    const usage5h = tiles.find((t) => t.key === "usage5h");
+    const usageWeek = tiles.find((t) => t.key === "usageWeek");
+    expect(usage5h?.value).toBeNull();
+    expect(usageWeek?.value).toBe("1.5M tok");
   });
 
   it("reports lintFindings as permanently unavailable (no persisted wiki-lint report file)", async () => {
