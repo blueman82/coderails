@@ -225,6 +225,11 @@
   color: var(--cc-grey-mid);
 }
 
+.cc-chip-running {
+  color: var(--cc-amber);
+  border-color: var(--cc-amber-dim);
+}
+
 .cc-activity-text {
   flex: 1;
   min-width: 0;
