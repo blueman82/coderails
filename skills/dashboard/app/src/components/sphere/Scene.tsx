@@ -68,7 +68,7 @@ export function Scene() {
   if (webglOK === null) return null;
 
   if (!webglOK) {
-    return <Fallback2D reducedMotion={reducedMotion} />;
+    return <Fallback2D reducedMotion={reducedMotion} accent={accent} />;
   }
 
   return (
@@ -81,7 +81,7 @@ export function Scene() {
       }}
       frameloop={reducedMotion ? "demand" : "always"}
     >
-      <NetworkSphere reducedMotion={reducedMotion} />
+      <NetworkSphere reducedMotion={reducedMotion} accent={accent} boost={boost} />
       <GridFloor />
       {!reducedMotion && (
         <EffectComposer>
