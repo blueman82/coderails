@@ -98,7 +98,16 @@ function recomputePlexus(positions: Float32Array, geometry: THREE.BufferGeometry
   geometry.setAttribute("position", new THREE.BufferAttribute(new Float32Array(verts), 3));
 }
 
-export function NetworkSphere({ reducedMotion }: { reducedMotion: boolean }) {
+export interface NetworkSphereProps {
+  reducedMotion: boolean;
+  // Live accent hue + eased 0..1 run-progress driver from useRunLifecycle, threaded down from
+  // Scene so the sphere's colour and motion intensity move in lockstep with the rest of the
+  // theme's --accent-h/-s/-l CSS vars — the mockup's single tickAccent() drives both.
+  accent: AccentHsl;
+  boost: number;
+}
+
+export function NetworkSphere({ reducedMotion, accent, boost }: NetworkSphereProps) {
   const { camera } = useThree();
   const groupRef = useRef<THREE.Group>(null);
   const satPointsRef = useRef<THREE.Points>(null);
@@ -112,6 +121,13 @@ export function NetworkSphere({ reducedMotion }: { reducedMotion: boolean }) {
   const plexusFrameCounter = useRef(0);
   const mouse = useRef({ x: 0, y: 0 });
   const smoothed = useRef({ x: 0, y: 0 });
+  const accentRef = useRef(accent);
+  const boostRef = useRef(boost);
+  accentRef.current = accent;
+  boostRef.current = boost;
+  const sphereColorScratch = useMemo(() => new THREE.Color(), []);
+  const hubColorScratch = useMemo(() => new THREE.Color(), []);
+  const whiteScratch = useMemo(() => new THREE.Color(0xffffff), []);
 
   // Camera starts where the mockup places it; parallax nudges from here.
   useEffect(() => {
