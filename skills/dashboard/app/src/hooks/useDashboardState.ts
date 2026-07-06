@@ -46,6 +46,7 @@ const EMPTY_SNAPSHOT: DashboardSnapshot = {
   trail: [],
   health: [],
   runs: [],
+  queue: [],
 };
 
 export const initialDashboardState: DashboardState = {
