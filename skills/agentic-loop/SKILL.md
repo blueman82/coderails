@@ -456,6 +456,8 @@ After any compaction, drift, or "wait, where are we" moment, the orchestrator RE
 
 Never artificially truncate a task or declare "done" mid-loop because of token pressure. If a genuine stop condition (see below) is not met, keep going.
 
+When a work-unit delegates to `subagent-driven-development`, that skill's own `sdd-ledger.md` lives as a sibling file in this same session-keyed directory alongside `progress.json`, written by its own workspace helper rather than by this skill.
+
 ## Stop conditions for the loop
 
 Stop conditions come in two classes. The agent must not collapse them into one — a gate is not a wall.
