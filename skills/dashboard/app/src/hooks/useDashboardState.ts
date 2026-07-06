@@ -172,7 +172,6 @@ export function useDashboardState(options: UseDashboardStateOptions = {}): Dashb
   // createSource/url (a caller swapping the SSE endpoint mid-life is not a
   // supported scenario — this hook always points at the one dashboard
   // stream for the component's lifetime).
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     const makeSource = createSource ?? ((u: string) => new EventSource(u) as unknown as EventSourceLike);
     const source = makeSource(url);
