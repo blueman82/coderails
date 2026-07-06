@@ -91,30 +91,15 @@ function recomputePlexus(positions: Float32Array, geometry: THREE.BufferGeometry
   geometry.setAttribute("position", new THREE.BufferAttribute(new Float32Array(verts), 3));
 }
 
-function buildGridVerts(): Float32Array {
-  const gridSize = 140;
-  const gridDiv = 28;
-  const half = gridSize / 2;
-  const verts: number[] = [];
-  for (let g = 0; g <= gridDiv; g++) {
-    const p = -half + (gridSize / gridDiv) * g;
-    verts.push(-half, 0, p, half, 0, p);
-    verts.push(p, 0, -half, p, 0, half);
-  }
-  return new Float32Array(verts);
-}
-
 export function NetworkSphere({ reducedMotion }: { reducedMotion: boolean }) {
   const { camera } = useThree();
   const groupRef = useRef<THREE.Group>(null);
   const satPointsRef = useRef<THREE.Points>(null);
   const hubPointsRef = useRef<THREE.Points>(null);
   const plexusRef = useRef<THREE.LineSegments>(null);
-  const gridRef = useRef<THREE.LineSegments>(null);
 
   const data = useMemo(() => buildSphereData(), []);
   const texture = useMemo(() => makeSpriteTexture(), []);
-  const gridVerts = useMemo(() => buildGridVerts(), []);
 
   const positionsRef = useRef(data.positions.slice());
   const plexusFrameCounter = useRef(0);
