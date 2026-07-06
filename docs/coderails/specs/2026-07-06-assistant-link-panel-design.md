@@ -212,25 +212,62 @@ speculatively.
   reserves a labelled empty slot ("Routines — not yet configured") with no
   data source wired, to be filled in in sub-project 2's own spec/plan cycle.
 
-## Deferred work: Approve/Deny button
+## Deferred work: Approve/Deny button (historical — now built, see reconciliation)
 
 The dashboard-side button that flips a `QueueFileEntry.status` from
-`pending` to `approved`/`denied` is explicitly deferred until coderails PR #25
-(the dashboard's initial observability build) merges — confirmed merged as
-of this writing (`378004e`, "Merge pull request #25 from
-blueman82/observability/spec", an ancestor of `origin/main`'s current head
-`d8fbdec`). Deferred here means: not built by this PR. A
-follow-up PR, scoped separately, adds the button component, wires it to
-`collectQueue`'s output, and performs the in-place JSON rewrite of the
-target `<hash>.json` file's `status` field. That follow-up is out of scope
-for sub-project 4 and is not tracked as an open task in this spec — it
-should be picked up as its own dashboard-side work item when the dashboard's
-own roadmap reaches it.
+`pending` to `approved`/`denied` was originally deferred until coderails PR
+#25 (the dashboard's initial observability build) merged — confirmed merged
+as of this writing (`378004e`, "Merge pull request #25 from
+blueman82/observability/spec", an ancestor of `origin/main`'s then-current
+head `d8fbdec`). **This deferral has since been resolved**: coderails PR #31
+built the button, the collector, and the panel component — see
+[Post-freeze reconciliation](#post-freeze-reconciliation-2026-07-06).
 
-## Non-goals
+## Non-goals (as originally scoped by this PR — see reconciliation for what a later PR added)
 
-- No dashboard code, component, or collector is implemented by this PR.
-- No change to `skills/dashboard/` of any kind.
-- No retroactive change to WU2's gate implementation — this document adapts
-  to WU2's shipped shape only if the owner re-resolves a mismatch; it does
-  not get silently rewritten to match drift.
+- No dashboard code, component, or collector was implemented by *this* PR
+  (#28). A later PR (#31) implemented all three — this section is retained
+  to record the original scope boundary, not as a current statement of what
+  exists in the repo.
+- No change to `skills/dashboard/` was made by this PR.
+- No retroactive change to WU2's gate implementation was needed — WU2's
+  shipped shape matched this document exactly (see the normativity note's
+  outcome above).
+
+## Post-freeze reconciliation (2026-07-06)
+
+This document was written and merged (PR #28) before either side of the
+contract existed in code. Both sides landed shortly after, on the same day:
+
+- **Queue-writer side** (`~/Github/assistant-agent`): `gate/surfaces/queue.ts`,
+  merged via assistant-agent PR #4 (`e492f745`). `QueueFileEntry` matches this
+  document's shape exactly — confirmed by wu2-gate directly and by reading
+  the merged file.
+- **Queue-reader + button side** (`~/Github/coderails`, `skills/dashboard/`):
+  merged via coderails PR #31 (`feat/wu5-approve-button`, head `6fa5e34`).
+  Files added: `skills/dashboard/app/src/lib/collect/queue.ts` (the
+  `collectQueue` collector — matches the [Proposed collector shape](#proposed-collector-shape)
+  above closely, with one addition this doc didn't specify: `parseQueueEntry`
+  validates each field's type and rejects/skips entries with a renamed field
+  or an out-of-vocabulary `status` rather than accepting anything
+  JSON-shaped — a stricter, and better, reading of this doc's "never throws"
+  requirement than the doc itself spelled out), `collect/queueActions.ts`,
+  `components/AssistantLinkPanel.tsx` (the button + queue-slice UI, citing
+  this document directly in its own code comments), and an `/api/queue`
+  route handling the approve/deny POST. `AssistantLinkPanel.tsx` explicitly
+  scopes itself to panel item 3 (sends + approvals log / the pending-queue
+  slice) only — items 1, 2, and 4 (tasks, email-last-checked, routine-runs)
+  remain unbuilt, exactly as this document specified they should stay until
+  their own dependencies land.
+
+**What this means for a future reader:** the "normative," "proposed,"
+"unbuilt," and "deferred" language throughout the sections above described
+reality accurately at merge time (2026-07-06, PR #28) but does not describe
+the repo as it stands after this reconciliation. Where this reconciliation
+section and an earlier section conflict on current build status, this
+section wins. The earlier sections are kept unedited (beyond inline
+pointers to this one) because their design rationale — why the shape looks
+the way it does, why certain fields were left unspecified, why certain panel
+items were deliberately not schema'd ahead of their real data source — is
+still the accurate record of *why*, even where *whether it's built yet* has
+moved on.
