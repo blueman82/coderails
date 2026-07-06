@@ -248,8 +248,9 @@ export function RailRight({ token, buttons }: RailRightProps) {
         ) : (
           <div className="hud-empty-state">no open PRs</div>
         )}
-        <div className="hud-reserved-row">Assistant.Link · Reserved — Sub-Project 4</div>
       </div>
+
+      <AssistantLinkPanel token={token} />
     </section>
   );
 }
