@@ -161,8 +161,8 @@ describe("renderCommandCentre — command grid", () => {
       metrics: null,
       activity: [],
       buttons: [
-        { name: "wiki-lint", label: "WIKI LINT" },
-        { name: "sync-docs", label: "SYNC DOCS" },
+        { name: "wiki-lint", label: "WIKI LINT", command: "/coderails:wiki-lint", cwd: "/repo", profile: "standard" },
+        { name: "sync-docs", label: "SYNC DOCS", command: "/coderails:sync-docs", cwd: "/repo", profile: "read-only" },
       ],
     };
     const el = renderCommandCentre(snapshot);
