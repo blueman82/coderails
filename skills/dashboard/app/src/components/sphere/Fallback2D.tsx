@@ -67,6 +67,8 @@ export function Fallback2D({ reducedMotion, accent }: { reducedMotion: boolean; 
     function drawFrame(rot: number) {
       ctx!.clearRect(0, 0, w, h);
       const proj = pts.map((p) => project(p.theta, p.phi, rot, cx, cy, radius));
+      const rgb = hslToRgb(accentRef.current.h, accentRef.current.s, accentRef.current.l);
+      const accentCss = `${rgb.r},${rgb.g},${rgb.b}`;
 
       // Plexus first (behind dots).
       for (let i = 0; i < proj.length; i++) {
@@ -76,7 +78,7 @@ export function Fallback2D({ reducedMotion, accent }: { reducedMotion: boolean; 
           const dist = Math.sqrt(dx * dx + dy * dy);
           if (dist < LINK_DIST && proj[i].z > -0.3 && proj[j].z > -0.3) {
             const op = (1 - dist / LINK_DIST) * 0.1;
-            ctx!.strokeStyle = `rgba(${ACCENT_RGB},${op.toFixed(3)})`;
+            ctx!.strokeStyle = `rgba(${accentCss},${op.toFixed(3)})`;
             ctx!.lineWidth = 1;
             ctx!.beginPath();
             ctx!.moveTo(proj[i].x, proj[i].y);
@@ -93,7 +95,7 @@ export function Fallback2D({ reducedMotion, accent }: { reducedMotion: boolean; 
         const alpha = (0.25 + depth * 0.6) * twinkle;
         const isRim = depth < 0.4;
         ctx!.beginPath();
-        ctx!.fillStyle = isRim ? `rgba(${ACCENT_RGB},${alpha.toFixed(3)})` : `rgba(243,236,236,${alpha.toFixed(3)})`;
+        ctx!.fillStyle = isRim ? `rgba(${accentCss},${alpha.toFixed(3)})` : `rgba(243,236,236,${alpha.toFixed(3)})`;
         ctx!.arc(pr.x, pr.y, pts[k].r * (0.6 + depth * 0.6), 0, Math.PI * 2);
         ctx!.fill();
       }
