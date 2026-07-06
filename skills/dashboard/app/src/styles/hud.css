@@ -549,6 +549,11 @@
 
 @media (max-width: 1100px) {
   .hud-root {
+    /* .hud-stage below switches to position: absolute + height: auto so it can grow past
+       100vh; that only contributes to *this* element's scrollable overflow (and overflow-y:
+       auto below has something to scroll) if .hud-root is itself the absolute box's
+       containing block — hence position: relative here. */
+    position: relative;
     overflow-y: auto;
   }
   .hud-stage {
