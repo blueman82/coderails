@@ -74,7 +74,7 @@ describe("collectMemoryTrail", () => {
 
   it("sets mtime to the file's actual mtime in ms", () => {
     const dir = makeTmpDir("mtime");
-    const path = writeFileWithAge(dir, "f.md", 5_000, NOW);
+    writeFileWithAge(dir, "f.md", 5_000, NOW);
     const entries = collectMemoryTrail([dir], 10);
     expect(entries[0].mtime).toBe(NOW - 5_000);
   });
