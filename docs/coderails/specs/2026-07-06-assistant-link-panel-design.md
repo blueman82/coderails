@@ -209,8 +209,9 @@ speculatively.
 The dashboard-side button that flips a `QueueFileEntry.status` from
 `pending` to `approved`/`denied` is explicitly deferred until coderails PR #25
 (the dashboard's initial observability build) merges — confirmed merged as
-of this writing (`d8fbdec`, "Merge pull request #20..." on `origin/main`
-includes PR #25's content). Deferred here means: not built by this PR. A
+of this writing (`378004e`, "Merge pull request #25 from
+blueman82/observability/spec", an ancestor of `origin/main`'s current head
+`d8fbdec`). Deferred here means: not built by this PR. A
 follow-up PR, scoped separately, adds the button component, wires it to
 `collectQueue`'s output, and performs the in-place JSON rewrite of the
 target `<hash>.json` file's `status` field. That follow-up is out of scope
