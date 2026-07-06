@@ -70,7 +70,7 @@ GO requires all P0 evals to pass. P1 failures don't block the gate but must be l
   "scope": "pr | loop",
   "task_ref": "<branch/PR# for pr scope; session loop ordinal for loop scope>",
   "tier": 0,
-  "tier_justification": "<required when tier is 0>",
+  "tier_justification": "<required at every tier: tier 0 = why the exemption is legitimate; tier 1/2 = which tier predicate fired>",
   "frozen_at": "<ISO8601>",
   "frozen_sha": "<base SHA at freeze>",
   "evals": [
