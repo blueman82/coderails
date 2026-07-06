@@ -56,6 +56,12 @@ After the plan is written, re-read it against the spec:
 
 Fix issues inline. If a spec requirement has no task, add the task.
 
+## Final eval-gate task
+
+Every plan produced by this skill ends with one final task invoking `/coderails:task-evals` (scope: `pr`) to generate and freeze the plan's end-state success evals, tiered per that skill's predicates. Per-task verify-criteria (already required above) remain as cheap inner-loop checks during implementation — they are NOT a substitute for the plan's eval gate. The plan's *done* is the eval artifact (posted via `/coderails:post-evals`, gating `/merge`), not the last task's verify-criteria passing.
+
+This is the one deliberate exception to the "Task right-sizing" section's rule to fold setup, config, and docs into the task whose deliverable needs them: the eval-gate task is always its own final task, never folded into the last implementation task, because it must run AFTER all other tasks' code exists. Freeze-before-build (in `task-evals`) means the evals themselves are frozen before implementation starts, but the artifact-posting step — grading the frozen evals against the finished implementation — happens at the end.
+
 ## Stress-test before implementation (required)
 
 After the plan passes the self-review gate, put it through `/coderails:planning-sequence` before any implementation begins. The sequence runs three stages against the plan — Pre-Parade (success conditions), Premortem (failure modes), Red Team (adversarial challenge) — surfacing weaknesses while they are still cheap to fix on paper rather than after code is written.

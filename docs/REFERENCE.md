@@ -34,7 +34,7 @@ These skills were written for coderails and are not vendored from elsewhere.
 
 **When it does NOT apply:** Single-PR interactive work — that is `/coderails:workflow`. The agentic loop sits _above_ `/workflow` and uses it as a subroutine.
 
-**Key discipline:** Main context is a pure orchestrator. Every code change (even single-file edits) goes to a spawned Sonnet agent. The orchestrator never implements; it delegates to agents, verifies artifacts, and escalates to `TeamCreate` only for ≥3 sequential PRs or dependency chains.
+**Key discipline:** Main context is a pure orchestrator. Every code change (even single-file edits) goes to a spawned Sonnet agent. The orchestrator never implements; it delegates to agents, verifies artifacts, and escalates to a spawned team only for ≥3 sequential PRs or dependency chains.
 
 **Dependencies:** Reads and writes `progress.json` (ephemeral loop state — path computed by `hooks/scripts/lib/agentic_loop_path.sh`, never manually). Invokes `coderails:writing-plans`, `coderails:premortem`, `coderails:brainstorming`, `coderails:handoff` as sub-skills. Interacts with `loop_state_guard` and `loop_stall_guard` Stop hooks.
 
@@ -73,6 +73,16 @@ These skills were written for coderails and are not vendored from elsewhere.
 **Purpose:** Improve a prompt before execution by surfacing ambiguities, filling gaps with reasonable assumptions, and rewriting it for clarity and precision.
 
 **When it triggers:** `/improve-prompt`, "improve this prompt", "what's missing from this prompt", requests to tighten a task description before running it. Also proactively when a prompt is vague, underspecified, or missing success criteria.
+
+---
+
+#### `task-evals`
+
+**Purpose:** Game-resistant success-eval generation. Produces a frozen `evals.json` (scope `pr` or `loop`, tiers 0-2) with negative controls and grader independence, so success is judged against a fixed target instead of hand-waved after the fact.
+
+**When it triggers:** Invoked at agentic-loop Phase 2.7, as `writing-plans`' final task, or directly.
+
+**Dependencies:** Consumed by `scripts/post_evals.sh` (`pr` scope, merge gate) and the `loop_state_guard` hook (`loop` scope gate).
 
 ---
 
@@ -328,7 +338,8 @@ Commands are slash commands invoked by Claude (or the user via `/coderails:<name
 | `/coderails:prep` | Create a safety branch, a feature/bug branch, and optionally a Jira ticket. | `git worktree`, Jira MCP (optional — skips if `config.jira` is null or no Jira MCP); reads `workflow.config.yaml` |
 | `/coderails:push` | Stage, commit, push changes, and create a PR. Runs an engineering-principles pre-flight if `config.engineering_principles_paths` is set. | Shells out to `scripts/push.sh`; requires a GitHub remote; reads `workflow.config.yaml` |
 | `/coderails:post-review` | Post the SHA-bound review artifact as a GitHub PR comment. Validates the review summary structure, then posts a machine-marked comment. The `/merge` gate requires this artifact for the current head SHA — fail-closed. | Shells out to `scripts/post_review.sh`; sources `scripts/lib/review-artifact.sh` inline to build the marker; uses `gh api` (not `gh pr comment`) to capture the returned comment URL; best-effort cache write to `progress.json` if it exists |
-| `/coderails:merge` | Merge an approved PR, switch to main, and pull latest. Requires a coderails review artifact on the PR for the current head SHA before merging. | Shells out to `scripts/merge.sh`; requires GitHub remote; checks PR approval if branch protection is on; fetches live PR comments for the artifact gate |
+| `/coderails:post-evals` | Validate and post the SHA-bound eval-artifact summary as a GitHub PR comment. Consumes the `evals.json` produced by `/coderails:task-evals` for this PR, computes `GO`/`NO-GO` (never hand-written), and posts a machine-marked comment. The `/merge` gate requires this artifact for the current head SHA — fail-closed, additive to the review-artifact gate. | Shells out to `scripts/post_evals.sh`; sources `scripts/lib/eval-artifact.sh` inline to build the marker |
+| `/coderails:merge` | Merge an approved PR, switch to main, and pull latest. Requires a coderails review artifact AND a coderails eval artifact on the PR for the current head SHA before merging. | Shells out to `scripts/merge.sh`; requires GitHub remote; checks PR approval if branch protection is on; fetches live PR comments for both the review-artifact gate and the eval-artifact gate |
 | `/coderails:init` | Scaffold a `workflow.config.yaml` for the current project. Writes to `$(pwd)/.claude/` (resolved by walk-up — see Config resolution). | `git rev-parse`, Write tool; idempotent — confirms before overwriting |
 | `/coderails:test-gate-setup` | Configure the test gate for the current project. Detects the test runner (npm, cargo, pytest, go test, etc.) and writes `.claude/test_command`. | Write tool; opt-in gate for `test_gate.sh` hook |
 | `/coderails:assumptions` | List every assumption currently being made (task, codebase, environment, state), marked `(verified)` or `(inferred)`. Pure inventory — does no other work. | None |

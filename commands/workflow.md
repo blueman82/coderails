@@ -154,6 +154,7 @@ Execute in order — do not pause between these:
    - **Cosmetic/subjective** (skip, note in PR body): style preferences, naming opinions without a concrete defect
 4. Post a ledger comment on the PR summarising what was applied vs. skipped and why.
 5. `/coderails:post-review <PR#>` — post the SHA-bound review artifact on the PR. This converts the ephemeral review output into a durable, machine-verifiable GitHub comment that `/merge` requires before merging. Run this after all findings are applied and the follow-up commit is pushed, so the artifact is stamped against the final head SHA. The chain is: `review-pr → (apply findings) → post-review → (Phase 4 ship-it pause) → /merge`.
+6. Also run `/coderails:task-evals` (if not already generated earlier in the plan per `writing-plans`' final task) then `/coderails:post-evals <PR#>` to post the eval artifact `/merge` additionally requires. This is ADDITIONAL to, and does not satisfy, the `enforce_pr_workflow` hook's `review-pr` requirement — the eval gate lives in `merge.sh`, a separate enforcement seam from the `PreToolUse` hook documented in the "What this command is NOT" section below.
 
 Report the PR URL, review summary, and resolved JIRA key (if applicable).
 
