@@ -60,6 +60,7 @@
   grid-template-rows: auto 1fr auto;
   gap: 0 28px;
   pointer-events: none;
+  min-width: 0;
 }
 .hud-stage a,
 .hud-stage button,
@@ -71,12 +72,27 @@
 .hud-header {
   grid-column: 1 / -1;
   grid-row: 1;
-  display: flex;
+  /* 1fr auto 1fr instead of flex space-between: space-between centres the middle
+     child between whatever the outer two children's content happens to measure —
+     here a wide wordmark+subtitle block vs a narrow clock, which skewed the status
+     line ~264px right of true page-centre. Equal 1fr tracks give the middle column
+     an actual page-centred slot regardless of sibling width — minmax(0, 1fr), not a
+     bare 1fr, because a bare 1fr track's minimum defaults to its content's width
+     (`auto`), and the wordmark's long subtitle is wide enough to blow that "equal
+     share" and skew the centre right back off-page. */
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: flex-start;
-  justify-content: space-between;
   padding-bottom: 18px;
   border-bottom: 1px solid var(--hairline);
   margin-bottom: 22px;
+  min-width: 0;
+}
+.hud-header .hud-status-line {
+  justify-self: center;
+}
+.hud-header .hud-clock-block {
+  justify-self: end;
 }
 .hud-wordmark {
   font-size: 34px;
@@ -353,7 +369,12 @@
   letter-spacing: 0.14em;
   color: var(--grey-dim);
   text-transform: uppercase;
-  white-space: nowrap;
+  /* Dynamic content ("Idle · 0/8 Active · 0 Queued") — nowrap forced it past the fixed
+     300px right rail's edge at every desktop width (the rail's own width doesn't grow
+     with viewport, so `.hud-rule` shrinking to 0 was never enough headroom). Wrapping
+     instead of clipping keeps the count readable rather than silently truncating it. */
+  white-space: normal;
+  min-width: 0;
 }
 .hud-active-cmd-list:empty {
   display: none;
@@ -512,6 +533,12 @@
   text-transform: uppercase;
   margin-bottom: 4px;
 }
+.hud-bc-loop-name {
+  max-width: 90vw;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .hud-bc-units {
   display: flex;
   align-items: baseline;
@@ -541,6 +568,11 @@
 
 @media (max-width: 1100px) {
   .hud-root {
+    /* .hud-stage below switches to position: absolute + height: auto so it can grow past
+       100vh; that only contributes to *this* element's scrollable overflow (and overflow-y:
+       auto below has something to scroll) if .hud-root is itself the absolute box's
+       containing block — hence position: relative here. */
+    position: relative;
     overflow-y: auto;
   }
   .hud-stage {
@@ -565,12 +597,41 @@
   .hud-rail {
     overflow: visible;
   }
+  /* .hud-status-line's white-space: nowrap forces the header's flex row to its full
+     min-content width, which under the single-column .hud-stage above becomes that
+     column's width — wide enough to push .hud-cmd-input (width: 100%, in the right
+     rail's 1fr 1fr command grid) past the viewport edge. Wrapping it here removes that
+     forced minimum so the column — and everything inside it — fits. */
+  .hud-status-line {
+    white-space: normal;
+    flex-wrap: wrap;
+  }
   /* HUD callouts (merge-ready / progress) land in later tasks; hidden below the breakpoint
      same as the mockup, kept here so those components inherit the rule once they exist. */
   .hud-callout,
   .hud-leader,
   .hud-progress {
     display: none;
+  }
+}
+
+/* Short desktop windows: keep the 3-column layout, but stop clipping rail content at the
+   fold — let the page scroll instead of pinning .hud-stage to a fixed 100vh box. The
+   sphere background (.hud-bg-canvas, position: fixed) stays put either way. */
+@media (max-height: 760px) {
+  .hud-root {
+    /* see the max-width: 1100px query's comment on .hud-root — same reason. */
+    position: relative;
+    overflow-y: auto;
+  }
+  .hud-stage {
+    position: absolute;
+    inset: 0 0 auto 0;
+    height: auto;
+    min-height: 100vh;
+  }
+  .hud-rail {
+    overflow: visible;
   }
 }
 

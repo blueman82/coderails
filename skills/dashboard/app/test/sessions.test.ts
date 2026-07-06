@@ -109,6 +109,7 @@ describe("collectLoops", () => {
     const loop = loops.find((l) => l.slug === "-work-project");
     expect(loop).toEqual({
       slug: "-work-project",
+      name: "-work-project",
       sessionId: "S1",
       status: "complete",
       workUnitsDone: 2,
@@ -127,6 +128,7 @@ describe("collectLoops", () => {
     const loop = loops.find((l) => l.slug === "-work-project-legacy");
     expect(loop).toEqual({
       slug: "-work-project-legacy",
+      name: "-work-project-legacy",
       sessionId: "S2",
       status: "complete",
       workUnitsDone: 2,
@@ -165,6 +167,56 @@ describe("collectLoops", () => {
       evalsFrozen: false,
       unitTitles: [],
     });
+  });
+
+  it("uses progress.json's loop field as the human-readable name when present", () => {
+    const base = makeTmpBase();
+    const dir = join(base, "-named-project", "S9");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, "progress.json"),
+      JSON.stringify({
+        status: "in-progress",
+        session_id: "S9",
+        loop: "observability-dashboard (sub-project 1 of agentic-os evolution)",
+        work_units: {},
+      })
+    );
+    const loops = collectLoops(base);
+    expect(loops[0].name).toBe("observability-dashboard (sub-project 1 of agentic-os evolution)");
+  });
+
+  it("falls back to the slug for name when progress.json has no loop field", () => {
+    const base = makeTmpBase();
+    const dir = join(base, "-unnamed-project", "S10");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "progress.json"), JSON.stringify({ status: "in-progress", session_id: "S10", work_units: {} }));
+    const loops = collectLoops(base);
+    expect(loops[0].name).toBe("-unnamed-project");
+  });
+
+  it("falls back to the slug for name when progress.json's loop field is blank", () => {
+    const base = makeTmpBase();
+    const dir = join(base, "-blank-loop-project", "S11");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, "progress.json"),
+      JSON.stringify({ status: "in-progress", session_id: "S11", loop: "   ", work_units: {} })
+    );
+    const loops = collectLoops(base);
+    expect(loops[0].name).toBe("-blank-loop-project");
+  });
+
+  it("falls back to the slug for name when progress.json's loop field is not a string", () => {
+    const base = makeTmpBase();
+    const dir = join(base, "-nonstring-loop-project", "S12");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, "progress.json"),
+      JSON.stringify({ status: "in-progress", session_id: "S12", loop: 42, work_units: {} })
+    );
+    const loops = collectLoops(base);
+    expect(loops[0].name).toBe("-nonstring-loop-project");
   });
 
   it("reports evalsFrozen true for a tier-0 exemption verdict", () => {

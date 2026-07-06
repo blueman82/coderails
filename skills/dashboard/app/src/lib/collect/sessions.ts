@@ -9,6 +9,9 @@ export interface SessionInfo {
 
 export interface LoopInfo {
   slug: string;
+  // Human-readable loop name from progress.json's "loop" field; falls back to
+  // `slug` when absent, blank, or non-string (see readLoopName below).
+  name: string;
   sessionId: string;
   status: string;
   workUnitsDone: number;
@@ -107,6 +110,15 @@ function readUnitTitles(workUnits: unknown): { title: string; done: boolean }[] 
   return [];
 }
 
+// progress.json's "loop" field is a free-text human name (e.g. "observability-dashboard
+// (sub-project 1 of agentic-os evolution)"), not present on every loop. Falls back to the
+// dir slug when absent, blank, or not a string.
+function readLoopName(record: Record<string, unknown>, slug: string): string {
+  const loop = record.loop;
+  if (typeof loop === "string" && loop.trim() !== "") return loop;
+  return slug;
+}
+
 // Mirrors als_read_loop_evals_result (hooks/scripts/lib/loop_state_common.sh):
 // GO or a justified TIER0 exemption count as frozen; NO-GO, UNJUSTIFIED,
 // ABSENT, wrong scope, or malformed JSON do not.
@@ -135,6 +147,7 @@ export function collectLoops(baseDir: string): LoopInfo[] {
       const unitTitles = readUnitTitles(record.work_units);
       loops.push({
         slug,
+        name: readLoopName(record, slug),
         sessionId: typeof record.session_id === "string" ? record.session_id : sessionId,
         status: typeof record.status === "string" ? record.status : "",
         workUnitsDone: unitTitles.filter((u) => u.done).length,
