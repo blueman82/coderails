@@ -191,6 +191,7 @@ export function useDashboardState(options: UseDashboardStateOptions = {}): Dashb
     };
 
     return () => source.close();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return state;
