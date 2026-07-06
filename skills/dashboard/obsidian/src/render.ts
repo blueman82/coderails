@@ -149,7 +149,7 @@ function renderActivityFeed(container: HTMLElement, activity: ActivityItem[]): v
     // renderer does not re-sort.
     for (const item of activity) {
       const row = el("div", "cc-activity-row");
-      const chip = el("span", `cc-status-chip ${chipClassFor(item.status)}`, item.status);
+      const chip = el("span", `cc-status-chip ${chipClassFor(item.status)}`, chipTextFor(item.status));
       const text = el("span", "cc-activity-text", item.title);
       const link = el("a", "cc-activity-link", item.notePath);
       link.setAttribute("data-note-path", item.notePath);
