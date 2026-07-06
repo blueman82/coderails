@@ -1,4 +1,9 @@
 "use client";
+/* eslint-disable react-hooks/set-state-in-effect --
+   `tracked` genuinely outlives its trigger: a run must stay tracked (marked resolved) for ~2.6s
+   after it disappears from the SSE-derived `active` list so its resolve flash/fade can play —
+   there is no pure-render derivation of "the previous render's value, kept a while longer",
+   same class of exception as this file's siblings (Header.tsx, RailLeft.tsx, Scene.tsx). */
 
 import { useEffect, useState } from "react";
 import { useDashboardContext } from "@/components/DashboardProvider";
