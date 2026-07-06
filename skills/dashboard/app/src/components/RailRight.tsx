@@ -140,7 +140,7 @@ export function RailRight({ token, buttons }: RailRightProps) {
           <span className="hud-title">Command Deck</span>
           <span className="hud-rule" />
           <span className="hud-deck-status">
-            {engagedCount > 0 ? "Engaged" : "Idle"} · {activeCount}/{buttons.length || 4} Active · 0 Queued
+            {engagedCount > 0 ? "Engaged" : "Idle"} · {activeCount}/{buttons.length || 4} Active · {queuedCount} Queued
           </span>
         </div>
 
