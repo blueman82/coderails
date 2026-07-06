@@ -260,7 +260,7 @@ The largest task; it stays one task because the mockup is a single approved arti
 - [ ] SKILL.md usage: start, stop, port override, config bootstrap note (if config missing, the server starts with an empty config and every panel renders its explicit empty state — first-run is not an error).
 - [ ] `chmod +x` both scripts (repo has an exec-bit invariant test — `hooks/scripts/tests/exec_bit_invariant.test.sh`).
 
-**Verify:** from a shell: `skills/dashboard/scripts/start-dashboard.sh` on a machine state with no `node_modules` reaches a serving dashboard (first-run path); re-run is fast (skips ci/build); `stop-dashboard.sh` kills it; `hooks/scripts/tests/run_all.sh` still passes (exec-bit + no hook regressions).
+**Verify:** from a shell: `skills/dashboard/scripts/start-dashboard.sh` on a machine state with no `node_modules` reaches a serving dashboard (first-run path); re-run is fast (skips ci/build); **offline assertion (spec testing rule): with networking disabled after a completed first install, the dashboard serves fully — every asset local, no CDN request** (DevTools offline mode or `networksetup` toggle); `stop-dashboard.sh` kills it; `hooks/scripts/tests/run_all.sh` still passes (exec-bit + no hook regressions).
 
 ---
 
