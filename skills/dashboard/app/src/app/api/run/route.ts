@@ -29,21 +29,30 @@ export interface RunHandlerDeps {
   runsDir?: string;
 }
 
-// hostname, as returned by `new URL(...).hostname`, always has IPv6 brackets
-// stripped ("::1", never "[::1]"). A bare Host header does not, so callers
-// extracting a hostname from Host must strip brackets themselves before
-// comparing against this.
-function isLocalhost(hostname: string): boolean {
-  return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
+// Strips IPv6 brackets if present: "[::1]" → "::1". Both `new
+// URL(...).hostname` ("http://[::1]:3000" → "[::1]", brackets KEPT — this is
+// not obvious and was the source of a bug: only `URL.host`/`URL.port`
+// separate them, `.hostname` does not) and a raw Host header
+// ("[::1]:3000") carry brackets around an IPv6 literal, so both call this
+// before comparing against isLocalhost.
+function stripIpv6Brackets(hostname: string): string {
+  if (hostname.startsWith("[") && hostname.endsWith("]")) {
+    return hostname.slice(1, -1);
+  }
+  return hostname;
 }
 
-// Host: "[::1]:3000" → "::1" (brackets stripped, port dropped). Host:
-// "127.0.0.1:3000" → "127.0.0.1". A bare IPv6 host with no port and no
-// brackets shouldn't occur in a real Host header, so no special-case for it.
+function isLocalhost(hostname: string): boolean {
+  const stripped = stripIpv6Brackets(hostname);
+  return stripped === "localhost" || stripped === "127.0.0.1" || stripped === "::1";
+}
+
+// Host: "[::1]:3000" → "[::1]" (port dropped, brackets kept — isLocalhost
+// strips them). Host: "127.0.0.1:3000" → "127.0.0.1".
 function hostnameFromHostHeader(host: string): string {
   if (host.startsWith("[")) {
     const end = host.indexOf("]");
-    return end === -1 ? host : host.slice(1, end);
+    return end === -1 ? host : host.slice(0, end + 1);
   }
   return host.split(":")[0];
 }
