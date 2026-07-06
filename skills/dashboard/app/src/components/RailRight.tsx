@@ -131,6 +131,7 @@ export function RailRight({ token, buttons }: RailRightProps) {
 
   const runningNames = buttons.filter((b) => isButtonBusy(b.name)).map((b) => b.label);
   const engagedCount = runningNames.length;
+  const queuedCount = buttons.filter((b) => getUi(b.name).queued && !activeByButton.has(b.name)).length;
 
   return (
     <section className="hud-rail hud-rail-right hud-intro-rail-right">
