@@ -86,6 +86,14 @@ These skills were written for coderails and are not vendored from elsewhere.
 
 ---
 
+#### `dashboard`
+
+**Purpose:** Live local web HUD showing sessions, agentic loops, PR gate states, runs, memory activity, and declared one-click triggers.
+
+**Invocation:** `/coderails:dashboard` or `scripts/start-dashboard.sh`.
+
+---
+
 ### Vendored dev-workflow skills
 
 These are coderails' general development-discipline skills (not coderails-specific workflow) — they ship with the plugin, so no external skill plugin is required.
