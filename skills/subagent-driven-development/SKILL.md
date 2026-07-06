@@ -251,6 +251,10 @@ controllers that lost their place have re-dispatched entire completed task
 sequences — the single most expensive failure observed. Track progress in
 a ledger file, not only in todos.
 
+- The ledger (`sdd-ledger.md`) is task-level truth with commit ranges,
+  controller-owned — a sibling fact to the agentic-loop's own `progress.json`,
+  whose `work_units[id].status` is unit-level truth, orchestrator-owned. Each
+  fact has a single writer; neither file duplicates the other's record.
 - At skill start, check for a ledger: `cat "$(bash skills/subagent-driven-development/scripts/sdd-workspace)/sdd-ledger.md"`. Tasks listed there
   as complete are DONE — do not re-dispatch them; resume at the first task
   not marked complete.
