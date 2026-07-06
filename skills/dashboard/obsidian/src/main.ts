@@ -49,12 +49,9 @@ export default class CommandCentrePlugin extends Plugin {
       async (_source: string, el: HTMLElement, ctx: MarkdownPostProcessorContext) => {
         await this.renderInto(el);
         this.containers.add(el);
-        ctx.addChild({
-          load: () => {},
-          onload: () => {},
-          unload: () => this.containers.delete(el),
-          onunload: () => this.containers.delete(el),
-        } as never);
+        const child = new MarkdownRenderChild(el);
+        child.register(() => this.containers.delete(el));
+        ctx.addChild(child);
       }
     );
 
