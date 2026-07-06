@@ -92,6 +92,15 @@ describe("collectSessions", () => {
     const byProject = Object.fromEntries(sessions.map((s) => [s.project, s.state]));
     expect(byProject).toEqual({ "-fresh-project": "active", "-stalled-project": "stalled" });
   });
+
+  it("excludes dotdirs like .git and .DS_Store from results", () => {
+    const base = makeTmpBase();
+    writeSessionFile(base, "-fresh-project", 0, NOW);
+    writeSessionFile(base, ".git", 0, NOW);
+    writeSessionFile(base, ".DS_Store", 0, NOW);
+    const sessions = collectSessions(base, NOW);
+    expect(sessions.map((s) => s.project)).toEqual(["-fresh-project"]);
+  });
 });
 
 describe("collectLoops", () => {
