@@ -25,6 +25,21 @@ export function useDraggableCallout(anchor: Point, initial: Point): DraggableCal
   const [leader, setLeader] = useState({ left: 0, top: 0, width: 1, height: 1 });
   const dragStart = useRef<{ x: number; y: number; origLeft: number; origTop: number } | null>(null);
 
+  // `anchor`/`initial` are {0,0} on first render (the caller's own window.innerWidth/Height
+  // effect hasn't resolved yet — see HudCallout.tsx/RunProgress.tsx) and `useState(initial)`
+  // only ever reads that first, wrong value: without this, `pos` stays pinned at the
+  // pre-resolution {-260,-10}-ish position forever, rendering the callout permanently
+  // off-screen. Re-seed `pos` from `initial` exactly once, the first time initial stops being
+  // the {0,0}-derived placeholder — never again after that, so a user drag isn't fought.
+  const seededRef = useRef(false);
+  useEffect(() => {
+    if (seededRef.current) return;
+    if (anchor.x === 0 && anchor.y === 0) return; // still the pre-resolution placeholder
+    seededRef.current = true;
+    setPos(initial);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [anchor.x, anchor.y]);
+
   function updateLeader(left: number, top: number) {
     const box = boxRef.current;
     if (!box) return;
