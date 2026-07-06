@@ -202,15 +202,17 @@ export interface RunRecord { runId: string; button: string; argv: string[]; cwd:
   profile: PermissionProfile; startedAt: number; endedAt?: number; exitCode?: number; outputPath: string; }
 export function appendRun(rec: RunRecord): void;   // JSONL at ~/.claude/coderails-dashboard/runs/runs.jsonl
 export function readRuns(limit: number): RunRecord[];
-export function mintToken(): string;                // random per server start; embedded in page; required by /api/run
+export function mintToken(): string;                // random per server start; delivered by SERVER-RENDER into the page ONLY — never via any API response body (see Task 8)
+export function buildArgv(btn: ButtonDef, input?: string): string[]; // src/lib/argv.ts — THE single profile→flag mapping; Task 13 must reuse this mapping, never re-implement it
 ```
 
 **Steps (TDD — these are the security invariants; tests first, no exceptions):**
-- [ ] Failing tests: wrong/missing token → 401 and no spawn; undeclared button name → 404; `input` on a button without `inputAllowed` → 400; second request while running → 409; argv assembly for each profile — `read-only` → `claude -p <command> --allowedTools <read set>`, `standard` → `claude -p <command>`, `bypass` → `claude -p <command> --dangerously-skip-permissions` (exact flag names confirmed against `claude --help` at implementation time and frozen into the test expectations); `input` lands as one argv element, never concatenated; spawn is `execFile`-style (assert the mock received an array, not a string).
-- [ ] Implement route with an in-memory per-button lock, `child_process.execFile('claude', argv, {cwd})`, stdout/stderr captured to `~/.claude/coderails-dashboard/runs/<runId>.log`, JSONL append on start and finish.
+- [ ] Failing tests: wrong/missing token → 401 and no spawn; non-localhost `Origin` or `Host` header → 403 and no spawn (stress-test finding: any open browser tab can reach localhost); undeclared button name → 404; `input` on a button without `inputAllowed` → 400; second request while running → 409; `buildArgv` per profile — `read-only` → `claude -p <command> --allowedTools <read set>`, `standard` → `claude -p <command>`, `bypass` → `claude -p <command> --dangerously-skip-permissions` (flag names verified against `claude --help` 2026-07-06: `--allowedTools`, `--dangerously-skip-permissions` — frozen into test expectations); `input` lands as one argv element, never concatenated; spawn is `execFile`-style (assert the mock received an array, not a string).
+- [ ] Implement `buildArgv` as a standalone pure module (`src/lib/argv.ts`) — it is security-critical and shared with Task 13.
+- [ ] Implement route with a FILE lock per button under `~/.claude/coderails-dashboard/locks/<button>.lock` (stress-test finding: Next.js route handlers may run in separate worker contexts, so a module-level in-memory lock is not a safety guarantee), `child_process.execFile('claude', argv, {cwd})`, stdout/stderr captured to `~/.claude/coderails-dashboard/runs/<runId>.log`, JSONL append on start and finish, lock removed on finish (stale locks older than 24h ignored).
 - [ ] Re-run; commit.
 
-**Verify:** `npm run test -- run` green (≥7 tests); manual: declared test button firing `claude -p '/coderails:assumptions'` in this repo produces a JSONL record and a non-empty output file.
+**Verify:** `npm run test -- run` green (≥9 tests); LIVE (not mocked): two concurrent `curl -X POST /api/run` for the same button → one 200, one 409; `curl` with `Origin: https://evil.example` → 403; declared test button firing `claude -p '/coderails:assumptions'` in this repo produces a JSONL record and a non-empty output file.
 
 ---
 
