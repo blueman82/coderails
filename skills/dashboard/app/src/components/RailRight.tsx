@@ -110,24 +110,17 @@ export function RailRight({ token, buttons }: RailRightProps) {
   // changed again afterward, the effect never got a chance to re-evaluate and correct it).
   // `runs` alone is synchronously consistent with itself, so it's the only signal this needs.
   useEffect(() => {
-    effectFireCount.current += 1;
-    const debugParts: string[] = [];
     setUiState((prev) => {
       let changed = false;
       const next = { ...prev };
       for (const [name, ui] of Object.entries(prev)) {
-        if (!ui.queued) {
-          debugParts.push(`${name}:not-queued`);
-          continue;
-        }
+        if (!ui.queued) continue;
         const stillRelevant = runs.some((r) => r.button === name && r.endedAt === undefined);
-        debugParts.push(`${name}:queued,stillRelevant=${stillRelevant}`);
         if (!stillRelevant) {
           next[name] = { ...ui, queued: false };
           changed = true;
         }
       }
-      lastEffectDebug.current = debugParts.length > 0 ? debugParts.join(";") : "no entries in prev";
       return changed ? next : prev;
     });
   }, [runs]);
