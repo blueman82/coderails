@@ -16,7 +16,7 @@ function formatClockDate(date: Date): string {
 }
 
 export function Header() {
-  const { status, lastUpdate } = useDashboardContext();
+  const { status, lastUpdate, snapshot } = useDashboardContext();
   const [now, setNow] = useState<Date | null>(null);
 
   useEffect(() => {
@@ -30,7 +30,15 @@ export function Header() {
   const dateLabel = now ? formatClockDate(now) : "";
 
   const isOnline = status === "online";
-  const statusLabel = isOnline ? "Kernel · Online — Runner · Alive" : "Kernel · Reconnecting…";
+  // Any run with no endedAt yet is in flight — flips KERNEL · ONLINE to KERNEL · WORKING for the
+  // duration, per Task 9d's spec (mirrors deriveActiveRuns' filter without pulling in the whole
+  // hue/tick machinery just for this boolean).
+  const isWorking = snapshot.runs.some((r) => r.endedAt === undefined);
+  const statusLabel = !isOnline
+    ? "Kernel · Reconnecting…"
+    : isWorking
+      ? "Kernel · Working — Runner · Alive"
+      : "Kernel · Online — Runner · Alive";
   const lastUpdateLabel = lastUpdate ? `Last Update ${formatClockTime(new Date(lastUpdate))}` : null;
 
   return (
