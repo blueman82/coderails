@@ -1,0 +1,61 @@
+import { readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import type { QueueEntry } from "./queue";
+
+export class QueueActionError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "QueueActionError";
+  }
+}
+
+type Decision = "approved" | "denied";
+
+const VALID_DECISIONS: Decision[] = ["approved", "denied"];
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+// The dashboard's Approve/Deny action: the only writer of the
+// approved/denied transition per the queue contract. Reads the single
+// <hash>.json file named by `hash` (never globs the directory — this is
+// what guarantees no bleed-through to a different pending entry), parses
+// it, flips its status field in place, and writes the same file back
+// unchanged otherwise. This is an in-place JSON rewrite, not a separate
+// decision-file mechanism, per the spec's own "Deferred work" language.
+//
+// Throws QueueActionError (never silently succeeds, never defaults to
+// approved) when: the decision value is invalid, the target file doesn't
+// exist or can't be read, or the file's contents aren't valid JSON.
+export function resolveQueueEntry(queueDir: string, hash: string, decision: Decision): void {
+  if (!VALID_DECISIONS.includes(decision)) {
+    throw new QueueActionError(`invalid decision: ${String(decision)}`);
+  }
+
+  const path = join(queueDir, `${hash}.json`);
+
+  let raw: string;
+  try {
+    raw = readFileSync(path, "utf-8");
+  } catch (err) {
+    throw new QueueActionError(`could not read queue file for hash ${hash}: ${String(err)}`);
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (err) {
+    throw new QueueActionError(`queue file for hash ${hash} is not valid JSON: ${String(err)}`);
+  }
+
+  if (!isRecord(parsed)) {
+    throw new QueueActionError(`queue file for hash ${hash} does not contain a JSON object`);
+  }
+
+  const updated: Record<string, unknown> = { ...parsed, status: decision };
+  writeFileSync(path, JSON.stringify(updated));
+}
+
+// Re-exported for consumers that want the shape without importing queue.ts directly.
+export type { QueueEntry };
