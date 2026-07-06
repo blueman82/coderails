@@ -60,6 +60,7 @@
   grid-template-rows: auto 1fr auto;
   gap: 0 28px;
   pointer-events: none;
+  min-width: 0;
 }
 .hud-stage a,
 .hud-stage button,
