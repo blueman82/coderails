@@ -80,7 +80,7 @@ These skills were written for coderails and are not vendored from elsewhere.
 
 **Purpose:** Game-resistant success-eval generation. Produces a frozen `evals.json` (scope `pr` or `loop`, tiers 0-2) with negative controls and grader independence, so success is judged against a fixed target instead of hand-waved after the fact.
 
-**When it triggers:** Invoked at agentic-loop Phase 2.7, as `writing-plans`' final task, or directly.
+**When it triggers:** Invoked at agentic-loop Phase 2.7, at plan completion per `writing-plans` (after stress-test, before implementation dispatch), or directly.
 
 **Dependencies:** Consumed by `scripts/post_evals.sh` (`pr` scope, merge gate) and the `loop_state_guard` hook (`loop` scope gate).
 
