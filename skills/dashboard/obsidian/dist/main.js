@@ -301,6 +301,15 @@ async function pressButton(deps, buttons, name, input) {
   return { ok: true, runId, notePath };
 }
 
+// src/notes.ts
+async function writeRunNote(deps, path, content) {
+  if (deps.exists(path)) {
+    await deps.modify(path, content);
+  } else {
+    await deps.create(path, content);
+  }
+}
+
 // src/main.ts
 var DASHBOARD_RUNS_FOLDER = "dashboard-runs";
 var METRICS_NOTE_PATH = `${DASHBOARD_RUNS_FOLDER}/_metrics.json`;
@@ -391,12 +400,18 @@ var CommandCentrePlugin = class extends import_obsidian.Plugin {
       writeIntentFile: (path, data) => (0, import_node_fs.writeFileSync)((0, import_node_path.join)(DASHBOARD_DIR, path), data),
       findUnresolvedRun: (button) => this.findUnresolvedRun(button),
       createRunNote: async (path, content) => {
-        const existing = vault.getAbstractFileByPath(path);
-        if (existing instanceof import_obsidian.TFile) {
-          await vault.modify(existing, content);
-        } else {
-          await vault.create(path, content);
-        }
+        await writeRunNote(
+          {
+            exists: (p) => vault.getAbstractFileByPath(p) instanceof import_obsidian.TFile,
+            create: (p, c) => vault.create(p, c).then(() => void 0),
+            modify: (p, c) => {
+              const file = vault.getAbstractFileByPath(p);
+              return file instanceof import_obsidian.TFile ? vault.modify(file, c) : Promise.resolve();
+            }
+          },
+          path,
+          content
+        );
       },
       modifyRunNote: async (path, content) => {
         const file = vault.getAbstractFileByPath(path);
