@@ -134,12 +134,18 @@ export default class CommandCentrePlugin extends Plugin {
         // day overwrites rather than colliding on vault.create's throw-if-
         // exists. findUnresolvedRun already blocks a second *concurrent*
         // press, so this only ever fires after the prior run resolved.
-        const existing = vault.getAbstractFileByPath(path);
-        if (existing instanceof TFile) {
-          await vault.modify(existing, content);
-        } else {
-          await vault.create(path, content);
-        }
+        await writeRunNote(
+          {
+            exists: (p) => vault.getAbstractFileByPath(p) instanceof TFile,
+            create: (p, c) => vault.create(p, c).then(() => undefined),
+            modify: (p, c) => {
+              const file = vault.getAbstractFileByPath(p);
+              return file instanceof TFile ? vault.modify(file, c) : Promise.resolve();
+            },
+          },
+          path,
+          content
+        );
       },
       modifyRunNote: async (path, content) => {
         const file = vault.getAbstractFileByPath(path);
