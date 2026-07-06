@@ -4,6 +4,7 @@ import { readRuns, type RunRecord } from "../runlog";
 import { collectHealth, type HealthTile } from "./health";
 import { collectMemoryTrail, type TrailEntry } from "./memoryTrail";
 import { collectPrGates, type PrGate, type PrGateError } from "./prGates";
+import { collectQueue, type QueueEntry } from "./queue";
 import { collectSessions, collectLoops, type SessionInfo, type LoopInfo } from "./sessions";
 
 export interface Snapshot {
@@ -13,6 +14,7 @@ export interface Snapshot {
   trail: TrailEntry[];
   health: HealthTile[];
   runs: RunRecord[];
+  queue: QueueEntry[];
 }
 
 export interface AggregatorDeps {
@@ -20,8 +22,10 @@ export interface AggregatorDeps {
   projectsDir: string;
   loopsDir: string;
   runsDir?: string;
+  queueDir?: string;
   memoryTrailLimit?: number;
   runsLimit?: number;
+  queueLimit?: number;
   gatesPollMs?: number;
   activityDebounceMs?: number;
   onError?: (source: string, err: unknown) => void;
@@ -38,6 +42,7 @@ export interface Aggregator {
 
 const DEFAULT_TRAIL_LIMIT = 20;
 const DEFAULT_RUNS_LIMIT = 20;
+const DEFAULT_QUEUE_LIMIT = 50;
 const DEFAULT_GATES_POLL_MS = 120_000;
 const DEFAULT_ACTIVITY_DEBOUNCE_MS = 2_000;
 
@@ -75,6 +80,7 @@ function sortGates(gates: (PrGate | PrGateError)[]): (PrGate | PrGateError)[] {
 export function createAggregator(deps: AggregatorDeps): Aggregator {
   const trailLimit = deps.memoryTrailLimit ?? DEFAULT_TRAIL_LIMIT;
   const runsLimit = deps.runsLimit ?? DEFAULT_RUNS_LIMIT;
+  const queueLimit = deps.queueLimit ?? DEFAULT_QUEUE_LIMIT;
   const gatesPollMs = deps.gatesPollMs ?? DEFAULT_GATES_POLL_MS;
   const activityDebounceMs = deps.activityDebounceMs ?? DEFAULT_ACTIVITY_DEBOUNCE_MS;
   const onError = deps.onError ?? (() => {});
@@ -91,6 +97,7 @@ export function createAggregator(deps: AggregatorDeps): Aggregator {
     trail: [],
     health: [],
     runs: [],
+    queue: [],
   };
 
   function emit(event: AggregatorEventName, data: unknown): void {
@@ -106,7 +113,7 @@ export function createAggregator(deps: AggregatorDeps): Aggregator {
     }
   }
 
-  function collectActivitySlice(): Pick<Snapshot, "sessions" | "loops" | "trail" | "health"> {
+  function collectActivitySlice(): Pick<Snapshot, "sessions" | "loops" | "trail" | "health" | "queue"> {
     const sessions = sortSessions(safeCall("sessions", () => collectSessions(deps.projectsDir, Date.now()), []));
     const loops = sortLoops(safeCall("loops", () => collectLoops(deps.loopsDir), []));
     const trail = safeCall("trail", () => collectMemoryTrail(deps.cfg.memoryPaths, trailLimit), []);
@@ -114,7 +121,8 @@ export function createAggregator(deps: AggregatorDeps): Aggregator {
     // unavailable; hooksFired/lintFindings are cheap to recompute) — it
     // rides along with the activity slice rather than getting its own timer.
     const health = safeCall("health", () => collectHealth(), []);
-    return { sessions, loops, trail, health };
+    const queue = deps.queueDir ? safeCall("queue", () => collectQueue(deps.queueDir!, queueLimit), []) : [];
+    return { sessions, loops, trail, health, queue };
   }
 
   function refreshActivity(): void {
@@ -178,6 +186,7 @@ export function createAggregator(deps: AggregatorDeps): Aggregator {
       watchDir(deps.loopsDir, scheduleActivityRefresh);
       for (const dir of deps.cfg.memoryPaths) watchDir(dir, scheduleActivityRefresh);
       if (deps.runsDir) watchDir(deps.runsDir, refreshRuns);
+      if (deps.queueDir) watchDir(deps.queueDir, scheduleActivityRefresh);
 
       void refreshGates();
       gatesTimer = setInterval(() => void refreshGates(), gatesPollMs);

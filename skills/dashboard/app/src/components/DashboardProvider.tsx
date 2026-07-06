@@ -11,7 +11,10 @@ import { useDashboardState, initialDashboardState, type DashboardState } from "@
 // provider calls the hook exactly once and hands the single resulting state
 // down via context; leaf components read it with useDashboardContext()
 // instead of calling the hook directly.
-const DashboardContext = createContext<DashboardState>(initialDashboardState);
+// Exported (test-only consumer: test/testUtils/DashboardContextTestProvider.tsx) so a panel
+// component test can supply a fixed snapshot without opening a real EventSource — production
+// code should still go through DashboardProvider/useDashboardContext below, never this directly.
+export const DashboardContext = createContext<DashboardState>(initialDashboardState);
 
 export function DashboardProvider({ children }: { children: ReactNode }) {
   const state = useDashboardState();
