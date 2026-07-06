@@ -110,8 +110,7 @@ describe("collectQueue", () => {
     // Negative control for E2: prove the "does not throw" assertion is meaningful by
     // demonstrating the naive implementation (no try/catch) does throw on a missing dir.
     expect(() => {
-      // eslint-disable-next-line @typescript-eslint/no-var-requires -- intentional raw call to prove the failure mode
-      require("node:fs").readdirSync(join(tmpdir(), "does-not-exist-queue-dir-2"));
+      readdirSync(join(tmpdir(), "does-not-exist-queue-dir-2"));
     }).toThrow();
   });
 
