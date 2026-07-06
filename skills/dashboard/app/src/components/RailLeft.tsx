@@ -1,56 +1,42 @@
+"use client";
+
+import { useState, useEffect } from "react";
 import { Sparkline } from "./Sparkline";
+import { useDashboardState, formatRelativeAge } from "@/hooks/useDashboardState";
+import type { HealthTile } from "@/lib/collect/health";
 
-// Static placeholder data — Task 9b replaces each block's contents with live collector output
-// (System Vitals from health.ts, Directives from sessions.ts, Documents from memoryTrail.ts).
-const KPIS = [
-  {
-    label: "5H Window",
-    delta: "▲ 3.0K /WK",
-    value: "38",
-    unit: "%",
-    spark: [0.2, 0.3, 0.25, 0.4, 0.35, 0.5, 0.42, 0.55, 0.5, 0.6, 0.55, 0.65, 0.6, 0.7, 0.65, 0.75, 0.7, 0.8, 0.75, 0.38],
-  },
-  {
-    label: "Week",
-    delta: "▲ 1.2K /WK",
-    value: "61",
-    unit: "%",
-    spark: [0.4, 0.35, 0.45, 0.5, 0.48, 0.55, 0.5, 0.6, 0.58, 0.65, 0.6, 0.7, 0.68, 0.72, 0.7, 0.78, 0.75, 0.8, 0.78, 0.61],
-  },
-  {
-    label: "Hooks Fired",
-    delta: "▲ 18 /DAY",
-    value: "142",
-    unit: "",
-    spark: [0.3, 0.4, 0.35, 0.45, 0.5, 0.42, 0.55, 0.5, 0.6, 0.55, 0.62, 0.58, 0.65, 0.6, 0.7, 0.68, 0.72, 0.7, 0.75, 0.72],
-  },
-  {
-    label: "Lint Findings",
-    delta: "▼ 2 /WK",
-    value: "3",
-    unit: "",
-    spark: [0.7, 0.65, 0.68, 0.6, 0.55, 0.58, 0.5, 0.45, 0.48, 0.4, 0.35, 0.38, 0.3, 0.32, 0.28, 0.25, 0.22, 0.2, 0.18, 0.15],
-  },
+// Static decoration only — no history source exists yet to derive a real
+// trend from, so every KPI reuses the same placeholder sparkline shape
+// (see Task 9b brief: "do NOT invent one").
+const PLACEHOLDER_SPARK = [
+  0.3, 0.4, 0.35, 0.45, 0.5, 0.42, 0.55, 0.5, 0.6, 0.55, 0.62, 0.58, 0.65, 0.6, 0.7, 0.68, 0.72, 0.7, 0.75, 0.72,
 ];
 
-const DIRECTIVES = [
-  { done: true, text: "Wire task-evals schema into loop intake sequence" },
-  { done: true, text: "Freeze eval tiers for PR gate board integration" },
-  { done: false, text: "Resolve comment-spoofing trust model for eval oracle" },
-  { done: false, text: "Wire merge-gate check against frozen eval artifact" },
-  { done: false, text: "Add dormant-eval detection to wiki-lint pass" },
-  { done: false, text: "Draft skill-eval runner corpus threshold decision" },
-  { done: false, text: "Close out task-evals follow-up loop and archive" },
-];
+const KPI_LABELS: Record<HealthTile["key"], string> = {
+  usage5h: "5H Window",
+  usageWeek: "Week",
+  hooksFired: "Hooks Fired",
+  lintFindings: "Lint Findings",
+};
 
-const DOCS = [
-  { name: "coderails-wiki/architecture/", bold: "task-evals.md", age: "18m" },
-  { name: "memory/", bold: "project_task_evals_feature.md", age: "1h" },
-  { name: "assistant-agent-wiki/", bold: "log.md", age: "3h" },
-  { name: "coderails-wiki/", bold: "index.md", age: "5h" },
-];
+function findTile(health: HealthTile[], key: HealthTile["key"]): HealthTile | undefined {
+  return health.find((t) => t.key === key);
+}
 
 export function RailLeft() {
+  const { snapshot } = useDashboardState();
+  const { health, loops, trail } = snapshot;
+  const [now, setNow] = useState<number | null>(null);
+
+  useEffect(() => {
+    setNow(Date.now());
+    const id = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(id);
+  }, []);
+
+  const kpiKeys: HealthTile["key"][] = ["usage5h", "usageWeek", "hooksFired", "lintFindings"];
+  const loop = loops[0];
+
   return (
     <section className="hud-rail hud-rail-left">
       <div className="hud-block">
@@ -59,37 +45,48 @@ export function RailLeft() {
           <span className="hud-suffix">Usage.Link</span>
           <span className="hud-rule" />
         </div>
-        {KPIS.map((kpi) => (
-          <div className="hud-kpi" key={kpi.label}>
-            <div className="hud-kpi-row">
-              <span className="hud-kpi-label">
-                <span className="hud-bullet" />
-                {kpi.label}
-              </span>
-              <span className="hud-kpi-delta">{kpi.delta}</span>
+        {kpiKeys.map((key) => {
+          const tile = findTile(health, key);
+          return (
+            <div className="hud-kpi" key={key}>
+              <div className="hud-kpi-row">
+                <span className="hud-kpi-label">
+                  <span className="hud-bullet" />
+                  {KPI_LABELS[key]}
+                </span>
+              </div>
+              {tile && tile.value !== null ? (
+                <div className="hud-kpi-value">{tile.value}</div>
+              ) : (
+                <div className="hud-kpi-unavailable">{tile?.note ?? "unavailable"}</div>
+              )}
+              <Sparkline points={PLACEHOLDER_SPARK} />
             </div>
-            <div className="hud-kpi-value">
-              {kpi.value}
-              {kpi.unit && <span className="hud-unit">{kpi.unit}</span>}
-            </div>
-            <Sparkline points={kpi.spark} />
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       <div className="hud-block">
         <div className="hud-sec-head">
           <span className="hud-title">Directives</span>
-          <span className="hud-suffix">Loop.7</span>
+          <span className="hud-suffix">{loop ? `Loop.${loop.workUnitsTotal}` : "Loop.—"}</span>
           <span className="hud-rule" />
         </div>
-        {DIRECTIVES.map((d) => (
-          <div className={`hud-directive-item${d.done ? " done" : ""}`} key={d.text}>
-            <span className="hud-box">{d.done ? "☑" : "☐"}</span>
-            <span>{d.text}</span>
-          </div>
-        ))}
-        <div className="hud-directive-footer">Loop Evals: Frozen ✓</div>
+        {loop ? (
+          <>
+            {loop.unitTitles.map((unit) => (
+              <div className={`hud-directive-item${unit.done ? " done" : ""}`} key={unit.title}>
+                <span className="hud-box">{unit.done ? "☑" : "☐"}</span>
+                <span>{unit.title}</span>
+              </div>
+            ))}
+            <div className="hud-directive-footer">
+              Loop Evals: {loop.evalsFrozen ? "Frozen ✓" : "Not Frozen"}
+            </div>
+          </>
+        ) : (
+          <div className="hud-empty-state">no active loop</div>
+        )}
       </div>
 
       <div className="hud-block">
@@ -98,15 +95,24 @@ export function RailLeft() {
           <span className="hud-suffix">Memory.Trail</span>
           <span className="hud-rule" />
         </div>
-        {DOCS.map((doc) => (
-          <div className="hud-doc-row" key={doc.name + doc.bold}>
-            <span className="hud-doc-name">
-              {doc.name}
-              <b>{doc.bold}</b>
-            </span>
-            <span className="hud-doc-age">{doc.age}</span>
-          </div>
-        ))}
+        {trail.length > 0 ? (
+          trail.map((entry) => {
+            const parts = entry.displayPath.split("/");
+            const bold = parts.pop() ?? entry.displayPath;
+            const name = parts.length > 0 ? parts.join("/") + "/" : "";
+            return (
+              <div className="hud-doc-row" key={entry.path}>
+                <span className="hud-doc-name">
+                  {name}
+                  <b>{bold}</b>
+                </span>
+                <span className="hud-doc-age">{now ? formatRelativeAge(entry.mtime, now) : ""}</span>
+              </div>
+            );
+          })
+        ) : (
+          <div className="hud-empty-state">no memory files found</div>
+        )}
       </div>
 
       <div className="hud-transcript-pill">
