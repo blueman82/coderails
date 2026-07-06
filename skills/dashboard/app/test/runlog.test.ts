@@ -117,3 +117,37 @@ describe("mintToken", () => {
     expect(a).not.toBe(b);
   });
 });
+
+describe("getRunToken", () => {
+  // getRunToken is file-backed (not a plain module-scope variable) because Next.js's app router
+  // compiles Route Handlers and Server Components as separate module graphs/bundler layers — a
+  // shared in-memory singleton ends up as two independently-initialized copies, one per layer
+  // (confirmed empirically: the token embedded in the rendered page never matched what POST
+  // /api/run compared against). These tests exercise the file-backed behaviour directly, each
+  // with its own tmp dir so getRunToken's internal cachedToken (scoped to THIS test's module
+  // instance) doesn't leak a token minted by an earlier test into a later one's fresh directory —
+  // every call here passes an explicit `dir` distinct across it and its dependents, so the
+  // in-process cache never masks a real cross-directory read.
+  it("mints and persists a token to <dir>/run-token on first call", () => {
+    const dir = tmpRunsDir();
+    const token = getRunToken(dir);
+    expect(typeof token).toBe("string");
+    expect(token.length).toBeGreaterThan(0);
+    expect(readFileSync(join(dir, "run-token"), "utf-8").trim()).toBe(token);
+  });
+
+  it("returns the token already on disk rather than minting a new one", () => {
+    const dir = tmpRunsDir();
+    const { writeFileSync, mkdirSync } = require("node:fs") as typeof import("node:fs");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "run-token"), "existing-token-value");
+    expect(getRunToken(dir)).toBe("existing-token-value");
+  });
+
+  it("creates the token dir if it does not exist yet", () => {
+    const dir = join(tmpRunsDir(), "nested", "token-dir");
+    const token = getRunToken(dir);
+    expect(existsSync(join(dir, "run-token"))).toBe(true);
+    expect(readFileSync(join(dir, "run-token"), "utf-8").trim()).toBe(token);
+  });
+});
