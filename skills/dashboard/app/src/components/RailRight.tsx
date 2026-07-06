@@ -55,8 +55,6 @@ export function RailRight({ token, buttons }: RailRightProps) {
   const { runs, gates } = snapshot;
   const { active } = useRunLifecycle(runs);
   const [uiState, setUiState] = useState<Record<string, ButtonUiState>>({});
-  const effectFireCount = useRef(0);
-  const lastEffectDebug = useRef<string>("none yet");
 
   const activeByButton = new Set(active.map((r) => r.button));
   const activeCount = active.length;
