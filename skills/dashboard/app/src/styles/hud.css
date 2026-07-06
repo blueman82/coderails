@@ -512,6 +512,12 @@
   text-transform: uppercase;
   margin-bottom: 4px;
 }
+.hud-bc-loop-name {
+  max-width: 90vw;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .hud-bc-units {
   display: flex;
   align-items: baseline;
