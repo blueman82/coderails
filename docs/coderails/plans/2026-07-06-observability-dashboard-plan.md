@@ -341,7 +341,7 @@ Reference assets for all four: `docs/coderails/specs/assets/2026-07-06-observabi
 
 **Steps (TDD):**
 - [ ] Failing tests: button press writes exactly one intent file with the declared shape; undeclared button never executes (config is the SSOT — same rule as the web deck); a press while that button's previous run is unresolved is rejected.
-- [ ] Implement: press → write intent → (interim, desktop only, until sub-project 2) directly `execFile('claude', argv…)` with the same profile→flag mapping as Task 7, output captured to a new `dashboard-runs/<date>-<button>.md` note with `status:` frontmatter — which makes the activity feed update by construction.
+- [ ] Implement: press → write intent → (interim, desktop only, until sub-project 2) directly `execFile('claude', argv…)` using Task 7's `buildArgv` mapping — bundled into the plugin from the SAME source file at build time (esbuild can import across the repo), or if bundle isolation genuinely forbids that, asserted byte-identical against Task 7's mapping via a shared test fixture. Never hand-re-implemented (stress-test finding: two drifting copies of the `--dangerously-skip-permissions` mapping is how a `standard` button silently becomes a `bypass` one). Output captured to a new `dashboard-runs/<date>-<button>.md` note with `status:` frontmatter — which makes the activity feed update by construction.
 - [ ] Feed row shows hourglass while unresolved, chip flips on completion (re-render on vault file change event).
 - [ ] Re-run; commit.
 
