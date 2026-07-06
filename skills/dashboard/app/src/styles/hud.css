@@ -72,13 +72,24 @@
 .hud-header {
   grid-column: 1 / -1;
   grid-row: 1;
-  display: flex;
+  /* 1fr auto 1fr instead of flex space-between: space-between centres the middle
+     child between whatever the outer two children's content happens to measure —
+     here a wide wordmark+subtitle block vs a narrow clock, which skewed the status
+     line ~264px right of true page-centre. Equal 1fr tracks give the middle column
+     an actual page-centred slot regardless of sibling width. */
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
   align-items: flex-start;
-  justify-content: space-between;
   padding-bottom: 18px;
   border-bottom: 1px solid var(--hairline);
   margin-bottom: 22px;
   min-width: 0;
+}
+.hud-header .hud-status-line {
+  justify-self: center;
+}
+.hud-header .hud-clock-block {
+  justify-self: end;
 }
 .hud-wordmark {
   font-size: 34px;
