@@ -93,16 +93,10 @@ export function RailRight({ token, buttons }: RailRightProps) {
     // so the deck never flickers back to idle between the 200 response and the next SSE frame.
   }
 
-  // Once the SSE-derived active set confirms a button is running, drop its local queued flag —
-  // the real state (activeByButton) takes over as the single source of truth for "is running".
-  for (const name of Object.keys(uiState)) {
-    if (uiState[name].queued && activeByButton.has(name)) {
-      // Deferred to a microtask-free direct mutation would violate React rules; instead this
-      // reconciliation happens lazily below via isButtonBusy(), so no separate effect is needed —
-      // queued is treated as OR'd with activeByButton for display purposes only.
-    }
-  }
-
+  // "Busy" is activeByButton (the SSE-confirmed source of truth) OR the local optimistic `queued`
+  // flag — the flag only matters for the brief window between the POST response and the next SSE
+  // 'runs' frame; once activeByButton confirms it, the flag is redundant but harmless to leave set
+  // (isButtonBusy short-circuits on activeByButton first).
   function isButtonBusy(name: string): boolean {
     return activeByButton.has(name) || getUi(name).queued;
   }
