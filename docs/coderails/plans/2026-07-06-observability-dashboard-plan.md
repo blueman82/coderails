@@ -125,9 +125,14 @@ export function loadConfig(path?: string): DashboardConfig; // throws ConfigErro
 **Interfaces produced (consumed by Task 8):**
 ```ts
 export interface SessionInfo { project: string; lastActivity: number; state: 'active'|'idle'|'stalled'; }
-export interface LoopInfo { slug: string; sessionId: string; workUnitsDone: number; workUnitsTotal: number; evalsFrozen: boolean; unitTitles: {title: string; done: boolean}[]; }
+export interface LoopInfo { slug: string; sessionId: string; status: string; workUnitsDone: number; workUnitsTotal: number; evalsFrozen: boolean; unitTitles: {title: string; done: boolean}[]; }
 export function collectSessions(baseDir: string, now: number): SessionInfo[];   // active <5m, idle <60m, stalled ≥60m
 export function collectLoops(baseDir: string): LoopInfo[];
+// Real schema (verified against hooks/scripts/lib/loop_state_common.sh): progress.json carries
+// .status, .session_id, .completed_marker and .work_units (an OBJECT; total = its length; per-unit
+// done state per the unit entry fields in the real fixtures). The loop-scope evals verdict lives in
+// a SIBLING evals.json next to progress.json — evalsFrozen reads that file, NOT progress.json.
+// Derive fixture content from hooks/scripts/tests/loop_state_guard_evals.test.sh fixtures verbatim.
 ```
 
 **Steps (TDD):**
