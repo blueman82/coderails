@@ -10,6 +10,7 @@ import type { PermissionProfile } from "@/lib/config";
 import { useDashboardContext } from "@/components/DashboardProvider";
 import { useRunLifecycle } from "@/hooks/useRunLifecycle";
 import { formatDuration, formatHHMM, runResultLabel, isGateError } from "@/hooks/useDashboardState";
+import { AssistantLinkPanel } from "@/components/AssistantLinkPanel";
 
 export interface DeckButtonDef {
   name: string;
