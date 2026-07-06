@@ -101,11 +101,18 @@ treat it as machine-local config, same as `.claude/settings.local.json`.
 
 | Commands | Skills | Hooks (automatic) |
 |---|---|---|
-| `/workflow` `/prep` `/push` `/merge` `/coderails:init` | agentic-loop | confidence-label check (Stop) |
-| `/assumptions` `/verify` `/notchecked` `/disconfirm` | planning-sequence | Did-Not-Verify catch-up (UserPromptSubmit) |
-| `/test-gate-setup` | premortem | destructive-bash gate (PreToolUse) |
-| | handoff | project test gate (PreToolUse) |
-| | improve-prompt | |
+| `/workflow` `/prep` `/push` `/merge` `/coderails:init` | **Workflow & evals:** agentic-loop, task-evals | confidence-label check (Stop) |
+| `/post-review` `/post-evals` | **Planning:** planning-sequence, premortem, brainstorming, writing-plans | Did-Not-Verify catch-up (UserPromptSubmit) |
+| `/assumptions` `/verify` `/notchecked` `/disconfirm` | **Dev discipline:** test-driven-development, systematic-debugging, engineering-principles (+ go/python/ts variants), verification-before-completion | destructive-bash gate (PreToolUse) |
+| `/test-gate-setup` | **Multi-agent:** dispatching-parallel-agents, subagent-driven-development, executing-plans, finishing-a-development-branch | project test gate (PreToolUse) |
+| | **Wiki:** wiki-init, wiki-query, wiki-ingest, wiki-lint | |
+| | **Review & handoff:** requesting-code-review, receiving-code-review, handoff, improve-prompt, using-git-worktrees, using-coderails, writing-skills | |
+
+28 skills ship in total (`ls skills/` in the plugin dir to see the full list) —
+the table above groups them by function rather than enumerating every one.
+`/post-review` and `/post-evals` post SHA-bound review/eval-artifact summaries
+as durable PR comments; `task-evals` freezes a game-resistant success-eval set
+at task intake and gates `/merge` on it.
 
 The two UserPromptSubmit hooks nudge: inject_context runs silently, and the
 discipline catch-up injects a reminder into the next turn. Four Stop hooks block
@@ -113,7 +120,11 @@ via exit 2: confidence-label check, verify-loop check (both promoted from
 warn-mode on 2026-05-05), loop-state guard, and loop-stall guard. The same two
 content-discipline checks (confidence-label and verify-loop) also run on
 SubagentStop — so subagents are held to the same standards as the parent session.
-The destructive-bash gate and the opt-in test gate also block.
+On PreToolUse, four hooks can block: the destructive-bash gate, the opt-in test
+gate, `enforce_pr_workflow` (enforces the PR chain — e.g. blocks a direct
+`git push` to `main` unless `/coderails:push`/review already ran this session),
+and `no_edit_on_main` (blocks editing source files, but not docs/config, while
+on `main` — use `/coderails:prep` or a worktree instead).
 
 ## Notes
 

@@ -31,6 +31,11 @@ check() { # desc expected actual
 
 # A 100644-in-index file (sourced-only lib) — sweep must ensure -x on disk.
 SOURCE_ONLY_FILE="scripts/lib/git-common.sh"
+# Other sourced-only libs under scripts/lib/ that install.sh's literal list
+# must also name explicitly (the sweep only globs hooks/scripts/lib/*.sh,
+# not scripts/lib/*.sh, so anything under scripts/lib/ that isn't named
+# literally is silently never swept at all).
+OTHER_SOURCE_ONLY_FILES="scripts/lib/review-artifact.sh scripts/lib/config.sh"
 # A 100755-in-index file (directly invoked) — sweep must ensure +x on disk.
 EXEC_FILE="scripts/push.sh"
 # A file NOT in the git index at all (e.g. a release-tarball install with no
@@ -58,6 +63,9 @@ cp "$REPO_ROOT/install.sh" "$TMP_TREE/install.sh"
 # Simulate drift in both directions before running the sweep.
 chmod +x "$TMP_TREE/$SOURCE_ONLY_FILE"   # stale +x that should be removed
 chmod -x "$TMP_TREE/$EXEC_FILE"          # missing +x that should be added
+for f in $OTHER_SOURCE_ONLY_FILES; do
+  chmod +x "$TMP_TREE/$f"                # stale +x that should be removed
+done
 
 # Untracked scratch file — not `git add`ed, so it has no index mode at all
 # (simulates a no-.git tarball install where every file takes this path).
@@ -84,6 +92,9 @@ check "$EXEC_FILE index mode is 100755 (precondition)" "100755" "$index_mode_exe
 check "$SOURCE_ONLY_FILE loses stale +x after sweep (100644-in-index)" "no" "$(is_executable "$TMP_TREE/$SOURCE_ONLY_FILE")"
 check "$EXEC_FILE gains +x after sweep (100755-in-index)" "yes" "$(is_executable "$TMP_TREE/$EXEC_FILE")"
 check "$UNTRACKED_FILE gains +x after sweep (not in index, fallback behaviour)" "yes" "$(is_executable "$TMP_TREE/$UNTRACKED_FILE")"
+for f in $OTHER_SOURCE_ONLY_FILES; do
+  check "$f loses stale +x after sweep (100644-in-index, must be named in install.sh's literal list)" "no" "$(is_executable "$TMP_TREE/$f")"
+done
 
 # --- No-git-checkout case (release tarball, no .git anywhere) ---
 # `git ls-files -s` exits 128 outside a git repo/worktree. Under install.sh's
