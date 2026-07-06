@@ -12,7 +12,7 @@ export function BottomHero() {
     <div className="hud-bottom-centre hud-intro-bottom">
       {loop ? (
         <>
-          <div className="hud-bc-label">Primary Directive · {loop.slug}</div>
+          <div className="hud-bc-label hud-bc-loop-name">Primary Directive · {loop.name}</div>
           <div className="hud-bc-units">
             <span className="hud-bc-value">
               {loop.workUnitsDone}/{loop.workUnitsTotal}
