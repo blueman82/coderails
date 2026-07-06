@@ -5,8 +5,9 @@
 # tasks intact.
 #
 # Usage: review-package BASE HEAD [OUTFILE]
-# Default OUTFILE: <repo-root>/.coderails/sdd/review-<base7>..<head7>.diff
-# (named per range, so a re-review after fixes gets a distinct fresh file).
+# Default OUTFILE: <session-keyed loop-state dir>/review-<base7>..<head7>.diff
+# (resolved via sdd-workspace; named per range, so a re-review after fixes
+# gets a distinct fresh file).
 set -euo pipefail
 
 if [ $# -lt 2 ] || [ $# -gt 3 ]; then

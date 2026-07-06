@@ -1,13 +1,20 @@
 #!/usr/bin/env bash
-# Resolve and ensure the working-tree directory SDD uses for its short-lived
-# artifacts: task briefs, implementer reports, review packages, and the
-# progress ledger. Print the directory's absolute path.
+# Resolve and ensure the working-tree-independent directory SDD uses for its
+# short-lived artifacts: task briefs, implementer reports, review packages,
+# and the progress ledger (sdd-ledger.md).
 #
-# The workspace lives in the working tree (not under .git/) because Claude Code
-# treats .git/ as a protected path and denies agent writes there — which blocks
-# an implementer subagent from writing its report file. A self-ignoring
-# .gitignore keeps the workspace out of `git status` and out of accidental
-# commits without modifying any tracked file.
+# Session-keyed, not repo-root-keyed: lives beside progress.json in the
+# agentic-loop state dir, resolved via the sole path authority
+# hooks/scripts/lib/agentic_loop_path.sh (dirname of its progress.json path).
+# This was previously a fixed repo-root subdirectory — repo-root-keyed, so
+# every session working in the same repo shared one ledger, a latent bug for
+# any two concurrent SDD runs in the same working tree. Session-keying via the
+# same helper progress.json already uses gives each session its own ledger,
+# with no risk of two sessions' task briefs/reports colliding.
+#
+# Outside the repo, so no self-ignoring marker file is needed to keep it out
+# of `git status` (progress.json's own directory is already outside git's
+# view) and `git clean -fdx` can no longer destroy the ledger.
 #
 # Single source of truth for the workspace location, so task-brief and
 # review-package cannot drift to different directories.
@@ -15,8 +22,7 @@
 # Usage: sdd-workspace
 set -euo pipefail
 
-root=$(git rev-parse --show-toplevel)
-dir="$root/.coderails/sdd"
+progress_path=$(bash "$(cd "$(dirname "$0")/../../.." && pwd)/hooks/scripts/lib/agentic_loop_path.sh")
+dir=$(dirname "$progress_path")
 mkdir -p "$dir"
-printf '*\n' > "$dir/.gitignore"
 cd "$dir" && pwd
