@@ -179,24 +179,16 @@ export function createRunHandler(deps: RunHandlerDeps) {
 }
 
 let cachedConfig: DashboardConfig | undefined;
-let cachedToken: string | undefined;
 
 function getConfig(): DashboardConfig {
   if (!cachedConfig) cachedConfig = loadConfig();
   return cachedConfig;
 }
 
-function getToken(): string {
-  if (!cachedToken) cachedToken = mintToken();
-  return cachedToken;
-}
-
-// Exported for the server-render page (Task 8/9) to embed the token — never
-// exposed via any API response body.
-export function getRunToken(): string {
-  return getToken();
-}
+// Token caching lives in runlog.ts, not here — see getRunToken's comment
+// there for why a route.ts-local cache is unsafe to share with page.tsx.
+export { getRunToken } from "../../../lib/runlog";
 
 export async function POST(request: Request): Promise<Response> {
-  return createRunHandler({ config: getConfig(), token: getToken() })(request);
+  return createRunHandler({ config: getConfig(), token: getRunToken() })(request);
 }
