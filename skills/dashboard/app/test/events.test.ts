@@ -40,17 +40,17 @@ function req(headers: Record<string, string> = {}): Request {
 
 // Reads named SSE frames off a ReadableStream<Uint8Array> body, splitting on
 // the blank-line frame terminator. Returns { event, data } pairs as they
-// arrive; stops once `count` frames have been read or the stream ends.
-async function readFrames(
+// arrive; stops once `stop(frames)` returns true or the stream ends.
+async function readFramesUntil(
   body: ReadableStream<Uint8Array>,
-  count: number
+  stop: (frames: { event: string; data: unknown }[]) => boolean
 ): Promise<{ event: string; data: unknown }[]> {
   const reader = body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
   const frames: { event: string; data: unknown }[] = [];
 
-  while (frames.length < count) {
+  while (!stop(frames)) {
     const { value, done } = await reader.read();
     if (done) break;
     buffer += decoder.decode(value, { stream: true });
@@ -67,11 +67,16 @@ async function readFrames(
           data: JSON.parse(dataLine.slice("data: ".length)),
         });
       }
-      if (frames.length >= count) break;
+      if (stop(frames)) break;
     }
   }
   await reader.cancel();
   return frames;
+}
+
+// Reads exactly `count` frames regardless of event name.
+function readFrames(body: ReadableStream<Uint8Array>, count: number) {
+  return readFramesUntil(body, (frames) => frames.length >= count);
 }
 
 async function readRawText(body: ReadableStream<Uint8Array>, minBytes: number, timeoutMs: number): Promise<string> {
