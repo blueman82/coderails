@@ -575,10 +575,7 @@
 }
 
 /* ---------- Command deck: run-lifecycle states (Task 9d) ---------- */
-.hud-cmd.running .hud-bullet {
-  box-shadow: 0 0 5px var(--rose);
-  animation: hud-cmd-pulse 0.9s ease-in-out infinite;
-}
+/* .hud-cmd.running .hud-bullet is already defined above (Task 9a) — reused as-is. */
 .hud-cmd.flare .hud-label {
   animation: hud-flare-flash 0.55s ease;
 }
