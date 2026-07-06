@@ -158,47 +158,58 @@ result=$(run_with_stub "$FAIL_STUB" pr::head_sha 42)
 check "pr::head_sha: gh failure → empty result" "" "$result"
 
 # ─── Trusted-author gh stub builder ──────────────────────────────────────────
-# Both gate readers now call `gh` twice: `gh api user -q .login` (identity,
-# once per process) and the paginated REST comments fetch
-# `gh api repos/{owner}/{repo}/issues/{n}/comments --paginate --jq '...'`.
-# comment_row() builds one raw JSON comment object; gh_stub_rows() builds a
-# stub `gh` script that branches on "$@": returns TRUSTED_LOGIN for `api user`,
-# and for the comments fetch EXTRACTS the --jq program production actually
-# passed out of its own "$@" and executes it verbatim with real `jq -r` over
-# the fixture rows. This means the filter logic lives ONLY in git-common.sh —
-# the stub never re-guesses or duplicates the select expression, so a mutation
-# that weakens or deletes the production filter changes what these tests
-# observe (proven by the negative control below, where deleting the filter
-# from production makes the spoof tests fail).
+# Both gate readers now call `gh` three times: `gh api user -q .login`
+# (identity, once per process), `gh repo view ... --json viewerPermission -q
+# .viewerPermission` (permission, once per process), and the paginated REST
+# comments fetch `gh api repos/{owner}/{repo}/issues/{n}/comments --paginate
+# --jq '...'`. comment_row() builds one raw JSON comment object; gh_stub_rows()
+# builds a stub `gh` script that branches on "$@": returns TRUSTED_LOGIN for
+# `api user`, a caller-chosen permission level for `repo view ...
+# viewerPermission`, and for the comments fetch EXTRACTS the --jq program
+# production actually passed out of its own "$@" and executes it verbatim with
+# real `jq -r` over the fixture rows. This means the filter logic lives ONLY in
+# git-common.sh — the stub never re-guesses or duplicates the select
+# expression, so a mutation that weakens or deletes the production filter
+# changes what these tests observe (proven by the negative control below,
+# where deleting the filter from production makes the spoof tests fail).
 TRUSTED_LOGIN="trusted-bot"
 
 # comment_row <login> <assoc> <body>
 # Echoes one JSON object for the comments array (body is JSON-string-escaped
 # via jq -Rs so embedded newlines/quotes in a marker+prose body are safe).
+# author_association is retained in the fixture shape (real GitHub payloads
+# carry it) even though production no longer filters on it post-WU5 — this
+# lets PERMISSION-TRUST exercise a non-OWNER association (MEMBER) explicitly.
 comment_row() {
     local login="$1" assoc="$2" body="$3"
     local body_json; body_json=$(printf '%s' "$body" | jq -Rs .)
     printf '{"user":{"login":"%s"},"author_association":"%s","body":%s}' "$login" "$assoc" "$body_json"
 }
 
-# gh_stub_rows <rows_json_array>
+# gh_stub_rows <rows_json_array> [permission]
 # Builds a gh stub body (to hand to run_with_stub) that serves TRUSTED_LOGIN
-# for identity and, for the comments fetch, pulls the --jq argument out of its
-# own "$@" (the exact program production passed) and runs it for real with
-# `jq -r` over the given JSON array of comment rows. Matches any
-# "*/comments --paginate*" invocation generically (both readers use it, across
-# different pr numbers), since the stub no longer needs to special-case pr=42.
-# Every invocation appends its own "$@" (one call per line) to
-# $STUB_ARGS_LOG so a test can assert exactly what production invoked, instead
-# of only inferring it from the case-match succeeding.
+# for identity, [permission] (default WRITE — sufficient trust, so every
+# pre-existing call site that doesn't pass this argument keeps its original
+# behaviour unchanged) for the viewerPermission lookup, and for the comments
+# fetch pulls the --jq argument out of its own "$@" (the exact program
+# production passed) and runs it for real with `jq -r` over the given JSON
+# array of comment rows. Matches any "*/comments --paginate*" invocation
+# generically (both readers use it, across different pr numbers), since the
+# stub no longer needs to special-case pr=42. Every invocation appends its own
+# "$@" (one call per line) to $STUB_ARGS_LOG so a test can assert exactly what
+# production invoked, instead of only inferring it from the case-match
+# succeeding.
 gh_stub_rows() {
-    local rows="$1"
+    local rows="$1" permission="${2:-WRITE}"
     cat <<STUB
 args=("\$@")
 printf '%s\n' "\$*" >> "$STUB_ARGS_LOG"
 case "\$*" in
   "api user -q .login")
     echo "$TRUSTED_LOGIN"
+    ;;
+  *"viewerPermission"*)
+    echo "$permission"
     ;;
   *"comments --paginate"*)
     # Find the --jq program among our own args and execute it verbatim —
@@ -220,17 +231,27 @@ STUB
 }
 
 # gh_stub_identity_fail
-# Identity fetch itself fails (gh api user exits non-zero) — comments call
-# never has a chance to run.
+# Identity fetch itself fails (gh api user exits non-zero) — permission and
+# comments calls never have a chance to run.
 IDENTITY_FAIL_STUB='case "$*" in
   "api user -q .login") exit 1 ;;
   *) exit 1 ;;
 esac'
 
+# gh_stub_permission_fail
+# Identity succeeds but the permission (viewerPermission) lookup fails —
+# comments call never has a chance to run.
+PERMISSION_FAIL_STUB="case \"\$*\" in
+  \"api user -q .login\") echo \"$TRUSTED_LOGIN\" ;;
+  *\"viewerPermission\"*) exit 1 ;;
+  *) exit 1 ;;
+esac"
+
 # gh_stub_comments_fail
-# Identity succeeds but the comments fetch fails.
+# Identity and permission succeed (WRITE) but the comments fetch fails.
 COMMENTS_FAIL_STUB="case \"\$*\" in
   \"api user -q .login\") echo \"$TRUSTED_LOGIN\" ;;
+  *\"viewerPermission\"*) echo WRITE ;;
   *\"issues/42/comments --paginate\"*) exit 1 ;;
   *) exit 1 ;;
 esac"
@@ -250,22 +271,39 @@ check "has_coderails_review_for_head: comments fetch used --paginate" "true" \
 check "has_coderails_review_for_head: comments fetch hit issues/42/comments" "true" \
   "$([[ "$FETCH_LINE" == *"issues/42/comments"* ]] && echo true || echo false)"
 
-# E1: untrusted login posts a byte-identical valid marker → exit 1 (spoofing rejected)
+# E1: untrusted login posts a byte-identical valid marker → exit 1 (spoofing
+# rejected). Permission defaults to WRITE in the stub — the highest-value
+# regression case in the whole PR: login-match alone must still reject a
+# forged marker regardless of the (now write-capable) permission field.
 ROWS_SPOOF=$(printf '[%s]' "$(comment_row "attacker" CONTRIBUTOR "$GOOD_MARKER")")
 run_with_stub "$(gh_stub_rows "$ROWS_SPOOF")" pr::has_coderails_review_for_head 42 "deadbeef"
 check "has_coderails_review_for_head: untrusted login byte-identical marker → exit 1 (spoof rejected)" 1 $?
 
-# E1: trusted login but NOT OWNER association → exit 1 (association also enforced)
-ROWS_TRUSTED_NOT_OWNER=$(printf '[%s]' "$(comment_row "$TRUSTED_LOGIN" CONTRIBUTOR "$GOOD_MARKER")")
-run_with_stub "$(gh_stub_rows "$ROWS_TRUSTED_NOT_OWNER")" pr::has_coderails_review_for_head 42 "deadbeef"
-check "has_coderails_review_for_head: trusted login, non-OWNER association → exit 1" 1 $?
+# WU5 PERMISSION-TRUST: trusted login, NON-OWNER association (MEMBER — simulates
+# an org-repo collaborator), write permission → exit 0. This is the actual
+# behavioural change: the OLD OWNER-badge conjunct would have rejected this.
+ROWS_TRUSTED_MEMBER=$(printf '[%s]' "$(comment_row "$TRUSTED_LOGIN" MEMBER "$GOOD_MARKER")")
+run_with_stub "$(gh_stub_rows "$ROWS_TRUSTED_MEMBER" WRITE)" pr::has_coderails_review_for_head 42 "deadbeef"
+check "has_coderails_review_for_head: trusted login, MEMBER association, write permission → exit 0 (org-collaborator now trusted)" 0 $?
 
-# E1: untrusted login WITH OWNER association → exit 1 (isolates the login check
-# from the association check — an association-only filter would wrongly pass
-# this, since OWNER alone is satisfied; the login mismatch must still reject it)
-ROWS_ATTACKER_OWNER=$(printf '[%s]' "$(comment_row "attacker" OWNER "$GOOD_MARKER")")
-run_with_stub "$(gh_stub_rows "$ROWS_ATTACKER_OWNER")" pr::has_coderails_review_for_head 42 "deadbeef"
-check "has_coderails_review_for_head: untrusted login, OWNER association → exit 1 (login check isolated from association check)" 1 $?
+# WU5 PERMISSION-DENY: trusted login but permission=READ → exit 1 (not trusted
+# — proves this isn't a login-only check in disguise; permission genuinely gates).
+ROWS_TRUSTED_READ=$(printf '[%s]' "$(comment_row "$TRUSTED_LOGIN" MEMBER "$GOOD_MARKER")")
+run_with_stub "$(gh_stub_rows "$ROWS_TRUSTED_READ" READ)" pr::has_coderails_review_for_head 42 "deadbeef"
+check "has_coderails_review_for_head: trusted login, permission=READ → exit 1 (permission denies trust)" 1 $?
+
+# E1: untrusted login WITH write permission → exit 1 (isolates the login check
+# from the permission check — a permission-only filter would wrongly pass
+# this, since write permission alone is satisfied; the login mismatch must
+# still reject it)
+ROWS_ATTACKER_WRITE=$(printf '[%s]' "$(comment_row "attacker" MEMBER "$GOOD_MARKER")")
+run_with_stub "$(gh_stub_rows "$ROWS_ATTACKER_WRITE" WRITE)" pr::has_coderails_review_for_head 42 "deadbeef"
+check "has_coderails_review_for_head: untrusted login, write permission → exit 1 (login check isolated from permission check)" 1 $?
+
+# WU5 FAIL-CLOSED: permission lookup itself fails → exit 2 (same fail-closed
+# posture as the existing identity-fetch-failure contract).
+run_with_stub "$PERMISSION_FAIL_STUB" pr::has_coderails_review_for_head 42 "deadbeef"
+check "has_coderails_review_for_head: permission lookup failure → exit 2 (fail-closed)" 2 $?
 
 # Stub: comment body contains a marker for a different SHA → exit 1 (no match)
 ROWS_WRONG_SHA=$(printf '[%s]' "$(comment_row "$TRUSTED_LOGIN" OWNER "$OTHER_SHA_MARKER")")
@@ -290,6 +328,80 @@ check "has_coderails_review_for_head: identity fetch failure → exit 2 (fail-cl
 run_with_stub "$COMMENTS_FAIL_STUB" pr::has_coderails_review_for_head 42 "deadbeef"
 rc=$?
 check "has_coderails_review_for_head: comments fetch failure → exit 2 (fail-closed)" 2 $rc
+
+# ─── WU4: identity-fetch vs permission-fetch vs comments-fetch failure are
+# distinguishable to the operator ─────────────────────────────────────────────
+# The 0/1/2 return-code contract on the public reader functions is unchanged
+# (both still return 2 for any of the three failure modes, asserted above and
+# below) — the new signal is an internal cause, surfaced via a global variable
+# set by pr::_trusted_comment_bodies (mirrors the existing PR_EVAL_TIER
+# pattern of a global set alongside a return code), so merge.sh's caller can
+# print a message naming which fetch actually failed instead of always
+# blaming "comments".
+run_with_stub "$IDENTITY_FAIL_STUB" bash -c '
+  source "'"$LIB"'"
+  pr::has_coderails_review_for_head 42 "deadbeef"
+  echo "rc=$?"
+  echo "reason=${PR_TRUST_FETCH_FAIL_REASON:-}"
+' > "$TMP/identity_fail.out"
+check "has_coderails_review_for_head: identity fetch failure → exit 2" "rc=2" "$(grep '^rc=' "$TMP/identity_fail.out")"
+check "has_coderails_review_for_head: identity fetch failure → reason=identity" "reason=identity" "$(grep '^reason=' "$TMP/identity_fail.out")"
+
+run_with_stub "$PERMISSION_FAIL_STUB" bash -c '
+  source "'"$LIB"'"
+  pr::has_coderails_review_for_head 42 "deadbeef"
+  echo "rc=$?"
+  echo "reason=${PR_TRUST_FETCH_FAIL_REASON:-}"
+' > "$TMP/permission_fail.out"
+check "has_coderails_review_for_head: permission fetch failure → exit 2" "rc=2" "$(grep '^rc=' "$TMP/permission_fail.out")"
+check "has_coderails_review_for_head: permission fetch failure → reason=permission" "reason=permission" "$(grep '^reason=' "$TMP/permission_fail.out")"
+
+run_with_stub "$COMMENTS_FAIL_STUB" bash -c '
+  source "'"$LIB"'"
+  pr::has_coderails_review_for_head 42 "deadbeef"
+  echo "rc=$?"
+  echo "reason=${PR_TRUST_FETCH_FAIL_REASON:-}"
+' > "$TMP/comments_fail.out"
+check "has_coderails_review_for_head: comments fetch failure → exit 2" "rc=2" "$(grep '^rc=' "$TMP/comments_fail.out")"
+check "has_coderails_review_for_head: comments fetch failure → reason=comments" "reason=comments" "$(grep '^reason=' "$TMP/comments_fail.out")"
+
+check "WU4: identity-fail and comments-fail reasons are DISTINCT" "true" \
+  "$([[ "$(grep '^reason=' "$TMP/identity_fail.out")" != "$(grep '^reason=' "$TMP/comments_fail.out")" ]] && echo true || echo false)"
+check "WU4: permission-fail and comments-fail reasons are DISTINCT" "true" \
+  "$([[ "$(grep '^reason=' "$TMP/permission_fail.out")" != "$(grep '^reason=' "$TMP/comments_fail.out")" ]] && echo true || echo false)"
+check "WU4: identity-fail and permission-fail reasons are DISTINCT" "true" \
+  "$([[ "$(grep '^reason=' "$TMP/identity_fail.out")" != "$(grep '^reason=' "$TMP/permission_fail.out")" ]] && echo true || echo false)"
+
+# ─── WU4 hardening: an mktemp failure inside pr::_trusted_comment_bodies_or_fail
+# must still fail-closed (exit 2) WITHOUT leaking a raw, unguarded coreutils
+# error past the TRUST_FETCH_FAIL_REASON abstraction. A fake failing `mktemp`
+# on PATH (alongside the normal gh stub) reproduces "no writable temp dir" —
+# the wrapper must detect the failure itself and report a dedicated reason
+# rather than silently proceeding with an empty/invalid stderr_file path.
+MKTEMP_FAIL_STUB_DIR="$TMP/mktemp_fail_stubs"
+mkdir -p "$MKTEMP_FAIL_STUB_DIR"
+cat > "$MKTEMP_FAIL_STUB_DIR/mktemp" <<'EOF'
+#!/bin/bash
+exit 1
+EOF
+chmod +x "$MKTEMP_FAIL_STUB_DIR/mktemp"
+GH_STUB="$STUB_DIR/gh"
+printf '#!/bin/bash\n%s\n' "$(gh_stub_rows "$ROWS_TRUSTED_MATCH")" > "$GH_STUB"
+chmod +x "$GH_STUB"
+result=$(
+  export PATH="$MKTEMP_FAIL_STUB_DIR:$STUB_DIR:$PATH"
+  bash -c '
+    source "'"$LIB"'"
+    pr::has_coderails_review_for_head 42 "deadbeef"
+    echo "rc=$?"
+    echo "reason=${PR_TRUST_FETCH_FAIL_REASON:-}"
+  ' 2>"$TMP/mktemp_fail_stderr.out"
+)
+check "has_coderails_review_for_head: mktemp failure → exit 2 (fail-closed, not silently bypassed)" "rc=2" "$(printf '%s\n' "$result" | grep '^rc=')"
+check "has_coderails_review_for_head: mktemp failure → a distinct reason is set (not empty/unset)" "true" \
+  "$([[ -n "$(printf '%s\n' "$result" | sed -n 's/^reason=//p')" ]] && echo true || echo false)"
+check "has_coderails_review_for_head: mktemp failure → no raw coreutils error text reaches stderr" "true" \
+  "$(grep -qi 'no such file or directory' "$TMP/mktemp_fail_stderr.out" && echo false || echo true)"
 
 # ─── Injection: a pre-seeded _PR_TRUSTED_LOGIN must be validated, not trusted
 # blindly ──────────────────────────────────────────────────────────────────
@@ -326,6 +438,22 @@ if old_blob=$(git show "${OLD_BLOB_SHA}:scripts/lib/git-common.sh" 2>/dev/null);
       "$([[ "$old_count" -ge 1 ]] && echo true || echo false)"
 else
     echo "skip - clean-break control: pre-change commit $OLD_BLOB_SHA not reachable (shallow clone?)"
+fi
+
+# ─── WU5 CLEAN-BREAK NEGATIVE CONTROL: the OWNER-badge conjunct is fully gone,
+# no compat flag, no dual-path fallback ───────────────────────────────────────
+owner_conjunct_count=$(grep -c 'author_association == "OWNER"' "$GIT_COMMON_SH")
+check "WU5 clean-break: no remaining 'author_association == \"OWNER\"' conjunct in git-common.sh" 0 "$owner_conjunct_count"
+
+# Control: the SAME pattern must find the old conjunct in the pre-change (frozen)
+# blob, proving the guard can actually fail rather than being vacuous.
+FREEZE_SHA="238f5e14c788503e9d194ac9afdba5749dd88c92"
+if old_blob_owner=$(git show "${FREEZE_SHA}:scripts/lib/git-common.sh" 2>/dev/null); then
+    old_owner_count=$(printf '%s\n' "$old_blob_owner" | grep -c 'author_association == "OWNER"')
+    check "WU5 clean-break control: conjunct present in the frozen pre-change blob (guard is not vacuous)" "true" \
+      "$([[ "$old_owner_count" -ge 1 ]] && echo true || echo false)"
+else
+    echo "skip - WU5 clean-break control: frozen commit $FREEZE_SHA not reachable (shallow clone?)"
 fi
 
 # ─── Pagination: a matching marker beyond the 100th comment row is found ────
@@ -416,29 +544,53 @@ result=$(run_with_stub "$(gh_stub_rows "$ROWS_SPOOF_GO")" bash -c '
 check "has_coderails_eval_for_head: untrusted GO marker → rc=1 (spoof rejected)" "rc=1" "$(printf '%s\n' "$result" | grep '^rc=')"
 check "has_coderails_eval_for_head: untrusted GO marker → PR_EVAL_TIER empty (never set from untrusted)" "tier=" "$(printf '%s\n' "$result" | grep '^tier=')"
 
-# E-spoof: untrusted login WITH OWNER association → rc=1 (isolates the login
-# check from the association check, same as the review reader's equivalent)
-ROWS_ATTACKER_OWNER_GO=$(printf '[%s]' "$(comment_row "attacker" OWNER "$GO_MARKER")")
-result=$(run_with_stub "$(gh_stub_rows "$ROWS_ATTACKER_OWNER_GO")" bash -c '
+# E-spoof: untrusted login WITH write permission → rc=1 (isolates the login
+# check from the permission check, same as the review reader's equivalent —
+# the highest-value regression case for the eval reader too)
+ROWS_ATTACKER_WRITE_GO=$(printf '[%s]' "$(comment_row "attacker" MEMBER "$GO_MARKER")")
+result=$(run_with_stub "$(gh_stub_rows "$ROWS_ATTACKER_WRITE_GO" WRITE)" bash -c '
   source "'"$LIB"'"
   pr::has_coderails_eval_for_head 42 "deadbeef"
   echo "rc=$?"
   echo "tier=${PR_EVAL_TIER:-}"
 ')
-check "has_coderails_eval_for_head: untrusted login, OWNER association → rc=1 (login check isolated from association check)" "rc=1" "$(printf '%s\n' "$result" | grep '^rc=')"
-check "has_coderails_eval_for_head: untrusted login, OWNER association → PR_EVAL_TIER empty" "tier=" "$(printf '%s\n' "$result" | grep '^tier=')"
+check "has_coderails_eval_for_head: untrusted login, write permission → rc=1 (login check isolated from permission check)" "rc=1" "$(printf '%s\n' "$result" | grep '^rc=')"
+check "has_coderails_eval_for_head: untrusted login, write permission → PR_EVAL_TIER empty" "tier=" "$(printf '%s\n' "$result" | grep '^tier=')"
 
-# E-assoc: trusted login but NOT OWNER association → rc=1 (association also
-# enforced for the eval reader, not just the review reader)
-ROWS_TRUSTED_NOT_OWNER_GO=$(printf '[%s]' "$(comment_row "$TRUSTED_LOGIN" CONTRIBUTOR "$GO_MARKER")")
-result=$(run_with_stub "$(gh_stub_rows "$ROWS_TRUSTED_NOT_OWNER_GO")" bash -c '
+# WU5 PERMISSION-TRUST (eval reader): trusted login, non-OWNER (MEMBER)
+# association, write permission → rc=0 (org-collaborator now trusted — mirrors
+# the review reader's equivalent behavioural change)
+ROWS_TRUSTED_MEMBER_GO=$(printf '[%s]' "$(comment_row "$TRUSTED_LOGIN" MEMBER "$GO_MARKER")")
+result=$(run_with_stub "$(gh_stub_rows "$ROWS_TRUSTED_MEMBER_GO" WRITE)" bash -c '
   source "'"$LIB"'"
   pr::has_coderails_eval_for_head 42 "deadbeef"
   echo "rc=$?"
   echo "tier=${PR_EVAL_TIER:-}"
 ')
-check "has_coderails_eval_for_head: trusted login, non-OWNER association → rc=1" "rc=1" "$(printf '%s\n' "$result" | grep '^rc=')"
-check "has_coderails_eval_for_head: trusted login, non-OWNER association → PR_EVAL_TIER empty" "tier=" "$(printf '%s\n' "$result" | grep '^tier=')"
+check "has_coderails_eval_for_head: trusted login, MEMBER association, write permission → rc=0" "rc=0" "$(printf '%s\n' "$result" | grep '^rc=')"
+check "has_coderails_eval_for_head: trusted login, MEMBER association, write permission → PR_EVAL_TIER=1" "tier=1" "$(printf '%s\n' "$result" | grep '^tier=')"
+
+# WU5 PERMISSION-DENY (eval reader): trusted login but permission=READ → rc=1
+# (proves permission genuinely gates, not a login-only check in disguise)
+ROWS_TRUSTED_READ_GO=$(printf '[%s]' "$(comment_row "$TRUSTED_LOGIN" MEMBER "$GO_MARKER")")
+result=$(run_with_stub "$(gh_stub_rows "$ROWS_TRUSTED_READ_GO" READ)" bash -c '
+  source "'"$LIB"'"
+  pr::has_coderails_eval_for_head 42 "deadbeef"
+  echo "rc=$?"
+  echo "tier=${PR_EVAL_TIER:-}"
+')
+check "has_coderails_eval_for_head: trusted login, permission=READ → rc=1 (permission denies trust)" "rc=1" "$(printf '%s\n' "$result" | grep '^rc=')"
+check "has_coderails_eval_for_head: trusted login, permission=READ → PR_EVAL_TIER empty" "tier=" "$(printf '%s\n' "$result" | grep '^tier=')"
+
+# WU5 FAIL-CLOSED (eval reader): permission lookup itself fails → rc=2
+result=$(run_with_stub "$PERMISSION_FAIL_STUB" bash -c '
+  source "'"$LIB"'"
+  pr::has_coderails_eval_for_head 42 "deadbeef"
+  echo "rc=$?"
+  echo "tier=${PR_EVAL_TIER:-}"
+')
+check "has_coderails_eval_for_head: permission lookup failure → rc=2 (fail-closed)" "rc=2" "$(printf '%s\n' "$result" | grep '^rc=')"
+check "has_coderails_eval_for_head: permission lookup failure → PR_EVAL_TIER empty" "tier=" "$(printf '%s\n' "$result" | grep '^tier=')"
 
 # Stub: no comments (empty array) → rc=1, PR_EVAL_TIER unset (mirrors the
 # review reader's empty-comment-list case, for the eval reader too)
