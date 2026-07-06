@@ -23,7 +23,7 @@ const STALLED_THRESHOLD_MS = 60 * 60_000;
 function listDirs(baseDir: string): string[] {
   try {
     return readdirSync(baseDir, { withFileTypes: true })
-      .filter((entry) => entry.isDirectory())
+      .filter((entry) => entry.isDirectory() && !entry.name.startsWith("."))
       .map((entry) => entry.name);
   } catch {
     return [];
