@@ -232,4 +232,18 @@ describe("collectLoops", () => {
     const loops = collectLoops(join(tmpdir(), "does-not-exist-loops-base"));
     expect(loops).toEqual([]);
   });
+
+  it("excludes dotdirs like .git and .DS_Store from results", () => {
+    const base = makeTmpBase();
+    for (const slug of [".git", ".DS_Store"]) {
+      const dir = join(base, slug, "S1");
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(
+        join(dir, "progress.json"),
+        JSON.stringify({ status: "complete", session_id: "S1", work_units: {} })
+      );
+    }
+    const loops = collectLoops(base);
+    expect(loops).toEqual([]);
+  });
 });
