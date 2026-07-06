@@ -121,6 +121,15 @@
     opacity: 0.4;
   }
 }
+.hud-status-dot.reconnecting {
+  background: var(--grey-dim);
+  box-shadow: none;
+  animation: none;
+}
+.hud-status-last-update {
+  color: var(--grey-dim);
+  font-size: 9.5px;
+}
 .hud-clock-block {
   text-align: right;
 }
