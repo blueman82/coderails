@@ -21,7 +21,7 @@ rather than secretary-internal:
 
 This is a design/contract document only. No dashboard code is added or
 modified by this spec — `skills/dashboard/` is untouched. The dashboard-side
-Approve/Deny button is explicitly **deferred**: see [Deferred work](#deferred-work-approve-deny-button).
+Approve/Deny button is explicitly **deferred**: see [Deferred work](#deferred-work-approvedeny-button).
 
 ## Normativity note (read this first)
 
@@ -94,13 +94,14 @@ Field-by-field rationale:
 - **Writer (dashboard Approve/Deny button, unbuilt, deferred):** flips
   `status` from `pending` to `approved` or `denied` in place. This is the
   only piece of the round-trip not yet built — see
-  [Deferred work](#deferred-work-approve-deny-button).
+  [Deferred work](#deferred-work-approvedeny-button).
 
 ### Proposed collector shape
 
 Modeled directly on `collectMemoryTrail` (`skills/dashboard/app/src/lib/collect/memoryTrail.ts`),
 which is the existing collector closest in shape (list a directory, parse
-each file, degrade to `[]` on any read error, never throw):
+each file, degrade to `[]` on any read error, never throw, sort newest-first,
+truncate to a caller-supplied `limit`):
 
 ```typescript
 // skills/dashboard/app/src/lib/collect/queue.ts (proposed, NOT built by this spec)
