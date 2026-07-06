@@ -13,11 +13,11 @@ coderails verifies everywhere, but always self-verifies. `writing-plans` gives e
 
 ## Prerequisite: gather context before generating evals
 
-Before drafting a single eval, gather target context — wiki first, codebase only where the wiki doesn't cover it. The project wiki is cheaper to read and often already states the goal state, prior decisions, and known gotchas that a codebase read would have to re-derive. Fall back to the codebase only for what the wiki leaves uncovered.
+Before drafting a single eval, gather target context — wiki first, codebase only where the wiki doesn't cover it. The project wiki is cheaper to read and often already states the invariants and constraints the goal state must respect, prior decisions, and known gotchas that a codebase read would have to re-derive. Fall back to the codebase only for what the wiki leaves uncovered. If the project has no wiki (`config.wiki_path` is null), the context read is codebase-only.
 
-This read is dispatched to a sonnet agent, not done inline — the same reasoning as the verifier agent contract below: keeping the context-gathering step off the main thread keeps the orchestrator's context clean and makes the read auditable as a discrete, reportable step. The agent returns distilled findings, not raw file dumps.
+This read is dispatched to a sonnet agent, not done inline: keeping the context-gathering step off the main thread keeps the orchestrator's context clean and makes the read auditable as a discrete, reportable step, the same delegation pattern `agentic-loop` Phase 2 uses for its pre-flight checks. The agent returns distilled findings, not raw file dumps. Inside an agentic loop, the orchestrator's Phase 2 pre-flight wiki read already satisfies this prerequisite — reuse its findings rather than re-reading per invocation.
 
-This is a context-gathering prerequisite, not a verification step — it does not substitute for, and must not be conflated with, the gameability self-check or the five anti-gaming rules below.
+This is a context-gathering prerequisite, not a verification step — do not conflate it with the gameability self-check or the five anti-gaming rules below.
 
 ## The five anti-gaming rules
 
