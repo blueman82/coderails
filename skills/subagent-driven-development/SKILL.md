@@ -255,9 +255,10 @@ a ledger file, not only in todos.
   controller-owned — a sibling fact to the agentic-loop's own `progress.json`,
   whose `work_units[id].status` is unit-level truth, orchestrator-owned. Each
   fact has a single writer; neither file duplicates the other's record.
-- At skill start, check for a ledger: `cat "$(bash skills/subagent-driven-development/scripts/sdd-workspace)/sdd-ledger.md"`. Tasks listed there
-  as complete are DONE — do not re-dispatch them; resume at the first task
-  not marked complete.
+- At skill start, check for a ledger: `cat "$(scripts/sdd-workspace)/sdd-ledger.md"`
+  (from this skill's directory, same convention as `scripts/review-package`
+  and `scripts/task-brief` above). Tasks listed there as complete are DONE —
+  do not re-dispatch them; resume at the first task not marked complete.
 - When a task's review comes back clean, append one line to the ledger in
   the same message as your other bookkeeping:
   `Task N: complete (commits <base7>..<head7>, review clean)`.
