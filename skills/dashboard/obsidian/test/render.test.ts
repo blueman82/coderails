@@ -218,4 +218,26 @@ describe("renderCommandCentre — command grid", () => {
     expect(el.querySelectorAll(".cc-cmd-btn").length).toBe(0);
     expect(el.querySelector(".cc-command-grid")!.textContent).toContain("no commands declared");
   });
+
+  it("renders an input micro-field only for buttons with inputAllowed", () => {
+    const snapshot: CommandCentreSnapshot = {
+      metrics: null,
+      activity: [],
+      buttons: [
+        { name: "wiki-lint", label: "WIKI LINT", command: "/coderails:wiki-lint", cwd: "/repo", profile: "standard" },
+        {
+          name: "ask",
+          label: "ASK",
+          command: "/coderails:ask",
+          cwd: "/repo",
+          profile: "standard",
+          inputAllowed: true,
+        },
+      ],
+    };
+    const el = renderCommandCentre(snapshot);
+    const inputs = el.querySelectorAll(".cc-cmd-input");
+    expect(inputs.length).toBe(1);
+    expect(inputs[0].getAttribute("data-button-name")).toBe("ask");
+  });
 });
