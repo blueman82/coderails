@@ -22,10 +22,13 @@ function canCreateWebGL(): boolean {
 }
 
 function usePrefersReducedMotion(): boolean {
-  const [reduced, setReduced] = useState(false);
+  // Lazy initializer reads the synchronous browser API directly at first render; the effect
+  // below only subscribes to later changes, so no setState call is needed to seed the value.
+  const [reduced, setReduced] = useState(
+    () => typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches
+  );
   useEffect(() => {
     const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
-    setReduced(mq.matches);
     const onChange = () => setReduced(mq.matches);
     mq.addEventListener("change", onChange);
     return () => mq.removeEventListener("change", onChange);
@@ -35,9 +38,12 @@ function usePrefersReducedMotion(): boolean {
 
 export function Scene() {
   const reducedMotion = usePrefersReducedMotion();
-  const [webglOK, setWebglOK] = useState<boolean | null>(null);
-
-  useEffect(() => {
+  // Deferred to a lazy initializer for the same reason as usePrefersReducedMotion: this is a
+  // synchronous probe, not a subscription, so it belongs in render rather than an effect body.
+  // null on the server (no window); the client's first render replaces it with the real probe
+  // result, which is a one-time client/server mismatch React reconciles on hydration.
+  const [webglOK] = useState<boolean | null>(() => {
+    if (typeof window === "undefined") return null;
     let ok = false;
     try {
       ok = canCreateWebGL();
@@ -47,8 +53,8 @@ export function Scene() {
     if (!ok) {
       console.warn("NetworkSphere: WebGL unavailable, rendering 2D canvas fallback");
     }
-    setWebglOK(ok);
-  }, []);
+    return ok;
+  });
 
   // Avoid a flash of the wrong renderer: render nothing for the one tick it takes to probe.
   if (webglOK === null) return null;
