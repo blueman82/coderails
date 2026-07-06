@@ -104,16 +104,12 @@ export function RailRight({ token, buttons }: RailRightProps) {
   // `queued` is set the run has very likely already finished and produced a finish record; this
   // effect un-stuffs the flag in either case rather than leaving it stuck true forever).
   useEffect(() => {
-    // eslint-disable-next-line no-console
-    console.log("[9d-debug] reconcile effect firing, runs=", runs.length, runs.map((r) => `${r.button}:${r.endedAt ?? "running"}`));
     setUiState((prev) => {
       let changed = false;
       const next = { ...prev };
       for (const [name, ui] of Object.entries(prev)) {
         if (!ui.queued) continue;
         const stillRelevant = activeByButton.has(name) || runs.some((r) => r.button === name && r.endedAt === undefined);
-        // eslint-disable-next-line no-console
-        console.log("[9d-debug] checking", name, "queued=", ui.queued, "stillRelevant=", stillRelevant);
         if (!stillRelevant) {
           next[name] = { ...ui, queued: false };
           changed = true;
