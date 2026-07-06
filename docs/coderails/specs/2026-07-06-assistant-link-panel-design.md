@@ -19,22 +19,29 @@ rather than secretary-internal:
    (tasks, email, sends/approvals, routine runs) alongside the existing
    session/loop/PR-gate panels.
 
-This is a design/contract document only. No dashboard code is added or
-modified by this spec — `skills/dashboard/` is untouched. The dashboard-side
-Approve/Deny button is explicitly **deferred**: see [Deferred work](#deferred-work-approvedeny-button).
+This was originally a design/contract document only, with no dashboard code
+added or modified. That has since changed: both sides of the contract, and
+the panel's queue-slice UI, are now built and merged — see
+[Post-freeze reconciliation](#post-freeze-reconciliation-2026-07-06) for what
+shipped and where. The rest of this document is kept as originally written
+(the design record), except where reconciliation notes are inserted inline.
 
-## Normativity note (read this first)
+## Normativity note (historical — see reconciliation)
 
-At the time of writing, `~/Github/assistant-agent`'s send-gate (WU2) has not
-yet implemented `gate/surfaces/queue.ts` — there is no `QueueFileEntry` shape
+At the time of writing, `~/Github/assistant-agent`'s send-gate (WU2) had not
+yet implemented `gate/surfaces/queue.ts` — there was no `QueueFileEntry` shape
 in code to copy verbatim. Per the loop plan's fallback instruction, **this
-document is the normative side of the contract**: WU2's `queue.ts` must
-conform to the shape defined here, not the reverse. The exact shape was sent
-to worker `wu2-gate` directly (SendMessage, sent alongside this PR) so their
-implementation can consume it without re-deriving it. If WU2 ships a
-divergent shape, that is a bug in WU2, not a stale doc here — this file should
-be updated only if the owner explicitly re-resolves the contract, not
-silently patched to match an implementation that drifted.
+document was the normative side of the contract**: WU2's `queue.ts` was
+required to conform to the shape defined here, not the reverse. The exact
+shape was sent to worker `wu2-gate` directly (SendMessage) so their
+implementation could consume it without re-deriving it.
+
+**Outcome (confirmed 2026-07-06):** WU2 shipped `gate/surfaces/queue.ts`
+(assistant-agent PR #4, merged `e492f745`) with a `QueueFileEntry` byte-
+identical to the shape below — field names, types, and the "no expired/
+timeout status in the file" design point all match exactly, confirmed by
+wu2-gate directly and independently by reading the merged file. No
+divergence occurred; no re-resolution was needed.
 
 ## Queue contract
 
