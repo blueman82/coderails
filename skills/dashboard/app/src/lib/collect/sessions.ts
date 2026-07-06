@@ -147,6 +147,7 @@ export function collectLoops(baseDir: string): LoopInfo[] {
       const unitTitles = readUnitTitles(record.work_units);
       loops.push({
         slug,
+        name: readLoopName(record, slug),
         sessionId: typeof record.session_id === "string" ? record.session_id : sessionId,
         status: typeof record.status === "string" ? record.status : "",
         workUnitsDone: unitTitles.filter((u) => u.done).length,
