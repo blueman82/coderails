@@ -1,25 +1,23 @@
 import "@/styles/hud.css";
-import { DashboardProvider } from "@/components/DashboardProvider";
-import { Header } from "@/components/Header";
-import { RailLeft } from "@/components/RailLeft";
-import { RailRight } from "@/components/RailRight";
-import { BottomHero } from "@/components/BottomHero";
-import { Scene } from "@/components/sphere/Scene";
+import { getRunToken } from "@/app/api/run/route";
+import { loadConfig } from "@/lib/config";
+import { DashboardApp } from "@/components/DashboardApp";
+import type { DeckButton } from "@/components/DashboardApp";
 
+// Server component: this is the ONLY place the run token and the config's button declarations
+// are read. Both are handed to the client tree as props — never via any API/SSE payload — per
+// runlog.ts's mintToken comment: an attacker who can only reach the HTTP API must not be able to
+// recover the token. Buttons are narrowed to exactly the fields the client needs (name, label,
+// profile, inputAllowed) — cwd/command never leave the server.
 export default function Home() {
-  return (
-    <div className="hud-root">
-      <Scene />
-      <div className="hud-floor-fade" />
+  const token = getRunToken();
+  const config = loadConfig();
+  const buttons: DeckButton[] = config.buttons.map((b) => ({
+    name: b.name,
+    label: b.label,
+    profile: b.profile,
+    inputAllowed: b.inputAllowed ?? false,
+  }));
 
-      <DashboardProvider>
-        <div className="hud-stage">
-          <Header />
-          <RailLeft />
-          <RailRight />
-          <BottomHero />
-        </div>
-      </DashboardProvider>
-    </div>
-  );
+  return <DashboardApp token={token} buttons={buttons} />;
 }
