@@ -110,14 +110,19 @@ export function getRunToken(dir: string = DEFAULT_TOKEN_DIR): string {
   }
 
   const minted = mintToken();
-  mkdirSync(dir, { recursive: true });
+  // 0o700/0o600: this is a credential (the run-auth secret, see mintToken's comment) — unlike
+  // runs.jsonl/lock files, it must not be world- or group-readable. mkdirSync's mode only takes
+  // effect when it actually creates the dir (a no-op on an existing dir, same as elsewhere in
+  // this file), so an existing ~/.claude/coderails-dashboard/ with looser perms isn't tightened
+  // retroactively — acceptable since that directory holds no other secrets today.
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
   // "wx" (exclusive create) closes the same race two worker processes
   // starting simultaneously would otherwise hit: if another process won the
   // race and already wrote the file between our read and write, re-read
   // its value instead of clobbering it with a second, different token.
   let token: string;
   try {
-    writeFileSync(path, minted, { flag: "wx" });
+    writeFileSync(path, minted, { flag: "wx", mode: 0o600 });
     token = minted;
   } catch {
     token = readFileSync(path, "utf-8").trim();
