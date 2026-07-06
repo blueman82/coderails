@@ -36,13 +36,36 @@ Seven panels:
 scripts/start-dashboard.sh
 ```
 
-Starts the local server and opens the dashboard in the browser.
+First run installs dependencies (`npm ci`) and builds the app (`npm run
+build`); later runs skip both when `node_modules` and a fresh `.next` build
+already exist, so a re-launch is fast. Starts the production server
+(`npm run start`) on `127.0.0.1:4173`, writes its pid to
+`~/.claude/coderails-dashboard/dashboard.pid`, and opens the dashboard in the
+browser.
+
+Override the port with `DASHBOARD_PORT`:
+
+```
+DASHBOARD_PORT=4200 scripts/start-dashboard.sh
+```
 
 ## Stopping
 
-Stop the process the start script launched (e.g. `Ctrl-C` in its terminal, or
-kill the PID it reports). Killing the process is enough — the dashboard keeps
+```
+scripts/stop-dashboard.sh
+```
+
+Kills the process recorded in the pidfile and removes it. The dashboard keeps
 no state of its own outside the config and run-history files below.
+
+## First run without a config
+
+If `~/.claude/coderails-dashboard.json` doesn't exist yet, the server still
+starts — it just runs with an empty config, so every panel renders its
+explicit empty state (no repos polled, no buttons declared) instead of
+erroring. Add the config once you're ready to point it at real repos, wiki
+paths, and COMMAND DECK buttons; no restart-and-hope required beyond a normal
+reload.
 
 ## Configuration
 
