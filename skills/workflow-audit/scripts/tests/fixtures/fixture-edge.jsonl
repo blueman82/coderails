@@ -1,0 +1,5 @@
+{"type":"last-prompt","prompt":"resume cache text that must never be read"}
+{"type":"user","message":{"role":"user","content":"a bare string content field, not a list of parts"},"timestamp":"2026-07-02T09:00:00Z"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"Bash","input":{"command":"npm   test --silent"}}]},"timestamp":"2026-07-02T09:00:05Z"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"mcp__claude-in-chrome__navigate","input":{"url":"https://example.com"}}]},"timestamp":"2026-07-02T09:00:10Z"}
+{"type":"assistant","message":{"role":"assistant","content":"a bare string assistant content field"},"timestamp":"2026-07-02T09:00:15Z"}
