@@ -14,7 +14,7 @@ const COMMANDS = [
 ];
 
 export function RailRight() {
-  const { snapshot } = useDashboardState();
+  const { snapshot } = useDashboardContext();
   const { runs, gates } = snapshot;
 
   return (
