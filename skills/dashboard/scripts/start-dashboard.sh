@@ -51,6 +51,15 @@ if [[ -f "$PID_FILE" ]]; then
   rm -f "$PID_FILE"
 fi
 
+# Fail loudly if some other process already holds the port, rather than
+# starting a doomed child and later mistaking that foreign process's
+# response for our own server's readiness.
+if holder="$(lsof -nP -iTCP:"$PORT" -sTCP:LISTEN 2>/dev/null)" && [[ -n "$holder" ]]; then
+  echo "Port $PORT is already in use by another process:" >&2
+  echo "$holder" >&2
+  exit 1
+fi
+
 nohup npm run start -- --hostname "$HOST" --port "$PORT" > "$LOG_FILE" 2>&1 &
 SERVER_PID=$!
 disown "$SERVER_PID" 2>/dev/null || true
@@ -75,6 +84,14 @@ done
 
 if [[ "$READY" != "true" ]]; then
   echo "Dashboard did not become ready within 10s. See $LOG_FILE" >&2
+  exit 1
+fi
+
+# A 200 response doesn't by itself prove our server answered it — confirm
+# our child is still the one alive before declaring success.
+if ! kill -0 "$SERVER_PID" 2>/dev/null; then
+  echo "Dashboard server exited after reporting ready. See $LOG_FILE" >&2
+  rm -f "$PID_FILE"
   exit 1
 fi
 
