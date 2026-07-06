@@ -149,4 +149,11 @@ describe("getRunToken", () => {
     expect(existsSync(join(dir, "run-token"))).toBe(true);
     expect(readFileSync(join(dir, "run-token"), "utf-8").trim()).toBe(token);
   });
+
+  it("creates the token file mode 0600 — not world/group readable (it's a credential)", () => {
+    const dir = tmpRunsDir();
+    getRunToken(dir);
+    const mode = statSync(join(dir, "run-token")).mode & 0o777;
+    expect(mode).toBe(0o600);
+  });
 });
