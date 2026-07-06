@@ -17,6 +17,7 @@ interface RawButton {
   cwd?: unknown;
   profile?: unknown;
   inputAllowed?: unknown;
+  bypassPermissions?: unknown;
 }
 
 function isValidButton(button: RawButton): button is {
@@ -34,7 +35,11 @@ function isValidButton(button: RawButton): button is {
     typeof button.cwd === "string" &&
     typeof button.profile === "string" &&
     PERMISSION_PROFILES.includes(button.profile as PermissionProfile) &&
-    (button.inputAllowed === undefined || typeof button.inputAllowed === "boolean")
+    (button.inputAllowed === undefined || typeof button.inputAllowed === "boolean") &&
+    // Same safety declaration the app's loadConfig requires (skills/dashboard/app/src/lib/config.ts):
+    // a "bypass" profile button must explicitly opt in via bypassPermissions: true in the JSON,
+    // independent of whatever buildArgv itself does with the profile.
+    (button.profile !== "bypass" || button.bypassPermissions === true)
   );
 }
 
