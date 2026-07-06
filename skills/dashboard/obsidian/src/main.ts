@@ -1,16 +1,22 @@
 import { Plugin, TFile, TFolder, MarkdownPostProcessorContext } from "obsidian";
-import { readFileSync } from "node:fs";
+import { execFile as execFileReal } from "node:child_process";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { randomBytes } from "node:crypto";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { renderCommandCentre } from "./render";
+import { renderCommandCentre, renderErrorRow } from "./render";
 import type { ActivityItem, ButtonItem, CommandCentreSnapshot, Metrics } from "./render";
 import { parseDashboardConfig } from "./config";
+import { pressButton } from "./exec";
+import type { ExecDeps, UnresolvedRun } from "./exec";
 // styles.css lives at the plugin root (not imported here) — Obsidian loads
 // a plugin's styles.css automatically alongside main.js and manifest.json.
 
 const DASHBOARD_RUNS_FOLDER = "dashboard-runs";
 const METRICS_NOTE_PATH = `${DASHBOARD_RUNS_FOLDER}/_metrics.json`;
 const DASHBOARD_CONFIG_PATH = join(homedir(), ".claude", "coderails-dashboard.json");
+const DASHBOARD_DIR = join(homedir(), ".claude", "coderails-dashboard");
+const QUEUE_DIR = join(DASHBOARD_DIR, "queue");
 
 function firstBodyLine(content: string): string {
   // Strip the frontmatter block (--- ... ---) before taking the first
