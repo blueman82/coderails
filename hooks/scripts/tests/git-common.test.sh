@@ -307,8 +307,26 @@ check "has_coderails_review_for_head: malicious pre-seeded _PR_TRUSTED_LOGIN is 
 unset _PR_TRUSTED_LOGIN
 
 # ─── Clean-break: the capped gh pr view --json comments fetch is fully gone ──
-count=$(grep -c 'pr view --json comments' "$(cd "$(dirname "$0")/../../.." && pwd)/scripts/lib/git-common.sh")
-check "clean-break: no remaining 'gh pr view --json comments' call in git-common.sh" 0 "$count"
+# The old code read `gh pr view "$num" --json comments` — the PR number sits
+# BETWEEN `view` and `--json`, so a literal 'pr view --json comments' string
+# never matched it even before this fix and would pass vacuously against
+# unchanged old code. Use a regex that bridges the argument instead.
+GIT_COMMON_SH="$(cd "$(dirname "$0")/../../.." && pwd)/scripts/lib/git-common.sh"
+count=$(grep -cE 'pr view .*--json comments' "$GIT_COMMON_SH")
+check "clean-break: no remaining 'gh pr view ... --json comments' call in git-common.sh" 0 "$count"
+
+# Control: the SAME -E pattern must find the old call in the pre-change blob,
+# proving this guard can actually fail (i.e. it isn't vacuous the way the
+# literal-string version was). Skipped gracefully if the commit isn't
+# reachable (e.g. a shallow clone) rather than failing the suite.
+OLD_BLOB_SHA="7aab163b59481ddb94dd6324375b4155f2014582"
+if old_blob=$(git show "${OLD_BLOB_SHA}:scripts/lib/git-common.sh" 2>/dev/null); then
+    old_count=$(printf '%s\n' "$old_blob" | grep -cE 'pr view .*--json comments')
+    check "clean-break control: -E pattern finds the old call in the pre-change blob (guard is not vacuous)" "true" \
+      "$([[ "$old_count" -ge 1 ]] && echo true || echo false)"
+else
+    echo "skip - clean-break control: pre-change commit $OLD_BLOB_SHA not reachable (shallow clone?)"
+fi
 
 # ─── Pagination: a matching marker beyond the 100th comment row is found ────
 # Build 105 filler rows (untrusted, non-matching) then a 106th trusted OWNER
