@@ -106,6 +106,7 @@ if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
   }
   session_id=$(als_sanitise_session_id "$(echo "$input" | jq -r '.session_id // "?"' 2>/dev/null)")
   cwd=$(echo "$input" | jq -r '.cwd // empty' 2>/dev/null)
+  [ -z "$cwd" ] && cwd="$PWD"  # F3 fix: fall back to $PWD when .cwd is absent
 
   [ -n "$transcript" ] && [ -f "$transcript" ] || {
     als_log "hook=unregistered_loop_guard session=$session_id nudged=0 reason=no_transcript"
