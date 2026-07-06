@@ -58,6 +58,7 @@ merge::main() {
                 case "${PR_TRUST_FETCH_FAIL_REASON:-}" in
                     identity)   err "GitHub fetch failed — could not resolve the authenticated identity (gh api user). Retry, or check gh auth/network." ;;
                     permission) err "GitHub fetch failed — could not resolve repo permission for the authenticated identity. Retry, or check gh auth/network." ;;
+                    tempfile)   err "Local temporary file allocation failed (mktemp) before any GitHub fetch was attempted. Check /tmp disk space or permissions, then retry." ;;
                     *)          err "GitHub fetch failed — could not fetch PR comments. Retry, or check gh auth/network." ;;
                 esac
             elif [[ $gate_rc -ne 0 ]]; then
@@ -76,6 +77,7 @@ merge::main() {
                 case "${PR_TRUST_FETCH_FAIL_REASON:-}" in
                     identity)   err "GitHub fetch failed — could not resolve the authenticated identity (gh api user) for the eval artifact gate. Retry, or check gh auth/network." ;;
                     permission) err "GitHub fetch failed — could not resolve repo permission for the eval artifact gate. Retry, or check gh auth/network." ;;
+                    tempfile)   err "Local temporary file allocation failed (mktemp) before any GitHub fetch was attempted for the eval artifact gate. Check /tmp disk space or permissions, then retry." ;;
                     *)          err "GitHub fetch failed — could not fetch PR comments for eval artifact. Retry, or check gh auth/network." ;;
                 esac
             elif [[ $eval_gate_rc -ne 0 ]]; then

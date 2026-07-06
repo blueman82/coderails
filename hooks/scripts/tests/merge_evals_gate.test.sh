@@ -199,6 +199,13 @@ check "merge: eval-gate identity and fallback fetch-fail messages are DISTINCT" 
 check "merge: eval-gate permission and fallback fetch-fail messages are DISTINCT" "true" \
   "$([[ "$EVAL_PERMISSION_MSG" != "$EVAL_FALLBACK_MSG" ]] && echo true || echo false)"
 
+# ─── Test 4d (Loop 2 WU-B1): PR_TRUST_FETCH_FAIL_REASON=tempfile on the
+# eval-artifact gate, mirroring Test 3d in merge.test.sh for the review gate.
+run_evals_gate_test 0 2 "" tempfile
+rc=$?
+check "merge blocks on eval-gate tempfile-allocation failure" 1 $rc
+check_msg "merge: eval tempfile-fail message names the tempfile/local cause" "temporary file" "$LAST_STDERR"
+
 # ─── Test 5: NO-GO at tier 0 (defensive case — shouldn't normally happen) ────
 run_evals_gate_test 0 1 0
 rc=$?
