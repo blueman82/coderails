@@ -1,4 +1,9 @@
 "use client";
+/* eslint-disable react-hooks/set-state-in-effect --
+   `pos` genuinely needs a one-time re-seed once the caller's window.innerWidth/Height-derived
+   anchor resolves past its {0,0} SSR placeholder (see the effect below) — there is no pure-render
+   derivation of "adopt this later value exactly once, then never again," same class of exception
+   as this file's siblings (Header.tsx, RailLeft.tsx, Scene.tsx). */
 
 import { useEffect, useRef, useState } from "react";
 
