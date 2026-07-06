@@ -26,7 +26,7 @@ SHA="deadbeef"
 FIX_OK="$TMP/ok.json"
 jq -n --arg sha "$SHA" '{
   tier: 1,
-  tier_justification: "",
+  tier_justification: "2 work-units, no irreversible surface",
   head_sha: $sha,
   evals: [
     {id:"e1", priority:"P0", mode:"scripted", status:"pass", cmd:"run-a", negative_control:"run-a-broken", evidence:"log line 1"},
@@ -50,7 +50,7 @@ check "validate_structure: invalid JSON → exit 1" 1 $?
 [[ "$stderr_out" == *"file not found or invalid JSON"* ]]
 check "validate_structure: invalid JSON → stderr mentions reason" 0 $?
 
-# ─── check 2: tier 0 with empty tier_justification ───────────────────────────
+# ─── check 2: tier_justification required at EVERY tier (owner directive) ────
 FIX_TIER0_EMPTY="$TMP/tier0_empty.json"
 jq -n --arg sha "$SHA" '{
   tier: 0,
@@ -60,7 +60,7 @@ jq -n --arg sha "$SHA" '{
 }' > "$FIX_TIER0_EMPTY"
 stderr_out=$(post_evals::validate_structure "$FIX_TIER0_EMPTY" 42 "$SHA" 2>&1)
 check "validate_structure: tier 0 empty tier_justification → exit 1" 1 $?
-[[ "$stderr_out" == *"tier 0 requires"* ]]
+[[ "$stderr_out" == *"tier 0"*"requires"*"tier_justification"* ]]
 check "validate_structure: tier 0 empty tier_justification → stderr mentions reason" 0 $?
 
 # tier-0 exemption path: non-empty tier_justification, empty evals → exit 0
@@ -76,11 +76,119 @@ check "validate_structure: tier 0 with justification, empty evals → exit 0" 0 
 result=$(post_evals::compute_and_validate_result "$FIX_TIER0_OK")
 check_str "compute_and_validate_result: tier-0 exemption → GO (vacuous)" "GO" "$result"
 
+# tier 1 with null tier_justification → refused (this is the new behaviour;
+# previously only tier 0 was checked, so this used to pass check 2 and fall
+# through to later checks).
+FIX_TIER1_NULL_JUST="$TMP/tier1_null_just.json"
+jq -n --arg sha "$SHA" '{
+  tier: 1,
+  tier_justification: null,
+  head_sha: $sha,
+  evals: [
+    {id:"e1", priority:"P0", mode:"scripted", status:"pass", cmd:"run-a", negative_control:"run-a-broken", evidence:"log"}
+  ]
+}' > "$FIX_TIER1_NULL_JUST"
+stderr_out=$(post_evals::validate_structure "$FIX_TIER1_NULL_JUST" 42 "$SHA" 2>&1)
+check "validate_structure: tier 1 null tier_justification → exit 1" 1 $?
+[[ "$stderr_out" == *"tier 1"*"requires"*"tier_justification"* ]]
+check "validate_structure: tier 1 null tier_justification → stderr names tier + reason" 0 $?
+
+# tier 2 with empty-string tier_justification → refused.
+FIX_TIER2_EMPTY_JUST="$TMP/tier2_empty_just.json"
+jq -n --arg sha "$SHA" '{
+  tier: 2,
+  tier_justification: "",
+  head_sha: $sha,
+  evals: [
+    {id:"e1", priority:"P0", mode:"scripted", status:"pass", cmd:"run-a", negative_control:"run-a-broken", evidence:"log"}
+  ]
+}' > "$FIX_TIER2_EMPTY_JUST"
+stderr_out=$(post_evals::validate_structure "$FIX_TIER2_EMPTY_JUST" 42 "$SHA" 2>&1)
+check "validate_structure: tier 2 empty tier_justification → exit 1" 1 $?
+[[ "$stderr_out" == *"tier 2"*"requires"*"tier_justification"* ]]
+check "validate_structure: tier 2 empty tier_justification → stderr names tier + reason" 0 $?
+
+# tier 2 with whitespace-only tier_justification → still refused (must not
+# just be non-empty string, must be non-blank).
+FIX_TIER2_WHITESPACE_JUST="$TMP/tier2_whitespace_just.json"
+jq -n --arg sha "$SHA" '{
+  tier: 2,
+  tier_justification: "   ",
+  head_sha: $sha,
+  evals: [
+    {id:"e1", priority:"P0", mode:"scripted", status:"pass", cmd:"run-a", negative_control:"run-a-broken", evidence:"log"}
+  ]
+}' > "$FIX_TIER2_WHITESPACE_JUST"
+stderr_out=$(post_evals::validate_structure "$FIX_TIER2_WHITESPACE_JUST" 42 "$SHA" 2>&1)
+check "validate_structure: tier 2 whitespace-only tier_justification → exit 1" 1 $?
+[[ "$stderr_out" == *"tier 2"*"requires"*"tier_justification"* ]]
+check "validate_structure: tier 2 whitespace-only tier_justification → stderr names tier + reason" 0 $?
+
+# tier>=1 with tier_justification KEY ABSENT entirely (not just blank) →
+# refused, same as an explicit blank (reviewer request: missing-key fixture).
+FIX_TIER1_NO_KEY="$TMP/tier1_no_key.json"
+jq -n --arg sha "$SHA" '{
+  tier: 1,
+  head_sha: $sha,
+  evals: [
+    {id:"e1", priority:"P0", mode:"scripted", status:"pass", cmd:"run-a", negative_control:"run-a-broken", evidence:"log"}
+  ]
+}' > "$FIX_TIER1_NO_KEY"
+stderr_out=$(post_evals::validate_structure "$FIX_TIER1_NO_KEY" 42 "$SHA" 2>&1)
+check "validate_structure: tier 1, tier_justification key absent → exit 1" 1 $?
+[[ "$stderr_out" == *"tier 1"*"requires"*"tier_justification"* ]]
+check "validate_structure: tier 1, tier_justification key absent → stderr names tier + reason" 0 $?
+
+# tier key ALSO absent (alongside tier_justification) → the message's tier
+# interpolation must render a placeholder, not a blank "tier  requires...".
+FIX_NO_TIER_NO_JUST="$TMP/no_tier_no_just.json"
+jq -n --arg sha "$SHA" '{
+  head_sha: $sha,
+  evals: []
+}' > "$FIX_NO_TIER_NO_JUST"
+stderr_out=$(post_evals::validate_structure "$FIX_NO_TIER_NO_JUST" 42 "$SHA" 2>&1)
+check "validate_structure: tier key absent, tier_justification key absent → exit 1" 1 $?
+[[ "$stderr_out" == *"tier <unset> requires"*"tier_justification"* ]]
+check "validate_structure: tier key absent → stderr renders <unset> placeholder, not blank" 0 $?
+
+# non-string tier_justification (a number) → jq's gsub errors on a non-string
+# operand ("number (42) cannot be matched, as it is not a string"), so the
+# $(...) capture is empty and check 2's blank-justification branch fires →
+# refused, fail-closed. Pinned here so a future trim rewrite can't silently
+# start accepting non-string values (reviewer request).
+FIX_NUMERIC_JUST="$TMP/numeric_just.json"
+jq -n --arg sha "$SHA" '{
+  tier: 1,
+  tier_justification: 42,
+  head_sha: $sha,
+  evals: [
+    {id:"e1", priority:"P0", mode:"scripted", status:"pass", cmd:"run-a", negative_control:"run-a-broken", evidence:"log"}
+  ]
+}' > "$FIX_NUMERIC_JUST"
+stderr_out=$(post_evals::validate_structure "$FIX_NUMERIC_JUST" 42 "$SHA" 2>&1)
+check "validate_structure: numeric tier_justification (42) → exit 1 (jq type error, fail-closed)" 1 $?
+[[ "$stderr_out" == *"tier 1"*"requires"*"tier_justification"* ]]
+check "validate_structure: numeric tier_justification → stderr names tier + reason" 0 $?
+
+# tier 1 with a real justification string → passes check 2 (falls through to
+# later structural checks, which this fixture also satisfies, so exit 0).
+FIX_TIER1_REAL_JUST="$TMP/tier1_real_just.json"
+jq -n --arg sha "$SHA" '{
+  tier: 1,
+  tier_justification: "2 work-units, no irreversible surface",
+  head_sha: $sha,
+  evals: [
+    {id:"e1", priority:"P0", mode:"scripted", status:"pass", cmd:"run-a", negative_control:"run-a-broken", evidence:"log"}
+  ]
+}' > "$FIX_TIER1_REAL_JUST"
+post_evals::validate_structure "$FIX_TIER1_REAL_JUST" 42 "$SHA"
+check "validate_structure: tier 1 with real justification → exit 0" 0 $?
+
 # ─── check 3: tier>=1 scripted eval with empty negative_control ─────────────
 FIX_EMPTY_NC="$TMP/empty_nc.json"
 jq -n --arg sha "$SHA" '{
   tier: 1,
-  tier_justification: "",
+  tier_justification: "2 work-units, no irreversible surface",
   head_sha: $sha,
   evals: [
     {id:"e1", priority:"P0", mode:"scripted", status:"pass", cmd:"run-a", negative_control:"", evidence:"log"}
@@ -95,7 +203,7 @@ check "validate_structure: empty negative_control → stderr names id + reason" 
 FIX_IDENTICAL_NC="$TMP/identical_nc.json"
 jq -n --arg sha "$SHA" '{
   tier: 1,
-  tier_justification: "",
+  tier_justification: "2 work-units, no irreversible surface",
   head_sha: $sha,
   evals: [
     {id:"e1", priority:"P0", mode:"scripted", status:"pass", cmd:"run-a", negative_control:"run-a", evidence:"log"}
@@ -112,7 +220,7 @@ check "validate_structure: identical negative_control → stderr names id + reas
 FIX_TRAILING_SPACE="$TMP/trailing_space_nc.json"
 jq -n --arg sha "$SHA" '{
   tier: 1,
-  tier_justification: "",
+  tier_justification: "2 work-units, no irreversible surface",
   head_sha: $sha,
   evals: [
     {id:"e1", priority:"P0", mode:"scripted", status:"pass", cmd:"run-a", negative_control:"run-a  ", evidence:"log"}
@@ -127,7 +235,7 @@ check "validate_structure: trailing-space variant → stderr names id + reason" 
 FIX_TRUE_WRAP="$TMP/true_wrap_nc.json"
 jq -n --arg sha "$SHA" '{
   tier: 1,
-  tier_justification: "",
+  tier_justification: "2 work-units, no irreversible surface",
   head_sha: $sha,
   evals: [
     {id:"e1", priority:"P0", mode:"scripted", status:"pass", cmd:"run-a", negative_control:"true; run-a", evidence:"log"}
@@ -142,7 +250,7 @@ check "validate_structure: 'true; cmd' wrapper → stderr names id" 0 $?
 FIX_ECHO_WRAP="$TMP/echo_wrap_nc.json"
 jq -n --arg sha "$SHA" '{
   tier: 1,
-  tier_justification: "",
+  tier_justification: "2 work-units, no irreversible surface",
   head_sha: $sha,
   evals: [
     {id:"e1", priority:"P0", mode:"scripted", status:"pass", cmd:"run-a", negative_control:"echo x && run-a", evidence:"log"}
@@ -157,7 +265,7 @@ check "validate_structure: echo-wrap wrapper → stderr names id" 0 $?
 FIX_LEGIT_DIFFERENT="$TMP/legit_different_nc.json"
 jq -n --arg sha "$SHA" '{
   tier: 1,
-  tier_justification: "",
+  tier_justification: "2 work-units, no irreversible surface",
   head_sha: $sha,
   evals: [
     {id:"e1", priority:"P0", mode:"scripted", status:"pass", cmd:"run-a", negative_control:"break-the-fixture-under-test", evidence:"log"}
@@ -170,7 +278,7 @@ check "validate_structure: legitimately different negative_control (different co
 FIX_EMPTY_EVIDENCE="$TMP/empty_evidence.json"
 jq -n --arg sha "$SHA" '{
   tier: 1,
-  tier_justification: "",
+  tier_justification: "2 work-units, no irreversible surface",
   head_sha: $sha,
   evals: [
     {id:"e1", priority:"P0", mode:"scripted", status:"pass", cmd:"run-a", negative_control:"run-a-broken", evidence:""}
@@ -196,7 +304,7 @@ check "validate_structure: head_sha mismatch → stderr mentions both shas" 0 $?
 FIX_TIER1_EMPTY_EVALS="$TMP/tier1_empty_evals.json"
 jq -n --arg sha "$SHA" '{
   tier: 1,
-  tier_justification: "",
+  tier_justification: "2 work-units, no irreversible surface",
   head_sha: $sha,
   evals: []
 }' > "$FIX_TIER1_EMPTY_EVALS"
@@ -208,7 +316,7 @@ check "validate_structure: tier 1 + empty evals → stderr names the P0 reason" 
 FIX_TIER1_ONLY_P1="$TMP/tier1_only_p1.json"
 jq -n --arg sha "$SHA" '{
   tier: 1,
-  tier_justification: "",
+  tier_justification: "2 work-units, no irreversible surface",
   head_sha: $sha,
   evals: [
     {id:"e1", priority:"P1", mode:"scripted", status:"pass", cmd:"run-a", negative_control:"run-a-broken", evidence:"log"}
@@ -247,7 +355,7 @@ check_str "compute_and_validate_result: all-pass fixture → GO" "GO" "$result"
 FIX_FAIL="$TMP/fail.json"
 jq -n --arg sha "$SHA" '{
   tier: 1,
-  tier_justification: "",
+  tier_justification: "2 work-units, no irreversible surface",
   head_sha: $sha,
   evals: [
     {id:"e1", priority:"P0", mode:"scripted", status:"fail", cmd:"run-a", negative_control:"run-a-broken", evidence:"log"}

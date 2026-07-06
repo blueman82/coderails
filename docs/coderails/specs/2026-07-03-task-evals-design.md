@@ -59,7 +59,7 @@ The generation method. Invoked at task intake — by agentic-loop at Phase 2.7 (
   "scope": "pr | loop",
   "task_ref": "<branch/PR# for pr scope; session loop ordinal for loop scope>",
   "tier": 0,
-  "tier_justification": "<required when tier is 0>",
+  "tier_justification": "<required at every tier: tier 0 = why the exemption is legitimate; tier 1/2 = which tier predicate fired>",
   "frozen_at": "<ISO8601>",
   "frozen_sha": "<base SHA at freeze>",
   "evals": [
@@ -87,7 +87,7 @@ Storage: loop scope → loop-state dir beside `progress.json` (path from `agenti
 ### 3. PR-scope artifact: marker + writer + reader
 
 - **Marker SSOT**: new `scripts/lib/eval-artifact.sh`, sibling of `review-artifact.sh`, one constructor sourced by writer and reader. Marker shape: `<!-- coderails-eval-summary v1 pr=<N> head_sha=<SHA> result=<GO|NO-GO> tier=<0|1|2> -->`. Exact-line equality matching, unknown versions never match (fail-closed) — same contract as the review marker.
-- **Writer**: `scripts/post_evals.sh` (+ thin command doc). Validates structure before posting — refuses if: tier ≥1 and any scripted eval lacks a non-empty `negative_control`; any P0 lacks `evidence`; `result` inconsistent with per-eval statuses; `head_sha` ≠ current PR head. Computes `result` itself from per-eval statuses (the neutral party — the orchestrator never writes it). Tier-0 path posts an exemption artifact carrying the justification instead of eval results.
+- **Writer**: `scripts/post_evals.sh` (+ thin command doc). Validates structure before posting — refuses if: `tier_justification` is blank at any tier; tier ≥1 and any scripted eval lacks a non-empty `negative_control`; any P0 lacks `evidence`; `result` inconsistent with per-eval statuses; `head_sha` ≠ current PR head. Computes `result` itself from per-eval statuses (the neutral party — the orchestrator never writes it). Tier-0 path posts an exemption artifact carrying the justification instead of eval results.
 - **Reader**: `scripts/merge.sh` gains a second gate directly after the review-artifact gate, same fail-closed semantics: GitHub fetch failure → block with retry message; no matching marker for current head → block with remediation hint; marker present but `result=NO-GO` → block. Tier-0 exemption marker satisfies the gate.
 
 ### 4. Loop-scope gate: `loop_state_guard` family extension
@@ -111,6 +111,8 @@ Concrete predicates, not vibes — same design rationale as agentic-loop Phase 2
 - **Tier 0 (exempt, justified):** single work-unit AND no outward/irreversible surface AND an existing test or verify-criterion already covers the goal state. The exemption is still a written artifact — the gates accept a justified exemption, never an absence.
 - **Tier 1 (standard):** anything above tier 0 that doesn't meet a tier-2 predicate — 3–5 end-state evals, ≥1 negative control, P0/P1 split.
 - **Tier 2 (full suite):** ≥3 work-units (the line Phase 2.7/Phase 3 already draw) OR any irreversible/outward surface (publish, deploy, migration, data deletion, external send). Full suite with pre+post surfaces where applicable and the GO/NO-GO rule stated in the artifact.
+
+`tier_justification` is required at every tier, not only tier 0: at tier 0 it states why the exemption is legitimate; at tier 1/2 it names which predicate fired (e.g. "2 work-units, no irreversible surface" or "≥3 work-units"). A blank justification is refused by the writer (`post_evals.sh validate-structure`, check 2) at pr scope, and by the loop gate (`loop_state_guard.sh` via `als_read_loop_evals_result`) at loop scope — the pr-scope MERGE reader itself only parses the posted marker comment (result/tier, no justification field), so enforcement there is entirely writer-side, at post time.
 
 ## Honest boundaries
 

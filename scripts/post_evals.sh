@@ -28,14 +28,16 @@ post_evals::validate_structure() {
     local tier
     tier=$(jq -r '.tier // ""' "$path")
 
-    # Check 2: tier 0 requires non-empty tier_justification.
-    if [[ "$tier" == "0" ]]; then
-        local justification
-        justification=$(jq -r '.tier_justification // ""' "$path")
-        if [[ -z "$justification" ]]; then
-            printf 'post_evals: tier 0 requires non-empty tier_justification\n' >&2
-            return 1
-        fi
+    # Check 2: every tier requires a non-blank tier_justification — tier 0
+    # justifies the exemption itself; tier>=1 justifies which tier predicate
+    # fired (owner directive: tightens this from tier-0-only to all tiers).
+    # "Non-blank" is trim-then-check, not merely non-empty, so a
+    # whitespace-only string doesn't slip through.
+    local justification
+    justification=$(jq -r '.tier_justification // "" | gsub("^\\s+|\\s+$"; "")' "$path")
+    if [[ -z "$justification" ]]; then
+        printf 'post_evals: tier %s requires a non-blank tier_justification\n' "${tier:-<unset>}" >&2
+        return 1
     fi
 
     # Checks 3-5 only apply when there are scripted/P0 evals to check — a

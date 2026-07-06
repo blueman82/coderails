@@ -87,6 +87,20 @@ gate_loop_evals_required() {
 Generate loop-scope evals via /coderails:task-evals (or a justified tier-0 exemption) and grade them GO before declaring complete." >&2
           exit 2
           ;;
+        UNJUSTIFIED)
+          als_log "hook=loop_state_guard session=$session_id work_units=$ALS_WORK_UNIT_COUNT evals=$ALS_LOOP_EVALS_RESULT blocked=1"
+          echo "[loop-state-guard] Loop complete with $ALS_WORK_UNIT_COUNT work-units, and evals.json at:
+  $loop_dir/evals.json
+grades GO/TIER0 but is missing a non-blank tier_justification. Add a tier_justification (at tier 0: why the exemption is legitimate; at tier 1/2: which tier predicate fired) before declaring complete." >&2
+          exit 2
+          ;;
+        *)
+          als_log "hook=loop_state_guard session=$session_id work_units=$ALS_WORK_UNIT_COUNT evals=$ALS_LOOP_EVALS_RESULT blocked=1 reason=unrecognised_evals_result"
+          echo "[loop-state-guard] Loop complete with $ALS_WORK_UNIT_COUNT work-units, but evals.json at:
+  $loop_dir/evals.json
+produced an unrecognised result ('$ALS_LOOP_EVALS_RESULT') from als_read_loop_evals_result. Fail-closed: treating this as a block. Inspect the file and regenerate it via /coderails:task-evals." >&2
+          exit 2
+          ;;
       esac
     else
       als_log "hook=loop_state_guard session=$session_id work_units=$ALS_WORK_UNIT_COUNT evals=skipped-below-threshold blocked=0"
