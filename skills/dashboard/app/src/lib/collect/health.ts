@@ -10,9 +10,17 @@ export interface HealthTile {
 
 export interface CollectHealthOptions {
   disciplineLogPath?: string;
+  now?: Date;
 }
 
 const DEFAULT_DISCIPLINE_LOG_PATH = join(homedir(), ".claude", "discipline.log");
+
+// Local calendar-day key (YYYY-MM-DD) for a Date, in that Date's own zone
+// offset — used to compare a log line's leading timestamp against "now"'s
+// day without normalizing either to UTC first.
+function localDayKey(date: Date): string {
+  return `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
+}
 
 // No local Claude Code usage/rate-limit file exists on disk to read from
 // (investigated: no ~/.claude/usage*, no ccusage-style cache) — ship these
