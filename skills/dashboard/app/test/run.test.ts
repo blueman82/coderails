@@ -102,6 +102,20 @@ function req(body: unknown, headers: Record<string, string> = {}): Request {
   });
 }
 
+// Like req(), but never sets an Origin header at all (not even an empty
+// string) — for testing the no-Origin/non-browser-client path, which is
+// distinct from an Origin header that is present but invalid.
+function reqNoOrigin(body: unknown, host = "127.0.0.1:3000"): Request {
+  return new Request("http://127.0.0.1:3000/api/run", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      host,
+    },
+    body: JSON.stringify(body),
+  });
+}
+
 describe("POST /api/run — token", () => {
   it("rejects a missing token with 401 and does not spawn", async () => {
     const { handler, fake } = makeHandler();
