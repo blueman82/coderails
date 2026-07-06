@@ -1,0 +1,55 @@
+---
+name: dashboard
+description: "Launch the coderails observability dashboard — a live local web HUD showing sessions, agentic loops, PR gate states, runs, and memory activity, with declared one-click skill triggers. Use when the user says 'dashboard', 'observability', 'command center', 'watch the system', or '/coderails:dashboard'."
+---
+
+# Dashboard
+
+Launch the local observability HUD for coderails: a live web view of what the
+agentic system is doing right now, backed by files already on disk (sessions,
+loop progress, wiki/memory, PR state, run history) — no new services, no
+telemetry leaving the machine.
+
+## What it shows
+
+Seven panels:
+
+1. **SYSTEM VITALS** — usage windows, hooks fired, lint findings; hero
+   numerals + sparklines. A source that can't be read locally shows
+   "unavailable", never a guess.
+2. **DIRECTIVES** — the active agentic loop's work units as a checklist
+   (from `progress.json`), with an evals-frozen footer.
+3. **DOCUMENTS / MEMORY.TRAIL** — newest-first feed across the wiki and
+   memory directories.
+4. **COMMAND DECK** — declared buttons (bounded, config-driven runs — never a
+   free prompt box) plus run history.
+5. **PR GATES** — open PRs with gate state: merge-ready / blocked (missing
+   artifact) / stale (SHA mismatch).
+6. **Bottom-centre hero** — the active loop's primary directive with a big
+   numeral (e.g. work units 2/7) and a micro ticker.
+7. **Reserved slot** — placeholder for the assistant-agent sub-project until
+   it lands.
+
+## Starting
+
+```
+scripts/start-dashboard.sh
+```
+
+Starts the local server and opens the dashboard in the browser.
+
+## Stopping
+
+Stop the process the start script launched (e.g. `Ctrl-C` in its terminal, or
+kill the PID it reports). Killing the process is enough — the dashboard keeps
+no state of its own outside the config and run-history files below.
+
+## Configuration
+
+Config lives at `~/.claude/coderails-dashboard.json` (per-user; the watch
+scope is machine-wide): which repos to poll, wiki/memory paths, and the
+button declarations for the COMMAND DECK.
+
+Buttons only ever run what this config declares. `POST /run` takes a button
+name, looks it up in the config, and refuses anything undeclared — there is
+no path from the dashboard to an arbitrary command.
