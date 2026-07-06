@@ -170,4 +170,55 @@ run_with_stub "$FAIL_STUB" pr::has_coderails_review_for_head 42 "deadbeef"
 rc=$?
 check "has_coderails_review_for_head: gh failure → exit 2 (fetch-failed, distinct from no-match)" 2 $rc
 
+# ─── pr::has_coderails_eval_for_head ─────────────────────────────────────────
+EVAL_ARTIFACT_LIB="$(cd "$(dirname "$0")/../../.." && pwd)/scripts/lib/eval-artifact.sh"
+source "$EVAL_ARTIFACT_LIB"
+
+GO_MARKER=$(eval_artifact::marker 42 "deadbeef" GO 1)
+NOGO_MARKER=$(eval_artifact::marker 42 "deadbeef" NO-GO 2)
+NOMATCH_MARKER=$(eval_artifact::marker 42 "othersha" GO 1)
+
+# Stub: comment body contains a matching GO marker → exit 0, PR_EVAL_TIER set
+MATCH_GO_STUB="printf '%s\n' '$GO_MARKER'"
+result=$(run_with_stub "$MATCH_GO_STUB" bash -c '
+  source "'"$LIB"'"
+  pr::has_coderails_eval_for_head 42 "deadbeef"
+  echo "rc=$?"
+  echo "tier=$PR_EVAL_TIER"
+')
+check "has_coderails_eval_for_head: matching GO marker → rc=0" "rc=0" "$(printf '%s\n' "$result" | grep '^rc=')"
+check "has_coderails_eval_for_head: matching GO marker → PR_EVAL_TIER=1" "tier=1" "$(printf '%s\n' "$result" | grep '^tier=')"
+
+# Stub: gh fetch fails → exit 2, PR_EVAL_TIER unset/empty
+result=$(run_with_stub "$FAIL_STUB" bash -c '
+  source "'"$LIB"'"
+  pr::has_coderails_eval_for_head 42 "deadbeef"
+  echo "rc=$?"
+  echo "tier=${PR_EVAL_TIER:-}"
+')
+check "has_coderails_eval_for_head: gh fetch fails → rc=2" "rc=2" "$(printf '%s\n' "$result" | grep '^rc=')"
+check "has_coderails_eval_for_head: gh fetch fails → PR_EVAL_TIER empty" "tier=" "$(printf '%s\n' "$result" | grep '^tier=')"
+
+# Stub: matching pr/sha but NO-GO → exit 1, PR_EVAL_TIER still set (so merge.sh can report it)
+MATCH_NOGO_STUB="printf '%s\n' '$NOGO_MARKER'"
+result=$(run_with_stub "$MATCH_NOGO_STUB" bash -c '
+  source "'"$LIB"'"
+  pr::has_coderails_eval_for_head 42 "deadbeef"
+  echo "rc=$?"
+  echo "tier=$PR_EVAL_TIER"
+')
+check "has_coderails_eval_for_head: NO-GO marker → rc=1" "rc=1" "$(printf '%s\n' "$result" | grep '^rc=')"
+check "has_coderails_eval_for_head: NO-GO marker → PR_EVAL_TIER=2" "tier=2" "$(printf '%s\n' "$result" | grep '^tier=')"
+
+# Stub: no matching marker at all → exit 1, PR_EVAL_TIER empty
+NOMATCH_STUB="printf '%s\n' '$NOMATCH_MARKER'"
+result=$(run_with_stub "$NOMATCH_STUB" bash -c '
+  source "'"$LIB"'"
+  pr::has_coderails_eval_for_head 42 "deadbeef"
+  echo "rc=$?"
+  echo "tier=${PR_EVAL_TIER:-}"
+')
+check "has_coderails_eval_for_head: no matching marker → rc=1" "rc=1" "$(printf '%s\n' "$result" | grep '^rc=')"
+check "has_coderails_eval_for_head: no matching marker → PR_EVAL_TIER empty" "tier=" "$(printf '%s\n' "$result" | grep '^tier=')"
+
 [[ $fails -eq 0 ]] && { echo PASS; exit 0; } || { echo "FAIL ($fails)"; exit 1; }

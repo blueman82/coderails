@@ -116,6 +116,14 @@ pr::head_sha() {
 pr::has_coderails_review_for_head() {
     return ${review_exit}
 }
+
+# The eval-artifact gate always passes here — this file exercises the
+# review-artifact gate in isolation. See merge_evals_gate.test.sh for the
+# eval gate's own behavioural coverage.
+pr::has_coderails_eval_for_head() {
+    PR_EVAL_TIER="1"
+    return 0
+}
 GCSTUB
 
     # Write a merge wrapper that places our stub libs where merge.sh expects them

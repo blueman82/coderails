@@ -6,6 +6,7 @@
 # Source review-artifact.sh (sibling lib) for marker matching.
 # BASH_SOURCE-relative so this works regardless of cwd.
 source "$(dirname "${BASH_SOURCE[0]}")/review-artifact.sh"
+source "$(dirname "${BASH_SOURCE[0]}")/eval-artifact.sh"
 
 # ━━━ Terminal ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 if [[ -z "${_GIT_COMMON_COLORS_LOADED:-}" ]]; then
@@ -78,6 +79,34 @@ pr::has_coderails_review_for_head() {
     while IFS= read -r line; do
         if review_artifact::matches_marker "$line" "$num" "$sha"; then
             return 0
+        fi
+    done <<< "$bodies"
+    return 1
+}
+
+# pr::has_coderails_eval_for_head <num> <sha>
+# Fetches all PR comment bodies and checks whether any LINE (across all comments)
+# is the coderails eval marker for <num>/<sha>. On any matching line, sets the
+# global PR_EVAL_TIER to the parsed tier digit.
+# Exit codes (same shape as pr::has_coderails_review_for_head):
+#   0 = found a matching artifact with result=GO
+#   1 = fetched ok, no matching GO artifact (no artifact at all, or a
+#       matching artifact exists but is NO-GO — PR_EVAL_TIER is still set
+#       in the latter case so the caller can report which tier failed)
+#   2 = gh fetch failed (fail-closed)
+pr::has_coderails_eval_for_head() {
+    local num="$1" sha="$2"
+    local bodies
+    if ! bodies=$(gh pr view "$num" --json comments -q '.comments[].body' 2>/dev/null); then
+        return 2
+    fi
+    while IFS= read -r line; do
+        if eval_artifact::matches_marker "$line" "$num" "$sha"; then
+            local result tier
+            result=$(eval_artifact::parse_result "$line")
+            tier=$(eval_artifact::parse_tier "$line")
+            PR_EVAL_TIER="$tier"
+            [[ "$result" == "GO" ]] && return 0
         fi
     done <<< "$bodies"
     return 1
