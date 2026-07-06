@@ -40,7 +40,12 @@ export function loadConfig(path: string = DEFAULT_CONFIG_PATH): DashboardConfig 
     throw new ConfigError(`Config file not found: ${path}`);
   }
 
-  const data = JSON.parse(raw) as DashboardConfig;
+  let data: DashboardConfig;
+  try {
+    data = JSON.parse(raw) as DashboardConfig;
+  } catch {
+    throw new ConfigError(`Config file has malformed JSON: ${path}`);
+  }
 
   const seenNames = new Set<string>();
   for (const button of data.buttons) {
