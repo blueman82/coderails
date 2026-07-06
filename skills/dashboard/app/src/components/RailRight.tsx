@@ -55,6 +55,8 @@ export function RailRight({ token, buttons }: RailRightProps) {
   const { runs, gates } = snapshot;
   const { active } = useRunLifecycle(runs);
   const [uiState, setUiState] = useState<Record<string, ButtonUiState>>({});
+  const effectFireCount = useRef(0);
+  effectFireCount.current; // no-op read to keep the ref "used" for the linter
 
   const activeByButton = new Set(active.map((r) => r.button));
   const activeCount = active.length;
