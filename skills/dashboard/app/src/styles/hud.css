@@ -247,6 +247,12 @@
   margin-bottom: 8px;
   font-variant-numeric: tabular-nums;
 }
+.hud-kpi-unavailable {
+  font-size: 10px;
+  color: var(--grey-dim);
+  margin-bottom: 8px;
+  line-height: 1.4;
+}
 .hud-kpi-value .hud-unit {
   font-size: 15px;
   color: var(--grey);
