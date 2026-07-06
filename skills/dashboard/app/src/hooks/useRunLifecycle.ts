@@ -83,7 +83,6 @@ export function useRunLifecycle(runs: RunRecord[]): RunLifecycleState {
     }, TICK_MS);
 
     return () => clearInterval(id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return state;
