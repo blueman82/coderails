@@ -314,6 +314,7 @@ Hooks run automatically on lifecycle events. They can **block** (exit 2 / `permi
 ### Notes on the activation conditions
 
 - **`loop_state_guard` and `loop_stall_guard`** only enforce discipline when an `agentic-loop` Skill invocation appears in the transcript. Outside an agentic loop session they are silent no-ops.
+- **`unregistered_loop_guard`** is the inverse case: it fires precisely when NO `agentic-loop` Skill invocation appears in the transcript, but dispatch behaviour looks loop-like. It never blocks — only a nudge — so it carries no bypass mechanism.
 - **`enforce_pr_workflow`** is a no-op in any repo without `workflow.config.yaml`. It only kicks in once a project is initialised with `/coderails:init`.
 - **`test_gate`** requires an explicit opt-in file (`.claude/test_command`) per project. Run `/coderails:test-gate-setup` to configure it.
 - **`destructive_bash_gate`** has no approval path — it is a permanent block. The only override is a `settings.json` Bash permission rule added by the user.
