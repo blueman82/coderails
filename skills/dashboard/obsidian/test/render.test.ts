@@ -156,6 +156,24 @@ describe("renderCommandCentre — status chip mapping", () => {
     const chip = el.querySelector(".cc-status-chip");
     expect(chip!.classList.contains("cc-chip-pending")).toBe(true);
   });
+
+  it("shows an hourglass on a running row and flips away once resolved", () => {
+    const running: CommandCentreSnapshot = {
+      metrics: null,
+      activity: [{ title: "Run", status: "running", time: "now", notePath: "dashboard-runs/x.md" }],
+      buttons: [],
+    };
+    const runningEl = renderCommandCentre(running);
+    expect(runningEl.querySelector(".cc-status-chip")!.textContent).toContain("⏳");
+
+    const done: CommandCentreSnapshot = {
+      metrics: null,
+      activity: [{ title: "Run", status: "done", time: "now", notePath: "dashboard-runs/x.md" }],
+      buttons: [],
+    };
+    const doneEl = renderCommandCentre(done);
+    expect(doneEl.querySelector(".cc-status-chip")!.textContent).not.toContain("⏳");
+  });
 });
 
 describe("renderCommandCentre — command grid", () => {
