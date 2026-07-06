@@ -77,6 +77,7 @@ Repo-relative paths below assume the coderails repo root.
 - [ ] Rewrite all semver ranges in `package.json` to exact pins (no `^`); run `npm install` to regenerate the lockfile; commit lockfile.
 - [ ] `next.config.mjs`: no special config beyond defaults; the start script (Task 10) passes `--hostname 127.0.0.1`.
 - [ ] `src/app/layout.tsx`: `<meta charSet="utf-8">`, `<title>coderails — observability terminal</title>`, dark background body.
+- [ ] Create `skills/dashboard/app/.gitignore` (`node_modules/`, `.next/`, `*.log`) and `skills/dashboard/obsidian/.gitignore` (`node_modules/` — do NOT ignore `dist/main.js`, it ships committed). The repo's root `.gitignore` has no Node entries; without these, `git add -A` stages `node_modules`.
 
 **Interfaces produced:** the app root `skills/dashboard/app` used by every later task; `npm run test` (vitest), `npm run build`, `npm run start` scripts.
 
