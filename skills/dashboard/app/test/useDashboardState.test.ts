@@ -18,7 +18,7 @@ import type { LoopInfo } from "../src/lib/collect/sessions";
 import type { RunRecord } from "../src/lib/runlog";
 
 function emptySnapshot(overrides: Partial<DashboardSnapshot> = {}): DashboardSnapshot {
-  return { sessions: [], loops: [], gates: [], trail: [], health: [], runs: [], ...overrides };
+  return { sessions: [], loops: [], gates: [], trail: [], health: [], runs: [], queue: [], ...overrides };
 }
 
 describe("mergeDashboardEvent — snapshot", () => {
