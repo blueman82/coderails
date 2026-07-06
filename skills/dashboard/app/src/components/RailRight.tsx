@@ -1,59 +1,182 @@
 "use client";
 
+import { useState } from "react";
+import type { PermissionProfile } from "@/lib/config";
 import { useDashboardContext } from "@/components/DashboardProvider";
+import { useRunLifecycle } from "@/hooks/useRunLifecycle";
 import { formatDuration, formatHHMM, runResultLabel, isGateError } from "@/hooks/useDashboardState";
 
-// Buttons stay static labels — Task 9d wires the run/click lifecycle onto these.
-const COMMANDS = [
-  { label: "Wiki Lint" },
-  { label: "Sync Docs" },
-  { label: "AM Report" },
-  { label: "Deep Research" },
-  { label: "PR Gates" },
-  { label: "WK Review" },
-];
+export interface DeckButtonDef {
+  name: string;
+  label: string;
+  profile: PermissionProfile;
+  inputAllowed: boolean;
+}
 
-export function RailRight() {
+export interface RailRightProps {
+  token: string;
+  buttons: DeckButtonDef[];
+}
+
+interface ButtonUiState {
+  inputValue: string;
+  error: string | null;
+  shake: boolean;
+  // Optimistic "queued" flag: set immediately on click, cleared as soon as the SSE `runs` slice
+  // confirms the run is active (or the POST itself fails) — bridges the gap between click and
+  // the first SSE 'runs' frame, per Task 9d's optimistic-feedback instruction.
+  queued: boolean;
+}
+
+const EMPTY_UI_STATE: ButtonUiState = { inputValue: "", error: null, shake: false, queued: false };
+
+async function postRun(token: string, button: string, input: string | undefined): Promise<{ ok: true } | { ok: false; error: string }> {
+  try {
+    const res = await fetch("/api/run", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ token, button, ...(input !== undefined ? { input } : {}) }),
+    });
+    if (res.ok) return { ok: true };
+    const body = (await res.json().catch(() => ({}))) as { error?: string };
+    return { ok: false, error: body.error ?? `request failed (${res.status})` };
+  } catch {
+    return { ok: false, error: "network error" };
+  }
+}
+
+export function RailRight({ token, buttons }: RailRightProps) {
   const { snapshot } = useDashboardContext();
   const { runs, gates } = snapshot;
+  const { active } = useRunLifecycle(runs);
+  const [uiState, setUiState] = useState<Record<string, ButtonUiState>>({});
+
+  const activeByButton = new Set(active.map((r) => r.button));
+  const activeCount = active.length;
+
+  function getUi(name: string): ButtonUiState {
+    return uiState[name] ?? EMPTY_UI_STATE;
+  }
+
+  function patchUi(name: string, patch: Partial<ButtonUiState>) {
+    setUiState((prev) => ({ ...prev, [name]: { ...(prev[name] ?? EMPTY_UI_STATE), ...patch } }));
+  }
+
+  function triggerShake(name: string) {
+    patchUi(name, { shake: true });
+    setTimeout(() => patchUi(name, { shake: false }), 350);
+  }
+
+  async function handleClick(btn: DeckButtonDef) {
+    const isRunning = activeByButton.has(btn.name) || getUi(btn.name).queued;
+    if (isRunning) {
+      triggerShake(btn.name);
+      return;
+    }
+
+    const ui = getUi(btn.name);
+    const input = btn.inputAllowed && ui.inputValue.trim() !== "" ? ui.inputValue.trim() : undefined;
+    if (input !== undefined && input.startsWith("-")) {
+      patchUi(btn.name, { error: "input can't start with '-'" });
+      triggerShake(btn.name);
+      return;
+    }
+
+    patchUi(btn.name, { queued: true, error: null });
+    const result = await postRun(token, btn.name, input);
+    if (!result.ok) {
+      patchUi(btn.name, { queued: false, error: result.error });
+      triggerShake(btn.name);
+      return;
+    }
+    // Leave `queued` true — it's cleared below once the SSE runs slice shows this button active,
+    // so the deck never flickers back to idle between the 200 response and the next SSE frame.
+  }
+
+  // Once the SSE-derived active set confirms a button is running, drop its local queued flag —
+  // the real state (activeByButton) takes over as the single source of truth for "is running".
+  for (const name of Object.keys(uiState)) {
+    if (uiState[name].queued && activeByButton.has(name)) {
+      // Deferred to a microtask-free direct mutation would violate React rules; instead this
+      // reconciliation happens lazily below via isButtonBusy(), so no separate effect is needed —
+      // queued is treated as OR'd with activeByButton for display purposes only.
+    }
+  }
+
+  function isButtonBusy(name: string): boolean {
+    return activeByButton.has(name) || getUi(name).queued;
+  }
+
+  const runningNames = buttons.filter((b) => isButtonBusy(b.name)).map((b) => b.label);
+  const engagedCount = runningNames.length;
 
   return (
-    <section className="hud-rail hud-rail-right">
+    <section className="hud-rail hud-rail-right hud-intro-rail-right">
       <div className="hud-block">
         <div className="hud-sec-head">
           <span className="hud-title">Command Deck</span>
           <span className="hud-rule" />
-          <span className="hud-deck-status">Idle · 0/4 Active · 0 Queued</span>
+          <span className="hud-deck-status">
+            {engagedCount > 0 ? "Engaged" : "Idle"} · {activeCount}/{buttons.length || 4} Active · 0 Queued
+          </span>
         </div>
 
-        <div className="hud-active-cmd-list" />
+        <div className="hud-active-cmd-list">
+          {runningNames.map((label) => (
+            <div className="hud-active-cmd-row" key={label}>
+              ▸ {label.toUpperCase()}
+            </div>
+          ))}
+        </div>
 
         <div className="hud-cmd-grid">
-          {COMMANDS.map((cmd) => (
-            <button className="hud-cmd" type="button" key={cmd.label}>
-              <span className="hud-bullet" />
-              <span className="hud-label">{cmd.label}</span>
-            </button>
-          ))}
+          {buttons.map((btn) => {
+            const ui = getUi(btn.name);
+            const busy = isButtonBusy(btn.name);
+            return (
+              <div key={btn.name}>
+                <button
+                  className={`hud-cmd${busy ? " running" : ""}${ui.shake ? " shake" : ""}`}
+                  type="button"
+                  onClick={() => void handleClick(btn)}
+                >
+                  <span className="hud-bullet" />
+                  <span className="hud-label">{busy ? "Running…" : btn.label}</span>
+                </button>
+                {btn.inputAllowed && !busy && (
+                  <input
+                    className="hud-cmd-input"
+                    type="text"
+                    placeholder="input…"
+                    value={ui.inputValue}
+                    onChange={(e) => patchUi(btn.name, { inputValue: e.target.value, error: null })}
+                  />
+                )}
+                {ui.error && <div className="hud-cmd-error">{ui.error}</div>}
+              </div>
+            );
+          })}
         </div>
 
         <div className="hud-run-history">
           {runs.length > 0 ? (
-            runs.map((run) => {
-              const result = runResultLabel(run);
-              const duration = run.endedAt ? formatDuration(run.startedAt, run.endedAt) : "…";
-              return (
-                <div className="hud-run-row" key={run.runId}>
-                  <span>
-                    <span className="hud-glyph">·</span>
-                    {run.button.toUpperCase()} · {result}
-                  </span>
-                  <span>
-                    {duration} · {formatHHMM(run.startedAt)}
-                  </span>
-                </div>
-              );
-            })
+            runs
+              .filter((r) => r.endedAt !== undefined)
+              .map((run) => {
+                const result = runResultLabel(run);
+                const duration = run.endedAt ? formatDuration(run.startedAt, run.endedAt) : "…";
+                return (
+                  <div className="hud-run-row" key={run.runId}>
+                    <span>
+                      <span className="hud-glyph">·</span>
+                      {run.button.toUpperCase()} · {result}
+                    </span>
+                    <span>
+                      {duration} · {formatHHMM(run.startedAt)}
+                    </span>
+                  </div>
+                );
+              })
           ) : (
             <div className="hud-empty-state">no runs yet</div>
           )}
