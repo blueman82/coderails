@@ -221,4 +221,46 @@ result=$(run_with_stub "$NOMATCH_STUB" bash -c '
 check "has_coderails_eval_for_head: no matching marker → rc=1" "rc=1" "$(printf '%s\n' "$result" | grep '^rc=')"
 check "has_coderails_eval_for_head: no matching marker → PR_EVAL_TIER empty" "tier=" "$(printf '%s\n' "$result" | grep '^tier=')"
 
+# ─── has_coderails_eval_for_head: NEWEST-match-wins (not first-match-wins) ───
+# A PR can accumulate multiple eval-artifact comments over its lifetime (e.g.
+# a stale NO-GO from an earlier push, then a fresh GO after fixes). The LAST
+# matching marker line in comment order must be authoritative — a stale GO
+# must never override a newer NO-GO for the same sha, and the legit
+# NO-GO→fix→GO path must still pass because GO is newest.
+
+# (a) GO line then NO-GO line for the same pr/sha → newest (NO-GO) wins → rc=1
+GO_THEN_NOGO_STUB="printf '%s\n%s\n' '$GO_MARKER' '$NOGO_MARKER'"
+result=$(run_with_stub "$GO_THEN_NOGO_STUB" bash -c '
+  source "'"$LIB"'"
+  pr::has_coderails_eval_for_head 42 "deadbeef"
+  echo "rc=$?"
+  echo "tier=$PR_EVAL_TIER"
+')
+check "has_coderails_eval_for_head: GO then NO-GO (same sha) → rc=1 (newest wins)" "rc=1" "$(printf '%s\n' "$result" | grep '^rc=')"
+check "has_coderails_eval_for_head: GO then NO-GO (same sha) → PR_EVAL_TIER=2 (from newest)" "tier=2" "$(printf '%s\n' "$result" | grep '^tier=')"
+
+# (b) NO-GO line then GO line for the same pr/sha (legit fix-and-repost path) → newest (GO) wins → rc=0
+NOGO_THEN_GO_STUB="printf '%s\n%s\n' '$NOGO_MARKER' '$GO_MARKER'"
+result=$(run_with_stub "$NOGO_THEN_GO_STUB" bash -c '
+  source "'"$LIB"'"
+  pr::has_coderails_eval_for_head 42 "deadbeef"
+  echo "rc=$?"
+  echo "tier=$PR_EVAL_TIER"
+')
+check "has_coderails_eval_for_head: NO-GO then GO (same sha) → rc=0 (newest wins)" "rc=0" "$(printf '%s\n' "$result" | grep '^rc=')"
+check "has_coderails_eval_for_head: NO-GO then GO (same sha) → PR_EVAL_TIER=1 (from newest)" "tier=1" "$(printf '%s\n' "$result" | grep '^tier=')"
+
+# ─── has_coderails_eval_for_head: PR_EVAL_TIER does not leak across calls ────
+# The function must unset PR_EVAL_TIER at entry so a second, non-matching call
+# in the same shell can't inherit a stale value from a prior matching call.
+result=$(run_with_stub "$MATCH_GO_STUB" bash -c '
+  source "'"$LIB"'"
+  pr::has_coderails_eval_for_head 42 "deadbeef" >/dev/null 2>&1
+  pr::has_coderails_eval_for_head 999 "othersha" >/dev/null 2>&1
+  echo "rc=$?"
+  echo "tier=${PR_EVAL_TIER:-}"
+')
+check "has_coderails_eval_for_head: second no-match call in same shell → rc=1" "rc=1" "$(printf '%s\n' "$result" | grep '^rc=')"
+check "has_coderails_eval_for_head: second no-match call → PR_EVAL_TIER does not leak from first call" "tier=" "$(printf '%s\n' "$result" | grep '^tier=')"
+
 [[ $fails -eq 0 ]] && { echo PASS; exit 0; } || { echo "FAIL ($fails)"; exit 1; }

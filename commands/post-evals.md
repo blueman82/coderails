@@ -56,8 +56,12 @@ MARKER=$(eval_artifact::marker "$ARGUMENTS" "$HEAD_SHA" "$RESULT" "$TIER")
 ```
 
 Write a summary body: per-eval pass/fail split by priority (P0/P1), plus any
-`amendments` from the evals.json. Prepend the marker so the posted comment
-begins with the marker line:
+`amendments` from the evals.json — `amendments` is freeform narrative text,
+not validated by `post_evals.sh`; include it verbatim for human context. The
+prose summary itself is deliberately not grammar-gated: the JSON's structural
+guarantees (checks 1-7 in `post_evals::validate_structure`) are what the merge
+gate relies on, not the wording of this comment body. Prepend the marker so
+the posted comment begins with the marker line:
 
 ```bash
 {

@@ -184,4 +184,62 @@ run_gate_test "deadbeef" 1
 rc=$?
 check "merge blocks (no fallback) even with no-artifact exit=1" 1 $rc
 
+# ─── Test 6: eval-gate stub returns failure → merge blocks on the eval-gate ──
+# message. This file otherwise stubs pr::has_coderails_eval_for_head to always
+# return 0 (see run_gate_test's GCSTUB above), so if the eval-gate call were
+# ever deleted from merge.sh, every test in THIS file would stay green — the
+# review gate alone can't catch that regression. This case makes the eval
+# gate's own stub return failure so a deleted call is caught here too.
+run_gate_test_eval_fail() {
+    local stderr_file="$TMP/stderr_run"
+    local stdout_file="$TMP/stdout_run"
+
+    cat > "$STUB_DIR/lib/git-common.sh" <<GCSTUB
+#!/bin/bash
+source "$STUB_DIR/lib/git-common-base.sh"
+
+pr::head_sha() {
+    echo "deadbeef"
+}
+
+pr::has_coderails_review_for_head() {
+    return 0
+}
+
+pr::has_coderails_eval_for_head() {
+    PR_EVAL_TIER="1"
+    return 1
+}
+GCSTUB
+
+    local wrapper="$STUB_DIR/merge_test.sh"
+    cat > "$wrapper" <<WRAPPER
+#!/bin/bash
+set -euo pipefail
+_DIR="\$(dirname "\${BASH_SOURCE[0]}")"
+source "\$_DIR/lib/git-common.sh"
+source "\$_DIR/lib/config.sh"
+WRAPPER
+    awk '
+        NR==1 { next }
+        /^source.*git-common/ { next }
+        /^source.*config/ { next }
+        { print }
+    ' "$MERGE_SH" >> "$wrapper"
+
+    (
+        export PATH="$STUB_DIR:$PATH"
+        bash "$wrapper" 42 2>"$stderr_file" >"$stdout_file"
+    )
+    local rc=$?
+    LAST_STDERR=$(cat "$stderr_file" 2>/dev/null || true)
+    LAST_STDOUT=$(cat "$stdout_file" 2>/dev/null || true)
+    return $rc
+}
+
+run_gate_test_eval_fail
+rc=$?
+check "merge blocks when eval-gate stub fails (review gate passing)" 1 $rc
+check_msg "merge: eval-gate failure message mentions NO-GO" "NO-GO" "$LAST_STDERR"
+
 [[ $fails -eq 0 ]] && { echo PASS; exit 0; } || { echo "FAIL ($fails)"; exit 1; }

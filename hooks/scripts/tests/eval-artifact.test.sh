@@ -61,6 +61,37 @@ INVALID_RESULT="<!-- coderails-eval-summary v1 pr=123 head_sha=abc result=MAYBE 
 eval_artifact::matches_marker "$INVALID_RESULT" 123 abc
 check "matches_marker: invalid result value → exit 1" 1 $?
 
+# ─── invalid tier digit (3) → exit 1 (boundary: grammar only allows 0-2) ─────
+INVALID_TIER="<!-- coderails-eval-summary v1 pr=123 head_sha=abc result=GO tier=3 -->"
+eval_artifact::matches_marker "$INVALID_TIER" 123 abc
+check "matches_marker: tier digit 3 → exit 1 (grammar boundary)" 1 $?
+
+# ─── lowercase result casing ("go") → exit 1 (grammar is case-sensitive) ─────
+LOWERCASE_RESULT="<!-- coderails-eval-summary v1 pr=123 head_sha=abc result=go tier=1 -->"
+eval_artifact::matches_marker "$LOWERCASE_RESULT" 123 abc
+check "matches_marker: lowercase 'go' not accepted as GO → exit 1" 1 $?
+
+# ─── literal string-equality matching, not regex: pr/sha carrying regex ──────
+# metacharacters must be matched LITERALLY, not interpreted as a pattern. A
+# hardened implementation builds the expected marker prefix for (pr, head_sha)
+# and compares literally — never regex with interpolated pr/sha values.
+REGEX_JUNK_PR='1|.*'
+eval_artifact::matches_marker "$MARKER" "$REGEX_JUNK_PR" abc
+check "matches_marker: pr containing regex metacharacters never matches unrelated marker" 1 $?
+
+# A line whose body literally contains regex-metacharacter junk shaped like a
+# pr value must not spuriously match a real numeric pr via pattern semantics.
+JUNK_PR_LINE="<!-- coderails-eval-summary v1 pr=1|.* head_sha=abc result=GO tier=1 -->"
+eval_artifact::matches_marker "$JUNK_PR_LINE" 123 abc
+check "matches_marker: regex-metacharacter-shaped pr in line body doesn't match a different pr" 1 $?
+eval_artifact::matches_marker "$JUNK_PR_LINE" "$REGEX_JUNK_PR" abc
+check "matches_marker: regex-metacharacter-shaped pr matches literally when equal" 0 $?
+
+# ─── junk-wrapped/prefixed marker lines still rejected (literal equality) ────
+PREFIXED="not a marker but has: $MARKER"
+eval_artifact::matches_marker "$PREFIXED" 123 abc
+check "matches_marker: prefixed marker line → exit 1 (literal equality, not substring)" 1 $?
+
 # ─── parse_result / parse_tier ────────────────────────────────────────────────
 GO_TIER2=$(eval_artifact::marker 5 shaX GO 2)
 check_str "parse_result: matched GO line → GO" "GO" "$(eval_artifact::parse_result "$GO_TIER2")"

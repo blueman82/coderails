@@ -106,6 +106,66 @@ check "validate_structure: negative_control identical to cmd → exit 1" 1 $?
 [[ "$stderr_out" == *"e1"* && "$stderr_out" == *"identical to cmd"* ]]
 check "validate_structure: identical negative_control → stderr names id + reason" 0 $?
 
+# ─── check 4 (hardened): whitespace-normalised comparison ────────────────────
+# Trailing-space variant: negative_control differs from cmd only by trailing
+# whitespace — still the same command, must be rejected.
+FIX_TRAILING_SPACE="$TMP/trailing_space_nc.json"
+jq -n --arg sha "$SHA" '{
+  tier: 1,
+  tier_justification: "",
+  head_sha: $sha,
+  evals: [
+    {id:"e1", priority:"P0", mode:"scripted", status:"pass", cmd:"run-a", negative_control:"run-a  ", evidence:"log"}
+  ]
+}' > "$FIX_TRAILING_SPACE"
+stderr_out=$(post_evals::validate_structure "$FIX_TRAILING_SPACE" 42 "$SHA" 2>&1)
+check "validate_structure: negative_control differs from cmd only by trailing space → exit 1" 1 $?
+[[ "$stderr_out" == *"e1"* && "$stderr_out" == *"identical to cmd"* ]]
+check "validate_structure: trailing-space variant → stderr names id + reason" 0 $?
+
+# ─── check 4 (hardened): "true; cmd" wrapper rejected ────────────────────────
+FIX_TRUE_WRAP="$TMP/true_wrap_nc.json"
+jq -n --arg sha "$SHA" '{
+  tier: 1,
+  tier_justification: "",
+  head_sha: $sha,
+  evals: [
+    {id:"e1", priority:"P0", mode:"scripted", status:"pass", cmd:"run-a", negative_control:"true; run-a", evidence:"log"}
+  ]
+}' > "$FIX_TRUE_WRAP"
+stderr_out=$(post_evals::validate_structure "$FIX_TRUE_WRAP" 42 "$SHA" 2>&1)
+check "validate_structure: negative_control='true; cmd' wrapper → exit 1 (vacuous control)" 1 $?
+[[ "$stderr_out" == *"e1"* ]]
+check "validate_structure: 'true; cmd' wrapper → stderr names id" 0 $?
+
+# ─── check 4 (hardened): echo-wrap rejected ──────────────────────────────────
+FIX_ECHO_WRAP="$TMP/echo_wrap_nc.json"
+jq -n --arg sha "$SHA" '{
+  tier: 1,
+  tier_justification: "",
+  head_sha: $sha,
+  evals: [
+    {id:"e1", priority:"P0", mode:"scripted", status:"pass", cmd:"run-a", negative_control:"echo x && run-a", evidence:"log"}
+  ]
+}' > "$FIX_ECHO_WRAP"
+stderr_out=$(post_evals::validate_structure "$FIX_ECHO_WRAP" 42 "$SHA" 2>&1)
+check "validate_structure: negative_control='echo x && cmd' wrapper → exit 1 (vacuous control)" 1 $?
+[[ "$stderr_out" == *"e1"* ]]
+check "validate_structure: echo-wrap wrapper → stderr names id" 0 $?
+
+# ─── check 4 (hardened): legitimately different control still accepted ──────
+FIX_LEGIT_DIFFERENT="$TMP/legit_different_nc.json"
+jq -n --arg sha "$SHA" '{
+  tier: 1,
+  tier_justification: "",
+  head_sha: $sha,
+  evals: [
+    {id:"e1", priority:"P0", mode:"scripted", status:"pass", cmd:"run-a", negative_control:"break-the-fixture-under-test", evidence:"log"}
+  ]
+}' > "$FIX_LEGIT_DIFFERENT"
+post_evals::validate_structure "$FIX_LEGIT_DIFFERENT" 42 "$SHA"
+check "validate_structure: legitimately different negative_control (different command) → exit 0" 0 $?
+
 # ─── check 5: P0 eval with empty evidence ────────────────────────────────────
 FIX_EMPTY_EVIDENCE="$TMP/empty_evidence.json"
 jq -n --arg sha "$SHA" '{
@@ -126,6 +186,43 @@ stderr_out=$(post_evals::validate_structure "$FIX_OK" 42 "newsha" 2>&1)
 check "validate_structure: head_sha mismatch → exit 1" 1 $?
 [[ "$stderr_out" == *"$SHA"* && "$stderr_out" == *"newsha"* ]]
 check "validate_structure: head_sha mismatch → stderr mentions both shas" 0 $?
+
+# ─── check 7: tier >= 1 requires at least one P0 eval (closes vacuous-GO gap) ──
+# A tier-1+ artifact with an empty .evals array or only P1 evals currently
+# computes GO past every other refusal (compute_go's P0-only gate is vacuously
+# satisfied when there are no P0 evals at all). This refusal closes that gap
+# at the WRITER layer; eval_artifact::compute_go's pure-function semantics are
+# unchanged.
+FIX_TIER1_EMPTY_EVALS="$TMP/tier1_empty_evals.json"
+jq -n --arg sha "$SHA" '{
+  tier: 1,
+  tier_justification: "",
+  head_sha: $sha,
+  evals: []
+}' > "$FIX_TIER1_EMPTY_EVALS"
+stderr_out=$(post_evals::validate_structure "$FIX_TIER1_EMPTY_EVALS" 42 "$SHA" 2>&1)
+check "validate_structure: tier 1 + empty evals → exit 1 (refused)" 1 $?
+[[ "$stderr_out" == *"P0"* ]]
+check "validate_structure: tier 1 + empty evals → stderr names the P0 reason" 0 $?
+
+FIX_TIER1_ONLY_P1="$TMP/tier1_only_p1.json"
+jq -n --arg sha "$SHA" '{
+  tier: 1,
+  tier_justification: "",
+  head_sha: $sha,
+  evals: [
+    {id:"e1", priority:"P1", mode:"scripted", status:"pass", cmd:"run-a", negative_control:"run-a-broken", evidence:"log"}
+  ]
+}' > "$FIX_TIER1_ONLY_P1"
+stderr_out=$(post_evals::validate_structure "$FIX_TIER1_ONLY_P1" 42 "$SHA" 2>&1)
+check "validate_structure: tier 1 + only-P1 evals → exit 1 (refused)" 1 $?
+[[ "$stderr_out" == *"P0"* ]]
+check "validate_structure: tier 1 + only-P1 evals → stderr names the P0 reason" 0 $?
+
+# tier 0 + empty evals is the exemption path — must still pass (already
+# covered by FIX_TIER0_OK above; re-assert here to pin it against check 7).
+post_evals::validate_structure "$FIX_TIER0_OK" 42 "$SHA"
+check "validate_structure: tier 0 + empty evals → exit 0 (exemption unaffected by check 7)" 0 $?
 
 # ─── ordering: check 2 fires before check 3 (tier 0 has no scripted evals to fail check 3) ──
 # (implicitly proven by FIX_TIER0_OK passing above; explicit ordering test below)

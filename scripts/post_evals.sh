@@ -52,11 +52,37 @@ post_evals::validate_structure() {
         fi
     fi
 
-    # Check 4: negative_control textually identical to cmd.
-    local identical_id
-    identical_id=$(jq -r '[.evals[]? | select(.mode == "scripted") | select((.negative_control // "") == (.cmd // "") and (.negative_control // "") != "") | .id] | first // ""' "$path")
-    if [[ -n "$identical_id" ]]; then
-        printf 'post_evals: eval %s negative_control is identical to cmd\n' "$identical_id" >&2
+    # Check 4: negative_control vacuous relative to cmd. Two sub-checks, both
+    # on whitespace-normalised (trimmed + internal runs collapsed) text:
+    #   (a) identical to cmd after normalisation (catches trailing-space etc.)
+    #   (b) normalised negative_control contains the full normalised cmd as a
+    #       WORD-BOUNDED substring — cmd must appear as a whole shell segment,
+    #       delimited by string start/end or a shell separator (space, ; & |),
+    #       not merely embedded inside a longer identifier. This catches
+    #       "true; cmd", "echo x && cmd", "cmd " wrappers while NOT flagging a
+    #       genuinely distinct negative control like "cmd-broken" (a different
+    #       identifier that happens to share cmd as a text prefix).
+    # This is a structural floor, not a semantic one: a genuinely different-but-
+    # vacuous control (e.g. one that happens to always pass for unrelated
+    # reasons) still passes this check. The verifier/human review layer owns
+    # semantic quality of the negative control; this only catches the control
+    # being the command itself, verbatim or trivially wrapped.
+    local vacuous_id
+    vacuous_id=$(jq -r '
+        def norm: gsub("^\\s+|\\s+$"; "") | gsub("\\s+"; " ");
+        def esc: gsub("(?<c>[.^$*+?()\\[\\]{}|\\\\])"; "\\\(.c)");
+        [.evals[]? | select(.mode == "scripted")
+                    | select((.negative_control // "") != "")
+                    | select((.cmd // "") != "")
+                    | (.negative_control | norm) as $nc
+                    | (.cmd | norm) as $cmd
+                    | (($cmd | esc)) as $cmd_re
+                    | select($nc == $cmd
+                             or ($nc | test("(^|[\\s;&|])" + $cmd_re + "($|[\\s;&|])")))
+                    | .id] | first // ""
+    ' "$path")
+    if [[ -n "$vacuous_id" ]]; then
+        printf 'post_evals: eval %s negative_control is identical to cmd\n' "$vacuous_id" >&2
         return 1
     fi
 
@@ -74,6 +100,20 @@ post_evals::validate_structure() {
     if [[ "$file_sha" != "$current_head_sha" ]]; then
         printf 'post_evals: evals.json head_sha (%s) does not match current PR head (%s)\n' "$file_sha" "$current_head_sha" >&2
         return 1
+    fi
+
+    # Check 7: tier>=1 requires at least one P0 eval. Without this, a tier-1+
+    # artifact with an empty (or only-P1) .evals array computes GO past every
+    # other refusal — eval_artifact::compute_go's P0-only gate is vacuously
+    # satisfied when there are no P0 evals to fail. Tier 0 is exempt (that's
+    # its whole point: the tier_justification in check 2 stands in for evals).
+    if [[ "$tier" != "0" ]]; then
+        local has_p0
+        has_p0=$(jq -r '[.evals[]? | select(.priority == "P0")] | length > 0' "$path")
+        if [[ "$has_p0" != "true" ]]; then
+            printf 'post_evals: tier>=1 requires at least one P0 eval in .evals\n' >&2
+            return 1
+        fi
     fi
 
     return 0
