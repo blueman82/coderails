@@ -1,9 +1,10 @@
 import { watch, type FSWatcher } from "node:fs";
+import type { DashboardConfig } from "../config";
+import { readRuns, type RunRecord } from "../runlog";
 import { collectHealth, type HealthTile } from "./health";
 import { collectMemoryTrail, type TrailEntry } from "./memoryTrail";
 import { collectPrGates, type PrGate, type PrGateError } from "./prGates";
 import { collectSessions, collectLoops, type SessionInfo, type LoopInfo } from "./sessions";
-import { readRuns, type RunRecord } from "../runlog";
 
 export interface Snapshot {
   sessions: SessionInfo[];
@@ -15,7 +16,7 @@ export interface Snapshot {
 }
 
 export interface AggregatorDeps {
-  cfg: import("../config").DashboardConfig;
+  cfg: DashboardConfig;
   projectsDir: string;
   loopsDir: string;
   runsDir?: string;
@@ -52,6 +53,9 @@ function isGateError(gate: PrGate | PrGateError): gate is PrGateError {
   return "error" in gate;
 }
 
+// Sorted by repo, then PR number (error entries carry no number — they sort
+// first within their repo, since a missing/unreachable repo has no number to
+// compare).
 function sortGates(gates: (PrGate | PrGateError)[]): (PrGate | PrGateError)[] {
   return [...gates].sort((a, b) => {
     const repoCmp = a.repo.localeCompare(b.repo);
@@ -62,11 +66,12 @@ function sortGates(gates: (PrGate | PrGateError)[]): (PrGate | PrGateError)[] {
   });
 }
 
-// Builds the aggregator: an in-memory snapshot kept current by fs.watch
-// (sessions/loops/memory-trail dirs, debounced) and a setInterval gh poll
-// (gates), plus a runs-log tap. Every collector call is wrapped so a throw
+// Builds the aggregator: an in-memory snapshot kept current by fs.watch on
+// the sessions/loops/memory-trail dirs (debounced) plus a runs-log tap, and a
+// setInterval gh poll for gates. Every collector call is wrapped so a throw
 // degrades that slice of the snapshot rather than killing the aggregator —
-// callers (the SSE route) never see an aggregator-level exception.
+// callers (the SSE route) never see an aggregator-level exception, and
+// `onError` is invoked (log once) instead.
 export function createAggregator(deps: AggregatorDeps): Aggregator {
   const trailLimit = deps.memoryTrailLimit ?? DEFAULT_TRAIL_LIMIT;
   const runsLimit = deps.runsLimit ?? DEFAULT_RUNS_LIMIT;
@@ -101,20 +106,20 @@ export function createAggregator(deps: AggregatorDeps): Aggregator {
     }
   }
 
-  function collectActivitySlice(): Pick<Snapshot, "sessions" | "loops" | "trail"> {
+  function collectActivitySlice(): Pick<Snapshot, "sessions" | "loops" | "trail" | "health"> {
     const sessions = sortSessions(safeCall("sessions", () => collectSessions(deps.projectsDir, Date.now()), []));
     const loops = sortLoops(safeCall("loops", () => collectLoops(deps.loopsDir), []));
-    const trail = safeCall(
-      "trail",
-      () => collectMemoryTrail(deps.cfg.memoryPaths, trailLimit),
-      []
-    );
-    return { sessions, loops, trail };
+    const trail = safeCall("trail", () => collectMemoryTrail(deps.cfg.memoryPaths, trailLimit), []);
+    // health has no dedicated fs signal to watch (usage tiles are always
+    // unavailable; hooksFired/lintFindings are cheap to recompute) — it
+    // rides along with the activity slice rather than getting its own timer.
+    const health = safeCall("health", () => collectHealth(), []);
+    return { sessions, loops, trail, health };
   }
 
   function refreshActivity(): void {
-    const activity = collectActivitySlice();
-    snapshot = { ...snapshot, ...activity };
+    const { health, ...activity } = collectActivitySlice();
+    snapshot = { ...snapshot, ...activity, health };
     emit("activity", activity);
   }
 
@@ -136,10 +141,6 @@ export function createAggregator(deps: AggregatorDeps): Aggregator {
     emit("runs", runs);
   }
 
-  function refreshHealth(): void {
-    snapshot = { ...snapshot, health: safeCall("health", () => collectHealth(), []) };
-  }
-
   function scheduleActivityRefresh(): void {
     if (activityDebounceTimer) clearTimeout(activityDebounceTimer);
     activityDebounceTimer = setTimeout(refreshActivity, activityDebounceMs);
@@ -151,6 +152,9 @@ export function createAggregator(deps: AggregatorDeps): Aggregator {
       watcher.on("error", (err) => onError("watch", err));
       watchers.push(watcher);
     } catch (err) {
+      // Missing/unwatchable dir degrades to "no activity signal from this
+      // source" rather than throwing — the initial collect above already
+      // handles a missing dir by returning an empty slice.
       onError("watch", err);
     }
   }
@@ -168,8 +172,7 @@ export function createAggregator(deps: AggregatorDeps): Aggregator {
     start(): void {
       const activity = collectActivitySlice();
       const runs = safeCall("runs", () => readRuns(runsLimit, { runsDir: deps.runsDir }), []);
-      const health = safeCall("health", () => collectHealth(), []);
-      snapshot = { ...snapshot, ...activity, runs, health };
+      snapshot = { ...snapshot, ...activity, runs };
 
       watchDir(deps.projectsDir, scheduleActivityRefresh);
       watchDir(deps.loopsDir, scheduleActivityRefresh);
@@ -178,12 +181,6 @@ export function createAggregator(deps: AggregatorDeps): Aggregator {
 
       void refreshGates();
       gatesTimer = setInterval(() => void refreshGates(), gatesPollMs);
-      // health has no fs signal to watch (usage tiles are always
-      // unavailable; hooksFired/lintFindings are cheap to recompute) — piggy
-      // back its refresh on the same activity debounce rather than its own
-      // timer.
-      const originalScheduleActivity = scheduleActivityRefresh;
-      void originalScheduleActivity;
     },
 
     stop(): void {
@@ -194,9 +191,4 @@ export function createAggregator(deps: AggregatorDeps): Aggregator {
       listeners.clear();
     },
   };
-}
-
-export { refreshHealthUnused };
-function refreshHealthUnused(): void {
-  // placeholder removed below
 }
