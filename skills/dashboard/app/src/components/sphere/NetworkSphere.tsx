@@ -157,13 +157,17 @@ export function NetworkSphere({ reducedMotion, accent, boost }: NetworkSpherePro
     const group = groupRef.current;
     if (!group) return;
 
-    group.rotation.y = t * ((Math.PI * 2) / 90);
+    const boost = boostRef.current;
+
+    // Rotation and drift boost while a run is in flight, matching the mockup's animate():
+    // rotation speeds up to (1 + boost*2.2)x and per-node drift amplitude grows by boost*0.8.
+    group.rotation.y = t * ((Math.PI * 2) / 90) * (1 + boost * 2.2);
     group.rotation.x = Math.sin(t * 0.09) * 0.05;
 
     const breathe = 1 + Math.sin(t * ((Math.PI * 2) / 10)) * 0.015;
     group.scale.setScalar(breathe);
 
-    const driftAmp = 0.35;
+    const driftAmp = 0.35 + boost * 0.8;
     const positions = positionsRef.current;
     const { home, phases } = data;
     for (let i = 0; i < PARTICLE_COUNT; i++) {
