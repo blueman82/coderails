@@ -180,9 +180,13 @@ export function createAggregator(deps: AggregatorDeps): Aggregator {
     },
 
     start(): void {
-      const activity = collectActivitySlice();
       const runs = safeCall("runs", () => readRuns(runsLimit, { runsDir: deps.runsDir }), []);
-      snapshot = { ...snapshot, ...activity, runs };
+      snapshot = { ...snapshot, runs };
+      // Initial activity collect (sessions/loops/trail/health) is async (health
+      // now reads usage transcripts) — fire it without blocking start(), same
+      // pattern as refreshGates below; the snapshot fills in once it resolves
+      // and "activity" listeners are notified same as any later refresh.
+      void refreshActivity();
 
       watchDir(deps.projectsDir, scheduleActivityRefresh);
       watchDir(deps.loopsDir, scheduleActivityRefresh);
