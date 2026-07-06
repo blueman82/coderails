@@ -601,6 +601,8 @@
    sphere background (.hud-bg-canvas, position: fixed) stays put either way. */
 @media (max-height: 760px) {
   .hud-root {
+    /* see the max-width: 1100px query's comment on .hud-root — same reason. */
+    position: relative;
     overflow-y: auto;
   }
   .hud-stage {
