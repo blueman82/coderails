@@ -243,23 +243,50 @@ export function buildArgv(btn: ButtonDef, input?: string): string[]; // src/lib/
 
 ---
 
-## Task 9 — HUD frontend: layout, sphere, run lifecycle
+## Tasks 9a–9d — HUD frontend (split per stress-test: one subjective mega-gate would churn or rubber-stamp)
 
-The largest task; it stays one task because the mockup is a single approved artifact a reviewer accepts or rejects whole. Reference assets: `docs/coderails/specs/assets/2026-07-06-observability/dashboard-mockup.html` (normative), the three `vault-reference-*.png` frames.
+Reference assets for all four: `docs/coderails/specs/assets/2026-07-06-observability/dashboard-mockup.html` (normative), the three `vault-reference-*.png` frames. Before 9a, invoke the frontend-design skill (owner mandate) with those assets as input.
 
-**Files:** `skills/dashboard/app/src/app/page.tsx`, `src/components/{Header,RailLeft,RailRight,BottomHero,HudCallout,RunProgress}.tsx`, `src/components/sphere/{Scene,NetworkSphere,GridFloor,Fallback2D}.tsx`, `src/styles/hud.css`.
+### Task 9a — Static layout & CSS
+
+**Files:** `skills/dashboard/app/src/app/page.tsx`, `src/components/{Header,RailLeft,RailRight,BottomHero}.tsx`, `src/styles/hud.css`.
 
 **Steps:**
-- [ ] Invoke the frontend-design skill (owner mandate) with the mockup + reference PNGs as input before writing components.
-- [ ] Port the approved mockup's layout verbatim into components: three-column grid (330px/1fr/300px), header band, SYSTEM VITALS KPI stack with sparklines, DIRECTIVES checklist, MEMORY.TRAIL, COMMAND DECK + run history, PR GATES (◆/◇ glyphs), bottom hero, reserved ASSISTANT.LINK row. Data from the SSE hook, not fakes.
+- [ ] Port the approved mockup's layout into components with static placeholder state: three-column grid (330px/1fr/300px), header band, SYSTEM VITALS KPI stack with sparklines, DIRECTIVES checklist, MEMORY.TRAIL, COMMAND DECK + run history, PR GATES (◆/◇ glyphs), bottom hero, reserved ASSISTANT.LINK row.
 - [ ] Responsive: `@media (max-width: 1100px)` stacks header/left/right/hero into rows 1–4, body scrolls, callouts hidden (port the fixed media query from the mockup — the rails-overlap bug is already solved there; do not regress it).
-- [ ] Sphere via R3F: 800–1500 nodes, plexus lines dominant, ~8% hub nodes larger/brighter, `FogExp2` tinted to the background colour (r128 lesson: white default fog brightens instead of dims under additive blending), static grid floor filling the lower third (visibility bar from the spec), clock-driven rotation/drift/breathing/twinkle, damped mouse parallax, bloom via postprocessing.
-- [ ] 2D fallback: try/catch around canvas/context creation; on failure render the plexus in 2D canvas with identical palette and hue progression; `console.warn` once.
-- [ ] Run lifecycle: fire button → optimistic deck state; SSE `runs` events drive RUNNING/ENGAGED states, header KERNEL·WORKING flip, tethered progress box (elapsed ticking, bar = elapsed/expected where expected = median of that button's last 5 durations from `readRuns`, fallback 30s), global hue sweep rose→violet→green by progress fraction (CSS custom property + same offset into the sphere material per frame), resolve flash, revert.
-- [ ] Draggable callouts (pointer events, leader line follows), near-opaque backing.
-- [ ] `prefers-reduced-motion`: skip GSAP intro, parallax, and animation loops; render one static frame.
 
-**Verify:** with the dev server running and config pointing at this repo: side-by-side screenshot vs mockup at 1680px (layout parity by eye); resize to 1000px — no overlapping rails; DevTools "disable WebGL" (or override flag) → fallback renders and page stays interactive; fire a test button → observe working-state flips, progress box, hue sweep, history row; `grep -ri '"v1"' src/ styles/` empty.
+**Verify:** side-by-side screenshot vs mockup at 1680px (layout parity); screenshot at 1000px — no overlapping rails; `grep -ri '"v1"' src/` empty. **Review checkpoint: a reviewer approves 9a's static render before any motion work begins.**
+
+### Task 9b — SSE data binding
+
+**Files:** `src/hooks/useDashboardState.ts` (create), edits to 9a components.
+
+**Steps:**
+- [ ] EventSource hook consuming Task 8's event schema; every panel renders real state; each panel has an explicit empty state ("unavailable: <reason>" for degraded health tiles per Task 6).
+
+**Verify:** with the server running against this repo's real config: DIRECTIVES shows the actual loop (or its empty state), PR GATES shows real open PRs, MEMORY.TRAIL shows real files newest-first; kill the server → page shows stale data, and EventSource reconnects when it returns.
+
+### Task 9c — Sphere scene + 2D fallback
+
+**Files:** `src/components/sphere/{Scene,NetworkSphere,GridFloor,Fallback2D}.tsx`.
+
+**Steps:**
+- [ ] Sphere via R3F: 800–1500 nodes, plexus lines dominant, ~8% hub nodes larger/brighter, `FogExp2` tinted to the background colour (r128 lesson: white default fog brightens instead of dims under additive blending), static grid floor filling the lower third (visibility bar from the spec: a glancing user immediately says there is a grid), clock-driven rotation/drift/breathing/twinkle, damped mouse parallax, bloom via postprocessing.
+- [ ] 2D fallback: try/catch around canvas/context creation; on failure render the plexus in 2D canvas with identical palette and hue progression; `console.warn` once.
+- [ ] `prefers-reduced-motion`: skip heavy motion; render one static frame.
+
+**Verify:** screenshot vs `vault-reference-sphere-closeup.png` (wiring-first structure, hub hierarchy, visible grid); force WebGL failure (browser flag or stubbed `getContext` returning null) → fallback renders, page stays interactive, exactly one console.warn.
+
+### Task 9d — Run lifecycle & hue progression
+
+**Files:** `src/components/{HudCallout,RunProgress}.tsx`, edits to Header/RailRight and sphere material wiring.
+
+**Steps:**
+- [ ] Fire button → optimistic deck state; SSE `runs` events drive RUNNING/ENGAGED states, header KERNEL·WORKING flip, tethered progress box (elapsed ticking, bar = elapsed/expected where expected = median of that button's last 5 durations from `readRuns`, fallback 30s), resolve flash, revert.
+- [ ] Global hue sweep rose→violet→green by progress fraction: CSS custom property on `<html>` + the same hue offset into the sphere/fallback material per frame.
+- [ ] Draggable callouts (pointer events, leader line follows), near-opaque backing; GSAP intro ≤2.5s (skipped under reduced motion).
+
+**Verify:** fire a real test button → observe working-state flips, ticking progress box, hue sweep across UI *and* sphere, history row appended, idle revert; drag a callout — leader line follows; second click mid-run → shake reject.
 
 ---
 
