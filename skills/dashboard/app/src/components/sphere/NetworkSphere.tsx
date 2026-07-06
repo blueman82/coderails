@@ -135,14 +135,12 @@ export function NetworkSphere({ reducedMotion }: { reducedMotion: boolean }) {
     return () => window.removeEventListener("mousemove", onMouseMove);
   }, []);
 
-  // Static frame for reduced motion: seed one plexus pass and stop — no rAF loop.
+  // Seed the initial plexus pass. When reducedMotion is set, useFrame below never re-triggers
+  // it, so this single pass is the whole static frame's wiring.
   useEffect(() => {
-    if (reducedMotion && plexusRef.current) {
-      recomputePlexus(positionsRef.current, plexusRef.current.geometry);
-    } else if (plexusRef.current) {
+    if (plexusRef.current) {
       recomputePlexus(positionsRef.current, plexusRef.current.geometry);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useFrame((state, delta) => {
