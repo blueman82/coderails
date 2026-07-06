@@ -30,8 +30,10 @@ function project(theta: number, phi: number, rot: number, cx: number, cy: number
   return { x: cx + x * radius, y: cy + y * radius * 1.5, z };
 }
 
-export function Fallback2D({ reducedMotion }: { reducedMotion: boolean }) {
+export function Fallback2D({ reducedMotion, accent }: { reducedMotion: boolean; accent: AccentHsl }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const accentRef = useRef(accent);
+  accentRef.current = accent;
 
   useEffect(() => {
     const canvas = canvasRef.current;
