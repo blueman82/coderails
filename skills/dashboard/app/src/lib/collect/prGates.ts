@@ -27,24 +27,34 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 // Matches a comment body against the eval-marker grammar for `pr`, at ANY
-// result/tier, mirroring eval_artifact::matches_marker's literal-prefix
-// approach (scripts/lib/eval-artifact.sh) — pr/headSha are compared via
-// string equality inside the regex capture groups, never interpolated into
-// the pattern itself, so a pr/sha containing regex metacharacters can't be
-// misread as part of the pattern.
+// result/tier, mirroring eval_artifact::parse_result/parse_tier
+// (scripts/lib/eval-artifact.sh) EXACTLY: those functions anchor the WHOLE
+// LINE (`^<!-- ... -->$`) and restrict result to GO|NO-GO, tier to a single
+// digit [0-2] — a marker embedded mid-sentence, or carrying an out-of-range
+// tier or non-vocabulary result, fails closed in the shell and must fail
+// closed here too. We split the body into lines and test each line whole
+// against an anchored pattern, rather than scanning the body as one blob
+// with an unanchored regex. pr/headSha are compared via string equality
+// after extraction, never interpolated into the pattern itself, so a pr/sha
+// containing regex metacharacters can't be misread as part of the pattern.
 function matchEvalMarkers(
   body: string,
   version: string,
   pr: number
 ): { headSha: string; result: string; tier: string }[] {
-  const escapedVersion = version.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const escapedVersion = escapeRegExp(version);
   const pattern = new RegExp(
-    `<!-- coderails-eval-summary ${escapedVersion} pr=(\\S+) head_sha=(\\S+) result=(GO|NO-GO) tier=(\\S+) -->`,
-    "g"
+    `^<!-- coderails-eval-summary ${escapedVersion} pr=(\\S+) head_sha=(\\S+) result=(GO|NO-GO) tier=([0-2]) -->$`
   );
   const matches: { headSha: string; result: string; tier: string }[] = [];
-  for (const m of body.matchAll(pattern)) {
+  for (const line of body.split("\n")) {
+    const m = pattern.exec(line);
+    if (!m) continue;
     if (m[1] !== String(pr)) continue;
     matches.push({ headSha: m[2], result: m[3], tier: m[4] });
   }
@@ -52,16 +62,20 @@ function matchEvalMarkers(
 }
 
 // Mirrors review_artifact::matches_marker's exact-equality approach
-// (scripts/lib/review-artifact.sh): match a whole marker string, not a
-// substring grep, so junk prefix/suffix on the line fails to match.
+// (scripts/lib/review-artifact.sh): that function compares a LINE against
+// the marker with string equality (`[ "$line" = "$(marker ...)" ]`), not a
+// substring grep, so junk prefix/suffix on the line fails to match. We test
+// each line of the body against a whole-line-anchored pattern for the same
+// effect.
 function matchReviewMarkers(body: string, version: string, pr: number): { headSha: string }[] {
-  const escapedVersion = version.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const escapedVersion = escapeRegExp(version);
   const pattern = new RegExp(
-    `<!-- coderails-review-summary ${escapedVersion} pr=(\\S+) head_sha=(\\S+) -->`,
-    "g"
+    `^<!-- coderails-review-summary ${escapedVersion} pr=(\\S+) head_sha=(\\S+) -->$`
   );
   const matches: { headSha: string }[] = [];
-  for (const m of body.matchAll(pattern)) {
+  for (const line of body.split("\n")) {
+    const m = pattern.exec(line);
+    if (!m) continue;
     if (m[1] !== String(pr)) continue;
     matches.push({ headSha: m[2] });
   }
