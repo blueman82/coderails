@@ -26,8 +26,8 @@
       "assert": "the sentinel string planted in a Bash command's arguments never appears in scan output over fixture-sentinel.jsonl",
       "cmd": "! skills/workflow-audit/scripts/scan_transcripts.sh --project fixture-sentinel 2>/dev/null | grep -q SENTINEL_sk_live_99xyz",
       "negative_control": "run `grep -q SENTINEL_sk_live_99xyz skills/workflow-audit/scripts/tests/fixtures/fixture-sentinel.jsonl` directly against the fixture (not the script output) to confirm the sentinel is genuinely present in the input, so the script's absence-of-leak is a real filter, not an empty fixture",
-      "status": "pending",
-      "evidence": ""
+      "status": "pass",
+      "evidence": "grep -q over script output: no match, exit 1 (absent); negative control grep over raw fixture: match, exit 0 (confirmed present in input)"
     },
     {
       "id": "E3",
