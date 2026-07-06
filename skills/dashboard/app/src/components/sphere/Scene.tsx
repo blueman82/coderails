@@ -1,0 +1,79 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import { Canvas } from "@react-three/fiber";
+import { EffectComposer, Bloom } from "@react-three/postprocessing";
+import { NetworkSphere } from "./NetworkSphere";
+import { GridFloor } from "./GridFloor";
+import { Fallback2D } from "./Fallback2D";
+
+// Probes WebGL context creation without mounting a real <Canvas> (R3F/three throw deep inside
+// the render pipeline, not at a boundary React's error boundaries can reliably catch before
+// paint). "GPU unavailable" is a real environment on this machine's history, so the probe must
+// fail closed: any exception, or a null context, means fallback.
+function canCreateWebGL(): boolean {
+  try {
+    const probe = document.createElement("canvas");
+    const gl = probe.getContext("webgl2") || probe.getContext("webgl");
+    return !!gl;
+  } catch {
+    return false;
+  }
+}
+
+function usePrefersReducedMotion(): boolean {
+  const [reduced, setReduced] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
+    setReduced(mq.matches);
+    const onChange = () => setReduced(mq.matches);
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, []);
+  return reduced;
+}
+
+export function Scene() {
+  const reducedMotion = usePrefersReducedMotion();
+  const [webglOK, setWebglOK] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    let ok = false;
+    try {
+      ok = canCreateWebGL();
+    } catch {
+      ok = false;
+    }
+    if (!ok) {
+      console.warn("NetworkSphere: WebGL unavailable, rendering 2D canvas fallback");
+    }
+    setWebglOK(ok);
+  }, []);
+
+  // Avoid a flash of the wrong renderer: render nothing for the one tick it takes to probe.
+  if (webglOK === null) return null;
+
+  if (!webglOK) {
+    return <Fallback2D reducedMotion={reducedMotion} />;
+  }
+
+  return (
+    <Canvas
+      className="hud-bg-canvas"
+      gl={{ antialias: true, alpha: true }}
+      camera={{ fov: 55, near: 0.1, far: 400, position: [0, 2, 46] }}
+      onCreated={({ gl }) => {
+        gl.setClearColor(0x0d0708, 0);
+      }}
+      frameloop={reducedMotion ? "demand" : "always"}
+    >
+      <NetworkSphere reducedMotion={reducedMotion} />
+      <GridFloor />
+      {!reducedMotion && (
+        <EffectComposer>
+          <Bloom luminanceThreshold={0.2} luminanceSmoothing={0.9} intensity={0.6} mipmapBlur />
+        </EffectComposer>
+      )}
+    </Canvas>
+  );
+}
