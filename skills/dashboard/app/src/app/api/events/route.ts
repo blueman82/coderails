@@ -48,6 +48,7 @@ export function createEventsHandler(deps: EventsHandlerDeps) {
       projectsDir: deps.projectsDir ?? DEFAULT_PROJECTS_DIR,
       loopsDir: deps.loopsDir ?? DEFAULT_LOOPS_DIR,
       runsDir: deps.runsDir ?? DEFAULT_RUNS_DIR,
+      queueDir: deps.queueDir ?? DEFAULT_QUEUE_DIR,
       gatesPollMs: deps.gatesPollMs,
       activityDebounceMs: deps.activityDebounceMs,
       onError: (source, err) => {
