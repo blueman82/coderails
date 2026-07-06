@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from "vitest";
-import { mkdtempSync, writeFileSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync, readFileSync, existsSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createQueueActionHandler } from "../src/app/api/queue/route";
@@ -19,6 +19,14 @@ afterEach(() => {
 });
 
 const TOKEN = "test-token-abc123";
+
+// 64-char hex strings, matching the frozen contract's "sha256(...), hex" shape.
+const HASH_A = "a".repeat(64);
+const HASH_B = "b".repeat(64);
+const HASH_X = "1".repeat(64);
+const HASH_Y = "2".repeat(64);
+const HASH_C = "c".repeat(64);
+const HASH_UNKNOWN = "d".repeat(64);
 
 function writeEntry(dir: string, hash: string, overrides: Record<string, unknown> = {}): string {
   const path = join(dir, `${hash}.json`);
@@ -58,30 +66,30 @@ function req(body: unknown, headers: Record<string, string> = {}): Request {
 describe("POST /api/queue — token/origin", () => {
   it("rejects a missing token with 401 and does not mutate the file", async () => {
     const { handler, queueDir } = makeHandler();
-    const path = writeEntry(queueDir, "hashA");
-    const res = await handler(req({ hash: "hashA", decision: "approved" }));
+    const path = writeEntry(queueDir, HASH_A);
+    const res = await handler(req({ hash: HASH_A, decision: "approved" }));
     expect(res.status).toBe(401);
     expect(JSON.parse(readFileSync(path, "utf-8")).status).toBe("pending");
   });
 
   it("rejects a wrong token with 401", async () => {
     const { handler } = makeHandler();
-    const res = await handler(req({ token: "wrong", hash: "hashA", decision: "approved" }));
+    const res = await handler(req({ token: "wrong", hash: HASH_A, decision: "approved" }));
     expect(res.status).toBe(401);
   });
 
   it("rejects a non-localhost origin with 403", async () => {
     const { handler, queueDir } = makeHandler();
-    writeEntry(queueDir, "hashA");
+    writeEntry(queueDir, HASH_A);
     const res = await handler(
-      req({ token: TOKEN, hash: "hashA", decision: "approved" }, { origin: "https://evil.example" })
+      req({ token: TOKEN, hash: HASH_A, decision: "approved" }, { origin: "https://evil.example" })
     );
     expect(res.status).toBe(403);
   });
 
   it("never includes the token in a response body", async () => {
     const { handler } = makeHandler();
-    const res = await handler(req({ token: "wrong", hash: "hashA", decision: "approved" }));
+    const res = await handler(req({ token: "wrong", hash: HASH_A, decision: "approved" }));
     const text = await res.text();
     expect(text).not.toContain(TOKEN);
   });
@@ -90,25 +98,25 @@ describe("POST /api/queue — token/origin", () => {
 describe("POST /api/queue — approve/deny", () => {
   it("approves a pending entry via in-place rewrite", async () => {
     const { handler, queueDir } = makeHandler();
-    const path = writeEntry(queueDir, "hashA");
-    const res = await handler(req({ token: TOKEN, hash: "hashA", decision: "approved" }));
+    const path = writeEntry(queueDir, HASH_A);
+    const res = await handler(req({ token: TOKEN, hash: HASH_A, decision: "approved" }));
     expect(res.status).toBe(200);
     expect(JSON.parse(readFileSync(path, "utf-8")).status).toBe("approved");
   });
 
   it("denies a pending entry via in-place rewrite", async () => {
     const { handler, queueDir } = makeHandler();
-    const path = writeEntry(queueDir, "hashB");
-    const res = await handler(req({ token: TOKEN, hash: "hashB", decision: "denied" }));
+    const path = writeEntry(queueDir, HASH_B);
+    const res = await handler(req({ token: TOKEN, hash: HASH_B, decision: "denied" }));
     expect(res.status).toBe(200);
     expect(JSON.parse(readFileSync(path, "utf-8")).status).toBe("denied");
   });
 
   it("does not bleed through to a different hash in the same dir", async () => {
     const { handler, queueDir } = makeHandler();
-    const pathX = writeEntry(queueDir, "hashX");
-    const pathY = writeEntry(queueDir, "hashY");
-    const res = await handler(req({ token: TOKEN, hash: "hashX", decision: "approved" }));
+    const pathX = writeEntry(queueDir, HASH_X);
+    const pathY = writeEntry(queueDir, HASH_Y);
+    const res = await handler(req({ token: TOKEN, hash: HASH_X, decision: "approved" }));
     expect(res.status).toBe(200);
     expect(JSON.parse(readFileSync(pathX, "utf-8")).status).toBe("approved");
     expect(JSON.parse(readFileSync(pathY, "utf-8")).status).toBe("pending");
@@ -116,16 +124,34 @@ describe("POST /api/queue — approve/deny", () => {
 
   it("rejects an invalid decision value with 400 and does not mutate the file", async () => {
     const { handler, queueDir } = makeHandler();
-    const path = writeEntry(queueDir, "hashC");
-    const res = await handler(req({ token: TOKEN, hash: "hashC", decision: "expired" }));
+    const path = writeEntry(queueDir, HASH_C);
+    const res = await handler(req({ token: TOKEN, hash: HASH_C, decision: "expired" }));
     expect(res.status).toBe(400);
     expect(JSON.parse(readFileSync(path, "utf-8")).status).toBe("pending");
   });
 
-  it("rejects a missing hash with 404 (unknown queue entry) rather than throwing", async () => {
+  it("rejects a well-formed-but-unknown hash with 404 (unknown queue entry) rather than throwing", async () => {
+    const { handler } = makeHandler();
+    const res = await handler(req({ token: TOKEN, hash: HASH_UNKNOWN, decision: "approved" }));
+    expect(res.status).toBe(404);
+  });
+
+  it("rejects a hash that is not well-formed hex-64 with 400, before ever reaching the filesystem", async () => {
     const { handler } = makeHandler();
     const res = await handler(req({ token: TOKEN, hash: "does-not-exist", decision: "approved" }));
-    expect(res.status).toBe(404);
+    expect(res.status).toBe(400);
+  });
+
+  it("rejects a path-traversal-shaped hash with 400 and does not escape queueDir (security)", async () => {
+    const { handler, queueDir } = makeHandler();
+    // A victim file one level above queueDir that a naive join() would let a ".." hash reach.
+    const outsideTarget = join(queueDir, "..", "victim.json");
+    writeFileSync(outsideTarget, JSON.stringify({ status: "untouched" }));
+
+    const res = await handler(req({ token: TOKEN, hash: "../victim", decision: "approved" }));
+    expect(res.status).toBe(400);
+    expect(existsSync(outsideTarget)).toBe(true);
+    expect(JSON.parse(readFileSync(outsideTarget, "utf-8"))).toEqual({ status: "untouched" });
   });
 
   it("rejects a malformed JSON body with 400", async () => {
