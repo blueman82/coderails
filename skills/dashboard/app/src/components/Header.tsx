@@ -44,15 +44,15 @@ export function Header() {
   return (
     <header className="hud-header">
       <div>
-        <div className="hud-wordmark">C.O.D.E.R.A.I.L.S</div>
-        <div className="hud-wordmark-sub">Agentic Operating System · Observability Terminal</div>
+        <div className="hud-wordmark hud-intro-wordmark">C.O.D.E.R.A.I.L.S</div>
+        <div className="hud-wordmark-sub hud-intro-fade">Agentic Operating System · Observability Terminal</div>
       </div>
-      <div className="hud-status-line">
+      <div className="hud-status-line hud-intro-fade">
         <span className={`hud-status-dot${isOnline ? "" : " reconnecting"}`} />
         <span>{statusLabel}</span>
         {lastUpdateLabel && <span className="hud-status-last-update">{lastUpdateLabel}</span>}
       </div>
-      <div className="hud-clock-block">
+      <div className="hud-clock-block hud-intro-fade">
         <div className="hud-clock-big">
           <span>{hhmm}</span>
           <span className="hud-clock-secs">:{secs}</span>
