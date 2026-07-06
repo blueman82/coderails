@@ -93,10 +93,28 @@ export function RailRight({ token, buttons }: RailRightProps) {
     // so the deck never flickers back to idle between the 200 response and the next SSE frame.
   }
 
-  // "Busy" is activeByButton (the SSE-confirmed source of truth) OR the local optimistic `queued`
-  // flag — the flag only matters for the brief window between the POST response and the next SSE
-  // 'runs' frame; once activeByButton confirms it, the flag is redundant but harmless to leave set
-  // (isButtonBusy short-circuits on activeByButton first).
+  // Clears the local optimistic `queued` flag once the run either shows up as SSE-confirmed
+  // active (real state has taken over) or has fully disappeared from `runs` finished+unfinished
+  // (the POST awaits full completion before responding — see api/run/route.ts — so by the time
+  // `queued` is set the run has very likely already finished and produced a finish record; this
+  // effect un-stuffs the flag in either case rather than leaving it stuck true forever).
+  useEffect(() => {
+    setUiState((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      for (const [name, ui] of Object.entries(prev)) {
+        if (!ui.queued) continue;
+        const stillRelevant = activeByButton.has(name) || runs.some((r) => r.button === name && r.endedAt === undefined);
+        if (!stillRelevant) {
+          next[name] = { ...ui, queued: false };
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [runs]);
+
   function isButtonBusy(name: string): boolean {
     return activeByButton.has(name) || getUi(name).queued;
   }
