@@ -21,14 +21,15 @@ function canCreateWebGL(): boolean {
   }
 }
 
+// SSR always has no window, so this is a client-only value: it must resolve after mount via an
+// effect (a lazy useState initializer would freeze at the server's answer through hydration,
+// since React reuses the SSR-computed initial state rather than re-running the initializer on
+// the client). The one-tick delay before the real value lands is intentional and unavoidable.
 function usePrefersReducedMotion(): boolean {
-  // Lazy initializer reads the synchronous browser API directly at first render; the effect
-  // below only subscribes to later changes, so no setState call is needed to seed the value.
-  const [reduced, setReduced] = useState(
-    () => typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches
-  );
+  const [reduced, setReduced] = useState(false);
   useEffect(() => {
     const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
+    setReduced(mq.matches);
     const onChange = () => setReduced(mq.matches);
     mq.addEventListener("change", onChange);
     return () => mq.removeEventListener("change", onChange);
@@ -38,12 +39,9 @@ function usePrefersReducedMotion(): boolean {
 
 export function Scene() {
   const reducedMotion = usePrefersReducedMotion();
-  // Deferred to a lazy initializer for the same reason as usePrefersReducedMotion: this is a
-  // synchronous probe, not a subscription, so it belongs in render rather than an effect body.
-  // null on the server (no window); the client's first render replaces it with the real probe
-  // result, which is a one-time client/server mismatch React reconciles on hydration.
-  const [webglOK] = useState<boolean | null>(() => {
-    if (typeof window === "undefined") return null;
+  const [webglOK, setWebglOK] = useState<boolean | null>(null);
+
+  useEffect(() => {
     let ok = false;
     try {
       ok = canCreateWebGL();
@@ -53,8 +51,8 @@ export function Scene() {
     if (!ok) {
       console.warn("NetworkSphere: WebGL unavailable, rendering 2D canvas fallback");
     }
-    return ok;
-  });
+    setWebglOK(ok);
+  }, []);
 
   // Avoid a flash of the wrong renderer: render nothing for the one tick it takes to probe.
   if (webglOK === null) return null;
