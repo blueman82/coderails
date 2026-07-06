@@ -72,11 +72,48 @@ done
 printf '#!/bin/bash\ntrue\n' > "$TMP_TREE/$UNTRACKED_FILE"
 chmod -x "$TMP_TREE/$UNTRACKED_FILE"
 
+# install.sh also writes unconditionally under $HOME (installed_plugins.json
+# scan, ~/.claude/commands conflict scan, settings.json / known_marketplaces.json
+# / plugins/marketplaces marketplace registration, ~/.claude/CLAUDE.md append) —
+# none of that is redirected by MEMORY_TARGET. Point HOME at a sandbox for the
+# duration of the invocation so those writes never touch the developer's real
+# home (this previously corrupted a real ~/.claude/settings.json on this
+# machine). The sandbox starts empty (freshly mktemp'd, nothing pre-seeded
+# except where deliberately noted below) and is never the same path as the
+# real HOME captured here before either run.
+REAL_HOME="$HOME"
+HOME_SANDBOX="$TMP_TREE/.home-sandbox"
+mkdir -p "$HOME_SANDBOX"
+[ "$HOME_SANDBOX" != "$REAL_HOME" ] || { echo "FAIL - sandbox HOME must differ from real HOME"; exit 1; }
+
+# Pre-seed the sandboxed settings.json with a stale marketplace key so the run
+# below exercises install.sh's real jq mutation logic (stage 4: drop stale
+# keys, register coderails) against the sandbox — proving the sandbox isn't
+# merely inert but is the actual target of the mutation under test.
+mkdir -p "$HOME_SANDBOX/.claude"
+printf '{"extraKnownMarketplaces":{"workflow-tools":{"source":{"source":"directory","path":"/nonexistent"}}}}\n' \
+  > "$HOME_SANDBOX/.claude/settings.json"
+
+REAL_SETTINGS="$REAL_HOME/.claude/settings.json"
+real_settings_cksum_before=""
+[ -f "$REAL_SETTINGS" ] && real_settings_cksum_before="$(cksum "$REAL_SETTINGS")"
+
 # Run install.sh's sweep in dry mode is not enough (dry-run doesn't chmod) —
 # run for real, in the temp copy, non-interactively, then inspect disk modes.
-# We invoke the whole script; it only touches files under $PLUGIN_DIR (TMP_TREE),
-# and needs gh/jq/git on PATH (present — same prerequisites as the real installer).
-( cd "$TMP_TREE" && printf 'n\n' | MEMORY_TARGET="$TMP_TREE/.memory-test" bash install.sh >/dev/null 2>&1 )
+# We invoke the whole script; it only touches files under $PLUGIN_DIR (TMP_TREE)
+# and $HOME (now the sandbox above), and needs jq/git on PATH (install.sh makes
+# no `gh` calls at all, so no auth/token state under HOME is needed here).
+( cd "$TMP_TREE" && printf 'n\n' | HOME="$HOME_SANDBOX" MEMORY_TARGET="$TMP_TREE/.memory-test" bash install.sh >/dev/null 2>&1 )
+
+if [ -n "$real_settings_cksum_before" ]; then
+  real_settings_cksum_after="$(cksum "$REAL_SETTINGS")"
+  check "real HOME settings.json untouched by sandboxed run (cksum)" "$real_settings_cksum_before" "$real_settings_cksum_after"
+fi
+
+check "sandboxed settings.json drops stale workflow-tools key (real jq mutation exercised)" \
+  "null" "$(jq -r '.extraKnownMarketplaces["workflow-tools"] // "null"' "$HOME_SANDBOX/.claude/settings.json" 2>/dev/null)"
+check "sandboxed settings.json registers coderails marketplace pointing at the sandbox tree" \
+  "$TMP_TREE" "$(jq -r '.extraKnownMarketplaces.coderails.source.path // "null"' "$HOME_SANDBOX/.claude/settings.json" 2>/dev/null)"
 
 is_executable() { [ -x "$1" ] && echo yes || echo no; }
 
@@ -123,8 +160,16 @@ for f in $OTHER_SOURCE_ONLY_FILES; do
   chmod +x "$NOGIT_TREE/$f"
 done
 
+NOGIT_HOME_SANDBOX="$NOGIT_TREE/.home-sandbox"
+mkdir -p "$NOGIT_HOME_SANDBOX"
+
 nogit_exit=0
-( cd "$NOGIT_TREE" && printf 'n\n' | MEMORY_TARGET="$NOGIT_TREE/.memory-test" bash install.sh >/dev/null 2>&1 ) || nogit_exit=$?
+( cd "$NOGIT_TREE" && printf 'n\n' | HOME="$NOGIT_HOME_SANDBOX" MEMORY_TARGET="$NOGIT_TREE/.memory-test" bash install.sh >/dev/null 2>&1 ) || nogit_exit=$?
+
+if [ -n "$real_settings_cksum_before" ]; then
+  real_settings_cksum_after_nogit="$(cksum "$REAL_SETTINGS")"
+  check "real HOME settings.json still untouched after no-git sandboxed run (cksum)" "$real_settings_cksum_before" "$real_settings_cksum_after_nogit"
+fi
 
 check "install.sh exits 0 in a no-git checkout (does not die mid-sweep)" "0" "$nogit_exit"
 check "$SOURCE_ONLY_FILE gains +x in a no-git checkout (fallback applied to every file)" "yes" "$(is_executable "$NOGIT_TREE/$SOURCE_ONLY_FILE")"
