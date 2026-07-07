@@ -6,6 +6,7 @@
 # invariant end-to-end, the no-approval/no-creation property, and residual
 # edge cases flagged during WU1 review but not yet pinned by a test.
 set -u
+set -o pipefail
 SCAN_SCRIPT="$(cd "$(dirname "$0")/.." && pwd)/scan_transcripts.sh"
 CLUSTER_SCRIPT="$(cd "$(dirname "$0")/.." && pwd)/cluster_ngrams.sh"
 REPO_ROOT="$(cd "$(dirname "$0")/../../../.." && pwd)"
@@ -139,8 +140,7 @@ printf '{"type":"assistant","message":{"role":"assistant","content":[{"type":"to
 printf '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"Grep"}]},"timestamp":"2026-07-06T12:00:00Z"}\n' \
   > "$TMP4/proj-noclust-c/nocl0000-0000-0000-0000-00000000000c.jsonl"
 
-NOCLUST_ERR=$(WORKFLOW_AUDIT_ROOT="$TMP4" bash "$SCAN_SCRIPT" --all-projects --days 36500 2>/tmp/e2e_noclust_scan.err | bash "$CLUSTER_SCRIPT" --min-sessions 3 2>/tmp/e2e_noclust_cluster.err)
-NOCLUST_OUT="$NOCLUST_ERR"
+NOCLUST_OUT=$(WORKFLOW_AUDIT_ROOT="$TMP4" bash "$SCAN_SCRIPT" --all-projects --days 36500 2>/tmp/e2e_noclust_scan.err | bash "$CLUSTER_SCRIPT" --min-sessions 3 2>/tmp/e2e_noclust_cluster.err)
 NOCLUST_RC=$?
 check "no-candidates corpus -> pipeline exits 0" "0" "$NOCLUST_RC"
 check "no-candidates corpus -> empty clusters array" "[]" "$(printf '%s' "$NOCLUST_OUT" | jq -c '.clusters')"
