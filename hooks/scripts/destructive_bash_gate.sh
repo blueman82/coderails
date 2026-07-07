@@ -235,23 +235,34 @@ fi
 # Bash tool_input rather than a command-file render-time !`cmd` line.
 #
 # Scoped (not whole-line): a substitution character anywhere on the line used
-# to deny even when it wasn't part of an argument passed to the script. Three
+# to deny even when it wasn't part of an argument passed to the script. Two
 # checks narrow this to genuine in-argument substitution:
-#   1. a substitution char appearing before the first script-name mention means
+#   1. an UNCLOSED substitution reaching the first script-name mention means
 #      the whole invocation is being captured (e.g. out=$(bash scripts/push.sh
 #      "clean msg")) — the script's own stdout is substituted, not its argument.
+#      "Unclosed" is measured by parenthesis-depth for $( (more opens than
+#      closes before the script name) and by parity for backticks (an odd
+#      count means the mention falls inside an open backtick pair). A
+#      substitution that is already CLOSED before the script name (e.g. an
+#      unrelated `echo $(pwd); bash scripts/push.sh "msg with $(whoami)"`) does
+#      not count — that line's real argument substitution must still be caught
+#      by check 2, not suppressed here.
 #   2. the quoted segment that contains the script-name mention, when that
 #      segment is not the bare "scripts/X.sh" token, is prose that happens to
 #      mention the script name and a substitution char together (e.g. a note
-#      documenting the script) — not an actual invocation of it.
-#   3. otherwise, a substitution char in a later quoted segment is a genuine
-#      argument to the script and still denies.
+#      documenting the script) — not an actual invocation of it. Otherwise a
+#      substitution char anywhere on the line (having passed check 1) is a
+#      genuine argument to the script and still denies.
 script_re='scripts/(push|merge|post_review|post_evals)\.sh'
 if echo "$cmd" | grep -qE "$script_re"; then
   if echo "$cmd" | grep -qE '`|\$\('; then
     substitution_scoped=1
     before_script=$(echo "$cmd" | sed -E "s#${script_re}.*##")
-    if echo "$before_script" | grep -qE '`|\$\('; then
+    dollar_opens=$(echo "$before_script" | grep -oE '\$\(' | wc -l | tr -d ' ')
+    close_parens=$(echo "$before_script" | grep -oE '\)' | wc -l | tr -d ' ')
+    backtick_count=$(echo "$before_script" | grep -oE '`' | wc -l | tr -d ' ')
+    backtick_open=$(( backtick_count % 2 ))
+    if [ "$dollar_opens" -gt "$close_parens" ] || [ "$backtick_open" -eq 1 ]; then
       substitution_scoped=0
     fi
     if [ "$substitution_scoped" -eq 1 ]; then

@@ -199,4 +199,19 @@ check "prose mentions push.sh, unrelated \$(...) elsewhere -> allow" ALLOW \
 check "stdout-capture of push.sh invocation -> allow" ALLOW \
   "$(run "$(payload 'out=$(bash scripts/push.sh "clean message with no substitution")')")"
 
+# --- Regression: an unrelated, already-CLOSED substitution earlier on the
+# line must not disable scoping for a genuine later in-argument substitution.
+# (An earlier open-and-still-open substitution legitimately wraps the whole
+# invocation per the stdout-capture case above; a closed one does not.)
+check "closed backtick earlier, real substitution in post_review.sh arg -> deny" DENY \
+  "$(run "$(payload 'echo `date`; bash scripts/post_review.sh validate "/tmp/x" "uses `foo` here"')")"
+check "closed \$(...) earlier, real substitution in merge.sh arg -> deny" DENY \
+  "$(run "$(payload 'echo $(pwd); bash scripts/merge.sh "19" "note with $(whoami)"')")"
+
+# --- Regression: quoting style of the malicious argument must not matter. ---
+check "single-quoted arg with \$(...) still denies" DENY \
+  "$(run "$(payload "bash scripts/push.sh 'fix thing \$(whoami)'")")"
+check "unquoted arg with \$(...) still denies" DENY \
+  "$(run "$(payload 'bash scripts/push.sh fix-thing-$(whoami)-done')")"
+
 [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails)"; exit 1; }
