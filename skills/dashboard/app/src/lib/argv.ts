@@ -42,7 +42,16 @@ function profileFlags(profile: ButtonDef["profile"]): string[] {
   return [];
 }
 
-export function buildArgv(btn: ButtonDef, input?: string): string[] {
+export function buildArgv(btn: ButtonDef, rawInput?: string): string[] {
+  // Normalise first: empty or whitespace-only input is treated exactly like
+  // no input at all. route.ts does no trim/empty check of its own (only the
+  // UI's call site converts empty→undefined before ever reaching here), so
+  // a direct API caller can hand buildArgv input:"" or input:"   " — without
+  // this normalisation that would still take the input-bearing branch below
+  // and produce a merged prompt with a trailing space and a needless '--'
+  // sentinel, instead of the same clean argv a genuine no-input press gets.
+  const input = rawInput !== undefined && rawInput.trim() === "" ? undefined : rawInput;
+
   if (input === undefined) {
     if (btn.command.trim() === "") {
       throw new Error("buildArgv: refusing to spawn an empty prompt (no command and no input)");
@@ -50,14 +59,13 @@ export function buildArgv(btn: ButtonDef, input?: string): string[] {
     return ["-p", btn.command, ...profileFlags(btn.profile)];
   }
 
-  if (input.startsWith("-")) {
+  // Checked against the trimmed value so whitespace can't smuggle a flag
+  // past a naive startsWith check (e.g. "  --dangerously-skip-permissions").
+  if (input.trim().startsWith("-")) {
     throw new Error(`buildArgv: input must not start with '-' (got: ${input})`);
   }
 
   const prompt = btn.command ? `${btn.command} ${input}` : input;
-  if (prompt.trim() === "") {
-    throw new Error("buildArgv: refusing to spawn an empty prompt (no command and no input)");
-  }
 
   return ["-p", ...profileFlags(btn.profile), "--", prompt];
 }
