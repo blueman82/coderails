@@ -49,10 +49,17 @@ gate_in_scope() {
   # (writing text) was blocked, while still catching chained forms like
   # `cd x && gh pr create`. The `([[:space:]]|$)` tail on `git merge`/`git push`
   # excludes read-only plumbing (`git merge-base`/`-file`/`-tree`).
+  # `git -C <dir> merge`/`git -C <dir> push` are also recognized as gated forms
+  # (same tail requirement) — previously a segment starting with `git -C` never
+  # matched "begins with git merge/push" at all, so the whole hook stood aside
+  # and e.g. `git -C /path/to/main-checkout push origin main` bypassed the gate
+  # unconditionally. push_target_dir carries the `-C` directory (if any) so
+  # gate_targets_main can resolve the branch from the actual target, not $cwd.
   # Known limit: a gated command wrapped in a subshell `(gh pr create)` or behind
   # an env/command prefix (`VAR=x gh ...`) is not parsed — the same "we don't
   # parse every shell form" stance as the refspec note in gate_targets_main.
   subcommand=""
+  push_target_dir=""
   local seg
   while IFS= read -r seg; do
     seg="${seg#"${seg%%[![:space:]]*}"}"   # strip leading whitespace
@@ -60,6 +67,10 @@ gate_in_scope() {
     elif [[ "$seg" =~ ^gh[[:space:]]+pr[[:space:]]+merge([[:space:]]|$)  ]]; then subcommand="merge";     break
     elif [[ "$seg" =~ ^git[[:space:]]+merge([[:space:]]|$) ]];             then subcommand="git_merge"; break
     elif [[ "$seg" =~ ^git[[:space:]]+push([[:space:]]|$) ]];              then subcommand="git_push";  break
+    elif [[ "$seg" =~ ^git[[:space:]]+-C[[:space:]]+([^[:space:]]+)[[:space:]]+merge([[:space:]]|$) ]]; then
+      subcommand="git_merge"; push_target_dir="${BASH_REMATCH[1]}"; break
+    elif [[ "$seg" =~ ^git[[:space:]]+-C[[:space:]]+([^[:space:]]+)[[:space:]]+push([[:space:]]|$) ]]; then
+      subcommand="git_push"; push_target_dir="${BASH_REMATCH[1]}"; break
     fi
   done <<EOF
 $(printf '%s' "$cmd" | awk '{gsub(/&&|\|\||[;|&]/, "\n"); print}')
@@ -67,6 +78,7 @@ EOF
   # No gated command was actually invoked → stand aside.
   [ -z "$subcommand" ] && exit 0
   # $subcommand is also read by gate_targets_main and enforce_required_step.
+  # $push_target_dir (may be empty) is read by gate_targets_main.
 }
 
 gate_config_present() {
@@ -90,7 +102,32 @@ gate_targets_main() {
   #    `feature:master`, `:refs/heads/main`) from any branch. Also gate positional
   #    bare-branch targets from any branch — a refspec is not the only way to name main.
   if [ "$subcommand" = "git_merge" ] || [ "$subcommand" = "git_push" ]; then
-    current_branch=$(git -C "$cwd" branch --show-current 2>/dev/null)
+    # Resolve the directory the git command actually runs in — a leading
+    # `cd <dir> &&` prefix or a `git -C <dir>` flag (parsed into push_target_dir
+    # by gate_in_scope) both take the command out of $cwd (the payload's
+    # session-level cwd). Relative dirs join to $cwd, same idiom as
+    # destructive_bash_gate.sh's branch_for_path. Falls back to $cwd verbatim
+    # when neither form is present — byte-identical to prior behaviour.
+    target_dir="$push_target_dir"
+    if [ -z "$target_dir" ] && [[ "$cmd" =~ ^[[:space:]]*cd[[:space:]]+([^[:space:]]+)[[:space:]]*(\&\&|\;) ]]; then
+      target_dir="${BASH_REMATCH[1]}"
+    fi
+    if [ -n "$target_dir" ]; then
+      case "$target_dir" in
+        /*) ;;
+        *) target_dir="$cwd/$target_dir" ;;
+      esac
+    else
+      target_dir="$cwd"
+    fi
+    current_branch=$(git -C "$target_dir" branch --show-current 2>/dev/null)
+    # If the resolved target isn't a usable git repo (e.g. a relative `cd sub`
+    # that doesn't exist, or isn't a checkout at all), fall back to $cwd's
+    # branch rather than treating an empty/unresolvable branch as "not main" —
+    # that would silently widen the gate's blind spot instead of narrowing it.
+    if [ -z "$current_branch" ] && [ "$target_dir" != "$cwd" ]; then
+      current_branch=$(git -C "$cwd" branch --show-current 2>/dev/null)
+    fi
     gate_it=0
     case "$current_branch" in main|master) gate_it=1 ;; esac
     # The destination ref may be terminated by whitespace, EOL, or a shell separator
@@ -117,7 +154,10 @@ gate_targets_main() {
     # permission escape covers any legitimate use of such a remote name.
     if [ "$subcommand" = "git_push" ] && [ "$gate_it" -eq 0 ]; then
       # Extract the portion of the command after the `push` keyword for token scan.
-      push_args=$(printf '%s' "$cmd" | grep -oE '\bgit[[:space:]]+push[[:space:]](.*)' | sed 's/^git[[:space:]]*push[[:space:]]*//')
+      # Matches both plain `git push ...` and `git -C <dir> push ...` (the anchor
+      # tolerates an optional `-C <dir>` between `git` and `push` so the -C form's
+      # destination args aren't silently skipped).
+      push_args=$(printf '%s' "$cmd" | grep -oE '\bgit([[:space:]]+-C[[:space:]]+[^[:space:]]+)?[[:space:]]+push[[:space:]](.*)' | sed -E 's/^git([[:space:]]+-C[[:space:]]+[^[:space:]]+)?[[:space:]]+push[[:space:]]*//')
       # Match +main, refs/heads/main, or bare main/master as a standalone token.
       if printf '%s' "$push_args" | grep -qE '(^|[[:space:]])(\+)?(refs/heads/)?(main|master)([[:space:];&|)]|$)'; then
         gate_it=1
