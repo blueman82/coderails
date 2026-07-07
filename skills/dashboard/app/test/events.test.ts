@@ -202,4 +202,63 @@ describe("GET /api/events — activity on fs change", () => {
     expect(Array.isArray(activity.health)).toBe(true);
     expect(activity.health.length).toBeGreaterThan(0);
   }, 6000);
+
+  it("snapshot carries a builds field populated from buildsDir, and it refreshes when a build's state.json changes", async () => {
+    const projectsDir = tmpDir("dashboard-events-projects-");
+    const loopsDir = tmpDir("dashboard-events-loops-");
+    const runsDir = tmpDir("dashboard-events-runs-");
+    const buildsDir = tmpDir("dashboard-events-builds-");
+    const debounceMs = 200;
+
+    const firstHash = "a".repeat(64);
+    mkdirSync(join(buildsDir, firstHash), { recursive: true });
+    writeFileSync(
+      join(buildsDir, firstHash, "state.json"),
+      JSON.stringify({ schemaVersion: 1, hash: firstHash, state: "running" })
+    );
+
+    const handler = createEventsHandler({
+      config: testConfig(),
+      projectsDir,
+      loopsDir,
+      runsDir,
+      buildsDir,
+      activityDebounceMs: debounceMs,
+      gatesPollMs: 999_999,
+    });
+    const res = handler(req());
+
+    // The first "activity" frame comes from start()'s unconditional initial
+    // refreshActivity() call (unrelated to file watching) and carries only
+    // firstHash. Once it lands, write the second build; the debounced
+    // fs.watch-triggered refresh then emits a second "activity" frame
+    // carrying both. Read continuously (a stream's reader/cancel can only be
+    // used once) until two activity frames have arrived.
+    let secondBuildWritten = false;
+    const framesPromise = readFramesUntil(res.body!, (frames) => {
+      const activityFrames = frames.filter((f) => f.event === "activity");
+      if (activityFrames.length >= 1 && !secondBuildWritten) {
+        secondBuildWritten = true;
+        const secondHash = "b".repeat(64);
+        mkdirSync(join(buildsDir, secondHash), { recursive: true });
+        writeFileSync(
+          join(buildsDir, secondHash, "state.json"),
+          JSON.stringify({ schemaVersion: 1, hash: secondHash, state: "pr_open" })
+        );
+      }
+      return activityFrames.length >= 2;
+    });
+
+    const timeout = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error("timed out waiting for two activity frames")), 8000)
+    );
+    const frames = await Promise.race([framesPromise, timeout]);
+
+    const activityFrames = frames.filter((f) => f.event === "activity");
+    const firstActivity = activityFrames[0].data as { builds: { hash: string }[] };
+    expect(firstActivity.builds.map((b) => b.hash)).toEqual([firstHash]);
+
+    const secondActivity = activityFrames[1].data as { builds: { hash: string }[] };
+    expect(secondActivity.builds.map((b) => b.hash).sort()).toEqual(["a".repeat(64), "b".repeat(64)]);
+  }, 10000);
 });

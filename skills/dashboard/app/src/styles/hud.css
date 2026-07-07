@@ -586,6 +586,28 @@
   cursor: default;
 }
 
+/* ---------- Assistant.Link build status (approve-builder pipeline) ---------- */
+.hud-build-status {
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  margin-top: 4px;
+}
+.hud-build-status a {
+  color: inherit;
+}
+.hud-build-building {
+  color: var(--grey);
+}
+.hud-build-pr-open {
+  color: var(--rose);
+}
+.hud-build-failed,
+.hud-build-dead {
+  color: var(--grey-dim);
+}
+
 /* ---------- Bottom centre directive ---------- */
 .hud-bottom-centre {
   grid-column: 1 / -1;

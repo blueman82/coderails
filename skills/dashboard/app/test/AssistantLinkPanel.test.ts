@@ -2,12 +2,23 @@ import { describe, it, expect } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { DashboardContextTestProvider } from "./testUtils/DashboardContextTestProvider";
-import { AssistantLinkPanel } from "../src/components/AssistantLinkPanel";
+import { AssistantLinkPanel, isHeartbeatStale } from "../src/components/AssistantLinkPanel";
 import type { DashboardSnapshot } from "../src/hooks/useDashboardState";
 import type { QueueEntry } from "../src/lib/collect/queue";
+import type { BuildEntry } from "../src/lib/collect/builds";
 
 function emptySnapshot(overrides: Partial<DashboardSnapshot> = {}): DashboardSnapshot {
-  return { sessions: [], loops: [], gates: [], trail: [], health: [], runs: [], queue: [], ...overrides };
+  return {
+    sessions: [],
+    loops: [],
+    gates: [],
+    trail: [],
+    health: [],
+    runs: [],
+    queue: [],
+    builds: [],
+    ...overrides,
+  };
 }
 
 function pendingEntry(overrides: Partial<QueueEntry> = {}): QueueEntry {
@@ -242,6 +253,183 @@ describe("AssistantLinkPanel", () => {
       );
       expect(html).toContain("Approve");
       expect(html).toContain("Deny");
+    });
+  });
+
+  describe("approve-builder build-state visibility", () => {
+    function approvedProposalEntry(overrides: Partial<QueueEntry> = {}): QueueEntry {
+      return pendingEntry({
+        hash: "buildHash1",
+        toolName: "workflow-audit:propose-skill",
+        status: "approved",
+        toolInput: {
+          cluster_ngram: ["Bash:git log", "Bash:git push"],
+          count: 3,
+          sessions: ["s1", "s2", "s3"],
+          task_summary: "Sessions repeatedly run git log then git push.",
+          proposed_name: "git-log-push",
+          proposed_description: "Use when a session reviews commits then pushes.",
+        },
+        ...overrides,
+      });
+    }
+
+    function buildEntry(overrides: Partial<BuildEntry> = {}): BuildEntry {
+      return { schemaVersion: 1, hash: "buildHash1", state: "running", ...overrides };
+    }
+
+    it("renders nothing build-related for an approved entry with no build entry yet (control)", () => {
+      const entry = approvedProposalEntry();
+      const html = renderToStaticMarkup(
+        createElement(
+          DashboardContextTestProvider,
+          { snapshot: emptySnapshot({ queue: [entry], builds: [] }) },
+          createElement(AssistantLinkPanel, { token: "t" })
+        )
+      );
+      expect(html).not.toContain("building");
+      expect(html).not.toContain("awaiting your merge");
+      expect(html).not.toContain("failed:");
+      expect(html).not.toContain("builder dead");
+    });
+
+    it('renders "building" for state running (SSR: no build entry heartbeat data needed)', () => {
+      const entry = approvedProposalEntry();
+      const build = buildEntry({ state: "running", heartbeatAt: Date.now() });
+      const html = renderToStaticMarkup(
+        createElement(
+          DashboardContextTestProvider,
+          { snapshot: emptySnapshot({ queue: [entry], builds: [build] }) },
+          createElement(AssistantLinkPanel, { token: "t" })
+        )
+      );
+      expect(html).toContain("building");
+      expect(html).not.toContain("builder dead");
+    });
+
+    it('renders "building" for state running with no heartbeatAt yet (heartbeat file not written this instant — a real transient just after the running state.json lands)', () => {
+      const entry = approvedProposalEntry();
+      const build = buildEntry({ state: "running", heartbeatAt: undefined });
+      const html = renderToStaticMarkup(
+        createElement(
+          DashboardContextTestProvider,
+          { snapshot: emptySnapshot({ queue: [entry], builds: [build] }) },
+          createElement(AssistantLinkPanel, { token: "t" })
+        )
+      );
+      expect(html).toContain("building");
+      expect(html).not.toContain("builder dead");
+    });
+
+    // renderToStaticMarkup never runs the component's mount effect, so its
+    // internal "now" stays null and isHeartbeatStale (below) always reports
+    // false through the full component in this test harness — asserted
+    // directly here as the SSR-safe "never stale before mount" contract.
+    // The live client behavior (staleness advancing against the panel's own
+    // ticking clock, independent of the last fs.watch-triggered collect) is
+    // covered by the isHeartbeatStale unit tests further down.
+    it('never renders "builder dead" via SSR, even with a very stale heartbeat, because now is null before mount', () => {
+      const entry = approvedProposalEntry();
+      const build = buildEntry({ state: "running", heartbeatAt: Date.now() - 4 * 60 * 1000 });
+      const html = renderToStaticMarkup(
+        createElement(
+          DashboardContextTestProvider,
+          { snapshot: emptySnapshot({ queue: [entry], builds: [build] }) },
+          createElement(AssistantLinkPanel, { token: "t" })
+        )
+      );
+      expect(html).toContain("building");
+      expect(html).not.toContain("builder dead");
+    });
+
+    it('renders "PR open — awaiting your merge" with a link to prUrl for state pr_open', () => {
+      const entry = approvedProposalEntry();
+      const build = buildEntry({
+        state: "pr_open",
+        prUrl: "https://github.com/blueman82/coderails/pull/999",
+      });
+      const html = renderToStaticMarkup(
+        createElement(
+          DashboardContextTestProvider,
+          { snapshot: emptySnapshot({ queue: [entry], builds: [build] }) },
+          createElement(AssistantLinkPanel, { token: "t" })
+        )
+      );
+      expect(html).toContain("awaiting your merge");
+      expect(html).toContain("https://github.com/blueman82/coderails/pull/999");
+    });
+
+    it('falls back to plain-text "PR open" (no link) when prUrl is a non-https scheme, e.g. javascript:', () => {
+      const entry = approvedProposalEntry();
+      const build = buildEntry({ state: "pr_open", prUrl: "javascript:alert(1)" });
+      const html = renderToStaticMarkup(
+        createElement(
+          DashboardContextTestProvider,
+          { snapshot: emptySnapshot({ queue: [entry], builds: [build] }) },
+          createElement(AssistantLinkPanel, { token: "t" })
+        )
+      );
+      expect(html).toContain("awaiting your merge");
+      expect(html).not.toContain("javascript:alert");
+      expect(html).not.toContain("<a ");
+    });
+
+    it('renders "failed: <reason> — delete builds/<hash> to retry" for state failed', () => {
+      const entry = approvedProposalEntry();
+      const build = buildEntry({ state: "failed", failureReason: "hash_mismatch:abc123" });
+      const html = renderToStaticMarkup(
+        createElement(
+          DashboardContextTestProvider,
+          { snapshot: emptySnapshot({ queue: [entry], builds: [build] }) },
+          createElement(AssistantLinkPanel, { token: "t" })
+        )
+      );
+      expect(html).toContain("failed: hash_mismatch:abc123");
+      expect(html).toContain(`delete builds/${build.hash} to retry`);
+    });
+
+    it("does not render a build-state row for an unrelated approved entry (wrong toolName), even if a build entry with a matching hash exists", () => {
+      const entry = pendingEntry({ hash: "buildHash1", status: "approved" });
+      const build = buildEntry({ state: "pr_open", prUrl: "https://example.com/pr/1" });
+      const html = renderToStaticMarkup(
+        createElement(
+          DashboardContextTestProvider,
+          { snapshot: emptySnapshot({ queue: [entry], builds: [build] }) },
+          createElement(AssistantLinkPanel, { token: "t" })
+        )
+      );
+      expect(html).not.toContain("awaiting your merge");
+    });
+
+    describe("isHeartbeatStale (client-side staleness against the panel's live clock)", () => {
+      it("is false when now is null (SSR / before the mount effect resolves)", () => {
+        const build = buildEntry({ state: "running", heartbeatAt: Date.now() - 10 * 60 * 1000 });
+        expect(isHeartbeatStale(build, null)).toBe(false);
+      });
+
+      it("is false when there is no heartbeatAt (e.g. still claimed, pre-running)", () => {
+        const build = buildEntry({ state: "running", heartbeatAt: undefined });
+        expect(isHeartbeatStale(build, Date.now())).toBe(false);
+      });
+
+      it("is false just under the 3-minute threshold", () => {
+        const now = Date.now();
+        const build = buildEntry({ state: "running", heartbeatAt: now - (3 * 60 * 1000 - 1) });
+        expect(isHeartbeatStale(build, now)).toBe(false);
+      });
+
+      it("is true just over the 3-minute threshold", () => {
+        const now = Date.now();
+        const build = buildEntry({ state: "running", heartbeatAt: now - (3 * 60 * 1000 + 1) });
+        expect(isHeartbeatStale(build, now)).toBe(true);
+      });
+
+      it("advances from false to true as `now` moves forward without any new heartbeatAt — the exact scenario a died builder produces (no further fs.watch event, so no fresh collect)", () => {
+        const heartbeatAt = Date.now();
+        const build = buildEntry({ state: "running", heartbeatAt });
+        expect(isHeartbeatStale(build, heartbeatAt + 60 * 1000)).toBe(false);
+        expect(isHeartbeatStale(build, heartbeatAt + 4 * 60 * 1000)).toBe(true);
+      });
     });
   });
 });

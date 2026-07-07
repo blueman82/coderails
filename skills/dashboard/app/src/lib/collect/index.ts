@@ -1,6 +1,7 @@
 import { watch, type FSWatcher } from "node:fs";
 import type { DashboardConfig } from "../config";
 import { readRuns, type RunRecord } from "../runlog";
+import { collectBuilds, type BuildEntry } from "./builds";
 import { collectHealth, type HealthTile } from "./health";
 import { collectMemoryTrail, type TrailEntry } from "./memoryTrail";
 import { collectPrGates, type PrGate, type PrGateError } from "./prGates";
@@ -15,6 +16,7 @@ export interface Snapshot {
   health: HealthTile[];
   runs: RunRecord[];
   queue: QueueEntry[];
+  builds: BuildEntry[];
 }
 
 export interface AggregatorDeps {
@@ -23,6 +25,7 @@ export interface AggregatorDeps {
   loopsDir: string;
   runsDir?: string;
   queueDir?: string;
+  buildsDir?: string;
   memoryTrailLimit?: number;
   runsLimit?: number;
   queueLimit?: number;
@@ -98,6 +101,7 @@ export function createAggregator(deps: AggregatorDeps): Aggregator {
     health: [],
     runs: [],
     queue: [],
+    builds: [],
   };
 
   function emit(event: AggregatorEventName, data: unknown): void {
@@ -122,7 +126,9 @@ export function createAggregator(deps: AggregatorDeps): Aggregator {
     }
   }
 
-  async function collectActivitySlice(): Promise<Pick<Snapshot, "sessions" | "loops" | "trail" | "health" | "queue">> {
+  async function collectActivitySlice(): Promise<
+    Pick<Snapshot, "sessions" | "loops" | "trail" | "health" | "queue" | "builds">
+  > {
     const sessions = sortSessions(safeCall("sessions", () => collectSessions(deps.projectsDir, Date.now()), []));
     const loops = sortLoops(safeCall("loops", () => collectLoops(deps.loopsDir), []));
     const trail = safeCall("trail", () => collectMemoryTrail(deps.cfg.memoryPaths, trailLimit), []);
@@ -132,7 +138,8 @@ export function createAggregator(deps: AggregatorDeps): Aggregator {
     // than getting its own timer.
     const health = await safeCallAsync("health", () => collectHealth({ projectsDir: deps.projectsDir }), []);
     const queue = deps.queueDir ? safeCall("queue", () => collectQueue(deps.queueDir!, queueLimit), []) : [];
-    return { sessions, loops, trail, health, queue };
+    const builds = deps.buildsDir ? safeCall("builds", () => collectBuilds(deps.buildsDir!), []) : [];
+    return { sessions, loops, trail, health, queue, builds };
   }
 
   async function refreshActivity(): Promise<void> {
@@ -201,6 +208,7 @@ export function createAggregator(deps: AggregatorDeps): Aggregator {
       for (const dir of deps.cfg.memoryPaths) watchDir(dir, scheduleActivityRefresh);
       if (deps.runsDir) watchDir(deps.runsDir, refreshRuns);
       if (deps.queueDir) watchDir(deps.queueDir, scheduleActivityRefresh);
+      if (deps.buildsDir) watchDir(deps.buildsDir, scheduleActivityRefresh);
 
       void refreshGates();
       gatesTimer = setInterval(() => void refreshGates(), gatesPollMs);

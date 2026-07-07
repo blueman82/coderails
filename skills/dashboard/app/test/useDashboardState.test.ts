@@ -18,7 +18,17 @@ import type { LoopInfo } from "../src/lib/collect/sessions";
 import type { RunRecord } from "../src/lib/runlog";
 
 function emptySnapshot(overrides: Partial<DashboardSnapshot> = {}): DashboardSnapshot {
-  return { sessions: [], loops: [], gates: [], trail: [], health: [], runs: [], queue: [], ...overrides };
+  return {
+    sessions: [],
+    loops: [],
+    gates: [],
+    trail: [],
+    health: [],
+    runs: [],
+    queue: [],
+    builds: [],
+    ...overrides,
+  };
 }
 
 describe("mergeDashboardEvent — snapshot", () => {
@@ -44,10 +54,12 @@ describe("mergeDashboardEvent — activity", () => {
       trail: [],
       health: [{ key: "hooksFired" as const, value: "3" }],
       queue: [],
+      builds: [{ schemaVersion: 1, hash: "a".repeat(64), state: "running" as const }],
     };
     const next = mergeDashboardEvent(base, { event: "activity", data: activity }, 2000);
     expect(next.snapshot.sessions).toEqual(activity.sessions);
     expect(next.snapshot.health).toEqual(activity.health);
+    expect(next.snapshot.builds).toEqual(activity.builds);
     expect(next.snapshot.gates).toEqual(base.snapshot.gates);
     expect(next.snapshot.runs).toEqual(base.snapshot.runs);
     expect(next.lastUpdate).toBe(2000);

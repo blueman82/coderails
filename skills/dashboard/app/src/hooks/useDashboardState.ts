@@ -6,6 +6,7 @@ import type { PrGate, PrGateError } from "@/lib/collect/prGates";
 import type { TrailEntry } from "@/lib/collect/memoryTrail";
 import type { HealthTile } from "@/lib/collect/health";
 import type { QueueEntry } from "@/lib/collect/queue";
+import type { BuildEntry } from "@/lib/collect/builds";
 import type { RunRecord } from "@/lib/runlog";
 
 // Mirrors the Snapshot shape from src/lib/collect/index.ts (type-only import
@@ -21,9 +22,13 @@ export interface DashboardSnapshot {
   health: HealthTile[];
   runs: RunRecord[];
   queue: QueueEntry[];
+  builds: BuildEntry[];
 }
 
-export type ActivitySlice = Pick<DashboardSnapshot, "sessions" | "loops" | "trail" | "health" | "queue">;
+export type ActivitySlice = Pick<
+  DashboardSnapshot,
+  "sessions" | "loops" | "trail" | "health" | "queue" | "builds"
+>;
 
 export type DashboardEvent =
   | { event: "snapshot"; data: DashboardSnapshot }
@@ -47,6 +52,7 @@ const EMPTY_SNAPSHOT: DashboardSnapshot = {
   health: [],
   runs: [],
   queue: [],
+  builds: [],
 };
 
 export const initialDashboardState: DashboardState = {
