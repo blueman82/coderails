@@ -650,4 +650,66 @@ T=$(mk_transcript "$(mk_skill_line "coderails:push")")
 check "git push -u origin feature-x -> allow (flagged push, non-main target)" ALLOW \
   "$(run "$(payload "git push -u origin feature-x" "$T" "$REPO_FEAT")")"
 
+# ────────────────────────────────────────────────────────────────────────────
+# ADDITION: cd/-C target resolution for pushes from a feature-branch worktree
+# ────────────────────────────────────────────────────────────────────────────
+# REPO_MAIN is a primary checkout on main (built above, Case 9). WORKTREE_FEAT is
+# a REAL `git worktree add` off REPO_MAIN, on its own feature branch. The reported
+# bug: the hook reads $cwd solely from the payload's .cwd field, so a command that
+# `cd`s into the worktree before pushing is judged by the PAYLOAD cwd's branch
+# (main), not the worktree's own (feature) branch — a false DENY.
+WORKTREE_FEAT="$TMP/worktree_feat"
+git -C "$REPO_MAIN" worktree add -q -b feature/worktree-thing "$WORKTREE_FEAT" >/dev/null 2>&1
+mkdir -p "$WORKTREE_FEAT/.claude"
+printf 'jira: null\n' > "$WORKTREE_FEAT/.claude/workflow.config.yaml"
+
+# Evidence transcript: /coderails:push only, no review-pr yet. This is the REAL
+# workflow moment a worktree push happens — review-pr runs AFTER push, at PR-review
+# time — so review-pr evidence is not yet present. (An earlier draft of this test
+# used review-pr evidence, which masked the bug: review-pr evidence alone already
+# satisfies git_push's required-step gate regardless of branch, so the false DENY
+# only surfaces with the realistic pre-review evidence used here.)
+T_PUSH_EVIDENCE=$(mk_transcript "$(mk_skill_line "coderails:push")")
+
+# ── Case 74: cd to worktree && git push, payload .cwd = main primary checkout ──
+# Expect ALLOW — the push actually runs in the worktree, on a feature branch.
+check "cd worktree && git push, cwd=main primary -> allow" ALLOW \
+  "$(run "$(payload "cd $WORKTREE_FEAT && git push" "$T_PUSH_EVIDENCE" "$REPO_MAIN")")"
+
+# ── Case 75: git -C <worktree> push, payload .cwd = main primary checkout ──────
+# Also exercises gate_in_scope's command-form recognition: `git -C <dir> push`
+# must be recognized as a gated git_push invocation in the first place (today it
+# is NOT — gate_in_scope only matches segments beginning literally with
+# `git push`, so `git -C <dir> push` never even enters the gate and ALLOWs for
+# the wrong reason). Both gaps are in the WU2 manifest (enforce_pr_workflow.sh)
+# and covered by the plan's adopted fix shape ("a leading cd <dir> && prefix or
+# a git -C <dir> flag").
+check "git -C worktree push, cwd=main primary -> allow" ALLOW \
+  "$(run "$(payload "git -C $WORKTREE_FEAT push" "$T_PUSH_EVIDENCE" "$REPO_MAIN")")"
+
+# ── Case 76 (negative control): plain push to main from a main checkout,
+# no cd/-C prefix at all → still DENY. The gate must not be weakened for the
+# common case that has no embedded cd/-C.
+T=$(mk_transcript "$(mk_skill_line "coderails:prep")")
+check "plain git push, no prefix, main checkout -> deny" DENY \
+  "$(run "$(payload "git push origin main" "$T" "$REPO_MAIN")")"
+
+# ── Case 77 (negative control): cd to a main checkout && git push, payload .cwd
+# is ALSO main → still DENY. Proves the resolver doesn't accidentally bypass the
+# gate when the resolved dir is itself main — only a genuine feature-branch
+# target should escape the gate.
+T=$(mk_transcript "$(mk_skill_line "coderails:prep")")
+check "cd main && git push, cd target is main -> deny" DENY \
+  "$(run "$(payload "cd $REPO_MAIN && git push" "$T" "$REPO_MAIN")")"
+
+# ── Case 78 (negative control): git -C <main-repo> push origin main → still DENY.
+# Today (pre-fix) gate_in_scope's begins-with-"git push" pattern never recognizes
+# the `git -C <dir> push` form at all, so the WHOLE hook stands aside and this
+# ALLOWS unconditionally — a silent bypass of the main-push gate, independent of
+# the cd-worktree bug. Fixing gate_in_scope to recognize `git -C <dir>` forms
+# must not create a new hole: pushing straight to main via `-C` must still DENY.
+T=$(mk_transcript "$(mk_skill_line "coderails:prep")")
+check "git -C main-repo push origin main -> deny (no silent -C bypass)" DENY \
+  "$(run "$(payload "git -C $REPO_MAIN push origin main" "$T" "$REPO_MAIN")")"
+
 [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails)"; exit 1; }
