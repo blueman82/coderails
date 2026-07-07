@@ -58,10 +58,11 @@ function safePrUrl(prUrl: string | undefined): string | undefined {
 function renderBuildStatus(build: BuildEntry | undefined, now: number | null) {
   if (!build) return null;
   if (build.state === "pr_open") {
+    const prUrl = safePrUrl(build.prUrl);
     return (
       <div className="hud-build-status hud-build-pr-open">
-        {build.prUrl ? (
-          <a href={build.prUrl} target="_blank" rel="noreferrer">
+        {prUrl ? (
+          <a href={prUrl} target="_blank" rel="noreferrer">
             PR open — awaiting your merge
           </a>
         ) : (
