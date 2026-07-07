@@ -224,4 +224,79 @@ check "closed \$(...) assignment earlier, clean post_evals.sh args -> allow" ALL
 check "closed \$(...) earlier, unrelated prose mentions merge.sh -> allow" ALLOW \
   "$(run "$(payload 'echo $(date) && echo see scripts/merge.sh docs')")"
 
+# --- SECURITY: a genuine in-argument substitution wrapped in an outer
+# stdout-capture must still DENY. The prior fix's "unclosed substitution
+# before the script name means the whole invocation is being captured"
+# heuristic treated ANY unclosed-looking prefix as proof the argument itself
+# was clean — but an outer capture can wrap an invocation whose OWN argument
+# independently carries a live substitution. This is the exact command-
+# substitution injection class the gate exists to block, merely wrapped in
+# an extra layer: out=$(bash scripts/merge.sh 19 "note with $(whoami)") — the
+# whoami call is live regardless of the outer $(...) capturing the script's
+# stdout into $out.
+check "in-arg substitution wrapped in outer stdout-capture -> deny" DENY \
+  "$(run "$(payload 'out=$(bash scripts/merge.sh 19 "note with $(whoami)")')")"
+
+# --- SECURITY: two script mentions on one line, each in its own && segment —
+# a clean first call must not mask a genuine substitution in a later call's
+# own argument. Each mention is covered by "first match to end-of-line".
+check "two script mentions, second has real substitution -> deny" DENY \
+  "$(run "$(payload 'bash scripts/merge.sh "19" && bash scripts/post_evals.sh post 19 "note with $(whoami)"')")"
+
+# --- SECURITY: a shell operator character (&&, ;, ||) sitting INSIDE the
+# quoted message argument itself must not be treated as a segment boundary.
+# A segment-splitting approach (tried and reverted) is quote-blind — it cuts
+# the line at these characters even when they're ordinary prose inside the
+# argument, severing the script-name token from its own argument's
+# substitution and reopening the injection this check exists to block.
+check "&& inside quoted message argument -> deny" DENY \
+  "$(run "$(payload 'bash scripts/push.sh "fix A && $(whoami)"')")"
+check "; inside quoted message argument -> deny" DENY \
+  "$(run "$(payload 'bash scripts/push.sh "note; $(whoami)"')")"
+check "|| inside quoted message argument -> deny" DENY \
+  "$(run "$(payload 'bash scripts/merge.sh 19 "a || `id`"')")"
+
+# --- SECURITY: the prose exemption must not fire for a genuine invocation
+# merely because the invoked script's own message argument happens to also
+# mention one of the four script names. Only a script-name mention actually
+# INSIDE a quoted string (i.e. text, not a bare command token) is eligible
+# for the prose exemption — this is a real call to merge.sh whose own 2nd
+# argument contains a live substitution, not documentation about merge.sh.
+check "real invocation whose own arg also names the script -> deny" DENY \
+  "$(run "$(payload 'bash scripts/merge.sh 19 "see scripts/merge.sh docs for $(cmd) syntax"')")"
+
+# --- SECURITY: a genuine invocation with NO bash/sh interpreter prefix at
+# all (the script called directly, or via a leading ./) must still deny when
+# its own argument carries a live substitution. An earlier version of this
+# fix only recognised "bash scripts/X.sh" / "sh scripts/X.sh" as invocation
+# position, which a direct call with no interpreter word evaded, falling
+# through to the prose exemption incorrectly.
+check "direct invocation, no interpreter prefix -> deny" DENY \
+  "$(run "$(payload 'scripts/push.sh "reference to scripts/push.sh with $(whoami)"')")"
+check "./ direct invocation, no interpreter prefix -> deny" DENY \
+  "$(run "$(payload './scripts/merge.sh 19 "see ./scripts/merge.sh for $(id)"')")"
+
+# --- SECURITY: a prose statement mentioning a script name (with its own
+# example substitution) followed by a SEPARATE, genuine invocation later on
+# the same line must still deny — the prose exemption is scoped to lines
+# with exactly ONE script mention; two or more is always invocation-bearing.
+check "prose mention then separate genuine invocation -> deny" DENY \
+  "$(run "$(payload 'echo "documentation mentions scripts/push.sh uses $(date)"; bash scripts/push.sh "injected: $(id)"')")"
+
+# --- SECURITY: an earlier closed backtick pair whose closing character
+# happens to land adjacent to a quote must not let the quoted-segment
+# extraction misread quote boundaries and grant an undeserved exemption.
+check "backtick adjacent to quote boundary before real invocation -> deny" DENY \
+  "$(run "$(payload 'echo `"`; bash scripts/push.sh "msg $(whoami)"')")"
+
+# --- SECURITY: a hash character inside the one prose segment must not break
+# the "is every substitution confined to this segment" check. An earlier
+# version removed the segment via a sed substitution delimited by #, which a
+# literal # inside the segment's own text broke, causing sed to emit a
+# parse error whose stderr text (containing no substitution character) was
+# silently read as "nothing left outside the segment" — masking a real,
+# separate substitution elsewhere on the line.
+check "hash character in prose segment does not mask a separate substitution -> deny" DENY \
+  "$(run "$(payload 'echo "note scripts/push.sh has $(date) example #hashtag" && echo $(whoami)')")"
+
 [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails)"; exit 1; }
