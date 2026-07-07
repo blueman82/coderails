@@ -152,6 +152,35 @@ describe("sweepOnce with routine artifact gating", () => {
     expect(result.succeeded).toBe(1);
   });
 
+  it("gates a buttonRef-named routine (routine.name !== button.name) through the artifact check, not just exit code (C4)", async () => {
+    const artifactPath = join(root, "never-written-buttonref.md");
+    const routineConfig: DashboardConfig = {
+      ...config,
+      routines: [
+        {
+          name: "wiki-lint-nightly", // deliberately differs from the buttonRef'd button's name
+          buttonRef: "wiki-lint",
+          cadence: "0 3 * * *",
+          expectedArtifact: { artifactPath, maxAgeSeconds: 3600, predicate: { kind: "exists" } },
+          escalation: ["notification"],
+        },
+      ],
+    };
+    writeIntent("run-buttonref", { button: "wiki-lint", requestedAt: Date.now(), source: "cli" });
+    const notifyImpl = vi.fn();
+    // Exits 0 without writing the expected artifact — a plain non-routine
+    // button press would call this a success; the routine's artifact gate
+    // must still catch it because the routine resolves via buttonRef.
+    const runClaudeImpl = vi.fn().mockResolvedValue({ exitCode: 0, stdout: "", stderr: "" });
+    const result = await sweepOnce({
+      queueDir, processingDir, archiveDir, quarantineDir,
+      config: routineConfig, runsDir, vaultNotesDir, runClaudeImpl, notifyImpl,
+    });
+    expect(result.failed).toBe(1);
+    expect(result.succeeded).toBe(0);
+    expect(notifyImpl).toHaveBeenCalledWith(expect.any(String), expect.stringContaining("artifact-gate-failed"));
+  });
+
   it("escalates with failure class skill-missing when a routine's foreignSkillPath does not exist", async () => {
     const routineConfig: DashboardConfig = {
       ...config,

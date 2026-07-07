@@ -40,39 +40,30 @@ export interface SeedResult {
 // is its buttonRef if set, otherwise a ButtonDef whose name equals the
 // routine's own name. This mirrors sweep.ts's own findButton/findRoutine
 // symmetry — findRoutine there matches a claimed intent's button name back
-// to a RoutineDef, so seeding must produce an intent whose `button` field
-// resolves the same way in reverse.
-//
-// IMPORTANT DOWNSTREAM CAVEAT (verified empirically against merged
-// sweep.ts, not just read): sweep.ts's own findRoutine(config, button.name)
-// looks up a RoutineDef by matching `routine.name === button.name` — it
-// does NOT resolve buttonRef in that direction. This means the artifact
-// gate, escalation, and vault run notes ONLY fire for a routine-triggered
-// run when RoutineDef.name is IDENTICAL to the resolved ButtonDef.name,
-// regardless of whether buttonRef or the self-name-match path was used to
-// resolve it here. A routine named e.g. "wiki-lint-nightly" with
-// buttonRef: "wiki-lint" will seed and execute correctly, but sweep.ts
-// will silently treat the run as a plain non-routine button press (no
-// artifact gate, no escalation, no vault note) because it can't find a
-// routine named "wiki-lint". This was caught by this loop's own
-// end-to-end smoke test, not by unit tests (seed.ts's own tests are
-// correct in isolation — resolveButton() does its job). Every routine in
-// examples/dashboard-config.json is named identically to its resolved
-// button as a result; this is not enforced by config validation
-// (skills/dashboard/lib/src/config.ts) and is not something this file's
-// authorised scope can fix (sweep.ts is off-limits) — flagged in the
-// WU4 report as a residual follow-up for sweep.ts's findRoutine.
+// to a RoutineDef by either routine.name or routine.buttonRef, so seeding
+// must produce an intent whose `button` field resolves the same way in
+// reverse (see sweep.ts's findRoutine for the matching half of this
+// contract; it was fixed in PR #53 to accept the buttonRef arm too, closing
+// the gap this comment used to document).
 function resolveButton(config: DashboardConfig, routine: RoutineDef): ButtonDef | undefined {
   const targetName = routine.buttonRef ?? routine.name;
   return config.buttons.find((b) => b.name === targetName);
 }
 
-function isDue(cadence: string, lastRun: RunRecord | undefined, now: number): boolean {
+function isDue(cadence: SeedCadence, lastRun: RunRecord | undefined, now: number): boolean {
   if (!lastRun) return true;
   const elapsed = now - lastRun.startedAt;
+  // A negative elapsed means lastRun.startedAt is in the future relative to
+  // `now` (clock skew across machines, or a system clock corrected
+  // backward after the run was recorded) — treat it as DUE rather than
+  // comparing a negative number against a positive threshold, which would
+  // always be false and wedge the routine as permanently "not due" until
+  // someone notices and intervenes (I2). Failing toward running once is the
+  // safer default: a spurious extra run is recoverable, a silently
+  // never-firing routine is not.
+  if (elapsed < 0) return true;
   if (cadence === "nightly") return elapsed >= NIGHTLY_DUE_AFTER_MS;
-  if (cadence === "weekly") return elapsed >= WEEKLY_DUE_AFTER_MS;
-  return false; // unreachable when called after the cadence-validity check below
+  return elapsed >= WEEKLY_DUE_AFTER_MS;
 }
 
 function mostRecentRun(runs: RunRecord[], buttonName: string): RunRecord | undefined {
@@ -111,6 +102,14 @@ export function seedDueRoutines(opts: SeedOptions): SeedResult {
     try {
       if (routine.cadence !== "nightly" && routine.cadence !== "weekly") {
         result.errored++;
+        // No dedup state (I6): a permanently-misconfigured routine (e.g. a
+        // typo'd cadence that's never fixed) re-escalates on every calendar
+        // fire, forever — there's no "already notified about this" memory.
+        // Accepted deliberately: too-loud beats a silently-swallowed
+        // misconfiguration, and dedup adds state (what counts as "the same"
+        // failure, when to expire it) that isn't worth building until the
+        // noise actually annoys someone in practice. Same tradeoff applies
+        // to every escalate() call in this function.
         escalate({
           routine,
           runId: randomBytes(8).toString("hex"),
@@ -125,6 +124,7 @@ export function seedDueRoutines(opts: SeedOptions): SeedResult {
       const button = resolveButton(opts.config, routine);
       if (!button) {
         result.errored++;
+        // No dedup — see the cadence-escalation comment above.
         escalate({
           routine,
           runId: randomBytes(8).toString("hex"),
@@ -136,6 +136,17 @@ export function seedDueRoutines(opts: SeedOptions): SeedResult {
         continue;
       }
 
+      // Accepted race (I4): isAlreadyQueued() (the check) and the
+      // writeFileSync() below (the act) are not atomic — two seed runs for
+      // the same routine racing here could both pass the check and both
+      // write an intent. In practice this is narrow: seed only runs from
+      // the CALENDAR plist (see bin/seed-and-sweep.sh), and launchd
+      // serialises a single calendar job's fires, so two seed passes for
+      // the same routine can't overlap in the deployed setup. Worst case if
+      // that assumption is ever violated (e.g. a manual second invocation)
+      // is one duplicate execution, bounded by sweepOnce's own atomic
+      // rename-based claim (sweep.ts) — a duplicate run, not data loss or a
+      // crash. Not worth a lockfile for that bound.
       if (isAlreadyQueued(opts.queueDir, button.name) || isAlreadyQueued(opts.processingDir, button.name)) {
         result.skippedAlreadyQueued++;
         continue;
@@ -162,6 +173,7 @@ export function seedDueRoutines(opts: SeedOptions): SeedResult {
       // rest of the routines from being considered.
       result.errored++;
       try {
+        // No dedup — see the cadence-escalation comment above.
         escalate({
           routine,
           runId: randomBytes(8).toString("hex"),

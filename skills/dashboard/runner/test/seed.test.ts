@@ -178,3 +178,75 @@ describe("seedDueRoutines", () => {
     expect(result).toEqual({ seeded: 0, skippedNotDue: 0, skippedAlreadyQueued: 0, errored: 0 });
   });
 });
+
+describe("seedDueRoutines due-ness boundaries (I1)", () => {
+  it("does not seed a nightly routine exactly one second under the 20h threshold", () => {
+    const now = Date.now();
+    appendRun(record({ button: "wiki-lint", startedAt: now - (20 * 60 * 60 * 1000 - 1000) }), { runsDir });
+    const result = seedDueRoutines({ queueDir, processingDir, config: config([NIGHTLY]), runsDir, nowImpl: () => now });
+    expect(result.seeded).toBe(0);
+    expect(result.skippedNotDue).toBe(1);
+  });
+
+  it("seeds a nightly routine exactly at the 20h threshold", () => {
+    const now = Date.now();
+    appendRun(record({ button: "wiki-lint", startedAt: now - 20 * 60 * 60 * 1000 }), { runsDir });
+    const result = seedDueRoutines({ queueDir, processingDir, config: config([NIGHTLY]), runsDir, nowImpl: () => now });
+    expect(result.seeded).toBe(1);
+  });
+
+  it("does not seed a weekly routine exactly one second under the 6.5-day threshold", () => {
+    const now = Date.now();
+    appendRun(record({ button: "sync-docs-weekly", startedAt: now - (6.5 * 24 * 60 * 60 * 1000 - 1000) }), { runsDir });
+    const result = seedDueRoutines({ queueDir, processingDir, config: config([WEEKLY]), runsDir, nowImpl: () => now });
+    expect(result.seeded).toBe(0);
+    expect(result.skippedNotDue).toBe(1);
+  });
+
+  it("seeds a weekly routine exactly at the 6.5-day threshold", () => {
+    const now = Date.now();
+    appendRun(record({ button: "sync-docs-weekly", startedAt: now - 6.5 * 24 * 60 * 60 * 1000 }), { runsDir });
+    const result = seedDueRoutines({ queueDir, processingDir, config: config([WEEKLY]), runsDir, nowImpl: () => now });
+    expect(result.seeded).toBe(1);
+  });
+});
+
+describe("seedDueRoutines clock skew (I2)", () => {
+  it("seeds a routine whose last run's startedAt is in the future (clock skew) instead of wedging it forever", () => {
+    const now = Date.now();
+    // A future startedAt can happen from clock skew across machines/VMs, or
+    // a corrected system clock jumping backward after a run was recorded.
+    // A naive `elapsed >= threshold` check computes a large negative number
+    // here, which is never >= a positive threshold — the routine would
+    // never be considered due again without manual intervention.
+    appendRun(record({ button: "wiki-lint", startedAt: now + 60 * 60 * 1000 }), { runsDir }); // 1h in the future
+    const result = seedDueRoutines({ queueDir, processingDir, config: config([NIGHTLY]), runsDir, nowImpl: () => now });
+    expect(result.seeded).toBe(1);
+  });
+});
+
+describe("seedDueRoutines runlog scoping (I3)", () => {
+  it("treats a routine as never-run (due) when runs.jsonl only contains other buttons' records", () => {
+    const now = Date.now();
+    appendRun(record({ button: "sync-docs-weekly", startedAt: now - 60 * 1000 }), { runsDir }); // recent, but a different button
+    const result = seedDueRoutines({ queueDir, processingDir, config: config([NIGHTLY]), runsDir, nowImpl: () => now });
+    expect(result.seeded).toBe(1);
+    expect(queuedButtonNames(queueDir)).toEqual(["wiki-lint"]);
+  });
+});
+
+describe("seedDueRoutines escalation vault-note wiring (I7)", () => {
+  it("writes a vault note when a seed-time escalation fires and vaultNotesDir is set", () => {
+    const vaultNotesDir = join(root, "dashboard-runs");
+    const badRoutine: RoutineDef = { ...NIGHTLY, name: "bad-cadence-vault", cadence: "0 3 * * *" };
+    const result = seedDueRoutines({
+      queueDir, processingDir, config: config([badRoutine]), runsDir, vaultNotesDir, notifyImpl: vi.fn(),
+    });
+    expect(result.errored).toBe(1);
+    const notePath = join(vaultNotesDir, "bad-cadence-vault.md");
+    expect(existsSync(notePath)).toBe(true);
+    const note = readFileSync(notePath, "utf-8");
+    expect(note).toContain("status: red");
+    expect(note).toContain("runner-error");
+  });
+});

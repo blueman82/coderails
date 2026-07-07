@@ -13,10 +13,19 @@
 # 2026-07-06), so this script uses absolute paths throughout — never a
 # bare `node` command. Node 24's built-in TypeScript type-stripping runs
 # src/*.ts files directly with no build step (verified in this worktree —
-# skills/dashboard/runner has no dist/ output today; bin/sweeper.sh's own
-# `dist/main.js` reference is a pre-existing gap in the merged WU2 code,
-# not something this script repeats).
+# skills/dashboard/runner has no dist/ output today; bin/sweeper.sh now
+# targets src/main.ts the same way, per PR #53's C2 fix).
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-/opt/homebrew/bin/node "$SCRIPT_DIR/../src/seedMain.ts"
+
+# The seed step's exit code must never block the sweep below — under
+# set -euo pipefail a plain non-zero exit here would abort the script before
+# the sweep ever runs, silently turning every calendar-triggered fire into a
+# no-op (C1). `|| seed_status=$?` catches the exit code without tripping -e.
+seed_status=0
+/opt/homebrew/bin/node "$SCRIPT_DIR/../src/seedMain.ts" || seed_status=$?
+if [ "$seed_status" -ne 0 ]; then
+  echo "seed step failed (exit $seed_status), continuing to sweep" >&2
+fi
+
 exec /opt/homebrew/bin/node "$SCRIPT_DIR/../src/main.ts"

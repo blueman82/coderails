@@ -74,8 +74,14 @@ function findButton(config: DashboardConfig, name: string): ButtonDef | undefine
   return config.buttons.find((b) => b.name === name);
 }
 
+// Matches either a routine named identically to the button, or a routine
+// whose buttonRef resolves to it — mirrors seed.ts's resolveButton(), which
+// accepts both paths when producing the intent in the first place. Without
+// the buttonRef arm, a buttonRef-named routine (RoutineDef.name !==
+// ButtonDef.name) seeds and executes correctly but silently loses its
+// artifact gate, escalation, and vault run note here (C4).
 function findRoutine(config: DashboardConfig, name: string): RoutineDef | undefined {
-  return (config.routines ?? []).find((r) => r.name === name);
+  return (config.routines ?? []).find((r) => r.name === name || r.buttonRef === name);
 }
 
 // Best-effort: each recovery step is individually guarded so a failure
