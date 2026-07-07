@@ -7,6 +7,7 @@ import { isLocalOrigin } from "../../../lib/requestGuard";
 const DEFAULT_PROJECTS_DIR = join(homedir(), ".claude", "projects");
 const DEFAULT_LOOPS_DIR = join(homedir(), ".claude", "agentic-loop");
 const DEFAULT_RUNS_DIR = join(homedir(), ".claude", "coderails-dashboard", "runs");
+const DEFAULT_QUEUE_DIR = join(homedir(), ".claude", "coderails-dashboard", "queue");
 
 function sseFrame(event: string, data: unknown): string {
   return `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
@@ -18,6 +19,7 @@ export interface EventsHandlerDeps {
   projectsDir?: string;
   loopsDir?: string;
   runsDir?: string;
+  queueDir?: string;
   gatesPollMs?: number;
   activityDebounceMs?: number;
 }
@@ -46,6 +48,7 @@ export function createEventsHandler(deps: EventsHandlerDeps) {
       projectsDir: deps.projectsDir ?? DEFAULT_PROJECTS_DIR,
       loopsDir: deps.loopsDir ?? DEFAULT_LOOPS_DIR,
       runsDir: deps.runsDir ?? DEFAULT_RUNS_DIR,
+      queueDir: deps.queueDir ?? DEFAULT_QUEUE_DIR,
       gatesPollMs: deps.gatesPollMs,
       activityDebounceMs: deps.activityDebounceMs,
       onError: (source, err) => {

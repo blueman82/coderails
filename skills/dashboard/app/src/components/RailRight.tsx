@@ -10,6 +10,7 @@ import type { PermissionProfile } from "@/lib/config";
 import { useDashboardContext } from "@/components/DashboardProvider";
 import { useRunLifecycle } from "@/hooks/useRunLifecycle";
 import { formatDuration, formatHHMM, runResultLabel, isGateError } from "@/hooks/useDashboardState";
+import { AssistantLinkPanel } from "@/components/AssistantLinkPanel";
 
 export interface DeckButtonDef {
   name: string;
@@ -247,8 +248,9 @@ export function RailRight({ token, buttons }: RailRightProps) {
         ) : (
           <div className="hud-empty-state">no open PRs</div>
         )}
-        <div className="hud-reserved-row">Assistant.Link · Reserved — Sub-Project 4</div>
       </div>
+
+      <AssistantLinkPanel token={token} />
     </section>
   );
 }
