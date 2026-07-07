@@ -94,6 +94,20 @@ These skills were written for coderails and are not vendored from elsewhere.
 
 ---
 
+#### `workflow-audit`
+
+**Purpose:** Mines Claude Code session transcripts for tool-use patterns that repeat across sessions, judges which ones are genuine candidates for a new skill, and — only after explicit owner approval — creates each approved skill through the normal `writing-skills` TDD process and a full PR gate.
+
+**When it triggers:** "look at our last N sessions and pull out repeated tasks", "what do I do repeatedly that isn't a skill yet", "audit my workflows", "mine my transcripts for skill candidates", "turn my repeated tasks into skills".
+
+**Pipeline:** `scripts/scan_transcripts.sh` (transcripts → per-session tool-use event sequences) pipes into `scripts/cluster_ngrams.sh` (event sequences → recurring n-gram clusters across `--min-sessions` distinct sessions), then a fresh sonnet subagent applies `references/judge-contract.md` to each cluster for a propose/reject verdict. Proposed candidates are charted for the owner; nothing is created without an explicit approval in that interaction — this gate overrides any standing agentic-loop autonomy.
+
+**Privacy invariant:** every artifact in the pipeline — scan output, cluster output, judge input/output, proposal chart — carries only tool names, a privacy-whitelisted `head` (first two Bash command tokens, the Skill name, or the Agent subagent_type), counts, and session ids. Never verbatim transcript prose, file contents, or reconstructed intent.
+
+**When it does NOT apply:** it never creates a skill on its own; the mechanical pipeline (scan+cluster) has no creation capability at all, and the judge stage only proposes.
+
+---
+
 ### Vendored dev-workflow skills
 
 These are coderails' general development-discipline skills (not coderails-specific workflow) — they ship with the plugin, so no external skill plugin is required.
