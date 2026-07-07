@@ -2,9 +2,18 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { isLocalOrigin } from "../../../lib/requestGuard";
 import { getRunToken } from "../../../lib/runlog";
-import { resolveQueueEntry, QueueActionError } from "../../../lib/collect/queueActions";
+import {
+  resolveQueueEntry,
+  QueueActionError,
+  type QueueEntrySnapshot,
+} from "../../../lib/collect/queueActions";
+import { claimAndSpawnBuild as claimAndSpawnBuildReal } from "../../../lib/build/spawn";
 
 const DEFAULT_QUEUE_DIR = join(homedir(), ".claude", "coderails-dashboard", "queue");
+const WRAPPER_PATH = join(process.cwd(), "..", "scripts", "run-builder.sh");
+// process.cwd() for a Next.js server process is the app root
+// (skills/dashboard/app); scripts/run-builder.sh lives one level up at
+// skills/dashboard/scripts/ per the file map.
 
 // hash is the hex SHA-256 filename stem per the queue contract (see
 // docs/coderails/specs/2026-07-06-assistant-link-panel-design.md) — never
@@ -16,6 +25,9 @@ const HASH_PATTERN = /^[0-9a-f]{64}$/;
 export interface QueueActionHandlerDeps {
   token: string;
   queueDir?: string;
+  claimAndSpawnBuild?: (
+    entry: QueueEntrySnapshot
+  ) => { claimed: boolean; alreadyClaimed?: boolean; error?: string };
 }
 
 function jsonResponse(status: number, body: unknown): Response {
@@ -59,18 +71,31 @@ export function createQueueActionHandler(deps: QueueActionHandlerDeps) {
     }
 
     try {
-      resolveQueueEntry(queueDir, payload.hash, payload.decision);
+      const entry = resolveQueueEntry(queueDir, payload.hash, payload.decision);
+      let build: { claimed?: boolean; alreadyClaimed?: boolean; error?: string } | undefined;
+      if (
+        entry.status === "approved" &&
+        entry.toolName === "workflow-audit:propose-skill" &&
+        deps.claimAndSpawnBuild
+      ) {
+        build = deps.claimAndSpawnBuild(entry);
+      }
+      return jsonResponse(200, { hash: payload.hash, status: payload.decision, ...(build ? { build } : {}) });
     } catch (err) {
       if (err instanceof QueueActionError) {
+        if (err.message.includes("is not pending")) {
+          return jsonResponse(409, { error: "entry is not pending" });
+        }
         return jsonResponse(404, { error: "unknown queue entry" });
       }
       throw err;
     }
-
-    return jsonResponse(200, { hash: payload.hash, status: payload.decision });
   };
 }
 
 export function POST(request: Request): Promise<Response> {
-  return createQueueActionHandler({ token: getRunToken() })(request);
+  return createQueueActionHandler({
+    token: getRunToken(),
+    claimAndSpawnBuild: (entry) => claimAndSpawnBuildReal(entry, { wrapperPath: WRAPPER_PATH }),
+  })(request);
 }

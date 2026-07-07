@@ -167,4 +167,29 @@ describe("resolveQueueEntry", () => {
     expect(naivePath.startsWith(dir)).toBe(false);
     expect(existsSync(naivePath.replace("escaped.json", ""))).toBe(true);
   });
+
+  it("throws QueueActionError when the target entry's status is not pending (approve-after-deny)", () => {
+    const dir = makeTmpDir("approve-after-deny");
+    const path = writeEntry(dir, HASH_A, { status: "denied" });
+    expect(() => resolveQueueEntry(dir, HASH_A, "approved")).toThrow(QueueActionError);
+    const untouched = JSON.parse(readFileSync(path, "utf-8"));
+    expect(untouched.status).toBe("denied"); // the guard fires before the write
+  });
+
+  it("throws QueueActionError on double-approve (already approved)", () => {
+    const dir = makeTmpDir("double-approve");
+    const path = writeEntry(dir, HASH_A, { status: "approved" });
+    expect(() => resolveQueueEntry(dir, HASH_A, "approved")).toThrow(QueueActionError);
+    const untouched = JSON.parse(readFileSync(path, "utf-8"));
+    expect(untouched.status).toBe("approved");
+  });
+
+  it("returns the updated entry with the new status, matching the file's new bytes", () => {
+    const dir = makeTmpDir("returns-updated-entry");
+    const path = writeEntry(dir, HASH_A);
+    const returned = resolveQueueEntry(dir, HASH_A, "approved");
+    const onDisk = JSON.parse(readFileSync(path, "utf-8"));
+    expect(returned).toEqual(onDisk);
+    expect(returned.status).toBe("approved");
+  });
 });
