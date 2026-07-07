@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createRunHandler } from "../src/app/api/run/route";
 import type { DashboardConfig } from "../src/lib/config";
+import { createRunOutputBus } from "../src/lib/runOutputBus";
 
 const tmpDirs: string[] = [];
 
@@ -102,6 +103,58 @@ function makeHangingSpawn() {
       // exit listener registered but never invoked — process never exits
     },
   }));
+}
+
+// A fake spawn-shaped fn whose stdout/stderr/exit/error firing is entirely
+// under the test's control (nothing fires until the test calls one of the
+// returned methods) — unlike makeFakeSpawn, which fires one chunk then exits
+// synchronously and so can't distinguish incremental delivery from
+// buffer-until-exit. Used to prove: (a) a chunk is observable (log file
+// written, bus published) before a later chunk/exit arrives, and (b) the
+// child "error" event is handled independently of "exit".
+function makeControllableFakeSpawn() {
+  const calls: { command: string; args: unknown; options: unknown }[] = [];
+  let stdoutListener: ((chunk: Buffer | string) => void) | undefined;
+  let stderrListener: ((chunk: Buffer | string) => void) | undefined;
+  let exitListener: ((code: number | null, signal: NodeJS.Signals | null) => void) | undefined;
+  let errorListener: ((err: Error) => void) | undefined;
+
+  const fn = vi.fn((command: string, args: unknown, options: unknown) => {
+    calls.push({ command, args, options });
+    return {
+      stdout: {
+        on(event: "data", listener: (chunk: Buffer | string) => void) {
+          if (event === "data") stdoutListener = listener;
+        },
+      },
+      stderr: {
+        on(event: "data", listener: (chunk: Buffer | string) => void) {
+          if (event === "data") stderrListener = listener;
+        },
+      },
+      on(event: "exit" | "error", listener: never) {
+        if (event === "exit") exitListener = listener;
+        if (event === "error") errorListener = listener;
+      },
+    };
+  });
+
+  return {
+    fn,
+    calls,
+    emitStdout(chunk: string) {
+      stdoutListener?.(chunk);
+    },
+    emitStderr(chunk: string) {
+      stderrListener?.(chunk);
+    },
+    emitExit(code: number | null, signal: NodeJS.Signals | null = null) {
+      exitListener?.(code, signal);
+    },
+    emitError(err: Error) {
+      errorListener?.(err);
+    },
+  };
 }
 
 function makeHandler(overrides: {
@@ -337,7 +390,7 @@ describe("POST /api/run — concurrency lock", () => {
 });
 
 describe("POST /api/run — spawn shape", () => {
-  it("calls execFile with 'claude' and an argv ARRAY (never a string)", async () => {
+  it("calls spawn with 'claude' and an argv ARRAY (never a string)", async () => {
     const { handler, fake } = makeHandler();
     await handler(req({ token: TOKEN, button: "wiki-lint" }));
     expect(fake!.calls.length).toBe(1);
@@ -345,7 +398,7 @@ describe("POST /api/run — spawn shape", () => {
     expect(Array.isArray(fake!.calls[0].args)).toBe(true);
   });
 
-  it("passes the button's cwd to execFile's options", async () => {
+  it("passes the button's cwd to spawn's options", async () => {
     const { handler, fake } = makeHandler();
     await handler(req({ token: TOKEN, button: "wiki-lint" }));
     expect(fake!.calls[0].options).toMatchObject({ cwd: "/Users/harrison/Github/coderails" });
@@ -390,5 +443,201 @@ describe("POST /api/run — run log", () => {
     expect(existsSync(rec!.outputPath)).toBe(true);
     const contents = readFileSync(rec!.outputPath, "utf-8");
     expect(contents).toContain("ok");
+  });
+});
+
+describe("POST /api/run — incremental output delivery", () => {
+  it("makes chunk1 observable in the log file before chunk2 arrives or the process exits (proves streaming, not buffer-until-exit)", async () => {
+    const runsDir = tmpDir("dashboard-run-runs-");
+    const locksDir = tmpDir("dashboard-run-locks-");
+    const controllable = makeControllableFakeSpawn();
+    const handler = createRunHandler({
+      config: testConfig(),
+      token: TOKEN,
+      spawnImpl: controllable.fn as never,
+      locksDir,
+      runsDir,
+    });
+
+    const pending = handler(req({ token: TOKEN, button: "wiki-lint" }));
+
+    // Let the handler register its listeners before emitting.
+    await new Promise((r) => setTimeout(r, 0));
+    controllable.emitStdout("chunk1\n");
+    await new Promise((r) => setTimeout(r, 0));
+
+    // A regression to "buffer until exit" would mean the log file doesn't
+    // exist yet / doesn't contain chunk1 at this point, since exit hasn't
+    // fired. We can find the output path from the still-pending run's
+    // start record on disk.
+    const { readRuns } = await import("../src/lib/runlog");
+    const startedRuns = readRuns(10, { runsDir });
+    expect(startedRuns.length).toBe(1);
+    const outputPath = startedRuns[0].outputPath;
+    expect(existsSync(outputPath)).toBe(true);
+    expect(readFileSync(outputPath, "utf-8")).toBe("chunk1\n");
+
+    controllable.emitStdout("chunk2\n");
+    await new Promise((r) => setTimeout(r, 0));
+    expect(readFileSync(outputPath, "utf-8")).toBe("chunk1\nchunk2\n");
+
+    controllable.emitExit(0);
+    await pending;
+    expect(readFileSync(outputPath, "utf-8")).toBe("chunk1\nchunk2\n");
+  });
+
+  it("publishes each chunk on the injected RunOutputBus as it arrives, as {runId, chunk}", async () => {
+    const runsDir = tmpDir("dashboard-run-runs-");
+    const locksDir = tmpDir("dashboard-run-locks-");
+    const controllable = makeControllableFakeSpawn();
+    const bus = createRunOutputBus();
+    const published: { runId: string; chunk: string }[] = [];
+    bus.subscribe((event) => published.push(event));
+
+    const handler = createRunHandler({
+      config: testConfig(),
+      token: TOKEN,
+      spawnImpl: controllable.fn as never,
+      locksDir,
+      runsDir,
+      runOutputBus: bus,
+    });
+
+    const pending = handler(req({ token: TOKEN, button: "wiki-lint" }));
+    await new Promise((r) => setTimeout(r, 0));
+
+    controllable.emitStdout("hello\n");
+    await new Promise((r) => setTimeout(r, 0));
+
+    const { readRuns } = await import("../src/lib/runlog");
+    const runId = readRuns(10, { runsDir })[0].runId;
+
+    expect(published).toEqual([{ runId, chunk: "hello\n" }]);
+
+    controllable.emitExit(0);
+    await pending;
+  });
+
+  it("routes stderr chunks through the same append/publish path as stdout", async () => {
+    const runsDir = tmpDir("dashboard-run-runs-");
+    const locksDir = tmpDir("dashboard-run-locks-");
+    const controllable = makeControllableFakeSpawn();
+    const bus = createRunOutputBus();
+    const published: string[] = [];
+    bus.subscribe((event) => published.push(event.chunk));
+
+    const handler = createRunHandler({
+      config: testConfig(),
+      token: TOKEN,
+      spawnImpl: controllable.fn as never,
+      locksDir,
+      runsDir,
+      runOutputBus: bus,
+    });
+
+    const pending = handler(req({ token: TOKEN, button: "wiki-lint" }));
+    await new Promise((r) => setTimeout(r, 0));
+
+    controllable.emitStderr("uh oh\n");
+    controllable.emitExit(0);
+    await pending;
+
+    const { readRuns } = await import("../src/lib/runlog");
+    const outputPath = readRuns(10, { runsDir })[0].outputPath;
+    expect(readFileSync(outputPath, "utf-8")).toContain("uh oh\n");
+    expect(published).toContain("uh oh\n");
+  });
+});
+
+describe("POST /api/run — spawn 'error' event (regression for the hang/lock-leak bug)", () => {
+  it("resolves the request, releases the lock, and records the failure when spawn fires 'error' instead of 'exit'", async () => {
+    const runsDir = tmpDir("dashboard-run-runs-");
+    const locksDir = tmpDir("dashboard-run-locks-");
+    const controllable = makeControllableFakeSpawn();
+    const handler = createRunHandler({
+      config: testConfig(),
+      token: TOKEN,
+      spawnImpl: controllable.fn as never,
+      locksDir,
+      runsDir,
+    });
+
+    const pending = handler(req({ token: TOKEN, button: "wiki-lint" }));
+    await new Promise((r) => setTimeout(r, 0));
+
+    const spawnError = Object.assign(new Error("spawn claude ENOENT"), { code: "ENOENT" });
+    controllable.emitError(spawnError);
+
+    // The request must resolve — before this fix, an "error"-only failure
+    // left the promise pending forever because resolve() lived exclusively
+    // in the "exit" handler.
+    const res = await Promise.race([
+      pending,
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("handler did not resolve after spawn 'error'")), 1000)
+      ),
+    ]);
+    expect(res.status).toBe(200);
+
+    expect(existsSync(join(locksDir, "wiki-lint.lock"))).toBe(false);
+
+    const { readRuns } = await import("../src/lib/runlog");
+    const rec = readRuns(10, { runsDir })[0];
+    expect(rec.endedAt).toBeDefined();
+    expect(rec.exitCode).toBe(-1);
+  });
+
+  it("does not double-settle if both 'error' and 'exit' fire (defensive: some Node failure modes can emit both)", async () => {
+    const runsDir = tmpDir("dashboard-run-runs-");
+    const locksDir = tmpDir("dashboard-run-locks-");
+    const controllable = makeControllableFakeSpawn();
+    const handler = createRunHandler({
+      config: testConfig(),
+      token: TOKEN,
+      spawnImpl: controllable.fn as never,
+      locksDir,
+      runsDir,
+    });
+
+    const pending = handler(req({ token: TOKEN, button: "wiki-lint" }));
+    await new Promise((r) => setTimeout(r, 0));
+
+    controllable.emitError(new Error("spawn failed"));
+    controllable.emitExit(1);
+
+    const res = await pending;
+    expect(res.status).toBe(200);
+
+    const { readRuns } = await import("../src/lib/runlog");
+    const runs = readRuns(10, { runsDir });
+    expect(runs.length).toBe(1);
+    // The first-to-fire ("error") wins: exitCode stays -1, not overwritten
+    // by the later "exit" (1).
+    expect(runs[0].exitCode).toBe(-1);
+  });
+});
+
+describe("POST /api/run — exit signal", () => {
+  it("records the signal when the child is terminated by one, rather than collapsing it into exitCode 1", async () => {
+    const runsDir = tmpDir("dashboard-run-runs-");
+    const locksDir = tmpDir("dashboard-run-locks-");
+    const controllable = makeControllableFakeSpawn();
+    const handler = createRunHandler({
+      config: testConfig(),
+      token: TOKEN,
+      spawnImpl: controllable.fn as never,
+      locksDir,
+      runsDir,
+    });
+
+    const pending = handler(req({ token: TOKEN, button: "wiki-lint" }));
+    await new Promise((r) => setTimeout(r, 0));
+
+    controllable.emitExit(null, "SIGTERM");
+    await pending;
+
+    const { readRuns } = await import("../src/lib/runlog");
+    const rec = readRuns(10, { runsDir })[0];
+    expect(rec.signal).toBe("SIGTERM");
   });
 });

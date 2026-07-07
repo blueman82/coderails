@@ -13,7 +13,7 @@
 // plain module-level Set survives across the two files' imports of this
 // module in production. Confirmed empirically alongside this change: see
 // test/runOutputBus.test.ts and the cross-route integration case in
-// test/run.test.ts.
+// test/events.test.ts (run-output forwarding).
 export interface RunOutputEvent {
   runId: string;
   chunk: string;

@@ -34,15 +34,21 @@ function withStreamJsonFlags(argv: readonly string[]): string[] {
 
 // Minimal shape of a spawned child process this route actually uses: stdout/
 // stderr as chunk-emitting streams (not the full Node.js Readable interface)
-// plus an exit event carrying the numeric exit code (or null if the process
-// was killed by a signal). node:child_process.spawn's real ChildProcess
+// plus exit/error events. node:child_process.spawn's real ChildProcess
 // satisfies this structurally, so the real spawn can be passed directly via
-// the same type-assertion pattern the rest of this route already uses for
-// execFile/spawn seams (see build/spawn.ts's SpawnFn).
+// the same type-assertion pattern used for the analogous spawn seam in
+// build/spawn.ts's SpawnFn.
+//
+// "error" is required (not optional) alongside "exit": Node fires "error"
+// instead of "exit" when the process never launches at all (e.g. ENOENT if
+// the "claude" binary isn't on PATH, EACCES, or a bad cwd) — a fake spawn
+// that only implements "exit" would silently hide the fact that this route
+// never handled that path. See the shared settle() helper below.
 interface ChildProcessLike {
   stdout: { on(event: "data", listener: (chunk: Buffer | string) => void): void } | null;
   stderr: { on(event: "data", listener: (chunk: Buffer | string) => void): void } | null;
-  on(event: "exit", listener: (code: number | null) => void): void;
+  on(event: "exit", listener: (code: number | null, signal: NodeJS.Signals | null) => void): void;
+  on(event: "error", listener: (err: Error) => void): void;
 }
 
 type SpawnFn = (command: string, args: readonly string[], options: { cwd: string }) => ChildProcessLike;
@@ -218,21 +224,54 @@ export function createRunHandler(deps: RunHandlerDeps) {
     }
 
     await new Promise<void>((resolve) => {
-      const child = spawnImpl("claude", argv, { cwd: button.cwd });
-      child.stdout?.on("data", handleChunk);
-      child.stderr?.on("data", handleChunk);
-      child.on("exit", (code) => {
-        for (const line of splitter.flush()) {
-          parseStreamJsonLine(line);
-        }
-        const exitCode = code ?? 1;
-        appendRun({ ...startRecord, endedAt: Date.now(), exitCode }, { runsDir });
+      // Node emits at most one of "error"/"exit" as the terminal event for a
+      // normal launch failure, but some failure modes (e.g. a bad cwd) can
+      // fire both — settled guards so whichever arrives first wins and the
+      // lock release + resolve() only ever happen once. Both paths funnel
+      // through this single helper rather than duplicating the
+      // record-then-unlock-then-resolve sequence, so the two can't drift.
+      let settled = false;
+      function settle(finishRecord: RunRecord): void {
+        if (settled) return;
+        settled = true;
+        appendRun(finishRecord, { runsDir });
         try {
           unlinkSync(lockPath);
         } catch {
           // already removed; nothing to clean up
         }
         resolve();
+      }
+
+      const child = spawnImpl("claude", argv, { cwd: button.cwd });
+      child.stdout?.on("data", handleChunk);
+      child.stderr?.on("data", handleChunk);
+      child.on("error", (err) => {
+        // Fires instead of "exit" when the process never launched at all
+        // (ENOENT if "claude" isn't on PATH, EACCES, bad cwd, etc) — without
+        // this handler the promise above never resolves (the request hangs
+        // forever) and the lock is never released (the button 409s until the
+        // 24h stale-lock TTL).
+        console.error("[api/run] spawn error", {
+          runId,
+          button: button.name,
+          argv0: argv[0],
+          cwd: button.cwd,
+          err,
+        });
+        settle({ ...startRecord, endedAt: Date.now(), exitCode: -1 });
+      });
+      child.on("exit", (code, signal) => {
+        for (const line of splitter.flush()) {
+          parseStreamJsonLine(line);
+        }
+        const exitCode = code ?? 1;
+        settle({
+          ...startRecord,
+          endedAt: Date.now(),
+          exitCode,
+          ...(signal ? { signal } : {}),
+        });
       });
     });
 
