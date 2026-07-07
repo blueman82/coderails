@@ -299,4 +299,92 @@ check "backtick adjacent to quote boundary before real invocation -> deny" DENY 
 check "hash character in prose segment does not mask a separate substitution -> deny" DENY \
   "$(run "$(payload 'echo "note scripts/push.sh has $(date) example #hashtag" && echo $(whoami)')")"
 
+# --- SECURITY (7th-round audit): process substitution <(...) / >(...) inside
+# a script argument executes eagerly, exactly like $(...) or backticks, but
+# contains NEITHER character — the detector's only trigger is
+# grep -qE '`|\$\(', so a payload using <(...) or >(...) alone sails through
+# undetected while still running arbitrary commands the instant the line is
+# interpreted by bash (confirmed via `: <(touch marker)` executing the touch
+# with no $( or backtick anywhere on the line).
+check "process substitution <(...) in push.sh arg -> deny" DENY \
+  "$(run "$(payload 'bash scripts/push.sh "note" <(touch /tmp/pwned)')")"
+check "process substitution >(...) in merge.sh arg -> deny" DENY \
+  "$(run "$(payload 'bash scripts/merge.sh 19 "note >(touch /tmp/pwned)"')")"
+check "process substitution >(...) as trailing redirect -> deny" DENY \
+  "$(run "$(payload 'bash scripts/merge.sh 19 "note" > >(cat > /tmp/exfil)')")"
+check "process substitution <(...) still allowed for unrelated commands" ALLOW \
+  "$(run "$(payload 'diff <(echo a) <(echo b)')")"
+check "process substitution <(...) as leading redirect -> deny" DENY \
+  "$(run "$(payload 'bash scripts/push.sh "note" < <(echo hi)')")"
+
+# --- SECURITY (7th-round audit, review follow-up): the prose-exemption's
+# "is every substitution confined to this one quoted segment" comparison
+# counts substitution occurrences in $cmd_flat vs. in $script_segment
+# (destructive_bash_gate.sh, the whole_subst/segment_subst lines). That
+# counting pattern must independently include <(/>( too, not just $(/
+# backtick — a fix that widened only the DETECTION trigger (subst_re) but
+# left the COUNTING pattern at the old $(/backtick-only set would still
+# pass every other test in this file (confirmed: such a half-fixed mutant
+# passes all other checks here) while wrongly granting the prose exemption
+# whenever an unconfined <( or >( sits outside the one quoted segment,
+# because whole_subst couldn't see it and would equal segment_subst by
+# omission. These two cases pin the counting pattern itself.
+check "<(...) confined to the one prose segment, nothing else on line -> allow" ALLOW \
+  "$(run "$(payload 'echo "doc mentions scripts/push.sh e.g. <(date)"')")"
+check "<(...) confined to prose segment PLUS a second unconfined <(...) -> deny" DENY \
+  "$(run "$(payload 'echo "doc mentions scripts/push.sh e.g. <(date)" && diff <(x) <(y)')")"
+
+# --- SECURITY (7th-round audit, review follow-up): the total_mentions > 1
+# path (script name appears more than once, so the prose exemption never
+# applies at all) is untested for both new bug classes. Confirms neither
+# process substitution nor the multi-line flattening accidentally weakens
+# that already-conservative path.
+check "two mentions, second call carries <(...) -> deny" DENY \
+  "$(run "$(payload 'bash scripts/merge.sh "19" && bash scripts/post_evals.sh post 19 "note <(touch pwned)"')")"
+check "two mentions via heredoc, second on later physical line -> deny" DENY \
+  "$(run "$(payload 'bash scripts/merge.sh 19 "clean" <<EOF
+scripts/merge.sh <(touch pwned)
+EOF')")"
+
+# --- SECURITY (7th-round audit): multi-line commands defeat the sed/grep
+# line-scoped scoping logic. Both `sed -E 's#pattern.*##'` and
+# `grep -oE "pattern.*"` operate on $cmd as text, but `.` never crosses a
+# newline in POSIX/BSD sed or grep without -z — so when the real script
+# argument (carrying a live substitution) lands on a DIFFERENT physical line
+# than the script-name mention, "before_script" wrongly absorbs the
+# argument's own line (inflating quote_count to an accidental even parity)
+# while "from_script" is truncated to end-of-first-line and never sees the
+# substitution at all. Two independent real-world triggers for this same
+# root cause: a heredoc body (unquoted delimiter, so it still expands) and
+# ordinary backslash line-continuation joining one logical command across
+# physical lines.
+check "heredoc-embedded substitution in push.sh arg -> deny" DENY \
+  "$(run "$(payload 'bash scripts/push.sh "clean message" <<EOF
+$(id -u)
+EOF')")"
+# NOTE: a quoted heredoc delimiter (<<'EOF') genuinely suppresses expansion
+# in real bash — this $(...) never executes. The fix conservatively denies
+# it anyway: distinguishing a quoted from an unquoted heredoc delimiter
+# would need new parsing logic, and every previous narrow refinement to
+# this block's scoping has itself introduced a fresh bypass under
+# adversarial review (see the block's own comments above). A false-positive
+# deny on a literal, inert heredoc body is the accepted conservative
+# trade-off — correctness over UX, matching this file's stated bias.
+check "quoted heredoc delimiter (no expansion) -> still denies (conservative)" DENY \
+  "$(run "$(payload 'bash scripts/push.sh "clean" <<'"'"'EOF'"'"'
+$(whoami)
+EOF')")"
+check "backslash line-continuation splits mention from live subst -> deny" DENY \
+  "$(run "$(payload 'bash scripts/push.sh \
+"note $(whoami)"')")"
+check "backslash line-continuation, merge.sh -> deny" DENY \
+  "$(run "$(payload 'bash scripts/merge.sh \
+19 "note $(whoami)"')")"
+check "backslash line-continuation, post_evals.sh -> deny" DENY \
+  "$(run "$(payload 'bash scripts/post_evals.sh post 19 \
+"note $(whoami)"')")"
+check "backslash continuation before mention, clean arg -> allow" ALLOW \
+  "$(run "$(payload 'bash \
+scripts/push.sh "clean message"')")"
+
 [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails)"; exit 1; }
