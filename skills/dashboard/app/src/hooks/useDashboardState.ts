@@ -21,7 +21,7 @@ export interface DashboardSnapshot {
   runs: RunRecord[];
 }
 
-export type ActivitySlice = Pick<DashboardSnapshot, "sessions" | "loops" | "trail">;
+export type ActivitySlice = Pick<DashboardSnapshot, "sessions" | "loops" | "trail" | "health">;
 
 export type DashboardEvent =
   | { event: "snapshot"; data: DashboardSnapshot }
