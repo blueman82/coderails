@@ -25,7 +25,7 @@ deny() {
   exit 0
 }
 
-# ── Change #4: extended permanent blocklist ───────────────────────────────────
+# ── Permanent blocklist ────────────────────────────────────────────────────
 
 # git clean with any force flag — matches combined short flags (-f, -fd, -fdx, -xf)
 # OR long flag --force OR separated flag like "-d -f".
@@ -76,7 +76,7 @@ if echo "$cmd" | grep -qiE "$pattern"; then
   deny "$matched"
 fi
 
-# ── Change #3: branch-aware in-Bash source edits on main/master ───────────────
+# ── Branch-aware in-Bash source edits on main/master ──────────────────────
 # Blocks: sed -i, perl -i, redirect (>/>>), tee, cp <src> FILE, mv <src> FILE, dd of=FILE
 # targeting source files (.py .ts .tsx .js .jsx .go) or plugin source
 # (skills/*/SKILL.md, commands/*.md).

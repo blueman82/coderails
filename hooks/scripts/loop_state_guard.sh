@@ -1,8 +1,8 @@
 #!/bin/bash
 # Stop hook — when an agentic loop is active in this session, block (exit 2) unless
 # a session-owned progress.json exists at the resolved path. Enforces PRESENCE +
-# OWNERSHIP only; it does NOT police content freshness (that's the anti-stall
-# guard's job, below).
+# OWNERSHIP only; it does NOT police content freshness (that's loop_stall_guard.sh's
+# job).
 #
 # Honest boundary (same as check_verify_loop.sh): this forces the file to exist and
 # be this session's; it cannot force the content to be accurate.

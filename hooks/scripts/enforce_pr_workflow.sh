@@ -27,7 +27,7 @@ gate_has_command() {
 }
 
 gate_safe_passthrough() {
-  # CHANGE D: merge --dry-run / --help into one alternation with word-boundary match
+  # --dry-run and --help are matched in one alternation with word-boundary checks
   # so --dry-run-data or --helpfulness don't accidentally pass through. The pattern
   # requires the flag to be preceded by a non-word char (or start of string) and
   # followed by a non-word char or end.
@@ -128,7 +128,7 @@ gate_targets_main() {
 }
 
 gate_have_transcript() {
-  # CHANGE A: in a subagent, .transcript_path is the PARENT session transcript and
+  # In a subagent, .transcript_path is the PARENT session transcript and
   # .agent_transcript_path is the subagent's own. Scan whichever transcripts are
   # present and readable — at least one must exist, or we can't enforce.
   transcript=$(printf '%s' "$input" | jq -r '.transcript_path // empty')
