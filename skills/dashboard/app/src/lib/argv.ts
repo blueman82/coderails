@@ -44,6 +44,9 @@ function profileFlags(profile: ButtonDef["profile"]): string[] {
 
 export function buildArgv(btn: ButtonDef, input?: string): string[] {
   if (input === undefined) {
+    if (btn.command.trim() === "") {
+      throw new Error("buildArgv: refusing to spawn an empty prompt (no command and no input)");
+    }
     return ["-p", btn.command, ...profileFlags(btn.profile)];
   }
 
@@ -52,5 +55,9 @@ export function buildArgv(btn: ButtonDef, input?: string): string[] {
   }
 
   const prompt = btn.command ? `${btn.command} ${input}` : input;
+  if (prompt.trim() === "") {
+    throw new Error("buildArgv: refusing to spawn an empty prompt (no command and no input)");
+  }
+
   return ["-p", ...profileFlags(btn.profile), "--", prompt];
 }
