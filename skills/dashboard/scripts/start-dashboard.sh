@@ -38,10 +38,22 @@ if [[ "$NEED_BUILD" == "true" ]]; then
   npm run build
 fi
 
+# PID-reuse guard: only treat the pid as ours if its command line looks like
+# the dashboard server (npm run start / next / node). Anything else means the
+# OS recycled the pid for an unrelated process — the pid file is stale.
+pid_is_dashboard() {
+  local cmd
+  cmd="$(ps -p "$1" -o command= 2>/dev/null || true)"
+  case "$cmd" in
+    *"npm run start"*|*next*|*node*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 # If a previous instance is still alive, stop it before starting a new one.
 if [[ -f "$PID_FILE" ]]; then
   old_pid="$(cat "$PID_FILE" 2>/dev/null || true)"
-  if [[ -n "$old_pid" ]] && kill -0 "$old_pid" 2>/dev/null; then
+  if [[ -n "$old_pid" ]] && kill -0 "$old_pid" 2>/dev/null && pid_is_dashboard "$old_pid"; then
     kill "$old_pid" 2>/dev/null || true
     for _ in {1..20}; do
       kill -0 "$old_pid" 2>/dev/null || break

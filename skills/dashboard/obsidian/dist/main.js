@@ -312,7 +312,7 @@ async function writeRunNote(deps, path, content) {
 
 // src/main.ts
 var DASHBOARD_RUNS_FOLDER = "dashboard-runs";
-var METRICS_NOTE_PATH = `${DASHBOARD_RUNS_FOLDER}/_metrics.json`;
+var METRICS_FILE_PATH = `${DASHBOARD_RUNS_FOLDER}/_metrics.json`;
 var DASHBOARD_CONFIG_PATH = (0, import_node_path.join)((0, import_node_os.homedir)(), ".claude", "coderails-dashboard.json");
 var DASHBOARD_DIR = (0, import_node_path.join)((0, import_node_os.homedir)(), ".claude", "coderails-dashboard");
 var QUEUE_DIR2 = (0, import_node_path.join)(DASHBOARD_DIR, "queue");
@@ -335,6 +335,9 @@ var CommandCentrePlugin = class extends import_obsidian.Plugin {
     // — this registration is what makes the feed flip without the user
     // having to reopen the note.
     this.containers = /* @__PURE__ */ new Set();
+    // readButtons cache, invalidated by config-file mtime — avoids re-reading
+    // and re-parsing ~/.claude/coderails-dashboard.json on every render.
+    this.buttonsCache = null;
   }
   async onload() {
     this.registerMarkdownCodeBlockProcessor(
@@ -444,7 +447,7 @@ var CommandCentrePlugin = class extends import_obsidian.Plugin {
     };
   }
   async readMetrics() {
-    const file = this.app.vault.getAbstractFileByPath(METRICS_NOTE_PATH);
+    const file = this.app.vault.getAbstractFileByPath(METRICS_FILE_PATH);
     if (!(file instanceof import_obsidian.TFile)) return null;
     try {
       const content = await this.app.vault.cachedRead(file);
@@ -480,9 +483,16 @@ var CommandCentrePlugin = class extends import_obsidian.Plugin {
   }
   readButtons() {
     try {
+      const { mtimeMs } = (0, import_node_fs.statSync)(DASHBOARD_CONFIG_PATH);
+      if (this.buttonsCache && this.buttonsCache.mtimeMs === mtimeMs) {
+        return this.buttonsCache.buttons;
+      }
       const raw = (0, import_node_fs.readFileSync)(DASHBOARD_CONFIG_PATH, "utf-8");
-      return parseDashboardConfig(raw).buttons;
+      const buttons = parseDashboardConfig(raw).buttons;
+      this.buttonsCache = { mtimeMs, buttons };
+      return buttons;
     } catch {
+      this.buttonsCache = null;
       return [];
     }
   }
