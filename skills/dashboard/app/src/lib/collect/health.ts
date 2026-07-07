@@ -44,7 +44,12 @@ function usageTile(key: "usage5h" | "usageWeek", totals: UsageTotals | null): He
   return {
     key,
     value: `${formatTokenCount(totals.totalTokens)} tok`,
-    note: `in ${formatTokenCount(totals.inputTokens)} / out ${formatTokenCount(totals.outputTokens)}`,
+    // Cache re-reads dominate the input total on real transcripts (~99%) —
+    // name their share so the headline isn't read as raw consumption.
+    note:
+      totals.cacheReadTokens > 0
+        ? `in ${formatTokenCount(totals.inputTokens)} (${formatTokenCount(totals.cacheReadTokens)} cache) / out ${formatTokenCount(totals.outputTokens)}`
+        : `in ${formatTokenCount(totals.inputTokens)} / out ${formatTokenCount(totals.outputTokens)}`,
   };
 }
 
