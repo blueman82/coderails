@@ -223,6 +223,40 @@ describe("run-builder.sh: full state machine (steps 3-7)", () => {
     expect(result.status).toBe(0);
   });
 
+  it("claude is spawned with --disallowedTools mechanically denying the merge skill and merge-adjacent bash commands, not just the prompt's own never-merge clause", () => {
+    // The prompt template asks the builder never to merge, but a prompt
+    // instruction is not an enforcement mechanism against a
+    // compromised/confused session. --disallowedTools removes the tool
+    // from what the session can invoke at all, verified separately (outside
+    // this suite) to hold even alongside --dangerously-skip-permissions.
+    // This test only asserts the wrapper actually passes those flags to the
+    // real claude invocation, via the argv-capturing stub already used
+    // elsewhere in this file.
+    const buildDir = makeBuildDir();
+    const locksDir = tmpDir("dashboard-run-builder-locks-");
+    const repoDir = makeRepoFixture();
+    const argvLog = join(buildDir, "argv.log");
+    const binDir = makeStubClaudeBin(
+      `printf '%s\\n' "$@" > "${argvLog}"; echo "https://github.com/blueman82/coderails/pull/1" > "${buildDir}/pr_url"; echo '{}' > "${buildDir}/result.json"; exit 0`
+    );
+
+    writeSnapshot(buildDir, { toolInput: { proposed_name: "disallow-flags-skill" } });
+
+    runWrapper(buildDir, {
+      CODERAILS_BUILDER_LOCKS_DIR: locksDir,
+      CODERAILS_BUILDER_REPO_PATH: repoDir,
+      BUILDER_WALL_CLOCK_SECS: "5",
+      PATH: `${binDir}:${process.env.PATH}`,
+    });
+
+    const argv = readFileSync(argvLog, "utf-8");
+    expect(argv).toContain("--disallowedTools");
+    expect(argv).toContain("Skill(coderails:merge)");
+    expect(argv).toContain("Bash(gh pr merge*)");
+    expect(argv).toContain("Bash(*merge.sh*)");
+    expect(argv).toContain("--dangerously-skip-permissions");
+  });
+
   it("invalid proposed_name in the snapshot is rejected by the wrapper itself, not just trusted from spawn.ts's upstream check", () => {
     // spawn.ts validates proposed_name against ^[a-z0-9][a-z0-9-]{0,63}$
     // before ever writing snapshot.json, but the wrapper independently

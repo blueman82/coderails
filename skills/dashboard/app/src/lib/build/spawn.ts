@@ -1,12 +1,39 @@
 import { spawn as spawnReal } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import type { QueueEntrySnapshot } from "../collect/queueActions";
 import { buildPrompt } from "./prompt";
 
 const NAME_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;
 const DEFAULT_BUILDS_DIR = join(homedir(), ".claude", "coderails-dashboard", "builds");
+const MAX_ANCESTORS = 10;
+
+// route.ts previously resolved the wrapper path via
+// join(process.cwd(), "..", "scripts", "run-builder.sh") — cwd-relative,
+// the exact class of bug design-loop2.md's premortem #8 flags (a
+// production Next.js server's cwd is not guaranteed to be the app root).
+// This walks upward from the module's own location (__dirname, stable
+// regardless of the server process's cwd) looking for the known sibling
+// skills/dashboard/scripts/run-builder.sh, matching the same
+// find-the-repo-root-by-walking-up technique already used by
+// collect/markerVersions.ts's findRepoRoot. Returns null (never a
+// fabricated guess) if no such sibling is found within MAX_ANCESTORS
+// levels — callers must treat null as "no default available", not silently
+// spawn a wrong path.
+export function resolveDefaultWrapperPath(startDir: string = __dirname): string | null {
+  let dir = startDir;
+  for (let i = 0; i < MAX_ANCESTORS; i++) {
+    const candidate = join(dir, "scripts", "run-builder.sh");
+    if (existsSync(candidate)) {
+      return candidate;
+    }
+    const parent = dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return null;
+}
 
 export type SpawnFn = (
   command: string,
@@ -23,7 +50,7 @@ export interface ClaimAndSpawnBuildDeps {
 export type ClaimAndSpawnBuildResult =
   | { claimed: true; runId: string }
   | { claimed: false; alreadyClaimed: true }
-  | { claimed: false; error: "invalid_name" };
+  | { claimed: false; error: "invalid_name" | "wrapper_not_found" };
 
 // The claim-and-spawn seam: called from POST /api/queue after resolveQueueEntry
 // flips an entry to "approved" with toolName "workflow-audit:propose-skill".

@@ -9,14 +9,18 @@ import {
 } from "../../../lib/collect/queueActions";
 import {
   claimAndSpawnBuild as claimAndSpawnBuildReal,
+  resolveDefaultWrapperPath,
   type ClaimAndSpawnBuildResult,
 } from "../../../lib/build/spawn";
 
 const DEFAULT_QUEUE_DIR = join(homedir(), ".claude", "coderails-dashboard", "approvals");
-const WRAPPER_PATH = join(process.cwd(), "..", "scripts", "run-builder.sh");
-// process.cwd() for a Next.js server process is the app root
-// (skills/dashboard/app); scripts/run-builder.sh lives one level up at
-// skills/dashboard/scripts/ per the file map.
+// Resolved once at module load, anchored to spawn.ts's own compiled
+// location (not process.cwd()) — a production Next.js server's cwd is not
+// guaranteed to be the app root, which the prior cwd-relative join would
+// have silently gotten wrong. null means no scripts/run-builder.sh sibling
+// was found; the production POST handler below fails the request loudly
+// in that case rather than spawning a bogus path.
+const WRAPPER_PATH = resolveDefaultWrapperPath();
 
 // hash is the hex SHA-256 filename stem per the queue contract (see
 // docs/coderails/specs/2026-07-06-assistant-link-panel-design.md) — never
@@ -97,6 +101,13 @@ export function createQueueActionHandler(deps: QueueActionHandlerDeps) {
 export function POST(request: Request): Promise<Response> {
   return createQueueActionHandler({
     token: getRunToken(),
-    claimAndSpawnBuild: (entry) => claimAndSpawnBuildReal(entry, { wrapperPath: WRAPPER_PATH }),
+    claimAndSpawnBuild: WRAPPER_PATH
+      ? (entry) => claimAndSpawnBuildReal(entry, { wrapperPath: WRAPPER_PATH })
+      : () => ({ claimed: false, error: "wrapper_not_found" }),
+    // WRAPPER_PATH resolves to null only if scripts/run-builder.sh cannot be
+    // found relative to spawn.ts's own location — a deployment/packaging
+    // misconfiguration, not a per-request condition. Reported via the
+    // distinct wrapper_not_found error rather than crashing every
+    // approve/deny request in the whole route module.
   })(request);
 }
