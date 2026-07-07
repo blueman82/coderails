@@ -264,7 +264,7 @@ Each task description must be **self-contained** so the spawned agent can act wi
 - Disposition — for a retirement unit, the `clean-break`/`preserve-compat` decision from Phase 2.6 copied **verbatim** into the task description, plus (if preserve-compat) the `named_blocker`. The worker acts only on its own prompt; a disposition recorded in `progress.json` but absent from the prompt silently reverts the unit to the model's preserve-default — the exact failure this discipline exists to stop.
 - Terminal state — the concrete artifact that means done (PR open / merged); no mid-task hand-backs (see Phase 3a)
 - Report-back instructions
-- Hook-seam — commits hit `test_gate` (resolution: fix the failing tests), pushes and PR-creates hit `enforce_pr_workflow` (satisfied by the `/coderails:push` / `/workflow` you run), edits stay on the feature-branch worktree so `no_edit_on_main` won't fire
+- Hook-seam — commits hit `test_gate` (resolution: fix the failing tests), pushes and PR-creates hit `enforce_pr_workflow` (satisfied by the `/coderails:push` / `/workflow` you run), edits stay on the feature-branch worktree so `no_edit_on_main` won't fire, merges hit the eval-artifact gate in `scripts/merge.sh` (satisfied by running `/coderails:task-evals` + `/coderails:post-evals` before `/coderails:merge`)
 
 Include this line in every agent prompt:
 > "Don't go silently idle — send a completion message via SendMessage. Past agents have failed this way."
