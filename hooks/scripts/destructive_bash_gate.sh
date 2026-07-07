@@ -29,7 +29,7 @@ deny() {
 
 # git clean with any force flag — matches combined short flags (-f, -fd, -fdx, -xf)
 # OR long flag --force OR separated flag like "-d -f".
-# F1 fix: also match --force and multi-token "-d -f" patterns.
+# Also matches --force and multi-token "-d -f" patterns.
 # Strategy: deny "git clean" when the arg string contains -f (combined short flag)
 # or --force (anywhere). Excludes: bare "git clean", dry-run, interactive.
 if echo "$cmd" | grep -qiE '\bgit +clean\b'; then
@@ -51,14 +51,14 @@ if echo "$cmd" | grep -qiE '\bgit +clean\b'; then
 fi
 
 # find ... -delete or find ... --delete
-# F4 fix: don't let .* cross a shell separator (;, &&, ||, |).
+# The .* must not cross a shell separator (;, &&, ||, |).
 # Only match -delete/--delete in the same shell token group as "find".
 if echo "$cmd" | grep -qiE '\bfind\b[^;|&]*( -delete| --delete)'; then
   deny "find -delete"
 fi
 
 # truncate with size flag — truncates file content
-# F2 fix: also catch --size / --size=N long forms.
+# Also catches --size / --size=N long forms.
 if echo "$cmd" | grep -qiE '\btruncate +(-s|--size[= ])'; then
   deny "truncate -s/--size"
 fi
@@ -85,7 +85,7 @@ fi
 # variable filenames, quoted paths with spaces, python -c open(...)).
 # On feature branches these patterns are allowed.
 #
-# Branch resolution strategy (per F3 design):
+# Branch resolution strategy:
 # - For cp/mv/dd: parse the target file path from the command and resolve its
 #   repo branch directly (target-repo resolution), mirroring no_edit_on_main.sh.
 #   Falls back to cwd-branch if the target path can't be resolved as a git repo.
@@ -93,10 +93,10 @@ fi
 #   resolution; fall back to cwd-branch if the path is not resolvable.
 # - Session cwd is read from the hook payload (.cwd), falling back to $PWD.
 cwd=$(echo "$input" | jq -r '.cwd // empty')
-[ -z "$cwd" ] && cwd="$PWD"  # F3 fix: fall back to $PWD when .cwd is absent
+[ -z "$cwd" ] && cwd="$PWD"  # Falls back to $PWD when .cwd is absent.
 
 # Source-file extensions pattern (anchored to end-of-token to avoid false matches
-# like foo.py.bak or output.go.log). F4 fix: match only tokens ENDING in a source ext.
+# like foo.py.bak or output.go.log). Matches only tokens ENDING in a source ext.
 src_ext='\.(py|ts|tsx|js|jsx|go)([ '"'"'"]|$)'
 # Plugin source pattern (skills/*/SKILL.md or commands/*.md)
 plugin_src='(skills/[^/]+/SKILL\.md|commands/[^/]+\.md)([ '"'"'"]|$)'
@@ -134,7 +134,7 @@ target_is_on_main() {
   is_main_branch "$branch"
 }
 
-# ── F5: cp/mv/dd write-to-source-file detection ──────────────────────────────
+# ── cp/mv/dd write-to-source-file detection ───────────────────────────────────
 # Uses target-repo resolution: resolves the target file's own git repo branch.
 # Best-effort: variable filenames, quoted paths with spaces remain uncaught.
 write_cmd_target=""
@@ -185,7 +185,7 @@ if [ "$source_edit_blocked" -eq 0 ]; then
 fi
 
 # redirect > or >> into a source file
-# F4 fix: anchor ext to end-of-token so foo.py.bak / output.go.log are not blocked.
+# Ext is anchored to end-of-token so foo.py.bak / output.go.log are not blocked.
 if [ "$source_edit_blocked" -eq 0 ]; then
   if echo "$cmd" | grep -qiE ">+\s*['\"]?[^ '\"]*($src_ext|$plugin_src)"; then
     source_edit_blocked=1
@@ -226,7 +226,7 @@ if [ "$source_edit_blocked" -eq 1 ]; then
   fi
 fi
 
-# ── F6: backtick/$() command-substitution inside workflow-script free-text args ──
+# ── backtick/$() command-substitution inside workflow-script free-text args ──
 # push.sh/merge.sh/post_review.sh/post_evals.sh all take a free-text message/path
 # argument that becomes part of a commit message, PR title, or file body. A bare
 # backtick or $(...) inside that argument executes as live command substitution

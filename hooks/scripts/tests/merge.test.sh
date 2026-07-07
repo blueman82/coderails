@@ -177,7 +177,7 @@ rc=$?
 check "merge aborts on gh fetch failure (exit non-zero)" 1 $rc
 check_msg "merge: fetch-fail message mentions GitHub fetch" "GitHub fetch" "$LAST_STDERR"
 
-# ─── Test 3b/3c (WU4): PR_TRUST_FETCH_FAIL_REASON=identity/permission produce
+# ─── Test 3b/3c: PR_TRUST_FETCH_FAIL_REASON=identity/permission produce
 # messages that actually name the real cause, not the generic fallback ───────
 # Regression target: a future edit that swaps the case-branch order, deletes
 # the permission branch, or breaks the reason handoff between git-common.sh

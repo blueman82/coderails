@@ -1,12 +1,12 @@
 #!/bin/bash
 # loop_state_common.sh — shared detection for the agentic-loop Stop guards.
-# SOURCED (not executed) by loop_state_guard.sh (C1, presence/ownership) and
-# loop_stall_guard.sh (C2, anti-stall). Single source for: env defaults, the
+# SOURCED (not executed) by loop_state_guard.sh (presence/ownership) and
+# loop_stall_guard.sh (anti-stall). Single source for: env defaults, the
 # discipline-log helper, the LOOP-STOP vocabulary, and the active-loop /
 # progress.json state resolution — so the two guards can never drift on what
 # "an active loop" means.
 
-# Single source of truth for the LOOP-STOP category vocabulary (C2). The C2 guard
+# Single source of truth for the LOOP-STOP category vocabulary. The anti-stall guard
 # builds BOTH its match regex and its block message from this, so they can't disagree.
 LOOP_STOP_VOCAB="hard-stop|approval-gate|awaiting-input|complete"
 
