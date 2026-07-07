@@ -84,7 +84,9 @@ content. The real interpolated template is WU2's `src/lib/build/prompt.ts`
 
 Build lifecycle lives entirely in
 `~/.claude/coderails-dashboard/builds/<hash>/`, a directory **separate from**
-the queue directory. This is a deliberate structural choice: the
+the queue directory (`~/.claude/coderails-dashboard/approvals/`, per PR #62's
+split of routines Intents in `queue/` from `QueueFileEntry`-shaped approvals in
+`approvals/`). This is a deliberate structural choice: the
 consumption-seam contract (§"Unparseable entries are also a distinct
 rejection" in the queue-seam doc) requires the runner to log any file
 failing `parseQueueEntry`

@@ -55,7 +55,7 @@ dashboard (not just the interactive chart below), pipe each `verdict:
 
 ```bash
 echo "$JUDGE_VERDICT_JSON" | bash skills/workflow-audit/scripts/write_queue_entry.sh \
-  --queue-dir ~/.claude/coderails-dashboard/queue \
+  --queue-dir ~/.claude/coderails-dashboard/approvals \
   --count "$CLUSTER_COUNT" \
   --sessions "$CLUSTER_SESSIONS_JSON"
 ```
@@ -86,7 +86,7 @@ The queue file itself carries only the D2-whitelisted fields already
 vetted by the judge contract (`cluster_ngram`, `count`, `sessions`,
 `task_summary`, `proposed_name`, `proposed_description`) — never verbatim
 transcript content — and is never committed to any repo
-(`~/.claude/coderails-dashboard/queue/` lives outside every repo).
+(`~/.claude/coderails-dashboard/approvals/` lives outside every repo).
 
 ## 6. Proposal chart
 

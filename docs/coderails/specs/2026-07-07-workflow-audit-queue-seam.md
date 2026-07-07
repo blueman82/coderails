@@ -28,6 +28,13 @@ This document (WU3) is the third and final piece: the **consumption seam**
 for the not-yet-built routines runner that will eventually act on an approved
 entry.
 
+The on-disk directory these `QueueFileEntry` files live in is
+`~/.claude/coderails-dashboard/approvals/`, per PR #62's split of the
+dashboard's `queue/` directory (routines Intents) from `approvals/`
+(QueueFileEntry-shaped approvals, including this `workflow-audit:propose-skill`
+entry type) — `write_queue_entry.sh` and the dashboard's `api/queue` and
+`api/events` routes all default to `approvals/` accordingly.
+
 ## The `workflow-audit:propose-skill` toolInput contract
 
 A `QueueFileEntry` with `toolName: "workflow-audit:propose-skill"` carries a
