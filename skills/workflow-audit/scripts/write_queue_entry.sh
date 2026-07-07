@@ -114,6 +114,7 @@ CANONICAL=$(printf '%s' "$TOOL_INPUT" | jq -S -c .)
 HASH=$(printf '%s' "$CANONICAL" | shasum -a 256 | awk '{print $1}')
 
 mkdir -p "$QUEUE_DIR"
+chmod 0700 "$QUEUE_DIR"
 
 CREATED_AT=$(date +%s%3N 2>/dev/null)
 case "$CREATED_AT" in (''|*[!0-9]*) CREATED_AT=$(($(date +%s) * 1000)) ;; esac
@@ -124,6 +125,7 @@ jq -n \
   --argjson createdAt "$CREATED_AT" \
   '{hash: $hash, toolName: "workflow-audit:propose-skill", toolInput: $toolInput, createdAt: $createdAt, status: "pending"}' \
   > "$QUEUE_DIR/$HASH.json"
+chmod 0600 "$QUEUE_DIR/$HASH.json"
 
 printf '%s\n' "$HASH"
 exit 0

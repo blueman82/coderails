@@ -43,6 +43,12 @@ check "propose fixture -> the written file is named <hash>.json" "1" "$(ls "$QDI
 
 WRITTEN1="$QDIR1/$HASH1.json"
 
+# ── 1b. Queue dir and written file are owner-only (0700/0600) — proposal
+#     text (task_summary etc.) must not be world- or group-readable on a
+#     shared machine. ───────────────────────────────────────────────────────
+check "queue dir is owner-only (0700)" "700" "$(stat -f '%OLp' "$QDIR1" 2>/dev/null || stat -c '%a' "$QDIR1")"
+check "written file is owner-only (0600)" "600" "$(stat -f '%OLp' "$WRITTEN1" 2>/dev/null || stat -c '%a' "$WRITTEN1")"
+
 # ── 2. toolName field is exactly "workflow-audit:propose-skill" ────────────
 check "written file toolName is exactly workflow-audit:propose-skill" "workflow-audit:propose-skill" \
   "$(jq -r '.toolName' "$WRITTEN1")"
