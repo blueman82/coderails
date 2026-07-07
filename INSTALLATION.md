@@ -119,13 +119,16 @@ via exit 2: confidence-label check, verify-loop check (both promoted from
 warn-mode on 2026-05-05), loop-state guard, and loop-stall guard. The same two
 content-discipline checks (confidence-label and verify-loop) also run on
 SubagentStop — so subagents are held to the same standards as the parent session.
-On PreToolUse, four hooks can block: the destructive-bash gate, the opt-in test
+On PreToolUse, five hooks can block: the destructive-bash gate, the opt-in test
 gate, the config-gated `enforce_pr_workflow` (opt-in via workflow.config.yaml,
 like the test gate — enforces the PR chain, e.g. blocks a direct `git push` to
-`main` unless `/pr-review-toolkit:review-pr` already ran this session), and
+`main` unless `/pr-review-toolkit:review-pr` already ran this session),
 `no_edit_on_main` (blocks editing source files, but not docs/config, while on
 `main` — use `/coderails:prep` or a worktree instead; it also blocks editing
-`.claude/settings.json`/`settings.local.json` on any branch).
+`.claude/settings.json`/`settings.local.json` on any branch), and
+`comment_citation_gate` (blocks new code comments that cite a session-artifact
+label like `E#:`/`Task A#`/`CHANGE B#` instead of stating the constraint the
+code enforces; `.md` files are exempt).
 
 ## Notes
 
