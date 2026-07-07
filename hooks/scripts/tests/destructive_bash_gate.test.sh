@@ -421,6 +421,18 @@ check "allowlist present: --force + --force-with-lease -> deny" DENY \
 check "allowlist present: -f short flag -> deny" DENY \
   "$(run_cwd "$(payload_with_cwd "git push origin main -f" "$ALLOWLIST_REPO")" "$ALLOWLIST_REPO")"
 
+# 5b. SECURITY — allowlist present, -f placed directly before --force-with-lease
+# still denied. Regression guard for a bypass found in review: the naked-force
+# exclusion regex required a literal space token (`push +`) immediately before
+# the alternation, which left no character available for the `(^|[^-])`
+# lookbehind-substitute to consume when -f sat right after that mandatory
+# space — so `git push -f --force-with-lease` slipped through as "no naked
+# force detected" even though -f is right there. Both orderings are checked.
+check "allowlist present: -f before --force-with-lease -> deny" DENY \
+  "$(run_cwd "$(payload_with_cwd "git push -f --force-with-lease" "$ALLOWLIST_REPO")" "$ALLOWLIST_REPO")"
+check "allowlist present: --force-with-lease before -f -> deny" DENY \
+  "$(run_cwd "$(payload_with_cwd "git push --force-with-lease -f" "$ALLOWLIST_REPO")" "$ALLOWLIST_REPO")"
+
 # 6. Empty allowlist file -> denied (mirrors test_gate.sh empty-content no-op)
 : > "$ALLOWLIST_REPO/.claude/destructive_allowlist"
 check "empty allowlist file: force-with-lease -> deny" DENY \

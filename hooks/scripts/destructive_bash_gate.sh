@@ -101,7 +101,7 @@ allowlist_permits() {
 # naked --force/-f unconditionally, even when both appear on the same line.
 if echo "$cmd" | grep -qiE '\bgit +push +.*(--force\b|-f\b|--force-with-lease\b)'; then
   if echo "$cmd" | grep -qiE '\bgit +push +.*--force-with-lease\b' \
-     && ! echo "$cmd" | grep -qiE '\bgit +push +.*(--force($|[^-])|(^|[^-])-f\b)' \
+     && ! echo "$cmd" | grep -qiE '\bgit +push\b.*(--force($|[^-])|(^|[^-])-f\b)' \
      && allowlist_permits "git-push-force-with-lease"; then
     : # allowlisted force-with-lease, no naked --force present — allow
   else
