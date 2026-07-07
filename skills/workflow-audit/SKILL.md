@@ -65,16 +65,18 @@ gate in section 7 below — the session's own `AskUserQuestion` flow runs
 exactly as it always has, unchanged. Queue-mode gives the same proposals a
 second, asynchronous surface on the dashboard.
 
-**Every pinned invariant from section 7 still applies to a queue entry:**
-a dashboard "Approve" click on one of these entries flips its on-disk
-`status` from `pending` to `approved` and nothing else — no skill is
-created, no branch opens, no PR is filed. Skill creation from an approved
-queue entry happens only when the (separate, not-yet-built) routines
-runner reads it, re-validates its content hash, and drives the section-8
-create step itself. **A stale or context-free status flip is not
-equivalent to a live owner exchange** — treat an `approved` queue entry
-exactly as cautiously as you would treat inferred consent, because
-that is what it is until the runner's re-validation step exists.
+**Every pinned invariant from section 7 still applies to a queue entry, with
+one update:** a dashboard "Approve" click on one of these entries flips its
+on-disk `status` from `pending` to `approved` **and now also triggers a
+build** — the dashboard's approve-path spawns a detached headless build
+that re-validates the entry's content hash and drives the section-8 create
+step (see `docs/coderails/specs/2026-07-07-approve-build-runner.md` for the
+full runner contract). **A stale or context-free status flip is still not
+equivalent to a live owner exchange** — an `approved` queue entry now
+carries real consequence, so treat the moment of clicking Approve with the
+same weight as any other consent that triggers action, not less because
+it happened outside a live conversation. The runner never merges the
+resulting skill PR; the owner reviews and merges it by hand.
 
 **Zero approvals is a complete, successful run here too** — an audit run
 that writes queue entries nobody has approved yet ends cleanly; there is
@@ -112,7 +114,7 @@ Ask via `AskUserQuestion`, multi-select, one option per proposed candidate (plus
 
 For each approved candidate, in sequence, never batched:
 
-1. Invoke `coderails:writing-skills` for real — RED: run a fresh-subagent baseline pressure-test scenario *without* the new skill present, and document what it actually does. GREEN: write the minimal `SKILL.md` addressing the observed baseline failures. REFACTOR: re-test under the same pressure and close any loopholes found.
+1. Author the skill via `/skill-creator:skill-creator` (per the owner's 2026-07-07 directive) fully specified from the candidate's own judge-contract fields, skipping its human-facing eval-viewer step in a headless run. Substitute `coderails:writing-skills`'s RED/GREEN/REFACTOR discipline as the stop condition, since skill-creator itself has no autonomous "done" signal: RED — run a fresh-subagent baseline pressure-test scenario *without* the new skill present, and document what it actually does. GREEN — write the minimal `SKILL.md` addressing the observed baseline failures. REFACTOR — re-test under the same pressure and close any loopholes found.
 2. Land the new skill in the coderails repo as a plugin skill, via its own branch and PR, through the full gate sequence: `test_gate` → `pr-review-toolkit:review-pr` → security review → `post-review` → pr-scope evals → merge. Never commit straight to `main`, and never write into a user's personal `~/.claude/skills` directory — this is a repo skill, not a local one.
 3. **Stop after this skill is merged before starting the next approved candidate.** Batching multiple skill creations without testing and shipping each individually is the exact anti-pattern `writing-skills` prohibits — apply it here too.
 
