@@ -10,6 +10,14 @@ export class QueueActionError extends Error {
 
 type Decision = "approved" | "denied";
 
+export interface QueueEntrySnapshot {
+  hash: string;
+  toolName: string;
+  toolInput: unknown;
+  createdAt: number;
+  status: "approved" | "denied";
+}
+
 const VALID_DECISIONS: Decision[] = ["approved", "denied"];
 
 // hash is the hex SHA-256 filename stem per the queue contract (see
@@ -36,8 +44,14 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 // Throws QueueActionError (never silently succeeds, never defaults to
 // approved) when: the hash is not a well-formed hex SHA-256 (blocks path
 // traversal), the decision value is invalid, the target file doesn't exist
-// or can't be read, or the file's contents aren't valid JSON.
-export function resolveQueueEntry(queueDir: string, hash: string, decision: Decision): void {
+// or can't be read, the file's contents aren't valid JSON, or the entry is
+// not currently pending (blocks approve-after-deny and double-approve
+// re-flips — the transition is pending-only, one-shot).
+export function resolveQueueEntry(
+  queueDir: string,
+  hash: string,
+  decision: Decision
+): QueueEntrySnapshot {
   if (!HASH_PATTERN.test(hash)) {
     throw new QueueActionError(`invalid hash: ${hash}`);
   }
@@ -66,6 +80,13 @@ export function resolveQueueEntry(queueDir: string, hash: string, decision: Deci
     throw new QueueActionError(`queue file for hash ${hash} does not contain a JSON object`);
   }
 
+  if (parsed.status !== "pending") {
+    throw new QueueActionError(
+      `entry ${hash} is not pending (current status: ${String(parsed.status)})`
+    );
+  }
+
   const updated: Record<string, unknown> = { ...parsed, status: decision };
   writeFileSync(path, JSON.stringify(updated));
+  return updated as unknown as QueueEntrySnapshot;
 }
