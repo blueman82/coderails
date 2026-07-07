@@ -47,7 +47,46 @@ Read `references/judge-contract.md` in full, then spawn exactly one fresh sonnet
 
 **The judge receives nothing else.** No transcript content, no conversation history, no orchestrator commentary. This is a deliberate privacy boundary: the judge's entire vocabulary is tool names, whitelisted heads, counts, session ids, and n-gram lengths — the same boundary `scan_transcripts.sh` and `cluster_ngrams.sh` already enforce on their own output. The judge returns one propose/reject verdict per cluster per the contract's schema.
 
-## 5. Proposal chart
+## 5. Queue-mode output (optional)
+
+When running inside a session that also wants proposals surfaced on the
+dashboard (not just the interactive chart below), pipe each `verdict:
+"propose"` judge output through the writer script, once per candidate:
+
+```bash
+echo "$JUDGE_VERDICT_JSON" | bash skills/workflow-audit/scripts/write_queue_entry.sh \
+  --queue-dir ~/.claude/coderails-dashboard/queue \
+  --count "$CLUSTER_COUNT" \
+  --sessions "$CLUSTER_SESSIONS_JSON"
+```
+
+This is additive to, never a replacement for, the interactive approval
+gate in section 7 below — the session's own `AskUserQuestion` flow runs
+exactly as it always has, unchanged. Queue-mode gives the same proposals a
+second, asynchronous surface on the dashboard.
+
+**Every pinned invariant from section 7 still applies to a queue entry:**
+a dashboard "Approve" click on one of these entries flips its on-disk
+`status` from `pending` to `approved` and nothing else — no skill is
+created, no branch opens, no PR is filed. Skill creation from an approved
+queue entry happens only when the (separate, not-yet-built) routines
+runner reads it, re-validates its content hash, and drives the section-8
+create step itself. **A stale or context-free status flip is not
+equivalent to a live owner exchange** — treat an `approved` queue entry
+exactly as cautiously as you would treat inferred consent, because
+that is what it is until the runner's re-validation step exists.
+
+**Zero approvals is a complete, successful run here too** — an audit run
+that writes queue entries nobody has approved yet ends cleanly; there is
+no retry, no nag, no follow-up ask.
+
+The queue file itself carries only the D2-whitelisted fields already
+vetted by the judge contract (`cluster_ngram`, `count`, `sessions`,
+`task_summary`, `proposed_name`, `proposed_description`) — never verbatim
+transcript content — and is never committed to any repo
+(`~/.claude/coderails-dashboard/queue/` lives outside every repo).
+
+## 6. Proposal chart
 
 Present one row per candidate cluster to the owner:
 
@@ -63,13 +102,13 @@ Only rows with `verdict: "propose"` go forward to the approval gate; rejected cl
 
 **Privacy invariant.** The chart and every downstream artifact (proposal file, approval-gate summary, wrap-up report) contain only tool names, whitelisted heads, counts, and session ids — never verbatim transcript prose, file contents, or reconstructed intent beyond what those fields literally say. Any proposal artifact written to disk stays local (scratch or loop-state dir) and is never committed to the repo.
 
-## 6. Approval gate — hard stop, no exceptions
+## 7. Approval gate — hard stop, no exceptions
 
 Ask via `AskUserQuestion`, multi-select, one option per proposed candidate (plus an implicit "approve none" if the user selects nothing). Wait for the response.
 
 **This gate overrides any standing autonomy the session has.** Even inside an agentic-loop session authorised for "crack on", "no human gates", "self-merge", or any other full-autonomy envelope, this specific gate does not fall inside that envelope. Skill creation from a workflow-audit run NEVER proceeds without the owner's explicit approval given in *this* interaction — not an earlier blanket authorisation, not an inferred "they'd probably want this." If the owner approves zero candidates, the skill ends here having created nothing, and that is a complete, successful run — not a failure to escalate past.
 
-## 7. Create step — one skill at a time
+## 8. Create step — one skill at a time
 
 For each approved candidate, in sequence, never batched:
 
@@ -77,7 +116,7 @@ For each approved candidate, in sequence, never batched:
 2. Land the new skill in the coderails repo as a plugin skill, via its own branch and PR, through the full gate sequence: `test_gate` → `pr-review-toolkit:review-pr` → security review → `post-review` → pr-scope evals → merge. Never commit straight to `main`, and never write into a user's personal `~/.claude/skills` directory — this is a repo skill, not a local one.
 3. **Stop after this skill is merged before starting the next approved candidate.** Batching multiple skill creations without testing and shipping each individually is the exact anti-pattern `writing-skills` prohibits — apply it here too.
 
-## 8. Wrap-up
+## 9. Wrap-up
 
 Report, unscored:
 - Skills created (name, PR, merge SHA).
