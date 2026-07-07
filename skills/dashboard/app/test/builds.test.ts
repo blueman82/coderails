@@ -48,6 +48,12 @@ describe("collectBuilds", () => {
     expect(collectBuilds(dir)).toEqual([]);
   });
 
+  it("rejects a state.json with the state field absent entirely, not just an unrecognized value", () => {
+    const dir = makeTmpDir("missing-state");
+    writeBuild(dir, "9".repeat(64), { state: undefined });
+    expect(collectBuilds(dir)).toEqual([]);
+  });
+
   it("skips a malformed state.json rather than throwing, alongside a sibling well-formed entry", () => {
     const dir = makeTmpDir("malformed");
     const badDir = join(dir, "c".repeat(64));
