@@ -231,9 +231,18 @@ export default class CommandCentrePlugin extends Plugin {
 
   private readButtons(): ButtonItem[] {
     try {
+      const { mtimeMs } = statSync(DASHBOARD_CONFIG_PATH);
+      if (this.buttonsCache && this.buttonsCache.mtimeMs === mtimeMs) {
+        return this.buttonsCache.buttons;
+      }
       const raw = readFileSync(DASHBOARD_CONFIG_PATH, "utf-8");
-      return parseDashboardConfig(raw).buttons;
+      const buttons = parseDashboardConfig(raw).buttons;
+      this.buttonsCache = { mtimeMs, buttons };
+      return buttons;
     } catch {
+      // Missing or unparseable config renders no buttons, exactly as before
+      // the cache existed; drop the cache so a repaired file is re-read.
+      this.buttonsCache = null;
       return [];
     }
   }
