@@ -120,8 +120,19 @@ describe("AssistantLinkPanel", () => {
       expect(html).toContain("Sessions repeatedly run git log, then git push, then invoke prime.");
     });
 
-    it("surfaces both the session count and the cluster count", () => {
-      const entry = proposalEntry();
+    it("surfaces both the occurrence count and the session count, distinctly", () => {
+      // count and sessions.length deliberately differ so a single "3"-style
+      // assertion couldn't accidentally pass by conflating the two numbers.
+      const entry = proposalEntry({
+        toolInput: {
+          cluster_ngram: ["Bash:git log", "Bash:git push", "Skill:prime"],
+          count: 5,
+          sessions: ["s1", "s2", "s3", "s4"],
+          task_summary: "Sessions repeatedly run git log, then git push, then invoke prime.",
+          proposed_name: "git-log-push-prime",
+          proposed_description: "Use when a session needs to review commits, push, and load context.",
+        },
+      });
       const html = renderToStaticMarkup(
         createElement(
           DashboardContextTestProvider,
@@ -129,8 +140,8 @@ describe("AssistantLinkPanel", () => {
           createElement(AssistantLinkPanel, { token: "t" })
         )
       );
-      expect(html).toContain("3");
-      expect(html.toLowerCase()).toContain("session");
+      expect(html).toContain("5 occurrences");
+      expect(html).toContain("4 sessions");
     });
 
     it("renders cluster_ngram as a joined chain", () => {
@@ -188,6 +199,36 @@ describe("AssistantLinkPanel", () => {
         )
       );
       expect(html).toContain("malformed entry missing proposed_name");
+    });
+
+    it("falls back to the opaque preview when a field has the wrong type (cluster_ngram as a string, sessions as a string), without crashing", () => {
+      const entry = proposalEntry({
+        toolInput: {
+          cluster_ngram: "Bash:git log", // wrong type: should be string[]
+          count: 1,
+          sessions: "s1", // wrong type: should be string[]
+          task_summary: "malformed entry with wrong-typed array fields",
+          proposed_name: "n",
+          proposed_description: "d",
+        },
+      });
+      expect(() =>
+        renderToStaticMarkup(
+          createElement(
+            DashboardContextTestProvider,
+            { snapshot: emptySnapshot({ queue: [entry] }) },
+            createElement(AssistantLinkPanel, { token: "t" })
+          )
+        )
+      ).not.toThrow();
+      const html = renderToStaticMarkup(
+        createElement(
+          DashboardContextTestProvider,
+          { snapshot: emptySnapshot({ queue: [entry] }) },
+          createElement(AssistantLinkPanel, { token: "t" })
+        )
+      );
+      expect(html).toContain("malformed entry with wrong-typed array fields");
     });
 
     it("still renders Approve/Deny buttons for a workflow-audit:propose-skill entry, untouched", () => {

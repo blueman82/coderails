@@ -525,6 +525,36 @@
   word-break: break-all;
   margin: 4px 0;
 }
+.hud-queue-proposal-preview {
+  margin: 4px 0;
+}
+.hud-queue-proposal-name {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: var(--off-white);
+}
+.hud-queue-proposal-description,
+.hud-queue-proposal-summary {
+  font-size: 9px;
+  color: var(--grey);
+  margin-top: 2px;
+}
+.hud-queue-proposal-stats {
+  font-family: var(--mono);
+  font-size: 8.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--grey-dim);
+  margin-top: 4px;
+}
+.hud-queue-proposal-chain {
+  font-family: var(--mono);
+  font-size: 8.5px;
+  color: var(--grey-dim);
+  word-break: break-all;
+  margin-top: 2px;
+}
 .hud-queue-actions {
   display: flex;
   gap: 8px;

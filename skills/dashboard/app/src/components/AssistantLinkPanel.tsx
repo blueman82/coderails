@@ -32,7 +32,7 @@ function previewToolInput(toolInput: unknown): string {
 
 // One deliberate, named exception to the opacity rule above:
 // "workflow-audit:propose-skill" carries a fixed, judge-contract-vetted
-// six-field vocabulary (docs/coderails/specs/2026-07-07-workflow-audit-queue-seam.md)
+// six-field vocabulary (skills/workflow-audit/references/judge-contract.md)
 // worth rendering legibly rather than as a truncated JSON blob. The type
 // guard only recognizes that exact shape; anything else — including a
 // malformed proposal missing a field — still falls through to the opaque
