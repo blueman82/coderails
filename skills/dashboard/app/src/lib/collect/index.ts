@@ -113,21 +113,31 @@ export function createAggregator(deps: AggregatorDeps): Aggregator {
     }
   }
 
-  function collectActivitySlice(): Pick<Snapshot, "sessions" | "loops" | "trail" | "health" | "queue"> {
+  async function safeCallAsync<T>(source: string, fn: () => Promise<T>, fallback: T): Promise<T> {
+    try {
+      return await fn();
+    } catch (err) {
+      onError(source, err);
+      return fallback;
+    }
+  }
+
+  async function collectActivitySlice(): Promise<Pick<Snapshot, "sessions" | "loops" | "trail" | "health" | "queue">> {
     const sessions = sortSessions(safeCall("sessions", () => collectSessions(deps.projectsDir, Date.now()), []));
     const loops = sortLoops(safeCall("loops", () => collectLoops(deps.loopsDir), []));
     const trail = safeCall("trail", () => collectMemoryTrail(deps.cfg.memoryPaths, trailLimit), []);
-    // health has no dedicated fs signal to watch (usage tiles are always
-    // unavailable; hooksFired/lintFindings are cheap to recompute) — it
-    // rides along with the activity slice rather than getting its own timer.
-    const health = safeCall("health", () => collectHealth(), []);
+    // health reads usage transcripts (I/O-bound, hence async) and has no
+    // dedicated fs signal of its own to watch beyond the projects dir already
+    // watched for sessions — it rides along with the activity slice rather
+    // than getting its own timer.
+    const health = await safeCallAsync("health", () => collectHealth({ projectsDir: deps.projectsDir }), []);
     const queue = deps.queueDir ? safeCall("queue", () => collectQueue(deps.queueDir!, queueLimit), []) : [];
     return { sessions, loops, trail, health, queue };
   }
 
-  function refreshActivity(): void {
-    const { health, ...activity } = collectActivitySlice();
-    snapshot = { ...snapshot, ...activity, health };
+  async function refreshActivity(): Promise<void> {
+    const activity = await collectActivitySlice();
+    snapshot = { ...snapshot, ...activity };
     emit("activity", activity);
   }
 
@@ -151,7 +161,7 @@ export function createAggregator(deps: AggregatorDeps): Aggregator {
 
   function scheduleActivityRefresh(): void {
     if (activityDebounceTimer) clearTimeout(activityDebounceTimer);
-    activityDebounceTimer = setTimeout(refreshActivity, activityDebounceMs);
+    activityDebounceTimer = setTimeout(() => void refreshActivity(), activityDebounceMs);
   }
 
   function watchDir(dir: string, onChange: () => void): void {
@@ -178,9 +188,13 @@ export function createAggregator(deps: AggregatorDeps): Aggregator {
     },
 
     start(): void {
-      const activity = collectActivitySlice();
       const runs = safeCall("runs", () => readRuns(runsLimit, { runsDir: deps.runsDir }), []);
-      snapshot = { ...snapshot, ...activity, runs };
+      snapshot = { ...snapshot, runs };
+      // Initial activity collect (sessions/loops/trail/health) is async (health
+      // now reads usage transcripts) — fire it without blocking start(), same
+      // pattern as refreshGates below; the snapshot fills in once it resolves
+      // and "activity" listeners are notified same as any later refresh.
+      void refreshActivity();
 
       watchDir(deps.projectsDir, scheduleActivityRefresh);
       watchDir(deps.loopsDir, scheduleActivityRefresh);

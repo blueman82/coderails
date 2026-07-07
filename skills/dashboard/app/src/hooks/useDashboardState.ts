@@ -23,7 +23,7 @@ export interface DashboardSnapshot {
   queue: QueueEntry[];
 }
 
-export type ActivitySlice = Pick<DashboardSnapshot, "sessions" | "loops" | "trail" | "queue">;
+export type ActivitySlice = Pick<DashboardSnapshot, "sessions" | "loops" | "trail" | "health" | "queue">;
 
 export type DashboardEvent =
   | { event: "snapshot"; data: DashboardSnapshot }

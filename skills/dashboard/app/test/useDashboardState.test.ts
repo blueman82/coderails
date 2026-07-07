@@ -32,15 +32,22 @@ describe("mergeDashboardEvent — snapshot", () => {
 });
 
 describe("mergeDashboardEvent — activity", () => {
-  it("overlays sessions/loops/trail onto the existing snapshot without touching gates/health/runs", () => {
+  it("overlays sessions/loops/trail/health onto the existing snapshot without touching gates/runs", () => {
     const base: DashboardState = {
       snapshot: emptySnapshot({ gates: [{ repo: "r", error: "boom" }], runs: [{ runId: "r1" } as RunRecord] }),
       status: "online",
       lastUpdate: 500,
     };
-    const activity = { sessions: [{ project: "p", lastActivity: 1, state: "active" as const }], loops: [], trail: [], queue: [] };
+    const activity = {
+      sessions: [{ project: "p", lastActivity: 1, state: "active" as const }],
+      loops: [],
+      trail: [],
+      health: [{ key: "hooksFired" as const, value: "3" }],
+      queue: [],
+    };
     const next = mergeDashboardEvent(base, { event: "activity", data: activity }, 2000);
     expect(next.snapshot.sessions).toEqual(activity.sessions);
+    expect(next.snapshot.health).toEqual(activity.health);
     expect(next.snapshot.gates).toEqual(base.snapshot.gates);
     expect(next.snapshot.runs).toEqual(base.snapshot.runs);
     expect(next.lastUpdate).toBe(2000);
