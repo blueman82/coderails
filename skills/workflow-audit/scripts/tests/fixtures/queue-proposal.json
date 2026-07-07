@@ -1,0 +1,8 @@
+{
+  "cluster_ngram": ["Bash:git log", "Bash:git push", "Skill:prime"],
+  "verdict": "propose",
+  "reject_reason": "",
+  "task_summary": "Sessions repeatedly run `git log`, then `git push`, then invoke the `prime` skill (seen in 3 sessions).",
+  "proposed_name": "git-log-push-prime",
+  "proposed_description": "Use when a session needs to review recent commits, push, and load project context in sequence — a pattern seen across 3 sessions."
+}
