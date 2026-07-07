@@ -26,7 +26,7 @@
 
 set -u
 
-QUEUE_DIR="$HOME/.claude/coderails-dashboard/queue"
+QUEUE_DIR="$HOME/.claude/coderails-dashboard/approvals"
 COUNT=""
 SESSIONS=""
 
@@ -50,7 +50,7 @@ On any other verdict (e.g. "reject"), writes nothing and exits 0 with no
 stdout.
 
   --queue-dir <dir>   Directory to write the queue file into (created if
-                      missing). Default: ~/.claude/coderails-dashboard/queue
+                      missing). Default: ~/.claude/coderails-dashboard/approvals
   --count N           Integer count from the originating cluster.
   --sessions '<json>' JSON array of session-id strings from the originating
                       cluster.

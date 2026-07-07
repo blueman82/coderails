@@ -89,12 +89,12 @@ check "written file hash equals independently-computed sha256(canonicalise(toolI
 check "written file hash matches its own filename" "$HASH1" "$(jq -r '.hash' "$WRITTEN1")"
 
 # ── 5b. Default --queue-dir (no flag passed) resolves to
-#     ~/.claude/coderails-dashboard/queue — exercise the actual default
+#     ~/.claude/coderails-dashboard/approvals — exercise the actual default
 #     branch, not just the explicitly-passed-flag path every other case uses.
-DEFAULT_QUEUE_DIR="$HOME/.claude/coderails-dashboard/queue"
+DEFAULT_QUEUE_DIR="$HOME/.claude/coderails-dashboard/approvals"
 DEFAULT_BEFORE_COUNT=$(ls "$DEFAULT_QUEUE_DIR" 2>/dev/null | wc -l | tr -d ' ')
 HASH_DEFAULT=$(cat "$FIXTURE_PROPOSE" | bash "$SCRIPT" --count 3 --sessions "$SESSIONS_JSON")
-check "no --queue-dir flag -> writes into the default ~/.claude/coderails-dashboard/queue" "1" \
+check "no --queue-dir flag -> writes into the default ~/.claude/coderails-dashboard/approvals" "1" \
   "$([ -f "$DEFAULT_QUEUE_DIR/$HASH_DEFAULT.json" ] && echo 1 || echo 0)"
 check "default-queue-dir file has the same hash as the explicit-queue-dir run (same input)" "$HASH1" "$HASH_DEFAULT"
 # Clean up only the file this test itself created, leaving any pre-existing
