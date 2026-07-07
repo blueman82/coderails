@@ -58,7 +58,7 @@ describe("collectUsage", () => {
       NOW
     );
     const usage = await collectUsage(base, NOW);
-    expect(usage.last5h).toEqual({ inputTokens: 10, outputTokens: 20, totalTokens: 30 });
+    expect(usage.last5h).toEqual({ inputTokens: 10, outputTokens: 20, totalTokens: 30, cacheReadTokens: 0 });
   });
 
   it("dedupes repeated lines sharing the same message.id, counting the usage once", async () => {
@@ -75,7 +75,7 @@ describe("collectUsage", () => {
       NOW
     );
     const usage = await collectUsage(base, NOW);
-    expect(usage.last5h).toEqual({ inputTokens: 1, outputTokens: 100, totalTokens: 101 });
+    expect(usage.last5h).toEqual({ inputTokens: 1, outputTokens: 100, totalTokens: 101, cacheReadTokens: 0 });
   });
 
   it("counts cache_creation_input_tokens and cache_read_input_tokens toward inputTokens", async () => {
@@ -95,7 +95,7 @@ describe("collectUsage", () => {
       NOW
     );
     const usage = await collectUsage(base, NOW);
-    expect(usage.last5h).toEqual({ inputTokens: 1502, outputTokens: 50, totalTokens: 1552 });
+    expect(usage.last5h).toEqual({ inputTokens: 1502, outputTokens: 50, totalTokens: 1552, cacheReadTokens: 500 });
   });
 
   it("excludes a message stamped just before the 5h window (boundary)", async () => {
@@ -109,7 +109,7 @@ describe("collectUsage", () => {
       NOW
     );
     const usage = await collectUsage(base, NOW);
-    expect(usage.last5h).toEqual({ inputTokens: 0, outputTokens: 0, totalTokens: 0 });
+    expect(usage.last5h).toEqual({ inputTokens: 0, outputTokens: 0, totalTokens: 0, cacheReadTokens: 0 });
   });
 
   it("includes a message stamped exactly at the 5h boundary", async () => {
@@ -123,7 +123,7 @@ describe("collectUsage", () => {
       NOW
     );
     const usage = await collectUsage(base, NOW);
-    expect(usage.last5h).toEqual({ inputTokens: 10, outputTokens: 20, totalTokens: 30 });
+    expect(usage.last5h).toEqual({ inputTokens: 10, outputTokens: 20, totalTokens: 30, cacheReadTokens: 0 });
   });
 
   it("includes a message stamped just under the 7-day week boundary but excludes one just past it", async () => {
@@ -141,7 +141,7 @@ describe("collectUsage", () => {
       NOW
     );
     const usage = await collectUsage(base, NOW);
-    expect(usage.week).toEqual({ inputTokens: 5, outputTokens: 5, totalTokens: 10 });
+    expect(usage.week).toEqual({ inputTokens: 5, outputTokens: 5, totalTokens: 10, cacheReadTokens: 0 });
   });
 
   it("sums usage across multiple project transcripts", async () => {
@@ -161,7 +161,7 @@ describe("collectUsage", () => {
       NOW
     );
     const usage = await collectUsage(base, NOW);
-    expect(usage.last5h).toEqual({ inputTokens: 15, outputTokens: 25, totalTokens: 40 });
+    expect(usage.last5h).toEqual({ inputTokens: 15, outputTokens: 25, totalTokens: 40, cacheReadTokens: 0 });
   });
 
   it("skips malformed JSON lines silently rather than throwing", async () => {
@@ -174,7 +174,7 @@ describe("collectUsage", () => {
       NOW
     );
     const usage = await collectUsage(base, NOW);
-    expect(usage.last5h).toEqual({ inputTokens: 10, outputTokens: 20, totalTokens: 30 });
+    expect(usage.last5h).toEqual({ inputTokens: 10, outputTokens: 20, totalTokens: 30, cacheReadTokens: 0 });
   });
 
   it("skips lines of the wrong shape (non-assistant type, missing usage) silently", async () => {
@@ -192,7 +192,7 @@ describe("collectUsage", () => {
       NOW
     );
     const usage = await collectUsage(base, NOW);
-    expect(usage.last5h).toEqual({ inputTokens: 10, outputTokens: 20, totalTokens: 30 });
+    expect(usage.last5h).toEqual({ inputTokens: 10, outputTokens: 20, totalTokens: 30, cacheReadTokens: 0 });
   });
 
   it("ignores blank lines", async () => {
@@ -205,7 +205,7 @@ describe("collectUsage", () => {
       NOW
     );
     const usage = await collectUsage(base, NOW);
-    expect(usage.last5h).toEqual({ inputTokens: 10, outputTokens: 20, totalTokens: 30 });
+    expect(usage.last5h).toEqual({ inputTokens: 10, outputTokens: 20, totalTokens: 30, cacheReadTokens: 0 });
   });
 
   it("only reads non-.jsonl files if present is a no-op (ignores unrelated files)", async () => {
@@ -213,7 +213,7 @@ describe("collectUsage", () => {
     mkdirSync(join(base, "-proj"), { recursive: true });
     writeFileSync(join(base, "-proj", "notes.txt"), "irrelevant content");
     const usage = await collectUsage(base, NOW);
-    expect(usage.last5h).toEqual({ inputTokens: 0, outputTokens: 0, totalTokens: 0 });
+    expect(usage.last5h).toEqual({ inputTokens: 0, outputTokens: 0, totalTokens: 0, cacheReadTokens: 0 });
   });
 
   it("returns null sections with a note when the base dir is unreadable", async () => {
@@ -240,6 +240,6 @@ describe("collectUsage", () => {
       longAgo
     );
     const usage = await collectUsage(base, NOW);
-    expect(usage.week).toEqual({ inputTokens: 0, outputTokens: 0, totalTokens: 0 });
+    expect(usage.week).toEqual({ inputTokens: 0, outputTokens: 0, totalTokens: 0, cacheReadTokens: 0 });
   });
 });
