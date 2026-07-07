@@ -3,10 +3,14 @@ import type { Intent } from "../src/intent";
 import type { IntentFile } from "../../obsidian/src/exec";
 
 // Type-only compatibility harness: assigns each type to the other's shape.
-// If obsidian/src/exec.ts's IntentFile ever drifts from this lib's Intent
-// (e.g. requestedAt changes type, or a required field is added/removed),
-// one of the two assignments below fails to typecheck and `tsc --noEmit`
-// (run via Task 1.9's vitest+typecheck gate) fails the build immediately.
+// This catches producer-side (IntentFile) renames, type changes, and
+// removals of required fields, and consumer-side (Intent) required
+// additions — one of the two assignments below fails to typecheck and
+// `tsc --noEmit` (run via Task 1.9's vitest+typecheck gate) fails the
+// build immediately. It CANNOT catch producer-side field ADDITIONS: a
+// wider IntentFile would still structurally assign to the narrower Intent
+// shape, so this is not a claim of mutual assignability in both
+// directions — only drift that narrows or breaks the existing contract.
 // This replaces the old dormant byte-parity test: there is no "not yet
 // merged" skip state anymore, because the producer already exists on
 // origin/main.

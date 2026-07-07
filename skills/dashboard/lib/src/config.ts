@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, isAbsolute } from "node:path";
 import {
   loadConfig as loadBaseConfig,
   ConfigError,
@@ -22,6 +22,9 @@ export interface ExpectedArtifact {
   predicate: ArtifactPredicate;
 }
 
+export const ESCALATION_CHANNELS = ["notification", "vault-note"] as const;
+export type EscalationChannel = typeof ESCALATION_CHANNELS[number];
+
 export interface RoutineDef {
   name: string;
   label?: string;
@@ -29,7 +32,7 @@ export interface RoutineDef {
   buttonRef?: string;
   cadence: string;
   expectedArtifact: ExpectedArtifact;
-  escalation: string[];
+  escalation: EscalationChannel[];
   foreignSkillPath?: string;
 }
 
@@ -76,10 +79,38 @@ function validateRoutines(routines: RoutineDef[], buttons: ButtonDef[]): void {
         `Routine "${routine.name}" expectedArtifact.maxAgeSeconds must be a positive number`
       );
     }
+    // Template placeholders like {date}/{vault} are left unresolved here — the runner
+    // resolves them at execution time; this only checks the field is a non-empty string.
+    if (!artifact || typeof artifact.artifactPath !== "string" || artifact.artifactPath.length === 0) {
+      throw new ConfigError(
+        `Routine "${routine.name}" expectedArtifact.artifactPath must be a non-empty string`
+      );
+    }
     if (!artifact.predicate || !PREDICATE_KINDS.includes(artifact.predicate.kind)) {
       throw new ConfigError(
         `Routine "${routine.name}" expectedArtifact.predicate has unknown kind`
       );
+    }
+
+    for (const channel of routine.escalation) {
+      if (!(ESCALATION_CHANNELS as readonly string[]).includes(channel)) {
+        throw new ConfigError(
+          `Routine "${routine.name}" has unknown escalation channel: ${channel}`
+        );
+      }
+    }
+
+    if (routine.foreignSkillPath !== undefined) {
+      if (typeof routine.foreignSkillPath !== "string" || routine.foreignSkillPath.length === 0) {
+        throw new ConfigError(
+          `Routine "${routine.name}" foreignSkillPath must be a non-empty string`
+        );
+      }
+      if (!isAbsolute(routine.foreignSkillPath)) {
+        throw new ConfigError(
+          `Routine "${routine.name}" has relative foreignSkillPath (must be absolute): ${routine.foreignSkillPath}`
+        );
+      }
     }
   }
 }

@@ -115,4 +115,73 @@ describe("parseIntent", () => {
     expect(() => parseIntent(null)).toThrow(IntentValidationError);
     expect(() => parseIntent(undefined)).toThrow(IntentValidationError);
   });
+
+  // Behaviour-pinning: requestedAt is only checked for type + finiteness, not
+  // range or sign. These pin the CURRENT design so a future change is a
+  // deliberate diff, not an accidental one.
+  it("accepts requestedAt of 0 (pins current design: no lower-bound check)", () => {
+    const intent = parseIntent({ button: "wiki-lint", requestedAt: 0, source: "web" });
+    expect(intent.requestedAt).toBe(0);
+  });
+
+  it("accepts a negative requestedAt (pins current design: sign is not validated)", () => {
+    const intent = parseIntent({ button: "wiki-lint", requestedAt: -1751835600000, source: "web" });
+    expect(intent.requestedAt).toBe(-1751835600000);
+  });
+
+  it("throws IntentValidationError when requestedAt is Infinity", () => {
+    expect(() =>
+      parseIntent({ button: "wiki-lint", requestedAt: Number.POSITIVE_INFINITY, source: "web" })
+    ).toThrow(IntentValidationError);
+  });
+
+  it("throws IntentValidationError when requestedAt is -Infinity", () => {
+    expect(() =>
+      parseIntent({ button: "wiki-lint", requestedAt: Number.NEGATIVE_INFINITY, source: "web" })
+    ).toThrow(IntentValidationError);
+  });
+
+  // Behaviour-pinning: parseIntent only checks button/source are strings, not
+  // that they're non-empty or a known name. The runner is responsible for
+  // rejecting unknown button names at lookup time — this is not that check.
+  it("accepts an empty-string button (pins current design: runner rejects unknown names at lookup)", () => {
+    const intent = parseIntent({ button: "", requestedAt: 1751835600000, source: "web" });
+    expect(intent.button).toBe("");
+  });
+
+  it("accepts an empty-string source (pins current design: no non-empty check)", () => {
+    const intent = parseIntent({ button: "wiki-lint", requestedAt: 1751835600000, source: "" });
+    expect(intent.source).toBe("");
+  });
+
+  it("accepts an empty-string input (pins current design)", () => {
+    const intent = parseIntent({ button: "wiki-lint", requestedAt: 1751835600000, source: "web", input: "" });
+    expect(intent.input).toBe("");
+  });
+
+  it("accepts a whitespace-only input (pins current design)", () => {
+    const intent = parseIntent({ button: "wiki-lint", requestedAt: 1751835600000, source: "web", input: "   " });
+    expect(intent.input).toBe("   ");
+  });
+
+  // Behaviour-pinning: parseIntent does not reject leading-dash-looking input.
+  // Flag-smuggling enforcement deliberately lives in buildArgv (the '--'
+  // sentinel + producer-side leading-dash rejection there) — parseIntent is
+  // a schema/type gate, not that enforcement point.
+  it("accepts input that looks like a CLI flag (pins current design: buildArgv, not parseIntent, enforces flag-smuggling)", () => {
+    const intent = parseIntent({ button: "wiki-lint", requestedAt: 1751835600000, source: "web", input: "-rf" });
+    expect(intent.input).toBe("-rf");
+  });
+
+  // Behaviour-pinning: unknown extra fields are silently dropped, not
+  // rejected. The returned object has exactly the four known keys.
+  it("silently drops unknown extra fields (pins current design)", () => {
+    const intent = parseIntent({
+      button: "wiki-lint",
+      requestedAt: 1751835600000,
+      source: "web",
+      retryCount: 3,
+    });
+    expect(Object.keys(intent).sort()).toEqual(["button", "requestedAt", "source"].sort());
+  });
 });

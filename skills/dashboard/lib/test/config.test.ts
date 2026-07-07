@@ -191,4 +191,87 @@ describe("loadConfig", () => {
     });
     expect(() => loadConfig(path)).toThrow(ConfigError);
   });
+
+  it("throws ConfigError on an unknown escalation channel", () => {
+    const path = writeConfig({
+      repos: [], wikiPaths: [], memoryPaths: [], buttons: [baseButton],
+      routines: [
+        {
+          name: "bad-escalation",
+          skillCommand: "/coderails:wiki-lint",
+          cadence: "0 3 * * *",
+          expectedArtifact: {
+            artifactPath: "{vault}/log.md",
+            maxAgeSeconds: 100,
+            predicate: { kind: "exists" },
+          },
+          escalation: ["notification", "carrier-pigeon"],
+        },
+      ],
+    });
+    expect(() => loadConfig(path)).toThrow(ConfigError);
+  });
+
+  it("throws ConfigError when a routine has a relative foreignSkillPath", () => {
+    const path = writeConfig({
+      repos: [], wikiPaths: [], memoryPaths: [], buttons: [baseButton],
+      routines: [
+        {
+          name: "relative-foreign-skill",
+          skillCommand: "/coderails:wiki-lint",
+          cadence: "0 3 * * *",
+          expectedArtifact: {
+            artifactPath: "{vault}/log.md",
+            maxAgeSeconds: 100,
+            predicate: { kind: "exists" },
+          },
+          escalation: ["notification"],
+          foreignSkillPath: "relative/skill/path",
+        },
+      ],
+    });
+    expect(() => loadConfig(path)).toThrow(ConfigError);
+  });
+
+  it("loads a routine with a valid absolute foreignSkillPath", () => {
+    const path = writeConfig({
+      repos: [], wikiPaths: [], memoryPaths: [], buttons: [baseButton],
+      routines: [
+        {
+          name: "absolute-foreign-skill",
+          skillCommand: "/coderails:wiki-lint",
+          cadence: "0 3 * * *",
+          expectedArtifact: {
+            artifactPath: "{vault}/log.md",
+            maxAgeSeconds: 100,
+            predicate: { kind: "exists" },
+          },
+          escalation: ["notification"],
+          foreignSkillPath: "/Users/harrison/Github/other-repo/skill",
+        },
+      ],
+    });
+    const config = loadConfig(path);
+    expect(config.routines?.[0].foreignSkillPath).toBe("/Users/harrison/Github/other-repo/skill");
+  });
+
+  it("throws ConfigError when expectedArtifact.artifactPath is empty", () => {
+    const path = writeConfig({
+      repos: [], wikiPaths: [], memoryPaths: [], buttons: [baseButton],
+      routines: [
+        {
+          name: "empty-artifact-path",
+          skillCommand: "/coderails:wiki-lint",
+          cadence: "0 3 * * *",
+          expectedArtifact: {
+            artifactPath: "",
+            maxAgeSeconds: 100,
+            predicate: { kind: "exists" },
+          },
+          escalation: ["notification"],
+        },
+      ],
+    });
+    expect(() => loadConfig(path)).toThrow(ConfigError);
+  });
 });

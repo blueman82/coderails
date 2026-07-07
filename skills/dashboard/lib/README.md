@@ -29,6 +29,10 @@ test (`test/schema-compat.test.ts`) type-checks this `Intent` type against
 the obsidian plugin's own `IntentFile` type on every build, so producer
 and consumer cannot silently drift apart.
 
+`IntentFile.source` is presently the single literal `"obsidian"` on the
+wire (the only merged producer); `Intent.source`'s wider union exists to
+admit future producers (`"web"`, `"cli"`), not because they exist today.
+
 **Interim producer behaviour, not part of this contract:** the obsidian
 plugin currently ALSO direct-execs `claude` itself after writing the
 intent file (see `obsidian/src/exec.ts`'s `pressButton`) — it does not
