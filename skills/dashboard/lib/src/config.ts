@@ -6,7 +6,7 @@ import {
   ConfigError,
   type ButtonDef,
   type PermissionProfile,
-} from "../../app/src/lib/config";
+} from "../../app/src/lib/config.ts";
 
 export type { ButtonDef, PermissionProfile };
 export { ConfigError }; // a class (value + type) — re-exported as a value, not `export type`, so `instanceof ConfigError` and `new ConfigError(...)` both work for consumers importing it from this module
