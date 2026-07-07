@@ -233,16 +233,46 @@ fi
 # the moment this command line is interpolated into bash — same injection class
 # as the $ARGUMENTS render-time bug (PR #97), triggered here via the model's own
 # Bash tool_input rather than a command-file render-time !`cmd` line.
-if echo "$cmd" | grep -qE '(scripts/push\.sh|scripts/merge\.sh|scripts/post_review\.sh|scripts/post_evals\.sh)'; then
+#
+# Scoped (not whole-line): a substitution character anywhere on the line used
+# to deny even when it wasn't part of an argument passed to the script. Three
+# checks narrow this to genuine in-argument substitution:
+#   1. a substitution char appearing before the first script-name mention means
+#      the whole invocation is being captured (e.g. out=$(bash scripts/push.sh
+#      "clean msg")) — the script's own stdout is substituted, not its argument.
+#   2. the quoted segment that contains the script-name mention, when that
+#      segment is not the bare "scripts/X.sh" token, is prose that happens to
+#      mention the script name and a substitution char together (e.g. a note
+#      documenting the script) — not an actual invocation of it.
+#   3. otherwise, a substitution char in a later quoted segment is a genuine
+#      argument to the script and still denies.
+script_re='scripts/(push|merge|post_review|post_evals)\.sh'
+if echo "$cmd" | grep -qE "$script_re"; then
   if echo "$cmd" | grep -qE '`|\$\('; then
-    jq -n --arg cmd "$cmd" '{
-      hookSpecificOutput: {
-        hookEventName: "PreToolUse",
-        permissionDecision: "deny",
-        permissionDecisionReason: ("Command-substitution character (backtick or $(...)) detected inside a push.sh/merge.sh/post_review.sh/post_evals.sh argument.\nFull command: " + $cmd + "\nThese scripts take a free-text message that becomes a commit/PR title or comment body — a backtick or $(...) in it executes as live shell substitution when this line runs, not literal text. None of these scripts read a body from a file, so there is no -F body=@file escape hatch here — rewrite the argument in plain prose with no backticks or $() (e.g. \"git rev-parse show-toplevel\" instead of wrapping it in backticks).")
-      }
-    }'
-    exit 0
+    substitution_scoped=1
+    before_script=$(echo "$cmd" | sed -E "s#${script_re}.*##")
+    if echo "$before_script" | grep -qE '`|\$\('; then
+      substitution_scoped=0
+    fi
+    if [ "$substitution_scoped" -eq 1 ]; then
+      script_segment=$(echo "$cmd" | grep -oE '"[^"]*"' | grep -E "$script_re" | head -1)
+      if [ -n "$script_segment" ]; then
+        bare_segment=$(echo "$script_segment" | grep -oE "^\"${script_re}\"\$")
+        if [ -z "$bare_segment" ] && echo "$script_segment" | grep -qE '`|\$\('; then
+          substitution_scoped=0
+        fi
+      fi
+    fi
+    if [ "$substitution_scoped" -eq 1 ]; then
+      jq -n --arg cmd "$cmd" '{
+        hookSpecificOutput: {
+          hookEventName: "PreToolUse",
+          permissionDecision: "deny",
+          permissionDecisionReason: ("Command-substitution character (backtick or $(...)) detected inside a push.sh/merge.sh/post_review.sh/post_evals.sh argument.\nFull command: " + $cmd + "\nThese scripts take a free-text message that becomes a commit/PR title or comment body — a backtick or $(...) in it executes as live shell substitution when this line runs, not literal text. None of these scripts read a body from a file, so there is no -F body=@file escape hatch here — rewrite the argument in plain prose with no backticks or $() (e.g. \"git rev-parse show-toplevel\" instead of wrapping it in backticks).")
+        }
+      }'
+      exit 0
+    fi
   fi
 fi
 

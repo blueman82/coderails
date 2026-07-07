@@ -185,4 +185,18 @@ check "merge.sh clean args -> allow" ALLOW \
 check "unrelated command with backtick -> allow" ALLOW \
   "$(run "$(payload 'echo "just a note about \`code\` formatting"')")"
 
+# --- False positives: substitution not inside the script's own argument ---
+# Negative control (genuine in-argument substitution must still deny) already
+# covered above at "push.sh with $(...) in message -> deny" (line 171-172).
+
+# Quoted-literal mention: script name appears in prose, and a $() sits
+# elsewhere on the line describing something unrelated to the script's args.
+check "prose mentions push.sh, unrelated \$(...) elsewhere -> allow" ALLOW \
+  "$(run "$(payload 'echo "this note documents scripts/push.sh and separately shows an example like $(date) for timestamps"')")"
+
+# Stdout-capture: the entire script invocation's stdout is captured into a
+# variable via $(...) wrapping the invocation, not the message argument itself.
+check "stdout-capture of push.sh invocation -> allow" ALLOW \
+  "$(run "$(payload 'out=$(bash scripts/push.sh "clean message with no substitution")')")"
+
 [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails)"; exit 1; }
