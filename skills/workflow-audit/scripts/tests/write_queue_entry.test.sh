@@ -23,8 +23,18 @@ check_not_contains() { # desc, haystack, needle
 FIXTURE_PROPOSE="$FIXTURES/queue-proposal.json"
 SESSIONS_JSON='["11111111-1111-1111-1111-111111111111","22222222-2222-2222-2222-222222222222","33333333-3333-3333-3333-333333333333"]'
 
+# All mktemp -d dirs created below are recorded in TMPDIR_LEDGER and swept on
+# exit, matching the cleanup convention used by the other workflow-audit test
+# files. A ledger file (not a variable) is used because mktempd is invoked via
+# command substitution (QDIRn=$(mktempd)), which forks a subshell — a variable
+# mutated inside it would never be visible back in this script.
+TMPDIR_LEDGER=$(mktemp)
+mktempd() { local d; d=$(mktemp -d); printf '%s\n' "$d" >> "$TMPDIR_LEDGER"; printf '%s' "$d"; }
+EXTRA_ERR_FILE=$(mktemp)
+trap 'xargs rm -rf < "$TMPDIR_LEDGER"; rm -f "$TMPDIR_LEDGER" "$EXTRA_ERR_FILE"' EXIT
+
 # ── 1. A propose-verdict fixture writes exactly one file named <hash>.json ──
-QDIR1=$(mktemp -d)
+QDIR1=$(mktempd)
 HASH1=$(cat "$FIXTURE_PROPOSE" | bash "$SCRIPT" --queue-dir "$QDIR1" --count 3 --sessions "$SESSIONS_JSON")
 RC1=$?
 check "propose fixture -> exit 0" "0" "$RC1"
@@ -88,7 +98,7 @@ DEFAULT_AFTER_COUNT=$(ls "$DEFAULT_QUEUE_DIR" 2>/dev/null | wc -l | tr -d ' ')
 check "default-queue-dir test cleans up after itself (no net file left behind)" "$DEFAULT_BEFORE_COUNT" "$DEFAULT_AFTER_COUNT"
 
 # ── 6. A reject-verdict fixture produces ZERO files (negative control) ──────
-QDIR2=$(mktemp -d)
+QDIR2=$(mktempd)
 REJECT_JSON='{"cluster_ngram":["Bash:rm"],"verdict":"reject","reject_reason":"tooling-mechanics artifact","task_summary":"x","proposed_name":"","proposed_description":""}'
 REJECT_OUT=$(printf '%s' "$REJECT_JSON" | bash "$SCRIPT" --queue-dir "$QDIR2" --count 1 --sessions '["s1"]')
 REJECT_RC=$?
@@ -99,7 +109,7 @@ check "reject-verdict fixture -> zero files written" "0" "$(ls "$QDIR2" 2>/dev/n
 # ── 6b. A verdict object with the "verdict" key missing entirely (distinct
 #     from an explicit "reject") is also a silent no-op — the guard is
 #     "!= propose", not "== reject", so an absent key must be covered too. ──
-QDIR2B=$(mktemp -d)
+QDIR2B=$(mktempd)
 NOVERDICTKEY_JSON='{"cluster_ngram":["Bash:rm"],"task_summary":"x","proposed_name":"","proposed_description":""}'
 NOVERDICTKEY_OUT=$(printf '%s' "$NOVERDICTKEY_JSON" | bash "$SCRIPT" --queue-dir "$QDIR2B" --count 1 --sessions '["s1"]')
 NOVERDICTKEY_RC=$?
@@ -110,7 +120,7 @@ check "missing verdict key -> zero files written" "0" "$(ls "$QDIR2B" 2>/dev/nul
 # ── 7. Sentinel pass-through: task_summary round-trips verbatim (this proves
 #     the writer is a faithful pass-through of judge-vetted vocabulary, NOT a
 #     second privacy filter that would strip or reconstruct content) ────────
-QDIR3=$(mktemp -d)
+QDIR3=$(mktempd)
 SENTINEL='SENTINEL_sk_live_99xyz'
 SENTINEL_JSON=$(jq -n --arg s "$SENTINEL" '{cluster_ngram:["Bash:curl"],verdict:"propose",reject_reason:"",task_summary:("contains " + $s + " in a judge-vetted summary"),proposed_name:"x",proposed_description:"y"}')
 HASH3=$(printf '%s' "$SENTINEL_JSON" | bash "$SCRIPT" --queue-dir "$QDIR3" --count 1 --sessions '["s1"]')
@@ -118,7 +128,7 @@ check_contains "sentinel string round-trips verbatim into written toolInput.task
   "$(jq -r '.toolInput.task_summary' "$QDIR3/$HASH3.json")" "$SENTINEL"
 
 # ── 8. Idempotency: same input+count+sessions -> same filename both times ──
-QDIR4=$(mktemp -d)
+QDIR4=$(mktempd)
 HASH_RUN1=$(cat "$FIXTURE_PROPOSE" | bash "$SCRIPT" --queue-dir "$QDIR4" --count 3 --sessions "$SESSIONS_JSON")
 HASH_RUN2=$(cat "$FIXTURE_PROPOSE" | bash "$SCRIPT" --queue-dir "$QDIR4" --count 3 --sessions "$SESSIONS_JSON")
 check "re-running with identical input produces the same hash/filename" "$HASH_RUN1" "$HASH_RUN2"
@@ -128,9 +138,9 @@ check "re-running with identical input does not accumulate a duplicate file" "1"
 # ── 9. D2 whitelist structural enforcement: an extra field in the piped
 #     verdict object must NOT survive into toolInput (dropped or errors,
 #     distinct failure reason from a plain propose/reject guard) ───────────
-QDIR5=$(mktemp -d)
+QDIR5=$(mktempd)
 EXTRA_FIELD_JSON='{"cluster_ngram":["Bash:ls"],"verdict":"propose","reject_reason":"","task_summary":"s","proposed_name":"n","proposed_description":"d","raw_transcript_line":"this must never survive"}'
-HASH5=$(printf '%s' "$EXTRA_FIELD_JSON" | bash "$SCRIPT" --queue-dir "$QDIR5" --count 1 --sessions '["s1"]' 2>/tmp/write_queue_entry_extra.err)
+HASH5=$(printf '%s' "$EXTRA_FIELD_JSON" | bash "$SCRIPT" --queue-dir "$QDIR5" --count 1 --sessions '["s1"]' 2>"$EXTRA_ERR_FILE")
 RC5=$?
 if [ -n "$HASH5" ] && [ -f "$QDIR5/$HASH5.json" ]; then
   check "extra un-whitelisted field -> toolInput keys still exactly the six-field whitelist" \
@@ -144,7 +154,22 @@ else
   check "extra un-whitelisted field -> if the script refuses instead of dropping, it exits non-zero (distinct failure reason)" "true" \
     "$( [ "$RC5" -ne 0 ] && echo true || echo false )"
 fi
-rm -f /tmp/write_queue_entry_extra.err
+
+# ── 9b. Malformed/non-object stdin -> the documented jq_parse_error:stdin
+#     path (write_queue_entry.sh's own error branch), not a raw jq crash ───
+QDIR6=$(mktempd)
+MALFORMED_ERR=$(printf '%s' '{not valid json' | bash "$SCRIPT" --queue-dir "$QDIR6" --count 1 --sessions '["s1"]' 2>&1 >/dev/null)
+MALFORMED_RC=$?
+check "malformed stdin -> non-zero exit" "true" "$( [ "$MALFORMED_RC" -ne 0 ] && echo true || echo false )"
+check_contains "malformed stdin -> documented jq_parse_error:stdin on stderr" "$MALFORMED_ERR" "jq_parse_error:stdin"
+check "malformed stdin -> zero files written" "0" "$(ls "$QDIR6" 2>/dev/null | wc -l | tr -d ' ')"
+
+NONOBJECT_JSON='"just a string, not an object"'
+QDIR6B=$(mktempd)
+NONOBJECT_ERR=$(printf '%s' "$NONOBJECT_JSON" | bash "$SCRIPT" --queue-dir "$QDIR6B" --count 1 --sessions '["s1"]' 2>&1 >/dev/null)
+NONOBJECT_RC=$?
+check "non-object JSON stdin -> non-zero exit" "true" "$( [ "$NONOBJECT_RC" -ne 0 ] && echo true || echo false )"
+check "non-object JSON stdin -> zero files written" "0" "$(ls "$QDIR6B" 2>/dev/null | wc -l | tr -d ' ')"
 
 # ── 10. --help exits 0 ───────────────────────────────────────────────────────
 HELP_OUT=$(bash "$SCRIPT" --help 2>&1)
