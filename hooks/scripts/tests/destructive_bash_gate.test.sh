@@ -276,4 +276,17 @@ check "direct invocation, no interpreter prefix -> deny" DENY \
 check "./ direct invocation, no interpreter prefix -> deny" DENY \
   "$(run "$(payload './scripts/merge.sh 19 "see ./scripts/merge.sh for $(id)"')")"
 
+# --- SECURITY: a prose statement mentioning a script name (with its own
+# example substitution) followed by a SEPARATE, genuine invocation later on
+# the same line must still deny — the prose exemption is scoped to lines
+# with exactly ONE script mention; two or more is always invocation-bearing.
+check "prose mention then separate genuine invocation -> deny" DENY \
+  "$(run "$(payload 'echo "documentation mentions scripts/push.sh uses $(date)"; bash scripts/push.sh "injected: $(id)"')")"
+
+# --- SECURITY: an earlier closed backtick pair whose closing character
+# happens to land adjacent to a quote must not let the quoted-segment
+# extraction misread quote boundaries and grant an undeserved exemption.
+check "backtick adjacent to quote boundary before real invocation -> deny" DENY \
+  "$(run "$(payload 'echo `"`; bash scripts/push.sh "msg $(whoami)"')")"
+
 [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails)"; exit 1; }

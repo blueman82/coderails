@@ -234,70 +234,65 @@ fi
 # as the $ARGUMENTS render-time bug (PR #97), triggered here via the model's own
 # Bash tool_input rather than a command-file render-time !`cmd` line.
 #
-# Scoped from the first script-name match to end-of-LINE (never end-of-
-# segment) — a prior version of this fix split the command on ; && || before
-# scanning, which is quote-blind: those operator characters are ordinary
-# prose inside the attacker-controllable message argument itself (e.g.
-# `bash scripts/push.sh "fix A && $(whoami)"`), and splitting on them there
-# severed the script-name token from its own argument's substitution,
-# reopening the exact injection class this check exists to block. Scanning
-# to end-of-line instead can never falsely truncate inside a quoted
-# argument, because there is nothing after end-of-line to truncate.
+# Scoped conservatively: the prose exemption (a note that merely mentions
+# a script name, not an invocation of it) is deliberately narrow, because
+# three prior narrower attempts at this exemption each turned out to admit
+# a real bypass under adversarial review (an outer-capture wrapper hiding a
+# dirty invocation; quote-blind segment splitting on ; && ||; an
+# interpreter-prefix check evaded by direct/./ invocation without bash/sh;
+# a first-mention-only scan that let a second, separate genuine invocation
+# hide behind an earlier prose statement's exemption). Rather than continue
+# refining a clever per-mention heuristic, the exemption now only fires for
+# the single narrowest shape it was ever meant to cover:
 #
-# An even earlier version tried to classify "does an earlier unclosed
-# substitution mean the whole invocation is being captured" (to allow
-# out=$(bash scripts/push.sh "clean msg")) — that heuristic was also unsound:
-# an outer stdout-capture can wrap an invocation whose own argument
-# independently carries a live substitution, e.g. out=$(bash scripts/merge.sh
-# 19 "note with $(whoami)") — the inner whoami call is a genuine injection
-# regardless of the outer capture. Neither heuristic is needed: scanning from
-# the first script-name match to end-of-line already allows a clean stdout-
-# capture (nothing after the match to flag) while denying a dirty one
-# (the inner substitution is after the match, so it's caught).
+#   the script pattern occurs EXACTLY ONCE on the whole line, that one
+#   occurrence is inside a quoted string (not a bare token — a bare,
+#   unquoted mention is always treated as a genuine invocation, whether
+#   written as `bash scripts/push.sh ...`, `sh scripts/push.sh ...`, or a
+#   direct `scripts/push.sh ...` / `./scripts/push.sh ...` call with no
+#   interpreter prefix at all), that quoted segment is not the bare
+#   "scripts/X.sh" token alone, AND every substitution character on the
+#   ENTIRE line is confined to that one quoted segment — if any substitution
+#   exists anywhere else on the line, the exemption does not apply.
 #
-# Two checks:
-#   1. if the region from the first script-name match to end-of-line
-#      contains a backtick or $(, it's either a genuine substitution inside
-#      an argument, or (see check 2) prose. This also naturally covers two
-#      script mentions on one line: if the SECOND mention's own argument has
-#      a substitution, it's still within "first match to end-of-line" and
-#      gets caught even though check 1 fires on the FIRST mention.
-#   2. exemption for genuine prose: fires only when the FIRST script-name
-#      mention is inside an open double-quoted string at that point in the
-#      line (i.e. it's text inside someone's argument, not a command word)
-#      AND the quoted segment containing it is not the bare "scripts/X.sh"
-#      token AND that same quoted segment also has the substitution char.
-#      "Inside a quote" is measured by counting unescaped double-quote
-#      characters before the match: an odd count means we're inside an open
-#      quote at that point, an even count (including zero) means we're
-#      outside any quote — a bare token, which is always a genuine
-#      invocation (whether `bash scripts/push.sh ...`, `sh scripts/push.sh
-#      ...`, or a direct `scripts/push.sh ...` / `./scripts/push.sh ...`
-#      call with no interpreter prefix at all — an earlier version of this
-#      check required a literal bash/sh prefix to recognise "invocation",
-#      which a direct call with no such prefix evaded, falling through to
-#      the prose exemption incorrectly). If the script name IS a bare token,
-#      this exemption never fires, even if the invoked script's own message
-#      argument happens to also mention one of the four script names
-#      alongside its substitution (`bash scripts/merge.sh 19 "see
-#      scripts/merge.sh docs for $(cmd) syntax"` — a real call with a live
-#      substitution in its own 2nd argument, not documentation).
+# If the script pattern occurs MORE THAN ONCE on the line, the exemption
+# never applies at all — multiple mentions are treated as invocation-
+# bearing and denied if a substitution exists anywhere from the first
+# mention onward. This collapses several of the previously-fragile shapes
+# (a real invocation whose own argument separately mentions a script name;
+# a prose statement followed by a separate genuine invocation) into a
+# single, simple, conservative rule: more than one mention is never prose.
 script_re='scripts/(push|merge|post_review|post_evals)\.sh'
 if echo "$cmd" | grep -qE "$script_re"; then
   if echo "$cmd" | grep -qE '`|\$\('; then
     substitution_scoped=0
-    from_script=$(echo "$cmd" | grep -oE "${script_re}.*")
-    if echo "$from_script" | grep -qE '`|\$\('; then
-      substitution_scoped=1
+    total_mentions=$(echo "$cmd" | grep -oE "$script_re" | wc -l | tr -d ' ')
+    if [ "$total_mentions" -eq 1 ]; then
       before_script=$(echo "$cmd" | sed -E "s#${script_re}.*##")
       quote_count=$(echo "$before_script" | grep -oE '"' | wc -l | tr -d ' ')
       quote_parity=$(( quote_count % 2 ))
-      if [ "$quote_parity" -eq 1 ]; then
+      if [ "$quote_parity" -eq 0 ]; then
+        from_script=$(echo "$cmd" | grep -oE "${script_re}.*")
+        echo "$from_script" | grep -qE '`|\$\(' && substitution_scoped=1
+      else
         script_segment=$(echo "$cmd" | grep -oE '"[^"]*"' | grep -E "$script_re" | head -1)
-        if [ -n "$script_segment" ] && echo "$script_segment" | grep -qE '`|\$\('; then
-          substitution_scoped=0
+        bare_segment=$(echo "$script_segment" | grep -oE "^\"${script_re}\"\$")
+        if [ -n "$bare_segment" ]; then
+          from_script=$(echo "$cmd" | grep -oE "${script_re}.*")
+          echo "$from_script" | grep -qE '`|\$\(' && substitution_scoped=1
+        elif echo "$script_segment" | grep -qE '`|\$\('; then
+          # substitution is inside the prose segment — allow ONLY if no
+          # OTHER substitution exists elsewhere on the line.
+          escaped_segment=$(echo "$script_segment" | sed -E 's/[.[\*^$()+?{|]/\\&/g')
+          rest=$(echo "$cmd" | sed -E "s#${escaped_segment}##")
+          echo "$rest" | grep -qE '`|\$\(' && substitution_scoped=1
+        else
+          substitution_scoped=1
         fi
       fi
+    else
+      from_script=$(echo "$cmd" | grep -oE "${script_re}.*")
+      echo "$from_script" | grep -qE '`|\$\(' && substitution_scoped=1
     fi
     if [ "$substitution_scoped" -eq 1 ]; then
       jq -n --arg cmd "$cmd" '{
