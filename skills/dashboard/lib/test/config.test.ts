@@ -1,8 +1,12 @@
 import { describe, it, expect } from "vitest";
 import { writeFileSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import { loadConfig, ConfigError } from "../src/config";
+
+const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "..");
+const EXAMPLE_CONFIG_PATH = join(REPO_ROOT, "examples", "dashboard-config.json");
 
 function writeConfig(obj: unknown): string {
   const dir = mkdtempSync(join(tmpdir(), "dashboard-config-test-"));
@@ -273,5 +277,42 @@ describe("loadConfig", () => {
       ],
     });
     expect(() => loadConfig(path)).toThrow(ConfigError);
+  });
+});
+
+describe("loadConfig against the real examples/dashboard-config.json (C3)", () => {
+  // Loads the actual repo file — not a synthetic fixture that merely
+  // resembles it — through the actual routine-aware loadConfig() this file
+  // wraps around loadBaseConfig(). Before this test, nothing in the repo
+  // ever exercised examples/dashboard-config.json through a validator at
+  // all: it could silently drift out of sync with config.ts's validation
+  // rules (or with sweep.ts/seed.ts's expectations) and no test would catch
+  // it, since it's a reference/documentation artifact, not code any
+  // existing suite imports.
+  it("validates without throwing", () => {
+    expect(() => loadConfig(EXAMPLE_CONFIG_PATH)).not.toThrow();
+  });
+
+  it("loads all three buttons and all three routines", () => {
+    const config = loadConfig(EXAMPLE_CONFIG_PATH);
+    expect(config.buttons.map((b) => b.name)).toEqual([
+      "wiki-lint",
+      "sync-docs-weekly",
+      "memory-consolidation-weekly",
+    ]);
+    expect(config.routines?.map((r) => r.name)).toEqual([
+      "wiki-lint",
+      "sync-docs-weekly",
+      "memory-consolidation-weekly",
+    ]);
+  });
+
+  it("every routine's buttonRef resolves to a real ButtonDef (matches sweep.ts's findRoutine/findButton contract)", () => {
+    const config = loadConfig(EXAMPLE_CONFIG_PATH);
+    const buttonNames = new Set(config.buttons.map((b) => b.name));
+    for (const routine of config.routines ?? []) {
+      expect(routine.buttonRef, `routine "${routine.name}" has no buttonRef`).toBeDefined();
+      expect(buttonNames.has(routine.buttonRef as string), `routine "${routine.name}"'s buttonRef "${routine.buttonRef}" matches no button`).toBe(true);
+    }
   });
 });

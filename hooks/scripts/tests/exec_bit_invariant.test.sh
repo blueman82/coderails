@@ -57,6 +57,9 @@ manifest_paths=(
   hooks/scripts/test_gate.sh
   hooks/scripts/unregistered_loop_guard.sh
   skills/dashboard/runner/bin/sweeper.sh
+  skills/dashboard/runner/bin/seed-and-sweep.sh
+  launchd/install-routines.sh
+  launchd/uninstall-routines.sh
 )
 manifest_modes=(
   100644
@@ -65,6 +68,9 @@ manifest_modes=(
   100644
   100644
   100644
+  100755
+  100755
+  100755
   100755
   100755
   100755
