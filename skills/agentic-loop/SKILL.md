@@ -73,7 +73,13 @@ The skill will surface ambiguities, fill gaps with grounded assumptions, and pro
 
 **Step 2 — Ask the user how to proceed.**
 
-After improve-prompt produces its output, use the `AskUserQuestion` tool to present three options:
+**Delivery constraint — the improved prompt must be visible, not just asked-about.** Text emitted before a tool call is not rendered in the Claude Code terminal UI — only text with no trailing tool call, or content inside the tool call itself, reaches the user. This means "present the improved prompt as text, then call `AskUserQuestion`" silently drops the prompt: the user sees only the question, never the content it's asking about. Use one of two delivery mechanisms instead:
+- (a) End the turn with the improved prompt as the final text — no trailing tool call — and issue the `AskUserQuestion` call in the *next* turn; or
+- (b) Embed the improved prompt directly inside the `AskUserQuestion` call itself: its question text, option descriptions, or option preview fields. This renders regardless of turn-splitting.
+
+Past failure: the improved prompt was presented as text immediately followed by an `AskUserQuestion` call, twice in the same run — invisible both times, because pre-tool-call text does not render.
+
+After improve-prompt produces its output, deliver it via (a) or (b) above, then present three options through `AskUserQuestion`:
 
 > "Here's the improved prompt. How do you want to proceed?
 > A) Proceed with the improved prompt as the authorising envelope
@@ -81,7 +87,7 @@ After improve-prompt produces its output, use the `AskUserQuestion` tool to pres
 > C) Use the original prompt as-is"
 
 On **A**: the improved prompt becomes the authorisation envelope. Phase 0 reads it verbatim.
-On **B**: apply the user's tweak, re-present the revised prompt, and ask again (bounded to two revision passes — if a third is needed, something is wrong with the envelope itself; surface that).
+On **B**: apply the user's tweak, re-present the revised prompt via (a) or (b) again, and ask again (bounded to two revision passes — if a third is needed, something is wrong with the envelope itself; surface that).
 On **C**: proceed with the original prompt unchanged; Phase 0 reads it verbatim.
 
 The improved-and-approved prompt (or the original, if C was chosen) is what Phase 0 treats as the authorisation envelope. Phase 0's `<thinking>` block quotes it verbatim from here.
