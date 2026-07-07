@@ -102,9 +102,11 @@ These skills were written for coderails and are not vendored from elsewhere.
 
 **Pipeline:** `scripts/scan_transcripts.sh` (transcripts → per-session tool-use event sequences) pipes into `scripts/cluster_ngrams.sh` (event sequences → recurring n-gram clusters across `--min-sessions` distinct sessions), then a fresh sonnet subagent applies `references/judge-contract.md` to each cluster for a propose/reject verdict. Proposed candidates are charted for the owner; nothing is created without an explicit approval in that interaction — this gate overrides any standing agentic-loop autonomy.
 
-**Privacy invariant:** every artifact in the pipeline — scan output, cluster output, judge input/output, proposal chart — carries only tool names, a privacy-whitelisted `head` (first two Bash command tokens, the Skill name, or the Agent subagent_type), counts, and session ids. Never verbatim transcript prose, file contents, or reconstructed intent.
+**Queue-mode output (optional):** each `verdict: "propose"` judge output can additionally be piped through `scripts/write_queue_entry.sh` to surface it on the observability dashboard. This is additive to, never a replacement for, the interactive approval gate — a dashboard "Approve" click only flips a queue entry's `status` from `pending` to `approved`; it never creates a skill, opens a branch, or files a PR on its own.
 
-**When it does NOT apply:** it never creates a skill on its own; the mechanical pipeline (scan+cluster) has no creation capability at all, and the judge stage only proposes.
+**Privacy invariant:** every artifact in the pipeline — scan output, cluster output, judge input/output, proposal chart, queue entry — carries only tool names, a privacy-whitelisted `head` (first two Bash command tokens, the Skill name, or the Agent subagent_type), counts, and session ids. Never verbatim transcript prose, file contents, or reconstructed intent.
+
+**When it does NOT apply:** it never creates a skill on its own; the mechanical pipeline (scan+cluster+queue-write) has no creation capability at all, and the judge stage only proposes.
 
 ---
 
