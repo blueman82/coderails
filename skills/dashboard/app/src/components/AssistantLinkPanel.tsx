@@ -18,12 +18,29 @@ export interface AssistantLinkPanelProps {
 // silence means the process died without writing a terminal state.
 const HEARTBEAT_STALE_MS = 3 * 60 * 1000;
 
+// Pure, exported so it's directly unit-testable without needing the
+// component's mount effect to fire (this file's tests render via
+// renderToStaticMarkup/SSR, where `now` is always null). `now` is the
+// panel's own live clock, not a server-computed age: the builds dir's
+// fs.watch only re-collects on a filesystem event, so a build that dies
+// without writing a terminal state (SIGKILL, power loss — the one path that
+// skips run-builder.sh's EXIT trap) stops touching the heartbeat file and
+// triggers no further event at all. Comparing the heartbeat's absolute mtime
+// against the client's own ticking `now` is what lets "builder dead" keep
+// advancing after the last real collect, instead of freezing at whatever
+// staleness happened to be true the moment collection stopped. `now === null`
+// (SSR, or before the mount effect resolves) is treated as "not yet known" —
+// never stale — same convention as formatRelativeAge's null-`now` handling.
+export function isHeartbeatStale(build: BuildEntry, now: number | null): boolean {
+  return build.heartbeatAt !== undefined && now !== null && now - build.heartbeatAt > HEARTBEAT_STALE_MS;
+}
+
 // Renders the build-state CTA for an approved workflow-audit:propose-skill
 // queue entry, joined to its builds/<hash>/ sidecar by hash. Returns null
 // when there's no build entry yet (claim hasn't landed on disk, or this
 // approved entry predates the builder pipeline) — the row still renders,
 // just without a build status line.
-function renderBuildStatus(build: BuildEntry | undefined) {
+function renderBuildStatus(build: BuildEntry | undefined, now: number | null) {
   if (!build) return null;
   if (build.state === "pr_open") {
     return (
@@ -46,7 +63,7 @@ function renderBuildStatus(build: BuildEntry | undefined) {
     );
   }
   if (build.state === "running") {
-    const stale = build.heartbeatAgeMs !== undefined && build.heartbeatAgeMs > HEARTBEAT_STALE_MS;
+    const stale = isHeartbeatStale(build, now);
     return (
       <div className={`hud-build-status ${stale ? "hud-build-dead" : "hud-build-building"}`}>
         {stale ? "builder dead" : "building"}
@@ -236,7 +253,7 @@ export function AssistantLinkPanel({ token }: AssistantLinkPanelProps) {
             {isWorkflowAuditProposal(entry.toolInput) ? (
               <div className="hud-queue-proposal-name">{entry.toolInput.proposed_name}</div>
             ) : null}
-            {renderBuildStatus(build)}
+            {renderBuildStatus(build, now)}
           </div>
         ))}
     </div>

@@ -18,7 +18,15 @@ export interface BuildEntry {
   prUrl?: string;
   failureReason?: string;
   stderrTail?: string;
-  heartbeatAgeMs?: number;
+  // Absolute epoch-ms mtime of the heartbeat touch-file (not a pre-computed
+  // age): a relative "age as of collection time" would freeze at its
+  // last-collected value if the build dies without triggering any further
+  // fs.watch event (e.g. SIGKILL/power-loss skips run-builder.sh's EXIT
+  // trap, so the heartbeat simply stops being touched and nothing else in
+  // the builds dir changes to re-trigger a collect). An absolute timestamp
+  // lets the client recompute staleness against its own live clock on every
+  // render instead of trusting a value that can go stale itself.
+  heartbeatAt?: number;
 }
 
 const VALID_STATES: BuildEntry["state"][] = ["claimed", "queued", "running", "pr_open", "failed"];
@@ -27,14 +35,14 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function parseBuildEntry(raw: unknown): Omit<BuildEntry, "heartbeatAgeMs"> | undefined {
+function parseBuildEntry(raw: unknown): Omit<BuildEntry, "heartbeatAt"> | undefined {
   if (!isRecord(raw)) return undefined;
   if (typeof raw.schemaVersion !== "number") return undefined;
   if (typeof raw.hash !== "string") return undefined;
   if (typeof raw.state !== "string" || !VALID_STATES.includes(raw.state as BuildEntry["state"])) {
     return undefined;
   }
-  const entry: Omit<BuildEntry, "heartbeatAgeMs"> = {
+  const entry: Omit<BuildEntry, "heartbeatAt"> = {
     schemaVersion: raw.schemaVersion,
     hash: raw.hash,
     state: raw.state as BuildEntry["state"],
@@ -49,7 +57,7 @@ function parseBuildEntry(raw: unknown): Omit<BuildEntry, "heartbeatAgeMs"> | und
 }
 
 // Lists `<buildsDir>/<hash>/state.json`, parsing each as a BuildEntry, and
-// attaches heartbeatAgeMs from the sibling heartbeat touch-file's mtime when
+// attaches heartbeatAt from the sibling heartbeat touch-file's mtime when
 // present (absent while a build is still "claimed", pre-"running"). A
 // missing dir, an unreadable per-build dir, or a file that fails JSON.parse
 // or shape validation contributes nothing for that entry — never throws.
@@ -64,7 +72,7 @@ export function collectBuilds(buildsDir: string): BuildEntry[] {
   const entries: BuildEntry[] = [];
   for (const name of names) {
     const stateFile = join(buildsDir, name, "state.json");
-    let parsed: Omit<BuildEntry, "heartbeatAgeMs"> | undefined;
+    let parsed: Omit<BuildEntry, "heartbeatAt"> | undefined;
     try {
       const raw: unknown = JSON.parse(readFileSync(stateFile, "utf-8"));
       parsed = parseBuildEntry(raw);
@@ -73,17 +81,14 @@ export function collectBuilds(buildsDir: string): BuildEntry[] {
     }
     if (!parsed) continue;
 
-    let heartbeatAgeMs: number | undefined;
+    let heartbeatAt: number | undefined;
     try {
       const hbStat = statSync(join(buildsDir, name, "heartbeat"));
-      // Clamp to 0: filesystem mtime resolution/clock skew can put a
-      // just-written file's mtime microseconds ahead of Date.now(), which
-      // would otherwise produce a meaningless negative age.
-      heartbeatAgeMs = Math.max(0, Date.now() - hbStat.mtimeMs);
+      heartbeatAt = hbStat.mtimeMs;
     } catch {
       // no heartbeat file yet (e.g. still "claimed", not yet "running") — leave undefined
     }
-    entries.push({ ...parsed, ...(heartbeatAgeMs !== undefined ? { heartbeatAgeMs } : {}) });
+    entries.push({ ...parsed, ...(heartbeatAt !== undefined ? { heartbeatAt } : {}) });
   }
   return entries;
 }

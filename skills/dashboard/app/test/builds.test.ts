@@ -62,25 +62,27 @@ describe("collectBuilds", () => {
     expect(entries[0].hash).toBe(goodHash);
   });
 
-  it("includes heartbeatAgeMs when a heartbeat file exists, computed from its mtime", () => {
+  it("includes heartbeatAt (the heartbeat file's mtime) when a heartbeat file exists", () => {
     const dir = makeTmpDir("heartbeat");
     const hash = "e".repeat(64);
     const buildDir = writeBuild(dir, hash, { state: "running" });
+    const before = Date.now();
     writeFileSync(join(buildDir, "heartbeat"), "");
+    const after = Date.now();
 
     const entries = collectBuilds(dir);
     expect(entries).toHaveLength(1);
-    expect(entries[0].heartbeatAgeMs).toBeGreaterThanOrEqual(0);
-    expect(entries[0].heartbeatAgeMs).toBeLessThan(5000);
+    expect(entries[0].heartbeatAt).toBeGreaterThanOrEqual(before - 1000);
+    expect(entries[0].heartbeatAt).toBeLessThanOrEqual(after + 1000);
   });
 
-  it("omits heartbeatAgeMs when no heartbeat file exists (state: claimed, pre-running)", () => {
+  it("omits heartbeatAt when no heartbeat file exists (state: claimed, pre-running)", () => {
     const dir = makeTmpDir("no-heartbeat");
     writeBuild(dir, "f".repeat(64), { state: "claimed" });
 
     const entries = collectBuilds(dir);
     expect(entries).toHaveLength(1);
-    expect(entries[0].heartbeatAgeMs).toBeUndefined();
+    expect(entries[0].heartbeatAt).toBeUndefined();
   });
 
   it("carries prUrl and failureReason through when present", () => {

@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { DashboardContextTestProvider } from "./testUtils/DashboardContextTestProvider";
-import { AssistantLinkPanel } from "../src/components/AssistantLinkPanel";
+import { AssistantLinkPanel, isHeartbeatStale } from "../src/components/AssistantLinkPanel";
 import type { DashboardSnapshot } from "../src/hooks/useDashboardState";
 import type { QueueEntry } from "../src/lib/collect/queue";
 import type { BuildEntry } from "../src/lib/collect/builds";
@@ -293,9 +293,9 @@ describe("AssistantLinkPanel", () => {
       expect(html).not.toContain("builder dead");
     });
 
-    it('renders "building" for state running with a fresh heartbeat', () => {
+    it('renders "building" for state running (SSR: no build entry heartbeat data needed)', () => {
       const entry = approvedProposalEntry();
-      const build = buildEntry({ state: "running", heartbeatAgeMs: 5_000 });
+      const build = buildEntry({ state: "running", heartbeatAt: Date.now() });
       const html = renderToStaticMarkup(
         createElement(
           DashboardContextTestProvider,
@@ -307,9 +307,9 @@ describe("AssistantLinkPanel", () => {
       expect(html).not.toContain("builder dead");
     });
 
-    it('renders "builder dead" for state running with a stale heartbeat (> 3 minutes)', () => {
+    it('renders "building" for state running with no heartbeatAt yet (heartbeat file not written this instant — a real transient just after the running state.json lands)', () => {
       const entry = approvedProposalEntry();
-      const build = buildEntry({ state: "running", heartbeatAgeMs: 4 * 60 * 1000 });
+      const build = buildEntry({ state: "running", heartbeatAt: undefined });
       const html = renderToStaticMarkup(
         createElement(
           DashboardContextTestProvider,
@@ -317,7 +317,29 @@ describe("AssistantLinkPanel", () => {
           createElement(AssistantLinkPanel, { token: "t" })
         )
       );
-      expect(html).toContain("builder dead");
+      expect(html).toContain("building");
+      expect(html).not.toContain("builder dead");
+    });
+
+    // renderToStaticMarkup never runs the component's mount effect, so its
+    // internal "now" stays null and isHeartbeatStale (below) always reports
+    // false through the full component in this test harness — asserted
+    // directly here as the SSR-safe "never stale before mount" contract.
+    // The live client behavior (staleness advancing against the panel's own
+    // ticking clock, independent of the last fs.watch-triggered collect) is
+    // covered by the isHeartbeatStale unit tests further down.
+    it('never renders "builder dead" via SSR, even with a very stale heartbeat, because now is null before mount', () => {
+      const entry = approvedProposalEntry();
+      const build = buildEntry({ state: "running", heartbeatAt: Date.now() - 4 * 60 * 1000 });
+      const html = renderToStaticMarkup(
+        createElement(
+          DashboardContextTestProvider,
+          { snapshot: emptySnapshot({ queue: [entry], builds: [build] }) },
+          createElement(AssistantLinkPanel, { token: "t" })
+        )
+      );
+      expect(html).toContain("building");
+      expect(html).not.toContain("builder dead");
     });
 
     it('renders "PR open — awaiting your merge" with a link to prUrl for state pr_open', () => {
@@ -362,6 +384,37 @@ describe("AssistantLinkPanel", () => {
         )
       );
       expect(html).not.toContain("awaiting your merge");
+    });
+
+    describe("isHeartbeatStale (client-side staleness against the panel's live clock)", () => {
+      it("is false when now is null (SSR / before the mount effect resolves)", () => {
+        const build = buildEntry({ state: "running", heartbeatAt: Date.now() - 10 * 60 * 1000 });
+        expect(isHeartbeatStale(build, null)).toBe(false);
+      });
+
+      it("is false when there is no heartbeatAt (e.g. still claimed, pre-running)", () => {
+        const build = buildEntry({ state: "running", heartbeatAt: undefined });
+        expect(isHeartbeatStale(build, Date.now())).toBe(false);
+      });
+
+      it("is false just under the 3-minute threshold", () => {
+        const now = Date.now();
+        const build = buildEntry({ state: "running", heartbeatAt: now - (3 * 60 * 1000 - 1) });
+        expect(isHeartbeatStale(build, now)).toBe(false);
+      });
+
+      it("is true just over the 3-minute threshold", () => {
+        const now = Date.now();
+        const build = buildEntry({ state: "running", heartbeatAt: now - (3 * 60 * 1000 + 1) });
+        expect(isHeartbeatStale(build, now)).toBe(true);
+      });
+
+      it("advances from false to true as `now` moves forward without any new heartbeatAt — the exact scenario a died builder produces (no further fs.watch event, so no fresh collect)", () => {
+        const heartbeatAt = Date.now();
+        const build = buildEntry({ state: "running", heartbeatAt });
+        expect(isHeartbeatStale(build, heartbeatAt + 60 * 1000)).toBe(false);
+        expect(isHeartbeatStale(build, heartbeatAt + 4 * 60 * 1000)).toBe(true);
+      });
     });
   });
 });
