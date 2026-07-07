@@ -1,0 +1,233 @@
+# Verified routines
+
+A **routine** is a scheduled skill run that isn't considered done just
+because `claude` exited 0. It's done when a specific artifact exists,
+is fresh enough, and satisfies a predicate — the **artifact gate**. Three
+routines ship today: `wiki-lint` (nightly), `sync-docs-weekly` (weekly),
+`memory-consolidation-weekly` (weekly).
+
+This doc is the operator-facing guide: how the queue/runner architecture
+works, how to define a routine, how to install/uninstall the scheduler,
+and where to look when a routine fails silently instead of loudly. The
+schema-level contract (the `Intent` type, the queue lifecycle, the
+`RoutineDef`/config shape) lives in
+[`skills/dashboard/lib/README.md`](../skills/dashboard/lib/README.md) —
+read that first if you need the exact field-by-field contract; this doc
+assumes it and focuses on operating the system.
+
+**Read the security warning before enabling anything beyond the shipped
+read-only routines.**
+
+## Architecture: intent producers, one runner
+
+Every run — a dashboard button press, an Obsidian command, or a scheduled
+routine — starts as an **intent**: a small JSON file dropped into
+`~/.claude/coderails-dashboard/queue/`. Producers only ever write intent
+files; they never execute `claude` directly as part of this contract (the
+Obsidian plugin's current interim direct-exec behaviour is a known,
+temporary exception documented in the lib README, not something new
+producers should copy).
+
+- **Obsidian / web / cli** — a button press writes `{ button, input?,
+  requestedAt, source: "obsidian" | "web" | "cli" }`.
+- **Scheduler (routines)** — the seed step (`seedMain.ts` →
+  `seed.ts`'s `seedDueRoutines`) writes `{ button, requestedAt, source:
+  "scheduler" }` for every routine that's due, using the same `Intent`
+  shape and the same `queue/` directory as any other producer. Scheduled
+  routines are intent **producers**, nothing more — the runner has no
+  concept of cadence or "this came from a routine" once an intent is
+  queued; it just executes buttons.
+- **The runner** (`skills/dashboard/runner`) is the sole consumer. It
+  claims an intent by atomically renaming it `queue/<id>.json` →
+  `processing/<id>.json`, spawns `claude` via the one shared
+  `buildArgv`/profile→flag mapping, records the run, and — only if the
+  claimed intent's button resolves to a `RoutineDef` — evaluates that
+  routine's artifact gate and escalates on failure. A plain button press
+  with no matching routine just gates on exit code, same as before
+  routines existed.
+
+## Defining a routine
+
+Routines live in the `routines` array of
+`~/.claude/coderails-dashboard.json`, alongside the pre-existing
+`buttons` array. A routine either names a `skillCommand` directly or
+points at an existing button via `buttonRef` — never both — and every
+routine needs `cadence`, `expectedArtifact`, and `escalation`. Full
+validation rules are in `skills/dashboard/lib/src/config.ts`; this is the
+shipped `wiki-lint` example from
+[`examples/dashboard-config.json`](../examples/dashboard-config.json):
+
+```json
+{
+  "name": "wiki-lint",
+  "label": "Wiki Lint (nightly)",
+  "buttonRef": "wiki-lint",
+  "cadence": "nightly",
+  "expectedArtifact": {
+    "artifactPath": "{vault}/log.md",
+    "maxAgeSeconds": 129600,
+    "predicate": { "kind": "contains", "marker": "## [{date}] lint" }
+  },
+  "escalation": ["notification", "vault-note"]
+}
+```
+
+Field by field:
+
+- **`name`** — the routine's own identifier. If it differs from the
+  button it drives, set `buttonRef` to the button's `name`; if it's the
+  same string, `buttonRef` is optional (both the seeder and the runner
+  resolve a routine to a button by `buttonRef ?? name`).
+- **`skillCommand` / `buttonRef`** — exactly one. `buttonRef` reuses an
+  existing button's `command`/`cwd`/`profile` (all three shipped
+  routines do this). `foreignSkillPath` (optional) names an absolute
+  path to a skill that lives outside this repo (e.g. `sync-docs`'s
+  personal-plugin location) — the runner checks the path exists before
+  spawning and escalates `skill-missing` if it doesn't, rather than
+  spawning `claude` and letting it fail inside the sandbox.
+- **`cadence`** — only `"nightly"` or `"weekly"` are understood by the
+  seed step today. Nightly is due after **20 hours** since the routine's
+  last recorded run; weekly after **6.5 days**. Both thresholds are
+  intentionally shorter than the nominal cadence so a routine that's a
+  few hours late (e.g. the machine was asleep) still fires on the next
+  calendar tick rather than sliding a full extra day. An unrecognised
+  cadence string doesn't crash seeding — it escalates a `runner-error`
+  for that routine and the rest of the routines still get considered.
+- **`expectedArtifact`** — the gate. `artifactPath` may contain
+  `{date}` (`YYYY-MM-DD`), `{runId}`, and `{vault}` (the first entry of
+  `wikiPaths`) template tokens, substituted at check time. `maxAgeSeconds`
+  is how old the artifact is allowed to be — set it comfortably above the
+  cadence interval (the `wiki-lint` example above uses 129600s = 36h for
+  a nightly routine; the two weekly routines use 691200s = 8 days) so a
+  slightly-late run doesn't fail its own gate. `predicate` is one of:
+  - `{ kind: "exists" }` — file present and fresh, nothing more.
+  - `{ kind: "contains", marker }` — file present, fresh, and contains
+    `marker` (itself `{date}`/`{runId}`/`{vault}`-substituted).
+  - `{ kind: "json-field", path, value }` — file parses as JSON and the
+    dotted `path` resolves to exactly `value`.
+- **`escalation`** — an array drawn from `["notification",
+  "vault-note"]`. Both shipped channels are enabled on all three
+  example routines; there's no "off" option today — a routine either
+  escalates through the channels it lists or (if the array is empty)
+  fails silently except in the runlog, which is rarely what you want.
+
+A run isn't "done" until the runner sees a passing `checkArtifact()`
+result for the routine it resolved — an exit-0 `claude` process that
+never wrote the expected artifact is a **failure**, not a success. This
+is deliberate: it's the whole reason routines exist instead of a bare
+cron job piping into `claude -p`.
+
+## Install / uninstall
+
+Two launchd jobs drive the runner, both installed by
+`launchd/install-routines.sh` (idempotent — safe to re-run):
+
+- **`com.coderails.routine-sweeper.calendar`** — fires daily at 03:00,
+  runs `skills/dashboard/runner/bin/seed-and-sweep.sh`, which seeds any
+  due routines into `queue/` and then sweeps. The seed step's own exit
+  code never blocks the sweep that follows it — a seeding failure still
+  lets any already-queued (e.g. button-pressed) intents get processed.
+- **`com.coderails.routine-sweeper.watch`** — fires on any write under
+  `~/.claude/coderails-dashboard/queue`, runs
+  `skills/dashboard/runner/bin/sweeper.sh` (sweep only, no seed step —
+  a button press already wrote its own intent, nothing to seed).
+
+```bash
+launchd/install-routines.sh     # bootstrap both plists into gui/$UID
+launchd/uninstall-routines.sh   # bootout both plists
+```
+
+Both plists hard-code this machine's absolute paths (checkout location,
+log path, `/opt/homebrew/bin/node`) at authoring time — they are **not
+portable** to a different checkout location or a different user's
+machine without hand-editing the plist files first. `launchd`'s
+environment carries no `PATH` (confirmed via `launchctl print
+gui/$UID`), which is why both bin scripts and the plists use absolute
+paths throughout rather than relying on a shell's PATH resolution.
+
+## Where to look when something fails
+
+Four places, roughest signal to most precise:
+
+1. **`~/.claude/coderails-dashboard/routines/sweeper.log`** — both
+   plists' stdout/stderr. First stop for "did the job even run" —
+   launchd scheduling failures, node crashes before a `SweepResult`
+   exists, and the seed step's own stderr (seed failures print to
+   stderr but don't block the sweep) all land here.
+2. **`~/.claude/coderails-dashboard/runs/runs.jsonl`** — one JSONL
+   record per run (start line, then a finish line with `exitCode` and
+   `endedAt` folded in), across every button and routine. This is the
+   ground truth for "did this run, when, with what argv, what exit
+   code" — read via `readRuns()`, the same reader the merged dashboard
+   app itself uses.
+3. **Vault run notes** — `<first wikiPath>/dashboard-runs/<routine or
+   button name>.md`, one file per routine/button, append-only, one `##
+   [YYYY-MM-DD] run <id> — green|red` section per run with a reason on
+   red. This is the human-readable failure history and is written for
+   both routine successes (green) and failures (red) — it is not just
+   an error log. **This is a distinct vault note type from the wiki
+   schema in `AGENTS.md`** (`type: routine-run`, not one of
+   `command|hook|skill|design|investigation|source`) — it is not
+   ingested by `/wiki-ingest` and does not follow the wiki page-format
+   contract; treat it as operational output, not a wiki page.
+4. **macOS notification** — fired synchronously on every escalation via
+   `osascript`, titled `Routine failed: <routine name>`, body
+   `<failure class>: <reason>`. Transient — if you miss it, the vault
+   note and runlog are the durable record.
+
+## Escalation taxonomy
+
+Every escalation carries a `failureClass`, always paired with a `reason`
+string, in both the notification body and the vault note:
+
+| Failure class | Fires when |
+|---|---|
+| `skill-missing` | The routine's `foreignSkillPath` doesn't exist on disk — checked before spawning `claude` at all. |
+| `claude-spawn-failed` | `resolveClaudePath()` found no `claude` binary, or `execFile` itself failed to spawn the process (e.g. bad `cwd`). The process never started. |
+| `exec-error` | `claude` spawned and exited non-zero, or the process was killed for exceeding the 30-minute timeout (the reason text says "timeout" explicitly in that case). |
+| `artifact-gate-failed` | `claude` exited 0 but `checkArtifact()` failed — missing, stale, or predicate mismatch. The routine "succeeded" by exit code and still failed. |
+| `runner-error` | A failure in the runner's own bookkeeping around a claimed intent (or a seed-time misconfiguration — unrecognised cadence, unresolvable `buttonRef` — see below), not the routine's execution itself. Also used for orphan recovery (a `processing/` file abandoned by a crashed sweep, reclaimed after 60 minutes). |
+
+**No deduplication.** Escalation has no "already told you about this"
+memory. A permanently misconfigured routine (bad cadence, dangling
+`buttonRef`) re-escalates in full on every calendar fire, forever. This
+is deliberate — a silently-swallowed misconfiguration is worse than
+repeated noise, and dedup adds state (what counts as "the same"
+failure, when to expire it) not worth building until the noise itself
+becomes the problem in practice.
+
+## Security warning: bypass-profile routines run outside the hook safety net
+
+**Empirically verified in this repo (2026-07-07):** under `claude -p`
+(the non-interactive mode the runner always uses), `SessionStart`,
+`UserPromptSubmit`, and `Stop` hooks fire normally, but **`PreToolUse`
+hooks do not fire**. This was confirmed directly: with a `test_gate`
+trigger file configured to force a deny, a `-p` invocation ran `git
+commit` and it succeeded — the gate never engaged.
+
+Concretely, `test_gate` and `enforce_pr_workflow` — the hooks that
+block untested commits and direct pushes to `main` in an interactive
+session — **do not protect a routine run**. A routine configured with
+`"profile": "bypass"` on its button (via `--dangerously-skip-permissions`,
+see `buildArgv` in `skills/dashboard/app/src/lib/argv.ts`) runs headless
+with neither the CLI's own tool allowlist (a `read-only`-profile
+routine gets `--allowedTools Read Grep Glob`; `bypass` gets no
+allowlist at all) nor the hook-based safety net an interactive terminal
+session gets.
+
+**Ship read-only routines unless you have explicitly accepted this.**
+All three shipped example routines use `"profile": "read-only"` for
+exactly this reason. If a routine's skill needs to write files or run
+commands, understand that its actions are gated only by the artifact
+check after the fact, not by any hook before the fact.
+
+## See also
+
+- [`skills/dashboard/lib/README.md`](../skills/dashboard/lib/README.md)
+  — the `Intent`/`RoutineDef` schema contract and queue lifecycle in
+  full.
+- [`skills/memory-consolidation/SKILL.md`](../skills/memory-consolidation/SKILL.md)
+  — one of the three shipped routines; a good template for a routine
+  whose own skill writes its artifact-gate report natively.
+- [`examples/dashboard-config.json`](../examples/dashboard-config.json)
+  — the full three-routine config this doc's examples are drawn from.
