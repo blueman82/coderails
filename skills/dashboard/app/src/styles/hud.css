@@ -575,10 +575,11 @@
   margin-bottom: 4px;
 }
 .hud-bc-loop-name {
+  /* Wrap, don't clip — same house style as the ticker below and the
+     status-line/deck-status overflow fixes; long loop names stay readable. */
   max-width: 90vw;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: break-word;
 }
 .hud-bc-units {
   display: flex;
