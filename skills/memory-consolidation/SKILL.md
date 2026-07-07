@@ -12,8 +12,9 @@ sessions.
 
 ## When to Use
 
-- Run as a scheduled routine (weekly, per the `routines` config section
-  documented in `skills/dashboard/lib/README.md`).
+- Run as a scheduled routine (weekly, via the `routines` section of
+  `~/.claude/coderails-dashboard.json`). The skill needs no routines setup
+  to work — it runs standalone on demand too.
 - Run on demand when memory files have visibly accumulated overlapping or
   contradictory content.
 
@@ -74,8 +75,6 @@ artifact-gate checks. Its content:
 Updated: yes|no
 ```
 
-This report is this skill's own durable artifact — it is written natively
-by this skill (unlike `sync-docs`, which needs an external
-`--append-system-prompt` wrapper to produce a file at all; see
-`skills/dashboard/lib/README.md` and the routine config's
-`expectedArtifact` for `memory-consolidation`).
+This report is this skill's own durable artifact, written natively by the
+skill itself — the property that lets a scheduled routine gate on the
+report's existence.
