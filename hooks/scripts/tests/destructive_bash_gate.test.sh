@@ -214,4 +214,14 @@ check "single-quoted arg with \$(...) still denies" DENY \
 check "unquoted arg with \$(...) still denies" DENY \
   "$(run "$(payload 'bash scripts/push.sh fix-thing-$(whoami)-done')")"
 
+# --- Chained shape: a fully-CLOSED substitution earlier in the command,
+# followed by a script invocation whose OWN arguments contain no substitution
+# characters at all. The earlier substitution neither wraps the invocation
+# (it's closed) nor shares a quoted segment with the script mention (the
+# script name here is a bare, unquoted token) — so it must not deny.
+check "closed \$(...) assignment earlier, clean post_evals.sh args -> allow" ALLOW \
+  "$(run "$(payload 'TIER=$(jq -r .tier /tmp/e.json) && bash scripts/post_evals.sh post 19 "tier zero clean note"')")"
+check "closed \$(...) earlier, unrelated prose mentions merge.sh -> allow" ALLOW \
+  "$(run "$(payload 'echo $(date) && echo see scripts/merge.sh docs')")"
+
 [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails)"; exit 1; }
