@@ -25,7 +25,17 @@ function makeEntry(overrides: Partial<QueueEntrySnapshot> = {}): QueueEntrySnaps
   return {
     hash: HASH_A,
     toolName: "workflow-audit:propose-skill",
-    toolInput: { proposed_name: "my-new-skill" },
+    // Full shape required by src/lib/build/prompt.ts's buildPrompt, which
+    // claimAndSpawnBuild now calls for real (Task 6 wired the real import in,
+    // replacing the earlier placeholder prompt.md string this task shipped).
+    toolInput: {
+      cluster_ngram: ["marker-a", "marker-b"],
+      count: 3,
+      sessions: ["session-1"],
+      task_summary: "a summary",
+      proposed_name: "my-new-skill",
+      proposed_description: "a description",
+    },
     createdAt: 1_720_000_000_000,
     status: "approved",
     ...overrides,
