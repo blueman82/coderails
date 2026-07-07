@@ -74,6 +74,8 @@ Every plan produced by this skill ends with one final task invoking `/coderails:
 
 This is the one deliberate exception to the "Task right-sizing" section's rule to fold setup, config, and docs into the task whose deliverable needs them: the grade-and-post task is always its own final task, never folded into the last implementation task, because it must run AFTER all other tasks' code exists.
 
+`scripts/merge.sh` hard-blocks every merge without a SHA-bound eval artifact for the current head — no config opt-out. A docs-only or single-unit PR isn't exempt from this step; if it meets `task-evals`' tier-0 predicate (single work-unit, no outward/irreversible surface, an existing check already covers the goal state) it takes the lightweight tier-0 path through `/coderails:task-evals`, not a skip.
+
 ## Plan header
 
 Every plan begins with this header verbatim, before the title:
