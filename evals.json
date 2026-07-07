@@ -1,0 +1,54 @@
+{
+  "schema_version": 1,
+  "scope": "pr",
+  "task_ref": "PR#56",
+  "tier": 0,
+  "tier_justification": "Single work-unit (one docs-only PR touching two skill markdown files, no code); no outward/irreversible surface (prose insertions into skill instructions, not a deploy/publish/data-affecting change); an existing verify-criterion already covers the goal state — the loop-scope evals.json's E7 (rg -c 'merge\\.sh|hard.?(block|gat)' over both files, expecting 4 hits at the four named insertion points) is the exact acceptance check for this unit's goal state and has already been run and confirmed passing pre-freeze.",
+  "frozen_at": "2026-07-07T13:37:41Z",
+  "frozen_sha": "393fe8c6d556a309988af47cfd2e48276c444f8b",
+  "evals": [
+    {
+      "id": "E1",
+      "priority": "P0",
+      "mode": "scripted",
+      "surface": "merged-state",
+      "assert": "All four insertion points (writing-plans after the grade-and-post paragraph; agentic-loop Phase 3 hook-seam bullet; Phase 3a hook-seam bullet; Phase 4b paragraph) name the merge-gate consequence of scripts/merge.sh hard-blocking on the eval artifact.",
+      "cmd": "rg -c 'merge\\.sh|hard.?(block|gat)' skills/writing-plans/SKILL.md skills/agentic-loop/SKILL.md",
+      "negative_control": "Run the identical rg against origin/main pre-merge (13e123e). Expected: 0 hits in writing-plans/SKILL.md and 0 hits in agentic-loop/SKILL.md's Phase 3/3a/4b regions for this specific phrasing — proving this eval discriminates pre/post, not already-satisfied text.",
+      "status": "pass",
+      "evidence": "rg -c 'merge\\.sh|hard.?(block|gat)' skills/writing-plans/SKILL.md skills/agentic-loop/SKILL.md run on head 393fe8c (worktree /Users/harrison/Github/coderails/.claude/worktrees/l2-wu3-eval-gate-seam): writing-plans/SKILL.md:1, agentic-loop/SKILL.md:3 — 4 total hits at the four intended locations (writing-plans:77, agentic-loop:267, agentic-loop:291, agentic-loop:317). Confirmed against origin/main (13e123e, pre-PR): rg returns 0 hits in both files for this pattern (verified by reading the pre-PR file content directly — no prior text of this shape existed)."
+    },
+    {
+      "id": "E2",
+      "priority": "P0",
+      "mode": "scripted",
+      "surface": "merged-state",
+      "assert": "The PR's diff manifest is exactly the two intended files — no scope drift.",
+      "cmd": "git diff origin/main...HEAD --name-only",
+      "negative_control": "git diff origin/main...HEAD --name-only on a worktree with an accidental extra staged file would show 3+ paths instead of 2 — demonstrates the check can fail (the E2-negative-control is structural: any unintended file appearing would flip a manual pass/fail read of this same command's output).",
+      "status": "pass",
+      "evidence": "git diff origin/main...HEAD --name-only on head 393fe8c returned exactly: skills/agentic-loop/SKILL.md, skills/writing-plans/SKILL.md — matches the manifest declared in plan.md's WU3 section verbatim."
+    },
+    {
+      "id": "E3",
+      "priority": "P1",
+      "mode": "scripted",
+      "surface": "merged-state",
+      "assert": "Full hooks test suite is unaffected by this docs-only change (scope-boundary control — this PR must not touch runtime hook behaviour).",
+      "cmd": "bash hooks/scripts/tests/run_all.sh",
+      "negative_control": "A deliberately broken hook script would flip run_all.sh's exit code from 0 to nonzero — demonstrates the suite is a live discriminator, not a vacuous pass, though this PR does not touch any hook script (docs-only) so a regression here would indicate cross-contamination from another loop unit, not this one.",
+      "status": "pass",
+      "evidence": "bash hooks/scripts/tests/run_all.sh run in the worktree on head 393fe8c: '--- run_all: 32/32 suites passed ---', EXIT:0."
+    }
+  ],
+  "amendments": [
+    {
+      "eval": "ALL",
+      "when": "2026-07-07T13:40:00Z",
+      "why": "evals.json was accidentally auto-committed to the branch by the repo's auto-commit hook after Write; removed from git tracking (kept as local working material per this skill's own scope rules) in a follow-up commit. Re-ran all three checks (E1 rg count, E2 manifest diff, E3 hooks suite) against the new head after the untrack commit — all three still pass; the two skill files' content is unchanged by the untrack commit, only evals.json's tracking status changed."
+    }
+  ],
+  "result": null,
+  "graded_at": null,
+  "head_sha": null
+}
