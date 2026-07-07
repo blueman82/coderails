@@ -106,7 +106,7 @@ These skills were written for coderails and are not vendored from elsewhere.
 
 **Privacy invariant:** every artifact in the pipeline — scan output, cluster output, judge input/output, proposal chart, queue entry — carries only tool names, a privacy-whitelisted `head` (first two Bash command tokens, the Skill name, or the Agent subagent_type), counts, and session ids. Never verbatim transcript prose, file contents, or reconstructed intent.
 
-**When it does NOT apply:** it never creates a skill on its own; the mechanical pipeline (scan+cluster+queue-write) has no creation capability at all, and the judge stage only proposes.
+**When it does NOT apply:** it never creates a skill on its own; the mechanical pipeline (scan+cluster+queue-write) has no skill-creation capability at all, and the judge stage only proposes.
 
 ---
 
