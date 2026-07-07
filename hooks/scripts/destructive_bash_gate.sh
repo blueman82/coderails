@@ -235,7 +235,7 @@ fi
 # Bash tool_input rather than a command-file render-time !`cmd` line.
 #
 # Scoped (not whole-line): a substitution character anywhere on the line used
-# to deny even when it wasn't part of an argument passed to the script. Two
+# to deny even when it wasn't part of an argument passed to the script. Three
 # checks narrow this to genuine in-argument substitution:
 #   1. an UNCLOSED substitution reaching the first script-name mention means
 #      the whole invocation is being captured (e.g. out=$(bash scripts/push.sh
@@ -246,13 +246,22 @@ fi
 #      substitution that is already CLOSED before the script name (e.g. an
 #      unrelated `echo $(pwd); bash scripts/push.sh "msg with $(whoami)"`) does
 #      not count — that line's real argument substitution must still be caught
-#      by check 2, not suppressed here.
+#      by check 2 or 3, not suppressed here.
 #   2. the quoted segment that contains the script-name mention, when that
 #      segment is not the bare "scripts/X.sh" token, is prose that happens to
 #      mention the script name and a substitution char together (e.g. a note
-#      documenting the script) — not an actual invocation of it. Otherwise a
-#      substitution char anywhere on the line (having passed check 1) is a
-#      genuine argument to the script and still denies.
+#      documenting the script) — not an actual invocation of it.
+#   3. the script's own invocation — everything from the script-name match
+#      onward, covering the script name itself plus every argument after it —
+#      contains zero substitution characters. Any substitution on the line is
+#      then necessarily earlier and already closed (check 1 ruled out "still
+#      open"), e.g. an unrelated closed assignment (`TIER=$(jq ...) && bash
+#      scripts/post_evals.sh post 19 "clean note"`) or prose mentioning a
+#      script name as a bare token elsewhere (`echo $(date) && echo see
+#      scripts/merge.sh docs`) — neither is a substitution inside what's
+#      actually passed to the script. Otherwise (a substitution character
+#      exists at or after the script-name match) it's a genuine argument to
+#      the script and still denies.
 script_re='scripts/(push|merge|post_review|post_evals)\.sh'
 if echo "$cmd" | grep -qE "$script_re"; then
   if echo "$cmd" | grep -qE '`|\$\('; then
@@ -272,6 +281,12 @@ if echo "$cmd" | grep -qE "$script_re"; then
         if [ -z "$bare_segment" ] && echo "$script_segment" | grep -qE '`|\$\('; then
           substitution_scoped=0
         fi
+      fi
+    fi
+    if [ "$substitution_scoped" -eq 1 ]; then
+      from_script=$(echo "$cmd" | grep -oE "${script_re}.*")
+      if ! echo "$from_script" | grep -qE '`|\$\('; then
+        substitution_scoped=0
       fi
     fi
     if [ "$substitution_scoped" -eq 1 ]; then

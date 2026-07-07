@@ -7,7 +7,7 @@ import { isLocalOrigin } from "../../../lib/requestGuard";
 const DEFAULT_PROJECTS_DIR = join(homedir(), ".claude", "projects");
 const DEFAULT_LOOPS_DIR = join(homedir(), ".claude", "agentic-loop");
 const DEFAULT_RUNS_DIR = join(homedir(), ".claude", "coderails-dashboard", "runs");
-const DEFAULT_QUEUE_DIR = join(homedir(), ".claude", "coderails-dashboard", "queue");
+const DEFAULT_QUEUE_DIR = join(homedir(), ".claude", "coderails-dashboard", "approvals");
 
 function sseFrame(event: string, data: unknown): string {
   return `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
