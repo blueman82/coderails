@@ -8,6 +8,12 @@ they live in `skills/dashboard/app/src/lib/config.ts` and `argv.ts`
 (merged via PR #25) and this package imports them rather than
 re-implementing them.
 
+This README covers the schema contract only. For how to actually stand
+the system up on a fresh clone (`npm install` in this package and in
+`skills/dashboard/runner`, where the dashboard's data directory comes
+from, how the `claude` binary is located under `launchd`) see
+[`docs/routines.md`](../../../docs/routines.md)'s Prerequisites section.
+
 ## The queue seam is LIVE
 
 As of PR #25, `skills/dashboard/obsidian/src/exec.ts` already writes
