@@ -6,7 +6,18 @@ set -euo pipefail
 source "$(dirname "$0")/lib/git-common.sh"
 
 push::main() {
-    local msg="${1:-}" br=$(branch)
+    local force_with_lease=0 msg=""
+    # --force-with-lease is a long-form-only opt-in flag (no -f alias — -f
+    # collides with git's own short force flag). require::feature below
+    # already guarantees a non-main branch before the push step runs.
+    for arg in "$@"; do
+        if [[ "$arg" == "--force-with-lease" ]]; then
+            force_with_lease=1
+        elif [[ -z "$msg" ]]; then
+            msg="$arg"
+        fi
+    done
+    local br=$(branch)
 
     require::feature
     require::repo
@@ -43,7 +54,11 @@ push::main() {
 
     # ─── Push ─────────────────────────────────────────────────────────────────
     step "Pushing"
-    git push -u origin "$br" 2>&1 | grep -v '^remote:' || true
+    if [[ "$force_with_lease" -eq 1 ]]; then
+        git push --force-with-lease -u origin "$br" 2>&1 | grep -v '^remote:' || true
+    else
+        git push -u origin "$br" 2>&1 | grep -v '^remote:' || true
+    fi
     ok "Pushed $(ahead) commit(s)"
 
 
