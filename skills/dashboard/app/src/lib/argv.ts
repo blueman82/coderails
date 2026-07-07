@@ -27,9 +27,10 @@ export const READ_ONLY_ALLOWED_TOOLS = ["Read", "Grep", "Glob"];
 // real flag instead of literal prompt text, confirmed empirically on this
 // machine 2026-07-06: `claude -p "--version"` prints the version banner and
 // never answers the prompt, i.e. the CLI really does parse a leading-dash
-// argument as a flag): (1) input starting with "-" is rejected outright
-// (throws) rather than trusting the sentinel alone, checked against the raw
-// input BEFORE it is merged into the combined prompt string; (2) a literal
+// argument as a flag): (1) input starting with "-" (after trimming, so
+// whitespace can't hide a leading dash from this check) is rejected
+// outright (throws) rather than trusting the sentinel alone, checked
+// BEFORE input is merged into the combined prompt string; (2) a literal
 // "--" end-of-options sentinel is inserted immediately before the combined
 // prompt whenever input is present, confirmed empirically on this machine
 // 2026-07-07 to still deliver correctly and to keep a flag-shaped substring
