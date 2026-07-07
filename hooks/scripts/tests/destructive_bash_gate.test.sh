@@ -239,8 +239,30 @@ check "in-arg substitution wrapped in outer stdout-capture -> deny" DENY \
 
 # --- SECURITY: two script mentions on one line, each in its own && segment —
 # a clean first call must not mask a genuine substitution in a later call's
-# own argument. Each segment is judged independently.
+# own argument. Each mention is covered by "first match to end-of-line".
 check "two script mentions, second has real substitution -> deny" DENY \
   "$(run "$(payload 'bash scripts/merge.sh "19" && bash scripts/post_evals.sh post 19 "note with $(whoami)"')")"
+
+# --- SECURITY: a shell operator character (&&, ;, ||) sitting INSIDE the
+# quoted message argument itself must not be treated as a segment boundary.
+# A segment-splitting approach (tried and reverted) is quote-blind — it cuts
+# the line at these characters even when they're ordinary prose inside the
+# argument, severing the script-name token from its own argument's
+# substitution and reopening the injection this check exists to block.
+check "&& inside quoted message argument -> deny" DENY \
+  "$(run "$(payload 'bash scripts/push.sh "fix A && $(whoami)"')")"
+check "; inside quoted message argument -> deny" DENY \
+  "$(run "$(payload 'bash scripts/push.sh "note; $(whoami)"')")"
+check "|| inside quoted message argument -> deny" DENY \
+  "$(run "$(payload 'bash scripts/merge.sh 19 "a || `id`"')")"
+
+# --- SECURITY: the prose exemption must not fire for a genuine invocation
+# merely because the invoked script's own message argument happens to also
+# mention one of the four script names. Only mentions OUTSIDE invocation
+# position (not immediately after bash/sh) are eligible for the prose
+# exemption — this is a real call to merge.sh whose own 2nd argument
+# contains a live substitution, not documentation about merge.sh.
+check "real invocation whose own arg also names the script -> deny" DENY \
+  "$(run "$(payload 'bash scripts/merge.sh 19 "see scripts/merge.sh docs for $(cmd) syntax"')")"
 
 [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails)"; exit 1; }

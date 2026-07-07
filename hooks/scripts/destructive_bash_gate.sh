@@ -234,56 +234,65 @@ fi
 # as the $ARGUMENTS render-time bug (PR #97), triggered here via the model's own
 # Bash tool_input rather than a command-file render-time !`cmd` line.
 #
-# Scoped per SEGMENT, checking the ARGUMENT REGION within each segment — not
-# the whole line, and not a wrapping heuristic. A prior version tried to
-# classify "does an earlier unclosed substitution mean the whole invocation
-# is being captured" — that heuristic was unsound: an outer stdout-capture
-# can wrap a script invocation whose own argument independently carries a
-# live substitution, e.g. out=$(bash scripts/merge.sh 19 "note with
-# $(whoami)") — the inner whoami call is a genuine injection regardless of
-# the outer capture, and the old heuristic exempted the whole line the
-# moment it saw the outer $( was unclosed at the script-name mention, never
-# re-examining the argument itself.
+# Scoped from the first script-name match to end-of-LINE (never end-of-
+# segment) — a prior version of this fix split the command on ; && || before
+# scanning, which is quote-blind: those operator characters are ordinary
+# prose inside the attacker-controllable message argument itself (e.g.
+# `bash scripts/push.sh "fix A && $(whoami)"`), and splitting on them there
+# severed the script-name token from its own argument's substitution,
+# reopening the exact injection class this check exists to block. Scanning
+# to end-of-line instead can never falsely truncate inside a quoted
+# argument, because there is nothing after end-of-line to truncate.
 #
-# The command is split into segments on ; && || (each starts an unrelated
-# command — substitution in one segment is none of another segment's
-# business; this also handles two script mentions on one line, each judged
-# independently, so a clean first call doesn't mask a dirty second call).
-# For each segment that mentions a script name, the argument region is: from
-# the matched script-name token to the end of that segment. Two checks:
-#   1. if the argument region contains a backtick or $(, it's a genuine
-#      substitution inside what's actually passed to the script — deny.
-#      This alone would also flag "prose mentions push.sh, and later in the
-#      SAME string there's an unrelated $()" as a false positive, since a
-#      bare (unquoted) script-name mention with no further terminator in
-#      that segment lets the region run to the segment's end and sweep up
-#      unrelated trailing text.
-#   2. exemption for that shape: if the quoted segment containing the
-#      script-name mention is not the bare "scripts/X.sh" token (i.e. the
-#      script name is embedded inside a larger prose string, not its own
-#      argument token) and that same quoted segment also has the
-#      substitution char, it's prose describing the script, not an
-#      invocation of it — allow.
+# An even earlier version tried to classify "does an earlier unclosed
+# substitution mean the whole invocation is being captured" (to allow
+# out=$(bash scripts/push.sh "clean msg")) — that heuristic was also unsound:
+# an outer stdout-capture can wrap an invocation whose own argument
+# independently carries a live substitution, e.g. out=$(bash scripts/merge.sh
+# 19 "note with $(whoami)") — the inner whoami call is a genuine injection
+# regardless of the outer capture. Neither heuristic is needed: scanning from
+# the first script-name match to end-of-line already allows a clean stdout-
+# capture (nothing after the match to flag) while denying a dirty one
+# (the inner substitution is after the match, so it's caught).
+#
+# Two checks:
+#   1. if the region from the first script-name match to end-of-line
+#      contains a backtick or $(, it's either a genuine substitution inside
+#      an argument, or (see check 2) prose. This also naturally covers two
+#      script mentions on one line: if the SECOND mention's own argument has
+#      a substitution, it's still within "first match to end-of-line" and
+#      gets caught even though check 1 fires on the FIRST mention.
+#   2. exemption for genuine prose: fires only when the script-name mention
+#      is NOT in invocation position (i.e. not the bare/unquoted command
+#      word immediately after `bash`/`sh`) AND the quoted segment containing
+#      the mention is not the bare "scripts/X.sh" token AND that same quoted
+#      segment also has the substitution char — e.g. a note that documents
+#      the script inside an unrelated echo. If the script name IS in
+#      invocation position (actually being invoked, not merely mentioned),
+#      this exemption never fires, even if the invoked script's own message
+#      argument happens to also mention one of the four script names
+#      alongside its substitution (`bash scripts/merge.sh 19 "see
+#      scripts/merge.sh docs for $(cmd) syntax"` — a real call with a live
+#      substitution in its own 2nd argument, not documentation).
 script_re='scripts/(push|merge|post_review|post_evals)\.sh'
 if echo "$cmd" | grep -qE "$script_re"; then
   if echo "$cmd" | grep -qE '`|\$\('; then
     substitution_scoped=0
-    segments=$(echo "$cmd" | sed -E 's/(;|&&|\|\|)/\n/g')
-    while IFS= read -r seg; do
-      echo "$seg" | grep -qE "$script_re" || continue
-      arg_region=$(echo "$seg" | grep -oE "${script_re}.*")
-      echo "$arg_region" | grep -qE '`|\$\(' || continue
-      script_segment=$(echo "$seg" | grep -oE '"[^"]*"' | grep -E "$script_re" | head -1)
-      if [ -n "$script_segment" ]; then
-        bare_segment=$(echo "$script_segment" | grep -oE "^\"${script_re}\"\$")
-        if [ -z "$bare_segment" ] && echo "$script_segment" | grep -qE '`|\$\('; then
-          continue
+    from_script=$(echo "$cmd" | grep -oE "${script_re}.*")
+    if echo "$from_script" | grep -qE '`|\$\('; then
+      substitution_scoped=1
+      if echo "$cmd" | grep -qE "(bash|sh) +[\"']?${script_re}"; then
+        substitution_scoped=1
+      else
+        script_segment=$(echo "$cmd" | grep -oE '"[^"]*"' | grep -E "$script_re" | head -1)
+        if [ -n "$script_segment" ]; then
+          bare_segment=$(echo "$script_segment" | grep -oE "^\"${script_re}\"\$")
+          if [ -z "$bare_segment" ] && echo "$script_segment" | grep -qE '`|\$\('; then
+            substitution_scoped=0
+          fi
         fi
       fi
-      substitution_scoped=1
-    done <<EOF_SEGMENTS
-$segments
-EOF_SEGMENTS
+    fi
     if [ "$substitution_scoped" -eq 1 ]; then
       jq -n --arg cmd "$cmd" '{
         hookSpecificOutput: {
