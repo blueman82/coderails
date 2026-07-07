@@ -99,9 +99,14 @@ allowlist_permits() {
 # (via grep -E, no BASH_REMATCH here) can't report WHICH alternative matched —
 # needed to allow the narrower --force-with-lease shape while still denying
 # naked --force/-f unconditionally, even when both appear on the same line.
-if echo "$cmd" | grep -qiE '\bgit +push +.*(--force\b|-f\b|--force-with-lease\b)'; then
+# The naked-force sub-pattern also matches short-flag CLUSTERS (e.g. -uf,
+# -fu, -ufd — git's own getopt-style combined short-flag behaviour), mirroring
+# this file's existing git-clean force detector above (line 47) rather than
+# only a standalone -f token, which a combined cluster would otherwise evade.
+naked_force_re='(--force($|[^-])|(^| )-[a-zA-Z]*f[a-zA-Z]*( |$))'
+if echo "$cmd" | grep -qiE "\\bgit +push\\b.*(${naked_force_re}|--force-with-lease\\b)"; then
   if echo "$cmd" | grep -qiE '\bgit +push +.*--force-with-lease\b' \
-     && ! echo "$cmd" | grep -qiE '\bgit +push\b.*(--force($|[^-])|(^|[^-])-f\b)' \
+     && ! echo "$cmd" | grep -qiE "\\bgit +push\\b.*${naked_force_re}" \
      && allowlist_permits "git-push-force-with-lease"; then
     : # allowlisted force-with-lease, no naked --force present — allow
   else

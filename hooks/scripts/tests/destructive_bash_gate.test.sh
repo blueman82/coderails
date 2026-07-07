@@ -33,6 +33,11 @@ check "rm -rf . -> deny"            DENY "$(run "$(payload "rm -rf .")")"
 check "rm -r somedir -> deny"       DENY "$(run "$(payload "rm -r somedir")")"
 check "git push --force -> deny"    DENY "$(run "$(payload "git push --force")")"
 check "git push -f -> deny"         DENY "$(run "$(payload "git push origin main -f")")"
+# Combined short-flag cluster (git's own getopt-style clustering, e.g. -uf ==
+# -u -f), no --force-with-lease in play at all — mirrors the file's existing
+# git-clean force detector's own combined-flag handling (line 47) rather than
+# only recognising -f as a standalone complete token.
+check "git push -uf cluster (no fwl) -> deny" DENY "$(run "$(payload "git push -uf origin main")")"
 check "git push --force-with-lease -> deny" DENY "$(run "$(payload "git push --force-with-lease")")"
 check "git reset --hard -> deny"    DENY "$(run "$(payload "git reset --hard HEAD~1")")"
 check "DROP TABLE -> deny"          DENY "$(run "$(payload "DROP TABLE users;")")"
@@ -432,6 +437,24 @@ check "allowlist present: -f before --force-with-lease -> deny" DENY \
   "$(run_cwd "$(payload_with_cwd "git push -f --force-with-lease" "$ALLOWLIST_REPO")" "$ALLOWLIST_REPO")"
 check "allowlist present: --force-with-lease before -f -> deny" DENY \
   "$(run_cwd "$(payload_with_cwd "git push --force-with-lease -f" "$ALLOWLIST_REPO")" "$ALLOWLIST_REPO")"
+
+# 5c. SECURITY — allowlist present, -f combined into a short-flag cluster with
+# another single-letter flag (git's own getopt-style clustering, e.g. -uf ==
+# -u -f) still denied. Regression guard for a second bypass found in review:
+# the -f\b detector only recognised -f as its OWN complete token, missing it
+# when bundled with another short flag on either side of the cluster. This
+# mirrors the file's own pre-existing git-clean force detector (line 47),
+# which already handles exactly this shape for a different command.
+check "allowlist present: -uf cluster (upstream+force) -> deny" DENY \
+  "$(run_cwd "$(payload_with_cwd "git push -uf origin main --force-with-lease" "$ALLOWLIST_REPO")" "$ALLOWLIST_REPO")"
+check "allowlist present: -fu cluster (force+upstream) -> deny" DENY \
+  "$(run_cwd "$(payload_with_cwd "git push -fu origin main --force-with-lease" "$ALLOWLIST_REPO")" "$ALLOWLIST_REPO")"
+check "allowlist present: -ufd cluster (force in middle) -> deny" DENY \
+  "$(run_cwd "$(payload_with_cwd "git push -ufd origin main --force-with-lease" "$ALLOWLIST_REPO")" "$ALLOWLIST_REPO")"
+# Negative control: a cluster with NO f letter (just -u) must still allow
+# force-with-lease through when the allowlist permits it.
+check "allowlist present: -u only (no f), force-with-lease -> allow" ALLOW \
+  "$(run_cwd "$(payload_with_cwd "git push -u origin main --force-with-lease" "$ALLOWLIST_REPO")" "$ALLOWLIST_REPO")"
 
 # 6. Empty allowlist file -> denied (mirrors test_gate.sh empty-content no-op)
 : > "$ALLOWLIST_REPO/.claude/destructive_allowlist"
