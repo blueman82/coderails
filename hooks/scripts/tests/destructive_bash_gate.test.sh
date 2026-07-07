@@ -258,11 +258,22 @@ check "|| inside quoted message argument -> deny" DENY \
 
 # --- SECURITY: the prose exemption must not fire for a genuine invocation
 # merely because the invoked script's own message argument happens to also
-# mention one of the four script names. Only mentions OUTSIDE invocation
-# position (not immediately after bash/sh) are eligible for the prose
-# exemption — this is a real call to merge.sh whose own 2nd argument
-# contains a live substitution, not documentation about merge.sh.
+# mention one of the four script names. Only a script-name mention actually
+# INSIDE a quoted string (i.e. text, not a bare command token) is eligible
+# for the prose exemption — this is a real call to merge.sh whose own 2nd
+# argument contains a live substitution, not documentation about merge.sh.
 check "real invocation whose own arg also names the script -> deny" DENY \
   "$(run "$(payload 'bash scripts/merge.sh 19 "see scripts/merge.sh docs for $(cmd) syntax"')")"
+
+# --- SECURITY: a genuine invocation with NO bash/sh interpreter prefix at
+# all (the script called directly, or via a leading ./) must still deny when
+# its own argument carries a live substitution. An earlier version of this
+# fix only recognised "bash scripts/X.sh" / "sh scripts/X.sh" as invocation
+# position, which a direct call with no interpreter word evaded, falling
+# through to the prose exemption incorrectly.
+check "direct invocation, no interpreter prefix -> deny" DENY \
+  "$(run "$(payload 'scripts/push.sh "reference to scripts/push.sh with $(whoami)"')")"
+check "./ direct invocation, no interpreter prefix -> deny" DENY \
+  "$(run "$(payload './scripts/merge.sh 19 "see ./scripts/merge.sh for $(id)"')")"
 
 [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails)"; exit 1; }

@@ -262,13 +262,21 @@ fi
 #      script mentions on one line: if the SECOND mention's own argument has
 #      a substitution, it's still within "first match to end-of-line" and
 #      gets caught even though check 1 fires on the FIRST mention.
-#   2. exemption for genuine prose: fires only when the script-name mention
-#      is NOT in invocation position (i.e. not the bare/unquoted command
-#      word immediately after `bash`/`sh`) AND the quoted segment containing
-#      the mention is not the bare "scripts/X.sh" token AND that same quoted
-#      segment also has the substitution char — e.g. a note that documents
-#      the script inside an unrelated echo. If the script name IS in
-#      invocation position (actually being invoked, not merely mentioned),
+#   2. exemption for genuine prose: fires only when the FIRST script-name
+#      mention is inside an open double-quoted string at that point in the
+#      line (i.e. it's text inside someone's argument, not a command word)
+#      AND the quoted segment containing it is not the bare "scripts/X.sh"
+#      token AND that same quoted segment also has the substitution char.
+#      "Inside a quote" is measured by counting unescaped double-quote
+#      characters before the match: an odd count means we're inside an open
+#      quote at that point, an even count (including zero) means we're
+#      outside any quote — a bare token, which is always a genuine
+#      invocation (whether `bash scripts/push.sh ...`, `sh scripts/push.sh
+#      ...`, or a direct `scripts/push.sh ...` / `./scripts/push.sh ...`
+#      call with no interpreter prefix at all — an earlier version of this
+#      check required a literal bash/sh prefix to recognise "invocation",
+#      which a direct call with no such prefix evaded, falling through to
+#      the prose exemption incorrectly). If the script name IS a bare token,
 #      this exemption never fires, even if the invoked script's own message
 #      argument happens to also mention one of the four script names
 #      alongside its substitution (`bash scripts/merge.sh 19 "see
@@ -281,15 +289,13 @@ if echo "$cmd" | grep -qE "$script_re"; then
     from_script=$(echo "$cmd" | grep -oE "${script_re}.*")
     if echo "$from_script" | grep -qE '`|\$\('; then
       substitution_scoped=1
-      if echo "$cmd" | grep -qE "(bash|sh) +[\"']?${script_re}"; then
-        substitution_scoped=1
-      else
+      before_script=$(echo "$cmd" | sed -E "s#${script_re}.*##")
+      quote_count=$(echo "$before_script" | grep -oE '"' | wc -l | tr -d ' ')
+      quote_parity=$(( quote_count % 2 ))
+      if [ "$quote_parity" -eq 1 ]; then
         script_segment=$(echo "$cmd" | grep -oE '"[^"]*"' | grep -E "$script_re" | head -1)
-        if [ -n "$script_segment" ]; then
-          bare_segment=$(echo "$script_segment" | grep -oE "^\"${script_re}\"\$")
-          if [ -z "$bare_segment" ] && echo "$script_segment" | grep -qE '`|\$\('; then
-            substitution_scoped=0
-          fi
+        if [ -n "$script_segment" ] && echo "$script_segment" | grep -qE '`|\$\('; then
+          substitution_scoped=0
         fi
       fi
     fi
