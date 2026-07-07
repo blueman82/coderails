@@ -180,8 +180,29 @@ cd "$WORKTREE_DIR" || fail_terminal "worktree_setup_failed:cd"
 # killed, which is what lets the wall-clock timeout actually cut a
 # long-running claude session short instead of silently waiting the full
 # duration out.
+#
+# CONTAINMENT STACK for this bypass spawn (--dangerously-skip-permissions is
+# a recorded design decision, not a gap: a headless, unattended builder
+# would otherwise hang forever on a permission prompt nobody is present to
+# answer — same precedent as api/run/route.ts's bypass profile). The
+# containment is the combination below, not the bypass flag in isolation:
+#   1. Prompt-level fence containment — untrusted snapshot fields are
+#      confined to a single fenced block (src/lib/build/prompt.ts).
+#   2. --max-budget-usd 25 — hard cost ceiling.
+#   3. Wall-clock watchdog (this script) — hard time ceiling.
+#   4. --disallowedTools below — MECHANICAL enforcement of the prompt's
+#      "never merge" clause: even a fully-compromised or -confused session
+#      cannot invoke the merge skill or run a merge command, because the
+#      tool/command is not available to it at all (verified: a live test
+#      with these exact flags produced a permission_denials entry for both
+#      Skill(coderails:merge) and Bash(gh pr merge*) attempts, alongside
+#      --dangerously-skip-permissions — the deny-list is not bypassed by
+#      the skip-permissions flag).
+#   5. Human merge — the PR sits open; a human reviews and merges. This is
+#      the final backstop regardless of 1-4 holding.
 claude -p "$(cat "$BUILD_DIR/prompt.md")" \
   --dangerously-skip-permissions \
+  --disallowedTools "Skill(coderails:merge)" "Bash(gh pr merge*)" "Bash(*merge.sh*)" \
   --max-budget-usd 25 \
   --output-format json \
   > "$BUILD_DIR/result.json" 2> "$BUILD_DIR/build.log" &
@@ -214,6 +235,16 @@ else
     FAILURE_REASON="timeout"
   elif grep -q "error_max_budget_usd" "$BUILD_DIR/result.json" 2>/dev/null; then
     FAILURE_REASON="budget_exceeded"
+  elif grep -q "unknown option" "$BUILD_DIR/build.log" 2>/dev/null; then
+    # Verified empirically: this claude CLI version rejects an unrecognized
+    # flag loudly (nonzero exit before any session starts), rather than
+    # silently ignoring it — so a --disallowedTools incompatibility from a
+    # future/older CLI version would surface here, not proceed unprotected.
+    # Distinguishing this from a routine build failure matters specifically
+    # because it signals the containment stack's mechanical enforcement
+    # layer (see the comment above the claude invocation) failed to even
+    # start, not that the build itself failed.
+    FAILURE_REASON="claude_cli_flag_rejected"
   else
     FAILURE_REASON="nonzero_exit"
   fi

@@ -1,8 +1,12 @@
 import { describe, it, expect, afterEach } from "vitest";
-import { mkdtempSync, rmSync, existsSync, readFileSync } from "node:fs";
+import { mkdtempSync, rmSync, existsSync, readFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { claimAndSpawnBuild, type SpawnFn } from "../src/lib/build/spawn";
+import {
+  claimAndSpawnBuild,
+  resolveDefaultWrapperPath,
+  type SpawnFn,
+} from "../src/lib/build/spawn";
 import type { QueueEntrySnapshot } from "../src/lib/collect/queueActions";
 
 const tmpDirs: string[] = [];
@@ -107,5 +111,71 @@ describe("claimAndSpawnBuild", () => {
     if (result.claimed) {
       expect(result.runId).toBe(entry.hash.slice(0, 8));
     }
+  });
+});
+
+describe("resolveDefaultWrapperPath", () => {
+  // route.ts previously resolved the wrapper path via
+  // join(process.cwd(), "..", "scripts", "run-builder.sh") — cwd-relative,
+  // which breaks under a production Next.js server whose cwd is not
+  // guaranteed to be the app root (the exact class of bug the
+  // prod-prerender war story documents in project memory). This walks
+  // upward from the module's own location (not cwd) looking for the known
+  // sibling scripts/run-builder.sh, so it's stable regardless of the
+  // server process's working directory.
+  it("resolves an absolute path that exists on disk, independent of process.cwd()", () => {
+    const originalCwd = process.cwd();
+    try {
+      process.chdir(tmpdir());
+      const resolved = resolveDefaultWrapperPath();
+      expect(resolved).not.toBeNull();
+      if (resolved) {
+        expect(existsSync(resolved)).toBe(true);
+        expect(resolved.endsWith("run-builder.sh")).toBe(true);
+      }
+    } finally {
+      process.chdir(originalCwd);
+    }
+  });
+
+  it("returns null (not a wrong guess) when no scripts/run-builder.sh sibling can be found from the given start directory", () => {
+    const isolatedDir = tmpDir("dashboard-resolve-wrapper-isolated-");
+    // An isolated tmp dir has no ancestor containing scripts/run-builder.sh
+    // within the search bound, so this must fail closed rather than
+    // fabricate a nonexistent path.
+    const resolved = resolveDefaultWrapperPath(isolatedDir);
+    expect(resolved).toBeNull();
+  });
+
+  it("finds scripts/run-builder.sh by walking up from a nested start directory that has it as a sibling further up", () => {
+    const fakeRepoRoot = tmpDir("dashboard-resolve-wrapper-fakeroot-");
+    mkdirSync(join(fakeRepoRoot, "scripts"), { recursive: true });
+    writeFileSync(
+      join(fakeRepoRoot, "scripts", "run-builder.sh"),
+      "#!/bin/bash\n# Owns the build lifecycle state machine for one approved\n"
+    );
+    const nestedStart = join(fakeRepoRoot, "app", "src", "lib", "build");
+    mkdirSync(nestedStart, { recursive: true });
+
+    const resolved = resolveDefaultWrapperPath(nestedStart);
+    expect(resolved).toBe(join(fakeRepoRoot, "scripts", "run-builder.sh"));
+  });
+
+  it("rejects a scripts/run-builder.sh that exists but lacks the identity marker, continuing the walk-up rather than accepting a false-positive match (silent-failure-hunter finding: monorepo/nested-checkout collision)", () => {
+    const outerRoot = tmpDir("dashboard-resolve-wrapper-outer-");
+    // An unrelated file that happens to share the exact relative path
+    // scripts/run-builder.sh but is NOT this repo's wrapper — e.g. a
+    // nested checkout or monorepo sibling project with its own script of
+    // the same name.
+    mkdirSync(join(outerRoot, "unrelated-project", "scripts"), { recursive: true });
+    writeFileSync(
+      join(outerRoot, "unrelated-project", "scripts", "run-builder.sh"),
+      "#!/bin/bash\necho 'this is an unrelated script, not the coderails builder wrapper'\n"
+    );
+    const nestedStart = join(outerRoot, "unrelated-project", "app", "src");
+    mkdirSync(nestedStart, { recursive: true });
+
+    const resolved = resolveDefaultWrapperPath(nestedStart);
+    expect(resolved).toBeNull();
   });
 });

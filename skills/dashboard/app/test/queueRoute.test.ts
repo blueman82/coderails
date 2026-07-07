@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach } from "vitest";
 import { mkdtempSync, writeFileSync, readFileSync, existsSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createQueueActionHandler } from "../src/app/api/queue/route";
+import { createQueueActionHandler, makeClaimAndSpawnBuild } from "../src/app/api/queue/route";
 import type { ClaimAndSpawnBuildResult } from "../src/lib/build/spawn";
 
 const tmpDirs: string[] = [];
@@ -274,5 +274,46 @@ describe("POST /api/queue — pending-only guard + build spawn seam", () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.build).toEqual({ claimed: false, alreadyClaimed: true });
+  });
+});
+
+describe("makeClaimAndSpawnBuild", () => {
+  // Exercises the production wiring's wrapper_not_found fallback directly.
+  // The bare POST export always sees a real, resolved WRAPPER_PATH in
+  // dev/CI (scripts/run-builder.sh genuinely exists there), so this branch
+  // is otherwise untestable through POST/createQueueActionHandler alone —
+  // this test targets the extracted, parameterised function instead.
+  it("returns {claimed:false, error:'wrapper_not_found'} when wrapperPath is null, without ever calling the real spawn", () => {
+    const claimAndSpawnBuild = makeClaimAndSpawnBuild(null);
+    const entry = {
+      hash: "a".repeat(64),
+      toolName: "workflow-audit:propose-skill",
+      toolInput: { proposed_name: "x" },
+      createdAt: 1,
+      status: "approved" as const,
+    };
+    const result = claimAndSpawnBuild(entry);
+    expect(result).toEqual({ claimed: false, error: "wrapper_not_found" });
+  });
+
+  it("delegates to the real claimAndSpawnBuild with the given wrapperPath when non-null", () => {
+    // A nonexistent wrapperPath is fine here — this only proves the
+    // wrapperPath value flows through to a real spawn attempt (which then
+    // fails for its own unrelated reasons, e.g. invalid_name on a
+    // deliberately-invalid entry, proving this branch does NOT take the
+    // wrapper_not_found shortcut).
+    const claimAndSpawnBuild = makeClaimAndSpawnBuild("/nonexistent/wrapper.sh");
+    const entry = {
+      hash: "b".repeat(64),
+      toolName: "workflow-audit:propose-skill",
+      toolInput: { proposed_name: "Has Spaces" }, // invalid per NAME_PATTERN
+      createdAt: 1,
+      status: "approved" as const,
+    };
+    const result = claimAndSpawnBuild(entry);
+    // Must NOT be wrapper_not_found — proves the non-null branch actually
+    // delegates to the real function rather than always taking the
+    // fallback regardless of input.
+    expect(result).toEqual({ claimed: false, error: "invalid_name" });
   });
 });
