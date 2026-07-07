@@ -115,7 +115,7 @@ check "main: perl -i on .go -> deny"  DENY  "$(run_cwd "$(payload_with_cwd "perl
 # >> append into source on main -> DENY
 check "main: >> into .js -> deny"     DENY  "$(run_cwd "$(payload_with_cwd "echo 'foo' >> app.js" "$MAIN_REPO")" "$MAIN_REPO")"
 
-# --- F1: git clean long/separated force flags ---
+# --- git clean long/separated force flags ---
 check "git clean --force -> deny"          DENY  "$(run "$(payload "git clean --force")")"
 check "git clean -d -f -> deny"            DENY  "$(run "$(payload "git clean -d -f")")"
 check "git clean -d --force -> deny"       DENY  "$(run "$(payload "git clean -d --force")")"
@@ -123,11 +123,11 @@ check "git clean bare -> allow"            ALLOW "$(run "$(payload "git clean")"
 check "git clean --dry-run -> allow"       ALLOW "$(run "$(payload "git clean --dry-run")")"
 check "git clean -i -> allow"              ALLOW "$(run "$(payload "git clean -i")")"
 
-# --- F2: truncate --size long flag ---
+# --- truncate --size long flag ---
 check "truncate --size=0 x -> deny"        DENY  "$(run "$(payload "truncate --size=0 file.txt")")"
 check "truncate --size 0 x -> deny"        DENY  "$(run "$(payload "truncate --size 0 file.txt")")"
 
-# --- F3: cwd fallback (cwd absent → hook resolves branch from $PWD) ---
+# --- cwd fallback (cwd absent → hook resolves branch from $PWD) ---
 # When .cwd is absent, the hook falls back to $PWD (destructive_bash_gate.sh:96).
 # The branch outcome therefore depends on $PWD, so we pin $PWD to a known repo via
 # a subshell `cd` rather than relying on the ambient branch of the coderails
@@ -136,53 +136,53 @@ check "truncate --size 0 x -> deny"        DENY  "$(run "$(payload "truncate --s
 check "no-cwd payload, PWD on feat -> allow" ALLOW "$(cd "$FEAT_REPO" && run "$(payload "sed -i 's/a/b/' foo.py")")"
 check "no-cwd payload, PWD on main -> deny"  DENY  "$(cd "$MAIN_REPO" && run "$(payload "sed -i 's/a/b/' foo.py")")"
 
-# --- F3: target-repo resolution (file in feature-branch repo, session cwd on main) ---
+# --- target-repo resolution (file in feature-branch repo, session cwd on main) ---
 # Target file is in FEAT_REPO (on a feature branch). The hook must not over-block.
-check "F3 feature-repo target, main cwd -> allow" ALLOW "$(run_cwd "$(payload_with_cwd "sed -i 's/a/b/' $FEAT_REPO/foo.py" "$MAIN_REPO")" "$MAIN_REPO")"
+check "feature-repo target, main cwd -> allow" ALLOW "$(run_cwd "$(payload_with_cwd "sed -i 's/a/b/' $FEAT_REPO/foo.py" "$MAIN_REPO")" "$MAIN_REPO")"
 
-# --- F4: redirect extension anchored to end-of-token ---
-check "F4 echo > output.go.log -> allow"        ALLOW "$(run_cwd "$(payload_with_cwd "echo x > output.go.log" "$MAIN_REPO")" "$MAIN_REPO")"
-check "F4 echo > foo.py.bak -> allow"           ALLOW "$(run_cwd "$(payload_with_cwd "echo x > foo.py.bak" "$MAIN_REPO")" "$MAIN_REPO")"
-check "F4 echo > changes.py.txt -> allow"       ALLOW "$(run_cwd "$(payload_with_cwd "echo x > changes.py.txt" "$MAIN_REPO")" "$MAIN_REPO")"
-check "F4 echo > real.py -> deny"               DENY  "$(run_cwd "$(payload_with_cwd "echo x > real.py" "$MAIN_REPO")" "$MAIN_REPO")"
-check "F4 find && echo --delete -> allow"       ALLOW "$(run "$(payload "find . -name x && echo --delete")")"
-check "F4 find; rm --delete-like -> allow"      ALLOW "$(run "$(payload "find . -name tmp; echo done --delete-style")")"
+# --- redirect extension anchored to end-of-token ---
+check "echo > output.go.log -> allow"        ALLOW "$(run_cwd "$(payload_with_cwd "echo x > output.go.log" "$MAIN_REPO")" "$MAIN_REPO")"
+check "echo > foo.py.bak -> allow"           ALLOW "$(run_cwd "$(payload_with_cwd "echo x > foo.py.bak" "$MAIN_REPO")" "$MAIN_REPO")"
+check "echo > changes.py.txt -> allow"       ALLOW "$(run_cwd "$(payload_with_cwd "echo x > changes.py.txt" "$MAIN_REPO")" "$MAIN_REPO")"
+check "echo > real.py -> deny"               DENY  "$(run_cwd "$(payload_with_cwd "echo x > real.py" "$MAIN_REPO")" "$MAIN_REPO")"
+check "find && echo --delete -> allow"       ALLOW "$(run "$(payload "find . -name x && echo --delete")")"
+check "find; rm --delete-like -> allow"      ALLOW "$(run "$(payload "find . -name tmp; echo done --delete-style")")"
 
-# --- F5: cp/mv/dd write-to-source on main vs feature branch ---
-check "F5 main: cp to foo.py -> deny"           DENY  "$(run_cwd "$(payload_with_cwd "cp /tmp/x foo.py" "$MAIN_REPO")" "$MAIN_REPO")"
-check "F5 main: mv to foo.go -> deny"           DENY  "$(run_cwd "$(payload_with_cwd "mv /tmp/x foo.go" "$MAIN_REPO")" "$MAIN_REPO")"
-check "F5 main: dd of=foo.py -> deny"           DENY  "$(run_cwd "$(payload_with_cwd "dd of=foo.py if=/tmp/x" "$MAIN_REPO")" "$MAIN_REPO")"
-check "F5 feat: cp to foo.py -> allow"          ALLOW "$(run_cwd "$(payload_with_cwd "cp /tmp/x foo.py" "$FEAT_REPO")" "$FEAT_REPO")"
-check "F5 feat: mv to foo.go -> allow"          ALLOW "$(run_cwd "$(payload_with_cwd "mv /tmp/x foo.go" "$FEAT_REPO")" "$FEAT_REPO")"
-check "F5 feat: dd of=foo.py -> allow"          ALLOW "$(run_cwd "$(payload_with_cwd "dd of=foo.py if=/tmp/x" "$FEAT_REPO")" "$FEAT_REPO")"
-check "F5 main: cp to SKILL.md -> deny"         DENY  "$(run_cwd "$(payload_with_cwd "cp /tmp/x skills/mything/SKILL.md" "$MAIN_REPO")" "$MAIN_REPO")"
-check "F5 main: mv to commands/x.md -> deny"    DENY  "$(run_cwd "$(payload_with_cwd "mv /tmp/x commands/prep.md" "$MAIN_REPO")" "$MAIN_REPO")"
+# --- cp/mv/dd write-to-source on main vs feature branch ---
+check "main: cp to foo.py -> deny"           DENY  "$(run_cwd "$(payload_with_cwd "cp /tmp/x foo.py" "$MAIN_REPO")" "$MAIN_REPO")"
+check "main: mv to foo.go -> deny"           DENY  "$(run_cwd "$(payload_with_cwd "mv /tmp/x foo.go" "$MAIN_REPO")" "$MAIN_REPO")"
+check "main: dd of=foo.py -> deny"           DENY  "$(run_cwd "$(payload_with_cwd "dd of=foo.py if=/tmp/x" "$MAIN_REPO")" "$MAIN_REPO")"
+check "feat: cp to foo.py -> allow"          ALLOW "$(run_cwd "$(payload_with_cwd "cp /tmp/x foo.py" "$FEAT_REPO")" "$FEAT_REPO")"
+check "feat: mv to foo.go -> allow"          ALLOW "$(run_cwd "$(payload_with_cwd "mv /tmp/x foo.go" "$FEAT_REPO")" "$FEAT_REPO")"
+check "feat: dd of=foo.py -> allow"          ALLOW "$(run_cwd "$(payload_with_cwd "dd of=foo.py if=/tmp/x" "$FEAT_REPO")" "$FEAT_REPO")"
+check "main: cp to SKILL.md -> deny"         DENY  "$(run_cwd "$(payload_with_cwd "cp /tmp/x skills/mything/SKILL.md" "$MAIN_REPO")" "$MAIN_REPO")"
+check "main: mv to commands/x.md -> deny"    DENY  "$(run_cwd "$(payload_with_cwd "mv /tmp/x commands/prep.md" "$MAIN_REPO")" "$MAIN_REPO")"
 # cp/mv to a non-source file on main -> allow
-check "F5 main: cp to README.md -> allow"       ALLOW "$(run_cwd "$(payload_with_cwd "cp /tmp/x README.md" "$MAIN_REPO")" "$MAIN_REPO")"
+check "main: cp to README.md -> allow"       ALLOW "$(run_cwd "$(payload_with_cwd "cp /tmp/x README.md" "$MAIN_REPO")" "$MAIN_REPO")"
 
-# --- F6: backtick/$() command-substitution in workflow-script free-text args ---
+# --- backtick/$() command-substitution in workflow-script free-text args ---
 # push.sh/merge.sh/post_review.sh/post_evals.sh take a free-text message argument.
 # A backtick or $() inside that argument executes as live command substitution
 # when the invoking command line is interpolated into bash — the same injection
-# class as the $ARGUMENTS render-time bug (PR #97), but triggered by the model's
-# own Bash tool_input rather than a render-time !`cmd` line.
-check "F6 push.sh with backtick in message -> deny" DENY \
+# class as a render-time !`cmd` line, but triggered by the model's own Bash
+# tool_input rather than at render time.
+check "push.sh with backtick in message -> deny" DENY \
   "$(run "$(payload 'bash "scripts/push.sh" "fix thing, uses \`git rev-parse\` under the hood"')")"
-check "F6 push.sh with \$(...) in message -> deny" DENY \
+check "push.sh with \$(...) in message -> deny" DENY \
   "$(run "$(payload 'bash "scripts/push.sh" "fix thing, runs $(whoami) as part of it"')")"
-check "F6 merge.sh with backtick in message -> deny" DENY \
+check "merge.sh with backtick in message -> deny" DENY \
   "$(run "$(payload 'bash "scripts/merge.sh" "19" "note: \`rm -rf /\` should never run"')")"
-check "F6 post_review.sh with backtick -> deny" DENY \
+check "post_review.sh with backtick -> deny" DENY \
   "$(run "$(payload 'bash "scripts/post_review.sh" validate "/tmp/x" "uses \`foo\`"')")"
-check "F6 post_evals.sh with backtick -> deny" DENY \
+check "post_evals.sh with backtick -> deny" DENY \
   "$(run "$(payload 'bash "scripts/post_evals.sh" validate-structure "/tmp/x.json" "19" "\`sha\`"')")"
 # Clean invocations (no backtick/$()) must still be allowed.
-check "F6 push.sh clean message -> allow" ALLOW \
+check "push.sh clean message -> allow" ALLOW \
   "$(run "$(payload 'bash "scripts/push.sh" "fix thing, uses git rev-parse show-toplevel under the hood"')")"
-check "F6 merge.sh clean args -> allow" ALLOW \
+check "merge.sh clean args -> allow" ALLOW \
   "$(run "$(payload 'bash "scripts/merge.sh" "19"')")"
 # Backticks/$() in unrelated commands (not these 4 scripts) must not be blocked by this check.
-check "F6 unrelated command with backtick -> allow" ALLOW \
+check "unrelated command with backtick -> allow" ALLOW \
   "$(run "$(payload 'echo "just a note about \`code\` formatting"')")"
 
 [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails)"; exit 1; }
