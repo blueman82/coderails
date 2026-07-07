@@ -119,6 +119,7 @@ catalog: [`docs/REFERENCE.md`](./docs/REFERENCE.md).
 | `UserPromptSubmit` | `discipline_catchup.sh` | warn |
 | `Stop` + `SubagentStop` | `check_confidence_labels.sh` | **block** — response ≥200 chars with no `(verified)`/`(inferred)`/`(guess)` label; on `SubagentStop` reads `last_assistant_message` directly |
 | `Stop` + `SubagentStop` | `check_verify_loop.sh` | **block** — any untagged `## Did Not Verify` bullet (only an explicit `(unverifiable: <reason>)` tag passes); on `SubagentStop` reads `last_assistant_message` directly |
+| `Stop` | `voice_announce.sh` | **observe-only** — speaks a loop lifecycle event (complete / waiting-on-human / stopped / stall) via macOS `say`, backgrounded so it never blocks; silent outside an active loop and when text extraction comes back empty (not a stall); debounced per kind; runs first in the Stop array |
 | `Stop` | `loop_state_guard.sh` | **block** — agentic loop active but no session-owned progress.json |
 | `Stop` | `loop_stall_guard.sh` | **block** — loop incomplete with no valid LOOP-STOP declaration |
 | `Stop` | `unregistered_loop_guard.sh` | **nudge** — dispatch-heavy session (≥3 Agent-dispatch turns) with no progress.json and no agentic-loop Skill invocation; never blocks |
