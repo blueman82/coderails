@@ -5,9 +5,20 @@ import { DashboardContextTestProvider } from "./testUtils/DashboardContextTestPr
 import { AssistantLinkPanel } from "../src/components/AssistantLinkPanel";
 import type { DashboardSnapshot } from "../src/hooks/useDashboardState";
 import type { QueueEntry } from "../src/lib/collect/queue";
+import type { BuildEntry } from "../src/lib/collect/builds";
 
 function emptySnapshot(overrides: Partial<DashboardSnapshot> = {}): DashboardSnapshot {
-  return { sessions: [], loops: [], gates: [], trail: [], health: [], runs: [], queue: [], ...overrides };
+  return {
+    sessions: [],
+    loops: [],
+    gates: [],
+    trail: [],
+    health: [],
+    runs: [],
+    queue: [],
+    builds: [],
+    ...overrides,
+  };
 }
 
 function pendingEntry(overrides: Partial<QueueEntry> = {}): QueueEntry {
@@ -242,6 +253,115 @@ describe("AssistantLinkPanel", () => {
       );
       expect(html).toContain("Approve");
       expect(html).toContain("Deny");
+    });
+  });
+
+  describe("approve-builder build-state visibility", () => {
+    function approvedProposalEntry(overrides: Partial<QueueEntry> = {}): QueueEntry {
+      return pendingEntry({
+        hash: "buildHash1",
+        toolName: "workflow-audit:propose-skill",
+        status: "approved",
+        toolInput: {
+          cluster_ngram: ["Bash:git log", "Bash:git push"],
+          count: 3,
+          sessions: ["s1", "s2", "s3"],
+          task_summary: "Sessions repeatedly run git log then git push.",
+          proposed_name: "git-log-push",
+          proposed_description: "Use when a session reviews commits then pushes.",
+        },
+        ...overrides,
+      });
+    }
+
+    function buildEntry(overrides: Partial<BuildEntry> = {}): BuildEntry {
+      return { schemaVersion: 1, hash: "buildHash1", state: "running", ...overrides };
+    }
+
+    it("renders nothing build-related for an approved entry with no build entry yet (control)", () => {
+      const entry = approvedProposalEntry();
+      const html = renderToStaticMarkup(
+        createElement(
+          DashboardContextTestProvider,
+          { snapshot: emptySnapshot({ queue: [entry], builds: [] }) },
+          createElement(AssistantLinkPanel, { token: "t" })
+        )
+      );
+      expect(html).not.toContain("building");
+      expect(html).not.toContain("awaiting your merge");
+      expect(html).not.toContain("failed:");
+      expect(html).not.toContain("builder dead");
+    });
+
+    it('renders "building" for state running with a fresh heartbeat', () => {
+      const entry = approvedProposalEntry();
+      const build = buildEntry({ state: "running", heartbeatAgeMs: 5_000 });
+      const html = renderToStaticMarkup(
+        createElement(
+          DashboardContextTestProvider,
+          { snapshot: emptySnapshot({ queue: [entry], builds: [build] }) },
+          createElement(AssistantLinkPanel, { token: "t" })
+        )
+      );
+      expect(html).toContain("building");
+      expect(html).not.toContain("builder dead");
+    });
+
+    it('renders "builder dead" for state running with a stale heartbeat (> 3 minutes)', () => {
+      const entry = approvedProposalEntry();
+      const build = buildEntry({ state: "running", heartbeatAgeMs: 4 * 60 * 1000 });
+      const html = renderToStaticMarkup(
+        createElement(
+          DashboardContextTestProvider,
+          { snapshot: emptySnapshot({ queue: [entry], builds: [build] }) },
+          createElement(AssistantLinkPanel, { token: "t" })
+        )
+      );
+      expect(html).toContain("builder dead");
+    });
+
+    it('renders "PR open — awaiting your merge" with a link to prUrl for state pr_open', () => {
+      const entry = approvedProposalEntry();
+      const build = buildEntry({
+        state: "pr_open",
+        prUrl: "https://github.com/blueman82/coderails/pull/999",
+      });
+      const html = renderToStaticMarkup(
+        createElement(
+          DashboardContextTestProvider,
+          { snapshot: emptySnapshot({ queue: [entry], builds: [build] }) },
+          createElement(AssistantLinkPanel, { token: "t" })
+        )
+      );
+      expect(html).toContain("awaiting your merge");
+      expect(html).toContain("https://github.com/blueman82/coderails/pull/999");
+    });
+
+    it('renders "failed: <reason> — delete builds/<hash> to retry" for state failed', () => {
+      const entry = approvedProposalEntry();
+      const build = buildEntry({ state: "failed", failureReason: "hash_mismatch:abc123" });
+      const html = renderToStaticMarkup(
+        createElement(
+          DashboardContextTestProvider,
+          { snapshot: emptySnapshot({ queue: [entry], builds: [build] }) },
+          createElement(AssistantLinkPanel, { token: "t" })
+        )
+      );
+      expect(html).toContain("failed: hash_mismatch:abc123");
+      expect(html).toContain(`delete builds/${build.hash} to retry`);
+    });
+
+    it("does not render a build-state row for an unrelated approved entry (wrong toolName), even if a build entry with a matching hash exists", () => {
+      const entry = pendingEntry({ hash: "buildHash1", status: "approved" });
+      const build = buildEntry({ state: "pr_open", prUrl: "https://example.com/pr/1" });
+      const html = renderToStaticMarkup(
+        createElement(
+          DashboardContextTestProvider,
+          { snapshot: emptySnapshot({ queue: [entry], builds: [build] }) },
+          createElement(AssistantLinkPanel, { token: "t" })
+        )
+      );
+      expect(html).not.toContain("awaiting your merge");
     });
   });
 });

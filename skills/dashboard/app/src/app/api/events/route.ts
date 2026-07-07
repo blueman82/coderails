@@ -8,6 +8,7 @@ const DEFAULT_PROJECTS_DIR = join(homedir(), ".claude", "projects");
 const DEFAULT_LOOPS_DIR = join(homedir(), ".claude", "agentic-loop");
 const DEFAULT_RUNS_DIR = join(homedir(), ".claude", "coderails-dashboard", "runs");
 const DEFAULT_QUEUE_DIR = join(homedir(), ".claude", "coderails-dashboard", "approvals");
+const DEFAULT_BUILDS_DIR = join(homedir(), ".claude", "coderails-dashboard", "builds");
 
 function sseFrame(event: string, data: unknown): string {
   return `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
@@ -20,6 +21,7 @@ export interface EventsHandlerDeps {
   loopsDir?: string;
   runsDir?: string;
   queueDir?: string;
+  buildsDir?: string;
   gatesPollMs?: number;
   activityDebounceMs?: number;
 }
@@ -49,6 +51,7 @@ export function createEventsHandler(deps: EventsHandlerDeps) {
       loopsDir: deps.loopsDir ?? DEFAULT_LOOPS_DIR,
       runsDir: deps.runsDir ?? DEFAULT_RUNS_DIR,
       queueDir: deps.queueDir ?? DEFAULT_QUEUE_DIR,
+      buildsDir: deps.buildsDir ?? DEFAULT_BUILDS_DIR,
       gatesPollMs: deps.gatesPollMs,
       activityDebounceMs: deps.activityDebounceMs,
       onError: (source, err) => {

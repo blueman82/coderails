@@ -7,9 +7,54 @@ import { useState, useEffect } from "react";
 import { useDashboardContext } from "@/components/DashboardProvider";
 import { formatRelativeAge } from "@/hooks/useDashboardState";
 import type { QueueEntry } from "@/lib/collect/queue";
+import type { BuildEntry } from "@/lib/collect/builds";
 
 export interface AssistantLinkPanelProps {
   token: string;
+}
+
+// Heartbeat staleness threshold: run-builder.sh touches builds/<hash>/heartbeat
+// every 30s (BUILDER_HEARTBEAT_SECS) while claude is running — 3 minutes of
+// silence means the process died without writing a terminal state.
+const HEARTBEAT_STALE_MS = 3 * 60 * 1000;
+
+// Renders the build-state CTA for an approved workflow-audit:propose-skill
+// queue entry, joined to its builds/<hash>/ sidecar by hash. Returns null
+// when there's no build entry yet (claim hasn't landed on disk, or this
+// approved entry predates the builder pipeline) — the row still renders,
+// just without a build status line.
+function renderBuildStatus(build: BuildEntry | undefined) {
+  if (!build) return null;
+  if (build.state === "pr_open") {
+    return (
+      <div className="hud-build-status hud-build-pr-open">
+        {build.prUrl ? (
+          <a href={build.prUrl} target="_blank" rel="noreferrer">
+            PR open — awaiting your merge
+          </a>
+        ) : (
+          "PR open — awaiting your merge"
+        )}
+      </div>
+    );
+  }
+  if (build.state === "failed") {
+    return (
+      <div className="hud-build-status hud-build-failed">
+        failed: {build.failureReason ?? "unknown"} — delete builds/{build.hash} to retry
+      </div>
+    );
+  }
+  if (build.state === "running") {
+    const stale = build.heartbeatAgeMs !== undefined && build.heartbeatAgeMs > HEARTBEAT_STALE_MS;
+    return (
+      <div className={`hud-build-status ${stale ? "hud-build-dead" : "hud-build-building"}`}>
+        {stale ? "builder dead" : "building"}
+      </div>
+    );
+  }
+  // claimed | queued
+  return <div className="hud-build-status hud-build-building">building</div>;
 }
 
 // Truncates JSON.stringify(toolInput) for display — this is the ONLY
@@ -100,7 +145,7 @@ async function postDecision(
 // explicitly out of scope for this component; they are not rendered here.
 export function AssistantLinkPanel({ token }: AssistantLinkPanelProps) {
   const { snapshot } = useDashboardContext();
-  const { queue } = snapshot;
+  const { queue, builds } = snapshot;
   const [now, setNow] = useState<number | null>(null);
   // Tracks hashes currently mid-request so a double-click can't fire twice,
   // and clears once the queue snapshot itself confirms the entry left
@@ -116,6 +161,14 @@ export function AssistantLinkPanel({ token }: AssistantLinkPanelProps) {
   }, []);
 
   const pendingEntries: QueueEntry[] = queue.filter((e) => e.status === "pending");
+  // Approved workflow-audit:propose-skill entries with a build already
+  // claimed on disk — joined to their builds/<hash>/ sidecar by hash. An
+  // approved entry with no build entry yet (claim hasn't landed, or predates
+  // this feature) renders nothing here; there's no status to show.
+  const buildingEntries: { entry: QueueEntry; build: BuildEntry }[] = queue
+    .filter((e) => e.status === "approved" && e.toolName === "workflow-audit:propose-skill")
+    .map((entry) => ({ entry, build: builds.find((b) => b.hash === entry.hash) }))
+    .filter((x): x is { entry: QueueEntry; build: BuildEntry } => x.build !== undefined);
 
   async function handleDecision(hash: string, decision: "approved" | "denied") {
     if (pending[hash]) return;
@@ -174,6 +227,18 @@ export function AssistantLinkPanel({ token }: AssistantLinkPanelProps) {
       ) : (
         <div className="hud-empty-state">no pending approvals</div>
       )}
+      {buildingEntries.length > 0 &&
+        buildingEntries.map(({ entry, build }) => (
+          <div className="hud-gate-row" key={entry.hash}>
+            <div className="hud-gate-top">
+              <span>{entry.toolName}</span>
+            </div>
+            {isWorkflowAuditProposal(entry.toolInput) ? (
+              <div className="hud-queue-proposal-name">{entry.toolInput.proposed_name}</div>
+            ) : null}
+            {renderBuildStatus(build)}
+          </div>
+        ))}
     </div>
   );
 }
