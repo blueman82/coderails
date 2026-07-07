@@ -224,4 +224,23 @@ check "closed \$(...) assignment earlier, clean post_evals.sh args -> allow" ALL
 check "closed \$(...) earlier, unrelated prose mentions merge.sh -> allow" ALLOW \
   "$(run "$(payload 'echo $(date) && echo see scripts/merge.sh docs')")"
 
+# --- SECURITY: a genuine in-argument substitution wrapped in an outer
+# stdout-capture must still DENY. The prior fix's "unclosed substitution
+# before the script name means the whole invocation is being captured"
+# heuristic treated ANY unclosed-looking prefix as proof the argument itself
+# was clean — but an outer capture can wrap an invocation whose OWN argument
+# independently carries a live substitution. This is the exact command-
+# substitution injection class the gate exists to block, merely wrapped in
+# an extra layer: out=$(bash scripts/merge.sh 19 "note with $(whoami)") — the
+# whoami call is live regardless of the outer $(...) capturing the script's
+# stdout into $out.
+check "in-arg substitution wrapped in outer stdout-capture -> deny" DENY \
+  "$(run "$(payload 'out=$(bash scripts/merge.sh 19 "note with $(whoami)")')")"
+
+# --- SECURITY: two script mentions on one line, each in its own && segment —
+# a clean first call must not mask a genuine substitution in a later call's
+# own argument. Each segment is judged independently.
+check "two script mentions, second has real substitution -> deny" DENY \
+  "$(run "$(payload 'bash scripts/merge.sh "19" && bash scripts/post_evals.sh post 19 "note with $(whoami)"')")"
+
 [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails)"; exit 1; }
