@@ -18,6 +18,43 @@ assumes it and focuses on operating the system.
 **Read the security warning before enabling anything beyond the shipped
 read-only routines.**
 
+## Prerequisites for a cold clone
+
+A fresh `git clone` is not runnable as-is — both TypeScript packages need
+their dependencies installed before anything under `skills/dashboard/`
+will import:
+
+```bash
+cd skills/dashboard/lib && npm install
+cd skills/dashboard/runner && npm install
+```
+
+`node_modules` is gitignored in both packages and nothing in this repo
+builds it for you; the launchd jobs described below import through it
+directly (Node 24's built-in TypeScript type-stripping runs `src/*.ts`
+with no build step), so a missing `npm install` in either package
+surfaces as a `MODULE_NOT_FOUND` the first time a routine fires, not at
+clone time.
+
+The dashboard's data directory (`~/.claude/coderails-dashboard/` in every
+path in this doc) is derived from `$HOME` at runtime (see `BASE_DIR` in
+`skills/dashboard/runner/src/main.ts` and `seedMain.ts`) — there is no
+flag or config option to relocate it. Redirecting `HOME` (e.g. `HOME=
+/tmp/fake-home node src/main.ts`) is the supported lever for a sandboxed
+or test run that shouldn't touch a real machine's dashboard state.
+
+The `claude` binary itself is resolved from a short, hard-coded candidate
+list (`KNOWN_CLAUDE_PATHS` in `skills/dashboard/runner/src/exec.ts`), not
+`$PATH` — `launchd` invokes these jobs with no `PATH` set at all
+(verified via `launchctl print gui/$UID`), so a bare `"claude"` command
+string would fail to spawn under the scheduler even though it works fine
+in an interactive shell. The candidate list is machine-specific by
+design (documented as YAGNI in that file's own comments — no
+multi-machine deployment exists yet to justify making it configurable):
+on a different machine, edit `KNOWN_CLAUDE_PATHS` in
+`skills/dashboard/runner/src/exec.ts` to add that machine's `claude`
+install path.
+
 ## Architecture: intent producers, one runner
 
 Every run — a dashboard button press, an Obsidian command, or a scheduled
@@ -159,7 +196,12 @@ Four places, roughest signal to most precise:
    `endedAt` folded in), across every button and routine. This is the
    ground truth for "did this run, when, with what argv, what exit
    code" — read via `readRuns()`, the same reader the merged dashboard
-   app itself uses.
+   app itself uses. Each record carries an `outputPath` field, but it is
+   presently **reserved**: the runner computes the path and stores it,
+   nothing writes the run's captured stdout/stderr there today, so
+   reading `outputPath` gets you a path to a file that doesn't exist. For
+   captured output, this runlog is not yet the place to look — see the
+   `sweeper.log` and vault-note entries above and below instead.
 3. **Vault run notes** — `<first wikiPath>/dashboard-runs/<routine or
    button name>.md`, one file per routine/button, append-only, one `##
    [YYYY-MM-DD] run <id> — green|red` section per run with a reason on

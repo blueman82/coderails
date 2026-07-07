@@ -1,6 +1,8 @@
 #!/usr/bin/env node
+import { existsSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { loadConfig } from "@coderails/dashboard-lib";
 import type { DashboardConfig } from "@coderails/dashboard-lib";
 import { sweepOnce, type SweepResult } from "./sweep.ts";
@@ -63,10 +65,34 @@ export async function run(deps: RunDeps = {}): Promise<number> {
 }
 
 // Thin bin shim: all logic lives in run() above so it can be tested without
-// process.exit tearing down the test runner. The import.meta.url guard
-// keeps this from firing (and exiting the process) when main.test.ts
-// imports run() directly — only firing when this file is the actual entry
-// point, e.g. via bin/sweeper.sh invoking dist/main.js.
-if (import.meta.url === `file://${process.argv[1]}`) {
+// process.exit tearing down the test runner. The guard below keeps this
+// from firing (and exiting the process) when main.test.ts imports run()
+// directly — only firing when this file is the actual entry point, e.g.
+// via bin/sweeper.sh invoking src/main.ts.
+//
+// Comparing realpaths (rather than import.meta.url against process.argv[1]
+// verbatim) is required because import.meta.url always resolves through
+// the filesystem while process.argv[1] keeps whatever path string was
+// typed on the command line — the two silently diverge whenever the
+// invocation path traverses a symlink, including macOS's own /var ->
+// /private/var, which every /tmp-rooted invocation crosses. An unguarded
+// mismatch here doesn't error; it just skips run() entirely, so a routine
+// invoked this way silently does nothing (exit 0, no output). Each side is
+// wrapped so a path that vanishes between argv parsing and this check
+// (e.g. a deleted temp dir) can't crash the guard itself — it just falls
+// through to "not the entry point".
+function tryRealpath(path: string): string | undefined {
+  try {
+    return existsSync(path) ? realpathSync(path) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+const isEntryPoint =
+  process.argv[1] !== undefined &&
+  tryRealpath(fileURLToPath(import.meta.url)) === tryRealpath(process.argv[1]);
+
+if (isEntryPoint) {
   run().then((code) => process.exit(code));
 }

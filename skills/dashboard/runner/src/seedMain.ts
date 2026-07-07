@@ -1,12 +1,14 @@
 #!/usr/bin/env node
 // CLI entrypoint for the seed step (see seed.ts's header for why seeding
 // exists as a producer rather than a sweep.ts/main.ts change). Mirrors
-// main.ts's shape (deps injection for testability, an import.meta.url
-// guard so importing run() in tests doesn't call process.exit) but is a
-// separate file rather than an edit to main.ts, per the authorised scope:
-// only new files in the runner package.
+// main.ts's shape (deps injection for testability, an entrypoint guard so
+// importing run() in tests doesn't call process.exit) but is a separate
+// file rather than an edit to main.ts, per the authorised scope: only new
+// files in the runner package.
+import { existsSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { loadConfig } from "@coderails/dashboard-lib";
 import type { DashboardConfig } from "@coderails/dashboard-lib";
 import { seedDueRoutines, type SeedResult } from "./seed.ts";
@@ -62,6 +64,23 @@ export async function run(deps: SeedRunDeps = {}): Promise<number> {
   return 0;
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+// See main.ts's guard for why this compares realpaths rather than
+// import.meta.url against process.argv[1] verbatim: the two silently
+// diverge whenever the invocation path traverses a symlink (including
+// macOS's own /var -> /private/var), which would otherwise make this
+// entrypoint skip run() entirely — exit 0, no output, nothing seeded.
+function tryRealpath(path: string): string | undefined {
+  try {
+    return existsSync(path) ? realpathSync(path) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+const isEntryPoint =
+  process.argv[1] !== undefined &&
+  tryRealpath(fileURLToPath(import.meta.url)) === tryRealpath(process.argv[1]);
+
+if (isEntryPoint) {
   run().then((code) => process.exit(code));
 }
