@@ -107,7 +107,7 @@ describe("collectQueue", () => {
   });
 
   it("a deliberately-broken collector that lets readdirSync's ENOENT propagate would fail the nonexistent-dir control", () => {
-    // Negative control for E2: prove the "does not throw" assertion is meaningful by
+    // Negative control: prove the "does not throw" assertion is meaningful by
     // demonstrating the naive implementation (no try/catch) does throw on a missing dir.
     expect(() => {
       readdirSync(join(tmpdir(), "does-not-exist-queue-dir-2"));
