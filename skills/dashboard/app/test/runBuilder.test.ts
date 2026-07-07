@@ -107,7 +107,16 @@ function makeRepoFixture(): string {
 function makeStubClaudeBin(script: string): string {
   const binDir = tmpDir("dashboard-run-builder-stubbin-");
   const stubPath = join(binDir, "claude");
-  writeFileSync(stubPath, `#!/bin/bash\n${script}\n`);
+  // The wrapper also calls `claude --version` (Step 5, before the actual
+  // build spawn) separately from the `-p` build invocation. The real CLI
+  // returns immediately for --version; a test's script body (e.g. one that
+  // sleeps to simulate a long build) must not apply to that unrelated call,
+  // or timing-sensitive tests (watchdog timeout) would be thrown off by a
+  // stub that treats every invocation identically regardless of args.
+  writeFileSync(
+    stubPath,
+    `#!/bin/bash\ncase "$1" in\n  --version) echo "stub-claude 0.0.0"; exit 0 ;;\nesac\n${script}\n`
+  );
   chmodSync(stubPath, 0o755);
   return binDir;
 }
