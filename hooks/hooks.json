@@ -55,6 +55,11 @@
             "type": "command",
             "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/unregistered_loop_guard.sh\"",
             "timeout": 15
+          },
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/voice_announce.sh\"",
+            "timeout": 15
           }
         ]
       }
