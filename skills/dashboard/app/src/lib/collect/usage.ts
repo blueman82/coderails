@@ -65,6 +65,7 @@ function parseUsageEvent(line: string): UsageEvent | null {
     timestampMs: timestamp,
     inputTokens: usage.input_tokens + cacheCreation + cacheRead,
     outputTokens: usage.output_tokens,
+    cacheReadTokens: cacheRead,
   };
 }
 
