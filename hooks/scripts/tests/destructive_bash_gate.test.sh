@@ -456,6 +456,36 @@ check "allowlist present: -ufd cluster (force in middle) -> deny" DENY \
 check "allowlist present: -u only (no f), force-with-lease -> allow" ALLOW \
   "$(run_cwd "$(payload_with_cwd "git push -u origin main --force-with-lease" "$ALLOWLIST_REPO")" "$ALLOWLIST_REPO")"
 
+# 5d. SECURITY — a TAB character (not just a literal space) as the flag
+# separator still denies with the allowlist present. Regression guard for a
+# bypass found in review: naked_force_re's token boundaries were previously
+# literal spaces only ("(^| )" / "( |$)"), but bash's default IFS splits on
+# space, tab, AND newline — a tool_input line with a tab between "-f" and
+# "--force-with-lease" produces the exact same real argv split as a space
+# would, so a space-only boundary let the tab-separated form slip through as
+# "no naked force detected" even though it is one. Fixed by using
+# [[:space:]] character classes instead of literal spaces throughout the
+# block. Each case below is paired with a POSITIVE CONTROL (plain
+# force-with-lease, no tab, same allowlist) run in the SAME check group —
+# an earlier verification pass on this exact bug wrongly concluded "not
+# reproduced" because it only ever asserted DENY with no allowlist present,
+# which is uninformatively true (fails closed for the wrong reason) rather
+# than proving detection; pairing every tab-form assertion with a same-
+# fixture positive control makes that class of false negative structurally
+# impossible to repeat here.
+TAB=$(printf '\t')
+POS_CTRL=$(run_cwd "$(payload_with_cwd "git push --force-with-lease" "$ALLOWLIST_REPO")" "$ALLOWLIST_REPO")
+check "positive control: plain force-with-lease, allowlist live -> allow" ALLOW "$POS_CTRL"
+check "allowlist present: -f + TAB + force-with-lease -> deny" DENY \
+  "$(run_cwd "$(payload_with_cwd "git push -f${TAB}--force-with-lease" "$ALLOWLIST_REPO")" "$ALLOWLIST_REPO")"
+check "allowlist present: -uf cluster + TAB + force-with-lease -> deny" DENY \
+  "$(run_cwd "$(payload_with_cwd "git push -uf${TAB}--force-with-lease" "$ALLOWLIST_REPO")" "$ALLOWLIST_REPO")"
+check "allowlist present: --force + TAB + force-with-lease -> deny" DENY \
+  "$(run_cwd "$(payload_with_cwd "git push --force${TAB}--force-with-lease" "$ALLOWLIST_REPO")" "$ALLOWLIST_REPO")"
+# Negative control: a non-force cluster separated by a TAB must still allow.
+check "allowlist present: -u + TAB + force-with-lease -> allow" ALLOW \
+  "$(run_cwd "$(payload_with_cwd "git push -u${TAB}--force-with-lease" "$ALLOWLIST_REPO")" "$ALLOWLIST_REPO")"
+
 # 6. Empty allowlist file -> denied (mirrors test_gate.sh empty-content no-op)
 : > "$ALLOWLIST_REPO/.claude/destructive_allowlist"
 check "empty allowlist file: force-with-lease -> deny" DENY \

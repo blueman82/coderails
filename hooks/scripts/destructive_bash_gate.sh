@@ -103,10 +103,15 @@ allowlist_permits() {
 # -fu, -ufd — git's own getopt-style combined short-flag behaviour), mirroring
 # this file's existing git-clean force detector above (line 47) rather than
 # only a standalone -f token, which a combined cluster would otherwise evade.
-naked_force_re='(--force($|[^-])|(^| )-[a-zA-Z]*f[a-zA-Z]*( |$))'
-if echo "$cmd" | grep -qiE "\\bgit +push\\b.*(${naked_force_re}|--force-with-lease\\b)"; then
-  if echo "$cmd" | grep -qiE '\bgit +push +.*--force-with-lease\b' \
-     && ! echo "$cmd" | grep -qiE "\\bgit +push\\b.*${naked_force_re}" \
+# All token boundaries use [[:space:]] (not a literal space) — bash's default
+# IFS splits on space, tab, AND newline, so a tab between flags on one
+# tool_input line produces the same real argv split as a space would; a
+# literal-space-only boundary here previously let a tab-separated naked
+# force slip past undetected while a space-separated one correctly denied.
+naked_force_re='(--force([^-]|$)|(^|[[:space:]])-[a-zA-Z]*f[a-zA-Z]*([[:space:]]|$))'
+if echo "$cmd" | grep -qiE "\\bgit[[:space:]]+push\\b.*(${naked_force_re}|--force-with-lease\\b)"; then
+  if echo "$cmd" | grep -qiE '\bgit[[:space:]]+push[[:space:]]+.*--force-with-lease\b' \
+     && ! echo "$cmd" | grep -qiE "\\bgit[[:space:]]+push\\b.*${naked_force_re}" \
      && allowlist_permits "git-push-force-with-lease"; then
     : # allowlisted force-with-lease, no naked --force present — allow
   else
