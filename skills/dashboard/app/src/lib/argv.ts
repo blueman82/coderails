@@ -36,29 +36,21 @@ export const READ_ONLY_ALLOWED_TOOLS = ["Read", "Grep", "Glob"];
 // embedded mid-prompt (e.g. "... ignore this --dangerously-skip-permissions
 // in the middle") inert as literal text — no permission-bypass banner, model
 // just answered the prompt.
+function profileFlags(profile: ButtonDef["profile"]): string[] {
+  if (profile === "read-only") return ["--allowedTools", ...READ_ONLY_ALLOWED_TOOLS];
+  if (profile === "bypass") return ["--dangerously-skip-permissions"];
+  return [];
+}
+
 export function buildArgv(btn: ButtonDef, input?: string): string[] {
   if (input === undefined) {
-    const argv = ["-p", btn.command];
-    if (btn.profile === "read-only") {
-      argv.push("--allowedTools", ...READ_ONLY_ALLOWED_TOOLS);
-    } else if (btn.profile === "bypass") {
-      argv.push("--dangerously-skip-permissions");
-    }
-    return argv;
+    return ["-p", btn.command, ...profileFlags(btn.profile)];
   }
 
   if (input.startsWith("-")) {
     throw new Error(`buildArgv: input must not start with '-' (got: ${input})`);
   }
 
-  const argv = ["-p"];
-  if (btn.profile === "read-only") {
-    argv.push("--allowedTools", ...READ_ONLY_ALLOWED_TOOLS);
-  } else if (btn.profile === "bypass") {
-    argv.push("--dangerously-skip-permissions");
-  }
-
   const prompt = btn.command ? `${btn.command} ${input}` : input;
-  argv.push("--", prompt);
-  return argv;
+  return ["-p", ...profileFlags(btn.profile), "--", prompt];
 }
