@@ -183,6 +183,50 @@ Every code change MUST be checked against these six principles:
 - No backwards-compatibility shims when you can just change the code
 - No feature flags for unreleased features
 
+### Comment Discipline
+
+A comment states the constraint the code enforces. It never cites the
+conversation, review, or session artifact that produced it. "Anchors to
+code, not process" — a comment must stand on its own for a reader who has
+none of the surrounding history.
+
+**The dead-link test:** any ID or label in a comment must resolve durably
+within the repo or its host platform. A PR number passes — it's a real,
+checkable GitHub artifact. A session ID, work-unit label, or reviewer
+finding ID fails — it points at a transcript or conversation the reader
+will never have.
+
+Before/after (from a real cleanup sweep):
+
+```
+- # ── Change #4: extended permanent blocklist ──────────────────────────
++ # ── Permanent blocklist ───────────────────────────────────────────────
+```
+
+```
+- # F1 fix: also match --force and multi-token "-d -f" patterns.
++ # Also matches --force and multi-token "-d -f" patterns.
+```
+
+```
+- # E1: untrusted login posts a byte-identical valid marker → exit 1 (spoofing
+- # rejected). Permission defaults to WRITE in the stub — the highest-value
+- # regression case in the whole PR: login-match alone must still reject a
+- # forged marker regardless of the (now write-capable) permission field.
++ # Spoof rejection: untrusted login posts a byte-identical valid marker → exit 1.
++ # Permission defaults to WRITE in the stub: login-match alone must still reject
++ # a forged marker regardless of the (write-capable) permission field.
+```
+
+Each rewrite keeps the property being tested or enforced — the "what" and
+the "why" — and drops the framing that only made sense inside the review
+or session that produced it (a change number, a fix label, "the highest-
+value regression case in the whole PR").
+
+In coderails-equipped repos, the `comment_citation_gate` PreToolUse hook
+enforces this mechanically on Write/Edit/MultiEdit. The rule itself is
+platform-agnostic — it holds whether or not that hook is installed.
+
 ---
 
 ## Enforcement Process
