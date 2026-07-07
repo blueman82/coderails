@@ -25,6 +25,7 @@ interface UsageEvent {
   timestampMs: number;
   inputTokens: number;
   outputTokens: number;
+  cacheReadTokens: number;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
