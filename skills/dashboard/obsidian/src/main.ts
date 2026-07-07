@@ -45,6 +45,10 @@ export default class CommandCentrePlugin extends Plugin {
   // having to reopen the note.
   private containers = new Set<HTMLElement>();
 
+  // readButtons cache, invalidated by config-file mtime — avoids re-reading
+  // and re-parsing ~/.claude/coderails-dashboard.json on every render.
+  private buttonsCache: { mtimeMs: number; buttons: ButtonItem[] } | null = null;
+
   async onload(): Promise<void> {
     this.registerMarkdownCodeBlockProcessor(
       "agentic-os",
