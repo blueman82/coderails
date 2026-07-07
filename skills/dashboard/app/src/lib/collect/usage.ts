@@ -6,6 +6,10 @@ export interface UsageTotals {
   inputTokens: number;
   outputTokens: number;
   totalTokens: number;
+  // Portion of inputTokens that was cache re-reads. On real transcripts this
+  // dominates the input total (~99%), so the tile note surfaces it rather
+  // than letting the headline read as raw consumption.
+  cacheReadTokens: number;
 }
 
 export interface UsageSummary {
