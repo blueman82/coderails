@@ -14,7 +14,8 @@ import { writeRunNote } from "./notes";
 // a plugin's styles.css automatically alongside main.js and manifest.json.
 
 const DASHBOARD_RUNS_FOLDER = "dashboard-runs";
-const METRICS_NOTE_PATH = `${DASHBOARD_RUNS_FOLDER}/_metrics.json`;
+// Raw JSON read from the vault, not a markdown note (hence FILE, not NOTE).
+const METRICS_FILE_PATH = `${DASHBOARD_RUNS_FOLDER}/_metrics.json`;
 const DASHBOARD_CONFIG_PATH = join(homedir(), ".claude", "coderails-dashboard.json");
 const DASHBOARD_DIR = join(homedir(), ".claude", "coderails-dashboard");
 const QUEUE_DIR = join(DASHBOARD_DIR, "queue");
