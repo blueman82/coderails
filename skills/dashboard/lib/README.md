@@ -84,7 +84,7 @@ rules.
 `skills/dashboard/app/src/lib/argv.ts` (merged via PR #25) and is the
 only place a `ButtonDef.profile` is translated into `claude` CLI flags
 anywhere in this contract. The obsidian plugin already imports it
-directly (esbuild-bundled); this package's runner (WU2) imports it the
+directly (esbuild-bundled); this package's runner imports it the
 same way. No consumer in this contract re-implements the profile→flag
 mapping — `dashboard-lib` does not carry its own copy.
 
