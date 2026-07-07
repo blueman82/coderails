@@ -69,6 +69,23 @@ describe("buildArgv", () => {
     expect(() => buildArgv(button({ profile: "standard" }), "-p")).toThrow();
   });
 
+  it("rejects an empty command with no input by throwing, rather than spawning an empty prompt", () => {
+    expect(() => buildArgv(button({ profile: "standard", command: "" }))).toThrow();
+  });
+
+  it("rejects a whitespace-only command with no input by throwing", () => {
+    expect(() => buildArgv(button({ profile: "standard", command: "   " }))).toThrow();
+  });
+
+  it("rejects empty input when the command is also empty, rather than spawning an empty prompt", () => {
+    expect(() => buildArgv(button({ profile: "standard", command: "" }), "")).toThrow();
+  });
+
+  it("rejects whitespace-only input when the command is also empty or whitespace-only", () => {
+    expect(() => buildArgv(button({ profile: "standard", command: "" }), "   ")).toThrow();
+    expect(() => buildArgv(button({ profile: "standard", command: "   " }), "   ")).toThrow();
+  });
+
   it("does not insert a '--' sentinel when there is no input", () => {
     const argv = buildArgv(button({ profile: "standard" }));
     expect(argv).toEqual(["-p", "/coderails:wiki-lint"]);
