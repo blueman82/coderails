@@ -3,7 +3,12 @@ import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import type { RoutineDef } from "@coderails/dashboard-lib";
 
-export type FailureClass = "artifact-gate-failed" | "skill-missing" | "exec-error";
+export type FailureClass =
+  | "artifact-gate-failed"
+  | "skill-missing"
+  | "exec-error"
+  | "runner-error"
+  | "claude-spawn-failed";
 export type RunStatus = "green" | "red";
 
 export interface EscalationContext {
@@ -15,10 +20,26 @@ export interface EscalationContext {
   vaultNotesDir?: string;
 }
 
-function defaultNotify(title: string, message: string): void {
+// Exported so recoverOrphans() in sweep.ts (which has no RoutineDef to
+// build a full EscalationContext from) can drive the same notification
+// channel escalate() uses, rather than re-implementing it.
+export function defaultNotify(title: string, message: string): void {
   // macOS-only (osascript) — no cross-platform requirement exists for this
-  // routine feature today.
-  execFileSync("osascript", ["-e", `display notification "${message}" with title "${title}"`]);
+  // routine feature today. title/message are passed as trailing argv
+  // elements (via `on run argv`), never interpolated into the AppleScript
+  // source string — verified live 2026-07-07 in this worktree: a reason
+  // string containing embedded double quotes and an attempted `"; do shell
+  // script "..."` breakout produced a plain notification and did NOT
+  // execute the injected command. Escalation reasons can originate from
+  // artifact-derived text (e.g. an artifact-gate failure reason), so this
+  // is a real injection surface, not just defense-in-depth.
+  execFileSync("osascript", [
+    "-e", "on run argv",
+    "-e", "display notification (item 2 of argv) with title (item 1 of argv)",
+    "-e", "end run",
+    title,
+    message,
+  ]);
 }
 
 function todayIso(): string {
@@ -50,21 +71,36 @@ export function writeRunNote(
   }
 }
 
+// Escalation itself must never throw: it runs from inside sweepOnce's
+// per-intent failure boundary (see sweep.ts's try/catch), and a broken
+// notification channel (e.g. osascript missing, or a bad notifyImpl) must
+// not stop the run record — the vault note / run log is the one
+// non-negotiable artifact. Each channel gets its own try/catch so one
+// channel's failure can't take out the other.
 export function escalate(ctx: EscalationContext): void {
   const notify = ctx.notifyImpl ?? defaultNotify;
   const title = `Routine failed: ${ctx.routine.name}`;
   const message = `${ctx.failureClass}: ${ctx.reason}`;
-  notify(title, message);
+
+  try {
+    notify(title, message);
+  } catch (err) {
+    console.error("escalate: notifyImpl threw, continuing:", err);
+  }
 
   if (!ctx.vaultNotesDir) return; // no vault configured — notification-only escalation
 
-  writeRunNote(
-    ctx.vaultNotesDir,
-    ctx.routine.name,
-    ctx.runId,
-    "red",
-    `Failure class: ${ctx.failureClass}\nReason: ${ctx.reason}`
-  );
+  try {
+    writeRunNote(
+      ctx.vaultNotesDir,
+      ctx.routine.name,
+      ctx.runId,
+      "red",
+      `Failure class: ${ctx.failureClass}\nReason: ${ctx.reason}`
+    );
+  } catch (err) {
+    console.error("escalate: writeRunNote threw, continuing:", err);
+  }
 }
 
 export function checkForeignSkillExists(foreignSkillPath: string): boolean {

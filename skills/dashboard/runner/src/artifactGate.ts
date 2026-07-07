@@ -13,6 +13,15 @@ export interface ArtifactCheckResult {
   reason: string;
 }
 
+// Order matters here in a way worth flagging: each .replaceAll re-scans the
+// whole string, so if an earlier-substituted value itself contains a later
+// token's literal text (e.g. ctx.date === "{runId}-ish"), that text gets
+// re-expanded by the later call too — verified directly (a ctx.date of
+// "{runId}-fake-date" came out with "{runId}" replaced by ctx.runId in the
+// final result). Harmless today only because {date}/{runId} are values
+// this process derives itself (see the comment below), never attacker-
+// controlled template or intent content; this ordering would need
+// revisiting if that ever changed.
 export function resolveArtifactPath(template: string, ctx: ArtifactCheckContext): string {
   return template
     .replaceAll("{date}", ctx.date)
@@ -30,6 +39,11 @@ export function resolveArtifactPath(template: string, ctx: ArtifactCheckContext)
 // right by hand.
 function escapesRoot(resolvedPath: string, template: string, ctx: ArtifactCheckContext): boolean {
   const rootToken = template.includes("{vault}") ? ctx.vault : undefined;
+  // A template with no {vault} token is a fixed, config-authored path —
+  // config is trusted (it's set up by the same person running the
+  // sweeper), unlike {runId}/{date}, which are still process-derived
+  // rather than attacker input, but are the values a crafted template
+  // could combine with. Nothing to contain such a path against.
   if (!rootToken) return false; // no {vault} token: nothing to contain against
   const root = resolvePath(rootToken);
   const withinRoot = resolvedPath === root || resolvedPath.startsWith(root + sep);
@@ -91,6 +105,10 @@ export function checkArtifact(
       return { passed: false, reason: `Artifact is not valid JSON: ${path}` };
     }
     const actual = getJsonField(parsed, predicate.path);
+    // === is strict equality: it only ever matches string/number/boolean
+    // values directly. NaN never matches (NaN !== NaN), and object/array
+    // values never match by structure — no deep-equal, since no
+    // ExpectedArtifact predicate today needs one (YAGNI).
     if (actual === predicate.value) {
       return { passed: true, reason: `Artifact field "${predicate.path}" matches expected value` };
     }

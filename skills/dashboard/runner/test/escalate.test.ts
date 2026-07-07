@@ -2,6 +2,12 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, rmSync, readFileSync, existsSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+
+const execFileSyncMock = vi.fn().mockReturnValue(Buffer.from(""));
+vi.mock("node:child_process", () => ({
+  execFileSync: (...args: unknown[]) => execFileSyncMock(...args),
+}));
+
 import { escalate, checkForeignSkillExists, writeRunNote } from "../src/escalate.ts";
 import type { RoutineDef } from "@coderails/dashboard-lib";
 
@@ -93,6 +99,64 @@ describe("escalate", () => {
       expect.any(String),
       expect.stringContaining("skill-missing")
     );
+  });
+});
+
+describe("escalate resilience (B2)", () => {
+  it("still writes the vault note when notifyImpl throws", () => {
+    const notifyImpl = vi.fn(() => {
+      throw new Error("notification channel down");
+    });
+    escalate({
+      routine: routine(),
+      runId: "resilient1",
+      failureClass: "runner-error",
+      reason: "boom",
+      notifyImpl,
+      vaultNotesDir: dir,
+    });
+    const notePath = join(dir, "wiki-lint-nightly.md");
+    expect(existsSync(notePath)).toBe(true);
+    expect(readFileSync(notePath, "utf-8")).toContain("resilient1");
+  });
+
+  it("still calls notifyImpl and returns when writeRunNote's target dir is unwritable", () => {
+    const unwritable = join(dir, "readonly-vault");
+    writeFileSync(unwritable, "not a directory"); // mkdirSync on this path will throw
+    const notifyImpl = vi.fn();
+    expect(() =>
+      escalate({
+        routine: routine(),
+        runId: "resilient2",
+        failureClass: "runner-error",
+        reason: "boom",
+        notifyImpl,
+        vaultNotesDir: unwritable,
+      })
+    ).not.toThrow();
+    expect(notifyImpl).toHaveBeenCalled();
+  });
+
+  it("passes a reason string containing double quotes through defaultNotify's argv verbatim, never string-built into the AppleScript source", () => {
+    execFileSyncMock.mockClear();
+    const maliciousReason = 'exec-error: reason with "quotes" and "; do shell script "touch /tmp/pwned';
+    escalate({
+      routine: routine(),
+      runId: "inj1",
+      failureClass: "exec-error",
+      reason: maliciousReason,
+      vaultNotesDir: dir,
+    });
+    expect(execFileSyncMock).toHaveBeenCalled();
+    const [command, args] = execFileSyncMock.mock.calls[0];
+    expect(command).toBe("osascript");
+    const argList = args as string[];
+    // The reason must appear as a discrete argv element, not interpolated
+    // into any -e script string.
+    expect(argList.some((a) => a.includes(maliciousReason))).toBe(true);
+    for (const scriptArg of argList.filter((_, i) => argList[i - 1] === "-e")) {
+      expect(scriptArg).not.toContain(maliciousReason);
+    }
   });
 });
 
