@@ -172,17 +172,17 @@ check "push.sh with \$(...) in message -> deny" DENY \
   "$(run "$(payload 'bash "scripts/push.sh" "fix thing, runs $(whoami) as part of it"')")"
 check "merge.sh with backtick in message -> deny" DENY \
   "$(run "$(payload 'bash "scripts/merge.sh" "19" "note: \`rm -rf /\` should never run"')")"
-check "F6 post_review.sh with backtick -> deny" DENY \
+check "post_review.sh with backtick -> deny" DENY \
   "$(run "$(payload 'bash "scripts/post_review.sh" validate "/tmp/x" "uses \`foo\`"')")"
-check "F6 post_evals.sh with backtick -> deny" DENY \
+check "post_evals.sh with backtick -> deny" DENY \
   "$(run "$(payload 'bash "scripts/post_evals.sh" validate-structure "/tmp/x.json" "19" "\`sha\`"')")"
 # Clean invocations (no backtick/$()) must still be allowed.
-check "F6 push.sh clean message -> allow" ALLOW \
+check "push.sh clean message -> allow" ALLOW \
   "$(run "$(payload 'bash "scripts/push.sh" "fix thing, uses git rev-parse show-toplevel under the hood"')")"
-check "F6 merge.sh clean args -> allow" ALLOW \
+check "merge.sh clean args -> allow" ALLOW \
   "$(run "$(payload 'bash "scripts/merge.sh" "19"')")"
 # Backticks/$() in unrelated commands (not these 4 scripts) must not be blocked by this check.
-check "F6 unrelated command with backtick -> allow" ALLOW \
+check "unrelated command with backtick -> allow" ALLOW \
   "$(run "$(payload 'echo "just a note about \`code\` formatting"')")"
 
 [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails)"; exit 1; }
