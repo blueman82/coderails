@@ -301,6 +301,19 @@ coderails-wiki/
 | investigation | `investigations/` | `<topic>_<YYYY-MM-DD>.md` | Point-in-time analysis filed during a workflow session; may be superseded |
 | source | `sources/` | `pr_<N>_<slug>.md` | Immutable record of a merged PR, created by `/wiki-ingest` |
 
+**Not a wiki page type:** scheduled-routine run notes
+(`<wikiPaths[0]>/dashboard-runs/<routine>.md`, `type: routine-run`,
+written by `skills/dashboard/runner`) live inside the vault directory
+but are operational output, not wiki content — they follow none of the
+page-format rules below, are never linked via `[[wiki-links]]`, and are
+not touched by `/wiki-ingest` or `/wiki-lint`. The `type: routine-run`
+frontmatter is specific to the runner's own notes — the Obsidian
+plugin's direct-exec path writes separate per-run notes into the same
+`dashboard-runs/` folder with `status: running|done|failed`
+frontmatter and no `type` field; treat both as non-wiki operational
+output regardless of frontmatter shape. See
+[`docs/routines.md`](./docs/routines.md) for what they're for.
+
 ## Page format
 
 Every page must have:
