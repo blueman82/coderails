@@ -135,7 +135,7 @@ describe("checkArtifact", () => {
     expect(result.passed).toBe(false);
   });
 
-  it("this is the E4 negative control: a routine that exits 0 but writes nothing must fail its artifact gate", () => {
+  it("negative control: a routine that exits 0 but writes nothing must fail its artifact gate", () => {
     const artifact: ExpectedArtifact = {
       artifactPath: join(dir, "never-written.md"),
       maxAgeSeconds: 3600,
