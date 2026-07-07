@@ -38,28 +38,30 @@ describe("buildArgv", () => {
     ]);
   });
 
-  it("appends input as exactly one trailing argv element, after a '--' end-of-options sentinel, for a standard-profile button", () => {
+  it("merges input into a single prompt string after a '--' end-of-options sentinel, so the CLI's single positional prompt argument carries both (the CLI never merges two separate positionals — confirmed empirically, see comment above)", () => {
     const argv = buildArgv(button({ profile: "standard" }), "extra context here");
-    expect(argv).toEqual(["-p", "/coderails:wiki-lint", "--", "extra context here"]);
+    expect(argv).toEqual(["-p", "--", "/coderails:wiki-lint extra context here"]);
   });
 
-  it("never concatenates input into the command string", () => {
+  it("still separates command from input with a space rather than string concatenation", () => {
     const argv = buildArgv(button({ profile: "standard" }), "; rm -rf /");
-    expect(argv[1]).toBe("/coderails:wiki-lint");
-    expect(argv).toContain("; rm -rf /");
-    expect(argv.some((a) => a.includes("/coderails:wiki-lint; rm -rf /"))).toBe(false);
+    expect(argv).toEqual(["-p", "--", "/coderails:wiki-lint ; rm -rf /"]);
   });
 
-  it("places the '--' sentinel and input after profile flags for a read-only-profile button", () => {
+  it("places the '--' sentinel and merged prompt after profile flags for a read-only-profile button", () => {
     const argv = buildArgv(button({ profile: "read-only" }), "note");
     expect(argv).toEqual([
       "-p",
-      "/coderails:wiki-lint",
       "--allowedTools",
       ...READ_ONLY_ALLOWED_TOOLS,
       "--",
-      "note",
+      "/coderails:wiki-lint note",
     ]);
+  });
+
+  it("uses input alone as the prompt when the button's command is empty (free-text ask button)", () => {
+    const argv = buildArgv(button({ profile: "standard", command: "" }), "what does this codebase do?");
+    expect(argv).toEqual(["-p", "--", "what does this codebase do?"]);
   });
 
   it("rejects input that starts with '-' (flag smuggling) by throwing", () => {
