@@ -103,6 +103,11 @@
             "type": "command",
             "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/no_edit_on_main.sh\"",
             "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/comment_citation_gate.sh\"",
+            "timeout": 5
           }
         ]
       }
