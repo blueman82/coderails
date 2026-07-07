@@ -124,12 +124,14 @@ function listJsonlFiles(dir: string, out: string[]): void {
 function sumWithinWindow(events: UsageEvent[], windowStartMs: number): UsageTotals {
   let inputTokens = 0;
   let outputTokens = 0;
+  let cacheReadTokens = 0;
   for (const event of events) {
     if (event.timestampMs < windowStartMs) continue;
     inputTokens += event.inputTokens;
     outputTokens += event.outputTokens;
+    cacheReadTokens += event.cacheReadTokens;
   }
-  return { inputTokens, outputTokens, totalTokens: inputTokens + outputTokens };
+  return { inputTokens, outputTokens, totalTokens: inputTokens + outputTokens, cacheReadTokens };
 }
 
 // baseDir is a ~/.claude/projects-shaped tree: <baseDir>/<slug>/ holding
