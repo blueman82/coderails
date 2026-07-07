@@ -687,6 +687,18 @@ check "cd worktree && git push, cwd=main primary -> allow" ALLOW \
 check "git -C worktree push, cwd=main primary -> allow" ALLOW \
   "$(run "$(payload "git -C $WORKTREE_FEAT push" "$T_PUSH_EVIDENCE" "$REPO_MAIN")")"
 
+# ── Case 75b: git -C <worktree> push origin main → still DENY, even from a
+# feature-branch worktree. This is the case that ACTUALLY proves gate_in_scope
+# recognizes the `-C` form (Case 75 alone would ALLOW even if `-C` were never
+# recognized at all, since an unrecognized command stands aside — see Case 78
+# for the direct proof of that gap). Here, if `-C` weren't recognized, this
+# would wrongly ALLOW a push whose destination refspec explicitly names main;
+# with recognition in place, the destination-refspec scan (independent of
+# branch resolution) still catches it.
+T=$(mk_transcript "$(mk_skill_line "coderails:prep")")
+check "git -C worktree push origin main -> deny (explicit main destination)" DENY \
+  "$(run "$(payload "git -C $WORKTREE_FEAT push origin main" "$T" "$REPO_MAIN")")"
+
 # ── Case 76 (negative control): plain push to main from a main checkout,
 # no cd/-C prefix at all → still DENY. The gate must not be weakened for the
 # common case that has no embedded cd/-C.

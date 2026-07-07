@@ -154,7 +154,10 @@ gate_targets_main() {
     # permission escape covers any legitimate use of such a remote name.
     if [ "$subcommand" = "git_push" ] && [ "$gate_it" -eq 0 ]; then
       # Extract the portion of the command after the `push` keyword for token scan.
-      push_args=$(printf '%s' "$cmd" | grep -oE '\bgit[[:space:]]+push[[:space:]](.*)' | sed 's/^git[[:space:]]*push[[:space:]]*//')
+      # Matches both plain `git push ...` and `git -C <dir> push ...` (the anchor
+      # tolerates an optional `-C <dir>` between `git` and `push` so the -C form's
+      # destination args aren't silently skipped).
+      push_args=$(printf '%s' "$cmd" | grep -oE '\bgit([[:space:]]+-C[[:space:]]+[^[:space:]]+)?[[:space:]]+push[[:space:]](.*)' | sed -E 's/^git([[:space:]]+-C[[:space:]]+[^[:space:]]+)?[[:space:]]+push[[:space:]]*//')
       # Match +main, refs/heads/main, or bare main/master as a standalone token.
       if printf '%s' "$push_args" | grep -qE '(^|[[:space:]])(\+)?(refs/heads/)?(main|master)([[:space:];&|)]|$)'; then
         gate_it=1
