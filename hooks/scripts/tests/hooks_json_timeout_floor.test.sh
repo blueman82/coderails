@@ -19,7 +19,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 HOOKS_JSON="${1:-$REPO_ROOT/hooks/hooks.json}"
 READ_T_FLOOR=5
-EXPECTED_BACKSTOP_COUNT=11
+EXPECTED_BACKSTOP_COUNT=12
 
 fails=0
 
@@ -84,7 +84,7 @@ backstop_files=$(grep -rl "IFS= read -r -d '' -t" "$SCRIPTS_DIR" --include="*.sh
 
 backstop_count=$(echo "$backstop_files" | grep -c . 2>/dev/null)
 
-# Assert backstop count == EXPECTED_BACKSTOP_COUNT (10 known hooks).
+# Assert backstop count == EXPECTED_BACKSTOP_COUNT (12 known hooks).
 if [ "$backstop_count" -ne "$EXPECTED_BACKSTOP_COUNT" ]; then
   printf 'FAIL - expected %d hook scripts with the bounded-read backstop, found %d — a hook may have gained or lost the backstop unexpectedly\n' \
     "$EXPECTED_BACKSTOP_COUNT" "$backstop_count"
