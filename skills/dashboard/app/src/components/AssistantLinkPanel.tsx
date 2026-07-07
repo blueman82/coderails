@@ -35,6 +35,21 @@ export function isHeartbeatStale(build: BuildEntry, now: number | null): boolean
   return build.heartbeatAt !== undefined && now !== null && now - build.heartbeatAt > HEARTBEAT_STALE_MS;
 }
 
+// prUrl is builder-session-controlled data (state.json, read verbatim from
+// run-builder.sh's own `gh pr create` output — see builds.ts), not a value
+// this dashboard itself generates. Rendered into an <a href>, an unvalidated
+// scheme (javascript:, data:) would be a click-triggered XSS vector, so only
+// an https: URL is ever linked; anything else falls back to the plain-text
+// CTA, same as when prUrl is absent.
+function safePrUrl(prUrl: string | undefined): string | undefined {
+  if (!prUrl) return undefined;
+  try {
+    return new URL(prUrl).protocol === "https:" ? prUrl : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 // Renders the build-state CTA for an approved workflow-audit:propose-skill
 // queue entry, joined to its builds/<hash>/ sidecar by hash. Returns null
 // when there's no build entry yet (claim hasn't landed on disk, or this
