@@ -7,7 +7,10 @@ import {
   QueueActionError,
   type QueueEntrySnapshot,
 } from "../../../lib/collect/queueActions";
-import { claimAndSpawnBuild as claimAndSpawnBuildReal } from "../../../lib/build/spawn";
+import {
+  claimAndSpawnBuild as claimAndSpawnBuildReal,
+  type ClaimAndSpawnBuildResult,
+} from "../../../lib/build/spawn";
 
 const DEFAULT_QUEUE_DIR = join(homedir(), ".claude", "coderails-dashboard", "queue");
 const WRAPPER_PATH = join(process.cwd(), "..", "scripts", "run-builder.sh");
@@ -25,9 +28,7 @@ const HASH_PATTERN = /^[0-9a-f]{64}$/;
 export interface QueueActionHandlerDeps {
   token: string;
   queueDir?: string;
-  claimAndSpawnBuild?: (
-    entry: QueueEntrySnapshot
-  ) => { claimed: boolean; alreadyClaimed?: boolean; error?: string };
+  claimAndSpawnBuild?: (entry: QueueEntrySnapshot) => ClaimAndSpawnBuildResult;
 }
 
 function jsonResponse(status: number, body: unknown): Response {
@@ -72,7 +73,7 @@ export function createQueueActionHandler(deps: QueueActionHandlerDeps) {
 
     try {
       const entry = resolveQueueEntry(queueDir, payload.hash, payload.decision);
-      let build: { claimed?: boolean; alreadyClaimed?: boolean; error?: string } | undefined;
+      let build: ClaimAndSpawnBuildResult | undefined;
       if (
         entry.status === "approved" &&
         entry.toolName === "workflow-audit:propose-skill" &&

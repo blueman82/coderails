@@ -3,6 +3,7 @@ import { mkdtempSync, writeFileSync, readFileSync, existsSync, rmSync } from "no
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createQueueActionHandler } from "../src/app/api/queue/route";
+import type { ClaimAndSpawnBuildResult } from "../src/lib/build/spawn";
 
 const tmpDirs: string[] = [];
 
@@ -54,7 +55,7 @@ function makeHandler(
       toolInput: unknown;
       createdAt: number;
       status: "approved" | "denied";
-    }) => { claimed: boolean; alreadyClaimed?: boolean; error?: string };
+    }) => ClaimAndSpawnBuildResult;
   } = {}
 ) {
   const queueDir = overrides.queueDir ?? tmpDir("dashboard-queue-route-");
@@ -228,21 +229,50 @@ describe("POST /api/queue — pending-only guard + build spawn seam", () => {
     const calls: unknown[] = [];
     const claimAndSpawnBuild = (entry: unknown) => {
       calls.push(entry);
-      return { claimed: true };
+      return { claimed: true as const, runId: "abc12345" };
     };
     const { handler, queueDir } = makeHandler({ claimAndSpawnBuild });
-    writeEntry(queueDir, HASH_A, { toolName: "workflow-audit:propose-skill" });
+    writeEntry(queueDir, HASH_A, {
+      toolName: "workflow-audit:propose-skill",
+      toolInput: { proposed_name: "my-new-skill" },
+    });
     const res = await handler(req({ token: TOKEN, hash: HASH_A, decision: "approved" }));
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body.build).toEqual({ claimed: true });
+    expect(body.build).toEqual({ claimed: true, runId: "abc12345" });
     expect(calls).toHaveLength(1);
     expect(calls[0]).toEqual({
       hash: HASH_A,
       toolName: "workflow-audit:propose-skill",
-      toolInput: { channel: "#general" },
+      toolInput: { proposed_name: "my-new-skill" },
       createdAt: 1_720_000_000_000,
       status: "approved",
     });
+  });
+
+  it("echoes {claimed:false, error:'invalid_name'} under build when claimAndSpawnBuild rejects the name", async () => {
+    const claimAndSpawnBuild = () => ({ claimed: false as const, error: "invalid_name" as const });
+    const { handler, queueDir } = makeHandler({ claimAndSpawnBuild });
+    writeEntry(queueDir, HASH_A, {
+      toolName: "workflow-audit:propose-skill",
+      toolInput: { proposed_name: "Has Spaces" },
+    });
+    const res = await handler(req({ token: TOKEN, hash: HASH_A, decision: "approved" }));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.build).toEqual({ claimed: false, error: "invalid_name" });
+  });
+
+  it("echoes {claimed:false, alreadyClaimed:true} under build when the hash was already claimed", async () => {
+    const claimAndSpawnBuild = () => ({ claimed: false as const, alreadyClaimed: true as const });
+    const { handler, queueDir } = makeHandler({ claimAndSpawnBuild });
+    writeEntry(queueDir, HASH_A, {
+      toolName: "workflow-audit:propose-skill",
+      toolInput: { proposed_name: "my-new-skill" },
+    });
+    const res = await handler(req({ token: TOKEN, hash: HASH_A, decision: "approved" }));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.build).toEqual({ claimed: false, alreadyClaimed: true });
   });
 });
