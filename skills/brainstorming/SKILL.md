@@ -26,10 +26,11 @@ You MUST create a task for each of these items and complete them in order:
 3. **Ask clarifying questions** — one at a time, understand purpose/constraints/success criteria
 4. **Propose 2-3 approaches** — with trade-offs and your recommendation
 5. **Present design** — in sections scaled to their complexity, get user approval after each section
-6. **Write design doc** — save to `docs/coderails/specs/YYYY-MM-DD-<topic>-design.md` and commit
-7. **Spec self-review** — quick inline check for placeholders, contradictions, ambiguity, scope (see below)
-8. **User reviews written spec** — ask user to review the spec file before proceeding
-9. **Transition to implementation** — invoke writing-plans skill to create implementation plan
+6. **Ensure isolated workspace** — invoke coderails:using-git-worktrees before writing anything to disk
+7. **Write design doc** — save to `docs/coderails/specs/YYYY-MM-DD-<topic>-design.md` and commit
+8. **Spec self-review** — quick inline check for placeholders, contradictions, ambiguity, scope (see below)
+9. **User reviews written spec** — ask user to review the spec file before proceeding
+10. **Transition to implementation** — invoke writing-plans skill to create implementation plan
 
 ## Process Flow
 
@@ -40,6 +41,7 @@ digraph brainstorming {
     "Propose 2-3 approaches" [shape=box];
     "Present design sections" [shape=box];
     "User approves design?" [shape=diamond];
+    "Ensure isolated workspace" [shape=box];
     "Write design doc" [shape=box];
     "Spec self-review\n(fix inline)" [shape=box];
     "User reviews spec?" [shape=diamond];
@@ -50,7 +52,8 @@ digraph brainstorming {
     "Propose 2-3 approaches" -> "Present design sections";
     "Present design sections" -> "User approves design?";
     "User approves design?" -> "Present design sections" [label="no, revise"];
-    "User approves design?" -> "Write design doc" [label="yes"];
+    "User approves design?" -> "Ensure isolated workspace" [label="yes"];
+    "Ensure isolated workspace" -> "Write design doc";
     "Write design doc" -> "Spec self-review\n(fix inline)";
     "Spec self-review\n(fix inline)" -> "User reviews spec?";
     "User reviews spec?" -> "Write design doc" [label="changes requested"];
@@ -103,11 +106,16 @@ digraph brainstorming {
 
 ## After the Design
 
+**Isolation:**
+
+- Before writing the spec, invoke coderails:using-git-worktrees to ensure an isolated workspace exists.
+- Why: main is for merges. The `no_edit_on_main` hook doesn't gate plain markdown at all (only `skills/*/SKILL.md` and `commands/*.md` are blocked on main) — so without this step, nothing stops the spec commit from landing straight on local main and dirtying the base every other session branches from.
+
 **Documentation:**
 
 - Write the validated design (spec) to `docs/coderails/specs/YYYY-MM-DD-<topic>-design.md`
   - (User preferences for spec location override this default)
-- Commit the design document to git
+- Commit the design document to git — this now lands on the isolated workspace's branch, feeding the normal /workflow pipeline
 
 **Spec Self-Review:**
 After writing the spec document, look at it with fresh eyes:
