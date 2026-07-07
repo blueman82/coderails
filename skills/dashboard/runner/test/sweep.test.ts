@@ -97,7 +97,7 @@ describe("sweepOnce", () => {
 });
 
 describe("sweepOnce with routine artifact gating", () => {
-  it("marks a routine run as failed when it exits 0 but the expected artifact was never written (E4)", async () => {
+  it("marks a routine run as failed when it exits 0 but the expected artifact was never written", async () => {
     const routineConfig: DashboardConfig = {
       ...config,
       routines: [
