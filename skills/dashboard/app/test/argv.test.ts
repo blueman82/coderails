@@ -69,6 +69,10 @@ describe("buildArgv", () => {
     expect(() => buildArgv(button({ profile: "standard" }), "-p")).toThrow();
   });
 
+  it("rejects input that is whitespace then a dash, so trimming can't smuggle a flag past the check", () => {
+    expect(() => buildArgv(button({ profile: "standard" }), "  --dangerously-skip-permissions")).toThrow();
+  });
+
   it("rejects an empty command with no input by throwing, rather than spawning an empty prompt", () => {
     expect(() => buildArgv(button({ profile: "standard", command: "" }))).toThrow();
   });
@@ -84,6 +88,30 @@ describe("buildArgv", () => {
   it("rejects whitespace-only input when the command is also empty or whitespace-only", () => {
     expect(() => buildArgv(button({ profile: "standard", command: "" }), "   ")).toThrow();
     expect(() => buildArgv(button({ profile: "standard", command: "   " }), "   ")).toThrow();
+  });
+
+  it("treats empty-string input exactly like no input at all, for a normal (non-empty command) button", () => {
+    const withEmptyInput = buildArgv(button({ profile: "standard" }), "");
+    const withNoInput = buildArgv(button({ profile: "standard" }));
+    expect(withEmptyInput).toEqual(withNoInput);
+    expect(withEmptyInput).toEqual(["-p", "/coderails:wiki-lint"]);
+  });
+
+  it("treats whitespace-only input exactly like no input at all, for a normal (non-empty command) button", () => {
+    const withWhitespaceInput = buildArgv(button({ profile: "standard" }), "   ");
+    const withNoInput = buildArgv(button({ profile: "standard" }));
+    expect(withWhitespaceInput).toEqual(withNoInput);
+    expect(withWhitespaceInput).toEqual(["-p", "/coderails:wiki-lint"]);
+  });
+
+  it("covers a bypass-profile button with input: profile flag first, then the sentinel and merged prompt", () => {
+    const argv = buildArgv(button({ profile: "bypass", bypassPermissions: true }), "go");
+    expect(argv).toEqual([
+      "-p",
+      "--dangerously-skip-permissions",
+      "--",
+      "/coderails:wiki-lint go",
+    ]);
   });
 
   it("does not insert a '--' sentinel when there is no input", () => {
