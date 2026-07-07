@@ -55,6 +55,7 @@ manifest_paths=(
   hooks/scripts/no_edit_on_main.sh
   hooks/scripts/test_gate.sh
   hooks/scripts/unregistered_loop_guard.sh
+  skills/dashboard/runner/bin/sweeper.sh
 )
 manifest_modes=(
   100644
@@ -63,6 +64,7 @@ manifest_modes=(
   100644
   100644
   100644
+  100755
   100755
   100755
   100755
