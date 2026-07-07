@@ -184,7 +184,7 @@ export default class CommandCentrePlugin extends Plugin {
   }
 
   private async readMetrics(): Promise<Metrics | null> {
-    const file = this.app.vault.getAbstractFileByPath(METRICS_NOTE_PATH);
+    const file = this.app.vault.getAbstractFileByPath(METRICS_FILE_PATH);
     if (!(file instanceof TFile)) return null;
 
     try {
