@@ -289,4 +289,14 @@ check "prose mention then separate genuine invocation -> deny" DENY \
 check "backtick adjacent to quote boundary before real invocation -> deny" DENY \
   "$(run "$(payload 'echo `"`; bash scripts/push.sh "msg $(whoami)"')")"
 
+# --- SECURITY: a hash character inside the one prose segment must not break
+# the "is every substitution confined to this segment" check. An earlier
+# version removed the segment via a sed substitution delimited by #, which a
+# literal # inside the segment's own text broke, causing sed to emit a
+# parse error whose stderr text (containing no substitution character) was
+# silently read as "nothing left outside the segment" — masking a real,
+# separate substitution elsewhere on the line.
+check "hash character in prose segment does not mask a separate substitution -> deny" DENY \
+  "$(run "$(payload 'echo "note scripts/push.sh has $(date) example #hashtag" && echo $(whoami)')")"
+
 [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails)"; exit 1; }

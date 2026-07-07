@@ -282,10 +282,20 @@ if echo "$cmd" | grep -qE "$script_re"; then
           echo "$from_script" | grep -qE '`|\$\(' && substitution_scoped=1
         elif echo "$script_segment" | grep -qE '`|\$\('; then
           # substitution is inside the prose segment — allow ONLY if no
-          # OTHER substitution exists elsewhere on the line.
-          escaped_segment=$(echo "$script_segment" | sed -E 's/[.[\*^$()+?{|]/\\&/g')
-          rest=$(echo "$cmd" | sed -E "s#${escaped_segment}##")
-          echo "$rest" | grep -qE '`|\$\(' && substitution_scoped=1
+          # OTHER substitution exists elsewhere on the line. Compared by
+          # COUNTING substitution characters in the whole command vs. in
+          # the one segment, rather than removing the segment via sed text
+          # substitution — a sed pattern needs a delimiter guaranteed
+          # absent from the segment's own (user-controlled) text, which
+          # cannot be guaranteed for any fixed delimiter (e.g. a literal #
+          # in the segment broke a `#`-delimited sed command, causing a
+          # silent parse error whose stderr text was captured as "rest" and
+          # read as substitution-free, granting an undeserved exemption
+          # even though a separate substitution existed elsewhere on the
+          # line). Counting has no delimiter to collide with.
+          whole_subst=$(( $(echo "$cmd" | grep -oE '\$\(' | wc -l | tr -d ' ') + $(echo "$cmd" | grep -oE '`' | wc -l | tr -d ' ') ))
+          segment_subst=$(( $(echo "$script_segment" | grep -oE '\$\(' | wc -l | tr -d ' ') + $(echo "$script_segment" | grep -oE '`' | wc -l | tr -d ' ') ))
+          [ "$whole_subst" -ne "$segment_subst" ] && substitution_scoped=1
         else
           substitution_scoped=1
         fi
