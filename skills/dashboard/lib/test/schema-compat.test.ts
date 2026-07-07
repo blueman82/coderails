@@ -53,6 +53,14 @@ describe("Intent / IntentFile schema compatibility", () => {
     expect(asIntent.input).toBe("check auth");
   });
 
+  it("this lib's Intent is assignable to IntentFile's shape in the reverse-narrow direction (compile-time gate)", () => {
+    const intent: Intent = { button: "wiki-lint", requestedAt: Date.now(), source: "obsidian" };
+    // Calls the gate function so it's an active assertion, not dead code:
+    // if Intent.button or Intent.requestedAt's type ever narrowed in a way
+    // IntentFile can't satisfy, this line fails to compile.
+    expect(() => assertIntentIsAssignableToIntentFileShape(intent)).not.toThrow();
+  });
+
   it("sanity: this test file itself performs a type-only import with no runtime obsidian dependency", () => {
     // If this ever became a runtime import, `IntentFile` would be undefined
     // at runtime (it's an interface, erased by TS) — this assertion exists
