@@ -15,11 +15,25 @@ function makeTmpDisciplineLog(lines: string[]): string {
   return path;
 }
 
-function assistantLine(id: string, timestamp: string, inputTokens: number, outputTokens: number): string {
+function assistantLine(
+  id: string,
+  timestamp: string,
+  inputTokens: number,
+  outputTokens: number,
+  cacheReadTokens = 0
+): string {
   return JSON.stringify({
     type: "assistant",
     timestamp,
-    message: { id, role: "assistant", usage: { input_tokens: inputTokens, output_tokens: outputTokens } },
+    message: {
+      id,
+      role: "assistant",
+      usage: {
+        input_tokens: inputTokens,
+        output_tokens: outputTokens,
+        ...(cacheReadTokens > 0 ? { cache_read_input_tokens: cacheReadTokens } : {}),
+      },
+    },
   });
 }
 
