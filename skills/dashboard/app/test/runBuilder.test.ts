@@ -303,6 +303,32 @@ describe("run-builder.sh: full state machine (steps 3-7)", () => {
     expect(state.stderrTail).toContain("boom, something broke");
   });
 
+  it("unrecognized-flag fixture: stub claude writes 'unknown option' to stderr and exits nonzero -> failed: claude_cli_flag_rejected, distinguishable from a routine build failure", () => {
+    // Verified empirically against the real claude CLI: an unrecognized
+    // flag (e.g. an incompatible --disallowedTools on some future/older
+    // CLI version) produces exactly this stderr shape and a nonzero exit
+    // before any session starts. Distinguishing this from a routine
+    // "nonzero_exit" build failure matters because it signals the
+    // mechanical merge-containment layer failed to even start.
+    const buildDir = makeBuildDir();
+    const locksDir = tmpDir("dashboard-run-builder-locks-");
+    const repoDir = makeRepoFixture();
+    const binDir = makeStubClaudeBin(`echo "error: unknown option '--disallowedTools'" 1>&2; exit 1`);
+
+    writeSnapshot(buildDir, { toolInput: { proposed_name: "flag-rejected-skill" } });
+
+    runWrapper(buildDir, {
+      CODERAILS_BUILDER_LOCKS_DIR: locksDir,
+      CODERAILS_BUILDER_REPO_PATH: repoDir,
+      BUILDER_WALL_CLOCK_SECS: "5",
+      PATH: `${binDir}:${process.env.PATH}`,
+    });
+
+    const state = readState(buildDir);
+    expect(state.state).toBe("failed");
+    expect(state.failureReason).toBe("claude_cli_flag_rejected");
+  });
+
   it("budget-breach fixture: stub claude writes result.json with subtype error_max_budget_usd, no pr_url, exits nonzero -> failed: budget_exceeded", () => {
     const buildDir = makeBuildDir();
     const locksDir = tmpDir("dashboard-run-builder-locks-");

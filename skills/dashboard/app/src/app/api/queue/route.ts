@@ -98,16 +98,30 @@ export function createQueueActionHandler(deps: QueueActionHandlerDeps) {
   };
 }
 
-export function POST(request: Request): Promise<Response> {
-  return createQueueActionHandler({
-    token: getRunToken(),
-    claimAndSpawnBuild: WRAPPER_PATH
-      ? (entry) => claimAndSpawnBuildReal(entry, { wrapperPath: WRAPPER_PATH })
-      : () => ({ claimed: false, error: "wrapper_not_found" }),
-    // WRAPPER_PATH resolves to null only if scripts/run-builder.sh cannot be
-    // found relative to spawn.ts's own location — a deployment/packaging
+// Extracted as a standalone, parameterised function (rather than inlined
+// as a closure over the module-level WRAPPER_PATH constant) specifically so
+// the wrapper_not_found fallback path is unit-testable directly: a test can
+// call this with wrapperPath=null without needing to mock module-load-time
+// resolution or import the bare POST export (which always sees a resolved
+// path in dev/CI, since the real scripts/run-builder.sh is always present
+// there — the null branch would otherwise be untestable).
+export function makeClaimAndSpawnBuild(
+  wrapperPath: string | null
+): (entry: QueueEntrySnapshot) => ClaimAndSpawnBuildResult {
+  if (!wrapperPath) {
+    // wrapperPath is null only if scripts/run-builder.sh cannot be found
+    // relative to spawn.ts's own location — a deployment/packaging
     // misconfiguration, not a per-request condition. Reported via the
     // distinct wrapper_not_found error rather than crashing every
     // approve/deny request in the whole route module.
+    return () => ({ claimed: false, error: "wrapper_not_found" });
+  }
+  return (entry) => claimAndSpawnBuildReal(entry, { wrapperPath });
+}
+
+export function POST(request: Request): Promise<Response> {
+  return createQueueActionHandler({
+    token: getRunToken(),
+    claimAndSpawnBuild: makeClaimAndSpawnBuild(WRAPPER_PATH),
   })(request);
 }

@@ -235,6 +235,16 @@ else
     FAILURE_REASON="timeout"
   elif grep -q "error_max_budget_usd" "$BUILD_DIR/result.json" 2>/dev/null; then
     FAILURE_REASON="budget_exceeded"
+  elif grep -q "unknown option" "$BUILD_DIR/build.log" 2>/dev/null; then
+    # Verified empirically: this claude CLI version rejects an unrecognized
+    # flag loudly (nonzero exit before any session starts), rather than
+    # silently ignoring it — so a --disallowedTools incompatibility from a
+    # future/older CLI version would surface here, not proceed unprotected.
+    # Distinguishing this from a routine build failure matters specifically
+    # because it signals the containment stack's mechanical enforcement
+    # layer (see the comment above the claude invocation) failed to even
+    # start, not that the build itself failed.
+    FAILURE_REASON="claude_cli_flag_rejected"
   else
     FAILURE_REASON="nonzero_exit"
   fi

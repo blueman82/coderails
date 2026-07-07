@@ -1,5 +1,5 @@
 import { spawn as spawnReal } from "node:child_process";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import type { QueueEntrySnapshot } from "../collect/queueActions";
@@ -9,6 +9,14 @@ const NAME_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;
 const DEFAULT_BUILDS_DIR = join(homedir(), ".claude", "coderails-dashboard", "builds");
 const MAX_ANCESTORS = 10;
 
+// A distinctive line from this exact wrapper script (not a generic
+// "coderails" string match) — checked against any scripts/run-builder.sh
+// candidate found during the walk-up below, so an unrelated tree that
+// happens to share the same relative scripts/run-builder.sh path (a nested
+// checkout, a monorepo, some other project's own differently-shaped
+// wrapper script) is rejected rather than silently accepted.
+const WRAPPER_IDENTITY_MARKER = "Owns the build lifecycle state machine for one approved";
+
 // route.ts previously resolved the wrapper path via
 // join(process.cwd(), "..", "scripts", "run-builder.sh") — cwd-relative,
 // the exact class of bug design-loop2.md's premortem #8 flags (a
@@ -17,16 +25,25 @@ const MAX_ANCESTORS = 10;
 // regardless of the server process's cwd) looking for the known sibling
 // skills/dashboard/scripts/run-builder.sh, matching the same
 // find-the-repo-root-by-walking-up technique already used by
-// collect/markerVersions.ts's findRepoRoot. Returns null (never a
-// fabricated guess) if no such sibling is found within MAX_ANCESTORS
-// levels — callers must treat null as "no default available", not silently
-// spawn a wrong path.
+// collect/markerVersions.ts's findRepoRoot — with an added content-identity
+// check (existence alone isn't enough: a nested checkout or monorepo could
+// have its own unrelated scripts/run-builder.sh at a shallower ancestor
+// level). Returns null (never a fabricated guess) if no matching sibling is
+// found within MAX_ANCESTORS levels — callers must treat null as "no
+// default available", not silently spawn a wrong path.
 export function resolveDefaultWrapperPath(startDir: string = __dirname): string | null {
   let dir = startDir;
   for (let i = 0; i < MAX_ANCESTORS; i++) {
     const candidate = join(dir, "scripts", "run-builder.sh");
     if (existsSync(candidate)) {
-      return candidate;
+      try {
+        const contents = readFileSync(candidate, "utf-8");
+        if (contents.includes(WRAPPER_IDENTITY_MARKER)) {
+          return candidate;
+        }
+      } catch {
+        // unreadable — treat as not a match, keep walking up
+      }
     }
     const parent = dirname(dir);
     if (parent === dir) break;

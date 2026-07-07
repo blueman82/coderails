@@ -150,11 +150,32 @@ describe("resolveDefaultWrapperPath", () => {
   it("finds scripts/run-builder.sh by walking up from a nested start directory that has it as a sibling further up", () => {
     const fakeRepoRoot = tmpDir("dashboard-resolve-wrapper-fakeroot-");
     mkdirSync(join(fakeRepoRoot, "scripts"), { recursive: true });
-    writeFileSync(join(fakeRepoRoot, "scripts", "run-builder.sh"), "#!/bin/bash\n");
+    writeFileSync(
+      join(fakeRepoRoot, "scripts", "run-builder.sh"),
+      "#!/bin/bash\n# Owns the build lifecycle state machine for one approved\n"
+    );
     const nestedStart = join(fakeRepoRoot, "app", "src", "lib", "build");
     mkdirSync(nestedStart, { recursive: true });
 
     const resolved = resolveDefaultWrapperPath(nestedStart);
     expect(resolved).toBe(join(fakeRepoRoot, "scripts", "run-builder.sh"));
+  });
+
+  it("rejects a scripts/run-builder.sh that exists but lacks the identity marker, continuing the walk-up rather than accepting a false-positive match (silent-failure-hunter finding: monorepo/nested-checkout collision)", () => {
+    const outerRoot = tmpDir("dashboard-resolve-wrapper-outer-");
+    // An unrelated file that happens to share the exact relative path
+    // scripts/run-builder.sh but is NOT this repo's wrapper — e.g. a
+    // nested checkout or monorepo sibling project with its own script of
+    // the same name.
+    mkdirSync(join(outerRoot, "unrelated-project", "scripts"), { recursive: true });
+    writeFileSync(
+      join(outerRoot, "unrelated-project", "scripts", "run-builder.sh"),
+      "#!/bin/bash\necho 'this is an unrelated script, not the coderails builder wrapper'\n"
+    );
+    const nestedStart = join(outerRoot, "unrelated-project", "app", "src");
+    mkdirSync(nestedStart, { recursive: true });
+
+    const resolved = resolveDefaultWrapperPath(nestedStart);
+    expect(resolved).toBeNull();
   });
 });
