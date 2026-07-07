@@ -169,7 +169,13 @@ Four places, roughest signal to most precise:
    schema in `AGENTS.md`** (`type: routine-run`, not one of
    `command|hook|skill|design|investigation|source`) — it is not
    ingested by `/wiki-ingest` and does not follow the wiki page-format
-   contract; treat it as operational output, not a wiki page.
+   contract; treat it as operational output, not a wiki page. Note the
+   `dashboard-runs/` folder holds two note conventions side by side: the
+   runner's `writeRunNote` (described above) writes one rolling
+   `<routine>.md` per routine with `type: routine-run` frontmatter, while
+   the Obsidian plugin's direct-exec path (pressing a button in the
+   vault) writes a separate `<YYYY-MM-DD>-<button>.md` per run, with
+   `status: running|done|failed` frontmatter and no `type` field at all.
 4. **macOS notification** — fired synchronously on every escalation via
    `osascript`, titled `Routine failed: <routine name>`, body
    `<failure class>: <reason>`. Transient — if you miss it, the vault
