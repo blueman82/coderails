@@ -98,6 +98,21 @@ describe("collectHealth", () => {
     expect(tile?.note).toBe("in 400K / out 12K");
   });
 
+  it("names the cache-read share in the note when cache re-reads contribute to the input total", async () => {
+    const now = new Date("2026-07-06T18:00:00Z");
+    const projectsDir = makeTmpProjectsDir([
+      assistantLine("msg_1", "2026-07-06T17:00:00.000Z", 100_000, 12_000, 300_000),
+    ]);
+    const tiles = await collectHealth({
+      disciplineLogPath: join(tmpdir(), "does-not-exist.log"),
+      projectsDir,
+      now,
+    });
+    const tile = tiles.find((t) => t.key === "usage5h");
+    expect(tile?.value).toBe("412K tok");
+    expect(tile?.note).toBe("in 400K (300K cache) / out 12K");
+  });
+
   it("reports usageWeek summed independently of the 5h window", async () => {
     const now = new Date("2026-07-06T18:00:00Z");
     const sixDaysAgo = new Date(now.getTime() - 6 * 24 * 60 * 60_000).toISOString();
