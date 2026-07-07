@@ -119,7 +119,10 @@ describe("collectHealth", () => {
       "2026-07-06T15:19:45+01:00 hook=confidence_labels session=abc text_len=405 attempts=0 matched=1 would_block=0",
       "2026-07-06T15:19:56+01:00 hook=verify_loop session=abc text_len=151 attempts=0 files=4 dnv_items=0 resolvable_dnv_items=0 blocked=0",
     ]);
-    const tiles = await collectHealth({ disciplineLogPath: path });
+    const tiles = await collectHealth({
+      disciplineLogPath: path,
+      now: new Date("2026-07-06T18:00:00+01:00"),
+    });
     const tile = tiles.find((t) => t.key === "hooksFired");
     expect(tile?.value).toBe("3");
     expect(tile?.note).toBeUndefined();
@@ -138,7 +141,10 @@ describe("collectHealth", () => {
       "",
       "2026-07-06T15:19:56+01:00 hook=verify_loop session=abc text_len=151 attempts=0 files=4 dnv_items=0 resolvable_dnv_items=0 blocked=0",
     ]);
-    const tiles = await collectHealth({ disciplineLogPath: path });
+    const tiles = await collectHealth({
+      disciplineLogPath: path,
+      now: new Date("2026-07-06T18:00:00+01:00"),
+    });
     const tile = tiles.find((t) => t.key === "hooksFired");
     expect(tile?.value).toBe("2");
   });
