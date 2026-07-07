@@ -37,23 +37,28 @@ export const READ_ONLY_ALLOWED_TOOLS = ["Read", "Grep", "Glob"];
 // in the middle") inert as literal text — no permission-bypass banner, model
 // just answered the prompt.
 export function buildArgv(btn: ButtonDef, input?: string): string[] {
-  const argv = ["-p"];
+  if (input === undefined) {
+    const argv = ["-p", btn.command];
+    if (btn.profile === "read-only") {
+      argv.push("--allowedTools", ...READ_ONLY_ALLOWED_TOOLS);
+    } else if (btn.profile === "bypass") {
+      argv.push("--dangerously-skip-permissions");
+    }
+    return argv;
+  }
 
+  if (input.startsWith("-")) {
+    throw new Error(`buildArgv: input must not start with '-' (got: ${input})`);
+  }
+
+  const argv = ["-p"];
   if (btn.profile === "read-only") {
     argv.push("--allowedTools", ...READ_ONLY_ALLOWED_TOOLS);
   } else if (btn.profile === "bypass") {
     argv.push("--dangerously-skip-permissions");
   }
 
-  if (input !== undefined) {
-    if (input.startsWith("-")) {
-      throw new Error(`buildArgv: input must not start with '-' (got: ${input})`);
-    }
-    const prompt = btn.command ? `${btn.command} ${input}` : input;
-    argv.push("--", prompt);
-  } else {
-    argv.push(btn.command);
-  }
-
+  const prompt = btn.command ? `${btn.command} ${input}` : input;
+  argv.push("--", prompt);
   return argv;
 }
