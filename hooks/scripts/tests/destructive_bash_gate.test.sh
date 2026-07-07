@@ -486,6 +486,48 @@ check "allowlist present: --force + TAB + force-with-lease -> deny" DENY \
 check "allowlist present: -u + TAB + force-with-lease -> allow" ALLOW \
   "$(run_cwd "$(payload_with_cwd "git push -u${TAB}--force-with-lease" "$ALLOWLIST_REPO")" "$ALLOWLIST_REPO")"
 
+# 5e. SECURITY — a backslash-newline line continuation defeats the naked-force
+# check even after the [[:space:]] fix above, because `echo "$cmd" | grep` is
+# inherently line-oriented — no character class can match ACROSS a newline.
+# Bash treats a trailing backslash at end-of-line as intra-command
+# whitespace, so two physical lines run as ONE logical command: a naked
+# force push split across a backslash-newline continuation executed for
+# real while the detector only ever saw one physical line at a time. This
+# is a DIFFERENT root cause than the tab case (architectural: line-oriented
+# matching, not a character-class gap) — verified by confirming the real
+# case is a genuine single command via bash itself, not just asserting on
+# the hook's output. Each DENY case pairs with the same-fixture positive
+# control used throughout this section.
+# NB: NL must be built with ANSI-C quoting ($'\n'), not $(printf '\n') --
+# command substitution strips trailing newlines, silently producing an
+# EMPTY string and turning every case below into a no-op false-pass.
+#
+# NOTE on scope: a backslash-newline continuation placed BETWEEN "git" and
+# "push" themselves (rather than between two flag tokens) is NOT tested
+# here and is confirmed NOT a real bypass, despite superficially looking
+# like one: bash's line-continuation removes the backslash-newline with NO
+# space inserted, so `git\`<newline>`push` becomes the single token
+# `gitpush` — a nonexistent command, not a real `git push` invocation at
+# all (verified: `type gitpush` reports not-found). Flagging this
+# distinction explicitly because the FLAG-separator case below behaves
+# differently: two flag tokens joined by backslash-newline genuinely do
+# remain two separate argv entries after continuation-removal (there's
+# still a token boundary between them, unlike git+push which fuses into
+# one identifier), so that case is a real, exploitable bypass and this one
+# is not.
+NL=$'\n'
+check "positive control (again, before newline cases): plain fwl -> allow" ALLOW \
+  "$(run_cwd "$(payload_with_cwd "git push --force-with-lease" "$ALLOWLIST_REPO")" "$ALLOWLIST_REPO")"
+# Naked force via backslash-newline continuation, NO allowlist keyword needed
+# at all — this is the more severe shape: a plain force push, no carve-out
+# involved, still must always deny.
+check "no allowlist: naked force via backslash-newline continuation -> deny" DENY \
+  "$(run_cwd "$(payload_with_cwd "git push \\${NL}-f origin main" "$ALLOWLIST_REPO")" "$ALLOWLIST_REPO")"
+# Allowlist-active smuggle: force-with-lease on the first physical line,
+# the naked -f on a second physical line joined by backslash-continuation.
+check "allowlist present: fwl line1 + backslash-newline + -f line2 -> deny" DENY \
+  "$(run_cwd "$(payload_with_cwd "git push --force-with-lease \\${NL}-f origin" "$ALLOWLIST_REPO")" "$ALLOWLIST_REPO")"
+
 # 6. Empty allowlist file -> denied (mirrors test_gate.sh empty-content no-op)
 : > "$ALLOWLIST_REPO/.claude/destructive_allowlist"
 check "empty allowlist file: force-with-lease -> deny" DENY \

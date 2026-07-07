@@ -108,10 +108,23 @@ allowlist_permits() {
 # tool_input line produces the same real argv split as a space would; a
 # literal-space-only boundary here previously let a tab-separated naked
 # force slip past undetected while a space-separated one correctly denied.
+#
+# force_cmd_flat: $cmd with embedded newlines joined into spaces before any
+# matching below. `echo "$cmd" | grep` is inherently line-oriented — grep's
+# `.` and `[[:space:]]` can never match ACROSS a newline no matter how the
+# character class is written, so a backslash-newline line continuation
+# (which bash treats as intra-command whitespace, executing the two
+# physical lines as one logical command) defeated the whole block even
+# after the [[:space:]] fix above: `git push --force-with-lease \` then a
+# second physical line `-f origin` runs as a single real force push, but
+# the naked-force check only ever saw one physical line at a time. Scoped
+# locally (not reusing the file's later cmd_flat, which is defined further
+# down for the substitution-check block and isn't in scope yet here).
+force_cmd_flat=$(echo "$cmd" | tr '\n' ' ')
 naked_force_re='(--force([^-]|$)|(^|[[:space:]])-[a-zA-Z]*f[a-zA-Z]*([[:space:]]|$))'
-if echo "$cmd" | grep -qiE "\\bgit[[:space:]]+push\\b.*(${naked_force_re}|--force-with-lease\\b)"; then
-  if echo "$cmd" | grep -qiE '\bgit[[:space:]]+push[[:space:]]+.*--force-with-lease\b' \
-     && ! echo "$cmd" | grep -qiE "\\bgit[[:space:]]+push\\b.*${naked_force_re}" \
+if echo "$force_cmd_flat" | grep -qiE "\\bgit[[:space:]]+push\\b.*(${naked_force_re}|--force-with-lease\\b)"; then
+  if echo "$force_cmd_flat" | grep -qiE '\bgit[[:space:]]+push[[:space:]]+.*--force-with-lease\b' \
+     && ! echo "$force_cmd_flat" | grep -qiE "\\bgit[[:space:]]+push\\b.*${naked_force_re}" \
      && allowlist_permits "git-push-force-with-lease"; then
     : # allowlisted force-with-lease, no naked --force present — allow
   else
