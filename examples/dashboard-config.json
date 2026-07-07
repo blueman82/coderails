@@ -1,0 +1,67 @@
+{
+  "repos": ["blueman82/coderails"],
+  "wikiPaths": ["/Users/harrison/Github/coderails-wiki"],
+  "memoryPaths": ["/Users/harrison/.claude/projects/-Users-harrison-Github-coderails/memory"],
+  "buttons": [
+    {
+      "name": "wiki-lint",
+      "label": "WIKI LINT",
+      "command": "/coderails:wiki-lint",
+      "cwd": "/Users/harrison/Github/coderails",
+      "profile": "read-only"
+    },
+    {
+      "name": "sync-docs-weekly",
+      "label": "SYNC DOCS",
+      "command": "/sync-docs --append-system-prompt \"Write the full drift report to ~/.claude/coderails-dashboard/routines/sync-docs/report-{date}.md before finishing.\"",
+      "cwd": "/Users/harrison/Github/coderails",
+      "profile": "read-only"
+    },
+    {
+      "name": "memory-consolidation-weekly",
+      "label": "MEMORY CONSOLIDATION",
+      "command": "/coderails:memory-consolidation",
+      "cwd": "/Users/harrison/Github/coderails",
+      "profile": "read-only"
+    }
+  ],
+  "routines": [
+    {
+      "name": "wiki-lint",
+      "label": "Wiki Lint (nightly)",
+      "buttonRef": "wiki-lint",
+      "cadence": "nightly",
+      "expectedArtifact": {
+        "artifactPath": "{vault}/log.md",
+        "maxAgeSeconds": 129600,
+        "predicate": { "kind": "contains", "marker": "## [{date}] lint" }
+      },
+      "escalation": ["notification", "vault-note"]
+    },
+    {
+      "name": "sync-docs-weekly",
+      "label": "Sync Docs (weekly)",
+      "buttonRef": "sync-docs-weekly",
+      "cadence": "weekly",
+      "foreignSkillPath": "/Users/harrison/.claude/skills/sync-docs/SKILL.md",
+      "expectedArtifact": {
+        "artifactPath": "/Users/harrison/.claude/coderails-dashboard/routines/sync-docs/report-{date}.md",
+        "maxAgeSeconds": 691200,
+        "predicate": { "kind": "exists" }
+      },
+      "escalation": ["notification", "vault-note"]
+    },
+    {
+      "name": "memory-consolidation-weekly",
+      "label": "Memory Consolidation (weekly)",
+      "buttonRef": "memory-consolidation-weekly",
+      "cadence": "weekly",
+      "expectedArtifact": {
+        "artifactPath": "/Users/harrison/.claude/coderails-dashboard/routines/memory-consolidation/report-{date}.md",
+        "maxAgeSeconds": 691200,
+        "predicate": { "kind": "exists" }
+      },
+      "escalation": ["notification", "vault-note"]
+    }
+  ]
+}
