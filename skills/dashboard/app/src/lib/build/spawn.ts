@@ -3,6 +3,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { QueueEntrySnapshot } from "../collect/queueActions";
+import { buildPrompt } from "./prompt";
 
 const NAME_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;
 const DEFAULT_BUILDS_DIR = join(homedir(), ".claude", "coderails-dashboard", "builds");
@@ -59,12 +60,7 @@ export function claimAndSpawnBuild(
   }
 
   writeFileSync(join(buildDir, "snapshot.json"), JSON.stringify(entry));
-  // WU2's src/lib/build/prompt.ts supplies the real template; this task only
-  // establishes the file-write contract with a placeholder.
-  writeFileSync(
-    join(buildDir, "prompt.md"),
-    `# Builder prompt for ${entry.hash}\n\nSee prompt.ts (WU2) for the real template — this task only establishes the file-write contract.`
-  );
+  writeFileSync(join(buildDir, "prompt.md"), buildPrompt(entry));
   writeFileSync(
     join(buildDir, "state.json"),
     JSON.stringify({ schemaVersion: 1, hash: entry.hash, state: "claimed", createdAt: Date.now() })
