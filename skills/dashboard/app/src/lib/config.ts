@@ -7,6 +7,10 @@ export type PermissionProfile = "read-only" | "standard" | "bypass";
 export interface ButtonDef {
   name: string;
   label: string;
+  // An empty string is valid only for an input-bearing (inputAllowed) button
+  // whose free-text input supplies the whole prompt; an empty or
+  // whitespace-only command with no (effective) input is rejected by
+  // buildArgv rather than spawning an empty prompt.
   command: string;
   cwd: string;
   profile: PermissionProfile;
