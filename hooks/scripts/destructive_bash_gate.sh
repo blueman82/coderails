@@ -262,25 +262,44 @@ fi
 # (a real invocation whose own argument separately mentions a script name;
 # a prose statement followed by a separate genuine invocation) into a
 # single, simple, conservative rule: more than one mention is never prose.
+# subst_re: every character/token sequence that triggers live shell
+# expansion the instant this line is interpreted — backtick and $(...)
+# command substitution, PLUS <(...) / >(...) process substitution, which
+# executes its body eagerly exactly like $(...) but contains neither a
+# backtick nor a literal "$(" and was therefore invisible to a detector
+# that only checked for those two (confirmed bypass: `bash scripts/push.sh
+# "note" <(touch pwned)` ran the touch with zero backticks or $( anywhere
+# on the line).
+subst_re='`|\$\(|<\(|>\('
+# cmd_flat: $cmd with embedded newlines joined into spaces before any
+# sed/grep scoping logic runs. Without this, sed's and grep's `.` never
+# cross a newline, so a script mention on one physical line and its own
+# live substitution on a DIFFERENT physical line (a heredoc body with an
+# unquoted delimiter, which still expands $(...) inside it; or ordinary
+# backslash line-continuation, which bash joins into one logical command
+# before executing it) let "before_script"/"from_script" silently miss the
+# substitution — confirmed bypass on both shapes. Flattening first makes
+# every check below see the whole logical command as bash will.
+cmd_flat=$(echo "$cmd" | tr '\n' ' ')
 script_re='scripts/(push|merge|post_review|post_evals)\.sh'
-if echo "$cmd" | grep -qE "$script_re"; then
-  if echo "$cmd" | grep -qE '`|\$\('; then
+if echo "$cmd_flat" | grep -qE "$script_re"; then
+  if echo "$cmd_flat" | grep -qE "$subst_re"; then
     substitution_scoped=0
-    total_mentions=$(echo "$cmd" | grep -oE "$script_re" | wc -l | tr -d ' ')
+    total_mentions=$(echo "$cmd_flat" | grep -oE "$script_re" | wc -l | tr -d ' ')
     if [ "$total_mentions" -eq 1 ]; then
-      before_script=$(echo "$cmd" | sed -E "s#${script_re}.*##")
+      before_script=$(echo "$cmd_flat" | sed -E "s#${script_re}.*##")
       quote_count=$(echo "$before_script" | grep -oE '"' | wc -l | tr -d ' ')
       quote_parity=$(( quote_count % 2 ))
       if [ "$quote_parity" -eq 0 ]; then
-        from_script=$(echo "$cmd" | grep -oE "${script_re}.*")
-        echo "$from_script" | grep -qE '`|\$\(' && substitution_scoped=1
+        from_script=$(echo "$cmd_flat" | grep -oE "${script_re}.*")
+        echo "$from_script" | grep -qE "$subst_re" && substitution_scoped=1
       else
-        script_segment=$(echo "$cmd" | grep -oE '"[^"]*"' | grep -E "$script_re" | head -1)
+        script_segment=$(echo "$cmd_flat" | grep -oE '"[^"]*"' | grep -E "$script_re" | head -1)
         bare_segment=$(echo "$script_segment" | grep -oE "^\"${script_re}\"\$")
         if [ -n "$bare_segment" ]; then
-          from_script=$(echo "$cmd" | grep -oE "${script_re}.*")
-          echo "$from_script" | grep -qE '`|\$\(' && substitution_scoped=1
-        elif echo "$script_segment" | grep -qE '`|\$\('; then
+          from_script=$(echo "$cmd_flat" | grep -oE "${script_re}.*")
+          echo "$from_script" | grep -qE "$subst_re" && substitution_scoped=1
+        elif echo "$script_segment" | grep -qE "$subst_re"; then
           # substitution is inside the prose segment — allow ONLY if no
           # OTHER substitution exists elsewhere on the line. Compared by
           # COUNTING substitution characters in the whole command vs. in
@@ -293,23 +312,23 @@ if echo "$cmd" | grep -qE "$script_re"; then
           # read as substitution-free, granting an undeserved exemption
           # even though a separate substitution existed elsewhere on the
           # line). Counting has no delimiter to collide with.
-          whole_subst=$(( $(echo "$cmd" | grep -oE '\$\(' | wc -l | tr -d ' ') + $(echo "$cmd" | grep -oE '`' | wc -l | tr -d ' ') ))
-          segment_subst=$(( $(echo "$script_segment" | grep -oE '\$\(' | wc -l | tr -d ' ') + $(echo "$script_segment" | grep -oE '`' | wc -l | tr -d ' ') ))
+          whole_subst=$(( $(echo "$cmd_flat" | grep -oE '\$\(|<\(|>\(' | wc -l | tr -d ' ') + $(echo "$cmd_flat" | grep -oE '`' | wc -l | tr -d ' ') ))
+          segment_subst=$(( $(echo "$script_segment" | grep -oE '\$\(|<\(|>\(' | wc -l | tr -d ' ') + $(echo "$script_segment" | grep -oE '`' | wc -l | tr -d ' ') ))
           [ "$whole_subst" -ne "$segment_subst" ] && substitution_scoped=1
         else
           substitution_scoped=1
         fi
       fi
     else
-      from_script=$(echo "$cmd" | grep -oE "${script_re}.*")
-      echo "$from_script" | grep -qE '`|\$\(' && substitution_scoped=1
+      from_script=$(echo "$cmd_flat" | grep -oE "${script_re}.*")
+      echo "$from_script" | grep -qE "$subst_re" && substitution_scoped=1
     fi
     if [ "$substitution_scoped" -eq 1 ]; then
       jq -n --arg cmd "$cmd" '{
         hookSpecificOutput: {
           hookEventName: "PreToolUse",
           permissionDecision: "deny",
-          permissionDecisionReason: ("Command-substitution character (backtick or $(...)) detected inside a push.sh/merge.sh/post_review.sh/post_evals.sh argument.\nFull command: " + $cmd + "\nThese scripts take a free-text message that becomes a commit/PR title or comment body — a backtick or $(...) in it executes as live shell substitution when this line runs, not literal text. None of these scripts read a body from a file, so there is no -F body=@file escape hatch here — rewrite the argument in plain prose with no backticks or $() (e.g. \"git rev-parse show-toplevel\" instead of wrapping it in backticks).")
+          permissionDecisionReason: ("Command-substitution character (backtick, $(...), or process substitution <(...)/>(...)) detected inside a push.sh/merge.sh/post_review.sh/post_evals.sh argument.\nFull command: " + $cmd + "\nThese scripts take a free-text message that becomes a commit/PR title or comment body — a backtick, $(...), or <(...)/>(...) in it executes as live shell substitution when this line runs, not literal text. None of these scripts read a body from a file, so there is no -F body=@file escape hatch here — rewrite the argument in plain prose with no backticks, $(), or <()/>() (e.g. \"git rev-parse show-toplevel\" instead of wrapping it in backticks).")
         }
       }'
       exit 0

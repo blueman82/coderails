@@ -23,6 +23,14 @@
       "command": "/coderails:memory-consolidation",
       "cwd": "/Users/harrison/Github/coderails",
       "profile": "read-only"
+    },
+    {
+      "name": "ask",
+      "label": "ASK",
+      "command": "",
+      "cwd": "/Users/harrison/Github/coderails",
+      "profile": "standard",
+      "inputAllowed": true
     }
   ],
   "routines": [

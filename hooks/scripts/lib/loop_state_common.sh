@@ -128,6 +128,55 @@ als_stable_invocations() {
   printf '%s' "$n"
 }
 
+# als_extract_last_text <transcript> <tail_lines>
+#   Extracts the last assistant text block from a JSONL transcript. Returns the
+#   joined text of the last assistant message that has any text content, or an
+#   empty string if none exists (absent/unreadable transcript, no text blocks,
+#   or a malformed line jq -s can't parse). Mirrors discipline_common.sh's
+#   dc_extract_last_text exactly (same canonical extraction shape); duplicated
+#   rather than shared across the two libs since loop_state_common.sh and
+#   discipline_common.sh are deliberately independent (different hook families).
+als_extract_last_text() {
+  local transcript="$1" tail_lines="$2"
+  tail -n "$tail_lines" "$transcript" 2>/dev/null | jq -s -r '
+    [.[]?
+     | select(.type == "assistant")
+     | (.message.content
+        | if type == "array" then [ .[]? | select(.type == "text") | .text ] | join(" ")
+          elif type == "string" then .
+          else "" end)
+     | select(type == "string" and length > 0)]
+    | last // ""
+  ' 2>/dev/null
+}
+
+# als_stable_last_text <transcript> <tail_lines> <max_attempts> <sleep_s>
+#   Calls als_extract_last_text in a retry loop until the length stabilises
+#   (two consecutive calls return the same non-zero length) or max_attempts is
+#   hit — rides out the transcript-flush race. Prints the stabilised text
+#   (possibly empty, e.g. a malformed transcript line jq -s can't parse across
+#   every attempt). Sets ALS_LAST_ATTEMPTS to the iteration count consumed.
+#   Mirrors discipline_common.sh's dc_stable_text; callers must inspect the
+#   RETURNED TEXT for emptiness themselves — this function does not treat
+#   empty-after-exhausting-retries as an error, only as "no text found."
+ALS_LAST_ATTEMPTS=0
+als_stable_last_text() {
+  local transcript="$1" tail_lines="$2" max_attempts="$3" sleep_s="$4"
+  local prev_len=-1 attempts=0 text="" cur_len
+  while [ "$attempts" -lt "$max_attempts" ]; do
+    text=$(als_extract_last_text "$transcript" "$tail_lines")
+    cur_len=${#text}
+    if [ "$cur_len" -eq "$prev_len" ] && [ "$cur_len" -gt 0 ]; then
+      break
+    fi
+    prev_len=$cur_len
+    attempts=$((attempts + 1))
+    [ "$attempts" -lt "$max_attempts" ] && sleep "$sleep_s"
+  done
+  ALS_LAST_ATTEMPTS=$attempts
+  printf '%s' "$text"
+}
+
 # Resolve the progress.json path via the sole path authority (sibling script).
 als_resolve_path() { bash "$(dirname "${BASH_SOURCE[0]}")/agentic_loop_path.sh" "$1" "$2" 2>/dev/null; }
 

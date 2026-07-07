@@ -264,7 +264,7 @@ describe("pressButton — argv parity with Task 7's buildArgv", () => {
 
   it("passes input with the -- sentinel for an inputAllowed button", async () => {
     const execFile = vi.fn((_cmd: string, args: string[], _opts, callback) => {
-      expect(args).toEqual(["-p", "/coderails:ask", "--", "hello"]);
+      expect(args).toEqual(["-p", "--", "/coderails:ask hello"]);
       callback(null, "", "");
     });
     const deps = makeDeps({ execFile });

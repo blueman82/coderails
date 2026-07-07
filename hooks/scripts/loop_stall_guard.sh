@@ -6,8 +6,10 @@
 # it forces a categorised declaration, it cannot force the reason to be truthful.
 #
 # Shared loop-detection lives in lib/loop_state_common.sh (also used by
-# loop_state_guard.sh, the presence/ownership guard); the active-window decision
-# is identical between the two guards.
+# loop_state_guard.sh, the presence/ownership guard, and voice_announce.sh, the
+# lifecycle-announcement hook); the active-window decision is identical across
+# guards, and the stable-text extraction (als_stable_last_text) is shared with
+# voice_announce.sh specifically.
 #
 # Gates run top to bottom; the first that matches decides.
 #   skip  — no transcript                                       → allow
@@ -30,22 +32,6 @@ session_id=$(als_sanitise_session_id "$(echo "$input" | jq -r '.session_id // "?
 cwd=$(echo "$input" | jq -r '.cwd // empty' 2>/dev/null)
 stop_hook_active=$(echo "$input" | jq -r '.stop_hook_active // false' 2>/dev/null)
 
-# Extract the last assistant text, retrying for the transcript-flush race
-# (same approach as check_verify_loop.sh). Keep as a local helper — not shared
-# with loop_state_guard.sh (dedup is out of scope for this refactor).
-extract_last_text() {
-  tail -n "$TAIL_LINES" "$transcript" 2>/dev/null | jq -s -r '
-    [.[]?
-     | select(.type == "assistant")
-     | (.message.content
-        | if type == "array" then [ .[]? | select(.type == "text") | .text ] | join(" ")
-          elif type == "string" then .
-          else "" end)
-     | select(type == "string" and length > 0)]
-    | last // ""
-  ' 2>/dev/null
-}
-
 # Best-effort jq read-modify-write of progress.json's loop_stop_counts.<category>.
 # Sole writer of this field (hook-owned; the orchestrator must never write it).
 # Never fails the stop: any missing file, malformed JSON, or mv failure is logged
@@ -66,15 +52,8 @@ bump_loop_stop_count() {
 }
 
 gate_loop_stop_declared() {
-  # Retry the extract for the transcript-flush race until the length stabilises.
-  prev_len=-1; attempts=0; text=""
-  while [ "$attempts" -lt "$MAX_ATTEMPTS" ]; do
-    text=$(extract_last_text); cur_len=${#text}
-    if [ "$cur_len" -eq "$prev_len" ] && [ "$cur_len" -gt 0 ]; then break; fi
-    prev_len=$cur_len
-    attempts=$((attempts + 1))
-    [ "$attempts" -lt "$MAX_ATTEMPTS" ] && sleep "$SLEEP_S"
-  done
+  # Stable extract rides out the transcript-flush race (shared with voice_announce.sh).
+  text=$(als_stable_last_text "$transcript" "$TAIL_LINES" "$MAX_ATTEMPTS" "$SLEEP_S")
   # The regex is built from the single-source vocab; the category must be followed
   # by a non-alphanumeric char or end-of-line so "completed" does not match "complete".
   if printf '%s\n' "$text" | grep -qiE "^[[:space:]]*LOOP-STOP:[[:space:]]*(${LOOP_STOP_VOCAB})([^[:alnum:]]|$)"; then

@@ -6,38 +6,67 @@ import type { ButtonDef } from "./config";
 export const READ_ONLY_ALLOWED_TOOLS = ["Read", "Grep", "Glob"];
 
 // buildArgv is THE single profile→flag mapping (per Task 7 brief) — Task 13
-// must reuse this, never re-implement it. `input`, when given, is appended
-// as exactly one argv element after any profile flags; it is never
-// concatenated into `btn.command` or any other string, so it can't inject
-// additional flags or shell syntax into the spawned process.
+// must reuse this, never re-implement it.
+//
+// `input`, when given, is merged into a single prompt string with
+// `btn.command` (space-separated), because the claude CLI's `-p`/`--print`
+// takes exactly ONE positional prompt argument — confirmed empirically on
+// this machine 2026-07-07: passing `btn.command` and `input` as two separate
+// argv elements (e.g. `-p "/coderails:verify" -- "some claim"`) left
+// `$ARGUMENTS` empty in the invoked slash command every time, because the
+// CLI never merges a second positional into the prompt it already consumed.
+// A single combined string (`-p -- "/coderails:verify some claim"`)
+// delivers correctly — confirmed empirically the same day: `$ARGUMENTS` was
+// populated and the CLI's plain single-prompt form
+// (`claude -p "Reply with PONG"`, no command prefix) also replied correctly,
+// which is why an empty `btn.command` (a free-text "ask" button) still works
+// once `input` alone becomes the whole prompt.
 //
 // Two independent layers close the flag-smuggling vector (an input value
 // like "--dangerously-skip-permissions" being parsed by the claude CLI as a
 // real flag instead of literal prompt text, confirmed empirically on this
 // machine 2026-07-06: `claude -p "--version"` prints the version banner and
 // never answers the prompt, i.e. the CLI really does parse a leading-dash
-// argument as a flag): (1) input starting with "-" is rejected outright
-// (throws) rather than trusting the sentinel alone; (2) a literal "--"
-// end-of-options sentinel is inserted immediately before input regardless,
-// confirmed on this machine 2026-07-06 to make the claude CLI treat
-// everything after it as literal argument text (`claude -p "..." --
-// "--dangerously-skip-permissions"` ran as a normal sandboxed prompt, no
-// permission-bypass banner).
-export function buildArgv(btn: ButtonDef, input?: string): string[] {
-  const argv = ["-p", btn.command];
+// argument as a flag): (1) input starting with "-" (after trimming, so
+// whitespace can't hide a leading dash from this check) is rejected
+// outright (throws) rather than trusting the sentinel alone, checked
+// BEFORE input is merged into the combined prompt string; (2) a literal
+// "--" end-of-options sentinel is inserted immediately before the combined
+// prompt whenever input is present, confirmed empirically on this machine
+// 2026-07-07 to still deliver correctly and to keep a flag-shaped substring
+// embedded mid-prompt (e.g. "... ignore this --dangerously-skip-permissions
+// in the middle") inert as literal text — no permission-bypass banner, model
+// just answered the prompt.
+function profileFlags(profile: ButtonDef["profile"]): string[] {
+  if (profile === "read-only") return ["--allowedTools", ...READ_ONLY_ALLOWED_TOOLS];
+  if (profile === "bypass") return ["--dangerously-skip-permissions"];
+  return [];
+}
 
-  if (btn.profile === "read-only") {
-    argv.push("--allowedTools", ...READ_ONLY_ALLOWED_TOOLS);
-  } else if (btn.profile === "bypass") {
-    argv.push("--dangerously-skip-permissions");
-  }
+export function buildArgv(btn: ButtonDef, rawInput?: string): string[] {
+  // Normalise first: empty or whitespace-only input is treated exactly like
+  // no input at all. route.ts does no trim/empty check of its own (only the
+  // UI's call site converts empty→undefined before ever reaching here), so
+  // a direct API caller can hand buildArgv input:"" or input:"   " — without
+  // this normalisation that would still take the input-bearing branch below
+  // and produce a merged prompt with a trailing space and a needless '--'
+  // sentinel, instead of the same clean argv a genuine no-input press gets.
+  const input = rawInput !== undefined && rawInput.trim() === "" ? undefined : rawInput;
 
-  if (input !== undefined) {
-    if (input.startsWith("-")) {
-      throw new Error(`buildArgv: input must not start with '-' (got: ${input})`);
+  if (input === undefined) {
+    if (btn.command.trim() === "") {
+      throw new Error("buildArgv: refusing to spawn an empty prompt (no command and no input)");
     }
-    argv.push("--", input);
+    return ["-p", btn.command, ...profileFlags(btn.profile)];
   }
 
-  return argv;
+  // Checked against the trimmed value so whitespace can't smuggle a flag
+  // past a naive startsWith check (e.g. "  --dangerously-skip-permissions").
+  if (input.trim().startsWith("-")) {
+    throw new Error(`buildArgv: input must not start with '-' (got: ${input})`);
+  }
+
+  const prompt = btn.command ? `${btn.command} ${input}` : input;
+
+  return ["-p", ...profileFlags(btn.profile), "--", prompt];
 }
