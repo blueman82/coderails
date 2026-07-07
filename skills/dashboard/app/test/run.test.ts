@@ -43,6 +43,14 @@ function testConfig(): DashboardConfig {
         profile: "read-only",
         inputAllowed: true,
       },
+      {
+        name: "ask",
+        label: "ASK",
+        command: "",
+        cwd: "/Users/harrison/Github/coderails",
+        profile: "standard",
+        inputAllowed: true,
+      },
     ],
   };
 }
