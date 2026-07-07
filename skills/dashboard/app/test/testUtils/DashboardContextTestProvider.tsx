@@ -11,7 +11,10 @@ export function DashboardContextTestProvider({
   children,
 }: {
   snapshot: DashboardSnapshot;
-  children: ReactNode;
+  // Optional so createElement(Provider, props, child) typechecks — TS's
+  // function-component overload doesn't count rest-arg children against a
+  // required `children` prop.
+  children?: ReactNode;
 }) {
   return (
     <DashboardContext.Provider value={{ snapshot, status: "online", lastUpdate: 0 }}>
