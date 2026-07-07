@@ -108,7 +108,7 @@ treat it as machine-local config, same as `.claude/settings.local.json`.
 | | **Wiki:** wiki-init, wiki-query, wiki-ingest, wiki-lint | |
 | | **Review & handoff:** requesting-code-review, receiving-code-review, handoff, improve-prompt, using-git-worktrees, using-coderails, writing-skills | |
 
-28 skills ship in total (`ls skills/` in the plugin dir to see the full list).
+31 skills ship in total (`ls skills/` in the plugin dir to see the full list).
 `/post-review` and `/post-evals` post SHA-bound review/eval-artifact summaries
 as durable PR comments; `task-evals` freezes a game-resistant success-eval set
 at task intake and gates `/merge` on it.

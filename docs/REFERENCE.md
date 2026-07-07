@@ -1,6 +1,6 @@
 # coderails Component Reference
 
-Catalogue of every coderails component (29 skills, plus hooks, commands, scripts): what it does, when it's active, when it's NOT, and dependencies. Ground truth: all entries verified from source files. See README for a lighter overview.
+Catalogue of every coderails component (31 skills, plus hooks, commands, scripts): what it does, when it's active, when it's NOT, and dependencies. Ground truth: all entries verified from source files. See README for a lighter overview.
 
 ---
 
@@ -105,6 +105,16 @@ These skills were written for coderails and are not vendored from elsewhere.
 **Privacy invariant:** every artifact in the pipeline — scan output, cluster output, judge input/output, proposal chart — carries only tool names, a privacy-whitelisted `head` (first two Bash command tokens, the Skill name, or the Agent subagent_type), counts, and session ids. Never verbatim transcript prose, file contents, or reconstructed intent.
 
 **When it does NOT apply:** it never creates a skill on its own; the mechanical pipeline (scan+cluster) has no creation capability at all, and the judge stage only proposes.
+
+---
+
+#### `memory-consolidation`
+
+**Purpose:** Health-checks and consolidates a project's persistent memory directory (`~/.claude/projects/<slug>/memory/`) — dedupes overlapping memories, flags stale or contradicted ones (without silently deleting `feedback`-type memories), and refreshes the `MEMORY.md` index.
+
+**When it triggers:** "consolidate memory", "clean up memory", "memory consolidation", or when running as a scheduled routine (weekly, via the `routines` section of `~/.claude/coderails-dashboard.json`). Also runs standalone on demand.
+
+**Dependencies:** Writes a durable report artifact to `~/.claude/coderails-dashboard/routines/memory-consolidation/report-{date}.md`, unconditionally — the property a scheduled routine's artifact-gate checks.
 
 ---
 
