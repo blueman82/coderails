@@ -41,7 +41,7 @@ silently patched to match an implementation that drifted.
 ### On-disk layout
 
 ```
-~/.claude/coderails-dashboard/queue/<hash>.json
+~/.claude/coderails-dashboard/approvals/<hash>.json
 ```
 
 One file per pending (or resolved) approval, named by the hex SHA-256 hash of
@@ -50,6 +50,22 @@ directory is created idempotently (`mkdir -p` semantics) by whichever process
 writes first — the secretary's gate is the only writer of `pending` entries;
 a future dashboard Approve/Deny button is the only writer of the
 `approved`/`denied` transition.
+
+**Note (2026-07-07):** this lives in `approvals/`, a sibling directory to
+`queue/`, not inside `queue/` itself. `queue/` is shared with the routines
+runner sweep (`skills/dashboard/runner/`), which globs every `.json` file in
+it and quarantines anything that doesn't parse as its own `Intent` shape
+(`{button, input?, requestedAt, source}` — see
+`skills/dashboard/lib/README.md`), and with workflow-audit's
+`workflow-audit:propose-skill` proposals, which use the same `QueueFileEntry`
+shape as approvals but are a distinct producer/consumer pair. Writing
+`QueueFileEntry` approval files into `queue/` would have them swept and
+quarantined by the runner as malformed intents. Splitting the send-gate
+approval traffic into its own `approvals/` directory removes that collision
+without touching the routines queue seam or workflow-audit's proposal flow,
+both of which stay in `queue/` unchanged. This is a clean-break move — there
+is no dual-dir fallback and no migration of old `queue/` approval files
+(there is no producer of approval-shaped files in `queue/` to migrate from).
 
 ### `QueueFileEntry` shape (normative)
 
