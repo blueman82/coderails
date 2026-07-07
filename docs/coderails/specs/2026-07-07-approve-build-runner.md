@@ -84,12 +84,18 @@ content. The real interpolated template is WU2's `src/lib/build/prompt.ts`
 
 Build lifecycle lives entirely in
 `~/.claude/coderails-dashboard/builds/<hash>/`, a directory **separate from**
-the queue directory. This is a deliberate structural choice: the queue
-contract requires any file failing `parseQueueEntry` to be logged as
-`unparseable_entry:<filename>` (`skills/dashboard/app/src/lib/collect/queue.ts`),
-and the queue's own status vocabulary is closed to exactly
-`pending|approved|denied` (`VALID_STATUSES` in the same file) — putting
-build-lifecycle state inside the queue directory, or inventing a new queue
+the queue directory. This is a deliberate structural choice: the
+consumption-seam contract (§"Unparseable entries are also a distinct
+rejection" in the queue-seam doc) requires the runner to log any file
+failing `parseQueueEntry`
+(`skills/dashboard/app/src/lib/collect/queue.ts`) as a distinct
+`unparseable_entry:<filename>` rejection — note `queue.ts`'s own
+`collectQueue` does not do this itself today, it silently skips a file that
+fails `parseQueueEntry`; the logging obligation falls on the runner (§4.2
+below), not on the collector. The queue's own status vocabulary is closed to
+exactly `pending|approved|denied` (`VALID_STATUSES` in the same file) —
+putting build-lifecycle state inside the queue directory, or inventing a new
+queue
 status for it, would either generate permanent false rejections or reopen a
 frozen vocabulary two shipped consumers already depend on. The builds
 directory keeps the queue directory byte-for-byte untouched.

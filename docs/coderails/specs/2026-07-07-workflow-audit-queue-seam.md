@@ -118,12 +118,14 @@ skill change goes through.
 **This section originally stated that clicking "Approve" on a
 `workflow-audit:propose-skill` queue entry changed only that entry's
 `status` field, in place, and triggered nothing else. That claim is no
-longer true.** A later loop (loop 2) built the consumption seam this
-document specified above as a contract, and clicking Approve now **does**
-trigger the routines runner described above: the dashboard's
-`POST /api/queue` route claims the approved entry and spawns a detached
-headless build that authors the proposed skill via skill-creator and opens
-a PR through the full gate sequence. See
+longer true.** A later loop (loop 2) built a consumer of the contract this
+document specifies above — not the separate scheduled "routines" sub-project
+this section originally anticipated, but a synchronous build spawned
+directly from the click itself, with no polling or cron involved. Clicking
+Approve now **does** trigger a build: the dashboard's `POST /api/queue`
+route claims the approved entry and spawns a detached headless build that
+authors the proposed skill via skill-creator and opens a PR through the
+full gate sequence. See
 [`2026-07-07-approve-build-runner.md`](2026-07-07-approve-build-runner.md)
 for the runner's full contract — trigger condition, sidecar schema, hash
 re-validation, concurrency handling, and the threat-model honesty note that
@@ -133,11 +135,13 @@ The filter → re-validate → create sequence this section specified above is
 exactly what the runner now implements: `status === "approved" && toolName
 === "workflow-audit:propose-skill"`, a hash re-validation before any action
 is taken, and — on success — the same `writing-skills` RED/GREEN/REFACTOR
-process landed via branch + PR + full gates that `workflow-audit`'s SKILL.md
-section 8 always specified. The one deliberate change from what was
-originally proposed here: the runner never reaches `/coderails:merge`. It
-stops at an open PR with gates green; the owner merges by hand (rationale in
-the new spec doc's §5).
+discipline and branch + PR + full-gates delivery that `workflow-audit`'s
+SKILL.md section 8 specifies (section 8's own authoring-engine detail was
+reconciled in the same change that rewrote this section — see that
+document). The one deliberate change from what was originally proposed
+here: the runner never reaches `/coderails:merge`. It stops at an open PR
+with gates green; the owner merges by hand (rationale in the new spec
+doc's §5).
 
 Zero approvals, or approved entries whose build fails and is never retried,
 remain valid, complete states — there is no nag, no implicit timeout that
