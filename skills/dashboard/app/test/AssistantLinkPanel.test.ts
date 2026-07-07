@@ -359,6 +359,21 @@ describe("AssistantLinkPanel", () => {
       expect(html).toContain("https://github.com/blueman82/coderails/pull/999");
     });
 
+    it('falls back to plain-text "PR open" (no link) when prUrl is a non-https scheme, e.g. javascript:', () => {
+      const entry = approvedProposalEntry();
+      const build = buildEntry({ state: "pr_open", prUrl: "javascript:alert(1)" });
+      const html = renderToStaticMarkup(
+        createElement(
+          DashboardContextTestProvider,
+          { snapshot: emptySnapshot({ queue: [entry], builds: [build] }) },
+          createElement(AssistantLinkPanel, { token: "t" })
+        )
+      );
+      expect(html).toContain("awaiting your merge");
+      expect(html).not.toContain("javascript:alert");
+      expect(html).not.toContain("<a ");
+    });
+
     it('renders "failed: <reason> — delete builds/<hash> to retry" for state failed', () => {
       const entry = approvedProposalEntry();
       const build = buildEntry({ state: "failed", failureReason: "hash_mismatch:abc123" });
