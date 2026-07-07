@@ -64,9 +64,8 @@ describe("parseIntent", () => {
     );
   });
 
-  // Negative control for the premise change: the OLD (pre-merge) plan
-  // treated requestedAt as an ISO 8601 string. The merged producer writes
-  // a number (Date.now()). An ISO string must now be REJECTED.
+  // Negative control: requestedAt is an epoch-ms number (Date.now()), not an
+  // ISO 8601 string. An ISO string must be REJECTED.
   it("throws IntentValidationError when requestedAt is an ISO 8601 string instead of epoch-ms number", () => {
     expect(() =>
       parseIntent({ button: "wiki-lint", requestedAt: "2026-07-06T20:00:00.000Z", source: "web" })

@@ -1,13 +1,15 @@
 #!/bin/bash
 # Stop hook — when an agentic loop is active in this session, block (exit 2) unless
 # a session-owned progress.json exists at the resolved path. Enforces PRESENCE +
-# OWNERSHIP only; it does NOT police content freshness (that is Spec C2's job).
+# OWNERSHIP only; it does NOT police content freshness (that's loop_stall_guard.sh's
+# job).
 #
 # Honest boundary (same as check_verify_loop.sh): this forces the file to exist and
 # be this session's; it cannot force the content to be accurate.
 #
 # Shared loop-detection (invocation count, path, file state) lives in
-# lib/loop_state_common.sh, sourced below and shared with loop_stall_guard.sh (C2).
+# lib/loop_state_common.sh, sourced below and shared with loop_stall_guard.sh, which
+# enforces the anti-stall LOOP-STOP declaration.
 #
 # Gates run top to bottom; the first that matches decides. Cheapest skips first.
 #   skip  — no transcript                                       → allow
@@ -23,7 +25,7 @@ IFS= read -r -d '' -t 5 input || true
 transcript=$(echo "$input" | jq -r '.transcript_path // empty')
 session_id=$(als_sanitise_session_id "$(echo "$input" | jq -r '.session_id // "?"' 2>/dev/null)")
 cwd=$(echo "$input" | jq -r '.cwd // empty' 2>/dev/null)
-[ -z "$cwd" ] && cwd="$PWD"  # F3 fix: fall back to $PWD when .cwd is absent
+[ -z "$cwd" ] && cwd="$PWD"  # Falls back to $PWD when .cwd is absent.
 stop_hook_active=$(echo "$input" | jq -r '.stop_hook_active // false' 2>/dev/null)
 
 gate_present_and_owned() {

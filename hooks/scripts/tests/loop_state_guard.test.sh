@@ -98,18 +98,14 @@ null_payload() { # transcript_path -> payload with session_id: null
   jq -cn --arg t "$1" --arg c "$CWD" '{transcript_path:$t,session_id:null,cwd:$c,stop_hook_active:false}'
 }
 
-# Fix 1 regression test — session_id: null must not collide onto a shared
-# sentinel path. Before the fix, EVERY payload with session_id null (or the key
-# missing) resolved session_id to the fixed literal "?", so a progress.json
-# stamped session_id "?" and sitting at ".../?/progress.json" would look
-# "present + owned" (allow) to ANY session that ever hit this edge case —
-# regardless of which session actually wrote it. Simulate that exact stray
-# file (owned by the "?" sentinel itself, matching what the OLD code would
-# have written for a prior malformed-payload session), then run the guard with
-# session_id: null. Pre-fix this must ALLOW (it is genuinely "present+owned" at
-# the shared sentinel path); post-fix each invocation gets its own unique
-# generated fallback, so the guard never resolves to "?" and must not see that
-# stray file — it blocks "absent" instead.
+# session_id: null must not collide onto a shared sentinel path. If a payload with
+# session_id null (or the key missing) resolved session_id to the fixed literal "?",
+# a progress.json stamped session_id "?" and sitting at ".../?/progress.json" would
+# look "present + owned" (allow) to ANY session that ever hit this edge case —
+# regardless of which session actually wrote it. Simulate that exact stray file
+# (owned by the "?" sentinel itself), then run the guard with session_id: null:
+# each invocation must get its own unique generated fallback, so the guard never
+# resolves to "?" and must not see that stray file — it blocks "absent" instead.
 reset; T=$(mk_transcript 1); write_file in-progress '?' 0 '?'
 check "null session_id -> unique fallback, not old '?' sentinel (absent, not allow)" 2 "$(run x "$(null_payload "$T")")"
 
@@ -152,14 +148,14 @@ check "sanitise: '..' collapsed/removed" "__etc" "$(sanitised "../../etc")"
 check "sanitise: normal id passes through unchanged" "normal-id-123" "$(sanitised "normal-id-123")"
 
 # =====================================================================
-# Task A1 — als_count_invocations jq-failure hardening (distinguishable logging)
+# als_count_invocations jq-failure hardening (distinguishable logging)
 # =====================================================================
 # Malformed transcript: 1 valid loop-Skill line + 1 truncated/invalid JSON line.
 # `jq -s` (slurp) aborts the WHOLE parse on the bad line, so als_count_invocations
 # returns empty -> als_gate_require_active_loop treats it as "not a loop" and
-# allows — this fail-open behavior is UNCHANGED by this task (asserted first).
-# The NEW part is the second assertion: the discipline log must now carry a
-# distinguishable reason=jq_parse_error line, where before it logged nothing.
+# allows — this fail-open behavior must stay unchanged (asserted first).
+# The second assertion covers the distinguishing behavior: the discipline log must
+# carry a distinguishable reason=jq_parse_error line rather than logging nothing.
 mk_corrupt_transcript() {
   local out="$TMP/corrupt_$RANDOM.jsonl"
   printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Skill","input":{"skill":"coderails:agentic-loop"}}]}}' > "$out"
@@ -263,24 +259,24 @@ check "clean transcript, no jq failure -> zero als_count_invocations log lines" 
   "$(count 'hook=als_count_invocations' "$CLAUDE_DISCIPLINE_LOG")"
 
 # =====================================================================
-# Task A2 — als_log brace-group redirection fix (no stderr leak, no dir auto-create)
+# als_log brace-group redirection (no stderr leak, no dir auto-create)
 # =====================================================================
 missing_parent_log="$TMP/does-not-exist-$RANDOM/discipline.log"
 stderr_out=$(
   CLAUDE_DISCIPLINE_LOG="$missing_parent_log" bash -c '. "'"$LIB"'"; als_log "test-message"' 2>&1 >/dev/null
 )
 check "als_log with missing parent dir -> stderr empty" "" "$stderr_out"
-# Exit code contract: als_log's exit status when the redirect itself fails was
-# ALREADY 1 pre-fix (the shell's own failed-redirect status, unmasked by a
-# trailing-only 2>/dev/null) — the fix only suppresses the stray stderr LINE
-# above, not this exit code, so this asserts "unchanged", not "0".
+# Exit code contract: als_log's exit status when the redirect itself fails is
+# the shell's own failed-redirect status (1), unmasked by a trailing-only
+# 2>/dev/null. Only the stray stderr LINE is suppressed, not this exit code,
+# so this asserts "unchanged", not "0".
 CLAUDE_DISCIPLINE_LOG="$missing_parent_log" bash -c '. "'"$LIB"'"; als_log "test-message"' 2>/dev/null
 check "als_log with missing parent dir -> exit code unchanged (1, same as pre-fix)" 1 "$?"
 [ ! -d "$(dirname "$missing_parent_log")" ]
 check "als_log does not auto-create the missing parent dir" 0 "$?"
 
 # =====================================================================
-# Task A3 — loop_state_guard.sh cwd fallback to $PWD when payload .cwd absent
+# loop_state_guard.sh cwd fallback to $PWD when payload .cwd absent
 # =====================================================================
 payload_no_cwd() { # transcript_path session_id [stop_hook_active] -- same shape as payload() but no "cwd" key
   printf '{"transcript_path":"%s","session_id":"%s","stop_hook_active":%s}' \

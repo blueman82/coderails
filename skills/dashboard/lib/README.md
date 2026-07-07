@@ -44,7 +44,7 @@ endorses going forward, and it is out of scope for this loop to change
 
 ## The runner is the sole executor (target state)
 
-No surface other than the runner (`skills/dashboard/runner`, WU2) may
+No surface other than the runner (`skills/dashboard/runner`) may
 invoke the `claude` CLI for a queued or scheduled run. This is a
 permanent design rule for every surface wired to this queue, going
 forward from this loop — even though the obsidian plugin's current
@@ -84,7 +84,7 @@ rules.
 `skills/dashboard/app/src/lib/argv.ts` (merged via PR #25) and is the
 only place a `ButtonDef.profile` is translated into `claude` CLI flags
 anywhere in this contract. The obsidian plugin already imports it
-directly (esbuild-bundled); this package's runner (WU2) imports it the
+directly (esbuild-bundled); this package's runner imports it the
 same way. No consumer in this contract re-implements the profile→flag
 mapping — `dashboard-lib` does not carry its own copy.
 

@@ -8,9 +8,9 @@ import {
 } from "../src/index";
 
 // Proves the package.json "main": "src/index.ts" entrypoint actually
-// resolves and re-exports the full public surface — WU2 (the runner) will
-// be the first real consumer importing via this barrel rather than the
-// individual src/intent.ts / src/config.ts modules.
+// resolves and re-exports the full public surface — the runner
+// (`skills/dashboard/runner`) will be the first real consumer importing via
+// this barrel rather than the individual src/intent.ts / src/config.ts modules.
 describe("src/index.ts barrel", () => {
   it("re-exports parseIntent and IntentValidationError from ./intent", () => {
     const intent = parseIntent({ button: "wiki-lint", requestedAt: 1751835600000, source: "web" });

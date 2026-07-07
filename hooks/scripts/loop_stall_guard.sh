@@ -1,12 +1,13 @@
 #!/bin/bash
-# Stop hook — anti-stall (C2). When an agentic loop is active and incomplete, block
+# Stop hook — anti-stall. When an agentic loop is active and incomplete, block
 # (exit 2) unless the stopping turn carries a valid LOOP-STOP declaration:
 #   LOOP-STOP: <hard-stop|approval-gate|awaiting-input|complete> — <reason>
 # Checks PRESENCE + a vocab CATEGORY only (honest boundary, same as check_verify_loop):
 # it forces a categorised declaration, it cannot force the reason to be truthful.
 #
-# Shared loop-detection lives in lib/loop_state_common.sh (also used by C1's
-# loop_state_guard.sh); the active-window decision is identical to C1's.
+# Shared loop-detection lives in lib/loop_state_common.sh (also used by
+# loop_state_guard.sh, the presence/ownership guard); the active-window decision
+# is identical between the two guards.
 #
 # Gates run top to bottom; the first that matches decides.
 #   skip  — no transcript                                       → allow

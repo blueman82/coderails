@@ -92,7 +92,7 @@ chmod +x "$STUB_DIR/git"
 # Always uses a valid sha/review pass so only the eval gate's behaviour varies,
 # unless review_exit is set nonzero to prove short-circuit ordering.
 # [trust_fail_reason] (identity/permission/comments) lets a test assert
-# merge.sh's eval-gate case-branch message names the real cause (WU4).
+# merge.sh's eval-gate case-branch message names the real cause.
 run_evals_gate_test() {
     local review_exit="$1" eval_exit="$2" eval_tier="$3" trust_fail_reason="${4:-}"
     local stderr_file="$TMP/stderr_run"
@@ -143,12 +143,6 @@ WRAPPER
     return $rc
 }
 
-# ─── Negative control: prove the pre-extension gap ───────────────────────────
-# review gate passes (0), eval gate would block (1) — but merge.sh does not
-# call the eval gate yet at this point in the TDD cycle, so merge wrongly
-# proceeds. This documents the gap the new gate closes.
-# (This section is run once, before the fix, to prove the gap — see report.)
-
 # ─── Test 1: both gates pass → merge proceeds (exit 0) ───────────────────────
 run_evals_gate_test 0 0 1
 check "merge proceeds when both review and eval gates pass" 0 $?
@@ -174,7 +168,7 @@ check "merge blocks on eval-gate gh fetch failure" 1 $rc
 check_msg "merge: eval fetch-fail message mentions GitHub fetch" "GitHub fetch" "$LAST_STDERR"
 check_msg "merge: eval fetch-fail message mentions eval artifact" "eval artifact" "$LAST_STDERR"
 
-# ─── Test 4b/4c (WU4): eval-gate identity/permission reasons produce distinct,
+# ─── Test 4b/4c: eval-gate identity/permission reasons produce distinct,
 # cause-naming messages, not the generic fallback ─────────────────────────────
 run_evals_gate_test 0 2 "" identity
 rc=$?

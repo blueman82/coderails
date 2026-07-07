@@ -27,7 +27,7 @@ gate_has_command() {
 }
 
 gate_safe_passthrough() {
-  # CHANGE D: merge --dry-run / --help into one alternation with word-boundary match
+  # --dry-run and --help are matched in one alternation with word-boundary checks
   # so --dry-run-data or --helpfulness don't accidentally pass through. The pattern
   # requires the flag to be preceded by a non-word char (or start of string) and
   # followed by a non-word char or end.
@@ -88,7 +88,7 @@ gate_targets_main() {
   #  - git_push is decided by its DESTINATION → gate when on main/master, OR when the
   #    command names an explicit main/master destination refspec (e.g. `HEAD:main`,
   #    `feature:master`, `:refs/heads/main`) from any branch. Also gate positional
-  #    bare-branch targets from any branch — CHANGE C1 closes this gap.
+  #    bare-branch targets from any branch — a refspec is not the only way to name main.
   if [ "$subcommand" = "git_merge" ] || [ "$subcommand" = "git_push" ]; then
     current_branch=$(git -C "$cwd" branch --show-current 2>/dev/null)
     gate_it=0
@@ -100,7 +100,7 @@ gate_targets_main() {
        printf '%s' "$cmd" | grep -qE ':(refs/heads/)?(main|master)([[:space:];&|)]|$)'; then
       gate_it=1
     fi
-    # CHANGE C1 (expanded): gate `git push` when main/master appears as a standalone
+    # Also gate `git push` when main/master appears as a standalone
     # whitespace-delimited token ANYWHERE after the `push` keyword. This catches all of:
     #   git push -u origin main         (upstream flag before remote)
     #   git push --set-upstream origin main
@@ -128,7 +128,7 @@ gate_targets_main() {
 }
 
 gate_have_transcript() {
-  # CHANGE A: in a subagent, .transcript_path is the PARENT session transcript and
+  # In a subagent, .transcript_path is the PARENT session transcript and
   # .agent_transcript_path is the subagent's own. Scan whichever transcripts are
   # present and readable — at least one must exist, or we can't enforce.
   transcript=$(printf '%s' "$input" | jq -r '.transcript_path // empty')
@@ -233,13 +233,13 @@ enforce_required_step() {
 
   elif [ "$subcommand" = "merge" ]; then
     # Required step: /pr-review-toolkit:review-pr
-    # CHANGE B: if a PR number is given in the command, require review-pr to have
+    # If a PR number is given in the command, require review-pr to have
     # been invoked with that same number in its args. If no PR number is given
     # (bare `gh pr merge`), any review-pr invocation suffices (legacy behaviour).
     required_step="/pr-review-toolkit:review-pr"
     gate_hint="Run /pr-review-toolkit:review-pr first (or add a 'gh pr merge' Bash permission to settings.json to bypass)."
 
-    # CHANGE B1: extract the first bare integer argument after "gh pr merge", skipping
+    # Extract the first bare integer argument after "gh pr merge", skipping
     # any leading --flag or --flag=val tokens. This handles forms like:
     #   gh pr merge --squash 42     (flag before number)
     #   gh pr merge --auto 42
@@ -260,7 +260,7 @@ enforce_required_step() {
     fi
 
     if [ -n "$pr_num" ]; then
-      # CHANGE B2: per-PR check — review-pr args must START WITH (or be exactly) the
+      # Per-PR check — review-pr args must START WITH (or be exactly) the
       # PR number as a leading token. Incidental occurrences of the number embedded in
       # prose (e.g. args "fixed 12 bugs") must NOT satisfy the gate.
       # Pattern: args begins with the PR number optionally followed by non-digit or end.
@@ -280,7 +280,7 @@ enforce_required_step() {
     fi
 
   elif [ "$subcommand" = "git_merge" ]; then
-    # CHANGE B consume-on-use: review-pr must have run SINCE the last git merge.
+    # Consume-on-use: review-pr must have run SINCE the last git merge.
     required_step="/pr-review-toolkit:review-pr"
     gate_hint="Run /pr-review-toolkit:review-pr first. Or use /coderails:merge for the full PR workflow. Or add a 'git merge' Bash permission to settings.json to bypass."
     step_found=$(scan_review_pr_since_last_git_merge)
