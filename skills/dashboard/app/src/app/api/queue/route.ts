@@ -12,7 +12,7 @@ import {
   type ClaimAndSpawnBuildResult,
 } from "../../../lib/build/spawn";
 
-const DEFAULT_QUEUE_DIR = join(homedir(), ".claude", "coderails-dashboard", "queue");
+const DEFAULT_QUEUE_DIR = join(homedir(), ".claude", "coderails-dashboard", "approvals");
 const WRAPPER_PATH = join(process.cwd(), "..", "scripts", "run-builder.sh");
 // process.cwd() for a Next.js server process is the app root
 // (skills/dashboard/app); scripts/run-builder.sh lives one level up at
