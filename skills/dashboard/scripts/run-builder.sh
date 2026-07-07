@@ -19,6 +19,7 @@ WALL_CLOCK_SECS="${BUILDER_WALL_CLOCK_SECS:-2700}"          # 45m
 
 TERMINAL_STATE_WRITTEN=0
 LOCK_HELD=0
+WATCHDOG_TERMINATED=0
 HEARTBEAT_PID=""
 WATCHDOG_PID=""
 
@@ -44,20 +45,43 @@ fail_terminal() {
 }
 
 # Guarantees a terminal state.json is on disk no matter how the script
-# exits (explicit fail_terminal, an unexpected command failure under `set
-# -e`-equivalent checks below, or a TERM from the watchdog). Without this,
-# any command that fails between "claimed" and the deliberate terminal
-# writes below (e.g. git fetch/worktree add) would otherwise leave the
-# build permanently stuck at a non-terminal state with nothing to signal
-# the dashboard.
+# exits (explicit fail_terminal, an unexpected command failure, or a
+# direct TERM to the wrapper's own PID). The watchdog's normal timeout
+# path kills the claude child specifically (see Step 6) and is caught
+# there via WATCHDOG_TERMINATED, not via this trap — but a stray external
+# TERM to $$ is still handled here as a defensive backstop. Without this
+# trap, any command that fails between "claimed" and the deliberate
+# terminal writes below (e.g. git fetch/worktree add) would otherwise leave
+# the build permanently stuck at a non-terminal state with nothing to
+# signal the dashboard.
+#
+# IMPORTANT: `$?` must be captured on a bare assignment BEFORE any other
+# statement runs in this function — `local exit_code=$?` would clobber `$?`
+# with `local`'s own (successful) exit status before the right-hand side is
+# ever read, silently losing the real exit code (a classic bash trap
+# pitfall).
 on_exit() {
-  local exit_code=$?
+  EXIT_CODE=$?
   [ -n "$HEARTBEAT_PID" ] && kill "$HEARTBEAT_PID" 2>/dev/null
   [ -n "$WATCHDOG_PID" ] && kill "$WATCHDOG_PID" 2>/dev/null
-  if [ "$TERMINAL_STATE_WRITTEN" -eq 0 ] && [ "$exit_code" -ne 0 ]; then
-    write_state "failed" "unexpected_exit:$exit_code"
+  if [ "$TERMINAL_STATE_WRITTEN" -eq 0 ]; then
+    if [ "$WATCHDOG_TERMINATED" -eq 1 ]; then
+      write_state "failed" "timeout"
+    elif [ "$EXIT_CODE" -ne 0 ]; then
+      write_state "failed" "unexpected_exit:$EXIT_CODE"
+    fi
   fi
   [ "$LOCK_HELD" -eq 1 ] && rm -f "$LOCK_PATH"
+}
+
+# Runs on SIGTERM (the watchdog's wall-clock kill). Records that this was a
+# timeout specifically — set BEFORE exiting, so on_exit (which the EXIT
+# trap still fires afterward) can tell a watchdog kill apart from any other
+# nonzero exit and report failureReason "timeout" instead of a generic
+# "unexpected_exit:<code>".
+on_term() {
+  WATCHDOG_TERMINATED=1
+  exit 143
 }
 
 # --- Step 1: global serialization ---
@@ -81,6 +105,7 @@ while ! ( set -o noclobber; echo "$$" > "$LOCK_PATH" ) 2>/dev/null; do
 done
 LOCK_HELD=1
 trap on_exit EXIT
+trap on_term TERM
 
 # --- Step 2: deterministic hash re-validation, before any LLM runs ---
 if [ ! -f "$BUILD_DIR/snapshot.json" ]; then
@@ -118,6 +143,14 @@ if ! grep -q '"coderails"' "$ABS_REPO_PATH/package.json" 2>/dev/null && \
   fail_terminal "bad_repo_path"
 fi
 PROPOSED_NAME=$(jq -r '.toolInput.proposed_name // empty' "$BUILD_DIR/snapshot.json")
+# Every other snapshot-derived invariant (hash, status, toolName) is
+# independently re-asserted by the wrapper rather than trusted from
+# spawn.ts's upstream check — proposed_name, which becomes a branch name
+# and path segment, gets the same treatment rather than being the one
+# exception.
+if ! echo "$PROPOSED_NAME" | grep -Eq '^[a-z0-9][a-z0-9-]{0,63}$'; then
+  fail_terminal "invalid_proposed_name"
+fi
 HASH8=$(echo "$STORED_HASH" | cut -c1-8)
 WORKTREE_DIR="$ABS_REPO_PATH/.claude/worktrees/skill-build-$HASH8"
 if ! git -C "$ABS_REPO_PATH" fetch origin; then
@@ -135,17 +168,38 @@ jq -n --arg hash "$STORED_HASH" --arg v "$CLAUDE_VERSION" --arg t "$(date +%s000
 
 ( while true; do touch "$BUILD_DIR/heartbeat"; sleep "${BUILDER_HEARTBEAT_SECS:-30}"; done ) &
 HEARTBEAT_PID=$!
-( sleep "$WALL_CLOCK_SECS" && kill -TERM $$ 2>/dev/null ) &
-WATCHDOG_PID=$!
 
 # --- Step 6: spawn claude ---
 cd "$WORKTREE_DIR" || fail_terminal "worktree_setup_failed:cd"
+
+# claude runs as a background job (not foreground), and the watchdog kills
+# that job's PID specifically (not $$) — bash only checks for a pending
+# trap between commands, and while blocked on a FOREGROUND child it does
+# not interrupt early even after the trap's signal arrives. `wait` on a
+# background job's PID returns promptly once that specific process is
+# killed, which is what lets the wall-clock timeout actually cut a
+# long-running claude session short instead of silently waiting the full
+# duration out.
 claude -p "$(cat "$BUILD_DIR/prompt.md")" \
   --dangerously-skip-permissions \
   --max-budget-usd 25 \
   --output-format json \
-  > "$BUILD_DIR/result.json" 2> "$BUILD_DIR/build.log"
+  > "$BUILD_DIR/result.json" 2> "$BUILD_DIR/build.log" &
+CLAUDE_PID=$!
+( sleep "$WALL_CLOCK_SECS" && kill -TERM "$CLAUDE_PID" 2>/dev/null ) &
+WATCHDOG_PID=$!
+
+set +e
+wait "$CLAUDE_PID"
 CLAUDE_EXIT=$?
+set -e
+if [ "$CLAUDE_EXIT" -gt 128 ]; then
+  # claude was killed by a signal (the watchdog's TERM, most likely) —
+  # report this as a timeout rather than falling through to the generic
+  # nonzero_exit path, regardless of whether the watchdog's own subshell
+  # happened to still be racing to fire when this check runs.
+  WATCHDOG_TERMINATED=1
+fi
 
 # --- Step 7: terminal state from artifacts ---
 if [ "$CLAUDE_EXIT" -eq 0 ] && [ -f "$BUILD_DIR/pr_url" ]; then
@@ -156,9 +210,12 @@ if [ "$CLAUDE_EXIT" -eq 0 ] && [ -f "$BUILD_DIR/pr_url" ]; then
   TERMINAL_STATE_WRITTEN=1
 else
   STDERR_TAIL=$(tail -20 "$BUILD_DIR/build.log" 2>/dev/null)
-  FAILURE_REASON="nonzero_exit"
-  if grep -q "error_max_budget_usd" "$BUILD_DIR/result.json" 2>/dev/null; then
+  if [ "$WATCHDOG_TERMINATED" -eq 1 ]; then
+    FAILURE_REASON="timeout"
+  elif grep -q "error_max_budget_usd" "$BUILD_DIR/result.json" 2>/dev/null; then
     FAILURE_REASON="budget_exceeded"
+  else
+    FAILURE_REASON="nonzero_exit"
   fi
   jq -n --arg hash "$STORED_HASH" --arg reason "$FAILURE_REASON" --arg tail "$STDERR_TAIL" '
     {schemaVersion: 1, hash: $hash, state: "failed", failureReason: $reason, stderrTail: $tail}

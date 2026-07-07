@@ -214,6 +214,31 @@ describe("run-builder.sh: full state machine (steps 3-7)", () => {
     expect(result.status).toBe(0);
   });
 
+  it("invalid proposed_name in the snapshot is rejected by the wrapper itself, not just trusted from spawn.ts's upstream check", () => {
+    // spawn.ts validates proposed_name against ^[a-z0-9][a-z0-9-]{0,63}$
+    // before ever writing snapshot.json, but the wrapper independently
+    // re-asserts hash/status/toolName rather than trusting the snapshot
+    // blindly — proposed_name gets the same treatment here rather than
+    // being spliced unchecked into a branch name.
+    const buildDir = makeBuildDir();
+    const locksDir = tmpDir("dashboard-run-builder-locks-");
+    const repoDir = makeRepoFixture();
+    const binDir = makeStubClaudeBin(`exit 0`);
+
+    writeSnapshot(buildDir, { toolInput: { proposed_name: "../escape" } });
+
+    runWrapper(buildDir, {
+      CODERAILS_BUILDER_LOCKS_DIR: locksDir,
+      CODERAILS_BUILDER_REPO_PATH: repoDir,
+      BUILDER_WALL_CLOCK_SECS: "5",
+      PATH: `${binDir}:${process.env.PATH}`,
+    });
+
+    const state = readState(buildDir);
+    expect(state.state).toBe("failed");
+    expect(state.failureReason).toBe("invalid_proposed_name");
+  });
+
   it("stub claude exits nonzero with no pr_url -> failed: nonzero_exit, with stderrTail populated", () => {
     const buildDir = makeBuildDir();
     const locksDir = tmpDir("dashboard-run-builder-locks-");
@@ -350,4 +375,39 @@ describe("run-builder.sh: full state machine (steps 3-7)", () => {
     const state = readState(buildDir);
     expect(state.state).toBe("pr_open");
   });
+
+  it("watchdog wall-clock timeout terminates the run and lands a terminal failed:timeout state, not a stuck running state", () => {
+    // This is the case the wrapper's on_exit trap exists to guarantee:
+    // when the watchdog's SIGTERM fires mid-claude-run, the script must
+    // still reach a terminal state.json rather than being left forever at
+    // "running". A prior version of on_exit captured `$?` via
+    // `local exit_code=$?`, which clobbers `$?` with `local`'s own exit
+    // status before it's read — so on SIGTERM the guard never fired and
+    // no terminal state was written at all. This test drives the real
+    // watchdog path (a stub claude that sleeps somewhat longer than the
+    // wall clock) rather than asserting on the trap's internals directly.
+    //
+    // Note: bash only handles a pending signal between commands, not while
+    // blocked on a foreground child — so the wrapper doesn't react to
+    // SIGTERM until the stub's own sleep finishes. The stub's sleep must
+    // therefore be short (not 10x+ the wall clock) or this test would wait
+    // out the full sleep duration before observing the timeout.
+    const buildDir = makeBuildDir();
+    const locksDir = tmpDir("dashboard-run-builder-locks-");
+    const repoDir = makeRepoFixture();
+    const binDir = makeStubClaudeBin(`sleep 3; exit 0`);
+
+    writeSnapshot(buildDir, { toolInput: { proposed_name: "timeout-skill" } });
+
+    runWrapper(buildDir, {
+      CODERAILS_BUILDER_LOCKS_DIR: locksDir,
+      CODERAILS_BUILDER_REPO_PATH: repoDir,
+      BUILDER_WALL_CLOCK_SECS: "1",
+      PATH: `${binDir}:${process.env.PATH}`,
+    });
+
+    const state = readState(buildDir);
+    expect(state.state).toBe("failed");
+    expect(state.failureReason).toBe("timeout");
+  }, 15000);
 });

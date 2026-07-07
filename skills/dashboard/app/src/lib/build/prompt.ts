@@ -29,6 +29,29 @@ function isWorkflowAuditProposal(toolInput: unknown): toolInput is WorkflowAudit
   );
 }
 
+// A run of 3+ backticks in any snapshot field would, once JSON.stringify'd
+// (which does NOT escape backticks) and interpolated below, be read by a
+// markdown-aware reader as the fence's own closing delimiter — letting an
+// adversarial proposed_description/task_summary break out of the
+// untrusted-data fence and have its trailing content read as top-level
+// instructions rather than data. Neutralise any such run before it ever
+// reaches the fence: this must run on every string field, recursively,
+// since sessions/cluster_ngram are string arrays too.
+const FENCE_BREAK_PATTERN = /`{3,}/g;
+function stripFenceDelimiters(value: string): string {
+  return value.replace(FENCE_BREAK_PATTERN, (match) => "​".repeat(match.length));
+}
+function sanitizeForFence(input: WorkflowAuditProposalInput): WorkflowAuditProposalInput {
+  return {
+    ...input,
+    proposed_name: stripFenceDelimiters(input.proposed_name),
+    proposed_description: stripFenceDelimiters(input.proposed_description),
+    task_summary: stripFenceDelimiters(input.task_summary),
+    cluster_ngram: input.cluster_ngram.map(stripFenceDelimiters),
+    sessions: input.sessions.map(stripFenceDelimiters),
+  };
+}
+
 // The typed prompt template for a headless skill-creator build. Snapshot
 // fields are interpolated ONLY inside the single untrusted-proposal-data
 // fence below — every other line is static authored prose. This is the
@@ -46,7 +69,7 @@ export function buildPrompt(entry: QueueEntrySnapshot): string {
       `buildPrompt: toolInput does not match the expected workflow-audit:propose-skill shape for hash ${entry.hash}`
     );
   }
-  const input = toolInput;
+  const input = sanitizeForFence(toolInput);
 
   return `You are a headless builder for one approved proposal. Your sole authority is snapshot.json in this directory; its hash was verified before you started. Never read or write ~/.claude/coderails-dashboard/queue/. Scope is locked to this one proposal — no other patterns you notice, no batching.
 
