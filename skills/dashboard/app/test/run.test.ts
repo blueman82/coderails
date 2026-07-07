@@ -55,46 +55,74 @@ function testConfig(): DashboardConfig {
   };
 }
 
-// A fake execFile-shaped fn that never actually spawns a process: it
-// immediately invokes the callback with success, after recording the args it
-// was called with. Mirrors node:child_process.execFile's callback signature
-// closely enough for the route to treat it identically.
-function makeFakeExecFile() {
+// A fake spawn-shaped fn that never actually spawns a process: it records
+// the args it was called with, emits "ok" on stdout, and immediately fires
+// exit with code 0. Mirrors route.ts's ChildProcessLike/SpawnFn seam
+// (stdout/stderr as chunk-emitting streams, an "exit" event carrying the
+// numeric code) closely enough for the route to treat it identically to a
+// real node:child_process.spawn result.
+function makeFakeSpawn() {
   const calls: { command: string; args: unknown; options: unknown }[] = [];
-  const fn = vi.fn(
-    (
-      command: string,
-      args: unknown,
-      options: unknown,
-      callback: (err: Error | null, stdout: string, stderr: string) => void
-    ) => {
-      calls.push({ command, args, options });
-      callback(null, "ok", "");
-      return { pid: 1234 };
-    }
-  );
+  const fn = vi.fn((command: string, args: unknown, options: unknown) => {
+    calls.push({ command, args, options });
+    const stdoutListeners: ((chunk: Buffer | string) => void)[] = [];
+    const exitListeners: ((code: number | null) => void)[] = [];
+    return {
+      stdout: {
+        on(event: "data", listener: (chunk: Buffer | string) => void) {
+          if (event === "data") stdoutListeners.push(listener);
+        },
+      },
+      stderr: {
+        on() {
+          // no stderr output in the fake — nothing to emit
+        },
+      },
+      on(event: "exit", listener: (code: number | null) => void) {
+        if (event === "exit") {
+          exitListeners.push(listener);
+          // fire synchronously, after listeners are registered, mirroring
+          // the previous fake execFile's immediate-callback semantics
+          for (const l of stdoutListeners) l("ok");
+          for (const l of exitListeners) l(0);
+        }
+      },
+    };
+  });
   return { fn, calls };
+}
+
+// A fake spawn-shaped fn that simulates a still-running process: it never
+// fires "exit", so the lock is held for the duration of the test.
+function makeHangingSpawn() {
+  return vi.fn(() => ({
+    stdout: { on() {} },
+    stderr: { on() {} },
+    on() {
+      // exit listener registered but never invoked — process never exits
+    },
+  }));
 }
 
 function makeHandler(overrides: {
   config?: DashboardConfig;
   token?: string;
-  execFileImpl?: ReturnType<typeof makeFakeExecFile>["fn"];
+  spawnImpl?: ReturnType<typeof makeFakeSpawn>["fn"];
   locksDir?: string;
   runsDir?: string;
 } = {}) {
   const locksDir = overrides.locksDir ?? tmpDir("dashboard-run-locks-");
   const runsDir = overrides.runsDir ?? tmpDir("dashboard-run-runs-");
-  const fake = overrides.execFileImpl ? undefined : makeFakeExecFile();
-  const execFileImpl = overrides.execFileImpl ?? fake!.fn;
+  const fake = overrides.spawnImpl ? undefined : makeFakeSpawn();
+  const spawnImpl = overrides.spawnImpl ?? fake!.fn;
   const handler = createRunHandler({
     config: overrides.config ?? testConfig(),
     token: overrides.token ?? TOKEN,
-    execFileImpl: execFileImpl as never,
+    spawnImpl: spawnImpl as never,
     locksDir,
     runsDir,
   });
-  return { handler, locksDir, runsDir, execFileImpl, fake };
+  return { handler, locksDir, runsDir, spawnImpl, fake };
 }
 
 function req(body: unknown, headers: Record<string, string> = {}): Request {
@@ -249,16 +277,11 @@ describe("POST /api/run — concurrency lock", () => {
   it("returns 409 and does not spawn a second run while the first holds the lock", async () => {
     const locksDir = tmpDir("dashboard-run-locks-");
     const runsDir = tmpDir("dashboard-run-runs-");
-    // execFile that never calls back — simulates a still-running process so
-    // the lock is held for the duration of this test.
-    const hangingExecFile = vi.fn(() => ({ pid: 1 })) as unknown as (
-      ...args: unknown[]
-    ) => unknown;
-    const { handler } = makeHandler({ execFileImpl: hangingExecFile as never, locksDir, runsDir });
+    const { handler } = makeHandler({ spawnImpl: makeHangingSpawn() as never, locksDir, runsDir });
 
-    // Fire-and-forget: this promise never resolves because the fake
-    // execFile never calls its callback, simulating a still-running
-    // process. We intentionally don't await it.
+    // Fire-and-forget: this promise never resolves because the fake spawn
+    // never fires "exit", simulating a still-running process. We
+    // intentionally don't await it.
     void handler(req({ token: TOKEN, button: "wiki-lint" }));
     // second request while the first's lock file still exists
     const second = await handler(req({ token: TOKEN, button: "wiki-lint" }));

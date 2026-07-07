@@ -1,4 +1,4 @@
-import { execFile as execFileReal } from "node:child_process";
+import { spawn as spawnReal } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { mkdirSync, statSync, writeFileSync, unlinkSync, appendFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -7,27 +7,53 @@ import { buildArgv } from "../../../lib/argv";
 import { loadConfig, type DashboardConfig } from "../../../lib/config";
 import { isLocalOrigin } from "../../../lib/requestGuard";
 import { appendRun, getRunToken, type RunRecord } from "../../../lib/runlog";
+import { runOutputBus as defaultRunOutputBus, type RunOutputBus } from "../../../lib/runOutputBus";
+import { StreamJsonSplitter, parseStreamJsonLine } from "../../../lib/streamJson";
 
 const STALE_LOCK_MS = 24 * 60 * 60 * 1000;
 const DEFAULT_LOCKS_DIR = join(homedir(), ".claude", "coderails-dashboard", "locks");
 const DEFAULT_RUNS_DIR = join(homedir(), ".claude", "coderails-dashboard", "runs");
 
-// Matches ExecFile's callback-style signature closely enough for this route
-// (and its tests) to treat a real node:child_process.execFile and a fake
-// identically: (command, args, options, callback) => ChildProcess-like.
-type ExecFileFn = (
-  command: string,
-  args: readonly string[],
-  options: { cwd: string },
-  callback: (error: Error | null, stdout: string, stderr: string) => void
-) => unknown;
+// The stream-json flags MUST come immediately after "-p" — buildArgv (Task
+// 7's single profile→flag mapping, not touched by this change) may append a
+// "--" end-of-options sentinel followed by the merged prompt when input is
+// present, and anything inserted after that sentinel would be swallowed into
+// the prompt text instead of being parsed as flags. Splicing right after the
+// leading "-p" keeps these flags before any such sentinel regardless of
+// which buildArgv branch produced the rest of argv.
+//
+// --verbose is required alongside --output-format stream-json under --print
+// — confirmed empirically on this machine 2026-07-07: omitting it fails
+// fast with "Error: When using --print, --output-format=stream-json requires
+// --verbose" before the CLI does anything else.
+const STREAM_JSON_FLAGS = ["--output-format", "stream-json", "--include-partial-messages", "--verbose"];
+
+function withStreamJsonFlags(argv: readonly string[]): string[] {
+  return [argv[0], ...STREAM_JSON_FLAGS, ...argv.slice(1)];
+}
+
+// Minimal shape of a spawned child process this route actually uses: stdout/
+// stderr as chunk-emitting streams (not the full Node.js Readable interface)
+// plus an exit event carrying the numeric exit code (or null if the process
+// was killed by a signal). node:child_process.spawn's real ChildProcess
+// satisfies this structurally, so the real spawn can be passed directly via
+// the same type-assertion pattern the rest of this route already uses for
+// execFile/spawn seams (see build/spawn.ts's SpawnFn).
+interface ChildProcessLike {
+  stdout: { on(event: "data", listener: (chunk: Buffer | string) => void): void } | null;
+  stderr: { on(event: "data", listener: (chunk: Buffer | string) => void): void } | null;
+  on(event: "exit", listener: (code: number | null) => void): void;
+}
+
+type SpawnFn = (command: string, args: readonly string[], options: { cwd: string }) => ChildProcessLike;
 
 export interface RunHandlerDeps {
   config: DashboardConfig;
   token: string;
-  execFileImpl?: ExecFileFn;
+  spawnImpl?: SpawnFn;
   locksDir?: string;
   runsDir?: string;
+  runOutputBus?: RunOutputBus;
 }
 
 function jsonResponse(status: number, body: unknown): Response {
@@ -93,9 +119,10 @@ function acquireLock(lockPath: string): boolean {
 }
 
 export function createRunHandler(deps: RunHandlerDeps) {
-  const execFileImpl = deps.execFileImpl ?? (execFileReal as unknown as ExecFileFn);
+  const spawnImpl = deps.spawnImpl ?? (spawnReal as unknown as SpawnFn);
   const locksDir = deps.locksDir ?? DEFAULT_LOCKS_DIR;
   const runsDir = deps.runsDir ?? DEFAULT_RUNS_DIR;
+  const runOutputBus = deps.runOutputBus ?? defaultRunOutputBus;
 
   return async function POST(request: Request): Promise<Response> {
     if (!isLocalOrigin(request)) {
@@ -132,7 +159,7 @@ export function createRunHandler(deps: RunHandlerDeps) {
     // permissions") — reject with 400 before ever touching the lock.
     let argv: string[];
     try {
-      argv = buildArgv(button, typeof input === "string" ? input : undefined);
+      argv = withStreamJsonFlags(buildArgv(button, typeof input === "string" ? input : undefined));
     } catch {
       return jsonResponse(400, { error: "invalid input" });
     }
@@ -164,11 +191,41 @@ export function createRunHandler(deps: RunHandlerDeps) {
     // acquireLock above). Frontend state during the run comes from the SSE
     // stream plus an optimistic flag, not this response — don't convert this
     // to fire-and-forget without redesigning the lock's release semantics.
+    //
+    // Output delivery is now incremental rather than one post-exit write:
+    // each stdout/stderr chunk is appended to the log file and published on
+    // the run-output bus as it arrives, so an SSE subscriber (and the log
+    // file, for anyone tailing it) sees output live instead of only after
+    // the whole run finishes. The stream-json splitter/parser
+    // (src/lib/streamJson.ts) is applied per chunk purely to prove each line
+    // is at least well-formed-or-gracefully-skipped — parsing failures never
+    // affect what gets appended/published, which is always the raw chunk
+    // text, so a malformed or unrecognised line can never crash the run or
+    // drop output.
+    const splitter = new StreamJsonSplitter();
+
+    function handleChunk(chunk: Buffer | string): void {
+      const text = typeof chunk === "string" ? chunk : chunk.toString("utf-8");
+      appendFileSync(outputPath, text);
+      runOutputBus.publish(runId, text);
+      // Non-throwing by construction (see streamJson.ts) — parsed here only
+      // so a malformed/unrecognised stream-json line is observed and
+      // discarded rather than silently never looked at; the parsed value
+      // itself isn't currently consumed further.
+      for (const line of splitter.push(text)) {
+        parseStreamJsonLine(line);
+      }
+    }
+
     await new Promise<void>((resolve) => {
-      execFileImpl("claude", argv, { cwd: button.cwd }, (error, stdout, stderr) => {
-        appendFileSync(outputPath, stdout + stderr);
-        const errorCode = (error as { code?: unknown } | null)?.code;
-        const exitCode = !error ? 0 : typeof errorCode === "number" ? errorCode : 1;
+      const child = spawnImpl("claude", argv, { cwd: button.cwd });
+      child.stdout?.on("data", handleChunk);
+      child.stderr?.on("data", handleChunk);
+      child.on("exit", (code) => {
+        for (const line of splitter.flush()) {
+          parseStreamJsonLine(line);
+        }
+        const exitCode = code ?? 1;
         appendRun({ ...startRecord, endedAt: Date.now(), exitCode }, { runsDir });
         try {
           unlinkSync(lockPath);
