@@ -43,6 +43,14 @@ function testConfig(): DashboardConfig {
         profile: "read-only",
         inputAllowed: true,
       },
+      {
+        name: "ask",
+        label: "ASK",
+        command: "",
+        cwd: "/Users/harrison/Github/coderails",
+        profile: "standard",
+        inputAllowed: true,
+      },
     ],
   };
 }
@@ -221,6 +229,20 @@ describe("POST /api/run — button validation", () => {
     expect(res.status).toBe(400);
     expect(fake!.calls.length).toBe(0);
   });
+
+  it("rejects an empty-command button pressed with no input (empty prompt) with a clean 400, not a 500, and does not spawn", async () => {
+    const { handler, fake } = makeHandler();
+    const res = await handler(req({ token: TOKEN, button: "ask" }));
+    expect(res.status).toBe(400);
+    expect(fake!.calls.length).toBe(0);
+  });
+
+  it("rejects an empty-command button pressed with empty-string input (empty prompt) with a clean 400, not a 500, and does not spawn", async () => {
+    const { handler, fake } = makeHandler();
+    const res = await handler(req({ token: TOKEN, button: "ask", input: "" }));
+    expect(res.status).toBe(400);
+    expect(fake!.calls.length).toBe(0);
+  });
 });
 
 describe("POST /api/run — concurrency lock", () => {
@@ -311,7 +333,7 @@ describe("POST /api/run — spawn shape", () => {
     await handler(req({ token: TOKEN, button: "with-input", input: "hello" }));
     const args = fake!.calls[0].args as string[];
     expect(args).toContain("--allowedTools");
-    expect(args[args.length - 1]).toBe("hello");
+    expect(args[args.length - 1]).toBe("/coderails:assumptions hello");
   });
 });
 

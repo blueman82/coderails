@@ -293,12 +293,13 @@ describe("loadConfig against the real examples/dashboard-config.json (C3)", () =
     expect(() => loadConfig(EXAMPLE_CONFIG_PATH)).not.toThrow();
   });
 
-  it("loads all three buttons and all three routines", () => {
+  it("loads all four buttons and all three routines", () => {
     const config = loadConfig(EXAMPLE_CONFIG_PATH);
     expect(config.buttons.map((b) => b.name)).toEqual([
       "wiki-lint",
       "sync-docs-weekly",
       "memory-consolidation-weekly",
+      "ask",
     ]);
     expect(config.routines?.map((r) => r.name)).toEqual([
       "wiki-lint",

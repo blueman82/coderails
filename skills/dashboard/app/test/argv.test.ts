@@ -38,33 +38,80 @@ describe("buildArgv", () => {
     ]);
   });
 
-  it("appends input as exactly one trailing argv element, after a '--' end-of-options sentinel, for a standard-profile button", () => {
+  it("merges input into a single prompt string after a '--' end-of-options sentinel, so the CLI's single positional prompt argument carries both (the CLI never merges two separate positionals — confirmed empirically, see comment above)", () => {
     const argv = buildArgv(button({ profile: "standard" }), "extra context here");
-    expect(argv).toEqual(["-p", "/coderails:wiki-lint", "--", "extra context here"]);
+    expect(argv).toEqual(["-p", "--", "/coderails:wiki-lint extra context here"]);
   });
 
-  it("never concatenates input into the command string", () => {
+  it("still separates command from input with a space rather than string concatenation", () => {
     const argv = buildArgv(button({ profile: "standard" }), "; rm -rf /");
-    expect(argv[1]).toBe("/coderails:wiki-lint");
-    expect(argv).toContain("; rm -rf /");
-    expect(argv.some((a) => a.includes("/coderails:wiki-lint; rm -rf /"))).toBe(false);
+    expect(argv).toEqual(["-p", "--", "/coderails:wiki-lint ; rm -rf /"]);
   });
 
-  it("places the '--' sentinel and input after profile flags for a read-only-profile button", () => {
+  it("places the '--' sentinel and merged prompt after profile flags for a read-only-profile button", () => {
     const argv = buildArgv(button({ profile: "read-only" }), "note");
     expect(argv).toEqual([
       "-p",
-      "/coderails:wiki-lint",
       "--allowedTools",
       ...READ_ONLY_ALLOWED_TOOLS,
       "--",
-      "note",
+      "/coderails:wiki-lint note",
     ]);
+  });
+
+  it("uses input alone as the prompt when the button's command is empty (free-text ask button)", () => {
+    const argv = buildArgv(button({ profile: "standard", command: "" }), "what does this codebase do?");
+    expect(argv).toEqual(["-p", "--", "what does this codebase do?"]);
   });
 
   it("rejects input that starts with '-' (flag smuggling) by throwing", () => {
     expect(() => buildArgv(button({ profile: "standard" }), "--dangerously-skip-permissions")).toThrow();
     expect(() => buildArgv(button({ profile: "standard" }), "-p")).toThrow();
+  });
+
+  it("rejects input that is whitespace then a dash, so trimming can't smuggle a flag past the check", () => {
+    expect(() => buildArgv(button({ profile: "standard" }), "  --dangerously-skip-permissions")).toThrow();
+  });
+
+  it("rejects an empty command with no input by throwing, rather than spawning an empty prompt", () => {
+    expect(() => buildArgv(button({ profile: "standard", command: "" }))).toThrow();
+  });
+
+  it("rejects a whitespace-only command with no input by throwing", () => {
+    expect(() => buildArgv(button({ profile: "standard", command: "   " }))).toThrow();
+  });
+
+  it("rejects empty input when the command is also empty, rather than spawning an empty prompt", () => {
+    expect(() => buildArgv(button({ profile: "standard", command: "" }), "")).toThrow();
+  });
+
+  it("rejects whitespace-only input when the command is also empty or whitespace-only", () => {
+    expect(() => buildArgv(button({ profile: "standard", command: "" }), "   ")).toThrow();
+    expect(() => buildArgv(button({ profile: "standard", command: "   " }), "   ")).toThrow();
+  });
+
+  it("treats empty-string input exactly like no input at all, for a normal (non-empty command) button", () => {
+    const withEmptyInput = buildArgv(button({ profile: "standard" }), "");
+    const withNoInput = buildArgv(button({ profile: "standard" }));
+    expect(withEmptyInput).toEqual(withNoInput);
+    expect(withEmptyInput).toEqual(["-p", "/coderails:wiki-lint"]);
+  });
+
+  it("treats whitespace-only input exactly like no input at all, for a normal (non-empty command) button", () => {
+    const withWhitespaceInput = buildArgv(button({ profile: "standard" }), "   ");
+    const withNoInput = buildArgv(button({ profile: "standard" }));
+    expect(withWhitespaceInput).toEqual(withNoInput);
+    expect(withWhitespaceInput).toEqual(["-p", "/coderails:wiki-lint"]);
+  });
+
+  it("covers a bypass-profile button with input: profile flag first, then the sentinel and merged prompt", () => {
+    const argv = buildArgv(button({ profile: "bypass", bypassPermissions: true }), "go");
+    expect(argv).toEqual([
+      "-p",
+      "--dangerously-skip-permissions",
+      "--",
+      "/coderails:wiki-lint go",
+    ]);
   });
 
   it("does not insert a '--' sentinel when there is no input", () => {
