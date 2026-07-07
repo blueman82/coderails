@@ -75,4 +75,173 @@ describe("AssistantLinkPanel", () => {
     expect(html.toLowerCase()).not.toContain("email");
     expect(html.toLowerCase()).not.toContain("tasks due");
   });
+
+  describe("workflow-audit:propose-skill readable preview", () => {
+    function proposalEntry(overrides: Partial<QueueEntry> = {}): QueueEntry {
+      return pendingEntry({
+        hash: "proposalHash",
+        toolName: "workflow-audit:propose-skill",
+        toolInput: {
+          cluster_ngram: ["Bash:git log", "Bash:git push", "Skill:prime"],
+          count: 3,
+          sessions: ["s1", "s2", "s3"],
+          task_summary: "Sessions repeatedly run git log, then git push, then invoke prime.",
+          proposed_name: "git-log-push-prime",
+          proposed_description: "Use when a session needs to review commits, push, and load context.",
+        },
+        ...overrides,
+      });
+    }
+
+    it("renders proposed_name and proposed_description as visible text, not an opaque JSON dump", () => {
+      const entry = proposalEntry();
+      const html = renderToStaticMarkup(
+        createElement(
+          DashboardContextTestProvider,
+          { snapshot: emptySnapshot({ queue: [entry] }) },
+          createElement(AssistantLinkPanel, { token: "t" })
+        )
+      );
+      expect(html).toContain("git-log-push-prime");
+      expect(html).toContain("Use when a session needs to review commits, push, and load context.");
+      // Not rendered as a single opaque JSON.stringify blob.
+      expect(html).not.toContain(JSON.stringify(entry.toolInput));
+    });
+
+    it("renders task_summary as visible text", () => {
+      const entry = proposalEntry();
+      const html = renderToStaticMarkup(
+        createElement(
+          DashboardContextTestProvider,
+          { snapshot: emptySnapshot({ queue: [entry] }) },
+          createElement(AssistantLinkPanel, { token: "t" })
+        )
+      );
+      expect(html).toContain("Sessions repeatedly run git log, then git push, then invoke prime.");
+    });
+
+    it("surfaces both the occurrence count and the session count, distinctly", () => {
+      // count and sessions.length deliberately differ so a single "3"-style
+      // assertion couldn't accidentally pass by conflating the two numbers.
+      const entry = proposalEntry({
+        toolInput: {
+          cluster_ngram: ["Bash:git log", "Bash:git push", "Skill:prime"],
+          count: 5,
+          sessions: ["s1", "s2", "s3", "s4"],
+          task_summary: "Sessions repeatedly run git log, then git push, then invoke prime.",
+          proposed_name: "git-log-push-prime",
+          proposed_description: "Use when a session needs to review commits, push, and load context.",
+        },
+      });
+      const html = renderToStaticMarkup(
+        createElement(
+          DashboardContextTestProvider,
+          { snapshot: emptySnapshot({ queue: [entry] }) },
+          createElement(AssistantLinkPanel, { token: "t" })
+        )
+      );
+      expect(html).toContain("5 occurrences");
+      expect(html).toContain("4 sessions");
+    });
+
+    it("renders cluster_ngram as a joined chain", () => {
+      const entry = proposalEntry();
+      const html = renderToStaticMarkup(
+        createElement(
+          DashboardContextTestProvider,
+          { snapshot: emptySnapshot({ queue: [entry] }) },
+          createElement(AssistantLinkPanel, { token: "t" })
+        )
+      );
+      expect(html).toContain("Bash:git log");
+      expect(html).toContain("Bash:git push");
+      expect(html).toContain("Skill:prime");
+    });
+
+    it("still renders a non-workflow-audit toolName via the existing opaque preview path (negative control)", () => {
+      const entry = pendingEntry();
+      const html = renderToStaticMarkup(
+        createElement(
+          DashboardContextTestProvider,
+          { snapshot: emptySnapshot({ queue: [entry] }) },
+          createElement(AssistantLinkPanel, { token: "t" })
+        )
+      );
+      expect(html).toContain("#general");
+      expect(html).not.toContain("git-log-push-prime");
+    });
+
+    it("falls back to the opaque preview when toolInput is malformed (missing proposed_name), without crashing", () => {
+      const entry = proposalEntry({
+        toolInput: {
+          cluster_ngram: ["Bash:git log"],
+          count: 1,
+          sessions: ["s1"],
+          task_summary: "malformed entry missing proposed_name",
+          // proposed_name intentionally omitted
+          proposed_description: "d",
+        },
+      });
+      expect(() =>
+        renderToStaticMarkup(
+          createElement(
+            DashboardContextTestProvider,
+            { snapshot: emptySnapshot({ queue: [entry] }) },
+            createElement(AssistantLinkPanel, { token: "t" })
+          )
+        )
+      ).not.toThrow();
+      const html = renderToStaticMarkup(
+        createElement(
+          DashboardContextTestProvider,
+          { snapshot: emptySnapshot({ queue: [entry] }) },
+          createElement(AssistantLinkPanel, { token: "t" })
+        )
+      );
+      expect(html).toContain("malformed entry missing proposed_name");
+    });
+
+    it("falls back to the opaque preview when a field has the wrong type (cluster_ngram as a string, sessions as a string), without crashing", () => {
+      const entry = proposalEntry({
+        toolInput: {
+          cluster_ngram: "Bash:git log", // wrong type: should be string[]
+          count: 1,
+          sessions: "s1", // wrong type: should be string[]
+          task_summary: "malformed entry with wrong-typed array fields",
+          proposed_name: "n",
+          proposed_description: "d",
+        },
+      });
+      expect(() =>
+        renderToStaticMarkup(
+          createElement(
+            DashboardContextTestProvider,
+            { snapshot: emptySnapshot({ queue: [entry] }) },
+            createElement(AssistantLinkPanel, { token: "t" })
+          )
+        )
+      ).not.toThrow();
+      const html = renderToStaticMarkup(
+        createElement(
+          DashboardContextTestProvider,
+          { snapshot: emptySnapshot({ queue: [entry] }) },
+          createElement(AssistantLinkPanel, { token: "t" })
+        )
+      );
+      expect(html).toContain("malformed entry with wrong-typed array fields");
+    });
+
+    it("still renders Approve/Deny buttons for a workflow-audit:propose-skill entry, untouched", () => {
+      const entry = proposalEntry();
+      const html = renderToStaticMarkup(
+        createElement(
+          DashboardContextTestProvider,
+          { snapshot: emptySnapshot({ queue: [entry] }) },
+          createElement(AssistantLinkPanel, { token: "t" })
+        )
+      );
+      expect(html).toContain("Approve");
+      expect(html).toContain("Deny");
+    });
+  });
 });
