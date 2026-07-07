@@ -128,8 +128,8 @@ export function createAggregator(deps: AggregatorDeps): Aggregator {
   }
 
   async function refreshActivity(): Promise<void> {
-    const { health, ...activity } = await collectActivitySlice();
-    snapshot = { ...snapshot, ...activity, health };
+    const activity = await collectActivitySlice();
+    snapshot = { ...snapshot, ...activity };
     emit("activity", activity);
   }
 
