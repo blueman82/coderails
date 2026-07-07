@@ -387,4 +387,68 @@ check "backslash continuation before mention, clean arg -> allow" ALLOW \
   "$(run "$(payload 'bash \
 scripts/push.sh "clean message"')")"
 
+# --- git push --force-with-lease allowlist carve-out ---
+# .claude/destructive_allowlist lets an owner opt in to --force-with-lease
+# without ever permitting naked --force/-f. Uses a scratch repo fixture (its
+# own .claude/ dir) so these tests are isolated from the real coderails
+# checkout's own .claude/ directory (test-isolation risk: the hook resolves
+# the allowlist path via git rev-parse --show-toplevel of the payload cwd —
+# if these tests ran against $PWD without a scoped fixture repo, a
+# developer's own real allowlist file could silently flip results).
+ALLOWLIST_REPO="$TMP/allowlist_repo"
+git init "$ALLOWLIST_REPO" -q
+git -C "$ALLOWLIST_REPO" checkout -b feat/allowlist-test -q 2>/dev/null || true
+
+# 1. No allowlist file present -> force-with-lease still denied (regression guard)
+check "no allowlist: force-with-lease -> deny" DENY \
+  "$(run_cwd "$(payload_with_cwd "git push --force-with-lease" "$ALLOWLIST_REPO")" "$ALLOWLIST_REPO")"
+
+# 2. Allowlist present with keyword -> force-with-lease allowed
+mkdir -p "$ALLOWLIST_REPO/.claude"
+printf 'git-push-force-with-lease\n' > "$ALLOWLIST_REPO/.claude/destructive_allowlist"
+check "allowlist present: force-with-lease -> allow" ALLOW \
+  "$(run_cwd "$(payload_with_cwd "git push --force-with-lease" "$ALLOWLIST_REPO")" "$ALLOWLIST_REPO")"
+
+# 3. SECURITY — allowlist present, naked --force still denied
+check "allowlist present: naked --force -> deny" DENY \
+  "$(run_cwd "$(payload_with_cwd "git push --force" "$ALLOWLIST_REPO")" "$ALLOWLIST_REPO")"
+
+# 4. SECURITY — allowlist present, BOTH flags on one line still denied
+check "allowlist present: --force + --force-with-lease -> deny" DENY \
+  "$(run_cwd "$(payload_with_cwd "git push --force --force-with-lease" "$ALLOWLIST_REPO")" "$ALLOWLIST_REPO")"
+
+# 5. SECURITY — allowlist present, -f short flag still denied
+check "allowlist present: -f short flag -> deny" DENY \
+  "$(run_cwd "$(payload_with_cwd "git push origin main -f" "$ALLOWLIST_REPO")" "$ALLOWLIST_REPO")"
+
+# 6. Empty allowlist file -> denied (mirrors test_gate.sh empty-content no-op)
+: > "$ALLOWLIST_REPO/.claude/destructive_allowlist"
+check "empty allowlist file: force-with-lease -> deny" DENY \
+  "$(run_cwd "$(payload_with_cwd "git push --force-with-lease" "$ALLOWLIST_REPO")" "$ALLOWLIST_REPO")"
+
+# 7. Malformed/garbage allowlist content -> denied, not accidentally permit-all
+printf '.*\nallow-everything\n--force\n' > "$ALLOWLIST_REPO/.claude/destructive_allowlist"
+check "garbage allowlist content: force-with-lease -> deny" DENY \
+  "$(run_cwd "$(payload_with_cwd "git push --force-with-lease" "$ALLOWLIST_REPO")" "$ALLOWLIST_REPO")"
+
+# 8. Comment and blank lines ignored, keyword still recognized
+printf '# comment\n\ngit-push-force-with-lease\n' > "$ALLOWLIST_REPO/.claude/destructive_allowlist"
+check "comment/blank lines + keyword: force-with-lease -> allow" ALLOW \
+  "$(run_cwd "$(payload_with_cwd "git push --force-with-lease" "$ALLOWLIST_REPO")" "$ALLOWLIST_REPO")"
+
+# 9. Wrong-keyword allowlist does not leak into force-with-lease
+printf 'git-commit-no-verify\n' > "$ALLOWLIST_REPO/.claude/destructive_allowlist"
+check "wrong keyword only: force-with-lease -> deny" DENY \
+  "$(run_cwd "$(payload_with_cwd "git push --force-with-lease" "$ALLOWLIST_REPO")" "$ALLOWLIST_REPO")"
+
+# 10. Existing full test suite regression guard: the original line-36-style
+# check (no allowlist in play) must still deny. Re-run with a scratch repo cwd
+# to confirm the harness doesn't accidentally inherit the real coderails
+# checkout's own .claude/ directory.
+NO_ALLOWLIST_REPO="$TMP/no_allowlist_repo"
+git init "$NO_ALLOWLIST_REPO" -q
+git -C "$NO_ALLOWLIST_REPO" checkout -b feat/no-allowlist -q 2>/dev/null || true
+check "scratch repo, no allowlist: force-with-lease -> deny" DENY \
+  "$(run_cwd "$(payload_with_cwd "git push --force-with-lease" "$NO_ALLOWLIST_REPO")" "$NO_ALLOWLIST_REPO")"
+
 [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails)"; exit 1; }

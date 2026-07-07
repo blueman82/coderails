@@ -155,5 +155,57 @@ check "DELETED TRACKED FILE: no untracked-file warning printed" "0" "$(printf '%
 check "NEGATIVE CONTROL: push.sh contains zero 'git add -A'" "0" "$(grep -c 'git add -A' "$PUSH_SH")"
 check "NEGATIVE CONTROL: push.sh contains 'git add -u'" "1" "$(grep -c 'git add -u' "$PUSH_SH" | head -1)"
 
+# ─── --force-with-lease flag: opt-in gated push ──────────────────────────────
+# The real network push cannot be exercised here (the fixture's origin is a
+# fake unreachable URL) — these checks instead assert on the git command
+# push.sh SELECTS based on the flag, via a stub `git` shim placed first on
+# PATH that records its own argv instead of touching the network. This
+# isolates "did push.sh choose --force-with-lease" from "did the push
+# actually succeed," which the fixture cannot exercise anyway.
+STUB_BIN="$TMP/stubbin"
+mkdir -p "$STUB_BIN"
+# Resolved OUTSIDE the stub (before $STUB_BIN is on PATH) — resolving it
+# INSIDE the stub via `command -v git` would find the stub itself once
+# $STUB_BIN is prepended to PATH, causing infinite self-recursion on every
+# non-push git call (status, rev-list, log, ...) that push.sh's earlier
+# commit/status steps depend on.
+REAL_GIT_PATH=$(command -v git)
+cat > "$STUB_BIN/git" <<EOF
+#!/bin/bash
+# Records argv for any \`git push\` call, then fails it (matching every other
+# fixture's convention: the fake unreachable origin makes the real push fail,
+# which under push.sh's \`set -euo pipefail\` aborts the script right there —
+# before the later \`gh pr\` calls that would otherwise hit the real network
+# and hang). Delegates to the real git for everything else so push.sh's
+# earlier commit/status steps still work.
+if [[ "\$1" == "push" ]]; then
+  echo "\$*" >> "\$GIT_PUSH_LOG"
+  exit 1
+fi
+exec "$REAL_GIT_PATH" "\$@"
+EOF
+chmod +x "$STUB_BIN/git"
+
+# Note: push.sh's push line pipes through `| grep -v '^remote:' || true`
+# (scripts/push.sh), which swallows the stub's exit 1 — push.sh proceeds
+# past the push step regardless (pre-existing behaviour, out of scope for
+# this change), so exit code is not a meaningful signal here. The check that
+# matters is which argv the stub git recorded.
+R=$(new_fixture force_with_lease_flag)
+echo "changed" > "$R/base.txt"
+GIT_PUSH_LOG="$TMP/force_with_lease_flag/push.log"
+: > "$GIT_PUSH_LOG"
+( cd "$R" && PATH="$STUB_BIN:$PATH" GIT_PUSH_LOG="$GIT_PUSH_LOG" bash "$PUSH_SH" --force-with-lease "msg" ) >/dev/null 2>&1
+logged=$(cat "$GIT_PUSH_LOG" 2>/dev/null || true)
+check "FLAG: git push invoked with --force-with-lease" "1" "$(printf '%s' "$logged" | grep -c -- '--force-with-lease')"
+
+R=$(new_fixture no_flag)
+echo "changed" > "$R/base.txt"
+GIT_PUSH_LOG="$TMP/no_flag/push.log"
+: > "$GIT_PUSH_LOG"
+( cd "$R" && PATH="$STUB_BIN:$PATH" GIT_PUSH_LOG="$GIT_PUSH_LOG" bash "$PUSH_SH" "msg" ) >/dev/null 2>&1
+logged=$(cat "$GIT_PUSH_LOG" 2>/dev/null || true)
+check "NO FLAG: git push invoked WITHOUT --force-with-lease" "0" "$(printf '%s' "$logged" | grep -c -- '--force-with-lease')"
+
 printf '\n--- push_staging.test.sh: %d failing checks ---\n' "$fails"
 [ "$fails" -eq 0 ] && exit 0 || exit 1

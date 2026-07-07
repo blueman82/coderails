@@ -68,8 +68,49 @@ if echo "$cmd" | grep -qiE '\bshred\b'; then
   deny "shred"
 fi
 
+# Session cwd, read from the hook payload (.cwd), falling back to $PWD.
+# Resolved here (rather than only at its later use below) because the
+# force-with-lease allowlist check below also needs it.
+cwd=$(echo "$input" | jq -r '.cwd // empty')
+[ -z "$cwd" ] && cwd="$PWD"  # Falls back to $PWD when .cwd is absent.
+
+# allowlist_permits: checks whether .claude/destructive_allowlist (resolved
+# against the payload cwd's repo root) contains an exact-match, whole-line
+# keyword. Closed keyword vocabulary only — the file is never eval'd or
+# spliced into a regex, so malformed/garbage content can only fail to match,
+# never widen what's permitted. Missing/empty/garbage file -> permits nothing
+# (fail CLOSED).
+allowlist_permits() {
+  local keyword="$1"
+  local root
+  root=$(git -C "$cwd" rev-parse --show-toplevel 2>/dev/null)
+  local path
+  if [ -n "$root" ]; then
+    path="$root/.claude/destructive_allowlist"
+  else
+    path="$cwd/.claude/destructive_allowlist"
+  fi
+  [ -f "$path" ] || return 1
+  grep -qxF "$keyword" "$path" 2>/dev/null
+}
+
+# git push --force / -f / --force-with-lease
+# Carved out of the monolithic blocklist below because POSIX ERE alternation
+# (via grep -E, no BASH_REMATCH here) can't report WHICH alternative matched —
+# needed to allow the narrower --force-with-lease shape while still denying
+# naked --force/-f unconditionally, even when both appear on the same line.
+if echo "$cmd" | grep -qiE '\bgit +push +.*(--force\b|-f\b|--force-with-lease\b)'; then
+  if echo "$cmd" | grep -qiE '\bgit +push +.*--force-with-lease\b' \
+     && ! echo "$cmd" | grep -qiE '\bgit +push +.*(--force($|[^-])|(^|[^-])-f\b)' \
+     && allowlist_permits "git-push-force-with-lease"; then
+    : # allowlisted force-with-lease, no naked --force present — allow
+  else
+    deny "git push --force"
+  fi
+fi
+
 # ── Original permanent blocklist ─────────────────────────────────────────────
-pattern='\brm +(-[rRfF]+|--recursive|--force)|\bgit +push +.*(--force|-f\b|--force-with-lease)|\bgit +reset +--hard|\bDROP +(TABLE|DATABASE|SCHEMA)\b|\bTRUNCATE +TABLE\b|\bdd +if=|\bmkfs\.|\bchmod +-R +777|\bgit +commit +.*--no-verify'
+pattern='\brm +(-[rRfF]+|--recursive|--force)|\bgit +reset +--hard|\bDROP +(TABLE|DATABASE|SCHEMA)\b|\bTRUNCATE +TABLE\b|\bdd +if=|\bmkfs\.|\bchmod +-R +777|\bgit +commit +.*--no-verify'
 
 if echo "$cmd" | grep -qiE "$pattern"; then
   matched=$(echo "$cmd" | grep -oiE "$pattern" | head -1)
@@ -91,9 +132,8 @@ fi
 #   Falls back to cwd-branch if the target path can't be resolved as a git repo.
 # - For sed/perl/redirect/tee: parse the target file path and prefer target-repo
 #   resolution; fall back to cwd-branch if the path is not resolvable.
-# - Session cwd is read from the hook payload (.cwd), falling back to $PWD.
-cwd=$(echo "$input" | jq -r '.cwd // empty')
-[ -z "$cwd" ] && cwd="$PWD"  # Falls back to $PWD when .cwd is absent.
+# - Session cwd is resolved earlier above (needed by the force-with-lease
+#   allowlist check too).
 
 # Source-file extensions pattern (anchored to end-of-token to avoid false matches
 # like foo.py.bak or output.go.log). Matches only tokens ENDING in a source ext.
