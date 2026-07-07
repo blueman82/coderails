@@ -1,6 +1,6 @@
 import { MarkdownRenderChild, Plugin, TFile, TFolder, MarkdownPostProcessorContext } from "obsidian";
 import { execFile as execFileReal } from "node:child_process";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -14,7 +14,8 @@ import { writeRunNote } from "./notes";
 // a plugin's styles.css automatically alongside main.js and manifest.json.
 
 const DASHBOARD_RUNS_FOLDER = "dashboard-runs";
-const METRICS_NOTE_PATH = `${DASHBOARD_RUNS_FOLDER}/_metrics.json`;
+// Raw JSON read from the vault, not a markdown note (hence FILE, not NOTE).
+const METRICS_FILE_PATH = `${DASHBOARD_RUNS_FOLDER}/_metrics.json`;
 const DASHBOARD_CONFIG_PATH = join(homedir(), ".claude", "coderails-dashboard.json");
 const DASHBOARD_DIR = join(homedir(), ".claude", "coderails-dashboard");
 const QUEUE_DIR = join(DASHBOARD_DIR, "queue");
@@ -43,6 +44,10 @@ export default class CommandCentrePlugin extends Plugin {
   // — this registration is what makes the feed flip without the user
   // having to reopen the note.
   private containers = new Set<HTMLElement>();
+
+  // readButtons cache, invalidated by config-file mtime — avoids re-reading
+  // and re-parsing ~/.claude/coderails-dashboard.json on every render.
+  private buttonsCache: { mtimeMs: number; buttons: ButtonItem[] } | null = null;
 
   async onload(): Promise<void> {
     this.registerMarkdownCodeBlockProcessor(
@@ -183,7 +188,7 @@ export default class CommandCentrePlugin extends Plugin {
   }
 
   private async readMetrics(): Promise<Metrics | null> {
-    const file = this.app.vault.getAbstractFileByPath(METRICS_NOTE_PATH);
+    const file = this.app.vault.getAbstractFileByPath(METRICS_FILE_PATH);
     if (!(file instanceof TFile)) return null;
 
     try {
@@ -226,9 +231,18 @@ export default class CommandCentrePlugin extends Plugin {
 
   private readButtons(): ButtonItem[] {
     try {
+      const { mtimeMs } = statSync(DASHBOARD_CONFIG_PATH);
+      if (this.buttonsCache && this.buttonsCache.mtimeMs === mtimeMs) {
+        return this.buttonsCache.buttons;
+      }
       const raw = readFileSync(DASHBOARD_CONFIG_PATH, "utf-8");
-      return parseDashboardConfig(raw).buttons;
+      const buttons = parseDashboardConfig(raw).buttons;
+      this.buttonsCache = { mtimeMs, buttons };
+      return buttons;
     } catch {
+      // Missing or unparseable config renders no buttons, exactly as before
+      // the cache existed; drop the cache so a repaired file is re-read.
+      this.buttonsCache = null;
       return [];
     }
   }

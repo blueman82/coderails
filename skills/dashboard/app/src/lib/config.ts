@@ -32,19 +32,20 @@ export class ConfigError extends Error {
   }
 }
 
-export function loadConfig(path: string = DEFAULT_CONFIG_PATH): DashboardConfig {
+export function loadConfig(path?: string): DashboardConfig {
+  const configPath = path ?? DEFAULT_CONFIG_PATH;
   let raw: string;
   try {
-    raw = readFileSync(path, "utf-8");
+    raw = readFileSync(configPath, "utf-8");
   } catch {
-    throw new ConfigError(`Config file not found: ${path}`);
+    throw new ConfigError(`Config file not found: ${configPath}`);
   }
 
   let data: DashboardConfig;
   try {
     data = JSON.parse(raw) as DashboardConfig;
   } catch {
-    throw new ConfigError(`Config file has malformed JSON: ${path}`);
+    throw new ConfigError(`Config file has malformed JSON: ${configPath}`);
   }
 
   const seenNames = new Set<string>();

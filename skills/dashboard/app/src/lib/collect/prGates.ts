@@ -160,28 +160,32 @@ async function fetchOpenPrGates(repo: string, env: NodeJS.ProcessEnv): Promise<P
     ? list.filter(isRecord).map((p) => p.number).filter((n): n is number => typeof n === "number")
     : [];
 
-  const gates: PrGate[] = [];
-  for (const number of numbers) {
-    const { stdout: viewOut } = await execFileAsync(
-      "gh",
-      [
-        "pr",
-        "view",
-        String(number),
-        "--repo",
-        repo,
-        "--json",
-        "number,title,headRefOid,comments",
-      ],
-      { env }
-    );
-    const view: unknown = JSON.parse(viewOut);
-    const comments = isRecord(view) && Array.isArray(view.comments) ? view.comments : [];
-    const gate = parseGates(view, comments);
-    gate.repo = repo;
-    gates.push(gate);
-  }
-  return gates;
+  // Per-PR `gh pr view` calls run in parallel; Promise.all preserves the
+  // list order, and a single failing call rejects the whole repo so it
+  // degrades to its {repo, error} entry in collectPrGates — identical error
+  // semantics to the sequential loop this replaced.
+  return Promise.all(
+    numbers.map(async (number): Promise<PrGate> => {
+      const { stdout: viewOut } = await execFileAsync(
+        "gh",
+        [
+          "pr",
+          "view",
+          String(number),
+          "--repo",
+          repo,
+          "--json",
+          "number,title,headRefOid,comments",
+        ],
+        { env }
+      );
+      const view: unknown = JSON.parse(viewOut);
+      const comments = isRecord(view) && Array.isArray(view.comments) ? view.comments : [];
+      const gate = parseGates(view, comments);
+      gate.repo = repo;
+      return gate;
+    })
+  );
 }
 
 // collectPrGates shells out to `gh` via execFile (never a shell string) for
