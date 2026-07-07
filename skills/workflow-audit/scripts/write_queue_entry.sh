@@ -17,11 +17,13 @@
 # hash = sha256 hex of the canonicalised (sorted-key, compact) toolInput JSON
 # — same recipe as assistant-agent's gate/sendGate.ts hashInput/canonicalise
 # (sha256(JSON.stringify(sortKeysDeep(toolInput)))); `jq -S -c` produces the
-# same canonical form for this flat toolInput shape (no nested objects).
-#
-# PRIVACY INVARIANT: the written file's toolInput never contains anything
-# beyond the six whitelisted fields — no verbatim transcript prose, no file
-# contents, no reconstructed intent.
+# same canonical form for this flat toolInput shape (no nested objects) for
+# all normal text content. One known divergence: jq backslash-u-escapes the
+# DEL control character (codepoint 127) while JS JSON.stringify emits it
+# raw — a literal DEL byte in judge-generated text would hash differently
+# under the two implementations. Exceedingly unlikely in LLM-generated
+# prose and not otherwise reachable, so accepted rather than worked around.
+
 set -u
 
 QUEUE_DIR="$HOME/.claude/coderails-dashboard/queue"

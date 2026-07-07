@@ -72,6 +72,21 @@ check "written file hash equals independently-computed sha256(canonicalise(toolI
   "$(jq -r '.hash' "$WRITTEN1")"
 check "written file hash matches its own filename" "$HASH1" "$(jq -r '.hash' "$WRITTEN1")"
 
+# ── 5b. Default --queue-dir (no flag passed) resolves to
+#     ~/.claude/coderails-dashboard/queue — exercise the actual default
+#     branch, not just the explicitly-passed-flag path every other case uses.
+DEFAULT_QUEUE_DIR="$HOME/.claude/coderails-dashboard/queue"
+DEFAULT_BEFORE_COUNT=$(ls "$DEFAULT_QUEUE_DIR" 2>/dev/null | wc -l | tr -d ' ')
+HASH_DEFAULT=$(cat "$FIXTURE_PROPOSE" | bash "$SCRIPT" --count 3 --sessions "$SESSIONS_JSON")
+check "no --queue-dir flag -> writes into the default ~/.claude/coderails-dashboard/queue" "1" \
+  "$([ -f "$DEFAULT_QUEUE_DIR/$HASH_DEFAULT.json" ] && echo 1 || echo 0)"
+check "default-queue-dir file has the same hash as the explicit-queue-dir run (same input)" "$HASH1" "$HASH_DEFAULT"
+# Clean up only the file this test itself created, leaving any pre-existing
+# default-queue-dir contents untouched.
+rm -f "$DEFAULT_QUEUE_DIR/$HASH_DEFAULT.json" 2>/dev/null
+DEFAULT_AFTER_COUNT=$(ls "$DEFAULT_QUEUE_DIR" 2>/dev/null | wc -l | tr -d ' ')
+check "default-queue-dir test cleans up after itself (no net file left behind)" "$DEFAULT_BEFORE_COUNT" "$DEFAULT_AFTER_COUNT"
+
 # ── 6. A reject-verdict fixture produces ZERO files (negative control) ──────
 QDIR2=$(mktemp -d)
 REJECT_JSON='{"cluster_ngram":["Bash:rm"],"verdict":"reject","reject_reason":"tooling-mechanics artifact","task_summary":"x","proposed_name":"","proposed_description":""}'
@@ -80,6 +95,17 @@ REJECT_RC=$?
 check "reject-verdict fixture -> exit 0 (silent no-op)" "0" "$REJECT_RC"
 check "reject-verdict fixture -> no stdout" "" "$REJECT_OUT"
 check "reject-verdict fixture -> zero files written" "0" "$(ls "$QDIR2" 2>/dev/null | wc -l | tr -d ' ')"
+
+# ── 6b. A verdict object with the "verdict" key missing entirely (distinct
+#     from an explicit "reject") is also a silent no-op — the guard is
+#     "!= propose", not "== reject", so an absent key must be covered too. ──
+QDIR2B=$(mktemp -d)
+NOVERDICTKEY_JSON='{"cluster_ngram":["Bash:rm"],"task_summary":"x","proposed_name":"","proposed_description":""}'
+NOVERDICTKEY_OUT=$(printf '%s' "$NOVERDICTKEY_JSON" | bash "$SCRIPT" --queue-dir "$QDIR2B" --count 1 --sessions '["s1"]')
+NOVERDICTKEY_RC=$?
+check "missing verdict key -> exit 0 (silent no-op, not a crash)" "0" "$NOVERDICTKEY_RC"
+check "missing verdict key -> no stdout" "" "$NOVERDICTKEY_OUT"
+check "missing verdict key -> zero files written" "0" "$(ls "$QDIR2B" 2>/dev/null | wc -l | tr -d ' ')"
 
 # ── 7. Sentinel pass-through: task_summary round-trips verbatim (this proves
 #     the writer is a faithful pass-through of judge-vetted vocabulary, NOT a
