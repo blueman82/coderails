@@ -47,6 +47,8 @@ export interface CommandCentreSnapshot {
   buttons: ButtonItem[];
 }
 
+// Two frontmatter status vocabularies coexist BY DESIGN, both mapped here:
+// eval statuses are pass/fail/needs-review; run notes use running/done/failed.
 const CHIP_CLASS_BY_STATUS: Record<string, string> = {
   pass: "cc-chip-pass",
   fail: "cc-chip-fail",
