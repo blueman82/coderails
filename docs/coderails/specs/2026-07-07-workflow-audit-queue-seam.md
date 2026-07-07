@@ -113,29 +113,35 @@ writes into a user's personal `~/.claude/skills` directory — a created skill
 is always a repo skill, landed through the same gates any other coderails
 skill change goes through.
 
-## Honesty requirement — read this before assuming a pipeline exists
+## Honesty requirement — superseded, read this before assuming the old claim still holds
 
-**As of this document, clicking "Approve" on a `workflow-audit:propose-skill`
-queue entry changes only that entry's `status` field, in place, from
-`"pending"` to `"approved"`.** Nothing else happens. No skill is created, no
-branch opens, no PR is filed, by any code that exists today. The Approve
-button's wiring (`AssistantLinkPanel.tsx`, WU2) and the underlying
-`resolveQueueEntry` / `POST /api/queue` path are unchanged by WU1, WU2, or
-this document — they already existed, generically, for every `toolName`.
+**This section originally stated that clicking "Approve" on a
+`workflow-audit:propose-skill` queue entry changed only that entry's
+`status` field, in place, and triggered nothing else. That claim is no
+longer true.** A later loop (loop 2) built the consumption seam this
+document specified above as a contract, and clicking Approve now **does**
+trigger the routines runner described above: the dashboard's
+`POST /api/queue` route claims the approved entry and spawns a detached
+headless build that authors the proposed skill via skill-creator and opens
+a PR through the full gate sequence. See
+[`2026-07-07-approve-build-runner.md`](2026-07-07-approve-build-runner.md)
+for the runner's full contract — trigger condition, sidecar schema, hash
+re-validation, concurrency handling, and the threat-model honesty note that
+document carries in its place.
 
-Skill creation happens only once the routines runner described above exists
-and performs the filter → re-validate → create sequence. Today, an approved
-`workflow-audit:propose-skill` entry is a recorded, hash-bound approval
-sitting in `~/.claude/coderails-dashboard/queue/`, waiting. This is
-deliberate seam design carried from this integration's own design decisions
-(loop spec, decision C — "Consumption: seam-only"), not an unfinished
-accident or an oversight to be fixed later without a new decision. A reader
-of this document alone, without reading the loop spec, should come away with
-exactly this understanding: approval today is a status flip, not a trigger.
+The filter → re-validate → create sequence this section specified above is
+exactly what the runner now implements: `status === "approved" && toolName
+=== "workflow-audit:propose-skill"`, a hash re-validation before any action
+is taken, and — on success — the same `writing-skills` RED/GREEN/REFACTOR
+process landed via branch + PR + full gates that `workflow-audit`'s SKILL.md
+section 8 always specified. The one deliberate change from what was
+originally proposed here: the runner never reaches `/coderails:merge`. It
+stops at an open PR with gates green; the owner merges by hand (rationale in
+the new spec doc's §5).
 
-Zero approvals, or approvals that sit unconsumed indefinitely, are both
-valid, complete states — there is no nag, no retry, no implicit timeout that
-converts a stale approval into a create.
+Zero approvals, or approved entries whose build fails and is never retried,
+remain valid, complete states — there is no nag, no implicit timeout that
+force-converts a stalled or failed build into a merge.
 
 ## Non-goals
 
