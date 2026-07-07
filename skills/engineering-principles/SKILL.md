@@ -186,9 +186,8 @@ Every code change MUST be checked against these six principles:
 ### Comment Discipline
 
 A comment states the constraint the code enforces. It never cites the
-conversation, review, or session artifact that produced it. "Anchors to
-code, not process" — a comment must stand on its own for a reader who has
-none of the surrounding history.
+conversation, review, or session artifact that produced it. A comment must
+stand on its own for a reader who has none of the surrounding history.
 
 **The dead-link test:** any ID or label in a comment must resolve durably
 within the repo or its host platform. A PR number passes — it's a real,
