@@ -26,8 +26,8 @@
       "assert": "hooks/scripts/tests/run_all.sh still reports all suites passed at final main (no regression introduced by the header comment)",
       "cmd": "bash hooks/scripts/tests/run_all.sh 2>&1 | tail -5",
       "negative_control": "Deliberately reintroducing a syntax error in install_mode_sweep.test.sh's edited header region (e.g. an unterminated comment) makes run_all.sh report a failing suite instead of \"run_all: N/N suites passed\".",
-      "status": "pending",
-      "evidence": ""
+      "status": "pass",
+      "evidence": "Run from the PR worktree (branch test/install-mode-sweep-nested-worktree, includes the header-comment edit): trailing output '--- run_all: 35/35 suites passed ---', exit 0."
     },
     {
       "id": "E3",
