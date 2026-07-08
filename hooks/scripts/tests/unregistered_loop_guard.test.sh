@@ -312,4 +312,30 @@ run "$(payload "$T" S-A)" >/dev/null   # session A's first (and only) nudge
 out_b=$(run_stdout "$(payload "$T" S-AB)")
 [ -n "$out_b" ] && check "distinct session S-AB not suppressed by prior S-A nudge" "ok" "ok" || check "distinct session S-AB not suppressed by prior S-A nudge" "ok" "FAIL: empty"
 
+# Reverse direction of the above: S-AB nudges first, then S-A (the substring
+# prefix) must still get its own first nudge. Proves the exact-match
+# guarantee holds regardless of which of the two session ids fires first —
+# matches the comment's "or vice versa" claim.
+rm -rf "$CLAUDE_AGENTIC_LOOP_DIR"
+: > "$CLAUDE_DISCIPLINE_LOG"
+T=$(mk_dispatch_transcript 3)
+run "$(payload "$T" S-AB)" >/dev/null   # session S-AB's first (and only) nudge
+out_a=$(run_stdout "$(payload "$T" S-A)")
+[ -n "$out_a" ] && check "distinct session S-A not suppressed by prior S-AB nudge (reverse direction)" "ok" "ok" || check "distinct session S-A not suppressed by prior S-AB nudge (reverse direction)" "ok" "FAIL: empty"
+
+# Regression: session_id is interpolated into a grep BRE pattern. A session
+# id containing a literal BRE metachar (here "." in "s.1") must not be
+# treated as a wildcard that matches an unrelated session's log line (e.g.
+# "sX1"). als_sanitise_session_id only strips "/" and collapses ".." — a
+# single "." survives untouched, so this is a real reachable session id.
+# This test must FAIL against an unescaped grep (since a BRE "." matches any
+# single char, "s.1" would wildcard-match a "session=sX1 ... nudged=1" line)
+# and PASS once the session id is escaped/matched literally before use.
+rm -rf "$CLAUDE_AGENTIC_LOOP_DIR"
+: > "$CLAUDE_DISCIPLINE_LOG"
+T=$(mk_dispatch_transcript 3)
+run "$(payload "$T" sX1)" >/dev/null   # sX1's first (and only) nudge
+out_dot=$(run_stdout "$(payload "$T" "s.1")")
+[ -n "$out_dot" ] && check "session 's.1' (literal dot) not falsely suppressed by unrelated 'sX1' nudge (BRE metachar regression)" "ok" "ok" || check "session 's.1' (literal dot) not falsely suppressed by unrelated 'sX1' nudge (BRE metachar regression)" "ok" "FAIL: empty"
+
 [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails)"; exit 1; }

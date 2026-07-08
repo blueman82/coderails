@@ -150,7 +150,14 @@ if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
   # a prior nudge for session "S-A" cannot suppress session "S-AB"'s first
   # nudge. Missing/unreadable log (first-ever nudge) -> grep finds nothing
   # -> falls through to emit, unchanged.
-  if grep -q "hook=unregistered_loop_guard .*session=$session_id .*nudged=1" "$LOG_FILE" 2>/dev/null; then
+  # session_id is interpolated into a grep BRE pattern below, so any BRE
+  # metacharacter it contains (., *, ^, $, [, \) must be escaped first —
+  # als_sanitise_session_id only strips "/" and collapses ".." (path-traversal
+  # defense), a single "." survives untouched, and an unescaped "." would
+  # wildcard-match an unrelated session's log line (e.g. "s.1" matching a
+  # "session=sX1 ... nudged=1" line).
+  esc_sid=$(printf '%s' "$session_id" | sed 's/[.[\*^$\\]/\\&/g')
+  if grep -q "hook=unregistered_loop_guard .*session=$esc_sid .*nudged=1" "$LOG_FILE" 2>/dev/null; then
     als_log "hook=unregistered_loop_guard session=$session_id dispatch_turns=$dispatch_turns nudged=0 reason=already_nudged_this_session"
     exit 0
   fi
