@@ -327,6 +327,7 @@ run_capture_stderr "$(payload "$T" S1)"
 check "complete + no retro.json -> block" 2 "$RC_OUT"
 case "$STDERR_OUT" in *[Rr]etro*) retro_mentioned=1 ;; *) retro_mentioned=0 ;; esac
 check "complete + no retro.json -> stderr mentions retro" 1 "$retro_mentioned"
+check "complete + no retro.json -> complete counter NOT bumped" 0 "$(counter S1 complete)"
 
 # (b) complete declared, valid {"schema_version":1} retro.json beside progress.json
 # -> allow AND loop_stop_counts.complete bumped (block-before-bump: a passing
@@ -342,12 +343,14 @@ reset; T=$(mk_transcript 1 "All done.
 LOOP-STOP: complete — done"); write_file in-progress S1 0
 write_retro S1 'not-json'
 check "complete + malformed retro.json -> block" 2 "$(run x "$(payload "$T" S1)")"
+check "complete + malformed retro.json -> complete counter NOT bumped" 0 "$(counter S1 complete)"
 
 # (d) complete declared, retro.json valid JSON but wrong schema_version -> block.
 reset; T=$(mk_transcript 1 "All done.
 LOOP-STOP: complete — done"); write_file in-progress S1 0
 write_retro S1 '{"schema_version":2}'
 check "complete + wrong schema_version retro.json -> block" 2 "$(run x "$(payload "$T" S1)")"
+check "complete + wrong schema_version retro.json -> complete counter NOT bumped" 0 "$(counter S1 complete)"
 
 # (e) non-complete category (hard-stop) with no retro.json -> allow; the gate
 # fires ONLY on a `complete` declaration.
@@ -371,10 +374,16 @@ check "stop_hook_active + complete + no retro.json -> allow (short-circuit prece
 reset; T=$(mk_transcript 1 "All done.
 LOOP-STOP: Complete — done"); write_file in-progress S1 0
 check "mixed-case Complete + no retro.json -> block" 2 "$(run x "$(payload "$T" S1)")"
+# bump_loop_stop_count keys on the RAW extracted category (unnormalized), so a
+# regression that let the block fall through to the bump would write under the
+# literal "Complete" key, not lowercase "complete" — assert against the key
+# that would actually receive the write.
+check "mixed-case Complete + no retro.json -> Complete counter NOT bumped" 0 "$(counter S1 Complete)"
 
 reset; T=$(mk_transcript 1 "All done.
 LOOP-STOP: COMPLETE — done"); write_file in-progress S1 0
 check "all-caps COMPLETE + no retro.json -> block" 2 "$(run x "$(payload "$T" S1)")"
+check "all-caps COMPLETE + no retro.json -> COMPLETE counter NOT bumped" 0 "$(counter S1 COMPLETE)"
 
 # (g3) mixed-case allow — proves normalization doesn't break the happy path
 # for a non-lowercase declaration paired with a valid retro.json.
