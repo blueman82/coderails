@@ -34,6 +34,22 @@ mk_other_transcript() {
   printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Skill","input":{"skill":"coderails:prep"}}]}}' > "$out"
   printf '%s' "$out"
 }
+# Build a transcript where the loop was started via the SLASH-COMMAND form
+# (/coderails:agentic-loop) — a user-role message whose content is a STRING
+# carrying <command-name>, NOT an assistant Skill tool_use. This is how a
+# human-invoked loop actually appears; the tool_use form only covers loops the
+# assistant invokes programmatically. Followed by a final assistant text message.
+mk_slash_transcript() { # command_name final_text -> path
+  local cmd="$1" final="$2" out="$TMP/slash_${RANDOM}.jsonl"
+  jq -cn --arg c "<command-message>agentic-loop</command-message>
+<command-name>${cmd}</command-name>
+<command-args>build this, crack on</command-args>" \
+    '{type:"user",message:{role:"user",content:$c}}' > "$out"
+  if [ -n "$final" ]; then
+    jq -cn --arg t "$final" '{type:"assistant",message:{content:[{type:"text",text:$t}]}}' >> "$out"
+  fi
+  printf '%s' "$out"
+}
 payload() { # transcript session_id [stop_hook_active]
   printf '{"transcript_path":"%s","session_id":"%s","cwd":"%s","stop_hook_active":%s}' \
     "$1" "$2" "$CWD" "${3:-false}"
@@ -150,6 +166,44 @@ run x "$(payload "$T" S1)" >/dev/null
 check "multi-declaration: last category wins (complete)" 1 "$(counter S1 complete)"
 check "multi-declaration: first category NOT counted (hard-stop)" 0 "$(counter S1 hard-stop)"
 
+# Slash-command loop registration — a loop started via /coderails:agentic-loop
+# (the human-invoked form: a user-role command-name message, NOT an assistant
+# Skill tool_use) must still be detected as an active loop, so the anti-stall
+# guard engages and the hook-owned counter increments. This is the real-world
+# case the null-counter bug hit: the whole loop ran off a slash invocation, the
+# gate saw invocations=0, exited early, and bump_loop_stop_count was never
+# reached. The tool_use-only fixtures above never exercised this path.
+reset; T=$(mk_slash_transcript "/coderails:agentic-loop" "Work paused.
+LOOP-STOP: awaiting-input — waiting on the user's plan confirmation"); write_file in-progress S1 0
+check "slash-command loop -> declaration allowed (not treated as non-loop)" 0 "$(run x "$(payload "$T" S1)")"
+check "slash-command loop -> counter increments" 1 "$(counter S1 awaiting-input)"
+
+# Bare slash form (/agentic-loop, unscoped) must also register.
+reset; T=$(mk_slash_transcript "/agentic-loop" "All done.
+LOOP-STOP: complete — all PRs merged"); write_file in-progress S1 0
+run x "$(payload "$T" S1)" >/dev/null
+check "bare slash-command loop -> counter increments" 1 "$(counter S1 complete)"
+
+# A slash command for a DIFFERENT skill must NOT be mistaken for a loop
+# (guards against an over-broad command-name match).
+reset; T=$(mk_slash_transcript "/coderails:prep" "no declaration here"); write_file in-progress S1 0
+check "non-loop slash command -> allow (not a loop)" 0 "$(run x "$(payload "$T" S1)")"
+
+# Multiple command-name tags in ONE user message, loop tag NOT first — the
+# scan must catch EVERY tag, not just the first, or a non-loop command ahead of
+# the loop command would undercount to 0 and re-hide the null-counter bug.
+reset
+T="$TMP/multitag_${RANDOM}.jsonl"
+jq -cn --arg c "<command-name>/coderails:prep</command-name>
+<command-name>/coderails:agentic-loop</command-name>" \
+  '{type:"user",message:{role:"user",content:$c}}' > "$T"
+jq -cn --arg t "Work paused.
+LOOP-STOP: hard-stop — multi-tag message" \
+  '{type:"assistant",message:{content:[{type:"text",text:$t}]}}' >> "$T"
+write_file in-progress S1 0
+run x "$(payload "$T" S1)" >/dev/null
+check "multi command-name tags: loop tag not first still counts" 1 "$(counter S1 hard-stop)"
+
 # Unwritable progress dir (chmod 555) — degrades safely: stop still allowed,
 # and jq's redirect never opens the tmp file, so no leftover .tmp.
 reset; T=$(mk_transcript 1 "Work paused.
@@ -203,5 +257,35 @@ check "malformed line + valid LOOP-STOP tag -> reached declaration gate (declare
   "$(count 'hook=loop_stall_guard.*declared=1' "$CLAUDE_DISCIPLINE_LOG")"
 check "malformed line + valid LOOP-STOP tag -> NOT misdetected as invocations=0 (not a loop)" 0 \
   "$(count 'invocations=0 active=0' "$CLAUDE_DISCIPLINE_LOG")"
+
+# =====================================================================
+# Direct unit tests for als_count_invocations' INPUT-SHAPE contract. These
+# assert the integer stdout for slash-command edge cases that are awkward to
+# reach through the full guard (which also needs a LOOP-STOP declaration and a
+# progress.json to observe). Source the lib in a subshell so its globals/env
+# don't leak into the guard tests above.
+mk_line() { jq -cn --arg c "$1" '{type:"user",message:{role:"user",content:$c}}'; }   # string-content user msg
+inv_count() { ( . "$(cd "$(dirname "$0")/.." && pwd)/lib/loop_state_common.sh"; als_count_invocations "$1" ); }
+
+# Gap: a user message with ARRAY content (tool_result) that QUOTES a command-name
+# tag must NOT count — the select(type=="string") guard is what keeps Form 2 from
+# firing on the bulk of the transcript (every tool_result turn is array-content).
+U="$TMP/arr_${RANDOM}.jsonl"
+jq -cn '{type:"user",message:{role:"user",content:[{type:"tool_result",content:"see <command-name>/coderails:agentic-loop</command-name>"}]}}' > "$U"
+check "array-content user msg quoting the tag -> not counted (0)" 0 "$(inv_count "$U")"
+
+# Gap: trailing whitespace INSIDE the tag must still count — the anchored
+# loop_name test would otherwise fail on the padded capture, re-hiding the bug.
+U="$TMP/ws_${RANDOM}.jsonl"; mk_line "<command-name>/coderails:agentic-loop  </command-name>" > "$U"
+check "trailing-whitespace tag -> still counts (1)" 1 "$(inv_count "$U")"
+
+# Lock-in: mixed-form (slash + assistant Skill tool_use for the same loop) counts
+# 2 by design — documented no-dedup decision; matches the pre-existing behavior
+# of two Skill tool_uses. A future 'unique' that silently changed the ordinal
+# would fail here.
+U="$TMP/mixed_${RANDOM}.jsonl"
+mk_line "<command-name>/coderails:agentic-loop</command-name>" > "$U"
+printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Skill","input":{"skill":"coderails:agentic-loop"}}]}}' >> "$U"
+check "mixed slash+tool_use for one loop -> counts 2 (no cross-form dedup)" 2 "$(inv_count "$U")"
 
 [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails)"; exit 1; }
