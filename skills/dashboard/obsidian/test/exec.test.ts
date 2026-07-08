@@ -175,6 +175,46 @@ describe("pressButton — client-side dash rejection", () => {
   });
 });
 
+describe("pressButton — buildArgv throw parity", () => {
+  it("resolves to invalid-input, not a rejected promise, for an empty command with no input", async () => {
+    const execFile = vi.fn();
+    const writeIntentFile = vi.fn();
+    const mkdirIntentDir = vi.fn();
+    const createRunNote = vi.fn();
+    const deps = makeDeps({ execFile, writeIntentFile, mkdirIntentDir, createRunNote });
+
+    const result = await pressButton(deps, BUTTONS, "free-ask");
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.reason).toBe("invalid-input");
+    }
+    expect(execFile).not.toHaveBeenCalled();
+    expect(writeIntentFile).not.toHaveBeenCalled();
+    expect(mkdirIntentDir).not.toHaveBeenCalled();
+    expect(createRunNote).not.toHaveBeenCalled();
+  });
+
+  it("resolves to invalid-input, not a rejected promise, for input with leading whitespace before a dash", async () => {
+    const execFile = vi.fn();
+    const writeIntentFile = vi.fn();
+    const mkdirIntentDir = vi.fn();
+    const createRunNote = vi.fn();
+    const deps = makeDeps({ execFile, writeIntentFile, mkdirIntentDir, createRunNote });
+
+    const result = await pressButton(deps, BUTTONS, "ask", "  --dangerously-skip-permissions");
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.reason).toBe("invalid-input");
+    }
+    expect(execFile).not.toHaveBeenCalled();
+    expect(writeIntentFile).not.toHaveBeenCalled();
+    expect(mkdirIntentDir).not.toHaveBeenCalled();
+    expect(createRunNote).not.toHaveBeenCalled();
+  });
+});
+
 describe("pressButton — run note lifecycle", () => {
   it("creates a run note with status: running before spawning, then flips to done on success", async () => {
     let runningContent = "";
