@@ -132,6 +132,41 @@ all_malformed_reason=$( ( . "$GUARD"; ulg_count_dispatch_turns "$all_malformed_t
 check "benign-skip and total-loss reasons are distinct (discriminator)" "ok" \
   "$([ "$parse_reason" != "$all_malformed_reason" ] && echo ok || echo "FAIL: both are '$parse_reason'")"
 
+# Order independence: malformed line FIRST, then 2 valid lines (the existing
+# fixture above only puts the malformed line last). Stage 1 parses per-line,
+# so a bad line's position must not matter — this must still recover count 2
+# with an empty reason, same as the malformed-last fixture.
+mk_corrupt_first_transcript() {
+  local out="$TMP/corrupt_first_$RANDOM.jsonl"
+  printf '%s\n' '{"type":"assistant", THIS IS NOT VALID JSON' > "$out"
+  jq -cn --arg id "msg-0" '{"type":"assistant","message":{"id":$id,"content":[{"type":"tool_use","name":"Agent","input":{}}]}}' >> "$out"
+  jq -cn --arg id "msg-1" '{"type":"assistant","message":{"id":$id,"content":[{"type":"tool_use","name":"Agent","input":{}}]}}' >> "$out"
+  printf '%s' "$out"
+}
+corrupt_first_t=$(mk_corrupt_first_transcript)
+n=$( ( . "$GUARD"; ulg_count_dispatch_turns "$corrupt_first_t" ) )
+check "benign partial skip, malformed line FIRST -> count 2 (order-independent)" "2" "$n"
+corrupt_first_reason=$( ( . "$GUARD"; ulg_count_dispatch_turns "$corrupt_first_t" >/dev/null; printf '%s' "$ULG_PARSE_REASON" ) )
+check "benign partial skip, malformed line FIRST -> ULG_PARSE_REASON empty" "" "$corrupt_first_reason"
+
+# Blank/whitespace-only lines mixed with one malformed content line. The
+# `total` line-count (grep -c '[^[:space:]]', a NEW variable this fix
+# introduces) must exclude the blank lines so this still reads as "1
+# non-blank line, that line is malformed" -> TOTAL LOSS, not a benign skip
+# miscounted as 3 lines with 2 blank "successes".
+mk_blank_and_malformed_transcript() {
+  local out="$TMP/blank_malformed_$RANDOM.jsonl"
+  printf '\n' > "$out"
+  printf '   \n' >> "$out"
+  printf '%s\n' '{"type":"assistant", THIS IS NOT VALID JSON' >> "$out"
+  printf '%s' "$out"
+}
+blank_malformed_t=$(mk_blank_and_malformed_transcript)
+n=$( ( . "$GUARD"; ulg_count_dispatch_turns "$blank_malformed_t" ) )
+check "blank lines + 1 malformed content line -> count 0 (blank lines excluded from total)" "0" "$n"
+blank_malformed_reason=$( ( . "$GUARD"; ulg_count_dispatch_turns "$blank_malformed_t" >/dev/null; printf '%s' "$ULG_PARSE_REASON" ) )
+[ -n "$blank_malformed_reason" ] && check "blank lines + 1 malformed content line -> ULG_PARSE_REASON non-empty (total loss, not miscounted)" "ok" "ok" || check "blank lines + 1 malformed content line -> ULG_PARSE_REASON non-empty (total loss, not miscounted)" "ok" "FAIL: empty"
+
 # Behavioural proof that a benign partial skip does not suppress a nudge that
 # would otherwise fire: 3 valid dispatch turns + 1 malformed line -> the
 # recovered count (3) still crosses the >=3 nudge threshold. The 2-valid
