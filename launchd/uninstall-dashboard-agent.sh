@@ -10,7 +10,7 @@ UID_DOMAIN="gui/$(id -u)"
 LABEL="com.coderails.dashboard"
 DEST="$HOME/Library/LaunchAgents/$LABEL.plist"
 
-launchctl bootout "$UID_DOMAIN/$LABEL" 2>/dev/null || true
+bootout_err="$(launchctl bootout "$UID_DOMAIN/$LABEL" 2>&1 >/dev/null || true)"
 
 # bootout is asynchronous for a running KeepAlive job: it returns before the
 # job has actually unloaded (observed live 2026-07-08 — a running KeepAlive
@@ -28,6 +28,8 @@ done
 
 if [ "$still_loaded" -eq 1 ]; then
   echo "Error: $LABEL is still loaded after bootout" >&2
+  [ -n "$bootout_err" ] && echo "bootout said: $bootout_err" >&2
+  echo "Leaving $DEST in place (job still loaded, not safe to remove)" >&2
   exit 1
 fi
 
