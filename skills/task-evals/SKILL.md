@@ -106,10 +106,11 @@ This copy and the design spec's copy are kept in lockstep; the enforcement compo
 
 Enforcement wiring is live: the merge gate lives in `scripts/merge.sh`, reading the PR-scope artifact `/coderails:post-evals` posts (via `scripts/post_evals.sh`); the loop-stop gate lives in `loop_state_guard` (`hooks/scripts/loop_state_guard.sh`), reading the loop-scope `evals.json` beside `progress.json`.
 
-This skill is invoked at three points:
+This skill is invoked at four points:
 
 - **agentic-loop Phase 2.7** — loop scope, alongside `spec.md`/`plan.md`.
 - **writing-plans**, once the plan has passed self-review and the stress-test pass — pr scope, frozen before implementation dispatch begins; the plan's actual final task only grades and posts via `/coderails:post-evals`.
+- **systematic-debugging** — pr scope, frozen before the fix is implemented, when a debugging fix will carry a PR.
 - **Directly by the user.**
 
 A plan's or loop's per-work-unit eval refs travel in worker prompts the same way disposition travels under agentic-loop Phase 3's existing pattern: a ref recorded only in `progress.json` and absent from the worker's own prompt does not exist for that worker. Every worker prompt that owns a unit with an eval ref must carry that ref verbatim, not just a pointer to the loop state file.

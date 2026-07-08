@@ -171,6 +171,10 @@ You MUST complete each phase before proceeding to the next.
 
 **Fix the root cause, not the symptom:**
 
+0. **Freeze success evals if the fix will carry a PR**
+   - If this fix is a code change that will carry a PR, invoke `/coderails:task-evals` (scope: `pr`) now, before writing the fix, to freeze the success evals — same freeze-before-build rule as the test in step 1 below.
+   - Subject to task-evals' own tier rules: a trivial fix meeting the tier-0 predicate takes the tier-0 exemption, not a skip.
+
 1. **Create Failing Test Case**
    - Simplest possible reproduction
    - Automated test if possible
@@ -284,6 +288,7 @@ These techniques are part of systematic debugging and available in this director
 - **`condition-based-waiting.md`** - Replace arbitrary timeouts with condition polling
 
 **Related skills:**
+- **coderails:task-evals** - Freeze PR-scope success evals before implementing a fix that will carry a PR (Phase 4, Step 0)
 - **coderails:test-driven-development** - For creating failing test case (Phase 4, Step 1)
 - **coderails:verification-before-completion** - Verify fix worked before claiming success
 
