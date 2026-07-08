@@ -26,6 +26,14 @@ const BUTTONS: ButtonItem[] = [
     profile: "standard",
     inputAllowed: true,
   },
+  {
+    name: "free-ask",
+    label: "FREE ASK",
+    command: "",
+    cwd: "/Users/harrison/Github/coderails",
+    profile: "standard",
+    inputAllowed: true,
+  },
 ];
 
 function makeDeps(overrides: Partial<ExecDeps> = {}): ExecDeps {
@@ -164,6 +172,58 @@ describe("pressButton — client-side dash rejection", () => {
     }
     expect(execFile).not.toHaveBeenCalled();
     expect(writeIntentFile).not.toHaveBeenCalled();
+  });
+});
+
+describe("pressButton — buildArgv throw parity", () => {
+  it("resolves to invalid-input, not a rejected promise, for an empty command with no input", async () => {
+    const execFile = vi.fn();
+    const writeIntentFile = vi.fn();
+    const mkdirIntentDir = vi.fn();
+    const createRunNote = vi.fn();
+    const deps = makeDeps({ execFile, writeIntentFile, mkdirIntentDir, createRunNote });
+
+    const result = await pressButton(deps, BUTTONS, "free-ask");
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.reason).toBe("invalid-input");
+    }
+    expect(execFile).not.toHaveBeenCalled();
+    expect(writeIntentFile).not.toHaveBeenCalled();
+    expect(mkdirIntentDir).not.toHaveBeenCalled();
+    expect(createRunNote).not.toHaveBeenCalled();
+  });
+
+  it("resolves to invalid-input, not a rejected promise, for input with leading whitespace before a dash", async () => {
+    const execFile = vi.fn();
+    const writeIntentFile = vi.fn();
+    const mkdirIntentDir = vi.fn();
+    const createRunNote = vi.fn();
+    const deps = makeDeps({ execFile, writeIntentFile, mkdirIntentDir, createRunNote });
+
+    const result = await pressButton(deps, BUTTONS, "ask", "  --dangerously-skip-permissions");
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.reason).toBe("invalid-input");
+    }
+    expect(execFile).not.toHaveBeenCalled();
+    expect(writeIntentFile).not.toHaveBeenCalled();
+    expect(mkdirIntentDir).not.toHaveBeenCalled();
+    expect(createRunNote).not.toHaveBeenCalled();
+  });
+
+  it("does not throw for a button with a non-empty command and no input", async () => {
+    const execFile = vi.fn((_cmd, _args, _opts, callback) => {
+      callback(null, "output", "");
+    });
+    const deps = makeDeps({ execFile });
+
+    const result = await pressButton(deps, BUTTONS, "wiki-lint");
+
+    expect(result.ok).toBe(true);
+    expect(execFile).toHaveBeenCalledTimes(1);
   });
 });
 
