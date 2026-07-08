@@ -37,8 +37,8 @@
       "assert": "loop_state_guard.sh, loop_stall_guard.sh, voice_announce.sh, and unregistered_loop_guard.test.sh's existing malformed-transcript assertions all pass on the merged branch (full hook test suite green, not just the three touched files).",
       "cmd": "cd /Users/harrison/Github/coderails && bash hooks/scripts/tests/run_all.sh 2>&1 | tail -1 | grep -qE '^--- run_all: [0-9]+/\\1 suites passed ---$' -e '^--- run_all: ([0-9]+)/\\1 suites passed ---$' || bash hooks/scripts/tests/run_all.sh 2>&1 | tail -1",
       "negative_control": "Introduce a deliberate break (temporarily revert als_count_invocations to `jq -s ...` alone with no tolerant pre-filter) and confirm loop_state_guard.test.sh's malformed-transcript assertions fail: git stash; git checkout e63d3d1f -- hooks/scripts/lib/loop_state_common.sh; bash hooks/scripts/tests/loop_state_guard.test.sh 2>&1 | grep -q '^FAIL' && echo EXPECTED_FAIL; git checkout HEAD -- hooks/scripts/lib/loop_state_common.sh; git stash pop",
-      "status": "pending",
-      "evidence": ""
+      "status": "pass",
+      "evidence": "bash hooks/scripts/tests/run_all.sh on the rebased worktree branch (fix/loop-state-tolerant-parse @ 5d7da834): '--- run_all: 36/36 suites passed ---' (includes unregistered_loop_guard.test.sh unmodified). Negative control (checked out pre-fix lib on this branch, ran loop_state_guard.test.sh): produced FAIL lines for the malformed-transcript assertions, confirming the check can fail."
     },
     {
       "id": "E4",
