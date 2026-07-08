@@ -8,6 +8,7 @@ import type { HealthTile } from "@/lib/collect/health";
 import type { QueueEntry } from "@/lib/collect/queue";
 import type { BuildEntry } from "@/lib/collect/builds";
 import type { RunRecord } from "@/lib/runlog";
+import type { RunOutputEvent } from "@/lib/runOutputBus";
 
 // Mirrors the Snapshot shape from src/lib/collect/index.ts (type-only import
 // there would be safe too, but the fields are re-declared here so this file
@@ -34,14 +35,21 @@ export type DashboardEvent =
   | { event: "snapshot"; data: DashboardSnapshot }
   | { event: "activity"; data: ActivitySlice }
   | { event: "gates"; data: (PrGate | PrGateError)[] }
-  | { event: "runs"; data: RunRecord[] };
+  | { event: "runs"; data: RunRecord[] }
+  | { event: "run-output"; data: RunOutputEvent };
 
 export type ConnectionStatus = "connecting" | "online" | "reconnecting";
 
+// runOutput accumulates live chunks per runId, keyed by the same runId the "runs" slice's
+// RunRecord carries — the output viewer panel appends to this map as "run-output" SSE frames
+// arrive rather than re-fetching, matching the incremental-publish design in runOutputBus.ts.
+// Defaults to {} (see initialDashboardState below); never reset on a later "snapshot"/"activity"
+// frame, since those don't carry output and a reset would drop output for still-active runs.
 export interface DashboardState {
   snapshot: DashboardSnapshot;
   status: ConnectionStatus;
   lastUpdate: number | null;
+  runOutput: Record<string, string>;
 }
 
 const EMPTY_SNAPSHOT: DashboardSnapshot = {
@@ -59,6 +67,7 @@ export const initialDashboardState: DashboardState = {
   snapshot: EMPTY_SNAPSHOT,
   status: "connecting",
   lastUpdate: null,
+  runOutput: {},
 };
 
 // Pure reducer: folds one incoming SSE frame into the running snapshot.
@@ -71,7 +80,7 @@ export function mergeDashboardEvent(
 ): DashboardState {
   switch (incoming.event) {
     case "snapshot":
-      return { snapshot: incoming.data, status: "online", lastUpdate: now };
+      return { ...state, snapshot: incoming.data, status: "online", lastUpdate: now };
     case "activity":
       return {
         ...state,
@@ -86,10 +95,32 @@ export function mergeDashboardEvent(
         status: "online",
         lastUpdate: now,
       };
-    case "runs":
+    case "runs": {
+      // Prune runOutput entries for runs no longer in the server's run-history window (runsLimit
+      // in lib/collect/index.ts, default 20) — otherwise this map only ever grows across a
+      // dashboard session's lifetime, one entry per run that ever streamed output. The incoming
+      // "runs" snapshot is the authoritative set worth keeping; anything absent from it has
+      // rolled off the cap and its buffered output is no longer reachable via any run-history
+      // row anyway.
+      const keepRunIds = new Set(incoming.data.map((r) => r.runId));
+      const prunedRunOutput = Object.fromEntries(
+        Object.entries(state.runOutput).filter(([runId]) => keepRunIds.has(runId))
+      );
       return {
         ...state,
         snapshot: { ...state.snapshot, runs: incoming.data },
+        runOutput: prunedRunOutput,
+        status: "online",
+        lastUpdate: now,
+      };
+    }
+    case "run-output":
+      return {
+        ...state,
+        runOutput: {
+          ...state.runOutput,
+          [incoming.data.runId]: (state.runOutput[incoming.data.runId] ?? "") + incoming.data.chunk,
+        },
         status: "online",
         lastUpdate: now,
       };
@@ -181,7 +212,7 @@ export interface EventSourceLike {
   onerror?: ((ev: Event) => void) | null;
 }
 
-const SSE_EVENT_NAMES: DashboardEvent["event"][] = ["snapshot", "activity", "gates", "runs"];
+const SSE_EVENT_NAMES: DashboardEvent["event"][] = ["snapshot", "activity", "gates", "runs", "run-output"];
 
 export function useDashboardState(options: UseDashboardStateOptions = {}): DashboardState {
   const { createSource, url = "/api/events" } = options;

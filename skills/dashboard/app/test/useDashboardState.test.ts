@@ -39,6 +39,17 @@ describe("mergeDashboardEvent — snapshot", () => {
     expect(next.status).toBe("online");
     expect(next.lastUpdate).toBe(1000);
   });
+
+  it("preserves the existing runOutput buffer — a later snapshot frame carries no output data and must not drop an in-progress run's accumulated live output", () => {
+    const base: DashboardState = {
+      snapshot: emptySnapshot(),
+      status: "online",
+      lastUpdate: 0,
+      runOutput: { abc: "already streamed" },
+    };
+    const next = mergeDashboardEvent(base, { event: "snapshot", data: emptySnapshot() }, 1000);
+    expect(next.runOutput).toEqual({ abc: "already streamed" });
+  });
 });
 
 describe("mergeDashboardEvent — activity", () => {
@@ -47,6 +58,7 @@ describe("mergeDashboardEvent — activity", () => {
       snapshot: emptySnapshot({ gates: [{ repo: "r", error: "boom" }], runs: [{ runId: "r1" } as RunRecord] }),
       status: "online",
       lastUpdate: 500,
+      runOutput: {},
     };
     const activity = {
       sessions: [{ project: "p", lastActivity: 1, state: "active" as const }],
@@ -68,7 +80,7 @@ describe("mergeDashboardEvent — activity", () => {
 
 describe("mergeDashboardEvent — gates", () => {
   it("replaces only the gates slice", () => {
-    const base: DashboardState = { snapshot: emptySnapshot({ sessions: [{ project: "p", lastActivity: 1, state: "idle" }] }), status: "online", lastUpdate: 0 };
+    const base: DashboardState = { snapshot: emptySnapshot({ sessions: [{ project: "p", lastActivity: 1, state: "idle" }] }), status: "online", lastUpdate: 0, runOutput: {} };
     const gates: (PrGate | PrGateError)[] = [{ repo: "r", error: "auth failed" }];
     const next = mergeDashboardEvent(base, { event: "gates", data: gates }, 3000);
     expect(next.snapshot.gates).toBe(gates);
@@ -78,17 +90,88 @@ describe("mergeDashboardEvent — gates", () => {
 
 describe("mergeDashboardEvent — runs", () => {
   it("replaces only the runs slice", () => {
-    const base: DashboardState = { snapshot: emptySnapshot(), status: "online", lastUpdate: 0 };
+    const base: DashboardState = { snapshot: emptySnapshot(), status: "online", lastUpdate: 0, runOutput: {} };
     const runs: RunRecord[] = [{ runId: "abc", button: "wiki-lint", argv: [], cwd: "/", profile: "standard", startedAt: 1, outputPath: "/tmp/x" }];
     const next = mergeDashboardEvent(base, { event: "runs", data: runs }, 4000);
     expect(next.snapshot.runs).toBe(runs);
     expect(next.lastUpdate).toBe(4000);
   });
+
+  it("prunes a runOutput entry for a runId absent from the incoming runs snapshot (rolled off the server-side cap)", () => {
+    const base: DashboardState = {
+      snapshot: emptySnapshot(),
+      status: "online",
+      lastUpdate: 0,
+      runOutput: { rolledOff: "old output", stillPresent: "current output" },
+    };
+    const runs: RunRecord[] = [
+      { runId: "stillPresent", button: "wiki-lint", argv: [], cwd: "/", profile: "standard", startedAt: 1, outputPath: "/tmp/x" },
+    ];
+    const next = mergeDashboardEvent(base, { event: "runs", data: runs }, 5000);
+    expect(next.runOutput).toEqual({ stillPresent: "current output" });
+  });
+
+  it("keeps every runOutput entry whose runId is still present in the incoming runs snapshot", () => {
+    const base: DashboardState = {
+      snapshot: emptySnapshot(),
+      status: "online",
+      lastUpdate: 0,
+      runOutput: { a: "a-out", b: "b-out" },
+    };
+    const runs: RunRecord[] = [
+      { runId: "a", button: "wiki-lint", argv: [], cwd: "/", profile: "standard", startedAt: 1, outputPath: "/tmp/a" },
+      { runId: "b", button: "wiki-lint", argv: [], cwd: "/", profile: "standard", startedAt: 2, outputPath: "/tmp/b" },
+    ];
+    const next = mergeDashboardEvent(base, { event: "runs", data: runs }, 6000);
+    expect(next.runOutput).toEqual({ a: "a-out", b: "b-out" });
+  });
+});
+
+describe("mergeDashboardEvent — run-output", () => {
+  it("appends the first chunk for a runId into an empty runOutput map", () => {
+    const base: DashboardState = { snapshot: emptySnapshot(), status: "online", lastUpdate: 0, runOutput: {} };
+    const next = mergeDashboardEvent(base, { event: "run-output", data: { runId: "abc", chunk: "hello " } }, 100);
+    expect(next.runOutput).toEqual({ abc: "hello " });
+    expect(next.lastUpdate).toBe(100);
+  });
+
+  it("concatenates subsequent chunks for the same runId in arrival order", () => {
+    const base: DashboardState = {
+      snapshot: emptySnapshot(),
+      status: "online",
+      lastUpdate: 0,
+      runOutput: { abc: "hello " },
+    };
+    const next = mergeDashboardEvent(base, { event: "run-output", data: { runId: "abc", chunk: "world" } }, 200);
+    expect(next.runOutput).toEqual({ abc: "hello world" });
+  });
+
+  it("keeps separate runIds' buffers independent", () => {
+    const base: DashboardState = {
+      snapshot: emptySnapshot(),
+      status: "online",
+      lastUpdate: 0,
+      runOutput: { abc: "foo" },
+    };
+    const next = mergeDashboardEvent(base, { event: "run-output", data: { runId: "def", chunk: "bar" } }, 300);
+    expect(next.runOutput).toEqual({ abc: "foo", def: "bar" });
+  });
+
+  it("does not touch the rest of the snapshot", () => {
+    const base: DashboardState = {
+      snapshot: emptySnapshot({ runs: [{ runId: "r1" } as RunRecord] }),
+      status: "online",
+      lastUpdate: 0,
+      runOutput: {},
+    };
+    const next = mergeDashboardEvent(base, { event: "run-output", data: { runId: "abc", chunk: "x" } }, 400);
+    expect(next.snapshot).toBe(base.snapshot);
+  });
 });
 
 describe("markReconnecting", () => {
   it("flips status to reconnecting while preserving the last-good snapshot", () => {
-    const base: DashboardState = { snapshot: emptySnapshot({ runs: [{ runId: "r1" } as RunRecord] }), status: "online", lastUpdate: 10 };
+    const base: DashboardState = { snapshot: emptySnapshot({ runs: [{ runId: "r1" } as RunRecord] }), status: "online", lastUpdate: 10, runOutput: {} };
     const next = markReconnecting(base);
     expect(next.status).toBe("reconnecting");
     expect(next.snapshot).toBe(base.snapshot);
@@ -96,7 +179,7 @@ describe("markReconnecting", () => {
   });
 
   it("is idempotent — reconnecting twice returns an equivalent state", () => {
-    const base: DashboardState = { snapshot: emptySnapshot(), status: "reconnecting", lastUpdate: 5 };
+    const base: DashboardState = { snapshot: emptySnapshot(), status: "reconnecting", lastUpdate: 5, runOutput: {} };
     const next = markReconnecting(base);
     expect(next).toBe(base);
   });

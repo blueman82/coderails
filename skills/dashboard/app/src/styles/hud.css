@@ -492,6 +492,45 @@
   border-top: 1px solid var(--hairline);
 }
 
+/* ---------- Run output viewer ---------- */
+/* .hud-run-row-selectable overrides .hud-run-row's default div styling onto a <button> (the
+   run-history rows here double as the output viewer's run picker) — reset the button chrome
+   first, then reapply the same layout .hud-run-row already uses elsewhere. */
+.hud-run-row-selectable {
+  width: 100%;
+  background: none;
+  border: none;
+  font-family: var(--mono);
+  cursor: pointer;
+  text-align: left;
+}
+.hud-run-row-selectable:hover {
+  color: var(--off-white);
+}
+.hud-run-row-selectable.selected {
+  color: var(--off-white);
+}
+.hud-run-row-selectable.selected .hud-glyph {
+  text-shadow: 0 0 6px hsla(var(--accent-h), var(--accent-s), var(--accent-l), 0.6);
+}
+.hud-output-viewer {
+  margin: 0;
+  padding: 10px;
+  max-height: 220px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--mono);
+  font-size: 9.5px;
+  line-height: 1.5;
+  color: var(--grey);
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--hairline);
+  scrollbar-width: thin;
+  scrollbar-color: var(--rose-dim) transparent;
+}
+
 /* ---------- PR gates ---------- */
 .hud-gate-row {
   padding: 9px 0;
