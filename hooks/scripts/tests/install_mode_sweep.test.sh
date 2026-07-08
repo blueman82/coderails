@@ -17,6 +17,19 @@
 # Uses parallel arrays, not `declare -A`, for bash 3.2 (macOS default) compat
 # — same constraint the other *.test.sh files in this directory respect.
 #
+# Nested-worktree note: this test has been run directly from inside a
+# worktree checked out under `.claude/worktrees/`, including a worktree
+# created FROM that worktree (worktree-of-a-worktree), and passes cleanly
+# both times. Git anchors every worktree's administrative area at the
+# original repo clone's `.git` dir regardless of nesting depth, so
+# REPO_ROOT's relative `cd ../../..` derivation (below) and the `git -C
+# "$REPO_ROOT" worktree add` / `ls-files -s` calls this test makes all
+# resolve against the same repo no matter which worktree invoked the test.
+# If a future git version changes worktree administrative-area anchoring so
+# a nested worktree's `git -C <path>` calls resolve against the wrong `.git`
+# dir or refs, this invariant would break and the test would need
+# re-investigation from inside a nested worktree.
+#
 # Usage: bash install_mode_sweep.test.sh
 set -u
 
