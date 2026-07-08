@@ -13,6 +13,11 @@ export interface RunRecord {
   startedAt: number;
   endedAt?: number;
   exitCode?: number;
+  // Set when the child was terminated by a signal (e.g. SIGTERM/SIGKILL)
+  // rather than exiting normally — Node's "exit" event carries code=null in
+  // that case, which would otherwise collapse to a misleading exitCode via
+  // `code ?? 1` with no way to tell a signal-kill from a genuine exit code 1.
+  signal?: NodeJS.Signals;
   outputPath: string;
 }
 
