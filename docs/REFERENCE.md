@@ -1,6 +1,6 @@
 # coderails Component Reference
 
-Catalogue of every coderails component (31 skills, plus hooks, commands, scripts): what it does, when it's active, when it's NOT, and dependencies. Ground truth: all entries verified from source files. See README for a lighter overview.
+Catalogue of every coderails component (32 skills, plus hooks, commands, scripts): what it does, when it's active, when it's NOT, and dependencies. Ground truth: all entries verified from source files. See README for a lighter overview.
 
 ---
 
@@ -119,11 +119,23 @@ SSE buffer instead) or `{status: "error", error}`.
 
 **Queue-mode output (optional):** each `verdict: "propose"` judge output can additionally be piped through `scripts/write_queue_entry.sh` to surface it on the observability dashboard, writing into `~/.claude/coderails-dashboard/approvals/` (routines' own scheduler intents live in the sibling `queue/` directory — see `docs/routines.md`). This is additive to, never a replacement for, the interactive approval gate — a dashboard "Approve" click only flips a queue entry's `status` from `pending` to `approved`.
 
-**Approve-click build runner:** flipping a `workflow-audit:propose-skill` entry to `approved` makes the dashboard's `POST /api/queue` route claim a build directory and spawn a detached, headless `claude -p` build (`skills/dashboard/app/src/lib/build/spawn.ts`, running `skills/dashboard/scripts/run-builder.sh` and prompted via `skills/dashboard/app/src/lib/build/prompt.ts`) that authors the proposed skill through skill-creator and ships it as a coderails PR through the full gate sequence. The builder never merges — its terminal state is an open PR with gates green, surfaced on the dashboard (`skills/dashboard/app/src/lib/collect/builds.ts`) as "awaiting your merge"; the owner reviews and merges by hand. Full contract: `docs/coderails/specs/2026-07-07-approve-build-runner.md`.
+**Approve-click build runner:** flipping a `workflow-audit:propose-skill` entry to `approved` makes the dashboard's `POST /api/queue` route claim a build directory and spawn a detached, headless `claude -p` build (`skills/dashboard/app/src/lib/build/spawn.ts`, running `skills/dashboard/scripts/run-builder.sh` and prompted via `skills/dashboard/app/src/lib/build/prompt.ts`) that authors the proposed skill through skill-creator and ships it as a coderails PR through the full gate sequence. The builder never merges — its terminal state is an open PR with gates green, surfaced on the dashboard (`skills/dashboard/app/src/lib/collect/builds.ts`); the owner reviews and merges by hand. While the build runs, the panel shows a coarse builder-reported phase (`authoring`/`testing`/`pushing`/`opening_pr`, closed-set-validated in the collector before reaching the client), an elapsed timer, and heartbeat freshness rather than an opaque "building"; once the build's PR leaves the dashboard's open-PR set it shows "PR resolved" instead of a stale "awaiting your merge" (skipped whenever the open-PR set is untrustworthy, so an open PR is never falsely marked resolved). Full contract: `docs/coderails/specs/2026-07-07-approve-build-runner.md`. **First skill built end-to-end by this runner:** `verify-merged-pr` (below).
 
 **Privacy invariant:** every artifact in the pipeline — scan output, cluster output, judge input/output, proposal chart, queue entry — carries only tool names, a privacy-whitelisted `head` (first two Bash command tokens, the Skill name, or the Agent subagent_type), counts, and session ids. Never verbatim transcript prose, file contents, or reconstructed intent.
 
 **When it does NOT apply:** it never creates a skill without the interactive approval gate; the mechanical scan+cluster+queue-write pipeline has no skill-creation capability at all, the judge stage only proposes, and the build runner only triggers on an explicit owner Approve click — it is not autonomous.
+
+---
+
+#### `verify-merged-pr`
+
+**Purpose:** Re-derives a "PR #N is merged" claim from the tools before you rely on it — independently confirming the merge **state** (`gh pr view`), the **content** on `origin/main` (fetch + `git merge-base --is-ancestor` + `git grep`), and the **sibling PRs** that landed in the same author/time window. The sibling check is the one agents skip: a reporter names one PR, but a session often lands several.
+
+**When it triggers:** an agent / teammate / CI report / session summary says a PR is merged, shipped, live, or landed; you are about to build on, deploy, or hand off work that depends on the merge being real; a headless builder or loop reports "done — PR merged" with one PR number.
+
+**When it does NOT apply:** you performed the merge yourself this session and watched it complete, or the claim is about an open/draft PR (nothing merged to verify).
+
+**Provenance:** the first skill authored end-to-end by the dashboard Approve→build runner (above) — a `workflow-audit` proposal, Approved on the dashboard, built by a headless `skill-creator` session, and merged by hand.
 
 ---
 
