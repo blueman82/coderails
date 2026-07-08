@@ -115,6 +115,13 @@ re-opened as findings.
   and the in-Bash source-edit gate catch known destructive patterns; obfuscated forms,
   variable filenames, quoted paths with spaces, here-docs, process substitution, and
   `python -c open(...)` writes remain uncaught. The gate is best-effort.
+- **Eval-gate coverage boundary.** The coderails eval artifact is ENFORCED at two
+  points — `/coderails:merge` via `scripts/merge.sh` (config-independent, no opt-out)
+  and raw `gh pr merge <N>` via `enforce_pr_workflow`'s `gate_eval_artifact_for_merge`
+  (config-dependent — inactive under `NO_CONFIG`, same as the rest of the hook). It is
+  NOT enforced on raw `git merge`/`git push` to main/master (the hook has no PR number
+  to resolve a SHA-bound artifact against, so these stay review-gated only) or in any
+  `NO_CONFIG` repo. Documented residual, accepted not closed.
 - **`no_edit_on_main` allowlist breadth is intentional (fail-safe).** `.sh` is blocked
   on main while `.json`/`.yaml` config stays editable — an accepted classification.
   The allowlist may over-block edge cases; the settings.json `Write`/`Edit` permission
