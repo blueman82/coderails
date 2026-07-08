@@ -128,12 +128,16 @@ als_count_invocations() {
         # <command-name>). Scan EVERY command-name tag in the string (match
         # with "g"), not just the first — a message could carry more than one
         # and the loop tag might not be first; matching only the first would
-        # undercount. Strip the leading "/" so the name matches loop_name.
+        # undercount. Strip the leading "/" and trim surrounding whitespace
+        # before the anchored loop_name test — the capture class [^<\n]+ would
+        # otherwise pull a trailing space/tab into the string and the "$"-anchored
+        # test would fail, silently re-hiding the null-counter bug for a padded tag.
         ( select(.type == "user")
           | .message.content
           | select(type == "string")
           | ( [ match("<command-name>/?([^<\\n]+)</command-name>"; "g")
                 | .captures[0].string ][]? )
+          | gsub("^\\s+|\\s+$"; "")
           | select(loop_name) )
     ]
     | length
