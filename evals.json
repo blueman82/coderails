@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "scope": "pr",
+  "task_ref": "test/install-mode-sweep-nested-worktree",
+  "tier": 0,
+  "tier_justification": "Single work-unit, no outward/irreversible surface (comment-only addition to a test file header, zero executable-line changes), and an existing test (install_mode_sweep.test.sh itself) already covers the goal state the task investigates — the test's pass/fail behavior is the oracle for whether the nested-worktree condition reproduces, and it is unchanged by this diff. The investigation's evidence (reproduction transcript) is the PR-body artifact called for by the plan's anti-rubber-stamp check, not a new scripted assertion.",
+  "frozen_at": "2026-07-08T08:08:02Z",
+  "frozen_sha": "e01bddb39630c914ccab28bd16318ac9be41ca27",
+  "evals": [
+    {
+      "id": "E1",
+      "priority": "P0",
+      "mode": "scripted",
+      "surface": "merged-state",
+      "assert": "install_mode_sweep.test.sh exits 0 with all checks ok when run from inside a worktree checked out under .claude/worktrees/ at final main",
+      "cmd": "git worktree add .claude/worktrees/wu4-verify origin/main --detach && (cd .claude/worktrees/wu4-verify && bash hooks/scripts/tests/install_mode_sweep.test.sh); echo EXIT=$?; git worktree remove --force .claude/worktrees/wu4-verify",
+      "negative_control": "Same command run against a commit before scripts/lib/git-common.sh etc. were set to 100644 in the index (or with the sweep's mode-read logic deliberately broken) fails one or more `check` lines and exits 1 — proving the test can fail, not just always pass.",
+      "status": "pending",
+      "evidence": ""
+    },
+    {
+      "id": "E2",
+      "priority": "P0",
+      "mode": "scripted",
+      "surface": "merged-state",
+      "assert": "hooks/scripts/tests/run_all.sh still reports all suites passed at final main (no regression introduced by the header comment)",
+      "cmd": "bash hooks/scripts/tests/run_all.sh 2>&1 | tail -5",
+      "negative_control": "Deliberately reintroducing a syntax error in install_mode_sweep.test.sh's edited header region (e.g. an unterminated comment) makes run_all.sh report a failing suite instead of \"run_all: N/N suites passed\".",
+      "status": "pending",
+      "evidence": ""
+    },
+    {
+      "id": "E3",
+      "priority": "P1",
+      "mode": "scripted",
+      "surface": "merged-state",
+      "assert": "The PR that lands this change carries the literal nested-worktree reproduction transcript in its body, not just a header comment (anti-rubber-stamp requirement from the loop plan)",
+      "cmd": "gh pr view <PR#> --json body -q .body | grep -c 'ok   -'",
+      "negative_control": "A PR body containing only prose (\"investigated, did not reproduce\") with zero literal `ok   -` / `FAIL -` test-output lines would return 0 and fail this check.",
+      "status": "pending",
+      "evidence": ""
+    }
+  ],
+  "amendments": [],
+  "result": null,
+  "graded_at": null,
+  "head_sha": null
+}
