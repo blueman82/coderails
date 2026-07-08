@@ -8,6 +8,14 @@
 # gui/$UID`), so a bare `npm`/`node` command or a backgrounded/PID-file
 # process would silently misbehave under the scheduler.
 #
+# It must also copy the plist into ~/Library/LaunchAgents/ and bootstrap
+# from that copy rather than the repo path — a `launchctl bootstrap` from an
+# arbitrary path only survives until logout/reboot, launchd only auto-loads
+# plists that live in ~/Library/LaunchAgents/. The routine-sweeper agents hit
+# this live on 2026-07-08 (03:00 run fine, reboot at 07:34, every
+# com.coderails job silently gone); install-routines.sh's fix (copy-then-
+# bootstrap-from-copy) is the pattern this installer must mirror.
+#
 # Usage: bash dashboard_agent.test.sh
 set -u
 
@@ -148,6 +156,26 @@ check "install script mkdirs the log dir at mode 0700" "yes" \
   "$(grep -qE 'mkdir -p -m 0700' "$INSTALL" 2>/dev/null && echo yes || echo no)"
 check "install script unconditionally chmod 700s the log dir" "yes" \
   "$(grep -qE 'chmod 700 ' "$INSTALL" 2>/dev/null && echo yes || echo no)"
+
+# A `launchctl bootstrap` from an arbitrary path (the repo dir) only
+# survives until logout/reboot — launchd only auto-loads plists that live in
+# ~/Library/LaunchAgents/ (the routine-sweeper agents proved this live on
+# 2026-07-08: reboot silently unloaded every com.coderails job that had been
+# bootstrapped from the repo path). The dashboard installer must copy the
+# plist into LaunchAgents and bootstrap FROM THAT COPY, not from
+# $SCRIPT_DIR, or the dashboard agent has the same reboot-loss bug.
+check "install script references ~/Library/LaunchAgents" "yes" \
+  "$(grep -q 'Library/LaunchAgents' "$INSTALL" 2>/dev/null && echo yes || echo no)"
+check "install script copies the plist with install -m 0644" "yes" \
+  "$(grep -qE 'install -m 0644 "\$PLIST" "\$DEST"' "$INSTALL" 2>/dev/null && echo yes || echo no)"
+check "install script bootstraps from the LaunchAgents copy (DEST), not \$SCRIPT_DIR" "yes" \
+  "$(grep -qE 'launchctl bootstrap "\$UID_DOMAIN" "\$DEST"' "$INSTALL" 2>/dev/null && echo yes || echo no)"
+check "install script does NOT bootstrap directly from \$PLIST (the repo path)" "no" \
+  "$(grep -qE 'launchctl bootstrap "\$UID_DOMAIN" "\$PLIST"' "$INSTALL" 2>/dev/null && echo yes || echo no)"
+check "uninstall script references ~/Library/LaunchAgents" "yes" \
+  "$(grep -q 'Library/LaunchAgents' "$UNINSTALL" 2>/dev/null && echo yes || echo no)"
+check "uninstall script removes the LaunchAgents copy (DEST)" "yes" \
+  "$(grep -qE 'rm -f "\$DEST"' "$UNINSTALL" 2>/dev/null && echo yes || echo no)"
 
 if [ "$checks" -eq 0 ]; then
   echo "FAIL - zero checks ran — guard is vacuous"
