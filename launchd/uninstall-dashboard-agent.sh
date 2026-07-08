@@ -12,7 +12,21 @@ DEST="$HOME/Library/LaunchAgents/$LABEL.plist"
 
 launchctl bootout "$UID_DOMAIN/$LABEL" 2>/dev/null || true
 
-if launchctl print "$UID_DOMAIN/$LABEL" >/dev/null 2>&1; then
+# bootout is asynchronous for a running KeepAlive job: it returns before the
+# job has actually unloaded (observed live 2026-07-08 — a running KeepAlive
+# job unloaded ~2s after bootout returned). Poll for up to 10s before
+# declaring failure, rather than checking once immediately and erroring out
+# spuriously on a job that is mid-teardown.
+still_loaded=1
+for _ in $(seq 1 10); do
+  if ! launchctl print "$UID_DOMAIN/$LABEL" >/dev/null 2>&1; then
+    still_loaded=0
+    break
+  fi
+  sleep 1
+done
+
+if [ "$still_loaded" -eq 1 ]; then
   echo "Error: $LABEL is still loaded after bootout" >&2
   exit 1
 fi

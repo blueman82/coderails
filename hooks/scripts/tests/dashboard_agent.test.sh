@@ -177,6 +177,17 @@ check "uninstall script references ~/Library/LaunchAgents" "yes" \
 check "uninstall script removes the LaunchAgents copy (DEST)" "yes" \
   "$(grep -qE 'rm -f "\$DEST"' "$UNINSTALL" 2>/dev/null && echo yes || echo no)"
 
+# `launchctl bootout` is asynchronous for a running KeepAlive job — it
+# returns before the job has actually unloaded (observed live 2026-07-08: a
+# running dashboard job unloaded ~2s after bootout returned). A single
+# immediate `launchctl print` check right after bootout would spuriously
+# report "still loaded" and bail before removing the LaunchAgents copy,
+# leaving the plist to auto-load again at next login. The uninstaller must
+# poll/retry between bootout and the failure declaration instead of
+# checking once.
+check "uninstall script polls/retries between bootout and the failure check" "yes" \
+  "$(awk '/launchctl bootout/{bo=NR} /still loaded after bootout/{err=NR} /for .*in.*seq|while /{loop=NR} END{print (bo && err && loop && bo<loop && loop<err) ? "yes" : "no"}' "$UNINSTALL")"
+
 if [ "$checks" -eq 0 ]; then
   echo "FAIL - zero checks ran — guard is vacuous"
   exit 1
