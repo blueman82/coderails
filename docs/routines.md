@@ -196,12 +196,18 @@ Four places, roughest signal to most precise:
    `endedAt` folded in), across every button and routine. This is the
    ground truth for "did this run, when, with what argv, what exit
    code" — read via `readRuns()`, the same reader the merged dashboard
-   app itself uses. Each record carries an `outputPath` field, but it is
-   presently **reserved**: the runner computes the path and stores it,
-   nothing writes the run's captured stdout/stderr there today, so
-   reading `outputPath` gets you a path to a file that doesn't exist. For
-   captured output, this runlog is not yet the place to look — see the
-   `sweeper.log` and vault-note entries above and below instead.
+   app itself uses. Every record carries an `outputPath` field, but only
+   a dashboard-triggered button run (via `POST /run` in
+   `skills/dashboard/app/src/app/api/run/route.ts`) actually writes its
+   captured stdout/stderr there as it streams, and exposes it via `GET
+   /api/run/output` and the COMMAND DECK's Run Output viewer. A
+   **routine** run (the scheduler's `sweep.ts`) still only computes and
+   stores the path — it captures stdout/stderr in memory via
+   `runClaudeImpl` but never writes them to `outputPath`, so reading a
+   routine's `outputPath` gets you a path to a file that doesn't exist.
+   For a routine's captured output, this runlog is not yet the place to
+   look — see the `sweeper.log` and vault-note entries above and below
+   instead.
 3. **Vault run notes** — `<first wikiPath>/dashboard-runs/<routine or
    button name>.md`, one file per routine/button, append-only, one `##
    [YYYY-MM-DD] run <id> — green|red` section per run with a reason on
