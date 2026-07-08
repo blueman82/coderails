@@ -11,6 +11,7 @@ import { useDashboardContext } from "@/components/DashboardProvider";
 import { useRunLifecycle } from "@/hooks/useRunLifecycle";
 import { formatDuration, formatHHMM, runResultLabel, isGateError } from "@/hooks/useDashboardState";
 import { AssistantLinkPanel } from "@/components/AssistantLinkPanel";
+import { OutputViewerPanel } from "@/components/OutputViewerPanel";
 
 export interface DeckButtonDef {
   name: string;
@@ -208,6 +209,8 @@ export function RailRight({ token, buttons }: RailRightProps) {
 
         <div className="hud-deck-footnote">Intents Write to System/Queue — Runner Executes</div>
       </div>
+
+      <OutputViewerPanel token={token} />
 
       <div className="hud-block">
         <div className="hud-sec-head">
