@@ -26,8 +26,8 @@
       "assert": "als_extract_last_text still extracts the final assistant text block when a malformed JSONL line sits between valid entries, using a fixture built independently of the implementer's own test files.",
       "cmd": "cd $(mktemp -d) && repo=/Users/harrison/Github/coderails && jq -cn '{type:\"assistant\",message:{content:[{type:\"text\",text:\"first\"}]}}' > t.jsonl && printf '%s\\n' 'GARBAGE NOT JSON' >> t.jsonl && jq -cn '{type:\"assistant\",message:{content:[{type:\"text\",text:\"LOOP-STOP: complete - independent-fixture check\"}]}}' >> t.jsonl && ( . \"$repo/hooks/scripts/lib/loop_state_common.sh\"; out=$(als_extract_last_text \"$PWD/t.jsonl\" 300); echo \"$out\" | grep -q 'LOOP-STOP: complete' && echo PASS || echo \"FAIL got=[$out]\" )",
       "negative_control": "Same command against the PRE-FIX lib must print FAIL got=[] (empty) — the whole slurp aborts on the malformed line: cd $(mktemp -d) && repo=/Users/harrison/Github/coderails && jq -cn '{type:\"assistant\",message:{content:[{type:\"text\",text:\"first\"}]}}' > t.jsonl && printf '%s\\n' 'GARBAGE NOT JSON' >> t.jsonl && jq -cn '{type:\"assistant\",message:{content:[{type:\"text\",text:\"LOOP-STOP: complete - independent-fixture check\"}]}}' >> t.jsonl && git -C \"$repo\" show e63d3d1f:hooks/scripts/lib/loop_state_common.sh > oldlib.sh && ( . ./oldlib.sh; out=$(als_extract_last_text \"$PWD/t.jsonl\" 300); echo \"$out\" | grep -q 'LOOP-STOP: complete' && echo UNEXPECTED_PASS || echo \"EXPECTED_FAIL got=[$out]\" )",
-      "status": "pending",
-      "evidence": ""
+      "status": "pass",
+      "evidence": "PASS got=[LOOP-STOP: complete - independent-fixture check]. Negative control against pre-fix lib (e63d3d1f): EXPECTED_FAIL got=[] (empty) — confirms the check can fail on unfixed code."
     },
     {
       "id": "E3",
