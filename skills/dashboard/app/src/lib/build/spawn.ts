@@ -17,39 +17,76 @@ const MAX_ANCESTORS = 10;
 // wrapper script) is rejected rather than silently accepted.
 const WRAPPER_IDENTITY_MARKER = "Owns the build lifecycle state machine for one approved";
 
-// route.ts previously resolved the wrapper path via
-// join(process.cwd(), "..", "scripts", "run-builder.sh") — cwd-relative,
-// the exact class of bug design-loop2.md's premortem #8 flags (a
-// production Next.js server's cwd is not guaranteed to be the app root).
-// This walks upward from the module's own location (__dirname, stable
-// regardless of the server process's cwd) looking for the known sibling
-// skills/dashboard/scripts/run-builder.sh, matching the same
-// find-the-repo-root-by-walking-up technique already used by
-// collect/markerVersions.ts's findRepoRoot — with an added content-identity
-// check (existence alone isn't enough: a nested checkout or monorepo could
-// have its own unrelated scripts/run-builder.sh at a shallower ancestor
-// level). Returns null (never a fabricated guess) if no matching sibling is
-// found within MAX_ANCESTORS levels — callers must treat null as "no
-// default available", not silently spawn a wrong path.
-export function resolveDefaultWrapperPath(startDir: string = __dirname): string | null {
+const WRAPPER_ENV_OVERRIDE = "CODERAILS_BUILDER_WRAPPER";
+
+// Checks a single candidate file against the content-identity marker,
+// rather than trusting existence alone — shared by every tier of the
+// fallback chain below (env override, __dirname walk, cwd walk) so a
+// lookalike script at any tier is rejected the same way.
+function isIdentifiedWrapper(candidate: string): boolean {
+  if (!existsSync(candidate)) return false;
+  try {
+    return readFileSync(candidate, "utf-8").includes(WRAPPER_IDENTITY_MARKER);
+  } catch {
+    return false;
+  }
+}
+
+// Walks upward from startDir looking for a sibling scripts/run-builder.sh,
+// matching the same find-the-repo-root-by-walking-up technique already
+// used by collect/markerVersions.ts's findRepoRoot — with the same
+// content-identity check as isIdentifiedWrapper (existence alone isn't
+// enough: a nested checkout or monorepo could have its own unrelated
+// scripts/run-builder.sh at a shallower ancestor level).
+function walkUpForWrapper(startDir: string): string | null {
   let dir = startDir;
   for (let i = 0; i < MAX_ANCESTORS; i++) {
     const candidate = join(dir, "scripts", "run-builder.sh");
-    if (existsSync(candidate)) {
-      try {
-        const contents = readFileSync(candidate, "utf-8");
-        if (contents.includes(WRAPPER_IDENTITY_MARKER)) {
-          return candidate;
-        }
-      } catch {
-        // unreadable — treat as not a match, keep walking up
-      }
+    if (isIdentifiedWrapper(candidate)) {
+      return candidate;
     }
     const parent = dirname(dir);
     if (parent === dir) break;
     dir = parent;
   }
   return null;
+}
+
+// route.ts previously resolved the wrapper path via
+// join(process.cwd(), "..", "scripts", "run-builder.sh") — cwd-relative,
+// the exact class of bug design-loop2.md's premortem #8 flags (a
+// production Next.js server's cwd is not guaranteed to be the app root).
+//
+// This tries an ordered fallback chain, each tier gated by the same
+// content-identity check (a lookalike is rejected, worst case falls
+// through to the next tier — never a fabricated guess):
+//   1. CODERAILS_BUILDER_WRAPPER env override, if set — an explicit
+//      deployment-provided path, for cases where neither of the walks
+//      below can find it (e.g. a packaging layout this function doesn't
+//      anticipate).
+//   2. Walk upward from the module's own location (__dirname) — stable
+//      regardless of the server process's cwd, and correct in dev/vitest
+//      where __dirname is a real source path. Under a built `next start`
+//      server, though, the bundler virtualises __dirname into a chunk
+//      path (e.g. "[root-of-the-server]__foo.js") that doesn't exist on
+//      disk, so this walk finds nothing there.
+//   3. Walk upward from process.cwd() — for `npm run start`, cwd is the
+//      app directory, so this recovers the production case tier 2 misses.
+//      The identity check makes this safe even though cwd is normally
+//      untrustworthy (see the class of bug above): a lookalike is
+//      rejected, worst case stays wrapper_not_found.
+// Returns null if no tier finds a match — callers must treat null as "no
+// default available", not silently spawn a wrong path.
+export function resolveDefaultWrapperPath(startDir: string = __dirname): string | null {
+  const envOverride = process.env[WRAPPER_ENV_OVERRIDE];
+  if (envOverride && isIdentifiedWrapper(envOverride)) {
+    return envOverride;
+  }
+
+  const viaModuleDir = walkUpForWrapper(startDir);
+  if (viaModuleDir) return viaModuleDir;
+
+  return walkUpForWrapper(process.cwd());
 }
 
 export type SpawnFn = (

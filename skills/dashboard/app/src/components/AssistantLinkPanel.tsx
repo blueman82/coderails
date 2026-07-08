@@ -8,6 +8,7 @@ import { useDashboardContext } from "@/components/DashboardProvider";
 import { formatRelativeAge } from "@/hooks/useDashboardState";
 import type { QueueEntry } from "@/lib/collect/queue";
 import type { BuildEntry } from "@/lib/collect/builds";
+import type { ClaimAndSpawnBuildResult } from "@/lib/build/spawn";
 
 export interface AssistantLinkPanelProps {
   token: string;
@@ -51,12 +52,20 @@ function safePrUrl(prUrl: string | undefined): string | undefined {
 }
 
 // Renders the build-state CTA for an approved workflow-audit:propose-skill
-// queue entry, joined to its builds/<hash>/ sidecar by hash. Returns null
-// when there's no build entry yet (claim hasn't landed on disk, or this
-// approved entry predates the builder pipeline) — the row still renders,
-// just without a build status line.
+// queue entry, joined to its builds/<hash>/ sidecar by hash. When there's no
+// build entry yet — the claim never landed on disk (e.g. L2-WU7 DEFECT A's
+// wrapper_not_found), or this approved entry predates the builder pipeline —
+// this renders an explicit "no build claimed" line rather than nothing, so
+// the owner's genuine Approve click isn't followed by silence (L2-WU7
+// DEFECT B).
 function renderBuildStatus(build: BuildEntry | undefined, now: number | null) {
-  if (!build) return null;
+  if (!build) {
+    return (
+      <div className="hud-build-status hud-build-failed">
+        approved — no build claimed (see server)
+      </div>
+    );
+  }
   if (build.state === "pr_open") {
     const prUrl = safePrUrl(build.prUrl);
     return (
@@ -153,23 +162,75 @@ function renderWorkflowAuditProposal(input: WorkflowAuditProposalInput) {
   );
 }
 
-async function postDecision(
+// L2-WU7 DEFECT B: previously collapsed the whole POST /api/queue response
+// down to {ok:true}|{ok:false,error}, discarding the response's `status` and
+// `build` fields entirely — so an owner's Approve click that hit
+// wrapper_not_found on the server looked identical to a successful claim.
+// Threads both fields through verbatim instead (D2: no fields invented
+// beyond what route.ts's jsonResponse actually returns).
+export type PostDecisionResult =
+  | { ok: true; status: "approved" | "denied"; build: ClaimAndSpawnBuildResult | undefined }
+  | { ok: false; error: string };
+
+export async function postDecision(
   token: string,
   hash: string,
   decision: "approved" | "denied"
-): Promise<{ ok: true } | { ok: false; error: string }> {
+): Promise<PostDecisionResult> {
   try {
     const res = await fetch("/api/queue", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ token, hash, decision }),
     });
-    if (res.ok) return { ok: true };
+    if (res.ok) {
+      // A 2xx with an unparseable or off-contract body must not masquerade as a
+      // successful "approved" (the very silence this panel exists to end): guard
+      // the parse the same way the error path below does, and only trust `status`
+      // if it is one of the two shapes route.ts's jsonResponse actually returns.
+      const body = (await res.json().catch(() => null)) as
+        | { status?: unknown; build?: ClaimAndSpawnBuildResult }
+        | null;
+      if (body === null || (body.status !== "approved" && body.status !== "denied")) {
+        return { ok: false, error: "malformed server response" };
+      }
+      return { ok: true, status: body.status, build: body.build };
+    }
     const body = (await res.json().catch(() => ({}))) as { error?: string };
     return { ok: false, error: body.error ?? `request failed (${res.status})` };
   } catch {
     return { ok: false, error: "network error" };
   }
+}
+
+// Renders the outcome of a completed Approve/Deny click on the row itself —
+// pure and exported so it's directly unit-testable via SSR the same way
+// renderBuildStatus above is. Previously handleDecision only ever surfaced
+// network/HTTP-level errors (result.ok === false); a successful response
+// whose build field carried claimed:false was rendered as if nothing had
+// happened at all (L2-WU7 DEFECT B). Returns null when there's no feedback
+// yet (fresh row, never clicked) — the row's normal content shows instead.
+export function renderDecisionFeedback(feedback: PostDecisionResult | undefined) {
+  if (!feedback) return null;
+  if (!feedback.ok) {
+    return <div className="hud-cmd-error">{feedback.error}</div>;
+  }
+  if (feedback.status === "denied") {
+    return <div className="hud-build-status hud-build-building">denied</div>;
+  }
+  // approved
+  if (!feedback.build) {
+    return <div className="hud-build-status hud-build-building">approved</div>;
+  }
+  if (feedback.build.claimed) {
+    return <div className="hud-build-status hud-build-building">build claimed — starting…</div>;
+  }
+  if ("alreadyClaimed" in feedback.build) {
+    return <div className="hud-build-status hud-build-building">approved — build already claimed</div>;
+  }
+  return (
+    <div className="hud-cmd-error">build failed to start: {feedback.build.error}</div>
+  );
 }
 
 // ASSISTANT.LINK panel, item 3 ("Sends + approvals log") — the pending-queue
@@ -185,7 +246,10 @@ export function AssistantLinkPanel({ token }: AssistantLinkPanelProps) {
   // "pending" (or the request failed) — same optimistic-flag shape as
   // RailRight's `queued` state, scoped down to what this panel needs.
   const [pending, setPending] = useState<Record<string, boolean>>({});
-  const [errors, setErrors] = useState<Record<string, string>>({});
+  // Per-hash outcome of the most recent Approve/Deny click, rendered via
+  // renderDecisionFeedback — see its comment for why this exists
+  // (L2-WU7 DEFECT B: the panel previously gave zero feedback either way).
+  const [feedback, setFeedback] = useState<Record<string, PostDecisionResult | undefined>>({});
 
   useEffect(() => {
     setNow(Date.now());
@@ -194,24 +258,23 @@ export function AssistantLinkPanel({ token }: AssistantLinkPanelProps) {
   }, []);
 
   const pendingEntries: QueueEntry[] = queue.filter((e) => e.status === "pending");
-  // Approved workflow-audit:propose-skill entries with a build already
-  // claimed on disk — joined to their builds/<hash>/ sidecar by hash. An
-  // approved entry with no build entry yet (claim hasn't landed, or predates
-  // this feature) renders nothing here; there's no status to show.
-  const buildingEntries: { entry: QueueEntry; build: BuildEntry }[] = queue
+  // Approved workflow-audit:propose-skill entries, joined to their
+  // builds/<hash>/ sidecar by hash where one exists. An approved entry with
+  // no build entry yet (claim hasn't landed — e.g. the L2-WU7 DEFECT A
+  // wrapper_not_found case — or the entry predates this feature) still gets
+  // a row here with an explicit "no build claimed" state, rather than
+  // rendering nothing (silent-failure-hunter finding, L2-WU7 DEFECT B).
+  const buildingEntries: { entry: QueueEntry; build: BuildEntry | undefined }[] = queue
     .filter((e) => e.status === "approved" && e.toolName === "workflow-audit:propose-skill")
-    .map((entry) => ({ entry, build: builds.find((b) => b.hash === entry.hash) }))
-    .filter((x): x is { entry: QueueEntry; build: BuildEntry } => x.build !== undefined);
+    .map((entry) => ({ entry, build: builds.find((b) => b.hash === entry.hash) }));
 
   async function handleDecision(hash: string, decision: "approved" | "denied") {
     if (pending[hash]) return;
     setPending((prev) => ({ ...prev, [hash]: true }));
-    setErrors((prev) => ({ ...prev, [hash]: "" }));
+    setFeedback((prev) => ({ ...prev, [hash]: undefined }));
     const result = await postDecision(token, hash, decision);
     setPending((prev) => ({ ...prev, [hash]: false }));
-    if (!result.ok) {
-      setErrors((prev) => ({ ...prev, [hash]: result.error }));
-    }
+    setFeedback((prev) => ({ ...prev, [hash]: result }));
   }
 
   return (
@@ -254,7 +317,7 @@ export function AssistantLinkPanel({ token }: AssistantLinkPanelProps) {
                 Deny
               </button>
             </div>
-            {errors[entry.hash] && <div className="hud-cmd-error">{errors[entry.hash]}</div>}
+            {renderDecisionFeedback(feedback[entry.hash])}
           </div>
         ))
       ) : (
