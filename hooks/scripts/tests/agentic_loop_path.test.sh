@@ -224,4 +224,93 @@ else
   fails=$((fails+1))
 fi
 
+# ── Session-id fallback probing (2026-07-08 split-slug incident) ────────────
+# When no progress.json exists at the CANONICAL slug path, the helper probes
+# <base>/*/<session_id>/progress.json for state a PRIOR helper version (or a
+# mid-loop cwd drift) parked under a different slug. session_id is unique per
+# session, so it is a sufficient key on its own. These tests use a dedicated
+# base per case so unrelated slugs from earlier cases can't leak in.
+
+# 18. Canonical-exists wins: when a progress.json exists at BOTH the canonical
+#     (git-common-dir) slug AND a stale legacy (raw-cwd) slug, the canonical one
+#     is printed — the probe must never override an existing canonical file.
+BASE18=$(cd "$(mktemp -d)" && pwd -P)
+canon18=$(CLAUDE_AGENTIC_LOOP_DIR="$BASE18" bash "$HELPER" "$PRIMARY" S18)
+legacy18_slug=$(printf '%s' "$PRIMARY" | sed 's#/#-#g')
+legacy18="$BASE18/$legacy18_slug/S18/progress.json"
+mkdir -p "$(dirname "$canon18")" "$(dirname "$legacy18")"
+printf '{"canonical":true}\n' > "$canon18"
+printf '{"legacy":true}\n' > "$legacy18"
+check "canonical-exists wins even when a legacy-slug file also exists" \
+  "$canon18" \
+  "$(CLAUDE_AGENTIC_LOOP_DIR="$BASE18" bash "$HELPER" "$PRIMARY" S18)"
+
+# 19. The incident: state was registered under a LEGACY raw-cwd slug, but the
+#     current helper resolves the canonical git-common-dir slug (which has no
+#     file). The probe must find the legacy file by session_id and print it,
+#     so the Stop guards see the registered loop instead of nudging a phantom.
+BASE19=$(cd "$(mktemp -d)" && pwd -P)
+legacy19_slug=$(printf '%s' "$PRIMARY" | sed 's#/#-#g')
+legacy19="$BASE19/$legacy19_slug/S19/progress.json"
+mkdir -p "$(dirname "$legacy19")"
+printf '{"legacy":true}\n' > "$legacy19"
+check "legacy-slug state found when canonical slug has no file (the incident)" \
+  "$legacy19" \
+  "$(CLAUDE_AGENTIC_LOOP_DIR="$BASE19" bash "$HELPER" "$PRIMARY" S19)"
+
+# 20. No state anywhere -> canonical printed, so a fresh loop registers at the
+#     canonical path (probe must fall through cleanly on an empty glob).
+BASE20=$(cd "$(mktemp -d)" && pwd -P)
+canon20=$(CLAUDE_AGENTIC_LOOP_DIR="$BASE20" bash "$HELPER" "$PRIMARY" S20)
+check "no state anywhere -> canonical printed (fresh registration)" \
+  "$canon20" \
+  "$(CLAUDE_AGENTIC_LOOP_DIR="$BASE20" bash "$HELPER" "$PRIMARY" S20)"
+
+# 21. Symlinked duplicates of ONE real state dir (the orchestrator's live
+#     workaround symlinks the same progress.json under 3 slugs). The probe must
+#     dedupe by physical identity, not crash, and print a path that references
+#     the one REAL state file.
+BASE21=$(cd "$(mktemp -d)" && pwd -P)
+real21_slug="real-slug"
+real21_dir="$BASE21/$real21_slug/S21"
+mkdir -p "$real21_dir"
+printf '{"real":true}\n' > "$real21_dir/progress.json"
+# Two extra slugs whose <session_id> dir is a symlink to the real one.
+for alias in alias-a alias-b; do
+  mkdir -p "$BASE21/$alias"
+  ln -s "$real21_dir" "$BASE21/$alias/S21"
+done
+out21=$(CLAUDE_AGENTIC_LOOP_DIR="$BASE21" bash "$HELPER" "$PRIMARY" S21)
+# Exactly one path printed, and it must resolve (realpath) to the real file.
+lines21=$(printf '%s\n' "$out21" | grep -c .)
+real21_canon=$(cd "$(dirname "$real21_dir/progress.json")" && pwd -P)/progress.json
+out21_canon=$(cd "$(dirname "$out21")" 2>/dev/null && pwd -P)/progress.json
+if [ "$lines21" = "1" ] && [ "$out21_canon" = "$real21_canon" ]; then
+  printf 'ok   - %s\n' "symlinked duplicates -> one path, references the real state"
+else
+  printf 'FAIL - %s\n      printed: %s (lines=%s, real=%s)\n' \
+    "symlinked duplicates -> one path, references the real state" "$out21" "$lines21" "$real21_canon"
+  fails=$((fails+1))
+fi
+
+# 22. Generated fallback session ids (unknown-<pid>-<ns>) still resolve to the
+#     canonical path. Two such invocations must NOT probe each other's dirs into
+#     a match (each fallback id is unique), so each prints its own canonical
+#     path with a fresh (non-existent) state file -> plain canonical, no probe hit.
+BASE22=$(cd "$(mktemp -d)" && pwd -P)
+unset CLAUDE_CODE_SESSION_ID
+u1=$(CLAUDE_AGENTIC_LOOP_DIR="$BASE22" bash "$HELPER" "$PRIMARY" "")
+u2=$(CLAUDE_AGENTIC_LOOP_DIR="$BASE22" bash "$HELPER" "$PRIMARY" "")
+# Both must be under the canonical git-common-dir slug for PRIMARY, and distinct.
+canon22_slug=$(printf '%s' "$(git -C "$PRIMARY" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" | sed 's#/#-#g')
+if printf '%s' "$u1" | grep -q "^$BASE22/$canon22_slug/unknown-.*/progress.json$" \
+   && printf '%s' "$u2" | grep -q "^$BASE22/$canon22_slug/unknown-.*/progress.json$" \
+   && [ "$u1" != "$u2" ]; then
+  printf 'ok   - %s\n' "generated fallback session ids -> canonical, no cross-probe collision"
+else
+  printf 'FAIL - %s\n      u1: %s\n      u2: %s\n' \
+    "generated fallback session ids -> canonical, no cross-probe collision" "$u1" "$u2"
+  fails=$((fails+1))
+fi
+
 [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails)"; exit 1; }
