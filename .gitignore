@@ -21,3 +21,6 @@ logs/
 docs/public-readiness-plan.md
 docs/public-readiness-spec.md
 docs/public-readiness-plan-v2.md
+
+# task-evals working artifact — PR-scope working material only, never a durable artifact (that's the PR comment)
+/evals.json
