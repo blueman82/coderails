@@ -49,6 +49,10 @@ check() { if [ "$2" = "$3" ]; then printf 'ok   - %s\n' "$1"; else printf 'FAIL 
 reset() { rm -rf "$CLAUDE_AGENTIC_LOOP_DIR"; }
 progress_file() { printf '%s/progress.json' "$(file_dir "$1")"; }   # session_id -> progress.json path
 counter() { jq -r --arg c "$2" '.loop_stop_counts[$c] // 0' "$(progress_file "$1")" 2>/dev/null; }   # session_id category
+# grep -c exits 1 on zero matches even though it correctly prints "0" — count()
+# always exits 0 and prints just the count, so a zero-match assertion doesn't
+# need an `|| echo 0` fallback (mirrors loop_state_guard.test.sh's own count()).
+count() { grep -c "$1" "$2" 2>/dev/null; true; }
 
 # A minimal PATH containing every coreutil the guard/lib needs, but NOT jq —
 # used to prove the hook fails open (never blocks) when jq is unavailable.
@@ -165,5 +169,39 @@ reset; T=$(mk_transcript 1 "Work paused.
 LOOP-STOP: hard-stop — testing nonexistent progress dir")
 # Deliberately skip write_file/mkdir — CLAUDE_AGENTIC_LOOP_DIR/state itself doesn't exist.
 check "nonexistent progress dir -> still allow" 0 "$(run x "$(payload "$T" S1)")"
+
+# =====================================================================
+# Malformed-line tolerance: one bad JSONL line must not collapse extraction
+# to empty and must not collapse the invocation count to 0 either. A
+# malformed line inserted between a valid loop-Skill line and the final
+# valid LOOP-STOP text must still be detected as active AND the declaration
+# must still extract — pre-fix, `jq -s` aborted the whole slurp on the bad
+# line, so both the count and the extracted text collapsed.
+mk_malformed_transcript() { # n_invocations final_text -> path (malformed line inserted before final text)
+  local n="$1" final="$2" out="$TMP/malformed_${RANDOM}.jsonl" i=0
+  : > "$out"
+  while [ "$i" -lt "$n" ]; do
+    printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Skill","input":{"skill":"coderails:agentic-loop"}}]}}' >> "$out"
+    i=$((i+1))
+  done
+  printf '%s\n' '{"type":"assistant", THIS IS NOT VALID JSON' >> "$out"
+  if [ -n "$final" ]; then
+    jq -cn --arg t "$final" '{type:"assistant",message:{content:[{type:"text",text:$t}]}}' >> "$out"
+  fi
+  printf '%s' "$out"
+}
+reset; : > "$CLAUDE_DISCIPLINE_LOG"; T=$(mk_malformed_transcript 1 "Work paused.
+LOOP-STOP: awaiting-input — waiting on the user's plan confirmation"); write_file in-progress S1 0
+check "malformed line + valid LOOP-STOP tag -> still allow (declaration still extracts)" 0 "$(run x "$(payload "$T" S1)")"
+# Discriminates "allowed because declared=1" (the fixed, correct path) from
+# "allowed because the malformed line collapsed the count to 0 and the guard
+# never reached the declaration gate at all" (the bug: exit 0 for the WRONG
+# reason). als_gate_require_active_loop's own log line only fires on
+# invocations=0; gate_loop_stop_declared's declared=1 line only fires once the
+# count is correctly nonzero and the declaration was found.
+check "malformed line + valid LOOP-STOP tag -> reached declaration gate (declared=1), not misdetected as no-loop" 1 \
+  "$(count 'hook=loop_stall_guard.*declared=1' "$CLAUDE_DISCIPLINE_LOG")"
+check "malformed line + valid LOOP-STOP tag -> NOT misdetected as invocations=0 (not a loop)" 0 \
+  "$(count 'invocations=0 active=0' "$CLAUDE_DISCIPLINE_LOG")"
 
 [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails)"; exit 1; }

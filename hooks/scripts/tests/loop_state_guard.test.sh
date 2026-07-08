@@ -148,14 +148,16 @@ check "sanitise: '..' collapsed/removed" "__etc" "$(sanitised "../../etc")"
 check "sanitise: normal id passes through unchanged" "normal-id-123" "$(sanitised "normal-id-123")"
 
 # =====================================================================
-# als_count_invocations jq-failure hardening (distinguishable logging)
+# als_count_invocations malformed-line tolerance (one bad line must not
+# collapse the whole slurp to empty/0 — a per-line tolerant pre-filter skips
+# only the bad line, so a genuinely active loop still counts as active).
 # =====================================================================
 # Malformed transcript: 1 valid loop-Skill line + 1 truncated/invalid JSON line.
-# `jq -s` (slurp) aborts the WHOLE parse on the bad line, so als_count_invocations
-# returns empty -> als_gate_require_active_loop treats it as "not a loop" and
-# allows — this fail-open behavior must stay unchanged (asserted first).
-# The second assertion covers the distinguishing behavior: the discipline log must
-# carry a distinguishable reason=jq_parse_error line rather than logging nothing.
+# Pre-fix, `jq -s` (slurp) aborted the WHOLE parse on the bad line, so
+# als_count_invocations returned empty -> als_gate_require_active_loop treated
+# an ACTIVE loop as "not a loop" and allowed the stop — the bug this fix closes.
+# Post-fix, the malformed line is skipped and the valid line is still counted,
+# so the gate must BLOCK (loop is active, no progress.json present yet).
 mk_corrupt_transcript() {
   local out="$TMP/corrupt_$RANDOM.jsonl"
   printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Skill","input":{"skill":"coderails:agentic-loop"}}]}}' > "$out"
@@ -163,10 +165,29 @@ mk_corrupt_transcript() {
   printf '%s' "$out"
 }
 reset; corrupt_t=$(mk_corrupt_transcript)
-check "malformed transcript -> gate still allows (fail-open unchanged)" 0 "$(run x "$(payload "$corrupt_t" S1)")"
-reset; : > "$CLAUDE_DISCIPLINE_LOG"; run x "$(payload "$corrupt_t" S1)" >/dev/null
-check "malformed transcript -> discipline log gains reason=jq_parse_error" 1 \
-  "$(count 'reason=jq_parse_error' "$CLAUDE_DISCIPLINE_LOG")"
+check "malformed transcript, valid loop line present -> still detected as active (block)" 2 "$(run x "$(payload "$corrupt_t" S1)")"
+
+# A malformed line alongside a NON-loop skill call must still allow (the
+# tolerant parse must not manufacture a false-positive loop detection either).
+mk_corrupt_other_transcript() {
+  local out="$TMP/corrupt_other_$RANDOM.jsonl"
+  printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Skill","input":{"skill":"coderails:prep"}}]}}' > "$out"
+  printf '%s\n' '{"type":"assistant", THIS IS NOT VALID JSON' >> "$out"
+  printf '%s' "$out"
+}
+reset; corrupt_other_t=$(mk_corrupt_other_transcript)
+check "malformed transcript, no loop line -> still allow (no false positive)" 0 "$(run x "$(payload "$corrupt_other_t" S1)")"
+
+# skipped_malformed=N breadcrumb: als_stable_invocations' summary log line
+# gains a skipped_malformed=N field (N>0) alongside the existing reason=/
+# attempts=/outcome= fields on the SAME line — no separate log line, and the
+# breadcrumb must name the count of lines the tolerant parse actually dropped.
+reset; : > "$CLAUDE_DISCIPLINE_LOG"; write_file in-progress S1 0
+run x "$(payload "$corrupt_t" S1)" >/dev/null
+check "malformed transcript -> discipline log gains skipped_malformed=1" 1 \
+  "$(count 'skipped_malformed=1' "$CLAUDE_DISCIPLINE_LOG")"
+check "skipped_malformed breadcrumb rides the SAME summary line as hook=als_count_invocations" 1 \
+  "$(count 'hook=als_count_invocations.*skipped_malformed=1' "$CLAUDE_DISCIPLINE_LOG")"
 
 # als_count_invocations is now a ONE-SHOT primitive: on jq failure it signals
 # the reason on STDERR (not by logging directly — see its own comment), and
@@ -226,6 +247,11 @@ check "sustained jq failure -> logged outcome=exhausted" 1 \
 # valid before the retry window ends (simulates the flush-race this retry
 # loop exists to ride out) -> final attempt succeeds, outcome=recovered,
 # still exactly one log line (not one per failed attempt beforehand).
+# Post-fix: a single wholly-malformed line is tolerantly SKIPPED (not a jq
+# parse failure of the whole slurp any more, since stage 1 drops just that
+# line) — the first attempt sees count=0 skipped_malformed=1, so reason stays
+# "none" and the skip is what triggers the summary line; outcome=recovered
+# because the settling (last) attempt's own count is clean.
 : > "$CLAUDE_DISCIPLINE_LOG"
 flush_t="$TMP/flush_$RANDOM.jsonl"
 printf '%s\n' '{"type":"assistant", TRUNCATED-MID-WRITE' > "$flush_t"
@@ -244,8 +270,8 @@ printf '%s\n' '{"type":"assistant", TRUNCATED-MID-WRITE' > "$flush_t"
 )
 check "recovered on retry -> exactly ONE summary log line (not one per attempt)" 1 \
   "$(count 'hook=als_count_invocations' "$CLAUDE_DISCIPLINE_LOG")"
-check "recovered on retry -> logged outcome=recovered" 1 \
-  "$(count 'reason=jq_parse_error attempts=[0-9]* outcome=recovered' "$CLAUDE_DISCIPLINE_LOG")"
+check "recovered on retry -> logged outcome=recovered, skipped_malformed breadcrumb from the earlier skip survives" 1 \
+  "$(count 'reason=none attempts=[0-9]* outcome=recovered skipped_malformed=1' "$CLAUDE_DISCIPLINE_LOG")"
 
 # Clean case: no jq failure at any attempt -> zero log lines from this path.
 : > "$CLAUDE_DISCIPLINE_LOG"

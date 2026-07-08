@@ -73,9 +73,26 @@ als_sanitise_session_id() {
 # ulg_has_skill_invocation) that call this directly, not through the retry
 # wrapper, simply never read stderr — no logging fires for them, matching
 # their prior (pre-hardening) behavior of being silent on a parse failure.
+#
+# Per-line tolerant parse: a single malformed JSONL line must not collapse the
+# WHOLE transcript's count to empty. Stage 1 (`jq -R 'fromjson? // empty'`)
+# parses one line at a time and drops any line that isn't valid JSON; stage 2
+# (`jq -s`) aggregates only the successfully-parsed lines. A line dropped at
+# stage 1 is reported via a "skipped_malformed=N" stderr line (only when N>0,
+# mirroring the reason-tag's stderr-only/fail-open-stdout convention above) so
+# the retrying caller can surface it without disturbing the integer stdout
+# contract. genuinely-empty input (0 lines) reports N=0, i.e. no line.
 als_count_invocations() {
   command -v jq >/dev/null 2>&1 || { echo "jq_missing" >&2; return; }
-  jq -s -r '
+  local total parsed skipped
+  total=$(grep -c '[^[:space:]]' "$1" 2>/dev/null); [ -z "$total" ] && total=0
+  local tolerant; tolerant=$(jq -R 'fromjson? // empty' "$1" 2>/dev/null)
+  parsed=0
+  [ -n "$tolerant" ] && parsed=$(printf '%s' "$tolerant" | jq -s 'length' 2>/dev/null)
+  [ -z "$parsed" ] && parsed=0
+  skipped=$((total - parsed))
+  [ "$skipped" -gt 0 ] && echo "skipped_malformed=$skipped" >&2
+  printf '%s' "$tolerant" | jq -s -r '
     [ .[]?
       | select(.type == "assistant")
       | .message.content[]?
@@ -83,7 +100,7 @@ als_count_invocations() {
       | (.input.skill // "")
       | select(test("(^|:)agentic-loop$")) ]
     | length
-  ' "$1" 2>/dev/null || echo "jq_parse_error" >&2
+  ' 2>/dev/null || echo "jq_parse_error" >&2
 }
 
 # Stable invocation count: retry for the transcript-flush race until it settles.
@@ -96,23 +113,55 @@ als_count_invocations() {
 # number of jq calls made. Zero lines when every attempt was clean. Gate
 # outcomes (stdout contract, fail-open) are unchanged — this only affects what
 # gets logged.
+#
+# skipped_malformed=N (from als_count_invocations' per-line tolerant parse) is
+# tracked SEPARATELY from the jq_missing/jq_parse_error reason tag: dropping a
+# malformed line is not itself a failure needing a retry (the count is still
+# valid), so it must not block the settling check the way reason does. The
+# LAST attempt's N is what gets appended to the summary line, on the SAME line
+# as reason=/attempts=/outcome= — and appended ONLY when N>0 and only when a
+# summary line is already firing for another reason, OR on its own when the
+# count itself settled clean but a malformed line was still seen (an all-clean
+# stdout contract that nonetheless dropped input is not "zero lines when every
+# attempt was clean" — that invariant means "no jq_missing/jq_parse_error AND
+# no skipped lines").
 als_stable_invocations() {
-  local transcript="$1" prev=-1 attempts=0 n=0 last_reason="" seen_reason=""
+  local transcript="$1" prev=-1 attempts=0 n=0 last_reason="" seen_reason="" max_skipped=0
   local err_file; err_file=$(mktemp 2>/dev/null) || err_file=""
   while [ "$attempts" -lt "$MAX_ATTEMPTS" ]; do
     # Single call per attempt: stdout (the count) captured normally, stderr
-    # (the reason tag, if any) redirected to a scratch file and read back —
-    # avoids calling the function twice per attempt, which would re-read the
-    # transcript twice and could observe two different states across the very
-    # flush-race window this retry loop exists to ride out.
+    # (the reason tag / skipped_malformed breadcrumb, if any) redirected to a
+    # scratch file and read back — avoids calling the function twice per
+    # attempt, which would re-read the transcript twice and could observe two
+    # different states across the very flush-race window this retry loop
+    # exists to ride out.
+    local raw_err=""
     if [ -n "$err_file" ]; then
       n=$(als_count_invocations "$transcript" 2>"$err_file")
-      last_reason=$(cat "$err_file" 2>/dev/null)
+      raw_err=$(cat "$err_file" 2>/dev/null)
     else
       n=$(als_count_invocations "$transcript" 2>/dev/null)
-      last_reason=""
+      raw_err=""
     fi
     [ -z "$n" ] && n=0
+    # Parse raw_err's up-to-two lines with bash builtins only (no head/sed) —
+    # the no-jq test fixture's minimal PATH deliberately excludes everything
+    # but the coreutils this function actually needs. skipped_malformed does
+    # NOT gate the settling check below (a stable, nonzero-but-tolerant count
+    # is still a trustworthy count) — only reason (jq_missing/jq_parse_error)
+    # does, matching the pre-existing contract.
+    local this_skipped=0
+    last_reason=""
+    while IFS= read -r line; do
+      case "$line" in
+        skipped_malformed=*) this_skipped="${line#skipped_malformed=}" ;;
+        *) [ -n "$line" ] && last_reason="$line" ;;
+      esac
+    done <<EOF
+$raw_err
+EOF
+    case "$this_skipped" in (''|*[!0-9]*) this_skipped=0;; esac
+    [ "$this_skipped" -gt "$max_skipped" ] && max_skipped="$this_skipped"
     attempts=$((attempts + 1))
     if [ "$n" -eq "$prev" ] && [ -z "$last_reason" ]; then break; fi
     prev=$n
@@ -120,10 +169,13 @@ als_stable_invocations() {
     [ "$attempts" -lt "$MAX_ATTEMPTS" ] && sleep "$SLEEP_S"
   done
   [ -n "$err_file" ] && rm -f "$err_file" 2>/dev/null
-  if [ -n "$seen_reason" ]; then
+  if [ -n "$seen_reason" ] || [ "$max_skipped" -gt 0 ]; then
     local outcome="exhausted"
     [ -z "$last_reason" ] && outcome="recovered"
-    als_log "hook=als_count_invocations reason=$seen_reason attempts=$attempts outcome=$outcome"
+    local reason_field="${seen_reason:-none}"
+    local skipped_suffix=""
+    [ "$max_skipped" -gt 0 ] && skipped_suffix=" skipped_malformed=$max_skipped"
+    als_log "hook=als_count_invocations reason=$reason_field attempts=$attempts outcome=$outcome$skipped_suffix"
   fi
   printf '%s' "$n"
 }
@@ -132,13 +184,22 @@ als_stable_invocations() {
 #   Extracts the last assistant text block from a JSONL transcript. Returns the
 #   joined text of the last assistant message that has any text content, or an
 #   empty string if none exists (absent/unreadable transcript, no text blocks,
-#   or a malformed line jq -s can't parse). Mirrors discipline_common.sh's
+#   or every line in the tail window malformed). Mirrors discipline_common.sh's
 #   dc_extract_last_text exactly (same canonical extraction shape); duplicated
 #   rather than shared across the two libs since loop_state_common.sh and
 #   discipline_common.sh are deliberately independent (different hook families).
+#   Per-line tolerant parse (same two-stage shape as als_count_invocations): a
+#   single malformed line in the tail window must not collapse extraction of a
+#   genuine final message to empty — stage 1 drops just the bad line, stage 2
+#   aggregates over what's left. No jq-presence guard here (unlike
+#   als_count_invocations): a missing jq makes stage 1 itself emit nothing,
+#   which stage 2 reduces to "" — the pre-existing no-jq fail-open contract,
+#   preserved unchanged. This function does not log (see als_stable_last_text)
+#   — a malformed-line skip here is silent by design, matching its prior
+#   contract of never distinguishing "malformed" from "no text yet".
 als_extract_last_text() {
   local transcript="$1" tail_lines="$2"
-  tail -n "$tail_lines" "$transcript" 2>/dev/null | jq -s -r '
+  tail -n "$tail_lines" "$transcript" 2>/dev/null | jq -R 'fromjson? // empty' 2>/dev/null | jq -s -r '
     [.[]?
      | select(.type == "assistant")
      | (.message.content
