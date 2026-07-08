@@ -13,10 +13,10 @@
       "mode": "scripted",
       "surface": "merged-state",
       "assert": "pressButton resolves to { ok: false, reason: 'invalid-input' } (never rejects/throws) when buildArgv throws on empty-command-plus-no-input, and no fs/spawn side effect fires",
-      "cmd": "cd skills/dashboard/obsidian && npx vitest run test/exec.test.ts -t 'empty command'",
+      "cmd": "cd skills/dashboard/obsidian && npx vitest run test/exec.test.ts -t 'buildArgv throw parity'",
       "negative_control": "git stash the try/catch wrap in src/exec.ts (revert to unwrapped buildArgv call), re-run the same command — must fail (unhandled rejection) since exec.ts:126 propagates the throw uncaught on origin/main today",
-      "status": "pending",
-      "evidence": ""
+      "status": "pass",
+      "evidence": "Pre-fix (RED, confirmed live): 'Error: buildArgv: refusing to spawn an empty prompt (no command and no input)' thrown at argv.ts:58, uncaught through exec.ts:126, test failed for the right reason. Post-fix (GREEN): npx vitest run test/exec.test.ts -t 'buildArgv throw parity' -> 'Test Files 1 passed (1), Tests 2 passed | 16 skipped (18)'."
     },
     {
       "id": "E2",
