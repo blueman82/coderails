@@ -98,9 +98,10 @@ n=$(call_fn ulg_count_dispatch_turns "$TMP/does-not-exist.jsonl")
 check "missing transcript path -> count 0" "0" "$n"
 
 # Malformed transcript: 2 valid dispatch lines + 1 truncated/broken JSON line.
-# jq -s (slurp) aborts the WHOLE parse on a single bad line, so this must be
-# distinguishable from a genuine empty/quiet transcript — ULG_PARSE_REASON is
-# the signal callers use to log that distinction (see hooks_json main body).
+# Tolerant two-stage parse (mirrors als_count_invocations): a single bad line
+# is dropped at stage 1, the 2 valid lines still get counted at stage 2 — a
+# BENIGN PARTIAL SKIP, not a failure. The count is valid and must be allowed
+# through (ULG_PARSE_REASON stays empty), unlike a total-loss parse below.
 mk_corrupt_transcript() {
   local out="$TMP/corrupt_$RANDOM.jsonl"
   jq -cn --arg id "msg-0" '{"type":"assistant","message":{"id":$id,"content":[{"type":"tool_use","name":"Agent","input":{}}]}}' > "$out"
@@ -110,9 +111,46 @@ mk_corrupt_transcript() {
 }
 corrupt_t=$(mk_corrupt_transcript)
 n=$( ( . "$GUARD"; ulg_count_dispatch_turns "$corrupt_t" ) )
-check "malformed transcript JSON -> count 0 (fail-safe default)" "0" "$n"
+check "benign partial skip (2 valid + 1 bad line) -> count 2 (recovered, not dropped)" "2" "$n"
 parse_reason=$( ( . "$GUARD"; ulg_count_dispatch_turns "$corrupt_t" >/dev/null; printf '%s' "$ULG_PARSE_REASON" ) )
-check "malformed transcript JSON -> ULG_PARSE_REASON=jq_parse_error (distinguishable from genuine 0)" "jq_parse_error" "$parse_reason"
+check "benign partial skip -> ULG_PARSE_REASON empty (partial skip is not a failure)" "" "$parse_reason"
+
+# All-malformed transcript: every line is broken JSON -> TOTAL LOSS. Count
+# must stay 0 AND ULG_PARSE_REASON must be non-empty (attribution preserved),
+# distinguishing "every line malformed" from "0 dispatches, quiet session."
+mk_all_malformed_transcript() {
+  local out="$TMP/all_malformed_$RANDOM.jsonl"
+  printf '%s\n' '{"type":"assistant", THIS IS NOT VALID JSON' > "$out"
+  printf '%s\n' '{"also broken' >> "$out"
+  printf '%s' "$out"
+}
+all_malformed_t=$(mk_all_malformed_transcript)
+n=$( ( . "$GUARD"; ulg_count_dispatch_turns "$all_malformed_t" ) )
+check "all-malformed transcript -> count 0 (total loss)" "0" "$n"
+all_malformed_reason=$( ( . "$GUARD"; ulg_count_dispatch_turns "$all_malformed_t" >/dev/null; printf '%s' "$ULG_PARSE_REASON" ) )
+[ -n "$all_malformed_reason" ] && check "all-malformed transcript -> ULG_PARSE_REASON non-empty (total loss attributed)" "ok" "ok" || check "all-malformed transcript -> ULG_PARSE_REASON non-empty (total loss attributed)" "ok" "FAIL: empty"
+check "benign-skip and total-loss reasons are distinct (discriminator)" "ok" \
+  "$([ "$parse_reason" != "$all_malformed_reason" ] && echo ok || echo "FAIL: both are '$parse_reason'")"
+
+# Behavioural proof that a benign partial skip does not suppress a nudge that
+# would otherwise fire: 3 valid dispatch turns + 1 malformed line -> the
+# recovered count (3) still crosses the >=3 nudge threshold. The 2-valid
+# fixture above can't prove this on its own (2<3).
+mk_nudge_fires_transcript() {
+  local out="$TMP/nudge_fires_$RANDOM.jsonl" i=0
+  : > "$out"
+  while [ "$i" -lt 3 ]; do
+    jq -cn --arg id "nf-$i" '{"type":"assistant","message":{"id":$id,"content":[{"type":"tool_use","name":"Agent","input":{}}]}}' >> "$out"
+    i=$((i+1))
+  done
+  printf '%s\n' '{"type":"assistant", THIS IS NOT VALID JSON' >> "$out"
+  printf '%s' "$out"
+}
+nudge_fires_t=$(mk_nudge_fires_transcript)
+n=$( ( . "$GUARD"; ulg_count_dispatch_turns "$nudge_fires_t" ) )
+check "3 valid + 1 malformed -> count 3 (threshold crossed)" "3" "$n"
+nudge_fires_reason=$( ( . "$GUARD"; ulg_count_dispatch_turns "$nudge_fires_t" >/dev/null; printf '%s' "$ULG_PARSE_REASON" ) )
+check "3 valid + 1 malformed -> ULG_PARSE_REASON empty" "" "$nudge_fires_reason"
 
 # jq not on PATH -> ULG_PARSE_REASON=jq_missing, count 0. Source the guard
 # FIRST (while jq is still reachable, since sourcing needs `dirname`), then
@@ -246,14 +284,37 @@ T=$(mk_dispatch_transcript 3)
 code=$(printf '%s' "$(payload "$T" S1)" | bash "$GUARD" >/dev/null 2>&1; echo $?)
 check "direct-payload stdin smoke (printf, not echo) -> exit 0" "0" "$code"
 
-# End-to-end: malformed transcript JSON -> stays silent (fail-open design),
-# same as any other skip reason, never a crash/hang and never a spurious nudge.
+# End-to-end: benign-partial-skip transcript (2 valid + 1 bad line, recovered
+# count 2) stays silent because 2 is still below the >=3 threshold — not
+# because of a parse failure. Never a crash/hang and never a spurious nudge.
 rm -rf "$CLAUDE_AGENTIC_LOOP_DIR"
 corrupt_e2e=$(mk_corrupt_transcript)
 code=$(run "$(payload "$corrupt_e2e" S1)")
 out=$(run_stdout "$(payload "$corrupt_e2e" S1)")
-check "malformed transcript end-to-end -> exit 0" "0" "$code"
-check "malformed transcript end-to-end -> silent stdout (fail-open, no spurious nudge)" "" "$out"
+check "benign-partial-skip transcript end-to-end (count 2, below threshold) -> exit 0" "0" "$code"
+check "benign-partial-skip transcript end-to-end -> silent stdout (below threshold)" "" "$out"
+
+# End-to-end: all-malformed transcript (total loss, count 0) -> stays silent
+# (fail-open design), same as any other skip reason, never a spurious nudge.
+rm -rf "$CLAUDE_AGENTIC_LOOP_DIR"
+all_malformed_e2e=$(mk_all_malformed_transcript)
+code=$(run "$(payload "$all_malformed_e2e" S1)")
+out=$(run_stdout "$(payload "$all_malformed_e2e" S1)")
+check "all-malformed transcript end-to-end -> exit 0" "0" "$code"
+check "all-malformed transcript end-to-end -> silent stdout (fail-open, no spurious nudge)" "" "$out"
+
+# End-to-end core proof: 3 valid dispatch turns + 1 malformed line -> the
+# recovered count crosses the threshold and the nudge FIRES. This is the
+# fixture that proves the fix's actual purpose (the 2-valid fixture above
+# can't, since 2 stays below threshold either way).
+rm -rf "$CLAUDE_AGENTIC_LOOP_DIR"
+: > "$CLAUDE_DISCIPLINE_LOG"
+nudge_fires_e2e=$(mk_nudge_fires_transcript)
+code=$(run "$(payload "$nudge_fires_e2e" S-NUDGE)")
+: > "$CLAUDE_DISCIPLINE_LOG"  # nudge-once-per-session: reset so the stdout check below is a first nudge for S-NUDGE, not a suppressed repeat
+out=$(run_stdout "$(payload "$nudge_fires_e2e" S-NUDGE)")
+check "3 valid + 1 malformed end-to-end -> exit 0" "0" "$code"
+[ -n "$out" ] && check "3 valid + 1 malformed end-to-end -> nudge fires (non-empty stdout)" "ok" "ok" || check "3 valid + 1 malformed end-to-end -> nudge fires (non-empty stdout)" "ok" "FAIL: empty"
 
 # End-to-end: malformed STDIN PAYLOAD (not transcript) -> logs reason=payload_parse_error,
 # stays silent, exit 0. Distinct seam from the transcript-parse-error case above.

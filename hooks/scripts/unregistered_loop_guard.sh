@@ -43,26 +43,53 @@
 # (A null/missing message.id on multiple dispatch turns would collapse them
 # to one via `unique` — not observed in real transcripts, defense-in-depth only.)
 # Pure: prints an integer, no side effects, no exit calls. Sets global
-# ULG_PARSE_REASON to "jq_missing" or "jq_parse_error" if jq itself failed
-# (jq not on PATH, or malformed/corrupt transcript JSON), else "" — so callers
-# can log a distinct reason from a genuine zero. `jq -s` aborts the whole
-# parse on a single bad line, which would otherwise be silently
-# indistinguishable from "0 dispatches, quiet session."
+# ULG_PARSE_REASON to "jq_missing", "jq_parse_error", or "" (empty) — but
+# "" now covers TWO cases, not one: a genuinely quiet transcript (0 real
+# dispatches) AND a BENIGN PARTIAL SKIP (some lines malformed, but at least
+# one line parsed) — a partial skip is not a failure, so the recovered count
+# is valid and must be allowed through unattributed, same as a clean parse.
+#
+# Two-stage tolerant parse (mirrors als_count_invocations in
+# lib/loop_state_common.sh): stage 1 (`jq -R 'fromjson? // empty'`) parses
+# one line at a time and drops any line that isn't valid JSON, instead of
+# `jq -s` aborting the WHOLE parse on a single bad line; stage 2 (`jq -s`)
+# aggregates only the lines stage 1 successfully parsed.
+#
+# ULG_PARSE_REASON is set to "jq_parse_error" (a non-empty, TOTAL-LOSS
+# reason) ONLY when every line is malformed (stage 1 recovers nothing from a
+# non-empty file) or stage 1 itself dies — that is the case a caller must
+# treat as "count is not trustworthy, suppress the nudge." A benign partial
+# skip (parsed > 0) is NOT that case: ULG_PARSE_REASON stays empty and the
+# recovered count is used as-is.
 ulg_count_dispatch_turns() {
   local transcript="$1"
   ULG_PARSE_REASON=""
   [ -n "$transcript" ] && [ -f "$transcript" ] || { printf '0'; return; }
   command -v jq >/dev/null 2>&1 || { ULG_PARSE_REASON="jq_missing"; printf '0'; return; }
+  local total tolerant tolerant_rc
+  total=$(grep -c '[^[:space:]]' "$transcript" 2>/dev/null); [ -z "$total" ] && total=0
+  tolerant=$(jq -R 'fromjson? // empty' "$transcript" 2>/dev/null); tolerant_rc=$?
+  if [ "$tolerant_rc" -ne 0 ]; then
+    ULG_PARSE_REASON="jq_parse_error"
+    printf '0'
+    return
+  fi
   local n
-  n=$(jq -s -r '
-    [ .[]?
-      | select(.type == "assistant")
-      | select(.message.content[]? | select(.type == "tool_use" and .name == "Agent"))
-      | .message.id ]
-    | unique
-    | length
-  ' "$transcript" 2>/dev/null) || ULG_PARSE_REASON="jq_parse_error"
+  n=0
+  if [ -n "$tolerant" ]; then
+    n=$(printf '%s' "$tolerant" | jq -s -r '
+      [ .[]?
+        | select(.type == "assistant")
+        | select(.message.content[]? | select(.type == "tool_use" and .name == "Agent"))
+        | .message.id ]
+      | unique
+      | length
+    ' 2>/dev/null)
+  fi
   case "$n" in (''|*[!0-9]*) n=0;; esac
+  if [ "$n" -eq 0 ] && [ "$total" -gt 0 ] && [ -z "$tolerant" ]; then
+    ULG_PARSE_REASON="jq_parse_error"
+  fi
   printf '%s' "$n"
 }
 
