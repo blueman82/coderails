@@ -362,6 +362,27 @@ LOOP-STOP: complete — done"); write_file in-progress S1 0
 check "stop_hook_active + complete + no retro.json -> allow (short-circuit precedes gate)" 0 \
   "$(run x "$(payload "$T" S1 true)")"
 
+# (g2) MIXED-CASE BLOCK (the Critical bug) — loop_stall_guard's own category
+# extraction is case-INSENSITIVE (grep -oiE) and preserves the model's original
+# casing, so a model writing "Complete" or "COMPLETE" still declares the loop
+# done per the outer stall-guard's vocab match. The retro gate must treat those
+# the same as lowercase "complete" — a case-sensitive compare here would let
+# capitalisation alone bypass the entire retro-presence requirement.
+reset; T=$(mk_transcript 1 "All done.
+LOOP-STOP: Complete — done"); write_file in-progress S1 0
+check "mixed-case Complete + no retro.json -> block" 2 "$(run x "$(payload "$T" S1)")"
+
+reset; T=$(mk_transcript 1 "All done.
+LOOP-STOP: COMPLETE — done"); write_file in-progress S1 0
+check "all-caps COMPLETE + no retro.json -> block" 2 "$(run x "$(payload "$T" S1)")"
+
+# (g3) mixed-case allow — proves normalization doesn't break the happy path
+# for a non-lowercase declaration paired with a valid retro.json.
+reset; T=$(mk_transcript 1 "All done.
+LOOP-STOP: Complete — done"); write_file in-progress S1 0
+write_retro S1 '{"schema_version":1}'
+check "mixed-case Complete + valid retro.json -> allow" 0 "$(run x "$(payload "$T" S1)")"
+
 # (g) NEGATIVE CONTROL — prove case (b)'s counter assertion actually
 # discriminates: re-checking against a category that was never bumped must
 # NOT match the "bumped" expectation. Verified with a plain bash comparison

@@ -454,8 +454,10 @@ als_read_loop_evals_result() {
 # is absent, matching bump_loop_stop_count.
 als_gate_retro_on_complete() {
   local category="$1" hook="$2" session="$3"
-  [ "$category" = "complete" ] || return 0
-  command -v jq >/dev/null 2>&1 || return 0
+  local category_lc; category_lc=$(printf '%s' "$category" | tr '[:upper:]' '[:lower:]')
+  [ "$category_lc" = "complete" ] || return 0
+  command -v jq >/dev/null 2>&1 || { als_log "hook=$hook session=$session retro_gate=skipped_no_jq"; return 0; }
+  [ -n "$ALS_PATH" ] || { ALS_RETRO_STATE="no_als_path"; als_log "hook=$hook session=$session retro=no_als_path blocked=1"; echo "[loop-stall-guard] retro gate: ALS_PATH unset — cannot locate retro.json." >&2; exit 2; }
   local retro; retro="$(dirname "$ALS_PATH")/retro.json"
   ALS_RETRO_STATE="present"
   if [ ! -f "$retro" ]; then ALS_RETRO_STATE="absent"
