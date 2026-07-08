@@ -54,7 +54,39 @@ T=$(mk_transcript \
 result=$(dc_extract_last_text "$T" 200)
 check "no assistant text -> empty" "" "$result"
 
-# --- Test (e): dc_stable_text stabilises (MAX_ATTEMPTS=1 so runs once) ---
+# --- Test (e): a malformed (non-JSON) line in the tail window must not
+# collapse extraction to empty -- the valid assistant text should still win ---
+T=$(mk_transcript \
+  'this is not valid json' \
+  '{"type":"assistant","message":{"content":[{"type":"text","text":"survives malformed line"}]}}')
+result=$(dc_extract_last_text "$T" 200)
+check "malformed line tolerated: valid text still extracted" "survives malformed line" "$result"
+
+# --- Test (e2): a malformed line INTERLEAVED between valid messages must not
+# disturb `last` ordering -- the final valid assistant text still wins ---
+T=$(mk_transcript \
+  '{"type":"assistant","message":{"content":[{"type":"text","text":"first valid"}]}}' \
+  'this is not valid json' \
+  '{"type":"assistant","message":{"content":[{"type":"text","text":"last valid"}]}}')
+result=$(dc_extract_last_text "$T" 200)
+check "malformed line interleaved: last valid text wins (ordering preserved)" "last valid" "$result"
+
+# --- Test (e3): a trailing malformed line (torn final write during flush) must
+# not hide the preceding valid message ---
+T=$(mk_transcript \
+  '{"type":"assistant","message":{"content":[{"type":"text","text":"valid before torn line"}]}}' \
+  '{"type":"assistant","message":{"content":[{"typ')
+result=$(dc_extract_last_text "$T" 200)
+check "trailing torn line tolerated: preceding valid text still extracted" "valid before torn line" "$result"
+
+# --- Test (e4): every line malformed -> empty (negative half of the contract) ---
+T=$(mk_transcript \
+  'not json at all' \
+  '{"type":"assistant", broken')
+result=$(dc_extract_last_text "$T" 200)
+check "all lines malformed -> empty" "" "$result"
+
+# --- Test (f): dc_stable_text stabilises (MAX_ATTEMPTS=1 so runs once) ---
 T=$(mk_transcript \
   '{"type":"assistant","message":{"content":[{"type":"text","text":"stable text"}]}}')
 export CLAUDE_HOOK_MAX_ATTEMPTS=1

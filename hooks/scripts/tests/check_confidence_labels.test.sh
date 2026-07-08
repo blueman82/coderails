@@ -13,7 +13,7 @@ fails=0
 # Build a synthetic JSONL transcript with one assistant text message.
 mk_transcript() { # text -> path
   local text="$1" out="$TMP/t_$RANDOM.jsonl"
-  jq -n --arg t "$text" '{"type":"assistant","message":{"content":[{"type":"text","text":$t}]}}' > "$out"
+  jq -nc --arg t "$text" '{"type":"assistant","message":{"content":[{"type":"text","text":$t}]}}' > "$out"
   printf '%s' "$out"
 }
 

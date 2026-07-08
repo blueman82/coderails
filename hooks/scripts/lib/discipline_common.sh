@@ -21,10 +21,17 @@ dc_file_count() {
 # dc_extract_last_text <transcript> <tail_lines>
 #   Extracts the last assistant text block from a JSONL transcript.
 #   Returns the joined text of the last assistant message that has any text content.
-#   Prints empty string if no such message exists.
+#   Prints empty string if no such message exists (absent/unreadable transcript,
+#   no text blocks, or every line in the tail window malformed).
+#   Per-line tolerant parse: a single malformed line in the tail window must
+#   not collapse extraction of a genuine final message to empty — stage 1
+#   drops just the bad line, stage 2 aggregates over what's left. This
+#   function does not log — a malformed-line skip here is silent by design,
+#   matching its prior contract of never distinguishing "malformed" from
+#   "no text yet".
 dc_extract_last_text() {
   local transcript="$1" tail_lines="$2"
-  tail -n "$tail_lines" "$transcript" 2>/dev/null | jq -s -r '
+  tail -n "$tail_lines" "$transcript" 2>/dev/null | jq -R 'fromjson? // empty' 2>/dev/null | jq -s -r '
     [.[]?
      | select(.type == "assistant")
      | (.message.content
