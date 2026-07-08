@@ -170,9 +170,20 @@ Two launchd jobs drive the runner, both installed by
   a button press already wrote its own intent, nothing to seed).
 
 ```bash
-launchd/install-routines.sh     # bootstrap both plists into gui/$UID
-launchd/uninstall-routines.sh   # bootout both plists
+launchd/install-routines.sh     # copy both plists into ~/Library/LaunchAgents and bootstrap into gui/$UID
+launchd/uninstall-routines.sh   # bootout both plists and remove the LaunchAgents copies
 ```
+
+Install **copies** each plist into `~/Library/LaunchAgents/` and bootstraps
+from that copy, not from the repo path. This is what makes the jobs survive a
+reboot: a `launchctl bootstrap` from an arbitrary path lasts only until
+logout/reboot, and launchd only auto-loads plists that live in
+`~/Library/LaunchAgents/`. Bootstrapping straight from the repo directory
+silently unloads the entire routines system on the next reboot — observed live
+on 2026-07-08, when the 03:00 run succeeded, the machine rebooted at 07:34, and
+afterwards no `com.coderails` jobs were loaded and no copies existed in
+`~/Library/LaunchAgents/`. Uninstall boots out both labels and removes those
+copies.
 
 Both plists hard-code this machine's absolute paths (checkout location,
 log path, `/opt/homebrew/bin/node`) at authoring time — they are **not
