@@ -1,8 +1,8 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { DashboardContextTestProvider } from "./testUtils/DashboardContextTestProvider";
-import { OutputViewerPanel, selectDefaultRunId } from "../src/components/OutputViewerPanel";
+import { OutputViewerPanel, selectDefaultRunId, fetchSettledOutput } from "../src/components/OutputViewerPanel";
 import type { DashboardSnapshot } from "../src/hooks/useDashboardState";
 import type { RunRecord } from "../src/lib/runlog";
 
@@ -105,5 +105,74 @@ describe("OutputViewerPanel — rendering (SSR)", () => {
     // SSR never fires the fetch effect, so a finished run's settled output is simply not yet
     // loaded — it must not fall back to rendering the stale live buffer instead.
     expect(html).not.toContain("leftover live text");
+  });
+});
+
+// fetchSettledOutput previously had zero direct coverage (it was only exercised indirectly
+// through a mount effect the SSR tests above never fire). It's a standalone exported function
+// with no React dependency, so it's tested directly here against a stubbed global.fetch — this
+// is also the regression test for the fix: every failure mode used to collapse to `undefined`
+// (rendered as the same "no output" a genuinely empty run produces), with nothing logged and no
+// way to distinguish "empty" from "the fetch blew up".
+describe("fetchSettledOutput", () => {
+  const originalFetch = global.fetch;
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+    vi.restoreAllMocks();
+  });
+
+  it("returns ok:true with the output string on a 200 response", async () => {
+    global.fetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ status: "ok", output: "hello" }), { status: 200 })
+    ) as unknown as typeof fetch;
+    const result = await fetchSettledOutput("tok", "0123456789abcdef");
+    expect(result).toEqual({ ok: true, output: "hello" });
+  });
+
+  it("returns a distinct error (not undefined/empty) on a 500 response", async () => {
+    global.fetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ status: "error", error: "boom" }), { status: 500 })
+    ) as unknown as typeof fetch;
+    const result = await fetchSettledOutput("tok", "0123456789abcdef");
+    expect(result.ok).toBe(false);
+    expect(result).toMatchObject({ kind: "error", error: "boom" });
+  });
+
+  it("falls back to a generic status-coded error when a non-2xx response has no error field", async () => {
+    global.fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({}), { status: 403 })) as unknown as typeof fetch;
+    const result = await fetchSettledOutput("tok", "0123456789abcdef");
+    expect(result.ok).toBe(false);
+    expect(result).toMatchObject({ kind: "error", error: "request failed (403)" });
+  });
+
+  it("returns kind:'error' (not a thrown exception) when fetch itself rejects (network error)", async () => {
+    global.fetch = vi.fn().mockRejectedValue(new Error("network down")) as unknown as typeof fetch;
+    const result = await fetchSettledOutput("tok", "0123456789abcdef");
+    expect(result.ok).toBe(false);
+    expect(result).toMatchObject({ kind: "error", error: "network error" });
+  });
+
+  it("returns kind:'error' (not undefined) when the response body is malformed JSON", async () => {
+    global.fetch = vi.fn().mockResolvedValue(new Response("not json{{{", { status: 200 })) as unknown as typeof fetch;
+    const result = await fetchSettledOutput("tok", "0123456789abcdef");
+    expect(result.ok).toBe(false);
+    expect(result).toMatchObject({ kind: "error" });
+  });
+
+  it("returns kind:'in-progress' (distinct from both ok and error) on a 409 response", async () => {
+    global.fetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ status: "in-progress" }), { status: 409 })
+    ) as unknown as typeof fetch;
+    const result = await fetchSettledOutput("tok", "0123456789abcdef");
+    expect(result).toEqual({ ok: false, kind: "in-progress" });
+  });
+
+  it("returns kind:'error' when a 200 response's output field is missing/wrong-typed", async () => {
+    global.fetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ status: "ok", output: 12345 }), { status: 200 })
+    ) as unknown as typeof fetch;
+    const result = await fetchSettledOutput("tok", "0123456789abcdef");
+    expect(result.ok).toBe(false);
   });
 });

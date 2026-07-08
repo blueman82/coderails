@@ -21,7 +21,17 @@ export interface RunOutputHandlerDeps {
   runsDir?: string;
 }
 
-function jsonResponse(status: number, body: unknown): Response {
+// Explicit discriminated shape for every body this route can return, so a client can narrow on
+// a real type instead of the inline object-literal shapes fetch call sites used to inline-guess
+// (`{ output?: unknown }`). `status` mirrors the HTTP status code that always accompanies each
+// variant (200 for output, 409 for in-progress, everything else for error) — carried in the body
+// too so a caller that only has the parsed JSON (not the Response) can still discriminate.
+export type RunOutputResponseBody =
+  | { status: "ok"; output: string }
+  | { status: "in-progress" }
+  | { status: "error"; error: string };
+
+function jsonResponse(status: number, body: RunOutputResponseBody): Response {
   return new Response(JSON.stringify(body), {
     status,
     headers: { "content-type": "application/json" },
@@ -42,23 +52,32 @@ export function createRunOutputHandler(deps: RunOutputHandlerDeps) {
 
   return async function GET(request: Request): Promise<Response> {
     if (!isLocalOrigin(request)) {
-      return jsonResponse(403, { error: "forbidden" });
+      return jsonResponse(403, { status: "error", error: "forbidden" });
     }
 
     const url = new URL(request.url);
     const token = url.searchParams.get("token");
     if (token !== deps.token) {
-      return jsonResponse(401, { error: "unauthorized" });
+      return jsonResponse(401, { status: "error", error: "unauthorized" });
     }
 
     const runId = url.searchParams.get("runId");
     if (!runId || !RUN_ID_PATTERN.test(runId)) {
-      return jsonResponse(400, { error: "invalid runId" });
+      return jsonResponse(400, { status: "error", error: "invalid runId" });
     }
 
     const record = readRuns(RUNS_LOOKUP_LIMIT, { runsDir }).find((r) => r.runId === runId);
     if (!record) {
-      return jsonResponse(404, { error: "unknown run" });
+      return jsonResponse(404, { status: "error", error: "unknown run" });
+    }
+
+    // A live run (no endedAt yet) has a record from run start, but its output file is still
+    // being appended to — reading it now would hand back a partial read indistinguishable from
+    // a genuinely short-but-complete run. Signal "in-progress" distinctly instead: the client
+    // already has a live path for this (the "run-output" SSE event accumulated in
+    // DashboardState.runOutput) and should fall back to that rather than trust a partial fetch.
+    if (record.endedAt === undefined) {
+      return jsonResponse(409, { status: "in-progress" });
     }
 
     let output: string;
@@ -70,7 +89,7 @@ export function createRunOutputHandler(deps: RunOutputHandlerDeps) {
       output = "";
     }
 
-    return jsonResponse(200, { output });
+    return jsonResponse(200, { status: "ok", output });
   };
 }
 

@@ -96,6 +96,35 @@ describe("mergeDashboardEvent — runs", () => {
     expect(next.snapshot.runs).toBe(runs);
     expect(next.lastUpdate).toBe(4000);
   });
+
+  it("prunes a runOutput entry for a runId absent from the incoming runs snapshot (rolled off the server-side cap)", () => {
+    const base: DashboardState = {
+      snapshot: emptySnapshot(),
+      status: "online",
+      lastUpdate: 0,
+      runOutput: { rolledOff: "old output", stillPresent: "current output" },
+    };
+    const runs: RunRecord[] = [
+      { runId: "stillPresent", button: "wiki-lint", argv: [], cwd: "/", profile: "standard", startedAt: 1, outputPath: "/tmp/x" },
+    ];
+    const next = mergeDashboardEvent(base, { event: "runs", data: runs }, 5000);
+    expect(next.runOutput).toEqual({ stillPresent: "current output" });
+  });
+
+  it("keeps every runOutput entry whose runId is still present in the incoming runs snapshot", () => {
+    const base: DashboardState = {
+      snapshot: emptySnapshot(),
+      status: "online",
+      lastUpdate: 0,
+      runOutput: { a: "a-out", b: "b-out" },
+    };
+    const runs: RunRecord[] = [
+      { runId: "a", button: "wiki-lint", argv: [], cwd: "/", profile: "standard", startedAt: 1, outputPath: "/tmp/a" },
+      { runId: "b", button: "wiki-lint", argv: [], cwd: "/", profile: "standard", startedAt: 2, outputPath: "/tmp/b" },
+    ];
+    const next = mergeDashboardEvent(base, { event: "runs", data: runs }, 6000);
+    expect(next.runOutput).toEqual({ a: "a-out", b: "b-out" });
+  });
 });
 
 describe("mergeDashboardEvent — run-output", () => {

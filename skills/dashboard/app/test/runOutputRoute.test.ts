@@ -139,6 +139,20 @@ describe("GET /api/run/output — lookup and read", () => {
     expect(body.output).toBe("");
   });
 
+  it("returns 409 with status 'in-progress' for a live run record (endedAt undefined), instead of reading a partial log", async () => {
+    const runsDir = tmpDir("run-output-route-");
+    const logPath = join(runsDir, `${RUN_ID}.log`);
+    writeFileSync(logPath, "partial output so far");
+    // No endedAt/exitCode — a run record as written at start, before it finishes.
+    writeRunRecord(runsDir, logPath);
+
+    const handler = makeHandler({ runsDir });
+    const res = await handler(req(`http://127.0.0.1:3000/api/run/output?runId=${RUN_ID}&token=${TOKEN}`));
+    expect(res.status).toBe(409);
+    const body = (await res.json()) as { status: string };
+    expect(body.status).toBe("in-progress");
+  });
+
   it("never joins the client-supplied runId directly into a filesystem path — a path-traversal-shaped runId is rejected by the format check before any lookup", async () => {
     // Negative control for the security property: even if an attacker's runId happened to
     // collide with RUN_ID_PATTERN by some other means, this route only ever reads

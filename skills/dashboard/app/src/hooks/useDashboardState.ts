@@ -8,6 +8,7 @@ import type { HealthTile } from "@/lib/collect/health";
 import type { QueueEntry } from "@/lib/collect/queue";
 import type { BuildEntry } from "@/lib/collect/builds";
 import type { RunRecord } from "@/lib/runlog";
+import type { RunOutputEvent } from "@/lib/runOutputBus";
 
 // Mirrors the Snapshot shape from src/lib/collect/index.ts (type-only import
 // there would be safe too, but the fields are re-declared here so this file
@@ -29,11 +30,6 @@ export type ActivitySlice = Pick<
   DashboardSnapshot,
   "sessions" | "loops" | "trail" | "health" | "queue" | "builds"
 >;
-
-export interface RunOutputEvent {
-  runId: string;
-  chunk: string;
-}
 
 export type DashboardEvent =
   | { event: "snapshot"; data: DashboardSnapshot }
@@ -99,13 +95,25 @@ export function mergeDashboardEvent(
         status: "online",
         lastUpdate: now,
       };
-    case "runs":
+    case "runs": {
+      // Prune runOutput entries for runs no longer in the server's run-history window (runsLimit
+      // in lib/collect/index.ts, default 20) — otherwise this map only ever grows across a
+      // dashboard session's lifetime, one entry per run that ever streamed output. The incoming
+      // "runs" snapshot is the authoritative set worth keeping; anything absent from it has
+      // rolled off the cap and its buffered output is no longer reachable via any run-history
+      // row anyway.
+      const keepRunIds = new Set(incoming.data.map((r) => r.runId));
+      const prunedRunOutput = Object.fromEntries(
+        Object.entries(state.runOutput).filter(([runId]) => keepRunIds.has(runId))
+      );
       return {
         ...state,
         snapshot: { ...state.snapshot, runs: incoming.data },
+        runOutput: prunedRunOutput,
         status: "online",
         lastUpdate: now,
       };
+    }
     case "run-output":
       return {
         ...state,
