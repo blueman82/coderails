@@ -67,15 +67,18 @@ launchd LaunchAgent, mirroring the routine-sweeper agents in
 `docs/routines.md`:
 
 ```
-launchd/install-dashboard-agent.sh     # bootstrap into gui/$UID
-launchd/uninstall-dashboard-agent.sh   # bootout
+launchd/install-dashboard-agent.sh     # copy plist + bootstrap into gui/$(id -u)
+launchd/uninstall-dashboard-agent.sh   # bootout + remove the copy
 ```
 
-This loads `launchd/com.coderails.dashboard.plist`, which runs
-`skills/dashboard/runner/bin/dashboard-server.sh` with `RunAtLoad` and
-`KeepAlive` set — launchd starts it at login and restarts it if it dies.
-Logs go to `~/.claude/coderails-dashboard/dashboard.log`, same path
-`start-dashboard.sh` uses.
+The installer copies `launchd/com.coderails.dashboard.plist` into
+`~/Library/LaunchAgents/` and bootstraps from that copy, not from the repo
+path — launchd only auto-loads plists that live in `~/Library/LaunchAgents/`,
+so bootstrapping straight from the repo would silently stop surviving
+reboots. The plist runs `skills/dashboard/runner/bin/dashboard-server.sh`
+with `RunAtLoad` and `KeepAlive` set — launchd starts it at login and
+restarts it if it dies. Logs go to `~/.claude/coderails-dashboard/dashboard.log`,
+same path `start-dashboard.sh` uses.
 
 **Once the agent is installed, `stop-dashboard.sh` does not stop it** — the
 agent-owned server has no pidfile for `stop-dashboard.sh` to find. Stop it
