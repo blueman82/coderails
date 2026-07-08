@@ -126,10 +126,13 @@ export async function pressButton(
   let argv: string[];
   try {
     argv = buildArgv(button, input);
-  } catch {
+  } catch (err) {
     // buildArgv throws when the input can't be turned into a valid command
     // line (no command and no input, or a flag-shaped input) — caught here
-    // so a press never crashes instead of resolving to a PressResult.
+    // so a press never crashes instead of resolving to a PressResult. The
+    // specific reason is logged since the PressResult itself only carries
+    // the generic "invalid-input" tag.
+    console.error(`pressButton: ${(err as Error).message}`);
     return { ok: false, reason: "invalid-input" };
   }
 
