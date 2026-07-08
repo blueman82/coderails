@@ -141,11 +141,18 @@ naked_force_re='(--force([^-]|$)|(^|[[:space:]])-[a-zA-Z]*f[a-zA-Z]*([[:space:]]
 # naked-force detector below never even looks at the rest of the line. git_opt_tok
 # covers the three shapes global options take: -c/-C with a separate-token
 # argument, a long option with an optional attached =value, and any other
-# short flag. Bounded to 6 repetitions (git accepts more in principle, but
-# six is already far beyond any real invocation) so this can't runaway-match
-# across an unrelated line.
+# short flag. Bounded to 20 repetitions — git itself has no limit on
+# repeated -c, so any fixed bound is a residual gap in principle, but 20
+# chained global options is far beyond any real invocation and this keeps
+# the match from running unbounded across an unrelated line. A -c/-C value
+# containing a quoted space (e.g. -c "user.name=John Doe") also isn't
+# matched by the single-token value arm below — same class as this file's
+# documented "quoted paths with spaces... remain uncaught" ceiling elsewhere
+# (AGENTS.md), not something a line-oriented ERE can fix without quote-aware
+# tokenising; both gaps pre-date this fix (confirmed identical on
+# pre-fix main) and are narrowed, not introduced, by it.
 git_opt_tok='(-[cC][[:space:]]+[^[:space:]]+|--[a-zA-Z][a-zA-Z-]*(=[^[:space:]]*)?|-[a-zA-Z]+)'
-git_push_re="\\bgit\\b([[:space:]]+${git_opt_tok}){0,6}[[:space:]]+push\\b"
+git_push_re="\\bgit\\b([[:space:]]+${git_opt_tok}){0,20}[[:space:]]+push\\b"
 if echo "$force_cmd_flat" | grep -qiE "${git_push_re}.*(${naked_force_re}|--force-with-lease\\b)"; then
   if echo "$force_cmd_flat" | grep -qiE "${git_push_re}[[:space:]]+.*--force-with-lease\\b" \
      && ! echo "$force_cmd_flat" | grep -qiE "${git_push_re}.*${naked_force_re}" \

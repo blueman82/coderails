@@ -624,6 +624,16 @@ check "no allowlist: --git-dir= before push, naked --force -> deny" DENY \
 check "no allowlist: stacked options before push, naked -f -> deny" DENY \
   "$(run_cwd "$(payload_with_cwd "git -c a=b -c c=d --no-pager push -f origin main" "$OPT_REPO")" "$OPT_REPO")"
 
+# Repetition-bound regression guard: 7 chained -c options (one more than the
+# gate's first-draft {0,6} bound, widened to {0,20} after review) must still
+# deny — found during review as a live bypass at the original bound (7
+# options pushed the trigger out of range, silently ALLOWing a naked force
+# push). git itself has no limit on repeated -c, so this proves the widened
+# bound actually covers a realistic chain length rather than just re-testing
+# the same single-option shape already covered above.
+check "no allowlist: 7 chained -c options before push, naked --force -> deny" DENY \
+  "$(run_cwd "$(payload_with_cwd "git -c a.a=1 -c a.b=2 -c a.c=3 -c a.d=4 -c a.e=5 -c a.f=6 -c a.g=7 push --force origin main" "$OPT_REPO")" "$OPT_REPO")"
+
 # Regression guard: the already-fixed backslash-newline-BETWEEN-git-and-push
 # case must stay denied — it's a different mechanism (awk splice collapses it
 # to contiguous "git push" upstream of this block) but worth re-confirming
