@@ -184,7 +184,16 @@ export async function postDecision(
       body: JSON.stringify({ token, hash, decision }),
     });
     if (res.ok) {
-      const body = (await res.json()) as { status: "approved" | "denied"; build?: ClaimAndSpawnBuildResult };
+      // A 2xx with an unparseable or off-contract body must not masquerade as a
+      // successful "approved" (the very silence this panel exists to end): guard
+      // the parse the same way the error path below does, and only trust `status`
+      // if it is one of the two shapes route.ts's jsonResponse actually returns.
+      const body = (await res.json().catch(() => null)) as
+        | { status?: unknown; build?: ClaimAndSpawnBuildResult }
+        | null;
+      if (body === null || (body.status !== "approved" && body.status !== "denied")) {
+        return { ok: false, error: "malformed server response" };
+      }
       return { ok: true, status: body.status, build: body.build };
     }
     const body = (await res.json().catch(() => ({}))) as { error?: string };

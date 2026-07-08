@@ -526,6 +526,27 @@ describe("AssistantLinkPanel", () => {
       const result = await postDecision("t", "h1", "approved");
       expect(result).toEqual({ ok: false, error: "network error" });
     });
+
+    it("returns a distinct 'malformed server response' (not 'network error') when a 2xx body fails to parse", async () => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue({
+          ok: true,
+          status: 200,
+          json: async () => {
+            throw new SyntaxError("Unexpected token < in JSON");
+          },
+        })
+      );
+      const result = await postDecision("t", "h1", "approved");
+      expect(result).toEqual({ ok: false, error: "malformed server response" });
+    });
+
+    it("returns 'malformed server response' for a 2xx body whose status is off-contract, rather than fabricating an 'approved' the server never asserted", async () => {
+      mockFetchOnce({ hash: "h1", status: "pending" });
+      const result = await postDecision("t", "h1", "approved");
+      expect(result).toEqual({ ok: false, error: "malformed server response" });
+    });
   });
 
   // L2-WU7 DEFECT B: AssistantLinkPanel previously gave zero visible
