@@ -17,10 +17,23 @@ PLIST="$SCRIPT_DIR/com.coderails.dashboard.plist"
 LABEL="com.coderails.dashboard"
 
 # StandardOutPath/StandardErrorPath point at
-# ~/.claude/coderails-dashboard/dashboard.log. Without this, launchd would
-# create that directory itself on first log write, at the process's default
-# umask — potentially group/world-readable.
+# ~/.claude/coderails-dashboard/dashboard.log. This mkdir guarantees the log
+# dir exists with tight perms before launchd ever tries to write to it; the
+# chmod covers a dir that already exists at a looser mode from an earlier
+# manual run (mkdir -p only sets mode on creation).
 mkdir -p -m 0700 "$HOME/.claude/coderails-dashboard"
+chmod 700 "$HOME/.claude/coderails-dashboard"
+
+# Fail loudly if a manually-started dashboard already holds the port, rather
+# than bootstrapping an agent that will just crash-loop on EADDRINUSE every
+# ThrottleInterval — see skills/dashboard/scripts/start-dashboard.sh for the
+# same guard on the manual-start side.
+if holder="$(lsof -nP -iTCP:4173 -sTCP:LISTEN 2>/dev/null)" && [[ -n "$holder" ]]; then
+  echo "Port 4173 is already in use by another process:" >&2
+  echo "$holder" >&2
+  echo "Stop the manually-started dashboard first (bash skills/dashboard/scripts/stop-dashboard.sh), or the agent will crash-loop every 60s on EADDRINUSE." >&2
+  exit 1
+fi
 
 echo "Installing: $LABEL ($PLIST)"
 # Idempotent: bootout first (ignore "not found" errors), then bootstrap

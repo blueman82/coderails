@@ -6,10 +6,9 @@
 # absolute paths throughout and exports PATH itself so npm's internal
 # shell-outs (which do rely on PATH) still work.
 #
-# Unlike scripts/start-dashboard.sh, this wrapper never backgrounds the
-# server or writes a PID file — launchd itself needs to own the surviving
-# PID to restart it on crash (KeepAlive) or track it at all, so the final
-# server process is `exec`'d in the foreground, replacing this script.
+# Unlike scripts/start-dashboard.sh, this wrapper execs npm in the
+# foreground (npm forwards SIGTERM to the next server); never backgrounds,
+# never writes a PID file.
 set -euo pipefail
 
 export PATH="/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin"
@@ -20,16 +19,25 @@ APP_DIR="$(cd "$DASHBOARD_DIR/app" && pwd)"
 
 cd "$APP_DIR"
 
-if [[ ! -d node_modules ]]; then
+# launchd can't write the log if the dir was deleted; this heals every
+# respawn after the first.
+mkdir -p -m 0700 "$HOME/.claude/coderails-dashboard"
+chmod 700 "$HOME/.claude/coderails-dashboard"
+
+if [[ ! -d node_modules ]] || [[ ! -f node_modules/.package-lock.json ]]; then
   npm ci
 fi
 
-# Rebuild if there's no prior build, or if any source file is newer than the
-# existing build output — same staleness check as start-dashboard.sh.
+# Rebuild if there's no prior build, no src dir, any src file is newer than
+# the existing build output, or dependency/config files changed — this
+# extends start-dashboard.sh's check with a fail-safe + dependency/config
+# staleness, because no human watches a daemon to notice a stale build.
 NEED_BUILD="false"
-if [[ ! -d .next ]]; then
+if [[ ! -d .next ]] || [[ ! -d src ]]; then
   NEED_BUILD="true"
-elif [[ -n "$(find src -newer .next -type f -print -quit 2>/dev/null)" ]]; then
+elif [[ -n "$(find src -newer .next -type f -print -quit)" ]]; then
+  NEED_BUILD="true"
+elif [[ -n "$(find package.json package-lock.json next.config.mjs -newer .next -print -quit)" ]]; then
   NEED_BUILD="true"
 fi
 

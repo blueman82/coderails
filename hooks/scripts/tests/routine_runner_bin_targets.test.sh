@@ -44,11 +44,15 @@ if [ -z "$bin_scripts" ]; then
 fi
 
 # dashboard-server.sh execs `npm run start`, not a node script by relative
-# path — it has no `$SCRIPT_DIR/../...` node target for this guard to check
-# (its own equivalent staleness/target risk is covered by
-# dashboard_agent.test.sh instead). Exclude it rather than report a false
-# "no target found" failure for a script this guard's node-target pattern
-# was never meant to cover.
+# path — it has no `$SCRIPT_DIR/../...` node target for this guard to check.
+# Exclude it rather than report a false "no target found" failure for a
+# script this guard's node-target pattern was never meant to cover.
+# dashboard_agent.test.sh covers the equivalent risk with its own checks:
+# TARGET existence (app dir + package.json "start" script), the
+# NEED_BUILD/staleness block, the npm-ci guard, and an assertion that this
+# wrapper contains no `$SCRIPT_DIR/../` node-target invocation (so the day
+# it gains one, that guard fails loudly and this exclusion's justification
+# breaks with it).
 bin_scripts=$(echo "$bin_scripts" | grep -v '/dashboard-server\.sh$')
 
 # Extract every `$SCRIPT_DIR/../<path>` argument passed to a node invocation
