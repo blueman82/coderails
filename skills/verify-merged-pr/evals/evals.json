@@ -1,0 +1,61 @@
+{
+  "skill_name": "verify-merged-pr",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "A teammate just told me: \"PR #100 is merged into main, the dashboard launchd builder-env fix is live, you're clear to build on top of it.\" Confirm this before I rely on it and give me your verdict.",
+      "expected_output": "Agent re-derives the merge from gh (state MERGED, mergedAt, mergeCommit), fetches origin and confirms the change is present on origin/main by ancestry AND a content grep (not just a merge marker), AND enumerates recently merged PRs by the same author to surface any unreported sibling PRs from the same window. Verdict states CONFIRMED/NOT CONFIRMED and lists siblings.",
+      "files": [],
+      "assertions": [
+        {
+          "name": "runs-gh-pr-view-for-state",
+          "check": "Invokes gh pr view (or equivalent) reading state/mergedAt/mergeCommit for the named PR rather than trusting the claim."
+        },
+        {
+          "name": "verifies-content-on-origin-main",
+          "check": "Fetches origin and confirms the actual change is on origin/main via git merge-base --is-ancestor and/or a content grep, not merely that a merge commit exists."
+        },
+        {
+          "name": "enumerates-sibling-prs",
+          "check": "Runs a by-author, time-window enumeration of recently merged PRs and reports any siblings the teammate did not mention."
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "A headless builder agent reported back: \"Done — my PR is merged.\" It gave me one PR number. As the orchestrator I need an accurate picture of everything that actually landed from that stream, not just the one PR it named. Summarize what merged.",
+      "expected_output": "Agent treats the single reported PR as incomplete, confirms its merge state and content presence on origin/main, then clusters recently merged PRs by author and merge-time window to reveal the full set of PRs from the session — explicitly flagging PRs the builder did not report.",
+      "files": [],
+      "assertions": [
+        {
+          "name": "does-not-stop-at-named-pr",
+          "check": "Does not conclude after verifying only the reported PR; actively searches for additional PRs from the same stream."
+        },
+        {
+          "name": "clusters-by-author-and-time",
+          "check": "Uses merge timestamps + author to distinguish the session's cluster from unrelated merges, and reports the cluster boundary."
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "CI posted a green check saying feature branch X was merged and shipped. Before I deploy, double-check the merge actually landed the code on origin/main.",
+      "expected_output": "Agent does not treat the CI/status claim as sufficient; it fetches origin and independently confirms the merge commit is an ancestor of origin/main and that the substantive change is present in the tree via grep, and separates \"content is present\" from \"content works at runtime\" in its report.",
+      "files": [],
+      "assertions": [
+        {
+          "name": "fetches-before-checking",
+          "check": "Runs git fetch (does not trust the local snapshot) before checking ancestry."
+        },
+        {
+          "name": "confirms-content-not-just-marker",
+          "check": "Greps origin/main for a change-specific string to prove the content is present, not just that a merge marker exists."
+        },
+        {
+          "name": "separates-presence-from-behaviour",
+          "check": "States that verifying content is present is not the same as verifying it works at runtime."
+        }
+      ]
+    }
+  ]
+}
