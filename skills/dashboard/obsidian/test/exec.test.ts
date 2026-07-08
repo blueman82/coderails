@@ -26,6 +26,14 @@ const BUTTONS: ButtonItem[] = [
     profile: "standard",
     inputAllowed: true,
   },
+  {
+    name: "free-ask",
+    label: "FREE ASK",
+    command: "",
+    cwd: "/Users/harrison/Github/coderails",
+    profile: "standard",
+    inputAllowed: true,
+  },
 ];
 
 function makeDeps(overrides: Partial<ExecDeps> = {}): ExecDeps {
