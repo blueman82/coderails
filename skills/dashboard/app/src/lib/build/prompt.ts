@@ -58,7 +58,7 @@ function sanitizeForFence(input: WorkflowAuditProposalInput): WorkflowAuditPropo
 // prompt-injection containment layer: judge-authored proposed_description /
 // task_summary text can never reach anywhere the model would read it as an
 // instruction rather than as data to describe.
-export function buildPrompt(entry: QueueEntrySnapshot): string {
+export function buildPrompt(entry: QueueEntrySnapshot, buildDir: string): string {
   const { toolInput } = entry;
   if (!isWorkflowAuditProposal(toolInput)) {
     // This template only exists for the workflow-audit:propose-skill
@@ -97,7 +97,9 @@ Transcript mining: you MAY read the sessions transcripts listed above locally fo
 
 Delivery: own branch (already created for you), then /coderails:push, then the full gate sequence: test_gate, pr-review-toolkit:review-pr, security review, post-review, pr-scope task-evals, post-evals. Never commit to main, never write into ~/.claude/skills.
 
-Terminal: stop after gates are green on the open PR. Do not merge. Do not invoke /coderails:merge. Write the PR URL to pr_url in this directory as your final act, and nothing else in that file.
+Progress reporting: as you move through the build, write your current phase — a single one of the words authoring, testing, pushing, opening_pr — to the file ${buildDir}/phase (overwrite it each time). Write authoring while drafting the skill, testing during the RED/GREEN pressure-test, pushing when running /coderails:push, and opening_pr while creating the PR. This is the dashboard's only window into your progress; keep it current.
+
+Terminal: stop after gates are green on the open PR. Do not merge. Do not invoke /coderails:merge. Write the PR URL to ${buildDir}/pr_url immediately after creating the PR (not only as a final act) so the dashboard can track it while your gates run, and put nothing else in that file.
 
 Do not spawn further headless claude sessions or agent teams.`;
 }

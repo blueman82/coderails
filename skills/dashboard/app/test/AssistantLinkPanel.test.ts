@@ -7,6 +7,8 @@ import {
   isHeartbeatStale,
   postDecision,
   renderDecisionFeedback,
+  renderBuildStatus,
+  formatElapsed,
 } from "../src/components/AssistantLinkPanel";
 import type { DashboardSnapshot } from "../src/hooks/useDashboardState";
 import type { QueueEntry } from "../src/lib/collect/queue";
@@ -316,6 +318,81 @@ describe("AssistantLinkPanel", () => {
       expect(html).not.toContain("no build claimed");
     });
 
+    it("renders the current phase label for a running build that reported one", () => {
+      const build = buildEntry({ state: "running", phase: "pushing", startedAt: 1000, heartbeatAt: 1000 });
+      const html = renderToStaticMarkup(renderBuildStatus(build, 1000, new Set()));
+      expect(html).toContain("pushing");
+    });
+
+    it("falls back to plain 'building' for a running build with no phase reported yet", () => {
+      const build = buildEntry({ state: "running", startedAt: 1000, heartbeatAt: 1000 });
+      const html = renderToStaticMarkup(renderBuildStatus(build, 1000, new Set()));
+      expect(html).toContain("building");
+      // no stray phase word leaks in
+      expect(html).not.toContain("authoring");
+      expect(html).not.toContain("opening_pr");
+    });
+
+    it("renders an elapsed time for a running build from startedAt against now", () => {
+      const startedAt = 1_000_000;
+      const now = startedAt + 6 * 60_000 + 12_000; // 6m12s later
+      const build = buildEntry({ state: "running", startedAt, heartbeatAt: now });
+      const html = renderToStaticMarkup(renderBuildStatus(build, now, new Set()));
+      expect(html).toContain("6m");
+    });
+
+    it("formatElapsed renders m/s from a millisecond delta and returns empty for unknown inputs", () => {
+      expect(formatElapsed(1000, 1000 + 6 * 60_000 + 12_000)).toBe("6m12s");
+      expect(formatElapsed(1000, 1000 + 45_000)).toBe("45s");
+      expect(formatElapsed(undefined, 1000)).toBe("");
+      expect(formatElapsed(1000, null)).toBe("");
+    });
+
+    it("after-merge: a pr_open build whose PR left the open set renders 'resolved', not 'awaiting your merge'", () => {
+      const build = buildEntry({
+        state: "pr_open",
+        prUrl: "https://github.com/blueman82/coderails/pull/104",
+      });
+      // PR 104 is NOT in the open-PR set → it was merged or closed
+      const html = renderToStaticMarkup(renderBuildStatus(build, Date.now(), new Set([200, 201])));
+      expect(html).toContain("resolved");
+      expect(html).not.toContain("awaiting your merge");
+    });
+
+    it("after-merge: a pr_open build whose PR is still open renders 'awaiting your merge' (negative control)", () => {
+      const build = buildEntry({
+        state: "pr_open",
+        prUrl: "https://github.com/blueman82/coderails/pull/104",
+      });
+      const html = renderToStaticMarkup(renderBuildStatus(build, Date.now(), new Set([104])));
+      expect(html).toContain("awaiting your merge");
+      expect(html).not.toContain("resolved");
+    });
+
+    it("after-merge: an untrusted (null) open-PR set never renders 'resolved' — gates unloaded/failed/degraded", () => {
+      const build = buildEntry({
+        state: "pr_open",
+        prUrl: "https://github.com/blueman82/coderails/pull/104",
+      });
+      // null = gates not yet loaded, or a repo degraded to an error entry.
+      // An open PR absent from an empty set must NOT be misread as resolved.
+      const html = renderToStaticMarkup(renderBuildStatus(build, Date.now(), null));
+      expect(html).toContain("awaiting your merge");
+      expect(html).not.toContain("resolved");
+    });
+
+    it("after-merge: a malformed prUrl on a pr_open build never renders 'resolved' (unparseable PR number is not a join miss)", () => {
+      const build = buildEntry({
+        state: "pr_open",
+        prUrl: "https://github.com/blueman82/coderails/pull/",
+      });
+      // prNumberFromUrl returns undefined → the build doesn't participate in
+      // the join → it falls back to "awaiting your merge", not "resolved".
+      const html = renderToStaticMarkup(renderBuildStatus(build, Date.now(), new Set([200])));
+      expect(html).toContain("awaiting your merge");
+      expect(html).not.toContain("resolved");
+    });
+
     it('renders "building" for state running (SSR: no build entry heartbeat data needed)', () => {
       const entry = approvedProposalEntry();
       const build = buildEntry({ state: "running", heartbeatAt: Date.now() });
@@ -371,10 +448,13 @@ describe("AssistantLinkPanel", () => {
         state: "pr_open",
         prUrl: "https://github.com/blueman82/coderails/pull/999",
       });
+      // PR 999 present in the open-PR set (gates) so the after-merge join
+      // reads it as still open → "awaiting your merge".
+      const openGate = { repo: "blueman82/coderails", number: 999, title: "t", headSha: "", review: {}, evals: {}, state: "merge-ready" };
       const html = renderToStaticMarkup(
         createElement(
           DashboardContextTestProvider,
-          { snapshot: emptySnapshot({ queue: [entry], builds: [build] }) },
+          { snapshot: emptySnapshot({ queue: [entry], builds: [build], gates: [openGate as never] }) },
           createElement(AssistantLinkPanel, { token: "t" })
         )
       );

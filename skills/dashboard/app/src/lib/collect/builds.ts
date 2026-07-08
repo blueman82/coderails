@@ -27,9 +27,18 @@ export interface BuildEntry {
   // lets the client recompute staleness against its own live clock on every
   // render instead of trusting a value that can go stale itself.
   heartbeatAt?: number;
+  // Coarse build phase the builder self-reports by writing one word to the
+  // sibling `phase` touch-file (builds/<hash>/phase). The wrapper spawns
+  // claude as one call and can't see inside it, so only the builder knows
+  // its phase; it's closed-set-validated here (same discipline as `state`)
+  // so an out-of-vocabulary or malformed word is dropped, never rendered.
+  phase?: BuildPhase;
 }
 
+export type BuildPhase = "authoring" | "testing" | "pushing" | "opening_pr";
+
 const VALID_STATES: BuildEntry["state"][] = ["claimed", "queued", "running", "pr_open", "failed"];
+const VALID_PHASES: BuildPhase[] = ["authoring", "testing", "pushing", "opening_pr"];
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -88,7 +97,21 @@ export function collectBuilds(buildsDir: string): BuildEntry[] {
     } catch {
       // no heartbeat file yet (e.g. still "claimed", not yet "running") — leave undefined
     }
-    entries.push({ ...parsed, ...(heartbeatAt !== undefined ? { heartbeatAt } : {}) });
+
+    let phase: BuildPhase | undefined;
+    try {
+      const raw = readFileSync(join(buildsDir, name, "phase"), "utf-8").trim();
+      if ((VALID_PHASES as string[]).includes(raw)) phase = raw as BuildPhase;
+      // an out-of-set or malformed phase word is dropped, never defaulted
+    } catch {
+      // no phase file yet — leave undefined
+    }
+
+    entries.push({
+      ...parsed,
+      ...(heartbeatAt !== undefined ? { heartbeatAt } : {}),
+      ...(phase !== undefined ? { phase } : {}),
+    });
   }
   return entries;
 }

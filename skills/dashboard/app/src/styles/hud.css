@@ -661,8 +661,16 @@
 .hud-build-pr-open {
   color: var(--rose);
 }
+.hud-build-resolved {
+  color: var(--grey-dim);
+}
 .hud-build-failed,
 .hud-build-dead {
+  color: var(--grey-dim);
+}
+/* Elapsed + heartbeat freshness suffix on a running build — dimmer than
+   the phase label it trails. */
+.hud-build-detail {
   color: var(--grey-dim);
 }
 

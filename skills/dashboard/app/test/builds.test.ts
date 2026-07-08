@@ -104,4 +104,35 @@ describe("collectBuilds", () => {
     expect(pr?.prUrl).toBe("https://github.com/blueman82/coderails/pull/999");
     expect(failed?.failureReason).toBe("hash_mismatch:abc");
   });
+
+  it("reads a valid phase word from the sibling phase file", () => {
+    const dir = makeTmpDir("phase-valid");
+    const hash = "3".repeat(64);
+    const buildDir = writeBuild(dir, hash, { state: "running" });
+    writeFileSync(join(buildDir, "phase"), "pushing\n");
+
+    const entry = collectBuilds(dir).find((e) => e.hash === hash);
+    expect(entry?.phase).toBe("pushing");
+  });
+
+  it("rejects an out-of-vocabulary phase word (closed-set, never defaulted)", () => {
+    const dir = makeTmpDir("phase-invalid");
+    const hash = "4".repeat(64);
+    const buildDir = writeBuild(dir, hash, { state: "running" });
+    writeFileSync(join(buildDir, "phase"), "definitely-not-a-real-phase");
+
+    const entry = collectBuilds(dir).find((e) => e.hash === hash);
+    expect(entry).toBeDefined();
+    expect(entry?.phase).toBeUndefined();
+  });
+
+  it("leaves phase undefined when no phase file exists", () => {
+    const dir = makeTmpDir("phase-absent");
+    const hash = "5".repeat(64);
+    writeBuild(dir, hash, { state: "running" });
+
+    const entry = collectBuilds(dir).find((e) => e.hash === hash);
+    expect(entry).toBeDefined();
+    expect(entry?.phase).toBeUndefined();
+  });
 });

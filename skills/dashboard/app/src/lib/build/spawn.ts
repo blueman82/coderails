@@ -141,7 +141,7 @@ export function claimAndSpawnBuild(
   }
 
   writeFileSync(join(buildDir, "snapshot.json"), JSON.stringify(entry));
-  writeFileSync(join(buildDir, "prompt.md"), buildPrompt(entry));
+  writeFileSync(join(buildDir, "prompt.md"), buildPrompt(entry, buildDir));
   writeFileSync(
     join(buildDir, "state.json"),
     JSON.stringify({ schemaVersion: 1, hash: entry.hash, state: "claimed", createdAt: Date.now() })
