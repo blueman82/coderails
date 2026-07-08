@@ -188,6 +188,7 @@ rm -rf "$CLAUDE_AGENTIC_LOOP_DIR"
 T=$(mk_dispatch_transcript 3)
 code=$(run "$(payload "$T" S1)")
 check "3 dispatches, unregistered -> exit 0" "0" "$code"
+: > "$CLAUDE_DISCIPLINE_LOG"  # nudge-once-per-session: reset so the next call is a first nudge for S1, not a suppressed repeat
 out=$(run_stdout "$(payload "$T" S1)")
 event=$(printf '%s' "$out" | jq -r '.hookSpecificOutput.hookEventName // empty' 2>/dev/null)
 ctx=$(printf '%s' "$out" | jq -r '.hookSpecificOutput.additionalContext // empty' 2>/dev/null)
@@ -262,5 +263,79 @@ code=$(printf '%s' "$malformed_payload" | bash "$GUARD" >/dev/null 2>&1; echo $?
 out=$(printf '%s' "$malformed_payload" | bash "$GUARD" 2>/dev/null)
 check "malformed stdin payload -> exit 0" "0" "$code"
 check "malformed stdin payload -> silent stdout (fail-open, no spurious nudge)" "" "$out"
+
+# =====================================================================
+# Task 4 — nudge-once-per-session suppression
+# =====================================================================
+# The guard previously re-emitted its nudge on EVERY Stop for a non-loop
+# session with no per-session termination, causing a self-perpetuating
+# loop (nudge -> honest "no action needed" turn -> Stop -> nudge again).
+# The discipline log already records "nudged=1" lines keyed by session_id
+# on the emit path, so suppression reads that log for a prior nudge for
+# THIS session_id before emitting again.
+
+# Same session, two consecutive Stop invocations, conditions unchanged
+# (3+ dispatches, no progress.json, no Skill invocation) -> nudge fires on
+# the FIRST call but NOT the second.
+rm -rf "$CLAUDE_AGENTIC_LOOP_DIR"
+: > "$CLAUDE_DISCIPLINE_LOG"
+T=$(mk_dispatch_transcript 3)
+out1=$(run_stdout "$(payload "$T" S-REPEAT)")
+code1=$(run "$(payload "$T" S-REPEAT)")
+check "repeat-session first Stop -> exit 0" "0" "$code1"
+[ -n "$out1" ] && check "repeat-session first Stop -> nudge fires (non-empty stdout)" "ok" "ok" || check "repeat-session first Stop -> nudge fires (non-empty stdout)" "ok" "FAIL: empty"
+
+out2=$(run_stdout "$(payload "$T" S-REPEAT)")
+code2=$(run "$(payload "$T" S-REPEAT)")
+check "repeat-session second Stop -> exit 0" "0" "$code2"
+check "repeat-session second Stop -> nudge suppressed (silent stdout)" "" "$out2"
+already_nudged_count=$(grep -c 'session=S-REPEAT.*reason=already_nudged_this_session' "$CLAUDE_DISCIPLINE_LOG" 2>/dev/null; true)
+[ "$already_nudged_count" -ge 1 ] 2>/dev/null && check "repeat-session second Stop -> discipline log records already_nudged_this_session" "ok" "ok" || check "repeat-session second Stop -> discipline log records already_nudged_this_session" "ok" "FAIL: got $already_nudged_count"
+
+# A fresh session meeting the conditions still nudges exactly once (the
+# first-nudge path is untouched by the suppression branch).
+rm -rf "$CLAUDE_AGENTIC_LOOP_DIR"
+: > "$CLAUDE_DISCIPLINE_LOG"
+T=$(mk_dispatch_transcript 3)
+out=$(run_stdout "$(payload "$T" S-FRESH)")
+[ -n "$out" ] && check "fresh session -> nudges once (non-empty stdout)" "ok" "ok" || check "fresh session -> nudges once (non-empty stdout)" "ok" "FAIL: empty"
+check "fresh session -> exactly one nudged=1 log line" 1 \
+  "$(grep -c 'session=S-FRESH.*nudged=1' "$CLAUDE_DISCIPLINE_LOG" 2>/dev/null; true)"
+
+# Different sessions are independent: session A having already nudged must
+# NOT suppress session B's first nudge. Also proves the session-id match is
+# exact (not a substring match) — "S-A" must not match "S-AB" or vice versa.
+rm -rf "$CLAUDE_AGENTIC_LOOP_DIR"
+: > "$CLAUDE_DISCIPLINE_LOG"
+T=$(mk_dispatch_transcript 3)
+run "$(payload "$T" S-A)" >/dev/null   # session A's first (and only) nudge
+out_b=$(run_stdout "$(payload "$T" S-AB)")
+[ -n "$out_b" ] && check "distinct session S-AB not suppressed by prior S-A nudge" "ok" "ok" || check "distinct session S-AB not suppressed by prior S-A nudge" "ok" "FAIL: empty"
+
+# Reverse direction of the above: S-AB nudges first, then S-A (the substring
+# prefix) must still get its own first nudge. Proves the exact-match
+# guarantee holds regardless of which of the two session ids fires first —
+# matches the comment's "or vice versa" claim.
+rm -rf "$CLAUDE_AGENTIC_LOOP_DIR"
+: > "$CLAUDE_DISCIPLINE_LOG"
+T=$(mk_dispatch_transcript 3)
+run "$(payload "$T" S-AB)" >/dev/null   # session S-AB's first (and only) nudge
+out_a=$(run_stdout "$(payload "$T" S-A)")
+[ -n "$out_a" ] && check "distinct session S-A not suppressed by prior S-AB nudge (reverse direction)" "ok" "ok" || check "distinct session S-A not suppressed by prior S-AB nudge (reverse direction)" "ok" "FAIL: empty"
+
+# Regression: session_id is interpolated into a grep BRE pattern. A session
+# id containing a literal BRE metachar (here "." in "s.1") must not be
+# treated as a wildcard that matches an unrelated session's log line (e.g.
+# "sX1"). als_sanitise_session_id only strips "/" and collapses ".." — a
+# single "." survives untouched, so this is a real reachable session id.
+# This test must FAIL against an unescaped grep (since a BRE "." matches any
+# single char, "s.1" would wildcard-match a "session=sX1 ... nudged=1" line)
+# and PASS once the session id is escaped/matched literally before use.
+rm -rf "$CLAUDE_AGENTIC_LOOP_DIR"
+: > "$CLAUDE_DISCIPLINE_LOG"
+T=$(mk_dispatch_transcript 3)
+run "$(payload "$T" sX1)" >/dev/null   # sX1's first (and only) nudge
+out_dot=$(run_stdout "$(payload "$T" "s.1")")
+[ -n "$out_dot" ] && check "session 's.1' (literal dot) not falsely suppressed by unrelated 'sX1' nudge (BRE metachar regression)" "ok" "ok" || check "session 's.1' (literal dot) not falsely suppressed by unrelated 'sX1' nudge (BRE metachar regression)" "ok" "FAIL: empty"
 
 [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails)"; exit 1; }

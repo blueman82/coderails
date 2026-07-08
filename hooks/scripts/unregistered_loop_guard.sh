@@ -140,6 +140,28 @@ if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
     exit 0
   }
 
+  # Nudge-once-per-session: without this, the nudge re-fires on EVERY Stop
+  # for a session that keeps meeting the above conditions, and the honest
+  # response to a genuinely one-off dispatch sequence ("no action needed")
+  # still produces a turn -> Stop -> nudge again, a self-perpetuating loop
+  # (observed live 2026-07-08). als_log already records each emitted nudge
+  # keyed by session_id (the line just below) — reuse that as the ledger
+  # instead of adding new state. Match session=$session_id space-bounded so
+  # a prior nudge for session "S-A" cannot suppress session "S-AB"'s first
+  # nudge. Missing/unreadable log (first-ever nudge) -> grep finds nothing
+  # -> falls through to emit, unchanged.
+  # session_id is interpolated into a grep BRE pattern below, so any BRE
+  # metacharacter it contains (., *, ^, $, [, \) must be escaped first —
+  # als_sanitise_session_id only strips "/" and collapses ".." (path-traversal
+  # defense), a single "." survives untouched, and an unescaped "." would
+  # wildcard-match an unrelated session's log line (e.g. "s.1" matching a
+  # "session=sX1 ... nudged=1" line).
+  esc_sid=$(printf '%s' "$session_id" | sed 's/[.[\*^$\\]/\\&/g')
+  if grep -q "hook=unregistered_loop_guard .*session=$esc_sid .*nudged=1" "$LOG_FILE" 2>/dev/null; then
+    als_log "hook=unregistered_loop_guard session=$session_id dispatch_turns=$dispatch_turns nudged=0 reason=already_nudged_this_session"
+    exit 0
+  fi
+
   als_log "hook=unregistered_loop_guard session=$session_id dispatch_turns=$dispatch_turns nudged=1"
   jq -n --arg ctx "[unregistered-loop-guard] This session has dispatched $dispatch_turns+ separate Agent turns with no agentic-loop registration detected (no progress.json, no agentic-loop Skill invocation). If this is a multi-step loop, register it now: invoke coderails:agentic-loop and create the progress.json stub at the path hooks/scripts/lib/agentic_loop_path.sh resolves for this session, so the loop-state guards can track it. If this is genuinely a one-off sequence of independent dispatches, no action is needed." \
     '{"hookSpecificOutput":{"hookEventName":"Stop","additionalContext":$ctx}}'
