@@ -192,8 +192,16 @@ fi
 # Source-file extensions pattern (anchored to end-of-token to avoid false matches
 # like foo.py.bak or output.go.log). Matches only tokens ENDING in a source ext.
 src_ext='\.(py|ts|tsx|js|jsx|go)([ '"'"'"]|$)'
-# Plugin source pattern (skills/*/SKILL.md or commands/*.md)
-plugin_src='(skills/[^/]+/SKILL\.md|commands/[^/]+\.md)([ '"'"'"]|$)'
+# Plugin source pattern (skills/*/SKILL.md or commands/*.md).
+# Left-anchored to a path/token boundary (start-of-string, whitespace,
+# quote, or a preceding "/") so a GLUED lookalike word like
+# "xcommands/prep.md" or "not-skills/x/SKILL.md" — which merely CONTAINS
+# the substring, not an actual skills/ or commands/ path segment — doesn't
+# false-positive, while a genuinely nested real path like
+# "vendor/skills/x/SKILL.md" still matches (the "/" before "skills/" is a
+# real path separator, not part of the directory name). Mirrors src_ext's
+# existing right-anchor above.
+plugin_src='(^|[[:space:]/'"'"'"])(skills/[^/]+/SKILL\.md|commands/[^/]+\.md)([ '"'"'"]|$)'
 
 # branch_for_path: resolve git branch for a given file path.
 # Accepts an absolute path or a path relative to $cwd.
