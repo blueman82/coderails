@@ -165,11 +165,26 @@ if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
   ulg_err_file=$(mktemp 2>/dev/null) || ulg_err_file=""
   if [ -n "$ulg_err_file" ]; then
     dispatch_turns=$(ulg_count_dispatch_turns "$transcript" 2>"$ulg_err_file")
+    # Reading the WHOLE file as one reason is safe only because
+    # ulg_count_dispatch_turns emits at most one single-line token on stderr
+    # (jq_missing or jq_parse_error) and never a second line — unlike the
+    # reference als_stable_invocations, which parses up to two stderr lines
+    # (a skipped_malformed=N breadcrumb plus a reason tag) and so can't use
+    # this shortcut. If a future edit adds a second stderr line here, this
+    # plain `cat` will silently fold it into parse_reason.
     parse_reason=$(cat "$ulg_err_file" 2>/dev/null)
     rm -f "$ulg_err_file" 2>/dev/null
   else
+    # mktemp itself is unavailable, so any real stderr reason (jq_missing /
+    # jq_parse_error) is unrecoverable — this transcript's parse_reason falls
+    # through to empty below exactly as before this fix (log-only change, NOT
+    # a new exit/nudge path: below_threshold or the nudge itself still decide
+    # the outcome same as always). Log a one-line breadcrumb so the degraded
+    # mode is at least visible instead of silently indistinguishable from a
+    # clean parse.
     dispatch_turns=$(ulg_count_dispatch_turns "$transcript" 2>/dev/null)
     parse_reason=""
+    als_log "hook=unregistered_loop_guard session=$session_id reason=mktemp_unavailable attribution=lost"
   fi
   if [ -n "$parse_reason" ]; then
     als_log "hook=unregistered_loop_guard session=$session_id nudged=0 reason=$parse_reason"

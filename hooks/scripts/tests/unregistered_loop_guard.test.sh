@@ -450,4 +450,44 @@ run "$(payload "$T" sX1)" >/dev/null   # sX1's first (and only) nudge
 out_dot=$(run_stdout "$(payload "$T" "s.1")")
 [ -n "$out_dot" ] && check "session 's.1' (literal dot) not falsely suppressed by unrelated 'sX1' nudge (BRE metachar regression)" "ok" "ok" || check "session 's.1' (literal dot) not falsely suppressed by unrelated 'sX1' nudge (BRE metachar regression)" "ok" "FAIL: empty"
 
+# =====================================================================
+# Task 5 — mktemp-failure degraded path leaves a breadcrumb (review follow-up)
+# =====================================================================
+# When mktemp itself is unavailable, the hook can't capture
+# ulg_count_dispatch_turns' stderr reason at all (the subshell-loss problem
+# this PR fixes is unrecoverable a second time, by construction, in that
+# branch). Before this follow-up, that degraded mode was completely silent —
+# a genuine jq_missing/jq_parse_error transcript would fall through
+# indistinguishable from a clean parse, logged only as reason=below_threshold
+# with zero trace that the reason was ever lost. Force mktemp to fail via a
+# PATH shim (a directory containing ONLY a failing `mktemp`, prepended to
+# PATH so real jq/grep/bash/cat/rm still resolve from the rest of PATH) and
+# assert the log now records the degraded mode.
+MKTEMP_FAIL_DIR="$TMP/mktemp_fail_bin"
+mkdir -p "$MKTEMP_FAIL_DIR"
+cat > "$MKTEMP_FAIL_DIR/mktemp" <<'EOF'
+#!/bin/bash
+exit 1
+EOF
+chmod +x "$MKTEMP_FAIL_DIR/mktemp"
+
+rm -rf "$CLAUDE_AGENTIC_LOOP_DIR"
+: > "$CLAUDE_DISCIPLINE_LOG"
+all_malformed_mktemp_fail=$(mk_all_malformed_transcript)
+PATH="$MKTEMP_FAIL_DIR:$PATH" run "$(payload "$all_malformed_mktemp_fail" S-MKTEMPFAIL)" >/dev/null
+check "mktemp-failure degraded path -> discipline log records reason=mktemp_unavailable" 1 \
+  "$(grep -c 'hook=unregistered_loop_guard session=S-MKTEMPFAIL reason=mktemp_unavailable attribution=lost' "$CLAUDE_DISCIPLINE_LOG" 2>/dev/null; true)"
+
+# Log-only guarantee: mktemp failure must NOT change nudge/exit behaviour.
+# A transcript with 3+ real dispatches and no registration must still nudge
+# even when mktemp is broken — the breadcrumb is an EXTRA log line, not a
+# new early-exit path that could swallow a legitimate nudge.
+rm -rf "$CLAUDE_AGENTIC_LOOP_DIR"
+: > "$CLAUDE_DISCIPLINE_LOG"
+T=$(mk_dispatch_transcript 3)
+out_mktemp_fail=$(PATH="$MKTEMP_FAIL_DIR:$PATH" run_stdout "$(payload "$T" S-MKTEMPFAIL2)")
+code_mktemp_fail=$(PATH="$MKTEMP_FAIL_DIR:$PATH" run "$(payload "$T" S-MKTEMPFAIL2)")
+check "mktemp-failure degraded path, 3 clean dispatches -> exit 0 (unchanged)" "0" "$code_mktemp_fail"
+[ -n "$out_mktemp_fail" ] && check "mktemp-failure degraded path -> nudge still fires (log-only change, no exit-path hijack)" "ok" "ok" || check "mktemp-failure degraded path -> nudge still fires (log-only change, no exit-path hijack)" "ok" "FAIL: empty"
+
 [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails)"; exit 1; }
