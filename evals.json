@@ -1,0 +1,59 @@
+{
+  "schema_version": 1,
+  "scope": "pr",
+  "task_ref": "fix/obsidian-exec-buildargv-parity",
+  "tier": 1,
+  "tier_justification": "1 work-unit, no irreversible/outward surface (local dashboard helper), but no existing test covers the goal state today (that absence is the bug) — tier 0's exemption predicate does not hold, so this takes the tier 1 standard set.",
+  "frozen_at": "2026-07-08T09:05:00Z",
+  "frozen_sha": "e01bddb39630c914ccab28bd16318ac9be41ca27",
+  "evals": [
+    {
+      "id": "E1",
+      "priority": "P0",
+      "mode": "scripted",
+      "surface": "merged-state",
+      "assert": "pressButton resolves to { ok: false, reason: 'invalid-input' } (never rejects/throws) when buildArgv throws on empty-command-plus-no-input, and no fs/spawn side effect fires",
+      "cmd": "cd skills/dashboard/obsidian && npx vitest run test/exec.test.ts -t 'empty command'",
+      "negative_control": "git stash the try/catch wrap in src/exec.ts (revert to unwrapped buildArgv call), re-run the same command — must fail (unhandled rejection) since exec.ts:126 propagates the throw uncaught on origin/main today",
+      "status": "pending",
+      "evidence": ""
+    },
+    {
+      "id": "E2",
+      "priority": "P0",
+      "mode": "scripted",
+      "surface": "merged-state",
+      "assert": "pressButton resolves to { ok: false, reason: 'invalid-input' } (never rejects/throws) when input has leading whitespace then a dash (slips exec.ts's own untrimmed pre-check, hits buildArgv's trimmed check), and no fs/spawn side effect fires",
+      "cmd": "cd skills/dashboard/obsidian && npx vitest run test/exec.test.ts -t 'leading whitespace'",
+      "negative_control": "git stash the try/catch wrap in src/exec.ts, re-run the same command — must fail since exec.ts:116's untrimmed startsWith('-') check does not catch '  --dangerously-skip-permissions' and the throw propagates uncaught",
+      "status": "pending",
+      "evidence": ""
+    },
+    {
+      "id": "E3",
+      "priority": "P0",
+      "mode": "scripted",
+      "surface": "merged-state",
+      "assert": "full obsidian test directory (config/notes/render/exec) stays green after the fix — no regression",
+      "cmd": "cd skills/dashboard/obsidian && npm test",
+      "negative_control": "reintroduce a deliberate syntax error in exec.ts's catch block — the suite must fail to run/compile, proving the runner actually executes this code",
+      "status": "pending",
+      "evidence": ""
+    },
+    {
+      "id": "E4",
+      "priority": "P1",
+      "mode": "scripted",
+      "surface": "merged-state",
+      "assert": "no new PressResult.reason union member was added beyond the existing 'invalid-input' (reuse, not proliferation) unless a review finding argues otherwise",
+      "cmd": "grep -n 'reason:' skills/dashboard/obsidian/src/exec.ts | grep -v 'invalid-input\\|undeclared\\|unresolved'",
+      "negative_control": "add a fake 4th reason literal to the PressResult union and re-run the grep — must find and report it, proving the grep isn't vacuously empty",
+      "status": "pending",
+      "evidence": ""
+    }
+  ],
+  "amendments": [],
+  "result": null,
+  "graded_at": null,
+  "head_sha": null
+}
