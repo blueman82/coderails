@@ -34,6 +34,22 @@ mk_other_transcript() {
   printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Skill","input":{"skill":"coderails:prep"}}]}}' > "$out"
   printf '%s' "$out"
 }
+# Build a transcript where the loop was started via the SLASH-COMMAND form
+# (/coderails:agentic-loop) — a user-role message whose content is a STRING
+# carrying <command-name>, NOT an assistant Skill tool_use. This is how a
+# human-invoked loop actually appears; the tool_use form only covers loops the
+# assistant invokes programmatically. Followed by a final assistant text message.
+mk_slash_transcript() { # command_name final_text -> path
+  local cmd="$1" final="$2" out="$TMP/slash_${RANDOM}.jsonl"
+  jq -cn --arg c "<command-message>agentic-loop</command-message>
+<command-name>${cmd}</command-name>
+<command-args>build this, crack on</command-args>" \
+    '{type:"user",message:{role:"user",content:$c}}' > "$out"
+  if [ -n "$final" ]; then
+    jq -cn --arg t "$final" '{type:"assistant",message:{content:[{type:"text",text:$t}]}}' >> "$out"
+  fi
+  printf '%s' "$out"
+}
 payload() { # transcript session_id [stop_hook_active]
   printf '{"transcript_path":"%s","session_id":"%s","cwd":"%s","stop_hook_active":%s}' \
     "$1" "$2" "$CWD" "${3:-false}"
@@ -149,6 +165,29 @@ LOOP-STOP: complete — actually this one, the loop is done"); write_file in-pro
 run x "$(payload "$T" S1)" >/dev/null
 check "multi-declaration: last category wins (complete)" 1 "$(counter S1 complete)"
 check "multi-declaration: first category NOT counted (hard-stop)" 0 "$(counter S1 hard-stop)"
+
+# Slash-command loop registration — a loop started via /coderails:agentic-loop
+# (the human-invoked form: a user-role command-name message, NOT an assistant
+# Skill tool_use) must still be detected as an active loop, so the anti-stall
+# guard engages and the hook-owned counter increments. This is the real-world
+# case the null-counter bug hit: the whole loop ran off a slash invocation, the
+# gate saw invocations=0, exited early, and bump_loop_stop_count was never
+# reached. The tool_use-only fixtures above never exercised this path.
+reset; T=$(mk_slash_transcript "/coderails:agentic-loop" "Work paused.
+LOOP-STOP: awaiting-input — waiting on the user's plan confirmation"); write_file in-progress S1 0
+check "slash-command loop -> declaration allowed (not treated as non-loop)" 0 "$(run x "$(payload "$T" S1)")"
+check "slash-command loop -> counter increments" 1 "$(counter S1 awaiting-input)"
+
+# Bare slash form (/agentic-loop, unscoped) must also register.
+reset; T=$(mk_slash_transcript "/agentic-loop" "All done.
+LOOP-STOP: complete — all PRs merged"); write_file in-progress S1 0
+run x "$(payload "$T" S1)" >/dev/null
+check "bare slash-command loop -> counter increments" 1 "$(counter S1 complete)"
+
+# A slash command for a DIFFERENT skill must NOT be mistaken for a loop
+# (guards against an over-broad command-name match).
+reset; T=$(mk_slash_transcript "/coderails:prep" "no declaration here"); write_file in-progress S1 0
+check "non-loop slash command -> allow (not a loop)" 0 "$(run x "$(payload "$T" S1)")"
 
 # Unwritable progress dir (chmod 555) — degrades safely: stop still allowed,
 # and jq's redirect never opens the tmp file, so no leftover .tmp.

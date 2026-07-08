@@ -55,8 +55,18 @@ als_sanitise_session_id() {
 }
 
 # Count agentic-loop Skill invocations across the WHOLE transcript (one-shot).
-# Structured jq match on a tool_use — never a text grep. Matches the scoped
-# ("coderails:agentic-loop") and bare ("agentic-loop") skill names.
+# Two invocation forms are counted, because a loop can start either way:
+#   1. PROGRAMMATIC — the assistant calls the Skill tool: an assistant message
+#      with a tool_use block name=="Skill", input.skill matching the loop name.
+#   2. SLASH-COMMAND — a human runs /coderails:agentic-loop: a user message
+#      whose content is a STRING carrying "<command-name>/coderails:agentic-loop
+#      </command-name>". This has NO assistant tool_use, so form 1 alone missed
+#      it entirely — the bug that left every loop_stop_counts null for a
+#      slash-started loop (the gate saw invocations=0 and exited before the
+#      counter write). Both forms match the SAME name semantic: scoped
+#      ("coderails:agentic-loop") or bare ("agentic-loop"), via (^|:)agentic-loop$
+#      after stripping the command's leading "/".
+# Structured jq match on a tool_use / command-name — never a free-text grep.
 # Stdout contract is UNCHANGED (empty or an integer) even on jq failure — every
 # consumer still reads that as "0, allow" (fail-open). On jq failure this ALSO
 # writes a distinguishable reason tag ("jq_missing" / "jq_parse_error") to
@@ -93,12 +103,22 @@ als_count_invocations() {
   skipped=$((total - parsed))
   [ "$skipped" -gt 0 ] && echo "skipped_malformed=$skipped" >&2
   printf '%s' "$tolerant" | jq -s -r '
+    def loop_name: test("(^|:)agentic-loop$");
     [ .[]?
-      | select(.type == "assistant")
-      | .message.content[]?
-      | select(.type == "tool_use" and .name == "Skill")
-      | (.input.skill // "")
-      | select(test("(^|:)agentic-loop$")) ]
+      # Form 1: assistant Skill tool_use.
+      | ( select(.type == "assistant")
+          | .message.content[]?
+          | select(.type == "tool_use" and .name == "Skill")
+          | (.input.skill // "")
+          | select(loop_name) ),
+        # Form 2: user slash-command message (content is a string carrying
+        # <command-name>). Strip the leading "/" so the name matches loop_name.
+        ( select(.type == "user")
+          | .message.content
+          | select(type == "string")
+          | (capture("<command-name>/?(?<c>[^<\\n]+)</command-name>").c // empty)
+          | select(loop_name) )
+    ]
     | length
   ' 2>/dev/null || echo "jq_parse_error" >&2
 }
