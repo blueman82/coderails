@@ -14,10 +14,87 @@ mkdir -p "$REPO/.claude"
 git -C "$TMP" init -q repo
 git -C "$REPO" config user.email t@t.t
 git -C "$REPO" config user.name t
+git -C "$REPO" remote add origin https://github.com/acme/widgets.git
 git -C "$REPO" commit -q --allow-empty -m init
 
 # Create workflow.config.yaml so the opt-in gate passes for DENY cases.
 printf 'jira: null\n' > "$REPO/.claude/workflow.config.yaml"
+
+# ── Mock `gh` (placed first on PATH) ─────────────────────────────────────────
+# The `gh pr merge` eval-artifact gate (gate_eval_artifact_for_merge, added in
+# enforce_pr_workflow.sh) calls into scripts/lib/git-common.sh's pr::head_sha
+# and pr::has_coderails_eval_for_head, which shell out to real `gh`. No test
+# in this suite has real GitHub auth/network, so `gh` is replaced globally,
+# for the whole suite, by a fake script on PATH.
+#
+# Default behaviour (no env override): resolves a fixed head SHA and returns a
+# single GO-tier-1 marker for whatever PR number appears in the comments URL
+# at that fixed SHA — this transparently satisfies the eval gate for every
+# PRE-EXISTING `gh pr merge` ALLOW case in this file (they exercise the
+# review-pr gate only and were not written with the eval gate in mind).
+# The dedicated "EVAL ARTIFACT GATE" section below overrides
+# MOCK_GH_HEAD_SHA / MOCK_GH_COMMENT_BODY / MOCK_GH_FETCH_FAIL per-call to
+# exercise the eval gate's own branches (no marker, NO-GO, fetch failure, …).
+DEFAULT_MOCK_SHA="cafef00d0000000000000000000000000000feed"
+MOCKGH_DIR="$TMP/mockbin"
+mkdir -p "$MOCKGH_DIR"
+cat > "$MOCKGH_DIR/gh" <<MOCKGH
+#!/bin/bash
+DEFAULT_SHA="$DEFAULT_MOCK_SHA"
+MOCKGH
+cat >> "$MOCKGH_DIR/gh" <<'MOCKGH'
+[ -n "${MOCK_GH_FETCH_FAIL:-}" ] && exit 1
+
+args="$*"
+case "$args" in
+  "pr list "*"--json number"*)
+    # gate_eval_artifact_for_merge's fallback (bare `gh pr merge`, no number
+    # parsed from the command) resolves the PR via pr::num -> `gh pr list
+    # --head <branch> --json number`. Fixed default PR number for the bare-
+    # merge case; the default comment-body branch below issues a matching
+    # marker for whatever number appears in the comments URL, so this stays
+    # self-consistent regardless of the exact value.
+    printf '99'
+    ;;
+  "pr view "*"--json headRefOid"*)
+    printf '%s' "${MOCK_GH_HEAD_SHA:-$DEFAULT_SHA}"
+    ;;
+  "api user "*)
+    printf 'testuser'
+    ;;
+  "repo view "*"--json viewerPermission"*)
+    printf 'WRITE'
+    ;;
+  "api repos/"*"/comments"*)
+    if [ -n "${MOCK_GH_COMMENTS_FAIL:-}" ]; then
+      # Unlike MOCK_GH_FETCH_FAIL (which fails every gh call, including the
+      # earlier pr::head_sha lookup, and so never even reaches
+      # pr::has_coderails_eval_for_head), this fails ONLY the comments fetch —
+      # identity and permission lookups above still succeed. This is what
+      # actually drives pr::has_coderails_eval_for_head's rc=2 (fail-closed)
+      # return via pr::_trusted_comment_bodies's TRUST_FETCH_FAIL_REASON=comments
+      # path, landing on the *default* rc=2 deny message (not the identity/
+      # permission-specific ones).
+      exit 1
+    fi
+    if [ -n "${MOCK_GH_COMMENT_BODY+x}" ]; then
+      # Explicit override (may be empty string -> deliberately no comments).
+      [ -n "$MOCK_GH_COMMENT_BODY" ] && printf '%s' "$MOCK_GH_COMMENT_BODY" | base64
+    else
+      # Default: auto-satisfy the eval gate for whatever PR number is in the
+      # URL (repos/OWNER/REPO/issues/<num>/comments), at the default SHA.
+      pr_num=$(printf '%s' "$args" | grep -oE '/issues/[0-9]+/comments' | grep -oE '[0-9]+')
+      sha="${MOCK_GH_HEAD_SHA:-$DEFAULT_SHA}"
+      printf '<!-- coderails-eval-summary v1 pr=%s head_sha=%s result=GO tier=1 -->' "$pr_num" "$sha" | base64
+    fi
+    ;;
+  *)
+    exit 1
+    ;;
+esac
+MOCKGH
+chmod +x "$MOCKGH_DIR/gh"
+export PATH="$MOCKGH_DIR:$PATH"
 
 # REPO_NO_CONFIG has no workflow.config.yaml — used for Case 7 (NO_CONFIG -> ALLOW).
 REPO_NO_CONFIG="$TMP/repo_noconfig"
@@ -723,5 +800,139 @@ check "cd main && git push, cd target is main -> deny" DENY \
 T=$(mk_transcript "$(mk_skill_line "coderails:prep")")
 check "git -C main-repo push origin main -> deny (no silent -C bypass)" DENY \
   "$(run "$(payload "git -C $REPO_MAIN push origin main" "$T" "$REPO_MAIN")")"
+
+# ────────────────────────────────────────────────────────────────────────────
+# EVAL ARTIFACT GATE: gh pr merge must also pass pr::has_coderails_eval_for_head
+# ────────────────────────────────────────────────────────────────────────────
+# These cases mock `gh` itself (a fake executable placed first on PATH) so the
+# eval-artifact primitive chain (repo() -> gh api user / gh repo view / gh api
+# .../comments) resolves deterministically with no real network or GitHub
+# auth. REPO_EVAL is a fresh repo with an `origin` remote (repo() needs one)
+# and review-pr evidence already satisfied in the transcript, so these cases
+# isolate the NEW eval gate rather than the pre-existing review-pr gate.
+
+REPO_EVAL="$TMP/repo_eval"
+git -C "$TMP" init -q repo_eval
+git -C "$REPO_EVAL" config user.email t@t.t
+git -C "$REPO_EVAL" config user.name t
+git -C "$REPO_EVAL" remote add origin https://github.com/acme/widgets.git
+git -C "$REPO_EVAL" commit -q --allow-empty -m init
+mkdir -p "$REPO_EVAL/.claude"
+printf 'jira: null\n' > "$REPO_EVAL/.claude/workflow.config.yaml"
+
+HEAD_SHA="deadbeef0000000000000000000000000000beef"
+
+# `gh` is already mocked globally (top of file). These cases override
+# MOCK_GH_HEAD_SHA / MOCK_GH_COMMENT_BODY / MOCK_GH_FETCH_FAIL per-call to
+# exercise the eval gate's branches directly, rather than relying on the
+# default auto-GO behaviour used by the pre-existing review-pr-only cases.
+
+# run_eval: like run(), but also captures the deny reason text for tier assertions.
+run_eval() {
+  printf '%s' "$1" | bash "$HOOK" 2>/dev/null
+}
+
+decision_of() {  # hook JSON output -> ALLOW | DENY
+  if printf '%s' "$1" | grep -q '"permissionDecision"[[:space:]]*:[[:space:]]*"deny"'; then
+    echo DENY
+  else
+    echo ALLOW
+  fi
+}
+
+# Transcript with review-pr evidence for PR 42 already satisfied, so only the
+# eval gate is under test.
+T_REVIEWED_42=$(mk_transcript \
+  "$(mk_skill_line "coderails:push")" \
+  "$(mk_skill_line_with_args "pr-review-toolkit:review-pr" "42")")
+
+# ── Case 79: no eval marker at all -> deny, reason mentions eval artifact ────
+MOCK_GH_HEAD_SHA="$HEAD_SHA" MOCK_GH_COMMENT_BODY="" out=$(
+  MOCK_GH_HEAD_SHA="$HEAD_SHA" MOCK_GH_COMMENT_BODY="" \
+  run_eval "$(payload "gh pr merge 42 --squash" "$T_REVIEWED_42" "$REPO_EVAL")"
+)
+check "gh pr merge 42, no eval marker -> deny" DENY "$(decision_of "$out")"
+case "$out" in
+  *"eval artifact"*) : ;;
+  *) printf 'FAIL - deny reason should mention eval artifact (got: %s)\n' "$out"; fails=$((fails + 1)) ;;
+esac
+
+# ── Case 80: GO eval marker for the head SHA -> NOT denied ──────────────────
+GO_MARKER="<!-- coderails-eval-summary v1 pr=42 head_sha=${HEAD_SHA} result=GO tier=1 -->"
+out=$(
+  MOCK_GH_HEAD_SHA="$HEAD_SHA" MOCK_GH_COMMENT_BODY="$GO_MARKER" \
+  run_eval "$(payload "gh pr merge 42 --squash" "$T_REVIEWED_42" "$REPO_EVAL")"
+)
+check "gh pr merge 42, GO eval marker tier 1 -> allow" ALLOW "$(decision_of "$out")"
+
+# ── Case 81: tier-0 GO marker -> NOT denied ──────────────────────────────────
+GO_TIER0_MARKER="<!-- coderails-eval-summary v1 pr=42 head_sha=${HEAD_SHA} result=GO tier=0 -->"
+out=$(
+  MOCK_GH_HEAD_SHA="$HEAD_SHA" MOCK_GH_COMMENT_BODY="$GO_TIER0_MARKER" \
+  run_eval "$(payload "gh pr merge 42 --squash" "$T_REVIEWED_42" "$REPO_EVAL")"
+)
+check "gh pr merge 42, GO eval marker tier 0 -> allow" ALLOW "$(decision_of "$out")"
+
+# ── Case 82: NO-GO marker with tier N -> deny, message includes the tier ────
+NOGO_MARKER="<!-- coderails-eval-summary v1 pr=42 head_sha=${HEAD_SHA} result=NO-GO tier=2 -->"
+out=$(
+  MOCK_GH_HEAD_SHA="$HEAD_SHA" MOCK_GH_COMMENT_BODY="$NOGO_MARKER" \
+  run_eval "$(payload "gh pr merge 42 --squash" "$T_REVIEWED_42" "$REPO_EVAL")"
+)
+check "gh pr merge 42, NO-GO eval marker tier 2 -> deny" DENY "$(decision_of "$out")"
+case "$out" in
+  *"tier 2"*) : ;;
+  *) printf 'FAIL - NO-GO deny reason should include tier (got: %s)\n' "$out"; fails=$((fails + 1)) ;;
+esac
+
+# ── Case 83: gh fetch fails -> deny (fail-closed), reason includes a retry hint
+# Uses MOCK_GH_COMMENTS_FAIL (not MOCK_GH_FETCH_FAIL) so that pr::head_sha,
+# the identity fetch, and the permission fetch all still succeed and only the
+# comments fetch fails -- this genuinely drives
+# pr::has_coderails_eval_for_head's rc=2 path (fail-closed) in
+# enforce_pr_workflow.sh, rather than being denied earlier for an unrelated
+# reason (head-SHA resolution failure) that happens to also mention "retry".
+# The assertion below checks for a substring UNIQUE to the rc=2 default
+# message ("could not fetch PR comments for the eval artifact") so this case
+# fails if the `[ "$eval_rc" -eq 2 ]` branch is ever removed and rc=2 falls
+# through to the generic NO-GO/no-marker deny (whose messages are worded
+# differently and do not mention "fetch PR comments").
+out=$(
+  MOCK_GH_HEAD_SHA="$HEAD_SHA" MOCK_GH_COMMENTS_FAIL=1 \
+  run_eval "$(payload "gh pr merge 42 --squash" "$T_REVIEWED_42" "$REPO_EVAL")"
+)
+check "gh pr merge 42, gh fetch fails -> deny (fail-closed)" DENY "$(decision_of "$out")"
+case "$out" in
+  *"could not fetch PR comments for the eval artifact"*) : ;;
+  *) printf 'FAIL - fetch-fail deny reason should be the rc=2 default message (got: %s)\n' "$out"; fails=$((fails + 1)) ;;
+esac
+
+# ── Case 84: NO_CONFIG -> stands aside (no deny) regardless of eval state ───
+# REPO_NO_CONFIG has no .claude/workflow.config.yaml. Even with no eval marker
+# mocked, the hook's existing opt-in posture (gate_config_present) must exit 0
+# before the eval gate ever runs.
+T_REVIEWED_42_NOCFG=$(mk_transcript \
+  "$(mk_skill_line "coderails:push")" \
+  "$(mk_skill_line_with_args "pr-review-toolkit:review-pr" "42")")
+out=$(
+  MOCK_GH_HEAD_SHA="$HEAD_SHA" MOCK_GH_COMMENT_BODY="" \
+  run_eval "$(payload "gh pr merge 42 --squash" "$T_REVIEWED_42_NOCFG" "$REPO_NO_CONFIG")"
+)
+check "NO_CONFIG -> allow regardless of eval marker state" ALLOW "$(decision_of "$out")"
+
+# ── Case 85: review-pr gate still fires FIRST — no review-pr evidence, no eval
+# marker either -> deny for the review-pr reason, not (only) the eval reason.
+# Confirms ordering: enforce_required_step (review gate) precedes the new eval
+# gate, per the build contract.
+T_NO_REVIEW=$(mk_transcript "$(mk_skill_line "coderails:push")")
+out=$(
+  MOCK_GH_HEAD_SHA="$HEAD_SHA" MOCK_GH_COMMENT_BODY="" \
+  run_eval "$(payload "gh pr merge 42 --squash" "$T_NO_REVIEW" "$REPO_EVAL")"
+)
+check "no review-pr evidence -> deny (review gate fires first)" DENY "$(decision_of "$out")"
+case "$out" in
+  *"review-pr"*) : ;;
+  *) printf 'FAIL - deny reason should mention review-pr (got: %s)\n' "$out"; fails=$((fails + 1)) ;;
+esac
 
 [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails)"; exit 1; }
