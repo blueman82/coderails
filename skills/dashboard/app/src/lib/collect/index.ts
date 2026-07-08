@@ -1,6 +1,7 @@
 import { watch, type FSWatcher } from "node:fs";
 import type { DashboardConfig } from "../config";
 import { readRuns, type RunRecord } from "../runlog";
+import { runOutputBus as defaultRunOutputBus, type RunOutputBus, type RunOutputEvent } from "../runOutputBus";
 import { collectBuilds, type BuildEntry } from "./builds";
 import { collectHealth, type HealthTile } from "./health";
 import { collectMemoryTrail, type TrailEntry } from "./memoryTrail";
@@ -32,13 +33,41 @@ export interface AggregatorDeps {
   gatesPollMs?: number;
   activityDebounceMs?: number;
   onError?: (source: string, err: unknown) => void;
+  // Test-only seam: inject a fake bus instead of the process-wide singleton
+  // in ../runOutputBus.
+  runOutputBus?: RunOutputBus;
 }
 
-export type AggregatorEventName = "runs" | "gates" | "activity";
+export type AggregatorEventName = "runs" | "gates" | "activity" | "run-output";
+
+// Maps each event name to the real payload type emitted alongside it, so a
+// call site that emits/handles the wrong shape for a given name is a compile
+// error rather than something only caught (or missed) at runtime — "data" was
+// previously typed as bare `unknown` here.
+export interface AggregatorEventPayloadMap {
+  runs: RunRecord[];
+  gates: (PrGate | PrGateError)[];
+  activity: Pick<Snapshot, "sessions" | "loops" | "trail" | "health" | "queue" | "builds">;
+  "run-output": RunOutputEvent;
+}
+
+// A single listener handles every event name (the SSE route registers one
+// listener and forwards {event, data} straight into an SSE frame), so the
+// listener signature is a function overloaded per event name — that keeps
+// "gates" paired only with its own payload type (not a union of every
+// payload type, which `(event: AggregatorEventName, data: X | Y | Z) => void`
+// would silently allow) a compile error at both emit() and subscribe() call
+// sites for a mismatched pairing.
+export interface AggregatorEventListener {
+  (event: "runs", data: AggregatorEventPayloadMap["runs"]): void;
+  (event: "gates", data: AggregatorEventPayloadMap["gates"]): void;
+  (event: "activity", data: AggregatorEventPayloadMap["activity"]): void;
+  (event: "run-output", data: AggregatorEventPayloadMap["run-output"]): void;
+}
 
 export interface Aggregator {
   getSnapshot(): Snapshot;
-  subscribe(listener: (event: AggregatorEventName, data: unknown) => void): () => void;
+  subscribe(listener: AggregatorEventListener): () => void;
   start(): void;
   stop(): void;
 }
@@ -87,11 +116,13 @@ export function createAggregator(deps: AggregatorDeps): Aggregator {
   const gatesPollMs = deps.gatesPollMs ?? DEFAULT_GATES_POLL_MS;
   const activityDebounceMs = deps.activityDebounceMs ?? DEFAULT_ACTIVITY_DEBOUNCE_MS;
   const onError = deps.onError ?? (() => {});
+  const runOutputBus = deps.runOutputBus ?? defaultRunOutputBus;
 
-  const listeners = new Set<(event: AggregatorEventName, data: unknown) => void>();
+  const listeners = new Set<AggregatorEventListener>();
   const watchers: FSWatcher[] = [];
   let gatesTimer: ReturnType<typeof setInterval> | undefined;
   let activityDebounceTimer: ReturnType<typeof setTimeout> | undefined;
+  let unsubscribeRunOutput: (() => void) | undefined;
 
   let snapshot: Snapshot = {
     sessions: [],
@@ -104,8 +135,19 @@ export function createAggregator(deps: AggregatorDeps): Aggregator {
     builds: [],
   };
 
-  function emit(event: AggregatorEventName, data: unknown): void {
-    for (const listener of listeners) listener(event, data);
+  // Overloaded the same way as AggregatorEventListener so each call site
+  // below is checked against that event name's real payload type, not a
+  // catch-all `unknown`.
+  function emit(event: "runs", data: AggregatorEventPayloadMap["runs"]): void;
+  function emit(event: "gates", data: AggregatorEventPayloadMap["gates"]): void;
+  function emit(event: "activity", data: AggregatorEventPayloadMap["activity"]): void;
+  function emit(event: "run-output", data: AggregatorEventPayloadMap["run-output"]): void;
+  function emit(event: AggregatorEventName, data: AggregatorEventPayloadMap[AggregatorEventName]): void {
+    for (const listener of listeners) listener(event as never, data as never);
+  }
+
+  function onRunOutput(event: RunOutputEvent): void {
+    emit("run-output", event);
   }
 
   function safeCall<T>(source: string, fn: () => T, fallback: T): T {
@@ -212,6 +254,8 @@ export function createAggregator(deps: AggregatorDeps): Aggregator {
 
       void refreshGates();
       gatesTimer = setInterval(() => void refreshGates(), gatesPollMs);
+
+      unsubscribeRunOutput = runOutputBus.subscribe(onRunOutput);
     },
 
     stop(): void {
@@ -219,6 +263,8 @@ export function createAggregator(deps: AggregatorDeps): Aggregator {
       watchers.length = 0;
       if (gatesTimer) clearInterval(gatesTimer);
       if (activityDebounceTimer) clearTimeout(activityDebounceTimer);
+      unsubscribeRunOutput?.();
+      unsubscribeRunOutput = undefined;
       listeners.clear();
     },
   };
