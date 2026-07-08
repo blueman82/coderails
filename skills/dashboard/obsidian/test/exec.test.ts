@@ -215,7 +215,9 @@ describe("pressButton — buildArgv throw parity", () => {
   });
 
   it("does not throw for a button with a non-empty command and no input", async () => {
-    const execFile = vi.fn();
+    const execFile = vi.fn((_cmd, _args, _opts, callback) => {
+      callback(null, "output", "");
+    });
     const deps = makeDeps({ execFile });
 
     const result = await pressButton(deps, BUTTONS, "wiki-lint");
