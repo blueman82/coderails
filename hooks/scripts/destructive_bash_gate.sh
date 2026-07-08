@@ -103,10 +103,40 @@ allowlist_permits() {
 # -fu, -ufd — git's own getopt-style combined short-flag behaviour), mirroring
 # this file's existing git-clean force detector above (line 47) rather than
 # only a standalone -f token, which a combined cluster would otherwise evade.
-naked_force_re='(--force($|[^-])|(^| )-[a-zA-Z]*f[a-zA-Z]*( |$))'
-if echo "$cmd" | grep -qiE "\\bgit +push\\b.*(${naked_force_re}|--force-with-lease\\b)"; then
-  if echo "$cmd" | grep -qiE '\bgit +push +.*--force-with-lease\b' \
-     && ! echo "$cmd" | grep -qiE "\\bgit +push\\b.*${naked_force_re}" \
+# All token boundaries use [[:space:]] (not a literal space) — bash's default
+# IFS splits on space, tab, AND newline, so a tab between flags on one
+# tool_input line produces the same real argv split as a space would; a
+# literal-space-only boundary here previously let a tab-separated naked
+# force slip past undetected while a space-separated one correctly denied.
+#
+# force_cmd_flat: $cmd normalised for matching below. Two passes, in order:
+#   1. Splice backslash-newline PAIRS out entirely (awk, RS set to the
+#      literal pair). Bash's own line-continuation removes both the
+#      backslash and the newline with NOTHING inserted in their place,
+#      fusing the characters on either
+#      side into one token — e.g. `--for` + backslash-newline + `ce`
+#      becomes the single real argv token `--force`. A naive `tr '\n' ' '`
+#      instead REPLACES the newline with a space and leaves the backslash
+#      behind, producing `--for\ ce` (two tokens, stray backslash) — the
+#      regex never sees a contiguous "--force" and a continuation split
+#      INSIDE a flag word (not just between two separate flag tokens)
+#      bypassed detection entirely, with no allowlist needed at all.
+#   2. THEN flatten any remaining bare (non-backslash-preceded) newlines to
+#      spaces, for the inter-token case: `echo "$cmd" | grep` is inherently
+#      line-oriented — grep's `.` and `[[:space:]]` can never match ACROSS
+#      a newline no matter how the character class is written, so two
+#      flags on separate physical lines (joined into one logical command
+#      by a continuation) still need normalising to be visible to a
+#      single-line regex.
+# Scoped locally (not reusing the file's later cmd_flat, defined further
+# down for the substitution-check block and not in scope yet here — and
+# that later cmd_flat has the SAME splice gap this fixes, since it also
+# only does a plain tr; out of scope to change here, flagged separately).
+force_cmd_flat=$(printf '%s' "$cmd" | awk 'BEGIN{RS="\\\\\n"} {printf "%s", $0}' | tr '\n' ' ')
+naked_force_re='(--force([^-]|$)|(^|[[:space:]])-[a-zA-Z]*f[a-zA-Z]*([[:space:]]|$))'
+if echo "$force_cmd_flat" | grep -qiE "\\bgit[[:space:]]+push\\b.*(${naked_force_re}|--force-with-lease\\b)"; then
+  if echo "$force_cmd_flat" | grep -qiE '\bgit[[:space:]]+push[[:space:]]+.*--force-with-lease\b' \
+     && ! echo "$force_cmd_flat" | grep -qiE "\\bgit[[:space:]]+push\\b.*${naked_force_re}" \
      && allowlist_permits "git-push-force-with-lease"; then
     : # allowlisted force-with-lease, no naked --force present — allow
   else
