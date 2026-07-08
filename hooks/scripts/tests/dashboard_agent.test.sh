@@ -56,6 +56,25 @@ check "wrapper does not write a PID file" "yes" \
 # path, and PATH itself must be exported so npm's internal shell-outs work.
 check "wrapper exports PATH with /opt/homebrew/bin" "yes" \
   "$(grep -qE 'export PATH=.*opt/homebrew/bin' "$WRAPPER" 2>/dev/null && echo yes || echo no)"
+# The approve->build wrapper invokes the `claude` CLI, which lives in
+# ~/.local/bin — absent from launchd's empty PATH, so the exported PATH must
+# include it or a daemon-spawned build dies "claude: command not found".
+check "wrapper's PATH includes ~/.local/bin for the claude CLI" "yes" \
+  "$(grep -qE 'export PATH=.*\.local/bin' "$WRAPPER" 2>/dev/null && echo yes || echo no)"
+
+# launchd's env also carries none of the builder env the approve->build
+# route depends on. Without CODERAILS_BUILDER_REPO_PATH the wrapper aborts
+# on its `:?` guard (unexpected_exit:1) on every real Approve, and without
+# CODERAILS_BUILDER_WRAPPER the prod bundle's __dirname resolution can miss
+# the script — both were live E5 failures. The launcher must export them so
+# every launchd respawn carries them, and both must be absolute so they
+# survive the scheduler's empty env.
+check "wrapper exports CODERAILS_BUILDER_REPO_PATH" "yes" \
+  "$(grep -qE 'export CODERAILS_BUILDER_REPO_PATH=' "$WRAPPER" 2>/dev/null && echo yes || echo no)"
+check "wrapper exports CODERAILS_BUILDER_WRAPPER" "yes" \
+  "$(grep -qE 'export CODERAILS_BUILDER_WRAPPER=' "$WRAPPER" 2>/dev/null && echo yes || echo no)"
+check "wrapper's CODERAILS_BUILDER_WRAPPER points at run-builder.sh" "yes" \
+  "$(grep -qE 'CODERAILS_BUILDER_WRAPPER=.*run-builder\.sh' "$WRAPPER" 2>/dev/null && echo yes || echo no)"
 
 # The wrapper deliberately uses bare `npm` via its exported PATH rather than
 # a `$SCRIPT_DIR/../` node target — routine_runner_bin_targets.test.sh
