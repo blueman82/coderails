@@ -92,6 +92,21 @@ These skills were written for coderails and are not vendored from elsewhere.
 
 **Invocation:** `/coderails:dashboard` or `scripts/start-dashboard.sh`.
 
+**Run output viewer:** the COMMAND DECK's `OutputViewerPanel`
+(`skills/dashboard/app/src/components/OutputViewerPanel.tsx`) shows a
+run's output, selected by clicking a row in run history. A still-live run
+streams via the `run-output` SSE event (`runId`, `chunk`) added to the
+aggregator's event set in `skills/dashboard/app/src/lib/collect/index.ts`
+and published by `skills/dashboard/app/src/lib/runOutputBus.ts` — an
+in-process pub/sub, not a second SSE endpoint, so it rides the existing
+single `/api/events` connection. A finished run's full output is instead
+fetched once from `GET /api/run/output`
+(`skills/dashboard/app/src/app/api/run/output/route.ts`), which takes
+`runId` + `token` query params and returns `{status: "ok", output}`,
+`{status: "in-progress"}` (409, if the
+run's `endedAt` hasn't landed yet — the client should keep using the live
+SSE buffer instead) or `{status: "error", error}`.
+
 ---
 
 #### `workflow-audit`

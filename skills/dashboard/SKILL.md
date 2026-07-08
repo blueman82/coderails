@@ -22,7 +22,9 @@ Seven panels:
 3. **DOCUMENTS / MEMORY.TRAIL** — newest-first feed across the wiki and
    memory directories.
 4. **COMMAND DECK** — declared buttons (bounded, config-driven runs — never a
-   free prompt box) plus run history.
+   free prompt box) plus run history, plus a Run Output viewer: click any
+   run-history row to view its output — live-streaming while the run is
+   still going, settled (fetched once) once it ends.
 5. **PR GATES** — open PRs with gate state: merge-ready / blocked (missing
    artifact) / stale (SHA mismatch).
 6. **Bottom-centre hero** — the active loop's primary directive with a big
