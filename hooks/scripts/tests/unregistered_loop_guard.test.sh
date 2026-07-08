@@ -338,6 +338,22 @@ out=$(run_stdout "$(payload "$all_malformed_e2e" S1)")
 check "all-malformed transcript end-to-end -> exit 0" "0" "$code"
 check "all-malformed transcript end-to-end -> silent stdout (fail-open, no spurious nudge)" "" "$out"
 
+# Regression (subshell-loss bug): ulg_count_dispatch_turns sets ULG_PARSE_REASON
+# on a GLOBAL, but the hook body calls it via command substitution
+# (dispatch_turns=$(...)), which runs the function in a SUBSHELL -> the global
+# assignment dies there and the parent-shell read of ULG_PARSE_REASON is always
+# empty in production. For an all-malformed transcript this means the
+# jq_parse_error reason=... log line the hook is SUPPOSED to emit never fires;
+# it falls through to the >=3 threshold check and logs reason=below_threshold
+# instead. Drives the REAL hook binary (not the sourced function) end-to-end
+# and asserts the discipline log actually contains reason=jq_parse_error.
+rm -rf "$CLAUDE_AGENTIC_LOOP_DIR"
+: > "$CLAUDE_DISCIPLINE_LOG"
+all_malformed_reason_e2e=$(mk_all_malformed_transcript)
+run "$(payload "$all_malformed_reason_e2e" S-JQERR)" >/dev/null
+check "all-malformed transcript end-to-end -> discipline log records reason=jq_parse_error" 1 \
+  "$(grep -c 'hook=unregistered_loop_guard session=S-JQERR.*reason=jq_parse_error' "$CLAUDE_DISCIPLINE_LOG" 2>/dev/null; true)"
+
 # End-to-end core proof: 3 valid dispatch turns + 1 malformed line -> the
 # recovered count crosses the threshold and the nudge FIRES. This is the
 # fixture that proves the fix's actual purpose (the 2-valid fixture above
