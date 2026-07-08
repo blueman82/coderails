@@ -42,12 +42,22 @@
 # is "Agent", never "Task", in this harness.
 # (A null/missing message.id on multiple dispatch turns would collapse them
 # to one via `unique` — not observed in real transcripts, defense-in-depth only.)
-# Pure: prints an integer, no side effects, no exit calls. Sets global
+# Pure: prints an integer on stdout, no exit calls. Sets global
 # ULG_PARSE_REASON to "jq_missing", "jq_parse_error", or "" (empty) — but
 # "" now covers TWO cases, not one: a genuinely quiet transcript (0 real
 # dispatches) AND a BENIGN PARTIAL SKIP (some lines malformed, but at least
 # one line parsed) — a partial skip is not a failure, so the recovered count
 # is valid and must be allowed through unattributed, same as a clean parse.
+#
+# The non-empty reason cases ALSO echo the reason token on stderr, mirroring
+# als_count_invocations (lib/loop_state_common.sh). Reason: the hook body
+# below invokes this function via command substitution
+# (dispatch_turns=$(ulg_count_dispatch_turns ...)), which runs the function
+# in a SUBSHELL — a plain global assignment inside that subshell never
+# reaches the parent shell. Direct/sourced callers (9 existing unit tests)
+# still read the global directly and are unaffected; the hook body instead
+# captures stderr to a scratch file to recover the reason across the
+# subshell boundary. stdout stays a bare integer either way.
 #
 # Two-stage tolerant parse (mirrors als_count_invocations in
 # lib/loop_state_common.sh): stage 1 (`jq -R 'fromjson? // empty'`) parses
@@ -65,12 +75,13 @@ ulg_count_dispatch_turns() {
   local transcript="$1"
   ULG_PARSE_REASON=""
   [ -n "$transcript" ] && [ -f "$transcript" ] || { printf '0'; return; }
-  command -v jq >/dev/null 2>&1 || { ULG_PARSE_REASON="jq_missing"; printf '0'; return; }
+  command -v jq >/dev/null 2>&1 || { ULG_PARSE_REASON="jq_missing"; echo "jq_missing" >&2; printf '0'; return; }
   local total tolerant tolerant_rc
   total=$(grep -c '[^[:space:]]' "$transcript" 2>/dev/null); [ -z "$total" ] && total=0
   tolerant=$(jq -R 'fromjson? // empty' "$transcript" 2>/dev/null); tolerant_rc=$?
   if [ "$tolerant_rc" -ne 0 ]; then
     ULG_PARSE_REASON="jq_parse_error"
+    echo "jq_parse_error" >&2
     printf '0'
     return
   fi
@@ -89,6 +100,7 @@ ulg_count_dispatch_turns() {
   case "$n" in (''|*[!0-9]*) n=0;; esac
   if [ "$n" -eq 0 ] && [ "$total" -gt 0 ] && [ -z "$tolerant" ]; then
     ULG_PARSE_REASON="jq_parse_error"
+    echo "jq_parse_error" >&2
   fi
   printf '%s' "$n"
 }
@@ -145,9 +157,37 @@ if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
     exit 0
   }
 
-  dispatch_turns=$(ulg_count_dispatch_turns "$transcript")
-  if [ -n "$ULG_PARSE_REASON" ]; then
-    als_log "hook=unregistered_loop_guard session=$session_id nudged=0 reason=$ULG_PARSE_REASON"
+  # Command substitution below runs ulg_count_dispatch_turns in a SUBSHELL, so
+  # its global ULG_PARSE_REASON assignment cannot reach this parent shell —
+  # capture the reason it also emits on stderr instead, mirroring how
+  # als_stable_invocations (lib/loop_state_common.sh) recovers als_count_invocations'
+  # stderr-signalled reason across the same kind of subshell boundary.
+  ulg_err_file=$(mktemp 2>/dev/null) || ulg_err_file=""
+  if [ -n "$ulg_err_file" ]; then
+    dispatch_turns=$(ulg_count_dispatch_turns "$transcript" 2>"$ulg_err_file")
+    # Reading the WHOLE file as one reason is safe only because
+    # ulg_count_dispatch_turns emits at most one single-line token on stderr
+    # (jq_missing or jq_parse_error) and never a second line — unlike the
+    # reference als_stable_invocations, which parses up to two stderr lines
+    # (a skipped_malformed=N breadcrumb plus a reason tag) and so can't use
+    # this shortcut. If a future edit adds a second stderr line here, this
+    # plain `cat` will silently fold it into parse_reason.
+    parse_reason=$(cat "$ulg_err_file" 2>/dev/null)
+    rm -f "$ulg_err_file" 2>/dev/null
+  else
+    # mktemp itself is unavailable, so any real stderr reason (jq_missing /
+    # jq_parse_error) is unrecoverable — this transcript's parse_reason falls
+    # through to empty below exactly as before this fix (log-only change, NOT
+    # a new exit/nudge path: below_threshold or the nudge itself still decide
+    # the outcome same as always). Log a one-line breadcrumb so the degraded
+    # mode is at least visible instead of silently indistinguishable from a
+    # clean parse.
+    dispatch_turns=$(ulg_count_dispatch_turns "$transcript" 2>/dev/null)
+    parse_reason=""
+    als_log "hook=unregistered_loop_guard session=$session_id reason=mktemp_unavailable attribution=lost"
+  fi
+  if [ -n "$parse_reason" ]; then
+    als_log "hook=unregistered_loop_guard session=$session_id nudged=0 reason=$parse_reason"
     exit 0
   fi
   [ "$dispatch_turns" -ge 3 ] || {
