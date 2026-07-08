@@ -109,6 +109,13 @@ check "main: redirect > .ts -> deny"  DENY  "$(run_cwd "$(payload_with_cwd "echo
 check "main: tee SKILL.md -> deny"    DENY  "$(run_cwd "$(payload_with_cwd "tee skills/mything/SKILL.md" "$MAIN_REPO")" "$MAIN_REPO")"
 # on main — tee into a command -> DENY
 check "main: tee commands/x.md -> deny" DENY "$(run_cwd "$(payload_with_cwd "tee commands/prep.md" "$MAIN_REPO")" "$MAIN_REPO")"
+# lookalike plugin-path filenames that merely CONTAIN "skills/"/"commands/" as a
+# substring, not the actual plugin directory at a token boundary -> ALLOW
+check "main: tee xcommands/prep.md -> allow"        ALLOW "$(run_cwd "$(payload_with_cwd "tee xcommands/prep.md" "$MAIN_REPO")" "$MAIN_REPO")"
+check "main: tee not-skills/x/SKILL.md -> allow"    ALLOW "$(run_cwd "$(payload_with_cwd "tee not-skills/x/SKILL.md" "$MAIN_REPO")" "$MAIN_REPO")"
+check "main: tee docs/notcommands/x.md -> allow"    ALLOW "$(run_cwd "$(payload_with_cwd "tee docs/notcommands/x.md" "$MAIN_REPO")" "$MAIN_REPO")"
+# genuine nested plugin path (real skills/ dir under an unrelated parent) -> DENY
+check "main: tee vendor/skills/x/SKILL.md -> deny"  DENY  "$(run_cwd "$(payload_with_cwd "tee vendor/skills/x/SKILL.md" "$MAIN_REPO")" "$MAIN_REPO")"
 # on main — sed -i on README.md (non-source) -> ALLOW
 check "main: sed -i README.md -> allow" ALLOW "$(run_cwd "$(payload_with_cwd "sed -i 's/a/b/' README.md" "$MAIN_REPO")" "$MAIN_REPO")"
 # on feature branch — same commands -> ALLOW
