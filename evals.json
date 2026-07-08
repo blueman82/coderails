@@ -24,10 +24,10 @@
       "mode": "scripted",
       "surface": "merged-state",
       "assert": "pressButton resolves to { ok: false, reason: 'invalid-input' } (never rejects/throws) when input has leading whitespace then a dash (slips exec.ts's own untrimmed pre-check, hits buildArgv's trimmed check), and no fs/spawn side effect fires",
-      "cmd": "cd skills/dashboard/obsidian && npx vitest run test/exec.test.ts -t 'leading whitespace'",
+      "cmd": "cd skills/dashboard/obsidian && npx vitest run test/exec.test.ts -t 'buildArgv throw parity'",
       "negative_control": "git stash the try/catch wrap in src/exec.ts, re-run the same command — must fail since exec.ts:116's untrimmed startsWith('-') check does not catch '  --dangerously-skip-permissions' and the throw propagates uncaught",
-      "status": "pending",
-      "evidence": ""
+      "status": "pass",
+      "evidence": "Pre-fix (RED, confirmed live): 'Error: buildArgv: input must not start with '-' (got:   --dangerously-skip-permissions)' thrown at argv.ts:66, uncaught through exec.ts:126, test failed for the right reason (exec.ts:116's untrimmed check let it through). Post-fix (GREEN): same run as E1 -> 2 passed."
     },
     {
       "id": "E3",
