@@ -105,16 +105,47 @@ als_sanitise_session_id() {
 # mirroring the reason-tag's stderr-only/fail-open-stdout convention above) so
 # the retrying caller can surface it without disturbing the integer stdout
 # contract. genuinely-empty input (0 lines) reports N=0, i.e. no line.
+#
+# total (grep -c, one read of the file) and parsed (jq -R, a SECOND,
+# independent read) are not from a single read — against an actively-
+# appended transcript, the two reads can observe different line counts across
+# the flush-race window, which can skew or suppress the skipped_malformed
+# breadcrumb for that one attempt. This affects only the breadcrumb's
+# accuracy, never the correctness of the invocation COUNT itself (stage 2
+# only ever aggregates what stage 1 actually parsed), and als_stable_invocations'
+# retry loop rides out the same window for the count regardless.
+#
+# Explicit failure attribution: readability and stage-1 exit status are
+# checked before either count is computed, so an unreadable file or a broken
+# jq surfaces its own reason (read_error) rather than masquerading as a
+# skipped-line breadcrumb. When stage 1 succeeds but produces ZERO parsed
+# lines out of a NON-EMPTY input (every line malformed), that is reported
+# distinctly as "all_lines_malformed" rather than skipped_malformed=N — a
+# transcript that is 100% garbage is not "N lines skipped, rest counted", and
+# conflating the two made a totally-unparseable read indistinguishable from
+# one bad line in an otherwise-clean transcript.
+# Known limitation: a bare `null` or `false` JSONL line is valid JSON but
+# `fromjson? // empty` maps both to empty output, so stage 1 drops them and
+# stage 2's count treats them as skipped_malformed — a real Claude Code
+# transcript is always one JSON OBJECT per line, so this is unreachable in
+# practice, not worth a code branch for.
 als_count_invocations() {
   command -v jq >/dev/null 2>&1 || { echo "jq_missing" >&2; return; }
+  [ -r "$1" ] || { echo "read_error" >&2; return; }
   local total parsed skipped
   total=$(grep -c '[^[:space:]]' "$1" 2>/dev/null); [ -z "$total" ] && total=0
-  local tolerant; tolerant=$(jq -R 'fromjson? // empty' "$1" 2>/dev/null)
+  local tolerant tolerant_rc
+  tolerant=$(jq -R 'fromjson? // empty' "$1" 2>/dev/null); tolerant_rc=$?
+  if [ "$tolerant_rc" -ne 0 ]; then echo "read_error" >&2; return; fi
   parsed=0
   [ -n "$tolerant" ] && parsed=$(printf '%s' "$tolerant" | jq -s 'length' 2>/dev/null)
   [ -z "$parsed" ] && parsed=0
   skipped=$((total - parsed))
-  [ "$skipped" -gt 0 ] && echo "skipped_malformed=$skipped" >&2
+  if [ "$parsed" -eq 0 ] && [ "$total" -gt 0 ]; then
+    echo "all_lines_malformed" >&2
+  elif [ "$skipped" -gt 0 ]; then
+    echo "skipped_malformed=$skipped" >&2
+  fi
   printf '%s' "$tolerant" | jq -s -r '
     def loop_name: test("(^|:)agentic-loop$");
     [ .[]?
@@ -145,27 +176,35 @@ als_count_invocations() {
 }
 
 # Stable invocation count: retry for the transcript-flush race until it settles.
-# Logs EXACTLY ONE summary line via als_log when any attempt hit a jq failure —
-# never one line per attempt (that was the ambiguous-recovery / double-log bug:
-# a transient failure that recovered on retry was indistinguishable from one
-# that never recovered, and a sustained failure logged once per attempt with no
-# final verdict). outcome=recovered means the LAST attempt succeeded (no reason
-# tag on that attempt); outcome=exhausted means it didn't. attempts=N is the
-# number of jq calls made. Zero lines when every attempt was clean. Gate
-# outcomes (stdout contract, fail-open) are unchanged — this only affects what
-# gets logged.
+# Logs EXACTLY ONE summary line via als_log when any attempt hit a reason tag
+# (jq_missing / read_error / all_lines_malformed / jq_parse_error) or saw a
+# partial skip — never one line per attempt (that was the ambiguous-recovery /
+# double-log bug: a transient failure that recovered on retry was
+# indistinguishable from one that never recovered, and a sustained failure
+# logged once per attempt with no final verdict). outcome=recovered means the
+# LAST attempt succeeded (no reason tag on that attempt); outcome=exhausted
+# means it didn't. attempts=N is the number of als_count_invocations calls
+# made. Zero lines when every attempt was clean: no reason tag on ANY attempt,
+# AND no skipped lines on any attempt. Gate outcomes (stdout contract,
+# fail-open) are unchanged — this only affects what gets logged.
 #
-# skipped_malformed=N (from als_count_invocations' per-line tolerant parse) is
-# tracked SEPARATELY from the jq_missing/jq_parse_error reason tag: dropping a
-# malformed line is not itself a failure needing a retry (the count is still
-# valid), so it must not block the settling check the way reason does. The
-# LAST attempt's N is what gets appended to the summary line, on the SAME line
-# as reason=/attempts=/outcome= — and appended ONLY when N>0 and only when a
-# summary line is already firing for another reason, OR on its own when the
-# count itself settled clean but a malformed line was still seen (an all-clean
-# stdout contract that nonetheless dropped input is not "zero lines when every
-# attempt was clean" — that invariant means "no jq_missing/jq_parse_error AND
-# no skipped lines").
+# skipped_malformed=N (from als_count_invocations' per-line tolerant parse,
+# for the ordinary case of one-or-a-few bad lines among otherwise-clean ones)
+# is tracked SEPARATELY from the reason tag: a partial skip alone is not
+# itself a failure needing a retry (the count is still valid), so it must not
+# gate the settling check below the way a reason tag does. The field appended
+# to the summary line is the MAX skipped_malformed seen ACROSS ALL ATTEMPTS
+# (not just the last one) — a spike on an early attempt must not be lost if a
+# later attempt happens to see fewer or zero skipped lines. It rides on the
+# SAME summary line as reason=/attempts=/outcome=, appended whenever
+# max_skipped>0, whether or not a reason tag also fired.
+#
+# read_error (unreadable/missing-mid-read file, or the stage-1 jq process
+# itself failing) and all_lines_malformed (stage 1 succeeded but every
+# non-blank line was malformed) are real reason tags, exactly like
+# jq_missing/jq_parse_error — they gate settling and can never be conflated
+# with the benign skipped_malformed breadcrumb, which reports a handful of
+# bad lines in an otherwise-trustworthy read.
 als_stable_invocations() {
   local transcript="$1" prev=-1 attempts=0 n=0 last_reason="" seen_reason="" max_skipped=0
   local err_file; err_file=$(mktemp 2>/dev/null) || err_file=""
@@ -237,9 +276,11 @@ EOF
 #   aggregates over what's left. No jq-presence guard here (unlike
 #   als_count_invocations): a missing jq makes stage 1 itself emit nothing,
 #   which stage 2 reduces to "" — the pre-existing no-jq fail-open contract,
-#   preserved unchanged. This function does not log (see als_stable_last_text)
-#   — a malformed-line skip here is silent by design, matching its prior
-#   contract of never distinguishing "malformed" from "no text yet".
+#   preserved unchanged. Neither this function nor its retrying wrapper
+#   als_stable_last_text logs — a malformed-line skip on this path is silent
+#   by design, matching the prior contract of never distinguishing
+#   "malformed" from "no text yet". (Callers like voice_announce.sh log their
+#   own extract_failed reason on empty.)
 als_extract_last_text() {
   local transcript="$1" tail_lines="$2"
   tail -n "$tail_lines" "$transcript" 2>/dev/null | jq -R 'fromjson? // empty' 2>/dev/null | jq -s -r '
@@ -258,8 +299,8 @@ als_extract_last_text() {
 #   Calls als_extract_last_text in a retry loop until the length stabilises
 #   (two consecutive calls return the same non-zero length) or max_attempts is
 #   hit — rides out the transcript-flush race. Prints the stabilised text
-#   (possibly empty, e.g. a malformed transcript line jq -s can't parse across
-#   every attempt). Sets ALS_LAST_ATTEMPTS to the iteration count consumed.
+#   (possibly empty, e.g. no assistant text yet, or every line in the tail
+#   window malformed). Sets ALS_LAST_ATTEMPTS to the iteration count consumed.
 #   Mirrors discipline_common.sh's dc_stable_text; callers must inspect the
 #   RETURNED TEXT for emptiness themselves — this function does not treat
 #   empty-after-exhausting-retries as an error, only as "no text found."
