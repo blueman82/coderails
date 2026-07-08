@@ -21,10 +21,18 @@ dc_file_count() {
 # dc_extract_last_text <transcript> <tail_lines>
 #   Extracts the last assistant text block from a JSONL transcript.
 #   Returns the joined text of the last assistant message that has any text content.
-#   Prints empty string if no such message exists.
+#   Prints empty string if no such message exists (absent/unreadable transcript,
+#   no text blocks, or every line in the tail window malformed).
+#   Tries the whole tail window as one JSON document stream first (the
+#   pre-existing fast path, unchanged for any input that already parses).
+#   Only on failure does it fall back to a per-line tolerant parse — a single
+#   malformed line in the tail window must not collapse extraction of a
+#   genuine final message to empty — stage 1 drops just the bad line, stage 2
+#   aggregates over what's left.
 dc_extract_last_text() {
-  local transcript="$1" tail_lines="$2"
-  tail -n "$tail_lines" "$transcript" 2>/dev/null | jq -s -r '
+  local transcript="$1" tail_lines="$2" tail_content
+  tail_content=$(tail -n "$tail_lines" "$transcript" 2>/dev/null)
+  local jq_filter='
     [.[]?
      | select(.type == "assistant")
      | (.message.content
@@ -33,7 +41,9 @@ dc_extract_last_text() {
           else "" end)
      | select(type == "string" and length > 0)]
     | last // ""
-  ' 2>/dev/null
+  '
+  printf '%s' "$tail_content" | jq -s -r "$jq_filter" 2>/dev/null \
+    || printf '%s' "$tail_content" | jq -R 'fromjson? // empty' 2>/dev/null | jq -s -r "$jq_filter" 2>/dev/null
 }
 
 # dc_stable_text <transcript> <tail_lines> <max_attempts> <sleep_s>
