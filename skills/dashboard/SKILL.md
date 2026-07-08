@@ -60,6 +60,36 @@ scripts/stop-dashboard.sh
 Kills the process recorded in the pidfile and removes it. The dashboard keeps
 no state of its own outside the config and run-history files below.
 
+## Surviving reboots (launchd)
+
+To keep the dashboard running across reboots and crashes, install it as a
+launchd LaunchAgent, mirroring the routine-sweeper agents in
+`docs/routines.md`:
+
+```
+launchd/install-dashboard-agent.sh     # bootstrap into gui/$UID
+launchd/uninstall-dashboard-agent.sh   # bootout
+```
+
+This loads `launchd/com.coderails.dashboard.plist`, which runs
+`skills/dashboard/runner/bin/dashboard-server.sh` with `RunAtLoad` and
+`KeepAlive` set — launchd starts it at login and restarts it if it dies.
+Logs go to `~/.claude/coderails-dashboard/dashboard.log`, same path
+`start-dashboard.sh` uses.
+
+**Once the agent is installed, `stop-dashboard.sh` does not stop it** — the
+agent-owned server has no pidfile for `stop-dashboard.sh` to find. Stop it
+with:
+
+```
+launchctl bootout gui/$UID/com.coderails.dashboard
+```
+
+Likewise, don't hand-run `start-dashboard.sh` while the agent is loaded:
+both will fight over port 4173, and `KeepAlive` means launchd immediately
+respawns its copy, so port 4173 crash-loops every `ThrottleInterval` (60s)
+until one of the two is stopped.
+
 ## First run without a config
 
 If `~/.claude/coderails-dashboard.json` doesn't exist yet, the server still
