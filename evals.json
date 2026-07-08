@@ -37,8 +37,8 @@
       "assert": "full obsidian test directory (config/notes/render/exec) stays green after the fix — no regression",
       "cmd": "cd skills/dashboard/obsidian && npm test",
       "negative_control": "reintroduce a deliberate syntax error in exec.ts's catch block — the suite must fail to run/compile, proving the runner actually executes this code",
-      "status": "pending",
-      "evidence": ""
+      "status": "pass",
+      "evidence": "npm test -> 'Test Files 4 passed (4), Tests 46 passed (46)' (baseline pre-change was 4 files / 44 tests; +2 from this PR's new RED/GREEN tests, 0 regressions)."
     },
     {
       "id": "E4",
