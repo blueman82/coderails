@@ -7,7 +7,7 @@
 
 ## Overview
 
-`coderails` is a single Claude Code plugin (v1.0.0) by Gary Harrison — a merged successor to two former separate plugins (`workflow-tools` and `claude-guardrails`). It ships as a zip, installs via `install.sh` + `/plugin install`, and bundles three core capabilities:
+`coderails` is a single Claude Code plugin (v1.1.0) by Gary Harrison — a merged successor to two former separate plugins (`workflow-tools` and `claude-guardrails`). It ships as a zip, installs via `install.sh` + `/plugin install`, and bundles three core capabilities:
 
 1. **Workflow commands** — `prep → push → merge → wiki` chain
 2. **Skills** — agentic-loop, planning-sequence, premortem, handoff, improve-prompt, test-driven-development, writing-plans, and the wiki subsystem
@@ -135,7 +135,7 @@ The proportional approach is straightforward to implement in bash (integer divis
 
 ---
 
-## 7. CHANGE: `destructive_bash_gate.sh` Should Support a Per-Project Allowlist
+## 7. CHANGE ✅ DONE: `destructive_bash_gate.sh` Supports a Per-Project Allowlist
 
 **Affected:** `hooks/scripts/destructive_bash_gate.sh`
 
@@ -149,7 +149,7 @@ A hardcoded regex permanently blocks: `rm -rf`, `git push --force`, `git push --
 - **`git commit --no-verify`** is sometimes legitimate in CI pipelines where pre-commit hooks run separately. Blocking it offers no per-project override.
 - **No version-controlled, auditable escape.** The only escape is `.claude/settings.json`, which lives outside the repo and isn't version-controlled.
 
-**Proposed action:** Mirror the pattern established by `test_gate.sh` — read a `.claude/destructive_allowlist` file (if it exists) that lists specific patterns to permit. Empty or missing file = current default behavior (block everything). This keeps the secure default while giving teams an opt-in escape that's version-controlled, auditable, and granular (allow `force-with-lease` without allowing naked `--force`).
+**Shipped action:** Mirrors the pattern established by `test_gate.sh` — reads a `.claude/destructive_allowlist` file (if it exists) that lists specific keywords to permit. Empty or missing file = default behavior (block everything). This keeps the secure default while giving teams an opt-in escape that's version-controlled, auditable, and granular (allow `force-with-lease` without allowing naked `--force`). Shipped 2026-07-07 (`4768a3b`): `allowlist_permits()` in `destructive_bash_gate.sh` (closed keyword vocabulary, fail-closed on missing/empty/garbage), with a passing test suite in `hooks/scripts/tests/destructive_bash_gate.test.sh`. (verified — destructive_bash_gate.sh:83-95)
 
 ---
 
@@ -175,7 +175,7 @@ A hardcoded regex permanently blocks: `rm -rf`, `git push --force`, `git push --
 | 4 | **Add ✅ DONE** | `no-edit-on-main` PreToolUse hook | shipped 2026-06-25: `no_edit_on_main.sh` + test (11/11) + hooks.json + install.sh |
 | 5 | **Add** | Integration test for C1/C2 guard consistency | ~50-line test script |
 | 6 | **Change** | `check_confidence_labels.sh` from binary to proportional | ~5-line logic change |
-| 7 | **Change** | `.claude/destructive_allowlist` for `destructive_bash_gate.sh` | ~15-line addition |
+| 7 | **Change ✅ DONE** | `.claude/destructive_allowlist` for `destructive_bash_gate.sh` | shipped 2026-07-07 (`4768a3b`): `allowlist_permits()` + test suite |
 | 8 | **Retracted** | agentic-loop delegation — design already exists in source | No change needed |
 
 ---
