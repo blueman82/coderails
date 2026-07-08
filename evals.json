@@ -15,8 +15,8 @@
       "assert": "install_mode_sweep.test.sh exits 0 with all checks ok when run from inside a worktree checked out under .claude/worktrees/ at final main",
       "cmd": "git worktree add .claude/worktrees/wu4-verify origin/main --detach && (cd .claude/worktrees/wu4-verify && bash hooks/scripts/tests/install_mode_sweep.test.sh); echo EXIT=$?; git worktree remove --force .claude/worktrees/wu4-verify",
       "negative_control": "Same command run against a commit before scripts/lib/git-common.sh etc. were set to 100644 in the index (or with the sweep's mode-read logic deliberately broken) fails one or more `check` lines and exits 1 — proving the test can fail, not just always pass.",
-      "status": "pending",
-      "evidence": ""
+      "status": "pass",
+      "evidence": "Run pre-merge from a worktree at .claude/worktrees/wu4-repro (equivalent construction) against origin/main@e01bddb: all 27 checks 'ok', trailing lines 'PASS' / EXIT=0. Re-verify required against final post-merge main by the fresh grader per frozen-eval convention."
     },
     {
       "id": "E2",
