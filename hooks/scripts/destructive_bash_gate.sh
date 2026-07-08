@@ -134,9 +134,28 @@ allowlist_permits() {
 # only does a plain tr; out of scope to change here, flagged separately).
 force_cmd_flat=$(printf '%s' "$cmd" | awk 'BEGIN{RS="\\\\\n"} {printf "%s", $0}' | tr '\n' ' ')
 naked_force_re='(--force([^-]|$)|(^|[[:space:]])-[a-zA-Z]*f[a-zA-Z]*([[:space:]]|$))'
-if echo "$force_cmd_flat" | grep -qiE "\\bgit[[:space:]]+push\\b.*(${naked_force_re}|--force-with-lease\\b)"; then
-  if echo "$force_cmd_flat" | grep -qiE '\bgit[[:space:]]+push[[:space:]]+.*--force-with-lease\b' \
-     && ! echo "$force_cmd_flat" | grep -qiE "\\bgit[[:space:]]+push\\b.*${naked_force_re}" \
+# git_push_re: "git" followed by zero or more git GLOBAL options, then "push".
+# A bare `git[[:space:]]+push` trigger is defeated by any global option placed
+# between the two (git -c NAME=VALUE push, git --no-pager push, git -C path
+# push, ...) — the option makes "git" and "push" no longer adjacent, so the
+# naked-force detector below never even looks at the rest of the line. git_opt_tok
+# covers the three shapes global options take: -c/-C with a separate-token
+# argument, a long option with an optional attached =value, and any other
+# short flag. Bounded to 20 repetitions — git itself has no limit on
+# repeated -c, so any fixed bound is a residual gap in principle, but 20
+# chained global options is far beyond any real invocation and this keeps
+# the match from running unbounded across an unrelated line. A -c/-C value
+# containing a quoted space (e.g. -c "user.name=John Doe") also isn't
+# matched by the single-token value arm below — same class as this file's
+# documented "quoted paths with spaces... remain uncaught" ceiling elsewhere
+# (AGENTS.md), not something a line-oriented ERE can fix without quote-aware
+# tokenising; both gaps pre-date this fix (confirmed identical on
+# pre-fix main) and are narrowed, not introduced, by it.
+git_opt_tok='(-[cC][[:space:]]+[^[:space:]]+|--[a-zA-Z][a-zA-Z-]*(=[^[:space:]]*)?|-[a-zA-Z]+)'
+git_push_re="\\bgit\\b([[:space:]]+${git_opt_tok}){0,20}[[:space:]]+push\\b"
+if echo "$force_cmd_flat" | grep -qiE "${git_push_re}.*(${naked_force_re}|--force-with-lease\\b)"; then
+  if echo "$force_cmd_flat" | grep -qiE "${git_push_re}[[:space:]]+.*--force-with-lease\\b" \
+     && ! echo "$force_cmd_flat" | grep -qiE "${git_push_re}.*${naked_force_re}" \
      && allowlist_permits "git-push-force-with-lease"; then
     : # allowlisted force-with-lease, no naked --force present — allow
   else
