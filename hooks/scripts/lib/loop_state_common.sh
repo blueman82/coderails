@@ -184,8 +184,10 @@ EOF
 #   Extracts the last assistant text block from a JSONL transcript. Returns the
 #   joined text of the last assistant message that has any text content, or an
 #   empty string if none exists (absent/unreadable transcript, no text blocks,
-#   or every line in the tail window malformed). Mirrors discipline_common.sh's
-#   dc_extract_last_text exactly (same canonical extraction shape); duplicated
+#   or every line in the tail window malformed). Same canonical extraction
+#   shape as discipline_common.sh's dc_extract_last_text, but NOT identical:
+#   this function additionally tolerates a malformed line in the tail window
+#   (see below), a behavior dc_extract_last_text does not share. Duplicated
 #   rather than shared across the two libs since loop_state_common.sh and
 #   discipline_common.sh are deliberately independent (different hook families).
 #   Per-line tolerant parse (same two-stage shape as als_count_invocations): a

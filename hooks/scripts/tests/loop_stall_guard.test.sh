@@ -175,8 +175,7 @@ check "nonexistent progress dir -> still allow" 0 "$(run x "$(payload "$T" S1)")
 # to empty and must not collapse the invocation count to 0 either. A
 # malformed line inserted between a valid loop-Skill line and the final
 # valid LOOP-STOP text must still be detected as active AND the declaration
-# must still extract — pre-fix, `jq -s` aborted the whole slurp on the bad
-# line, so both the count and the extracted text collapsed.
+# must still extract.
 mk_malformed_transcript() { # n_invocations final_text -> path (malformed line inserted before final text)
   local n="$1" final="$2" out="$TMP/malformed_${RANDOM}.jsonl" i=0
   : > "$out"
@@ -193,12 +192,13 @@ mk_malformed_transcript() { # n_invocations final_text -> path (malformed line i
 reset; : > "$CLAUDE_DISCIPLINE_LOG"; T=$(mk_malformed_transcript 1 "Work paused.
 LOOP-STOP: awaiting-input — waiting on the user's plan confirmation"); write_file in-progress S1 0
 check "malformed line + valid LOOP-STOP tag -> still allow (declaration still extracts)" 0 "$(run x "$(payload "$T" S1)")"
-# Discriminates "allowed because declared=1" (the fixed, correct path) from
-# "allowed because the malformed line collapsed the count to 0 and the guard
-# never reached the declaration gate at all" (the bug: exit 0 for the WRONG
-# reason). als_gate_require_active_loop's own log line only fires on
-# invocations=0; gate_loop_stop_declared's declared=1 line only fires once the
-# count is correctly nonzero and the declaration was found.
+# Discriminates "allowed because declared=1" (the correct path: the guard
+# reached the declaration gate with a nonzero invocation count) from
+# "allowed because invocations read as 0 and the guard exited early via the
+# not-a-loop path" — an exit code of 0 alone does not distinguish these two
+# very different reasons for allowing. als_gate_require_active_loop's own log
+# line only fires on invocations=0; gate_loop_stop_declared's declared=1 line
+# only fires once the count is correctly nonzero and the declaration was found.
 check "malformed line + valid LOOP-STOP tag -> reached declaration gate (declared=1), not misdetected as no-loop" 1 \
   "$(count 'hook=loop_stall_guard.*declared=1' "$CLAUDE_DISCIPLINE_LOG")"
 check "malformed line + valid LOOP-STOP tag -> NOT misdetected as invocations=0 (not a loop)" 0 \
