@@ -68,8 +68,8 @@
       "mode": "scripted",
       "surface": "fresh-clone",
       "assert": "als_count_invocations stdout contract unchanged: always empty or an integer, never a reason string leaking to stdout",
-      "cmd": "T=$(mktemp); chmod 000 \"$T\"; source hooks/scripts/lib/loop_state_common.sh; out=$(als_count_invocations \"$T\" 2>/dev/null); chmod 644 \"$T\"; rm -f \"$T\"; case \"$out\" in ''|*[!0-9]*) echo FAIL;; *) echo PASS;; esac",
-      "negative_control": "A hypothetical regression that echoes 'read_error' to stdout instead of stderr would fail this grep",
+      "cmd": "T=$(mktemp); chmod 000 \"$T\"; source hooks/scripts/lib/loop_state_common.sh; out=$(als_count_invocations \"$T\" 2>/dev/null); chmod 644 \"$T\"; rm -f \"$T\"; case \"$out\" in ''|*[0-9]*[!0-9]*|*[!0-9-]*) echo FAIL;; *) echo PASS;; esac 2>/dev/null; [ -z \"$out\" ] && echo PASS || case \"$out\" in *[!0-9]*) echo FAIL;; *) echo PASS;; esac",
+      "negative_control": "A hypothetical regression that echoes 'read_error' to stdout instead of stderr would trip the non-digit branch and print FAIL",
       "status": "pending",
       "evidence": ""
     }
