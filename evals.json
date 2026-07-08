@@ -48,8 +48,8 @@
       "assert": "als_stable_invocations logs a skipped_malformed=N field on its existing single summary line (not a new line) only when N>0, preserving the zero-lines-when-clean invariant for a fully valid transcript.",
       "cmd": "cd $(mktemp -d) && repo=/Users/harrison/Github/coderails && export CLAUDE_DISCIPLINE_LOG=\"$PWD/disc.log\"; export CLAUDE_HOOK_MAX_ATTEMPTS=1; printf '%s\\n' '{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Skill\",\"input\":{\"skill\":\"coderails:agentic-loop\"}}]}}' > clean.jsonl && ( . \"$repo/hooks/scripts/lib/loop_state_common.sh\"; als_stable_invocations \"$PWD/clean.jsonl\" >/dev/null ); [ ! -s disc.log ] && echo PASS || echo \"FAIL log-not-empty: $(cat disc.log)\"",
       "negative_control": "Same command with a malformed line appended must produce a NONEMPTY log with skipped_malformed=1: cd $(mktemp -d) && repo=/Users/harrison/Github/coderails && export CLAUDE_DISCIPLINE_LOG=\"$PWD/disc.log\"; export CLAUDE_HOOK_MAX_ATTEMPTS=1; printf '%s\\n' '{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Skill\",\"input\":{\"skill\":\"coderails:agentic-loop\"}}]}}' > t.jsonl && printf '%s\\n' 'BAD' >> t.jsonl && ( . \"$repo/hooks/scripts/lib/loop_state_common.sh\"; als_stable_invocations \"$PWD/t.jsonl\" >/dev/null ); grep -q 'skipped_malformed=1' disc.log && echo EXPECTED_NONEMPTY || echo UNEXPECTED_EMPTY",
-      "status": "pending",
-      "evidence": ""
+      "status": "pass",
+      "evidence": "Clean transcript: disc.log stays empty (PASS). Negative control (malformed line appended): disc.log gains exactly 'hook=als_count_invocations reason=none attempts=1 outcome=recovered skipped_malformed=1' — confirms both the invariant and the negative control."
     }
   ],
   "amendments": [],
