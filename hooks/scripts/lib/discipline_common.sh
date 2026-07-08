@@ -70,9 +70,9 @@ dc_stable_text() {
 # dc_mine_hook_blocks <session_id> [log_file]
 #   Aggregates this session's discipline-log lines per hook. Stdout: compact
 #   JSON {"<hook>":{"events":N,"flagged":M}}. Lines are hook-authored
-#   (key=value format, als_log convention) - this is the one retro field the
-#   orchestrator cannot have written itself. Fail-open to {} on any read
-#   problem: the retro must still be writable when the log is absent.
+#   (key=value format, als_log convention) - a hook-authored field; the
+#   orchestrator cannot have written these log lines itself. Fail-open to {}
+#   on any read problem: the retro must still be writable when the log is absent.
 dc_mine_hook_blocks() {
   local session="$1" log="${2:-${CLAUDE_DISCIPLINE_LOG:-$HOME/.claude/discipline.log}}"
   { [ -n "$session" ] && [ -r "$log" ]; } || { printf '{}'; return 0; }

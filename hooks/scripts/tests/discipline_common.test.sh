@@ -146,18 +146,61 @@ result=$(dc_mine_hook_blocks "sess-a" "$LOG")
 expected='{"hook_three":{"events":1,"flagged":0}}'
 check "line with hook= but no session= excluded from every session's counts" "$expected" "$result"
 
-# --- Test (g-g): NEGATIVE CONTROL - a deliberately-wrong expected count must fail the comparison ---
+# --- Test (g-h): BLOCKER regression - PREFIX COLLISION must not substring-match.
+# session=sess-a must not match a line for session=sess-ab. This is the
+# function's headline guarantee (exact match, not substring): mutating the
+# awk match from `$i == "session=" sid` to a substring/regex match (verified
+# manually with `$i ~ ("session=" sid)`) makes this fixture return
+# events:2 instead of events:1 -- this test fails under that mutation. ---
+LOG="$TMP/discipline_mine_prefix.log"
+cat > "$LOG" <<'EOF'
+ts=1 session=sess-a hook=hook_five blocked=0
+ts=2 session=sess-ab hook=hook_five blocked=0
+EOF
+result=$(dc_mine_hook_blocks "sess-a" "$LOG")
+expected='{"hook_five":{"events":1,"flagged":0}}'
+check "prefix collision: session=sess-ab line excluded from session=sess-a mine" "$expected" "$result"
+
+# --- Test (g-i): multi-hook-per-session -- two distinct hooks in the same
+# session must each land as independent, correctly-keyed entries ---
+LOG="$TMP/discipline_mine_multihook.log"
+cat > "$LOG" <<'EOF'
+ts=1 session=sess-a hook=hook_alpha blocked=0
+ts=2 session=sess-a hook=hook_beta blocked=1
+ts=3 session=sess-a hook=hook_alpha blocked=0
+EOF
+result=$(dc_mine_hook_blocks "sess-a" "$LOG")
+expected='{"hook_alpha":{"events":2,"flagged":0},"hook_beta":{"events":1,"flagged":1}}'
+check "multi-hook session: both hooks tracked independently" "$expected" "$result"
+
+# --- Test (g-j): log exists and is non-empty but zero lines match the
+# session (no hook= at all) -- must fall to {} same as the missing-file and
+# empty-session cases, not just those two ---
+LOG="$TMP/discipline_mine_allgarbage.log"
+cat > "$LOG" <<'EOF'
+this line has no session or hook key at all
+another totally unrelated line of text
+EOF
+result=$(dc_mine_hook_blocks "sess-a" "$LOG")
+check "non-empty log, zero matches -> {}" "{}" "$result"
+
+# --- Test (g-g): NEGATIVE CONTROL - proves the check() harness itself can
+# detect a failure. Calls check() with a deliberately wrong expectation and
+# confirms the failure counter increments; the induced failure is then
+# subtracted back out so it doesn't pollute the real pass/fail total. ---
 LOG="$TMP/discipline_mine_negctrl.log"
 cat > "$LOG" <<'EOF'
 ts=1 session=sess-a hook=hook_four blocked=0
 EOF
 result=$(dc_mine_hook_blocks "sess-a" "$LOG")
-wrong_expected='{"hook_four":{"events":99,"flagged":99}}'
-if [ "$wrong_expected" = "$result" ]; then
-  printf 'FAIL - negative control: wrong expectation should NOT match actual\n'
-  fails=$((fails+1))
+fails_before=$fails
+check "negative control (expected to fail here)" '{"hook_four":{"events":99,"flagged":99}}' "$result"
+if [ "$fails" -eq "$((fails_before + 1))" ]; then
+  printf 'ok   - negative control: check() harness correctly detected the induced mismatch\n'
+  fails=$fails_before
 else
-  printf 'ok   - negative control: wrong expectation correctly fails comparison\n'
+  printf 'FAIL - negative control: check() harness did NOT detect the induced mismatch (fails=%s, expected %s)\n' "$fails" "$((fails_before + 1))"
+  fails=$((fails_before + 1))
 fi
 
 [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails failures)"; exit 1; }
