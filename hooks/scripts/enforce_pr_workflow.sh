@@ -19,6 +19,13 @@
 # relative to this script: hooks/scripts/ -> ../../scripts/lib/config.sh.
 . "$(dirname "$0")/../../scripts/lib/config.sh"
 
+# git-common.sh (BASH_SOURCE-relatively sources eval-artifact.sh +
+# review-artifact.sh) — needed for gate_eval_artifact_for_merge's use of
+# pr::head_sha / pr::has_coderails_eval_for_head. Its colour vars are guarded
+# by _GIT_COMMON_COLORS_LOADED, so re-sourcing here is safe even though
+# scripts/merge.sh also sources it in-process elsewhere.
+. "$(dirname "$0")/../../scripts/lib/git-common.sh"
+
 IFS= read -r -d '' -t 5 input || true
 cmd=$(printf '%s' "$input" | jq -r '.tool_input.command // empty')
 
@@ -356,6 +363,98 @@ enforce_required_step() {
   fi
 }
 
+gate_eval_artifact_for_merge() {
+  # Closes the gap PR #95 shipped through: scripts/merge.sh already gates `gh
+  # pr merge` on a coderails eval artifact (pr::has_coderails_eval_for_head),
+  # but a raw `gh pr merge` run outside merge.sh bypassed it entirely. Only
+  # acts on the `merge` subcommand — git_merge/git_push have no PR number and
+  # stay review-gated only (documented residual gap). Runs AFTER
+  # enforce_required_step so the cheap, transcript-only review-pr gate fires
+  # and denies first; this function only runs its (network) check once that
+  # gate has already passed for this invocation.
+  [ "$subcommand" = "merge" ] || return 0
+  # If the review-pr gate above already denied, don't also run (and
+  # potentially deny again for) the eval gate — one deny per invocation.
+  [ "$step_found" -eq 0 ] 2>/dev/null && return 0
+
+  local num="$pr_num"
+  # repo()/pr::* are CWD-dependent (e.g. `git remote get-url origin` takes no
+  # arg) — cd into the payload's cwd before calling any of them. This is the
+  # hook's own process and it exits right after, so a plain `cd` (not a
+  # subshell) is safe and is required: a subshell would swallow the
+  # PR_EVAL_TIER / PR_TRUST_FETCH_FAIL_REASON globals the deny messages below
+  # need from pr::has_coderails_eval_for_head.
+  cd "$cwd" 2>/dev/null || {
+    jq -n '{
+      hookSpecificOutput: {
+        hookEventName: "PreToolUse",
+        permissionDecision: "deny",
+        permissionDecisionReason: "Blocked: could not resolve working directory to verify the eval artifact for gh pr merge. Retry from a valid repo directory."
+      }
+    }'
+    return 0
+  }
+
+  [ -z "$num" ] && num=$(pr::num "$(branch)")
+  if [ -z "$num" ]; then
+    jq -n '{
+      hookSpecificOutput: {
+        hookEventName: "PreToolUse",
+        permissionDecision: "deny",
+        permissionDecisionReason: "Blocked: gh pr merge — could not resolve a PR number to verify the eval artifact. Retry, or check gh auth/network."
+      }
+    }'
+    return 0
+  fi
+
+  local sha; sha=$(pr::head_sha "$num")
+  if [ -z "$sha" ]; then
+    jq -n --arg n "$num" '{
+      hookSpecificOutput: {
+        hookEventName: "PreToolUse",
+        permissionDecision: "deny",
+        permissionDecisionReason: ("Blocked: gh pr merge " + $n + " — GitHub fetch failed, could not resolve PR head SHA. Retry, or check gh auth/network.")
+      }
+    }'
+    return 0
+  fi
+
+  local eval_rc=0
+  pr::has_coderails_eval_for_head "$num" "$sha" || eval_rc=$?
+
+  if [ "$eval_rc" -eq 2 ]; then
+    local reason
+    case "${PR_TRUST_FETCH_FAIL_REASON:-}" in
+      identity)   reason="Blocked: gh pr merge $num — GitHub fetch failed, could not resolve the authenticated identity (gh api user) for the eval artifact gate. Retry, or check gh auth/network." ;;
+      permission) reason="Blocked: gh pr merge $num — GitHub fetch failed, could not resolve repo permission for the eval artifact gate. Retry, or check gh auth/network." ;;
+      tempfile)   reason="Blocked: gh pr merge $num — local temporary file allocation failed (mktemp) before any GitHub fetch was attempted for the eval artifact gate. Check /tmp disk space or permissions, then retry." ;;
+      *)          reason="Blocked: gh pr merge $num — GitHub fetch failed, could not fetch PR comments for the eval artifact. Retry, or check gh auth/network." ;;
+    esac
+    jq -n --arg r "$reason" '{
+      hookSpecificOutput: {
+        hookEventName: "PreToolUse",
+        permissionDecision: "deny",
+        permissionDecisionReason: $r
+      }
+    }'
+  elif [ "$eval_rc" -ne 0 ]; then
+    local reason
+    if [ -n "${PR_EVAL_TIER:-}" ]; then
+      reason="Blocked: gh pr merge $num — eval artifact for current head $sha is NO-GO (tier $PR_EVAL_TIER). Resolve failing P0 evals and re-run /coderails:post-evals."
+    else
+      reason="Blocked: gh pr merge $num — no coderails eval artifact for current head $sha. Run /coderails:task-evals then /coderails:post-evals after /pr-review-toolkit:review-pr."
+    fi
+    jq -n --arg r "$reason" '{
+      hookSpecificOutput: {
+        hookEventName: "PreToolUse",
+        permissionDecision: "deny",
+        permissionDecisionReason: $r
+      }
+    }'
+  fi
+  return 0
+}
+
 gate_has_command
 gate_safe_passthrough
 gate_in_scope
@@ -363,5 +462,6 @@ gate_config_present
 gate_targets_main
 gate_have_transcript
 enforce_required_step
+gate_eval_artifact_for_merge
 
 exit 0
