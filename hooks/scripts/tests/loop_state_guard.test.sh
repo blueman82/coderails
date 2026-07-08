@@ -394,6 +394,16 @@ check "T1: permanently-malformed-only transcript -> gate still allows" 0 \
 )
 check "F3: all-lines-malformed -> summary log does NOT claim outcome=recovered" 0 \
   "$(count 'outcome=recovered' "$CLAUDE_DISCIPLINE_LOG")"
+# F4 pin: all_lines_malformed is a REAL reason tag (unlike the benign
+# skipped_malformed breadcrumb), so it must gate settling on EVERY attempt
+# for a fixture that never becomes valid — burning the full retry budget
+# (attempts=MAX_ATTEMPTS, outcome=exhausted), not settling early at count=0.
+# A regression that let all_lines_malformed stop gating settling would still
+# satisfy the "not outcome=recovered" check above by accident (e.g. logging
+# nothing at all, or logging outcome=exhausted with the wrong attempts=N) —
+# this pins the exact honest line, closing that gap.
+check "F4: all-lines-malformed exhausts the FULL retry budget (attempts=2), not an early settle" 1 \
+  "$(count 'reason=all_lines_malformed attempts=2 outcome=exhausted' "$CLAUDE_DISCIPLINE_LOG")"
 
 # T4: N>1 skipped_malformed count — 2 malformed lines + 1 valid line ->
 # skipped_malformed=2 (not double-counted, not truncated to 1).
