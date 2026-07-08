@@ -110,9 +110,10 @@ allowlist_permits() {
 # force slip past undetected while a space-separated one correctly denied.
 #
 # force_cmd_flat: $cmd normalised for matching below. Two passes, in order:
-#   1. Splice backslash-newline PAIRS out entirely (sed loop). Bash's own
-#      line-continuation removes both the backslash and the newline with
-#      NOTHING inserted in their place, fusing the characters on either
+#   1. Splice backslash-newline PAIRS out entirely (awk, RS set to the
+#      literal pair). Bash's own line-continuation removes both the
+#      backslash and the newline with NOTHING inserted in their place,
+#      fusing the characters on either
 #      side into one token — e.g. `--for` + backslash-newline + `ce`
 #      becomes the single real argv token `--force`. A naive `tr '\n' ' '`
 #      instead REPLACES the newline with a space and leaves the backslash
