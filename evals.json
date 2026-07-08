@@ -48,8 +48,8 @@
       "assert": "no new PressResult.reason union member was added beyond the existing 'invalid-input' (reuse, not proliferation) unless a review finding argues otherwise",
       "cmd": "grep -n 'reason:' skills/dashboard/obsidian/src/exec.ts | grep -v 'invalid-input\\|undeclared\\|unresolved'",
       "negative_control": "add a fake 4th reason literal to the PressResult union and re-run the grep — must find and report it, proving the grep isn't vacuously empty",
-      "status": "pending",
-      "evidence": ""
+      "status": "pass",
+      "evidence": "grep found zero lines beyond the three existing reason literals ('undeclared' | 'unresolved' | 'invalid-input'); the type union at exec.ts:51 is unchanged."
     }
   ],
   "amendments": [],
