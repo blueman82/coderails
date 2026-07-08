@@ -32,13 +32,33 @@
 #          part of the shared-checkout workflow; see PR body / SKILL.md for the
 #          fuller rationale.
 #
+# Resolution (which of the candidate paths is printed):
+#   1. Compute the CANONICAL path from the slug above.
+#   2. If a progress.json EXISTS at the canonical path -> print it.
+#   3. Else PROBE <base>/*/<session_id>/progress.json — state that a PRIOR
+#      version of THIS helper (or a mid-loop cwd/repo-ness drift) parked under a
+#      DIFFERENT slug for the same session. session_id is unique per session, so
+#      it is a sufficient key on its own. Existing matches are deduped by the
+#      physical identity of their containing dir (the same file can appear under
+#      several slugs via the orchestrator's workaround symlinks — realpath
+#      collapses them); if DISTINCT real files somehow exist, the pick is
+#      deterministic (lexicographically smallest path). Print the match.
+#   4. Else (no state anywhere) -> print the canonical path, so a fresh loop
+#      registers there.
+# The probe is why session_id sanitisation (below) must run BEFORE the glob: the
+# already-sanitised <session_id> segment cannot expand into a sibling/parent dir.
+#
 # Accepted limitation (design invariant, not a bug): this helper is stateless
-# and re-derives the slug from the CURRENT repo state on every call. If a
-# session changes its own cwd's repo-ness mid-loop (e.g. `git init`s an
-# until-then-non-git cwd, or its .git disappears), the slug changes too, and
-# the loop's progress.json state splits across the old and new slugs. This is
-# rare and self-inflicted (a session altering its own repo state mid-loop) —
-# not fixed here; documented so it isn't mistaken for a fresh bug later.
+# and re-derives the slug from the CURRENT repo state on every call. The
+# session_id probe (step 3) now HEALS the common case of that slug changing
+# mid-loop — a session that `git init`s an until-then-non-git cwd (or whose .git
+# disappears) shifts to a new slug, but its already-written progress.json is
+# still found under the old slug by session_id, so the loop's state no longer
+# splits. The one residual gap: if NO progress.json has been written yet when
+# the slug changes, there is nothing to probe for, and the fresh registration
+# lands at the new canonical path (as it should). Rare and self-inflicted (a
+# session altering its own repo state mid-loop before registering) — documented
+# so it isn't mistaken for a fresh bug later.
 #
 # Keying on session_id (stable across compaction/restart within one continuous
 # conversation — Claude Code's own $CLAUDE_CODE_SESSION_ID and the Stop-hook
@@ -91,4 +111,44 @@ if [ -n "$git_common_dir" ]; then
 else
   slug=$(printf '%s' "$cwd" | sed 's#/#-#g')
 fi
-printf '%s/%s/%s/progress.json\n' "$base" "$slug" "$session_id"
+canonical="$base/$slug/$session_id/progress.json"
+
+# If canonical state exists, use it — unchanged behaviour. Otherwise, probe for
+# state a PRIOR helper version (or a mid-loop cwd drift) may have parked under a
+# DIFFERENT slug for THIS session. session_id is unique per session, so
+# <base>/*/<session_id>/progress.json is a sufficient key on its own. This heals
+# the 2026-07-08 split-slug incident: a loop registered under the old raw-cwd
+# slug but read back under the git-common-dir slug, blinding the Stop guards.
+# The session_id sanitisation ABOVE is load-bearing here: it has already
+# stripped "/" and collapsed "..", so the glob's <session_id> segment cannot
+# expand into a sibling/parent directory. If canonical exists OR no state is
+# found anywhere, print canonical (a fresh loop registers at the canonical path).
+if [ -e "$canonical" ]; then
+  printf '%s\n' "$canonical"
+else
+  # Collect existing matches under other slugs, deduped by PHYSICAL identity of
+  # the containing dir (the orchestrator's live workaround symlinks the SAME
+  # progress.json under multiple slugs — realpath collapses them to one). A
+  # glob that matches nothing yields the literal pattern, which `[ -e ]` rejects.
+  match=""
+  seen=""
+  for candidate in "$base"/*/"$session_id"/progress.json; do
+    [ -e "$candidate" ] || continue
+    real=$(cd "$(dirname "$candidate")" 2>/dev/null && pwd -P) || continue
+    case "$seen" in
+      *"|$real|"*) continue ;;
+    esac
+    seen="$seen|$real|"
+    # Deterministic pick if multiple DISTINCT real files somehow exist: keep the
+    # lexicographically smallest printable path (glob order is already sorted,
+    # but choose explicitly so it does not depend on shell glob-sort locale).
+    if [ -z "$match" ] || [ "$candidate" \< "$match" ]; then
+      match="$candidate"
+    fi
+  done
+  if [ -n "$match" ]; then
+    printf '%s\n' "$match"
+  else
+    printf '%s\n' "$canonical"
+  fi
+fi
