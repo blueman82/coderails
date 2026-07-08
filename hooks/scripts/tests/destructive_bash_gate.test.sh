@@ -595,4 +595,64 @@ git -C "$NO_ALLOWLIST_REPO" checkout -b feat/no-allowlist -q 2>/dev/null || true
 check "scratch repo, no allowlist: force-with-lease -> deny" DENY \
   "$(run_cwd "$(payload_with_cwd "git push --force-with-lease" "$NO_ALLOWLIST_REPO")" "$NO_ALLOWLIST_REPO")"
 
+# --- git GLOBAL OPTION between "git" and "push" bypass (option-tolerant trigger) ---
+# The original trigger regex required a CONTIGUOUS "git push" (git immediately
+# followed by whitespace then push). Any git global option placed between
+# them — git -c NAME=VALUE push, git --no-pager push, git -C path push — broke
+# that adjacency, so the naked-force detector never even looked at the rest
+# of the line: a naked force push with NO allowlist anywhere would sail
+# through as ALLOW. Uses its own fresh scratch repo (no allowlist file at
+# all) so these assertions prove the trigger fires independent of the
+# allowlist carve-out machinery entirely.
+OPT_REPO="$TMP/opt_repo"
+git init "$OPT_REPO" -q
+git -C "$OPT_REPO" checkout -b feat/opt-bypass -q 2>/dev/null || true
+
+# Regression guard for the exact three bypass shapes reported.
+check "no allowlist: -c NAME=VALUE before push, naked --force -> deny" DENY \
+  "$(run_cwd "$(payload_with_cwd "git -c push.followTags=true push --force origin main" "$OPT_REPO")" "$OPT_REPO")"
+check "no allowlist: --no-pager before push, naked --force -> deny" DENY \
+  "$(run_cwd "$(payload_with_cwd "git --no-pager push --force origin main" "$OPT_REPO")" "$OPT_REPO")"
+check "no allowlist: -c NAME=VALUE before push, naked -f -> deny" DENY \
+  "$(run_cwd "$(payload_with_cwd "git -c core.pager=less push -f origin main" "$OPT_REPO")" "$OPT_REPO")"
+
+# Other global-option shapes, same no-allowlist naked-force pattern.
+check "no allowlist: -C path before push, naked --force -> deny" DENY \
+  "$(run_cwd "$(payload_with_cwd "git -C /tmp/somerepo push --force origin main" "$OPT_REPO")" "$OPT_REPO")"
+check "no allowlist: --git-dir= before push, naked --force -> deny" DENY \
+  "$(run_cwd "$(payload_with_cwd "git --git-dir=/tmp/somerepo/.git push --force origin main" "$OPT_REPO")" "$OPT_REPO")"
+check "no allowlist: stacked options before push, naked -f -> deny" DENY \
+  "$(run_cwd "$(payload_with_cwd "git -c a=b -c c=d --no-pager push -f origin main" "$OPT_REPO")" "$OPT_REPO")"
+
+# Regression guard: the already-fixed backslash-newline-BETWEEN-git-and-push
+# case must stay denied — it's a different mechanism (awk splice collapses it
+# to contiguous "git push" upstream of this block) but worth re-confirming
+# here alongside the option-tolerance fix so a future change to either
+# mechanism can't silently reopen this specific shape.
+OPT_NL=$'\n'
+check "no allowlist: backslash-newline between git and push, naked --force -> deny (no regression)" DENY \
+  "$(run_cwd "$(payload_with_cwd "git \\${OPT_NL}push --force origin main" "$OPT_REPO")" "$OPT_REPO")"
+
+# Symmetric carve-out preservation: the allowlisted force-with-lease path must
+# stay reachable WITH a git global option present between git and push —
+# option-tolerance has to apply to both the trigger and the fwl-exclusion
+# check, not just the naked-force trigger, or this fix would break the
+# legitimate opt-in path for anyone who also passes a global option.
+mkdir -p "$OPT_REPO/.claude"
+printf 'git-push-force-with-lease\n' > "$OPT_REPO/.claude/destructive_allowlist"
+check "allowlist present: -c option before push, force-with-lease only -> allow" ALLOW \
+  "$(run_cwd "$(payload_with_cwd "git -c push.followTags=true push --force-with-lease origin main" "$OPT_REPO")" "$OPT_REPO")"
+check "positive control: plain force-with-lease, allowlist live -> allow" ALLOW \
+  "$(run_cwd "$(payload_with_cwd "git push --force-with-lease" "$OPT_REPO")" "$OPT_REPO")"
+check "allowlist present: -c option before push, naked --force + fwl -> deny" DENY \
+  "$(run_cwd "$(payload_with_cwd "git -c push.followTags=true push --force --force-with-lease origin main" "$OPT_REPO")" "$OPT_REPO")"
+
+# Negative control: an unrelated git subcommand with a global option must
+# still be allowed through untouched (proves the wider trigger isn't
+# over-matching ordinary git invocations).
+check "no allowlist: -c option before status (unrelated subcommand) -> allow" ALLOW \
+  "$(run_cwd "$(payload_with_cwd "git -c color.ui=always status" "$OPT_REPO")" "$OPT_REPO")"
+check "no allowlist: --no-pager before log (unrelated subcommand) -> allow" ALLOW \
+  "$(run_cwd "$(payload_with_cwd "git --no-pager log -1" "$OPT_REPO")" "$OPT_REPO")"
+
 [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails)"; exit 1; }

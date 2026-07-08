@@ -134,9 +134,21 @@ allowlist_permits() {
 # only does a plain tr; out of scope to change here, flagged separately).
 force_cmd_flat=$(printf '%s' "$cmd" | awk 'BEGIN{RS="\\\\\n"} {printf "%s", $0}' | tr '\n' ' ')
 naked_force_re='(--force([^-]|$)|(^|[[:space:]])-[a-zA-Z]*f[a-zA-Z]*([[:space:]]|$))'
-if echo "$force_cmd_flat" | grep -qiE "\\bgit[[:space:]]+push\\b.*(${naked_force_re}|--force-with-lease\\b)"; then
-  if echo "$force_cmd_flat" | grep -qiE '\bgit[[:space:]]+push[[:space:]]+.*--force-with-lease\b' \
-     && ! echo "$force_cmd_flat" | grep -qiE "\\bgit[[:space:]]+push\\b.*${naked_force_re}" \
+# git_push_re: "git" followed by zero or more git GLOBAL options, then "push".
+# A bare `git[[:space:]]+push` trigger is defeated by any global option placed
+# between the two (git -c NAME=VALUE push, git --no-pager push, git -C path
+# push, ...) — the option makes "git" and "push" no longer adjacent, so the
+# naked-force detector below never even looks at the rest of the line. git_opt_tok
+# covers the three shapes global options take: -c/-C with a separate-token
+# argument, a long option with an optional attached =value, and any other
+# short flag. Bounded to 6 repetitions (git accepts more in principle, but
+# six is already far beyond any real invocation) so this can't runaway-match
+# across an unrelated line.
+git_opt_tok='(-[cC][[:space:]]+[^[:space:]]+|--[a-zA-Z][a-zA-Z-]*(=[^[:space:]]*)?|-[a-zA-Z]+)'
+git_push_re="\\bgit\\b([[:space:]]+${git_opt_tok}){0,6}[[:space:]]+push\\b"
+if echo "$force_cmd_flat" | grep -qiE "${git_push_re}.*(${naked_force_re}|--force-with-lease\\b)"; then
+  if echo "$force_cmd_flat" | grep -qiE "${git_push_re}[[:space:]]+.*--force-with-lease\\b" \
+     && ! echo "$force_cmd_flat" | grep -qiE "${git_push_re}.*${naked_force_re}" \
      && allowlist_permits "git-push-force-with-lease"; then
     : # allowlisted force-with-lease, no naked --force present — allow
   else
