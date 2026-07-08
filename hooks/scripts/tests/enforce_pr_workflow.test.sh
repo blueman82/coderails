@@ -66,6 +66,17 @@ case "$args" in
     printf 'WRITE'
     ;;
   "api repos/"*"/comments"*)
+    if [ -n "${MOCK_GH_COMMENTS_FAIL:-}" ]; then
+      # Unlike MOCK_GH_FETCH_FAIL (which fails every gh call, including the
+      # earlier pr::head_sha lookup, and so never even reaches
+      # pr::has_coderails_eval_for_head), this fails ONLY the comments fetch —
+      # identity and permission lookups above still succeed. This is what
+      # actually drives pr::has_coderails_eval_for_head's rc=2 (fail-closed)
+      # return via pr::_trusted_comment_bodies's TRUST_FETCH_FAIL_REASON=comments
+      # path, landing on the *default* rc=2 deny message (not the identity/
+      # permission-specific ones).
+      exit 1
+    fi
     if [ -n "${MOCK_GH_COMMENT_BODY+x}" ]; then
       # Explicit override (may be empty string -> deliberately no comments).
       [ -n "$MOCK_GH_COMMENT_BODY" ] && printf '%s' "$MOCK_GH_COMMENT_BODY" | base64
@@ -875,14 +886,25 @@ case "$out" in
 esac
 
 # ── Case 83: gh fetch fails -> deny (fail-closed), reason includes a retry hint
+# Uses MOCK_GH_COMMENTS_FAIL (not MOCK_GH_FETCH_FAIL) so that pr::head_sha,
+# the identity fetch, and the permission fetch all still succeed and only the
+# comments fetch fails -- this genuinely drives
+# pr::has_coderails_eval_for_head's rc=2 path (fail-closed) in
+# enforce_pr_workflow.sh, rather than being denied earlier for an unrelated
+# reason (head-SHA resolution failure) that happens to also mention "retry".
+# The assertion below checks for a substring UNIQUE to the rc=2 default
+# message ("could not fetch PR comments for the eval artifact") so this case
+# fails if the `[ "$eval_rc" -eq 2 ]` branch is ever removed and rc=2 falls
+# through to the generic NO-GO/no-marker deny (whose messages are worded
+# differently and do not mention "fetch PR comments").
 out=$(
-  MOCK_GH_FETCH_FAIL=1 \
+  MOCK_GH_HEAD_SHA="$HEAD_SHA" MOCK_GH_COMMENTS_FAIL=1 \
   run_eval "$(payload "gh pr merge 42 --squash" "$T_REVIEWED_42" "$REPO_EVAL")"
 )
 check "gh pr merge 42, gh fetch fails -> deny (fail-closed)" DENY "$(decision_of "$out")"
 case "$out" in
-  *"Retry"*|*"retry"*) : ;;
-  *) printf 'FAIL - fetch-fail deny reason should include a retry hint (got: %s)\n' "$out"; fails=$((fails + 1)) ;;
+  *"could not fetch PR comments for the eval artifact"*) : ;;
+  *) printf 'FAIL - fetch-fail deny reason should be the rc=2 default message (got: %s)\n' "$out"; fails=$((fails + 1)) ;;
 esac
 
 # ── Case 84: NO_CONFIG -> stands aside (no deny) regardless of eval state ───
