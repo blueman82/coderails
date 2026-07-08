@@ -267,9 +267,9 @@ check "non-blocking: hook returns in well under 3s" 1 "$([ "$elapsed" -lt 2 ] &&
 
 # ── Malformed-line tolerance: a bad JSONL line alongside a genuine valid
 # LOOP-STOP declaration must still announce the CORRECT kind, not silently
-# fall back to reason=extract_failed. Pre-fix, `jq -s` aborted the whole
-# slurp on the bad line, collapsing extraction to empty (indistinguishable
-# from "no text yet").
+# fall back to reason=extract_failed. A whole-slurp parse would abort on the
+# bad line and collapse extraction to empty (indistinguishable from "no text
+# yet") — this test pins per-line tolerance instead.
 mk_malformed_transcript() { # n_invocations final_text -> path (malformed line inserted before final text)
   local n="$1" final="$2" out="$TMP/malformed_${RANDOM}.jsonl" i=0
   : > "$out"

@@ -153,11 +153,11 @@ check "sanitise: normal id passes through unchanged" "normal-id-123" "$(sanitise
 # only the bad line, so a genuinely active loop still counts as active).
 # =====================================================================
 # Malformed transcript: 1 valid loop-Skill line + 1 truncated/invalid JSON line.
-# Pre-fix, `jq -s` (slurp) aborted the WHOLE parse on the bad line, so
-# als_count_invocations returned empty -> als_gate_require_active_loop treated
-# an ACTIVE loop as "not a loop" and allowed the stop — the bug this fix closes.
-# Post-fix, the malformed line is skipped and the valid line is still counted,
-# so the gate must BLOCK (loop is active, no progress.json present yet).
+# A whole-slurp parse would abort on the bad line, making als_count_invocations
+# return empty and als_gate_require_active_loop misread an ACTIVE loop as "not
+# a loop", allowing the stop — this test pins per-line tolerance instead: the
+# malformed line is skipped, the valid line is still counted, and the gate
+# must BLOCK (loop is active, no progress.json present yet).
 mk_corrupt_transcript() {
   local out="$TMP/corrupt_$RANDOM.jsonl"
   printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Skill","input":{"skill":"coderails:agentic-loop"}}]}}' > "$out"
@@ -210,9 +210,9 @@ check "jq not on PATH, called directly (one-shot) -> discipline log NOT touched"
 # als_stable_invocations (the retrying wrapper) is where jq-failure logging
 # actually happens now — EXACTLY ONE summary line per gate call, with
 # attempts=N and outcome=recovered|exhausted, never one line per retry
-# attempt. This is the PR #23 review fix: the prior per-attempt logging inside
-# als_count_invocations left "recovered on retry" indistinguishable from
-# "exhausted, fell back to 0" and double-logged on a sustained failure.
+# attempt. Per-attempt logging inside als_count_invocations itself would leave
+# "recovered on retry" indistinguishable from "exhausted, fell back to 0" and
+# double-log on a sustained failure.
 
 # Exhausted case: jq missing for the WHOLE retry window -> every attempt
 # fails, final outcome is exhausted, exactly one log line. A blanket PATH
@@ -243,15 +243,19 @@ check "jq missing for whole retry window -> exactly ONE summary log line" 1 \
 check "sustained jq failure -> logged outcome=exhausted" 1 \
   "$(count 'reason=jq_missing attempts=[0-9]* outcome=exhausted' "$CLAUDE_DISCIPLINE_LOG")"
 
-# Recovered case: transcript is malformed on disk initially, then becomes
+# Recovered case: transcript is malformed on disk initially (a single
+# truncated mid-write line — every non-blank line malformed), then becomes
 # valid before the retry window ends (simulates the flush-race this retry
 # loop exists to ride out) -> final attempt succeeds, outcome=recovered,
 # still exactly one log line (not one per failed attempt beforehand).
-# Post-fix: a single wholly-malformed line is tolerantly SKIPPED (not a jq
-# parse failure of the whole slurp any more, since stage 1 drops just that
-# line) — the first attempt sees count=0 skipped_malformed=1, so reason stays
-# "none" and the skip is what triggers the summary line; outcome=recovered
-# because the settling (last) attempt's own count is clean.
+# A whole-slurp parse would abort on the bad line and misread an ACTIVE loop
+# as "not a loop" (the pre-#91 bug) — this test pins the CURRENT, honest
+# contract: since every line is malformed on the early attempts (not just
+# one bad line among clean ones), als_count_invocations reports
+# reason=all_lines_malformed (a real reason, gating settling) rather than the
+# benign skipped_malformed breadcrumb — so the retry loop correctly keeps
+# going past attempt 2 instead of settling clean at 0, until the flush lands
+# and the last attempt's own count is clean.
 : > "$CLAUDE_DISCIPLINE_LOG"
 flush_t="$TMP/flush_$RANDOM.jsonl"
 printf '%s\n' '{"type":"assistant", TRUNCATED-MID-WRITE' > "$flush_t"
@@ -270,8 +274,8 @@ printf '%s\n' '{"type":"assistant", TRUNCATED-MID-WRITE' > "$flush_t"
 )
 check "recovered on retry -> exactly ONE summary log line (not one per attempt)" 1 \
   "$(count 'hook=als_count_invocations' "$CLAUDE_DISCIPLINE_LOG")"
-check "recovered on retry -> logged outcome=recovered, skipped_malformed breadcrumb from the earlier skip survives" 1 \
-  "$(count 'reason=none attempts=[0-9]* outcome=recovered skipped_malformed=1' "$CLAUDE_DISCIPLINE_LOG")"
+check "recovered on retry -> logged reason=all_lines_malformed, outcome=recovered (honest attribution, not reason=none)" 1 \
+  "$(count 'reason=all_lines_malformed attempts=[0-9]* outcome=recovered' "$CLAUDE_DISCIPLINE_LOG")"
 
 # Clean case: no jq failure at any attempt -> zero log lines from this path.
 : > "$CLAUDE_DISCIPLINE_LOG"
@@ -283,6 +287,122 @@ clean_t=$(mk_transcript 1)
 )
 check "clean transcript, no jq failure -> zero als_count_invocations log lines" 0 \
   "$(count 'hook=als_count_invocations' "$CLAUDE_DISCIPLINE_LOG")"
+
+# =====================================================================
+# Failure-attribution regressions (post-#91): an existing-but-unreadable
+# transcript, or a stage-1 jq crash on a readable one, must surface a real
+# reason tag — not the confident-but-wrong "skipped_malformed" breadcrumb a
+# read failure was producing.
+# =====================================================================
+
+# als_count_invocations on a chmod-000 (existing, unreadable) transcript must
+# signal a reason on stderr, not silently return 0 with no breadcrumb at all.
+unreadable_t="$TMP/unreadable_$RANDOM.jsonl"
+printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Skill","input":{"skill":"coderails:agentic-loop"}}]}}' > "$unreadable_t"
+chmod 000 "$unreadable_t"
+unreadable_stdout=$(call_lib_fn als_count_invocations "$unreadable_t" 2>"$TMP/unreadable.err")
+unreadable_stderr=$(cat "$TMP/unreadable.err" 2>/dev/null)
+chmod 644 "$unreadable_t"
+check "unreadable transcript -> stdout stays empty-or-0 (fail-open contract preserved, callers coerce)" "" "$unreadable_stdout"
+check "unreadable transcript -> stderr carries a real reason, not silence" 1 \
+  "$([ -n "$unreadable_stderr" ] && echo 1 || echo 0)"
+check "unreadable transcript -> reason is NOT the misleading skipped_malformed breadcrumb" 0 \
+  "$(printf '%s' "$unreadable_stderr" | grep -qE '^skipped_malformed=' && echo 1 || echo 0)"
+
+# als_stable_invocations on the same unreadable fixture must log a real
+# reason (not reason=none) and must NOT claim outcome=recovered.
+: > "$CLAUDE_DISCIPLINE_LOG"
+(
+  export CLAUDE_HOOK_MAX_ATTEMPTS=2
+  export CLAUDE_HOOK_SLEEP_S=0.01
+  chmod 000 "$unreadable_t"
+  . "$LIB"
+  als_stable_invocations "$unreadable_t" >/dev/null
+  chmod 644 "$unreadable_t"
+)
+check "T1/F1: unreadable transcript -> summary log does NOT say reason=none" 0 \
+  "$(count 'hook=als_count_invocations reason=none' "$CLAUDE_DISCIPLINE_LOG")"
+check "T1/F1: unreadable transcript -> summary log does NOT claim outcome=recovered" 0 \
+  "$(count 'outcome=recovered' "$CLAUDE_DISCIPLINE_LOG")"
+
+# F2: stage-1 jq crashing on a READABLE file (PATH-stubbed jq that fails only
+# on the -R invocation) must also surface a real reason, never
+# reason=none/outcome=recovered/skipped_malformed=1 (three lies: nothing was
+# malformed, nothing recovered, jq itself is broken).
+STUBJQ_DIR="$TMP/stubjq_$RANDOM"
+mkdir -p "$STUBJQ_DIR"
+REAL_JQ=$(command -v jq)
+cat > "$STUBJQ_DIR/jq" <<EOF
+#!/bin/bash
+for a in "\$@"; do
+  if [ "\$a" = "-R" ]; then echo "stub-jq: forced failure on -R" >&2; exit 1; fi
+done
+exec "$REAL_JQ" "\$@"
+EOF
+chmod +x "$STUBJQ_DIR/jq"
+readable_t=$(mk_transcript 1)
+: > "$CLAUDE_DISCIPLINE_LOG"
+(
+  export CLAUDE_HOOK_MAX_ATTEMPTS=1
+  export PATH="$STUBJQ_DIR:$PATH"
+  . "$LIB"
+  als_stable_invocations "$readable_t" >/dev/null
+)
+check "F2: stage-1 jq crash on readable file -> NOT reason=none" 0 \
+  "$(count 'hook=als_count_invocations reason=none' "$CLAUDE_DISCIPLINE_LOG")"
+check "F2: stage-1 jq crash on readable file -> NOT outcome=recovered" 0 \
+  "$(count 'outcome=recovered' "$CLAUDE_DISCIPLINE_LOG")"
+
+# T3: the stage-2 jq_parse_error fallback branch is still independently
+# reachable after the F1/F2 rc-capture — a jq that only fails on the FINAL
+# filter program (not on -R/-s length) must still surface jq_parse_error, not
+# be silently absorbed by the earlier read_error/all_lines_malformed checks.
+STUBJQ2_DIR="$TMP/stubjq2_$RANDOM"
+mkdir -p "$STUBJQ2_DIR"
+cat > "$STUBJQ2_DIR/jq" <<EOF
+#!/bin/bash
+for a in "\$@"; do
+  case "\$a" in *loop_name*) echo "stub-jq: forced failure on final filter" >&2; exit 1;; esac
+done
+exec "$REAL_JQ" "\$@"
+EOF
+chmod +x "$STUBJQ2_DIR/jq"
+t3_readable=$(mk_transcript 1)
+t3_stderr=$(
+  . "$LIB"
+  export PATH="$STUBJQ2_DIR:$PATH"
+  als_count_invocations "$t3_readable" 2>&1 1>/dev/null
+)
+check "T3: stage-2 filter jq failure -> jq_parse_error still reachable" "jq_parse_error" "$t3_stderr"
+
+# F3/T1: a transcript whose EVERY non-blank line is malformed (parsed=0,
+# total>0) must be distinguishable from "one bad line among many, otherwise
+# clean" — the guard must still ALLOW (fail-open, unchanged stdout contract)
+# but the log must not claim outcome=recovered.
+all_malformed_t="$TMP/all_malformed_$RANDOM.jsonl"
+printf '%s\n' '{"type":"assistant", BROKEN LINE ONE' > "$all_malformed_t"
+printf '%s\n' '{"type":"assistant", BROKEN LINE TWO' >> "$all_malformed_t"
+reset
+check "T1: permanently-malformed-only transcript -> gate still allows" 0 \
+  "$(run x "$(payload "$all_malformed_t" S1)")"
+: > "$CLAUDE_DISCIPLINE_LOG"
+(
+  export CLAUDE_HOOK_MAX_ATTEMPTS=2
+  export CLAUDE_HOOK_SLEEP_S=0.01
+  . "$LIB"
+  als_stable_invocations "$all_malformed_t" >/dev/null
+)
+check "F3: all-lines-malformed -> summary log does NOT claim outcome=recovered" 0 \
+  "$(count 'outcome=recovered' "$CLAUDE_DISCIPLINE_LOG")"
+
+# T4: N>1 skipped_malformed count — 2 malformed lines + 1 valid line ->
+# skipped_malformed=2 (not double-counted, not truncated to 1).
+mixed_malformed_t="$TMP/mixed_malformed_$RANDOM.jsonl"
+printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Skill","input":{"skill":"coderails:agentic-loop"}}]}}' > "$mixed_malformed_t"
+printf '%s\n' '{"type":"assistant", BROKEN LINE ONE' >> "$mixed_malformed_t"
+printf '%s\n' '{"type":"assistant", BROKEN LINE TWO' >> "$mixed_malformed_t"
+mixed_stderr=$(call_lib_fn als_count_invocations "$mixed_malformed_t" 2>&1 1>/dev/null)
+check "T4: 2 malformed + 1 valid line -> skipped_malformed=2" "skipped_malformed=2" "$mixed_stderr"
 
 # =====================================================================
 # als_log brace-group redirection (no stderr leak, no dir auto-create)

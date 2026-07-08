@@ -111,8 +111,8 @@ gate_announce_by_declaration() {
   text=$(als_stable_last_text "$transcript" "$TAIL_LINES" "$MAX_ATTEMPTS" "$SLEEP_S")
   if [ -z "$text" ]; then
     # Extraction found nothing to read — NOT evidence of a stall. Could be a
-    # transcript-flush race that never lands within the retry budget, a
-    # malformed line breaking jq -s's parse, or a turn with no text content at
+    # transcript-flush race that never lands within the retry budget, every
+    # line in the tail window malformed, or a turn with no text content at
     # all. Silent, with a distinct log reason (never misreported as a stall).
     als_log "hook=voice_announce session=$session_id reason=extract_failed"
     exit 0
