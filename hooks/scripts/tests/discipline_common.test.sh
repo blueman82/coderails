@@ -93,4 +93,71 @@ export CLAUDE_HOOK_MAX_ATTEMPTS=1
 result=$(dc_stable_text "$T" 200 1 0)
 check "dc_stable_text returns text on single attempt" "stable text" "$result"
 
+# --- dc_mine_hook_blocks ---
+
+# --- Test (g-a): two sessions interleaved -> only target session's lines counted ---
+LOG="$TMP/discipline_mine.log"
+cat > "$LOG" <<'EOF'
+ts=1 session=sess-a hook=test_gate.sh blocked=0
+ts=2 session=sess-b hook=test_gate.sh blocked=1
+ts=3 session=sess-a hook=test_gate.sh blocked=0
+EOF
+result=$(dc_mine_hook_blocks "sess-a" "$LOG")
+expected='{"test_gate.sh":{"events":2,"flagged":0}}'
+check "two sessions interleaved: only target session counted" "$expected" "$result"
+
+# --- Test (g-b): blocked=1 / would_block=1 / nudged=1 each land in flagged; clean lines only in events ---
+LOG="$TMP/discipline_mine_flags.log"
+cat > "$LOG" <<'EOF'
+ts=1 session=sess-a hook=hook_one blocked=1
+ts=2 session=sess-a hook=hook_one would_block=1
+ts=3 session=sess-a hook=hook_one nudged=1
+ts=4 session=sess-a hook=hook_one
+EOF
+result=$(dc_mine_hook_blocks "sess-a" "$LOG")
+expected='{"hook_one":{"events":4,"flagged":3}}'
+check "blocked/would_block/nudged all flag; clean line only bumps events" "$expected" "$result"
+
+# --- Test (g-c): missing log file -> {} ---
+result=$(dc_mine_hook_blocks "sess-a" "$TMP/does_not_exist.log")
+check "missing log file -> {}" "{}" "$result"
+
+# --- Test (g-d): empty session id -> {} ---
+result=$(dc_mine_hook_blocks "" "$LOG")
+check "empty session id -> {}" "{}" "$result"
+
+# --- Test (g-e): a garbage line with no hook= is skipped without breaking the parse ---
+LOG="$TMP/discipline_mine_garbage.log"
+cat > "$LOG" <<'EOF'
+this is a garbage line with no key=value shape
+ts=1 session=sess-a hook=hook_two blocked=0
+EOF
+result=$(dc_mine_hook_blocks "sess-a" "$LOG")
+expected='{"hook_two":{"events":1,"flagged":0}}'
+check "garbage line with no hook= skipped without breaking parse" "$expected" "$result"
+
+# --- Test (g-f): real-shape line with hook= but NO session= field at all is excluded ---
+LOG="$TMP/discipline_mine_nosession.log"
+cat > "$LOG" <<'EOF'
+ts=1 hook=unregistered_loop_guard.sh payload_parse_error=1
+ts=2 session=sess-a hook=hook_three blocked=0
+EOF
+result=$(dc_mine_hook_blocks "sess-a" "$LOG")
+expected='{"hook_three":{"events":1,"flagged":0}}'
+check "line with hook= but no session= excluded from every session's counts" "$expected" "$result"
+
+# --- Test (g-g): NEGATIVE CONTROL - a deliberately-wrong expected count must fail the comparison ---
+LOG="$TMP/discipline_mine_negctrl.log"
+cat > "$LOG" <<'EOF'
+ts=1 session=sess-a hook=hook_four blocked=0
+EOF
+result=$(dc_mine_hook_blocks "sess-a" "$LOG")
+wrong_expected='{"hook_four":{"events":99,"flagged":99}}'
+if [ "$wrong_expected" = "$result" ]; then
+  printf 'FAIL - negative control: wrong expectation should NOT match actual\n'
+  fails=$((fails+1))
+else
+  printf 'ok   - negative control: wrong expectation correctly fails comparison\n'
+fi
+
 [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails failures)"; exit 1; }

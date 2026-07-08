@@ -66,3 +66,28 @@ dc_stable_text() {
   DC_LAST_ATTEMPTS=$attempts
   printf '%s' "$text"
 }
+
+# dc_mine_hook_blocks <session_id> [log_file]
+#   Aggregates this session's discipline-log lines per hook. Stdout: compact
+#   JSON {"<hook>":{"events":N,"flagged":M}}. Lines are hook-authored
+#   (key=value format, als_log convention) - this is the one retro field the
+#   orchestrator cannot have written itself. Fail-open to {} on any read
+#   problem: the retro must still be writable when the log is absent.
+dc_mine_hook_blocks() {
+  local session="$1" log="${2:-${CLAUDE_DISCIPLINE_LOG:-$HOME/.claude/discipline.log}}"
+  { [ -n "$session" ] && [ -r "$log" ]; } || { printf '{}'; return 0; }
+  awk -v sid="$session" '
+    {
+      hook=""; flagged=0; sess=0
+      for (i=1; i<=NF; i++) {
+        if ($i == "session=" sid) sess=1
+        if ($i ~ /^hook=/) hook=substr($i,6)
+        if ($i=="blocked=1" || $i=="would_block=1" || $i=="nudged=1") flagged=1
+      }
+      if (sess && hook != "") { ev[hook]++; if (flagged) fl[hook]++ }
+    }
+    END { for (h in ev) printf "%s %d %d\n", h, ev[h], fl[h]+0 }
+  ' "$log" 2>/dev/null \
+  | jq -Rnc '[inputs | split(" ") | {(.[0]): {events:(.[1]|tonumber), flagged:(.[2]|tonumber)}}] | add // {}' 2>/dev/null \
+  || printf '{}'
+}
