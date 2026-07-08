@@ -78,11 +78,24 @@ run() { # path payload -> exit code
 
 # The hook backgrounds `say` and returns before it necessarily runs, so poll
 # briefly for the stub's async write rather than racing it.
+#
+# Optional arg = the expected call count to wait for. When given, poll until
+# the count REACHES that value (not merely becomes >0). This matters when an
+# assertion expects >1 call: two backgrounded `say` writes can land in
+# separate poll ticks, and a plain ">0 -> break" returns after the first
+# write, reading a low count under load (the flaky "expected 2, got 1"). With
+# an explicit target the poll waits for the second write. When no arg is given
+# the old ">0 -> break" behaviour is kept, which is correct for the 0- and
+# 1-call assertions (0-call ones exhaust the poll and return 0 either way).
 say_call_count() {
-  local i=0 n
+  local want="${1:-}" i=0 n
   while [ "$i" -lt 20 ]; do
     n=$([ -f "$SAY_LOG" ] && wc -l < "$SAY_LOG" | tr -d ' ' || echo 0)
-    [ "$n" -gt 0 ] && break
+    if [ -n "$want" ]; then
+      [ "$n" -ge "$want" ] && break
+    else
+      [ "$n" -gt 0 ] && break
+    fi
     sleep 0.1
     i=$((i+1))
   done
@@ -186,7 +199,7 @@ run "$STUB_PATH" "$(payload "$T1" S1)" >/dev/null
 T2=$(mk_transcript 1 "All done.
 LOOP-STOP: complete — all PRs merged")
 run "$STUB_PATH" "$(payload "$T2" S1)" >/dev/null
-check "debounce: different kind still speaks (2 calls total)" 2 "$(say_call_count)"
+check "debounce: different kind still speaks (2 calls total)" 2 "$(say_call_count 2)"
 
 # Debounce EXPIRY (item 7): CLAUDE_VOICE_DEBOUNCE_SECONDS=0 means the window
 # never suppresses — an immediate repeat of the SAME kind still speaks again.
@@ -194,7 +207,7 @@ reset; T=$(mk_transcript 1 "All done.
 LOOP-STOP: complete — all PRs merged"); write_file in-progress S1 0
 CLAUDE_VOICE_DEBOUNCE_SECONDS=0 run "$STUB_PATH" "$(payload "$T" S1)" >/dev/null
 CLAUDE_VOICE_DEBOUNCE_SECONDS=0 run "$STUB_PATH" "$(payload "$T" S1)" >/dev/null
-check "debounce expiry (window=0): repeat still speaks (2 calls)" 2 "$(say_call_count)"
+check "debounce expiry (window=0): repeat still speaks (2 calls)" 2 "$(say_call_count 2)"
 
 # Debounce EXPIRY via a stale marker: a marker timestamped far in the past
 # (older than the debounce window) must not suppress a fresh announcement.
