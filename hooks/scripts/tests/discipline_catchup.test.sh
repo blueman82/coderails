@@ -20,7 +20,7 @@ mk_transcript() { # text num_edits -> path
     printf '%s\n' "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Edit\",\"input\":{\"file_path\":\"/tmp/f$i.py\"}}]}}" >> "$out"
     i=$((i+1))
   done
-  jq -n --arg t "$text" '{"type":"assistant","message":{"content":[{"type":"text","text":$t}]}}' >> "$out"
+  jq -cn --arg t "$text" '{"type":"assistant","message":{"content":[{"type":"text","text":$t}]}}' >> "$out"
   printf '%s' "$out"
 }
 

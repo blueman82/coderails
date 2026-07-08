@@ -18,14 +18,14 @@ mk_transcript() { # text -> path
   # tool_use line: simulates an Edit call
   printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Edit","input":{"file_path":"/tmp/f.py"}}]}}' > "$out"
   # text line: assistant response that the hook inspects
-  jq -n --arg t "$text" '{"type":"assistant","message":{"content":[{"type":"text","text":$t}]}}' >> "$out"
+  jq -nc --arg t "$text" '{"type":"assistant","message":{"content":[{"type":"text","text":$t}]}}' >> "$out"
   printf '%s' "$out"
 }
 
 # Transcript with a text message but NO file edits — hook skips file_count check.
 mk_transcript_no_edit() { # text -> path
   local text="$1" out="$TMP/t_ne_$RANDOM.jsonl"
-  jq -n --arg t "$text" '{"type":"assistant","message":{"content":[{"type":"text","text":$t}]}}' > "$out"
+  jq -nc --arg t "$text" '{"type":"assistant","message":{"content":[{"type":"text","text":$t}]}}' > "$out"
   printf '%s' "$out"
 }
 
@@ -129,7 +129,7 @@ subagentstop_payload() { # last_assistant_message [agent_transcript_path] -> jso
 mk_agent_transcript() { # text -> path
   local text="$1" out="$TMP/at_$RANDOM.jsonl"
   printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Edit","input":{"file_path":"/tmp/f.py"}}]}}' > "$out"
-  jq -n --arg t "$text" '{"type":"assistant","message":{"content":[{"type":"text","text":$t}]}}' >> "$out"
+  jq -nc --arg t "$text" '{"type":"assistant","message":{"content":[{"type":"text","text":$t}]}}' >> "$out"
   printf '%s' "$out"
 }
 
