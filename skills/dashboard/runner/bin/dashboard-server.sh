@@ -11,11 +11,25 @@
 # never writes a PID file.
 set -euo pipefail
 
-export PATH="/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+# ~/.local/bin carries the `claude` CLI the approve->build wrapper invokes;
+# launchd's empty PATH omits it, so a daemon-spawned build died
+# "claude: command not found" until it was added here.
+export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 DASHBOARD_DIR="$(dirname "$(dirname "$SCRIPT_DIR")")"
 APP_DIR="$(cd "$DASHBOARD_DIR/app" && pwd)"
+REPO_ROOT="$(cd "$DASHBOARD_DIR/../.." && pwd)"
+
+# The approve->build route spawns run-builder.sh, which hard-requires
+# CODERAILS_BUILDER_REPO_PATH (aborts on its `:?` guard otherwise) and uses
+# CODERAILS_BUILDER_WRAPPER to locate itself under the production bundle
+# where __dirname is virtualised. launchd's env carries neither, so every
+# real Approve failed unexpected_exit:1 until these were exported here.
+# Both absolute, derived from this checkout, surviving the scheduler's
+# empty env.
+export CODERAILS_BUILDER_REPO_PATH="$REPO_ROOT"
+export CODERAILS_BUILDER_WRAPPER="$DASHBOARD_DIR/scripts/run-builder.sh"
 
 cd "$APP_DIR"
 
