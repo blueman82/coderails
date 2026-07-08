@@ -15,8 +15,8 @@
       "assert": "als_count_invocations returns a correct NONZERO count on a transcript containing one malformed JSONL line plus a valid agentic-loop Skill invocation line, using a fixture built independently of the implementer's own test files.",
       "cmd": "cd $(mktemp -d) && repo=/Users/harrison/Github/coderails && printf '%s\\n' '{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Skill\",\"input\":{\"skill\":\"coderails:agentic-loop\"}}]}}' > t.jsonl && printf '%s\\n' 'THIS LINE IS NOT JSON AT ALL {{{' >> t.jsonl && ( . \"$repo/hooks/scripts/lib/loop_state_common.sh\"; n=$(als_count_invocations \"$PWD/t.jsonl\"); [ \"$n\" = \"1\" ] && echo PASS || echo \"FAIL got=$n\" )",
       "negative_control": "Same command against the PRE-FIX lib (git show e63d3d1f:hooks/scripts/lib/loop_state_common.sh) must print FAIL got= (empty, coerced to non-1) — proving the check can fail: cd $(mktemp -d) && repo=/Users/harrison/Github/coderails && printf '%s\\n' '{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Skill\",\"input\":{\"skill\":\"coderails:agentic-loop\"}}]}}' > t.jsonl && printf '%s\\n' 'THIS LINE IS NOT JSON AT ALL {{{' >> t.jsonl && git -C \"$repo\" show e63d3d1f:hooks/scripts/lib/loop_state_common.sh > oldlib.sh && ( . ./oldlib.sh; n=$(als_count_invocations \"$PWD/t.jsonl\"); [ \"$n\" = \"1\" ] && echo UNEXPECTED_PASS || echo \"EXPECTED_FAIL got=$n\" )",
-      "status": "pending",
-      "evidence": ""
+      "status": "pass",
+      "evidence": "PASS (n=1, one stderr line skipped_malformed=1). Negative control against pre-fix lib (e63d3d1f): EXPECTED_FAIL got=[] (empty, coerces to 0) — confirms the check can fail on unfixed code."
     },
     {
       "id": "E2",
