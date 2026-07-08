@@ -189,6 +189,21 @@ check "bare slash-command loop -> counter increments" 1 "$(counter S1 complete)"
 reset; T=$(mk_slash_transcript "/coderails:prep" "no declaration here"); write_file in-progress S1 0
 check "non-loop slash command -> allow (not a loop)" 0 "$(run x "$(payload "$T" S1)")"
 
+# Multiple command-name tags in ONE user message, loop tag NOT first — the
+# scan must catch EVERY tag, not just the first, or a non-loop command ahead of
+# the loop command would undercount to 0 and re-hide the null-counter bug.
+reset
+T="$TMP/multitag_${RANDOM}.jsonl"
+jq -cn --arg c "<command-name>/coderails:prep</command-name>
+<command-name>/coderails:agentic-loop</command-name>" \
+  '{type:"user",message:{role:"user",content:$c}}' > "$T"
+jq -cn --arg t "Work paused.
+LOOP-STOP: hard-stop — multi-tag message" \
+  '{type:"assistant",message:{content:[{type:"text",text:$t}]}}' >> "$T"
+write_file in-progress S1 0
+run x "$(payload "$T" S1)" >/dev/null
+check "multi command-name tags: loop tag not first still counts" 1 "$(counter S1 hard-stop)"
+
 # Unwritable progress dir (chmod 555) — degrades safely: stop still allowed,
 # and jq's redirect never opens the tmp file, so no leftover .tmp.
 reset; T=$(mk_transcript 1 "Work paused.

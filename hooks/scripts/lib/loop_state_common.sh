@@ -67,6 +67,19 @@ als_sanitise_session_id() {
 #      ("coderails:agentic-loop") or bare ("agentic-loop"), via (^|:)agentic-loop$
 #      after stripping the command's leading "/".
 # Structured jq match on a tool_use / command-name — never a free-text grep.
+#
+# Counts EVERY matching occurrence, not distinct loops. A single loop that is
+# both slash-started AND later re-invokes the Skill tool programmatically counts
+# 2 — the SAME accepted behavior the assistant-only form already had (two
+# Skill(agentic-loop) tool_uses in one loop have always counted 2). The
+# completed_marker=count ordinal in als_load_progress is a BACKSTOP; the primary
+# re-arm signal is Phase -2's stub-first overwrite (SKILL.md "Recency"), which
+# resets status to initialising regardless of count. Deliberately NOT deduping
+# across forms: it would add jq complexity to defend an ordinal that stub-first
+# already protects, and the mixed-form co-occurrence is not observed in practice
+# (a loop is started by one trigger). Form 2 DOES scan all command-name tags in
+# a single message (match "g"), so a loop tag after a non-loop tag in one
+# message is not missed — that undercount WOULD silently re-hide the null bug.
 # Stdout contract is UNCHANGED (empty or an integer) even on jq failure — every
 # consumer still reads that as "0, allow" (fail-open). On jq failure this ALSO
 # writes a distinguishable reason tag ("jq_missing" / "jq_parse_error") to
@@ -112,11 +125,15 @@ als_count_invocations() {
           | (.input.skill // "")
           | select(loop_name) ),
         # Form 2: user slash-command message (content is a string carrying
-        # <command-name>). Strip the leading "/" so the name matches loop_name.
+        # <command-name>). Scan EVERY command-name tag in the string (match
+        # with "g"), not just the first — a message could carry more than one
+        # and the loop tag might not be first; matching only the first would
+        # undercount. Strip the leading "/" so the name matches loop_name.
         ( select(.type == "user")
           | .message.content
           | select(type == "string")
-          | (capture("<command-name>/?(?<c>[^<\\n]+)</command-name>").c // empty)
+          | ( [ match("<command-name>/?([^<\\n]+)</command-name>"; "g")
+                | .captures[0].string ][]? )
           | select(loop_name) )
     ]
     | length
