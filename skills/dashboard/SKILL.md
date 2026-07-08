@@ -82,13 +82,17 @@ agent-owned server has no pidfile for `stop-dashboard.sh` to find. Stop it
 with:
 
 ```
-launchctl bootout gui/$UID/com.coderails.dashboard
+launchctl bootout gui/$(id -u)/com.coderails.dashboard
 ```
 
-Likewise, don't hand-run `start-dashboard.sh` while the agent is loaded:
-both will fight over port 4173, and `KeepAlive` means launchd immediately
-respawns its copy, so port 4173 crash-loops every `ThrottleInterval` (60s)
-until one of the two is stopped.
+Likewise, stop any manual server (`bash skills/dashboard/scripts/stop-dashboard.sh`)
+**before** running `install-dashboard-agent.sh` — the installer also refuses
+to bootstrap if port 4173 is already held. Hand-running `start-dashboard.sh`
+while the agent's server is healthy fails cleanly instead (its own lsof guard
+refuses and exits 1, no fight). The real crash-loop risk is the reverse:
+installing the agent while a manual server holds the port causes
+EADDRINUSE, and launchd respawns the agent every `ThrottleInterval` (60s,
+rate-limited — not immediately) until one of the two is stopped.
 
 ## First run without a config
 
