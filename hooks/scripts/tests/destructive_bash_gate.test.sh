@@ -528,6 +528,43 @@ check "no allowlist: naked force via backslash-newline continuation -> deny" DEN
 check "allowlist present: fwl line1 + backslash-newline + -f line2 -> deny" DENY \
   "$(run_cwd "$(payload_with_cwd "git push --force-with-lease \\${NL}-f origin" "$ALLOWLIST_REPO")" "$ALLOWLIST_REPO")"
 
+# 5f. SECURITY — a backslash-newline continuation placed INSIDE a flag word
+# (not just between two separate flags) defeats a naive tr '\n' ' '
+# flattening. Bash's real line-continuation REMOVES both the backslash and
+# the newline, fusing the characters on either side into one token: e.g.
+# "--for" + backslash-newline + "ce" becomes the single genuine argv token
+# "--force". A flatten that only replaces the newline with a space (and
+# leaves the backslash) instead produces "--for\ ce" — two tokens with a
+# stray backslash — so the regex never sees a contiguous "--force" and the
+# split escapes detection entirely, with NO allowlist involved at all. This
+# is more severe than the inter-token case above: it's a plain naked-force
+# bypass, not something that needs the carve-out active to exploit.
+#
+# Uses its OWN fresh scratch repo (NO_INTRA_REPO) rather than reusing
+# ALLOWLIST_REPO, whose allowlist file state at this point in the suite is
+# ambient (last set by an earlier section, not something this group
+# controls) — an earlier draft of this test wrongly assumed "no allowlist"
+# while actually running against a live one left over from an earlier
+# check, producing a self-contradictory pair of assertions for the same
+# fixture state. A dedicated fresh repo makes the allowlist state explicit
+# and local to this test group instead of inherited.
+NO_INTRA_REPO="$TMP/no_intra_repo"
+git init "$NO_INTRA_REPO" -q
+git -C "$NO_INTRA_REPO" checkout -b feat/no-intra -q 2>/dev/null || true
+check "no allowlist: --force split via intra-token backslash-newline -> deny" DENY \
+  "$(run_cwd "$(payload_with_cwd "git push --for\\${NL}ce origin main" "$NO_INTRA_REPO")" "$NO_INTRA_REPO")"
+check "no allowlist: --force-with-lease split via intra-token backslash-newline -> deny" DENY \
+  "$(run_cwd "$(payload_with_cwd "git push --force-with-\\${NL}lease" "$NO_INTRA_REPO")" "$NO_INTRA_REPO")"
+# Positive control: the SAME intra-token split of force-with-lease, but with
+# the allowlist live in this same fresh repo, must allow once correctly
+# spliced back together into the real "--force-with-lease" token — proves
+# the splice fix doesn't just deny everything with a backslash-newline in
+# it.
+mkdir -p "$NO_INTRA_REPO/.claude"
+printf 'git-push-force-with-lease\n' > "$NO_INTRA_REPO/.claude/destructive_allowlist"
+check "allowlist present: --force-with-lease split via intra-token backslash-newline -> allow" ALLOW \
+  "$(run_cwd "$(payload_with_cwd "git push --force-with-\\${NL}lease" "$NO_INTRA_REPO")" "$NO_INTRA_REPO")"
+
 # 6. Empty allowlist file -> denied (mirrors test_gate.sh empty-content no-op)
 : > "$ALLOWLIST_REPO/.claude/destructive_allowlist"
 check "empty allowlist file: force-with-lease -> deny" DENY \
