@@ -87,6 +87,10 @@ run() { # path payload -> exit code
 # an explicit target the poll waits for the second write. When no arg is given
 # the old ">0 -> break" behaviour is kept, which is correct for the 0- and
 # 1-call assertions (0-call ones exhaust the poll and return 0 either way).
+# The returned count is the ACTUAL line count, so an over-count (more writes
+# than want) is still rejected by check's exact equality. Residual: a write
+# landing strictly after the tick that first satisfies want is not seen (the
+# poll has already broken) — same blind spot the old >0-break had, not a new one.
 say_call_count() {
   local want="${1:-}" i=0 n
   while [ "$i" -lt 20 ]; do
@@ -208,6 +212,14 @@ LOOP-STOP: complete — all PRs merged"); write_file in-progress S1 0
 CLAUDE_VOICE_DEBOUNCE_SECONDS=0 run "$STUB_PATH" "$(payload "$T" S1)" >/dev/null
 CLAUDE_VOICE_DEBOUNCE_SECONDS=0 run "$STUB_PATH" "$(payload "$T" S1)" >/dev/null
 check "debounce expiry (window=0): repeat still speaks (2 calls)" 2 "$(say_call_count 2)"
+
+# say_call_count contract: the want-arg poll returns the ACTUAL count, so an
+# over-count (more writes than want) is still rejected by check's exact
+# equality — the wait target must never mask a spurious extra say call. Seed
+# SAY_LOG with 3 lines and assert say_call_count 2 reports 3 (not a clamped 2).
+reset; printf 'a\nb\nc\n' > "$SAY_LOG"
+check "say_call_count returns true count (over-count not masked by want target)" 3 "$(say_call_count 2)"
+reset
 
 # Debounce EXPIRY via a stale marker: a marker timestamped far in the past
 # (older than the debounce window) must not suppress a fresh announcement.
