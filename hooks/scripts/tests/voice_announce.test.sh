@@ -265,4 +265,31 @@ elapsed=$((end - start))
 check "non-blocking: hook exits 0 despite slow say" 0 "$rc"
 check "non-blocking: hook returns in well under 3s" 1 "$([ "$elapsed" -lt 2 ] && echo 1 || echo 0)"
 
+# ── Malformed-line tolerance: a bad JSONL line alongside a genuine valid
+# LOOP-STOP declaration must still announce the CORRECT kind, not silently
+# fall back to reason=extract_failed. Pre-fix, `jq -s` aborted the whole
+# slurp on the bad line, collapsing extraction to empty (indistinguishable
+# from "no text yet").
+mk_malformed_transcript() { # n_invocations final_text -> path (malformed line inserted before final text)
+  local n="$1" final="$2" out="$TMP/malformed_${RANDOM}.jsonl" i=0
+  : > "$out"
+  while [ "$i" -lt "$n" ]; do
+    printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Skill","input":{"skill":"coderails:agentic-loop"}}]}}' >> "$out"
+    i=$((i+1))
+  done
+  printf '%s\n' '{"type":"assistant", THIS IS NOT VALID JSON' >> "$out"
+  if [ -n "$final" ]; then
+    jq -cn --arg t "$final" '{type:"assistant",message:{content:[{type:"text",text:$t}]}}' >> "$out"
+  fi
+  printf '%s' "$out"
+}
+reset; T=$(mk_malformed_transcript 1 "All done.
+LOOP-STOP: complete — all PRs merged"); write_file in-progress S1 0
+rc=$(run "$STUB_PATH" "$(payload "$T" S1)")
+check "malformed line + valid declaration: hook exits 0" 0 "$rc"
+check "malformed line + valid declaration: exactly one say call" 1 "$(say_call_count)"
+check "malformed line + valid declaration: announces correct kind (complete)" 1 "$(grep -qi 'complete' "$SAY_LOG" && echo 1 || echo 0)"
+check "malformed line + valid declaration: NOT misread as extract_failed" 0 \
+  "$(last_voice_log_line | grep -qE 'reason=extract_failed' && echo 1 || echo 0)"
+
 [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails)"; exit 1; }
