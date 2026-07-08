@@ -213,6 +213,16 @@ describe("pressButton — buildArgv throw parity", () => {
     expect(mkdirIntentDir).not.toHaveBeenCalled();
     expect(createRunNote).not.toHaveBeenCalled();
   });
+
+  it("does not throw for a button with a non-empty command and no input", async () => {
+    const execFile = vi.fn();
+    const deps = makeDeps({ execFile });
+
+    const result = await pressButton(deps, BUTTONS, "wiki-lint");
+
+    expect(result.ok).toBe(true);
+    expect(execFile).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("pressButton — run note lifecycle", () => {
