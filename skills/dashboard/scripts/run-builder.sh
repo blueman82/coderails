@@ -135,12 +135,31 @@ fi
 
 # --- Step 4: worktree ---
 ABS_REPO_PATH="${CODERAILS_BUILDER_REPO_PATH:?CODERAILS_BUILDER_REPO_PATH must be set}"
+# Distinct bad_repo_path suffixes (matching the script's reason:detail
+# convention) because state.json's failureReason is the operator's only
+# diagnostic — the wrapper runs with stdio ignored. A bare .git FILE (a
+# linked worktree) also lands in no_git: the path must be the primary
+# checkout.
 if [ ! -d "$ABS_REPO_PATH/.git" ]; then
-  fail_terminal "bad_repo_path"
+  fail_terminal "bad_repo_path:no_git"
 fi
-if ! grep -q '"coderails"' "$ABS_REPO_PATH/package.json" 2>/dev/null && \
-   ! grep -q 'name.*coderails' "$ABS_REPO_PATH/package.json" 2>/dev/null; then
-  fail_terminal "bad_repo_path"
+# The coderails repo has no root package.json — its identity file is
+# .claude-plugin/plugin.json. Checking package.json here meant every real
+# build failed bad_repo_path while tests (whose fixture repos carried a
+# root package.json) stayed green. The name field is compared exactly:
+# a substring grep would let any repo that merely mentions coderails
+# (a keyword, a description) pass the one guard that decides where the
+# bypass-permissions builder runs.
+PLUGIN_JSON="$ABS_REPO_PATH/.claude-plugin/plugin.json"
+# Reject a symlinked identity file or a symlinked .claude-plugin dir: the
+# guard's job is to confirm this path IS the real primary checkout, and a
+# symlink to the genuine plugin.json would let an otherwise-foreign repo
+# borrow coderails's identity and run the bypass-permissions builder.
+if [ ! -f "$PLUGIN_JSON" ] || [ -L "$PLUGIN_JSON" ] || [ -L "$ABS_REPO_PATH/.claude-plugin" ]; then
+  fail_terminal "bad_repo_path:no_identity_file"
+fi
+if [ "$(jq -r '.name // empty' "$PLUGIN_JSON" 2>/dev/null)" != "coderails" ]; then
+  fail_terminal "bad_repo_path:wrong_identity"
 fi
 PROPOSED_NAME=$(jq -r '.toolInput.proposed_name // empty' "$BUILD_DIR/snapshot.json")
 # Every other snapshot-derived invariant (hash, status, toolName) is

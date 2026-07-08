@@ -7,6 +7,7 @@ import {
   rmSync,
   chmodSync,
   mkdirSync,
+  symlinkSync,
 } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
@@ -95,8 +96,17 @@ function makeRepoFixture(): string {
   execFileSync("git", ["init", "-q", repoDir]);
   execFileSync("git", ["-C", repoDir, "config", "user.email", "test@example.com"]);
   execFileSync("git", ["-C", repoDir, "config", "user.name", "Test"]);
-  writeFileSync(join(repoDir, "package.json"), JSON.stringify({ name: "coderails" }));
-  execFileSync("git", ["-C", repoDir, "add", "package.json"]);
+  // Mirror the real repo's identity file: coderails has NO root
+  // package.json — its identity lives at .claude-plugin/plugin.json. A
+  // fixture with a root package.json passed a repo-identity check the
+  // real repo could never pass (caught live: every real build failed
+  // bad_repo_path while this suite stayed green).
+  mkdirSync(join(repoDir, ".claude-plugin"));
+  writeFileSync(
+    join(repoDir, ".claude-plugin", "plugin.json"),
+    JSON.stringify({ name: "coderails" }),
+  );
+  execFileSync("git", ["-C", repoDir, "add", ".claude-plugin/plugin.json"]);
   execFileSync("git", ["-C", repoDir, "commit", "-q", "-m", "init"]);
   execFileSync("git", ["-C", repoDir, "branch", "-M", "main"]);
   execFileSync("git", ["-C", repoDir, "remote", "add", "origin", bareDir]);
@@ -173,6 +183,92 @@ describe("run-builder.sh: hash re-validation (steps 1-2)", () => {
     const state = readState(buildDir);
     expect(state.state).toBe("failed");
     expect(state.failureReason).toBe(`hash_mismatch:${wrongHash}`);
+    expect(existsSync(stubLog)).toBe(false);
+  });
+
+  it("repo without .claude-plugin/plugin.json -> failed: bad_repo_path:no_identity_file, and the stub claude is never invoked", () => {
+    const buildDir = makeBuildDir();
+    const locksDir = tmpDir("dashboard-run-builder-locks-");
+    const stubLog = join(buildDir, "stub-invocations.log");
+    const binDir = makeStubClaudeBin(`echo "$@" >> "${stubLog}"; exit 0`);
+
+    // A real git repo that is NOT coderails: has .git but no identity file.
+    const repoDir = tmpDir("dashboard-run-builder-notcoderails-");
+    execFileSync("git", ["init", "-q", repoDir]);
+
+    writeSnapshot(buildDir, { toolInput: { proposed_name: "x" } });
+
+    runWrapper(buildDir, {
+      CODERAILS_BUILDER_LOCKS_DIR: locksDir,
+      CODERAILS_BUILDER_REPO_PATH: repoDir,
+      PATH: `${binDir}:${process.env.PATH}`,
+    });
+
+    const state = readState(buildDir);
+    expect(state.state).toBe("failed");
+    expect(state.failureReason).toBe("bad_repo_path:no_identity_file");
+    expect(existsSync(stubLog)).toBe(false);
+  });
+
+  it("symlinked plugin.json pointing at a genuine coderails identity -> failed: bad_repo_path:no_identity_file", () => {
+    const buildDir = makeBuildDir();
+    const locksDir = tmpDir("dashboard-run-builder-locks-");
+    const stubLog = join(buildDir, "stub-invocations.log");
+    const binDir = makeStubClaudeBin(`echo "$@" >> "${stubLog}"; exit 0`);
+
+    // A foreign repo whose plugin.json is a symlink to a real coderails
+    // identity file must NOT borrow that identity. The guard confirms the
+    // path is the real checkout, so a symlinked identity file is rejected.
+    const genuineDir = tmpDir("dashboard-run-builder-genuine-");
+    writeFileSync(join(genuineDir, "plugin.json"), JSON.stringify({ name: "coderails" }));
+
+    const repoDir = tmpDir("dashboard-run-builder-symlink-");
+    execFileSync("git", ["init", "-q", repoDir]);
+    mkdirSync(join(repoDir, ".claude-plugin"));
+    symlinkSync(join(genuineDir, "plugin.json"), join(repoDir, ".claude-plugin", "plugin.json"));
+
+    writeSnapshot(buildDir, { toolInput: { proposed_name: "x" } });
+
+    runWrapper(buildDir, {
+      CODERAILS_BUILDER_LOCKS_DIR: locksDir,
+      CODERAILS_BUILDER_REPO_PATH: repoDir,
+      PATH: `${binDir}:${process.env.PATH}`,
+    });
+
+    const state = readState(buildDir);
+    expect(state.state).toBe("failed");
+    expect(state.failureReason).toBe("bad_repo_path:no_identity_file");
+    expect(existsSync(stubLog)).toBe(false);
+  });
+
+  it("plugin.json that merely MENTIONS coderails without being it -> failed: bad_repo_path:wrong_identity", () => {
+    const buildDir = makeBuildDir();
+    const locksDir = tmpDir("dashboard-run-builder-locks-");
+    const stubLog = join(buildDir, "stub-invocations.log");
+    const binDir = makeStubClaudeBin(`echo "$@" >> "${stubLog}"; exit 0`);
+
+    // The identity check must compare the name FIELD exactly — a substring
+    // match would let a companion plugin that lists coderails as a keyword
+    // run the bypass-permissions builder in the wrong repo.
+    const repoDir = tmpDir("dashboard-run-builder-lookalike-");
+    execFileSync("git", ["init", "-q", repoDir]);
+    mkdirSync(join(repoDir, ".claude-plugin"));
+    writeFileSync(
+      join(repoDir, ".claude-plugin", "plugin.json"),
+      JSON.stringify({ name: "other-plugin", keywords: ["coderails", "companion"] }),
+    );
+
+    writeSnapshot(buildDir, { toolInput: { proposed_name: "x" } });
+
+    runWrapper(buildDir, {
+      CODERAILS_BUILDER_LOCKS_DIR: locksDir,
+      CODERAILS_BUILDER_REPO_PATH: repoDir,
+      PATH: `${binDir}:${process.env.PATH}`,
+    });
+
+    const state = readState(buildDir);
+    expect(state.state).toBe("failed");
+    expect(state.failureReason).toBe("bad_repo_path:wrong_identity");
     expect(existsSync(stubLog)).toBe(false);
   });
 
