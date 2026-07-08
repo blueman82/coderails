@@ -177,6 +177,40 @@ check "uninstall script references ~/Library/LaunchAgents" "yes" \
 check "uninstall script removes the LaunchAgents copy (DEST)" "yes" \
   "$(grep -qE 'rm -f "\$DEST"' "$UNINSTALL" 2>/dev/null && echo yes || echo no)"
 
+# The stranded-copy half of the original bug: a refactor that moves the
+# `rm -f "$DEST"` above the still-loaded failure check (or above the
+# bootout call entirely) would remove the LaunchAgents copy even when the
+# job never actually unloaded, defeating the "don't remove while still
+# loaded" guarantee the failure branch exists to enforce. Assert the rm
+# comes strictly after the failure-check line, not merely that it exists
+# somewhere in the file.
+check "uninstall script removes DEST only after the still-loaded failure check" "yes" \
+  "$(awk '/still loaded after bootout/{err=NR} /rm -f "\$DEST"/{rm=NR} END{print (err && rm && err<rm) ? "yes" : "no"}' "$UNINSTALL")"
+
+# `launchctl bootout` is asynchronous for a running KeepAlive job — it
+# returns before the job has actually unloaded (observed live 2026-07-08: a
+# running dashboard job unloaded ~2s after bootout returned). A single
+# immediate `launchctl print` check right after bootout would spuriously
+# report "still loaded" and bail before removing the LaunchAgents copy,
+# leaving the plist to auto-load again at next login. The uninstaller must
+# actually poll `launchctl print` INSIDE a loop body between bootout and the
+# failure declaration, not merely contain a loop keyword somewhere in that
+# span (a loop with an empty/no-op body, or an unrelated loop earlier in the
+# file, would satisfy a looser check while still having the original bug —
+# proven by mutant discrimination in this file's own dev history).
+check "uninstall script polls launchctl print inside a loop between bootout and the failure check" "yes" \
+  "$(awk '
+    /launchctl bootout/ && !bo {bo=NR}
+    /for .*in.*seq|while /{if (!loop_start && bo && NR>bo) loop_start=NR}
+    loop_start && !loop_done && /^done/ {loop_done=NR}
+    /launchctl print/ {if (loop_start && !pr_in_loop && NR>loop_start) pr_in_loop=NR}
+    /still loaded after bootout/ && !err {err=NR}
+    END{
+      ok = (bo && err && loop_start && loop_done && pr_in_loop && bo<loop_start && loop_start<pr_in_loop && pr_in_loop<loop_done && loop_done<err) ? "yes" : "no"
+      print ok
+    }
+  ' "$UNINSTALL")"
+
 if [ "$checks" -eq 0 ]; then
   echo "FAIL - zero checks ran — guard is vacuous"
   exit 1
