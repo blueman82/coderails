@@ -137,6 +137,30 @@ for label in $LABELS; do
     "yes" "$(grep -q "bootout .*$label" "$LAUNCHCTL_LOG" && echo yes || echo no)"
 done
 
+# --- Empty-glob guard ---
+# Copy each script into a launchd dir that has NO plists at all. Under
+# `set -euo pipefail` an unguarded glob would expand to the literal pattern
+# and crash mid-loop with a cryptic error; the nullglob + guard must instead
+# exit non-zero with a clear "no plists found" message and touch nothing.
+EMPTY_LAUNCHD="$TMP/empty-launchd"
+EMPTY_HOME="$TMP/empty-home"
+mkdir -p "$EMPTY_LAUNCHD" "$EMPTY_HOME"
+cp "$LAUNCHD_DIR/install-routines.sh" "$LAUNCHD_DIR/uninstall-routines.sh" "$EMPTY_LAUNCHD/"
+
+empty_install_out="$( cd "$EMPTY_LAUNCHD" && HOME="$EMPTY_HOME" PATH="$BIN_STUB:$PATH" \
+    bash "$EMPTY_LAUNCHD/install-routines.sh" 2>&1 )"
+empty_install_rc=$?
+check "install exits non-zero when no plists present" \
+  "yes" "$([ "$empty_install_rc" -ne 0 ] && echo yes || echo no)"
+check "install prints a clear no-plists error" \
+  "yes" "$(printf '%s' "$empty_install_out" | grep -q 'no com.coderails.routine-sweeper' && echo yes || echo no)"
+
+empty_uninstall_out="$( cd "$EMPTY_LAUNCHD" && HOME="$EMPTY_HOME" PATH="$BIN_STUB:$PATH" \
+    bash "$EMPTY_LAUNCHD/uninstall-routines.sh" 2>&1 )"
+empty_uninstall_rc=$?
+check "uninstall exits non-zero when no plists present" \
+  "yes" "$([ "$empty_uninstall_rc" -ne 0 ] && echo yes || echo no)"
+
 if [ "$checks" -eq 0 ]; then
   echo "FAIL - zero checks ran — guard is vacuous"
   exit 1

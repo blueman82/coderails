@@ -33,7 +33,17 @@ mkdir -p -m 0700 "$HOME/.claude/coderails-dashboard/routines"
 
 mkdir -p "$LAUNCH_AGENTS"
 
-for plist in "$SCRIPT_DIR"/com.coderails.routine-sweeper.*.plist; do
+# nullglob so an empty match expands to nothing rather than the literal
+# pattern (which, under `set -e`, would crash `install` with a cryptic
+# "No such file" mid-loop). The guard then turns "no plists" into a clear error.
+shopt -s nullglob
+plists=("$SCRIPT_DIR"/com.coderails.routine-sweeper.*.plist)
+if [ "${#plists[@]}" -eq 0 ]; then
+  echo "Error: no com.coderails.routine-sweeper.*.plist found in $SCRIPT_DIR" >&2
+  exit 1
+fi
+
+for plist in "${plists[@]}"; do
   label=$(basename "$plist" .plist)
   dest="$LAUNCH_AGENTS/$label.plist"
   echo "Installing: $label ($plist)"
