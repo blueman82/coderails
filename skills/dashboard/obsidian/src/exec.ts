@@ -123,7 +123,15 @@ export async function pressButton(
     return { ok: false, reason: "unresolved" };
   }
 
-  const argv = buildArgv(button, input);
+  let argv: string[];
+  try {
+    argv = buildArgv(button, input);
+  } catch {
+    // buildArgv throws when the input can't be turned into a valid command
+    // line (no command and no input, or a flag-shaped input) — caught here
+    // so a press never crashes instead of resolving to a PressResult.
+    return { ok: false, reason: "invalid-input" };
+  }
 
   const runId = deps.randomRunId();
   const requestedAt = deps.now();
