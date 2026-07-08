@@ -74,6 +74,23 @@ Fire-and-forget is safe here because the claim directory is never released
 on process exit — it always ends up in a terminal state written by the
 wrapper (§3), and retry is deleting the directory (§6), not re-approving.
 
+**Deployment contract — the dashboard server's environment.** The wrapper
+hard-requires `CODERAILS_BUILDER_REPO_PATH` (the absolute path of the
+coderails checkout it will make build worktrees from) and aborts otherwise;
+`spawn.ts` passes the server's environment through, so the variable must be
+set on the `next start` process itself. `CODERAILS_BUILDER_WRAPPER` may
+additionally pin the wrapper script path explicitly (recommended for
+production, where bundler-virtualised `__dirname` makes the fallback chain
+work harder than it should); a pinned path that fails the wrapper's
+content-identity check is silently ignored and the fallback walks run
+instead. The wrapper validates the repo path by its
+`.claude-plugin/plugin.json` identity file (exact `name` comparison — the
+repo has no root `package.json`; a symlinked identity file or
+`.claude-plugin` dir is rejected so a foreign repo can't borrow the
+identity), and the path must be the primary checkout, not a linked
+worktree: a linked worktree's `.git` is a file, and the wrapper requires a
+`.git` directory (`bad_repo_path:no_git`).
+
 **`prompt.md` as shipped by WU1 is a placeholder** (`"See prompt.ts (WU2)
 for the real template — this task only establishes the file-write
 contract"`) — WU1's scope was the file-write contract, not the prompt
