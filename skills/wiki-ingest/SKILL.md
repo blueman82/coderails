@@ -67,15 +67,23 @@ WORKTREE_PATH="$vault"
 
 **From description**: Ask which files changed, or use `git log` to find relevant commits.
 
-### Step 3: Discuss Key Takeaways
+### Step 3: Discuss Key Takeaways (unless `wiki.supervision: autonomous`)
 
-Before writing anything, discuss with the user:
+**If `wiki.supervision` is `autonomous`:** skip straight to Step 4. Curate and commit without
+pausing — that is what this setting means. Do not add your own confirmation checkpoint before
+Step 6's commit either; `autonomous` covers the whole ingest, not just this step.
+
+**Otherwise (the default — `discuss`, or the field absent):** before writing anything, discuss
+with the user:
 - What are the key changes / main ideas?
 - What should the wiki emphasise?
 - Are there decisions or patterns worth capturing?
 - Does this relate to existing wiki pages?
 
-Don't auto-ingest silently. The human stays involved.
+Don't auto-ingest silently. The human stays involved. A prior authorization earlier in the same
+turn (e.g. approving the code change, PR, or merge this source documents) does not satisfy this
+step — the wiki content itself has not been discussed yet, regardless of momentum from a chain of
+already-approved actions.
 
 ### Step 4: Check What's Already Known
 
