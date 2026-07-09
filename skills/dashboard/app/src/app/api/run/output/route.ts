@@ -99,7 +99,7 @@ export function createRunOutputHandler(deps: RunOutputHandlerDeps) {
 
     let output: string;
     try {
-      output = readFileSync(record.outputPath, "utf-8");
+      output = extractResultText(readFileSync(record.outputPath, "utf-8"));
     } catch {
       // Log file not (yet) written, or since removed — an absent log is not an error state a
       // caller needs to distinguish from "no output yet"; both render the same empty viewer.
