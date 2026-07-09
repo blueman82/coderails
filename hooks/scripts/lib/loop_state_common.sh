@@ -446,3 +446,30 @@ als_read_loop_evals_result() {
   else ALS_LOOP_EVALS_RESULT="NO-GO"
   fi
 }
+
+# Gate: on a `complete` declaration, require a parseable retro.json
+# (schema_version 1) beside progress.json - Phase 13's write contract.
+# Presence + parse only (honest boundary: provenance/content fidelity is
+# not checkable here, same limit as every other guard). Fail-open when jq
+# is absent, matching bump_loop_stop_count.
+als_gate_retro_on_complete() {
+  local category="$1" hook="$2" session="$3"
+  local category_lc; category_lc=$(printf '%s' "$category" | tr '[:upper:]' '[:lower:]')
+  [ "$category_lc" = "complete" ] || return 0
+  command -v jq >/dev/null 2>&1 || { als_log "hook=$hook session=$session retro_gate=skipped_no_jq"; return 0; }
+  [ -n "$ALS_PATH" ] || { ALS_RETRO_STATE="no_als_path"; als_log "hook=$hook session=$session retro=no_als_path blocked=1"; echo "[loop-stall-guard] retro gate: ALS_PATH unset — cannot locate retro.json." >&2; exit 2; }
+  local retro; retro="$(dirname "$ALS_PATH")/retro.json"
+  ALS_RETRO_STATE="present"
+  if [ ! -f "$retro" ]; then ALS_RETRO_STATE="absent"
+  elif ! jq -e . "$retro" >/dev/null 2>&1; then ALS_RETRO_STATE="malformed"
+  elif [ "$(jq -r '.schema_version // 0' "$retro" 2>/dev/null)" != "1" ]; then ALS_RETRO_STATE="wrong_schema"
+  fi
+  if [ "$ALS_RETRO_STATE" != "present" ]; then
+    als_log "hook=$hook session=$session retro=$ALS_RETRO_STATE blocked=1"
+    echo "[loop-stall-guard] LOOP-STOP: complete declared but retro.json is $ALS_RETRO_STATE.
+Phase 13 teardown writes retro.json (schema_version 1) beside progress.json
+BEFORE declaring complete: assemble the retro (see agentic-loop SKILL.md
+Phase 13), write it, then re-declare complete." >&2
+    exit 2
+  fi
+}

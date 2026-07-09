@@ -65,6 +65,11 @@ check() { if [ "$2" = "$3" ]; then printf 'ok   - %s\n' "$1"; else printf 'FAIL 
 reset() { rm -rf "$CLAUDE_AGENTIC_LOOP_DIR"; }
 progress_file() { printf '%s/progress.json' "$(file_dir "$1")"; }   # session_id -> progress.json path
 counter() { jq -r --arg c "$2" '.loop_stop_counts[$c] // 0' "$(progress_file "$1")" 2>/dev/null; }   # session_id category
+write_retro() { # session_id content -> writes retro.json beside progress.json
+  local dir; dir=$(file_dir "$1")
+  mkdir -p "$dir"
+  printf '%s' "$2" > "$dir/retro.json"
+}
 # grep -c exits 1 on zero matches even though it correctly prints "0" — count()
 # always exits 0 and prints just the count, so a zero-match assertion doesn't
 # need an `|| echo 0` fallback (mirrors loop_state_guard.test.sh's own count()).
@@ -96,8 +101,12 @@ LOOP-STOP: awaiting-input — waiting on the user's plan confirmation"); write_f
 check "valid LOOP-STOP tag -> allow" 0 "$(run x "$(payload "$T" S1)")"
 
 # gate_loop_stop_declared — complete category tag is also accepted.
+# (retro.json required alongside from Task 2's als_gate_retro_on_complete —
+# this fixture is testing declaration-category matching, not the retro gate,
+# so it supplies a valid retro to keep exercising the ORIGINAL behaviour.)
 reset; T=$(mk_transcript 1 "All done.
 LOOP-STOP: complete — all PRs merged"); write_file in-progress S1 0
+write_retro S1 '{"schema_version":1}'
 check "complete tag -> allow" 0 "$(run x "$(payload "$T" S1)")"
 
 # block_missing_declaration — active, incomplete, NO tag -> block.
@@ -124,8 +133,11 @@ run x "$(payload "$T" S1)" >/dev/null
 check "counter accumulates on repeat -> 2" 2 "$(counter S1 awaiting-input)"
 
 # A different category in the same fixture increments independently, other counts untouched.
+# (retro.json supplied so this "complete" fixture clears Task 2's retro gate —
+# this test is about counter independence, not the retro gate itself.)
 reset; T=$(mk_transcript 1 "All done.
 LOOP-STOP: complete — all PRs merged"); write_file in-progress S1 0
+write_retro S1 '{"schema_version":1}'
 run x "$(payload "$T" S1)" >/dev/null
 check "distinct category counted separately (complete)" 1 "$(counter S1 complete)"
 check "untouched category stays 0 (hard-stop)" 0 "$(counter S1 hard-stop)"
@@ -162,6 +174,7 @@ check "jq absent -> still allow (fail-open by design)" 0 "$(run_env "PATH=$NOJQ_
 # ENDING line, so only the final one reflects the turn's actual outcome).
 reset; T=$(mk_transcript 1 "LOOP-STOP: hard-stop — first, ignore this one
 LOOP-STOP: complete — actually this one, the loop is done"); write_file in-progress S1 0
+write_retro S1 '{"schema_version":1}'
 run x "$(payload "$T" S1)" >/dev/null
 check "multi-declaration: last category wins (complete)" 1 "$(counter S1 complete)"
 check "multi-declaration: first category NOT counted (hard-stop)" 0 "$(counter S1 hard-stop)"
@@ -181,6 +194,7 @@ check "slash-command loop -> counter increments" 1 "$(counter S1 awaiting-input)
 # Bare slash form (/agentic-loop, unscoped) must also register.
 reset; T=$(mk_slash_transcript "/agentic-loop" "All done.
 LOOP-STOP: complete — all PRs merged"); write_file in-progress S1 0
+write_retro S1 '{"schema_version":1}'
 run x "$(payload "$T" S1)" >/dev/null
 check "bare slash-command loop -> counter increments" 1 "$(counter S1 complete)"
 
@@ -287,5 +301,108 @@ U="$TMP/mixed_${RANDOM}.jsonl"
 mk_line "<command-name>/coderails:agentic-loop</command-name>" > "$U"
 printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Skill","input":{"skill":"coderails:agentic-loop"}}]}}' >> "$U"
 check "mixed slash+tool_use for one loop -> counts 2 (no cross-form dedup)" 2 "$(inv_count "$U")"
+
+# =====================================================================
+# als_gate_retro_on_complete — retro-presence gate on a `complete` LOOP-STOP.
+# retro.json lives BESIDE progress.json, i.e. in the same session dir
+# (write_retro is defined up with the other fixture helpers, since two
+# pre-existing "complete" fixtures above now need it too).
+# NOT `rc=$(run_capture_stderr ...)` — that would run the function in a
+# subshell (command substitution), so the STDERR_OUT global it sets would
+# vanish with the subshell and never reach the caller (same pitfall
+# als_count_invocations' header comment documents for its own reason-tag).
+# Call it directly; it sets both RC_OUT and STDERR_OUT in THIS shell.
+run_capture_stderr() { # payload -> sets $RC_OUT and $STDERR_OUT (no subshell)
+  local errfile="$TMP/stderr_${RANDOM}.txt"
+  echo "$1" | bash "$GUARD" >/dev/null 2>"$errfile"
+  RC_OUT=$?
+  STDERR_OUT=$(cat "$errfile" 2>/dev/null)
+  rm -f "$errfile"
+}
+
+# (a) complete declared, retro.json absent -> block, stderr mentions retro.
+reset; T=$(mk_transcript 1 "All done.
+LOOP-STOP: complete — done"); write_file in-progress S1 0
+run_capture_stderr "$(payload "$T" S1)"
+check "complete + no retro.json -> block" 2 "$RC_OUT"
+case "$STDERR_OUT" in *[Rr]etro*) retro_mentioned=1 ;; *) retro_mentioned=0 ;; esac
+check "complete + no retro.json -> stderr mentions retro" 1 "$retro_mentioned"
+check "complete + no retro.json -> complete counter NOT bumped" 0 "$(counter S1 complete)"
+
+# (b) complete declared, valid {"schema_version":1} retro.json beside progress.json
+# -> allow AND loop_stop_counts.complete bumped (block-before-bump: a passing
+# gate must still let the pre-existing counter logic run).
+reset; T=$(mk_transcript 1 "All done.
+LOOP-STOP: complete — done"); write_file in-progress S1 0
+write_retro S1 '{"schema_version":1}'
+check "complete + valid retro.json -> allow" 0 "$(run x "$(payload "$T" S1)")"
+check "complete + valid retro.json -> counter bumped" 1 "$(counter S1 complete)"
+
+# (c) complete declared, retro.json present but not valid JSON -> block.
+reset; T=$(mk_transcript 1 "All done.
+LOOP-STOP: complete — done"); write_file in-progress S1 0
+write_retro S1 'not-json'
+check "complete + malformed retro.json -> block" 2 "$(run x "$(payload "$T" S1)")"
+check "complete + malformed retro.json -> complete counter NOT bumped" 0 "$(counter S1 complete)"
+
+# (d) complete declared, retro.json valid JSON but wrong schema_version -> block.
+reset; T=$(mk_transcript 1 "All done.
+LOOP-STOP: complete — done"); write_file in-progress S1 0
+write_retro S1 '{"schema_version":2}'
+check "complete + wrong schema_version retro.json -> block" 2 "$(run x "$(payload "$T" S1)")"
+check "complete + wrong schema_version retro.json -> complete counter NOT bumped" 0 "$(counter S1 complete)"
+
+# (e) non-complete category (hard-stop) with no retro.json -> allow; the gate
+# fires ONLY on a `complete` declaration.
+reset; T=$(mk_transcript 1 "Work paused.
+LOOP-STOP: hard-stop — x"); write_file in-progress S1 0
+check "hard-stop + no retro.json -> allow (gate is complete-only)" 0 "$(run x "$(payload "$T" S1)")"
+
+# (f) stop_hook_active=true short-circuits BEFORE the retro gate even runs —
+# complete + no retro.json must still allow.
+reset; T=$(mk_transcript 1 "All done.
+LOOP-STOP: complete — done"); write_file in-progress S1 0
+check "stop_hook_active + complete + no retro.json -> allow (short-circuit precedes gate)" 0 \
+  "$(run x "$(payload "$T" S1 true)")"
+
+# (g2) MIXED-CASE BLOCK (the Critical bug) — loop_stall_guard's own category
+# extraction is case-INSENSITIVE (grep -oiE) and preserves the model's original
+# casing, so a model writing "Complete" or "COMPLETE" still declares the loop
+# done per the outer stall-guard's vocab match. The retro gate must treat those
+# the same as lowercase "complete" — a case-sensitive compare here would let
+# capitalisation alone bypass the entire retro-presence requirement.
+reset; T=$(mk_transcript 1 "All done.
+LOOP-STOP: Complete — done"); write_file in-progress S1 0
+check "mixed-case Complete + no retro.json -> block" 2 "$(run x "$(payload "$T" S1)")"
+# bump_loop_stop_count keys on the RAW extracted category (unnormalized), so a
+# regression that let the block fall through to the bump would write under the
+# literal "Complete" key, not lowercase "complete" — assert against the key
+# that would actually receive the write.
+check "mixed-case Complete + no retro.json -> Complete counter NOT bumped" 0 "$(counter S1 Complete)"
+
+reset; T=$(mk_transcript 1 "All done.
+LOOP-STOP: COMPLETE — done"); write_file in-progress S1 0
+check "all-caps COMPLETE + no retro.json -> block" 2 "$(run x "$(payload "$T" S1)")"
+check "all-caps COMPLETE + no retro.json -> COMPLETE counter NOT bumped" 0 "$(counter S1 COMPLETE)"
+
+# (g3) mixed-case allow — proves normalization doesn't break the happy path
+# for a non-lowercase declaration paired with a valid retro.json.
+reset; T=$(mk_transcript 1 "All done.
+LOOP-STOP: Complete — done"); write_file in-progress S1 0
+write_retro S1 '{"schema_version":1}'
+check "mixed-case Complete + valid retro.json -> allow" 0 "$(run x "$(payload "$T" S1)")"
+
+# (g) NEGATIVE CONTROL — prove case (b)'s counter assertion actually
+# discriminates: re-checking against a category that was never bumped must
+# NOT match the "bumped" expectation. Verified with a plain bash comparison
+# (not check(), so a correctly-failing control doesn't fail the suite) so the
+# mismatch is self-evident and the file still exits 0 overall.
+neg_actual="$(counter S1 nonexistent-category)"
+if [ "$neg_actual" = "1" ]; then
+  echo "FAIL - negative control did not fail as expected (bug in test design)"
+  fails=$((fails+1))
+else
+  echo "ok   - negative control correctly reports mismatch (expected bumped=1, got $neg_actual for an uncounted category)"
+fi
 
 [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails)"; exit 1; }
