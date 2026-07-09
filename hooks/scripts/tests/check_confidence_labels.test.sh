@@ -17,8 +17,9 @@ mk_transcript() { # text -> path
   printf '%s' "$out"
 }
 
-payload() { # transcript_path -> json
-  printf '{"transcript_path":"%s","session_id":"S1"}' "$1"
+payload() { # transcript_path [stop_hook_active] -> json
+  local tp="$1" sha="${2:-false}"
+  printf '{"transcript_path":"%s","session_id":"S1","stop_hook_active":%s}' "$tp" "$sha"
 }
 
 run() { # json -> exit code
@@ -54,6 +55,10 @@ check "short unlabelled response -> allow" 0 "$(run "$(payload "$T")")"
 
 # Case 6: no transcript file -> allow
 check "no transcript -> allow" 0 "$(run '{"transcript_path":"/nonexistent/path.jsonl","session_id":"S1"}')"
+
+# Case 6b: stop_hook_active=true -> allow even with unlabelled long text (loop-guard)
+T=$(mk_transcript "${LONG_TEXT}")
+check "stop_hook_active -> allow" 0 "$(run "$(payload "$T" true)")"
 
 # Case 7: empty transcript_path -> allow
 check "empty transcript_path -> allow" 0 "$(run '{"session_id":"S1"}')"
