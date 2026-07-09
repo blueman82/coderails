@@ -2,9 +2,10 @@
 
 A **routine** is a scheduled skill run that isn't considered done just
 because `claude` exited 0. It's done when a specific artifact exists,
-is fresh enough, and satisfies a predicate — the **artifact gate**. Three
+is fresh enough, and satisfies a predicate — the **artifact gate**. Four
 routines ship today: `wiki-lint` (nightly), `sync-docs-weekly` (weekly),
-`memory-consolidation-weekly` (weekly).
+`memory-consolidation-weekly` (weekly), `loop-retro-promotion-weekly`
+(weekly).
 
 This doc is the operator-facing guide: how the queue/runner architecture
 works, how to define a routine, how to install/uninstall the scheduler,
@@ -94,6 +95,17 @@ validation rules are in `skills/dashboard/lib/src/config.ts`; this is the
 shipped `wiki-lint` example from
 [`examples/dashboard-config.json`](../examples/dashboard-config.json):
 
+**`~/.claude/coderails-dashboard.json` is per-machine, `$HOME`-local, and
+not checked into this repo** — every `cwd` and `artifactPath` in it is an
+absolute path specific to the machine it lives on (same caveat as the
+launchd plists and `KNOWN_CLAUDE_PATHS` above). `examples/dashboard-config.json`
+is the checked-in reference copy, kept in sync by hand; it is not itself
+read by anything. To arm a routine on a given machine, copy its
+button+routine block from the example file into that machine's own
+`~/.claude/coderails-dashboard.json` and rewrite every absolute path
+(`cwd`, `artifactPath`) to match that machine's actual checkout
+location — do not copy the example's paths verbatim.
+
 ```json
 {
   "name": "wiki-lint",
@@ -116,7 +128,7 @@ Field by field:
   same string, `buttonRef` is optional (both the seeder and the runner
   resolve a routine to a button by `buttonRef ?? name`).
 - **`skillCommand` / `buttonRef`** — exactly one. `buttonRef` reuses an
-  existing button's `command`/`cwd`/`profile` (all three shipped
+  existing button's `command`/`cwd`/`profile` (all four shipped
   routines do this). `foreignSkillPath` (optional) names an absolute
   path to a skill that lives outside this repo (e.g. `sync-docs`'s
   personal-plugin location) — the runner checks the path exists before
@@ -135,7 +147,7 @@ Field by field:
   `wikiPaths`) template tokens, substituted at check time. `maxAgeSeconds`
   is how old the artifact is allowed to be — set it comfortably above the
   cadence interval (the `wiki-lint` example above uses 129600s = 36h for
-  a nightly routine; the two weekly routines use 691200s = 8 days) so a
+  a nightly routine; the three weekly routines use 691200s = 8 days) so a
   slightly-late run doesn't fail its own gate. `predicate` is one of:
   - `{ kind: "exists" }` — file present and fresh, nothing more.
   - `{ kind: "contains", marker }` — file present, fresh, and contains
@@ -143,7 +155,7 @@ Field by field:
   - `{ kind: "json-field", path, value }` — file parses as JSON and the
     dotted `path` resolves to exactly `value`.
 - **`escalation`** — an array drawn from `["notification",
-  "vault-note"]`. Both shipped channels are enabled on all three
+  "vault-note"]`. Both shipped channels are enabled on all four
   example routines; there's no "off" option today — a routine either
   escalates through the channels it lists or (if the array is empty)
   fails silently except in the runlog, which is rarely what you want.
@@ -153,6 +165,43 @@ result for the routine it resolved — an exit-0 `claude` process that
 never wrote the expected artifact is a **failure**, not a success. This
 is deliberate: it's the whole reason routines exist instead of a bare
 cron job piping into `claude -p`.
+
+## `loop-retro-promotion-weekly`: a dormant-by-default routine
+
+Unlike the other three routines, `loop-retro-promotion-weekly`'s own
+skill (`skills/loop-retro-promotion/SKILL.md`) evaluates a 3-part
+graduation predicate every time it runs, before doing anything else: (1)
+at least 10 `retro.json` files exist under the repo-key dir, (2)
+`standing-orders.md` has at least one entry whose `last_recurred` differs
+from its `created` date (one lesson has recurred at least once), and (3)
+`standing-orders-decayed.md` has at least one entry (one lesson has
+completed a full create → recur → decay lifecycle). Until all three
+hold, the routine is dormant.
+
+A dormant run still appends one line to `promotion-runs.log`
+(`<ISO8601> predicate=unmet retros=<n> lifecycle=<0|1> decay=<0|1>`) and
+stops there — no branch, no PR, no gate chain. That log line is
+deliberately this routine's `expectedArtifact` (an `exists` predicate),
+precisely so a dormant run still passes its artifact gate: dormancy is
+the expected steady state for a long while after this routine ships, not
+a failure, and the routine shouldn't escalate every week just because the
+graduation bar hasn't been met yet.
+
+**Security note.** This is the first routine in this repo to use a
+non-`read-only` button profile (`bypass`, i.e.
+`--dangerously-skip-permissions` — see the security warning below). Once
+the predicate graduates, the routine opens and merges its own PR with no
+human in the loop, and — as that warning documents — `PreToolUse` hooks
+do not fire under `claude -p`, so `test_gate`/`enforce_pr_workflow` do
+not protect this run either. Its merge rail is entirely
+`scripts/merge.sh`'s own script-internal artifact gates, plus
+`/pr-review-toolkit:review-pr` and the manifest assertion the skill
+itself runs before pushing (abort-with-cleanup if the diff isn't exactly
+`skills/agentic-loop/learned-failure-modes.md`) — no hook and no
+server-side check backs any of this up today. Set up GitHub branch
+protection on `main` (required review, required status checks) as a
+server-side backstop before this routine's predicate is expected to
+graduate for the first time.
 
 ## Install / uninstall
 
@@ -281,10 +330,12 @@ allowlist at all) nor the hook-based safety net an interactive terminal
 session gets.
 
 **Ship read-only routines unless you have explicitly accepted this.**
-All three shipped example routines use `"profile": "read-only"` for
-exactly this reason. If a routine's skill needs to write files or run
-commands, understand that its actions are gated only by the artifact
-check after the fact, not by any hook before the fact.
+Three of the four shipped example routines use `"profile": "read-only"`
+for exactly this reason. The fourth, `loop-retro-promotion-weekly`, is
+the deliberate, documented exception — see the section above for what
+backs up its merge instead of a hook. If a routine's skill needs to
+write files or run commands, understand that its actions are gated only
+by the artifact check after the fact, not by any hook before the fact.
 
 ## See also
 
@@ -292,7 +343,11 @@ check after the fact, not by any hook before the fact.
   — the `Intent`/`RoutineDef` schema contract and queue lifecycle in
   full.
 - [`skills/memory-consolidation/SKILL.md`](../skills/memory-consolidation/SKILL.md)
-  — one of the three shipped routines; a good template for a routine
+  — one of the four shipped routines; a good template for a routine
   whose own skill writes its artifact-gate report natively.
+- [`skills/loop-retro-promotion/SKILL.md`](../skills/loop-retro-promotion/SKILL.md)
+  — the fourth shipped routine; dormant by default, see the
+  dedicated section above for its graduation predicate and security
+  posture.
 - [`examples/dashboard-config.json`](../examples/dashboard-config.json)
-  — the full three-routine config this doc's examples are drawn from.
+  — the full four-routine config this doc's examples are drawn from.
