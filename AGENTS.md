@@ -278,7 +278,18 @@ This is the single source of truth for wiki conventions. Do NOT create a separat
 
 ## Wiki location
 
-`<your-wiki-vault-path>/` (set during /wiki-init)
+`../coderails-wiki` (set during /wiki-init)
+
+```yaml
+git:
+  worktree: false   # personal wiki, no PR ceremony — write and commit directly
+wiki:
+  supervision: autonomous   # wiki-ingest writes and commits without a discuss-first pause.
+                             # Default when this field is absent is `discuss` (Step 3's
+                             # "discuss with the user" requirement) — this project opts
+                             # into autonomous curation explicitly; it is not the shipped
+                             # default for other coderails installs.
+```
 
 Vault structure:
 ```
