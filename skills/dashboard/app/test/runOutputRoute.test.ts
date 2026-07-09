@@ -158,6 +158,46 @@ describe("GET /api/run/output — lookup and read", () => {
     expect(body.output).toBe("Dublin time is 23:15 IST.");
   });
 
+  it("uses the LAST type:\"result\" line when a log contains more than one (e.g. a resumed/retried run)", async () => {
+    const runsDir = tmpDir("run-output-route-");
+    const logPath = join(runsDir, `${RUN_ID}.log`);
+    writeFileSync(
+      logPath,
+      [
+        '{"type":"system","subtype":"init"}',
+        '{"type":"result","subtype":"success","result":"stale first answer"}',
+        '{"type":"assistant","message":{"content":[{"type":"text","text":"retrying"}]}}',
+        '{"type":"result","subtype":"success","result":"final answer"}',
+        "",
+      ].join("\n")
+    );
+    writeRunRecord(runsDir, logPath, { endedAt: 100, exitCode: 0 });
+
+    const handler = makeHandler({ runsDir });
+    const res = await handler(req(`http://127.0.0.1:3000/api/run/output?runId=${RUN_ID}&token=${TOKEN}`));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { output: string };
+    expect(body.output).toBe("final answer");
+  });
+
+  it("falls back to the raw log content when the last type:\"result\" line has a non-string result field (e.g. an error subtype)", async () => {
+    const runsDir = tmpDir("run-output-route-");
+    const logPath = join(runsDir, `${RUN_ID}.log`);
+    const rawContent = [
+      '{"type":"system","subtype":"init"}',
+      '{"type":"result","subtype":"error_during_execution","result":null}',
+      "",
+    ].join("\n");
+    writeFileSync(logPath, rawContent);
+    writeRunRecord(runsDir, logPath, { endedAt: 100, exitCode: 1 });
+
+    const handler = makeHandler({ runsDir });
+    const res = await handler(req(`http://127.0.0.1:3000/api/run/output?runId=${RUN_ID}&token=${TOKEN}`));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { output: string };
+    expect(body.output).toBe(rawContent);
+  });
+
   it("falls back to the raw log content when no type:\"result\" line is present (e.g. a crashed run)", async () => {
     const runsDir = tmpDir("run-output-route-");
     const logPath = join(runsDir, `${RUN_ID}.log`);
