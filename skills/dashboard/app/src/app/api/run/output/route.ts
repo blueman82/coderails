@@ -3,6 +3,23 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { isLocalOrigin } from "../../../../lib/requestGuard";
 import { getRunToken, readRuns } from "../../../../lib/runlog";
+import { parseStreamJsonLine } from "../../../../lib/streamJson";
+
+// A completed run's log is `claude -p --output-format stream-json` output: one JSON event per
+// line, with the final answer text living in the `result` field of the LAST `type: "result"`
+// line. Returns that extracted text; falls back to the raw log content if no such line is found
+// (e.g. a crashed/killed run that never reached a result event) so the viewer still shows
+// whatever partial output exists rather than an empty panel.
+function extractResultText(rawLog: string): string {
+  const lines = rawLog.split("\n").filter((line) => line.trim() !== "");
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const parsed = parseStreamJsonLine(lines[i]);
+    if (parsed.ok && parsed.value.type === "result" && typeof parsed.value.result === "string") {
+      return parsed.value.result;
+    }
+  }
+  return rawLog;
+}
 
 const DEFAULT_RUNS_DIR = join(homedir(), ".claude", "coderails-dashboard", "runs");
 // A run's history is capped to whatever the dashboard SSE aggregator keeps (runsLimit in
@@ -82,7 +99,7 @@ export function createRunOutputHandler(deps: RunOutputHandlerDeps) {
 
     let output: string;
     try {
-      output = readFileSync(record.outputPath, "utf-8");
+      output = extractResultText(readFileSync(record.outputPath, "utf-8"));
     } catch {
       // Log file not (yet) written, or since removed — an absent log is not an error state a
       // caller needs to distinguish from "no output yet"; both render the same empty viewer.
