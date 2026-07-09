@@ -114,17 +114,64 @@ describe("GET /api/run/output — lookup and read", () => {
     expect(res.status).toBe(404);
   });
 
-  it("reads the run's own recorded outputPath (server-controlled, never client-supplied) and returns its content", async () => {
+  it("extracts the final result text from the log's last type:\"result\" line, rather than returning the raw file content", async () => {
     const runsDir = tmpDir("run-output-route-");
     const logPath = join(runsDir, `${RUN_ID}.log`);
-    writeFileSync(logPath, "hello from the log\n");
+    writeFileSync(
+      logPath,
+      [
+        '{"type":"system","subtype":"init"}',
+        '{"type":"assistant","message":{"content":[{"type":"text","text":"thinking..."}]}}',
+        '{"type":"result","subtype":"success","result":"The answer is 42."}',
+        "",
+      ].join("\n")
+    );
     writeRunRecord(runsDir, logPath, { endedAt: 100, exitCode: 0 });
 
     const handler = makeHandler({ runsDir });
     const res = await handler(req(`http://127.0.0.1:3000/api/run/output?runId=${RUN_ID}&token=${TOKEN}`));
     expect(res.status).toBe(200);
     const body = (await res.json()) as { output: string };
-    expect(body.output).toBe("hello from the log\n");
+    expect(body.output).toBe("The answer is 42.");
+  });
+
+  it("does not leak raw stream-json event markers into the returned output", async () => {
+    const runsDir = tmpDir("run-output-route-");
+    const logPath = join(runsDir, `${RUN_ID}.log`);
+    writeFileSync(
+      logPath,
+      [
+        '{"type":"system","subtype":"init","tools":["Bash","Read"]}',
+        '{"type":"assistant","message":{"content":[{"type":"text","text":"working"}]}}',
+        '{"type":"result","subtype":"success","result":"Dublin time is 23:15 IST."}',
+        "",
+      ].join("\n")
+    );
+    writeRunRecord(runsDir, logPath, { endedAt: 100, exitCode: 0 });
+
+    const handler = makeHandler({ runsDir });
+    const res = await handler(req(`http://127.0.0.1:3000/api/run/output?runId=${RUN_ID}&token=${TOKEN}`));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { output: string };
+    expect(body.output).not.toMatch(/"type":"system"/);
+    expect(body.output).not.toMatch(/"type":"assistant"/);
+    expect(body.output).toBe("Dublin time is 23:15 IST.");
+  });
+
+  it("falls back to the raw log content when no type:\"result\" line is present (e.g. a crashed run)", async () => {
+    const runsDir = tmpDir("run-output-route-");
+    const logPath = join(runsDir, `${RUN_ID}.log`);
+    const rawContent = ['{"type":"system","subtype":"init"}', '{"type":"assistant","message":{"content":[{"type":"text","text":"partial"}]}}', ""].join(
+      "\n"
+    );
+    writeFileSync(logPath, rawContent);
+    writeRunRecord(runsDir, logPath, { endedAt: 100, exitCode: 1 });
+
+    const handler = makeHandler({ runsDir });
+    const res = await handler(req(`http://127.0.0.1:3000/api/run/output?runId=${RUN_ID}&token=${TOKEN}`));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { output: string };
+    expect(body.output).toBe(rawContent);
   });
 
   it("returns an empty output string (200) if the record exists but the log file is missing, rather than throwing", async () => {
