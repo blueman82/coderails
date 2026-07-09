@@ -55,7 +55,7 @@ preferred way to set up a new repo.
 
 coderails is self-contained — it ships the dev-workflow skills it needs. `pr-review-toolkit@claude-plugins-official` is still required for the review stage of `/workflow`.
 
-32 skills are bundled across four groups. `dashboard` and
+34 skills are bundled across four groups. `dashboard` and
 `workflow-audit` are documented in
 [`docs/REFERENCE.md`](./docs/REFERENCE.md) but aren't yet rows in the
 summary tables below (a pre-existing gap, tracked separately). Full
@@ -86,6 +86,7 @@ catalog: [`docs/REFERENCE.md`](./docs/REFERENCE.md).
 |---|---|
 | `handoff` | Structured memory + continuation prompt for a fresh session |
 | `improve-prompt` | Surfaces ambiguities and rewrites underspecified prompts |
+| `loop-retro-promotion` | Predicate-dormant pipeline that promotes proven loop lessons into learned-failure-modes.md via the full gate chain (scheduled, not user-invocable) |
 | `memory-consolidation` | Health-checks and consolidates a project's persistent memory directory; runs on demand or as a weekly scheduled routine |
 | `planning-sequence` | Pre-Parade → Premortem → Red Team on a plan |
 | `premortem` | Assume failure, reason backwards to causes |
@@ -121,7 +122,7 @@ catalog: [`docs/REFERENCE.md`](./docs/REFERENCE.md).
 | `Stop` + `SubagentStop` | `check_verify_loop.sh` | **block** — any untagged `## Did Not Verify` bullet (only an explicit `(unverifiable: <reason>)` tag passes); on `SubagentStop` reads `last_assistant_message` directly |
 | `Stop` | `voice_announce.sh` | **observe-only** — speaks a loop lifecycle event (complete / waiting-on-human / stopped / stall) via macOS `say`, backgrounded so it never blocks; silent outside an active loop and when text extraction comes back empty (not a stall); debounced per kind; runs first in the Stop array |
 | `Stop` | `loop_state_guard.sh` | **block** — agentic loop active but no session-owned progress.json |
-| `Stop` | `loop_stall_guard.sh` | **block** — loop incomplete with no valid LOOP-STOP declaration |
+| `Stop` | `loop_stall_guard.sh` | **block** — loop incomplete with no valid LOOP-STOP declaration; also blocks a `complete` declaration when retro.json is missing/malformed (Phase 13 retro gate) |
 | `Stop` | `unregistered_loop_guard.sh` | **nudge** — dispatch-heavy session (≥3 Agent-dispatch turns) with no progress.json and no agentic-loop Skill invocation; never blocks |
 | `PreToolUse` (Bash) | `destructive_bash_gate.sh` | **block** — permanent blocklist: `rm -rf`, `git push --force`/`-f` (naked — `--force-with-lease` has a narrow opt-in carve-out), `git reset --hard`, SQL DROP/TRUNCATE, `dd if=`, `mkfs.*`, `chmod -R 777`, `git commit --no-verify`, `git clean -f/--force`, `find -delete`, `truncate -s/--size`, `shred`; also blocks in-Bash source-file edits (redirects, `sed -i`, `tee`, `cp`/`mv` to source extensions) when on main/master; also blocks backtick, `$(...)`, and process-substitution `<(...)`/`>(...)` characters inside a `push.sh`/`merge.sh`/`post_review.sh`/`post_evals.sh` free-text argument |
 | `PreToolUse` (Bash) | `enforce_pr_workflow.sh` | **block** — `gh pr create` without `/coderails:push`; `gh pr merge <N>` without `/pr-review-toolkit:review-pr <N>` (per-PR, consume-on-use) AND without a SHA-bound `GO` coderails eval artifact for the PR's current head (same fail-closed posture as `scripts/merge.sh`; a tier-0 `GO` satisfies it); `git merge` or `git push` to main/master without `review-pr`; scans subagent transcripts |
