@@ -18,6 +18,7 @@ This is the single source of truth for:
 - `git.worktree` — whether to use git worktree/PR flow (`true`) or write directly (`false`)
 - `git.bypass_flag` — env var to set when creating/merging PRs (e.g. `BYPASS_REVIEW=1`)
 - `git.pull_path` — path to pull after merge
+- `wiki.supervision` — `discuss` (default when absent) or `autonomous`; see Step 3
 
 **Example AGENTS.md git section (team repo with PR flow):**
 ```yaml
@@ -32,6 +33,15 @@ git:
 git:
   worktree: false
 ```
+
+**Example AGENTS.md wiki supervision section (opt into autonomous curation):**
+```yaml
+wiki:
+  supervision: autonomous
+```
+If `wiki.supervision` is absent from AGENTS.md, treat it as `discuss` — the field must be
+explicitly set to `autonomous` to skip Step 3's pause. Never infer autonomy from context,
+momentum, or a prior authorization earlier in the same turn.
 
 ### Step 1: Set Up Workspace
 
