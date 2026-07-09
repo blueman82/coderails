@@ -36,7 +36,7 @@
       "name": "loop-retro-promotion",
       "label": "LOOP RETRO PROMOTION",
       "command": "/coderails:loop-retro-promotion",
-      "cwd": "/Users/harrison/Github/coderails",
+      "cwd": "/Users/harrison/Documents/Github/coderails",
       "profile": "bypass",
       "bypassPermissions": true
     }
@@ -85,7 +85,7 @@
       "buttonRef": "loop-retro-promotion",
       "cadence": "weekly",
       "expectedArtifact": {
-        "artifactPath": "/Users/harrison/.claude/agentic-loop/-Users-harrison-Github-coderails-.git/promotion-runs.log",
+        "artifactPath": "/Users/harrison/.claude/agentic-loop/-Users-harrison-Documents-Github-coderails-.git/promotion-runs.log",
         "maxAgeSeconds": 691200,
         "predicate": { "kind": "exists" }
       },

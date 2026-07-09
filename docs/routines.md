@@ -95,6 +95,17 @@ validation rules are in `skills/dashboard/lib/src/config.ts`; this is the
 shipped `wiki-lint` example from
 [`examples/dashboard-config.json`](../examples/dashboard-config.json):
 
+**`~/.claude/coderails-dashboard.json` is per-machine, `$HOME`-local, and
+not checked into this repo** — every `cwd` and `artifactPath` in it is an
+absolute path specific to the machine it lives on (same caveat as the
+launchd plists and `KNOWN_CLAUDE_PATHS` above). `examples/dashboard-config.json`
+is the checked-in reference copy, kept in sync by hand; it is not itself
+read by anything. To arm a routine on a given machine, copy its
+button+routine block from the example file into that machine's own
+`~/.claude/coderails-dashboard.json` and rewrite every absolute path
+(`cwd`, `artifactPath`) to match that machine's actual checkout
+location — do not copy the example's paths verbatim.
+
 ```json
 {
   "name": "wiki-lint",
