@@ -31,6 +31,14 @@
       "cwd": "/Users/harrison/Github/coderails",
       "profile": "standard",
       "inputAllowed": true
+    },
+    {
+      "name": "loop-retro-promotion",
+      "label": "LOOP RETRO PROMOTION",
+      "command": "/coderails:loop-retro-promotion",
+      "cwd": "/Users/harrison/Github/coderails",
+      "profile": "bypass",
+      "bypassPermissions": true
     }
   ],
   "routines": [
@@ -66,6 +74,18 @@
       "cadence": "weekly",
       "expectedArtifact": {
         "artifactPath": "/Users/harrison/.claude/coderails-dashboard/routines/memory-consolidation/report-{date}.md",
+        "maxAgeSeconds": 691200,
+        "predicate": { "kind": "exists" }
+      },
+      "escalation": ["notification", "vault-note"]
+    },
+    {
+      "name": "loop-retro-promotion-weekly",
+      "label": "Loop Retro Promotion (weekly)",
+      "buttonRef": "loop-retro-promotion",
+      "cadence": "weekly",
+      "expectedArtifact": {
+        "artifactPath": "/Users/harrison/.claude/agentic-loop/-Users-harrison-Github-coderails-.git/promotion-runs.log",
         "maxAgeSeconds": 691200,
         "predicate": { "kind": "exists" }
       },
