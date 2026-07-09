@@ -18,6 +18,8 @@ In long agentic sessions, the assistant tends to drift back into bad habits:
 
 This skill encodes the working method so those failures don't keep happening. Each unnecessary stall is a manual prompt the user has to write — a stalled loop loses the autonomy the session was authorised for.
 
+Repo-agnostic lessons promoted from accumulated loop retros live in [learned-failure-modes.md](learned-failure-modes.md) — machine-maintained via the `loop-retro-promotion` pipeline; read it alongside this skill.
+
 ## The phases
 
 Nineteen-plus numbered phases (−2 through 13, with lettered sub-phases) is too many to hold in mind cold. Group them into five stages before descending into per-phase detail:
