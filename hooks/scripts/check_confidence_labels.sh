@@ -13,6 +13,14 @@ MIN_LEN="${CLAUDE_HOOK_MIN_LEN:-200}"
 IFS= read -r -d '' -t 5 input || true
 hook_event=$(echo "$input" | jq -r '.hook_event_name // "Stop"' 2>/dev/null)
 
+# Loop-guard: if we already blocked once this turn, allow the stop to avoid looping.
+# Mirrors check_verify_loop.sh's guard — without it, a stale/degenerate transcript
+# read can re-block every subsequent Stop attempt in the same turn indefinitely.
+stop_hook_active=$(echo "$input" | jq -r '.stop_hook_active // false' 2>/dev/null)
+if [ "$stop_hook_active" = "true" ]; then
+  exit 0
+fi
+
 # SubagentStop: the subagent's final text is available directly in last_assistant_message.
 # Prefer it over transcript parsing — it avoids the flush race and reads the right
 # message. (transcript_path on a SubagentStop payload is the PARENT session transcript,
