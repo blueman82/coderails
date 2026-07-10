@@ -60,6 +60,10 @@ export function RailRight({ token, buttons }: RailRightProps) {
   const { runs, gates } = snapshot;
   const { active } = useRunLifecycle(runs);
   const [uiState, setUiState] = useState<Record<string, ButtonUiState>>({});
+  // Pending lastOutcome clear-timeouts, keyed by button name — lets a new run for the same
+  // button cancel a still-pending timer from its predecessor before scheduling its own, and lets
+  // the unmount cleanup below clear every outstanding timer at once.
+  const outcomeTimeoutsRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
 
   const activeByButton = new Set(active.map((r) => r.button));
   const activeCount = active.length;
