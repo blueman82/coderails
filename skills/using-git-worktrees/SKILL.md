@@ -1,13 +1,13 @@
 ---
 name: using-git-worktrees
-description: Use when starting feature work that needs isolation from current workspace or before executing implementation plans - ensures an isolated workspace exists via native tools or git worktree fallback
+description: Use when starting feature work that needs isolation from current workspace or before executing implementation plans - autonomously ensures an isolated workspace exists via native tools or git worktree fallback, no human checkpoint
 ---
 
 # Using Git Worktrees
 
 ## Overview
 
-Ensure work happens in an isolated workspace. Prefer your platform's native worktree tools. Fall back to manual git worktrees only when no native tool is available.
+Ensure work happens in an isolated workspace. Prefer your platform's native worktree tools. Fall back to manual git worktrees only when no native tool is available. No human checkpoint — isolation is always created, and a failing baseline always stops the skill rather than asking whether to proceed.
 
 **Core principle:** Detect existing isolation first. Then use native tools. Then fall back to git. Never fight the harness.
 
@@ -36,13 +36,7 @@ Report with branch state:
 - On a branch: "Already in isolated workspace at `<path>` on branch `<name>`."
 - Detached HEAD: "Already in isolated workspace at `<path>` (detached HEAD, externally managed). Branch creation needed at finish time."
 
-**If `GIT_DIR == GIT_COMMON` (or in a submodule):** You are in a normal repo checkout.
-
-Has the user already indicated their worktree preference in your instructions? If not, ask for consent before creating a worktree:
-
-> "Would you like me to set up an isolated worktree? It protects your current branch from changes."
-
-Honor any existing declared preference without asking. If the user declines consent, work in place and skip to Step 2.
+**If `GIT_DIR == GIT_COMMON` (or in a submodule):** You are in a normal repo checkout. Always create an isolated worktree — no consent question. Isolation is the point of invoking this skill; there is no scenario inside it where working in place is the right default.
 
 ## Step 1: Create Isolated Workspace
 
@@ -50,7 +44,7 @@ Honor any existing declared preference without asking. If the user declines cons
 
 ### 1a. Native Worktree Tools (preferred)
 
-The user has asked for an isolated workspace (Step 0 consent). Do you already have a way to create a worktree? It might be a tool with a name like `EnterWorktree`, `WorktreeCreate`, a `/worktree` command, or a `--worktree` flag. If you do, use it and skip to Step 2.
+Do you already have a way to create a worktree? It might be a tool with a name like `EnterWorktree`, `WorktreeCreate`, a `/worktree` command, or a `--worktree` flag. If you do, use it and skip to Step 2.
 
 Native tools handle directory placement, branch creation, and cleanup automatically. Using `git worktree add` when you have a native tool creates phantom state your harness can't see or manage.
 
@@ -89,10 +83,20 @@ git check-ignore -q .worktrees 2>/dev/null || git check-ignore -q worktrees 2>/d
 
 #### Create the Worktree
 
+**Base ref:** check your instructions for a declared base ref (e.g. a
+caller that requires branching off freshly-fetched `origin/main` rather
+than local `main` or HEAD — this matters when the caller has already
+detected a dirty local base). If one is declared, use it explicitly. If
+none is declared, omit it and let `git worktree add` use its implicit
+default (current HEAD).
+
 ```bash
 # Determine path based on chosen location
 path="$LOCATION/$BRANCH_NAME"
 
+# With a declared base ref:
+git worktree add "$path" -b "$BRANCH_NAME" "$BASE_REF"
+# Without one, omit the base ref entirely (defaults to HEAD):
 git worktree add "$path" -b "$BRANCH_NAME"
 cd "$path"
 ```
@@ -127,7 +131,7 @@ Run tests to ensure workspace starts clean:
 npm test / cargo test / pytest / go test ./...
 ```
 
-**If tests fail:** Report failures, ask whether to proceed or investigate.
+**If tests fail:** Report failures. STOP — do not proceed with a dirty baseline. A failing baseline means whatever gets built next can't be verified against a clean starting point, so this skill ends here rather than asking whether to continue.
 
 **If tests pass:** Report ready.
 
@@ -153,7 +157,7 @@ Ready to implement <feature-name>
 | Neither exists | Check instruction file, then default `.worktrees/` |
 | Directory not ignored | Add to .gitignore + commit |
 | Permission error on create | Sandbox fallback, work in place |
-| Tests fail during baseline | Report failures + ask |
+| Tests fail during baseline | Report failures + STOP |
 | No package.json/Cargo.toml | Skip dependency install |
 
 ## Common Mistakes
@@ -181,7 +185,7 @@ Ready to implement <feature-name>
 ### Proceeding with failing tests
 
 - **Problem:** Can't distinguish new bugs from pre-existing issues
-- **Fix:** Report failures, get explicit permission to proceed
+- **Fix:** Report failures and stop — a failing baseline is a hard stop, not a question
 
 ## Red Flags
 
@@ -191,7 +195,7 @@ Ready to implement <feature-name>
 - Skip Step 1a by jumping straight to Step 1b's git commands
 - Create worktree without verifying it's ignored (project-local)
 - Skip baseline test verification
-- Proceed with failing tests without asking
+- Proceed with failing tests, or ask whether to proceed — stop instead
 
 **Always:**
 - Run Step 0 detection first

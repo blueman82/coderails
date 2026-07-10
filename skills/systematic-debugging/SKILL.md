@@ -171,6 +171,9 @@ You MUST complete each phase before proceeding to the next.
 
 **Fix the root cause, not the symptom:**
 
+-1. **Ensure isolated workspace before writing anything**
+   - If this fix is a code change that will carry a PR, invoke `coderails:using-git-worktrees` now, before touching any files — not after the fix is written.
+
 0. **Freeze success evals if the fix will carry a PR**
    - If this fix is a code change that will carry a PR, invoke `/coderails:task-evals` (scope: `pr`) now, before writing the fix, to freeze the success evals — same freeze-before-build rule as the test in step 1 below.
    - Subject to task-evals' own tier rules: a trivial fix meeting the tier-0 predicate takes the tier-0 exemption, not a skip.
@@ -192,6 +195,10 @@ You MUST complete each phase before proceeding to the next.
    - Test passes now?
    - No other tests broken?
    - Issue actually resolved?
+
+3.5. **Ship the fix**
+   - If this fix carries a PR: invoke `coderails:finishing-a-development-branch` now. It ships (push + create PR) and tears down the worktree autonomously — no separate handoff step needed beyond this invocation.
+   - If this fix was invoked mid-task inside a larger flow (e.g. a work-unit inside `agentic-loop`, or a step inside `subagent-driven-development`): skip this step and return control to the calling context, which owns shipping.
 
 4. **If Fix Doesn't Work**
    - STOP
@@ -288,9 +295,11 @@ These techniques are part of systematic debugging and available in this director
 - **`condition-based-waiting.md`** - Replace arbitrary timeouts with condition polling
 
 **Related skills:**
+- **coderails:using-git-worktrees** - Ensure isolated workspace before writing a fix that will carry a PR (Phase 4, Step -1)
 - **coderails:task-evals** - Freeze PR-scope success evals before implementing a fix that will carry a PR (Phase 4, Step 0)
 - **coderails:test-driven-development** - For creating failing test case (Phase 4, Step 1)
 - **coderails:verification-before-completion** - Verify fix worked before claiming success
+- **coderails:finishing-a-development-branch** - Ship the fix and tear down the worktree once verified (Phase 4, Step 3.5)
 
 ## Real-World Impact
 
