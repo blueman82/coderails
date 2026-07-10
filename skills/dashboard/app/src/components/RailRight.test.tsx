@@ -79,8 +79,6 @@ describe("RailRight — button-state differentiation", () => {
       )
     );
     const finished = run({ runId: "r1", startedAt: 1000, endedAt: 2000, exitCode: 0 });
-    const { rerender } = { rerender: undefined as unknown as (el: ReturnType<typeof createElement>) => void };
-    void rerender;
     // trigger the transition via a second render pass with the same container
     const rr = render(
       createElement(
