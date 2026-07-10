@@ -233,7 +233,20 @@
 }
 
 .hud-block {
-  margin-bottom: 30px;
+  border: 1px solid var(--hairline);
+  background: rgba(255, 255, 255, 0.02);
+  padding: 14px 14px 12px;
+  margin-bottom: 14px;
+  position: relative;
+}
+.hud-block::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--rose-dim);
 }
 .hud-block:last-child {
   margin-bottom: 0;
