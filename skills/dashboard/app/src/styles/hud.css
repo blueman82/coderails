@@ -826,20 +826,26 @@
   }
 }
 .hud-cmd-input {
-  background: none;
-  border: none;
-  border-bottom: 1px solid var(--hairline);
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--hairline);
   color: var(--off-white);
   font-family: var(--mono);
   font-size: 9.5px;
   letter-spacing: 0.04em;
-  padding: 2px 0;
+  padding: 3px 7px;
   width: 100%;
   margin-top: 4px;
 }
 .hud-cmd-input:focus {
   outline: none;
-  border-bottom-color: var(--rose);
+  border-color: var(--rose);
+}
+.hud-cmd .tag {
+  font-size: 7.5px;
+  letter-spacing: 0.14em;
+  color: var(--rose-dim);
+  text-transform: uppercase;
+  margin-left: 4px;
 }
 .hud-cmd-error {
   font-size: 8.5px;
