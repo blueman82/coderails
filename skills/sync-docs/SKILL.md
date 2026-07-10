@@ -230,7 +230,7 @@ const classDetails = await serena.find_symbol({
 |------|----------|
 | `--check` | Report only, no suggestions |
 | `--suggest-updates` | Include proposed markdown patches |
-| `--semantic` | Run Theo+Serena discovery (Phase 2.5) |
+| `--semantic` | Run Serena semantic discovery (Phase 2.5) |
 | `--compare <section>` | Deep-dive single section |
 | `--verbose` | Include line numbers and full context |
 | `--diagrams-only` | Audit visual documentation only |
