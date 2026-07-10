@@ -126,13 +126,42 @@ export function RailRight({ token, buttons }: RailRightProps) {
         if (!ui.queued) continue;
         const stillRelevant = runs.some((r) => r.button === name && r.endedAt === undefined);
         if (!stillRelevant) {
-          next[name] = { ...ui, queued: false };
+          // The run that just ended for this button — the most recently started among its
+          // finished records — determines the transient completed/failed flash.
+          const ended = runs
+            .filter((r) => r.button === name && r.endedAt !== undefined)
+            .sort((a, b) => b.startedAt - a.startedAt)[0];
+          const outcome = ended ? runResultLabel(ended) : "RUNNING";
+          const lastOutcome = outcome === "PASS" ? "completed" : outcome === "FAIL" ? "failed" : null;
+
+          next[name] = { ...ui, queued: false, lastOutcome };
           changed = true;
+
+          if (outcomeTimeoutsRef.current[name] !== undefined) {
+            clearTimeout(outcomeTimeoutsRef.current[name]);
+          }
+          if (lastOutcome !== null) {
+            outcomeTimeoutsRef.current[name] = setTimeout(() => {
+              patchUi(name, { lastOutcome: null });
+              delete outcomeTimeoutsRef.current[name];
+            }, 1500);
+          }
         }
       }
       return changed ? next : prev;
     });
   }, [runs]);
+
+  // Clears every pending outcome-clear timeout on unmount so none fires (and attempts a state
+  // update) after the component is gone.
+  useEffect(() => {
+    return () => {
+      for (const timeoutId of Object.values(outcomeTimeoutsRef.current)) {
+        clearTimeout(timeoutId);
+      }
+      outcomeTimeoutsRef.current = {};
+    };
+  }, []);
 
   function isButtonBusy(name: string): boolean {
     return activeByButton.has(name) || getUi(name).queued;
