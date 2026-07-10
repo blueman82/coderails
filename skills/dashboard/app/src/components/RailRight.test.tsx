@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { createElement } from "react";
-import { render, cleanup } from "@testing-library/react";
+import { render, cleanup, fireEvent, act } from "@testing-library/react";
 import { DashboardContextTestProvider } from "../../test/testUtils/DashboardContextTestProvider";
 import { RailRight, type DeckButtonDef } from "./RailRight";
 import type { DashboardSnapshot } from "@/hooks/useDashboardState";
@@ -42,6 +42,10 @@ function findButton(container: HTMLElement, label: string): HTMLButtonElement {
   return btn as HTMLButtonElement;
 }
 
+function mockOkFetch() {
+  global.fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({}), { status: 200 })) as unknown as typeof fetch;
+}
+
 describe("RailRight — button-state differentiation", () => {
   afterEach(() => {
     cleanup();
@@ -49,15 +53,26 @@ describe("RailRight — button-state differentiation", () => {
     vi.restoreAllMocks();
   });
 
-  it("applies .completed to a button whose run transitions to endedAt with a PASS outcome", () => {
-    const active = run({ runId: "r1", startedAt: 1000 });
+  // A run only produces a completed/failed flash for a button this component itself dispatched
+  // (the `queued` flag, set by handleClick's POST, is what the SSE effect's `!stillRelevant`
+  // branch keys the outcome-derivation on) — so every scenario below clicks the button first to
+  // put it in the same `queued: true` state a real user click would produce, then drives the
+  // `runs` prop from active to ended via rerender to simulate the SSE frame confirming it.
+
+  it("applies .completed to a button whose run transitions to endedAt with a PASS outcome", async () => {
+    mockOkFetch();
     const { container, rerender } = render(
       createElement(
         DashboardContextTestProvider,
-        { snapshot: emptySnapshot({ runs: [active] }) },
+        { snapshot: emptySnapshot({ runs: [] }) },
         createElement(RailRight, { token: "t", buttons: BUTTONS })
       )
     );
+    await act(async () => {
+      fireEvent.click(findButton(container, "Wiki Lint"));
+      await Promise.resolve();
+    });
+
     const finished = run({ runId: "r1", startedAt: 1000, endedAt: 2000, exitCode: 0 });
     rerender(
       createElement(
@@ -66,19 +81,25 @@ describe("RailRight — button-state differentiation", () => {
         createElement(RailRight, { token: "t", buttons: BUTTONS })
       )
     );
+
     const btn = findButton(container, "Wiki Lint");
     expect(btn.className).toContain("completed");
   });
 
-  it("applies .failed to a button whose run transitions to endedAt with a FAIL outcome", () => {
-    const active = run({ runId: "r2", startedAt: 1000 });
+  it("applies .failed to a button whose run transitions to endedAt with a FAIL outcome", async () => {
+    mockOkFetch();
     const { container, rerender } = render(
       createElement(
         DashboardContextTestProvider,
-        { snapshot: emptySnapshot({ runs: [active] }) },
+        { snapshot: emptySnapshot({ runs: [] }) },
         createElement(RailRight, { token: "t", buttons: BUTTONS })
       )
     );
+    await act(async () => {
+      fireEvent.click(findButton(container, "Wiki Lint"));
+      await Promise.resolve();
+    });
+
     const finished = run({ runId: "r2", startedAt: 1000, endedAt: 2000, exitCode: 1 });
     rerender(
       createElement(
@@ -87,20 +108,26 @@ describe("RailRight — button-state differentiation", () => {
         createElement(RailRight, { token: "t", buttons: BUTTONS })
       )
     );
+
     const btn = findButton(container, "Wiki Lint");
     expect(btn.className).toContain("failed");
   });
 
-  it("clears the completed/failed class after ~1.5s and returns to plain hud-cmd", () => {
+  it("clears the completed/failed class after ~1.5s and returns to plain hud-cmd", async () => {
+    mockOkFetch();
     vi.useFakeTimers();
-    const active = run({ runId: "r3", startedAt: 1000 });
     const { container, rerender } = render(
       createElement(
         DashboardContextTestProvider,
-        { snapshot: emptySnapshot({ runs: [active] }) },
+        { snapshot: emptySnapshot({ runs: [] }) },
         createElement(RailRight, { token: "t", buttons: BUTTONS })
       )
     );
+    await act(async () => {
+      fireEvent.click(findButton(container, "Wiki Lint"));
+      await Promise.resolve();
+    });
+
     const finished = run({ runId: "r3", startedAt: 1000, endedAt: 2000, exitCode: 0 });
     rerender(
       createElement(
@@ -113,7 +140,9 @@ describe("RailRight — button-state differentiation", () => {
     let btn = findButton(container, "Wiki Lint");
     expect(btn.className).toContain("completed");
 
-    vi.advanceTimersByTime(1600);
+    act(() => {
+      vi.advanceTimersByTime(1600);
+    });
 
     btn = findButton(container, "Wiki Lint");
     expect(btn.className).not.toContain("completed");
@@ -121,16 +150,22 @@ describe("RailRight — button-state differentiation", () => {
     expect(btn.className).toBe("hud-cmd");
   });
 
-  it("does not let a stale clear-timeout from a prior run wipe a newer run's state (no cross-contamination)", () => {
+  it("does not let a stale clear-timeout from a prior run wipe a newer run's state (no cross-contamination)", async () => {
+    mockOkFetch();
     vi.useFakeTimers();
-    const firstActive = run({ runId: "r4a", startedAt: 1000 });
     const { container, rerender } = render(
       createElement(
         DashboardContextTestProvider,
-        { snapshot: emptySnapshot({ runs: [firstActive] }) },
+        { snapshot: emptySnapshot({ runs: [] }) },
         createElement(RailRight, { token: "t", buttons: BUTTONS })
       )
     );
+
+    // First run: click, then finish as a PASS.
+    await act(async () => {
+      fireEvent.click(findButton(container, "Wiki Lint"));
+      await Promise.resolve();
+    });
     const firstFinished = run({ runId: "r4a", startedAt: 1000, endedAt: 2000, exitCode: 0 });
     rerender(
       createElement(
@@ -142,17 +177,16 @@ describe("RailRight — button-state differentiation", () => {
     expect(findButton(container, "Wiki Lint").className).toContain("completed");
 
     // Advance partway through the first timer (not yet fired), then start a second run for the
-    // SAME button and finish it with a different (failed) outcome before the first timer elapses.
-    vi.advanceTimersByTime(500);
+    // SAME button (a fresh click, since the button is idle again with lastOutcome pending clear)
+    // and finish it with a different (failed) outcome before the first timer elapses.
+    act(() => {
+      vi.advanceTimersByTime(500);
+    });
 
-    const secondActive = run({ runId: "r4b", startedAt: 2600 });
-    rerender(
-      createElement(
-        DashboardContextTestProvider,
-        { snapshot: emptySnapshot({ runs: [firstFinished, secondActive] }) },
-        createElement(RailRight, { token: "t", buttons: BUTTONS })
-      )
-    );
+    await act(async () => {
+      fireEvent.click(findButton(container, "Wiki Lint"));
+      await Promise.resolve();
+    });
     const secondFinished = run({ runId: "r4b", startedAt: 2600, endedAt: 3000, exitCode: 1 });
     rerender(
       createElement(
@@ -166,27 +200,36 @@ describe("RailRight — button-state differentiation", () => {
     // Advance past when the FIRST (stale) timer would have fired (total elapsed from first
     // completion: 500 + 1200 = 1700ms > 1500ms). If the stale timer weren't cleared, it would
     // incorrectly clear lastOutcome now, wiping the second run's still-fresh "failed" state.
-    vi.advanceTimersByTime(1200);
+    act(() => {
+      vi.advanceTimersByTime(1200);
+    });
     expect(findButton(container, "Wiki Lint").className).toContain("failed");
 
     // The second (real) timer, started at the second completion, fires ~1500ms after that point.
-    vi.advanceTimersByTime(400);
+    act(() => {
+      vi.advanceTimersByTime(400);
+    });
     const finalBtn = findButton(container, "Wiki Lint");
     expect(finalBtn.className).not.toContain("failed");
     expect(finalBtn.className).not.toContain("completed");
   });
 
-  it("cleans up pending clear-timeouts on unmount without throwing or updating state after unmount", () => {
+  it("cleans up pending clear-timeouts on unmount without throwing or updating state after unmount", async () => {
+    mockOkFetch();
     vi.useFakeTimers();
     const clearTimeoutSpy = vi.spyOn(global, "clearTimeout");
-    const active = run({ runId: "r5", startedAt: 1000 });
     const { container, rerender, unmount } = render(
       createElement(
         DashboardContextTestProvider,
-        { snapshot: emptySnapshot({ runs: [active] }) },
+        { snapshot: emptySnapshot({ runs: [] }) },
         createElement(RailRight, { token: "t", buttons: BUTTONS })
       )
     );
+    await act(async () => {
+      fireEvent.click(findButton(container, "Wiki Lint"));
+      await Promise.resolve();
+    });
+
     const finished = run({ runId: "r5", startedAt: 1000, endedAt: 2000, exitCode: 0 });
     rerender(
       createElement(
@@ -201,6 +244,10 @@ describe("RailRight — button-state differentiation", () => {
     expect(clearTimeoutSpy).toHaveBeenCalled();
 
     // Advancing timers post-unmount must not throw (no update-after-unmount / stale closure crash).
-    expect(() => vi.advanceTimersByTime(2000)).not.toThrow();
+    expect(() => {
+      act(() => {
+        vi.advanceTimersByTime(2000);
+      });
+    }).not.toThrow();
   });
 });
