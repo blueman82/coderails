@@ -91,6 +91,11 @@ prior decision, already made.
 
 #### Push and Create PR (default outcome)
 
+**Detached HEAD only:** there is no named branch to push. Create one first —
+`git checkout -b <new-branch-name>` (derive a name from the work done, e.g.
+`feature/<short-description>`) — before running the push below. Named-branch
+worktrees and normal repos already have `<feature-branch>`; skip this.
+
 ```bash
 # Push branch
 git push -u origin <feature-branch>
