@@ -128,3 +128,7 @@ git commit -m "wiki: ingest <description>"
 ### Step 7: Report
 
 Pages created/updated, new wiki-links added, gaps identified. If worktree flow: include PR URL.
+
+### Step 8: Run wiki-lint
+
+**Always run `coderails:wiki-lint` immediately after ingest completes.** An ingest without a follow-up lint leaves the new/updated pages unverified — treat ingest and lint as one combined step, not two independently optional ones. (`agentic-loop` batches this at the cluster level when running many ingests across a loop's PRs; a solo invocation of this skill still pairs immediately, since there's no larger batch to wait for.)
