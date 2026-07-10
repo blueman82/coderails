@@ -25,7 +25,7 @@ export interface DashboardConfig {
   buttons: ButtonDef[];
 }
 
-const PERMISSION_PROFILES: PermissionProfile[] = ["read-only", "standard", "bypass"];
+const PERMISSION_PROFILES: PermissionProfile[] = ["read-only", "standard", "auto", "bypass"];
 
 const DEFAULT_CONFIG_PATH = join(homedir(), ".claude", "coderails-dashboard.json");
 
