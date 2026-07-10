@@ -247,9 +247,7 @@ const classDetails = await serena.find_symbol({
 - Large codebases where manual discovery is impractical
 
 **Key insight:**
-- Theo answers: "What code exists that docs don't mention?"
-- Serena answers: "What exactly does that code do?"
-- Combined: Complete picture of documentation gaps
+- Serena answers both: "What code exists that docs don't mention?" and "What exactly does that code do?" — combined, a complete picture of documentation gaps
 
 ---
 
