@@ -4,8 +4,9 @@
 # not direct source edits. Gated: everything EXCEPT an explicit allowlist of doc/config
 # extensions (see below), plus plugin source that lives in markdown (skills/*/SKILL.md,
 # commands/*.md) — those are source, not docs, so they get the same block even though .md
-# is otherwise in the allowlist. Escape: create an isolated worktree + branch first
-# (/coderails:prep or 'git worktree add'), or add a Write/Edit permission rule to settings.json. Emits
+# is otherwise in the allowlist. Escape: create an isolated worktree + branch first via
+# the coderails:using-git-worktrees skill (or /coderails:prep, which invokes it), or add
+# a Write/Edit permission rule to settings.json. Emits
 # permissionDecision=deny, the same PreToolUse idiom as destructive_bash_gate.sh.
 #
 # Allowlist (these stay editable on main):
@@ -112,7 +113,7 @@ if [ "$arm" = "md" ]; then
   { [ -n "$root" ] && [ -f "$root/.claude-plugin/plugin.json" ]; } || exit 0
 fi
 
-reason="Blocked: editing a source file ($file) directly on '$branch'. Create an isolated worktree + branch first (e.g. /coderails:prep or 'git worktree add <path> -b <name>'), then edit there. For a genuine one-line hotfix, add a Write/Edit permission rule to settings.json."
+reason="Blocked: editing a source file ($file) directly on '$branch'. Use the coderails:using-git-worktrees skill to create an isolated worktree + branch, then edit there. For a genuine one-line hotfix, add a Write/Edit permission rule to settings.json."
 
 jq -n --arg r "$reason" '{
   hookSpecificOutput: {
