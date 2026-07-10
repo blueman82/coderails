@@ -101,4 +101,3 @@ Lint does not need to trigger a follow-up ingest — this direction is
 one-way. It's `coderails:wiki-ingest` that always pairs forward into a
 lint pass (see that skill's own Step 8); this skill is the target of that
 pairing, not a source of a new obligation back onto ingest.
-```
