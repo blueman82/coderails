@@ -295,9 +295,11 @@ These techniques are part of systematic debugging and available in this director
 - **`condition-based-waiting.md`** - Replace arbitrary timeouts with condition polling
 
 **Related skills:**
+- **coderails:using-git-worktrees** - Ensure isolated workspace before writing a fix that will carry a PR (Phase 4, Step -1)
 - **coderails:task-evals** - Freeze PR-scope success evals before implementing a fix that will carry a PR (Phase 4, Step 0)
 - **coderails:test-driven-development** - For creating failing test case (Phase 4, Step 1)
 - **coderails:verification-before-completion** - Verify fix worked before claiming success
+- **coderails:finishing-a-development-branch** - Ship the fix and tear down the worktree once verified (Phase 4, Step 3.5)
 
 ## Real-World Impact
 
