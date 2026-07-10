@@ -196,6 +196,10 @@ You MUST complete each phase before proceeding to the next.
    - No other tests broken?
    - Issue actually resolved?
 
+3.5. **Ship the fix**
+   - If this fix carries a PR: invoke `coderails:finishing-a-development-branch` now. It ships (push + create PR) and tears down the worktree autonomously — no separate handoff step needed beyond this invocation.
+   - If this fix was invoked mid-task inside a larger flow (e.g. a work-unit inside `agentic-loop`, or a step inside `subagent-driven-development`): skip this step and return control to the calling context, which owns shipping.
+
 4. **If Fix Doesn't Work**
    - STOP
    - Count: How many fixes have you tried?
