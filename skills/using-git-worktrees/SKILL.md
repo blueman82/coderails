@@ -175,7 +175,7 @@ Ready to implement <feature-name>
 ### Proceeding with failing tests
 
 - **Problem:** Can't distinguish new bugs from pre-existing issues
-- **Fix:** Report failures, get explicit permission to proceed
+- **Fix:** Report failures and stop — a failing baseline is a hard stop, not a question
 
 ## Red Flags
 
