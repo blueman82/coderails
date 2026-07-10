@@ -83,10 +83,20 @@ git check-ignore -q .worktrees 2>/dev/null || git check-ignore -q worktrees 2>/d
 
 #### Create the Worktree
 
+**Base ref:** check your instructions for a declared base ref (e.g. a
+caller that requires branching off freshly-fetched `origin/main` rather
+than local `main` or HEAD — this matters when the caller has already
+detected a dirty local base). If one is declared, use it explicitly. If
+none is declared, omit it and let `git worktree add` use its implicit
+default (current HEAD).
+
 ```bash
 # Determine path based on chosen location
 path="$LOCATION/$BRANCH_NAME"
 
+# With a declared base ref:
+git worktree add "$path" -b "$BRANCH_NAME" "$BASE_REF"
+# Without one, omit the base ref entirely (defaults to HEAD):
 git worktree add "$path" -b "$BRANCH_NAME"
 cd "$path"
 ```
