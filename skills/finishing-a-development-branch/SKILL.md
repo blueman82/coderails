@@ -41,20 +41,20 @@ Stop. Don't proceed to Step 2.
 
 ### Step 2: Detect Environment
 
-**Determine workspace state before presenting options:**
+**Determine workspace state before selecting the outcome:**
 
 ```bash
 GIT_DIR=$(cd "$(git rev-parse --git-dir)" 2>/dev/null && pwd -P)
 GIT_COMMON=$(cd "$(git rev-parse --git-common-dir)" 2>/dev/null && pwd -P)
 ```
 
-This determines which menu to show and how cleanup works:
+This determines which outcomes are available and how cleanup works:
 
-| State | Menu | Cleanup |
+| State | Available outcomes | Cleanup |
 |-------|------|---------|
-| `GIT_DIR == GIT_COMMON` (normal repo) | Standard 4 options | No worktree to clean up |
-| `GIT_DIR != GIT_COMMON`, named branch | Standard 4 options | Provenance-based (see Step 6) |
-| `GIT_DIR != GIT_COMMON`, detached HEAD | Reduced 3 options (no merge) | No cleanup (externally managed) |
+| `GIT_DIR == GIT_COMMON` (normal repo) | Push+PR (default), Merge locally, Discard | No worktree to clean up |
+| `GIT_DIR != GIT_COMMON`, named branch | Push+PR (default), Merge locally, Discard | Provenance-based (see Step 6) |
+| `GIT_DIR != GIT_COMMON`, detached HEAD | Push+PR (default), Discard (no local merge — no named branch to merge from) | No cleanup (externally managed) |
 
 ### Step 3: Determine Base Branch
 
