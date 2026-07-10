@@ -326,5 +326,5 @@ Add after section 6:
 - Tool adapts to any project structure
 - Configuration optional (auto-discovery handles most cases)
 - Prioritization focuses effort on important gaps
-- `--semantic` requires Theo index and Serena project activation
+- `--semantic` requires Serena project activation
 - Health score accounts for both traditional and semantic findings
