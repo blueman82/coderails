@@ -1,13 +1,13 @@
 ---
 name: using-git-worktrees
-description: Use when starting feature work that needs isolation from current workspace or before executing implementation plans - ensures an isolated workspace exists via native tools or git worktree fallback
+description: Use when starting feature work that needs isolation from current workspace or before executing implementation plans - autonomously ensures an isolated workspace exists via native tools or git worktree fallback, no human checkpoint
 ---
 
 # Using Git Worktrees
 
 ## Overview
 
-Ensure work happens in an isolated workspace. Prefer your platform's native worktree tools. Fall back to manual git worktrees only when no native tool is available.
+Ensure work happens in an isolated workspace. Prefer your platform's native worktree tools. Fall back to manual git worktrees only when no native tool is available. No human checkpoint — isolation is always created, and a failing baseline always stops the skill rather than asking whether to proceed.
 
 **Core principle:** Detect existing isolation first. Then use native tools. Then fall back to git. Never fight the harness.
 
