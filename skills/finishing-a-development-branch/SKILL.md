@@ -183,26 +183,25 @@ git worktree prune  # Self-healing: clean up any stale registrations
 
 ## Quick Reference
 
-| Option | Merge | Push | Keep Worktree | Cleanup Branch |
+| Outcome | Merge | Push | Keep Worktree | Cleanup Branch |
 |--------|-------|------|---------------|----------------|
-| 1. Merge locally | yes | - | - | yes |
-| 2. Create PR | - | yes | yes | - |
-| 3. Keep as-is | - | - | yes | - |
-| 4. Discard | - | - | - | yes (force) |
+| Push + PR (default) | - | yes | yes | - |
+| Merge locally (authorized-alternative) | yes | - | - | yes |
+| Discard (authorized-alternative) | - | - | - | yes (force) |
 
 ## Common Mistakes
 
 **Skipping test verification**
-- **Problem:** Merge broken code, create failing PR
-- **Fix:** Always verify tests before offering options
+- **Problem:** Ship broken code, create failing PR
+- **Fix:** Always verify tests before auto-selecting the outcome
 
-**Open-ended questions**
-- **Problem:** "What should I do next?" is ambiguous
-- **Fix:** Present exactly 4 structured options (or 3 for detached HEAD)
+**Asking instead of deciding**
+- **Problem:** Introducing a human checkpoint defeats the point of this skill
+- **Fix:** Default to push+PR; only deviate when the calling context's own instructions explicitly authorized a different outcome for this run
 
-**Cleaning up worktree for Option 2**
-- **Problem:** Remove worktree user needs for PR iteration
-- **Fix:** Only cleanup for Options 1 and 4
+**Cleaning up worktree for the default outcome**
+- **Problem:** Remove worktree the PR needs for iteration
+- **Fix:** Only cleanup for the Merge Locally and Discard outcomes
 
 **Deleting branch before removing worktree**
 - **Problem:** `git branch -d` fails because worktree still references the branch
@@ -216,26 +215,27 @@ git worktree prune  # Self-healing: clean up any stale registrations
 - **Problem:** Removing a worktree the harness created causes phantom state
 - **Fix:** Only clean up worktrees under `.worktrees/` or `worktrees/`
 
-**No confirmation for discard**
-- **Problem:** Accidentally delete work
-- **Fix:** Require typed "discard" confirmation
+**Discarding without reporting what's deleted**
+- **Problem:** Destructive action with no record of what was lost
+- **Fix:** Always report the branch, commits, and worktree path being deleted before proceeding
 
 ## Red Flags
 
 **Never:**
 - Proceed with failing tests
 - Merge without verifying tests on result
-- Delete work without confirmation
+- Discard work without reporting what's being deleted
 - Force-push without explicit request
 - Remove a worktree before confirming merge success
 - Clean up worktrees you didn't create (provenance check)
 - Run `git worktree remove` from inside the worktree
+- Introduce a human prompt/menu — this skill runs to completion autonomously
 
 **Always:**
-- Verify tests before offering options
-- Detect environment before presenting menu
-- Present exactly 4 options (or 3 for detached HEAD)
-- Get typed confirmation for Option 4
-- Clean up worktree for Options 1 & 4 only
+- Verify tests before auto-selecting the outcome
+- Detect environment before selecting the outcome
+- Default to push+PR unless the calling context authorized otherwise
+- Report a discard's deletions before executing it
+- Clean up worktree for Merge Locally & Discard outcomes only
 - `cd` to main repo root before worktree removal
 - Run `git worktree prune` after removal
