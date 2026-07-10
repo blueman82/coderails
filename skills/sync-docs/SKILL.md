@@ -162,19 +162,19 @@ const classDetails = await serena.find_symbol({
 ### Step 4: Generate Semantic Discovery Report
 
 ```markdown
-## Semantic Discovery Findings (Theo + Serena)
+## Semantic Discovery Findings (Serena)
 
 ### Undocumented Code Discovered
 
 #### 1. [Component Name]
-- **Source Files**: `path/to/file.py` (Theo score: 0.XXX)
+- **Source Files**: `path/to/file.py`
 - **Classes** (Serena): ClassName1, ClassName2
 - **Protocols**: ProtocolName1, ProtocolName2
 - **Missing From**: doc1.md, doc2.md
 - **Recommended Action**: Add section following [existing pattern]
 
 ### Coverage Summary
-- Files discovered by Theo: X
+- Files discovered via Serena: X
 - Undocumented entities: Y
 - Documentation coverage: Z%
 ```
