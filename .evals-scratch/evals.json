@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "scope": "pr",
+  "task_ref": "feat/dashboard-button-state-diff",
+  "tier": 1,
+  "tier_justification": "Single work-unit PR, no irreversible/outward surface, but does NOT qualify for tier-0 exemption: the goal state's own coverage (RailRight.test.tsx's 5 tests) is written by this same task, so it shares an oracle with the implementation (anti-gaming rule 4) and cannot itself satisfy the 'existing test already covers the goal state' predicate. Falls through to tier 1: independent end-state evals derived from the plan/spec's stated interfaces, not from the implementer's own test file.",
+  "frozen_at": "2026-07-10T22:20:54Z",
+  "frozen_sha": "9465f21d9e5c12ff3f5ec13c38f37e6b15fd9142",
+  "evals": [
+    {
+      "id": "E1",
+      "priority": "P0",
+      "mode": "scripted",
+      "surface": "merged-state",
+      "assert": "Full dashboard app test suite (all files, not just the new one) is green on a checkout of the PR head SHA — proves no regression in the other 26 pre-existing test files, not just the 5 new tests.",
+      "cmd": "cd skills/dashboard/app && npm test 2>&1 | tail -20",
+      "negative_control": "Introduce a syntax error in src/components/RailRight.tsx (e.g. an unclosed brace) on a scratch copy and confirm `npm test` fails/errors rather than reporting green.",
+      "status": "pending",
+      "evidence": ""
+    },
+    {
+      "id": "E2",
+      "priority": "P0",
+      "mode": "scripted",
+      "surface": "merged-state",
+      "assert": "ButtonUiState (RailRight.tsx) actually gained a lastOutcome: \"completed\" | \"failed\" | null field wired into EMPTY_UI_STATE — checked via source grep against the merged file, independent of whatever the implementer's own test asserts.",
+      "cmd": "cd skills/dashboard/app && grep -c 'lastOutcome' src/components/RailRight.tsx",
+      "negative_control": "grep for a field name that does not exist in the file (e.g. 'lastOutcomeXYZ') and confirm the grep count is 0, proving the grep genuinely discriminates presence vs absence.",
+      "status": "pending",
+      "evidence": ""
+    },
+    {
+      "id": "E3",
+      "priority": "P0",
+      "mode": "scripted",
+      "surface": "merged-state",
+      "assert": "hud.css defines both hud-complete-flash and hud-fail-flash keyframes AND .hud-cmd.completed / .hud-cmd.failed selectors targeting .hud-bullet, matching the spec's exact treatment (not a differently-named or differently-scoped equivalent).",
+      "cmd": "cd skills/dashboard/app && grep -c '@keyframes hud-complete-flash' src/styles/hud.css && grep -c '@keyframes hud-fail-flash' src/styles/hud.css && grep -c '.hud-cmd.completed .hud-bullet' src/styles/hud.css && grep -c '.hud-cmd.failed .hud-bullet' src/styles/hud.css",
+      "negative_control": "grep for a keyframe name with a typo (e.g. '@keyframes hud-compete-flash') and confirm 0 matches, proving the check discriminates the exact required name from a near-miss.",
+      "status": "pending",
+      "evidence": ""
+    },
+    {
+      "id": "E4",
+      "priority": "P0",
+      "mode": "scripted",
+      "surface": "merged-state",
+      "assert": "The button's className expression in RailRight.tsx includes ui.lastOutcome in its template, so the completed/failed class is actually wired onto the rendered <button>, not just present as dead state.",
+      "cmd": "cd skills/dashboard/app && grep -n 'className=' src/components/RailRight.tsx | grep 'hud-cmd' | grep -c 'lastOutcome'",
+      "negative_control": "grep the same className line for a field guaranteed absent from it (e.g. 'inputValue', which belongs to a different part of ButtonUiState) and confirm 0 matches — proves the positive check isn't a vacuous always-true grep.",
+      "status": "pending",
+      "evidence": ""
+    },
+    {
+      "id": "E5",
+      "priority": "P1",
+      "mode": "agent-run",
+      "surface": "artifact-path",
+      "assert": "RailRight.test.tsx's 5 required tests (completed class, failed class, auto-clear after timeout, no cross-contamination between a button's stale timer and its next run, cleanup-on-unmount) are each present as a distinct test case addressing that exact scenario, not merged/skipped/renamed away from the plan's specification.",
+      "verifier_instruction": "Read skills/dashboard/app/src/components/RailRight.test.tsx at the given PR's head SHA. For each of the 5 scenarios listed in this eval's assert field, confirm there is a distinct it(...)/test(...) block whose test body actually exercises that scenario (not just a title matching the words). Report each of the 5 as present/absent with a one-line reason, and an overall pass/fail (pass requires all 5 present and non-trivial -- no test that only asserts true or lacks any assertion). You are NOT given the implementation conversation -- grade only from the file content and this instruction.",
+      "status": "pending",
+      "evidence": ""
+    }
+  ],
+  "amendments": [],
+  "result": null,
+  "graded_at": null,
+  "head_sha": null
+}
