@@ -197,7 +197,7 @@ export function RailRight({ token, buttons }: RailRightProps) {
             return (
               <div key={btn.name}>
                 <button
-                  className={`hud-cmd${busy ? " running" : ""}${ui.shake ? " shake" : ""}`}
+                  className={`hud-cmd${busy ? " running" : ""}${ui.shake ? " shake" : ""}${ui.lastOutcome ? ` ${ui.lastOutcome}` : ""}`}
                   type="button"
                   title={btn.label}
                   onClick={() => void handleClick(btn)}
