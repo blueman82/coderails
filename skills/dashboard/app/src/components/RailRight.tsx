@@ -5,7 +5,7 @@
    current `runs` prop, then be cleared once that prop confirms the run is no longer relevant.
    No pure-render derivation replaces this; same class of exception as this file's siblings. */
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { PermissionProfile } from "@/lib/config";
 import { useDashboardContext } from "@/components/DashboardProvider";
 import { useRunLifecycle } from "@/hooks/useRunLifecycle";
@@ -33,9 +33,12 @@ interface ButtonUiState {
   // confirms the run is active (or the POST itself fails) — bridges the gap between click and
   // the first SSE 'runs' frame, per Task 9d's optimistic-feedback instruction.
   queued: boolean;
+  // Transient outcome flash: set when the `runs` SSE effect sees this button's run end, cleared
+  // via timeout ~1.5s later. Mirrors `shake`'s transient-flag lifecycle.
+  lastOutcome: "completed" | "failed" | null;
 }
 
-const EMPTY_UI_STATE: ButtonUiState = { inputValue: "", error: null, shake: false, queued: false };
+const EMPTY_UI_STATE: ButtonUiState = { inputValue: "", error: null, shake: false, queued: false, lastOutcome: null };
 
 async function postRun(token: string, button: string, input: string | undefined): Promise<{ ok: true } | { ok: false; error: string }> {
   try {
@@ -57,6 +60,10 @@ export function RailRight({ token, buttons }: RailRightProps) {
   const { runs, gates } = snapshot;
   const { active } = useRunLifecycle(runs);
   const [uiState, setUiState] = useState<Record<string, ButtonUiState>>({});
+  // Pending lastOutcome clear-timeouts, keyed by button name — lets a new run for the same
+  // button cancel a still-pending timer from its predecessor before scheduling its own, and lets
+  // the unmount cleanup below clear every outstanding timer at once.
+  const outcomeTimeoutsRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
 
   const activeByButton = new Set(active.map((r) => r.button));
   const activeCount = active.length;
@@ -119,13 +126,42 @@ export function RailRight({ token, buttons }: RailRightProps) {
         if (!ui.queued) continue;
         const stillRelevant = runs.some((r) => r.button === name && r.endedAt === undefined);
         if (!stillRelevant) {
-          next[name] = { ...ui, queued: false };
+          // The run that just ended for this button — the most recently started among its
+          // finished records — determines the transient completed/failed flash.
+          const ended = runs
+            .filter((r) => r.button === name && r.endedAt !== undefined)
+            .sort((a, b) => b.startedAt - a.startedAt)[0];
+          const outcome = ended ? runResultLabel(ended) : "RUNNING";
+          const lastOutcome = outcome === "PASS" ? "completed" : outcome === "FAIL" ? "failed" : null;
+
+          next[name] = { ...ui, queued: false, lastOutcome };
           changed = true;
+
+          if (outcomeTimeoutsRef.current[name] !== undefined) {
+            clearTimeout(outcomeTimeoutsRef.current[name]);
+          }
+          if (lastOutcome !== null) {
+            outcomeTimeoutsRef.current[name] = setTimeout(() => {
+              patchUi(name, { lastOutcome: null });
+              delete outcomeTimeoutsRef.current[name];
+            }, 1500);
+          }
         }
       }
       return changed ? next : prev;
     });
   }, [runs]);
+
+  // Clears every pending outcome-clear timeout on unmount so none fires (and attempts a state
+  // update) after the component is gone.
+  useEffect(() => {
+    return () => {
+      for (const timeoutId of Object.values(outcomeTimeoutsRef.current)) {
+        clearTimeout(timeoutId);
+      }
+      outcomeTimeoutsRef.current = {};
+    };
+  }, []);
 
   function isButtonBusy(name: string): boolean {
     return activeByButton.has(name) || getUi(name).queued;
@@ -161,7 +197,7 @@ export function RailRight({ token, buttons }: RailRightProps) {
             return (
               <div key={btn.name}>
                 <button
-                  className={`hud-cmd${busy ? " running" : ""}${ui.shake ? " shake" : ""}`}
+                  className={`hud-cmd${busy ? " running" : ""}${ui.shake ? " shake" : ""}${ui.lastOutcome ? ` ${ui.lastOutcome}` : ""}`}
                   type="button"
                   title={btn.label}
                   onClick={() => void handleClick(btn)}

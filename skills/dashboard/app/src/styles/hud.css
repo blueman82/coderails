@@ -866,6 +866,33 @@
     transform: translateX(3px);
   }
 }
+@keyframes hud-complete-flash {
+  0% {
+    background: hsl(120 90% 55%);
+    box-shadow: 0 0 12px hsl(120 90% 55%);
+  }
+  100% {
+    background: var(--rose);
+    box-shadow: 0 0 5px var(--rose);
+  }
+}
+@keyframes hud-fail-flash {
+  0%,
+  50% {
+    background: var(--rose);
+    box-shadow: 0 0 20px var(--rose);
+  }
+  100% {
+    background: var(--rose);
+    box-shadow: 0 0 5px var(--rose);
+  }
+}
+.hud-cmd.completed .hud-bullet {
+  animation: hud-complete-flash 1.5s ease forwards;
+}
+.hud-cmd.failed .hud-bullet {
+  animation: hud-fail-flash 1.5s ease forwards;
+}
 .hud-cmd-input {
   background: rgba(255, 255, 255, 0.03);
   border: 1px solid var(--hairline);
