@@ -198,7 +198,7 @@ describe("RailRight — button-state differentiation", () => {
     expect(findButton(container, "Wiki Lint").className).toContain("completed");
 
     expect(() => unmount()).not.toThrow();
-    expect(setTimeoutSpy).toHaveBeenCalled();
+    expect(clearTimeoutSpy).toHaveBeenCalled();
 
     // Advancing timers post-unmount must not throw (no update-after-unmount / stale closure crash).
     expect(() => vi.advanceTimersByTime(2000)).not.toThrow();
