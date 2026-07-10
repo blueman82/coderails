@@ -351,7 +351,11 @@ Before spawning a "bug fix" agent for any reported regression, the fix agent's p
 
 > Verify the symptom in the source-of-truth FIRST. Slack pin-bar / GitHub PR state / Jira board / browser tabs all cache. Reproduce the bug via API call, prod log, DDB read, or git diff before any code change. If the symptom can't be reproduced via SOT, STOP and report — don't ship a fix to a non-bug.
 
+This is a specific application of `/coderails:verify` — the same "re-derive from sources only, no recall, no inference" discipline, applied to one claim: "this bug currently reproduces." Point the fix agent at `/coderails:verify` (claim: the reported symptom) rather than re-deriving the sources-only instruction inline each time.
+
 Past failure: this pattern caught false alarms — stale Slack pin-bar views and design artefacts mistaken for regressions. The cost of disproving is one tool call; the cost of shipping a fix to a non-bug is a PR, a deploy, a rollback, and trust.
+
+**Once a fix is diagnosed, before implementing it, run `/coderails:disconfirm` on the diagnosis.** Phase 5 checks whether the bug exists; this checks whether the proposed fix is actually right, before code gets written against it. Argue against the diagnosis — what would falsify it, what edge case breaks it, what did the fix agent assume away. This is cheap (one more tool call) relative to implementing, reviewing, and reverting a fix for the wrong root cause. Skip this step only when the fix is a direct, mechanical application of an already-verified design (e.g. this session's dashboard UX findings — each treatment was already confirmed against source during brainstorming, so there is no fresh diagnosis left to disconfirm).
 
 ### Phase 6 — Match confirmation to authorisation envelope
 
@@ -440,6 +444,8 @@ The cost of one extra tool call before unblocking the next phase is small. The c
 
 ### Phase 13 — Confirm the factory actually ran (terminal self-audit)
 
+**This phase is mandatory and singular, not optional and not repeatable mid-loop.** It runs exactly once, only at the very end of the loop, immediately before the `complete` LOOP-STOP declaration — never as a mid-loop check-in, never skipped because the loop "felt straightforward." A loop that reaches `complete` without this report has not actually finished; the `loop_stall_guard` hook's `retro.json` requirement (see the teardown contract below) is what makes skipping it structurally hard, not just discouraged. The report is a summary, not a checkpoint — it does not pause for approval and does not ask the human anything; it tells them what happened.
+
 At the end of the loop, before declaring done, the orchestrator audits its own autonomy from the `progress.json` counters and reports two raw, unscored facts — no numeric pass/fail scorecard, no "target: approaching zero" framing. The human is the only party positioned to judge "should I have been asked about that?"; hand them the raw list rather than have the process pre-grade itself:
 
 - **`LOOP-STOP` category counts, broken down by type** — the per-category counts of this loop's `LOOP-STOP` declarations (`progress.json` `loop_stop_counts`: `hard-stop`, `approval-gate`, `awaiting-input`, `complete`). This field is HOOK-OWNED — the `loop_stall_guard` hook increments it on every valid declaration; read it as-is, do not compute or edit it yourself. Report the raw breakdown with no verdict attached — already artifact-backed from the declared stops, hard to fake. A high `awaiting-input` count is worth the human's attention, but this section states the count, not a judgement on it.
@@ -489,11 +495,15 @@ When a work-unit delegates to `subagent-driven-development`, that skill's own `s
 
 Stop conditions come in two classes. The agent must not collapse them into one — a gate is not a wall.
 
+**Retry-until-green (not a stop condition — applies BEFORE hard-stop #1 below).** A single failing test, lint error, or verification check is not, by itself, a reason to stop and ask — diagnose, fix, re-verify in a bounded cycle (default 5 distinct attempts) before escalating. Full mechanics, the multiple-independent-failures parallel-dispatch case, and the cause-not-obvious systematic-debugging case: see [retry-until-green.md](retry-until-green.md).
+
 **Hard-stop (abort the loop, wait for the human):**
-1. Verification failure that can't be auto-recovered (Phase 4 or Phase 12 artifact check fails)
+1. Verification failure that survives the bounded retry-until-green cycle above without resolving
 2. Premise disproven (Phase 5 — symptom can't be reproduced via SOT)
 3. Genuinely ambiguous decision outside the authorisation envelope
 4. Destructive/irreversible operation not previously authorised
+
+These four hard-stops are the floor, not a preference — they exist to stop an autonomous loop from pushing through a broken test suite, force-pushing, or taking an irreversible action with nobody watching. Retry-until-green narrows how often #1 fires; it does not remove it, and #2–4 are not narrowed by anything in this skill.
 
 On a hard-stop: report current state with confidence labels, propose the next move (don't just stop silently), and wait.
 
