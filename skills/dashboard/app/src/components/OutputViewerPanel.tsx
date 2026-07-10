@@ -158,6 +158,10 @@ export function OutputViewerPanel({ token }: OutputViewerPanelProps) {
           {runs.map((run) => {
             const result = runResultLabel(run);
             const duration = run.endedAt ? formatDuration(run.startedAt, run.endedAt) : "…";
+            // Glyph-derivation logic duplicated intentionally from RailRight.tsx — keep both
+            // mappings in sync if either changes.
+            const glyphClass = result === "PASS" ? "status-ok" : result === "FAIL" ? "status-fail" : "";
+            const glyph = result === "PASS" ? "◆" : result === "FAIL" ? "◇" : "·";
             return (
               <button
                 type="button"
@@ -166,7 +170,7 @@ export function OutputViewerPanel({ token }: OutputViewerPanelProps) {
                 onClick={() => setSelectedRunId(run.runId)}
               >
                 <span>
-                  <span className="hud-glyph">·</span>
+                  <span className={`hud-glyph${glyphClass ? ` ${glyphClass}` : ""}`}>{glyph}</span>
                   {run.button.toUpperCase()} · {result} · {run.runId}
                 </span>
                 <span>
