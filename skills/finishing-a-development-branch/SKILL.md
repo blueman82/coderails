@@ -1,15 +1,17 @@
 ---
 name: finishing-a-development-branch
-description: Use when implementation is complete, all tests pass, and you need to decide how to integrate the work - guides completion of development work by presenting structured options for merge, PR, or cleanup
+description: Use when implementation is complete and all tests pass - autonomously ships the work (push + create PR by default) and cleans up the workspace, with no human checkpoint
 ---
 
 # Finishing a Development Branch
 
 ## Overview
 
-Guide completion of development work by presenting clear options and handling chosen workflow.
+Autonomously complete development work: verify, ship, clean up. No human
+checkpoint — the default outcome (push + create PR) requires no decision,
+so this skill runs to completion without asking.
 
-**Core principle:** Verify tests → Detect environment → Present options → Execute choice → Clean up.
+**Core principle:** Verify tests → Detect environment → Auto-select outcome → Execute → Clean up.
 
 **Announce at start:** "I'm using the finishing-a-development-branch skill to complete this work."
 
@@ -17,7 +19,7 @@ Guide completion of development work by presenting clear options and handling ch
 
 ### Step 1: Verify Tests
 
-**Before presenting options, verify tests pass:**
+**Before shipping, verify tests pass:**
 
 ```bash
 # Run project's test suite
