@@ -163,6 +163,7 @@ export function RailRight({ token, buttons }: RailRightProps) {
                 <button
                   className={`hud-cmd${busy ? " running" : ""}${ui.shake ? " shake" : ""}`}
                   type="button"
+                  title={btn.label}
                   onClick={() => void handleClick(btn)}
                 >
                   <span className="hud-bullet" />
