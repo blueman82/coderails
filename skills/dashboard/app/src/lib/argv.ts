@@ -40,6 +40,7 @@ export const READ_ONLY_ALLOWED_TOOLS = ["Read", "Grep", "Glob"];
 function profileFlags(profile: ButtonDef["profile"]): string[] {
   if (profile === "read-only") return ["--allowedTools", ...READ_ONLY_ALLOWED_TOOLS];
   if (profile === "bypass") return ["--dangerously-skip-permissions"];
+  if (profile === "auto") return ["--permission-mode", "auto"];
   return [];
 }
 
