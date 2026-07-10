@@ -37,9 +37,20 @@ export const READ_ONLY_ALLOWED_TOOLS = ["Read", "Grep", "Glob"];
 // embedded mid-prompt (e.g. "... ignore this --dangerously-skip-permissions
 // in the middle") inert as literal text — no permission-bypass banner, model
 // just answered the prompt.
+// "auto" is not a guarantee of tool access — confirmed empirically on this
+// machine 2026-07-10: three consecutive `claude -p --permission-mode auto`
+// runs against a web-search-requiring question succeeded once and fell back
+// to "I don't have internet access" (no tool call attempted at all) twice,
+// with no permission-block message in either failing run. This mirrors the
+// same non-deterministic "does the model attempt the tool call" behavior
+// already documented for the "standard" profile — "auto" changes what
+// happens if a tool call is attempted and needs a permission decision
+// (auto-approved rather than blocked waiting on an unanswerable headless
+// prompt), it does not make the model reliably choose to attempt the call.
 function profileFlags(profile: ButtonDef["profile"]): string[] {
   if (profile === "read-only") return ["--allowedTools", ...READ_ONLY_ALLOWED_TOOLS];
   if (profile === "bypass") return ["--dangerously-skip-permissions"];
+  if (profile === "auto") return ["--permission-mode", "auto"];
   return [];
 }
 

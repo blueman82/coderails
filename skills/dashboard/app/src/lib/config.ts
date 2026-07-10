@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, isAbsolute } from "node:path";
 
-export type PermissionProfile = "read-only" | "standard" | "bypass";
+export type PermissionProfile = "read-only" | "standard" | "auto" | "bypass";
 
 export interface ButtonDef {
   name: string;
@@ -25,7 +25,7 @@ export interface DashboardConfig {
   buttons: ButtonDef[];
 }
 
-const PERMISSION_PROFILES: PermissionProfile[] = ["read-only", "standard", "bypass"];
+const PERMISSION_PROFILES: PermissionProfile[] = ["read-only", "standard", "auto", "bypass"];
 
 const DEFAULT_CONFIG_PATH = join(homedir(), ".claude", "coderails-dashboard.json");
 

@@ -38,6 +38,16 @@ describe("buildArgv", () => {
     ]);
   });
 
+  it("appends --permission-mode auto for an auto-profile button", () => {
+    const argv = buildArgv(button({ profile: "auto" }));
+    expect(argv).toEqual([
+      "-p",
+      "/coderails:wiki-lint",
+      "--permission-mode",
+      "auto",
+    ]);
+  });
+
   it("merges input into a single prompt string after a '--' end-of-options sentinel, so the CLI's single positional prompt argument carries both (the CLI never merges two separate positionals — confirmed empirically, see comment above)", () => {
     const argv = buildArgv(button({ profile: "standard" }), "extra context here");
     expect(argv).toEqual(["-p", "--", "/coderails:wiki-lint extra context here"]);
@@ -109,6 +119,17 @@ describe("buildArgv", () => {
     expect(argv).toEqual([
       "-p",
       "--dangerously-skip-permissions",
+      "--",
+      "/coderails:wiki-lint go",
+    ]);
+  });
+
+  it("covers an auto-profile button with input: both profile flag elements first, then the sentinel and merged prompt", () => {
+    const argv = buildArgv(button({ profile: "auto" }), "go");
+    expect(argv).toEqual([
+      "-p",
+      "--permission-mode",
+      "auto",
       "--",
       "/coderails:wiki-lint go",
     ]);
