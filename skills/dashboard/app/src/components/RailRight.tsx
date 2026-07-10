@@ -167,6 +167,7 @@ export function RailRight({ token, buttons }: RailRightProps) {
                 >
                   <span className="hud-bullet" />
                   <span className="hud-label">{busy ? "Running…" : btn.label}</span>
+                  {btn.inputAllowed && !busy && <span className="tag">arg</span>}
                 </button>
                 {btn.inputAllowed && !busy && (
                   <input
