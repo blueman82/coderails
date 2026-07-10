@@ -124,6 +124,17 @@ describe("buildArgv", () => {
     ]);
   });
 
+  it("covers an auto-profile button with input: both profile flag elements first, then the sentinel and merged prompt", () => {
+    const argv = buildArgv(button({ profile: "auto" }), "go");
+    expect(argv).toEqual([
+      "-p",
+      "--permission-mode",
+      "auto",
+      "--",
+      "/coderails:wiki-lint go",
+    ]);
+  });
+
   it("does not insert a '--' sentinel when there is no input", () => {
     const argv = buildArgv(button({ profile: "standard" }));
     expect(argv).toEqual(["-p", "/coderails:wiki-lint"]);
