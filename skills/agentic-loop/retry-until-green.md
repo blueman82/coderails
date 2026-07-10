@@ -20,7 +20,8 @@ time. A single test run failing across 2+ unrelated files/subsystems with differ
 focused agent per independent failure domain, in parallel, each scoped to its own file/subsystem
 with an explicit "don't touch other code" constraint; integrate and re-run the full suite once
 they all report back. This is a parallelisation tactic inside one retry-until-green cycle, not a
-substitute for it — each parallel fix still counts toward the same 5-attempt bound, and a
+substitute for it — the bound is per failure (as stated above), so each independent failure domain
+gets its own 5-attempt budget, not a pool shared or split across the dispatched agents. A
 genuinely single, related failure (fixing one thing likely fixes the rest) should NOT be split
 into parallel agents — that's this skill's own explicit "don't use when" case.
 
