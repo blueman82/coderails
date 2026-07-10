@@ -171,6 +171,9 @@ You MUST complete each phase before proceeding to the next.
 
 **Fix the root cause, not the symptom:**
 
+-1. **Ensure isolated workspace before writing anything**
+   - If this fix is a code change that will carry a PR, invoke `coderails:using-git-worktrees` now, before touching any files — not after the fix is written.
+
 0. **Freeze success evals if the fix will carry a PR**
    - If this fix is a code change that will carry a PR, invoke `/coderails:task-evals` (scope: `pr`) now, before writing the fix, to freeze the success evals — same freeze-before-build rule as the test in step 1 below.
    - Subject to task-evals' own tier rules: a trivial fix meeting the tier-0 predicate takes the tier-0 exemption, not a skip.
