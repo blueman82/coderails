@@ -112,4 +112,18 @@ describe("loadConfig", () => {
     expect(() => loadConfig(path)).toThrow(ConfigError);
     expect(() => loadConfig(path)).toThrow(/profile/i);
   });
+
+  it("accepts a button with profile 'auto'", () => {
+    const path = writeConfig({
+      ...validConfig,
+      buttons: [
+        {
+          ...validConfig.buttons[0],
+          profile: "auto",
+        },
+      ],
+    });
+    const config = loadConfig(path);
+    expect(config.buttons[0].profile).toBe("auto");
+  });
 });
