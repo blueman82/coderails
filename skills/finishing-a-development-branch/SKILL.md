@@ -92,9 +92,6 @@ prior decision, already made.
 #### Push and Create PR (default outcome)
 
 ```bash
-# Get main repo root for CWD safety
-MAIN_ROOT=$(git -C "$(git rev-parse --git-common-dir)/.." rev-parse --show-toplevel)
-```bash
 # Push branch
 git push -u origin <feature-branch>
 ```
