@@ -188,9 +188,21 @@ export function OutputViewerPanel({ token }: OutputViewerPanelProps) {
           </button>
         </div>
       ) : (
-        <pre className="hud-output-viewer">
-          {output !== undefined && output !== "" ? output : "no output"}
-        </pre>
+        <>
+          {selectedRun !== undefined && (
+            <div className="hud-output-header">
+              <span>{selectedRun.button.toUpperCase()}</span>
+              <span>
+                {runResultLabel(selectedRun)} ·{" "}
+                {selectedRun.endedAt ? formatDuration(selectedRun.startedAt, selectedRun.endedAt) : "…"} ·{" "}
+                {formatHHMM(selectedRun.startedAt)}
+              </span>
+            </div>
+          )}
+          <pre className={`hud-output-viewer${selectedRun ? " attached" : ""}`}>
+            {output !== undefined && output !== "" ? output : "no output"}
+          </pre>
+        </>
       )}
     </div>
   );

@@ -526,6 +526,18 @@
 .hud-run-row-selectable.selected .hud-glyph {
   text-shadow: 0 0 6px hsla(var(--accent-h), var(--accent-s), var(--accent-l), 0.6);
 }
+.hud-output-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  border: 1px solid var(--hairline);
+  border-bottom: none;
+  padding: 6px 10px;
+  background: rgba(255, 255, 255, 0.04);
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
 .hud-output-viewer {
   margin: 0;
   padding: 10px;
@@ -542,6 +554,9 @@
   border: 1px solid var(--hairline);
   scrollbar-width: thin;
   scrollbar-color: var(--rose-dim) transparent;
+}
+.hud-output-viewer.attached {
+  border-top: none;
 }
 
 /* ---------- PR gates ---------- */
