@@ -450,6 +450,13 @@
   flex-shrink: 0;
   transition: box-shadow 0.15s ease;
 }
+.hud-cmd .hud-label {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: inline-block;
+  max-width: 100px;
+}
 .hud-cmd:hover {
   color: var(--off-white);
 }
