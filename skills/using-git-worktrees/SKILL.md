@@ -121,7 +121,7 @@ Run tests to ensure workspace starts clean:
 npm test / cargo test / pytest / go test ./...
 ```
 
-**If tests fail:** Report failures, ask whether to proceed or investigate.
+**If tests fail:** Report failures. STOP — do not proceed with a dirty baseline. A failing baseline means whatever gets built next can't be verified against a clean starting point, so this skill ends here rather than asking whether to continue.
 
 **If tests pass:** Report ready.
 
