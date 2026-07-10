@@ -185,7 +185,7 @@ Ready to implement <feature-name>
 - Skip Step 1a by jumping straight to Step 1b's git commands
 - Create worktree without verifying it's ignored (project-local)
 - Skip baseline test verification
-- Proceed with failing tests without asking
+- Proceed with failing tests, or ask whether to proceed — stop instead
 
 **Always:**
 - Run Step 0 detection first
