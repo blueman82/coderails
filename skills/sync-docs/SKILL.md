@@ -1,14 +1,6 @@
 ---
 name: sync-docs
 description: Analyze documentation drift and generate sync reports for any project. Enhanced with Serena semantic discovery for deep code analysis. Use when: "sync docs", "check documentation", "documentation drift", "doc audit", "/sync-docs". Supports --semantic flag for AI-powered undocumented code discovery.
-triggers:
-  - "sync-docs"
-  - "sync docs"
-  - "check documentation"
-  - "documentation drift"
-  - "doc audit"
-  - "docs out of sync"
-  - "update documentation"
 ---
 
 # Sync Docs - Universal Documentation Synchronization
