@@ -33,9 +33,12 @@ interface ButtonUiState {
   // confirms the run is active (or the POST itself fails) — bridges the gap between click and
   // the first SSE 'runs' frame, per Task 9d's optimistic-feedback instruction.
   queued: boolean;
+  // Transient outcome flash: set when the `runs` SSE effect sees this button's run end, cleared
+  // via timeout ~1.5s later. Mirrors `shake`'s transient-flag lifecycle.
+  lastOutcome: "completed" | "failed" | null;
 }
 
-const EMPTY_UI_STATE: ButtonUiState = { inputValue: "", error: null, shake: false, queued: false };
+const EMPTY_UI_STATE: ButtonUiState = { inputValue: "", error: null, shake: false, queued: false, lastOutcome: null };
 
 async function postRun(token: string, button: string, input: string | undefined): Promise<{ ok: true } | { ok: false; error: string }> {
   try {
