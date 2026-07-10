@@ -92,6 +92,23 @@ prior decision, already made.
 ```bash
 # Get main repo root for CWD safety
 MAIN_ROOT=$(git -C "$(git rev-parse --git-common-dir)/.." rev-parse --show-toplevel)
+```bash
+# Push branch
+git push -u origin <feature-branch>
+```
+
+**Do NOT clean up worktree** — the PR needs it alive to iterate on feedback.
+This is the terminal step for the default outcome; do not continue to
+Step 6.
+
+#### Merge Locally (authorized-alternative outcome only)
+
+Only run this when the calling context's own instructions explicitly
+authorized a local merge instead of push+PR for this run.
+
+```bash
+# Get main repo root for CWD safety
+MAIN_ROOT=$(git -C "$(git rev-parse --git-common-dir)/.." rev-parse --show-toplevel)
 cd "$MAIN_ROOT"
 
 # Merge first — verify success before removing anything
@@ -100,7 +117,7 @@ git pull
 git merge <feature-branch>
 # Note: if the repo has a workflow.config.yaml, the enforce_pr_workflow hook
 # blocks `git merge` on main/master unless /pr-review-toolkit:review-pr ran this
-# session — run it on the feature diff first, or use Option 2 (PR workflow).
+# session — run it first, or use the default push+PR outcome instead.
 
 # Verify tests on merged result
 <test command>
@@ -114,36 +131,20 @@ Then: Cleanup worktree (Step 6), then delete branch:
 git branch -d <feature-branch>
 ```
 
-#### Option 2: Push and Create PR
+#### Discard (authorized-alternative outcome only)
 
-```bash
-# Push branch
-git push -u origin <feature-branch>
+Only run this when the calling context's own instructions explicitly
+authorized discarding this work for this run (e.g. the work was rejected
+upstream). This is destructive — report exactly what will be deleted
+before proceeding:
+
 ```
-
-**Do NOT clean up worktree** — user needs it alive to iterate on PR feedback.
-
-#### Option 3: Keep As-Is
-
-Report: "Keeping branch <name>. Worktree preserved at <path>."
-
-**Don't cleanup worktree.**
-
-#### Option 4: Discard
-
-**Confirm first:**
-```
-This will permanently delete:
+Discarding this work — permanently deleting:
 - Branch <name>
 - All commits: <commit-list>
 - Worktree at <path>
-
-Type 'discard' to confirm.
 ```
 
-Wait for exact confirmation.
-
-If confirmed:
 ```bash
 MAIN_ROOT=$(git -C "$(git rev-parse --git-common-dir)/.." rev-parse --show-toplevel)
 cd "$MAIN_ROOT"
@@ -156,7 +157,8 @@ git branch -D <feature-branch>
 
 ### Step 6: Cleanup Workspace
 
-**Only runs for Options 1 and 4.** Options 2 and 3 always preserve the worktree.
+**Only runs for the Merge Locally and Discard outcomes.** The default
+push+PR outcome always preserves the worktree.
 
 ```bash
 GIT_DIR=$(cd "$(git rev-parse --git-dir)" 2>/dev/null && pwd -P)
