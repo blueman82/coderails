@@ -71,7 +71,7 @@ describe("RailRight — button-state differentiation", () => {
 
   it("applies .completed to a button whose run transitions to endedAt with a PASS outcome", () => {
     const active = run({ runId: "r1", startedAt: 1000 });
-    const { container } = render(
+    const { container, rerender } = render(
       createElement(
         DashboardContextTestProvider,
         { snapshot: emptySnapshot({ runs: [active] }) },
@@ -79,22 +79,20 @@ describe("RailRight — button-state differentiation", () => {
       )
     );
     const finished = run({ runId: "r1", startedAt: 1000, endedAt: 2000, exitCode: 0 });
-    // trigger the transition via a second render pass with the same container
-    const rr = render(
+    rerender(
       createElement(
         DashboardContextTestProvider,
         { snapshot: emptySnapshot({ runs: [finished] }) },
         createElement(RailRight, { token: "t", buttons: BUTTONS })
-      ),
-      { container }
+      )
     );
-    const btn = findButton(rr.container, "Wiki Lint");
+    const btn = findButton(container, "Wiki Lint");
     expect(btn.className).toContain("completed");
   });
 
   it("applies .failed to a button whose run transitions to endedAt with a FAIL outcome", () => {
     const active = run({ runId: "r2", startedAt: 1000 });
-    const { container } = render(
+    const { container, rerender } = render(
       createElement(
         DashboardContextTestProvider,
         { snapshot: emptySnapshot({ runs: [active] }) },
@@ -102,15 +100,14 @@ describe("RailRight — button-state differentiation", () => {
       )
     );
     const finished = run({ runId: "r2", startedAt: 1000, endedAt: 2000, exitCode: 1 });
-    const rr = render(
+    rerender(
       createElement(
         DashboardContextTestProvider,
         { snapshot: emptySnapshot({ runs: [finished] }) },
         createElement(RailRight, { token: "t", buttons: BUTTONS })
-      ),
-      { container }
+      )
     );
-    const btn = findButton(rr.container, "Wiki Lint");
+    const btn = findButton(container, "Wiki Lint");
     expect(btn.className).toContain("failed");
   });
 
