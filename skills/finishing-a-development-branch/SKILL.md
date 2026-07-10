@@ -63,38 +63,31 @@ git merge-base HEAD main 2>/dev/null || git merge-base HEAD master 2>/dev/null
 
 Or ask: "This branch split from main - is that correct?"
 
-### Step 4: Present Options
+### Step 4: Auto-Select Outcome
 
-**Normal repo and named-branch worktree — present exactly these 4 options:**
+No human checkpoint here — this skill runs to completion autonomously.
+Tests already passed (Step 1) and the workspace is verified (Step 2), so
+the default outcome is always **push and create a Pull Request**: it's
+the only outcome that doesn't require a human decision (unlike
+local-merge, which needs base-branch confirmation and hook authorization;
+or discard, which is destructive and requires explicit authorization if
+ever taken).
 
+Report the outcome, don't ask for it:
 ```
-Implementation complete. What would you like to do?
-
-1. Merge back to <base-branch> locally
-2. Push and create a Pull Request
-3. Keep the branch as-is (I'll handle it later)
-4. Discard this work
-
-Which option?
-```
-
-**Detached HEAD — present exactly these 3 options:**
-
-```
-Implementation complete. You're on a detached HEAD (externally managed workspace).
-
-1. Push as new branch and create a Pull Request
-2. Keep as-is (I'll handle it later)
-3. Discard this work
-
-Which option?
+Implementation complete. Pushing <branch-name> and creating a Pull Request.
 ```
 
-**Don't add explanation** - keep options concise.
+**Only deviate from push+PR when the caller's own instructions explicitly
+authorize a different outcome for this run** (e.g. an orchestrating flow
+that has already decided to merge locally, or to discard because the work
+was rejected upstream). In that case, follow the authorized outcome
+instead — this is not a human prompt, it's the calling context's own
+prior decision, already made.
 
-### Step 5: Execute Choice
+### Step 5: Execute Outcome
 
-#### Option 1: Merge Locally
+#### Push and Create PR (default outcome)
 
 ```bash
 # Get main repo root for CWD safety
