@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, isAbsolute } from "node:path";
 
-export type PermissionProfile = "read-only" | "standard" | "bypass";
+export type PermissionProfile = "read-only" | "standard" | "auto" | "bypass";
 
 export interface ButtonDef {
   name: string;
