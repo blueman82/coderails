@@ -36,26 +36,6 @@ function run(overrides: Partial<RunRecord> = {}): RunRecord {
 
 const BUTTONS: DeckButtonDef[] = [{ name: "wiki-lint", label: "Wiki Lint", profile: "read-only", inputAllowed: false }];
 
-function renderRail(initialRuns: RunRecord[]) {
-  const { rerender } = render(
-    createElement(
-      DashboardContextTestProvider,
-      { snapshot: emptySnapshot({ runs: initialRuns }) },
-      createElement(RailRight, { token: "t", buttons: BUTTONS })
-    )
-  );
-  function updateRuns(nextRuns: RunRecord[]) {
-    rerender(
-      createElement(
-        DashboardContextTestProvider,
-        { snapshot: emptySnapshot({ runs: nextRuns }) },
-        createElement(RailRight, { token: "t", buttons: BUTTONS })
-      )
-    );
-  }
-  return { updateRuns };
-}
-
 function findButton(container: HTMLElement, label: string): HTMLButtonElement {
   const btn = Array.from(container.querySelectorAll("button.hud-cmd")).find((b) => b.textContent?.includes(label.toUpperCase()) || b.textContent?.includes(label));
   if (!btn) throw new Error(`button not found for label: ${label}`);
