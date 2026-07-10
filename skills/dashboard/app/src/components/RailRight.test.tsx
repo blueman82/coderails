@@ -178,7 +178,7 @@ describe("RailRight — button-state differentiation", () => {
 
   it("cleans up pending clear-timeouts on unmount without throwing or updating state after unmount", () => {
     vi.useFakeTimers();
-    const setTimeoutSpy = vi.spyOn(global, "clearTimeout");
+    const clearTimeoutSpy = vi.spyOn(global, "clearTimeout");
     const active = run({ runId: "r5", startedAt: 1000 });
     const { container, rerender, unmount } = render(
       createElement(
