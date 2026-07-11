@@ -149,6 +149,9 @@ export function OutputViewerPanel({ token }: OutputViewerPanelProps) {
 
   const settledError = selectedRun !== undefined && !isLive ? errorByRunId[selectedRun.runId] : undefined;
   const output = selectedRun === undefined ? undefined : isLive ? (runOutput[selectedRun.runId] ?? "") : settledByRunId[selectedRun.runId];
+  // Projected at render time so both the live-SSE path and the settled-fetch path — which both
+  // ultimately feed the same raw `output` string — get the same clean-by-default treatment.
+  const displayedOutput = output === undefined ? undefined : showRaw ? output : projectAssistantText(output);
 
   return (
     <div className="hud-block">
