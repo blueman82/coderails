@@ -213,6 +213,9 @@ export function RailRight({ token, buttons }: RailRightProps) {
                     placeholder="input…"
                     value={ui.inputValue}
                     onChange={(e) => patchUi(btn.name, { inputValue: e.target.value, error: null })}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && !e.shiftKey) void handleClick(btn);
+                    }}
                   />
                 )}
                 {ui.error && <div className="hud-cmd-error">{ui.error}</div>}
