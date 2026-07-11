@@ -24,3 +24,7 @@ docs/public-readiness-plan-v2.md
 
 # task-evals working artifact — PR-scope working material only, never a durable artifact (that's the PR comment)
 /evals.json
+
+# design specs and implementation plans — session-local working docs, never tracked in the repo
+docs/coderails/specs/
+docs/coderails/plans/
