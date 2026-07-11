@@ -44,10 +44,10 @@ function jsonResponse(status: number, body: unknown): Response {
 
 // Builds the POST /api/queue handler: the dashboard's Approve/Deny action.
 // This is the only writer of the approved/denied transition per the queue
-// contract (docs/coderails/specs/2026-07-06-assistant-link-panel-design.md)
-// — it performs an in-place JSON rewrite of the target <hash>.json file's
-// status field, never a separate decision-file mechanism. Mirrors
-// api/run/route.ts's token + Origin/Host guard pattern exactly.
+// contract (see lib/collect/queue.ts's QueueFileEntry shape) — it performs
+// an in-place JSON rewrite of the target <hash>.json file's status field,
+// never a separate decision-file mechanism. Mirrors api/run/route.ts's
+// token + Origin/Host guard pattern exactly.
 export function createQueueActionHandler(deps: QueueActionHandlerDeps) {
   const queueDir = deps.queueDir ?? DEFAULT_QUEUE_DIR;
 
