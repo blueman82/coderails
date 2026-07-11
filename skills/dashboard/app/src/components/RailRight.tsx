@@ -214,7 +214,7 @@ export function RailRight({ token, buttons }: RailRightProps) {
                     value={ui.inputValue}
                     onChange={(e) => patchUi(btn.name, { inputValue: e.target.value, error: null })}
                     onKeyDown={(e) => {
-                      if (e.key === "Enter" && !e.shiftKey) void handleClick(btn);
+                      if (e.key === "Enter") void handleClick(btn);
                     }}
                   />
                 )}
