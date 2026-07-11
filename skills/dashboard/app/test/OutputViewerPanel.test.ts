@@ -131,8 +131,17 @@ describe("OutputViewerPanel — rendering (SSR)", () => {
     // ...not the raw JSONL structure (proves default = clean projection, not raw passthrough).
     expect(html).not.toContain("content_block_delta");
     expect(html).not.toContain('"type":"result"');
-    // The toggle back to raw is present.
-    expect(html).toContain("raw");
+    // The toggle back to raw is present for a live run — the raw stream-json client-side buffer
+    // genuinely differs from the projected clean view.
+    expect(html).toContain("hud-output-toggle");
+  });
+
+  it("does not render the raw/clean toggle for a settled run (server already extracts clean prose; there is no raw JSONL client-side to toggle to)", () => {
+    const finished = run({ runId: "done1", startedAt: 100, endedAt: 150, exitCode: 0 });
+    const html = renderToStaticMarkup(
+      createElement(DashboardContextTestProvider, { snapshot: emptySnapshot({ runs: [finished] }) }, createElement(OutputViewerPanel, { token: "t" }))
+    );
+    expect(html).not.toContain("hud-output-toggle");
   });
 });
 
