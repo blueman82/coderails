@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useDashboardContext } from "@/components/DashboardProvider";
 import { runResultLabel, formatDuration, formatHHMM } from "@/hooks/useDashboardState";
 import type { RunRecord } from "@/lib/runlog";
+import { projectAssistantText } from "@/lib/streamJson";
 
 export interface OutputViewerPanelProps {
   token: string;
