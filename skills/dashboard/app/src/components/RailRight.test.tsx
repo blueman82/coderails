@@ -36,10 +36,18 @@ function run(overrides: Partial<RunRecord> = {}): RunRecord {
 
 const BUTTONS: DeckButtonDef[] = [{ name: "wiki-lint", label: "Wiki Lint", profile: "read-only", inputAllowed: false }];
 
+const ASK_BUTTONS: DeckButtonDef[] = [{ name: "ask", label: "Ask", profile: "read-only", inputAllowed: true }];
+
 function findButton(container: HTMLElement, label: string): HTMLButtonElement {
   const btn = Array.from(container.querySelectorAll("button.hud-cmd")).find((b) => b.textContent?.includes(label.toUpperCase()) || b.textContent?.includes(label));
   if (!btn) throw new Error(`button not found for label: ${label}`);
   return btn as HTMLButtonElement;
+}
+
+function findInput(container: HTMLElement): HTMLInputElement {
+  const input = container.querySelector("input.hud-cmd-input");
+  if (!input) throw new Error("ask input not found");
+  return input as HTMLInputElement;
 }
 
 function mockOkFetch() {
@@ -249,5 +257,59 @@ describe("RailRight — button-state differentiation", () => {
         vi.advanceTimersByTime(2000);
       });
     }).not.toThrow();
+  });
+});
+
+describe("RailRight — ask input Enter-to-submit", () => {
+  afterEach(() => {
+    cleanup();
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it("submits the run when Enter is pressed in the ask input, without Shift", async () => {
+    mockOkFetch();
+    const { container } = render(
+      createElement(
+        DashboardContextTestProvider,
+        { snapshot: emptySnapshot({ runs: [] }) },
+        createElement(RailRight, { token: "t", buttons: ASK_BUTTONS })
+      )
+    );
+
+    const input = findInput(container);
+    fireEvent.change(input, { target: { value: "what is the status" } });
+    await act(async () => {
+      fireEvent.keyDown(input, { key: "Enter" });
+      await Promise.resolve();
+    });
+
+    expect(global.fetch).toHaveBeenCalledWith(
+      "/api/run",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ token: "t", button: "ask", input: "what is the status" }),
+      })
+    );
+  });
+
+  it("does not submit when Shift+Enter is pressed in the ask input", async () => {
+    mockOkFetch();
+    const { container } = render(
+      createElement(
+        DashboardContextTestProvider,
+        { snapshot: emptySnapshot({ runs: [] }) },
+        createElement(RailRight, { token: "t", buttons: ASK_BUTTONS })
+      )
+    );
+
+    const input = findInput(container);
+    fireEvent.change(input, { target: { value: "what is the status" } });
+    await act(async () => {
+      fireEvent.keyDown(input, { key: "Enter", shiftKey: true });
+      await Promise.resolve();
+    });
+
+    expect(global.fetch).not.toHaveBeenCalled();
   });
 });
