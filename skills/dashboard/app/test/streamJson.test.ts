@@ -98,8 +98,8 @@ describe("projectAssistantText", () => {
   });
 
   it("uses the result field even across multiple assistant turns (num_turns > 1) rather than concatenating every turn's deltas", () => {
-    // Turn 1 deltas + turn 2 deltas, but only ONE coherent final result line — mirrors the
-    // ca01962c69681a03.log fixture (num_turns:2, one result line carrying the full answer).
+    // Turn 1 deltas + turn 2 deltas, but only ONE coherent final result line — mirrors a real
+    // two-turn stream-json run (num_turns:2, one result line carrying the full answer).
     const raw =
       [
         deltaLine(0, "turn one partial"),
