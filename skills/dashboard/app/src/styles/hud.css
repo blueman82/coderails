@@ -554,14 +554,14 @@
 .hud-output-viewer {
   margin: 0;
   padding: 10px;
-  max-height: 220px;
+  max-height: 320px;
   overflow-y: auto;
   overflow-x: hidden;
   white-space: pre-wrap;
   word-break: break-word;
   font-family: var(--mono);
-  font-size: 9.5px;
-  line-height: 1.5;
+  font-size: 12px;
+  line-height: 1.6;
   color: var(--grey);
   background: rgba(255, 255, 255, 0.03);
   border: 1px solid var(--hairline);
