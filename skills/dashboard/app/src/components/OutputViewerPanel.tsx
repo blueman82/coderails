@@ -71,7 +71,12 @@ export function OutputViewerPanel({ token }: OutputViewerPanelProps) {
   const [selectedRunId, setSelectedRunId] = useState<string | undefined>(undefined);
   // Defaults to the clean, projected assistant-prose view (see projectAssistantText in
   // streamJson.ts) — the raw stream-json log is hundreds of JSON lines and unreadable in this
-  // small box. "raw" toggles back to the full log for debugging.
+  // small box. "raw" toggles back to the full log for debugging. Only meaningful for a live run:
+  // the live-SSE buffer (runOutput) is genuinely raw stream-json, so projection cleans it. A
+  // settled run's output comes from GET /api/run/output, which already server-side extracts just
+  // the result text (extractResultText in api/run/output/route.ts) — there is no raw JSONL
+  // client-side to toggle to, so the toggle button itself is hidden for settled runs (see isLive
+  // below) rather than rendered as a no-op.
   const [showRaw, setShowRaw] = useState(false);
   // Cache of fetched settled output, keyed by runId — fetched once per finished run, never
   // refetched just because the panel re-renders (a finished run's output file never changes).
