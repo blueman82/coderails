@@ -105,16 +105,11 @@ digraph brainstorming {
 
 ## After the Design
 
-**Isolation:**
-
-- Before writing the spec, invoke coderails:using-git-worktrees to ensure an isolated workspace exists.
-- Why: main is for merges. The `no_edit_on_main` hook doesn't gate plain markdown at all (only `skills/*/SKILL.md` and `commands/*.md` are blocked on main) — so without this step, nothing stops the spec commit from landing straight on local main and dirtying the base every other session branches from.
-
 **Documentation:**
 
-- Write the validated design (spec) to `docs/coderails/specs/YYYY-MM-DD-<topic>-design.md`
+- Write the validated design (spec) to a session-local scratch path (e.g. the session scratchpad directory), NOT into the repo. `docs/coderails/specs/` and `docs/coderails/plans/` are gitignored and must never be tracked — this is a deliberate owner decision (2026-07-11): specs and plans are working documents for the session that produced them, not permanent repo artifacts.
   - (User preferences for spec location override this default)
-- Commit the design document to git — this now lands on the isolated workspace's branch, feeding the normal /workflow pipeline
+- Do not commit the design document to the repo. If the user wants a durable record of the design decision, use `coderails:handoff` or a wiki page instead — both are meant for exactly this.
 
 **Spec Self-Review:**
 After writing the spec document, look at it with fresh eyes:
