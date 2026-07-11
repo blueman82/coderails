@@ -4,10 +4,9 @@ import { join } from "node:path";
 // Mirrors queue.ts's closed-set validation discipline exactly: an
 // out-of-vocabulary or missing `state` is rejected, never defaulted, and any
 // unreadable/malformed file degrades to "skip this entry", never throws.
-// Schema per docs/coderails/specs' sidecar contract (builds/<hash>/state.json,
+// This is the frozen sidecar contract (builds/<hash>/state.json,
 // schemaVersion 1) — verified against the shipped run-builder.sh's actual
-// jq -n state.json writes (skills/dashboard/scripts/run-builder.sh), not just
-// the design doc's sketch.
+// jq -n state.json writes (skills/dashboard/scripts/run-builder.sh).
 export interface BuildEntry {
   schemaVersion: number;
   hash: string;
