@@ -259,3 +259,57 @@ describe("RailRight — button-state differentiation", () => {
     }).not.toThrow();
   });
 });
+
+describe("RailRight — ask input Enter-to-submit", () => {
+  afterEach(() => {
+    cleanup();
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it("submits the run when Enter is pressed in the ask input, without Shift", async () => {
+    mockOkFetch();
+    const { container } = render(
+      createElement(
+        DashboardContextTestProvider,
+        { snapshot: emptySnapshot({ runs: [] }) },
+        createElement(RailRight, { token: "t", buttons: ASK_BUTTONS })
+      )
+    );
+
+    const input = findInput(container);
+    fireEvent.change(input, { target: { value: "what is the status" } });
+    await act(async () => {
+      fireEvent.keyDown(input, { key: "Enter" });
+      await Promise.resolve();
+    });
+
+    expect(global.fetch).toHaveBeenCalledWith(
+      "/api/run",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ token: "t", button: "ask", input: "what is the status" }),
+      })
+    );
+  });
+
+  it("does not submit when Shift+Enter is pressed in the ask input", async () => {
+    mockOkFetch();
+    const { container } = render(
+      createElement(
+        DashboardContextTestProvider,
+        { snapshot: emptySnapshot({ runs: [] }) },
+        createElement(RailRight, { token: "t", buttons: ASK_BUTTONS })
+      )
+    );
+
+    const input = findInput(container);
+    fireEvent.change(input, { target: { value: "what is the status" } });
+    await act(async () => {
+      fireEvent.keyDown(input, { key: "Enter", shiftKey: true });
+      await Promise.resolve();
+    });
+
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+});
