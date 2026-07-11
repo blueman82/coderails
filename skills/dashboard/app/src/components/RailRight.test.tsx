@@ -36,10 +36,18 @@ function run(overrides: Partial<RunRecord> = {}): RunRecord {
 
 const BUTTONS: DeckButtonDef[] = [{ name: "wiki-lint", label: "Wiki Lint", profile: "read-only", inputAllowed: false }];
 
+const ASK_BUTTONS: DeckButtonDef[] = [{ name: "ask", label: "Ask", profile: "read-only", inputAllowed: true }];
+
 function findButton(container: HTMLElement, label: string): HTMLButtonElement {
   const btn = Array.from(container.querySelectorAll("button.hud-cmd")).find((b) => b.textContent?.includes(label.toUpperCase()) || b.textContent?.includes(label));
   if (!btn) throw new Error(`button not found for label: ${label}`);
   return btn as HTMLButtonElement;
+}
+
+function findInput(container: HTMLElement): HTMLInputElement {
+  const input = container.querySelector("input.hud-cmd-input");
+  if (!input) throw new Error("ask input not found");
+  return input as HTMLInputElement;
 }
 
 function mockOkFetch() {
