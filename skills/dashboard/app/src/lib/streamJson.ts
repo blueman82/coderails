@@ -75,7 +75,7 @@ export function projectAssistantText(raw: string): string {
     if (!parsed.ok) continue;
     const value = parsed.value;
 
-    if (value.type === "result" && typeof value.result === "string") {
+    if (value.type === "result" && typeof value.result === "string" && value.result.trim() !== "") {
       resultText = value.result;
       continue;
     }
