@@ -23,9 +23,9 @@ const DEFAULT_QUEUE_DIR = join(homedir(), ".claude", "coderails-dashboard", "app
 const WRAPPER_PATH = resolveDefaultWrapperPath();
 
 // hash is the hex SHA-256 filename stem per the queue contract (see
-// docs/coderails/specs/2026-07-06-assistant-link-panel-design.md) — never
-// anything else. Rejecting anything outside that shape at the API boundary
-// closes off path traversal (e.g. "../../../etc/passwd") before it ever
+// lib/collect/queue.ts's QueueFileEntry shape) — never anything else.
+// Rejecting anything outside that shape at the API boundary closes off
+// path traversal (e.g. "../../../etc/passwd") before it ever
 // reaches queueActions.ts's join(queueDir, `${hash}.json`).
 const HASH_PATTERN = /^[0-9a-f]{64}$/;
 
