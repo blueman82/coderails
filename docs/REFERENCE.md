@@ -183,7 +183,7 @@ These are coderails' general development-discipline skills (not coderails-specif
 
 **When it triggers:** After a spec exists and work spans multiple tasks, files, or reviewable units. Not for single trivial edits.
 
-**Plan storage:** Plans referenced as `docs/coderails/plans/<name>.md` (committed to the repo, not ephemeral). The agentic loop's `plan.md` is a special case — it lives in the loop-state dir outside the repo alongside `progress.json`.
+**Plan storage:** `docs/coderails/plans/` is gitignored — plans are session-local working documents, never tracked in the repo (owner decision, 2026-07-11). The agentic loop's `plan.md` is a special case — it lives in the loop-state dir outside the repo alongside `progress.json`, same treatment.
 
 **Next step (required):** After the self-review gate, the plan goes through `/coderails:planning-sequence` (Pre-Parade → Premortem → Red Team) before implementation hands off to `subagent-driven-development`/`executing-plans`. Findings fold back into the plan inline.
 
