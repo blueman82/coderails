@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { StreamJsonSplitter, parseStreamJsonLine } from "../src/lib/streamJson";
+import { StreamJsonSplitter, parseStreamJsonLine, projectAssistantText } from "../src/lib/streamJson";
 
 describe("StreamJsonSplitter", () => {
   it("splits a single chunk containing multiple complete JSONL lines into separate raw lines", () => {
