@@ -54,3 +54,46 @@ export function parseStreamJsonLine(line: string): ParsedStreamJsonLine {
     return { ok: false, raw: line };
   }
 }
+
+// Projects the raw stream-json log into just the assistant's readable prose, for the dashboard's
+// "clean" default view (see OutputViewerPanel.tsx). Non-throwing, same posture as
+// parseStreamJsonLine: malformed or partial lines are skipped rather than raised. Prefers the
+// `{"type":"result",...,"result":"<text>"}` line's `result` field — normally there is one such
+// line per run, and it carries the single coherent final answer, so concatenating every turn's
+// deltas would duplicate/garble content rather than clarify it (even across multiple assistant
+// turns, e.g. a hook-block forcing extra turns). If more than one result line were ever to appear,
+// the last one wins rather than the first — still safer than concatenating deltas across turns.
+// Falls back to concatenating `text_delta` values for a still-live run (deltas exist, no `result`
+// line yet). If nothing parses as assistant text at all, returns the raw input unchanged so a run
+// that produced output never renders an empty box.
+export function projectAssistantText(raw: string): string {
+  const lines = raw.split("\n");
+  let resultText: string | undefined;
+  let deltaText = "";
+
+  for (const line of lines) {
+    if (line.trim() === "") continue;
+    const parsed = parseStreamJsonLine(line);
+    if (!parsed.ok) continue;
+    const value = parsed.value;
+
+    if (value.type === "result" && typeof value.result === "string" && value.result.trim() !== "") {
+      resultText = value.result;
+      continue;
+    }
+
+    if (value.type === "stream_event") {
+      const event = value.event as Record<string, unknown> | undefined;
+      if (event?.type === "content_block_delta") {
+        const delta = event.delta as Record<string, unknown> | undefined;
+        if (delta?.type === "text_delta" && typeof delta.text === "string") {
+          deltaText += delta.text;
+        }
+      }
+    }
+  }
+
+  if (resultText !== undefined) return resultText;
+  if (deltaText !== "") return deltaText;
+  return raw;
+}

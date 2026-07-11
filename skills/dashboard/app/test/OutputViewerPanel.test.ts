@@ -106,6 +106,43 @@ describe("OutputViewerPanel — rendering (SSR)", () => {
     // loaded — it must not fall back to rendering the stale live buffer instead.
     expect(html).not.toContain("leftover live text");
   });
+
+  it("renders the projected clean prose by default for a live run's raw stream-json output, not the raw JSON lines", () => {
+    // Real shape produced by `claude -p --output-format stream-json`: a text_delta stream_event
+    // followed by a final result line — see streamJson.test.ts's projectAssistantText coverage.
+    const rawStreamJson =
+      [
+        JSON.stringify({
+          type: "stream_event",
+          event: { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "draft" } },
+        }),
+        JSON.stringify({ type: "result", subtype: "success", is_error: false, result: "Clean final answer." }),
+      ].join("\n") + "\n";
+    const active = run({ runId: "live1", startedAt: 100 });
+    const html = renderToStaticMarkup(
+      createElement(
+        DashboardContextTestProvider,
+        { snapshot: emptySnapshot({ runs: [active] }), runOutput: { live1: rawStreamJson } },
+        createElement(OutputViewerPanel, { token: "t" })
+      )
+    );
+    // Default view shows the projected prose...
+    expect(html).toContain("Clean final answer.");
+    // ...not the raw JSONL structure (proves default = clean projection, not raw passthrough).
+    expect(html).not.toContain("content_block_delta");
+    expect(html).not.toContain('"type":"result"');
+    // The toggle back to raw is present for a live run — the raw stream-json client-side buffer
+    // genuinely differs from the projected clean view.
+    expect(html).toContain("hud-output-toggle");
+  });
+
+  it("does not render the raw/clean toggle for a settled run (server already extracts clean prose; there is no raw JSONL client-side to toggle to)", () => {
+    const finished = run({ runId: "done1", startedAt: 100, endedAt: 150, exitCode: 0 });
+    const html = renderToStaticMarkup(
+      createElement(DashboardContextTestProvider, { snapshot: emptySnapshot({ runs: [finished] }) }, createElement(OutputViewerPanel, { token: "t" }))
+    );
+    expect(html).not.toContain("hud-output-toggle");
+  });
 });
 
 // fetchSettledOutput previously had zero direct coverage (it was only exercised indirectly

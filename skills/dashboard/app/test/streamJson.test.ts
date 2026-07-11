@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { StreamJsonSplitter, parseStreamJsonLine } from "../src/lib/streamJson";
+import { StreamJsonSplitter, parseStreamJsonLine, projectAssistantText } from "../src/lib/streamJson";
 
 describe("StreamJsonSplitter", () => {
   it("splits a single chunk containing multiple complete JSONL lines into separate raw lines", () => {
@@ -69,5 +69,79 @@ describe("parseStreamJsonLine", () => {
       ok: true,
       value: { type: "some_future_event_type", payload: { nested: true } },
     });
+  });
+});
+
+// Helper: builds a text_delta stream_event line for a given index/text — the shape
+// projectAssistantText concatenates for live-streaming (no final result line yet).
+function deltaLine(index: number, text: string): string {
+  return JSON.stringify({
+    type: "stream_event",
+    event: { type: "content_block_delta", index, delta: { type: "text_delta", text } },
+  });
+}
+
+function resultLine(result: string): string {
+  return JSON.stringify({ type: "result", subtype: "success", is_error: false, result });
+}
+
+describe("projectAssistantText", () => {
+  it("concatenates text_delta events into prose when no final result line exists yet (live streaming)", () => {
+    const raw = [deltaLine(0, "This"), deltaLine(0, " is"), deltaLine(0, " streaming.")].join("\n") + "\n";
+    expect(projectAssistantText(raw)).toBe("This is streaming.");
+  });
+
+  it("prefers the final result line's `result` field over concatenated deltas when both exist", () => {
+    const raw =
+      [deltaLine(0, "draft"), deltaLine(0, " text"), resultLine("The real final answer.")].join("\n") + "\n";
+    expect(projectAssistantText(raw)).toBe("The real final answer.");
+  });
+
+  it("uses the result field even across multiple assistant turns (num_turns > 1) rather than concatenating every turn's deltas", () => {
+    // Turn 1 deltas + turn 2 deltas, but only ONE coherent final result line — mirrors a real
+    // two-turn stream-json run (num_turns:2, one result line carrying the full answer).
+    const raw =
+      [
+        deltaLine(0, "turn one partial"),
+        JSON.stringify({ type: "assistant", message: { content: [] } }),
+        deltaLine(0, "turn two partial"),
+        resultLine("Final coherent answer covering both turns."),
+      ].join("\n") + "\n";
+    expect(projectAssistantText(raw)).toBe("Final coherent answer covering both turns.");
+  });
+
+  it("skips malformed/unparseable lines interleaved with valid delta lines rather than throwing or corrupting output", () => {
+    const raw = [deltaLine(0, "Hello"), "not json at all", deltaLine(0, " world"), "{truncated"].join("\n") + "\n";
+    expect(() => projectAssistantText(raw)).not.toThrow();
+    expect(projectAssistantText(raw)).toBe("Hello world");
+  });
+
+  it("handles an incomplete/partial trailing line (no newline yet) without throwing or losing prior text", () => {
+    const raw = deltaLine(0, "Complete line") + "\n" + '{"type":"stream_event","event":{"type":"content_block_delta"';
+    expect(() => projectAssistantText(raw)).not.toThrow();
+    expect(projectAssistantText(raw)).toBe("Complete line");
+  });
+
+  it("returns the raw input unchanged when nothing parses as assistant text (never shows an empty box for a run that produced output)", () => {
+    const raw = [JSON.stringify({ type: "system", subtype: "init" }), "some raw unparseable garbage"].join("\n") + "\n";
+    expect(projectAssistantText(raw)).toBe(raw);
+  });
+
+  it("returns the raw input unchanged for a completely empty string", () => {
+    expect(projectAssistantText("")).toBe("");
+  });
+
+  it("ignores non-text_delta stream_event deltas (e.g. input_json_delta from tool-use blocks)", () => {
+    const toolDelta = JSON.stringify({
+      type: "stream_event",
+      event: { type: "content_block_delta", index: 0, delta: { type: "input_json_delta", partial_json: "{\"x\":1}" } },
+    });
+    const raw = [deltaLine(0, "Hello "), toolDelta, deltaLine(0, "world")].join("\n") + "\n";
+    expect(projectAssistantText(raw)).toBe("Hello world");
+  });
+
+  it("falls back to accumulated deltas when the result line's `result` field is empty/whitespace-only, rather than blanking a run that had streamed output", () => {
+    const raw = [deltaLine(0, "Hello"), deltaLine(0, " world"), resultLine("")].join("\n") + "\n";
+    expect(projectAssistantText(raw)).toBe("Hello world");
   });
 });

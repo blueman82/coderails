@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useDashboardContext } from "@/components/DashboardProvider";
 import { runResultLabel, formatDuration, formatHHMM } from "@/hooks/useDashboardState";
 import type { RunRecord } from "@/lib/runlog";
+import { projectAssistantText } from "@/lib/streamJson";
 
 export interface OutputViewerPanelProps {
   token: string;
@@ -68,6 +69,15 @@ export function OutputViewerPanel({ token }: OutputViewerPanelProps) {
   const { snapshot, runOutput } = useDashboardContext();
   const { runs } = snapshot;
   const [selectedRunId, setSelectedRunId] = useState<string | undefined>(undefined);
+  // Defaults to the clean, projected assistant-prose view (see projectAssistantText in
+  // streamJson.ts) — the raw stream-json log is hundreds of JSON lines and unreadable in this
+  // small box. "raw" toggles back to the full log for debugging. Only meaningful for a live run:
+  // the live-SSE buffer (runOutput) is genuinely raw stream-json, so projection cleans it. A
+  // settled run's output comes from GET /api/run/output, which already server-side extracts just
+  // the result text (extractResultText in api/run/output/route.ts) — there is no raw JSONL
+  // client-side to toggle to, so the toggle button itself is hidden for settled runs (see isLive
+  // below) rather than rendered as a no-op.
+  const [showRaw, setShowRaw] = useState(false);
   // Cache of fetched settled output, keyed by runId — fetched once per finished run, never
   // refetched just because the panel re-renders (a finished run's output file never changes).
   const [settledByRunId, setSettledByRunId] = useState<Record<string, string>>({});
@@ -144,6 +154,9 @@ export function OutputViewerPanel({ token }: OutputViewerPanelProps) {
 
   const settledError = selectedRun !== undefined && !isLive ? errorByRunId[selectedRun.runId] : undefined;
   const output = selectedRun === undefined ? undefined : isLive ? (runOutput[selectedRun.runId] ?? "") : settledByRunId[selectedRun.runId];
+  // Projected at render time so both the live-SSE path and the settled-fetch path — which both
+  // ultimately feed the same raw `output` string — get the same clean-by-default treatment.
+  const displayedOutput = output === undefined ? undefined : showRaw ? output : projectAssistantText(output);
 
   return (
     <div className="hud-block">
@@ -201,10 +214,15 @@ export function OutputViewerPanel({ token }: OutputViewerPanelProps) {
                 {selectedRun.endedAt ? formatDuration(selectedRun.startedAt, selectedRun.endedAt) : "…"} ·{" "}
                 {formatHHMM(selectedRun.startedAt)}
               </span>
+              {isLive && (
+                <button type="button" className="hud-output-toggle" onClick={() => setShowRaw((prev) => !prev)}>
+                  {showRaw ? "clean" : "raw"}
+                </button>
+              )}
             </div>
           )}
           <pre className={`hud-output-viewer${selectedRun ? " attached" : ""}`}>
-            {output !== undefined && output !== "" ? output : "no output"}
+            {displayedOutput !== undefined && displayedOutput !== "" ? displayedOutput : "no output"}
           </pre>
         </>
       )}
