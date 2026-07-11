@@ -139,4 +139,9 @@ describe("projectAssistantText", () => {
     const raw = [deltaLine(0, "Hello "), toolDelta, deltaLine(0, "world")].join("\n") + "\n";
     expect(projectAssistantText(raw)).toBe("Hello world");
   });
+
+  it("falls back to accumulated deltas when the result line's `result` field is empty/whitespace-only, rather than blanking a run that had streamed output", () => {
+    const raw = [deltaLine(0, "Hello"), deltaLine(0, " world"), resultLine("")].join("\n") + "\n";
+    expect(projectAssistantText(raw)).toBe("Hello world");
+  });
 });
