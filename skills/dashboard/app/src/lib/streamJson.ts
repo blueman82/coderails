@@ -58,12 +58,14 @@ export function parseStreamJsonLine(line: string): ParsedStreamJsonLine {
 // Projects the raw stream-json log into just the assistant's readable prose, for the dashboard's
 // "clean" default view (see OutputViewerPanel.tsx). Non-throwing, same posture as
 // parseStreamJsonLine: malformed or partial lines are skipped rather than raised. Prefers the
-// final `{"type":"result",...,"result":"<text>"}` line's `result` field — even across multiple
-// assistant turns (e.g. a hook-block forcing extra turns) there is exactly one such line, and it
-// already carries the single coherent final answer, so concatenating every turn's deltas would
-// duplicate/garble content rather than clarify it. Falls back to concatenating `text_delta` values
-// for a still-live run (deltas exist, no `result` line yet). If nothing parses as assistant text at
-// all, returns the raw input unchanged so a run that produced output never renders an empty box.
+// `{"type":"result",...,"result":"<text>"}` line's `result` field — normally there is one such
+// line per run, and it carries the single coherent final answer, so concatenating every turn's
+// deltas would duplicate/garble content rather than clarify it (even across multiple assistant
+// turns, e.g. a hook-block forcing extra turns). If more than one result line were ever to appear,
+// the last one wins rather than the first — still safer than concatenating deltas across turns.
+// Falls back to concatenating `text_delta` values for a still-live run (deltas exist, no `result`
+// line yet). If nothing parses as assistant text at all, returns the raw input unchanged so a run
+// that produced output never renders an empty box.
 export function projectAssistantText(raw: string): string {
   const lines = raw.split("\n");
   let resultText: string | undefined;
