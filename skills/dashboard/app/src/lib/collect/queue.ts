@@ -1,11 +1,10 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
-// Mirrors the normative QueueFileEntry shape frozen in
-// docs/coderails/specs/2026-07-06-assistant-link-panel-design.md verbatim —
-// field names and types included. toolInput is `unknown` deliberately: the
-// queue is generic across all gated tools, rendered opaquely, never
-// destructured by assumed shape.
+// This is the frozen QueueFileEntry shape — the queue contract other
+// modules (api/queue/route.ts, queueActions.ts) cite and depend on.
+// toolInput is `unknown` deliberately: the queue is generic across all
+// gated tools, rendered opaquely, never destructured by assumed shape.
 export interface QueueEntry {
   hash: string;
   toolName: string;

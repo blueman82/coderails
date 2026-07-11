@@ -291,9 +291,8 @@ export function renderDecisionFeedback(feedback: PostDecisionResult | undefined)
 }
 
 // ASSISTANT.LINK panel, item 3 ("Sends + approvals log") — the pending-queue
-// slice only. Per docs/coderails/specs/2026-07-06-assistant-link-panel-design.md,
-// the other three panel slots (tasks, email-checked, routine-runs) are
-// explicitly out of scope for this component; they are not rendered here.
+// slice only. The other three panel slots (tasks, email-checked, routine-runs)
+// are explicitly out of scope for this component; they are not rendered here.
 export function AssistantLinkPanel({ token }: AssistantLinkPanelProps) {
   const { snapshot } = useDashboardContext();
   const { queue, builds, gates } = snapshot;

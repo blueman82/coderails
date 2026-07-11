@@ -12,8 +12,7 @@ import * as THREE from "three";
 import { hslToRgb, type AccentHsl } from "@/lib/runHue";
 
 // Network-first sphere: a wired mesh of nodes, not a dot cloud. Structure (plexus wiring, hub
-// hierarchy) is the dominant visual texture, per the normative mockup
-// (docs/coderails/specs/assets/2026-07-06-observability/dashboard-mockup.html).
+// hierarchy) is the dominant visual texture, per the original owner-approved HTML mockup.
 const PARTICLE_COUNT = 1100;
 const HUB_FRACTION = 0.08;
 const RADIUS = 13;

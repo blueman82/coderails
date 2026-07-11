@@ -6,8 +6,8 @@ import { hslToRgb, type AccentHsl } from "@/lib/runHue";
 // 2D-canvas plexus sphere: mirrors the WebGL sphere's palette and structure (rose rim, plexus
 // wiring, depth-based fade) for environments where a WebGL context cannot be created. Re-tinted
 // with the live accent hue each frame (via the `accent` prop) so the fallback path stays in sync
-// with the rest of the theme during a run, same as the mockup's 2D fallback reads currentAccent.
-// Ported from docs/coderails/specs/assets/2026-07-06-observability/dashboard-mockup.html.
+// with the rest of the theme during a run — ported from the original owner-approved HTML mockup's
+// 2D fallback, which read currentAccent the same way.
 const COUNT = 260;
 const LINK_DIST = 46;
 

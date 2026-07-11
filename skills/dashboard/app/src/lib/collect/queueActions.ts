@@ -21,7 +21,7 @@ export interface QueueEntrySnapshot {
 const VALID_DECISIONS: Decision[] = ["approved", "denied"];
 
 // hash is the hex SHA-256 filename stem per the queue contract (see
-// docs/coderails/specs/2026-07-06-assistant-link-panel-design.md). The API
+// lib/collect/queue.ts's QueueFileEntry shape). The API
 // route already validates this shape before calling in, but this function is
 // exported and documented as the sole writer of the approved/denied
 // transition — it must not trust a caller to have sanitised `hash`, since

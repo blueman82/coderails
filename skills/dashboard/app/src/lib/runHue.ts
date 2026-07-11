@@ -1,8 +1,8 @@
 // Pure run-lifecycle math: accent-hue sweep, median-duration "expected time" estimate, and
-// progress-fraction clamping. Ported from the normative mockup's tickAccent()/accentAt()/
-// hslToRgbHex() (docs/coderails/specs/assets/2026-07-06-observability/dashboard-mockup.html) so
-// the dashboard's CSS custom properties and the sphere's material colours are driven by the same
-// function the approved reference used — no drift between the two render paths.
+// progress-fraction clamping. Ported from the original owner-approved HTML mockup's
+// tickAccent()/accentAt()/hslToRgbHex() so the dashboard's CSS custom properties and the
+// sphere's material colours are driven by the same function the approved reference used —
+// no drift between the two render paths.
 import type { RunRecord } from "./runlog";
 
 export interface AccentHsl {

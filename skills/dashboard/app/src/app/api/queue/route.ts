@@ -23,9 +23,9 @@ const DEFAULT_QUEUE_DIR = join(homedir(), ".claude", "coderails-dashboard", "app
 const WRAPPER_PATH = resolveDefaultWrapperPath();
 
 // hash is the hex SHA-256 filename stem per the queue contract (see
-// docs/coderails/specs/2026-07-06-assistant-link-panel-design.md) — never
-// anything else. Rejecting anything outside that shape at the API boundary
-// closes off path traversal (e.g. "../../../etc/passwd") before it ever
+// lib/collect/queue.ts's QueueFileEntry shape) — never anything else.
+// Rejecting anything outside that shape at the API boundary closes off
+// path traversal (e.g. "../../../etc/passwd") before it ever
 // reaches queueActions.ts's join(queueDir, `${hash}.json`).
 const HASH_PATTERN = /^[0-9a-f]{64}$/;
 
@@ -44,10 +44,10 @@ function jsonResponse(status: number, body: unknown): Response {
 
 // Builds the POST /api/queue handler: the dashboard's Approve/Deny action.
 // This is the only writer of the approved/denied transition per the queue
-// contract (docs/coderails/specs/2026-07-06-assistant-link-panel-design.md)
-// — it performs an in-place JSON rewrite of the target <hash>.json file's
-// status field, never a separate decision-file mechanism. Mirrors
-// api/run/route.ts's token + Origin/Host guard pattern exactly.
+// contract (see lib/collect/queue.ts's QueueFileEntry shape) — it performs
+// an in-place JSON rewrite of the target <hash>.json file's status field,
+// never a separate decision-file mechanism. Mirrors api/run/route.ts's
+// token + Origin/Host guard pattern exactly.
 export function createQueueActionHandler(deps: QueueActionHandlerDeps) {
   const queueDir = deps.queueDir ?? DEFAULT_QUEUE_DIR;
 
