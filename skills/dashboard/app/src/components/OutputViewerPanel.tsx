@@ -209,10 +209,13 @@ export function OutputViewerPanel({ token }: OutputViewerPanelProps) {
                 {selectedRun.endedAt ? formatDuration(selectedRun.startedAt, selectedRun.endedAt) : "…"} ·{" "}
                 {formatHHMM(selectedRun.startedAt)}
               </span>
+              <button type="button" className="hud-output-toggle" onClick={() => setShowRaw((prev) => !prev)}>
+                {showRaw ? "clean" : "raw"}
+              </button>
             </div>
           )}
           <pre className={`hud-output-viewer${selectedRun ? " attached" : ""}`}>
-            {output !== undefined && output !== "" ? output : "no output"}
+            {displayedOutput !== undefined && displayedOutput !== "" ? displayedOutput : "no output"}
           </pre>
         </>
       )}
