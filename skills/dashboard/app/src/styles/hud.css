@@ -1,6 +1,6 @@
-/* Ported from docs/coderails/specs/assets/2026-07-06-observability/dashboard-mockup.html
-   (owner-approved normative visual reference). Static layout only — the sphere background,
-   HUD callouts, and command-deck interactivity land in later tasks (9c/9d). */
+/* Ported from an owner-approved HTML mockup during initial design. Static layout only —
+   the sphere background, HUD callouts, and command-deck interactivity land in later
+   tasks (9c/9d). */
 
 :root {
   --void: #0d0708;
