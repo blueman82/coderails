@@ -171,7 +171,7 @@ These are coderails' general development-discipline skills (not coderails-specif
 
 **Purpose:** Explores user intent, requirements, and design before implementation. Required before any creative work.
 
-**When it triggers:** MUST be used before creating features, building components, adding functionality, or modifying behaviour. Mandatory pre-implementation gate. Saves spec to `docs/coderails/specs/YYYY-MM-DD-<topic>-design.md`.
+**When it triggers:** MUST be used before creating features, building components, adding functionality, or modifying behaviour. Mandatory pre-implementation gate. Saves spec to a session-local scratch path — `docs/coderails/specs/` is gitignored, never tracked in the repo (owner decision, 2026-07-11).
 
 **When it does NOT apply:** Pure investigation/research turns with no implementation intent.
 
