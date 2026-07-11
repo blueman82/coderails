@@ -551,17 +551,36 @@
   letter-spacing: 0.1em;
   text-transform: uppercase;
 }
+/* .hud-output-toggle resets default button chrome (border/background/padding) the same way
+   .hud-run-row-selectable does above, then restyles it as a small HUD-terminal control. */
+.hud-output-toggle {
+  margin: 0;
+  padding: 2px 6px;
+  background: none;
+  border: 1px solid var(--hairline);
+  border-radius: 2px;
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--grey);
+  cursor: pointer;
+}
+.hud-output-toggle:hover {
+  color: var(--off-white);
+  border-color: var(--rose-dim);
+}
 .hud-output-viewer {
   margin: 0;
   padding: 10px;
-  max-height: 220px;
+  max-height: 320px;
   overflow-y: auto;
   overflow-x: hidden;
   white-space: pre-wrap;
   word-break: break-word;
   font-family: var(--mono);
-  font-size: 9.5px;
-  line-height: 1.5;
+  font-size: 12px;
+  line-height: 1.6;
   color: var(--grey);
   background: rgba(255, 255, 255, 0.03);
   border: 1px solid var(--hairline);
