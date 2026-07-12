@@ -141,10 +141,12 @@ function readLoopName(record: Record<string, unknown>, slug: string): string {
 // the tier-0 exemption, same precedence as the bash SSOT.
 // Also mirrors the hook's UNSTAMPED check: GO/TIER0 additionally require a
 // `.grading` stamp (post_evals.sh grade-loop's provenance record) to read as
-// frozen. This is presence-only — no checksum recomputation here, unlike the
-// hook, since this is a display surface (KISS); a status edited after
-// grading without re-stamping will still show frozen here even though the
-// hook would demote it to UNSTAMPED.
+// frozen — both `.grading.by` and `.grading.checksum` must be present AND
+// non-empty, matching the bash reader's `[ -z "$stamped_by" ] || [ -z
+// "$stamped_checksum" ]` check. This is presence-only — no checksum
+// recomputation here, unlike the hook, since this is a display surface
+// (KISS); a status edited after grading without re-stamping will still show
+// frozen here even though the hook would demote it to UNSTAMPED.
 function readEvalsFrozen(loopDir: string): boolean {
   const data = readJson(join(loopDir, "evals.json"));
   if (!isRecord(data)) return false;
@@ -152,8 +154,10 @@ function readEvalsFrozen(loopDir: string): boolean {
   const justification = typeof data.tier_justification === "string" ? data.tier_justification.trim() : "";
   if (!justification) return false;
   if (data.result === "NO-GO") return false;
-  const stamped = isRecord(data.grading) && typeof data.grading.checksum === "string";
-  if (!stamped) return false;
+  const grading = isRecord(data.grading) ? data.grading : undefined;
+  const stampedBy = typeof grading?.by === "string" ? grading.by.trim() : "";
+  const stampedChecksum = typeof grading?.checksum === "string" ? grading.checksum.trim() : "";
+  if (!stampedBy || !stampedChecksum) return false;
   if (data.result === "GO") return true;
   if (data.tier === 0) return true;
   return false;
