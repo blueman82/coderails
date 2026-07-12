@@ -343,4 +343,73 @@ describe("collectLoops", () => {
     const loops = collectLoops(base);
     expect(loops).toEqual([]);
   });
+
+  it("surfaces the last 5 decisions_absorbed entries, newest first, formatted as phase: decision", () => {
+    const base = makeTmpBase();
+    const dir = join(base, "-decisions-project", "S20");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, "progress.json"),
+      JSON.stringify({
+        status: "in-progress",
+        session_id: "S20",
+        work_units: {},
+        decisions_absorbed: [
+          { phase: "2.5", decision: "one" },
+          { phase: "2.6", decision: "two" },
+          { phase: "5", decision: "three" },
+          { phase: "6", decision: "four" },
+          { phase: "13", decision: "five" },
+          { phase: "13", decision: "six" },
+          { phase: "13", decision: "seven" },
+        ],
+      })
+    );
+    const loops = collectLoops(base);
+    expect(loops[0].decisions).toEqual([
+      "13: seven",
+      "13: six",
+      "13: five",
+      "6: four",
+      "5: three",
+    ]);
+  });
+
+  it("reports an empty decisions array when decisions_absorbed is absent (predates the field)", () => {
+    const base = makeTmpBase();
+    const dir = join(base, "-nodecisions-project", "S21");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, "progress.json"),
+      JSON.stringify({ status: "in-progress", session_id: "S21", work_units: {} })
+    );
+    const loops = collectLoops(base);
+    expect(loops[0].decisions).toEqual([]);
+  });
+
+  it("tolerates a malformed decisions_absorbed (non-array, or entries missing keys) by skipping rather than throwing", () => {
+    const base = makeTmpBase();
+    const dirA = join(base, "-decisions-notarray-project", "S22");
+    mkdirSync(dirA, { recursive: true });
+    writeFileSync(
+      join(dirA, "progress.json"),
+      JSON.stringify({ status: "in-progress", session_id: "S22", work_units: {}, decisions_absorbed: "not-an-array" })
+    );
+
+    const dirB = join(base, "-decisions-badentries-project", "S23");
+    mkdirSync(dirB, { recursive: true });
+    writeFileSync(
+      join(dirB, "progress.json"),
+      JSON.stringify({
+        status: "in-progress",
+        session_id: "S23",
+        work_units: {},
+        decisions_absorbed: [{ phase: "2.5" }, { decision: "orphan" }, "not-a-record", { phase: "6", decision: "kept" }],
+      })
+    );
+
+    const loops = collectLoops(base);
+    expect(loops.find((l) => l.slug === "-decisions-notarray-project")?.decisions).toEqual([]);
+    expect(loops.find((l) => l.slug === "-decisions-badentries-project")?.decisions).toEqual(["6: kept"]);
+  });
 });
