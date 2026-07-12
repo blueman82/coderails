@@ -1,7 +1,6 @@
 ---
 name: loop-retro-promotion
 description: Scheduled promotion pipeline that mines accumulated agentic-loop retros for repo-agnostic lessons and promotes them into learned-failure-modes.md. Runs on a schedule, NOT for interactive use — do not invoke this for a single loop's retro or from inside an active agentic-loop session.
-user-invocable: false
 ---
 
 # Loop Retro Promotion
