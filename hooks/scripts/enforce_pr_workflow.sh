@@ -38,7 +38,17 @@ gate_safe_passthrough() {
   # so --dry-run-data or --helpfulness don't accidentally pass through. The pattern
   # requires the flag to be preceded by a non-word char (or start of string) and
   # followed by a non-word char or end.
-  if printf '%s' "$cmd" | grep -qE '(^|[^-[:alnum:]])(--dry-run|--help)([^-[:alnum:]]|$)'; then
+  # EXCLUDED from this passthrough: merge.sh invocations (tested with the same
+  # anchor gate_in_scope uses below, so this isn't a second regex dialect).
+  # The exemption exists because `gh pr merge --dry-run`/`--help` are genuinely
+  # inert for gh (gh rejects the unknown --dry-run flag outright with exit 1,
+  # and --help just prints usage — neither ever merges). scripts/merge.sh has
+  # no such flags: its arg parser (merge::main) reads only $1 as the PR
+  # number/branch and silently ignores any trailing token, including
+  # --dry-run — so `scripts/merge.sh 140 --dry-run` would otherwise pass
+  # through this gate and then perform a REAL merge of PR 140.
+  if printf '%s' "$cmd" | grep -qE '(^|[^-[:alnum:]])(--dry-run|--help)([^-[:alnum:]]|$)' && \
+     ! printf '%s' "$cmd" | grep -qE "(^|[;&|[:space:]])((bash|sh)[[:space:]]+)?[\"']?([^[:space:]\"']*/)?merge\\.sh[\"']?([[:space:]]|\$)"; then
     exit 0
   fi
   # git merge conflict-resolution ops are never a "bring in changes" merge — always pass.
@@ -67,13 +77,28 @@ gate_in_scope() {
   # parse every shell form" stance as the refspec note in gate_targets_main.
   subcommand=""
   push_target_dir=""
+  matched_seg=""
   local seg
   while IFS= read -r seg; do
     seg="${seg#"${seg%%[![:space:]]*}"}"   # strip leading whitespace
-    if   [[ "$seg" =~ ^gh[[:space:]]+pr[[:space:]]+create([[:space:]]|$) ]]; then subcommand="create";    break
-    elif [[ "$seg" =~ ^gh[[:space:]]+pr[[:space:]]+merge([[:space:]]|$)  ]]; then subcommand="merge";     break
+    if   [[ "$seg" =~ ^gh[[:space:]]+pr[[:space:]]+create([[:space:]]|$) ]]; then subcommand="create";    matched_seg="$seg"; break
+    elif [[ "$seg" =~ ^gh[[:space:]]+pr[[:space:]]+merge([[:space:]]|$)  ]]; then subcommand="merge";     matched_seg="$seg"; break
     elif [[ "$seg" =~ ^git[[:space:]]+merge([[:space:]]|$) ]];             then subcommand="git_merge"; break
     elif [[ "$seg" =~ ^git[[:space:]]+push([[:space:]]|$) ]];              then subcommand="git_push";  break
+    elif [[ "$seg" =~ ^((bash|sh)[[:space:]]+)?[\"\']?([^[:space:]\"\']*/)?merge\.sh[\"\']?([[:space:]]|$) ]]; then
+      # scripts/merge.sh is the repo's sanctioned merge wrapper (calls `gh pr
+      # merge` internally). Recognizing its invocation here closes the gap
+      # where `scripts/merge.sh <N>` / `./scripts/merge.sh <N>` / `bash
+      # <path>/merge.sh <N>` sailed past this gate entirely — only literal
+      # `gh pr merge` was matched. subcommand="merge" reuses the exact same
+      # review-pr + eval-artifact gating as raw `gh pr merge` below.
+      # pr_num is NOT set here (no arm sets it) — enforce_required_step
+      # extracts it from this form the same way it does for `gh pr merge`.
+      # Word-boundary: the executed word must be exactly `merge.sh` (optionally
+      # path-prefixed and/or quoted) — a name merely containing "merge.sh"
+      # (auto_merge.sh, some-merge.shim) must not match, same precedent as the
+      # git-merge-base word-boundary fix (PR #42).
+      subcommand="merge"; matched_seg="$seg"; break
     elif [[ "$seg" =~ ^git[[:space:]]+-C[[:space:]]+([^[:space:]]+)[[:space:]]+merge([[:space:]]|$) ]]; then
       subcommand="git_merge"; push_target_dir="${BASH_REMATCH[1]}"; break
     elif [[ "$seg" =~ ^git[[:space:]]+-C[[:space:]]+([^[:space:]]+)[[:space:]]+push([[:space:]]|$) ]]; then
@@ -86,6 +111,11 @@ EOF
   [ -z "$subcommand" ] && exit 0
   # $subcommand is also read by gate_targets_main and enforce_required_step.
   # $push_target_dir (may be empty) is read by gate_targets_main.
+  # $matched_seg (create/merge only) is the SEGMENT that actually matched, not
+  # the raw $cmd — enforce_required_step's pr_num extraction scans this rather
+  # than $cmd so an earlier segment that only MENTIONS a PR number (e.g.
+  # `echo "run merge.sh 999 first" && scripts/merge.sh 140`) can't donate a
+  # decoy PR number to the real, later-executed merge invocation.
 }
 
 gate_config_present() {
@@ -292,7 +322,12 @@ enforce_required_step() {
     #   gh pr merge --auto 42
     #   gh pr merge 42 --squash     (number first — also handled by stripping flags)
     # Strip the "gh pr merge" prefix, then scan tokens left-to-right for a bare integer.
-    merge_suffix=$(printf '%s' "$cmd" | grep -oE 'gh[[:space:]]+pr[[:space:]]+merge(.*)')
+    # Scoped to $matched_seg (the segment gate_in_scope actually classified as
+    # the merge), NOT the raw $cmd — otherwise a PR number mentioned in an
+    # earlier, non-executed segment (e.g. `echo "gh pr merge 999" && gh pr
+    # merge 140`) would be extracted instead of the real target, since grep
+    # over the whole $cmd finds the FIRST occurrence anywhere in the string.
+    merge_suffix=$(printf '%s' "$matched_seg" | grep -oE 'gh[[:space:]]+pr[[:space:]]+merge(.*)')
     pr_num=""
     if [ -n "$merge_suffix" ]; then
       # Remove the "gh pr merge" prefix; iterate remaining tokens to find first integer.
@@ -304,6 +339,28 @@ enforce_required_step() {
           [0-9]*) pr_num="$token"; break ;;   # bare integer: this is the PR number
         esac
       done
+    fi
+
+    # Parallel extraction for the merge.sh invocation form (mirrors the gh pr
+    # merge extraction above rather than inventing a second parser style):
+    # find the merge.sh token, then scan remaining tokens left-to-right for
+    # the first bare integer, stripping surrounding quotes from each token
+    # first (merge.sh args are commonly quoted: `merge.sh "140"`). Also scoped
+    # to $matched_seg for the same decoy-number reason as above.
+    if [ -z "$pr_num" ]; then
+      merge_sh_suffix=$(printf '%s' "$matched_seg" | grep -oE '[^[:space:]]*merge\.sh.*')
+      if [ -n "$merge_sh_suffix" ]; then
+        merge_sh_args=$(printf '%s' "$merge_sh_suffix" | sed -E 's/^[^[:space:]]*merge\.sh[[:space:]]*//')
+        for token in $merge_sh_args; do
+          token="${token%\"}"; token="${token#\"}"
+          token="${token%\'}"; token="${token#\'}"
+          case "$token" in
+            --*=*) ;;           # --flag=val: skip
+            --*|-*) ;;          # --flag or -f: skip
+            [0-9]*) pr_num="$token"; break ;;   # bare integer: this is the PR number
+          esac
+        done
+      fi
     fi
 
     if [ -n "$pr_num" ]; then
