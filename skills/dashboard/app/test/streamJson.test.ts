@@ -175,6 +175,17 @@ describe("projectAssistantText", () => {
     expect(projectAssistantText(raw)).toBe("FATAL: the runner exploded before streaming anything");
   });
 
+  it("does NOT strip a JSON-object-shaped error payload that lacks a machinery `type` (a JSON-shaped crash must stay visible, not become an empty box)", () => {
+    // A wrapper/crash can dump a JSON object with no stream-json `type` field.
+    // isRecognisedMachineryLine strips only KNOWN machinery types, so this
+    // survives the filter and stays visible rather than being silently reduced
+    // to "" (which would render identically to a genuinely empty run).
+    const raw = JSON.stringify({ error: "OOM killed", code: 137 }) + "\n";
+    const out = projectAssistantText(raw);
+    expect(out).toContain("OOM killed");
+    expect(out).not.toBe("");
+  });
+
   it("returns empty for a completely empty string", () => {
     expect(projectAssistantText("")).toBe("");
   });
