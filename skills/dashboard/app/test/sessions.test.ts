@@ -296,6 +296,22 @@ describe("collectLoops", () => {
     expect(loops[0].evalsFrozen).toBe(false);
   });
 
+  it("reports evalsFrozen false for an otherwise-valid GO verdict missing the grading stamp (mirrors the hook's UNSTAMPED check)", () => {
+    const base = makeTmpBase();
+    const dir = join(base, "-unstamped-project", "S7b");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, "progress.json"),
+      JSON.stringify({ status: "complete", session_id: "S7b", completed_marker: 1, work_units: { unit1: { status: "done" } } })
+    );
+    writeFileSync(
+      join(dir, "evals.json"),
+      JSON.stringify({ scope: "loop", result: "GO", tier: 1, tier_justification: "2 work-units, no irreversible surface" })
+    );
+    const loops = collectLoops(base);
+    expect(loops[0].evalsFrozen).toBe(false);
+  });
+
   it("ignores a sibling evals.json with the wrong scope (pr, not loop)", () => {
     const base = makeTmpBase();
     const dir = join(base, "-wrongscope-project", "S8");
