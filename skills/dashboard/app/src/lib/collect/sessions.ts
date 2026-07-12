@@ -111,6 +111,21 @@ function readUnitTitles(workUnits: unknown): { title: string; done: boolean }[] 
   return [];
 }
 
+// decisions_absorbed is documented (SKILL.md) as a chronological array of
+// {phase, decision} appended oldest-first. Older progress.json files predate
+// the field entirely. Same degrade-don't-throw stance as readUnitTitles:
+// non-array or non-record entries are skipped rather than raising. Returns
+// the last 5 entries, newest first, formatted "<phase>: <decision>".
+function readDecisions(decisionsAbsorbed: unknown): string[] {
+  if (!Array.isArray(decisionsAbsorbed)) return [];
+  return decisionsAbsorbed
+    .filter(isRecord)
+    .filter((entry) => typeof entry.phase === "string" && typeof entry.decision === "string")
+    .map((entry) => `${entry.phase as string}: ${entry.decision as string}`)
+    .slice(-5)
+    .reverse();
+}
+
 // progress.json's "loop" field is a free-text human name (e.g. "observability-dashboard
 // (sub-project 1 of agentic-os evolution)"), not present on every loop. Falls back to the
 // dir slug when absent, blank, or not a string.
