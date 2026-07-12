@@ -137,13 +137,23 @@ function readLoopName(record: Record<string, unknown>, slug: string): string {
 
 // Mirrors als_read_loop_evals_result (hooks/scripts/lib/loop_state_common.sh):
 // GO or a justified TIER0 exemption count as frozen; NO-GO, UNJUSTIFIED,
-// ABSENT, wrong scope, or malformed JSON do not.
+// ABSENT, wrong scope, or malformed JSON do not. An explicit NO-GO wins over
+// the tier-0 exemption, same precedence as the bash SSOT.
+// Also mirrors the hook's UNSTAMPED check: GO/TIER0 additionally require a
+// `.grading` stamp (post_evals.sh grade-loop's provenance record) to read as
+// frozen. This is presence-only — no checksum recomputation here, unlike the
+// hook, since this is a display surface (KISS); a status edited after
+// grading without re-stamping will still show frozen here even though the
+// hook would demote it to UNSTAMPED.
 function readEvalsFrozen(loopDir: string): boolean {
   const data = readJson(join(loopDir, "evals.json"));
   if (!isRecord(data)) return false;
   if (data.scope !== "loop") return false;
   const justification = typeof data.tier_justification === "string" ? data.tier_justification.trim() : "";
   if (!justification) return false;
+  if (data.result === "NO-GO") return false;
+  const stamped = isRecord(data.grading) && typeof data.grading.checksum === "string";
+  if (!stamped) return false;
   if (data.result === "GO") return true;
   if (data.tier === 0) return true;
   return false;
