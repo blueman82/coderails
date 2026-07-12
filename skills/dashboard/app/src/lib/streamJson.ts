@@ -55,25 +55,34 @@ export function parseStreamJsonLine(line: string): ParsedStreamJsonLine {
   }
 }
 
+// The stream-json event `type` values that are CLI machinery, NOT the
+// assistant's readable output: control/transcript envelopes the `claude -p`
+// stream emits around the actual prose.
+const MACHINERY_TYPES = new Set(["system", "stream_event", "result", "assistant", "user"]);
+
 // A raw log line is "recognised stream-json machinery" — i.e. NOT the
 // assistant's readable output — if it is the plain-text stdin warning the
-// `claude -p` CLI prints to stderr, or any parseable stream-json control event:
-// a `type: "system"` event (init / hook_started / hook_response / hook_stop —
-// in a cwd with a SessionStart hook, hook_response carries the entire injected
-// skill blob), a `type: "stream_event"` envelope (message_start / message_stop /
-// content_block_start/stop / *_delta — raw JSON, never prose), a `type: "result"`
-// line, a `type: "assistant"`/`"user"` transcript line, etc. The fallback strips
-// all of these so the clean view shows only genuinely-unrecognised remainder —
-// which is where a crashed run's real error text lives, so a true failure is
-// never blanked. Any line that DOES parse as a stream-json object is machinery;
-// only non-JSON, non-warning text survives.
+// `claude -p` CLI prints to stderr, or a parseable stream-json line whose
+// `type` is one of MACHINERY_TYPES:
+//   - `system` (init / hook_started / hook_response / hook_stop — in a cwd with
+//     a SessionStart hook, hook_response carries the entire injected skill blob),
+//   - `stream_event` (message_start / message_stop / content_block_start/stop /
+//     *_delta — raw JSON envelopes, never prose),
+//   - `result`, and `assistant`/`user` transcript lines.
+// The fallback strips these so the clean view shows only genuinely-unrecognised
+// remainder — which is where a crashed run's real error text lives, so a true
+// failure is never blanked. Deliberately matched on KNOWN `type` values rather
+// than "any JSON-shaped line": a crash/error payload that happens to be a JSON
+// object WITHOUT a machinery `type` (e.g. `{"error":"OOM killed","code":137}`
+// dumped by a wrapper) is NOT machinery — it survives the strip and stays
+// visible, so a JSON-shaped failure is never silently reduced to "no output".
 function isRecognisedMachineryLine(line: string): boolean {
   const trimmed = line.trim();
   if (trimmed === "") return false;
   // The CLI's stderr stdin-warning is plain text, not JSON — match its stable prefix.
   if (trimmed.startsWith("Warning: no stdin data received")) return true;
-  // Anything that parses as a stream-json object is CLI machinery, not prose.
-  return parseStreamJsonLine(trimmed).ok;
+  const parsed = parseStreamJsonLine(trimmed);
+  return parsed.ok && typeof parsed.value.type === "string" && MACHINERY_TYPES.has(parsed.value.type);
 }
 
 // Projects the raw stream-json log into just the assistant's readable prose, for the dashboard's
