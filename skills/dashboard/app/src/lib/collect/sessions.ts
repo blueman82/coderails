@@ -18,6 +18,7 @@ export interface LoopInfo {
   workUnitsTotal: number;
   evalsFrozen: boolean;
   unitTitles: { title: string; done: boolean }[];
+  decisions: string[];
 }
 
 const ACTIVE_THRESHOLD_MS = 5 * 60_000;
