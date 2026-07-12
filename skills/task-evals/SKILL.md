@@ -17,17 +17,18 @@ Before drafting a single eval, gather target context — wiki first, codebase on
 
 This read is dispatched to a sonnet agent, not done inline: keeping the context-gathering step off the main thread keeps the orchestrator's context clean and makes the read auditable as a discrete, reportable step, the same delegation pattern `agentic-loop` Phase 2 uses for its pre-flight checks. The agent returns distilled findings, not raw file dumps. Inside an agentic loop, the orchestrator's Phase 2 pre-flight wiki read already satisfies this prerequisite — reuse its findings rather than re-reading per invocation.
 
-This is a context-gathering prerequisite, not a verification step — do not conflate it with the gameability self-check or the five anti-gaming rules below.
+This is a context-gathering prerequisite, not a verification step — do not conflate it with the gameability self-check or the six anti-gaming rules below.
 
-## The five anti-gaming rules
+## The six anti-gaming rules
 
-Every eval this skill generates must satisfy all five. These are generation requirements, not descriptions of an ideal — an eval that fails one of them is not a valid eval.
+Every eval this skill generates must satisfy all six. These are generation requirements, not descriptions of an ideal — an eval that fails one of them is not a valid eval.
 
 1. **Freeze-before-build.** Evals are generated and frozen (timestamp + base SHA) before implementation starts. Post-freeze edits are amendments with recorded reasons — visible, auditable, reported at loop end.
 2. **Negative controls.** Every scripted eval carries a command demonstrating the check *can* fail (E0 pattern). A check that has never failed proves nothing; the tooling itself must be validated before its green is trusted.
 3. **End-state surfaces.** Assertions run against merged state, fresh clone, or deployed artifact — never working-tree self-reports.
 4. **Oracle independence.** An eval must not share its oracle with the implementation (same regex, same fixture, same test the implementation writes). Derive evals from the task's goal state, not its implementation steps.
 5. **Grader independence.** Judgement evals are graded by a fresh subagent that receives only `evals.json` + artifact references — never the implementation conversation. The orchestrator never hand-writes the `result` field; a neutral assembly script computes it.
+6. **Strongest surface.** If the task's goal state names something a human sees or interacts with — a UI, CLI output, a rendered artifact, a served endpoint — at least one P0 eval must exercise that surface directly: drive the running artifact (browser, CLI invocation, HTTP request), never only code-greps of merged state. At pr scope pre-merge this means the locally-run artifact; at loop scope, the deployed surface. This is a writer-side generation rule: no script can detect "user-facing", so it is enforced at generation and by review, not by a gate. (Exemplar: the run-output noise-strip loop — merged-state greps passed while the live streaming window still leaked; only an in-browser eval across the streaming lifecycle caught it.)
 
 ## Gameability self-check (mandatory before freezing)
 
