@@ -364,6 +364,148 @@ jq -n --arg sha "$SHA" '{
 result=$(post_evals::compute_and_validate_result "$FIX_FAIL")
 check_str "compute_and_validate_result: P0 fail → NO-GO" "NO-GO" "$result"
 
+# ─── grade-loop: neutral loop-scope grading + stamp ──────────────────────────
+# Loop-scope fixtures carry no PR number; grade-loop's structural validation
+# is the loop variant (no pr arg, check 6 becomes "head_sha non-blank").
+
+# (a) all-P0-pass loop fixture -> result=GO, graded_at set, grading.checksum
+# matches eval_artifact::grading_checksum recomputed independently.
+FIX_LOOP_GO="$TMP/loop_go.json"
+jq -n --arg sha "$SHA" '{
+  scope: "loop",
+  tier: 1,
+  tier_justification: "3 work-units, no irreversible surface",
+  head_sha: $sha,
+  evals: [
+    {id:"e1", priority:"P0", mode:"scripted", status:"pass", cmd:"run-a", negative_control:"run-a-broken", evidence:"log 1"},
+    {id:"e2", priority:"P0", mode:"scripted", status:"pass", cmd:"run-b", negative_control:"run-b-broken", evidence:"log 2"}
+  ]
+}' > "$FIX_LOOP_GO"
+grade_out=$(post_evals::grade_loop "$FIX_LOOP_GO")
+check "grade_loop: all-P0-pass -> exit 0" 0 $?
+check_str "grade_loop: all-P0-pass -> echoes GO" "GO" "$grade_out"
+check_str "grade_loop: all-P0-pass -> writes .result=GO" "GO" "$(jq -r '.result' "$FIX_LOOP_GO")"
+[[ -n "$(jq -r '.graded_at // ""' "$FIX_LOOP_GO")" ]]
+check "grade_loop: all-P0-pass -> .graded_at is set" 0 $?
+check_str "grade_loop: all-P0-pass -> .grading.by is post_evals.sh grade-loop" "post_evals.sh grade-loop" "$(jq -r '.grading.by // ""' "$FIX_LOOP_GO")"
+written_checksum=$(jq -r '.grading.checksum // ""' "$FIX_LOOP_GO")
+[[ -n "$written_checksum" ]]
+check "grade_loop: all-P0-pass -> .grading.checksum is non-empty" 0 $?
+expected_checksum=$(eval_artifact::grading_checksum "$FIX_LOOP_GO" "GO")
+check_str "grade_loop: written checksum matches independent recomputation" "$expected_checksum" "$written_checksum"
+
+# (b) P0-fail loop fixture -> NO-GO, still stamped.
+FIX_LOOP_NOGO="$TMP/loop_nogo.json"
+jq -n --arg sha "$SHA" '{
+  scope: "loop",
+  tier: 1,
+  tier_justification: "3 work-units, no irreversible surface",
+  head_sha: $sha,
+  evals: [
+    {id:"e1", priority:"P0", mode:"scripted", status:"fail", cmd:"run-a", negative_control:"run-a-broken", evidence:"log 1"}
+  ]
+}' > "$FIX_LOOP_NOGO"
+grade_out=$(post_evals::grade_loop "$FIX_LOOP_NOGO")
+check "grade_loop: P0-fail -> exit 0 (successful grade, even NO-GO)" 0 $?
+check_str "grade_loop: P0-fail -> echoes NO-GO" "NO-GO" "$grade_out"
+check_str "grade_loop: P0-fail -> writes .result=NO-GO" "NO-GO" "$(jq -r '.result' "$FIX_LOOP_NOGO")"
+check_str "grade_loop: P0-fail -> .grading.by still stamped" "post_evals.sh grade-loop" "$(jq -r '.grading.by // ""' "$FIX_LOOP_NOGO")"
+
+# (c) tier-0 exemption fixture (empty evals + justification) -> stamps.
+FIX_LOOP_TIER0="$TMP/loop_tier0.json"
+jq -n --arg sha "$SHA" '{
+  scope: "loop",
+  tier: 0,
+  tier_justification: "docs-only loop, no runtime behaviour",
+  head_sha: $sha,
+  evals: []
+}' > "$FIX_LOOP_TIER0"
+grade_out=$(post_evals::grade_loop "$FIX_LOOP_TIER0")
+check "grade_loop: tier-0 exemption -> exit 0" 0 $?
+check_str "grade_loop: tier-0 exemption -> echoes GO (vacuous)" "GO" "$grade_out"
+check_str "grade_loop: tier-0 exemption -> .grading.by stamped" "post_evals.sh grade-loop" "$(jq -r '.grading.by // ""' "$FIX_LOOP_TIER0")"
+
+# (d) grade-loop refuses a fixture with blank tier_justification (reuses check 2).
+FIX_LOOP_BLANK_JUST="$TMP/loop_blank_just.json"
+jq -n --arg sha "$SHA" '{
+  scope: "loop",
+  tier: 1,
+  tier_justification: "",
+  head_sha: $sha,
+  evals: [
+    {id:"e1", priority:"P0", mode:"scripted", status:"pass", cmd:"run-a", negative_control:"run-a-broken", evidence:"log 1"}
+  ]
+}' > "$FIX_LOOP_BLANK_JUST"
+stderr_out=$(post_evals::grade_loop "$FIX_LOOP_BLANK_JUST" 2>&1)
+check "grade_loop: blank tier_justification -> exit 1 (refused)" 1 $?
+[[ "$stderr_out" == *"tier_justification"* ]]
+check "grade_loop: blank tier_justification -> stderr mentions tier_justification" 0 $?
+[[ -z "$(jq -r '.result // ""' "$FIX_LOOP_BLANK_JUST")" ]]
+check "grade_loop: refused fixture -> no .result written" 0 $?
+
+# grade-loop also refuses a fixture with a blank head_sha (loop-variant check 6).
+FIX_LOOP_BLANK_SHA="$TMP/loop_blank_sha.json"
+jq -n '{
+  scope: "loop",
+  tier: 1,
+  tier_justification: "3 work-units, no irreversible surface",
+  head_sha: "",
+  evals: [
+    {id:"e1", priority:"P0", mode:"scripted", status:"pass", cmd:"run-a", negative_control:"run-a-broken", evidence:"log 1"}
+  ]
+}' > "$FIX_LOOP_BLANK_SHA"
+stderr_out=$(post_evals::grade_loop "$FIX_LOOP_BLANK_SHA" 2>&1)
+check "grade_loop: blank head_sha -> exit 1 (refused, loop variant check 6)" 1 $?
+[[ "$stderr_out" == *"head_sha"* ]]
+check "grade_loop: blank head_sha -> stderr mentions head_sha" 0 $?
+
+# (e) checksum function is deterministic and changes when any status or the
+# result changes.
+checksum_1=$(eval_artifact::grading_checksum "$FIX_LOOP_GO" "GO")
+checksum_2=$(eval_artifact::grading_checksum "$FIX_LOOP_GO" "GO")
+check_str "grading_checksum: deterministic across repeated calls" "$checksum_1" "$checksum_2"
+
+checksum_diff_result=$(eval_artifact::grading_checksum "$FIX_LOOP_GO" "NO-GO")
+[[ "$checksum_1" != "$checksum_diff_result" ]]
+check "grading_checksum: differs when result string changes" 0 $?
+
+# Same evals content, but a status flipped -> checksum differs (uses FIX_LOOP_GO
+# vs FIX_LOOP_NOGO, both graded above so both carry .grading/.result, but the
+# checksum function only extracts {id,priority,status} from .evals, so this
+# still isolates status-sensitivity from the extra fields).
+checksum_go_fixture=$(eval_artifact::grading_checksum "$FIX_LOOP_GO" "GO")
+checksum_nogo_fixture=$(eval_artifact::grading_checksum "$FIX_LOOP_NOGO" "GO")
+[[ "$checksum_go_fixture" != "$checksum_nogo_fixture" ]]
+check "grading_checksum: differs when eval statuses differ" 0 $?
+
+# grade_loop: a failed write (target directory read-only, so jq's redirect
+# fails) must be reported as a failure — exit 1, stderr naming the file — not
+# silently echoed as GO/exit 0. Original file must be left untouched.
+FIX_WRITE_FAIL_DIR="$TMP/readonly_dir"
+mkdir -p "$FIX_WRITE_FAIL_DIR"
+FIX_WRITE_FAIL="$FIX_WRITE_FAIL_DIR/loop.json"
+jq -n --arg sha "$SHA" '{
+  scope: "loop",
+  tier: 1,
+  tier_justification: "3 work-units, no irreversible surface",
+  head_sha: $sha,
+  evals: [
+    {id:"e1", priority:"P0", mode:"scripted", status:"pass", cmd:"run-a", negative_control:"run-a-broken", evidence:"log 1"}
+  ]
+}' > "$FIX_WRITE_FAIL"
+before_content=$(cat "$FIX_WRITE_FAIL")
+chmod 555 "$FIX_WRITE_FAIL_DIR"
+stderr_out=$(post_evals::grade_loop "$FIX_WRITE_FAIL" 2>&1)
+rc=$?
+chmod 755 "$FIX_WRITE_FAIL_DIR"
+check "grade_loop: write failure (read-only dir) -> exit 1, not 0" 1 $rc
+[[ "$stderr_out" == *"grade-loop"* && "$stderr_out" == *"$FIX_WRITE_FAIL"* ]]
+check "grade_loop: write failure -> stderr names the failure and the file" 0 $?
+after_content=$(cat "$FIX_WRITE_FAIL")
+check_str "grade_loop: write failure -> original file left untouched" "$before_content" "$after_content"
+[[ -z "$(jq -r '.grading // empty' "$FIX_WRITE_FAIL")" ]]
+check "grade_loop: write failure -> no .grading present" 0 $?
+
 # ─── CLI dispatch: bare invocation prints usage, exits 1 ─────────────────────
 usage_out=$(bash "$SCRIPT" 2>&1)
 rc=$?

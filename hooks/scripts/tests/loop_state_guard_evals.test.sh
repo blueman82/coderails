@@ -8,6 +8,7 @@ set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"
 GUARD="$HERE/../loop_state_guard.sh"
 COMMON="$HERE/../lib/loop_state_common.sh"
+POST_EVALS="$HERE/../../../scripts/post_evals.sh"
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 export CLAUDE_AGENTIC_LOOP_DIR="$TMP/state"
@@ -18,6 +19,11 @@ check() { # desc expected actual
   if [ "$2" = "$3" ]; then printf 'ok   - %s\n' "$1"
   else printf 'FAIL - %s (expected %s, got %s)\n' "$1" "$2" "$3"; fails=$((fails+1)); fi
 }
+
+# stamp <evals_json_path>: grades a fixture in place using the REAL
+# post_evals::grade_loop, so "properly stamped" test fixtures are byte-
+# identical to what the writer produces — never hand-computed here.
+stamp() { ( source "$POST_EVALS" >/dev/null 2>&1; post_evals::grade_loop "$1" >/dev/null ) || { printf 'stamp: grade_loop refused %s\n' "$1" >&2; return 1; } }
 
 # ── als_read_work_units ──────────────────────────────────────────────────────
 . "$COMMON"
@@ -40,11 +46,15 @@ check "nonexistent path -> 0 (fail-open)" 0 "$ALS_WORK_UNIT_COUNT"
 
 # ── als_read_loop_evals_result ───────────────────────────────────────────────
 
-# scope loop, result GO, non-empty tier_justification -> GO.
+# scope loop, result GO, non-empty tier_justification, PROPERLY STAMPED -> GO.
+# (Task 1's own UNSTAMPED demotion means a GO/TIER0 fixture must now also
+# carry a valid grade-loop stamp to read back as GO/TIER0 — see the dedicated
+# UNSTAMPED cases further down for the unstamped/mismatched-checksum paths.)
 d=$(mktemp -d "$TMP/loopdir.XXXX")
-jq -n '{scope:"loop", result:"GO", tier:1, tier_justification:"2 work-units, no irreversible surface"}' > "$d/evals.json"
+jq -n '{scope:"loop", tier:1, tier_justification:"2 work-units, no irreversible surface", head_sha:"deadbeef", evals:[{id:"e1",priority:"P0",mode:"scripted",status:"pass",cmd:"run-a",negative_control:"run-a-broken",evidence:"log"}]}' > "$d/evals.json"
+stamp "$d/evals.json"
 als_read_loop_evals_result "$d"
-check "scope=loop result=GO justified -> GO" "GO" "$ALS_LOOP_EVALS_RESULT"
+check "scope=loop result=GO justified + stamped -> GO" "GO" "$ALS_LOOP_EVALS_RESULT"
 
 # scope loop, result GO, but tier_justification blank -> UNJUSTIFIED (
 # justification is required at every tier, even when result already
@@ -85,11 +95,19 @@ jq -n '{scope:"loop", result:"NO-GO", tier:1, tier_justification:"2 work-units, 
 als_read_loop_evals_result "$d"
 check "scope=loop result=NO-GO justified -> NO-GO (exercises final else)" "NO-GO" "$ALS_LOOP_EVALS_RESULT"
 
-# scope loop, tier 0, non-empty tier_justification, no result field -> TIER0.
+# scope loop, tier 0, non-empty tier_justification, no result field, PROPERLY
+# STAMPED -> GO, not TIER0: grade-loop always writes .result (GO for a tier-0
+# exemption — compute_go on empty .evals is vacuously true), and the reader's
+# elif chain checks .result before .tier, so a stamped tier-0 file always has
+# an explicit .result and never reaches the tier-0 branch. TIER0 as a
+# TERMINAL outcome only occurs for an UNSTAMPED tier-0 file (no .result at
+# all) — see the dedicated unstamped-TIER0 case further down, which is the
+# one that actually exercises the tier-0 branch end-to-end.
 d=$(mktemp -d "$TMP/loopdir.XXXX")
-jq -n '{scope:"loop", tier:0, tier_justification:"no user-facing behaviour changed"}' > "$d/evals.json"
+jq -n '{scope:"loop", tier:0, tier_justification:"no user-facing behaviour changed", head_sha:"deadbeef", evals:[]}' > "$d/evals.json"
+stamp "$d/evals.json"
 als_read_loop_evals_result "$d"
-check "scope=loop tier=0 justified -> TIER0" "TIER0" "$ALS_LOOP_EVALS_RESULT"
+check "scope=loop tier=0 justified + stamped -> GO (stamping always sets .result)" "GO" "$ALS_LOOP_EVALS_RESULT"
 
 # scope loop, tier 0, empty tier_justification -> UNJUSTIFIED (unjustified tier-0 claim does not pass).
 d=$(mktemp -d "$TMP/loopdir.XXXX")
@@ -119,19 +137,25 @@ jq -n '{scope:"loop", tier:0, tier_justification:"probe", result:"NO-GO"}' > "$d
 als_read_loop_evals_result "$d"
 check "scope=loop tier=0 justified result=NO-GO -> NO-GO (explicit NO-GO wins)" "NO-GO" "$ALS_LOOP_EVALS_RESULT"
 
-# regression: tier 0, justified, no explicit result -> still TIER0 (the
-# legitimate exemption path must be untouched by the new branch).
+# regression: tier 0, justified, no explicit result, STAMPED -> GO (same
+# reasoning as above: grade-loop always writes .result, so this converges
+# with the "explicit GO" fixture below once stamped).
 d=$(mktemp -d "$TMP/loopdir.XXXX")
-jq -n '{scope:"loop", tier:0, tier_justification:"probe"}' > "$d/evals.json"
+jq -n '{scope:"loop", tier:0, tier_justification:"probe", head_sha:"deadbeef", evals:[]}' > "$d/evals.json"
+stamp "$d/evals.json"
 als_read_loop_evals_result "$d"
-check "regression: scope=loop tier=0 justified no result -> TIER0" "TIER0" "$ALS_LOOP_EVALS_RESULT"
+check "regression: scope=loop tier=0 justified no result + stamped -> GO" "GO" "$ALS_LOOP_EVALS_RESULT"
 
-# regression: tier 0, justified, result GO -> still GO (GO branch must still
-# be checked before the new NO-GO branch, and before the tier-0 branch).
+# regression: tier 0, justified, result GO explicitly pre-written, STAMPED
+# (stamping recomputes .result over whatever was there — post_evals::grade_loop
+# is the SSOT for .result — so this exercises the GO branch being checked
+# before the tier-0 branch, same as the fixture above minus the pre-existing
+# key; distinct in intent even though grade-loop makes both files converge).
 d=$(mktemp -d "$TMP/loopdir.XXXX")
-jq -n '{scope:"loop", tier:0, tier_justification:"probe", result:"GO"}' > "$d/evals.json"
+jq -n '{scope:"loop", tier:0, tier_justification:"probe", result:"GO", head_sha:"deadbeef", evals:[]}' > "$d/evals.json"
+stamp "$d/evals.json"
 als_read_loop_evals_result "$d"
-check "regression: scope=loop tier=0 justified result=GO -> GO" "GO" "$ALS_LOOP_EVALS_RESULT"
+check "regression: scope=loop tier=0 justified result=GO + stamped -> GO" "GO" "$ALS_LOOP_EVALS_RESULT"
 
 # regression: tier 2 (non-zero), justified, result NO-GO -> still NO-GO (the
 # pre-existing else-branch path for non-tier-0 must be unaffected).
@@ -152,6 +176,66 @@ d=$(mktemp -d "$TMP/loopdir.XXXX")
 jq -n '{scope:"loop", tier:2, tier_justification:"probe, no result key at all"}' > "$d/evals.json"
 als_read_loop_evals_result "$d"
 check "scope=loop tier=2 justified, result key absent -> NO-GO (final else)" "NO-GO" "$ALS_LOOP_EVALS_RESULT"
+
+# ── UNSTAMPED: the new grade-loop stamp check ────────────────────────────────
+
+# (f reader-level) tier-0, justified, no .result, no .grading at all (never
+# stamped) -> UNSTAMPED. This is the terminal TIER0-would-be case: only an
+# unstamped tier-0 file ever reaches the tier-0 branch (a stamped one always
+# has .result and resolves via the GO branch instead — see above).
+d=$(mktemp -d "$TMP/loopdir.XXXX")
+jq -n '{scope:"loop", tier:0, tier_justification:"docs-only, never stamped"}' > "$d/evals.json"
+als_read_loop_evals_result "$d"
+check "scope=loop tier=0 justified, no .grading -> UNSTAMPED" "UNSTAMPED" "$ALS_LOOP_EVALS_RESULT"
+
+# (f reader-level) hand-written result:"GO", no .grading at all -> UNSTAMPED.
+d=$(mktemp -d "$TMP/loopdir.XXXX")
+jq -n '{scope:"loop", result:"GO", tier:1, tier_justification:"hand-written, never graded"}' > "$d/evals.json"
+als_read_loop_evals_result "$d"
+check "scope=loop result=GO, no .grading -> UNSTAMPED" "UNSTAMPED" "$ALS_LOOP_EVALS_RESULT"
+
+# (g reader-level) stamped GO, then a status is edited post-stamp (checksum
+# mismatch, .grading.by/checksum still present but stale) -> UNSTAMPED.
+d=$(mktemp -d "$TMP/loopdir.XXXX")
+jq -n '{scope:"loop", tier:1, tier_justification:"2 work-units, no irreversible surface", head_sha:"deadbeef", evals:[{id:"e1",priority:"P0",mode:"scripted",status:"pass",cmd:"run-a",negative_control:"run-a-broken",evidence:"log"}]}' > "$d/evals.json"
+stamp "$d/evals.json"
+als_read_loop_evals_result "$d"
+check "sanity: stamped fixture reads GO before tamper" "GO" "$ALS_LOOP_EVALS_RESULT"
+tmp_tamper="$d/evals.json.tamper"
+jq '.evals[0].status = "fail" | .result = "GO"' "$d/evals.json" > "$tmp_tamper" && mv "$tmp_tamper" "$d/evals.json"
+als_read_loop_evals_result "$d"
+check "stamped GO, status tampered post-stamp (checksum mismatch) -> UNSTAMPED" "UNSTAMPED" "$ALS_LOOP_EVALS_RESULT"
+
+# fail-closed: eval-artifact.sh itself cannot be sourced (e.g. moved/missing)
+# -> UNSTAMPED, never a silent fall-through to GO. Temporarily rename the
+# real file out of the way, restore it unconditionally afterwards even if
+# an assertion below fails, so a broken run never leaves the repo file gone.
+EVAL_ARTIFACT_REAL="$HERE/../../../scripts/lib/eval-artifact.sh"
+EVAL_ARTIFACT_HIDDEN="${EVAL_ARTIFACT_REAL}.hidden-for-test"
+d=$(mktemp -d "$TMP/loopdir.XXXX")
+jq -n '{scope:"loop", tier:1, tier_justification:"2 work-units, no irreversible surface", head_sha:"deadbeef", evals:[{id:"e1",priority:"P0",mode:"scripted",status:"pass",cmd:"run-a",negative_control:"run-a-broken",evidence:"log"}]}' > "$d/evals.json"
+stamp "$d/evals.json"
+mv "$EVAL_ARTIFACT_REAL" "$EVAL_ARTIFACT_HIDDEN"
+als_read_loop_evals_result "$d"
+source_failure_result="$ALS_LOOP_EVALS_RESULT"
+mv "$EVAL_ARTIFACT_HIDDEN" "$EVAL_ARTIFACT_REAL"
+check "eval-artifact.sh unsourceable -> UNSTAMPED (fail-closed, never GO)" "UNSTAMPED" "$source_failure_result"
+
+# invariant: TIER0 is never a terminal outcome for a file the sanctioned
+# writer (grade_loop) produced — grade_loop always writes an explicit
+# .result (GO or NO-GO; compute_go on empty .evals is vacuously GO), so a
+# stamped tier-0 file's .result is never absent and the reader's tier-0
+# branch (which only fires when .result is unset) is never reached by a
+# properly-stamped file. TIER0 as a live category only exists for an
+# UNSTAMPED file that happens to name tier 0 — see the unstamped-tier-0 case
+# above, which demotes it before it can surface as TIER0.
+d=$(mktemp -d "$TMP/loopdir.XXXX")
+jq -n '{scope:"loop", tier:0, tier_justification:"docs-only loop, no runtime behaviour", head_sha:"deadbeef", evals:[]}' > "$d/evals.json"
+stamp "$d/evals.json"
+[[ -n "$(jq -r '.result // ""' "$d/evals.json")" ]]
+check "invariant: grade_loop always writes non-blank .result, even for tier 0" 0 $?
+als_read_loop_evals_result "$d"
+check "invariant: stamped tier-0 file never reads back as TIER0 (reads GO)" "GO" "$ALS_LOOP_EVALS_RESULT"
 
 # ── gate_loop_evals_required (end-to-end guard invocations) ─────────────────
 # Helpers copied verbatim (in spirit) from loop_state_guard.test.sh, per the
@@ -209,10 +293,11 @@ case "$err" in
   *) fails=$((fails+1)); printf 'FAIL - stderr missing expected evals path/text: %s\n' "$err" ;;
 esac
 
-# evals.json present, scope loop, result GO, justified -> allow (exit 0).
+# evals.json present, scope loop, result GO, justified, STAMPED -> allow (exit 0).
 reset; T=$(mk_transcript 1); write_file complete S1 1 S1 "$WU3"
-jq -n '{scope:"loop", result:"GO", tier:1, tier_justification:"2 work-units, no irreversible surface"}' > "$(file_dir S1)/evals.json"
-check "GO evals justified -> allow" 0 "$(run x "$(payload "$T" S1)")"
+jq -n '{scope:"loop", tier:1, tier_justification:"2 work-units, no irreversible surface", head_sha:"deadbeef", evals:[{id:"e1",priority:"P0",mode:"scripted",status:"pass",cmd:"run-a",negative_control:"run-a-broken",evidence:"log"}]}' > "$(file_dir S1)/evals.json"
+stamp "$(file_dir S1)/evals.json"
+check "GO evals justified + stamped -> allow" 0 "$(run x "$(payload "$T" S1)")"
 
 # evals.json present, scope loop, result GO, but tier_justification blank ->
 # block (exit 2) — owner directive closes the gap where GO alone bypassed
@@ -229,10 +314,12 @@ case "$err" in
   *) fails=$((fails+1)); printf 'FAIL - UNJUSTIFIED stderr missing tier_justification mention: %s\n' "$err" ;;
 esac
 
-# tier-0 exemption: scope loop, tier 0, non-empty tier_justification, no result -> allow.
+# tier-0 exemption: scope loop, tier 0, non-empty tier_justification, no
+# result, STAMPED -> allow.
 reset; T=$(mk_transcript 1); write_file complete S1 1 S1 "$WU3"
-jq -n '{scope:"loop", tier:0, tier_justification:"docs-only loop, no runtime behaviour"}' > "$(file_dir S1)/evals.json"
-check "TIER0 exemption evals -> allow" 0 "$(run x "$(payload "$T" S1)")"
+jq -n '{scope:"loop", tier:0, tier_justification:"docs-only loop, no runtime behaviour", head_sha:"deadbeef", evals:[]}' > "$(file_dir S1)/evals.json"
+stamp "$(file_dir S1)/evals.json"
+check "TIER0 exemption evals + stamped -> allow" 0 "$(run x "$(payload "$T" S1)")"
 
 # evals.json present but NO-GO, JUSTIFIED -> block, stderr mentions the loop
 # dir path. Justification present so this exercises the reader's final `else
@@ -340,5 +427,63 @@ case "$err" in
   *"$(file_dir S1)/evals.json"*) : ;;
   *) fails=$((fails+1)); printf 'FAIL - e2e final-else stderr missing loop dir path: %s\n' "$err" ;;
 esac
+
+# ── UNSTAMPED e2e (Task 1's own guard arm) ───────────────────────────────────
+
+# (f) hand-written result:"GO", no .grading at all -> guard BLOCKS, stderr
+# mentions grade-loop (the remediation the message points to).
+reset; T=$(mk_transcript 1); write_file complete S1 1 S1 "$WU3"
+jq -n '{scope:"loop", result:"GO", tier:1, tier_justification:"hand-written, never graded"}' > "$(file_dir S1)/evals.json"
+code=$(run x "$(payload "$T" S1)")
+err=$(run_err x "$(payload "$T" S1)")
+check "e2e: hand-written GO, no .grading -> block (exit 2)" 2 "$code"
+case "$err" in
+  *"grade-loop"*) : ;;
+  *) fails=$((fails+1)); printf 'FAIL - UNSTAMPED e2e stderr missing grade-loop mention: %s\n' "$err" ;;
+esac
+case "$err" in
+  *"treat .grading as provenance, not proof against forgery"*) : ;;
+  *) fails=$((fails+1)); printf 'FAIL - UNSTAMPED e2e stderr missing honesty clause: %s\n' "$err" ;;
+esac
+
+# (g) stamped GO, but a status is edited afterwards (checksum mismatch) -> blocks.
+reset; T=$(mk_transcript 1); write_file complete S1 1 S1 "$WU3"
+jq -n '{scope:"loop", tier:1, tier_justification:"2 work-units, no irreversible surface", head_sha:"deadbeef", evals:[{id:"e1",priority:"P0",mode:"scripted",status:"pass",cmd:"run-a",negative_control:"run-a-broken",evidence:"log"}]}' > "$(file_dir S1)/evals.json"
+stamp "$(file_dir S1)/evals.json"
+check "sanity: e2e stamped GO allows before tamper" 0 "$(run x "$(payload "$T" S1)")"
+tmp_tamper="$(file_dir S1)/evals.json.tamper"
+jq '.evals[0].status = "fail" | .result = "GO"' "$(file_dir S1)/evals.json" > "$tmp_tamper" && mv "$tmp_tamper" "$(file_dir S1)/evals.json"
+code=$(run x "$(payload "$T" S1)")
+check "e2e: stamped GO, status tampered post-stamp -> block (exit 2)" 2 "$code"
+
+# (h) properly graded GO -> allows (same fixture pre-tamper above, re-asserted
+# standalone so this case is independently pinned).
+reset; T=$(mk_transcript 1); write_file complete S1 1 S1 "$WU3"
+jq -n '{scope:"loop", tier:1, tier_justification:"2 work-units, no irreversible surface", head_sha:"deadbeef", evals:[{id:"e1",priority:"P0",mode:"scripted",status:"pass",cmd:"run-a",negative_control:"run-a-broken",evidence:"log"}]}' > "$(file_dir S1)/evals.json"
+stamp "$(file_dir S1)/evals.json"
+check "e2e: properly graded GO -> allow" 0 "$(run x "$(payload "$T" S1)")"
+
+# (i) stamped TIER0 -> allow; unstamped TIER0 -> block.
+reset; T=$(mk_transcript 1); write_file complete S1 1 S1 "$WU3"
+jq -n '{scope:"loop", tier:0, tier_justification:"docs-only loop, no runtime behaviour", head_sha:"deadbeef", evals:[]}' > "$(file_dir S1)/evals.json"
+stamp "$(file_dir S1)/evals.json"
+check "e2e: stamped tier-0 exemption -> allow" 0 "$(run x "$(payload "$T" S1)")"
+
+reset; T=$(mk_transcript 1); write_file complete S1 1 S1 "$WU3"
+jq -n '{scope:"loop", tier:0, tier_justification:"docs-only loop, never stamped"}' > "$(file_dir S1)/evals.json"
+code=$(run x "$(payload "$T" S1)")
+err=$(run_err x "$(payload "$T" S1)")
+check "e2e: unstamped tier-0 exemption -> block (exit 2)" 2 "$code"
+case "$err" in
+  *"grade-loop"*) : ;;
+  *) fails=$((fails+1)); printf 'FAIL - unstamped TIER0 e2e stderr missing grade-loop mention: %s\n' "$err" ;;
+esac
+
+# stop_hook_active:true short-circuit still wins over UNSTAMPED — the
+# short-circuit gate (als_gate_stop_loop) runs before progress.json is even
+# loaded, so it must allow regardless of what evals.json says.
+reset; T=$(mk_transcript 1); write_file complete S1 1 S1 "$WU3"
+jq -n '{scope:"loop", result:"GO", tier:1, tier_justification:"hand-written, never graded"}' > "$(file_dir S1)/evals.json"
+check "stop_hook_active:true short-circuits UNSTAMPED -> allow" 0 "$(run x "$(payload "$T" S1 true)")"
 
 [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails)"; exit 1; }

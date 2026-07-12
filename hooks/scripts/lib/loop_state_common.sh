@@ -427,6 +427,17 @@ als_read_work_units() {
 # recorded failure. So a tier-0 artifact with justification but no result
 # field still reads TIER0 (the legitimate exemption), but a tier-0 artifact
 # that explicitly recorded result:"NO-GO" must block like any other tier.
+#
+# UNSTAMPED (added for grade-loop): a GO or TIER0 verdict is demoted to
+# UNSTAMPED when the file lacks a valid post_evals.sh grade-loop stamp — no
+# `.grading.by`/`.grading.checksum`, or the checksum recomputed against the
+# file's OWN `.result` doesn't match what's stored. This is what makes GO/
+# TIER0 mean "graded by the neutral script", not "someone wrote GO into the
+# file". NO-GO/UNJUSTIFIED are untouched — they already block, and an
+# unstamped NO-GO is not a forgery risk (nothing to gain by faking a
+# rejection). Fail-closed: if eval-artifact.sh can't be sourced or
+# grading_checksum can't be called, treat that exactly like a missing stamp
+# (UNSTAMPED), never fall through to GO/TIER0.
 als_read_loop_evals_result() {
   ALS_LOOP_EVALS_RESULT="ABSENT"
   command -v jq >/dev/null 2>&1 || { als_log "hook=loop_state_guard evals=skipped reason=jq_missing"; return 0; }
@@ -445,6 +456,24 @@ als_read_loop_evals_result() {
   elif [ "$tier" = "0" ]; then ALS_LOOP_EVALS_RESULT="TIER0"
   else ALS_LOOP_EVALS_RESULT="NO-GO"
   fi
+
+  case "$ALS_LOOP_EVALS_RESULT" in
+    GO|TIER0)
+      local stamped_by stamped_checksum recomputed
+      stamped_by=$(jq -r '.grading.by // ""' "$f" 2>/dev/null)
+      stamped_checksum=$(jq -r '.grading.checksum // ""' "$f" 2>/dev/null)
+      if [ -z "$stamped_by" ] || [ -z "$stamped_checksum" ]; then
+        ALS_LOOP_EVALS_RESULT="UNSTAMPED"
+      elif ! source "$(dirname "${BASH_SOURCE[0]}")/../../../scripts/lib/eval-artifact.sh" 2>/dev/null; then
+        ALS_LOOP_EVALS_RESULT="UNSTAMPED"
+      else
+        recomputed=$(eval_artifact::grading_checksum "$f" "$result" 2>/dev/null)
+        if [ -z "$recomputed" ] || [ "$recomputed" != "$stamped_checksum" ]; then
+          ALS_LOOP_EVALS_RESULT="UNSTAMPED"
+        fi
+      fi
+      ;;
+  esac
 }
 
 # Gate: on a `complete` declaration, require a parseable retro.json

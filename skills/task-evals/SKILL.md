@@ -91,9 +91,12 @@ GO requires all P0 evals to pass. P1 failures don't block the gate but must be l
   "amendments": [ { "eval": "E1", "when": "<ISO8601>", "why": "<reason>" } ],
   "result": null,
   "graded_at": null,
-  "head_sha": "<SHA the grading ran against>"
+  "head_sha": "<SHA the grading ran against>",
+  "grading": { "by": "post_evals.sh grade-loop", "checksum": "<sha256 hex>" }
 }
 ```
+
+`grading` is optional and additive — loop-scope files written by `post_evals.sh grade-loop` (see the Verifier agent contract below); pr-scope files and every existing reader tolerate its absence. Adding it does not bump `schema_version` past 1.
 
 This copy and the design spec's copy are kept in lockstep; the enforcement components implement against this definition: `scripts/lib/eval-artifact.sh` (the marker/result SSOT), `scripts/post_evals.sh` (structural validation + result computation, invoked by `/coderails:post-evals`), and the `loop_state_guard` loop-scope gate (blocks loop completion at ≥3 work-units with no passing loop-scope `evals.json`).
 
@@ -117,4 +120,4 @@ A plan's or loop's per-work-unit eval refs travel in worker prompts the same way
 
 ## Verifier agent contract (agent-run evals)
 
-For agent-run evals, a fresh sonnet subagent is spawned to grade. Its prompt contains: the `evals.json` content, artifact references (PR number, clone path, deployed surface), and the confidence-label contract — and explicitly nothing else. It must not receive the implementation conversation, the implementer's summary, or the orchestrator's opinion of the outcome — the same principle behind agentic-loop Phase 4b's clean-break gate (the author is the least able to see its own shims). The verifier returns per-eval status plus evidence; the assembly script (`post_evals.sh` for pr scope, a direct `evals.json` update for loop scope) folds the results in and computes `result` itself — the verifier never writes `result` directly.
+For agent-run evals, a fresh sonnet subagent is spawned to grade. Its prompt contains: the `evals.json` content, artifact references (PR number, clone path, deployed surface), and the confidence-label contract — and explicitly nothing else. It must not receive the implementation conversation, the implementer's summary, or the orchestrator's opinion of the outcome — the same principle behind agentic-loop Phase 4b's clean-break gate (the author is the least able to see its own shims). The verifier returns per-eval status plus evidence; the orchestrator folds those statuses into `evals.json` — nothing more. Computing and stamping `result` is a separate, neutral step: `post_evals.sh` for pr scope, `post_evals.sh grade-loop` for loop scope. The orchestrator never writes `result` at either scope. `grade-loop` also stamps a `grading` object (`by`, a `checksum` over the per-eval statuses + result) that the loop-stop guard checks before accepting a GO/TIER0 verdict — honest boundary: the stamp catches accidental drift (a status edited after grading), not deliberate tampering.
