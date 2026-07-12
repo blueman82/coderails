@@ -55,22 +55,25 @@ export function parseStreamJsonLine(line: string): ParsedStreamJsonLine {
   }
 }
 
-// A raw log line is "noise preamble" if it is NOT part of the assistant's
-// output: the plain-text stdin warning the `claude -p` CLI prints to stderr,
-// or a `type: "system"` control event (init / hook_started / hook_response /
-// hook_stop / etc). In a cwd with a SessionStart hook, the hook_response event
-// carries the entire injected skill blob (thousands of chars) — the exact
-// "shite before the event stream" the clean view must never render. Kept
-// deliberately narrow: only the two families that are provably not assistant
-// content, so a genuine unrecognised error line (a crashed run) is NOT dropped.
-function isNoisePreambleLine(line: string): boolean {
+// A raw log line is "recognised stream-json machinery" — i.e. NOT the
+// assistant's readable output — if it is the plain-text stdin warning the
+// `claude -p` CLI prints to stderr, or any parseable stream-json control event:
+// a `type: "system"` event (init / hook_started / hook_response / hook_stop —
+// in a cwd with a SessionStart hook, hook_response carries the entire injected
+// skill blob), a `type: "stream_event"` envelope (message_start / message_stop /
+// content_block_start/stop / *_delta — raw JSON, never prose), a `type: "result"`
+// line, a `type: "assistant"`/`"user"` transcript line, etc. The fallback strips
+// all of these so the clean view shows only genuinely-unrecognised remainder —
+// which is where a crashed run's real error text lives, so a true failure is
+// never blanked. Any line that DOES parse as a stream-json object is machinery;
+// only non-JSON, non-warning text survives.
+function isRecognisedMachineryLine(line: string): boolean {
   const trimmed = line.trim();
   if (trimmed === "") return false;
   // The CLI's stderr stdin-warning is plain text, not JSON — match its stable prefix.
   if (trimmed.startsWith("Warning: no stdin data received")) return true;
-  const parsed = parseStreamJsonLine(trimmed);
-  if (parsed.ok && parsed.value.type === "system") return true;
-  return false;
+  // Anything that parses as a stream-json object is CLI machinery, not prose.
+  return parseStreamJsonLine(trimmed).ok;
 }
 
 // Projects the raw stream-json log into just the assistant's readable prose, for the dashboard's
