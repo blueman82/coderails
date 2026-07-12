@@ -180,6 +180,7 @@ export function collectLoops(baseDir: string): LoopInfo[] {
         workUnitsTotal: unitTitles.length,
         evalsFrozen: readEvalsFrozen(loopDir),
         unitTitles,
+        decisions: readDecisions(record.decisions_absorbed),
       });
     }
   }
