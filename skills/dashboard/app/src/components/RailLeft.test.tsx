@@ -21,7 +21,7 @@ function emptySnapshot(overrides: Partial<DashboardSnapshot> = {}): DashboardSna
   };
 }
 
-function loop(overrides: Partial<LoopSnapshot> = {}): LoopSnapshot {
+function loop(overrides: Partial<LoopInfo> = {}): LoopInfo {
   return {
     slug: "-project",
     name: "-project",
