@@ -123,5 +123,5 @@ export function projectAssistantText(raw: string): string {
 
   if (resultText !== undefined) return resultText;
   if (deltaText !== "") return deltaText;
-  return lines.filter((line) => !isNoisePreambleLine(line)).join("\n").trim();
+  return lines.filter((line) => !isRecognisedMachineryLine(line)).join("\n").trim();
 }
