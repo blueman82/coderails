@@ -122,12 +122,46 @@ describe("projectAssistantText", () => {
     expect(projectAssistantText(raw)).toBe("Complete line");
   });
 
-  it("returns the raw input unchanged when nothing parses as assistant text (never shows an empty box for a run that produced output)", () => {
-    const raw = [JSON.stringify({ type: "system", subtype: "init" }), "some raw unparseable garbage"].join("\n") + "\n";
-    expect(projectAssistantText(raw)).toBe(raw);
+  it("never leaks the claude -p stdin warning or SessionStart hook preamble, even before any assistant text has streamed (live window)", () => {
+    // Reproduces the real dashboard run-output noise: a `claude -p` run in a
+    // cwd with a SessionStart hook emits, BEFORE any assistant content, a
+    // plain-text stdin warning plus system/hook_started/hook_response events
+    // (the hook_response carries the entire using-coderails skill blob as
+    // additionalContext). During the live-streaming window there is no result
+    // line and no text_delta yet, so the projection must NOT fall through to
+    // dumping this preamble — it must render nothing (empty -> "no output")
+    // until real assistant text arrives.
+    const raw = [
+      "Warning: no stdin data received in 3s, proceeding without it. If piping from a slow command, redirect stdin explicitly: < /dev/null to skip, or wait longer.",
+      JSON.stringify({ type: "system", subtype: "hook_started", hook_name: "SessionStart:startup" }),
+      JSON.stringify({ type: "system", subtype: "hook_response", hook_name: "SessionStart:startup", output: "<EXTREMELY_IMPORTANT> ...giant skill blob... </EXTREMELY_IMPORTANT>" }),
+      JSON.stringify({ type: "system", subtype: "init", session_id: "abc" }),
+    ].join("\n") + "\n";
+    const out = projectAssistantText(raw);
+    expect(out).not.toContain("no stdin data received");
+    expect(out).not.toContain("hook_started");
+    expect(out).not.toContain("hook_response");
+    expect(out).not.toContain("EXTREMELY_IMPORTANT");
+    expect(out).toBe("");
   });
 
-  it("returns the raw input unchanged for a completely empty string", () => {
+  it("strips the noise preamble but still shows real assistant text that streams in after it", () => {
+    const raw = [
+      "Warning: no stdin data received in 3s, proceeding without it.",
+      JSON.stringify({ type: "system", subtype: "hook_started", hook_name: "SessionStart:startup" }),
+      deltaLine(0, "BANANA"),
+    ].join("\n") + "\n";
+    expect(projectAssistantText(raw)).toBe("BANANA");
+  });
+
+  it("returns a non-hook, non-warning raw remainder when a crashed run produced only unrecognised output (preserves genuine error visibility)", () => {
+    // A genuinely crashed run whose only output is an unrecognised error line —
+    // NOT hook/warning noise — should still be shown rather than blanked.
+    const raw = "FATAL: the runner exploded before streaming anything\n";
+    expect(projectAssistantText(raw)).toBe("FATAL: the runner exploded before streaming anything");
+  });
+
+  it("returns empty for a completely empty string", () => {
     expect(projectAssistantText("")).toBe("");
   });
 
