@@ -478,6 +478,34 @@ checksum_nogo_fixture=$(eval_artifact::grading_checksum "$FIX_LOOP_NOGO" "GO")
 [[ "$checksum_go_fixture" != "$checksum_nogo_fixture" ]]
 check "grading_checksum: differs when eval statuses differ" 0 $?
 
+# grade_loop: a failed write (target directory read-only, so jq's redirect
+# fails) must be reported as a failure — exit 1, stderr naming the file — not
+# silently echoed as GO/exit 0. Original file must be left untouched.
+FIX_WRITE_FAIL_DIR="$TMP/readonly_dir"
+mkdir -p "$FIX_WRITE_FAIL_DIR"
+FIX_WRITE_FAIL="$FIX_WRITE_FAIL_DIR/loop.json"
+jq -n --arg sha "$SHA" '{
+  scope: "loop",
+  tier: 1,
+  tier_justification: "3 work-units, no irreversible surface",
+  head_sha: $sha,
+  evals: [
+    {id:"e1", priority:"P0", mode:"scripted", status:"pass", cmd:"run-a", negative_control:"run-a-broken", evidence:"log 1"}
+  ]
+}' > "$FIX_WRITE_FAIL"
+before_content=$(cat "$FIX_WRITE_FAIL")
+chmod 555 "$FIX_WRITE_FAIL_DIR"
+stderr_out=$(post_evals::grade_loop "$FIX_WRITE_FAIL" 2>&1)
+rc=$?
+chmod 755 "$FIX_WRITE_FAIL_DIR"
+check "grade_loop: write failure (read-only dir) -> exit 1, not 0" 1 $rc
+[[ "$stderr_out" == *"grade-loop"* && "$stderr_out" == *"$FIX_WRITE_FAIL"* ]]
+check "grade_loop: write failure -> stderr names the failure and the file" 0 $?
+after_content=$(cat "$FIX_WRITE_FAIL")
+check_str "grade_loop: write failure -> original file left untouched" "$before_content" "$after_content"
+[[ -z "$(jq -r '.grading // empty' "$FIX_WRITE_FAIL")" ]]
+check "grade_loop: write failure -> no .grading present" 0 $?
+
 # ─── CLI dispatch: bare invocation prints usage, exits 1 ─────────────────────
 usage_out=$(bash "$SCRIPT" 2>&1)
 rc=$?

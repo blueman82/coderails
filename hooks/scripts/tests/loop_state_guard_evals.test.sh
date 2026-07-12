@@ -206,6 +206,37 @@ jq '.evals[0].status = "fail" | .result = "GO"' "$d/evals.json" > "$tmp_tamper" 
 als_read_loop_evals_result "$d"
 check "stamped GO, status tampered post-stamp (checksum mismatch) -> UNSTAMPED" "UNSTAMPED" "$ALS_LOOP_EVALS_RESULT"
 
+# fail-closed: eval-artifact.sh itself cannot be sourced (e.g. moved/missing)
+# -> UNSTAMPED, never a silent fall-through to GO. Temporarily rename the
+# real file out of the way, restore it unconditionally afterwards even if
+# an assertion below fails, so a broken run never leaves the repo file gone.
+EVAL_ARTIFACT_REAL="$HERE/../../../scripts/lib/eval-artifact.sh"
+EVAL_ARTIFACT_HIDDEN="${EVAL_ARTIFACT_REAL}.hidden-for-test"
+d=$(mktemp -d "$TMP/loopdir.XXXX")
+jq -n '{scope:"loop", tier:1, tier_justification:"2 work-units, no irreversible surface", head_sha:"deadbeef", evals:[{id:"e1",priority:"P0",mode:"scripted",status:"pass",cmd:"run-a",negative_control:"run-a-broken",evidence:"log"}]}' > "$d/evals.json"
+stamp "$d/evals.json"
+mv "$EVAL_ARTIFACT_REAL" "$EVAL_ARTIFACT_HIDDEN"
+als_read_loop_evals_result "$d"
+source_failure_result="$ALS_LOOP_EVALS_RESULT"
+mv "$EVAL_ARTIFACT_HIDDEN" "$EVAL_ARTIFACT_REAL"
+check "eval-artifact.sh unsourceable -> UNSTAMPED (fail-closed, never GO)" "UNSTAMPED" "$source_failure_result"
+
+# invariant: TIER0 is never a terminal outcome for a file the sanctioned
+# writer (grade_loop) produced — grade_loop always writes an explicit
+# .result (GO or NO-GO; compute_go on empty .evals is vacuously GO), so a
+# stamped tier-0 file's .result is never absent and the reader's tier-0
+# branch (which only fires when .result is unset) is never reached by a
+# properly-stamped file. TIER0 as a live category only exists for an
+# UNSTAMPED file that happens to name tier 0 — see the unstamped-tier-0 case
+# above, which demotes it before it can surface as TIER0.
+d=$(mktemp -d "$TMP/loopdir.XXXX")
+jq -n '{scope:"loop", tier:0, tier_justification:"docs-only loop, no runtime behaviour", head_sha:"deadbeef", evals:[]}' > "$d/evals.json"
+stamp "$d/evals.json"
+[[ -n "$(jq -r '.result // ""' "$d/evals.json")" ]]
+check "invariant: grade_loop always writes non-blank .result, even for tier 0" 0 $?
+als_read_loop_evals_result "$d"
+check "invariant: stamped tier-0 file never reads back as TIER0 (reads GO)" "GO" "$ALS_LOOP_EVALS_RESULT"
+
 # ── gate_loop_evals_required (end-to-end guard invocations) ─────────────────
 # Helpers copied verbatim (in spirit) from loop_state_guard.test.sh, per the
 # plan's instruction that bash test files in this repo are self-contained.

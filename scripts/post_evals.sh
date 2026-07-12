@@ -150,7 +150,9 @@ post_evals::compute_and_validate_result() {
 # (unchanged SSOT), then atomically writes .result, .graded_at (ISO8601 UTC),
 # and .grading = {by, checksum} into the file. Echoes GO/NO-GO on success;
 # exit 0 on a successful grade (even NO-GO — a graded NO-GO is still a
-# completed, stamped grade), exit 1 on validation refusal (nothing written).
+# completed, stamped grade), exit 1 on validation refusal (nothing written)
+# OR on a write/install failure (jq or mv) — both checked explicitly so a
+# failed write is never echoed/exited as if the grade had succeeded.
 post_evals::grade_loop() {
     local path="$1"
     post_evals::validate_structure "$path" "" "" "loop" || return 1
@@ -160,12 +162,20 @@ post_evals::grade_loop() {
     local graded_at; graded_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
     local tmp; tmp="${path}.tmp.$$"
-    jq --arg result "$result" \
+    if ! jq --arg result "$result" \
        --arg graded_at "$graded_at" \
        --arg by "post_evals.sh grade-loop" \
        --arg checksum "$checksum" \
        '.result = $result | .graded_at = $graded_at | .grading = {by: $by, checksum: $checksum}' \
-       "$path" > "$tmp" && mv "$tmp" "$path"
+       "$path" > "$tmp"; then
+        rm -f "$tmp"
+        printf 'post_evals: grade-loop failed to write graded output for %s\n' "$path" >&2
+        return 1
+    fi
+    if ! mv "$tmp" "$path"; then
+        printf 'post_evals: grade-loop failed to install graded output for %s (tmp file left at %s)\n' "$path" "$tmp" >&2
+        return 1
+    fi
 
     printf '%s' "$result"
 }

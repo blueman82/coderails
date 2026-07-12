@@ -91,7 +91,8 @@ eval_artifact::compute_go() {
 # eval_artifact::grading_checksum <evals_json_path> <result>
 # Echoes the sha256 hex checksum binding an evals.json's per-eval statuses to
 # a computed result. Canonical input: `jq -cS '[.evals[]? | {id, priority,
-# status}]' <path>` (compact, sorted keys — order- and whitespace-independent)
+# status}]' <path>` (compact, sorted keys — key-order- and whitespace-independent;
+# reordering the .evals ARRAY itself still changes the checksum, by design)
 # concatenated with a newline and <result>. ONE definition, shared by the
 # writer (post_evals::grade_loop) and the reader (als_read_loop_evals_result)
 # so they can never drift on how the stamp is computed. Deliberately no
