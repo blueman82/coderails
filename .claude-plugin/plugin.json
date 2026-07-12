@@ -1,6 +1,6 @@
 {
   "name": "coderails",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "description": "Claude Code workflow plugin: prep→push→merge→wiki commands, planning/orchestration skills, and self-checking hooks.",
   "author": {
     "name": "Gary Harrison",
