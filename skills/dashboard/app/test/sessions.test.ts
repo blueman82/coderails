@@ -221,7 +221,7 @@ describe("collectLoops", () => {
     expect(loops[0].name).toBe("-nonstring-loop-project");
   });
 
-  it("reports evalsFrozen true for a tier-0 exemption verdict", () => {
+  it("reports evalsFrozen true for a tier-0 exemption verdict with a grading stamp", () => {
     const base = makeTmpBase();
     const dir = join(base, "-tier0-project", "S5");
     mkdirSync(dir, { recursive: true });
