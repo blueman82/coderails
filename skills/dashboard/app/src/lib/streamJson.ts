@@ -55,6 +55,24 @@ export function parseStreamJsonLine(line: string): ParsedStreamJsonLine {
   }
 }
 
+// A raw log line is "noise preamble" if it is NOT part of the assistant's
+// output: the plain-text stdin warning the `claude -p` CLI prints to stderr,
+// or a `type: "system"` control event (init / hook_started / hook_response /
+// hook_stop / etc). In a cwd with a SessionStart hook, the hook_response event
+// carries the entire injected skill blob (thousands of chars) — the exact
+// "shite before the event stream" the clean view must never render. Kept
+// deliberately narrow: only the two families that are provably not assistant
+// content, so a genuine unrecognised error line (a crashed run) is NOT dropped.
+function isNoisePreambleLine(line: string): boolean {
+  const trimmed = line.trim();
+  if (trimmed === "") return false;
+  // The CLI's stderr stdin-warning is plain text, not JSON — match its stable prefix.
+  if (trimmed.startsWith("Warning: no stdin data received")) return true;
+  const parsed = parseStreamJsonLine(trimmed);
+  if (parsed.ok && parsed.value.type === "system") return true;
+  return false;
+}
+
 // Projects the raw stream-json log into just the assistant's readable prose, for the dashboard's
 // "clean" default view (see OutputViewerPanel.tsx). Non-throwing, same posture as
 // parseStreamJsonLine: malformed or partial lines are skipped rather than raised. Prefers the
@@ -64,8 +82,15 @@ export function parseStreamJsonLine(line: string): ParsedStreamJsonLine {
 // turns, e.g. a hook-block forcing extra turns). If more than one result line were ever to appear,
 // the last one wins rather than the first — still safer than concatenating deltas across turns.
 // Falls back to concatenating `text_delta` values for a still-live run (deltas exist, no `result`
-// line yet). If nothing parses as assistant text at all, returns the raw input unchanged so a run
-// that produced output never renders an empty box.
+// line yet).
+//
+// Final fallback, when nothing parses as assistant text: return the raw input with the noise
+// preamble (stdin warning + `system`/hook events) stripped — NOT the raw input verbatim. This is
+// the fix for the live-streaming window, where a `claude -p` run emits the stdin warning and the
+// SessionStart hook_started/hook_response events (the latter carrying the whole injected skill
+// blob) BEFORE any assistant content: returning raw there dumped all of it into the clean view.
+// A genuinely crashed run whose only output is an unrecognised error line still survives the strip
+// (it is neither the warning nor a `system` event), so a real failure is never silently blanked.
 export function projectAssistantText(raw: string): string {
   const lines = raw.split("\n");
   let resultText: string | undefined;
@@ -95,5 +120,5 @@ export function projectAssistantText(raw: string): string {
 
   if (resultText !== undefined) return resultText;
   if (deltaText !== "") return deltaText;
-  return raw;
+  return lines.filter((line) => !isNoisePreambleLine(line)).join("\n").trim();
 }
