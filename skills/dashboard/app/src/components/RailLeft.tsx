@@ -84,8 +84,8 @@ export function RailLeft() {
                 <span>{unit.title}</span>
               </div>
             ))}
-            {loop.decisions.map((decision) => (
-              <div className="hud-decision-item" key={decision}>
+            {loop.decisions.map((decision, i) => (
+              <div className="hud-decision-item" key={`${i}-${decision}`}>
                 {decision}
               </div>
             ))}
