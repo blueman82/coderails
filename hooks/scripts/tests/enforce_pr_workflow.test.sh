@@ -935,6 +935,52 @@ case "$out" in
   *) printf 'FAIL - deny reason should mention review-pr (got: %s)\n' "$out"; fails=$((fails + 1)) ;;
 esac
 
+# ── Case 85b: merge.sh form also drives the eval-artifact gate (not just the
+# review-pr gate) — mirrors Case 82, but through `scripts/merge.sh 42` instead
+# of `gh pr merge 42`. Proves pr_num extracted from the merge.sh form reaches
+# gate_eval_artifact_for_merge correctly, rather than relying on the default
+# auto-GO mock (which would auto-satisfy the eval gate for ANY PR number and
+# so could not distinguish a correctly-wired pr_num from an empty one).
+T_REVIEWED_42_MERGESH=$(mk_transcript \
+  "$(mk_skill_line "coderails:push")" \
+  "$(mk_skill_line_with_args "pr-review-toolkit:review-pr" "42")")
+NOGO_MARKER_MERGESH="<!-- coderails-eval-summary v1 pr=42 head_sha=${HEAD_SHA} result=NO-GO tier=1 -->"
+out=$(
+  MOCK_GH_HEAD_SHA="$HEAD_SHA" MOCK_GH_COMMENT_BODY="$NOGO_MARKER_MERGESH" \
+  run_eval "$(payload "scripts/merge.sh 42" "$T_REVIEWED_42_MERGESH" "$REPO_EVAL")"
+)
+check "scripts/merge.sh 42, NO-GO eval marker -> deny (eval gate reached via merge.sh pr_num)" DENY "$(decision_of "$out")"
+case "$out" in
+  *"tier 1"*) : ;;
+  *) printf 'FAIL - merge.sh NO-GO deny reason should include tier (got: %s)\n' "$out"; fails=$((fails + 1)) ;;
+esac
+
+GO_MARKER_MERGESH="<!-- coderails-eval-summary v1 pr=42 head_sha=${HEAD_SHA} result=GO tier=1 -->"
+out=$(
+  MOCK_GH_HEAD_SHA="$HEAD_SHA" MOCK_GH_COMMENT_BODY="$GO_MARKER_MERGESH" \
+  run_eval "$(payload "scripts/merge.sh 42" "$T_REVIEWED_42_MERGESH" "$REPO_EVAL")"
+)
+check "scripts/merge.sh 42, GO eval marker -> allow" ALLOW "$(decision_of "$out")"
+
+# ── Case 85c: decoy-number hijack across a shell chain — a PR number that
+# only appears in an EARLIER, non-executed segment (e.g. an echo string) must
+# not donate its number to enforce_required_step's pr_num extraction for the
+# LATER segment that gate_in_scope actually classified as the merge. Before
+# the matched_seg fix, pr_num extraction scanned the raw $cmd end-to-end via
+# grep, so the first PR number anywhere in the string (here: the decoy "999",
+# which review-pr WAS run against) was extracted instead of "140" (the real
+# target, never reviewed) — a silent full bypass. Both invocation forms
+# (merge.sh and gh pr merge) share the same extraction site pattern, so both
+# get a case here.
+T_DECOY_999=$(mk_transcript \
+  "$(mk_skill_line "coderails:push")" \
+  "$(mk_skill_line_with_args "pr-review-toolkit:review-pr" "999")")
+check "echo decoy 999 && scripts/merge.sh 140, review-pr only for 999 -> deny" DENY \
+  "$(run "$(payload "echo \\\"run scripts/merge.sh 999 first\\\" && scripts/merge.sh 140" "$T_DECOY_999")")"
+
+check "echo decoy 999 && gh pr merge 140, review-pr only for 999 -> deny" DENY \
+  "$(run "$(payload "echo \\\"run gh pr merge 999 first\\\" && gh pr merge 140" "$T_DECOY_999")")"
+
 # ────────────────────────────────────────────────────────────────────────────
 # MERGE.SH MATCHER: scripts/merge.sh invocations are recognized as subcommand
 # "merge" (same gate as raw `gh pr merge`) — closes the bypass where a
@@ -965,6 +1011,17 @@ T=$(mk_transcript \
   "$(mk_skill_line "coderails:push")" \
   "$(mk_skill_line_with_args "pr-review-toolkit:review-pr" "140")")
 check "./scripts/merge.sh 140, review-pr for 140 -> allow" ALLOW \
+  "$(run "$(payload "./scripts/merge.sh 140" "$T")")"
+
+# ── Case 88b: mismatched-PR DENY for the BARE/unquoted form — case 86 proves
+# per-PR pinning only for the quoted form (which exercises the token
+# quote-stripping); this proves the bare form's extraction independently
+# pins to the actual PR number rather than falling through to the
+# any-review-pr legacy path.
+T=$(mk_transcript \
+  "$(mk_skill_line "coderails:push")" \
+  "$(mk_skill_line_with_args "pr-review-toolkit:review-pr" "139")")
+check "./scripts/merge.sh 140, review-pr only for 139 (bare form) -> deny" DENY \
   "$(run "$(payload "./scripts/merge.sh 140" "$T")")"
 
 # ── Case 89: scripts/merge.sh with NO number → legacy bare-merge (any review-pr) ──
@@ -998,12 +1055,28 @@ check "some-merge.shim 140 -> allow (not merge.sh)" ALLOW \
 check "echo mentioning scripts/merge.sh -> allow (never executed)" ALLOW \
   "$(run "$(payload "echo \\\"scripts/merge.sh 140\\\"" "$T")")"
 
-# ── Case 94: --dry-run / --help early-exit still stands aside for merge.sh ───
-check "scripts/merge.sh 140 --dry-run -> allow (passthrough)" ALLOW \
+# ── Case 94: --dry-run / --help do NOT exempt merge.sh from the gate ─────────
+# Unlike `gh pr merge --dry-run` (gh rejects the unknown flag outright — never
+# merges) and `gh pr create --help` (prints usage — never creates), merge.sh's
+# arg parser (merge::main) reads only $1 as the PR number/branch and silently
+# ignores any trailing token. `scripts/merge.sh 140 --dry-run` would actually
+# perform a REAL merge of PR 140 if gate_safe_passthrough exempted it here —
+# so the passthrough must NOT apply to merge.sh invocations. Both sub-cases
+# gate exactly like any other merge.sh form (T has no review-pr -> deny).
+check "scripts/merge.sh 140 --dry-run -> deny (not exempt, would actually merge)" DENY \
   "$(run "$(payload "scripts/merge.sh 140 --dry-run" "$T")")"
 
-check "scripts/merge.sh --help -> allow (passthrough)" ALLOW \
+check "scripts/merge.sh --help -> deny (not exempt; no PR num, legacy bare-merge gating)" DENY \
   "$(run "$(payload "scripts/merge.sh --help" "$T")")"
+
+# ── Case 94b: gh pr merge --dry-run / gh pr create --help STILL pass through
+# (regression guard: the merge.sh exclusion above must not narrow the
+# pre-existing gh-form exemptions this hook already relied on).
+check "gh pr merge 1 --dry-run (gh form) -> allow (still exempt)" ALLOW \
+  "$(run "$(payload "gh pr merge 1 --dry-run" "$T")")"
+
+check "gh pr create --help (gh form) -> allow (still exempt)" ALLOW \
+  "$(run "$(payload "gh pr create --help" "$T")")"
 
 # ── Case 95 (documented limit): bash -x scripts/merge.sh 140 → NOT gated ─────
 # Same "we don't parse every shell form" stance as gate_in_scope's header
