@@ -312,6 +312,50 @@ describe("collectLoops", () => {
     expect(loops[0].evalsFrozen).toBe(false);
   });
 
+  it("reports evalsFrozen false for a GO verdict whose grading stamp has a checksum but no by field (partial stamp)", () => {
+    const base = makeTmpBase();
+    const dir = join(base, "-partialstamp-noby-project", "S7c");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, "progress.json"),
+      JSON.stringify({ status: "complete", session_id: "S7c", completed_marker: 1, work_units: { unit1: { status: "done" } } })
+    );
+    writeFileSync(
+      join(dir, "evals.json"),
+      JSON.stringify({
+        scope: "loop",
+        result: "GO",
+        tier: 1,
+        tier_justification: "2 work-units, no irreversible surface",
+        grading: { checksum: "abc123" },
+      })
+    );
+    const loops = collectLoops(base);
+    expect(loops[0].evalsFrozen).toBe(false);
+  });
+
+  it("reports evalsFrozen false for a GO verdict whose grading stamp has empty-string by and checksum", () => {
+    const base = makeTmpBase();
+    const dir = join(base, "-partialstamp-empty-project", "S7d");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, "progress.json"),
+      JSON.stringify({ status: "complete", session_id: "S7d", completed_marker: 1, work_units: { unit1: { status: "done" } } })
+    );
+    writeFileSync(
+      join(dir, "evals.json"),
+      JSON.stringify({
+        scope: "loop",
+        result: "GO",
+        tier: 1,
+        tier_justification: "2 work-units, no irreversible surface",
+        grading: { by: "", checksum: "" },
+      })
+    );
+    const loops = collectLoops(base);
+    expect(loops[0].evalsFrozen).toBe(false);
+  });
+
   it("ignores a sibling evals.json with the wrong scope (pr, not loop)", () => {
     const base = makeTmpBase();
     const dir = join(base, "-wrongscope-project", "S8");
