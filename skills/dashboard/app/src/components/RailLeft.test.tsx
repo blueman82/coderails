@@ -4,7 +4,8 @@ import { createElement } from "react";
 import { render, cleanup } from "@testing-library/react";
 import { DashboardContextTestProvider } from "../../test/testUtils/DashboardContextTestProvider";
 import { RailLeft } from "./RailLeft";
-import type { DashboardSnapshot, LoopSnapshot } from "@/hooks/useDashboardState";
+import type { DashboardSnapshot } from "@/hooks/useDashboardState";
+import type { LoopInfo } from "@/lib/collect/sessions";
 
 function emptySnapshot(overrides: Partial<DashboardSnapshot> = {}): DashboardSnapshot {
   return {
