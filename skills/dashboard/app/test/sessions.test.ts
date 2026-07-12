@@ -120,6 +120,7 @@ describe("collectLoops", () => {
         { title: "wu2", done: true },
         { title: "wu3", done: false },
       ],
+      decisions: [],
     });
   });
 
@@ -139,6 +140,7 @@ describe("collectLoops", () => {
         { title: "rewrite", done: true },
         { title: "force-push", done: false },
       ],
+      decisions: [],
     });
   });
 
