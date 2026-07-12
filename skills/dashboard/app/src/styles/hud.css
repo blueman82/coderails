@@ -351,6 +351,13 @@
   color: var(--grey-dim);
   text-transform: uppercase;
 }
+.hud-decision-item {
+  font-size: 10.5px;
+  line-height: 1.5;
+  color: var(--grey-dim);
+  font-style: italic;
+  margin-bottom: 6px;
+}
 
 /* ---------- Documents table ---------- */
 .hud-doc-row {

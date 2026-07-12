@@ -18,6 +18,7 @@ export interface LoopInfo {
   workUnitsTotal: number;
   evalsFrozen: boolean;
   unitTitles: { title: string; done: boolean }[];
+  decisions: string[];
 }
 
 const ACTIVE_THRESHOLD_MS = 5 * 60_000;
@@ -110,6 +111,21 @@ function readUnitTitles(workUnits: unknown): { title: string; done: boolean }[] 
   return [];
 }
 
+// decisions_absorbed is documented (SKILL.md) as a chronological array of
+// {phase, decision} appended oldest-first. Older progress.json files predate
+// the field entirely. Same degrade-don't-throw stance as readUnitTitles:
+// non-array or non-record entries are skipped rather than raising. Returns
+// the last 5 entries, newest first, formatted "<phase>: <decision>".
+function readDecisions(decisionsAbsorbed: unknown): string[] {
+  if (!Array.isArray(decisionsAbsorbed)) return [];
+  return decisionsAbsorbed
+    .filter(isRecord)
+    .filter((entry) => typeof entry.phase === "string" && typeof entry.decision === "string")
+    .map((entry) => `${entry.phase as string}: ${entry.decision as string}`)
+    .slice(-5)
+    .reverse();
+}
+
 // progress.json's "loop" field is a free-text human name (e.g. "observability-dashboard
 // (sub-project 1 of agentic-os evolution)"), not present on every loop. Falls back to the
 // dir slug when absent, blank, or not a string.
@@ -121,13 +137,23 @@ function readLoopName(record: Record<string, unknown>, slug: string): string {
 
 // Mirrors als_read_loop_evals_result (hooks/scripts/lib/loop_state_common.sh):
 // GO or a justified TIER0 exemption count as frozen; NO-GO, UNJUSTIFIED,
-// ABSENT, wrong scope, or malformed JSON do not.
+// ABSENT, wrong scope, or malformed JSON do not. An explicit NO-GO wins over
+// the tier-0 exemption, same precedence as the bash SSOT.
+// Also mirrors the hook's UNSTAMPED check: GO/TIER0 additionally require a
+// `.grading` stamp (post_evals.sh grade-loop's provenance record) to read as
+// frozen. This is presence-only — no checksum recomputation here, unlike the
+// hook, since this is a display surface (KISS); a status edited after
+// grading without re-stamping will still show frozen here even though the
+// hook would demote it to UNSTAMPED.
 function readEvalsFrozen(loopDir: string): boolean {
   const data = readJson(join(loopDir, "evals.json"));
   if (!isRecord(data)) return false;
   if (data.scope !== "loop") return false;
   const justification = typeof data.tier_justification === "string" ? data.tier_justification.trim() : "";
   if (!justification) return false;
+  if (data.result === "NO-GO") return false;
+  const stamped = isRecord(data.grading) && typeof data.grading.checksum === "string";
+  if (!stamped) return false;
   if (data.result === "GO") return true;
   if (data.tier === 0) return true;
   return false;
@@ -154,6 +180,7 @@ export function collectLoops(baseDir: string): LoopInfo[] {
         workUnitsTotal: unitTitles.length,
         evalsFrozen: readEvalsFrozen(loopDir),
         unitTitles,
+        decisions: readDecisions(record.decisions_absorbed),
       });
     }
   }

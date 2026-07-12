@@ -120,6 +120,7 @@ describe("collectLoops", () => {
         { title: "wu2", done: true },
         { title: "wu3", done: false },
       ],
+      decisions: [],
     });
   });
 
@@ -139,6 +140,7 @@ describe("collectLoops", () => {
         { title: "rewrite", done: true },
         { title: "force-push", done: false },
       ],
+      decisions: [],
     });
   });
 
@@ -219,7 +221,7 @@ describe("collectLoops", () => {
     expect(loops[0].name).toBe("-nonstring-loop-project");
   });
 
-  it("reports evalsFrozen true for a tier-0 exemption verdict", () => {
+  it("reports evalsFrozen true for a tier-0 exemption verdict with a grading stamp", () => {
     const base = makeTmpBase();
     const dir = join(base, "-tier0-project", "S5");
     mkdirSync(dir, { recursive: true });
@@ -229,10 +231,37 @@ describe("collectLoops", () => {
     );
     writeFileSync(
       join(dir, "evals.json"),
-      JSON.stringify({ scope: "loop", tier: 0, tier_justification: "docs-only loop, no runtime behaviour" })
+      JSON.stringify({
+        scope: "loop",
+        tier: 0,
+        tier_justification: "docs-only loop, no runtime behaviour",
+        grading: { by: "post_evals.sh grade-loop", checksum: "abc123" },
+      })
     );
     const loops = collectLoops(base);
     expect(loops[0].evalsFrozen).toBe(true);
+  });
+
+  it("reports evalsFrozen false for a tier-0 exemption whose result is explicitly NO-GO (NO-GO takes precedence over the tier-0 exemption)", () => {
+    const base = makeTmpBase();
+    const dir = join(base, "-tier0-nogo-project", "S5b");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, "progress.json"),
+      JSON.stringify({ status: "complete", session_id: "S5b", completed_marker: 1, work_units: { unit1: { status: "done" } } })
+    );
+    writeFileSync(
+      join(dir, "evals.json"),
+      JSON.stringify({
+        scope: "loop",
+        result: "NO-GO",
+        tier: 0,
+        tier_justification: "docs-only loop, no runtime behaviour",
+        grading: { by: "post_evals.sh grade-loop", checksum: "abc123" },
+      })
+    );
+    const loops = collectLoops(base);
+    expect(loops[0].evalsFrozen).toBe(false);
   });
 
   it("reports evalsFrozen false for a justified NO-GO verdict", () => {
@@ -262,6 +291,22 @@ describe("collectLoops", () => {
     writeFileSync(
       join(dir, "evals.json"),
       JSON.stringify({ scope: "loop", result: "GO", tier: 1, tier_justification: "" })
+    );
+    const loops = collectLoops(base);
+    expect(loops[0].evalsFrozen).toBe(false);
+  });
+
+  it("reports evalsFrozen false for an otherwise-valid GO verdict missing the grading stamp (mirrors the hook's UNSTAMPED check)", () => {
+    const base = makeTmpBase();
+    const dir = join(base, "-unstamped-project", "S7b");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, "progress.json"),
+      JSON.stringify({ status: "complete", session_id: "S7b", completed_marker: 1, work_units: { unit1: { status: "done" } } })
+    );
+    writeFileSync(
+      join(dir, "evals.json"),
+      JSON.stringify({ scope: "loop", result: "GO", tier: 1, tier_justification: "2 work-units, no irreversible surface" })
     );
     const loops = collectLoops(base);
     expect(loops[0].evalsFrozen).toBe(false);
@@ -297,5 +342,74 @@ describe("collectLoops", () => {
     }
     const loops = collectLoops(base);
     expect(loops).toEqual([]);
+  });
+
+  it("surfaces the last 5 decisions_absorbed entries, newest first, formatted as phase: decision", () => {
+    const base = makeTmpBase();
+    const dir = join(base, "-decisions-project", "S20");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, "progress.json"),
+      JSON.stringify({
+        status: "in-progress",
+        session_id: "S20",
+        work_units: {},
+        decisions_absorbed: [
+          { phase: "2.5", decision: "one" },
+          { phase: "2.6", decision: "two" },
+          { phase: "5", decision: "three" },
+          { phase: "6", decision: "four" },
+          { phase: "13", decision: "five" },
+          { phase: "13", decision: "six" },
+          { phase: "13", decision: "seven" },
+        ],
+      })
+    );
+    const loops = collectLoops(base);
+    expect(loops[0].decisions).toEqual([
+      "13: seven",
+      "13: six",
+      "13: five",
+      "6: four",
+      "5: three",
+    ]);
+  });
+
+  it("reports an empty decisions array when decisions_absorbed is absent (predates the field)", () => {
+    const base = makeTmpBase();
+    const dir = join(base, "-nodecisions-project", "S21");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, "progress.json"),
+      JSON.stringify({ status: "in-progress", session_id: "S21", work_units: {} })
+    );
+    const loops = collectLoops(base);
+    expect(loops[0].decisions).toEqual([]);
+  });
+
+  it("tolerates a malformed decisions_absorbed (non-array, or entries missing keys) by skipping rather than throwing", () => {
+    const base = makeTmpBase();
+    const dirA = join(base, "-decisions-notarray-project", "S22");
+    mkdirSync(dirA, { recursive: true });
+    writeFileSync(
+      join(dirA, "progress.json"),
+      JSON.stringify({ status: "in-progress", session_id: "S22", work_units: {}, decisions_absorbed: "not-an-array" })
+    );
+
+    const dirB = join(base, "-decisions-badentries-project", "S23");
+    mkdirSync(dirB, { recursive: true });
+    writeFileSync(
+      join(dirB, "progress.json"),
+      JSON.stringify({
+        status: "in-progress",
+        session_id: "S23",
+        work_units: {},
+        decisions_absorbed: [{ phase: "2.5" }, { decision: "orphan" }, "not-a-record", { phase: "6", decision: "kept" }],
+      })
+    );
+
+    const loops = collectLoops(base);
+    expect(loops.find((l) => l.slug === "-decisions-notarray-project")?.decisions).toEqual([]);
+    expect(loops.find((l) => l.slug === "-decisions-badentries-project")?.decisions).toEqual(["6: kept"]);
   });
 });

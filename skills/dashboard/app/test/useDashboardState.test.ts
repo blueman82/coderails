@@ -235,7 +235,7 @@ describe("formatHHMM", () => {
 
 describe("selectActiveLoop", () => {
   function loop(overrides: Partial<LoopInfo>): LoopInfo {
-    return { slug: "s", name: "s", sessionId: "id", status: "", workUnitsDone: 0, workUnitsTotal: 0, evalsFrozen: false, unitTitles: [], ...overrides };
+    return { slug: "s", name: "s", sessionId: "id", status: "", workUnitsDone: 0, workUnitsTotal: 0, evalsFrozen: false, unitTitles: [], decisions: [], ...overrides };
   }
 
   it("returns undefined for an empty list", () => {

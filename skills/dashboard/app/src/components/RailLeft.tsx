@@ -84,6 +84,11 @@ export function RailLeft() {
                 <span>{unit.title}</span>
               </div>
             ))}
+            {loop.decisions.map((decision, i) => (
+              <div className="hud-decision-item" key={`${i}-${decision}`}>
+                {decision}
+              </div>
+            ))}
             <div className="hud-directive-footer">
               Loop Evals: {loop.evalsFrozen ? "Frozen ✓" : "Not Frozen"}
             </div>
