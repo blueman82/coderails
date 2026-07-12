@@ -935,4 +935,86 @@ case "$out" in
   *) printf 'FAIL - deny reason should mention review-pr (got: %s)\n' "$out"; fails=$((fails + 1)) ;;
 esac
 
+# ────────────────────────────────────────────────────────────────────────────
+# MERGE.SH MATCHER: scripts/merge.sh invocations are recognized as subcommand
+# "merge" (same gate as raw `gh pr merge`) — closes the bypass where a
+# hand-rolled `scripts/merge.sh <N>` sailed past review-pr enforcement because
+# gate_in_scope's elif-chain only matched literal `gh pr merge`.
+# ────────────────────────────────────────────────────────────────────────────
+
+# ── Case 86: bash "/repo/scripts/merge.sh" "140", only review-pr 139 in transcript → DENY
+T=$(mk_transcript \
+  "$(mk_skill_line "coderails:push")" \
+  "$(mk_skill_line_with_args "pr-review-toolkit:review-pr" "139")")
+check "merge.sh 140, review-pr only for 139 -> deny" DENY \
+  "$(run "$(payload "bash \\\"/repo/scripts/merge.sh\\\" \\\"140\\\"" "$T")")"
+
+# ── Case 87: same command, review-pr 140 in transcript → ALLOW ───────────────
+T=$(mk_transcript \
+  "$(mk_skill_line "coderails:push")" \
+  "$(mk_skill_line_with_args "pr-review-toolkit:review-pr" "140")")
+check "merge.sh 140, review-pr for 140 -> allow" ALLOW \
+  "$(run "$(payload "bash \\\"/repo/scripts/merge.sh\\\" \\\"140\\\"" "$T")")"
+
+# ── Case 88: ./scripts/merge.sh 140 → same gating (deny without, allow with) ──
+T=$(mk_transcript "$(mk_skill_line "coderails:push")")
+check "./scripts/merge.sh 140, no review-pr -> deny" DENY \
+  "$(run "$(payload "./scripts/merge.sh 140" "$T")")"
+
+T=$(mk_transcript \
+  "$(mk_skill_line "coderails:push")" \
+  "$(mk_skill_line_with_args "pr-review-toolkit:review-pr" "140")")
+check "./scripts/merge.sh 140, review-pr for 140 -> allow" ALLOW \
+  "$(run "$(payload "./scripts/merge.sh 140" "$T")")"
+
+# ── Case 89: scripts/merge.sh with NO number → legacy bare-merge (any review-pr) ──
+T=$(mk_transcript \
+  "$(mk_skill_line "coderails:push")" \
+  "$(mk_skill_line "pr-review-toolkit:review-pr")")
+check "scripts/merge.sh (no number), review-pr no args -> allow" ALLOW \
+  "$(run "$(payload "scripts/merge.sh" "$T")")"
+
+T=$(mk_transcript "$(mk_skill_line "coderails:push")")
+check "scripts/merge.sh (no number), no review-pr -> deny" DENY \
+  "$(run "$(payload "scripts/merge.sh" "$T")")"
+
+# ── Case 90 (negative): post_review.sh 140 → NOT matched (not gated) ─────────
+T=$(mk_transcript "$(mk_skill_line "coderails:prep")")
+check "post_review.sh 140 -> allow (not a merge.sh invocation)" ALLOW \
+  "$(run "$(payload "post_review.sh 140" "$T")")"
+
+# ── Case 91 (negative): auto_merge.sh 140 → NOT matched — word-boundary
+# precedent (PR #42 merge-base): a name merely CONTAINING merge.sh must not
+# match the executed-word anchor.
+check "auto_merge.sh 140 -> allow (containing merge.sh is not merge.sh)" ALLOW \
+  "$(run "$(payload "auto_merge.sh 140" "$T")")"
+
+# ── Case 92 (negative): some-merge.shim 140 → NOT matched ────────────────────
+check "some-merge.shim 140 -> allow (not merge.sh)" ALLOW \
+  "$(run "$(payload "some-merge.shim 140" "$T")")"
+
+# ── Case 93 (negative): echo "scripts/merge.sh 140" (quoted argument, mention
+# only, never executed) → NOT matched ────────────────────────────────────────
+check "echo mentioning scripts/merge.sh -> allow (never executed)" ALLOW \
+  "$(run "$(payload "echo \\\"scripts/merge.sh 140\\\"" "$T")")"
+
+# ── Case 94: --dry-run / --help early-exit still stands aside for merge.sh ───
+check "scripts/merge.sh 140 --dry-run -> allow (passthrough)" ALLOW \
+  "$(run "$(payload "scripts/merge.sh 140 --dry-run" "$T")")"
+
+check "scripts/merge.sh --help -> allow (passthrough)" ALLOW \
+  "$(run "$(payload "scripts/merge.sh --help" "$T")")"
+
+# ── Case 95 (documented limit): bash -x scripts/merge.sh 140 → NOT gated ─────
+# Same "we don't parse every shell form" stance as gate_in_scope's header
+# comment (~lines 65-67, subshell/env-prefix limit) — a debug-trace flag
+# inserted before the script path is not parsed. Converts a silent gap into a
+# documented, tested one; not a regression target.
+check "bash -x scripts/merge.sh 140 -> allow (documented limit, not gated)" ALLOW \
+  "$(run "$(payload "bash -x scripts/merge.sh 140" "$T")")"
+
+# ── Case 96 (documented limit): command bash scripts/merge.sh 140 → NOT gated ─
+check "command bash scripts/merge.sh 140 -> allow (documented limit, not gated)" ALLOW \
+  "$(run "$(payload "command bash scripts/merge.sh 140" "$T")")"
+
 [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails)"; exit 1; }

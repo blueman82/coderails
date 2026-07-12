@@ -74,6 +74,20 @@ gate_in_scope() {
     elif [[ "$seg" =~ ^gh[[:space:]]+pr[[:space:]]+merge([[:space:]]|$)  ]]; then subcommand="merge";     break
     elif [[ "$seg" =~ ^git[[:space:]]+merge([[:space:]]|$) ]];             then subcommand="git_merge"; break
     elif [[ "$seg" =~ ^git[[:space:]]+push([[:space:]]|$) ]];              then subcommand="git_push";  break
+    elif [[ "$seg" =~ ^((bash|sh)[[:space:]]+)?[\"\']?([^[:space:]\"\']*/)?merge\.sh[\"\']?([[:space:]]|$) ]]; then
+      # scripts/merge.sh is the repo's sanctioned merge wrapper (calls `gh pr
+      # merge` internally). Recognizing its invocation here closes the gap
+      # where `scripts/merge.sh <N>` / `./scripts/merge.sh <N>` / `bash
+      # <path>/merge.sh <N>` sailed past this gate entirely — only literal
+      # `gh pr merge` was matched. subcommand="merge" reuses the exact same
+      # review-pr + eval-artifact gating as raw `gh pr merge` below.
+      # pr_num is NOT set here (no arm sets it) — enforce_required_step
+      # extracts it from this form the same way it does for `gh pr merge`.
+      # Word-boundary: the executed word must be exactly `merge.sh` (optionally
+      # path-prefixed and/or quoted) — a name merely containing "merge.sh"
+      # (auto_merge.sh, some-merge.shim) must not match, same precedent as the
+      # git-merge-base word-boundary fix (PR #42).
+      subcommand="merge"; break
     elif [[ "$seg" =~ ^git[[:space:]]+-C[[:space:]]+([^[:space:]]+)[[:space:]]+merge([[:space:]]|$) ]]; then
       subcommand="git_merge"; push_target_dir="${BASH_REMATCH[1]}"; break
     elif [[ "$seg" =~ ^git[[:space:]]+-C[[:space:]]+([^[:space:]]+)[[:space:]]+push([[:space:]]|$) ]]; then
@@ -304,6 +318,27 @@ enforce_required_step() {
           [0-9]*) pr_num="$token"; break ;;   # bare integer: this is the PR number
         esac
       done
+    fi
+
+    # Parallel extraction for the merge.sh invocation form (mirrors the gh pr
+    # merge extraction above rather than inventing a second parser style):
+    # find the merge.sh token, then scan remaining tokens left-to-right for
+    # the first bare integer, stripping surrounding quotes from each token
+    # first (merge.sh args are commonly quoted: `merge.sh "140"`).
+    if [ -z "$pr_num" ]; then
+      merge_sh_suffix=$(printf '%s' "$cmd" | grep -oE '[^[:space:]]*merge\.sh.*')
+      if [ -n "$merge_sh_suffix" ]; then
+        merge_sh_args=$(printf '%s' "$merge_sh_suffix" | sed -E 's/^[^[:space:]]*merge\.sh[[:space:]]*//')
+        for token in $merge_sh_args; do
+          token="${token%\"}"; token="${token#\"}"
+          token="${token%\'}"; token="${token#\'}"
+          case "$token" in
+            --*=*) ;;           # --flag=val: skip
+            --*|-*) ;;          # --flag or -f: skip
+            [0-9]*) pr_num="$token"; break ;;   # bare integer: this is the PR number
+          esac
+        done
+      fi
     fi
 
     if [ -n "$pr_num" ]; then
