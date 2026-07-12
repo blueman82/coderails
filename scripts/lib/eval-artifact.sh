@@ -87,3 +87,19 @@ eval_artifact::compute_go() {
     # internal errors — normalise any non-zero outcome to 1 (fail-closed).
     [[ $rc -eq 0 ]]
 }
+
+# eval_artifact::grading_checksum <evals_json_path> <result>
+# Echoes the sha256 hex checksum binding an evals.json's per-eval statuses to
+# a computed result. Canonical input: `jq -cS '[.evals[]? | {id, priority,
+# status}]' <path>` (compact, sorted keys — order- and whitespace-independent)
+# concatenated with a newline and <result>. ONE definition, shared by the
+# writer (post_evals::grade_loop) and the reader (als_read_loop_evals_result)
+# so they can never drift on how the stamp is computed. Deliberately no
+# secret/HMAC: forging a valid stamp requires hand-running this same
+# computation, which is the honest boundary the stamp documents — it catches
+# accidental drift, not deliberate tampering.
+eval_artifact::grading_checksum() {
+    local path="$1" result="$2"
+    local canon; canon=$(jq -cS '[.evals[]? | {id, priority, status}]' "$path" 2>/dev/null)
+    printf '%s\n%s' "$canon" "$result" | shasum -a 256 | awk '{print $1}'
+}
