@@ -154,6 +154,20 @@ describe("projectAssistantText", () => {
     expect(projectAssistantText(raw)).toBe("BANANA");
   });
 
+  it("strips non-text stream_event envelopes (message_start/stop, content_block_start) from the live-window fallback, showing nothing rather than raw JSON", () => {
+    // The real live-streaming window before any text_delta: message_start plus
+    // content_block_start arrive as stream_event envelopes that are NOT prose.
+    // The fallback must not dump these as raw JSON into the clean view.
+    const raw = [
+      JSON.stringify({ type: "stream_event", event: { type: "message_start", message: { model: "claude-x" } } }),
+      JSON.stringify({ type: "stream_event", event: { type: "content_block_start", index: 0 } }),
+    ].join("\n") + "\n";
+    const out = projectAssistantText(raw);
+    expect(out).not.toContain("message_start");
+    expect(out).not.toContain("content_block_start");
+    expect(out).toBe("");
+  });
+
   it("returns a non-hook, non-warning raw remainder when a crashed run produced only unrecognised output (preserves genuine error visibility)", () => {
     // A genuinely crashed run whose only output is an unrecognised error line —
     // NOT hook/warning noise — should still be shown rather than blanked.
