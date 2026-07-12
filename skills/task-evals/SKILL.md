@@ -91,9 +91,12 @@ GO requires all P0 evals to pass. P1 failures don't block the gate but must be l
   "amendments": [ { "eval": "E1", "when": "<ISO8601>", "why": "<reason>" } ],
   "result": null,
   "graded_at": null,
-  "head_sha": "<SHA the grading ran against>"
+  "head_sha": "<SHA the grading ran against>",
+  "grading": { "by": "post_evals.sh grade-loop", "checksum": "<sha256 hex>" }
 }
 ```
+
+`grading` is optional and additive — loop-scope files written by `post_evals.sh grade-loop` (see rule 5 below); pr-scope files and every existing reader tolerate its absence. Adding it does not bump `schema_version` past 1.
 
 This copy and the design spec's copy are kept in lockstep; the enforcement components implement against this definition: `scripts/lib/eval-artifact.sh` (the marker/result SSOT), `scripts/post_evals.sh` (structural validation + result computation, invoked by `/coderails:post-evals`), and the `loop_state_guard` loop-scope gate (blocks loop completion at ≥3 work-units with no passing loop-scope `evals.json`).
 
