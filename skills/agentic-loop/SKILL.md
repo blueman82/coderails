@@ -370,6 +370,8 @@ Inside an authorised loop:
 
 Re-asking is more expensive than over-reaching by a small margin within scope. If the user wants to redirect, they will.
 
+A notable in-scope action taken without a check-in under this phase is also a consciously absorbed decision — append it to `progress.json`'s `decisions_absorbed` at the phase boundary where `progress.json` is already updated.
+
 ### Phases 7 & 8 — stack-specific deploy/push tactics live in a feedback memory, not here
 
 Deploy and push gotchas tied to a particular stack — skip-validation flags when a deploy script blocks on cosmetic lint, rebase-before-push when a versioned artifact (e.g. a compose file) bumps on every PR — belong in your own feedback memory for that stack, not in this general skill. Keep this skill stack-agnostic.
