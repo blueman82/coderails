@@ -231,10 +231,37 @@ describe("collectLoops", () => {
     );
     writeFileSync(
       join(dir, "evals.json"),
-      JSON.stringify({ scope: "loop", tier: 0, tier_justification: "docs-only loop, no runtime behaviour" })
+      JSON.stringify({
+        scope: "loop",
+        tier: 0,
+        tier_justification: "docs-only loop, no runtime behaviour",
+        grading: { by: "post_evals.sh grade-loop", checksum: "abc123" },
+      })
     );
     const loops = collectLoops(base);
     expect(loops[0].evalsFrozen).toBe(true);
+  });
+
+  it("reports evalsFrozen false for a tier-0 exemption whose result is explicitly NO-GO (NO-GO takes precedence over the tier-0 exemption)", () => {
+    const base = makeTmpBase();
+    const dir = join(base, "-tier0-nogo-project", "S5b");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, "progress.json"),
+      JSON.stringify({ status: "complete", session_id: "S5b", completed_marker: 1, work_units: { unit1: { status: "done" } } })
+    );
+    writeFileSync(
+      join(dir, "evals.json"),
+      JSON.stringify({
+        scope: "loop",
+        result: "NO-GO",
+        tier: 0,
+        tier_justification: "docs-only loop, no runtime behaviour",
+        grading: { by: "post_evals.sh grade-loop", checksum: "abc123" },
+      })
+    );
+    const loops = collectLoops(base);
+    expect(loops[0].evalsFrozen).toBe(false);
   });
 
   it("reports evalsFrozen false for a justified NO-GO verdict", () => {
