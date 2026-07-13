@@ -404,6 +404,13 @@ describe("POST /api/run — spawn shape", () => {
     expect(fake!.calls[0].options).toMatchObject({ cwd: "/Users/harrison/Github/coderails" });
   });
 
+  it("sets CODERAILS_HEADLESS_RUN=1 in the spawned child's env, so the discipline\n     Stop hooks (check_confidence_labels.sh / check_verify_loop.sh) exempt this run", async () => {
+    const { handler, fake } = makeHandler();
+    await handler(req({ token: TOKEN, button: "wiki-lint" }));
+    const options = fake!.calls[0].options as { env?: Record<string, string | undefined> };
+    expect(options.env).toMatchObject({ CODERAILS_HEADLESS_RUN: "1" });
+  });
+
   it("builds argv via buildArgv's mapping (read-only button gets --allowedTools)", async () => {
     const { handler, fake } = makeHandler();
     await handler(req({ token: TOKEN, button: "with-input", input: "hello" }));
