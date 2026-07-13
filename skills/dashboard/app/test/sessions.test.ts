@@ -138,9 +138,9 @@ describe("collectLoops", () => {
       evalsFrozen: false,
       lastUpdatedMs: expect.any(Number),
       units: [
-        { key: "backup", done: true, inFlight: false },
-        { key: "rewrite", done: true, inFlight: false },
-        { key: "force-push", done: false, inFlight: true },
+        { key: "backup", status: "done" },
+        { key: "rewrite", status: "done" },
+        { key: "force-push", status: "in-flight" },
       ],
       decisions: [],
     });
