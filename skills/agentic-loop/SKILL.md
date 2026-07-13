@@ -129,15 +129,15 @@ Match the confirmation cadence to the envelope class for the rest of the session
 
 ### Phase 0.5 — Orchestrator operating rules (the conductor obeys its own rules)
 
-The orchestrator (main context) is subject to the same discipline it imposes on workers. In long sessions the orchestrator itself trips the user's stop hooks — confidence-label and verify-loop blocks — and every block is a stall that costs a manual turn to clear, exactly the cost this skill exists to remove.
+The orchestrator (main context) is subject to the same discipline it imposes on workers. Inside an active, incomplete loop, the two discipline Stop hooks — confidence-label and verify-loop — demote a would-be block to a model-visible warn (`additionalContext` on the Stop event) rather than stopping the turn outright; the discipline itself hasn't changed, the warn is the correction signal the orchestrator acts on next turn. Outside an active loop, and for worker output (SubagentStop), both hooks still block outright. Even at warn-level, a missed warn is still a cost — it's the cost this skill exists to keep to a minimum, just paid as a drifted transcript instead of a forced regeneration.
 
 Main context must, in its own output (not just in spawned-agent prompts):
 - Confidence-label every substantive status claim — `(verified)` / `(inferred)` / `(guess)` (same taxonomy as Phase 11).
-- Pre-tag any `## Did Not Verify` bullet that genuinely can't be checked, in the same turn it's written — an untagged bullet blocks the stop hook.
+- Pre-tag any `## Did Not Verify` bullet that genuinely can't be checked, in the same turn it's written — an untagged bullet blocks the stop outside a loop and for workers, and is the first thing the in-loop warn will name.
 - Never narrate a claim about an artifact (PR merged, deploy live) without having run the check this turn (Phase 12).
-- End any stopping turn inside an active loop with a LOOP-STOP declaration line — `LOOP-STOP: <hard-stop|approval-gate|awaiting-input|complete> — <reason>` — emitted in the SAME turn as the confidence-label and Did-Not-Verify requirements above (the `loop_stall_guard` hook blocks a stop that lacks one; bundling all three keeps you from clearing one stop hook only to trip another). Declaring `complete` means the loop is done: also set `progress.json` `status: "complete"` and run the Phase 13 teardown. The declaration line is all that's required — `loop_stop_counts` is HOOK-OWNED: the `loop_stall_guard` hook itself increments the matching category on a valid declaration; never write or compute this field yourself.
+- End any stopping turn inside an active loop with a LOOP-STOP declaration line — `LOOP-STOP: <hard-stop|approval-gate|awaiting-input|complete> — <reason>` — as the FINAL line of the turn, emitted in the SAME turn as the confidence-label and Did-Not-Verify requirements above — that ending-line position is the contract this skill defines and the hook's category accounting assumes: when a turn carries more than one LOOP-STOP-shaped line (e.g. a quoted example), `loop_stall_guard` counts only the last one, so the last line must be the declaration that reflects the turn's actual outcome. Bundling all three matters more, not less, in the warn era: the confidence-label and verify-loop hooks no longer block the orchestrator's in-loop Stop turns, so nothing else forces those labels and DNV tags into the transcript — the bundle is what keeps them present for post-hoc audit, and one composed ending beats clearing one stop hook only to trip another (`loop_stall_guard` still blocks). Declaring `complete` means the loop is done: also set `progress.json` `status: "complete"` and run the Phase 13 teardown. The declaration line is all that's required — `loop_stop_counts` is HOOK-OWNED: the `loop_stall_guard` hook itself increments the matching category on a valid declaration; never write or compute this field yourself.
 
-The why: Phase 11 disciplines the workers; Phase 0.5 disciplines the orchestrator — because a conductor that trips its own hooks stalls the loop just as surely as a worker that does. Past failure: an orchestrator tripped ~8 confidence/verify blocks in one run — each a manual turn to clear.
+The why: Phase 11 disciplines the workers; Phase 0.5 disciplines the orchestrator — because a conductor that ignores its own warns drifts the loop just as surely as a worker that trips a hard block. Past failure: loop f87a0a2e forced ~69 turn regenerations in one crack-on loop (49 confidence-label blocks + 20 verify-loop blocks) — the incident that motivated demoting these two hooks to warn-level inside an active loop.
 
 ### Phase 1 — State the plan in bullets, ask once
 
@@ -525,7 +525,7 @@ Model an approval-gate as "pause-then-proceed", never as "do not start". Past fa
 **Loop complete:**
 5. All authorised work done and all gates passed — run Phase 13, then stop.
 
-**Declaring the stop (the LOOP-STOP contract).** Whichever class applies, a stop inside an active loop must be declared, or the `loop_stall_guard` Stop hook blocks it. End the stopping turn with:
+**Declaring the stop (the LOOP-STOP contract).** Whichever class applies, a stop inside an active loop must be declared, or the `loop_stall_guard` Stop hook blocks it. The declaration line must be the FINAL line of the stopping turn — that ending-line position is the contract this skill defines and the hook's category accounting assumes: when a turn carries more than one LOOP-STOP-shaped line, `loop_stall_guard` counts only the last one, so the last line must be the declaration that reflects the turn's actual outcome, coming after the confidence-label and Did-Not-Verify content required by Phase 0.5. End the stopping turn with:
 
 > `LOOP-STOP: <category> — <reason>`
 
