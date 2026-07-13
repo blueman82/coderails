@@ -485,7 +485,7 @@ Do not stop work early because the context window is filling or a token budget i
 
 **Lifecycle, enforced by the `loop_state_guard` Stop hook (presence + ownership).** The file moves through a fixed lifecycle, and the guard blocks any stop where an active loop has no session-owned file:
 - **Stub-first (Phase -2):** `status: "initialising"`, stamped with this `session_id`.
-- **Enrich at Phase 0:** record the envelope verbatim; `status: "in-progress"`.
+- **Enrich at Phase 0:** record the envelope verbatim in `authorising_prompt_raw`; `status: "in-progress"`.
 - **Update at each phase boundary:** current phase, work-unit states, Spec A's disposition fields, `last_updated` — carry `loop_stop_counts` forward per the same conditional as the Phase -2 stub rule (never computed or edited by the orchestrator; see above).
 - **Teardown at Phase 13:** `status: "complete"`, and set `completed_marker` to the number of agentic-loop loops run in this session so far — i.e. the prior `completed_marker` (default 0) **plus 1**. Because this skill is invoked once per loop, that ordinal matches the guard's count of agentic-loop invocations, which is how the guard distinguishes a finished loop from a new one.
 
