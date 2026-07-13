@@ -172,13 +172,17 @@ post_evals::grade_loop() {
     # its reach (rule-5 text + Phase 13 audit territory).
     local amend_count prior_stamped
     amend_count=$(jq -r '(.amendments // []) | length' "$path")
+    if ! [[ "$amend_count" =~ ^[0-9]+$ ]]; then
+        printf 'post_evals: grade-loop refused for %s — .amendments is malformed (not an array). Fix the amendments array, then re-run grade-loop.\n' "$path" >&2
+        return 1
+    fi
     if jq -e '(.grading // .graded_at // .result) != null' "$path" >/dev/null 2>&1; then
         prior_stamped=$(jq -r '(.grading.amendments_at_grade // 0) | tonumber? // 0' "$path")
         [[ "$prior_stamped" =~ ^[0-9]+$ ]] || prior_stamped=0
         if [[ "$amend_count" -gt "$prior_stamped" ]]; then
             local unattested
             unattested=$(jq --argjson n "$prior_stamped" \
-                '[.amendments[$n:][] | select(((.regraded_by? // "") | tostring | test("\\S")) | not)] | length' "$path" 2>/dev/null)
+                '[.amendments[$n:][] | select(((.regraded_by? // "") | (type == "string" and test("\\S"))) | not)] | length' "$path" 2>/dev/null)
             if ! [[ "$unattested" =~ ^[0-9]+$ ]] || [[ "$unattested" -gt 0 ]]; then
                 printf 'post_evals: grade-loop refused for %s — amendment(s) added after the prior grade lack a non-blank regraded_by (or the amendments array is malformed). Dispatch a fresh grader for the amended eval(s), record regraded_by in each post-verdict amendment, and amend the graded file in place — do not regenerate it — then re-run grade-loop.\n' "$path" >&2
                 return 1
