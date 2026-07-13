@@ -113,10 +113,10 @@ treat it as machine-local config, same as `.claude/settings.local.json`.
 as durable PR comments; `task-evals` freezes a game-resistant success-eval set
 at task intake and gates `/merge` on it.
 
-The two UserPromptSubmit hooks nudge: inject_context runs silently, and the
-discipline catch-up injects a reminder into the next turn. Four Stop hooks block
+The one UserPromptSubmit hook, inject_context, runs silently. Four Stop hooks block
 via exit 2: confidence-label check, verify-loop check (both promoted from
-warn-mode on 2026-05-05), loop-state guard, and loop-stall guard. The same two
+warn-mode on 2026-05-05; verify-loop also blocks on a missing Did-Not-Verify
+section, not just an untagged bullet), loop-state guard, and loop-stall guard. The same two
 content-discipline checks (confidence-label and verify-loop) also run on
 SubagentStop — so subagents are held to the same standards as the parent session.
 On PreToolUse, five hooks can block: the destructive-bash gate, the opt-in test
