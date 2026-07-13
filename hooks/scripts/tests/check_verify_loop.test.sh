@@ -182,6 +182,67 @@ check "2 files, no DNV section -> allow" 0 "$(run "$(payload "$T")")"
 T=$(mk_transcript_n_files "Done, all changes applied. (verified)" 3)
 check "stop_hook_active + 3 files, no DNV -> allow (guard precedence)" 0 "$(run "$(payload "$T" true)")"
 
+# ── Presence-block loop-scoped warn-demotion (wired through the SAME
+# als_loop_active_incomplete predicate #155 used for the bullet path) ───────
+# mk_transcript_n_files builds assistant-only records (no genuine user
+# record), so dc_file_count falls back to whole-transcript counting — the
+# turn-scoping cutoff never applies here, matching the pre-existing Test A-D
+# fixtures above.
+
+# Build a transcript with N agentic-loop invocations, N_files unique Edit
+# tool_use entries, then optional final text (mirrors mk_loop_transcript but
+# parameterised on file count instead of a fixed single edit).
+mk_loop_transcript_n_files() { # n_invocations n_files final_text -> path
+  local n_inv="$1" n_files="$2" final="$3" out="$TMP/lnf_${RANDOM}.jsonl" i=0
+  : > "$out"
+  while [ "$i" -lt "$n_inv" ]; do
+    printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Skill","input":{"skill":"coderails:agentic-loop"}}]}}' >> "$out"
+    i=$((i+1))
+  done
+  for i in $(seq 1 "$n_files"); do
+    printf '%s\n' "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Edit\",\"input\":{\"file_path\":\"/tmp/lf${i}.py\"}}]}}" >> "$out"
+  done
+  if [ -n "$final" ]; then
+    jq -cn --arg t "$final" '{type:"assistant",message:{content:[{type:"text",text:$t}]}}' >> "$out"
+  fi
+  printf '%s' "$out"
+}
+
+# Case P1: loop active+incomplete, Stop, 3 turn-edits, NO DNV header -> exit 0,
+# stdout carries additionalContext AND the discipline-warn(loop) prefix AND
+# the presence message (session modified N files ... no section).
+reset_loop; T=$(mk_loop_transcript_n_files 1 3 "Done, all changes applied. (verified)"); write_progress S1 in-progress 0
+run_capture "$(loop_payload "$T" S1)"
+check "presence: loop active+incomplete -> exit 0" 0 "$RC_OUT"
+case "$OUT_OUT" in *additionalContext*) p1_ctx=1 ;; *) p1_ctx=0 ;; esac
+check "presence: loop active+incomplete -> stdout has additionalContext" 1 "$p1_ctx"
+case "$OUT_OUT" in *"discipline-warn(loop)"*) p1_warn=1 ;; *) p1_warn=0 ;; esac
+check "presence: loop active+incomplete -> warn message tagged discipline-warn(loop)" 1 "$p1_warn"
+p1_shape=$(printf '%s' "$OUT_OUT" | jq -e '.hookSpecificOutput.hookEventName == "Stop"' 2>/dev/null)
+check "presence: loop active+incomplete -> stdout is valid JSON with hookEventName=Stop" "true" "$p1_shape"
+p1_msg=$(printf '%s' "$OUT_OUT" | jq -e '.hookSpecificOutput.additionalContext | contains("no \"## Did Not Verify\" section")' 2>/dev/null)
+check "presence: loop active+incomplete -> presence message embedded in additionalContext" "true" "$p1_msg"
+
+# Case P2: no loop invocation in transcript, Stop, 3 turn-edits, no DNV header
+# -> exit 2 (unchanged hard block outside a loop).
+reset_loop; T=$(mk_transcript_n_files "Done, all changes applied. (verified)" 3)
+check "presence: no loop invocation -> exit 2 unchanged" 2 "$(run "$(loop_payload "$T" S1)")"
+
+# Case P3: loop complete (marker == invocations, session-owned), Stop, 3
+# turn-edits, no DNV header -> exit 2 (completed loop is not demoted).
+reset_loop; T=$(mk_loop_transcript_n_files 1 3 "Done, all changes applied. (verified)"); write_progress S1 complete 1
+check "presence: loop complete (not re-armed, owned) -> exit 2" 2 "$(run "$(loop_payload "$T" S1)")"
+
+# Case P4: demoted-path log line for the presence branch matches
+# presence_block=1 would_block=1 warned=1 blocked=0.
+reset_loop; : > "$CLAUDE_DISCIPLINE_LOG"; T=$(mk_loop_transcript_n_files 1 3 "Done, all changes applied. (verified)"); write_progress S1 in-progress 0
+run "$(loop_payload "$T" S1)" >/dev/null 2>&1
+case "$(cat "$CLAUDE_DISCIPLINE_LOG" 2>/dev/null)" in
+  *"presence_block=1 would_block=1 warned=1 blocked=0"*) p4_match=1 ;;
+  *) p4_match=0 ;;
+esac
+check "presence: demoted-path log line: presence_block=1 would_block=1 warned=1 blocked=0" 1 "$p4_match"
+
 # ── Turn-scoping cases (file_count scoped to records after the last genuine
 # user prompt, not session-cumulative) ──────────────────────────────────────
 
@@ -446,5 +507,18 @@ check "SubagentStop, 3+-edit agent transcript, clean message -> allow (presence 
 # had room to include.
 T=$(mk_transcript_n_files "" 3)
 check "empty final text + 3 turn-edits -> allow (empty-text skip precedence)" 0 "$(run "$(payload "$T")")"
+
+# Case P5: SubagentStop cannot reach the presence branch at all (file_count is
+# always 0 on that path — case g above already pins this for a CLEAN message).
+# This confirms a DIRTY (untagged-DNV) SubagentStop message still hard-blocks
+# even with a loop active: the presence path structurally never fires there,
+# and the bullet path's SubagentStop exclusion (event check first) already
+# covers it — no new behaviour from this PR, sanity pin only.
+reset_loop; write_progress S1 in-progress 1
+DNV_MSG_P5="Work. (verified)
+## Did Not Verify
+- untagged item"
+AT_P5=$(mk_agent_transcript "$DNV_MSG_P5")
+check "presence: SubagentStop with loop active + untagged DNV bullet -> exit 2 (block-enforced, presence irrelevant)" 2 "$(run "$(subagentstop_payload "$DNV_MSG_P5" "$AT_P5")")"
 
 [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails)"; exit 1; }

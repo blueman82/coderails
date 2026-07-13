@@ -49,7 +49,11 @@
 # section with one untagged bullet blocked. It is keyed on the HEADER's
 # presence, not on zero bullets — a compliant prose-only section ("nothing
 # outstanding") has the header but no bullets and must still pass, the same
-# honesty boundary as an all-tagged bullet list.
+# honesty boundary as an all-tagged bullet list. It is wired through the SAME
+# als_loop_active_incomplete demotion predicate #155 added for the bullet
+# path (same Stop-only, fail-toward-blocking shape) — after #155, a hard
+# presence-block in-loop would be the only remaining in-loop hard block,
+# inconsistent with the merged demotion arc.
 
 LOG_FILE="${CLAUDE_DISCIPLINE_LOG:-$HOME/.claude/discipline.log}"
 TAIL_LINES="${CLAUDE_HOOK_TAIL_LINES:-300}"
@@ -135,8 +139,24 @@ if [ "$has_dnv_header" -eq 0 ]; then
   # omission the section-policing below catches for untagged bullets —
   # resolve or tag, don't skip the section entirely.
   if [ "$file_count" -ge 3 ]; then
+    presence_msg="[verify-loop-block] session modified $file_count files but the response has no \"## Did Not Verify\" section. Rule (CLAUDE.md): after any response that edits files, end with a ## Did Not Verify section — resolve each item or tag it (unverifiable: <reason>). Add the section before stopping."
+
+    # Loop-scoped warn demotion — same predicate, same fail-toward-blocking
+    # shape as the bullet path below (#155). Evaluated lazily, only once a
+    # block is imminent. SubagentStop never reaches this branch (the whole
+    # has_dnv_header block above is dead on that path since file_count is
+    # always 0 there), so this mirrors the bullet path's demotion contract
+    # for consistency rather than adding new in-loop exposure.
+    if [ "$hook_event" = "Stop" ] && als_loop_active_incomplete "$transcript" "$cwd" "$(als_sanitise_session_id "$session_id")"; then
+      if jq -n --arg m "${presence_msg/\[verify-loop-block\]/[discipline-warn(loop)]}" \
+        '{"hookSpecificOutput":{"hookEventName":"Stop","additionalContext":$m}}'; then
+        log_line "hook=verify_loop session=$session_id text_len=${#text} attempts=$attempts files=$file_count dnv_items=0 resolvable_dnv_items=0 presence_block=1 would_block=1 warned=1 blocked=0"
+        exit 0
+      fi
+    fi
+
     log_line "hook=verify_loop session=$session_id text_len=${#text} attempts=$attempts files=$file_count dnv_items=0 resolvable_dnv_items=0 presence_block=1 blocked=1"
-    echo "[verify-loop-block] session modified $file_count files but the response has no \"## Did Not Verify\" section. Rule (CLAUDE.md): after any response that edits files, end with a ## Did Not Verify section — resolve each item or tag it (unverifiable: <reason>). Add the section before stopping." >&2
+    echo "$presence_msg" >&2
     exit 2
   fi
   log_line "hook=verify_loop session=$session_id text_len=${#text} attempts=$attempts files=$file_count dnv_items=0 resolvable_dnv_items=0 blocked=0"
