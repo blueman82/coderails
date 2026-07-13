@@ -241,7 +241,6 @@ export function createAggregator(deps: AggregatorDeps): Aggregator {
 
       watchDir(deps.projectsDir, scheduleActivityRefresh);
       watchDir(deps.loopsDir, scheduleActivityRefresh);
-      for (const dir of deps.cfg.memoryPaths) watchDir(dir, scheduleActivityRefresh);
       if (deps.runsDir) watchDir(deps.runsDir, refreshRuns);
       if (deps.queueDir) watchDir(deps.queueDir, scheduleActivityRefresh);
       if (deps.buildsDir) watchDir(deps.buildsDir, scheduleActivityRefresh);
