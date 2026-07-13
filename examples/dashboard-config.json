@@ -8,21 +8,24 @@
       "label": "WIKI LINT",
       "command": "/coderails:wiki-lint",
       "cwd": "/Users/harrison/Github/coderails",
-      "profile": "read-only"
+      "profile": "read-only",
+      "hidden": true
     },
     {
       "name": "sync-docs-weekly",
       "label": "SYNC DOCS",
       "command": "/sync-docs --append-system-prompt \"Write the full drift report to ~/.claude/coderails-dashboard/routines/sync-docs/report-{date}.md before finishing.\"",
       "cwd": "/Users/harrison/Github/coderails",
-      "profile": "read-only"
+      "profile": "read-only",
+      "hidden": true
     },
     {
       "name": "memory-consolidation-weekly",
       "label": "MEMORY CONSOLIDATION",
       "command": "/coderails:memory-consolidation",
       "cwd": "/Users/harrison/Github/coderails",
-      "profile": "read-only"
+      "profile": "read-only",
+      "hidden": true
     },
     {
       "name": "ask",
@@ -38,7 +41,8 @@
       "command": "/coderails:loop-retro-promotion",
       "cwd": "/Users/harrison/Documents/Github/coderails",
       "profile": "bypass",
-      "bypassPermissions": true
+      "bypassPermissions": true,
+      "hidden": true
     }
   ],
   "routines": [
