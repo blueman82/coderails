@@ -12,7 +12,6 @@ export interface Snapshot {
   sessions: SessionInfo[];
   loops: LoopInfo[];
   gates: (PrGate | PrGateError)[];
-  trail: TrailEntry[];
   health: HealthTile[];
   runs: RunRecord[];
   queue: QueueEntry[];
