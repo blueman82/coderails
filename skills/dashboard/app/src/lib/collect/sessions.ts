@@ -7,17 +7,28 @@ export interface SessionInfo {
   state: "active" | "idle" | "stalled";
 }
 
+export interface LoopUnit {
+  key: string;
+  done: boolean;
+  inFlight: boolean;
+  description?: string;
+  pr?: number;
+}
+
 export interface LoopInfo {
   slug: string;
-  // Human-readable loop name from progress.json's "loop" field; falls back to
-  // `slug` when absent, blank, or non-string (see readLoopName below).
-  name: string;
+  // Loop title, chain: progress.json's "loop" field -> authorising_prompt_raw
+  // (first 80 chars, trimmed, "…") -> slug (see readTitle below).
+  title: string;
   sessionId: string;
   status: string;
   workUnitsDone: number;
   workUnitsTotal: number;
   evalsFrozen: boolean;
-  unitTitles: { title: string; done: boolean }[];
+  // progress.json's last_updated field when it parses as a valid date, else
+  // progress.json's own file mtime (see readLastUpdatedMs below).
+  lastUpdatedMs: number;
+  units: LoopUnit[];
   decisions: string[];
 }
 
