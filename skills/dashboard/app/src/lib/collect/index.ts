@@ -124,7 +124,6 @@ export function createAggregator(deps: AggregatorDeps): Aggregator {
     sessions: [],
     loops: [],
     gates: [],
-    trail: [],
     health: [],
     runs: [],
     queue: [],
