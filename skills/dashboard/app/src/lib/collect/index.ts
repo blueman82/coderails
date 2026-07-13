@@ -25,7 +25,6 @@ export interface AggregatorDeps {
   runsDir?: string;
   queueDir?: string;
   buildsDir?: string;
-  memoryTrailLimit?: number;
   runsLimit?: number;
   queueLimit?: number;
   gatesPollMs?: number;
