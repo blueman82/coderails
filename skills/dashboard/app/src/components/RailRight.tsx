@@ -224,35 +224,6 @@ export function RailRight({ token, buttons }: RailRightProps) {
           })}
         </div>
 
-        <div className="hud-run-history">
-          {runs.length > 0 ? (
-            runs
-              .filter((r) => r.endedAt !== undefined)
-              .map((run) => {
-                const result = runResultLabel(run);
-                const duration = run.endedAt ? formatDuration(run.startedAt, run.endedAt) : "…";
-                // Glyph-derivation logic duplicated intentionally in OutputViewerPanel.tsx —
-                // two real independent run-history implementations exist; keep both mappings
-                // in sync if either changes.
-                const glyphClass = result === "PASS" ? "status-ok" : result === "FAIL" ? "status-fail" : "";
-                const glyph = result === "PASS" ? "◆" : result === "FAIL" ? "◇" : "·";
-                return (
-                  <div className="hud-run-row" key={run.runId}>
-                    <span>
-                      <span className={`hud-glyph${glyphClass ? ` ${glyphClass}` : ""}`}>{glyph}</span>
-                      {run.button.toUpperCase()} · {result}
-                    </span>
-                    <span>
-                      {duration} · {formatHHMM(run.startedAt)}
-                    </span>
-                  </div>
-                );
-              })
-          ) : (
-            <div className="hud-empty-state">no runs yet</div>
-          )}
-        </div>
-
         <div className="hud-deck-footnote">Intents Write to System/Queue — Runner Executes</div>
       </div>
 
