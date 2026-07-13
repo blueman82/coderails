@@ -102,7 +102,7 @@ treat it as machine-local config, same as `.claude/settings.local.json`.
 | Commands | Skills | Hooks (automatic) |
 |---|---|---|
 | `/workflow` `/prep` `/push` `/merge` `/coderails:init` | **Workflow & evals:** agentic-loop, task-evals | confidence-label check (Stop) |
-| `/post-review` `/post-evals` | **Planning:** planning-sequence, premortem, brainstorming, writing-plans | Did-Not-Verify catch-up (UserPromptSubmit) |
+| `/post-review` `/post-evals` | **Planning:** planning-sequence, premortem, brainstorming, writing-plans | Did-Not-Verify check (Stop) |
 | `/assumptions` `/verify` `/notchecked` `/disconfirm` | **Dev discipline:** test-driven-development, systematic-debugging, engineering-principles (+ go/python/ts variants), verification-before-completion | destructive-bash gate (PreToolUse) |
 | `/test-gate-setup` | **Multi-agent:** dispatching-parallel-agents, subagent-driven-development, executing-plans, finishing-a-development-branch | project test gate (PreToolUse) |
 | | **Wiki:** wiki-init, wiki-query, wiki-ingest, wiki-lint | |
@@ -113,10 +113,12 @@ treat it as machine-local config, same as `.claude/settings.local.json`.
 as durable PR comments; `task-evals` freezes a game-resistant success-eval set
 at task intake and gates `/merge` on it.
 
-The two UserPromptSubmit hooks nudge: inject_context runs silently, and the
-discipline catch-up injects a reminder into the next turn. Four Stop hooks block
+The one UserPromptSubmit hook, inject_context, runs silently. Four Stop hooks block
 via exit 2: confidence-label check, verify-loop check (both promoted from
-warn-mode on 2026-05-05), loop-state guard, and loop-stall guard. The same two
+warn-mode on 2026-05-05), loop-state guard, and loop-stall guard. verify-loop
+also blocks when a turn edits 3+ files and the response omits the
+Did-Not-Verify section entirely (added 2026-07-13), not just on untagged
+bullets. The same two
 content-discipline checks (confidence-label and verify-loop) also run on
 SubagentStop — so subagents are held to the same standards as the parent session.
 On PreToolUse, five hooks can block: the destructive-bash gate, the opt-in test
