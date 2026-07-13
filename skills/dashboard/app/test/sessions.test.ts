@@ -109,16 +109,17 @@ describe("collectLoops", () => {
     const loop = loops.find((l) => l.slug === "-work-project");
     expect(loop).toEqual({
       slug: "-work-project",
-      name: "-work-project",
+      title: "-work-project",
       sessionId: "S1",
       status: "complete",
       workUnitsDone: 2,
       workUnitsTotal: 3,
       evalsFrozen: true,
-      unitTitles: [
-        { title: "wu1", done: true },
-        { title: "wu2", done: true },
-        { title: "wu3", done: false },
+      lastUpdatedMs: expect.any(Number),
+      units: [
+        { key: "wu1", done: true, inFlight: false },
+        { key: "wu2", done: true, inFlight: false },
+        { key: "wu3", done: false, inFlight: true },
       ],
       decisions: [],
     });
@@ -129,16 +130,17 @@ describe("collectLoops", () => {
     const loop = loops.find((l) => l.slug === "-work-project-legacy");
     expect(loop).toEqual({
       slug: "-work-project-legacy",
-      name: "-work-project-legacy",
+      title: "-work-project-legacy",
       sessionId: "S2",
       status: "complete",
       workUnitsDone: 2,
       workUnitsTotal: 3,
       evalsFrozen: false,
-      unitTitles: [
-        { title: "backup", done: true },
-        { title: "rewrite", done: true },
-        { title: "force-push", done: false },
+      lastUpdatedMs: expect.any(Number),
+      units: [
+        { key: "backup", done: true, inFlight: false },
+        { key: "rewrite", done: true, inFlight: false },
+        { key: "force-push", done: false, inFlight: true },
       ],
       decisions: [],
     });
@@ -153,7 +155,7 @@ describe("collectLoops", () => {
       workUnitsDone: 0,
       workUnitsTotal: 0,
       evalsFrozen: false,
-      unitTitles: [],
+      units: [],
     });
   });
 
@@ -167,11 +169,11 @@ describe("collectLoops", () => {
       workUnitsDone: 0,
       workUnitsTotal: 0,
       evalsFrozen: false,
-      unitTitles: [],
+      units: [],
     });
   });
 
-  it("uses progress.json's loop field as the human-readable name when present", () => {
+  it("uses progress.json's loop field as the human-readable title when present", () => {
     const base = makeTmpBase();
     const dir = join(base, "-named-project", "S9");
     mkdirSync(dir, { recursive: true });
@@ -185,19 +187,19 @@ describe("collectLoops", () => {
       })
     );
     const loops = collectLoops(base);
-    expect(loops[0].name).toBe("observability-dashboard (sub-project 1 of agentic-os evolution)");
+    expect(loops[0].title).toBe("observability-dashboard (sub-project 1 of agentic-os evolution)");
   });
 
-  it("falls back to the slug for name when progress.json has no loop field", () => {
+  it("falls back to the slug for title when progress.json has no loop field and no authorising_prompt_raw", () => {
     const base = makeTmpBase();
     const dir = join(base, "-unnamed-project", "S10");
     mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, "progress.json"), JSON.stringify({ status: "in-progress", session_id: "S10", work_units: {} }));
     const loops = collectLoops(base);
-    expect(loops[0].name).toBe("-unnamed-project");
+    expect(loops[0].title).toBe("-unnamed-project");
   });
 
-  it("falls back to the slug for name when progress.json's loop field is blank", () => {
+  it("falls back to the slug for title when progress.json's loop field is blank", () => {
     const base = makeTmpBase();
     const dir = join(base, "-blank-loop-project", "S11");
     mkdirSync(dir, { recursive: true });
@@ -206,10 +208,10 @@ describe("collectLoops", () => {
       JSON.stringify({ status: "in-progress", session_id: "S11", loop: "   ", work_units: {} })
     );
     const loops = collectLoops(base);
-    expect(loops[0].name).toBe("-blank-loop-project");
+    expect(loops[0].title).toBe("-blank-loop-project");
   });
 
-  it("falls back to the slug for name when progress.json's loop field is not a string", () => {
+  it("falls back to the slug for title when progress.json's loop field is not a string", () => {
     const base = makeTmpBase();
     const dir = join(base, "-nonstring-loop-project", "S12");
     mkdirSync(dir, { recursive: true });
@@ -218,7 +220,104 @@ describe("collectLoops", () => {
       JSON.stringify({ status: "in-progress", session_id: "S12", loop: 42, work_units: {} })
     );
     const loops = collectLoops(base);
-    expect(loops[0].name).toBe("-nonstring-loop-project");
+    expect(loops[0].title).toBe("-nonstring-loop-project");
+  });
+
+  it("falls back to authorising_prompt_raw's first 80 chars (trimmed, ellipsis) for title when loop is null", () => {
+    const loops = collectLoops(LOOP_FIXTURES);
+    const loop = loops.find((l) => l.slug === "-work-project-authprompt");
+    expect(loop?.title).toBe(
+      "Read memory file `project_loop_hardening_handoff.md` for full context. Two syste…"
+    );
+  });
+
+  it("uses authorising_prompt_raw verbatim (no ellipsis) when it is 80 chars or shorter", () => {
+    const base = makeTmpBase();
+    const dir = join(base, "-short-prompt-project", "S13");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, "progress.json"),
+      JSON.stringify({
+        status: "in-progress",
+        session_id: "S13",
+        loop: null,
+        authorising_prompt_raw: "  Fix the flaky test.  ",
+        work_units: {},
+      })
+    );
+    const loops = collectLoops(base);
+    expect(loops[0].title).toBe("Fix the flaky test.");
+  });
+
+  it("parses keyed units carrying description, desc-alias, and pr (fixture (a): description+pr)", () => {
+    const loops = collectLoops(LOOP_FIXTURES);
+    const loop = loops.find((l) => l.slug === "-work-project-described");
+    expect(loop?.units).toEqual([
+      { key: "wu1-done", done: true, inFlight: false, description: "F1: first unit, done and described.", pr: 17 },
+      { key: "wu2-inprogress", done: false, inFlight: true, description: "F2: second unit, in flight.", pr: 18 },
+      { key: "wu3-doing", done: false, inFlight: true, description: "F3: third unit, uses the desc alias and the doing status." },
+      { key: "wu4-pending", done: false, inFlight: false },
+    ]);
+  });
+
+  it("omits description when both description and desc are absent or blank, and omits pr when not a number", () => {
+    const base = makeTmpBase();
+    const dir = join(base, "-blank-desc-project", "S14");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, "progress.json"),
+      JSON.stringify({
+        status: "in-progress",
+        session_id: "S14",
+        work_units: {
+          "wu-blank": { status: "pending", description: "   ", pr: "17" },
+          "wu-none": { status: "pending" },
+        },
+      })
+    );
+    const loops = collectLoops(base);
+    expect(loops[0].units).toEqual([
+      { key: "wu-blank", done: false, inFlight: false },
+      { key: "wu-none", done: false, inFlight: false },
+    ]);
+  });
+
+  it("uses last_updated when it parses as a valid date (precedence over mtime)", () => {
+    const loops = collectLoops(LOOP_FIXTURES);
+    const loop = loops.find((l) => l.slug === "-work-project-described");
+    expect(loop?.lastUpdatedMs).toBe(Date.parse("2026-07-13T12:00:00Z"));
+  });
+
+  it("falls back to progress.json's mtime when last_updated is invalid (fixture (e): last_updated invalid -> mtime fallback)", () => {
+    const base = makeTmpBase();
+    const dir = join(base, "-invalid-lastupdated-project", "S15");
+    mkdirSync(dir, { recursive: true });
+    const file = join(dir, "progress.json");
+    writeFileSync(
+      file,
+      JSON.stringify({
+        status: "in-progress",
+        session_id: "S15",
+        last_updated: "not-a-date",
+        work_units: {},
+      })
+    );
+    const mtime = new Date("2026-07-01T00:00:00Z");
+    utimesSync(file, mtime, mtime);
+    const loops = collectLoops(base);
+    expect(loops[0].lastUpdatedMs).toBe(mtime.getTime());
+  });
+
+  it("falls back to progress.json's mtime when last_updated is absent entirely", () => {
+    const base = makeTmpBase();
+    const dir = join(base, "-no-lastupdated-project", "S16");
+    mkdirSync(dir, { recursive: true });
+    const file = join(dir, "progress.json");
+    writeFileSync(file, JSON.stringify({ status: "in-progress", session_id: "S16", work_units: {} }));
+    const mtime = new Date("2026-07-02T00:00:00Z");
+    utimesSync(file, mtime, mtime);
+    const loops = collectLoops(base);
+    expect(loops[0].lastUpdatedMs).toBe(mtime.getTime());
   });
 
   it("reports evalsFrozen true for a tier-0 exemption verdict with a grading stamp", () => {
