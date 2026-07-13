@@ -1,0 +1,80 @@
+{
+  "schema_version": 1,
+  "scope": "pr",
+  "task_ref": "docs/loop-stop-bundle-warn-era",
+  "tier": 1,
+  "tier_justification": "1 work-unit (prose-only edit to a single file), no irreversible/outward surface, but no existing test or verify-criterion covers these specific prose claims (the goal state is new/changed text asserting warn-vs-block behaviour) — tier 0's 'existing check already covers it' predicate does not hold, so standard tier 1 applies.",
+  "frozen_at": "2026-07-13T09:11:32Z",
+  "frozen_sha": "a36fa9d8df1c6f962cbeae3050dbf6701f7e5bf5",
+  "evals": [
+    {
+      "id": "E1",
+      "priority": "P0",
+      "mode": "scripted",
+      "surface": "merged-state",
+      "assert": "The stale 'every block is a stall' claim about in-loop orchestrator confidence/verify hooks is gone from SKILL.md.",
+      "cmd": "! git grep -n \"every block is a stall\" -- skills/agentic-loop/SKILL.md",
+      "negative_control": "git grep -n \"every block is a stall\" -- skills/agentic-loop/SKILL.md   # passes (finds it) on frozen_sha, proving the grep is capable of matching before the edit",
+      "status": "pending",
+      "evidence": ""
+    },
+    {
+      "id": "E2",
+      "priority": "P0",
+      "mode": "scripted",
+      "surface": "merged-state",
+      "assert": "The stale '~8 confidence/verify blocks' past-failure figure is replaced; the real f87a0a2e incident (~69 regenerations / 49 confidence + 20 verify-loop) is now cited in Phase 0.5.",
+      "cmd": "! git grep -q \"~8 confidence\" -- skills/agentic-loop/SKILL.md && git grep -q \"f87a0a2e\" -- skills/agentic-loop/SKILL.md && git grep -q \"69\" -- skills/agentic-loop/SKILL.md",
+      "negative_control": "git grep -q \"~8 confidence\" -- skills/agentic-loop/SKILL.md   # true (matches) on frozen_sha, proving the stale figure is present pre-edit and the grep can detect it",
+      "status": "pending",
+      "evidence": ""
+    },
+    {
+      "id": "E3",
+      "priority": "P0",
+      "mode": "scripted",
+      "surface": "merged-state",
+      "assert": "Phase 0.5 opening paragraph states the two discipline hooks WARN (not block) on Stop inside an active loop, and still block outside loops / for worker SubagentStop output.",
+      "cmd": "git grep -n -A2 \"Phase 0.5\" -- skills/agentic-loop/SKILL.md | grep -qi \"warn\" && git grep -qi \"still block\\|block outside\\|blocks outside\\|SubagentStop\" -- skills/agentic-loop/SKILL.md",
+      "negative_control": "git grep -n -A2 \"Phase 0.5\" -- skills/agentic-loop/SKILL.md | grep -qi \"warn\"   # exits 1 (no match) on frozen_sha since the opening paragraph only says 'blocks', proving the main check's first clause can fail pre-edit",
+      "status": "pending",
+      "evidence": ""
+    },
+    {
+      "id": "E4",
+      "priority": "P0",
+      "mode": "agent-run",
+      "surface": "merged-state",
+      "assert": "Both bundle passages (Phase 0.5's LOOP-STOP bullet and the 'Declaring the stop (the LOOP-STOP contract)' section) state that the LOOP-STOP declaration line is the FINAL line of the stopping turn, and the bundling rationale is extended for the warn era (in-loop discipline enforcement is warn-level for the orchestrator, so bundling keeps confidence-label + DNV present for post-hoc transcript audit).",
+      "verifier_instruction": "You are grading a prose edit to skills/agentic-loop/SKILL.md in the coderails repo, on branch docs/loop-stop-bundle-warn-era, against origin/main. You have NOT seen any implementation conversation — grade only from the file content and this instruction. Read the merged/current skills/agentic-loop/SKILL.md. Find (a) the Phase 0.5 section's LOOP-STOP bullet (originally near 'End any stopping turn inside an active loop with a LOOP-STOP declaration line') and (b) the 'Declaring the stop (the LOOP-STOP contract)' section near the end of the file. PASS requires ALL of: (1) both passages explicitly state the LOOP-STOP line must be the LAST/FINAL line of the stopping turn (not merely 'in the same turn' — ordering must be explicit in both places); (2) the rationale for bundling LOOP-STOP with confidence-label/DNV is tied to the warn-era reality — i.e. states or clearly implies that because in-loop Stop-event enforcement of the two discipline hooks is now warn-level (not block) for the orchestrator, bundling is what keeps confidence labels and Did-Not-Verify content present in the transcript for later audit, rather than being framed purely around 'avoid clearing one hook only to trip another'; (3) the two passages are mutually consistent (neither contradicts the other on ordering or rationale); (4) neither passage claims the two discipline hooks still block in-loop orchestrator Stop-event turns. FAIL if any of these is missing, or if the ordering/rationale claim is only implied by keyword presence without making the actual rule clear to a reader. Report PASS or FAIL per criterion (1)-(4) with a one-line quote as evidence for each, then an overall PASS/FAIL.",
+      "status": "pending",
+      "evidence": ""
+    },
+    {
+      "id": "E5",
+      "priority": "P1",
+      "mode": "scripted",
+      "surface": "merged-state",
+      "assert": "No other passage in SKILL.md still claims the confidence-label or verify-loop hooks block in-loop orchestrator Stop turns (self-check sweep) — loop_stall_guard/loop_state_guard block-claims are untouched and excluded from this check.",
+      "cmd": "! git grep -niE \"confidence-label (block|blocks)|verify-loop (block|blocks)|confidence/verify block\" -- skills/agentic-loop/SKILL.md | grep -v \"[0-9] confidence-label blocks\\|[0-9] verify-loop blocks\"",
+      "negative_control": "git grep -niE \"confidence-label (block|blocks)|verify-loop (block|blocks)|confidence/verify block\" -- skills/agentic-loop/SKILL.md | grep -v \"[0-9] confidence-label blocks\\|[0-9] verify-loop blocks\"   # matches on frozen_sha (line 132's 'confidence-label and verify-loop blocks', not a counted historical figure), proving the sweep can fail pre-edit",
+      "status": "pending",
+      "evidence": ""
+    },
+    {
+      "id": "E6",
+      "priority": "P0",
+      "mode": "scripted",
+      "surface": "merged-state",
+      "assert": "The PR diff touches exactly skills/agentic-loop/SKILL.md and nothing else (manifest scope assertion).",
+      "cmd": "test \"$(git diff origin/main --name-only | tr -d '\\n')\" = \"skills/agentic-loop/SKILL.md\"",
+      "negative_control": "git diff origin/main --name-only   # on frozen_sha (no diff yet), this is empty, which fails the exact-match test against the required filename, proving the check can fail",
+      "status": "pending",
+      "evidence": ""
+    }
+  ],
+  "amendments": [],
+  "result": null,
+  "graded_at": null,
+  "head_sha": null
+}
