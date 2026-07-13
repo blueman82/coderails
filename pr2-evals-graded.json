@@ -78,6 +78,12 @@
       "eval": "E5",
       "when": "2026-07-13T09:20:00Z",
       "why": "Original regex flagged 'confidence-label blocks'/'verify-loop blocks' as bare phrases, which false-positived on the new past-failure sentence's historical count ('49 confidence-label blocks + 20 verify-loop blocks') \u2014 accurate historical data about the f87a0a2e incident, explicitly framed as the motivating cause of the demotion, not a stale present-tense claim. Narrowed the sweep to exclude the counted-historical-figure pattern while keeping it sensitive to any present-tense stale claim. Made pre-grading (no verifier verdict existed yet), so no regraded_by required."
+    },
+    {
+      "eval": "E4",
+      "when": "2026-07-13T10:45:00Z",
+      "why": "The implementation text in both LOOP-STOP bundle passages originally described the enforcing hook as detecting a declaration by reading only the last line of the turn, which would wrongly imply an earlier-placed valid LOOP-STOP line goes unrecognised. The hook's actual behaviour: it accepts a valid LOOP-STOP line anywhere in the turn; only its category-counting logic selects the last one when multiple LOOP-STOP-shaped lines exist. Both passages were corrected to attribute the FINAL-line placement to this skill's own authored contract, and to describe the hook's role accurately as category-counting rather than detection. E4's assertion (final-line ordering plus warn-era bundling rationale) needed no change; its verifier instruction gained a fifth criterion that specifically catches a false detection-mechanism claim, and the eval was re-graded against the extended rubric.",
+      "regraded_by": "fresh general-purpose subagent, dispatched independently with zero visibility into the implementation conversation or the first grader's verdict; graded PASS on all 5 criteria against the corrected file content"
     }
   ],
   "result": null,
