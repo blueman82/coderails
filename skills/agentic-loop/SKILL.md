@@ -52,7 +52,7 @@ It prints the absolute path. Write the stub there with the Write tool (it create
   "session_id": "<this session's id>",
   "status": "initialising",
   "created": "<ISO8601 timestamp>",
-  "authorising_prompt_raw": "<the user's authorising prompt, verbatim>",
+  "authorising_prompt_raw": "<the user's authorising prompt, verbatim — Phase -1 updates this if an improved prompt is adopted>",
   "completed_marker": <carry forward the prior file's completed_marker if one exists at this path, else 0>
 }
 ```
@@ -60,7 +60,7 @@ It prints the absolute path. Write the stub there with the Write tool (it create
 If a `progress.json` already exists at the path from an earlier loop in this session, read its `completed_marker` and carry it forward into the new stub (do not reset it to 0) — this is what lets the guard tell a genuinely-finished loop from a new one that re-armed it (see the teardown rule below).
 
 `loop_stop_counts` gets different treatment depending on the prior file's `status`, because it is HOOK-OWNED (see Context-window persistence below):
-- Prior file `status != "complete"` (mid-loop re-stub, e.g. a recovery after a restart): carry `loop_stop_counts` forward verbatim into the new stub, so a mid-loop recovery doesn't silently reset the count the `loop_stall_guard` hook has been maintaining.
+- Prior file `status != "complete"` (mid-loop re-stub, e.g. a recovery after a restart): carry `loop_stop_counts` forward verbatim into the new stub, so a mid-loop recovery doesn't silently reset the count the `loop_stall_guard` hook has been maintaining. Carry `authorising_prompt_raw` forward verbatim too — a re-stub refilled from conversation memory instead of the prior file's value would silently drift the eval author's canonical anchor.
 - Prior file `status == "complete"` (re-arming for a NEW loop): reset `loop_stop_counts` to `{}` (omit the field from the stub) — the completed loop's counts are already preserved in its own `retro.json`; carrying them forward would bleed the finished loop's stop counts into the new loop's Phase 13 report.
 
 ### Phase -1 — Sharpen the authorising prompt
@@ -95,6 +95,8 @@ After improve-prompt produces its output, deliver it via (a) or (b) above, then 
 On **A**: the improved prompt becomes the authorisation envelope. Phase 0 reads it verbatim.
 On **B**: apply the user's tweak, re-present the revised prompt via (a) or (b) again, and ask again (bounded to two revision passes — if a third is needed, something is wrong with the envelope itself; surface that).
 On **C**: proceed with the original prompt unchanged; Phase 0 reads it verbatim.
+
+On adopting an improved envelope (outcome **A** or **B**), update `progress.json.authorising_prompt_raw` to the adopted text so the field stays the canonical post-Phase-0 envelope. Outcome **C** needs no update — the Phase -2 stub already wrote the original prompt verbatim.
 
 The improved-and-approved prompt (or the original, if C was chosen) is what Phase 0 treats as the authorisation envelope. Phase 0's `<thinking>` block quotes it verbatim from here.
 
@@ -238,7 +240,7 @@ The `spec.md` is loop state, keyed to this orchestrator's run, exactly like `pro
 - **Phase 3 builds its task list directly from `plan.md`** — the shared task list (`TaskCreate`/`TaskUpdate`) and the Phase 3/3a worker descriptions derive from the plan's tasks, so the two are consistent by construction rather than re-derived from conversation.
 - **After any compaction the orchestrator re-reads `plan.md` to recover *scope* (what to build)** the same way it re-reads `progress.json` to recover *position* (where we are).
 
-**2.7c — generate and freeze loop-scope evals via `/coderails:task-evals`.** Alongside `spec.md`/`plan.md`, invoke **`/coderails:task-evals`** (scope: `loop`) to produce a frozen `evals.json` defining the loop's end-state success evals. Two triggers fire this sub-step, stated explicitly because they're independent: (1) a loop that reaches Phase 2.7 at all is tier-2-eligible on work-unit count alone (2.7 itself only fires at ≥3 work-units); (2) an irreversible-surface trigger (publish, deploy, migration, data deletion, external send) can independently apply even to a <3-unit loop that still reached 2.7 via the cross-unit-dependency clause. The frozen `evals.json` (scope: `loop`) lives beside `progress.json`/`spec.md`/`plan.md` in the loop-state dir — same "never committed, outside the repo" rule as those two files. Grading this file at loop end is `post_evals.sh grade-loop`'s job, not the orchestrator's — see Phase 13.
+**2.7c — generate and freeze loop-scope evals via `/coderails:task-evals`.** Alongside `spec.md`/`plan.md`, invoke **`/coderails:task-evals`** (scope: `loop`) to produce a frozen `evals.json` defining the loop's end-state success evals. Two triggers fire this sub-step, stated explicitly because they're independent: (1) a loop that reaches Phase 2.7 at all is tier-2-eligible on work-unit count alone (2.7 itself only fires at ≥3 work-units); (2) an irreversible-surface trigger (publish, deploy, migration, data deletion, external send) can independently apply even to a <3-unit loop that still reached 2.7 via the cross-unit-dependency clause. The frozen `evals.json` (scope: `loop`) lives beside `progress.json`/`spec.md`/`plan.md` in the loop-state dir — same "never committed, outside the repo" rule as those two files. Grading this file at loop end is `post_evals.sh grade-loop`'s job, not the orchestrator's — see Phase 13. The eval author anchors goal state on `progress.json`'s `authorising_prompt_raw`, per `task-evals`'s oracle-independence rule.
 
 The same `/coderails:task-evals` invocation also produces per-work-unit PR-scope eval refs (scope: `pr`, one per work-unit). These travel into worker prompts the same way disposition travels under Phase 3's existing "Disposition — ... copied **verbatim** into the task description" bullet: a ref recorded only in `progress.json`/`plan.md` and absent from the worker prompt does not exist for the worker — identical framing to the disposition rule above.
 
@@ -470,7 +472,7 @@ This is the factory's own audit — raw facts for the human to judge, not a self
 
 **Teardown write contract — ordered, and it runs BEFORE the `complete` declaration.** The `loop_stall_guard` hook blocks a `complete` declaration when `retro.json` is absent, malformed, or not `schema_version` 1 — so the retro must be written before the declaration. Run these four steps in order:
 
-1. **Assemble `retro.json` (`schema_version` 1) beside `progress.json`.** Fields: `session_id`, `created`, `loop_ordinal` (= `completed_marker` after the Phase 13 bump), `envelope` (verbatim from `progress.json`), `loop_stop_counts` (copied **verbatim** from `progress.json` — HOOK-OWNED, never recomputed), `decisions_absorbed` (copied **verbatim** from `progress.json`'s array, not reconstructed from conversation memory — same rule as the Phase 13 bullet above), `disposition_record` (distinguish "0 violations" from "no-record", same framing as the self-audit above), `evals` (`result`/`amendments`/unresolved P1s), `artifacts` (PRs + the verifying check), `hook_blocks` (via `bash -c 'source "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/lib/discipline_common.sh" && dc_mine_hook_blocks "<session_id>"'`), `review_themes`, `raw_notes`. The schema has **no `verdict` field** — raw and unscored is structural, not an oversight: the retro records what happened, it does not grade it.
+1. **Assemble `retro.json` (`schema_version` 1) beside `progress.json`.** Fields: `session_id`, `created`, `loop_ordinal` (= `completed_marker` after the Phase 13 bump), `envelope` (verbatim from `progress.json`'s `authorising_prompt_raw`), `loop_stop_counts` (copied **verbatim** from `progress.json` — HOOK-OWNED, never recomputed), `decisions_absorbed` (copied **verbatim** from `progress.json`'s array, not reconstructed from conversation memory — same rule as the Phase 13 bullet above), `disposition_record` (distinguish "0 violations" from "no-record", same framing as the self-audit above), `evals` (`result`/`amendments`/unresolved P1s), `artifacts` (PRs + the verifying check), `hook_blocks` (via `bash -c 'source "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/lib/discipline_common.sh" && dc_mine_hook_blocks "<session_id>"'`), `review_themes`, `raw_notes`. The schema has **no `verdict` field** — raw and unscored is structural, not an oversight: the retro records what happened, it does not grade it.
 2. **Update `standing-orders.md` (at the repo-key dir).** Match this loop's retro failure modes against existing entries: a match resets that entry's `loops_since_recurrence` to 0, updates `last_recurred`, and appends evidence; a genuinely new failure mode appends a new entry (fields: `id`, `created`, `failure_mode`, `lesson`, `evidence`, `last_recurred`, `loops_since_recurrence`). Increment `loops_since_recurrence` on every non-matched surviving entry. When an entry's `loops_since_recurrence` reaches K=5 (a constant stated here, not config), MOVE it to `standing-orders-decayed.md` — a tombstone, **never a delete**; the graduation predicate's "one clean decay" is checked against this file. This step is additive-or-recurrence-only: no metric-based removal anywhere.
 3. **Write feedback-type auto-memories** for lessons that generalise beyond this loop.
 4. **Only then** set `progress.json` `status: "complete"` and declare `LOOP-STOP: complete`.
@@ -483,7 +485,7 @@ Do not stop work early because the context window is filling or a token budget i
 
 **Lifecycle, enforced by the `loop_state_guard` Stop hook (presence + ownership).** The file moves through a fixed lifecycle, and the guard blocks any stop where an active loop has no session-owned file:
 - **Stub-first (Phase -2):** `status: "initialising"`, stamped with this `session_id`.
-- **Enrich at Phase 0:** record the envelope verbatim; `status: "in-progress"`.
+- **Enrich at Phase 0:** record the envelope verbatim in `authorising_prompt_raw`; `status: "in-progress"`.
 - **Update at each phase boundary:** current phase, work-unit states, Spec A's disposition fields, `last_updated` — carry `loop_stop_counts` forward per the same conditional as the Phase -2 stub rule (never computed or edited by the orchestrator; see above).
 - **Teardown at Phase 13:** `status: "complete"`, and set `completed_marker` to the number of agentic-loop loops run in this session so far — i.e. the prior `completed_marker` (default 0) **plus 1**. Because this skill is invoked once per loop, that ordinal matches the guard's count of agentic-loop invocations, which is how the guard distinguishes a finished loop from a new one.
 
