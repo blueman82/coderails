@@ -133,10 +133,9 @@ re-opened as findings.
 - **Wiki/workflow sequence past merge is advisory, not enforced.** The `/workflow`
   chain (`/wiki-ingest` + `/wiki-lint`) after merge is a slash command — Claude must
   choose to invoke it. No hook enforces it.
-- **`check_verify_loop` and the two loop guards short-circuit on `stop_hook_active=true`
-  (block at most once per turn).** This is an intentional infinite-loop safety valve.
-  `check_confidence_labels` does NOT read `stop_hook_active` and can re-block on a
-  re-armed Stop.
+- **`check_verify_loop`, `check_confidence_labels`, and the two loop guards all
+  short-circuit on `stop_hook_active=true` (block at most once per turn).** This
+  is an intentional infinite-loop safety valve; all four hooks read the field.
 - **TDD is not enforced test-first.** `test_gate` only checks that tests pass at
   commit time; it does not enforce the red-green-refactor sequence.
 - **Skill invocation, ask-on-ambiguity, and verify-memory are structurally
