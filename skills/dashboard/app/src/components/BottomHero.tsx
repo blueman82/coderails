@@ -6,7 +6,7 @@ import { selectActiveLoop } from "@/hooks/useDashboardState";
 export function BottomHero() {
   const { snapshot } = useDashboardContext();
   const loop = selectActiveLoop(snapshot.loops);
-  const nextUnit = loop?.units.find((u) => !u.done);
+  const nextUnit = loop?.units.find((u) => u.status !== "done");
 
   return (
     <div className="hud-bottom-centre hud-intro-bottom">
