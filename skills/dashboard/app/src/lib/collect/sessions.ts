@@ -113,7 +113,7 @@ function readUnit(key: string, unit: Record<string, unknown>): LoopUnit {
     key,
     done: status === "done",
     inFlight: status === "in-progress" || status === "doing",
-    description: readNonEmptyString(unit.desc) ?? readNonEmptyString(unit.description),
+    description: readNonEmptyString(unit.description) ?? readNonEmptyString(unit.desc),
     pr: typeof unit.pr === "number" ? unit.pr : undefined,
   };
 }
