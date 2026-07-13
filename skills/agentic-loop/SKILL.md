@@ -96,6 +96,8 @@ On **A**: the improved prompt becomes the authorisation envelope. Phase 0 reads 
 On **B**: apply the user's tweak, re-present the revised prompt via (a) or (b) again, and ask again (bounded to two revision passes — if a third is needed, something is wrong with the envelope itself; surface that).
 On **C**: proceed with the original prompt unchanged; Phase 0 reads it verbatim.
 
+On adopting an improved envelope (outcome **A** or **B**), update `progress.json.authorising_prompt_raw` to the adopted text so the field stays the canonical post-Phase-0 envelope. Outcome **C** needs no update — the Phase -2 stub already wrote the original prompt verbatim.
+
 The improved-and-approved prompt (or the original, if C was chosen) is what Phase 0 treats as the authorisation envelope. Phase 0's `<thinking>` block quotes it verbatim from here.
 
 ### Phase 0 — Read the authorisation envelope
