@@ -28,7 +28,7 @@ export const dynamic = "force-dynamic";
 export default function Home() {
   const token = getRunToken();
   const config = loadConfig();
-  const buttons: DeckButton[] = config.buttons.map((b) => ({
+  const buttons: DeckButton[] = visibleButtons(config).map((b) => ({
     name: b.name,
     label: b.label,
     profile: b.profile,
