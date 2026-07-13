@@ -161,3 +161,30 @@ describe("loadConfig", () => {
     expect(config.buttons[0].hidden).toBeUndefined();
   });
 });
+
+describe("visibleButtons", () => {
+  it("excludes buttons with hidden: true", () => {
+    const config = {
+      ...validConfig,
+      buttons: [
+        validConfig.buttons[0],
+        { ...validConfig.buttons[0], name: "hidden-button", hidden: true },
+      ],
+    };
+    expect(visibleButtons(config).map((b) => b.name)).toEqual(["wiki-lint"]);
+  });
+
+  it("includes buttons with hidden absent or false", () => {
+    const config = {
+      ...validConfig,
+      buttons: [
+        validConfig.buttons[0],
+        { ...validConfig.buttons[0], name: "explicit-false", hidden: false },
+      ],
+    };
+    expect(visibleButtons(config).map((b) => b.name)).toEqual([
+      "wiki-lint",
+      "explicit-false",
+    ]);
+  });
+});
