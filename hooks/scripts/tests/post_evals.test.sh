@@ -506,6 +506,161 @@ check_str "grade_loop: write failure -> original file left untouched" "$before_c
 [[ -z "$(jq -r '.grading // empty' "$FIX_WRITE_FAIL")" ]]
 check "grade_loop: write failure -> no .grading present" 0 $?
 
+# ─── grade_loop: regrade-on-amendment backstop ───────────────────────────────
+# Post-verdict amendments require a fresh-grader attestation (regraded_by) on
+# each new amendment; otherwise grade-loop refuses and writes nothing.
+
+# (1) first grade stamps amendments_at_grade: 0 with no amendments.
+FIX_AAG0="$TMP/aag0.json"
+jq -n --arg sha "$SHA" '{
+  scope: "loop", tier: 1, tier_justification: "1 work-unit, scripted change", head_sha: $sha,
+  evals: [ {id:"e1", priority:"P0", mode:"scripted", status:"pass", cmd:"run-a", negative_control:"run-a-broken", evidence:"log"} ]
+}' > "$FIX_AAG0"
+post_evals::grade_loop "$FIX_AAG0" >/dev/null
+check "grade_loop backstop: first grade, no amendments -> exit 0" 0 $?
+check_str "grade_loop backstop: amendments_at_grade stamped 0" "0" "$(jq -r '.grading.amendments_at_grade' "$FIX_AAG0")"
+
+# (1b) first grade with 2 pre-grade amendments stamps 2 (rule 1's escape valve, no gate).
+FIX_AAG2="$TMP/aag2.json"
+jq -n --arg sha "$SHA" '{
+  scope: "loop", tier: 1, tier_justification: "1 work-unit, scripted change", head_sha: $sha,
+  evals: [ {id:"e1", priority:"P0", mode:"scripted", status:"pass", cmd:"run-a", negative_control:"run-a-broken", evidence:"log"} ],
+  amendments: [ {eval:"e1", when:"2026-07-12T00:00:00Z", why:"pre-grade fix a"},
+                {eval:"e1", when:"2026-07-12T00:01:00Z", why:"pre-grade fix b"} ]
+}' > "$FIX_AAG2"
+post_evals::grade_loop "$FIX_AAG2" >/dev/null
+check "grade_loop backstop: first grade, 2 pre-grade amendments -> exit 0" 0 $?
+check_str "grade_loop backstop: amendments_at_grade stamped 2" "2" "$(jq -r '.grading.amendments_at_grade' "$FIX_AAG2")"
+
+# (2) re-grade with unchanged amendment count grades normally (status change
+# alone is not gated — a fresh grader legitimately updates statuses).
+jq '.evals[0].status = "fail"' "$FIX_AAG0" > "$FIX_AAG0.tmp" && mv "$FIX_AAG0.tmp" "$FIX_AAG0"
+grade_out=$(post_evals::grade_loop "$FIX_AAG0")
+check "grade_loop backstop: re-grade, amendments unchanged -> exit 0" 0 $?
+check_str "grade_loop backstop: re-grade computes NO-GO from statuses" "NO-GO" "$grade_out"
+
+# (3) NEGATIVE CONTROL for the backstop: post-verdict amendment WITHOUT
+# regraded_by -> refused, exit 1, file byte-identical.
+jq '.amendments = [ {eval:"e1", when:"2026-07-12T01:00:00Z", why:"post-verdict fix"} ] | .evals[0].status = "pass"' \
+  "$FIX_AAG0" > "$FIX_AAG0.tmp" && mv "$FIX_AAG0.tmp" "$FIX_AAG0"
+before_content=$(cat "$FIX_AAG0")
+stderr_out=$(post_evals::grade_loop "$FIX_AAG0" 2>&1)
+check "grade_loop backstop: post-verdict amendment w/o regraded_by -> exit 1" 1 $?
+[[ "$stderr_out" == *"regraded_by"* ]]
+check "grade_loop backstop: refusal stderr names regraded_by" 0 $?
+check_str "grade_loop backstop: refused file left byte-identical" "$before_content" "$(cat "$FIX_AAG0")"
+
+# (4) same amendment WITH non-blank regraded_by -> grades, restamps count.
+jq '.amendments[0].regraded_by = "fresh grader: verify-l2-regrade agent"' \
+  "$FIX_AAG0" > "$FIX_AAG0.tmp" && mv "$FIX_AAG0.tmp" "$FIX_AAG0"
+grade_out=$(post_evals::grade_loop "$FIX_AAG0")
+check "grade_loop backstop: post-verdict amendment with regraded_by -> exit 0" 0 $?
+check_str "grade_loop backstop: attested re-grade echoes GO" "GO" "$grade_out"
+check_str "grade_loop backstop: amendments_at_grade restamped to 1" "1" "$(jq -r '.grading.amendments_at_grade' "$FIX_AAG0")"
+
+# (4b) restamp checksum integrity: the written .grading.checksum equals an
+# independent recomputation via eval_artifact::grading_checksum.
+written_checksum_aag0=$(jq -r '.grading.checksum // ""' "$FIX_AAG0")
+expected_checksum_aag0=$(eval_artifact::grading_checksum "$FIX_AAG0" "GO")
+check_str "grade_loop backstop: restamp checksum matches independent recomputation" "$expected_checksum_aag0" "$written_checksum_aag0"
+
+# (5) blank regraded_by is not an attestation.
+jq '.amendments += [ {eval:"e1", when:"2026-07-12T02:00:00Z", why:"another post-verdict fix", regraded_by: "   "} ]' \
+  "$FIX_AAG0" > "$FIX_AAG0.tmp" && mv "$FIX_AAG0.tmp" "$FIX_AAG0"
+post_evals::grade_loop "$FIX_AAG0" 2>/dev/null
+check "grade_loop backstop: blank regraded_by -> exit 1 (refused)" 1 $?
+
+# (6) prior grading object WITHOUT amendments_at_grade (old writer) reads as 0.
+FIX_OLD="$TMP/old_writer.json"
+jq -n --arg sha "$SHA" '{
+  scope: "loop", tier: 1, tier_justification: "1 work-unit, scripted change", head_sha: $sha,
+  evals: [ {id:"e1", priority:"P0", mode:"scripted", status:"pass", cmd:"run-a", negative_control:"run-a-broken", evidence:"log"} ]
+}' > "$FIX_OLD"
+post_evals::grade_loop "$FIX_OLD" >/dev/null
+jq 'del(.grading.amendments_at_grade) | .amendments = [ {eval:"e1", when:"2026-07-12T03:00:00Z", why:"post-verdict, old stamp"} ]' \
+  "$FIX_OLD" > "$FIX_OLD.tmp" && mv "$FIX_OLD.tmp" "$FIX_OLD"
+post_evals::grade_loop "$FIX_OLD" 2>/dev/null
+check "grade_loop backstop: old stamp w/o amendments_at_grade treated as 0 -> refused" 1 $?
+
+# (7) malformed amendments fail CLOSED: a non-object amendment entry (the
+# shorthand a negligent orchestrator writes) refuses instead of grading.
+FIX_MALF="$TMP/malformed_amend.json"
+jq -n --arg sha "$SHA" '{
+  scope: "loop", tier: 1, tier_justification: "1 work-unit, scripted change", head_sha: $sha,
+  evals: [ {id:"e1", priority:"P0", mode:"scripted", status:"pass", cmd:"run-a", negative_control:"run-a-broken", evidence:"log"} ]
+}' > "$FIX_MALF"
+post_evals::grade_loop "$FIX_MALF" >/dev/null
+jq '.amendments = ["fixed e1 config path"]' "$FIX_MALF" > "$FIX_MALF.tmp" && mv "$FIX_MALF.tmp" "$FIX_MALF"
+post_evals::grade_loop "$FIX_MALF" 2>/dev/null
+check "grade_loop backstop: non-object amendment entry -> exit 1 (fail closed)" 1 $?
+
+# (8) disarm-by-regeneration: del(.grading) alone does not re-arm the
+# first-grade path — grade residue (.graded_at/.result) still trips the gate.
+FIX_REGEN="$TMP/regen.json"
+jq -n --arg sha "$SHA" '{
+  scope: "loop", tier: 1, tier_justification: "1 work-unit, scripted change", head_sha: $sha,
+  evals: [ {id:"e1", priority:"P0", mode:"scripted", status:"pass", cmd:"run-a", negative_control:"run-a-broken", evidence:"log"} ]
+}' > "$FIX_REGEN"
+post_evals::grade_loop "$FIX_REGEN" >/dev/null
+jq 'del(.grading) | .amendments = [ {eval:"e1", when:"2026-07-12T04:00:00Z", why:"post-verdict, stamp shed"} ]' \
+  "$FIX_REGEN" > "$FIX_REGEN.tmp" && mv "$FIX_REGEN.tmp" "$FIX_REGEN"
+post_evals::grade_loop "$FIX_REGEN" 2>/dev/null
+check "grade_loop backstop: del(.grading) with grade residue -> still refused" 1 $?
+
+# (9) scalar-number amendments (not an array) fail-open under jq's fractional
+# `length` semantics unless explicitly guarded — refuse instead of grading.
+FIX_SCALAR="$TMP/scalar_amend.json"
+jq -n --arg sha "$SHA" '{
+  scope: "loop", tier: 1, tier_justification: "1 work-unit, scripted change", head_sha: $sha,
+  evals: [ {id:"e1", priority:"P0", mode:"scripted", status:"pass", cmd:"run-a", negative_control:"run-a-broken", evidence:"log"} ]
+}' > "$FIX_SCALAR"
+post_evals::grade_loop "$FIX_SCALAR" >/dev/null
+jq '.amendments = 2.5' "$FIX_SCALAR" > "$FIX_SCALAR.tmp" && mv "$FIX_SCALAR.tmp" "$FIX_SCALAR"
+post_evals::grade_loop "$FIX_SCALAR" 2>/dev/null
+check "grade_loop backstop: scalar-number amendments -> exit 1 (refused)" 1 $?
+
+# (10) mixed batch smuggling: one attested + one unattested amendment in the
+# SAME post-verdict write must still refuse (an ALL-unattested predicate
+# mutation would let this slip through since not every entry is unattested).
+FIX_MIXED="$TMP/mixed_batch.json"
+jq -n --arg sha "$SHA" '{
+  scope: "loop", tier: 1, tier_justification: "1 work-unit, scripted change", head_sha: $sha,
+  evals: [ {id:"e1", priority:"P0", mode:"scripted", status:"pass", cmd:"run-a", negative_control:"run-a-broken", evidence:"log"} ]
+}' > "$FIX_MIXED"
+post_evals::grade_loop "$FIX_MIXED" >/dev/null
+jq '.amendments = [
+      {eval:"e1", when:"2026-07-12T05:00:00Z", why:"post-verdict fix a", regraded_by:"fresh grader run"},
+      {eval:"e1", when:"2026-07-12T05:01:00Z", why:"post-verdict fix b"}
+    ]' "$FIX_MIXED" > "$FIX_MIXED.tmp" && mv "$FIX_MIXED.tmp" "$FIX_MIXED"
+before_content_mixed=$(cat "$FIX_MIXED")
+post_evals::grade_loop "$FIX_MIXED" 2>/dev/null
+check "grade_loop backstop: mixed attested/unattested batch -> exit 1 (refused)" 1 $?
+check_str "grade_loop backstop: mixed batch refused file left byte-identical" "$before_content_mixed" "$(cat "$FIX_MIXED")"
+
+# (11) slice-boundary escape valve: FIX_AAG2 already carries amendments_at_grade
+# stamped 2 with two pre-grade (exempt) unattested amendments — reused as-is,
+# not re-created. Appending ONE attested amendment brings the count to 3 > 2;
+# grade-loop must succeed because the slice starts at the stamped index 2, so
+# the two old unattested entries are exempt from the attestation check.
+jq '.amendments += [ {eval:"e1", when:"2026-07-12T06:00:00Z", why:"post-verdict fix", regraded_by:"fresh grader run three"} ]' \
+  "$FIX_AAG2" > "$FIX_AAG2.tmp" && mv "$FIX_AAG2.tmp" "$FIX_AAG2"
+grade_out=$(post_evals::grade_loop "$FIX_AAG2")
+check "grade_loop backstop: slice-boundary escape valve -> exit 0" 0 $?
+check_str "grade_loop backstop: amendments_at_grade restamped to 3" "3" "$(jq -r '.grading.amendments_at_grade' "$FIX_AAG2")"
+
+# (12) non-string regraded_by (e.g. a number) does not count as attestation —
+# jq's `and` short-circuits so a non-string never reaches `test`.
+FIX_NONSTR="$TMP/nonstring_regraded_by.json"
+jq -n --arg sha "$SHA" '{
+  scope: "loop", tier: 1, tier_justification: "1 work-unit, scripted change", head_sha: $sha,
+  evals: [ {id:"e1", priority:"P0", mode:"scripted", status:"pass", cmd:"run-a", negative_control:"run-a-broken", evidence:"log"} ]
+}' > "$FIX_NONSTR"
+post_evals::grade_loop "$FIX_NONSTR" >/dev/null
+jq '.amendments = [ {eval:"e1", when:"2026-07-12T07:00:00Z", why:"post-verdict fix", regraded_by: 123} ]' \
+  "$FIX_NONSTR" > "$FIX_NONSTR.tmp" && mv "$FIX_NONSTR.tmp" "$FIX_NONSTR"
+post_evals::grade_loop "$FIX_NONSTR" 2>/dev/null
+check "grade_loop backstop: non-string regraded_by (number) -> exit 1 (refused)" 1 $?
+
 # ─── CLI dispatch: bare invocation prints usage, exits 1 ─────────────────────
 usage_out=$(bash "$SCRIPT" 2>&1)
 rc=$?
