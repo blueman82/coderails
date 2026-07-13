@@ -227,7 +227,7 @@ export function collectLoops(baseDir: string): LoopInfo[] {
         title: readTitle(record, slug),
         sessionId: typeof record.session_id === "string" ? record.session_id : sessionId,
         status: typeof record.status === "string" ? record.status : "",
-        workUnitsDone: units.filter((u) => u.done).length,
+        workUnitsDone: units.filter((u) => u.status === "done").length,
         workUnitsTotal: units.length,
         evalsFrozen: readEvalsFrozen(loopDir),
         lastUpdatedMs: readLastUpdatedMs(record, progressPath),
