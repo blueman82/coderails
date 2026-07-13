@@ -87,35 +87,6 @@ export function RailLeft() {
         )}
       </div>
 
-      <div className="hud-block">
-        <div className="hud-sec-head">
-          <span className="hud-title">Documents</span>
-          <span className="hud-suffix">Memory.Trail</span>
-          <span className="hud-rule" />
-        </div>
-        {trail.length > 0 ? (
-          trail.map((entry) => {
-            const parts = entry.displayPath.split("/");
-            const bold = parts.pop() ?? entry.displayPath;
-            const name = parts.length > 0 ? parts.join("/") + "/" : "";
-            return (
-              <div className="hud-doc-row" key={entry.path}>
-                <span className="hud-doc-name">
-                  {name}
-                  <b>{bold}</b>
-                </span>
-                <span className="hud-doc-age">{now ? formatRelativeAge(entry.mtime, now) : ""}</span>
-              </div>
-            );
-          })
-        ) : (
-          <div className="hud-empty-state">no memory files found</div>
-        )}
-      </div>
-
-      <div className="hud-transcript-pill">
-        <span>Transcript</span>
-      </div>
     </section>
   );
 }
