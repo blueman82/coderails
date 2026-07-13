@@ -9,7 +9,7 @@ import { useEffect, useRef, useState } from "react";
 import type { PermissionProfile } from "@/lib/config";
 import { useDashboardContext } from "@/components/DashboardProvider";
 import { useRunLifecycle } from "@/hooks/useRunLifecycle";
-import { formatDuration, formatHHMM, runResultLabel, isGateError } from "@/hooks/useDashboardState";
+import { runResultLabel, isGateError } from "@/hooks/useDashboardState";
 import { AssistantLinkPanel } from "@/components/AssistantLinkPanel";
 import { OutputViewerPanel } from "@/components/OutputViewerPanel";
 
