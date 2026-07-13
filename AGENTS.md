@@ -171,7 +171,7 @@ re-opened as findings.
   sourced from `lib/loop_state_common.sh`). The other five core gate scripts
   (`check_verify_loop.sh`, `check_confidence_labels.sh`, `no_edit_on_main.sh`,
   `destructive_bash_gate.sh`, `test_gate.sh`) use inline `if`-blocks — that pattern is equally fine.
-  Support/context scripts (`inject_context.sh`, `inject_bootstrap.sh`, `discipline_catchup.sh`)
+  Support/context scripts (`inject_context.sh`, `inject_bootstrap.sh`)
   also use inline blocks but are not part of the gate-pattern convention.
   New scripts should prefer named gate functions. Cheap skip-gates first, expensive
   transcript-parsing last. Guard scripts do NOT use `set -euo pipefail` — preserve
