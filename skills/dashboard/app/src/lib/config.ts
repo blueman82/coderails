@@ -16,6 +16,7 @@ export interface ButtonDef {
   profile: PermissionProfile;
   inputAllowed?: boolean;
   bypassPermissions?: true;
+  hidden?: boolean;
 }
 
 export interface DashboardConfig {
