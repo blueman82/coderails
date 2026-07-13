@@ -7,8 +7,9 @@ discipline loop. Two halves:
 - **Workflow** — the `prep → push → merge → wiki` command chain plus the
   agentic-loop, planning-sequence, premortem, and handoff skills.
 - **Guardrails** — a self-checking discipline loop: Claude labels claims
-  (verified)/(inferred), gets nudged for a `## Did Not Verify` section, and is
-  gated on destructive bash and failing project tests.
+  (verified)/(inferred), is blocked at stop until the `## Did Not Verify`
+  section is present and resolved, and is gated on destructive bash and
+  failing project tests.
 
 It started as two separate plugins (`workflow-tools` and `claude-guardrails`).
 This is the merge: one install, one marketplace key, no launchd, no calibration
@@ -118,7 +119,7 @@ catalog: [`docs/REFERENCE.md`](./docs/REFERENCE.md).
 | `SessionStart` | `inject_bootstrap.sh` | silent — injects `using-coderails` skill into every new session |
 | `UserPromptSubmit` | `inject_context.sh` | silent — prepends `[ctx]` (cwd, branch, date); on the first prompt of a session also appends the discipline reminder |
 | `Stop` + `SubagentStop` | `check_confidence_labels.sh` | **block** outside an active agentic loop — response ≥200 chars with no `(verified)`/`(inferred)`/`(guess)` label; inside an active, incomplete loop, `Stop`-event violations demote to a model-visible warn (`additionalContext`) instead — `SubagentStop`/worker output still blocks; on `SubagentStop` reads `last_assistant_message` directly |
-| `Stop` + `SubagentStop` | `check_verify_loop.sh` | **block** outside an active agentic loop — any untagged `## Did Not Verify` bullet (only an explicit `(unverifiable: <reason>)` tag passes); inside an active, incomplete loop, `Stop`-event violations demote to a model-visible warn (`additionalContext`) instead — `SubagentStop`/worker output still blocks; on `SubagentStop` reads `last_assistant_message` directly |
+| `Stop` + `SubagentStop` | `check_verify_loop.sh` | **block** outside an active agentic loop — any untagged `## Did Not Verify` bullet (only an explicit `(unverifiable: <reason>)` tag passes); or missing section after a 3+-file turn; inside an active, incomplete loop, `Stop`-event violations demote to a model-visible warn (`additionalContext`) instead — `SubagentStop`/worker output still blocks; on `SubagentStop` reads `last_assistant_message` directly |
 | `Stop` | `voice_announce.sh` | **observe-only** — speaks a loop lifecycle event (complete / waiting-on-human / stopped / stall) via macOS `say`, backgrounded so it never blocks; silent outside an active loop and when text extraction comes back empty (not a stall); debounced per kind; runs first in the Stop array |
 | `Stop` | `loop_state_guard.sh` | **block** — agentic loop active but no session-owned progress.json |
 | `Stop` | `loop_stall_guard.sh` | **block** — loop incomplete with no valid LOOP-STOP declaration; also blocks a `complete` declaration when retro.json is missing/malformed (Phase 13 retro gate) |

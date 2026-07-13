@@ -115,8 +115,10 @@ at task intake and gates `/merge` on it.
 
 The one UserPromptSubmit hook, inject_context, runs silently. Four Stop hooks block
 via exit 2: confidence-label check, verify-loop check (both promoted from
-warn-mode on 2026-05-05; verify-loop also blocks on a missing Did-Not-Verify
-section, not just an untagged bullet), loop-state guard, and loop-stall guard. The same two
+warn-mode on 2026-05-05), loop-state guard, and loop-stall guard. verify-loop
+also blocks when a turn edits 3+ files and the response omits the
+Did-Not-Verify section entirely (added 2026-07-13), not just on untagged
+bullets. The same two
 content-discipline checks (confidence-label and verify-loop) also run on
 SubagentStop — so subagents are held to the same standards as the parent session.
 On PreToolUse, five hooks can block: the destructive-bash gate, the opt-in test
