@@ -25,14 +25,7 @@ function findTile(health: HealthTile[], key: HealthTile["key"]): HealthTile | un
 
 export function RailLeft() {
   const { snapshot } = useDashboardContext();
-  const { health, loops, trail } = snapshot;
-  const [now, setNow] = useState<number | null>(null);
-
-  useEffect(() => {
-    setNow(Date.now());
-    const id = setInterval(() => setNow(Date.now()), 30_000);
-    return () => clearInterval(id);
-  }, []);
+  const { health, loops } = snapshot;
 
   const kpiKeys: HealthTile["key"][] = ["usage5h", "usageWeek", "hooksFired", "lintFindings"];
   const loop = selectActiveLoop(loops);
