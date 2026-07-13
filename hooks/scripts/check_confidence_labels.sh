@@ -11,6 +11,17 @@ MAX_ATTEMPTS="${CLAUDE_HOOK_MAX_ATTEMPTS:-5}"
 SLEEP_S="${CLAUDE_HOOK_SLEEP_S:-0.3}"
 MIN_LEN="${CLAUDE_HOOK_MIN_LEN:-200}"
 
+# Headless-run exemption: dashboard-spawned `claude -p` runs set this env var;
+# the discipline text gates would otherwise displace the run's answer with a
+# repair turn (see AGENTS.md ceilings note). Cheap skip-gate first, before
+# stdin is even read. Inside the agent trust domain by design, like every
+# local gate.
+if [ "${CODERAILS_HEADLESS_RUN:-}" = "1" ]; then
+  printf '%s hook=confidence_labels skipped=headless\n' \
+    "$(date -Iseconds 2>/dev/null || date +%Y-%m-%dT%H:%M:%S%z)" >> "$LOG_FILE" 2>/dev/null
+  exit 0
+fi
+
 . "$(dirname "$0")/lib/discipline_common.sh"
 . "$(dirname "$0")/lib/loop_state_common.sh"
 

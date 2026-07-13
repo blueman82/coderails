@@ -550,4 +550,36 @@ case "$(cat "$CLAUDE_DISCIPLINE_LOG" 2>/dev/null)" in
 esac
 check "SubagentStop payload -> log line carries event=SubagentStop" 1 "$evt_sub_match"
 
+# ── Headless-run exemption (CODERAILS_HEADLESS_RUN=1) ────────────────────────
+# Dashboard-spawned `claude -p` runs set this env var so the discipline text
+# gates don't displace the run's answer with a repair turn. Gate fires before
+# stdin is even read (cheap skip-gate first).
+
+DNV_MSG_HEADLESS="Work. (verified)
+## Did Not Verify
+- untagged item"
+
+# Case H1: CODERAILS_HEADLESS_RUN=1 + a payload that would otherwise BLOCK
+# (untagged DNV bullet) -> exit 0.
+: > "$CLAUDE_DISCIPLINE_LOG"
+T=$(mk_transcript "$DNV_MSG_HEADLESS")
+check "headless + would-block payload -> exit 0" 0 "$(CODERAILS_HEADLESS_RUN=1 run "$(payload "$T")")"
+
+# Case H2: same headless run -> log line records skipped=headless.
+case "$(cat "$CLAUDE_DISCIPLINE_LOG" 2>/dev/null)" in
+  *"skipped=headless"*) h2_match=1 ;;
+  *) h2_match=0 ;;
+esac
+check "headless run -> log line records skipped=headless" 1 "$h2_match"
+
+# Case H3: WITHOUT the flag, the same payload still blocks (exit 2) — existing
+# behaviour unchanged.
+T=$(mk_transcript "$DNV_MSG_HEADLESS")
+check "no headless flag, would-block payload -> exit 2 unchanged" 2 "$(run "$(payload "$T")")"
+
+# Case H4: CODERAILS_HEADLESS_RUN set to something other than "1" -> no exemption,
+# still blocks (exact-match gate, not a truthy check).
+T=$(mk_transcript "$DNV_MSG_HEADLESS")
+check "CODERAILS_HEADLESS_RUN=0 -> not exempt, exit 2" 2 "$(CODERAILS_HEADLESS_RUN=0 run "$(payload "$T")")"
+
 [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails)"; exit 1; }
