@@ -11,13 +11,16 @@
 # checkable item is cheaper than checking it) — the guarantee is "nothing silently
 # deferred," and the tag is the auditable seam.
 #
-# Checks run top to bottom; the first that matches decides. All but the last let
-# the model stop — only an untagged DNV item blocks.
+# Checks run top to bottom; the first that matches decides. All but the last two
+# rungs let the model stop unconditionally.
 #   skip  — no transcript to inspect                       → allow stop
 #   skip  — already blocked once this turn (loop-guard)    → allow stop
 #   skip  — the last response has no text                  → allow stop
 #   skip  — no "## Did Not Verify" bullets                 → allow stop
-#   BLOCK — any untagged DNV bullet                        → deferred item left open
+#   warn  — untagged DNV bullet, Stop event, active+incomplete
+#           agentic loop                                    → additionalContext
+#           warn, allow stop (SubagentStop never demotes)
+#   BLOCK — any untagged DNV bullet (outside the warn case above) → deferred item left open
 #
 # file_count is NOT used as a skip gate on the Stop path. A DNV section that
 # exists must be policed regardless of whether files were edited this turn —
@@ -31,12 +34,14 @@ MAX_ATTEMPTS="${CLAUDE_HOOK_MAX_ATTEMPTS:-5}"
 SLEEP_S="${CLAUDE_HOOK_SLEEP_S:-0.3}"
 
 . "$(dirname "$0")/lib/discipline_common.sh"
+. "$(dirname "$0")/lib/loop_state_common.sh"
 
 log_line() { printf '%s %s\n' "$(date -Iseconds 2>/dev/null || date +%Y-%m-%dT%H:%M:%S%z)" "$1" >> "$LOG_FILE" 2>/dev/null; }
 
 IFS= read -r -d '' -t 5 input || true
 hook_event=$(echo "$input" | jq -r '.hook_event_name // "Stop"' 2>/dev/null)
 session_id=$(echo "$input" | jq -r '.session_id // "?"' 2>/dev/null)
+cwd=$(echo "$input" | jq -r '.cwd // empty' 2>/dev/null)
 file_count=0
 attempts=1
 
@@ -122,6 +127,11 @@ dnv_item_text=$(echo "$text" | awk '
 # CANNOT force the tag to be truthful — tagging a checkable item is cheaper than
 # checking it. The guarantee is "nothing is silently deferred," not "everything was
 # actually verified." The tag is the auditable seam.
+#
+# Loop-scoped exception: on a Stop event inside an active, incomplete agentic
+# loop, this enforcement demotes to a model-visible warn (additionalContext,
+# exit 0) instead of a block — see the demotion branch below. SubagentStop
+# never demotes, so worker output stays under full enforcement.
 hatch_pattern='^- *\(unverifiable:'
 untagged_bullets=$(echo "$dnv_item_text" | grep -ivE "$hatch_pattern")
 # Count untagged bullets that carry any non-whitespace content (a bare "- " is not a claim).
@@ -131,6 +141,28 @@ resolvable_dnv_items=$(echo "$untagged_bullets" | grep -cE '^- *[^[:space:]]')
 log_line "hook=verify_loop session=$session_id text_len=${#text} attempts=$attempts files=$file_count dnv_items=$dnv_items resolvable_dnv_items=$resolvable_dnv_items blocked=0"
 
 if [ "$resolvable_dnv_items" -gt 0 ]; then
+  # Loop-scoped warn demotion (Stop event only — SubagentStop never reaches
+  # this branch, so workers stay block-enforced). Evaluated lazily, only once
+  # a block is imminent, so non-loop sessions never pay the transcript-
+  # invocation scan. Fail-toward-blocking: the jq emission runs FIRST and its
+  # own exit status gates the log line and exit 0 — if jq fails, execution
+  # falls through to the normal block path below instead of silently exiting
+  # 0 with a log line that falsely claims warned=1.
+  if [ "$hook_event" = "Stop" ] && als_loop_active_incomplete "$transcript" "$cwd" "$(als_sanitise_session_id "$session_id")"; then
+    if jq -n --arg m "[discipline-warn(loop)] Your '## Did Not Verify' section has untagged items — anything not
+explicitly marked uncheckable is treated as something you could have resolved:
+${dnv_item_text}
+Resolve each before stopping: read the file, run the check (Read/Grep/Bash), or delete the bullet.
+If an item GENUINELY cannot be checked from source (a REPL-only action, external-system
+behaviour, prod-only observation, or user intent), keep it but tag its leading clause:
+  - (unverifiable: <reason>) <the item>
+That tag is the only escape hatch — every untagged bullet blocks outside a loop and is flagged inside one." \
+      '{"hookSpecificOutput":{"hookEventName":"Stop","additionalContext":$m}}'; then
+      log_line "hook=verify_loop session=$session_id text_len=${#text} resolvable_dnv_items=$resolvable_dnv_items would_block=1 warned=1 blocked=0"
+      exit 0
+    fi
+  fi
+
   log_line "hook=verify_loop session=$session_id text_len=${#text} resolvable_dnv_items=$resolvable_dnv_items blocked=1"
   echo "[verify-loop-block] Your '## Did Not Verify' section has untagged items — anything not
 explicitly marked uncheckable is treated as something you could have resolved:
