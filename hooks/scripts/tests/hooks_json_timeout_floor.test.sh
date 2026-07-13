@@ -84,7 +84,7 @@ backstop_files=$(grep -rl "IFS= read -r -d '' -t" "$SCRIPTS_DIR" --include="*.sh
 
 backstop_count=$(echo "$backstop_files" | grep -c . 2>/dev/null)
 
-# Assert backstop count == EXPECTED_BACKSTOP_COUNT (12 known hooks).
+# Assert backstop count == EXPECTED_BACKSTOP_COUNT (13 known hooks).
 if [ "$backstop_count" -ne "$EXPECTED_BACKSTOP_COUNT" ]; then
   printf 'FAIL - expected %d hook scripts with the bounded-read backstop, found %d — a hook may have gained or lost the backstop unexpectedly\n' \
     "$EXPECTED_BACKSTOP_COUNT" "$backstop_count"
@@ -112,6 +112,12 @@ done <<< "$backstop_files"
 # --- Guard: UserPromptSubmit registers exactly one hook (inject_context.sh) ---
 # discipline_catchup.sh was retired with no shim/flag/fallback (clean break);
 # this pins the registration so a re-add or a stray second entry fails loud.
+# Checks the matcher-array length too — a re-add as a SECOND matcher object
+# (UserPromptSubmit[1]) would otherwise sail past a check that only looks
+# inside [0].hooks.
+ups_matchers=$(jq -r '.hooks.UserPromptSubmit | length' "$HOOKS_JSON")
+check "UserPromptSubmit matcher-array length" "1" "$ups_matchers"
+
 ups_result=$(jq -r '
   .hooks.UserPromptSubmit[0].hooks
   | "\(length) \(.[0].command)"
@@ -128,10 +134,23 @@ esac
 # --- Guard: plugin.json and marketplace.json versions stay in lockstep ---
 # PR #155 bumped only plugin.json, breaking the invariant; this pins both
 # together so a future single-file bump fails loud instead of drifting again.
+# Both jq reads degrade identically on a missing file or absent key (empty
+# string, or the literal "null") — an equality check alone would pass
+# vacuously in that case instead of catching the underlying breakage, so each
+# side must first be asserted non-empty and not "null".
 PLUGIN_JSON="$REPO_ROOT/.claude-plugin/plugin.json"
 MARKETPLACE_JSON="$REPO_ROOT/.claude-plugin/marketplace.json"
-plugin_version=$(jq -r '.version' "$PLUGIN_JSON")
-marketplace_version=$(jq -r '.plugins[0].version' "$MARKETPLACE_JSON")
-check "plugin.json version ($plugin_version) matches marketplace.json plugin version ($marketplace_version)" "$plugin_version" "$marketplace_version"
+plugin_version=$(jq -r '.version' "$PLUGIN_JSON" 2>/dev/null)
+marketplace_version=$(jq -r '.plugins[0].version' "$MARKETPLACE_JSON" 2>/dev/null)
+
+if [ -z "$plugin_version" ] || [ "$plugin_version" = "null" ]; then
+  printf 'FAIL - could not read a version from %s (got [%s])\n' "$PLUGIN_JSON" "$plugin_version"
+  fails=$((fails+1))
+elif [ -z "$marketplace_version" ] || [ "$marketplace_version" = "null" ]; then
+  printf 'FAIL - could not read a version from %s (got [%s])\n' "$MARKETPLACE_JSON" "$marketplace_version"
+  fails=$((fails+1))
+else
+  check "plugin.json version ($plugin_version) matches marketplace.json plugin version ($marketplace_version)" "$plugin_version" "$marketplace_version"
+fi
 
 [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails)"; exit 1; }

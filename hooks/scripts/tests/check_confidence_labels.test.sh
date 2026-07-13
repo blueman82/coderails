@@ -57,6 +57,11 @@ run() { # json -> exit code
   printf '%s' "$1" | bash "$HOOK" >/dev/null 2>&1; echo $?
 }
 
+run_stderr() { # json -> sets RC_ERR and ERR_ERR (stderr)
+  ERR_ERR=$(printf '%s' "$1" | bash "$HOOK" 2>&1 >/dev/null)
+  RC_ERR=$?
+}
+
 check() { # desc expected actual
   if [ "$2" = "$3" ]; then printf 'ok   - %s\n' "$1"
   else printf 'FAIL - %s (expected exit %s, got %s)\n' "$1" "$2" "$3"; fails=$((fails+1)); fi
@@ -262,5 +267,17 @@ case "$(cat "$CLAUDE_DISCIPLINE_LOG" 2>/dev/null)" in
   *) evt_sub_match=0 ;;
 esac
 check "SubagentStop payload -> log line carries event=SubagentStop" 1 "$evt_sub_match"
+
+# ── blocked-path stderr message content ─────────────────────────────────
+# The block message is meant to be actionable (names the rule, gives a
+# worked example), not just a generic "add labels" line — pin its content,
+# not only the exit code, so a regression to a vague message is caught.
+T=$(mk_transcript "$LONG_TEXT")
+run_stderr "$(payload "$T")"
+check "blocked path -> exit 2" 2 "$RC_ERR"
+case "$ERR_ERR" in *"[discipline-block]"*) msg_tag=1 ;; *) msg_tag=0 ;; esac
+check "blocked path -> stderr contains [discipline-block]" 1 "$msg_tag"
+case "$ERR_ERR" in *"Rule (CLAUDE.md)"*) msg_rule=1 ;; *) msg_rule=0 ;; esac
+check "blocked path -> stderr contains Rule (CLAUDE.md)" 1 "$msg_rule"
 
 [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails)"; exit 1; }
