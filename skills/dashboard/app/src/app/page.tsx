@@ -1,6 +1,6 @@
 import "@/styles/hud.css";
 import { getRunToken } from "@/lib/runlog";
-import { loadConfig } from "@/lib/config";
+import { loadConfig, visibleButtons } from "@/lib/config";
 import { DashboardApp } from "@/components/DashboardApp";
 import type { DeckButton } from "@/components/DashboardApp";
 
