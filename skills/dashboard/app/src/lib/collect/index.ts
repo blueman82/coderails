@@ -100,7 +100,7 @@ function sortGates(gates: (PrGate | PrGateError)[]): (PrGate | PrGateError)[] {
 }
 
 // Builds the aggregator: an in-memory snapshot kept current by fs.watch on
-// the sessions/loops/memory-trail dirs (debounced) plus a runs-log tap, and a
+// the sessions/loops dirs (debounced) plus a runs-log tap, and a
 // setInterval gh poll for gates. Every collector call is wrapped so a throw
 // degrades that slice of the snapshot rather than killing the aggregator —
 // callers (the SSE route) never see an aggregator-level exception, and
