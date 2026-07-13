@@ -195,13 +195,18 @@ describe("GET /api/events — activity on fs change", () => {
     expect(frames[0].event).toBe("snapshot");
     const activityFrame = frames.find((f) => f.event === "activity");
     expect(activityFrame).toBeDefined();
-    const activity = activityFrame!.data as { sessions: unknown[]; health: unknown[] };
+    const activity = activityFrame!.data as Record<string, unknown>;
+    // Wire-shape regression guard: the activity payload's key set is
+    // enumerated exactly here (rather than spot-checked) so a future slice
+    // drop — trail removal, or dropping any other key — is caught on the
+    // wire instead of degrading silently on the client.
+    expect(Object.keys(activity).sort()).toEqual(["builds", "health", "loops", "queue", "sessions"].sort());
     expect(Array.isArray(activity.sessions)).toBe(true);
-    // Regression: health used to be computed alongside sessions/loops/trail
-    // but dropped before the emit, so tiles never left "unavailable" on the
+    // Regression: health used to be computed alongside sessions/loops but
+    // dropped before the emit, so tiles never left "unavailable" on the
     // client past the initial (necessarily empty) snapshot frame.
     expect(Array.isArray(activity.health)).toBe(true);
-    expect(activity.health.length).toBeGreaterThan(0);
+    expect((activity.health as unknown[]).length).toBeGreaterThan(0);
   }, 6000);
 
   it("snapshot carries a builds field populated from buildsDir, and it refreshes when a build's state.json changes", async () => {
