@@ -70,7 +70,6 @@ export interface Aggregator {
   stop(): void;
 }
 
-const DEFAULT_TRAIL_LIMIT = 20;
 const DEFAULT_RUNS_LIMIT = 20;
 const DEFAULT_QUEUE_LIMIT = 50;
 const DEFAULT_GATES_POLL_MS = 120_000;
