@@ -217,18 +217,20 @@ export function collectLoops(baseDir: string): LoopInfo[] {
     const projectDir = join(baseDir, slug);
     for (const sessionId of listDirs(projectDir)) {
       const loopDir = join(projectDir, sessionId);
-      const progress = readJson(join(loopDir, "progress.json"));
+      const progressPath = join(loopDir, "progress.json");
+      const progress = readJson(progressPath);
       const record = isRecord(progress) ? progress : {};
-      const unitTitles = readUnitTitles(record.work_units);
+      const units = readUnits(record.work_units);
       loops.push({
         slug,
-        name: readLoopName(record, slug),
+        title: readTitle(record, slug),
         sessionId: typeof record.session_id === "string" ? record.session_id : sessionId,
         status: typeof record.status === "string" ? record.status : "",
-        workUnitsDone: unitTitles.filter((u) => u.done).length,
-        workUnitsTotal: unitTitles.length,
+        workUnitsDone: units.filter((u) => u.done).length,
+        workUnitsTotal: units.length,
         evalsFrozen: readEvalsFrozen(loopDir),
-        unitTitles,
+        lastUpdatedMs: readLastUpdatedMs(record, progressPath),
+        units,
         decisions: readDecisions(record.decisions_absorbed),
       });
     }
