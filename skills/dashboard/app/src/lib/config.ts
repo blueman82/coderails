@@ -16,6 +16,7 @@ export interface ButtonDef {
   profile: PermissionProfile;
   inputAllowed?: boolean;
   bypassPermissions?: true;
+  hidden?: boolean;
 }
 
 export interface DashboardConfig {
@@ -76,7 +77,20 @@ export function loadConfig(path?: string): DashboardConfig {
         `Button "${button.name}" has relative cwd (must be absolute): ${button.cwd}`
       );
     }
+
+    if (button.hidden !== undefined && typeof button.hidden !== "boolean") {
+      throw new ConfigError(
+        `Button "${button.name}" has non-boolean hidden: ${button.hidden}`
+      );
+    }
   }
 
   return data;
+}
+
+// Buttons stay in the config (routines still target them by name) but
+// never reach the deck. Callers narrowing config.buttons for the client
+// should go through this helper rather than filtering inline.
+export function visibleButtons(config: DashboardConfig): ButtonDef[] {
+  return config.buttons.filter((b) => !b.hidden);
 }

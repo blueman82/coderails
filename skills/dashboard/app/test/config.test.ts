@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach } from "vitest";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { loadConfig, ConfigError } from "../src/lib/config";
+import { loadConfig, visibleButtons, ConfigError, type DashboardConfig } from "../src/lib/config";
 
 const tmpDirs: string[] = [];
 
@@ -20,7 +20,7 @@ afterEach(() => {
   }
 });
 
-const validConfig = {
+const validConfig: DashboardConfig = {
   repos: ["blueman82/coderails"],
   wikiPaths: ["/Users/harrison/Github/coderails-wiki"],
   memoryPaths: ["/Users/harrison/.claude/projects/-Users-harrison-Github-coderails/memory"],
@@ -125,5 +125,66 @@ describe("loadConfig", () => {
     });
     const config = loadConfig(path);
     expect(config.buttons[0].profile).toBe("auto");
+  });
+
+  it("accepts a button with hidden: true", () => {
+    const path = writeConfig({
+      ...validConfig,
+      buttons: [
+        {
+          ...validConfig.buttons[0],
+          hidden: true,
+        },
+      ],
+    });
+    const config = loadConfig(path);
+    expect(config.buttons[0].hidden).toBe(true);
+  });
+
+  it("throws when a button's hidden field is not a boolean", () => {
+    const path = writeConfig({
+      ...validConfig,
+      buttons: [
+        {
+          ...validConfig.buttons[0],
+          hidden: "yes",
+        },
+      ],
+    });
+    expect(() => loadConfig(path)).toThrow(ConfigError);
+    expect(() => loadConfig(path)).toThrow(/hidden/i);
+  });
+
+  it("leaves hidden undefined when absent", () => {
+    const path = writeConfig(validConfig);
+    const config = loadConfig(path);
+    expect(config.buttons[0].hidden).toBeUndefined();
+  });
+});
+
+describe("visibleButtons", () => {
+  it("excludes buttons with hidden: true", () => {
+    const config: DashboardConfig = {
+      ...validConfig,
+      buttons: [
+        validConfig.buttons[0],
+        { ...validConfig.buttons[0], name: "hidden-button", hidden: true },
+      ],
+    };
+    expect(visibleButtons(config).map((b) => b.name)).toEqual(["wiki-lint"]);
+  });
+
+  it("includes buttons with hidden absent or false", () => {
+    const config: DashboardConfig = {
+      ...validConfig,
+      buttons: [
+        validConfig.buttons[0],
+        { ...validConfig.buttons[0], name: "explicit-false", hidden: false },
+      ],
+    };
+    expect(visibleButtons(config).map((b) => b.name)).toEqual([
+      "wiki-lint",
+      "explicit-false",
+    ]);
   });
 });
