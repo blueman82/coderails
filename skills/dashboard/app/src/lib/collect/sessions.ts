@@ -152,12 +152,32 @@ function readDecisions(decisionsAbsorbed: unknown): string[] {
 }
 
 // progress.json's "loop" field is a free-text human name (e.g. "observability-dashboard
-// (sub-project 1 of agentic-os evolution)"), not present on every loop. Falls back to the
-// dir slug when absent, blank, or not a string.
-function readLoopName(record: Record<string, unknown>, slug: string): string {
-  const loop = record.loop;
-  if (typeof loop === "string" && loop.trim() !== "") return loop;
+// (sub-project 1 of agentic-os evolution)"), not present on every loop. Falls back to
+// the first 80 chars of authorising_prompt_raw (trimmed, "…" appended when truncated),
+// then to the dir slug when neither is present.
+function readTitle(record: Record<string, unknown>, slug: string): string {
+  const loop = readNonEmptyString(record.loop);
+  if (loop) return loop;
+  const prompt = readNonEmptyString(record.authorising_prompt_raw);
+  if (prompt) {
+    const trimmed = prompt.trim();
+    return trimmed.length > 80 ? `${trimmed.slice(0, 80)}…` : trimmed;
+  }
   return slug;
+}
+
+// last_updated is a free-text timestamp field written by the orchestrator, not
+// guaranteed to parse (or be present at all) on every progress.json. Falls back
+// to the file's own mtime — a crashed writer can leave mtime touched without a
+// corresponding last_updated bump, but that's still a better signal than 0.
+function readLastUpdatedMs(record: Record<string, unknown>, progressPath: string): number {
+  const lastUpdated = typeof record.last_updated === "string" ? Date.parse(record.last_updated) : NaN;
+  if (!Number.isNaN(lastUpdated)) return lastUpdated;
+  try {
+    return statSync(progressPath).mtimeMs;
+  } catch {
+    return 0;
+  }
 }
 
 // Mirrors als_read_loop_evals_result (hooks/scripts/lib/loop_state_common.sh):
