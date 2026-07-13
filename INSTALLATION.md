@@ -102,7 +102,7 @@ treat it as machine-local config, same as `.claude/settings.local.json`.
 | Commands | Skills | Hooks (automatic) |
 |---|---|---|
 | `/workflow` `/prep` `/push` `/merge` `/coderails:init` | **Workflow & evals:** agentic-loop, task-evals | confidence-label check (Stop) |
-| `/post-review` `/post-evals` | **Planning:** planning-sequence, premortem, brainstorming, writing-plans | Did-Not-Verify catch-up (UserPromptSubmit) |
+| `/post-review` `/post-evals` | **Planning:** planning-sequence, premortem, brainstorming, writing-plans | Did-Not-Verify check (Stop) |
 | `/assumptions` `/verify` `/notchecked` `/disconfirm` | **Dev discipline:** test-driven-development, systematic-debugging, engineering-principles (+ go/python/ts variants), verification-before-completion | destructive-bash gate (PreToolUse) |
 | `/test-gate-setup` | **Multi-agent:** dispatching-parallel-agents, subagent-driven-development, executing-plans, finishing-a-development-branch | project test gate (PreToolUse) |
 | | **Wiki:** wiki-init, wiki-query, wiki-ingest, wiki-lint | |
