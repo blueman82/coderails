@@ -31,7 +31,7 @@ function loop(overrides: Partial<LoopInfo> = {}): LoopInfo {
     workUnitsTotal: 2,
     evalsFrozen: false,
     lastUpdatedMs: 0,
-    units: [{ key: "wu1", done: true, inFlight: false }],
+    units: [{ key: "wu1", status: "done" }],
     decisions: [],
     ...overrides,
   };
