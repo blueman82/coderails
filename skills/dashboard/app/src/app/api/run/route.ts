@@ -51,7 +51,11 @@ interface ChildProcessLike {
   on(event: "error", listener: (err: Error) => void): void;
 }
 
-type SpawnFn = (command: string, args: readonly string[], options: { cwd: string }) => ChildProcessLike;
+type SpawnFn = (
+  command: string,
+  args: readonly string[],
+  options: { cwd: string; env?: NodeJS.ProcessEnv },
+) => ChildProcessLike;
 
 export interface RunHandlerDeps {
   config: DashboardConfig;
