@@ -73,7 +73,13 @@
       "evidence": ""
     }
   ],
-  "amendments": [],
+  "amendments": [
+    {
+      "eval": "E5",
+      "when": "2026-07-13T09:20:00Z",
+      "why": "Original regex flagged 'confidence-label blocks'/'verify-loop blocks' as bare phrases, which false-positived on the new past-failure sentence's historical count ('49 confidence-label blocks + 20 verify-loop blocks') — accurate historical data about the f87a0a2e incident, explicitly framed as the motivating cause of the demotion, not a stale present-tense claim. Narrowed the sweep to exclude the counted-historical-figure pattern while keeping it sensitive to any present-tense stale claim. Made pre-grading (no verifier verdict existed yet), so no regraded_by required."
+    }
+  ],
   "result": null,
   "graded_at": null,
   "head_sha": null
