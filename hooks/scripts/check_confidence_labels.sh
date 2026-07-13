@@ -1,6 +1,9 @@
 #!/bin/bash
 # Tail-first read + retry-backoff race mitigation + diagnostic logging.
 # BLOCK-MODE: exits 2 when confidence labels are missing (promoted from warn-mode 2026-05-05).
+# Demoted to a model-visible additionalContext warn (exit 0) on Stop events inside
+# an active, incomplete agentic loop (see the loop-scoped warn demotion branch
+# below); SubagentStop always blocks regardless of loop state.
 
 LOG_FILE="${CLAUDE_DISCIPLINE_LOG:-$HOME/.claude/discipline.log}"
 TAIL_LINES="${CLAUDE_HOOK_TAIL_LINES:-200}"
@@ -60,15 +63,20 @@ fi
 # Loop-scoped warn demotion (Stop event only — SubagentStop never reaches this
 # branch, so workers stay block-enforced). Evaluated lazily, only once a block
 # is imminent, so non-loop sessions never pay the transcript-invocation scan.
+# Fail-toward-blocking: the jq emission runs FIRST and its own exit status
+# gates the log line and exit 0 — if jq fails (e.g. missing binary), execution
+# falls through to the normal block path below instead of silently exiting 0
+# with a log line that falsely claims warned=1.
 if [ "$hook_event" = "Stop" ] && als_loop_active_incomplete "$transcript" "$cwd" "$(als_sanitise_session_id "$session_id")"; then
-  {
-    printf '%s hook=confidence_labels session=%s text_len=%d would_block=1 warned=1 blocked=0\n' \
-      "$(date -Iseconds 2>/dev/null || date +%Y-%m-%dT%H:%M:%S%z)" \
-      "$session_id" "${#text}"
-  } >> "$LOG_FILE" 2>/dev/null
-  jq -n --arg m "[discipline-warn(loop)] response made substantive claims without (verified)/(inferred)/(guess) labels. Add them before stopping." \
-    '{"hookSpecificOutput":{"hookEventName":"Stop","additionalContext":$m}}'
-  exit 0
+  if jq -n --arg m "[discipline-warn(loop)] response made substantive claims without (verified)/(inferred)/(guess) labels. Add them before stopping." \
+    '{"hookSpecificOutput":{"hookEventName":"Stop","additionalContext":$m}}'; then
+    {
+      printf '%s hook=confidence_labels session=%s text_len=%d would_block=1 warned=1 blocked=0\n' \
+        "$(date -Iseconds 2>/dev/null || date +%Y-%m-%dT%H:%M:%S%z)" \
+        "$session_id" "${#text}"
+    } >> "$LOG_FILE" 2>/dev/null
+    exit 0
+  fi
 fi
 
 {

@@ -147,7 +147,10 @@ check "SubagentStop: compliant parent but non-compliant last_assistant_message -
 LONG_TEXT2=$(printf '%200s' | tr ' ' 'y')  # distinct filler from LONG_TEXT above
 
 # Case D1: loop active+incomplete, Stop, would-block text -> exit 0, stdout
-# carries additionalContext AND the discipline-warn(loop) prefix.
+# carries additionalContext AND the discipline-warn(loop) prefix. Also asserts
+# the emitted stdout is VALID JSON with the expected shape (not just a
+# substring match) — a broken jq emission must fail this test, not pass by
+# substring luck (pairs with the fail-toward-blocking restructure below).
 reset_loop() { rm -rf "$CLAUDE_AGENTIC_LOOP_DIR"; }
 reset_loop; T=$(mk_loop_transcript 1 "$LONG_TEXT2"); write_progress S1 in-progress 0
 run_capture "$(loop_payload "$T" S1)"
@@ -156,6 +159,8 @@ case "$OUT_OUT" in *additionalContext*) d1_ctx=1 ;; *) d1_ctx=0 ;; esac
 check "loop active+incomplete -> stdout has additionalContext" 1 "$d1_ctx"
 case "$OUT_OUT" in *"discipline-warn(loop)"*) d1_warn=1 ;; *) d1_warn=0 ;; esac
 check "loop active+incomplete -> warn message tagged discipline-warn(loop)" 1 "$d1_warn"
+d1_shape=$(printf '%s' "$OUT_OUT" | jq -e '.hookSpecificOutput.hookEventName == "Stop"' 2>/dev/null)
+check "loop active+incomplete -> stdout is valid JSON with hookEventName=Stop" "true" "$d1_shape"
 
 # Case D2: no loop invocation in transcript, Stop -> exit 2 (unchanged).
 reset_loop; T=$(mk_transcript "$LONG_TEXT2")
@@ -164,6 +169,21 @@ check "no loop invocation -> exit 2 unchanged" 2 "$(run "$(payload "$T")")"
 # Case D3: loop complete (marker == invocations, session-owned), Stop -> exit 2.
 reset_loop; T=$(mk_loop_transcript 1 "$LONG_TEXT2"); write_progress S1 complete 1
 check "loop complete (not re-armed, owned) -> exit 2" 2 "$(run "$(loop_payload "$T" S1)")"
+
+# Case D3b (ownership conjunct coverage — G1): progress.json lives at THIS
+# session's resolved path (S1's dir) but its session_id FIELD names a
+# different session, status=complete, marker==invocations (not re-armed by
+# the marker check alone). The completed-loop exemption in
+# als_loop_active_incomplete requires ALS_SESSION == session_id; without that
+# conjunct, a foreign session's stale complete record would silently demote
+# an unrelated active session. Expect: still ACTIVE -> exit 0 warn (the
+# exemption does NOT apply when the file's session_id doesn't match).
+reset_loop; T=$(mk_loop_transcript 1 "$LONG_TEXT2"); dir=$(file_dir S1); mkdir -p "$dir"
+printf '{"schema_version":1,"status":"complete","session_id":"OTHER-SESSION","completed_marker":1}' > "$dir/progress.json"
+run_capture "$(loop_payload "$T" S1)"
+check "foreign-owned complete progress.json -> still exit 0 (ownership required for exemption)" 0 "$RC_OUT"
+case "$OUT_OUT" in *additionalContext*) d3b_ctx=1 ;; *) d3b_ctx=0 ;; esac
+check "foreign-owned complete progress.json -> additionalContext present (demoted, not blocked)" 1 "$d3b_ctx"
 
 # Case D4: unreadable/absent transcript -> unchanged existing early-allow (exit 0).
 reset_loop

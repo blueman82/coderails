@@ -340,12 +340,27 @@ als_read_file_state() {
 # als_loop_active_incomplete <transcript_path> <cwd> <session_id>
 #   Non-exiting predicate for the discipline hooks' Stop-only warn demotion
 #   (PR1 of the ceremony-noise-reduction loop). Returns 0 (true, shell
-#   success) iff a registered agentic loop is active+incomplete for this
-#   session; returns 1 (false) otherwise. Mirrors the als_gate_* pair
-#   (als_gate_require_active_loop + als_load_progress + als_gate_loop_complete)
-#   exactly, but as a predicate rather than an exiting gate — no `exit` calls
-#   and no logging here; callers own both. `session_id` MUST already be
-#   sanitised via als_sanitise_session_id before being passed in.
+#   success) iff the agentic-loop Skill has been INVOKED for this session and
+#   the loop is not exempt as complete; returns 1 (false) otherwise. Mirrors
+#   the als_gate_* pair (als_gate_require_active_loop + als_load_progress +
+#   als_gate_loop_complete) exactly, but as a predicate rather than an exiting
+#   gate — no `exit` calls and no logging here; callers own both. `session_id`
+#   MUST already be sanitised via als_sanitise_session_id before being passed in.
+#
+#   Truth table: active iff invocations>0 AND NOT (status="complete" AND
+#   NOT rearmed AND session-owned). Concretely:
+#     invocations=0                                          -> INACTIVE (1)
+#     invocations>0, no progress.json yet (invoked but not
+#       stubbed) or absent/corrupt/foreign-owned progress.json -> ACTIVE (0)
+#     invocations>0, status=complete, not rearmed, owned      -> INACTIVE (1)
+#     invocations>0, status=complete, rearmed (invocations>marker) -> ACTIVE (0)
+#     invocations>0, status=complete, but session_id mismatch  -> ACTIVE (0)
+#   The absent/corrupt/foreign-owned case reading ACTIVE is BY DESIGN, not an
+#   oversight: als_read_file_state's fail-open defaults (empty status/session,
+#   marker=0) never satisfy the completed-and-owned exemption, so those states
+#   fall through to active/warn — and loop_state_guard/loop_stall_guard block
+#   those same stops separately via their own gates, so the stop is never
+#   left unpoliced even though this predicate alone demotes it.
 als_loop_active_incomplete() {
   local transcript="$1" cwd="$2" session_id="$3"
   local invocations; invocations=$(als_stable_invocations "$transcript")
