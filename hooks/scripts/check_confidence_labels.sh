@@ -9,9 +9,11 @@ SLEEP_S="${CLAUDE_HOOK_SLEEP_S:-0.3}"
 MIN_LEN="${CLAUDE_HOOK_MIN_LEN:-200}"
 
 . "$(dirname "$0")/lib/discipline_common.sh"
+. "$(dirname "$0")/lib/loop_state_common.sh"
 
 IFS= read -r -d '' -t 5 input || true
 hook_event=$(echo "$input" | jq -r '.hook_event_name // "Stop"' 2>/dev/null)
+cwd=$(echo "$input" | jq -r '.cwd // empty' 2>/dev/null)
 
 # Loop-guard: if we already blocked once this turn, allow the stop to avoid looping.
 # Mirrors check_verify_loop.sh's guard — without it, a stale/degenerate transcript
@@ -52,6 +54,20 @@ if [ "${#text}" -lt "$MIN_LEN" ]; then
   exit 0
 fi
 if [ "$matched_label" -eq 1 ]; then
+  exit 0
+fi
+
+# Loop-scoped warn demotion (Stop event only — SubagentStop never reaches this
+# branch, so workers stay block-enforced). Evaluated lazily, only once a block
+# is imminent, so non-loop sessions never pay the transcript-invocation scan.
+if [ "$hook_event" = "Stop" ] && als_loop_active_incomplete "$transcript" "$cwd" "$(als_sanitise_session_id "$session_id")"; then
+  {
+    printf '%s hook=confidence_labels session=%s text_len=%d would_block=1 warned=1 blocked=0\n' \
+      "$(date -Iseconds 2>/dev/null || date +%Y-%m-%dT%H:%M:%S%z)" \
+      "$session_id" "${#text}"
+  } >> "$LOG_FILE" 2>/dev/null
+  jq -n --arg m "[discipline-warn(loop)] response made substantive claims without (verified)/(inferred)/(guess) labels. Add them before stopping." \
+    '{"hookSpecificOutput":{"hookEventName":"Stop","additionalContext":$m}}'
   exit 0
 fi
 

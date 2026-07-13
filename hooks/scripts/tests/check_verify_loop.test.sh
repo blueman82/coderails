@@ -5,9 +5,12 @@ set -u
 HOOK="$(cd "$(dirname "$0")/.." && pwd)/check_verify_loop.sh"
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
+export CLAUDE_AGENTIC_LOOP_DIR="$TMP/state"
 export CLAUDE_DISCIPLINE_LOG="$TMP/discipline.log"
 export CLAUDE_HOOK_MAX_ATTEMPTS=1   # no flush-race retry sleeps in tests
 export CLAUDE_HOOK_SLEEP_S=0
+CWD="/work/project"
+SLUG="-work-project"
 fails=0
 
 # Build a JSONL transcript with an Edit tool use + an assistant text message.
@@ -31,7 +34,7 @@ mk_transcript_no_edit() { # text -> path
 
 payload() { # transcript_path [stop_hook_active] -> json
   local tp="$1" sha="${2:-false}"
-  printf '{"transcript_path":"%s","session_id":"S1","stop_hook_active":%s}' "$tp" "$sha"
+  printf '{"transcript_path":"%s","session_id":"S1","cwd":"%s","stop_hook_active":%s}' "$tp" "$CWD" "$sha"
 }
 
 run() { # json -> exit code
@@ -42,6 +45,38 @@ check() { # desc expected actual
   if [ "$2" = "$3" ]; then printf 'ok   - %s\n' "$1"
   else printf 'FAIL - %s (expected exit %s, got %s)\n' "$1" "$2" "$3"; fails=$((fails+1)); fi
 }
+
+# ── Loop-scoped warn-demotion fixture helpers (mirrors loop_stall_guard.test.sh) ──
+file_dir() { printf '%s/%s/%s' "$CLAUDE_AGENTIC_LOOP_DIR" "$SLUG" "$1"; }   # session_id -> dir
+# Builds a transcript with N agentic-loop invocations, an Edit tool_use (so
+# file_count>=1), then the given final text (typically with an untagged DNV bullet).
+mk_loop_transcript() { # n_invocations final_text -> path
+  local n="$1" final="$2" out="$TMP/lt_${RANDOM}.jsonl" i=0
+  : > "$out"
+  while [ "$i" -lt "$n" ]; do
+    printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Skill","input":{"skill":"coderails:agentic-loop"}}]}}' >> "$out"
+    i=$((i+1))
+  done
+  printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Edit","input":{"file_path":"/tmp/f.py"}}]}}' >> "$out"
+  if [ -n "$final" ]; then
+    jq -cn --arg t "$final" '{type:"assistant",message:{content:[{type:"text",text:$t}]}}' >> "$out"
+  fi
+  printf '%s' "$out"
+}
+write_progress() { # session_id status completed_marker
+  local dir; dir=$(file_dir "$1")
+  mkdir -p "$dir"
+  printf '{"schema_version":1,"status":"%s","session_id":"%s","completed_marker":%s}' "$2" "$1" "$3" > "$dir/progress.json"
+}
+loop_payload() { # transcript session_id [stop_hook_active] [hook_event_name]
+  printf '{"transcript_path":"%s","session_id":"%s","cwd":"%s","stop_hook_active":%s,"hook_event_name":"%s"}' \
+    "$1" "$2" "$CWD" "${3:-false}" "${4:-Stop}"
+}
+run_capture() { # json -> sets RC_OUT and OUT_OUT (stdout), no subshell needed for RC
+  OUT_OUT=$(printf '%s' "$1" | bash "$HOOK" 2>/dev/null)
+  RC_OUT=$?
+}
+reset_loop() { rm -rf "$CLAUDE_AGENTIC_LOOP_DIR"; }
 
 RESP_NO_DNV="This is a response that edits files but has no Did Not Verify section. (verified)"
 
@@ -207,5 +242,79 @@ check "fixture SubagentStop non-compliant -> block" 2 "$(
     '.last_assistant_message = $msg | .agent_transcript_path = $atp' \
     "$FIXTURE" | bash "$HOOK" >/dev/null 2>&1; echo $?
 )"
+
+# ── Loop-scoped warn-demotion (PR1) ─────────────────────────────────────────
+DNV_TEXT="Some text here. (verified)
+## Did Not Verify
+- the integration test was not run"
+
+# Case D1: loop active+incomplete, Stop, would-block text (untagged DNV) ->
+# exit 0, stdout carries additionalContext AND the discipline-warn(loop) prefix.
+reset_loop; T=$(mk_loop_transcript 1 "$DNV_TEXT"); write_progress S1 in-progress 0
+run_capture "$(loop_payload "$T" S1)"
+check "loop active+incomplete -> exit 0" 0 "$RC_OUT"
+case "$OUT_OUT" in *additionalContext*) d1_ctx=1 ;; *) d1_ctx=0 ;; esac
+check "loop active+incomplete -> stdout has additionalContext" 1 "$d1_ctx"
+case "$OUT_OUT" in *"discipline-warn(loop)"*) d1_warn=1 ;; *) d1_warn=0 ;; esac
+check "loop active+incomplete -> warn message tagged discipline-warn(loop)" 1 "$d1_warn"
+
+# Case D2: no loop invocation in transcript, Stop -> exit 2 (unchanged).
+reset_loop; T=$(mk_transcript "$DNV_TEXT")
+check "no loop invocation -> exit 2 unchanged" 2 "$(run "$(payload "$T")")"
+
+# Case D3: loop complete (marker == invocations, session-owned), Stop -> exit 2.
+reset_loop; T=$(mk_loop_transcript 1 "$DNV_TEXT"); write_progress S1 complete 1
+check "loop complete (not re-armed, owned) -> exit 2" 2 "$(run "$(loop_payload "$T" S1)")"
+
+# Case D4: unreadable/absent transcript -> unchanged existing no-transcript path (exit 0).
+reset_loop
+check "unreadable transcript -> exit 0 unchanged" 0 "$(run "$(loop_payload "$TMP/nope.jsonl" S1)")"
+
+# Case D5: corrupt progress.json + invocation present, Stop -> exit 0 warn.
+# (Documented pairing: loop_state_guard blocks this same stop separately;
+# check_verify_loop.sh only judges DNV-tag compliance.)
+reset_loop; T=$(mk_loop_transcript 1 "$DNV_TEXT"); dir=$(file_dir S1); mkdir -p "$dir"
+printf '{not valid json' > "$dir/progress.json"
+run_capture "$(loop_payload "$T" S1)"
+check "corrupt progress.json + invocation present -> exit 0 warn" 0 "$RC_OUT"
+case "$OUT_OUT" in *additionalContext*) d5_ctx=1 ;; *) d5_ctx=0 ;; esac
+check "corrupt progress.json + invocation present -> additionalContext present" 1 "$d5_ctx"
+
+# Case D6: re-arm (status=complete but invocations > completed_marker), Stop -> exit 0 warn.
+reset_loop; T=$(mk_loop_transcript 2 "$DNV_TEXT"); write_progress S1 complete 1
+run_capture "$(loop_payload "$T" S1)"
+check "re-arm (invocations>marker) -> exit 0 warn" 0 "$RC_OUT"
+case "$OUT_OUT" in *additionalContext*) d6_ctx=1 ;; *) d6_ctx=0 ;; esac
+check "re-arm -> additionalContext present" 1 "$d6_ctx"
+
+# Case D7: SubagentStop with loop active, unlabelled last_assistant_message
+# carrying an untagged DNV bullet -> exit 2 (workers stay block-enforced).
+reset_loop; T=$(mk_loop_transcript 1 "$DNV_TEXT"); write_progress S1 in-progress 0
+SUB_PAYLOAD=$(jq -n --arg msg "$DNV_TEXT" --arg tp "$T" --arg c "$CWD" '{
+  "hook_event_name": "SubagentStop",
+  "session_id": "S1",
+  "transcript_path": $tp,
+  "cwd": $c,
+  "stop_hook_active": false,
+  "last_assistant_message": $msg
+}')
+check "SubagentStop with loop active -> exit 2 (block-enforced)" 2 "$(run "$SUB_PAYLOAD")"
+
+# Case D8: demoted-path log line matches would_block=1 warned=1 blocked=0.
+reset_loop; : > "$CLAUDE_DISCIPLINE_LOG"; T=$(mk_loop_transcript 1 "$DNV_TEXT"); write_progress S1 in-progress 0
+run "$(loop_payload "$T" S1)" >/dev/null 2>&1
+case "$(cat "$CLAUDE_DISCIPLINE_LOG" 2>/dev/null)" in
+  *"would_block=1 warned=1 blocked=0"*) d8_match=1 ;;
+  *) d8_match=0 ;;
+esac
+check "demoted-path log line: would_block=1 warned=1 blocked=0" 1 "$d8_match"
+
+# Case D9: a compliant turn (clean DNV — no bullets) in an active loop -> exit 0
+# with NO additionalContext output (no warn spam on a passing turn).
+reset_loop; T=$(mk_loop_transcript 1 "$RESP_NO_DNV"); write_progress S1 in-progress 0
+run_capture "$(loop_payload "$T" S1)"
+check "compliant turn in loop -> exit 0" 0 "$RC_OUT"
+case "$OUT_OUT" in *additionalContext*) d9_ctx=1 ;; *) d9_ctx=0 ;; esac
+check "compliant turn in loop -> NO additionalContext (no warn spam)" 0 "$d9_ctx"
 
 [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails)"; exit 1; }

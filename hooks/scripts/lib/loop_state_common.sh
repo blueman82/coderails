@@ -337,6 +337,30 @@ als_read_file_state() {
   fi
 }
 
+# als_loop_active_incomplete <transcript_path> <cwd> <session_id>
+#   Non-exiting predicate for the discipline hooks' Stop-only warn demotion
+#   (PR1 of the ceremony-noise-reduction loop). Returns 0 (true, shell
+#   success) iff a registered agentic loop is active+incomplete for this
+#   session; returns 1 (false) otherwise. Mirrors the als_gate_* pair
+#   (als_gate_require_active_loop + als_load_progress + als_gate_loop_complete)
+#   exactly, but as a predicate rather than an exiting gate — no `exit` calls
+#   and no logging here; callers own both. `session_id` MUST already be
+#   sanitised via als_sanitise_session_id before being passed in.
+als_loop_active_incomplete() {
+  local transcript="$1" cwd="$2" session_id="$3"
+  local invocations; invocations=$(als_stable_invocations "$transcript")
+  [ -z "$invocations" ] && invocations=0
+  [ "$invocations" -eq 0 ] && return 1
+  local als_path; als_path=$(als_resolve_path "$cwd" "$session_id")
+  als_read_file_state "$als_path"
+  local rearmed=0
+  [ "$invocations" -gt "$ALS_MARKER" ] && rearmed=1
+  if [ "$ALS_STATUS" = "complete" ] && [ "$rearmed" -eq 0 ] && [ "$ALS_SESSION" = "$session_id" ]; then
+    return 1
+  fi
+  return 0
+}
+
 # ── Shared gate functions (called by both loop guards) ───────────────────────
 # Guard scripts do NOT use set -euo pipefail; gate functions exit directly to
 # skip or block, exactly like require::* helpers in scripts/lib/git-common.sh.
