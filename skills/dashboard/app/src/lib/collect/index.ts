@@ -45,7 +45,7 @@ export type AggregatorEventName = "runs" | "gates" | "activity" | "run-output";
 export interface AggregatorEventPayloadMap {
   runs: RunRecord[];
   gates: (PrGate | PrGateError)[];
-  activity: Pick<Snapshot, "sessions" | "loops" | "trail" | "health" | "queue" | "builds">;
+  activity: Pick<Snapshot, "sessions" | "loops" | "health" | "queue" | "builds">;
   "run-output": RunOutputEvent;
 }
 
