@@ -253,10 +253,10 @@ describe("collectLoops", () => {
     const loops = collectLoops(LOOP_FIXTURES);
     const loop = loops.find((l) => l.slug === "-work-project-described");
     expect(loop?.units).toEqual([
-      { key: "wu1-done", done: true, inFlight: false, description: "F1: first unit, done and described.", pr: 17 },
-      { key: "wu2-inprogress", done: false, inFlight: true, description: "F2: second unit, in flight.", pr: 18 },
-      { key: "wu3-doing", done: false, inFlight: true, description: "F3: third unit, uses the desc alias and the doing status." },
-      { key: "wu4-pending", done: false, inFlight: false },
+      { key: "wu1-done", status: "done", description: "F1: first unit, done and described.", pr: 17 },
+      { key: "wu2-inprogress", status: "in-flight", description: "F2: second unit, in flight.", pr: 18 },
+      { key: "wu3-doing", status: "in-flight", description: "F3: third unit, uses the desc alias and the doing status." },
+      { key: "wu4-pending", status: "pending" },
     ]);
   });
 
@@ -277,9 +277,27 @@ describe("collectLoops", () => {
     );
     const loops = collectLoops(base);
     expect(loops[0].units).toEqual([
-      { key: "wu-blank", done: false, inFlight: false },
-      { key: "wu-none", done: false, inFlight: false },
+      { key: "wu-blank", status: "pending" },
+      { key: "wu-none", status: "pending" },
     ]);
+  });
+
+  it("uses description over the desc alias when both are non-blank (precedence)", () => {
+    const base = makeTmpBase();
+    const dir = join(base, "-both-desc-project", "S17");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, "progress.json"),
+      JSON.stringify({
+        status: "in-progress",
+        session_id: "S17",
+        work_units: {
+          "wu-both": { status: "pending", description: "description wins", desc: "desc loses" },
+        },
+      })
+    );
+    const loops = collectLoops(base);
+    expect(loops[0].units).toEqual([{ key: "wu-both", status: "pending", description: "description wins" }]);
   });
 
   it("uses last_updated when it parses as a valid date (precedence over mtime)", () => {
