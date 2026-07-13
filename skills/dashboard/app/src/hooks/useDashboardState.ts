@@ -54,7 +54,6 @@ const EMPTY_SNAPSHOT: DashboardSnapshot = {
   sessions: [],
   loops: [],
   gates: [],
-  trail: [],
   health: [],
   runs: [],
   queue: [],
