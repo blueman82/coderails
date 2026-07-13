@@ -141,6 +141,155 @@ T=$(mk_transcript "Some text here. (verified)
 - ")
 check "bare DNV bullet (no content) -> allow" 0 "$(run "$(payload "$T")")"
 
+# ── DNV-presence cases ───────────────────────────────────────────────────────
+# When file_count >= 3 and the response has no "## Did Not Verify" section at
+# all, that is treated the same as an untagged bullet: something checkable was
+# silently omitted rather than resolved or tagged.
+
+# Build a JSONL transcript with N unique Edit tool_use entries + an assistant
+# text message.
+mk_transcript_n_files() { # text n_files -> path
+  local text="$1" n="$2" out="$TMP/t_nf_$RANDOM.jsonl" i
+  : > "$out"
+  for i in $(seq 1 "$n"); do
+    printf '%s\n' "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Edit\",\"input\":{\"file_path\":\"/tmp/f${i}.py\"}}]}}" >> "$out"
+  done
+  jq -nc --arg t "$text" '{"type":"assistant","message":{"content":[{"type":"text","text":$t}]}}' >> "$out"
+  printf '%s' "$out"
+}
+
+# Test A: >=3 unique edited files, non-empty final text, NO DNV section -> block (exit 2)
+T=$(mk_transcript_n_files "Done, all changes applied. (verified)" 3)
+RES_A=$(printf '%s' "$(payload "$T")" | bash "$HOOK" 2>&1 >/dev/null)
+check "3 files, no DNV section -> block" 2 "$(run "$(payload "$T")")"
+case "$RES_A" in
+  *'no "## Did Not Verify" section'*) printf 'ok   - %s\n' "3 files, no DNV -> stderr names missing section" ;;
+  *) printf 'FAIL - %s (stderr: %s)\n' "3 files, no DNV -> stderr names missing section" "$RES_A"; fails=$((fails+1)) ;;
+esac
+
+# Test B: same transcript shape, but final text HAS a DNV section with one
+# tagged (unverifiable) bullet -> allow (exit 0)
+T=$(mk_transcript_n_files "Done, all changes applied. (verified)
+## Did Not Verify
+- (unverifiable: prod-only observation) whether the deploy actually succeeded" 3)
+check "3 files, DNV section present with tagged bullet -> allow" 0 "$(run "$(payload "$T")")"
+
+# Test C: only 2 edited files, no DNV section -> allow (below the file_count>=3 threshold)
+T=$(mk_transcript_n_files "Done. (verified)" 2)
+check "2 files, no DNV section -> allow" 0 "$(run "$(payload "$T")")"
+
+# Test D: stop_hook_active=true, >=3 files, no DNV section -> allow (loop-guard precedence)
+T=$(mk_transcript_n_files "Done, all changes applied. (verified)" 3)
+check "stop_hook_active + 3 files, no DNV -> allow (guard precedence)" 0 "$(run "$(payload "$T" true)")"
+
+# ── Presence-block loop-scoped warn-demotion (wired through the SAME
+# als_loop_active_incomplete predicate #155 used for the bullet path) ───────
+# mk_transcript_n_files builds assistant-only records (no genuine user
+# record), so dc_file_count falls back to whole-transcript counting — the
+# turn-scoping cutoff never applies here, matching the pre-existing Test A-D
+# fixtures above.
+
+# Build a transcript with N agentic-loop invocations, N_files unique Edit
+# tool_use entries, then optional final text (mirrors mk_loop_transcript but
+# parameterised on file count instead of a fixed single edit).
+mk_loop_transcript_n_files() { # n_invocations n_files final_text -> path
+  local n_inv="$1" n_files="$2" final="$3" out="$TMP/lnf_${RANDOM}.jsonl" i=0
+  : > "$out"
+  while [ "$i" -lt "$n_inv" ]; do
+    printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Skill","input":{"skill":"coderails:agentic-loop"}}]}}' >> "$out"
+    i=$((i+1))
+  done
+  for i in $(seq 1 "$n_files"); do
+    printf '%s\n' "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Edit\",\"input\":{\"file_path\":\"/tmp/lf${i}.py\"}}]}}" >> "$out"
+  done
+  if [ -n "$final" ]; then
+    jq -cn --arg t "$final" '{type:"assistant",message:{content:[{type:"text",text:$t}]}}' >> "$out"
+  fi
+  printf '%s' "$out"
+}
+
+# Case P1: loop active+incomplete, Stop, 3 turn-edits, NO DNV header -> exit 0,
+# stdout carries additionalContext AND the discipline-warn(loop) prefix AND
+# the presence message (session modified N files ... no section).
+reset_loop; T=$(mk_loop_transcript_n_files 1 3 "Done, all changes applied. (verified)"); write_progress S1 in-progress 0
+run_capture "$(loop_payload "$T" S1)"
+check "presence: loop active+incomplete -> exit 0" 0 "$RC_OUT"
+case "$OUT_OUT" in *additionalContext*) p1_ctx=1 ;; *) p1_ctx=0 ;; esac
+check "presence: loop active+incomplete -> stdout has additionalContext" 1 "$p1_ctx"
+case "$OUT_OUT" in *"discipline-warn(loop)"*) p1_warn=1 ;; *) p1_warn=0 ;; esac
+check "presence: loop active+incomplete -> warn message tagged discipline-warn(loop)" 1 "$p1_warn"
+p1_shape=$(printf '%s' "$OUT_OUT" | jq -e '.hookSpecificOutput.hookEventName == "Stop"' 2>/dev/null)
+check "presence: loop active+incomplete -> stdout is valid JSON with hookEventName=Stop" "true" "$p1_shape"
+p1_msg=$(printf '%s' "$OUT_OUT" | jq -e '.hookSpecificOutput.additionalContext | contains("no \"## Did Not Verify\" section")' 2>/dev/null)
+check "presence: loop active+incomplete -> presence message embedded in additionalContext" "true" "$p1_msg"
+
+# Case P2: no loop invocation in transcript, Stop, 3 turn-edits, no DNV header
+# -> exit 2 (unchanged hard block outside a loop).
+reset_loop; T=$(mk_transcript_n_files "Done, all changes applied. (verified)" 3)
+check "presence: no loop invocation -> exit 2 unchanged" 2 "$(run "$(loop_payload "$T" S1)")"
+
+# Case P3: loop complete (marker == invocations, session-owned), Stop, 3
+# turn-edits, no DNV header -> exit 2 (completed loop is not demoted).
+reset_loop; T=$(mk_loop_transcript_n_files 1 3 "Done, all changes applied. (verified)"); write_progress S1 complete 1
+check "presence: loop complete (not re-armed, owned) -> exit 2" 2 "$(run "$(loop_payload "$T" S1)")"
+
+# Case P4: demoted-path log line for the presence branch matches
+# presence_block=1 would_block=1 warned=1 blocked=0.
+reset_loop; : > "$CLAUDE_DISCIPLINE_LOG"; T=$(mk_loop_transcript_n_files 1 3 "Done, all changes applied. (verified)"); write_progress S1 in-progress 0
+run "$(loop_payload "$T" S1)" >/dev/null 2>&1
+case "$(cat "$CLAUDE_DISCIPLINE_LOG" 2>/dev/null)" in
+  *"presence_block=1 would_block=1 warned=1 blocked=0"*) p4_match=1 ;;
+  *) p4_match=0 ;;
+esac
+check "presence: demoted-path log line: presence_block=1 would_block=1 warned=1 blocked=0" 1 "$p4_match"
+
+# ── Turn-scoping cases (file_count scoped to records after the last genuine
+# user prompt, not session-cumulative) ──────────────────────────────────────
+
+# Build a transcript with a genuine user prompt record (content is a string).
+mk_user_record() { # text -> jsonl line
+  jq -nc --arg t "$1" '{"type":"user","message":{"content":$t}}'
+}
+
+# Test (d): 3 edits in an EARLIER turn (before a genuine user record), final
+# turn is text-only with no DNV -> allow (exit 0). The earlier edits must not
+# leak into the current turn's file_count.
+T="$TMP/t_earlier_turn_$RANDOM.jsonl"
+{
+  mk_user_record "first prompt"
+  printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Edit","input":{"file_path":"/tmp/a.py"}}]}}'
+  printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Edit","input":{"file_path":"/tmp/b.py"}}]}}'
+  printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Edit","input":{"file_path":"/tmp/c.py"}}]}}'
+  mk_user_record "second prompt"
+  jq -nc --arg t "Done, no edits this turn. (verified)" '{"type":"assistant","message":{"content":[{"type":"text","text":$t}]}}'
+} > "$T"
+check "3 edits in earlier turn, current turn text-only no DNV -> allow" 0 "$(run "$(payload "$T")")"
+
+# Test (e): 3 edits AFTER the last genuine user record, no DNV -> block (exit 2)
+T="$TMP/t_current_turn_$RANDOM.jsonl"
+{
+  mk_user_record "first prompt"
+  jq -nc --arg t "ack" '{"type":"assistant","message":{"content":[{"type":"text","text":$t}]}}'
+  mk_user_record "second prompt"
+  printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Edit","input":{"file_path":"/tmp/a.py"}}]}}'
+  printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Edit","input":{"file_path":"/tmp/b.py"}}]}}'
+  printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Edit","input":{"file_path":"/tmp/c.py"}}]}}'
+  jq -nc --arg t "Done, all changes applied. (verified)" '{"type":"assistant","message":{"content":[{"type":"text","text":$t}]}}'
+} > "$T"
+check "3 edits after last user record, no DNV -> block" 2 "$(run "$(payload "$T")")"
+
+# ── Header-presence cases (FIX 3: gate on the "## Did Not Verify" HEADER
+# being absent, not on zero bullets — a compliant prose-only section with the
+# header but no bullets must pass, not be misread as "no section") ─────────
+
+# Test (f): 3 turn-edits + text with the DNV header present but only prose,
+# no bullets -> allow (exit 0). The header's presence is the honesty
+# boundary, same as an all-tagged bullet list.
+T=$(mk_transcript_n_files "Done, all changes applied. (verified)
+## Did Not Verify
+Nothing outstanding — every claim above was checked directly." 3)
+check "3 files, DNV header present with only prose (no bullets) -> allow" 0 "$(run "$(payload "$T")")"
+
 # ── SubagentStop cases ────────────────────────────────────────────────────────
 # SubagentStop payloads carry last_assistant_message directly. The hook must read
 # that field, not transcript_path (which is the PARENT session transcript).
@@ -337,5 +486,39 @@ run_capture "$(loop_payload "$T" S1)"
 check "compliant turn in loop -> exit 0" 0 "$RC_OUT"
 case "$OUT_OUT" in *additionalContext*) d9_ctx=1 ;; *) d9_ctx=0 ;; esac
 check "compliant turn in loop -> NO additionalContext (no warn spam)" 0 "$d9_ctx"
+
+# ── Pin tests (presence check must never fire outside its intended scope) ──
+
+# Case (g): SubagentStop with a 3+-edit agent transcript and a clean message
+# (no DNV section at all) -> allow. Pins that the presence check never fires
+# on SubagentStop: file_count is 0 on that path (never computed from
+# agent_transcript_path), so file_count>=3 can never be true there.
+AT_G=$(mk_agent_transcript "Work done, no issues. (verified)")
+# mk_agent_transcript only writes one Edit; extend it to 3 unique files.
+{
+  printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Edit","input":{"file_path":"/tmp/g2.py"}}]}}'
+  printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Edit","input":{"file_path":"/tmp/g3.py"}}]}}'
+} >> "$AT_G"
+check "SubagentStop, 3+-edit agent transcript, clean message -> allow (presence never fires)" 0 "$(run "$(subagentstop_payload "Work done, no issues. (verified)" "$AT_G")")"
+
+# Case (h): empty final text + 3 turn-edits -> allow. The empty-text skip
+# (nothing was claimed, nothing to inspect) must take precedence over the
+# presence check — an empty response can't be missing a section it never
+# had room to include.
+T=$(mk_transcript_n_files "" 3)
+check "empty final text + 3 turn-edits -> allow (empty-text skip precedence)" 0 "$(run "$(payload "$T")")"
+
+# Case P5: SubagentStop cannot reach the presence branch at all (file_count is
+# always 0 on that path — case g above already pins this for a CLEAN message).
+# This confirms a DIRTY (untagged-DNV) SubagentStop message still hard-blocks
+# even with a loop active: the presence path structurally never fires there,
+# and the bullet path's SubagentStop exclusion (event check first) already
+# covers it — no new behaviour from this PR, sanity pin only.
+reset_loop; write_progress S1 in-progress 1
+DNV_MSG_P5="Work. (verified)
+## Did Not Verify
+- untagged item"
+AT_P5=$(mk_agent_transcript "$DNV_MSG_P5")
+check "presence: SubagentStop with loop active + untagged DNV bullet -> exit 2 (block-enforced, presence irrelevant)" 2 "$(run "$(subagentstop_payload "$DNV_MSG_P5" "$AT_P5")")"
 
 [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails)"; exit 1; }

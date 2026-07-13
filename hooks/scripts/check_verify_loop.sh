@@ -1,7 +1,10 @@
 #!/bin/bash
-# Stop hook — blocks (exit 2) when the response leaves ANY "## Did Not Verify" item
-# untagged. Total enforcement: an untagged bullet is treated as something the model
-# could have resolved (read the file, run the check) and chose to defer.
+# Stop hook — blocks (exit 2) in two cases: (1) the response leaves ANY
+# "## Did Not Verify" bullet untagged, or (2) the current turn edited >=3
+# files and the response has no "## Did Not Verify" header at all. Total
+# enforcement: an untagged bullet, or a missing section after enough edits,
+# is treated as something the model could have resolved (read the file, run
+# the check) and chose to defer or omit.
 #
 # The ONLY way a DNV bullet passes is an explicit "(unverifiable: <reason>)" tag on
 # its leading clause — a deliberate, audited declaration that the item genuinely
@@ -11,22 +14,46 @@
 # checkable item is cheaper than checking it) — the guarantee is "nothing silently
 # deferred," and the tag is the auditable seam.
 #
-# Checks run top to bottom; the first that matches decides. All but the last two
-# rungs let the model stop unconditionally.
-#   skip  — no transcript to inspect                       → allow stop
-#   skip  — already blocked once this turn (loop-guard)    → allow stop
-#   skip  — the last response has no text                  → allow stop
-#   skip  — no "## Did Not Verify" bullets                 → allow stop
-#   warn  — untagged DNV bullet, Stop event, active+incomplete
-#           agentic loop                                    → additionalContext
+# Checks run top to bottom; the first that matches decides.
+#   skip  — no transcript to inspect                             → allow stop
+#   skip  — already blocked once this turn (loop-guard)          → allow stop
+#   skip  — the last response has no text                        → allow stop
+#   warn  — no DNV header, turn file_count >= 3, Stop event,
+#           active+incomplete agentic loop                        → additionalContext
+#           warn, allow stop (SubagentStop never demotes; presence
+#           can't fire on SubagentStop anyway — file_count is 0 there)
+#   BLOCK — no DNV header AND turn file_count >= 3 (outside the warn
+#           case above)                                            → section omitted after edits
+#   skip  — no DNV header, turn file_count < 3                    → nothing to enforce
+#   skip  — DNV header present, zero bullets (prose-only)         → compliant empty section
+#   warn  — DNV header present, untagged bullet, Stop event,
+#           active+incomplete agentic loop                        → additionalContext
 #           warn, allow stop (SubagentStop never demotes)
-#   BLOCK — any untagged DNV bullet (outside the warn case above) → deferred item left open
+#   BLOCK — DNV header present, any untagged bullet (outside the
+#           warn case above)                                       → deferred item left open
+#   skip  — DNV header present, all bullets tagged                → allow stop
 #
-# file_count is NOT used as a skip gate on the Stop path. A DNV section that
-# exists must be policed regardless of whether files were edited this turn —
-# a pure-conversation response can carry deferred verifiable claims too.
-# (file_count was previously used to gate the entire check; that gate has been
-# removed to close the escape hatch.)
+# file_count is NOT used as a skip gate on the bullet-policing path (an
+# EXISTING section's bullets are always policed regardless of how many files
+# were edited this turn — a pure-conversation response can carry deferred
+# verifiable claims too). file_count IS used as a gate on the separate
+# header-presence check: it decides whether a header must exist at all.
+# (file_count was previously session-cumulative; it is now TURN-scoped —
+# see dc_file_count in lib/discipline_common.sh — records after the last
+# genuine user prompt, so an earlier turn's edits don't nag every later
+# pure-conversation stop in the same session.)
+#
+# 2026-07-13: a file_count>=3 PRESENCE check was added (a different code path
+# from bullet-policing) closing the inversion where a response that omitted
+# the "## Did Not Verify" section entirely passed silently while an honest
+# section with one untagged bullet blocked. It is keyed on the HEADER's
+# presence, not on zero bullets — a compliant prose-only section ("nothing
+# outstanding") has the header but no bullets and must still pass, the same
+# honesty boundary as an all-tagged bullet list. It is wired through the SAME
+# als_loop_active_incomplete demotion predicate #155 added for the bullet
+# path (same Stop-only, fail-toward-blocking shape) — after #155, a hard
+# presence-block in-loop would be the only remaining in-loop hard block,
+# inconsistent with the merged demotion arc.
 
 LOG_FILE="${CLAUDE_DISCIPLINE_LOG:-$HOME/.claude/discipline.log}"
 TAIL_LINES="${CLAUDE_HOOK_TAIL_LINES:-300}"
@@ -66,9 +93,11 @@ else
     exit 0
   fi
 
-  # Count unique Write/Edit/MultiEdit targets. file_count is retained for the
-  # log line but is no longer used as a skip gate — a DNV section that exists
-  # is policed regardless of whether files were edited this turn.
+  # Count unique Write/Edit/MultiEdit targets for the CURRENT TURN (records
+  # after the last genuine user prompt — see dc_file_count). It is NOT a
+  # skip gate for bullet-policing below: an EXISTING DNV section's bullets
+  # are always policed regardless of file_count. It IS the gate input for
+  # the separate header-presence check further down.
   file_count=$(dc_file_count "$transcript")
 
   # Extract the last assistant text block, retrying for the transcript-flush race.
@@ -87,11 +116,56 @@ if [ "$stop_hook_active" = "true" ]; then
 fi
 
 # Skip if the last response has no text: nothing was claimed, nothing to inspect.
+# Logged (not silent) so a degraded/empty-text check is auditable — this now
+# also short-circuits the header-presence check further down.
 if [ -z "$text" ]; then
+  log_line "hook=verify_loop session=$session_id attempts=$attempts files=$file_count skipped=empty_text blocked=0"
   exit 0
 fi
 
-# Skip if there are no "## Did Not Verify" bullets: nothing to enforce.
+# Does a "## Did Not Verify" HEADER exist at all? This is distinct from
+# dnv_items below: a header with zero bullets (prose-only, e.g. "nothing
+# outstanding") is a COMPLIANT empty section — the same honesty boundary as
+# an all-tagged bullet list — and must not be confused with the header being
+# absent entirely.
+has_dnv_header=0
+echo "$text" | grep -qE '^## *(Did Not Verify|Not Verified)' && has_dnv_header=1
+
+if [ "$has_dnv_header" -eq 0 ]; then
+  # Presence check: file_count is 0 on the SubagentStop path (never computed
+  # there), so this never fires for SubagentStop — intended, since a subagent
+  # transcript is not scanned for file_count on that path. On the Stop path,
+  # >=3 unique edited files this TURN with no DNV header at all is the same
+  # omission the section-policing below catches for untagged bullets —
+  # resolve or tag, don't skip the section entirely.
+  if [ "$file_count" -ge 3 ]; then
+    presence_msg="[verify-loop-block] session modified $file_count files but the response has no \"## Did Not Verify\" section. Rule (CLAUDE.md): after any response that edits files, end with a ## Did Not Verify section — resolve each item or tag it (unverifiable: <reason>). Add the section before stopping."
+
+    # Loop-scoped warn demotion — same predicate, same fail-toward-blocking
+    # shape as the bullet path below (#155). Evaluated lazily, only once a
+    # block is imminent. SubagentStop never reaches this branch (the whole
+    # has_dnv_header block above is dead on that path since file_count is
+    # always 0 there), so this mirrors the bullet path's demotion contract
+    # for consistency rather than adding new in-loop exposure.
+    if [ "$hook_event" = "Stop" ] && als_loop_active_incomplete "$transcript" "$cwd" "$(als_sanitise_session_id "$session_id")"; then
+      if jq -n --arg m "${presence_msg/\[verify-loop-block\]/[discipline-warn(loop)]}" \
+        '{"hookSpecificOutput":{"hookEventName":"Stop","additionalContext":$m}}'; then
+        log_line "hook=verify_loop session=$session_id text_len=${#text} attempts=$attempts files=$file_count dnv_items=0 resolvable_dnv_items=0 presence_block=1 would_block=1 warned=1 blocked=0"
+        exit 0
+      fi
+    fi
+
+    log_line "hook=verify_loop session=$session_id text_len=${#text} attempts=$attempts files=$file_count dnv_items=0 resolvable_dnv_items=0 presence_block=1 blocked=1"
+    echo "$presence_msg" >&2
+    exit 2
+  fi
+  log_line "hook=verify_loop session=$session_id text_len=${#text} attempts=$attempts files=$file_count dnv_items=0 resolvable_dnv_items=0 blocked=0"
+  exit 0
+fi
+
+# Header is present: count its bullets. Zero bullets under a present header
+# is a compliant empty section (nothing to enforce) — the header itself is
+# the model's declaration that it considered the question.
 dnv_items=$(echo "$text" | awk '
   /^## *(Did Not Verify|Not Verified)/ { in_section=1; next }
   in_section && /^## / { in_section=0 }

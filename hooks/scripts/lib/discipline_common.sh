@@ -9,11 +9,37 @@
 #     text block when `last` runs.
 
 # dc_file_count <transcript-path>
-#   Returns the count of unique Write/Edit/MultiEdit target files in a JSONL transcript.
-#   Returns 0 if the transcript is absent, unreadable, or contains no such tool uses.
+#   Returns the count of unique Write/Edit/MultiEdit target files in a JSONL
+#   transcript, scoped to the CURRENT TURN — records after the last genuine
+#   user prompt (a "user" record whose message.content is a non-empty string,
+#   or an array containing a text block; a tool_result-only array does NOT
+#   count as genuine). If no genuine user record exists, counts the whole
+#   transcript (test fixtures and edge-case transcripts that never had one).
+#   Returns 0 if the transcript is absent, unreadable, or contains no such
+#   tool uses in scope.
+#   Per-line tolerant parse (same style as dc_extract_last_text): a single
+#   malformed/truncated line must not zero the count for the rest of the
+#   transcript — stage 1 drops just the bad line, stage 2 aggregates over
+#   what's left.
 dc_file_count() {
   local transcript="$1" n
-  n=$(jq -s -r '[.[]? | select(.type=="assistant") | .message.content[]? | select(.type=="tool_use" and (.name=="Write" or .name=="Edit" or .name=="MultiEdit")) | .input.file_path] | unique | length' "$transcript" 2>/dev/null)
+  n=$(jq -R 'fromjson? // empty' "$transcript" 2>/dev/null | jq -s -r '
+    def is_genuine_user:
+      .type == "user" and
+      ( .message.content
+        | if type == "string" then (length > 0)
+          elif type == "array" then ( any(.[]?; .type == "text") )
+          else false end
+      );
+    . as $lines
+    | ($lines | to_entries | map(select(.value | is_genuine_user)) | last.key // -1) as $cutoff
+    | [ $lines[($cutoff+1):][]?
+        | select(.type=="assistant")
+        | .message.content[]?
+        | select(.type=="tool_use" and (.name=="Write" or .name=="Edit" or .name=="MultiEdit"))
+        | .input.file_path
+      ] | unique | length
+  ' 2>/dev/null)
   [ -z "$n" ] && n=0
   printf '%s' "$n"
 }
