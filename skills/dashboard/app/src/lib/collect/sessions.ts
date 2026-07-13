@@ -105,13 +105,15 @@ function readNonEmptyString(value: unknown): string | undefined {
 }
 
 // Real progress.json files use "in-progress" and (older) "doing" for the
-// same in-flight state (see plan.md's LoopUnit field comment).
+// same in-flight state; both field names (description, desc) appear across
+// real progress.json files, description taking precedence when both are set.
 function readUnit(key: string, unit: Record<string, unknown>): LoopUnit {
-  const status = unit.status;
+  const rawStatus = unit.status;
+  const status: LoopUnit["status"] =
+    rawStatus === "done" ? "done" : rawStatus === "in-progress" || rawStatus === "doing" ? "in-flight" : "pending";
   return {
     key,
-    done: status === "done",
-    inFlight: status === "in-progress" || status === "doing",
+    status,
     description: readNonEmptyString(unit.description) ?? readNonEmptyString(unit.desc),
     pr: typeof unit.pr === "number" ? unit.pr : undefined,
   };
