@@ -27,6 +27,15 @@
 # a pure-conversation response can carry deferred verifiable claims too.
 # (file_count was previously used to gate the entire check; that gate has been
 # removed to close the escape hatch.)
+#
+# 2026-07-13: a file_count>=3 PRESENCE check was added below (dnv_items==0
+# branch) — a different code path from the section-policing above. It closes
+# the inversion where a response that omits the "## Did Not Verify" section
+# entirely passed silently while an honest section with one untagged bullet
+# blocked. This does not reopen the file_count skip gate described above:
+# that gate governed whether an EXISTING section gets policed (removed); this
+# new check governs whether a section must exist at all once enough files
+# were touched.
 
 LOG_FILE="${CLAUDE_DISCIPLINE_LOG:-$HOME/.claude/discipline.log}"
 TAIL_LINES="${CLAUDE_HOOK_TAIL_LINES:-300}"
@@ -100,6 +109,17 @@ dnv_items=$(echo "$text" | awk '
 ')
 
 if [ "$dnv_items" -eq 0 ]; then
+  # Presence check: file_count is 0 on the SubagentStop path (never computed
+  # there), so this never fires for SubagentStop — intended, since a subagent
+  # transcript is not scanned for file_count on that path. On the Stop path,
+  # >=3 unique edited files with no DNV section at all is the same omission
+  # the section-policing above catches for untagged bullets — resolve or tag,
+  # don't skip the section entirely.
+  if [ "$file_count" -ge 3 ]; then
+    log_line "hook=verify_loop session=$session_id text_len=${#text} attempts=$attempts files=$file_count dnv_items=0 resolvable_dnv_items=0 presence_block=1 blocked=1"
+    echo "[verify-loop-block] session modified $file_count files but the response has no \"## Did Not Verify\" section. Rule (CLAUDE.md): after any response that edits files, end with a ## Did Not Verify section — resolve each item or tag it (unverifiable: <reason>). Add the section before stopping." >&2
+    exit 2
+  fi
   log_line "hook=verify_loop session=$session_id text_len=${#text} attempts=$attempts files=$file_count dnv_items=0 resolvable_dnv_items=0 blocked=0"
   exit 0
 fi

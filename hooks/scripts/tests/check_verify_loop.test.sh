@@ -141,6 +141,47 @@ T=$(mk_transcript "Some text here. (verified)
 - ")
 check "bare DNV bullet (no content) -> allow" 0 "$(run "$(payload "$T")")"
 
+# ── DNV-presence cases ───────────────────────────────────────────────────────
+# When file_count >= 3 and the response has no "## Did Not Verify" section at
+# all, that is treated the same as an untagged bullet: something checkable was
+# silently omitted rather than resolved or tagged.
+
+# Build a JSONL transcript with N unique Edit tool_use entries + an assistant
+# text message.
+mk_transcript_n_files() { # text n_files -> path
+  local text="$1" n="$2" out="$TMP/t_nf_$RANDOM.jsonl" i
+  : > "$out"
+  for i in $(seq 1 "$n"); do
+    printf '%s\n' "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Edit\",\"input\":{\"file_path\":\"/tmp/f${i}.py\"}}]}}" >> "$out"
+  done
+  jq -nc --arg t "$text" '{"type":"assistant","message":{"content":[{"type":"text","text":$t}]}}' >> "$out"
+  printf '%s' "$out"
+}
+
+# Test A: >=3 unique edited files, non-empty final text, NO DNV section -> block (exit 2)
+T=$(mk_transcript_n_files "Done, all changes applied. (verified)" 3)
+RES_A=$(printf '%s' "$(payload "$T")" | bash "$HOOK" 2>&1 >/dev/null)
+check "3 files, no DNV section -> block" 2 "$(printf '%s' "$(payload "$T")" | bash "$HOOK" >/dev/null 2>&1; echo $?)"
+case "$RES_A" in
+  *'no "## Did Not Verify" section'*) printf 'ok   - %s\n' "3 files, no DNV -> stderr names missing section" ;;
+  *) printf 'FAIL - %s (stderr: %s)\n' "3 files, no DNV -> stderr names missing section" "$RES_A"; fails=$((fails+1)) ;;
+esac
+
+# Test B: same transcript shape, but final text HAS a DNV section with one
+# tagged (unverifiable) bullet -> allow (exit 0)
+T=$(mk_transcript_n_files "Done, all changes applied. (verified)
+## Did Not Verify
+- (unverifiable: prod-only observation) whether the deploy actually succeeded" 3)
+check "3 files, DNV section present with tagged bullet -> allow" 0 "$(run "$(payload "$T")")"
+
+# Test C: only 2 edited files, no DNV section -> allow (below the file_count>=3 threshold)
+T=$(mk_transcript_n_files "Done. (verified)" 2)
+check "2 files, no DNV section -> allow" 0 "$(run "$(payload "$T")")"
+
+# Test D: stop_hook_active=true, >=3 files, no DNV section -> allow (loop-guard precedence)
+T=$(mk_transcript_n_files "Done, all changes applied. (verified)" 3)
+check "stop_hook_active + 3 files, no DNV -> allow (guard precedence)" 0 "$(run "$(payload "$T" true)")"
+
 # ── SubagentStop cases ────────────────────────────────────────────────────────
 # SubagentStop payloads carry last_assistant_message directly. The hook must read
 # that field, not transcript_path (which is the PARENT session transcript).
