@@ -22,7 +22,6 @@ function emptySnapshot(overrides: Partial<DashboardSnapshot> = {}): DashboardSna
     sessions: [],
     loops: [],
     gates: [],
-    trail: [],
     health: [],
     runs: [],
     queue: [],
