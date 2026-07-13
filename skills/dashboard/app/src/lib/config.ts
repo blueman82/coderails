@@ -77,6 +77,12 @@ export function loadConfig(path?: string): DashboardConfig {
         `Button "${button.name}" has relative cwd (must be absolute): ${button.cwd}`
       );
     }
+
+    if (button.hidden !== undefined && typeof button.hidden !== "boolean") {
+      throw new ConfigError(
+        `Button "${button.name}" has non-boolean hidden: ${button.hidden}`
+      );
+    }
   }
 
   return data;
