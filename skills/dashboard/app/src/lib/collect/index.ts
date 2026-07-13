@@ -232,7 +232,7 @@ export function createAggregator(deps: AggregatorDeps): Aggregator {
     start(): void {
       const runs = safeCall("runs", () => readRuns(runsLimit, { runsDir: deps.runsDir }), []);
       snapshot = { ...snapshot, runs };
-      // Initial activity collect (sessions/loops/trail/health) is async (health
+      // Initial activity collect (sessions/loops/health) is async (health
       // now reads usage transcripts) — fire it without blocking start(), same
       // pattern as refreshGates below; the snapshot fills in once it resolves
       // and "activity" listeners are notified same as any later refresh.
