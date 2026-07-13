@@ -4,7 +4,6 @@ import { readRuns, type RunRecord } from "../runlog";
 import { runOutputBus as defaultRunOutputBus, type RunOutputBus, type RunOutputEvent } from "../runOutputBus";
 import { collectBuilds, type BuildEntry } from "./builds";
 import { collectHealth, type HealthTile } from "./health";
-import { collectMemoryTrail, type TrailEntry } from "./memoryTrail";
 import { collectPrGates, type PrGate, type PrGateError } from "./prGates";
 import { collectQueue, type QueueEntry } from "./queue";
 import { collectSessions, collectLoops, type SessionInfo, type LoopInfo } from "./sessions";
