@@ -44,8 +44,7 @@ function parseQueueEntry(raw: unknown): QueueEntry | undefined {
 
 // Lists `<queueDir>/*.json`, parsing each as a QueueFileEntry. A missing dir,
 // an unreadable file, or a file that fails JSON.parse or shape validation
-// contributes nothing — never throws. Modeled on collectMemoryTrail's
-// per-file try/catch degrade-to-skip idiom.
+// contributes nothing — never throws (per-file try/catch degrade-to-skip).
 export function collectQueue(queueDir: string, limit = 50): QueueEntry[] {
   let names: string[];
   try {
