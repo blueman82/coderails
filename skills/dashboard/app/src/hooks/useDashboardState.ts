@@ -18,7 +18,6 @@ export interface DashboardSnapshot {
   sessions: SessionInfo[];
   loops: LoopInfo[];
   gates: (PrGate | PrGateError)[];
-  trail: TrailEntry[];
   health: HealthTile[];
   runs: RunRecord[];
   queue: QueueEntry[];
@@ -27,7 +26,7 @@ export interface DashboardSnapshot {
 
 export type ActivitySlice = Pick<
   DashboardSnapshot,
-  "sessions" | "loops" | "trail" | "health" | "queue" | "builds"
+  "sessions" | "loops" | "health" | "queue" | "builds"
 >;
 
 export type DashboardEvent =
