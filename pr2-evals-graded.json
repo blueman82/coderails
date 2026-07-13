@@ -70,7 +70,7 @@
       "cmd": "test \"$(git diff origin/main --name-only | tr -d '\\n')\" = \"skills/agentic-loop/SKILL.md\"",
       "negative_control": "git diff origin/main --name-only   # on frozen_sha (no diff yet), this is empty, which fails the exact-match test against the required filename, proving the check can fail",
       "status": "pass",
-      "evidence": "git diff origin/main --name-only \u2192 'skills/agentic-loop/SKILL.md' only (exact match); confirmed after removing an auto-committed scratch file (.evals-pr2.json) from the branch via git rm + commit b0fd57e"
+      "evidence": "git diff origin/main --name-only \u2192 'skills/agentic-loop/SKILL.md' only (exact match); confirmed after removing an auto-committed scratch file (.evals-pr2.json) from the branch via git rm + commit b0fd57e; re-confirmed at head d75b349 after the two post-review fixup commits, still exactly one file, +5/-5"
     }
   ],
   "amendments": [
