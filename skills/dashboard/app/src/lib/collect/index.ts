@@ -164,11 +164,10 @@ export function createAggregator(deps: AggregatorDeps): Aggregator {
   }
 
   async function collectActivitySlice(): Promise<
-    Pick<Snapshot, "sessions" | "loops" | "trail" | "health" | "queue" | "builds">
+    Pick<Snapshot, "sessions" | "loops" | "health" | "queue" | "builds">
   > {
     const sessions = sortSessions(safeCall("sessions", () => collectSessions(deps.projectsDir, Date.now()), []));
     const loops = sortLoops(safeCall("loops", () => collectLoops(deps.loopsDir), []));
-    const trail = safeCall("trail", () => collectMemoryTrail(deps.cfg.memoryPaths, trailLimit), []);
     // health reads usage transcripts (I/O-bound, hence async) and has no
     // dedicated fs signal of its own to watch beyond the projects dir already
     // watched for sessions — it rides along with the activity slice rather
@@ -176,7 +175,7 @@ export function createAggregator(deps: AggregatorDeps): Aggregator {
     const health = await safeCallAsync("health", () => collectHealth({ projectsDir: deps.projectsDir }), []);
     const queue = deps.queueDir ? safeCall("queue", () => collectQueue(deps.queueDir!, queueLimit), []) : [];
     const builds = deps.buildsDir ? safeCall("builds", () => collectBuilds(deps.buildsDir!), []) : [];
-    return { sessions, loops, trail, health, queue, builds };
+    return { sessions, loops, health, queue, builds };
   }
 
   async function refreshActivity(): Promise<void> {
