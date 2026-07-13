@@ -525,7 +525,7 @@ Model an approval-gate as "pause-then-proceed", never as "do not start". Past fa
 **Loop complete:**
 5. All authorised work done and all gates passed — run Phase 13, then stop.
 
-**Declaring the stop (the LOOP-STOP contract).** Whichever class applies, a stop inside an active loop must be declared, or the `loop_stall_guard` Stop hook blocks it. End the stopping turn with:
+**Declaring the stop (the LOOP-STOP contract).** Whichever class applies, a stop inside an active loop must be declared, or the `loop_stall_guard` Stop hook blocks it. The declaration line must be the FINAL line of the stopping turn — `loop_stall_guard` reads only the last declaration line, so it has to come after the confidence-label and Did-Not-Verify content required by Phase 0.5, not just somewhere in the same turn. End the stopping turn with:
 
 > `LOOP-STOP: <category> — <reason>`
 
