@@ -126,4 +126,38 @@ describe("loadConfig", () => {
     const config = loadConfig(path);
     expect(config.buttons[0].profile).toBe("auto");
   });
+
+  it("accepts a button with hidden: true", () => {
+    const path = writeConfig({
+      ...validConfig,
+      buttons: [
+        {
+          ...validConfig.buttons[0],
+          hidden: true,
+        },
+      ],
+    });
+    const config = loadConfig(path);
+    expect(config.buttons[0].hidden).toBe(true);
+  });
+
+  it("throws when a button's hidden field is not a boolean", () => {
+    const path = writeConfig({
+      ...validConfig,
+      buttons: [
+        {
+          ...validConfig.buttons[0],
+          hidden: "yes",
+        },
+      ],
+    });
+    expect(() => loadConfig(path)).toThrow(ConfigError);
+    expect(() => loadConfig(path)).toThrow(/hidden/i);
+  });
+
+  it("leaves hidden undefined when absent", () => {
+    const path = writeConfig(validConfig);
+    const config = loadConfig(path);
+    expect(config.buttons[0].hidden).toBeUndefined();
+  });
 });
