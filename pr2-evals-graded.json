@@ -59,7 +59,7 @@
       "cmd": "! git grep -niE \"confidence-label (block|blocks)|verify-loop (block|blocks)|confidence/verify block\" -- skills/agentic-loop/SKILL.md | grep -v \"[0-9] confidence-label blocks\\|[0-9] verify-loop blocks\"",
       "negative_control": "git grep -niE \"confidence-label (block|blocks)|verify-loop (block|blocks)|confidence/verify block\" -- skills/agentic-loop/SKILL.md | grep -v \"[0-9] confidence-label blocks\\|[0-9] verify-loop blocks\"   # matches on frozen_sha (line 132's 'confidence-label and verify-loop blocks', not a counted historical figure), proving the sweep can fail pre-edit",
       "status": "pass",
-      "evidence": "amended cmd \u2192 exit=0 (no stale present-tense block-claim found; the only remaining match is the historical count in the past-failure sentence, correctly excluded)"
+      "evidence": "amended cmd \u2192 exit=0 (no stale present-tense block-claim found; the only remaining match is the historical count in the past-failure sentence, correctly excluded); re-confirmed at head d75b349 after the two post-review accuracy fixes"
     },
     {
       "id": "E6",
