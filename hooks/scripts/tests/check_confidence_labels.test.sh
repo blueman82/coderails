@@ -57,6 +57,11 @@ run() { # json -> exit code
   printf '%s' "$1" | bash "$HOOK" >/dev/null 2>&1; echo $?
 }
 
+run_stderr() { # json -> sets RC_ERR and ERR_ERR (stderr)
+  ERR_ERR=$(printf '%s' "$1" | bash "$HOOK" 2>&1 >/dev/null)
+  RC_ERR=$?
+}
+
 check() { # desc expected actual
   if [ "$2" = "$3" ]; then printf 'ok   - %s\n' "$1"
   else printf 'FAIL - %s (expected exit %s, got %s)\n' "$1" "$2" "$3"; fails=$((fails+1)); fi
@@ -237,5 +242,42 @@ run_capture "$(loop_payload "$T" S1)"
 check "compliant turn in loop -> exit 0" 0 "$RC_OUT"
 case "$OUT_OUT" in *additionalContext*) d9_ctx=1 ;; *) d9_ctx=0 ;; esac
 check "compliant turn in loop -> NO additionalContext (no warn spam)" 0 "$d9_ctx"
+
+# ── event= telemetry token ──────────────────────────────────────────────
+# Every log line this hook writes carries which hook_event_name produced
+# it, so discipline.log consumers can distinguish Stop from SubagentStop
+# without re-deriving it from surrounding context.
+
+# Stop payload, unlabelled long text (blocked path) -> log line carries event=Stop.
+: > "$CLAUDE_DISCIPLINE_LOG"
+T=$(mk_transcript "$LONG_TEXT")
+run "$(payload "$T")" >/dev/null 2>&1
+case "$(cat "$CLAUDE_DISCIPLINE_LOG" 2>/dev/null)" in
+  *"hook=confidence_labels event=Stop"*) evt_stop_match=1 ;;
+  *) evt_stop_match=0 ;;
+esac
+check "Stop payload -> log line carries event=Stop" 1 "$evt_stop_match"
+
+# SubagentStop payload, unlabelled long message (blocked path) -> log line
+# carries event=SubagentStop.
+: > "$CLAUDE_DISCIPLINE_LOG"
+run "$(subagentstop_payload "${LONG_TEXT}")" >/dev/null 2>&1
+case "$(cat "$CLAUDE_DISCIPLINE_LOG" 2>/dev/null)" in
+  *"hook=confidence_labels event=SubagentStop"*) evt_sub_match=1 ;;
+  *) evt_sub_match=0 ;;
+esac
+check "SubagentStop payload -> log line carries event=SubagentStop" 1 "$evt_sub_match"
+
+# ── blocked-path stderr message content ─────────────────────────────────
+# The block message is meant to be actionable (names the rule, gives a
+# worked example), not just a generic "add labels" line — pin its content,
+# not only the exit code, so a regression to a vague message is caught.
+T=$(mk_transcript "$LONG_TEXT")
+run_stderr "$(payload "$T")"
+check "blocked path -> exit 2" 2 "$RC_ERR"
+case "$ERR_ERR" in *"[discipline-block]"*) msg_tag=1 ;; *) msg_tag=0 ;; esac
+check "blocked path -> stderr contains [discipline-block]" 1 "$msg_tag"
+case "$ERR_ERR" in *"Rule (CLAUDE.md)"*) msg_rule=1 ;; *) msg_rule=0 ;; esac
+check "blocked path -> stderr contains Rule (CLAUDE.md)" 1 "$msg_rule"
 
 [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails)"; exit 1; }

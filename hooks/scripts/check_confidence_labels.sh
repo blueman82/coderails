@@ -48,9 +48,9 @@ if echo "$text" | grep -qE '\((verified|inferred|guess)'; then matched_label=1; 
 would_block=0
 if [ "${#text}" -ge "$MIN_LEN" ] && [ "$matched_label" -eq 0 ]; then would_block=1; fi
 {
-  printf '%s hook=confidence_labels session=%s text_len=%d attempts=%d matched=%d would_block=%d\n' \
+  printf '%s hook=confidence_labels event=%s session=%s text_len=%d attempts=%d matched=%d would_block=%d\n' \
     "$(date -Iseconds 2>/dev/null || date +%Y-%m-%dT%H:%M:%S%z)" \
-    "$session_id" "${#text}" "$attempts" "$matched_label" "$would_block"
+    "$hook_event" "$session_id" "${#text}" "$attempts" "$matched_label" "$would_block"
 } >> "$LOG_FILE" 2>/dev/null
 
 if [ "${#text}" -lt "$MIN_LEN" ]; then
@@ -71,18 +71,18 @@ if [ "$hook_event" = "Stop" ] && als_loop_active_incomplete "$transcript" "$cwd"
   if jq -n --arg m "[discipline-warn(loop)] response made substantive claims without (verified)/(inferred)/(guess) labels. Add them before stopping." \
     '{"hookSpecificOutput":{"hookEventName":"Stop","additionalContext":$m}}'; then
     {
-      printf '%s hook=confidence_labels session=%s text_len=%d would_block=1 warned=1 blocked=0\n' \
+      printf '%s hook=confidence_labels event=%s session=%s text_len=%d would_block=1 warned=1 blocked=0\n' \
         "$(date -Iseconds 2>/dev/null || date +%Y-%m-%dT%H:%M:%S%z)" \
-        "$session_id" "${#text}"
+        "$hook_event" "$session_id" "${#text}"
     } >> "$LOG_FILE" 2>/dev/null
     exit 0
   fi
 fi
 
 {
-  printf '%s hook=confidence_labels session=%s text_len=%d blocked=1\n' \
+  printf '%s hook=confidence_labels event=%s session=%s text_len=%d blocked=1\n' \
     "$(date -Iseconds 2>/dev/null || date +%Y-%m-%dT%H:%M:%S%z)" \
-    "$session_id" "${#text}"
+    "$hook_event" "$session_id" "${#text}"
 } >> "$LOG_FILE" 2>/dev/null
-echo "[discipline-block] response made substantive claims without (verified)/(inferred)/(guess) labels. Add them before stopping." >&2
+echo "[discipline-block] response >=${MIN_LEN} chars with no confidence label. Rule (CLAUDE.md): tag each substantive claim (verified)/(inferred)/(guess) — e.g. \"the cache matches the repo (verified — diffed both trees)\". Add labels to the claims you made, then stop again." >&2
 exit 2

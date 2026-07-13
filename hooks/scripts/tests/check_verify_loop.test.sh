@@ -521,4 +521,33 @@ DNV_MSG_P5="Work. (verified)
 AT_P5=$(mk_agent_transcript "$DNV_MSG_P5")
 check "presence: SubagentStop with loop active + untagged DNV bullet -> exit 2 (block-enforced, presence irrelevant)" 2 "$(run "$(subagentstop_payload "$DNV_MSG_P5" "$AT_P5")")"
 
+# ── event= telemetry token ──────────────────────────────────────────────
+# Every log line this hook writes carries which hook_event_name produced
+# it, so discipline.log consumers can distinguish Stop from SubagentStop
+# without re-deriving it from surrounding context.
+
+# Stop payload, untagged DNV bullet (blocked path) -> log line carries event=Stop.
+: > "$CLAUDE_DISCIPLINE_LOG"
+DNV_MSG_EVT="Work. (verified)
+## Did Not Verify
+- untagged item"
+T=$(mk_transcript "$DNV_MSG_EVT")
+run "$(payload "$T")" >/dev/null 2>&1
+case "$(cat "$CLAUDE_DISCIPLINE_LOG" 2>/dev/null)" in
+  *"hook=verify_loop event=Stop"*) evt_stop_match=1 ;;
+  *) evt_stop_match=0 ;;
+esac
+check "Stop payload -> log line carries event=Stop" 1 "$evt_stop_match"
+
+# SubagentStop payload, untagged DNV bullet (blocked path) -> log line
+# carries event=SubagentStop.
+: > "$CLAUDE_DISCIPLINE_LOG"
+AT_EVT=$(mk_agent_transcript "$DNV_MSG_EVT")
+run "$(subagentstop_payload "$DNV_MSG_EVT" "$AT_EVT")" >/dev/null 2>&1
+case "$(cat "$CLAUDE_DISCIPLINE_LOG" 2>/dev/null)" in
+  *"hook=verify_loop event=SubagentStop"*) evt_sub_match=1 ;;
+  *) evt_sub_match=0 ;;
+esac
+check "SubagentStop payload -> log line carries event=SubagentStop" 1 "$evt_sub_match"
+
 [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails)"; exit 1; }
