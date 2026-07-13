@@ -164,7 +164,7 @@ describe("loadConfig", () => {
 
 describe("visibleButtons", () => {
   it("excludes buttons with hidden: true", () => {
-    const config = {
+    const config: DashboardConfig = {
       ...validConfig,
       buttons: [
         validConfig.buttons[0],
@@ -175,7 +175,7 @@ describe("visibleButtons", () => {
   });
 
   it("includes buttons with hidden absent or false", () => {
-    const config = {
+    const config: DashboardConfig = {
       ...validConfig,
       buttons: [
         validConfig.buttons[0],
