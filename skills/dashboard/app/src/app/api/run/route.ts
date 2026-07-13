@@ -247,7 +247,15 @@ export function createRunHandler(deps: RunHandlerDeps) {
         resolve();
       }
 
-      const child = spawnImpl("claude", argv, { cwd: button.cwd });
+      // CODERAILS_HEADLESS_RUN=1 tells the discipline Stop hooks
+      // (check_confidence_labels.sh / check_verify_loop.sh) to exempt this
+      // run — a headless `claude -p` run has no way to satisfy a repair-turn
+      // block, so the gate would otherwise displace the run's answer with
+      // gate text. Must never be set anywhere else (see AGENTS.md ceilings note).
+      const child = spawnImpl("claude", argv, {
+        cwd: button.cwd,
+        env: { ...process.env, CODERAILS_HEADLESS_RUN: "1" },
+      });
       child.stdout?.on("data", handleChunk);
       child.stderr?.on("data", handleChunk);
       child.on("error", (err) => {
