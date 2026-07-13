@@ -157,8 +157,6 @@ function readDecisions(decisionsAbsorbed: unknown): string[] {
 // the first 80 chars of authorising_prompt_raw (trimmed, "…" appended when truncated),
 // then to the dir slug when neither is present.
 function readTitle(record: Record<string, unknown>, slug: string): string {
-  const loop = readNonEmptyString(record.loop);
-  if (loop) return loop;
   const prompt = readNonEmptyString(record.authorising_prompt_raw);
   if (prompt) {
     const trimmed = prompt.trim();
