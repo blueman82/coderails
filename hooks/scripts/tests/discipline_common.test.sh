@@ -203,4 +203,33 @@ else
   fails=$((fails_before + 1))
 fi
 
+# --- dc_file_count ---
+
+# --- Test (h): a malformed MIDDLE line must not zero the count -- the two
+# valid edits either side of it should still be counted (fail-open harden,
+# same per-line tolerant style as dc_extract_last_text) ---
+T=$(mk_transcript \
+  '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Edit","input":{"file_path":"/tmp/a.py"}}]}}' \
+  'this is not valid json' \
+  '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Edit","input":{"file_path":"/tmp/b.py"}}]}}')
+result=$(dc_file_count "$T")
+check "malformed middle line does not zero the count" "2" "$result"
+
+# --- Test (i): a truncated TRAILING line (torn final write during flush)
+# must not hide the preceding valid edits ---
+T=$(mk_transcript \
+  '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Edit","input":{"file_path":"/tmp/a.py"}}]}}' \
+  '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Edit","input":{"file_path":"/tmp/b.py"}}]}}' \
+  '{"type":"assistant","message":{"content":[{"typ')
+result=$(dc_file_count "$T")
+check "truncated trailing line does not zero the count" "2" "$result"
+
+# --- Test (j): 3 edits to the SAME file path dedupe to 1 ---
+T=$(mk_transcript \
+  '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Edit","input":{"file_path":"/tmp/same.py"}}]}}' \
+  '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Edit","input":{"file_path":"/tmp/same.py"}}]}}' \
+  '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Edit","input":{"file_path":"/tmp/same.py"}}]}}')
+result=$(dc_file_count "$T")
+check "3 edits to one file path dedupe to 1" "1" "$result"
+
 [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails failures)"; exit 1; }

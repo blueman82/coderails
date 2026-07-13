@@ -161,7 +161,7 @@ mk_transcript_n_files() { # text n_files -> path
 # Test A: >=3 unique edited files, non-empty final text, NO DNV section -> block (exit 2)
 T=$(mk_transcript_n_files "Done, all changes applied. (verified)" 3)
 RES_A=$(printf '%s' "$(payload "$T")" | bash "$HOOK" 2>&1 >/dev/null)
-check "3 files, no DNV section -> block" 2 "$(printf '%s' "$(payload "$T")" | bash "$HOOK" >/dev/null 2>&1; echo $?)"
+check "3 files, no DNV section -> block" 2 "$(run "$(payload "$T")")"
 case "$RES_A" in
   *'no "## Did Not Verify" section'*) printf 'ok   - %s\n' "3 files, no DNV -> stderr names missing section" ;;
   *) printf 'FAIL - %s (stderr: %s)\n' "3 files, no DNV -> stderr names missing section" "$RES_A"; fails=$((fails+1)) ;;
@@ -181,6 +181,53 @@ check "2 files, no DNV section -> allow" 0 "$(run "$(payload "$T")")"
 # Test D: stop_hook_active=true, >=3 files, no DNV section -> allow (loop-guard precedence)
 T=$(mk_transcript_n_files "Done, all changes applied. (verified)" 3)
 check "stop_hook_active + 3 files, no DNV -> allow (guard precedence)" 0 "$(run "$(payload "$T" true)")"
+
+# ── Turn-scoping cases (file_count scoped to records after the last genuine
+# user prompt, not session-cumulative) ──────────────────────────────────────
+
+# Build a transcript with a genuine user prompt record (content is a string).
+mk_user_record() { # text -> jsonl line
+  jq -nc --arg t "$1" '{"type":"user","message":{"content":$t}}'
+}
+
+# Test (d): 3 edits in an EARLIER turn (before a genuine user record), final
+# turn is text-only with no DNV -> allow (exit 0). The earlier edits must not
+# leak into the current turn's file_count.
+T="$TMP/t_earlier_turn_$RANDOM.jsonl"
+{
+  mk_user_record "first prompt"
+  printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Edit","input":{"file_path":"/tmp/a.py"}}]}}'
+  printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Edit","input":{"file_path":"/tmp/b.py"}}]}}'
+  printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Edit","input":{"file_path":"/tmp/c.py"}}]}}'
+  mk_user_record "second prompt"
+  jq -nc --arg t "Done, no edits this turn. (verified)" '{"type":"assistant","message":{"content":[{"type":"text","text":$t}]}}'
+} > "$T"
+check "3 edits in earlier turn, current turn text-only no DNV -> allow" 0 "$(run "$(payload "$T")")"
+
+# Test (e): 3 edits AFTER the last genuine user record, no DNV -> block (exit 2)
+T="$TMP/t_current_turn_$RANDOM.jsonl"
+{
+  mk_user_record "first prompt"
+  jq -nc --arg t "ack" '{"type":"assistant","message":{"content":[{"type":"text","text":$t}]}}'
+  mk_user_record "second prompt"
+  printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Edit","input":{"file_path":"/tmp/a.py"}}]}}'
+  printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Edit","input":{"file_path":"/tmp/b.py"}}]}}'
+  printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Edit","input":{"file_path":"/tmp/c.py"}}]}}'
+  jq -nc --arg t "Done, all changes applied. (verified)" '{"type":"assistant","message":{"content":[{"type":"text","text":$t}]}}'
+} > "$T"
+check "3 edits after last user record, no DNV -> block" 2 "$(run "$(payload "$T")")"
+
+# ── Header-presence cases (FIX 3: gate on the "## Did Not Verify" HEADER
+# being absent, not on zero bullets — a compliant prose-only section with the
+# header but no bullets must pass, not be misread as "no section") ─────────
+
+# Test (f): 3 turn-edits + text with the DNV header present but only prose,
+# no bullets -> allow (exit 0). The header's presence is the honesty
+# boundary, same as an all-tagged bullet list.
+T=$(mk_transcript_n_files "Done, all changes applied. (verified)
+## Did Not Verify
+Nothing outstanding — every claim above was checked directly." 3)
+check "3 files, DNV header present with only prose (no bullets) -> allow" 0 "$(run "$(payload "$T")")"
 
 # ── SubagentStop cases ────────────────────────────────────────────────────────
 # SubagentStop payloads carry last_assistant_message directly. The hook must read
@@ -378,5 +425,26 @@ run_capture "$(loop_payload "$T" S1)"
 check "compliant turn in loop -> exit 0" 0 "$RC_OUT"
 case "$OUT_OUT" in *additionalContext*) d9_ctx=1 ;; *) d9_ctx=0 ;; esac
 check "compliant turn in loop -> NO additionalContext (no warn spam)" 0 "$d9_ctx"
+
+# ── Pin tests (presence check must never fire outside its intended scope) ──
+
+# Case (g): SubagentStop with a 3+-edit agent transcript and a clean message
+# (no DNV section at all) -> allow. Pins that the presence check never fires
+# on SubagentStop: file_count is 0 on that path (never computed from
+# agent_transcript_path), so file_count>=3 can never be true there.
+AT_G=$(mk_agent_transcript "Work done, no issues. (verified)")
+# mk_agent_transcript only writes one Edit; extend it to 3 unique files.
+{
+  printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Edit","input":{"file_path":"/tmp/g2.py"}}]}}'
+  printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Edit","input":{"file_path":"/tmp/g3.py"}}]}}'
+} >> "$AT_G"
+check "SubagentStop, 3+-edit agent transcript, clean message -> allow (presence never fires)" 0 "$(run "$(subagentstop_payload "Work done, no issues. (verified)" "$AT_G")")"
+
+# Case (h): empty final text + 3 turn-edits -> allow. The empty-text skip
+# (nothing was claimed, nothing to inspect) must take precedence over the
+# presence check — an empty response can't be missing a section it never
+# had room to include.
+T=$(mk_transcript_n_files "" 3)
+check "empty final text + 3 turn-edits -> allow (empty-text skip precedence)" 0 "$(run "$(payload "$T")")"
 
 [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails)"; exit 1; }
