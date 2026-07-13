@@ -138,7 +138,7 @@ function readUnits(workUnits: unknown): LoopUnit[] {
 
 // decisions_absorbed is documented (SKILL.md) as a chronological array of
 // {phase, decision} appended oldest-first. Older progress.json files predate
-// the field entirely. Same degrade-don't-throw stance as readUnitTitles:
+// the field entirely. Same degrade-don't-throw stance as readUnits:
 // non-array or non-record entries are skipped rather than raising. Returns
 // the last 5 entries, newest first, formatted "<phase>: <decision>".
 function readDecisions(decisionsAbsorbed: unknown): string[] {
