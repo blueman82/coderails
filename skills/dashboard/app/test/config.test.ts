@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach } from "vitest";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { loadConfig, visibleButtons, ConfigError } from "../src/lib/config";
+import { loadConfig, visibleButtons, ConfigError, type DashboardConfig } from "../src/lib/config";
 
 const tmpDirs: string[] = [];
 
