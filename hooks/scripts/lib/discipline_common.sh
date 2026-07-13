@@ -1,7 +1,7 @@
 #!/bin/bash
 # discipline_common.sh — shared transcript-extraction utilities for discipline hooks.
-# SOURCED (not executed) by check_confidence_labels.sh, check_verify_loop.sh, and
-# discipline_catchup.sh. Mirrors the lib/loop_state_common.sh pattern.
+# SOURCED (not executed) by check_confidence_labels.sh and check_verify_loop.sh.
+# Mirrors the lib/loop_state_common.sh pattern.
 #
 # Canonical form chosen from check_verify_loop.sh (the more defensive variant):
 #   - handles array content (join text blocks), string content (pass through),

@@ -238,4 +238,29 @@ check "compliant turn in loop -> exit 0" 0 "$RC_OUT"
 case "$OUT_OUT" in *additionalContext*) d9_ctx=1 ;; *) d9_ctx=0 ;; esac
 check "compliant turn in loop -> NO additionalContext (no warn spam)" 0 "$d9_ctx"
 
+# ── event= telemetry token ──────────────────────────────────────────────
+# Every log line this hook writes carries which hook_event_name produced
+# it, so discipline.log consumers can distinguish Stop from SubagentStop
+# without re-deriving it from surrounding context.
+
+# Stop payload, unlabelled long text (blocked path) -> log line carries event=Stop.
+: > "$CLAUDE_DISCIPLINE_LOG"
+T=$(mk_transcript "$LONG_TEXT")
+run "$(payload "$T")" >/dev/null 2>&1
+case "$(cat "$CLAUDE_DISCIPLINE_LOG" 2>/dev/null)" in
+  *"hook=confidence_labels event=Stop"*) evt_stop_match=1 ;;
+  *) evt_stop_match=0 ;;
+esac
+check "Stop payload -> log line carries event=Stop" 1 "$evt_stop_match"
+
+# SubagentStop payload, unlabelled long message (blocked path) -> log line
+# carries event=SubagentStop.
+: > "$CLAUDE_DISCIPLINE_LOG"
+run "$(subagentstop_payload "${LONG_TEXT}")" >/dev/null 2>&1
+case "$(cat "$CLAUDE_DISCIPLINE_LOG" 2>/dev/null)" in
+  *"hook=confidence_labels event=SubagentStop"*) evt_sub_match=1 ;;
+  *) evt_sub_match=0 ;;
+esac
+check "SubagentStop payload -> log line carries event=SubagentStop" 1 "$evt_sub_match"
+
 [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails)"; exit 1; }

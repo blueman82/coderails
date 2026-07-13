@@ -19,7 +19,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 HOOKS_JSON="${1:-$REPO_ROOT/hooks/hooks.json}"
 READ_T_FLOOR=5
-EXPECTED_BACKSTOP_COUNT=14
+EXPECTED_BACKSTOP_COUNT=13
 
 fails=0
 
@@ -108,5 +108,30 @@ while IFS= read -r hook_file; do
     check "$hook_name: read -t $n == floor ($READ_T_FLOOR)" "ok" "ok"
   fi
 done <<< "$backstop_files"
+
+# --- Guard: UserPromptSubmit registers exactly one hook (inject_context.sh) ---
+# discipline_catchup.sh was retired with no shim/flag/fallback (clean break);
+# this pins the registration so a re-add or a stray second entry fails loud.
+ups_result=$(jq -r '
+  .hooks.UserPromptSubmit[0].hooks
+  | "\(length) \(.[0].command)"
+' "$HOOKS_JSON")
+ups_count=$(echo "$ups_result" | awk '{print $1}')
+ups_cmd=$(echo "$ups_result" | cut -d' ' -f2-)
+
+check "UserPromptSubmit[0].hooks length" "1" "$ups_count"
+case "$ups_cmd" in
+  *inject_context.sh*) check "UserPromptSubmit[0]'s only hook references inject_context.sh" "ok" "ok" ;;
+  *) check "UserPromptSubmit[0]'s only hook references inject_context.sh" "ok" "FAIL:$ups_cmd" ;;
+esac
+
+# --- Guard: plugin.json and marketplace.json versions stay in lockstep ---
+# PR #155 bumped only plugin.json, breaking the invariant; this pins both
+# together so a future single-file bump fails loud instead of drifting again.
+PLUGIN_JSON="$REPO_ROOT/.claude-plugin/plugin.json"
+MARKETPLACE_JSON="$REPO_ROOT/.claude-plugin/marketplace.json"
+plugin_version=$(jq -r '.version' "$PLUGIN_JSON")
+marketplace_version=$(jq -r '.plugins[0].version' "$MARKETPLACE_JSON")
+check "plugin.json version ($plugin_version) matches marketplace.json plugin version ($marketplace_version)" "$plugin_version" "$marketplace_version"
 
 [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails)"; exit 1; }

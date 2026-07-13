@@ -119,7 +119,7 @@ fi
 # Logged (not silent) so a degraded/empty-text check is auditable — this now
 # also short-circuits the header-presence check further down.
 if [ -z "$text" ]; then
-  log_line "hook=verify_loop session=$session_id attempts=$attempts files=$file_count skipped=empty_text blocked=0"
+  log_line "hook=verify_loop event=$hook_event session=$session_id attempts=$attempts files=$file_count skipped=empty_text blocked=0"
   exit 0
 fi
 
@@ -150,16 +150,16 @@ if [ "$has_dnv_header" -eq 0 ]; then
     if [ "$hook_event" = "Stop" ] && als_loop_active_incomplete "$transcript" "$cwd" "$(als_sanitise_session_id "$session_id")"; then
       if jq -n --arg m "${presence_msg/\[verify-loop-block\]/[discipline-warn(loop)]}" \
         '{"hookSpecificOutput":{"hookEventName":"Stop","additionalContext":$m}}'; then
-        log_line "hook=verify_loop session=$session_id text_len=${#text} attempts=$attempts files=$file_count dnv_items=0 resolvable_dnv_items=0 presence_block=1 would_block=1 warned=1 blocked=0"
+        log_line "hook=verify_loop event=$hook_event session=$session_id text_len=${#text} attempts=$attempts files=$file_count dnv_items=0 resolvable_dnv_items=0 presence_block=1 would_block=1 warned=1 blocked=0"
         exit 0
       fi
     fi
 
-    log_line "hook=verify_loop session=$session_id text_len=${#text} attempts=$attempts files=$file_count dnv_items=0 resolvable_dnv_items=0 presence_block=1 blocked=1"
+    log_line "hook=verify_loop event=$hook_event session=$session_id text_len=${#text} attempts=$attempts files=$file_count dnv_items=0 resolvable_dnv_items=0 presence_block=1 blocked=1"
     echo "$presence_msg" >&2
     exit 2
   fi
-  log_line "hook=verify_loop session=$session_id text_len=${#text} attempts=$attempts files=$file_count dnv_items=0 resolvable_dnv_items=0 blocked=0"
+  log_line "hook=verify_loop event=$hook_event session=$session_id text_len=${#text} attempts=$attempts files=$file_count dnv_items=0 resolvable_dnv_items=0 blocked=0"
   exit 0
 fi
 
@@ -174,7 +174,7 @@ dnv_items=$(echo "$text" | awk '
 ')
 
 if [ "$dnv_items" -eq 0 ]; then
-  log_line "hook=verify_loop session=$session_id text_len=${#text} attempts=$attempts files=$file_count dnv_items=0 resolvable_dnv_items=0 blocked=0"
+  log_line "hook=verify_loop event=$hook_event session=$session_id text_len=${#text} attempts=$attempts files=$file_count dnv_items=0 resolvable_dnv_items=0 blocked=0"
   exit 0
 fi
 
@@ -212,7 +212,7 @@ untagged_bullets=$(echo "$dnv_item_text" | grep -ivE "$hatch_pattern")
 resolvable_dnv_items=$(echo "$untagged_bullets" | grep -cE '^- *[^[:space:]]')
 [ -z "$resolvable_dnv_items" ] && resolvable_dnv_items=0
 
-log_line "hook=verify_loop session=$session_id text_len=${#text} attempts=$attempts files=$file_count dnv_items=$dnv_items resolvable_dnv_items=$resolvable_dnv_items blocked=0"
+log_line "hook=verify_loop event=$hook_event session=$session_id text_len=${#text} attempts=$attempts files=$file_count dnv_items=$dnv_items resolvable_dnv_items=$resolvable_dnv_items blocked=0"
 
 if [ "$resolvable_dnv_items" -gt 0 ]; then
   # Loop-scoped warn demotion (Stop event only — SubagentStop never reaches
@@ -232,12 +232,12 @@ behaviour, prod-only observation, or user intent), keep it but tag its leading c
   - (unverifiable: <reason>) <the item>
 That tag is the only escape hatch — every untagged bullet blocks outside a loop and is flagged inside one." \
       '{"hookSpecificOutput":{"hookEventName":"Stop","additionalContext":$m}}'; then
-      log_line "hook=verify_loop session=$session_id text_len=${#text} resolvable_dnv_items=$resolvable_dnv_items would_block=1 warned=1 blocked=0"
+      log_line "hook=verify_loop event=$hook_event session=$session_id text_len=${#text} resolvable_dnv_items=$resolvable_dnv_items would_block=1 warned=1 blocked=0"
       exit 0
     fi
   fi
 
-  log_line "hook=verify_loop session=$session_id text_len=${#text} resolvable_dnv_items=$resolvable_dnv_items blocked=1"
+  log_line "hook=verify_loop event=$hook_event session=$session_id text_len=${#text} resolvable_dnv_items=$resolvable_dnv_items blocked=1"
   echo "[verify-loop-block] Your '## Did Not Verify' section has untagged items — anything not
 explicitly marked uncheckable is treated as something you could have resolved:
 ${dnv_item_text}
