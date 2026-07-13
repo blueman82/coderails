@@ -98,26 +98,40 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+// Non-empty string, else undefined — used for both the description/desc
+// fields (description wins over the desc alias; either may be blank in a
+// hand-edited progress.json).
+function readNonEmptyString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() !== "" ? value : undefined;
+}
+
+// Real progress.json files use "in-progress" and (older) "doing" for the
+// same in-flight state (see plan.md's LoopUnit field comment).
+function readUnit(key: string, unit: Record<string, unknown>): LoopUnit {
+  const status = unit.status;
+  return {
+    key,
+    done: status === "done",
+    inFlight: status === "in-progress" || status === "doing",
+    description: readNonEmptyString(unit.description) ?? readNonEmptyString(unit.desc),
+    pr: typeof unit.pr === "number" ? unit.pr : undefined,
+  };
+}
+
 // work_units is documented (SKILL.md) as an object keyed by unit id, each
 // entry carrying at least a status. Some real progress.json files predate
 // that schema and carry work_units as an array of {id, status, ...} instead.
 // Accept both without throwing; anything else degrades to no units.
-function readUnitTitles(workUnits: unknown): { title: string; done: boolean }[] {
+function readUnits(workUnits: unknown): LoopUnit[] {
   if (Array.isArray(workUnits)) {
     return workUnits
       .filter(isRecord)
-      .map((unit) => ({
-        title: typeof unit.id === "string" ? unit.id : "",
-        done: unit.status === "done",
-      }));
+      .map((unit) => readUnit(typeof unit.id === "string" ? unit.id : "", unit));
   }
   if (isRecord(workUnits)) {
     return Object.entries(workUnits)
       .filter(([, unit]) => isRecord(unit))
-      .map(([title, unit]) => ({
-        title,
-        done: (unit as Record<string, unknown>).status === "done",
-      }));
+      .map(([key, unit]) => readUnit(key, unit as Record<string, unknown>));
   }
   return [];
 }
