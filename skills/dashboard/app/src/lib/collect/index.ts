@@ -107,7 +107,6 @@ function sortGates(gates: (PrGate | PrGateError)[]): (PrGate | PrGateError)[] {
 // callers (the SSE route) never see an aggregator-level exception, and
 // `onError` is invoked (log once) instead.
 export function createAggregator(deps: AggregatorDeps): Aggregator {
-  const trailLimit = deps.memoryTrailLimit ?? DEFAULT_TRAIL_LIMIT;
   const runsLimit = deps.runsLimit ?? DEFAULT_RUNS_LIMIT;
   const queueLimit = deps.queueLimit ?? DEFAULT_QUEUE_LIMIT;
   const gatesPollMs = deps.gatesPollMs ?? DEFAULT_GATES_POLL_MS;
