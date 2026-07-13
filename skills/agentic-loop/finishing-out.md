@@ -33,7 +33,8 @@ remove worktrees the loop itself created (under `.worktrees/`/`worktrees/`), nev
 harness-owned workspace. This runs per-work-unit at Phase 4b, not deferred to the
 loop-level teardown.
 
-**Caveat — never remove the worktree that is the shell's current cwd.** Removing the
-session's own cwd-pinned worktree breaks the shell. `cd` to the main repo root FIRST,
+**Caveat — never remove the worktree that is the shell's current cwd.** `git worktree
+remove` fails when run from inside the worktree being removed (per
+`finishing-a-development-branch`'s Common Mistakes). `cd` to the main repo root FIRST,
 then remove. If the loop's own cwd is inside the worktree being finished, this is
-mandatory, not optional — a real failure this subsystem hit.
+mandatory, not optional.
