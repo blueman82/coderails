@@ -87,3 +87,10 @@ export function loadConfig(path?: string): DashboardConfig {
 
   return data;
 }
+
+// Buttons stay in the config (routines still target them by name) but
+// never reach the deck. Callers narrowing config.buttons for the client
+// should go through this helper rather than filtering inline.
+export function visibleButtons(config: DashboardConfig): ButtonDef[] {
+  return config.buttons.filter((b) => !b.hidden);
+}
