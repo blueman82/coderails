@@ -9,8 +9,7 @@ export interface SessionInfo {
 
 export interface LoopUnit {
   key: string;
-  done: boolean;
-  inFlight: boolean;
+  status: "done" | "in-flight" | "pending";
   description?: string;
   pr?: number;
 }
