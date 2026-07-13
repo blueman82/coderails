@@ -129,7 +129,7 @@ Match the confirmation cadence to the envelope class for the rest of the session
 
 ### Phase 0.5 — Orchestrator operating rules (the conductor obeys its own rules)
 
-The orchestrator (main context) is subject to the same discipline it imposes on workers. In long sessions the orchestrator itself trips the user's stop hooks — confidence-label and verify-loop blocks — and every block is a stall that costs a manual turn to clear, exactly the cost this skill exists to remove.
+The orchestrator (main context) is subject to the same discipline it imposes on workers. Inside an active, incomplete loop, the two discipline Stop hooks — confidence-label and verify-loop — demote a would-be block to a model-visible warn (`additionalContext` on the Stop event) rather than stopping the turn outright; the discipline itself hasn't changed, the warn is the correction signal the orchestrator acts on next turn. Outside an active loop, and for worker output (SubagentStop), both hooks still block outright. Even at warn-level, a missed warn is still a cost — it's the cost this skill exists to keep to a minimum, just paid as a drifted transcript instead of a forced regeneration.
 
 Main context must, in its own output (not just in spawned-agent prompts):
 - Confidence-label every substantive status claim — `(verified)` / `(inferred)` / `(guess)` (same taxonomy as Phase 11).
