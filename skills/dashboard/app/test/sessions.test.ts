@@ -300,6 +300,24 @@ describe("collectLoops", () => {
     ]);
   });
 
+  it("falls through to the desc alias when description is present but blank", () => {
+    const base = makeTmpBase();
+    const dir = join(base, "-blank-description-desc-fallthrough-project", "S19");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, "progress.json"),
+      JSON.stringify({
+        status: "in-progress",
+        session_id: "S19",
+        work_units: {
+          "wu-fallthrough": { status: "pending", description: "   ", desc: "desc used" },
+        },
+      })
+    );
+    const loops = collectLoops(base);
+    expect(loops[0].units).toEqual([{ key: "wu-fallthrough", status: "pending", description: "desc used" }]);
+  });
+
   it("uses description over the desc alias when both are non-blank (precedence)", () => {
     const base = makeTmpBase();
     const dir = join(base, "-both-desc-project", "S17");
