@@ -143,9 +143,9 @@ describe("GET /api/events — snapshot", () => {
     expect(snapshot).toHaveProperty("sessions");
     expect(snapshot).toHaveProperty("loops");
     expect(snapshot).toHaveProperty("gates");
-    expect(snapshot).toHaveProperty("trail");
     expect(snapshot).toHaveProperty("health");
     expect(snapshot).toHaveProperty("runs");
+    expect(snapshot).not.toHaveProperty("trail");
   }, 4000);
 
   it("never includes a token key anywhere in the captured stream", async () => {
