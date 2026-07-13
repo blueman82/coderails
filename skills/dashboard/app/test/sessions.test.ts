@@ -249,6 +249,24 @@ describe("collectLoops", () => {
     expect(loops[0].title).toBe("Fix the flaky test.");
   });
 
+  it("uses the loop field over authorising_prompt_raw when both are non-blank (precedence)", () => {
+    const base = makeTmpBase();
+    const dir = join(base, "-both-title-project", "S18");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, "progress.json"),
+      JSON.stringify({
+        status: "in-progress",
+        session_id: "S18",
+        loop: "loop wins",
+        authorising_prompt_raw: "authorising_prompt_raw loses",
+        work_units: {},
+      })
+    );
+    const loops = collectLoops(base);
+    expect(loops[0].title).toBe("loop wins");
+  });
+
   it("parses keyed units carrying description, desc-alias, and pr (fixture (a): description+pr)", () => {
     const loops = collectLoops(LOOP_FIXTURES);
     const loop = loops.find((l) => l.slug === "-work-project-described");
