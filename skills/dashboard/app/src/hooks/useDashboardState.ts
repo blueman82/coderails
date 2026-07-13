@@ -3,7 +3,6 @@
 import { useEffect, useReducer } from "react";
 import type { SessionInfo, LoopInfo } from "@/lib/collect/sessions";
 import type { PrGate, PrGateError } from "@/lib/collect/prGates";
-import type { TrailEntry } from "@/lib/collect/memoryTrail";
 import type { HealthTile } from "@/lib/collect/health";
 import type { QueueEntry } from "@/lib/collect/queue";
 import type { BuildEntry } from "@/lib/collect/builds";
