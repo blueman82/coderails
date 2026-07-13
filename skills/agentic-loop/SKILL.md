@@ -52,7 +52,7 @@ It prints the absolute path. Write the stub there with the Write tool (it create
   "session_id": "<this session's id>",
   "status": "initialising",
   "created": "<ISO8601 timestamp>",
-  "authorising_prompt_raw": "<the user's authorising prompt, verbatim>",
+  "authorising_prompt_raw": "<the envelope Phase 0 reads, verbatim — updated if Phase -1 adopts an improved prompt>",
   "completed_marker": <carry forward the prior file's completed_marker if one exists at this path, else 0>
 }
 ```
