@@ -193,7 +193,7 @@ describe("collectPrGates", () => {
   });
 
   it("returns an empty array for an empty repos list", async () => {
-    const cfg: DashboardConfig = { repos: [], wikiPaths: [], memoryPaths: [], buttons: [] };
+    const cfg: DashboardConfig = { repos: [], wikiPaths: [], buttons: [] };
     const gates = await collectPrGates(cfg);
     expect(gates).toEqual([]);
   });
