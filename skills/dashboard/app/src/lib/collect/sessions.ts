@@ -160,7 +160,10 @@ function readTitle(record: Record<string, unknown>, slug: string): string {
   const loop = readNonEmptyString(record.loop);
   if (loop) return loop;
   const prompt = readNonEmptyString(record.authorising_prompt_raw);
-  if (prompt) return prompt.trim();
+  if (prompt) {
+    const trimmed = prompt.trim();
+    return trimmed.length > 80 ? `${trimmed.slice(0, 80)}…` : trimmed;
+  }
   return slug;
 }
 
