@@ -208,6 +208,76 @@ describe("OutputViewerPanel — run-output overlay", () => {
     expect(el.textContent).toContain("body text");
   });
 
+  it("(gfm-table) a GFM table in run output renders as a real <table>, not literal pipe text", async () => {
+    // Bare CommonMark (no remark-gfm) has no table syntax, so a GFM table falls through as one
+    // line of literal '| A | B |' text. This pins remarkGfm being wired into the ReactMarkdown
+    // pipeline — drop the plugin and this fails (mutation-check).
+    const withTable = "# Report\n\n| Field | Value |\n|---|---|\n| Day | Sunday |\n| Count | 3 |\n";
+    global.fetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ status: "ok", output: withTable }), { status: 200 })
+    ) as unknown as typeof fetch;
+    const finished = run({ runId: "done1", startedAt: 100, endedAt: 150, exitCode: 0 });
+    const { container } = render(
+      createElement(
+        DashboardContextTestProvider,
+        { snapshot: emptySnapshot({ runs: [finished] }) },
+        createElement(OutputViewerPanel, { token: "t" })
+      )
+    );
+    await act(async () => {
+      fireEvent.click(historyRow(container, "done1"));
+      await Promise.resolve();
+    });
+    const el = await waitFor(() => {
+      const o = overlay();
+      if (!o || !o.querySelector("h1")) throw new Error("not ready");
+      return o;
+    });
+    const table = el.querySelector("table");
+    expect(table).not.toBeNull();
+    const headers = Array.from(table?.querySelectorAll("th") ?? []).map((th) => th.textContent);
+    expect(headers).toEqual(["Field", "Value"]);
+    const cells = Array.from(table?.querySelectorAll("td") ?? []).map((td) => td.textContent);
+    expect(cells).toEqual(["Day", "Sunday", "Count", "3"]);
+    // The literal pipe markers must NOT survive into the rendered text as raw table syntax.
+    expect(el.textContent).not.toContain("|---|---|");
+  });
+
+  it("(gfm-autolink) a bare URL in run output renders as a real <a>, and a javascript: URL is inerted", async () => {
+    // GFM autolink support turns a bare URL into a live <a>. Links are click-gated (unlike the
+    // passive image beacon above), so this is acceptable new surface — but confirm react-markdown's
+    // default urlTransform still strips javascript: hrefs even with remark-gfm's autolink active.
+    const withLinks =
+      "# Report\n\nSee https://example.com/results for details.\n\njavascript:alert(1)\n";
+    global.fetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ status: "ok", output: withLinks }), { status: 200 })
+    ) as unknown as typeof fetch;
+    const finished = run({ runId: "done1", startedAt: 100, endedAt: 150, exitCode: 0 });
+    const { container } = render(
+      createElement(
+        DashboardContextTestProvider,
+        { snapshot: emptySnapshot({ runs: [finished] }) },
+        createElement(OutputViewerPanel, { token: "t" })
+      )
+    );
+    await act(async () => {
+      fireEvent.click(historyRow(container, "done1"));
+      await Promise.resolve();
+    });
+    const el = await waitFor(() => {
+      const o = overlay();
+      if (!o || !o.querySelector("h1")) throw new Error("not ready");
+      return o;
+    });
+    const links = Array.from(el.querySelectorAll("a"));
+    const httpsLink = links.find((a) => a.textContent === "https://example.com/results");
+    expect(httpsLink).toBeDefined();
+    expect(httpsLink?.getAttribute("href")).toBe("https://example.com/results");
+    // A bare `javascript:` URI is NOT autolinked into a live anchor with that scheme as href.
+    const jsLink = links.find((a) => a.getAttribute("href")?.startsWith("javascript:"));
+    expect(jsLink).toBeUndefined();
+  });
+
   it("(settled-projection) a settled run whose fetch returns RAW stream-json renders projected prose, not the JSON log", async () => {
     // A crashed/killed run's server-side extractResultText falls back to the raw stream-json log
     // verbatim (no `result` line). The panel must project that on the settled path too, else the

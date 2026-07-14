@@ -3,6 +3,7 @@
 import { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { runResultLabel, formatDuration, formatHHMM } from "@/hooks/useDashboardState";
 import type { RunRecord } from "@/lib/runlog";
 
@@ -95,7 +96,9 @@ export function RunOutputOverlay({ run, isLive, output, error, onRetry, onClose 
                   raw-HTML escaping (which handles literal <img> tags in the source); both are
                   needed. Links are left as-is: defaultUrlTransform already inerts javascript:,
                   and following one is a visible, deliberate click. */}
-              <ReactMarkdown components={{ img: (props) => <>{props.alt ?? ""}</> }}>{body}</ReactMarkdown>
+              <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ img: (props) => <>{props.alt ?? ""}</> }}>
+                {body}
+              </ReactMarkdown>
             </div>
           ) : (
             <div className="hud-empty-state">{isLive ? "waiting for output…" : "no output"}</div>
