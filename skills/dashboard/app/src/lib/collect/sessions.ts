@@ -114,7 +114,7 @@ function readUnit(key: string, unit: Record<string, unknown>): LoopUnit {
   return {
     key,
     status,
-    description: typeof unit.description === "string" ? unit.description : readNonEmptyString(unit.desc),
+    description: readNonEmptyString(unit.description) ?? readNonEmptyString(unit.desc),
     pr: typeof unit.pr === "number" ? unit.pr : undefined,
   };
 }
