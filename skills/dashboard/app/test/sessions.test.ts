@@ -223,15 +223,15 @@ describe("collectLoops", () => {
     expect(loops[0].title).toBe("-nonstring-loop-project");
   });
 
-  it("falls back to authorising_prompt_raw's first 80 chars (trimmed, ellipsis) for title when loop is null", () => {
+  it("falls back to authorising_prompt_raw's full verbatim text (no truncation) for title when loop is null", () => {
     const loops = collectLoops(LOOP_FIXTURES);
     const loop = loops.find((l) => l.slug === "-work-project-authprompt");
     expect(loop?.title).toBe(
-      "Read memory file `project_loop_hardening_handoff.md` for full context. Two syste…"
+      "Read memory file `project_loop_hardening_handoff.md` for full context. Two systemic hardening findings from the observability-dashboard build that need addressing before the next release ships to users."
     );
   });
 
-  it("uses authorising_prompt_raw verbatim (no ellipsis) when it is 80 chars or shorter", () => {
+  it("uses authorising_prompt_raw verbatim when it is 80 chars or shorter", () => {
     const base = makeTmpBase();
     const dir = join(base, "-short-prompt-project", "S13");
     mkdirSync(dir, { recursive: true });
