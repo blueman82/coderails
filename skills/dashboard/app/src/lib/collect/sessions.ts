@@ -17,7 +17,7 @@ export interface LoopUnit {
 export interface LoopInfo {
   slug: string;
   // Loop title, chain: progress.json's "loop" field -> authorising_prompt_raw
-  // (first 80 chars, trimmed, "…") -> slug (see readTitle below).
+  // (trimmed, full text, no truncation) -> slug (see readTitle below).
   title: string;
   sessionId: string;
   status: string;
@@ -154,16 +154,13 @@ function readDecisions(decisionsAbsorbed: unknown): string[] {
 
 // progress.json's "loop" field is a free-text human name (e.g. "observability-dashboard
 // (sub-project 1 of agentic-os evolution)"), not present on every loop. Falls back to
-// the first 80 chars of authorising_prompt_raw (trimmed, "…" appended when truncated),
-// then to the dir slug when neither is present.
+// authorising_prompt_raw's full trimmed text (no truncation — readable directive text
+// matters more than a compact title), then to the dir slug when neither is present.
 function readTitle(record: Record<string, unknown>, slug: string): string {
   const loop = readNonEmptyString(record.loop);
   if (loop) return loop;
   const prompt = readNonEmptyString(record.authorising_prompt_raw);
-  if (prompt) {
-    const trimmed = prompt.trim();
-    return trimmed.length > 80 ? `${trimmed.slice(0, 80)}…` : trimmed;
-  }
+  if (prompt) return prompt.trim();
   return slug;
 }
 

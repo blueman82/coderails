@@ -155,8 +155,8 @@ describe("RailLeft — multi-loop Directives panel", () => {
     expect(chips[0].textContent).toBe("PR #166");
   });
 
-  it("renders a unit description clamped in dim text with the full text in a title attribute", () => {
-    const long = "a very long description that should be clamped to two lines in the card body";
+  it("renders a unit description in full, in dim text, with the full text also in a title attribute", () => {
+    const long = "a very long description that should render in full, wrapping rather than clamping in the card body";
     const { container } = renderRail(
       emptySnapshot({ loops: [loop({ units: [{ key: "u1", status: "in-flight", description: long }] })] })
     );
