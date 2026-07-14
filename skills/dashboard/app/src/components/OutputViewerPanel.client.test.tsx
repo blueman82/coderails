@@ -145,6 +145,38 @@ describe("OutputViewerPanel — run-output overlay", () => {
     expect(overlay()).toBeNull();
   });
 
+  it("(sanitize) renders raw HTML in untrusted run output as escaped text, not live DOM (no XSS)", async () => {
+    // Run output is untrusted. react-markdown (no rehype-raw, no dangerouslySetInnerHTML) renders
+    // any embedded HTML as escaped text. This locks that property so a future rehype-raw regression
+    // that would inject live nodes fails here.
+    const malicious = "# Report\n\n<script>window.__pwned = true;</script>\n\n<img src=x onerror=\"window.__pwned=true\">\n";
+    global.fetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ status: "ok", output: malicious }), { status: 200 })
+    ) as unknown as typeof fetch;
+    const finished = run({ runId: "done1", startedAt: 100, endedAt: 150, exitCode: 0 });
+    const { container } = render(
+      createElement(
+        DashboardContextTestProvider,
+        { snapshot: emptySnapshot({ runs: [finished] }) },
+        createElement(OutputViewerPanel, { token: "t" })
+      )
+    );
+    await act(async () => {
+      fireEvent.click(historyRow(container, "done1"));
+      await Promise.resolve();
+    });
+    const el = await waitFor(() => {
+      const o = overlay();
+      if (!o || !o.querySelector("h1")) throw new Error("not ready");
+      return o;
+    });
+    // No live <script> or <img> node was injected from the untrusted markdown source.
+    expect(el.querySelector("script")).toBeNull();
+    expect(el.querySelector("img")).toBeNull();
+    // The markup appears as visible escaped text instead.
+    expect(el.textContent).toContain("<script>");
+  });
+
   it("(b') a click inside the overlay panel does NOT close it (only the backdrop does)", async () => {
     global.fetch = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ status: "ok", output: MARKDOWN_FIXTURE }), { status: 200 })
