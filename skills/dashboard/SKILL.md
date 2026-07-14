@@ -109,7 +109,7 @@ reload.
 ## Configuration
 
 Config lives at `~/.claude/coderails-dashboard.json` (per-user; the watch
-scope is machine-wide): which repos to poll, wiki/memory paths, and the
+scope is machine-wide): which repos to poll, wiki paths, and the
 button declarations for the COMMAND DECK.
 
 Buttons only ever run what this config declares. `POST /run` takes a button
