@@ -198,7 +198,7 @@
 
 /* ---------- Rails ---------- */
 /* grid-row: 2 is a 1fr track (see .hud-stage), so each rail's height is capped by the
-   viewport regardless of how much content it holds (KPIs/directives/memory trail on the
+   viewport regardless of how much content it holds (KPIs/directives on the
    left; command deck/PR gates/ASSISTANT.LINK on the right). overflow-y: auto lets each
    rail scroll independently within that fixed height instead of clipping content with no
    way to reach it — min-height: 0 is what lets a flex child shrink below its content size
