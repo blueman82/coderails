@@ -19,7 +19,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 HOOKS_JSON="${1:-$REPO_ROOT/hooks/hooks.json}"
 READ_T_FLOOR=5
-EXPECTED_BACKSTOP_COUNT=13
+EXPECTED_BACKSTOP_COUNT=14
 
 fails=0
 
@@ -109,9 +109,12 @@ while IFS= read -r hook_file; do
   fi
 done <<< "$backstop_files"
 
-# --- Guard: UserPromptSubmit registers exactly one hook (inject_context.sh) ---
+# --- Guard: UserPromptSubmit registers exactly two hooks (inject_context.sh,
+# crack_on_gate.sh) ---
 # discipline_catchup.sh was retired with no shim/flag/fallback (clean break);
-# this pins the registration so a re-add or a stray second entry fails loud.
+# this pins the registration so a re-add or a stray extra entry fails loud.
+# crack_on_gate.sh joined as the deliberate second entry (raw-prompt crack-on
+# stamping — a SEPARATE hook, not a change to inject_context's job).
 # Checks the matcher-array length too — a re-add as a SECOND matcher object
 # (UserPromptSubmit[1]) would otherwise sail past a check that only looks
 # inside [0].hooks.
@@ -120,15 +123,20 @@ check "UserPromptSubmit matcher-array length" "1" "$ups_matchers"
 
 ups_result=$(jq -r '
   .hooks.UserPromptSubmit[0].hooks
-  | "\(length) \(.[0].command)"
+  | "\(length) \(.[0].command) \(.[1].command // "missing")"
 ' "$HOOKS_JSON")
 ups_count=$(echo "$ups_result" | awk '{print $1}')
-ups_cmd=$(echo "$ups_result" | cut -d' ' -f2-)
+ups_cmd0=$(echo "$ups_result" | awk '{print $2}')
+ups_cmd1=$(echo "$ups_result" | awk '{print $3}')
 
-check "UserPromptSubmit[0].hooks length" "1" "$ups_count"
-case "$ups_cmd" in
-  *inject_context.sh*) check "UserPromptSubmit[0]'s only hook references inject_context.sh" "ok" "ok" ;;
-  *) check "UserPromptSubmit[0]'s only hook references inject_context.sh" "ok" "FAIL:$ups_cmd" ;;
+check "UserPromptSubmit[0].hooks length" "2" "$ups_count"
+case "$ups_cmd0" in
+  *inject_context.sh*) check "UserPromptSubmit[0] hook 1 references inject_context.sh" "ok" "ok" ;;
+  *) check "UserPromptSubmit[0] hook 1 references inject_context.sh" "ok" "FAIL:$ups_cmd0" ;;
+esac
+case "$ups_cmd1" in
+  *crack_on_gate.sh*) check "UserPromptSubmit[0] hook 2 references crack_on_gate.sh" "ok" "ok" ;;
+  *) check "UserPromptSubmit[0] hook 2 references crack_on_gate.sh" "ok" "FAIL:$ups_cmd1" ;;
 esac
 
 # --- Guard: plugin.json and marketplace.json versions stay in lockstep ---
