@@ -1004,6 +1004,21 @@
   .hud-bg-canvas {
     display: none;
   }
+  /* Desktop's 3-column header (wordmark | status-line | clock, see .hud-header's comment)
+     crushes the wordmark and clock into overlapping text at phone width — neither column
+     has room to breathe once the middle "auto" column claims its space. Stack them instead. */
+  .hud-header {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto auto auto;
+    row-gap: 10px;
+  }
+  .hud-header .hud-status-line,
+  .hud-header .hud-clock-block {
+    justify-self: start;
+  }
+  .hud-wordmark {
+    font-size: 22px;
+  }
   .hud-block {
     font-size: 12.5px;
     line-height: 1.5;
