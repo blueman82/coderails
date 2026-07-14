@@ -2,7 +2,7 @@
 
 import { Sparkline } from "./Sparkline";
 import { useDashboardContext } from "@/components/DashboardProvider";
-import { liveLoops, stalledLoops, formatRelativeAge } from "@/hooks/useDashboardState";
+import { liveLoops, stalledLoops, formatRelativeAge, useNow } from "@/hooks/useDashboardState";
 import type { HealthTile } from "@/lib/collect/health";
 import type { LoopInfo, LoopUnit } from "@/lib/collect/sessions";
 
