@@ -233,43 +233,65 @@ describe("formatHHMM", () => {
   });
 });
 
-describe("selectActiveLoop", () => {
+describe("liveLoops / stalledLoops", () => {
+  const NOW = 10_000 * 60_000; // arbitrary fixed "now" in ms
+
   function loop(overrides: Partial<LoopInfo>): LoopInfo {
     return {
       slug: "s",
       title: "s",
       sessionId: "id",
-      status: "",
+      status: "in-progress",
       workUnitsDone: 0,
       workUnitsTotal: 0,
       evalsFrozen: false,
-      lastUpdatedMs: 0,
+      lastUpdatedMs: NOW,
       units: [],
       decisions: [],
       ...overrides,
     };
   }
 
-  it("returns undefined for an empty list", () => {
-    expect(selectActiveLoop([])).toBeUndefined();
+  it("classifies a loop updated 59 minutes ago as live", () => {
+    const recent = loop({ sessionId: "recent", lastUpdatedMs: NOW - 59 * 60_000 });
+    expect(liveLoops([recent], NOW)).toEqual([recent]);
+    expect(stalledLoops([recent], NOW)).toEqual([]);
   });
 
-  it("prefers an in-progress loop over a 0-unit noise entry ahead of it", () => {
-    const noise = loop({ sessionId: ".git", status: "", workUnitsTotal: 0 });
-    const active = loop({ sessionId: "real", status: "in-progress", workUnitsTotal: 5 });
-    expect(selectActiveLoop([noise, active])).toBe(active);
+  it("classifies a loop updated 61 minutes ago as stalled, not live", () => {
+    const old = loop({ sessionId: "old", lastUpdatedMs: NOW - 61 * 60_000 });
+    expect(liveLoops([old], NOW)).toEqual([]);
+    expect(stalledLoops([old], NOW)).toEqual([old]);
   });
 
-  it("falls back to a loop with units when none is in-progress", () => {
-    const noise = loop({ sessionId: ".git", workUnitsTotal: 0 });
-    const complete = loop({ sessionId: "done", status: "complete", workUnitsTotal: 3, workUnitsDone: 3 });
-    expect(selectActiveLoop([noise, complete])).toBe(complete);
+  it("treats exactly LOOP_LIVE_WINDOW_MS as still live (inclusive boundary)", () => {
+    const edge = loop({ sessionId: "edge", lastUpdatedMs: NOW - LOOP_LIVE_WINDOW_MS });
+    expect(liveLoops([edge], NOW)).toEqual([edge]);
+    expect(stalledLoops([edge], NOW)).toEqual([]);
   });
 
-  it("falls back to loops[0] when every loop is 0-unit noise", () => {
-    const a = loop({ sessionId: ".git" });
-    const b = loop({ sessionId: ".DS_Store" });
-    expect(selectActiveLoop([a, b])).toBe(a);
+  it("excludes complete loops from both live and stalled lists", () => {
+    const doneRecent = loop({ sessionId: "done-recent", status: "complete", lastUpdatedMs: NOW - 5 * 60_000 });
+    const doneOld = loop({ sessionId: "done-old", status: "complete", lastUpdatedMs: NOW - 120 * 60_000 });
+    expect(liveLoops([doneRecent, doneOld], NOW)).toEqual([]);
+    expect(stalledLoops([doneRecent, doneOld], NOW)).toEqual([]);
+  });
+
+  it("sorts live loops by lastUpdatedMs descending (most recent first)", () => {
+    const older = loop({ sessionId: "older", lastUpdatedMs: NOW - 30 * 60_000 });
+    const newer = loop({ sessionId: "newer", lastUpdatedMs: NOW - 2 * 60_000 });
+    expect(liveLoops([older, newer], NOW)).toEqual([newer, older]);
+  });
+
+  it("sorts stalled loops by lastUpdatedMs descending (most recent first)", () => {
+    const oldest = loop({ sessionId: "oldest", lastUpdatedMs: NOW - 300 * 60_000 });
+    const lessOld = loop({ sessionId: "less-old", lastUpdatedMs: NOW - 90 * 60_000 });
+    expect(stalledLoops([oldest, lessOld], NOW)).toEqual([lessOld, oldest]);
+  });
+
+  it("returns empty lists for an empty input", () => {
+    expect(liveLoops([], NOW)).toEqual([]);
+    expect(stalledLoops([], NOW)).toEqual([]);
   });
 });
 
