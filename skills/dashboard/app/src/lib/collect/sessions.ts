@@ -17,7 +17,7 @@ export interface LoopUnit {
 export interface LoopInfo {
   slug: string;
   // Loop title, chain: progress.json's "loop" field -> authorising_prompt_raw
-  // (first 80 chars, trimmed, "…") -> slug (see readTitle below).
+  // (trimmed, full text, no truncation) -> slug (see readTitle below).
   title: string;
   sessionId: string;
   status: string;
