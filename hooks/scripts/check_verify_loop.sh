@@ -72,6 +72,17 @@ cwd=$(echo "$input" | jq -r '.cwd // empty' 2>/dev/null)
 file_count=0
 attempts=1
 
+# Headless-run exemption: dashboard-spawned `claude -p` runs set this env var;
+# the discipline text gates would otherwise displace the run's answer with a
+# repair turn (see AGENTS.md ceilings note). Stop-event only — SubagentStop
+# (worker output) stays block-enforced regardless of headless-run state,
+# consistent with every other demotion branch in this file. Inside the agent
+# trust domain by design, like every local gate.
+if [ "${CODERAILS_HEADLESS_RUN:-}" = "1" ] && [ "$hook_event" = "Stop" ]; then
+  log_line "hook=verify_loop skipped=headless"
+  exit 0
+fi
+
 # SubagentStop: the subagent's final text is in last_assistant_message — police it
 # directly, without gating on file_count. The message IS the authoritative output;
 # an untagged DNV bullet in it is proof of deferred verifiable work regardless of

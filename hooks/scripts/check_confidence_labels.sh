@@ -18,6 +18,18 @@ IFS= read -r -d '' -t 5 input || true
 hook_event=$(echo "$input" | jq -r '.hook_event_name // "Stop"' 2>/dev/null)
 cwd=$(echo "$input" | jq -r '.cwd // empty' 2>/dev/null)
 
+# Headless-run exemption: dashboard-spawned `claude -p` runs set this env var;
+# the discipline text gates would otherwise displace the run's answer with a
+# repair turn (see AGENTS.md ceilings note). Stop-event only — SubagentStop
+# (worker output) stays block-enforced regardless of headless-run state,
+# consistent with every other demotion branch in this file. Inside the agent
+# trust domain by design, like every local gate.
+if [ "${CODERAILS_HEADLESS_RUN:-}" = "1" ] && [ "$hook_event" = "Stop" ]; then
+  printf '%s hook=confidence_labels skipped=headless\n' \
+    "$(date -Iseconds 2>/dev/null || date +%Y-%m-%dT%H:%M:%S%z)" >> "$LOG_FILE" 2>/dev/null
+  exit 0
+fi
+
 # Loop-guard: if we already blocked once this turn, allow the stop to avoid looping.
 # Mirrors check_verify_loop.sh's guard — without it, a stale/degenerate transcript
 # read can re-block every subsequent Stop attempt in the same turn indefinitely.
