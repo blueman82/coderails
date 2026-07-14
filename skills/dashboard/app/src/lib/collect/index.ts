@@ -71,8 +71,9 @@ export interface Aggregator {
 
 const DEFAULT_RUNS_LIMIT = 20;
 const DEFAULT_QUEUE_LIMIT = 50;
-const DEFAULT_GATES_POLL_MS = 120_000;
+const DEFAULT_GATES_POLL_MS = 30_000;
 const DEFAULT_ACTIVITY_DEBOUNCE_MS = 2_000;
+const GATES_RUNS_DEBOUNCE_MS = 3_000;
 
 function sortSessions(sessions: SessionInfo[]): SessionInfo[] {
   return [...sessions].sort((a, b) => b.lastActivity - a.lastActivity);
@@ -116,6 +117,7 @@ export function createAggregator(deps: AggregatorDeps): Aggregator {
   const listeners = new Set<AggregatorEventListener>();
   const watchers: FSWatcher[] = [];
   let gatesTimer: ReturnType<typeof setInterval> | undefined;
+  let gatesDebounceTimer: ReturnType<typeof setTimeout> | undefined;
   let activityDebounceTimer: ReturnType<typeof setTimeout> | undefined;
   let unsubscribeRunOutput: (() => void) | undefined;
 
@@ -206,6 +208,11 @@ export function createAggregator(deps: AggregatorDeps): Aggregator {
     activityDebounceTimer = setTimeout(() => void refreshActivity(), activityDebounceMs);
   }
 
+  function scheduleGatesRefresh(): void {
+    if (gatesDebounceTimer) clearTimeout(gatesDebounceTimer);
+    gatesDebounceTimer = setTimeout(() => void refreshGates(), GATES_RUNS_DEBOUNCE_MS);
+  }
+
   function watchDir(dir: string, onChange: () => void): void {
     try {
       const watcher = watch(dir, { recursive: true }, onChange);
@@ -240,7 +247,7 @@ export function createAggregator(deps: AggregatorDeps): Aggregator {
 
       watchDir(deps.projectsDir, scheduleActivityRefresh);
       watchDir(deps.loopsDir, scheduleActivityRefresh);
-      if (deps.runsDir) watchDir(deps.runsDir, refreshRuns);
+      if (deps.runsDir) watchDir(deps.runsDir, () => { refreshRuns(); scheduleGatesRefresh(); });
       if (deps.queueDir) watchDir(deps.queueDir, scheduleActivityRefresh);
       if (deps.buildsDir) watchDir(deps.buildsDir, scheduleActivityRefresh);
 
@@ -254,6 +261,7 @@ export function createAggregator(deps: AggregatorDeps): Aggregator {
       for (const watcher of watchers) watcher.close();
       watchers.length = 0;
       if (gatesTimer) clearInterval(gatesTimer);
+      if (gatesDebounceTimer) clearTimeout(gatesDebounceTimer);
       if (activityDebounceTimer) clearTimeout(activityDebounceTimer);
       unsubscribeRunOutput?.();
       unsubscribeRunOutput = undefined;
