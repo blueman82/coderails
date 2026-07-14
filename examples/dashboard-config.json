@@ -42,6 +42,14 @@
       "profile": "bypass",
       "bypassPermissions": true,
       "hidden": true
+    },
+    {
+      "name": "inbox-brief",
+      "label": "INBOX BRIEF",
+      "command": "Run exactly this command via the Bash tool and report its output, nothing else: bin/rachel \"Read tasks/inbox-brief.md and follow it.\" < /dev/null",
+      "cwd": "/Users/harrison/Github/assistant-agent",
+      "profile": "bypass",
+      "bypassPermissions": true
     }
   ],
   "routines": [
