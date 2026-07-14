@@ -177,6 +177,77 @@ describe("OutputViewerPanel — run-output overlay", () => {
     expect(el.textContent).toContain("<script>");
   });
 
+  it("(beacon) a CommonMark image in untrusted output renders NO <img> element (no tracking-beacon GET on open)", async () => {
+    // Distinct from raw-HTML escaping: `![alt](url)` is parsed markdown, a different react-markdown
+    // pipeline stage. Without the img component override it renders a live <img> whose GET fires on
+    // overlay open with no click. This pins the override — remove it and this fails.
+    const withImage = "# Report\n\n![x](https://example.com/tracker.png)\n\nbody text\n";
+    global.fetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ status: "ok", output: withImage }), { status: 200 })
+    ) as unknown as typeof fetch;
+    const finished = run({ runId: "done1", startedAt: 100, endedAt: 150, exitCode: 0 });
+    const { container } = render(
+      createElement(
+        DashboardContextTestProvider,
+        { snapshot: emptySnapshot({ runs: [finished] }) },
+        createElement(OutputViewerPanel, { token: "t" })
+      )
+    );
+    await act(async () => {
+      fireEvent.click(historyRow(container, "done1"));
+      await Promise.resolve();
+    });
+    const el = await waitFor(() => {
+      const o = overlay();
+      if (!o || !o.querySelector("h1")) throw new Error("not ready");
+      return o;
+    });
+    // No live image element was created from the untrusted markdown source.
+    expect(el.querySelector("img")).toBeNull();
+    // Surrounding content still renders (the override drops only the image, not the document).
+    expect(el.textContent).toContain("body text");
+  });
+
+  it("(settled-projection) a settled run whose fetch returns RAW stream-json renders projected prose, not the JSON log", async () => {
+    // A crashed/killed run's server-side extractResultText falls back to the raw stream-json log
+    // verbatim (no `result` line). The panel must project that on the settled path too, else the
+    // overlay dumps a JSON log. Fixture = raw stream-json with a text_delta then a result line.
+    const rawStreamJson =
+      [
+        JSON.stringify({
+          type: "stream_event",
+          event: { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "draft" } },
+        }),
+        JSON.stringify({ type: "result", subtype: "success", is_error: false, result: "# Recovered\n\nclean answer" }),
+      ].join("\n") + "\n";
+    global.fetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ status: "ok", output: rawStreamJson }), { status: 200 })
+    ) as unknown as typeof fetch;
+    const finished = run({ runId: "done1", startedAt: 100, endedAt: 150, exitCode: 0 });
+    const { container } = render(
+      createElement(
+        DashboardContextTestProvider,
+        { snapshot: emptySnapshot({ runs: [finished] }) },
+        createElement(OutputViewerPanel, { token: "t" })
+      )
+    );
+    await act(async () => {
+      fireEvent.click(historyRow(container, "done1"));
+      await Promise.resolve();
+    });
+    const el = await waitFor(() => {
+      const o = overlay();
+      if (!o || !o.querySelector("h1")) throw new Error("not ready");
+      return o;
+    });
+    // Projected prose (the result line), rendered as markdown...
+    expect(el.querySelector("h1")?.textContent).toContain("Recovered");
+    expect(el.textContent).toContain("clean answer");
+    // ...not the raw JSONL structure.
+    expect(el.textContent).not.toContain("content_block_delta");
+    expect(el.textContent).not.toContain('"type":"result"');
+  });
+
   it("(b') a click inside the overlay panel does NOT close it (only the backdrop does)", async () => {
     global.fetch = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ status: "ok", output: MARKDOWN_FIXTURE }), { status: 200 })
