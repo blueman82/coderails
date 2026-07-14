@@ -12,25 +12,30 @@ telemetry leaving the machine.
 
 ## What it shows
 
-Seven panels:
+Six panels:
 
 1. **SYSTEM VITALS** — usage windows, hooks fired, lint findings; hero
    numerals + sparklines. A source that can't be read locally shows
    "unavailable", never a guess.
-2. **DIRECTIVES** — the active agentic loop's work units as a checklist
-   (from `progress.json`), with an evals-frozen footer.
-3. **DOCUMENTS / MEMORY.TRAIL** — newest-first feed across the wiki and
-   memory directories.
-4. **COMMAND DECK** — declared buttons (bounded, config-driven runs — never a
+2. **DIRECTIVES** — one card per live agentic loop (last updated within 60
+   minutes): title, done/total work-unit count, a per-unit checklist with
+   status glyphs (done / in-flight / pending), PR chips, recent decisions,
+   and an evals-frozen footer. A `Live.N` counter in the section header
+   tracks how many loop cards are showing. Non-complete loops that have
+   gone stale drop into a dim sub-list below the cards, one line per loop
+   with its title and time since last update.
+3. **COMMAND DECK** — declared buttons (bounded, config-driven runs — never a
    free prompt box) plus run history, plus a Run Output viewer: click any
    run-history row to view its output — live-streaming while the run is
    still going, settled (fetched once) once it ends.
-5. **PR GATES** — open PRs with gate state: merge-ready / blocked (missing
+4. **PR GATES** — open PRs with gate state: merge-ready / blocked (missing
    artifact) / stale (SHA mismatch).
-6. **Bottom-centre hero** — the active loop's primary directive with a big
+5. **Bottom-centre hero** — the active loop's primary directive with a big
    numeral (e.g. work units 2/7) and a micro ticker.
-7. **Reserved slot** — placeholder for the assistant-agent sub-project until
-   it lands.
+6. **ASSISTANT.LINK** — pending workflow-audit approvals awaiting a
+   decision (Approve/Deny), plus build status for approved
+   `workflow-audit:propose-skill` entries as they claim, build, and open a
+   PR.
 
 ## Starting
 
