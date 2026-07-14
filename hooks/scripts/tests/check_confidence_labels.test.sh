@@ -308,4 +308,10 @@ check "no headless flag, would-block payload -> exit 2 unchanged" 2 "$(run "$(pa
 T=$(mk_transcript "$LONG_TEXT")
 check "CODERAILS_HEADLESS_RUN=0 -> not exempt, exit 2" 2 "$(CODERAILS_HEADLESS_RUN=0 run "$(payload "$T")")"
 
+# Case H5: headless exemption is Stop-only — CODERAILS_HEADLESS_RUN=1 with a
+# SubagentStop event and violating (unlabelled long) output must still BLOCK.
+# SubagentStop/worker output stays block-enforced regardless of headless-run
+# state (see AGENTS.md: the exemption applies to the Stop event only).
+check "headless + SubagentStop + would-block message -> exit 2 (still blocks)" 2 "$(CODERAILS_HEADLESS_RUN=1 run "$(subagentstop_payload "${LONG_TEXT}")")"
+
 [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails)"; exit 1; }

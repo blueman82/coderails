@@ -65,22 +65,23 @@ SLEEP_S="${CLAUDE_HOOK_SLEEP_S:-0.3}"
 
 log_line() { printf '%s %s\n' "$(date -Iseconds 2>/dev/null || date +%Y-%m-%dT%H:%M:%S%z)" "$1" >> "$LOG_FILE" 2>/dev/null; }
 
-# Headless-run exemption: dashboard-spawned `claude -p` runs set this env var;
-# the discipline text gates would otherwise displace the run's answer with a
-# repair turn (see AGENTS.md ceilings note). Cheap skip-gate first, before
-# stdin is even read. Inside the agent trust domain by design, like every
-# local gate.
-if [ "${CODERAILS_HEADLESS_RUN:-}" = "1" ]; then
-  log_line "hook=verify_loop skipped=headless"
-  exit 0
-fi
-
 IFS= read -r -d '' -t 5 input || true
 hook_event=$(echo "$input" | jq -r '.hook_event_name // "Stop"' 2>/dev/null)
 session_id=$(echo "$input" | jq -r '.session_id // "?"' 2>/dev/null)
 cwd=$(echo "$input" | jq -r '.cwd // empty' 2>/dev/null)
 file_count=0
 attempts=1
+
+# Headless-run exemption: dashboard-spawned `claude -p` runs set this env var;
+# the discipline text gates would otherwise displace the run's answer with a
+# repair turn (see AGENTS.md ceilings note). Stop-event only — SubagentStop
+# (worker output) stays block-enforced regardless of headless-run state,
+# consistent with every other demotion branch in this file. Inside the agent
+# trust domain by design, like every local gate.
+if [ "${CODERAILS_HEADLESS_RUN:-}" = "1" ] && [ "$hook_event" = "Stop" ]; then
+  log_line "hook=verify_loop skipped=headless"
+  exit 0
+fi
 
 # SubagentStop: the subagent's final text is in last_assistant_message — police it
 # directly, without gating on file_count. The message IS the authoritative output;
