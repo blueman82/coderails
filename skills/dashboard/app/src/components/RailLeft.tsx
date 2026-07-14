@@ -9,7 +9,7 @@ import type { LoopInfo, LoopUnit } from "@/lib/collect/sessions";
 // Distinct glyph per unit status — all three union states must read differently
 // at a glance (done / in-flight / pending).
 const UNIT_GLYPH: Record<LoopUnit["status"], string> = {
-  done: "☑",
+  done: "✓",
   "in-flight": "◆",
   pending: "·",
 };
