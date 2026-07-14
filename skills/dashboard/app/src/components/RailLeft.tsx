@@ -72,7 +72,7 @@ export function RailLeft() {
   const { health, loops } = snapshot;
 
   const kpiKeys: HealthTile["key"][] = ["usage5h", "usageWeek", "hooksFired", "lintFindings"];
-  const now = Date.now();
+  const now = useNow(30_000);
   const live = liveLoops(loops, now);
   const stalled = stalledLoops(loops, now);
 
