@@ -446,49 +446,6 @@
   overflow-wrap: break-word;
 }
 
-/* ---------- Documents table ---------- */
-.hud-doc-row {
-  display: flex;
-  justify-content: space-between;
-  gap: 10px;
-  font-size: 10.5px;
-  padding: 7px 0;
-  border-bottom: 1px solid var(--hairline);
-}
-.hud-doc-row:last-child {
-  border-bottom: none;
-}
-.hud-doc-name {
-  color: var(--grey);
-  word-break: break-all;
-}
-.hud-doc-name b {
-  color: var(--off-white);
-  font-weight: 500;
-}
-.hud-doc-age {
-  color: var(--grey-dim);
-  white-space: nowrap;
-  flex-shrink: 0;
-}
-
-/* ---------- Transcript pill ---------- */
-.hud-transcript-pill {
-  margin-top: auto;
-  align-self: flex-start;
-  padding-top: 18px;
-}
-.hud-transcript-pill span {
-  display: inline-block;
-  border: 1px solid var(--hairline);
-  border-radius: 999px;
-  padding: 7px 16px;
-  font-size: 9px;
-  letter-spacing: 0.2em;
-  color: var(--grey-dim);
-  text-transform: uppercase;
-}
-
 /* ---------- Command deck ---------- */
 .hud-deck-status {
   font-size: 9px;
