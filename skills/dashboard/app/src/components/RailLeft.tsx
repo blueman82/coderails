@@ -2,8 +2,52 @@
 
 import { Sparkline } from "./Sparkline";
 import { useDashboardContext } from "@/components/DashboardProvider";
-import { selectActiveLoop } from "@/hooks/useDashboardState";
+import { liveLoops, stalledLoops, formatRelativeAge } from "@/hooks/useDashboardState";
 import type { HealthTile } from "@/lib/collect/health";
+import type { LoopInfo, LoopUnit } from "@/lib/collect/sessions";
+
+// Distinct glyph per unit status — all three union states must read differently
+// at a glance (done / in-flight / pending).
+const UNIT_GLYPH: Record<LoopUnit["status"], string> = {
+  done: "☑",
+  "in-flight": "◆",
+  pending: "·",
+};
+
+function LoopCard({ loop }: { loop: LoopInfo }) {
+  return (
+    <div className="hud-loop-card" data-testid="loop-card">
+      <div className="hud-loop-card-head">
+        <span className="hud-loop-title">{loop.title}</span>
+        <span className="hud-loop-count">
+          {loop.workUnitsDone}/{loop.workUnitsTotal}
+        </span>
+      </div>
+      {loop.units.map((unit) => (
+        <div className={`hud-directive-item${unit.status === "done" ? " done" : ""}`} key={unit.key}>
+          <span className="hud-box">{UNIT_GLYPH[unit.status]}</span>
+          <span className="hud-unit-body">
+            <span className="hud-unit-head">
+              <span className="hud-unit-key">{unit.key}</span>
+              {unit.pr !== undefined && <span className="hud-pr-chip">PR #{unit.pr}</span>}
+            </span>
+            {unit.description && (
+              <span className="hud-unit-desc" title={unit.description}>
+                {unit.description}
+              </span>
+            )}
+          </span>
+        </div>
+      ))}
+      {loop.decisions.map((decision, i) => (
+        <div className="hud-decision-item" key={`${i}-${decision}`}>
+          {decision}
+        </div>
+      ))}
+      <div className="hud-directive-footer">Loop Evals: {loop.evalsFrozen ? "Frozen ✓" : "Not Frozen"}</div>
+    </div>
+  );
+}
 
 // Static decoration only — no history source exists yet to derive a real
 // trend from, so every KPI reuses the same placeholder sparkline shape
