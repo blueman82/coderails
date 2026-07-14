@@ -500,4 +500,54 @@ describe("GET /api/events — gates freshness", () => {
 
     expect(collectPrGatesMock.mock.calls.length).toBe(callsAfterStart);
   }, 12000);
+
+  it("default poll fires refreshGates at 30s, not only at 120s", async () => {
+    const projectsDir = tmpDir("dashboard-gates-poll-projects-");
+    const loopsDir = tmpDir("dashboard-gates-poll-loops-");
+
+    const collectPrGatesMock = prGatesModule.collectPrGates as unknown as ReturnType<typeof vi.fn>;
+    collectPrGatesMock.mockClear();
+
+    vi.useFakeTimers();
+    try {
+      // Deliberately omit runsDir: on this fs.watch implementation, a fresh
+      // recursive watcher on a brand-new empty directory can fire one
+      // spurious initial "change" event shortly after registration, which
+      // would arm the (unrelated) runsDir debounce path and add a spurious
+      // gates refresh independent of the poll interval under test — this
+      // test only cares about the setInterval(gatesPollMs) path in start().
+      const aggregator = createAggregator({
+        cfg: testConfig(),
+        projectsDir,
+        loopsDir,
+        // Do not override gatesPollMs, so it uses DEFAULT_GATES_POLL_MS (30_000).
+      });
+      aggregator.start();
+
+      // start()'s unconditional initial refreshGates() call is async (it
+      // awaits collectPrGates) — advancing by 0ms flushes that pending
+      // microtask under fake timers before we read the call count.
+      await vi.advanceTimersByTimeAsync(0);
+      const callsAfterStart = collectPrGatesMock.mock.calls.length;
+      expect(callsAfterStart).toBeGreaterThanOrEqual(1);
+
+      // Just short of 30s: the poll must NOT have fired yet.
+      await vi.advanceTimersByTimeAsync(29_000);
+      expect(collectPrGatesMock.mock.calls.length).toBe(callsAfterStart);
+
+      // Past 30s total: exactly one additional call from the poll interval —
+      // if the interval were still 120_000 (or any longer default), this
+      // would still show callsAfterStart with no new call.
+      await vi.advanceTimersByTimeAsync(1_100);
+      expect(collectPrGatesMock.mock.calls.length).toBe(callsAfterStart + 1);
+
+      aggregator.stop();
+    } finally {
+      // Restore real timers unconditionally so a failure inside the try
+      // block above can't leak fake timers into later tests in this file —
+      // exactly the leak that made the previous version of this test
+      // (mocking setInterval directly) order-dependent.
+      vi.useRealTimers();
+    }
+  });
 });
