@@ -23,7 +23,6 @@ afterEach(() => {
 const validConfig = {
   repos: ["blueman82/coderails"],
   wikiPaths: ["/Users/harrison/Github/coderails-wiki"],
-  memoryPaths: ["/Users/harrison/.claude/projects/-Users-harrison-Github-coderails/memory"],
   buttons: [
     {
       name: "wiki-lint",
