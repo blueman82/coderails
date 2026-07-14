@@ -87,7 +87,15 @@ export function RunOutputOverlay({ run, isLive, output, error, onRetry, onClose 
             </div>
           ) : body !== "" ? (
             <div className="hud-markdown">
-              <ReactMarkdown>{body}</ReactMarkdown>
+              {/* img override: run output is untrusted, and a CommonMark image
+                  (`![alt](url)`) renders a LIVE <img> whose GET fires on open with no click —
+                  a tracking beacon / SSRF-from-the-viewer vector. A run-output viewer has no
+                  legitimate use for remote images, so images render as their alt text (or
+                  nothing) instead of a live element. This is a DIFFERENT pipeline stage from
+                  raw-HTML escaping (which handles literal <img> tags in the source); both are
+                  needed. Links are left as-is: defaultUrlTransform already inerts javascript:,
+                  and following one is a visible, deliberate click. */}
+              <ReactMarkdown components={{ img: (props) => <>{props.alt ?? ""}</> }}>{body}</ReactMarkdown>
             </div>
           ) : (
             <div className="hud-empty-state">{isLive ? "waiting for output…" : "no output"}</div>
