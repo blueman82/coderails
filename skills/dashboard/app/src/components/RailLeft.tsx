@@ -108,28 +108,26 @@ export function RailLeft() {
       <div className="hud-block">
         <div className="hud-sec-head">
           <span className="hud-title">Directives</span>
-          <span className="hud-suffix">{loop ? `Loop.${loop.workUnitsTotal}` : "Loop.—"}</span>
+          <span className="hud-suffix">Live.{live.length}</span>
           <span className="hud-rule" />
         </div>
-        {loop ? (
-          <>
-            {loop.units.map((unit) => (
-              <div className={`hud-directive-item${unit.status === "done" ? " done" : ""}`} key={unit.key}>
-                <span className="hud-box">{unit.status === "done" ? "☑" : "☐"}</span>
-                <span>{unit.key}</span>
-              </div>
-            ))}
-            {loop.decisions.map((decision, i) => (
-              <div className="hud-decision-item" key={`${i}-${decision}`}>
-                {decision}
-              </div>
-            ))}
-            <div className="hud-directive-footer">
-              Loop Evals: {loop.evalsFrozen ? "Frozen ✓" : "Not Frozen"}
-            </div>
-          </>
+        {live.length === 0 && stalled.length === 0 ? (
+          <div className="hud-empty-state">no active loops</div>
         ) : (
-          <div className="hud-empty-state">no active loop</div>
+          <>
+            {live.map((loop) => (
+              <LoopCard loop={loop} key={loop.sessionId} />
+            ))}
+            {stalled.length > 0 && (
+              <div className="hud-stalled-list" data-testid="stalled-list">
+                {stalled.map((loop) => (
+                  <div className="hud-stalled-row" key={loop.sessionId}>
+                    {loop.title} · {formatRelativeAge(loop.lastUpdatedMs, now)}
+                  </div>
+                ))}
+              </div>
+            )}
+          </>
         )}
       </div>
 
