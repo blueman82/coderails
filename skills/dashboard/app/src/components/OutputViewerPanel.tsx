@@ -139,16 +139,16 @@ export function OutputViewerPanel({ token }: OutputViewerPanelProps) {
   }
 
   const settledError = finishedRunId !== undefined ? errorByRunId[finishedRunId] : undefined;
-  // The raw output string feeding the overlay: for a live run it's the live SSE buffer (raw
-  // stream-json, projected to clean prose — the buffer is hundreds of JSON lines otherwise); for
-  // a settled run it's the server-extracted prose from GET /api/run/output. Both ultimately feed
-  // the same markdown renderer in the overlay.
-  const openOutput =
-    openRun === undefined
-      ? undefined
-      : isLive
-        ? projectAssistantText(runOutput[openRun.runId] ?? "")
-        : settledByRunId[openRun.runId];
+  // The output string feeding the overlay, projected to clean prose in BOTH cases:
+  //  - live: the SSE buffer is raw stream-json (hundreds of JSON lines) — projection is essential.
+  //  - settled: GET /api/run/output normally returns already-extracted prose (projection is
+  //    identity there), BUT for a crashed/killed run with no `result` line its extractResultText
+  //    falls back to the RAW stream-json log verbatim (api/run/output/route.ts) — so projecting
+  //    here too keeps a crashed run's overlay from dumping a JSON log. `settledByRunId[...]` may
+  //    be undefined (fetch not done yet); guard so we don't project "undefined".
+  const rawOpenOutput =
+    openRun === undefined ? undefined : isLive ? (runOutput[openRun.runId] ?? "") : settledByRunId[openRun.runId];
+  const openOutput = rawOpenOutput === undefined ? undefined : projectAssistantText(rawOpenOutput);
 
   return (
     <div className="hud-block">
