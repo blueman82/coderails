@@ -156,10 +156,13 @@ re-opened as findings.
 - **Model-role routing for spawned workers is advisory, not hook-enforced.**
   `agentic-loop` SKILL.md's Phase 2.8 assigns a capability role
   (`fast-mechanical`/`default`/`frontier`) to every task before it spawns, and
-  asserts the resulting role at every worker-spawn point across the skill
-  (Phases 2, 2.5, 2.8, 3, 3a, 10 — as of this writing) — but no hook gates
-  `Agent`/`Task` spawn calls on the requested model — `hooks/hooks.json` and
-  `hooks/scripts/*.sh` only match `Bash` and `Write`/`Edit`/`MultiEdit` events.
+  asserts the resulting role at each spawn site across the skill
+  (Phases 2, 2.5, 3, 3a, 9, 10 — as of this writing; the role table itself
+  lives in Phase 2.8) — but no hook gates
+  `Agent`/`Task` spawn calls on the requested model — the only `PreToolUse`
+  matchers in `hooks/hooks.json` are `Bash` and `Write|Edit|MultiEdit`; the
+  remaining registered events (SessionStart/UserPromptSubmit/Stop/SubagentStop)
+  gate no tool calls.
   This is deliberate: routing exists for cost and latency, not correctness — PR
   gates (review, evals, hook-seam) are model-independent, so a `frontier`-role
   worker still produces a valid, fully-gated PR; nothing load-bearing breaks if

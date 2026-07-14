@@ -183,7 +183,7 @@ The why: main context fills up fast in long sessions. Pre-flight output is dense
 
 If the plan contains an unresolved architectural choice (which primitive, which topology, which of several viable shapes), resolve it BEFORE entering Phase 3 — not through live back-and-forth once workers are spawning.
 
-Spawn one design agent, role assigned per Phase 2.8's table: `default` when the fork is a bounded choice between well-understood shapes; `frontier` from the start when the fork is a genuinely ambiguous investigation — strongest-available first, not escalated-to, because a weak investigator burns wall-clock discovering it's out of its depth before a second, stronger run re-does the work anyway. (This agent runs before Phase 2.8's per-loop task routing, so it gets its role inline, here, using the same table.) Its prompt requires:
+Spawn one design agent, role assigned per Phase 2.8's table: `default` when the fork is a bounded choice between well-understood shapes; `frontier` from the start when the fork is a genuinely ambiguous investigation (Phase 2.8's "Investigations get frontier FIRST" states why). This agent runs before Phase 2.8's per-loop task routing, so it gets its role inline, here, using the same table. Its prompt requires:
 - Read the actual code paths the alternatives touch — not assumptions about them.
 - Build a head-to-head of the viable shapes with the real constraint each one hits.
 - Return ONE recommended shape, the rejected alternatives with the reason each lost, and the single fact that would flip the recommendation.
@@ -275,7 +275,7 @@ a reason.
 **Record the assignment set once.** Append one `decisions_absorbed` entry covering
 every task's role assignment for this loop — `{phase: "2.8", decision: "<task id:
 role, ...>"}` — not one entry per task. A `<3`-unit loop still writes this entry
-even though it skipped Phase 2.7.
+even when it skipped Phase 2.7.
 
 **Fallback valves live in the stamp, never improvised by a worker.** If a task
 needs an escape hatch (e.g. "fast-mechanical; default fallback after two failed
@@ -291,11 +291,12 @@ worker.
 the same gates a `default` worker's PR does. Routing exists for cost and latency,
 never for correctness; do not read a role mismatch as a quality risk in itself.
 
-**Two assignment sites, same vocabulary.** This phase routes Phase 3/3a *build*
-tasks only. The Phase 2 pre-flight agent and the Phase 2.5 design-fork agent are
-each assigned their own role inline, at their own spawn point, because both
-already run and report before this phase exists in the sequence — see the
-reconciled Phase 2 and Phase 2.5 text.
+**Inline sites elsewhere, same vocabulary.** This phase routes Phase 3/3a *build*
+tasks only. Agents spawned at other phases — the Phase 2 pre-flight agent, the
+Phase 2.5 design-fork agent, and Phase 9's wiki and sync-docs delegates — are
+each assigned their role inline, at their own spawn point, using this phase's
+vocabulary and table: the pre-2.8 phases run before this phase exists in the
+sequence, and Phase 9's delegates are loop-boundary ceremony, not build tasks.
 
 ### Phase 3 — Delegate all implementation to routed workers; spawn a team when work has ≥3 sequential units or dependency chains
 
@@ -361,7 +362,7 @@ Escalate from one agent to a spawned team the moment the work grows a third unit
 
 ### Phase 4 — Spawn workers in waves, never block on idle pings
 
-Sonnet agents (especially in teams) frequently complete work successfully but go idle **without sending a completion message**. The idle ping is not a failure signal — it's just "I stopped."
+Workers (especially in teams) frequently complete work successfully but go idle **without sending a completion message**. The idle ping is not a failure signal — it's just "I stopped."
 
 When an agent goes idle without a report:
 1. Read the worktree `git status` and `git diff --stat`
@@ -467,7 +468,7 @@ After the cluster wiki ingest+lint, the orchestrator runs `/sync-docs` ONCE at t
 
 Run it even without Serena (the `--semantic` backend) — omit `--semantic` for the traditional file-comparison audit, which still catches drift. Do not skip `/sync-docs` just because Serena isn't installed.
 
-Delegate it to a spawned agent, same as the wiki step, to keep orchestrator context clean.
+Delegate it to a spawned agent at the `default` role, same as the wiki ingest+lint agent — both inline-assigned (like Phase 2's; Phase 2.8 routes build tasks only) — to keep orchestrator context clean.
 
 **Disposition of findings:** `/sync-docs` surfaces drift; the orchestrator must triage. Fix only drift the loop's own PRs introduced. Surface pre-existing drift to the user rather than silently folding unrelated doc fixes into the loop — that is scope creep. This mirrors the loop's finding-triage discipline.
 

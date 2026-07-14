@@ -25,7 +25,7 @@ Every task in the plan must include:
   `default`, or `frontier` — plus a one-line rationale, and an optional fallback
   valve. Mandatory on every task in every plan, no exceptions for small or
   loop-only plans. Role definitions, the role→model table, and the tiering
-  rationale live in `coderails:agentic-loop`'s Phase 2.8 — this stamp names the
+  rationale live in `coderails:agentic-loop`'s routing phase (Phase 2.8 as of this writing) — this stamp names the
   role and the reason, it does not repeat the table. Example:
   `Model: fast-mechanical — scripted rename across N files; default fallback
   after two failed gate attempts.`
