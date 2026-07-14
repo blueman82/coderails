@@ -3,7 +3,7 @@ import { run } from "../src/main.ts";
 import type { SweepResult } from "../src/sweep.ts";
 import type { DashboardConfig } from "@coderails/dashboard-lib";
 
-const baseConfig: DashboardConfig = { repos: [], wikiPaths: [], memoryPaths: [], buttons: [] };
+const baseConfig: DashboardConfig = { repos: [], wikiPaths: [], buttons: [] };
 
 function sweepResult(overrides: Partial<SweepResult> = {}): SweepResult {
   return { claimed: 0, succeeded: 0, failed: 0, quarantined: 0, ...overrides };

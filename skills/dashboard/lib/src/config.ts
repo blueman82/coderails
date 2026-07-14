@@ -39,7 +39,6 @@ export interface RoutineDef {
 export interface DashboardConfig {
   repos: string[];
   wikiPaths: string[];
-  memoryPaths: string[];
   buttons: ButtonDef[];
   routines?: RoutineDef[];
 }

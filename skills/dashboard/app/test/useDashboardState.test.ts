@@ -22,7 +22,6 @@ function emptySnapshot(overrides: Partial<DashboardSnapshot> = {}): DashboardSna
     sessions: [],
     loops: [],
     gates: [],
-    trail: [],
     health: [],
     runs: [],
     queue: [],
@@ -53,7 +52,7 @@ describe("mergeDashboardEvent — snapshot", () => {
 });
 
 describe("mergeDashboardEvent — activity", () => {
-  it("overlays sessions/loops/trail/health onto the existing snapshot without touching gates/runs", () => {
+  it("overlays sessions/loops/health onto the existing snapshot without touching gates/runs", () => {
     const base: DashboardState = {
       snapshot: emptySnapshot({ gates: [{ repo: "r", error: "boom" }], runs: [{ runId: "r1" } as RunRecord] }),
       status: "online",
@@ -63,7 +62,6 @@ describe("mergeDashboardEvent — activity", () => {
     const activity = {
       sessions: [{ project: "p", lastActivity: 1, state: "active" as const }],
       loops: [],
-      trail: [],
       health: [{ key: "hooksFired" as const, value: "3" }],
       queue: [],
       builds: [{ schemaVersion: 1, hash: "a".repeat(64), state: "running" as const }],

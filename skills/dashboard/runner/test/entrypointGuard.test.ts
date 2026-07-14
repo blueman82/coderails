@@ -36,7 +36,7 @@ beforeAll(() => {
   mkdirSync(join(fakeHome, ".claude"), { recursive: true });
   writeFileSync(
     join(fakeHome, ".claude", "coderails-dashboard.json"),
-    JSON.stringify({ repos: [], wikiPaths: [], memoryPaths: [], buttons: [], routines: [] })
+    JSON.stringify({ repos: [], wikiPaths: [], buttons: [], routines: [] })
   );
 });
 

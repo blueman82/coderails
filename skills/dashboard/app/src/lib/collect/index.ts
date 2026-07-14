@@ -4,7 +4,6 @@ import { readRuns, type RunRecord } from "../runlog";
 import { runOutputBus as defaultRunOutputBus, type RunOutputBus, type RunOutputEvent } from "../runOutputBus";
 import { collectBuilds, type BuildEntry } from "./builds";
 import { collectHealth, type HealthTile } from "./health";
-import { collectMemoryTrail, type TrailEntry } from "./memoryTrail";
 import { collectPrGates, type PrGate, type PrGateError } from "./prGates";
 import { collectQueue, type QueueEntry } from "./queue";
 import { collectSessions, collectLoops, type SessionInfo, type LoopInfo } from "./sessions";
@@ -13,7 +12,6 @@ export interface Snapshot {
   sessions: SessionInfo[];
   loops: LoopInfo[];
   gates: (PrGate | PrGateError)[];
-  trail: TrailEntry[];
   health: HealthTile[];
   runs: RunRecord[];
   queue: QueueEntry[];
@@ -27,7 +25,6 @@ export interface AggregatorDeps {
   runsDir?: string;
   queueDir?: string;
   buildsDir?: string;
-  memoryTrailLimit?: number;
   runsLimit?: number;
   queueLimit?: number;
   gatesPollMs?: number;
@@ -47,7 +44,7 @@ export type AggregatorEventName = "runs" | "gates" | "activity" | "run-output";
 export interface AggregatorEventPayloadMap {
   runs: RunRecord[];
   gates: (PrGate | PrGateError)[];
-  activity: Pick<Snapshot, "sessions" | "loops" | "trail" | "health" | "queue" | "builds">;
+  activity: Pick<Snapshot, "sessions" | "loops" | "health" | "queue" | "builds">;
   "run-output": RunOutputEvent;
 }
 
@@ -72,7 +69,6 @@ export interface Aggregator {
   stop(): void;
 }
 
-const DEFAULT_TRAIL_LIMIT = 20;
 const DEFAULT_RUNS_LIMIT = 20;
 const DEFAULT_QUEUE_LIMIT = 50;
 const DEFAULT_GATES_POLL_MS = 120_000;
@@ -104,13 +100,12 @@ function sortGates(gates: (PrGate | PrGateError)[]): (PrGate | PrGateError)[] {
 }
 
 // Builds the aggregator: an in-memory snapshot kept current by fs.watch on
-// the sessions/loops/memory-trail dirs (debounced) plus a runs-log tap, and a
+// the sessions/loops dirs (debounced) plus a runs-log tap, and a
 // setInterval gh poll for gates. Every collector call is wrapped so a throw
 // degrades that slice of the snapshot rather than killing the aggregator —
 // callers (the SSE route) never see an aggregator-level exception, and
 // `onError` is invoked (log once) instead.
 export function createAggregator(deps: AggregatorDeps): Aggregator {
-  const trailLimit = deps.memoryTrailLimit ?? DEFAULT_TRAIL_LIMIT;
   const runsLimit = deps.runsLimit ?? DEFAULT_RUNS_LIMIT;
   const queueLimit = deps.queueLimit ?? DEFAULT_QUEUE_LIMIT;
   const gatesPollMs = deps.gatesPollMs ?? DEFAULT_GATES_POLL_MS;
@@ -128,7 +123,6 @@ export function createAggregator(deps: AggregatorDeps): Aggregator {
     sessions: [],
     loops: [],
     gates: [],
-    trail: [],
     health: [],
     runs: [],
     queue: [],
@@ -169,11 +163,10 @@ export function createAggregator(deps: AggregatorDeps): Aggregator {
   }
 
   async function collectActivitySlice(): Promise<
-    Pick<Snapshot, "sessions" | "loops" | "trail" | "health" | "queue" | "builds">
+    Pick<Snapshot, "sessions" | "loops" | "health" | "queue" | "builds">
   > {
     const sessions = sortSessions(safeCall("sessions", () => collectSessions(deps.projectsDir, Date.now()), []));
     const loops = sortLoops(safeCall("loops", () => collectLoops(deps.loopsDir), []));
-    const trail = safeCall("trail", () => collectMemoryTrail(deps.cfg.memoryPaths, trailLimit), []);
     // health reads usage transcripts (I/O-bound, hence async) and has no
     // dedicated fs signal of its own to watch beyond the projects dir already
     // watched for sessions — it rides along with the activity slice rather
@@ -181,7 +174,7 @@ export function createAggregator(deps: AggregatorDeps): Aggregator {
     const health = await safeCallAsync("health", () => collectHealth({ projectsDir: deps.projectsDir }), []);
     const queue = deps.queueDir ? safeCall("queue", () => collectQueue(deps.queueDir!, queueLimit), []) : [];
     const builds = deps.buildsDir ? safeCall("builds", () => collectBuilds(deps.buildsDir!), []) : [];
-    return { sessions, loops, trail, health, queue, builds };
+    return { sessions, loops, health, queue, builds };
   }
 
   async function refreshActivity(): Promise<void> {
@@ -239,7 +232,7 @@ export function createAggregator(deps: AggregatorDeps): Aggregator {
     start(): void {
       const runs = safeCall("runs", () => readRuns(runsLimit, { runsDir: deps.runsDir }), []);
       snapshot = { ...snapshot, runs };
-      // Initial activity collect (sessions/loops/trail/health) is async (health
+      // Initial activity collect (sessions/loops/health) is async (health
       // now reads usage transcripts) — fire it without blocking start(), same
       // pattern as refreshGates below; the snapshot fills in once it resolves
       // and "activity" listeners are notified same as any later refresh.
@@ -247,7 +240,6 @@ export function createAggregator(deps: AggregatorDeps): Aggregator {
 
       watchDir(deps.projectsDir, scheduleActivityRefresh);
       watchDir(deps.loopsDir, scheduleActivityRefresh);
-      for (const dir of deps.cfg.memoryPaths) watchDir(dir, scheduleActivityRefresh);
       if (deps.runsDir) watchDir(deps.runsDir, refreshRuns);
       if (deps.queueDir) watchDir(deps.queueDir, scheduleActivityRefresh);
       if (deps.buildsDir) watchDir(deps.buildsDir, scheduleActivityRefresh);

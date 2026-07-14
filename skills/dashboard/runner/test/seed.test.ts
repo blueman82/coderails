@@ -37,7 +37,7 @@ const WEEKLY: RoutineDef = {
 
 function config(routines: RoutineDef[]): DashboardConfig {
   return {
-    repos: [], wikiPaths: [], memoryPaths: [],
+    repos: [], wikiPaths: [],
     buttons: [
       { name: "wiki-lint", label: "WIKI LINT", command: "/coderails:wiki-lint", cwd: "/tmp", profile: "read-only" },
       { name: "sync-docs-weekly", label: "SYNC DOCS", command: "/sync-docs", cwd: "/tmp", profile: "read-only" },

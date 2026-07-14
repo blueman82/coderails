@@ -3,7 +3,6 @@
 import { useEffect, useReducer } from "react";
 import type { SessionInfo, LoopInfo } from "@/lib/collect/sessions";
 import type { PrGate, PrGateError } from "@/lib/collect/prGates";
-import type { TrailEntry } from "@/lib/collect/memoryTrail";
 import type { HealthTile } from "@/lib/collect/health";
 import type { QueueEntry } from "@/lib/collect/queue";
 import type { BuildEntry } from "@/lib/collect/builds";
@@ -19,7 +18,6 @@ export interface DashboardSnapshot {
   sessions: SessionInfo[];
   loops: LoopInfo[];
   gates: (PrGate | PrGateError)[];
-  trail: TrailEntry[];
   health: HealthTile[];
   runs: RunRecord[];
   queue: QueueEntry[];
@@ -28,7 +26,7 @@ export interface DashboardSnapshot {
 
 export type ActivitySlice = Pick<
   DashboardSnapshot,
-  "sessions" | "loops" | "trail" | "health" | "queue" | "builds"
+  "sessions" | "loops" | "health" | "queue" | "builds"
 >;
 
 export type DashboardEvent =
@@ -56,7 +54,6 @@ const EMPTY_SNAPSHOT: DashboardSnapshot = {
   sessions: [],
   loops: [],
   gates: [],
-  trail: [],
   health: [],
   runs: [],
   queue: [],

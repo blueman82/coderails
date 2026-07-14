@@ -173,7 +173,6 @@ describe("collectPrGates", () => {
     const cfg: DashboardConfig = {
       repos: ["blueman82/coderails"],
       wikiPaths: [],
-      memoryPaths: [],
       buttons: [],
     };
     const gates = await collectPrGates(cfg);
@@ -184,7 +183,6 @@ describe("collectPrGates", () => {
     const cfg: DashboardConfig = {
       repos: ["blueman82/coderails"],
       wikiPaths: [],
-      memoryPaths: [],
       buttons: [],
     };
     const gates = await collectPrGates(cfg, { GH_TOKEN: "garbage-token-that-is-not-valid" });
@@ -195,7 +193,7 @@ describe("collectPrGates", () => {
   });
 
   it("returns an empty array for an empty repos list", async () => {
-    const cfg: DashboardConfig = { repos: [], wikiPaths: [], memoryPaths: [], buttons: [] };
+    const cfg: DashboardConfig = { repos: [], wikiPaths: [], buttons: [] };
     const gates = await collectPrGates(cfg);
     expect(gates).toEqual([]);
   });

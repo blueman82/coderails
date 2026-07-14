@@ -27,7 +27,6 @@ function testConfig(): DashboardConfig {
   return {
     repos: [],
     wikiPaths: [],
-    memoryPaths: [],
     buttons: [
       {
         name: "wiki-lint",

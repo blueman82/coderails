@@ -24,7 +24,7 @@ afterEach(() => {
 });
 
 const config: DashboardConfig = {
-  repos: [], wikiPaths: [], memoryPaths: [],
+  repos: [], wikiPaths: [],
   buttons: [
     { name: "wiki-lint", label: "WIKI LINT", command: "/coderails:wiki-lint", cwd: "/tmp", profile: "read-only" },
   ],

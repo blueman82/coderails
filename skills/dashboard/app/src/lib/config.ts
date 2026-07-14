@@ -22,7 +22,6 @@ export interface ButtonDef {
 export interface DashboardConfig {
   repos: string[];
   wikiPaths: string[];
-  memoryPaths: string[];
   buttons: ButtonDef[];
 }
 
