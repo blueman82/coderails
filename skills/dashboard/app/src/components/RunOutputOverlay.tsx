@@ -96,9 +96,7 @@ export function RunOutputOverlay({ run, isLive, output, error, onRetry, onClose 
                   raw-HTML escaping (which handles literal <img> tags in the source); both are
                   needed. Links are left as-is: defaultUrlTransform already inerts javascript:,
                   and following one is a visible, deliberate click. */}
-              <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ img: (props) => <>{props.alt ?? ""}</> }}>
-                {body}
-              </ReactMarkdown>
+              <ReactMarkdown components={{ img: (props) => <>{props.alt ?? ""}</> }}>{body}</ReactMarkdown>
             </div>
           ) : (
             <div className="hud-empty-state">{isLive ? "waiting for output…" : "no output"}</div>
