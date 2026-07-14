@@ -15,30 +15,38 @@
 #     the agentic-loop hard-stops are turn-ending LOOP-STOP declarations, not
 #     AskUserQuestion calls, so they are untouched by design.
 #
-# The flag lives beside the session's progress.json path: lib/agentic_loop_path.sh
-# is the sole authority for the session+repo key (worktree hops resolve to the
-# same key as their primary checkout). No session_id in the payload -> the gate
-# stands aside entirely (an unkeyable stamp could never be found again).
+# The flag lives at a SESSION-ONLY path: <base>/<session_id>/crack_on_active
+# (base = $CLAUDE_AGENTIC_LOOP_DIR or $HOME/.claude/agentic-loop). It is
+# deliberately NOT derived from lib/agentic_loop_path.sh: that helper resolves
+# its dir by progress.json EXISTENCE (canonical-then-probe), so a flag routed
+# through it can be stamped under one slug and read under another whenever
+# progress.json's location changes between the two events (e.g. a mid-session
+# git init shifting the git-common-dir slug) — and a missed read here fails in
+# the UNSAFE direction (AskUserQuestion allowed despite an active envelope).
+# Keying on session_id alone removes that drift class by construction; the
+# session id is the envelope's real scope anyway. No session_id in the payload
+# -> the gate stands aside entirely (an unkeyable stamp could never be found
+# again).
 
 IFS= read -r -d '' -t 5 input || true
 
 event=$(echo "$input" | jq -r '.hook_event_name // empty')
 session_id=$(echo "$input" | jq -r '.session_id // empty')
-cwd=$(echo "$input" | jq -r '.cwd // empty')
-[ -z "$cwd" ] && cwd="$PWD"
 
 LOG_FILE="${CLAUDE_DISCIPLINE_LOG:-$HOME/.claude/discipline.log}"
 log_line() { printf '%s %s\n' "$(date -Iseconds 2>/dev/null || date +%Y-%m-%dT%H:%M:%S%z)" "$1" >> "$LOG_FILE" 2>/dev/null; }
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-
-# flag_path: prints the session+repo-keyed flag file path, empty on failure.
-# dirname of the helper's progress.json path IS the session+repo key dir.
+# flag_path: prints the session-only flag file path, fails on empty session_id.
+# session_id sanitisation (strip "/", collapse "..") kept in lockstep with the
+# same two-line transform in lib/agentic_loop_path.sh and loop_state_common.sh
+# — intentionally duplicated, this script stays dependency-free like they do.
 flag_path() {
-  local p
-  p=$(bash "$SCRIPT_DIR/lib/agentic_loop_path.sh" "$cwd" "$session_id" 2>/dev/null)
-  [ -z "$p" ] && return 1
-  printf '%s/crack_on_active' "$(dirname "$p")"
+  local base sid
+  base="${CLAUDE_AGENTIC_LOOP_DIR:-$HOME/.claude/agentic-loop}"
+  sid=$(printf '%s' "$session_id" | tr '/' '_')
+  sid=$(printf '%s' "$sid" | sed 's/\.\.//g')
+  [ -z "$sid" ] && return 1
+  printf '%s/%s/crack_on_active' "$base" "$sid"
 }
 
 # ── UserPromptSubmit: stamp on a raw-prompt match ──────────────────────────
@@ -48,12 +56,18 @@ if [ "$event" = "UserPromptSubmit" ]; then
   [ -z "$prompt" ] && exit 0
   # Word-boundary match: "crack" and "on" as whole words, any whitespace run
   # between them. [^[:alnum:]] boundaries instead of \b for BSD/GNU grep parity.
+  # Hyphenated "crack-on" is deliberately unmatched: the authorising phrase is
+  # what a human types ("crack on"); hyphenated forms are prose ABOUT the gate.
   if printf '%s' "$prompt" | grep -qiE '(^|[^[:alnum:]])crack[[:space:]]+on([^[:alnum:]]|$)'; then
     flag=$(flag_path) || exit 0
     [ -z "$flag" ] && exit 0
     mkdir -p "$(dirname "$flag")" 2>/dev/null
-    date -Iseconds > "$flag" 2>/dev/null
-    log_line "hook=crack_on_gate event=UserPromptSubmit session=$session_id stamped=1"
+    # stamped=1 only on a confirmed write — a failed stamp must not log success.
+    if { date -Iseconds > "$flag"; } 2>/dev/null; then
+      log_line "hook=crack_on_gate event=UserPromptSubmit session=$session_id stamped=1"
+    else
+      log_line "hook=crack_on_gate event=UserPromptSubmit session=$session_id stamped=0 err=write_failed"
+    fi
   fi
   exit 0
 fi

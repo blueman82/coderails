@@ -122,6 +122,53 @@ check "empty stdin exits 0" 0 "$(printf '' | bash "$HOOK" >/dev/null 2>/dev/null
 check "UPS crack on, no session_id -> exits 0" 0 "$(run_ups "$(jq -n --arg cwd "$CWD" '{"hook_event_name":"UserPromptSubmit","cwd":$cwd,"prompt":"crack on"}')")"
 check "PTU AskUserQuestion, no session_id -> allow" ALLOW "$(run_ptu "$(jq -n --arg cwd "$CWD" '{"hook_event_name":"PreToolUse","cwd":$cwd,"tool_name":"AskUserQuestion","tool_input":{}}')")"
 
+# --- REGRESSION: flag keying must be session-only, independent of the
+# progress.json resolver. The resolver (lib/agentic_loop_path.sh) picks its
+# dir by progress.json EXISTENCE (canonical-then-probe), so a flag routed
+# through it can be stamped under one slug and read under another whenever
+# progress.json's location changes between the two events (e.g. a mid-session
+# git init changing the git-common-dir slug) — silently ALLOWING AskUserQuestion
+# despite an active envelope. Session-only keying removes that class entirely;
+# these cases fail against any resolver-derived flag path.
+
+# R0: exact session-only location — the flag lives directly at
+# <base>/<session_id>/crack_on_active, no slug segment in between.
+check "UPS stamp lands at session-only path (no slug segment)" 0 "$(run_ups "$(ups_payload "crack on" sess-exact)")"
+check "flag exists at <base>/<sid>/crack_on_active exactly" yes \
+  "$([ -f "$CLAUDE_AGENTIC_LOOP_DIR/sess-exact/crack_on_active" ] && echo yes || echo no)"
+
+# R1: a progress.json appearing under a DIFFERENT slug for this session after
+# the stamp (the shape the resolver's probe would chase) must not move the
+# flag out from under the deny.
+check "UPS stamp for drift case exits 0" 0 "$(run_ups "$(ups_payload "crack on" sess-drift)")"
+mkdir -p "$CLAUDE_AGENTIC_LOOP_DIR/-some-other-slug/sess-drift"
+printf '{}' > "$CLAUDE_AGENTIC_LOOP_DIR/-some-other-slug/sess-drift/progress.json"
+check "REGRESSION: progress.json under another slug -> AskUserQuestion still deny" DENY \
+  "$(run_ptu "$(ptu_payload AskUserQuestion sess-drift)")"
+
+# R2: repo-ness of the cwd changing between stamp and read (git init after the
+# stamp — the concrete slug-drift trigger) must not affect the deny.
+GITLESS="$TMP/gitless-cwd"
+mkdir -p "$GITLESS"
+check "UPS stamp with non-git cwd exits 0" 0 \
+  "$(run_ups "$(jq -n --arg cwd "$GITLESS" '{"hook_event_name":"UserPromptSubmit","session_id":"sess-gitinit","cwd":$cwd,"prompt":"crack on"}')")"
+git init -q "$GITLESS"
+check "REGRESSION: cwd git-inited after stamp -> AskUserQuestion still deny" DENY \
+  "$(run_ptu "$(jq -n --arg cwd "$GITLESS" '{"hook_event_name":"PreToolUse","session_id":"sess-gitinit","cwd":$cwd,"tool_name":"AskUserQuestion","tool_input":{}}')")"
+
+# --- Write failure must not log a lie: stamped=1 only on a successful write ---
+# Point the base at a regular FILE so mkdir -p and the flag write both fail.
+BADBASE="$TMP/base-is-a-file"
+printf 'x' > "$BADBASE"
+check "UPS with unwritable base exits 0" 0 \
+  "$(printf '%s' "$(ups_payload "crack on" sess-badwrite)" | CLAUDE_AGENTIC_LOOP_DIR="$BADBASE" bash "$HOOK" >/dev/null 2>/dev/null; echo $?)"
+check "write failure logged as stamped=0 err=write_failed" yes \
+  "$(grep -q 'hook=crack_on_gate .*session=sess-badwrite stamped=0 err=write_failed' "$CLAUDE_DISCIPLINE_LOG" && echo yes || echo no)"
+check "write failure never logged as stamped=1" no \
+  "$(grep -q 'session=sess-badwrite stamped=1' "$CLAUDE_DISCIPLINE_LOG" && echo yes || echo no)"
+check "unwritable base: AskUserQuestion -> allow (no flag ever landed)" ALLOW \
+  "$(printf '%s' "$(ptu_payload AskUserQuestion sess-badwrite)" | CLAUDE_AGENTIC_LOOP_DIR="$BADBASE" bash "$HOOK" 2>/dev/null | grep -q '"permissionDecision": *"deny"' && echo DENY || echo ALLOW)"
+
 # --- UserPromptSubmit stays well-behaved: no deny JSON on its stdout ---
 ups_out=$(printf '%s' "$(ups_payload "crack on" sess-stdout)" | bash "$HOOK" 2>/dev/null)
 if printf '%s' "$ups_out" | grep -q 'permissionDecision'; then
