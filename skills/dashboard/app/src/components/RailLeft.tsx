@@ -72,7 +72,9 @@ export function RailLeft() {
   const { health, loops } = snapshot;
 
   const kpiKeys: HealthTile["key"][] = ["usage5h", "usageWeek", "hooksFired", "lintFindings"];
-  const loop = selectActiveLoop(loops);
+  const now = Date.now();
+  const live = liveLoops(loops, now);
+  const stalled = stalledLoops(loops, now);
 
   return (
     <section className="hud-rail hud-rail-left hud-intro-rail-left">
