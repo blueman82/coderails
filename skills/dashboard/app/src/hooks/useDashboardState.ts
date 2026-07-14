@@ -158,6 +158,21 @@ export function stalledLoops(loops: LoopInfo[], now: number): LoopInfo[] {
     .sort((a, b) => b.lastUpdatedMs - a.lastUpdatedMs);
 }
 
+// A ticking "now" (ms since epoch) for components whose derived state depends on
+// wall-clock time (e.g. the live/stalled loop split). Reading Date.now()
+// directly in render is impure — it can only re-evaluate when an unrelated
+// re-render happens, so a loop crossing the live window during a quiet spell
+// would not demote until the next event. This re-renders every periodMs
+// instead. Same shape as RunProgress.tsx's own `now` state.
+export function useNow(periodMs: number): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), periodMs);
+    return () => clearInterval(id);
+  }, [periodMs]);
+  return now;
+}
+
 // --- Formatters -------------------------------------------------------
 
 // "HH:MM:SS" in the local zone, zero-padded.
