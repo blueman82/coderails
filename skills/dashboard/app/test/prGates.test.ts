@@ -173,7 +173,6 @@ describe("collectPrGates", () => {
     const cfg: DashboardConfig = {
       repos: ["blueman82/coderails"],
       wikiPaths: [],
-      memoryPaths: [],
       buttons: [],
     };
     const gates = await collectPrGates(cfg);
@@ -184,7 +183,6 @@ describe("collectPrGates", () => {
     const cfg: DashboardConfig = {
       repos: ["blueman82/coderails"],
       wikiPaths: [],
-      memoryPaths: [],
       buttons: [],
     };
     const gates = await collectPrGates(cfg, { GH_TOKEN: "garbage-token-that-is-not-valid" });
