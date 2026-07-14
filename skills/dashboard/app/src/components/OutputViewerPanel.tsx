@@ -82,14 +82,11 @@ export function OutputViewerPanel({ token }: OutputViewerPanelProps) {
     errorByRunIdRef.current = errorByRunId;
   }, [errorByRunId]);
 
+  // The open run, looked up in the current snapshot. If the open run drops out of the snapshot
+  // (e.g. the run list is trimmed), this is undefined and the overlay simply doesn't render —
+  // no state reset needed, and the stale `openRunId` is harmless (it matches no row, so no row
+  // shows as selected, and a later click overwrites it).
   const openRun = runs.find((r) => r.runId === openRunId);
-  // If the open run drops out of the snapshot (e.g. the run list is trimmed), close the overlay
-  // rather than leave it pointed at a run that no longer exists.
-  useEffect(() => {
-    if (openRunId !== undefined && !runs.some((r) => r.runId === openRunId)) {
-      setOpenRunId(undefined);
-    }
-  }, [openRunId, runs]);
 
   const isLive = openRun !== undefined && openRun.endedAt === undefined;
   const finishedRunId = openRun !== undefined && !isLive ? openRun.runId : undefined;
