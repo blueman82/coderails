@@ -282,8 +282,9 @@ check "blocked path -> stderr contains Rule (CLAUDE.md)" 1 "$msg_rule"
 
 # ── Headless-run exemption (CODERAILS_HEADLESS_RUN=1) ────────────────────────
 # Dashboard-spawned `claude -p` runs set this env var so the discipline text
-# gates don't displace the run's answer with a repair turn. Gate fires before
-# stdin is even read (cheap skip-gate first).
+# gates don't displace the run's answer with a repair turn. Gate fires after
+# hook_event is parsed from stdin, scoped to the Stop event only — SubagentStop
+# still blocks (case H5 below).
 
 # Case H1: CODERAILS_HEADLESS_RUN=1 + a payload that would otherwise BLOCK
 # (unlabelled long text) -> exit 0.

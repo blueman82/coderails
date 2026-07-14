@@ -552,8 +552,9 @@ check "SubagentStop payload -> log line carries event=SubagentStop" 1 "$evt_sub_
 
 # ── Headless-run exemption (CODERAILS_HEADLESS_RUN=1) ────────────────────────
 # Dashboard-spawned `claude -p` runs set this env var so the discipline text
-# gates don't displace the run's answer with a repair turn. Gate fires before
-# stdin is even read (cheap skip-gate first).
+# gates don't displace the run's answer with a repair turn. Gate fires after
+# hook_event is parsed from stdin, scoped to the Stop event only — SubagentStop
+# still blocks (case H5 below).
 
 DNV_MSG_HEADLESS="Work. (verified)
 ## Did Not Verify
