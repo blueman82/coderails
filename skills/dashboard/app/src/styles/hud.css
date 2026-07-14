@@ -424,11 +424,8 @@
   font-size: 10px;
   line-height: 1.45;
   color: var(--grey-dim);
-  /* Clamp to two lines; the full text lives in the row's title attribute. */
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
+  /* Wrap, don't clip — house rule; full description stays readable. */
+  overflow-wrap: break-word;
 }
 
 /* ---------- Stalled loops sub-list ---------- */
