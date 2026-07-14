@@ -659,6 +659,10 @@
   border-color: var(--rose-dim);
 }
 .hud-overlay-body {
+  /* min-height:0 lets this flex child shrink below its content height so overflow-y actually
+     scrolls INSIDE the panel (header stays pinned, panel capped at 80vh) instead of the whole
+     panel growing past its max-height. Without it a flex item's default min-height:auto wins. */
+  min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
   padding: 16px 20px;
