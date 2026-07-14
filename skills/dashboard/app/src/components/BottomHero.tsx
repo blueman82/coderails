@@ -1,11 +1,13 @@
 "use client";
 
 import { useDashboardContext } from "@/components/DashboardProvider";
-import { selectActiveLoop } from "@/hooks/useDashboardState";
+import { liveLoops, useNow } from "@/hooks/useDashboardState";
 
 export function BottomHero() {
   const { snapshot } = useDashboardContext();
-  const loop = selectActiveLoop(snapshot.loops);
+  const now = useNow(30_000);
+  // The hero tracks the single most-recently-updated live loop.
+  const loop = liveLoops(snapshot.loops, now)[0];
   const nextUnit = loop?.units.find((u) => u.status !== "done");
 
   return (
