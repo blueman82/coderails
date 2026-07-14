@@ -3,7 +3,7 @@ import { run } from "../src/seedMain.ts";
 import type { SeedResult } from "../src/seed.ts";
 import type { DashboardConfig } from "@coderails/dashboard-lib";
 
-const baseConfig: DashboardConfig = { repos: [], wikiPaths: [], memoryPaths: [], buttons: [] };
+const baseConfig: DashboardConfig = { repos: [], wikiPaths: [], buttons: [] };
 
 function seedResult(overrides: Partial<SeedResult> = {}): SeedResult {
   return { seeded: 0, skippedNotDue: 0, skippedAlreadyQueued: 0, errored: 0, ...overrides };
