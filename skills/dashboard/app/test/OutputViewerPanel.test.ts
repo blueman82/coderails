@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach, vi } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { DashboardContextTestProvider } from "./testUtils/DashboardContextTestProvider";
-import { OutputViewerPanel, selectDefaultRunId, fetchSettledOutput } from "../src/components/OutputViewerPanel";
+import { OutputViewerPanel, fetchSettledOutput } from "../src/components/OutputViewerPanel";
 import type { DashboardSnapshot } from "../src/hooks/useDashboardState";
 import type { RunRecord } from "../src/lib/runlog";
 
@@ -32,54 +32,26 @@ function run(overrides: Partial<RunRecord> = {}): RunRecord {
   };
 }
 
-describe("selectDefaultRunId", () => {
-  it("returns undefined for an empty run list", () => {
-    expect(selectDefaultRunId([])).toBeUndefined();
-  });
-
-  it("prefers a still-active run (no endedAt) over a finished one, even if the finished run started later", () => {
-    const active = run({ runId: "a", startedAt: 100 });
-    const finished = run({ runId: "b", startedAt: 200, endedAt: 250, exitCode: 0 });
-    expect(selectDefaultRunId([finished, active])).toBe("a");
-  });
-
-  it("falls back to the most recently started run when nothing is active", () => {
-    const older = run({ runId: "a", startedAt: 100, endedAt: 150, exitCode: 0 });
-    const newer = run({ runId: "b", startedAt: 200, endedAt: 250, exitCode: 0 });
-    expect(selectDefaultRunId([older, newer])).toBe("b");
-  });
-});
-
-describe("OutputViewerPanel — rendering (SSR)", () => {
+// The overlay is closed by default and only opens on click, which renderToStaticMarkup can't
+// drive — so these SSR tests cover only the always-rendered history list. Open/close/markdown/
+// live-stream behaviour lives in ../src/components/OutputViewerPanel.client.test.tsx (jsdom).
+describe("OutputViewerPanel — history list (SSR)", () => {
   it("renders an empty state when there are no runs", () => {
     const html = renderToStaticMarkup(
       createElement(DashboardContextTestProvider, { snapshot: emptySnapshot() }, createElement(OutputViewerPanel, { token: "t" }))
     );
-    expect(html).toContain("no output");
+    expect(html).toContain("no runs yet");
   });
 
-  it("renders live output from the runOutput map for the default-selected (active) run", () => {
-    const active = run({ runId: "live1", startedAt: 100 });
+  it("does not render any output region until a row is clicked (no inline viewer to scroll past)", () => {
+    const finished = run({ runId: "done1", startedAt: 100, endedAt: 150, exitCode: 0 });
     const html = renderToStaticMarkup(
-      createElement(
-        DashboardContextTestProvider,
-        { snapshot: emptySnapshot({ runs: [active] }), runOutput: { live1: "streaming chunk one" } },
-        createElement(OutputViewerPanel, { token: "t" })
-      )
+      createElement(DashboardContextTestProvider, { snapshot: emptySnapshot({ runs: [finished] }) }, createElement(OutputViewerPanel, { token: "t" }))
     );
-    expect(html).toContain("streaming chunk one");
-  });
-
-  it("appends a second chunk when runOutput for the same runId grows (chunk-append rendering)", () => {
-    const active = run({ runId: "live1", startedAt: 100 });
-    const html = renderToStaticMarkup(
-      createElement(
-        DashboardContextTestProvider,
-        { snapshot: emptySnapshot({ runs: [active] }), runOutput: { live1: "chunk one chunk two" } },
-        createElement(OutputViewerPanel, { token: "t" })
-      )
-    );
-    expect(html).toContain("chunk one chunk two");
+    // The retired inline viewer rendered a .hud-output-viewer <pre> here; the overlay renders
+    // nothing until opened.
+    expect(html).not.toContain("hud-output-viewer");
+    expect(html).not.toContain("hud-overlay");
   });
 
   it("renders each run-history entry as a clickable row carrying its runId", () => {
@@ -90,66 +62,14 @@ describe("OutputViewerPanel — rendering (SSR)", () => {
     );
     expect(html).toContain("aaaa111122223333");
     expect(html).toContain("bbbb111122223333");
-  });
-
-  it("does not render live output for a finished run even if a stale runOutput entry exists for it (live→settled: finished runs never read the live buffer)", () => {
-    const finished = run({ runId: "done1", startedAt: 100, endedAt: 150, exitCode: 0 });
-    const html = renderToStaticMarkup(
-      createElement(
-        DashboardContextTestProvider,
-        { snapshot: emptySnapshot({ runs: [finished] }), runOutput: { done1: "leftover live text" } },
-        createElement(OutputViewerPanel, { token: "t" })
-      )
-    );
-    // SSR never fires the fetch effect, so a finished run's settled output is simply not yet
-    // loaded — it must not fall back to rendering the stale live buffer instead.
-    expect(html).not.toContain("leftover live text");
-  });
-
-  it("renders the projected clean prose by default for a live run's raw stream-json output, not the raw JSON lines", () => {
-    // Real shape produced by `claude -p --output-format stream-json`: a text_delta stream_event
-    // followed by a final result line — see streamJson.test.ts's projectAssistantText coverage.
-    const rawStreamJson =
-      [
-        JSON.stringify({
-          type: "stream_event",
-          event: { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "draft" } },
-        }),
-        JSON.stringify({ type: "result", subtype: "success", is_error: false, result: "Clean final answer." }),
-      ].join("\n") + "\n";
-    const active = run({ runId: "live1", startedAt: 100 });
-    const html = renderToStaticMarkup(
-      createElement(
-        DashboardContextTestProvider,
-        { snapshot: emptySnapshot({ runs: [active] }), runOutput: { live1: rawStreamJson } },
-        createElement(OutputViewerPanel, { token: "t" })
-      )
-    );
-    // Default view shows the projected prose...
-    expect(html).toContain("Clean final answer.");
-    // ...not the raw JSONL structure (proves default = clean projection, not raw passthrough).
-    expect(html).not.toContain("content_block_delta");
-    expect(html).not.toContain('"type":"result"');
-    // The toggle back to raw is present for a live run — the raw stream-json client-side buffer
-    // genuinely differs from the projected clean view.
-    expect(html).toContain("hud-output-toggle");
-  });
-
-  it("does not render the raw/clean toggle for a settled run (server already extracts clean prose; there is no raw JSONL client-side to toggle to)", () => {
-    const finished = run({ runId: "done1", startedAt: 100, endedAt: 150, exitCode: 0 });
-    const html = renderToStaticMarkup(
-      createElement(DashboardContextTestProvider, { snapshot: emptySnapshot({ runs: [finished] }) }, createElement(OutputViewerPanel, { token: "t" }))
-    );
-    expect(html).not.toContain("hud-output-toggle");
+    expect(html).toContain("hud-run-row-selectable");
   });
 });
 
-// fetchSettledOutput previously had zero direct coverage (it was only exercised indirectly
-// through a mount effect the SSR tests above never fire). It's a standalone exported function
-// with no React dependency, so it's tested directly here against a stubbed global.fetch — this
-// is also the regression test for the fix: every failure mode used to collapse to `undefined`
-// (rendered as the same "no output" a genuinely empty run produces), with nothing logged and no
-// way to distinguish "empty" from "the fetch blew up".
+// fetchSettledOutput is a standalone exported function with no React dependency, tested directly
+// against a stubbed global.fetch. Every failure mode returns a distinct result rather than
+// collapsing to `undefined` (which the overlay would render as the same "no output" a genuinely
+// empty run produces).
 describe("fetchSettledOutput", () => {
   const originalFetch = global.fetch;
 

@@ -3,24 +3,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useDashboardContext } from "@/components/DashboardProvider";
 import { runResultLabel, formatDuration, formatHHMM } from "@/hooks/useDashboardState";
-import type { RunRecord } from "@/lib/runlog";
 import { projectAssistantText } from "@/lib/streamJson";
+import { RunOutputOverlay } from "@/components/RunOutputOverlay";
 
 export interface OutputViewerPanelProps {
   token: string;
-}
-
-// Picks which run the panel shows before the user has clicked anything: a still-active run (no
-// endedAt) takes priority over any finished run regardless of start time — that's the run whose
-// output is actually changing right now. With no active run, falls back to the most recently
-// started run so there's always something useful to show. Pure and exported so the selection
-// rule is unit-testable without mounting the component (SSR renders with no click simulation
-// available — see AssistantLinkPanel.test.ts's equivalent pure-function extractions).
-export function selectDefaultRunId(runs: RunRecord[]): string | undefined {
-  const active = runs.find((r) => r.endedAt === undefined);
-  if (active) return active.runId;
-  if (runs.length === 0) return undefined;
-  return runs.reduce((newest, r) => (r.startedAt > newest.startedAt ? r : newest)).runId;
 }
 
 // Discriminated result mirroring AssistantLinkPanel.tsx's postDecision — every failure mode
@@ -59,25 +46,20 @@ export async function fetchSettledOutput(token: string, runId: string): Promise<
   return { ok: false, kind: "error", error };
 }
 
-// The COMMAND DECK's output-viewer: shows a run's output as it streams (live, via the
-// "run-output" SSE event accumulated in DashboardState.runOutput — see useDashboardState.ts) and,
-// once a run ends, its full settled output fetched from GET /api/run/output. Run-history rows are
-// clickable to switch which run is shown; the default selection prefers whatever run is currently
-// active. Matches RailRight's Command Deck aesthetic (same hud-block/hud-sec-head/hud-run-row
-// classes) since this panel is the CTA gap that block's footnote ("Runner Executes") pointed at.
+// The COMMAND DECK's run-output history box: lists every run (glyph · button · result · id ·
+// duration · time) as a clickable row. Clicking a row opens an in-page OVERLAY (RunOutputOverlay)
+// that renders the run's output as sanitized markdown — the retired inline <pre> viewer squished
+// that same text into a small box below this list, which is what Task T10 replaced. This panel
+// still owns the data flow the overlay consumes: the live SSE buffer (DashboardState.runOutput,
+// projected from raw stream-json to prose) for an in-flight run, and the settled fetch
+// (GET /api/run/output, already server-extracted prose) cached per finished run.
 export function OutputViewerPanel({ token }: OutputViewerPanelProps) {
   const { snapshot, runOutput } = useDashboardContext();
   const { runs } = snapshot;
-  const [selectedRunId, setSelectedRunId] = useState<string | undefined>(undefined);
-  // Defaults to the clean, projected assistant-prose view (see projectAssistantText in
-  // streamJson.ts) — the raw stream-json log is hundreds of JSON lines and unreadable in this
-  // small box. "raw" toggles back to the full log for debugging. Only meaningful for a live run:
-  // the live-SSE buffer (runOutput) is genuinely raw stream-json, so projection cleans it. A
-  // settled run's output comes from GET /api/run/output, which already server-side extracts just
-  // the result text (extractResultText in api/run/output/route.ts) — there is no raw JSONL
-  // client-side to toggle to, so the toggle button itself is hidden for settled runs (see isLive
-  // below) rather than rendered as a no-op.
-  const [showRaw, setShowRaw] = useState(false);
+  // Which run's overlay is open. undefined = overlay closed (the default — nothing shows until a
+  // row is clicked, so there's no inline region to scroll past). A run that leaves the `runs`
+  // snapshot entirely closes its overlay (see effect below).
+  const [openRunId, setOpenRunId] = useState<string | undefined>(undefined);
   // Cache of fetched settled output, keyed by runId — fetched once per finished run, never
   // refetched just because the panel re-renders (a finished run's output file never changes).
   const [settledByRunId, setSettledByRunId] = useState<Record<string, string>>({});
@@ -100,10 +82,14 @@ export function OutputViewerPanel({ token }: OutputViewerPanelProps) {
     errorByRunIdRef.current = errorByRunId;
   }, [errorByRunId]);
 
-  const effectiveRunId = selectedRunId ?? selectDefaultRunId(runs);
-  const selectedRun = runs.find((r) => r.runId === effectiveRunId);
-  const isLive = selectedRun !== undefined && selectedRun.endedAt === undefined;
-  const finishedRunId = selectedRun !== undefined && !isLive ? selectedRun.runId : undefined;
+  // The open run, looked up in the current snapshot. If the open run drops out of the snapshot
+  // (e.g. the run list is trimmed), this is undefined and the overlay simply doesn't render —
+  // no state reset needed, and the stale `openRunId` is harmless (it matches no row, so no row
+  // shows as selected, and a later click overwrites it).
+  const openRun = runs.find((r) => r.runId === openRunId);
+
+  const isLive = openRun !== undefined && openRun.endedAt === undefined;
+  const finishedRunId = openRun !== undefined && !isLive ? openRun.runId : undefined;
 
   // Shared by the auto-fetch effect below and the manual retry button: runs the fetch for one
   // runId and files the result into whichever cache applies. Not itself an effect so the retry
@@ -152,17 +138,23 @@ export function OutputViewerPanel({ token }: OutputViewerPanelProps) {
     loadSettledOutput(runId, () => false);
   }
 
-  const settledError = selectedRun !== undefined && !isLive ? errorByRunId[selectedRun.runId] : undefined;
-  const output = selectedRun === undefined ? undefined : isLive ? (runOutput[selectedRun.runId] ?? "") : settledByRunId[selectedRun.runId];
-  // Projected at render time so both the live-SSE path and the settled-fetch path — which both
-  // ultimately feed the same raw `output` string — get the same clean-by-default treatment.
-  const displayedOutput = output === undefined ? undefined : showRaw ? output : projectAssistantText(output);
+  const settledError = finishedRunId !== undefined ? errorByRunId[finishedRunId] : undefined;
+  // The output string feeding the overlay, projected to clean prose in BOTH cases:
+  //  - live: the SSE buffer is raw stream-json (hundreds of JSON lines) — projection is essential.
+  //  - settled: GET /api/run/output normally returns already-extracted prose (projection is
+  //    identity there), BUT for a crashed/killed run with no `result` line its extractResultText
+  //    falls back to the RAW stream-json log verbatim (api/run/output/route.ts) — so projecting
+  //    here too keeps a crashed run's overlay from dumping a JSON log. `settledByRunId[...]` may
+  //    be undefined (fetch not done yet); guard so we don't project "undefined".
+  const rawOpenOutput =
+    openRun === undefined ? undefined : isLive ? (runOutput[openRun.runId] ?? "") : settledByRunId[openRun.runId];
+  const openOutput = rawOpenOutput === undefined ? undefined : projectAssistantText(rawOpenOutput);
 
   return (
     <div className="hud-block">
       <div className="hud-sec-head">
         <span className="hud-title">Run Output</span>
-        <span className="hud-suffix">{isLive ? "Live" : "Settled"}</span>
+        <span className="hud-suffix">History</span>
         <span className="hud-rule" />
       </div>
 
@@ -179,8 +171,8 @@ export function OutputViewerPanel({ token }: OutputViewerPanelProps) {
               <button
                 type="button"
                 key={run.runId}
-                className={`hud-run-row hud-run-row-selectable${run.runId === effectiveRunId ? " selected" : ""}`}
-                onClick={() => setSelectedRunId(run.runId)}
+                className={`hud-run-row hud-run-row-selectable${run.runId === openRunId ? " selected" : ""}`}
+                onClick={() => setOpenRunId(run.runId)}
               >
                 <span>
                   <span className={`hud-glyph${glyphClass ? ` ${glyphClass}` : ""}`}>{glyph}</span>
@@ -197,34 +189,15 @@ export function OutputViewerPanel({ token }: OutputViewerPanelProps) {
         <div className="hud-empty-state">no runs yet</div>
       )}
 
-      {settledError !== undefined && finishedRunId !== undefined ? (
-        <div className="hud-cmd-error">
-          couldn&apos;t load output — {settledError}{" "}
-          <button type="button" onClick={() => retry(finishedRunId)}>
-            retry
-          </button>
-        </div>
-      ) : (
-        <>
-          {selectedRun !== undefined && (
-            <div className="hud-output-header">
-              <span>{selectedRun.button.toUpperCase()}</span>
-              <span>
-                {runResultLabel(selectedRun)} ·{" "}
-                {selectedRun.endedAt ? formatDuration(selectedRun.startedAt, selectedRun.endedAt) : "…"} ·{" "}
-                {formatHHMM(selectedRun.startedAt)}
-              </span>
-              {isLive && (
-                <button type="button" className="hud-output-toggle" onClick={() => setShowRaw((prev) => !prev)}>
-                  {showRaw ? "clean" : "raw"}
-                </button>
-              )}
-            </div>
-          )}
-          <pre className={`hud-output-viewer${selectedRun ? " attached" : ""}`}>
-            {displayedOutput !== undefined && displayedOutput !== "" ? displayedOutput : "no output"}
-          </pre>
-        </>
+      {openRun !== undefined && (
+        <RunOutputOverlay
+          run={openRun}
+          isLive={isLive}
+          output={openOutput}
+          error={settledError}
+          onRetry={finishedRunId !== undefined ? () => retry(finishedRunId) : undefined}
+          onClose={() => setOpenRunId(undefined)}
+        />
       )}
     </div>
   );
