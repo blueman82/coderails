@@ -24,13 +24,14 @@ function emptySnapshot(overrides: Partial<DashboardSnapshot> = {}): DashboardSna
 function loop(overrides: Partial<LoopInfo> = {}): LoopInfo {
   return {
     slug: "-project",
-    name: "-project",
+    title: "-project",
     sessionId: "S1",
     status: "in-progress",
     workUnitsDone: 1,
     workUnitsTotal: 2,
     evalsFrozen: false,
-    unitTitles: [{ title: "wu1", done: true }],
+    lastUpdatedMs: 0,
+    units: [{ key: "wu1", status: "done" }],
     decisions: [],
     ...overrides,
   };

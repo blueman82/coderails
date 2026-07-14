@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "status": "in-progress",
+  "session_id": "S6",
+  "loop": null,
+  "authorising_prompt_raw": "Read memory file `project_loop_hardening_handoff.md` for full context. Two systemic hardening findings from the observability-dashboard build that need addressing before the next release ships to users.",
+  "work_units": {}
+}

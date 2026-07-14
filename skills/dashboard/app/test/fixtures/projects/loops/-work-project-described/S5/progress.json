@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "status": "in-progress",
+  "session_id": "S5",
+  "loop": "described-units-loop",
+  "last_updated": "2026-07-13T12:00:00Z",
+  "work_units": {
+    "wu1-done": { "status": "done", "description": "F1: first unit, done and described.", "pr": 17 },
+    "wu2-inprogress": { "status": "in-progress", "description": "F2: second unit, in flight.", "pr": 18 },
+    "wu3-doing": { "status": "doing", "desc": "F3: third unit, uses the desc alias and the doing status." },
+    "wu4-pending": { "status": "pending" }
+  }
+}

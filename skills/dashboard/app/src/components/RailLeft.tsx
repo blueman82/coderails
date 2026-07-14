@@ -78,10 +78,10 @@ export function RailLeft() {
         </div>
         {loop ? (
           <>
-            {loop.unitTitles.map((unit) => (
-              <div className={`hud-directive-item${unit.done ? " done" : ""}`} key={unit.title}>
-                <span className="hud-box">{unit.done ? "☑" : "☐"}</span>
-                <span>{unit.title}</span>
+            {loop.units.map((unit) => (
+              <div className={`hud-directive-item${unit.status === "done" ? " done" : ""}`} key={unit.key}>
+                <span className="hud-box">{unit.status === "done" ? "☑" : "☐"}</span>
+                <span>{unit.key}</span>
               </div>
             ))}
             {loop.decisions.map((decision, i) => (

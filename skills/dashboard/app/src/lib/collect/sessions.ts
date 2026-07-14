@@ -7,17 +7,27 @@ export interface SessionInfo {
   state: "active" | "idle" | "stalled";
 }
 
+export interface LoopUnit {
+  key: string;
+  status: "done" | "in-flight" | "pending";
+  description?: string;
+  pr?: number;
+}
+
 export interface LoopInfo {
   slug: string;
-  // Human-readable loop name from progress.json's "loop" field; falls back to
-  // `slug` when absent, blank, or non-string (see readLoopName below).
-  name: string;
+  // Loop title, chain: progress.json's "loop" field -> authorising_prompt_raw
+  // (first 80 chars, trimmed, "…") -> slug (see readTitle below).
+  title: string;
   sessionId: string;
   status: string;
   workUnitsDone: number;
   workUnitsTotal: number;
   evalsFrozen: boolean;
-  unitTitles: { title: string; done: boolean }[];
+  // progress.json's last_updated field when it parses as a valid date, else
+  // progress.json's own file mtime (see readLastUpdatedMs below).
+  lastUpdatedMs: number;
+  units: LoopUnit[];
   decisions: string[];
 }
 
@@ -87,33 +97,49 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+// Non-empty string, else undefined — used for both the description/desc
+// fields (description wins over the desc alias; either may be blank in a
+// hand-edited progress.json).
+function readNonEmptyString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() !== "" ? value : undefined;
+}
+
+// Real progress.json files use "in-progress" and (older) "doing" for the
+// same in-flight state; both field names (description, desc) appear across
+// real progress.json files, description taking precedence when both are set.
+function readUnit(key: string, unit: Record<string, unknown>): LoopUnit {
+  const rawStatus = unit.status;
+  const status: LoopUnit["status"] =
+    rawStatus === "done" ? "done" : rawStatus === "in-progress" || rawStatus === "doing" ? "in-flight" : "pending";
+  return {
+    key,
+    status,
+    description: readNonEmptyString(unit.description) ?? readNonEmptyString(unit.desc),
+    pr: typeof unit.pr === "number" ? unit.pr : undefined,
+  };
+}
+
 // work_units is documented (SKILL.md) as an object keyed by unit id, each
 // entry carrying at least a status. Some real progress.json files predate
 // that schema and carry work_units as an array of {id, status, ...} instead.
 // Accept both without throwing; anything else degrades to no units.
-function readUnitTitles(workUnits: unknown): { title: string; done: boolean }[] {
+function readUnits(workUnits: unknown): LoopUnit[] {
   if (Array.isArray(workUnits)) {
     return workUnits
       .filter(isRecord)
-      .map((unit) => ({
-        title: typeof unit.id === "string" ? unit.id : "",
-        done: unit.status === "done",
-      }));
+      .map((unit) => readUnit(typeof unit.id === "string" ? unit.id : "", unit));
   }
   if (isRecord(workUnits)) {
     return Object.entries(workUnits)
       .filter(([, unit]) => isRecord(unit))
-      .map(([title, unit]) => ({
-        title,
-        done: (unit as Record<string, unknown>).status === "done",
-      }));
+      .map(([key, unit]) => readUnit(key, unit as Record<string, unknown>));
   }
   return [];
 }
 
 // decisions_absorbed is documented (SKILL.md) as a chronological array of
 // {phase, decision} appended oldest-first. Older progress.json files predate
-// the field entirely. Same degrade-don't-throw stance as readUnitTitles:
+// the field entirely. Same degrade-don't-throw stance as readUnits:
 // non-array or non-record entries are skipped rather than raising. Returns
 // the last 5 entries, newest first, formatted "<phase>: <decision>".
 function readDecisions(decisionsAbsorbed: unknown): string[] {
@@ -127,12 +153,32 @@ function readDecisions(decisionsAbsorbed: unknown): string[] {
 }
 
 // progress.json's "loop" field is a free-text human name (e.g. "observability-dashboard
-// (sub-project 1 of agentic-os evolution)"), not present on every loop. Falls back to the
-// dir slug when absent, blank, or not a string.
-function readLoopName(record: Record<string, unknown>, slug: string): string {
-  const loop = record.loop;
-  if (typeof loop === "string" && loop.trim() !== "") return loop;
+// (sub-project 1 of agentic-os evolution)"), not present on every loop. Falls back to
+// the first 80 chars of authorising_prompt_raw (trimmed, "…" appended when truncated),
+// then to the dir slug when neither is present.
+function readTitle(record: Record<string, unknown>, slug: string): string {
+  const loop = readNonEmptyString(record.loop);
+  if (loop) return loop;
+  const prompt = readNonEmptyString(record.authorising_prompt_raw);
+  if (prompt) {
+    const trimmed = prompt.trim();
+    return trimmed.length > 80 ? `${trimmed.slice(0, 80)}…` : trimmed;
+  }
   return slug;
+}
+
+// last_updated is a free-text timestamp field written by the orchestrator, not
+// guaranteed to parse (or be present at all) on every progress.json. Falls back
+// to the file's own mtime — a crashed writer can leave mtime touched without a
+// corresponding last_updated bump, but that's still a better signal than 0.
+function readLastUpdatedMs(record: Record<string, unknown>, progressPath: string): number {
+  const lastUpdated = typeof record.last_updated === "string" ? Date.parse(record.last_updated) : NaN;
+  if (!Number.isNaN(lastUpdated)) return lastUpdated;
+  try {
+    return statSync(progressPath).mtimeMs;
+  } catch {
+    return 0;
+  }
 }
 
 // Mirrors als_read_loop_evals_result (hooks/scripts/lib/loop_state_common.sh):
@@ -172,18 +218,20 @@ export function collectLoops(baseDir: string): LoopInfo[] {
     const projectDir = join(baseDir, slug);
     for (const sessionId of listDirs(projectDir)) {
       const loopDir = join(projectDir, sessionId);
-      const progress = readJson(join(loopDir, "progress.json"));
+      const progressPath = join(loopDir, "progress.json");
+      const progress = readJson(progressPath);
       const record = isRecord(progress) ? progress : {};
-      const unitTitles = readUnitTitles(record.work_units);
+      const units = readUnits(record.work_units);
       loops.push({
         slug,
-        name: readLoopName(record, slug),
+        title: readTitle(record, slug),
         sessionId: typeof record.session_id === "string" ? record.session_id : sessionId,
         status: typeof record.status === "string" ? record.status : "",
-        workUnitsDone: unitTitles.filter((u) => u.done).length,
-        workUnitsTotal: unitTitles.length,
+        workUnitsDone: units.filter((u) => u.status === "done").length,
+        workUnitsTotal: units.length,
         evalsFrozen: readEvalsFrozen(loopDir),
-        unitTitles,
+        lastUpdatedMs: readLastUpdatedMs(record, progressPath),
+        units,
         decisions: readDecisions(record.decisions_absorbed),
       });
     }
