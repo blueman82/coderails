@@ -3,6 +3,7 @@
 import { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { runResultLabel, formatDuration, formatHHMM } from "@/hooks/useDashboardState";
 import type { RunRecord } from "@/lib/runlog";
 
