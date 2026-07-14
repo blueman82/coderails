@@ -359,6 +359,93 @@
   margin-bottom: 6px;
 }
 
+/* ---------- Multi-loop cards ---------- */
+/* One card per live loop under the Directives block. Cards stack with a
+   hairline separator so several loops read as distinct panels within the
+   same block idiom (hud-block / hud-sec-head). */
+.hud-loop-card {
+  padding-bottom: 12px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid var(--hairline);
+}
+.hud-loop-card:last-child {
+  border-bottom: none;
+  margin-bottom: 0;
+  padding-bottom: 0;
+}
+.hud-loop-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.hud-loop-title {
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--off-white);
+  /* Wrap, don't clip — house rule; long loop titles stay readable. */
+  overflow-wrap: break-word;
+  min-width: 0;
+}
+.hud-loop-count {
+  font-size: 10px;
+  color: var(--grey-dim);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.hud-unit-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.hud-unit-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.hud-unit-key {
+  overflow-wrap: break-word;
+}
+.hud-pr-chip {
+  font-size: 8.5px;
+  letter-spacing: 0.1em;
+  color: var(--grey-dim);
+  text-transform: uppercase;
+  border: 1px solid var(--hairline);
+  border-radius: 999px;
+  padding: 1px 7px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.hud-unit-desc {
+  font-size: 10px;
+  line-height: 1.45;
+  color: var(--grey-dim);
+  /* Clamp to two lines; the full text lives in the row's title attribute. */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* ---------- Stalled loops sub-list ---------- */
+/* Loops idle past the live window get one dim line each here instead of a full
+   card. */
+.hud-stalled-list {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--hairline);
+}
+.hud-stalled-row {
+  font-size: 10px;
+  line-height: 1.6;
+  color: var(--grey-dim);
+  overflow-wrap: break-word;
+}
+
 /* ---------- Documents table ---------- */
 .hud-doc-row {
   display: flex;
