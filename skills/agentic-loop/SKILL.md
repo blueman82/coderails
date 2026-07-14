@@ -1,6 +1,6 @@
 ---
 name: agentic-loop
-description: 'Multi-agent orchestration discipline. Load this skill IMMEDIATELY, taking precedence over /workflow, /prep, /push, and any other single-PR slash command, whenever the user authorises a sequence of agent-driven work. Specifically: any time the user says "spawn a team", "create a team", "team of agents", "no human gates", "self-merge", "crack on", "without the human", "no per-PR confirmation", "agentic loop", "multi-PR", or authorises 3+ PRs in one instruction. ALSO load when the user authorises autonomous merge + deploy + verify chains, even for a single PR, if they have explicitly waived per-step confirmation. This is NOT /workflow (single-PR prep → push → merge → wiki); it sits ABOVE /workflow and uses it as a subroutine. Keep main context a pure orchestrator that never implements: every change goes to a spawned sonnet agent that verifies its own artifact, escalating to a spawned team only for ≥3 sequential PRs or dependency chains. Verify artifacts not idle pings; disprove symptom premises before spawning fixes; match confirmation cadence to envelope scope. Fire this skill aggressively — forgetting to delegate is costly in long sessions.'
+description: 'Multi-agent orchestration discipline. Load this skill IMMEDIATELY, taking precedence over /workflow, /prep, /push, and any other single-PR slash command, whenever the user authorises a sequence of agent-driven work. Specifically: any time the user says "spawn a team", "create a team", "team of agents", "no human gates", "self-merge", "crack on", "without the human", "no per-PR confirmation", "agentic loop", "multi-PR", or authorises 3+ PRs in one instruction. ALSO load when the user authorises autonomous merge + deploy + verify chains, even for a single PR, if they have explicitly waived per-step confirmation. This is NOT /workflow (single-PR prep → push → merge → wiki); it sits ABOVE /workflow and uses it as a subroutine. Keep main context a pure orchestrator that never implements: every change goes to a spawned worker that verifies its own artifact, escalating to a spawned team only for ≥3 sequential PRs or dependency chains. Verify artifacts not idle pings; disprove symptom premises before spawning fixes; match confirmation cadence to envelope scope. Fire this skill aggressively — forgetting to delegate is costly in long sessions.'
 ---
 
 # Agentic Loop
@@ -27,7 +27,7 @@ Nineteen-plus numbered phases (−2 through 13, with lettered sub-phases) is too
 | Stage | Phases |
 |---|---|
 | Setup | -2, -1, 0, 0.5 |
-| Pre-flight | 1, 2, 2.5, 2.6, 2.7 |
+| Pre-flight | 1, 2, 2.5, 2.6, 2.7, 2.8 |
 | Build | 3, 3a, 4 |
 | Review & Ship | 4b, 5, 6, 7&8 |
 | Wrap-up | 9, 10, 11, 12, 13 |
@@ -169,7 +169,7 @@ Include `/coderails:wiki-query` in the pre-flight agent's skill list, scoped to 
 
 **Primitive-contract read (mandatory when the plan calls a primitive in a non-standard way).** If the plan calls a lock, queue, transaction, or other shared primitive in any of: nested calls, recursion, parallel from same process, re-entered from the same caller — the pre-flight agent MUST read the primitive's source and document its contract: raise vs. return-bool semantics, reentrancy (PK collision behaviour), owner identity, expiry/steal logic. The schema may have been written before anyone read the primitive's internals. Past failure: a "wrap both sites with a DistributedLock" schema was impossible — the lock's `attribute_not_exists(PK)` semantics are non-reentrant and the sites were nested, not parallel; only reading the primitive's source caught it.
 
-Spawn this pre-flight agent with `model: sonnet` — it's running skills, not making architectural decisions, and keeping it off opus controls cost.
+Spawn this pre-flight agent at the `default` role — it's running skills, not making architectural decisions, and `default` controls cost. (One of the two assignment sites Phase 2.8 doesn't cover — this agent runs before 2.8 exists in the sequence, so it gets its role inline, here.)
 
 **Clean-base check (mandatory orchestrator action in main context, before ANY worker is spawned).** Run `git fetch origin` then `git log --oneline origin/main..main` and `git status --short` yourself. If local `main` carries commits `origin/main` does not, or has uncommitted/untracked files, the base is DIRTY — a parallel session (or an earlier uncommitted edit) has polluted it. When the base is dirty:
 - NEVER let a worker branch off local `main`. Every worker MUST create its worktree via `coderails:using-git-worktrees`, which accepts a declared base ref — the orchestrator must state one explicitly, by name, in the worker prompt: "Use the using-git-worktrees skill with base ref `origin/main` — not local `main`, not HEAD." This keeps worktree mechanics (native-tool detection, ignore-verification, directory selection) on the shared skill instead of Phase 3 reinventing them inline, while the `origin/main`-base requirement — a loop-specific safety invariant — travels through the skill's own declared-base-ref mechanism rather than being asserted outside it.
@@ -183,7 +183,7 @@ The why: main context fills up fast in long sessions. Pre-flight output is dense
 
 If the plan contains an unresolved architectural choice (which primitive, which topology, which of several viable shapes), resolve it BEFORE entering Phase 3 — not through live back-and-forth once workers are spawning.
 
-Spawn one design agent (`model: sonnet` for the recon; escalate the synthesis to opus only if the tradeoff is genuinely close) whose prompt requires:
+Spawn one design agent, role assigned per Phase 2.8's table: `default` when the fork is a bounded choice between well-understood shapes; `frontier` from the start when the fork is a genuinely ambiguous investigation — strongest-available first, not escalated-to, because a weak investigator burns wall-clock discovering it's out of its depth before a second, stronger run re-does the work anyway. (This agent runs before Phase 2.8's per-loop task routing, so it gets its role inline, here, using the same table.) Its prompt requires:
 - Read the actual code paths the alternatives touch — not assumptions about them.
 - Build a head-to-head of the viable shapes with the real constraint each one hits.
 - Return ONE recommended shape, the rejected alternatives with the reason each lost, and the single fact that would flip the recommendation.
@@ -246,16 +246,67 @@ The same `/coderails:task-evals` invocation also produces per-work-unit PR-scope
 
 (This is the one place the `plan.md`↔`progress.json` relationship is named. It is stated here, standalone, on purpose — the `## Context-window persistence` section, which describes `progress.json`, is not edited.)
 
-### Phase 3 — Delegate all implementation to sonnet agents; spawn a team when work has ≥3 sequential units or dependency chains
+### Phase 2.8 — Route: assign a model role per task
 
-**Default: main context never implements.** It orchestrates — plans, delegates, verifies. Every implementation unit (even a single-file edit, even a tight sequential step) goes to a spawned **sonnet** agent. The two reasons, in order: keep main context clean (opus context is scarce and fills fast in long sessions), and keep cost down (sonnet does the typing, not opus). Treat a file edit done directly in main context as the exception that needs a reason, not the default.
+Every loop assigns a **model role** to every Phase 3/3a build task before any
+worker spawns — even a 1-2 unit loop that skips Phase 2.7 entirely. This closes
+the fork the same way Phase 2.5 closes a design fork: once, up front, recorded,
+never re-litigated per spawn.
+
+**Roles are capability tiers, not model names.** Pinning a tier to a specific
+model goes stale the moment a new model ships — a named-tier table went stale
+within a day of Fable 5's release. The table below is the only thing a model
+release touches; the roles and their rationale (this section) are durable.
+
+| Role | Currently | Use for |
+|---|---|---|
+| `fast-mechanical` | haiku | Exact-recipe mechanical tasks with scripted ceremony; orchestrator verification micro-reads |
+| `default` | sonnet | TDD / mechanical / multi-file work; the fallback when uncertain (cost control) |
+| `frontier` | fable (opus alternate) | Design-judgement UI/architecture units; genuinely ambiguous investigations |
+
+**Investigations get frontier FIRST, not escalated-to.** For a genuinely ambiguous
+investigation, spawn `frontier` from the start — a weak investigator burns
+wall-clock discovering it's out of its depth, then a second run re-does the work
+at the stronger tier. One strong run beats escalate-later for this task shape
+specifically. This is the one place `default`-first cost control does not apply;
+everywhere else, `default` is the floor and `frontier` is the exception that needs
+a reason.
+
+**Record the assignment set once.** Append one `decisions_absorbed` entry covering
+every task's role assignment for this loop — `{phase: "2.8", decision: "<task id:
+role, ...>"}` — not one entry per task. A `<3`-unit loop still writes this entry
+even though it skipped Phase 2.7.
+
+**Fallback valves live in the stamp, never improvised by a worker.** If a task
+needs an escape hatch (e.g. "fast-mechanical; default fallback after two failed
+gate attempts"), write the exact valve condition into the plan's `Model:` stamp
+(`coderails:writing-plans`) or, for a loop below the plan.md threshold, into the
+task description's `Model:` bullet (Phase 3/3a). A worker that hits trouble and
+picks its own fallback model is exactly the failure this rule exists to prevent —
+the valve must already be named in the prompt, or it does not exist for the
+worker.
+
+**Escalation is safe by construction, not a correctness control.** PR gates
+(review, evals, hook-seam) are model-independent — a `frontier` worker's PR clears
+the same gates a `default` worker's PR does. Routing exists for cost and latency,
+never for correctness; do not read a role mismatch as a quality risk in itself.
+
+**Two assignment sites, same vocabulary.** This phase routes Phase 3/3a *build*
+tasks only. The Phase 2 pre-flight agent and the Phase 2.5 design-fork agent are
+each assigned their own role inline, at their own spawn point, because both
+already run and report before this phase exists in the sequence — see the
+reconciled Phase 2 and Phase 2.5 text.
+
+### Phase 3 — Delegate all implementation to routed workers; spawn a team when work has ≥3 sequential units or dependency chains
+
+**Default: main context never implements.** It orchestrates — plans, delegates, verifies. Every implementation unit (even a single-file edit, even a tight sequential step) goes to a spawned worker at the role Phase 2.8 assigned it — the `default` role unless Phase 2.8 routed otherwise. The two reasons, in order: keep main context clean (frontier-tier context is scarce and fills fast in long sessions), and keep cost down (`default` does the typing, not `frontier`). Treat a `frontier`-role worker, or a file edit done directly in main context, as the exception that needs a reason, not the default.
 
 This means the delegation decision is a two-rung ladder, not "delegate vs. do it yourself":
 
-1. **Single sonnet `Agent` for impl + verify** — the default for any self-contained 1–2 unit of work (a bug fix, one PR, a single-file change). One agent does the implementation *and* verifies its own artifact before reporting. A spawned team would be overkill here; main context doing it directly burns opus context and money for no benefit. See Phase 3a below for the prompt contract.
+1. **Single routed `Agent` for impl + verify** — the default for any self-contained 1–2 unit of work (a bug fix, one PR, a single-file change), at the role Phase 2.8 assigned. One agent does the implementation *and* verifies its own artifact before reporting. A spawned team would be overkill here; main context doing it directly burns frontier-tier context and money for no benefit. See Phase 3a below for the prompt contract.
 2. **Spawn a team** — named teammates via the `Agent` tool, coordinated through a shared task list (`TaskCreate`/`TaskUpdate` with `blockedBy` dependencies) and `SendMessage`, when the loop has 3+ PRs or any cross-step dependency. See below.
 
-The only work that legitimately stays in main context: reading for orchestration decisions (git status, `gh pr view`, log reads, the Phase 12 artifact checks), and the planning/cadence the skill describes. If you catch yourself running `Edit`/`Write`/`MultiEdit` in main context inside an authorised loop, stop — that work belongs in a sonnet agent.
+The only work that legitimately stays in main context: reading for orchestration decisions (git status, `gh pr view`, log reads, the Phase 12 artifact checks), and the planning/cadence the skill describes. If you catch yourself running `Edit`/`Write`/`MultiEdit` in main context inside an authorised loop, stop — that work belongs in a routed worker agent.
 
 When the loop has 3+ PRs or any cross-step dependency, spawn each worker as a named teammate via the `Agent` tool and build a task list with explicit `blockedBy` dependencies via `TaskCreate`/`TaskUpdate`. Don't just describe a "sequential PR loop" — actually spawn the named agents and create the task list. The user can see each teammate and the task list becomes the shared source of truth; use `SendMessage` to coordinate between them.
 
@@ -264,7 +315,7 @@ If the user has explicitly asked for a spawned team in their prompt, it is non-n
 Each task description must be **self-contained** so the spawned agent can act without re-reading the conversation. Include:
 - Worktree path
 - Branch name
-- Model: sonnet (workers must be sonnet, not opus — controls cost and matches the orchestration pattern this skill encodes)
+- Model: the role Phase 2.8 assigned this task, copied **verbatim** from the plan's `Model:` stamp (`coderails:writing-plans`) or from Phase 2.8's recorded assignment for a below-plan.md-threshold loop — including any fallback valve. A role recorded in `progress.json`/`plan.md` but absent from this prompt does not exist for the worker, same rule as the disposition and lessons bullets below.
 - JIRA ticket
 - Verified state from prior tasks (deployed version, test counts, what's already wired)
 - Exact step-by-step sub-steps
@@ -283,19 +334,19 @@ Include this line in every agent prompt:
 
 For bare 1-2 task work, a single `Agent` call is the right tool — don't over-engineer with a spawned team (see Phase 3a).
 
-### Phase 3a — Single sonnet agent for impl + verify (the spawned-team-is-overkill case)
+### Phase 3a — Single routed agent for impl + verify (the spawned-team-is-overkill case)
 
-For self-contained work that doesn't justify a team — a bug fix, one PR, a single-file change, a tight sequence of steps with shared context — spawn **one** `Agent` with `model: sonnet` that owns both the implementation **and** the verification, then reports back a confidence-labelled result. Main context stays the orchestrator; it does not make the edit itself.
+For self-contained work that doesn't justify a team — a bug fix, one PR, a single-file change, a tight sequence of steps with shared context — spawn **one** `Agent`, at the role Phase 2.8 assigned, that owns both the implementation **and** the verification, then reports back a confidence-labelled result. Main context stays the orchestrator; it does not make the edit itself.
 
 Why one agent does both impl and verify (not two): the verification output is dense — exactly the kind that fills main context. The agent self-verifies; main context spot-checks only at dependency boundaries (Phase 12) or when the artifact check is cheap and the stakes are high.
 
 The agent's prompt must be self-contained (it can't re-read the conversation) and include:
-- **`model: sonnet`** — non-negotiable, same rule as team workers (Phase 3): cost control, and impl+verify is execution, not architecture.
+- **The Phase 2.8-assigned role, verbatim, including any fallback valve** — same travel rule as team workers (Phase 3): a role absent from this prompt does not exist for the worker. `default` is the floor absent a routing reason; `frontier` is the exception that needs one.
 - The exact change to make, with file paths and the success criteria stated as something testable.
 - **Construction method (when the deliverable is code).** If the change adds or alters a function, method, or branch that *can* carry a test, the worker builds it test-first via `/coderails:test-driven-development`: write the failing test, watch it fail for the right reason, then the minimal code to pass, then refactor green — even if the PR also touches non-code files. For pure docs/config/prose with no testable code, there is no failing test to write first; the verify step below is by inspection instead.
 - **Construction discipline.** The agent holds itself to `coderails:verification-before-completion` throughout implementation, not only at the report-back step: no "should work now" framing on any intermediate claim, run the actual check before asserting a sub-step is done. Additive to the report-back contract below, not a replacement for it.
 - **A verify step the agent runs itself before reporting** — run the test / lint / build, read back the diff, hit the endpoint or read the log. State which one. "Implement X, then verify by running `Y`, and only report success if `Y` passes."
-- **Report-back contract:** return a confidence-labelled summary (Phase 11), state what was run to verify (the command + its result, not just "verified"), and "don't go silently idle — send a completion message" (Phase 4 — sonnet agents go idle without reporting).
+- **Report-back contract:** return a confidence-labelled summary (Phase 11), state what was run to verify (the command + its result, not just "verified"), and "don't go silently idle — send a completion message" (Phase 4 — workers go idle without reporting regardless of role).
 - If the work writes to git, the worktree/branch and a "commit your work" instruction so the artifact is durable for the orchestrator's Phase 4 check.
 - **A manifest — the exact set of files this change should touch — plus a pre-push scope assertion.** Require: "before you push, run `git diff origin/main --name-only` and confirm the file list equals EXACTLY this manifest. If any file you did not intend to touch appears — especially one you never edited — STOP and report; do not push. A PR that carries files outside its manifest is a contamination, not a change." This catches a dirty base or a stray `git add -A` at push time, one stage before the orchestrator's merge gate, where it is far cheaper to fix. Past failure: a worker pushed a PR carrying two files from a polluted base — no pre-push scope assertion, so it surfaced only at the merge gate and forced a rebuild.
   When the unit's disposition is `clean-break`, the assertion also covers compat: before push, confirm no compatibility shim, bridge, adapter, or legacy code path for the replaced functionality remains. If one does, clean-break is not finished — remove it or STOP and report. This worker assertion is a **first-pass smell test, not the gate** — the independent reviewer (Phase 4b) is the gate, because the worker that wrote a shim is the party least able to see it as one.
@@ -424,7 +475,7 @@ Delegate it to a spawned agent, same as the wiki step, to keep orchestrator cont
 
 Dead agents continue to emit idle pings until the runtime cleans them up. If you respawn with the same name, you can't tell which idle ping is which.
 
-Always respawn with a versioned name: `dockerfile-fixer` → `dockerfile-fixer-v2` → `dockerfile-fixer-v3`. The dead one's pings become identifiable noise; the live one's reports are unambiguous. The version bump doesn't change the model rule — respawned agents must also use `model: sonnet`.
+Always respawn with a versioned name: `dockerfile-fixer` → `dockerfile-fixer-v2` → `dockerfile-fixer-v3`. The dead one's pings become identifiable noise; the live one's reports are unambiguous. The version bump doesn't change the routing — respawned agents keep the same Phase 2.8-assigned role.
 
 ### Phase 11 — Agent prompts include "confidence-label every claim"
 
@@ -461,7 +512,7 @@ The cost of one extra tool call before unblocking the next phase is small. The c
 At the end of the loop, before declaring done, the orchestrator audits its own autonomy from the `progress.json` counters and reports two raw, unscored facts — no numeric pass/fail scorecard, no "target: approaching zero" framing. The human is the only party positioned to judge "should I have been asked about that?"; hand them the raw list rather than have the process pre-grade itself:
 
 - **`LOOP-STOP` category counts, broken down by type** — the per-category counts of this loop's `LOOP-STOP` declarations (`progress.json` `loop_stop_counts`: `hard-stop`, `approval-gate`, `awaiting-input`, `complete`). This field is HOOK-OWNED — the `loop_stall_guard` hook increments it on every valid declaration; read it as-is, do not compute or edit it yourself. Report the raw breakdown with no verdict attached — already artifact-backed from the declared stops, hard to fake. A high `awaiting-input` count is worth the human's attention, but this section states the count, not a judgement on it.
-- **Decisions absorbed** — a flat, unscored list of in-scope decisions the loop made autonomously without asking (e.g. a Phase 2.5 design-fork auto-adopted, a Phase 2.6 disposition defaulted to clean-break, a Phase 5 disconfirm-skip, a Phase 6 in-scope action taken without a check-in). No self-justification text attached to each entry, no automated "this looks calibrated" stamp — just what was decided and where (phase/work-unit). This list is COPIED VERBATIM from `progress.json`'s `decisions_absorbed` array, chronological (oldest first) — never reconstructed from conversation memory, which is exactly the kind of after-the-fact self-report this phase exists to avoid.
+- **Decisions absorbed** — a flat, unscored list of in-scope decisions the loop made autonomously without asking (e.g. a Phase 2.5 design-fork auto-adopted, a Phase 2.6 disposition defaulted to clean-break, a Phase 2.8 routing assignment set, a Phase 5 disconfirm-skip, a Phase 6 in-scope action taken without a check-in). No self-justification text attached to each entry, no automated "this looks calibrated" stamp — just what was decided and where (phase/work-unit). This list is COPIED VERBATIM from `progress.json`'s `decisions_absorbed` array, chronological (oldest first) — never reconstructed from conversation memory, which is exactly the kind of after-the-fact self-report this phase exists to avoid.
 
 Also report, unscored, alongside the two facts above:
 - **Artifacts produced** — PRs merged, deploys done, each with the verifying check (Phase 12), not the agent's claim.
@@ -481,7 +532,7 @@ This is the factory's own audit — raw facts for the human to judge, not a self
 
 Do not stop work early because the context window is filling or a token budget is approaching. Context will compact and the session will continue — treat that as a non-event, not a stop condition.
 
-**Loop state lives in a durable artifact, not in the conversation.** Maintain a single `progress.json` at the path printed by the loop-state path helper (`hooks/scripts/lib/agentic_loop_path.sh`) — outside the code repo, keyed to the repo (or cwd outside a repo) **and this session's id**, so it survives this session's own restart/compaction, never pollutes the base every worker branches from, and never collides with another session's file in the same directory. Resolve the path by running the helper (Phase -2); never compute it yourself. The helper reads `$CLAUDE_CODE_SESSION_ID` (set in every Bash tool call) when no session_id argument is given, so you normally don't need to pass one explicitly. It is overwritten (not appended) on every phase boundary and holds: the authorisation envelope verbatim, the current phase, a `work_units` field (a JSON object keyed by unit id, each entry carrying at least a `status`: `pending`/`in-progress`/`done`/`blocked` with `blockedBy`) — the loop-scope evals gate (`loop_state_guard`) reads `.work_units | length` off this field to decide whether the ≥3-work-unit eval threshold applies, failing open (no block) when the field is absent, so keep it populated whenever the loop tracks ≥1 work-unit — verified state carried between units (deployed version, test counts), per-category `loop_stop_counts` (`{hard-stop, approval-gate, awaiting-input, complete}`) for Phase 13 — **HOOK-OWNED**: written solely by the `loop_stall_guard` hook on each valid `LOOP-STOP` declaration; the orchestrator never writes or increments it, and on any wholesale rewrite of this file must re-read the existing `progress.json` first and carry `loop_stop_counts` forward according to the same conditional as the Phase -2 stub rule above (verbatim on a mid-loop rewrite, reset to `{}` when the prior file's `status` was `"complete"`) — and, for any work-unit that retires an existing code path, its `disposition` (`clean-break` | `preserve-compat`), plus, when `preserve-compat`, the `named_blocker` (the specific consumer still on the old path that justifies keeping it) and the `removal_ticket` tracking the deferred removal — and `decisions_absorbed`, the chronological (oldest-first) array of `{phase, decision}` entries appended at each phase boundary that absorbs an in-scope decision (Phases 2.5, 2.6, 5, 6). A single overwritten JSON object — read the whole file in one shot to know current state. Do not use an append-log (`.jsonl`) that has to be replayed to derive position, and that can leave a torn tail line after a crash.
+**Loop state lives in a durable artifact, not in the conversation.** Maintain a single `progress.json` at the path printed by the loop-state path helper (`hooks/scripts/lib/agentic_loop_path.sh`) — outside the code repo, keyed to the repo (or cwd outside a repo) **and this session's id**, so it survives this session's own restart/compaction, never pollutes the base every worker branches from, and never collides with another session's file in the same directory. Resolve the path by running the helper (Phase -2); never compute it yourself. The helper reads `$CLAUDE_CODE_SESSION_ID` (set in every Bash tool call) when no session_id argument is given, so you normally don't need to pass one explicitly. It is overwritten (not appended) on every phase boundary and holds: the authorisation envelope verbatim, the current phase, a `work_units` field (a JSON object keyed by unit id, each entry carrying at least a `status`: `pending`/`in-progress`/`done`/`blocked` with `blockedBy`) — the loop-scope evals gate (`loop_state_guard`) reads `.work_units | length` off this field to decide whether the ≥3-work-unit eval threshold applies, failing open (no block) when the field is absent, so keep it populated whenever the loop tracks ≥1 work-unit — verified state carried between units (deployed version, test counts), per-category `loop_stop_counts` (`{hard-stop, approval-gate, awaiting-input, complete}`) for Phase 13 — **HOOK-OWNED**: written solely by the `loop_stall_guard` hook on each valid `LOOP-STOP` declaration; the orchestrator never writes or increments it, and on any wholesale rewrite of this file must re-read the existing `progress.json` first and carry `loop_stop_counts` forward according to the same conditional as the Phase -2 stub rule above (verbatim on a mid-loop rewrite, reset to `{}` when the prior file's `status` was `"complete"`) — and, for any work-unit that retires an existing code path, its `disposition` (`clean-break` | `preserve-compat`), plus, when `preserve-compat`, the `named_blocker` (the specific consumer still on the old path that justifies keeping it) and the `removal_ticket` tracking the deferred removal — and `decisions_absorbed`, the chronological (oldest-first) array of `{phase, decision}` entries appended at each phase boundary that absorbs an in-scope decision (Phases 2.5, 2.6, 2.8, 5, 6). A single overwritten JSON object — read the whole file in one shot to know current state. Do not use an append-log (`.jsonl`) that has to be replayed to derive position, and that can leave a torn tail line after a crash.
 
 **Lifecycle, enforced by the `loop_state_guard` Stop hook (presence + ownership).** The file moves through a fixed lifecycle, and the guard blocks any stop where an active loop has no session-owned file:
 - **Stub-first (Phase -2):** `status: "initialising"`, stamped with this `session_id`.

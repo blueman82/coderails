@@ -21,6 +21,14 @@ Every task in the plan must include:
 - **Interfaces**: what this task consumes from earlier tasks (exact signatures) and what it produces for later ones (exact function names, parameter and return types). A worker sees only their task — interfaces are how they learn the names and types neighboring tasks use.
 - **Steps**: one action each, 2–5 minutes. "Write the failing test" is a step. "Implement auth" is not.
 - **Verify-criteria**: something runnable or inspectable that proves the task is done — a test command with expected output, a grep, a visible UI state.
+- **Model**: the capability role this task should run at — `fast-mechanical`,
+  `default`, or `frontier` — plus a one-line rationale, and an optional fallback
+  valve. Mandatory on every task in every plan, no exceptions for small or
+  loop-only plans. Role definitions, the role→model table, and the tiering
+  rationale live in `coderails:agentic-loop`'s Phase 2.8 — this stamp names the
+  role and the reason, it does not repeat the table. Example:
+  `Model: fast-mechanical — scripted rename across N files; default fallback
+  after two failed gate attempts.`
 
 ## Per-task construction method
 
