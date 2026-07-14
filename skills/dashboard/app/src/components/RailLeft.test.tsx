@@ -81,7 +81,9 @@ describe("RailLeft — multi-loop Directives panel", () => {
         ],
       })
     );
-    const suffix = container.querySelector(".hud-suffix");
+    // The Directives block is the second .hud-block (System Vitals is first).
+    const directivesBlock = container.querySelectorAll(".hud-block")[1];
+    const suffix = directivesBlock.querySelector(".hud-suffix");
     expect(suffix?.textContent).toBe("Live.2");
     // No legacy Loop.N literal may survive anywhere in the rendered output.
     expect(container.textContent).not.toContain("Loop.");
