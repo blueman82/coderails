@@ -991,6 +991,60 @@
   }
 }
 
+/* Phone widths: builds on the max-width: 1100px stack above (already single-column). The
+   sphere is decorative background there — on a phone it just eats space behind data panels
+   that are already full-bleed, so it's hidden outright rather than shrunk. Body type gets a
+   readable bump (desktop's 9-10.5px is tuned for a monitor, not a handheld), and interactive
+   rows/buttons get real touch targets. */
+@media (max-width: 640px) {
+  .hud-stage {
+    padding: 16px;
+    gap: 0 16px;
+  }
+  .hud-bg-canvas {
+    display: none;
+  }
+  .hud-block {
+    font-size: 12.5px;
+    line-height: 1.5;
+  }
+  .hud-run-row,
+  .hud-run-row-selectable {
+    font-size: 12.5px;
+    padding: 11px 0;
+    min-height: 44px;
+    align-items: center;
+  }
+  .hud-cmd {
+    font-size: 13px;
+    padding: 11px 0;
+    min-height: 44px;
+  }
+  .hud-cmd-grid {
+    grid-template-columns: 1fr;
+  }
+  .hud-cmd .hud-label {
+    max-width: none;
+  }
+  .hud-deck-status,
+  .hud-active-cmd-row,
+  .hud-deck-footnote {
+    font-size: 11px;
+  }
+  .hud-bc-value {
+    font-size: 56px;
+  }
+  .hud-bc-units-label {
+    font-size: 12px;
+  }
+  .hud-overlay {
+    padding: 12px;
+  }
+  .hud-overlay-panel {
+    width: min(70ch, 92vw);
+  }
+}
+
 /* Short desktop windows: keep the 3-column layout, but stop clipping rail content at the
    fold — let the page scroll instead of pinning .hud-stage to a fixed 100vh box. The
    sphere background (.hud-bg-canvas, position: fixed) stays put either way. */
