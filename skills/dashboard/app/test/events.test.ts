@@ -20,11 +20,10 @@ afterEach(() => {
   }
 });
 
-function testConfig(memoryPaths: string[] = []): DashboardConfig {
+function testConfig(): DashboardConfig {
   return {
     repos: [],
     wikiPaths: [],
-    memoryPaths,
     buttons: [],
   };
 }
