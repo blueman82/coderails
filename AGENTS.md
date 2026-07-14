@@ -153,15 +153,25 @@ re-opened as findings.
   expected to demote from a block to a nudge once the artifact gate is live and
   verified in practice — ordering constraint: never before, or a window opens
   where neither gate is active.
-- **`model: sonnet` for spawned workers is advisory, not hook-enforced.** `agentic-loop`
-  SKILL.md asserts it ~6 times (Phases 2, 2.5, 3, 3a, 10) but no hook gates `Agent`/`Task` spawn
-  calls on the requested model — `hooks/hooks.json` and `hooks/scripts/*.sh` only match `Bash`
-  and `Write`/`Edit`/`MultiEdit` events. This is deliberate: the rule's purpose is cost control,
-  not correctness — an opus worker still produces a valid, fully-gated PR; nothing load-bearing
-  breaks if it fires. Phase 2.5 also sanctions a legitimate opus-escalation exception ("escalate
-  the synthesis to opus only if the tradeoff is genuinely close") that a blunt model-gate hook
-  cannot distinguish from a disallowed worker spawn without a self-reported carve-out flag —
-  which reintroduces the same trust-the-agent problem one level down.
+- **Model-role routing for spawned workers is advisory, not hook-enforced.**
+  `agentic-loop` SKILL.md's Phase 2.8 assigns a capability role
+  (`fast-mechanical`/`default`/`frontier`) to every task before it spawns, and
+  asserts the resulting role at each spawn site across the skill
+  (Phases 2, 2.5, 3, 3a, 9, 10 — as of this writing; the role table itself
+  lives in Phase 2.8) — but no hook gates
+  `Agent`/`Task` spawn calls on the requested model — the only `PreToolUse`
+  matchers in `hooks/hooks.json` are `Bash` and `Write|Edit|MultiEdit`; the
+  remaining registered events (SessionStart/UserPromptSubmit/Stop/SubagentStop)
+  gate no tool calls.
+  This is deliberate: routing exists for cost and latency, not correctness — PR
+  gates (review, evals, hook-seam) are model-independent, so a `frontier`-role
+  worker still produces a valid, fully-gated PR; nothing load-bearing breaks if
+  a role assignment is ignored. Phase 2.8 also sanctions a legitimate
+  role-vs-role judgement call (bounded `default` vs. genuinely-ambiguous
+  `frontier`-first for a design-fork investigation) that a blunt model-gate hook
+  cannot distinguish from a disallowed worker spawn without a self-reported
+  carve-out flag — which reintroduces the same trust-the-agent problem one
+  level down.
 - **Headless-run exemption is env-triggered, Stop-event only, inside the agent trust
   domain — consistent with the documented ceiling.** `check_confidence_labels.sh` and
   `check_verify_loop.sh` both skip enforcement on the `Stop` event when
