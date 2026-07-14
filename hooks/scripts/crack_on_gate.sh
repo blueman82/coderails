@@ -1,0 +1,95 @@
+#!/bin/bash
+# Two-event crack-on gate: while a "crack on" envelope is active in a session,
+# asking the human anything (the AskUserQuestion tool) is mechanically denied.
+#
+#   UserPromptSubmit — detect "crack on" (case-insensitive, word-boundary) in
+#     the RAW submitted prompt (payload .prompt) and stamp a per-session
+#     crack_on_active flag file. Detection deliberately never reads the
+#     transcript or any injected context: the phrase "crack on" appears in the
+#     agentic-loop skill body and in injected memory in essentially every
+#     session, so a transcript/context scan would false-positive fleet-wide
+#     and permanently suppress human interaction. Only the human actually
+#     typing the phrase activates the gate.
+#   PreToolUse (AskUserQuestion) — if this session's flag is stamped, deny via
+#     permissionDecision JSON (never exit 2). Scoped to AskUserQuestion only:
+#     the agentic-loop hard-stops are turn-ending LOOP-STOP declarations, not
+#     AskUserQuestion calls, so they are untouched by design.
+#
+# The flag lives at a SESSION-ONLY path: <base>/<session_id>/crack_on_active
+# (base = $CLAUDE_AGENTIC_LOOP_DIR or $HOME/.claude/agentic-loop). It is
+# deliberately NOT derived from lib/agentic_loop_path.sh: that helper resolves
+# its dir by progress.json EXISTENCE (canonical-then-probe), so a flag routed
+# through it can be stamped under one slug and read under another whenever
+# progress.json's location changes between the two events (e.g. a mid-session
+# git init shifting the git-common-dir slug) — and a missed read here fails in
+# the UNSAFE direction (AskUserQuestion allowed despite an active envelope).
+# Keying on session_id alone removes that drift class by construction; the
+# session id is the envelope's real scope anyway. No session_id in the payload
+# -> the gate stands aside entirely (an unkeyable stamp could never be found
+# again).
+
+IFS= read -r -d '' -t 5 input || true
+
+event=$(echo "$input" | jq -r '.hook_event_name // empty')
+session_id=$(echo "$input" | jq -r '.session_id // empty')
+
+LOG_FILE="${CLAUDE_DISCIPLINE_LOG:-$HOME/.claude/discipline.log}"
+log_line() { printf '%s %s\n' "$(date -Iseconds 2>/dev/null || date +%Y-%m-%dT%H:%M:%S%z)" "$1" >> "$LOG_FILE" 2>/dev/null; }
+
+# flag_path: prints the session-only flag file path, fails on empty session_id.
+# session_id sanitisation (strip "/", collapse "..") kept in lockstep with the
+# same two-line transform in lib/agentic_loop_path.sh and loop_state_common.sh
+# — intentionally duplicated, this script stays dependency-free like they do.
+flag_path() {
+  local base sid
+  base="${CLAUDE_AGENTIC_LOOP_DIR:-$HOME/.claude/agentic-loop}"
+  sid=$(printf '%s' "$session_id" | tr '/' '_')
+  sid=$(printf '%s' "$sid" | sed 's/\.\.//g')
+  [ -z "$sid" ] && return 1
+  printf '%s/%s/crack_on_active' "$base" "$sid"
+}
+
+# ── UserPromptSubmit: stamp on a raw-prompt match ──────────────────────────
+if [ "$event" = "UserPromptSubmit" ]; then
+  [ -z "$session_id" ] && exit 0
+  prompt=$(echo "$input" | jq -r '.prompt // empty')
+  [ -z "$prompt" ] && exit 0
+  # Word-boundary match: "crack" and "on" as whole words, any whitespace run
+  # between them. [^[:alnum:]] boundaries instead of \b for BSD/GNU grep parity.
+  # Hyphenated "crack-on" is deliberately unmatched: the authorising phrase is
+  # what a human types ("crack on"); hyphenated forms are prose ABOUT the gate.
+  if printf '%s' "$prompt" | grep -qiE '(^|[^[:alnum:]])crack[[:space:]]+on([^[:alnum:]]|$)'; then
+    flag=$(flag_path) || exit 0
+    [ -z "$flag" ] && exit 0
+    mkdir -p "$(dirname "$flag")" 2>/dev/null
+    # stamped=1 only on a confirmed write — a failed stamp must not log success.
+    if { date -Iseconds > "$flag"; } 2>/dev/null; then
+      log_line "hook=crack_on_gate event=UserPromptSubmit session=$session_id stamped=1"
+    else
+      log_line "hook=crack_on_gate event=UserPromptSubmit session=$session_id stamped=0 err=write_failed"
+    fi
+  fi
+  exit 0
+fi
+
+# ── PreToolUse: deny AskUserQuestion while the flag is stamped ─────────────
+if [ "$event" = "PreToolUse" ]; then
+  tool_name=$(echo "$input" | jq -r '.tool_name // empty')
+  [ "$tool_name" = "AskUserQuestion" ] || exit 0
+  [ -z "$session_id" ] && exit 0
+  flag=$(flag_path) || exit 0
+  if [ -n "$flag" ] && [ -f "$flag" ]; then
+    log_line "hook=crack_on_gate event=PreToolUse session=$session_id tool=AskUserQuestion denied=1"
+    jq -n '{
+      hookSpecificOutput: {
+        hookEventName: "PreToolUse",
+        permissionDecision: "deny",
+        permissionDecisionReason: "crack-on active: human-ask suppressed; proceed autonomously. A crack-on envelope was activated by the user in this session, so AskUserQuestion is mechanically denied — make the call yourself using the envelope scope, or end the turn with a report if genuinely outside it."
+      }
+    }'
+    exit 0
+  fi
+  exit 0
+fi
+
+exit 0
