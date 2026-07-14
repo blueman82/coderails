@@ -171,8 +171,8 @@ export function OutputViewerPanel({ token }: OutputViewerPanelProps) {
           {runs.map((run) => {
             const result = runResultLabel(run);
             const duration = run.endedAt ? formatDuration(run.startedAt, run.endedAt) : "…";
-            // Glyph-derivation logic duplicated intentionally from RailRight.tsx — keep both
-            // mappings in sync if either changes.
+            // Result -> glyph/class mapping: PASS -> filled diamond, FAIL -> hollow diamond,
+            // anything else (still running) -> a plain dot.
             const glyphClass = result === "PASS" ? "status-ok" : result === "FAIL" ? "status-fail" : "";
             const glyph = result === "PASS" ? "◆" : result === "FAIL" ? "◇" : "·";
             return (
