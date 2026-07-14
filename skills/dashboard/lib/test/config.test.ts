@@ -26,7 +26,7 @@ const baseButton = {
 describe("loadConfig", () => {
   it("loads a minimal valid config with no routines", () => {
     const path = writeConfig({
-      repos: [], wikiPaths: [], memoryPaths: [], buttons: [baseButton],
+      repos: [], wikiPaths: [], buttons: [baseButton],
     });
     const config = loadConfig(path);
     expect(config.buttons).toHaveLength(1);
@@ -46,7 +46,7 @@ describe("loadConfig", () => {
 
   it("throws ConfigError on a duplicate button name", () => {
     const path = writeConfig({
-      repos: [], wikiPaths: [], memoryPaths: [],
+      repos: [], wikiPaths: [],
       buttons: [baseButton, { ...baseButton }],
     });
     expect(() => loadConfig(path)).toThrow(ConfigError);
@@ -54,7 +54,7 @@ describe("loadConfig", () => {
 
   it("throws ConfigError on an unknown profile", () => {
     const path = writeConfig({
-      repos: [], wikiPaths: [], memoryPaths: [],
+      repos: [], wikiPaths: [],
       buttons: [{ ...baseButton, profile: "godmode" }],
     });
     expect(() => loadConfig(path)).toThrow(ConfigError);
@@ -62,7 +62,7 @@ describe("loadConfig", () => {
 
   it("throws ConfigError when profile is bypass but bypassPermissions is not true", () => {
     const path = writeConfig({
-      repos: [], wikiPaths: [], memoryPaths: [],
+      repos: [], wikiPaths: [],
       buttons: [{ ...baseButton, profile: "bypass" }],
     });
     expect(() => loadConfig(path)).toThrow(ConfigError);
@@ -70,7 +70,7 @@ describe("loadConfig", () => {
 
   it("throws ConfigError on a relative cwd", () => {
     const path = writeConfig({
-      repos: [], wikiPaths: [], memoryPaths: [],
+      repos: [], wikiPaths: [],
       buttons: [{ ...baseButton, cwd: "relative/path" }],
     });
     expect(() => loadConfig(path)).toThrow(ConfigError);
@@ -78,7 +78,7 @@ describe("loadConfig", () => {
 
   it("loads a valid routines section alongside buttons", () => {
     const path = writeConfig({
-      repos: [], wikiPaths: [], memoryPaths: [], buttons: [baseButton],
+      repos: [], wikiPaths: [], buttons: [baseButton],
       routines: [
         {
           name: "wiki-lint-nightly",
@@ -100,7 +100,7 @@ describe("loadConfig", () => {
 
   it("throws ConfigError when a routine has neither skillCommand nor buttonRef", () => {
     const path = writeConfig({
-      repos: [], wikiPaths: [], memoryPaths: [], buttons: [baseButton],
+      repos: [], wikiPaths: [], buttons: [baseButton],
       routines: [
         {
           name: "broken-routine",
@@ -119,7 +119,7 @@ describe("loadConfig", () => {
 
   it("throws ConfigError when a routine's buttonRef does not match any button name", () => {
     const path = writeConfig({
-      repos: [], wikiPaths: [], memoryPaths: [], buttons: [baseButton],
+      repos: [], wikiPaths: [], buttons: [baseButton],
       routines: [
         {
           name: "orphan-ref",
@@ -150,7 +150,7 @@ describe("loadConfig", () => {
       escalation: ["notification"],
     };
     const path = writeConfig({
-      repos: [], wikiPaths: [], memoryPaths: [], buttons: [baseButton],
+      repos: [], wikiPaths: [], buttons: [baseButton],
       routines: [routine, { ...routine }],
     });
     expect(() => loadConfig(path)).toThrow(ConfigError);
@@ -158,7 +158,7 @@ describe("loadConfig", () => {
 
   it("throws ConfigError when expectedArtifact.maxAgeSeconds is not a positive number", () => {
     const path = writeConfig({
-      repos: [], wikiPaths: [], memoryPaths: [], buttons: [baseButton],
+      repos: [], wikiPaths: [], buttons: [baseButton],
       routines: [
         {
           name: "bad-maxage",
@@ -178,7 +178,7 @@ describe("loadConfig", () => {
 
   it("throws ConfigError on an unknown predicate kind", () => {
     const path = writeConfig({
-      repos: [], wikiPaths: [], memoryPaths: [], buttons: [baseButton],
+      repos: [], wikiPaths: [], buttons: [baseButton],
       routines: [
         {
           name: "bad-predicate",
@@ -198,7 +198,7 @@ describe("loadConfig", () => {
 
   it("throws ConfigError on an unknown escalation channel", () => {
     const path = writeConfig({
-      repos: [], wikiPaths: [], memoryPaths: [], buttons: [baseButton],
+      repos: [], wikiPaths: [], buttons: [baseButton],
       routines: [
         {
           name: "bad-escalation",
@@ -218,7 +218,7 @@ describe("loadConfig", () => {
 
   it("throws ConfigError when a routine has a relative foreignSkillPath", () => {
     const path = writeConfig({
-      repos: [], wikiPaths: [], memoryPaths: [], buttons: [baseButton],
+      repos: [], wikiPaths: [], buttons: [baseButton],
       routines: [
         {
           name: "relative-foreign-skill",
@@ -239,7 +239,7 @@ describe("loadConfig", () => {
 
   it("loads a routine with a valid absolute foreignSkillPath", () => {
     const path = writeConfig({
-      repos: [], wikiPaths: [], memoryPaths: [], buttons: [baseButton],
+      repos: [], wikiPaths: [], buttons: [baseButton],
       routines: [
         {
           name: "absolute-foreign-skill",
@@ -261,7 +261,7 @@ describe("loadConfig", () => {
 
   it("throws ConfigError when expectedArtifact.artifactPath is empty", () => {
     const path = writeConfig({
-      repos: [], wikiPaths: [], memoryPaths: [], buttons: [baseButton],
+      repos: [], wikiPaths: [], buttons: [baseButton],
       routines: [
         {
           name: "empty-artifact-path",
