@@ -135,18 +135,27 @@ function isGateError(gate: PrGate | PrGateError): gate is PrGateError {
 
 export { isGateError };
 
-// Picks the loop DIRECTIVES/hero should show. `loops[0]` alone isn't
-// reliable: collectLoops (src/lib/collect/sessions.ts) treats every
-// subdirectory under the loops base as a session, including non-loop dirs
-// like a stray `.git`, and sortLoops only orders by slug — so index 0 can
-// land on a 0-unit noise entry ahead of the loop that's actually running.
-// Prefers an in-progress loop; falls back to any loop that has units at
-// all; falls back to loops[0] (or undefined) so an all-noise list still
-// resolves to *something* rather than throwing.
-export function selectActiveLoop(loops: LoopInfo[]): LoopInfo | undefined {
-  return (
-    loops.find((l) => l.status === "in-progress") ?? loops.find((l) => l.workUnitsTotal > 0) ?? loops[0]
-  );
+// The multi-loop Directives panel splits non-complete loops into two lists by
+// recency: "live" loops (updated within the last hour) get a full card; older
+// ones ("stalled") get a one-line entry. A complete loop (status "complete")
+// shows in neither — it has finished, not gone quiet.
+export const LOOP_LIVE_WINDOW_MS = 60 * 60_000;
+
+// Non-complete loops updated within LOOP_LIVE_WINDOW_MS of `now`, most recent
+// first. `now` is passed in (browser Date.now() at the call site) rather than
+// read here, keeping this a pure function of its inputs for unit testing.
+export function liveLoops(loops: LoopInfo[], now: number): LoopInfo[] {
+  return loops
+    .filter((l) => l.status !== "complete" && now - l.lastUpdatedMs <= LOOP_LIVE_WINDOW_MS)
+    .sort((a, b) => b.lastUpdatedMs - a.lastUpdatedMs);
+}
+
+// Non-complete loops last updated more than LOOP_LIVE_WINDOW_MS ago, most
+// recent first — the complement of liveLoops over the non-complete set.
+export function stalledLoops(loops: LoopInfo[], now: number): LoopInfo[] {
+  return loops
+    .filter((l) => l.status !== "complete" && now - l.lastUpdatedMs > LOOP_LIVE_WINDOW_MS)
+    .sort((a, b) => b.lastUpdatedMs - a.lastUpdatedMs);
 }
 
 // --- Formatters -------------------------------------------------------
