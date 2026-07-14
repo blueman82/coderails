@@ -240,3 +240,34 @@ describe("RailLeft — loop decisions (per card)", () => {
     expect(container.textContent).toContain("Loop Evals:");
   });
 });
+
+describe("RailLeft — ticking now demotes a boundary-crossing loop", () => {
+  afterEach(() => {
+    cleanup();
+    vi.useRealTimers();
+  });
+
+  it("moves a loop from card to stalled list as wall-clock advances, without new props", () => {
+    const base = 10_000 * 60_000; // fixed epoch base for both fixture and useNow
+    vi.useFakeTimers();
+    vi.setSystemTime(base);
+
+    // 59 minutes old at render — live, so it gets a card.
+    const { container } = renderRail(
+      emptySnapshot({ loops: [loop({ title: "boundary-loop", lastUpdatedMs: base - 59 * 60_000 })] })
+    );
+    expect(container.querySelectorAll('[data-testid="loop-card"]').length).toBe(1);
+    expect(container.querySelector('[data-testid="stalled-list"]')).toBeNull();
+
+    // Advance 2 minutes: the loop is now 61 min old. useNow's 30s interval has
+    // fired, so the component re-renders with a fresh `now` and no new props.
+    act(() => {
+      vi.advanceTimersByTime(2 * 60_000);
+    });
+
+    expect(container.querySelectorAll('[data-testid="loop-card"]').length).toBe(0);
+    const stalled = container.querySelector('[data-testid="stalled-list"]');
+    expect(stalled).not.toBeNull();
+    expect(stalled!.textContent).toContain("boundary-loop");
+  });
+});
