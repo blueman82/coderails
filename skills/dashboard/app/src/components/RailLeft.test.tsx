@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
 import { createElement } from "react";
-import { render, cleanup } from "@testing-library/react";
+import { render, cleanup, act } from "@testing-library/react";
 import { DashboardContextTestProvider } from "../../test/testUtils/DashboardContextTestProvider";
 import { RailLeft } from "./RailLeft";
 import { LOOP_LIVE_WINDOW_MS } from "@/hooks/useDashboardState";
