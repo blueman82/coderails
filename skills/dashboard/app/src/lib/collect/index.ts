@@ -172,8 +172,14 @@ export function createAggregator(deps: AggregatorDeps): Aggregator {
     // health reads usage transcripts (I/O-bound, hence async) and has no
     // dedicated fs signal of its own to watch beyond the projects dir already
     // watched for sessions — it rides along with the activity slice rather
-    // than getting its own timer.
-    const health = await safeCallAsync("health", () => collectHealth({ projectsDir: deps.projectsDir }), []);
+    // than getting its own timer. loopsDir is passed through so the cost
+    // tiles (costWeek/costMonth) read sibling retro.json files from the same
+    // tree collectLoops walks.
+    const health = await safeCallAsync(
+      "health",
+      () => collectHealth({ projectsDir: deps.projectsDir, loopsDir: deps.loopsDir }),
+      []
+    );
     const queue = deps.queueDir ? safeCall("queue", () => collectQueue(deps.queueDir!, queueLimit), []) : [];
     const builds = deps.buildsDir ? safeCall("builds", () => collectBuilds(deps.buildsDir!), []) : [];
     return { sessions, loops, health, queue, builds };
