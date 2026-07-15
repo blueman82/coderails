@@ -9,7 +9,7 @@ Mines Claude Code session transcripts for tool-use patterns that repeat across s
 
 ## Overview
 
-Four stages: scan transcripts into tool-use event sequences, cluster repeated n-grams across sessions, hand the clusters to a fresh judge subagent for propose/reject verdicts, then carry every `propose` verdict straight into creation. Nothing is created that the judge rejected; nothing else stands in the way of what it proposed.
+Four stages: scan transcripts into tool-use event sequences, cluster repeated n-grams across sessions, hand the clusters to a fresh judge subagent for propose/reject verdicts, then carry every `propose` verdict forward — straight to creation in-session by default, or to a dashboard queue entry if the run is in queue-mode (section 5), never both. Nothing is created that the judge rejected.
 
 ## 1. Scope mapping
 
