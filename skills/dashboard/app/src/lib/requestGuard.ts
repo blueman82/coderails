@@ -21,6 +21,19 @@ function isLocalhost(hostname: string): boolean {
   return stripped === "localhost" || stripped === "127.0.0.1" || stripped === "::1";
 }
 
+// LAN opt-in: when DASHBOARD_HOST is set, that ONE exact host is additionally
+// allowed alongside loopback — never "any non-loopback host". Read fresh on
+// every call (matches this app's existing direct process.env.* read style,
+// e.g. build/spawn.ts) rather than cached at module load, so tests can flip
+// it per-case. Unset/empty means "no LAN host configured" — behaviour is then
+// identical to isLocalhost alone, the safe default.
+function isAllowedHost(hostname: string): boolean {
+  if (isLocalhost(hostname)) return true;
+  const lanHost = process.env.DASHBOARD_HOST;
+  if (!lanHost) return false;
+  return stripIpv6Brackets(hostname) === lanHost;
+}
+
 // Host: "[::1]:3000" → "[::1]" (port dropped, brackets kept — isLocalhost
 // strips them). Host: "127.0.0.1:3000" → "127.0.0.1".
 function hostnameFromHostHeader(host: string): string {
