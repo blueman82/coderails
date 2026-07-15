@@ -252,6 +252,27 @@ check "wrong-typed cache_creation: batch not wiped, valid fields still counted" 
 result=$(printf '%s' "$out" | jq -r '.per_model["claude-opus-4-8"].cache_write_5m_tokens')
 check "wrong-typed cache_creation: falls through to legacy flat field (500)" "500" "$result"
 
+# --- Test (i2d): same wipeout risk a THIRD level deep — a well-formed usage
+# object with an otherwise-valid shape but a WRONG-TYPED NUMERIC LEAF (e.g.
+# input_tokens is a string, not a number). `// 0` alone does NOT catch this
+# ("abc" // 0 is still "abc"; adding that to a number throws) — must use
+# `| numbers) // 0` to actually coerce a wrong type, not just null/false.
+# Mixed with a fully-valid line: proves (a) the batch is not wiped, (b) the
+# bad line's wrong-typed field coerces to 0 while its OTHER valid field
+# still contributes, (c) the valid line is counted in full. ---
+sess="wrong-typed-numeric-leaf-session"
+proj="$TMP/projects/-test-proj-wipeout3"
+mkdir -p "$proj"
+{
+  usage_line "msg_good_leaf" "claude-opus-4-8" 100 50 0 0 0
+  jq -cn '{type:"assistant",message:{id:"msg_bad_leaf",model:"claude-opus-4-8",usage:{input_tokens:"abc",output_tokens:5}}}'
+} > "$proj/$sess.jsonl"
+out=$(dc_mine_token_usage "$sess")
+result=$(printf '%s' "$out" | jq -r '.per_model["claude-opus-4-8"].input_tokens // "WIPED"')
+check "wrong-typed numeric leaf: batch not wiped, wrong-typed input_tokens coerced to 0 (only good line's 100 counted)" "100" "$result"
+result=$(printf '%s' "$out" | jq -r '.per_model["claude-opus-4-8"].output_tokens // "WIPED"')
+check "wrong-typed numeric leaf: bad line's VALID output_tokens (5) still contributes alongside good line's 50" "55" "$result"
+
 # --- Test (i3): stage-1 parse tolerance — a genuinely non-JSON garbage
 # line mixed in with a valid usage line must not zero the whole transcript.
 # Guards the `fromjson? // empty` filter: a malformed line drops itself,

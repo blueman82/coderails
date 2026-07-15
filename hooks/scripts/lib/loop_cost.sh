@@ -113,12 +113,17 @@ dc_mine_token_usage() {
           # the legacy-field branch, not throw on ".ephemeral_5m_input_tokens"
           # — same whole-batch-wipeout risk as the usage type-guard above.
           | (if ($e.usage.cache_creation | type) == "object" then $e.usage.cache_creation else null end) as $cc
-          | (if $cc != null then ($cc.ephemeral_5m_input_tokens // 0) else ($e.usage.cache_creation_input_tokens // 0) end) as $cw5m
-          | (if $cc != null then ($cc.ephemeral_1h_input_tokens // 0) else 0 end) as $cw1h
+          # One leaf deeper: `// 0` alone only substitutes on null/false, NOT
+          # on a wrong-typed value — ("abc" // 0) is still "abc", and adding
+          # that to a number throws, same whole-batch-wipeout risk as above.
+          # `| numbers` filters out anything non-numeric first so the `// 0`
+          # fallback actually catches wrong-typed leaves too.
+          | (if $cc != null then (($cc.ephemeral_5m_input_tokens | numbers) // 0) else (($e.usage.cache_creation_input_tokens | numbers) // 0) end) as $cw5m
+          | (if $cc != null then (($cc.ephemeral_1h_input_tokens | numbers) // 0) else 0 end) as $cw1h
           | .[$m] = {
-              input_tokens: ($cur.input_tokens + ($e.usage.input_tokens // 0)),
-              output_tokens: ($cur.output_tokens + ($e.usage.output_tokens // 0)),
-              cache_read_tokens: ($cur.cache_read_tokens + ($e.usage.cache_read_input_tokens // 0)),
+              input_tokens: ($cur.input_tokens + (($e.usage.input_tokens | numbers) // 0)),
+              output_tokens: ($cur.output_tokens + (($e.usage.output_tokens | numbers) // 0)),
+              cache_read_tokens: ($cur.cache_read_tokens + (($e.usage.cache_read_input_tokens | numbers) // 0)),
               cache_write_5m_tokens: ($cur.cache_write_5m_tokens + $cw5m),
               cache_write_1h_tokens: ($cur.cache_write_1h_tokens + $cw1h)
             }
