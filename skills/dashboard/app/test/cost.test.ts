@@ -107,11 +107,28 @@ describe("collectLoopCost", () => {
     expect(result.month.usd).toBe(0);
   });
 
-  it("returns zeroed totals for a missing base dir rather than throwing", () => {
+  it("returns null (no-data, not $0) for a missing base dir rather than throwing", () => {
     const now = new Date("2026-07-15T12:00:00Z");
     const result = collectLoopCost(join(tmpdir(), "does-not-exist-cost-base"), now);
-    expect(result.week.usd).toBe(0);
-    expect(result.month.usd).toBe(0);
+    expect(result.week.usd).toBeNull();
+    expect(result.week.tokens).toBeNull();
+    expect(result.month.usd).toBeNull();
+    expect(result.month.tokens).toBeNull();
+  });
+
+  it("returns null (no-data) for a window with zero completed loops, distinct from a real $0 spend", () => {
+    const now = new Date("2026-07-15T12:00:00Z");
+    const base = makeTmpBase();
+    // Only a loop outside the week window — week bucket has zero contributing
+    // loops and must read as null, not 0.
+    writeLoopDir(base, "-proj", "sess-old", {
+      created: "2026-06-01T10:00:00Z",
+      cost: { total_usd_estimate: 1, total_tokens: 100, prices_as_of: "2026-06-01" },
+    });
+
+    const result = collectLoopCost(base, now);
+    expect(result.week.usd).toBeNull();
+    expect(result.week.tokens).toBeNull();
   });
 
   it("falls back to progress.json's created field when retro.json has no created timestamp", () => {
