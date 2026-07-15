@@ -20,6 +20,10 @@ export interface RunRecord {
   // `code ?? 1` with no way to tell a signal-kill from a genuine exit code 1.
   signal?: NodeJS.Signals;
   outputPath: string;
+  // Set on a synthetic finish line written by reconcileOrphanRuns (see
+  // below) rather than by the run's own child.on("exit")/"error" handler —
+  // an audit marker distinguishing a real exit from a guessed one.
+  reconciled?: true;
 }
 
 export interface RunLogOptions {
