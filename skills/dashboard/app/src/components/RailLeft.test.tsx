@@ -207,6 +207,28 @@ describe("RailLeft — multi-loop Directives panel", () => {
   });
 });
 
+describe("RailLeft — cost KPI tiles", () => {
+  afterEach(() => {
+    cleanup();
+  });
+
+  it("renders costWeek and costMonth values and labels alongside the existing usage tiles", () => {
+    const { container } = renderRail(
+      emptySnapshot({
+        health: [
+          { key: "costWeek", value: "$3.75", note: "completed loops only" },
+          { key: "costMonth", value: "$12.40", note: "completed loops only · prices as of 2026-07-01" },
+        ],
+      })
+    );
+    expect(container.textContent).toContain("Cost (Week)");
+    expect(container.textContent).toContain("$3.75");
+    expect(container.textContent).toContain("Cost (Month)");
+    expect(container.textContent).toContain("$12.40");
+    expect(container.textContent).toContain("completed loops only");
+  });
+});
+
 describe("RailLeft — loop decisions (per card)", () => {
   afterEach(() => {
     cleanup();
