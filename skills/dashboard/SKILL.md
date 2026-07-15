@@ -91,8 +91,8 @@ defends against a hostile web page or DNS-rebinding attack reaching the
 dashboard from your browser; it does **not** authenticate LAN devices. Any
 device on your LAN that can reach the port can trigger declared runs. Only
 enable LAN access on a trusted home network, and use a DHCP reservation or
-static lease for the host — the LAN IP is baked into `DASHBOARD_HOST` and
-access breaks silently if it changes.
+static lease for the host — if the host's LAN IP changes, the dashboard will
+fail to bind on next start rather than break silently.
 
 ## Stopping
 
