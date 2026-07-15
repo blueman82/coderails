@@ -73,7 +73,14 @@ export function RailLeft() {
   const { snapshot } = useDashboardContext();
   const { health, loops } = snapshot;
 
-  const kpiKeys: HealthTile["key"][] = ["usage5h", "usageWeek", "hooksFired", "lintFindings"];
+  const kpiKeys: HealthTile["key"][] = [
+    "usage5h",
+    "usageWeek",
+    "hooksFired",
+    "lintFindings",
+    "costWeek",
+    "costMonth",
+  ];
   const now = useNow(30_000);
   const live = liveLoops(loops, now);
   const stalled = stalledLoops(loops, now);
