@@ -198,10 +198,10 @@ not protect this run either. Its merge rail is entirely
 `/pr-review-toolkit:review-pr` and the manifest assertion the skill
 itself runs before pushing (abort-with-cleanup if the diff isn't exactly
 `skills/agentic-loop/learned-failure-modes.md`) — no hook and no
-server-side check backs any of this up today. Set up GitHub branch
-protection on `main` (required review, required status checks) as a
-server-side backstop before this routine's predicate is expected to
-graduate for the first time.
+server-side check backs any of this up. This repo deliberately does not
+enable GitHub branch protection (2026-07-15) — that's a standing
+decision, not a TODO — so this routine's merge rail rests entirely, by
+design, on the script-internal gates named above.
 
 ## Install / uninstall
 
