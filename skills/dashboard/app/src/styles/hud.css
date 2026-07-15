@@ -728,6 +728,9 @@
   margin: 0.8em 0;
   padding: 12px;
   overflow-x: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid var(--hairline);
   border-radius: 2px;
