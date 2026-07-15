@@ -345,12 +345,22 @@ write_retro S1 'not-json'
 check "complete + malformed retro.json -> block" 2 "$(run x "$(payload "$T" S1)")"
 check "complete + malformed retro.json -> complete counter NOT bumped" 0 "$(counter S1 complete)"
 
-# (d) complete declared, retro.json valid JSON but wrong schema_version -> block.
+# (d) complete declared, retro.json valid JSON, schema_version 2 (the
+# loop-cost-miner bump) -> allow. schema_version 1 and 2 are both accepted.
 reset; T=$(mk_transcript 1 "All done.
 LOOP-STOP: complete — done"); write_file in-progress S1 0
 write_retro S1 '{"schema_version":2}'
-check "complete + wrong schema_version retro.json -> block" 2 "$(run x "$(payload "$T" S1)")"
-check "complete + wrong schema_version retro.json -> complete counter NOT bumped" 0 "$(counter S1 complete)"
+check "complete + schema_version 2 retro.json -> allow" 0 "$(run x "$(payload "$T" S1)")"
+check "complete + schema_version 2 retro.json -> counter bumped" 1 "$(counter S1 complete)"
+
+# (d2) complete declared, retro.json valid JSON but a schema_version OUTSIDE
+# the accepted {1,2} set -> still block (the accept-set widened, it did not
+# disappear).
+reset; T=$(mk_transcript 1 "All done.
+LOOP-STOP: complete — done"); write_file in-progress S1 0
+write_retro S1 '{"schema_version":99}'
+check "complete + out-of-range schema_version retro.json -> block" 2 "$(run x "$(payload "$T" S1)")"
+check "complete + out-of-range schema_version retro.json -> complete counter NOT bumped" 0 "$(counter S1 complete)"
 
 # (e) non-complete category (hard-stop) with no retro.json -> allow; the gate
 # fires ONLY on a `complete` declaration.
