@@ -44,6 +44,15 @@ describe("reconcileOrphanRuns", () => {
     expect(finishes).toHaveLength(0);
   });
 
+  it("spares a run started at exactly bootTime (guard is >=, not >)", () => {
+    const records = [run({ runId: "boundary", startedAt: 200 })];
+    const bootTime = 200;
+
+    const finishes = reconcileOrphanRuns(records, bootTime);
+
+    expect(finishes).toHaveLength(0);
+  });
+
   it("leaves an already-settled run untouched", () => {
     const records = [
       run({ runId: "settled", startedAt: 100, endedAt: 150, exitCode: 0 }),
