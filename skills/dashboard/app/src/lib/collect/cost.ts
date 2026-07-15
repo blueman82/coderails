@@ -56,8 +56,9 @@ function readLoopCost(loopDir: string): LoopCostEntry | undefined {
   const retro = readJson(join(loopDir, "retro.json"));
   if (!isRecord(retro)) return undefined;
 
-  const cost = isRecord(retro.cost) ? retro.cost : undefined;
-  const usd = typeof cost?.total_usd_estimate === "number" ? cost.total_usd_estimate : undefined;
+  if (!isRecord(retro.cost)) return undefined;
+  const cost = retro.cost;
+  const usd = typeof cost.total_usd_estimate === "number" ? cost.total_usd_estimate : undefined;
   if (usd === undefined) return undefined;
 
   let createdMs = typeof retro.created === "string" ? Date.parse(retro.created) : NaN;
