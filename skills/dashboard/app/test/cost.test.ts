@@ -14,8 +14,7 @@ function makeTmpBase(): string {
 
 // Creates <base>/<slug>/<sessionId>/ with a progress.json (created field) and
 // an optional sibling retro.json (cost field) — mirrors the real
-// ~/.claude/agentic-loop/<repo-key>/<slug>/<sessionId>/ tree collectLoops
-// already walks.
+// ~/.claude/agentic-loop/<slug>/<sessionId>/ tree collectLoops already walks.
 function writeLoopDir(
   base: string,
   slug: string,
