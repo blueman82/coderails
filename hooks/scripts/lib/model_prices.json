@@ -1,6 +1,6 @@
 {
   "prices_as_of": "2026-06-24",
-  "price_source": "https://www.anthropic.com/pricing — no on-disk claude-api skill reference file found in this repo/plugin to cite instead (searched skills/, commands/, hooks/, ~/.claude). Cache-write/cache-read multipliers (1.25x/2x write, 0.1x read) are the documented economics from Anthropic's prompt caching docs, applied to each model's base input rate.",
+  "price_source": "https://www.anthropic.com/pricing — no on-disk claude-api skill reference file found in this repo/plugin to cite instead (searched skills/, commands/, hooks/, ~/.claude). Cache-write/cache-read multipliers (1.25x/2x write, 0.1x read) are the documented economics from Anthropic's prompt caching docs, applied to each model's base input rate. claude-sonnet-5 rates below are its INTRO price ($2.00/$10.00 per MTok, see its sonnet_intro_until field) rather than the standard $3.00/$15.00 — bump to standard rates once that date passes.",
   "per_mtok": {
     "claude-opus-4-8": {
       "input": 5.00,
