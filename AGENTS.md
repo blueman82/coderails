@@ -83,7 +83,7 @@ the Stop-hook gates — they can force a declared step to appear, not to be real
 **This repo.** This repo deliberately does not enable GitHub branch protection
 (2026-07-15) — that's a standing decision, not a pending TODO. So here, the
 server-side layer described above is absent, and the enforcement ceiling is
-unmitigated: the redirect-and-audit layer is the whole enforcement story, by
+unmitigated: the redirect-and-audit layer is the whole story, by
 design.
 
 ### Skills↔hooks seam convention
