@@ -74,11 +74,15 @@ Host and Origin headers. From any other device on the LAN, open
 `http://<LAN-IP>:<port>` (e.g. `http://192.168.50.140:4173`).
 
 For the persistent launchd agent, set `DASHBOARD_HOST` in the `plist`'s
-`EnvironmentVariables` dict (`launchd/com.coderails.dashboard.plist`) rather
-than exporting it ad hoc, then reinstall the agent so launchd picks it up.
+`EnvironmentVariables` dict (it ships with an empty `DASHBOARD_HOST` entry —
+fill in your LAN IP), then reinstall the agent
+(`launchd/install-dashboard-agent.sh`) so launchd picks it up.
 
 Leaving `DASHBOARD_HOST` unset (or empty) is unchanged from before this
 option existed: bind and guard are loopback-only, identical to today.
+Wildcard binds (`0.0.0.0`, `::`, `*`) and `host:port` forms are rejected at
+startup with a non-zero exit — the guard exact-matches one host, so a
+wildcard bind would silently 403 real LAN requests.
 
 **SECURITY NOTE:** the dashboard has an unauthenticated command-execution
 surface — the COMMAND DECK's `POST /run` and workflow-audit Approve/Deny both
