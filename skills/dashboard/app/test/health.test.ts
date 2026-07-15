@@ -84,7 +84,7 @@ describe("collectHealth", () => {
     );
   });
 
-  it("reports costWeek and costMonth as $0.00, labelled completed loops only, when the loops dir has no retro.json sources", async () => {
+  it("reports costWeek and costMonth as unavailable (null, not $0.00) when the loops dir has no retro.json sources", async () => {
     const tiles = await collectHealth({
       disciplineLogPath: join(tmpdir(), "does-not-exist.log"),
       projectsDir: MISSING_PROJECTS_DIR,
@@ -92,13 +92,13 @@ describe("collectHealth", () => {
     });
     const week = tiles.find((t) => t.key === "costWeek");
     const month = tiles.find((t) => t.key === "costMonth");
-    expect(week?.value).toBe("$0.00");
-    expect(week?.note).toBe("completed loops only");
-    expect(month?.value).toBe("$0.00");
-    expect(month?.note).toBe("completed loops only");
+    expect(week?.value).toBeNull();
+    expect(week?.note).toBe("unavailable: no completed loops in this window");
+    expect(month?.value).toBeNull();
+    expect(month?.note).toBe("unavailable: no completed loops in this window");
   });
 
-  it("sums frozen retro.json cost into costWeek and surfaces the shared prices_as_of as a staleness note", async () => {
+  it("sums frozen retro.json cost into costWeek, showing the summed token count and the shared prices_as_of as a staleness note", async () => {
     const now = new Date("2026-07-15T12:00:00Z");
     const loopsDir = makeTmpLoopsDir([
       { sessionId: "sess-1", created: "2026-07-14T10:00:00Z", usd: 1.5, tokens: 100_000 },
@@ -112,7 +112,7 @@ describe("collectHealth", () => {
     });
     const week = tiles.find((t) => t.key === "costWeek");
     expect(week?.value).toBe("$3.75");
-    expect(week?.note).toBe("completed loops only · prices as of 2026-07-01");
+    expect(week?.note).toBe("150K tokens · completed loops only · prices as of 2026-07-01");
   });
 
   it("reports usage5h as unavailable when the projects dir has no local transcripts", async () => {
