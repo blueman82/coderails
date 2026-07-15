@@ -106,7 +106,7 @@ Present one row per candidate cluster to the owner:
 | Proposed name / description | judge's `proposed_name` / `proposed_description` |
 | Verdict | judge's `verdict` (+ `reject_reason` if rejected) |
 
-Only rows with `verdict: "propose"` go forward to creation; rejected clusters are reported (with their reason) but nothing further is done with them.
+Only rows with `verdict: "propose"` go forward (to creation or a queue entry, per section 7); rejected clusters are reported (with their reason) but nothing further is done with them.
 
 **Privacy invariant.** The chart and every downstream artifact (proposal file, wrap-up report) contain only tool names, whitelisted heads, counts, and session ids — never verbatim transcript prose, file contents, or reconstructed intent beyond what those fields literally say. Any proposal artifact written to disk stays local (scratch or loop-state dir) and is never committed to the repo.
 
