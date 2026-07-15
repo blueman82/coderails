@@ -112,7 +112,7 @@ Only rows with `verdict: "propose"` go forward to creation; rejected clusters ar
 
 ## 7. Proceed to creation
 
-Every candidate the judge marked `propose` goes straight to the section-8 create step, no `AskUserQuestion`, no waiting on the owner. The judge's propose/reject verdict is the only filter that decides what gets built — nothing is created that the judge rejected, and zero `propose` verdicts is a complete, successful run, not a failure to escalate past.
+Unless the run is in queue-mode (section 5), every candidate the judge marked `propose` goes straight to the section-8 create step, no `AskUserQuestion`, no waiting on the owner. In queue-mode, a `propose` verdict is written as a queue entry instead (section 5) and is NOT also created here — the dashboard Approve-click is its sole creation path. Either way, the judge's propose/reject verdict is the only filter that decides what gets built — nothing is created that the judge rejected, and zero `propose` verdicts is a complete, successful run, not a failure to escalate past.
 
 ## 8. Create step — one skill at a time
 
