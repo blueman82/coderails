@@ -5,6 +5,9 @@
 #
 # Env overrides:
 #   DASHBOARD_PORT   Port to serve on (default: 4173).
+#   DASHBOARD_HOST   Bind host (default: 127.0.0.1, loopback-only). Set to a
+#                     LAN IP to allow other devices to reach the dashboard —
+#                     see skills/dashboard/SKILL.md for the security tradeoffs.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -13,7 +16,7 @@ STATE_DIR="$HOME/.claude/coderails-dashboard"
 PID_FILE="$STATE_DIR/dashboard.pid"
 LOG_FILE="$STATE_DIR/dashboard.log"
 PORT="${DASHBOARD_PORT:-4173}"
-HOST="127.0.0.1"
+HOST="${DASHBOARD_HOST:-127.0.0.1}"
 
 mkdir -p "$STATE_DIR"
 

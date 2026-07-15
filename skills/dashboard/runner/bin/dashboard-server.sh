@@ -59,4 +59,4 @@ if [[ "$NEED_BUILD" == "true" ]]; then
   npm run build
 fi
 
-exec npm run start -- --hostname 127.0.0.1 --port 4173
+exec npm run start -- --hostname "${DASHBOARD_HOST:-127.0.0.1}" --port 4173
