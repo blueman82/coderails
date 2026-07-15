@@ -99,6 +99,9 @@ export function reconcileOrphanRuns(records: RunRecord[], bootTime: number): Run
   for (const rec of newest) {
     if (rec.endedAt !== undefined) continue; // already settled
     if (rec.startedAt >= bootTime) continue; // started by this process — still in flight
+    // exitCode: -1 is the same sentinel route.ts's child.on("error") spawn-failure
+    // path uses (route.ts ~line 274) — both mean "abnormal/non-genuine exit," disambiguated
+    // here by the reconciled: true marker.
     finishes.push({ ...rec, endedAt: Date.now(), exitCode: -1, reconciled: true });
   }
   return finishes;
