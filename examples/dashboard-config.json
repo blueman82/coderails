@@ -46,7 +46,7 @@
     {
       "name": "inbox-brief",
       "label": "INBOX BRIEF",
-      "command": "Run exactly this command via the Bash tool and report its output, nothing else: bin/rachel \"Read tasks/inbox-brief.md and follow it.\" < /dev/null",
+      "command": "Run exactly this command via the Bash tool: bin/rachel \"Read tasks/inbox-brief.md and follow it.\" < /dev/null . Its output will end with a line `BRIEF FILE: <path>`. Read that file and make your ENTIRE final message exactly its contents — nothing before it, nothing after it, no preamble, no code fence. If no `BRIEF FILE:` line appears (delivery failed or the sweep was skipped), instead report Rachel's stated outcome in a single line.",
       "cwd": "/Users/harrison/Github/assistant-agent",
       "profile": "bypass",
       "bypassPermissions": true
