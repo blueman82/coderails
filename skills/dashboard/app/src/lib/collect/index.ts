@@ -240,11 +240,14 @@ export function createAggregator(deps: AggregatorDeps): Aggregator {
       // Settle any runs orphaned by a server process that died mid-flight
       // (crashloop, launchctl restart, kill) before its in-process
       // child.on("exit") handler could write the finish line — must run
-      // BEFORE the readRuns below, and unguarded (no "ran once" flag): this
-      // route instantiates a fresh aggregator per SSE connection, and the
-      // reconciler is idempotent (a second pass sees the synthetic finish
-      // lines already appended and no-ops), so a guard would only
-      // reintroduce the per-module-graph duplication problem it avoids.
+      // BEFORE the readRuns below, and unguarded (no "ran once" flag):
+      // start() runs once per SSE connection, building a fresh aggregator
+      // each time, so a module-scope "ran once" guard would silently stop
+      // the reconciler from running on the second and all later
+      // connections — any orphan created after the first connection would
+      // then never be settled. Idempotency (a second pass sees the
+      // synthetic finish line already appended and no-ops) is what makes
+      // running it unguarded on every call both safe and correct.
       safeCall("runs", () => { reconcileOrphanRunsInLedger({ runsDir: deps.runsDir }); return undefined; }, undefined);
       const runs = safeCall("runs", () => readRuns(runsLimit, { runsDir: deps.runsDir }), []);
       snapshot = { ...snapshot, runs };
