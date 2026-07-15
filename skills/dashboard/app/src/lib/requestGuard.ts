@@ -54,10 +54,16 @@ function hostnameFromHostHeader(host: string): string {
 // send for opaque/sandboxed origins) is rejected — any open browser tab can
 // reach 127.0.0.1, so this is the wall against cross-origin/DNS-rebinding
 // requests reaching the guarded endpoint.
+//
+// LAN mode (DASHBOARD_HOST set): the exact configured host is additionally
+// accepted for both Host and Origin, on top of loopback — never a relaxation
+// of the "any doubt → reject" rule above, just one more exact string in the
+// allowlist. A rebinding attempt (Host: evil.com) or a cross-origin request
+// (Origin pointed elsewhere) is rejected exactly as before.
 export function isLocalOrigin(request: Request): boolean {
   const host = request.headers.get("host");
   if (!host) return false;
-  if (!isLocalhost(hostnameFromHostHeader(host))) return false;
+  if (!isAllowedHost(hostnameFromHostHeader(host))) return false;
 
   const origin = request.headers.get("origin");
   if (origin === null) return true;
@@ -68,5 +74,5 @@ export function isLocalOrigin(request: Request): boolean {
   } catch {
     return false;
   }
-  return isLocalhost(originHost);
+  return isAllowedHost(originHost);
 }
