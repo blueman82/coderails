@@ -1,6 +1,6 @@
 import { watch, type FSWatcher } from "node:fs";
 import type { DashboardConfig } from "../config";
-import { readRuns, type RunRecord } from "../runlog";
+import { readRuns, reconcileOrphanRunsInLedger, type RunRecord } from "../runlog";
 import { runOutputBus as defaultRunOutputBus, type RunOutputBus, type RunOutputEvent } from "../runOutputBus";
 import { collectBuilds, type BuildEntry } from "./builds";
 import { collectHealth, type HealthTile } from "./health";
