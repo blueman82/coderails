@@ -98,6 +98,23 @@ describe("collectHealth", () => {
     expect(month?.note).toBe("completed loops only");
   });
 
+  it("sums frozen retro.json cost into costWeek and surfaces the shared prices_as_of as a staleness note", async () => {
+    const now = new Date("2026-07-15T12:00:00Z");
+    const loopsDir = makeTmpLoopsDir([
+      { sessionId: "sess-1", created: "2026-07-14T10:00:00Z", usd: 1.5, tokens: 100_000 },
+      { sessionId: "sess-2", created: "2026-07-13T10:00:00Z", usd: 2.25, tokens: 50_000 },
+    ]);
+    const tiles = await collectHealth({
+      disciplineLogPath: join(tmpdir(), "does-not-exist.log"),
+      projectsDir: MISSING_PROJECTS_DIR,
+      loopsDir,
+      now,
+    });
+    const week = tiles.find((t) => t.key === "costWeek");
+    expect(week?.value).toBe("$3.75");
+    expect(week?.note).toBe("completed loops only · prices as of 2026-07-01");
+  });
+
   it("reports usage5h as unavailable when the projects dir has no local transcripts", async () => {
     const tiles = await collectHealth({
       disciplineLogPath: join(tmpdir(), "does-not-exist.log"),
