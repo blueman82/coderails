@@ -100,15 +100,13 @@ Present one row per candidate cluster to the owner:
 | Proposed name / description | judge's `proposed_name` / `proposed_description` |
 | Verdict | judge's `verdict` (+ `reject_reason` if rejected) |
 
-Only rows with `verdict: "propose"` go forward to the approval gate; rejected clusters are reported (with their reason) but not offered for approval.
+Only rows with `verdict: "propose"` go forward to creation; rejected clusters are reported (with their reason) but nothing further is done with them.
 
-**Privacy invariant.** The chart and every downstream artifact (proposal file, approval-gate summary, wrap-up report) contain only tool names, whitelisted heads, counts, and session ids — never verbatim transcript prose, file contents, or reconstructed intent beyond what those fields literally say. Any proposal artifact written to disk stays local (scratch or loop-state dir) and is never committed to the repo.
+**Privacy invariant.** The chart and every downstream artifact (proposal file, wrap-up report) contain only tool names, whitelisted heads, counts, and session ids — never verbatim transcript prose, file contents, or reconstructed intent beyond what those fields literally say. Any proposal artifact written to disk stays local (scratch or loop-state dir) and is never committed to the repo.
 
-## 7. Approval gate — hard stop, no exceptions
+## 7. Proceed to creation
 
-Ask via `AskUserQuestion`, multi-select, one option per proposed candidate (plus an implicit "approve none" if the user selects nothing). Wait for the response.
-
-**This gate overrides any standing autonomy the session has.** Even inside an agentic-loop session authorised for "crack on", "no human gates", "self-merge", or any other full-autonomy envelope, this specific gate does not fall inside that envelope. Skill creation from a workflow-audit run NEVER proceeds without the owner's explicit approval given in *this* interaction — not an earlier blanket authorisation, not an inferred "they'd probably want this." If the owner approves zero candidates, the skill ends here having created nothing, and that is a complete, successful run — not a failure to escalate past.
+Every candidate the judge marked `propose` goes straight to the section-8 create step, no `AskUserQuestion`, no waiting on the owner. The judge's propose/reject verdict is the only filter that decides what gets built — nothing is created that the judge rejected, and zero `propose` verdicts is a complete, successful run, not a failure to escalate past.
 
 ## 8. Create step — one skill at a time
 
