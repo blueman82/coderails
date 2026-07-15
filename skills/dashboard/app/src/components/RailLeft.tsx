@@ -61,6 +61,8 @@ const KPI_LABELS: Record<HealthTile["key"], string> = {
   usageWeek: "Week",
   hooksFired: "Hooks Fired",
   lintFindings: "Lint Findings",
+  costWeek: "Cost (Week)",
+  costMonth: "Cost (Month)",
 };
 
 function findTile(health: HealthTile[], key: HealthTile["key"]): HealthTile | undefined {
