@@ -56,6 +56,44 @@ Override the port with `DASHBOARD_PORT`:
 DASHBOARD_PORT=4200 scripts/start-dashboard.sh
 ```
 
+## LAN access (opt-in)
+
+By default the dashboard binds to `127.0.0.1` and only accepts requests whose
+Host/Origin resolve to loopback — nothing on the network can reach it. Set
+`DASHBOARD_HOST` to your machine's LAN IP to allow other devices on the same
+network to reach it too:
+
+```
+DASHBOARD_HOST=192.168.50.140 scripts/start-dashboard.sh
+```
+
+This does two things together, from the one variable: the server binds to
+that exact address instead of `127.0.0.1`, and the request guard additionally
+accepts that exact host (and only that host) alongside loopback on both the
+Host and Origin headers. From any other device on the LAN, open
+`http://<LAN-IP>:<port>` (e.g. `http://192.168.50.140:4173`).
+
+For the persistent launchd agent, set `DASHBOARD_HOST` in the `plist`'s
+`EnvironmentVariables` dict (it ships with an empty `DASHBOARD_HOST` entry —
+fill in your LAN IP), then reinstall the agent
+(`launchd/install-dashboard-agent.sh`) so launchd picks it up.
+
+Leaving `DASHBOARD_HOST` unset (or empty) is unchanged from before this
+option existed: bind and guard are loopback-only, identical to today.
+Wildcard binds (`0.0.0.0`, `::`, `*`) and `host:port` forms are rejected at
+startup with a non-zero exit — the guard exact-matches one host, so a
+wildcard bind would silently 403 real LAN requests.
+
+**SECURITY NOTE:** the dashboard has an unauthenticated command-execution
+surface — the COMMAND DECK's `POST /run` and workflow-audit Approve/Deny both
+execute declared commands with no login of any kind. The Host/Origin guard
+defends against a hostile web page or DNS-rebinding attack reaching the
+dashboard from your browser; it does **not** authenticate LAN devices. Any
+device on your LAN that can reach the port can trigger declared runs. Only
+enable LAN access on a trusted home network, and use a DHCP reservation or
+static lease for the host — if the host's LAN IP changes, the dashboard will
+fail to bind on next start rather than break silently.
+
 ## Stopping
 
 ```

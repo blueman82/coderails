@@ -5,6 +5,9 @@
 #
 # Env overrides:
 #   DASHBOARD_PORT   Port to serve on (default: 4173).
+#   DASHBOARD_HOST   Bind host (default: 127.0.0.1, loopback-only). Set to a
+#                     LAN IP to allow other devices to reach the dashboard —
+#                     see skills/dashboard/SKILL.md for the security tradeoffs.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -13,7 +16,34 @@ STATE_DIR="$HOME/.claude/coderails-dashboard"
 PID_FILE="$STATE_DIR/dashboard.pid"
 LOG_FILE="$STATE_DIR/dashboard.log"
 PORT="${DASHBOARD_PORT:-4173}"
-HOST="127.0.0.1"
+HOST="${DASHBOARD_HOST:-127.0.0.1}"
+
+# Accept only loopback shortcuts or a concrete IP literal — the request guard
+# exact-matches ONE host, so a wildcard bind, a host:port form, or a hostname
+# would silently 403 real LAN requests. Empty/unset DASHBOARD_HOST is fine
+# (falls through to the loopback default above).
+if [[ -n "${DASHBOARD_HOST:-}" ]]; then
+  case "$HOST" in
+    localhost|127.0.0.1|::1) ;;
+    0.0.0.0|::|'*')
+      echo "DASHBOARD_HOST='$HOST' is not a concrete host IP (wildcards like 0.0.0.0 and host:port forms are rejected — the guard exact-matches one host; see SKILL.md)" >&2
+      exit 1
+      ;;
+    *)
+      if [[ "$HOST" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+:[0-9]+$ ]]; then
+        echo "DASHBOARD_HOST='$HOST' is not a concrete host IP (wildcards like 0.0.0.0 and host:port forms are rejected — the guard exact-matches one host; see SKILL.md)" >&2
+        exit 1
+      elif [[ "$HOST" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        : # concrete IPv4 literal — accept
+      elif [[ "$HOST" == *:* ]]; then
+        : # bare IPv6 literal — accept
+      else
+        echo "DASHBOARD_HOST='$HOST' is not a concrete host IP (wildcards like 0.0.0.0 and host:port forms are rejected — the guard exact-matches one host; see SKILL.md)" >&2
+        exit 1
+      fi
+      ;;
+  esac
+fi
 
 mkdir -p "$STATE_DIR"
 

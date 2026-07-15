@@ -59,4 +59,34 @@ if [[ "$NEED_BUILD" == "true" ]]; then
   npm run build
 fi
 
-exec npm run start -- --hostname 127.0.0.1 --port 4173
+# Accept only loopback shortcuts or a concrete IP literal — the request guard
+# exact-matches ONE host, so a wildcard bind, a host:port form, or a hostname
+# would silently 403 real LAN requests. Empty/unset DASHBOARD_HOST is fine
+# (falls through to the loopback default below).
+# Under launchd (KeepAlive + ThrottleInterval=60) a rejection here means the
+# agent respawns and fails every 60s until DASHBOARD_HOST is fixed — that's
+# the correct fail-loud behaviour for a misconfiguration, not a bug.
+if [[ -n "${DASHBOARD_HOST:-}" ]]; then
+  case "$DASHBOARD_HOST" in
+    localhost|127.0.0.1|::1) ;;
+    0.0.0.0|::|'*')
+      echo "DASHBOARD_HOST='$DASHBOARD_HOST' is not a concrete host IP (wildcards like 0.0.0.0 and host:port forms are rejected — the guard exact-matches one host; see SKILL.md)" >&2
+      exit 1
+      ;;
+    *)
+      if [[ "$DASHBOARD_HOST" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+:[0-9]+$ ]]; then
+        echo "DASHBOARD_HOST='$DASHBOARD_HOST' is not a concrete host IP (wildcards like 0.0.0.0 and host:port forms are rejected — the guard exact-matches one host; see SKILL.md)" >&2
+        exit 1
+      elif [[ "$DASHBOARD_HOST" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        : # concrete IPv4 literal — accept
+      elif [[ "$DASHBOARD_HOST" == *:* ]]; then
+        : # bare IPv6 literal — accept
+      else
+        echo "DASHBOARD_HOST='$DASHBOARD_HOST' is not a concrete host IP (wildcards like 0.0.0.0 and host:port forms are rejected — the guard exact-matches one host; see SKILL.md)" >&2
+        exit 1
+      fi
+      ;;
+  esac
+fi
+
+exec npm run start -- --hostname "${DASHBOARD_HOST:-127.0.0.1}" --port 4173
