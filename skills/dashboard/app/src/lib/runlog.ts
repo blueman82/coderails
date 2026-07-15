@@ -2,6 +2,7 @@ import { appendFileSync, chmodSync, mkdirSync, readFileSync, statSync, writeFile
 import { randomBytes } from "node:crypto";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { performance } from "node:perf_hooks";
 import type { PermissionProfile } from "./config";
 
 export interface RunRecord {
