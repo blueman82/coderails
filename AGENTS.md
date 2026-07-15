@@ -80,6 +80,12 @@ no direct pushes), which no local agent can fake. The local hook complements
 branch protection; it does not replace it. (The same honest boundary applies to
 the Stop-hook gates — they can force a declared step to appear, not to be real.)
 
+**This repo.** This repo deliberately does not enable GitHub branch protection
+(2026-07-15) — that's a standing decision, not a pending TODO. So here, the
+server-side layer described above is absent, and the enforcement ceiling is
+unmitigated: the redirect-and-audit layer is the whole enforcement story, by
+design.
+
 ### Skills↔hooks seam convention
 
 When a skill instructs an action that a hook gates — e.g. `git merge`/`gh pr create`/`gh pr merge` → `enforce_pr_workflow`; code-file & plugin-source (`SKILL.md`/command) edits on main → `no_edit_on_main`; `git commit` → `test_gate` — the skill must name the gating hook and the resolution path (what the user needs to do, or what bypass flag satisfies it). When you add a hook that gates a common action, update the skills that instruct it. The merge gate (`enforce_pr_workflow`) recognises PR-review evidence as the `/pr-review-toolkit:review-pr <PR#>` Skill invocation (with the PR number in args), NOT a manually-spawned agent fanout — so the agentic loop must invoke the Skill to clear the merge gate.
