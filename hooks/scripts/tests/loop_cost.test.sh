@@ -217,6 +217,41 @@ check "traversal: outside-projects-dir transcript NOT mined" "false" "$result"
 result=$(printf '%s' "$out" | jq -r '.per_model["claude-sonnet-5"].input_tokens // "absent"')
 check "traversal: sanitised in-tree transcript IS mined" "42" "$result"
 
+# --- Test (i2b): whole-batch wipeout guard — a line that IS valid JSON but
+# has a WRONG-TYPED usage field (a string, not an object) must not crash the
+# jq -s aggregation and wipe every other transcript's real numbers to {}.
+# The bad line is dropped like any other malformed input; the good line
+# still counts. This is distinct from the parse-tolerance test below (which
+# covers non-JSON garbage) — this covers well-formed JSON with a type error
+# one level deeper, which `fromjson?` alone cannot catch. ---
+sess="wrong-typed-usage-session"
+proj="$TMP/projects/-test-proj-wipeout"
+mkdir -p "$proj"
+{
+  usage_line "msg_good1" "claude-opus-4-8" 100 50 0 0 0
+  jq -cn '{type:"assistant",message:{id:"msg_bad1",model:"claude-opus-4-8",usage:"not-an-object"}}'
+} > "$proj/$sess.jsonl"
+out=$(dc_mine_token_usage "$sess")
+result=$(printf '%s' "$out" | jq -r '.per_model["claude-opus-4-8"].input_tokens // "WIPED"')
+check "whole-batch wipeout: wrong-typed usage line dropped, valid line still counted (not wiped to {})" "100" "$result"
+
+# --- Test (i2c): same wipeout risk one level deeper — a well-formed usage
+# OBJECT whose cache_creation field is wrong-typed (a string, not an
+# object) must not crash when indexed for .ephemeral_5m_input_tokens. Falls
+# through to the legacy flat-field branch (cache_creation_input_tokens),
+# same as if cache_creation were absent. ---
+sess="wrong-typed-cache-creation-session"
+proj="$TMP/projects/-test-proj-wipeout2"
+mkdir -p "$proj"
+{
+  jq -cn '{type:"assistant",message:{id:"msg_cc1",model:"claude-opus-4-8",usage:{input_tokens:1,output_tokens:1,cache_creation:"garbage",cache_creation_input_tokens:500}}}'
+} > "$proj/$sess.jsonl"
+out=$(dc_mine_token_usage "$sess")
+result=$(printf '%s' "$out" | jq -r '.per_model["claude-opus-4-8"].input_tokens // "WIPED"')
+check "wrong-typed cache_creation: batch not wiped, valid fields still counted" "1" "$result"
+result=$(printf '%s' "$out" | jq -r '.per_model["claude-opus-4-8"].cache_write_5m_tokens')
+check "wrong-typed cache_creation: falls through to legacy flat field (500)" "500" "$result"
+
 # --- Test (i3): stage-1 parse tolerance — a genuinely non-JSON garbage
 # line mixed in with a valid usage line must not zero the whole transcript.
 # Guards the `fromjson? // empty` filter: a malformed line drops itself,

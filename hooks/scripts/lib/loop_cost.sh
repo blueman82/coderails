@@ -93,7 +93,12 @@ dc_mine_token_usage() {
         | select(.type == "assistant")
         | select(.message.id != null and (.message.id | type) == "string")
         | select(.message.model != null and .message.model != "<synthetic>")
-        | select(.message.usage != null)
+        # Type-guard, not just presence: a wrong-typed usage (e.g. a string)
+        # is not just "no usage" — indexing it downstream (.usage.cache_creation)
+        # throws and jq -s aborts the WHOLE aggregation, wiping every other
+        # transcript real numbers to a bare {}. Drop the one bad line here
+        # instead, same as any other malformed line, so the batch survives.
+        | select(.message.usage != null and (.message.usage | type == "object"))
         | { id: .message.id, model: .message.model, usage: .message.usage }
       ]
       # dedupe by message.id, first occurrence wins (unique_by keeps the
@@ -104,7 +109,10 @@ dc_mine_token_usage() {
           {};
           ($e.model) as $m
           | (.[$m] // {input_tokens:0,output_tokens:0,cache_read_tokens:0,cache_write_5m_tokens:0,cache_write_1h_tokens:0}) as $cur
-          | ($e.usage.cache_creation) as $cc
+          # Wrong-typed cache_creation (e.g. a string) must fall through to
+          # the legacy-field branch, not throw on ".ephemeral_5m_input_tokens"
+          # — same whole-batch-wipeout risk as the usage type-guard above.
+          | (if ($e.usage.cache_creation | type) == "object" then $e.usage.cache_creation else null end) as $cc
           | (if $cc != null then ($cc.ephemeral_5m_input_tokens // 0) else ($e.usage.cache_creation_input_tokens // 0) end) as $cw5m
           | (if $cc != null then ($cc.ephemeral_1h_input_tokens // 0) else 0 end) as $cw1h
           | .[$m] = {
