@@ -73,6 +73,73 @@ export function readRuns(limit: number, opts?: RunLogOptions): RunRecord[] {
     .slice(0, limit);
 }
 
+// Folds the FULL ledger by newest line per runId — unlike readRuns, this is
+// not truncated to a limit, since an orphan can sit behind arbitrarily many
+// more-recent runs and still needs to be found.
+function foldLedger(records: RunRecord[]): RunRecord[] {
+  const byRunId = new Map<string, RunRecord>();
+  for (const rec of records) byRunId.set(rec.runId, rec);
+  return Array.from(byRunId.values());
+}
+
+// Pure core: given the full ledger's records and a boot timestamp, returns
+// the synthetic finish records to append for orphaned runs — a run whose
+// newest line has no endedAt because the server process that would have
+// written its finish line (see route.ts's child.on("exit") handler) died or
+// was replaced before that could happen.
+//
+// A run started by THIS process (startedAt >= bootTime) is spared — it may
+// still be genuinely in flight, and settling it would clobber a live run.
+// This is the critical guard: bootTime must precede every run this process
+// serves, which is why callers must pass performance.timeOrigin rather than
+// a module-load Date.now() (see reconcileOrphanRunsInLedger below).
+export function reconcileOrphanRuns(records: RunRecord[], bootTime: number): RunRecord[] {
+  const newest = foldLedger(records);
+  const finishes: RunRecord[] = [];
+  for (const rec of newest) {
+    if (rec.endedAt !== undefined) continue; // already settled
+    if (rec.startedAt >= bootTime) continue; // started by this process — still in flight
+    finishes.push({ ...rec, endedAt: Date.now(), exitCode: -1, reconciled: true });
+  }
+  return finishes;
+}
+
+// Wrapper: reads the ledger file, reconciles orphans against the true
+// process-start time, and appends any synthetic finish lines. Called
+// unguarded on every aggregator start() — idempotent, since a second pass
+// folds the synthetic finish lines just appended and finds endedAt already
+// set, so it's a no-op on subsequent calls (see collect/index.ts).
+export function reconcileOrphanRunsInLedger(opts?: RunLogOptions): void {
+  let raw: string;
+  try {
+    raw = readFileSync(runsFilePath(opts), "utf-8");
+  } catch {
+    return; // no ledger yet — nothing to reconcile
+  }
+
+  const records: RunRecord[] = [];
+  for (const line of raw.split("\n")) {
+    if (!line.trim()) continue;
+    try {
+      records.push(JSON.parse(line) as RunRecord);
+    } catch {
+      // skip malformed line
+    }
+  }
+
+  // performance.timeOrigin, not a module-load Date.now(): Next.js compiles
+  // route.ts and the aggregator as separate module graphs (see the token
+  // comment below for the same phenomenon), so a module-level constant
+  // would initialize once per layer rather than once per process — and
+  // could land AFTER a run this process already started, wrongly settling
+  // a live run. performance.timeOrigin is the true OS-process start time,
+  // identical across module graphs within the same process, in the same
+  // wall-clock (ms since epoch) domain as startedAt.
+  const bootTime = performance.timeOrigin;
+  const finishes = reconcileOrphanRuns(records, bootTime);
+  for (const finish of finishes) appendRun(finish, opts);
+}
+
 // mintToken generates a per-server-start secret. It is delivered to the
 // client ONLY via server-render into the page (see Task 8) — never through
 // any API response body — so an attacker who can only reach the HTTP API
