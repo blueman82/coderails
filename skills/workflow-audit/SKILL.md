@@ -47,11 +47,19 @@ Read `references/judge-contract.md` in full, then spawn exactly one fresh sonnet
 
 **The judge receives nothing else.** No transcript content, no conversation history, no orchestrator commentary. This is a deliberate privacy boundary: the judge's entire vocabulary is tool names, whitelisted heads, counts, session ids, and n-gram lengths — the same boundary `scan_transcripts.sh` and `cluster_ngrams.sh` already enforce on their own output. The judge returns one propose/reject verdict per cluster per the contract's schema.
 
-## 5. Queue-mode output (optional)
+## 5. Queue-mode output (optional) — mutually exclusive with in-session creation
 
-When running inside a session that also wants proposals surfaced on the
-dashboard (not just the interactive chart below), pipe each `verdict:
-"propose"` judge output through the writer script, once per candidate:
+A run either creates in-session (the default: every `propose` verdict goes
+straight to section 8, no queue entries written) **or** defers to the
+dashboard (queue-mode: every `propose` verdict is written as a queue entry
+and the run does NOT also create in-session). Never both for the same run
+— a candidate is created by exactly one path, never twice. Choose
+queue-mode when the session wants proposals surfaced on the dashboard for
+the owner to trigger builds from at a time of their choosing, instead of
+building them immediately in-session.
+
+To run in queue-mode, pipe each `verdict: "propose"` judge output through
+the writer script, once per candidate, instead of proceeding to section 8:
 
 ```bash
 echo "$JUDGE_VERDICT_JSON" | bash skills/workflow-audit/scripts/write_queue_entry.sh \
@@ -60,23 +68,21 @@ echo "$JUDGE_VERDICT_JSON" | bash skills/workflow-audit/scripts/write_queue_entr
   --sessions "$CLUSTER_SESSIONS_JSON"
 ```
 
-This is a separate, dashboard-only surface from the in-session flow above,
-which now goes straight to creation with no interactive gate of its own.
-Queue-mode gives the same proposals a second, asynchronous surface on the
-dashboard.
-
-**The dashboard's own gate stays exactly as it is:** a dashboard "Approve"
-click on one of these entries flips its on-disk `status` from `pending` to
-`approved` and triggers a build — the dashboard's approve-path spawns a
-detached headless build that re-validates the entry's content hash and
-drives the section-8 create step (see `docs/REFERENCE.md`'s "Approve-click
-build runner" entry for the full runner contract). **A stale or
-context-free status flip is not equivalent to a live owner exchange** — an
-`approved` queue entry carries real consequence, so treat the moment of
-clicking Approve with the same weight as any other consent that triggers
-action, not less because it happened outside a live conversation. The
-runner never merges the resulting skill PR; the owner reviews and merges
-it by hand.
+**The dashboard build trigger is owner-initiated, not an audit surface.**
+A dashboard "Approve" click on one of these entries flips its on-disk
+`status` from `pending` to `approved` and triggers a build — the
+dashboard's approve-path spawns a detached headless build that
+re-validates the entry's content hash and drives the section-8 create
+step (see `docs/REFERENCE.md`'s "Approve-click build runner" entry for the
+full runner contract). This is the owner clicking a button on their own
+initiative, not the session pausing to ask — it never blocks or stalls a
+session, and it is the sole creation path for a queue-mode candidate.
+**A stale or context-free status flip is not equivalent to a live owner
+exchange** — an `approved` queue entry carries real consequence, so treat
+the moment of clicking Approve with the same weight as any other consent
+that triggers action, not less because it happened outside a live
+conversation. The runner never merges the resulting skill PR; the owner
+reviews and merges it by hand.
 
 **Zero clicks is a complete, successful run here too** — an audit run
 that writes queue entries nobody has approved yet ends cleanly; there is
