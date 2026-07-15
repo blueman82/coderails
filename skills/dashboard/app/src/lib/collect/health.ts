@@ -62,6 +62,29 @@ function lintFindingsTile(): HealthTile {
   return { key: "lintFindings", value: null, note: "unavailable: wiki-lint persists no report file" };
 }
 
+// USD headline with two decimal places: 3.75 -> "$3.75". total_usd_estimate
+// is frozen at teardown by the miner — this formats a stored number, it
+// never re-prices.
+function formatUsd(n: number): string {
+  return `$${n.toFixed(2)}`;
+}
+
+// Cost tiles sum retro.json's frozen cost.total_usd_estimate across
+// COMPLETED loops only — a different denominator from the usage5h/usageWeek
+// tiles above, which sum every transcript regardless of loop completion.
+// The note names that scope explicitly so the two don't read as
+// contradictory. A derivable shared prices_as_of is surfaced as a
+// staleness note; when the summed loops disagree (or none carry one) it's
+// omitted rather than fabricated.
+function costTile(key: "costWeek" | "costMonth", bucket: CostBucket): HealthTile {
+  const scopeNote = "completed loops only";
+  return {
+    key,
+    value: formatUsd(bucket.usd),
+    note: bucket.pricesAsOf ? `${scopeNote} · prices as of ${bucket.pricesAsOf}` : scopeNote,
+  };
+}
+
 // discipline.log (written by the hooks in ~/.claude/hooks) is plain text,
 // one line per hook invocation, each line starting with an ISO-8601
 // timestamp: "<timestamp> hook=<name> ... blocked=<0|1>". The dashboard
