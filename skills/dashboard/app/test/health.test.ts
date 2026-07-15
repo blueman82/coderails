@@ -53,14 +53,29 @@ afterEach(() => {
 });
 
 describe("collectHealth", () => {
-  it("always returns exactly the four documented tile keys", async () => {
+  it("always returns exactly the six documented tile keys", async () => {
     const tiles = await collectHealth({
       disciplineLogPath: join(tmpdir(), "does-not-exist.log"),
       projectsDir: MISSING_PROJECTS_DIR,
+      loopsDir: join(tmpdir(), "does-not-exist-health-loops"),
     });
     expect(tiles.map((t) => t.key).sort()).toEqual(
-      ["hooksFired", "lintFindings", "usage5h", "usageWeek"].sort()
+      ["costMonth", "costWeek", "hooksFired", "lintFindings", "usage5h", "usageWeek"].sort()
     );
+  });
+
+  it("reports costWeek and costMonth as $0.00, labelled completed loops only, when the loops dir has no retro.json sources", async () => {
+    const tiles = await collectHealth({
+      disciplineLogPath: join(tmpdir(), "does-not-exist.log"),
+      projectsDir: MISSING_PROJECTS_DIR,
+      loopsDir: join(tmpdir(), "does-not-exist-health-loops"),
+    });
+    const week = tiles.find((t) => t.key === "costWeek");
+    const month = tiles.find((t) => t.key === "costMonth");
+    expect(week?.value).toBe("$0.00");
+    expect(week?.note).toBe("completed loops only");
+    expect(month?.value).toBe("$0.00");
+    expect(month?.note).toBe("completed loops only");
   });
 
   it("reports usage5h as unavailable when the projects dir has no local transcripts", async () => {
