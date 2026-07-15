@@ -1,6 +1,6 @@
 {
   "prices_as_of": "2026-06-24",
-  "price_source": "https://www.anthropic.com/pricing (no on-disk claude-api skill reference file found in this repo or plugin to cite instead — searched skills/, commands/, hooks/); cache-write/cache-read multipliers (1.25x/2x write, 0.1x read) applied per skills/claude-api's cached SKILL.md Current Models table and cross-referenced against this repo's own skills/claude-api SKILL.md if present",
+  "price_source": "https://www.anthropic.com/pricing — no on-disk claude-api skill reference file found in this repo/plugin to cite instead (searched skills/, commands/, hooks/, ~/.claude). Cache-write/cache-read multipliers (1.25x/2x write, 0.1x read) are the documented economics from Anthropic's prompt caching docs, applied to each model's base input rate.",
   "per_mtok": {
     "claude-opus-4-8": {
       "input": 5.00,
