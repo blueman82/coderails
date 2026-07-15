@@ -117,12 +117,16 @@ function hooksFiredTile(path: string, now: Date): HealthTile {
 export async function collectHealth(options: CollectHealthOptions = {}): Promise<HealthTile[]> {
   const disciplineLogPath = options.disciplineLogPath ?? DEFAULT_DISCIPLINE_LOG_PATH;
   const projectsDir = options.projectsDir ?? DEFAULT_PROJECTS_DIR;
+  const loopsDir = options.loopsDir ?? DEFAULT_LOOPS_DIR;
   const now = options.now ?? new Date();
   const usage = await collectUsage(projectsDir, now);
+  const cost = collectLoopCost(loopsDir, now);
   return [
     usageTile("usage5h", usage.last5h),
     usageTile("usageWeek", usage.week),
     hooksFiredTile(disciplineLogPath, now),
     lintFindingsTile(),
+    costTile("costWeek", cost.week),
+    costTile("costMonth", cost.month),
   ];
 }
