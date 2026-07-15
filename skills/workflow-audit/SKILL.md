@@ -5,11 +5,11 @@ description: Use when the user asks to look at recent sessions and find repeated
 
 # Workflow Audit
 
-Mines Claude Code session transcripts for tool-use patterns that repeat across sessions, judges which ones are genuine candidates for a new skill, and — only after explicit owner approval — creates each approved skill through the normal `writing-skills` TDD process and a full PR gate.
+Mines Claude Code session transcripts for tool-use patterns that repeat across sessions, judges which ones are genuine candidates for a new skill, and creates each proposed skill through the normal `writing-skills` TDD process and a full PR gate.
 
 ## Overview
 
-Four stages: scan transcripts into tool-use event sequences, cluster repeated n-grams across sessions, hand the clusters to a fresh judge subagent for propose/reject verdicts, then present the proposals to the owner and stop. Nothing is created without an explicit approval in that interaction.
+Four stages: scan transcripts into tool-use event sequences, cluster repeated n-grams across sessions, hand the clusters to a fresh judge subagent for propose/reject verdicts, then carry every `propose` verdict straight into creation. Nothing is created that the judge rejected; nothing else stands in the way of what it proposed.
 
 ## 1. Scope mapping
 
