@@ -73,11 +73,19 @@ function formatUsd(n: number): string {
 // COMPLETED loops only — a different denominator from the usage5h/usageWeek
 // tiles above, which sum every transcript regardless of loop completion.
 // The note names that scope explicitly so the two don't read as
-// contradictory. A derivable shared prices_as_of is surfaced as a
-// staleness note; when the summed loops disagree (or none carry one) it's
-// omitted rather than fabricated.
+// contradictory, and carries the summed token count (tokens ≈ $estimate)
+// so bucket.tokens has a real consumer rather than being computed and never
+// shown. A derivable shared prices_as_of is appended as a staleness note;
+// when the summed loops disagree (or none carry one) it's omitted rather
+// than fabricated. usd === null means zero completed loops fell in this
+// window (no-data) — distinct from a real $0 spend — so it renders
+// unavailable exactly like the usage tiles above, rather than a misleading
+// "$0.00".
 function costTile(key: "costWeek" | "costMonth", bucket: CostBucket): HealthTile {
-  const scopeNote = "completed loops only";
+  if (bucket.usd === null) {
+    return { key, value: null, note: "unavailable: no completed loops in this window" };
+  }
+  const scopeNote = `${formatTokenCount(bucket.tokens ?? 0)} tokens · completed loops only`;
   return {
     key,
     value: formatUsd(bucket.usd),
