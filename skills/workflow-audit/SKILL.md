@@ -60,25 +60,25 @@ echo "$JUDGE_VERDICT_JSON" | bash skills/workflow-audit/scripts/write_queue_entr
   --sessions "$CLUSTER_SESSIONS_JSON"
 ```
 
-This is additive to, never a replacement for, the interactive approval
-gate in section 7 below — the session's own `AskUserQuestion` flow runs
-exactly as it always has, unchanged. Queue-mode gives the same proposals a
-second, asynchronous surface on the dashboard.
+This is a separate, dashboard-only surface from the in-session flow above,
+which now goes straight to creation with no interactive gate of its own.
+Queue-mode gives the same proposals an asynchronous surface on the
+dashboard, for owners who want to review before a build kicks off there.
 
-**Every pinned invariant from section 7 still applies to a queue entry, with
-one update:** a dashboard "Approve" click on one of these entries flips its
-on-disk `status` from `pending` to `approved` **and now also triggers a
-build** — the dashboard's approve-path spawns a detached headless build
-that re-validates the entry's content hash and drives the section-8 create
-step (see `docs/REFERENCE.md`'s "Approve-click build runner" entry for the
-full runner contract). **A stale or context-free status flip is still not
-equivalent to a live owner exchange** — an `approved` queue entry now
-carries real consequence, so treat the moment of clicking Approve with the
-same weight as any other consent that triggers action, not less because
-it happened outside a live conversation. The runner never merges the
-resulting skill PR; the owner reviews and merges it by hand.
+**The dashboard's own gate stays exactly as it is:** a dashboard "Approve"
+click on one of these entries flips its on-disk `status` from `pending` to
+`approved` and triggers a build — the dashboard's approve-path spawns a
+detached headless build that re-validates the entry's content hash and
+drives the section-8 create step (see `docs/REFERENCE.md`'s "Approve-click
+build runner" entry for the full runner contract). **A stale or
+context-free status flip is not equivalent to a live owner exchange** — an
+`approved` queue entry carries real consequence, so treat the moment of
+clicking Approve with the same weight as any other consent that triggers
+action, not less because it happened outside a live conversation. The
+runner never merges the resulting skill PR; the owner reviews and merges
+it by hand.
 
-**Zero approvals is a complete, successful run here too** — an audit run
+**Zero clicks is a complete, successful run here too** — an audit run
 that writes queue entries nobody has approved yet ends cleanly; there is
 no retry, no nag, no follow-up ask.
 
