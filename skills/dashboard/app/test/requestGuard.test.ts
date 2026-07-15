@@ -55,4 +55,11 @@ describe("isLocalOrigin — LAN mode (DASHBOARD_HOST set)", () => {
     process.env.DASHBOARD_HOST = "192.168.50.140";
     expect(isLocalOrigin(req({ host: "192.168.50.141:4199" }))).toBe(false);
   });
+
+  it("accepts an IPv6 LAN host when DASHBOARD_HOST is set to the bracketed literal", () => {
+    process.env.DASHBOARD_HOST = "[fe80::1]";
+    expect(
+      isLocalOrigin(req({ host: "[fe80::1]:4199", origin: "http://[fe80::1]:4199" }))
+    ).toBe(true);
+  });
 });
