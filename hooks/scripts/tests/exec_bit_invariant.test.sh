@@ -38,6 +38,7 @@ manifest_paths=(
   scripts/lib/eval-artifact.sh
   hooks/scripts/lib/agentic_loop_path.sh
   hooks/scripts/lib/discipline_common.sh
+  hooks/scripts/lib/loop_cost.sh
   hooks/scripts/lib/loop_state_common.sh
   scripts/merge.sh
   scripts/post_review.sh
@@ -64,6 +65,7 @@ manifest_paths=(
   launchd/uninstall-routines.sh
 )
 manifest_modes=(
+  100644
   100644
   100644
   100644

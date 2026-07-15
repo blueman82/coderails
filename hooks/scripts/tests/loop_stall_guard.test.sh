@@ -345,12 +345,52 @@ write_retro S1 'not-json'
 check "complete + malformed retro.json -> block" 2 "$(run x "$(payload "$T" S1)")"
 check "complete + malformed retro.json -> complete counter NOT bumped" 0 "$(counter S1 complete)"
 
-# (d) complete declared, retro.json valid JSON but wrong schema_version -> block.
+# (d) complete declared, retro.json valid JSON, schema_version 2 (the
+# loop-cost-miner bump) -> allow. The gate is forward-compatible
+# (schema_version >= 1), so 2 (and any future bump) is accepted without
+# needing another gate edit.
 reset; T=$(mk_transcript 1 "All done.
 LOOP-STOP: complete — done"); write_file in-progress S1 0
 write_retro S1 '{"schema_version":2}'
-check "complete + wrong schema_version retro.json -> block" 2 "$(run x "$(payload "$T" S1)")"
-check "complete + wrong schema_version retro.json -> complete counter NOT bumped" 0 "$(counter S1 complete)"
+check "complete + schema_version 2 retro.json -> allow" 0 "$(run x "$(payload "$T" S1)")"
+check "complete + schema_version 2 retro.json -> counter bumped" 1 "$(counter S1 complete)"
+
+# (d2) complete declared, retro.json valid JSON, schema_version 99 (an
+# arbitrary future bump) -> allow. Proves the gate is genuinely >=1
+# forward-compatible, not secretly still an exact {1,2} allowlist.
+reset; T=$(mk_transcript 1 "All done.
+LOOP-STOP: complete — done"); write_file in-progress S1 0
+write_retro S1 '{"schema_version":99}'
+check "complete + schema_version 99 retro.json -> allow (forward-compatible)" 0 "$(run x "$(payload "$T" S1)")"
+check "complete + schema_version 99 retro.json -> counter bumped" 1 "$(counter S1 complete)"
+
+# (d3) complete declared, retro.json valid JSON but schema_version 0 -> still
+# block. Negative control: forward-compatibility (>=1) must not have
+# degraded into fail-never — a retro with no real schema_version is still
+# rejected.
+reset; T=$(mk_transcript 1 "All done.
+LOOP-STOP: complete — done"); write_file in-progress S1 0
+write_retro S1 '{"schema_version":0}'
+check "complete + schema_version 0 retro.json -> block" 2 "$(run x "$(payload "$T" S1)")"
+check "complete + schema_version 0 retro.json -> complete counter NOT bumped" 0 "$(counter S1 complete)"
+
+# (d4) complete declared, retro.json valid JSON but schema_version ABSENT
+# entirely -> still block. Same negative-control intent as (d3), covering
+# the missing-key case rather than an explicit 0.
+reset; T=$(mk_transcript 1 "All done.
+LOOP-STOP: complete — done"); write_file in-progress S1 0
+write_retro S1 '{"not_schema_version":1}'
+check "complete + absent schema_version retro.json -> block" 2 "$(run x "$(payload "$T" S1)")"
+check "complete + absent schema_version retro.json -> complete counter NOT bumped" 0 "$(counter S1 complete)"
+
+# (d5) complete declared, retro.json valid JSON but schema_version is a
+# NON-NUMERIC value (a string) -> still block. Rounds out the >=1 negative
+# controls: 0 (d3), absent (d4), and now wrong-type.
+reset; T=$(mk_transcript 1 "All done.
+LOOP-STOP: complete — done"); write_file in-progress S1 0
+write_retro S1 '{"schema_version":"abc"}'
+check "complete + non-numeric schema_version retro.json -> block" 2 "$(run x "$(payload "$T" S1)")"
+check "complete + non-numeric schema_version retro.json -> complete counter NOT bumped" 0 "$(counter S1 complete)"
 
 # (e) non-complete category (hard-stop) with no retro.json -> allow; the gate
 # fires ONLY on a `complete` declaration.
