@@ -95,6 +95,7 @@ function deriveSharedPricesAsOf(entries: LoopCostEntry[]): string | undefined {
 
 function sumBucket(entries: LoopCostEntry[], startMs: number, endMs: number): CostBucket {
   const inWindow = entries.filter((entry) => entry.createdMs >= startMs && entry.createdMs < endMs);
+  if (inWindow.length === 0) return { usd: null, tokens: null };
   return {
     usd: inWindow.reduce((sum, entry) => sum + entry.usd, 0),
     tokens: inWindow.reduce((sum, entry) => sum + entry.tokens, 0),
