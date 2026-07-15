@@ -115,3 +115,38 @@ describe("reconcileOrphanRuns", () => {
     expect(finishes).toHaveLength(0);
   });
 });
+
+describe("reconcileOrphanRunsInLedger", () => {
+  let dir: string;
+
+  afterEach(() => {
+    if (dir) rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("does nothing when no ledger file exists yet", () => {
+    dir = mkdtempSync(join(tmpdir(), "runlog-test-"));
+
+    expect(() => reconcileOrphanRunsInLedger({ runsDir: dir })).not.toThrow();
+  });
+
+  it("is idempotent: a second pass folds the synthetic finish and no-ops", () => {
+    dir = mkdtempSync(join(tmpdir(), "runlog-test-"));
+    // startedAt: 1 — safely in the past relative to performance.timeOrigin
+    // (a large epoch-ms value at test run time), so this reliably counts as
+    // an orphan without needing to fake the clock.
+    appendRun(run({ runId: "orphan", startedAt: 1 }), { runsDir: dir });
+
+    reconcileOrphanRunsInLedger({ runsDir: dir });
+    reconcileOrphanRunsInLedger({ runsDir: dir });
+
+    const lines = readFileSync(join(dir, "runs.jsonl"), "utf-8")
+      .split("\n")
+      .filter((line) => line.trim())
+      .map((line) => JSON.parse(line) as RunRecord);
+    const synthetic = lines.filter((rec) => rec.runId === "orphan" && rec.reconciled === true);
+
+    expect(synthetic).toHaveLength(1);
+    expect(synthetic[0].endedAt).toBeTypeOf("number");
+    expect(synthetic[0].exitCode).toBe(-1);
+  });
+});
