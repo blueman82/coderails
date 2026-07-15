@@ -93,6 +93,11 @@ function foldLedger(records: RunRecord[]): RunRecord[] {
 // This is the critical guard: bootTime must precede every run this process
 // serves, which is why callers must pass performance.timeOrigin rather than
 // a module-load Date.now() (see reconcileOrphanRunsInLedger below).
+//
+// This reasoning holds only under a single serving process owning the
+// ledger, which the deployment guarantees: com.coderails.dashboard is a
+// single launchd job, and a second hand-started server fails to bind the
+// port — so it never serves SSE and never runs this reconciler.
 export function reconcileOrphanRuns(records: RunRecord[], bootTime: number): RunRecord[] {
   const newest = foldLedger(records);
   const finishes: RunRecord[] = [];
