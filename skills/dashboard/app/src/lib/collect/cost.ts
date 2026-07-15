@@ -2,8 +2,13 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 export interface CostBucket {
-  usd: number;
-  tokens: number;
+  // null signals NO completed loops fell in this window — distinct from a
+  // real $0 spend (e.g. a completed loop with an empty/unpriced cost {}),
+  // which is a genuine zero and stays a number. Mirrors the UsageTotals |
+  // null pattern in usage.ts: a silently-0 number would be indistinguishable
+  // from "nothing to report" on the rendered tile.
+  usd: number | null;
+  tokens: number | null;
   // Only set when every summed loop's retro.json carries the SAME
   // prices_as_of — a mix of dates has no single honest answer, so the
   // bucket omits it rather than picking one arbitrarily (see
