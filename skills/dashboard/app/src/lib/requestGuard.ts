@@ -31,7 +31,7 @@ function isAllowedHost(hostname: string): boolean {
   if (isLocalhost(hostname)) return true;
   const lanHost = process.env.DASHBOARD_HOST;
   if (!lanHost) return false;
-  return stripIpv6Brackets(hostname) === lanHost;
+  return stripIpv6Brackets(hostname) === stripIpv6Brackets(lanHost);
 }
 
 // Host: "[::1]:3000" → "[::1]" (port dropped, brackets kept — isLocalhost
