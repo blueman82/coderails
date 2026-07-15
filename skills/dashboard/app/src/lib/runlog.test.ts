@@ -1,6 +1,9 @@
-import { describe, it, expect } from "vitest";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { describe, it, expect, afterEach } from "vitest";
 import type { RunRecord } from "./runlog";
-import { reconcileOrphanRuns } from "./runlog";
+import { appendRun, reconcileOrphanRuns, reconcileOrphanRunsInLedger } from "./runlog";
 
 // Reconciler test fixtures below use `startedAt`/`bootTime` as small relative
 // integers rather than real timestamps — the pure core only ever compares
