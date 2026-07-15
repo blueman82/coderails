@@ -18,6 +18,25 @@ LOG_FILE="$STATE_DIR/dashboard.log"
 PORT="${DASHBOARD_PORT:-4173}"
 HOST="${DASHBOARD_HOST:-127.0.0.1}"
 
+# Reject wildcard binds and host:port forms — the request guard exact-matches
+# ONE host, so a wildcard bind would silently 403 real LAN requests. Empty/
+# unset DASHBOARD_HOST is fine (falls through to the loopback default above).
+if [[ -n "${DASHBOARD_HOST:-}" ]]; then
+  case "$HOST" in
+    localhost|127.0.0.1|::1) ;;
+    0.0.0.0|::|'*')
+      echo "DASHBOARD_HOST='$HOST' is not a concrete host IP (wildcards like 0.0.0.0 and host:port forms are rejected — the guard exact-matches one host; see SKILL.md)" >&2
+      exit 1
+      ;;
+    *)
+      if [[ "$HOST" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+:[0-9]+$ ]]; then
+        echo "DASHBOARD_HOST='$HOST' is not a concrete host IP (wildcards like 0.0.0.0 and host:port forms are rejected — the guard exact-matches one host; see SKILL.md)" >&2
+        exit 1
+      fi
+      ;;
+  esac
+fi
+
 mkdir -p "$STATE_DIR"
 
 cd "$APP_DIR"

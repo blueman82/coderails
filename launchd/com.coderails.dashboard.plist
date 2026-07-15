@@ -8,6 +8,11 @@
   <array>
     <string>/Users/harrison/Github/coderails/skills/dashboard/runner/bin/dashboard-server.sh</string>
   </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>DASHBOARD_HOST</key>
+    <string></string>
+  </dict>
   <key>RunAtLoad</key>
   <true/>
   <key>KeepAlive</key>
