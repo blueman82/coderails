@@ -96,15 +96,31 @@ describe("collectLoopCost", () => {
     expect(result.week.tokens).toBe(1_000);
   });
 
-  it("treats an empty cost object {} (fail-open) as contributing 0 without crashing", () => {
+  it("excludes a loop with an empty cost object {} (fail-open, no total_usd_estimate) without crashing", () => {
     const now = new Date("2026-07-15T12:00:00Z");
     const base = makeTmpBase();
     writeLoopDir(base, "-proj", "sess-empty-cost", { created: "2026-07-14T10:00:00Z", cost: {} });
 
     const result = collectLoopCost(base, now);
+    // cost: {} carries no total_usd_estimate, so the loop is excluded
+    // entirely — zero contributing loops in the window reads as null
+    // (no-data), not a real $0.
+    expect(result.week.usd).toBeNull();
+    expect(result.week.tokens).toBeNull();
+    expect(result.month.usd).toBeNull();
+  });
+
+  it("sums a completed loop whose cost.total_usd_estimate is genuinely 0 as a real $0, not null", () => {
+    const now = new Date("2026-07-15T12:00:00Z");
+    const base = makeTmpBase();
+    writeLoopDir(base, "-proj", "sess-zero-cost", {
+      created: "2026-07-14T10:00:00Z",
+      cost: { total_usd_estimate: 0, total_tokens: 0, prices_as_of: "2026-07-01" },
+    });
+
+    const result = collectLoopCost(base, now);
     expect(result.week.usd).toBe(0);
     expect(result.week.tokens).toBe(0);
-    expect(result.month.usd).toBe(0);
   });
 
   it("returns null (no-data, not $0) for a missing base dir rather than throwing", () => {
