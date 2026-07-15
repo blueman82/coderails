@@ -47,7 +47,7 @@ function makeTmpProjectsDir(lines: string[]): string {
 }
 
 // Creates <dir>/-proj/<sessionId>/retro.json carrying a frozen cost block —
-// mirrors the real ~/.claude/agentic-loop/<repo-key>/<slug>/<sessionId>/ tree.
+// mirrors the real ~/.claude/agentic-loop/<slug>/<sessionId>/ tree.
 function makeTmpLoopsDir(loops: { sessionId: string; created: string; usd: number; tokens: number }[]): string {
   const dir = mkdtempSync(join(tmpdir(), "dashboard-health-loops-test-"));
   tmpDirs.push(dir);
