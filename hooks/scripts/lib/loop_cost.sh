@@ -45,6 +45,20 @@ dc_mine_token_usage() {
   [ -n "$session" ] || { printf '{}'; return 0; }
   [ -f "$prices_file" ] || { printf '{}'; return 0; }
 
+  # session_id is harness-owned (caller-supplied), not attacker-controlled —
+  # defence-in-depth against path traversal, not a security boundary (same
+  # framing as als_sanitise_session_id's own comment). Reuse that helper's
+  # exact strip-"/"-and-collapse-".." transform rather than duplicating it,
+  # since $session is already known non-empty here (checked above), its
+  # empty/"?" fresh-fallback branch never fires for this call site.
+  if ! declare -f als_sanitise_session_id >/dev/null 2>&1; then
+    # shellcheck source=/dev/null
+    . "$(dirname "${BASH_SOURCE[0]}")/loop_state_common.sh" 2>/dev/null
+  fi
+  if declare -f als_sanitise_session_id >/dev/null 2>&1; then
+    session="$(als_sanitise_session_id "$session")"
+  fi
+
   # Resolve <proj> — the directory containing <session>.jsonl.
   local orch_transcript="" proj=""
   for f in "$projects_dir"/*/"$session.jsonl"; do
@@ -82,9 +96,10 @@ dc_mine_token_usage() {
         | select(.message.usage != null)
         | { id: .message.id, model: .message.model, usage: .message.usage }
       ]
-      # dedupe by message.id, first occurrence wins
-      | (reduce .[] as $e ({}; if has($e.id) then . else . + {($e.id): $e} end))
-      | [ .[] ]
+      # dedupe by message.id, first occurrence wins (unique_by keeps the
+      # first element of each equal-key group, verified against ordering
+      # with duplicate ids interleaved — not incidental)
+      | unique_by(.id)
       | reduce .[] as $e (
           {};
           ($e.model) as $m
@@ -147,8 +162,8 @@ dc_mine_token_usage() {
         prices_as_of: ($pt.prices_as_of // ""),
         price_source: ($pt.price_source // ""),
         per_model: $per_model_out,
-        total_tokens: ($per_model_out | to_entries | map(.value.input_tokens + .value.output_tokens + .value.cache_read_tokens + .value.cache_write_5m_tokens + .value.cache_write_1h_tokens) | add // 0),
-        total_usd_estimate: ($per_model_out | to_entries | map(.value.usd_estimate) | add // 0),
+        total_tokens: ([$per_model_out[] | .input_tokens + .output_tokens + .cache_read_tokens + .cache_write_5m_tokens + .cache_write_1h_tokens] | add // 0),
+        total_usd_estimate: ([$per_model_out[] | .usd_estimate] | add // 0),
         transcripts_scanned: $scanned,
         unpriced_models: $unpriced_models,
         models_used: ($per_model_out | keys | sort),

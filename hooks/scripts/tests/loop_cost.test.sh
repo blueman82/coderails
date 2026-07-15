@@ -64,6 +64,8 @@ usage_line "msg_worker1" "claude-haiku-4-5" 20 8 0 0 0 > "$proj/$sess/subagents/
 out=$(dc_mine_token_usage "$sess")
 result=$(printf '%s' "$out" | jq -r '.models_used | sort | join(",")')
 check "worker inclusion: orchestrator + subagent models both present" "claude-haiku-4-5,claude-opus-4-8" "$result"
+result=$(printf '%s' "$out" | jq -r '.transcripts_scanned')
+check "worker inclusion: transcripts_scanned counts orchestrator + 1 subagent = 2" "2" "$result"
 
 # --- Test (b2): worker inclusion — recursion into a NESTED subagents dir
 # (agent spawning agent) must not be flat-glob-missed ---
@@ -75,6 +77,8 @@ usage_line "msg_nested1" "claude-sonnet-5" 30 10 0 0 0 > "$proj/$sess/subagents/
 out=$(dc_mine_token_usage "$sess")
 result=$(printf '%s' "$out" | jq -r '.models_used | contains(["claude-sonnet-5"])')
 check "worker inclusion: nested subagent transcript found via recursion" "true" "$result"
+result=$(printf '%s' "$out" | jq -r '.transcripts_scanned')
+check "worker inclusion: transcripts_scanned counts orchestrator + 1 nested subagent = 2" "2" "$result"
 
 # --- Test (c): fail-open — unknown session id -> {} and exit 0 (E4) ---
 rc_out=$(dc_mine_token_usage "session-does-not-exist-anywhere" 2>/dev/null)
@@ -109,6 +113,12 @@ result=$(printf '%s' "$out" | jq -r '.per_model["claude-opus-4-8"].input_tokens'
 check "multi-model split: opus input_tokens isolated from haiku" "100" "$result"
 result=$(printf '%s' "$out" | jq -r '.per_model["claude-haiku-4-5"].input_tokens')
 check "multi-model split: haiku input_tokens isolated from opus" "200" "$result"
+# Rollup check: total_tokens/total_usd_estimate sum across BOTH models, not
+# just the last one written (opus 150 tok/$0.00175 + haiku 275 tok/$0.000575).
+result=$(printf '%s' "$out" | jq -r '.total_tokens')
+check "multi-model split: total_tokens rolls up both models (150+275)" "425" "$result"
+result=$(printf '%s' "$out" | jq -r '.total_usd_estimate')
+check "multi-model split: total_usd_estimate rolls up both models" "0.002325" "$result"
 
 # --- Test (f): cache 5m vs 1h priced at different multipliers ---
 sess="cache-split-session"
@@ -185,6 +195,43 @@ for key in schema_version prices_as_of price_source per_model total_tokens total
 done
 result=$(printf '%s' "$out" | jq -r '.schema_version')
 check "schema shape: schema_version is 1" "1" "$result"
+
+# --- Test (i2): session_id path-traversal is neutralised before it is
+# globbed into a path (defence-in-depth, mirrors als_sanitise_session_id's
+# framing — session_id is caller-supplied, not attacker-controlled, but the
+# sanitisation still applies). A "../../secret/leak"-shaped session_id must
+# not escape CLAUDE_PROJECTS_DIR: plant a real transcript OUTSIDE the
+# projects tree at the literal traversal target, and one INSIDE at the
+# sanitised path; only the sanitised (inside) one may be found. ---
+outside_dir="$TMP/outside-secret"
+mkdir -p "$outside_dir"
+usage_line "msg_outside" "claude-opus-4-8" 999999 999999 0 0 0 > "$outside_dir/leak.jsonl"
+sess='../../outside-secret/leak'
+sanitised_sess='__outside-secret_leak'
+proj="$TMP/projects/-traversal-proj"
+mkdir -p "$proj"
+usage_line "msg_inside" "claude-sonnet-5" 42 7 0 0 0 > "$proj/$sanitised_sess.jsonl"
+out=$(dc_mine_token_usage "$sess")
+result=$(printf '%s' "$out" | jq -r '.per_model | has("claude-opus-4-8")')
+check "traversal: outside-projects-dir transcript NOT mined" "false" "$result"
+result=$(printf '%s' "$out" | jq -r '.per_model["claude-sonnet-5"].input_tokens // "absent"')
+check "traversal: sanitised in-tree transcript IS mined" "42" "$result"
+
+# --- Test (i3): stage-1 parse tolerance — a genuinely non-JSON garbage
+# line mixed in with a valid usage line must not zero the whole transcript.
+# Guards the `fromjson? // empty` filter: a malformed line drops itself,
+# not the file. ---
+sess="garbage-line-session"
+proj="$TMP/projects/-test-proj-garbage"
+mkdir -p "$proj"
+{
+  printf '%s\n' 'this is not valid json at all {{{'
+  usage_line "msg_garbage_ok" "claude-opus-4-8" 10 5 0 0 0
+  printf '%s\n' '{"truncated": "mid-wri'
+} > "$proj/$sess.jsonl"
+out=$(dc_mine_token_usage "$sess")
+result=$(printf '%s' "$out" | jq -r '.per_model["claude-opus-4-8"].input_tokens // "absent"')
+check "parse tolerance: garbage lines dropped, valid line still counted" "10" "$result"
 
 # --- Test (j): a line missing message.id is skipped (not a valid usage event) ---
 sess="no-id-session"

@@ -383,6 +383,15 @@ write_retro S1 '{"not_schema_version":1}'
 check "complete + absent schema_version retro.json -> block" 2 "$(run x "$(payload "$T" S1)")"
 check "complete + absent schema_version retro.json -> complete counter NOT bumped" 0 "$(counter S1 complete)"
 
+# (d5) complete declared, retro.json valid JSON but schema_version is a
+# NON-NUMERIC value (a string) -> still block. Rounds out the >=1 negative
+# controls: 0 (d3), absent (d4), and now wrong-type.
+reset; T=$(mk_transcript 1 "All done.
+LOOP-STOP: complete — done"); write_file in-progress S1 0
+write_retro S1 '{"schema_version":"abc"}'
+check "complete + non-numeric schema_version retro.json -> block" 2 "$(run x "$(payload "$T" S1)")"
+check "complete + non-numeric schema_version retro.json -> complete counter NOT bumped" 0 "$(counter S1 complete)"
+
 # (e) non-complete category (hard-stop) with no retro.json -> allow; the gate
 # fires ONLY on a `complete` declaration.
 reset; T=$(mk_transcript 1 "Work paused.
