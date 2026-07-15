@@ -104,7 +104,12 @@ export function RailLeft() {
                 </span>
               </div>
               {tile && tile.value !== null ? (
-                <div className="hud-kpi-value">{tile.value}</div>
+                <>
+                  <div className="hud-kpi-value">{tile.value}</div>
+                  {(key === "costWeek" || key === "costMonth") && tile.note && (
+                    <div className="hud-kpi-note">{tile.note}</div>
+                  )}
+                </>
               ) : (
                 <div className="hud-kpi-unavailable">{tile?.note ?? "unavailable"}</div>
               )}
