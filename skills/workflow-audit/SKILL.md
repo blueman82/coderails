@@ -62,8 +62,8 @@ echo "$JUDGE_VERDICT_JSON" | bash skills/workflow-audit/scripts/write_queue_entr
 
 This is a separate, dashboard-only surface from the in-session flow above,
 which now goes straight to creation with no interactive gate of its own.
-Queue-mode gives the same proposals an asynchronous surface on the
-dashboard, for owners who want to review before a build kicks off there.
+Queue-mode gives the same proposals a second, asynchronous surface on the
+dashboard.
 
 **The dashboard's own gate stays exactly as it is:** a dashboard "Approve"
 click on one of these entries flips its on-disk `status` from `pending` to
