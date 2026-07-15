@@ -46,6 +46,26 @@ function makeTmpProjectsDir(lines: string[]): string {
   return dir;
 }
 
+// Creates <dir>/-proj/<sessionId>/retro.json carrying a frozen cost block —
+// mirrors the real ~/.claude/agentic-loop/<repo-key>/<slug>/<sessionId>/ tree.
+function makeTmpLoopsDir(loops: { sessionId: string; created: string; usd: number; tokens: number }[]): string {
+  const dir = mkdtempSync(join(tmpdir(), "dashboard-health-loops-test-"));
+  tmpDirs.push(dir);
+  for (const loop of loops) {
+    const loopDir = join(dir, "-proj", loop.sessionId);
+    mkdirSync(loopDir, { recursive: true });
+    writeFileSync(join(loopDir, "progress.json"), JSON.stringify({ created: loop.created }));
+    writeFileSync(
+      join(loopDir, "retro.json"),
+      JSON.stringify({
+        created: loop.created,
+        cost: { total_usd_estimate: loop.usd, total_tokens: loop.tokens, prices_as_of: "2026-07-01" },
+      })
+    );
+  }
+  return dir;
+}
+
 afterEach(() => {
   for (const dir of tmpDirs.splice(0)) {
     rmSync(dir, { recursive: true, force: true });
