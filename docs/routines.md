@@ -201,8 +201,7 @@ itself runs before pushing (abort-with-cleanup if the diff isn't exactly
 server-side check backs any of this up. This repo deliberately does not
 enable GitHub branch protection (2026-07-15) — that's a standing
 decision, not a TODO — so this routine's merge rail rests entirely, by
-design, on the script-internal gates named above: no server-side backstop
-exists or is planned.
+design, on the script-internal gates named above.
 
 ## Install / uninstall
 
