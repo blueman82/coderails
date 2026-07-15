@@ -237,6 +237,15 @@ export function createAggregator(deps: AggregatorDeps): Aggregator {
     },
 
     start(): void {
+      // Settle any runs orphaned by a server process that died mid-flight
+      // (crashloop, launchctl restart, kill) before its in-process
+      // child.on("exit") handler could write the finish line — must run
+      // BEFORE the readRuns below, and unguarded (no "ran once" flag): this
+      // route instantiates a fresh aggregator per SSE connection, and the
+      // reconciler is idempotent (a second pass sees the synthetic finish
+      // lines already appended and no-ops), so a guard would only
+      // reintroduce the per-module-graph duplication problem it avoids.
+      safeCall("runs", () => { reconcileOrphanRunsInLedger({ runsDir: deps.runsDir }); return undefined; }, undefined);
       const runs = safeCall("runs", () => readRuns(runsLimit, { runsDir: deps.runsDir }), []);
       snapshot = { ...snapshot, runs };
       // Initial activity collect (sessions/loops/health) is async (health
