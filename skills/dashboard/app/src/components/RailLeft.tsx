@@ -61,6 +61,8 @@ const KPI_LABELS: Record<HealthTile["key"], string> = {
   usageWeek: "Week",
   hooksFired: "Hooks Fired",
   lintFindings: "Lint Findings",
+  costWeek: "Cost (Week)",
+  costMonth: "Cost (Month)",
 };
 
 function findTile(health: HealthTile[], key: HealthTile["key"]): HealthTile | undefined {
@@ -71,7 +73,14 @@ export function RailLeft() {
   const { snapshot } = useDashboardContext();
   const { health, loops } = snapshot;
 
-  const kpiKeys: HealthTile["key"][] = ["usage5h", "usageWeek", "hooksFired", "lintFindings"];
+  const kpiKeys: HealthTile["key"][] = [
+    "usage5h",
+    "usageWeek",
+    "hooksFired",
+    "lintFindings",
+    "costWeek",
+    "costMonth",
+  ];
   const now = useNow(30_000);
   const live = liveLoops(loops, now);
   const stalled = stalledLoops(loops, now);
@@ -95,7 +104,12 @@ export function RailLeft() {
                 </span>
               </div>
               {tile && tile.value !== null ? (
-                <div className="hud-kpi-value">{tile.value}</div>
+                <>
+                  <div className="hud-kpi-value">{tile.value}</div>
+                  {(key === "costWeek" || key === "costMonth") && tile.note && (
+                    <div className="hud-kpi-note">{tile.note}</div>
+                  )}
+                </>
               ) : (
                 <div className="hud-kpi-unavailable">{tile?.note ?? "unavailable"}</div>
               )}

@@ -46,6 +46,26 @@ function makeTmpProjectsDir(lines: string[]): string {
   return dir;
 }
 
+// Creates <dir>/-proj/<sessionId>/retro.json carrying a frozen cost block —
+// mirrors the real ~/.claude/agentic-loop/<slug>/<sessionId>/ tree.
+function makeTmpLoopsDir(loops: { sessionId: string; created: string; usd: number; tokens: number }[]): string {
+  const dir = mkdtempSync(join(tmpdir(), "dashboard-health-loops-test-"));
+  tmpDirs.push(dir);
+  for (const loop of loops) {
+    const loopDir = join(dir, "-proj", loop.sessionId);
+    mkdirSync(loopDir, { recursive: true });
+    writeFileSync(join(loopDir, "progress.json"), JSON.stringify({ created: loop.created }));
+    writeFileSync(
+      join(loopDir, "retro.json"),
+      JSON.stringify({
+        created: loop.created,
+        cost: { total_usd_estimate: loop.usd, total_tokens: loop.tokens, prices_as_of: "2026-07-01" },
+      })
+    );
+  }
+  return dir;
+}
+
 afterEach(() => {
   for (const dir of tmpDirs.splice(0)) {
     rmSync(dir, { recursive: true, force: true });
@@ -53,14 +73,46 @@ afterEach(() => {
 });
 
 describe("collectHealth", () => {
-  it("always returns exactly the four documented tile keys", async () => {
+  it("always returns exactly the six documented tile keys", async () => {
     const tiles = await collectHealth({
       disciplineLogPath: join(tmpdir(), "does-not-exist.log"),
       projectsDir: MISSING_PROJECTS_DIR,
+      loopsDir: join(tmpdir(), "does-not-exist-health-loops"),
     });
     expect(tiles.map((t) => t.key).sort()).toEqual(
-      ["hooksFired", "lintFindings", "usage5h", "usageWeek"].sort()
+      ["costMonth", "costWeek", "hooksFired", "lintFindings", "usage5h", "usageWeek"].sort()
     );
+  });
+
+  it("reports costWeek and costMonth as unavailable (null, not $0.00) when the loops dir has no retro.json sources", async () => {
+    const tiles = await collectHealth({
+      disciplineLogPath: join(tmpdir(), "does-not-exist.log"),
+      projectsDir: MISSING_PROJECTS_DIR,
+      loopsDir: join(tmpdir(), "does-not-exist-health-loops"),
+    });
+    const week = tiles.find((t) => t.key === "costWeek");
+    const month = tiles.find((t) => t.key === "costMonth");
+    expect(week?.value).toBeNull();
+    expect(week?.note).toBe("unavailable: no completed loops in this window");
+    expect(month?.value).toBeNull();
+    expect(month?.note).toBe("unavailable: no completed loops in this window");
+  });
+
+  it("sums frozen retro.json cost into costWeek, showing the summed token count and the shared prices_as_of as a staleness note", async () => {
+    const now = new Date("2026-07-15T12:00:00Z");
+    const loopsDir = makeTmpLoopsDir([
+      { sessionId: "sess-1", created: "2026-07-14T10:00:00Z", usd: 1.5, tokens: 100_000 },
+      { sessionId: "sess-2", created: "2026-07-13T10:00:00Z", usd: 2.25, tokens: 50_000 },
+    ]);
+    const tiles = await collectHealth({
+      disciplineLogPath: join(tmpdir(), "does-not-exist.log"),
+      projectsDir: MISSING_PROJECTS_DIR,
+      loopsDir,
+      now,
+    });
+    const week = tiles.find((t) => t.key === "costWeek");
+    expect(week?.value).toBe("$3.75");
+    expect(week?.note).toBe("150K tokens · completed loops only · prices as of 2026-07-01");
   });
 
   it("reports usage5h as unavailable when the projects dir has no local transcripts", async () => {

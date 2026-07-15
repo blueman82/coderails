@@ -2,9 +2,10 @@ import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { collectUsage, type UsageTotals } from "./usage";
+import { collectLoopCost, type CostBucket } from "./cost";
 
 export interface HealthTile {
-  key: "usage5h" | "usageWeek" | "hooksFired" | "lintFindings";
+  key: "usage5h" | "usageWeek" | "hooksFired" | "lintFindings" | "costWeek" | "costMonth";
   value: string | null;
   note?: string;
 }
@@ -12,11 +13,13 @@ export interface HealthTile {
 export interface CollectHealthOptions {
   disciplineLogPath?: string;
   projectsDir?: string;
+  loopsDir?: string;
   now?: Date;
 }
 
 const DEFAULT_DISCIPLINE_LOG_PATH = join(homedir(), ".claude", "discipline.log");
 const DEFAULT_PROJECTS_DIR = join(homedir(), ".claude", "projects");
+const DEFAULT_LOOPS_DIR = join(homedir(), ".claude", "agentic-loop");
 
 // Local calendar-day key (YYYY-MM-DD) for a Date, in that Date's own zone
 // offset — used to compare a log line's leading timestamp against "now"'s
@@ -59,6 +62,37 @@ function lintFindingsTile(): HealthTile {
   return { key: "lintFindings", value: null, note: "unavailable: wiki-lint persists no report file" };
 }
 
+// USD headline with two decimal places: 3.75 -> "$3.75". total_usd_estimate
+// is frozen at teardown by the miner — this formats a stored number, it
+// never re-prices.
+function formatUsd(n: number): string {
+  return `$${n.toFixed(2)}`;
+}
+
+// Cost tiles sum retro.json's frozen cost.total_usd_estimate across
+// COMPLETED loops only — a different denominator from the usage5h/usageWeek
+// tiles above, which sum every transcript regardless of loop completion.
+// The note names that scope explicitly so the two don't read as
+// contradictory, and carries the summed token count (tokens ≈ $estimate)
+// so bucket.tokens has a real consumer rather than being computed and never
+// shown. A derivable shared prices_as_of is appended as a staleness note;
+// when the summed loops disagree (or none carry one) it's omitted rather
+// than fabricated. usd === null means zero completed loops fell in this
+// window (no-data) — distinct from a real $0 spend — so it renders
+// unavailable exactly like the usage tiles above, rather than a misleading
+// "$0.00".
+function costTile(key: "costWeek" | "costMonth", bucket: CostBucket): HealthTile {
+  if (bucket.usd === null) {
+    return { key, value: null, note: "unavailable: no completed loops in this window" };
+  }
+  const scopeNote = `${formatTokenCount(bucket.tokens ?? 0)} tokens · completed loops only`;
+  return {
+    key,
+    value: formatUsd(bucket.usd),
+    note: bucket.pricesAsOf ? `${scopeNote} · prices as of ${bucket.pricesAsOf}` : scopeNote,
+  };
+}
+
 // discipline.log (written by the hooks in ~/.claude/hooks) is plain text,
 // one line per hook invocation, each line starting with an ISO-8601
 // timestamp: "<timestamp> hook=<name> ... blocked=<0|1>". The dashboard
@@ -91,12 +125,16 @@ function hooksFiredTile(path: string, now: Date): HealthTile {
 export async function collectHealth(options: CollectHealthOptions = {}): Promise<HealthTile[]> {
   const disciplineLogPath = options.disciplineLogPath ?? DEFAULT_DISCIPLINE_LOG_PATH;
   const projectsDir = options.projectsDir ?? DEFAULT_PROJECTS_DIR;
+  const loopsDir = options.loopsDir ?? DEFAULT_LOOPS_DIR;
   const now = options.now ?? new Date();
   const usage = await collectUsage(projectsDir, now);
+  const cost = collectLoopCost(loopsDir, now);
   return [
     usageTile("usage5h", usage.last5h),
     usageTile("usageWeek", usage.week),
     hooksFiredTile(disciplineLogPath, now),
     lintFindingsTile(),
+    costTile("costWeek", cost.week),
+    costTile("costMonth", cost.month),
   ];
 }
