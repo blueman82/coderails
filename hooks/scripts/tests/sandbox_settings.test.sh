@@ -70,15 +70,11 @@ check "no bare ~ path remains" "0" \
 check "no // comment survives into rendered JSON" "0" "$(grep -c '^[[:space:]]*//' "$OUT" || true)"
 
 # ─── Allowlist content ──────────────────────────────────────────────────────
-# ~/.cache is REQUIRED, not speculative: without it `claude -p` inside the
-# sandbox produces EMPTY OUTPUT AND STILL EXITS 0 (verified live, srt 0.0.65 —
-# a bare control in the same worktree prints "ok"). Bisected to this exact
-# path: the narrower ~/.cache/claude does NOT suffice, because claude creates
-# its cache dir under ~/.cache and needs write on the parent. The silent rc=0
-# is why this assertion exists — an allowlist gap here does not fail loudly, so
-# only a test can hold the line.
-check "allowWrite carries ~/.cache (claude -p silently no-ops without it)" "true" \
-  "$(jq --arg p "$HOME/.cache" '.filesystem.allowWrite | index($p) != null' "$OUT")"
+# ~/.cache is deliberately ABSENT from allowWrite: claude -p's cache need is
+# met instead by the spawn script redirecting XDG_CACHE_HOME to a subdir of
+# %%SCRATCH%% (already allowlisted below), which is narrower than granting
+# ~/.cache (shared with gh/uv/huggingface). Verified live, srt 0.0.65 — see
+# spawn_sandboxed_worker.test.sh for the behavioural guard on that env var.
 check "network allowlist carries api.anthropic.com" "true" \
   "$(jq '.network.allowedDomains | index("api.anthropic.com") != null' "$OUT")"
 check "network allowlist carries github.com" "true" \

@@ -34,21 +34,18 @@
       // .claude/commands + .claude/agents block.
       "%%HOME%%/.claude",
       "%%HOME%%/.claude.json",
-      // REQUIRED by claude -p, and its absence FAILS SILENTLY: without this the
-      // worker's claude process emits empty output and still exits 0 (verified
-      // live, srt 0.0.65; a bare control in the same worktree prints "ok").
-      // Bisected to this exact path — the narrower %%HOME%%/.cache/claude does
-      // NOT suffice, because claude creates its cache dir under ~/.cache and so
-      // needs write on the parent. Width recorded honestly: ~/.cache is shared
-      // with unrelated tools (gh, uv, huggingface), so this grants more than
-      // claude's own cache. Narrowing it needs an upstream change (an
-      // XDG_CACHE_HOME pointed at the worker scratch is the obvious candidate,
-      // untested here) — flagged rather than silently accepted.
-      "%%HOME%%/.cache",
       // Node, npx and git all write here; without it the toolchain EPERMs.
       // NOTE: on macOS this is the per-user $TMPDIR (/var/folders/...), which
       // is NOT /tmp — /tmp stays correctly denied (verified: a write to
       // /tmp/d.out EPERMs under these settings).
+      // Also where claude -p's own cache lands: the spawn script sets
+      // XDG_CACHE_HOME to a subdir of this scratch dir, so ~/.cache does NOT
+      // need to be allowlisted (verified live, srt 0.0.65: without the env
+      // var AND without ~/.cache allowlisted, claude -p silently emits empty
+      // output and still exits 0; with XDG_CACHE_HOME redirected here it
+      // prints its real output, reproducibly). This is narrower than the
+      // previous ~/.cache grant, which was shared with unrelated tools
+      // (gh, uv, huggingface) — real containment win, not just tidiness.
       "%%TMPDIR%%"
     ],
     // denyWrite takes precedence over allowWrite. This carves the permission
