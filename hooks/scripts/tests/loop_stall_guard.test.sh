@@ -793,4 +793,311 @@ else
   echo "ok   - negative control correctly reports mismatch (expected bumped=1, got $neg_actual for an uncounted category)"
 fi
 
+# =====================================================================
+# als_gate_proofs_on_complete — proof gate on a `complete` LOOP-STOP.
+# proof.json lives BESIDE progress.json, same dir as retro.json. Every
+# fixture below supplies a valid retro.json (write_retro) AND either omits
+# work_units or marks them all-done (write_work_units ... done), so the two
+# earlier gates never mask this one — mirrors the work_units block's own
+# discipline against the retro gate.
+write_proof() { # session_id proofs_json_fragment [schema_version]
+  local dir; dir=$(file_dir "$1")
+  mkdir -p "$dir"
+  jq -n --argjson p "$2" --argjson sv "${3:-1}" '{schema_version:$sv, proofs:$p}' > "$dir/proof.json"
+}
+write_proof_raw() { # session_id raw_content -> writes proof.json verbatim (for malformed-JSON fixtures)
+  local dir; dir=$(file_dir "$1")
+  mkdir -p "$dir"
+  printf '%s' "$2" > "$dir/proof.json"
+}
+# Appends a Bash tool_use (assistant) + its paired tool_result (user) to a
+# transcript file. is_error: "true"/"false"/"null" (bare token, unquoted in
+# the jq --argjson so null becomes JSON null, not the string "null").
+# run_in_background: "true"/"false" — when "true", NO tool_result line is
+# appended (mirrors the harness: a backgrounded launch's immediate result is
+# "Command running in background…", not a pass/fail outcome).
+append_bash_call() { # transcript cmd is_error run_in_background
+  local t="$1" cmd="$2" is_error="$3" bg="${4:-false}" tool_id="tu_${RANDOM}${RANDOM}"
+  jq -cn --arg id "$tool_id" --arg cmd "$cmd" --argjson bg "$bg" \
+    '{type:"assistant",message:{content:[{type:"tool_use",id:$id,name:"Bash",input:{command:$cmd,run_in_background:$bg}}]}}' >> "$t"
+  if [ "$bg" != "true" ]; then
+    jq -cn --arg id "$tool_id" --argjson err "$is_error" \
+      '{type:"user",message:{content:[{type:"tool_result",tool_use_id:$id,is_error:$err}]}}' >> "$t"
+  fi
+}
+# Appends a Bash tool_use with NO paired tool_result at all (interrupted call).
+append_bash_call_no_result() { # transcript cmd
+  local t="$1" cmd="$2" tool_id="tu_${RANDOM}${RANDOM}"
+  jq -cn --arg id "$tool_id" --arg cmd "$cmd" \
+    '{type:"assistant",message:{content:[{type:"tool_use",id:$id,name:"Bash",input:{command:$cmd,run_in_background:false}}]}}' >> "$t"
+}
+# Standard complete-declaration transcript base: N loop invocations + final
+# LOOP-STOP: complete text. Bash calls are appended to this via append_bash_call
+# BEFORE the final text line is written, matching real transcript order (tool
+# calls happen during the turn, before the ending LOOP-STOP line).
+mk_complete_base() { # -> path (transcript with 1 loop invocation, no final text yet)
+  local out="$TMP/proof_${RANDOM}.jsonl"
+  printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Skill","input":{"skill":"coderails:agentic-loop"}}]}}' > "$out"
+  printf '%s' "$out"
+}
+append_complete_declaration() { # transcript -> appends the final LOOP-STOP: complete text line
+  jq -cn --arg t "All done.
+LOOP-STOP: complete — done" '{type:"assistant",message:{content:[{type:"text",text:$t}]}}' >> "$1"
+}
+# Sets up the standard fixture scaffold for a proof-gate test: resets state,
+# writes retro.json + all-work-units-done, returns the transcript path via
+# the PROOF_T global (bash functions can't return strings cleanly).
+proof_fixture_reset() { # session_id
+  reset
+  PROOF_T=$(mk_complete_base)
+  write_file in-progress "$1" 0
+  write_retro "$1" '{"schema_version":1}'
+}
+
+# (1) one proof whose cmd never appears in the transcript -> BLOCK, stderr
+# names the id with (unexecuted), counter not bumped.
+proof_fixture_reset S1
+write_proof S1 '[{"id":"P1","cmd":"echo hello-never-run"}]'
+append_complete_declaration "$PROOF_T"
+run_capture_stderr "$(payload "$PROOF_T" S1)"
+check "proof: unexecuted cmd -> block" 2 "$RC_OUT"
+case "$STDERR_OUT" in *"P1"*"unexecuted"*) p1_named=1 ;; *) p1_named=0 ;; esac
+check "proof: unexecuted cmd -> stderr names P1(unexecuted)" 1 "$p1_named"
+check "proof: unexecuted cmd -> complete counter NOT bumped" 0 "$(counter S1 complete)"
+
+# (2) all proofs executed with is_error false -> ALLOW, counter bumped.
+proof_fixture_reset S1
+write_proof S1 '[{"id":"P1","cmd":"echo ok-run"}]'
+append_bash_call "$PROOF_T" "echo ok-run" false
+append_complete_declaration "$PROOF_T"
+check "proof: all satisfied -> allow" 0 "$(run x "$(payload "$PROOF_T" S1)")"
+check "proof: all satisfied -> counter bumped" 1 "$(counter S1 complete)"
+
+# (3) proof executed, is_error true -> BLOCK, stderr names id with (failed).
+proof_fixture_reset S1
+write_proof S1 '[{"id":"P1","cmd":"false-cmd"}]'
+append_bash_call "$PROOF_T" "false-cmd" true
+append_complete_declaration "$PROOF_T"
+run_capture_stderr "$(payload "$PROOF_T" S1)"
+check "proof: failed execution -> block" 2 "$RC_OUT"
+case "$STDERR_OUT" in *"P1"*"failed"*) p1_named=1 ;; *) p1_named=0 ;; esac
+check "proof: failed execution -> stderr names P1(failed)" 1 "$p1_named"
+
+# (4) absent proof.json -> ALLOW (fail-open).
+proof_fixture_reset S1
+append_complete_declaration "$PROOF_T"
+check "proof: absent proof.json -> allow (fail-open)" 0 "$(run x "$(payload "$PROOF_T" S1)")"
+
+# (5) THE ANTI-GAMING FLAGSHIP — proof.json entry has "status":"pass" but its
+# cmd is absent from the transcript -> BLOCK. The self-written pass must not
+# rescue it.
+proof_fixture_reset S1
+write_proof S1 '[{"id":"P1","cmd":"echo self-written-pass","status":"pass"}]'
+append_complete_declaration "$PROOF_T"
+run_capture_stderr "$(payload "$PROOF_T" S1)"
+check "proof: status=pass but cmd never ran -> block (anti-gaming)" 2 "$RC_OUT"
+case "$STDERR_OUT" in *"P1"*"unexecuted"*) p1_named=1 ;; *) p1_named=0 ;; esac
+check "proof: status=pass but cmd never ran -> stderr names P1(unexecuted)" 1 "$p1_named"
+
+# (6) malformed proof.json (invalid JSON) -> BLOCK.
+proof_fixture_reset S1
+write_proof_raw S1 'not-valid-json{'
+append_complete_declaration "$PROOF_T"
+check "proof: malformed proof.json -> block" 2 "$(run x "$(payload "$PROOF_T" S1)")"
+
+# (7) schema_version 0 / missing / non-numeric -> BLOCK; schema_version 2
+# (forward-compat) with satisfied proofs -> ALLOW.
+proof_fixture_reset S1
+write_proof S1 '[{"id":"P1","cmd":"echo v0"}]' 0
+append_bash_call "$PROOF_T" "echo v0" false
+append_complete_declaration "$PROOF_T"
+check "proof: schema_version 0 -> block" 2 "$(run x "$(payload "$PROOF_T" S1)")"
+
+proof_fixture_reset S1
+write_proof_raw S1 '{"proofs":[{"id":"P1","cmd":"echo missing-sv"}]}'
+append_bash_call "$PROOF_T" "echo missing-sv" false
+append_complete_declaration "$PROOF_T"
+check "proof: schema_version missing -> block" 2 "$(run x "$(payload "$PROOF_T" S1)")"
+
+proof_fixture_reset S1
+write_proof_raw S1 '{"schema_version":"abc","proofs":[{"id":"P1","cmd":"echo nonnum-sv"}]}'
+append_bash_call "$PROOF_T" "echo nonnum-sv" false
+append_complete_declaration "$PROOF_T"
+check "proof: schema_version non-numeric -> block" 2 "$(run x "$(payload "$PROOF_T" S1)")"
+
+proof_fixture_reset S1
+write_proof S1 '[{"id":"P1","cmd":"echo v2"}]' 2
+append_bash_call "$PROOF_T" "echo v2" false
+append_complete_declaration "$PROOF_T"
+check "proof: schema_version 2 (forward-compat) + satisfied -> allow" 0 "$(run x "$(payload "$PROOF_T" S1)")"
+
+# (8) empty proofs array -> ALLOW.
+proof_fixture_reset S1
+write_proof S1 '[]'
+append_complete_declaration "$PROOF_T"
+check "proof: empty proofs array -> allow" 0 "$(run x "$(payload "$PROOF_T" S1)")"
+
+# (9) cmd appears ONLY as a run_in_background tool_use (is_error false) ->
+# BLOCK (bg launch is not an outcome).
+proof_fixture_reset S1
+write_proof S1 '[{"id":"P1","cmd":"long-running-thing"}]'
+append_bash_call "$PROOF_T" "long-running-thing" false true
+append_complete_declaration "$PROOF_T"
+run_capture_stderr "$(payload "$PROOF_T" S1)"
+check "proof: cmd only ran in background -> block" 2 "$RC_OUT"
+case "$STDERR_OUT" in *"P1"*"unexecuted"*) p1_named=1 ;; *) p1_named=0 ;; esac
+check "proof: cmd only ran in background -> stderr names P1(unexecuted)" 1 "$p1_named"
+
+# (10) same cmd twice: first is_error true, last false -> ALLOW (last
+# decides). And the reverse: first false, last true -> BLOCK.
+proof_fixture_reset S1
+write_proof S1 '[{"id":"P1","cmd":"flaky-then-fixed"}]'
+append_bash_call "$PROOF_T" "flaky-then-fixed" true
+append_bash_call "$PROOF_T" "flaky-then-fixed" false
+append_complete_declaration "$PROOF_T"
+check "proof: failed-then-fixed (last decides) -> allow" 0 "$(run x "$(payload "$PROOF_T" S1)")"
+
+proof_fixture_reset S1
+write_proof S1 '[{"id":"P1","cmd":"passed-then-broke"}]'
+append_bash_call "$PROOF_T" "passed-then-broke" false
+append_bash_call "$PROOF_T" "passed-then-broke" true
+append_complete_declaration "$PROOF_T"
+run_capture_stderr "$(payload "$PROOF_T" S1)"
+check "proof: passed-then-broke (last decides) -> block" 2 "$RC_OUT"
+case "$STDERR_OUT" in *"P1"*"failed"*) p1_named=1 ;; *) p1_named=0 ;; esac
+check "proof: passed-then-broke -> stderr names P1(failed)" 1 "$p1_named"
+
+# (11) echo-gaming: transcript contains Bash `echo "<the exact cmd>"` (and
+# also a command that merely CONTAINS the cmd as substring) -> BLOCK
+# (exact-match holds).
+proof_fixture_reset S1
+write_proof S1 '[{"id":"P1","cmd":"run-the-real-thing"}]'
+append_bash_call "$PROOF_T" 'echo "run-the-real-thing"' false
+append_bash_call "$PROOF_T" 'run-the-real-thing --with-extra-args' false
+append_complete_declaration "$PROOF_T"
+run_capture_stderr "$(payload "$PROOF_T" S1)"
+check "proof: echo-gaming + substring-only -> block (exact-match holds)" 2 "$RC_OUT"
+case "$STDERR_OUT" in *"P1"*"unexecuted"*) p1_named=1 ;; *) p1_named=0 ;; esac
+check "proof: echo-gaming + substring-only -> stderr names P1(unexecuted)" 1 "$p1_named"
+
+# (12) is_error null on the matching result -> ALLOW (deliberate tolerance).
+proof_fixture_reset S1
+write_proof S1 '[{"id":"P1","cmd":"echo null-is-error"}]'
+append_bash_call "$PROOF_T" "echo null-is-error" null
+append_complete_declaration "$PROOF_T"
+check "proof: is_error null on match -> allow (deliberate tolerance)" 0 "$(run x "$(payload "$PROOF_T" S1)")"
+
+# (13) proof with missing/empty/non-string cmd -> BLOCK naming its id.
+proof_fixture_reset S1
+write_proof_raw S1 '{"schema_version":1,"proofs":[{"id":"P1"}]}'
+append_complete_declaration "$PROOF_T"
+run_capture_stderr "$(payload "$PROOF_T" S1)"
+check "proof: missing cmd -> block" 2 "$RC_OUT"
+case "$STDERR_OUT" in *"P1"*) p1_named=1 ;; *) p1_named=0 ;; esac
+check "proof: missing cmd -> stderr names P1" 1 "$p1_named"
+
+proof_fixture_reset S1
+write_proof S1 '[{"id":"P2","cmd":""}]'
+append_complete_declaration "$PROOF_T"
+run_capture_stderr "$(payload "$PROOF_T" S1)"
+check "proof: empty-string cmd -> block" 2 "$RC_OUT"
+case "$STDERR_OUT" in *"P2"*) p2_named=1 ;; *) p2_named=0 ;; esac
+check "proof: empty-string cmd -> stderr names P2" 1 "$p2_named"
+
+proof_fixture_reset S1
+write_proof S1 '[{"id":"P3","cmd":"   "}]'
+append_complete_declaration "$PROOF_T"
+check "proof: whitespace-only cmd -> block" 2 "$(run x "$(payload "$PROOF_T" S1)")"
+
+proof_fixture_reset S1
+write_proof S1 '[{"id":"P4","cmd":42}]'
+append_complete_declaration "$PROOF_T"
+run_capture_stderr "$(payload "$PROOF_T" S1)"
+check "proof: non-string (number) cmd -> block" 2 "$RC_OUT"
+case "$STDERR_OUT" in *"P4"*) p4_named=1 ;; *) p4_named=0 ;; esac
+check "proof: non-string (number) cmd -> stderr names P4" 1 "$p4_named"
+
+# (14) proof.cmd with leading/trailing whitespace vs identical trimmed
+# transcript command -> ALLOW (trim applies both sides).
+proof_fixture_reset S1
+write_proof S1 '[{"id":"P1","cmd":"  echo padded  "}]'
+append_bash_call "$PROOF_T" "echo padded" false
+append_complete_declaration "$PROOF_T"
+check "proof: padded proof.cmd vs trimmed transcript cmd -> allow (trim both sides)" 0 "$(run x "$(payload "$PROOF_T" S1)")"
+
+# (15) two proofs, one satisfied one unexecuted -> BLOCK naming ONLY the
+# unexecuted one.
+proof_fixture_reset S1
+write_proof S1 '[{"id":"P1","cmd":"echo satisfied-one"},{"id":"P2","cmd":"echo never-ran"}]'
+append_bash_call "$PROOF_T" "echo satisfied-one" false
+append_complete_declaration "$PROOF_T"
+run_capture_stderr "$(payload "$PROOF_T" S1)"
+check "proof: one satisfied one unexecuted -> block" 2 "$RC_OUT"
+case "$STDERR_OUT" in *"P2"*"unexecuted"*) p2_named=1 ;; *) p2_named=0 ;; esac
+check "proof: mixed -> stderr names P2(unexecuted)" 1 "$p2_named"
+case "$STDERR_OUT" in *"P1"*) p1_named=1 ;; *) p1_named=0 ;; esac
+check "proof: mixed -> stderr does NOT name satisfied P1" 0 "$p1_named"
+
+# (16) tool_use with NO tool_result at all (interrupted) as the only match
+# -> BLOCK.
+proof_fixture_reset S1
+write_proof S1 '[{"id":"P1","cmd":"interrupted-call"}]'
+append_bash_call_no_result "$PROOF_T" "interrupted-call"
+append_complete_declaration "$PROOF_T"
+run_capture_stderr "$(payload "$PROOF_T" S1)"
+check "proof: interrupted call (no tool_result) -> block" 2 "$RC_OUT"
+case "$STDERR_OUT" in *"P1"*"unexecuted"*) p1_named=1 ;; *) p1_named=0 ;; esac
+check "proof: interrupted call -> stderr names P1(unexecuted)" 1 "$p1_named"
+
+# (17) non-object proofs entry (e.g. a bare string in the array) -> BLOCK
+# (cannot be verified -> fails closed, not open).
+proof_fixture_reset S1
+write_proof_raw S1 '{"schema_version":1,"proofs":["just-a-string"]}'
+append_complete_declaration "$PROOF_T"
+check "proof: non-object proofs entry -> block (fails closed)" 2 "$(run x "$(payload "$PROOF_T" S1)")"
+
+# ---------------------------------------------------------------------
+# Additional regression/negative controls beyond the 17 mandatory tests.
+
+# hard-stop + unexecuted proof -> ALLOW (gate is complete-only, mirrors the
+# retro/work_units gates' own case (e)/(h10)).
+reset; T=$(mk_transcript 1 "Work paused.
+LOOP-STOP: hard-stop — x"); write_file in-progress S1 0
+write_proof S1 '[{"id":"P1","cmd":"echo never-ran"}]'
+check "proof: hard-stop + unexecuted -> allow (gate is complete-only)" 0 "$(run x "$(payload "$T" S1)")"
+
+# jq absent -> ALLOW (fail-open, mirrors NOJQ_BIN usage for the sibling gates).
+proof_fixture_reset S1
+write_proof S1 '[{"id":"P1","cmd":"echo never-ran"}]'
+append_complete_declaration "$PROOF_T"
+check "proof: jq absent -> allow (fail-open)" 0 "$(run_env "PATH=$NOJQ_BIN" "$(payload "$PROOF_T" S1)")"
+
+# Missing id falls back to P<index> — first entry with no id gets "P0".
+proof_fixture_reset S1
+write_proof_raw S1 '{"schema_version":1,"proofs":[{"cmd":"echo no-id-here"}]}'
+append_complete_declaration "$PROOF_T"
+run_capture_stderr "$(payload "$PROOF_T" S1)"
+case "$STDERR_OUT" in *"P0"*"unexecuted"*) p0_named=1 ;; *) p0_named=0 ;; esac
+check "proof: missing id falls back to P0" 1 "$p0_named"
+
+# Non-string id falls back to P<index> too.
+proof_fixture_reset S1
+write_proof_raw S1 '{"schema_version":1,"proofs":[{"id":42,"cmd":"echo numeric-id"}]}'
+append_complete_declaration "$PROOF_T"
+run_capture_stderr "$(payload "$PROOF_T" S1)"
+case "$STDERR_OUT" in *"P0"*"unexecuted"*) p0_named=1 ;; *) p0_named=0 ;; esac
+check "proof: non-string id falls back to P0" 1 "$p0_named"
+
+# .proofs null -> ALLOW (treated same as absent field).
+proof_fixture_reset S1
+write_proof_raw S1 '{"schema_version":1,"proofs":null}'
+append_complete_declaration "$PROOF_T"
+check "proof: proofs is null -> allow (nothing to prove)" 0 "$(run x "$(payload "$PROOF_T" S1)")"
+
+# .proofs present but not an array (an object) -> BLOCK (malformed shape).
+proof_fixture_reset S1
+write_proof_raw S1 '{"schema_version":1,"proofs":{"id":"P1","cmd":"echo x"}}'
+append_complete_declaration "$PROOF_T"
+check "proof: proofs is an object, not an array -> block (malformed shape)" 2 "$(run x "$(payload "$PROOF_T" S1)")"
+
 [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails)"; exit 1; }

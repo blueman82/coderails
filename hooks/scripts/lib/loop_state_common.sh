@@ -625,3 +625,157 @@ before declaring complete. Finish or explicitly drop (with a reason) the
 listed unit(s), then re-declare complete." >&2
   exit 2
 }
+
+# Gate: on a `complete` declaration, block if any frozen proof.json proof was
+# never executed (in THIS session's own transcript) or last-executed with an
+# error. NEW enforcement class for this repo: every prior gate here checks
+# artifact presence/shape/stamp (retro.json exists and parses; work_units
+# entries carry a terminal status); this one re-derives a verdict from raw
+# transcript tool_use/tool_result pairs instead of trusting any field the
+# artifact itself claims. That is also its honest boundary: the gate verifies
+# a command RAN in this session's transcript and did NOT error — it CANNOT
+# verify it was the RIGHT command. A weak, poorly-chosen frozen proof set
+# passes trivially. What it buys: the proof CHOICE is auditable and
+# time-stamped (frozen at Phase 2.7c, before implementation, per
+# skills/agentic-loop/SKILL.md), and EXECUTION can no longer be
+# self-reported — proof.json's own `.status` field is read but IGNORED for
+# the verdict; only a real tool_use/tool_result pair in the transcript can
+# satisfy a proof.
+#
+# Orchestrator-session scope, BY DESIGN: subagent/worker Bash calls never
+# appear in the orchestrator's own transcript (verified against real
+# delegating transcripts elsewhere in this codebase) — proofs MUST be run by
+# the orchestrator itself, in its own session, or this gate false-blocks.
+# That is the intended enforcement, not a bug: a proof satisfied only inside
+# a dispatched worker's transcript proves nothing to THIS gate, which is the
+# point — see task-evals' identical grader-independence rationale.
+#
+# Exact-match rationale: a SUBSTRING match would be trivially satisfiable by
+# `echo "the cmd"` or a comment containing the text — exact trimmed equality
+# means the executed command literally IS the frozen proof command, closing
+# that gap the same way the work_units gate's allowlist closes status-string
+# gaming.
+#
+# Fail-open on ABSENT proof.json, fail-closed on malformed/unverifiable —
+# the same established asymmetry as retro.json (mandatory, blocks on
+# absence) versus work_units (optional, blocks only on an unprovable entry).
+# proof.json is OPTIONAL and adopted voluntarily (mirrors task-evals'
+# voluntary-adoption posture): a loop authored before this gate existed, or
+# with no executable surface to prove, writes no proof.json and is not
+# punished for its absence. But once present, a garbage file must never read
+# as absence — malformed JSON, a bad schema_version, or a proofs entry that
+# cannot be verified all fail CLOSED, mirroring the work_units rule that a
+# unit which cannot be proven terminal blocks rather than passing by default.
+#
+# Full-file-scan cost: this mines the WHOLE transcript in one jq pass, same
+# cost class als_count_invocations already pays on every Stop — but this gate
+# only runs at most once per loop (only on a `complete` declaration), a
+# strictly smaller footprint than the invocation counter that runs on every
+# single Stop event regardless of category.
+als_gate_proofs_on_complete() {
+  local category="$1" hook="$2" session="$3" transcript="$4"
+  local category_lc; category_lc=$(printf '%s' "$category" | tr '[:upper:]' '[:lower:]')
+  [ "$category_lc" = "complete" ] || return 0
+  command -v jq >/dev/null 2>&1 || { als_log "hook=$hook session=$session proof_gate=skipped_no_jq"; return 0; }
+  [ -n "$ALS_PATH" ] || return 0
+  local proof_file; proof_file="$(dirname "$ALS_PATH")/proof.json"
+  [ -f "$proof_file" ] || return 0
+  jq -e . "$proof_file" >/dev/null 2>&1 || {
+    als_log "hook=$hook session=$session proof_gate=blocked offenders=malformed"
+    echo "[loop-stall-guard] LOOP-STOP: complete declared but proof.json is malformed (not valid JSON).
+A frozen proof.json must be valid JSON. Fix or regenerate it, then re-declare complete." >&2
+    exit 2
+  }
+  jq -e '(.schema_version) as $v | ($v | type == "number") and $v >= 1' "$proof_file" >/dev/null 2>&1 || {
+    als_log "hook=$hook session=$session proof_gate=blocked offenders=wrong_schema"
+    echo "[loop-stall-guard] LOOP-STOP: complete declared but proof.json has no valid schema_version (>= 1 required).
+Regenerate proof.json with a numeric schema_version >= 1, then re-declare complete." >&2
+    exit 2
+  }
+  # .proofs absent/null -> nothing to prove (allow). Present-but-not-array is
+  # a malformed shape and blocks, same posture as work_units' file-shape check.
+  local proofs_type; proofs_type=$(jq -r '(.proofs // null) | type' "$proof_file" 2>/dev/null)
+  case "$proofs_type" in
+    null) return 0 ;;
+    array) : ;;
+    *)
+      als_log "hook=$hook session=$session proof_gate=blocked offenders=malformed_shape"
+      echo "[loop-stall-guard] LOOP-STOP: complete declared but proof.json's .proofs field is not an array.
+Regenerate proof.json with .proofs as a JSON array, then re-declare complete." >&2
+      exit 2
+      ;;
+  esac
+  local proof_count; proof_count=$(jq '.proofs | length' "$proof_file" 2>/dev/null)
+  [ "$proof_count" -gt 0 ] 2>/dev/null || return 0
+
+  # Two-stage tolerant parse of the transcript (same idiom als_count_invocations
+  # uses): a single malformed JSONL line must not collapse the whole scan.
+  # executions: every Bash tool_use NOT launched in the background, in
+  # transcript order, as {id, command}. results: every tool_result's
+  # {tool_use_id, is_error}. Both mined in ONE jq -s pass alongside proof.json's
+  # own .proofs array, so verdicts are computed in a single invocation.
+  local verdicts
+  verdicts=$(
+    { jq -R 'fromjson? // empty' "$transcript" 2>/dev/null | jq -s '.' 2>/dev/null; } | \
+    jq -s --slurpfile proofdoc "$proof_file" '
+      .[0] as $records
+      | ($proofdoc[0].proofs) as $proofs
+      | ( [ $records[]?
+            | select(.type == "assistant")
+            | .message.content[]?
+            | select(.type == "tool_use" and .name == "Bash")
+            | select((.input.run_in_background // false) != true)
+            | {id: .id, command: (.input.command // "")} ] ) as $executions
+      | ( [ $records[]?
+            | select(.type == "user")
+            | .message.content[]?
+            | select(.type == "tool_result")
+            | {tool_use_id: .tool_use_id, is_error: (.is_error // null)} ] ) as $results
+      | [ $proofs[] as $p
+          | ( if ($p | type) != "object" then
+                {id: "P\($proofs | index($p))", verdict: "unverifiable"}
+              else
+                ( ($p.id | if type == "string" and length > 0 then . else null end)) as $rawid
+                | ($rawid // "P\($proofs | index($p))") as $id
+                | ( $p.cmd | if type == "string" then gsub("^\\s+|\\s+$";"") else null end ) as $cmd
+                | if ($cmd == null or $cmd == "") then
+                    {id: $id, verdict: "badcmd"}
+                  else
+                    ( [ $executions[]
+                        | select((.command | if type == "string" then gsub("^\\s+|\\s+$";"") else "" end) == $cmd) ] ) as $matches
+                    | if ($matches | length) == 0 then
+                        {id: $id, verdict: "unexecuted"}
+                      else
+                        ($matches[-1]) as $last
+                        | ( [ $results[] | select(.tool_use_id == $last.id) ] | last) as $result
+                        | if ($result == null) then
+                            {id: $id, verdict: "unexecuted"}
+                          elif ($result.is_error == true) then
+                            {id: $id, verdict: "failed"}
+                          else
+                            {id: $id, verdict: "satisfied"}
+                          end
+                      end
+                  end
+              end )
+        ]
+    ' 2>/dev/null
+  )
+  [ -n "$verdicts" ] || { als_log "hook=$hook session=$session proof_gate=blocked offenders=jq_error"; echo "[loop-stall-guard] LOOP-STOP: complete declared but proof.json/transcript could not be evaluated." >&2; exit 2; }
+
+  local offenders
+  offenders=$(printf '%s' "$verdicts" | jq -r '
+    [ .[] | select(.verdict != "satisfied") | "\(.id)(\(.verdict))" ] | join(", ")
+  ' 2>/dev/null)
+  if [ -n "$offenders" ]; then
+    als_log "hook=$hook session=$session proof_gate=blocked offenders=$offenders"
+    echo "[loop-stall-guard] LOOP-STOP: complete declared but these frozen proofs are not verified: $offenders.
+Run each named proof's cmd VERBATIM as its own single Bash command in THIS
+(the orchestrator's) session — commands run inside dispatched workers or
+subagents never appear in this transcript and cannot satisfy this gate — then
+re-declare complete." >&2
+    exit 2
+  fi
+  local n; n=$(printf '%s' "$verdicts" | jq 'length' 2>/dev/null)
+  als_log "hook=$hook session=$session proof_gate=ok proofs=$n"
+}

@@ -64,6 +64,7 @@ gate_loop_stop_declared() {
     category=$(printf '%s\n' "$text" | grep -oiE "LOOP-STOP:[[:space:]]*(${LOOP_STOP_VOCAB})" | grep -oiE "(${LOOP_STOP_VOCAB})\$" | tail -1)
     als_gate_retro_on_complete "$category" "loop_stall_guard" "$session_id"
     als_gate_work_units_on_complete "$category" "loop_stall_guard" "$session_id"
+    als_gate_proofs_on_complete "$category" "loop_stall_guard" "$session_id" "$transcript"
     bump_loop_stop_count "$category"
     als_log "hook=loop_stall_guard session=$session_id invocations=$ALS_INVOCATIONS declared=1 blocked=0"
     exit 0
