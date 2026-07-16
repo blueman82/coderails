@@ -51,6 +51,15 @@ be replayed to derive position, and that can leave a torn tail line after a cras
 to decide whether the ≥3-work-unit eval threshold applies, and fails open (no block) when the
 field is absent — so keep it populated whenever the loop tracks ≥1 work-unit.
 
+**`work_units` also feeds the `loop_stall_guard` deferral gate.** A `LOOP-STOP: complete`
+declaration is blocked while any unit's `status` is not terminal (`pending`, `in-progress`, or
+`blocked` all block; so does any other value). `done` is terminal outright; `dropped` is terminal
+only with a non-empty `dropped_reason` — an absent, empty, or whitespace-only reason still blocks.
+The block message names the offending unit id(s). Fails open (allows) when jq is absent, the field
+is absent/null, or the file is malformed — same honest boundary as the retro-presence gate. This is
+structural enforcement of "nothing is deferred": prose alone (a standing order) was observed to
+fail, so the gate makes deferral impossible rather than merely discouraged.
+
 **`loop_stop_counts` is written solely by the `loop_stall_guard` hook** on each valid `LOOP-STOP`
 declaration. The orchestrator never writes or increments it. On any wholesale rewrite of the file
 you must re-read the existing `progress.json` first and carry `loop_stop_counts` forward by the
