@@ -54,7 +54,7 @@
     {
       "name": "workflow-audit-weekly",
       "label": "WORKFLOW AUDIT (weekly)",
-      "command": "Invoke coderails:workflow-audit in QUEUE-MODE over the last 7 days (--days 7). In-session skill creation is forbidden in this run — every propose verdict is written as a queue entry only. Finish by writing the run note recording `proposals_written: <N>` and `proposals_attempted: <A>`, where N counts queue entries actually written this run. Emit the completion marker line `## [<YYYY-MM-DD>] workflow-audit complete` ONLY IF the run finished cleanly AND N == A. If any queue write failed (N != A) or the run did not complete, write the note WITHOUT the completion marker. N=0 with no failures is SUCCESS — emit the marker.",
+      "command": "Invoke coderails:workflow-audit in QUEUE-MODE over the last 7 days (--days 7). In-session skill creation is forbidden in this run — every propose verdict is written as a queue entry only. Finish by writing the run note to ~/.claude/coderails-dashboard/routines/workflow-audit/run-{date}.md (use exactly this path and filename) recording `proposals_written: <N>` and `proposals_attempted: <A>`, where N counts queue entries actually written this run. Emit the completion marker line `## [<YYYY-MM-DD>] workflow-audit complete` ONLY IF the run finished cleanly AND N == A. If any queue write failed (N != A) or the run did not complete, write the note WITHOUT the completion marker. N=0 with no failures is SUCCESS — emit the marker.",
       "cwd": "/Users/harrison/Github/coderails",
       "profile": "read-only",
       "hidden": true
