@@ -22,7 +22,21 @@ SLEEP_S="${CLAUDE_HOOK_SLEEP_S:-0.3}"
 # failure-reporting line (e.g. als_stable_invocations' jq-failure summary) is
 # itself silently swallowed here — only reachable via a misconfigured
 # CLAUDE_DISCIPLINE_LOG override, not a normal operating condition.
-als_log() { { printf '%s %s\n' "$(date -Iseconds 2>/dev/null || date +%Y-%m-%dT%H:%M:%S%z)" "$1" >> "$LOG_FILE"; } 2>/dev/null; }
+# One log call must write exactly ONE line. Message text can carry model-chosen
+# data (work-unit ids, session ids) whose newlines would otherwise append extra
+# lines to the log — letting a crafted id forge a whole record, e.g. a
+# fabricated "gate=passed" with its own timestamp, in the audit trail the
+# dashboard reads. Enforcement never depended on this; the log's integrity does.
+# Escape CR/LF to literal \n / \r so the message stays one line and stays legible.
+# Escaping uses bash parameter expansion ONLY — no awk/sed/tr. als_log must keep
+# working when PATH carries almost nothing (the jq-missing retry window relies on
+# it to report its own failure), so it must not acquire external dependencies.
+als_log() {
+  local msg="$1"
+  msg=${msg//$'\r'/\\r}
+  msg=${msg//$'\n'/\\n}
+  { printf '%s %s\n' "$(date -Iseconds 2>/dev/null || date +%Y-%m-%dT%H:%M:%S%z)" "$msg" >> "$LOG_FILE"; } 2>/dev/null
+}
 
 # Sanitise a session_id extracted from the Stop-hook JSON payload. If the
 # payload's session_id is missing/null, the jq extraction below falls back to

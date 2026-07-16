@@ -102,4 +102,17 @@ check "\"priority\":\"P0\" inside JSON-fixture content -> allow" ALLOW \
 check "CHANGE the default timeout (no trailing digit) -> allow" ALLOW \
   "$(run "$(payload Edit "$FILE" "# CHANGE the default timeout")")"
 
+# ─── Non-comment lines must NOT fire: the gate polices COMMENTS, not code ────
+# Regression: the gate matched anywhere in the content field, so literal label
+# data in JSON fixtures and label strings asserted on in tests were read as
+# comment citations. Both are data the repo can resolve on its own.
+check "E1: as a JSON fixture VALUE (not a comment) -> allow" ALLOW \
+  "$(run "$(payload_write "fixtures/evals.json" "{\"evals\":[{\"id\":\"E1:\",\"desc\":\"gate blocks\"}]}")")"
+check "reviewer finding asserted as a test STRING (not a comment) -> allow" ALLOW \
+  "$(run "$(payload Edit "hooks/scripts/tests/x.test.sh" "assert_eq \"\$out\" \"reviewer finding\"")")"
+check "WU1: inside a shell string literal (not a comment) -> allow" ALLOW \
+  "$(run "$(payload Edit "$FILE" "msg=\"WU1: pending\"")")"
+check "code line with trailing comment citation -> deny" DENY \
+  "$(run "$(payload Edit "$FILE" "foo=1  # E1: reviewer finding said guard this")")"
+
 [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails)"; exit 1; }

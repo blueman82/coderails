@@ -37,7 +37,20 @@ content=$(printf '%s' "$input" | jq -r '
 # C2, and generic indirect-artifact phrasing (per the plan/design/session).
 pattern='\bE[0-9]+:|\bF[0-9]+ (fix|:|design)|CHANGE [BC][0-9]|\bTask A[0-9]+\b|TA-I[0-9]+|reviewer finding|eval E[0-9]+|\bWU[0-9]+:|\bC2\b|per the (plan|design|session)|per F[0-9]+'
 
-match=$(printf '%s\n' "$content" | grep -Ei "$pattern" | head -1)
+# Only COMMENT text is in scope. Matching the whole content field read literal
+# label data — a value in a JSON fixture, a label string asserted on in a test
+# — as if it were a citation, denying edits that cite nothing. That data is
+# resolvable from the repo alone, which is the only thing this gate protects.
+# Reduce each line to its comment span first, then match: a citation in a
+# trailing comment still fires (the span survives), while the code or data
+# before the comment marker cannot.
+comments=$(printf '%s\n' "$content" | sed -n \
+  -e 's@.*//@//@p' \
+  -e 's@.*[[:space:]]#@#@p' \
+  -e 's@^[[:space:]]*#@#@p' \
+  -e 's@^[[:space:]]*\*@*@p')
+
+match=$(printf '%s\n' "$comments" | grep -Ei "$pattern" | head -1)
 
 if [ -n "$match" ]; then
   reason="Blocked: comment cites a session-artifact label ($(printf '%s' "$match" | sed 's/^[[:space:]]*//')). State the constraint the code enforces, not the conversation/PR that produced it."
