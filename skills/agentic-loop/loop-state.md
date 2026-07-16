@@ -38,7 +38,7 @@ be replayed to derive position, and that can leave a torn tail line after a cras
 | `session_id` | This session's id; the guard's ownership check compares it against the file's own path. |
 | `status` | `initialising` → `in-progress` → `complete` (see Lifecycle). |
 | `authorising_prompt_raw` | The authorisation envelope, verbatim. |
-| `work_units` | JSON object keyed by unit id; each entry carries at least a `status` (`pending`/`in-progress`/`done`/`blocked` with `blockedBy`). |
+| `work_units` | JSON object keyed by unit id; each entry carries at least a `status`. In-flight values are `pending`/`in-progress`/`blocked` (with `blockedBy`); only `done` and `dropped` (with a mandatory sibling `dropped_reason`) are terminal — see below. `merged`/`complete`/other synonyms are retired: do not mint new status values. |
 | `loop_stop_counts` | **HOOK-OWNED.** Per-category counts `{hard-stop, approval-gate, awaiting-input, complete}`, for Phase 13. |
 | `disposition` | Per work-unit that retires an existing code path: `clean-break` \| `preserve-compat`. |
 | `named_blocker` | When `preserve-compat`: the specific consumer still on the old path that justifies keeping it. |
@@ -50,6 +50,23 @@ be replayed to derive position, and that can leave a torn tail line after a cras
 **`work_units` feeds the loop-scope eval gate.** `loop_state_guard` reads `.work_units | length`
 to decide whether the ≥3-work-unit eval threshold applies, and fails open (no block) when the
 field is absent — so keep it populated whenever the loop tracks ≥1 work-unit.
+
+**`work_units` also feeds the `loop_stall_guard` deferral gate.** A `LOOP-STOP: complete`
+declaration is blocked while any unit's `status` is not terminal (`pending`, `in-progress`, or
+`blocked` all block; so does any other value). `done` is terminal outright; `dropped` is terminal
+only with a non-empty **string** `dropped_reason` — an absent, empty, whitespace-only, or
+non-string (number, boolean, array, object) reason all still block. A unit whose value is not an
+object blocks too: a unit that cannot be proven terminal is not terminal. The block message names
+the offending unit id(s).
+
+Fails open (allows) only at the FILE level: jq absent, the field absent/null, an empty
+object, or an unparseable file. Note this is **not** the retro-presence gate's posture — that gate
+*blocks* on an absent/malformed retro.json, because a retro is mandatory at Phase 13 whereas
+`work_units` is optional and a trivial loop may never populate it. Absence of the field fails open;
+an individual unit that cannot be proven terminal fails closed, so one malformed entry can never
+launder an unfinished unit into a completion. This is structural enforcement of "nothing is
+deferred": prose alone (a standing order) was observed to fail, so the gate makes deferral
+impossible rather than merely discouraged.
 
 **`loop_stop_counts` is written solely by the `loop_stall_guard` hook** on each valid `LOOP-STOP`
 declaration. The orchestrator never writes or increments it. On any wholesale rewrite of the file

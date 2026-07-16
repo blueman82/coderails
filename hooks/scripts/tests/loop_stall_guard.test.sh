@@ -70,6 +70,16 @@ write_retro() { # session_id content -> writes retro.json beside progress.json
   mkdir -p "$dir"
   printf '%s' "$2" > "$dir/retro.json"
 }
+# Overwrites progress.json (written by write_file) with an added top-level
+# work_units field, given as a raw JSON fragment (object or array literal).
+# Keeps schema_version/status/session_id from the prior write_file call.
+write_work_units() { # session_id status work_units_json_fragment
+  local dir; dir=$(file_dir "$1")
+  mkdir -p "$dir"
+  jq -n --arg s "$1" --arg st "$2" --argjson wu "$3" \
+    '{schema_version:1, status:$st, session_id:$s, completed_marker:0, work_units:$wu}' \
+    > "$dir/progress.json"
+}
 # grep -c exits 1 on zero matches even though it correctly prints "0" — count()
 # always exits 0 and prints just the count, so a zero-match assertion doesn't
 # need an `|| echo 0` fallback (mirrors loop_state_guard.test.sh's own count()).
@@ -431,6 +441,344 @@ reset; T=$(mk_transcript 1 "All done.
 LOOP-STOP: Complete — done"); write_file in-progress S1 0
 write_retro S1 '{"schema_version":1}'
 check "mixed-case Complete + valid retro.json -> allow" 0 "$(run x "$(payload "$T" S1)")"
+
+# =====================================================================
+# als_gate_work_units_on_complete — deferral gate on a `complete` LOOP-STOP.
+# work_units lives INSIDE progress.json (write_work_units overwrites the file
+# written by write_file, adding the field). Every fixture below supplies a
+# valid retro.json first (write_retro) so the PRE-EXISTING retro gate never
+# fires first and masks this gate as a no-op (see the file-header note on
+# als_gate_retro_on_complete for why retro.json is required for "complete").
+# To discriminate the block SOURCE from the retro gate's, every BLOCK
+# assertion below checks stderr names the offending unit id, not just "retro".
+
+# (h1) object, one pending unit + complete -> BLOCK, stderr names that id,
+# complete counter NOT bumped.
+reset; T=$(mk_transcript 1 "All done.
+LOOP-STOP: complete — done"); write_file in-progress S1 0
+write_retro S1 '{"schema_version":1}'
+write_work_units S1 in-progress '{"wu1":{"status":"pending"}}'
+run_capture_stderr "$(payload "$T" S1)"
+check "work_units: one pending -> block" 2 "$RC_OUT"
+case "$STDERR_OUT" in *wu1*) wu1_named=1 ;; *) wu1_named=0 ;; esac
+check "work_units: one pending -> stderr names wu1" 1 "$wu1_named"
+check "work_units: one pending -> complete counter NOT bumped" 0 "$(counter S1 complete)"
+
+# (h2) object, all done + complete -> ALLOW, counter bumped.
+reset; T=$(mk_transcript 1 "All done.
+LOOP-STOP: complete — done"); write_file in-progress S1 0
+write_retro S1 '{"schema_version":1}'
+write_work_units S1 in-progress '{"wu1":{"status":"done"},"wu2":{"status":"done"}}'
+check "work_units: all done -> allow" 0 "$(run x "$(payload "$T" S1)")"
+check "work_units: all done -> counter bumped" 1 "$(counter S1 complete)"
+
+# (h3) dropped + non-empty reason -> ALLOW.
+reset; T=$(mk_transcript 1 "All done.
+LOOP-STOP: complete — done"); write_file in-progress S1 0
+write_retro S1 '{"schema_version":1}'
+write_work_units S1 in-progress '{"wu1":{"status":"dropped","dropped_reason":"superseded by wu2"}}'
+check "work_units: dropped + reason -> allow" 0 "$(run x "$(payload "$T" S1)")"
+
+# (h4) dropped + no reason key at all -> BLOCK.
+reset; T=$(mk_transcript 1 "All done.
+LOOP-STOP: complete — done"); write_file in-progress S1 0
+write_retro S1 '{"schema_version":1}'
+write_work_units S1 in-progress '{"wu1":{"status":"dropped"}}'
+run_capture_stderr "$(payload "$T" S1)"
+check "work_units: dropped + no reason -> block" 2 "$RC_OUT"
+case "$STDERR_OUT" in *wu1*) wu1_named=1 ;; *) wu1_named=0 ;; esac
+check "work_units: dropped + no reason -> stderr names wu1" 1 "$wu1_named"
+
+# (h5) dropped + empty-string reason -> BLOCK.
+reset; T=$(mk_transcript 1 "All done.
+LOOP-STOP: complete — done"); write_file in-progress S1 0
+write_retro S1 '{"schema_version":1}'
+write_work_units S1 in-progress '{"wu1":{"status":"dropped","dropped_reason":""}}'
+check "work_units: dropped + empty-string reason -> block" 2 "$(run x "$(payload "$T" S1)")"
+
+# (h5b) dropped + whitespace-only reason -> BLOCK.
+reset; T=$(mk_transcript 1 "All done.
+LOOP-STOP: complete — done"); write_file in-progress S1 0
+write_retro S1 '{"schema_version":1}'
+write_work_units S1 in-progress '{"wu1":{"status":"dropped","dropped_reason":"   "}}'
+check "work_units: dropped + whitespace-only reason -> block" 2 "$(run x "$(payload "$T" S1)")"
+
+# (h6) absent work_units -> ALLOW (fail-open; write_file never sets the field).
+reset; T=$(mk_transcript 1 "All done.
+LOOP-STOP: complete — done"); write_file in-progress S1 0
+write_retro S1 '{"schema_version":1}'
+check "work_units: absent field -> allow" 0 "$(run x "$(payload "$T" S1)")"
+
+# (h7) empty object {} -> ALLOW.
+reset; T=$(mk_transcript 1 "All done.
+LOOP-STOP: complete — done"); write_file in-progress S1 0
+write_retro S1 '{"schema_version":1}'
+write_work_units S1 in-progress '{}'
+check "work_units: empty object -> allow" 0 "$(run x "$(payload "$T" S1)")"
+
+# (h8) mixed done + pending -> BLOCK naming ONLY the pending id.
+reset; T=$(mk_transcript 1 "All done.
+LOOP-STOP: complete — done"); write_file in-progress S1 0
+write_retro S1 '{"schema_version":1}'
+write_work_units S1 in-progress '{"wu1":{"status":"done"},"wu2":{"status":"pending"}}'
+run_capture_stderr "$(payload "$T" S1)"
+check "work_units: mixed done+pending -> block" 2 "$RC_OUT"
+case "$STDERR_OUT" in *wu2*) wu2_named=1 ;; *) wu2_named=0 ;; esac
+check "work_units: mixed done+pending -> stderr names wu2" 1 "$wu2_named"
+case "$STDERR_OUT" in *wu1*) wu1_named=1 ;; *) wu1_named=0 ;; esac
+check "work_units: mixed done+pending -> stderr does NOT name wu1 (done)" 0 "$wu1_named"
+
+# (h9) in-progress and blocked statuses -> BLOCK (two sub-cases).
+reset; T=$(mk_transcript 1 "All done.
+LOOP-STOP: complete — done"); write_file in-progress S1 0
+write_retro S1 '{"schema_version":1}'
+write_work_units S1 in-progress '{"wu1":{"status":"in-progress"}}'
+check "work_units: in-progress status -> block" 2 "$(run x "$(payload "$T" S1)")"
+
+reset; T=$(mk_transcript 1 "All done.
+LOOP-STOP: complete — done"); write_file in-progress S1 0
+write_retro S1 '{"schema_version":1}'
+write_work_units S1 in-progress '{"wu1":{"status":"blocked"}}'
+check "work_units: blocked status -> block" 2 "$(run x "$(payload "$T" S1)")"
+
+# (h10) hard-stop + pending unit -> ALLOW (complete-only gate; mirrors the
+# retro gate's own case (e)). No retro.json needed — the retro gate is also
+# complete-only, so a hard-stop clears both gates by not triggering either.
+reset; T=$(mk_transcript 1 "Work paused.
+LOOP-STOP: hard-stop — x"); write_file in-progress S1 0
+write_work_units S1 in-progress '{"wu1":{"status":"pending"}}'
+check "work_units: hard-stop + pending -> allow (gate is complete-only)" 0 "$(run x "$(payload "$T" S1)")"
+
+# (h11) jq absent + pending + complete -> ALLOW (fail-open, mirrors NOJQ_BIN
+# usage in the retro-gate style: no jq means the gate itself never runs, and
+# the whole guard falls back to fail-open behaviour upstream).
+reset; T=$(mk_transcript 1 "All done.
+LOOP-STOP: complete — done"); write_file in-progress S1 0
+write_retro S1 '{"schema_version":1}'
+write_work_units S1 in-progress '{"wu1":{"status":"pending"}}'
+check "work_units: jq absent -> allow (fail-open)" 0 "$(run_env "PATH=$NOJQ_BIN" "$(payload "$T" S1)")"
+
+# (h12) mixed-case "Complete" + pending -> BLOCK (case-insensitive fire, same
+# requirement as the retro gate's (g2)).
+reset; T=$(mk_transcript 1 "All done.
+LOOP-STOP: Complete — done"); write_file in-progress S1 0
+write_retro S1 '{"schema_version":1}'
+write_work_units S1 in-progress '{"wu1":{"status":"pending"}}'
+check "work_units: mixed-case Complete + pending -> block" 2 "$(run x "$(payload "$T" S1)")"
+
+# (h13) malformed progress.json + complete -> ALLOW (fail-open; write_work_units
+# always emits valid JSON, so overwrite with a raw non-JSON file directly).
+reset; T=$(mk_transcript 1 "All done.
+LOOP-STOP: complete — done"); write_file in-progress S1 0
+write_retro S1 '{"schema_version":1}'
+dir=$(file_dir S1); printf 'not-json' > "$dir/progress.json"
+check "work_units: malformed progress.json -> allow" 0 "$(run x "$(payload "$T" S1)")"
+
+# (h14) ARRAY-shaped work_units + pending -> BLOCK (defensive tolerance for
+# the legacy/wrong shape; uses .id since array entries carry their own id).
+reset; T=$(mk_transcript 1 "All done.
+LOOP-STOP: complete — done"); write_file in-progress S1 0
+write_retro S1 '{"schema_version":1}'
+write_work_units S1 in-progress '[{"id":"wu1","status":"pending"}]'
+run_capture_stderr "$(payload "$T" S1)"
+check "work_units: array-shaped + pending -> block" 2 "$RC_OUT"
+case "$STDERR_OUT" in *wu1*) wu1_named=1 ;; *) wu1_named=0 ;; esac
+check "work_units: array-shaped + pending -> stderr names wu1" 1 "$wu1_named"
+
+# (h16) dropped_reason is a NUMBER (not a string) -> BLOCK. jq's gsub throws on
+# a non-string input; the type guard must catch this BEFORE gsub touches it,
+# treating a non-string reason as absent (not terminal) rather than letting
+# the whole jq -r pipeline die and offenders come back empty (fail-open bypass
+# of the gate's only escape hatch).
+reset; T=$(mk_transcript 1 "All done.
+LOOP-STOP: complete — done"); write_file in-progress S1 0
+write_retro S1 '{"schema_version":1}'
+write_work_units S1 in-progress '{"wu1":{"status":"dropped","dropped_reason":42}}'
+run_capture_stderr "$(payload "$T" S1)"
+check "work_units: dropped_reason is a number -> block" 2 "$RC_OUT"
+case "$STDERR_OUT" in *wu1*) wu1_named=1 ;; *) wu1_named=0 ;; esac
+check "work_units: dropped_reason is a number -> stderr names wu1" 1 "$wu1_named"
+check "work_units: dropped_reason is a number -> complete counter NOT bumped" 0 "$(counter S1 complete)"
+
+# (h17) dropped_reason is a BOOLEAN -> BLOCK.
+reset; T=$(mk_transcript 1 "All done.
+LOOP-STOP: complete — done"); write_file in-progress S1 0
+write_retro S1 '{"schema_version":1}'
+write_work_units S1 in-progress '{"wu1":{"status":"dropped","dropped_reason":true}}'
+run_capture_stderr "$(payload "$T" S1)"
+check "work_units: dropped_reason is a boolean -> block" 2 "$RC_OUT"
+case "$STDERR_OUT" in *wu1*) wu1_named=1 ;; *) wu1_named=0 ;; esac
+check "work_units: dropped_reason is a boolean -> stderr names wu1" 1 "$wu1_named"
+
+# (h18) dropped_reason is an ARRAY -> BLOCK.
+reset; T=$(mk_transcript 1 "All done.
+LOOP-STOP: complete — done"); write_file in-progress S1 0
+write_retro S1 '{"schema_version":1}'
+write_work_units S1 in-progress '{"wu1":{"status":"dropped","dropped_reason":["x"]}}'
+run_capture_stderr "$(payload "$T" S1)"
+check "work_units: dropped_reason is an array -> block" 2 "$RC_OUT"
+case "$STDERR_OUT" in *wu1*) wu1_named=1 ;; *) wu1_named=0 ;; esac
+check "work_units: dropped_reason is an array -> stderr names wu1" 1 "$wu1_named"
+
+# (h19) dropped_reason is an OBJECT -> BLOCK.
+reset; T=$(mk_transcript 1 "All done.
+LOOP-STOP: complete — done"); write_file in-progress S1 0
+write_retro S1 '{"schema_version":1}'
+write_work_units S1 in-progress '{"wu1":{"status":"dropped","dropped_reason":{"a":1}}}'
+run_capture_stderr "$(payload "$T" S1)"
+check "work_units: dropped_reason is an object -> block" 2 "$RC_OUT"
+case "$STDERR_OUT" in *wu1*) wu1_named=1 ;; *) wu1_named=0 ;; esac
+check "work_units: dropped_reason is an object -> stderr names wu1" 1 "$wu1_named"
+
+# (h20) dropped_reason is explicit JSON null (distinct from the key being
+# absent entirely, h4) -> BLOCK. Already correctly blocks pre-fix (the `// ""`
+# upstream of gsub catches null), so this is a regression guard, not proof of
+# the number/bool/array/object bug.
+reset; T=$(mk_transcript 1 "All done.
+LOOP-STOP: complete — done"); write_file in-progress S1 0
+write_retro S1 '{"schema_version":1}'
+write_work_units S1 in-progress '{"wu1":{"status":"dropped","dropped_reason":null}}'
+check "work_units: dropped_reason is explicit null -> block" 2 "$(run x "$(payload "$T" S1)")"
+
+# (h21) COMPOUNDING CASE — a dropped_reason:42 unit AND a separate pending
+# unit in the SAME file -> BLOCK, naming BOTH units. Pre-fix, the type error
+# on wu1 kills the whole jq -r pipeline, so offenders comes back completely
+# empty and even wu2's plain "pending" status (which needs no gsub at all)
+# goes unchecked — a compounding fail-open, not just a missed reason check.
+reset; T=$(mk_transcript 1 "All done.
+LOOP-STOP: complete — done"); write_file in-progress S1 0
+write_retro S1 '{"schema_version":1}'
+write_work_units S1 in-progress '{"wu1":{"status":"dropped","dropped_reason":42},"wu2":{"status":"pending"}}'
+run_capture_stderr "$(payload "$T" S1)"
+check "work_units: compounding (bad reason + pending) -> block" 2 "$RC_OUT"
+case "$STDERR_OUT" in *wu1*) wu1_named=1 ;; *) wu1_named=0 ;; esac
+check "work_units: compounding -> stderr names wu1" 1 "$wu1_named"
+case "$STDERR_OUT" in *wu2*) wu2_named=1 ;; *) wu2_named=0 ;; esac
+check "work_units: compounding -> stderr names wu2" 1 "$wu2_named"
+check "work_units: compounding -> complete counter NOT bumped" 0 "$(counter S1 complete)"
+
+# (h22) REGRESSION — dropped + a real non-empty STRING reason -> still ALLOW.
+# Proves the type guard didn't break the legitimate escape hatch.
+reset; T=$(mk_transcript 1 "All done.
+LOOP-STOP: complete — done"); write_file in-progress S1 0
+write_retro S1 '{"schema_version":1}'
+write_work_units S1 in-progress '{"wu1":{"status":"dropped","dropped_reason":"superseded by wu2, see PR #200"}}'
+check "work_units: dropped + real string reason -> allow (escape hatch intact)" 0 "$(run x "$(payload "$T" S1)")"
+check "work_units: dropped + real string reason -> counter bumped" 1 "$(counter S1 complete)"
+
+# (h23) ARRAY-shaped entry MISSING .id -> BLOCK, stderr names it by its array
+# INDEX ("[0]"), not the uninformative literal "null".
+reset; T=$(mk_transcript 1 "All done.
+LOOP-STOP: complete — done"); write_file in-progress S1 0
+write_retro S1 '{"schema_version":1}'
+write_work_units S1 in-progress '[{"status":"pending"}]'
+run_capture_stderr "$(payload "$T" S1)"
+check "work_units: array entry missing .id -> block" 2 "$RC_OUT"
+case "$STDERR_OUT" in *'[0]'*) idx_named=1 ;; *) idx_named=0 ;; esac
+check "work_units: array entry missing .id -> stderr names it by index [0]" 1 "$idx_named"
+case "$STDERR_OUT" in *'"null"'*|*': null'*) literal_null=1 ;; *) literal_null=0 ;; esac
+check "work_units: array entry missing .id -> stderr does NOT name it literal null" 0 "$literal_null"
+
+# (h24) VALUE-TYPE-GUARD — a unit whose VALUE is a scalar STRING (not an
+# object) -> BLOCK, stderr names it. Pre-fix, .value.status on a string value
+# throws "Cannot index string with string \"status\"" inside the jq -r
+# pipeline, killing it entirely: offenders collapses to "", and
+# `[ -n "$offenders" ] || return 0` fails the whole gate OPEN even though this
+# unit obviously isn't done/dropped. A non-object value cannot be proven
+# terminal, so it must block, same shape as the dropped_reason type-guard.
+reset; T=$(mk_transcript 1 "All done.
+LOOP-STOP: complete — done"); write_file in-progress S1 0
+write_retro S1 '{"schema_version":1}'
+write_work_units S1 in-progress '{"wu1":"pending"}'
+run_capture_stderr "$(payload "$T" S1)"
+check "work_units: scalar string value -> block" 2 "$RC_OUT"
+case "$STDERR_OUT" in *wu1*) wu1_named=1 ;; *) wu1_named=0 ;; esac
+check "work_units: scalar string value -> stderr names wu1" 1 "$wu1_named"
+check "work_units: scalar string value -> complete counter NOT bumped" 0 "$(counter S1 complete)"
+
+# (h25) VALUE-TYPE-GUARD — a unit whose VALUE is a scalar NUMBER -> BLOCK.
+reset; T=$(mk_transcript 1 "All done.
+LOOP-STOP: complete — done"); write_file in-progress S1 0
+write_retro S1 '{"schema_version":1}'
+write_work_units S1 in-progress '{"wu1":42}'
+check "work_units: scalar number value -> block" 2 "$(run x "$(payload "$T" S1)")"
+
+# (h26) VALUE-TYPE-GUARD — a unit whose VALUE is JSON null -> BLOCK.
+reset; T=$(mk_transcript 1 "All done.
+LOOP-STOP: complete — done"); write_file in-progress S1 0
+write_retro S1 '{"schema_version":1}'
+write_work_units S1 in-progress '{"wu1":null}'
+check "work_units: null value -> block" 2 "$(run x "$(payload "$T" S1)")"
+
+# (h27) THE BLINDING CASE — one malformed scalar-value unit (wu1) alongside a
+# genuinely pending object-value unit (wu2), SAME file -> BLOCK naming BOTH.
+# This is the exact fail-open this fix closes: pre-fix, wu1's .value.status
+# throws and kills the whole pipeline, so wu2's real "pending" status (which
+# needs no type guard at all) goes completely unchecked too — one bad scalar
+# entry blinds the gate to every other unit in the file.
+reset; T=$(mk_transcript 1 "All done.
+LOOP-STOP: complete — done"); write_file in-progress S1 0
+write_retro S1 '{"schema_version":1}'
+write_work_units S1 in-progress '{"wu1":"whatever","wu2":{"status":"pending"}}'
+run_capture_stderr "$(payload "$T" S1)"
+check "work_units: blinding case (scalar + pending) -> block" 2 "$RC_OUT"
+case "$STDERR_OUT" in *wu1*) wu1_named=1 ;; *) wu1_named=0 ;; esac
+check "work_units: blinding case -> stderr names wu1" 1 "$wu1_named"
+case "$STDERR_OUT" in *wu2*) wu2_named=1 ;; *) wu2_named=0 ;; esac
+check "work_units: blinding case -> stderr names wu2" 1 "$wu2_named"
+check "work_units: blinding case -> complete counter NOT bumped" 0 "$(counter S1 complete)"
+
+# (h28) CRITICAL REGRESSION — one malformed scalar-value unit (wu1) alongside
+# a genuinely DONE object-value unit (wu2) -> BLOCK naming ONLY wu1. Proves
+# the malformed entry doesn't blind evaluation of the valid one (wu2 must
+# still read back as done, not swept into the block by association), and that
+# the fix doesn't over-block a legitimately finished unit.
+reset; T=$(mk_transcript 1 "All done.
+LOOP-STOP: complete — done"); write_file in-progress S1 0
+write_retro S1 '{"schema_version":1}'
+write_work_units S1 in-progress '{"wu1":"whatever","wu2":{"status":"done"}}'
+run_capture_stderr "$(payload "$T" S1)"
+check "work_units: malformed + done sibling -> block" 2 "$RC_OUT"
+case "$STDERR_OUT" in *wu1*) wu1_named=1 ;; *) wu1_named=0 ;; esac
+check "work_units: malformed + done sibling -> stderr names wu1" 1 "$wu1_named"
+case "$STDERR_OUT" in *wu2*) wu2_named=1 ;; *) wu2_named=0 ;; esac
+check "work_units: malformed + done sibling -> stderr does NOT name wu2" 0 "$wu2_named"
+
+# (h29) ARRAY branch — a scalar entry alongside an object entry -> BLOCK
+# naming both; the scalar is named by its array INDEX (fallback), same as
+# h23's missing-.id case.
+reset; T=$(mk_transcript 1 "All done.
+LOOP-STOP: complete — done"); write_file in-progress S1 0
+write_retro S1 '{"schema_version":1}'
+write_work_units S1 in-progress '[{"status":"pending"},"scalar"]'
+run_capture_stderr "$(payload "$T" S1)"
+check "work_units: array scalar entry -> block" 2 "$RC_OUT"
+case "$STDERR_OUT" in *'[0]'*) idx0_named=1 ;; *) idx0_named=0 ;; esac
+check "work_units: array scalar entry -> stderr names the pending object [0]" 1 "$idx0_named"
+case "$STDERR_OUT" in *'[1]'*) idx_named=1 ;; *) idx_named=0 ;; esac
+check "work_units: array scalar entry -> stderr names the scalar by index [1]" 1 "$idx_named"
+
+# (h30) REGRESSION — all-object, all-done (object branch) still ALLOWS. The
+# value-type guard must not break the ordinary happy path.
+reset; T=$(mk_transcript 1 "All done.
+LOOP-STOP: complete — done"); write_file in-progress S1 0
+write_retro S1 '{"schema_version":1}'
+write_work_units S1 in-progress '{"wu1":{"status":"done"},"wu2":{"status":"done"}}'
+check "work_units: value-guard regression, all-object all-done -> allow" 0 "$(run x "$(payload "$T" S1)")"
+check "work_units: value-guard regression, all-object all-done -> counter bumped" 1 "$(counter S1 complete)"
+
+# (h15) NEGATIVE CONTROL — prove the must-BLOCK assertions above actually
+# discriminate: a category never bumped must not read back as bumped.
+# Mirrors the retro gate's own (g) negative control below, scoped to this
+# gate's fixtures (h1's session was blocked, so its counter must read 0, not
+# some stale nonzero value from an earlier reset).
+wu_neg_actual="$(counter S1 nonexistent-category-wu)"
+if [ "$wu_neg_actual" = "1" ]; then
+  echo "FAIL - work_units negative control did not fail as expected (bug in test design)"
+  fails=$((fails+1))
+else
+  echo "ok   - work_units negative control correctly reports mismatch (expected bumped=1, got $wu_neg_actual for an uncounted category)"
+fi
 
 # (g) NEGATIVE CONTROL — prove case (b)'s counter assertion actually
 # discriminates: re-checking against a category that was never bumped must
