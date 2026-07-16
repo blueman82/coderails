@@ -176,7 +176,7 @@ The 8-day artifact-gate freshness window (`maxAgeSeconds: 691200`) provides catc
 
 ## `loop-retro-promotion-weekly`: a dormant-by-default routine
 
-Unlike the other three routines, `loop-retro-promotion-weekly`'s own
+Unlike the other four routines, `loop-retro-promotion-weekly`'s own
 skill (`skills/loop-retro-promotion/SKILL.md`) evaluates a 3-part
 graduation predicate every time it runs, before doing anything else: (1)
 at least 10 `retro.json` files exist under the repo-key dir, (2)
