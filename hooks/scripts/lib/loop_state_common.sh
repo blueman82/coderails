@@ -576,9 +576,17 @@ Phase 13), write it, then re-declare complete." >&2
 # the array INDEX ("[0]") rather than the uninformative literal "null" —
 # object is still the primary, expected shape.
 #
-# Fail-open (mirrors als_gate_retro_on_complete): jq absent, absent/null
-# work_units, empty object/array, or malformed progress.json/work_units all
+# Fail-open at the FILE level: jq absent, ALS_PATH unset/missing, absent/null
+# work_units, empty object/array, or malformed (unparseable) progress.json all
 # allow. Fires ONLY on `complete` (case-insensitively).
+#
+# This is deliberately NOT the same posture as als_gate_retro_on_complete,
+# which BLOCKS on an absent/malformed retro.json (its artifact is mandatory at
+# Phase 13). The two gates share only the jq-absent skip. work_units is
+# OPTIONAL — a trivial or legacy loop may never populate it — so its ABSENCE
+# must never itself block. The distinction: absence of the field fails open,
+# but an individual unit that cannot be PROVEN terminal fails closed (blocks),
+# so a malformed entry can never launder an unfinished unit into a completion.
 #
 # Allowlist is deliberately narrow: {done, dropped}. Do NOT widen to accept
 # "merged"/"complete"/other synonyms seen in historical loops — those
