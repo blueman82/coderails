@@ -155,7 +155,7 @@ Field by field:
   - `{ kind: "json-field", path, value }` — file parses as JSON and the
     dotted `path` resolves to exactly `value`.
 - **`escalation`** — an array drawn from `["notification",
-  "vault-note"]`. Both shipped channels are enabled on all four
+  "vault-note"]`. Both shipped channels are enabled on all five
   example routines; there's no "off" option today — a routine either
   escalates through the channels it lists or (if the array is empty)
   fails silently except in the runlog, which is rarely what you want.
