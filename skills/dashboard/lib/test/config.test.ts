@@ -301,6 +301,7 @@ describe("loadConfig against the real examples/dashboard-config.json (C3)", () =
       "memory-consolidation-weekly",
       "ask",
       "loop-retro-promotion",
+      "inbox-brief",
       "workflow-audit-weekly",
     ]);
     expect(config.routines?.map((r) => r.name)).toEqual([
