@@ -97,6 +97,28 @@ STUB
   PATH="$STUBDIR:$PATH" "$SPAWN" "$WORKTREE" "$PROMPT_FILE" "claude-haiku-4-5-20251001" >/dev/null 2>&1 || rc=$?
   check "(d) worker rc 42 propagates" "42" "$rc"
 
+  # ─── Child-inheritance (Task 5, red-team item, pinned) ──────────────────
+  # Pins the design's load-bearing assumption: a worker cannot escape the
+  # sandbox by spawning a child process. stub-claude spawns a CHILD bash that
+  # attempts the same $HOME escape write; Seatbelt/bubblewrap denials are
+  # inherited by descendants, so the child's write must be denied too, not
+  # just the top-level claude process's own writes (case (c) above only
+  # proves the direct process is contained).
+  cat > "$STUBDIR/claude" <<'STUB'
+#!/bin/bash
+bash -c 'echo "child escape attempt" > "$HOME/escape-probe"' 2>&1
+echo "child-ran"
+STUB
+  chmod +x "$STUBDIR/claude"
+
+  rc=0
+  out=$(PATH="$STUBDIR:$PATH" "$SPAWN" "$WORKTREE" "$PROMPT_FILE" "claude-haiku-4-5-20251001" 2>&1) || rc=$?
+
+  check "(child) spawn exits 0" "0" "$rc"
+  check "(child) HOME escape file does NOT exist (child denied too)" "0" \
+    "$([ -e "$HOME/escape-probe" ] && echo 1 || echo 0)"
+  check_contains "(child) stderr shows the child's escape denial" "Operation not permitted" "$out"
+
   # ─── Correction 3 guard: XDG_CACHE_HOME set + writable, ~/.cache untouched ─
   # Locks in the containment win from correction 3: the spawn script must set
   # XDG_CACHE_HOME to a writable per-worker scratch dir so claude -p's own
