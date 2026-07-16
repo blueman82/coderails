@@ -128,7 +128,7 @@ Field by field:
   same string, `buttonRef` is optional (both the seeder and the runner
   resolve a routine to a button by `buttonRef ?? name`).
 - **`skillCommand` / `buttonRef`** — exactly one. `buttonRef` reuses an
-  existing button's `command`/`cwd`/`profile` (all four shipped
+  existing button's `command`/`cwd`/`profile` (all five shipped
   routines do this). `foreignSkillPath` (optional) names an absolute
   path to a skill that lives outside this repo (e.g. `sync-docs`'s
   personal-plugin location) — the runner checks the path exists before
