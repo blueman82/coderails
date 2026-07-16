@@ -585,6 +585,100 @@ check "work_units: array-shaped + pending -> block" 2 "$RC_OUT"
 case "$STDERR_OUT" in *wu1*) wu1_named=1 ;; *) wu1_named=0 ;; esac
 check "work_units: array-shaped + pending -> stderr names wu1" 1 "$wu1_named"
 
+# (h16) dropped_reason is a NUMBER (not a string) -> BLOCK. jq's gsub throws on
+# a non-string input; the type guard must catch this BEFORE gsub touches it,
+# treating a non-string reason as absent (not terminal) rather than letting
+# the whole jq -r pipeline die and offenders come back empty (fail-open bypass
+# of the gate's only escape hatch).
+reset; T=$(mk_transcript 1 "All done.
+LOOP-STOP: complete — done"); write_file in-progress S1 0
+write_retro S1 '{"schema_version":1}'
+write_work_units S1 in-progress '{"wu1":{"status":"dropped","dropped_reason":42}}'
+run_capture_stderr "$(payload "$T" S1)"
+check "work_units: dropped_reason is a number -> block" 2 "$RC_OUT"
+case "$STDERR_OUT" in *wu1*) wu1_named=1 ;; *) wu1_named=0 ;; esac
+check "work_units: dropped_reason is a number -> stderr names wu1" 1 "$wu1_named"
+check "work_units: dropped_reason is a number -> complete counter NOT bumped" 0 "$(counter S1 complete)"
+
+# (h17) dropped_reason is a BOOLEAN -> BLOCK.
+reset; T=$(mk_transcript 1 "All done.
+LOOP-STOP: complete — done"); write_file in-progress S1 0
+write_retro S1 '{"schema_version":1}'
+write_work_units S1 in-progress '{"wu1":{"status":"dropped","dropped_reason":true}}'
+run_capture_stderr "$(payload "$T" S1)"
+check "work_units: dropped_reason is a boolean -> block" 2 "$RC_OUT"
+case "$STDERR_OUT" in *wu1*) wu1_named=1 ;; *) wu1_named=0 ;; esac
+check "work_units: dropped_reason is a boolean -> stderr names wu1" 1 "$wu1_named"
+
+# (h18) dropped_reason is an ARRAY -> BLOCK.
+reset; T=$(mk_transcript 1 "All done.
+LOOP-STOP: complete — done"); write_file in-progress S1 0
+write_retro S1 '{"schema_version":1}'
+write_work_units S1 in-progress '{"wu1":{"status":"dropped","dropped_reason":["x"]}}'
+run_capture_stderr "$(payload "$T" S1)"
+check "work_units: dropped_reason is an array -> block" 2 "$RC_OUT"
+case "$STDERR_OUT" in *wu1*) wu1_named=1 ;; *) wu1_named=0 ;; esac
+check "work_units: dropped_reason is an array -> stderr names wu1" 1 "$wu1_named"
+
+# (h19) dropped_reason is an OBJECT -> BLOCK.
+reset; T=$(mk_transcript 1 "All done.
+LOOP-STOP: complete — done"); write_file in-progress S1 0
+write_retro S1 '{"schema_version":1}'
+write_work_units S1 in-progress '{"wu1":{"status":"dropped","dropped_reason":{"a":1}}}'
+run_capture_stderr "$(payload "$T" S1)"
+check "work_units: dropped_reason is an object -> block" 2 "$RC_OUT"
+case "$STDERR_OUT" in *wu1*) wu1_named=1 ;; *) wu1_named=0 ;; esac
+check "work_units: dropped_reason is an object -> stderr names wu1" 1 "$wu1_named"
+
+# (h20) dropped_reason is explicit JSON null (distinct from the key being
+# absent entirely, h4) -> BLOCK. Already correctly blocks pre-fix (the `// ""`
+# upstream of gsub catches null), so this is a regression guard, not proof of
+# the number/bool/array/object bug.
+reset; T=$(mk_transcript 1 "All done.
+LOOP-STOP: complete — done"); write_file in-progress S1 0
+write_retro S1 '{"schema_version":1}'
+write_work_units S1 in-progress '{"wu1":{"status":"dropped","dropped_reason":null}}'
+check "work_units: dropped_reason is explicit null -> block" 2 "$(run x "$(payload "$T" S1)")"
+
+# (h21) COMPOUNDING CASE — a dropped_reason:42 unit AND a separate pending
+# unit in the SAME file -> BLOCK, naming BOTH units. Pre-fix, the type error
+# on wu1 kills the whole jq -r pipeline, so offenders comes back completely
+# empty and even wu2's plain "pending" status (which needs no gsub at all)
+# goes unchecked — a compounding fail-open, not just a missed reason check.
+reset; T=$(mk_transcript 1 "All done.
+LOOP-STOP: complete — done"); write_file in-progress S1 0
+write_retro S1 '{"schema_version":1}'
+write_work_units S1 in-progress '{"wu1":{"status":"dropped","dropped_reason":42},"wu2":{"status":"pending"}}'
+run_capture_stderr "$(payload "$T" S1)"
+check "work_units: compounding (bad reason + pending) -> block" 2 "$RC_OUT"
+case "$STDERR_OUT" in *wu1*) wu1_named=1 ;; *) wu1_named=0 ;; esac
+check "work_units: compounding -> stderr names wu1" 1 "$wu1_named"
+case "$STDERR_OUT" in *wu2*) wu2_named=1 ;; *) wu2_named=0 ;; esac
+check "work_units: compounding -> stderr names wu2" 1 "$wu2_named"
+check "work_units: compounding -> complete counter NOT bumped" 0 "$(counter S1 complete)"
+
+# (h22) REGRESSION — dropped + a real non-empty STRING reason -> still ALLOW.
+# Proves the type guard didn't break the legitimate escape hatch.
+reset; T=$(mk_transcript 1 "All done.
+LOOP-STOP: complete — done"); write_file in-progress S1 0
+write_retro S1 '{"schema_version":1}'
+write_work_units S1 in-progress '{"wu1":{"status":"dropped","dropped_reason":"superseded by wu2, see PR #200"}}'
+check "work_units: dropped + real string reason -> allow (escape hatch intact)" 0 "$(run x "$(payload "$T" S1)")"
+check "work_units: dropped + real string reason -> counter bumped" 1 "$(counter S1 complete)"
+
+# (h23) ARRAY-shaped entry MISSING .id -> BLOCK, stderr names it by its array
+# INDEX ("[0]"), not the uninformative literal "null".
+reset; T=$(mk_transcript 1 "All done.
+LOOP-STOP: complete — done"); write_file in-progress S1 0
+write_retro S1 '{"schema_version":1}'
+write_work_units S1 in-progress '[{"status":"pending"}]'
+run_capture_stderr "$(payload "$T" S1)"
+check "work_units: array entry missing .id -> block" 2 "$RC_OUT"
+case "$STDERR_OUT" in *'[0]'*) idx_named=1 ;; *) idx_named=0 ;; esac
+check "work_units: array entry missing .id -> stderr names it by index [0]" 1 "$idx_named"
+case "$STDERR_OUT" in *'"null"'*|*': null'*) literal_null=1 ;; *) literal_null=0 ;; esac
+check "work_units: array entry missing .id -> stderr does NOT name it literal null" 0 "$literal_null"
+
 # (h15) NEGATIVE CONTROL — prove the must-BLOCK assertions above actually
 # discriminate: a category never bumped must not read back as bumped.
 # Mirrors the retro gate's own (g) negative control below, scoped to this

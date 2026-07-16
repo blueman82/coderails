@@ -548,15 +548,23 @@ Phase 13), write it, then re-declare complete." >&2
 
 # Gate: on a `complete` declaration, block if any progress.json work_unit is
 # not terminal. Terminal = "done", or "dropped" with a non-empty (post-trim)
-# dropped_reason. Anything else (pending, in-progress, blocked, or any other
-# value) blocks — this is the structural "nothing is deferred" enforcement;
-# prose standing-orders alone were observed to fail (deferred twice in one
-# loop with the standing-order loaded the whole time).
+# STRING dropped_reason. Anything else (pending, in-progress, blocked, or any
+# other value) blocks — this is the structural "nothing is deferred"
+# enforcement; prose standing-orders alone were observed to fail (deferred
+# twice in one loop with the standing-order loaded the whole time).
+#
+# dropped_reason must be type-guarded BEFORE gsub touches it: jq's gsub
+# throws on a non-string input (number/bool/array/object), which would kill
+# the whole jq -r pipeline, collapse offenders to empty, and fail the gate
+# OPEN — the exact bypass this gate exists to prevent. A non-string
+# dropped_reason is therefore treated as absent (not terminal, blocks),
+# same as a missing key or an empty/whitespace-only string.
 #
 # work_units is an OBJECT keyed by unit id (verified against every real
 # progress.json on disk) — to_entries/.key gives the real id. An array shape
-# is tolerated defensively (.id) so a shape mismatch never silently produces
-# `null` ids in the block message, but object is the primary, expected shape.
+# is tolerated defensively via to_entries too, so a missing .id falls back to
+# the array INDEX ("[0]") rather than the uninformative literal "null" —
+# object is still the primary, expected shape.
 #
 # Fail-open (mirrors als_gate_retro_on_complete): jq absent, absent/null
 # work_units, empty object/array, or malformed progress.json/work_units all
@@ -577,13 +585,13 @@ als_gate_work_units_on_complete() {
   offenders=$(jq -r '
     ( .work_units // {} ) as $wu
     | ( if ($wu | type) == "array"
-        then [ $wu[] | {id: (.id // "null"), status, dropped_reason} ]
+        then [ $wu | to_entries[] | {id: (.value.id // "[\(.key)]"), status: .value.status, dropped_reason: .value.dropped_reason} ]
         elif ($wu | type) == "object"
         then [ $wu | to_entries[] | {id: .key, status: .value.status, dropped_reason: .value.dropped_reason} ]
         else [] end )
     | map( select( ((.status == "done")
           or ((.status == "dropped")
-              and (((.dropped_reason // "") | gsub("^\\s+|\\s+$";"")) != ""))) | not ) )
+              and (((.dropped_reason | if type == "string" then gsub("^\\s+|\\s+$";"") else "" end) // "") != ""))) | not ) )
     | map(.id)
     | join(", ")
   ' "$ALS_PATH" 2>/dev/null)
