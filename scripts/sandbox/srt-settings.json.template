@@ -1,0 +1,77 @@
+// srt settings template — @anthropic-ai/sandbox-runtime, PINNED 0.0.65.
+//
+// Rendered per worker by render-settings.sh, which substitutes the %%…%%
+// placeholders and STRIPS these // comments: srt parses settings with
+// JSON.parse (dist/utils/config-loader.js), which rejects comments outright.
+// Justifications live here, in the template, and never reach the rendered file.
+//
+// SCHEMA (verified against the pinned tarball's zod schema, not the README:
+// dist/sandbox/sandbox-config.js). These five keys are NON-optional —
+// network.allowedDomains, network.deniedDomains, filesystem.denyRead,
+// filesystem.allowWrite, filesystem.denyWrite. Drop any one and loadConfig()
+// returns null and srt exits 1 ("Refusing to run with the default config").
+// Write is allow-only with denyWrite taking precedence; read is deny-then-allow;
+// network is allow-only with deniedDomains checked first.
+//
+// Literal absolute paths only — macOS supports globs, Linux does not, so one
+// template serves both platforms.
+{
+  "filesystem": {
+    // Every writable path the worker legitimately needs. Anything absent is
+    // EPERM at the syscall — that denial IS the feature.
+    "allowWrite": [
+      // The worker's own worktree: where it edits, builds and commits.
+      "%%WORKTREE%%",
+      // Per-worker scratch: worker.log, rendered settings, temp artifacts.
+      "%%SCRATCH%%",
+      // The PRIMARY repo's .git. A linked worktree's .git is a POINTER FILE;
+      // objects and refs land in the primary's .git/worktrees/<name> and the
+      // shared object store. Omit this and EVERY git commit fails.
+      "%%PRIMARY_GIT%%",
+      // Claude Code requires its own config paths writable (session state,
+      // history). Named residual: worker containment excludes claude-home —
+      // narrowed by the denyWrite carve-out below and srt's unconditional
+      // .claude/commands + .claude/agents block.
+      "%%HOME%%/.claude",
+      "%%HOME%%/.claude.json",
+      // Node, npx and git all write here; without it the toolchain EPERMs.
+      "%%TMPDIR%%"
+    ],
+    // denyWrite takes precedence over allowWrite. This carves the permission
+    // files out of the claude-home allow above: the one file class whose edit
+    // dismantles the discipline layer becomes OS-denied, not just hook-denied
+    // — no_edit_on_main's permission-file arm re-enforced OUT of the agent's
+    // trust domain.
+    "denyWrite": [
+      "%%HOME%%/.claude/settings.json",
+      "%%HOME%%/.claude/settings.local.json"
+    ],
+    // Read containment is an explicit non-goal (spec): deny-read breaks
+    // toolchains constantly for near-zero marginal safety. Required key, so
+    // it is present and deliberately empty.
+    "denyRead": []
+    // allowGitConfig deliberately OMITTED (defaults false). srt only pushes the
+    // .git/config deny path `if (!allowGitConfig)` (dist/sandbox/macos-sandbox-utils.js).
+    // Leaving it off is free hardening: a sandboxed worker structurally cannot
+    // rewrite remotes. It is also why `git push -u` EPERMs (it writes
+    // branch.<name>.* to .git/config) — hence the no-`-u` contract for
+    // sandboxed workers. Do NOT set this true to "fix" push -u; that trades the
+    // hardening away for orchestrator convenience.
+  },
+  "network": {
+    // Allow-only: srt denies all egress by default. An incomplete list fails
+    // LOUDLY (blocked egress), never silently. Extend only from probe evidence.
+    "allowedDomains": [
+      // The README's GitHub recipe: git push/fetch over HTTPS and the API.
+      "github.com",
+      "*.github.com",
+      "lfs.github.com",
+      "api.github.com",
+      // The worker's own claude -p process talks to the Anthropic API.
+      "api.anthropic.com"
+    ],
+    // Required key (non-optional in the schema). Empty: the allowlist above is
+    // the whole policy, and deniedDomains would only ever subtract from it.
+    "deniedDomains": []
+  }
+}
