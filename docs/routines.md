@@ -338,12 +338,22 @@ allowlist at all) nor the hook-based safety net an interactive terminal
 session gets.
 
 **Ship read-only routines unless you have explicitly accepted this.**
-Three of the four shipped example routines use `"profile": "read-only"`
-for exactly this reason. The fourth, `loop-retro-promotion-weekly`, is
+Four of the five shipped example routines use `"profile": "read-only"`
+for exactly this reason. The fifth, `loop-retro-promotion-weekly`, is
 the deliberate, documented exception — see the section above for what
 backs up its merge instead of a hook. If a routine's skill needs to
 write files or run commands, understand that its actions are gated only
 by the artifact check after the fact, not by any hook before the fact.
+
+**Write surfaces for unattended routines.** `workflow-audit-weekly` runs
+headless in `read-only` profile; its write surface is restricted to two
+directories: `~/.claude/coderails-dashboard/routines/workflow-audit/`
+(its own run note, containing `proposals_written: N` and optionally the
+completion marker) and `~/.claude/coderails-dashboard/approvals/`
+(queue entries for each proposed skill, carrying only the judge's D2-whitelisted
+fields, never full transcript content). The scan's privacy boundary — structural
+extraction only, no full-text content — is enforced at the `scan_transcripts.sh`
+level and is unchanged by this routine.
 
 ## See also
 
