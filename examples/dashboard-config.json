@@ -109,6 +109,18 @@
         "predicate": { "kind": "exists" }
       },
       "escalation": ["notification", "vault-note"]
+    },
+    {
+      "name": "workflow-audit-weekly",
+      "label": "Workflow Audit (weekly)",
+      "buttonRef": "workflow-audit-weekly",
+      "cadence": "weekly",
+      "expectedArtifact": {
+        "artifactPath": "/Users/harrison/.claude/coderails-dashboard/routines/workflow-audit/run-{date}.md",
+        "maxAgeSeconds": 691200,
+        "predicate": { "kind": "contains", "marker": "## [{date}] workflow-audit complete" }
+      },
+      "escalation": ["notification", "vault-note"]
     }
   ]
 }
