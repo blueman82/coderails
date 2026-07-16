@@ -813,14 +813,22 @@ write_proof_raw() { # session_id raw_content -> writes proof.json verbatim (for 
 # Appends a Bash tool_use (assistant) + its paired tool_result (user) to a
 # transcript file. is_error: "true"/"false"/"null" (bare token, unquoted in
 # the jq --argjson so null becomes JSON null, not the string "null").
-# run_in_background: "true"/"false" — when "true", NO tool_result line is
-# appended (mirrors the harness: a backgrounded launch's immediate result is
-# "Command running in background…", not a pass/fail outcome).
+# run_in_background: "true"/"false" — a real backgrounded launch DOES get an
+# immediate paired tool_result with is_error:false (harness text like
+# "Command running in background with ID: ..."), so this helper appends that
+# realistic paired result too, same as the foreground path. This is what
+# makes the bg-exclusion fixture actually exercise the
+# run_in_background filter: without a matching non-error result present, a
+# gate that forgot the filter would still block via the "no matching
+# execution" path, not because it correctly excluded the bg launch.
 append_bash_call() { # transcript cmd is_error run_in_background
   local t="$1" cmd="$2" is_error="$3" bg="${4:-false}" tool_id="tu_${RANDOM}${RANDOM}"
   jq -cn --arg id "$tool_id" --arg cmd "$cmd" --argjson bg "$bg" \
     '{type:"assistant",message:{content:[{type:"tool_use",id:$id,name:"Bash",input:{command:$cmd,run_in_background:$bg}}]}}' >> "$t"
-  if [ "$bg" != "true" ]; then
+  if [ "$bg" = "true" ]; then
+    jq -cn --arg id "$tool_id" \
+      '{type:"user",message:{content:[{type:"tool_result",tool_use_id:$id,is_error:false,content:"Command running in background with ID: xyz"}]}}' >> "$t"
+  else
     jq -cn --arg id "$tool_id" --argjson err "$is_error" \
       '{type:"user",message:{content:[{type:"tool_result",tool_use_id:$id,is_error:$err}]}}' >> "$t"
   fi
