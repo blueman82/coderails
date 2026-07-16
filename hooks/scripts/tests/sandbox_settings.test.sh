@@ -80,11 +80,28 @@ check "denyWrite carves out ~/.claude/settings.json" "true" \
   "$(jq --arg p "$HOME/.claude/settings.json" '.filesystem.denyWrite | index($p) != null' "$OUT")"
 check "denyWrite carves out ~/.claude/settings.local.json" "true" \
   "$(jq --arg p "$HOME/.claude/settings.local.json" '.filesystem.denyWrite | index($p) != null' "$OUT")"
-# allowGitConfig must stay unset/false: srt's macos-sandbox-utils.js only pushes
-# the .git/config deny path `if (!allowGitConfig)`. Setting it true would trade
-# away the free hardening the spec relies on to make `git push -u` fail loudly.
+# allowGitConfig must stay unset/false. srt only emits its .git/config deny
+# `if (!allowGitConfig)` (dist/sandbox/macos-sandbox-utils.js). Note this only
+# protects the CWD's own .git — see the primary-.git assertions below.
 check "allowGitConfig is not enabled" "true" \
   "$(jq '(.filesystem | has("allowGitConfig") | not) or (.filesystem.allowGitConfig == false)' "$OUT")"
+
+# ─── Primary .git hooks/config deny — SANDBOX ESCAPE GUARD ──────────────────
+# srt's "mandatory" denies do NOT cover the primary .git in a worktree topology.
+# macGetMandatoryDenyPatterns() builds them as path.resolve(cwd, '.git/hooks')
+# plus a '**/.git/hooks/**' glob, and normalizePathForSandbox() ANCHORS that
+# glob to cwd — so it means "under the worker's worktree", never the primary
+# repo, which lives at an unrelated absolute path. allowWrite grants
+# %%PRIMARY_GIT%% (required: a linked worktree's objects/refs land there), so
+# without these explicit entries a sandboxed worker can write
+# <primary>/.git/hooks/pre-commit — which then executes UNSANDBOXED on the next
+# git operation in the primary repo. That is a full escape, verified live
+# against srt 0.0.65 and closed by these two denies (also verified: the denies
+# block hooks+config while ordinary commits still succeed).
+check "denyWrite covers the PRIMARY .git/hooks (escape guard)" "true" \
+  "$(jq --arg p "$PRIMARY_GIT/hooks" '.filesystem.denyWrite | index($p) != null' "$OUT")"
+check "denyWrite covers the PRIMARY .git/config (escape guard)" "true" \
+  "$(jq --arg p "$PRIMARY_GIT/config" '.filesystem.denyWrite | index($p) != null' "$OUT")"
 
 # ─── Fail-fast preconditions ────────────────────────────────────────────────
 rc=0; "$RENDER" "$WORKTREE" "$SCRATCH" >/dev/null 2>&1 || rc=$?

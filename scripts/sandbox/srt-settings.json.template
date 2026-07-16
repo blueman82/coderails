@@ -44,19 +44,39 @@
     // trust domain.
     "denyWrite": [
       "%%HOME%%/.claude/settings.json",
-      "%%HOME%%/.claude/settings.local.json"
+      "%%HOME%%/.claude/settings.local.json",
+      // SANDBOX ESCAPE GUARD — do not remove. srt's own "mandatory" .git/hooks
+      // and .git/config denies do NOT reach the primary repo in a worktree
+      // topology: macGetMandatoryDenyPatterns() builds them from
+      // path.resolve(cwd, ...) plus a "**/.git/hooks/**" glob that
+      // normalizePathForSandbox() ANCHORS TO CWD. The worker's cwd is its
+      // worktree, so those denies only ever cover the worktree's own .git
+      // pointer file — never the primary .git, which allowWrite above must
+      // grant for commits to work. Without these two entries a worker can
+      // write <primary>/.git/hooks/pre-commit, which then executes
+      // UNSANDBOXED on the next git operation in the primary repo: a full
+      // escape. Verified live against srt 0.0.65 (escape reproduced, then
+      // closed by these denies, with ordinary commits still working).
+      "%%PRIMARY_GIT%%/hooks",
+      "%%PRIMARY_GIT%%/config"
     ],
     // Read containment is an explicit non-goal (spec): deny-read breaks
     // toolchains constantly for near-zero marginal safety. Required key, so
     // it is present and deliberately empty.
     "denyRead": []
-    // allowGitConfig deliberately OMITTED (defaults false). srt only pushes the
-    // .git/config deny path `if (!allowGitConfig)` (dist/sandbox/macos-sandbox-utils.js).
-    // Leaving it off is free hardening: a sandboxed worker structurally cannot
-    // rewrite remotes. It is also why `git push -u` EPERMs (it writes
-    // branch.<name>.* to .git/config) — hence the no-`-u` contract for
-    // sandboxed workers. Do NOT set this true to "fix" push -u; that trades the
-    // hardening away for orchestrator convenience.
+    // allowGitConfig deliberately OMITTED (defaults false), so srt emits its
+    // .git/config deny (dist/sandbox/macos-sandbox-utils.js). Scope honestly:
+    // that deny is cwd-anchored, so it protects only the WORKTREE's own .git
+    // — the primary repo's config is covered by the explicit denyWrite entry
+    // above, not by this flag. Do NOT set it true; it would drop the deny for
+    // the cwd repo too.
+    //
+    // NOTE: `git push -u` SUCCEEDS under this config (verified live, srt
+    // 0.0.65) — it writes branch.<name>.* into the PRIMARY .git/config, which
+    // srt's cwd-anchored deny never covered. With the explicit deny above it
+    // now fails. Keep the no-`-u` contract for sandboxed workers regardless:
+    // its real justification is concurrency hygiene (parallel workers
+    // scribbling branch.* into one shared primary config), NOT srt blocking it.
   },
   "network": {
     // Allow-only: srt denies all egress by default. An incomplete list fails
