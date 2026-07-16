@@ -368,4 +368,4 @@ level and is unchanged by this routine.
   dedicated section above for its graduation predicate and security
   posture.
 - [`examples/dashboard-config.json`](../examples/dashboard-config.json)
-  — the full four-routine config this doc's examples are drawn from.
+  — the full five-routine config this doc's examples are drawn from.
