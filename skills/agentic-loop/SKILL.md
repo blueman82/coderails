@@ -262,7 +262,20 @@ release touches; the roles and their rationale (this section) are durable.
 |---|---|---|
 | `fast-mechanical` | haiku | Exact-recipe mechanical tasks with scripted ceremony; orchestrator verification micro-reads |
 | `default` | sonnet | TDD / mechanical / multi-file work; the fallback when uncertain (cost control) |
-| `frontier` | fable (opus alternate) | Design-judgement UI/architecture units; genuinely ambiguous investigations |
+| `frontier` | opus at `xhigh` effort (fable escalation — see below) | Design-judgement UI/architecture units; genuinely ambiguous investigations |
+
+**`frontier` resolves to opus, never automatically to fable.** Anthropic's own
+model-selection guidance places complex agentic coding — multihour autonomous
+agents, large-scale refactoring, systems engineering — on Opus, with `xhigh`
+effort named as the best setting for coding and agentic work; Fable is
+positioned for next-generation-intelligence needs at roughly twice Opus's
+price. Auto-picking the most expensive model is a cost decision the loop has
+no authority to make silently. Escalating a task to fable requires BOTH: (a) a
+named reason why opus-at-xhigh is insufficient for that specific task (not
+"it's important" — what capability is missing), recorded in the task's
+`Model:` stamp; and (b) the same fallback-valve discipline as every other
+stamp. Effort tuning (up to `xhigh`/`max` on opus) is the first lever;
+model escalation is the second.
 
 **Investigations get frontier FIRST, not escalated-to.** For a genuinely ambiguous
 investigation, spawn `frontier` from the start — a weak investigator burns
