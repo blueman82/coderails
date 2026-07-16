@@ -95,12 +95,24 @@ unset CODERAILS_HEADLESS_RUN
 # write $HOME/e2-escape-attempt.txt still dies with "EPERM: operation not
 # permitted" and no file reaches disk. Never set this flag for a worker that is
 # NOT wrapped by srt.
+# Record the exact wrapper invocation as the log's FIRST line. `tee` below only
+# captures what the CHILD prints, and `claude -p`'s default stdout never echoes
+# the command that launched it — so without this the log carries no proof the
+# worker ran under srt at all. That proof is not decorative: the E2 eval's
+# verifier requires "the `npx @anthropic-ai/sandbox-runtime@<pin> ... claude -p`
+# invocation line, or equivalent evidence the worker was NOT dispatched via the
+# in-process Agent tool", and an independent verifier had to reconstruct it from
+# three indirect signals because this line was missing. An audit trail that
+# requires forensic reconstruction is a gap in the artifact, not in the auditor.
+printf 'spawn-sandboxed-worker: npx --yes @anthropic-ai/sandbox-runtime@%s --settings %s claude -p <%s> --model %s --dangerously-skip-permissions\n' \
+  "$SRT_VERSION" "$settings_path" "$prompt_file" "$model" | tee "$log_file"
+
 set +e
 npx --yes "@anthropic-ai/sandbox-runtime@$SRT_VERSION" \
   --settings "$settings_path" \
   claude -p "$(cat "$prompt_file")" --model "$model" \
   --dangerously-skip-permissions \
-  2>&1 | tee "$log_file"
+  2>&1 | tee -a "$log_file"
 rc="${PIPESTATUS[0]}"
 set -e
 

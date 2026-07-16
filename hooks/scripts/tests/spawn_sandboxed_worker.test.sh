@@ -79,6 +79,15 @@ STUB
   out=$(PATH="$STUBDIR:$PATH" "$SPAWN" "$WORKTREE" "$PROMPT_FILE" "claude-haiku-4-5-20251001" 2>&1) || rc=$?
 
   check "(c) spawn exits 0 with stub claude" "0" "$rc"
+  # The log's first line must record the exact srt wrapper invocation. E2's
+  # verifier requires the "npx @anthropic-ai/sandbox-runtime@<pin> ... claude -p"
+  # line as evidence the worker was NOT dispatched via the in-process Agent
+  # tool; `tee` only captures what the CHILD prints, and claude -p never echoes
+  # its own launch command, so without this banner an auditor must reconstruct
+  # sandboxed dispatch from indirect signals (an independent verifier had to do
+  # exactly that). Assert the pinned version appears, not just the package name.
+  check "(c) log records the srt invocation with the pinned version" "1" \
+    "$(printf '%s' "$out" | grep -q "npx --yes @anthropic-ai/sandbox-runtime@0.0.65" && echo 1 || echo 0)"
   check "(c) inside-file was written" "1" \
     "$([ -f "$WORKTREE/inside-probe.txt" ] && echo 1 || echo 0)"
   check "(c) HOME escape file does NOT exist" "0" \
