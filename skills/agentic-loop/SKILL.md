@@ -1,6 +1,6 @@
 ---
 name: agentic-loop
-description: 'Multi-agent orchestration discipline. Load this skill IMMEDIATELY, taking precedence over /workflow, /prep, /push, and any other single-PR slash command, whenever the user authorises a sequence of agent-driven work. Specifically: any time the user says "spawn a team", "create a team", "team of agents", "no human gates", "self-merge", "crack on", "without the human", "no per-PR confirmation", "agentic loop", "multi-PR", or authorises 3+ PRs in one instruction. ALSO load when the user authorises autonomous merge + deploy + verify chains, even for a single PR, if they have explicitly waived per-step confirmation. This is NOT /workflow (single-PR prep → push → merge → wiki); it sits ABOVE /workflow and uses it as a subroutine. Keep main context a pure orchestrator that never implements: every change goes to a spawned worker that verifies its own artifact, escalating to a spawned team only for ≥3 sequential PRs or dependency chains. Verify artifacts not idle pings; disprove symptom premises before spawning fixes; match confirmation cadence to envelope scope. Fire this skill aggressively — forgetting to delegate is costly in long sessions.'
+description: 'Multi-agent orchestration discipline. Load IMMEDIATELY, over /workflow, /prep, /push and any other single-PR command, whenever the user authorises agent-driven work: any time they say "spawn a team", "create a team", "team of agents", "no human gates", "self-merge", "crack on", "without the human", "no per-PR confirmation", "agentic loop", "multi-PR", or authorise 3+ PRs in one instruction. ALSO load for autonomous merge + deploy + verify chains, even a single PR, if per-step confirmation is waived. NOT /workflow (single-PR prep → push → merge → wiki); it sits ABOVE /workflow and uses it as a subroutine. Keep main context a pure orchestrator that never implements: every change goes to a spawned worker that verifies its own artifact, escalating to a spawned team only for ≥3 sequential PRs or dependency chains. Verify artifacts not idle pings; disprove symptom premises before spawning fixes; match confirmation cadence to envelope scope. Fire aggressively — forgetting to delegate is costly in long sessions.'
 ---
 
 # Agentic Loop
@@ -9,14 +9,7 @@ How to run an autonomous multi-agent / multi-PR session so the user doesn't have
 
 ## Why this skill exists
 
-In long agentic sessions, the assistant tends to drift back into bad habits:
-- Running skills (`/planning-sequence`, `/premortem`, `/coderails:assumptions`, `/coderails:notchecked`) in main context instead of delegating to agents
-- Asking "want me to spawn an agent for X?" when X is obviously in scope
-- Holding at human gates that were explicitly removed at session start
-- Trusting an agent's "idle" notification as proof-of-failure when the agent often completed the work silently
-- Spawning fix workers without first disproving the symptom premise
-
-This skill encodes the working method so those failures don't keep happening. Each unnecessary stall is a manual prompt the user has to write — a stalled loop loses the autonomy the session was authorised for.
+In long agentic sessions the assistant drifts back into bad habits: running skills in main context instead of delegating; asking "want me to spawn an agent for X?" when X is obviously in scope; holding at human gates the session already removed; trusting an "idle" notification as proof-of-failure when the agent often finished silently; spawning fix workers without disproving the symptom premise. Each unnecessary stall is a manual prompt the user has to write — a stalled loop loses the autonomy the session was authorised for.
 
 Repo-agnostic lessons promoted from accumulated loop retros live in [learned-failure-modes.md](learned-failure-modes.md) — machine-maintained via the `loop-retro-promotion` pipeline; read it alongside this skill.
 
@@ -67,23 +60,17 @@ If a `progress.json` already exists at the path from an earlier loop in this ses
 
 **Run this phase UNLESS the user's prompt explicitly opts out.** Opt-out signals: "just do it", "skip improve-prompt", "don't improve the prompt", or any language that makes the directive unambiguous. On opt-out, skip directly to Phase 0. (Note: improve-prompt itself treats "just do it" as an unconditional skip — align with that.)
 
-**Why this phase exists.** Phase 0 calls misreading the authorisation envelope "the root of most over-asking." Closing ambiguity once, up front, is cheaper than re-asking mid-loop. A sharpened authorising prompt is the cheapest input to a tighter envelope — it is the one intervention that improves every subsequent phase simultaneously.
-
 **Step 1 — Invoke `/coderails:improve-prompt` on the authorising prompt.**
-
-Run the improve-prompt skill against the user's authorising prompt:
 
 > `/coderails:improve-prompt` — apply it to the prompt above.
 
-The skill will surface ambiguities, fill gaps with grounded assumptions, and produce a rewritten prompt that passes its 7-foundation diagnosis. Let it run to completion before proceeding to Step 2.
+It surfaces ambiguities, fills gaps with grounded assumptions, and produces a rewritten prompt that passes its 7-foundation diagnosis. Let it run to completion before Step 2.
 
 **Step 2 — Ask the user how to proceed.**
 
 **Delivery constraint — the improved prompt must be visible, not just asked-about.** Text emitted before a tool call is not rendered in the Claude Code terminal UI — only text with no trailing tool call, or content inside the tool call itself, reaches the user. This means "present the improved prompt as text, then call `AskUserQuestion`" silently drops the prompt: the user sees only the question, never the content it's asking about. Use one of two delivery mechanisms instead:
 - (a) End the turn with the improved prompt as the final text — no trailing tool call — and issue the `AskUserQuestion` call in the *next* turn; or
 - (b) Embed the improved prompt directly inside the `AskUserQuestion` call itself: its question text, option descriptions, or option preview fields. This renders regardless of turn-splitting.
-
-Past failure: the improved prompt was presented as text immediately followed by an `AskUserQuestion` call, twice in the same run — invisible both times, because pre-tool-call text does not render.
 
 After improve-prompt produces its output, deliver it via (a) or (b) above, then present three options through `AskUserQuestion`:
 
@@ -127,7 +114,7 @@ Then respond.
 - "Crack on / human is dead" → full-autonomous. All routine sub-steps autonomous; only break the loop on verification failure or destructive/irreversible actions.
 - "Help me debug" → diagnostic-only. Do not write code without explicit go-ahead.
 
-Match the confirmation cadence to the envelope class for the rest of the session. The why: every "do you want me to..." inside an authorised envelope is a stall the user has to clear. Stalls cost more than the occasional over-reach you'd avoid by asking.
+Match the confirmation cadence to the envelope class for the rest of the session — every "do you want me to..." inside an authorised envelope is a stall the user has to clear, and stalls cost more than the occasional over-reach you'd avoid by asking.
 
 ### Phase 0.5 — Orchestrator operating rules (the conductor obeys its own rules)
 
@@ -138,8 +125,6 @@ Main context must, in its own output (not just in spawned-agent prompts):
 - Pre-tag any `## Did Not Verify` bullet that genuinely can't be checked, in the same turn it's written — an untagged bullet blocks the stop outside a loop and for workers, and is the first thing the in-loop warn will name.
 - Never narrate a claim about an artifact (PR merged, deploy live) without having run the check this turn (Phase 12).
 - End any stopping turn inside an active loop with a LOOP-STOP declaration line — `LOOP-STOP: <hard-stop|approval-gate|awaiting-input|complete> — <reason>` — as the FINAL line of the turn, emitted in the SAME turn as the confidence-label and Did-Not-Verify requirements above — that ending-line position is the contract this skill defines and the hook's category accounting assumes: when a turn carries more than one LOOP-STOP-shaped line (e.g. a quoted example), `loop_stall_guard` counts only the last one, so the last line must be the declaration that reflects the turn's actual outcome. Bundling all three matters more, not less, in the warn era: the confidence-label and verify-loop hooks no longer block the orchestrator's in-loop Stop turns, so nothing else forces those labels and DNV tags into the transcript — the bundle is what keeps them present for post-hoc audit, and one composed ending beats clearing one stop hook only to trip another (`loop_stall_guard` still blocks). Declaring `complete` means the loop is done: also set `progress.json` `status: "complete"` and run the Phase 13 teardown. The declaration line is all that's required — `loop_stop_counts` is HOOK-OWNED: the `loop_stall_guard` hook itself increments the matching category on a valid declaration; never write or compute this field yourself.
-
-The why: Phase 11 disciplines the workers; Phase 0.5 disciplines the orchestrator — because a conductor that ignores its own warns drifts the loop just as surely as a worker that trips a hard block. Past failure: loop f87a0a2e forced ~69 turn regenerations in one crack-on loop (49 confidence-label blocks + 20 verify-loop blocks) — the incident that motivated demoting these two hooks to warn-level inside an active loop.
 
 ### Phase 1 — State the plan in bullets, ask once
 
@@ -152,7 +137,7 @@ If no → revise once based on feedback, then re-ask.
 
 Do not loop more than twice on plan negotiation. If the third pass is needed, something is wrong with the envelope itself — surface that.
 
-The harness choice itself — which loop skill drives this (`/coderails:agentic-loop` vs a flat loop vs a goal runner) — is part of the authorisation envelope (Phase 0), not a Phase 1 question. Resolve it once when reading the envelope and never re-surface it as "which approach do you want?". Past failure: a run re-asked "select your approach" 4× because harness choice leaked out of the envelope into plan negotiation.
+The harness choice itself — which loop skill drives this (`/coderails:agentic-loop` vs a flat loop vs a goal runner) — is part of the authorisation envelope (Phase 0), not a Phase 1 question. Resolve it once when reading the envelope and never re-surface it as "which approach do you want?".
 
 ### Phase 2 — Pre-flight checks via spawned agents, not main context
 
@@ -175,9 +160,7 @@ Spawn this pre-flight agent at the `default` role — it's running skills, not m
 - NEVER let a worker branch off local `main`. Every worker MUST create its worktree via `coderails:using-git-worktrees`, which accepts a declared base ref — the orchestrator must state one explicitly, by name, in the worker prompt: "Use the using-git-worktrees skill with base ref `origin/main` — not local `main`, not HEAD." This keeps worktree mechanics (native-tool detection, ignore-verification, directory selection) on the shared skill instead of Phase 3 reinventing them inline, while the `origin/main`-base requirement — a loop-specific safety invariant — travels through the skill's own declared-base-ref mechanism rather than being asserted outside it.
 - Carry the foreign file names into worker prompts as an explicit "these are not yours — never stage, commit, or include them" exclusion list.
 
-Do this check even when the base looks clean — it is two cheap git reads and it pre-empts the single most expensive failure mode in a parallel-session loop: a worker's PR silently inheriting another session's WIP from a dirty base, which otherwise only surfaces at the merge gate. Past failure: a removal PR silently carried two unrelated docs inherited from a polluted local `main`; it surfaced only at the merge gate and cost a full close-and-rebuild cycle.
-
-The why: main context fills up fast in long sessions. Pre-flight output is dense and only useful for shaping the next move — perfect for delegation. Agents have skill access; passing the skill name in the prompt is enough.
+Do this check even when the base looks clean — two cheap git reads pre-empt a worker's PR silently inheriting another session's WIP from a dirty base, which otherwise only surfaces at the merge gate.
 
 ### Phase 2.5 — Resolve design forks before execution, not during it
 
@@ -194,8 +177,6 @@ What happens with that recommendation depends on the envelope class (Phase 0) �
 - **Narrow-fix / diagnostic / ambiguous envelope:** surface the one recommendation as a single decision — "here's the shape, here's why, approve or redirect" — bounded like Phase 1 (ask once, don't loop), then enter Phase 3.
 
 Either way the fork is closed by ONE design artifact before building starts — the loop does not start half-built while the design is still being argued turn by turn.
-
-The why: design forks resolved mid-build cost twenty turns of interleaved debate; resolved once up front they cost one. On a full-autonomous envelope, no human round-trip is needed. Past failure: a run spent ~20 turns debating queue-vs-lease-vs-hybrid as ad-hoc Q&A interleaved with the build — it should have been one design artifact resolved before any PR work.
 
 **Where the design artifact is written — never onto local `main`.** Any phase that produces a file — a design investigation page, a recon note, a `progress.json` — writes it *outside the code repo's working tree*: to the wiki vault (`config.wiki_path`) if it is wiki-bound, otherwise a temp dir outside the repo. It is promoted into the PR worktree only at build time (Phase 3); it never lands on local `main`, where an untracked file silently pollutes the base every worker branches from — exactly the contamination the Phase 2 clean-base check then has to catch downstream. The recon/design phase is logically read-only with respect to the code repo; keep it literally so.
 
@@ -216,8 +197,6 @@ When the Phase 1 plan contains a work-unit that **retires an existing code path*
 - **Narrow-fix / diagnostic / ambiguous:** surface the disposition as one decision — "clean-break recommended, here's why" — bounded like Phase 1 (ask once, don't loop).
 
 **Record** per work-unit in `progress.json`: `disposition`, and when `preserve-compat`, the `named_blocker` and a mandatory `removal_ticket`. The disposition decision also appends `{phase: "2.6", decision: "<clean-break or preserve-compat, with named_blocker if applicable>"}` to `progress.json`'s `decisions_absorbed` array.
-
-The why: an unresolved disposition defaults silently to preserve-compat — the cautious answer that keeps a path the change was meant to remove, forcing a redo. Clean-break as the default, closed once before execution, prevents the doubled work. Past failure: a migration kept legacy shims because the model assumed the human wanted them; it had to be re-run with "remove the shims" — double the work.
 
 ### Phase 2.7 — Commit the resolved design to durable `spec.md` and `plan.md`
 
@@ -244,149 +223,79 @@ The `spec.md` is loop state, keyed to this orchestrator's run, exactly like `pro
 
 The same `/coderails:task-evals` invocation also produces per-work-unit PR-scope eval refs (scope: `pr`, one per work-unit). These travel into worker prompts the same way disposition travels under Phase 3's existing "Disposition — ... copied **verbatim** into the task description" bullet: a ref recorded only in `progress.json`/`plan.md` and absent from the worker prompt does not exist for the worker — identical framing to the disposition rule above.
 
-(This is the one place the `plan.md`↔`progress.json` relationship is named. It is stated here, standalone, on purpose — the `## Context-window persistence` section, which describes `progress.json`, is not edited.)
-
 ### Phase 2.8 — Route: assign a model role per task
 
 Every loop assigns a **model role** to every Phase 3/3a build task before any
-worker spawns — even a 1-2 unit loop that skips Phase 2.7 entirely. This closes
-the fork the same way Phase 2.5 closes a design fork: once, up front, recorded,
-never re-litigated per spawn.
+worker spawns — even a 1-2 unit loop that skips Phase 2.7 entirely. Decide once,
+up front, recorded; never re-litigate per spawn.
 
-**Roles are capability tiers, not model names.** Pinning a tier to a specific
-model goes stale the moment a new model ships — a named-tier table went stale
-within a day of Fable 5's release. The table below is the only thing a model
-release touches; the roles and their rationale (this section) are durable.
+**Roles are capability tiers, not model names.** A tier pinned to a named model
+goes stale the moment a new model ships. The table below is the only thing a
+model release touches; the roles themselves are durable.
 
 | Role | Currently | Use for |
 |---|---|---|
 | `fast-mechanical` | haiku | Exact-recipe mechanical tasks with scripted ceremony; orchestrator verification micro-reads |
 | `default` | sonnet | TDD / mechanical / multi-file work; the fallback when uncertain (cost control) |
-| `frontier` | opus at `xhigh` effort (fable escalation — see below) | Design-judgement UI/architecture units; genuinely ambiguous investigations |
+| `frontier` | opus at `xhigh` effort (fable escalation — see [model-routing.md](model-routing.md)) | Design-judgement UI/architecture units; genuinely ambiguous investigations |
 
-**`frontier` resolves to opus, never automatically to fable.** Anthropic's own
-model-selection guidance places complex agentic coding — multihour autonomous
-agents, large-scale refactoring, systems engineering — on Opus, with `xhigh`
-effort named as the best setting for coding and agentic work; Fable is
-positioned for next-generation-intelligence needs at roughly twice Opus's
-price. Auto-picking the most expensive model is a cost decision the loop has
-no authority to make silently. Escalating a task to fable requires BOTH: (a) a
-named reason why opus-at-xhigh is insufficient for that specific task (not
-"it's important" — what capability is missing), recorded in the task's
-`Model:` stamp; and (b) the same fallback-valve discipline as every other
-stamp. Effort tuning (up to `xhigh`/`max` on opus) is the first lever;
-model escalation is the second.
-
-**Effort is part of the stamp — route reasoning level per task, not only the
-model.** Recent opus and sonnet models expose an effort parameter, and
-Anthropic's guidance is that tuning effort is often a better lever than
-switching models. Every `Model:` stamp therefore names role AND effort:
-- `frontier` → opus at `xhigh` (the documented best setting for coding and
-  agentic work). `max` is a per-task escalation needing a named reason in
-  the stamp, same discipline as a fable escalation.
-- `default` → sonnet at its default effort (`high`). A stamp MAY lower a
-  bounded, exact-recipe task to `medium` when the verify-criteria are
-  mechanical (the gates catch a wrong answer cheaply); never lower
-  investigation or review tasks.
-- `fast-mechanical` → haiku; no effort parameter applies.
-The valve discipline is unchanged: an effort change mid-task that isn't
-named in the stamp does not exist for the worker.
-
-**Investigations get frontier FIRST, not escalated-to.** For a genuinely ambiguous
-investigation, spawn `frontier` from the start — a weak investigator burns
-wall-clock discovering it's out of its depth, then a second run re-does the work
-at the stronger tier. One strong run beats escalate-later for this task shape
-specifically. This is the one place `default`-first cost control does not apply;
-everywhere else, `default` is the floor and `frontier` is the exception that needs
-a reason.
+**`frontier` resolves to opus, never automatically to fable** — escalating to fable needs a named
+capability reason in the stamp. **Effort is part of the stamp:** every `Model:` stamp names role
+AND effort (`frontier` → opus at `xhigh`; `default` → sonnet at `high`; `fast-mechanical` →
+haiku), and tuning effort is the first lever, model escalation the second. **Investigations get
+`frontier` FIRST**, not escalated-to — the one place `default`-first cost control does not apply.
+**Fallback valves live in the stamp, never improvised by a worker.** Full escalation rules, the
+effort table, and the inline-spawn sites at other phases: see [model-routing.md](model-routing.md).
 
 **Record the assignment set once.** Append one `decisions_absorbed` entry covering
 every task's role assignment for this loop — `{phase: "2.8", decision: "<task id:
 role, ...>"}` — not one entry per task. A `<3`-unit loop still writes this entry
 even when it skipped Phase 2.7.
 
-**Fallback valves live in the stamp, never improvised by a worker.** If a task
-needs an escape hatch (e.g. "fast-mechanical; default fallback after two failed
-gate attempts"), write the exact valve condition into the plan's `Model:` stamp
-(`coderails:writing-plans`) or, for a loop below the plan.md threshold, into the
-task description's `Model:` bullet (Phase 3/3a). A worker that hits trouble and
-picks its own fallback model is exactly the failure this rule exists to prevent —
-the valve must already be named in the prompt, or it does not exist for the
-worker.
-
-**Escalation is safe by construction, not a correctness control.** PR gates
-(review, evals, hook-seam) are model-independent — a `frontier` worker's PR clears
-the same gates a `default` worker's PR does. Routing exists for cost and latency,
-never for correctness; do not read a role mismatch as a quality risk in itself.
-
-**Inline sites elsewhere, same vocabulary.** This phase routes Phase 3/3a *build*
-tasks only. Agents spawned at other phases — the Phase 2 pre-flight agent, the
-Phase 2.5 design-fork agent, and Phase 9's wiki and sync-docs delegates — are
-each assigned their role inline, at their own spawn point, using this phase's
-vocabulary and table: the pre-2.8 phases run before this phase exists in the
-sequence, and Phase 9's delegates are loop-boundary ceremony, not build tasks.
-
 ### Phase 3 — Delegate all implementation to routed workers; spawn a team when work has ≥3 sequential units or dependency chains
 
 **Default: main context never implements.** It orchestrates — plans, delegates, verifies. Every implementation unit (even a single-file edit, even a tight sequential step) goes to a spawned worker at the role Phase 2.8 assigned it — the `default` role unless Phase 2.8 routed otherwise. The two reasons, in order: keep main context clean (frontier-tier context is scarce and fills fast in long sessions), and keep cost down (`default` does the typing, not `frontier`). Treat a `frontier`-role worker, or a file edit done directly in main context, as the exception that needs a reason, not the default.
 
-This means the delegation decision is a two-rung ladder, not "delegate vs. do it yourself":
+The delegation decision is a two-rung ladder, not "delegate vs. do it yourself":
 
-1. **Single routed `Agent` for impl + verify** — the default for any self-contained 1–2 unit of work (a bug fix, one PR, a single-file change), at the role Phase 2.8 assigned. One agent does the implementation *and* verifies its own artifact before reporting. A spawned team would be overkill here; main context doing it directly burns frontier-tier context and money for no benefit. See Phase 3a below for the prompt contract.
-2. **Spawn a team** — named teammates via the `Agent` tool, coordinated through a shared task list (`TaskCreate`/`TaskUpdate` with `blockedBy` dependencies) and `SendMessage`, when the loop has 3+ PRs or any cross-step dependency. See below.
+1. **Single routed `Agent` for impl + verify** — the default for any self-contained 1–2 unit of work (a bug fix, one PR, a single-file change), at the role Phase 2.8 assigned. One agent does the implementation *and* verifies its own artifact before reporting. A spawned team would be overkill here. See Phase 3a below for the prompt contract.
+2. **Spawn a team** — when the loop has 3+ PRs or any cross-step dependency, spawn each worker as a named teammate via the `Agent` tool and build a task list with explicit `blockedBy` dependencies via `TaskCreate`/`TaskUpdate`; coordinate with `SendMessage`. Don't just describe a "sequential PR loop" — actually spawn the named agents and create the task list, so the user can see each teammate and the task list becomes the shared source of truth.
 
 The only work that legitimately stays in main context: reading for orchestration decisions (git status, `gh pr view`, log reads, the Phase 12 artifact checks), and the planning/cadence the skill describes. If you catch yourself running `Edit`/`Write`/`MultiEdit` in main context inside an authorised loop, stop — that work belongs in a routed worker agent.
 
-When the loop has 3+ PRs or any cross-step dependency, spawn each worker as a named teammate via the `Agent` tool and build a task list with explicit `blockedBy` dependencies via `TaskCreate`/`TaskUpdate`. Don't just describe a "sequential PR loop" — actually spawn the named agents and create the task list. The user can see each teammate and the task list becomes the shared source of truth; use `SendMessage` to coordinate between them.
-
 If the user has explicitly asked for a spawned team in their prompt, it is non-negotiable — spawn named teammates even if a flat sequence of solo `Agent` calls would technically work.
 
-Each task description must be **self-contained** so the spawned agent can act without re-reading the conversation. Include:
-- Worktree path
-- Branch name
-- Model: the role Phase 2.8 assigned this task, copied **verbatim** from the plan's `Model:` stamp (`coderails:writing-plans`) or from Phase 2.8's recorded assignment for a below-plan.md-threshold loop — including any fallback valve. A role recorded in `progress.json`/`plan.md` but absent from this prompt does not exist for the worker, same rule as the disposition and lessons bullets below.
+Each task description must be **self-contained** so the spawned agent can act without re-reading the conversation. Every bullet of Phase 3a's prompt contract applies to each teammate's task description — role verbatim, construction method and discipline, the self-run verify step, manifest + pre-push scope assertion, disposition, lessons, terminal state, report-back contract, and the hook-seam. A task-list entry is not a substitute for any of them: anything absent from the prompt does not exist for the worker. Add, on top of that contract:
+- Worktree path and branch name
 - JIRA ticket
 - Verified state from prior tasks (deployed version, test counts, what's already wired)
 - Exact step-by-step sub-steps
-- Construction method — when the deliverable is code (the change adds or alters a function, method, or branch that *can* carry a test), instruct the worker to build it test-first via `/coderails:test-driven-development` (failing test → minimal code → refactor). This holds even if the unit also touches non-code files. For pure docs/config/prose with no testable code, there is no test to write first — keep the verify-your-artifact contract. For the full worker-prompt construction contract (implementer/reviewer prompt templates + the per-task review loop), see `/coderails:subagent-driven-development`.
-- Construction discipline — the worker holds itself to `coderails:verification-before-completion` while working, not only at hand-off: no "should work now"/"tests probably pass" framing mid-task, run the actual check before claiming any sub-step done. This is additive to, not a substitute for, the end-of-task artifact gate (Phase 4b) — the artifact gate proves the deliverable exists and passes; this discipline stops premature success claims *before* that artifact is even produced.
-- Verify criteria
-- Manifest — the exact set of files this unit should touch, with the pre-push scope assertion (see Phase 3a)
-- Disposition — for a retirement unit, the `clean-break`/`preserve-compat` decision from Phase 2.6 copied **verbatim** into the task description, plus (if preserve-compat) the `named_blocker`. The worker acts only on its own prompt; a disposition recorded in `progress.json` but absent from the prompt silently reverts the unit to the model's preserve-default — the exact failure this discipline exists to stop.
-- Lessons — applicable standing-orders entries copied verbatim into the task description (same travel rule and rationale as disposition: a lesson absent from the prompt does not exist for the worker).
-- Terminal state — the concrete artifact that means done (PR open / merged); no mid-task hand-backs (see Phase 3a)
-- Report-back instructions
-- Hook-seam — commits hit `test_gate` (resolution: fix the failing tests), pushes and PR-creates hit `enforce_pr_workflow` (satisfied by the `/coderails:push` / `/workflow` you run), edits stay on the feature-branch worktree so `no_edit_on_main` won't fire, merges hit the eval-artifact gate in `scripts/merge.sh` (satisfied by running `/coderails:task-evals` + `/coderails:post-evals` before `/coderails:merge`)
 
 Include this line in every agent prompt:
 > "Don't go silently idle — send a completion message via SendMessage. Past agents have failed this way."
-
-For bare 1-2 task work, a single `Agent` call is the right tool — don't over-engineer with a spawned team (see Phase 3a).
 
 ### Phase 3a — Single routed agent for impl + verify (the spawned-team-is-overkill case)
 
 For self-contained work that doesn't justify a team — a bug fix, one PR, a single-file change, a tight sequence of steps with shared context — spawn **one** `Agent`, at the role Phase 2.8 assigned, that owns both the implementation **and** the verification, then reports back a confidence-labelled result. Main context stays the orchestrator; it does not make the edit itself.
 
-Why one agent does both impl and verify (not two): the verification output is dense — exactly the kind that fills main context. The agent self-verifies; main context spot-checks only at dependency boundaries (Phase 12) or when the artifact check is cheap and the stakes are high.
+One agent does both impl and verify (not two) because verification output is dense — exactly the kind that fills main context. The agent self-verifies; main context spot-checks only at dependency boundaries (Phase 12) or when the artifact check is cheap and the stakes are high.
 
 The agent's prompt must be self-contained (it can't re-read the conversation) and include:
-- **The Phase 2.8-assigned role, verbatim, including any fallback valve** — same travel rule as team workers (Phase 3): a role absent from this prompt does not exist for the worker. `default` is the floor absent a routing reason; `frontier` is the exception that needs one.
+- **The Phase 2.8-assigned role, verbatim, including any fallback valve** — copied from the plan's `Model:` stamp (`coderails:writing-plans`), or from Phase 2.8's recorded assignment for a below-plan.md-threshold loop. A role recorded in `progress.json`/`plan.md` but absent from this prompt does not exist for the worker — same travel rule as disposition and lessons. `default` is the floor absent a routing reason; `frontier` is the exception that needs one.
 - The exact change to make, with file paths and the success criteria stated as something testable.
-- **Construction method (when the deliverable is code).** If the change adds or alters a function, method, or branch that *can* carry a test, the worker builds it test-first via `/coderails:test-driven-development`: write the failing test, watch it fail for the right reason, then the minimal code to pass, then refactor green — even if the PR also touches non-code files. For pure docs/config/prose with no testable code, there is no failing test to write first; the verify step below is by inspection instead.
+- **Construction method (when the deliverable is code).** If the change adds or alters a function, method, or branch that *can* carry a test, the worker builds it test-first via `/coderails:test-driven-development`: write the failing test, watch it fail for the right reason, then the minimal code to pass, then refactor green — even if the PR also touches non-code files. For pure docs/config/prose with no testable code, there is no failing test to write first; the verify step below is by inspection instead. For the full worker-prompt construction contract (implementer/reviewer prompt templates + the per-task review loop), see `/coderails:subagent-driven-development`.
 - **Construction discipline.** The agent holds itself to `coderails:verification-before-completion` throughout implementation, not only at the report-back step: no "should work now" framing on any intermediate claim, run the actual check before asserting a sub-step is done. Additive to the report-back contract below, not a replacement for it.
 - **A verify step the agent runs itself before reporting** — run the test / lint / build, read back the diff, hit the endpoint or read the log. State which one. "Implement X, then verify by running `Y`, and only report success if `Y` passes."
 - **Report-back contract:** return a confidence-labelled summary (Phase 11), state what was run to verify (the command + its result, not just "verified"), and "don't go silently idle — send a completion message" (Phase 4 — workers go idle without reporting regardless of role).
 - If the work writes to git, the worktree/branch and a "commit your work" instruction so the artifact is durable for the orchestrator's Phase 4 check.
-- **A manifest — the exact set of files this change should touch — plus a pre-push scope assertion.** Require: "before you push, run `git diff origin/main --name-only` and confirm the file list equals EXACTLY this manifest. If any file you did not intend to touch appears — especially one you never edited — STOP and report; do not push. A PR that carries files outside its manifest is a contamination, not a change." This catches a dirty base or a stray `git add -A` at push time, one stage before the orchestrator's merge gate, where it is far cheaper to fix. Past failure: a worker pushed a PR carrying two files from a polluted base — no pre-push scope assertion, so it surfaced only at the merge gate and forced a rebuild.
+- **A manifest — the exact set of files this change should touch — plus a pre-push scope assertion.** Require: "before you push, run `git diff origin/main --name-only` and confirm the file list equals EXACTLY this manifest. If any file you did not intend to touch appears — especially one you never edited — STOP and report; do not push. A PR that carries files outside its manifest is a contamination, not a change." This catches a dirty base or a stray `git add -A` at push time, one stage before the orchestrator's merge gate, where it is far cheaper to fix.
   When the unit's disposition is `clean-break`, the assertion also covers compat: before push, confirm no compatibility shim, bridge, adapter, or legacy code path for the replaced functionality remains. If one does, clean-break is not finished — remove it or STOP and report. This worker assertion is a **first-pass smell test, not the gate** — the independent reviewer (Phase 4b) is the gate, because the worker that wrote a shim is the party least able to see it as one.
 - **The disposition, verbatim** — for a retirement unit, the `clean-break`/`preserve-compat` decision from Phase 2.6 and (if preserve-compat) the `named_blocker`. The single agent cannot re-read the conversation; the decision must travel in its prompt or it does not exist for the worker.
 - Lessons — applicable standing-orders entries copied verbatim into the task description (same travel rule and rationale as disposition: a lesson absent from the prompt does not exist for the worker).
-- **A terminal state stated as a concrete artifact, with no mid-task hand-backs.** The done-condition is an artifact that exists ("the PR is OPEN" or "the PR is MERGED"), never a sub-step. Add to the prompt: "You own this through that artifact existing. Do NOT hand back to the orchestrator in an intermediate state — after editing but before committing, after engineering-principles but before pushing, after review but before the PR is open. If you stop before the artifact exists, you have not finished; continue." Past failure: workers stopped after engineering-principles and "handed back to push the PR", leaving work uncommitted with no PR — stating the terminal state as the artifact removes the premature hand-back.
+- **A terminal state stated as a concrete artifact, with no mid-task hand-backs.** The done-condition is an artifact that exists ("the PR is OPEN" or "the PR is MERGED"), never a sub-step. Add to the prompt: "You own this through that artifact existing. Do NOT hand back to the orchestrator in an intermediate state — after editing but before committing, after engineering-principles but before pushing, after review but before the PR is open. If you stop before the artifact exists, you have not finished; continue."
 - **Hook-seam —** commits hit `test_gate` (resolution: fix the failing tests), pushes and PR-creates hit `enforce_pr_workflow` (satisfied by the `/coderails:push` / `/workflow` you run), edits stay on the feature-branch worktree so `no_edit_on_main` won't fire, merges hit the eval-artifact gate in `scripts/merge.sh` (satisfied by running `/coderails:task-evals` + `/coderails:post-evals` before `/coderails:merge`)
 
-When the single agent goes idle without reporting, apply Phase 4 verbatim — check the artifact (git diff, PR state, log), not the ping. When it reports success, that's a Phase 12 claim, not evidence — re-check at dependency boundaries.
-
-Escalate from one agent to a spawned team the moment the work grows a third unit or a cross-unit dependency. Don't run three sequential solo `Agent` calls where a set of named teammates with a `blockedBy` task list belongs — that's the case Phase 3 reserves for spawning a team.
+If the agent goes idle, apply Phase 4 (check the artifact, not the ping); if it reports success, that's a Phase 12 claim, not evidence. Escalate to a spawned team (Phase 3, rung 2) the moment the work grows a third unit or a cross-unit dependency — never three sequential solo `Agent` calls where a `blockedBy` task list belongs.
 
 ### Phase 4 — Spawn workers in waves, never block on idle pings
 
@@ -406,7 +315,7 @@ When a phase reaches "review the PR" (after a `/workflow` agent has pushed a PR,
 
 **Invoking `/pr-review-toolkit:review-pr <PR#>` with the PR number is REQUIRED to satisfy the merge gate, because `enforce_pr_workflow` only accepts the `review-pr` Skill (with the PR number in args) as merge evidence — a manually-spawned agent fanout leaves no evidence the gate recognises and the merge will block.** The gate also recognises `scripts/merge.sh <PR#>` invocations (not just raw `gh pr merge`) as the same merge subcommand, so a hand-rolled review cannot merge through the wrapper script either.
 
-**Review tier ladder.** All tiers — regardless of the PR's own eval-artifact tier (Phase 4b's eval gate above is a separate, orthogonal check) — invoke `/pr-review-toolkit:review-pr <PR#>` (the toolkit self-scales its reviewer fan-out by change shape; see its "Determine Applicable Reviews" step) plus `/coderails:post-review <PR#>`. Only at tier 0 MAY the separate `/security-review` pass below be skipped, and only after checking the actual diff file list (`gh pr diff <PR#> --name-only` or `git diff origin/main...HEAD --name-only`): any path under `hooks/` or `scripts/`, or any change touching auth/exec/network-fetch code, FORCES the security pass regardless of the declared tier. The override keys off the diff, never the self-assigned tier label — reusing the self-assigned tier alone to gate a security control would be the same self-exemption shape the task-evals tier rules exist to resist. Tier 1/2 PRs run the full Phase 4b unchanged, security pass included.
+**Review tier ladder.** All tiers — regardless of the PR's own eval-artifact tier (a separate, orthogonal check) — invoke `/pr-review-toolkit:review-pr <PR#>` (the toolkit self-scales its reviewer fan-out by change shape) plus `/coderails:post-review <PR#>`. Only at tier 0 MAY the separate `/security-review` pass below be skipped, and only after checking the actual diff file list (`gh pr diff <PR#> --name-only` or `git diff origin/main...HEAD --name-only`): any path under `hooks/` or `scripts/`, or any change touching auth/exec/network-fetch code, FORCES the security pass regardless of declared tier. The override keys off the diff, never the self-assigned tier label. Tier 1/2 PRs run the full Phase 4b unchanged, security pass included.
 
 **After `review-pr` completes and all applied findings (blocking and worthwhile) are committed and pushed, invoke `/coderails:post-review <PR#>`.** This posts the SHA-bound review artifact — a machine-marked GitHub comment — that the `/merge` gate requires before merging. Loop symmetry: this is the same artifact gate that `/coderails:workflow`'s Phase 3 wires in for non-loop use. Both paths produce the same artifact; `/merge` checks both the same way. Run `post-review` after findings are applied and the follow-up commit is pushed, so the artifact is stamped against the final head SHA.
 
@@ -427,13 +336,11 @@ The six review dimensions the Skill covers:
 
 Collect all reports, aggregate into Critical / Important / Suggestion, and feed any MERGE-BLOCKER back to a fix agent (Phase 5/10) BEFORE merge.
 
-The `silent-failure-hunter` row earns its keep even on tiny diffs: on the one-function PR #142 fix, it caught a real swallowed-crash-payload bug pre-merge. This is why the tier ladder above never drops the toolkit review itself — only the separate `/security-review` pass at tier 0.
-
 **Plus the native `/security-review` pass.** Alongside the six agents, run Claude Code's built-in `/security-review` on the same branch diff as part of this gate — it is a dedicated security review (auth/authz surfaces, injection, secret leakage, unsafe deserialisation, SSRF) that the six general reviewers do not specialise in. Run it in the worktree so it sees the branch's pending changes. Fold its findings into the same Critical / Important / Suggestion aggregation; any security MERGE-BLOCKER blocks merge exactly like a code finding (Phase 5/10) BEFORE merge.
 
-**Clean-break gate (when the unit's disposition is `clean-break`).** The `code-simplifier` pass — already independent of the worker (separately spawned, read-only) — is additionally instructed to hunt **relabelled compatibility**: a surviving old code path renamed to "fallback", "adapter", "guard", "transitional", or "bridge". It checks whether an **old code path still executes**, not whether the literal word "shim" appears. On a clean-break unit, its findings of surviving compat are **MERGE-BLOCKERS**, not the report-only suggestions row 6 produces by default. **The orchestrator cannot downgrade this finding unilaterally.** Its only two moves: (a) actually fix it — remove the compat path, or (b) declare a hard-stop and hand it to a human, logged with who/when/SHA/reason. If a fully-unattended envelope genuinely cannot tolerate ever hard-stopping at this gate, the human must grant auto-demote authority explicitly **at envelope-authorisation time** (Phase 0) — never something the orchestrator grants itself mid-run. The why: clean-break enforced by worker self-assertion alone is self-attestation by the party with motive to keep the path — and letting that SAME party (the orchestrator) also grade the independent reviewer's finding reintroduces the identical loophole one level up. Past failure: the original shim rework happened because no independent check hunted the compat the author had rationalised as necessary.
+**Clean-break gate (when the unit's disposition is `clean-break`).** The `code-simplifier` pass — already independent of the worker (separately spawned, read-only) — is additionally instructed to hunt **relabelled compatibility**: a surviving old code path renamed to "fallback", "adapter", "guard", "transitional", or "bridge". It checks whether an **old code path still executes**, not whether the literal word "shim" appears. On a clean-break unit, its findings of surviving compat are **MERGE-BLOCKERS**, not row 6's default report-only suggestions. **The orchestrator cannot downgrade this finding unilaterally.** Its only two moves: (a) fix it — remove the compat path, or (b) declare a hard-stop and hand it to a human, logged with who/when/SHA/reason. If a fully-unattended envelope cannot tolerate ever hard-stopping here, the human must grant auto-demote authority explicitly **at envelope-authorisation time** (Phase 0) — never something the orchestrator grants itself mid-run. The why: letting the orchestrator grade an independent reviewer's finding reintroduces the same self-attestation loophole one level up.
 
-**Do not substitute the generic `architect-review` + `debugger` + `ai-engineer` trio here.** That three-agent set (`architect-review` + `debugger` + `ai-engineer`) is a separate general-purpose adversarial pattern for design/architecture stress-tests, used elsewhere for pressure-testing a proposed design before it's built — it is NOT the PR-review step. The canonical review step is `/pr-review-toolkit:review-pr all` = the six agents above. Past failure: spawned the architect/debugger/ai-engineer trio at PR-review time; corrected to the toolkit six.
+**Do not substitute the generic `architect-review` + `debugger` + `ai-engineer` trio here.** That trio is a separate general-purpose adversarial pattern for design stress-tests before a thing is built — it is NOT the PR-review step. The canonical review step is `/pr-review-toolkit:review-pr all` = the six agents above.
 
 ### Phase 5 — Disprove the premise before each fix
 
@@ -442,8 +349,6 @@ Before spawning a "bug fix" agent for any reported regression, the fix agent's p
 > Verify the symptom in the source-of-truth FIRST. Slack pin-bar / GitHub PR state / Jira board / browser tabs all cache. Reproduce the bug via API call, prod log, DDB read, or git diff before any code change. If the symptom can't be reproduced via SOT, STOP and report — don't ship a fix to a non-bug.
 
 This is a specific application of `/coderails:verify` — the same "re-derive from sources only, no recall, no inference" discipline, applied to one claim: "this bug currently reproduces." Point the fix agent at `/coderails:verify` (claim: the reported symptom) rather than re-deriving the sources-only instruction inline each time.
-
-Past failure: this pattern caught false alarms — stale Slack pin-bar views and design artefacts mistaken for regressions. The cost of disproving is one tool call; the cost of shipping a fix to a non-bug is a PR, a deploy, a rollback, and trust.
 
 **Once a fix is diagnosed, before implementing it, run `/coderails:disconfirm` on the diagnosis.** Phase 5 checks whether the bug exists; this checks whether the proposed fix is actually right, before code gets written against it. Argue against the diagnosis — what would falsify it, what edge case breaks it, what did the fix agent assume away. This is cheap (one more tool call) relative to implementing, reviewing, and reverting a fix for the wrong root cause. Skip this step only when the fix is a direct, mechanical application of an already-verified design (e.g. this session's dashboard UX findings — each treatment was already confirmed against source during brainstorming, so there is no fresh diagnosis left to disconfirm). A consciously absorbed disconfirm-skip is an in-scope decision — append it to `progress.json`'s `decisions_absorbed` at the same phase boundary where `progress.json` is already being updated for this work-unit.
 
@@ -470,25 +375,21 @@ Deploy and push gotchas tied to a particular stack — skip-validation flags whe
 
 Run `/coderails:wiki-ingest` AND `/coderails:wiki-lint` ONCE at the end of the loop, with all related PRs as a cluster — not once per PR. Lint must always pair with ingest — running one without the other leaves the wiki either unverified (ingest with no lint) or unrefreshed (lint with no ingest); treat the two as one step, not two optional ones.
 
-One source page covers the cluster. Updates to entities/services/concepts pages aggregate the cluster's changes. Clustering related updates into one pass keeps the wiki's per-topic pages coherent; running one wiki agent per PR instead fragments a single theme across many small, redundant edits.
-
-If the loop's PRs aren't thematically related (rare — a spawned team's task list usually clusters them), one ingest per cluster theme is fine. Avoid one-per-PR sprawl.
+One source page covers the cluster; updates to entities/services/concepts pages aggregate the cluster's changes. If the loop's PRs aren't thematically related (rare — a spawned team's task list usually clusters them), one ingest per cluster theme is fine. Avoid one-per-PR sprawl.
 
 **Suppressing per-PR wiki steps in spawned `/coderails:workflow` agents:** place the following line as the **FIRST instruction** in every spawned agent's prompt inside this loop (not buried mid-section, not under the task-specific scope, not after the workflow steps — first):
 
 > "When running /workflow inside this agentic-loop, skip /workflow's wiki sub-steps (Phase 2 `/coderails:wiki-query` and Phase 5 `/coderails:wiki-ingest`/`/coderails:wiki-lint`). The orchestrator runs these at the loop boundary — running them per-PR causes redundant ingests and fragmented wiki context."
 
-**Why first-line, not just "include":** workers shortcut past mid-section process notes and treat anything that appears to constrain the workflow steps as "optional polish." Past failure: a worker shipped a per-PR wiki PR because the suppression instruction sat below the workflow steps; moving it to the top fixed it. **Scope-suppression instructions go above scope-additive instructions in worker prompts.**
+**Why first-line, not just "include":** workers shortcut past mid-section process notes and treat anything that appears to constrain the workflow steps as "optional polish." **Scope-suppression instructions go above scope-additive instructions in worker prompts.**
 
-The orchestrator handles both ends: Phase 2 (plan-level wiki read before coding starts) and Phase 9 (cluster ingest+lint after all PRs are merged). Per-PR wiki steps inside `/coderails:workflow` would duplicate Phase 2's context query on stale partial state and fragment Phase 9's cluster ingest into one-per-PR sprawl.
+The orchestrator handles both ends: Phase 2 (plan-level wiki read before coding starts) and Phase 9 (cluster ingest+lint after all PRs are merged).
 
 **Wiki commits are artifacts too — verify they reached `origin/main`, and deliver them the way *this* repo accepts.** A delegated wiki agent reports a *commit SHA*, not a merged PR — and a commit is not a push. Close two failure modes at the loop boundary: (1) the agent commits to **local `main`** and never pushes — work stranded; (2) the agent pushes wiki files **direct to `main`**, which a branch-protection ruleset rejects.
 
 **Delivery is repo-specific.** If `main` is ruleset-protected, the wiki agent must deliver via a branch + PR off freshly-fetched `origin/main`, merged like any other change. Only where a repo *deliberately* permits direct wiki commits (e.g. a wiki dir gated behind a bypass env var) is a direct push acceptable — and even then it must be verified to have landed.
 
 **Then verify, after `git fetch origin`:** confirm the content is on `origin/main` via the wiki PR's `mergedAt` or `git show origin/main:<wiki-file>`. Do **not** confirm a merge with `git merge-base --is-ancestor <agent-sha> origin/main` — a squash-merge rewrites the SHA, so the agent's commit is never an ancestor even when its content landed (`--is-ancestor` is the right probe only for *detecting* an unpushed commit before merge). A committed-but-unpushed SHA is a textbook false-success; the "committed" ping is a claim, not evidence (Phase 12).
-
-Past failure: a wiki agent reported two commits "done" that were unpushed on local `main` (ruleset-protected, so a direct push was rejected); the origin check caught it before the docs were stranded.
 
 **Docs-drift check — run `/sync-docs` at the loop boundary**
 
@@ -517,8 +418,6 @@ Add to every spawned agent's prompt:
 >
 > The user's stop hook enforces this. Propagate it into your work.
 
-The why: when an agent reports "verified live in prod", you need to know whether they ran the verify command or assumed it from a log line. Confidence labels make that distinction explicit and reduce false success signals.
-
 ### Phase 12 — Status reports from agents are claims, not evidence
 
 When an agent says "PR-N verified, deployed, working in prod" — treat that as a hypothesis, not a fact.
@@ -530,63 +429,32 @@ Before unblocking the next dependent task in the chain:
 
 **Re-check at the moment of action, not at the moment the report arrived.** State changes in the gap. If the worker says "PR is CONFLICTING" or "ready to merge" and you queue a corrective instruction (rebase, redo, wait), the artifact may have moved by the time the message lands. Always re-run `gh pr view` (or equivalent) at the moment you act on the report, not when you first read it. Past failure: a CONFLICTING state self-healed via an intervening merge before the queued rebase instruction landed — stale on arrival, it triggered redundant work. One extra `gh pr view` between report and instruction is cheap.
 
-This is more rigorous than checking the idle ping (Phase 4) — it's specifically the "next phase blocker" check. Past failure: an agent reported PR-2 verified, PR-3 was unblocked, then PR-2 proved broken (race surfaced on the 2nd restart) — PR-3 stacked on a bad base.
-
 The cost of one extra tool call before unblocking the next phase is small. The cost of unblocking on a false report is hours.
 
 ### Phase 13 — Confirm the factory actually ran (terminal self-audit)
 
 **This phase is mandatory and singular, not optional and not repeatable mid-loop.** It runs exactly once, only at the very end of the loop, immediately before the `complete` LOOP-STOP declaration — never as a mid-loop check-in, never skipped because the loop "felt straightforward." A loop that reaches `complete` without this report has not actually finished; the `loop_stall_guard` hook's `retro.json` requirement (see the teardown contract below) is what makes skipping it structurally hard, not just discouraged. The report is a summary, not a checkpoint — it does not pause for approval and does not ask the human anything; it tells them what happened.
 
-At the end of the loop, before declaring done, the orchestrator audits its own autonomy from the `progress.json` counters and reports two raw, unscored facts — no numeric pass/fail scorecard, no "target: approaching zero" framing. The human is the only party positioned to judge "should I have been asked about that?"; hand them the raw list rather than have the process pre-grade itself:
+At the end of the loop, before declaring done, the orchestrator audits its own autonomy from the `progress.json` counters and reports raw, unscored facts — no pass/fail scorecard. The human is the only party positioned to judge "should I have been asked about that?"; hand them the raw list rather than have the process pre-grade itself. Report: **`LOOP-STOP` category counts** (HOOK-OWNED — read as-is, never compute or edit), **decisions absorbed** (copied VERBATIM from `progress.json`, never reconstructed from memory), **artifacts produced** (each with its Phase 12 verifying check), **loop cost** (printed with a price-staleness age, not merely written to disk), **disposition violations**, and the **loop-scope eval result** (graded via `post_evals.sh grade-loop`, never hand-written). For the last two, "no record found" is an **audit failure, not a pass**. Per-field detail: [teardown.md](teardown.md).
 
-- **`LOOP-STOP` category counts, broken down by type** — the per-category counts of this loop's `LOOP-STOP` declarations (`progress.json` `loop_stop_counts`: `hard-stop`, `approval-gate`, `awaiting-input`, `complete`). This field is HOOK-OWNED — the `loop_stall_guard` hook increments it on every valid declaration; read it as-is, do not compute or edit it yourself. Report the raw breakdown with no verdict attached — already artifact-backed from the declared stops, hard to fake. A high `awaiting-input` count is worth the human's attention, but this section states the count, not a judgement on it.
-- **Decisions absorbed** — a flat, unscored list of in-scope decisions the loop made autonomously without asking (e.g. a Phase 2.5 design-fork auto-adopted, a Phase 2.6 disposition defaulted to clean-break, a Phase 2.8 routing assignment set, a Phase 5 disconfirm-skip, a Phase 6 in-scope action taken without a check-in). No self-justification text attached to each entry, no automated "this looks calibrated" stamp — just what was decided and where (phase/work-unit). This list is COPIED VERBATIM from `progress.json`'s `decisions_absorbed` array, chronological (oldest first) — never reconstructed from conversation memory, which is exactly the kind of after-the-fact self-report this phase exists to avoid.
+This is the factory's own audit — raw facts for the human to judge, not a self-issued verdict.
 
-Also report, unscored, alongside the two facts above:
-- **Artifacts produced** — PRs merged, deploys done, each with the verifying check (Phase 12), not the agent's claim.
-- **Loop cost** — the per-model token + dated-USD breakdown mined into `retro.json`'s `cost` field (see the teardown write contract below), printed to the human WITH a price-staleness age: "prices as of `<cost.prices_as_of>`, N days old". This is the human-facing report deliverable, not just a stored artifact — a `complete` loop must print it, the same way the other Phase 13 facts are printed, not merely written to disk.
-- **Disposition violations** — work-units where `clean-break` was recorded in `progress.json` but a shim/compat path shipped anyway (caught at the Phase 4b gate, or by the human afterward). Audit as a diff between the `progress.json` disposition record and the merged artifact. Critically, distinguish **"0 violations"** from **"no disposition record found"**: the latter is an **audit failure** — the record was not maintained — not a pass, otherwise the report reads "clean" when the record was simply absent. Separately, surface any `preserve-compat` unit whose `removal_ticket` is still **open at loop end** as a compat-debt drift signal, so deferred removals cannot silently rot.
-- **Loop-scope eval result** — graded via `post_evals.sh grade-loop` (never hand-written into `evals.json`), the loop's final `evals.json` `result` (`GO`/`NO-GO`/a tier-0-exemption-with-justification), reported unscored, and any `amendments` entries (post-freeze eval edits with recorded reasons) — an amendment made after a grader verdict must carry its fresh re-grade (`regraded_by` recorded; `grade-loop` refuses otherwise): a verdict flipped by an orchestrator-written status is an audit failure, not a pass, the same way the "Decisions absorbed" bullet above reports the Phase 2.5/2.6 forks — unscored, no self-issued verdict. Distinguish this explicitly, mirroring the disposition-violation framing above: **"no `evals.json` record found" for a ≥3-work-unit loop is an audit failure, not a pass** — distinguish it from a genuine `GO` the same way this section already distinguishes "0 disposition violations" from "no disposition record found".
+**Teardown write contract — ordered, and it runs BEFORE the `complete` declaration.** The `loop_stall_guard` hook blocks a `complete` declaration when `retro.json` is absent, malformed, or below `schema_version` 1 — so the retro must be written before the declaration. Run these four steps in order, per the field spec and mechanics in [teardown.md](teardown.md):
 
-This is the factory's own audit — raw facts for the human to judge, not a self-issued verdict. A clean-looking scorecard is more dangerous than an honest unscored list because it is more likely to be trusted uncritically; the two facts above can only be gamed by omission, and omission from a flat list is easier for a human to spot than a fabricated pass on a scorecard.
-
-**Teardown write contract — ordered, and it runs BEFORE the `complete` declaration.** The `loop_stall_guard` hook blocks a `complete` declaration when `retro.json` is absent, malformed, or below `schema_version` 1 (the hook accepts `schema_version >= 1`, forward-compatible with the cost fields added at 2) — so the retro must be written before the declaration. Run these four steps in order:
-
-1. **Assemble `retro.json` (`schema_version` 2) beside `progress.json`.** Fields: `session_id`, `created`, `loop_ordinal` (= `completed_marker` after the Phase 13 bump), `envelope` (verbatim from `progress.json`'s `authorising_prompt_raw`), `loop_stop_counts` (copied **verbatim** from `progress.json` — HOOK-OWNED, never recomputed), `decisions_absorbed` (copied **verbatim** from `progress.json`'s array, not reconstructed from conversation memory — same rule as the Phase 13 bullet above), `disposition_record` (distinguish "0 violations" from "no-record", same framing as the self-audit above), `evals` (`result`/`amendments`/unresolved P1s), `artifacts` (PRs + the verifying check), `hook_blocks` (via `bash -c 'source "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/lib/discipline_common.sh" && dc_mine_hook_blocks "<session_id>"'`), `review_themes`, `raw_notes`, `models_used` (top-level array of model ids observed this loop — lifted out of the cost-miner's output, see below), `cost` (the dated per-model token/USD breakdown — see below). The schema has **no `verdict` field** — raw and unscored is structural, not an oversight: the retro records what happened, it does not grade it.
-
-   **Cost-mining sub-step, same step 1.** After assembling the fields above, source `hooks/scripts/lib/loop_cost.sh` and run `dc_mine_token_usage <session_id>`. It enumerates this loop's transcripts (the orchestrator's own `~/.claude/projects/<slug>/<sid>.jsonl` plus every worker transcript under `<proj>/<sid>/subagents/`, recursively), dedupes by `message.id` so a transcript read twice isn't double-counted, sums per-model token usage, prices it from a dated price table, and returns a single object carrying `prices_as_of`, `per_model`, `total_tokens`, `total_usd_estimate`, and `models_used` all as siblings. **Fold-in is a split, not a copy:** write the miner's returned object as `retro.cost` (its own nested `schema_version` 1, independent of the retro's), then lift its `models_used` array OUT to `retro.models_used` (top-level) — `models_used` lives at retro top-level only, never duplicated inside `cost`. This split is what bumps the retro's own `schema_version` to 2; the cost/models_used fields don't exist under `schema_version` 1. **Fail-open:** the miner never blocks teardown — on any error it returns `{}`, so both `retro.cost` and `retro.models_used` end up empty and a `complete` declaration proceeds exactly as it would with populated values. `loop_stall_guard` checks the retro's presence and `schema_version`, never the cost field's correctness, so a miner failure cannot stall a loop.
-
-   **Pricing is computed once, here, and frozen.** The miner prices `cost.per_model[*].usd_estimate` and `cost.total_usd_estimate` a single time at teardown, stamped with `cost.prices_as_of` and `cost.price_source`. Nothing downstream re-prices: the dashboard MUST sum the stored `usd_estimate`/`total_usd_estimate` values as written and MUST NEVER re-derive them from token counts against a live price table. If a second pricing path is ever tempting (e.g. a dashboard-side "current price" toggle), that is out of contract — the frozen number at teardown is the number.
-2. **Update `standing-orders.md` (at the repo-key dir).** Match this loop's retro failure modes against existing entries: a match resets that entry's `loops_since_recurrence` to 0, updates `last_recurred`, and appends evidence; a genuinely new failure mode appends a new entry (fields: `id`, `created`, `failure_mode`, `lesson`, `evidence`, `last_recurred`, `loops_since_recurrence`). Increment `loops_since_recurrence` on every non-matched surviving entry. When an entry's `loops_since_recurrence` reaches K=5 (a constant stated here, not config), MOVE it to `standing-orders-decayed.md` — a tombstone, **never a delete**; the graduation predicate's "one clean decay" is checked against this file. This step is additive-or-recurrence-only: no metric-based removal anywhere.
+1. **Assemble `retro.json` (`schema_version` 2) beside `progress.json`** — envelope, `loop_stop_counts` and `decisions_absorbed` copied verbatim from `progress.json` (never recomputed or reconstructed from memory), disposition record, evals, artifacts, hook blocks, `models_used`, and `cost`. The schema has **no `verdict` field** — raw and unscored is structural: the retro records what happened, it does not grade it. Mine cost via `dc_mine_token_usage` (fail-open: it never blocks teardown), and price once — nothing downstream re-prices.
+2. **Update `standing-orders.md` (at the repo-key dir).** Match this loop's failure modes against existing entries (match resets `loops_since_recurrence` to 0; new modes append), increment non-matched entries, and MOVE an entry to `standing-orders-decayed.md` at K=5 — a tombstone, **never a delete**. Additive-or-recurrence-only: no metric-based removal anywhere.
 3. **Write feedback-type auto-memories** for lessons that generalise beyond this loop.
 4. **Only then** set `progress.json` `status: "complete"` and declare `LOOP-STOP: complete`. First apply `coderails:verification-before-completion` to the orchestrator's own completion claim, per [finishing-out.md](finishing-out.md).
 
 ## Context-window persistence
 
-Do not stop work early because the context window is filling or a token budget is approaching. Context will compact and the session will continue — treat that as a non-event, not a stop condition.
+Do not stop work early because the context window is filling or a token budget is approaching. Context will compact and the session will continue — treat that as a non-event, not a stop condition. Never artificially truncate a task or declare "done" mid-loop because of token pressure. If a genuine stop condition (see below) is not met, keep going.
 
-**Loop state lives in a durable artifact, not in the conversation.** Maintain a single `progress.json` at the path printed by the loop-state path helper (`hooks/scripts/lib/agentic_loop_path.sh`) — outside the code repo, keyed to the repo (or cwd outside a repo) **and this session's id**, so it survives this session's own restart/compaction, never pollutes the base every worker branches from, and never collides with another session's file in the same directory. Resolve the path by running the helper (Phase -2); never compute it yourself. The helper reads `$CLAUDE_CODE_SESSION_ID` (set in every Bash tool call) when no session_id argument is given, so you normally don't need to pass one explicitly. It is overwritten (not appended) on every phase boundary and holds: the authorisation envelope verbatim, the current phase, a `work_units` field (a JSON object keyed by unit id, each entry carrying at least a `status`: `pending`/`in-progress`/`done`/`blocked` with `blockedBy`) — the loop-scope evals gate (`loop_state_guard`) reads `.work_units | length` off this field to decide whether the ≥3-work-unit eval threshold applies, failing open (no block) when the field is absent, so keep it populated whenever the loop tracks ≥1 work-unit — verified state carried between units (deployed version, test counts), per-category `loop_stop_counts` (`{hard-stop, approval-gate, awaiting-input, complete}`) for Phase 13 — **HOOK-OWNED**: written solely by the `loop_stall_guard` hook on each valid `LOOP-STOP` declaration; the orchestrator never writes or increments it, and on any wholesale rewrite of this file must re-read the existing `progress.json` first and carry `loop_stop_counts` forward according to the same conditional as the Phase -2 stub rule above (verbatim on a mid-loop rewrite, reset to `{}` when the prior file's `status` was `"complete"`) — and, for any work-unit that retires an existing code path, its `disposition` (`clean-break` | `preserve-compat`), plus, when `preserve-compat`, the `named_blocker` (the specific consumer still on the old path that justifies keeping it) and the `removal_ticket` tracking the deferred removal — and `decisions_absorbed`, the chronological (oldest-first) array of `{phase, decision}` entries appended at each phase boundary that absorbs an in-scope decision (Phases 2.5, 2.6, 2.8, 5, 6). A single overwritten JSON object — read the whole file in one shot to know current state. Do not use an append-log (`.jsonl`) that has to be replayed to derive position, and that can leave a torn tail line after a crash.
-
-**Lifecycle, enforced by the `loop_state_guard` Stop hook (presence + ownership).** The file moves through a fixed lifecycle, and the guard blocks any stop where an active loop has no session-owned file:
-- **Stub-first (Phase -2):** `status: "initialising"`, stamped with this `session_id`.
-- **Enrich at Phase 0:** record the envelope verbatim in `authorising_prompt_raw`; `status: "in-progress"`.
-- **Update at each phase boundary:** current phase, work-unit states, Spec A's disposition fields, `last_updated` — carry `loop_stop_counts` forward per the same conditional as the Phase -2 stub rule (never computed or edited by the orchestrator; see above).
-- **Teardown at Phase 13:** `status: "complete"`, and set `completed_marker` to the number of agentic-loop loops run in this session so far — i.e. the prior `completed_marker` (default 0) **plus 1**. Because this skill is invoked once per loop, that ordinal matches the guard's count of agentic-loop invocations, which is how the guard distinguishes a finished loop from a new one.
-
-**Recency — a second loop is not masked by a stale `complete`.** This skill supports multiple loops in one long session. A prior loop's `status: "complete"` must not silence the guard for a later loop. When a new loop starts, Phase -2's stub-first overwrites the file (`status` back to `initialising`), which is the primary re-arm signal. The `completed_marker` is the backstop: if a new loop skips its stub, the guard still sees that the current invocation count exceeds the recorded `completed_marker` and blocks, forcing a re-initialisation. This is why teardown must bump `completed_marker` and stub-first must carry it forward.
-
-**Honest boundary.** The guard guarantees the file *exists* and is *this session's* — not that its content is faithfully maintained (the same limit `check_verify_loop.sh` documents). Keeping the file current is still your job; the guard only catches its absence.
+**Loop state lives in a durable artifact, not in the conversation.** Maintain a single `progress.json` at the path printed by the loop-state path helper — resolve it by running the helper (Phase -2), never compute it yourself. Overwrite it (never append) at every phase boundary, recording the authorisation envelope verbatim, the current phase, work-unit states, and each phase's absorbed decisions. Field-by-field schema, the stub→enrich→teardown lifecycle, the hook-owned `loop_stop_counts` carry-forward rule, and the concurrency/ownership rules: see [loop-state.md](loop-state.md).
 
 After any compaction, drift, or "wait, where are we" moment, the orchestrator RE-READS `progress.json` — never the conversation — to re-orient. If the user ever has to remind the loop that it's mid-loop, the artifact wasn't being maintained. Git remains the authoritative checkpoint for code (commit all in-progress work before compaction); `progress.json` is the authoritative checkpoint for loop position.
 
-**Concurrent loops in one directory.** `progress.json` is keyed by repo (or cwd outside a repo) *and* session_id (Phase -2), so two `agentic-loop` sessions running concurrently against the same repo each get their own file — no race, no last-writer-wins — regardless of which worktree of that repo each session's cwd happens to be in: worktrees of the same repo now resolve to the SAME progress.json directory by design (that is the fix), and `session_id` remains the sole isolating key within it, exactly as it already was for two sessions sharing one literal directory. This relies on Claude Code's `session_id` staying stable for the life of one continuous conversation (across its own compaction/restart), while differing between genuinely separate conversations. `loop_state_guard.sh`'s session-mismatch check still fails closed if a file's own path disagrees with the session_id recorded inside it (a copied or hand-edited file) — a corruption signal, unchanged in what it compares; repo-keying only widens which cwds share a directory. A loop that must not let another session see its working-tree changes still wants a separate git worktree — that isolation is about the working tree, not about `progress.json`, which is shared on purpose across a repo's worktrees.
-
-Never artificially truncate a task or declare "done" mid-loop because of token pressure. If a genuine stop condition (see below) is not met, keep going.
-
-When a work-unit delegates to `subagent-driven-development`, that skill's own `sdd-ledger.md` lives as a sibling file in this same session-keyed directory alongside `progress.json`, written by its own workspace helper rather than by this skill.
-
-**Retro and standing-orders are durable loop-state siblings of `progress.json`, not conversation state.** `retro.json` is session-keyed — it lives beside `progress.json` in the same session dir, written once by the Phase 13 teardown contract. `standing-orders.md` and `standing-orders-decayed.md` are repo-keyed — one dir up (the repo-key dir, the grandparent of the `progress.json` path), shared across every session and loop against that repo, not per-session. This asymmetry is deliberate: a retro belongs to the loop that produced it, but a lesson is meant to outlive any single loop. The overlay write-race residual: two concurrent loops updating `standing-orders.md` at once is last-writer-wins, and this is self-correcting rather than a data-loss risk — a lesson lost to the race simply re-adds itself the next time its failure mode recurs (step 2 of the teardown contract), so the cost of the race is a delayed re-entry, not a permanently missing lesson.
+**The guard catches absence, not neglect.** `loop_state_guard` guarantees the file exists and is this session's — not that its content is faithful. Keeping it current is still your job. `retro.json`, `sdd-ledger.md`, and the repo-keyed `standing-orders.md` are durable siblings, not conversation state ([loop-state.md](loop-state.md)).
 
 ## Stop conditions for the loop
 
@@ -607,7 +475,7 @@ On a hard-stop: report current state with confidence labels, propose the next mo
 **Approval-gate (pause, surface a one-screen summary, PROCEED on yes):**
 A named risk boundary the envelope flagged for human sign-off — e.g. a prod cutover / enable step. This is NOT a hard-stop and NOT a wall. The loop runs autonomously right up to the gate, then pauses, presents a single summary (what's about to happen, the artifacts behind it, what's irreversible about it), and proceeds the moment the human approves — without re-planning or re-asking the steps before it.
 
-Model an approval-gate as "pause-then-proceed", never as "do not start". Past failure: a run relabelled a prod-enable gate as "do not start / hard wall" and took two human turns to correct. The gate is a pause point inside the envelope, not the edge of it.
+Model an approval-gate as "pause-then-proceed", never as "do not start" — it is a pause point inside the envelope, not the edge of it.
 
 **Loop complete:**
 5. All authorised work done and all gates passed — run Phase 13, then stop.

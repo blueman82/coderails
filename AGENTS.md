@@ -94,7 +94,7 @@ When a skill instructs an action that a hook gates — e.g. `git merge`/`gh pr c
 
 A second, additive merge gate covers task evals: `/coderails:task-evals` generates and freezes a tiered `evals.json` for the PR (see `skills/task-evals/SKILL.md`), and `/coderails:post-evals <PR#>` validates and posts it as a SHA-bound PR comment marked `coderails-eval-summary` (built from `scripts/lib/eval-artifact.sh`). `scripts/merge.sh` reads this artifact directly after the review-artifact gate, in the same `OPEN` branch before `gh pr merge` — same fail-closed rc semantics: a `gh` fetch failure or a `NO-GO`/missing artifact both block the merge. Loop scope has its own gate: `loop_state_guard` additionally checks for a loop-scope `evals.json` when the loop's `progress.json` `work_units` field reports ≥3 units, blocking the stop if none is found — fail-open (no block) when `work_units` is absent, matching the hook's presence-not-provenance posture elsewhere. A loop-scope `result` must also be computed by `scripts/post_evals.sh grade-loop` (never hand-written by the orchestrator) and carry a valid `grading` stamp — `loop_state_guard` demotes an otherwise-valid `GO`/`TIER0` lacking that stamp to `UNSTAMPED` and blocks the same way.
 
-A third instance of the same seam: the `agentic-loop` skill's Phase 13 teardown instructs writing `retro.json` (`schema_version` 2, since the cost-mining sub-step below) beside `progress.json` before a `complete` declaration; the `loop_stall_guard` hook gates that declaration on it, accepting `schema_version >= 1` (forward-compatible, not an exact-version check). Resolution when blocked is the same as any other seam gate — do the thing the skill already told you to do: assemble and write the retro per Phase 13, then re-declare `complete`. As of `schema_version` 2, Phase 13's step 1 also sources `hooks/scripts/lib/loop_cost.sh` and runs `dc_mine_token_usage`, writing its returned object as `retro.cost` (a dated, once-frozen per-model token/USD breakdown) and lifting its `models_used` array out to top-level `retro.models_used` — not duplicated inside `cost` — fail-open (a miner failure leaves both empty, never blocks teardown) — see `skills/agentic-loop/SKILL.md`'s Phase 13 for the full field contract.
+A third instance of the same seam: the `agentic-loop` skill's Phase 13 teardown instructs writing `retro.json` (`schema_version` 2, since the cost-mining sub-step below) beside `progress.json` before a `complete` declaration; the `loop_stall_guard` hook gates that declaration on it, accepting `schema_version >= 1` (forward-compatible, not an exact-version check). Resolution when blocked is the same as any other seam gate — do the thing the skill already told you to do: assemble and write the retro per Phase 13, then re-declare `complete`. As of `schema_version` 2, Phase 13's step 1 also sources `hooks/scripts/lib/loop_cost.sh` and runs `dc_mine_token_usage`, writing its returned object as `retro.cost` (a dated, once-frozen per-model token/USD breakdown) and lifting its `models_used` array out to top-level `retro.models_used` — not duplicated inside `cost` — fail-open (a miner failure leaves both empty, never blocks teardown) — see `skills/agentic-loop/SKILL.md`'s Phase 13, and its `teardown.md` detail-carrier, for the full field contract.
 
 ## Hook event map (`hooks/hooks.json`)
 
@@ -166,9 +166,9 @@ re-opened as findings.
   (`fast-mechanical`/`default`/`frontier`) plus a reasoning-effort level to
   every task before it spawns, and
   asserts the resulting role at each spawn site across the skill
-  (Phases 2, 2.5, 3, 3a, 9, 10 — as of this writing; the role table, the
-  per-role effort defaults, and the fable-escalation rule all
-  live in Phase 2.8) — but no hook gates
+  (Phases 2, 2.5, 3, 3a, 9, 10 — as of this writing; the role table lives in
+  Phase 2.8, and the per-role effort defaults plus the fable-escalation rule in
+  its `model-routing.md` detail-carrier) — but no hook gates
   `Agent`/`Task` spawn calls on the requested model — the only `PreToolUse`
   matchers in `hooks/hooks.json` are `Bash` and `Write|Edit|MultiEdit`; the
   remaining registered events (SessionStart/UserPromptSubmit/Stop/SubagentStop)
