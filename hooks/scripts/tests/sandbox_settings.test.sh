@@ -60,6 +60,18 @@ check "scratch path substituted into allowWrite" "true" \
 check "primary .git path substituted into allowWrite" "true" \
   "$(jq --arg p "$PRIMARY_GIT" '.filesystem.allowWrite | index($p) != null' "$OUT")"
 
+# Claude Code's per-project state dir (/tmp/claude-<uid>/<slug-of-worktree>) must
+# be granted or a sandboxed worker writes one file then EPERMs on mkdir at its
+# next tool call — the E2 end-to-end probe failed exactly this way, while every
+# component test passed. The slug is the worktree path with / replaced by -.
+CLAUDE_STATE="/private/tmp/claude-$(id -u)/$(printf '%s' "$WORKTREE" | sed 's|/|-|g')"
+check "claude project-state dir substituted into allowWrite" "true" \
+  "$(jq --arg p "$CLAUDE_STATE" '.filesystem.allowWrite | index($p) != null' "$OUT")"
+# ...and ONLY this worker's own slug. Granting the whole /tmp/claude-<uid> tree
+# would hand every worker write access over every other project's session state.
+check "claude state grant is the slug subdir, NOT the whole tree" "true" \
+  "$(jq --arg root "/private/tmp/claude-$(id -u)" '.filesystem.allowWrite | index($root) == null' "$OUT")"
+
 # No placeholder may survive, anywhere in the file.
 check "no %% placeholder remains" "0" "$(grep -c '%%' "$OUT" || true)"
 # ~ must be expanded by the renderer, not left for srt/the shell to guess.

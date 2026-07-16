@@ -46,7 +46,20 @@
       // prints its real output, reproducibly). This is narrower than the
       // previous ~/.cache grant, which was shared with unrelated tools
       // (gh, uv, huggingface) — real containment win, not just tidiness.
-      "%%TMPDIR%%"
+      "%%TMPDIR%%",
+      // Claude Code's per-project state dir for THIS worker's cwd only
+      // (/tmp/claude-<uid>/<slug-of-worktree>, slug = cwd with / -> -). Not
+      // configurable by any flag, and OUTSIDE %%TMPDIR%%: macOS resolves /tmp
+      // to /private/tmp, whereas TMPDIR is /var/folders/... — so the TMPDIR
+      // grant above does not cover it. Without this entry a worker writes its
+      // first file successfully and then dies at its NEXT tool call with
+      // "EPERM: operation not permitted, mkdir '/private/tmp/claude-<uid>/
+      // <slug>'" (observed live in the E2 end-to-end probe — components all
+      // passed; only a real end-to-end run surfaced it). Scoped to this
+      // worker's OWN slug, never the whole /tmp/claude-<uid> tree: the broader
+      // grant would hand every worker write access over every other project's
+      // session state.
+      "%%CLAUDE_PROJECT_STATE%%"
     ],
     // denyWrite takes precedence over allowWrite. This carves the permission
     // files out of the claude-home allow above: the one file class whose edit

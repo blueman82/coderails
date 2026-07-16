@@ -51,6 +51,20 @@ tmpdir="${TMPDIR:-/tmp}"
 # compares literally against syscall paths that carry no trailing slash.
 tmpdir="${tmpdir%/}"
 
+# Claude Code keeps per-project state under /tmp/claude-<uid>/<slug-of-cwd>,
+# where the slug is the worker's cwd with every '/' replaced by '-'. This path
+# is NOT configurable by flag and sits OUTSIDE $TMPDIR (macOS resolves /tmp to
+# /private/tmp, which is not the /var/folders/... TMPDIR), so it is not covered
+# by the %%TMPDIR%% grant. Without it a sandboxed worker writes its first file
+# fine and then dies at the next tool call with
+# "EPERM: operation not permitted, mkdir '/private/tmp/claude-<uid>/<slug>'"
+# — observed live in the E2 end-to-end probe. Grant ONLY this worker's own slug
+# subdir, never the whole /tmp/claude-<uid> tree (that would hand every worker
+# read/write over every other project's session state).
+claude_state_root="/private/tmp/claude-$(id -u)"
+claude_project_state="$claude_state_root/$(printf '%s' "$worktree" | sed 's|/|-|g')"
+mkdir -p "$claude_project_state" || die "could not create claude project-state dir: $claude_project_state"
+
 # ─── Render ─────────────────────────────────────────────────────────────────
 # Comment-strip first, then substitute: a path could legitimately contain "//"
 # (a doubled slash), and stripping afterwards could eat part of it.
@@ -61,7 +75,8 @@ rendered=$(
       -e "s|%%SCRATCH%%|$scratch|g" \
       -e "s|%%PRIMARY_GIT%%|$primary_git|g" \
       -e "s|%%HOME%%|$HOME|g" \
-      -e "s|%%TMPDIR%%|$tmpdir|g"
+      -e "s|%%TMPDIR%%|$tmpdir|g" \
+      -e "s|%%CLAUDE_PROJECT_STATE%%|$claude_project_state|g"
 )
 
 # No placeholder may survive: an unsubstituted %%…%% would reach srt as a

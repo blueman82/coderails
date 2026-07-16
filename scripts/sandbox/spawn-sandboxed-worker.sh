@@ -83,10 +83,23 @@ export GH_TOKEN="$gh_token"
 export XDG_CACHE_HOME="$xdg_cache_home"
 unset CODERAILS_HEADLESS_RUN
 
+# --dangerously-skip-permissions is REQUIRED here, and is the whole point of the
+# sandbox rather than a shortcut. A headless `claude -p` has no TTY, so its
+# in-process permission prompts cannot be answered: without this flag the worker
+# stalls on the first Write and produces nothing (observed live — the E2
+# end-to-end probe failed exactly this way, with ZERO EPERM in the log, i.e.
+# blocked by the prompt, not by the sandbox). Those prompts are in-trust-domain
+# enforcement — the layer this feature exists to replace. Skipping them is safe
+# ONLY because srt's OS-level policy is enforcing underneath, outside the agent's
+# trust domain: verified live that with this flag set, a worker's attempt to
+# write $HOME/e2-escape-attempt.txt still dies with "EPERM: operation not
+# permitted" and no file reaches disk. Never set this flag for a worker that is
+# NOT wrapped by srt.
 set +e
 npx --yes "@anthropic-ai/sandbox-runtime@$SRT_VERSION" \
   --settings "$settings_path" \
   claude -p "$(cat "$prompt_file")" --model "$model" \
+  --dangerously-skip-permissions \
   2>&1 | tee "$log_file"
 rc="${PIPESTATUS[0]}"
 set -e
