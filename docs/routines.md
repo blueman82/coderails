@@ -2,10 +2,10 @@
 
 A **routine** is a scheduled skill run that isn't considered done just
 because `claude` exited 0. It's done when a specific artifact exists,
-is fresh enough, and satisfies a predicate — the **artifact gate**. Four
+is fresh enough, and satisfies a predicate — the **artifact gate**. Five
 routines ship today: `wiki-lint` (nightly), `sync-docs-weekly` (weekly),
 `memory-consolidation-weekly` (weekly), `loop-retro-promotion-weekly`
-(weekly).
+(weekly), `workflow-audit-weekly` (weekly).
 
 This doc is the operator-facing guide: how the queue/runner architecture
 works, how to define a routine, how to install/uninstall the scheduler,
