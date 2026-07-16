@@ -28,3 +28,6 @@ docs/public-readiness-plan-v2.md
 # design specs and implementation plans — session-local working docs, never tracked in the repo
 docs/coderails/specs/
 docs/coderails/plans/
+
+# local-only competitive-analysis working notes (do not publish)
+docs/agent-stack-comparison-*.md
