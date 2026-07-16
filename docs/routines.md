@@ -2,10 +2,10 @@
 
 A **routine** is a scheduled skill run that isn't considered done just
 because `claude` exited 0. It's done when a specific artifact exists,
-is fresh enough, and satisfies a predicate — the **artifact gate**. Four
+is fresh enough, and satisfies a predicate — the **artifact gate**. Five
 routines ship today: `wiki-lint` (nightly), `sync-docs-weekly` (weekly),
 `memory-consolidation-weekly` (weekly), `loop-retro-promotion-weekly`
-(weekly).
+(weekly), `workflow-audit-weekly` (weekly).
 
 This doc is the operator-facing guide: how the queue/runner architecture
 works, how to define a routine, how to install/uninstall the scheduler,
@@ -128,7 +128,7 @@ Field by field:
   same string, `buttonRef` is optional (both the seeder and the runner
   resolve a routine to a button by `buttonRef ?? name`).
 - **`skillCommand` / `buttonRef`** — exactly one. `buttonRef` reuses an
-  existing button's `command`/`cwd`/`profile` (all four shipped
+  existing button's `command`/`cwd`/`profile` (all five shipped
   routines do this). `foreignSkillPath` (optional) names an absolute
   path to a skill that lives outside this repo (e.g. `sync-docs`'s
   personal-plugin location) — the runner checks the path exists before
@@ -147,7 +147,7 @@ Field by field:
   `wikiPaths`) template tokens, substituted at check time. `maxAgeSeconds`
   is how old the artifact is allowed to be — set it comfortably above the
   cadence interval (the `wiki-lint` example above uses 129600s = 36h for
-  a nightly routine; the three weekly routines use 691200s = 8 days) so a
+  a nightly routine; the four weekly routines use 691200s = 8 days) so a
   slightly-late run doesn't fail its own gate. `predicate` is one of:
   - `{ kind: "exists" }` — file present and fresh, nothing more.
   - `{ kind: "contains", marker }` — file present, fresh, and contains
@@ -155,7 +155,7 @@ Field by field:
   - `{ kind: "json-field", path, value }` — file parses as JSON and the
     dotted `path` resolves to exactly `value`.
 - **`escalation`** — an array drawn from `["notification",
-  "vault-note"]`. Both shipped channels are enabled on all four
+  "vault-note"]`. Both shipped channels are enabled on all five
   example routines; there's no "off" option today — a routine either
   escalates through the channels it lists or (if the array is empty)
   fails silently except in the runlog, which is rarely what you want.
@@ -166,9 +166,17 @@ never wrote the expected artifact is a **failure**, not a success. This
 is deliberate: it's the whole reason routines exist instead of a bare
 cron job piping into `claude -p`.
 
+## `workflow-audit-weekly`: transcript mining with queue-mode proposals
+
+This routine mines transcripts from the last 7 days, clusters repeated tool-use patterns, judges them as skill candidates, and writes any `propose` verdicts as queue entries in the dashboard approval queue. It runs in **queue-mode mandatory**: in-session skill creation is forbidden, and every proposal appears as a queue entry awaiting the owner's Approve click, never auto-built.
+
+The routine's run note lives at `~/.claude/coderails-dashboard/routines/workflow-audit/run-{date}.md` and records `proposals_written: <N>` (count of queue entries actually written this run). The artifact gate checks for the completion marker `## [{date}] workflow-audit complete`, which the routine emits **only** if it finishes cleanly **and** `proposals_written == proposals_attempted` (no queue write failures). A week with zero proposals (`proposals_written: 0` with no failures) is a **successful run** — the marker is emitted and the gate passes. A crash, or a shortfall where some proposals failed to write, causes the marker to be omitted and the gate to fail.
+
+The 8-day artifact-gate freshness window (`maxAgeSeconds: 691200`) provides catch-up grace for a run that fires late (e.g. the machine was asleep at the scheduled time) — a run inside that window still passes the gate. Read `proposals_written: 0` plainly: no repeated patterns reached the proposal threshold this week, and zero proposals is not a failure or a request to lower the threshold — it's the expected norm in a healthy workflow. Report it as a green, completed run just like any other passing gate.
+
 ## `loop-retro-promotion-weekly`: a dormant-by-default routine
 
-Unlike the other three routines, `loop-retro-promotion-weekly`'s own
+Unlike the other four routines, `loop-retro-promotion-weekly`'s own
 skill (`skills/loop-retro-promotion/SKILL.md`) evaluates a 3-part
 graduation predicate every time it runs, before doing anything else: (1)
 at least 10 `retro.json` files exist under the repo-key dir, (2)
@@ -330,12 +338,22 @@ allowlist at all) nor the hook-based safety net an interactive terminal
 session gets.
 
 **Ship read-only routines unless you have explicitly accepted this.**
-Three of the four shipped example routines use `"profile": "read-only"`
-for exactly this reason. The fourth, `loop-retro-promotion-weekly`, is
+Four of the five shipped example routines use `"profile": "read-only"`
+for exactly this reason. `loop-retro-promotion-weekly` is
 the deliberate, documented exception — see the section above for what
 backs up its merge instead of a hook. If a routine's skill needs to
 write files or run commands, understand that its actions are gated only
 by the artifact check after the fact, not by any hook before the fact.
+
+**Write surfaces for unattended routines.** `workflow-audit-weekly` runs
+headless in `read-only` profile; its write surface is restricted to two
+directories: `~/.claude/coderails-dashboard/routines/workflow-audit/`
+(its own run note, containing `proposals_written: N` and optionally the
+completion marker) and `~/.claude/coderails-dashboard/approvals/`
+(queue entries for each proposed skill, carrying only the judge's D2-whitelisted
+fields, never full transcript content). The scan's privacy boundary — structural
+extraction only, no full-text content — is enforced at the `scan_transcripts.sh`
+level and is unchanged by this routine.
 
 ## See also
 
@@ -343,11 +361,11 @@ by the artifact check after the fact, not by any hook before the fact.
   — the `Intent`/`RoutineDef` schema contract and queue lifecycle in
   full.
 - [`skills/memory-consolidation/SKILL.md`](../skills/memory-consolidation/SKILL.md)
-  — one of the four shipped routines; a good template for a routine
+  — one of the five shipped routines; a good template for a routine
   whose own skill writes its artifact-gate report natively.
 - [`skills/loop-retro-promotion/SKILL.md`](../skills/loop-retro-promotion/SKILL.md)
   — the fourth shipped routine; dormant by default, see the
   dedicated section above for its graduation predicate and security
   posture.
 - [`examples/dashboard-config.json`](../examples/dashboard-config.json)
-  — the full four-routine config this doc's examples are drawn from.
+  — the full five-routine config this doc's examples are drawn from.
