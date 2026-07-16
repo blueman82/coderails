@@ -679,6 +679,94 @@ check "work_units: array entry missing .id -> stderr names it by index [0]" 1 "$
 case "$STDERR_OUT" in *'"null"'*|*': null'*) literal_null=1 ;; *) literal_null=0 ;; esac
 check "work_units: array entry missing .id -> stderr does NOT name it literal null" 0 "$literal_null"
 
+# (h24) VALUE-TYPE-GUARD — a unit whose VALUE is a scalar STRING (not an
+# object) -> BLOCK, stderr names it. Pre-fix, .value.status on a string value
+# throws "Cannot index string with string \"status\"" inside the jq -r
+# pipeline, killing it entirely: offenders collapses to "", and
+# `[ -n "$offenders" ] || return 0` fails the whole gate OPEN even though this
+# unit obviously isn't done/dropped. A non-object value cannot be proven
+# terminal, so it must block, same shape as the dropped_reason type-guard.
+reset; T=$(mk_transcript 1 "All done.
+LOOP-STOP: complete — done"); write_file in-progress S1 0
+write_retro S1 '{"schema_version":1}'
+write_work_units S1 in-progress '{"wu1":"pending"}'
+run_capture_stderr "$(payload "$T" S1)"
+check "work_units: scalar string value -> block" 2 "$RC_OUT"
+case "$STDERR_OUT" in *wu1*) wu1_named=1 ;; *) wu1_named=0 ;; esac
+check "work_units: scalar string value -> stderr names wu1" 1 "$wu1_named"
+check "work_units: scalar string value -> complete counter NOT bumped" 0 "$(counter S1 complete)"
+
+# (h25) VALUE-TYPE-GUARD — a unit whose VALUE is a scalar NUMBER -> BLOCK.
+reset; T=$(mk_transcript 1 "All done.
+LOOP-STOP: complete — done"); write_file in-progress S1 0
+write_retro S1 '{"schema_version":1}'
+write_work_units S1 in-progress '{"wu1":42}'
+check "work_units: scalar number value -> block" 2 "$(run x "$(payload "$T" S1)")"
+
+# (h26) VALUE-TYPE-GUARD — a unit whose VALUE is JSON null -> BLOCK.
+reset; T=$(mk_transcript 1 "All done.
+LOOP-STOP: complete — done"); write_file in-progress S1 0
+write_retro S1 '{"schema_version":1}'
+write_work_units S1 in-progress '{"wu1":null}'
+check "work_units: null value -> block" 2 "$(run x "$(payload "$T" S1)")"
+
+# (h27) THE BLINDING CASE — one malformed scalar-value unit (wu1) alongside a
+# genuinely pending object-value unit (wu2), SAME file -> BLOCK naming BOTH.
+# This is the exact fail-open this fix closes: pre-fix, wu1's .value.status
+# throws and kills the whole pipeline, so wu2's real "pending" status (which
+# needs no type guard at all) goes completely unchecked too — one bad scalar
+# entry blinds the gate to every other unit in the file.
+reset; T=$(mk_transcript 1 "All done.
+LOOP-STOP: complete — done"); write_file in-progress S1 0
+write_retro S1 '{"schema_version":1}'
+write_work_units S1 in-progress '{"wu1":"whatever","wu2":{"status":"pending"}}'
+run_capture_stderr "$(payload "$T" S1)"
+check "work_units: blinding case (scalar + pending) -> block" 2 "$RC_OUT"
+case "$STDERR_OUT" in *wu1*) wu1_named=1 ;; *) wu1_named=0 ;; esac
+check "work_units: blinding case -> stderr names wu1" 1 "$wu1_named"
+case "$STDERR_OUT" in *wu2*) wu2_named=1 ;; *) wu2_named=0 ;; esac
+check "work_units: blinding case -> stderr names wu2" 1 "$wu2_named"
+check "work_units: blinding case -> complete counter NOT bumped" 0 "$(counter S1 complete)"
+
+# (h28) CRITICAL REGRESSION — one malformed scalar-value unit (wu1) alongside
+# a genuinely DONE object-value unit (wu2) -> BLOCK naming ONLY wu1. Proves
+# the malformed entry doesn't blind evaluation of the valid one (wu2 must
+# still read back as done, not swept into the block by association), and that
+# the fix doesn't over-block a legitimately finished unit.
+reset; T=$(mk_transcript 1 "All done.
+LOOP-STOP: complete — done"); write_file in-progress S1 0
+write_retro S1 '{"schema_version":1}'
+write_work_units S1 in-progress '{"wu1":"whatever","wu2":{"status":"done"}}'
+run_capture_stderr "$(payload "$T" S1)"
+check "work_units: malformed + done sibling -> block" 2 "$RC_OUT"
+case "$STDERR_OUT" in *wu1*) wu1_named=1 ;; *) wu1_named=0 ;; esac
+check "work_units: malformed + done sibling -> stderr names wu1" 1 "$wu1_named"
+case "$STDERR_OUT" in *wu2*) wu2_named=1 ;; *) wu2_named=0 ;; esac
+check "work_units: malformed + done sibling -> stderr does NOT name wu2" 0 "$wu2_named"
+
+# (h29) ARRAY branch — a scalar entry alongside an object entry -> BLOCK
+# naming both; the scalar is named by its array INDEX (fallback), same as
+# h23's missing-.id case.
+reset; T=$(mk_transcript 1 "All done.
+LOOP-STOP: complete — done"); write_file in-progress S1 0
+write_retro S1 '{"schema_version":1}'
+write_work_units S1 in-progress '[{"status":"pending"},"scalar"]'
+run_capture_stderr "$(payload "$T" S1)"
+check "work_units: array scalar entry -> block" 2 "$RC_OUT"
+case "$STDERR_OUT" in *'[0]'*) idx0_named=1 ;; *) idx0_named=0 ;; esac
+check "work_units: array scalar entry -> stderr names the pending object [0]" 1 "$idx0_named"
+case "$STDERR_OUT" in *'[1]'*) idx_named=1 ;; *) idx_named=0 ;; esac
+check "work_units: array scalar entry -> stderr names the scalar by index [1]" 1 "$idx_named"
+
+# (h30) REGRESSION — all-object, all-done (object branch) still ALLOWS. The
+# value-type guard must not break the ordinary happy path.
+reset; T=$(mk_transcript 1 "All done.
+LOOP-STOP: complete — done"); write_file in-progress S1 0
+write_retro S1 '{"schema_version":1}'
+write_work_units S1 in-progress '{"wu1":{"status":"done"},"wu2":{"status":"done"}}'
+check "work_units: value-guard regression, all-object all-done -> allow" 0 "$(run x "$(payload "$T" S1)")"
+check "work_units: value-guard regression, all-object all-done -> counter bumped" 1 "$(counter S1 complete)"
+
 # (h15) NEGATIVE CONTROL — prove the must-BLOCK assertions above actually
 # discriminate: a category never bumped must not read back as bumped.
 # Mirrors the retro gate's own (g) negative control below, scoped to this

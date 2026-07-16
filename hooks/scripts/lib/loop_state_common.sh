@@ -560,6 +560,16 @@ Phase 13), write it, then re-declare complete." >&2
 # dropped_reason is therefore treated as absent (not terminal, blocks),
 # same as a missing key or an empty/whitespace-only string.
 #
+# The unit VALUE itself must be type-guarded too, BEFORE .status/.dropped_reason
+# touch it: a scalar value (string/number) throws "Cannot index string/number
+# with string ..." inside the same jq -r pipeline, which kills the pipeline
+# for EVERY unit in the file, not just the malformed one — one bad scalar
+# entry would blind the gate to a genuinely-pending sibling unit elsewhere in
+# work_units. status/dropped_reason are therefore read as null when the value
+# isn't an object; a null status is not "done"/"dropped", so it blocks same as
+# a missing key — a non-object unit has no verifiable done/dropped status, so
+# it can never be treated as terminal.
+#
 # work_units is an OBJECT keyed by unit id (verified against every real
 # progress.json on disk) — to_entries/.key gives the real id. An array shape
 # is tolerated defensively via to_entries too, so a missing .id falls back to
@@ -585,9 +595,13 @@ als_gate_work_units_on_complete() {
   offenders=$(jq -r '
     ( .work_units // {} ) as $wu
     | ( if ($wu | type) == "array"
-        then [ $wu | to_entries[] | {id: (.value.id // "[\(.key)]"), status: .value.status, dropped_reason: .value.dropped_reason} ]
+        then [ $wu | to_entries[] | {id: ((if (.value | type) == "object" then .value.id else null end) // "[\(.key)]"),
+               status: (if (.value | type) == "object" then .value.status else null end),
+               dropped_reason: (if (.value | type) == "object" then .value.dropped_reason else null end)} ]
         elif ($wu | type) == "object"
-        then [ $wu | to_entries[] | {id: .key, status: .value.status, dropped_reason: .value.dropped_reason} ]
+        then [ $wu | to_entries[] | {id: .key,
+               status: (if (.value | type) == "object" then .value.status else null end),
+               dropped_reason: (if (.value | type) == "object" then .value.dropped_reason else null end)} ]
         else [] end )
     | map( select( ((.status == "done")
           or ((.status == "dropped")
