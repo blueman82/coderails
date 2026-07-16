@@ -38,7 +38,7 @@ be replayed to derive position, and that can leave a torn tail line after a cras
 | `session_id` | This session's id; the guard's ownership check compares it against the file's own path. |
 | `status` | `initialising` → `in-progress` → `complete` (see Lifecycle). |
 | `authorising_prompt_raw` | The authorisation envelope, verbatim. |
-| `work_units` | JSON object keyed by unit id; each entry carries at least a `status` (`pending`/`in-progress`/`done`/`blocked` with `blockedBy`). |
+| `work_units` | JSON object keyed by unit id; each entry carries at least a `status`. In-flight values are `pending`/`in-progress`/`blocked` (with `blockedBy`); only `done` and `dropped` (with a mandatory sibling `dropped_reason`) are terminal — see below. `merged`/`complete`/other synonyms are retired: do not mint new status values. |
 | `loop_stop_counts` | **HOOK-OWNED.** Per-category counts `{hard-stop, approval-gate, awaiting-input, complete}`, for Phase 13. |
 | `disposition` | Per work-unit that retires an existing code path: `clean-break` \| `preserve-compat`. |
 | `named_blocker` | When `preserve-compat`: the specific consumer still on the old path that justifies keeping it. |
