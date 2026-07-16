@@ -360,6 +360,20 @@ describe("loadConfig against the real examples/dashboard-config.json (C3)", () =
         command.includes(basename),
         `routine "${routine.name}" gates on "${routine.expectedArtifact.artifactPath}" but its button command never names "${basename}" — the run has to guess the filename`,
       ).toBe(true);
+
+      // Same bug class, other half: a `contains` gate gives the run a marker to
+      // emit. If the command never states it, the run guesses the wording and
+      // the gate reds out exactly as it did on the filename. Assert the marker's
+      // static tail only — the two sides notate the date differently ("{date}"
+      // in the gate, "<YYYY-MM-DD>" in the command prose), so the templated
+      // marker never matches verbatim.
+      if (routine.expectedArtifact.predicate.kind !== "contains") continue;
+      const markerTail = routine.expectedArtifact.predicate.marker.split("]").pop()?.trim() ?? "";
+      if (markerTail === "") continue; // marker carries no static text to pin
+      expect(
+        command.includes(markerTail),
+        `routine "${routine.name}" gates on marker "${routine.expectedArtifact.predicate.marker}" but its button command never states "${markerTail}" — the run has to guess the marker wording`,
+      ).toBe(true);
     }
   });
 });
