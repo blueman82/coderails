@@ -128,3 +128,7 @@ Report, unscored:
 - Skills created (name, PR, merge SHA).
 - Candidates rejected by the judge, with `reject_reason`.
 - Clusters below the `--min-sessions` threshold (`diagnostics.below_threshold`), so the owner knows what's sitting just under the bar.
+
+## 10. Scheduled invocation
+
+This skill is invoked weekly via the `workflow-audit-weekly` routine (see `docs/routines.md` for the full operator guide). The routine scans transcripts from the last 7 days (`--days 7`), clusters repeated patterns, judges them, and writes any `propose` verdicts as queue entries on the dashboard. **Queue-mode is mandatory for scheduled runs** — in-session skill creation is forbidden, and the owner's Approve click on a queue entry is the sole build trigger for each proposal. This differs from an interactive run, which can create skills in-session or defer to queue-mode at the user's discretion. The routine completes cleanly only if `proposals_written == proposals_attempted` (no queue write failures); a run with zero proposals is a successful week, not a failure.
