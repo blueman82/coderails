@@ -361,7 +361,7 @@ level and is unchanged by this routine.
   — the `Intent`/`RoutineDef` schema contract and queue lifecycle in
   full.
 - [`skills/memory-consolidation/SKILL.md`](../skills/memory-consolidation/SKILL.md)
-  — one of the four shipped routines; a good template for a routine
+  — one of the five shipped routines; a good template for a routine
   whose own skill writes its artifact-gate report natively.
 - [`skills/loop-retro-promotion/SKILL.md`](../skills/loop-retro-promotion/SKILL.md)
   — the fourth shipped routine; dormant by default, see the
