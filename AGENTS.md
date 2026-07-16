@@ -166,9 +166,9 @@ re-opened as findings.
   (`fast-mechanical`/`default`/`frontier`) plus a reasoning-effort level to
   every task before it spawns, and
   asserts the resulting role at each spawn site across the skill
-  (Phases 2, 2.5, 3, 3a, 9, 10 — as of this writing; the role table, the
-  per-role effort defaults, and the fable-escalation rule all
-  live in Phase 2.8) — but no hook gates
+  (Phases 2, 2.5, 3, 3a, 9, 10 — as of this writing; the role table lives in
+  Phase 2.8, and the per-role effort defaults plus the fable-escalation rule in
+  its `model-routing.md` detail-carrier) — but no hook gates
   `Agent`/`Task` spawn calls on the requested model — the only `PreToolUse`
   matchers in `hooks/hooks.json` are `Bash` and `Write|Edit|MultiEdit`; the
   remaining registered events (SessionStart/UserPromptSubmit/Stop/SubagentStop)
