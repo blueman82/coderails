@@ -99,6 +99,63 @@ describe("checkArtifact", () => {
     expect(result.reason).toMatch(/marker/i);
   });
 
+  // These three cases pin the workflow-audit gate's END of the contract only:
+  // marker present -> pass, marker absent -> fail, stale -> fail. They are
+  // deliberately redundant with the generic `contains` cases above — kept as
+  // executable documentation of what this routine's gate does, since the gate
+  // is the half a reader is most likely to mis-model.
+  //
+  // What they do NOT prove, and cannot: zero-is-success itself. `checkArtifact`
+  // never parses proposals_written — the `contains` branch is content.includes()
+  // and nothing more, so the counter lines in these fixtures are inert (delete
+  // them and the tests pass identically). The real invariant — emit the marker
+  // ONLY IF the run finished cleanly AND written == attempted, including 0 == 0
+  // — lives in the routine's button command prose (examples/dashboard-config.json),
+  // an instruction to an LLM run that no unit test here can execute. It is
+  // verified by live-fire against the installed routine, not by this file.
+  it("passes a workflow-audit run note whose completion marker is present (marker-presence only — see note above)", () => {
+    const path = join(dir, "run-2026-07-06.md");
+    writeFileSync(
+      path,
+      "proposals_written: 0\nproposals_attempted: 0\n## [2026-07-06] workflow-audit complete\n"
+    );
+    const artifact: ExpectedArtifact = {
+      artifactPath: path,
+      maxAgeSeconds: 691200,
+      predicate: { kind: "contains", marker: "## [{date}] workflow-audit complete" },
+    };
+    const result = checkArtifact(artifact, { ...ctx, vault: dir });
+    expect(result.passed).toBe(true);
+  });
+
+  it("fails a 'contains' predicate on a workflow-audit run note that omitted the completion marker (shortfall or crash)", () => {
+    const path = join(dir, "run-2026-07-06.md");
+    writeFileSync(path, "proposals_written: 2\nproposals_attempted: 3\n");
+    const artifact: ExpectedArtifact = {
+      artifactPath: path,
+      maxAgeSeconds: 691200,
+      predicate: { kind: "contains", marker: "## [{date}] workflow-audit complete" },
+    };
+    const result = checkArtifact(artifact, { ...ctx, vault: dir });
+    expect(result.passed).toBe(false);
+    expect(result.reason).toMatch(/marker/i);
+  });
+
+  it("fails a 'contains' predicate on a stale workflow-audit run note even with the marker present", () => {
+    const path = join(dir, "run-2026-06-20.md");
+    writeFileSync(path, "proposals_written: 0\n## [2026-06-20] workflow-audit complete\n");
+    const oldTime = new Date(Date.now() - 700_000_000); // > 691200s (8 days)
+    utimesSync(path, oldTime, oldTime);
+    const artifact: ExpectedArtifact = {
+      artifactPath: path,
+      maxAgeSeconds: 691200,
+      predicate: { kind: "contains", marker: "## [2026-06-20] workflow-audit complete" },
+    };
+    const result = checkArtifact(artifact, { ...ctx, vault: dir });
+    expect(result.passed).toBe(false);
+    expect(result.reason).toMatch(/stale|too old/i);
+  });
+
   it("passes a 'json-field' predicate when the field matches the expected value", () => {
     const path = join(dir, "result.json");
     writeFileSync(path, JSON.stringify({ status: "green" }));

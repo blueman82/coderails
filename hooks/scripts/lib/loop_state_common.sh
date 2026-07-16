@@ -545,3 +545,83 @@ Phase 13), write it, then re-declare complete." >&2
     exit 2
   fi
 }
+
+# Gate: on a `complete` declaration, block if any progress.json work_unit is
+# not terminal. Terminal = "done", or "dropped" with a non-empty (post-trim)
+# STRING dropped_reason. Anything else (pending, in-progress, blocked, or any
+# other value) blocks — this is the structural "nothing is deferred"
+# enforcement; prose standing-orders alone were observed to fail (deferred
+# twice in one loop with the standing-order loaded the whole time).
+#
+# dropped_reason must be type-guarded BEFORE gsub touches it: jq's gsub
+# throws on a non-string input (number/bool/array/object), which would kill
+# the whole jq -r pipeline, collapse offenders to empty, and fail the gate
+# OPEN — the exact bypass this gate exists to prevent. A non-string
+# dropped_reason is therefore treated as absent (not terminal, blocks),
+# same as a missing key or an empty/whitespace-only string.
+#
+# The unit VALUE itself must be type-guarded too, BEFORE .status/.dropped_reason
+# touch it: a scalar value (string/number) throws "Cannot index string/number
+# with string ..." inside the same jq -r pipeline, which kills the pipeline
+# for EVERY unit in the file, not just the malformed one — one bad scalar
+# entry would blind the gate to a genuinely-pending sibling unit elsewhere in
+# work_units. status/dropped_reason are therefore read as null when the value
+# isn't an object; a null status is not "done"/"dropped", so it blocks same as
+# a missing key — a non-object unit has no verifiable done/dropped status, so
+# it can never be treated as terminal.
+#
+# work_units is an OBJECT keyed by unit id (verified against every real
+# progress.json on disk) — to_entries/.key gives the real id. An array shape
+# is tolerated defensively via to_entries too, so a missing .id falls back to
+# the array INDEX ("[0]") rather than the uninformative literal "null" —
+# object is still the primary, expected shape.
+#
+# Fail-open at the FILE level: jq absent, ALS_PATH unset/missing, absent/null
+# work_units, empty object/array, or malformed (unparseable) progress.json all
+# allow. Fires ONLY on `complete` (case-insensitively).
+#
+# This is deliberately NOT the same posture as als_gate_retro_on_complete,
+# which BLOCKS on an absent/malformed retro.json (its artifact is mandatory at
+# Phase 13). The two gates share only the jq-absent skip. work_units is
+# OPTIONAL — a trivial or legacy loop may never populate it — so its ABSENCE
+# must never itself block. The distinction: absence of the field fails open,
+# but an individual unit that cannot be PROVEN terminal fails closed (blocks),
+# so a malformed entry can never launder an unfinished unit into a completion.
+#
+# Allowlist is deliberately narrow: {done, dropped}. Do NOT widen to accept
+# "merged"/"complete"/other synonyms seen in historical loops — those
+# vocabularies grew because nothing constrained them; widening here would
+# rebuild the non-enforcement this gate exists to remove.
+als_gate_work_units_on_complete() {
+  local category="$1" hook="$2" session="$3"
+  local category_lc; category_lc=$(printf '%s' "$category" | tr '[:upper:]' '[:lower:]')
+  [ "$category_lc" = "complete" ] || return 0
+  command -v jq >/dev/null 2>&1 || { als_log "hook=$hook session=$session work_units_gate=skipped_no_jq"; return 0; }
+  [ -n "$ALS_PATH" ] && [ -f "$ALS_PATH" ] || return 0
+  jq -e . "$ALS_PATH" >/dev/null 2>&1 || return 0
+  local offenders
+  offenders=$(jq -r '
+    ( .work_units // {} ) as $wu
+    | ( if ($wu | type) == "array"
+        then [ $wu | to_entries[] | {id: ((if (.value | type) == "object" then .value.id else null end) // "[\(.key)]"),
+               status: (if (.value | type) == "object" then .value.status else null end),
+               dropped_reason: (if (.value | type) == "object" then .value.dropped_reason else null end)} ]
+        elif ($wu | type) == "object"
+        then [ $wu | to_entries[] | {id: .key,
+               status: (if (.value | type) == "object" then .value.status else null end),
+               dropped_reason: (if (.value | type) == "object" then .value.dropped_reason else null end)} ]
+        else [] end )
+    | map( select( ((.status == "done")
+          or ((.status == "dropped")
+              and (((.dropped_reason | if type == "string" then gsub("^\\s+|\\s+$";"") else "" end) // "") != ""))) | not ) )
+    | map(.id)
+    | join(", ")
+  ' "$ALS_PATH" 2>/dev/null)
+  [ -n "$offenders" ] || return 0
+  als_log "hook=$hook session=$session work_units_gate=blocked offenders=$offenders"
+  echo "[loop-stall-guard] LOOP-STOP: complete declared but work_units are unfinished: $offenders.
+Every work_unit must be \"done\", or \"dropped\" with a non-empty dropped_reason,
+before declaring complete. Finish or explicitly drop (with a reason) the
+listed unit(s), then re-declare complete." >&2
+  exit 2
+}
