@@ -22,13 +22,17 @@ Every task in the plan must include:
 - **Steps**: one action each, 2–5 minutes. "Write the failing test" is a step. "Implement auth" is not.
 - **Verify-criteria**: something runnable or inspectable that proves the task is done — a test command with expected output, a grep, a visible UI state.
 - **Model**: the capability role this task should run at — `fast-mechanical`,
-  `default`, or `frontier` — plus a one-line rationale, and an optional fallback
+  `default`, or `frontier` — plus the reasoning-effort level where the role's
+  model supports one, a one-line rationale, and an optional fallback
   valve. Mandatory on every task in every plan, no exceptions for small or
-  loop-only plans. Role definitions, the role→model table, and the tiering
+  loop-only plans. Role definitions, the role→model table, the per-role
+  effort defaults, and the tiering
   rationale live in `coderails:agentic-loop`'s routing phase (Phase 2.8 as of this writing) — this stamp names the
-  role and the reason, it does not repeat the table. Example:
+  role, effort, and reason; it does not repeat the table. Examples:
   `Model: fast-mechanical — scripted rename across N files; default fallback
   after two failed gate attempts.`
+  `Model: frontier (effort: xhigh) — ambiguous design fork across two
+  subsystems; no fallback, one strong run beats escalate-later.`
 
 ## Per-task construction method
 

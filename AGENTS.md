@@ -163,10 +163,12 @@ re-opened as findings.
   where neither gate is active.
 - **Model-role routing for spawned workers is advisory, not hook-enforced.**
   `agentic-loop` SKILL.md's Phase 2.8 assigns a capability role
-  (`fast-mechanical`/`default`/`frontier`) to every task before it spawns, and
+  (`fast-mechanical`/`default`/`frontier`) plus a reasoning-effort level to
+  every task before it spawns, and
   asserts the resulting role at each spawn site across the skill
-  (Phases 2, 2.5, 3, 3a, 9, 10 — as of this writing; the role table itself
-  lives in Phase 2.8) — but no hook gates
+  (Phases 2, 2.5, 3, 3a, 9, 10 — as of this writing; the role table, the
+  per-role effort defaults, and the fable-escalation rule all
+  live in Phase 2.8) — but no hook gates
   `Agent`/`Task` spawn calls on the requested model — the only `PreToolUse`
   matchers in `hooks/hooks.json` are `Bash` and `Write|Edit|MultiEdit`; the
   remaining registered events (SessionStart/UserPromptSubmit/Stop/SubagentStop)

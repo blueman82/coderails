@@ -262,7 +262,35 @@ release touches; the roles and their rationale (this section) are durable.
 |---|---|---|
 | `fast-mechanical` | haiku | Exact-recipe mechanical tasks with scripted ceremony; orchestrator verification micro-reads |
 | `default` | sonnet | TDD / mechanical / multi-file work; the fallback when uncertain (cost control) |
-| `frontier` | fable (opus alternate) | Design-judgement UI/architecture units; genuinely ambiguous investigations |
+| `frontier` | opus at `xhigh` effort (fable escalation — see below) | Design-judgement UI/architecture units; genuinely ambiguous investigations |
+
+**`frontier` resolves to opus, never automatically to fable.** Anthropic's own
+model-selection guidance places complex agentic coding — multihour autonomous
+agents, large-scale refactoring, systems engineering — on Opus, with `xhigh`
+effort named as the best setting for coding and agentic work; Fable is
+positioned for next-generation-intelligence needs at roughly twice Opus's
+price. Auto-picking the most expensive model is a cost decision the loop has
+no authority to make silently. Escalating a task to fable requires BOTH: (a) a
+named reason why opus-at-xhigh is insufficient for that specific task (not
+"it's important" — what capability is missing), recorded in the task's
+`Model:` stamp; and (b) the same fallback-valve discipline as every other
+stamp. Effort tuning (up to `xhigh`/`max` on opus) is the first lever;
+model escalation is the second.
+
+**Effort is part of the stamp — route reasoning level per task, not only the
+model.** Recent opus and sonnet models expose an effort parameter, and
+Anthropic's guidance is that tuning effort is often a better lever than
+switching models. Every `Model:` stamp therefore names role AND effort:
+- `frontier` → opus at `xhigh` (the documented best setting for coding and
+  agentic work). `max` is a per-task escalation needing a named reason in
+  the stamp, same discipline as a fable escalation.
+- `default` → sonnet at its default effort (`high`). A stamp MAY lower a
+  bounded, exact-recipe task to `medium` when the verify-criteria are
+  mechanical (the gates catch a wrong answer cheaply); never lower
+  investigation or review tasks.
+- `fast-mechanical` → haiku; no effort parameter applies.
+The valve discipline is unchanged: an effort change mid-task that isn't
+named in the stamp does not exist for the worker.
 
 **Investigations get frontier FIRST, not escalated-to.** For a genuinely ambiguous
 investigation, spawn `frontier` from the start — a weak investigator burns
