@@ -99,7 +99,21 @@ describe("checkArtifact", () => {
     expect(result.reason).toMatch(/marker/i);
   });
 
-  it("passes a 'contains' predicate on a workflow-audit run note recording proposals_written: 0 (zero-is-success invariant)", () => {
+  // These three cases pin the workflow-audit gate's END of the contract only:
+  // marker present -> pass, marker absent -> fail, stale -> fail. They are
+  // deliberately redundant with the generic `contains` cases above — kept as
+  // executable documentation of what this routine's gate does, since the gate
+  // is the half a reader is most likely to mis-model.
+  //
+  // What they do NOT prove, and cannot: zero-is-success itself. `checkArtifact`
+  // never parses proposals_written — the `contains` branch is content.includes()
+  // and nothing more, so the counter lines in these fixtures are inert (delete
+  // them and the tests pass identically). The real invariant — emit the marker
+  // ONLY IF the run finished cleanly AND written == attempted, including 0 == 0
+  // — lives in the routine's button command prose (examples/dashboard-config.json),
+  // an instruction to an LLM run that no unit test here can execute. It is
+  // verified by live-fire against the installed routine, not by this file.
+  it("passes a workflow-audit run note whose completion marker is present (marker-presence only — see note above)", () => {
     const path = join(dir, "run-2026-07-06.md");
     writeFileSync(
       path,
