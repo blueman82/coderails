@@ -3,7 +3,7 @@
 A **routine** is a scheduled skill run that isn't considered done just
 because `claude` exited 0. It's done when a specific artifact exists,
 is fresh enough, and satisfies a predicate — the **artifact gate**. Five
-routines ship today: `wiki-lint` (nightly), `sync-docs-weekly` (weekly),
+routines ship today: `wiki-lint` (nightly), `sync-docs-nightly` (nightly),
 `memory-consolidation-weekly` (weekly), `loop-retro-promotion-weekly`
 (weekly), `workflow-audit-weekly` (weekly).
 
@@ -130,10 +130,12 @@ Field by field:
 - **`skillCommand` / `buttonRef`** — exactly one. `buttonRef` reuses an
   existing button's `command`/`cwd`/`profile` (all five shipped
   routines do this). `foreignSkillPath` (optional) names an absolute
-  path to a skill that lives outside this repo (e.g. `sync-docs`'s
-  personal-plugin location) — the runner checks the path exists before
-  spawning and escalates `skill-missing` if it doesn't, rather than
-  spawning `claude` and letting it fail inside the sandbox.
+  path to a skill that lives outside this repo — the runner checks the
+  path exists before spawning and escalates `skill-missing` if it
+  doesn't, rather than spawning `claude` and letting it fail inside the
+  sandbox. None of the five shipped example routines use it today (see
+  the `sync-docs-nightly` section below for why); it remains available
+  for any routine whose skill genuinely lives outside this repo.
 - **`cadence`** — only `"nightly"` or `"weekly"` are understood by the
   seed step today. Nightly is due after **20 hours** since the routine's
   last recorded run; weekly after **6.5 days**. Both thresholds are
@@ -147,7 +149,7 @@ Field by field:
   `wikiPaths`) template tokens, substituted at check time. `maxAgeSeconds`
   is how old the artifact is allowed to be — set it comfortably above the
   cadence interval (the `wiki-lint` example above uses 129600s = 36h for
-  a nightly routine; the four weekly routines use 691200s = 8 days) so a
+  a nightly routine; the three weekly routines use 691200s = 8 days) so a
   slightly-late run doesn't fail its own gate. `predicate` is one of:
   - `{ kind: "exists" }` — file present and fresh, nothing more.
   - `{ kind: "contains", marker }` — file present, fresh, and contains
@@ -174,9 +176,86 @@ The routine's run note lives at `~/.claude/coderails-dashboard/routines/workflow
 
 The 8-day artifact-gate freshness window (`maxAgeSeconds: 691200`) provides catch-up grace for a run that fires late (e.g. the machine was asleep at the scheduled time) — a run inside that window still passes the gate. Read `proposals_written: 0` plainly: no repeated patterns reached the proposal threshold this week, and zero proposals is not a failure or a request to lower the threshold — it's the expected norm in a healthy workflow. Report it as a green, completed run just like any other passing gate.
 
+## `sync-docs-nightly`: self-merging documentation drift fixer
+
+Every night, this routine's skill (`skills/docs-sync/SKILL.md`) audits
+the repo's git-tracked documentation (`README.md`, `AGENTS.md`,
+`CLAUDE.md`, tracked `docs/*.md`) for drift against the actual codebase,
+using `/coderails:sync-docs`'s own audit. If nothing needs fixing, it
+logs `no-drift` and stops — no branch, no PR — before any git state is
+touched, which keeps a healthy night from ever producing an empty or
+no-op PR. If drift is found, it fixes it and drives the fix through the
+full gate chain (task-evals frozen before the edit, a
+`git diff origin/main...HEAD --name-only` manifest assertion — three-dot,
+because a sibling PR merging into `main` mid-run must not make a clean
+branch look contaminated — review, post-review, post-evals, merge) and
+merges its own PR with no human in the loop.
+
+It replaces the former `sync-docs-weekly` routine, whose
+`foreignSkillPath` pointed at a path under `~/.claude/skills/` that
+never existed (the real skill lives in-repo), and `loadConfig()`'s own
+validator only checks that `foreignSkillPath` is a non-empty absolute
+string, never that the path exists on disk — so the broken config
+loaded clean. The routine's escalation machinery itself worked as
+designed: it ran green on 2026-07-08, then correctly escalated a red
+`skill-missing` run via vault-note on 2026-07-15
+(`dashboard-runs/sync-docs-weekly.md`). The actual defect was that the
+dead path then sat unfixed for 9 days, because that escalation landed
+on a channel — a vault run-note nobody was reading — rather than
+anywhere the owner would actually see it. `sync-docs-nightly` needs no
+`foreignSkillPath` at all: its skill ships in-repo, same as
+`loop-retro-promotion`.
+
+Its manifest is hard-scoped to git-tracked `.md` files. If the diff ever
+contains anything else — a hook script, `scripts/`, `.claude/settings.json`,
+any code — the skill aborts with cleanup (closes the PR if one was
+opened, deletes the branch locally and on the remote) rather than
+warning and continuing.
+
+**The manifest check also carries a self-governance deny-list**, not
+just a file-extension check: `skills/**/SKILL.md` (including this
+routine's own), `AGENTS.md`, `CLAUDE.md`, `docs/routines.md`, and
+anything under `.claude/` abort the run the same way a non-`.md` path
+does, even though every one of them IS `.md`. Without this, the routine
+could legally "fix" its own governing contract — every subsequent night
+would then run from a self-weakened rulebook, and the one entity
+authoring the edit is the same one that reviews and merges it
+headlessly. A drift finding against one of these files is reported,
+never fixed, by this routine. **Be clear about the limit:** this
+deny-list lives in the skill's own prompt and is honoured inside
+`claude -p`, where `PreToolUse` hooks do not fire (see the security
+warning below) — it reduces the risk of a self-authored governance edit,
+it does not eliminate it the way a hook-level or server-side check
+would.
+
+**Failure visibility.** This routine's config keeps both shipped
+escalation channels (`["notification", "vault-note"]`) — no new
+notification infrastructure was built for it. What the skill itself
+additionally guarantees: any abort-with-cleanup or gate refusal writes
+its reason into the run-note (the vault-note escalation channel above)
+**and** appends a durable, greppable marker line (`abort=<reason>` or
+`refused=<gate>`) to this routine's own run log, so a later audit can
+find every failed night without replaying the whole log. Concretely,
+where a human should look after this routine has been running
+unattended for a while: the macOS notification (transient, easy to
+miss), then `dashboard-runs/sync-docs.md` (the vault-note history,
+one entry per run), then the run log's `abort=`/`refused=` lines for a
+grep-able summary across many nights at once. There is no dashboard
+alert and no PR comment for a failed run — those two channels are the
+whole surface.
+
+**Security note.** See the security warning below —
+`sync-docs-nightly` is the **second** routine in this repo (after
+`loop-retro-promotion-weekly`) to use a non-`read-only` button profile
+(`bypass`). Its mitigation is the same shape as that routine's: no hook
+protects a `claude -p` run, so the entire merge rail is the manifest
+lock (docs-only, three-dot-scoped) plus `scripts/merge.sh`'s own
+script-internal artifact gates and `/pr-review-toolkit:review-pr` — not
+any hook or server-side check.
+
 ## `loop-retro-promotion-weekly`: a dormant-by-default routine
 
-Unlike the other four routines, `loop-retro-promotion-weekly`'s own
+Unlike the other three read-only routines, `loop-retro-promotion-weekly`'s own
 skill (`skills/loop-retro-promotion/SKILL.md`) evaluates a 3-part
 graduation predicate every time it runs, before doing anything else: (1)
 at least 10 `retro.json` files exist under the repo-key dir, (2)
@@ -195,9 +274,23 @@ the expected steady state for a long while after this routine ships, not
 a failure, and the routine shouldn't escalate every week just because the
 graduation bar hasn't been met yet.
 
-**Security note.** This is the first routine in this repo to use a
+**Its full self-merge chain has never actually fired.** As of this
+writing `promotion-runs.log` holds exactly one line
+(`2026-07-12T23:32:06Z predicate=unmet retros=14 lifecycle=1 decay=0`)
+— the predicate has stayed unmet since this routine shipped, so it has
+never gone past step 1 to open, review, or merge a PR headlessly.
+`sync-docs-nightly` (above) follows this routine's pattern — same
+gate-chain shape, same manifest-lock idea — but that makes
+`sync-docs-nightly` the **first** actual production exercise of the
+full headless chain (task-evals → push → review-pr → post-review →
+post-evals → merge inside one `claude -p` run), not a repeat of a
+proven path. Treat the pattern as sound by construction, not as
+battle-tested.
+
+**Security note.** This was the first routine in this repo to use a
 non-`read-only` button profile (`bypass`, i.e.
-`--dangerously-skip-permissions` — see the security warning below). Once
+`--dangerously-skip-permissions` — see the security warning below);
+`sync-docs-nightly` (above) is the second. Once
 the predicate graduates, the routine opens and merges its own PR with no
 human in the loop, and — as that warning documents — `PreToolUse` hooks
 do not fire under `claude -p`, so `test_gate`/`enforce_pr_workflow` do
@@ -282,7 +375,7 @@ Four places, roughest signal to most precise:
    red. This is the human-readable failure history and is written for
    both routine successes (green) and failures (red) — it is not just
    an error log. **This is a distinct vault note type from the wiki
-   schema in `AGENTS.md`** (`type: routine-run`, not one of
+   schema in `AGENTS-wiki-schema.md`** (`type: routine-run`, not one of
    `command|hook|skill|design|investigation|source`) — it is not
    ingested by `/wiki-ingest` and does not follow the wiki page-format
    contract; treat it as operational output, not a wiki page. Note the
@@ -338,10 +431,11 @@ allowlist at all) nor the hook-based safety net an interactive terminal
 session gets.
 
 **Ship read-only routines unless you have explicitly accepted this.**
-Four of the five shipped example routines use `"profile": "read-only"`
-for exactly this reason. `loop-retro-promotion-weekly` is
-the deliberate, documented exception — see the section above for what
-backs up its merge instead of a hook. If a routine's skill needs to
+Three of the five shipped example routines use `"profile": "read-only"`
+for exactly this reason. `sync-docs-nightly` and
+`loop-retro-promotion-weekly` are
+the deliberate, documented exceptions — see the sections above for what
+backs up each one's merge instead of a hook. If a routine's skill needs to
 write files or run commands, understand that its actions are gated only
 by the artifact check after the fact, not by any hook before the fact.
 
@@ -363,8 +457,11 @@ level and is unchanged by this routine.
 - [`skills/memory-consolidation/SKILL.md`](../skills/memory-consolidation/SKILL.md)
   — one of the five shipped routines; a good template for a routine
   whose own skill writes its artifact-gate report natively.
+- [`skills/docs-sync/SKILL.md`](../skills/docs-sync/SKILL.md)
+  — the fourth shipped routine; self-merging, docs-only, manifest-locked,
+  see the dedicated section above.
 - [`skills/loop-retro-promotion/SKILL.md`](../skills/loop-retro-promotion/SKILL.md)
-  — the fourth shipped routine; dormant by default, see the
+  — the fifth shipped routine; dormant by default, see the
   dedicated section above for its graduation predicate and security
   posture.
 - [`examples/dashboard-config.json`](../examples/dashboard-config.json)

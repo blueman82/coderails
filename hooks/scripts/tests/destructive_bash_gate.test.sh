@@ -22,6 +22,16 @@ run() { # json -> DENY|ALLOW
   if printf '%s' "$out" | grep -q '"permissionDecision": *"deny"'; then echo DENY; else echo ALLOW; fi
 }
 
+# run_reason: json -> the permissionDecisionReason text (empty if allowed)
+run_reason() {
+  printf '%s' "$1" | bash "$HOOK" 2>/dev/null | jq -r '.hookSpecificOutput.permissionDecisionReason // ""'
+}
+
+# run_pattern_id: json -> the hookSpecificOutput.patternId field (empty if allowed/absent)
+run_pattern_id() {
+  printf '%s' "$1" | bash "$HOOK" 2>/dev/null | jq -r '.hookSpecificOutput.patternId // ""'
+}
+
 check() { # desc expected actual
   if [ "$2" = "$3" ]; then printf 'ok   - %s\n' "$1"
   else printf 'FAIL - %s (expected %s, got %s)\n' "$1" "$2" "$3"; fails=$((fails+1)); fi
@@ -47,6 +57,103 @@ check "dd if= -> deny"              DENY "$(run "$(payload "dd if=/dev/zero of=/
 check "mkfs. -> deny"               DENY "$(run "$(payload "mkfs.ext4 /dev/sdb1")")"
 check "chmod -R 777 -> deny"        DENY "$(run "$(payload "chmod -R 777 /var/www")")"
 check "git commit --no-verify -> deny" DENY "$(run "$(payload "git commit -m 'wip' --no-verify")")"
+
+# --- Deny messages must name a concrete safe route per pattern family, not a
+# single generic sentence appended to every message (the gap this file's
+# deny() fix closes: a stated prohibition with no named way around it). ---
+reset_reason=$(run_reason "$(payload "git reset --hard HEAD~1")")
+check "git reset --hard message names keep+backup route" DENY \
+  "$(printf '%s' "$reset_reason" | grep -qiE 'keep' && printf '%s' "$reset_reason" | grep -qiE 'backup' && echo DENY || echo MISSING)"
+
+rm_reason=$(run_reason "$(payload "rm -rf /tmp/x")")
+check "rm -rf message names unlink+temp route" DENY \
+  "$(printf '%s' "$rm_reason" | grep -qiE 'unlink' && printf '%s' "$rm_reason" | grep -qiE 'temp' && echo DENY || echo MISSING)"
+
+push_reason=$(run_reason "$(payload "git push --force origin main")")
+check "git push --force message names force-with-lease route" DENY \
+  "$(printf '%s' "$push_reason" | grep -qiE 'force-with-lease' && printf '%s' "$push_reason" | grep -qiE 'allowlist' && echo DENY || echo MISSING)"
+
+# The force-with-lease route the message recommends must not itself be a dead
+# end: the hook denies --force-with-lease BY DEFAULT (no allowlist file), so
+# the message must say so and name the opt-in step — not just the bare flag.
+check "push message flags that fwl is itself blocked without the allowlist opt-in" DENY \
+  "$(printf '%s' "$push_reason" | grep -qi 'destructive_allowlist' && echo DENY || echo MISSING)"
+
+# --- Deliverable A: a route for every remaining blockable pattern. Each check
+# asserts the deny message contains a route AND does NOT contain the generic
+# "No specific safe route is recorded" fallback text — the two-part test the
+# task calls for, so a pattern that never got a route arm (falling through to
+# the generic case) fails here rather than passing silently.
+assert_specific_route() { # description command must_contain...
+  local desc="$1" cmd="$2"
+  shift 2
+  local reason
+  reason=$(run_reason "$(payload "$cmd")")
+  local ok=1
+  if printf '%s' "$reason" | grep -qi 'no specific safe route'; then
+    ok=0
+  fi
+  for needle in "$@"; do
+    printf '%s' "$reason" | grep -qi -- "$needle" || ok=0
+  done
+  check "$desc" DENY "$( [ "$ok" -eq 1 ] && echo DENY || echo MISSING)"
+}
+
+# git clean (force) has a genuine safe route: the gate itself already permits
+# -n (dry-run/preview) and -i (interactive) — see lines 72-76 of the gate —
+# so the message must point at those rather than the generic fallback.
+# Needles are multi-char, route-specific literals ('git clean -n', 'git clean
+# -i', and the distinctive prose "dry-run"/"interactive prompt") rather than
+# bare '-n'/'-i' — those two-char substrings match incidentally inside
+# unrelated words and were proven (by a reviewer, confirmed here) to let a
+# fabricated, unrelated route pass undetected.
+assert_specific_route "git clean message names -n preview and -i interactive route" \
+  "git clean -fdx" "git clean -n" "dry-run" "git clean -i" "interactive prompt"
+
+# find -delete: no safe equivalent to deletion itself — honest route points at
+# previewing the match set first and at the settings.json escape hatch.
+# Needles are specific to THIS route's own wording (not just the shared
+# "no safe equivalent"/"settings.json" phrases every honest route repeats) so
+# a copy-paste-wrong route swapped in from a different pattern still fails.
+assert_specific_route "find -delete message names -print preview + settings.json route" \
+  "find . -name '*.tmp' -delete" "no safe equivalent" "-print" "xargs" "settings.json"
+
+# truncate -s/--size: destroys file content, no safe equivalent — honest route.
+assert_specific_route "truncate -s message names no-safe-equivalent + settings.json route" \
+  "truncate -s0 logfile.txt" "no safe equivalent" "file content in place" "rotate the log" "settings.json"
+
+# shred: secure overwrite/delete is the point of the command — no safe
+# equivalent — honest route.
+assert_specific_route "shred message names no-safe-equivalent + settings.json route" \
+  "shred secret.key" "no safe equivalent" "unrecoverable" "securely wipe" "settings.json"
+
+# DROP TABLE/DATABASE/SCHEMA: destructive DDL, no safe equivalent — honest route.
+assert_specific_route "DROP TABLE message names no-safe-equivalent + settings.json route" \
+  "DROP TABLE users;" "no safe equivalent" "destructive ddl" "settings.json"
+assert_specific_route "DROP DATABASE message names no-safe-equivalent + settings.json route" \
+  "DROP DATABASE mydb;" "no safe equivalent" "destructive ddl" "settings.json"
+assert_specific_route "DROP SCHEMA message names no-safe-equivalent + settings.json route" \
+  "DROP SCHEMA public CASCADE;" "no safe equivalent" "destructive ddl" "settings.json"
+
+# TRUNCATE TABLE: destroys all rows, no safe equivalent — honest route.
+assert_specific_route "TRUNCATE TABLE message names no-safe-equivalent + settings.json route" \
+  "TRUNCATE TABLE logs;" "no safe equivalent" "removes all rows" "scoped delete" "settings.json"
+
+# dd if=: raw block-device copy, no safe equivalent — honest route.
+assert_specific_route "dd if= message names no-safe-equivalent + settings.json route" \
+  "dd if=/dev/zero of=/dev/sda" "no safe equivalent" "raw bytes" "of= target" "settings.json"
+
+# mkfs.: reformats a filesystem, no safe equivalent — honest route.
+assert_specific_route "mkfs. message names no-safe-equivalent + settings.json route" \
+  "mkfs.ext4 /dev/sdb1" "no safe equivalent" "reformats a filesystem" "settings.json"
+
+# chmod -R 777: genuine safer alternative exists — narrower recursive bits.
+assert_specific_route "chmod -R 777 message names narrower-permission route" \
+  "chmod -R 777 /var/www" "u+rwx" "go+rx" "world-writable"
+
+# git commit --no-verify: genuine safe alternative — fix the failing hook.
+assert_specific_route "git commit --no-verify message names fix-the-hook route" \
+  "git commit -m 'wip' --no-verify" "fix the failing pre-commit hook" "don't skip it"
 
 # --- Allowed commands ---
 check "ls -> allow"                 ALLOW "$(run "$(payload "ls -la")")"
@@ -671,5 +778,255 @@ check "no allowlist: -c option before status (unrelated subcommand) -> allow" AL
   "$(run_cwd "$(payload_with_cwd "git -c color.ui=always status" "$OPT_REPO")" "$OPT_REPO")"
 check "no allowlist: --no-pager before log (unrelated subcommand) -> allow" ALLOW \
   "$(run_cwd "$(payload_with_cwd "git --no-pager log -1" "$OPT_REPO")" "$OPT_REPO")"
+
+# --- SECURITY: TAB-separated forms of every OTHER blocklist detector in this
+# file (not just the git-push naked-force one fixed above). Every one of
+# these detectors used a literal-space-only "+" (or a literal-space "(^| )"
+# boundary, or "[= ]") as its token separator, which never matches a TAB —
+# a real, executable argv split bash itself treats identically to a space
+# (default IFS = space, tab, newline). A tab between "rm" and "-rf", or
+# "git" and "reset", etc. previously evaded every one of these checks
+# entirely, denying nothing. TAB is the same $(printf '\t') var defined
+# above (5d) — reused here rather than re-declared.
+check "rm TAB -rf -> deny" DENY \
+  "$(run "$(payload "rm${TAB}-rf /tmp/x")")"
+check "git TAB reset TAB --hard -> deny" DENY \
+  "$(run "$(payload "git${TAB}reset${TAB}--hard HEAD~1")")"
+check "DROP TAB TABLE -> deny" DENY \
+  "$(run "$(payload "DROP${TAB}TABLE users;")")"
+check "TRUNCATE TAB TABLE -> deny" DENY \
+  "$(run "$(payload "TRUNCATE${TAB}TABLE logs;")")"
+check "dd TAB if= -> deny" DENY \
+  "$(run "$(payload "dd${TAB}if=/dev/zero of=/dev/sda")")"
+check "chmod TAB -R TAB 777 -> deny" DENY \
+  "$(run "$(payload "chmod${TAB}-R${TAB}777 /var/www")")"
+check "git TAB commit TAB --no-verify -> deny" DENY \
+  "$(run "$(payload "git${TAB}commit${TAB}-m x${TAB}--no-verify")")"
+
+# git clean force, TAB-separated
+check "git TAB clean TAB -f -> deny" DENY \
+  "$(run "$(payload "git${TAB}clean${TAB}-f")")"
+check "git TAB clean TAB --force -> deny" DENY \
+  "$(run "$(payload "git${TAB}clean${TAB}--force")")"
+# git clean dry-run, TAB-separated, must still allow
+check "git TAB clean TAB --dry-run -> allow" ALLOW \
+  "$(run "$(payload "git${TAB}clean${TAB}--dry-run")")"
+
+# find -delete, TAB-separated
+check "find ... TAB -delete -> deny" DENY \
+  "$(run "$(payload "find .${TAB}-delete")")"
+
+# truncate -s / --size, TAB-separated (shell truncate, distinct from the SQL
+# TRUNCATE TABLE detector above)
+check "truncate TAB -s0 -> deny" DENY \
+  "$(run "$(payload "truncate${TAB}-s0 logfile.txt")")"
+check "truncate TAB --size=0 -> deny" DENY \
+  "$(run "$(payload "truncate${TAB}--size=0 logfile.txt")")"
+check "truncate --sizeTAB0 -> deny" DENY \
+  "$(run "$(payload "truncate --size${TAB}0 logfile.txt")")"
+
+# sed -i / perl -i, TAB-separated, branch-aware (must deny on main, allow on
+# a feature branch — mirrors the existing sed/perl coverage above).
+check "main: sed TAB -i on .py -> deny" DENY \
+  "$(run_cwd "$(payload_with_cwd "sed${TAB}-i 's/a/b/' foo.py" "$MAIN_REPO")" "$MAIN_REPO")"
+check "feat: sed TAB -i on .py -> allow" ALLOW \
+  "$(run_cwd "$(payload_with_cwd "sed${TAB}-i 's/a/b/' foo.py" "$FEAT_REPO")" "$FEAT_REPO")"
+check "main: perl TAB -i on .go -> deny" DENY \
+  "$(run_cwd "$(payload_with_cwd "perl${TAB}-i -pe 's/old/new/g' main.go" "$MAIN_REPO")" "$MAIN_REPO")"
+
+# src_ext / plugin_src right-boundary: "([ '\"]|$)" was a literal-space
+# bracket expression (space, single-quote, double-quote only, no tab), so a
+# source extension followed by a TAB (rather than end-of-string, a space, or
+# a quote) fell through the boundary check entirely and was not recognised
+# as a source file at all.
+check "main: sed -i on .py followed by TAB -> deny" DENY \
+  "$(run_cwd "$(payload_with_cwd "sed -i 's/a/b/' foo.py${TAB}extra" "$MAIN_REPO")" "$MAIN_REPO")"
+check "main: tee SKILL.md followed by TAB -> deny" DENY \
+  "$(run_cwd "$(payload_with_cwd "tee skills/mything/SKILL.md${TAB}extra" "$MAIN_REPO")" "$MAIN_REPO")"
+
+# --- Regression: benign commands where a blocked word appears only as a
+# substring of an unrelated token must still allow, including with tabs
+# nearby, so the widened separator classes don't start over-matching.
+check "drops.txt filename -> allow" ALLOW \
+  "$(run "$(payload "cat drops.txt")")"
+check "firmware/ path -> allow" ALLOW \
+  "$(run "$(payload "ls firmware/")")"
+check "format word in prose -> allow" ALLOW \
+  "$(run "$(payload "echo format the disk nicely")")"
+check "find without delete, TAB-separated args -> allow" ALLOW \
+  "$(run "$(payload "find${TAB}. -name x.tmp")")"
+
+# --- Q1: mention-safe hyphenated pattern_id per deny() case arm -----------
+# Each deny() call now carries a hyphenated pattern_id in the jq output
+# (hookSpecificOutput.patternId) alongside the existing message fields. The
+# id is MESSAGE-ONLY output text — it changes nothing about which commands
+# reach deny() in the first place (the matcher regexes are untouched).
+#
+# Per id: (a) MENTION-SAFETY — a command whose text is just the id string
+# itself must NOT be denied (the id is hyphenated specifically so it never
+# matches the matcher's own whitespace-based regexes, e.g. "chmod-r-777"
+# does not match "chmod[[:space:]]+-R[[:space:]]+777"). (b) NEGATIVE
+# CONTROL — the real blocked literal must still deny AND must carry that
+# same pattern_id in its output.
+assert_pattern_id() { # desc real_blocked_cmd mention_safe_cmd expected_id
+  local desc="$1" real_cmd="$2" mention_cmd="$3" expected_id="$4"
+  check "$desc: mention alone -> allow" ALLOW "$(run "$(payload "$mention_cmd")")"
+  check "$desc: real literal -> deny"   DENY  "$(run "$(payload "$real_cmd")")"
+  check "$desc: deny carries pattern_id" "$expected_id" "$(run_pattern_id "$(payload "$real_cmd")")"
+}
+
+assert_pattern_id "git-reset-hard" \
+  "git reset --hard HEAD~1" "echo git-reset-hard" "git-reset-hard"
+assert_pattern_id "rm-rf" \
+  "rm -rf /tmp/x" "echo rm-rf" "rm-rf"
+assert_pattern_id "git-push-force" \
+  "git push --force" "echo git-push-force" "git-push-force"
+assert_pattern_id "git-clean-force" \
+  "git clean -fdx" "echo git-clean-force" "git-clean-force"
+assert_pattern_id "find-delete" \
+  "find . -name '*.tmp' -delete" "echo find-delete" "find-delete"
+assert_pattern_id "truncate-size" \
+  "truncate -s0 logfile.txt" "echo truncate-size" "truncate-size"
+assert_pattern_id "secure-wipe-delete" \
+  "shred secret.key" "echo secure-wipe-delete" "secure-wipe-delete"
+assert_pattern_id "drop-table (TABLE)" \
+  "DROP TABLE users;" "echo drop-table" "drop-table"
+assert_pattern_id "drop-table (DATABASE)" \
+  "DROP DATABASE mydb;" "echo drop-table" "drop-table"
+assert_pattern_id "drop-table (SCHEMA)" \
+  "DROP SCHEMA public CASCADE;" "echo drop-table" "drop-table"
+assert_pattern_id "truncate-table" \
+  "TRUNCATE TABLE logs;" "echo truncate-table" "truncate-table"
+assert_pattern_id "dd-if" \
+  "dd if=/dev/zero of=/dev/sda" "echo dd-if" "dd-if"
+assert_pattern_id "mkfs-format" \
+  "mkfs.ext4 /dev/sdb1" "echo mkfs-format" "mkfs-format"
+assert_pattern_id "chmod-r-777" \
+  "chmod -R 777 /var/www" "echo chmod-r-777" "chmod-r-777"
+assert_pattern_id "git-commit-no-verify" \
+  "git commit -m 'wip' --no-verify" "echo git-commit-no-verify" "git-commit-no-verify"
+
+# --- Q1: source-drift tripwire extension — every route case arm (except the
+# generic "*)" fallback, exempted below) must carry a pattern_id, so a new
+# arm added later without one is caught here rather than shipping silently
+# routeless AND idless. Extracted the same way as extract_fixed_labels above
+# (grep -vE comment lines first) but scoped to "route=" assignment lines and
+# their immediately-following "pattern_id=" assignment, keyed on line number
+# adjacency within the case block.
+assert_every_route_arm_has_pattern_id() {
+  local gate_path="$1"
+  # route_lines: 1-indexed line numbers of every non-comment "route=" assignment
+  # inside the deny() case block (destructive_bash_gate.sh's case "$pat_lc" in
+  # ... esac). The generic "*)" fallback's route= line is excluded by name via
+  # the preceding case label check below, not by line-number exclusion, so a
+  # future reordering of arms doesn't silently break the exemption.
+  local awk_prog='
+    /^[[:space:]]*case "\$pat_lc" in/ { in_case=1 }
+    /^[[:space:]]*esac/ { in_case=0 }
+    in_case && /^[[:space:]]*\*\)/ { is_fallback=1; next }
+    in_case && /^[[:space:]]*[^[:space:]].*\)$/ { is_fallback=0 }
+    in_case && /^[[:space:]]*route=/ && !is_fallback { print NR }
+  '
+  local route_lines
+  route_lines=$(grep -vE '^[[:space:]]*#' "$gate_path" > /dev/null; awk "$awk_prog" "$gate_path")
+  local missing=0
+  local ln
+  for ln in $route_lines; do
+    # A pattern_id= assignment must appear within the same case arm — check
+    # the next non-blank line after route= (the arms in this file set
+    # pattern_id immediately adjacent to route, per the task's pinned shape).
+    local next_line
+    next_line=$(sed -n "$((ln+1))p" "$gate_path")
+    if ! printf '%s' "$next_line" | grep -qE '^[[:space:]]*pattern_id='; then
+      missing=1
+      printf '     MISSING pattern_id on the arm ending at route= line %s\n' "$ln"
+    fi
+  done
+  [ "$missing" -eq 0 ]
+}
+
+if assert_every_route_arm_has_pattern_id "$HOOK"; then
+  check "every non-fallback deny() case arm sets a pattern_id" DENY DENY
+else
+  fails=$((fails+1))
+  printf 'FAIL - every non-fallback deny() case arm sets a pattern_id\n'
+fi
+
+# --- Deliverable B: source-drift tripwire ---------------------------------
+# Extracts the gate's blockable set (the 5 fixed-label `deny "..."` call
+# sites, plus the monolithic `pattern=` regex line verbatim) and compares it
+# against a committed expected snapshot below. This must FAIL the instant
+# someone adds a new blockable pattern to the gate without also updating this
+# file's EXPECTED_* snapshot — which is exactly the moment a new pattern
+# would otherwise ship with no safe route and no test (the routeless
+# pattern-#14 gap this whole task exists to close).
+#
+# Extraction reads the gate source with grep/awk only — never executes it as
+# a command whose *string content* matches the gate's own blocklist (the
+# extraction regexes below, e.g. 'deny "[^"$]*"' or '^pattern=', contain no
+# blocklisted literal themselves, so this is safe to run directly).
+#
+# Comment lines are excluded (grep -vE '^[[:space:]]*#') so a *prose mention*
+# of `deny "..."` in a comment (e.g. this file's own strategy comment above
+# the git-clean block) is not mistaken for a real call site — confirmed this
+# matters: the naive extraction (no comment filter) picked up a spurious
+# 6th "label" from exactly such a comment during this file's own development.
+#
+# Scope: sync is enforced for the deny()-routed patterns only (the 5 fixed
+# labels + the pattern= alternatives) — NOT the cp/mv/dd, sed/perl/tee, or
+# command-substitution blocks further down the gate, which build their own
+# jq JSON directly and never call deny(). Those three already carry their
+# own specific messages and are outside this tripwire's scope by design.
+
+extract_fixed_labels() { # gate_path -> sorted unique "deny "..."" call sites
+  grep -vE '^[[:space:]]*#' "$1" | grep -oE 'deny "[^"$]*"' | sort -u
+}
+
+extract_pattern_line() { # gate_path -> the pattern= line verbatim
+  grep -E '^pattern=' "$1"
+}
+
+# Committed expected snapshot — the blockable set as of this PR. Update BOTH
+# this snapshot AND (deny() route arm + a behavioural test case above) in the
+# SAME commit whenever a new deny() call site or pattern= alternative is
+# added — that is the "one-line update with an obvious diff" the drift check
+# exists to force.
+EXPECTED_FIXED_LABELS='deny "find -delete"
+deny "git clean (force)"
+deny "git push --force"
+deny "shred"
+deny "truncate -s/--size"'
+
+EXPECTED_PATTERN_LINE='pattern='"'"'\brm[[:space:]]+(-[rRfF]+|--recursive|--force)|\bgit[[:space:]]+reset[[:space:]]+--hard|\bDROP[[:space:]]+(TABLE|DATABASE|SCHEMA)\b|\bTRUNCATE[[:space:]]+TABLE\b|\bdd[[:space:]]+if=|\bmkfs\.|\bchmod[[:space:]]+-R[[:space:]]+777|\bgit[[:space:]]+commit[[:space:]]+.*--no-verify'"'"
+
+actual_fixed_labels=$(extract_fixed_labels "$HOOK")
+actual_pattern_line=$(extract_pattern_line "$HOOK")
+
+if [ "$actual_fixed_labels" = "$EXPECTED_FIXED_LABELS" ]; then
+  check "gate's fixed-label deny() call sites match the committed snapshot" DENY DENY
+else
+  fails=$((fails+1))
+  printf 'FAIL - gate'"'"'s fixed-label deny() call sites match the committed snapshot\n'
+  printf '     the blockable set changed. Expected:\n%s\n     Actual (live gate):\n%s\n' \
+    "$EXPECTED_FIXED_LABELS" "$actual_fixed_labels"
+  printf '     ACTION: for each new/removed deny "<label>" call site, add a matching\n'
+  printf '     lowercase case arm in deny() (destructive_bash_gate.sh) with a real safe\n'
+  printf '     route (or an honest "no safe equivalent" route), add a behavioural test\n'
+  printf '     case for it above, THEN update EXPECTED_FIXED_LABELS in this file to match.\n'
+fi
+
+if [ "$actual_pattern_line" = "$EXPECTED_PATTERN_LINE" ]; then
+  check "gate's monolithic pattern= line matches the committed snapshot" DENY DENY
+else
+  fails=$((fails+1))
+  printf 'FAIL - gate'"'"'s monolithic pattern= line matches the committed snapshot\n'
+  printf '     the pattern= regex changed. Expected:\n%s\n     Actual (live gate):\n%s\n' \
+    "$EXPECTED_PATTERN_LINE" "$actual_pattern_line"
+  printf '     ACTION: for each new alternative added to pattern=, add a matching\n'
+  printf '     lowercase case arm in deny() keyed on the MATCHED SUBSTRING (not a\n'
+  printf '     friendly label) with a real safe route (or an honest "no safe\n'
+  printf '     equivalent" route), add a behavioural test case for it above, THEN\n'
+  printf '     update EXPECTED_PATTERN_LINE in this file to match.\n'
+fi
 
 [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails)"; exit 1; }

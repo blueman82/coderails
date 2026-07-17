@@ -37,6 +37,16 @@ Run the validator before posting. Abort if it fails — do not post.
 
 If exit code is non-zero, print the validation error and **stop** — do not post.
 
+## Step 3b — Validate discriminating checks
+
+Run the discriminating-check gate before posting. Abort if it fails — do not post.
+
+```bash
+./scripts/post_evals.sh validate-discriminating <evals_json_path>
+```
+
+If exit code is non-zero, print the validation error and **stop** — do not post.
+
 ## Step 4 — Compute result and read tier
 
 ```bash

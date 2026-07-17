@@ -14,6 +14,7 @@ export { ConfigError }; // a class (value + type) — re-exported as a value, no
 export type ArtifactPredicate =
   | { kind: "exists" }
   | { kind: "contains"; marker: string }
+  | { kind: "last-marker"; success: string; failures: string[] }
   | { kind: "json-field"; path: string; value: unknown };
 
 export interface ExpectedArtifact {
@@ -43,7 +44,7 @@ export interface DashboardConfig {
   routines?: RoutineDef[];
 }
 
-const PREDICATE_KINDS = ["exists", "contains", "json-field"];
+const PREDICATE_KINDS = ["exists", "contains", "last-marker", "json-field"];
 
 const DEFAULT_CONFIG_PATH = join(homedir(), ".claude", "coderails-dashboard.json");
 
@@ -89,6 +90,23 @@ function validateRoutines(routines: RoutineDef[], buttons: ButtonDef[]): void {
       throw new ConfigError(
         `Routine "${routine.name}" expectedArtifact.predicate has unknown kind`
       );
+    }
+    if (artifact.predicate.kind === "last-marker") {
+      const p = artifact.predicate as { success?: unknown; failures?: unknown };
+      if (typeof p.success !== "string" || p.success.length === 0) {
+        throw new ConfigError(
+          `Routine "${routine.name}" last-marker predicate must have a non-empty string "success"`
+        );
+      }
+      if (
+        !Array.isArray(p.failures) ||
+        p.failures.length === 0 ||
+        !p.failures.every((f) => typeof f === "string" && f.length > 0)
+      ) {
+        throw new ConfigError(
+          `Routine "${routine.name}" last-marker predicate must have a non-empty "failures" array of non-empty strings`
+        );
+      }
     }
 
     for (const channel of routine.escalation) {

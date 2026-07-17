@@ -97,6 +97,47 @@ export function checkArtifact(
     return { passed: false, reason: `Artifact is missing expected marker "${marker}"` };
   }
 
+  if (predicate.kind === "last-marker") {
+    // Order-aware discrimination for an append-only, per-date run log that
+    // holds MANY runs. A whole-file `contains` check (the old `contains`
+    // predicate) false-passes an aborted run whenever an EARLIER run that
+    // day wrote the success marker: the stale success line is still in the
+    // file. So scan for lines matching the terminal marker set
+    // (success ∪ failures) and let the LAST such line decide — the most
+    // recent run's outcome wins. Pass iff that last terminal marker is the
+    // success marker.
+    //
+    // Deliberately NOT the literal last line: a routine may append a
+    // trailing non-terminal note (e.g. `note=scope-rationale`) AFTER
+    // `run=ok` within the same successful run, so `tail -1` would miss the
+    // marker. It is the last line matching the marker SET, not the last
+    // line of the file.
+    const success = resolveArtifactPath(predicate.success, ctx);
+    const failures = predicate.failures.map((f) => resolveArtifactPath(f, ctx));
+    const lines = readFileSync(path, "utf-8").split("\n");
+    let lastMarker: { text: string; isSuccess: boolean } | null = null;
+    for (const line of lines) {
+      if (line.includes(success)) {
+        lastMarker = { text: success, isSuccess: true };
+        continue;
+      }
+      const failed = failures.find((f) => line.includes(f));
+      if (failed !== undefined) {
+        lastMarker = { text: failed, isSuccess: false };
+      }
+    }
+    if (lastMarker === null) {
+      return {
+        passed: false,
+        reason: `Artifact has no terminal marker (none of "${success}", ${failures.map((f) => `"${f}"`).join(", ")})`,
+      };
+    }
+    if (lastMarker.isSuccess) {
+      return { passed: true, reason: `Last terminal marker is success ("${success}")` };
+    }
+    return { passed: false, reason: `Last terminal marker is a failure ("${lastMarker.text}")` };
+  }
+
   if (predicate.kind === "json-field") {
     let parsed: unknown;
     try {

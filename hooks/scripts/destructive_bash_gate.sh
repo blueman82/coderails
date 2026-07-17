@@ -15,11 +15,99 @@ fi
 
 deny() {
   local pat="$1"
-  jq -n --arg pat "$pat" --arg cmd "$cmd" '{
+  # route: the concrete safe alternative for this specific pattern, so the
+  # message doesn't just state a prohibition and withhold the way around it.
+  # Keyed on $pat's own text (set by each call site below via grep -oiE or a
+  # literal string) — this only changes what the DENY message SAYS, never
+  # which commands reach deny() in the first place.
+  # Matched against a normalised copy: the call sites feed $pat from a
+  # case-insensitive grep whose blocklist regexes allow runs of whitespace
+  # (`git +reset +--hard`), so a command reaches here with its own casing and
+  # internal spacing preserved and would otherwise miss every specific branch
+  # and take the generic route. Lowercase and collapse whitespace runs to a
+  # single space for the lookup only — the message still reports $pat as it
+  # was actually matched. tr rather than a bash 4 parameter expansion:
+  # this machine's bash is 3.2, where `${pat,,}` aborts the hook and it
+  # denies nothing.
+  local route
+  # pattern_id: a hyphenated, mention-safe identifier for this arm, so a
+  # test/artifact can reference the pattern by ID (e.g. "chmod-r-777")
+  # without its own text ever matching the matcher's whitespace-based
+  # regexes above — MESSAGE-ONLY, emitted in the jq output below alongside
+  # route. Never used in any matching/blocking decision.
+  local pattern_id
+  local pat_lc
+  pat_lc=$(printf '%s' "$pat" | tr '[:upper:]' '[:lower:]' | tr -s '[:space:]' ' ')
+  case "$pat_lc" in
+    *"git reset --hard"*)
+      route="Safe route: park the commits first with 'git branch backup/<desc> <ref>', then use 'git reset --keep <ref>' instead of --hard — --keep applies the same move but REFUSES (errors out) rather than clobbering when it would discard uncommitted working-tree changes, and the backup branch keeps the moved-past commits recoverable either way."
+      pattern_id="git-reset-hard"
+      ;;
+    "rm "*)
+      route="Safe route: for a single file, use 'unlink <file>' instead of rm -rf. For a directory or multiple files, move the target into a temp dir (e.g. 'mkdir -p /tmp/trash && mv <target> /tmp/trash/') instead of deleting it outright."
+      pattern_id="rm-rf"
+      ;;
+    *"git push --force"*)
+      route="Safe route: use 'git push --force-with-lease' instead of a naked --force — it refuses to overwrite a remote ref that has moved since your last fetch. Note --force-with-lease is ALSO blocked by this hook by default; add the exact line 'git-push-force-with-lease' to .claude/destructive_allowlist in the target repo to opt in before using it."
+      pattern_id="git-push-force"
+      ;;
+    "git clean"*)
+      route="Safe route: preview what would be removed first with 'git clean -n' (dry-run — lists targets, deletes nothing), or use 'git clean -i' for an interactive prompt per file/directory. Both are already permitted by this hook; only the force forms (-f/--force) are blocked."
+      pattern_id="git-clean-force"
+      ;;
+    *"find"*"-delete"*|*"find"*"--delete"*)
+      route="Safe route: there is no safe equivalent for the deletion itself. Preview the exact match set first by replacing -delete with -print (or -print0 piped to xargs -0 ls) and reviewing the list before deleting any other way. To allow this pattern, add a Bash permission rule to settings.json."
+      pattern_id="find-delete"
+      ;;
+    *"truncate -s"*|*"truncate --size"*)
+      route="Safe route: there is no safe equivalent — truncate destroys file content in place. Back up the file first ('cp <file> <file>.bak') if you need to recover it, or find a non-destructive way to achieve the goal (e.g. rotate the log instead of truncating it). To allow this pattern, add a Bash permission rule to settings.json."
+      pattern_id="truncate-size"
+      ;;
+    *"shred"*)
+      route="Safe route: there is no safe equivalent — shred exists specifically to make content unrecoverable. If you only meant to delete the file (not securely wipe it), move it to a temp dir instead ('mkdir -p /tmp/trash && mv <file> /tmp/trash/'). To allow shred itself, add a Bash permission rule to settings.json."
+      pattern_id="secure-wipe-delete"
+      ;;
+    *"drop table"*|*"drop database"*|*"drop schema"*)
+      route="Safe route: there is no safe equivalent — DROP permanently destroys the object and its data. Take a backup/dump first if the data must be recoverable, and confirm you're pointed at the intended database before running any destructive DDL directly. To allow this pattern, add a Bash permission rule to settings.json."
+      pattern_id="drop-table"
+      ;;
+    *"truncate table"*)
+      route="Safe route: there is no safe equivalent — TRUNCATE TABLE removes all rows and is not equivalent in safety to a scoped DELETE. Take a backup/dump first if the data must be recoverable. To allow this pattern, add a Bash permission rule to settings.json."
+      pattern_id="truncate-table"
+      ;;
+    *"dd if="*)
+      route="Safe route: there is no safe equivalent — dd writes raw bytes to its target with no confirmation. Double-check the of= target device/file before running it directly, and confirm it isn't a mounted disk. To allow this pattern, add a Bash permission rule to settings.json."
+      pattern_id="dd-if"
+      ;;
+    *"mkfs."*)
+      route="Safe route: there is no safe equivalent — mkfs reformats a filesystem and destroys existing data on it. Confirm the target device is correct (not a mounted or in-use disk) before running it directly. To allow this pattern, add a Bash permission rule to settings.json."
+      pattern_id="mkfs-format"
+      ;;
+    *"chmod -r 777"*)
+      route="Safe route: use narrower recursive bits instead of a blanket 777 — 'chmod -R u+rwX,go+rX <path>' grants the owner read/write (and execute only on directories/already-executable files) while giving group/other read access, without making everything world-writable and world-executable."
+      pattern_id="chmod-r-777"
+      ;;
+    *"git commit"*"--no-verify"*)
+      route="Safe route: fix the failing pre-commit hook and re-run 'git commit' without --no-verify, rather than bypassing it — the hook exists to catch something before commit. If the hook itself is broken (not the change), fix the hook, don't skip it."
+      pattern_id="git-commit-no-verify"
+      ;;
+    *)
+      route="No specific safe route is recorded for this pattern. To allow it, add a Bash permission rule to settings.json, or find a non-destructive equivalent for what you're trying to do."
+      # No pattern_id: this is the generic fallback for a pattern with no
+      # dedicated case arm above — there is no specific id to assign, and
+      # forcing a placeholder here would be a fabricated id for a pattern
+      # this arm doesn't actually identify. Exempted from the tripwire in
+      # destructive_bash_gate.test.sh (see its own comment) rather than
+      # given a synthetic value.
+      pattern_id=""
+      ;;
+  esac
+  jq -n --arg pat "$pat" --arg cmd "$cmd" --arg route "$route" --arg patternId "$pattern_id" '{
     hookSpecificOutput: {
       hookEventName: "PreToolUse",
       permissionDecision: "deny",
-      permissionDecisionReason: ("Destructive pattern detected: " + $pat + "\nFull command: " + $cmd + "\nThis command is permanently blocked. To allow it, add a Bash permission rule to settings.json or use a non-destructive alternative.")
+      permissionDecisionReason: ("Destructive pattern detected: " + $pat + "\nFull command: " + $cmd + "\nThis command is permanently blocked. " + $route),
+      patternId: (if $patternId == "" then null else $patternId end)
     }
   }'
   exit 0
@@ -32,19 +120,19 @@ deny() {
 # Also matches --force and multi-token "-d -f" patterns.
 # Strategy: deny "git clean" when the arg string contains -f (combined short flag)
 # or --force (anywhere). Excludes: bare "git clean", dry-run, interactive.
-if echo "$cmd" | grep -qiE '\bgit +clean\b'; then
+if echo "$cmd" | grep -qiE '\bgit[[:space:]]+clean\b'; then
   # Extract everything after "git clean" as the args portion
-  args=$(echo "$cmd" | sed -E 's/.*\bgit +clean\b//')
+  args=$(echo "$cmd" | sed -E 's/.*\bgit[[:space:]]+clean\b//')
   # Allow bare "git clean" (no args)
   if [ -n "$(echo "$args" | tr -d ' \t')" ]; then
     # Allow dry-run forms: -n / --dry-run
-    if echo "$args" | grep -qE '(^| )--dry-run( |$)|(^| )-[a-zA-Z]*n[a-zA-Z]*( |$)'; then
+    if echo "$args" | grep -qE '(^|[[:space:]])--dry-run([[:space:]]|$)|(^|[[:space:]])-[a-zA-Z]*n[a-zA-Z]*([[:space:]]|$)'; then
       : # dry-run — allow
     # Allow interactive: -i / --interactive
-    elif echo "$args" | grep -qE '(^| )-[a-zA-Z]*i[a-zA-Z]*( |$)|(^| )--interactive( |$)'; then
+    elif echo "$args" | grep -qE '(^|[[:space:]])-[a-zA-Z]*i[a-zA-Z]*([[:space:]]|$)|(^|[[:space:]])--interactive([[:space:]]|$)'; then
       : # interactive — allow
     # Deny force: --force or -f in any combined/separated form
-    elif echo "$args" | grep -qE '(^| )--force( |$)|(^| )-[a-zA-Z]*f[a-zA-Z]*( |$)'; then
+    elif echo "$args" | grep -qE '(^|[[:space:]])--force([[:space:]]|$)|(^|[[:space:]])-[a-zA-Z]*f[a-zA-Z]*([[:space:]]|$)'; then
       deny "git clean (force)"
     fi
   fi
@@ -53,13 +141,13 @@ fi
 # find ... -delete or find ... --delete
 # The .* must not cross a shell separator (;, &&, ||, |).
 # Only match -delete/--delete in the same shell token group as "find".
-if echo "$cmd" | grep -qiE '\bfind\b[^;|&]*( -delete| --delete)'; then
+if echo "$cmd" | grep -qiE '\bfind\b[^;|&]*([[:space:]]-delete|[[:space:]]--delete)'; then
   deny "find -delete"
 fi
 
 # truncate with size flag — truncates file content
 # Also catches --size / --size=N long forms.
-if echo "$cmd" | grep -qiE '\btruncate +(-s|--size[= ])'; then
+if echo "$cmd" | grep -qiE '\btruncate[[:space:]]+(-s|--size[=[:space:]])'; then
   deny "truncate -s/--size"
 fi
 
@@ -164,7 +252,18 @@ if echo "$force_cmd_flat" | grep -qiE "${git_push_re}.*(${naked_force_re}|--forc
 fi
 
 # ── Original permanent blocklist ─────────────────────────────────────────────
-pattern='\brm +(-[rRfF]+|--recursive|--force)|\bgit +reset +--hard|\bDROP +(TABLE|DATABASE|SCHEMA)\b|\bTRUNCATE +TABLE\b|\bdd +if=|\bmkfs\.|\bchmod +-R +777|\bgit +commit +.*--no-verify'
+# All token separators below use [[:space:]] (POSIX class: space, tab,
+# newline, etc.), never a literal space. A literal-space-only "+" only
+# matches commands whose flags are separated by an actual space character —
+# a tab (or other whitespace) between tokens is still a real argv split once
+# bash parses the line (IFS defaults to space+tab+newline), but a
+# literal-space regex never sees it as a separator, so a tab-separated form
+# of every pattern here (rm, git reset --hard, DROP/TRUNCATE, chmod -R 777,
+# git commit --no-verify) previously matched nothing and evaded the entire
+# blocklist. [[:space:]] is POSIX ERE and confirmed working under this
+# machine's bash 3.2.57 grep -E — unlike a bash 4-only construct
+# (${var,,}, declare -A, mapfile), it carries no version risk.
+pattern='\brm[[:space:]]+(-[rRfF]+|--recursive|--force)|\bgit[[:space:]]+reset[[:space:]]+--hard|\bDROP[[:space:]]+(TABLE|DATABASE|SCHEMA)\b|\bTRUNCATE[[:space:]]+TABLE\b|\bdd[[:space:]]+if=|\bmkfs\.|\bchmod[[:space:]]+-R[[:space:]]+777|\bgit[[:space:]]+commit[[:space:]]+.*--no-verify'
 
 if echo "$cmd" | grep -qiE "$pattern"; then
   matched=$(echo "$cmd" | grep -oiE "$pattern" | head -1)
@@ -191,7 +290,12 @@ fi
 
 # Source-file extensions pattern (anchored to end-of-token to avoid false matches
 # like foo.py.bak or output.go.log). Matches only tokens ENDING in a source ext.
-src_ext='\.(py|ts|tsx|js|jsx|go)([ '"'"'"]|$)'
+# Right boundary uses [[:space:]] (not a literal space) alongside the quote
+# chars, for the same reason as every other separator in this file: a tab
+# after the extension is a real token break bash itself recognises, and a
+# literal-space-only bracket let a source path followed by a TAB (rather
+# than end-of-string, a space, or a quote) evade detection entirely.
+src_ext='\.(py|ts|tsx|js|jsx|go)([[:space:]'"'"'"]|$)'
 # Plugin source pattern (skills/*/SKILL.md or commands/*.md).
 # Left-anchored to a path/token boundary (start-of-string, whitespace,
 # quote, or a preceding "/") so a GLUED lookalike word like
@@ -201,7 +305,7 @@ src_ext='\.(py|ts|tsx|js|jsx|go)([ '"'"'"]|$)'
 # "vendor/skills/x/SKILL.md" still matches (the "/" before "skills/" is a
 # real path separator, not part of the directory name). Mirrors src_ext's
 # existing right-anchor above.
-plugin_src='(^|[[:space:]/'"'"'"])(skills/[^/]+/SKILL\.md|commands/[^/]+\.md)([ '"'"'"]|$)'
+plugin_src='(^|[[:space:]/'"'"'"])(skills/[^/]+/SKILL\.md|commands/[^/]+\.md)([[:space:]'"'"'"]|$)'
 
 # branch_for_path: resolve git branch for a given file path.
 # Accepts an absolute path or a path relative to $cwd.
@@ -273,14 +377,14 @@ source_edit_blocked=0
 source_edit_target=""
 
 # sed -i ... <sourcefile>: extract last token as the target approximation
-if echo "$cmd" | grep -qiE "\\bsed +-[^'\"]*i[^'\"]*.*($src_ext|$plugin_src)"; then
+if echo "$cmd" | grep -qiE "\\bsed[[:space:]]+-[^'\"]*i[^'\"]*.*($src_ext|$plugin_src)"; then
   source_edit_blocked=1
   source_edit_target=$(echo "$cmd" | awk '{print $NF}')
 fi
 
 # perl -i ... <sourcefile>: extract last token as the target approximation
 if [ "$source_edit_blocked" -eq 0 ]; then
-  if echo "$cmd" | grep -qiE "\\bperl +-[^'\"]*i[^'\"]*.*($src_ext|$plugin_src)"; then
+  if echo "$cmd" | grep -qiE "\\bperl[[:space:]]+-[^'\"]*i[^'\"]*.*($src_ext|$plugin_src)"; then
     source_edit_blocked=1
     source_edit_target=$(echo "$cmd" | awk '{print $NF}')
   fi

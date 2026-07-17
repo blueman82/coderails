@@ -202,6 +202,122 @@ describe("checkArtifact", () => {
     expect(result.passed).toBe(false);
   });
 
+  // sync-docs-nightly's actual defect shape: an `exists` predicate accepts a
+  // log whose run aborted or was refused, as long as it wrote *something*.
+  // These two cases pin the `contains`/`run=ok` gate against that shape — an
+  // aborted/refused run must fail, and only a run that actually reached
+  // `run=ok` may pass. If checkArtifact ignored the marker and only checked
+  // presence, both assertions would pass.
+  it("fails a 'contains'/'run=ok' predicate on a docs-sync run log that aborted without reaching run=ok", () => {
+    const path = join(dir, "run-2026-07-17.log");
+    writeFileSync(path, "2026-07-17T10:00:00Z abort=duplicate-work\n2026-07-17T10:00:01Z refused=merge\n");
+    const artifact: ExpectedArtifact = {
+      artifactPath: path,
+      maxAgeSeconds: 129600,
+      predicate: { kind: "contains", marker: "run=ok" },
+    };
+    const result = checkArtifact(artifact, { ...ctx, vault: dir });
+    expect(result.passed).toBe(false);
+    expect(result.reason).toMatch(/marker/i);
+  });
+
+  it("passes a 'contains'/'run=ok' predicate on a docs-sync run log that reached run=ok", () => {
+    const path = join(dir, "run-2026-07-17.log");
+    writeFileSync(path, "2026-07-17T10:00:00Z start\n2026-07-17T10:05:00Z run=ok\n");
+    const artifact: ExpectedArtifact = {
+      artifactPath: path,
+      maxAgeSeconds: 129600,
+      predicate: { kind: "contains", marker: "run=ok" },
+    };
+    const result = checkArtifact(artifact, { ...ctx, vault: dir });
+    expect(result.passed).toBe(true);
+  });
+
+  // ---- last-marker predicate (defect 3: same-date-append false-green) ----
+  // The per-date run log holds MANY runs appended in sequence. A whole-file
+  // `contains` check false-passes an ABORTED run whenever an EARLIER run that
+  // day already wrote the success marker — the stale line is still in the file.
+  // The `last-marker` predicate keys on the LAST terminal marker so the most
+  // recent run's outcome wins. These cases pin that behaviour.
+  const lastMarker: ExpectedArtifact["predicate"] = {
+    kind: "last-marker",
+    success: "run=ok",
+    failures: ["abort=", "refused="],
+  };
+
+  // THE RED-LOCK — the exact live defect: a green run's run=ok FOLLOWED by a
+  // later same-date abort must read NOT-passed. A whole-file contains(run=ok)
+  // (what #220 shipped) returns true here — that is the production false-green
+  // reproduced live as run 8bedfa1c. This test fails against that implementation.
+  it("last-marker: run=ok followed by a later same-date abort reads NOT passed", () => {
+    const path = join(dir, "run-2026-07-17.log");
+    writeFileSync(
+      path,
+      [
+        "2026-07-17T16:11:28Z run=ok",
+        "2026-07-17T16:24:27Z abort=denylisted-doc-drift detail=docs/routines.md",
+        "",
+      ].join("\n"),
+    );
+    const artifact: ExpectedArtifact = { artifactPath: path, maxAgeSeconds: 129600, predicate: lastMarker };
+    const result = checkArtifact(artifact, { ...ctx, vault: dir });
+    expect(result.passed).toBe(false);
+    expect(result.reason).toMatch(/failure/i);
+  });
+
+  it("last-marker: run=ok as the last terminal marker (trailing non-marker note after it) reads passed", () => {
+    // A successful run may append a trailing non-terminal note AFTER run=ok
+    // (observed: note=scope-rationale at 16:18 after run=ok at 16:11). A naive
+    // last-LINE check would miss the marker; the last MARKER-SET match must win.
+    const path = join(dir, "run-2026-07-17.log");
+    writeFileSync(
+      path,
+      [
+        "2026-07-17T16:11:28Z run=ok",
+        "2026-07-17T16:18:50Z note=scope-rationale INSTALLATION.md-in-scope",
+        "",
+      ].join("\n"),
+    );
+    const artifact: ExpectedArtifact = { artifactPath: path, maxAgeSeconds: 129600, predicate: lastMarker };
+    const result = checkArtifact(artifact, { ...ctx, vault: dir });
+    expect(result.passed).toBe(true);
+    expect(result.reason).toMatch(/success/i);
+  });
+
+  it("last-marker: a refused= as the last terminal marker reads NOT passed", () => {
+    const path = join(dir, "run-2026-07-17.log");
+    writeFileSync(path, "2026-07-17T10:00:00Z run=ok\n2026-07-17T11:00:00Z refused=post-evals\n");
+    const artifact: ExpectedArtifact = { artifactPath: path, maxAgeSeconds: 129600, predicate: lastMarker };
+    const result = checkArtifact(artifact, { ...ctx, vault: dir });
+    expect(result.passed).toBe(false);
+    expect(result.reason).toMatch(/refused=/);
+  });
+
+  it("last-marker: a log with no terminal marker at all reads NOT passed", () => {
+    const path = join(dir, "run-2026-07-17.log");
+    writeFileSync(path, "2026-07-17T10:00:00Z stage=audit drift-found\n2026-07-17T10:01:00Z stage=branch\n");
+    const artifact: ExpectedArtifact = { artifactPath: path, maxAgeSeconds: 129600, predicate: lastMarker };
+    const result = checkArtifact(artifact, { ...ctx, vault: dir });
+    expect(result.passed).toBe(false);
+    expect(result.reason).toMatch(/no terminal marker/i);
+  });
+
+  it("last-marker: green-then-abort-then-green on the same date reads passed (latest run wins)", () => {
+    const path = join(dir, "run-2026-07-17.log");
+    writeFileSync(
+      path,
+      [
+        "2026-07-17T09:00:00Z run=ok",
+        "2026-07-17T12:00:00Z abort=denylisted-doc-drift",
+        "2026-07-17T15:00:00Z run=ok",
+        "",
+      ].join("\n"),
+    );
+    const artifact: ExpectedArtifact = { artifactPath: path, maxAgeSeconds: 129600, predicate: lastMarker };
+    const result = checkArtifact(artifact, { ...ctx, vault: dir });
+    expect(result.passed).toBe(true);
+  });
+
   it("fails a template using {vault} whose ../ traversal resolves outside the vault root", () => {
     const outside = join(dir, "..", "outside-secret.md");
     writeFileSync(outside, "leaked");

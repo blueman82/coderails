@@ -189,7 +189,7 @@ proj="$TMP/projects/-test-proj-i"
 mkdir -p "$proj"
 usage_line "msg_i1" "claude-opus-4-8" 10 5 0 0 0 > "$proj/$sess.jsonl"
 out=$(dc_mine_token_usage "$sess")
-for key in schema_version prices_as_of price_source per_model total_tokens total_usd_estimate transcripts_scanned unpriced_models notes models_used; do
+for key in schema_version prices_as_of price_source per_model total_tokens total_usd_estimate transcripts_scanned unpriced_models notes models_used headless_children_excluded_count; do
   result=$(printf '%s' "$out" | jq -e "has(\"$key\")" 2>/dev/null)
   check "schema shape: top-level key '$key' present" "true" "$result"
 done
@@ -300,5 +300,284 @@ mkdir -p "$proj"
 out=$(dc_mine_token_usage "$sess")
 result=$(printf '%s' "$out" | jq -r '.per_model["claude-opus-4-8"].input_tokens')
 check "missing message.id line skipped, only valid line counted" "10" "$result"
+
+# --- Test (k): zsh self-path — dc_mine_token_usage sourced into an
+# INTERACTIVE-shell-shaped zsh (not run_all.sh's bash) must still find its own
+# model_prices.json via self-path resolution, not silently fail-open to {}.
+# Under zsh, ${BASH_SOURCE[0]} is empty inside a function, so a bash-only
+# self-path idiom returns './model_prices.json' relative to zsh's cwd (not
+# the lib's directory) and the "$prices_file" existence guard fails, masking
+# real usage data as {} — indistinguishable from "no data found". This test
+# does NOT set CLAUDE_MODEL_PRICES_FILE, so it exercises the library's
+# default self-path resolution for real, under genuine zsh, with real usage
+# data present -- the only way to force the actual reported failure mode
+# (a bash-only run_all.sh invocation can't reproduce it). Skips gracefully if
+# zsh is unavailable on this machine. ---
+if command -v zsh >/dev/null 2>&1; then
+  sess="zsh-self-path-session"
+  proj="$TMP/projects/-test-proj-k"
+  mkdir -p "$proj"
+  usage_line "msg_k1" "claude-opus-4-8" 100 50 0 0 0 > "$proj/$sess.jsonl"
+  zsh_out=$(CLAUDE_PROJECTS_DIR="$TMP/projects" zsh -c "
+    unset CLAUDE_MODEL_PRICES_FILE
+    cd /
+    . '$LIB'
+    dc_mine_token_usage '$sess'
+  ")
+  result=$(printf '%s' "$zsh_out" | jq -r '.per_model["claude-opus-4-8"].input_tokens // "MISSING"')
+  check "zsh self-path: real usage data mined under zsh (not fail-opened to {})" "100" "$result"
+else
+  printf 'skip - zsh self-path test (zsh not available on this machine)\n'
+fi
+
+# --- Test (k2): zsh no-transcript fail-open — under zsh, an unmatched glob
+# is a hard error (nomatch is on by default), NOT a silent empty expansion
+# like bash. Reaching the "for f in .../*/\"$session.jsonl\"" loop with a
+# session that has no transcript anywhere must still fail-open to {} with
+# exit 0, not crash with "no matches found" before the
+# `[ -n "$orch_transcript" ] || { printf '{}'; return 0; }` guard ever runs.
+# Must run under GENUINE zsh (a bash-only test can't reproduce this — bash
+# expands the unmatched glob to the literal pattern, which is silently
+# skipped by the `[ -f "$f" ] || continue` check, so it never crashes there
+# in the first place). Skips gracefully if zsh is unavailable. ---
+if command -v zsh >/dev/null 2>&1; then
+  zsh_out=$(CLAUDE_PROJECTS_DIR="$TMP/projects" CLAUDE_MODEL_PRICES_FILE="$PRICES" zsh -c "
+    . '$LIB'
+    dc_mine_token_usage 'no-such-session-xyz'
+  " 2>/dev/null)
+  zsh_rc=$?
+  check "zsh no-transcript: fail-opens to {} (not a crash)" "{}" "$zsh_out"
+  check "zsh no-transcript: exit code 0" "0" "$zsh_rc"
+else
+  printf 'skip - zsh no-transcript fail-open test (zsh not available on this machine)\n'
+fi
+
+# --- Test (l): missing prices file — the [ -f "$prices_file" ] fail-open
+# bail must emit a DISTINCT stderr diagnostic naming the path it looked for,
+# so this branch is no longer indistinguishable from "no usage data found"
+# or "jq missing" (the ambiguity that cost prior loops wrong root-cause
+# guesses). Return value is unchanged: still {}, still exit 0. ---
+sess="missing-prices-session"
+proj="$TMP/projects/-test-proj-l"
+mkdir -p "$proj"
+usage_line "msg_l1" "claude-opus-4-8" 10 5 0 0 0 > "$proj/$sess.jsonl"
+bogus_prices="$TMP/does-not-exist-prices.json"
+stderr_out=$(CLAUDE_MODEL_PRICES_FILE="$bogus_prices" dc_mine_token_usage "$sess" 2>&1 1>/dev/null)
+stdout_out=$(CLAUDE_MODEL_PRICES_FILE="$bogus_prices" dc_mine_token_usage "$sess" 2>/dev/null)
+rc=0
+CLAUDE_MODEL_PRICES_FILE="$bogus_prices" dc_mine_token_usage "$sess" >/dev/null 2>&1 || rc=$?
+check "missing prices file: distinct stderr diagnostic mentions the path" "true" "$(printf '%s' "$stderr_out" | grep -qF "$bogus_prices" && echo true || echo false)"
+check "missing prices file: still fail-opens to {} on stdout" "{}" "$stdout_out"
+check "missing prices file: still exit 0" "0" "$rc"
+
+# --- Test (m): jq absent — the `command -v jq` bail must emit a distinct
+# stderr diagnostic, so it's no longer indistinguishable from any other
+# fail-open cause. Simulate absence with a PATH containing no jq, run in a
+# FRESH bash -c subshell (not this script's own shell) — bash caches a
+# command's resolved path in its hash table once invoked (this file's own
+# `usage_line` helper already called jq earlier), and a one-shot `PATH=...`
+# prefix on a single command does not clear that cache, so `command -v jq`
+# would still report "found" and silently fall through to a LATER bail
+# instead of this one. A fresh subshell starts with an empty hash table, so
+# `command -v jq` genuinely re-searches PATH. Return value unchanged: still
+# {}, still exit 0. ---
+sess="jq-absent-session"
+proj="$TMP/projects/-test-proj-m"
+mkdir -p "$proj"
+usage_line "msg_m1" "claude-opus-4-8" 10 5 0 0 0 > "$proj/$sess.jsonl"
+empty_path_dir="$TMP/empty-path-m"
+mkdir -p "$empty_path_dir"
+run_jq_absent() {
+  CLAUDE_PROJECTS_DIR="$TMP/projects" CLAUDE_MODEL_PRICES_FILE="$PRICES" bash -c "
+    PATH='$empty_path_dir'
+    . '$LIB'
+    dc_mine_token_usage '$sess'
+  "
+}
+stderr_out=$(run_jq_absent 2>&1 1>/dev/null)
+stdout_out=$(run_jq_absent 2>/dev/null)
+rc=0
+run_jq_absent >/dev/null 2>&1 || rc=$?
+check "jq absent: distinct stderr diagnostic" "true" "$(printf '%s' "$stderr_out" | grep -qF "jq not found" && echo true || echo false)"
+check "jq absent: still fail-opens to {} on stdout" "{}" "$stdout_out"
+check "jq absent: still exit 0" "0" "$rc"
+
+# --- Test (n): empty session id — the `[ -n "$session" ]` bail must emit a
+# distinct stderr diagnostic. Return value unchanged: still {}, still exit 0. ---
+stderr_out=$(dc_mine_token_usage "" 2>&1 1>/dev/null)
+stdout_out=$(dc_mine_token_usage "" 2>/dev/null)
+rc=0
+dc_mine_token_usage "" >/dev/null 2>&1 || rc=$?
+check "empty session id: distinct stderr diagnostic" "true" "$(printf '%s' "$stderr_out" | grep -qF "empty session id" && echo true || echo false)"
+check "empty session id: still fail-opens to {} on stdout" "{}" "$stdout_out"
+check "empty session id: still exit 0" "0" "$rc"
+
+# --- Test (o): no transcript found — the `[ -n "$orch_transcript" ]` bail
+# must emit a distinct stderr diagnostic naming the session, so it is no
+# longer indistinguishable from "jq missing" or "prices file missing" (the
+# ambiguity that cost prior loops wrong root-cause guesses — test (c) above
+# already covers the return-value half; this covers the NEW stderr half).
+# Return value unchanged: still {}, still exit 0. ---
+sess="no-transcript-diag-session"
+stderr_out=$(dc_mine_token_usage "$sess" 2>&1 1>/dev/null)
+stdout_out=$(dc_mine_token_usage "$sess" 2>/dev/null)
+rc=0
+dc_mine_token_usage "$sess" >/dev/null 2>&1 || rc=$?
+check "no transcript: distinct stderr diagnostic mentions the session" "true" "$(printf '%s' "$stderr_out" | grep -qF "no transcript found" && printf '%s' "$stderr_out" | grep -qF "$sess" && echo true || echo false)"
+check "no transcript: still fail-opens to {} on stdout" "{}" "$stdout_out"
+check "no transcript: still exit 0" "0" "$rc"
+
+# --- Fault-injection harness for tests (p)/(q): a jq SHIM placed first on
+# PATH that fails (or emits garbage) ONLY for the stage-2 aggregation jq
+# (recognisable by 'unique_by' in its program text), and delegates to the
+# REAL jq for every other invocation (the per-line parse stage, the pricing
+# stage, and this test file's own `jq` calls). REAL_JQ is resolved dynamically
+# (not hardcoded) so the shim works on any machine regardless of jq's
+# install location. This reproduces a genuine jq failure that the existing
+# `2>/dev/null` on the aggregation pipeline would otherwise mute completely —
+# the exact "identical {}, no cause" symptom this task exists to kill. ---
+REAL_JQ="$(command -v jq)"
+shim_dir="$TMP/jq-shim"
+mkdir -p "$shim_dir"
+
+# --- Test (p): mining jq produces nothing (aggregation jq exits non-zero) —
+# the `[ -n "$mined" ]` bail must emit a distinct stderr diagnostic. ---
+cat > "$shim_dir/jq" <<SHIM
+#!/bin/bash
+for a in "\$@"; do
+  if [[ "\$a" == *"unique_by"* ]]; then
+    exit 1
+  fi
+done
+exec "$REAL_JQ" "\$@"
+SHIM
+chmod +x "$shim_dir/jq"
+sess="mining-crash-session"
+proj="$TMP/projects/-test-proj-p"
+mkdir -p "$proj"
+usage_line "msg_p1" "claude-opus-4-8" 10 5 0 0 0 > "$proj/$sess.jsonl"
+stderr_out=$(PATH="$shim_dir:$PATH" CLAUDE_PROJECTS_DIR="$TMP/projects" CLAUDE_MODEL_PRICES_FILE="$PRICES" dc_mine_token_usage "$sess" 2>&1 1>/dev/null)
+stdout_out=$(PATH="$shim_dir:$PATH" CLAUDE_PROJECTS_DIR="$TMP/projects" CLAUDE_MODEL_PRICES_FILE="$PRICES" dc_mine_token_usage "$sess" 2>/dev/null)
+rc=0
+PATH="$shim_dir:$PATH" CLAUDE_PROJECTS_DIR="$TMP/projects" CLAUDE_MODEL_PRICES_FILE="$PRICES" dc_mine_token_usage "$sess" >/dev/null 2>&1 || rc=$?
+check "mining jq crash: distinct stderr diagnostic (no output)" "true" "$(printf '%s' "$stderr_out" | grep -qF "mining produced no output" && echo true || echo false)"
+check "mining jq crash: still fail-opens to {} on stdout" "{}" "$stdout_out"
+check "mining jq crash: still exit 0" "0" "$rc"
+
+# --- Test (q): mining jq produces non-JSON garbage (exits 0 but the stage-2
+# aggregation stage's stdout is not valid JSON) — the `jq -e .` validity
+# check bail must emit a distinct stderr diagnostic, different from test (p)'s
+# "no output" message, since these are two different failure stages. ---
+cat > "$shim_dir/jq" <<SHIM
+#!/bin/bash
+for a in "\$@"; do
+  if [[ "\$a" == *"unique_by"* ]]; then
+    echo "not-valid-json-garbage"
+    exit 0
+  fi
+done
+exec "$REAL_JQ" "\$@"
+SHIM
+chmod +x "$shim_dir/jq"
+sess="mining-garbage-session"
+proj="$TMP/projects/-test-proj-q"
+mkdir -p "$proj"
+usage_line "msg_q1" "claude-opus-4-8" 10 5 0 0 0 > "$proj/$sess.jsonl"
+stderr_out=$(PATH="$shim_dir:$PATH" CLAUDE_PROJECTS_DIR="$TMP/projects" CLAUDE_MODEL_PRICES_FILE="$PRICES" dc_mine_token_usage "$sess" 2>&1 1>/dev/null)
+stdout_out=$(PATH="$shim_dir:$PATH" CLAUDE_PROJECTS_DIR="$TMP/projects" CLAUDE_MODEL_PRICES_FILE="$PRICES" dc_mine_token_usage "$sess" 2>/dev/null)
+rc=0
+PATH="$shim_dir:$PATH" CLAUDE_PROJECTS_DIR="$TMP/projects" CLAUDE_MODEL_PRICES_FILE="$PRICES" dc_mine_token_usage "$sess" >/dev/null 2>&1 || rc=$?
+check "mining jq garbage: distinct stderr diagnostic (invalid JSON)" "true" "$(printf '%s' "$stderr_out" | grep -qF "mining produced invalid JSON" && echo true || echo false)"
+check "mining jq garbage: still fail-opens to {} on stdout" "{}" "$stdout_out"
+check "mining jq garbage: still exit 0" "0" "$rc"
+rm -f "$shim_dir/jq"
+
+# --- Test (r): pricing jq produces nothing — a prices file that EXISTS
+# (passes the line-59 guard) but contains invalid JSON, so the `--slurpfile
+# prices` stage fails and `result` comes back empty. Distinguishes this
+# stage from the mining-stage failures above and from "prices file missing"
+# (test l). ---
+sess="pricing-crash-session"
+proj="$TMP/projects/-test-proj-r"
+mkdir -p "$proj"
+usage_line "msg_r1" "claude-opus-4-8" 10 5 0 0 0 > "$proj/$sess.jsonl"
+invalid_prices="$TMP/invalid-prices.json"
+printf 'not valid json {{{' > "$invalid_prices"
+stderr_out=$(CLAUDE_PROJECTS_DIR="$TMP/projects" CLAUDE_MODEL_PRICES_FILE="$invalid_prices" dc_mine_token_usage "$sess" 2>&1 1>/dev/null)
+stdout_out=$(CLAUDE_PROJECTS_DIR="$TMP/projects" CLAUDE_MODEL_PRICES_FILE="$invalid_prices" dc_mine_token_usage "$sess" 2>/dev/null)
+rc=0
+CLAUDE_PROJECTS_DIR="$TMP/projects" CLAUDE_MODEL_PRICES_FILE="$invalid_prices" dc_mine_token_usage "$sess" >/dev/null 2>&1 || rc=$?
+check "pricing jq crash: distinct stderr diagnostic (pricing produced no output)" "true" "$(printf '%s' "$stderr_out" | grep -qF "pricing produced no output" && echo true || echo false)"
+check "pricing jq crash: still fail-opens to {} on stdout" "{}" "$stdout_out"
+check "pricing jq crash: still exit 0" "0" "$rc"
+
+# --- Test (t): headless orphan detection — a sibling top-level .jsonl in the
+# SAME <proj> dir as the orchestrator transcript, with an mtime inside the
+# orchestrator's activity window, is a candidate headless `claude -p` child
+# (own top-level session, no subagents/ parent linkage exists to attribute
+# its tokens directly — see the lib's header comment). It must be SURFACED
+# as a count, not silently dropped, and its tokens must NOT be folded into
+# total_tokens/total_usd_estimate (no attribution without proof). The
+# orchestrator transcript itself and files in subagents/ must never be
+# double-counted as orphans. ---
+sess="orphan-session"
+proj="$TMP/projects/-test-proj-t"
+mkdir -p "$proj/$sess/subagents"
+usage_line "msg_orph_orch" "claude-opus-4-8" 10 5 0 0 0 > "$proj/$sess.jsonl"
+usage_line "msg_orph_worker" "claude-haiku-4-5" 5 5 0 0 0 > "$proj/$sess/subagents/agent-y.jsonl"
+# A sibling top-level session in the same proj dir, mtime pinned to the same
+# moment as the orchestrator transcript -> inside its activity window.
+usage_line "msg_orph_child" "claude-sonnet-5" 999 999 0 0 0 > "$proj/headless-child-1.jsonl"
+touch -t "$(date -j -v-2M +%Y%m%d%H%M 2>/dev/null || date -d '-2 minutes' +%Y%m%d%H%M 2>/dev/null)" "$proj/$sess.jsonl" "$proj/headless-child-1.jsonl" 2>/dev/null
+out=$(dc_mine_token_usage "$sess")
+result=$(printf '%s' "$out" | jq -r '.headless_children_excluded_count')
+check "headless orphan detection: one in-window sibling top-level session counted" "1" "$result"
+result=$(printf '%s' "$out" | jq -r '.per_model | has("claude-sonnet-5")')
+check "headless orphan detection: orphan's tokens NOT folded into per_model (no fabricated attribution)" "false" "$result"
+result=$(printf '%s' "$out" | jq -r '.total_tokens')
+check "headless orphan detection: orphan's tokens NOT folded into total_tokens" "25" "$result"
+
+# --- Test (t2): negative case — a sibling top-level session in the SAME proj
+# dir but with an mtime FAR OUTSIDE the orchestrator's activity window (a
+# different, unrelated run in the same repo) must NOT be counted as a
+# candidate orphan. Without this negative case, a bare "count every sibling"
+# implementation would pass test (t) too -- this is what actually proves the
+# time-window filter discriminates rather than just counting everything. ---
+sess="orphan-window-session"
+proj="$TMP/projects/-test-proj-t2"
+mkdir -p "$proj"
+usage_line "msg_orph_w_orch" "claude-opus-4-8" 10 5 0 0 0 > "$proj/$sess.jsonl"
+usage_line "msg_orph_w_far" "claude-sonnet-5" 111 22 0 0 0 > "$proj/far-away-session.jsonl"
+touch -t "$(date -j -v-2M +%Y%m%d%H%M 2>/dev/null || date -d '-2 minutes' +%Y%m%d%H%M 2>/dev/null)" "$proj/$sess.jsonl" 2>/dev/null
+touch -t "$(date -j -v-30d +%Y%m%d%H%M 2>/dev/null || date -d '-30 days' +%Y%m%d%H%M 2>/dev/null)" "$proj/far-away-session.jsonl" 2>/dev/null
+out=$(dc_mine_token_usage "$sess")
+result=$(printf '%s' "$out" | jq -r '.headless_children_excluded_count')
+check "headless orphan detection: out-of-window sibling NOT counted (proves time filter, not a bare sibling count)" "0" "$result"
+
+# --- Test (t3): the orchestrator's own transcript and subagent transcripts
+# must never count themselves as headless orphans (no double-count / no
+# self-flagging), even though the orchestrator file is itself in-window by
+# construction. ---
+sess="orphan-noself-session"
+proj="$TMP/projects/-test-proj-t3"
+mkdir -p "$proj/$sess/subagents"
+usage_line "msg_noself_orch" "claude-opus-4-8" 10 5 0 0 0 > "$proj/$sess.jsonl"
+usage_line "msg_noself_worker" "claude-haiku-4-5" 5 5 0 0 0 > "$proj/$sess/subagents/agent-z.jsonl"
+out=$(dc_mine_token_usage "$sess")
+result=$(printf '%s' "$out" | jq -r '.headless_children_excluded_count')
+check "headless orphan detection: no siblings present -> count is 0 (orchestrator/subagent files never self-count)" "0" "$result"
+
+# --- Test (s): pairwise distinctness — all 7 fail-open bails in $LIB must
+# emit 7 DIFFERENT stderr messages. Tests (l)/(m)/(n)/(o)/(p)/(q)/(r) each
+# assert its OWN bail's message individually, but none of them assert the
+# messages differ FROM EACH OTHER — two bails silently sharing wording would
+# reproduce the identical-{}-for-every-cause bug this whole file exists to
+# kill, one layer up (message collision instead of stdout collision). Read
+# every `echo "loop_cost: ..." >&2` literal straight out of the library
+# source and require exactly 7 unique strings. ---
+msg_count=$(grep -oE 'echo "loop_cost:[^"]*"' "$LIB" | wc -l | tr -d ' ')
+unique_count=$(grep -oE 'echo "loop_cost:[^"]*"' "$LIB" | sort -u | wc -l | tr -d ' ')
+check "pairwise distinctness: 7 loop_cost stderr bail messages found" "7" "$msg_count"
+check "pairwise distinctness: all 7 messages are unique (no two bails share wording)" "7" "$unique_count"
 
 [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails failures)"; exit 1; }

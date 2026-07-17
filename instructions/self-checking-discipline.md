@@ -1,4 +1,4 @@
-# Self-Checking Discipline (claude-guardrails)
+# Self-Checking Discipline
 
 These four rules are appended to your `~/.claude/CLAUDE.md` by `bootstrap.sh`.
 They are advisory at the prompt level; the plugin's hooks provide mechanical enforcement.

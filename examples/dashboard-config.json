@@ -1,28 +1,29 @@
 {
   "repos": ["blueman82/coderails"],
-  "wikiPaths": ["/Users/harrison/Github/coderails-wiki"],
+  "wikiPaths": ["/path/to/coderails-wiki"],
   "buttons": [
     {
       "name": "wiki-lint",
       "label": "WIKI LINT",
       "command": "/coderails:wiki-lint",
-      "cwd": "/Users/harrison/Github/coderails",
+      "cwd": "/path/to/coderails",
       "profile": "read-only",
       "hidden": true
     },
     {
-      "name": "sync-docs-weekly",
-      "label": "SYNC DOCS",
-      "command": "/sync-docs --append-system-prompt \"Write the full drift report to ~/.claude/coderails-dashboard/routines/sync-docs/report-{date}.md before finishing.\"",
-      "cwd": "/Users/harrison/Github/coderails",
-      "profile": "read-only",
+      "name": "sync-docs",
+      "label": "DOCS SYNC",
+      "command": "/coderails:docs-sync",
+      "cwd": "/path/to/coderails",
+      "profile": "bypass",
+      "bypassPermissions": true,
       "hidden": true
     },
     {
       "name": "memory-consolidation-weekly",
       "label": "MEMORY CONSOLIDATION",
       "command": "/coderails:memory-consolidation",
-      "cwd": "/Users/harrison/Github/coderails",
+      "cwd": "/path/to/coderails",
       "profile": "read-only",
       "hidden": true
     },
@@ -30,7 +31,7 @@
       "name": "ask",
       "label": "ASK",
       "command": "",
-      "cwd": "/Users/harrison/Github/coderails",
+      "cwd": "/path/to/coderails",
       "profile": "auto",
       "inputAllowed": true
     },
@@ -38,7 +39,7 @@
       "name": "loop-retro-promotion",
       "label": "LOOP RETRO PROMOTION",
       "command": "/coderails:loop-retro-promotion",
-      "cwd": "/Users/harrison/Documents/Github/coderails",
+      "cwd": "/path/to/coderails",
       "profile": "bypass",
       "bypassPermissions": true,
       "hidden": true
@@ -47,15 +48,15 @@
       "name": "inbox-brief",
       "label": "INBOX BRIEF",
       "command": "Run exactly this command via the Bash tool: bin/rachel \"Read tasks/inbox-brief.md and follow it.\" < /dev/null . Its output will end with a line `BRIEF FILE: <path>`. Read that file and make your ENTIRE final message exactly its contents — nothing before it, nothing after it, no preamble, no code fence. If no `BRIEF FILE:` line appears (delivery failed or the sweep was skipped), instead report Rachel's stated outcome in a single line.",
-      "cwd": "/Users/harrison/Github/assistant-agent",
+      "cwd": "/path/to/assistant-agent",
       "profile": "bypass",
       "bypassPermissions": true
     },
     {
       "name": "workflow-audit-weekly",
       "label": "WORKFLOW AUDIT (weekly)",
-      "command": "Invoke coderails:workflow-audit in QUEUE-MODE over the last 7 days (--days 7). In-session skill creation is forbidden in this run — every propose verdict is written as a queue entry only. Finish by writing the run note to ~/.claude/coderails-dashboard/routines/workflow-audit/run-{date}.md (use exactly this path and filename) recording `proposals_written: <N>` and `proposals_attempted: <A>`, where N counts queue entries actually written this run. Emit the completion marker line `## [<YYYY-MM-DD>] workflow-audit complete` ONLY IF the run finished cleanly AND N == A. If any queue write failed (N != A) or the run did not complete, write the note WITHOUT the completion marker. N=0 with no failures is SUCCESS — emit the marker.",
-      "cwd": "/Users/harrison/Github/coderails",
+      "command": "Invoke coderails:workflow-audit in QUEUE-MODE over the last 7 days (--days 7). In-session skill creation is forbidden in this run — every propose verdict is written as a queue entry only. Finish by writing the run note to /path/to/.claude/coderails-dashboard/routines/workflow-audit/run-{date}.md (use exactly this path and filename) recording `proposals_written: <N>` and `proposals_attempted: <A>`, where N counts queue entries actually written this run. Emit the completion marker line `## [<YYYY-MM-DD>] workflow-audit complete` ONLY IF the run finished cleanly AND N == A. If any queue write failed (N != A) or the run did not complete, write the note WITHOUT the completion marker. N=0 with no failures is SUCCESS — emit the marker.",
+      "cwd": "/path/to/coderails",
       "profile": "read-only",
       "hidden": true
     }
@@ -74,15 +75,14 @@
       "escalation": ["notification", "vault-note"]
     },
     {
-      "name": "sync-docs-weekly",
-      "label": "Sync Docs (weekly)",
-      "buttonRef": "sync-docs-weekly",
-      "cadence": "weekly",
-      "foreignSkillPath": "/Users/harrison/.claude/skills/sync-docs/SKILL.md",
+      "name": "sync-docs-nightly",
+      "label": "Docs Sync (nightly)",
+      "buttonRef": "sync-docs",
+      "cadence": "nightly",
       "expectedArtifact": {
-        "artifactPath": "/Users/harrison/.claude/coderails-dashboard/routines/sync-docs/report-{date}.md",
-        "maxAgeSeconds": 691200,
-        "predicate": { "kind": "exists" }
+        "artifactPath": "/path/to/.claude/coderails-dashboard/routines/docs-sync/run-{date}.log",
+        "maxAgeSeconds": 129600,
+        "predicate": { "kind": "last-marker", "success": "run=ok", "failures": ["abort=", "refused="] }
       },
       "escalation": ["notification", "vault-note"]
     },
@@ -92,7 +92,7 @@
       "buttonRef": "memory-consolidation-weekly",
       "cadence": "weekly",
       "expectedArtifact": {
-        "artifactPath": "/Users/harrison/.claude/coderails-dashboard/routines/memory-consolidation/report-{date}.md",
+        "artifactPath": "/path/to/.claude/coderails-dashboard/routines/memory-consolidation/report-{date}.md",
         "maxAgeSeconds": 691200,
         "predicate": { "kind": "exists" }
       },
@@ -104,7 +104,7 @@
       "buttonRef": "loop-retro-promotion",
       "cadence": "weekly",
       "expectedArtifact": {
-        "artifactPath": "/Users/harrison/.claude/agentic-loop/-Users-harrison-Documents-Github-coderails-.git/promotion-runs.log",
+        "artifactPath": "/path/to/.claude/agentic-loop/-path-to-coderails-.git/promotion-runs.log",
         "maxAgeSeconds": 691200,
         "predicate": { "kind": "exists" }
       },
@@ -116,7 +116,7 @@
       "buttonRef": "workflow-audit-weekly",
       "cadence": "weekly",
       "expectedArtifact": {
-        "artifactPath": "/Users/harrison/.claude/coderails-dashboard/routines/workflow-audit/run-{date}.md",
+        "artifactPath": "/path/to/.claude/coderails-dashboard/routines/workflow-audit/run-{date}.md",
         "maxAgeSeconds": 691200,
         "predicate": { "kind": "contains", "marker": "## [{date}] workflow-audit complete" }
       },

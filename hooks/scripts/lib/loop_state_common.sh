@@ -38,6 +38,29 @@ als_log() {
   { printf '%s %s\n' "$(date -Iseconds 2>/dev/null || date +%Y-%m-%dT%H:%M:%S%z)" "$msg" >> "$LOG_FILE"; } 2>/dev/null
 }
 
+# Shared accumulator for the `complete`-only systemMessage: als_gate_proofs_on_complete
+# (withdrawn_proofs) and als_report_cost_on_complete (cost) both run in the
+# SAME loop_stall_guard.sh hook invocation and each has its own reason to
+# tell the human something. Each top-level JSON object is only valid as its
+# OWN document under a whole-buffer JSON parse — two of them concatenated on
+# one hook's stdout is not one valid document — so neither function may emit
+# its own {systemMessage:...} directly. Both append their text here instead;
+# the call site (loop_stall_guard.sh, after both gates have run) emits ONE
+# jq -n '{systemMessage:...}' from the final accumulated value. GLOBAL, not
+# local: it must survive past either function's own return so the call site
+# can read it once both have had their chance to append.
+ALS_PENDING_SYSMSG=""
+als_append_pending_sysmsg() { # text -> appends to $ALS_PENDING_SYSMSG (newline-joined if non-empty)
+  local text="$1"
+  [ -n "$text" ] || return 0
+  if [ -n "$ALS_PENDING_SYSMSG" ]; then
+    ALS_PENDING_SYSMSG="${ALS_PENDING_SYSMSG}
+${text}"
+  else
+    ALS_PENDING_SYSMSG="$text"
+  fi
+}
+
 # Sanitise a session_id extracted from the Stop-hook JSON payload. If the
 # payload's session_id is missing/null, the jq extraction below falls back to
 # the literal "?" — a FIXED sentinel that would make every malformed-payload
@@ -316,6 +339,7 @@ als_extract_last_text() {
   local transcript="$1" tail_lines="$2"
   tail -n "$tail_lines" "$transcript" 2>/dev/null | jq -R 'fromjson? // empty' 2>/dev/null | jq -s -r '
     [.[]?
+     | select(type == "object")
      | select(.type == "assistant")
      | (.message.content
         | if type == "array" then [ .[]? | select(.type == "text") | .text ] | join(" ")
@@ -697,16 +721,66 @@ listed unit(s), then re-declare complete." >&2
 # that gap the same way the work_units gate's allowlist closes status-string
 # gaming.
 #
-# Fail-open on ABSENT proof.json, fail-closed on malformed/unverifiable —
-# the same established asymmetry as retro.json (mandatory, blocks on
-# absence) versus work_units (optional, blocks only on an unprovable entry).
-# proof.json is OPTIONAL and adopted voluntarily (mirrors task-evals'
-# voluntary-adoption posture): a loop authored before this gate existed, or
-# with no executable surface to prove, writes no proof.json and is not
-# punished for its absence. But once present, a garbage file must never read
-# as absence — malformed JSON, a bad schema_version, or a proofs entry that
-# cannot be verified all fail CLOSED, mirroring the work_units rule that a
-# unit which cannot be proven terminal blocks rather than passing by default.
+# ABSENT proof.json is DISPOSITION-GATED, not unconditionally fail-open —
+# fail-closed on malformed/unverifiable either way. proof.json is OPTIONAL
+# and adopted voluntarily (mirrors task-evals' voluntary-adoption posture): a
+# loop with no executable surface to prove writes none. SKILL.md Phase 2.7e
+# already required that choice be "a visible decision, not a silent gap",
+# recorded in decisions_absorbed — but nothing enforced that requirement
+# mechanically, so a loop with a clearly executable surface could declare
+# `complete` with no proof.json and no recorded disposition at all, and this
+# gate let it through silently. That silent path is now closed via
+# progress.json's own `proof_disposition` field (see loop-state.md): a
+# value starting with "none" (e.g. "none: no executable surface") is the
+# mechanical form of that recorded decision and allows absence; any other
+# non-empty value, or an absent/null proof_disposition, now BLOCKS on an
+# absent proof.json — silent skip becomes impossible.
+#
+# GRANDFATHER (removal condition below): this disposition requirement only
+# applies once progress.json's OWN schema_version is >= 2. A schema_version
+# < 2 (or absent, or non-numeric — the field is authored freehand by an LLM
+# per prose instruction, not emitted by trusted code, so treat it as
+# adversarial input like every other field here) predates proof_disposition
+# entirely and keeps the OLD unconditional fail-open-on-absence behaviour —
+# this is what protects every already-in-flight loop's progress.json (there
+# are live sibling loops mid-run at the time this gate shipped) from being
+# bricked at their own `complete` declaration by a field their SKILL.md
+# never told them to write. Mirrors the identical schema_version-gated
+# grandfather als_report_cost_on_complete already uses for retro.json's
+# schema_version 1 -> 2 cost-miner transition (see that function's own
+# header for the numeric-vs-string-compare pitfall this reuses the same
+# jq-side `>=` fix for). REMOVAL CONDITION: once every active loop's
+# progress.json is known to carry schema_version >= 2 (i.e. once this gate
+# has been live longer than the longest-running loop's lifetime), the
+# schema_version < 2 branch and this comment block can be deleted and
+# proof_disposition enforcement made unconditional.
+#
+# HONEST BOUNDARY: this makes SILENT skip impossible FOR LOOPS AT
+# progress.json schema_version >= 2 — such a loop can no longer reach
+# `complete` with an absent proof.json and zero trace of why. It does NOT
+# make silent skip impossible universally; two boundary members remain
+# uncaught. (1) It does not stop a model writing a false "none: no
+# executable surface" when a surface actually exists — "does an executable
+# surface exist" is undetectable by any hook, the same honest-boundary every
+# gate in this file already carries (checks the declaration is present, not
+# that the reason is honest). (2) A loop whose progress.json self-declares
+# schema_version < 2 (or non-numeric, or omits the field), or whose
+# progress.json is absent/unparseable, is grandfathered (see above) and can
+# still reach `complete` with no proof.json and no proof_disposition at
+# all — logged as proof_gate=allowed_no_proof_grandfathered, not blocked.
+# Do not oversell this as closing either cheat; it only closes the
+# silent-omission path for schema_version >= 2 loops.
+#
+# Fail-closed on malformed/unverifiable is unchanged and unconditional on
+# schema_version — the same established asymmetry as retro.json (mandatory,
+# blocks on absence) versus work_units (optional, blocks only on an
+# unprovable entry): once proof.json is PRESENT, a garbage file must never
+# read as absence — malformed JSON, a bad schema_version, or a proofs entry
+# that cannot be verified all fail CLOSED, mirroring the work_units rule
+# that a unit which cannot be proven terminal blocks rather than passing by
+# default. proof_disposition is never consulted once proof.json exists —
+# presence always drives full validation/execution-mining, regardless of
+# what proof_disposition claims.
 #
 # Cost: one O(transcript) mining pass (same cost class als_count_invocations
 # already pays on every Stop, but this gate only runs on `complete`
@@ -727,7 +801,59 @@ als_gate_proofs_on_complete() {
   command -v jq >/dev/null 2>&1 || { als_log "hook=$hook session=$session proof_gate=skipped_no_jq"; return 0; }
   [ -n "$ALS_PATH" ] || return 0
   local proof_file; proof_file="$(dirname "$ALS_PATH")/proof.json"
-  [ -f "$proof_file" ] || return 0
+  if [ ! -f "$proof_file" ]; then
+    # Absent proof.json: grandfather on progress.json's own schema_version
+    # (see the header block above for the full rationale and removal
+    # condition). Numeric `>=` comparison happens INSIDE jq, deliberately —
+    # a bash string/pattern compare would mishandle a float schema_version
+    # the same way als_report_cost_on_complete's header documents for
+    # retro.json. progress.json itself may be absent/unreadable here (this
+    # gate runs independently of als_gate_require_active_loop's own
+    # progress.json checks), so a missing/unparseable file reads as
+    # schema_version 0 -> grandfathered, same as an explicit low value.
+    local sv_ge2="false" grandfather_reason="grandfathered_progress_absent"
+    if [ -f "$ALS_PATH" ]; then
+      sv_ge2=$(jq -r '(.schema_version // 0) | if type == "number" then (. >= 2) else false end' "$ALS_PATH" 2>/dev/null)
+      if [ -z "$sv_ge2" ]; then
+        grandfather_reason="grandfathered_progress_malformed"
+        sv_ge2="false"
+      elif [ "$sv_ge2" != "true" ]; then
+        grandfather_reason="grandfathered_sv_lt2"
+        sv_ge2="false"
+      fi
+    fi
+    if [ "$sv_ge2" != "true" ]; then
+      als_log "hook=$hook session=$session proof_gate=allowed_no_proof_$grandfather_reason"
+      return 0
+    fi
+    local disposition
+    disposition=$(jq -r '(.proof_disposition // "") | if type == "string" then . else "" end' "$ALS_PATH" 2>/dev/null)
+    case "$disposition" in
+      none|none:*)
+        als_log "hook=$hook session=$session proof_gate=allowed_no_proof_disposition=none"
+        return 0
+        ;;
+      "")
+        als_log "hook=$hook session=$session proof_gate=blocked offenders=no_proof_no_disposition"
+        echo "[loop-stall-guard] LOOP-STOP: complete declared but there is no proof.json and progress.json
+(schema_version >= 2) records no proof_disposition explaining why.
+Either freeze proof.json (Phase 2.7e), or set progress.json's proof_disposition
+to \"none: <reason>\" (e.g. \"none: no executable surface\") to record that
+choice visibly, then re-declare complete." >&2
+        exit 2
+        ;;
+      *)
+        als_log "hook=$hook session=$session proof_gate=blocked offenders=disposition_promises_proof"
+        echo "[loop-stall-guard] LOOP-STOP: complete declared but progress.json's proof_disposition is
+\"$disposition\", which is not a recorded skip (\"none: <reason>\"), yet no
+proof.json exists at:
+  $proof_file
+Freeze proof.json (Phase 2.7e), or change proof_disposition to \"none: <reason>\"
+if there is genuinely nothing to prove, then re-declare complete." >&2
+        exit 2
+        ;;
+    esac
+  fi
   jq -e . "$proof_file" >/dev/null 2>&1 || {
     als_log "hook=$hook session=$session proof_gate=blocked offenders=malformed"
     echo "[loop-stall-guard] LOOP-STOP: complete declared but proof.json is malformed (not valid JSON).
@@ -740,11 +866,18 @@ A frozen proof.json must be valid JSON. Fix or regenerate it, then re-declare co
 Regenerate proof.json with a numeric schema_version >= 1, then re-declare complete." >&2
     exit 2
   }
-  # .proofs absent/null -> nothing to prove (allow). Present-but-not-array is
-  # a malformed shape and blocks, same posture as work_units' file-shape check.
+  # .proofs absent/null -> nothing to prove ITSELF, but withdrawn_proofs (see
+  # below) may still be present and must still be evaluated — a loop that
+  # withdraws its ONLY proof produces exactly this shape (.proofs absent,
+  # withdrawn_proofs populated). This is EDGE #1 from the authorising prompt:
+  # do NOT `return 0` here the way the pre-withdrawal version of this gate
+  # did: that would let an unvalidated withdrawn_proofs sail through under
+  # the "nothing to prove" allow. Present-but-not-array is still a malformed
+  # shape and still blocks immediately, same posture as work_units' file-shape
+  # check — withdrawal doesn't relax that.
   local proofs_type; proofs_type=$(jq -r '(.proofs // null) | type' "$proof_file" 2>/dev/null)
   case "$proofs_type" in
-    null) return 0 ;;
+    null) : ;;
     array) : ;;
     *)
       als_log "hook=$hook session=$session proof_gate=blocked offenders=malformed_shape"
@@ -753,13 +886,28 @@ Regenerate proof.json with .proofs as a JSON array, then re-declare complete." >
       exit 2
       ;;
   esac
-  # proof_count is numerically validated BEFORE either comparison below — a
-  # bare `[ "$x" -gt 0 ] 2>/dev/null || return 0` conflates "jq failed /
-  # printed garbage" with "the deliberate, legitimate empty-proofs allow";
-  # both silently fell through to the same `return 0`. A jq failure here
-  # (missing binary already ruled out above; a truncated/mid-write proof.json
-  # racing the reader is the realistic cause) must fail CLOSED like every
-  # other unparseable-proof.json case in this gate, not silently pass.
+  # withdrawn_proofs absent/null -> nothing withdrawn (fine, .proofs alone
+  # still governs). Present-but-not-array is malformed and blocks, same
+  # posture as .proofs above.
+  local withdrawn_type; withdrawn_type=$(jq -r '(.withdrawn_proofs // null) | type' "$proof_file" 2>/dev/null)
+  case "$withdrawn_type" in
+    null) : ;;
+    array) : ;;
+    *)
+      als_log "hook=$hook session=$session proof_gate=blocked offenders=malformed_withdrawn_shape"
+      echo "[loop-stall-guard] LOOP-STOP: complete declared but proof.json's .withdrawn_proofs field is not an array.
+Regenerate proof.json with .withdrawn_proofs as a JSON array, then re-declare complete." >&2
+      exit 2
+      ;;
+  esac
+  # proof_count/withdrawn_count are numerically validated BEFORE any
+  # comparison below — a bare `[ "$x" -gt 0 ] 2>/dev/null || return 0`
+  # conflates "jq failed / printed garbage" with "the deliberate, legitimate
+  # empty-proofs allow"; both silently fell through to the same `return 0`. A
+  # jq failure here (missing binary already ruled out above; a truncated/
+  # mid-write proof.json racing the reader is the realistic cause) must fail
+  # CLOSED like every other unparseable-proof.json case in this gate, not
+  # silently pass.
   local proof_count; proof_count=$(jq '.proofs | length' "$proof_file" 2>/dev/null)
   case "$proof_count" in
     ''|*[!0-9]*)
@@ -769,23 +917,42 @@ Regenerate proof.json (it may be truncated or mid-write), then re-declare comple
       exit 2
       ;;
   esac
-  # MERGE-BLOCKER FIX: proof.json is model-writable and uncapped, and this
-  # gate previously did a linear rescan of $executions PER PROOF entry —
-  # O(proofs x transcript_bash_calls). loop_stall_guard is registered with a
-  # 15s hooks.json timeout, and a timed-out hook never exits 2 — the Stop
-  # proceeds UNBLOCKED. An inflated proof.json (reproduced: ~2,000 proofs x
-  # ~2,000 Bash calls ~= 15s) therefore defeats the gate by making the CHECK
-  # itself time out, not by satisfying it. A hard cap, checked BEFORE any
-  # transcript mining, closes this: a legitimate proof set is 3-10 entries;
-  # 100+ is itself suspicious and blocks fail-closed rather than being mined.
-  if [ "$proof_count" -gt 100 ]; then
-    als_log "hook=$hook session=$session proof_gate=blocked offenders=too_many_proofs count=$proof_count"
-    echo "[loop-stall-guard] LOOP-STOP: complete declared but proof.json declares $proof_count proofs, exceeding the cap of 100.
+  local withdrawn_count; withdrawn_count=$(jq '.withdrawn_proofs | length' "$proof_file" 2>/dev/null)
+  case "$withdrawn_count" in
+    ''|*[!0-9]*)
+      als_log "hook=$hook session=$session proof_gate=blocked offenders=jq_error"
+      echo "[loop-stall-guard] LOOP-STOP: complete declared but proof.json's .withdrawn_proofs length could not be read.
+Regenerate proof.json (it may be truncated or mid-write), then re-declare complete." >&2
+      exit 2
+      ;;
+  esac
+  # MERGE-BLOCKER FIX (extended to the combined total): proof.json is
+  # model-writable and uncapped, and this gate previously did a linear rescan
+  # of $executions PER PROOF entry — O(proofs x transcript_bash_calls).
+  # loop_stall_guard is registered with a 15s hooks.json timeout, and a
+  # timed-out hook never exits 2 — the Stop proceeds UNBLOCKED. An inflated
+  # proof.json (reproduced: ~2,000 proofs x ~2,000 Bash calls ~= 15s)
+  # therefore defeats the gate by making the CHECK itself time out, not by
+  # satisfying it. The cap is on len(.proofs) + len(.withdrawn_proofs)
+  # COMBINED, not 100 each — both arrays feed the SAME $exec_index mining
+  # pass below, so 100-and-100 would recreate the exact ~100x100 timeout
+  # shape the original cap was sized to rule out. A hard cap, checked BEFORE
+  # any transcript mining, closes this: a legitimate combined set is a
+  # handful of entries; 100+ is itself suspicious and blocks fail-closed
+  # rather than being mined.
+  local combined_count=$((proof_count + withdrawn_count))
+  if [ "$combined_count" -gt 100 ]; then
+    als_log "hook=$hook session=$session proof_gate=blocked offenders=too_many_proofs count=$combined_count"
+    echo "[loop-stall-guard] LOOP-STOP: complete declared but proof.json declares $combined_count proofs+withdrawn_proofs combined, exceeding the cap of 100.
 A legitimate frozen proof set is a handful of commands (typically 3-10). Reduce
-proof.json to <= 100 proofs, then re-declare complete." >&2
+proof.json (.proofs + .withdrawn_proofs combined) to <= 100, then re-declare complete." >&2
     exit 2
   fi
-  [ "$proof_count" -gt 0 ] || return 0
+  # True "nothing to prove" allow: BOTH arrays empty (or absent). Either one
+  # alone still needs the mining pass below — an empty .proofs alongside a
+  # populated withdrawn_proofs must still validate the withdrawal (EDGE #1's
+  # second early-return site, the pre-fix `-gt 0 || return 0`).
+  { [ "$proof_count" -eq 0 ] && [ "$withdrawn_count" -eq 0 ]; } && { als_log "hook=$hook session=$session proof_gate=ok proofs=0 withdrawn=0"; return 0; }
 
   # Two-stage tolerant parse of the transcript (same idiom als_count_invocations
   # uses): a single malformed JSONL line must not collapse the whole scan.
@@ -827,20 +994,42 @@ proof.json to <= 100 proofs, then re-declare complete." >&2
   # (one result per tool_use, itself bounded by the transcript), so there is
   # no perf reason to also map it.
   #
-  # OUTPUT SHAPE: the pass emits a two-line "<count>\n<offenders>" string,
-  # count FIRST. This is what makes offenders extraction fail closed: a
-  # completely clean run (zero offenders) still emits a non-empty first line
-  # (the digit count), so `[ -n "$out" ]` genuinely distinguishes "the pass
-  # ran" from "the pass failed" — a prior version ran offenders extraction as
-  # its OWN SEPARATE jq call on $verdicts, whose transient failure yielded ""
-  # indistinguishable from the legitimate "zero offenders" case, i.e. a
-  # silent pass. One pipeline, one failure mode, guarded once.
+  # WITHDRAWN VALIDATION (mined by the SAME pass, against the SAME
+  # $exec_index — no second independent scan, per the timeout-hole
+  # mitigation in the header above): a withdrawn_proofs entry is a claim
+  # that a proof WAS run, WAS SEEN TO FAIL, and is being withdrawn rather
+  # than fixed — deliberately STRICTER than .proofs' null-tolerance (a
+  # withdrawn entry whose last execution has is_error:null does NOT pass;
+  # only an observed FAILURE justifies a withdrawal, whereas .proofs treats
+  # null as "ran, no clear failure signal, let it through"). Verdicts:
+  #   unexecuted   — cmd never appears in $exec_index (same definition as .proofs)
+  #   not_failed   — cmd executed but its last result is_error is not
+  #                  strictly true (includes false AND null — a withdrawal
+  #                  claims a FAILURE was witnessed, so tolerance here would
+  #                  let a passing or ambiguous check be withdrawn instead
+  #                  of fixed)
+  #   badreason    — withdrawn_reason missing/empty/non-string
+  #   badcmd       — cmd missing/empty/non-string (same as .proofs)
+  #   duplicate_id — this id also appears in .proofs (no double-dipping: a
+  #                  proof cannot simultaneously be pending AND withdrawn)
+  #   unverifiable — the withdrawn_proofs entry itself is not an object
+  #
+  # OUTPUT SHAPE: the pass emits a THREE-line string: "<proof_count>\n
+  # <offenders>\n<withdrawn_ok_ids>", count FIRST (unchanged fail-closed
+  # rationale from the original two-line shape — `[ -n "$out" ]` still
+  # distinguishes "the pass ran" from "the pass failed" off the first line
+  # alone). offenders now covers BOTH .proofs verdicts != satisfied AND
+  # withdrawn_proofs verdicts != ok, so a single offenders check still
+  # blocks on either side. withdrawn_ok_ids is the id list of withdrawn
+  # entries that passed ALL their checks — used only for the ALLOW-path
+  # systemMessage, never for blocking.
   local out
   out=$(
     jq -R 'fromjson? // empty' "$transcript" 2>/dev/null | \
     jq -s --slurpfile proofdoc "$proof_file" -r '
       . as $records
-      | ($proofdoc[0].proofs) as $proofs
+      | ($proofdoc[0].proofs // []) as $proofs
+      | ($proofdoc[0].withdrawn_proofs // []) as $withdrawn
       | ( [ $records[]?
             | select(type == "object" and .type == "assistant")
             | .message.content[]?
@@ -861,6 +1050,8 @@ proof.json to <= 100 proofs, then re-declare complete." >&2
             | select(type == "object" and .type == "tool_result")
             | select((.tool_use_id | type == "string" and length > 0))
             | {tool_use_id: .tool_use_id, is_error: (.is_error // null)} ] ) as $results
+      | ( [ $proofs[] | select(type == "object") | (.id | if type == "string" and length > 0 then . else null end) ]
+          | map(select(. != null)) ) as $proof_ids
       | [ $proofs[] as $p
           | ( if ($p | type) != "object" then
                 {id: "P\($proofs | index($p))", verdict: "unverifiable"}
@@ -887,14 +1078,52 @@ proof.json to <= 100 proofs, then re-declare complete." >&2
                   end
               end )
         ] as $verdicts
-      | "\($verdicts | length)\n\([ $verdicts[] | select(.verdict != "satisfied") | "\(.id)(\(.verdict))" ] | join(", "))"
+      | [ $withdrawn[] as $w
+          | ( if ($w | type) != "object" then
+                {id: "W\($withdrawn | index($w))", verdict: "unverifiable"}
+              else
+                ( ($w.id | if type == "string" and length > 0 then . else null end)) as $rawid
+                | ($rawid // "W\($withdrawn | index($w))") as $id
+                | ( $w.cmd | if type == "string" then gsub("^\\s+|\\s+$";"") else null end ) as $cmd
+                | ( $w.withdrawn_reason | if type == "string" then gsub("^\\s+|\\s+$";"") else null end ) as $reason
+                | if ($proof_ids | index($id)) then
+                    {id: $id, verdict: "duplicate_id", reason_line: ""}
+                  elif ($cmd == null or $cmd == "") then
+                    {id: $id, verdict: "badcmd", reason_line: ""}
+                  elif ($reason == null or $reason == "") then
+                    {id: $id, verdict: "badreason", reason_line: ""}
+                  else
+                    ( $exec_index[$cmd] ) as $last
+                    | if ($last == null) then
+                        {id: $id, verdict: "unexecuted", reason_line: ""}
+                      else
+                        ( [ $results[] | select(.tool_use_id == $last.id) ] | last) as $result
+                        | if ($result == null or $result.is_error != true) then
+                            {id: $id, verdict: "not_failed", reason_line: ""}
+                          else
+                            # First line only of withdrawn_reason: a
+                            # multi-line reason must not smuggle newlines
+                            # into a one-line systemMessage (same rule the
+                            # cost reporters control-char strip enforces).
+                            {id: $id, verdict: "ok", reason_line: ($reason | split("\n")[0])}
+                          end
+                      end
+                  end
+              end )
+        ] as $wverdicts
+      | "\($verdicts | length)\n\(
+          ( [ $verdicts[] | select(.verdict != "satisfied") | "\(.id)(\(.verdict))" ]
+            + [ $wverdicts[] | select(.verdict != "ok") | "\(.id)(\(.verdict))" ]
+          ) | join(", ")
+        )\n\([ $wverdicts[] | select(.verdict == "ok") | "\(.id): \(.reason_line)" ] | join("; "))"
     ' 2>/dev/null
   )
   [ -n "$out" ] || { als_log "hook=$hook session=$session proof_gate=blocked offenders=jq_error"; echo "[loop-stall-guard] LOOP-STOP: complete declared but proof.json/transcript could not be evaluated." >&2; exit 2; }
 
-  local n offenders
+  local n offenders withdrawn_ok
   n=$(printf '%s\n' "$out" | sed -n '1p')
   offenders=$(printf '%s\n' "$out" | sed -n '2p')
+  withdrawn_ok=$(printf '%s\n' "$out" | sed -n '3p')
   case "$n" in
     ''|*[!0-9]*)
       als_log "hook=$hook session=$session proof_gate=blocked offenders=jq_error"
@@ -908,8 +1137,271 @@ proof.json to <= 100 proofs, then re-declare complete." >&2
 Run each named proof's cmd VERBATIM as its own single Bash command in THIS
 (the orchestrator's) session, in the foreground (never run_in_background) —
 commands run inside dispatched workers or subagents never appear in this
-transcript and cannot satisfy this gate — then re-declare complete." >&2
+transcript and cannot satisfy this gate — then re-declare complete.
+A withdrawn_proofs entry must have been run and SEEN TO FAIL in this
+session's transcript, with a non-empty withdrawn_reason and cmd, and must
+not also appear in .proofs." >&2
     exit 2
   fi
   als_log "hook=$hook session=$session proof_gate=ok proofs=$n"
+  # POSTURE SPLIT (deliberate — read before touching this tail): everything
+  # above this line, including the withdrawn_proofs verdicts folded into
+  # $offenders, is fail-CLOSED like every sibling check in this function — a
+  # withdrawal that didn't run-and-fail, or carries an empty reason/cmd, or
+  # double-dips against .proofs, blocks exit 2 same as an unproven .proofs
+  # entry. Only this final message ACCUMULATION (via als_append_pending_sysmsg,
+  # see its header for why this function does not emit its own JSON directly)
+  # inherits the cost-reporter's never-block posture — a reporting failure
+  # must never re-block an already-validated, already-passed gate. Do not let
+  # "never block" leak upward into the validation logic above this line —
+  # only the append below is allowed to fail silently.
+  if [ -n "$withdrawn_ok" ]; then
+    als_append_pending_sysmsg "Withdrawn proofs: $withdrawn_ok"
+  fi
+}
+
+# Reporter (NOT a gate): on a `complete` declaration, APPEND the loop's mined
+# cost to $ALS_PENDING_SYSMSG (emitted as a single top-level systemMessage at
+# the loop_stall_guard.sh call site), mechanically — so a `complete` loop can
+# no longer finish without the human seeing what it cost, the way SKILL.md's
+# Phase 13 prose has always demanded but a model could silently skip. This is
+# the fix for that: prose can't enforce prose, a hook can.
+#
+# DELIBERATE POSTURE INVERSION — read this before "fixing" this function:
+# every other gate in this file (check_verify_loop.sh and
+# check_confidence_labels.sh follow the same house idiom elsewhere) runs its
+# jq emission FIRST and lets that emission's exit status gate the caller's
+# own `exit 0` — i.e. they fail TOWARD blocking. This function does the
+# OPPOSITE on purpose: it must NEVER block, under any failure. Rationale:
+# dc_mine_token_usage (hooks/scripts/lib/loop_cost.sh:7-12) is contractually
+# fail-open to `{}` on any mining error and documents that it "must never
+# block a caller" — retro.json's `.cost` can legitimately be `{}` (miner ran,
+# failed open) on an otherwise perfectly valid, already-finished loop. If
+# this reporter were written in the house fail-closed style, a miner bug
+# would deadlock a loop that has ALREADY passed the retro/work_units/proof
+# gates above it — strictly worse than the unrecorded-cost bug it exists to
+# fix. Any error path here must therefore emit nothing and return, never
+# exit non-zero. Do not widen this into the house fail-closed idiom.
+#
+# Fires ONLY on `category == "complete"` (case-insensitively, mirroring the
+# category_lc idiom shared by every sibling gate above). Reads retro.json at
+# `$(dirname "$ALS_PATH")/retro.json` — same resolution als_gate_retro_on_complete
+# uses. By the time this runs (called AFTER the retro/work_units/proof gates
+# at the loop_stall_guard.sh call site), retro.json is already proven present
+# and parseable with schema_version >= 1 by als_gate_retro_on_complete, so
+# this function does not re-validate file existence/parseability defensively
+# — it only branches on the fields it needs.
+#
+# Behaviour matrix (see skills/agentic-loop/teardown.md for the cost-mining
+# contract this reads):
+#   schema_version < 2 (legacy, pre-cost-miner retro)      -> silent
+#   schema_version >= 2, .cost populated (has a usd total) -> print USD +
+#     tokens + staleness age
+#   schema_version >= 2, .cost non-empty but MISSING total_usd_estimate
+#     and/or total_tokens (partial miner output, schema drift) -> print
+#     "cost recorded but incomplete (missing <field(s)>)" — NEVER return
+#     silently and NEVER fabricate a $ figure. A silent return here would
+#     recreate, inside this very mechanism, the exact failure this PR exists
+#     to fix: a cost that exists on disk but never reaches the human.
+#   schema_version >= 2, .cost == {} (miner ran, failed open) -> print "cost
+#     unavailable (miner returned no data)" — NEVER a fabricated $ figure
+#   schema_version >= 2, .cost absent (teardown skipped the mining sub-step)
+#     -> print "cost not recorded" — deliberately distinct text from the
+#     miner-failed-open case above: absent = step skipped, {} = miner ran and
+#     came back empty. Different bugs, different messages; collapsing them
+#     into one message would silently relocate the original bug (a cost the
+#     human never sees) from model-omission to hook-omission instead of
+#     fixing it. The incomplete-but-non-empty case above is a THIRD distinct
+#     message for the same reason — collapsing it into either the {} case or
+#     a silent return would do the same thing this whole PR exists to stop.
+# schema_version is therefore the row-2-vs-row-4 discriminator, not
+# cost-presence: rows 2 and 4 both have `.cost` absent, so cost-presence
+# alone cannot tell "legacy loop, nothing to report" from "sv2 loop, teardown
+# skipped a step it should have run".
+#
+# Staleness: computed from `.cost.prices_as_of` (a YYYY-MM-DD date string) vs
+# today, in DAYS. The date math itself fails open — a `prices_as_of` value
+# `date` cannot parse falls back to printing the raw string verbatim rather
+# than erroring or fabricating an age. Staleness is reported inline as
+# information, never as a block: the shipped price table is routinely weeks
+# stale, so treating staleness as a failure condition would fire on every
+# single loop.
+# prices_as_of is unverifiable self-report — it measures "days since a human
+# typed a date here," not "are the rates still correct" (no pricing API
+# exists to check against; see model_prices.json's price_source note). Past
+# this many days, nag a human to go check, without claiming the RATES
+# themselves are wrong (that can never be known from a date alone).
+# Staleness threshold in days. 14, not 30, and the reason is empirical rather
+# than aesthetic: the shipped table sits at prices_as_of 2026-06-24 — 23 days
+# old at the time this was written. A 30-day threshold is SILENT on the real
+# table, i.e. the nag would never fire on the exact data that motivated it,
+# which is a feature that exists only in its own tests. 14 also roughly tracks
+# how often published rates actually move. Nothing enforces this number; it is
+# a judgement, and a wrong one is cheap here because this only ever WARNS.
+ALS_PRICE_STALE_DAYS=14
+als_report_cost_on_complete() {
+  local category="$1" hook="$2" session="$3"
+  local category_lc; category_lc=$(printf '%s' "$category" | tr '[:upper:]' '[:lower:]')
+  [ "$category_lc" = "complete" ] || return 0
+  command -v jq >/dev/null 2>&1 || { als_log "hook=$hook session=$session cost_report=skipped_no_jq"; return 0; }
+  [ -n "$ALS_PATH" ] || { als_log "hook=$hook session=$session cost_report=skipped_no_als_path"; return 0; }
+  local retro; retro="$(dirname "$ALS_PATH")/retro.json"
+  # Absent/unreadable retro: the retro gate above already blocked on this, so
+  # reaching here means it was skipped (no jq) or the file vanished mid-turn.
+  # Silent to the human by design — the gate owns that message — but logged.
+  [ -f "$retro" ] || { als_log "hook=$hook session=$session cost_report=skipped_no_retro"; return 0; }
+
+  # The >=2 comparison happens INSIDE jq, deliberately, and must stay there.
+  # als_gate_retro_on_complete (which runs immediately before this reporter
+  # and lets the retro through) validates schema_version with jq's NUMERIC
+  # `>=`, so a float 2.0 or 2.5 passes it. Comparing in bash instead means
+  # pattern-matching a string: `case $sv in *[!0-9]*)` matches the "." and
+  # drops a float — so a retro carrying a perfectly valid cost would pass the
+  # gate and then vanish here, printing nothing (verified end-to-end: a
+  # {"schema_version":2.0, cost:{...$64.46...}} retro emitted absolutely
+  # nothing). Two validators disagreeing about the same field is how the
+  # exact bug this reporter exists to fix survives INSIDE the fix.
+  # schema_version is authored freehand by an LLM per prose instruction, not
+  # emitted by trusted code — treat it as adversarial input like every other
+  # field here, even though no float instance exists in the corpus yet.
+  local sv_ok; sv_ok=$(jq -r '(.schema_version // 0) | if type == "number" then (. >= 2) else false end' "$retro" 2>/dev/null)
+  # Legacy grandfather: a schema_version 1 retro predates the cost miner
+  # entirely, so there is no cost to report and silence is correct. Logged
+  # anyway — a silent path that leaves NO trace is indistinguishable from a
+  # broken one during an audit, which is the whole failure class this
+  # reporter exists to close.
+  [ "$sv_ok" = "true" ] || { als_log "hook=$hook session=$session cost_report=skipped_legacy_or_bad_sv"; return 0; }
+
+  local cost_type; cost_type=$(jq -r '(.cost // null) | type' "$retro" 2>/dev/null)
+  local msg=""
+  case "$cost_type" in
+    object)
+      local is_empty; is_empty=$(jq -r '(.cost | length) == 0' "$retro" 2>/dev/null)
+      if [ "$is_empty" = "true" ]; then
+        msg="cost unavailable (miner returned no data)"
+      else
+        # Scalars only. `jq -r` on a non-scalar (array/object) emits its
+        # PRETTY-PRINTED form — real newlines and all — which then lands
+        # inside the human-facing message: "Loop cost: $[\n 1,\n 2\n] (...)"
+        # (verified). That is not the "visibly-wrong beats fabricated" tradeoff
+        # this function makes elsewhere: that rule assumes a raw value a human
+        # can eyeball on one line, and it smuggles newlines into a report the
+        # terminal renders. A field of the wrong TYPE is unusable data, which
+        # is exactly what the incomplete path below already exists to report —
+        # so select non-scalars to empty and let them fall into it.
+        local usd tokens prices_as_of
+        usd=$(jq -r '(.cost.total_usd_estimate | select(type=="number" or type=="string")) // empty' "$retro" 2>/dev/null)
+        tokens=$(jq -r '(.cost.total_tokens | select(type=="number" or type=="string")) // empty' "$retro" 2>/dev/null)
+        prices_as_of=$(jq -r '(.cost.prices_as_of | select(type=="string")) // empty' "$retro" 2>/dev/null)
+        if [ -z "$usd" ] || [ -z "$tokens" ]; then
+          local missing=""
+          [ -z "$usd" ] && missing="total_usd_estimate"
+          if [ -z "$tokens" ]; then
+            [ -n "$missing" ] && missing="${missing}, total_tokens" || missing="total_tokens"
+          fi
+          msg="cost recorded but incomplete (missing ${missing})"
+          als_log "hook=$hook session=$session cost_report=cost_incomplete"
+          als_append_pending_sysmsg "$msg"
+          return 0
+        fi
+        # Staleness age. WARNS inline, never blocks: a stale price table means
+        # the table needs maintenance, not that this loop's work is invalid —
+        # and the table is routinely weeks old, so blocking on it would refuse
+        # every completion.
+        #
+        # The strict shape check before `date` is load-bearing, for the same
+        # reason as the printf guard below: `date -j -f %Y-%m-%d` does NOT
+        # reject trailing garbage — it silently ACCEPTS "2026-06-24FORGED",
+        # "2026-06-24 anything", and even an embedded-newline value, parsing
+        # the leading date and ignoring the rest (verified on macOS). A
+        # corrupt prices_as_of would therefore render a confident, precise
+        # "23 days old" computed from a value nobody should trust. Only pure
+        # garbage ("not-a-date") fails the parse and falls back to raw.
+        # So: gate on the exact YYYY-MM-DD shape FIRST, and let anything else
+        # print raw. Visibly-wrong beats plausibly-fabricated — the same rule
+        # the USD guard follows.
+        local age="$prices_as_of"
+        case "$prices_as_of" in
+          [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9])
+            local then_epoch now_epoch
+            then_epoch=$(date -j -f "%Y-%m-%d" "$prices_as_of" +%s 2>/dev/null)
+            now_epoch=$(date +%s 2>/dev/null)
+            if [ -n "$then_epoch" ] && [ -n "$now_epoch" ]; then
+              local days=$(( (now_epoch - then_epoch) / 86400 ))
+              age="prices as of $prices_as_of, $days days old"
+              # Nag, never block: past the threshold, tell a human to go
+              # check the pricing page. The claim is strictly about the
+              # DATE being old, never that the rates are wrong — this
+              # function has no way to know that.
+              # A prices_as_of in the FUTURE yields negative days and renders
+              # "-10 days old", which is nonsense to read and looks like a bug.
+              # It is not a fabrication risk (no figure is invented and nothing
+              # blocks), so it stays a display fix, not a guard: say plainly the
+              # date is in the future and let the human judge it.
+              if [ "$days" -lt 0 ]; then
+                age="prices as of $prices_as_of, dated in the future (check the date)"
+              elif [ "$days" -gt "$ALS_PRICE_STALE_DAYS" ]; then
+                age="${age} (checks the date only, not the rates) — verify at claude.com/pricing and bump prices_as_of"
+              fi
+            fi
+            ;;
+        esac
+        # Round for display only: the miner stores full float precision
+        # ($64.45735454999999), which reads as noise in a one-line terminal
+        # report. Rounding happens HERE, not at extraction, so `usd` stays raw
+        # for the emptiness check above that drives the incomplete-data path.
+        #
+        # The numeric guard is NOT ceremony: `printf '%.2f'` does NOT fail on a
+        # non-numeric input, it silently prints 0.00 (verified). Handing it a
+        # garbage value would therefore FABRICATE "$0.00" — inventing a figure
+        # from unusable data is the precise failure this reporter exists to
+        # prevent (loop 0d3fb487 omitted its cost AND authored a false
+        # explanation for the omission). So: only round something that is
+        # actually a number; otherwise print the raw value and let it look
+        # wrong, because visibly-wrong beats plausibly-fabricated.
+        local usd_disp="$usd"
+        case "$usd" in
+          ''|*[!0-9.eE+-]*) ;;
+          *) usd_disp=$(printf '%.2f' "$usd" 2>/dev/null) || usd_disp="$usd" ;;
+        esac
+        [ -n "$usd_disp" ] || usd_disp="$usd"
+        msg="Loop cost: \$${usd_disp} (${tokens} tokens), ${age}"
+      fi
+      ;;
+    *)
+      msg="cost not recorded"
+      ;;
+  esac
+
+  [ -n "$msg" ] || { als_log "hook=$hook session=$session cost_report=skipped_empty_msg"; return 0; }
+  # Strip control characters before the message reaches a terminal. Every
+  # value interpolated above is retro.json-derived, and jq --arg guarantees
+  # only that the JSON stays well-formed — a live ESC (0x1B) survives JSON
+  # decode intact and lands in whatever renders this (verified). Whether the
+  # harness neutralises it is outside this repo and unknowable from here; a
+  # hook has no business shipping raw control bytes to a terminal on that
+  # assumption. Same posture als_log already takes on its own newlines.
+  # Printable + literal space only. NOT [:space:] — that class includes VT
+  # (0x0b) and FF (0x0c), which would survive the strip and reach the terminal
+  # (verified: `printf 'A\013B\014C' | tr -c '[:print:][:space:]' ' '` passes
+  # both through). FF clears the screen on many terminals. The follow-up tr
+  # below only ever mapped \n\r\t, so those two had no second line of defence.
+  # Found by the security pass on this PR; it is pre-existing (PR #204 wrote
+  # it) rather than introduced here, but it is one character on a line this
+  # change already touches, and "I shipped it last loop" is not a reason to
+  # leave a control byte heading for a terminal.
+  msg=$(printf '%s' "$msg" | tr -c '[:print:] ' ' ' | tr '\n\r\t' '   ')
+  # Log the outcome CLASS, never the message body: the body interpolates
+  # retro.json-derived values, and als_log's sanitisation is a backstop, not a
+  # reason to widen what reaches the log. The class is what a post-hoc audit
+  # actually needs — "did the human get a cost line, and if not, why".
+  local outcome="reported"
+  case "$msg" in
+    "cost unavailable"*) outcome="miner_failed_open" ;;
+    "cost not recorded"*) outcome="cost_absent" ;;
+    "cost recorded but incomplete"*) outcome="cost_incomplete" ;;
+  esac
+  als_log "hook=$hook session=$session cost_report=$outcome"
+  als_append_pending_sysmsg "$msg"
+  return 0
 }
