@@ -202,6 +202,37 @@ describe("checkArtifact", () => {
     expect(result.passed).toBe(false);
   });
 
+  // sync-docs-nightly's actual defect shape: an `exists` predicate accepts a
+  // log whose run aborted or was refused, as long as it wrote *something*.
+  // These two cases pin the `contains`/`run=ok` gate against that shape — an
+  // aborted/refused run must fail, and only a run that actually reached
+  // `run=ok` may pass. If checkArtifact ignored the marker and only checked
+  // presence, both assertions would pass.
+  it("fails a 'contains'/'run=ok' predicate on a docs-sync run log that aborted without reaching run=ok", () => {
+    const path = join(dir, "run-2026-07-17.log");
+    writeFileSync(path, "2026-07-17T10:00:00Z abort=duplicate-work\n2026-07-17T10:00:01Z refused=merge\n");
+    const artifact: ExpectedArtifact = {
+      artifactPath: path,
+      maxAgeSeconds: 129600,
+      predicate: { kind: "contains", marker: "run=ok" },
+    };
+    const result = checkArtifact(artifact, { ...ctx, vault: dir });
+    expect(result.passed).toBe(false);
+    expect(result.reason).toMatch(/marker/i);
+  });
+
+  it("passes a 'contains'/'run=ok' predicate on a docs-sync run log that reached run=ok", () => {
+    const path = join(dir, "run-2026-07-17.log");
+    writeFileSync(path, "2026-07-17T10:00:00Z start\n2026-07-17T10:05:00Z run=ok\n");
+    const artifact: ExpectedArtifact = {
+      artifactPath: path,
+      maxAgeSeconds: 129600,
+      predicate: { kind: "contains", marker: "run=ok" },
+    };
+    const result = checkArtifact(artifact, { ...ctx, vault: dir });
+    expect(result.passed).toBe(true);
+  });
+
   it("fails a template using {vault} whose ../ traversal resolves outside the vault root", () => {
     const outside = join(dir, "..", "outside-secret.md");
     writeFileSync(outside, "leaked");
