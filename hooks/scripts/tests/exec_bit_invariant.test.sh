@@ -51,6 +51,7 @@ manifest_paths=(
   hooks/scripts/check_verify_loop.sh
   hooks/scripts/comment_citation_gate.sh
   hooks/scripts/crack_on_gate.sh
+  hooks/scripts/crack_on_prose_gate.sh
   hooks/scripts/destructive_bash_gate.sh
   hooks/scripts/enforce_pr_workflow.sh
   hooks/scripts/inject_bootstrap.sh
@@ -75,6 +76,7 @@ manifest_modes=(
   100644
   100644
   100644
+  100755
   100755
   100755
   100755
