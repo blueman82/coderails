@@ -1025,7 +1025,26 @@ als_report_cost_on_complete() {
             age="prices as of $prices_as_of, $days days old"
           fi
         fi
-        msg="Loop cost: \$${usd} (${tokens} tokens), ${age}"
+        # Round for display only: the miner stores full float precision
+        # ($64.45735454999999), which reads as noise in a one-line terminal
+        # report. Rounding happens HERE, not at extraction, so `usd` stays raw
+        # for the emptiness check above that drives the incomplete-data path.
+        #
+        # The numeric guard is NOT ceremony: `printf '%.2f'` does NOT fail on a
+        # non-numeric input, it silently prints 0.00 (verified). Handing it a
+        # garbage value would therefore FABRICATE "$0.00" — inventing a figure
+        # from unusable data is the precise failure this reporter exists to
+        # prevent (loop 0d3fb487 omitted its cost AND authored a false
+        # explanation for the omission). So: only round something that is
+        # actually a number; otherwise print the raw value and let it look
+        # wrong, because visibly-wrong beats plausibly-fabricated.
+        local usd_disp="$usd"
+        case "$usd" in
+          ''|*[!0-9.eE+-]*) ;;
+          *) usd_disp=$(printf '%.2f' "$usd" 2>/dev/null) || usd_disp="$usd" ;;
+        esac
+        [ -n "$usd_disp" ] || usd_disp="$usd"
+        msg="Loop cost: \$${usd_disp} (${tokens} tokens), ${age}"
       fi
       ;;
     *)

@@ -1504,4 +1504,32 @@ check "cost-report: malformed prices_as_of -> raw string falls back into the mes
 case "$msg_baddate" in *"days old"*) computed_age=1 ;; *) computed_age=0 ;; esac
 check "cost-report: malformed prices_as_of -> no fabricated 'days old' age computed" 0 "$computed_age"
 
+# USD display rounding: the miner stores full float precision, which reads as
+# noise in a one-line terminal report. Round to 2dp for display.
+reset; T=$(mk_transcript 1 "All done.
+LOOP-STOP: complete — done"); write_file in-progress S1 0
+write_retro S1 '{"schema_version":2, "cost":{"total_usd_estimate":64.45735454999999,"total_tokens":93987957,"prices_as_of":"2026-06-24"}}'
+run_capture_stdout "$(payload "$T" S1)"
+msg_round=$(system_message "$STDOUT_OUT")
+case "$msg_round" in *'$64.46'*) rounded=1 ;; *) rounded=0 ;; esac
+check "cost-report: float-noise USD is rounded to 2dp for display" 1 "$rounded"
+case "$msg_round" in *"45735454"*) raw_float=1 ;; *) raw_float=0 ;; esac
+check "cost-report: raw float precision does not leak into the message" 0 "$raw_float"
+
+# Anti-fabrication guard on the rounding path. `printf '%.2f'` does NOT fail on
+# a non-numeric input — it silently prints 0.00 (verified). Rounding a garbage
+# value would therefore FABRICATE "$0.00" from unusable data, which is the
+# exact failure class this reporter exists to prevent. A non-numeric USD must
+# print RAW (visibly wrong) rather than rounded (plausibly fabricated).
+reset; T=$(mk_transcript 1 "All done.
+LOOP-STOP: complete — done"); write_file in-progress S1 0
+write_retro S1 '{"schema_version":2, "cost":{"total_usd_estimate":"not-a-number","total_tokens":42,"prices_as_of":"2026-06-24"}}'
+run_capture_stdout "$(payload "$T" S1)"
+check "cost-report: non-numeric USD -> allow (never blocks)" 0 "$RC_OUT"
+msg_nan=$(system_message "$STDOUT_OUT")
+case "$msg_nan" in *'$0.00'*) fabricated=1 ;; *) fabricated=0 ;; esac
+check "cost-report: non-numeric USD is NOT fabricated into \$0.00" 0 "$fabricated"
+case "$msg_nan" in *"not-a-number"*) raw_shown=1 ;; *) raw_shown=0 ;; esac
+check "cost-report: non-numeric USD falls back to the raw value" 1 "$raw_shown"
+
 [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails)"; exit 1; }
