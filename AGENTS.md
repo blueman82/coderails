@@ -81,11 +81,32 @@ no direct pushes), which no local agent can fake. The local hook complements
 branch protection; it does not replace it. (The same honest boundary applies to
 the Stop-hook gates — they can force a declared step to appear, not to be real.)
 
-**This repo.** This repo deliberately does not enable GitHub branch protection
-(2026-07-15) — that's a standing decision, not a pending TODO. So here, the
-server-side layer described above is absent, and the enforcement ceiling is
-unmitigated: the redirect-and-audit layer is the whole story, by
-design.
+**This repo.** This repo deliberately does not enable general GitHub branch
+protection (2026-07-15) — that's a standing decision, not a pending TODO, and
+it is NOT reversed by what follows. So for ordinary PRs, the server-side layer
+described above is absent, and the enforcement ceiling is unmitigated: the
+redirect-and-audit layer is the whole story, by design.
+
+**One narrow server-side exception: the tier-review ruleset.** The owner's
+2026-07-16 instruction — a forged tier-0 verdict and a bypassed merge gate
+must both be *impossible*, not costly — is explicit authorisation for a single
+scoped carve-out, not a general reopening of branch protection. A GitHub
+ruleset on `main` requires a PR before merge and requires the `tier-review`
+commit-status context to be green; it does **not** require human reviews, and
+it does not apply any of the other branch-protection knobs (no required
+approvals, no required linear history, no other status checks). The daemon
+that posts `tier-review` (`scripts/tier-gate/`) is a root-owned launchd
+process running as a dedicated machine-user identity whose credentials only
+root can read — see `docs/coderails/specs/tier-review-spec.md`'s capability
+lattice for why the verdict is unforgeable (the agent's own `gh` token carries
+no commit-status permission) and the gate is unbypassable (that same token
+carries no `administration` permission, so it can neither push around the
+ruleset nor edit it away). This narrow ruleset is an owner-provisioned,
+owner-activated addition living entirely outside the local hook layer this
+section otherwise describes — it does not change anything about how
+`enforce_pr_workflow`/`merge.sh` behave for PRs that never carry a tier-0
+artifact, and it is dormant until the owner's Pro-or-public choice unblocks
+ruleset activation on this repo (see the spec's Availability constraint).
 
 **Sandboxed workers narrow this ceiling for worker processes only, never for the orchestrator.** With `config.sandbox_workers: true` (`skills/agentic-loop/SKILL.md` Phase 3/3a), an implementation-unit worker runs as a separate process wrapped by `@anthropic-ai/sandbox-runtime` (srt, pinned version), OS-enforced (Seatbelt on macOS, bubblewrap on Linux) — outside the agent's own trust domain, the first coderails enforcement layer that is not a hook. The orchestrator itself is never sandboxed and its ceiling above is unchanged.
 
@@ -108,7 +129,9 @@ When a skill instructs an action that a hook gates — e.g. `git merge`/`gh pr c
 
 A second, additive merge gate covers task evals: `/coderails:task-evals` generates and freezes a tiered `evals.json` for the PR (see `skills/task-evals/SKILL.md`), and `/coderails:post-evals <PR#>` validates and posts it as a SHA-bound PR comment marked `coderails-eval-summary` (built from `scripts/lib/eval-artifact.sh`). `scripts/merge.sh` reads this artifact directly after the review-artifact gate, in the same `OPEN` branch before `gh pr merge` — same fail-closed rc semantics: a `gh` fetch failure or a `NO-GO`/missing artifact both block the merge. Loop scope has its own gate: `loop_state_guard` additionally checks for a loop-scope `evals.json` when the loop's `progress.json` `work_units` field reports ≥3 units, blocking the stop if none is found — fail-open (no block) when `work_units` is absent, matching the hook's presence-not-provenance posture elsewhere. A loop-scope `result` must also be computed by `scripts/post_evals.sh grade-loop` (never hand-written by the orchestrator) and carry a valid `grading` stamp — `loop_state_guard` demotes an otherwise-valid `GO`/`TIER0` lacking that stamp to `UNSTAMPED` and blocks the same way.
 
-A third instance of the same seam: the `agentic-loop` skill's Phase 13 teardown instructs writing `retro.json` (`schema_version` 2, since the cost-mining sub-step below) beside `progress.json` before a `complete` declaration; the `loop_stall_guard` hook gates that declaration on it, accepting `schema_version >= 1` (forward-compatible, not an exact-version check). Resolution when blocked is the same as any other seam gate — do the thing the skill already told you to do: assemble and write the retro per Phase 13, then re-declare `complete`. As of `schema_version` 2, Phase 13's step 1 also sources `hooks/scripts/lib/loop_cost.sh` and runs `dc_mine_token_usage`, writing its returned object as `retro.cost` (a dated, once-frozen per-model token/USD breakdown) and lifting its `models_used` array out to top-level `retro.models_used` — not duplicated inside `cost` — fail-open (a miner failure leaves both empty, never blocks teardown) — see `skills/agentic-loop/SKILL.md`'s Phase 13, and its `teardown.md` detail-carrier, for the full field contract.
+A third, additive merge gate covers tier-0 self-exemption: when `config.tier_review.machine_user` is set (absent/null by default — inactive, other installs unaffected) AND the PR's eval artifact is tier 0, `scripts/merge.sh` and `enforce_pr_workflow` additionally require the newest `tier-review` commit status on the head SHA to be `state=success` posted by exactly that configured login — a mismatch (wrong creator, missing status, non-success state, or a `gh` fetch failure) blocks with a named remedy. This is a **redundant local layer, not the primary control**: the primary control, when active, is the server-side ruleset described in the enforcement-ceiling section above (`scripts/tier-gate/` daemon + ruleset). The local check exists to fail loudly on misconfiguration and to hold the line during the interim before the owner activates the ruleset — it is in the agent's own trust domain like every other local gate, so it complements the ruleset, never substitutes for it. See `skills/task-evals/SKILL.md`'s tier rules for what makes an artifact tier 0.
+
+A fourth instance of the same seam: the `agentic-loop` skill's Phase 13 teardown instructs writing `retro.json` (`schema_version` 2, since the cost-mining sub-step below) beside `progress.json` before a `complete` declaration; the `loop_stall_guard` hook gates that declaration on it, accepting `schema_version >= 1` (forward-compatible, not an exact-version check). Resolution when blocked is the same as any other seam gate — do the thing the skill already told you to do: assemble and write the retro per Phase 13, then re-declare `complete`. As of `schema_version` 2, Phase 13's step 1 also sources `hooks/scripts/lib/loop_cost.sh` and runs `dc_mine_token_usage`, writing its returned object as `retro.cost` (a dated, once-frozen per-model token/USD breakdown) and lifting its `models_used` array out to top-level `retro.models_used` — not duplicated inside `cost` — fail-open (a miner failure leaves both empty, never blocks teardown) — see `skills/agentic-loop/SKILL.md`'s Phase 13, and its `teardown.md` detail-carrier, for the full field contract.
 
 ## Hook event map (`hooks/hooks.json`)
 
