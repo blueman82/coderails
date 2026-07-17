@@ -19,7 +19,7 @@ Nineteen-plus numbered phases (−2 through 13, with lettered sub-phases) is too
 
 | Stage | Phases |
 |---|---|
-| Setup | -2, -1, 0, 0.5 |
+| Setup | -2, -1, 0, 0.4, 0.5 |
 | Pre-flight | 1, 2, 2.5, 2.6, 2.7, 2.8 |
 | Build | 3, 3a, 4 |
 | Review & Ship | 4b, 5, 6, 7&8 |
@@ -115,6 +115,10 @@ Then respond.
 - "Help me debug" → diagnostic-only. Do not write code without explicit go-ahead.
 
 Match the confirmation cadence to the envelope class for the rest of the session — every "do you want me to..." inside an authorised envelope is a stall the user has to clear, and stalls cost more than the occasional over-reach you'd avoid by asking.
+
+### Phase 0.4 — Pin the orchestrator's own model at loop launch
+
+**Token-burn rule (row 2 of 4).** At loop launch — alongside Phase 0's envelope read, before Phase 1's plan — pin the orchestrator's own model explicitly via `/model` (`opus` or `sonnet`) — never leave it on an unpinned default. An unpinned default can silently resolve to a costlier frontier tier (e.g. 2x the cache-read rate of a pinned mid-tier model), and the orchestrator re-reads its whole growing context on every turn for the life of the loop, so the rate compounds across the entire session. This is distinct from Phase 2.8's worker model routing — that table assigns roles to spawned workers; this pin is for the orchestrator (main context) itself, decided once at launch, not re-litigated per phase.
 
 ### Phase 0.5 — Orchestrator operating rules (the conductor obeys its own rules)
 
@@ -275,6 +279,8 @@ The delegation decision is a two-rung ladder, not "delegate vs. do it yourself":
 
 The only work that legitimately stays in main context: reading for orchestration decisions (git status, `gh pr view`, log reads, the Phase 12 artifact checks), and the planning/cadence the skill describes. If you catch yourself running `Edit`/`Write`/`MultiEdit` in main context inside an authorised loop, stop — that work belongs in a routed worker agent.
 
+**Orchestrator never authors deliverable files inline (token-burn rule, row 4 of 4).** The orchestrator's own `Write`/`Edit` calls are for loop-state only — `progress.json`, `spec.md`, `plan.md`, `retro.json`, and the like. Every deliverable artifact (code, docs, config, any file that ends up in a PR) is authored by a spawned worker, never typed inline in main context. Workers report back structured, confidence-labelled verdicts (Phase 11) — a short claim plus the command that verified it — not long narrative prose; a verbose report re-inflates the same context this rule is trying to keep small.
+
 If the user has explicitly asked for a spawned team in their prompt, it is non-negotiable — spawn named teammates even if a flat sequence of solo `Agent` calls would technically work.
 
 **Sandboxed dispatch (`config.sandbox_workers: true`).** When set, implementation-unit workers (rung 1 and each teammate in rung 2) dispatch as a separate OS-sandboxed process instead of an in-process `Agent` call: `scripts/sandbox/spawn-sandboxed-worker.sh <worktree> <prompt_file> <model>` (worktree must already exist; `prompt_file` holds the same self-contained worker prompt Phase 3a requires — every travel-rule bullet still applies, just written to a file instead of passed as an `Agent` prompt string). Orchestration reads (git status, `gh pr view`, log reads) stay in-process regardless — only implementation units route through the sandbox. Trade-off: a sandboxed worker is a separate process, so it has no `SendMessage`/task-list coordination — reporting is artifact-terminal only (PR state), same terminal-state discipline as Phase 3a's own contract. Seam: a spawn failure (non-zero rc, non-git worktree, missing prompt file) is a failed dispatch — treat it exactly like an idle/failed `Agent` call under Phase 4, re-derive from the artifact, don't retry blindly. In the sandboxed path, push with plain `git push origin <branch>` — no `-u` (concurrency hygiene: parallel sandboxed workers would otherwise race to write `branch.*` into one shared primary `.git/config`; on this pinned srt version `-u` also silently fails its config write while still exiting 0, a partial-failure mode this contract avoids rather than depends on). Any in-worker GitHub API call must use curl, not `gh` — `gh`'s Go/trustd TLS verification does not work inside the sandbox on this pinned version.
@@ -323,6 +329,8 @@ When an agent goes idle without a report:
 
 Only after the artifact check fails should you assume failure. Then respawn — and per Phase 10, give it a new name.
 
+**Orchestrator probe discipline — batch the battery, cap the output on a tool-output diet (token-burn rules, rows 3 and 4 of 4).** The four checks above (and any similar verification battery — Phase 12's artifact checks, gate-state reads, `gh pr view` sequences) go in ONE compound Bash call per battery, not one call per check. Each orchestrator turn re-reads the full, growing context accumulated so far; running 4 probes as 4 separate turns costs roughly 4x the cache-read volume of the same 4 probes chained in one script (`&&`/`;`-joined, or piped) and read once. Compound the reads, not the decisions — still stop and reason once the battery's combined output is in hand. Additionally, cap what each probe returns before it enters context — pipe through `jq -c`, `head`, or an equivalent limiter — so a large `git diff --stat` or `gh pr view` payload doesn't sit in the transcript re-inflating every subsequent turn's re-read for the rest of the loop.
+
 ### Phase 4b — PR review invokes `/pr-review-toolkit:review-pr <PR#>` as a Skill, then `/coderails:post-review <PR#>`
 
 When a phase reaches "review the PR" (after a `/workflow` agent has pushed a PR, before merge), invoke the **`/pr-review-toolkit:review-pr <PR#>`** Skill — passing the PR number as the argument — which itself fans out the six specialised reviewers plus a security pass. Do NOT hand-roll the reviewers as separate `Agent` or `Task` spawns; use the Skill invocation.
@@ -336,6 +344,8 @@ When a phase reaches "review the PR" (after a `/workflow` agent has pushed a PR,
 Before `/coderails:merge`, the loop must also produce a second, independent artifact: run `/coderails:task-evals` (scope: `pr`; docs-only/single-unit PRs that meet its tier-0 predicate get the lightweight exemption path) then `/coderails:post-evals`. `scripts/merge.sh` hard-gates on this eval artifact separately from the review artifact above — same fail-closed posture, no config opt-out.
 
 **Worktree teardown, immediately after `/coderails:merge` confirms this work-unit's PR is merged.** A work-unit's worktree (created per the `origin/main`-based instruction above) is scoped to that one PR — once it's merged, the worktree has no further purpose and must not be left to accumulate across a multi-work-unit loop. Clean up the worktree using `coderails:finishing-a-development-branch`'s Step 6 mechanics — the commands, provenance check, and cwd-pinned-worktree caveat are in [finishing-out.md](finishing-out.md). (The PR is already merged via `/coderails:merge` at this point, so this is the Step 6 cleanup only, not the skill's push/PR outcome-selection.) This runs per-work-unit at this point in Phase 4b — not deferred to Phase 9/13's loop-level teardown, which handles wiki/retro artifacts, not worktrees.
+
+**MANDATORY compaction at the PR-merge boundary (token-burn rule, row 1 of 4 — the single largest saving).** Immediately after worktree teardown above, for THIS work-unit, the orchestrator MUST: (a) write this work-unit's phase summary into `progress.json` (state already current per Context-window persistence below), (b) run `/compact`, (c) re-read `progress.json` and `plan.md` to re-orient before starting the next work-unit. This is not optional and not skippable because the loop "still has headroom" — the orchestrator's context grows linearly across work-units and is re-read in full on every turn at orchestrator rates, so compacting at each merged-PR boundary is the biggest single lever this skill has for reducing token burn. This is a planned boundary action, not the early stop the Context-window persistence section warns against — do it precisely because the PR just merged and the state needed to resume already lives in `progress.json`/`plan.md`, not because context pressure is mounting.
 
 The six review dimensions the Skill covers:
 
@@ -464,6 +474,8 @@ This is the factory's own audit — raw facts for the human to judge, not a self
 ## Context-window persistence
 
 Do not stop work early because the context window is filling or a token budget is approaching. Context will compact and the session will continue — treat that as a non-event, not a stop condition. Never artificially truncate a task or declare "done" mid-loop because of token pressure. If a genuine stop condition (see below) is not met, keep going.
+
+**Compaction cadence (token-burn rule, row 1 of 4).** Compaction inside this loop is not left to fire opportunistically when the context window happens to fill — it is scheduled at a fixed boundary: immediately after each work-unit's PR merges (Phase 4b's per-unit close, above). At that boundary: write the phase summary into `progress.json`, run `/compact`, then re-read `progress.json` + `plan.md` to re-orient. The reason this is mandatory rather than a nice-to-have: the orchestrator re-reads its entire accumulated context on every turn, at orchestrator rates, for as long as that context keeps growing — so the PR-merge boundary, which is also the moment `progress.json` is guaranteed current, is the cheapest possible place to cut it back down. This is a scheduled boundary action, distinct from — and not in tension with — the "don't stop early" guidance above: that guidance is about not treating filling context as a reason to halt the loop; this rule is about not letting it fill unbounded between merges in the first place.
 
 **Loop state lives in a durable artifact, not in the conversation.** Maintain a single `progress.json` at the path printed by the loop-state path helper — resolve it by running the helper (Phase -2), never compute it yourself. Overwrite it (never append) at every phase boundary, recording the authorisation envelope verbatim, the current phase, work-unit states, and each phase's absorbed decisions. Field-by-field schema, the stub→enrich→teardown lifecycle, the hook-owned `loop_stop_counts` carry-forward rule, and the concurrency/ownership rules: see [loop-state.md](loop-state.md).
 
