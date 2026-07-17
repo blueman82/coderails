@@ -69,6 +69,28 @@ check "case4 negative control: failing suite reported FAILED, not SKIPPED" "yes"
 check "case4 negative control: no SKIPPED line for an exit-1 suite" "yes" "$(printf '%s' "$out4" | grep -q 'SKIPPED' && echo no || echo yes)"
 rm -rf "$TMP4"
 
+# --- case 5: NEGATIVE CONTROL — exit 4 (HIGH side of 3) must be reported
+# FAILED, not SKIPPED — pins the skip class from above, ruling out a mutant
+# skip check like `-ge 3` that would absorb exit 4 as a skip ---
+TMP5="$(new_scratch)"
+fake_suite "$TMP5" a_exit4.test.sh 4
+out5="$(bash "$TMP5/run_all.sh" 2>&1)"; rc5=$?
+check "case5 negative control: exit 4 -> exit 1 (never absorbed as skip)" "1" "$rc5"
+check "case5 negative control: exit-4 suite reported FAILED, not SKIPPED" "yes" "$(printf '%s' "$out5" | grep -q 'FAILED (exit 4)' && echo yes || echo no)"
+check "case5 negative control: no SKIPPED line for an exit-4 suite" "yes" "$(printf '%s' "$out5" | grep -q 'SKIPPED' && echo no || echo yes)"
+rm -rf "$TMP5"
+
+# --- case 6: NEGATIVE CONTROL — exit 2 (LOW side of 3) must be reported
+# FAILED, not SKIPPED — pins the skip class from below, ruling out a mutant
+# skip check like `-ne 0` that would absorb exit 2 as a skip ---
+TMP6="$(new_scratch)"
+fake_suite "$TMP6" a_exit2.test.sh 2
+out6="$(bash "$TMP6/run_all.sh" 2>&1)"; rc6=$?
+check "case6 negative control: exit 2 -> exit 1 (never absorbed as skip)" "1" "$rc6"
+check "case6 negative control: exit-2 suite reported FAILED, not SKIPPED" "yes" "$(printf '%s' "$out6" | grep -q 'FAILED (exit 2)' && echo yes || echo no)"
+check "case6 negative control: no SKIPPED line for an exit-2 suite" "yes" "$(printf '%s' "$out6" | grep -q 'SKIPPED' && echo no || echo yes)"
+rm -rf "$TMP6"
+
 if [ "$checks" -eq 0 ]; then
   echo "FAIL - zero checks ran — guard is vacuous"
   exit 1

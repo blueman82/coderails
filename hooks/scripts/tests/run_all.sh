@@ -30,6 +30,7 @@ if [ "$total" -eq 0 ]; then
   exit 1
 fi
 
+# Downstream consumers (eval/proof formulas) should gate on `fails`, not `passed==total` — a legitimate skip makes passed<total without being a failure.
 printf '\n--- run_all: %d/%d suites passed, %d skipped ---\n' "$((total - fails - skips))" "$total" "$skips"
 
 if [ "$skips" -eq "$total" ]; then
