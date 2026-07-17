@@ -15,11 +15,36 @@ fi
 
 deny() {
   local pat="$1"
-  jq -n --arg pat "$pat" --arg cmd "$cmd" '{
+  # route: the concrete safe alternative for this specific pattern, so the
+  # message doesn't just state a prohibition and withhold the way around it.
+  # Keyed on $pat's own text (set by each call site below via grep -oiE or a
+  # literal string) — this only changes what the DENY message SAYS, never
+  # which commands reach deny() in the first place.
+  # Case assumes the canonical lowercase form grep -oiE actually returns for
+  # these three patterns; an all-caps or irregular-casing command still
+  # denies (unaffected — the case-insensitive grep above already matched it),
+  # it just falls through to the generic route below instead of the specific
+  # one, same as any other unmapped pattern.
+  local route
+  case "$pat" in
+    *"git reset --hard"*)
+      route="Safe route: park the commits first with 'git branch backup/<desc> <ref>', then use 'git reset --keep <ref>' instead of --hard — --keep applies the same move but REFUSES (errors out) rather than clobbering when it would discard uncommitted working-tree changes, and the backup branch keeps the moved-past commits recoverable either way."
+      ;;
+    "rm "*)
+      route="Safe route: for a single file, use 'unlink <file>' instead of rm -rf. For a directory or multiple files, move the target into a temp dir (e.g. 'mkdir -p /tmp/trash && mv <target> /tmp/trash/') instead of deleting it outright."
+      ;;
+    *"git push --force"*)
+      route="Safe route: use 'git push --force-with-lease' instead of a naked --force — it refuses to overwrite a remote ref that has moved since your last fetch. Note --force-with-lease is ALSO blocked by this hook by default; add the exact line 'git-push-force-with-lease' to .claude/destructive_allowlist in the target repo to opt in before using it."
+      ;;
+    *)
+      route="No specific safe route is recorded for this pattern. To allow it, add a Bash permission rule to settings.json, or find a non-destructive equivalent for what you're trying to do."
+      ;;
+  esac
+  jq -n --arg pat "$pat" --arg cmd "$cmd" --arg route "$route" '{
     hookSpecificOutput: {
       hookEventName: "PreToolUse",
       permissionDecision: "deny",
-      permissionDecisionReason: ("Destructive pattern detected: " + $pat + "\nFull command: " + $cmd + "\nThis command is permanently blocked. To allow it, add a Bash permission rule to settings.json or use a non-destructive alternative.")
+      permissionDecisionReason: ("Destructive pattern detected: " + $pat + "\nFull command: " + $cmd + "\nThis command is permanently blocked. " + $route)
     }
   }'
   exit 0
