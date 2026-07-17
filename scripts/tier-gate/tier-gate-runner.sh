@@ -135,6 +135,23 @@ tg_pr_head_sha() {
 # Echoes each issue comment body for <pr>, base64-encoded one per line, in
 # comment order (oldest first) — same encoding idiom as git-common.sh's
 # pr::_trusted_comment_bodies, so multi-line bodies survive the `read` loop.
+#
+# No author filter, and that is SAFE here — deliberately, not by omission.
+# git-common.sh's reader filters to the merge-runner's own gh identity, but in
+# this deployment the agent self-merges, so that "trusted" author IS uid 501 —
+# the same identity as the adversary. Filtering by author cannot separate the
+# honest eval-artifact author from a forger when they are one uid; it would only
+# reject the honest artifact (authored by uid 501, not the machine user) and
+# brick every genuine tier-0 PR. The real defences against a forged marker are
+# elsewhere and do not depend on comment authorship:
+#   - A tier-0 claim is judged on the SHA-bound REAL diff (Fix 1/3), never on the
+#     marker's prose, so a forged `tier=0` marker still faces the judge + prefilter.
+#   - A `tier != 0` claim posts NO status (tg_gate_pr), so a forged non-tier-0
+#     marker mints no reusable success and merge.sh finds no tier-review approval
+#     -> fails closed. A later in-place edit back to tier=0 finds no terminal
+#     status and is re-judged (tg_should_gate).
+#   - merge.sh requires the status description to carry verdict=legitimate, so a
+#     bare state=success (however minted) is not a valid tier-0 approval.
 tg_pr_comments() {
     local pr="$1"
     tg_with_watchdog "$TIER_GATE_WATCHDOG_TIMEOUT" -- \
@@ -378,7 +395,7 @@ tg_should_gate() {
     esac
 }
 
-# ─── Judge (Task 3): blind verdict via direct Anthropic API call ─────────────
+# ─── Judge (Task 3): blind verdict via a claude -p subscription subprocess ───
 
 # TIER_GATE_JUDGE_MODEL: pinned model constant for the judge call.
 # claude-haiku-4-5 — chosen deliberately over the "always use Opus 4.8"
@@ -397,8 +414,13 @@ TIER_GATE_JUDGE_PROMPT_PATH="${TIER_GATE_JUDGE_PROMPT_PATH:-$(cd "$(dirname "${B
 # root-owned copy in a uid-501-UNWRITABLE tree — a root daemon exec'ing a
 # binary the adversary (uid 501) can swap is a privilege-escalation surface
 # worse than the one this gate closes. The default points at the root-owned
-# install (`sudo HOME=/var/root claude install stable`), NEVER uid 501's
-# ~/.local/bin/claude. install.sh owns keeping this current on `stable`.
+# install, NEVER uid 501's ~/.local/bin/claude. Provisioning this binary is a
+# MANUAL operator step, not something any code here performs: the operator runs
+# `sudo HOME=/var/root claude install stable` once to create it, and is
+# responsible for keeping it current on `stable` (e.g. a root-scheduled re-run).
+# install.sh does NOT install or update it — a future maintainer must not assume
+# the root-owned judge binary is auto-provisioned. See the tier-review spec's
+# operator checklist.
 TIER_GATE_CLAUDE_BIN="${TIER_GATE_CLAUDE_BIN:-/var/root/.local/bin/claude}"
 
 # TIER_GATE_JUDGE_HOME: the HOME (and cwd) the judge subprocess runs under.
@@ -681,8 +703,18 @@ tg_gate_pr() {
     fi
 
     if [[ "$tier" != "0" ]]; then
-        tg_post_status "$sha" "success" "verdict=not-tier-0 host=$(hostname)"
-        printf 'gated: pr=%s sha=%s tier=%s verdict=not-tier-0 state=success\n' "$pr" "$sha" "$tier"
+        # A non-tier-0 claim needs NO tier-review status, and must not get one:
+        # merge.sh only consults the tier-review gate when PR_EVAL_TIER == 0
+        # (scripts/merge.sh), so a tier-1/2 PR is gated entirely by its normal
+        # eval artifact, never by us. Posting a `success` here used to mint a
+        # reusable state=success token an adversary could launder into a tier-0
+        # pass: claim tier=1 (short-circuit success, no judge), then edit the
+        # marker to tier=0 in place — the SHA is unchanged, tg_should_gate sees
+        # the terminal success and never re-judges, and merge.sh (which reads
+        # only state+creator) can't tell that success from a real `legitimate`
+        # verdict. Posting nothing closes it: no token to launder, and a later
+        # tier=0 edit finds NO terminal status, so tg_should_gate re-judges it.
+        printf 'skip: pr=%s sha=%s reason=not_tier_0 (tier=%s, no status posted)\n' "$pr" "$sha" "$tier"
         return 0
     fi
 

@@ -161,10 +161,18 @@ WRAPPER
     return $rc
 }
 
-SUCCESS_RIGHT_CREATOR="[{\"state\":\"success\",\"creator\":{\"login\":\"${MACHINE_USER}\"}}]"
-SUCCESS_WRONG_CREATOR="[{\"state\":\"success\",\"creator\":{\"login\":\"repo-owner\"}}]"
-ERROR_STATUS="[{\"state\":\"error\",\"creator\":{\"login\":\"${MACHINE_USER}\"}}]"
-PENDING_STATUS="[{\"state\":\"pending\",\"creator\":{\"login\":\"${MACHINE_USER}\"}}]"
+# A GENUINE tier-0 approval carries verdict=legitimate in its description — only
+# the real `legitimate` judgment posts that (tier-gate-runner tg_gate_pr). The
+# gate now requires it: state=success + right creator is necessary but not
+# sufficient (closes the verdict-laundering path where a non-judged/minted
+# success is reused as a tier-0 pass).
+SUCCESS_RIGHT_CREATOR="[{\"state\":\"success\",\"creator\":{\"login\":\"${MACHINE_USER}\"},\"description\":\"verdict=legitimate host=h\"}]"
+SUCCESS_WRONG_CREATOR="[{\"state\":\"success\",\"creator\":{\"login\":\"repo-owner\"},\"description\":\"verdict=legitimate host=h\"}]"
+# A success with the RIGHT creator but WITHOUT verdict=legitimate — the laundered
+# / non-judged status an adversary would try to reuse. Must block.
+SUCCESS_NO_VERDICT="[{\"state\":\"success\",\"creator\":{\"login\":\"${MACHINE_USER}\"},\"description\":\"verdict=not-tier-0 host=h\"}]"
+ERROR_STATUS="[{\"state\":\"error\",\"creator\":{\"login\":\"${MACHINE_USER}\"},\"description\":\"verdict=error host=h\"}]"
+PENDING_STATUS="[{\"state\":\"pending\",\"creator\":{\"login\":\"${MACHINE_USER}\"},\"description\":\"verdict=pending host=h\"}]"
 
 # ─── Test 1: tier=0, config set, no status at all -> block ───────────────────
 run_tier_gate_test 0 "$MACHINE_USER" "[]"
@@ -179,10 +187,20 @@ rc=$?
 check "tier-review gate blocks on success with WRONG creator" 1 $rc
 check_msg "wrong-creator block message names the misconfig/forgery framing" "creator" "$LAST_STDERR"
 
-# ─── Test 3: tier=0, config set, success + RIGHT creator -> pass ─────────────
+# ─── Test 3: tier=0, success + RIGHT creator + verdict=legitimate -> pass ────
 run_tier_gate_test 0 "$MACHINE_USER" "$SUCCESS_RIGHT_CREATOR"
 rc=$?
-check "tier-review gate passes on success with RIGHT creator" 0 $rc
+check "tier-review gate passes on success with RIGHT creator + verdict=legitimate" 0 $rc
+
+# ─── Test 3b: tier=0, success + RIGHT creator but NO verdict=legitimate -> block
+# The verdict-laundering regression lock: a state=success by the machine user
+# whose description is NOT verdict=legitimate (e.g. a minted/non-judged status)
+# must NOT pass. Before the description check this passed (Test 3's old fixture
+# had no description) — a bare state+creator match was the whole gate.
+run_tier_gate_test 0 "$MACHINE_USER" "$SUCCESS_NO_VERDICT"
+rc=$?
+check "tier-review gate BLOCKS success+right-creator when description lacks verdict=legitimate" 1 $rc
+check_msg "laundering block message names verdict=legitimate" "verdict=legitimate" "$LAST_STDERR"
 
 # ─── Test 4: tier=0, config set, state=error -> block ────────────────────────
 run_tier_gate_test 0 "$MACHINE_USER" "$ERROR_STATUS"
