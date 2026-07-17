@@ -1,9 +1,9 @@
 #!/bin/bash
 #═══════════════════════════════════════════════════════════════════════════════
 #  install.sh │ Installs the tier-gate root daemon
-#  - Preflight: gh/jq/curl present; credentials file exists with BOTH keys
-#    (machine-user GH_TOKEN + ANTHROPIC_API_KEY); machine user resolvable as a
-#    repo collaborator.
+#  - Preflight: gh/jq/curl present; credentials file exists with all three
+#    keys (machine-user GH_TOKEN + ANTHROPIC_API_KEY + MACHINE_USER); machine
+#    user resolvable as a repo collaborator; ruleset visibility (honest MODE).
 #  - Renders com.coderails.tier-gate.plist.template with real paths.
 #  - Prints a repo-vs-installed diff for the runner + judge prompt and refuses
 #    to promote without confirmation — per spec decision 3, the live runner +
@@ -48,18 +48,23 @@ tgi_check_tools() {
 # ─── Preflight: credentials file ──────────────────────────────────────────────
 
 # tgi_check_credentials <path>
-# Verifies <path> exists and contains BOTH required keys (GH_TOKEN for the
-# machine-user identity's gh calls, ANTHROPIC_API_KEY for the judge). Named,
-# actionable failure per missing piece; rc 0 only when both are present with
-# non-empty values.
+# Verifies <path> exists and contains all THREE required keys: GH_TOKEN (the
+# machine-user identity's curl/gh calls), ANTHROPIC_API_KEY (the judge), and
+# MACHINE_USER (the login tg_post_status's live GET /user identity check
+# must match before it will ever post — see tier-gate-runner.sh's
+# tg_read_machine_user). MACHINE_USER lives here, in the same root-owned
+# file, rather than as a plist env var, because the daemon's plist only ever
+# passes TIER_GATE_CREDS (a path) — nothing else propagates into the
+# installed launchd job. Named, actionable failure per missing piece; rc 0
+# only when all three are present with non-empty values.
 tgi_check_credentials() {
     local path="$1"
     if [[ ! -f "$path" ]]; then
-        printf 'preflight: credentials file not found at %s — create it (KEY=value lines) with GH_TOKEN and ANTHROPIC_API_KEY before installing.\n' "$path"
+        printf 'preflight: credentials file not found at %s — create it (KEY=value lines) with GH_TOKEN, ANTHROPIC_API_KEY, and MACHINE_USER before installing.\n' "$path"
         return 1
     fi
     local ok=1 key
-    for key in GH_TOKEN ANTHROPIC_API_KEY; do
+    for key in GH_TOKEN ANTHROPIC_API_KEY MACHINE_USER; do
         local val
         val=$(grep -E "^${key}=" "$path" 2>/dev/null | head -1 | cut -d= -f2-)
         if [[ -z "$val" ]]; then

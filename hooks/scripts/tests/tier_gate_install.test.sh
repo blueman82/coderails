@@ -80,6 +80,7 @@ rc=$?
 check "tgi_check_credentials: empty file -> rc 1" "1" "$rc"
 check_contains "tgi_check_credentials: empty file -> names GH_TOKEN" "missing a non-empty GH_TOKEN=" "$out"
 check_contains "tgi_check_credentials: empty file -> names ANTHROPIC_API_KEY" "missing a non-empty ANTHROPIC_API_KEY=" "$out"
+check_contains "tgi_check_credentials: empty file -> names MACHINE_USER" "missing a non-empty MACHINE_USER=" "$out"
 
 CREDS_ONE_KEY="$TMP/creds-one-key"
 printf 'GH_TOKEN=ghp_fake\n' > "$CREDS_ONE_KEY"
@@ -88,16 +89,24 @@ rc=$?
 check "tgi_check_credentials: only GH_TOKEN -> rc 1" "1" "$rc"
 check_not_contains "tgi_check_credentials: only GH_TOKEN -> does not also complain about GH_TOKEN" "missing a non-empty GH_TOKEN=" "$out"
 check_contains "tgi_check_credentials: only GH_TOKEN -> names missing ANTHROPIC_API_KEY" "missing a non-empty ANTHROPIC_API_KEY=" "$out"
+check_contains "tgi_check_credentials: only GH_TOKEN -> names missing MACHINE_USER" "missing a non-empty MACHINE_USER=" "$out"
 
-CREDS_BOTH="$TMP/creds-both"
-printf 'GH_TOKEN=ghp_fake\nANTHROPIC_API_KEY=sk-ant-fake\n' > "$CREDS_BOTH"
-out=$(tgi_check_credentials "$CREDS_BOTH" 2>&1)
+CREDS_TWO_KEYS="$TMP/creds-two-keys"
+printf 'GH_TOKEN=ghp_fake\nANTHROPIC_API_KEY=sk-ant-fake\n' > "$CREDS_TWO_KEYS"
+out=$(tgi_check_credentials "$CREDS_TWO_KEYS" 2>&1)
 rc=$?
-check "tgi_check_credentials: both keys -> rc 0" "0" "$rc"
-check "tgi_check_credentials: both keys -> no output" "" "$out"
+check "tgi_check_credentials: two of three keys (no MACHINE_USER) -> rc 1" "1" "$rc"
+check_contains "tgi_check_credentials: two of three keys -> names missing MACHINE_USER" "missing a non-empty MACHINE_USER=" "$out"
+
+CREDS_ALL_THREE="$TMP/creds-all-three"
+printf 'GH_TOKEN=ghp_fake\nANTHROPIC_API_KEY=sk-ant-fake\nMACHINE_USER=coderails-tier-bot\n' > "$CREDS_ALL_THREE"
+out=$(tgi_check_credentials "$CREDS_ALL_THREE" 2>&1)
+rc=$?
+check "tgi_check_credentials: all three keys -> rc 0" "0" "$rc"
+check "tgi_check_credentials: all three keys -> no output" "" "$out"
 
 CREDS_BLANK_VAL="$TMP/creds-blank-val"
-printf 'GH_TOKEN=\nANTHROPIC_API_KEY=sk-ant-fake\n' > "$CREDS_BLANK_VAL"
+printf 'GH_TOKEN=\nANTHROPIC_API_KEY=sk-ant-fake\nMACHINE_USER=coderails-tier-bot\n' > "$CREDS_BLANK_VAL"
 out=$(tgi_check_credentials "$CREDS_BLANK_VAL" 2>&1)
 rc=$?
 check "tgi_check_credentials: blank GH_TOKEN value -> rc 1 (not just key presence)" "1" "$rc"

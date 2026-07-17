@@ -220,6 +220,32 @@ tg_read_gh_token() {
     printf '%s' "$token"
 }
 
+# tg_read_machine_user <creds_path>
+# Echoes the MACHINE_USER value from the credentials file, or empty string
+# with a named error on stderr if the file is missing or the key is absent.
+# Lives in the SAME root-owned creds file as the other credentials — NOT an
+# env var. The daemon's plist (com.coderails.tier-gate.plist.template)
+# only ever passes TIER_GATE_CREDS (a path) via EnvironmentVariables; nothing
+# propagates a separate bare env var into the installed launchd job. Reading
+# the expected login from inside the creds file (rather than trusting an
+# env var the daemon never actually receives) is what makes the identity
+# check in tg_post_status functional in production, not just in a test
+# harness that happens to export one.
+tg_read_machine_user() {
+    local creds_path="$1"
+    if [[ ! -f "$creds_path" ]]; then
+        printf 'tg_post_status: error: TIER_GATE_CREDS file not found at %s\n' "$creds_path" >&2
+        return 1
+    fi
+    local login
+    login=$(grep -E '^MACHINE_USER=' "$creds_path" | head -1 | cut -d= -f2-)
+    if [[ -z "$login" ]]; then
+        printf 'tg_post_status: error: MACHINE_USER not present in credentials file %s\n' "$creds_path" >&2
+        return 1
+    fi
+    printf '%s' "$login"
+}
+
 # tg_verify_identity <token>
 # Calls GET /user with <token> and echoes the authenticated login on success.
 # Returns 1 (empty stdout) on any fetch/parse failure — caller treats that
@@ -231,7 +257,8 @@ tg_verify_identity() {
         "$TIER_GATE_CURL_BIN" -sS --max-time "$TIER_GATE_WATCHDOG_TIMEOUT" \
         https://api.github.com/user \
         -H "Authorization: Bearer ${token}" \
-        -H "Accept: application/vnd.github+json")
+        -H "Accept: application/vnd.github+json" \
+        -H "content-type: application/json")
     printf '%s' "$response" | jq -r '.login // empty' 2>/dev/null
 }
 
@@ -248,19 +275,13 @@ tg_verify_identity() {
 #
 # Before ever posting, this calls tg_verify_identity with the SAME
 # credential and aborts — posts nothing, logs a named error — unless the
-# returned login matches TIER_GATE_MACHINE_USER exactly. A mismatch means
-# the wrong credential is loaded (misconfiguration, or a tampered creds
-# file): failing closed here is what makes the identity check meaningful —
-# posting under an unverified identity would defeat the whole point of
-# creator-binding downstream in merge.sh.
+# returned login matches the creds file's MACHINE_USER exactly. A mismatch
+# means the wrong credential is loaded (misconfiguration, or a tampered
+# creds file): failing closed here is what makes the identity check
+# meaningful — posting under an unverified identity would defeat the whole
+# point of creator-binding downstream in merge.sh.
 tg_post_status() {
     local sha="$1" state="$2" description="$3"
-
-    local machine_user="${TIER_GATE_MACHINE_USER:-}"
-    if [[ -z "$machine_user" ]]; then
-        printf 'tg_post_status: error: TIER_GATE_MACHINE_USER is not set\n' >&2
-        return 1
-    fi
 
     local creds_path="${TIER_GATE_CREDS:-}"
     if [[ -z "$creds_path" ]]; then
@@ -269,6 +290,8 @@ tg_post_status() {
     fi
     local token
     token=$(tg_read_gh_token "$creds_path") || return 1
+    local machine_user
+    machine_user=$(tg_read_machine_user "$creds_path") || return 1
 
     local actual_login
     actual_login=$(tg_verify_identity "$token")
@@ -293,6 +316,7 @@ tg_post_status() {
         "https://api.github.com/repos/${repo_slug}/statuses/${sha}" \
         -H "Authorization: Bearer ${token}" \
         -H "Accept: application/vnd.github+json" \
+        -H "content-type: application/json" \
         -d "$body" \
         >/dev/null
 }

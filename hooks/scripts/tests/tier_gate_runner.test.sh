@@ -111,14 +111,21 @@ TIER_GATE_CREDS_FILE="$TMP/tier-gate-creds"
 
 # default: identity matches, so pre-existing T-series tests (which don't
 # care about identity) see a normal, unblocked POST by default.
-set_expected_login() { printf '%s' "$1" > "$TMP/expected_login"; }  # what the creds file's token belongs to
-set_user_login_response() { printf '{"login":"%s"}' "$1" > "$USER_LOGIN_RESPONSE"; }
-write_tier_gate_creds() { # <gh_token>
-    printf 'GH_TOKEN=%s\n' "$1" > "$TIER_GATE_CREDS_FILE"
+# MACHINE_USER lives in the SAME root-owned creds file as GH_TOKEN/
+# ANTHROPIC_API_KEY — not an env var — because the daemon's plist only ever
+# passes TIER_GATE_CREDS (a path); nothing propagates a bare env var into
+# the installed launchd job (see com.coderails.tier-gate.plist.template,
+# which sets exactly one EnvironmentVariables key). A test harness that
+# exported TIER_GATE_MACHINE_USER directly would pass while the real
+# installed daemon — which never gets that var — silently fails closed on
+# every single post. Sourcing the expected login from the creds file is what
+# makes this test representative of production.
+write_tier_gate_creds() { # <gh_token> <machine_user>
+    printf 'GH_TOKEN=%s\nMACHINE_USER=%s\n' "$1" "$2" > "$TIER_GATE_CREDS_FILE"
 }
+set_user_login_response() { printf '{"login":"%s"}' "$1" > "$USER_LOGIN_RESPONSE"; }
 
-write_tier_gate_creds "ghp_machine_user_fixture_token"
-set_expected_login "coderails-tier-bot"
+write_tier_gate_creds "ghp_machine_user_fixture_token" "coderails-tier-bot"
 set_user_login_response "coderails-tier-bot"
 
 write_status_curl_stub() {
@@ -147,11 +154,14 @@ CURLSTUB
     chmod +x "$TMP/curl"
 }
 
+# run_gate deliberately does NOT export TIER_GATE_MACHINE_USER — the
+# installed daemon never receives it either (see write_tier_gate_creds'
+# header comment). The expected login must come from TIER_GATE_CREDS'
+# MACHINE_USER= line, exactly like the real daemon reads it.
 run_gate() {
     (
         export PATH="$TMP:$PATH"
         export TIER_GATE_CREDS="$TIER_GATE_CREDS_FILE"
-        export TIER_GATE_MACHINE_USER="$(cat "$TMP/expected_login")"
         export TIER_GATE_CURL_BIN="$TMP/curl"
         write_status_curl_stub
         tg_gate_pr "$TEST_PR"
@@ -673,9 +683,8 @@ TEST_PR=201 TEST_SHA=sha_identity_ok
 reset_gh_state
 write_gh_stub
 set_comment_body "$(tier1_body "$TEST_PR" "$TEST_SHA" GO)"  # tier-1: short-circuit success, exercises tg_post_status without the judge
-set_expected_login "coderails-tier-bot"
 set_user_login_response "coderails-tier-bot"
-write_tier_gate_creds "ghp_machine_user_fixture_token"
+write_tier_gate_creds "ghp_machine_user_fixture_token" "coderails-tier-bot"
 out=$(run_gate)
 token_calls=$(cat "$GH_TOKEN_CALLS" 2>/dev/null)
 check_contains "I1: the status POST carries the machine-user GH_TOKEN as a Bearer credential" "Bearer ghp_machine_user_fixture_token" "$token_calls"
@@ -691,9 +700,8 @@ TEST_PR=202 TEST_SHA=sha_mismatch_case
 reset_gh_state
 write_gh_stub
 set_comment_body "$(tier1_body "$TEST_PR" "$TEST_SHA" GO)"
-set_expected_login "coderails-tier-bot"
 set_user_login_response "some-other-account"   # credential loaded belongs to the WRONG login
-write_tier_gate_creds "ghp_wrong_account_token"
+write_tier_gate_creds "ghp_wrong_account_token" "coderails-tier-bot"
 out=$(run_gate 2>&1)
 posted=$(cat "$POSTED_LOG" 2>/dev/null)
 check "I2: login mismatch -> nothing posted (fail closed, never posts under the wrong identity)" "" "$posted"
@@ -706,11 +714,35 @@ TEST_PR=203 TEST_SHA=sha_identity_match_control
 reset_gh_state
 write_gh_stub
 set_comment_body "$(tier1_body "$TEST_PR" "$TEST_SHA" GO)"
-set_expected_login "coderails-tier-bot"
 set_user_login_response "coderails-tier-bot"
-write_tier_gate_creds "ghp_machine_user_fixture_token"
+write_tier_gate_creds "ghp_machine_user_fixture_token" "coderails-tier-bot"
 out=$(run_gate)
 posted=$(cat "$POSTED_LOG" 2>/dev/null)
 check_contains "I3: matching identity -> status IS posted (negative control for I2)" "state=success" "$posted"
+
+# I4: the expected machine-user login is read from the CREDS FILE's
+# MACHINE_USER= line, never from a bare TIER_GATE_MACHINE_USER env var —
+# proven by running with that env var unset entirely (run_gate never sets
+# it) and a mismatched MACHINE_USER= line in the creds file still blocking
+# the post. This is the regression guard for the gap where an earlier draft
+# of this test suite exported TIER_GATE_MACHINE_USER directly: that made
+# every test pass while the real installed daemon (whose plist only ever
+# passes TIER_GATE_CREDS, never a bare env var) would silently post nothing
+# on every single call.
+TEST_PR=204 TEST_SHA=sha_creds_file_is_source_of_truth
+reset_gh_state
+write_gh_stub
+set_comment_body "$(tier1_body "$TEST_PR" "$TEST_SHA" GO)"
+set_user_login_response "coderails-tier-bot"
+write_tier_gate_creds "ghp_fixture_token" "a-different-configured-login"
+out=$(env -u TIER_GATE_MACHINE_USER bash -c '
+    source "'"$RUNNER"'"
+    export PATH="'"$TMP"':$PATH"
+    export TIER_GATE_CREDS="'"$TIER_GATE_CREDS_FILE"'"
+    export TIER_GATE_CURL_BIN="'"$TMP"'/curl"
+    tg_gate_pr "'"$TEST_PR"'"
+' 2>&1)
+posted=$(cat "$POSTED_LOG" 2>/dev/null)
+check "I4: MACHINE_USER sourced from creds file (env var absent) -> mismatch still blocks the post" "" "$posted"
 
 [[ $fails -eq 0 ]] && { echo PASS; exit 0; } || { echo "FAIL ($fails)"; exit 1; }
