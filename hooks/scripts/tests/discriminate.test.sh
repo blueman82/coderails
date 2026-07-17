@@ -262,6 +262,151 @@ check "validate_discriminating: second eval's broken fixtures -> exit 1" 1 $?
 [[ "$stderr_out" == *"e2"* ]]
 check "validate_discriminating: multi-eval -> stderr names the offending id (e2, not e1)" 0 $?
 
+# ─── case 11: fixtures present but bad omitted -> reject (unsafe-accept fix) ─
+# Author supplies good + formula but omits bad; bad defaults to "" and the
+# gate could otherwise ACCEPT — proof against an empty string the author
+# never wrote. This formula makes the danger concrete: grep on the omitted
+# empty string exits 1 (no match), which LOOKS like a legitimate "bad fails"
+# — good_rc=0, bad_rc=1 — the exact unsafe-accept shape, without ever
+# checking a real bad fixture.
+FIX_BAD_OMITTED="$TMP/bad_omitted.json"
+jq -n --arg sha "$SHA" '{
+  tier: 1,
+  tier_justification: "1 work-unit, scripted change",
+  head_sha: $sha,
+  evals: [
+    {
+      id: "e1", priority: "P0", mode: "scripted", status: "pass",
+      cmd: "bash run_all.sh 2>&1 | grep -q '\''39/39'\''",
+      negative_control: "run-a-broken", evidence: "log",
+      fixtures: { good: "39/39 suites passed", formula: "grep -q '\''39/39'\''" }
+    }
+  ]
+}' > "$FIX_BAD_OMITTED"
+stderr_out=$(post_evals::validate_discriminating "$FIX_BAD_OMITTED" 2>&1)
+check "validate_discriminating: fixtures.bad omitted -> exit 1 (reject, not accept)" 1 $?
+[[ "$stderr_out" == *"e1"* ]]
+check "validate_discriminating: bad omitted -> stderr names the eval id" 0 $?
+
+# ─── case 12: fixtures present but good omitted -> reject (same unsafe direction) ─
+# Same unsafe-accept shape as case 11, mirrored: this formula makes empty
+# input (the omitted good's default) exit 0 trivially, while the real bad
+# fixture correctly exits non-zero — good_rc=0, bad_rc=1 — without ever
+# checking a real good fixture the author wrote.
+FIX_GOOD_OMITTED="$TMP/good_omitted.json"
+jq -n --arg sha "$SHA" '{
+  tier: 1,
+  tier_justification: "1 work-unit, scripted change",
+  head_sha: $sha,
+  evals: [
+    {
+      id: "e1", priority: "P0", mode: "scripted", status: "pass",
+      cmd: "bash run_all.sh 2>&1 | ! grep -q FAIL",
+      negative_control: "run-a-broken", evidence: "log",
+      fixtures: { bad: "18/40 suites passed - FAIL", formula: "! grep -q FAIL" }
+    }
+  ]
+}' > "$FIX_GOOD_OMITTED"
+stderr_out=$(post_evals::validate_discriminating "$FIX_GOOD_OMITTED" 2>&1)
+check "validate_discriminating: fixtures.good omitted -> exit 1 (reject)" 1 $?
+[[ "$stderr_out" == *"e1"* ]]
+check "validate_discriminating: good omitted -> stderr names the eval id" 0 $?
+
+# ─── case 13: env-guard broadened — 126 (permission denied) on bad leg -> reject ─
+# Without the fix, good_rc=0 && bad_rc=126 falls into the accept path (an
+# environmental crash read as a legitimate discrimination fail).
+NOPERM="$TMP/noperm_e13.sh"
+printf '#!/bin/bash\necho hi\n' > "$NOPERM"
+chmod -x "$NOPERM"
+FIX_ENV_126="$TMP/env_126.json"
+jq -n --arg sha "$SHA" --arg noperm "$NOPERM" '{
+  tier: 1,
+  tier_justification: "1 work-unit, scripted change",
+  head_sha: $sha,
+  evals: [
+    {
+      id: "e1", priority: "P0", mode: "scripted", status: "pass",
+      cmd: ("bash run_all.sh 2>&1 | if grep -q g; then exit 0; else " + $noperm + "; fi"),
+      negative_control: "run-a-broken", evidence: "log",
+      fixtures: {
+        good: "g", bad: "b",
+        formula: ("if grep -q g; then exit 0; else " + $noperm + "; fi")
+      }
+    }
+  ]
+}' > "$FIX_ENV_126"
+stderr_out=$(post_evals::validate_discriminating "$FIX_ENV_126" 2>&1)
+check "validate_discriminating: bad leg exits 126 -> exit 1 (env-suspect, not accept)" 1 $?
+[[ "$stderr_out" != *"non-discriminating"* ]]
+check "validate_discriminating: exit 126 -> stderr does NOT claim non-discriminating" 0 $?
+
+# ─── case 14: env-guard broadened — 137 (SIGKILL) on bad leg -> reject ──────
+# A formula that CRASHES on bad input is environmental-suspect, not a valid
+# content fail — a crash is not a discrimination signal.
+FIX_ENV_137="$TMP/env_137.json"
+jq -n --arg sha "$SHA" '{
+  tier: 1,
+  tier_justification: "1 work-unit, scripted change",
+  head_sha: $sha,
+  evals: [
+    {
+      id: "e1", priority: "P0", mode: "scripted", status: "pass",
+      cmd: "bash run_all.sh 2>&1 | if grep -q g; then exit 0; else kill -9 $$; fi",
+      negative_control: "run-a-broken", evidence: "log",
+      fixtures: {
+        good: "g", bad: "b",
+        formula: "if grep -q g; then exit 0; else kill -9 $$; fi"
+      }
+    }
+  ]
+}' > "$FIX_ENV_137"
+stderr_out=$(post_evals::validate_discriminating "$FIX_ENV_137" 2>&1)
+check "validate_discriminating: bad leg exits 137 (SIGKILL) -> exit 1 (env-suspect)" 1 $?
+[[ "$stderr_out" != *"non-discriminating"* ]]
+check "validate_discriminating: exit 137 -> stderr does NOT claim non-discriminating" 0 $?
+
+# ─── case 15: 142 timeout message still distinct after the >=128 broadening ─
+# CRITICAL ORDERING: the 142 (128+SIGALRM) check must still fire with its own
+# message, not get swallowed by the new >=128 environmental-suspect check.
+FIX_TIMEOUT="$TMP/timeout.json"
+jq -n --arg sha "$SHA" '{
+  tier: 1,
+  tier_justification: "1 work-unit, scripted change",
+  head_sha: $sha,
+  evals: [
+    {
+      id: "e1", priority: "P0", mode: "scripted", status: "pass",
+      cmd: "bash run_all.sh 2>&1 | sleep 15",
+      negative_control: "run-a-broken", evidence: "log",
+      fixtures: { good: "g", bad: "b", formula: "sleep 15" }
+    }
+  ]
+}' > "$FIX_TIMEOUT"
+stderr_out=$(post_evals::validate_discriminating "$FIX_TIMEOUT" 2>&1)
+check "validate_discriminating: timeout still exit 1" 1 $?
+[[ "$stderr_out" == *"timed out"* ]]
+check "validate_discriminating: timeout message still distinct (not swallowed by >=128 check)" 0 $?
+
+# ─── case 16: malformed fixtures (not an object) -> reject with distinct message ─
+FIX_MALFORMED="$TMP/malformed.json"
+jq -n --arg sha "$SHA" '{
+  tier: 1,
+  tier_justification: "1 work-unit, scripted change",
+  head_sha: $sha,
+  evals: [
+    {
+      id: "e1", priority: "P0", mode: "scripted", status: "pass",
+      cmd: "bash run_all.sh 2>&1 | cat",
+      negative_control: "run-a-broken", evidence: "log",
+      fixtures: "not-an-object"
+    }
+  ]
+}' > "$FIX_MALFORMED"
+stderr_out=$(post_evals::validate_discriminating "$FIX_MALFORMED" 2>&1)
+check "validate_discriminating: fixtures is a string, not object -> exit 1" 1 $?
+[[ "$stderr_out" == *"e1"* && "$stderr_out" == *"object"* ]]
+check "validate_discriminating: malformed fixtures -> stderr names id + says 'object'" 0 $?
+
 # ─── CLI dispatch: validate-discriminating wired into the subcommand case ────
 usage_out=$(bash "$SCRIPT" 2>&1)
 [[ "$usage_out" == *"validate-discriminating"* ]]

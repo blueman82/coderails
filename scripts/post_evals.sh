@@ -168,11 +168,33 @@ post_evals::validate_discriminating() {
     while IFS= read -r id; do
         [[ -z "$id" ]] && continue
 
+        # fixtures must be an object before extracting good/bad/formula from
+        # it — a string/number fixtures value would otherwise error to
+        # stderr on every per-field extraction below and fall through the
+        # `// ""` fallback into a misleading "non-discriminating" verdict.
+        local fixtures_type
+        fixtures_type=$(jq -r --arg id "$id" '.evals[] | select(.id == $id) | .fixtures | type' "$path")
+        if [[ "$fixtures_type" != "object" ]]; then
+            printf 'post_evals: eval %s has malformed fixtures (must be an object) — got %s.\n' "$id" "$fixtures_type" >&2
+            return 1
+        fi
+
         local cmd good bad formula
         cmd=$(jq -r --arg id "$id" '.evals[] | select(.id == $id) | .cmd // ""' "$path")
         good=$(jq -r --arg id "$id" '.evals[] | select(.id == $id) | .fixtures.good // ""' "$path")
         bad=$(jq -r --arg id "$id" '.evals[] | select(.id == $id) | .fixtures.bad // ""' "$path")
         formula=$(jq -r --arg id "$id" '.evals[] | select(.id == $id) | .fixtures.formula // ""' "$path")
+
+        # Require both good AND bad when fixtures are present — an author
+        # who supplies good+formula but omits bad gets bad="" by default,
+        # and proving the formula "discriminates" against an empty string
+        # nobody wrote is the unsafe direction (a false accept). Reject
+        # explicitly rather than silently proving something the author
+        # never asked for.
+        if [[ -z "$good" || -z "$bad" ]]; then
+            printf 'post_evals: eval %s fixtures present but good and bad are both required — got good=%s, bad=%s.\n' "$id" "$([[ -n "$good" ]] && echo present || echo missing)" "$([[ -n "$bad" ]] && echo present || echo missing)" >&2
+            return 1
+        fi
 
         # Determine the formula: explicit fixtures.formula wins; else the
         # substring of cmd after the LAST top-level pipe. Deliberately not a
@@ -203,6 +225,20 @@ post_evals::validate_discriminating() {
         fi
         if [[ "$good_rc" == "142" || "$bad_rc" == "142" ]]; then
             printf 'post_evals: eval %s formula execution timed out (10s) — good exit=%s, bad exit=%s.\n' "$id" "$good_rc" "$bad_rc" >&2
+            return 1
+        fi
+        # 126 (permission denied) and 128+n signal deaths (137=SIGKILL,
+        # 139=SIGSEGV, ...) are environmental crashes, not discrimination
+        # signals — without this check they fall through to the accept path
+        # below (good_rc=0 && bad_rc!=0) and an environmental crash on the
+        # bad leg reads as a legitimate discrimination fail. This check runs
+        # AFTER the 142 check above so the 142-timeout message stays
+        # distinct; 142 is itself >=128, so ordering here is load-bearing.
+        # DECISION: a formula that CRASHES (e.g. 137) on bad input is
+        # environmental-suspect and rejected — NOT treated as a valid
+        # content fail, because a crash is not a discrimination signal.
+        if [[ "$good_rc" == "126" || "$bad_rc" == "126" || "$good_rc" -ge 128 || "$bad_rc" -ge 128 ]]; then
+            printf 'post_evals: eval %s formula execution crashed (environmental) — good exit=%s, bad exit=%s. Fix the formula, not this gate.\n' "$id" "$good_rc" "$bad_rc" >&2
             return 1
         fi
 
