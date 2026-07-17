@@ -913,3 +913,110 @@ transcript and cannot satisfy this gate — then re-declare complete." >&2
   fi
   als_log "hook=$hook session=$session proof_gate=ok proofs=$n"
 }
+
+# Reporter (NOT a gate): on a `complete` declaration, print the loop's mined
+# cost to the human's terminal via top-level `systemMessage`, mechanically —
+# so a `complete` loop can no longer finish without the human seeing what it
+# cost, the way SKILL.md's Phase 13 prose has always demanded but a model
+# could silently skip. This is the fix for that: prose can't enforce prose,
+# a hook can.
+#
+# DELIBERATE POSTURE INVERSION — read this before "fixing" this function:
+# every other gate in this file (check_verify_loop.sh and
+# check_confidence_labels.sh follow the same house idiom elsewhere) runs its
+# jq emission FIRST and lets that emission's exit status gate the caller's
+# own `exit 0` — i.e. they fail TOWARD blocking. This function does the
+# OPPOSITE on purpose: it must NEVER block, under any failure. Rationale:
+# dc_mine_token_usage (hooks/scripts/lib/loop_cost.sh:7-12) is contractually
+# fail-open to `{}` on any mining error and documents that it "must never
+# block a caller" — retro.json's `.cost` can legitimately be `{}` (miner ran,
+# failed open) on an otherwise perfectly valid, already-finished loop. If
+# this reporter were written in the house fail-closed style, a miner bug
+# would deadlock a loop that has ALREADY passed the retro/work_units/proof
+# gates above it — strictly worse than the unrecorded-cost bug it exists to
+# fix. Any error path here must therefore emit nothing and return, never
+# exit non-zero. Do not widen this into the house fail-closed idiom.
+#
+# Fires ONLY on `category == "complete"` (case-insensitively, mirroring the
+# category_lc idiom shared by every sibling gate above). Reads retro.json at
+# `$(dirname "$ALS_PATH")/retro.json` — same resolution als_gate_retro_on_complete
+# uses. By the time this runs (called AFTER the retro/work_units/proof gates
+# at the loop_stall_guard.sh call site), retro.json is already proven present
+# and parseable with schema_version >= 1 by als_gate_retro_on_complete, so
+# this function does not re-validate file existence/parseability defensively
+# — it only branches on the fields it needs.
+#
+# Behaviour matrix (see skills/agentic-loop/teardown.md for the cost-mining
+# contract this reads):
+#   schema_version < 2 (legacy, pre-cost-miner retro)      -> silent
+#   schema_version >= 2, .cost populated (has a usd total) -> print USD +
+#     tokens + staleness age
+#   schema_version >= 2, .cost == {} (miner ran, failed open) -> print "cost
+#     unavailable (miner returned no data)" — NEVER a fabricated $ figure
+#   schema_version >= 2, .cost absent (teardown skipped the mining sub-step)
+#     -> print "cost not recorded" — deliberately distinct text from the
+#     miner-failed-open case above: absent = step skipped, {} = miner ran and
+#     came back empty. Different bugs, different messages; collapsing them
+#     into one message would silently relocate the original bug (a cost the
+#     human never sees) from model-omission to hook-omission instead of
+#     fixing it.
+# schema_version is therefore the row-2-vs-row-4 discriminator, not
+# cost-presence: rows 2 and 4 both have `.cost` absent, so cost-presence
+# alone cannot tell "legacy loop, nothing to report" from "sv2 loop, teardown
+# skipped a step it should have run".
+#
+# Staleness: computed from `.cost.prices_as_of` (a YYYY-MM-DD date string) vs
+# today, in DAYS. The date math itself fails open — a `prices_as_of` value
+# `date` cannot parse falls back to printing the raw string verbatim rather
+# than erroring or fabricating an age. Staleness is reported inline as
+# information, never as a block: the shipped price table is routinely weeks
+# stale, so treating staleness as a failure condition would fire on every
+# single loop.
+als_report_cost_on_complete() {
+  local category="$1" hook="$2" session="$3"
+  local category_lc; category_lc=$(printf '%s' "$category" | tr '[:upper:]' '[:lower:]')
+  [ "$category_lc" = "complete" ] || return 0
+  command -v jq >/dev/null 2>&1 || return 0
+  [ -n "$ALS_PATH" ] || return 0
+  local retro; retro="$(dirname "$ALS_PATH")/retro.json"
+  [ -f "$retro" ] || return 0
+
+  local sv; sv=$(jq -r '(.schema_version // 0) | if type == "number" then . else 0 end' "$retro" 2>/dev/null)
+  case "$sv" in ''|*[!0-9]*) return 0 ;; esac
+  [ "$sv" -ge 2 ] || return 0
+
+  local cost_type; cost_type=$(jq -r '(.cost // null) | type' "$retro" 2>/dev/null)
+  local msg=""
+  case "$cost_type" in
+    object)
+      local is_empty; is_empty=$(jq -r '(.cost | length) == 0' "$retro" 2>/dev/null)
+      if [ "$is_empty" = "true" ]; then
+        msg="cost unavailable (miner returned no data)"
+      else
+        local usd tokens prices_as_of
+        usd=$(jq -r '.cost.total_usd_estimate // empty' "$retro" 2>/dev/null)
+        tokens=$(jq -r '.cost.total_tokens // empty' "$retro" 2>/dev/null)
+        prices_as_of=$(jq -r '.cost.prices_as_of // empty' "$retro" 2>/dev/null)
+        [ -n "$usd" ] && [ -n "$tokens" ] || return 0
+        local age="$prices_as_of"
+        if [ -n "$prices_as_of" ]; then
+          local then_epoch now_epoch
+          then_epoch=$(date -j -f "%Y-%m-%d" "$prices_as_of" +%s 2>/dev/null)
+          now_epoch=$(date +%s 2>/dev/null)
+          if [ -n "$then_epoch" ] && [ -n "$now_epoch" ]; then
+            local days=$(( (now_epoch - then_epoch) / 86400 ))
+            age="prices as of $prices_as_of, $days days old"
+          fi
+        fi
+        msg="Loop cost: \$${usd} (${tokens} tokens), ${age}"
+      fi
+      ;;
+    *)
+      msg="cost not recorded"
+      ;;
+  esac
+
+  [ -n "$msg" ] || return 0
+  jq -n --arg m "$msg" '{systemMessage: $m}' 2>/dev/null
+  return 0
+}
