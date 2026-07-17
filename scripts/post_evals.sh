@@ -131,6 +131,97 @@ post_evals::validate_structure() {
     return 0
 }
 
+# post_evals::_run_formula <formula> <input>
+# Echoes <input> piped into `bash -c <formula>`, capped at a 10s timeout via
+# perl's alarm (present on every macOS and Linux box this gate runs on — no
+# hand-rolled bash job-control race). Echoes the exit code: 142 signals a
+# timeout (128 + SIGALRM), 127 signals command-not-found — both are
+# environmental outcomes the caller must not read as a discrimination result.
+post_evals::_run_formula() {
+    local formula="$1" input="$2"
+    printf '%s' "$input" | perl -e 'alarm shift; exec "/bin/bash", "-c", shift' 10 "$formula" >/dev/null 2>&1
+    printf '%s' "$?"
+}
+
+# post_evals::validate_discriminating <evals_json_path>
+# Freeze-time gate: for every scripted eval carrying an optional `fixtures`
+# object, mechanically proves the check's formula can both pass (on
+# fixtures.good) and fail (on fixtures.bad) — rejecting a check that is
+# incapable of either. Evals with no `fixtures` field are grandfathered:
+# untouched by this gate, exactly as before it existed (see
+# skills/task-evals/SKILL.md's honest-boundary note). Exit 0 if every
+# fixtures-carrying eval discriminates (or there are none); exit 1 + a
+# specific stderr reason on the first failure.
+post_evals::validate_discriminating() {
+    local path="$1"
+
+    if [[ ! -f "$path" ]] || ! jq -e . "$path" >/dev/null 2>&1; then
+        printf 'post_evals: file not found or invalid JSON: %s\n' "$path" >&2
+        return 1
+    fi
+
+    local ids
+    ids=$(jq -r '[.evals[]? | select(.mode == "scripted") | select(.fixtures != null) | .id] | .[]' "$path")
+    [[ -z "$ids" ]] && return 0
+
+    local id
+    while IFS= read -r id; do
+        [[ -z "$id" ]] && continue
+
+        local cmd good bad formula
+        cmd=$(jq -r --arg id "$id" '.evals[] | select(.id == $id) | .cmd // ""' "$path")
+        good=$(jq -r --arg id "$id" '.evals[] | select(.id == $id) | .fixtures.good // ""' "$path")
+        bad=$(jq -r --arg id "$id" '.evals[] | select(.id == $id) | .fixtures.bad // ""' "$path")
+        formula=$(jq -r --arg id "$id" '.evals[] | select(.id == $id) | .fixtures.formula // ""' "$path")
+
+        # Determine the formula: explicit fixtures.formula wins; else the
+        # substring of cmd after the LAST top-level pipe. Deliberately not a
+        # shell parser — if cmd has no pipe and no explicit formula was
+        # given, fail closed rather than guess.
+        if [[ -z "$formula" ]]; then
+            if [[ "$cmd" == *"|"* ]]; then
+                formula="${cmd##*|}"
+                # Trim leading/trailing whitespace left by the split.
+                formula="${formula#"${formula%%[![:space:]]*}"}"
+                formula="${formula%"${formula##*[![:space:]]}"}"
+            else
+                printf 'post_evals: eval %s has fixtures but no derivable formula — cmd has no pipe. Supply fixtures.formula explicitly.\n' "$id" >&2
+                return 1
+            fi
+        fi
+
+        local good_rc bad_rc
+        good_rc=$(post_evals::_run_formula "$formula" "$good")
+        bad_rc=$(post_evals::_run_formula "$formula" "$bad")
+
+        # Environmental outcomes (127 = command not found, 142 = our timeout
+        # sentinel) are reported distinctly — never conflated with a
+        # discrimination verdict, on EITHER leg.
+        if [[ "$good_rc" == "127" || "$bad_rc" == "127" ]]; then
+            printf 'post_evals: eval %s formula execution failed (command not found) — good exit=%s, bad exit=%s. Fix the formula, not this gate.\n' "$id" "$good_rc" "$bad_rc" >&2
+            return 1
+        fi
+        if [[ "$good_rc" == "142" || "$bad_rc" == "142" ]]; then
+            printf 'post_evals: eval %s formula execution timed out (10s) — good exit=%s, bad exit=%s.\n' "$id" "$good_rc" "$bad_rc" >&2
+            return 1
+        fi
+
+        if [[ "$good_rc" == "0" && "$bad_rc" != "0" ]]; then
+            continue
+        fi
+
+        if [[ "$good_rc" == "$bad_rc" ]]; then
+            printf 'post_evals: eval %s formula is non-discriminating — good and bad fixtures both exit %s. The check can never both pass and fail.\n' "$id" "$good_rc" >&2
+            return 1
+        fi
+
+        printf 'post_evals: eval %s formula did not discriminate as required — good fixture exit=%s (want 0), bad fixture exit=%s (want non-zero).\n' "$id" "$good_rc" "$bad_rc" >&2
+        return 1
+    done <<< "$ids"
+
+    return 0
+}
+
 # post_evals::compute_and_validate_result <evals_json_path>
 # Echoes GO or NO-GO by calling eval_artifact::compute_go. This is the ONLY
 # place the artifact's result value is produced — never read from a
@@ -217,12 +308,16 @@ post_evals::grade_loop() {
 # ─── Subcommand dispatch ───────────────────────────────────────────────────────
 # Called by the post-evals command prose as:
 #   ./scripts/post_evals.sh validate-structure <path> <pr> <sha>
+#   ./scripts/post_evals.sh validate-discriminating <path>
 #   ./scripts/post_evals.sh compute-result <path>
 #   ./scripts/post_evals.sh grade-loop <path>
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     case "${1:-}" in
         validate-structure)
             post_evals::validate_structure "${2:?validate-structure requires a file argument}" "${3:?}" "${4:?}"
+            ;;
+        validate-discriminating)
+            post_evals::validate_discriminating "${2:?validate-discriminating requires a file argument}"
             ;;
         compute-result)
             post_evals::compute_and_validate_result "${2:?compute-result requires a file argument}"
@@ -232,6 +327,7 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
             ;;
         *)
             printf 'Usage: post_evals.sh validate-structure <path> <pr> <sha>\n' >&2
+            printf '       post_evals.sh validate-discriminating <path>\n' >&2
             printf '       post_evals.sh compute-result <path>\n' >&2
             printf '       post_evals.sh grade-loop <path>\n' >&2
             exit 1
