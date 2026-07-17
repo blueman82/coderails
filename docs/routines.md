@@ -212,6 +212,22 @@ any code — the skill aborts with cleanup (closes the PR if one was
 opened, deletes the branch locally and on the remote) rather than
 warning and continuing.
 
+**The manifest check also carries a self-governance deny-list**, not
+just a file-extension check: `skills/**/SKILL.md` (including this
+routine's own), `AGENTS.md`, `CLAUDE.md`, `docs/routines.md`, and
+anything under `.claude/` abort the run the same way a non-`.md` path
+does, even though every one of them IS `.md`. Without this, the routine
+could legally "fix" its own governing contract — every subsequent night
+would then run from a self-weakened rulebook, and the one entity
+authoring the edit is the same one that reviews and merges it
+headlessly. A drift finding against one of these files is reported,
+never fixed, by this routine. **Be clear about the limit:** this
+deny-list lives in the skill's own prompt and is honoured inside
+`claude -p`, where `PreToolUse` hooks do not fire (see the security
+warning below) — it reduces the risk of a self-authored governance edit,
+it does not eliminate it the way a hook-level or server-side check
+would.
+
 **Failure visibility.** This routine's config keeps both shipped
 escalation channels (`["notification", "vault-note"]`) — no new
 notification infrastructure was built for it. What the skill itself
