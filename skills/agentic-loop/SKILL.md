@@ -200,9 +200,11 @@ When the Phase 1 plan contains a work-unit that **retires an existing code path*
 
 ### Phase 2.7 — Commit the resolved design to durable `spec.md` and `plan.md`
 
-This phase fires ONLY when the loop has **≥3 work-units or a cross-unit dependency** — the same line Phase 3 draws to choose a spawned team over a single agent. A 1–2-unit fix that Phase 3 routes to a single agent needs no separate design docs: the envelope (Phase 0) + `progress.json` + the one self-contained task description already carry everything. If the loop is below that threshold, skip 2.7 (both sub-steps) entirely.
+The **2.7a/2.7b** design-doc sub-steps fire ONLY when the loop has **≥3 work-units or a cross-unit dependency** — the same line Phase 3 draws to choose a spawned team over a single agent. A 1–2-unit fix that Phase 3 routes to a single agent needs no separate design docs: the envelope (Phase 0) + `progress.json` + the one self-contained task description already carry everything. If the loop is below that threshold, skip 2.7a/2.7b.
 
-When it fires, run both sub-steps in order:
+**2.7c and 2.7e carry their own independent triggers and are NOT gated by the ≥3-work-unit threshold above** — a loop can skip 2.7a/2.7b entirely and still owe 2.7c and/or 2.7e. 2.7c fires on either of its own two stated triggers (tier-2-eligibility on work-unit count, or an irreversible-surface trigger, independently of each other and of 2.7a/2.7b). 2.7e fires for ANY loop with an executable surface, whatever its unit count, even when the rest of Phase 2.7 is skipped.
+
+When 2.7a/2.7b fire, run both sub-steps in order:
 
 **2.7a — write `spec.md`.** Write a durable `spec.md` to the loop-state dir — the path printed by the loop-state path helper (`hooks/scripts/lib/agentic_loop_path.sh`, run at Phase -2), next to `progress.json`, outside the code repo, **not committed** (loop state, not a PR deliverable). This is a **commit of design the loop has already resolved**, not interactive brainstorming — a loop cannot brainstorm with itself; the forks were closed at 2.5 and 2.6. Record:
 - the authorisation envelope verbatim (Phase 0);
