@@ -1,21 +1,25 @@
 # Teardown write contract — `retro.json` and standing-orders
 
-Detail-carrier for Phase 13's teardown. The main skill keeps the imperative (run the four steps in
+Detail-carrier for Phase 13's teardown. The main skill keeps the imperative (run the five steps in
 order, before the `complete` declaration); this file is the field spec and the mechanics you
 consult **while writing the retro**.
 
 `loop_stall_guard` blocks a `complete` declaration when `retro.json` is absent, malformed, or
 below `schema_version` 1 (the hook accepts `schema_version >= 1`, forward-compatible with the cost
-fields added at 2) — so the retro must be written before the declaration.
+fields added at 2) — so the retro must be written before the declaration. It separately blocks
+when a sibling `proof.json` exists but any of its frozen proofs is unexecuted-in-transcript or
+last-failed — so every proof cmd must be run, in the foreground, in the orchestrator's own
+session, before the declaration too (Step 1 below).
 
 ## Contents
 
 - [The Phase 13 self-audit report](#the-phase-13-self-audit-report)
-- [Step 1 — Assemble `retro.json`](#step-1--assemble-retrojson)
+- [Step 1 — Run every `proof.json` cmd](#step-1--run-every-proofjson-cmd)
+- [Step 2 — Assemble `retro.json`](#step-2--assemble-retrojson)
 - [Cost-mining sub-step](#cost-mining-sub-step)
 - [Pricing is computed once and frozen](#pricing-is-computed-once-and-frozen)
-- [Step 2 — Update `standing-orders.md`](#step-2--update-standing-ordersmd)
-- [Steps 3 and 4](#steps-3-and-4)
+- [Step 3 — Update `standing-orders.md`](#step-3--update-standing-ordersmd)
+- [Steps 4 and 5](#steps-4-and-5)
 
 ## The Phase 13 self-audit report
 
@@ -37,7 +41,18 @@ than an honest unscored list because it is more likely to be trusted uncriticall
 - **Disposition violations** — work-units where `clean-break` was recorded in `progress.json` but a shim/compat path shipped anyway (caught at the Phase 4b gate, or by the human afterward). Audit as a diff between the `progress.json` disposition record and the merged artifact. Critically, distinguish **"0 violations"** from **"no disposition record found"**: the latter is an **audit failure** — the record was not maintained — not a pass, otherwise the report reads "clean" when the record was simply absent. Separately, surface any `preserve-compat` unit whose `removal_ticket` is still **open at loop end** as a compat-debt drift signal, so deferred removals cannot silently rot.
 - **Loop-scope eval result** — graded via `post_evals.sh grade-loop` (never hand-written into `evals.json`), the loop's final `evals.json` `result` (`GO`/`NO-GO`/a tier-0-exemption-with-justification), reported unscored, plus any `amendments` entries (post-freeze eval edits with recorded reasons). An amendment made after a grader verdict must carry its fresh re-grade (`regraded_by` recorded; `grade-loop` refuses otherwise): a verdict flipped by an orchestrator-written status is an audit failure, not a pass. **"No `evals.json` record found" for a ≥3-work-unit loop is an audit failure, not a pass** — distinguish it from a genuine `GO` the same way "0 disposition violations" is distinguished from "no disposition record found".
 
-## Step 1 — Assemble `retro.json`
+## Step 1 — Run every `proof.json` cmd
+
+If a `proof.json` was frozen at Phase 2.7e, run every one of its `cmd`s VERBATIM as its own single
+Bash command, in the FOREGROUND (never `run_in_background`), in THIS (the orchestrator's) own
+session — before assembling the retro. Confirm each exits 0. A proof run inside a dispatched
+worker's session never appears in the orchestrator's own transcript and cannot satisfy the
+`loop_stall_guard` proof gate, whatever its actual outcome. If a proof still fails, fix the
+underlying issue and re-run that proof's `cmd` (not a modified version of it) until it passes, or
+the `complete` declaration below blocks, naming the offending proof id(s) and their verdict. No
+`proof.json` beside `progress.json` means nothing to run here — skip straight to Step 2.
+
+## Step 2 — Assemble `retro.json`
 
 Written at `schema_version` 2, beside `progress.json`.
 
@@ -89,7 +104,7 @@ NEVER re-derive them from token counts against a live price table. If a second p
 ever tempting (e.g. a dashboard-side "current price" toggle), that is out of contract — the frozen
 number at teardown is the number.
 
-## Step 2 — Update `standing-orders.md`
+## Step 3 — Update `standing-orders.md`
 
 At the repo-key dir. Match this loop's retro failure modes against existing entries:
 
@@ -100,7 +115,7 @@ At the repo-key dir. Match this loop's retro failure modes against existing entr
 
 This step is additive-or-recurrence-only: no metric-based removal anywhere.
 
-## Steps 3 and 4
+## Steps 4 and 5
 
-3. **Write feedback-type auto-memories** for lessons that generalise beyond this loop.
-4. **Only then** set `progress.json` `status: "complete"` and declare `LOOP-STOP: complete`. First apply `coderails:verification-before-completion` to the orchestrator's own completion claim (SKILL.md's Phase 13 links the `finishing-out.md` detail).
+4. **Write feedback-type auto-memories** for lessons that generalise beyond this loop.
+5. **Only then** set `progress.json` `status: "complete"` and declare `LOOP-STOP: complete`. First apply `coderails:verification-before-completion` to the orchestrator's own completion claim (SKILL.md's Phase 13 links the `finishing-out.md` detail). The `loop_stall_guard` proof gate blocks the declaration itself if Step 1 was skipped or left a proof unexecuted/failed — it does not need a separate manual check here.
