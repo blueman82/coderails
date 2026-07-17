@@ -182,9 +182,49 @@ The routine's run note lives at `~/.claude/coderails-dashboard/routines/workflow
 
 The 8-day artifact-gate freshness window (`maxAgeSeconds: 691200`) provides catch-up grace for a run that fires late (e.g. the machine was asleep at the scheduled time) — a run inside that window still passes the gate. Read `proposals_written: 0` plainly: no repeated patterns reached the proposal threshold this week, and zero proposals is not a failure or a request to lower the threshold — it's the expected norm in a healthy workflow. Report it as a green, completed run just like any other passing gate.
 
+## `docs-sync-nightly`: self-merging documentation drift fixer
+
+Every night, this routine's skill (`skills/docs-sync/SKILL.md`) audits
+the repo's git-tracked documentation (`README.md`, `AGENTS.md`,
+`CLAUDE.md`, tracked `docs/*.md`) for drift against the actual codebase,
+using `/coderails:sync-docs`'s own audit. If nothing needs fixing, it
+logs `no-drift` and stops — no branch, no PR — before any git state is
+touched, which keeps a healthy night from ever producing an empty or
+no-op PR. If drift is found, it fixes it and drives the fix through the
+full gate chain (task-evals frozen before the edit, a
+`git diff origin/main...HEAD --name-only` manifest assertion — three-dot,
+because a sibling PR merging into `main` mid-run must not make a clean
+branch look contaminated — review, post-review, post-evals, merge) and
+merges its own PR with no human in the loop.
+
+It replaces the former `sync-docs-weekly` routine, which had been
+silently broken for 9 days: its `foreignSkillPath` pointed at a path
+under `~/.claude/skills/` that never existed (the real skill lives
+in-repo), and `loadConfig()`'s own validator only checks that
+`foreignSkillPath` is a non-empty absolute string, never that the path
+exists on disk — so the broken config loaded clean and the failure
+surfaced only at sweep time, with zero escalations logged the whole
+time it was dead. `docs-sync-nightly` needs no `foreignSkillPath` at
+all: its skill ships in-repo, same as `loop-retro-promotion`.
+
+Its manifest is hard-scoped to git-tracked `.md` files. If the diff ever
+contains anything else — a hook script, `scripts/`, `.claude/settings.json`,
+any code — the skill aborts with cleanup (closes the PR if one was
+opened, deletes the branch locally and on the remote) rather than
+warning and continuing.
+
+**Security note.** See the security warning below —
+`docs-sync-nightly` is the **second** routine in this repo (after
+`loop-retro-promotion-weekly`) to use a non-`read-only` button profile
+(`bypass`). Its mitigation is the same shape as that routine's: no hook
+protects a `claude -p` run, so the entire merge rail is the manifest
+lock (docs-only, three-dot-scoped) plus `scripts/merge.sh`'s own
+script-internal artifact gates and `/pr-review-toolkit:review-pr` — not
+any hook or server-side check.
+
 ## `loop-retro-promotion-weekly`: a dormant-by-default routine
 
-Unlike the other four routines, `loop-retro-promotion-weekly`'s own
+Unlike the other three read-only routines, `loop-retro-promotion-weekly`'s own
 skill (`skills/loop-retro-promotion/SKILL.md`) evaluates a 3-part
 graduation predicate every time it runs, before doing anything else: (1)
 at least 10 `retro.json` files exist under the repo-key dir, (2)
