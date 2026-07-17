@@ -61,9 +61,15 @@ if ! command -v node >/dev/null 2>&1; then
   exit 1
 fi
 
+# A missing node_modules is a normal cold-clone state (docs/routines.md
+# "Prerequisites for a cold clone"), not a broken assertion — SKIP (exit 3)
+# rather than FAIL, so run_all.sh can distinguish "couldn't run" from
+# "ran and found a real problem". Scoped to node_modules only: the earlier
+# `command -v node` check above stays a hard FAIL, since a missing node
+# binary isn't the documented cold-clone case this exists to unblock.
 if [ ! -d "$REPO_ROOT/skills/dashboard/lib/node_modules" ] || [ ! -d "$REPO_ROOT/skills/dashboard/runner/node_modules" ]; then
-  echo "FAIL - skills/dashboard/lib and/or skills/dashboard/runner node_modules missing — run npm install in both (see docs/routines.md 'Prerequisites for a cold clone')"
-  exit 1
+  echo "SKIP: skills/dashboard/lib and/or skills/dashboard/runner node_modules missing — run npm install in both (see docs/routines.md 'Prerequisites for a cold clone')"
+  exit 3
 fi
 
 # --- Everything config-shaped goes through ONE node invocation: loadConfig()
