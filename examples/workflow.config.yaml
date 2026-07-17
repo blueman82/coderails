@@ -11,3 +11,13 @@ engineering_principles_skill: /engineering-principles-python
 # node/npx and a supported platform (macOS Seatbelt, Linux/WSL2 bubblewrap).
 # Default/absent = false (today's in-process dispatch, unchanged).
 sandbox_workers: false
+# tier_review.machine_user: the GitHub login of the dedicated machine-user
+# identity that posts `tier-review` commit statuses. When set, scripts/merge.sh
+# and hooks/scripts/enforce_pr_workflow.sh additionally require, for any PR
+# whose eval artifact is tier 0, that the newest `tier-review` status on the
+# head SHA be state=success AND posted by this exact login — a mismatch blocks
+# the merge as a misconfiguration-or-forgery signal. This is a redundant local
+# gate (defence-in-depth): the primary control is a server-side ruleset.
+# Absent/omitted (default) = this check is inactive; other installs unaffected.
+# tier_review:
+#   machine_user: null
