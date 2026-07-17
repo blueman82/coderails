@@ -38,6 +38,29 @@ als_log() {
   { printf '%s %s\n' "$(date -Iseconds 2>/dev/null || date +%Y-%m-%dT%H:%M:%S%z)" "$msg" >> "$LOG_FILE"; } 2>/dev/null
 }
 
+# Shared accumulator for the `complete`-only systemMessage: als_gate_proofs_on_complete
+# (withdrawn_proofs) and als_report_cost_on_complete (cost) both run in the
+# SAME loop_stall_guard.sh hook invocation and each has its own reason to
+# tell the human something. Each top-level JSON object is only valid as its
+# OWN document under a whole-buffer JSON parse — two of them concatenated on
+# one hook's stdout is not one valid document — so neither function may emit
+# its own {systemMessage:...} directly. Both append their text here instead;
+# the call site (loop_stall_guard.sh, after both gates have run) emits ONE
+# jq -n '{systemMessage:...}' from the final accumulated value. GLOBAL, not
+# local: it must survive past either function's own return so the call site
+# can read it once both have had their chance to append.
+ALS_PENDING_SYSMSG=""
+als_append_pending_sysmsg() { # text -> appends to $ALS_PENDING_SYSMSG (newline-joined if non-empty)
+  local text="$1"
+  [ -n "$text" ] || return 0
+  if [ -n "$ALS_PENDING_SYSMSG" ]; then
+    ALS_PENDING_SYSMSG="${ALS_PENDING_SYSMSG}
+${text}"
+  else
+    ALS_PENDING_SYSMSG="$text"
+  fi
+}
+
 # Sanitise a session_id extracted from the Stop-hook JSON payload. If the
 # payload's session_id is missing/null, the jq extraction below falls back to
 # the literal "?" — a FIXED sentinel that would make every malformed-payload
@@ -843,11 +866,18 @@ A frozen proof.json must be valid JSON. Fix or regenerate it, then re-declare co
 Regenerate proof.json with a numeric schema_version >= 1, then re-declare complete." >&2
     exit 2
   }
-  # .proofs absent/null -> nothing to prove (allow). Present-but-not-array is
-  # a malformed shape and blocks, same posture as work_units' file-shape check.
+  # .proofs absent/null -> nothing to prove ITSELF, but withdrawn_proofs (see
+  # below) may still be present and must still be evaluated — a loop that
+  # withdraws its ONLY proof produces exactly this shape (.proofs absent,
+  # withdrawn_proofs populated). This is EDGE #1 from the authorising prompt:
+  # do NOT `return 0` here the way the pre-withdrawal version of this gate
+  # did: that would let an unvalidated withdrawn_proofs sail through under
+  # the "nothing to prove" allow. Present-but-not-array is still a malformed
+  # shape and still blocks immediately, same posture as work_units' file-shape
+  # check — withdrawal doesn't relax that.
   local proofs_type; proofs_type=$(jq -r '(.proofs // null) | type' "$proof_file" 2>/dev/null)
   case "$proofs_type" in
-    null) return 0 ;;
+    null) : ;;
     array) : ;;
     *)
       als_log "hook=$hook session=$session proof_gate=blocked offenders=malformed_shape"
@@ -856,13 +886,28 @@ Regenerate proof.json with .proofs as a JSON array, then re-declare complete." >
       exit 2
       ;;
   esac
-  # proof_count is numerically validated BEFORE either comparison below — a
-  # bare `[ "$x" -gt 0 ] 2>/dev/null || return 0` conflates "jq failed /
-  # printed garbage" with "the deliberate, legitimate empty-proofs allow";
-  # both silently fell through to the same `return 0`. A jq failure here
-  # (missing binary already ruled out above; a truncated/mid-write proof.json
-  # racing the reader is the realistic cause) must fail CLOSED like every
-  # other unparseable-proof.json case in this gate, not silently pass.
+  # withdrawn_proofs absent/null -> nothing withdrawn (fine, .proofs alone
+  # still governs). Present-but-not-array is malformed and blocks, same
+  # posture as .proofs above.
+  local withdrawn_type; withdrawn_type=$(jq -r '(.withdrawn_proofs // null) | type' "$proof_file" 2>/dev/null)
+  case "$withdrawn_type" in
+    null) : ;;
+    array) : ;;
+    *)
+      als_log "hook=$hook session=$session proof_gate=blocked offenders=malformed_withdrawn_shape"
+      echo "[loop-stall-guard] LOOP-STOP: complete declared but proof.json's .withdrawn_proofs field is not an array.
+Regenerate proof.json with .withdrawn_proofs as a JSON array, then re-declare complete." >&2
+      exit 2
+      ;;
+  esac
+  # proof_count/withdrawn_count are numerically validated BEFORE any
+  # comparison below — a bare `[ "$x" -gt 0 ] 2>/dev/null || return 0`
+  # conflates "jq failed / printed garbage" with "the deliberate, legitimate
+  # empty-proofs allow"; both silently fell through to the same `return 0`. A
+  # jq failure here (missing binary already ruled out above; a truncated/
+  # mid-write proof.json racing the reader is the realistic cause) must fail
+  # CLOSED like every other unparseable-proof.json case in this gate, not
+  # silently pass.
   local proof_count; proof_count=$(jq '.proofs | length' "$proof_file" 2>/dev/null)
   case "$proof_count" in
     ''|*[!0-9]*)
@@ -872,23 +917,42 @@ Regenerate proof.json (it may be truncated or mid-write), then re-declare comple
       exit 2
       ;;
   esac
-  # MERGE-BLOCKER FIX: proof.json is model-writable and uncapped, and this
-  # gate previously did a linear rescan of $executions PER PROOF entry —
-  # O(proofs x transcript_bash_calls). loop_stall_guard is registered with a
-  # 15s hooks.json timeout, and a timed-out hook never exits 2 — the Stop
-  # proceeds UNBLOCKED. An inflated proof.json (reproduced: ~2,000 proofs x
-  # ~2,000 Bash calls ~= 15s) therefore defeats the gate by making the CHECK
-  # itself time out, not by satisfying it. A hard cap, checked BEFORE any
-  # transcript mining, closes this: a legitimate proof set is 3-10 entries;
-  # 100+ is itself suspicious and blocks fail-closed rather than being mined.
-  if [ "$proof_count" -gt 100 ]; then
-    als_log "hook=$hook session=$session proof_gate=blocked offenders=too_many_proofs count=$proof_count"
-    echo "[loop-stall-guard] LOOP-STOP: complete declared but proof.json declares $proof_count proofs, exceeding the cap of 100.
+  local withdrawn_count; withdrawn_count=$(jq '.withdrawn_proofs | length' "$proof_file" 2>/dev/null)
+  case "$withdrawn_count" in
+    ''|*[!0-9]*)
+      als_log "hook=$hook session=$session proof_gate=blocked offenders=jq_error"
+      echo "[loop-stall-guard] LOOP-STOP: complete declared but proof.json's .withdrawn_proofs length could not be read.
+Regenerate proof.json (it may be truncated or mid-write), then re-declare complete." >&2
+      exit 2
+      ;;
+  esac
+  # MERGE-BLOCKER FIX (extended to the combined total): proof.json is
+  # model-writable and uncapped, and this gate previously did a linear rescan
+  # of $executions PER PROOF entry — O(proofs x transcript_bash_calls).
+  # loop_stall_guard is registered with a 15s hooks.json timeout, and a
+  # timed-out hook never exits 2 — the Stop proceeds UNBLOCKED. An inflated
+  # proof.json (reproduced: ~2,000 proofs x ~2,000 Bash calls ~= 15s)
+  # therefore defeats the gate by making the CHECK itself time out, not by
+  # satisfying it. The cap is on len(.proofs) + len(.withdrawn_proofs)
+  # COMBINED, not 100 each — both arrays feed the SAME $exec_index mining
+  # pass below, so 100-and-100 would recreate the exact ~100x100 timeout
+  # shape the original cap was sized to rule out. A hard cap, checked BEFORE
+  # any transcript mining, closes this: a legitimate combined set is a
+  # handful of entries; 100+ is itself suspicious and blocks fail-closed
+  # rather than being mined.
+  local combined_count=$((proof_count + withdrawn_count))
+  if [ "$combined_count" -gt 100 ]; then
+    als_log "hook=$hook session=$session proof_gate=blocked offenders=too_many_proofs count=$combined_count"
+    echo "[loop-stall-guard] LOOP-STOP: complete declared but proof.json declares $combined_count proofs+withdrawn_proofs combined, exceeding the cap of 100.
 A legitimate frozen proof set is a handful of commands (typically 3-10). Reduce
-proof.json to <= 100 proofs, then re-declare complete." >&2
+proof.json (.proofs + .withdrawn_proofs combined) to <= 100, then re-declare complete." >&2
     exit 2
   fi
-  [ "$proof_count" -gt 0 ] || return 0
+  # True "nothing to prove" allow: BOTH arrays empty (or absent). Either one
+  # alone still needs the mining pass below — an empty .proofs alongside a
+  # populated withdrawn_proofs must still validate the withdrawal (EDGE #1's
+  # second early-return site, the pre-fix `-gt 0 || return 0`).
+  { [ "$proof_count" -eq 0 ] && [ "$withdrawn_count" -eq 0 ]; } && { als_log "hook=$hook session=$session proof_gate=ok proofs=0 withdrawn=0"; return 0; }
 
   # Two-stage tolerant parse of the transcript (same idiom als_count_invocations
   # uses): a single malformed JSONL line must not collapse the whole scan.
@@ -930,20 +994,42 @@ proof.json to <= 100 proofs, then re-declare complete." >&2
   # (one result per tool_use, itself bounded by the transcript), so there is
   # no perf reason to also map it.
   #
-  # OUTPUT SHAPE: the pass emits a two-line "<count>\n<offenders>" string,
-  # count FIRST. This is what makes offenders extraction fail closed: a
-  # completely clean run (zero offenders) still emits a non-empty first line
-  # (the digit count), so `[ -n "$out" ]` genuinely distinguishes "the pass
-  # ran" from "the pass failed" — a prior version ran offenders extraction as
-  # its OWN SEPARATE jq call on $verdicts, whose transient failure yielded ""
-  # indistinguishable from the legitimate "zero offenders" case, i.e. a
-  # silent pass. One pipeline, one failure mode, guarded once.
+  # WITHDRAWN VALIDATION (mined by the SAME pass, against the SAME
+  # $exec_index — no second independent scan, per the timeout-hole
+  # mitigation in the header above): a withdrawn_proofs entry is a claim
+  # that a proof WAS run, WAS SEEN TO FAIL, and is being withdrawn rather
+  # than fixed — deliberately STRICTER than .proofs' null-tolerance (a
+  # withdrawn entry whose last execution has is_error:null does NOT pass;
+  # only an observed FAILURE justifies a withdrawal, whereas .proofs treats
+  # null as "ran, no clear failure signal, let it through"). Verdicts:
+  #   unexecuted   — cmd never appears in $exec_index (same definition as .proofs)
+  #   not_failed   — cmd executed but its last result is_error is not
+  #                  strictly true (includes false AND null — a withdrawal
+  #                  claims a FAILURE was witnessed, so tolerance here would
+  #                  let a passing or ambiguous check be withdrawn instead
+  #                  of fixed)
+  #   badreason    — withdrawn_reason missing/empty/non-string
+  #   badcmd       — cmd missing/empty/non-string (same as .proofs)
+  #   duplicate_id — this id also appears in .proofs (no double-dipping: a
+  #                  proof cannot simultaneously be pending AND withdrawn)
+  #   unverifiable — the withdrawn_proofs entry itself is not an object
+  #
+  # OUTPUT SHAPE: the pass emits a THREE-line string: "<proof_count>\n
+  # <offenders>\n<withdrawn_ok_ids>", count FIRST (unchanged fail-closed
+  # rationale from the original two-line shape — `[ -n "$out" ]` still
+  # distinguishes "the pass ran" from "the pass failed" off the first line
+  # alone). offenders now covers BOTH .proofs verdicts != satisfied AND
+  # withdrawn_proofs verdicts != ok, so a single offenders check still
+  # blocks on either side. withdrawn_ok_ids is the id list of withdrawn
+  # entries that passed ALL their checks — used only for the ALLOW-path
+  # systemMessage, never for blocking.
   local out
   out=$(
     jq -R 'fromjson? // empty' "$transcript" 2>/dev/null | \
     jq -s --slurpfile proofdoc "$proof_file" -r '
       . as $records
-      | ($proofdoc[0].proofs) as $proofs
+      | ($proofdoc[0].proofs // []) as $proofs
+      | ($proofdoc[0].withdrawn_proofs // []) as $withdrawn
       | ( [ $records[]?
             | select(type == "object" and .type == "assistant")
             | .message.content[]?
@@ -964,6 +1050,8 @@ proof.json to <= 100 proofs, then re-declare complete." >&2
             | select(type == "object" and .type == "tool_result")
             | select((.tool_use_id | type == "string" and length > 0))
             | {tool_use_id: .tool_use_id, is_error: (.is_error // null)} ] ) as $results
+      | ( [ $proofs[] | select(type == "object") | (.id | if type == "string" and length > 0 then . else null end) ]
+          | map(select(. != null)) ) as $proof_ids
       | [ $proofs[] as $p
           | ( if ($p | type) != "object" then
                 {id: "P\($proofs | index($p))", verdict: "unverifiable"}
@@ -990,14 +1078,52 @@ proof.json to <= 100 proofs, then re-declare complete." >&2
                   end
               end )
         ] as $verdicts
-      | "\($verdicts | length)\n\([ $verdicts[] | select(.verdict != "satisfied") | "\(.id)(\(.verdict))" ] | join(", "))"
+      | [ $withdrawn[] as $w
+          | ( if ($w | type) != "object" then
+                {id: "W\($withdrawn | index($w))", verdict: "unverifiable"}
+              else
+                ( ($w.id | if type == "string" and length > 0 then . else null end)) as $rawid
+                | ($rawid // "W\($withdrawn | index($w))") as $id
+                | ( $w.cmd | if type == "string" then gsub("^\\s+|\\s+$";"") else null end ) as $cmd
+                | ( $w.withdrawn_reason | if type == "string" then gsub("^\\s+|\\s+$";"") else null end ) as $reason
+                | if ($proof_ids | index($id)) then
+                    {id: $id, verdict: "duplicate_id", reason_line: ""}
+                  elif ($cmd == null or $cmd == "") then
+                    {id: $id, verdict: "badcmd", reason_line: ""}
+                  elif ($reason == null or $reason == "") then
+                    {id: $id, verdict: "badreason", reason_line: ""}
+                  else
+                    ( $exec_index[$cmd] ) as $last
+                    | if ($last == null) then
+                        {id: $id, verdict: "unexecuted", reason_line: ""}
+                      else
+                        ( [ $results[] | select(.tool_use_id == $last.id) ] | last) as $result
+                        | if ($result == null or $result.is_error != true) then
+                            {id: $id, verdict: "not_failed", reason_line: ""}
+                          else
+                            # First line only of withdrawn_reason: a
+                            # multi-line reason must not smuggle newlines
+                            # into a one-line systemMessage (same rule the
+                            # cost reporters control-char strip enforces).
+                            {id: $id, verdict: "ok", reason_line: ($reason | split("\n")[0])}
+                          end
+                      end
+                  end
+              end )
+        ] as $wverdicts
+      | "\($verdicts | length)\n\(
+          ( [ $verdicts[] | select(.verdict != "satisfied") | "\(.id)(\(.verdict))" ]
+            + [ $wverdicts[] | select(.verdict != "ok") | "\(.id)(\(.verdict))" ]
+          ) | join(", ")
+        )\n\([ $wverdicts[] | select(.verdict == "ok") | "\(.id): \(.reason_line)" ] | join("; "))"
     ' 2>/dev/null
   )
   [ -n "$out" ] || { als_log "hook=$hook session=$session proof_gate=blocked offenders=jq_error"; echo "[loop-stall-guard] LOOP-STOP: complete declared but proof.json/transcript could not be evaluated." >&2; exit 2; }
 
-  local n offenders
+  local n offenders withdrawn_ok
   n=$(printf '%s\n' "$out" | sed -n '1p')
   offenders=$(printf '%s\n' "$out" | sed -n '2p')
+  withdrawn_ok=$(printf '%s\n' "$out" | sed -n '3p')
   case "$n" in
     ''|*[!0-9]*)
       als_log "hook=$hook session=$session proof_gate=blocked offenders=jq_error"
@@ -1011,18 +1137,35 @@ proof.json to <= 100 proofs, then re-declare complete." >&2
 Run each named proof's cmd VERBATIM as its own single Bash command in THIS
 (the orchestrator's) session, in the foreground (never run_in_background) —
 commands run inside dispatched workers or subagents never appear in this
-transcript and cannot satisfy this gate — then re-declare complete." >&2
+transcript and cannot satisfy this gate — then re-declare complete.
+A withdrawn_proofs entry must have been run and SEEN TO FAIL in this
+session's transcript, with a non-empty withdrawn_reason and cmd, and must
+not also appear in .proofs." >&2
     exit 2
   fi
   als_log "hook=$hook session=$session proof_gate=ok proofs=$n"
+  # POSTURE SPLIT (deliberate — read before touching this tail): everything
+  # above this line, including the withdrawn_proofs verdicts folded into
+  # $offenders, is fail-CLOSED like every sibling check in this function — a
+  # withdrawal that didn't run-and-fail, or carries an empty reason/cmd, or
+  # double-dips against .proofs, blocks exit 2 same as an unproven .proofs
+  # entry. Only this final message ACCUMULATION (via als_append_pending_sysmsg,
+  # see its header for why this function does not emit its own JSON directly)
+  # inherits the cost-reporter's never-block posture — a reporting failure
+  # must never re-block an already-validated, already-passed gate. Do not let
+  # "never block" leak upward into the validation logic above this line —
+  # only the append below is allowed to fail silently.
+  if [ -n "$withdrawn_ok" ]; then
+    als_append_pending_sysmsg "Withdrawn proofs: $withdrawn_ok"
+  fi
 }
 
-# Reporter (NOT a gate): on a `complete` declaration, print the loop's mined
-# cost to the human's terminal via top-level `systemMessage`, mechanically —
-# so a `complete` loop can no longer finish without the human seeing what it
-# cost, the way SKILL.md's Phase 13 prose has always demanded but a model
-# could silently skip. This is the fix for that: prose can't enforce prose,
-# a hook can.
+# Reporter (NOT a gate): on a `complete` declaration, APPEND the loop's mined
+# cost to $ALS_PENDING_SYSMSG (emitted as a single top-level systemMessage at
+# the loop_stall_guard.sh call site), mechanically — so a `complete` loop can
+# no longer finish without the human seeing what it cost, the way SKILL.md's
+# Phase 13 prose has always demanded but a model could silently skip. This is
+# the fix for that: prose can't enforce prose, a hook can.
 #
 # DELIBERATE POSTURE INVERSION — read this before "fixing" this function:
 # every other gate in this file (check_verify_loop.sh and
@@ -1158,7 +1301,7 @@ als_report_cost_on_complete() {
           fi
           msg="cost recorded but incomplete (missing ${missing})"
           als_log "hook=$hook session=$session cost_report=cost_incomplete"
-          jq -n --arg m "$msg" '{systemMessage: $m}' 2>/dev/null
+          als_append_pending_sysmsg "$msg"
           return 0
         fi
         # Staleness age. WARNS inline, never blocks: a stale price table means
@@ -1259,6 +1402,6 @@ als_report_cost_on_complete() {
     "cost recorded but incomplete"*) outcome="cost_incomplete" ;;
   esac
   als_log "hook=$hook session=$session cost_report=$outcome"
-  jq -n --arg m "$msg" '{systemMessage: $m}' 2>/dev/null
+  als_append_pending_sysmsg "$msg"
   return 0
 }
