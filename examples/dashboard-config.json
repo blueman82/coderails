@@ -13,7 +13,7 @@
     {
       "name": "sync-docs-weekly",
       "label": "SYNC DOCS",
-      "command": "/sync-docs --append-system-prompt \"Write the full drift report to /path/to/coderails-dashboard/routines/sync-docs/report-{date}.md before finishing.\"",
+      "command": "/sync-docs --append-system-prompt \"Write the full drift report to /path/to/.claude/coderails-dashboard/routines/sync-docs/report-{date}.md before finishing.\"",
       "cwd": "/path/to/coderails",
       "profile": "read-only",
       "hidden": true
@@ -54,7 +54,7 @@
     {
       "name": "workflow-audit-weekly",
       "label": "WORKFLOW AUDIT (weekly)",
-      "command": "Invoke coderails:workflow-audit in QUEUE-MODE over the last 7 days (--days 7). In-session skill creation is forbidden in this run — every propose verdict is written as a queue entry only. Finish by writing the run note to /path/to/coderails-dashboard/routines/workflow-audit/run-{date}.md (use exactly this path and filename) recording `proposals_written: <N>` and `proposals_attempted: <A>`, where N counts queue entries actually written this run. Emit the completion marker line `## [<YYYY-MM-DD>] workflow-audit complete` ONLY IF the run finished cleanly AND N == A. If any queue write failed (N != A) or the run did not complete, write the note WITHOUT the completion marker. N=0 with no failures is SUCCESS — emit the marker.",
+      "command": "Invoke coderails:workflow-audit in QUEUE-MODE over the last 7 days (--days 7). In-session skill creation is forbidden in this run — every propose verdict is written as a queue entry only. Finish by writing the run note to /path/to/.claude/coderails-dashboard/routines/workflow-audit/run-{date}.md (use exactly this path and filename) recording `proposals_written: <N>` and `proposals_attempted: <A>`, where N counts queue entries actually written this run. Emit the completion marker line `## [<YYYY-MM-DD>] workflow-audit complete` ONLY IF the run finished cleanly AND N == A. If any queue write failed (N != A) or the run did not complete, write the note WITHOUT the completion marker. N=0 with no failures is SUCCESS — emit the marker.",
       "cwd": "/path/to/coderails",
       "profile": "read-only",
       "hidden": true
@@ -80,7 +80,7 @@
       "cadence": "weekly",
       "foreignSkillPath": "/path/to/.claude/skills/sync-docs/SKILL.md",
       "expectedArtifact": {
-        "artifactPath": "/path/to/coderails-dashboard/routines/sync-docs/report-{date}.md",
+        "artifactPath": "/path/to/.claude/coderails-dashboard/routines/sync-docs/report-{date}.md",
         "maxAgeSeconds": 691200,
         "predicate": { "kind": "exists" }
       },
@@ -92,7 +92,7 @@
       "buttonRef": "memory-consolidation-weekly",
       "cadence": "weekly",
       "expectedArtifact": {
-        "artifactPath": "/path/to/coderails-dashboard/routines/memory-consolidation/report-{date}.md",
+        "artifactPath": "/path/to/.claude/coderails-dashboard/routines/memory-consolidation/report-{date}.md",
         "maxAgeSeconds": 691200,
         "predicate": { "kind": "exists" }
       },
@@ -104,7 +104,7 @@
       "buttonRef": "loop-retro-promotion",
       "cadence": "weekly",
       "expectedArtifact": {
-        "artifactPath": "/path/to/agentic-loop/-path-to-coderails-.git/promotion-runs.log",
+        "artifactPath": "/path/to/.claude/agentic-loop/-path-to-coderails-.git/promotion-runs.log",
         "maxAgeSeconds": 691200,
         "predicate": { "kind": "exists" }
       },
@@ -116,7 +116,7 @@
       "buttonRef": "workflow-audit-weekly",
       "cadence": "weekly",
       "expectedArtifact": {
-        "artifactPath": "/path/to/coderails-dashboard/routines/workflow-audit/run-{date}.md",
+        "artifactPath": "/path/to/.claude/coderails-dashboard/routines/workflow-audit/run-{date}.md",
         "maxAgeSeconds": 691200,
         "predicate": { "kind": "contains", "marker": "## [{date}] workflow-audit complete" }
       },
