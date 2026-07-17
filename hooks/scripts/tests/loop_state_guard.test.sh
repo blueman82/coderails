@@ -415,6 +415,63 @@ mixed_stderr=$(call_lib_fn als_count_invocations "$mixed_malformed_t" 2>&1 1>/de
 check "T4: 2 malformed + 1 valid line -> skipped_malformed=2" "skipped_malformed=2" "$mixed_stderr"
 
 # =====================================================================
+# als_extract_last_text: non-object JSON line in the tail window must not
+# blind the whole extraction (companion to als_count_invocations' malformed-
+# line tolerance above, but a DIFFERENT failure shape: `fromjson? // empty`
+# happily emits any valid JSON value, not only objects, so a bare scalar or
+# array line passes stage 1 clean; stage 2's `select(.type == "assistant")`
+# then errors on that non-object value, and with 2>/dev/null the whole
+# `jq -s` pipeline yields empty — even though a real assistant-text line sits
+# right next to it in the same tail window.
+# =====================================================================
+mk_nonobject_line_transcript() {
+  local out="$TMP/nonobject_$RANDOM.jsonl"
+  printf '%s\n' '123' > "$out"
+  printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"text","text":"final answer text"}]}}' >> "$out"
+  printf '%s' "$out"
+}
+nonobject_t=$(mk_nonobject_line_transcript)
+extracted=$(call_lib_fn als_extract_last_text "$nonobject_t" 10)
+check "bare scalar JSON line alongside valid assistant text -> text still extracted" "final answer text" "$extracted"
+
+mk_nonobject_array_transcript() {
+  local out="$TMP/nonobject_array_$RANDOM.jsonl"
+  printf '%s\n' '[1,2,3]' > "$out"
+  printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"text","text":"final answer text"}]}}' >> "$out"
+  printf '%s' "$out"
+}
+nonobject_array_t=$(mk_nonobject_array_transcript)
+extracted_array=$(call_lib_fn als_extract_last_text "$nonobject_array_t" 10)
+check "bare JSON array line alongside valid assistant text -> text still extracted" "final answer text" "$extracted_array"
+
+# Reversed ordering: the poison line comes AFTER the assistant-text line, not
+# before. `last // ""` means this exercises a materially different path than
+# the two tests above — and it's the shape a live transcript actually takes,
+# since the assistant message is rarely the final line in the tail window (a
+# trailing tool_result, hook record, etc. commonly follows it). Without this
+# ordering the poison-before-text tests above could pass by coincidence if
+# the guard only skipped LEADING junk rather than filtering every element.
+mk_trailing_nonobject_transcript() {
+  local out="$TMP/trailing_nonobject_$RANDOM.jsonl"
+  printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"text","text":"final answer text"}]}}' > "$out"
+  printf '%s\n' '123' >> "$out"
+  printf '%s' "$out"
+}
+trailing_nonobject_t=$(mk_trailing_nonobject_transcript)
+extracted_trailing=$(call_lib_fn als_extract_last_text "$trailing_nonobject_t" 10)
+check "bare scalar JSON line AFTER valid assistant text -> text still extracted" "final answer text" "$extracted_trailing"
+
+mk_trailing_nonobject_array_transcript() {
+  local out="$TMP/trailing_nonobject_array_$RANDOM.jsonl"
+  printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"text","text":"final answer text"}]}}' > "$out"
+  printf '%s\n' '[1,2,3]' >> "$out"
+  printf '%s' "$out"
+}
+trailing_nonobject_array_t=$(mk_trailing_nonobject_array_transcript)
+extracted_trailing_array=$(call_lib_fn als_extract_last_text "$trailing_nonobject_array_t" 10)
+check "bare JSON array line AFTER valid assistant text -> text still extracted" "final answer text" "$extracted_trailing_array"
+
+# =====================================================================
 # als_log brace-group redirection (no stderr leak, no dir auto-create)
 # =====================================================================
 missing_parent_log="$TMP/does-not-exist-$RANDOM/discipline.log"
