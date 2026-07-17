@@ -839,6 +839,13 @@ append_bash_call_no_result() { # transcript cmd
   jq -cn --arg id "$tool_id" --arg cmd "$cmd" \
     '{type:"assistant",message:{content:[{type:"tool_use",id:$id,name:"Bash",input:{command:$cmd,run_in_background:false}}]}}' >> "$t"
 }
+# Appends a single line that is VALID JSON but NOT an object (e.g. a bare
+# number) — must survive the fromjson? stage same as a real record, then be
+# skipped inert by the select(type=="object") guard rather than aborting the
+# whole jq program when its .type is accessed.
+append_raw_json_line() { # transcript raw_json
+  printf '%s\n' "$2" >> "$1"
+}
 # Standard complete-declaration transcript base: N loop invocations + final
 # LOOP-STOP: complete text. Bash calls are appended to this via append_bash_call
 # BEFORE the final text line is written, matching real transcript order (tool
@@ -1063,6 +1070,43 @@ proof_fixture_reset S1
 write_proof_raw S1 '{"schema_version":1,"proofs":["just-a-string"]}'
 append_complete_declaration "$PROOF_T"
 check "proof: non-object proofs entry -> block (fails closed)" 2 "$(run x "$(payload "$PROOF_T" S1)")"
+
+# (18) a valid-JSON but NON-OBJECT transcript line (e.g. a bare `42`)
+# alongside an otherwise-satisfied proof -> ALLOW. Without the
+# select(type=="object") guard, this line's own .type access throws inside
+# the jq program, collapsing $verdicts to empty and blocking a legitimate
+# complete on offenders=jq_error — exactly the "one malformed line collapses
+# the whole scan" failure the gate's header explicitly rules out.
+#
+# NOT exercised through the real guard entry point: als_count_invocations
+# (the invocation counter, called first via als_gate_require_active_loop) has
+# an IDENTICAL unguarded .type access on the same transcript, and a bare `42`
+# line crashes ITS jq pipeline too (jq_parse_error), collapsing invocations to
+# 0 — which makes the whole guard treat the session as "not a loop" and exit 0
+# via a completely different path BEFORE als_gate_proofs_on_complete is ever
+# reached (confirmed via bash -x trace). That is a separate, pre-existing,
+# equally-unguarded exposure in als_count_invocations, explicitly OUT OF
+# SCOPE here (tracked separately) — so a full-transcript fixture cannot
+# reach this gate's own guard through the real Stop-hook entry point. Calling
+# als_gate_proofs_on_complete directly (mirrors inv_count's existing
+# direct-call pattern below) isolates the assertion to just this gate's own
+# defence, which is what's actually being fixed.
+proof_gate_direct() { # session_id proof_dir transcript -> exit code of als_gate_proofs_on_complete alone
+  (
+    . "$(cd "$(dirname "$0")/.." && pwd)/lib/loop_state_common.sh"
+    ALS_PATH="$2/progress.json"
+    als_gate_proofs_on_complete complete loop_stall_guard "$1" "$3"
+  )
+  echo $?
+}
+reset
+dir=$(file_dir S1); mkdir -p "$dir"
+printf '{"schema_version":1,"proofs":[{"id":"P1","cmd":"echo still-satisfied"}]}' > "$dir/proof.json"
+T="$TMP/directcall_${RANDOM}.jsonl"
+: > "$T"
+append_raw_json_line "$T" '42'
+append_bash_call "$T" "echo still-satisfied" false
+check "proof (direct call): non-object transcript line (bare 42) -> allow (stray line skipped, not fatal)" 0 "$(proof_gate_direct S1 "$dir" "$T")"
 
 # ---------------------------------------------------------------------
 # Additional regression/negative controls beyond the 17 mandatory tests.
