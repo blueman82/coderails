@@ -175,6 +175,19 @@ NEVER edits: hook scripts, gate logic, anything under `scripts/`,
 (`~/.claude/coderails-dashboard.json` or
 `examples/dashboard-config.json`), `.claude/settings.json`, or any code.
 
+**This is mechanically enforced, not merely stated.** The
+self-governance deny-list in step 4 is checked by the same manifest
+assertion that rejects a non-`.md` path — an edit to `skills/**/SKILL.md`
+(including this file), `AGENTS.md`, `CLAUDE.md`, `docs/routines.md`, or
+anything under `.claude/` aborts the run exactly like a code change
+would, before push. It is not left to this prose alone to be honoured.
+That said, be honest about the limit: this enforcement lives in the
+skill's own prompt and runs inside `claude -p`, where `PreToolUse` hooks
+do not fire — it reduces the risk of self-governance drift, it does not
+eliminate it the way a hook-level or server-side check would. See the
+security warning in `docs/routines.md` for the same caveat stated for
+the reader operating this routine.
+
 It never relaxes, reorders, or skips a gate. It merges ONLY via
 `/coderails:merge` — never raw `gh pr merge`: `PreToolUse` hooks do not
 fire in this headless execution mode (`claude -p`), so
