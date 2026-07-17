@@ -210,7 +210,7 @@ describe("checkArtifact", () => {
   // presence, both assertions would pass.
   it("fails a 'contains'/'run=ok' predicate on a docs-sync run log that aborted without reaching run=ok", () => {
     const path = join(dir, "run-2026-07-17.log");
-    writeFileSync(path, "2026-07-17T10:00:00Z abort=duplicate-work\n2026-07-17T10:00:01Z refused=merge\nrun=ok\n");
+    writeFileSync(path, "2026-07-17T10:00:00Z abort=duplicate-work\n2026-07-17T10:00:01Z refused=merge\n");
     const artifact: ExpectedArtifact = {
       artifactPath: path,
       maxAgeSeconds: 129600,
