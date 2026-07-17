@@ -80,11 +80,32 @@ no direct pushes), which no local agent can fake. The local hook complements
 branch protection; it does not replace it. (The same honest boundary applies to
 the Stop-hook gates — they can force a declared step to appear, not to be real.)
 
-**This repo.** This repo deliberately does not enable GitHub branch protection
-(2026-07-15) — that's a standing decision, not a pending TODO. So here, the
-server-side layer described above is absent, and the enforcement ceiling is
-unmitigated: the redirect-and-audit layer is the whole story, by
-design.
+**This repo.** This repo deliberately does not enable general GitHub branch
+protection (2026-07-15) — that's a standing decision, not a pending TODO, and
+it is NOT reversed by what follows. So for ordinary PRs, the server-side layer
+described above is absent, and the enforcement ceiling is unmitigated: the
+redirect-and-audit layer is the whole story, by design.
+
+**One narrow server-side exception: the tier-review ruleset.** The owner's
+2026-07-16 instruction — a forged tier-0 verdict and a bypassed merge gate
+must both be *impossible*, not costly — is explicit authorisation for a single
+scoped carve-out, not a general reopening of branch protection. A GitHub
+ruleset on `main` requires a PR before merge and requires the `tier-review`
+commit-status context to be green; it does **not** require human reviews, and
+it does not apply any of the other branch-protection knobs (no required
+approvals, no required linear history, no other status checks). The daemon
+that posts `tier-review` (`scripts/tier-gate/`) is a root-owned launchd
+process running as a dedicated machine-user identity whose credentials only
+root can read — see `docs/coderails/specs/tier-review-spec.md`'s capability
+lattice for why the verdict is unforgeable (the agent's own `gh` token carries
+no commit-status permission) and the gate is unbypassable (that same token
+carries no `administration` permission, so it can neither push around the
+ruleset nor edit it away). This narrow ruleset is an owner-provisioned,
+owner-activated addition living entirely outside the local hook layer this
+section otherwise describes — it does not change anything about how
+`enforce_pr_workflow`/`merge.sh` behave for PRs that never carry a tier-0
+artifact, and it is dormant until the owner's Pro-or-public choice unblocks
+ruleset activation on this repo (see the spec's Availability constraint).
 
 **Sandboxed workers narrow this ceiling for worker processes only, never for the orchestrator.** With `config.sandbox_workers: true` (`skills/agentic-loop/SKILL.md` Phase 3/3a), an implementation-unit worker runs as a separate process wrapped by `@anthropic-ai/sandbox-runtime` (srt, pinned version), OS-enforced (Seatbelt on macOS, bubblewrap on Linux) — outside the agent's own trust domain, the first coderails enforcement layer that is not a hook. The orchestrator itself is never sandboxed and its ceiling above is unchanged.
 
