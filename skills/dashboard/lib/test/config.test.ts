@@ -293,11 +293,11 @@ describe("loadConfig against the real examples/dashboard-config.json (C3)", () =
     expect(() => loadConfig(EXAMPLE_CONFIG_PATH)).not.toThrow();
   });
 
-  it("loads all six buttons and all five routines", () => {
+  it("loads all seven buttons and all five routines", () => {
     const config = loadConfig(EXAMPLE_CONFIG_PATH);
     expect(config.buttons.map((b) => b.name)).toEqual([
       "wiki-lint",
-      "sync-docs-weekly",
+      "sync-docs",
       "memory-consolidation-weekly",
       "ask",
       "loop-retro-promotion",
@@ -306,7 +306,7 @@ describe("loadConfig against the real examples/dashboard-config.json (C3)", () =
     ]);
     expect(config.routines?.map((r) => r.name)).toEqual([
       "wiki-lint",
-      "sync-docs-weekly",
+      "sync-docs-nightly",
       "memory-consolidation-weekly",
       "loop-retro-promotion-weekly",
       "workflow-audit-weekly",
@@ -333,14 +333,17 @@ describe("loadConfig against the real examples/dashboard-config.json (C3)", () =
   // Exempt: a routine whose skill owns the path itself (memory-consolidation
   // names it in SKILL.md; wiki-lint's `{vault}/log.md` is the lint's own
   // output; loop-retro-promotion-weekly's button command never names the gate's
-  // basename 'promotion-runs.log', so the skill owns the path). Those can't
-  // drift from a command that never mentions a path.
+  // basename 'promotion-runs.log', so the skill owns the path; sync-docs-nightly's
+  // skill names its own run-log path — `run-{date}.log` — in SKILL.md section 4,
+  // so the skill owns both the path and the `run=ok` marker wording). Those
+  // can't drift from a command that never mentions a path.
   it("every routine whose skill does not own its artifact path has that path named in the button command", () => {
     const config = loadConfig(EXAMPLE_CONFIG_PATH);
     const SKILL_OWNS_ITS_PATH = new Set([
       "wiki-lint",
       "memory-consolidation-weekly",
       "loop-retro-promotion-weekly",
+      "sync-docs-nightly",
     ]);
     const byName = new Map(config.buttons.map((b) => [b.name, b]));
 
@@ -369,5 +372,18 @@ describe("loadConfig against the real examples/dashboard-config.json (C3)", () =
         `routine "${routine.name}" gates on marker "${routine.expectedArtifact.predicate.marker}" but its button command never states "${markerTail}" — the run has to guess the marker wording`,
       ).toBe(true);
     }
+  });
+
+  // sync-docs-nightly's whole purpose is rejecting a failure log — but an
+  // `exists` predicate accepts ANY log, success or failure, so a routine
+  // that aborted or refused mid-run still passed its gate as long as it wrote
+  // *something*. That was the green-on-failure defect this PR fixes. Pin the
+  // predicate's kind AND marker against the real config so a regression back
+  // to `exists` (or any marker drift) cannot ship green.
+  it("sync-docs-nightly's gate rejects a failure log — predicate is 'contains'/'run=ok', not 'exists'", () => {
+    const config = loadConfig(EXAMPLE_CONFIG_PATH);
+    const routine = config.routines?.find((r) => r.name === "sync-docs-nightly");
+    expect(routine, "sync-docs-nightly routine not found in example config").toBeDefined();
+    expect(routine?.expectedArtifact.predicate).toEqual({ kind: "contains", marker: "run=ok" });
   });
 });
