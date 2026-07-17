@@ -529,6 +529,12 @@ describe("sweepOnce gate date derivation (UTC/local skew)", () => {
     expect(notifyImpl).not.toHaveBeenCalled();
   });
 
+  // Guards against over-correction (a gate that matches BOTH days), not against
+  // the skew itself: the test above is the one that discriminates. This one
+  // cannot fail against a UTC-deriving gate by construction — such a gate
+  // resolves the wall clock's day, which matches neither pinned 2025 date, so
+  // it fails to find the marker for the wrong reason and still satisfies the
+  // assertions below.
   it("does NOT match the UTC-derived day when the producer wrote the local day (pins the failure direction)", async () => {
     const artifactPath = join(root, "run-note-utc-mismatch.md");
     const routineConfig: DashboardConfig = {
