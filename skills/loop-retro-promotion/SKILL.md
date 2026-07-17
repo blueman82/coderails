@@ -59,6 +59,15 @@ under `## Promoted lessons`, containing:
 
 ## 4. Delivery — full gate chain, manifest-locked
 
+Before step 1, append a `delivery=started` line to `promotion-runs.log`. This
+is the FIRST action of this section, ahead of the fetch. Any run that enters
+delivery but does not reach `run=ok` below (step 9's success write) leaves
+`delivery=started` as its last terminal marker, so the last-marker gate reads
+that run RED — one fail-safe write at one known point, rather than trying to
+enumerate every failure exit between here and merge. The existing `abort=`
+line on manifest failure (step 4 below) is unchanged and still fires on its
+own path.
+
 1. Fetch `origin/main`; branch off the freshly-fetched tip.
 2. Run `/coderails:task-evals` (scope: `pr`) and freeze it — BEFORE making
    the edit.
