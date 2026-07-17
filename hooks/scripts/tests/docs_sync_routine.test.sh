@@ -81,7 +81,7 @@ import('./skills/dashboard/lib/src/config.ts').then((m) => {
     return;
   }
   console.log('loadConfig_ok=yes');
-  const routine = cfg.routines.find(r => /docs.?sync/i.test(r.name));
+  const routine = cfg.routines.find(r => /(docs.?sync|sync.?docs)/i.test(r.name));
   if (!routine) {
     console.log('routine_found=no');
     return;
@@ -115,6 +115,26 @@ check "docs-sync routine cadence is nightly" "nightly" "$(field cadence)"
 check "docs-sync routine has NO foreignSkillPath (in-repo skill, not foreign)" "no" "$(field foreignSkillPath_present)"
 check "docs-sync routine's button is found (buttonRef/name resolves)" "yes" "$(field button_found)"
 check "docs-sync button profile is bypass" "bypass" "$(field button_profile)"
+
+# --- Direct replication of the deployed lookup pattern: `select(.name |
+# test("sync-docs"))` against BOTH .routines[].name and .buttons[].name
+# independently (not via buttonRef resolution). This is the actual
+# mechanism external consumers of this config use to locate "the
+# sync-docs routine" and "the sync-docs button" by name substring match —
+# proving both the routine's own `name` and the button's own `name` each
+# independently contain "sync-docs" is a stronger, more direct guard than
+# the buttonRef-resolution check above, and catches an ordering mismatch
+# (e.g. "docs-sync" vs "sync-docs") that buttonRef-resolution alone would
+# miss, since buttonRef resolves by whatever string it's set to, not by
+# substring match on either side's name.
+if command -v jq >/dev/null 2>&1; then
+  jq_cadence="$(jq -r '.routines[] | select(.name|test("sync-docs")) | .cadence' "$CONFIG_PATH" 2>/dev/null)"
+  jq_profile="$(jq -r '.buttons[] | select(.name|test("sync-docs")) | .profile' "$CONFIG_PATH" 2>/dev/null)"
+  check "jq name-substring lookup: a routine named *sync-docs* has cadence nightly" \
+    "nightly" "$jq_cadence"
+  check "jq name-substring lookup: a button named *sync-docs* has profile bypass" \
+    "bypass" "$jq_profile"
+fi
 
 # maxAgeSeconds must be sized for NIGHTLY cadence, not the 691200s (8-day)
 # weekly bar — leaving the weekly bar in place would let a routine dead for
