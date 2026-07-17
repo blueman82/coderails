@@ -329,6 +329,8 @@ When an agent goes idle without a report:
 
 Only after the artifact check fails should you assume failure. Then respawn — and per Phase 10, give it a new name.
 
+**Orchestrator probe discipline — batch the battery, cap the output (token-burn rules, rows 3 and 4 of 4).** The four checks above (and any similar verification battery — Phase 12's artifact checks, gate-state reads, `gh pr view` sequences) go in ONE compound Bash call per battery, not one call per check. Each orchestrator turn re-reads the full, growing context accumulated so far; running 4 probes as 4 separate turns costs roughly 4x the cache-read volume of the same 4 probes chained in one script (`&&`/`;`-joined, or piped) and read once. Compound the reads, not the decisions — still stop and reason once the battery's combined output is in hand. Additionally, cap what each probe returns before it enters context — pipe through `jq -c`, `head`, or an equivalent limiter — so a large `git diff --stat` or `gh pr view` payload doesn't sit in the transcript re-inflating every subsequent turn's re-read for the rest of the loop.
+
 ### Phase 4b — PR review invokes `/pr-review-toolkit:review-pr <PR#>` as a Skill, then `/coderails:post-review <PR#>`
 
 When a phase reaches "review the PR" (after a `/workflow` agent has pushed a PR, before merge), invoke the **`/pr-review-toolkit:review-pr <PR#>`** Skill — passing the PR number as the argument — which itself fans out the six specialised reviewers plus a security pass. Do NOT hand-roll the reviewers as separate `Agent` or `Task` spawns; use the Skill invocation.
