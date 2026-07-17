@@ -193,6 +193,42 @@ if [ -f "$SKILL_PATH" ]; then
     "yes" "$(grep -qi 'vault-note' "$SKILL_PATH" && echo yes || echo no)"
   check "SKILL.md states there is no dashboard alert or PR comment for a failed run" \
     "yes" "$(grep -qi 'no dashboard alert' "$SKILL_PATH" && echo yes || echo no)"
+
+  # --- C1 security-review finding: the manifest's .md-only check does not
+  # by itself stop the routine editing ITS OWN governing .md files (its own
+  # SKILL.md, AGENTS.md, CLAUDE.md, docs/routines.md, .claude/**) — every
+  # one of those passes an extension-only check. These assert the
+  # self-governance deny-list is documented as an ABORT-triggering
+  # condition, not just named in passing.
+  check "SKILL.md names a self-governance deny-list" \
+    "yes" "$(grep -qi 'self-governance deny-list' "$SKILL_PATH" && echo yes || echo no)"
+  check "SKILL.md's deny-list names skills/**/SKILL.md (including its own)" \
+    "yes" "$(grep -q 'skills/\*\*/SKILL.md' "$SKILL_PATH" && echo yes || echo no)"
+  check "SKILL.md's deny-list names AGENTS.md" \
+    "yes" "$(grep -qE '\bAGENTS\.md\b' "$SKILL_PATH" && echo yes || echo no)"
+  check "SKILL.md's deny-list names docs/routines.md" \
+    "yes" "$(grep -q 'docs/routines.md' "$SKILL_PATH" && echo yes || echo no)"
+  check "SKILL.md states the deny-list is mechanically enforced, not merely stated" \
+    "yes" "$(grep -qi 'mechanically enforced' "$SKILL_PATH" && echo yes || echo no)"
+  check "SKILL.md is honest that enforcement is prompt-level, not hook-level" \
+    "yes" "$(grep -qi 'do not fire' "$SKILL_PATH" && echo yes || echo no)"
+fi
+
+# --- SO-31 negative control for the deny-list checks above: strip the
+# deny-list section out of a scratch copy of SKILL.md and confirm the
+# checks above would go RED against that stripped copy, proving they
+# discriminate real content from its absence rather than passing by
+# construction (e.g. matching on an unrelated word).
+if [ -f "$SKILL_PATH" ]; then
+  STRIPPED="$(mktemp)"
+  # Remove every line mentioning the deny-list marker phrase and its
+  # constituent paths, simulating a version of this file that never
+  # documented the deny-list at all.
+  grep -viE 'self-governance deny-list|skills/\*\*/SKILL\.md|docs/routines\.md|mechanically enforced' "$SKILL_PATH" > "$STRIPPED"
+  neg_denylist="$(grep -qi 'self-governance deny-list' "$STRIPPED" && echo yes || echo no)"
+  check "negative control: deny-list check goes RED against a SKILL.md stripped of the deny-list" \
+    "no" "$neg_denylist"
+  rm -f "$STRIPPED"
 fi
 
 if [ "$checks" -eq 0 ]; then
