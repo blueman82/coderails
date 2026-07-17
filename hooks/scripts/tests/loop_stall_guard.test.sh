@@ -1532,4 +1532,31 @@ check "cost-report: non-numeric USD is NOT fabricated into \$0.00" 0 "$fabricate
 case "$msg_nan" in *"not-a-number"*) raw_shown=1 ;; *) raw_shown=0 ;; esac
 check "cost-report: non-numeric USD falls back to the raw value" 1 "$raw_shown"
 
+# Date-laundering guard. `date -j -f %Y-%m-%d` does NOT reject trailing
+# garbage — it silently accepts "2026-06-24FORGED" and parses the leading
+# date (verified). Without a strict shape check, a corrupt prices_as_of
+# renders a confident "N days old" computed from an untrustworthy value:
+# fabricated precision, the same failure class as the $0.00 guard above.
+# Only an exact YYYY-MM-DD may reach the date math; anything else prints raw.
+reset; T=$(mk_transcript 1 "All done.
+LOOP-STOP: complete — done"); write_file in-progress S1 0
+write_retro S1 '{"schema_version":2, "cost":{"total_usd_estimate":1,"total_tokens":2,"prices_as_of":"2026-06-24FORGED"}}'
+run_capture_stdout "$(payload "$T" S1)"
+check "cost-report: trailing-garbage date -> allow (never blocks)" 0 "$RC_OUT"
+msg_launder=$(system_message "$STDOUT_OUT")
+case "$msg_launder" in *"days old"*) laundered=1 ;; *) laundered=0 ;; esac
+check "cost-report: trailing-garbage date does NOT fabricate a 'days old' age" 0 "$laundered"
+case "$msg_launder" in *"2026-06-24FORGED"*) raw_kept=1 ;; *) raw_kept=0 ;; esac
+check "cost-report: trailing-garbage date falls back to the raw string" 1 "$raw_kept"
+
+# A clean date must STILL compute the age — the guard must not be so strict
+# that it breaks the happy path it exists to protect.
+reset; T=$(mk_transcript 1 "All done.
+LOOP-STOP: complete — done"); write_file in-progress S1 0
+write_retro S1 '{"schema_version":2, "cost":{"total_usd_estimate":1,"total_tokens":2,"prices_as_of":"2026-06-24"}}'
+run_capture_stdout "$(payload "$T" S1)"
+msg_clean=$(system_message "$STDOUT_OUT")
+case "$msg_clean" in *"days old"*) still_computes=1 ;; *) still_computes=0 ;; esac
+check "cost-report: a clean YYYY-MM-DD still computes the staleness age" 1 "$still_computes"
+
 [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails)"; exit 1; }

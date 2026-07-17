@@ -1015,16 +1015,34 @@ als_report_cost_on_complete() {
           jq -n --arg m "$msg" '{systemMessage: $m}' 2>/dev/null
           return 0
         fi
+        # Staleness age. WARNS inline, never blocks: a stale price table means
+        # the table needs maintenance, not that this loop's work is invalid —
+        # and the table is routinely weeks old, so blocking on it would refuse
+        # every completion.
+        #
+        # The strict shape check before `date` is load-bearing, for the same
+        # reason as the printf guard below: `date -j -f %Y-%m-%d` does NOT
+        # reject trailing garbage — it silently ACCEPTS "2026-06-24FORGED",
+        # "2026-06-24 anything", and even an embedded-newline value, parsing
+        # the leading date and ignoring the rest (verified on macOS). A
+        # corrupt prices_as_of would therefore render a confident, precise
+        # "23 days old" computed from a value nobody should trust. Only pure
+        # garbage ("not-a-date") fails the parse and falls back to raw.
+        # So: gate on the exact YYYY-MM-DD shape FIRST, and let anything else
+        # print raw. Visibly-wrong beats plausibly-fabricated — the same rule
+        # the USD guard follows.
         local age="$prices_as_of"
-        if [ -n "$prices_as_of" ]; then
-          local then_epoch now_epoch
-          then_epoch=$(date -j -f "%Y-%m-%d" "$prices_as_of" +%s 2>/dev/null)
-          now_epoch=$(date +%s 2>/dev/null)
-          if [ -n "$then_epoch" ] && [ -n "$now_epoch" ]; then
-            local days=$(( (now_epoch - then_epoch) / 86400 ))
-            age="prices as of $prices_as_of, $days days old"
-          fi
-        fi
+        case "$prices_as_of" in
+          [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9])
+            local then_epoch now_epoch
+            then_epoch=$(date -j -f "%Y-%m-%d" "$prices_as_of" +%s 2>/dev/null)
+            now_epoch=$(date +%s 2>/dev/null)
+            if [ -n "$then_epoch" ] && [ -n "$now_epoch" ]; then
+              local days=$(( (now_epoch - then_epoch) / 86400 ))
+              age="prices as of $prices_as_of, $days days old"
+            fi
+            ;;
+        esac
         # Round for display only: the miner stores full float precision
         # ($64.45735454999999), which reads as noise in a one-line terminal
         # report. Rounding happens HERE, not at extraction, so `usd` stays raw
