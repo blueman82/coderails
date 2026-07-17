@@ -2,7 +2,7 @@
 
 coderails is a Claude Code workflow plugin: the prep → push → merge → wiki
 command chain plus planning/orchestration skills and a self-checking
-discipline loop. Two halves:
+discipline loop. It combines:
 
 - **Workflow** — the `prep → push → merge → wiki` command chain plus the
   agentic-loop, planning-sequence, premortem, and handoff skills.
@@ -10,10 +10,6 @@ discipline loop. Two halves:
   (verified)/(inferred), is blocked at stop until the `## Did Not Verify`
   section is present and resolved, and is gated on destructive bash and
   failing project tests.
-
-It started as two separate plugins (`workflow-tools` and `claude-guardrails`).
-This is the merge: one install, one marketplace key, no launchd, no calibration
-ritual.
 
 ## Install
 
