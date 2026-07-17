@@ -139,6 +139,26 @@ SSE buffer instead) or `{status: "error", error}`.
 
 ---
 
+#### `fable-mode`
+
+**Purpose:** Closes the behavioural gap between Claude Opus-class models and Claude Fable 5 by adopting its working habits deliberately: specify-before-start, high autonomy, first-shot correctness, instruction retention over long sessions, and rigorous self-verification.
+
+**When it triggers:** Any non-trivial task — multi-step work, anything involving files or tool calls, analysis, building something, debugging, research, document creation, or long-running work. Applied before starting work, not after, since it changes how the work is done.
+
+**When it does NOT apply:** Trivial single-step responses with no tool use or file involvement.
+
+---
+
+#### `sync-docs`
+
+**Purpose:** Analyzes any codebase and its documentation to identify drift and generate actionable sync reports. Enhanced with Serena for semantic code discovery — an optional `--semantic` flag adds AI-powered undocumented-code discovery on top of the mechanical diff.
+
+**When it triggers:** "sync docs", "check documentation", "documentation drift", "doc audit", explicit `/sync-docs`.
+
+**Invocation modes:** `/sync-docs` (full drift report), `/sync-docs --check` (drift report only, no suggestions), `/sync-docs --suggest-updates` (includes proposed markdown for updates).
+
+---
+
 #### `memory-consolidation`
 
 **Purpose:** Health-checks and consolidates a project's persistent memory directory (`~/.claude/projects/<slug>/memory/`) — dedupes overlapping memories, flags stale or contradicted ones (without silently deleting `feedback`-type memories), and refreshes the `MEMORY.md` index.
