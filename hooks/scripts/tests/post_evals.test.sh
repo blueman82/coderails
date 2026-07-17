@@ -668,4 +668,102 @@ check "bare invocation: exits 1" 1 $rc
 [[ "$usage_out" == *"Usage"* ]]
 check "bare invocation: prints usage" 0 $?
 
+# ─── discriminate: freeze-time discriminating-check gate ────────────────────
+# For each scripted eval with discriminate:true, mechanically runs .cmd and
+# .negative_control and rejects any check that can't both pass AND fail. Evals
+# without discriminate:true (even with a prose negative_control) are skipped,
+# never rejected — the forward-only, additive opt-in that keeps the historical
+# corpus from being false-rejected.
+
+# (1) discriminating pair: cmd passes, negative_control passes (self-normalised
+# — it exits 0 to prove the thing it tests correctly fails) -> exit 0.
+FIX_DISC_OK="$TMP/disc_ok.json"
+jq -n '{
+  tier: 1,
+  tier_justification: "1 work-unit, scripted change",
+  head_sha: "deadbeef",
+  evals: [
+    {id:"e1", priority:"P0", mode:"scripted", discriminate:true, status:"pass",
+     cmd:"bash -c '\''exit 0'\''", negative_control:"bash -c '\''exit 0'\''", evidence:"log"}
+  ]
+}' > "$FIX_DISC_OK"
+post_evals::discriminate "$FIX_DISC_OK"
+check "discriminate: discriminating pair -> exit 0" 0 $?
+
+# (2) non-discriminating: cmd passes but negative_control does NOT pass (its
+# self-normalised form exits non-zero, meaning the thing it tests did not
+# fail) -> reject, stderr names the id + "negative_control".
+FIX_DISC_BAD_NC="$TMP/disc_bad_nc.json"
+jq -n '{
+  tier: 1,
+  tier_justification: "1 work-unit, scripted change",
+  head_sha: "deadbeef",
+  evals: [
+    {id:"e2", priority:"P0", mode:"scripted", discriminate:true, status:"pass",
+     cmd:"bash -c '\''exit 0'\''", negative_control:"bash -c '\''exit 1'\''", evidence:"log"}
+  ]
+}' > "$FIX_DISC_BAD_NC"
+stderr_out=$(post_evals::discriminate "$FIX_DISC_BAD_NC" 2>&1)
+check "discriminate: cmd passes, negative_control fails -> exit 1" 1 $?
+[[ "$stderr_out" == *"e2"* && "$stderr_out" == *"negative_control"* ]]
+check "discriminate: bad negative_control -> stderr names id + negative_control" 0 $?
+
+# (3) non-discriminating: cmd does NOT pass -> reject, stderr names the id +
+# "cmd".
+FIX_DISC_BAD_CMD="$TMP/disc_bad_cmd.json"
+jq -n '{
+  tier: 1,
+  tier_justification: "1 work-unit, scripted change",
+  head_sha: "deadbeef",
+  evals: [
+    {id:"e3", priority:"P0", mode:"scripted", discriminate:true, status:"pass",
+     cmd:"bash -c '\''exit 1'\''", negative_control:"bash -c '\''exit 0'\''", evidence:"log"}
+  ]
+}' > "$FIX_DISC_BAD_CMD"
+stderr_out=$(post_evals::discriminate "$FIX_DISC_BAD_CMD" 2>&1)
+check "discriminate: cmd fails -> exit 1" 1 $?
+[[ "$stderr_out" == *"e3"* && "$stderr_out" == *"cmd did not pass"* ]]
+check "discriminate: bad cmd -> stderr names id + cmd" 0 $?
+
+# (4) an eval WITHOUT discriminate:true (even with a prose negative_control
+# that would fail if run mechanically) -> SKIPPED, discriminate exits 0.
+FIX_DISC_SKIP="$TMP/disc_skip.json"
+jq -n '{
+  tier: 1,
+  tier_justification: "1 work-unit, scripted change",
+  head_sha: "deadbeef",
+  evals: [
+    {id:"e4", priority:"P0", mode:"scripted", status:"pass",
+     cmd:"bash -c '\''exit 0'\''", negative_control:"prose description, not runnable", evidence:"log"}
+  ]
+}' > "$FIX_DISC_SKIP"
+post_evals::discriminate "$FIX_DISC_SKIP"
+check "discriminate: eval without discriminate:true -> skipped, exit 0" 0 $?
+
+# (5) NEGATIVE CONTROL FOR THE GATE ITSELF: a file whose only discriminate:true
+# eval is a known-bad (non-discriminating) pair MUST be rejected — a
+# freeze-gate that never rejects proves nothing.
+FIX_DISC_GATE_NC="$TMP/disc_gate_nc.json"
+jq -n '{
+  tier: 1,
+  tier_justification: "1 work-unit, scripted change",
+  head_sha: "deadbeef",
+  evals: [
+    {id:"e5", priority:"P0", mode:"scripted", discriminate:true, status:"pass",
+     cmd:"bash -c '\''exit 0'\''", negative_control:"bash -c '\''exit 1'\''", evidence:"log"}
+  ]
+}' > "$FIX_DISC_GATE_NC"
+post_evals::discriminate "$FIX_DISC_GATE_NC" >/dev/null 2>&1
+check "discriminate: gate negative control (known-bad pair) -> exit 1 (rejected)" 1 $?
+
+# ─── discriminate: CLI dispatch ──────────────────────────────────────────────
+disc_out=$(bash "$SCRIPT" discriminate "$FIX_DISC_OK" 2>&1)
+check "discriminate CLI: discriminating pair via subcommand -> exit 0" 0 $?
+
+disc_out=$(bash "$SCRIPT" discriminate "$FIX_DISC_BAD_CMD" 2>&1)
+rc=$?
+check "discriminate CLI: non-discriminating pair via subcommand -> exit 1" 1 $rc
+[[ "$disc_out" == *"e3"* ]]
+check "discriminate CLI: subcommand stderr names id" 0 $?
+
 [[ $fails -eq 0 ]] && { echo PASS; exit 0; } || { echo "FAIL ($fails)"; exit 1; }

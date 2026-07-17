@@ -214,6 +214,48 @@ post_evals::grade_loop() {
     printf '%s' "$result"
 }
 
+# post_evals::discriminate <evals_json_path>
+# Freeze-time discriminating-check gate: for each scripted eval opted in via
+# discriminate:true, mechanically runs its .cmd and .negative_control (each in
+# its own `bash -c` subshell) and requires BOTH to exit 0. Per the repo idiom,
+# a real negative_control self-normalises (e.g. "...; test $? -ne 0") so it
+# exits 0 when the thing it tests correctly fails — so "both legs exit 0"
+# means the check can pass (cmd) AND can fail (negative_control). Either leg
+# exiting non-zero means the check can't be shown to discriminate -> reject.
+# discriminate:true is opt-in and additive: an eval without it (absent or
+# false) is SKIPPED, never rejected, so the existing corpus is unaffected.
+# Exit 0 if every opted-in eval discriminates (or none opt in); exit 1 with
+# the first failure's id + which leg failed on any rejection.
+#
+# HONEST LIMIT: this catches non-discriminating checks whose formula is
+# exercisable at freeze time. A check that greps for output vocabulary that
+# does not exist until the surface is built (P3-class) is NOT caught here —
+# blind amendment remains the backstop for that class.
+post_evals::discriminate() {
+    local path="$1"
+
+    local ids
+    ids=$(jq -r '[.evals[]? | select(.mode == "scripted") | select(.discriminate == true) | .id] | .[]' "$path")
+
+    local id cmd negative_control
+    while IFS= read -r id; do
+        [[ -z "$id" ]] && continue
+        cmd=$(jq -r --arg id "$id" '.evals[] | select(.id == $id) | .cmd // ""' "$path")
+        negative_control=$(jq -r --arg id "$id" '.evals[] | select(.id == $id) | .negative_control // ""' "$path")
+
+        if ! bash -c "$cmd" >/dev/null 2>&1; then
+            printf 'post_evals: discriminate rejected %s — cmd did not pass\n' "$id" >&2
+            return 1
+        fi
+        if ! bash -c "$negative_control" >/dev/null 2>&1; then
+            printf 'post_evals: discriminate rejected %s — negative_control did not pass\n' "$id" >&2
+            return 1
+        fi
+    done <<< "$ids"
+
+    return 0
+}
+
 # ─── Subcommand dispatch ───────────────────────────────────────────────────────
 # Called by the post-evals command prose as:
 #   ./scripts/post_evals.sh validate-structure <path> <pr> <sha>
@@ -230,10 +272,14 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
         grade-loop)
             post_evals::grade_loop "${2:?grade-loop requires a file argument}"
             ;;
+        discriminate)
+            post_evals::discriminate "${2:?discriminate requires a file argument}"
+            ;;
         *)
             printf 'Usage: post_evals.sh validate-structure <path> <pr> <sha>\n' >&2
             printf '       post_evals.sh compute-result <path>\n' >&2
             printf '       post_evals.sh grade-loop <path>\n' >&2
+            printf '       post_evals.sh discriminate <path>\n' >&2
             exit 1
             ;;
     esac
