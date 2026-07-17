@@ -289,7 +289,7 @@ export async function sweepOnce(opts: SweepOptions): Promise<SweepResult> {
         }
       } else if (routine) {
         const artifactResult = checkArtifact(routine.expectedArtifact, {
-          date: localDateIso((opts.clock ?? (() => new Date()))()),
+          date: localDateIso(opts.clock?.() ?? new Date()),
           runId: outputRunId,
           vault: (opts.config.wikiPaths ?? [])[0] ?? "",
         });
