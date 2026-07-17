@@ -893,6 +893,14 @@ check "git reset \${IFS:-y}--hard -> deny" DENY \
   "$(run "$(payload "git\${IFS:-y}reset\${IFS:-y}--hard HEAD~1")")"
 check "DROP \${IFS:-y}TABLE -> deny"   DENY "$(run "$(payload "DROP\${IFS:-y}TABLE users;")")"
 
+# Negative substring offsets — \${IFS: -1} / \${IFS:(-1)} — bash requires the
+# space (or parens) right after the colon to disambiguate a negative offset
+# from the :- use-default operator; both still evaluate to trailing IFS
+# whitespace and are real separators (an enumerated, non-exclude-only version
+# of this fix missed this shape entirely — found by an independent grader).
+check "rm \${IFS: -1}-rf -> deny"      DENY "$(run "$(payload "rm\${IFS: -1}-rf /tmp/x")")"
+check "rm \${IFS:(-1)}-rf -> deny"     DENY "$(run "$(payload "rm\${IFS:(-1)}-rf /tmp/x")")"
+
 # Benign commands that merely MENTION $IFS (not use it as a separator to
 # hide a destructive verb) must stay ALLOWED — the normalization only
 # changes whitespace, never introduces or removes a blocklist keyword.
@@ -919,6 +927,10 @@ check "rm \${IFSx}-rf (different var, harmless) -> allow" ALLOW \
 # allowed exactly as written.
 check "echo \${IFS:+word} (not a separator) -> allow" ALLOW \
   "$(run "$(payload 'echo "safe${IFS:+word}"')")"
+check "echo \${IFS:+SET} (not a separator) -> allow" ALLOW \
+  "$(run "$(payload 'echo "${IFS:+SET}"')")"
+check "echo \${IFS+SET} (no colon, not a separator) -> allow" ALLOW \
+  "$(run "$(payload 'echo "${IFS+SET}"')")"
 
 # --- Deliverable B: source-drift tripwire ---------------------------------
 # Extracts the gate's blockable set (the 5 fixed-label `deny "..."` call
