@@ -11,11 +11,12 @@
       "hidden": true
     },
     {
-      "name": "sync-docs-weekly",
-      "label": "SYNC DOCS",
-      "command": "/sync-docs --append-system-prompt \"Write the full drift report to /path/to/.claude/coderails-dashboard/routines/sync-docs/report-{date}.md before finishing.\"",
+      "name": "sync-docs",
+      "label": "DOCS SYNC",
+      "command": "/coderails:docs-sync",
       "cwd": "/path/to/coderails",
-      "profile": "read-only",
+      "profile": "bypass",
+      "bypassPermissions": true,
       "hidden": true
     },
     {
@@ -74,14 +75,13 @@
       "escalation": ["notification", "vault-note"]
     },
     {
-      "name": "sync-docs-weekly",
-      "label": "Sync Docs (weekly)",
-      "buttonRef": "sync-docs-weekly",
-      "cadence": "weekly",
-      "foreignSkillPath": "/path/to/.claude/skills/sync-docs/SKILL.md",
+      "name": "sync-docs-nightly",
+      "label": "Docs Sync (nightly)",
+      "buttonRef": "sync-docs",
+      "cadence": "nightly",
       "expectedArtifact": {
-        "artifactPath": "/path/to/.claude/coderails-dashboard/routines/sync-docs/report-{date}.md",
-        "maxAgeSeconds": 691200,
+        "artifactPath": "/path/to/.claude/coderails-dashboard/routines/docs-sync/run-{date}.log",
+        "maxAgeSeconds": 129600,
         "predicate": { "kind": "exists" }
       },
       "escalation": ["notification", "vault-note"]
