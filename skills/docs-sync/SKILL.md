@@ -89,12 +89,20 @@ fixing.
 8. `/coderails:post-evals <PR#>`
 9. `/coderails:merge`
 
+Any of steps 5–9 can REFUSE (a failing eval, a review that blocks, a
+merge gate that rejects) rather than the routine choosing to abort.
+Treat a refusal the same as an abort: close the PR if one is open,
+delete the branch locally and on the remote, and append a
+`refused=<gate>` line to the run log (e.g. `refused=post-evals` or
+`refused=merge`) naming which step refused. Never retry past a refusal
+in the same run and never relax the gate that refused.
+
 Append a timestamped per-stage line to the run log after each gate step
 above (fetch/branch, evals frozen, edit made, manifest check, push,
 review, post-review, post-evals, merge) — same convention as
 `loop-retro-promotion`'s `promotion-runs.log`.
 
-## 4. Run log
+## 4. Run log and failure visibility
 
 One append-only log at the config's `expectedArtifact.artifactPath`
 (`run-{date}.log`), one line per stage per run, timestamped ISO8601. The
@@ -102,6 +110,29 @@ no-drift short-circuit (step 2) and every delivery stage (step 3) write
 to this same file — it is both this routine's durable record of what
 happened on a given night AND the artifact its `exists` gate checks,
 mirroring `loop-retro-promotion`'s `promotion-runs.log` convention.
+
+This routine keeps both of its config's shipped escalation channels
+(`escalation: ["notification", "vault-note"]`) — nothing here replaces
+or reduces them; this section only makes the failure path legible on
+top of them. Every abort (step 4) or refusal (steps 5–9) does BOTH of
+the following, not just one:
+
+1. Writes its reason into the run-note (the `vault-note` escalation
+   channel — same file the routine's normal green/red history already
+   goes to).
+2. Appends a durable, greppable marker line to this run log —
+   `abort=<reason>` for a manifest-scope abort, `refused=<gate>` for a
+   downstream gate refusal — so a later audit can `grep` every failed
+   night across the whole log in one pass instead of re-reading each
+   run-note individually.
+
+Where a human should actually look, in order: the macOS notification
+first (transient — easy to miss if you're away), then the vault-note
+run history (one entry per run, human-readable), then this run log's
+`abort=`/`refused=` lines (the fast, grep-able summary across many
+nights). There is no dashboard alert and no PR comment for a failed
+run — notification + vault-note are the entire failure-visibility
+surface for this routine, same as every other routine in this file.
 
 ## 5. Prohibitions
 
