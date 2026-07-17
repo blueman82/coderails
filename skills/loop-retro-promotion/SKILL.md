@@ -68,9 +68,10 @@ under `## Promoted lessons`, containing:
 
 ## 4. Delivery — full gate chain, manifest-locked
 
-Before step 1, append a `delivery=started` line to `promotion-runs.log`. This
-is the FIRST action of this section, ahead of the fetch. Any run that enters
-delivery but does not reach `run=ok` below (step 9's success write) leaves
+The `delivery=started` in-progress marker was already written in §1's
+predicate=met branch, ahead of §2 Mining — it covers this entire section too,
+so no separate write is needed here. Any run that enters this section but
+does not reach `run=ok` below (step 9's success write) leaves
 `delivery=started` as its last terminal marker, so the last-marker gate reads
 that run RED — one fail-safe write at one known point, rather than trying to
 enumerate every failure exit between here and merge. The existing `abort=`
