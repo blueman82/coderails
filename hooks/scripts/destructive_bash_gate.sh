@@ -75,16 +75,26 @@ cmd=$(echo "$input" | jq -r '.tool_input.command // empty')
 #                                         not whitespace) — moot here since
 #                                         this pattern only ever anchors on
 #                                         literal "${IFS", never "${#".
-#      This exclude-only shape is validated against bash ground truth across
-#      18 forms spanning every operator (bare, substring incl. negative
-#      offsets, use-default, assign-default, error-if-unset, alternate-value,
-#      and the length operator) — see the "robust rule" table this fix was
-#      checked against, not a hand-picked case list.
-#      Best-effort ceiling: the body portion (`[^}]*`) stops at the first
-#      literal "}", so a WORD containing its own nested ${...} (e.g.
-#      ${IFS:-${OTHER}}) is not fully matched and leaves a stray brace in the
-#      normalized text — an exotic construction, not a known live gap for any
-#      family this file blocks.
+#      This exclude-only shape was checked against bash ground truth for the
+#      common operators (bare, substring incl. negative offsets, use-default,
+#      assign-default, error-if-unset, alternate-value, length). It is
+#      BEST-EFFORT, NOT complete — a pre-expansion regex cannot fully match
+#      bash tokenization, and review found this the hard way. KNOWN CEILING
+#      (deliberate, same class as the quoted-path and chmod-ordering ceilings
+#      elsewhere in this file / AGENTS.md — obfuscation no normal workflow
+#      emits, and an actor who can craft it already has shell capability):
+#        - a WORD containing a nested ${...} / $(...) (e.g. ${IFS:-${OTHER}},
+#          ${IFS:+${IFS}}) — the body `[^}]*` stops at the first "}".
+#        - a substring form that expands to the EMPTY string (${IFS:0:0},
+#          ${IFS:3}, offset past IFS's 3 bytes): this pass OVER-collapses it
+#          to a space, fabricating a separator bash does not create. This
+#          only ever fails OPEN on obfuscated input that base also allowed —
+#          it never turns a base-DENIED real command into an allow (verified
+#          non-regression), so it is a missed catch, never a lost one.
+#        - an arbitrary user variable holding whitespace (X=' '; rm${X}-rf) —
+#          unbounded, no regex can enumerate variable names.
+#      These are recorded as a future unit (see the residual handoff); closing
+#      them needs position-based tokenisation, not more normalization passes.
 #   0. WHITESPACE-WORD CARVE-OUT (runs BEFORE pass 1, on the untouched $cmd):
 #      ${IFS:+word} / ${IFS+word} substitute the literal WORD (see above) —
 #      but the word is attacker-controlled, and when the word is ONE OR MORE
