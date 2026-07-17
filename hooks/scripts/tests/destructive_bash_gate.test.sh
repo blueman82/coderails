@@ -74,11 +74,81 @@ check "git push --force message names force-with-lease route" DENY \
 check "push message flags that fwl is itself blocked without the allowlist opt-in" DENY \
   "$(printf '%s' "$push_reason" | grep -qi 'destructive_allowlist' && echo DENY || echo MISSING)"
 
-# Patterns with no specific route mapping (e.g. git clean force) still get the
-# generic fallback sentence, not a false claim of a specific route.
-clean_reason=$(run_reason "$(payload "git clean -fdx")")
-check "git clean (no specific route) falls back to generic guidance" DENY \
-  "$(printf '%s' "$clean_reason" | grep -qi 'no specific safe route' && echo DENY || echo MISSING)"
+# --- Deliverable A: a route for every remaining blockable pattern. Each check
+# asserts the deny message contains a route AND does NOT contain the generic
+# "No specific safe route is recorded" fallback text — the two-part test the
+# task calls for, so a pattern that never got a route arm (falling through to
+# the generic case) fails here rather than passing silently.
+assert_specific_route() { # description command must_contain...
+  local desc="$1" cmd="$2"
+  shift 2
+  local reason
+  reason=$(run_reason "$(payload "$cmd")")
+  local ok=1
+  if printf '%s' "$reason" | grep -qi 'no specific safe route'; then
+    ok=0
+  fi
+  for needle in "$@"; do
+    printf '%s' "$reason" | grep -qi -- "$needle" || ok=0
+  done
+  check "$desc" DENY "$( [ "$ok" -eq 1 ] && echo DENY || echo MISSING)"
+}
+
+# git clean (force) has a genuine safe route: the gate itself already permits
+# -n (dry-run/preview) and -i (interactive) — see lines 72-76 of the gate —
+# so the message must point at those rather than the generic fallback.
+# Needles are multi-char, route-specific literals ('git clean -n', 'git clean
+# -i', and the distinctive prose "dry-run"/"interactive prompt") rather than
+# bare '-n'/'-i' — those two-char substrings match incidentally inside
+# unrelated words and were proven (by a reviewer, confirmed here) to let a
+# fabricated, unrelated route pass undetected.
+assert_specific_route "git clean message names -n preview and -i interactive route" \
+  "git clean -fdx" "git clean -n" "dry-run" "git clean -i" "interactive prompt"
+
+# find -delete: no safe equivalent to deletion itself — honest route points at
+# previewing the match set first and at the settings.json escape hatch.
+# Needles are specific to THIS route's own wording (not just the shared
+# "no safe equivalent"/"settings.json" phrases every honest route repeats) so
+# a copy-paste-wrong route swapped in from a different pattern still fails.
+assert_specific_route "find -delete message names -print preview + settings.json route" \
+  "find . -name '*.tmp' -delete" "no safe equivalent" "-print" "xargs" "settings.json"
+
+# truncate -s/--size: destroys file content, no safe equivalent — honest route.
+assert_specific_route "truncate -s message names no-safe-equivalent + settings.json route" \
+  "truncate -s0 logfile.txt" "no safe equivalent" "file content in place" "rotate the log" "settings.json"
+
+# shred: secure overwrite/delete is the point of the command — no safe
+# equivalent — honest route.
+assert_specific_route "shred message names no-safe-equivalent + settings.json route" \
+  "shred secret.key" "no safe equivalent" "unrecoverable" "securely wipe" "settings.json"
+
+# DROP TABLE/DATABASE/SCHEMA: destructive DDL, no safe equivalent — honest route.
+assert_specific_route "DROP TABLE message names no-safe-equivalent + settings.json route" \
+  "DROP TABLE users;" "no safe equivalent" "destructive ddl" "settings.json"
+assert_specific_route "DROP DATABASE message names no-safe-equivalent + settings.json route" \
+  "DROP DATABASE mydb;" "no safe equivalent" "destructive ddl" "settings.json"
+assert_specific_route "DROP SCHEMA message names no-safe-equivalent + settings.json route" \
+  "DROP SCHEMA public CASCADE;" "no safe equivalent" "destructive ddl" "settings.json"
+
+# TRUNCATE TABLE: destroys all rows, no safe equivalent — honest route.
+assert_specific_route "TRUNCATE TABLE message names no-safe-equivalent + settings.json route" \
+  "TRUNCATE TABLE logs;" "no safe equivalent" "removes all rows" "scoped delete" "settings.json"
+
+# dd if=: raw block-device copy, no safe equivalent — honest route.
+assert_specific_route "dd if= message names no-safe-equivalent + settings.json route" \
+  "dd if=/dev/zero of=/dev/sda" "no safe equivalent" "raw bytes" "of= target" "settings.json"
+
+# mkfs.: reformats a filesystem, no safe equivalent — honest route.
+assert_specific_route "mkfs. message names no-safe-equivalent + settings.json route" \
+  "mkfs.ext4 /dev/sdb1" "no safe equivalent" "reformats a filesystem" "settings.json"
+
+# chmod -R 777: genuine safer alternative exists — narrower recursive bits.
+assert_specific_route "chmod -R 777 message names narrower-permission route" \
+  "chmod -R 777 /var/www" "u+rwx" "go+rx" "world-writable"
+
+# git commit --no-verify: genuine safe alternative — fix the failing hook.
+assert_specific_route "git commit --no-verify message names fix-the-hook route" \
+  "git commit -m 'wip' --no-verify" "fix the failing pre-commit hook" "don't skip it"
 
 # --- Allowed commands ---
 check "ls -> allow"                 ALLOW "$(run "$(payload "ls -la")")"
@@ -780,5 +850,82 @@ check "format word in prose -> allow" ALLOW \
   "$(run "$(payload "echo format the disk nicely")")"
 check "find without delete, TAB-separated args -> allow" ALLOW \
   "$(run "$(payload "find${TAB}. -name x.tmp")")"
+
+# --- Deliverable B: source-drift tripwire ---------------------------------
+# Extracts the gate's blockable set (the 5 fixed-label `deny "..."` call
+# sites, plus the monolithic `pattern=` regex line verbatim) and compares it
+# against a committed expected snapshot below. This must FAIL the instant
+# someone adds a new blockable pattern to the gate without also updating this
+# file's EXPECTED_* snapshot — which is exactly the moment a new pattern
+# would otherwise ship with no safe route and no test (the routeless
+# pattern-#14 gap this whole task exists to close).
+#
+# Extraction reads the gate source with grep/awk only — never executes it as
+# a command whose *string content* matches the gate's own blocklist (the
+# extraction regexes below, e.g. 'deny "[^"$]*"' or '^pattern=', contain no
+# blocklisted literal themselves, so this is safe to run directly).
+#
+# Comment lines are excluded (grep -vE '^[[:space:]]*#') so a *prose mention*
+# of `deny "..."` in a comment (e.g. this file's own strategy comment above
+# the git-clean block) is not mistaken for a real call site — confirmed this
+# matters: the naive extraction (no comment filter) picked up a spurious
+# 6th "label" from exactly such a comment during this file's own development.
+#
+# Scope: sync is enforced for the deny()-routed patterns only (the 5 fixed
+# labels + the pattern= alternatives) — NOT the cp/mv/dd, sed/perl/tee, or
+# command-substitution blocks further down the gate, which build their own
+# jq JSON directly and never call deny(). Those three already carry their
+# own specific messages and are outside this tripwire's scope by design.
+
+extract_fixed_labels() { # gate_path -> sorted unique "deny "..."" call sites
+  grep -vE '^[[:space:]]*#' "$1" | grep -oE 'deny "[^"$]*"' | sort -u
+}
+
+extract_pattern_line() { # gate_path -> the pattern= line verbatim
+  grep -E '^pattern=' "$1"
+}
+
+# Committed expected snapshot — the blockable set as of this PR. Update BOTH
+# this snapshot AND (deny() route arm + a behavioural test case above) in the
+# SAME commit whenever a new deny() call site or pattern= alternative is
+# added — that is the "one-line update with an obvious diff" the drift check
+# exists to force.
+EXPECTED_FIXED_LABELS='deny "find -delete"
+deny "git clean (force)"
+deny "git push --force"
+deny "shred"
+deny "truncate -s/--size"'
+
+EXPECTED_PATTERN_LINE='pattern='"'"'\brm[[:space:]]+(-[rRfF]+|--recursive|--force)|\bgit[[:space:]]+reset[[:space:]]+--hard|\bDROP[[:space:]]+(TABLE|DATABASE|SCHEMA)\b|\bTRUNCATE[[:space:]]+TABLE\b|\bdd[[:space:]]+if=|\bmkfs\.|\bchmod[[:space:]]+-R[[:space:]]+777|\bgit[[:space:]]+commit[[:space:]]+.*--no-verify'"'"
+
+actual_fixed_labels=$(extract_fixed_labels "$HOOK")
+actual_pattern_line=$(extract_pattern_line "$HOOK")
+
+if [ "$actual_fixed_labels" = "$EXPECTED_FIXED_LABELS" ]; then
+  check "gate's fixed-label deny() call sites match the committed snapshot" DENY DENY
+else
+  fails=$((fails+1))
+  printf 'FAIL - gate'"'"'s fixed-label deny() call sites match the committed snapshot\n'
+  printf '     the blockable set changed. Expected:\n%s\n     Actual (live gate):\n%s\n' \
+    "$EXPECTED_FIXED_LABELS" "$actual_fixed_labels"
+  printf '     ACTION: for each new/removed deny "<label>" call site, add a matching\n'
+  printf '     lowercase case arm in deny() (destructive_bash_gate.sh) with a real safe\n'
+  printf '     route (or an honest "no safe equivalent" route), add a behavioural test\n'
+  printf '     case for it above, THEN update EXPECTED_FIXED_LABELS in this file to match.\n'
+fi
+
+if [ "$actual_pattern_line" = "$EXPECTED_PATTERN_LINE" ]; then
+  check "gate's monolithic pattern= line matches the committed snapshot" DENY DENY
+else
+  fails=$((fails+1))
+  printf 'FAIL - gate'"'"'s monolithic pattern= line matches the committed snapshot\n'
+  printf '     the pattern= regex changed. Expected:\n%s\n     Actual (live gate):\n%s\n' \
+    "$EXPECTED_PATTERN_LINE" "$actual_pattern_line"
+  printf '     ACTION: for each new alternative added to pattern=, add a matching\n'
+  printf '     lowercase case arm in deny() keyed on the MATCHED SUBSTRING (not a\n'
+  printf '     friendly label) with a real safe route (or an honest "no safe\n'
+  printf '     equivalent" route), add a behavioural test case for it above, THEN\n'
+  printf '     update EXPECTED_PATTERN_LINE in this file to match.\n'
+fi
 
 [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails)"; exit 1; }
