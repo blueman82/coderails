@@ -157,6 +157,10 @@ emit() { # <body-file-or-string> <http_code> [is_file]
 }
 case "\$args" in
   *"api.github.com/user"*)
+    # The trailing '\n200' matters only for callers that pass -w '%{http_code}'
+    # (the read helper). tg_verify_identity and the status POST do NOT consume
+    # it: identity does jq '.login' on the first JSON value (ignoring the code),
+    # the POST is >/dev/null. Emitting it uniformly keeps the stub simple.
     cat "$USER_LOGIN_RESPONSE"; printf '\n200'
     ;;
   *"/statuses/"*)
@@ -515,9 +519,51 @@ out=$(run_gate)
 token_calls=$(cat "$GH_TOKEN_CALLS" 2>/dev/null)
 check_contains "FC6: reads present the Bearer credential via curl (routed off bare gh)" "Bearer ghp_machine_user_fixture_token" "$token_calls"
 
-# Tests T1-T10 + FC1-FC6 above each redefine tg_judge in this top-level shell
-# (not a subshell), so the LAST redefinition is still active here. Undefine it
-# and re-source the runner so the tests below exercise the REAL tg_judge
+# ══════════════════════════════════════════════════════════════════════════
+# Byte cap (TIER_GATE_MAX_DIFF_BYTES): a diff whose raw content exceeds the cap
+# blocks as `failure` (verdict=illegitimate) BEFORE the judge, even when the
+# file/line counts pass the prefilter. The cap is a source-time global that
+# tg_gate_pr reads from the shell; run_gate's ( ) subshell inherits it, so the
+# test sets a low cap in this shell and restores it. The files array is kept
+# small (1 file, 3 lines) so the PREFILTER passes and only the byte cap can
+# block — the reason assertion (diff_bytes) proves it was the byte cap, not the
+# prefilter, that fired.
+# ══════════════════════════════════════════════════════════════════════════
+_saved_max_bytes="$TIER_GATE_MAX_DIFF_BYTES"
+
+# ── BC1: raw diff over the (lowered) byte cap -> failure, judge NOT called ──
+TEST_PR=310 TEST_SHA=sha_diff_over_bytecap
+reset_gh_state
+set_files_json '[{"filename":"scripts/foo.sh","additions":3,"deletions":0}]'  # passes the prefilter
+set_diff "$(printf 'diff --git a/scripts/foo.sh b/scripts/foo.sh\n'; head -c 500 /dev/zero | tr '\0' 'x')"  # ~540 bytes
+set_comment_body "$(tier0_body "$TEST_PR" "$TEST_SHA" GO)"
+TIER_GATE_MAX_DIFF_BYTES=100
+tg_judge() { echo "JUDGE CALLED" >> "$TMP/judge_called_bc1.log"; printf 'legitimate\nx\n'; return 0; }
+rm -f "$TMP/judge_called_bc1.log"
+out=$(run_gate)
+posted=$(cat "$POSTED_LOG")
+TIER_GATE_MAX_DIFF_BYTES="$_saved_max_bytes"
+check_contains "BC1: over-byte-cap diff -> failure posted" "state=failure" "$posted"
+check_contains "BC1: block reason names the byte cap (not the prefilter)" "diff_bytes" "$out"
+[[ -f "$TMP/judge_called_bc1.log" ]] && fails=$((fails+1)) && echo "FAIL - BC1: judge called on an over-byte-cap diff" || echo "ok   - BC1: judge NOT called on an over-byte-cap diff"
+
+# ── BC2 (negative control for BC1): the SAME diff under a generous cap reaches
+#    the judge and posts success — proving BC1 blocks on the cap, not always. ─
+TEST_PR=311 TEST_SHA=sha_diff_under_bytecap
+reset_gh_state
+set_files_json '[{"filename":"scripts/foo.sh","additions":3,"deletions":0}]'
+set_diff "$(printf 'diff --git a/scripts/foo.sh b/scripts/foo.sh\n'; head -c 500 /dev/zero | tr '\0' 'x')"
+set_comment_body "$(tier0_body "$TEST_PR" "$TEST_SHA" GO)"
+TIER_GATE_MAX_DIFF_BYTES=204800
+tg_judge() { printf 'legitimate\nControl.\n'; return 0; }
+out=$(run_gate)
+posted=$(cat "$POSTED_LOG")
+TIER_GATE_MAX_DIFF_BYTES="$_saved_max_bytes"
+check_contains "BC2: same diff under a generous byte cap -> success (negative control)" "state=success" "$posted"
+
+# Tests T1-T10 + FC1-FC6 + BC1-BC2 above each redefine tg_judge in this top-level
+# shell (not a subshell), so the LAST redefinition is still active here. Undefine
+# it and re-source the runner so the tests below exercise the REAL tg_judge
 # implementation, not a leftover per-test stub.
 unset -f tg_judge
 source "$RUNNER"
@@ -918,5 +964,28 @@ out=$(env -u TIER_GATE_MACHINE_USER bash -c '
 ' 2>&1)
 posted=$(cat "$POSTED_LOG" 2>/dev/null)
 check "I4: MACHINE_USER sourced from creds file (env var absent) -> mismatch still blocks the post" "" "$posted"
+
+# I5: a FAILED identity fetch (empty GET /user body) blocks the post — no status
+# posted, named error. tg_verify_identity's only failure detector is "did I
+# extract a .login": an empty response yields empty login, which tg_post_status
+# treats as a mismatch and fails closed. Calls tg_post_status DIRECTLY (not via
+# tg_gate_pr) to isolate the identity binding from the judge/diff path — the
+# post is the unit under test. Empty USER_LOGIN_RESPONSE simulates the failed
+# fetch.
+TEST_PR=205 TEST_SHA=sha_identity_fetch_fail
+reset_gh_state
+: > "$USER_LOGIN_RESPONSE"                    # GET /user returns an empty body (fetch failure)
+write_tier_gate_creds "ghp_some_token" "coderails-tier-bot"
+out=$(
+    write_curl_stub
+    export PATH="$TMP:$PATH"
+    export TIER_GATE_CREDS="$TIER_GATE_CREDS_FILE"
+    export TIER_GATE_CURL_BIN="$TMP/curl"
+    tg_post_status "$TEST_SHA" "success" "verdict=legitimate host=test" 2>&1
+)
+posted=$(cat "$POSTED_LOG" 2>/dev/null)
+set_user_login_response "coderails-tier-bot"  # restore for any later use
+check "I5: failed identity fetch (empty /user) -> nothing posted (fail closed)" "" "$posted"
+check_contains "I5: failed identity fetch -> named identity error" "identity" "$out"
 
 [[ $fails -eq 0 ]] && { echo PASS; exit 0; } || { echo "FAIL ($fails)"; exit 1; }
