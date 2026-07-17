@@ -28,13 +28,20 @@ repeat of the per-merge one.
 
 When a work-unit's PR is merged, finish the branch/worktree using
 `coderails:finishing-a-development-branch`'s Step 6 mechanics: `cd` to main repo root,
-`git worktree remove <path>`, `git worktree prune` — gated by the provenance check: only
-remove worktrees the loop itself created (under `.worktrees/`/`worktrees/`), never a
-harness-owned workspace. This runs per-work-unit at Phase 4b, not deferred to the
-loop-level teardown.
+check lock state, `git worktree remove <path>`, `git worktree prune` — gated by the
+provenance check: only remove worktrees the loop itself created (under
+`.worktrees/`/`worktrees/`), never a harness-owned workspace. This runs per-work-unit at
+Phase 4b, not deferred to the loop-level teardown.
 
 **Caveat — never remove the worktree that is the shell's current cwd.** `git worktree
 remove` fails when run from inside the worktree being removed (per
 `finishing-a-development-branch`'s Common Mistakes). `cd` to the main repo root FIRST,
 then remove. If the loop's own cwd is inside the worktree being finished, this is
 mandatory, not optional.
+
+**Caveat — a merged worktree can still be locked.** Step 6 now checks lock state before
+removing: unlocked → remove normally; locked by a live pid (another session still using
+it) → report and defer, never force; locked by a dead pid → clear the stale lock and
+remove, with a notice. A merged PR does not by itself mean the worktree is safe to
+remove — a locked-and-live worktree at Phase 4b means some other session is still
+working in it, and forcing it out mid-loop would yank that session.
