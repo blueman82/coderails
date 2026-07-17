@@ -68,8 +68,16 @@ push::main() {
     else
         push_output=$(git push -u origin "$br" 2>&1) || push_rc=$?
     fi
-    printf '%s\n' "$push_output" | grep -v '^remote:' || true
-    [[ "$push_rc" -eq 0 ]] || err "Push failed (exit $push_rc) — see error above"
+    # Filtering `remote:` lines de-noises a SUCCESSFUL push, but on failure
+    # those same lines carry the server's actual reason (GH006, the ruleset
+    # name, "Changes must be made through a pull request") — the one thing the
+    # user needs. Filter on success only; print failures whole, to stderr.
+    if [[ "$push_rc" -eq 0 ]]; then
+        printf '%s\n' "$push_output" | grep -v '^remote:' || true
+    else
+        printf '%s\n' "$push_output" >&2
+        err "Push failed (exit $push_rc) — see error above"
+    fi
 
     # Positive verification: confirm the push actually landed. `git push`
     # updates the remote-tracking ref on success, so origin/$br should already
@@ -77,7 +85,6 @@ push::main() {
     [[ "$(git rev-parse "origin/$br")" == "$(git rev-parse HEAD)" ]] \
         || err "Push reported success but origin/$br does not match local HEAD"
     ok "Pushed $(ahead) commit(s)"
-
 
     # ─── PR ───────────────────────────────────────────────────────────────────
     if pr::exists; then

@@ -256,6 +256,32 @@ check "REJECTED PUSH: a failure is reported" "1" "$(printf '%s' "$LAST_OUT" | gr
 check "REJECTED PUSH: local commit still happened (commit step is independent of push outcome)" "1" "$([ "$BEFORE_HEAD" != "$(git -C "$R" rev-parse HEAD)" ] && echo 1 || echo 0)"
 
 # ══════════════════════════════════════════════════════════════════════════
+# ─── SERVER-REASON: a remote:-only rejection must still explain WHY ─────────
+# ══════════════════════════════════════════════════════════════════════════
+# How a GitHub ruleset actually rejects: the server's reason (GH006, the rule
+# name) arrives ONLY on `remote:`-prefixed lines. Git's own summary line says
+# a rejection happened but never why. The display filter strips `remote:` to
+# de-noise a SUCCESSFUL push, so it must not run on the failure path — else
+# `err "see error above"` points at output with the only useful line removed.
+# A pre-receive hook is the faithful local stand-in for a server-side rule.
+R=$(new_fixture serverreason)
+cat > "$TMP/serverreason/origin.git/hooks/pre-receive" <<'HOOK'
+#!/bin/bash
+echo "error: GH006: Protected branch update failed for refs/heads/feature." >&2
+echo "error: Changes must be made through a pull request." >&2
+exit 1
+HOOK
+chmod +x "$TMP/serverreason/origin.git/hooks/pre-receive"
+echo "change" >> "$R/base.txt"
+run_push "$R" "server reason msg"
+
+check "SERVER-REASON: exits non-zero" "1" "$([ "$LAST_RC" -ne 0 ] && echo 1 || echo 0)"
+check "SERVER-REASON: does NOT print 'Pushed'" "0" "$(printf '%s' "$LAST_OUT" | grep -c 'Pushed')"
+# The point of the whole block: the server's actual reason must survive.
+check "SERVER-REASON: GH006 rule id reaches the user" "1" "$(printf '%s' "$LAST_OUT" | grep -q 'GH006' && echo 1 || echo 0)"
+check "SERVER-REASON: actionable reason text reaches the user" "1" "$(printf '%s' "$LAST_OUT" | grep -q 'through a pull request' && echo 1 || echo 0)"
+
+# ══════════════════════════════════════════════════════════════════════════
 # ─── STALE-LEASE REJECTION: --force-with-lease's own rejection reason ───────
 # ══════════════════════════════════════════════════════════════════════════
 # The plain non-fast-forward case above exercises the default push path's
