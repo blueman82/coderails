@@ -980,6 +980,12 @@ transcript and cannot satisfy this gate — then re-declare complete." >&2
 # information, never as a block: the shipped price table is routinely weeks
 # stale, so treating staleness as a failure condition would fire on every
 # single loop.
+# prices_as_of is unverifiable self-report — it measures "days since a human
+# typed a date here," not "are the rates still correct" (no pricing API
+# exists to check against; see model_prices.json's price_source note). Past
+# this many days, nag a human to go check, without claiming the RATES
+# themselves are wrong (that can never be known from a date alone).
+ALS_PRICE_STALE_DAYS=30
 als_report_cost_on_complete() {
   local category="$1" hook="$2" session="$3"
   local category_lc; category_lc=$(printf '%s' "$category" | tr '[:upper:]' '[:lower:]')
@@ -1070,6 +1076,13 @@ als_report_cost_on_complete() {
             if [ -n "$then_epoch" ] && [ -n "$now_epoch" ]; then
               local days=$(( (now_epoch - then_epoch) / 86400 ))
               age="prices as of $prices_as_of, $days days old"
+              # Nag, never block: past the threshold, tell a human to go
+              # check the pricing page. The claim is strictly about the
+              # DATE being old, never that the rates are wrong — this
+              # function has no way to know that.
+              if [ "$days" -gt "$ALS_PRICE_STALE_DAYS" ]; then
+                age="${age} (checks the date only, not the rates) — verify at claude.com/pricing and bump prices_as_of"
+              fi
             fi
             ;;
         esac

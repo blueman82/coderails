@@ -1717,4 +1717,49 @@ m_norm=$(nonscalar_msg '{"schema_version":2,"cost":{"total_usd_estimate":64.46,"
 case "$m_norm" in *'Loop cost: $64.46 (93987957 tokens), prices as of 2026-06-24, '*'days old'*) norm_ok=1 ;; *) norm_ok=0 ;; esac
 check "cost-report: a normal message survives control-char stripping intact" 1 "$norm_ok"
 
+
+# =====================================================================
+# Price-table staleness NAG (distinct from the plain "N days old" age
+# string already asserted above). prices_as_of is unverifiable self-report
+# — it measures "days since a human typed a date here", not "are the rates
+# still correct" — so past a threshold the reporter must also nudge a
+# human to go check the rates, while still never blocking and still never
+# suppressing the cost figure. Threshold is 30 days (named constant in the
+# lib, not asserted by exact value here — only the behavioural boundary).
+
+STALE45=$(date -u -v-45d +%Y-%m-%d 2>/dev/null || date -u -d '45 days ago' +%Y-%m-%d 2>/dev/null)
+FRESH5=$(date -u -v-5d +%Y-%m-%d 2>/dev/null || date -u -d '5 days ago' +%Y-%m-%d 2>/dev/null)
+
+# Stale (45 days, past the 30-day threshold) -> warning present, exit 0,
+# and the message must say the DATE is old (never claim the rates
+# themselves are wrong — that can't be known from a date alone).
+m_stale=$(nonscalar_msg "$(jq -cn --arg d "$STALE45" '{schema_version:2, cost:{total_usd_estimate:9.99, total_tokens:100, prices_as_of:$d}}')")
+case "$m_stale" in *"verify"*"pricing"*) stale_warn=1 ;; *) stale_warn=0 ;; esac
+check "staleness nag: >30-day-old prices_as_of -> warning present (names verify+pricing)" 1 "$stale_warn"
+case "$m_stale" in *"rates are wrong"*|*"rates were wrong"*) claims_rates_wrong=1 ;; *) claims_rates_wrong=0 ;; esac
+check "staleness nag: message never claims the RATES are wrong (date-only claim)" 0 "$claims_rates_wrong"
+case "$m_stale" in *"9.99"*) stale_cost_present=1 ;; *) stale_cost_present=0 ;; esac
+check "staleness nag: the cost figure is still reported alongside the nag" 1 "$stale_cost_present"
+
+# Fresh (5 days, well under the threshold) -> NO staleness nag.
+m_fresh=$(nonscalar_msg "$(jq -cn --arg d "$FRESH5" '{schema_version:2, cost:{total_usd_estimate:1.00, total_tokens:5, prices_as_of:$d}}')")
+case "$m_fresh" in *"verify"*"pricing"*) fresh_warn=1 ;; *) fresh_warn=0 ;; esac
+check "staleness nag: fresh prices_as_of (5 days) -> NO nag" 0 "$fresh_warn"
+
+# Malformed prices_as_of ("not-a-date") must not crash or compute a bogus
+# age/nag — reuses the same strict YYYY-MM-DD shape guard the existing age
+# computation already relies on.
+run_capture_stdout "$(payload "$(mk_transcript 1 "All done.
+LOOP-STOP: complete — done")" S1)" 2>/dev/null
+reset; T_bad=$(mk_transcript 1 "All done.
+LOOP-STOP: complete — done"); write_file in-progress S1 0
+write_retro S1 '{"schema_version":2, "cost":{"total_usd_estimate":2,"total_tokens":9,"prices_as_of":"not-a-date"}}'
+run_capture_stdout "$(payload "$T_bad" S1)"
+check "staleness nag: malformed prices_as_of -> allow (exit 0)" 0 "$RC_OUT"
+m_bad=$(system_message "$STDOUT_OUT")
+case "$m_bad" in *"verify"*"pricing"*) bad_warn=1 ;; *) bad_warn=0 ;; esac
+check "staleness nag: malformed prices_as_of -> no bogus nag computed" 0 "$bad_warn"
+case "$m_bad" in *"2.00"*) bad_cost_present=1 ;; *) bad_cost_present=0 ;; esac
+check "staleness nag: malformed prices_as_of -> cost figure still reported" 1 "$bad_cost_present"
+
 [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails)"; exit 1; }
