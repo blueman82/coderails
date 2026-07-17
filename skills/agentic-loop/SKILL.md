@@ -116,6 +116,10 @@ Then respond.
 
 Match the confirmation cadence to the envelope class for the rest of the session — every "do you want me to..." inside an authorised envelope is a stall the user has to clear, and stalls cost more than the occasional over-reach you'd avoid by asking.
 
+### Phase 0.4 — Pin the orchestrator's own model before Phase 0
+
+**Token-burn rule (row 2 of 4).** Before entering Phase 0, pin the orchestrator's own model explicitly via `/model` (`opus` or `sonnet`) — never leave it on an unpinned default. An unpinned default can silently resolve to a costlier frontier tier (e.g. 2x the cache-read rate of a pinned mid-tier model), and the orchestrator re-reads its whole growing context on every turn for the life of the loop, so the rate compounds across the entire session. This is distinct from Phase 2.8's worker model routing — that table assigns roles to spawned workers; this pin is for the orchestrator (main context) itself, decided once at launch, not re-litigated per phase.
+
 ### Phase 0.5 — Orchestrator operating rules (the conductor obeys its own rules)
 
 The orchestrator (main context) is subject to the same discipline it imposes on workers. Inside an active, incomplete loop, the two discipline Stop hooks — confidence-label and verify-loop — demote a would-be block to a model-visible warn (`additionalContext` on the Stop event) rather than stopping the turn outright; the discipline itself hasn't changed, the warn is the correction signal the orchestrator acts on next turn. Outside an active loop, and for worker output (SubagentStop), both hooks still block outright. Even at warn-level, a missed warn is still a cost — it's the cost this skill exists to keep to a minimum, just paid as a drifted transcript instead of a forced regeneration.
