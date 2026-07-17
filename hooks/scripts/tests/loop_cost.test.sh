@@ -189,7 +189,7 @@ proj="$TMP/projects/-test-proj-i"
 mkdir -p "$proj"
 usage_line "msg_i1" "claude-opus-4-8" 10 5 0 0 0 > "$proj/$sess.jsonl"
 out=$(dc_mine_token_usage "$sess")
-for key in schema_version prices_as_of price_source per_model total_tokens total_usd_estimate transcripts_scanned unpriced_models notes models_used; do
+for key in schema_version prices_as_of price_source per_model total_tokens total_usd_estimate transcripts_scanned unpriced_models notes models_used headless_children_excluded_count; do
   result=$(printf '%s' "$out" | jq -e "has(\"$key\")" 2>/dev/null)
   check "schema shape: top-level key '$key' present" "true" "$result"
 done
@@ -510,6 +510,62 @@ CLAUDE_PROJECTS_DIR="$TMP/projects" CLAUDE_MODEL_PRICES_FILE="$invalid_prices" d
 check "pricing jq crash: distinct stderr diagnostic (pricing produced no output)" "true" "$(printf '%s' "$stderr_out" | grep -qF "pricing produced no output" && echo true || echo false)"
 check "pricing jq crash: still fail-opens to {} on stdout" "{}" "$stdout_out"
 check "pricing jq crash: still exit 0" "0" "$rc"
+
+# --- Test (t): headless orphan detection — a sibling top-level .jsonl in the
+# SAME <proj> dir as the orchestrator transcript, with an mtime inside the
+# orchestrator's activity window, is a candidate headless `claude -p` child
+# (own top-level session, no subagents/ parent linkage exists to attribute
+# its tokens directly — see the lib's header comment). It must be SURFACED
+# as a count, not silently dropped, and its tokens must NOT be folded into
+# total_tokens/total_usd_estimate (no attribution without proof). The
+# orchestrator transcript itself and files in subagents/ must never be
+# double-counted as orphans. ---
+sess="orphan-session"
+proj="$TMP/projects/-test-proj-t"
+mkdir -p "$proj/$sess/subagents"
+usage_line "msg_orph_orch" "claude-opus-4-8" 10 5 0 0 0 > "$proj/$sess.jsonl"
+usage_line "msg_orph_worker" "claude-haiku-4-5" 5 5 0 0 0 > "$proj/$sess/subagents/agent-y.jsonl"
+# A sibling top-level session in the same proj dir, mtime pinned to the same
+# moment as the orchestrator transcript -> inside its activity window.
+usage_line "msg_orph_child" "claude-sonnet-5" 999 999 0 0 0 > "$proj/headless-child-1.jsonl"
+touch -t "$(date -j -v-2M +%Y%m%d%H%M 2>/dev/null || date -d '-2 minutes' +%Y%m%d%H%M 2>/dev/null)" "$proj/$sess.jsonl" "$proj/headless-child-1.jsonl" 2>/dev/null
+out=$(dc_mine_token_usage "$sess")
+result=$(printf '%s' "$out" | jq -r '.headless_children_excluded_count')
+check "headless orphan detection: one in-window sibling top-level session counted" "1" "$result"
+result=$(printf '%s' "$out" | jq -r '.per_model | has("claude-sonnet-5")')
+check "headless orphan detection: orphan's tokens NOT folded into per_model (no fabricated attribution)" "false" "$result"
+result=$(printf '%s' "$out" | jq -r '.total_tokens')
+check "headless orphan detection: orphan's tokens NOT folded into total_tokens" "25" "$result"
+
+# --- Test (t2): negative case — a sibling top-level session in the SAME proj
+# dir but with an mtime FAR OUTSIDE the orchestrator's activity window (a
+# different, unrelated run in the same repo) must NOT be counted as a
+# candidate orphan. Without this negative case, a bare "count every sibling"
+# implementation would pass test (t) too -- this is what actually proves the
+# time-window filter discriminates rather than just counting everything. ---
+sess="orphan-window-session"
+proj="$TMP/projects/-test-proj-t2"
+mkdir -p "$proj"
+usage_line "msg_orph_w_orch" "claude-opus-4-8" 10 5 0 0 0 > "$proj/$sess.jsonl"
+usage_line "msg_orph_w_far" "claude-sonnet-5" 111 22 0 0 0 > "$proj/far-away-session.jsonl"
+touch -t "$(date -j -v-2M +%Y%m%d%H%M 2>/dev/null || date -d '-2 minutes' +%Y%m%d%H%M 2>/dev/null)" "$proj/$sess.jsonl" 2>/dev/null
+touch -t "$(date -j -v-30d +%Y%m%d%H%M 2>/dev/null || date -d '-30 days' +%Y%m%d%H%M 2>/dev/null)" "$proj/far-away-session.jsonl" 2>/dev/null
+out=$(dc_mine_token_usage "$sess")
+result=$(printf '%s' "$out" | jq -r '.headless_children_excluded_count')
+check "headless orphan detection: out-of-window sibling NOT counted (proves time filter, not a bare sibling count)" "0" "$result"
+
+# --- Test (t3): the orchestrator's own transcript and subagent transcripts
+# must never count themselves as headless orphans (no double-count / no
+# self-flagging), even though the orchestrator file is itself in-window by
+# construction. ---
+sess="orphan-noself-session"
+proj="$TMP/projects/-test-proj-t3"
+mkdir -p "$proj/$sess/subagents"
+usage_line "msg_noself_orch" "claude-opus-4-8" 10 5 0 0 0 > "$proj/$sess.jsonl"
+usage_line "msg_noself_worker" "claude-haiku-4-5" 5 5 0 0 0 > "$proj/$sess/subagents/agent-z.jsonl"
+out=$(dc_mine_token_usage "$sess")
+result=$(printf '%s' "$out" | jq -r '.headless_children_excluded_count')
+check "headless orphan detection: no siblings present -> count is 0 (orchestrator/subagent files never self-count)" "0" "$result"
 
 # --- Test (s): pairwise distinctness — all 7 fail-open bails in $LIB must
 # emit 7 DIFFERENT stderr messages. Tests (l)/(m)/(n)/(o)/(p)/(q)/(r) each
