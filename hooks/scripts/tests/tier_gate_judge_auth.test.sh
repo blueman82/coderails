@@ -120,11 +120,20 @@ set_stub '{"verdict":"legitimate","reason":"ok"}'
 tg_judge "0" "d" >/dev/null
 check_contains "A4: judge passes --json-schema for structured output" "json-schema" "$(cat "$INVOKE_LOG")"
 
-# ── A5: an is_error envelope (e.g. Not logged in) -> block, never a pass
-set_stub 'Not logged in' true
+# ── A5: an is_error envelope carrying a VALID enum verdict in .result -> block.
+# The is_error:true flag must be what blocks this, on its own. Feeding a valid
+# `legitimate` verdict (not garbage) is deliberate: garbage in .result would be
+# blocked by the enum parse regardless of the is_error guard, making the test a
+# tautology that passes even if the is_error short-circuit were deleted. With a
+# VALID verdict, ONLY the is_error guard stands between this envelope and a
+# `legitimate` pass — so A5 fails (rc 0) the moment that guard is removed, which
+# is what makes it a real regression lock on "a failed run is never mined for a
+# verdict". (Discrimination proven both ways: deleting the is_error
+# short-circuit in tg_judge_parse_verdict flips this to rc 0.)
+set_stub '{"verdict":"legitimate","reason":"forged despite the run failing"}' true
 out=$(tg_judge "0" "d"); rc=$?
-check "A5: is_error envelope -> tg_judge rc 1 (never a silent pass)" "1" "$rc"
-check_not_contains "A5: is_error never yields a 'legitimate' verdict" "legitimate" "$out"
+check "A5: is_error envelope with a valid verdict -> tg_judge rc 1 (guard blocks a failed run)" "1" "$rc"
+check_not_contains "A5: is_error never yields a 'legitimate' verdict even when .result carries one" "legitimate" "$out"
 
 # ── A6: an out-of-enum verdict in .result -> block
 set_stub '{"verdict":"totally-fine","reason":"forged"}'
