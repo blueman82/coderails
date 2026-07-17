@@ -131,12 +131,23 @@ catalog: [`docs/REFERENCE.md`](./docs/REFERENCE.md).
 | `PreToolUse` (Write/Edit/MultiEdit) | `no_edit_on_main.sh` | **block** — on main/master, blocks edits to any file EXCEPT an explicit allowlist (`.md`/`.txt`/`.rst`, `.yaml`/`.yml`/`.json`/`.toml`/`.ini`/`.cfg`, `.gitignore`, `LICENSE`); plugin-source markdown (`skills/*/SKILL.md`, `commands/*.md`) is also blocked. Also blocks `.claude/settings.json` / `.claude/settings.local.json` edits on **any** branch (the permission files that can bypass every gate) |
 | `PreToolUse` (Write/Edit/MultiEdit) | `comment_citation_gate.sh` | **block** — blocks new comment content that cites a session-artifact label (`E#:`, `F# fix`, `CHANGE B#`/`C#`, `Task A#`, `TA-I#`, "reviewer finding", "per the plan", etc.) instead of stating the constraint the code enforces; `.md` files exempt; fails open |
 
+## Sandboxed workers
+
+With `config.sandbox_workers: true` (`.claude/workflow.config.yaml`), the
+agentic-loop dispatches implementation-unit workers via
+`@anthropic-ai/sandbox-runtime` (`scripts/sandbox/spawn-sandboxed-worker.sh`),
+an OS-enforced filesystem containment layer (Seatbelt on macOS, bubblewrap on
+Linux) that restricts a worker's writes to its own worktree, scratch, and the
+primary repo's `.git` — never the orchestrator, which is unaffected. Requires
+`node`/`npx`, macOS or Linux/WSL2.
+
 ## Requirements
 
 - Claude Code 2.1.x
 - `gh`, `jq`, `git`
 - For `/push` / `/merge`: a **GitHub**-hosted repo with an authenticated `gh` CLI (`gh auth login`) — the workflow uses `gh`, so non-GitHub remotes (GitLab/Bitbucket/Gitea) are not supported.
 - `pr-review-toolkit@claude-plugins-official` for the review stage of `/workflow`
+- For sandboxed workers (opt-in): `node`/`npx`, macOS or Linux/WSL2
 
 ## Uninstall
 
