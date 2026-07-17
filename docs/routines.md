@@ -191,21 +191,42 @@ because a sibling PR merging into `main` mid-run must not make a clean
 branch look contaminated — review, post-review, post-evals, merge) and
 merges its own PR with no human in the loop.
 
-It replaces the former `sync-docs-weekly` routine, which had been
-silently broken for 9 days: its `foreignSkillPath` pointed at a path
-under `~/.claude/skills/` that never existed (the real skill lives
-in-repo), and `loadConfig()`'s own validator only checks that
-`foreignSkillPath` is a non-empty absolute string, never that the path
-exists on disk — so the broken config loaded clean and the failure
-surfaced only at sweep time, with zero escalations logged the whole
-time it was dead. `docs-sync-nightly` needs no `foreignSkillPath` at
-all: its skill ships in-repo, same as `loop-retro-promotion`.
+It replaces the former `sync-docs-weekly` routine, whose
+`foreignSkillPath` pointed at a path under `~/.claude/skills/` that
+never existed (the real skill lives in-repo), and `loadConfig()`'s own
+validator only checks that `foreignSkillPath` is a non-empty absolute
+string, never that the path exists on disk — so the broken config
+loaded clean. The routine's escalation machinery itself worked as
+designed: it ran green on 2026-07-08, then correctly escalated a red
+`skill-missing` run via vault-note on 2026-07-15
+(`dashboard-runs/sync-docs-weekly.md`). The actual defect was that the
+dead path then sat unfixed for 9 days, because that escalation landed
+on a channel — a vault run-note nobody was reading — rather than
+anywhere the owner would actually see it. `docs-sync-nightly` needs no
+`foreignSkillPath` at all: its skill ships in-repo, same as
+`loop-retro-promotion`.
 
 Its manifest is hard-scoped to git-tracked `.md` files. If the diff ever
 contains anything else — a hook script, `scripts/`, `.claude/settings.json`,
 any code — the skill aborts with cleanup (closes the PR if one was
 opened, deletes the branch locally and on the remote) rather than
 warning and continuing.
+
+**Failure visibility.** This routine's config keeps both shipped
+escalation channels (`["notification", "vault-note"]`) — no new
+notification infrastructure was built for it. What the skill itself
+additionally guarantees: any abort-with-cleanup or gate refusal writes
+its reason into the run-note (the vault-note escalation channel above)
+**and** appends a durable, greppable marker line (`abort=<reason>` or
+`refused=<gate>`) to this routine's own run log, so a later audit can
+find every failed night without replaying the whole log. Concretely,
+where a human should look after this routine has been running
+unattended for a while: the macOS notification (transient, easy to
+miss), then `dashboard-runs/docs-sync.md` (the vault-note history,
+one entry per run), then the run log's `abort=`/`refused=` lines for a
+grep-able summary across many nights at once. There is no dashboard
+alert and no PR comment for a failed run — those two channels are the
+whole surface.
 
 **Security note.** See the security warning below —
 `docs-sync-nightly` is the **second** routine in this repo (after
