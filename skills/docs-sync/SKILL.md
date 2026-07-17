@@ -143,7 +143,7 @@ fixing.
 8. `/coderails:post-evals <PR#>`
 9. `/coderails:merge`. Once the merge succeeds, append a terminal
    `run=ok` line to the run log as the last line — the canonical
-   success marker the `contains` gate keys on.
+   success marker the `last-marker` gate keys on.
 
 Any of steps 5–9 can REFUSE (a failing eval, a review that blocks, a
 merge gate that rejects) rather than the routine choosing to abort.
