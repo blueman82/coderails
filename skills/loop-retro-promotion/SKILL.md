@@ -127,7 +127,11 @@ own path.
 
 Append a timestamped per-stage line to `promotion-runs.log` after each gate
 step above (fetch/branch, evals frozen, edit made, manifest check, push,
-review, post-review, post-evals, merge).
+review, post-review, post-evals, merge). Only after step 9 (merge) completes
+successfully, append one further line: `run=ok`. This is the ONLY point that
+writes the success marker for a delivery run — it must come after the
+per-stage "merge" line, so `run=ok` remains the log's true last terminal
+marker for a completed delivery.
 
 ## 5. Prohibitions
 
