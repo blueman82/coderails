@@ -14,6 +14,7 @@ export { ConfigError }; // a class (value + type) — re-exported as a value, no
 export type ArtifactPredicate =
   | { kind: "exists" }
   | { kind: "contains"; marker: string }
+  | { kind: "last-marker"; success: string; failures: string[] }
   | { kind: "json-field"; path: string; value: unknown };
 
 export interface ExpectedArtifact {
