@@ -256,6 +256,42 @@ check "REJECTED PUSH: a failure is reported" "1" "$(printf '%s' "$LAST_OUT" | gr
 check "REJECTED PUSH: local commit still happened (commit step is independent of push outcome)" "1" "$([ "$BEFORE_HEAD" != "$(git -C "$R" rev-parse HEAD)" ] && echo 1 || echo 0)"
 
 # ══════════════════════════════════════════════════════════════════════════
+# ─── STALE-LEASE REJECTION: --force-with-lease's own rejection reason ───────
+# ══════════════════════════════════════════════════════════════════════════
+# The plain non-fast-forward case above exercises the default push path's
+# capture/err logic; this exercises the SAME logic on the --force-with-lease
+# branch with lease's own distinct rejection reason ("stale info"), so the
+# force-with-lease code path isn't just covered by code-reading symmetry.
+# Builds a fixture whose local origin/feature tracking ref goes stale: a
+# second clone pushes new history to feature on the real remote WITHOUT our
+# fixture's repo ever fetching, so our repo's local record of origin/feature
+# no longer matches the actual remote tip — the exact condition
+# --force-with-lease is designed to detect and refuse to clobber.
+R=$(new_fixture stale_lease)
+git -C "$R" checkout -q feature
+echo "v1" > "$R/base.txt"
+git -C "$R" add base.txt
+git -C "$R" commit -q -m "v1"
+git -C "$R" push -q -u origin feature
+OTHER2="$TMP/stale_lease/other2"
+git clone -q "$TMP/stale_lease/origin.git" "$OTHER2" 2>/dev/null
+git -C "$OTHER2" config user.email o2@o2.o; git -C "$OTHER2" config user.name other2
+git -C "$OTHER2" checkout -q -b feature origin/feature
+echo "v2-from-other" > "$OTHER2/base.txt"
+git -C "$OTHER2" add base.txt
+git -C "$OTHER2" commit -q -m "v2 other"
+git -C "$OTHER2" push -q origin feature
+# $R's local origin/feature ref is now stale (still records v1; the real
+# remote tip is v2-from-other) — force-with-lease must refuse this.
+echo "v3-local-diverged" > "$R/base.txt"
+git -C "$R" add base.txt
+git -C "$R" commit -q -m "v3 local diverged"
+run_push "$R" --force-with-lease "msg"
+check "STALE-LEASE: exits non-zero" "1" "$([ "$LAST_RC" -ne 0 ] && echo 1 || echo 0)"
+check "STALE-LEASE: does NOT print 'Pushed'" "0" "$(printf '%s' "$LAST_OUT" | grep -c 'Pushed')"
+check "STALE-LEASE: real 'stale info' rejection text reaches the user" "1" "$(printf '%s' "$LAST_OUT" | grep -q -i 'stale' && echo 1 || echo 0)"
+
+# ══════════════════════════════════════════════════════════════════════════
 # ─── ALL-REMOTE-LINES SUCCESS: false-negative guard ─────────────────────────
 # ══════════════════════════════════════════════════════════════════════════
 # A successful push whose entire stderr/stdout output consists of `remote:`
@@ -304,6 +340,37 @@ run_push "$R"
 check "VERIFY-LANDED: exits 0" "0" "$LAST_RC"
 check "VERIFY-LANDED: prints 'Pushed'" "1" "$(printf '%s' "$LAST_OUT" | grep -c 'Pushed')"
 check "VERIFY-LANDED: origin/feature == local HEAD" "$(git -C "$R" rev-parse HEAD)" "$(git -C "$R" rev-parse origin/feature)"
+
+# ══════════════════════════════════════════════════════════════════════════
+# ─── DECEPTIVE-SUCCESS GUARD: push_rc==0 but origin/$br never moved ─────────
+# ══════════════════════════════════════════════════════════════════════════
+# Drives the rev-parse-mismatch `err` branch directly: this state cannot arise
+# from a real, unmodified git push (a real push that reports success DOES
+# move the remote-tracking ref), so it is only reachable via a stub that lies
+# — `git push` exits 0 without touching the remote at all. push.sh's own
+# push-status check (`push_rc -eq 0`) is satisfied and stays silent; only the
+# rev-parse verification added by this fix can catch the deception. Asserts
+# the SPECIFIC "does not match local HEAD" message, not just "any failure",
+# so this can't pass by accidentally tripping the unrelated push_rc branch.
+STUB_BIN3="$TMP/stubbin3"
+mkdir -p "$STUB_BIN3"
+cat > "$STUB_BIN3/git" <<EOF
+#!/bin/bash
+if [[ "\$1" == "push" ]]; then
+  echo "Everything up-to-date"
+  exit 0
+fi
+exec "$REAL_GIT_PATH" "\$@"
+EOF
+chmod +x "$STUB_BIN3/git"
+
+R=$(new_fixture deceptive_success)
+echo "changed" > "$R/base.txt"
+OUT=$( (cd "$R" && PATH="$STUB_BIN3:$GH_STUB_DIR:$PATH" bash "$PUSH_SH") 2>&1 )
+RC=$?
+check "DECEPTIVE-SUCCESS: exits non-zero (rev-parse guard catches the lie)" "1" "$([ "$RC" -ne 0 ] && echo 1 || echo 0)"
+check "DECEPTIVE-SUCCESS: does NOT print 'Pushed'" "0" "$(printf '%s' "$OUT" | grep -c 'Pushed')"
+check "DECEPTIVE-SUCCESS: reports the specific mismatch reason" "1" "$(printf '%s' "$OUT" | grep -q 'does not match local HEAD' && echo 1 || echo 0)"
 
 printf '\n--- push_staging.test.sh: %d failing checks ---\n' "$fails"
 [ "$fails" -eq 0 ] && exit 0 || exit 1
