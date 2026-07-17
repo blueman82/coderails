@@ -77,7 +77,7 @@
     {
       "name": "sync-docs-nightly",
       "label": "Docs Sync (nightly)",
-      "buttonRef": "docs-sync",
+      "buttonRef": "sync-docs",
       "cadence": "nightly",
       "expectedArtifact": {
         "artifactPath": "/path/to/.claude/coderails-dashboard/routines/docs-sync/run-{date}.log",
