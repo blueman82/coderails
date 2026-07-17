@@ -1416,6 +1416,42 @@ case "$msg4" in *"not recorded"*) not_recorded_msg=1 ;; *) not_recorded_msg=0 ;;
 check "cost-report row4: systemMessage says cost not recorded" 1 "$not_recorded_msg"
 check "cost-report row3 vs row4: messages are textually distinct" 1 "$([ "$msg4" != "$msg" ] && echo 1 || echo 0)"
 
+# (row 4b) complete + sv>=2 + .cost is a NON-EMPTY object but MISSING
+# total_usd_estimate (partial miner output / schema drift) -> ALLOW, PRINT a
+# message that says the cost data is present but incomplete. Must NOT
+# silently return nothing (that would relocate the exact bug this PR exists
+# to fix from model-omission to hook-omission), and must NOT fabricate a $
+# figure. Message must be textually distinct from both row3's "cost
+# unavailable (miner returned no data)" and row4's "cost not recorded".
+reset; T=$(mk_transcript 1 "All done.
+LOOP-STOP: complete — done"); write_file in-progress S1 0
+write_retro S1 '{"schema_version":2, "cost":{"total_tokens":123}}'
+run_capture_stdout "$(payload "$T" S1)"
+check "cost-report row4b: sv2 + cost missing total_usd_estimate -> allow" 0 "$RC_OUT"
+msg4b=$(system_message "$STDOUT_OUT")
+check "cost-report row4b: systemMessage is emitted (not silent)" 1 "$([ -n "$msg4b" ] && echo 1 || echo 0)"
+case "$msg4b" in *'$'[0-9]*) fabricated4b=1 ;; *) fabricated4b=0 ;; esac
+check "cost-report row4b: systemMessage has NO fabricated \$ figure" 0 "$fabricated4b"
+case "$msg4b" in *"incomplete"*) incomplete_msg4b=1 ;; *) incomplete_msg4b=0 ;; esac
+check "cost-report row4b: systemMessage says cost incomplete" 1 "$incomplete_msg4b"
+check "cost-report row4b vs row3: messages are textually distinct" 1 "$([ "$msg4b" != "$msg" ] && echo 1 || echo 0)"
+check "cost-report row4b vs row4: messages are textually distinct" 1 "$([ "$msg4b" != "$msg4" ] && echo 1 || echo 0)"
+
+# (row 4c) complete + sv>=2 + .cost is a NON-EMPTY object but MISSING
+# total_tokens (the sibling missing-field case) -> ALLOW, PRINT a distinct
+# incomplete-cost message, no fabricated $ figure.
+reset; T=$(mk_transcript 1 "All done.
+LOOP-STOP: complete — done"); write_file in-progress S1 0
+write_retro S1 '{"schema_version":2, "cost":{"total_usd_estimate":9.99}}'
+run_capture_stdout "$(payload "$T" S1)"
+check "cost-report row4c: sv2 + cost missing total_tokens -> allow" 0 "$RC_OUT"
+msg4c=$(system_message "$STDOUT_OUT")
+check "cost-report row4c: systemMessage is emitted (not silent)" 1 "$([ -n "$msg4c" ] && echo 1 || echo 0)"
+case "$msg4c" in *'$'[0-9]*) fabricated4c=1 ;; *) fabricated4c=0 ;; esac
+check "cost-report row4c: systemMessage has NO fabricated \$ figure" 0 "$fabricated4c"
+case "$msg4c" in *"incomplete"*) incomplete_msg4c=1 ;; *) incomplete_msg4c=0 ;; esac
+check "cost-report row4c: systemMessage says cost incomplete" 1 "$incomplete_msg4c"
+
 # (row 5) non-complete category (e.g. hard-stop) -> SKIP, silent, no matter
 # what .cost looks like on a stale retro from an earlier declaration.
 reset; T=$(mk_transcript 1 "Work paused.

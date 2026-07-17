@@ -951,6 +951,12 @@ transcript and cannot satisfy this gate — then re-declare complete." >&2
 #   schema_version < 2 (legacy, pre-cost-miner retro)      -> silent
 #   schema_version >= 2, .cost populated (has a usd total) -> print USD +
 #     tokens + staleness age
+#   schema_version >= 2, .cost non-empty but MISSING total_usd_estimate
+#     and/or total_tokens (partial miner output, schema drift) -> print
+#     "cost recorded but incomplete (missing <field(s)>)" — NEVER return
+#     silently and NEVER fabricate a $ figure. A silent return here would
+#     recreate, inside this very mechanism, the exact failure this PR exists
+#     to fix: a cost that exists on disk but never reaches the human.
 #   schema_version >= 2, .cost == {} (miner ran, failed open) -> print "cost
 #     unavailable (miner returned no data)" — NEVER a fabricated $ figure
 #   schema_version >= 2, .cost absent (teardown skipped the mining sub-step)
@@ -959,7 +965,9 @@ transcript and cannot satisfy this gate — then re-declare complete." >&2
 #     came back empty. Different bugs, different messages; collapsing them
 #     into one message would silently relocate the original bug (a cost the
 #     human never sees) from model-omission to hook-omission instead of
-#     fixing it.
+#     fixing it. The incomplete-but-non-empty case above is a THIRD distinct
+#     message for the same reason — collapsing it into either the {} case or
+#     a silent return would do the same thing this whole PR exists to stop.
 # schema_version is therefore the row-2-vs-row-4 discriminator, not
 # cost-presence: rows 2 and 4 both have `.cost` absent, so cost-presence
 # alone cannot tell "legacy loop, nothing to report" from "sv2 loop, teardown
@@ -997,7 +1005,16 @@ als_report_cost_on_complete() {
         usd=$(jq -r '.cost.total_usd_estimate // empty' "$retro" 2>/dev/null)
         tokens=$(jq -r '.cost.total_tokens // empty' "$retro" 2>/dev/null)
         prices_as_of=$(jq -r '.cost.prices_as_of // empty' "$retro" 2>/dev/null)
-        [ -n "$usd" ] && [ -n "$tokens" ] || return 0
+        if [ -z "$usd" ] || [ -z "$tokens" ]; then
+          local missing=""
+          [ -z "$usd" ] && missing="total_usd_estimate"
+          if [ -z "$tokens" ]; then
+            [ -n "$missing" ] && missing="${missing}, total_tokens" || missing="total_tokens"
+          fi
+          msg="cost recorded but incomplete (missing ${missing})"
+          jq -n --arg m "$msg" '{systemMessage: $m}' 2>/dev/null
+          return 0
+        fi
         local age="$prices_as_of"
         if [ -n "$prices_as_of" ]; then
           local then_epoch now_epoch
