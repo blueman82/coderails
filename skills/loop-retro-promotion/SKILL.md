@@ -60,12 +60,35 @@ under `## Promoted lessons`, containing:
 2. Run `/coderails:task-evals` (scope: `pr`) and freeze it — BEFORE making
    the edit.
 3. Make the edit (the append from step 3, above).
-4. Assert `git diff origin/main --name-only` equals EXACTLY:
+4. Assert `git diff origin/main...HEAD --name-status` (THREE-dot, not two;
+   `--name-status`, never `--name-only`) shows EXACTLY ONE line, and that
+   line is a modification (`M`) of:
    `skills/agentic-loop/learned-failure-modes.md`
-   If any other file appears in that diff: **ABORT WITH CLEANUP** — close
-   the PR if one was opened, delete the branch both locally and on the
-   remote, and append an `abort=<reason>` line to `promotion-runs.log`. Do
-   not leave orphaned branches, PRs, or partial state.
+   Anything else — a second path, a rename (`R`/`C`) from any source, a
+   deletion (`D`), or an addition (`A`) of any other file — is an **ABORT
+   WITH CLEANUP**: close the PR if one was opened, delete the branch both
+   locally and on the remote, and append an `abort=<reason>` line to
+   `promotion-runs.log`. Do not leave orphaned branches, PRs, or partial
+   state. **ABORT, never warn-and-continue.**
+
+   Both flags are load-bearing, not stylistic:
+
+   - **Two-dot compares against a base that MOVES.** `git diff origin/main`
+     diffs the working tree against wherever `origin/main` happens to be at
+     assertion time. If a sibling PR merges mid-run, that base has moved and
+     the diff indicts this branch for files it never touched — aborting a
+     clean run. Three-dot compares against the merge-base as of when this
+     branch forked, which is the only comparison scoped to what *this*
+     pipeline changed.
+   - **`--name-only` cannot see a rename's source or tell a deletion from an
+     edit.** It prints a rename as its DESTINATION path alone, so
+     `git mv scripts/gate.sh learned-failure-modes.md` would appear as the
+     bare expected filename and PASS this assertion while smuggling a shell
+     script into the repo under a permitted name. `--name-status` prints
+     `R100 scripts/gate.sh learned-failure-modes.md`, exposing the source.
+     Likewise `git rm` of the target file prints the identical single line
+     an edit does under `--name-only`, while `--name-status` prints `D`.
+     (Both proven empirically in a scratch repo, 2026-07-17.)
 5. `/coderails:push`
 6. `/pr-review-toolkit:review-pr <PR#>`
 7. `/coderails:post-review <PR#>`
