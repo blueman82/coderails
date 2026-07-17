@@ -118,8 +118,11 @@ check "docs-sync button profile is bypass" "bypass" "$(field button_profile)"
 
 # maxAgeSeconds must be sized for NIGHTLY cadence, not the 691200s (8-day)
 # weekly bar — leaving the weekly bar in place would let a routine dead for
-# up to 8 nights still read as "fresh enough", reintroducing the exact
-# silent-failure class (9 days dead, zero escalations) this PR exists to fix.
+# up to 8 nights still read as "fresh enough". (Escalation itself worked
+# correctly here — vault-runs/sync-docs-weekly.md shows a green run on
+# 2026-07-08 and a red skill-missing escalation on 2026-07-15 — the defect
+# is that the DEAD PATH sat unfixed because the escalation landed on a
+# channel nobody was watching, not that escalation was silent or broken.)
 maxage="$(field maxAgeSeconds)"
 check "docs-sync maxAgeSeconds is set" "yes" "$([ -n "$maxage" ] && echo yes || echo no)"
 if [ -n "$maxage" ]; then
@@ -162,6 +165,14 @@ if [ -f "$SKILL_PATH" ]; then
     "yes" "$(grep -q 'ABORT WITH CLEANUP' "$SKILL_PATH" && echo yes || echo no)"
   check "SKILL.md scopes edits to git-tracked .md files" \
     "yes" "$(grep -qi 'git-tracked' "$SKILL_PATH" && echo yes || echo no)"
+  check "SKILL.md documents a refused=<gate> marker for a downstream gate refusal" \
+    "yes" "$(grep -q 'refused=' "$SKILL_PATH" && echo yes || echo no)"
+  check "SKILL.md documents an abort=<reason> marker for a manifest-scope abort" \
+    "yes" "$(grep -q 'abort=' "$SKILL_PATH" && echo yes || echo no)"
+  check "SKILL.md names the vault-note as a failure-visibility channel (not just the run log)" \
+    "yes" "$(grep -qi 'vault-note' "$SKILL_PATH" && echo yes || echo no)"
+  check "SKILL.md states there is no dashboard alert or PR comment for a failed run" \
+    "yes" "$(grep -qi 'no dashboard alert' "$SKILL_PATH" && echo yes || echo no)"
 fi
 
 if [ "$checks" -eq 0 ]; then
