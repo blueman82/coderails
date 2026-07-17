@@ -59,13 +59,54 @@ under `## Promoted lessons`, containing:
 1. Fetch `origin/main`; branch off the freshly-fetched tip.
 2. Run `/coderails:task-evals` (scope: `pr`) and freeze it — BEFORE making
    the edit.
-3. Make the edit (the append from step 3, above).
-4. Assert `git diff origin/main --name-only` equals EXACTLY:
+3. Make the edit (the append from step 3, above), then **commit it** —
+   `git add skills/agentic-loop/learned-failure-modes.md` and commit. The
+   assertion in step 4 is a **commit-range** diff: it compares two commits,
+   so it cannot see an uncommitted working-tree edit. Skip this commit and
+   the range is empty, step 4's "exactly one line" fails, and the run aborts
+   every single time — a self-inflicted denial of service, not a safety
+   check. Stage the ONE target path by name, never `git add -A`: an
+   uncommitted stray from an earlier step would otherwise be swept into the
+   same commit and trip the assertion legitimately.
+4. Assert `git diff origin/main...HEAD --name-status` (THREE-dot, not two;
+   `--name-status`, never `--name-only`) shows EXACTLY ONE line, and that
+   line is a modification (`M`) of:
    `skills/agentic-loop/learned-failure-modes.md`
-   If any other file appears in that diff: **ABORT WITH CLEANUP** — close
-   the PR if one was opened, delete the branch both locally and on the
-   remote, and append an `abort=<reason>` line to `promotion-runs.log`. Do
-   not leave orphaned branches, PRs, or partial state.
+   Anything else — a second path, a rename (`R`/`C`) from any source, a
+   deletion (`D`), or an addition (`A`) of any other file — is an **ABORT
+   WITH CLEANUP**: close the PR if one was opened, delete the branch both
+   locally and on the remote, and append an `abort=<reason>` line to
+   `promotion-runs.log`. Do not leave orphaned branches, PRs, or partial
+   state. **ABORT, never warn-and-continue.**
+
+   Both flags are load-bearing, not stylistic:
+
+   - **Two-dot compares against a base that MOVES.** `git diff origin/main`
+     diffs the working tree against wherever `origin/main` happens to be at
+     assertion time. If a sibling PR merges mid-run, that base has moved and
+     the diff indicts this branch for files it never touched — aborting a
+     clean run. Three-dot compares against the merge-base as of when this
+     branch forked, which is the only comparison scoped to what *this*
+     pipeline changed.
+   - **`--name-only` cannot see a rename's source or tell a deletion from an
+     edit.** It prints a rename as its DESTINATION path alone, so
+     `git mv scripts/gate.sh skills/agentic-loop/learned-failure-modes.md`
+     appears as the bare expected filename and PASSES a `--name-only` check
+     while smuggling a shell script onto `main` under a permitted name.
+     `--name-status` exposes it — as `R100 scripts/gate.sh <target>` when the
+     destination did not pre-exist, or as a `D`+`M` pair when it did. Either
+     shape fails "exactly one `M` line", so both abort. Likewise `git rm` of
+     the target prints the identical single line an edit does under
+     `--name-only`, while `--name-status` prints `D`. (All proven empirically
+     in a scratch repo, 2026-07-17.)
+
+   **What this assertion does NOT catch, stated plainly:** it is a PATH
+   check, not a CONTENT check. A commit that legitimately modifies only
+   `learned-failure-modes.md`, but fills it with something other than a
+   mined lesson, is a lone `M` of the permitted path and PASSES here. That
+   residual is held by the mining rules in section 2 and by the review/eval
+   gates in steps 6-8 — not by this step. No path-based manifest can close
+   it, and pretending otherwise would be worse than naming it.
 5. `/coderails:push`
 6. `/pr-review-toolkit:review-pr <PR#>`
 7. `/coderails:post-review <PR#>`
