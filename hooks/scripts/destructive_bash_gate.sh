@@ -20,13 +20,15 @@ deny() {
   # Keyed on $pat's own text (set by each call site below via grep -oiE or a
   # literal string) — this only changes what the DENY message SAYS, never
   # which commands reach deny() in the first place.
-  # Case assumes the canonical lowercase form grep -oiE actually returns for
-  # these three patterns; an all-caps or irregular-casing command still
-  # denies (unaffected — the case-insensitive grep above already matched it),
-  # it just falls through to the generic route below instead of the specific
-  # one, same as any other unmapped pattern.
+  # Matched against a lowercased copy: the call sites feed $pat from a
+  # case-insensitive grep, so an all-caps or mixed-case command reaches here
+  # with its own casing preserved and would otherwise miss every specific
+  # branch and take the generic route. Only the route lookup is lowercased —
+  # the message still reports $pat as it was actually matched.
   local route
-  case "$pat" in
+  local pat_lc
+  pat_lc=$(printf '%s' "$pat" | tr '[:upper:]' '[:lower:]')
+  case "$pat_lc" in
     *"git reset --hard"*)
       route="Safe route: park the commits first with 'git branch backup/<desc> <ref>', then use 'git reset --keep <ref>' instead of --hard — --keep applies the same move but REFUSES (errors out) rather than clobbering when it would discard uncommitted working-tree changes, and the backup branch keeps the moved-past commits recoverable either way."
       ;;
