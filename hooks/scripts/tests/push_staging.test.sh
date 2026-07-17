@@ -1,15 +1,20 @@
 #!/bin/bash
-# Behavioural test for scripts/push.sh staging behaviour. Builds a real
-# bare origin + clone fixture per case (matching git-common.test.sh's
+# Behavioural test for scripts/push.sh staging behaviour, plus (as of the
+# push-status-handling fix) the push-success/push-failure gate itself. Builds
+# a real bare origin + clone fixture per case (matching git-common.test.sh's
 # convention) and runs push.sh as a real subprocess (`bash "$PUSH_SH"`, not
 # `source`d — push.sh resolves its sibling lib via `$(dirname "$0")`, which
 # only points at push.sh's own directory when it's actually executed, not
 # sourced into a caller with a different $0). `git add -A` was replaced with
-# `git add -u` (tracked-only staging) plus an untracked-file warning. No
-# network — each fixture's origin remote is a nonexistent github.com URL so
-# require::repo() passes, but the subsequent `git push` inside push.sh fails
-# fast (no such repo) and push.sh's `set -euo pipefail` aborts it right after
-# the commit step under test, before any `gh pr` call is reached.
+# `git add -u` (tracked-only staging) plus an untracked-file warning.
+#
+# The origin remote is registered as a fake https://github.com/... URL (so
+# require::repo() passes) but rewritten via `url.<path>.insteadOf` git config
+# to actually redirect to a real local bare repo — so `require::repo()` sees
+# a github.com-shaped remote AND the underlying `git push` genuinely talks to
+# a real, reachable git repository and can genuinely succeed. A `gh` stub is
+# placed first on PATH so the PR-create/PR-comment steps after a successful
+# push never touch the real network.
 set -u
 export GIT_TERMINAL_PROMPT=0
 REPO_ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
@@ -23,18 +28,33 @@ check() { # desc expected actual
   else printf 'FAIL - %s\n  expected: %s\n  actual:   %s\n' "$1" "$2" "$3"; fails=$((fails+1)); fi
 }
 
+# ─── gh stub: PR list is always empty (no existing PR), PR create returns a
+# fake URL. Never touches the network. Placed first on PATH by callers via
+# PATH="$GH_STUB_DIR:$PATH".
+GH_STUB_DIR="$TMP/ghstub"
+mkdir -p "$GH_STUB_DIR"
+cat > "$GH_STUB_DIR/gh" <<'GHSTUB'
+#!/bin/bash
+case "$*" in
+  "pr list"*) echo "[]" ;;
+  "pr create"*) echo "https://github.com/testowner/testrepo-fixture/pull/1" ;;
+  "pr comment"*) exit 0 ;;
+  "pr view"*) echo "" ;;
+  *) exit 0 ;;
+esac
+GHSTUB
+chmod +x "$GH_STUB_DIR/gh"
+
 # new_fixture <name> → sets up $TMP/<name>/origin.git (bare) + $TMP/<name>/repo
 # (clone, on a feature branch, remote-HEAD set to main) and echoes the repo path.
 # push.sh's require::repo() gates on repo() matching a github.com URL, so
-# `origin` is registered as a fake https://github.com/... URL purely so
-# repo()/require::repo() pass — this repo is never actually reachable. The
-# `main` branch is a LOCAL branch only (never pushed anywhere), so `origin/main`
-# (used by ahead()/dirty-independent bits) resolves via a local remote-tracking
-# ref we set up manually, and the subsequent `git push -u origin "$br"` inside
-# push::main fails fast (no such host reachable / not a real remote) — this
-# happens AFTER the commit step under test, and `set -euo pipefail` inside
-# push.sh then aborts the subshell right there, so push.sh's later `gh pr`
-# calls (which would otherwise hit the real network) are never reached.
+# `origin` is registered as a fake https://github.com/... URL — but a
+# `url.<local-path>.insteadOf` git config rewrite makes that fake URL actually
+# redirect to the real local bare repo, so the subsequent `git push -u origin
+# "$br"` inside push::main is a genuine, reachable push that can genuinely
+# succeed (not merely fail-fast against an unreachable host). The `main`
+# branch is pushed for real too, so `origin/main` (used by ahead()) is a real
+# remote-tracking ref.
 new_fixture() {
   local name="$1" origin repo
   origin="$TMP/$name/origin.git"; repo="$TMP/$name/repo"
@@ -48,9 +68,21 @@ new_fixture() {
   git -C "$repo" branch -M main
   git -C "$repo" push -q -u origin main
   git -C "$repo" remote set-head origin main
-  git -C "$repo" remote set-url origin "https://github.com/testowner/testrepo-does-not-exist-coderails-test.git"
+  git -C "$repo" remote set-url origin "https://github.com/testowner/testrepo-fixture.git"
+  git -C "$repo" config "url.${origin}.insteadOf" "https://github.com/testowner/testrepo-fixture.git"
   git -C "$repo" checkout -q -b feature
   echo "$repo"
+}
+
+# run_push <repo> [args...] → runs push.sh with the gh stub on PATH, echoing
+# the repo's own path first-on-PATH is NOT needed here (push.sh is invoked by
+# absolute path). Sets LAST_RC as a side effect.
+run_push() {
+  local repo="$1"; shift
+  local out
+  out=$( (cd "$repo" && PATH="$GH_STUB_DIR:$PATH" bash "$PUSH_SH" "$@") 2>&1 )
+  LAST_RC=$?
+  LAST_OUT="$out"
 }
 
 # ─── TRACKED-ONLY: modified tracked file, no untracked files ────────────────
@@ -58,57 +90,56 @@ new_fixture() {
 # previously crashed push.sh (a bare `grep '^??'` with zero matches exits 1,
 # and under `set -euo pipefail` that aborted the whole script before the
 # commit ever ran) — assert on exit code and HEAD advancing, not just content,
-# so a future regression that skips the commit can't pass silently.
+# so a future regression that skips the commit can't pass silently. The push
+# now genuinely succeeds against the real local bare origin, so a 0 exit here
+# is a true positive, not a swallowed failure.
 R=$(new_fixture tracked_only)
 BEFORE_HEAD=$(git -C "$R" rev-parse HEAD)
 echo "changed" > "$R/base.txt"
-OUT=$( ( cd "$R" && bash "$PUSH_SH" ) 2>&1 )
-RC=$?
+run_push "$R"
 AFTER_HEAD=$(git -C "$R" rev-parse HEAD)
 staged=$(git -C "$R" show --name-only -1 --format="" HEAD 2>/dev/null)
-check "TRACKED-ONLY: does not crash (exit 0)" "0" "$RC"
+check "TRACKED-ONLY: does not crash (exit 0)" "0" "$LAST_RC"
 check "TRACKED-ONLY: HEAD advances (a new commit was made)" "1" "$([ "$BEFORE_HEAD" != "$AFTER_HEAD" ] && echo 1 || echo 0)"
 check "TRACKED-ONLY: modification staged and committed" "base.txt" "$staged"
-check "TRACKED-ONLY: no untracked-file warning printed" "0" "$(printf '%s' "$OUT" | grep -c -i 'untracked')"
+check "TRACKED-ONLY: no untracked-file warning printed" "0" "$(printf '%s' "$LAST_OUT" | grep -c '^! Untracked')"
+check "TRACKED-ONLY: push actually landed (origin/feature == HEAD)" "$AFTER_HEAD" "$(git -C "$R" rev-parse origin/feature)"
 
 # ─── UNTRACKED-PRESENT: modified tracked file AND an untracked file ─────────
 R=$(new_fixture untracked_present)
 BEFORE_HEAD=$(git -C "$R" rev-parse HEAD)
 echo "changed" > "$R/base.txt"
 echo "new" > "$R/newfile.txt"
-OUT=$( ( cd "$R" && bash "$PUSH_SH" ) 2>&1 )
-RC=$?
+run_push "$R"
 AFTER_HEAD=$(git -C "$R" rev-parse HEAD)
 committed_files=$(git -C "$R" show --name-only -1 --format="" HEAD 2>/dev/null)
-check "UNTRACKED-PRESENT: does not crash (exit 0)" "0" "$RC"
+check "UNTRACKED-PRESENT: does not crash (exit 0)" "0" "$LAST_RC"
 check "UNTRACKED-PRESENT: HEAD advances (a new commit was made)" "1" "$([ "$BEFORE_HEAD" != "$AFTER_HEAD" ] && echo 1 || echo 0)"
 check "UNTRACKED-PRESENT: modification staged and committed" "base.txt" "$committed_files"
 check "UNTRACKED-PRESENT: untracked file NOT staged" "0" "$(printf '%s' "$committed_files" | grep -c newfile.txt)"
-check "UNTRACKED-PRESENT: warning printed" "1" "$(printf '%s' "$OUT" | grep -c -i 'untracked')"
-check "UNTRACKED-PRESENT: warning names the file" "1" "$(printf '%s' "$OUT" | grep -c 'newfile.txt')"
-check "UNTRACKED-PRESENT: warning mentions git add" "1" "$(printf '%s' "$OUT" | grep -c -i 'git add')"
+check "UNTRACKED-PRESENT: warning printed" "1" "$(printf '%s' "$LAST_OUT" | grep -c '^! Untracked')"
+check "UNTRACKED-PRESENT: warning names the file" "1" "$(printf '%s' "$LAST_OUT" | grep -c 'newfile.txt')"
+check "UNTRACKED-PRESENT: warning mentions git add" "1" "$(printf '%s' "$LAST_OUT" | grep -c -i 'git add')"
 
 # ─── UNTRACKED-ONLY: no tracked changes at all, only a new untracked file ───
 R=$(new_fixture untracked_only)
 echo "new" > "$R/newfile.txt"
 BEFORE_HEAD=$(git -C "$R" rev-parse HEAD)
-OUT=$( ( cd "$R" && bash "$PUSH_SH" ) 2>&1 )
-RC=$?
+run_push "$R"
 AFTER_HEAD=$(git -C "$R" rev-parse HEAD)
-check "UNTRACKED-ONLY: does not crash (exit 0)" "0" "$RC"
+check "UNTRACKED-ONLY: does not crash (exit 0)" "0" "$LAST_RC"
 check "UNTRACKED-ONLY: no new commit created (nothing staged)" "$BEFORE_HEAD" "$AFTER_HEAD"
-check "UNTRACKED-ONLY: warning still printed" "1" "$(printf '%s' "$OUT" | grep -c -i 'untracked')"
+check "UNTRACKED-ONLY: warning still printed" "1" "$(printf '%s' "$LAST_OUT" | grep -c '^! Untracked')"
 
 # ─── MULTIPLE UNTRACKED: warning lists all untracked files ──────────────────
 R=$(new_fixture multi_untracked)
 echo "changed" > "$R/base.txt"
 echo "a" > "$R/alpha.txt"
 echo "b" > "$R/beta.txt"
-OUT=$( ( cd "$R" && bash "$PUSH_SH" ) 2>&1 )
-RC=$?
-check "MULTIPLE UNTRACKED: does not crash (exit 0)" "0" "$RC"
-check "MULTIPLE UNTRACKED: alpha.txt named in warning" "1" "$(printf '%s' "$OUT" | grep -c 'alpha.txt')"
-check "MULTIPLE UNTRACKED: beta.txt named in warning" "1" "$(printf '%s' "$OUT" | grep -c 'beta.txt')"
+run_push "$R"
+check "MULTIPLE UNTRACKED: does not crash (exit 0)" "0" "$LAST_RC"
+check "MULTIPLE UNTRACKED: alpha.txt named in warning" "1" "$(printf '%s' "$LAST_OUT" | grep -c 'alpha.txt')"
+check "MULTIPLE UNTRACKED: beta.txt named in warning" "1" "$(printf '%s' "$LAST_OUT" | grep -c 'beta.txt')"
 
 # ─── PRE-STAGED NEW FILE: a new file already `git add`ed before push.sh runs ─
 # `git add -u` only touches already-tracked paths; a pre-staged new file has
@@ -121,14 +152,13 @@ R=$(new_fixture prestaged_new)
 BEFORE_HEAD=$(git -C "$R" rev-parse HEAD)
 echo "brand new" > "$R/prestaged.txt"
 git -C "$R" add prestaged.txt
-OUT=$( ( cd "$R" && bash "$PUSH_SH" ) 2>&1 )
-RC=$?
+run_push "$R"
 AFTER_HEAD=$(git -C "$R" rev-parse HEAD)
 committed_files=$(git -C "$R" show --name-only -1 --format="" HEAD 2>/dev/null)
-check "PRE-STAGED NEW FILE: does not crash (exit 0)" "0" "$RC"
+check "PRE-STAGED NEW FILE: does not crash (exit 0)" "0" "$LAST_RC"
 check "PRE-STAGED NEW FILE: HEAD advances (a new commit was made)" "1" "$([ "$BEFORE_HEAD" != "$AFTER_HEAD" ] && echo 1 || echo 0)"
 check "PRE-STAGED NEW FILE: the pre-staged file is committed" "1" "$(printf '%s' "$committed_files" | grep -c prestaged.txt)"
-check "PRE-STAGED NEW FILE: no untracked-file warning printed" "0" "$(printf '%s' "$OUT" | grep -c -i 'untracked')"
+check "PRE-STAGED NEW FILE: no untracked-file warning printed" "0" "$(printf '%s' "$LAST_OUT" | grep -c '^! Untracked')"
 
 # ─── DELETED TRACKED FILE: a tracked file removed from disk before push.sh runs ─
 # `git add -u` (unlike a bare `git add -A .` restricted to modified files)
@@ -141,27 +171,25 @@ git -C "$R" add todelete.txt
 git -C "$R" commit -q -m "add todelete.txt"
 BEFORE_HEAD=$(git -C "$R" rev-parse HEAD)
 rm "$R/todelete.txt"
-OUT=$( ( cd "$R" && bash "$PUSH_SH" ) 2>&1 )
-RC=$?
+run_push "$R"
 AFTER_HEAD=$(git -C "$R" rev-parse HEAD)
 committed_files=$(git -C "$R" show --name-only -1 --format="" HEAD 2>/dev/null)
-check "DELETED TRACKED FILE: does not crash (exit 0)" "0" "$RC"
+check "DELETED TRACKED FILE: does not crash (exit 0)" "0" "$LAST_RC"
 check "DELETED TRACKED FILE: HEAD advances (a new commit was made)" "1" "$([ "$BEFORE_HEAD" != "$AFTER_HEAD" ] && echo 1 || echo 0)"
 check "DELETED TRACKED FILE: the deletion is committed" "1" "$(printf '%s' "$committed_files" | grep -c todelete.txt)"
 check "DELETED TRACKED FILE: file absent from the resulting tree" "0" "$(git -C "$R" show HEAD:todelete.txt 2>/dev/null | wc -l | tr -d ' ')"
-check "DELETED TRACKED FILE: no untracked-file warning printed" "0" "$(printf '%s' "$OUT" | grep -c -i 'untracked')"
+check "DELETED TRACKED FILE: no untracked-file warning printed" "0" "$(printf '%s' "$LAST_OUT" | grep -c '^! Untracked')"
 
 # ─── NEGATIVE CONTROL: script no longer contains git add -A ─────────────────
 check "NEGATIVE CONTROL: push.sh contains zero 'git add -A'" "0" "$(grep -c 'git add -A' "$PUSH_SH")"
 check "NEGATIVE CONTROL: push.sh contains 'git add -u'" "1" "$(grep -c 'git add -u' "$PUSH_SH" | head -1)"
 
 # ─── --force-with-lease flag: opt-in gated push ──────────────────────────────
-# The real network push cannot be exercised here (the fixture's origin is a
-# fake unreachable URL) — these checks instead assert on the git command
-# push.sh SELECTS based on the flag, via a stub `git` shim placed first on
-# PATH that records its own argv instead of touching the network. This
-# isolates "did push.sh choose --force-with-lease" from "did the push
-# actually succeed," which the fixture cannot exercise anyway.
+# The fixture's origin is now a genuinely reachable local bare repo, so these
+# checks assert on the git command push.sh SELECTS based on the flag, via a
+# stub `git` shim placed first on PATH that records its own argv and then
+# delegates to the real git — this isolates "did push.sh choose
+# --force-with-lease" from the push's actual success/failure.
 STUB_BIN="$TMP/stubbin"
 mkdir -p "$STUB_BIN"
 # Resolved OUTSIDE the stub (before $STUB_BIN is on PATH) — resolving it
@@ -172,30 +200,20 @@ mkdir -p "$STUB_BIN"
 REAL_GIT_PATH=$(command -v git)
 cat > "$STUB_BIN/git" <<EOF
 #!/bin/bash
-# Records argv for any \`git push\` call, then fails it (matching every other
-# fixture's convention: the fake unreachable origin makes the real push fail,
-# which under push.sh's \`set -euo pipefail\` aborts the script right there —
-# before the later \`gh pr\` calls that would otherwise hit the real network
-# and hang). Delegates to the real git for everything else so push.sh's
-# earlier commit/status steps still work.
+# Records argv for any \`git push\` call, then delegates to the real git so
+# the push actually happens against the fixture's real local bare origin.
 if [[ "\$1" == "push" ]]; then
   echo "\$*" >> "\$GIT_PUSH_LOG"
-  exit 1
 fi
 exec "$REAL_GIT_PATH" "\$@"
 EOF
 chmod +x "$STUB_BIN/git"
 
-# Note: push.sh's push line pipes through `| grep -v '^remote:' || true`
-# (scripts/push.sh), which swallows the stub's exit 1 — push.sh proceeds
-# past the push step regardless (pre-existing behaviour, out of scope for
-# this change), so exit code is not a meaningful signal here. The check that
-# matters is which argv the stub git recorded.
 R=$(new_fixture force_with_lease_flag)
 echo "changed" > "$R/base.txt"
 GIT_PUSH_LOG="$TMP/force_with_lease_flag/push.log"
 : > "$GIT_PUSH_LOG"
-( cd "$R" && PATH="$STUB_BIN:$PATH" GIT_PUSH_LOG="$GIT_PUSH_LOG" bash "$PUSH_SH" --force-with-lease "msg" ) >/dev/null 2>&1
+( cd "$R" && PATH="$STUB_BIN:$GH_STUB_DIR:$PATH" GIT_PUSH_LOG="$GIT_PUSH_LOG" bash "$PUSH_SH" --force-with-lease "msg" ) >/dev/null 2>&1
 logged=$(cat "$GIT_PUSH_LOG" 2>/dev/null || true)
 check "FLAG: git push invoked with --force-with-lease" "1" "$(printf '%s' "$logged" | grep -c -- '--force-with-lease')"
 
@@ -203,9 +221,89 @@ R=$(new_fixture no_flag)
 echo "changed" > "$R/base.txt"
 GIT_PUSH_LOG="$TMP/no_flag/push.log"
 : > "$GIT_PUSH_LOG"
-( cd "$R" && PATH="$STUB_BIN:$PATH" GIT_PUSH_LOG="$GIT_PUSH_LOG" bash "$PUSH_SH" "msg" ) >/dev/null 2>&1
+( cd "$R" && PATH="$STUB_BIN:$GH_STUB_DIR:$PATH" GIT_PUSH_LOG="$GIT_PUSH_LOG" bash "$PUSH_SH" "msg" ) >/dev/null 2>&1
 logged=$(cat "$GIT_PUSH_LOG" 2>/dev/null || true)
 check "NO FLAG: git push invoked WITHOUT --force-with-lease" "0" "$(printf '%s' "$logged" | grep -c -- '--force-with-lease')"
+
+# ══════════════════════════════════════════════════════════════════════════
+# ─── REJECTED PUSH: real non-fast-forward rejection must NOT report success ─
+# ══════════════════════════════════════════════════════════════════════════
+# Simulates a second clone pushing to the same feature branch first, so our
+# clone's push is a genuine non-fast-forward rejection from a real git
+# server (the fixture's bare repo) — not a stubbed/simulated failure. Before
+# the fix, push.sh piped `git push` through `grep -v '^remote:' || true`,
+# which discarded git's real exit status and unconditionally printed
+# "Pushed". After the fix, a rejected push must exit non-zero, must NOT
+# print "Pushed", and the real git error text must reach the user.
+R=$(new_fixture rejected_push)
+OTHER="$TMP/rejected_push/other"
+ORIGIN_BARE="$TMP/rejected_push/origin.git"
+git clone -q "$ORIGIN_BARE" "$OTHER" 2>/dev/null
+git -C "$OTHER" config user.email o@o.o; git -C "$OTHER" config user.name other
+git -C "$OTHER" checkout -q -b feature
+echo "other change" > "$OTHER/other.txt"
+git -C "$OTHER" add other.txt
+git -C "$OTHER" commit -q -m "other commit"
+git -C "$OTHER" push -q -u origin feature
+
+BEFORE_HEAD=$(git -C "$R" rev-parse HEAD)
+echo "changed" > "$R/base.txt"
+run_push "$R"
+check "REJECTED PUSH: exits non-zero" "1" "$([ "$LAST_RC" -ne 0 ] && echo 1 || echo 0)"
+check "REJECTED PUSH: does NOT print 'Pushed'" "0" "$(printf '%s' "$LAST_OUT" | grep -c 'Pushed')"
+check "REJECTED PUSH: real rejection text reaches the user" "1" "$(printf '%s' "$LAST_OUT" | grep -q 'rejected' && echo 1 || echo 0)"
+check "REJECTED PUSH: a failure is reported" "1" "$(printf '%s' "$LAST_OUT" | grep -q -i 'fail\|error\|✗' && echo 1 || echo 0)"
+check "REJECTED PUSH: local commit still happened (commit step is independent of push outcome)" "1" "$([ "$BEFORE_HEAD" != "$(git -C "$R" rev-parse HEAD)" ] && echo 1 || echo 0)"
+
+# ══════════════════════════════════════════════════════════════════════════
+# ─── ALL-REMOTE-LINES SUCCESS: false-negative guard ─────────────────────────
+# ══════════════════════════════════════════════════════════════════════════
+# A successful push whose entire stderr/stdout output consists of `remote:`
+# lines must still be treated as success and still print "Pushed". This
+# guards against a fix that determines success/failure by checking whether
+# `grep -v '^remote:'` produced any output — under `set -o pipefail`, a
+# real push whose only lines start with `remote:` makes that grep exit 1
+# (nothing matched), which must NOT be mistaken for a git-push failure.
+# A `git` stub that delegates the real push, then rewrites the *displayed*
+# output only, is used so status capture is independent of display filtering.
+STUB_BIN2="$TMP/stubbin2"
+mkdir -p "$STUB_BIN2"
+cat > "$STUB_BIN2/git" <<EOF
+#!/bin/bash
+if [[ "\$1" == "push" ]]; then
+  shift
+  "$REAL_GIT_PATH" push "\$@" >/tmp/.push_out_\$\$ 2>&1
+  rc=\$?
+  printf 'remote: %s\n' "ok"
+  printf 'remote: %s\n' "more remote output"
+  rm -f /tmp/.push_out_\$\$
+  exit \$rc
+fi
+exec "$REAL_GIT_PATH" "\$@"
+EOF
+chmod +x "$STUB_BIN2/git"
+
+R=$(new_fixture all_remote_lines)
+echo "changed" > "$R/base.txt"
+BEFORE_HEAD=$(git -C "$R" rev-parse HEAD)
+OUT=$( (cd "$R" && PATH="$STUB_BIN2:$GH_STUB_DIR:$PATH" bash "$PUSH_SH") 2>&1 )
+RC=$?
+AFTER_HEAD=$(git -C "$R" rev-parse HEAD)
+check "ALL-REMOTE-LINES: still exits 0 (false-negative guard)" "0" "$RC"
+check "ALL-REMOTE-LINES: still prints 'Pushed'" "1" "$(printf '%s' "$OUT" | grep -c 'Pushed')"
+check "ALL-REMOTE-LINES: push actually landed (origin/feature == HEAD)" "$AFTER_HEAD" "$(git -C "$R" rev-parse origin/feature)"
+
+# ══════════════════════════════════════════════════════════════════════════
+# ─── POSITIVE VERIFICATION: origin/$br must equal local HEAD after success ──
+# ══════════════════════════════════════════════════════════════════════════
+# On an ordinary successful push (no stubs at all — the real git binary),
+# origin/<branch> must equal local HEAD by the time push.sh prints "Pushed".
+R=$(new_fixture verify_landed)
+echo "changed" > "$R/base.txt"
+run_push "$R"
+check "VERIFY-LANDED: exits 0" "0" "$LAST_RC"
+check "VERIFY-LANDED: prints 'Pushed'" "1" "$(printf '%s' "$LAST_OUT" | grep -c 'Pushed')"
+check "VERIFY-LANDED: origin/feature == local HEAD" "$(git -C "$R" rev-parse HEAD)" "$(git -C "$R" rev-parse origin/feature)"
 
 printf '\n--- push_staging.test.sh: %d failing checks ---\n' "$fails"
 [ "$fails" -eq 0 ] && exit 0 || exit 1
