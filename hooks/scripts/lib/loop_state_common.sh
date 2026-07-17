@@ -38,6 +38,29 @@ als_log() {
   { printf '%s %s\n' "$(date -Iseconds 2>/dev/null || date +%Y-%m-%dT%H:%M:%S%z)" "$msg" >> "$LOG_FILE"; } 2>/dev/null
 }
 
+# Shared accumulator for the `complete`-only systemMessage: als_gate_proofs_on_complete
+# (withdrawn_proofs) and als_report_cost_on_complete (cost) both run in the
+# SAME loop_stall_guard.sh hook invocation and each has its own reason to
+# tell the human something. Each top-level JSON object is only valid as its
+# OWN document under a whole-buffer JSON parse — two of them concatenated on
+# one hook's stdout is not one valid document — so neither function may emit
+# its own {systemMessage:...} directly. Both append their text here instead;
+# the call site (loop_stall_guard.sh, after both gates have run) emits ONE
+# jq -n '{systemMessage:...}' from the final accumulated value. GLOBAL, not
+# local: it must survive past either function's own return so the call site
+# can read it once both have had their chance to append.
+ALS_PENDING_SYSMSG=""
+als_append_pending_sysmsg() { # text -> appends to $ALS_PENDING_SYSMSG (newline-joined if non-empty)
+  local text="$1"
+  [ -n "$text" ] || return 0
+  if [ -n "$ALS_PENDING_SYSMSG" ]; then
+    ALS_PENDING_SYSMSG="${ALS_PENDING_SYSMSG}
+${text}"
+  else
+    ALS_PENDING_SYSMSG="$text"
+  fi
+}
+
 # Sanitise a session_id extracted from the Stop-hook JSON payload. If the
 # payload's session_id is missing/null, the jq extraction below falls back to
 # the literal "?" — a FIXED sentinel that would make every malformed-payload
@@ -1032,15 +1055,14 @@ not also appear in .proofs." >&2
   # $offenders, is fail-CLOSED like every sibling check in this function — a
   # withdrawal that didn't run-and-fail, or carries an empty reason/cmd, or
   # double-dips against .proofs, blocks exit 2 same as an unproven .proofs
-  # entry. Only this final message EMISSION inherits the cost-reporter's
-  # never-block posture (als_report_cost_on_complete's header above explains
-  # why: a reporting failure must never re-block an already-validated,
-  # already-passed gate). Do not let "never block" leak upward into the
-  # validation logic above this line — only the jq formatting/echo below is
-  # allowed to fail silently.
+  # entry. Only this final message ACCUMULATION (via als_append_pending_sysmsg,
+  # see its header for why this function does not emit its own JSON directly)
+  # inherits the cost-reporter's never-block posture — a reporting failure
+  # must never re-block an already-validated, already-passed gate. Do not let
+  # "never block" leak upward into the validation logic above this line —
+  # only the append below is allowed to fail silently.
   if [ -n "$withdrawn_ok" ]; then
-    local wmsg="Withdrawn proofs: $withdrawn_ok"
-    jq -n --arg m "$wmsg" '{systemMessage: $m}' 2>/dev/null
+    als_append_pending_sysmsg "Withdrawn proofs: $withdrawn_ok"
   fi
 }
 
@@ -1185,7 +1207,7 @@ als_report_cost_on_complete() {
           fi
           msg="cost recorded but incomplete (missing ${missing})"
           als_log "hook=$hook session=$session cost_report=cost_incomplete"
-          jq -n --arg m "$msg" '{systemMessage: $m}' 2>/dev/null
+          als_append_pending_sysmsg "$msg"
           return 0
         fi
         # Staleness age. WARNS inline, never blocks: a stale price table means
@@ -1286,6 +1308,6 @@ als_report_cost_on_complete() {
     "cost recorded but incomplete"*) outcome="cost_incomplete" ;;
   esac
   als_log "hook=$hook session=$session cost_report=$outcome"
-  jq -n --arg m "$msg" '{systemMessage: $m}' 2>/dev/null
+  als_append_pending_sysmsg "$msg"
   return 0
 }

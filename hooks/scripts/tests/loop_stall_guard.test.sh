@@ -1337,6 +1337,50 @@ wmsg=$(system_message "$STDOUT_OUT")
 case "$wmsg" in *"W1"*) w1_named=1 ;; *) w1_named=0 ;; esac
 check "withdrawn: systemMessage names W1" 1 "$w1_named"
 
+# STRICT SINGLE-JSON-DOCUMENT ORACLE — the whole point of the accumulator
+# fix. `jq -r '.systemMessage'` (system_message() above) is LENIENT: fed
+# two concatenated top-level JSON objects, it happily prints both values and
+# exits 0, so a test built only on system_message() would go green even if
+# als_gate_proofs_on_complete and als_report_cost_on_complete each emitted
+# their own {systemMessage:...} directly (the exact bug the accumulator
+# exists to prevent). `jq -s 'length == 1'` is the discriminating check:
+# slurp mode turns N concatenated top-level values into an N-element array,
+# so two objects reads back length 2, not 1. This is the oracle that would
+# have caught the bug the lenient helper could not.
+#
+# Fixture: BOTH a valid withdrawal AND a populated schema_version>=2 cost
+# report fire in the SAME complete declaration — the real co-occurrence
+# case (see the 75fa2e68 worked example this gate formalises, where a loop's
+# proof.json carries withdrawn_proofs AND its retro.json carries a cost).
+# Before the accumulator fix, this exact fixture would have produced TWO
+# concatenated {systemMessage:...} objects on stdout.
+reset
+COMBINED_T=$(mk_complete_base)
+write_file in-progress S1 0
+write_retro S1 "$(jq -cn '{schema_version:2, cost:{total_usd_estimate:1.23, total_tokens:456, prices_as_of:"2026-07-01", per_model:{}}}')"
+write_proof_withdrawn S1 '[]' '[{"id":"W1","cmd":"echo combined-withdrawn-check","withdrawn_reason":"defective check, not the code"}]'
+append_bash_call "$COMBINED_T" "echo combined-withdrawn-check" true
+append_complete_declaration "$COMBINED_T"
+run_capture_stdout "$(payload "$COMBINED_T" S1)"
+check "withdrawn+cost combined: allow" 0 "$RC_OUT"
+combined_doc_count=$(printf '%s' "$STDOUT_OUT" | jq -s 'length' 2>/dev/null)
+check "withdrawn+cost combined: stdout is exactly ONE JSON document (jq -s length==1, the strict oracle)" 1 "$([ "$combined_doc_count" = "1" ] && echo 1 || echo 0)"
+combined_msg=$(system_message "$STDOUT_OUT")
+case "$combined_msg" in *"W1"*) combined_w1=1 ;; *) combined_w1=0 ;; esac
+check "withdrawn+cost combined: the single systemMessage still names W1" 1 "$combined_w1"
+case "$combined_msg" in *"1.23"*) combined_usd=1 ;; *) combined_usd=0 ;; esac
+check "withdrawn+cost combined: the single systemMessage still carries the USD figure" 1 "$combined_usd"
+
+# NEGATIVE CONTROL for the oracle itself: prove `jq -s 'length==1'` actually
+# discriminates by feeding it the OLD (pre-fix) shape directly — two
+# hand-built top-level JSON objects concatenated, exactly what the two
+# functions would have produced had they each emitted independently. This
+# must FAIL the length==1 check, or the oracle above is not testing anything.
+fake_concatenated_stdout='{"systemMessage":"Withdrawn proofs: W1: defective"}
+{"systemMessage":"Loop cost: $1.23 (456 tokens)"}'
+fake_doc_count=$(printf '%s' "$fake_concatenated_stdout" | jq -s 'length' 2>/dev/null)
+check "oracle negative control: two concatenated objects -> jq -s length is 2, NOT 1 (proves the oracle discriminates)" 1 "$([ "$fake_doc_count" = "2" ] && echo 1 || echo 0)"
+
 # (a) withdrawn cmd never executed -> BLOCK.
 proof_fixture_reset S1
 write_proof_withdrawn S1 '[]' '[{"id":"W1","cmd":"echo never-ran-withdrawn","withdrawn_reason":"defective check"}]'
