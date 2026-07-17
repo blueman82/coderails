@@ -413,8 +413,11 @@ level and is unchanged by this routine.
 - [`skills/memory-consolidation/SKILL.md`](../skills/memory-consolidation/SKILL.md)
   — one of the five shipped routines; a good template for a routine
   whose own skill writes its artifact-gate report natively.
+- [`skills/docs-sync/SKILL.md`](../skills/docs-sync/SKILL.md)
+  — the fourth shipped routine; self-merging, docs-only, manifest-locked,
+  see the dedicated section above.
 - [`skills/loop-retro-promotion/SKILL.md`](../skills/loop-retro-promotion/SKILL.md)
-  — the fourth shipped routine; dormant by default, see the
+  — the fifth shipped routine; dormant by default, see the
   dedicated section above for its graduation predicate and security
   posture.
 - [`examples/dashboard-config.json`](../examples/dashboard-config.json)
