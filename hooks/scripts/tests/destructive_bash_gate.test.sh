@@ -103,45 +103,48 @@ assert_specific_route() { # description command must_contain...
 
 # find -delete: no safe equivalent to deletion itself — honest route points at
 # previewing the match set first and at the settings.json escape hatch.
+# Needles are specific to THIS route's own wording (not just the shared
+# "no safe equivalent"/"settings.json" phrases every honest route repeats) so
+# a copy-paste-wrong route swapped in from a different pattern still fails.
 assert_specific_route "find -delete message names -print preview + settings.json route" \
-  "find . -name '*.tmp' -delete" "print" "settings.json"
+  "find . -name '*.tmp' -delete" "no safe equivalent" "-print" "xargs" "settings.json"
 
 # truncate -s/--size: destroys file content, no safe equivalent — honest route.
 assert_specific_route "truncate -s message names no-safe-equivalent + settings.json route" \
-  "truncate -s0 logfile.txt" "no safe equivalent" "settings.json"
+  "truncate -s0 logfile.txt" "no safe equivalent" "file content in place" "rotate the log" "settings.json"
 
 # shred: secure overwrite/delete is the point of the command — no safe
 # equivalent — honest route.
 assert_specific_route "shred message names no-safe-equivalent + settings.json route" \
-  "shred secret.key" "no safe equivalent" "settings.json"
+  "shred secret.key" "no safe equivalent" "unrecoverable" "securely wipe" "settings.json"
 
 # DROP TABLE/DATABASE/SCHEMA: destructive DDL, no safe equivalent — honest route.
 assert_specific_route "DROP TABLE message names no-safe-equivalent + settings.json route" \
-  "DROP TABLE users;" "no safe equivalent" "settings.json"
+  "DROP TABLE users;" "no safe equivalent" "destructive ddl" "settings.json"
 assert_specific_route "DROP DATABASE message names no-safe-equivalent + settings.json route" \
-  "DROP DATABASE mydb;" "no safe equivalent" "settings.json"
+  "DROP DATABASE mydb;" "no safe equivalent" "destructive ddl" "settings.json"
 assert_specific_route "DROP SCHEMA message names no-safe-equivalent + settings.json route" \
-  "DROP SCHEMA public CASCADE;" "no safe equivalent" "settings.json"
+  "DROP SCHEMA public CASCADE;" "no safe equivalent" "destructive ddl" "settings.json"
 
 # TRUNCATE TABLE: destroys all rows, no safe equivalent — honest route.
 assert_specific_route "TRUNCATE TABLE message names no-safe-equivalent + settings.json route" \
-  "TRUNCATE TABLE logs;" "no safe equivalent" "settings.json"
+  "TRUNCATE TABLE logs;" "no safe equivalent" "removes all rows" "scoped delete" "settings.json"
 
 # dd if=: raw block-device copy, no safe equivalent — honest route.
 assert_specific_route "dd if= message names no-safe-equivalent + settings.json route" \
-  "dd if=/dev/zero of=/dev/sda" "no safe equivalent" "settings.json"
+  "dd if=/dev/zero of=/dev/sda" "no safe equivalent" "raw bytes" "of= target" "settings.json"
 
 # mkfs.: reformats a filesystem, no safe equivalent — honest route.
 assert_specific_route "mkfs. message names no-safe-equivalent + settings.json route" \
-  "mkfs.ext4 /dev/sdb1" "no safe equivalent" "settings.json"
+  "mkfs.ext4 /dev/sdb1" "no safe equivalent" "reformats a filesystem" "settings.json"
 
 # chmod -R 777: genuine safer alternative exists — narrower recursive bits.
 assert_specific_route "chmod -R 777 message names narrower-permission route" \
-  "chmod -R 777 /var/www" "u+rwx" "go+rx"
+  "chmod -R 777 /var/www" "u+rwx" "go+rx" "world-writable"
 
 # git commit --no-verify: genuine safe alternative — fix the failing hook.
 assert_specific_route "git commit --no-verify message names fix-the-hook route" \
-  "git commit -m 'wip' --no-verify" "fix"
+  "git commit -m 'wip' --no-verify" "fix the failing pre-commit hook" "don't skip it"
 
 # --- Allowed commands ---
 check "ls -> allow"                 ALLOW "$(run "$(payload "ls -la")")"
