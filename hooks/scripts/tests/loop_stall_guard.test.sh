@@ -1273,6 +1273,124 @@ case "$STDERR_OUT" in *"P1"*"unexecuted"*) p1_named=1 ;; *) p1_named=0 ;; esac
 check "proof: tool_result missing .tool_use_id -> stderr names P1(unexecuted)" 1 "$p1_named"
 
 # =====================================================================
+# proof_disposition — disposition-gated absence. Grandfathered on
+# progress.json's OWN schema_version (< 2, absent, or non-numeric keeps the
+# pre-existing fail-open-on-absent-proof.json behaviour untouched); at
+# schema_version >= 2, an absent proof.json now requires a recorded
+# proof_disposition ("none: <reason>" allows, anything else or absent/null
+# blocks) — see als_gate_proofs_on_complete's own header for the full
+# rationale. write_progress_raw writes progress.json VERBATIM (mirrors
+# write_proof_raw's idiom) so these fixtures can set schema_version and
+# proof_disposition independently of write_file's hardcoded schema_version:1.
+write_progress_raw() { # session_id raw_content -> writes progress.json verbatim
+  local dir; dir=$(file_dir "$1")
+  mkdir -p "$dir"
+  printf '%s' "$2" > "$dir/progress.json"
+}
+# Direct-call harness, same shape as proof_gate_direct above: isolates the
+# assertion to als_gate_proofs_on_complete alone, independent of the retro/
+# work_units gates that would otherwise also need satisfying via the full
+# loop_stall_guard.sh pipeline for a bare "complete" declaration.
+proof_disposition_gate_direct() { # session_id proof_dir transcript -> exit code
+  (
+    . "$(cd "$(dirname "$0")/.." && pwd)/lib/loop_state_common.sh"
+    ALS_PATH="$2/progress.json"
+    als_gate_proofs_on_complete complete loop_stall_guard "$1" "$3"
+  )
+  echo $?
+}
+EMPTY_T="$TMP/pd_empty_${RANDOM}.jsonl"; : > "$EMPTY_T"
+
+# (A) schema_version:2, proof.json absent, proof_disposition absent -> BLOCK.
+# The core fix: silent skip becomes impossible once a loop opts into the new
+# progress.json schema. Verified at freeze time against the UNMODIFIED gate
+# on origin/main@024f393 that this exact fixture returns 0 (fail-open, the
+# bug this case exists to close) — see wu2-evals.json assertion A's
+# negative_control.
+reset
+write_progress_raw S1 '{"schema_version":2,"session_id":"S1","status":"in-progress"}'
+check "proof_disposition: schema_version 2, no proof.json, no disposition -> block (core fix)" \
+  2 "$(proof_disposition_gate_direct S1 "$(file_dir S1)" "$EMPTY_T")"
+
+# (A2) schema_version:2, proof.json absent, proof_disposition:null (explicit
+# JSON null, not merely absent) -> BLOCK, same as absent.
+reset
+write_progress_raw S1 '{"schema_version":2,"session_id":"S1","status":"in-progress","proof_disposition":null}'
+check "proof_disposition: schema_version 2, no proof.json, disposition explicit null -> block" \
+  2 "$(proof_disposition_gate_direct S1 "$(file_dir S1)" "$EMPTY_T")"
+
+# (A3) schema_version:2, proof.json absent, proof_disposition is a non-none,
+# non-empty string ("frozen") -> BLOCK. A disposition value that is not
+# "none: ..." promises a proof.json that isn't there.
+reset
+write_progress_raw S1 '{"schema_version":2,"session_id":"S1","status":"in-progress","proof_disposition":"frozen"}'
+check "proof_disposition: schema_version 2, no proof.json, disposition=frozen -> block" \
+  2 "$(proof_disposition_gate_direct S1 "$(file_dir S1)" "$EMPTY_T")"
+
+# (B) schema_version:2, proof.json absent, proof_disposition starts with
+# "none" -> ALLOW. A recorded, visible decision to skip is permitted.
+reset
+write_progress_raw S1 '{"schema_version":2,"session_id":"S1","status":"in-progress","proof_disposition":"none: no executable surface"}'
+check "proof_disposition: schema_version 2, no proof.json, disposition=none:<reason> -> allow" \
+  0 "$(proof_disposition_gate_direct S1 "$(file_dir S1)" "$EMPTY_T")"
+
+# (B2) exact-string "none" (no colon/reason) also allows -- "starts with
+# none" is the rule, not "matches the none:<reason> shape exactly".
+reset
+write_progress_raw S1 '{"schema_version":2,"session_id":"S1","status":"in-progress","proof_disposition":"none"}'
+check "proof_disposition: schema_version 2, no proof.json, disposition=\"none\" bare -> allow" \
+  0 "$(proof_disposition_gate_direct S1 "$(file_dir S1)" "$EMPTY_T")"
+
+# (C) grandfathering: schema_version 1 / absent / non-numeric, proof.json
+# absent, no proof_disposition -> ALLOW, preserving the pre-existing
+# behaviour for every progress.json written before this change, including
+# live sibling loops mid-flight right now.
+reset
+write_progress_raw S1 '{"schema_version":1,"session_id":"S1","status":"in-progress"}'
+check "proof_disposition: grandfathered schema_version 1, no proof.json -> allow (compat)" \
+  0 "$(proof_disposition_gate_direct S1 "$(file_dir S1)" "$EMPTY_T")"
+
+reset
+write_progress_raw S1 '{"session_id":"S1","status":"in-progress"}'
+check "proof_disposition: grandfathered (schema_version key absent entirely), no proof.json -> allow (compat)" \
+  0 "$(proof_disposition_gate_direct S1 "$(file_dir S1)" "$EMPTY_T")"
+
+reset
+write_progress_raw S1 '{"schema_version":"x","session_id":"S1","status":"in-progress"}'
+check "proof_disposition: grandfathered (schema_version non-numeric), no proof.json -> allow (compat)" \
+  0 "$(proof_disposition_gate_direct S1 "$(file_dir S1)" "$EMPTY_T")"
+
+# Same three grandfather fixtures, but re-run with schema_version forced to 2
+# and no disposition, to prove the grandfathering is keyed on the
+# schema_version threshold and not on some other property (e.g. a missing
+# work_units field) shared by these minimal fixtures.
+reset
+write_progress_raw S1 '{"schema_version":2,"session_id":"S1","status":"in-progress"}'
+check "proof_disposition: same minimal fixture but schema_version 2 -> block (not grandfathered)" \
+  2 "$(proof_disposition_gate_direct S1 "$(file_dir S1)" "$EMPTY_T")"
+
+# (D) proof.json PRESENT overrides everything above: existing
+# validation/execution-mining behaviour is completely unchanged by this fix,
+# regardless of schema_version or proof_disposition (even a self-contradictory
+# proof_disposition:"none: x" sitting beside an actual proof.json).
+reset
+dir=$(file_dir S1); mkdir -p "$dir"
+write_progress_raw S1 '{"schema_version":2,"session_id":"S1","status":"in-progress","proof_disposition":"none: x"}'
+printf '{"schema_version":1,"proofs":[{"id":"P1","cmd":"echo d-satisfied"}]}' > "$dir/proof.json"
+D_T="$TMP/pd_d_${RANDOM}.jsonl"; : > "$D_T"
+append_bash_call "$D_T" "echo d-satisfied" false
+check "proof_disposition: proof.json present + satisfied, disposition=none (contradictory) -> allow (file wins)" \
+  0 "$(proof_disposition_gate_direct S1 "$dir" "$D_T")"
+
+reset
+dir=$(file_dir S1); mkdir -p "$dir"
+write_progress_raw S1 '{"schema_version":2,"session_id":"S1","status":"in-progress","proof_disposition":"none: x"}'
+printf '{"schema_version":1,"proofs":[{"id":"P1","cmd":"echo d-unsatisfied"}]}' > "$dir/proof.json"
+D_T2="$TMP/pd_d2_${RANDOM}.jsonl"; : > "$D_T2"
+check "proof_disposition: proof.json present + UNSATISFIED, disposition=none -> block (presence still fully verifies)" \
+  2 "$(proof_disposition_gate_direct S1 "$dir" "$D_T2")"
+
+# =====================================================================
 # Hardening: bg-exclusion polarity flip. run_in_background must be EXACTLY
 # `false` (or absent, defaulting to false) to count as foreground; any
 # truthy-ish value, INCLUDING a schema-dodging STRING "true", now excludes
