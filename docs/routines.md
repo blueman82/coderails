@@ -3,7 +3,7 @@
 A **routine** is a scheduled skill run that isn't considered done just
 because `claude` exited 0. It's done when a specific artifact exists,
 is fresh enough, and satisfies a predicate — the **artifact gate**. Five
-routines ship today: `wiki-lint` (nightly), `sync-docs-weekly` (weekly),
+routines ship today: `wiki-lint` (nightly), `docs-sync-nightly` (nightly),
 `memory-consolidation-weekly` (weekly), `loop-retro-promotion-weekly`
 (weekly), `workflow-audit-weekly` (weekly).
 
