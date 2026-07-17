@@ -258,6 +258,19 @@ the expected steady state for a long while after this routine ships, not
 a failure, and the routine shouldn't escalate every week just because the
 graduation bar hasn't been met yet.
 
+**Its full self-merge chain has never actually fired.** As of this
+writing `promotion-runs.log` holds exactly one line
+(`2026-07-12T23:32:06Z predicate=unmet retros=14 lifecycle=1 decay=0`)
+— the predicate has stayed unmet since this routine shipped, so it has
+never gone past step 1 to open, review, or merge a PR headlessly.
+`docs-sync-nightly` (above) follows this routine's pattern — same
+gate-chain shape, same manifest-lock idea — but that makes
+`docs-sync-nightly` the **first** actual production exercise of the
+full headless chain (task-evals → push → review-pr → post-review →
+post-evals → merge inside one `claude -p` run), not a repeat of a
+proven path. Treat the pattern as sound by construction, not as
+battle-tested.
+
 **Security note.** This was the first routine in this repo to use a
 non-`read-only` button profile (`bypass`, i.e.
 `--dangerously-skip-permissions` — see the security warning below);
