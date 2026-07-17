@@ -174,12 +174,47 @@ WORKTREE_PATH=$(git rev-parse --show-toplevel)
 
 **If worktree path is under `.worktrees/` or `worktrees/`:** Coderails created this worktree — we own cleanup.
 
+**Check lock state before removing** — a worktree can be locked (e.g. by the
+harness, to protect a live session using it):
+
 ```bash
 MAIN_ROOT=$(git -C "$(git rev-parse --git-common-dir)/.." rev-parse --show-toplevel)
 cd "$MAIN_ROOT"
+LOCK_REASON=$(git worktree list --porcelain | awk -v p="$WORKTREE_PATH" '
+  $0 == "worktree " p { f=1; next }
+  f && /^locked / { sub(/^locked /, ""); print; exit }
+  f && /^worktree / { exit }
+')
+```
+
+**Not locked (`LOCK_REASON` empty):** Remove normally.
+
+```bash
 git worktree remove "$WORKTREE_PATH"
 git worktree prune  # Self-healing: clean up any stale registrations
 ```
+
+**Locked:** Parse a pid out of the reason string (harness-written lock
+reasons look like `claude session <name> (pid NNNNN start <date>)`) and
+check whether that process is alive:
+
+```bash
+LOCK_PID=$(echo "$LOCK_REASON" | grep -oE '\(pid [0-9]+ ' | grep -oE '[0-9]+')
+if [ -z "$LOCK_PID" ]; then
+  echo "Worktree $WORKTREE_PATH is locked with no parseable pid (reason: $LOCK_REASON) — leaving in place, not removing."
+elif kill -0 "$LOCK_PID" 2>/dev/null; then
+  echo "Worktree $WORKTREE_PATH is locked by live pid $LOCK_PID (reason: $LOCK_REASON) — deferred until that session ends, not removing."
+else
+  echo "Worktree $WORKTREE_PATH is locked by stale pid $LOCK_PID (dead) — clearing lock and removing."
+  git worktree unlock "$WORKTREE_PATH"
+  git worktree remove "$WORKTREE_PATH"
+  git worktree prune
+fi
+```
+
+**Never force-remove a lock you can't attribute to a dead pid.** No
+parseable pid and a live pid both mean: report and leave the worktree
+alone. Only a confirmed-dead pid clears the lock.
 
 **Otherwise:** The host environment (harness) owns this workspace. Do NOT remove it. If your platform provides a workspace-exit tool, use it. Otherwise, leave the workspace in place.
 
