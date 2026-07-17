@@ -61,18 +61,21 @@ not validated by `post_evals.sh`; include it verbatim for human context. The
 prose summary itself is deliberately not grammar-gated: the JSON's structural
 guarantees (checks 1-7 in `post_evals::validate_structure`) are what the merge
 gate relies on, not the wording of this comment body. Prepend the marker,
-append the full `evals.json` as a fenced ```json block, so the posted comment
-begins with the marker line and ends with the complete artifact — this is
-the embed a tier-review daemon extracts and judges (never hand-summarised;
-the raw file, verbatim):
+append the full `evals.json` as a fenced JSON code block, so the posted
+comment begins with the marker line and ends with the complete artifact —
+this is the embed a tier-review daemon extracts and judges (never
+hand-summarised; the raw file, verbatim). Use a `FENCE` variable rather than
+literal triple-backticks inside this script, since a literal fence would
+terminate this instruction's own surrounding code block:
 
 ```bash
+FENCE='```'
 {
   printf '%s\n' "$MARKER"
   cat /tmp/coderails-evals-summary-$$.md
-  printf '\n```json\n'
+  printf '\n%sjson\n' "$FENCE"
   cat <evals_json_path>
-  printf '\n```\n'
+  printf '\n%s\n' "$FENCE"
 } > /tmp/coderails-evals-body-$$.md
 ```
 
