@@ -107,6 +107,7 @@ GO requires all P0 evals to pass. P1 failures don't block the gate but must be l
       "assert": "<one-line goal-state assertion>",
       "cmd": "<command, scripted mode>",
       "negative_control": "<command proving the check can fail — required, scripted mode>",
+      "fixtures": "<OPTIONAL, scripted mode only: {good, bad, formula?} — see 'Discriminating-check gate' above. Absent = grandfathered, unvalidated by that gate>",
       "status": "pending | pass | fail",
       "evidence": "<command + exit code + output excerpt>"
     }
