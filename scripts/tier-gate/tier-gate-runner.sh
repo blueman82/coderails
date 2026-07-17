@@ -279,20 +279,24 @@ tg_judge_read_api_key() {
     printf '%s' "$key"
 }
 
-# tg_judge_build_prompt <evals_json> <filelist> <diffstat>
-# Echoes judge-prompt.md with the three blind-input placeholders substituted.
-# Uses awk (not sed) so embedded JSON braces/quotes in evals_json never
-# collide with sed's delimiter or backreference syntax.
+# tg_judge_build_prompt <claimed_tier> <diff>
+# Echoes the static judge-prompt.md instructions followed by the two blind
+# inputs, joined by plain concatenation (printf, never substitution into the
+# template). This is the injection fix, not a mitigation on top of the old
+# mechanism: judge-prompt.md carries no placeholders at all (verified by
+# J13), so there is no template-substitution step left for a `&` in the
+# replacement or an embedded fence/heading in the diff to corrupt — nothing
+# here re-parses the diff text as anything other than an opaque data blob
+# appended after the instructions. tg_judge_call_api is what makes this safe
+# on the wire: it passes the resulting string to `jq --arg`, which JSON-
+# encodes it as a single string value, so it reaches the model as inert data
+# regardless of what markdown/JSON-looking content it contains.
 tg_judge_build_prompt() {
-    local evals_json="$1" filelist="$2" diffstat="$3"
-    awk -v evals="$evals_json" -v files="$filelist" -v diff="$diffstat" '
-        { line = $0
-          gsub(/__EVALS_JSON__/, evals, line)
-          gsub(/__FILELIST__/, files, line)
-          gsub(/__DIFFSTAT__/, diff, line)
-          print line
-        }
-    ' "$TIER_GATE_JUDGE_PROMPT_PATH"
+    local claimed_tier="$1" diff="$2"
+    local instructions
+    instructions=$(cat "$TIER_GATE_JUDGE_PROMPT_PATH")
+    printf '%s\n\n### Claimed tier\n\n%s\n\n### PR diff\n\n%s' \
+        "$instructions" "$claimed_tier" "$diff"
 }
 
 # tg_judge_call_api <api_key> <prompt_text>
@@ -301,6 +305,11 @@ tg_judge_build_prompt() {
 # pull the judge back into the agent's trust domain). Echoes the raw response
 # body; rc is curl's own exit code (0 on any HTTP response, including 4xx/5xx
 # bodies — HTTP-level failures are caught by the caller's JSON/verdict parse).
+# The request declares output_config.format (json_schema, Fix 4): the API
+# enforces the {verdict, reason} shape and the verdict enum server-side, so
+# tg_judge_parse_verdict's own enum check is a second, redundant guard rather
+# than the only one — a model that tried to return a fifth verdict value
+# would be rejected by the API itself before this ever ran.
 tg_judge_call_api() {
     local api_key="$1" prompt_text="$2"
     local body
@@ -308,7 +317,21 @@ tg_judge_call_api() {
         model: $model,
         max_tokens: 1024,
         temperature: 0,
-        messages: [{role: "user", content: $prompt}]
+        messages: [{role: "user", content: $prompt}],
+        output_config: {
+            format: {
+                type: "json_schema",
+                schema: {
+                    type: "object",
+                    properties: {
+                        verdict: {type: "string", enum: ["legitimate", "illegitimate", "insufficient"]},
+                        reason: {type: "string"}
+                    },
+                    required: ["verdict", "reason"],
+                    additionalProperties: false
+                }
+            }
+        }
     }')
     tg_with_watchdog "$TIER_GATE_WATCHDOG_TIMEOUT" -- \
         curl -sS --max-time "$TIER_GATE_WATCHDOG_TIMEOUT" \
@@ -323,7 +346,10 @@ tg_judge_call_api() {
 # Extracts {verdict, reason} from the Messages API response's first text
 # block and echoes "<verdict>\n<reason>". Returns 1 (caller retries) if the
 # response isn't valid JSON, has no text content block, or the inner JSON
-# doesn't parse to a recognised verdict.
+# doesn't parse to a recognised verdict. The verdict enum check here is a
+# second guard on top of the request's own output_config.format schema
+# (Fix 4) — belt-and-suspenders: an unparseable or off-enum response is
+# always rc 1 (error/block), never treated as a pass, however it arose.
 tg_judge_parse_verdict() {
     local response_body="$1"
     local inner_text
@@ -340,17 +366,20 @@ tg_judge_parse_verdict() {
     printf '%s\n%s' "$verdict" "$reason"
 }
 
-# tg_judge <evals_json> <filelist> <diffstat>
-# Contract (final, per plan Task 3): stdout `legitimate|illegitimate|insufficient`
-# on the first line followed by a one-paragraph reason, rc 0 on a completed
+# tg_judge <claimed_tier> <diff>
+# Contract (per Fix 1): stdout `legitimate|illegitimate|insufficient` on the
+# first line followed by a one-paragraph reason, rc 0 on a completed
 # judgement; rc 1 on API/parse/creds failure (caller posts `error`, never
 # `failure`). One retry on a malformed/unparseable response before giving up.
+# Takes ONLY the trusted claimed tier and the PR diff — never the
+# defendant's own evals.json/tier_justification prose (that channel is
+# deleted entirely, not sanitised; see judge-prompt.md's header comment).
 # Late-bound on purpose: bash resolves function calls at CALL time, so a test
 # that redefines tg_judge after sourcing this file transparently replaces
 # this implementation — no other code here needs to change (see Task 2's
 # tg_gate_pr tests, which redefine tg_judge and never reach this code path).
 tg_judge() {
-    local evals_json="$1" filelist="$2" diffstat="$3"
+    local claimed_tier="$1" diff="$2"
 
     local creds_path="${TIER_GATE_CREDS:-}"
     if [[ -z "$creds_path" ]]; then
@@ -361,7 +390,7 @@ tg_judge() {
     api_key=$(tg_judge_read_api_key "$creds_path") || return 1
 
     local prompt_text
-    prompt_text=$(tg_judge_build_prompt "$evals_json" "$filelist" "$diffstat")
+    prompt_text=$(tg_judge_build_prompt "$claimed_tier" "$diff")
 
     local attempt response parsed
     for attempt in 1 2; do
@@ -371,6 +400,84 @@ tg_judge() {
 
     printf 'tg_judge: error: API/parse failure after retry\n' >&2
     return 1
+}
+
+# ─── Pre-filter (Fix 2): mechanical size/path gate BEFORE any model call ────
+
+# TIER_GATE_MAX_FILES / TIER_GATE_MAX_LINES: the tier-0 size cap. Tier 0
+# MEANS "single work-unit" (skills/task-evals/SKILL.md's own predicate) —
+# a genuine single-work-unit diff is small. `diff > cap` is therefore NOT
+# tier 0 by definition, so oversize blocks outright; this can never produce
+# a permissive read (there is no "truncate and still judge" path — see
+# tg_gate_pr, which never calls tg_judge once the prefilter blocks).
+#
+# Calibrated against the two real-world dishonest tier-0 PRs this exists to
+# catch: PR #189 (205 lines / 1 file) and PR #191 (3 lines / 1 file). A
+# file-count-only check passes #189 outright (it's a single file) — the
+# LINE cap is what catches it. #191 is deliberately NOT caught here: at
+# 3 lines it is indistinguishable in size from a genuinely tiny honest
+# tier-0, so catching it is the model's job (content-based judgement), not
+# the pre-filter's (size-based judgement) — tuning the cap down to reach it
+# would block the large majority of honest tier-0s along with it.
+#
+# 80 lines: comfortably below 205 (so #189 blocks with margin, not by a
+# hair) and comfortably above what a single self-contained work-unit
+# realistically spans in a bugfix/small-feature diff in this repo (see the
+# existing tier-0 predicate's own "single work-unit" framing) — high enough
+# that a real one-file-one-function honest tier-0 clears it without needing
+# per-PR tuning.
+TIER_GATE_MAX_FILES="${TIER_GATE_MAX_FILES:-3}"
+TIER_GATE_MAX_LINES="${TIER_GATE_MAX_LINES:-80}"
+
+# TIER_GATE_MAX_DIFF_BYTES: cap on the real diff content (Fix 3) fed to the
+# judge. Same fail-closed posture as the pre-filter — over-cap blocks
+# outright, never truncates-and-judges. 200KB is generous headroom above
+# the ~80-line/~3-file shape the line/file caps already enforce (a diff
+# that size in bytes would already have failed those caps on almost any
+# real content), so this exists as a defense-in-depth backstop against a
+# pathological few-lines-but-enormous-content diff, not as the primary cap.
+TIER_GATE_MAX_DIFF_BYTES="${TIER_GATE_MAX_DIFF_BYTES:-204800}"
+
+# TIER_GATE_PATH_DENYLIST: ERE alternation of path prefixes that are
+# outward-facing or irreversible surfaces by construction (tier-0's own
+# predicate names these as automatically disqualifying — see
+# judge-prompt.md). Matched against each line of the PR's file list.
+# Deliberately conservative and easy to extend; a path matching here blocks
+# without ever reaching the model.
+TIER_GATE_PATH_DENYLIST='^(skills/dashboard/|launchd/|scripts/tier-gate/|\.github/workflows/)'
+
+# tg_prefilter <filelist> <line_count>
+# Mechanical, model-free gate. <filelist> is newline-separated paths (as
+# from `gh pr diff --name-only`); <line_count> is the diff's total changed
+# line count (as from `gh pr diff --stat`, or any equivalent count). Exit 0
+# and empty stdout on pass; exit 1 and a named reason on stdout on block.
+# Injection-immune by construction: no model call happens in this function,
+# so there is nothing here for diff CONTENT to inject into — only file
+# paths and a line count are inspected, both mechanically derived facts
+# about the diff's shape, never text the defendant wrote is read as
+# instructions.
+tg_prefilter() {
+    local filelist="$1" line_count="$2"
+
+    local file_count=0
+    if [[ -n "$filelist" ]]; then
+        file_count=$(printf '%s\n' "$filelist" | grep -c .)
+    fi
+
+    local bad_path
+    bad_path=$(printf '%s\n' "$filelist" | grep -E "$TIER_GATE_PATH_DENYLIST" | head -1)
+    if [[ -n "$bad_path" ]]; then
+        printf 'blocked: denylist path=%s\n' "$bad_path"
+        return 1
+    fi
+
+    if [[ "$file_count" -gt "$TIER_GATE_MAX_FILES" || "$line_count" -gt "$TIER_GATE_MAX_LINES" ]]; then
+        printf 'blocked: size cap exceeded files=%s/%s lines=%s/%s\n' \
+            "$file_count" "$TIER_GATE_MAX_FILES" "$line_count" "$TIER_GATE_MAX_LINES"
+        return 1
+    fi
+
+    return 0
 }
 
 # ─── Per-SHA gate ─────────────────────────────────────────────────────────────
@@ -415,6 +522,10 @@ tg_gate_pr() {
 
     tg_post_status "$sha" "pending" "verdict=pending host=$(hostname)"
 
+    # Well-formedness gate only: a tier-0 artifact with no embedded
+    # evals.json is a malformed-artifact error, independent of the judge.
+    # The extracted content itself is NEVER passed to the judge (Fix 1) —
+    # its presence is all this checks.
     local evals_json; evals_json=$(tg_extract_evals_json "$body")
     if [[ -z "$evals_json" ]]; then
         tg_post_status "$sha" "error" "verdict=error host=$(hostname)"
@@ -422,12 +533,39 @@ tg_gate_pr() {
         return 1
     fi
 
-    local filelist diffstat
+    # Fix 2: mechanical pre-filter BEFORE any model call. filelist/line
+    # count only — never diff content — so this step cannot be influenced
+    # by anything the defendant wrote.
+    local filelist line_count
     filelist=$(tg_with_watchdog "$TIER_GATE_WATCHDOG_TIMEOUT" -- gh pr diff "$pr" --name-only 2>/dev/null)
-    diffstat=$(tg_with_watchdog "$TIER_GATE_WATCHDOG_TIMEOUT" -- gh pr diff "$pr" --stat 2>/dev/null)
+    line_count=$(tg_with_watchdog "$TIER_GATE_WATCHDOG_TIMEOUT" -- gh pr diff "$pr" --stat 2>/dev/null \
+        | grep -oE '[0-9]+ insertion|[0-9]+ deletion' | grep -oE '[0-9]+' | awk '{s+=$1} END {print s+0}')
+
+    local prefilter_out
+    prefilter_out=$(tg_prefilter "$filelist" "$line_count")
+    if [[ $? -ne 0 ]]; then
+        tg_post_status "$sha" "failure" "verdict=illegitimate host=$(hostname)"
+        printf 'gated: pr=%s sha=%s tier=0 verdict=illegitimate state=failure reason=prefilter_%s\n' \
+            "$pr" "$sha" "$(printf '%s' "$prefilter_out" | tr -s ' \n' '_')"
+        return 0
+    fi
+
+    # Fix 3: capped REAL diff content (not just name-only/--stat metadata).
+    # Byte cap mirrors Fix 2's fail-closed posture: over-cap blocks outright
+    # rather than truncating and judging a partial diff (a truncated diff
+    # is never a valid basis for a permissive read).
+    local diff diff_bytes
+    diff=$(tg_with_watchdog "$TIER_GATE_WATCHDOG_TIMEOUT" -- gh pr diff "$pr" 2>/dev/null)
+    diff_bytes=$(printf '%s' "$diff" | wc -c | tr -d ' ')
+    if [[ "$diff_bytes" -gt "$TIER_GATE_MAX_DIFF_BYTES" ]]; then
+        tg_post_status "$sha" "failure" "verdict=illegitimate host=$(hostname)"
+        printf 'gated: pr=%s sha=%s tier=0 verdict=illegitimate state=failure reason=diff_bytes_%s_over_%s\n' \
+            "$pr" "$sha" "$diff_bytes" "$TIER_GATE_MAX_DIFF_BYTES"
+        return 0
+    fi
 
     local judge_out judge_rc
-    judge_out=$(tg_judge "$evals_json" "$filelist" "$diffstat")
+    judge_out=$(tg_judge "$tier" "$diff")
     judge_rc=$?
     if [[ $judge_rc -ne 0 ]]; then
         tg_post_status "$sha" "error" "verdict=error host=$(hostname)"
