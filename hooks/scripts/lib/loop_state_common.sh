@@ -135,7 +135,24 @@ als_count_invocations() {
   local total parsed skipped
   total=$(grep -c '[^[:space:]]' "$1" 2>/dev/null); [ -z "$total" ] && total=0
   local tolerant tolerant_rc
-  tolerant=$(jq -R 'fromjson? // empty' "$1" 2>/dev/null); tolerant_rc=$?
+  # select(type=="object") added at stage 1 (SECURITY FIX, reproduced full
+  # bypass): a valid-JSON but non-object line (e.g. a bare `42`) survived
+  # fromjson? same as a real record, then threw at stage 2's `.type` access
+  # ("Cannot index number with string \"type\"") — collapsing this function's
+  # entire count to 0 via the jq_parse_error path below. A count of 0 makes
+  # als_gate_require_active_loop treat the session as "not a loop" and exit 0
+  # BEFORE any complete-gate (retro/work_units/proof) ever runs — a single
+  # attacker-plantable transcript line defeated every one of them. Filtering
+  # here, not just at the final pass, is what makes `parsed` (and therefore
+  # `skipped`) also reflect the exclusion truthfully: a non-object line now
+  # counts toward skipped_malformed like any other line this function cannot
+  # use, rather than surviving into `parsed` only to be silently dropped
+  # later. This is the SAME tolerant-parse intent the function's own header
+  # already states ("a single malformed JSONL line must not collapse the
+  # WHOLE transcript's count to empty") — a non-object line is exactly the
+  # malformed-for-this-purpose case that intent already covers, just not yet
+  # enforced.
+  tolerant=$(jq -R 'fromjson? | select(type == "object")' "$1" 2>/dev/null); tolerant_rc=$?
   if [ "$tolerant_rc" -ne 0 ]; then echo "read_error" >&2; return; fi
   parsed=0
   [ -n "$tolerant" ] && parsed=$(printf '%s' "$tolerant" | jq -s 'length' 2>/dev/null)
@@ -642,6 +659,16 @@ listed unit(s), then re-declare complete." >&2
 # consulted for the verdict; only a real tool_use/tool_result pair in the
 # transcript can satisfy a proof.
 #
+# TRUST BOUNDARY: the gate treats the transcript as harness-written. A
+# session that deliberately APPENDS forged tool_use/tool_result records to
+# its own transcript file (it is an ordinary writable file, not a sealed
+# log) can defeat this gate — no transcript-reading hook can stop that. The
+# gate's actual target is the OBSERVED failure class: honest self-deception
+# and lazy self-reporting (`"status":"pass"` written without ever running
+# the command), not adversarial transcript forgery. Same overclaim-avoidance
+# rule as the rest of this header — state what the gate defends against, not
+# a stronger guarantee it cannot actually make.
+#
 # Orchestrator-session scope, BY DESIGN: subagent/worker Bash calls never
 # appear in the orchestrator's own transcript (verified against real
 # delegating transcripts elsewhere in this codebase) — proofs MUST be run by
@@ -667,10 +694,18 @@ listed unit(s), then re-declare complete." >&2
 # cannot be verified all fail CLOSED, mirroring the work_units rule that a
 # unit which cannot be proven terminal blocks rather than passing by default.
 #
-# Full-file-scan cost: this mines the WHOLE transcript in one jq pass, same
-# cost class als_count_invocations already pays on every Stop — but this gate
-# only runs on `complete` declarations (not on every Stop like the invocation
-# counter, which runs regardless of category).
+# Cost: one O(transcript) mining pass (same cost class als_count_invocations
+# already pays on every Stop, but this gate only runs on `complete`
+# declarations, not on every Stop) plus O(proofs) index lookups, with the
+# proof count itself hard-capped at 100 before any mining happens. This is
+# NOT the whole story on its own: an earlier version of this gate did an
+# O(proofs x executions) rescan per proof, which a model-writable, uncapped
+# proof.json could inflate past the 15s hooks.json timeout — a timed-out
+# hook never exits 2, so the Stop proceeds UNBLOCKED. The <=100 cap and the
+# O(proofs + executions) command-match index (see the transcript-mining
+# comment below) are both required to close that: the cap alone still lets a
+# ~100 x 100-execution transcript stay fast, and the index alone doesn't stop
+# an attacker from inflating proof.json unboundedly without it.
 als_gate_proofs_on_complete() {
   local category="$1" hook="$2" session="$3" transcript="$4"
   local category_lc; category_lc=$(printf '%s' "$category" | tr '[:upper:]' '[:lower:]')
@@ -704,8 +739,39 @@ Regenerate proof.json with .proofs as a JSON array, then re-declare complete." >
       exit 2
       ;;
   esac
+  # proof_count is numerically validated BEFORE either comparison below — a
+  # bare `[ "$x" -gt 0 ] 2>/dev/null || return 0` conflates "jq failed /
+  # printed garbage" with "the deliberate, legitimate empty-proofs allow";
+  # both silently fell through to the same `return 0`. A jq failure here
+  # (missing binary already ruled out above; a truncated/mid-write proof.json
+  # racing the reader is the realistic cause) must fail CLOSED like every
+  # other unparseable-proof.json case in this gate, not silently pass.
   local proof_count; proof_count=$(jq '.proofs | length' "$proof_file" 2>/dev/null)
-  [ "$proof_count" -gt 0 ] 2>/dev/null || return 0
+  case "$proof_count" in
+    ''|*[!0-9]*)
+      als_log "hook=$hook session=$session proof_gate=blocked offenders=jq_error"
+      echo "[loop-stall-guard] LOOP-STOP: complete declared but proof.json's .proofs length could not be read.
+Regenerate proof.json (it may be truncated or mid-write), then re-declare complete." >&2
+      exit 2
+      ;;
+  esac
+  # MERGE-BLOCKER FIX: proof.json is model-writable and uncapped, and this
+  # gate previously did a linear rescan of $executions PER PROOF entry —
+  # O(proofs x transcript_bash_calls). loop_stall_guard is registered with a
+  # 15s hooks.json timeout, and a timed-out hook never exits 2 — the Stop
+  # proceeds UNBLOCKED. An inflated proof.json (reproduced: ~2,000 proofs x
+  # ~2,000 Bash calls ~= 15s) therefore defeats the gate by making the CHECK
+  # itself time out, not by satisfying it. A hard cap, checked BEFORE any
+  # transcript mining, closes this: a legitimate proof set is 3-10 entries;
+  # 100+ is itself suspicious and blocks fail-closed rather than being mined.
+  if [ "$proof_count" -gt 100 ]; then
+    als_log "hook=$hook session=$session proof_gate=blocked offenders=too_many_proofs count=$proof_count"
+    echo "[loop-stall-guard] LOOP-STOP: complete declared but proof.json declares $proof_count proofs, exceeding the cap of 100.
+A legitimate frozen proof set is a handful of commands (typically 3-10). Reduce
+proof.json to <= 100 proofs, then re-declare complete." >&2
+    exit 2
+  fi
+  [ "$proof_count" -gt 0 ] || return 0
 
   # Two-stage tolerant parse of the transcript (same idiom als_count_invocations
   # uses): a single malformed JSONL line must not collapse the whole scan.
@@ -723,22 +789,63 @@ Regenerate proof.json with .proofs as a JSON array, then re-declare complete." >
   # failure this gate's own header rules out; the guard keeps a stray
   # non-object line inert (skipped) instead of fatal, at both the top-level
   # record and the nested content-array level.
-  local verdicts
-  verdicts=$(
+  #
+  # COMMAND-MATCH INDEX (the O(n+m) fix): $executions is grouped by its
+  # trimmed command into a map (last execution per distinct command wins,
+  # since group_by is stable and preserves transcript order within each
+  # group, so `.[-1]` of a group is the LAST matching execution — the exact
+  # semantic the per-proof scan used to compute via `$matches[-1]`). Building
+  # this ONCE costs O(executions), then each proof does an O(1) map lookup
+  # instead of an O(executions) linear rescan — O(proofs + executions)
+  # overall instead of O(proofs x executions), bounded further by the <=100
+  # proof cap above. The command key is trimmed AND type-guarded (non-string
+  # or empty commands dropped) BEFORE group_by/from_entries: a raw non-string
+  # value reaching from_entries as an object key throws ("Cannot use ... as
+  # object key"), which would kill the whole jq program the same way the
+  # non-object-record bug did — the index is built defensively for exactly
+  # that reason. RESULT pairing (matching a proof's chosen execution id
+  # against $results) stays a per-proof linear scan, NOT a second map: a
+  # map keyed by tool_use_id would collide "no result exists for this id"
+  # (must read as unexecuted) with "a result exists with is_error:null" (must
+  # read as satisfied, per the deliberate null-tolerance rule) into the same
+  # missing-key lookup, silently losing that distinction. The per-proof
+  # results scan is bounded by the same <=100 cap and by $results' own size
+  # (one result per tool_use, itself bounded by the transcript), so there is
+  # no perf reason to also map it.
+  #
+  # OUTPUT SHAPE: the pass emits a two-line "<count>\n<offenders>" string,
+  # count FIRST. This is what makes offenders extraction fail closed: a
+  # completely clean run (zero offenders) still emits a non-empty first line
+  # (the digit count), so `[ -n "$out" ]` genuinely distinguishes "the pass
+  # ran" from "the pass failed" — a prior version ran offenders extraction as
+  # its OWN SEPARATE jq call on $verdicts, whose transient failure yielded ""
+  # indistinguishable from the legitimate "zero offenders" case, i.e. a
+  # silent pass. One pipeline, one failure mode, guarded once.
+  local out
+  out=$(
     jq -R 'fromjson? // empty' "$transcript" 2>/dev/null | \
-    jq -s --slurpfile proofdoc "$proof_file" '
+    jq -s --slurpfile proofdoc "$proof_file" -r '
       . as $records
       | ($proofdoc[0].proofs) as $proofs
       | ( [ $records[]?
             | select(type == "object" and .type == "assistant")
             | .message.content[]?
             | select(type == "object" and .type == "tool_use" and .name == "Bash")
-            | select((.input.run_in_background // false) != true)
+            | select((.input.run_in_background // false) == false)
+            | select((.id | type == "string" and length > 0))
             | {id: .id, command: (.input.command // "")} ] ) as $executions
+      | ( $executions
+          | map(select((.command | type) == "string" and (.command | gsub("^\\s+|\\s+$";"")) != ""))
+          | map(.command |= gsub("^\\s+|\\s+$";""))
+          | group_by(.command)
+          | map({key: .[0].command, value: .[-1]})
+          | from_entries
+        ) as $exec_index
       | ( [ $records[]?
             | select(type == "object" and .type == "user")
             | .message.content[]?
             | select(type == "object" and .type == "tool_result")
+            | select((.tool_use_id | type == "string" and length > 0))
             | {tool_use_id: .tool_use_id, is_error: (.is_error // null)} ] ) as $results
       | [ $proofs[] as $p
           | ( if ($p | type) != "object" then
@@ -750,13 +857,11 @@ Regenerate proof.json with .proofs as a JSON array, then re-declare complete." >
                 | if ($cmd == null or $cmd == "") then
                     {id: $id, verdict: "badcmd"}
                   else
-                    ( [ $executions[]
-                        | select((.command | if type == "string" then gsub("^\\s+|\\s+$";"") else "" end) == $cmd) ] ) as $matches
-                    | if ($matches | length) == 0 then
+                    ( $exec_index[$cmd] ) as $last
+                    | if ($last == null) then
                         {id: $id, verdict: "unexecuted"}
                       else
-                        ($matches[-1]) as $last
-                        | ( [ $results[] | select(.tool_use_id == $last.id) ] | last) as $result
+                        ( [ $results[] | select(.tool_use_id == $last.id) ] | last) as $result
                         | if ($result == null) then
                             {id: $id, verdict: "unexecuted"}
                           elif ($result.is_error == true) then
@@ -767,15 +872,22 @@ Regenerate proof.json with .proofs as a JSON array, then re-declare complete." >
                       end
                   end
               end )
-        ]
+        ] as $verdicts
+      | "\($verdicts | length)\n\([ $verdicts[] | select(.verdict != "satisfied") | "\(.id)(\(.verdict))" ] | join(", "))"
     ' 2>/dev/null
   )
-  [ -n "$verdicts" ] || { als_log "hook=$hook session=$session proof_gate=blocked offenders=jq_error"; echo "[loop-stall-guard] LOOP-STOP: complete declared but proof.json/transcript could not be evaluated." >&2; exit 2; }
+  [ -n "$out" ] || { als_log "hook=$hook session=$session proof_gate=blocked offenders=jq_error"; echo "[loop-stall-guard] LOOP-STOP: complete declared but proof.json/transcript could not be evaluated." >&2; exit 2; }
 
-  local offenders
-  offenders=$(printf '%s' "$verdicts" | jq -r '
-    [ .[] | select(.verdict != "satisfied") | "\(.id)(\(.verdict))" ] | join(", ")
-  ' 2>/dev/null)
+  local n offenders
+  n=$(printf '%s\n' "$out" | sed -n '1p')
+  offenders=$(printf '%s\n' "$out" | sed -n '2p')
+  case "$n" in
+    ''|*[!0-9]*)
+      als_log "hook=$hook session=$session proof_gate=blocked offenders=jq_error"
+      echo "[loop-stall-guard] LOOP-STOP: complete declared but proof.json/transcript could not be evaluated." >&2
+      exit 2
+      ;;
+  esac
   if [ -n "$offenders" ]; then
     als_log "hook=$hook session=$session proof_gate=blocked offenders=$offenders"
     echo "[loop-stall-guard] LOOP-STOP: complete declared but these frozen proofs are not verified: $offenders.
@@ -785,6 +897,5 @@ commands run inside dispatched workers or subagents never appear in this
 transcript and cannot satisfy this gate — then re-declare complete." >&2
     exit 2
   fi
-  local n; n=$(printf '%s' "$verdicts" | jq 'length' 2>/dev/null)
   als_log "hook=$hook session=$session proof_gate=ok proofs=$n"
 }

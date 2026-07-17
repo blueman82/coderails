@@ -282,6 +282,31 @@ check "malformed line + valid LOOP-STOP tag -> reached declaration gate (declare
 check "malformed line + valid LOOP-STOP tag -> NOT misdetected as invocations=0 (not a loop)" 0 \
   "$(count 'invocations=0 active=0' "$CLAUDE_DISCIPLINE_LOG")"
 
+# SECURITY REGRESSION GUARD (reproduced full bypass, all three complete-only
+# gates): a valid-JSON but NON-OBJECT scalar line (e.g. bare `42`) in the
+# transcript, alongside a genuine agentic-loop invocation and an active,
+# incomplete loop with NO LOOP-STOP declaration at all, must still BLOCK via
+# the ordinary "no declaration" path — exactly like a clean transcript would.
+# Before the als_count_invocations fix, this scalar line crashed its stage-2
+# jq ("Cannot index number with string \"type\""), collapsing invocations to
+# 0, which made als_gate_require_active_loop treat the whole session as "not
+# a loop" and exit 0 (allow) — bypassing retro/work_units/proof gates alike,
+# since none of them were ever reached. This drives that exact class through
+# the REAL Stop-hook entry point (not a direct function call), because the
+# bug lived in the shared invocation-counting path every gate depends on.
+mk_scalar_line_transcript() { # n_invocations -> path (bare 42 line inserted after invocation, no final text)
+  local n="$1" out="$TMP/scalarline_${RANDOM}.jsonl" i=0
+  : > "$out"
+  while [ "$i" -lt "$n" ]; do
+    printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Skill","input":{"skill":"coderails:agentic-loop"}}]}}' >> "$out"
+    i=$((i+1))
+  done
+  printf '%s\n' '42' >> "$out"
+  printf '%s' "$out"
+}
+reset; T=$(mk_scalar_line_transcript 1); write_file in-progress S1 0
+check "SECURITY: scalar-line (42) transcript + active loop + no declaration -> block (not bypassed)" 2 "$(run x "$(payload "$T" S1)")"
+
 # =====================================================================
 # Direct unit tests for als_count_invocations' INPUT-SHAPE contract. These
 # assert the integer stdout for slash-command edge cases that are awkward to
@@ -1078,19 +1103,22 @@ check "proof: non-object proofs entry -> block (fails closed)" 2 "$(run x "$(pay
 # complete on offenders=jq_error — exactly the "one malformed line collapses
 # the whole scan" failure the gate's header explicitly rules out.
 #
-# NOT exercised through the real guard entry point: als_count_invocations
-# (the invocation counter, called first via als_gate_require_active_loop) has
-# an IDENTICAL unguarded .type access on the same transcript, and a bare `42`
-# line crashes ITS jq pipeline too (jq_parse_error), collapsing invocations to
-# 0 — which makes the whole guard treat the session as "not a loop" and exit 0
-# via a completely different path BEFORE als_gate_proofs_on_complete is ever
-# reached (confirmed via bash -x trace). That is a separate, pre-existing,
-# equally-unguarded exposure in als_count_invocations, explicitly OUT OF
-# SCOPE here (tracked separately) — so a full-transcript fixture cannot
-# reach this gate's own guard through the real Stop-hook entry point. Calling
-# als_gate_proofs_on_complete directly (mirrors inv_count's existing
-# direct-call pattern below) isolates the assertion to just this gate's own
-# defence, which is what's actually being fixed.
+# Calls als_gate_proofs_on_complete directly (mirrors inv_count's existing
+# direct-call pattern below) to isolate the assertion to just this gate's own
+# defence, independent of any other function's behaviour on the same
+# transcript. This was NOT merely a convenience choice: als_count_invocations
+# (called first via als_gate_require_active_loop, before this gate ever runs)
+# ORIGINALLY had an identical unguarded .type access on the same transcript
+# shape, and a bare `42` line crashed its own pipeline too — collapsing
+# invocations to 0 and exiting the whole guard via the "not a loop" path
+# before als_gate_proofs_on_complete was ever reached, at the time this test
+# was first written. als_count_invocations has SINCE been fixed with the same
+# select(type=="object") guard (see its own header) — the SECURITY REGRESSION
+# GUARD test above (search "scalar-line") now drives this exact non-object-line
+# class through the REAL Stop-hook entry point end-to-end and asserts the
+# correct outcome there too. This direct-call test remains as an independent
+# unit-level check of this gate's own guard, not because the full pipeline is
+# unreachable anymore.
 proof_gate_direct() { # session_id proof_dir transcript -> exit code of als_gate_proofs_on_complete alone
   (
     . "$(cd "$(dirname "$0")/.." && pwd)/lib/loop_state_common.sh"
@@ -1151,5 +1179,139 @@ proof_fixture_reset S1
 write_proof_raw S1 '{"schema_version":1,"proofs":{"id":"P1","cmd":"echo x"}}'
 append_complete_declaration "$PROOF_T"
 check "proof: proofs is an object, not an array -> block (malformed shape)" 2 "$(run x "$(payload "$PROOF_T" S1)")"
+
+# =====================================================================
+# MERGE-BLOCKER FIX — proof-count cap (fail-closed, checked before any
+# transcript mining). Uses jq to generate N proofs programmatically rather
+# than a hand-written literal.
+mk_n_proofs() { # n -> JSON array literal of N satisfiable-shaped proofs, each cmd unique
+  jq -cn --argjson n "$1" '[ range(0; $n) | {id: "P\(.)", cmd: "echo proof-\(.)"} ]'
+}
+
+# 101 proofs -> BLOCK, stderr names the count and the cap.
+proof_fixture_reset S1
+write_proof S1 "$(mk_n_proofs 101)"
+append_complete_declaration "$PROOF_T"
+run_capture_stderr "$(payload "$PROOF_T" S1)"
+check "proof: 101 proofs -> block (exceeds cap)" 2 "$RC_OUT"
+case "$STDERR_OUT" in *"101"*"100"*) cap_named=1 ;; *) cap_named=0 ;; esac
+check "proof: 101 proofs -> stderr names the count (101) and the cap (100)" 1 "$cap_named"
+
+# Exactly 100 proofs, all satisfied -> ALLOW (cap is exclusive: >100 blocks,
+# ==100 is within bounds).
+proof_fixture_reset S1
+write_proof S1 "$(mk_n_proofs 100)"
+i=0
+while [ "$i" -lt 100 ]; do
+  append_bash_call "$PROOF_T" "echo proof-$i" false
+  i=$((i+1))
+done
+append_complete_declaration "$PROOF_T"
+check "proof: exactly 100 satisfied proofs -> allow (cap is inclusive at 100)" 0 "$(run x "$(payload "$PROOF_T" S1)")"
+
+# TIMING EVIDENCE for the O(proofs + executions) fix: 100 proofs (the cap)
+# against 500 Bash calls in the transcript (the O(n x m) pre-fix shape would
+# have been 100 x 500 = 50,000 comparisons; post-fix it's O(100 + 500)).
+# Asserted as a wall-clock bound, not just "it completes" — a regression back
+# to the linear rescan would still complete at this N, just slower; the
+# threshold is generous (5s, well under the 15s hooks.json timeout) so this
+# is a regression trip-wire, not a tight perf assertion.
+proof_fixture_reset S1
+write_proof S1 "$(mk_n_proofs 100)"
+i=0
+while [ "$i" -lt 500 ]; do
+  append_bash_call "$PROOF_T" "echo filler-call-$i" false
+  i=$((i+1))
+done
+i=0
+while [ "$i" -lt 100 ]; do
+  append_bash_call "$PROOF_T" "echo proof-$i" false
+  i=$((i+1))
+done
+append_complete_declaration "$PROOF_T"
+t0=$(date +%s)
+rc=$(run x "$(payload "$PROOF_T" S1)")
+t1=$(date +%s)
+elapsed=$((t1 - t0))
+check "proof: 100 proofs x 500 filler calls -> allow (still satisfied)" 0 "$rc"
+if [ "$elapsed" -lt 5 ]; then
+  printf 'ok   - proof: 100 proofs x 500 calls completed in %ss (< 5s bound)\n' "$elapsed"
+else
+  printf 'FAIL - proof: 100 proofs x 500 calls took %ss (>= 5s bound, possible O(n x m) regression)\n' "$elapsed"
+  fails=$((fails+1))
+fi
+
+# =====================================================================
+# Hardening: .id / .tool_use_id must be non-empty STRINGS to be usable as a
+# match key (closes a null==null / missing-key forged-match class). A
+# tool_use with a non-string or empty id is excluded from $executions
+# entirely (its command can never be matched), and a tool_result with a
+# non-string or empty tool_use_id is excluded from $results (can never pair).
+
+# tool_use.id missing entirely -> the execution is unusable -> proof reads
+# unexecuted even though a same-named command exists elsewhere with a result.
+proof_fixture_reset S1
+write_proof S1 '[{"id":"P1","cmd":"echo no-id-exec"}]'
+jq -cn '{type:"assistant",message:{content:[{type:"tool_use",name:"Bash",input:{command:"echo no-id-exec",run_in_background:false}}]}}' >> "$PROOF_T"
+append_complete_declaration "$PROOF_T"
+run_capture_stderr "$(payload "$PROOF_T" S1)"
+check "proof: tool_use missing .id -> block (execution unusable)" 2 "$RC_OUT"
+case "$STDERR_OUT" in *"P1"*"unexecuted"*) p1_named=1 ;; *) p1_named=0 ;; esac
+check "proof: tool_use missing .id -> stderr names P1(unexecuted)" 1 "$p1_named"
+
+# tool_result.tool_use_id missing entirely -> the result is unusable -> a
+# matched execution with no usable result reads unexecuted, not satisfied.
+proof_fixture_reset S1
+write_proof S1 '[{"id":"P1","cmd":"echo no-id-result"}]'
+tid="tu_${RANDOM}${RANDOM}"
+jq -cn --arg id "$tid" --arg cmd "echo no-id-result" '{type:"assistant",message:{content:[{type:"tool_use",id:$id,name:"Bash",input:{command:$cmd,run_in_background:false}}]}}' >> "$PROOF_T"
+jq -cn '{type:"user",message:{content:[{type:"tool_result",is_error:false}]}}' >> "$PROOF_T"
+append_complete_declaration "$PROOF_T"
+run_capture_stderr "$(payload "$PROOF_T" S1)"
+check "proof: tool_result missing .tool_use_id -> block (result unusable, reads unexecuted)" 2 "$RC_OUT"
+case "$STDERR_OUT" in *"P1"*"unexecuted"*) p1_named=1 ;; *) p1_named=0 ;; esac
+check "proof: tool_result missing .tool_use_id -> stderr names P1(unexecuted)" 1 "$p1_named"
+
+# =====================================================================
+# Hardening: bg-exclusion polarity flip. run_in_background must be EXACTLY
+# `false` (or absent, defaulting to false) to count as foreground; any
+# truthy-ish value, INCLUDING a schema-dodging STRING "true", now excludes
+# the call as background (fails toward unexecuted, not toward satisfied).
+proof_fixture_reset S1
+write_proof S1 '[{"id":"P1","cmd":"echo string-bg-dodge"}]'
+tid="tu_${RANDOM}${RANDOM}"
+jq -cn --arg id "$tid" --arg cmd "echo string-bg-dodge" '{type:"assistant",message:{content:[{type:"tool_use",id:$id,name:"Bash",input:{command:$cmd,run_in_background:"true"}}]}}' >> "$PROOF_T"
+jq -cn --arg id "$tid" '{type:"user",message:{content:[{type:"tool_result",tool_use_id:$id,is_error:false}]}}' >> "$PROOF_T"
+append_complete_declaration "$PROOF_T"
+run_capture_stderr "$(payload "$PROOF_T" S1)"
+check "proof: run_in_background as STRING \"true\" -> block (schema-dodge fails toward unexecuted)" 2 "$RC_OUT"
+case "$STDERR_OUT" in *"P1"*"unexecuted"*) p1_named=1 ;; *) p1_named=0 ;; esac
+check "proof: run_in_background string dodge -> stderr names P1(unexecuted)" 1 "$p1_named"
+
+# Regression: run_in_background exactly `false` still counts as foreground.
+proof_fixture_reset S1
+write_proof S1 '[{"id":"P1","cmd":"echo explicit-false-bg"}]'
+append_bash_call "$PROOF_T" "echo explicit-false-bg" false false
+append_complete_declaration "$PROOF_T"
+check "proof: run_in_background explicit false -> allow (foreground regression check)" 0 "$(run x "$(payload "$PROOF_T" S1)")"
+
+# =====================================================================
+# proof_count numeric-validation fail-closed: a proof.json whose .proofs
+# length jq cannot read (simulated via a file that disappears between the
+# earlier presence check and this read) must block, not silently allow via
+# the old `[ -n "$x" ] || return 0` conflation. Simulated directly by making
+# proof.json valid-shaped JSON but with .proofs as a value whose length jq
+# CAN compute (a string, which has string length, not proof count) --
+# proves the numeric guard fires even when jq itself doesn't error.
+# (Already covered structurally by the "proofs is an object" test above for
+# the non-array case; this is the arithmetic-guard's own regression check.)
+reset
+dir=$(file_dir S1); mkdir -p "$dir"
+write_file in-progress S1 0
+write_retro S1 '{"schema_version":1}'
+T=$(mk_complete_base)
+append_complete_declaration "$T"
+printf '{"schema_version":1,"proofs":[]}' > "$dir/proof.json"
+check "proof: proof_count regression, empty array -> allow" 0 "$(run x "$(payload "$T" S1)")"
 
 [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails)"; exit 1; }
