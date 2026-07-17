@@ -1314,4 +1314,33 @@ append_complete_declaration "$T"
 printf '{"schema_version":1,"proofs":[]}' > "$dir/proof.json"
 check "proof: proof_count regression, empty array -> allow" 0 "$(run x "$(payload "$T" S1)")"
 
+# ─── Log injection: a newline in a unit id must not forge a log line ─────────
+# The gate logs the offending unit ids. A newline in an id would otherwise write
+# a second, attacker-chosen line into the discipline log — e.g. a fabricated
+# "work_units_gate=passed" record with its own timestamp — corrupting the audit
+# trail the dashboard reads. Enforcement was never affected; the log was.
+inj_log="$TMP/inject.log"
+inj_state="$TMP/inject_progress.json"
+jq -n '{schema_version:1, work_units:{"evil\n2026-01-01T00:00:00+00:00 hook=loop_stall_guard session=forged work_units_gate=passed":{status:"pending"}}}' > "$inj_state"
+(
+  # shellcheck disable=SC1090
+  . "$(cd "$(dirname "$0")/.." && pwd)/lib/loop_state_common.sh" 2>/dev/null
+  ALS_PATH="$inj_state" LOG_FILE="$inj_log" \
+    als_gate_work_units_on_complete "complete" "loop_stall_guard" "s"
+) >/dev/null 2>&1
+# A forged record is a line that STARTS with a timestamp and carries the
+# attacker's payload — i.e. a line the log reader would parse as its own entry.
+# The payload text surviving as escaped data on the gate's own single line is
+# the fix working, not the injection: it is quoted, not executed.
+# NB: grep -c prints 0 AND exits 1 on no-match, so `|| echo 0` would append a
+# second 0 and make the count unparseable. Count lines instead.
+inj_forged=$(grep -E '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[^ ]* hook=loop_stall_guard session=forged' "$inj_log" 2>/dev/null | wc -l | tr -d ' ')
+inj_lines=$(wc -l < "$inj_log" 2>/dev/null | tr -d " ")
+if [ "$inj_forged" -eq 0 ] && [ "$inj_lines" -eq 1 ]; then
+  echo "ok   - newline in unit id cannot forge a log line (1 line, no forged record)"
+else
+  echo "FAIL - log injection: forged=$inj_forged lines=$inj_lines (expected forged=0 lines=1)"
+  fails=$((fails+1))
+fi
+
 [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails)"; exit 1; }

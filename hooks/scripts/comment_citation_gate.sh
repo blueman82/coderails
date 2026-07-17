@@ -37,7 +37,36 @@ content=$(printf '%s' "$input" | jq -r '
 # C2, and generic indirect-artifact phrasing (per the plan/design/session).
 pattern='\bE[0-9]+:|\bF[0-9]+ (fix|:|design)|CHANGE [BC][0-9]|\bTask A[0-9]+\b|TA-I[0-9]+|reviewer finding|eval E[0-9]+|\bWU[0-9]+:|\bC2\b|per the (plan|design|session)|per F[0-9]+'
 
-match=$(printf '%s\n' "$content" | grep -Ei "$pattern" | head -1)
+# Literal label DATA is not a citation: a value in a JSON fixture, or a label
+# string asserted on in a test, cites nothing — it resolves from the repo alone,
+# which is the only thing this gate protects. Matching the raw content field
+# denied those edits.
+#
+# Strip the spans that are provably data — text inside quotes — and match what
+# remains. This direction is deliberate. The inverse (extract comment spans,
+# match only those) cannot be expressed line-at-a-time: a /* */ span carries no
+# per-line marker, so every C/JS/TS block comment silently leaves scope and the
+# gate stops enforcing there. Stripping quoted spans instead fails SAFE — any
+# text not provably a string literal stays in scope, so a comment in any syntax,
+# block or line, still fires.
+#
+# A citation inside a double-quoted string is the deliberate blind spot, and it
+# is the exact false positive this fixes. A comment is never inside quotes.
+#
+# ONLY double quotes are stripped. Single quotes are NOT: an apostrophe in
+# ordinary prose (as in "don't" ... "isn't") would pair with the next one and
+# swallow the text between them as a fake string span, so a cited label sitting
+# in that gap would go silently unenforced. That text is a comment, not a
+# string. A single-quoted string literal carrying a label therefore still
+# denies; a false positive there is the safe direction, and the fixture and
+# test-string cases this targets are JSON, which is double-quoted anyway.
+#
+# Escaped quotes are neutralised first so they cannot open or close a span.
+uncited=$(printf '%s\n' "$content" | sed \
+  -e 's/\\"/@/g' \
+  -e 's/"[^"]*"/""/g')
+
+match=$(printf '%s\n' "$uncited" | grep -Ei "$pattern" | head -1)
 
 if [ -n "$match" ]; then
   reason="Blocked: comment cites a session-artifact label ($(printf '%s' "$match" | sed 's/^[[:space:]]*//')). State the constraint the code enforces, not the conversation/PR that produced it."

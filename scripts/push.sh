@@ -54,13 +54,37 @@ push::main() {
 
     # ─── Push ─────────────────────────────────────────────────────────────────
     step "Pushing"
+    # Capture git push's own output/status separately from display filtering:
+    # `local push_output=$(...)` would mask git's exit status with `local`'s
+    # own (always-zero) status, so declare first, assign on its own line, and
+    # capture the real status via `||` (also keeps `set -e` from aborting
+    # before we can branch on it). The display filter (`grep -v '^remote:'`)
+    # runs afterwards on the captured text only, so its own exit code (1 when
+    # a successful push's output is ALL `remote:` lines) can never be mistaken
+    # for git push's status.
+    local push_output push_rc=0
     if [[ "$force_with_lease" -eq 1 ]]; then
-        git push --force-with-lease -u origin "$br" 2>&1 | grep -v '^remote:' || true
+        push_output=$(git push --force-with-lease -u origin "$br" 2>&1) || push_rc=$?
     else
-        git push -u origin "$br" 2>&1 | grep -v '^remote:' || true
+        push_output=$(git push -u origin "$br" 2>&1) || push_rc=$?
     fi
-    ok "Pushed $(ahead) commit(s)"
+    # Filtering `remote:` lines de-noises a SUCCESSFUL push, but on failure
+    # those same lines carry the server's actual reason (GH006, the ruleset
+    # name, "Changes must be made through a pull request") — the one thing the
+    # user needs. Filter on success only; print failures whole, to stderr.
+    if [[ "$push_rc" -eq 0 ]]; then
+        printf '%s\n' "$push_output" | grep -v '^remote:' || true
+    else
+        printf '%s\n' "$push_output" >&2
+        err "Push failed (exit $push_rc) — see error above"
+    fi
 
+    # Positive verification: confirm the push actually landed. `git push`
+    # updates the remote-tracking ref on success, so origin/$br should already
+    # be current without a separate fetch.
+    [[ "$(git rev-parse "origin/$br")" == "$(git rev-parse HEAD)" ]] \
+        || err "Push reported success but origin/$br does not match local HEAD"
+    ok "Pushed $(ahead) commit(s)"
 
     # ─── PR ───────────────────────────────────────────────────────────────────
     if pr::exists; then

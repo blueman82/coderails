@@ -40,6 +40,9 @@ manifest_paths=(
   hooks/scripts/lib/discipline_common.sh
   hooks/scripts/lib/loop_cost.sh
   hooks/scripts/lib/loop_state_common.sh
+  scripts/sandbox/render-settings.sh
+  scripts/sandbox/spawn-sandboxed-worker.sh
+  scripts/sandbox/sandbox-probe.sh
   scripts/merge.sh
   scripts/post_review.sh
   scripts/post_evals.sh
@@ -72,6 +75,9 @@ manifest_modes=(
   100644
   100644
   100644
+  100755
+  100755
+  100755
   100755
   100755
   100755

@@ -102,4 +102,48 @@ check "\"priority\":\"P0\" inside JSON-fixture content -> allow" ALLOW \
 check "CHANGE the default timeout (no trailing digit) -> allow" ALLOW \
   "$(run "$(payload Edit "$FILE" "# CHANGE the default timeout")")"
 
+# ─── Non-comment lines must NOT fire: the gate polices COMMENTS, not code ────
+# Regression: the gate matched anywhere in the content field, so literal label
+# data in JSON fixtures and label strings asserted on in tests were read as
+# comment citations. Both are data the repo can resolve on its own.
+check "E1: as a JSON fixture VALUE (not a comment) -> allow" ALLOW \
+  "$(run "$(payload_write "fixtures/evals.json" "{\"evals\":[{\"id\":\"E1:\",\"desc\":\"gate blocks\"}]}")")"
+check "reviewer finding asserted as a test STRING (not a comment) -> allow" ALLOW \
+  "$(run "$(payload Edit "hooks/scripts/tests/x.test.sh" "assert_eq \"\$out\" \"reviewer finding\"")")"
+check "WU1: inside a shell string literal (not a comment) -> allow" ALLOW \
+  "$(run "$(payload Edit "$FILE" "msg=\"WU1: pending\"")")"
+check "code line with trailing comment citation -> deny" DENY \
+  "$(run "$(payload Edit "$FILE" "foo=1  # E1: reviewer finding said guard this")")"
+
+# ─── Block comments must stay in scope (regression: a comment-span extractor
+# ─── silently dropped every /* */ line, disabling the gate for C/JS/TS/Java) ──
+check "C block comment citation, trailing -> deny" DENY \
+  "$(run "$(payload Edit "src/x.c" "int x; /* E1: reviewer finding */")")"
+check "C block comment citation, opener line -> deny" DENY \
+  "$(run "$(payload Edit "src/x.c" "/* E1: reviewer finding said guard this")")"
+check "JS block comment, per the plan -> deny" DENY \
+  "$(run "$(payload Edit "src/x.js" "const x = 1; /* per the plan */")")"
+check "block comment continuation line -> deny" DENY \
+  "$(run "$(payload Edit "src/x.c" " * per the design doc")")"
+check "// line comment citation -> deny" DENY \
+  "$(run "$(payload Edit "src/x.ts" "// E1: reviewer finding")")"
+
+# ─── Apostrophes in prose must not form a fake string span ───────────────────
+# Regression: stripping single-quoted spans made two ordinary prose apostrophes
+# pair up and swallow the citation between them, silently unenforcing a comment
+# written in plain English. Only double quotes delimit strings here.
+APOS="'"
+check "prose apostrophes around a citation -> deny" DENY \
+  "$(run "$(payload Edit "$FILE" "# don${APOS}t cite E1: because it isn${APOS}t resolvable")")"
+check "prose apostrophes around per-the-plan -> deny" DENY \
+  "$(run "$(payload Edit "$FILE" "# it${APOS}s per the plan, don${APOS}t change it")")"
+check "single-quoted literal with a label -> deny (safe direction)" DENY \
+  "$(run "$(payload Edit "$FILE" "msg=${APOS}E1: pending${APOS}")")"
+
+# ─── A second comment marker must not drop the citation before it ────────────
+check "two # markers, citation before the second -> deny" DENY \
+  "$(run "$(payload Edit "$FILE" "# E1: x # y")")"
+check "two // markers, citation before the second -> deny" DENY \
+  "$(run "$(payload Edit "src/x.js" "// E1: x // y")")"
+
 [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails)"; exit 1; }
