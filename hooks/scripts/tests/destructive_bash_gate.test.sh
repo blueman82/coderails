@@ -22,6 +22,11 @@ run() { # json -> DENY|ALLOW
   if printf '%s' "$out" | grep -q '"permissionDecision": *"deny"'; then echo DENY; else echo ALLOW; fi
 }
 
+# run_reason: json -> the permissionDecisionReason text (empty if allowed)
+run_reason() {
+  printf '%s' "$1" | bash "$HOOK" 2>/dev/null | jq -r '.hookSpecificOutput.permissionDecisionReason // ""'
+}
+
 check() { # desc expected actual
   if [ "$2" = "$3" ]; then printf 'ok   - %s\n' "$1"
   else printf 'FAIL - %s (expected %s, got %s)\n' "$1" "$2" "$3"; fails=$((fails+1)); fi
@@ -47,6 +52,33 @@ check "dd if= -> deny"              DENY "$(run "$(payload "dd if=/dev/zero of=/
 check "mkfs. -> deny"               DENY "$(run "$(payload "mkfs.ext4 /dev/sdb1")")"
 check "chmod -R 777 -> deny"        DENY "$(run "$(payload "chmod -R 777 /var/www")")"
 check "git commit --no-verify -> deny" DENY "$(run "$(payload "git commit -m 'wip' --no-verify")")"
+
+# --- Deny messages must name a concrete safe route per pattern family, not a
+# single generic sentence appended to every message (the gap this file's
+# deny() fix closes: a stated prohibition with no named way around it). ---
+reset_reason=$(run_reason "$(payload "git reset --hard HEAD~1")")
+check "git reset --hard message names keep+backup route" DENY \
+  "$(printf '%s' "$reset_reason" | grep -qiE 'keep' && printf '%s' "$reset_reason" | grep -qiE 'backup' && echo DENY || echo MISSING)"
+
+rm_reason=$(run_reason "$(payload "rm -rf /tmp/x")")
+check "rm -rf message names unlink+temp route" DENY \
+  "$(printf '%s' "$rm_reason" | grep -qiE 'unlink' && printf '%s' "$rm_reason" | grep -qiE 'temp' && echo DENY || echo MISSING)"
+
+push_reason=$(run_reason "$(payload "git push --force origin main")")
+check "git push --force message names force-with-lease route" DENY \
+  "$(printf '%s' "$push_reason" | grep -qiE 'force-with-lease' && printf '%s' "$push_reason" | grep -qiE 'allowlist' && echo DENY || echo MISSING)"
+
+# The force-with-lease route the message recommends must not itself be a dead
+# end: the hook denies --force-with-lease BY DEFAULT (no allowlist file), so
+# the message must say so and name the opt-in step — not just the bare flag.
+check "push message flags that fwl is itself blocked without the allowlist opt-in" DENY \
+  "$(printf '%s' "$push_reason" | grep -qi 'destructive_allowlist' && echo DENY || echo MISSING)"
+
+# Patterns with no specific route mapping (e.g. git clean force) still get the
+# generic fallback sentence, not a false claim of a specific route.
+clean_reason=$(run_reason "$(payload "git clean -fdx")")
+check "git clean (no specific route) falls back to generic guidance" DENY \
+  "$(printf '%s' "$clean_reason" | grep -qi 'no specific safe route' && echo DENY || echo MISSING)"
 
 # --- Allowed commands ---
 check "ls -> allow"                 ALLOW "$(run "$(payload "ls -la")")"
