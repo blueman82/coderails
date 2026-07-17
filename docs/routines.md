@@ -243,9 +243,10 @@ the expected steady state for a long while after this routine ships, not
 a failure, and the routine shouldn't escalate every week just because the
 graduation bar hasn't been met yet.
 
-**Security note.** This is the first routine in this repo to use a
+**Security note.** This was the first routine in this repo to use a
 non-`read-only` button profile (`bypass`, i.e.
-`--dangerously-skip-permissions` — see the security warning below). Once
+`--dangerously-skip-permissions` — see the security warning below);
+`docs-sync-nightly` (above) is the second. Once
 the predicate graduates, the routine opens and merges its own PR with no
 human in the loop, and — as that warning documents — `PreToolUse` hooks
 do not fire under `claude -p`, so `test_gate`/`enforce_pr_workflow` do
