@@ -508,6 +508,93 @@ gate_eval_artifact_for_merge() {
         permissionDecisionReason: $r
       }
     }'
+  elif [ "${PR_EVAL_TIER:-}" = "0" ]; then
+    gate_tier_review_status "$num" "$sha"
+  fi
+  return 0
+}
+
+# coderails::_tier_review_machine_user <config_file>
+# Echoes the value of the nested key tier_review.machine_user from a
+# workflow.config.yaml, or nothing if the key/block is absent. Mirrors
+# scripts/merge.sh's identically-named function (no shared lib file is in
+# this task's manifest, so both gates carry their own copy) — no generic
+# nested-key YAML reader exists in this repo (scripts/lib/config.sh only
+# locates the file); this is a minimal, single-purpose extractor for this
+# one key, not a new config system.
+coderails::_tier_review_machine_user() {
+  local config_file="$1"
+  [ -f "$config_file" ] || return 0
+  awk '
+    /^tier_review:[[:space:]]*$/ { in_block=1; next }
+    in_block && /^[^[:space:]]/ { in_block=0 }
+    in_block && /^[[:space:]]+machine_user:/ {
+      sub(/^[[:space:]]+machine_user:[[:space:]]*/, "")
+      gsub(/^["'"'"']|["'"'"']$/, "")
+      gsub(/[[:space:]]*#.*$/, "")
+      gsub(/[[:space:]]+$/, "")
+      print
+      exit
+    }
+  ' "$config_file" 2>/dev/null
+}
+
+# gate_tier_review_status <num> <sha>
+# Redundant defence-in-depth layer (fail-closed): once the eval-artifact gate
+# above has ALREADY passed with tier=0, this additionally requires a
+# `tier-review` commit status of state=success posted by the configured
+# machine user. This layer is REDUNDANT BY DESIGN once the server-side
+# ruleset is live (belt-and-braces) — it exists to fail loudly on
+# misconfiguration and to hold the line during the pre-ruleset interim. It is
+# NOT the primary control — do not delete it as dead code once the ruleset is
+# active; it is the only local check that catches a machine-user
+# misconfiguration before GitHub itself would. Config-keyed and inactive by
+# default: only runs when config key tier_review.machine_user is set (config
+# absent -> other installs unaffected). Emits a deny JSON on any failure;
+# emits nothing (stands aside) when inactive or when the check passes — same
+# "one deny per invocation" contract as gate_eval_artifact_for_merge's caller.
+gate_tier_review_status() {
+  local num="$1" sha="$2"
+  local config_file; config_file=$(coderails::config_path "$cwd")
+  [ -z "$config_file" ] && return 0
+  local machine_user; machine_user=$(coderails::_tier_review_machine_user "$config_file")
+  [ -z "$machine_user" ] && return 0
+
+  local statuses tr_rc=0
+  statuses=$(gh api "repos/$(repo)/commits/${sha}/statuses" --paginate \
+    --jq '[.[] | select(.context == "tier-review")]' 2>/dev/null) || tr_rc=$?
+  if [ "$tr_rc" -ne 0 ]; then
+    jq -n --arg r "Blocked: gh pr merge $num — GitHub fetch failed, could not fetch tier-review status for $sha. Retry, or check gh auth/network." '{
+      hookSpecificOutput: {
+        hookEventName: "PreToolUse",
+        permissionDecision: "deny",
+        permissionDecisionReason: $r
+      }
+    }'
+    return 0
+  fi
+
+  local state creator
+  state=$(printf '%s' "$statuses" | jq -r '.[0].state // empty' 2>/dev/null)
+  creator=$(printf '%s' "$statuses" | jq -r '.[0].creator.login // empty' 2>/dev/null)
+
+  local reason=""
+  if [ -z "$state" ]; then
+    reason="Blocked: gh pr merge $num — no tier-review status found for $sha. The tier-gate daemon has not judged this SHA yet. Wait for it, or kickstart it, then retry."
+  elif [ "$state" != "success" ]; then
+    reason="Blocked: gh pr merge $num — tier-review status for $sha is '$state' (not success). The tier-gate daemon has not approved this SHA. Resolve and retry."
+  elif [ "$creator" != "$machine_user" ]; then
+    reason="Blocked: gh pr merge $num — tier-review status for $sha was posted by '$creator', not the configured machine user '$machine_user'. This is a misconfiguration-or-forgery signal, not a valid verdict. Do not bypass; investigate the creator mismatch."
+  fi
+
+  if [ -n "$reason" ]; then
+    jq -n --arg r "$reason" '{
+      hookSpecificOutput: {
+        hookEventName: "PreToolUse",
+        permissionDecision: "deny",
+        permissionDecisionReason: $r
+      }
+    }'
   fi
   return 0
 }

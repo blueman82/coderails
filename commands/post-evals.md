@@ -70,15 +70,33 @@ Write a summary body: per-eval pass/fail split by priority (P0/P1), plus any
 not validated by `post_evals.sh`; include it verbatim for human context. The
 prose summary itself is deliberately not grammar-gated: the JSON's structural
 guarantees (checks 1-7 in `post_evals::validate_structure`) are what the merge
-gate relies on, not the wording of this comment body. Prepend the marker so
-the posted comment begins with the marker line:
+gate relies on, not the wording of this comment body. Prepend the marker,
+append the full `evals.json` as a fenced JSON code block, so the posted
+comment begins with the marker line and ends with the complete artifact —
+this is the embed a tier-review daemon extracts and judges (never
+hand-summarised; the raw file, verbatim). Use a `FENCE` variable rather than
+literal triple-backticks inside this script, since a literal fence would
+terminate this instruction's own surrounding code block:
 
 ```bash
+FENCE='```'
 {
   printf '%s\n' "$MARKER"
   cat /tmp/coderails-evals-summary-$$.md
+  printf '\n%sjson\n' "$FENCE"
+  cat <evals_json_path>
+  printf '\n%s\n' "$FENCE"
 } > /tmp/coderails-evals-body-$$.md
 ```
+
+Before posting, validate the composed body embeds the artifact correctly
+(required at tier 0; a no-op exit-0 at tier 1/2):
+
+```bash
+./scripts/post_evals.sh validate-embed <evals_json_path> /tmp/coderails-evals-body-$$.md
+```
+
+If exit code is non-zero, print the validation error and **stop** — do not post.
 
 ## Step 6 — Post via gh api (NOT gh pr comment)
 

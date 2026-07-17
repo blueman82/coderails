@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.coderails.tier-gate</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>__TIER_GATE_RUNNER_PATH__</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>TIER_GATE_CREDS</key>
+    <string>__TIER_GATE_CREDS_PATH__</string>
+  </dict>
+  <key>StartInterval</key>
+  <integer>300</integer>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>/var/log/coderails-tier-gate.log</string>
+  <key>StandardErrorPath</key>
+  <string>/var/log/coderails-tier-gate.log</string>
+  <key>UserName</key>
+  <string>root</string>
+</dict>
+</plist>
