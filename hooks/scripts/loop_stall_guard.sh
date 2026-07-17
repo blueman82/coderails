@@ -65,6 +65,7 @@ gate_loop_stop_declared() {
     als_gate_retro_on_complete "$category" "loop_stall_guard" "$session_id"
     als_gate_work_units_on_complete "$category" "loop_stall_guard" "$session_id"
     als_gate_proofs_on_complete "$category" "loop_stall_guard" "$session_id" "$transcript"
+    als_report_cost_on_complete "$category" "loop_stall_guard" "$session_id"
     bump_loop_stop_count "$category"
     als_log "hook=loop_stall_guard session=$session_id invocations=$ALS_INVOCATIONS declared=1 blocked=0"
     exit 0

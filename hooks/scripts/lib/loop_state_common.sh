@@ -913,3 +913,215 @@ transcript and cannot satisfy this gate — then re-declare complete." >&2
   fi
   als_log "hook=$hook session=$session proof_gate=ok proofs=$n"
 }
+
+# Reporter (NOT a gate): on a `complete` declaration, print the loop's mined
+# cost to the human's terminal via top-level `systemMessage`, mechanically —
+# so a `complete` loop can no longer finish without the human seeing what it
+# cost, the way SKILL.md's Phase 13 prose has always demanded but a model
+# could silently skip. This is the fix for that: prose can't enforce prose,
+# a hook can.
+#
+# DELIBERATE POSTURE INVERSION — read this before "fixing" this function:
+# every other gate in this file (check_verify_loop.sh and
+# check_confidence_labels.sh follow the same house idiom elsewhere) runs its
+# jq emission FIRST and lets that emission's exit status gate the caller's
+# own `exit 0` — i.e. they fail TOWARD blocking. This function does the
+# OPPOSITE on purpose: it must NEVER block, under any failure. Rationale:
+# dc_mine_token_usage (hooks/scripts/lib/loop_cost.sh:7-12) is contractually
+# fail-open to `{}` on any mining error and documents that it "must never
+# block a caller" — retro.json's `.cost` can legitimately be `{}` (miner ran,
+# failed open) on an otherwise perfectly valid, already-finished loop. If
+# this reporter were written in the house fail-closed style, a miner bug
+# would deadlock a loop that has ALREADY passed the retro/work_units/proof
+# gates above it — strictly worse than the unrecorded-cost bug it exists to
+# fix. Any error path here must therefore emit nothing and return, never
+# exit non-zero. Do not widen this into the house fail-closed idiom.
+#
+# Fires ONLY on `category == "complete"` (case-insensitively, mirroring the
+# category_lc idiom shared by every sibling gate above). Reads retro.json at
+# `$(dirname "$ALS_PATH")/retro.json` — same resolution als_gate_retro_on_complete
+# uses. By the time this runs (called AFTER the retro/work_units/proof gates
+# at the loop_stall_guard.sh call site), retro.json is already proven present
+# and parseable with schema_version >= 1 by als_gate_retro_on_complete, so
+# this function does not re-validate file existence/parseability defensively
+# — it only branches on the fields it needs.
+#
+# Behaviour matrix (see skills/agentic-loop/teardown.md for the cost-mining
+# contract this reads):
+#   schema_version < 2 (legacy, pre-cost-miner retro)      -> silent
+#   schema_version >= 2, .cost populated (has a usd total) -> print USD +
+#     tokens + staleness age
+#   schema_version >= 2, .cost non-empty but MISSING total_usd_estimate
+#     and/or total_tokens (partial miner output, schema drift) -> print
+#     "cost recorded but incomplete (missing <field(s)>)" — NEVER return
+#     silently and NEVER fabricate a $ figure. A silent return here would
+#     recreate, inside this very mechanism, the exact failure this PR exists
+#     to fix: a cost that exists on disk but never reaches the human.
+#   schema_version >= 2, .cost == {} (miner ran, failed open) -> print "cost
+#     unavailable (miner returned no data)" — NEVER a fabricated $ figure
+#   schema_version >= 2, .cost absent (teardown skipped the mining sub-step)
+#     -> print "cost not recorded" — deliberately distinct text from the
+#     miner-failed-open case above: absent = step skipped, {} = miner ran and
+#     came back empty. Different bugs, different messages; collapsing them
+#     into one message would silently relocate the original bug (a cost the
+#     human never sees) from model-omission to hook-omission instead of
+#     fixing it. The incomplete-but-non-empty case above is a THIRD distinct
+#     message for the same reason — collapsing it into either the {} case or
+#     a silent return would do the same thing this whole PR exists to stop.
+# schema_version is therefore the row-2-vs-row-4 discriminator, not
+# cost-presence: rows 2 and 4 both have `.cost` absent, so cost-presence
+# alone cannot tell "legacy loop, nothing to report" from "sv2 loop, teardown
+# skipped a step it should have run".
+#
+# Staleness: computed from `.cost.prices_as_of` (a YYYY-MM-DD date string) vs
+# today, in DAYS. The date math itself fails open — a `prices_as_of` value
+# `date` cannot parse falls back to printing the raw string verbatim rather
+# than erroring or fabricating an age. Staleness is reported inline as
+# information, never as a block: the shipped price table is routinely weeks
+# stale, so treating staleness as a failure condition would fire on every
+# single loop.
+als_report_cost_on_complete() {
+  local category="$1" hook="$2" session="$3"
+  local category_lc; category_lc=$(printf '%s' "$category" | tr '[:upper:]' '[:lower:]')
+  [ "$category_lc" = "complete" ] || return 0
+  command -v jq >/dev/null 2>&1 || { als_log "hook=$hook session=$session cost_report=skipped_no_jq"; return 0; }
+  [ -n "$ALS_PATH" ] || { als_log "hook=$hook session=$session cost_report=skipped_no_als_path"; return 0; }
+  local retro; retro="$(dirname "$ALS_PATH")/retro.json"
+  # Absent/unreadable retro: the retro gate above already blocked on this, so
+  # reaching here means it was skipped (no jq) or the file vanished mid-turn.
+  # Silent to the human by design — the gate owns that message — but logged.
+  [ -f "$retro" ] || { als_log "hook=$hook session=$session cost_report=skipped_no_retro"; return 0; }
+
+  # The >=2 comparison happens INSIDE jq, deliberately, and must stay there.
+  # als_gate_retro_on_complete (which runs immediately before this reporter
+  # and lets the retro through) validates schema_version with jq's NUMERIC
+  # `>=`, so a float 2.0 or 2.5 passes it. Comparing in bash instead means
+  # pattern-matching a string: `case $sv in *[!0-9]*)` matches the "." and
+  # drops a float — so a retro carrying a perfectly valid cost would pass the
+  # gate and then vanish here, printing nothing (verified end-to-end: a
+  # {"schema_version":2.0, cost:{...$64.46...}} retro emitted absolutely
+  # nothing). Two validators disagreeing about the same field is how the
+  # exact bug this reporter exists to fix survives INSIDE the fix.
+  # schema_version is authored freehand by an LLM per prose instruction, not
+  # emitted by trusted code — treat it as adversarial input like every other
+  # field here, even though no float instance exists in the corpus yet.
+  local sv_ok; sv_ok=$(jq -r '(.schema_version // 0) | if type == "number" then (. >= 2) else false end' "$retro" 2>/dev/null)
+  # Legacy grandfather: a schema_version 1 retro predates the cost miner
+  # entirely, so there is no cost to report and silence is correct. Logged
+  # anyway — a silent path that leaves NO trace is indistinguishable from a
+  # broken one during an audit, which is the whole failure class this
+  # reporter exists to close.
+  [ "$sv_ok" = "true" ] || { als_log "hook=$hook session=$session cost_report=skipped_legacy_or_bad_sv"; return 0; }
+
+  local cost_type; cost_type=$(jq -r '(.cost // null) | type' "$retro" 2>/dev/null)
+  local msg=""
+  case "$cost_type" in
+    object)
+      local is_empty; is_empty=$(jq -r '(.cost | length) == 0' "$retro" 2>/dev/null)
+      if [ "$is_empty" = "true" ]; then
+        msg="cost unavailable (miner returned no data)"
+      else
+        # Scalars only. `jq -r` on a non-scalar (array/object) emits its
+        # PRETTY-PRINTED form — real newlines and all — which then lands
+        # inside the human-facing message: "Loop cost: $[\n 1,\n 2\n] (...)"
+        # (verified). That is not the "visibly-wrong beats fabricated" tradeoff
+        # this function makes elsewhere: that rule assumes a raw value a human
+        # can eyeball on one line, and it smuggles newlines into a report the
+        # terminal renders. A field of the wrong TYPE is unusable data, which
+        # is exactly what the incomplete path below already exists to report —
+        # so select non-scalars to empty and let them fall into it.
+        local usd tokens prices_as_of
+        usd=$(jq -r '(.cost.total_usd_estimate | select(type=="number" or type=="string")) // empty' "$retro" 2>/dev/null)
+        tokens=$(jq -r '(.cost.total_tokens | select(type=="number" or type=="string")) // empty' "$retro" 2>/dev/null)
+        prices_as_of=$(jq -r '(.cost.prices_as_of | select(type=="string")) // empty' "$retro" 2>/dev/null)
+        if [ -z "$usd" ] || [ -z "$tokens" ]; then
+          local missing=""
+          [ -z "$usd" ] && missing="total_usd_estimate"
+          if [ -z "$tokens" ]; then
+            [ -n "$missing" ] && missing="${missing}, total_tokens" || missing="total_tokens"
+          fi
+          msg="cost recorded but incomplete (missing ${missing})"
+          als_log "hook=$hook session=$session cost_report=cost_incomplete"
+          jq -n --arg m "$msg" '{systemMessage: $m}' 2>/dev/null
+          return 0
+        fi
+        # Staleness age. WARNS inline, never blocks: a stale price table means
+        # the table needs maintenance, not that this loop's work is invalid —
+        # and the table is routinely weeks old, so blocking on it would refuse
+        # every completion.
+        #
+        # The strict shape check before `date` is load-bearing, for the same
+        # reason as the printf guard below: `date -j -f %Y-%m-%d` does NOT
+        # reject trailing garbage — it silently ACCEPTS "2026-06-24FORGED",
+        # "2026-06-24 anything", and even an embedded-newline value, parsing
+        # the leading date and ignoring the rest (verified on macOS). A
+        # corrupt prices_as_of would therefore render a confident, precise
+        # "23 days old" computed from a value nobody should trust. Only pure
+        # garbage ("not-a-date") fails the parse and falls back to raw.
+        # So: gate on the exact YYYY-MM-DD shape FIRST, and let anything else
+        # print raw. Visibly-wrong beats plausibly-fabricated — the same rule
+        # the USD guard follows.
+        local age="$prices_as_of"
+        case "$prices_as_of" in
+          [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9])
+            local then_epoch now_epoch
+            then_epoch=$(date -j -f "%Y-%m-%d" "$prices_as_of" +%s 2>/dev/null)
+            now_epoch=$(date +%s 2>/dev/null)
+            if [ -n "$then_epoch" ] && [ -n "$now_epoch" ]; then
+              local days=$(( (now_epoch - then_epoch) / 86400 ))
+              age="prices as of $prices_as_of, $days days old"
+            fi
+            ;;
+        esac
+        # Round for display only: the miner stores full float precision
+        # ($64.45735454999999), which reads as noise in a one-line terminal
+        # report. Rounding happens HERE, not at extraction, so `usd` stays raw
+        # for the emptiness check above that drives the incomplete-data path.
+        #
+        # The numeric guard is NOT ceremony: `printf '%.2f'` does NOT fail on a
+        # non-numeric input, it silently prints 0.00 (verified). Handing it a
+        # garbage value would therefore FABRICATE "$0.00" — inventing a figure
+        # from unusable data is the precise failure this reporter exists to
+        # prevent (loop 0d3fb487 omitted its cost AND authored a false
+        # explanation for the omission). So: only round something that is
+        # actually a number; otherwise print the raw value and let it look
+        # wrong, because visibly-wrong beats plausibly-fabricated.
+        local usd_disp="$usd"
+        case "$usd" in
+          ''|*[!0-9.eE+-]*) ;;
+          *) usd_disp=$(printf '%.2f' "$usd" 2>/dev/null) || usd_disp="$usd" ;;
+        esac
+        [ -n "$usd_disp" ] || usd_disp="$usd"
+        msg="Loop cost: \$${usd_disp} (${tokens} tokens), ${age}"
+      fi
+      ;;
+    *)
+      msg="cost not recorded"
+      ;;
+  esac
+
+  [ -n "$msg" ] || { als_log "hook=$hook session=$session cost_report=skipped_empty_msg"; return 0; }
+  # Strip control characters before the message reaches a terminal. Every
+  # value interpolated above is retro.json-derived, and jq --arg guarantees
+  # only that the JSON stays well-formed — a live ESC (0x1B) survives JSON
+  # decode intact and lands in whatever renders this (verified). Whether the
+  # harness neutralises it is outside this repo and unknowable from here; a
+  # hook has no business shipping raw control bytes to a terminal on that
+  # assumption. Same posture als_log already takes on its own newlines.
+  # Printable + space/tab only; anything else becomes a space, so a hostile
+  # value stays visible-but-inert rather than executing as an escape.
+  msg=$(printf '%s' "$msg" | tr -c '[:print:][:space:]' ' ' | tr '\n\r\t' '   ')
+  # Log the outcome CLASS, never the message body: the body interpolates
+  # retro.json-derived values, and als_log's sanitisation is a backstop, not a
+  # reason to widen what reaches the log. The class is what a post-hoc audit
+  # actually needs — "did the human get a cost line, and if not, why".
+  local outcome="reported"
+  case "$msg" in
+    "cost unavailable"*) outcome="miner_failed_open" ;;
+    "cost not recorded"*) outcome="cost_absent" ;;
+    "cost recorded but incomplete"*) outcome="cost_incomplete" ;;
+  esac
+  als_log "hook=$hook session=$session cost_report=$outcome"
+  jq -n --arg m "$msg" '{systemMessage: $m}' 2>/dev/null
+  return 0
+}

@@ -1343,4 +1343,378 @@ else
   fails=$((fails+1))
 fi
 
+# =====================================================================
+# als_gate_cost_report_on_complete (als_report_cost_on_complete) — a REPORT,
+# never a gate: it must never block, only print a systemMessage on stdout (or
+# stay silent) once the retro/work_units/proof gates above have already
+# passed. Captures STDOUT (not stderr) since systemMessage is a stdout JSON
+# emission — run_capture_stderr above only ever inspects stderr, so it cannot
+# see this hook's output; a separate capture helper is required.
+run_capture_stdout() { # payload -> sets $RC_OUT and $STDOUT_OUT (no subshell)
+  local outfile="$TMP/stdout_${RANDOM}.txt"
+  echo "$1" | bash "$GUARD" >"$outfile" 2>/dev/null
+  RC_OUT=$?
+  STDOUT_OUT=$(cat "$outfile" 2>/dev/null)
+  rm -f "$outfile"
+}
+# Extracts .systemMessage from a stdout blob that may be empty or non-JSON;
+# jq -e failing (empty stdout, or JSON with no such key) yields "".
+system_message() { printf '%s' "$1" | jq -r '.systemMessage // empty' 2>/dev/null; }
+
+# (row 1) complete + schema_version>=2 + populated .cost -> ALLOW, PRINT a
+# systemMessage carrying the USD total, token total, and a staleness age
+# computed from prices_as_of vs today.
+reset; T=$(mk_transcript 1 "All done.
+LOOP-STOP: complete — done"); write_file in-progress S1 0
+STALE_DATE=$(date -u -v-5d +%Y-%m-%d 2>/dev/null || date -u -d '5 days ago' +%Y-%m-%d 2>/dev/null)
+write_retro S1 "$(jq -cn --arg d "$STALE_DATE" '{schema_version:2, cost:{total_usd_estimate:12.34, total_tokens:56789, prices_as_of:$d, per_model:{}}}')"
+run_capture_stdout "$(payload "$T" S1)"
+check "cost-report row1: populated cost -> allow" 0 "$RC_OUT"
+msg=$(system_message "$STDOUT_OUT")
+case "$msg" in *"12.34"*) usd_present=1 ;; *) usd_present=0 ;; esac
+check "cost-report row1: systemMessage names the USD total (12.34)" 1 "$usd_present"
+case "$msg" in *"56789"*) tok_present=1 ;; *) tok_present=0 ;; esac
+check "cost-report row1: systemMessage names the token total (56789)" 1 "$tok_present"
+case "$msg" in *"5 days old"*) age_present=1 ;; *) age_present=0 ;; esac
+check "cost-report row1: systemMessage names staleness (5 days old)" 1 "$age_present"
+check "cost-report row1: complete counter still bumped (report never blocks the counter path)" 1 "$(counter S1 complete)"
+
+# (row 2) complete + legacy schema_version 1 (no .cost field at all, the
+# pre-cost-miner shape) -> ALLOW, SILENT — must NOT be confused with row 4
+# (sv>=2, cost absent), which prints. schema_version is the discriminator,
+# not cost-presence, since both rows 2 and 4 have .cost absent.
+reset; T=$(mk_transcript 1 "All done.
+LOOP-STOP: complete — done"); write_file in-progress S1 0
+write_retro S1 '{"schema_version":1}'
+run_capture_stdout "$(payload "$T" S1)"
+check "cost-report row2: legacy sv1, no cost -> allow" 0 "$RC_OUT"
+check "cost-report row2: legacy sv1, no cost -> silent (no systemMessage)" "" "$(system_message "$STDOUT_OUT")"
+
+# (row 3) complete + sv>=2 + .cost == {} (miner ran, failed open) -> ALLOW,
+# PRINT "cost unavailable ..." with NO fabricated dollar figure.
+reset; T=$(mk_transcript 1 "All done.
+LOOP-STOP: complete — done"); write_file in-progress S1 0
+write_retro S1 '{"schema_version":2, "cost":{}}'
+run_capture_stdout "$(payload "$T" S1)"
+check "cost-report row3: sv2 + cost=={} -> allow" 0 "$RC_OUT"
+msg=$(system_message "$STDOUT_OUT")
+case "$msg" in *"cost unavailable"*"miner"*) unavailable_msg=1 ;; *) unavailable_msg=0 ;; esac
+check "cost-report row3: systemMessage says cost unavailable (miner returned no data)" 1 "$unavailable_msg"
+case "$msg" in *'$'[0-9]*) fabricated=1 ;; *) fabricated=0 ;; esac
+check "cost-report row3: systemMessage has NO fabricated \$ figure" 0 "$fabricated"
+
+# (row 4) complete + sv>=2 + .cost ABSENT entirely (teardown skipped the
+# cost-mining sub-step) -> ALLOW, PRINT "cost not recorded" — a message
+# DISTINCT from row 3's "cost unavailable (miner returned no data)".
+reset; T=$(mk_transcript 1 "All done.
+LOOP-STOP: complete — done"); write_file in-progress S1 0
+write_retro S1 '{"schema_version":2}'
+run_capture_stdout "$(payload "$T" S1)"
+check "cost-report row4: sv2 + cost absent -> allow" 0 "$RC_OUT"
+msg4=$(system_message "$STDOUT_OUT")
+case "$msg4" in *"not recorded"*) not_recorded_msg=1 ;; *) not_recorded_msg=0 ;; esac
+check "cost-report row4: systemMessage says cost not recorded" 1 "$not_recorded_msg"
+check "cost-report row3 vs row4: messages are textually distinct" 1 "$([ "$msg4" != "$msg" ] && echo 1 || echo 0)"
+
+# (row 4b) complete + sv>=2 + .cost is a NON-EMPTY object but MISSING
+# total_usd_estimate (partial miner output / schema drift) -> ALLOW, PRINT a
+# message that says the cost data is present but incomplete. Must NOT
+# silently return nothing (that would relocate the exact bug this PR exists
+# to fix from model-omission to hook-omission), and must NOT fabricate a $
+# figure. Message must be textually distinct from both row3's "cost
+# unavailable (miner returned no data)" and row4's "cost not recorded".
+reset; T=$(mk_transcript 1 "All done.
+LOOP-STOP: complete — done"); write_file in-progress S1 0
+write_retro S1 '{"schema_version":2, "cost":{"total_tokens":123}}'
+run_capture_stdout "$(payload "$T" S1)"
+check "cost-report row4b: sv2 + cost missing total_usd_estimate -> allow" 0 "$RC_OUT"
+msg4b=$(system_message "$STDOUT_OUT")
+check "cost-report row4b: systemMessage is emitted (not silent)" 1 "$([ -n "$msg4b" ] && echo 1 || echo 0)"
+case "$msg4b" in *'$'[0-9]*) fabricated4b=1 ;; *) fabricated4b=0 ;; esac
+check "cost-report row4b: systemMessage has NO fabricated \$ figure" 0 "$fabricated4b"
+case "$msg4b" in *"incomplete"*) incomplete_msg4b=1 ;; *) incomplete_msg4b=0 ;; esac
+check "cost-report row4b: systemMessage says cost incomplete" 1 "$incomplete_msg4b"
+check "cost-report row4b vs row3: messages are textually distinct" 1 "$([ "$msg4b" != "$msg" ] && echo 1 || echo 0)"
+check "cost-report row4b vs row4: messages are textually distinct" 1 "$([ "$msg4b" != "$msg4" ] && echo 1 || echo 0)"
+
+# (row 4c) complete + sv>=2 + .cost is a NON-EMPTY object but MISSING
+# total_tokens (the sibling missing-field case) -> ALLOW, PRINT a distinct
+# incomplete-cost message, no fabricated $ figure.
+reset; T=$(mk_transcript 1 "All done.
+LOOP-STOP: complete — done"); write_file in-progress S1 0
+write_retro S1 '{"schema_version":2, "cost":{"total_usd_estimate":9.99}}'
+run_capture_stdout "$(payload "$T" S1)"
+check "cost-report row4c: sv2 + cost missing total_tokens -> allow" 0 "$RC_OUT"
+msg4c=$(system_message "$STDOUT_OUT")
+check "cost-report row4c: systemMessage is emitted (not silent)" 1 "$([ -n "$msg4c" ] && echo 1 || echo 0)"
+case "$msg4c" in *'$'[0-9]*) fabricated4c=1 ;; *) fabricated4c=0 ;; esac
+check "cost-report row4c: systemMessage has NO fabricated \$ figure" 0 "$fabricated4c"
+case "$msg4c" in *"incomplete"*) incomplete_msg4c=1 ;; *) incomplete_msg4c=0 ;; esac
+check "cost-report row4c: systemMessage says cost incomplete" 1 "$incomplete_msg4c"
+
+# (row 5) non-complete category (e.g. hard-stop) -> SKIP, silent, no matter
+# what .cost looks like on a stale retro from an earlier declaration.
+reset; T=$(mk_transcript 1 "Work paused.
+LOOP-STOP: hard-stop — pausing"); write_file in-progress S1 0
+write_retro S1 '{"schema_version":2, "cost":{"total_usd_estimate":99.99,"total_tokens":1,"prices_as_of":"2026-01-01"}}'
+run_capture_stdout "$(payload "$T" S1)"
+check "cost-report row5: non-complete category -> allow" 0 "$RC_OUT"
+check "cost-report row5: non-complete category -> silent" "" "$(system_message "$STDOUT_OUT")"
+
+# (row 6) jq absent -> SKIP, silent (mirrors the existing NOJQ_BIN idiom used
+# for the sibling gates above).
+reset; T=$(mk_transcript 1 "All done.
+LOOP-STOP: complete — done"); write_file in-progress S1 0
+write_retro S1 '{"schema_version":2, "cost":{"total_usd_estimate":1.23,"total_tokens":10,"prices_as_of":"2026-01-01"}}'
+rc_nojq=$(run_env "PATH=$NOJQ_BIN" "$(payload "$T" S1)")
+check "cost-report row6: jq absent -> allow (fail-open)" 0 "$rc_nojq"
+
+# --- Negative controls -------------------------------------------------
+# These exist so a stubbed-to-no-op or a stubbed-to-blocking reporter cannot
+# pass this suite silently — a gate that never emits and never blocks proves
+# nothing on its own.
+
+# (a) Fails if the reporter is stubbed to a no-op: row 1's content assertions
+# above (usd/token/staleness all present) already require real emission —
+# restated here as an explicit non-empty-message assertion so the intent is
+# unambiguous on its own.
+reset; T=$(mk_transcript 1 "All done.
+LOOP-STOP: complete — done"); write_file in-progress S1 0
+write_retro S1 '{"schema_version":2, "cost":{"total_usd_estimate":7.5,"total_tokens":42,"prices_as_of":"2026-01-01"}}'
+run_capture_stdout "$(payload "$T" S1)"
+msg_noop_check=$(system_message "$STDOUT_OUT")
+check "negative control: reporter is NOT a no-op (systemMessage non-empty on row1)" 1 "$([ -n "$msg_noop_check" ] && echo 1 || echo 0)"
+
+# (b) Fails if the reporter is made to block. This must AGGREGATE REAL exit
+# codes, not restate a literal: `check "..." 0 0` compares 0 to 0, calls no
+# code, and passes under every implementation including a fully blocking one
+# — a "negative control" that can never fail is a false assurance parading as
+# the proof that the gate is real. Re-drive each row and sum the actual codes.
+neverblock_sum=0
+nb_row() { # <retro-json>
+  reset; local t; t=$(mk_transcript 1 "All done.
+LOOP-STOP: complete — done"); write_file in-progress S1 0
+  write_retro S1 "$1"
+  run_capture_stdout "$(payload "$t" S1)"
+  neverblock_sum=$((neverblock_sum + RC_OUT))
+}
+nb_row '{"schema_version":2, "cost":{"total_usd_estimate":7.5,"total_tokens":42,"prices_as_of":"2026-01-01"}}'
+nb_row '{"schema_version":1}'
+nb_row '{"schema_version":2, "cost":{}}'
+nb_row '{"schema_version":2}'
+nb_row '{"schema_version":2, "cost":{"total_tokens":123}}'
+nb_row '{"schema_version":2, "cost":{"total_usd_estimate":"not-a-number","total_tokens":1,"prices_as_of":"2026-06-24"}}'
+check "negative control: reporter never exits non-zero (summed real exit codes)" 0 "$neverblock_sum"
+
+# Date-math fail-open: a malformed prices_as_of must not crash the hook or
+# block the stop — it must fall back to printing the RAW prices_as_of string
+# instead of a computed "N days old" age.
+reset; T=$(mk_transcript 1 "All done.
+LOOP-STOP: complete — done"); write_file in-progress S1 0
+write_retro S1 '{"schema_version":2, "cost":{"total_usd_estimate":3.14,"total_tokens":100,"prices_as_of":"not-a-date"}}'
+run_capture_stdout "$(payload "$T" S1)"
+check "cost-report: malformed prices_as_of -> allow (date math fails open)" 0 "$RC_OUT"
+msg_baddate=$(system_message "$STDOUT_OUT")
+case "$msg_baddate" in *"not-a-date"*) raw_fallback=1 ;; *) raw_fallback=0 ;; esac
+check "cost-report: malformed prices_as_of -> raw string falls back into the message" 1 "$raw_fallback"
+case "$msg_baddate" in *"days old"*) computed_age=1 ;; *) computed_age=0 ;; esac
+check "cost-report: malformed prices_as_of -> no fabricated 'days old' age computed" 0 "$computed_age"
+
+# USD display rounding: the miner stores full float precision, which reads as
+# noise in a one-line terminal report. Round to 2dp for display.
+reset; T=$(mk_transcript 1 "All done.
+LOOP-STOP: complete — done"); write_file in-progress S1 0
+write_retro S1 '{"schema_version":2, "cost":{"total_usd_estimate":64.45735454999999,"total_tokens":93987957,"prices_as_of":"2026-06-24"}}'
+run_capture_stdout "$(payload "$T" S1)"
+msg_round=$(system_message "$STDOUT_OUT")
+case "$msg_round" in *'$64.46'*) rounded=1 ;; *) rounded=0 ;; esac
+check "cost-report: float-noise USD is rounded to 2dp for display" 1 "$rounded"
+case "$msg_round" in *"45735454"*) raw_float=1 ;; *) raw_float=0 ;; esac
+check "cost-report: raw float precision does not leak into the message" 0 "$raw_float"
+
+# Anti-fabrication guard on the rounding path. `printf '%.2f'` does NOT fail on
+# a non-numeric input — it silently prints 0.00 (verified). Rounding a garbage
+# value would therefore FABRICATE "$0.00" from unusable data, which is the
+# exact failure class this reporter exists to prevent. A non-numeric USD must
+# print RAW (visibly wrong) rather than rounded (plausibly fabricated).
+reset; T=$(mk_transcript 1 "All done.
+LOOP-STOP: complete — done"); write_file in-progress S1 0
+write_retro S1 '{"schema_version":2, "cost":{"total_usd_estimate":"not-a-number","total_tokens":42,"prices_as_of":"2026-06-24"}}'
+run_capture_stdout "$(payload "$T" S1)"
+check "cost-report: non-numeric USD -> allow (never blocks)" 0 "$RC_OUT"
+msg_nan=$(system_message "$STDOUT_OUT")
+case "$msg_nan" in *'$0.00'*) fabricated=1 ;; *) fabricated=0 ;; esac
+check "cost-report: non-numeric USD is NOT fabricated into \$0.00" 0 "$fabricated"
+case "$msg_nan" in *"not-a-number"*) raw_shown=1 ;; *) raw_shown=0 ;; esac
+check "cost-report: non-numeric USD falls back to the raw value" 1 "$raw_shown"
+
+# Date-laundering guard. `date -j -f %Y-%m-%d` does NOT reject trailing
+# garbage — it silently accepts "2026-06-24FORGED" and parses the leading
+# date (verified). Without a strict shape check, a corrupt prices_as_of
+# renders a confident "N days old" computed from an untrustworthy value:
+# fabricated precision, the same failure class as the $0.00 guard above.
+# Only an exact YYYY-MM-DD may reach the date math; anything else prints raw.
+reset; T=$(mk_transcript 1 "All done.
+LOOP-STOP: complete — done"); write_file in-progress S1 0
+write_retro S1 '{"schema_version":2, "cost":{"total_usd_estimate":1,"total_tokens":2,"prices_as_of":"2026-06-24FORGED"}}'
+run_capture_stdout "$(payload "$T" S1)"
+check "cost-report: trailing-garbage date -> allow (never blocks)" 0 "$RC_OUT"
+msg_launder=$(system_message "$STDOUT_OUT")
+case "$msg_launder" in *"days old"*) laundered=1 ;; *) laundered=0 ;; esac
+check "cost-report: trailing-garbage date does NOT fabricate a 'days old' age" 0 "$laundered"
+case "$msg_launder" in *"2026-06-24FORGED"*) raw_kept=1 ;; *) raw_kept=0 ;; esac
+check "cost-report: trailing-garbage date falls back to the raw string" 1 "$raw_kept"
+
+# A clean date must STILL compute the age — the guard must not be so strict
+# that it breaks the happy path it exists to protect.
+reset; T=$(mk_transcript 1 "All done.
+LOOP-STOP: complete — done"); write_file in-progress S1 0
+write_retro S1 '{"schema_version":2, "cost":{"total_usd_estimate":1,"total_tokens":2,"prices_as_of":"2026-06-24"}}'
+run_capture_stdout "$(payload "$T" S1)"
+msg_clean=$(system_message "$STDOUT_OUT")
+case "$msg_clean" in *"days old"*) still_computes=1 ;; *) still_computes=0 ;; esac
+check "cost-report: a clean YYYY-MM-DD still computes the staleness age" 1 "$still_computes"
+
+# Audit trail. Every sibling gate in this file logs its outcome via als_log
+# (retro=3 calls, work_units=2, proofs=10); the reporter must too, per
+# AGENTS.md's hook-script conventions. This matters most on the SILENT paths:
+# a path that emits nothing to the human AND leaves no log line is
+# indistinguishable from a broken one during an audit — which is precisely
+# the failure class this reporter exists to close.
+#
+# The log records the outcome CLASS only, never the message body: the body
+# interpolates retro.json-derived values, and als_log's newline sanitisation
+# is a backstop, not a licence to widen what reaches the log.
+cost_log_case() { # <retro-json> -> echoes the logged cost_report= class
+  local lg="$TMP/costlog_${RANDOM}.txt"; : > "$lg"
+  local st="$TMP/costlog_state_${RANDOM}.json"
+  local rt; rt="$(dirname "$st")/retro.json"
+  echo '{"schema_version":1,"status":"complete"}' > "$st"
+  printf '%s' "$1" > "$rt"
+  (
+    # shellcheck disable=SC1090
+    . "$(cd "$(dirname "$0")/.." && pwd)/lib/loop_state_common.sh" 2>/dev/null
+    ALS_PATH="$st" LOG_FILE="$lg" \
+      als_report_cost_on_complete "complete" "loop_stall_guard" "s"
+  ) >/dev/null 2>&1
+  grep -o 'cost_report=[a-z_0-9]*' "$lg" 2>/dev/null | head -1
+}
+
+check "cost-report log: populated cost -> cost_report=reported" \
+  "cost_report=reported" \
+  "$(cost_log_case '{"schema_version":2,"cost":{"total_usd_estimate":1,"total_tokens":2,"prices_as_of":"2026-06-24"}}')"
+check "cost-report log: miner failed open -> cost_report=miner_failed_open" \
+  "cost_report=miner_failed_open" \
+  "$(cost_log_case '{"schema_version":2,"cost":{}}')"
+check "cost-report log: cost absent -> cost_report=cost_absent" \
+  "cost_report=cost_absent" \
+  "$(cost_log_case '{"schema_version":2}')"
+check "cost-report log: incomplete cost -> cost_report=cost_incomplete" \
+  "cost_report=cost_incomplete" \
+  "$(cost_log_case '{"schema_version":2,"cost":{"total_tokens":9}}')"
+# The silent legacy path MUST still leave a trace — silence + no log is the
+# indistinguishable-from-broken case above.
+check "cost-report log: legacy sv1 silent path is still logged" \
+  "cost_report=skipped_legacy_or_bad_sv" \
+  "$(cost_log_case '{"schema_version":1}')"
+
+
+# No retro-derived VALUE may reach the log — only the outcome class.
+leak_lg="$TMP/costleak.txt"; : > "$leak_lg"
+leak_st="$TMP/costleak_state.json"
+echo '{"schema_version":1,"status":"complete"}' > "$leak_st"
+printf '%s' '{"schema_version":2,"cost":{"total_usd_estimate":31337.42,"total_tokens":999,"prices_as_of":"2026-06-24"}}' \
+  > "$(dirname "$leak_st")/retro.json"
+(
+  # shellcheck disable=SC1090
+  . "$(cd "$(dirname "$0")/.." && pwd)/lib/loop_state_common.sh" 2>/dev/null
+  ALS_PATH="$leak_st" LOG_FILE="$leak_lg" \
+    als_report_cost_on_complete "complete" "loop_stall_guard" "s"
+) >/dev/null 2>&1
+leaked=$(grep -c "31337" "$leak_lg" 2>/dev/null); leaked=${leaked:-0}
+check "cost-report log: no retro-derived value leaks into the log" 0 "$leaked"
+
+# Non-scalar cost fields. `jq -r` on an array/object emits its PRETTY-PRINTED
+# form — real newlines included — which lands inside the human-facing message
+# ("Loop cost: $[\n  1,\n  2\n] (...)", verified before the fix). Two reasons
+# that must not stand: it smuggles newlines into a report the terminal
+# renders, and "$true"/"$[1,2]" is not a dollar figure a human can eyeball,
+# so it fails the "visibly-wrong beats plausibly-fabricated" rule rather than
+# satisfying it. A wrong-TYPE field is unusable data -> the incomplete path.
+nonscalar_msg() { # <retro-json> -> the emitted systemMessage
+  reset; local t; t=$(mk_transcript 1 "All done.
+LOOP-STOP: complete — done"); write_file in-progress S1 0
+  write_retro S1 "$1"
+  run_capture_stdout "$(payload "$t" S1)"
+  system_message "$STDOUT_OUT"
+}
+
+m_arr=$(nonscalar_msg '{"schema_version":2,"cost":{"total_usd_estimate":[1,2,3],"total_tokens":10,"prices_as_of":"2026-06-24"}}')
+case "$m_arr" in *"incomplete"*) arr_ok=1 ;; *) arr_ok=0 ;; esac
+check "cost-report: array USD -> incomplete message (not a raw JSON blob)" 1 "$arr_ok"
+check "cost-report: array USD -> message is single-line (no smuggled newlines)" 0 "$(printf '%s' "$m_arr" | grep -c '^' | awk '{print $1-1}')"
+
+m_obj=$(nonscalar_msg '{"schema_version":2,"cost":{"total_usd_estimate":{"a":1},"total_tokens":10,"prices_as_of":"2026-06-24"}}')
+case "$m_obj" in *"incomplete"*) obj_ok=1 ;; *) obj_ok=0 ;; esac
+check "cost-report: object USD -> incomplete message" 1 "$obj_ok"
+
+m_bool=$(nonscalar_msg '{"schema_version":2,"cost":{"total_usd_estimate":true,"total_tokens":10,"prices_as_of":"2026-06-24"}}')
+case "$m_bool" in *'$true'*) bool_leaked=1 ;; *) bool_leaked=0 ;; esac
+check "cost-report: boolean USD does not render as \"\$true\"" 0 "$bool_leaked"
+
+m_atok=$(nonscalar_msg '{"schema_version":2,"cost":{"total_usd_estimate":1.5,"total_tokens":[9,9],"prices_as_of":"2026-06-24"}}')
+case "$m_atok" in *"incomplete"*) atok_ok=1 ;; *) atok_ok=0 ;; esac
+check "cost-report: array tokens -> incomplete message" 1 "$atok_ok"
+check "cost-report: array tokens -> message is single-line" 0 "$(printf '%s' "$m_atok" | grep -c '^' | awk '{print $1-1}')"
+
+# A non-scalar prices_as_of must not blow up the age path either; the cost
+# figure itself is still good, so this must STILL report the cost.
+m_apr=$(nonscalar_msg '{"schema_version":2,"cost":{"total_usd_estimate":2.5,"total_tokens":7,"prices_as_of":["x"]}}')
+case "$m_apr" in *'$2.50'*) apr_reports=1 ;; *) apr_reports=0 ;; esac
+check "cost-report: non-scalar prices_as_of still reports the cost figure" 1 "$apr_reports"
+check "cost-report: non-scalar prices_as_of -> message is single-line" 0 "$(printf '%s' "$m_apr" | grep -c '^' | awk '{print $1-1}')"
+
+# Float schema_version. als_gate_retro_on_complete validates schema_version
+# with jq's NUMERIC >=, so 2.0 passes the gate and reaches this reporter. If
+# the reporter compares in bash instead (string pattern match), the "." trips
+# *[!0-9]* and a retro carrying a fully valid cost silently prints NOTHING —
+# the exact bug this reporter exists to fix, surviving inside the fix. The
+# two validators must agree on what a valid schema_version is. No float
+# instance exists in the corpus yet, but schema_version is authored freehand
+# by an LLM per prose, not emitted by trusted code.
+m_float=$(nonscalar_msg '{"schema_version":2.0,"cost":{"total_usd_estimate":64.46,"total_tokens":93987957,"prices_as_of":"2026-06-24"}}')
+check "cost-report: float schema_version 2.0 still reports (the retro gate accepts it, so must this)" 1 \
+  "$([ -n "$m_float" ] && echo 1 || echo 0)"
+case "$m_float" in *'$64.46'*) float_usd=1 ;; *) float_usd=0 ;; esac
+check "cost-report: float schema_version 2.0 reports the real USD figure" 1 "$float_usd"
+
+m_float25=$(nonscalar_msg '{"schema_version":2.5,"cost":{"total_usd_estimate":1.25,"total_tokens":5,"prices_as_of":"2026-06-24"}}')
+check "cost-report: float schema_version 2.5 still reports" 1 "$([ -n "$m_float25" ] && echo 1 || echo 0)"
+
+# ...but a float BELOW 2 must still grandfather silently, exactly like sv1 —
+# the fix must not widen the gate it is correcting.
+m_float19=$(nonscalar_msg '{"schema_version":1.9,"cost":{"total_usd_estimate":1,"total_tokens":1,"prices_as_of":"2026-06-24"}}')
+check "cost-report: float schema_version 1.9 is still grandfathered (silent)" "" "$m_float19"
+
+# Control-character neutralisation. jq --arg guarantees the JSON stays
+# well-formed, NOT that the decoded string is safe to render: a live ESC
+# (0x1B) survives JSON decode and reaches whatever draws the message. The
+# harness's own handling is outside this repo and unknowable from here, so
+# the hook strips control bytes itself rather than assuming — the same
+# posture als_log already takes on its own newlines.
+esc_char=$(printf '\033')
+m_esc=$(nonscalar_msg "$(jq -cn --arg p "${esc_char}[2J${esc_char}[31mRED" \
+  '{schema_version:2, cost:{total_usd_estimate:1.5, total_tokens:3, prices_as_of:$p}}')")
+esc_present=$(printf '%s' "$m_esc" | LC_ALL=C grep -c "$esc_char" 2>/dev/null); esc_present=${esc_present:-0}
+check "cost-report: ESC byte is stripped from the human-facing message" 0 "$esc_present"
+check "cost-report: message with hostile prices_as_of is still emitted (not silenced)" 1 \
+  "$([ -n "$m_esc" ] && echo 1 || echo 0)"
+case "$m_esc" in *'$1.50'*) esc_usd=1 ;; *) esc_usd=0 ;; esac
+check "cost-report: hostile prices_as_of does not suppress the real USD figure" 1 "$esc_usd"
+
+# The stripper must not damage a normal message.
+m_norm=$(nonscalar_msg '{"schema_version":2,"cost":{"total_usd_estimate":64.46,"total_tokens":93987957,"prices_as_of":"2026-06-24"}}')
+case "$m_norm" in *'Loop cost: $64.46 (93987957 tokens), prices as of 2026-06-24, '*'days old'*) norm_ok=1 ;; *) norm_ok=0 ;; esac
+check "cost-report: a normal message survives control-char stripping intact" 1 "$norm_ok"
+
 [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails)"; exit 1; }
