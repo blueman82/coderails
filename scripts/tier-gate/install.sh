@@ -106,6 +106,32 @@ tgi_render_plist() {
     ' "$template_path"
 }
 
+# ─── Preflight: ruleset visibility (honest MODE line) ────────────────────────
+
+# tgi_classify_mode <rules_json>
+# Classifies enforcement mode from the response body of
+# `gh api repos/{owner}/{repo}/rules/branches/main` (works on plain read
+# scope, no admin permission required). A non-empty JSON array means a
+# ruleset protects main -> the merge gate is server-enforced on top of the
+# unforgeable verdict. An empty array, or any response this can't parse as a
+# JSON array (free-plan private repos return `[]`; a malformed/empty body is
+# treated the same way), means no ruleset exists -> the server-side
+# enforcement leg is absent and the merge gate is local-only and bypassable.
+# Fails closed toward the honest under-claim: any doubt classifies as audit,
+# never enforced — this is a WARN line, not a refusal, so getting it wrong in
+# the pessimistic direction costs nothing but getting it wrong optimistically
+# would tell an adopter they're protected when they are not.
+tgi_classify_mode() {
+    local rules_json="$1"
+    local count
+    count=$(printf '%s' "$rules_json" | jq 'length' 2>/dev/null)
+    if [[ "$count" =~ ^[0-9]+$ ]] && [[ "$count" -gt 0 ]]; then
+        printf 'MODE: enforced'
+    else
+        printf 'MODE: audit (server leg absent) — verdict unforgeable, merge gate local-only and bypassable'
+    fi
+}
+
 # ─── Repo-vs-installed diff, printed BEFORE promote ───────────────────────────
 
 # tgi_diff_before_promote <repo_path> <installed_path> <label>
@@ -144,6 +170,12 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
         exit 1
     fi
     echo "preflight OK"
+
+    echo "== tier-gate install: ruleset visibility =="
+    rules_json=$(gh api "repos/{owner}/{repo}/rules/branches/main" 2>/dev/null || printf '')
+    tgi_classify_mode "$rules_json"
+    echo
+    echo "(WARN only — install proceeds either way; this states which mode the merge gate runs in.)"
 
     echo "== tier-gate install: render plist =="
     RENDERED_PLIST=$(tgi_render_plist \

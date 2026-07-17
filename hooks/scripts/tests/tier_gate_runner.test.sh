@@ -49,6 +49,7 @@ reset_gh_state() {
     printf '[]' > "$STATUSES_FILE"
     : > "$POSTED_LOG"
     : > "$COMMENT_B64_FILE"
+    : > "$TMP/gh_token_calls.log" 2>/dev/null || true
 }
 
 write_gh_stub() {
@@ -97,9 +98,62 @@ set_statuses() { # json array
     printf '%s' "$1" > "$STATUSES_FILE"
 }
 
+# ─── curl stub for tg_post_status (Fix 7: identity-bound status POST) ────────
+# The status POST moves off `gh` onto a PATH-pinned curl (TIER_GATE_CURL_BIN)
+# carrying the machine-user GH_TOKEN as a Bearer token, guarded by a live
+# `GET /user` identity check. This stub serves BOTH endpoints so the T-series
+# (which predates Fix 7 and asserts on POSTED_LOG in the pre-existing
+# `POST state=... description=...` format) keeps passing unchanged, and new
+# identity-focused tests (below) can inspect the auth header / GET-/user calls.
+GH_TOKEN_CALLS="$TMP/gh_token_calls.log"      # Authorization header seen per statuses/ POST
+USER_LOGIN_RESPONSE="$TMP/user_login_response" # what GET /user echoes back
+TIER_GATE_CREDS_FILE="$TMP/tier-gate-creds"
+
+# default: identity matches, so pre-existing T-series tests (which don't
+# care about identity) see a normal, unblocked POST by default.
+set_expected_login() { printf '%s' "$1" > "$TMP/expected_login"; }  # what the creds file's token belongs to
+set_user_login_response() { printf '{"login":"%s"}' "$1" > "$USER_LOGIN_RESPONSE"; }
+write_tier_gate_creds() { # <gh_token>
+    printf 'GH_TOKEN=%s\n' "$1" > "$TIER_GATE_CREDS_FILE"
+}
+
+write_tier_gate_creds "ghp_machine_user_fixture_token"
+set_expected_login "coderails-tier-bot"
+set_user_login_response "coderails-tier-bot"
+
+write_status_curl_stub() {
+    cat > "$TMP/curl" <<CURLSTUB
+#!/bin/bash
+args="\$*"
+case "\$args" in
+  *"api.github.com/user"*)
+    # log the bearer token presented for the identity check
+    tok=\$(printf '%s' "\$args" | grep -oE 'Authorization: Bearer [^ ]*' | head -1)
+    echo "\$tok" >> "$GH_TOKEN_CALLS"
+    cat "$USER_LOGIN_RESPONSE"
+    ;;
+  *"statuses/"*)
+    tok=\$(printf '%s' "\$args" | grep -oE 'Authorization: Bearer [^ ]*' | head -1)
+    echo "\$tok" >> "$GH_TOKEN_CALLS"
+    state=\$(printf '%s' "\$args" | grep -oE '"state"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed -E 's/.*"([^"]*)"\$/\1/')
+    desc=\$(printf '%s' "\$args" | grep -oE '"description"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed -E 's/.*"([^"]*)"\$/\1/')
+    echo "POST state=\$state description=\$desc" >> "$POSTED_LOG"
+    ;;
+  *)
+    exit 0
+    ;;
+esac
+CURLSTUB
+    chmod +x "$TMP/curl"
+}
+
 run_gate() {
     (
         export PATH="$TMP:$PATH"
+        export TIER_GATE_CREDS="$TIER_GATE_CREDS_FILE"
+        export TIER_GATE_MACHINE_USER="$(cat "$TMP/expected_login")"
+        export TIER_GATE_CURL_BIN="$TMP/curl"
+        write_status_curl_stub
         tg_gate_pr "$TEST_PR"
     )
 }
@@ -605,5 +659,58 @@ rc=$?
 check "J14: out-of-enum verdict -> tg_judge rc 1 (never a silent pass)" "1" "$rc"
 check_not_contains "J14: never reports bare 'legitimate' for an invalid verdict" "legitimate" "$(printf '%s' "$out" | head -1)"
 write_curl_stub "$(anthropic_success_body legitimate "fine")"  # restore
+
+# ══════════════════════════════════════════════════════════════════════════
+# Fix 7: tg_post_status carries the machine-user credential via curl
+# (never gh), guarded by a live GET /user identity check. Tests inspect the
+# REAL curl invocation (auth header / endpoint hit) — never just the return
+# value — per the J11 "inspect the real call" convention above.
+# ══════════════════════════════════════════════════════════════════════════
+
+# I1: tg_post_status's write goes through curl carrying the GH_TOKEN as a
+# Bearer credential — not through gh, and not unauthenticated.
+TEST_PR=201 TEST_SHA=sha_identity_ok
+reset_gh_state
+write_gh_stub
+set_comment_body "$(tier1_body "$TEST_PR" "$TEST_SHA" GO)"  # tier-1: short-circuit success, exercises tg_post_status without the judge
+set_expected_login "coderails-tier-bot"
+set_user_login_response "coderails-tier-bot"
+write_tier_gate_creds "ghp_machine_user_fixture_token"
+out=$(run_gate)
+token_calls=$(cat "$GH_TOKEN_CALLS" 2>/dev/null)
+check_contains "I1: the status POST carries the machine-user GH_TOKEN as a Bearer credential" "Bearer ghp_machine_user_fixture_token" "$token_calls"
+
+# I2: a login mismatch (GET /user returns a DIFFERENT login than configured)
+# aborts the post entirely — no status posted under the wrong identity — and
+# logs a named error, fail-closed. SHA deliberately does NOT contain the word
+# "identity" — an earlier draft of this test used sha_identity_mismatch as
+# the fixture SHA, which made the "named error" assertion below pass
+# trivially (the SHA itself echoes back into the summary line, matching the
+# grep for free) even against pre-fix code that never checks identity at all.
+TEST_PR=202 TEST_SHA=sha_mismatch_case
+reset_gh_state
+write_gh_stub
+set_comment_body "$(tier1_body "$TEST_PR" "$TEST_SHA" GO)"
+set_expected_login "coderails-tier-bot"
+set_user_login_response "some-other-account"   # credential loaded belongs to the WRONG login
+write_tier_gate_creds "ghp_wrong_account_token"
+out=$(run_gate 2>&1)
+posted=$(cat "$POSTED_LOG" 2>/dev/null)
+check "I2: login mismatch -> nothing posted (fail closed, never posts under the wrong identity)" "" "$posted"
+check_contains "I2: login mismatch -> named error identifies the cause" "identity" "$out"
+
+# I3: negative control for I2 — matching identity on the SAME fixture shape
+# reaches a normal post, proving I2 discriminates on the mismatch and isn't
+# just always blocking.
+TEST_PR=203 TEST_SHA=sha_identity_match_control
+reset_gh_state
+write_gh_stub
+set_comment_body "$(tier1_body "$TEST_PR" "$TEST_SHA" GO)"
+set_expected_login "coderails-tier-bot"
+set_user_login_response "coderails-tier-bot"
+write_tier_gate_creds "ghp_machine_user_fixture_token"
+out=$(run_gate)
+posted=$(cat "$POSTED_LOG" 2>/dev/null)
+check_contains "I3: matching identity -> status IS posted (negative control for I2)" "state=success" "$posted"
 
 [[ $fails -eq 0 ]] && { echo PASS; exit 0; } || { echo "FAIL ($fails)"; exit 1; }

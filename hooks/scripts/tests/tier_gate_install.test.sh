@@ -175,6 +175,22 @@ check_contains "tgi_diff_before_promote: differs -> flags DIFFERS" "DIFFERS from
 check_contains "tgi_diff_before_promote: differs -> shows the actual delta" "TAMPERED" "$out"
 
 # ═══════════════════════════════════════════════════════════════════════════
+# tgi_classify_mode — honest MODE line from the ruleset preflight probe
+# ═══════════════════════════════════════════════════════════════════════════
+
+out=$(tgi_classify_mode '[]')
+check "tgi_classify_mode: empty ruleset array -> audit" "MODE: audit (server leg absent) — verdict unforgeable, merge gate local-only and bypassable" "$out"
+
+out=$(tgi_classify_mode '[{"type":"pull_request"}]')
+check "tgi_classify_mode: non-empty ruleset array -> enforced" "MODE: enforced" "$out"
+
+out=$(tgi_classify_mode '')
+check "tgi_classify_mode: empty/unreadable response -> audit (honest under-claim, never enforced)" "MODE: audit (server leg absent) — verdict unforgeable, merge gate local-only and bypassable" "$out"
+
+out=$(tgi_classify_mode 'not json')
+check "tgi_classify_mode: malformed response -> audit (honest under-claim, never enforced)" "MODE: audit (server leg absent) — verdict unforgeable, merge gate local-only and bypassable" "$out"
+
+# ═══════════════════════════════════════════════════════════════════════════
 echo "───"
 if [[ "$fails" -eq 0 ]]; then echo "PASS"; exit 0
 else echo "FAILED ($fails)"; exit 1

@@ -108,7 +108,15 @@ tg_with_watchdog() {
     wait "$pid"
 }
 
-# ─── GitHub I/O (all through `gh` on PATH — stubbable in tests) ──────────────
+# ─── GitHub I/O (reads through `gh` on PATH; the credentialled status WRITE
+#     goes through curl instead — see tg_post_status's own header comment) ───
+
+# TIER_GATE_CURL_BIN: PATH-pinned by default to the root-owned system curl.
+# `gh` lives in /opt/homebrew/bin, which is uid-501-writable — a root daemon
+# exec'ing it for a credentialled write would let anything able to write
+# there intercept the machine-user token. curl at /usr/bin is root:wheel.
+# Overridable so tests can point it at a stub.
+TIER_GATE_CURL_BIN="${TIER_GATE_CURL_BIN:-/usr/bin/curl}"
 
 # tg_open_prs
 # Echoes one PR number per line for every open PR.
@@ -173,16 +181,119 @@ tg_commit_statuses() {
         --jq "[.[] | select(.context == \"$TIER_GATE_CONTEXT\")]"
 }
 
+# tg_repo_slug
+# Echoes "<owner>/<repo>" resolved from `git remote get-url origin`. Native
+# reimplementation of git-common.sh's repo() (same regex) rather than
+# sourcing it — see this file's header comment on why the daemon never
+# sources scripts/lib/*.sh at runtime. Needed because the credentialled
+# status POST (tg_post_status, below) moved off `gh api repos/{owner}/{repo}/
+# ...`, whose {owner}/{repo} placeholder gh resolves for us automatically —
+# curl has no equivalent, so this function is curl's replacement for it.
+tg_repo_slug() {
+    local url; url=$(git remote get-url origin 2>/dev/null) || return 1
+    if [[ "$url" =~ github\.com[:/]([^/]+)/(.+)$ ]]; then
+        local name="${BASH_REMATCH[2]}"
+        name="${name%/}"
+        name="${name%.git}"
+        printf '%s/%s' "${BASH_REMATCH[1]}" "$name"
+    fi
+}
+
+# tg_read_gh_token <creds_path>
+# Echoes the GH_TOKEN value from the credentials file, or empty string with a
+# named error on stderr if the file is missing or the key is absent. Same
+# shape as tg_judge_read_api_key (below) but reads a distinct credential
+# from the same root-owned file (install.sh's tgi_check_credentials already
+# requires both keys present).
+tg_read_gh_token() {
+    local creds_path="$1"
+    if [[ ! -f "$creds_path" ]]; then
+        printf 'tg_post_status: error: TIER_GATE_CREDS file not found at %s\n' "$creds_path" >&2
+        return 1
+    fi
+    local token
+    token=$(grep -E '^GH_TOKEN=' "$creds_path" | head -1 | cut -d= -f2-)
+    if [[ -z "$token" ]]; then
+        printf 'tg_post_status: error: GH_TOKEN not present in credentials file %s\n' "$creds_path" >&2
+        return 1
+    fi
+    printf '%s' "$token"
+}
+
+# tg_verify_identity <token>
+# Calls GET /user with <token> and echoes the authenticated login on success.
+# Returns 1 (empty stdout) on any fetch/parse failure — caller treats that
+# the same as a mismatch (fail closed).
+tg_verify_identity() {
+    local token="$1"
+    local response
+    response=$(tg_with_watchdog "$TIER_GATE_WATCHDOG_TIMEOUT" -- \
+        "$TIER_GATE_CURL_BIN" -sS --max-time "$TIER_GATE_WATCHDOG_TIMEOUT" \
+        https://api.github.com/user \
+        -H "Authorization: Bearer ${token}" \
+        -H "Accept: application/vnd.github+json")
+    printf '%s' "$response" | jq -r '.login // empty' 2>/dev/null
+}
+
 # tg_post_status <sha> <state> <description>
 # Posts a commit status on <sha> for TIER_GATE_CONTEXT with <state>
 # (pending|success|failure|error) and <description>.
+#
+# Fix 7: this write carries the root-owned machine-user credential
+# (TIER_GATE_CREDS' GH_TOKEN) via curl, PREFERRED over `gh` for exactly this
+# call — gh lives under /opt/homebrew/bin (uid-501-writable); a root daemon
+# exec'ing it for a credentialled write is a privilege-escalation surface
+# that curl at /usr/bin (root:wheel) is not. Reads elsewhere in this file
+# stay on gh; only this credentialled write moved.
+#
+# Before ever posting, this calls tg_verify_identity with the SAME
+# credential and aborts — posts nothing, logs a named error — unless the
+# returned login matches TIER_GATE_MACHINE_USER exactly. A mismatch means
+# the wrong credential is loaded (misconfiguration, or a tampered creds
+# file): failing closed here is what makes the identity check meaningful —
+# posting under an unverified identity would defeat the whole point of
+# creator-binding downstream in merge.sh.
 tg_post_status() {
     local sha="$1" state="$2" description="$3"
+
+    local machine_user="${TIER_GATE_MACHINE_USER:-}"
+    if [[ -z "$machine_user" ]]; then
+        printf 'tg_post_status: error: TIER_GATE_MACHINE_USER is not set\n' >&2
+        return 1
+    fi
+
+    local creds_path="${TIER_GATE_CREDS:-}"
+    if [[ -z "$creds_path" ]]; then
+        printf 'tg_post_status: error: TIER_GATE_CREDS is not set\n' >&2
+        return 1
+    fi
+    local token
+    token=$(tg_read_gh_token "$creds_path") || return 1
+
+    local actual_login
+    actual_login=$(tg_verify_identity "$token")
+    if [[ -z "$actual_login" || "$actual_login" != "$machine_user" ]]; then
+        printf 'tg_post_status: error: identity check failed — GET /user returned login "%s", expected machine user "%s". Aborting post under an unverified identity.\n' \
+            "$actual_login" "$machine_user" >&2
+        return 1
+    fi
+
+    local repo_slug; repo_slug=$(tg_repo_slug)
+    if [[ -z "$repo_slug" ]]; then
+        printf 'tg_post_status: error: could not resolve owner/repo from git remote origin\n' >&2
+        return 1
+    fi
+
+    local body
+    body=$(jq -n --arg state "$state" --arg context "$TIER_GATE_CONTEXT" --arg description "$description" \
+        '{state: $state, context: $context, description: $description}')
+
     tg_with_watchdog "$TIER_GATE_WATCHDOG_TIMEOUT" -- \
-        gh api "repos/{owner}/{repo}/statuses/${sha}" \
-        -f "state=${state}" \
-        -f "context=${TIER_GATE_CONTEXT}" \
-        -f "description=${description}" \
+        "$TIER_GATE_CURL_BIN" -sS --max-time "$TIER_GATE_WATCHDOG_TIMEOUT" \
+        "https://api.github.com/repos/${repo_slug}/statuses/${sha}" \
+        -H "Authorization: Bearer ${token}" \
+        -H "Accept: application/vnd.github+json" \
+        -d "$body" \
         >/dev/null
 }
 
