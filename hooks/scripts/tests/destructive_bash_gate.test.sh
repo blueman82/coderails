@@ -704,4 +704,81 @@ check "no allowlist: -c option before status (unrelated subcommand) -> allow" AL
 check "no allowlist: --no-pager before log (unrelated subcommand) -> allow" ALLOW \
   "$(run_cwd "$(payload_with_cwd "git --no-pager log -1" "$OPT_REPO")" "$OPT_REPO")"
 
+# --- SECURITY: TAB-separated forms of every OTHER blocklist detector in this
+# file (not just the git-push naked-force one fixed above). Every one of
+# these detectors used a literal-space-only "+" (or a literal-space "(^| )"
+# boundary, or "[= ]") as its token separator, which never matches a TAB —
+# a real, executable argv split bash itself treats identically to a space
+# (default IFS = space, tab, newline). A tab between "rm" and "-rf", or
+# "git" and "reset", etc. previously evaded every one of these checks
+# entirely, denying nothing. TAB is the same $(printf '\t') var defined
+# above (5d) — reused here rather than re-declared.
+check "rm TAB -rf -> deny" DENY \
+  "$(run "$(payload "rm${TAB}-rf /tmp/x")")"
+check "git TAB reset TAB --hard -> deny" DENY \
+  "$(run "$(payload "git${TAB}reset${TAB}--hard HEAD~1")")"
+check "DROP TAB TABLE -> deny" DENY \
+  "$(run "$(payload "DROP${TAB}TABLE users;")")"
+check "TRUNCATE TAB TABLE -> deny" DENY \
+  "$(run "$(payload "TRUNCATE${TAB}TABLE logs;")")"
+check "dd TAB if= -> deny" DENY \
+  "$(run "$(payload "dd${TAB}if=/dev/zero of=/dev/sda")")"
+check "chmod TAB -R TAB 777 -> deny" DENY \
+  "$(run "$(payload "chmod${TAB}-R${TAB}777 /var/www")")"
+check "git TAB commit TAB --no-verify -> deny" DENY \
+  "$(run "$(payload "git${TAB}commit${TAB}-m x${TAB}--no-verify")")"
+
+# git clean force, TAB-separated
+check "git TAB clean TAB -f -> deny" DENY \
+  "$(run "$(payload "git${TAB}clean${TAB}-f")")"
+check "git TAB clean TAB --force -> deny" DENY \
+  "$(run "$(payload "git${TAB}clean${TAB}--force")")"
+# git clean dry-run, TAB-separated, must still allow
+check "git TAB clean TAB --dry-run -> allow" ALLOW \
+  "$(run "$(payload "git${TAB}clean${TAB}--dry-run")")"
+
+# find -delete, TAB-separated
+check "find ... TAB -delete -> deny" DENY \
+  "$(run "$(payload "find .${TAB}-delete")")"
+
+# truncate -s / --size, TAB-separated (shell truncate, distinct from the SQL
+# TRUNCATE TABLE detector above)
+check "truncate TAB -s0 -> deny" DENY \
+  "$(run "$(payload "truncate${TAB}-s0 logfile.txt")")"
+check "truncate TAB --size=0 -> deny" DENY \
+  "$(run "$(payload "truncate${TAB}--size=0 logfile.txt")")"
+check "truncate --sizeTAB0 -> deny" DENY \
+  "$(run "$(payload "truncate --size${TAB}0 logfile.txt")")"
+
+# sed -i / perl -i, TAB-separated, branch-aware (must deny on main, allow on
+# a feature branch — mirrors the existing sed/perl coverage above).
+check "main: sed TAB -i on .py -> deny" DENY \
+  "$(run_cwd "$(payload_with_cwd "sed${TAB}-i 's/a/b/' foo.py" "$MAIN_REPO")" "$MAIN_REPO")"
+check "feat: sed TAB -i on .py -> allow" ALLOW \
+  "$(run_cwd "$(payload_with_cwd "sed${TAB}-i 's/a/b/' foo.py" "$FEAT_REPO")" "$FEAT_REPO")"
+check "main: perl TAB -i on .go -> deny" DENY \
+  "$(run_cwd "$(payload_with_cwd "perl${TAB}-i -pe 's/old/new/g' main.go" "$MAIN_REPO")" "$MAIN_REPO")"
+
+# src_ext / plugin_src right-boundary: "([ '\"]|$)" was a literal-space
+# bracket expression (space, single-quote, double-quote only, no tab), so a
+# source extension followed by a TAB (rather than end-of-string, a space, or
+# a quote) fell through the boundary check entirely and was not recognised
+# as a source file at all.
+check "main: sed -i on .py followed by TAB -> deny" DENY \
+  "$(run_cwd "$(payload_with_cwd "sed -i 's/a/b/' foo.py${TAB}extra" "$MAIN_REPO")" "$MAIN_REPO")"
+check "main: tee SKILL.md followed by TAB -> deny" DENY \
+  "$(run_cwd "$(payload_with_cwd "tee skills/mything/SKILL.md${TAB}extra" "$MAIN_REPO")" "$MAIN_REPO")"
+
+# --- Regression: benign commands where a blocked word appears only as a
+# substring of an unrelated token must still allow, including with tabs
+# nearby, so the widened separator classes don't start over-matching.
+check "drops.txt filename -> allow" ALLOW \
+  "$(run "$(payload "cat drops.txt")")"
+check "firmware/ path -> allow" ALLOW \
+  "$(run "$(payload "ls firmware/")")"
+check "format word in prose -> allow" ALLOW \
+  "$(run "$(payload "echo format the disk nicely")")"
+check "find without delete, TAB-separated args -> allow" ALLOW \
+  "$(run "$(payload "find${TAB}. -name x.tmp")")"
+
 [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails)"; exit 1; }
