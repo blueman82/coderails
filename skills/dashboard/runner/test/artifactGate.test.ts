@@ -435,6 +435,32 @@ describe("checkArtifact", () => {
     expect(staleResult.passed).toBe(true);
   });
 
+  // SKILL.md now writes `delivery=started` at §1's predicate=met determination
+  // (before §2 Mining), not at §4 Delivery's entry — so it's the fail-safe
+  // in-progress marker for the WHOLE met-path (mining + drafting + delivery),
+  // not delivery alone. The gate doesn't care where in the routine the marker
+  // was written, only that it's the LAST terminal marker in the log — so this
+  // fixture (delivery=started immediately after predicate=met, with NO
+  // delivery-stage lines at all) proves a death during Mining or Drafting
+  // reads RED exactly like a death during Delivery does (state d above).
+  it("loop-retro-promotion: log ending in delivery=started right after predicate=met (no delivery steps) reads NOT passed — death during mining/drafting", () => {
+    const path = join(dir, "promotion-runs.log");
+    writeFileSync(
+      path,
+      [
+        "2026-07-10T09:00:00Z predicate=met retros=12 lifecycle=1 decay=1",
+        "2026-07-10T09:05:00Z run=ok",
+        "2026-07-17T09:00:00Z predicate=met retros=13 lifecycle=1 decay=1",
+        "2026-07-17T09:00:01Z delivery=started",
+        "",
+      ].join("\n")
+    );
+    const artifact: ExpectedArtifact = { artifactPath: path, maxAgeSeconds: 691200, predicate: lrpLastMarker };
+    const result = checkArtifact(artifact, { ...ctx, vault: dir });
+    expect(result.passed).toBe(false);
+    expect(result.reason).toMatch(/failure/i);
+  });
+
   it("loop-retro-promotion: log ending in abort= (with a prior run=ok) reads NOT passed — manifest abort, state c", () => {
     const path = join(dir, "promotion-runs.log");
     writeFileSync(
