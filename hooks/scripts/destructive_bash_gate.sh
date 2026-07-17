@@ -9,6 +9,40 @@
 IFS= read -r -d '' -t 5 input || true
 cmd=$(echo "$input" | jq -r '.tool_input.command // empty')
 
+# Normalize $IFS expansions to a single space, once, immediately after $cmd is
+# assigned. Bash honours $IFS/${IFS}/${IFS:offset:length} as a live expansion
+# that yields whitespace and is then used by bash itself to split the
+# surrounding text into argv tokens — so a command built with `rm${IFS}-rf`
+# instead of `rm -rf` contains NO whitespace CHARACTER anywhere in the literal
+# tool_input string. Every detector below (the git-clean block, find,
+# truncate, shred, the monolithic blocklist, the source-edit blocks, and the
+# derived force_cmd_flat/cmd_flat vars) greps `$cmd` (or something derived
+# from it) for a literal whitespace class — none of them evaluate the string
+# as bash would, so an IFS-expansion form is literally invisible text to every
+# one of them and evades the entire file. Doing the substitution once here,
+# before any detector runs, fixes all of them in one place.
+#
+# Two passes:
+#   1. Braced forms: ${IFS} and ${IFS:offset} / ${IFS:offset:length} (offset
+#      and length are digit runs; bash also allows a leading '-' for
+#      "from-the-end" indexing, accepted here as well for completeness).
+#      The closing brace fully delimits the expansion, so whatever follows
+#      it is untouched, real, subsequent text — safe to replace with a
+#      single space unconditionally.
+#   2. Bare $IFS: only when NOT followed by an identifier character
+#      ([A-Za-z0-9_]) or followed by end-of-string. Bash variable names
+#      extend as far as identifier characters continue, so `$IFSOMETHING` is
+#      a wholly different (and irrelevant) variable, not $IFS at all — the
+#      lookahead-substitute (capture the boundary char, splice it back in
+#      unconsumed) is required so `$IFS-rf` collapses to ` -rf` but
+#      `$IFSOMETHING` is left completely alone.
+# A benign command that only MENTIONS IFS in an unrelated way (e.g.
+# echo "${IFS}") still normalizes to a literal space in that position, same
+# as before — it does not gain or lose any blocklist keyword by doing so, so
+# it stays ALLOWED; the substitution changes whitespace, never introduces or
+# removes a destructive verb/flag token.
+cmd=$(printf '%s' "$cmd" | sed -E 's/\$\{IFS(:-?[0-9]+)?(:-?[0-9]+)?\}/ /g' | sed -E 's/\$IFS([^A-Za-z0-9_]|$)/ \1/g')
+
 if [ -z "$cmd" ]; then
   exit 0
 fi
