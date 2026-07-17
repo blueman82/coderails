@@ -59,7 +59,15 @@ under `## Promoted lessons`, containing:
 1. Fetch `origin/main`; branch off the freshly-fetched tip.
 2. Run `/coderails:task-evals` (scope: `pr`) and freeze it — BEFORE making
    the edit.
-3. Make the edit (the append from step 3, above).
+3. Make the edit (the append from step 3, above), then **commit it** —
+   `git add skills/agentic-loop/learned-failure-modes.md` and commit. The
+   assertion in step 4 is a **commit-range** diff: it compares two commits,
+   so it cannot see an uncommitted working-tree edit. Skip this commit and
+   the range is empty, step 4's "exactly one line" fails, and the run aborts
+   every single time — a self-inflicted denial of service, not a safety
+   check. Stage the ONE target path by name, never `git add -A`: an
+   uncommitted stray from an earlier step would otherwise be swept into the
+   same commit and trip the assertion legitimately.
 4. Assert `git diff origin/main...HEAD --name-status` (THREE-dot, not two;
    `--name-status`, never `--name-only`) shows EXACTLY ONE line, and that
    line is a modification (`M`) of:
