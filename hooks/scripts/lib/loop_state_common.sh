@@ -316,6 +316,7 @@ als_extract_last_text() {
   local transcript="$1" tail_lines="$2"
   tail -n "$tail_lines" "$transcript" 2>/dev/null | jq -R 'fromjson? // empty' 2>/dev/null | jq -s -r '
     [.[]?
+     | select(type == "object")
      | select(.type == "assistant")
      | (.message.content
         | if type == "array" then [ .[]? | select(.type == "text") | .text ] | join(" ")
