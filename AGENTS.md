@@ -15,7 +15,7 @@ The wiki vault lives at the wiki vault directory (e.g. `../coderails-wiki`
 relative to the plugin, or wherever you placed it during `/wiki-init`).
 `CLAUDE.md` in this repo is a thin pointer to this file — edit here, not there.
 
-# Working in this repo
+# The repo working guide
 
 ## What this repo is
 
