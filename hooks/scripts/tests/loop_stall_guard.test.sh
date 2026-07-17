@@ -1749,8 +1749,6 @@ check "staleness nag: fresh prices_as_of (5 days) -> NO nag" 0 "$fresh_warn"
 # Malformed prices_as_of ("not-a-date") must not crash or compute a bogus
 # age/nag — reuses the same strict YYYY-MM-DD shape guard the existing age
 # computation already relies on.
-run_capture_stdout "$(payload "$(mk_transcript 1 "All done.
-LOOP-STOP: complete — done")" S1)" 2>/dev/null
 reset; T_bad=$(mk_transcript 1 "All done.
 LOOP-STOP: complete — done"); write_file in-progress S1 0
 write_retro S1 '{"schema_version":2, "cost":{"total_usd_estimate":2,"total_tokens":9,"prices_as_of":"not-a-date"}}'
