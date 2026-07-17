@@ -332,15 +332,9 @@ describe("loadConfig against the real examples/dashboard-config.json (C3)", () =
   //
   // Exempt: a routine whose skill owns the path itself (memory-consolidation
   // names it in SKILL.md; wiki-lint's `{vault}/log.md` is the lint's own
-  // output). Those can't drift from a command that never mentions a path.
-  //
-  // loop-retro-promotion-weekly is exempt as KNOWN-BROKEN, not as compliant:
-  // its gate points at a `-Users-harrison-Documents-Github-...` repo-key dir
-  // that does not exist (the repo lives at ~/Github, not ~/Documents/Github),
-  // while the real promotion-runs.log sits in the correct dir — so its gate
-  // cannot pass regardless of what its command says. That predates this
-  // routine and is out of scope here; exempting it keeps this guard honest
-  // about what it does check rather than silently widening the fix.
+  // output; loop-retro-promotion-weekly's button command never names the gate's
+  // basename 'promotion-runs.log', so the skill owns the path). Those can't
+  // drift from a command that never mentions a path.
   it("every routine whose skill does not own its artifact path has that path named in the button command", () => {
     const config = loadConfig(EXAMPLE_CONFIG_PATH);
     const SKILL_OWNS_ITS_PATH = new Set([
