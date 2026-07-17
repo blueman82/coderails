@@ -131,6 +131,75 @@ post_evals::validate_structure() {
     return 0
 }
 
+# post_evals::validate_embed <evals_json_path> <body_path>
+# Validates the POSTED COMMENT BODY (not the source file alone): the body
+# must carry a marker line whose tier this function reads via
+# eval_artifact::parse_tier (the SSOT the tier-gate daemon itself triages
+# on — never taken as an argument, so a body whose marker disagrees with its
+# own embedded block can't slip past). tier!=0 → not required, exit 0
+# immediately (tier-1/2 artifacts are short-circuited by the daemon). At
+# tier 0: the body must contain EXACTLY ONE fenced ```json block, it must
+# parse as JSON, its .tier must equal the marker's tier, and its .task_ref
+# must equal <evals_json_path>'s own .task_ref (the file already validated
+# by validate_structure earlier in the same posting flow — comparing against
+# the numeric PR argument would be wrong since task_ref may legitimately be
+# a branch name, frozen before a PR exists). Fail-closed throughout: any
+# missing/ambiguous/mismatched state returns 1 with a named reason.
+post_evals::validate_embed() {
+    local path="$1" body_path="$2"
+
+    if [[ ! -f "$body_path" ]]; then
+        printf 'post_evals: validate_embed: body file not found: %s\n' "$body_path" >&2
+        return 1
+    fi
+
+    local marker_line
+    marker_line=$(head -n 1 "$body_path")
+    local marker_tier
+    marker_tier=$(eval_artifact::parse_tier "$marker_line")
+    if [[ -z "$marker_tier" ]]; then
+        printf 'post_evals: validate_embed: body marker line does not parse (missing or malformed marker): %s\n' "$body_path" >&2
+        return 1
+    fi
+
+    # Not required at tier 1/2 — the daemon short-circuits those to
+    # success/not-tier-0 without extracting an embedded artifact.
+    if [[ "$marker_tier" != "0" ]]; then
+        return 0
+    fi
+
+    local block_count
+    block_count=$(grep -c '^```json[[:space:]]*$' "$body_path")
+    if [[ "$block_count" -ne 1 ]]; then
+        printf 'post_evals: validate_embed: tier-0 body must contain exactly one fenced json block, found %s\n' "$block_count" >&2
+        return 1
+    fi
+
+    local block
+    block=$(awk '/^```json[[:space:]]*$/{f=1;next} /^```[[:space:]]*$/{if(f){f=0}} f' "$body_path")
+    if ! jq -e . >/dev/null 2>&1 <<<"$block"; then
+        printf 'post_evals: validate_embed: fenced json block does not parse as JSON\n' >&2
+        return 1
+    fi
+
+    local block_tier
+    block_tier=$(jq -r '.tier // ""' <<<"$block")
+    if [[ "$block_tier" != "$marker_tier" ]]; then
+        printf 'post_evals: validate_embed: embedded block tier (%s) does not match marker tier (%s)\n' "$block_tier" "$marker_tier" >&2
+        return 1
+    fi
+
+    local file_task_ref block_task_ref
+    file_task_ref=$(jq -r '.task_ref // ""' "$path")
+    block_task_ref=$(jq -r '.task_ref // ""' <<<"$block")
+    if [[ -z "$block_task_ref" || "$block_task_ref" != "$file_task_ref" ]]; then
+        printf 'post_evals: validate_embed: embedded block task_ref (%s) does not match source evals.json task_ref (%s)\n' "$block_task_ref" "$file_task_ref" >&2
+        return 1
+    fi
+
+    return 0
+}
+
 # post_evals::compute_and_validate_result <evals_json_path>
 # Echoes GO or NO-GO by calling eval_artifact::compute_go. This is the ONLY
 # place the artifact's result value is produced — never read from a
@@ -227,12 +296,16 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
         compute-result)
             post_evals::compute_and_validate_result "${2:?compute-result requires a file argument}"
             ;;
+        validate-embed)
+            post_evals::validate_embed "${2:?validate-embed requires a file argument}" "${3:?validate-embed requires a body path argument}"
+            ;;
         grade-loop)
             post_evals::grade_loop "${2:?grade-loop requires a file argument}"
             ;;
         *)
             printf 'Usage: post_evals.sh validate-structure <path> <pr> <sha>\n' >&2
             printf '       post_evals.sh compute-result <path>\n' >&2
+            printf '       post_evals.sh validate-embed <path> <body_path>\n' >&2
             printf '       post_evals.sh grade-loop <path>\n' >&2
             exit 1
             ;;
