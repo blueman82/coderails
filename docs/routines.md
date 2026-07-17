@@ -3,7 +3,7 @@
 A **routine** is a scheduled skill run that isn't considered done just
 because `claude` exited 0. It's done when a specific artifact exists,
 is fresh enough, and satisfies a predicate — the **artifact gate**. Five
-routines ship today: `wiki-lint` (nightly), `docs-sync-nightly` (nightly),
+routines ship today: `wiki-lint` (nightly), `sync-docs-nightly` (nightly),
 `memory-consolidation-weekly` (weekly), `loop-retro-promotion-weekly`
 (weekly), `workflow-audit-weekly` (weekly).
 
@@ -134,7 +134,7 @@ Field by field:
   path exists before spawning and escalates `skill-missing` if it
   doesn't, rather than spawning `claude` and letting it fail inside the
   sandbox. None of the five shipped example routines use it today (see
-  the `docs-sync-nightly` section below for why); it remains available
+  the `sync-docs-nightly` section below for why); it remains available
   for any routine whose skill genuinely lives outside this repo.
 - **`cadence`** — only `"nightly"` or `"weekly"` are understood by the
   seed step today. Nightly is due after **20 hours** since the routine's
@@ -176,7 +176,7 @@ The routine's run note lives at `~/.claude/coderails-dashboard/routines/workflow
 
 The 8-day artifact-gate freshness window (`maxAgeSeconds: 691200`) provides catch-up grace for a run that fires late (e.g. the machine was asleep at the scheduled time) — a run inside that window still passes the gate. Read `proposals_written: 0` plainly: no repeated patterns reached the proposal threshold this week, and zero proposals is not a failure or a request to lower the threshold — it's the expected norm in a healthy workflow. Report it as a green, completed run just like any other passing gate.
 
-## `docs-sync-nightly`: self-merging documentation drift fixer
+## `sync-docs-nightly`: self-merging documentation drift fixer
 
 Every night, this routine's skill (`skills/docs-sync/SKILL.md`) audits
 the repo's git-tracked documentation (`README.md`, `AGENTS.md`,
@@ -202,7 +202,7 @@ designed: it ran green on 2026-07-08, then correctly escalated a red
 (`dashboard-runs/sync-docs-weekly.md`). The actual defect was that the
 dead path then sat unfixed for 9 days, because that escalation landed
 on a channel — a vault run-note nobody was reading — rather than
-anywhere the owner would actually see it. `docs-sync-nightly` needs no
+anywhere the owner would actually see it. `sync-docs-nightly` needs no
 `foreignSkillPath` at all: its skill ships in-repo, same as
 `loop-retro-promotion`.
 
@@ -222,14 +222,14 @@ its reason into the run-note (the vault-note escalation channel above)
 find every failed night without replaying the whole log. Concretely,
 where a human should look after this routine has been running
 unattended for a while: the macOS notification (transient, easy to
-miss), then `dashboard-runs/docs-sync.md` (the vault-note history,
+miss), then `dashboard-runs/sync-docs.md` (the vault-note history,
 one entry per run), then the run log's `abort=`/`refused=` lines for a
 grep-able summary across many nights at once. There is no dashboard
 alert and no PR comment for a failed run — those two channels are the
 whole surface.
 
 **Security note.** See the security warning below —
-`docs-sync-nightly` is the **second** routine in this repo (after
+`sync-docs-nightly` is the **second** routine in this repo (after
 `loop-retro-promotion-weekly`) to use a non-`read-only` button profile
 (`bypass`). Its mitigation is the same shape as that routine's: no hook
 protects a `claude -p` run, so the entire merge rail is the manifest
@@ -263,9 +263,9 @@ writing `promotion-runs.log` holds exactly one line
 (`2026-07-12T23:32:06Z predicate=unmet retros=14 lifecycle=1 decay=0`)
 — the predicate has stayed unmet since this routine shipped, so it has
 never gone past step 1 to open, review, or merge a PR headlessly.
-`docs-sync-nightly` (above) follows this routine's pattern — same
+`sync-docs-nightly` (above) follows this routine's pattern — same
 gate-chain shape, same manifest-lock idea — but that makes
-`docs-sync-nightly` the **first** actual production exercise of the
+`sync-docs-nightly` the **first** actual production exercise of the
 full headless chain (task-evals → push → review-pr → post-review →
 post-evals → merge inside one `claude -p` run), not a repeat of a
 proven path. Treat the pattern as sound by construction, not as
@@ -274,7 +274,7 @@ battle-tested.
 **Security note.** This was the first routine in this repo to use a
 non-`read-only` button profile (`bypass`, i.e.
 `--dangerously-skip-permissions` — see the security warning below);
-`docs-sync-nightly` (above) is the second. Once
+`sync-docs-nightly` (above) is the second. Once
 the predicate graduates, the routine opens and merges its own PR with no
 human in the loop, and — as that warning documents — `PreToolUse` hooks
 do not fire under `claude -p`, so `test_gate`/`enforce_pr_workflow` do
@@ -416,7 +416,7 @@ session gets.
 
 **Ship read-only routines unless you have explicitly accepted this.**
 Three of the five shipped example routines use `"profile": "read-only"`
-for exactly this reason. `docs-sync-nightly` and
+for exactly this reason. `sync-docs-nightly` and
 `loop-retro-promotion-weekly` are
 the deliberate, documented exceptions — see the sections above for what
 backs up each one's merge instead of a hook. If a routine's skill needs to
