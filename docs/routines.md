@@ -155,7 +155,7 @@ Field by field:
   `wikiPaths`) template tokens, substituted at check time. `maxAgeSeconds`
   is how old the artifact is allowed to be — set it comfortably above the
   cadence interval (the `wiki-lint` example above uses 129600s = 36h for
-  a nightly routine; the four weekly routines use 691200s = 8 days) so a
+  a nightly routine; the three weekly routines use 691200s = 8 days) so a
   slightly-late run doesn't fail its own gate. `predicate` is one of:
   - `{ kind: "exists" }` — file present and fresh, nothing more.
   - `{ kind: "contains", marker }` — file present, fresh, and contains
