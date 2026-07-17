@@ -354,6 +354,19 @@ run_capture_stderr() { # payload -> sets $RC_OUT and $STDERR_OUT (no subshell)
   STDERR_OUT=$(cat "$errfile" 2>/dev/null)
   rm -f "$errfile"
 }
+# Same pattern, but captures STDOUT (not stderr) since systemMessage is a
+# stdout JSON emission — run_capture_stderr above only ever inspects stderr,
+# so it cannot see this hook's output; a separate capture helper is required.
+run_capture_stdout() { # payload -> sets $RC_OUT and $STDOUT_OUT (no subshell)
+  local outfile="$TMP/stdout_${RANDOM}.txt"
+  echo "$1" | bash "$GUARD" >"$outfile" 2>/dev/null
+  RC_OUT=$?
+  STDOUT_OUT=$(cat "$outfile" 2>/dev/null)
+  rm -f "$outfile"
+}
+# Extracts .systemMessage from a stdout blob that may be empty or non-JSON;
+# jq -e failing (empty stdout, or JSON with no such key) yields "".
+system_message() { printf '%s' "$1" | jq -r '.systemMessage // empty' 2>/dev/null; }
 
 # (a) complete declared, retro.json absent -> block, stderr mentions retro.
 reset; T=$(mk_transcript 1 "All done.
@@ -835,6 +848,16 @@ write_proof_raw() { # session_id raw_content -> writes proof.json verbatim (for 
   mkdir -p "$dir"
   printf '%s' "$2" > "$dir/proof.json"
 }
+# session_id proofs_json_fragment withdrawn_json_fragment [schema_version] ->
+# writes a proof.json carrying BOTH .proofs and .withdrawn_proofs. proofs_json_fragment
+# may be "null" (bare, unquoted) to omit/null .proofs entirely — the withdrawn-only
+# shape EDGE #1 exercises.
+write_proof_withdrawn() {
+  local dir; dir=$(file_dir "$1")
+  mkdir -p "$dir"
+  jq -n --argjson p "$2" --argjson w "$3" --argjson sv "${4:-1}" \
+    '{schema_version:$sv, proofs:$p, withdrawn_proofs:$w}' > "$dir/proof.json"
+}
 # Appends a Bash tool_use (assistant) + its paired tool_result (user) to a
 # transcript file. is_error: "true"/"false"/"null" (bare token, unquoted in
 # the jq --argjson so null becomes JSON null, not the string "null").
@@ -1296,6 +1319,126 @@ append_complete_declaration "$PROOF_T"
 check "proof: run_in_background explicit false -> allow (foreground regression check)" 0 "$(run x "$(payload "$PROOF_T" S1)")"
 
 # =====================================================================
+# withdrawn_proofs — auditable withdrawal. Mined against the SAME
+# $exec_index the .proofs pass already builds. A withdrawn entry must have
+# been RUN and SEEN TO FAIL in this session's transcript, with a non-empty
+# withdrawn_reason and cmd, and must not also appear in .proofs. On success,
+# ALLOW + a systemMessage naming the withdrawn id(s).
+
+# (positive) withdrawn entry ran + failed + has a reason -> ALLOW +
+# systemMessage names the id.
+proof_fixture_reset S1
+write_proof_withdrawn S1 '[]' '[{"id":"W1","cmd":"echo withdrawn-check","withdrawn_reason":"the check itself was defective, not the code"}]'
+append_bash_call "$PROOF_T" "echo withdrawn-check" true
+append_complete_declaration "$PROOF_T"
+run_capture_stdout "$(payload "$PROOF_T" S1)"
+check "withdrawn: ran+failed+reason -> allow" 0 "$RC_OUT"
+wmsg=$(system_message "$STDOUT_OUT")
+case "$wmsg" in *"W1"*) w1_named=1 ;; *) w1_named=0 ;; esac
+check "withdrawn: systemMessage names W1" 1 "$w1_named"
+
+# (a) withdrawn cmd never executed -> BLOCK.
+proof_fixture_reset S1
+write_proof_withdrawn S1 '[]' '[{"id":"W1","cmd":"echo never-ran-withdrawn","withdrawn_reason":"defective check"}]'
+append_complete_declaration "$PROOF_T"
+run_capture_stderr "$(payload "$PROOF_T" S1)"
+check "withdrawn: cmd never executed -> block" 2 "$RC_OUT"
+case "$STDERR_OUT" in *"W1"*) w1_named=1 ;; *) w1_named=0 ;; esac
+check "withdrawn: cmd never executed -> stderr names W1" 1 "$w1_named"
+
+# (b) withdrawn cmd's last execution is_error false (succeeded) -> BLOCK
+# (a passing proof cannot be withdrawn).
+proof_fixture_reset S1
+write_proof_withdrawn S1 '[]' '[{"id":"W1","cmd":"echo actually-passed","withdrawn_reason":"claimed defective but it is not"}]'
+append_bash_call "$PROOF_T" "echo actually-passed" false
+append_complete_declaration "$PROOF_T"
+run_capture_stderr "$(payload "$PROOF_T" S1)"
+check "withdrawn: last execution succeeded -> block" 2 "$RC_OUT"
+case "$STDERR_OUT" in *"W1"*) w1_named=1 ;; *) w1_named=0 ;; esac
+check "withdrawn: last execution succeeded -> stderr names W1" 1 "$w1_named"
+
+# (c) empty withdrawn_reason -> BLOCK.
+proof_fixture_reset S1
+write_proof_withdrawn S1 '[]' '[{"id":"W1","cmd":"echo empty-reason","withdrawn_reason":""}]'
+append_bash_call "$PROOF_T" "echo empty-reason" true
+append_complete_declaration "$PROOF_T"
+run_capture_stderr "$(payload "$PROOF_T" S1)"
+check "withdrawn: empty withdrawn_reason -> block" 2 "$RC_OUT"
+case "$STDERR_OUT" in *"W1"*) w1_named=1 ;; *) w1_named=0 ;; esac
+check "withdrawn: empty withdrawn_reason -> stderr names W1" 1 "$w1_named"
+
+# (d) same id in BOTH .proofs and withdrawn_proofs -> BLOCK (no double-dipping).
+proof_fixture_reset S1
+write_proof_withdrawn S1 '[{"id":"DUP","cmd":"echo dup-in-proofs"}]' '[{"id":"DUP","cmd":"echo dup-in-proofs","withdrawn_reason":"defective"}]'
+append_bash_call "$PROOF_T" "echo dup-in-proofs" true
+append_complete_declaration "$PROOF_T"
+run_capture_stderr "$(payload "$PROOF_T" S1)"
+check "withdrawn: id duplicated across .proofs and withdrawn_proofs -> block" 2 "$RC_OUT"
+case "$STDERR_OUT" in *"DUP"*) dup_named=1 ;; *) dup_named=0 ;; esac
+check "withdrawn: duplicate id -> stderr names DUP" 1 "$dup_named"
+
+# (e) withdrawn_proofs present + a SEPARATE .proofs entry unexecuted -> still
+# BLOCKS on the .proofs side (withdrawing one exempts nothing else).
+proof_fixture_reset S1
+write_proof_withdrawn S1 '[{"id":"P1","cmd":"echo still-owed"}]' '[{"id":"W1","cmd":"echo legitimately-withdrawn","withdrawn_reason":"defective check"}]'
+append_bash_call "$PROOF_T" "echo legitimately-withdrawn" true
+append_complete_declaration "$PROOF_T"
+run_capture_stderr "$(payload "$PROOF_T" S1)"
+check "withdrawn: valid withdrawal + separate unexecuted .proofs entry -> block" 2 "$RC_OUT"
+case "$STDERR_OUT" in *"P1"*"unexecuted"*) p1_named=1 ;; *) p1_named=0 ;; esac
+check "withdrawn: valid withdrawal + separate unexecuted .proofs entry -> stderr names P1(unexecuted)" 1 "$p1_named"
+
+# (f) EDGE #1 — withdrawn-only file (.proofs absent/null): entry ran+failed+
+# reason -> ALLOW. Same shape but empty reason -> BLOCK. Both early returns
+# in the .proofs-absent path (the `proofs_type == null` return and the
+# `proof_count -eq 0` return) must not skip withdrawn_proofs evaluation.
+proof_fixture_reset S1
+write_proof_withdrawn S1 'null' '[{"id":"W1","cmd":"echo withdrawn-only-ok","withdrawn_reason":"defective check"}]'
+append_bash_call "$PROOF_T" "echo withdrawn-only-ok" true
+append_complete_declaration "$PROOF_T"
+check "withdrawn: EDGE1 .proofs null + valid withdrawal -> allow" 0 "$(run x "$(payload "$PROOF_T" S1)")"
+
+proof_fixture_reset S1
+write_proof_withdrawn S1 'null' '[{"id":"W1","cmd":"echo withdrawn-only-bad","withdrawn_reason":""}]'
+append_bash_call "$PROOF_T" "echo withdrawn-only-bad" true
+append_complete_declaration "$PROOF_T"
+check "withdrawn: EDGE1 .proofs null + empty reason -> block" 2 "$(run x "$(payload "$PROOF_T" S1)")"
+
+# EDGE #1's SECOND early return: .proofs present but EMPTY array (not null)
+# -> proof_count is 0 -> must still route into withdrawn_proofs evaluation.
+proof_fixture_reset S1
+write_proof_withdrawn S1 '[]' '[{"id":"W1","cmd":"echo empty-proofs-array-withdrawn","withdrawn_reason":""}]'
+append_bash_call "$PROOF_T" "echo empty-proofs-array-withdrawn" true
+append_complete_declaration "$PROOF_T"
+check "withdrawn: EDGE1b .proofs=[] + empty reason -> block (not silently allowed)" 2 "$(run x "$(payload "$PROOF_T" S1)")"
+
+# (g) combined cap: len(.proofs) + len(.withdrawn_proofs) > 100 -> BLOCK.
+# NOT 100 each — the cap is on the SUM, closing the same timeout hole the
+# .proofs-only cap already closes.
+proof_fixture_reset S1
+write_proof_withdrawn S1 "$(mk_n_proofs 60)" "$(jq -cn '[range(0;41) | {id:"W\(.)", cmd:"echo w-\(.)", withdrawn_reason:"defective"}]')"
+append_complete_declaration "$PROOF_T"
+run_capture_stderr "$(payload "$PROOF_T" S1)"
+check "withdrawn: combined 60+41=101 -> block (exceeds cap)" 2 "$RC_OUT"
+case "$STDERR_OUT" in *"101"*"100"*) cap_named=1 ;; *) cap_named=0 ;; esac
+check "withdrawn: combined 101 -> stderr names the count (101) and the cap (100)" 1 "$cap_named"
+
+# empty withdrawn_proofs array alongside a satisfied .proofs -> ALLOW
+# (no withdrawal declared, nothing new to validate).
+proof_fixture_reset S1
+write_proof_withdrawn S1 '[{"id":"P1","cmd":"echo normal-pass"}]' '[]'
+append_bash_call "$PROOF_T" "echo normal-pass" false
+append_complete_declaration "$PROOF_T"
+check "withdrawn: empty withdrawn_proofs array + satisfied .proofs -> allow" 0 "$(run x "$(payload "$PROOF_T" S1)")"
+
+# non-array withdrawn_proofs (malformed shape) -> BLOCK, mirrors the
+# non-array .proofs malformed-shape check.
+proof_fixture_reset S1
+write_proof_raw S1 '{"schema_version":1,"proofs":[],"withdrawn_proofs":{"id":"W1"}}'
+append_complete_declaration "$PROOF_T"
+check "withdrawn: withdrawn_proofs is an object, not an array -> block (malformed shape)" 2 "$(run x "$(payload "$PROOF_T" S1)")"
+
+# =====================================================================
 # proof_count numeric-validation fail-closed: a proof.json whose .proofs
 # length jq cannot read (simulated via a file that disappears between the
 # earlier presence check and this read) must block, not silently allow via
@@ -1347,19 +1490,10 @@ fi
 # als_gate_cost_report_on_complete (als_report_cost_on_complete) — a REPORT,
 # never a gate: it must never block, only print a systemMessage on stdout (or
 # stay silent) once the retro/work_units/proof gates above have already
-# passed. Captures STDOUT (not stderr) since systemMessage is a stdout JSON
-# emission — run_capture_stderr above only ever inspects stderr, so it cannot
-# see this hook's output; a separate capture helper is required.
-run_capture_stdout() { # payload -> sets $RC_OUT and $STDOUT_OUT (no subshell)
-  local outfile="$TMP/stdout_${RANDOM}.txt"
-  echo "$1" | bash "$GUARD" >"$outfile" 2>/dev/null
-  RC_OUT=$?
-  STDOUT_OUT=$(cat "$outfile" 2>/dev/null)
-  rm -f "$outfile"
-}
-# Extracts .systemMessage from a stdout blob that may be empty or non-JSON;
-# jq -e failing (empty stdout, or JSON with no such key) yields "".
-system_message() { printf '%s' "$1" | jq -r '.systemMessage // empty' 2>/dev/null; }
+# passed. Uses run_capture_stdout/system_message, defined up with
+# run_capture_stderr (both hook-output capture helpers live together; the
+# withdrawn_proofs block above also needs them, and definition order matters
+# in a flat sourced script).
 
 # (row 1) complete + schema_version>=2 + populated .cost -> ALLOW, PRINT a
 # systemMessage carrying the USD total, token total, and a staleness age
