@@ -41,7 +41,18 @@ than an honest unscored list because it is more likely to be trusted uncriticall
 - **Disposition violations** — work-units where `clean-break` was recorded in `progress.json` but a shim/compat path shipped anyway (caught at the Phase 4b gate, or by the human afterward). Audit as a diff between the `progress.json` disposition record and the merged artifact. Critically, distinguish **"0 violations"** from **"no disposition record found"**: the latter is an **audit failure** — the record was not maintained — not a pass, otherwise the report reads "clean" when the record was simply absent. Separately, surface any `preserve-compat` unit whose `removal_ticket` is still **open at loop end** as a compat-debt drift signal, so deferred removals cannot silently rot.
 - **Loop-scope eval result** — graded via `post_evals.sh grade-loop` (never hand-written into `evals.json`), the loop's final `evals.json` `result` (`GO`/`NO-GO`/a tier-0-exemption-with-justification), reported unscored, plus any `amendments` entries (post-freeze eval edits with recorded reasons). An amendment made after a grader verdict must carry its fresh re-grade (`regraded_by` recorded; `grade-loop` refuses otherwise): a verdict flipped by an orchestrator-written status is an audit failure, not a pass. **"No `evals.json` record found" for a ≥3-work-unit loop is an audit failure, not a pass** — distinguish it from a genuine `GO` the same way "0 disposition violations" is distinguished from "no disposition record found".
 
-## Step 1 — Assemble `retro.json`
+## Step 1 — Run every `proof.json` cmd
+
+If a `proof.json` was frozen at Phase 2.7e, run every one of its `cmd`s VERBATIM as its own single
+Bash command, in the FOREGROUND (never `run_in_background`), in THIS (the orchestrator's) own
+session — before assembling the retro. Confirm each exits 0. A proof run inside a dispatched
+worker's session never appears in the orchestrator's own transcript and cannot satisfy the
+`loop_stall_guard` proof gate, whatever its actual outcome. If a proof still fails, fix the
+underlying issue and re-run that proof's `cmd` (not a modified version of it) until it passes, or
+the `complete` declaration below blocks, naming the offending proof id(s) and their verdict. No
+`proof.json` beside `progress.json` means nothing to run here — skip straight to Step 2.
+
+## Step 2 — Assemble `retro.json`
 
 Written at `schema_version` 2, beside `progress.json`.
 
