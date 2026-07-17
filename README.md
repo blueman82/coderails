@@ -2,7 +2,7 @@
 
 coderails is a Claude Code workflow plugin: the prep → push → merge → wiki
 command chain plus planning/orchestration skills and a self-checking
-discipline loop. Two halves:
+discipline loop. It combines:
 
 - **Workflow** — the `prep → push → merge → wiki` command chain plus the
   agentic-loop, planning-sequence, premortem, and handoff skills.
@@ -10,10 +10,6 @@ discipline loop. Two halves:
   (verified)/(inferred), is blocked at stop until the `## Did Not Verify`
   section is present and resolved, and is gated on destructive bash and
   failing project tests.
-
-It started as two separate plugins (`workflow-tools` and `claude-guardrails`).
-This is the merge: one install, one marketplace key, no launchd, no calibration
-ritual.
 
 ## Install
 
@@ -56,10 +52,7 @@ preferred way to set up a new repo.
 
 coderails is self-contained — it ships the dev-workflow skills it needs. `pr-review-toolkit@claude-plugins-official` is still required for the review stage of `/workflow`.
 
-34 skills are bundled across four groups. `dashboard` and
-`workflow-audit` are documented in
-[`docs/REFERENCE.md`](./docs/REFERENCE.md) but aren't yet rows in the
-summary tables below (a pre-existing gap, tracked separately). Full
+35 skills are bundled across four groups. Full
 catalog: [`docs/REFERENCE.md`](./docs/REFERENCE.md).
 
 **Dev-workflow skills**
@@ -85,14 +78,19 @@ catalog: [`docs/REFERENCE.md`](./docs/REFERENCE.md).
 
 | Skill | Purpose |
 |---|---|
+| `dashboard` | Live local web HUD: sessions, loops, PR gate states, runs, memory activity |
+| `fable-mode` | High-autonomy self-verifying working mode for non-trivial tasks |
 | `handoff` | Structured memory + continuation prompt for a fresh session |
 | `improve-prompt` | Surfaces ambiguities and rewrites underspecified prompts |
 | `loop-retro-promotion` | Predicate-dormant pipeline that promotes proven loop lessons into learned-failure-modes.md via the full gate chain (scheduled, not for interactive use) |
 | `memory-consolidation` | Health-checks and consolidates a project's persistent memory directory; runs on demand or as a weekly scheduled routine |
 | `planning-sequence` | Pre-Parade → Premortem → Red Team on a plan |
 | `premortem` | Assume failure, reason backwards to causes |
+| `sync-docs` | Audit in-tree docs for drift against the codebase; generate sync reports |
 | `task-evals` | Game-resistant success-eval generation: frozen `evals.json` with negative controls |
 | `using-coderails` | Self-bootstrap: injected at SessionStart, explains coderails to Claude |
+| `verify-merged-pr` | Verify a "PR is merged" claim against origin before relying on it |
+| `workflow-audit` | Mine transcripts for repeated tasks worth turning into skills |
 
 **Wiki**
 
@@ -125,6 +123,7 @@ catalog: [`docs/REFERENCE.md`](./docs/REFERENCE.md).
 | `Stop` | `loop_state_guard.sh` | **block** — agentic loop active but no session-owned progress.json |
 | `Stop` | `loop_stall_guard.sh` | **block** — loop incomplete with no valid LOOP-STOP declaration; also blocks a `complete` declaration when retro.json is missing/malformed (Phase 13 retro gate), when any work_unit is unfinished (deferral gate), or when a sibling proof.json has a proof that's unexecuted-in-transcript or last-failed (proof gate) |
 | `Stop` | `unregistered_loop_guard.sh` | **nudge** — dispatch-heavy session (≥3 Agent-dispatch turns) with no progress.json and no agentic-loop Skill invocation; never blocks |
+| `Stop` + `SubagentStop` | `offload_push_guard.sh` | **nudge** — final assistant text names a `git push` to main/master AND carries an offload-to-user cue (e.g. a leading `! ` prefix, "run this yourself"); nudges at most once per session; never blocks |
 | `PreToolUse` (Bash) | `destructive_bash_gate.sh` | **block** — permanent blocklist: `rm -rf`, `git push --force`/`-f` (naked — `--force-with-lease` has a narrow opt-in carve-out), `git reset --hard`, SQL DROP/TRUNCATE, `dd if=`, `mkfs.*`, `chmod -R 777`, `git commit --no-verify`, `git clean -f/--force`, `find -delete`, `truncate -s/--size`, `shred`; also blocks in-Bash source-file edits (redirects, `sed -i`, `tee`, `cp`/`mv` to source extensions) when on main/master; also blocks backtick, `$(...)`, and process-substitution `<(...)`/`>(...)` characters inside a `push.sh`/`merge.sh`/`post_review.sh`/`post_evals.sh` free-text argument |
 | `PreToolUse` (Bash) | `enforce_pr_workflow.sh` | **block** — `gh pr create` without `/coderails:push`; `gh pr merge <N>` (or `scripts/merge.sh <N>`, gated identically) without `/pr-review-toolkit:review-pr <N>` (per-PR, consume-on-use) AND without a SHA-bound `GO` coderails eval artifact for the PR's current head (same fail-closed posture as `scripts/merge.sh`; a tier-0 `GO` satisfies it); `git merge` or `git push` to main/master without `review-pr`; scans subagent transcripts |
 | `PreToolUse` (Bash) | `test_gate.sh` | **block** on `git commit` if tests fail — opt-in per repo |
@@ -132,12 +131,26 @@ catalog: [`docs/REFERENCE.md`](./docs/REFERENCE.md).
 | `PreToolUse` (Write/Edit/MultiEdit) | `no_edit_on_main.sh` | **block** — on main/master, blocks edits to any file EXCEPT an explicit allowlist (`.md`/`.txt`/`.rst`, `.yaml`/`.yml`/`.json`/`.toml`/`.ini`/`.cfg`, `.gitignore`, `LICENSE`); plugin-source markdown (`skills/*/SKILL.md`, `commands/*.md`) is also blocked. Also blocks `.claude/settings.json` / `.claude/settings.local.json` edits on **any** branch (the permission files that can bypass every gate) |
 | `PreToolUse` (Write/Edit/MultiEdit) | `comment_citation_gate.sh` | **block** — blocks new comment content that cites a session-artifact label (`E#:`, `F# fix`, `CHANGE B#`/`C#`, `Task A#`, `TA-I#`, "reviewer finding", "per the plan", etc.) instead of stating the constraint the code enforces; `.md` files exempt; fails open |
 
+## Sandboxed workers
+
+With `config.sandbox_workers: true` (`.claude/workflow.config.yaml`), the
+agentic-loop dispatches implementation-unit workers via
+`@anthropic-ai/sandbox-runtime` (`scripts/sandbox/spawn-sandboxed-worker.sh`),
+an OS-enforced filesystem containment layer (Seatbelt on macOS, bubblewrap on
+Linux) that restricts writes to an explicit per-worker allowlist — the
+worktree, per-worker scratch, the primary repo's `.git` (with its `hooks` and
+`config` subpaths denied), the per-user `$TMPDIR`, and a narrowed slice of
+Claude Code's own `~/.claude` config state (a named residual — worker
+containment excludes claude-home) — never the orchestrator, which is
+unaffected. Requires `node`/`npx`, macOS or Linux/WSL2.
+
 ## Requirements
 
 - Claude Code 2.1.x
 - `gh`, `jq`, `git`
 - For `/push` / `/merge`: a **GitHub**-hosted repo with an authenticated `gh` CLI (`gh auth login`) — the workflow uses `gh`, so non-GitHub remotes (GitLab/Bitbucket/Gitea) are not supported.
 - `pr-review-toolkit@claude-plugins-official` for the review stage of `/workflow`
+- For sandboxed workers (opt-in): `node`/`npx`, macOS or Linux/WSL2
 
 ## Uninstall
 

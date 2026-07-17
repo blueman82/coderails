@@ -1,6 +1,6 @@
 # coderails Component Reference
 
-Catalogue of every coderails component (34 skills, plus hooks, commands, scripts): what it does, when it's active, when it's NOT, and dependencies. Ground truth: all entries verified from source files. See README for a lighter overview.
+Catalogue of every coderails component (35 skills, plus hooks, commands, scripts): what it does, when it's active, when it's NOT, and dependencies. Ground truth: all entries verified from source files. See README for a lighter overview.
 
 ---
 
@@ -136,6 +136,26 @@ SSE buffer instead) or `{status: "error", error}`.
 **When it does NOT apply:** you performed the merge yourself this session and watched it complete, or the claim is about an open/draft PR (nothing merged to verify).
 
 **Provenance:** the first skill authored end-to-end by the dashboard Approve→build runner (above) — a `workflow-audit` proposal, Approved on the dashboard, built by a headless `skill-creator` session, and merged by hand.
+
+---
+
+#### `fable-mode`
+
+**Purpose:** Closes the behavioural gap between Claude Opus-class models and Claude Fable 5 by adopting its working habits deliberately: specify-before-start, high autonomy, first-shot correctness, instruction retention over long sessions, and rigorous self-verification.
+
+**When it triggers:** Any non-trivial task — multi-step work, anything involving files or tool calls, analysis, building something, debugging, research, document creation, or long-running work. Applied before starting work, not after, since it changes how the work is done.
+
+**When it does NOT apply:** Trivial single-step responses with no tool use or file involvement.
+
+---
+
+#### `sync-docs`
+
+**Purpose:** Analyzes any codebase and its documentation to identify drift and generate actionable sync reports. Enhanced with Serena for semantic code discovery — an optional `--semantic` flag adds AI-powered undocumented-code discovery on top of the mechanical diff.
+
+**When it triggers:** "sync docs", "check documentation", "documentation drift", "doc audit", explicit `/sync-docs`.
+
+**Invocation modes:** `/sync-docs` (full drift report), `/sync-docs --check` (drift report only, no suggestions), `/sync-docs --suggest-updates` (includes proposed markdown for updates), `/sync-docs --semantic` (Serena-powered deep code discovery), `/sync-docs --compare <section>` (deep-dive analysis of a specific section), `/sync-docs --verbose` (includes detailed file references), `/sync-docs --diagrams-only` (audits only `docs/diagrams/`).
 
 ---
 
@@ -458,6 +478,9 @@ source "${CLAUDE_PLUGIN_ROOT}/scripts/lib/config.sh" && coderails::resolve_confi
 | `scripts/lib/review-artifact.sh` | SSOT for the coderails review artifact marker: `review_artifact::marker <pr> <sha>` (builds the exact marker string), `review_artifact::matches_marker <line> <pr> <sha>` (exact-equality match). Both `/post-review` (writer) and `/merge` (reader) source this lib — no literal marker duplication. | `scripts/post_review.sh`, `scripts/merge.sh` (via `git-common.sh`) |
 | `scripts/lib/eval-artifact.sh` | SSOT for the coderails eval artifact marker: `eval_artifact::marker <pr> <head_sha> <result> <tier>` (builds the exact marker string), `eval_artifact::compute_go` (the only place a `GO`/`NO-GO` result is derived), plus `eval_artifact::grading_checksum` (computes the sha256 provenance checksum `grade-loop` stamps into a loop-scope artifact's `grading` field). Source-only — mirrors `review-artifact.sh`. Both `/post-evals` (writer) and `/merge` (reader) source this lib. | `scripts/post_evals.sh`, `scripts/merge.sh`, `hooks/scripts/lib/loop_state_common.sh` (sources it for `grading_checksum` in the UNSTAMPED check) |
 | `scripts/post_evals.sh` | Structural validator and result computer for `/coderails:post-evals`. `post_evals::validate_structure` runs anti-gaming structural refusals (schema, frozen-SHA match, tier/priority shape, and other gaming checks) in order, first failure wins; `post_evals::compute_and_validate_result` echoes `GO`/`NO-GO` by calling `eval_artifact::compute_go` — never read from a caller-supplied field. A `grade-loop` subcommand is the sole neutral computer of a loop-scope artifact's `result`: validates the loop-variant structure, computes `result` via the same `eval_artifact::compute_go`, and atomically stamps `result`/`graded_at`/`grading: {by, checksum}` — closes the gap where an orchestrator could otherwise hand-write its own loop-scope `GO`. `loop_state_guard.sh` demotes a `GO`/`TIER0` verdict lacking a valid stamp to `UNSTAMPED` and blocks. | `/coderails:post-evals` command (pr scope, writer path); orchestrator runs `grade-loop` at loop scope (prompted by `loop_state_guard.sh`'s block message — the hook echoes the command but never invokes it) |
+| `scripts/sandbox/spawn-sandboxed-worker.sh` | Launches a headless `claude -p` worker wrapped by `@anthropic-ai/sandbox-runtime` (srt, version-pinned at `SRT_VERSION=0.0.65`). Resolves the primary repo's `.git` (not the worktree's own pointer file), obtains a `gh auth token` outside the sandbox (the worker itself must call GitHub via `curl`, never `gh`, since srt breaks its TLS stack), creates a per-worker scratch dir under `$TMPDIR`, renders sandbox settings via `render-settings.sh`, then execs the worker inside srt so its filesystem writes are OS-contained to an explicit per-worker `allowWrite` list — worktree, scratch, primary `.git` (with `.git/hooks` and `.git/config` separately denied to close a worktree-topology escape), `$TMPDIR`, and a narrowed slice of `~/.claude` (config state only; `~/.claude/hooks`, `~/.claude/plugins`, and the two settings files stay denied) — a named residual, not full claude-home exclusion. Not a hook guard — fails fast and loudly (`set -euo pipefail`) rather than failing open. | agentic-loop orchestrator, Phase 3/3a, when `config.sandbox_workers: true` |
+| `scripts/sandbox/render-settings.sh` | Renders the pinned srt settings template (`srt-settings.json.template`) into a per-worker settings file: substitutes `%%WORKTREE%%`, `%%SCRATCH%%`, `%%PRIMARY_GIT%%`, `%%HOME%%`, `%%TMPDIR%%`, and `%%CLAUDE_PROJECT_STATE%%`, strips the template's `//` comments (srt parses with `JSON.parse`, which rejects them), and validates the result with `jq` before writing. | `scripts/sandbox/spawn-sandboxed-worker.sh` |
+| `scripts/sandbox/sandbox-probe.sh` | First-class negative control proving a probe run discriminates the sandbox, not merely the filesystem. Writes then deletes `<worktree>/.sandbox-probe` (must succeed — inside the allowlist), then attempts `$HOME/.sandbox-escape-probe` and `<primary-repo-parent>/escape-probe` (both must fail — outside the allowlist). Exit 0 iff the inside write succeeded and both outside attempts failed; exit 1 with a named reason otherwise; exit 2 ("not sandboxed?") when an outside write unexpectedly succeeds, i.e. run bare outside srt. | Sandbox-workers eval harness (manual or CI verification that containment holds) |
 
 ### `require::repo` constraint
 
