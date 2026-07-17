@@ -177,10 +177,36 @@ check "negative control: old broken foreignSkillPath is confirmed NOT to exist (
 check "skills/docs-sync/SKILL.md exists" "yes" "$([ -f "$SKILL_PATH" ] && echo yes || echo no)"
 
 if [ -f "$SKILL_PATH" ]; then
-  check "SKILL.md documents the no-drift short-circuit" \
-    "yes" "$(grep -qi 'no-drift' "$SKILL_PATH" && echo yes || echo no)"
+  # Anchored on the NORMATIVE imperative, not the topic keyword. A bare
+  # grep for 'no-drift' passes on prose that says the short-circuit was
+  # REMOVED ("no-drift handling was removed; the routine now always opens
+  # a PR" matches 'no-drift'), so it locks nothing. The instruction is the
+  # contract; assert the instruction.
+  check "SKILL.md forbids creating a branch on a no-drift night" \
+    "yes" "$(grep -qi 'do \*\*NOT\*\* create a branch\|do not create a branch' "$SKILL_PATH" && echo yes || echo no)"
+  check "SKILL.md forbids opening a PR on a no-drift night" \
+    "yes" "$(grep -qi 'do \*\*NOT\*\* open a pull request\|do not open a pull request' "$SKILL_PATH" && echo yes || echo no)"
   check "SKILL.md says the short-circuit happens BEFORE branch/PR creation" \
     "yes" "$(grep -qi 'before.*branch' "$SKILL_PATH" && echo yes || echo no)"
+
+  # --- Manifest must read the diff with --name-status, never --name-only.
+  # --name-only prints a rename as its DESTINATION alone, so
+  # `git mv scripts/gate.sh evil.md` shows bare `evil.md` — a .md path on
+  # no deny-list, which passes an extension check while smuggling in a
+  # shell script. It also cannot distinguish a deletion from an edit
+  # (both print the bare path). Verified empirically, 2026-07-17.
+  check "SKILL.md's manifest assertion uses --name-status" \
+    "yes" "$(grep -q -- '--name-status' "$SKILL_PATH" && echo yes || echo no)"
+  check "SKILL.md forbids --name-only in the manifest assertion" \
+    "yes" "$(grep -q -- 'never `--name-only`' "$SKILL_PATH" && echo yes || echo no)"
+  check "SKILL.md rejects renames whose source was not an in-scope doc" \
+    "yes" "$(grep -qiE 'status .?R.? or .?C.?|rename/copy' "$SKILL_PATH" && echo yes || echo no)"
+  # Anchored on the ONE normative clause. An earlier version of this check
+  # OR-ed two alternatives and so survived deletion of either — a check with
+  # a spare escape hatch is not a lock. Verified: stripping the single
+  # clause below now takes this check RED.
+  check "SKILL.md rejects deletion of an in-scope doc" \
+    "yes" "$(grep -q 'No line has status `D` (deletion) for an in-scope doc' "$SKILL_PATH" && echo yes || echo no)"
   check "SKILL.md documents ABORT WITH CLEANUP for a non-.md path" \
     "yes" "$(grep -q 'ABORT WITH CLEANUP' "$SKILL_PATH" && echo yes || echo no)"
   check "SKILL.md scopes edits to git-tracked .md files" \
