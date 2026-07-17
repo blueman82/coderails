@@ -19,7 +19,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 HOOKS_JSON="${1:-$REPO_ROOT/hooks/hooks.json}"
 READ_T_FLOOR=5
-EXPECTED_BACKSTOP_COUNT=14
+EXPECTED_BACKSTOP_COUNT=15
 
 fails=0
 
