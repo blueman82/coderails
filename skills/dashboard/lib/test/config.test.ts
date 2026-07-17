@@ -333,14 +333,17 @@ describe("loadConfig against the real examples/dashboard-config.json (C3)", () =
   // Exempt: a routine whose skill owns the path itself (memory-consolidation
   // names it in SKILL.md; wiki-lint's `{vault}/log.md` is the lint's own
   // output; loop-retro-promotion-weekly's button command never names the gate's
-  // basename 'promotion-runs.log', so the skill owns the path). Those can't
-  // drift from a command that never mentions a path.
+  // basename 'promotion-runs.log', so the skill owns the path; sync-docs-nightly's
+  // skill names its own run-log path — `run-{date}.log` — in SKILL.md section 4,
+  // so the skill owns both the path and the `run=ok` marker wording). Those
+  // can't drift from a command that never mentions a path.
   it("every routine whose skill does not own its artifact path has that path named in the button command", () => {
     const config = loadConfig(EXAMPLE_CONFIG_PATH);
     const SKILL_OWNS_ITS_PATH = new Set([
       "wiki-lint",
       "memory-consolidation-weekly",
       "loop-retro-promotion-weekly",
+      "sync-docs-nightly",
     ]);
     const byName = new Map(config.buttons.map((b) => [b.name, b]));
 
