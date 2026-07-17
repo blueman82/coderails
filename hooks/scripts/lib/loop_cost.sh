@@ -137,12 +137,15 @@ dc_mine_token_usage() {
   case "$headless_window" in ''|*[!0-9]*) headless_window=3600 ;; esac
   local headless_count=0
   # Portable mtime-in-epoch-seconds: GNU stat first, BSD/macOS stat second.
-  local orch_mtime
+  # f_mtime/diff are declared here, NOT inside the loop body — a `local`
+  # redeclared on each iteration makes zsh 5.9 echo "name=value" to stdout on
+  # the 2nd+ pass, corrupting this function's single-JSON-object output
+  # contract (the file has explicit zsh-compat support, so this matters).
+  local orch_mtime f_mtime diff
   orch_mtime=$(stat -c %Y "$orch_transcript" 2>/dev/null || stat -f %m "$orch_transcript" 2>/dev/null)
   if [ -n "$orch_mtime" ]; then
     while IFS= read -r -d '' f; do
       [ "$f" = "$orch_transcript" ] && continue
-      local f_mtime diff
       f_mtime=$(stat -c %Y "$f" 2>/dev/null || stat -f %m "$f" 2>/dev/null)
       [ -n "$f_mtime" ] || continue
       diff=$(( f_mtime - orch_mtime ))
