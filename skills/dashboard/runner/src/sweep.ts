@@ -49,6 +49,20 @@ export interface SweepOptions {
   vaultNotesDir?: string;
   runClaudeImpl?: typeof runClaude;
   notifyImpl?: (title: string, message: string) => void;
+  // The producer (the `claude -p` run) writes its artifact keyed to the
+  // LOCAL calendar date, not UTC. Defaults to `() => new Date()`; tests
+  // inject a fixed instant to reproduce a local/UTC day-boundary skew.
+  clock?: () => Date;
+}
+
+// Local calendar date (YYYY-MM-DD), not UTC — `toISOString()` is always UTC
+// regardless of process.env.TZ, which is exactly the mismatch this
+// resolves: the producer writes the artifact keyed to its local date.
+function localDateIso(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
 export interface SweepResult {
@@ -275,7 +289,7 @@ export async function sweepOnce(opts: SweepOptions): Promise<SweepResult> {
         }
       } else if (routine) {
         const artifactResult = checkArtifact(routine.expectedArtifact, {
-          date: new Date().toISOString().slice(0, 10),
+          date: localDateIso((opts.clock ?? (() => new Date()))()),
           runId: outputRunId,
           vault: (opts.config.wikiPaths ?? [])[0] ?? "",
         });
