@@ -444,6 +444,33 @@ nonobject_array_t=$(mk_nonobject_array_transcript)
 extracted_array=$(call_lib_fn als_extract_last_text "$nonobject_array_t" 10)
 check "bare JSON array line alongside valid assistant text -> text still extracted" "final answer text" "$extracted_array"
 
+# Reversed ordering: the poison line comes AFTER the assistant-text line, not
+# before. `last // ""` means this exercises a materially different path than
+# the two tests above — and it's the shape a live transcript actually takes,
+# since the assistant message is rarely the final line in the tail window (a
+# trailing tool_result, hook record, etc. commonly follows it). Without this
+# ordering the poison-before-text tests above could pass by coincidence if
+# the guard only skipped LEADING junk rather than filtering every element.
+mk_trailing_nonobject_transcript() {
+  local out="$TMP/trailing_nonobject_$RANDOM.jsonl"
+  printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"text","text":"final answer text"}]}}' > "$out"
+  printf '%s\n' '123' >> "$out"
+  printf '%s' "$out"
+}
+trailing_nonobject_t=$(mk_trailing_nonobject_transcript)
+extracted_trailing=$(call_lib_fn als_extract_last_text "$trailing_nonobject_t" 10)
+check "bare scalar JSON line AFTER valid assistant text -> text still extracted" "final answer text" "$extracted_trailing"
+
+mk_trailing_nonobject_array_transcript() {
+  local out="$TMP/trailing_nonobject_array_$RANDOM.jsonl"
+  printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"text","text":"final answer text"}]}}' > "$out"
+  printf '%s\n' '[1,2,3]' >> "$out"
+  printf '%s' "$out"
+}
+trailing_nonobject_array_t=$(mk_trailing_nonobject_array_transcript)
+extracted_trailing_array=$(call_lib_fn als_extract_last_text "$trailing_nonobject_array_t" 10)
+check "bare JSON array line AFTER valid assistant text -> text still extracted" "final answer text" "$extracted_trailing_array"
+
 # =====================================================================
 # als_log brace-group redirection (no stderr leak, no dir auto-create)
 # =====================================================================
