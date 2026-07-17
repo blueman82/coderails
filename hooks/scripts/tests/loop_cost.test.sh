@@ -370,4 +370,131 @@ check "missing prices file: distinct stderr diagnostic mentions the path" "true"
 check "missing prices file: still fail-opens to {} on stdout" "{}" "$stdout_out"
 check "missing prices file: still exit 0" "0" "$rc"
 
+# --- Test (m): jq absent — the `command -v jq` bail must emit a distinct
+# stderr diagnostic, so it's no longer indistinguishable from any other
+# fail-open cause. Simulate absence with a PATH containing no jq. Return
+# value unchanged: still {}, still exit 0. ---
+sess="jq-absent-session"
+proj="$TMP/projects/-test-proj-m"
+mkdir -p "$proj"
+usage_line "msg_m1" "claude-opus-4-8" 10 5 0 0 0 > "$proj/$sess.jsonl"
+empty_path_dir="$TMP/empty-path-m"
+mkdir -p "$empty_path_dir"
+stderr_out=$(PATH="$empty_path_dir" CLAUDE_PROJECTS_DIR="$TMP/projects" dc_mine_token_usage "$sess" 2>&1 1>/dev/null)
+stdout_out=$(PATH="$empty_path_dir" CLAUDE_PROJECTS_DIR="$TMP/projects" dc_mine_token_usage "$sess" 2>/dev/null)
+rc=0
+PATH="$empty_path_dir" CLAUDE_PROJECTS_DIR="$TMP/projects" dc_mine_token_usage "$sess" >/dev/null 2>&1 || rc=$?
+check "jq absent: distinct stderr diagnostic" "true" "$(printf '%s' "$stderr_out" | grep -qF "jq not found" && echo true || echo false)"
+check "jq absent: still fail-opens to {} on stdout" "{}" "$stdout_out"
+check "jq absent: still exit 0" "0" "$rc"
+
+# --- Test (n): empty session id — the `[ -n "$session" ]` bail must emit a
+# distinct stderr diagnostic. Return value unchanged: still {}, still exit 0. ---
+stderr_out=$(dc_mine_token_usage "" 2>&1 1>/dev/null)
+stdout_out=$(dc_mine_token_usage "" 2>/dev/null)
+rc=0
+dc_mine_token_usage "" >/dev/null 2>&1 || rc=$?
+check "empty session id: distinct stderr diagnostic" "true" "$(printf '%s' "$stderr_out" | grep -qF "empty session id" && echo true || echo false)"
+check "empty session id: still fail-opens to {} on stdout" "{}" "$stdout_out"
+check "empty session id: still exit 0" "0" "$rc"
+
+# --- Test (o): no transcript found — the `[ -n "$orch_transcript" ]` bail
+# must emit a distinct stderr diagnostic naming the session, so it is no
+# longer indistinguishable from "jq missing" or "prices file missing" (the
+# ambiguity that cost prior loops wrong root-cause guesses — test (c) above
+# already covers the return-value half; this covers the NEW stderr half).
+# Return value unchanged: still {}, still exit 0. ---
+sess="no-transcript-diag-session"
+stderr_out=$(dc_mine_token_usage "$sess" 2>&1 1>/dev/null)
+stdout_out=$(dc_mine_token_usage "$sess" 2>/dev/null)
+rc=0
+dc_mine_token_usage "$sess" >/dev/null 2>&1 || rc=$?
+check "no transcript: distinct stderr diagnostic mentions the session" "true" "$(printf '%s' "$stderr_out" | grep -qF "no transcript found" && printf '%s' "$stderr_out" | grep -qF "$sess" && echo true || echo false)"
+check "no transcript: still fail-opens to {} on stdout" "{}" "$stdout_out"
+check "no transcript: still exit 0" "0" "$rc"
+
+# --- Fault-injection harness for tests (p)/(q): a jq SHIM placed first on
+# PATH that fails (or emits garbage) ONLY for the stage-2 aggregation jq
+# (recognisable by 'unique_by' in its program text), and delegates to the
+# REAL jq for every other invocation (the per-line parse stage, the pricing
+# stage, and this test file's own `jq` calls). REAL_JQ is resolved dynamically
+# (not hardcoded) so the shim works on any machine regardless of jq's
+# install location. This reproduces a genuine jq failure that the existing
+# `2>/dev/null` on the aggregation pipeline would otherwise mute completely —
+# the exact "identical {}, no cause" symptom this task exists to kill. ---
+REAL_JQ="$(command -v jq)"
+shim_dir="$TMP/jq-shim"
+mkdir -p "$shim_dir"
+
+# --- Test (p): mining jq produces nothing (aggregation jq exits non-zero) —
+# the `[ -n "$mined" ]` bail must emit a distinct stderr diagnostic. ---
+cat > "$shim_dir/jq" <<SHIM
+#!/bin/bash
+for a in "\$@"; do
+  if [[ "\$a" == *"unique_by"* ]]; then
+    exit 1
+  fi
+done
+exec "$REAL_JQ" "\$@"
+SHIM
+chmod +x "$shim_dir/jq"
+sess="mining-crash-session"
+proj="$TMP/projects/-test-proj-p"
+mkdir -p "$proj"
+usage_line "msg_p1" "claude-opus-4-8" 10 5 0 0 0 > "$proj/$sess.jsonl"
+stderr_out=$(PATH="$shim_dir:$PATH" CLAUDE_PROJECTS_DIR="$TMP/projects" CLAUDE_MODEL_PRICES_FILE="$PRICES" dc_mine_token_usage "$sess" 2>&1 1>/dev/null)
+stdout_out=$(PATH="$shim_dir:$PATH" CLAUDE_PROJECTS_DIR="$TMP/projects" CLAUDE_MODEL_PRICES_FILE="$PRICES" dc_mine_token_usage "$sess" 2>/dev/null)
+rc=0
+PATH="$shim_dir:$PATH" CLAUDE_PROJECTS_DIR="$TMP/projects" CLAUDE_MODEL_PRICES_FILE="$PRICES" dc_mine_token_usage "$sess" >/dev/null 2>&1 || rc=$?
+check "mining jq crash: distinct stderr diagnostic (no output)" "true" "$(printf '%s' "$stderr_out" | grep -qF "mining produced no output" && echo true || echo false)"
+check "mining jq crash: still fail-opens to {} on stdout" "{}" "$stdout_out"
+check "mining jq crash: still exit 0" "0" "$rc"
+
+# --- Test (q): mining jq produces non-JSON garbage (exits 0 but the stage-2
+# aggregation stage's stdout is not valid JSON) — the `jq -e .` validity
+# check bail must emit a distinct stderr diagnostic, different from test (p)'s
+# "no output" message, since these are two different failure stages. ---
+cat > "$shim_dir/jq" <<SHIM
+#!/bin/bash
+for a in "\$@"; do
+  if [[ "\$a" == *"unique_by"* ]]; then
+    echo "not-valid-json-garbage"
+    exit 0
+  fi
+done
+exec "$REAL_JQ" "\$@"
+SHIM
+chmod +x "$shim_dir/jq"
+sess="mining-garbage-session"
+proj="$TMP/projects/-test-proj-q"
+mkdir -p "$proj"
+usage_line "msg_q1" "claude-opus-4-8" 10 5 0 0 0 > "$proj/$sess.jsonl"
+stderr_out=$(PATH="$shim_dir:$PATH" CLAUDE_PROJECTS_DIR="$TMP/projects" CLAUDE_MODEL_PRICES_FILE="$PRICES" dc_mine_token_usage "$sess" 2>&1 1>/dev/null)
+stdout_out=$(PATH="$shim_dir:$PATH" CLAUDE_PROJECTS_DIR="$TMP/projects" CLAUDE_MODEL_PRICES_FILE="$PRICES" dc_mine_token_usage "$sess" 2>/dev/null)
+rc=0
+PATH="$shim_dir:$PATH" CLAUDE_PROJECTS_DIR="$TMP/projects" CLAUDE_MODEL_PRICES_FILE="$PRICES" dc_mine_token_usage "$sess" >/dev/null 2>&1 || rc=$?
+check "mining jq garbage: distinct stderr diagnostic (invalid JSON)" "true" "$(printf '%s' "$stderr_out" | grep -qF "mining produced invalid JSON" && echo true || echo false)"
+check "mining jq garbage: still fail-opens to {} on stdout" "{}" "$stdout_out"
+check "mining jq garbage: still exit 0" "0" "$rc"
+rm -f "$shim_dir/jq"
+
+# --- Test (r): pricing jq produces nothing — a prices file that EXISTS
+# (passes the line-59 guard) but contains invalid JSON, so the `--slurpfile
+# prices` stage fails and `result` comes back empty. Distinguishes this
+# stage from the mining-stage failures above and from "prices file missing"
+# (test l). ---
+sess="pricing-crash-session"
+proj="$TMP/projects/-test-proj-r"
+mkdir -p "$proj"
+usage_line "msg_r1" "claude-opus-4-8" 10 5 0 0 0 > "$proj/$sess.jsonl"
+invalid_prices="$TMP/invalid-prices.json"
+printf 'not valid json {{{' > "$invalid_prices"
+stderr_out=$(CLAUDE_PROJECTS_DIR="$TMP/projects" CLAUDE_MODEL_PRICES_FILE="$invalid_prices" dc_mine_token_usage "$sess" 2>&1 1>/dev/null)
+stdout_out=$(CLAUDE_PROJECTS_DIR="$TMP/projects" CLAUDE_MODEL_PRICES_FILE="$invalid_prices" dc_mine_token_usage "$sess" 2>/dev/null)
+rc=0
+CLAUDE_PROJECTS_DIR="$TMP/projects" CLAUDE_MODEL_PRICES_FILE="$invalid_prices" dc_mine_token_usage "$sess" >/dev/null 2>&1 || rc=$?
+check "pricing jq crash: distinct stderr diagnostic (pricing produced no output)" "true" "$(printf '%s' "$stderr_out" | grep -qF "pricing produced no output" && echo true || echo false)"
+check "pricing jq crash: still fail-opens to {} on stdout" "{}" "$stdout_out"
+check "pricing jq crash: still exit 0" "0" "$rc"
+
 [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails failures)"; exit 1; }

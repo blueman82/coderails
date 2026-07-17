@@ -54,8 +54,8 @@ dc_mine_token_usage() {
   fi
   local prices_file="${CLAUDE_MODEL_PRICES_FILE:-$(dirname "$self_path")/model_prices.json}"
 
-  command -v jq >/dev/null 2>&1 || { printf '{}'; return 0; }
-  [ -n "$session" ] || { printf '{}'; return 0; }
+  command -v jq >/dev/null 2>&1 || { echo "loop_cost: jq not found on PATH" >&2; printf '{}'; return 0; }
+  [ -n "$session" ] || { echo "loop_cost: empty session id" >&2; printf '{}'; return 0; }
   [ -f "$prices_file" ] || { echo "loop_cost: prices file not found at $prices_file" >&2; printf '{}'; return 0; }
 
   # session_id is harness-owned (caller-supplied), not attacker-controlled —
@@ -97,7 +97,7 @@ dc_mine_token_usage() {
     proj="$(dirname "$f")"
     break
   done
-  [ -n "$orch_transcript" ] || { printf '{}'; return 0; }
+  [ -n "$orch_transcript" ] || { echo "loop_cost: no transcript found for session $session under $projects_dir" >&2; printf '{}'; return 0; }
 
   # Collect transcripts: the orchestrator file, plus every .jsonl found by
   # recursing under <proj>/<session>/subagents/ (find handles arbitrary
@@ -160,8 +160,8 @@ dc_mine_token_usage() {
         )
     ' 2>/dev/null
   )
-  [ -n "$mined" ] || { printf '{}'; return 0; }
-  echo "$mined" | jq -e . >/dev/null 2>&1 || { printf '{}'; return 0; }
+  [ -n "$mined" ] || { echo "loop_cost: mining produced no output" >&2; printf '{}'; return 0; }
+  echo "$mined" | jq -e . >/dev/null 2>&1 || { echo "loop_cost: mining produced invalid JSON" >&2; printf '{}'; return 0; }
 
   # Price each model. jq -s with two inputs (mined per-model, price table).
   local result
@@ -214,7 +214,7 @@ dc_mine_token_usage() {
       }
     ' 2>/dev/null)
 
-  [ -n "$result" ] || { printf '{}'; return 0; }
+  [ -n "$result" ] || { echo "loop_cost: pricing produced no output" >&2; printf '{}'; return 0; }
   printf '%s' "$result"
   return 0
 }
