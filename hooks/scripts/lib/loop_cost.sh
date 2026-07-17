@@ -131,6 +131,10 @@ dc_mine_token_usage() {
   # default 1h covers a single build's wall-clock budget
   # (BUILDER_WALL_CLOCK_SECS default 2700s in run-builder.sh) with margin.
   local headless_window="${CLAUDE_HEADLESS_WINDOW_SECS:-3600}"
+  # Guard a non-numeric override so the -le comparison below never leaks a raw
+  # "[: integer expression expected" to stderr — fall back to the default rather
+  # than mining a garbage window (still fail-open either way).
+  case "$headless_window" in ''|*[!0-9]*) headless_window=3600 ;; esac
   local headless_count=0
   # Portable mtime-in-epoch-seconds: GNU stat first, BSD/macOS stat second.
   local orch_mtime
