@@ -74,13 +74,6 @@ check "git push --force message names force-with-lease route" DENY \
 check "push message flags that fwl is itself blocked without the allowlist opt-in" DENY \
   "$(printf '%s' "$push_reason" | grep -qi 'destructive_allowlist' && echo DENY || echo MISSING)"
 
-# git clean (force) has a genuine safe route: the gate itself already permits
-# -n (dry-run/preview) and -i (interactive) — see lines 72-76 of the gate —
-# so the message must point at those rather than the generic fallback.
-clean_reason=$(run_reason "$(payload "git clean -fdx")")
-check "git clean message names -n preview and -i interactive route" DENY \
-  "$(printf '%s' "$clean_reason" | grep -qi -- '-n' && printf '%s' "$clean_reason" | grep -qi -- '-i' && echo DENY || echo MISSING)"
-
 # --- Deliverable A: a route for every remaining blockable pattern. Each check
 # asserts the deny message contains a route AND does NOT contain the generic
 # "No specific safe route is recorded" fallback text — the two-part test the
@@ -100,6 +93,17 @@ assert_specific_route() { # description command must_contain...
   done
   check "$desc" DENY "$( [ "$ok" -eq 1 ] && echo DENY || echo MISSING)"
 }
+
+# git clean (force) has a genuine safe route: the gate itself already permits
+# -n (dry-run/preview) and -i (interactive) — see lines 72-76 of the gate —
+# so the message must point at those rather than the generic fallback.
+# Needles are multi-char, route-specific literals ('git clean -n', 'git clean
+# -i', and the distinctive prose "dry-run"/"interactive prompt") rather than
+# bare '-n'/'-i' — those two-char substrings match incidentally inside
+# unrelated words and were proven (by a reviewer, confirmed here) to let a
+# fabricated, unrelated route pass undetected.
+assert_specific_route "git clean message names -n preview and -i interactive route" \
+  "git clean -fdx" "git clean -n" "dry-run" "git clean -i" "interactive prompt"
 
 # find -delete: no safe equivalent to deletion itself — honest route points at
 # previewing the match set first and at the settings.json escape hatch.
@@ -866,6 +870,12 @@ check "find without delete, TAB-separated args -> allow" ALLOW \
 # the git-clean block) is not mistaken for a real call site — confirmed this
 # matters: the naive extraction (no comment filter) picked up a spurious
 # 6th "label" from exactly such a comment during this file's own development.
+#
+# Scope: sync is enforced for the deny()-routed patterns only (the 5 fixed
+# labels + the pattern= alternatives) — NOT the cp/mv/dd, sed/perl/tee, or
+# command-substitution blocks further down the gate, which build their own
+# jq JSON directly and never call deny(). Those three already carry their
+# own specific messages and are outside this tripwire's scope by design.
 
 extract_fixed_labels() { # gate_path -> sorted unique "deny "..."" call sites
   grep -vE '^[[:space:]]*#' "$1" | grep -oE 'deny "[^"$]*"' | sort -u
