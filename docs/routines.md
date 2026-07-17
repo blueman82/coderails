@@ -387,10 +387,11 @@ allowlist at all) nor the hook-based safety net an interactive terminal
 session gets.
 
 **Ship read-only routines unless you have explicitly accepted this.**
-Four of the five shipped example routines use `"profile": "read-only"`
-for exactly this reason. `loop-retro-promotion-weekly` is
-the deliberate, documented exception — see the section above for what
-backs up its merge instead of a hook. If a routine's skill needs to
+Three of the five shipped example routines use `"profile": "read-only"`
+for exactly this reason. `docs-sync-nightly` and
+`loop-retro-promotion-weekly` are
+the deliberate, documented exceptions — see the sections above for what
+backs up each one's merge instead of a hook. If a routine's skill needs to
 write files or run commands, understand that its actions are gated only
 by the artifact check after the fact, not by any hook before the fact.
 
