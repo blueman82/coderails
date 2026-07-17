@@ -1844,4 +1844,25 @@ if [ -n "$fut" ]; then
   check "staleness nag: future date is not treated as stale" 0 "$fut_nags"
 fi
 
+# VT/FF must not survive the control-char strip. The original stripper used
+# tr -c '[:print:][:space:]', and [:space:] INCLUDES VT (0x0b) and FF (0x0c) —
+# so both passed straight through to the terminal, and the follow-up tr only
+# mapped \n\r\t, leaving them with no second line of defence. FF clears the
+# screen on many terminals. Pre-existing (shipped by PR #204), caught by the
+# security pass on this PR, fixed here.
+vt=$(printf '\013'); ff=$(printf '\014')
+m_vtff=$(nonscalar_msg "$(jq -cn --arg p "2026-06-24${vt}VT${ff}FF" \
+  '{schema_version:2, cost:{total_usd_estimate:1.25, total_tokens:4, prices_as_of:$p}}')")
+vt_left=$(printf '%s' "$m_vtff" | LC_ALL=C grep -c "$vt" 2>/dev/null); vt_left=${vt_left:-0}
+ff_left=$(printf '%s' "$m_vtff" | LC_ALL=C grep -c "$ff" 2>/dev/null); ff_left=${ff_left:-0}
+check "control-char strip: VT (0x0b) does not survive into the message" 0 "$vt_left"
+check "control-char strip: FF (0x0c) does not survive into the message" 0 "$ff_left"
+case "$m_vtff" in *'$1.25'*) vtff_cost=1 ;; *) vtff_cost=0 ;; esac
+check "control-char strip: hostile VT/FF prices_as_of still reports the cost" 1 "$vtff_cost"
+
+# The tightened strip must not damage an ordinary message.
+m_plain=$(nonscalar_msg '{"schema_version":2,"cost":{"total_usd_estimate":64.46,"total_tokens":93987957,"prices_as_of":"2026-06-24"}}')
+case "$m_plain" in *'Loop cost: $64.46 (93987957 tokens), prices as of 2026-06-24, '*) plain_ok=1 ;; *) plain_ok=0 ;; esac
+check "control-char strip: an ordinary message survives the tightened strip intact" 1 "$plain_ok"
+
 [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails)"; exit 1; }

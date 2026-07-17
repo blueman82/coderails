@@ -1137,7 +1137,16 @@ als_report_cost_on_complete() {
   # assumption. Same posture als_log already takes on its own newlines.
   # Printable + space/tab only; anything else becomes a space, so a hostile
   # value stays visible-but-inert rather than executing as an escape.
-  msg=$(printf '%s' "$msg" | tr -c '[:print:][:space:]' ' ' | tr '\n\r\t' '   ')
+  # Printable + literal space only. NOT [:space:] — that class includes VT
+  # (0x0b) and FF (0x0c), which would survive the strip and reach the terminal
+  # (verified: `printf 'A\013B\014C' | tr -c '[:print:][:space:]' ' '` passes
+  # both through). FF clears the screen on many terminals. The follow-up tr
+  # below only ever mapped \n\r\t, so those two had no second line of defence.
+  # Found by the security pass on this PR; it is pre-existing (PR #204 wrote
+  # it) rather than introduced here, but it is one character on a line this
+  # change already touches, and "I shipped it last loop" is not a reason to
+  # leave a control byte heading for a terminal.
+  msg=$(printf '%s' "$msg" | tr -c '[:print:] ' ' ' | tr '\n\r\t' '   ')
   # Log the outcome CLASS, never the message body: the body interpolates
   # retro.json-derived values, and als_log's sanitisation is a backstop, not a
   # reason to widen what reaches the log. The class is what a post-hoc audit
