@@ -44,7 +44,7 @@ export interface DashboardConfig {
   routines?: RoutineDef[];
 }
 
-const PREDICATE_KINDS = ["exists", "contains", "json-field"];
+const PREDICATE_KINDS = ["exists", "contains", "last-marker", "json-field"];
 
 const DEFAULT_CONFIG_PATH = join(homedir(), ".claude", "coderails-dashboard.json");
 
