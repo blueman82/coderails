@@ -1341,6 +1341,17 @@ write_progress_raw S1 '{"schema_version":2,"session_id":"S1","status":"in-progre
 check "proof_disposition: schema_version 2, no proof.json, disposition=\"none\" bare -> allow" \
   0 "$(proof_disposition_gate_direct S1 "$(file_dir S1)" "$EMPTY_T")"
 
+# (B3) a value that merely STARTS WITH the letters "none" but is not the
+# bare word or a "none:"-prefixed reason must BLOCK, not allow -- the rule
+# is "is 'none' or starts with 'none:'", not "starts with the substring
+# none". "nonexistent" is the adversarial case: a model typo or a
+# hallucinated field value that happens to start with "none" must not be
+# read as the recorded skip decision.
+reset
+write_progress_raw S1 '{"schema_version":2,"session_id":"S1","status":"in-progress","proof_disposition":"nonexistent"}'
+check "proof_disposition: schema_version 2, no proof.json, disposition=\"nonexistent\" -> block (not a none-match)" \
+  2 "$(proof_disposition_gate_direct S1 "$(file_dir S1)" "$EMPTY_T")"
+
 # (C) grandfathering: schema_version 1 / absent / non-numeric, proof.json
 # absent, no proof_disposition -> ALLOW, preserving the pre-existing
 # behaviour for every progress.json written before this change, including
@@ -1368,6 +1379,40 @@ reset
 write_progress_raw S1 '{"schema_version":2,"session_id":"S1","status":"in-progress"}'
 check "proof_disposition: same minimal fixture but schema_version 2 -> block (not grandfathered)" \
   2 "$(proof_disposition_gate_direct S1 "$(file_dir S1)" "$EMPTY_T")"
+
+# Absent, malformed, and legitimate sv<2 progress.json must each log a
+# DIFFERENT proof_gate suffix rather than one identical
+# "allowed_no_proof_grandfathered" line, so logs alone can tell the three
+# apart (e.g. to audit whether every live loop has moved to sv>=2 yet).
+proof_disposition_gate_logged() { # session_id proof_dir transcript log_file -> exit code, writes to $4
+  (
+    . "$(cd "$(dirname "$0")/.." && pwd)/lib/loop_state_common.sh"
+    ALS_PATH="$2/progress.json" LOG_FILE="$4"
+    als_gate_proofs_on_complete complete loop_stall_guard "$1" "$3"
+  )
+  echo $?
+}
+
+reset
+lg="$TMP/pd_grandfather_absent.log"
+proof_disposition_gate_logged S1 "$(file_dir S1)" "$EMPTY_T" "$lg" >/dev/null
+check "proof_disposition log: progress.json absent -> grandfathered_progress_absent" \
+  1 "$(grep -c 'proof_gate=allowed_no_proof_grandfathered_progress_absent' "$lg")"
+
+reset
+mkdir -p "$(file_dir S1)"
+printf '{not valid json' > "$(file_dir S1)/progress.json"
+lg="$TMP/pd_grandfather_malformed.log"
+proof_disposition_gate_logged S1 "$(file_dir S1)" "$EMPTY_T" "$lg" >/dev/null
+check "proof_disposition log: progress.json malformed -> grandfathered_progress_malformed" \
+  1 "$(grep -c 'proof_gate=allowed_no_proof_grandfathered_progress_malformed' "$lg")"
+
+reset
+write_progress_raw S1 '{"schema_version":1,"session_id":"S1","status":"in-progress"}'
+lg="$TMP/pd_grandfather_sv1.log"
+proof_disposition_gate_logged S1 "$(file_dir S1)" "$EMPTY_T" "$lg" >/dev/null
+check "proof_disposition log: progress.json schema_version 1 -> grandfathered_sv_lt2" \
+  1 "$(grep -c 'proof_gate=allowed_no_proof_grandfathered_sv_lt2' "$lg")"
 
 # (D) proof.json PRESENT overrides everything above: existing
 # validation/execution-mining behaviour is completely unchanged by this fix,

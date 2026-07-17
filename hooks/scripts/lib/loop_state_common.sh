@@ -732,14 +732,21 @@ listed unit(s), then re-declare complete." >&2
 # schema_version < 2 branch and this comment block can be deleted and
 # proof_disposition enforcement made unconditional.
 #
-# HONEST BOUNDARY: this makes SILENT skip impossible — a loop can no longer
-# reach `complete` with an absent proof.json and zero trace of why. It does
-# NOT stop a model writing a false "none: no executable surface" when a
-# surface actually exists — "does an executable surface exist" is
-# undetectable by any hook, the same honest-boundary every gate in this file
-# already carries (checks the declaration is present, not that the reason is
-# honest). Do not oversell this as closing that cheat; it only closes the
-# silent-omission path.
+# HONEST BOUNDARY: this makes SILENT skip impossible FOR LOOPS AT
+# progress.json schema_version >= 2 — such a loop can no longer reach
+# `complete` with an absent proof.json and zero trace of why. It does NOT
+# make silent skip impossible universally; two boundary members remain
+# uncaught. (1) It does not stop a model writing a false "none: no
+# executable surface" when a surface actually exists — "does an executable
+# surface exist" is undetectable by any hook, the same honest-boundary every
+# gate in this file already carries (checks the declaration is present, not
+# that the reason is honest). (2) A loop whose progress.json self-declares
+# schema_version < 2 (or non-numeric, or omits the field), or whose
+# progress.json is absent/unparseable, is grandfathered (see above) and can
+# still reach `complete` with no proof.json and no proof_disposition at
+# all — logged as proof_gate=allowed_no_proof_grandfathered, not blocked.
+# Do not oversell this as closing either cheat; it only closes the
+# silent-omission path for schema_version >= 2 loops.
 #
 # Fail-closed on malformed/unverifiable is unchanged and unconditional on
 # schema_version — the same established asymmetry as retro.json (mandatory,
@@ -781,19 +788,25 @@ als_gate_proofs_on_complete() {
     # gate runs independently of als_gate_require_active_loop's own
     # progress.json checks), so a missing/unparseable file reads as
     # schema_version 0 -> grandfathered, same as an explicit low value.
-    local sv_ge2="false"
+    local sv_ge2="false" grandfather_reason="grandfathered_progress_absent"
     if [ -f "$ALS_PATH" ]; then
       sv_ge2=$(jq -r '(.schema_version // 0) | if type == "number" then (. >= 2) else false end' "$ALS_PATH" 2>/dev/null)
-      [ "$sv_ge2" = "true" ] || sv_ge2="false"
+      if [ -z "$sv_ge2" ]; then
+        grandfather_reason="grandfathered_progress_malformed"
+        sv_ge2="false"
+      elif [ "$sv_ge2" != "true" ]; then
+        grandfather_reason="grandfathered_sv_lt2"
+        sv_ge2="false"
+      fi
     fi
     if [ "$sv_ge2" != "true" ]; then
-      als_log "hook=$hook session=$session proof_gate=allowed_no_proof_grandfathered"
+      als_log "hook=$hook session=$session proof_gate=allowed_no_proof_$grandfather_reason"
       return 0
     fi
     local disposition
     disposition=$(jq -r '(.proof_disposition // "") | if type == "string" then . else "" end' "$ALS_PATH" 2>/dev/null)
     case "$disposition" in
-      none*)
+      none|none:*)
         als_log "hook=$hook session=$session proof_gate=allowed_no_proof_disposition=none"
         return 0
         ;;
