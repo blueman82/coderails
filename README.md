@@ -137,9 +137,12 @@ With `config.sandbox_workers: true` (`.claude/workflow.config.yaml`), the
 agentic-loop dispatches implementation-unit workers via
 `@anthropic-ai/sandbox-runtime` (`scripts/sandbox/spawn-sandboxed-worker.sh`),
 an OS-enforced filesystem containment layer (Seatbelt on macOS, bubblewrap on
-Linux) that restricts a worker's writes to its own worktree, scratch, and the
-primary repo's `.git` — never the orchestrator, which is unaffected. Requires
-`node`/`npx`, macOS or Linux/WSL2.
+Linux) that restricts writes to an explicit per-worker allowlist — the
+worktree, per-worker scratch, the primary repo's `.git` (with its `hooks` and
+`config` subpaths denied), the per-user `$TMPDIR`, and a narrowed slice of
+Claude Code's own `~/.claude` config state (a named residual — worker
+containment excludes claude-home) — never the orchestrator, which is
+unaffected. Requires `node`/`npx`, macOS or Linux/WSL2.
 
 ## Requirements
 
