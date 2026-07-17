@@ -168,8 +168,16 @@ One append-only log at the config's `expectedArtifact.artifactPath`
 (`run-{date}.log`), one line per stage per run, timestamped ISO8601. The
 no-drift short-circuit (step 2) and every delivery stage (step 3) write
 to this same file — it is both this routine's durable record of what
-happened on a given night AND the artifact its `exists` gate checks,
-mirroring `loop-retro-promotion`'s `promotion-runs.log` convention.
+happened on a given night AND the artifact its gate checks, mirroring
+`loop-retro-promotion`'s `promotion-runs.log` convention.
+
+`run=ok` is the canonical terminal success marker: the config's
+`expectedArtifact.predicate` is a `contains` check keyed on this exact
+string. It is written as the final line on both success paths — the
+no-drift short-circuit (step 2) and a completed merge (step 3, after
+step 9) — and NEVER written on an abort or a refusal. A run log merely
+*existing* does not mean the night succeeded (an aborted or refused run
+still writes a log describing its own failure); only `run=ok` does.
 
 This routine keeps both of its config's shipped escalation channels
 (`escalation: ["notification", "vault-note"]`) — nothing here replaces
