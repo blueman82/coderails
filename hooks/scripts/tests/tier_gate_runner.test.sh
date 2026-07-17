@@ -186,8 +186,11 @@ check_contains "T1: pending posted BEFORE success (ordering)" "$(printf 'POST st
 check_contains "T1: summary line reports tier=0" "tier=0" "$out"
 
 # ══════════════════════════════════════════════════════════════════════════
-# Test 2: tier-1/2 artifact -> short-circuit success + verdict=not-tier-0,
-# NO judge call, NO pending step (uniform context, no per-tier gymnastics)
+# Test 2: tier-1/2 artifact -> posts NOTHING and reports a not_tier_0 skip.
+# (Post-nothing contract, b87272c: a tier!=0 claim mints no tier-review status
+# — merge.sh only consults the gate when PR_EVAL_TIER==0, so a tier-1/2 PR
+# needs none, and posting a reusable success was the verdict-laundering surface
+# that commit closed. No judge call, no pending step.)
 # ══════════════════════════════════════════════════════════════════════════
 TEST_PR=102 TEST_SHA=sha1
 reset_gh_state
@@ -197,9 +200,8 @@ tg_judge() { echo "JUDGE CALLED — should never happen for tier 1/2" >> "$TMP/j
 rm -f "$TMP/judge_called.log"
 out=$(run_gate)
 posted=$(cat "$POSTED_LOG")
-check "T2: tier-1 artifact short-circuits to success" "0" "$?"
-check_contains "T2: posted status is success" "state=success" "$posted"
-check_contains "T2: description names not-tier-0" "verdict=not-tier-0" "$posted"
+check "T2: tier-1 artifact -> no status posted (post-nothing contract)" "" "$posted"
+check_contains "T2: summary reports the not_tier_0 skip" "reason=not_tier_0" "$out"
 check_not_contains "T2: NO pending status posted for tier-1 short-circuit" "state=pending" "$posted"
 [[ -f "$TMP/judge_called.log" ]] && fails=$((fails+1)) && echo "FAIL - T2: judge was called for a tier-1 artifact" || echo "ok   - T2: judge NOT called for tier-1 artifact"
 
@@ -717,10 +719,14 @@ write_claude_stub "$(claude_success_body legitimate "fine")"  # restore
 
 # I1: tg_post_status's write goes through curl carrying the GH_TOKEN as a
 # Bearer credential — not through gh, and not unauthenticated.
+# Uses a TIER-0 body: under the post-nothing contract a tier-1 claim posts no
+# status at all, so it no longer exercises tg_post_status. A tier-0 body reaches
+# the identity-bound PENDING post (which carries the Bearer credential) before
+# the judge runs, which is exactly the write this test inspects.
 TEST_PR=201 TEST_SHA=sha_identity_ok
 reset_gh_state
 write_gh_stub
-set_comment_body "$(tier1_body "$TEST_PR" "$TEST_SHA" GO)"  # tier-1: short-circuit success, exercises tg_post_status without the judge
+set_comment_body "$(tier0_body "$TEST_PR" "$TEST_SHA" GO)"
 set_user_login_response "coderails-tier-bot"
 write_tier_gate_creds "ghp_machine_user_fixture_token" "coderails-tier-bot"
 out=$(run_gate)
@@ -737,7 +743,7 @@ check_contains "I1: the status POST carries the machine-user GH_TOKEN as a Beare
 TEST_PR=202 TEST_SHA=sha_mismatch_case
 reset_gh_state
 write_gh_stub
-set_comment_body "$(tier1_body "$TEST_PR" "$TEST_SHA" GO)"
+set_comment_body "$(tier0_body "$TEST_PR" "$TEST_SHA" GO)"  # tier-0: reaches the identity-bound post; a tier-1 body would skip before it
 set_user_login_response "some-other-account"   # credential loaded belongs to the WRONG login
 write_tier_gate_creds "ghp_wrong_account_token" "coderails-tier-bot"
 out=$(run_gate 2>&1)
@@ -747,16 +753,25 @@ check_contains "I2: login mismatch -> named error identifies the cause" "identit
 
 # I3: negative control for I2 — matching identity on the SAME fixture shape
 # reaches a normal post, proving I2 discriminates on the mismatch and isn't
-# just always blocking.
+# just always blocking. Uses a tier-0 body (post-nothing contract: a tier-1
+# body posts nothing) with a stubbed judge + a non-empty honest diff, so the
+# gate runs to a terminal SUCCESS post rather than erroring on the missing
+# CLAUDE_CODE_OAUTH_TOKEN the I-series creds deliberately omit (the real judge
+# needs it; this test is about the POST identity binding, not the judge). The
+# non-empty diff also keeps this forward-compatible with the fail-closed
+# empty-diff handling added downstream.
 TEST_PR=203 TEST_SHA=sha_identity_match_control
 reset_gh_state
-write_gh_stub
-set_comment_body "$(tier1_body "$TEST_PR" "$TEST_SHA" GO)"
+write_gh_stub_with_diff "scripts/foo.sh" "1 file changed, 10 insertions(+)" "diff --git a/scripts/foo.sh b/scripts/foo.sh
++echo hi"
+set_comment_body "$(tier0_body "$TEST_PR" "$TEST_SHA" GO)"
 set_user_login_response "coderails-tier-bot"
 write_tier_gate_creds "ghp_machine_user_fixture_token" "coderails-tier-bot"
+tg_judge() { printf 'legitimate\nControl.\n'; return 0; }
 out=$(run_gate)
 posted=$(cat "$POSTED_LOG" 2>/dev/null)
 check_contains "I3: matching identity -> status IS posted (negative control for I2)" "state=success" "$posted"
+unset -f tg_judge
 
 # I4: the expected machine-user login is read from the CREDS FILE's
 # MACHINE_USER= line, never from a bare TIER_GATE_MACHINE_USER env var —
@@ -770,7 +785,7 @@ check_contains "I3: matching identity -> status IS posted (negative control for 
 TEST_PR=204 TEST_SHA=sha_creds_file_is_source_of_truth
 reset_gh_state
 write_gh_stub
-set_comment_body "$(tier1_body "$TEST_PR" "$TEST_SHA" GO)"
+set_comment_body "$(tier0_body "$TEST_PR" "$TEST_SHA" GO)"  # tier-0: reaches the identity check; a tier-1 body would skip before it and pass this test vacuously
 set_user_login_response "coderails-tier-bot"
 write_tier_gate_creds "ghp_fixture_token" "a-different-configured-login"
 out=$(env -u TIER_GATE_MACHINE_USER bash -c '
