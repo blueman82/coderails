@@ -774,9 +774,8 @@ Regenerate proof.json with a numeric schema_version >= 1, then re-declare comple
   # shape and still blocks immediately, same posture as work_units' file-shape
   # check — withdrawal doesn't relax that.
   local proofs_type; proofs_type=$(jq -r '(.proofs // null) | type' "$proof_file" 2>/dev/null)
-  local proofs_absent=0
   case "$proofs_type" in
-    null) proofs_absent=1 ;;
+    null) : ;;
     array) : ;;
     *)
       als_log "hook=$hook session=$session proof_gate=blocked offenders=malformed_shape"
@@ -789,9 +788,8 @@ Regenerate proof.json with .proofs as a JSON array, then re-declare complete." >
   # still governs). Present-but-not-array is malformed and blocks, same
   # posture as .proofs above.
   local withdrawn_type; withdrawn_type=$(jq -r '(.withdrawn_proofs // null) | type' "$proof_file" 2>/dev/null)
-  local withdrawn_absent=0
   case "$withdrawn_type" in
-    null) withdrawn_absent=1 ;;
+    null) : ;;
     array) : ;;
     *)
       als_log "hook=$hook session=$session proof_gate=blocked offenders=malformed_withdrawn_shape"
@@ -808,30 +806,24 @@ Regenerate proof.json with .withdrawn_proofs as a JSON array, then re-declare co
   # mid-write proof.json racing the reader is the realistic cause) must fail
   # CLOSED like every other unparseable-proof.json case in this gate, not
   # silently pass.
-  local proof_count=0
-  if [ "$proofs_absent" -eq 0 ]; then
-    proof_count=$(jq '.proofs | length' "$proof_file" 2>/dev/null)
-    case "$proof_count" in
-      ''|*[!0-9]*)
-        als_log "hook=$hook session=$session proof_gate=blocked offenders=jq_error"
-        echo "[loop-stall-guard] LOOP-STOP: complete declared but proof.json's .proofs length could not be read.
+  local proof_count; proof_count=$(jq '.proofs | length' "$proof_file" 2>/dev/null)
+  case "$proof_count" in
+    ''|*[!0-9]*)
+      als_log "hook=$hook session=$session proof_gate=blocked offenders=jq_error"
+      echo "[loop-stall-guard] LOOP-STOP: complete declared but proof.json's .proofs length could not be read.
 Regenerate proof.json (it may be truncated or mid-write), then re-declare complete." >&2
-        exit 2
-        ;;
-    esac
-  fi
-  local withdrawn_count=0
-  if [ "$withdrawn_absent" -eq 0 ]; then
-    withdrawn_count=$(jq '.withdrawn_proofs | length' "$proof_file" 2>/dev/null)
-    case "$withdrawn_count" in
-      ''|*[!0-9]*)
-        als_log "hook=$hook session=$session proof_gate=blocked offenders=jq_error"
-        echo "[loop-stall-guard] LOOP-STOP: complete declared but proof.json's .withdrawn_proofs length could not be read.
+      exit 2
+      ;;
+  esac
+  local withdrawn_count; withdrawn_count=$(jq '.withdrawn_proofs | length' "$proof_file" 2>/dev/null)
+  case "$withdrawn_count" in
+    ''|*[!0-9]*)
+      als_log "hook=$hook session=$session proof_gate=blocked offenders=jq_error"
+      echo "[loop-stall-guard] LOOP-STOP: complete declared but proof.json's .withdrawn_proofs length could not be read.
 Regenerate proof.json (it may be truncated or mid-write), then re-declare complete." >&2
-        exit 2
-        ;;
-    esac
-  fi
+      exit 2
+      ;;
+  esac
   # MERGE-BLOCKER FIX (extended to the combined total): proof.json is
   # model-writable and uncapped, and this gate previously did a linear rescan
   # of $executions PER PROOF entry — O(proofs x transcript_bash_calls).
@@ -1066,12 +1058,12 @@ not also appear in .proofs." >&2
   fi
 }
 
-# Reporter (NOT a gate): on a `complete` declaration, print the loop's mined
-# cost to the human's terminal via top-level `systemMessage`, mechanically —
-# so a `complete` loop can no longer finish without the human seeing what it
-# cost, the way SKILL.md's Phase 13 prose has always demanded but a model
-# could silently skip. This is the fix for that: prose can't enforce prose,
-# a hook can.
+# Reporter (NOT a gate): on a `complete` declaration, APPEND the loop's mined
+# cost to $ALS_PENDING_SYSMSG (emitted as a single top-level systemMessage at
+# the loop_stall_guard.sh call site), mechanically — so a `complete` loop can
+# no longer finish without the human seeing what it cost, the way SKILL.md's
+# Phase 13 prose has always demanded but a model could silently skip. This is
+# the fix for that: prose can't enforce prose, a hook can.
 #
 # DELIBERATE POSTURE INVERSION — read this before "fixing" this function:
 # every other gate in this file (check_verify_loop.sh and
