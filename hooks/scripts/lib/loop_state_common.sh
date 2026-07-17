@@ -985,7 +985,14 @@ transcript and cannot satisfy this gate — then re-declare complete." >&2
 # exists to check against; see model_prices.json's price_source note). Past
 # this many days, nag a human to go check, without claiming the RATES
 # themselves are wrong (that can never be known from a date alone).
-ALS_PRICE_STALE_DAYS=30
+# Staleness threshold in days. 14, not 30, and the reason is empirical rather
+# than aesthetic: the shipped table sits at prices_as_of 2026-06-24 — 23 days
+# old at the time this was written. A 30-day threshold is SILENT on the real
+# table, i.e. the nag would never fire on the exact data that motivated it,
+# which is a feature that exists only in its own tests. 14 also roughly tracks
+# how often published rates actually move. Nothing enforces this number; it is
+# a judgement, and a wrong one is cheap here because this only ever WARNS.
+ALS_PRICE_STALE_DAYS=14
 als_report_cost_on_complete() {
   local category="$1" hook="$2" session="$3"
   local category_lc; category_lc=$(printf '%s' "$category" | tr '[:upper:]' '[:lower:]')

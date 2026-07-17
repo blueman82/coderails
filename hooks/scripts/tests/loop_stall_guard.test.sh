@@ -1760,4 +1760,40 @@ check "staleness nag: malformed prices_as_of -> no bogus nag computed" 0 "$bad_w
 case "$m_bad" in *"2.00"*) bad_cost_present=1 ;; *) bad_cost_present=0 ;; esac
 check "staleness nag: malformed prices_as_of -> cost figure still reported" 1 "$bad_cost_present"
 
+# The threshold must fire on the REAL shipped table, not just on synthetic
+# fixtures. This caught a live defect: the nag was first written at 30 days
+# while model_prices.json sat at prices_as_of 2026-06-24 (23 days old), so it
+# was SILENT on the exact data that motivated building it — a feature that
+# existed only inside its own tests. Reads the real table's date rather than
+# hardcoding one, so this keeps working after a genuine price bump.
+real_prices="$(cd "$(dirname "$0")/.." && pwd)/lib/model_prices.json"
+# Read the threshold from the lib's source rather than expecting it in scope:
+# this test file drives the guard as a subprocess and never sources the lib at
+# top level, so the constant is not a shell variable here.
+stale_days=$(grep -oE '^ALS_PRICE_STALE_DAYS=[0-9]+' \
+  "$(cd "$(dirname "$0")/.." && pwd)/lib/loop_state_common.sh" 2>/dev/null | grep -oE '[0-9]+$')
+stale_days=${stale_days:-30}
+if [ -f "$real_prices" ] && command -v jq >/dev/null 2>&1; then
+  real_date=$(jq -r '.prices_as_of // empty' "$real_prices" 2>/dev/null)
+  case "$real_date" in
+    [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9])
+      real_epoch=$(date -j -f "%Y-%m-%d" "$real_date" +%s 2>/dev/null)
+      if [ -n "$real_epoch" ]; then
+        real_age=$(( ( $(date +%s) - real_epoch ) / 86400 ))
+        m_real=$(nonscalar_msg "$(jq -cn --arg d "$real_date" \
+          '{schema_version:2, cost:{total_usd_estimate:1, total_tokens:2, prices_as_of:$d}}')")
+        case "$m_real" in *"checks the date only"*) real_nags=1 ;; *) real_nags=0 ;; esac
+        # Only assert the nag when the real table is genuinely past the
+        # threshold — right after a legitimate price bump it SHOULD be silent,
+        # and this test must not then fail spuriously.
+        if [ "$real_age" -gt "$stale_days" ]; then
+          check "staleness nag: fires on the REAL shipped model_prices.json (${real_age}d old > ${stale_days}d)" 1 "$real_nags"
+        else
+          check "staleness nag: correctly silent on a freshly-bumped real table (${real_age}d old <= ${stale_days}d)" 0 "$real_nags"
+        fi
+      fi
+      ;;
+  esac
+fi
+
 [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails)"; exit 1; }
