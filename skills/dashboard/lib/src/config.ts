@@ -91,6 +91,23 @@ function validateRoutines(routines: RoutineDef[], buttons: ButtonDef[]): void {
         `Routine "${routine.name}" expectedArtifact.predicate has unknown kind`
       );
     }
+    if (artifact.predicate.kind === "last-marker") {
+      const p = artifact.predicate as { success?: unknown; failures?: unknown };
+      if (typeof p.success !== "string" || p.success.length === 0) {
+        throw new ConfigError(
+          `Routine "${routine.name}" last-marker predicate must have a non-empty string "success"`
+        );
+      }
+      if (
+        !Array.isArray(p.failures) ||
+        p.failures.length === 0 ||
+        !p.failures.every((f) => typeof f === "string" && f.length > 0)
+      ) {
+        throw new ConfigError(
+          `Routine "${routine.name}" last-marker predicate must have a non-empty "failures" array of non-empty strings`
+        );
+      }
+    }
 
     for (const channel of routine.escalation) {
       if (!(ESCALATION_CHANNELS as readonly string[]).includes(channel)) {
