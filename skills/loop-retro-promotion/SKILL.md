@@ -28,7 +28,10 @@ Append one line to `<repo-key-dir>/promotion-runs.log`:
 ```
 
 If the predicate is unmet, STOP here. This is a dormant run — the log line
-IS the run's artifact. No branch, no PR, no gate chain.
+IS the run's artifact. No branch, no PR, no gate chain. A dormant stop is a
+correct, successful no-op, not a failure: before stopping, append a `run=ok`
+line to `promotion-runs.log` so the artifact gate (a last-marker predicate,
+keyed on this file's terminal markers) reads this run as green.
 
 ## 2. Mining
 
