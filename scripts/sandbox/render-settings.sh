@@ -68,16 +68,41 @@ mkdir -p "$claude_project_state" || die "could not create claude project-state d
 # ─── Render ─────────────────────────────────────────────────────────────────
 # Comment-strip first, then substitute: a path could legitimately contain "//"
 # (a doubled slash), and stripping afterwards could eat part of it.
+#
+# Substitute with jq, not sed. sed needs a delimiter, and EVERY delimiter is a
+# legal filename character — `s|%%WORKTREE%%|$worktree|g` dies with "bad flag in
+# substitute command" the moment a path contains `|` (reproduced: a worktree
+# under a dir named `pipe|dir`). Picking a rarer delimiter only moves the bug.
+# sed also cannot JSON-escape: a path containing `"` or a backslash would render
+# structurally-invalid JSON, and one containing `"` sequences could in
+# principle inject an allowlist entry. jq fixes both at once — it substitutes
+# and emits each value as a correctly-escaped JSON string, so the path is data,
+# never syntax. This is the same reasoning as the no-shell-injection rule one
+# layer up: never build a structured format by string-splicing.
 rendered=$(
   grep -v '^[[:space:]]*//' "$TEMPLATE" \
-  | sed \
-      -e "s|%%WORKTREE%%|$worktree|g" \
-      -e "s|%%SCRATCH%%|$scratch|g" \
-      -e "s|%%PRIMARY_GIT%%|$primary_git|g" \
-      -e "s|%%HOME%%|$HOME|g" \
-      -e "s|%%TMPDIR%%|$tmpdir|g" \
-      -e "s|%%CLAUDE_PROJECT_STATE%%|$claude_project_state|g"
-)
+  | jq \
+      --arg worktree "$worktree" \
+      --arg scratch "$scratch" \
+      --arg primary_git "$primary_git" \
+      --arg home "$HOME" \
+      --arg tmpdir "$tmpdir" \
+      --arg claude_project_state "$claude_project_state" \
+      '
+      def subst:
+        if type == "string" then
+          gsub("%%WORKTREE%%"; $worktree)
+          | gsub("%%SCRATCH%%"; $scratch)
+          | gsub("%%PRIMARY_GIT%%"; $primary_git)
+          | gsub("%%HOME%%"; $home)
+          | gsub("%%TMPDIR%%"; $tmpdir)
+          | gsub("%%CLAUDE_PROJECT_STATE%%"; $claude_project_state)
+        elif type == "array" then map(subst)
+        elif type == "object" then map_values(subst)
+        else . end;
+      subst
+      ' 2>/dev/null
+) || die "jq substitution failed — the template is not valid JSON once comments are stripped, or a path broke the render"
 
 # No placeholder may survive: an unsubstituted %%…%% would reach srt as a
 # literal path and silently widen or narrow the policy.

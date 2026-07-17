@@ -72,6 +72,37 @@ check "claude project-state dir substituted into allowWrite" "true" \
 check "claude state grant is the slug subdir, NOT the whole tree" "true" \
   "$(jq --arg root "/private/tmp/claude-$(id -u)" '.filesystem.allowWrite | index($root) == null' "$OUT")"
 
+# Paths are DATA, not syntax. The renderer substitutes with jq (not sed) because
+# every sed delimiter is a legal filename character and sed cannot JSON-escape.
+# Two regressions, both reproduced against the old sed implementation:
+#   `|` -> sed died "bad flag in substitute command", no settings file written.
+#   `"` -> sed spliced it in raw, producing structurally-invalid JSON (caught
+#          only by the downstream jq gate, and an injection risk in principle).
+PIPE_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/settings-pipe.XXXXXX")
+mkdir -p "$PIPE_ROOT/pipe|dir"
+git init -q "$PIPE_ROOT/pipe|dir/wt"
+PIPE_GIT=$(git -C "$PIPE_ROOT/pipe|dir/wt" rev-parse --path-format=absolute --git-common-dir)
+mkdir -p "$PIPE_ROOT/scratch"
+PIPE_OUT="$PIPE_ROOT/rendered.json"
+"$RENDER" "$PIPE_ROOT/pipe|dir/wt" "$PIPE_ROOT/scratch" "$PIPE_GIT" "$PIPE_OUT" >/dev/null 2>&1
+check "path containing | renders (sed delimiter regression)" "true" \
+  "$(jq -e . "$PIPE_OUT" >/dev/null 2>&1 && echo true || echo false)"
+check "path containing | is substituted literally" "true" \
+  "$(jq --arg p "$PIPE_ROOT/pipe|dir/wt" '.filesystem.allowWrite | index($p) != null' "$PIPE_OUT" 2>/dev/null)"
+
+QUOTE_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/settings-quote.XXXXXX")
+mkdir -p "$QUOTE_ROOT/qu\"ote"
+git init -q "$QUOTE_ROOT/qu\"ote/wt"
+QUOTE_GIT=$(git -C "$QUOTE_ROOT/qu\"ote/wt" rev-parse --path-format=absolute --git-common-dir)
+mkdir -p "$QUOTE_ROOT/scratch"
+QUOTE_OUT="$QUOTE_ROOT/rendered.json"
+"$RENDER" "$QUOTE_ROOT/qu\"ote/wt" "$QUOTE_ROOT/scratch" "$QUOTE_GIT" "$QUOTE_OUT" >/dev/null 2>&1
+check "path containing a quote renders valid JSON (escaping regression)" "true" \
+  "$(jq -e . "$QUOTE_OUT" >/dev/null 2>&1 && echo true || echo false)"
+# The quote must be ESCAPED into one entry, never splice a second one in.
+check "quoted path does not inject an extra allowWrite entry" "7" \
+  "$(jq '.filesystem.allowWrite | length' "$QUOTE_OUT" 2>/dev/null)"
+
 # No placeholder may survive, anywhere in the file.
 check "no %% placeholder remains" "0" "$(grep -c '%%' "$OUT" || true)"
 # ~ must be expanded by the renderer, not left for srt/the shell to guess.
