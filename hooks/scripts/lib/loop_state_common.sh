@@ -992,14 +992,26 @@ als_report_cost_on_complete() {
   # Silent to the human by design — the gate owns that message — but logged.
   [ -f "$retro" ] || { als_log "hook=$hook session=$session cost_report=skipped_no_retro"; return 0; }
 
-  local sv; sv=$(jq -r '(.schema_version // 0) | if type == "number" then . else 0 end' "$retro" 2>/dev/null)
-  case "$sv" in ''|*[!0-9]*) als_log "hook=$hook session=$session cost_report=skipped_bad_schema_version"; return 0 ;; esac
+  # The >=2 comparison happens INSIDE jq, deliberately, and must stay there.
+  # als_gate_retro_on_complete (which runs immediately before this reporter
+  # and lets the retro through) validates schema_version with jq's NUMERIC
+  # `>=`, so a float 2.0 or 2.5 passes it. Comparing in bash instead means
+  # pattern-matching a string: `case $sv in *[!0-9]*)` matches the "." and
+  # drops a float — so a retro carrying a perfectly valid cost would pass the
+  # gate and then vanish here, printing nothing (verified end-to-end: a
+  # {"schema_version":2.0, cost:{...$64.46...}} retro emitted absolutely
+  # nothing). Two validators disagreeing about the same field is how the
+  # exact bug this reporter exists to fix survives INSIDE the fix.
+  # schema_version is authored freehand by an LLM per prose instruction, not
+  # emitted by trusted code — treat it as adversarial input like every other
+  # field here, even though no float instance exists in the corpus yet.
+  local sv_ok; sv_ok=$(jq -r '(.schema_version // 0) | if type == "number" then (. >= 2) else false end' "$retro" 2>/dev/null)
   # Legacy grandfather: a schema_version 1 retro predates the cost miner
   # entirely, so there is no cost to report and silence is correct. Logged
   # anyway — a silent path that leaves NO trace is indistinguishable from a
   # broken one during an audit, which is the whole failure class this
   # reporter exists to close.
-  [ "$sv" -ge 2 ] || { als_log "hook=$hook session=$session cost_report=skipped_legacy_sv$sv"; return 0; }
+  [ "$sv_ok" = "true" ] || { als_log "hook=$hook session=$session cost_report=skipped_legacy_or_bad_sv"; return 0; }
 
   local cost_type; cost_type=$(jq -r '(.cost // null) | type' "$retro" 2>/dev/null)
   local msg=""
@@ -1009,10 +1021,19 @@ als_report_cost_on_complete() {
       if [ "$is_empty" = "true" ]; then
         msg="cost unavailable (miner returned no data)"
       else
+        # Scalars only. `jq -r` on a non-scalar (array/object) emits its
+        # PRETTY-PRINTED form — real newlines and all — which then lands
+        # inside the human-facing message: "Loop cost: $[\n 1,\n 2\n] (...)"
+        # (verified). That is not the "visibly-wrong beats fabricated" tradeoff
+        # this function makes elsewhere: that rule assumes a raw value a human
+        # can eyeball on one line, and it smuggles newlines into a report the
+        # terminal renders. A field of the wrong TYPE is unusable data, which
+        # is exactly what the incomplete path below already exists to report —
+        # so select non-scalars to empty and let them fall into it.
         local usd tokens prices_as_of
-        usd=$(jq -r '.cost.total_usd_estimate // empty' "$retro" 2>/dev/null)
-        tokens=$(jq -r '.cost.total_tokens // empty' "$retro" 2>/dev/null)
-        prices_as_of=$(jq -r '.cost.prices_as_of // empty' "$retro" 2>/dev/null)
+        usd=$(jq -r '(.cost.total_usd_estimate | select(type=="number" or type=="string")) // empty' "$retro" 2>/dev/null)
+        tokens=$(jq -r '(.cost.total_tokens | select(type=="number" or type=="string")) // empty' "$retro" 2>/dev/null)
+        prices_as_of=$(jq -r '(.cost.prices_as_of | select(type=="string")) // empty' "$retro" 2>/dev/null)
         if [ -z "$usd" ] || [ -z "$tokens" ]; then
           local missing=""
           [ -z "$usd" ] && missing="total_usd_estimate"
@@ -1080,6 +1101,16 @@ als_report_cost_on_complete() {
   esac
 
   [ -n "$msg" ] || { als_log "hook=$hook session=$session cost_report=skipped_empty_msg"; return 0; }
+  # Strip control characters before the message reaches a terminal. Every
+  # value interpolated above is retro.json-derived, and jq --arg guarantees
+  # only that the JSON stays well-formed — a live ESC (0x1B) survives JSON
+  # decode intact and lands in whatever renders this (verified). Whether the
+  # harness neutralises it is outside this repo and unknowable from here; a
+  # hook has no business shipping raw control bytes to a terminal on that
+  # assumption. Same posture als_log already takes on its own newlines.
+  # Printable + space/tab only; anything else becomes a space, so a hostile
+  # value stays visible-but-inert rather than executing as an escape.
+  msg=$(printf '%s' "$msg" | tr -c '[:print:][:space:]' ' ' | tr '\n\r\t' '   ')
   # Log the outcome CLASS, never the message body: the body interpolates
   # retro.json-derived values, and als_log's sanitisation is a backstop, not a
   # reason to widen what reaches the log. The class is what a post-hoc audit

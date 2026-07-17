@@ -1485,10 +1485,26 @@ run_capture_stdout "$(payload "$T" S1)"
 msg_noop_check=$(system_message "$STDOUT_OUT")
 check "negative control: reporter is NOT a no-op (systemMessage non-empty on row1)" 1 "$([ -n "$msg_noop_check" ] && echo 1 || echo 0)"
 
-# (b) Fails if the reporter is made to block: exit code must be 0 (not 2) on
-# every one of rows 1-6 above, already asserted individually; restated as one
-# aggregate assertion so "the reporter never blocks" is a single named check.
-check "negative control: reporter never exits non-zero across all 6 rows" 0 0
+# (b) Fails if the reporter is made to block. This must AGGREGATE REAL exit
+# codes, not restate a literal: `check "..." 0 0` compares 0 to 0, calls no
+# code, and passes under every implementation including a fully blocking one
+# — a "negative control" that can never fail is a false assurance parading as
+# the proof that the gate is real. Re-drive each row and sum the actual codes.
+neverblock_sum=0
+nb_row() { # <retro-json>
+  reset; local t; t=$(mk_transcript 1 "All done.
+LOOP-STOP: complete — done"); write_file in-progress S1 0
+  write_retro S1 "$1"
+  run_capture_stdout "$(payload "$t" S1)"
+  neverblock_sum=$((neverblock_sum + RC_OUT))
+}
+nb_row '{"schema_version":2, "cost":{"total_usd_estimate":7.5,"total_tokens":42,"prices_as_of":"2026-01-01"}}'
+nb_row '{"schema_version":1}'
+nb_row '{"schema_version":2, "cost":{}}'
+nb_row '{"schema_version":2}'
+nb_row '{"schema_version":2, "cost":{"total_tokens":123}}'
+nb_row '{"schema_version":2, "cost":{"total_usd_estimate":"not-a-number","total_tokens":1,"prices_as_of":"2026-06-24"}}'
+check "negative control: reporter never exits non-zero (summed real exit codes)" 0 "$neverblock_sum"
 
 # Date-math fail-open: a malformed prices_as_of must not crash the hook or
 # block the stop — it must fall back to printing the RAW prices_as_of string
@@ -1599,8 +1615,9 @@ check "cost-report log: incomplete cost -> cost_report=cost_incomplete" \
 # The silent legacy path MUST still leave a trace — silence + no log is the
 # indistinguishable-from-broken case above.
 check "cost-report log: legacy sv1 silent path is still logged" \
-  "cost_report=skipped_legacy_sv1" \
+  "cost_report=skipped_legacy_or_bad_sv" \
   "$(cost_log_case '{"schema_version":1}')"
+
 
 # No retro-derived VALUE may reach the log — only the outcome class.
 leak_lg="$TMP/costleak.txt"; : > "$leak_lg"
@@ -1616,5 +1633,88 @@ printf '%s' '{"schema_version":2,"cost":{"total_usd_estimate":31337.42,"total_to
 ) >/dev/null 2>&1
 leaked=$(grep -c "31337" "$leak_lg" 2>/dev/null); leaked=${leaked:-0}
 check "cost-report log: no retro-derived value leaks into the log" 0 "$leaked"
+
+# Non-scalar cost fields. `jq -r` on an array/object emits its PRETTY-PRINTED
+# form — real newlines included — which lands inside the human-facing message
+# ("Loop cost: $[\n  1,\n  2\n] (...)", verified before the fix). Two reasons
+# that must not stand: it smuggles newlines into a report the terminal
+# renders, and "$true"/"$[1,2]" is not a dollar figure a human can eyeball,
+# so it fails the "visibly-wrong beats plausibly-fabricated" rule rather than
+# satisfying it. A wrong-TYPE field is unusable data -> the incomplete path.
+nonscalar_msg() { # <retro-json> -> the emitted systemMessage
+  reset; local t; t=$(mk_transcript 1 "All done.
+LOOP-STOP: complete — done"); write_file in-progress S1 0
+  write_retro S1 "$1"
+  run_capture_stdout "$(payload "$t" S1)"
+  system_message "$STDOUT_OUT"
+}
+
+m_arr=$(nonscalar_msg '{"schema_version":2,"cost":{"total_usd_estimate":[1,2,3],"total_tokens":10,"prices_as_of":"2026-06-24"}}')
+case "$m_arr" in *"incomplete"*) arr_ok=1 ;; *) arr_ok=0 ;; esac
+check "cost-report: array USD -> incomplete message (not a raw JSON blob)" 1 "$arr_ok"
+check "cost-report: array USD -> message is single-line (no smuggled newlines)" 0 "$(printf '%s' "$m_arr" | grep -c '^' | awk '{print $1-1}')"
+
+m_obj=$(nonscalar_msg '{"schema_version":2,"cost":{"total_usd_estimate":{"a":1},"total_tokens":10,"prices_as_of":"2026-06-24"}}')
+case "$m_obj" in *"incomplete"*) obj_ok=1 ;; *) obj_ok=0 ;; esac
+check "cost-report: object USD -> incomplete message" 1 "$obj_ok"
+
+m_bool=$(nonscalar_msg '{"schema_version":2,"cost":{"total_usd_estimate":true,"total_tokens":10,"prices_as_of":"2026-06-24"}}')
+case "$m_bool" in *'$true'*) bool_leaked=1 ;; *) bool_leaked=0 ;; esac
+check "cost-report: boolean USD does not render as \"\$true\"" 0 "$bool_leaked"
+
+m_atok=$(nonscalar_msg '{"schema_version":2,"cost":{"total_usd_estimate":1.5,"total_tokens":[9,9],"prices_as_of":"2026-06-24"}}')
+case "$m_atok" in *"incomplete"*) atok_ok=1 ;; *) atok_ok=0 ;; esac
+check "cost-report: array tokens -> incomplete message" 1 "$atok_ok"
+check "cost-report: array tokens -> message is single-line" 0 "$(printf '%s' "$m_atok" | grep -c '^' | awk '{print $1-1}')"
+
+# A non-scalar prices_as_of must not blow up the age path either; the cost
+# figure itself is still good, so this must STILL report the cost.
+m_apr=$(nonscalar_msg '{"schema_version":2,"cost":{"total_usd_estimate":2.5,"total_tokens":7,"prices_as_of":["x"]}}')
+case "$m_apr" in *'$2.50'*) apr_reports=1 ;; *) apr_reports=0 ;; esac
+check "cost-report: non-scalar prices_as_of still reports the cost figure" 1 "$apr_reports"
+check "cost-report: non-scalar prices_as_of -> message is single-line" 0 "$(printf '%s' "$m_apr" | grep -c '^' | awk '{print $1-1}')"
+
+# Float schema_version. als_gate_retro_on_complete validates schema_version
+# with jq's NUMERIC >=, so 2.0 passes the gate and reaches this reporter. If
+# the reporter compares in bash instead (string pattern match), the "." trips
+# *[!0-9]* and a retro carrying a fully valid cost silently prints NOTHING —
+# the exact bug this reporter exists to fix, surviving inside the fix. The
+# two validators must agree on what a valid schema_version is. No float
+# instance exists in the corpus yet, but schema_version is authored freehand
+# by an LLM per prose, not emitted by trusted code.
+m_float=$(nonscalar_msg '{"schema_version":2.0,"cost":{"total_usd_estimate":64.46,"total_tokens":93987957,"prices_as_of":"2026-06-24"}}')
+check "cost-report: float schema_version 2.0 still reports (the retro gate accepts it, so must this)" 1 \
+  "$([ -n "$m_float" ] && echo 1 || echo 0)"
+case "$m_float" in *'$64.46'*) float_usd=1 ;; *) float_usd=0 ;; esac
+check "cost-report: float schema_version 2.0 reports the real USD figure" 1 "$float_usd"
+
+m_float25=$(nonscalar_msg '{"schema_version":2.5,"cost":{"total_usd_estimate":1.25,"total_tokens":5,"prices_as_of":"2026-06-24"}}')
+check "cost-report: float schema_version 2.5 still reports" 1 "$([ -n "$m_float25" ] && echo 1 || echo 0)"
+
+# ...but a float BELOW 2 must still grandfather silently, exactly like sv1 —
+# the fix must not widen the gate it is correcting.
+m_float19=$(nonscalar_msg '{"schema_version":1.9,"cost":{"total_usd_estimate":1,"total_tokens":1,"prices_as_of":"2026-06-24"}}')
+check "cost-report: float schema_version 1.9 is still grandfathered (silent)" "" "$m_float19"
+
+# Control-character neutralisation. jq --arg guarantees the JSON stays
+# well-formed, NOT that the decoded string is safe to render: a live ESC
+# (0x1B) survives JSON decode and reaches whatever draws the message. The
+# harness's own handling is outside this repo and unknowable from here, so
+# the hook strips control bytes itself rather than assuming — the same
+# posture als_log already takes on its own newlines.
+esc_char=$(printf '\033')
+m_esc=$(nonscalar_msg "$(jq -cn --arg p "${esc_char}[2J${esc_char}[31mRED" \
+  '{schema_version:2, cost:{total_usd_estimate:1.5, total_tokens:3, prices_as_of:$p}}')")
+esc_present=$(printf '%s' "$m_esc" | LC_ALL=C grep -c "$esc_char" 2>/dev/null); esc_present=${esc_present:-0}
+check "cost-report: ESC byte is stripped from the human-facing message" 0 "$esc_present"
+check "cost-report: message with hostile prices_as_of is still emitted (not silenced)" 1 \
+  "$([ -n "$m_esc" ] && echo 1 || echo 0)"
+case "$m_esc" in *'$1.50'*) esc_usd=1 ;; *) esc_usd=0 ;; esac
+check "cost-report: hostile prices_as_of does not suppress the real USD figure" 1 "$esc_usd"
+
+# The stripper must not damage a normal message.
+m_norm=$(nonscalar_msg '{"schema_version":2,"cost":{"total_usd_estimate":64.46,"total_tokens":93987957,"prices_as_of":"2026-06-24"}}')
+case "$m_norm" in *'Loop cost: $64.46 (93987957 tokens), prices as of 2026-06-24, '*'days old'*) norm_ok=1 ;; *) norm_ok=0 ;; esac
+check "cost-report: a normal message survives control-char stripping intact" 1 "$norm_ok"
 
 [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails)"; exit 1; }
