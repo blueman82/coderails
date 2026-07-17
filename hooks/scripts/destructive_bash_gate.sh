@@ -63,19 +63,19 @@ deny() {
 # Also matches --force and multi-token "-d -f" patterns.
 # Strategy: deny "git clean" when the arg string contains -f (combined short flag)
 # or --force (anywhere). Excludes: bare "git clean", dry-run, interactive.
-if echo "$cmd" | grep -qiE '\bgit +clean\b'; then
+if echo "$cmd" | grep -qiE '\bgit[[:space:]]+clean\b'; then
   # Extract everything after "git clean" as the args portion
-  args=$(echo "$cmd" | sed -E 's/.*\bgit +clean\b//')
+  args=$(echo "$cmd" | sed -E 's/.*\bgit[[:space:]]+clean\b//')
   # Allow bare "git clean" (no args)
   if [ -n "$(echo "$args" | tr -d ' \t')" ]; then
     # Allow dry-run forms: -n / --dry-run
-    if echo "$args" | grep -qE '(^| )--dry-run( |$)|(^| )-[a-zA-Z]*n[a-zA-Z]*( |$)'; then
+    if echo "$args" | grep -qE '(^|[[:space:]])--dry-run([[:space:]]|$)|(^|[[:space:]])-[a-zA-Z]*n[a-zA-Z]*([[:space:]]|$)'; then
       : # dry-run — allow
     # Allow interactive: -i / --interactive
-    elif echo "$args" | grep -qE '(^| )-[a-zA-Z]*i[a-zA-Z]*( |$)|(^| )--interactive( |$)'; then
+    elif echo "$args" | grep -qE '(^|[[:space:]])-[a-zA-Z]*i[a-zA-Z]*([[:space:]]|$)|(^|[[:space:]])--interactive([[:space:]]|$)'; then
       : # interactive — allow
     # Deny force: --force or -f in any combined/separated form
-    elif echo "$args" | grep -qE '(^| )--force( |$)|(^| )-[a-zA-Z]*f[a-zA-Z]*( |$)'; then
+    elif echo "$args" | grep -qE '(^|[[:space:]])--force([[:space:]]|$)|(^|[[:space:]])-[a-zA-Z]*f[a-zA-Z]*([[:space:]]|$)'; then
       deny "git clean (force)"
     fi
   fi
@@ -84,13 +84,13 @@ fi
 # find ... -delete or find ... --delete
 # The .* must not cross a shell separator (;, &&, ||, |).
 # Only match -delete/--delete in the same shell token group as "find".
-if echo "$cmd" | grep -qiE '\bfind\b[^;|&]*( -delete| --delete)'; then
+if echo "$cmd" | grep -qiE '\bfind\b[^;|&]*([[:space:]]-delete|[[:space:]]--delete)'; then
   deny "find -delete"
 fi
 
 # truncate with size flag — truncates file content
 # Also catches --size / --size=N long forms.
-if echo "$cmd" | grep -qiE '\btruncate +(-s|--size[= ])'; then
+if echo "$cmd" | grep -qiE '\btruncate[[:space:]]+(-s|--size[=[:space:]])'; then
   deny "truncate -s/--size"
 fi
 
@@ -195,7 +195,18 @@ if echo "$force_cmd_flat" | grep -qiE "${git_push_re}.*(${naked_force_re}|--forc
 fi
 
 # ── Original permanent blocklist ─────────────────────────────────────────────
-pattern='\brm +(-[rRfF]+|--recursive|--force)|\bgit +reset +--hard|\bDROP +(TABLE|DATABASE|SCHEMA)\b|\bTRUNCATE +TABLE\b|\bdd +if=|\bmkfs\.|\bchmod +-R +777|\bgit +commit +.*--no-verify'
+# All token separators below use [[:space:]] (POSIX class: space, tab,
+# newline, etc.), never a literal space. A literal-space-only "+" only
+# matches commands whose flags are separated by an actual space character —
+# a tab (or other whitespace) between tokens is still a real argv split once
+# bash parses the line (IFS defaults to space+tab+newline), but a
+# literal-space regex never sees it as a separator, so a tab-separated form
+# of every pattern here (rm, git reset --hard, DROP/TRUNCATE, chmod -R 777,
+# git commit --no-verify) previously matched nothing and evaded the entire
+# blocklist. [[:space:]] is POSIX ERE and confirmed working under this
+# machine's bash 3.2.57 grep -E — unlike a bash 4-only construct
+# (${var,,}, declare -A, mapfile), it carries no version risk.
+pattern='\brm[[:space:]]+(-[rRfF]+|--recursive|--force)|\bgit[[:space:]]+reset[[:space:]]+--hard|\bDROP[[:space:]]+(TABLE|DATABASE|SCHEMA)\b|\bTRUNCATE[[:space:]]+TABLE\b|\bdd[[:space:]]+if=|\bmkfs\.|\bchmod[[:space:]]+-R[[:space:]]+777|\bgit[[:space:]]+commit[[:space:]]+.*--no-verify'
 
 if echo "$cmd" | grep -qiE "$pattern"; then
   matched=$(echo "$cmd" | grep -oiE "$pattern" | head -1)
@@ -222,7 +233,12 @@ fi
 
 # Source-file extensions pattern (anchored to end-of-token to avoid false matches
 # like foo.py.bak or output.go.log). Matches only tokens ENDING in a source ext.
-src_ext='\.(py|ts|tsx|js|jsx|go)([ '"'"'"]|$)'
+# Right boundary uses [[:space:]] (not a literal space) alongside the quote
+# chars, for the same reason as every other separator in this file: a tab
+# after the extension is a real token break bash itself recognises, and a
+# literal-space-only bracket let a source path followed by a TAB (rather
+# than end-of-string, a space, or a quote) evade detection entirely.
+src_ext='\.(py|ts|tsx|js|jsx|go)([[:space:]'"'"'"]|$)'
 # Plugin source pattern (skills/*/SKILL.md or commands/*.md).
 # Left-anchored to a path/token boundary (start-of-string, whitespace,
 # quote, or a preceding "/") so a GLUED lookalike word like
@@ -232,7 +248,7 @@ src_ext='\.(py|ts|tsx|js|jsx|go)([ '"'"'"]|$)'
 # "vendor/skills/x/SKILL.md" still matches (the "/" before "skills/" is a
 # real path separator, not part of the directory name). Mirrors src_ext's
 # existing right-anchor above.
-plugin_src='(^|[[:space:]/'"'"'"])(skills/[^/]+/SKILL\.md|commands/[^/]+\.md)([ '"'"'"]|$)'
+plugin_src='(^|[[:space:]/'"'"'"])(skills/[^/]+/SKILL\.md|commands/[^/]+\.md)([[:space:]'"'"'"]|$)'
 
 # branch_for_path: resolve git branch for a given file path.
 # Accepts an absolute path or a path relative to $cwd.
@@ -304,14 +320,14 @@ source_edit_blocked=0
 source_edit_target=""
 
 # sed -i ... <sourcefile>: extract last token as the target approximation
-if echo "$cmd" | grep -qiE "\\bsed +-[^'\"]*i[^'\"]*.*($src_ext|$plugin_src)"; then
+if echo "$cmd" | grep -qiE "\\bsed[[:space:]]+-[^'\"]*i[^'\"]*.*($src_ext|$plugin_src)"; then
   source_edit_blocked=1
   source_edit_target=$(echo "$cmd" | awk '{print $NF}')
 fi
 
 # perl -i ... <sourcefile>: extract last token as the target approximation
 if [ "$source_edit_blocked" -eq 0 ]; then
-  if echo "$cmd" | grep -qiE "\\bperl +-[^'\"]*i[^'\"]*.*($src_ext|$plugin_src)"; then
+  if echo "$cmd" | grep -qiE "\\bperl[[:space:]]+-[^'\"]*i[^'\"]*.*($src_ext|$plugin_src)"; then
     source_edit_blocked=1
     source_edit_target=$(echo "$cmd" | awk '{print $NF}')
   fi
