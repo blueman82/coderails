@@ -984,14 +984,22 @@ als_report_cost_on_complete() {
   local category="$1" hook="$2" session="$3"
   local category_lc; category_lc=$(printf '%s' "$category" | tr '[:upper:]' '[:lower:]')
   [ "$category_lc" = "complete" ] || return 0
-  command -v jq >/dev/null 2>&1 || return 0
-  [ -n "$ALS_PATH" ] || return 0
+  command -v jq >/dev/null 2>&1 || { als_log "hook=$hook session=$session cost_report=skipped_no_jq"; return 0; }
+  [ -n "$ALS_PATH" ] || { als_log "hook=$hook session=$session cost_report=skipped_no_als_path"; return 0; }
   local retro; retro="$(dirname "$ALS_PATH")/retro.json"
-  [ -f "$retro" ] || return 0
+  # Absent/unreadable retro: the retro gate above already blocked on this, so
+  # reaching here means it was skipped (no jq) or the file vanished mid-turn.
+  # Silent to the human by design — the gate owns that message — but logged.
+  [ -f "$retro" ] || { als_log "hook=$hook session=$session cost_report=skipped_no_retro"; return 0; }
 
   local sv; sv=$(jq -r '(.schema_version // 0) | if type == "number" then . else 0 end' "$retro" 2>/dev/null)
-  case "$sv" in ''|*[!0-9]*) return 0 ;; esac
-  [ "$sv" -ge 2 ] || return 0
+  case "$sv" in ''|*[!0-9]*) als_log "hook=$hook session=$session cost_report=skipped_bad_schema_version"; return 0 ;; esac
+  # Legacy grandfather: a schema_version 1 retro predates the cost miner
+  # entirely, so there is no cost to report and silence is correct. Logged
+  # anyway — a silent path that leaves NO trace is indistinguishable from a
+  # broken one during an audit, which is the whole failure class this
+  # reporter exists to close.
+  [ "$sv" -ge 2 ] || { als_log "hook=$hook session=$session cost_report=skipped_legacy_sv$sv"; return 0; }
 
   local cost_type; cost_type=$(jq -r '(.cost // null) | type' "$retro" 2>/dev/null)
   local msg=""
@@ -1012,6 +1020,7 @@ als_report_cost_on_complete() {
             [ -n "$missing" ] && missing="${missing}, total_tokens" || missing="total_tokens"
           fi
           msg="cost recorded but incomplete (missing ${missing})"
+          als_log "hook=$hook session=$session cost_report=cost_incomplete"
           jq -n --arg m "$msg" '{systemMessage: $m}' 2>/dev/null
           return 0
         fi
@@ -1070,7 +1079,18 @@ als_report_cost_on_complete() {
       ;;
   esac
 
-  [ -n "$msg" ] || return 0
+  [ -n "$msg" ] || { als_log "hook=$hook session=$session cost_report=skipped_empty_msg"; return 0; }
+  # Log the outcome CLASS, never the message body: the body interpolates
+  # retro.json-derived values, and als_log's sanitisation is a backstop, not a
+  # reason to widen what reaches the log. The class is what a post-hoc audit
+  # actually needs — "did the human get a cost line, and if not, why".
+  local outcome="reported"
+  case "$msg" in
+    "cost unavailable"*) outcome="miner_failed_open" ;;
+    "cost not recorded"*) outcome="cost_absent" ;;
+    "cost recorded but incomplete"*) outcome="cost_incomplete" ;;
+  esac
+  als_log "hook=$hook session=$session cost_report=$outcome"
   jq -n --arg m "$msg" '{systemMessage: $m}' 2>/dev/null
   return 0
 }

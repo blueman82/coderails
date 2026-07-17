@@ -1559,4 +1559,62 @@ msg_clean=$(system_message "$STDOUT_OUT")
 case "$msg_clean" in *"days old"*) still_computes=1 ;; *) still_computes=0 ;; esac
 check "cost-report: a clean YYYY-MM-DD still computes the staleness age" 1 "$still_computes"
 
+# Audit trail. Every sibling gate in this file logs its outcome via als_log
+# (retro=3 calls, work_units=2, proofs=10); the reporter must too, per
+# AGENTS.md's hook-script conventions. This matters most on the SILENT paths:
+# a path that emits nothing to the human AND leaves no log line is
+# indistinguishable from a broken one during an audit — which is precisely
+# the failure class this reporter exists to close.
+#
+# The log records the outcome CLASS only, never the message body: the body
+# interpolates retro.json-derived values, and als_log's newline sanitisation
+# is a backstop, not a licence to widen what reaches the log.
+cost_log_case() { # <retro-json> -> echoes the logged cost_report= class
+  local lg="$TMP/costlog_${RANDOM}.txt"; : > "$lg"
+  local st="$TMP/costlog_state_${RANDOM}.json"
+  local rt; rt="$(dirname "$st")/retro.json"
+  echo '{"schema_version":1,"status":"complete"}' > "$st"
+  printf '%s' "$1" > "$rt"
+  (
+    # shellcheck disable=SC1090
+    . "$(cd "$(dirname "$0")/.." && pwd)/lib/loop_state_common.sh" 2>/dev/null
+    ALS_PATH="$st" LOG_FILE="$lg" \
+      als_report_cost_on_complete "complete" "loop_stall_guard" "s"
+  ) >/dev/null 2>&1
+  grep -o 'cost_report=[a-z_0-9]*' "$lg" 2>/dev/null | head -1
+}
+
+check "cost-report log: populated cost -> cost_report=reported" \
+  "cost_report=reported" \
+  "$(cost_log_case '{"schema_version":2,"cost":{"total_usd_estimate":1,"total_tokens":2,"prices_as_of":"2026-06-24"}}')"
+check "cost-report log: miner failed open -> cost_report=miner_failed_open" \
+  "cost_report=miner_failed_open" \
+  "$(cost_log_case '{"schema_version":2,"cost":{}}')"
+check "cost-report log: cost absent -> cost_report=cost_absent" \
+  "cost_report=cost_absent" \
+  "$(cost_log_case '{"schema_version":2}')"
+check "cost-report log: incomplete cost -> cost_report=cost_incomplete" \
+  "cost_report=cost_incomplete" \
+  "$(cost_log_case '{"schema_version":2,"cost":{"total_tokens":9}}')"
+# The silent legacy path MUST still leave a trace — silence + no log is the
+# indistinguishable-from-broken case above.
+check "cost-report log: legacy sv1 silent path is still logged" \
+  "cost_report=skipped_legacy_sv1" \
+  "$(cost_log_case '{"schema_version":1}')"
+
+# No retro-derived VALUE may reach the log — only the outcome class.
+leak_lg="$TMP/costleak.txt"; : > "$leak_lg"
+leak_st="$TMP/costleak_state.json"
+echo '{"schema_version":1,"status":"complete"}' > "$leak_st"
+printf '%s' '{"schema_version":2,"cost":{"total_usd_estimate":31337.42,"total_tokens":999,"prices_as_of":"2026-06-24"}}' \
+  > "$(dirname "$leak_st")/retro.json"
+(
+  # shellcheck disable=SC1090
+  . "$(cd "$(dirname "$0")/.." && pwd)/lib/loop_state_common.sh" 2>/dev/null
+  ALS_PATH="$leak_st" LOG_FILE="$leak_lg" \
+    als_report_cost_on_complete "complete" "loop_stall_guard" "s"
+) >/dev/null 2>&1
+leaked=$(grep -c "31337" "$leak_lg" 2>/dev/null); leaked=${leaked:-0}
+check "cost-report log: no retro-derived value leaks into the log" 0 "$leaked"
+
 [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails)"; exit 1; }
