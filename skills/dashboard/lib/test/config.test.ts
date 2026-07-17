@@ -374,16 +374,22 @@ describe("loadConfig against the real examples/dashboard-config.json (C3)", () =
     }
   });
 
-  // sync-docs-nightly's whole purpose is rejecting a failure log — but an
-  // `exists` predicate accepts ANY log, success or failure, so a routine
-  // that aborted or refused mid-run still passed its gate as long as it wrote
-  // *something*. That was the green-on-failure defect this PR fixes. Pin the
-  // predicate's kind AND marker against the real config so a regression back
-  // to `exists` (or any marker drift) cannot ship green.
-  it("sync-docs-nightly's gate rejects a failure log — predicate is 'contains'/'run=ok', not 'exists'", () => {
+  // sync-docs-nightly's whole purpose is rejecting a failure log. An `exists`
+  // predicate accepted ANY log (green-on-failure). A whole-file `contains`
+  // `run=ok` then false-passed an ABORTED same-date re-run, because the per-date
+  // log still held an earlier run's `run=ok` (defect 3, reproduced live as run
+  // 8bedfa1c). The gate must key on the LAST terminal marker: `last-marker`.
+  // Pin the predicate against the real config so a regression back to `exists`
+  // OR a whole-file `contains` (either of which re-opens a false-green) cannot
+  // ship green.
+  it("sync-docs-nightly's gate keys on the last terminal marker — predicate is 'last-marker', not 'exists'/'contains'", () => {
     const config = loadConfig(EXAMPLE_CONFIG_PATH);
     const routine = config.routines?.find((r) => r.name === "sync-docs-nightly");
     expect(routine, "sync-docs-nightly routine not found in example config").toBeDefined();
-    expect(routine?.expectedArtifact.predicate).toEqual({ kind: "contains", marker: "run=ok" });
+    expect(routine?.expectedArtifact.predicate).toEqual({
+      kind: "last-marker",
+      success: "run=ok",
+      failures: ["abort=", "refused="],
+    });
   });
 });
