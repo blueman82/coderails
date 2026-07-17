@@ -19,7 +19,7 @@ Nineteen-plus numbered phases (−2 through 13, with lettered sub-phases) is too
 
 | Stage | Phases |
 |---|---|
-| Setup | -2, -1, 0, 0.5 |
+| Setup | -2, -1, 0, 0.4, 0.5 |
 | Pre-flight | 1, 2, 2.5, 2.6, 2.7, 2.8 |
 | Build | 3, 3a, 4 |
 | Review & Ship | 4b, 5, 6, 7&8 |
