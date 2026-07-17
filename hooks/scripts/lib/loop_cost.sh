@@ -66,13 +66,28 @@ dc_mine_token_usage() {
   # empty/"?" fresh-fallback branch never fires for this call site.
   if ! declare -f als_sanitise_session_id >/dev/null 2>&1; then
     # shellcheck source=/dev/null
-    . "$(dirname "${BASH_SOURCE[0]}")/loop_state_common.sh" 2>/dev/null
+    # Reuse $self_path (resolved above) rather than ${BASH_SOURCE[0]} again —
+    # under zsh that expands empty inside a function, so dirname's fallback
+    # would silently resolve to '.' (cwd) instead of this file's real
+    # directory, degrading (not crashing, thanks to the 2>/dev/null + the
+    # declare -f fallback below) to an unsanitised session id.
+    . "$(dirname "$self_path")/loop_state_common.sh" 2>/dev/null
   fi
   if declare -f als_sanitise_session_id >/dev/null 2>&1; then
     session="$(als_sanitise_session_id "$session")"
   fi
 
   # Resolve <proj> — the directory containing <session>.jsonl.
+  # Under zsh, nomatch is on by default: an unmatched glob is a HARD ERROR,
+  # not a silent empty expansion like bash. A session with no transcript
+  # would crash the for loop before the orch_transcript fail-open guard
+  # below ever ran. null_glob makes the unmatched glob expand to nothing
+  # instead, so the loop body simply never runs — scoped to this function via
+  # local_options so it doesn't leak into the caller's shell. Under bash,
+  # setopt is not a builtin, so it errors harmlessly to /dev/null and
+  # behaviour is unchanged (bash already expands to the literal pattern,
+  # which the existing `[ -f "$f" ] || continue` below then skips).
+  setopt local_options null_glob 2>/dev/null
   local orch_transcript="" proj=""
   for f in "$projects_dir"/*/"$session.jsonl"; do
     [ -f "$f" ] || continue

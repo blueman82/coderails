@@ -330,6 +330,28 @@ else
   printf 'skip - zsh self-path test (zsh not available on this machine)\n'
 fi
 
+# --- Test (k2): zsh no-transcript fail-open — under zsh, an unmatched glob
+# is a hard error (nomatch is on by default), NOT a silent empty expansion
+# like bash. Reaching the "for f in .../*/\"$session.jsonl\"" loop with a
+# session that has no transcript anywhere must still fail-open to {} with
+# exit 0, not crash with "no matches found" before the
+# `[ -n "$orch_transcript" ] || { printf '{}'; return 0; }` guard ever runs.
+# Must run under GENUINE zsh (a bash-only test can't reproduce this — bash
+# expands the unmatched glob to the literal pattern, which is silently
+# skipped by the `[ -f "$f" ] || continue` check, so it never crashes there
+# in the first place). Skips gracefully if zsh is unavailable. ---
+if command -v zsh >/dev/null 2>&1; then
+  zsh_out=$(CLAUDE_PROJECTS_DIR="$TMP/projects" CLAUDE_MODEL_PRICES_FILE="$PRICES" zsh -c "
+    . '$LIB'
+    dc_mine_token_usage 'no-such-session-xyz'
+  " 2>/dev/null)
+  zsh_rc=$?
+  check "zsh no-transcript: fail-opens to {} (not a crash)" "{}" "$zsh_out"
+  check "zsh no-transcript: exit code 0" "0" "$zsh_rc"
+else
+  printf 'skip - zsh no-transcript fail-open test (zsh not available on this machine)\n'
+fi
+
 # --- Test (l): missing prices file — the [ -f "$prices_file" ] fail-open
 # bail must emit a DISTINCT stderr diagnostic naming the path it looked for,
 # so this branch is no longer indistinguishable from "no usage data found"
