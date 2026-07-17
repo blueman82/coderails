@@ -55,7 +55,7 @@ If the audit in step 1 finds nothing to fix:
 
 1. Append a timestamped `no-drift` line to the run log (step 4).
 2. Append a terminal `run=ok` line to the run log — the canonical
-   success marker the routine's `expectedArtifact` (a `contains`
+   success marker the routine's `expectedArtifact` (a `last-marker`
    predicate against that same run-log path) keys on. Writing this line
    satisfies the artifact gate; there is no separate report file to
    write on a no-drift night.
@@ -143,7 +143,7 @@ fixing.
 8. `/coderails:post-evals <PR#>`
 9. `/coderails:merge`. Once the merge succeeds, append a terminal
    `run=ok` line to the run log as the last line — the canonical
-   success marker the `contains` gate keys on.
+   success marker the `last-marker` gate keys on.
 
 Any of steps 5–9 can REFUSE (a failing eval, a review that blocks, a
 merge gate that rejects) rather than the routine choosing to abort.
@@ -172,12 +172,18 @@ happened on a given night AND the artifact its gate checks, mirroring
 `loop-retro-promotion`'s `promotion-runs.log` convention.
 
 `run=ok` is the canonical terminal success marker: the config's
-`expectedArtifact.predicate` is a `contains` check keyed on this exact
-string. It is written as the final line on both success paths — the
-no-drift short-circuit (step 2) and a completed merge (step 3, after
-step 9) — and NEVER written on an abort or a refusal. A run log merely
-*existing* does not mean the night succeeded (an aborted or refused run
-still writes a log describing its own failure); only `run=ok` does.
+`expectedArtifact.predicate` is a `last-marker` check keyed on this exact
+string (with `abort=`/`refused=` as the failure markers). It is written
+as the final terminal marker on both success paths — the no-drift
+short-circuit (step 2) and a completed merge (step 3, after step 9) — and
+NEVER written on an abort or a refusal. The gate takes the LAST terminal
+marker in the log and passes only if it is `run=ok`: this per-date log is
+append-only across many runs, so a same-date run that aborts after an
+earlier run wrote `run=ok` must still read red — the most recent run's
+outcome wins, not merely whether `run=ok` appears anywhere. A run log
+merely *existing* does not mean the night succeeded (an aborted or
+refused run still writes a log describing its own failure); only a
+trailing `run=ok` does.
 
 This routine keeps both of its config's shipped escalation channels
 (`escalation: ["notification", "vault-note"]`) — nothing here replaces
