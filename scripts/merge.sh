@@ -6,6 +6,29 @@ set -euo pipefail
 source "$(dirname "$0")/lib/git-common.sh"
 source "$(dirname "$0")/lib/config.sh"
 
+# coderails::_tier_review_machine_user <config_file>
+# Echoes the value of the nested key tier_review.machine_user from a
+# workflow.config.yaml, or nothing if the key/block is absent. No generic
+# nested-key YAML reader exists in this repo (scripts/lib/config.sh only
+# locates the file) — this is a minimal, single-purpose extractor for this
+# one key, not a new config system.
+coderails::_tier_review_machine_user() {
+    local config_file="$1"
+    [[ -f "$config_file" ]] || return 0
+    awk '
+        /^tier_review:[[:space:]]*$/ { in_block=1; next }
+        in_block && /^[^[:space:]]/ { in_block=0 }
+        in_block && /^[[:space:]]+machine_user:/ {
+            sub(/^[[:space:]]+machine_user:[[:space:]]*/, "")
+            gsub(/^["'"'"']|["'"'"']$/, "")
+            gsub(/[[:space:]]*#.*$/, "")
+            gsub(/[[:space:]]+$/, "")
+            print
+            exit
+        }
+    ' "$config_file" 2>/dev/null
+}
+
 merge::main() {
     local arg="${1:-auto}" br=$(branch) m=$(main)
 
@@ -88,6 +111,42 @@ merge::main() {
                 fi
             fi
             ok "Eval artifact verified (SHA: $sha, tier ${PR_EVAL_TIER:-?})"
+
+            # ─── Tier-review gate (redundant defence-in-depth, fail-closed) ───
+            # This layer is REDUNDANT BY DESIGN once the server-side ruleset is
+            # live (belt-and-braces): it exists to fail loudly on misconfiguration
+            # and to hold the line during the pre-ruleset interim. It is NOT the
+            # primary control — do not delete it as dead code once the ruleset is
+            # active; it is the only local check that catches a machine-user
+            # misconfiguration before GitHub itself would. Config-keyed and
+            # inactive by default: only runs when config key
+            # tier_review.machine_user is set AND the eval artifact's tier is 0.
+            if [[ "${PR_EVAL_TIER:-}" == "0" ]]; then
+                local tier_review_config; tier_review_config=$(coderails::config_path "$PWD")
+                local tier_review_machine_user=""
+                if [[ -n "$tier_review_config" ]]; then
+                    tier_review_machine_user=$(coderails::_tier_review_machine_user "$tier_review_config")
+                fi
+                if [[ -n "$tier_review_machine_user" ]]; then
+                    local tr_statuses tr_rc=0
+                    tr_statuses=$(gh api "repos/$(repo)/commits/${sha}/statuses" --paginate \
+                        --jq '[.[] | select(.context == "tier-review")]' 2>/dev/null) || tr_rc=$?
+                    if [[ $tr_rc -ne 0 ]]; then
+                        err "GitHub fetch failed — could not fetch tier-review status for $sha. Retry, or check gh auth/network."
+                    fi
+                    local tr_state tr_creator
+                    tr_state=$(printf '%s' "$tr_statuses" | jq -r '.[0].state // empty' 2>/dev/null)
+                    tr_creator=$(printf '%s' "$tr_statuses" | jq -r '.[0].creator.login // empty' 2>/dev/null)
+                    if [[ -z "$tr_state" ]]; then
+                        err "No tier-review status found for $sha — the tier-gate daemon has not judged this SHA yet. Wait for it, or kickstart it, then retry."
+                    elif [[ "$tr_state" != "success" ]]; then
+                        err "tier-review status for $sha is '$tr_state' (not success) — the tier-gate daemon has not approved this SHA. Resolve and retry."
+                    elif [[ "$tr_creator" != "$tier_review_machine_user" ]]; then
+                        err "tier-review status for $sha was posted by '$tr_creator', not the configured machine user '$tier_review_machine_user' — this is a misconfiguration-or-forgery signal, not a valid verdict. Do not bypass; investigate the creator mismatch."
+                    fi
+                    ok "Tier-review verified (SHA: $sha, creator: $tr_creator)"
+                fi
+            fi
 
             step "Merging"
             gh pr merge "$num" --merge          # remote merge ONLY — its failure must abort; branch cleanup is separate + non-fatal
