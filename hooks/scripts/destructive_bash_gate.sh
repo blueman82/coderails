@@ -10,25 +10,48 @@ IFS= read -r -d '' -t 5 input || true
 cmd=$(echo "$input" | jq -r '.tool_input.command // empty')
 
 # Normalize $IFS expansions to a single space, once, immediately after $cmd is
-# assigned. Bash honours $IFS/${IFS}/${IFS:offset:length} as a live expansion
-# that yields whitespace and is then used by bash itself to split the
-# surrounding text into argv tokens — so a command built with `rm${IFS}-rf`
-# instead of `rm -rf` contains NO whitespace CHARACTER anywhere in the literal
-# tool_input string. Every detector below (the git-clean block, find,
-# truncate, shred, the monolithic blocklist, the source-edit blocks, and the
-# derived force_cmd_flat/cmd_flat vars) greps `$cmd` (or something derived
-# from it) for a literal whitespace class — none of them evaluate the string
-# as bash would, so an IFS-expansion form is literally invisible text to every
-# one of them and evades the entire file. Doing the substitution once here,
-# before any detector runs, fixes all of them in one place.
+# assigned. Bash honours $IFS/${IFS}/${IFS:offset:length}/${IFS<op>word} as a
+# live expansion that yields whitespace (IFS is set by default in any real
+# shell) and is then used by bash itself to split the surrounding text into
+# argv tokens — so a command built with `rm${IFS}-rf` instead of `rm -rf`
+# contains NO whitespace CHARACTER anywhere in the literal tool_input string.
+# Every detector below (the git-clean block, find, truncate, shred, the
+# monolithic blocklist, the source-edit blocks, and the derived
+# force_cmd_flat/cmd_flat vars) greps `$cmd` (or something derived from it)
+# for a literal whitespace class — none of them evaluate the string as bash
+# would, so an IFS-expansion form is literally invisible text to every one of
+# them and evades the entire file. Doing the substitution once here, before
+# any detector runs, fixes all of them in one place.
 #
 # Two passes:
-#   1. Braced forms: ${IFS} and ${IFS:offset} / ${IFS:offset:length} (offset
-#      and length are digit runs; bash also allows a leading '-' for
-#      "from-the-end" indexing, accepted here as well for completeness).
-#      The closing brace fully delimits the expansion, so whatever follows
-#      it is untouched, real, subsequent text — safe to replace with a
-#      single space unconditionally.
+#   1. Braced forms — matched per bash's own parameter-expansion grammar.
+#      After "IFS", the expansion is delimited by "}" or continues with one
+#      of the operator characters : - + ? = (never an identifier char, which
+#      would make it a DIFFERENT variable — see pass 2). Covered as a real
+#      whitespace-yielding separator (collapsed to a space):
+#        ${IFS}                          bare
+#        ${IFS:N} ${IFS:N:M}             substring (N/M optionally signed digits)
+#        ${IFS:-word} ${IFS-word}        use-default — IFS is set, so this
+#                                         evaluates to IFS's OWN value (the
+#                                         default word is never used), i.e.
+#                                         whitespace, not the word
+#        ${IFS:=word} ${IFS=word}        assign-default — same reasoning
+#        ${IFS:?word} ${IFS?word}        error-if-unset — same reasoning
+#      Deliberately NOT collapsed: ${IFS:+word} / ${IFS+word} (the
+#      "alternate value" operator) — this is the ONE operator whose branches
+#      are inverted: since IFS is normally set, this substitutes the literal
+#      WORD, not IFS's whitespace value (verified: bash expands
+#      `${IFS:+word}` to the literal text "word" when IFS is set). Collapsing
+#      it to a space would be wrong twice over — it doesn't act as a
+#      separator, and blindly replacing it would erase real text (a "word"
+#      that happened to itself be a flag) rather than normalize whitespace.
+#      Left untouched, it stays opaque, non-matching literal text — safe,
+#      since it never expands to a clean separator to exploit.
+#      Best-effort ceiling: the word portion (`[^}]*`) stops at the first
+#      literal "}", so a WORD containing its own nested ${...} (e.g.
+#      ${IFS:-${OTHER}}) is not fully matched and leaves a stray brace in the
+#      normalized text — an exotic construction, not a known live gap for any
+#      family this file blocks.
 #   2. Bare $IFS: only when NOT followed by an identifier character
 #      ([A-Za-z0-9_]) or followed by end-of-string. Bash variable names
 #      extend as far as identifier characters continue, so `$IFSOMETHING` is
@@ -41,7 +64,7 @@ cmd=$(echo "$input" | jq -r '.tool_input.command // empty')
 # as before — it does not gain or lose any blocklist keyword by doing so, so
 # it stays ALLOWED; the substitution changes whitespace, never introduces or
 # removes a destructive verb/flag token.
-cmd=$(printf '%s' "$cmd" | sed -E 's/\$\{IFS(:-?[0-9]+)?(:-?[0-9]+)?\}/ /g' | sed -E 's/\$IFS([^A-Za-z0-9_]|$)/ \1/g')
+cmd=$(printf '%s' "$cmd" | sed -E 's/\$\{IFS(:?[0-9-]+(:[0-9-]+)?|:?[=?-][^}]*)?\}/ /g' | sed -E 's/\$IFS([^A-Za-z0-9_]|$)/ \1/g')
 
 if [ -z "$cmd" ]; then
   exit 0

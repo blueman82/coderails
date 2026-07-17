@@ -852,19 +852,26 @@ check "find without delete, TAB-separated args -> allow" ALLOW \
   "$(run "$(payload "find${TAB}. -name x.tmp")")"
 
 # --- SECURITY: \$IFS-expansion evasion ------------------------------------
-# A destructive command built with an $IFS expansion (${IFS}, bare $IFS, or
-# ${IFS:offset:length}) as its token separator contains NO whitespace
-# CHARACTER in the literal tool_input text — every detector in this file
-# greps $cmd for a literal whitespace class, so the pattern was entirely
-# invisible to all of them before $cmd is normalized. Covers rm, git reset
-# --hard, and chmod -R 777 (representative families across the monolithic
-# blocklist), using the clean separator forms that reconstruct into the
-# real, intended command in actual bash (confirmed via bash's own word-
-# splitting): ${IFS} and ${IFS:0:1} act as a full expansion boundary and are
-# always safe to replace with a space; bare $IFS is included only where it
-# is not immediately followed by an identifier character, since bash itself
-# treats $IFSreset as an entirely different (and here irrelevant) variable
-# name, not $IFS followed by literal "reset".
+# A destructive command built with an $IFS expansion (${IFS}, bare $IFS,
+# ${IFS:offset:length}, or a use-default/assign-default/error-if-unset
+# parameter-expansion operator applied to IFS) as its token separator
+# contains NO whitespace CHARACTER in the literal tool_input text — every
+# detector in this file greps $cmd for a literal whitespace class, so the
+# pattern was entirely invisible to all of them before $cmd is normalized.
+# Covers rm, git reset --hard, chmod -R 777, and DROP TABLE (representative
+# families across the monolithic blocklist), using the clean separator forms
+# that reconstruct into the real, intended command in actual bash — verified
+# by ground-truth execution (rm removing a real non-empty directory, chmod
+# actually setting 777 on a real file), not tokenization alone, since a
+# glued/corrupted reconstruction can look destructive in isolated token
+# inspection while actually erroring out harmlessly. ${IFS}, ${IFS:0:1}, and
+# ${IFS:-y} all act as a full expansion boundary yielding real whitespace
+# (IFS is set by default, so use-default/assign-default/error-if-unset
+# operators evaluate to IFS's own value, never their fallback word) and are
+# safe to replace with a space; bare $IFS is included only where it is not
+# immediately followed by an identifier character, since bash itself treats
+# $IFSreset as an entirely different (and here irrelevant) variable name,
+# not $IFS followed by literal "reset".
 check "rm\${IFS}-rf -> deny"           DENY "$(run "$(payload "rm\${IFS}-rf /tmp/x")")"
 check "rm bare \$IFS -rf -> deny"      DENY "$(run "$(payload "rm\$IFS-rf /tmp/x")")"
 check "rm \${IFS:0:1}-rf -> deny"      DENY "$(run "$(payload "rm\${IFS:0:1}-rf /tmp/x")")"
@@ -875,6 +882,17 @@ check "chmod \${IFS}-R\${IFS}777 -> deny" DENY \
 check "chmod \${IFS:0:1}-R\${IFS:0:1}777 -> deny" DENY \
   "$(run "$(payload "chmod\${IFS:0:1}-R\${IFS:0:1}777 /var/www")")"
 
+# ${IFS:-word} / ${IFS-word} (use-default operator): since IFS is set by
+# default, this evaluates to IFS's OWN whitespace value, not the fallback
+# word — a real separator, confirmed by ground-truth execution (rm -rf on a
+# non-empty dir; chmod -R 777 on a real file) rather than tokenization alone.
+check "rm \${IFS:-y}-rf -> deny"       DENY "$(run "$(payload "rm\${IFS:-y}-rf /tmp/x")")"
+check "chmod \${IFS:-y}-R\${IFS:-y}777 -> deny" DENY \
+  "$(run "$(payload "chmod\${IFS:-y}-R\${IFS:-y}777 /var/www")")"
+check "git reset \${IFS:-y}--hard -> deny" DENY \
+  "$(run "$(payload "git\${IFS:-y}reset\${IFS:-y}--hard HEAD~1")")"
+check "DROP \${IFS:-y}TABLE -> deny"   DENY "$(run "$(payload "DROP\${IFS:-y}TABLE users;")")"
+
 # Benign commands that merely MENTION $IFS (not use it as a separator to
 # hide a destructive verb) must stay ALLOWED — the normalization only
 # changes whitespace, never introduces or removes a blocklist keyword.
@@ -884,6 +902,23 @@ check "echo bare \$IFS (benign mention) -> allow" ALLOW \
   "$(run "$(payload 'echo $IFS')")"
 check "echo \\\$IFSOMETHING (different var, not \$IFS) -> allow" ALLOW \
   "$(run "$(payload 'echo $IFSOMETHING')")"
+
+# Harmless look-alikes: ${IFS}x and ${IFSx} do NOT act as clean separators
+# (confirmed by ground-truth execution against a real non-empty directory —
+# rm${IFS}x-rf and rm${IFSx}-rf both leave the directory intact) and must
+# stay ALLOWED, proving the normalization doesn't over-match into a false deny.
+check "rm \${IFS}x-rf (harmless glue) -> allow" ALLOW \
+  "$(run "$(payload "rm\${IFS}x-rf /tmp/x")")"
+check "rm \${IFSx}-rf (different var, harmless) -> allow" ALLOW \
+  "$(run "$(payload "rm\${IFSx}-rf /tmp/x")")"
+
+# \${IFS:+word} / \${IFS+word} (alternate-value operator): the ONE operator
+# whose branches are inverted — since IFS is set, this substitutes the
+# literal WORD, not IFS's whitespace value, so it must NOT be collapsed to a
+# space. Confirmed it is not treated as a separator: a benign use stays
+# allowed exactly as written.
+check "echo \${IFS:+word} (not a separator) -> allow" ALLOW \
+  "$(run "$(payload 'echo "safe${IFS:+word}"')")"
 
 # --- Deliverable B: source-drift tripwire ---------------------------------
 # Extracts the gate's blockable set (the 5 fixed-label `deny "..."` call
