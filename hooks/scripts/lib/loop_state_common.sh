@@ -1087,7 +1087,14 @@ als_report_cost_on_complete() {
               # check the pricing page. The claim is strictly about the
               # DATE being old, never that the rates are wrong — this
               # function has no way to know that.
-              if [ "$days" -gt "$ALS_PRICE_STALE_DAYS" ]; then
+              # A prices_as_of in the FUTURE yields negative days and renders
+              # "-10 days old", which is nonsense to read and looks like a bug.
+              # It is not a fabrication risk (no figure is invented and nothing
+              # blocks), so it stays a display fix, not a guard: say plainly the
+              # date is in the future and let the human judge it.
+              if [ "$days" -lt 0 ]; then
+                age="prices as of $prices_as_of, dated in the future (check the date)"
+              elif [ "$days" -gt "$ALS_PRICE_STALE_DAYS" ]; then
                 age="${age} (checks the date only, not the rates) — verify at claude.com/pricing and bump prices_as_of"
               fi
             fi

@@ -1730,12 +1730,17 @@ check "cost-report: a normal message survives control-char stripping intact" 1 "
 STALE45=$(date -u -v-45d +%Y-%m-%d 2>/dev/null || date -u -d '45 days ago' +%Y-%m-%d 2>/dev/null)
 FRESH5=$(date -u -v-5d +%Y-%m-%d 2>/dev/null || date -u -d '5 days ago' +%Y-%m-%d 2>/dev/null)
 
-# Stale (45 days, past the 30-day threshold) -> warning present, exit 0,
-# and the message must say the DATE is old (never claim the rates
+# Stale (45 days — comfortably past any sane threshold) -> warning present,
+# exit 0, and the message must say the DATE is old (never claim the rates
 # themselves are wrong — that can't be known from a date alone).
+# Deliberately described WITHOUT naming the threshold: an earlier revision of
+# these strings said "30" and survived the threshold moving to 14, leaving a
+# test whose name asserted one rule while its body tested another. The 45-day
+# fixture is past both, so the assertion was never wrong — only its label was,
+# which is worse: a misdescribed passing test misleads whoever reads it next.
 m_stale=$(nonscalar_msg "$(jq -cn --arg d "$STALE45" '{schema_version:2, cost:{total_usd_estimate:9.99, total_tokens:100, prices_as_of:$d}}')")
 case "$m_stale" in *"verify"*"pricing"*) stale_warn=1 ;; *) stale_warn=0 ;; esac
-check "staleness nag: >30-day-old prices_as_of -> warning present (names verify+pricing)" 1 "$stale_warn"
+check "staleness nag: well-past-threshold prices_as_of (45d) -> warning present (names verify+pricing)" 1 "$stale_warn"
 case "$m_stale" in *"rates are wrong"*|*"rates were wrong"*) claims_rates_wrong=1 ;; *) claims_rates_wrong=0 ;; esac
 check "staleness nag: message never claims the RATES are wrong (date-only claim)" 0 "$claims_rates_wrong"
 case "$m_stale" in *"9.99"*) stale_cost_present=1 ;; *) stale_cost_present=0 ;; esac
@@ -1772,8 +1777,17 @@ real_prices="$(cd "$(dirname "$0")/.." && pwd)/lib/model_prices.json"
 # top level, so the constant is not a shell variable here.
 stale_days=$(grep -oE '^ALS_PRICE_STALE_DAYS=[0-9]+' \
   "$(cd "$(dirname "$0")/.." && pwd)/lib/loop_state_common.sh" 2>/dev/null | grep -oE '[0-9]+$')
-stale_days=${stale_days:-30}
-if [ -f "$real_prices" ] && command -v jq >/dev/null 2>&1; then
+# No plausible-looking fallback here, deliberately. If the grep above fails,
+# a default of "30" would silently substitute a number that LOOKS like a real
+# threshold, and this test would keep passing while measuring nothing — the
+# same class of silent-wrong-answer the cost reporter itself exists to stop.
+# Skip the check outright instead: an absent assertion is visible in the
+# output; a fabricated one is not.
+if [ -z "$stale_days" ]; then
+  echo "ok   - staleness nag: real-table check SKIPPED (could not read ALS_PRICE_STALE_DAYS from source)"
+  stale_days=""
+fi
+if [ -n "$stale_days" ] && [ -f "$real_prices" ] && command -v jq >/dev/null 2>&1; then
   real_date=$(jq -r '.prices_as_of // empty' "$real_prices" 2>/dev/null)
   case "$real_date" in
     [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9])
@@ -1794,6 +1808,40 @@ if [ -f "$real_prices" ] && command -v jq >/dev/null 2>&1; then
       fi
       ;;
   esac
+fi
+
+# Exact boundary. The comparison is `-gt`, so a table exactly AT the threshold
+# is silent and one day past it nags. That is a deliberate choice, not an
+# accident — pin it, because an off-by-one here flips silently: the nag would
+# either fire a day early forever or (worse) stay quiet a day longer than
+# intended, and neither shows up in any other test.
+bound_at=$(date -u -v-"${stale_days:-14}"d +%Y-%m-%d 2>/dev/null || date -u -d "${stale_days:-14} days ago" +%Y-%m-%d 2>/dev/null)
+bound_past=$(date -u -v-"$(( ${stale_days:-14} + 1 ))"d +%Y-%m-%d 2>/dev/null || date -u -d "$(( ${stale_days:-14} + 1 )) days ago" +%Y-%m-%d 2>/dev/null)
+if [ -n "$bound_at" ] && [ -n "$bound_past" ]; then
+  m_at=$(nonscalar_msg "$(jq -cn --arg d "$bound_at" '{schema_version:2, cost:{total_usd_estimate:1, total_tokens:2, prices_as_of:$d}}')")
+  case "$m_at" in *"checks the date only"*) at_nags=1 ;; *) at_nags=0 ;; esac
+  check "staleness nag: exactly AT the threshold -> silent (comparison is -gt, not -ge)" 0 "$at_nags"
+
+  m_past=$(nonscalar_msg "$(jq -cn --arg d "$bound_past" '{schema_version:2, cost:{total_usd_estimate:1, total_tokens:2, prices_as_of:$d}}')")
+  case "$m_past" in *"checks the date only"*) past_nags=1 ;; *) past_nags=0 ;; esac
+  check "staleness nag: one day PAST the threshold -> nags" 1 "$past_nags"
+fi
+
+# Future-dated prices_as_of. Rendered "-10 days old" before this was fixed:
+# not a fabrication (no invented figure, nothing blocks) but nonsense to read
+# and indistinguishable from a bug at a glance. Must say so plainly, still
+# report the cost, and never nag (a future date is not stale).
+fut=$(date -u -v+10d +%Y-%m-%d 2>/dev/null || date -u -d '10 days' +%Y-%m-%d 2>/dev/null)
+if [ -n "$fut" ]; then
+  m_fut=$(nonscalar_msg "$(jq -cn --arg d "$fut" '{schema_version:2, cost:{total_usd_estimate:3.5, total_tokens:7, prices_as_of:$d}}')")
+  case "$m_fut" in *"-"[0-9]*" days old"*) neg_days=1 ;; *) neg_days=0 ;; esac
+  check "staleness nag: future date does NOT render negative days old" 0 "$neg_days"
+  case "$m_fut" in *"future"*) says_future=1 ;; *) says_future=0 ;; esac
+  check "staleness nag: future date says so plainly" 1 "$says_future"
+  case "$m_fut" in *'$3.50'*) fut_cost=1 ;; *) fut_cost=0 ;; esac
+  check "staleness nag: future date still reports the cost figure" 1 "$fut_cost"
+  case "$m_fut" in *"checks the date only"*) fut_nags=1 ;; *) fut_nags=0 ;; esac
+  check "staleness nag: future date is not treated as stale" 0 "$fut_nags"
 fi
 
 [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails)"; exit 1; }
