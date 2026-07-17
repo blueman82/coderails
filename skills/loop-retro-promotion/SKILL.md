@@ -90,13 +90,23 @@ under `## Promoted lessons`, containing:
      pipeline changed.
    - **`--name-only` cannot see a rename's source or tell a deletion from an
      edit.** It prints a rename as its DESTINATION path alone, so
-     `git mv scripts/gate.sh learned-failure-modes.md` would appear as the
-     bare expected filename and PASS this assertion while smuggling a shell
-     script into the repo under a permitted name. `--name-status` prints
-     `R100 scripts/gate.sh learned-failure-modes.md`, exposing the source.
-     Likewise `git rm` of the target file prints the identical single line
-     an edit does under `--name-only`, while `--name-status` prints `D`.
-     (Both proven empirically in a scratch repo, 2026-07-17.)
+     `git mv scripts/gate.sh skills/agentic-loop/learned-failure-modes.md`
+     appears as the bare expected filename and PASSES a `--name-only` check
+     while smuggling a shell script onto `main` under a permitted name.
+     `--name-status` exposes it — as `R100 scripts/gate.sh <target>` when the
+     destination did not pre-exist, or as a `D`+`M` pair when it did. Either
+     shape fails "exactly one `M` line", so both abort. Likewise `git rm` of
+     the target prints the identical single line an edit does under
+     `--name-only`, while `--name-status` prints `D`. (All proven empirically
+     in a scratch repo, 2026-07-17.)
+
+   **What this assertion does NOT catch, stated plainly:** it is a PATH
+   check, not a CONTENT check. A commit that legitimately modifies only
+   `learned-failure-modes.md`, but fills it with something other than a
+   mined lesson, is a lone `M` of the permitted path and PASSES here. That
+   residual is held by the mining rules in section 2 and by the review/eval
+   gates in steps 6-8 — not by this step. No path-based manifest can close
+   it, and pretending otherwise would be worse than naming it.
 5. `/coderails:push`
 6. `/pr-review-toolkit:review-pr <PR#>`
 7. `/coderails:post-review <PR#>`
