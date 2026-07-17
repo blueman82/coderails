@@ -1,20 +1,21 @@
 # AGENTS.md — Coderails
 
-This file is the single source the LLM reads at conversation start. It covers two
-things, in order:
+This file is the single source the LLM reads at conversation start. It is the
+entry point for two things:
 
-1. **The repo working guide** — what coderails is, how the pieces wire together,
-   the enforcement model, the hook map, workflow command architecture, and how to
-   edit this repo safely.
+1. **The repo working guide** (below) — what coderails is, how the pieces wire
+   together, the enforcement model, the hook map, workflow command
+   architecture, and how to edit this repo safely.
 2. **The wiki schema** — how the coderails wiki (a persistent, compounding
    knowledge base maintained by Claude and browsed in Obsidian) is structured,
-   maintained, and queried.
+   maintained, and queried. See
+   [`AGENTS-wiki-schema.md`](./AGENTS-wiki-schema.md) for the full reference.
 
 The wiki vault lives at the wiki vault directory (e.g. `../coderails-wiki`
 relative to the plugin, or wherever you placed it during `/wiki-init`).
 `CLAUDE.md` in this repo is a thin pointer to this file — edit here, not there.
 
-# Part 1 — Working in this repo
+# Working in this repo
 
 ## What this repo is
 
