@@ -235,4 +235,188 @@ check "T7: fresh pending -> no new status posted (not reclaimed)" "" "$posted"
 check_contains "T7: summary reports skip for fresh pending" "skip:" "$out"
 [[ -f "$TMP/judge_called3.log" ]] && fails=$((fails+1)) && echo "FAIL - T7: judge called despite fresh (non-stale) pending" || echo "ok   - T7: judge NOT called for fresh pending"
 
+# Tests T1-T7 above each redefine tg_judge in this top-level shell (not a
+# subshell), so the LAST redefinition (T7's) is still active here. Undefine
+# it and re-source the runner so the tests below exercise the REAL tg_judge
+# implementation, not a leftover per-test stub.
+unset -f tg_judge
+source "$RUNNER"
+
+# ══════════════════════════════════════════════════════════════════════════
+# Task 3: tg_judge — blind judge via direct Anthropic API (real implementation,
+# NOT redefined here). Stubs `curl` on PATH and points TIER_GATE_CREDS at a
+# fixture credentials file; never a real network call.
+# ══════════════════════════════════════════════════════════════════════════
+CREDS_FILE="$TMP/creds"
+CURL_CALLS="$TMP/curl_calls.log"
+CURL_RESPONSES="$TMP/curl_responses"  # one file per call, read in order
+
+write_creds() { # <anthropic_key>
+    printf 'ANTHROPIC_API_KEY=%s\n' "$1" > "$CREDS_FILE"
+    chmod 600 "$CREDS_FILE"
+}
+
+# write_curl_stub <response1> [response2 ...]
+# Each call to `curl` echoes the next response body in order and appends a
+# call-count line to CURL_CALLS so tests can assert exactly-once / exactly-N.
+# Paths are interpolated directly (no heredoc+sed dance) to avoid quoting
+# fights with embedded JSON in the response bodies.
+write_curl_stub() {
+    rm -rf "$CURL_RESPONSES"; mkdir -p "$CURL_RESPONSES"
+    local i=1
+    for resp in "$@"; do
+        printf '%s' "$resp" > "$CURL_RESPONSES/$i"
+        i=$((i+1))
+    done
+    {
+        printf '#!/bin/bash\n'
+        printf 'COUNT_FILE=%q\n' "$CURL_CALLS"
+        printf 'RESP_DIR=%q\n' "$CURL_RESPONSES"
+        printf 'n=$(( $(wc -l < "$COUNT_FILE" 2>/dev/null || echo 0) + 1 ))\n'
+        printf 'echo "call $n" >> "$COUNT_FILE"\n'
+        printf 'resp_file="$RESP_DIR/$n"\n'
+        printf 'if [[ -f "$resp_file" ]]; then\n'
+        printf '    cat "$resp_file"\n'
+        printf 'else\n'
+        printf '    last=$(ls "$RESP_DIR" | sort -n | tail -1)\n'
+        printf '    cat "$RESP_DIR/$last"\n'
+        printf 'fi\n'
+    } > "$TMP/curl"
+    chmod +x "$TMP/curl"
+}
+
+# write_hanging_curl_stub — never returns (used for watchdog test)
+write_hanging_curl_stub() {
+    {
+        printf '#!/bin/bash\n'
+        printf 'COUNT_FILE=%q\n' "$CURL_CALLS"
+        printf 'echo "call" >> "$COUNT_FILE"\n'
+        printf 'sleep 999\n'
+    } > "$TMP/curl"
+    chmod +x "$TMP/curl"
+}
+
+# anthropic_success_body <verdict> <reason>
+# A minimal Messages API response whose content[0].text is the strict-JSON
+# {verdict, reason} contract tg_judge parses.
+anthropic_success_body() {
+    local verdict="$1" reason="$2"
+    printf '{"content":[{"type":"text","text":"{\\"verdict\\":\\"%s\\",\\"reason\\":\\"%s\\"}"}],"stop_reason":"end_turn"}' \
+        "$verdict" "$reason"
+}
+
+run_judge() { # evals_json filelist diffstat
+    (
+        export PATH="$TMP:$PATH"
+        export TIER_GATE_CREDS="$CREDS_FILE"
+        export TIER_GATE_WATCHDOG_TIMEOUT=2
+        tg_judge "$1" "$2" "$3"
+    )
+}
+
+# run_judge_with_stderr — same as run_judge but merges stderr into stdout, for
+# tests asserting on tg_judge's named-error text (which goes to stderr by the
+# runner's own convention — see tg_gate_pr's other error paths).
+run_judge_with_stderr() { # evals_json filelist diffstat
+    (
+        export PATH="$TMP:$PATH"
+        export TIER_GATE_CREDS="$CREDS_FILE"
+        export TIER_GATE_WATCHDOG_TIMEOUT=2
+        tg_judge "$1" "$2" "$3" 2>&1
+    )
+}
+
+FIXTURE_EVALS='{"tier":0,"tier_justification":"x","evals":[]}'
+FIXTURE_FILES="scripts/foo.sh"
+FIXTURE_DIFFSTAT=" 1 file changed, 3 insertions(+)"
+
+# ── Test J1: legitimate verdict -> stdout "legitimate\n<reason>", rc 0 ───────
+: > "$CURL_CALLS"
+write_creds "sk-ant-fixture-key"
+write_curl_stub "$(anthropic_success_body legitimate "Matches the task scope.")"
+out=$(run_judge "$FIXTURE_EVALS" "$FIXTURE_FILES" "$FIXTURE_DIFFSTAT")
+rc=$?
+check "J1: tg_judge rc 0 on legitimate parse" "0" "$rc"
+check "J1: line 1 is bare 'legitimate' (no prefix, no JSON)" "legitimate" "$(printf '%s' "$out" | head -1 | tr -d '[:space:]')"
+check_contains "J1: reason follows on subsequent line(s)" "Matches the task scope" "$out"
+check "J1: curl invoked exactly once" "1" "$(wc -l < "$CURL_CALLS" | tr -d ' ')"
+
+# ── Test J2: illegitimate verdict -> stdout "illegitimate\n<reason>", rc 0 ──
+: > "$CURL_CALLS"
+write_curl_stub "$(anthropic_success_body illegitimate "Claim contradicts the diff.")"
+out=$(run_judge "$FIXTURE_EVALS" "$FIXTURE_FILES" "$FIXTURE_DIFFSTAT")
+rc=$?
+check "J2: tg_judge rc 0 on illegitimate parse" "0" "$rc"
+check "J2: line 1 is bare 'illegitimate'" "illegitimate" "$(printf '%s' "$out" | head -1 | tr -d '[:space:]')"
+check_contains "J2: reason present" "contradicts" "$out"
+
+# ── Test J3: insufficient verdict -> stdout "insufficient\n<reason>", rc 0 ──
+: > "$CURL_CALLS"
+write_curl_stub "$(anthropic_success_body insufficient "Not enough evidence in the blind inputs.")"
+out=$(run_judge "$FIXTURE_EVALS" "$FIXTURE_FILES" "$FIXTURE_DIFFSTAT")
+rc=$?
+check "J3: tg_judge rc 0 on insufficient parse" "0" "$rc"
+check "J3: line 1 is bare 'insufficient'" "insufficient" "$(printf '%s' "$out" | head -1 | tr -d '[:space:]')"
+
+# ── Test J4: malformed response -> retry once -> still malformed -> rc 1 ───
+: > "$CURL_CALLS"
+write_curl_stub 'not json at all' 'still not json'
+out=$(run_judge "$FIXTURE_EVALS" "$FIXTURE_FILES" "$FIXTURE_DIFFSTAT")
+rc=$?
+check "J4: malformed response after retry -> rc 1" "1" "$rc"
+check "J4: exactly one retry (2 curl calls total)" "2" "$(wc -l < "$CURL_CALLS" | tr -d ' ')"
+
+# ── Test J5 (negative control for J4 — SO-31 pairing, mirrors T6/T7):
+#    a WELL-FORMED response must invoke curl exactly ONCE. Proves the retry
+#    in J4 is conditional on failure, not an unconditional double-call that
+#    would vacuously "pass" J4 too. ───────────────────────────────────────
+: > "$CURL_CALLS"
+write_curl_stub "$(anthropic_success_body legitimate "fine")"
+run_judge "$FIXTURE_EVALS" "$FIXTURE_FILES" "$FIXTURE_DIFFSTAT" >/dev/null
+check "J5: well-formed response -> curl called exactly once (not retried)" "1" "$(wc -l < "$CURL_CALLS" | tr -d ' ')"
+
+# ── Test J6: missing creds file -> rc 1 with a NAMED error (not generic) ───
+# The named error goes to stderr (this runner's own convention for tg_judge's
+# other failure messages) — use run_judge_with_stderr to assert on it.
+: > "$CURL_CALLS"
+rm -f "$CREDS_FILE"
+write_curl_stub "$(anthropic_success_body legitimate "unreachable")"
+out=$(run_judge_with_stderr "$FIXTURE_EVALS" "$FIXTURE_FILES" "$FIXTURE_DIFFSTAT")
+rc=$?
+check "J6: missing creds file -> rc 1" "1" "$rc"
+check_contains "J6: error names the missing-creds cause" "TIER_GATE_CREDS" "$out"
+check "J6: curl never invoked (fails before network call)" "0" "$(wc -l < "$CURL_CALLS" 2>/dev/null | tr -d ' ' || echo 0)"
+write_creds "sk-ant-fixture-key"  # restore for subsequent tests
+
+# ── Test J7: creds file present but missing the ANTHROPIC_API_KEY line ─────
+: > "$CURL_CALLS"
+: > "$CREDS_FILE"  # empty file, key absent
+out=$(run_judge_with_stderr "$FIXTURE_EVALS" "$FIXTURE_FILES" "$FIXTURE_DIFFSTAT")
+rc=$?
+check "J7: creds file present but key absent -> rc 1" "1" "$rc"
+check_contains "J7: error names the missing-key cause" "ANTHROPIC_API_KEY" "$out"
+write_creds "sk-ant-fixture-key"
+
+# ── Test J8: watchdog timeout on a hung curl call -> rc 1 (never hangs) ────
+: > "$CURL_CALLS"
+write_hanging_curl_stub
+start_ts=$(date +%s)
+out=$(run_judge "$FIXTURE_EVALS" "$FIXTURE_FILES" "$FIXTURE_DIFFSTAT")
+rc=$?
+end_ts=$(date +%s)
+elapsed=$((end_ts - start_ts))
+check "J8: hung API call -> tg_judge rc 1 (never hangs the daemon)" "1" "$rc"
+# Watchdog timeout is 2s (env override above); one retry means worst case is
+# bounded at ~2x timeout. Generous upper bound (20s) avoids flaking on a slow
+# CI runner while still proving the call does NOT block indefinitely.
+[[ $elapsed -lt 20 ]] && echo "ok   - J8: bounded wall-clock (${elapsed}s < 20s, not an indefinite hang)" \
+    || { echo "FAIL - J8: wall-clock ${elapsed}s exceeded bound — watchdog not wired to the judge call"; fails=$((fails+1)); }
+
+# ── Test J9: never references the claude CLI (spec's central constraint) ──
+# grep -c exits 1 on zero matches (still printing "0" to stdout) — capture
+# stdout only, ignore exit status, so the count is never corrupted.
+cli_refs="$(grep -c "claude --print\|claude -p" "$REPO_ROOT/scripts/tier-gate/tier-gate-runner.sh" 2>/dev/null)"
+[[ -z "$cli_refs" ]] && cli_refs=0
+check "J9: tier-gate-runner.sh never shells out to the claude CLI" "0" "$cli_refs"
+
 [[ $fails -eq 0 ]] && { echo PASS; exit 0; } || { echo "FAIL ($fails)"; exit 1; }

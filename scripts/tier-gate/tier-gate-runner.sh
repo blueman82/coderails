@@ -75,6 +75,12 @@ tg_extract_evals_json() {
 # call itself failed" from "the external call never returned". Falls back to
 # a manual background+kill loop if `timeout` isn't on PATH (e.g. some macOS
 # base installs lack GNU timeout without coreutils).
+# The fallback backgrounds <cmd...> in its OWN process group (`set -m` +
+# subshell) so that on expiry `kill -9 -"$pid"` (negative PID = kill the
+# whole group) reaps any child processes <cmd...> itself spawned — killing
+# only the direct child would leave orphaned descendants holding the
+# caller's stdout pipe open, hanging any `$(tg_with_watchdog ...)` command
+# substitution forever even though this function itself has returned 124.
 tg_with_watchdog() {
     local timeout_secs="$1"; shift
     [[ "$1" == "--" ]] && shift
@@ -82,13 +88,18 @@ tg_with_watchdog() {
         timeout "$timeout_secs" "$@"
         return $?
     fi
+    local was_monitor=0
+    case "$-" in *m*) was_monitor=1 ;; esac
+    set -m
     "$@" &
     local pid=$!
+    [[ $was_monitor -eq 0 ]] && set +m
     local waited=0
     while kill -0 "$pid" 2>/dev/null; do
         sleep 1
         waited=$((waited + 1))
         if [[ $waited -ge $timeout_secs ]]; then
+            kill -9 -"$pid" 2>/dev/null
             kill -9 "$pid" 2>/dev/null
             wait "$pid" 2>/dev/null
             return 124
@@ -232,19 +243,134 @@ tg_should_gate() {
     esac
 }
 
-# ─── Judge seam (Task 3 fills this in) ───────────────────────────────────────
+# ─── Judge (Task 3): blind verdict via direct Anthropic API call ─────────────
+
+# TIER_GATE_JUDGE_MODEL: pinned model constant for the judge call.
+# claude-haiku-4-5 — chosen deliberately over the "always use Opus 4.8"
+# default: this is a cheap, deterministic classification task (three-way
+# verdict + one-paragraph reason), the exact use case the model catalog names
+# Haiku for. The frozen spec/plan require `temperature: 0` for determinism;
+# current-generation models (Opus 4.8/4.7, Sonnet 5, Fable 5) REJECT any
+# non-default temperature/top_p/top_k with a 400 — only prior-generation
+# models (Haiku 4.5, Sonnet 4.5 and older) still accept it. Haiku 4.5 is the
+# one model satisfying every constraint at once: cheap, active/current,
+# classification-appropriate, and temperature-compatible.
+TIER_GATE_JUDGE_MODEL="claude-haiku-4-5"
+TIER_GATE_JUDGE_PROMPT_PATH="${TIER_GATE_JUDGE_PROMPT_PATH:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/judge-prompt.md}"
+
+# tg_judge_read_api_key <creds_path>
+# Echoes the ANTHROPIC_API_KEY value from the credentials file, or empty
+# string with a named error on stderr if the file is missing or the key is
+# absent. The credentials file is a simple KEY=value file (one root-owned
+# file holds both the machine-user PAT and the Anthropic key; the judge only
+# ever reads its own key out of it).
+tg_judge_read_api_key() {
+    local creds_path="$1"
+    if [[ ! -f "$creds_path" ]]; then
+        printf 'tg_judge: error: TIER_GATE_CREDS file not found at %s\n' "$creds_path" >&2
+        return 1
+    fi
+    local key
+    key=$(grep -E '^ANTHROPIC_API_KEY=' "$creds_path" | head -1 | cut -d= -f2-)
+    if [[ -z "$key" ]]; then
+        printf 'tg_judge: error: ANTHROPIC_API_KEY not present in credentials file %s\n' "$creds_path" >&2
+        return 1
+    fi
+    printf '%s' "$key"
+}
+
+# tg_judge_build_prompt <evals_json> <filelist> <diffstat>
+# Echoes judge-prompt.md with the three blind-input placeholders substituted.
+# Uses awk (not sed) so embedded JSON braces/quotes in evals_json never
+# collide with sed's delimiter or backreference syntax.
+tg_judge_build_prompt() {
+    local evals_json="$1" filelist="$2" diffstat="$3"
+    awk -v evals="$evals_json" -v files="$filelist" -v diff="$diffstat" '
+        { line = $0
+          gsub(/__EVALS_JSON__/, evals, line)
+          gsub(/__FILELIST__/, files, line)
+          gsub(/__DIFFSTAT__/, diff, line)
+          print line
+        }
+    ' "$TIER_GATE_JUDGE_PROMPT_PATH"
+}
+
+# tg_judge_call_api <api_key> <prompt_text>
+# Makes ONE direct curl call to the Anthropic Messages API (never the claude
+# CLI — see the spec's central constraint: user-owned CLI auth/state would
+# pull the judge back into the agent's trust domain). Echoes the raw response
+# body; rc is curl's own exit code (0 on any HTTP response, including 4xx/5xx
+# bodies — HTTP-level failures are caught by the caller's JSON/verdict parse).
+tg_judge_call_api() {
+    local api_key="$1" prompt_text="$2"
+    local body
+    body=$(jq -n --arg model "$TIER_GATE_JUDGE_MODEL" --arg prompt "$prompt_text" '{
+        model: $model,
+        max_tokens: 1024,
+        temperature: 0,
+        messages: [{role: "user", content: $prompt}]
+    }')
+    tg_with_watchdog "$TIER_GATE_WATCHDOG_TIMEOUT" -- \
+        curl -sS --max-time "$TIER_GATE_WATCHDOG_TIMEOUT" \
+        https://api.anthropic.com/v1/messages \
+        -H "content-type: application/json" \
+        -H "x-api-key: ${api_key}" \
+        -H "anthropic-version: 2023-06-01" \
+        -d "$body"
+}
+
+# tg_judge_parse_verdict <response_body>
+# Extracts {verdict, reason} from the Messages API response's first text
+# block and echoes "<verdict>\n<reason>". Returns 1 (caller retries) if the
+# response isn't valid JSON, has no text content block, or the inner JSON
+# doesn't parse to a recognised verdict.
+tg_judge_parse_verdict() {
+    local response_body="$1"
+    local inner_text
+    inner_text=$(printf '%s' "$response_body" | jq -r '.content[0].text // empty' 2>/dev/null)
+    [[ -z "$inner_text" ]] && return 1
+
+    local verdict reason
+    verdict=$(printf '%s' "$inner_text" | jq -r '.verdict // empty' 2>/dev/null)
+    reason=$(printf '%s' "$inner_text" | jq -r '.reason // empty' 2>/dev/null)
+    case "$verdict" in
+        legitimate|illegitimate|insufficient) ;;
+        *) return 1 ;;
+    esac
+    printf '%s\n%s' "$verdict" "$reason"
+}
 
 # tg_judge <evals_json> <filelist> <diffstat>
-# STUB for Task 2 — Task 3 replaces this with a real direct-API call.
 # Contract (final, per plan Task 3): stdout `legitimate|illegitimate|insufficient`
 # on the first line followed by a one-paragraph reason, rc 0 on a completed
-# judgement; rc 1 on API/parse failure (caller posts `error`, never `failure`).
+# judgement; rc 1 on API/parse/creds failure (caller posts `error`, never
+# `failure`). One retry on a malformed/unparseable response before giving up.
 # Late-bound on purpose: bash resolves function calls at CALL time, so a test
-# (or Task 3's real implementation) that redefines tg_judge after sourcing this
-# file transparently replaces this stub — no other code here needs to change.
+# that redefines tg_judge after sourcing this file transparently replaces
+# this implementation — no other code here needs to change (see Task 2's
+# tg_gate_pr tests, which redefine tg_judge and never reach this code path).
 tg_judge() {
-    printf 'insufficient\nSTUB: judge not yet implemented (Task 3).\n'
-    return 0
+    local evals_json="$1" filelist="$2" diffstat="$3"
+
+    local creds_path="${TIER_GATE_CREDS:-}"
+    if [[ -z "$creds_path" ]]; then
+        printf 'tg_judge: error: TIER_GATE_CREDS is not set\n' >&2
+        return 1
+    fi
+    local api_key
+    api_key=$(tg_judge_read_api_key "$creds_path") || return 1
+
+    local prompt_text
+    prompt_text=$(tg_judge_build_prompt "$evals_json" "$filelist" "$diffstat")
+
+    local attempt response parsed
+    for attempt in 1 2; do
+        response=$(tg_judge_call_api "$api_key" "$prompt_text")
+        parsed=$(tg_judge_parse_verdict "$response") && { printf '%s' "$parsed"; return 0; }
+    done
+
+    printf 'tg_judge: error: API/parse failure after retry\n' >&2
+    return 1
 }
 
 # ─── Per-SHA gate ─────────────────────────────────────────────────────────────
