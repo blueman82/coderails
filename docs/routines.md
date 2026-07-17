@@ -375,7 +375,7 @@ Four places, roughest signal to most precise:
    red. This is the human-readable failure history and is written for
    both routine successes (green) and failures (red) — it is not just
    an error log. **This is a distinct vault note type from the wiki
-   schema in `AGENTS.md`** (`type: routine-run`, not one of
+   schema in `AGENTS-wiki-schema.md`** (`type: routine-run`, not one of
    `command|hook|skill|design|investigation|source`) — it is not
    ingested by `/wiki-ingest` and does not follow the wiki page-format
    contract; treat it as operational output, not a wiki page. Note the
