@@ -372,18 +372,32 @@ check "missing prices file: still exit 0" "0" "$rc"
 
 # --- Test (m): jq absent — the `command -v jq` bail must emit a distinct
 # stderr diagnostic, so it's no longer indistinguishable from any other
-# fail-open cause. Simulate absence with a PATH containing no jq. Return
-# value unchanged: still {}, still exit 0. ---
+# fail-open cause. Simulate absence with a PATH containing no jq, run in a
+# FRESH bash -c subshell (not this script's own shell) — bash caches a
+# command's resolved path in its hash table once invoked (this file's own
+# `usage_line` helper already called jq earlier), and a one-shot `PATH=...`
+# prefix on a single command does not clear that cache, so `command -v jq`
+# would still report "found" and silently fall through to a LATER bail
+# instead of this one. A fresh subshell starts with an empty hash table, so
+# `command -v jq` genuinely re-searches PATH. Return value unchanged: still
+# {}, still exit 0. ---
 sess="jq-absent-session"
 proj="$TMP/projects/-test-proj-m"
 mkdir -p "$proj"
 usage_line "msg_m1" "claude-opus-4-8" 10 5 0 0 0 > "$proj/$sess.jsonl"
 empty_path_dir="$TMP/empty-path-m"
 mkdir -p "$empty_path_dir"
-stderr_out=$(PATH="$empty_path_dir" CLAUDE_PROJECTS_DIR="$TMP/projects" dc_mine_token_usage "$sess" 2>&1 1>/dev/null)
-stdout_out=$(PATH="$empty_path_dir" CLAUDE_PROJECTS_DIR="$TMP/projects" dc_mine_token_usage "$sess" 2>/dev/null)
+run_jq_absent() {
+  CLAUDE_PROJECTS_DIR="$TMP/projects" CLAUDE_MODEL_PRICES_FILE="$PRICES" bash -c "
+    PATH='$empty_path_dir'
+    . '$LIB'
+    dc_mine_token_usage '$sess'
+  "
+}
+stderr_out=$(run_jq_absent 2>&1 1>/dev/null)
+stdout_out=$(run_jq_absent 2>/dev/null)
 rc=0
-PATH="$empty_path_dir" CLAUDE_PROJECTS_DIR="$TMP/projects" dc_mine_token_usage "$sess" >/dev/null 2>&1 || rc=$?
+run_jq_absent >/dev/null 2>&1 || rc=$?
 check "jq absent: distinct stderr diagnostic" "true" "$(printf '%s' "$stderr_out" | grep -qF "jq not found" && echo true || echo false)"
 check "jq absent: still fail-opens to {} on stdout" "{}" "$stdout_out"
 check "jq absent: still exit 0" "0" "$rc"
@@ -496,5 +510,18 @@ CLAUDE_PROJECTS_DIR="$TMP/projects" CLAUDE_MODEL_PRICES_FILE="$invalid_prices" d
 check "pricing jq crash: distinct stderr diagnostic (pricing produced no output)" "true" "$(printf '%s' "$stderr_out" | grep -qF "pricing produced no output" && echo true || echo false)"
 check "pricing jq crash: still fail-opens to {} on stdout" "{}" "$stdout_out"
 check "pricing jq crash: still exit 0" "0" "$rc"
+
+# --- Test (s): pairwise distinctness — all 7 fail-open bails in $LIB must
+# emit 7 DIFFERENT stderr messages. Tests (l)/(m)/(n)/(o)/(p)/(q)/(r) each
+# assert its OWN bail's message individually, but none of them assert the
+# messages differ FROM EACH OTHER — two bails silently sharing wording would
+# reproduce the identical-{}-for-every-cause bug this whole file exists to
+# kill, one layer up (message collision instead of stdout collision). Read
+# every `echo "loop_cost: ..." >&2` literal straight out of the library
+# source and require exactly 7 unique strings. ---
+msg_count=$(grep -oE 'echo "loop_cost:[^"]*"' "$LIB" | wc -l | tr -d ' ')
+unique_count=$(grep -oE 'echo "loop_cost:[^"]*"' "$LIB" | sort -u | wc -l | tr -d ' ')
+check "pairwise distinctness: 7 loop_cost stderr bail messages found" "7" "$msg_count"
+check "pairwise distinctness: all 7 messages are unique (no two bails share wording)" "7" "$unique_count"
 
 [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails failures)"; exit 1; }
