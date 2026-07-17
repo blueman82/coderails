@@ -25,9 +25,16 @@ project structure, traditional audit, generate a drift report) to detect
 drift between this repo's documentation and its actual code.
 
 **Scope of docs this routine may fix: git-tracked `.md` files only** —
-`README.md`, `AGENTS.md`, `CLAUDE.md`, and tracked files under `docs/`.
-Before treating any `docs/*.md` file as in-scope, confirm it is actually
-tracked and not gitignored:
+`README.md`, `AGENTS.md`, `CLAUDE.md`, and tracked files under `docs/`
+— **except the self-governance deny-list in step 4 below**
+(`skills/**/SKILL.md`, `AGENTS.md`, `CLAUDE.md`, `docs/routines.md`,
+anything under `.claude/`, `examples/dashboard-config.json`). Yes, this
+means `AGENTS.md` and `CLAUDE.md` are named in both the general scope
+above and the deny-list — read the deny-list as an override: if the
+audit finds drift in a deny-listed file, report it, do not fix it. This
+routine can flag that its own governing documents look stale; it can
+never be the one to edit them. Before treating any `docs/*.md` file as
+in-scope, confirm it is actually tracked and not gitignored:
 
 ```bash
 git ls-files --error-unmatch <path>          # tracked, or
