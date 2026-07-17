@@ -55,7 +55,7 @@ If the audit in step 1 finds nothing to fix:
 
 1. Append a timestamped `no-drift` line to the run log (step 4).
 2. Append a terminal `run=ok` line to the run log — the canonical
-   success marker the routine's `expectedArtifact` (a `contains`
+   success marker the routine's `expectedArtifact` (a `last-marker`
    predicate against that same run-log path) keys on. Writing this line
    satisfies the artifact gate; there is no separate report file to
    write on a no-drift night.
