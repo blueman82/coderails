@@ -96,11 +96,12 @@ review, post-review, post-evals, merge) — same convention as
 
 ## 4. Run log
 
-One append-only log, one line per stage per run, timestamped ISO8601.
-The no-drift short-circuit (step 2) and every delivery stage (step 3)
-write to this same log — it is this routine's durable record of what
-happened on a given night, mirroring `loop-retro-promotion`'s
-`promotion-runs.log` convention.
+One append-only log at the config's `expectedArtifact.artifactPath`
+(`run-{date}.log`), one line per stage per run, timestamped ISO8601. The
+no-drift short-circuit (step 2) and every delivery stage (step 3) write
+to this same file — it is both this routine's durable record of what
+happened on a given night AND the artifact its `exists` gate checks,
+mirroring `loop-retro-promotion`'s `promotion-runs.log` convention.
 
 ## 5. Prohibitions
 
