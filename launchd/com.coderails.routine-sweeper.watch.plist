@@ -4,6 +4,11 @@
 <dict>
   <key>Label</key>
   <string>com.coderails.routine-sweeper.watch</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/Users/harrison/.local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
   <key>ProgramArguments</key>
   <array>
     <string>/Users/harrison/Github/coderails/skills/dashboard/runner/bin/sweeper.sh</string>
