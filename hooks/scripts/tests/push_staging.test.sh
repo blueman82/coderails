@@ -442,6 +442,21 @@ check "ADD-FLAG+MSG: does not crash (exit 0)" "0" "$LAST_RC"
 check "ADD-FLAG+MSG: commit subject is exactly the message (not corrupted by flag parsing)" "my message" "$subject"
 check "ADD-FLAG+MSG: named new file committed" "1" "$(printf '%s' "$committed_files" | grep -c mynew.txt)"
 
+# ─── MESSAGE-FIRST ORDERING: matches push.md's actual invocation shape ──────
+# push.md invokes push.sh as `"$ARGUMENTS" --add path`, i.e. message BEFORE
+# --add, the reverse order of the ADD-FLAG+MSG case above. The `want_add`
+# latch is order-independent by construction, but this locks the specific
+# order the real caller uses rather than relying on that alone.
+R=$(new_fixture add_flag_message_first)
+echo "changed" > "$R/base.txt"
+echo "new" > "$R/mynew.txt"
+run_push "$R" "my message" --add mynew.txt
+committed_files=$(git -C "$R" show --name-only -1 --format="" HEAD 2>/dev/null)
+subject=$(git -C "$R" log -1 --format=%s)
+check "MSG-FIRST: does not crash (exit 0)" "0" "$LAST_RC"
+check "MSG-FIRST: commit subject is exactly the message" "my message" "$subject"
+check "MSG-FIRST: named new file committed" "1" "$(printf '%s' "$committed_files" | grep -c mynew.txt)"
+
 # ─── MULTIPLE --add FLAGS: each repeated --add stages its own path ──────────
 R=$(new_fixture add_flag_multiple)
 echo "changed" > "$R/base.txt"
