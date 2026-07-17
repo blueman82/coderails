@@ -78,14 +78,19 @@ catalog: [`docs/REFERENCE.md`](./docs/REFERENCE.md).
 
 | Skill | Purpose |
 |---|---|
+| `dashboard` | Live local web HUD: sessions, loops, PR gate states, runs, memory activity |
+| `fable-mode` | High-autonomy self-verifying working mode for non-trivial tasks |
 | `handoff` | Structured memory + continuation prompt for a fresh session |
 | `improve-prompt` | Surfaces ambiguities and rewrites underspecified prompts |
 | `loop-retro-promotion` | Predicate-dormant pipeline that promotes proven loop lessons into learned-failure-modes.md via the full gate chain (scheduled, not for interactive use) |
 | `memory-consolidation` | Health-checks and consolidates a project's persistent memory directory; runs on demand or as a weekly scheduled routine |
 | `planning-sequence` | Pre-Parade → Premortem → Red Team on a plan |
 | `premortem` | Assume failure, reason backwards to causes |
+| `sync-docs` | Audit in-tree docs for drift against the codebase; generate sync reports |
 | `task-evals` | Game-resistant success-eval generation: frozen `evals.json` with negative controls |
 | `using-coderails` | Self-bootstrap: injected at SessionStart, explains coderails to Claude |
+| `verify-merged-pr` | Verify a "PR is merged" claim against origin before relying on it |
+| `workflow-audit` | Mine transcripts for repeated tasks worth turning into skills |
 
 **Wiki**
 
