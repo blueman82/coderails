@@ -76,6 +76,46 @@ else
 
   check "sandboxed run -> rc 0" "0" "$rc"
 
+  # ─── Escape guard, BEHAVIOURAL (not a shape check) ─────────────────────────
+  # The most safety-critical property in this feature, and until now it was
+  # asserted only by jq-index'ing two strings out of denyWrite — a check that
+  # stays green even if srt's denyWrite-over-allowWrite precedence silently
+  # breaks, which is the exact regression this feature exists to prevent.
+  #
+  # The property: %%PRIMARY_GIT%% MUST be in allowWrite (a linked worktree's
+  # objects/refs live in the primary .git — omit it and every commit fails), so
+  # the ONLY thing stopping a worker from planting <primary>/.git/hooks/pre-commit
+  # (which then executes UNSANDBOXED on the next git op) is denyWrite precedence.
+  # Assert the DENIAL, and assert it by ground truth (no file on disk), not by
+  # rc or stderr text alone.
+  hook_target="$PRIMARY_GIT/hooks/escape-probe-behavioural"
+  cfg_before=$(shasum -a 256 "$PRIMARY_GIT/config" 2>/dev/null | cut -d' ' -f1)
+
+  rc=0
+  out=$(cd "$WORKTREE" && npx --yes "@anthropic-ai/sandbox-runtime@$SRT_VERSION" \
+    --settings "$SETTINGS" \
+    bash -c "echo '#!/bin/sh' > '$hook_target'" 2>&1) || rc=$?
+  check "escape guard: write to PRIMARY .git/hooks is DENIED" "0" \
+    "$([ -e "$hook_target" ] && echo 1 || echo 0)"
+  check_contains "escape guard: .git/hooks denial names the reason" "not permitted" "$out"
+
+  rc=0
+  out=$(cd "$WORKTREE" && npx --yes "@anthropic-ai/sandbox-runtime@$SRT_VERSION" \
+    --settings "$SETTINGS" \
+    bash -c "echo '[evil]' >> '$PRIMARY_GIT/config'" 2>&1) || rc=$?
+  cfg_after=$(shasum -a 256 "$PRIMARY_GIT/config" 2>/dev/null | cut -d' ' -f1)
+  check "escape guard: write to PRIMARY .git/config is DENIED" "$cfg_before" "$cfg_after"
+  check_contains "escape guard: .git/config denial names the reason" "not permitted" "$out"
+
+  # CONTROL — the guard must not be vacuous. A settings file that denied ALL
+  # .git writes would pass both assertions above while breaking the feature
+  # entirely (no worker could ever commit). Assert the allow side still works.
+  rc=0
+  out=$(cd "$WORKTREE" && npx --yes "@anthropic-ai/sandbox-runtime@$SRT_VERSION" \
+    --settings "$SETTINGS" \
+    bash -c "git -c user.email=t@t -c user.name=t commit -q --allow-empty -m 'escape-guard control'" 2>&1) || rc=$?
+  check "escape guard CONTROL: ordinary commit still succeeds (guard is not deny-all)" "0" "$rc"
+
   git -C "$REPO" worktree remove --force "$WORKTREE" >/dev/null 2>&1
 fi
 
