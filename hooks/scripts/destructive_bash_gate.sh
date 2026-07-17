@@ -20,14 +20,18 @@ deny() {
   # Keyed on $pat's own text (set by each call site below via grep -oiE or a
   # literal string) — this only changes what the DENY message SAYS, never
   # which commands reach deny() in the first place.
-  # Matched against a lowercased copy: the call sites feed $pat from a
-  # case-insensitive grep, so an all-caps or mixed-case command reaches here
-  # with its own casing preserved and would otherwise miss every specific
-  # branch and take the generic route. Only the route lookup is lowercased —
-  # the message still reports $pat as it was actually matched.
+  # Matched against a normalised copy: the call sites feed $pat from a
+  # case-insensitive grep whose blocklist regexes allow runs of whitespace
+  # (`git +reset +--hard`), so a command reaches here with its own casing and
+  # internal spacing preserved and would otherwise miss every specific branch
+  # and take the generic route. Lowercase and collapse whitespace runs to a
+  # single space for the lookup only — the message still reports $pat as it
+  # was actually matched. tr rather than a bash 4 parameter expansion:
+  # this machine's bash is 3.2, where `${pat,,}` aborts the hook and it
+  # denies nothing.
   local route
   local pat_lc
-  pat_lc=$(printf '%s' "$pat" | tr '[:upper:]' '[:lower:]')
+  pat_lc=$(printf '%s' "$pat" | tr '[:upper:]' '[:lower:]' | tr -s '[:space:]' ' ')
   case "$pat_lc" in
     *"git reset --hard"*)
       route="Safe route: park the commits first with 'git branch backup/<desc> <ref>', then use 'git reset --keep <ref>' instead of --hard — --keep applies the same move but REFUSES (errors out) rather than clobbering when it would discard uncommitted working-tree changes, and the backup branch keeps the moved-past commits recoverable either way."
