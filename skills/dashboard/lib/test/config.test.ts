@@ -373,4 +373,17 @@ describe("loadConfig against the real examples/dashboard-config.json (C3)", () =
       ).toBe(true);
     }
   });
+
+  // sync-docs-nightly's whole purpose is rejecting a failure log — but an
+  // `exists` predicate accepts ANY log, success or failure, so a routine
+  // that aborted or refused mid-run still passed its gate as long as it wrote
+  // *something*. That was the green-on-failure defect this PR fixes. Pin the
+  // predicate's kind AND marker against the real config so a regression back
+  // to `exists` (or any marker drift) cannot ship green.
+  it("sync-docs-nightly's gate rejects a failure log — predicate is 'contains'/'run=ok', not 'exists'", () => {
+    const config = loadConfig(EXAMPLE_CONFIG_PATH);
+    const routine = config.routines?.find((r) => r.name === "sync-docs-nightly");
+    expect(routine, "sync-docs-nightly routine not found in example config").toBeDefined();
+    expect(routine?.expectedArtifact.predicate).toEqual({ kind: "contains", marker: "run=ok" });
+  });
 });
