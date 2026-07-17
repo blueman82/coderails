@@ -75,14 +75,13 @@
       "escalation": ["notification", "vault-note"]
     },
     {
-      "name": "sync-docs-weekly",
-      "label": "Sync Docs (weekly)",
-      "buttonRef": "sync-docs-weekly",
-      "cadence": "weekly",
-      "foreignSkillPath": "/path/to/.claude/skills/sync-docs/SKILL.md",
+      "name": "docs-sync-nightly",
+      "label": "Docs Sync (nightly)",
+      "buttonRef": "docs-sync",
+      "cadence": "nightly",
       "expectedArtifact": {
-        "artifactPath": "/path/to/.claude/coderails-dashboard/routines/sync-docs/report-{date}.md",
-        "maxAgeSeconds": 691200,
+        "artifactPath": "/path/to/.claude/coderails-dashboard/routines/docs-sync/run-{date}.log",
+        "maxAgeSeconds": 129600,
         "predicate": { "kind": "exists" }
       },
       "escalation": ["notification", "vault-note"]
