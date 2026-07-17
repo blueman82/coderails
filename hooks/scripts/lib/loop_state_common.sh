@@ -1135,8 +1135,6 @@ als_report_cost_on_complete() {
   # harness neutralises it is outside this repo and unknowable from here; a
   # hook has no business shipping raw control bytes to a terminal on that
   # assumption. Same posture als_log already takes on its own newlines.
-  # Printable + space/tab only; anything else becomes a space, so a hostile
-  # value stays visible-but-inert rather than executing as an escape.
   # Printable + literal space only. NOT [:space:] — that class includes VT
   # (0x0b) and FF (0x0c), which would survive the strip and reach the terminal
   # (verified: `printf 'A\013B\014C' | tr -c '[:print:][:space:]' ' '` passes
