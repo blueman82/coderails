@@ -1,21 +1,25 @@
 # Teardown write contract — `retro.json` and standing-orders
 
-Detail-carrier for Phase 13's teardown. The main skill keeps the imperative (run the four steps in
+Detail-carrier for Phase 13's teardown. The main skill keeps the imperative (run the five steps in
 order, before the `complete` declaration); this file is the field spec and the mechanics you
 consult **while writing the retro**.
 
 `loop_stall_guard` blocks a `complete` declaration when `retro.json` is absent, malformed, or
 below `schema_version` 1 (the hook accepts `schema_version >= 1`, forward-compatible with the cost
-fields added at 2) — so the retro must be written before the declaration.
+fields added at 2) — so the retro must be written before the declaration. It separately blocks
+when a sibling `proof.json` exists but any of its frozen proofs is unexecuted-in-transcript or
+last-failed — so every proof cmd must be run, in the foreground, in the orchestrator's own
+session, before the declaration too (Step 1 below).
 
 ## Contents
 
 - [The Phase 13 self-audit report](#the-phase-13-self-audit-report)
-- [Step 1 — Assemble `retro.json`](#step-1--assemble-retrojson)
+- [Step 1 — Run every `proof.json` cmd](#step-1--run-every-proofjson-cmd)
+- [Step 2 — Assemble `retro.json`](#step-2--assemble-retrojson)
 - [Cost-mining sub-step](#cost-mining-sub-step)
 - [Pricing is computed once and frozen](#pricing-is-computed-once-and-frozen)
-- [Step 2 — Update `standing-orders.md`](#step-2--update-standing-ordersmd)
-- [Steps 3 and 4](#steps-3-and-4)
+- [Step 3 — Update `standing-orders.md`](#step-3--update-standing-ordersmd)
+- [Steps 4 and 5](#steps-4-and-5)
 
 ## The Phase 13 self-audit report
 
