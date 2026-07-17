@@ -68,13 +68,19 @@ fixing.
    making the edit.
 3. Make the doc edits identified in step 1 (git-tracked `.md` files
    only).
-4. **Assert `git diff origin/main --name-only` contains ONLY git-tracked
-   `.md` files.** If ANY non-`.md` path appears in that diff — anything
-   under `hooks/`, `scripts/`, `skills/*/` other than a `.md` file, any
-   `.sh`, `.json`, `.ts`, `.yaml` — **ABORT WITH CLEANUP**: close the PR
-   if one was opened, delete the branch both locally and on the remote,
-   and append an `abort=<reason>` line to the run log. Do not leave
-   orphaned branches, PRs, or partial state. **ABORT, never
+4. **Assert `git diff origin/main...HEAD --name-only` (THREE-dot, not
+   two) contains ONLY git-tracked `.md` files.** Two-dot compares against
+   whatever `origin/main` happens to be at assertion time; if a sibling
+   PR merges into `main` mid-run, that comparison base has moved and a
+   two-dot diff can indict an otherwise-clean branch for files it never
+   touched. Three-dot compares against the merge-base as of when this
+   branch forked, which is the only comparison actually scoped to what
+   *this* routine changed. If ANY non-`.md` path appears in that diff —
+   anything under `hooks/`, `scripts/`, `skills/*/` other than a `.md`
+   file, any `.sh`, `.json`, `.ts`, `.yaml` — **ABORT WITH CLEANUP**:
+   close the PR if one was opened, delete the branch both locally and on
+   the remote, and append an `abort=<reason>` line to the run log. Do not
+   leave orphaned branches, PRs, or partial state. **ABORT, never
    warn-and-continue** — a non-`.md` path in the diff is a hard stop,
    not a warning to log and push anyway.
 5. `/coderails:push`
