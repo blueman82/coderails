@@ -318,7 +318,7 @@ stage of `/workflow`.
 
 ---
 
-# Part 2 — The coderails wiki schema — see AGENTS-wiki-schema.md
+# The coderails wiki schema — see AGENTS-wiki-schema.md
 
 Wiki conventions (vault location, the three layers, page types, page format,
 the wiki-lens enforcement note, and the ingest/query/lint workflows) live in
