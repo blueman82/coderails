@@ -141,7 +141,9 @@ fixing.
 6. `/pr-review-toolkit:review-pr <PR#>`
 7. `/coderails:post-review <PR#>`
 8. `/coderails:post-evals <PR#>`
-9. `/coderails:merge`
+9. `/coderails:merge`. Once the merge succeeds, append a terminal
+   `run=ok` line to the run log as the last line — the canonical
+   success marker the `contains` gate keys on.
 
 Any of steps 5–9 can REFUSE (a failing eval, a review that blocks, a
 merge gate that rejects) rather than the routine choosing to abort.
@@ -149,7 +151,11 @@ Treat a refusal the same as an abort: close the PR if one is open,
 delete the branch locally and on the remote, and append a
 `refused=<gate>` line to the run log (e.g. `refused=post-evals` or
 `refused=merge`) naming which step refused. Never retry past a refusal
-in the same run and never relax the gate that refused.
+in the same run and never relax the gate that refused. **Never append
+`run=ok` on this path** — an abort (step 4) or a refusal (steps 5–9)
+writes `abort=`/`refused=` only; the success marker is written on
+successful completion of a no-drift or merged night and on no other
+path.
 
 Append a timestamped per-stage line to the run log after each gate step
 above (fetch/branch, evals frozen, edit made, manifest check, push,
