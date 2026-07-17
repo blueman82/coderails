@@ -117,8 +117,8 @@ fixing.
      non-`.md` rule below, named here explicitly so the deny-list is a
      complete, self-contained list on its own)
 
-   These are this routine's own governing files — the documents that
-   define what it is allowed to do. A drift finding against any of them
+   These are this routine's own governing files: documents that define
+   what it is allowed to do. A drift finding against any of them
    is **reported** in the run log and the run-note, **never fixed** by
    this routine; it is escalated to a human instead, exactly like any
    other abort. This is not advisory: the assertion in this step MUST
