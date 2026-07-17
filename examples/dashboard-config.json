@@ -11,7 +11,7 @@
       "hidden": true
     },
     {
-      "name": "docs-sync",
+      "name": "sync-docs",
       "label": "DOCS SYNC",
       "command": "/coderails:docs-sync",
       "cwd": "/path/to/coderails",
