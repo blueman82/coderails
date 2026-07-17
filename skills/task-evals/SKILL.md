@@ -46,6 +46,8 @@ A broken instrument looks like this in the raw output: a reporter-loading error 
 
 What to do on discovery depends on timing: at freeze time the file is not yet frozen, so a broken `cmd` or `negative_control` is simply rewritten and re-run — no amendment needed, nothing to record. Discovered after `frozen_at`/`frozen_sha` are stamped, it goes through the amendment path instead: recorded reason, assertion left unchanged, and if a grader verdict already exists for that eval, a fresh re-grade per rule 5.
 
+For any scripted eval marked `discriminate:true`, `post_evals.sh discriminate <evals_json_path>` mechanically runs the smoke-run's own logic: `.cmd` and `.negative_control` in real subshells, rejecting the eval unless both exit 0. HONEST LIMIT: this only catches a non-discriminating check whose formula is exercisable at freeze time — a check that greps for output vocabulary that does not exist until the surface is built (P3-class) is not caught this way; blind amendment remains the backstop for that class.
+
 ## Tier rules (self-exemption defence)
 
 Concrete predicates, not vibes — same design rationale as agentic-loop Phase 2.6's "what named thing does this remove?" test for disposition.
