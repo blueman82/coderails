@@ -84,9 +84,11 @@ dc_mine_token_usage() {
   # below ever ran. null_glob makes the unmatched glob expand to nothing
   # instead, so the loop body simply never runs — scoped to this function via
   # local_options so it doesn't leak into the caller's shell. Under bash,
-  # setopt is not a builtin, so it errors harmlessly to /dev/null and
-  # behaviour is unchanged (bash already expands to the literal pattern,
-  # which the existing `[ -f "$f" ] || continue` below then skips).
+  # setopt is not a builtin: it exits 127 to /dev/null and behaviour is
+  # unchanged (bash already expands to the literal pattern, which the
+  # existing `[ -f "$f" ] || continue` below then skips). That 127 is
+  # discarded here, but it WOULD abort a caller running under `set -e` —
+  # no such caller exists (guard scripts deliberately don't use set -e).
   setopt local_options null_glob 2>/dev/null
   local orch_transcript="" proj=""
   for f in "$projects_dir"/*/"$session.jsonl"; do
