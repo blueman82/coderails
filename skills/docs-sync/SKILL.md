@@ -46,11 +46,11 @@ thing this routine decides after the audit completes.**
 
 If the audit in step 1 finds nothing to fix:
 
-1. Write the drift report artifact (the routine's expected artifact —
-   see the config's `expectedArtifact.artifactPath`).
-2. Log `no-drift` (append a timestamped line to the run log — see the
-   log format in step 4).
-3. Exit 0.
+1. Append a timestamped `no-drift` line to the run log (step 4) — this
+   IS the routine's `expectedArtifact` (an `exists` predicate against
+   that same run-log path). Writing this line satisfies the artifact
+   gate; there is no separate report file to write on a no-drift night.
+2. Exit 0.
 
 Do **NOT** create a branch. Do **NOT** open a pull request. A no-drift
 night is a successful, quiet run, not a reason to open an empty or
