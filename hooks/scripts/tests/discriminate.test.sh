@@ -51,7 +51,7 @@ stderr_out=$(post_evals::validate_discriminating "$FIX_REAL_BUG" 2>&1)
 check "validate_discriminating: loop 8b69e779 broken awk -> exit 1 (non-discriminating)" 1 $?
 [[ "$stderr_out" == *"e1"* && "$stderr_out" == *"non-discriminating"* ]]
 check "validate_discriminating: broken awk -> stderr names id + non-discriminating" 0 $?
-[[ "$stderr_out" == *"1"* ]]
+[[ "$stderr_out" == *"both exit 1"* ]]
 check "validate_discriminating: broken awk -> stderr mentions the shared exit code" 0 $?
 
 # ─── case 2: repaired formula is ACCEPTED ────────────────────────────────────
@@ -100,7 +100,7 @@ stderr_out=$(post_evals::validate_discriminating "$FIX_VACUOUS" 2>&1)
 check "validate_discriminating: cat (exits 0 on both) -> exit 1 (non-discriminating)" 1 $?
 [[ "$stderr_out" == *"e1"* && "$stderr_out" == *"non-discriminating"* ]]
 check "validate_discriminating: vacuous-pass -> stderr names id + non-discriminating" 0 $?
-[[ "$stderr_out" == *"0"* ]]
+[[ "$stderr_out" == *"both exit 0"* ]]
 check "validate_discriminating: vacuous-pass -> stderr mentions the shared exit code (0)" 0 $?
 
 # ─── case 4: grandfathering — no fixtures field validates as today ─────────
@@ -406,6 +406,30 @@ stderr_out=$(post_evals::validate_discriminating "$FIX_MALFORMED" 2>&1)
 check "validate_discriminating: fixtures is a string, not object -> exit 1" 1 $?
 [[ "$stderr_out" == *"e1"* && "$stderr_out" == *"object"* ]]
 check "validate_discriminating: malformed fixtures -> stderr names id + says 'object'" 0 $?
+
+# ─── case 17: pipe-derivation happy path — no fixtures.formula, derivation succeeds ─
+# Every other fixtures block in this suite supplies fixtures.formula explicitly,
+# so the "${cmd##*|}" derivation-from-cmd branch (case 5 above only exercises
+# its FAIL-CLOSED half — no pipe, no formula) was never exercised on the path
+# where it actually derives a formula and that formula genuinely discriminates.
+# cmd's last-pipe segment ("grep -q x") is the derived formula: good="x" makes
+# it exit 0, bad="y" makes it exit 1 — accepted via derivation, not override.
+FIX_DERIVED="$TMP/derived.json"
+jq -n --arg sha "$SHA" '{
+  tier: 1,
+  tier_justification: "1 work-unit, scripted change",
+  head_sha: $sha,
+  evals: [
+    {
+      id: "e1", priority: "P0", mode: "scripted", status: "pass",
+      cmd: "echo x | grep -q x",
+      negative_control: "run-a-broken", evidence: "log",
+      fixtures: { good: "x", bad: "y" }
+    }
+  ]
+}' > "$FIX_DERIVED"
+post_evals::validate_discriminating "$FIX_DERIVED"
+check "validate_discriminating: derived formula (no fixtures.formula) discriminates -> exit 0 (accepted)" 0 $?
 
 # ─── CLI dispatch: validate-discriminating wired into the subcommand case ────
 usage_out=$(bash "$SCRIPT" 2>&1)
