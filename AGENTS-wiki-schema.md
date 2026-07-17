@@ -95,7 +95,7 @@ Body rules:
 
 The full treatment — hooks vs commands, the enforcement ceiling, and the
 skills↔hooks seam convention — lives in the **Two enforcement mechanisms**
-section of Part 1 in [`AGENTS.md`](./AGENTS.md). For wiki purposes the rule is: when documenting a hook
+section of the repo working guide in [`AGENTS.md`](./AGENTS.md). For wiki purposes the rule is: when documenting a hook
 page vs a command page, record *which* mechanism it is and *what it can/can't
 guarantee*; link the page to [[enforcement-model]] and cite the ceiling caveats
 verbatim so they aren't re-opened as findings.
