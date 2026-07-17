@@ -39,11 +39,24 @@
 dc_mine_token_usage() {
   local session="$1"
   local projects_dir="${CLAUDE_PROJECTS_DIR:-$HOME/.claude/projects}"
-  local prices_file="${CLAUDE_MODEL_PRICES_FILE:-$(dirname "${BASH_SOURCE[0]}")/model_prices.json}"
+
+  # Self-path resolution, cross-shell. ${BASH_SOURCE[0]} is bash-only — under
+  # zsh it is empty inside a function, which would silently resolve
+  # dirname's fallback to '.' (cwd) instead of this file's real directory.
+  # zsh's own self-path idiom is ${(%):-%x}, but that syntax is a bash PARSE
+  # error (not just a runtime one), so it can't appear directly in a script
+  # bash also sources — it's routed through eval so bash's parser never sees
+  # the literal token, and only the zsh branch (guarded by $ZSH_VERSION)
+  # ever evaluates it.
+  local self_path="${BASH_SOURCE[0]:-}"
+  if [ -z "$self_path" ] && [ -n "${ZSH_VERSION:-}" ]; then
+    self_path="$(eval 'echo ${(%):-%x}')"
+  fi
+  local prices_file="${CLAUDE_MODEL_PRICES_FILE:-$(dirname "$self_path")/model_prices.json}"
 
   command -v jq >/dev/null 2>&1 || { printf '{}'; return 0; }
   [ -n "$session" ] || { printf '{}'; return 0; }
-  [ -f "$prices_file" ] || { printf '{}'; return 0; }
+  [ -f "$prices_file" ] || { echo "loop_cost: prices file not found at $prices_file" >&2; printf '{}'; return 0; }
 
   # session_id is harness-owned (caller-supplied), not attacker-controlled —
   # defence-in-depth against path traversal, not a security boundary (same
@@ -53,13 +66,30 @@ dc_mine_token_usage() {
   # empty/"?" fresh-fallback branch never fires for this call site.
   if ! declare -f als_sanitise_session_id >/dev/null 2>&1; then
     # shellcheck source=/dev/null
-    . "$(dirname "${BASH_SOURCE[0]}")/loop_state_common.sh" 2>/dev/null
+    # Reuse $self_path (resolved above) rather than ${BASH_SOURCE[0]} again —
+    # under zsh that expands empty inside a function, so dirname's fallback
+    # would silently resolve to '.' (cwd) instead of this file's real
+    # directory, degrading (not crashing, thanks to the 2>/dev/null + the
+    # declare -f fallback below) to an unsanitised session id.
+    . "$(dirname "$self_path")/loop_state_common.sh" 2>/dev/null
   fi
   if declare -f als_sanitise_session_id >/dev/null 2>&1; then
     session="$(als_sanitise_session_id "$session")"
   fi
 
   # Resolve <proj> — the directory containing <session>.jsonl.
+  # Under zsh, nomatch is on by default: an unmatched glob is a HARD ERROR,
+  # not a silent empty expansion like bash. A session with no transcript
+  # would crash the for loop before the orch_transcript fail-open guard
+  # below ever ran. null_glob makes the unmatched glob expand to nothing
+  # instead, so the loop body simply never runs — scoped to this function via
+  # local_options so it doesn't leak into the caller's shell. Under bash,
+  # setopt is not a builtin: it exits 127 to /dev/null and behaviour is
+  # unchanged (bash already expands to the literal pattern, which the
+  # existing `[ -f "$f" ] || continue` below then skips). That 127 is
+  # discarded here, but it WOULD abort a caller running under `set -e` —
+  # no such caller exists (guard scripts deliberately don't use set -e).
+  setopt local_options null_glob 2>/dev/null
   local orch_transcript="" proj=""
   for f in "$projects_dir"/*/"$session.jsonl"; do
     [ -f "$f" ] || continue

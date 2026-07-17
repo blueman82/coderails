@@ -301,4 +301,73 @@ out=$(dc_mine_token_usage "$sess")
 result=$(printf '%s' "$out" | jq -r '.per_model["claude-opus-4-8"].input_tokens')
 check "missing message.id line skipped, only valid line counted" "10" "$result"
 
+# --- Test (k): zsh self-path — dc_mine_token_usage sourced into an
+# INTERACTIVE-shell-shaped zsh (not run_all.sh's bash) must still find its own
+# model_prices.json via self-path resolution, not silently fail-open to {}.
+# Under zsh, ${BASH_SOURCE[0]} is empty inside a function, so a bash-only
+# self-path idiom returns './model_prices.json' relative to zsh's cwd (not
+# the lib's directory) and the "$prices_file" existence guard fails, masking
+# real usage data as {} — indistinguishable from "no data found". This test
+# does NOT set CLAUDE_MODEL_PRICES_FILE, so it exercises the library's
+# default self-path resolution for real, under genuine zsh, with real usage
+# data present -- the only way to force the actual reported failure mode
+# (a bash-only run_all.sh invocation can't reproduce it). Skips gracefully if
+# zsh is unavailable on this machine. ---
+if command -v zsh >/dev/null 2>&1; then
+  sess="zsh-self-path-session"
+  proj="$TMP/projects/-test-proj-k"
+  mkdir -p "$proj"
+  usage_line "msg_k1" "claude-opus-4-8" 100 50 0 0 0 > "$proj/$sess.jsonl"
+  zsh_out=$(CLAUDE_PROJECTS_DIR="$TMP/projects" zsh -c "
+    unset CLAUDE_MODEL_PRICES_FILE
+    cd /
+    . '$LIB'
+    dc_mine_token_usage '$sess'
+  ")
+  result=$(printf '%s' "$zsh_out" | jq -r '.per_model["claude-opus-4-8"].input_tokens // "MISSING"')
+  check "zsh self-path: real usage data mined under zsh (not fail-opened to {})" "100" "$result"
+else
+  printf 'skip - zsh self-path test (zsh not available on this machine)\n'
+fi
+
+# --- Test (k2): zsh no-transcript fail-open — under zsh, an unmatched glob
+# is a hard error (nomatch is on by default), NOT a silent empty expansion
+# like bash. Reaching the "for f in .../*/\"$session.jsonl\"" loop with a
+# session that has no transcript anywhere must still fail-open to {} with
+# exit 0, not crash with "no matches found" before the
+# `[ -n "$orch_transcript" ] || { printf '{}'; return 0; }` guard ever runs.
+# Must run under GENUINE zsh (a bash-only test can't reproduce this — bash
+# expands the unmatched glob to the literal pattern, which is silently
+# skipped by the `[ -f "$f" ] || continue` check, so it never crashes there
+# in the first place). Skips gracefully if zsh is unavailable. ---
+if command -v zsh >/dev/null 2>&1; then
+  zsh_out=$(CLAUDE_PROJECTS_DIR="$TMP/projects" CLAUDE_MODEL_PRICES_FILE="$PRICES" zsh -c "
+    . '$LIB'
+    dc_mine_token_usage 'no-such-session-xyz'
+  " 2>/dev/null)
+  zsh_rc=$?
+  check "zsh no-transcript: fail-opens to {} (not a crash)" "{}" "$zsh_out"
+  check "zsh no-transcript: exit code 0" "0" "$zsh_rc"
+else
+  printf 'skip - zsh no-transcript fail-open test (zsh not available on this machine)\n'
+fi
+
+# --- Test (l): missing prices file — the [ -f "$prices_file" ] fail-open
+# bail must emit a DISTINCT stderr diagnostic naming the path it looked for,
+# so this branch is no longer indistinguishable from "no usage data found"
+# or "jq missing" (the ambiguity that cost prior loops wrong root-cause
+# guesses). Return value is unchanged: still {}, still exit 0. ---
+sess="missing-prices-session"
+proj="$TMP/projects/-test-proj-l"
+mkdir -p "$proj"
+usage_line "msg_l1" "claude-opus-4-8" 10 5 0 0 0 > "$proj/$sess.jsonl"
+bogus_prices="$TMP/does-not-exist-prices.json"
+stderr_out=$(CLAUDE_MODEL_PRICES_FILE="$bogus_prices" dc_mine_token_usage "$sess" 2>&1 1>/dev/null)
+stdout_out=$(CLAUDE_MODEL_PRICES_FILE="$bogus_prices" dc_mine_token_usage "$sess" 2>/dev/null)
+rc=0
+CLAUDE_MODEL_PRICES_FILE="$bogus_prices" dc_mine_token_usage "$sess" >/dev/null 2>&1 || rc=$?
+check "missing prices file: distinct stderr diagnostic mentions the path" "true" "$(printf '%s' "$stderr_out" | grep -qF "$bogus_prices" && echo true || echo false)"
+check "missing prices file: still fail-opens to {} on stdout" "{}" "$stdout_out"
+check "missing prices file: still exit 0" "0" "$rc"
+
 [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails failures)"; exit 1; }
