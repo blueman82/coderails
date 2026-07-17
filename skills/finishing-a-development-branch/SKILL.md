@@ -252,6 +252,10 @@ alone. Only a confirmed-dead pid clears the lock.
 - **Problem:** Removing a worktree the harness created causes phantom state
 - **Fix:** Only clean up worktrees under `.worktrees/` or `worktrees/`
 
+**Force-removing a locked worktree without checking the pid**
+- **Problem:** A locked worktree can be a live session in progress (harness lock reasons embed a pid); force-removing it yanks a running session
+- **Fix:** Parse the pid from the lock reason and `kill -0` it — only remove if confirmed dead; report and leave alone otherwise
+
 **Discarding without reporting what's deleted**
 - **Problem:** Destructive action with no record of what was lost
 - **Fix:** Always report the branch, commits, and worktree path being deleted before proceeding
