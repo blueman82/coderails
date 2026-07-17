@@ -34,7 +34,8 @@ be replayed to derive position, and that can leave a torn tail line after a cras
 
 | Field | Notes |
 |---|---|
-| `schema_version` | Currently 1 for `progress.json`. |
+| `schema_version` | 1 for `progress.json` written before `proof_disposition` existed; write `2` going forward so `als_gate_proofs_on_complete` enforces the disposition requirement below (schema_version < 2 is grandfathered to the old fail-open-on-absence behaviour — see that gate's own header for the removal condition). |
+| `proof_disposition` | Required at `schema_version` 2 when no `proof.json` is frozen: `"none: <reason>"` (e.g. `"none: no executable surface"`) records that skip visibly. Any other value, or an absent/null field, blocks `complete` — see `als_gate_proofs_on_complete`. Never consulted once `proof.json` exists. |
 | `session_id` | This session's id; the guard's ownership check compares it against the file's own path. |
 | `status` | `initialising` → `in-progress` → `complete` (see Lifecycle). |
 | `authorising_prompt_raw` | The authorisation envelope, verbatim. |
