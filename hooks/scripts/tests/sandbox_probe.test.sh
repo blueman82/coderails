@@ -107,6 +107,41 @@ else
   check "escape guard: write to PRIMARY .git/config is DENIED" "$cfg_before" "$cfg_after"
   check_contains "escape guard: .git/config denial names the reason" "not permitted" "$out"
 
+  # ─── Claude-home exec guard, BEHAVIOURAL ───────────────────────────────────
+  # Same rule as the .git guard above: a writable dir holding exec-capable files
+  # is an escape, and denying the file that NAMES an executable is worthless
+  # while the body stays writable. ~/.claude must stay writable (session state),
+  # but settings.json NAMES hook scripts and plugin manifests declare their own
+  # hooks — all of which run UNSANDBOXED next session. Found by security review:
+  # denying settings.json alone left ~/.claude/hooks/ writable, i.e. the
+  # directory holding the very gates that police this repo.
+  claude_hook_target="$HOME/.claude/hooks/escape-probe-behavioural.sh"
+  out=$(cd "$WORKTREE" && npx --yes "@anthropic-ai/sandbox-runtime@$SRT_VERSION" \
+    --settings "$SETTINGS" \
+    bash -c "echo '#!/bin/sh' > '$claude_hook_target'" 2>&1) || true
+  check "claude-home guard: write to ~/.claude/hooks is DENIED" "0" \
+    "$([ -e "$claude_hook_target" ] && echo 1 || echo 0)"
+  [ -e "$claude_hook_target" ] && unlink "$claude_hook_target"
+
+  claude_plugin_target="$HOME/.claude/plugins/escape-probe-behavioural.json"
+  out=$(cd "$WORKTREE" && npx --yes "@anthropic-ai/sandbox-runtime@$SRT_VERSION" \
+    --settings "$SETTINGS" \
+    bash -c "echo '{}' > '$claude_plugin_target'" 2>&1) || true
+  check "claude-home guard: write to ~/.claude/plugins is DENIED" "0" \
+    "$([ -e "$claude_plugin_target" ] && echo 1 || echo 0)"
+  [ -e "$claude_plugin_target" ] && unlink "$claude_plugin_target"
+
+  # CONTROL — claude-home must stay writable for its legitimate need (session
+  # state). A deny-all-of-~/.claude settings file would pass both assertions
+  # above while breaking every worker.
+  claude_scratch_target="$HOME/.claude/escape-probe-scratch-ok"
+  out=$(cd "$WORKTREE" && npx --yes "@anthropic-ai/sandbox-runtime@$SRT_VERSION" \
+    --settings "$SETTINGS" \
+    bash -c "echo ok > '$claude_scratch_target'" 2>&1) || true
+  check "claude-home CONTROL: ~/.claude itself still writable (not deny-all)" "1" \
+    "$([ -e "$claude_scratch_target" ] && echo 1 || echo 0)"
+  [ -e "$claude_scratch_target" ] && unlink "$claude_scratch_target"
+
   # CONTROL — the guard must not be vacuous. A settings file that denied ALL
   # .git writes would pass both assertions above while breaking the feature
   # entirely (no worker could ever commit). Assert the allow side still works.

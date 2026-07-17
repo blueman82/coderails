@@ -124,6 +124,15 @@ check "network allowlist carries github.com" "true" \
   "$(jq '.network.allowedDomains | index("github.com") != null' "$OUT")"
 # The claude-home settings carve-out: denyWrite takes precedence over allowWrite,
 # so these two OS-deny the one file class whose edit dismantles the hook layer.
+# Claude-home EXEC guard: settings.json only NAMES the hooks — denying it while
+# the hook bodies stay writable protects the pointer, not the target. Found by
+# security review (a sandboxed worker wrote into ~/.claude/hooks/ live). The
+# behavioural counterpart lives in sandbox_probe.test.sh; this is the shape half.
+check "denyWrite covers ~/.claude/hooks (exec guard)" "true" \
+  "$(jq --arg p "$HOME/.claude/hooks" '.filesystem.denyWrite | index($p) != null' "$OUT")"
+check "denyWrite covers ~/.claude/plugins (exec guard)" "true" \
+  "$(jq --arg p "$HOME/.claude/plugins" '.filesystem.denyWrite | index($p) != null' "$OUT")"
+
 check "denyWrite carves out ~/.claude/settings.json" "true" \
   "$(jq --arg p "$HOME/.claude/settings.json" '.filesystem.denyWrite | index($p) != null' "$OUT")"
 check "denyWrite carves out ~/.claude/settings.local.json" "true" \

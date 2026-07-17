@@ -61,14 +61,31 @@
       // session state.
       "%%CLAUDE_PROJECT_STATE%%"
     ],
-    // denyWrite takes precedence over allowWrite. This carves the permission
-    // files out of the claude-home allow above: the one file class whose edit
-    // dismantles the discipline layer becomes OS-denied, not just hook-denied
-    // — no_edit_on_main's permission-file arm re-enforced OUT of the agent's
-    // trust domain.
+    // denyWrite takes precedence over allowWrite. Two guard families below; the
+    // rule behind both is the same: A WRITABLE DIRECTORY CONTAINING
+    // EXEC-CAPABLE FILES IS AN ESCAPE, and denying the file that NAMES an
+    // executable is worthless while the executable's BODY stays writable.
     "denyWrite": [
+      // CLAUDE-HOME EXEC GUARD — do not remove. ~/.claude must stay writable
+      // (Claude Code needs its own session state), but that grant carries three
+      // exec surfaces, every one of which runs UNSANDBOXED next session:
+      //   settings.json NAMES hook scripts -> the hook BODIES under
+      //     ~/.claude/hooks must be denied too, or denying settings.json only
+      //     protects the pointer while the target stays writable. (Verified
+      //     live: a sandboxed worker wrote into ~/.claude/hooks/ — the very
+      //     directory holding destructive_bash_gate.sh and test_gate.sh, the
+      //     gates that police this repo.)
+      //   plugin manifests under ~/.claude/plugins declare their own hooks.
+      // This mirrors srt's OWN unconditional block on .claude/commands and
+      // .claude/agents — same threat, same shape — and mirrors the primary-.git
+      // guard below. ~/.claude.json is NOT deniable here: it is one file mixing
+      // required session state with a live top-level mcpServers block, so
+      // granting it writable intrinsically permits MCP command injection. That
+      // residual is named honestly in AGENTS.md rather than papered over.
       "%%HOME%%/.claude/settings.json",
       "%%HOME%%/.claude/settings.local.json",
+      "%%HOME%%/.claude/hooks",
+      "%%HOME%%/.claude/plugins",
       // SANDBOX ESCAPE GUARD — do not remove. srt's own "mandatory" .git/hooks
       // and .git/config denies do NOT reach the primary repo in a worktree
       // topology: macGetMandatoryDenyPatterns() builds them from

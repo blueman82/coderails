@@ -61,6 +61,17 @@ mkdir -p "$xdg_cache_home" || die "could not create XDG_CACHE_HOME dir: $xdg_cac
 # GH_TOKEN obtained here, OUTSIDE the sandbox — the worker itself must never
 # call `gh` (the Go/trustd TLS fork fails inside srt; in-worker GitHub calls
 # go through curl instead, per the spec's decision rule).
+#
+# SCOPE RESIDUAL, disclosed rather than hidden: this hands the worker the
+# operator's FULL gh token — scopes `repo`, `gist`, `read:org` (verified via
+# `gh auth status`), i.e. write access to EVERY repo the operator can reach,
+# not just this worktree's. The network allowlist stops it being POSTed to an
+# arbitrary host, but it is fully usable against GitHub itself from inside the
+# sandbox. It is granted because the worker's terminal artifact is an open PR,
+# which needs it; it is not narrowed because gh offers no scope-narrowing here.
+# A per-repo fine-grained PAT would shrink this surface and is the right
+# follow-up. Sandboxing does NOT contain this: filesystem containment and
+# credential scope are different axes.
 gh_token=$(gh auth token 2>&1) || die "gh auth token failed: $gh_token"
 
 log_file="$scratch/worker.log"
