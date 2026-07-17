@@ -5,3 +5,9 @@ worktree_script: null
 jira: null
 engineering_principles_paths: null
 engineering_principles_skill: /engineering-principles-python
+# When true, agentic-loop dispatches implementation-unit workers as separate
+# OS-sandboxed processes (@anthropic-ai/sandbox-runtime) instead of in-process
+# Agent calls — write containment outside the agent's trust domain. Requires
+# node/npx and a supported platform (macOS Seatbelt, Linux/WSL2 bubblewrap).
+# Default/absent = false (today's in-process dispatch, unchanged).
+sandbox_workers: false

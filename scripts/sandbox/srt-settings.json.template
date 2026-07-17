@@ -1,0 +1,138 @@
+// srt settings template — @anthropic-ai/sandbox-runtime, PINNED 0.0.65.
+//
+// Rendered per worker by render-settings.sh, which substitutes the %%…%%
+// placeholders and STRIPS these // comments: srt parses settings with
+// JSON.parse (dist/utils/config-loader.js), which rejects comments outright.
+// Justifications live here, in the template, and never reach the rendered file.
+//
+// SCHEMA (verified against the pinned tarball's zod schema, not the README:
+// dist/sandbox/sandbox-config.js). These five keys are NON-optional —
+// network.allowedDomains, network.deniedDomains, filesystem.denyRead,
+// filesystem.allowWrite, filesystem.denyWrite. Drop any one and loadConfig()
+// returns null and srt exits 1 ("Refusing to run with the default config").
+// Write is allow-only with denyWrite taking precedence; read is deny-then-allow;
+// network is allow-only with deniedDomains checked first.
+//
+// Literal absolute paths only — macOS supports globs, Linux does not, so one
+// template serves both platforms.
+{
+  "filesystem": {
+    // Every writable path the worker legitimately needs. Anything absent is
+    // EPERM at the syscall — that denial IS the feature.
+    "allowWrite": [
+      // The worker's own worktree: where it edits, builds and commits.
+      "%%WORKTREE%%",
+      // Per-worker scratch: worker.log, rendered settings, temp artifacts.
+      "%%SCRATCH%%",
+      // The PRIMARY repo's .git. A linked worktree's .git is a POINTER FILE;
+      // objects and refs land in the primary's .git/worktrees/<name> and the
+      // shared object store. Omit this and EVERY git commit fails.
+      "%%PRIMARY_GIT%%",
+      // Claude Code requires its own config paths writable (session state,
+      // history). Named residual: worker containment excludes claude-home —
+      // narrowed by the denyWrite carve-out below and srt's unconditional
+      // .claude/commands + .claude/agents block.
+      "%%HOME%%/.claude",
+      "%%HOME%%/.claude.json",
+      // Node, npx and git all write here; without it the toolchain EPERMs.
+      // NOTE: on macOS this is the per-user $TMPDIR (/var/folders/...), which
+      // is NOT /tmp — /tmp stays correctly denied (verified: a write to
+      // /tmp/d.out EPERMs under these settings).
+      // Also where claude -p's own cache lands: the spawn script sets
+      // XDG_CACHE_HOME to a subdir of this scratch dir, so ~/.cache does NOT
+      // need to be allowlisted (verified live, srt 0.0.65: without the env
+      // var AND without ~/.cache allowlisted, claude -p silently emits empty
+      // output and still exits 0; with XDG_CACHE_HOME redirected here it
+      // prints its real output, reproducibly). This is narrower than the
+      // previous ~/.cache grant, which was shared with unrelated tools
+      // (gh, uv, huggingface) — real containment win, not just tidiness.
+      "%%TMPDIR%%",
+      // Claude Code's per-project state dir for THIS worker's cwd only
+      // (/tmp/claude-<uid>/<slug-of-worktree>, slug = cwd with / -> -). Not
+      // configurable by any flag, and OUTSIDE %%TMPDIR%%: macOS resolves /tmp
+      // to /private/tmp, whereas TMPDIR is /var/folders/... — so the TMPDIR
+      // grant above does not cover it. Without this entry a worker writes its
+      // first file successfully and then dies at its NEXT tool call with
+      // "EPERM: operation not permitted, mkdir '/private/tmp/claude-<uid>/
+      // <slug>'" (observed live in the E2 end-to-end probe — components all
+      // passed; only a real end-to-end run surfaced it). Scoped to this
+      // worker's OWN slug, never the whole /tmp/claude-<uid> tree: the broader
+      // grant would hand every worker write access over every other project's
+      // session state.
+      "%%CLAUDE_PROJECT_STATE%%"
+    ],
+    // denyWrite takes precedence over allowWrite. Two guard families below; the
+    // rule behind both is the same: A WRITABLE DIRECTORY CONTAINING
+    // EXEC-CAPABLE FILES IS AN ESCAPE, and denying the file that NAMES an
+    // executable is worthless while the executable's BODY stays writable.
+    "denyWrite": [
+      // CLAUDE-HOME EXEC GUARD — do not remove. ~/.claude must stay writable
+      // (Claude Code needs its own session state), but that grant carries three
+      // exec surfaces, every one of which runs UNSANDBOXED next session:
+      //   settings.json NAMES hook scripts -> the hook BODIES under
+      //     ~/.claude/hooks must be denied too, or denying settings.json only
+      //     protects the pointer while the target stays writable. (Verified
+      //     live: a sandboxed worker wrote into ~/.claude/hooks/ — the very
+      //     directory holding destructive_bash_gate.sh and test_gate.sh, the
+      //     gates that police this repo.)
+      //   plugin manifests under ~/.claude/plugins declare their own hooks.
+      // This mirrors srt's OWN unconditional block on .claude/commands and
+      // .claude/agents — same threat, same shape — and mirrors the primary-.git
+      // guard below. ~/.claude.json is NOT deniable here: it is one file mixing
+      // required session state with a live top-level mcpServers block, so
+      // granting it writable intrinsically permits MCP command injection. That
+      // residual is named honestly in AGENTS.md rather than papered over.
+      "%%HOME%%/.claude/settings.json",
+      "%%HOME%%/.claude/settings.local.json",
+      "%%HOME%%/.claude/hooks",
+      "%%HOME%%/.claude/plugins",
+      // SANDBOX ESCAPE GUARD — do not remove. srt's own "mandatory" .git/hooks
+      // and .git/config denies do NOT reach the primary repo in a worktree
+      // topology: macGetMandatoryDenyPatterns() builds them from
+      // path.resolve(cwd, ...) plus a "**/.git/hooks/**" glob that
+      // normalizePathForSandbox() ANCHORS TO CWD. The worker's cwd is its
+      // worktree, so those denies only ever cover the worktree's own .git
+      // pointer file — never the primary .git, which allowWrite above must
+      // grant for commits to work. Without these two entries a worker can
+      // write <primary>/.git/hooks/pre-commit, which then executes
+      // UNSANDBOXED on the next git operation in the primary repo: a full
+      // escape. Verified live against srt 0.0.65 (escape reproduced, then
+      // closed by these denies, with ordinary commits still working).
+      "%%PRIMARY_GIT%%/hooks",
+      "%%PRIMARY_GIT%%/config"
+    ],
+    // Read containment is an explicit non-goal (spec): deny-read breaks
+    // toolchains constantly for near-zero marginal safety. Required key, so
+    // it is present and deliberately empty.
+    "denyRead": []
+    // allowGitConfig deliberately OMITTED (defaults false), so srt emits its
+    // .git/config deny (dist/sandbox/macos-sandbox-utils.js). Scope honestly:
+    // that deny is cwd-anchored, so it protects only the WORKTREE's own .git
+    // — the primary repo's config is covered by the explicit denyWrite entry
+    // above, not by this flag. Do NOT set it true; it would drop the deny for
+    // the cwd repo too.
+    //
+    // NOTE: `git push -u` SUCCEEDS under this config (verified live, srt
+    // 0.0.65) — it writes branch.<name>.* into the PRIMARY .git/config, which
+    // srt's cwd-anchored deny never covered. With the explicit deny above it
+    // now fails. Keep the no-`-u` contract for sandboxed workers regardless:
+    // its real justification is concurrency hygiene (parallel workers
+    // scribbling branch.* into one shared primary config), NOT srt blocking it.
+  },
+  "network": {
+    // Allow-only: srt denies all egress by default. An incomplete list fails
+    // LOUDLY (blocked egress), never silently. Extend only from probe evidence.
+    "allowedDomains": [
+      // The README's GitHub recipe: git push/fetch over HTTPS and the API.
+      "github.com",
+      "*.github.com",
+      "lfs.github.com",
+      "api.github.com",
+      // The worker's own claude -p process talks to the Anthropic API.
+      "api.anthropic.com"
+    ],
+    // Required key (non-optional in the schema). Empty: the allowlist above is
+    // the whole policy, and deniedDomains would only ever subtract from it.
+    "deniedDomains": []
+  }
+}
