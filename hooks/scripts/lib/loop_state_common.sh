@@ -981,6 +981,19 @@ transcript and cannot satisfy this gate — then re-declare complete." >&2
 # information, never as a block: the shipped price table is routinely weeks
 # stale, so treating staleness as a failure condition would fire on every
 # single loop.
+# prices_as_of is unverifiable self-report — it measures "days since a human
+# typed a date here," not "are the rates still correct" (no pricing API
+# exists to check against; see model_prices.json's price_source note). Past
+# this many days, nag a human to go check, without claiming the RATES
+# themselves are wrong (that can never be known from a date alone).
+# Staleness threshold in days. 14, not 30, and the reason is empirical rather
+# than aesthetic: the shipped table sits at prices_as_of 2026-06-24 — 23 days
+# old at the time this was written. A 30-day threshold is SILENT on the real
+# table, i.e. the nag would never fire on the exact data that motivated it,
+# which is a feature that exists only in its own tests. 14 also roughly tracks
+# how often published rates actually move. Nothing enforces this number; it is
+# a judgement, and a wrong one is cheap here because this only ever WARNS.
+ALS_PRICE_STALE_DAYS=14
 als_report_cost_on_complete() {
   local category="$1" hook="$2" session="$3"
   local category_lc; category_lc=$(printf '%s' "$category" | tr '[:upper:]' '[:lower:]')
@@ -1071,6 +1084,20 @@ als_report_cost_on_complete() {
             if [ -n "$then_epoch" ] && [ -n "$now_epoch" ]; then
               local days=$(( (now_epoch - then_epoch) / 86400 ))
               age="prices as of $prices_as_of, $days days old"
+              # Nag, never block: past the threshold, tell a human to go
+              # check the pricing page. The claim is strictly about the
+              # DATE being old, never that the rates are wrong — this
+              # function has no way to know that.
+              # A prices_as_of in the FUTURE yields negative days and renders
+              # "-10 days old", which is nonsense to read and looks like a bug.
+              # It is not a fabrication risk (no figure is invented and nothing
+              # blocks), so it stays a display fix, not a guard: say plainly the
+              # date is in the future and let the human judge it.
+              if [ "$days" -lt 0 ]; then
+                age="prices as of $prices_as_of, dated in the future (check the date)"
+              elif [ "$days" -gt "$ALS_PRICE_STALE_DAYS" ]; then
+                age="${age} (checks the date only, not the rates) — verify at claude.com/pricing and bump prices_as_of"
+              fi
             fi
             ;;
         esac
@@ -1109,9 +1136,16 @@ als_report_cost_on_complete() {
   # harness neutralises it is outside this repo and unknowable from here; a
   # hook has no business shipping raw control bytes to a terminal on that
   # assumption. Same posture als_log already takes on its own newlines.
-  # Printable + space/tab only; anything else becomes a space, so a hostile
-  # value stays visible-but-inert rather than executing as an escape.
-  msg=$(printf '%s' "$msg" | tr -c '[:print:][:space:]' ' ' | tr '\n\r\t' '   ')
+  # Printable + literal space only. NOT [:space:] — that class includes VT
+  # (0x0b) and FF (0x0c), which would survive the strip and reach the terminal
+  # (verified: `printf 'A\013B\014C' | tr -c '[:print:][:space:]' ' '` passes
+  # both through). FF clears the screen on many terminals. The follow-up tr
+  # below only ever mapped \n\r\t, so those two had no second line of defence.
+  # Found by the security pass on this PR; it is pre-existing (PR #204 wrote
+  # it) rather than introduced here, but it is one character on a line this
+  # change already touches, and "I shipped it last loop" is not a reason to
+  # leave a control byte heading for a terminal.
+  msg=$(printf '%s' "$msg" | tr -c '[:print:] ' ' ' | tr '\n\r\t' '   ')
   # Log the outcome CLASS, never the message body: the body interpolates
   # retro.json-derived values, and als_log's sanitisation is a backstop, not a
   # reason to widen what reaches the log. The class is what a post-hoc audit
