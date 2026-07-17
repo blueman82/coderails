@@ -82,7 +82,7 @@
       "expectedArtifact": {
         "artifactPath": "/path/to/.claude/coderails-dashboard/routines/docs-sync/run-{date}.log",
         "maxAgeSeconds": 129600,
-        "predicate": { "kind": "exists" }
+        "predicate": { "kind": "contains", "marker": "run=ok" }
       },
       "escalation": ["notification", "vault-note"]
     },
