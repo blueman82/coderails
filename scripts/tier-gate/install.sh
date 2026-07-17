@@ -2,7 +2,7 @@
 #═══════════════════════════════════════════════════════════════════════════════
 #  install.sh │ Installs the tier-gate root daemon
 #  - Preflight: gh/jq/curl present; credentials file exists with all three
-#    keys (machine-user GH_TOKEN + ANTHROPIC_API_KEY + MACHINE_USER); machine
+#    keys (machine-user GH_TOKEN + CLAUDE_CODE_OAUTH_TOKEN + MACHINE_USER); machine
 #    user resolvable as a repo collaborator; ruleset visibility (honest MODE).
 #  - Renders com.coderails.tier-gate.plist.template with real paths.
 #  - Prints a repo-vs-installed diff for the runner + judge prompt and refuses
@@ -49,7 +49,8 @@ tgi_check_tools() {
 
 # tgi_check_credentials <path>
 # Verifies <path> exists and contains all THREE required keys: GH_TOKEN (the
-# machine-user identity's curl/gh calls), ANTHROPIC_API_KEY (the judge), and
+# machine-user identity's curl/gh calls), CLAUDE_CODE_OAUTH_TOKEN (the judge's
+# subscription auth — the owner's Claude subscription, never a metered key), and
 # MACHINE_USER (the login tg_post_status's live GET /user identity check
 # must match before it will ever post — see tier-gate-runner.sh's
 # tg_read_machine_user). MACHINE_USER lives here, in the same root-owned
@@ -60,11 +61,11 @@ tgi_check_tools() {
 tgi_check_credentials() {
     local path="$1"
     if [[ ! -f "$path" ]]; then
-        printf 'preflight: credentials file not found at %s — create it (KEY=value lines) with GH_TOKEN, ANTHROPIC_API_KEY, and MACHINE_USER before installing.\n' "$path"
+        printf 'preflight: credentials file not found at %s — create it (KEY=value lines) with GH_TOKEN, MACHINE_USER, and CLAUDE_CODE_OAUTH_TOKEN before installing.\n' "$path"
         return 1
     fi
     local ok=1 key
-    for key in GH_TOKEN ANTHROPIC_API_KEY MACHINE_USER; do
+    for key in GH_TOKEN MACHINE_USER CLAUDE_CODE_OAUTH_TOKEN; do
         local val
         val=$(grep -E "^${key}=" "$path" 2>/dev/null | head -1 | cut -d= -f2-)
         if [[ -z "$val" ]]; then

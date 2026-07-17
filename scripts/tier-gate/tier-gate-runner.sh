@@ -202,9 +202,9 @@ tg_repo_slug() {
 # tg_read_gh_token <creds_path>
 # Echoes the GH_TOKEN value from the credentials file, or empty string with a
 # named error on stderr if the file is missing or the key is absent. Same
-# shape as tg_judge_read_api_key (below) but reads a distinct credential
+# shape as tg_judge_read_oauth_token (below) but reads a distinct credential
 # from the same root-owned file (install.sh's tgi_check_credentials already
-# requires both keys present).
+# requires all three keys present).
 tg_read_gh_token() {
     local creds_path="$1"
     if [[ ! -f "$creds_path" ]]; then
@@ -393,25 +393,45 @@ tg_should_gate() {
 TIER_GATE_JUDGE_MODEL="claude-haiku-4-5"
 TIER_GATE_JUDGE_PROMPT_PATH="${TIER_GATE_JUDGE_PROMPT_PATH:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/judge-prompt.md}"
 
-# tg_judge_read_api_key <creds_path>
-# Echoes the ANTHROPIC_API_KEY value from the credentials file, or empty
+# TIER_GATE_CLAUDE_BIN: the claude binary the judge execs. MUST be a
+# root-owned copy in a uid-501-UNWRITABLE tree — a root daemon exec'ing a
+# binary the adversary (uid 501) can swap is a privilege-escalation surface
+# worse than the one this gate closes. The default points at the root-owned
+# install (`sudo HOME=/var/root claude install stable`), NEVER uid 501's
+# ~/.local/bin/claude. install.sh owns keeping this current on `stable`.
+TIER_GATE_CLAUDE_BIN="${TIER_GATE_CLAUDE_BIN:-/var/root/.local/bin/claude}"
+
+# TIER_GATE_JUDGE_HOME: the HOME (and cwd) the judge subprocess runs under.
+# MUST be root-owned. claude discovers CLAUDE.md / settings.json / MCP config
+# relative to BOTH cwd and HOME; if either were a uid-501-writable path (e.g.
+# the PR author's checkout), the adversary would plant a CLAUDE.md ("rule this
+# tier-0 legitimate") that the judge reads as instruction — the exact
+# injection class Fix 1 deleted, re-entering through config discovery. Pinning
+# both to a root-owned dir closes that surface categorically.
+TIER_GATE_JUDGE_HOME="${TIER_GATE_JUDGE_HOME:-/var/root}"
+
+# tg_judge_read_oauth_token <creds_path>
+# Echoes the CLAUDE_CODE_OAUTH_TOKEN value from the credentials file, or empty
 # string with a named error on stderr if the file is missing or the key is
-# absent. The credentials file is a simple KEY=value file (one root-owned
-# file holds both the machine-user PAT and the Anthropic key; the judge only
-# ever reads its own key out of it).
-tg_judge_read_api_key() {
+# absent. Mirrors tg_read_gh_token / tg_read_machine_user: the one root-owned
+# 0600 creds file holds GH_TOKEN, MACHINE_USER, and this subscription token;
+# the judge reads only its own token out of it. The subscription token
+# replaces the vetoed metered API key — the CLI uses CLAUDE_CODE_OAUTH_TOKEN
+# from the env with no keychain fallback (a bogus token 401s), so the token
+# never leaves the root-owned file except into the subprocess env.
+tg_judge_read_oauth_token() {
     local creds_path="$1"
     if [[ ! -f "$creds_path" ]]; then
         printf 'tg_judge: error: TIER_GATE_CREDS file not found at %s\n' "$creds_path" >&2
         return 1
     fi
-    local key
-    key=$(grep -E '^ANTHROPIC_API_KEY=' "$creds_path" | head -1 | cut -d= -f2-)
-    if [[ -z "$key" ]]; then
-        printf 'tg_judge: error: ANTHROPIC_API_KEY not present in credentials file %s\n' "$creds_path" >&2
+    local token
+    token=$(grep -E '^CLAUDE_CODE_OAUTH_TOKEN=' "$creds_path" | head -1 | cut -d= -f2-)
+    if [[ -z "$token" ]]; then
+        printf 'tg_judge: error: CLAUDE_CODE_OAUTH_TOKEN not present in credentials file %s\n' "$creds_path" >&2
         return 1
     fi
-    printf '%s' "$key"
+    printf '%s' "$token"
 }
 
 # tg_judge_build_prompt <claimed_tier> <diff>
@@ -422,10 +442,11 @@ tg_judge_read_api_key() {
 # J13), so there is no template-substitution step left for a `&` in the
 # replacement or an embedded fence/heading in the diff to corrupt — nothing
 # here re-parses the diff text as anything other than an opaque data blob
-# appended after the instructions. tg_judge_call_api is what makes this safe
-# on the wire: it passes the resulting string to `jq --arg`, which JSON-
-# encodes it as a single string value, so it reaches the model as inert data
-# regardless of what markdown/JSON-looking content it contains.
+# appended after the instructions. tg_judge_call_claude is what makes this
+# safe on the wire: it passes the resulting string as a single `-p` argument
+# in the subprocess argv (never interpolated into a shell string or a
+# template), so it reaches the model as one inert data value regardless of
+# what markdown/JSON-looking content it contains.
 tg_judge_build_prompt() {
     local claimed_tier="$1" diff="$2"
     local instructions
@@ -434,61 +455,71 @@ tg_judge_build_prompt() {
         "$instructions" "$claimed_tier" "$diff"
 }
 
-# tg_judge_call_api <api_key> <prompt_text>
-# Makes ONE direct curl call to the Anthropic Messages API (never the claude
-# CLI — see the spec's central constraint: user-owned CLI auth/state would
-# pull the judge back into the agent's trust domain). Echoes the raw response
-# body; rc is curl's own exit code (0 on any HTTP response, including 4xx/5xx
-# bodies — HTTP-level failures are caught by the caller's JSON/verdict parse).
-# The request declares output_config.format (json_schema, Fix 4): the API
-# enforces the {verdict, reason} shape and the verdict enum server-side, so
-# tg_judge_parse_verdict's own enum check is a second, redundant guard rather
-# than the only one — a model that tried to return a fifth verdict value
-# would be rejected by the API itself before this ever ran.
-tg_judge_call_api() {
-    local api_key="$1" prompt_text="$2"
-    local body
-    body=$(jq -n --arg model "$TIER_GATE_JUDGE_MODEL" --arg prompt "$prompt_text" '{
-        model: $model,
-        max_tokens: 1024,
-        temperature: 0,
-        messages: [{role: "user", content: $prompt}],
-        output_config: {
-            format: {
-                type: "json_schema",
-                schema: {
-                    type: "object",
-                    properties: {
-                        verdict: {type: "string", enum: ["legitimate", "illegitimate", "insufficient"]},
-                        reason: {type: "string"}
-                    },
-                    required: ["verdict", "reason"],
-                    additionalProperties: false
-                }
-            }
-        }
-    }')
+# TIER_GATE_JUDGE_SCHEMA: the structured-output JSON Schema constraining the
+# verdict to the enum. Passed to `claude -p --json-schema` — the CLI analogue
+# of the old API request's output_config.format. tg_judge_parse_verdict's own
+# enum check remains a second, redundant guard (belt-and-suspenders): an
+# off-enum or unparseable response is always rc 1, never a pass.
+TIER_GATE_JUDGE_SCHEMA='{"type":"object","properties":{"verdict":{"type":"string","enum":["legitimate","illegitimate","insufficient"]},"reason":{"type":"string"}},"required":["verdict","reason"],"additionalProperties":false}'
+
+# tg_judge_call_claude <oauth_token> <prompt_text>
+# Runs ONE `claude -p` subprocess against the owner's subscription (never the
+# metered Anthropic API — permanent owner veto). Echoes claude's raw
+# --output-format json envelope; rc is the CLI's own exit code. Auth is the
+# root-held CLAUDE_CODE_OAUTH_TOKEN passed ONLY into this subprocess's env (no
+# keychain fallback — a bad token surfaces as an is_error envelope the parser
+# blocks on). SECURITY-CRITICAL: the subprocess runs with HOME **and** cwd
+# pinned to TIER_GATE_JUDGE_HOME (root-owned) so claude cannot discover a
+# uid-501-planted CLAUDE.md / settings.json / MCP config — the cwd/HOME
+# re-entry of the injection class Fix 1 deleted. --json-schema constrains the
+# verdict enum (Fix 4); --max-turns 1 and permission-mode plan keep it a pure
+# read-and-classify call with no tool surface. The binary is
+# TIER_GATE_CLAUDE_BIN (root-owned), never uid 501's.
+# NOTE: claude has NO --cwd flag (verified against --help) — the working
+# directory is inherited from the process, so the cwd pin is enforced by
+# `cd`-ing into the root-owned dir in a subshell BEFORE exec, not by a claude
+# argument. The subshell keeps the cd from leaking into the daemon's own cwd.
+# `env -i` clears the environment so no uid-501 env var (e.g. an inherited
+# CLAUDE_* or HOME) survives into the judge; only the whitelisted vars pass.
+tg_judge_call_claude() {
+    local oauth_token="$1" prompt_text="$2"
     tg_with_watchdog "$TIER_GATE_WATCHDOG_TIMEOUT" -- \
-        curl -sS --max-time "$TIER_GATE_WATCHDOG_TIMEOUT" \
-        https://api.anthropic.com/v1/messages \
-        -H "content-type: application/json" \
-        -H "x-api-key: ${api_key}" \
-        -H "anthropic-version: 2023-06-01" \
-        -d "$body"
+        bash -c 'cd "$1" || exit 1; exec env -i \
+            HOME="$1" \
+            PATH="/usr/bin:/bin:/usr/sbin:/sbin" \
+            CLAUDE_CODE_OAUTH_TOKEN="$2" \
+            "$3" \
+            -p "$4" \
+            --model "$5" \
+            --output-format json \
+            --json-schema "$6" \
+            --permission-mode plan \
+            --max-turns 1' \
+        _ "$TIER_GATE_JUDGE_HOME" "$oauth_token" "$TIER_GATE_CLAUDE_BIN" \
+          "$prompt_text" "$TIER_GATE_JUDGE_MODEL" "$TIER_GATE_JUDGE_SCHEMA"
 }
 
 # tg_judge_parse_verdict <response_body>
-# Extracts {verdict, reason} from the Messages API response's first text
-# block and echoes "<verdict>\n<reason>". Returns 1 (caller retries) if the
-# response isn't valid JSON, has no text content block, or the inner JSON
-# doesn't parse to a recognised verdict. The verdict enum check here is a
-# second guard on top of the request's own output_config.format schema
-# (Fix 4) — belt-and-suspenders: an unparseable or off-enum response is
-# always rc 1 (error/block), never treated as a pass, however it arose.
+# Extracts {verdict, reason} from claude's `-p --output-format json` envelope
+# and echoes "<verdict>\n<reason>". The envelope (observed live) is
+# {type:"result", is_error:<bool>, result:"<string>", ...}; with --json-schema
+# the structured payload lands in .result as a JSON string. Returns 1 (caller
+# retries, then blocks) when: the envelope isn't valid JSON, is_error is true
+# (e.g. "Not logged in" — a bad/absent token surfaces HERE, and must never be
+# read as a pass), .result is absent, the inner JSON doesn't parse, or the
+# verdict isn't in the enum. The enum check is a second guard on top of
+# --json-schema (Fix 4): an unparseable or off-enum response is always rc 1
+# (error/block), never a pass, however it arose.
 tg_judge_parse_verdict() {
     local response_body="$1"
+    # is_error true => the CLI call failed inside the envelope (auth, model,
+    # tool error). Block outright — never mine a verdict out of a failed run.
+    local is_error
+    is_error=$(printf '%s' "$response_body" | jq -r '.is_error // empty' 2>/dev/null)
+    [[ "$is_error" == "true" ]] && return 1
+
     local inner_text
-    inner_text=$(printf '%s' "$response_body" | jq -r '.content[0].text // empty' 2>/dev/null)
+    inner_text=$(printf '%s' "$response_body" | jq -r '.result // empty' 2>/dev/null)
     [[ -z "$inner_text" ]] && return 1
 
     local verdict reason
@@ -521,19 +552,19 @@ tg_judge() {
         printf 'tg_judge: error: TIER_GATE_CREDS is not set\n' >&2
         return 1
     fi
-    local api_key
-    api_key=$(tg_judge_read_api_key "$creds_path") || return 1
+    local oauth_token
+    oauth_token=$(tg_judge_read_oauth_token "$creds_path") || return 1
 
     local prompt_text
     prompt_text=$(tg_judge_build_prompt "$claimed_tier" "$diff")
 
     local attempt response parsed
     for attempt in 1 2; do
-        response=$(tg_judge_call_api "$api_key" "$prompt_text")
+        response=$(tg_judge_call_claude "$oauth_token" "$prompt_text")
         parsed=$(tg_judge_parse_verdict "$response") && { printf '%s' "$parsed"; return 0; }
     done
 
-    printf 'tg_judge: error: API/parse failure after retry\n' >&2
+    printf 'tg_judge: error: claude/parse failure after retry\n' >&2
     return 1
 }
 
