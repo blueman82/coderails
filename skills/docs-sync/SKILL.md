@@ -75,16 +75,35 @@ fixing.
    making the edit.
 3. Make the doc edits identified in step 1 (git-tracked `.md` files
    only).
-4. **Assert `git diff origin/main...HEAD --name-only` (THREE-dot, not
-   two) contains ONLY git-tracked `.md` files, AND contains NONE of the
-   files in the self-governance deny-list below — even though every one
-   of them is itself `.md`.** Two-dot compares against whatever
-   `origin/main` happens to be at assertion time; if a sibling PR merges
-   into `main` mid-run, that comparison base has moved and a two-dot diff
-   can indict an otherwise-clean branch for files it never touched.
-   Three-dot compares against the merge-base as of when this branch
-   forked, which is the only comparison actually scoped to what *this*
-   routine changed.
+4. **Assert `git diff origin/main...HEAD --name-status` (THREE-dot, not
+   two; `--name-status`, never `--name-only`) satisfies ALL FOUR of the
+   conditions below. Any violation is an ABORT WITH CLEANUP.**
+
+   1. Every path is a git-tracked `.md` file.
+   2. No path is in the self-governance deny-list below — even though
+      every one of them is itself `.md`.
+   3. No line has status `R` or `C` (rename/copy) unless its SOURCE path
+      was already an in-scope `.md` doc.
+   4. No line has status `D` (deletion) for an in-scope doc. This
+      routine fixes drift in a doc; it never deletes one.
+
+   Two-dot compares against whatever `origin/main` happens to be at
+   assertion time; if a sibling PR merges into `main` mid-run, that
+   comparison base has moved and a two-dot diff can indict an
+   otherwise-clean branch for files it never touched. Three-dot compares
+   against the merge-base as of when this branch forked, which is the
+   only comparison actually scoped to what *this* routine changed.
+
+   `--name-only` prints a rename as its DESTINATION path alone, so
+   `git mv scripts/gate.sh evil.md` appears as bare `evil.md` — which is
+   `.md`, is on no deny-list, and therefore passes conditions 1 and 2
+   while smuggling a shell script into the repo. `--name-status` prints
+   `R100  scripts/gate.sh  evil.md`, exposing the source. The same flag
+   is what makes condition 4 checkable at all: under `--name-only` a
+   deletion and an edit are the identical single line `README.md`, while
+   `--name-status` prints `D  README.md`. Conditions 3 and 4 are not
+   reachable without `--name-status`; this is why the flag is mandatory
+   rather than stylistic.
 
    **Self-governance deny-list (permanently out of scope, regardless of
    file extension):**
