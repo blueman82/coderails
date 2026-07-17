@@ -1724,8 +1724,10 @@ check "cost-report: a normal message survives control-char stripping intact" 1 "
 # — it measures "days since a human typed a date here", not "are the rates
 # still correct" — so past a threshold the reporter must also nudge a
 # human to go check the rates, while still never blocking and still never
-# suppressing the cost figure. Threshold is 30 days (named constant in the
-# lib, not asserted by exact value here — only the behavioural boundary).
+# suppressing the cost figure. The threshold is a named constant in the
+# lib (ALS_PRICE_STALE_DAYS); these tests assert the behavioural boundary and
+# read the value from source, never hardcoding it — an earlier revision named
+# "30" here and survived the move to 14.
 
 STALE45=$(date -u -v-45d +%Y-%m-%d 2>/dev/null || date -u -d '45 days ago' +%Y-%m-%d 2>/dev/null)
 FRESH5=$(date -u -v-5d +%Y-%m-%d 2>/dev/null || date -u -d '5 days ago' +%Y-%m-%d 2>/dev/null)
