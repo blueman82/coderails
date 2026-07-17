@@ -155,7 +155,7 @@ SSE buffer instead) or `{status: "error", error}`.
 
 **When it triggers:** "sync docs", "check documentation", "documentation drift", "doc audit", explicit `/sync-docs`.
 
-**Invocation modes:** `/sync-docs` (full drift report), `/sync-docs --check` (drift report only, no suggestions), `/sync-docs --suggest-updates` (includes proposed markdown for updates).
+**Invocation modes:** `/sync-docs` (full drift report), `/sync-docs --check` (drift report only, no suggestions), `/sync-docs --suggest-updates` (includes proposed markdown for updates), `/sync-docs --semantic` (Serena-powered deep code discovery), `/sync-docs --compare <section>` (deep-dive analysis of a specific section), `/sync-docs --verbose` (includes detailed file references), `/sync-docs --diagrams-only` (audits only `docs/diagrams/`).
 
 ---
 
