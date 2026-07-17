@@ -39,11 +39,24 @@
 dc_mine_token_usage() {
   local session="$1"
   local projects_dir="${CLAUDE_PROJECTS_DIR:-$HOME/.claude/projects}"
-  local prices_file="${CLAUDE_MODEL_PRICES_FILE:-$(dirname "${BASH_SOURCE[0]}")/model_prices.json}"
+
+  # Self-path resolution, cross-shell. ${BASH_SOURCE[0]} is bash-only — under
+  # zsh it is empty inside a function, which would silently resolve
+  # dirname's fallback to '.' (cwd) instead of this file's real directory.
+  # zsh's own self-path idiom is ${(%):-%x}, but that syntax is a bash PARSE
+  # error (not just a runtime one), so it can't appear directly in a script
+  # bash also sources — it's routed through eval so bash's parser never sees
+  # the literal token, and only the zsh branch (guarded by $ZSH_VERSION)
+  # ever evaluates it.
+  local self_path="${BASH_SOURCE[0]:-}"
+  if [ -z "$self_path" ] && [ -n "${ZSH_VERSION:-}" ]; then
+    self_path="$(eval 'echo ${(%):-%x}')"
+  fi
+  local prices_file="${CLAUDE_MODEL_PRICES_FILE:-$(dirname "$self_path")/model_prices.json}"
 
   command -v jq >/dev/null 2>&1 || { printf '{}'; return 0; }
   [ -n "$session" ] || { printf '{}'; return 0; }
-  [ -f "$prices_file" ] || { printf '{}'; return 0; }
+  [ -f "$prices_file" ] || { echo "loop_cost: prices file not found at $prices_file" >&2; printf '{}'; return 0; }
 
   # session_id is harness-owned (caller-supplied), not attacker-controlled —
   # defence-in-depth against path traversal, not a security boundary (same
