@@ -5,7 +5,7 @@ This file is the single source of truth for coderails wiki conventions — how
 the wiki is structured, maintained, and queried. `AGENTS.md` is still the
 entry point; it links here.
 
-# Part 2 — The coderails wiki schema
+## The coderails wiki schema
 
 This is the single source of truth for wiki conventions. Do NOT create a separate
 `schema.md` inside the vault.
