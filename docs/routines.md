@@ -133,15 +133,9 @@ Field by field:
   path to a skill that lives outside this repo — the runner checks the
   path exists before spawning and escalates `skill-missing` if it
   doesn't, rather than spawning `claude` and letting it fail inside the
-  sandbox. None of the five shipped example routines use it today: it
-  used to be `sync-docs-weekly`'s way of pointing at a personal-plugin
-  skill location, and that path had been silently broken for 9 days
-  before anyone noticed — `foreignSkillPath` is validated only as a
-  non-empty absolute string, never that it actually exists on disk, at
-  config-load time. `docs-sync-nightly` (its replacement) moved the
-  skill in-repo instead of fixing the stale path, which is why the field
-  is unused now; it remains available for any routine whose skill
-  genuinely lives outside this repo.
+  sandbox. None of the five shipped example routines use it today (see
+  the `docs-sync-nightly` section below for why); it remains available
+  for any routine whose skill genuinely lives outside this repo.
 - **`cadence`** — only `"nightly"` or `"weekly"` are understood by the
   seed step today. Nightly is due after **20 hours** since the routine's
   last recorded run; weekly after **6.5 days**. Both thresholds are
