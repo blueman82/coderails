@@ -180,81 +180,100 @@ if [ -f "$SKILL_PATH" ]; then
   # Anchored on the NORMATIVE imperative, not the topic keyword. A bare
   # grep for 'no-drift' passes on prose that says the short-circuit was
   # REMOVED ("no-drift handling was removed; the routine now always opens
-  # a PR" matches 'no-drift'), so it locks nothing. The instruction is the
-  # contract; assert the instruction.
+  # a PR" matches 'no-drift'), so it locks nothing — verified directly:
+  #   echo "no-drift handling was removed..." | grep -qi 'no-drift'  -> matches
+  # The instruction is the contract; assert the instruction's own text.
   check "SKILL.md forbids creating a branch on a no-drift night" \
-    "yes" "$(grep -qi 'do \*\*NOT\*\* create a branch\|do not create a branch' "$SKILL_PATH" && echo yes || echo no)"
+    "yes" "$(grep -qi 'do \*\*not\*\* create a branch' "$SKILL_PATH" && echo yes || echo no)"
   check "SKILL.md forbids opening a PR on a no-drift night" \
-    "yes" "$(grep -qi 'do \*\*NOT\*\* open a pull request\|do not open a pull request' "$SKILL_PATH" && echo yes || echo no)"
-  check "SKILL.md says the short-circuit happens BEFORE branch/PR creation" \
-    "yes" "$(grep -qi 'before.*branch' "$SKILL_PATH" && echo yes || echo no)"
+    "yes" "$(grep -qi 'do \*\*not\*\* open a pull request' "$SKILL_PATH" && echo yes || echo no)"
+  check "SKILL.md states the short-circuit decision happens BEFORE branch/PR creation" \
+    "yes" "$(grep -qi 'BEFORE any branch or PR is created' "$SKILL_PATH" && echo yes || echo no)"
 
   # --- Manifest must read the diff with --name-status, never --name-only.
   # --name-only prints a rename as its DESTINATION alone, so
   # `git mv scripts/gate.sh evil.md` shows bare `evil.md` — a .md path on
   # no deny-list, which passes an extension check while smuggling in a
   # shell script. It also cannot distinguish a deletion from an edit
-  # (both print the bare path). Verified empirically, 2026-07-17.
+  # (both print the bare path). Verified empirically by the reviewer,
+  # 2026-07-17, in a scratch git repo.
   check "SKILL.md's manifest assertion uses --name-status" \
     "yes" "$(grep -q -- '--name-status' "$SKILL_PATH" && echo yes || echo no)"
   check "SKILL.md forbids --name-only in the manifest assertion" \
-    "yes" "$(grep -q -- 'never `--name-only`' "$SKILL_PATH" && echo yes || echo no)"
-  check "SKILL.md rejects renames whose source was not an in-scope doc" \
-    "yes" "$(grep -qiE 'status .?R.? or .?C.?|rename/copy' "$SKILL_PATH" && echo yes || echo no)"
-  # Anchored on the ONE normative clause. An earlier version of this check
-  # OR-ed two alternatives and so survived deletion of either — a check with
-  # a spare escape hatch is not a lock. Verified: stripping the single
-  # clause below now takes this check RED.
+    "yes" "$(grep -q -- 'never .\{0,5\}--name-only' "$SKILL_PATH" && echo yes || echo no)"
+  check "SKILL.md rejects a rename/copy whose source wasn't already in-scope" \
+    "yes" "$(grep -qi 'no line has status .R. or .C. (rename/copy) unless its SOURCE path' "$SKILL_PATH" && echo yes || echo no)"
   check "SKILL.md rejects deletion of an in-scope doc" \
-    "yes" "$(grep -q 'No line has status `D` (deletion) for an in-scope doc' "$SKILL_PATH" && echo yes || echo no)"
-  check "SKILL.md documents ABORT WITH CLEANUP for a non-.md path" \
-    "yes" "$(grep -q 'ABORT WITH CLEANUP' "$SKILL_PATH" && echo yes || echo no)"
-  check "SKILL.md scopes edits to git-tracked .md files" \
-    "yes" "$(grep -qi 'git-tracked' "$SKILL_PATH" && echo yes || echo no)"
-  check "SKILL.md documents a refused=<gate> marker for a downstream gate refusal" \
-    "yes" "$(grep -q 'refused=' "$SKILL_PATH" && echo yes || echo no)"
-  check "SKILL.md documents an abort=<reason> marker for a manifest-scope abort" \
-    "yes" "$(grep -q 'abort=' "$SKILL_PATH" && echo yes || echo no)"
-  check "SKILL.md names the vault-note as a failure-visibility channel (not just the run log)" \
-    "yes" "$(grep -qi 'vault-note' "$SKILL_PATH" && echo yes || echo no)"
-  check "SKILL.md states there is no dashboard alert or PR comment for a failed run" \
-    "yes" "$(grep -qi 'no dashboard alert' "$SKILL_PATH" && echo yes || echo no)"
+    "yes" "$(grep -qi 'no line has status .D. (deletion) for an in-scope doc' "$SKILL_PATH" && echo yes || echo no)"
 
-  # --- C1 security-review finding: the manifest's .md-only check does not
+  check "SKILL.md's manifest-scope violation is the normative ABORT clause (never warn-and-continue)" \
+    "yes" "$(grep -q 'ABORT, never warn-and-continue' "$SKILL_PATH" && echo yes || echo no)"
+  check "SKILL.md scopes edits to git-tracked .md files only (the actual scope clause, not the topic word)" \
+    "yes" "$(grep -q 'git-tracked \`\.md\` files only' "$SKILL_PATH" && echo yes || echo no)"
+  check "SKILL.md's refusal contract names the refused=<gate> marker specifically" \
+    "yes" "$(grep -q 'refused=<gate>' "$SKILL_PATH" && echo yes || echo no)"
+  check "SKILL.md's abort contract names the abort=<reason> marker specifically" \
+    "yes" "$(grep -q 'abort=<reason>' "$SKILL_PATH" && echo yes || echo no)"
+  check "SKILL.md's failure-visibility section states it writes into the run-note (not just logs)" \
+    "yes" "$(grep -qi 'writes its reason into the run-note' "$SKILL_PATH" && echo yes || echo no)"
+  check "SKILL.md states plainly there is no dashboard alert or PR comment for a failed run" \
+    "yes" "$(grep -q 'There is no dashboard alert and no PR comment' "$SKILL_PATH" && echo yes || echo no)"
+
+  # --- C1 security-review finding: the manifest's file-TYPE check does not
   # by itself stop the routine editing ITS OWN governing .md files (its own
   # SKILL.md, AGENTS.md, CLAUDE.md, docs/routines.md, .claude/**) — every
   # one of those passes an extension-only check. These assert the
   # self-governance deny-list is documented as an ABORT-triggering
-  # condition, not just named in passing.
-  check "SKILL.md names a self-governance deny-list" \
+  # condition, anchored on the normative sentence rather than a passing
+  # mention of the word "deny-list" or "AGENTS.md" somewhere unrelated.
+  check "SKILL.md names a self-governance deny-list as a heading/label" \
     "yes" "$(grep -qi 'self-governance deny-list' "$SKILL_PATH" && echo yes || echo no)"
-  check "SKILL.md's deny-list names skills/**/SKILL.md (including its own)" \
-    "yes" "$(grep -q 'skills/\*\*/SKILL.md' "$SKILL_PATH" && echo yes || echo no)"
-  check "SKILL.md's deny-list names AGENTS.md" \
-    "yes" "$(grep -qE '\bAGENTS\.md\b' "$SKILL_PATH" && echo yes || echo no)"
-  check "SKILL.md's deny-list names docs/routines.md" \
-    "yes" "$(grep -q 'docs/routines.md' "$SKILL_PATH" && echo yes || echo no)"
-  check "SKILL.md states the deny-list is mechanically enforced, not merely stated" \
-    "yes" "$(grep -qi 'mechanically enforced' "$SKILL_PATH" && echo yes || echo no)"
-  check "SKILL.md is honest that enforcement is prompt-level, not hook-level" \
-    "yes" "$(grep -qi 'do not fire' "$SKILL_PATH" && echo yes || echo no)"
+  check "SKILL.md's deny-list names skills/**/SKILL.md, including its own file" \
+    "yes" "$(grep -qi 'skills/\*\*/SKILL.md.*including this skill.s own file' "$SKILL_PATH" && echo yes || echo no)"
+  check "SKILL.md's deny-list has a line-item naming AGENTS.md" \
+    "yes" "$(grep -qE '^ *- .AGENTS\.md.$' "$SKILL_PATH" && echo yes || echo no)"
+  check "SKILL.md's deny-list has a line-item naming docs/routines.md" \
+    "yes" "$(grep -qE '^ *- .docs/routines\.md.$' "$SKILL_PATH" && echo yes || echo no)"
+  check "SKILL.md states the deny-list defines what the routine is ALLOWED to do (the actual invariant)" \
+    "yes" "$(grep -qi 'documents that define' "$SKILL_PATH" && echo yes || echo no)"
+  check "SKILL.md is honest that PreToolUse hooks do not fire under claude -p (the actual limit)" \
+    "yes" "$(grep -qi 'do not fire.*it reduces the risk of self-governance drift' "$SKILL_PATH" && echo yes || echo no)"
 fi
 
-# --- SO-31 negative control for the deny-list checks above: strip the
-# deny-list section out of a scratch copy of SKILL.md and confirm the
-# checks above would go RED against that stripped copy, proving they
-# discriminate real content from its absence rather than passing by
-# construction (e.g. matching on an unrelated word).
+# --- SO-31 negative controls: strip the EXACT normative sentence each
+# check above anchors on out of a scratch copy of SKILL.md, and confirm
+# the corresponding check would go RED against that stripped copy. This
+# is what makes an anchor real rather than another keyword in disguise —
+# a check that cannot be made to fail by removing the behaviour it claims
+# to guard is not evidence of anything (the reviewer's exact finding).
 if [ -f "$SKILL_PATH" ]; then
-  STRIPPED="$(mktemp)"
-  # Remove every line mentioning the deny-list marker phrase and its
-  # constituent paths, simulating a version of this file that never
-  # documented the deny-list at all.
-  grep -viE 'self-governance deny-list|skills/\*\*/SKILL\.md|docs/routines\.md|mechanically enforced' "$SKILL_PATH" > "$STRIPPED"
-  neg_denylist="$(grep -qi 'self-governance deny-list' "$STRIPPED" && echo yes || echo no)"
-  check "negative control: deny-list check goes RED against a SKILL.md stripped of the deny-list" \
-    "no" "$neg_denylist"
-  rm -f "$STRIPPED"
+  neg_check() { # description, ERE pattern to strip AND reassert absent
+    local desc="$1" pat="$2" stripped
+    stripped="$(mktemp)"
+    grep -viE "$pat" "$SKILL_PATH" > "$stripped"
+    check "$desc" "no" "$(grep -qiE "$pat" "$stripped" && echo yes || echo no)"
+  }
+
+  neg_check "negative control: no-drift branch-prohibition check goes RED without its sentence" \
+    'do \*\*not\*\* create a branch'
+  neg_check "negative control: manifest ABORT clause check goes RED without its sentence" \
+    'ABORT, never warn-and-continue'
+  neg_check "negative control: deny-list heading check goes RED without its sentence" \
+    'self-governance deny-list'
+  neg_check "negative control: AGENTS.md deny-list line-item check goes RED without its line" \
+    '^ *- .AGENTS\.md.\$'
+  neg_check "negative control: docs/routines.md deny-list line-item check goes RED without its line" \
+    '^ *- .docs/routines\.md.\$'
+  neg_check "negative control: --name-status requirement check goes RED without the flag" \
+    -- '--name-status'
+  neg_check "negative control: R/C rename-source check goes RED without its sentence" \
+    'no line has status .R. or .C. \(rename/copy\) unless its SOURCE path'
+  neg_check "negative control: D deletion check goes RED without its sentence" \
+    'no line has status .D. \(deletion\) for an in-scope doc'
+  neg_check "negative control: deny-list-defines-permission check goes RED without its clause" \
+    'documents that define'
+  neg_check "negative control: PreToolUse-honesty check goes RED without its sentence" \
+    'do not fire.*it reduces the risk of self-governance drift'
 fi
 
 if [ "$checks" -eq 0 ]; then
