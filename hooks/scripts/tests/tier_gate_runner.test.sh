@@ -39,87 +39,70 @@ tier1_body() { # <pr> <sha> <result>
     printf '<!-- coderails-eval-summary v1 pr=%s head_sha=%s result=%s tier=1 -->\n```json\n{"tier":1,"tier_justification":"x","evals":[{"id":"e1","priority":"P0","status":"pass"}],"head_sha":"%s"}\n```\n' "$pr" "$sha" "$result" "$sha"
 }
 
-# ─── gh stub factory ──────────────────────────────────────────────────────────
-# STATUSES_JSON / HEAD_SHA / COMMENT_BODY / POSTED (log file) are set per test.
+# ─── curl stub factory ─────────────────────────────────────────────────────────
+# The daemon now performs EVERY GitHub call — reads and the credentialled status
+# WRITE alike — through curl (TIER_GATE_CURL_BIN) against the REST API; it never
+# execs `gh`. So this one curl stub serves all of it, returning RAW GitHub API
+# JSON (not gh's pre-filtered output — the daemon does the base64/jq/context
+# filtering itself now). Per-test fixtures are files the stub reads:
+#   STATUSES_FILE   raw commit-statuses array (must carry .context; see set_statuses)
+#   COMMENTS_FILE   raw issue-comments array [{body:...}] (daemon does @base64 itself)
+#   FILES_FILE      raw pulls/{pr}/files array [{filename,additions,deletions}]
+#   DIFF_FILE       raw unified diff text (application/vnd.github.v3.diff)
+# POSTED_LOG keeps the pre-existing `POST state=... description=...` line format
+# the T/I-series assert on. GH_TOKEN_CALLS logs the Bearer header per call.
 STATUSES_FILE="$TMP/statuses.json"
+COMMENTS_FILE="$TMP/comments.json"
+FILES_FILE="$TMP/files.json"
+DIFF_FILE="$TMP/diff.txt"
 POSTED_LOG="$TMP/posted.log"
-COMMENT_B64_FILE="$TMP/comment.b64"
-
-reset_gh_state() {
-    printf '[]' > "$STATUSES_FILE"
-    : > "$POSTED_LOG"
-    : > "$COMMENT_B64_FILE"
-    : > "$TMP/gh_token_calls.log" 2>/dev/null || true
-}
-
-write_gh_stub() {
-    cat > "$TMP/gh" <<GHSTUB
-#!/bin/bash
-case "\$*" in
-  *"pr list --state open"*)
-    echo "$TEST_PR"
-    ;;
-  *"pr view"*"headRefOid"*)
-    echo "$TEST_SHA"
-    ;;
-  *"issues/${TEST_PR:-x}/comments"*)
-    cat "$COMMENT_B64_FILE"
-    ;;
-  *"commits/"*"/statuses"*)
-    cat "$STATUSES_FILE"
-    ;;
-  *"statuses/"*)
-    # gh api repos/.../statuses/<sha> -f state=... -f context=... -f description=...
-    args="\$*"
-    state=\$(printf '%s' "\$args" | grep -oE 'state=[^ ]*' | head -1 | cut -d= -f2-)
-    desc=\$(printf '%s' "\$args" | grep -oE 'description=[^ ]*(( [^ ]*)*)' | sed 's/^description=//')
-    echo "POST state=\$state description=\$desc" >> "$POSTED_LOG"
-    ;;
-  *"pr diff"*"--name-only"*)
-    echo "some/file.sh"
-    ;;
-  *"pr diff"*"--stat"*)
-    echo "1 file changed"
-    ;;
-  *)
-    exit 0
-    ;;
-esac
-GHSTUB
-    chmod +x "$TMP/gh"
-}
-
-set_comment_body() {
-    printf '%s' "$1" | base64 | tr -d '\n' > "$COMMENT_B64_FILE"
-    printf '\n' >> "$COMMENT_B64_FILE"
-}
-
-set_statuses() { # json array
-    printf '%s' "$1" > "$STATUSES_FILE"
-}
-
-# ─── curl stub for tg_post_status (Fix 7: identity-bound status POST) ────────
-# The status POST moves off `gh` onto a PATH-pinned curl (TIER_GATE_CURL_BIN)
-# carrying the machine-user GH_TOKEN as a Bearer token, guarded by a live
-# `GET /user` identity check. This stub serves BOTH endpoints so the T-series
-# (which predates Fix 7 and asserts on POSTED_LOG in the pre-existing
-# `POST state=... description=...` format) keeps passing unchanged, and new
-# identity-focused tests (below) can inspect the auth header / GET-/user calls.
-GH_TOKEN_CALLS="$TMP/gh_token_calls.log"      # Authorization header seen per statuses/ POST
+GH_TOKEN_CALLS="$TMP/gh_token_calls.log"      # Authorization header seen per call
 USER_LOGIN_RESPONSE="$TMP/user_login_response" # what GET /user echoes back
 TIER_GATE_CREDS_FILE="$TMP/tier-gate-creds"
 
-# default: identity matches, so pre-existing T-series tests (which don't
-# care about identity) see a normal, unblocked POST by default.
+reset_gh_state() {
+    printf '[]' > "$STATUSES_FILE"
+    # A single honest small diff: one file, a handful of lines, non-empty raw
+    # diff — the default shape the T-series relies on reaching the judge.
+    printf '[{"filename":"some/file.sh","additions":1,"deletions":0}]' > "$FILES_FILE"
+    printf 'diff --git a/some/file.sh b/some/file.sh\n+x\n' > "$DIFF_FILE"
+    printf '[]' > "$COMMENTS_FILE"
+    : > "$POSTED_LOG"
+    : > "$GH_TOKEN_CALLS" 2>/dev/null || true
+}
+
+# set_comment_body <raw_comment_body>
+# Stores the body as raw GitHub-API comment JSON ([{body:...}]) — built with
+# jq --arg so the tier0/tier1 fixtures (which contain quotes, newlines, backticks,
+# fenced ```json, and $) round-trip losslessly through the daemon's own
+# `jq -r '.[]|(.body|@base64)'` -> base64 -d path. Hand-built JSON would corrupt
+# on the fenced block; --arg is the only safe encoder here.
+set_comment_body() {
+    jq -n --arg b "$1" '[{body:$b}]' > "$COMMENTS_FILE"
+}
+
+# set_statuses <json array>
+# Injects .context="tier-review" into each element so the daemon's
+# select(.context==...) filter keeps them (the daemon now filters context in
+# bash, where the old gh stub returned already-filtered output). A caller that
+# wants a NON-tier-review status (to prove the filter drops it) sets .context
+# explicitly and it is preserved.
+set_statuses() {
+    printf '%s' "$1" | jq '[.[] | (.context //= "tier-review")]' > "$STATUSES_FILE"
+}
+
+# set_files_json <json array> / set_diff <raw diff> — steer the diff shape for
+# the prefilter / byte-cap / empty-diff tests (replaces the old
+# write_gh_stub_with_diff name-only/--stat steering).
+set_files_json() { printf '%s' "$1" > "$FILES_FILE"; }
+set_diff() { printf '%s' "$1" > "$DIFF_FILE"; }
+
+# write_tier_gate_creds / set_user_login_response: identity fixtures.
 # MACHINE_USER lives in the SAME root-owned creds file as GH_TOKEN/
 # CLAUDE_CODE_OAUTH_TOKEN — not an env var — because the daemon's plist only ever
 # passes TIER_GATE_CREDS (a path); nothing propagates a bare env var into
-# the installed launchd job (see com.coderails.tier-gate.plist.template,
-# which sets exactly one EnvironmentVariables key). A test harness that
-# exported TIER_GATE_MACHINE_USER directly would pass while the real
-# installed daemon — which never gets that var — silently fails closed on
-# every single post. Sourcing the expected login from the creds file is what
-# makes this test representative of production.
+# the installed launchd job. Sourcing the expected login from the creds file is
+# what makes this test representative of production.
 write_tier_gate_creds() { # <gh_token> <machine_user>
     printf 'GH_TOKEN=%s\nMACHINE_USER=%s\n' "$1" "$2" > "$TIER_GATE_CREDS_FILE"
 }
@@ -128,23 +111,92 @@ set_user_login_response() { printf '{"login":"%s"}' "$1" > "$USER_LOGIN_RESPONSE
 write_tier_gate_creds "ghp_machine_user_fixture_token" "coderails-tier-bot"
 set_user_login_response "coderails-tier-bot"
 
-write_status_curl_stub() {
+# CURL_HTTP_CODE / *_HTTP_CODE: overridable HTTP status the stub returns per
+# endpoint. Default 200; a test sets one to a 4xx/5xx to exercise fail-closed.
+# The stub appends `\n<code>` to the body (matching the daemon's -w '\n%{http_code}').
+reset_http_codes() {
+    FILES_HTTP_CODE=200 DIFF_HTTP_CODE=200 STATUSES_HTTP_CODE=200
+    COMMENTS_HTTP_CODE=200 PULLS_HTTP_CODE=200
+    COMMENTS_PAGE2_LINK=""   # if set, page 1 emits a Link: rel=next to this URL
+    COMMENTS_PAGE2_HTTP_CODE=200
+}
+reset_http_codes
+
+# write_gh_stub / write_gh_stub_with_diff: retained names (many tests call them)
+# but now they only (re)write the curl stub — there is no gh binary the daemon
+# execs anymore. write_gh_stub_with_diff steers the files/diff fixtures.
+write_gh_stub() { write_curl_stub; }
+write_gh_stub_with_diff() { # <name-only-ignored> <stat-ignored> <diff_content>  (legacy 3-arg shape)
+    # Back-compat shim: older call sites passed (filelist, stat_line, diff). We
+    # derive a files array from the filelist and a line count is irrelevant now
+    # (the daemon counts additions+deletions from the files array). Callers that
+    # need precise counts use set_files_json/set_diff directly.
+    local filelist="$1" _stat="$2" diff_content="$3"
+    printf '%s\n' "$filelist" | grep -v '^$' | jq -R -s 'split("\n") | map(select(length>0)) | map({filename:., additions:1, deletions:0})' > "$FILES_FILE"
+    printf '%b' "$diff_content" > "$DIFF_FILE"
+    write_curl_stub
+}
+
+# write_curl_stub — the one stub serving every daemon curl call.
+write_curl_stub() {
     cat > "$TMP/curl" <<CURLSTUB
 #!/bin/bash
+# Parse the -D <headerfile> target (comments pagination writes a Link header here)
+hdr_out=""
+prev=""
+for a in "\$@"; do
+  [[ "\$prev" == "-D" ]] && hdr_out="\$a"
+  prev="\$a"
+done
 args="\$*"
+tok=\$(printf '%s' "\$args" | grep -oE 'Authorization: Bearer [^ ]*' | head -1)
+echo "\$tok" >> "$GH_TOKEN_CALLS"
+emit() { # <body-file-or-string> <http_code> [is_file]
+  if [[ "\$3" == file ]]; then cat "\$1"; else printf '%s' "\$1"; fi
+  printf '\n%s' "\$2"
+}
 case "\$args" in
   *"api.github.com/user"*)
-    # log the bearer token presented for the identity check
-    tok=\$(printf '%s' "\$args" | grep -oE 'Authorization: Bearer [^ ]*' | head -1)
-    echo "\$tok" >> "$GH_TOKEN_CALLS"
-    cat "$USER_LOGIN_RESPONSE"
+    cat "$USER_LOGIN_RESPONSE"; printf '\n200'
     ;;
-  *"statuses/"*)
-    tok=\$(printf '%s' "\$args" | grep -oE 'Authorization: Bearer [^ ]*' | head -1)
-    echo "\$tok" >> "$GH_TOKEN_CALLS"
+  *"/statuses/"*)
+    # POST a commit status (URL .../statuses/<sha>) — has a -d '{...}' body.
     state=\$(printf '%s' "\$args" | grep -oE '"state"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed -E 's/.*"([^"]*)"\$/\1/')
     desc=\$(printf '%s' "\$args" | grep -oE '"description"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed -E 's/.*"([^"]*)"\$/\1/')
     echo "POST state=\$state description=\$desc" >> "$POSTED_LOG"
+    printf '{}\n201'
+    ;;
+  *"/commits/"*"/statuses"*)
+    emit "$STATUSES_FILE" "\$STATUSES_HTTP_CODE" file
+    ;;
+  *"/issues/"*"/comments"*)
+    # Pagination: if this is the page-2 URL, serve page 2; else page 1 (+ optional Link).
+    if printf '%s' "\$args" | grep -q 'page=2'; then
+      [[ -n "\$hdr_out" ]] && : > "\$hdr_out"
+      printf '[]\n%s' "\$COMMENTS_PAGE2_HTTP_CODE"
+    else
+      if [[ -n "\$COMMENTS_PAGE2_LINK" && -n "\$hdr_out" ]]; then
+        printf 'Link: <%s>; rel="next"\r\n' "\$COMMENTS_PAGE2_LINK" > "\$hdr_out"
+      elif [[ -n "\$hdr_out" ]]; then
+        : > "\$hdr_out"
+      fi
+      emit "$COMMENTS_FILE" "\$COMMENTS_HTTP_CODE" file
+    fi
+    ;;
+  *"/pulls/"*"/files"*)
+    emit "$FILES_FILE" "\$FILES_HTTP_CODE" file
+    ;;
+  *"vnd.github.v3.diff"*)
+    # raw diff: pulls/<pr> with the diff media type
+    emit "$DIFF_FILE" "\$DIFF_HTTP_CODE" file
+    ;;
+  *"/pulls/"*)
+    # bare pulls/<pr> (json) -> head sha; or pulls?state=open -> open PR list
+    if printf '%s' "\$args" | grep -q 'state=open'; then
+      printf '[{"number":%s}]\n%s' "$TEST_PR" "\$PULLS_HTTP_CODE"
+    else
+      printf '{"head":{"sha":"%s"}}\n%s' "$TEST_SHA" "\$PULLS_HTTP_CODE"
+    fi
     ;;
   *)
     exit 0
@@ -152,18 +204,21 @@ case "\$args" in
 esac
 CURLSTUB
     chmod +x "$TMP/curl"
+    # Export the per-endpoint HTTP codes + pagination knobs so the stub (a child
+    # process) sees them.
+    export FILES_HTTP_CODE DIFF_HTTP_CODE STATUSES_HTTP_CODE COMMENTS_HTTP_CODE \
+           PULLS_HTTP_CODE COMMENTS_PAGE2_LINK COMMENTS_PAGE2_HTTP_CODE
 }
 
 # run_gate deliberately does NOT export TIER_GATE_MACHINE_USER — the
-# installed daemon never receives it either (see write_tier_gate_creds'
-# header comment). The expected login must come from TIER_GATE_CREDS'
-# MACHINE_USER= line, exactly like the real daemon reads it.
+# installed daemon never receives it either. The expected login must come from
+# TIER_GATE_CREDS' MACHINE_USER= line, exactly like the real daemon reads it.
 run_gate() {
+    write_curl_stub
     (
         export PATH="$TMP:$PATH"
         export TIER_GATE_CREDS="$TIER_GATE_CREDS_FILE"
         export TIER_GATE_CURL_BIN="$TMP/curl"
-        write_status_curl_stub
         tg_gate_pr "$TEST_PR"
     )
 }
@@ -301,59 +356,14 @@ check "T7: fresh pending -> no new status posted (not reclaimed)" "" "$posted"
 check_contains "T7: summary reports skip for fresh pending" "skip:" "$out"
 [[ -f "$TMP/judge_called3.log" ]] && fails=$((fails+1)) && echo "FAIL - T7: judge called despite fresh (non-stale) pending" || echo "ok   - T7: judge NOT called for fresh pending"
 
-# write_gh_stub_with_diff <filelist> <stat_line> <diff_content>
-# Same as write_gh_stub but with controllable pr-diff outputs, for the
-# prefilter/byte-cap tests below (T8-T10) which need to steer the diff's
-# shape rather than accept the fixed "some/file.sh" / "1 file changed".
-write_gh_stub_with_diff() {
-    local filelist="$1" stat_line="$2" diff_content="$3"
-    printf '%s' "$filelist" > "$TMP/stub_filelist"
-    printf '%s' "$stat_line" > "$TMP/stub_statline"
-    printf '%s' "$diff_content" > "$TMP/stub_diffcontent"
-    cat > "$TMP/gh" <<GHSTUB
-#!/bin/bash
-case "\$*" in
-  *"pr list --state open"*)
-    echo "$TEST_PR"
-    ;;
-  *"pr view"*"headRefOid"*)
-    echo "$TEST_SHA"
-    ;;
-  *"issues/${TEST_PR:-x}/comments"*)
-    cat "$COMMENT_B64_FILE"
-    ;;
-  *"commits/"*"/statuses"*)
-    cat "$STATUSES_FILE"
-    ;;
-  *"statuses/"*)
-    args="\$*"
-    state=\$(printf '%s' "\$args" | grep -oE 'state=[^ ]*' | head -1 | cut -d= -f2-)
-    desc=\$(printf '%s' "\$args" | grep -oE 'description=[^ ]*(( [^ ]*)*)' | sed 's/^description=//')
-    echo "POST state=\$state description=\$desc" >> "$POSTED_LOG"
-    ;;
-  *"pr diff"*"--name-only"*)
-    cat "$TMP/stub_filelist"
-    ;;
-  *"pr diff"*"--stat"*)
-    cat "$TMP/stub_statline"
-    ;;
-  *"pr diff"*)
-    cat "$TMP/stub_diffcontent"
-    ;;
-  *)
-    exit 0
-    ;;
-esac
-GHSTUB
-    chmod +x "$TMP/gh"
-}
-
 # ══════════════════════════════════════════════════════════════════════════
 # Test 8 (Fix 2): denylisted path -> blocked, NO model call
 # ══════════════════════════════════════════════════════════════════════════
 TEST_PR=108 TEST_SHA=sha_denylist
 reset_gh_state
-write_gh_stub_with_diff "skills/dashboard/runner/bin/sweeper.sh" "1 file changed, 2 insertions(+)" "diff --git a/x b/x\n+x"
+set_files_json '[{"filename":"skills/dashboard/runner/bin/sweeper.sh","additions":2,"deletions":0}]'
+set_diff "diff --git a/x b/x
++x"
 set_comment_body "$(tier0_body "$TEST_PR" "$TEST_SHA" GO)"
 tg_judge() { echo "JUDGE CALLED" >> "$TMP/judge_called_t8.log"; printf 'legitimate\nx\n'; return 0; }
 rm -f "$TMP/judge_called_t8.log"
@@ -369,7 +379,9 @@ check_not_contains "T8: denylisted path never posted as error (illegitimate, not
 # ══════════════════════════════════════════════════════════════════════════
 TEST_PR=109 TEST_SHA=sha_honest_size
 reset_gh_state
-write_gh_stub_with_diff "scripts/foo.sh" "1 file changed, 10 insertions(+)" "diff --git a/scripts/foo.sh b/scripts/foo.sh\n+echo hi"
+set_files_json '[{"filename":"scripts/foo.sh","additions":10,"deletions":0}]'
+set_diff "diff --git a/scripts/foo.sh b/scripts/foo.sh
++echo hi"
 set_comment_body "$(tier0_body "$TEST_PR" "$TEST_SHA" GO)"
 tg_judge() { echo "JUDGE CALLED" >> "$TMP/judge_called_t9.log"; printf 'legitimate\nx\n'; return 0; }
 rm -f "$TMP/judge_called_t9.log"
@@ -385,7 +397,9 @@ check_contains "T9: honest small diff -> success posted" "state=success" "$poste
 # ══════════════════════════════════════════════════════════════════════════
 TEST_PR=110 TEST_SHA=sha_pr189_shape
 reset_gh_state
-write_gh_stub_with_diff "scripts/foo.sh" "1 file changed, 205 insertions(+)" "diff --git a/scripts/foo.sh b/scripts/foo.sh\n+x"
+set_files_json '[{"filename":"scripts/foo.sh","additions":205,"deletions":0}]'
+set_diff "diff --git a/scripts/foo.sh b/scripts/foo.sh
++x"
 set_comment_body "$(tier0_body "$TEST_PR" "$TEST_SHA" GO)"
 tg_judge() { echo "JUDGE CALLED" >> "$TMP/judge_called_t10.log"; printf 'legitimate\nx\n'; return 0; }
 rm -f "$TMP/judge_called_t10.log"
@@ -394,9 +408,116 @@ posted=$(cat "$POSTED_LOG")
 check_contains "T10: PR#189 shape (205 lines/1 file) -> failure posted" "state=failure" "$posted"
 [[ -f "$TMP/judge_called_t10.log" ]] && fails=$((fails+1)) && echo "FAIL - T10: judge called for a 205-line diff (PR#189 shape)" || echo "ok   - T10: judge NOT called for a 205-line diff (PR#189 shape)"
 
-# Tests T1-T10 above each redefine tg_judge in this top-level shell (not a
-# subshell), so the LAST redefinition (T10's) is still active here. Undefine
-# it and re-source the runner so the tests below exercise the REAL tg_judge
+# ══════════════════════════════════════════════════════════════════════════
+# Read fail-closed lock: the daemon's READS route through curl to the GitHub
+# REST API, and curl exits 0 on an HTTP 4xx/5xx (unlike gh). A failed or empty
+# gate-critical read must post `error` and NEVER let a phantom/empty value reach
+# the prefilter or judge. Each test below uses a tier-0 body + a stubbed judge
+# that would post `legitimate` IF reached — so an expectation of `error` +
+# judge-NOT-called only holds if the guard fired before the judge, which is
+# exactly the fail-closed property under test.
+# ══════════════════════════════════════════════════════════════════════════
+
+# ── FC1: empty raw diff -> error, judge NOT called (the headline bug). An empty
+#    diff would set file/line counts such that the prefilter passes and the
+#    judge runs on nothing; the guard must post error instead. ───────────────
+TEST_PR=301 TEST_SHA=sha_empty_diff
+reset_gh_state
+set_files_json '[{"filename":"scripts/foo.sh","additions":3,"deletions":0}]'  # files OK...
+set_diff ''                                                                   # ...but the raw diff is empty
+set_comment_body "$(tier0_body "$TEST_PR" "$TEST_SHA" GO)"
+tg_judge() { echo "JUDGE CALLED" >> "$TMP/judge_called_fc1.log"; printf 'legitimate\nx\n'; return 0; }
+rm -f "$TMP/judge_called_fc1.log"
+out=$(run_gate)
+posted=$(cat "$POSTED_LOG")
+check_contains "FC1: empty raw diff -> error posted (fail closed)" "state=error" "$posted"
+check_not_contains "FC1: empty diff never reaches a success verdict" "state=success" "$posted"
+[[ -f "$TMP/judge_called_fc1.log" ]] && fails=$((fails+1)) && echo "FAIL - FC1: judge called on an empty diff" || echo "ok   - FC1: judge NOT called on an empty diff"
+
+# ── FC2: HTTP 500 on the raw-diff fetch -> error, judge NOT called. curl exits
+#    0 on a 500 with an error body; only the HTTP-status check makes this fail
+#    closed rather than judging the 500 body as a diff. ──────────────────────
+TEST_PR=302 TEST_SHA=sha_diff_500
+reset_gh_state
+set_files_json '[{"filename":"scripts/foo.sh","additions":3,"deletions":0}]'
+set_diff 'diff --git a/scripts/foo.sh b/scripts/foo.sh
++ok'
+set_comment_body "$(tier0_body "$TEST_PR" "$TEST_SHA" GO)"
+DIFF_HTTP_CODE=500
+tg_judge() { echo "JUDGE CALLED" >> "$TMP/judge_called_fc2.log"; printf 'legitimate\nx\n'; return 0; }
+rm -f "$TMP/judge_called_fc2.log"
+out=$(run_gate)
+posted=$(cat "$POSTED_LOG")
+DIFF_HTTP_CODE=200
+check_contains "FC2: HTTP 500 on diff fetch -> error posted (fail closed)" "state=error" "$posted"
+[[ -f "$TMP/judge_called_fc2.log" ]] && fails=$((fails+1)) && echo "FAIL - FC2: judge called despite a 500 on the diff fetch" || echo "ok   - FC2: judge NOT called on a 500 diff fetch"
+
+# ── FC3: HTTP 500 on the files fetch -> error, judge NOT called. ────────────
+TEST_PR=303 TEST_SHA=sha_files_500
+reset_gh_state
+set_comment_body "$(tier0_body "$TEST_PR" "$TEST_SHA" GO)"
+FILES_HTTP_CODE=500
+tg_judge() { echo "JUDGE CALLED" >> "$TMP/judge_called_fc3.log"; printf 'legitimate\nx\n'; return 0; }
+rm -f "$TMP/judge_called_fc3.log"
+out=$(run_gate)
+posted=$(cat "$POSTED_LOG")
+FILES_HTTP_CODE=200
+check_contains "FC3: HTTP 500 on files fetch -> error posted (fail closed)" "state=error" "$posted"
+[[ -f "$TMP/judge_called_fc3.log" ]] && fails=$((fails+1)) && echo "FAIL - FC3: judge called despite a 500 on the files fetch" || echo "ok   - FC3: judge NOT called on a 500 files fetch"
+
+# ── FC4: HTTP 500 on the commit-STATUSES fetch -> the PR is SKIPPED (not
+#    gated), judge NOT called, nothing posted. This is the fail-closed a naive
+#    `tg_gh_get | jq` pipe would silently break: tg_should_gate treats a
+#    returned "" as "no status -> gate", so a failed statuses read leaking
+#    through as empty-rc-0 would RE-JUDGE a SHA whose terminal status was
+#    unreadable. tg_commit_statuses captures rc before jq to prevent that. ────
+TEST_PR=304 TEST_SHA=sha_statuses_500
+reset_gh_state
+set_comment_body "$(tier0_body "$TEST_PR" "$TEST_SHA" GO)"
+STATUSES_HTTP_CODE=500
+tg_judge() { echo "JUDGE CALLED" >> "$TMP/judge_called_fc4.log"; printf 'legitimate\nx\n'; return 0; }
+rm -f "$TMP/judge_called_fc4.log"
+out=$(run_gate)
+posted=$(cat "$POSTED_LOG")
+STATUSES_HTTP_CODE=200
+check "FC4: statuses fetch 500 -> nothing posted (PR skipped, fail closed)" "" "$posted"
+check_contains "FC4: statuses fetch 500 -> summary reports a skip" "skip:" "$out"
+[[ -f "$TMP/judge_called_fc4.log" ]] && fails=$((fails+1)) && echo "FAIL - FC4: judge called despite an unreadable statuses fetch" || echo "ok   - FC4: judge NOT called on a 500 statuses fetch"
+
+# ── FC5: comments pagination fails CLOSED. Page 1 returns the eval artifact AND
+#    a Link: rel=next; page 2 returns HTTP 500. Because issue comments are
+#    oldest-first, a truncated list drops the NEWEST artifact — so a partial
+#    fetch must read as "no artifact" (skip), never a judgement on page 1.
+#    tg_pr_comments buffers all pages and emits NOTHING if any page fails. ────
+TEST_PR=305 TEST_SHA=sha_comments_page2_500
+reset_gh_state
+set_comment_body "$(tier0_body "$TEST_PR" "$TEST_SHA" GO)"   # lives on page 1
+COMMENTS_PAGE2_LINK="https://api.github.com/repos/o/r/issues/305/comments?per_page=100&page=2"
+COMMENTS_PAGE2_HTTP_CODE=500
+tg_judge() { echo "JUDGE CALLED" >> "$TMP/judge_called_fc5.log"; printf 'legitimate\nx\n'; return 0; }
+rm -f "$TMP/judge_called_fc5.log"
+out=$(run_gate)
+posted=$(cat "$POSTED_LOG")
+COMMENTS_PAGE2_LINK="" COMMENTS_PAGE2_HTTP_CODE=200
+check "FC5: page-2 fetch failure -> nothing posted (partial list = no artifact)" "" "$posted"
+check_contains "FC5: page-2 fetch failure -> reported as no_eval_artifact skip" "no_eval_artifact" "$out"
+[[ -f "$TMP/judge_called_fc5.log" ]] && fails=$((fails+1)) && echo "FAIL - FC5: judge called on a truncated comments fetch" || echo "ok   - FC5: judge NOT called on a truncated comments fetch"
+
+# ── FC6: the read path presents the Bearer credential on the curl calls the
+#    daemon logs — pinning that reads go through curl (TIER_GATE_CURL_BIN),
+#    never bare gh. The behavioural fail-closed above is the primary proof;
+#    this pins the transport. ───────────────────────────────────────────────
+TEST_PR=306 TEST_SHA=sha_reads_via_curl
+reset_gh_state
+set_comment_body "$(tier0_body "$TEST_PR" "$TEST_SHA" GO)"
+tg_judge() { printf 'legitimate\nx\n'; return 0; }
+out=$(run_gate)
+token_calls=$(cat "$GH_TOKEN_CALLS" 2>/dev/null)
+check_contains "FC6: reads present the Bearer credential via curl (routed off bare gh)" "Bearer ghp_machine_user_fixture_token" "$token_calls"
+
+# Tests T1-T10 + FC1-FC6 above each redefine tg_judge in this top-level shell
+# (not a subshell), so the LAST redefinition is still active here. Undefine it
+# and re-source the runner so the tests below exercise the REAL tg_judge
 # implementation, not a leftover per-test stub.
 unset -f tg_judge
 source "$RUNNER"

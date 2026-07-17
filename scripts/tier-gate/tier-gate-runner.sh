@@ -108,27 +108,75 @@ tg_with_watchdog() {
     wait "$pid"
 }
 
-# ─── GitHub I/O (reads through `gh` on PATH; the credentialled status WRITE
-#     goes through curl instead — see tg_post_status's own header comment) ───
+# ─── GitHub I/O ─────────────────────────────────────────────────────────────
+# Every call — reads and the credentialled status WRITE alike — goes through
+# curl (TIER_GATE_CURL_BIN) to the GitHub REST API, carrying the machine-user
+# GH_TOKEN as a Bearer credential. NOTHING here execs `gh`: gh lives under
+# /opt/homebrew/bin, which is uid-501-writable, so a root daemon exec'ing it is
+# a privilege-escalation surface (uid 501 swaps the binary, root runs it).
+# There is no root-owned gh to pin, so the reads route through curl at /usr/bin
+# (root:wheel) exactly like the write does — see tg_post_status's header.
 
 # TIER_GATE_CURL_BIN: PATH-pinned by default to the root-owned system curl.
-# `gh` lives in /opt/homebrew/bin, which is uid-501-writable — a root daemon
-# exec'ing it for a credentialled write would let anything able to write
-# there intercept the machine-user token. curl at /usr/bin is root:wheel.
-# Overridable so tests can point it at a stub.
+# curl at /usr/bin is root:wheel; overridable so tests can point it at a stub.
 TIER_GATE_CURL_BIN="${TIER_GATE_CURL_BIN:-/usr/bin/curl}"
+
+# tg_gh_get <api_path_or_url> [accept_header]
+# Authenticated GET against the GitHub REST API. <api_path_or_url> is either a
+# path RELATIVE to https://api.github.com/repos/<owner>/<repo>/ (e.g.
+# "pulls/42/files") OR an absolute https:// URL (used to follow a Link
+# rel="next" header, which GitHub returns as an absolute URL). Echoes the
+# response body on a 2xx and returns 0; returns 1 (and echoes nothing) on any
+# failure — the daemon's fail-closed primitive for reads.
+#
+# FAIL-CLOSED / the curl-vs-gh trap: `gh` exits nonzero on an HTTP 4xx/5xx, but
+# curl exits 0 (its rc reflects the TRANSPORT, not the HTTP status) unless
+# asked. So checking curl's rc alone would read a 404/500 error body as a
+# successful response. We append the HTTP status via -w and reject any non-2xx
+# BEFORE returning the body, so a failed read can never masquerade as data.
+# An EMPTY 2xx body is NOT treated as failure here (a statuses list is
+# legitimately []); call sites that must reject an empty body (the diff trio)
+# enforce that themselves.
+tg_gh_get() {
+    local target="$1" accept="${2:-application/vnd.github+json}"
+    local url
+    case "$target" in
+        https://*) url="$target" ;;
+        *)
+            local slug; slug=$(tg_repo_slug)
+            [[ -z "$slug" ]] && { printf 'tg_gh_get: error: could not resolve owner/repo from git remote origin\n' >&2; return 1; }
+            url="https://api.github.com/repos/${slug}/${target}"
+            ;;
+    esac
+    local creds_path="${TIER_GATE_CREDS:-}"
+    [[ -z "$creds_path" ]] && { printf 'tg_gh_get: error: TIER_GATE_CREDS is not set\n' >&2; return 1; }
+    local token; token=$(tg_read_gh_token "$creds_path") || return 1
+
+    local resp rc
+    resp=$(tg_with_watchdog "$TIER_GATE_WATCHDOG_TIMEOUT" -- \
+        "$TIER_GATE_CURL_BIN" -sS --max-time "$TIER_GATE_WATCHDOG_TIMEOUT" \
+        -w '\n%{http_code}' \
+        "$url" \
+        -H "Authorization: Bearer ${token}" \
+        -H "Accept: ${accept}")
+    rc=$?
+    [[ $rc -ne 0 ]] && return 1        # watchdog/curl transport failure
+    local code="${resp##*$'\n'}" body="${resp%$'\n'*}"
+    [[ "$code" =~ ^2[0-9][0-9]$ ]] || return 1   # HTTP 4xx/5xx -> fail closed
+    printf '%s' "$body"
+}
 
 # tg_open_prs
 # Echoes one PR number per line for every open PR.
 tg_open_prs() {
-    tg_with_watchdog "$TIER_GATE_WATCHDOG_TIMEOUT" -- gh pr list --state open --json number -q '.[].number'
+    tg_gh_get "pulls?state=open&per_page=100" | jq -r '.[].number // empty' 2>/dev/null
 }
 
 # tg_pr_head_sha <pr>
 # Echoes the current head SHA for <pr>.
 tg_pr_head_sha() {
     local pr="$1"
-    tg_with_watchdog "$TIER_GATE_WATCHDOG_TIMEOUT" -- gh pr view "$pr" --json headRefOid -q .headRefOid
+    tg_gh_get "pulls/${pr}" | jq -r '.head.sha // empty' 2>/dev/null
 }
 
 # tg_pr_comments <pr>
@@ -152,11 +200,54 @@ tg_pr_head_sha() {
 #     status and is re-judged (tg_should_gate).
 #   - merge.sh requires the status description to carry verdict=legitimate, so a
 #     bare state=success (however minted) is not a valid tier-0 approval.
+#
+# Paginated, and it MUST be: issue comments come oldest-first, so on a busy PR
+# the newest eval artifact lands on a LATER page — a single per_page=100 page
+# would miss it and the PR would never get judged. This follows the GitHub
+# `Link: rel="next"` header (an ABSOLUTE URL) across every page.
+#
+# FAIL-CLOSED on a partial fetch: all pages are buffered and emitted only after
+# the LAST page succeeds. If ANY page fails (transport or non-2xx), this emits
+# NOTHING and returns 1 — never a truncated list. That matters because the sole
+# caller (tg_newest_eval_comment_for_sha) reads this via `< <(...)`, a process
+# substitution whose exit status is discarded, so it cannot see the rc; a
+# truncated stream would be silently mistaken for "these are all the comments"
+# and, oldest-first, would drop exactly the newest artifact. Emitting nothing
+# instead makes a partial fetch read as "no eval artifact" -> tg_gate_pr skips
+# (safe: next tick retries), never a judgement on a stale/partial view.
 tg_pr_comments() {
     local pr="$1"
-    tg_with_watchdog "$TIER_GATE_WATCHDOG_TIMEOUT" -- \
-        gh api "repos/{owner}/{repo}/issues/${pr}/comments" --paginate \
-        --jq '.[] | (.body | @base64)'
+    local creds_path="${TIER_GATE_CREDS:-}"
+    [[ -z "$creds_path" ]] && return 1
+    local token; token=$(tg_read_gh_token "$creds_path") || return 1
+    local slug; slug=$(tg_repo_slug)
+    [[ -z "$slug" ]] && return 1
+
+    local url="https://api.github.com/repos/${slug}/issues/${pr}/comments?per_page=100"
+    local buffer="" hdr_file
+    hdr_file=$(mktemp) || return 1
+    while [[ -n "$url" ]]; do
+        local resp rc body code
+        resp=$(tg_with_watchdog "$TIER_GATE_WATCHDOG_TIMEOUT" -- \
+            "$TIER_GATE_CURL_BIN" -sS --max-time "$TIER_GATE_WATCHDOG_TIMEOUT" \
+            -D "$hdr_file" -w '\n%{http_code}' \
+            "$url" \
+            -H "Authorization: Bearer ${token}" \
+            -H "Accept: application/vnd.github+json")
+        rc=$?
+        if [[ $rc -ne 0 ]]; then rm -f "$hdr_file"; return 1; fi
+        code="${resp##*$'\n'}"; body="${resp%$'\n'*}"
+        if [[ ! "$code" =~ ^2[0-9][0-9]$ ]]; then rm -f "$hdr_file"; return 1; fi
+        # Accumulate this page's base64-encoded comment bodies.
+        local page_enc; page_enc=$(printf '%s' "$body" | jq -r '.[] | (.body | @base64)' 2>/dev/null) || { rm -f "$hdr_file"; return 1; }
+        buffer+="${page_enc}"$'\n'
+        # Follow Link: <url>; rel="next" if present (absolute URL from GitHub).
+        url=$(grep -i '^Link:' "$hdr_file" | grep -oE '<[^>]*>; rel="next"' | head -1 | sed -E 's/^<([^>]*)>.*/\1/')
+    done
+    rm -f "$hdr_file"
+    # Emit only after every page succeeded. Strip the trailing blank line so the
+    # consumer's `[[ -n "$encoded" ]]` guard isn't fed an empty final record.
+    printf '%s' "$buffer" | grep -v '^$' || true
 }
 
 # tg_newest_eval_comment_for_sha <pr> <head_sha>
@@ -191,11 +282,22 @@ tg_newest_eval_comment_for_sha() {
 # Echoes the JSON array of commit statuses for <sha> for context
 # TIER_GATE_CONTEXT, newest first (GitHub's own list order), each object
 # containing at minimum state/description/created_at.
+#
+# GATE-CRITICAL fail-closed: capture tg_gh_get's rc BEFORE jq. tg_should_gate
+# (below) does `statuses_json=$(tg_commit_statuses "$sha") || return 1` and
+# treats a returned "" as "no status -> gate", so a failed fetch that leaked
+# through as empty-but-rc-0 would make the daemon RE-JUDGE a SHA whose terminal
+# status it could not read. Piping tg_gh_get straight into jq would bind the
+# `$(...)` rc to jq, not the fetch — so the fetch is captured first, its rc
+# propagated, and only a real 2xx body is handed to jq.
+# per_page=100 single page (no Link-following): statuses are newest-first, so
+# page 1 already holds the freshest tier-review status, which is all the
+# lifecycle logic below inspects. Capped at 100 by construction.
 tg_commit_statuses() {
     local sha="$1"
-    tg_with_watchdog "$TIER_GATE_WATCHDOG_TIMEOUT" -- \
-        gh api "repos/{owner}/{repo}/commits/${sha}/statuses" --paginate \
-        --jq "[.[] | select(.context == \"$TIER_GATE_CONTEXT\")]"
+    local raw
+    raw=$(tg_gh_get "commits/${sha}/statuses?per_page=100") || return 1
+    printf '%s' "$raw" | jq "[.[] | select(.context == \"$TIER_GATE_CONTEXT\")]" 2>/dev/null
 }
 
 # tg_repo_slug
@@ -734,10 +836,30 @@ tg_gate_pr() {
     # Fix 2: mechanical pre-filter BEFORE any model call. filelist/line
     # count only — never diff content — so this step cannot be influenced
     # by anything the defendant wrote.
+    #
+    # B3 fail-closed: both are derived from ONE GET /pulls/{pr}/files. curl
+    # exits 0 on an HTTP 4xx/5xx (unlike gh), so tg_gh_get's own HTTP-status
+    # check is what makes a failed fetch fail-closed here; we additionally treat
+    # an empty file list as a hard error. Letting a failed/empty fetch through
+    # would set file_count=0 / line_count=0, which SAILS THROUGH the prefilter
+    # (0 > cap is false) and reaches the judge on a phantom empty diff — the
+    # exact permissive read this gate exists to prevent. per_page=100 single
+    # page (no Link-following): a tier-0 diff is <=3 files by the size cap, so a
+    # PR that legitimately exceeds one page of files is already not tier-0.
+    local files_json
+    files_json=$(tg_gh_get "pulls/${pr}/files?per_page=100") || {
+        tg_post_status "$sha" "error" "verdict=error host=$(hostname)"
+        printf 'gated: pr=%s sha=%s tier=0 verdict=error state=error reason=files_fetch_failed\n' "$pr" "$sha"
+        return 1
+    }
     local filelist line_count
-    filelist=$(tg_with_watchdog "$TIER_GATE_WATCHDOG_TIMEOUT" -- gh pr diff "$pr" --name-only 2>/dev/null)
-    line_count=$(tg_with_watchdog "$TIER_GATE_WATCHDOG_TIMEOUT" -- gh pr diff "$pr" --stat 2>/dev/null \
-        | grep -oE '[0-9]+ insertion|[0-9]+ deletion' | grep -oE '[0-9]+' | awk '{s+=$1} END {print s+0}')
+    filelist=$(printf '%s' "$files_json" | jq -r '.[].filename // empty' 2>/dev/null)
+    line_count=$(printf '%s' "$files_json" | jq '[.[] | .additions + .deletions] | add // 0' 2>/dev/null)
+    if [[ -z "$filelist" ]]; then
+        tg_post_status "$sha" "error" "verdict=error host=$(hostname)"
+        printf 'gated: pr=%s sha=%s tier=0 verdict=error state=error reason=empty_file_list\n' "$pr" "$sha"
+        return 1
+    fi
 
     local prefilter_out
     prefilter_out=$(tg_prefilter "$filelist" "$line_count")
@@ -749,11 +871,27 @@ tg_gate_pr() {
     fi
 
     # Fix 3: capped REAL diff content (not just name-only/--stat metadata).
-    # Byte cap mirrors Fix 2's fail-closed posture: over-cap blocks outright
-    # rather than truncating and judging a partial diff (a truncated diff
-    # is never a valid basis for a permissive read).
+    # Fetched as the raw unified diff via the GitHub diff media type. Byte cap
+    # mirrors Fix 2's fail-closed posture: over-cap blocks outright rather than
+    # truncating and judging a partial diff (a truncated diff is never a valid
+    # basis for a permissive read).
+    #
+    # B3 fail-closed on the diff fetch itself: tg_gh_get returns nonzero on a
+    # failed/non-2xx fetch (curl's exit-0-on-HTTP-error trap is handled inside
+    # it), and we ALSO treat an empty diff body as a hard error. An empty diff
+    # reaching the judge is the headline bug this closes: it would present zero
+    # changed content as a legitimate tier-0 basis.
     local diff diff_bytes
-    diff=$(tg_with_watchdog "$TIER_GATE_WATCHDOG_TIMEOUT" -- gh pr diff "$pr" 2>/dev/null)
+    diff=$(tg_gh_get "pulls/${pr}" "application/vnd.github.v3.diff") || {
+        tg_post_status "$sha" "error" "verdict=error host=$(hostname)"
+        printf 'gated: pr=%s sha=%s tier=0 verdict=error state=error reason=diff_fetch_failed\n' "$pr" "$sha"
+        return 1
+    }
+    if [[ -z "$diff" ]]; then
+        tg_post_status "$sha" "error" "verdict=error host=$(hostname)"
+        printf 'gated: pr=%s sha=%s tier=0 verdict=error state=error reason=empty_diff\n' "$pr" "$sha"
+        return 1
+    fi
     diff_bytes=$(printf '%s' "$diff" | wc -c | tr -d ' ')
     if [[ "$diff_bytes" -gt "$TIER_GATE_MAX_DIFF_BYTES" ]]; then
         tg_post_status "$sha" "failure" "verdict=illegitimate host=$(hostname)"
