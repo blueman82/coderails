@@ -270,6 +270,7 @@ alone. Only a confirmed-dead pid clears the lock.
 - Remove a worktree before confirming merge success
 - Clean up worktrees you didn't create (provenance check)
 - Run `git worktree remove` from inside the worktree
+- Force-remove a locked worktree without confirming the lock's pid is dead
 - Introduce a human prompt/menu — this skill runs to completion autonomously
 
 **Always:**
@@ -279,4 +280,5 @@ alone. Only a confirmed-dead pid clears the lock.
 - Report a discard's deletions before executing it
 - Clean up worktree for Merge Locally & Discard outcomes only
 - `cd` to main repo root before worktree removal
+- Check lock state before removing; report live/unattributable locks instead of forcing
 - Run `git worktree prune` after removal
