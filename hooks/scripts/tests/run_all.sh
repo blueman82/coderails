@@ -4,6 +4,7 @@ set -u
 cd "$(dirname "$0")"
 
 fails=0
+skips=0
 total=0
 
 for test_file in *.test.sh; do
@@ -14,8 +15,13 @@ for test_file in *.test.sh; do
     printf 'OK\n'
   else
     rc=$?
-    fails=$((fails + 1))
-    printf 'FAILED (exit %d)\n' "$rc"
+    if [ "$rc" -eq 3 ]; then
+      skips=$((skips + 1))
+      printf 'SKIPPED (prerequisite): %s\n' "$test_file"
+    else
+      fails=$((fails + 1))
+      printf 'FAILED (exit %d)\n' "$rc"
+    fi
   fi
 done
 
@@ -24,6 +30,11 @@ if [ "$total" -eq 0 ]; then
   exit 1
 fi
 
-printf '\n--- run_all: %d/%d suites passed ---\n' "$((total - fails))" "$total"
+printf '\n--- run_all: %d/%d suites passed, %d skipped ---\n' "$((total - fails - skips))" "$total" "$skips"
+
+if [ "$skips" -eq "$total" ]; then
+  printf 'WARNING: all %d suites skipped — nothing was actually verified\n' "$total" >&2
+  exit 1
+fi
 
 [ "$fails" -eq 0 ] && exit 0 || exit 1
