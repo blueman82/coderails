@@ -37,14 +37,18 @@ If no blocking findings, proceed silently.
 
 ## Push
 
-Execute the push workflow script. Remove `--quick` from arguments if present:
+Execute the push workflow script. Remove `--quick` from arguments if present.
+
+`push.sh` stages tracked-modified files automatically (`git add -u`) but never sweeps up new, untracked files — that's deliberate, to avoid dragging unrelated working-tree files into the PR. If you (the actor running this command) created NEW files that belong in this PR, list them explicitly and pass each one via a repeatable `--add <path>` flag. You know what you created; don't stage new files with a separate `git add` sweep — name them to push.sh instead.
+
+Compute any such file list on its own line, BEFORE the invocation line — a `$(...)`/backtick on the same line as the push.sh call is blocked by the destructive-bash gate. Pass a bare `$VAR` expansion on the invocation line, never inline command substitution. Example shape:
 
 ```bash
-bash "${CLAUDE_PLUGIN_ROOT}/scripts/push.sh" "$ARGUMENTS"
+bash "${CLAUDE_PLUGIN_ROOT}/scripts/push.sh" "$ARGUMENTS" --add path/to/newfile
 ```
 
 The script handles:
-1. Staging all changes
+1. Staging tracked-modified files, plus any `--add <path>` files named explicitly
 2. Creating commit (with provided message or auto-generated)
 3. Pushing branch to origin
 4. Creating or updating Pull Request
