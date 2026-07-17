@@ -75,7 +75,7 @@
       "escalation": ["notification", "vault-note"]
     },
     {
-      "name": "docs-sync-nightly",
+      "name": "sync-docs-nightly",
       "label": "Docs Sync (nightly)",
       "buttonRef": "docs-sync",
       "cadence": "nightly",
