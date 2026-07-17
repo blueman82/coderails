@@ -69,20 +69,46 @@ fixing.
 3. Make the doc edits identified in step 1 (git-tracked `.md` files
    only).
 4. **Assert `git diff origin/main...HEAD --name-only` (THREE-dot, not
-   two) contains ONLY git-tracked `.md` files.** Two-dot compares against
-   whatever `origin/main` happens to be at assertion time; if a sibling
-   PR merges into `main` mid-run, that comparison base has moved and a
-   two-dot diff can indict an otherwise-clean branch for files it never
-   touched. Three-dot compares against the merge-base as of when this
-   branch forked, which is the only comparison actually scoped to what
-   *this* routine changed. If ANY non-`.md` path appears in that diff —
-   anything under `hooks/`, `scripts/`, `skills/*/` other than a `.md`
-   file, any `.sh`, `.json`, `.ts`, `.yaml` — **ABORT WITH CLEANUP**:
-   close the PR if one was opened, delete the branch both locally and on
-   the remote, and append an `abort=<reason>` line to the run log. Do not
-   leave orphaned branches, PRs, or partial state. **ABORT, never
-   warn-and-continue** — a non-`.md` path in the diff is a hard stop,
-   not a warning to log and push anyway.
+   two) contains ONLY git-tracked `.md` files, AND contains NONE of the
+   files in the self-governance deny-list below — even though every one
+   of them is itself `.md`.** Two-dot compares against whatever
+   `origin/main` happens to be at assertion time; if a sibling PR merges
+   into `main` mid-run, that comparison base has moved and a two-dot diff
+   can indict an otherwise-clean branch for files it never touched.
+   Three-dot compares against the merge-base as of when this branch
+   forked, which is the only comparison actually scoped to what *this*
+   routine changed.
+
+   **Self-governance deny-list (permanently out of scope, regardless of
+   file extension):**
+   - any `skills/**/SKILL.md` — including this skill's own file, and
+     every other skill in the plugin
+   - `AGENTS.md`
+   - `CLAUDE.md`
+   - `docs/routines.md`
+   - anything under `.claude/`
+   - `examples/dashboard-config.json` (already excluded by the
+     non-`.md` rule below, named here explicitly so the deny-list is a
+     complete, self-contained list on its own)
+
+   These are this routine's own governing files — the documents that
+   define what it is allowed to do. A drift finding against any of them
+   is **reported** in the run log and the run-note, **never fixed** by
+   this routine; it is escalated to a human instead, exactly like any
+   other abort. This is not advisory: the assertion in this step MUST
+   fail the manifest check the same way a non-`.md` path does, and
+   nothing in the prose of this skill can waive it — see Prohibitions
+   below for why this is a mechanism, not merely a stated intent.
+
+   If ANY non-`.md` path appears in that diff — anything under `hooks/`,
+   `scripts/`, `skills/*/` other than a `.md` file, any `.sh`, `.json`,
+   `.ts`, `.yaml` — **or ANY deny-listed path appears, even though it is
+   `.md`** — **ABORT WITH CLEANUP**: close the PR if one was opened,
+   delete the branch both locally and on the remote, and append an
+   `abort=<reason>` line to the run log. Do not leave orphaned branches,
+   PRs, or partial state. **ABORT, never warn-and-continue** — a
+   non-`.md` path, or a deny-listed `.md` path, in the diff is a hard
+   stop, not a warning to log and push anyway.
 5. `/coderails:push`
 6. `/pr-review-toolkit:review-pr <PR#>`
 7. `/coderails:post-review <PR#>`
