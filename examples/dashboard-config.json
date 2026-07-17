@@ -75,9 +75,9 @@
       "escalation": ["notification", "vault-note"]
     },
     {
-      "name": "sync-docs-nightly",
+      "name": "docs-sync-nightly",
       "label": "Docs Sync (nightly)",
-      "buttonRef": "sync-docs",
+      "buttonRef": "docs-sync",
       "cadence": "nightly",
       "expectedArtifact": {
         "artifactPath": "/path/to/.claude/coderails-dashboard/routines/docs-sync/run-{date}.log",
