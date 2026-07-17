@@ -698,16 +698,66 @@ listed unit(s), then re-declare complete." >&2
 # that gap the same way the work_units gate's allowlist closes status-string
 # gaming.
 #
-# Fail-open on ABSENT proof.json, fail-closed on malformed/unverifiable —
-# the same established asymmetry as retro.json (mandatory, blocks on
-# absence) versus work_units (optional, blocks only on an unprovable entry).
-# proof.json is OPTIONAL and adopted voluntarily (mirrors task-evals'
-# voluntary-adoption posture): a loop authored before this gate existed, or
-# with no executable surface to prove, writes no proof.json and is not
-# punished for its absence. But once present, a garbage file must never read
-# as absence — malformed JSON, a bad schema_version, or a proofs entry that
-# cannot be verified all fail CLOSED, mirroring the work_units rule that a
-# unit which cannot be proven terminal blocks rather than passing by default.
+# ABSENT proof.json is DISPOSITION-GATED, not unconditionally fail-open —
+# fail-closed on malformed/unverifiable either way. proof.json is OPTIONAL
+# and adopted voluntarily (mirrors task-evals' voluntary-adoption posture): a
+# loop with no executable surface to prove writes none. SKILL.md Phase 2.7e
+# already required that choice be "a visible decision, not a silent gap",
+# recorded in decisions_absorbed — but nothing enforced that requirement
+# mechanically, so a loop with a clearly executable surface could declare
+# `complete` with no proof.json and no recorded disposition at all, and this
+# gate let it through silently. That silent path is now closed via
+# progress.json's own `proof_disposition` field (see loop-state.md): a
+# value starting with "none" (e.g. "none: no executable surface") is the
+# mechanical form of that recorded decision and allows absence; any other
+# non-empty value, or an absent/null proof_disposition, now BLOCKS on an
+# absent proof.json — silent skip becomes impossible.
+#
+# GRANDFATHER (removal condition below): this disposition requirement only
+# applies once progress.json's OWN schema_version is >= 2. A schema_version
+# < 2 (or absent, or non-numeric — the field is authored freehand by an LLM
+# per prose instruction, not emitted by trusted code, so treat it as
+# adversarial input like every other field here) predates proof_disposition
+# entirely and keeps the OLD unconditional fail-open-on-absence behaviour —
+# this is what protects every already-in-flight loop's progress.json (there
+# are live sibling loops mid-run at the time this gate shipped) from being
+# bricked at their own `complete` declaration by a field their SKILL.md
+# never told them to write. Mirrors the identical schema_version-gated
+# grandfather als_report_cost_on_complete already uses for retro.json's
+# schema_version 1 -> 2 cost-miner transition (see that function's own
+# header for the numeric-vs-string-compare pitfall this reuses the same
+# jq-side `>=` fix for). REMOVAL CONDITION: once every active loop's
+# progress.json is known to carry schema_version >= 2 (i.e. once this gate
+# has been live longer than the longest-running loop's lifetime), the
+# schema_version < 2 branch and this comment block can be deleted and
+# proof_disposition enforcement made unconditional.
+#
+# HONEST BOUNDARY: this makes SILENT skip impossible FOR LOOPS AT
+# progress.json schema_version >= 2 — such a loop can no longer reach
+# `complete` with an absent proof.json and zero trace of why. It does NOT
+# make silent skip impossible universally; two boundary members remain
+# uncaught. (1) It does not stop a model writing a false "none: no
+# executable surface" when a surface actually exists — "does an executable
+# surface exist" is undetectable by any hook, the same honest-boundary every
+# gate in this file already carries (checks the declaration is present, not
+# that the reason is honest). (2) A loop whose progress.json self-declares
+# schema_version < 2 (or non-numeric, or omits the field), or whose
+# progress.json is absent/unparseable, is grandfathered (see above) and can
+# still reach `complete` with no proof.json and no proof_disposition at
+# all — logged as proof_gate=allowed_no_proof_grandfathered, not blocked.
+# Do not oversell this as closing either cheat; it only closes the
+# silent-omission path for schema_version >= 2 loops.
+#
+# Fail-closed on malformed/unverifiable is unchanged and unconditional on
+# schema_version — the same established asymmetry as retro.json (mandatory,
+# blocks on absence) versus work_units (optional, blocks only on an
+# unprovable entry): once proof.json is PRESENT, a garbage file must never
+# read as absence — malformed JSON, a bad schema_version, or a proofs entry
+# that cannot be verified all fail CLOSED, mirroring the work_units rule
+# that a unit which cannot be proven terminal blocks rather than passing by
+# default. proof_disposition is never consulted once proof.json exists —
+# presence always drives full validation/execution-mining, regardless of
+# what proof_disposition claims.
 #
 # Cost: one O(transcript) mining pass (same cost class als_count_invocations
 # already pays on every Stop, but this gate only runs on `complete`
@@ -728,7 +778,59 @@ als_gate_proofs_on_complete() {
   command -v jq >/dev/null 2>&1 || { als_log "hook=$hook session=$session proof_gate=skipped_no_jq"; return 0; }
   [ -n "$ALS_PATH" ] || return 0
   local proof_file; proof_file="$(dirname "$ALS_PATH")/proof.json"
-  [ -f "$proof_file" ] || return 0
+  if [ ! -f "$proof_file" ]; then
+    # Absent proof.json: grandfather on progress.json's own schema_version
+    # (see the header block above for the full rationale and removal
+    # condition). Numeric `>=` comparison happens INSIDE jq, deliberately —
+    # a bash string/pattern compare would mishandle a float schema_version
+    # the same way als_report_cost_on_complete's header documents for
+    # retro.json. progress.json itself may be absent/unreadable here (this
+    # gate runs independently of als_gate_require_active_loop's own
+    # progress.json checks), so a missing/unparseable file reads as
+    # schema_version 0 -> grandfathered, same as an explicit low value.
+    local sv_ge2="false" grandfather_reason="grandfathered_progress_absent"
+    if [ -f "$ALS_PATH" ]; then
+      sv_ge2=$(jq -r '(.schema_version // 0) | if type == "number" then (. >= 2) else false end' "$ALS_PATH" 2>/dev/null)
+      if [ -z "$sv_ge2" ]; then
+        grandfather_reason="grandfathered_progress_malformed"
+        sv_ge2="false"
+      elif [ "$sv_ge2" != "true" ]; then
+        grandfather_reason="grandfathered_sv_lt2"
+        sv_ge2="false"
+      fi
+    fi
+    if [ "$sv_ge2" != "true" ]; then
+      als_log "hook=$hook session=$session proof_gate=allowed_no_proof_$grandfather_reason"
+      return 0
+    fi
+    local disposition
+    disposition=$(jq -r '(.proof_disposition // "") | if type == "string" then . else "" end' "$ALS_PATH" 2>/dev/null)
+    case "$disposition" in
+      none|none:*)
+        als_log "hook=$hook session=$session proof_gate=allowed_no_proof_disposition=none"
+        return 0
+        ;;
+      "")
+        als_log "hook=$hook session=$session proof_gate=blocked offenders=no_proof_no_disposition"
+        echo "[loop-stall-guard] LOOP-STOP: complete declared but there is no proof.json and progress.json
+(schema_version >= 2) records no proof_disposition explaining why.
+Either freeze proof.json (Phase 2.7e), or set progress.json's proof_disposition
+to \"none: <reason>\" (e.g. \"none: no executable surface\") to record that
+choice visibly, then re-declare complete." >&2
+        exit 2
+        ;;
+      *)
+        als_log "hook=$hook session=$session proof_gate=blocked offenders=disposition_promises_proof"
+        echo "[loop-stall-guard] LOOP-STOP: complete declared but progress.json's proof_disposition is
+\"$disposition\", which is not a recorded skip (\"none: <reason>\"), yet no
+proof.json exists at:
+  $proof_file
+Freeze proof.json (Phase 2.7e), or change proof_disposition to \"none: <reason>\"
+if there is genuinely nothing to prove, then re-declare complete." >&2
+        exit 2
+        ;;
+    esac
+  fi
   jq -e . "$proof_file" >/dev/null 2>&1 || {
     als_log "hook=$hook session=$session proof_gate=blocked offenders=malformed"
     echo "[loop-stall-guard] LOOP-STOP: complete declared but proof.json is malformed (not valid JSON).
