@@ -41,10 +41,10 @@ Execute the push workflow script. Remove `--quick` from arguments if present.
 
 `push.sh` stages tracked-modified files automatically (`git add -u`) but never sweeps up new, untracked files — that's deliberate, to avoid dragging unrelated working-tree files into the PR. If you (the actor running this command) created NEW files that belong in this PR, list them explicitly and pass each one via a repeatable `--add <path>` flag. You know what you created; don't stage new files with a separate `git add` sweep — name them to push.sh instead.
 
-Compute any such file list on its own line, BEFORE the invocation line — a `$(...)`/backtick on the same line as the push.sh call is blocked by the destructive-bash gate. Pass a bare `$VAR` expansion on the invocation line, never inline command substitution. Example shape:
+Use a separate `--add` flag per file, one path per occurrence — never a space-separated variable like `--add $FILES`. `--add` consumes exactly one token, so `--add $FILES` would stage only the first file and the rest would be silently misparsed as extra arguments (the next token becomes part of the commit message). Name individual files, not directories or globs — a directory would stage everything under it, including files that aren't yours. Example shape:
 
 ```bash
-bash "${CLAUDE_PLUGIN_ROOT}/scripts/push.sh" "$ARGUMENTS" --add path/to/newfile
+bash "${CLAUDE_PLUGIN_ROOT}/scripts/push.sh" "$ARGUMENTS" --add path/to/newfile --add path/to/another
 ```
 
 The script handles:
