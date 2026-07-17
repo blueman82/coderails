@@ -920,17 +920,33 @@ check "rm \${IFS}x-rf (harmless glue) -> allow" ALLOW \
 check "rm \${IFSx}-rf (different var, harmless) -> allow" ALLOW \
   "$(run "$(payload "rm\${IFSx}-rf /tmp/x")")"
 
-# \${IFS:+word} / \${IFS+word} (alternate-value operator): the ONE operator
-# whose branches are inverted — since IFS is set, this substitutes the
-# literal WORD, not IFS's whitespace value, so it must NOT be collapsed to a
-# space. Confirmed it is not treated as a separator: a benign use stays
-# allowed exactly as written.
+# \${IFS:+word} / \${IFS+word} (alternate-value operator): since IFS is set,
+# this substitutes the literal WORD, not IFS's whitespace value. A
+# NON-whitespace word (e.g. SET) must NOT be collapsed to a space — that
+# would erase real text — and stays allowed exactly as written.
 check "echo \${IFS:+word} (not a separator) -> allow" ALLOW \
   "$(run "$(payload 'echo "safe${IFS:+word}"')")"
 check "echo \${IFS:+SET} (not a separator) -> allow" ALLOW \
   "$(run "$(payload 'echo "${IFS:+SET}"')")"
 check "echo \${IFS+SET} (no colon, not a separator) -> allow" ALLOW \
   "$(run "$(payload 'echo "${IFS+SET}"')")"
+
+# SECURITY (whitespace-word carve-out): when the :+/+ word is ATTACKER-
+# CONTROLLED and is one or more literal spaces/tabs, the substituted word
+# IS whitespace, making the expansion a real separator independent of IFS's
+# own value — found by security review, confirmed by ground-truth execution
+# (rm removing a real non-empty directory). The blanket "never collapse
+# :+/+" reasoning above covers the common case (a non-whitespace word) but
+# is incomplete on its own; this carve-out must fire first and re-collapse
+# the whitespace-only-word shape specifically.
+check "rm \${IFS:+ }-rf (whitespace word) -> deny" DENY \
+  "$(run "$(payload "rm\${IFS:+ }-rf /tmp/x")")"
+check "rm \${IFS+ }-rf (whitespace word, no colon) -> deny" DENY \
+  "$(run "$(payload "rm\${IFS+ }-rf /tmp/x")")"
+check "rm \${IFS:+  }-rf (two-space word) -> deny" DENY \
+  "$(run "$(payload "rm\${IFS:+  }-rf /tmp/x")")"
+check "chmod \${IFS:+ }-R\${IFS:+ }777 (whitespace word) -> deny" DENY \
+  "$(run "$(payload "chmod\${IFS:+ }-R\${IFS:+ }777 /var/www")")"
 
 # --- Deliverable B: source-drift tripwire ---------------------------------
 # Extracts the gate's blockable set (the 5 fixed-label `deny "..."` call

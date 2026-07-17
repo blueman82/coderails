@@ -51,7 +51,9 @@ cmd=$(echo "$input" | jq -r '.tool_input.command // empty')
 #                                         whitespace, not the word
 #        ${IFS:=word} ${IFS=word}        assign-default — same reasoning
 #        ${IFS:?word} ${IFS?word}        error-if-unset — same reasoning
-#      NOT collapsed (left as opaque, non-matching literal text):
+#      NOT collapsed by this pass alone (left as opaque, non-matching literal
+#      text — but see the WHITESPACE-WORD CARVE-OUT below, which runs FIRST
+#      and re-collapses one specific case of it):
 #        ${IFS:+word} ${IFS+word}        alternate-value — the ONE operator
 #                                         whose branches are inverted: since
 #                                         IFS is normally set, this
@@ -59,14 +61,10 @@ cmd=$(echo "$input" | jq -r '.tool_input.command // empty')
 #                                         IFS's whitespace value (verified:
 #                                         bash expands `${IFS:+word}` to the
 #                                         literal text "word" when IFS is
-#                                         set). Collapsing it to a space
-#                                         would be wrong twice over — it
-#                                         doesn't act as a separator, and
-#                                         blindly replacing it would erase
-#                                         real text rather than normalize
-#                                         whitespace. Safe to leave alone:
-#                                         it never expands to a clean
-#                                         separator to exploit.
+#                                         set). A non-whitespace word (e.g.
+#                                         SET) must stay untouched — collapsing
+#                                         it would erase real text rather than
+#                                         normalize whitespace.
 #        ${IFSx} (any identifier char    a DIFFERENT variable name, not an
 #          right after IFS)              operator on IFS at all — the first
 #                                         body character must not itself be
@@ -87,6 +85,22 @@ cmd=$(echo "$input" | jq -r '.tool_input.command // empty')
 #      ${IFS:-${OTHER}}) is not fully matched and leaves a stray brace in the
 #      normalized text — an exotic construction, not a known live gap for any
 #      family this file blocks.
+#   0. WHITESPACE-WORD CARVE-OUT (runs BEFORE pass 1, on the untouched $cmd):
+#      ${IFS:+word} / ${IFS+word} substitute the literal WORD (see above) —
+#      but the word is attacker-controlled, and when the word is ONE OR MORE
+#      literal space/tab characters, that substituted word IS whitespace,
+#      making the whole expansion a real separator with no dependency on
+#      IFS's own value at all (verified by ground truth: `rm${IFS:+ }-rf`
+#      removes a real non-empty directory; found by security review — the
+#      blanket "never collapse :+/+" exclusion in pass 1 covered the common
+#      case, `${IFS:+SET}`, but missed this one). An EMPTY word (${IFS:+})
+#      is excluded from this carve-out: it substitutes nothing, gluing the
+#      surrounding tokens together (`rm${IFS:+}-rf` -> the single, inert,
+#      nonexistent token `rm-rf`), not separating them — verified this stays
+#      harmless, so only a NON-EMPTY run of spaces/tabs is collapsed here.
+#      [[:space:]] (not \t) — POSIX bracket expressions don't treat \t as an
+#      escape, so a literal-backslash-t class silently fails to match a real
+#      tab byte; confirmed via direct testing on this machine's sed.
 #   2. Bare $IFS: only when NOT followed by an identifier character
 #      ([A-Za-z0-9_]) or followed by end-of-string. Bash variable names
 #      extend as far as identifier characters continue, so `$IFSOMETHING` is
@@ -99,7 +113,7 @@ cmd=$(echo "$input" | jq -r '.tool_input.command // empty')
 # as before — it does not gain or lose any blocklist keyword by doing so, so
 # it stays ALLOWED; the substitution changes whitespace, never introduces or
 # removes a destructive verb/flag token.
-cmd=$(printf '%s' "$cmd" | sed -E 's/\$\{IFS(\}|[^A-Za-z0-9_:+}][^}]*\}|:[^+}][^}]*\})/ /g' | sed -E 's/\$IFS([^A-Za-z0-9_]|$)/ \1/g')
+cmd=$(printf '%s' "$cmd" | sed -E 's/\$\{IFS:?\+[[:space:]]+\}/ /g' | sed -E 's/\$\{IFS(\}|[^A-Za-z0-9_:+}][^}]*\}|:[^+}][^}]*\})/ /g' | sed -E 's/\$IFS([^A-Za-z0-9_]|$)/ \1/g')
 
 if [ -z "$cmd" ]; then
   exit 0
