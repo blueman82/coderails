@@ -741,7 +741,26 @@ TIER_GATE_MAX_LINES="${TIER_GATE_MAX_LINES:-80}"
 # that size in bytes would already have failed those caps on almost any
 # real content), so this exists as a defense-in-depth backstop against a
 # pathological few-lines-but-enormous-content diff, not as the primary cap.
+# Shared by every tier: the byte cap is a content-size backstop, not the
+# tier-0-specific "single work-unit" discriminator the line/file caps are,
+# so it does not need a separate tier-1/2 value the way TIER_GATE_MAX_LINES
+# does (below).
 TIER_GATE_MAX_DIFF_BYTES="${TIER_GATE_MAX_DIFF_BYTES:-204800}"
+
+# TIER_GATE_MAX_LINES_HIGHER_TIER: the line cap for tier-1/2 claims, once
+# every tier is judged (not just tier-0). Tier-0's 80-line cap encodes
+# "single work-unit" and would wrongly block honest tier-1/2 work, which is
+# routinely larger (tier 1/2 carry no size predicate — see
+# skills/task-evals/SKILL.md: tier 2 is defined by work-unit COUNT or an
+# outward/irreversible surface, never by line count). 500 lines is a
+# generous ceiling above ordinary tier-1/2 diffs in this repo while still
+# bounding the judge's input; a genuinely larger honest change fails closed
+# to `insufficient` (human review) rather than being judged on a truncated
+# diff or waved through uncapped. File count is NOT split per-tier: a
+# self-contained tier-1/2 change spanning many files is unusual enough that
+# the shared TIER_GATE_MAX_FILES cap catching it and falling back to
+# `insufficient` is an acceptable, rare cost.
+TIER_GATE_MAX_LINES_HIGHER_TIER="${TIER_GATE_MAX_LINES_HIGHER_TIER:-500}"
 
 # TIER_GATE_PATH_DENYLIST: ERE alternation of path prefixes that are
 # outward-facing or irreversible surfaces by construction (tier-0's own
@@ -751,18 +770,30 @@ TIER_GATE_MAX_DIFF_BYTES="${TIER_GATE_MAX_DIFF_BYTES:-204800}"
 # without ever reaching the model.
 TIER_GATE_PATH_DENYLIST='^(skills/dashboard/|launchd/|scripts/tier-gate/|\.github/workflows/)'
 
-# tg_prefilter <filelist> <line_count>
+# tg_prefilter <filelist> <line_count> [claimed_tier]
 # Mechanical, model-free gate. <filelist> is newline-separated paths (as
 # from `gh pr diff --name-only`); <line_count> is the diff's total changed
-# line count (as from `gh pr diff --stat`, or any equivalent count). Exit 0
-# and empty stdout on pass; exit 1 and a named reason on stdout on block.
-# Injection-immune by construction: no model call happens in this function,
-# so there is nothing here for diff CONTENT to inject into — only file
-# paths and a line count are inspected, both mechanically derived facts
-# about the diff's shape, never text the defendant wrote is read as
-# instructions.
+# line count (as from `gh pr diff --stat`, or any equivalent count).
+# <claimed_tier> is OPTIONAL and defaults to "0" — every existing call site
+# (and the prefilter test suite) that omits it keeps the original tier-0
+# line cap unchanged. Exit 0 and empty stdout on pass; exit 1 and a named
+# reason on stdout on block. Injection-immune by construction: no model
+# call happens in this function, so there is nothing here for diff CONTENT
+# to inject into — only file paths and a line count are inspected, both
+# mechanically derived facts about the diff's shape, never text the
+# defendant wrote is read as instructions.
+#
+# The line cap is tier-aware (TIER_GATE_MAX_LINES for tier 0,
+# TIER_GATE_MAX_LINES_HIGHER_TIER for tier 1/2) now that every tier reaches
+# this gate; TIER_GATE_MAX_FILES and the path denylist are NOT split per
+# tier — the denylist is a self-edit leash that must hold at every tier
+# identically, and the file-count cap is a defense-in-depth backstop
+# distinct from the line-count discriminator, not worth a second constant.
 tg_prefilter() {
-    local filelist="$1" line_count="$2"
+    local filelist="$1" line_count="$2" claimed_tier="${3:-0}"
+
+    local max_lines="$TIER_GATE_MAX_LINES"
+    [[ "$claimed_tier" != "0" ]] && max_lines="$TIER_GATE_MAX_LINES_HIGHER_TIER"
 
     local file_count=0
     if [[ -n "$filelist" ]]; then
@@ -776,9 +807,9 @@ tg_prefilter() {
         return 1
     fi
 
-    if [[ "$file_count" -gt "$TIER_GATE_MAX_FILES" || "$line_count" -gt "$TIER_GATE_MAX_LINES" ]]; then
+    if [[ "$file_count" -gt "$TIER_GATE_MAX_FILES" || "$line_count" -gt "$max_lines" ]]; then
         printf 'blocked: size cap exceeded files=%s/%s lines=%s/%s\n' \
-            "$file_count" "$TIER_GATE_MAX_FILES" "$line_count" "$TIER_GATE_MAX_LINES"
+            "$file_count" "$TIER_GATE_MAX_FILES" "$line_count" "$max_lines"
         return 1
     fi
 
@@ -788,21 +819,27 @@ tg_prefilter() {
 # ─── Per-SHA gate ─────────────────────────────────────────────────────────────
 
 # tg_gate_pr <pr>
-# Runs the full lifecycle for the current head of <pr>:
+# Runs the full lifecycle for the current head of <pr>. EVERY tier is judged
+# (no mechanical-only short-circuit at tier 1/2 — see the "judge every tier"
+# comment inline below for why):
 #   1. Resolve head SHA. Fetch failure -> no action (next tick retries).
 #   2. Find the newest eval-artifact comment for that SHA. None -> no action
 #      (nothing to gate yet).
 #   3. tg_should_gate decides whether this SHA needs (re-)gating.
 #   4. Fetch the PR's changed-file list ONCE (B3 fail-closed fetch, shared by
-#      every tier) and run the self-edit leash against it.
-#   5. tier-1/2 artifact (attest-all): mechanical checks only — self-edit
-#      leash, then embedded-evals presence — then post a distinct terminal
-#      status. No judge call, no pending step.
-#   6. tier-0 artifact: post pending, extract embedded evals.json, prefilter,
-#      judge, post the terminal status (success|failure|error) — UNCHANGED
-#      from the pre-attest-all flow except the `tier=0` token in descriptions.
-# Echoes a one-line summary of the action taken (or "skip: <reason>") to
-# stdout for logging; callers/tests read this for assertions.
+#      every tier) and run the self-edit leash against it — blocks any tier
+#      touching scripts/tier-gate/ before anything else runs.
+#   5. Post pending, extract embedded evals.json, prefilter (tier-aware size
+#      cap — see tg_prefilter), judge (the claimed tier as the claim under
+#      test, not just a tier-0 exemption), post the terminal status
+#      (success|failure|error). A size-cap breach posts `illegitimate` at
+#      tier 0 (size IS the tier-0 discriminator) but `insufficient` at tier
+#      1/2 (size is NOT the tier-2 discriminator — never truncate-and-judge,
+#      never brand an honest large diff dishonest).
+# Every posted description carries a `tier=<claimed>` token so a status can
+# never be replayed against a different claimed tier. Echoes a one-line
+# summary of the action taken (or "skip: <reason>") to stdout for logging;
+# callers/tests read this for assertions.
 tg_gate_pr() {
     local pr="$1"
     local sha; sha=$(tg_pr_head_sha "$pr")
@@ -824,12 +861,11 @@ tg_gate_pr() {
         return 0
     fi
 
-    # ── Shared B3 fail-closed file-list fetch, hoisted above the tier fork ──
-    # Every tier needs this: the self-edit leash (below) must run BEFORE a
-    # tier-1/2 claim can short-circuit, or a tier=1 PR could edit the
-    # daemon's own source (scripts/tier-gate/) and self-merge ungated — the
-    # exact hole attest-all closes. Fetched ONCE and reused by the tier-0
-    # branch's prefilter, never re-fetched.
+    # ── Shared B3 fail-closed file-list fetch ──────────────────────────────
+    # Every tier needs this: the self-edit leash (below) must run BEFORE any
+    # judging logic, or a tier claim could edit the daemon's own source
+    # (scripts/tier-gate/) and self-merge ungated. Fetched ONCE and reused
+    # by tg_prefilter below, never re-fetched.
     #
     # B3 fail-closed: both filelist/line_count are derived from ONE GET
     # /pulls/{pr}/files. curl exits 0 on an HTTP 4xx/5xx (unlike gh), so
@@ -841,8 +877,9 @@ tg_gate_pr() {
     # filelist — a false "no self-edit" read. per_page=100 single page (no
     # Link-following): a tier-0 diff is <=3 files by the size cap, so a PR
     # that legitimately exceeds one page of files is already not tier-0;
-    # tier-1/2 PRs are not size-capped, but a self-edit only needs ONE
-    # matching filename to appear on page 1 to be caught.
+    # tier-1/2 PRs are capped higher (TIER_GATE_MAX_LINES_HIGHER_TIER) but
+    # still capped, and a self-edit only needs ONE matching filename to
+    # appear on page 1 to be caught regardless of tier.
     local files_json
     files_json=$(tg_gh_get "pulls/${pr}/files?per_page=100") || {
         tg_post_status "$sha" "error" "verdict=error tier=${tier} host=$(hostname)"
@@ -859,11 +896,14 @@ tg_gate_pr() {
     fi
 
     # Self-edit leash: a claim at ANY tier that touches scripts/tier-gate/
-    # (the daemon's own source) is blocked outright, before any tier-specific
-    # logic runs. Reuses TIER_GATE_PATH_DENYLIST — the same paths tg_prefilter
-    # blocks for tier-0 — but greps it directly rather than calling
-    # tg_prefilter, since tg_prefilter also applies the size cap, and tier-1/2
-    # is not subject to that cap.
+    # (the daemon's own source) is blocked outright, before any judging
+    # logic runs. Reuses TIER_GATE_PATH_DENYLIST — the same paths
+    # tg_prefilter's own denylist check would eventually hit — but greps it
+    # directly here so the block posts the more specific verdict=self_edit
+    # rather than the generic prefilter verdict=illegitimate: a self-edit is
+    # a leash violation, categorically different from "diff too big" or
+    # "content doesn't match the claimed tier", and worth distinguishing in
+    # the posted status for anyone reading it later.
     local self_edit_path
     self_edit_path=$(printf '%s\n' "$filelist" | grep -E "$TIER_GATE_PATH_DENYLIST" | head -1)
     if [[ -n "$self_edit_path" ]]; then
@@ -873,54 +913,73 @@ tg_gate_pr() {
         return 0
     fi
 
-    if [[ "$tier" != "0" ]]; then
-        # Attest-all (replaces the old post-nothing contract): a tier-1/2
-        # claim gets NO judge call and NO pending status — only mechanical
-        # checks — but it MUST post a terminal status so merge.sh/
-        # enforce_pr_workflow always find a tier-review status to inspect,
-        # and so the self-edit leash above always runs. The old post-nothing
-        # design minted no reusable token, but it also meant a tier!=0 claim
-        # skipped the gate ENTIRELY (including the denylist, which only ran
-        # inside the tier-0 branch) — a tier=1 PR could edit the daemon's own
-        # source and self-merge unreviewed. verdict=not_tier_0 is a DISTINCT
-        # token from verdict=legitimate — merge.sh's tier-0 path requires the
-        # exact substring verdict=legitimate (scripts/merge.sh:147), so this
-        # can never be misread as a genuine judged approval, and PR_EVAL_TIER
-        # != 0 means merge.sh never even looks at this status.
-        local evals_json_nj; evals_json_nj=$(tg_extract_evals_json "$body")
-        if [[ -z "$evals_json_nj" ]]; then
-            tg_post_status "$sha" "error" "verdict=error tier=${tier} host=$(hostname)"
-            printf 'gated: pr=%s sha=%s tier=%s verdict=error state=error reason=no_embedded_evals_json\n' "$pr" "$sha" "$tier"
-            return 1
-        fi
-        tg_post_status "$sha" "success" "verdict=not_tier_0 tier=${tier} host=$(hostname)"
-        printf 'gated: pr=%s sha=%s tier=%s verdict=not_tier_0 state=success\n' "$pr" "$sha" "$tier"
-        return 0
-    fi
+    # Judge every tier (supersedes the old post-nothing / attest-all
+    # short-circuits). post_evals.sh's eval OBLIGATION ladder is binary —
+    # tier 0 is exempt from evals entirely, tier 1 and tier 2 carry
+    # mechanically IDENTICAL obligations (skills/task-evals/SKILL.md) — so
+    # the only lie that buys anything at the eval layer is claiming tier 0.
+    # Judging every tier is not about catching a 1-vs-2 mistake; it is that
+    # an independent judged status now posts on EVERY PR (no silent path to
+    # merge that the daemon never looked at) and the daemon's tier-review
+    # context becomes ALWAYS-REPORTED, which is the precondition for making
+    # it a required status check on main (a daemon that posts nothing at
+    # tier!=0 can never be a required check — every tier-1/2 PR would hang
+    # pending forever).
+    tg_post_status "$sha" "pending" "verdict=pending tier=${tier} host=$(hostname)"
 
-    tg_post_status "$sha" "pending" "verdict=pending tier=0 host=$(hostname)"
-
-    # Well-formedness gate only: a tier-0 artifact with no embedded
-    # evals.json is a malformed-artifact error, independent of the judge.
-    # The extracted content itself is NEVER passed to the judge (Fix 1) —
-    # its presence is all this checks.
+    # Well-formedness gate only: an artifact with no embedded evals.json is
+    # a malformed-artifact error, independent of the judge, at every tier
+    # (tier 0 embeds tier_justification-only evals.json per the Task 4
+    # embed contract; a missing block is malformed regardless of tier). The
+    # extracted content itself is NEVER passed to the judge (Fix 1) — its
+    # presence is all this checks.
     local evals_json; evals_json=$(tg_extract_evals_json "$body")
     if [[ -z "$evals_json" ]]; then
-        tg_post_status "$sha" "error" "verdict=error tier=0 host=$(hostname)"
-        printf 'gated: pr=%s sha=%s tier=0 verdict=error state=error reason=no_embedded_evals_json\n' "$pr" "$sha"
+        tg_post_status "$sha" "error" "verdict=error tier=${tier} host=$(hostname)"
+        printf 'gated: pr=%s sha=%s tier=%s verdict=error state=error reason=no_embedded_evals_json\n' "$pr" "$sha" "$tier"
         return 1
     fi
 
     # Fix 2: mechanical pre-filter BEFORE any model call. filelist/line
     # count only — never diff content — so this step cannot be influenced
     # by anything the defendant wrote. Uses the filelist/line_count already
-    # fetched above (shared B3 fetch); not re-fetched here.
-    local prefilter_out
-    prefilter_out=$(tg_prefilter "$filelist" "$line_count")
-    if [[ $? -ne 0 ]]; then
-        tg_post_status "$sha" "failure" "verdict=illegitimate tier=0 host=$(hostname)"
-        printf 'gated: pr=%s sha=%s tier=0 verdict=illegitimate state=failure reason=prefilter_%s\n' \
-            "$pr" "$sha" "$(printf '%s' "$prefilter_out" | tr -s ' \n' '_')"
+    # fetched above (shared B3 fetch); not re-fetched here. Tier-aware: the
+    # claimed tier selects TIER_GATE_MAX_LINES (tier 0) vs
+    # TIER_GATE_MAX_LINES_HIGHER_TIER (tier 1/2) inside tg_prefilter itself.
+    #
+    # Verdict on breach is TIER-SPLIT and this is the crux of judging every
+    # tier honestly: at tier 0, over-cap really isn't tier-0 work (tier 0
+    # MEANS single work-unit, which is small) — genuinely illegitimate,
+    # unchanged from the pre-existing behaviour. At tier 1/2, size is NOT
+    # the discriminator (tier 2 is defined by work-unit COUNT or an
+    # outward/irreversible surface, never by line count — SKILL.md), so an
+    # honest large tier-1/2 change (e.g. a big single-module refactor with
+    # no outward surface) breaching the cap is not evidence of dishonesty.
+    # Branding it illegitimate would be the same size-implies-tier
+    # conflation PR #191 warned against, inverted. It posts `insufficient`
+    # instead — the same fail-closed-to-human-review semantics the judge
+    # itself would use for "can't tell from the blind inputs" — without
+    # ever calling the judge on a diff this large. This is still
+    # never-truncate-and-judge: an over-cap diff at ANY tier never reaches
+    # tg_judge.
+    # tg_prefilter's OWN denylist check can never fire here — the leash
+    # above already ran the identical regex against the identical filelist
+    # and would have returned first — so any block reaching this point is
+    # the size cap, never the denylist. Only the size-cap outcome is
+    # branched on below.
+    local prefilter_out prefilter_rc
+    prefilter_out=$(tg_prefilter "$filelist" "$line_count" "$tier")
+    prefilter_rc=$?
+    if [[ $prefilter_rc -ne 0 ]]; then
+        if [[ "$tier" == "0" ]]; then
+            tg_post_status "$sha" "failure" "verdict=illegitimate tier=0 host=$(hostname)"
+            printf 'gated: pr=%s sha=%s tier=0 verdict=illegitimate state=failure reason=prefilter_%s\n' \
+                "$pr" "$sha" "$(printf '%s' "$prefilter_out" | tr -s ' \n' '_')"
+        else
+            tg_post_status "$sha" "failure" "verdict=insufficient tier=${tier} host=$(hostname)"
+            printf 'gated: pr=%s sha=%s tier=%s verdict=insufficient state=failure reason=prefilter_%s\n' \
+                "$pr" "$sha" "$tier" "$(printf '%s' "$prefilter_out" | tr -s ' \n' '_')"
+        fi
         return 0
     fi
 
@@ -928,54 +987,67 @@ tg_gate_pr() {
     # Fetched as the raw unified diff via the GitHub diff media type. Byte cap
     # mirrors Fix 2's fail-closed posture: over-cap blocks outright rather than
     # truncating and judging a partial diff (a truncated diff is never a valid
-    # basis for a permissive read).
+    # basis for a permissive read). Shared across tiers — see
+    # TIER_GATE_MAX_DIFF_BYTES's own comment for why it isn't split per tier.
     #
     # B3 fail-closed on the diff fetch itself: tg_gh_get returns nonzero on a
     # failed/non-2xx fetch (curl's exit-0-on-HTTP-error trap is handled inside
     # it), and we ALSO treat an empty diff body as a hard error. An empty diff
     # reaching the judge is the headline bug this closes: it would present zero
-    # changed content as a legitimate tier-0 basis.
+    # changed content as a legitimate basis at any tier.
     local diff diff_bytes
     diff=$(tg_gh_get "pulls/${pr}" "application/vnd.github.v3.diff") || {
-        tg_post_status "$sha" "error" "verdict=error tier=0 host=$(hostname)"
-        printf 'gated: pr=%s sha=%s tier=0 verdict=error state=error reason=diff_fetch_failed\n' "$pr" "$sha"
+        tg_post_status "$sha" "error" "verdict=error tier=${tier} host=$(hostname)"
+        printf 'gated: pr=%s sha=%s tier=%s verdict=error state=error reason=diff_fetch_failed\n' "$pr" "$sha" "$tier"
         return 1
     }
     if [[ -z "$diff" ]]; then
-        tg_post_status "$sha" "error" "verdict=error tier=0 host=$(hostname)"
-        printf 'gated: pr=%s sha=%s tier=0 verdict=error state=error reason=empty_diff\n' "$pr" "$sha"
+        tg_post_status "$sha" "error" "verdict=error tier=${tier} host=$(hostname)"
+        printf 'gated: pr=%s sha=%s tier=%s verdict=error state=error reason=empty_diff\n' "$pr" "$sha" "$tier"
         return 1
     fi
     diff_bytes=$(printf '%s' "$diff" | wc -c | tr -d ' ')
     if [[ "$diff_bytes" -gt "$TIER_GATE_MAX_DIFF_BYTES" ]]; then
-        tg_post_status "$sha" "failure" "verdict=illegitimate tier=0 host=$(hostname)"
-        printf 'gated: pr=%s sha=%s tier=0 verdict=illegitimate state=failure reason=diff_bytes_%s_over_%s\n' \
-            "$pr" "$sha" "$diff_bytes" "$TIER_GATE_MAX_DIFF_BYTES"
+        if [[ "$tier" == "0" ]]; then
+            tg_post_status "$sha" "failure" "verdict=illegitimate tier=0 host=$(hostname)"
+            printf 'gated: pr=%s sha=%s tier=0 verdict=illegitimate state=failure reason=diff_bytes_%s_over_%s\n' \
+                "$pr" "$sha" "$diff_bytes" "$TIER_GATE_MAX_DIFF_BYTES"
+        else
+            tg_post_status "$sha" "failure" "verdict=insufficient tier=${tier} host=$(hostname)"
+            printf 'gated: pr=%s sha=%s tier=%s verdict=insufficient state=failure reason=diff_bytes_%s_over_%s\n' \
+                "$pr" "$sha" "$tier" "$diff_bytes" "$TIER_GATE_MAX_DIFF_BYTES"
+        fi
         return 0
     fi
 
+    # The judge now tests the CLAIM at every tier: "does this diff match
+    # the claimed tier N?", not just "is this legitimate tier-0 exempt
+    # work?" — judge-prompt.md carries all three tier predicates (Fix
+    # judge-all-tiers). tg_judge's own contract (claimed_tier, diff) ->
+    # verdict is unchanged; only the prompt content and what counts as a
+    # legitimate answer at each tier changed.
     local judge_out judge_rc
     judge_out=$(tg_judge "$tier" "$diff")
     judge_rc=$?
     if [[ $judge_rc -ne 0 ]]; then
-        tg_post_status "$sha" "error" "verdict=error tier=0 host=$(hostname)"
-        printf 'gated: pr=%s sha=%s tier=0 verdict=error state=error reason=judge_rc_%s\n' "$pr" "$sha" "$judge_rc"
+        tg_post_status "$sha" "error" "verdict=error tier=${tier} host=$(hostname)"
+        printf 'gated: pr=%s sha=%s tier=%s verdict=error state=error reason=judge_rc_%s\n' "$pr" "$sha" "$tier" "$judge_rc"
         return 1
     fi
 
     local verdict; verdict=$(printf '%s' "$judge_out" | head -1 | tr -d '[:space:]')
     case "$verdict" in
         legitimate)
-            tg_post_status "$sha" "success" "verdict=legitimate tier=0 host=$(hostname)"
-            printf 'gated: pr=%s sha=%s tier=0 verdict=legitimate state=success\n' "$pr" "$sha"
+            tg_post_status "$sha" "success" "verdict=legitimate tier=${tier} host=$(hostname)"
+            printf 'gated: pr=%s sha=%s tier=%s verdict=legitimate state=success\n' "$pr" "$sha" "$tier"
             ;;
         illegitimate|insufficient)
-            tg_post_status "$sha" "failure" "verdict=${verdict} tier=0 host=$(hostname)"
-            printf 'gated: pr=%s sha=%s tier=0 verdict=%s state=failure\n' "$pr" "$sha" "$verdict"
+            tg_post_status "$sha" "failure" "verdict=${verdict} tier=${tier} host=$(hostname)"
+            printf 'gated: pr=%s sha=%s tier=%s verdict=%s state=failure\n' "$pr" "$sha" "$tier" "$verdict"
             ;;
         *)
-            tg_post_status "$sha" "error" "verdict=error tier=0 host=$(hostname)"
-            printf 'gated: pr=%s sha=%s tier=0 verdict=error state=error reason=unrecognised_verdict_%s\n' "$pr" "$sha" "$verdict"
+            tg_post_status "$sha" "error" "verdict=error tier=${tier} host=$(hostname)"
+            printf 'gated: pr=%s sha=%s tier=%s verdict=error state=error reason=unrecognised_verdict_%s\n' "$pr" "$sha" "$tier" "$verdict"
             return 1
             ;;
     esac

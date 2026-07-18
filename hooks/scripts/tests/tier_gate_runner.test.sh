@@ -242,41 +242,40 @@ check_contains "T1: pending posted before terminal" "state=pending" "$posted"
 check_contains "T1: terminal success posted" "state=success" "$posted"
 check_contains "T1: success description carries verdict=legitimate" "verdict=legitimate" "$posted"
 check_contains "T1: success description carries tier=0 token" "tier=0" "$posted"
-check_not_contains "T1: tier-0 success never carries verdict=not_tier_0 (laundering audit, reverse direction)" "verdict=not_tier_0" "$posted"
 check_contains "T1: pending posted BEFORE success (ordering)" "$(printf 'POST state=pending')" "$(printf '%s' "$posted" | head -1)"
 check_contains "T1: summary line reports tier=0" "tier=0" "$out"
 
 # ══════════════════════════════════════════════════════════════════════════
-# Test 2: tier-1/2 artifact -> ATTESTS: posts `success` verdict=not_tier_0,
-# no judge call, no pending step. (Attest-all replaces post-nothing: the old
-# post-nothing contract minted no reusable token but also let a tier!=0 claim
-# skip the gate ENTIRELY — including the denylist, which only ran inside the
-# tier-0 branch — so a tier=1 claim could edit scripts/tier-gate/ and
-# self-merge unreviewed. Attest-all posts a DISTINCT, non-laundering status
-# for every tier so merge.sh/enforce_pr_workflow always find a tier-review
-# status to inspect, and the self-edit leash (below) runs for every tier.)
+# Test 2: tier-1 artifact, judge returns legitimate -> pending then success
+# posted, JUST LIKE tier-0. (Judge-every-tier supersedes both the old
+# post-nothing contract AND the superseded attest-all mechanical-only
+# short-circuit: post_evals.sh's eval obligation ladder is binary — tier 0 is
+# exempt from evals, tier 1/2 are mechanically IDENTICAL to each other — so
+# the value here is not catching a 1-vs-2 mistake, it's that an independent
+# judged status now posts on EVERY PR, and the daemon's tier-review context
+# becomes ALWAYS-REPORTED, the precondition for a required status check.)
 # ══════════════════════════════════════════════════════════════════════════
 TEST_PR=102 TEST_SHA=sha1
 reset_gh_state
 write_gh_stub
 set_comment_body "$(tier1_body "$TEST_PR" "$TEST_SHA" GO)"
-tg_judge() { echo "JUDGE CALLED — should never happen for tier 1/2" >> "$TMP/judge_called.log"; printf 'legitimate\nx\n'; return 0; }
-rm -f "$TMP/judge_called.log"
+tg_judge() { echo "JUDGE CALLED" >> "$TMP/judge_called_t2.log"; printf 'legitimate\nMatches the tier-1 predicate.\n'; return 0; }
+rm -f "$TMP/judge_called_t2.log"
 out=$(run_gate)
 posted=$(cat "$POSTED_LOG")
-check_contains "T2: tier-1 artifact -> success posted (attest-all)" "state=success" "$posted"
-check_contains "T2: success description carries verdict=not_tier_0" "verdict=not_tier_0" "$posted"
+check_contains "T2: tier-1 pending posted before terminal" "state=pending" "$posted"
+check_contains "T2: tier-1 legitimate verdict -> success posted" "state=success" "$posted"
+check_contains "T2: success description carries verdict=legitimate" "verdict=legitimate" "$posted"
+check_contains "T2: success description carries tier=1 token" "tier=1" "$posted"
 check_contains "T2: summary reports tier=1" "tier=1" "$out"
-check_not_contains "T2: NO pending status posted for tier-1 short-circuit" "state=pending" "$posted"
-[[ -f "$TMP/judge_called.log" ]] && fails=$((fails+1)) && echo "FAIL - T2: judge was called for a tier-1 artifact" || echo "ok   - T2: judge NOT called for tier-1 artifact"
+[[ -f "$TMP/judge_called_t2.log" ]] && echo "ok   - T2: judge WAS called for a tier-1 artifact (judge-every-tier)" || { fails=$((fails+1)); echo "FAIL - T2: judge was not called for a tier-1 artifact"; }
 
 # ══════════════════════════════════════════════════════════════════════════
 # Test 2b: tier-1 claim touching a denylisted path (scripts/tier-gate/ — the
-# daemon's own source) -> failure + verdict=self_edit, NO judge call. This is
-# the self-edit leash: the old post-nothing daemon never even fetched the file
-# list for a tier!=0 claim, so a tier=1 PR editing the daemon's own source
-# self-merged with no gate at all. Attest-all fetches the file list for EVERY
-# tier and blocks a self-edit before anything else.
+# daemon's own source) -> failure + verdict=self_edit, NO judge call, NO
+# pending step. The self-edit leash runs BEFORE the judge-every-tier flow at
+# every tier, closing the hole where a tier!=0 claim could edit the daemon's
+# own source and self-merge ungated.
 # ══════════════════════════════════════════════════════════════════════════
 TEST_PR=112 TEST_SHA=sha1_selfedit
 reset_gh_state
@@ -290,13 +289,14 @@ check_contains "T2b: tier-1 self-edit -> failure posted" "state=failure" "$poste
 check_contains "T2b: failure description carries verdict=self_edit" "verdict=self_edit" "$posted"
 check_contains "T2b: summary reports tier=1" "tier=1" "$out"
 check_not_contains "T2b: self-edit is never posted as success" "state=success" "$posted"
+check_not_contains "T2b: NO pending status posted for a self-edit block" "state=pending" "$posted"
 [[ -f "$TMP/judge_called_t2b.log" ]] && fails=$((fails+1)) && echo "FAIL - T2b: judge called for a tier-1 self-edit" || echo "ok   - T2b: judge NOT called for a tier-1 self-edit"
 
 # ══════════════════════════════════════════════════════════════════════════
 # Test 2c: tier-1 claim whose files fetch fails (HTTP 500) -> error posted,
-# fail-closed. Reuses the SAME B3 fetch as tier-0 (hoisted above the tier
-# fork), so it inherits the same fail-closed posture: a failed fetch must
-# never be read as "no self-edit, proceed".
+# fail-closed. Reuses the SAME B3 fetch as tier-0, so it inherits the same
+# fail-closed posture: a failed fetch must never be read as "no self-edit,
+# proceed".
 # ══════════════════════════════════════════════════════════════════════════
 TEST_PR=113 TEST_SHA=sha1_files_500
 reset_gh_state
@@ -314,7 +314,7 @@ check_not_contains "T2c: files-fetch failure never posted as success" "state=suc
 # ══════════════════════════════════════════════════════════════════════════
 # Test 2d: tier-1 claim with NO embedded evals.json in the artifact body ->
 # error posted, verdict=error. Presence check ONLY — the extracted content
-# must never reach the judge (there is no judge call for tier-1/2 at all).
+# must never reach the judge (Fix 1 is preserved at every tier).
 # ══════════════════════════════════════════════════════════════════════════
 TEST_PR=114 TEST_SHA=sha1_no_evals
 reset_gh_state
@@ -330,13 +330,26 @@ check_not_contains "T2d: missing embedded evals never posted as success" "state=
 [[ -f "$TMP/judge_called_t2d.log" ]] && fails=$((fails+1)) && echo "FAIL - T2d: judge called despite missing embedded evals" || echo "ok   - T2d: judge NOT called for tier-1 with no embedded evals"
 
 # ══════════════════════════════════════════════════════════════════════════
-# Test 2e: cross-tier laundering audit. No tier-1/2 description may EVER
-# contain the substring verdict=legitimate (the exact token merge.sh/
-# enforce_pr_workflow treat as a genuine judged tier-0 approval — see
-# merge.sh:147). Checks every status this file posts across T2/T2b/T2c/T2d.
+# Test 2e: tier-binding audit. Judging every tier means verdict=legitimate
+# IS reachable at tier 1/2 now (unlike the superseded attest-all design) —
+# so the anti-laundering invariant is no longer "tier-1/2 never says
+# legitimate"; it's that every posted description carries the tier=N token
+# matching the SHA's actually-claimed tier, so a status can never be
+# replayed against a different claimed tier. A tier-2 claim, judged and
+# found legitimate, must post tier=2 (not silently collapse to tier=1's
+# token or omit it) — the case none of T1/T2/T2b/T2c/T2d exercise, since
+# they only use tier 0 and tier 1 fixtures.
 # ══════════════════════════════════════════════════════════════════════════
-all_tier1_posted="$(cat "$POSTED_LOG")"
-check_not_contains "T2e: no tier-1/2 status ever carries verdict=legitimate (laundering audit)" "verdict=legitimate" "$all_tier1_posted"
+TEST_PR=115 TEST_SHA=sha2legit
+reset_gh_state
+write_gh_stub
+set_comment_body "$(printf '<!-- coderails-eval-summary v1 pr=%s head_sha=%s result=GO tier=2 -->\n```json\n{"tier":2,"tier_justification":"x","evals":[{"id":"e1","priority":"P0","status":"pass"}],"head_sha":"%s"}\n```\n' "$TEST_PR" "$TEST_SHA" "$TEST_SHA")"
+tg_judge() { printf 'legitimate\nMatches the tier-2 predicate.\n'; return 0; }
+out=$(run_gate)
+posted=$(cat "$POSTED_LOG")
+check_contains "T2e: tier-2 legitimate verdict -> success posted" "state=success" "$posted"
+check_contains "T2e: tier-2 success description carries tier=2 token (not tier=1 or bare)" "tier=2" "$posted"
+check_contains "T2e: summary reports tier=2" "tier=2" "$out"
 
 # ══════════════════════════════════════════════════════════════════════════
 # Test 3: already-terminal SHA (success already posted) -> no action
@@ -484,7 +497,76 @@ rm -f "$TMP/judge_called_t10.log"
 out=$(run_gate)
 posted=$(cat "$POSTED_LOG")
 check_contains "T10: PR#189 shape (205 lines/1 file) -> failure posted" "state=failure" "$posted"
+check_contains "T10: tier-0 over-cap posts verdict=illegitimate (size IS the tier-0 discriminator)" "verdict=illegitimate" "$posted"
 [[ -f "$TMP/judge_called_t10.log" ]] && fails=$((fails+1)) && echo "FAIL - T10: judge called for a 205-line diff (PR#189 shape)" || echo "ok   - T10: judge NOT called for a 205-line diff (PR#189 shape)"
+
+# ══════════════════════════════════════════════════════════════════════════
+# Test 11 (judge-all-tiers): a tier-1 claim whose diff BREACHES the tier-1/2
+# line cap (TIER_GATE_MAX_LINES_HIGHER_TIER) posts `insufficient`, NEVER
+# `illegitimate` — size is not the tier-1/2 discriminator (tier 2 is defined
+# by work-unit COUNT or an outward/irreversible surface, never by line
+# count), so an honest large tier-1 diff breaching the cap is not evidence
+# of dishonesty. This is the mechanism the orchestrator explicitly rejected
+# in the other direction (over-cap => illegitimate is unsound at tier 1/2)
+# and adopted `insufficient` => fail-closed => human review instead. Uses a
+# line count comfortably above the default HIGHER_TIER cap (500) but keeps
+# file_count within TIER_GATE_MAX_FILES so ONLY the line cap fires.
+# ══════════════════════════════════════════════════════════════════════════
+TEST_PR=116 TEST_SHA=sha_tier1_overcap
+reset_gh_state
+set_files_json '[{"filename":"scripts/big_refactor.sh","additions":600,"deletions":0}]'
+set_diff "diff --git a/scripts/big_refactor.sh b/scripts/big_refactor.sh
++x"
+set_comment_body "$(tier1_body "$TEST_PR" "$TEST_SHA" GO)"
+tg_judge() { echo "JUDGE CALLED" >> "$TMP/judge_called_t11.log"; printf 'legitimate\nx\n'; return 0; }
+rm -f "$TMP/judge_called_t11.log"
+out=$(run_gate)
+posted=$(cat "$POSTED_LOG")
+check_contains "T11: tier-1 over-(higher-tier)-cap -> failure posted" "state=failure" "$posted"
+check_contains "T11: tier-1 over-cap posts verdict=insufficient (NOT illegitimate — size isn't the tier-1/2 discriminator)" "verdict=insufficient" "$posted"
+check_not_contains "T11: tier-1 over-cap NEVER posts verdict=illegitimate" "verdict=illegitimate" "$posted"
+check_contains "T11: over-cap description still carries tier=1 token" "tier=1" "$posted"
+[[ -f "$TMP/judge_called_t11.log" ]] && fails=$((fails+1)) && echo "FAIL - T11: judge called for a diff over the tier-1/2 cap (never-truncate-and-judge violated)" || echo "ok   - T11: judge NOT called for a diff over the tier-1/2 cap"
+
+# ══════════════════════════════════════════════════════════════════════════
+# Test 12 (negative control for T11): the SAME 600-line diff, judged as a
+# tier-0 claim instead, still blocks as `illegitimate` under the tier-0
+# cap (80 lines) — proving T11's insufficient outcome is genuinely
+# tier-conditional, not a global replacement of illegitimate everywhere.
+# ══════════════════════════════════════════════════════════════════════════
+TEST_PR=117 TEST_SHA=sha_tier0_overcap_control
+reset_gh_state
+set_files_json '[{"filename":"scripts/big_refactor.sh","additions":600,"deletions":0}]'
+set_diff "diff --git a/scripts/big_refactor.sh b/scripts/big_refactor.sh
++x"
+set_comment_body "$(tier0_body "$TEST_PR" "$TEST_SHA" GO)"
+tg_judge() { echo "JUDGE CALLED" >> "$TMP/judge_called_t12.log"; printf 'legitimate\nx\n'; return 0; }
+rm -f "$TMP/judge_called_t12.log"
+out=$(run_gate)
+posted=$(cat "$POSTED_LOG")
+check_contains "T12: same 600-line diff at tier=0 -> failure posted" "state=failure" "$posted"
+check_contains "T12: tier-0 over-cap still posts verdict=illegitimate (negative control for T11)" "verdict=illegitimate" "$posted"
+check_not_contains "T12: tier-0 over-cap never posts verdict=insufficient" "verdict=insufficient" "$posted"
+[[ -f "$TMP/judge_called_t12.log" ]] && fails=$((fails+1)) && echo "FAIL - T12: judge called for a tier-0 diff over the tier-0 cap" || echo "ok   - T12: judge NOT called for a tier-0 diff over the tier-0 cap"
+
+# ══════════════════════════════════════════════════════════════════════════
+# Test 13 (negative control for T11, boundary): a tier-1 diff UNDER the
+# higher-tier cap (500 lines) but over the tier-0 cap (80 lines) reaches the
+# judge normally and posts success — proving the higher cap is real
+# headroom, not a cosmetic label that still blocks at 80.
+# ══════════════════════════════════════════════════════════════════════════
+TEST_PR=118 TEST_SHA=sha_tier1_honest_large
+reset_gh_state
+set_files_json '[{"filename":"scripts/module.sh","additions":300,"deletions":0}]'
+set_diff "diff --git a/scripts/module.sh b/scripts/module.sh
++x"
+set_comment_body "$(tier1_body "$TEST_PR" "$TEST_SHA" GO)"
+tg_judge() { echo "JUDGE CALLED" >> "$TMP/judge_called_t13.log"; printf 'legitimate\nHonest large tier-1 refactor.\n'; return 0; }
+rm -f "$TMP/judge_called_t13.log"
+out=$(run_gate)
+posted=$(cat "$POSTED_LOG")
+check_contains "T13: honest 300-line tier-1 diff (under the higher cap) -> success posted" "state=success" "$posted"
+[[ -f "$TMP/judge_called_t13.log" ]] && echo "ok   - T13: judge WAS called for an honest 300-line tier-1 diff" || { fails=$((fails+1)); echo "FAIL - T13: judge not called for a diff that should be under the tier-1/2 cap"; }
 
 # ══════════════════════════════════════════════════════════════════════════
 # Read fail-closed lock: the daemon's READS route through curl to the GitHub
@@ -619,7 +701,27 @@ posted=$(cat "$POSTED_LOG")
 TIER_GATE_MAX_DIFF_BYTES="$_saved_max_bytes"
 check_contains "BC1: over-byte-cap diff -> failure posted" "state=failure" "$posted"
 check_contains "BC1: block reason names the byte cap (not the prefilter)" "diff_bytes" "$out"
+check_contains "BC1: tier-0 byte-cap breach posts verdict=illegitimate" "verdict=illegitimate" "$posted"
 [[ -f "$TMP/judge_called_bc1.log" ]] && fails=$((fails+1)) && echo "FAIL - BC1: judge called on an over-byte-cap diff" || echo "ok   - BC1: judge NOT called on an over-byte-cap diff"
+
+# ── BC1b (tier-split, mirrors T11 for the byte cap): the SAME shape but a
+#    tier-1 claim -> insufficient, never illegitimate, same rationale as T11
+#    (size/byte-count is not the tier-1/2 discriminator). ───────────────────
+TEST_PR=312 TEST_SHA=sha_tier1_diff_over_bytecap
+reset_gh_state
+set_files_json '[{"filename":"scripts/foo.sh","additions":3,"deletions":0}]'
+set_diff "$(printf 'diff --git a/scripts/foo.sh b/scripts/foo.sh\n'; head -c 500 /dev/zero | tr '\0' 'x')"
+set_comment_body "$(tier1_body "$TEST_PR" "$TEST_SHA" GO)"
+TIER_GATE_MAX_DIFF_BYTES=100
+tg_judge() { echo "JUDGE CALLED" >> "$TMP/judge_called_bc1b.log"; printf 'legitimate\nx\n'; return 0; }
+rm -f "$TMP/judge_called_bc1b.log"
+out=$(run_gate)
+posted=$(cat "$POSTED_LOG")
+TIER_GATE_MAX_DIFF_BYTES="$_saved_max_bytes"
+check_contains "BC1b: tier-1 over-byte-cap diff -> failure posted" "state=failure" "$posted"
+check_contains "BC1b: tier-1 byte-cap breach posts verdict=insufficient (not illegitimate)" "verdict=insufficient" "$posted"
+check_not_contains "BC1b: tier-1 byte-cap breach never posts verdict=illegitimate" "verdict=illegitimate" "$posted"
+[[ -f "$TMP/judge_called_bc1b.log" ]] && fails=$((fails+1)) && echo "FAIL - BC1b: judge called on a tier-1 over-byte-cap diff" || echo "ok   - BC1b: judge NOT called on a tier-1 over-byte-cap diff"
 
 # ── BC2 (negative control for BC1): the SAME diff under a generous cap reaches
 #    the judge and posts success — proving BC1 blocks on the cap, not always. ─
