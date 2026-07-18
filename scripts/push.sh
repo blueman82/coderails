@@ -6,13 +6,23 @@ set -euo pipefail
 source "$(dirname "$0")/lib/git-common.sh"
 
 push::main() {
-    local force_with_lease=0 msg=""
+    local force_with_lease=0 msg="" want_add=0
+    local -a add_paths=()
     # --force-with-lease is a long-form-only opt-in flag (no -f alias — -f
     # collides with git's own short force flag). require::feature below
     # already guarantees a non-main branch before the push step runs.
+    # --add <path> is repeatable (--add a --add b, not --add a b) — a for-loop
+    # over "$@" can't consume "the next token" for a multi-value flag, but a
+    # one-value-per-flag repeat is trivial: a `want_add` latch consumes
+    # exactly the arg immediately following each `--add`.
     for arg in "$@"; do
-        if [[ "$arg" == "--force-with-lease" ]]; then
+        if [[ "$want_add" -eq 1 ]]; then
+            add_paths+=("$arg")
+            want_add=0
+        elif [[ "$arg" == "--force-with-lease" ]]; then
             force_with_lease=1
+        elif [[ "$arg" == "--add" ]]; then
+            want_add=1
         elif [[ -z "$msg" ]]; then
             msg="$arg"
         fi
@@ -31,6 +41,7 @@ push::main() {
     # ─── Commit ───────────────────────────────────────────────────────────────
     if dirty; then
         git add -u
+        [[ ${#add_paths[@]} -gt 0 ]] && git add -- "${add_paths[@]}"
         local untracked; untracked=$(git status --porcelain | grep '^??' | cut -c4- || true)
         if [[ -n "$untracked" ]]; then
             warn "Untracked files not staged (run 'git add' explicitly to include them):"
