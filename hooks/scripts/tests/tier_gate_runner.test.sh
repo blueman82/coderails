@@ -501,72 +501,90 @@ check_contains "T10: tier-0 over-cap posts verdict=illegitimate (size IS the tie
 [[ -f "$TMP/judge_called_t10.log" ]] && fails=$((fails+1)) && echo "FAIL - T10: judge called for a 205-line diff (PR#189 shape)" || echo "ok   - T10: judge NOT called for a 205-line diff (PR#189 shape)"
 
 # ══════════════════════════════════════════════════════════════════════════
-# Test 11 (judge-all-tiers): a tier-1 claim whose diff BREACHES the tier-1/2
-# line cap (TIER_GATE_MAX_LINES_HIGHER_TIER) posts `insufficient`, NEVER
-# `illegitimate` — size is not the tier-1/2 discriminator (tier 2 is defined
-# by work-unit COUNT or an outward/irreversible surface, never by line
-# count), so an honest large tier-1 diff breaching the cap is not evidence
-# of dishonesty. This is the mechanism the orchestrator explicitly rejected
-# in the other direction (over-cap => illegitimate is unsound at tier 1/2)
-# and adopted `insufficient` => fail-closed => human review instead. Uses a
-# line count comfortably above the default HIGHER_TIER cap (500) but keeps
-# file_count within TIER_GATE_MAX_FILES so ONLY the line cap fires.
+# Test 11 (owner's fix — file/line caps REMOVED at tier 1/2): a tier-1 claim
+# with 5 files and 600 lines — a shape that would have breached BOTH the old
+# TIER_GATE_MAX_FILES=3 and the old (now-retired) tier-1/2 line cap — REACHES
+# THE JUDGE and posts success. This is the regression lock for the owner's
+# exact complaint ("no cap for the judge to leave out files gives judge
+# incomplete picture of implementation") and the real defect it caught: PR
+# #242 genuinely touched 5 files and would have been blocked before ever
+# reaching a judge, despite being honest tier-1 work. A file/line-COUNT cap
+# is a worse version of the judge's own "how many work-units" question now
+# that judge-prompt.md carries the tier-2 predicate explicitly — the judge
+# decides, the count no longer gets a vote at tier 1/2.
 # ══════════════════════════════════════════════════════════════════════════
-TEST_PR=116 TEST_SHA=sha_tier1_overcap
+TEST_PR=116 TEST_SHA=sha_tier1_many_files
 reset_gh_state
-set_files_json '[{"filename":"scripts/big_refactor.sh","additions":600,"deletions":0}]'
-set_diff "diff --git a/scripts/big_refactor.sh b/scripts/big_refactor.sh
+set_files_json '[
+  {"filename":"scripts/a.sh","additions":150,"deletions":0},
+  {"filename":"scripts/b.sh","additions":150,"deletions":0},
+  {"filename":"scripts/c.sh","additions":100,"deletions":0},
+  {"filename":"scripts/d.sh","additions":100,"deletions":0},
+  {"filename":"scripts/e.sh","additions":100,"deletions":0}
+]'
+set_diff "diff --git a/scripts/a.sh b/scripts/a.sh
 +x"
 set_comment_body "$(tier1_body "$TEST_PR" "$TEST_SHA" GO)"
-tg_judge() { echo "JUDGE CALLED" >> "$TMP/judge_called_t11.log"; printf 'legitimate\nx\n'; return 0; }
+tg_judge() { echo "JUDGE CALLED" >> "$TMP/judge_called_t11.log"; printf 'legitimate\nFive files, one coherent refactor — matches the tier-1 predicate.\n'; return 0; }
 rm -f "$TMP/judge_called_t11.log"
 out=$(run_gate)
 posted=$(cat "$POSTED_LOG")
-check_contains "T11: tier-1 over-(higher-tier)-cap -> failure posted" "state=failure" "$posted"
-check_contains "T11: tier-1 over-cap posts verdict=insufficient (NOT illegitimate — size isn't the tier-1/2 discriminator)" "verdict=insufficient" "$posted"
-check_not_contains "T11: tier-1 over-cap NEVER posts verdict=illegitimate" "verdict=illegitimate" "$posted"
-check_contains "T11: over-cap description still carries tier=1 token" "tier=1" "$posted"
-[[ -f "$TMP/judge_called_t11.log" ]] && fails=$((fails+1)) && echo "FAIL - T11: judge called for a diff over the tier-1/2 cap (never-truncate-and-judge violated)" || echo "ok   - T11: judge NOT called for a diff over the tier-1/2 cap"
+check_contains "T11: tier-1, 5 files/600 lines (PR#242 shape) -> success posted (no longer blocked)" "state=success" "$posted"
+check_contains "T11: success description carries verdict=legitimate" "verdict=legitimate" "$posted"
+check_contains "T11: success description carries tier=1 token" "tier=1" "$posted"
+[[ -f "$TMP/judge_called_t11.log" ]] && echo "ok   - T11: judge WAS called for a 5-file/600-line tier-1 diff (file/line caps retired at tier 1/2)" || { fails=$((fails+1)); echo "FAIL - T11: judge not called — a tier-1/2 file or line cap is still blocking"; }
 
 # ══════════════════════════════════════════════════════════════════════════
-# Test 12 (negative control for T11): the SAME 600-line diff, judged as a
-# tier-0 claim instead, still blocks as `illegitimate` under the tier-0
-# cap (80 lines) — proving T11's insufficient outcome is genuinely
-# tier-conditional, not a global replacement of illegitimate everywhere.
+# Test 12 (negative control for T11): the SAME 5-file/600-line shape, judged
+# as a tier-0 claim instead, STILL blocks under the UNCHANGED tier-0 caps
+# (3 files / 80 lines) — proving tier-0's caps are untouched, not globally
+# retired alongside tier-1/2's.
 # ══════════════════════════════════════════════════════════════════════════
-TEST_PR=117 TEST_SHA=sha_tier0_overcap_control
+TEST_PR=117 TEST_SHA=sha_tier0_manyfiles_control
 reset_gh_state
-set_files_json '[{"filename":"scripts/big_refactor.sh","additions":600,"deletions":0}]'
-set_diff "diff --git a/scripts/big_refactor.sh b/scripts/big_refactor.sh
+set_files_json '[
+  {"filename":"scripts/a.sh","additions":150,"deletions":0},
+  {"filename":"scripts/b.sh","additions":150,"deletions":0},
+  {"filename":"scripts/c.sh","additions":100,"deletions":0},
+  {"filename":"scripts/d.sh","additions":100,"deletions":0},
+  {"filename":"scripts/e.sh","additions":100,"deletions":0}
+]'
+set_diff "diff --git a/scripts/a.sh b/scripts/a.sh
 +x"
 set_comment_body "$(tier0_body "$TEST_PR" "$TEST_SHA" GO)"
 tg_judge() { echo "JUDGE CALLED" >> "$TMP/judge_called_t12.log"; printf 'legitimate\nx\n'; return 0; }
 rm -f "$TMP/judge_called_t12.log"
 out=$(run_gate)
 posted=$(cat "$POSTED_LOG")
-check_contains "T12: same 600-line diff at tier=0 -> failure posted" "state=failure" "$posted"
-check_contains "T12: tier-0 over-cap still posts verdict=illegitimate (negative control for T11)" "verdict=illegitimate" "$posted"
-check_not_contains "T12: tier-0 over-cap never posts verdict=insufficient" "verdict=insufficient" "$posted"
-[[ -f "$TMP/judge_called_t12.log" ]] && fails=$((fails+1)) && echo "FAIL - T12: judge called for a tier-0 diff over the tier-0 cap" || echo "ok   - T12: judge NOT called for a tier-0 diff over the tier-0 cap"
+check_contains "T12: same 5-file/600-line shape at tier=0 -> failure posted (negative control for T11)" "state=failure" "$posted"
+check_contains "T12: tier-0 over-cap still posts verdict=illegitimate" "verdict=illegitimate" "$posted"
+[[ -f "$TMP/judge_called_t12.log" ]] && fails=$((fails+1)) && echo "FAIL - T12: judge called for a tier-0 diff over the (unchanged) tier-0 caps" || echo "ok   - T12: judge NOT called for a tier-0 diff over the (unchanged) tier-0 caps"
 
 # ══════════════════════════════════════════════════════════════════════════
-# Test 13 (negative control for T11, boundary): a tier-1 diff UNDER the
-# higher-tier cap (500 lines) but over the tier-0 cap (80 lines) reaches the
-# judge normally and posts success — proving the higher cap is real
-# headroom, not a cosmetic label that still blocks at 80.
+# Test 13 (owner's fix, byte-cap path): a tier-1 diff whose raw byte content
+# BREACHES TIER_GATE_MAX_DIFF_BYTES posts `insufficient`, never
+# `illegitimate` — the byte cap is the SOLE tier-1/2 size guard now that the
+# file/line caps are retired there, and it is the anti-truncation guard
+# (breach means the judge would only see a PARTIAL diff, which is never a
+# valid basis for a permissive OR punitive read) — never truncate-and-judge,
+# never brand a diff that's merely large as dishonest.
 # ══════════════════════════════════════════════════════════════════════════
-TEST_PR=118 TEST_SHA=sha_tier1_honest_large
+TEST_PR=118 TEST_SHA=sha_tier1_over_bytecap
 reset_gh_state
-set_files_json '[{"filename":"scripts/module.sh","additions":300,"deletions":0}]'
-set_diff "diff --git a/scripts/module.sh b/scripts/module.sh
-+x"
+set_files_json '[{"filename":"scripts/module.sh","additions":3,"deletions":0}]'
+set_diff "$(printf 'diff --git a/scripts/module.sh b/scripts/module.sh\n'; head -c 500 /dev/zero | tr '\0' 'x')"
 set_comment_body "$(tier1_body "$TEST_PR" "$TEST_SHA" GO)"
-tg_judge() { echo "JUDGE CALLED" >> "$TMP/judge_called_t13.log"; printf 'legitimate\nHonest large tier-1 refactor.\n'; return 0; }
+_saved_max_bytes_t13="$TIER_GATE_MAX_DIFF_BYTES"
+TIER_GATE_MAX_DIFF_BYTES=100
+tg_judge() { echo "JUDGE CALLED" >> "$TMP/judge_called_t13.log"; printf 'legitimate\nx\n'; return 0; }
 rm -f "$TMP/judge_called_t13.log"
 out=$(run_gate)
 posted=$(cat "$POSTED_LOG")
-check_contains "T13: honest 300-line tier-1 diff (under the higher cap) -> success posted" "state=success" "$posted"
-[[ -f "$TMP/judge_called_t13.log" ]] && echo "ok   - T13: judge WAS called for an honest 300-line tier-1 diff" || { fails=$((fails+1)); echo "FAIL - T13: judge not called for a diff that should be under the tier-1/2 cap"; }
+TIER_GATE_MAX_DIFF_BYTES="$_saved_max_bytes_t13"
+check_contains "T13: tier-1 over-byte-cap diff -> failure posted" "state=failure" "$posted"
+check_contains "T13: tier-1 byte-cap breach posts verdict=insufficient (not illegitimate)" "verdict=insufficient" "$posted"
+check_not_contains "T13: tier-1 byte-cap breach never posts verdict=illegitimate" "verdict=illegitimate" "$posted"
+[[ -f "$TMP/judge_called_t13.log" ]] && fails=$((fails+1)) && echo "FAIL - T13: judge called on a tier-1 over-byte-cap diff" || echo "ok   - T13: judge NOT called on a tier-1 over-byte-cap diff (never-truncate-and-judge preserved)"
 
 # ══════════════════════════════════════════════════════════════════════════
 # Read fail-closed lock: the daemon's READS route through curl to the GitHub
@@ -704,24 +722,8 @@ check_contains "BC1: block reason names the byte cap (not the prefilter)" "diff_
 check_contains "BC1: tier-0 byte-cap breach posts verdict=illegitimate" "verdict=illegitimate" "$posted"
 [[ -f "$TMP/judge_called_bc1.log" ]] && fails=$((fails+1)) && echo "FAIL - BC1: judge called on an over-byte-cap diff" || echo "ok   - BC1: judge NOT called on an over-byte-cap diff"
 
-# ── BC1b (tier-split, mirrors T11 for the byte cap): the SAME shape but a
-#    tier-1 claim -> insufficient, never illegitimate, same rationale as T11
-#    (size/byte-count is not the tier-1/2 discriminator). ───────────────────
-TEST_PR=312 TEST_SHA=sha_tier1_diff_over_bytecap
-reset_gh_state
-set_files_json '[{"filename":"scripts/foo.sh","additions":3,"deletions":0}]'
-set_diff "$(printf 'diff --git a/scripts/foo.sh b/scripts/foo.sh\n'; head -c 500 /dev/zero | tr '\0' 'x')"
-set_comment_body "$(tier1_body "$TEST_PR" "$TEST_SHA" GO)"
-TIER_GATE_MAX_DIFF_BYTES=100
-tg_judge() { echo "JUDGE CALLED" >> "$TMP/judge_called_bc1b.log"; printf 'legitimate\nx\n'; return 0; }
-rm -f "$TMP/judge_called_bc1b.log"
-out=$(run_gate)
-posted=$(cat "$POSTED_LOG")
-TIER_GATE_MAX_DIFF_BYTES="$_saved_max_bytes"
-check_contains "BC1b: tier-1 over-byte-cap diff -> failure posted" "state=failure" "$posted"
-check_contains "BC1b: tier-1 byte-cap breach posts verdict=insufficient (not illegitimate)" "verdict=insufficient" "$posted"
-check_not_contains "BC1b: tier-1 byte-cap breach never posts verdict=illegitimate" "verdict=illegitimate" "$posted"
-[[ -f "$TMP/judge_called_bc1b.log" ]] && fails=$((fails+1)) && echo "FAIL - BC1b: judge called on a tier-1 over-byte-cap diff" || echo "ok   - BC1b: judge NOT called on a tier-1 over-byte-cap diff"
+# (The tier-1/2 byte-cap breach -> verdict=insufficient case is covered by
+# Test 13 above, near the other size-cap tests — not duplicated here.)
 
 # ── BC2 (negative control for BC1): the SAME diff under a generous cap reaches
 #    the judge and posts success — proving BC1 blocks on the cap, not always. ─

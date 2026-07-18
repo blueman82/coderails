@@ -709,12 +709,15 @@ tg_judge() {
 
 # ─── Pre-filter (Fix 2): mechanical size/path gate BEFORE any model call ────
 
-# TIER_GATE_MAX_FILES / TIER_GATE_MAX_LINES: the tier-0 size cap. Tier 0
-# MEANS "single work-unit" (skills/task-evals/SKILL.md's own predicate) —
-# a genuine single-work-unit diff is small. `diff > cap` is therefore NOT
-# tier 0 by definition, so oversize blocks outright; this can never produce
-# a permissive read (there is no "truncate and still judge" path — see
-# tg_gate_pr, which never calls tg_judge once the prefilter blocks).
+# TIER_GATE_MAX_FILES / TIER_GATE_MAX_LINES: the tier-0 size cap, and ONLY
+# tier-0's — tg_prefilter applies these checks exclusively when the claimed
+# tier is "0" (see its own comment for why tier-1/2 does not use them at
+# all). Tier 0 MEANS "single work-unit" (skills/task-evals/SKILL.md's own
+# predicate) — a genuine single-work-unit diff is small. `diff > cap` is
+# therefore NOT tier 0 by definition, so oversize blocks outright; this can
+# never produce a permissive read (there is no "truncate and still judge"
+# path — see tg_gate_pr, which never calls tg_judge once the prefilter
+# blocks).
 #
 # Calibrated against the two real-world dishonest tier-0 PRs this exists to
 # catch: PR #189 (205 lines / 1 file) and PR #191 (3 lines / 1 file). A
@@ -737,37 +740,31 @@ TIER_GATE_MAX_LINES="${TIER_GATE_MAX_LINES:-80}"
 # TIER_GATE_MAX_DIFF_BYTES: cap on the real diff content (Fix 3) fed to the
 # judge. Same fail-closed posture as the pre-filter — over-cap blocks
 # outright, never truncates-and-judges. 200KB is generous headroom above
-# the ~80-line/~3-file shape the line/file caps already enforce (a diff
-# that size in bytes would already have failed those caps on almost any
-# real content), so this exists as a defense-in-depth backstop against a
-# pathological few-lines-but-enormous-content diff, not as the primary cap.
-# Shared by every tier: the byte cap is a content-size backstop, not the
-# tier-0-specific "single work-unit" discriminator the line/file caps are,
-# so it does not need a separate tier-1/2 value the way TIER_GATE_MAX_LINES
-# does (below).
+# the ~80-line/~3-file shape the tier-0 file/line caps already enforce (a
+# diff that size in bytes would already have failed those caps on almost
+# any real content at tier 0), so at tier 0 this exists as a defense-in-
+# depth backstop, not the primary cap.
+#
+# At tier 1/2 this is the SOLE size guard (the file-count and line-count
+# caps do not apply there — see tg_prefilter). It is the anti-truncation
+# guard, not a proxy for "too much work": tg_gate_pr measures diff_bytes
+# from the exact same $diff variable it then passes to tg_judge (one fetch,
+# no re-retrieval, no truncation in between) — so byte-cap-pass implies the
+# judge sees the COMPLETE diff. Removing or truncating past this cap would
+# recreate the incomplete-picture problem this whole guard exists to
+# prevent; it must never shrink. Not split per tier: it bounds INPUT SIZE
+# to the model call (a cost/latency ceiling), not a tier predicate, so tier
+# 0 and tier 1/2 share the same value.
 TIER_GATE_MAX_DIFF_BYTES="${TIER_GATE_MAX_DIFF_BYTES:-204800}"
-
-# TIER_GATE_MAX_LINES_HIGHER_TIER: the line cap for tier-1/2 claims, once
-# every tier is judged (not just tier-0). Tier-0's 80-line cap encodes
-# "single work-unit" and would wrongly block honest tier-1/2 work, which is
-# routinely larger (tier 1/2 carry no size predicate — see
-# skills/task-evals/SKILL.md: tier 2 is defined by work-unit COUNT or an
-# outward/irreversible surface, never by line count). 500 lines is a
-# generous ceiling above ordinary tier-1/2 diffs in this repo while still
-# bounding the judge's input; a genuinely larger honest change fails closed
-# to `insufficient` (human review) rather than being judged on a truncated
-# diff or waved through uncapped. File count is NOT split per-tier: a
-# self-contained tier-1/2 change spanning many files is unusual enough that
-# the shared TIER_GATE_MAX_FILES cap catching it and falling back to
-# `insufficient` is an acceptable, rare cost.
-TIER_GATE_MAX_LINES_HIGHER_TIER="${TIER_GATE_MAX_LINES_HIGHER_TIER:-500}"
 
 # TIER_GATE_PATH_DENYLIST: ERE alternation of path prefixes that are
 # outward-facing or irreversible surfaces by construction (tier-0's own
 # predicate names these as automatically disqualifying — see
 # judge-prompt.md). Matched against each line of the PR's file list.
 # Deliberately conservative and easy to extend; a path matching here blocks
-# without ever reaching the model.
+# without ever reaching the model. Applies at every tier — see the
+# standalone self-edit leash in tg_gate_pr, which runs this same check
+# independently of (and before) tg_prefilter.
 TIER_GATE_PATH_DENYLIST='^(skills/dashboard/|launchd/|scripts/tier-gate/|\.github/workflows/)'
 
 # tg_prefilter <filelist> <line_count> [claimed_tier]
@@ -776,29 +773,25 @@ TIER_GATE_PATH_DENYLIST='^(skills/dashboard/|launchd/|scripts/tier-gate/|\.githu
 # line count (as from `gh pr diff --stat`, or any equivalent count).
 # <claimed_tier> is OPTIONAL and defaults to "0" — every existing call site
 # (and the prefilter test suite) that omits it keeps the original tier-0
-# line cap unchanged. Exit 0 and empty stdout on pass; exit 1 and a named
+# behaviour unchanged. Exit 0 and empty stdout on pass; exit 1 and a named
 # reason on stdout on block. Injection-immune by construction: no model
 # call happens in this function, so there is nothing here for diff CONTENT
 # to inject into — only file paths and a line count are inspected, both
 # mechanically derived facts about the diff's shape, never text the
 # defendant wrote is read as instructions.
 #
-# The line cap is tier-aware (TIER_GATE_MAX_LINES for tier 0,
-# TIER_GATE_MAX_LINES_HIGHER_TIER for tier 1/2) now that every tier reaches
-# this gate; TIER_GATE_MAX_FILES and the path denylist are NOT split per
-# tier — the denylist is a self-edit leash that must hold at every tier
-# identically, and the file-count cap is a defense-in-depth backstop
-# distinct from the line-count discriminator, not worth a second constant.
+# TIER_GATE_MAX_FILES / TIER_GATE_MAX_LINES apply ONLY at tier 0 — see the
+# constants' own comment for why. At tier 1/2 this function checks ONLY the
+# path denylist; file/line counts are ignored entirely (tg_gate_pr's byte
+# cap is the sole tier-1/2 size guard, checked separately after the raw
+# diff fetch — see its own comment for why that split is correct: a count
+# is a worse version of the judge's own "how many work-units" question now
+# that judge-prompt.md carries the tier-2 predicate explicitly, whereas the
+# byte cap bounds the judge's INPUT SIZE, a different concern entirely).
+# The path denylist itself is NOT tier-split — it is a self-edit leash that
+# must hold identically at every tier.
 tg_prefilter() {
     local filelist="$1" line_count="$2" claimed_tier="${3:-0}"
-
-    local max_lines="$TIER_GATE_MAX_LINES"
-    [[ "$claimed_tier" != "0" ]] && max_lines="$TIER_GATE_MAX_LINES_HIGHER_TIER"
-
-    local file_count=0
-    if [[ -n "$filelist" ]]; then
-        file_count=$(printf '%s\n' "$filelist" | grep -c .)
-    fi
 
     local bad_path
     bad_path=$(printf '%s\n' "$filelist" | grep -E "$TIER_GATE_PATH_DENYLIST" | head -1)
@@ -807,9 +800,18 @@ tg_prefilter() {
         return 1
     fi
 
-    if [[ "$file_count" -gt "$TIER_GATE_MAX_FILES" || "$line_count" -gt "$max_lines" ]]; then
+    if [[ "$claimed_tier" != "0" ]]; then
+        return 0
+    fi
+
+    local file_count=0
+    if [[ -n "$filelist" ]]; then
+        file_count=$(printf '%s\n' "$filelist" | grep -c .)
+    fi
+
+    if [[ "$file_count" -gt "$TIER_GATE_MAX_FILES" || "$line_count" -gt "$TIER_GATE_MAX_LINES" ]]; then
         printf 'blocked: size cap exceeded files=%s/%s lines=%s/%s\n' \
-            "$file_count" "$TIER_GATE_MAX_FILES" "$line_count" "$max_lines"
+            "$file_count" "$TIER_GATE_MAX_FILES" "$line_count" "$TIER_GATE_MAX_LINES"
         return 1
     fi
 
@@ -829,13 +831,18 @@ tg_prefilter() {
 #   4. Fetch the PR's changed-file list ONCE (B3 fail-closed fetch, shared by
 #      every tier) and run the self-edit leash against it — blocks any tier
 #      touching scripts/tier-gate/ before anything else runs.
-#   5. Post pending, extract embedded evals.json, prefilter (tier-aware size
-#      cap — see tg_prefilter), judge (the claimed tier as the claim under
-#      test, not just a tier-0 exemption), post the terminal status
-#      (success|failure|error). A size-cap breach posts `illegitimate` at
-#      tier 0 (size IS the tier-0 discriminator) but `insufficient` at tier
-#      1/2 (size is NOT the tier-2 discriminator — never truncate-and-judge,
-#      never brand an honest large diff dishonest).
+#   5. Post pending, extract embedded evals.json, tier-0-only prefilter
+#      (file/line count caps — see tg_prefilter, called ONLY when tier==0),
+#      byte-cap the raw diff (every tier — see TIER_GATE_MAX_DIFF_BYTES),
+#      judge (the claimed tier as the claim under test, not just a tier-0
+#      exemption), post the terminal status (success|failure|error). A
+#      size-cap breach posts `illegitimate` at tier 0 (size IS the tier-0
+#      discriminator) but `insufficient` at tier 1/2 (size is NOT the
+#      tier-2 discriminator — a file/line-count cap there is a worse proxy
+#      for the judge's own "how many work-units" question, so tier 1/2 has
+#      no file/line cap at all; only the byte cap, which bounds the judge's
+#      input size, applies). Never truncate-and-judge at any tier or cap;
+#      never brand an honest large diff dishonest.
 # Every posted description carries a `tier=<claimed>` token so a status can
 # never be replayed against a different claimed tier. Echoes a one-line
 # summary of the action taken (or "skip: <reason>") to stdout for logging;
@@ -872,14 +879,17 @@ tg_gate_pr() {
     # tg_gh_get's own HTTP-status check is what makes a failed fetch
     # fail-closed here; we additionally treat an empty file list as a hard
     # error. Letting a failed/empty fetch through would set file_count=0 /
-    # line_count=0, which SAILS THROUGH the prefilter (0 > cap is false) and
-    # would also make the self-edit leash see an empty (non-matching)
-    # filelist — a false "no self-edit" read. per_page=100 single page (no
-    # Link-following): a tier-0 diff is <=3 files by the size cap, so a PR
-    # that legitimately exceeds one page of files is already not tier-0;
-    # tier-1/2 PRs are capped higher (TIER_GATE_MAX_LINES_HIGHER_TIER) but
-    # still capped, and a self-edit only needs ONE matching filename to
-    # appear on page 1 to be caught regardless of tier.
+    # line_count=0, which SAILS THROUGH the tier-0 prefilter cap (0 > cap is
+    # false) and would also make the self-edit leash see an empty
+    # (non-matching) filelist — a false "no self-edit" read. per_page=100
+    # single page (no Link-following): a tier-0 diff is <=3 files by the
+    # size cap, so a PR that legitimately exceeds one page of files is
+    # already not tier-0. Tier-1/2 has no file-count cap (the byte cap on
+    # the raw diff, checked later, is the sole tier-1/2 size guard) — a
+    # tier-1/2 PR with more than 100 changed files would see a truncated
+    # filelist here, but the self-edit leash only needs ONE matching
+    # filename to appear on THIS page to be caught, and a 100+-file single
+    # PR is an extreme edge case this daemon does not otherwise special-case.
     local files_json
     files_json=$(tg_gh_get "pulls/${pr}/files?per_page=100") || {
         tg_post_status "$sha" "error" "verdict=error tier=${tier} host=$(hostname)"
@@ -940,47 +950,41 @@ tg_gate_pr() {
         return 1
     fi
 
-    # Fix 2: mechanical pre-filter BEFORE any model call. filelist/line
-    # count only — never diff content — so this step cannot be influenced
-    # by anything the defendant wrote. Uses the filelist/line_count already
-    # fetched above (shared B3 fetch); not re-fetched here. Tier-aware: the
-    # claimed tier selects TIER_GATE_MAX_LINES (tier 0) vs
-    # TIER_GATE_MAX_LINES_HIGHER_TIER (tier 1/2) inside tg_prefilter itself.
+    # Fix 2: mechanical pre-filter BEFORE any model call — TIER-0 ONLY.
+    # filelist/line count only — never diff content — so this step cannot be
+    # influenced by anything the defendant wrote. Uses the filelist/
+    # line_count already fetched above (shared B3 fetch); not re-fetched
+    # here.
     #
-    # Verdict on breach is TIER-SPLIT and this is the crux of judging every
-    # tier honestly: at tier 0, over-cap really isn't tier-0 work (tier 0
-    # MEANS single work-unit, which is small) — genuinely illegitimate,
-    # unchanged from the pre-existing behaviour. At tier 1/2, size is NOT
-    # the discriminator (tier 2 is defined by work-unit COUNT or an
-    # outward/irreversible surface, never by line count — SKILL.md), so an
-    # honest large tier-1/2 change (e.g. a big single-module refactor with
-    # no outward surface) breaching the cap is not evidence of dishonesty.
-    # Branding it illegitimate would be the same size-implies-tier
-    # conflation PR #191 warned against, inverted. It posts `insufficient`
-    # instead — the same fail-closed-to-human-review semantics the judge
-    # itself would use for "can't tell from the blind inputs" — without
-    # ever calling the judge on a diff this large. This is still
-    # never-truncate-and-judge: an over-cap diff at ANY tier never reaches
-    # tg_judge.
-    # tg_prefilter's OWN denylist check can never fire here — the leash
-    # above already ran the identical regex against the identical filelist
-    # and would have returned first — so any block reaching this point is
-    # the size cap, never the denylist. Only the size-cap outcome is
-    # branched on below.
-    local prefilter_out prefilter_rc
-    prefilter_out=$(tg_prefilter "$filelist" "$line_count" "$tier")
-    prefilter_rc=$?
-    if [[ $prefilter_rc -ne 0 ]]; then
-        if [[ "$tier" == "0" ]]; then
+    # Tier 0: unchanged from the pre-judge-all-tiers behaviour. Over-cap
+    # really isn't tier-0 work (tier 0 MEANS single work-unit, which is
+    # small) — genuinely `illegitimate`.
+    #
+    # Tier 1/2: tg_prefilter is NOT called at all — calling it would be
+    # vestigial, since (per its own tier-aware body) it can only ever
+    # return 0 for a non-zero claimed tier at this point in the flow (its
+    # denylist check is the one thing that could still block it, and that
+    # is already unreachable here: the standalone self-edit leash above ran
+    # the identical regex against the identical filelist and would have
+    # returned first). The owner's point: a file/line-COUNT cap is a worse
+    # version of the judge's own "how many work-units" question now that
+    # judge-prompt.md carries the tier-2 predicate explicitly — a count
+    # cannot tell 5 files of ONE work-unit from 5 independent changes, the
+    # judge can. Removing it also fixes a real defect: PR #242 (5 files)
+    # would have breached the old TIER_GATE_MAX_FILES=3 cap and never
+    # reached the judge, even though it was honest tier-1 work. The ONLY
+    # tier-1/2 size guard is the byte cap below, checked after the raw diff
+    # fetch — see TIER_GATE_MAX_DIFF_BYTES's own comment for why that one
+    # stays and is the anti-truncation guard, not a work-unit proxy.
+    if [[ "$tier" == "0" ]]; then
+        local prefilter_out
+        prefilter_out=$(tg_prefilter "$filelist" "$line_count" "$tier")
+        if [[ $? -ne 0 ]]; then
             tg_post_status "$sha" "failure" "verdict=illegitimate tier=0 host=$(hostname)"
             printf 'gated: pr=%s sha=%s tier=0 verdict=illegitimate state=failure reason=prefilter_%s\n' \
                 "$pr" "$sha" "$(printf '%s' "$prefilter_out" | tr -s ' \n' '_')"
-        else
-            tg_post_status "$sha" "failure" "verdict=insufficient tier=${tier} host=$(hostname)"
-            printf 'gated: pr=%s sha=%s tier=%s verdict=insufficient state=failure reason=prefilter_%s\n' \
-                "$pr" "$sha" "$tier" "$(printf '%s' "$prefilter_out" | tr -s ' \n' '_')"
+            return 0
         fi
-        return 0
     fi
 
     # Fix 3: capped REAL diff content (not just name-only/--stat metadata).
