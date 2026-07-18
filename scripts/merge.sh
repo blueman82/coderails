@@ -120,42 +120,54 @@ merge::main() {
             # active; it is the only local check that catches a machine-user
             # misconfiguration before GitHub itself would. Config-keyed and
             # inactive by default: only runs when config key
-            # tier_review.machine_user is set AND the eval artifact's tier is 0.
-            if [[ "${PR_EVAL_TIER:-}" == "0" ]]; then
-                local tier_review_config; tier_review_config=$(coderails::config_path "$PWD")
-                local tier_review_machine_user=""
-                if [[ -n "$tier_review_config" ]]; then
-                    tier_review_machine_user=$(coderails::_tier_review_machine_user "$tier_review_config")
+            # tier_review.machine_user is set — the daemon (tier-gate-runner)
+            # now judges EVERY tier, not just tier 0, so this gate runs at
+            # every tier too (no more `PR_EVAL_TIER == 0` restriction). A
+            # missing/failed status now blocks merges at every tier — fail-
+            # closed is symmetric across tiers, never bypassed.
+            local tier_review_config; tier_review_config=$(coderails::config_path "$PWD")
+            local tier_review_machine_user=""
+            if [[ -n "$tier_review_config" ]]; then
+                tier_review_machine_user=$(coderails::_tier_review_machine_user "$tier_review_config")
+            fi
+            if [[ -n "$tier_review_machine_user" ]]; then
+                local tr_statuses tr_rc=0
+                tr_statuses=$(gh api "repos/$(repo)/commits/${sha}/statuses" --paginate \
+                    --jq '[.[] | select(.context == "tier-review")]' 2>/dev/null) || tr_rc=$?
+                if [[ $tr_rc -ne 0 ]]; then
+                    err "GitHub fetch failed — could not fetch tier-review status for $sha. Retry, or check gh auth/network."
                 fi
-                if [[ -n "$tier_review_machine_user" ]]; then
-                    local tr_statuses tr_rc=0
-                    tr_statuses=$(gh api "repos/$(repo)/commits/${sha}/statuses" --paginate \
-                        --jq '[.[] | select(.context == "tier-review")]' 2>/dev/null) || tr_rc=$?
-                    if [[ $tr_rc -ne 0 ]]; then
-                        err "GitHub fetch failed — could not fetch tier-review status for $sha. Retry, or check gh auth/network."
-                    fi
-                    local tr_state tr_creator tr_desc
-                    tr_state=$(printf '%s' "$tr_statuses" | jq -r '.[0].state // empty' 2>/dev/null)
-                    tr_creator=$(printf '%s' "$tr_statuses" | jq -r '.[0].creator.login // empty' 2>/dev/null)
-                    tr_desc=$(printf '%s' "$tr_statuses" | jq -r '.[0].description // empty' 2>/dev/null)
-                    if [[ -z "$tr_state" ]]; then
-                        err "No tier-review status found for $sha — the tier-gate daemon has not judged this SHA yet. Wait for it, or kickstart it, then retry."
-                    elif [[ "$tr_state" != "success" ]]; then
-                        err "tier-review status for $sha is '$tr_state' (not success) — the tier-gate daemon has not approved this SHA. Resolve and retry."
-                    elif [[ "$tr_creator" != "$tier_review_machine_user" ]]; then
-                        err "tier-review status for $sha was posted by '$tr_creator', not the configured machine user '$tier_review_machine_user' — this is a misconfiguration-or-forgery signal, not a valid verdict. Do not bypass; investigate the creator mismatch."
-                    elif [[ "$tr_desc" != *"verdict=legitimate"* ]]; then
-                        # state=success is necessary but NOT sufficient: only a
-                        # genuine tier-0 `legitimate` judgment carries
-                        # verdict=legitimate in its description (tier-gate-runner
-                        # tg_gate_pr). Requiring it here closes the verdict-
-                        # laundering path where a non-tier-0 or otherwise-minted
-                        # success is reused as a tier-0 pass — a bare state check
-                        # cannot distinguish those, the description can.
-                        err "tier-review status for $sha is success but its description ('$tr_desc') does not carry verdict=legitimate — this is not a genuine tier-0 approval (e.g. a laundered or non-judged status). Do not bypass; investigate."
-                    fi
-                    ok "Tier-review verified (SHA: $sha, creator: $tr_creator, verdict=legitimate)"
+                local tr_state tr_creator tr_desc
+                tr_state=$(printf '%s' "$tr_statuses" | jq -r '.[0].state // empty' 2>/dev/null)
+                tr_creator=$(printf '%s' "$tr_statuses" | jq -r '.[0].creator.login // empty' 2>/dev/null)
+                tr_desc=$(printf '%s' "$tr_statuses" | jq -r '.[0].description // empty' 2>/dev/null)
+                if [[ -z "$tr_state" ]]; then
+                    err "No tier-review status found for $sha — the tier-gate daemon has not judged this SHA yet. Wait for it, or kickstart it, then retry."
+                elif [[ "$tr_state" != "success" ]]; then
+                    err "tier-review status for $sha is '$tr_state' (not success) — the tier-gate daemon has not approved this SHA. Resolve and retry."
+                elif [[ "$tr_creator" != "$tier_review_machine_user" ]]; then
+                    err "tier-review status for $sha was posted by '$tr_creator', not the configured machine user '$tier_review_machine_user' — this is a misconfiguration-or-forgery signal, not a valid verdict. Do not bypass; investigate the creator mismatch."
+                elif [[ "$tr_desc" != *"verdict=legitimate"* ]]; then
+                    # state=success is necessary but NOT sufficient: only a
+                    # genuine `legitimate` judgment carries verdict=legitimate
+                    # in its description (tier-gate-runner tg_gate_pr).
+                    # Requiring it here closes the verdict-laundering path
+                    # where an otherwise-minted success is reused as a pass —
+                    # a bare state check cannot distinguish those, the
+                    # description can.
+                    err "tier-review status for $sha is success but its description ('$tr_desc') does not carry verdict=legitimate — this is not a genuine approval (e.g. a laundered or non-judged status). Do not bypass; investigate."
+                elif ! [[ "$tr_desc" =~ (^|[[:space:]])tier=${PR_EVAL_TIER}($|[[:space:]]) ]]; then
+                    # Tier-binding (anti-laundering): the status description
+                    # must carry a tier=N token matching THIS artifact's own
+                    # claimed tier. Space/end-of-string delimited so tier=1
+                    # can never satisfy tier=12 (or vice versa) via a bare
+                    # substring match. A status minted against one claimed
+                    # tier must never satisfy a different claim — this is the
+                    # reason tier-gate-runner puts the token in every
+                    # description; this is the first thing that consumes it.
+                    err "tier-review status for $sha carries description ('$tr_desc') that does not match this artifact's claimed tier ${PR_EVAL_TIER} — a status minted for a different tier cannot satisfy this claim. Do not bypass; investigate."
                 fi
+                ok "Tier-review verified (SHA: $sha, creator: $tr_creator, verdict=legitimate, tier=${PR_EVAL_TIER})"
             fi
 
             step "Merging"

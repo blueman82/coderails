@@ -508,7 +508,7 @@ gate_eval_artifact_for_merge() {
         permissionDecisionReason: $r
       }
     }'
-  elif [ "${PR_EVAL_TIER:-}" = "0" ]; then
+  else
     gate_tier_review_status "$num" "$sha"
   fi
   return 0
@@ -541,16 +541,20 @@ coderails::_tier_review_machine_user() {
 
 # gate_tier_review_status <num> <sha>
 # Redundant defence-in-depth layer (fail-closed): once the eval-artifact gate
-# above has ALREADY passed with tier=0, this additionally requires a
-# `tier-review` commit status of state=success posted by the configured
-# machine user. This layer is REDUNDANT BY DESIGN once the server-side
+# above has ALREADY passed, this additionally requires a `tier-review` commit
+# status of state=success, posted by the configured machine user, whose
+# description carries verdict=legitimate AND a tier=N token matching this
+# artifact's own claimed tier (PR_EVAL_TIER, set by pr::has_coderails_eval_for_head
+# in the caller). This layer is REDUNDANT BY DESIGN once the server-side
 # ruleset is live (belt-and-braces) — it exists to fail loudly on
 # misconfiguration and to hold the line during the pre-ruleset interim. It is
 # NOT the primary control — do not delete it as dead code once the ruleset is
 # active; it is the only local check that catches a machine-user
 # misconfiguration before GitHub itself would. Config-keyed and inactive by
 # default: only runs when config key tier_review.machine_user is set (config
-# absent -> other installs unaffected). Emits a deny JSON on any failure;
+# absent -> other installs unaffected). Runs at EVERY tier — the daemon
+# (tier-gate-runner) now judges every tier, not just tier 0, so this gate is
+# no longer restricted to PR_EVAL_TIER=0. Emits a deny JSON on any failure;
 # emits nothing (stands aside) when inactive or when the check passes — same
 # "one deny per invocation" contract as gate_eval_artifact_for_merge's caller.
 gate_tier_review_status() {
@@ -574,9 +578,10 @@ gate_tier_review_status() {
     return 0
   fi
 
-  local state creator
+  local state creator description
   state=$(printf '%s' "$statuses" | jq -r '.[0].state // empty' 2>/dev/null)
   creator=$(printf '%s' "$statuses" | jq -r '.[0].creator.login // empty' 2>/dev/null)
+  description=$(printf '%s' "$statuses" | jq -r '.[0].description // empty' 2>/dev/null)
 
   local reason=""
   if [ -z "$state" ]; then
@@ -585,6 +590,32 @@ gate_tier_review_status() {
     reason="Blocked: gh pr merge $num — tier-review status for $sha is '$state' (not success). The tier-gate daemon has not approved this SHA. Resolve and retry."
   elif [ "$creator" != "$machine_user" ]; then
     reason="Blocked: gh pr merge $num — tier-review status for $sha was posted by '$creator', not the configured machine user '$machine_user'. This is a misconfiguration-or-forgery signal, not a valid verdict. Do not bypass; investigate the creator mismatch."
+  else
+    case "$description" in
+      *"verdict=legitimate"*) : ;;
+      *)
+        # state=success is necessary but NOT sufficient: only a genuine
+        # `legitimate` judgment carries verdict=legitimate in its description
+        # (tier-gate-runner tg_gate_pr). Mirrors scripts/merge.sh's identical
+        # check — closes the verdict-laundering path where an otherwise-
+        # minted success is reused as a pass.
+        reason="Blocked: gh pr merge $num — tier-review status for $sha is success but its description ('$description') does not carry verdict=legitimate. This is not a genuine approval (e.g. a laundered or non-judged status). Do not bypass; investigate."
+        ;;
+    esac
+    if [ -z "$reason" ]; then
+      case "$description" in
+        *[[:space:]]tier=${PR_EVAL_TIER}[[:space:]]*|*[[:space:]]tier=${PR_EVAL_TIER}) : ;;
+        tier=${PR_EVAL_TIER}[[:space:]]*|tier=${PR_EVAL_TIER}) : ;;
+        *)
+          # Tier-binding (anti-laundering): the status description must carry
+          # a tier=N token matching THIS artifact's own claimed tier.
+          # Space/end-of-string delimited so tier=1 can never satisfy tier=12
+          # (or vice versa) via a bare substring match. Mirrors
+          # scripts/merge.sh's identical check.
+          reason="Blocked: gh pr merge $num — tier-review status for $sha carries description ('$description') that does not match this artifact's claimed tier ${PR_EVAL_TIER}. A status minted for a different tier cannot satisfy this claim. Do not bypass; investigate."
+          ;;
+      esac
+    fi
   fi
 
   if [ -n "$reason" ]; then

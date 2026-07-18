@@ -166,13 +166,31 @@ WRAPPER
 # gate now requires it: state=success + right creator is necessary but not
 # sufficient (closes the verdict-laundering path where a non-judged/minted
 # success is reused as a tier-0 pass).
-SUCCESS_RIGHT_CREATOR="[{\"state\":\"success\",\"creator\":{\"login\":\"${MACHINE_USER}\"},\"description\":\"verdict=legitimate host=h\"}]"
-SUCCESS_WRONG_CREATOR="[{\"state\":\"success\",\"creator\":{\"login\":\"repo-owner\"},\"description\":\"verdict=legitimate host=h\"}]"
+SUCCESS_RIGHT_CREATOR="[{\"state\":\"success\",\"creator\":{\"login\":\"${MACHINE_USER}\"},\"description\":\"verdict=legitimate tier=0 host=h\"}]"
+SUCCESS_WRONG_CREATOR="[{\"state\":\"success\",\"creator\":{\"login\":\"repo-owner\"},\"description\":\"verdict=legitimate tier=0 host=h\"}]"
 # A success with the RIGHT creator but WITHOUT verdict=legitimate — the laundered
 # / non-judged status an adversary would try to reuse. Must block.
-SUCCESS_NO_VERDICT="[{\"state\":\"success\",\"creator\":{\"login\":\"${MACHINE_USER}\"},\"description\":\"verdict=not-tier-0 host=h\"}]"
-ERROR_STATUS="[{\"state\":\"error\",\"creator\":{\"login\":\"${MACHINE_USER}\"},\"description\":\"verdict=error host=h\"}]"
-PENDING_STATUS="[{\"state\":\"pending\",\"creator\":{\"login\":\"${MACHINE_USER}\"},\"description\":\"verdict=pending host=h\"}]"
+SUCCESS_NO_VERDICT="[{\"state\":\"success\",\"creator\":{\"login\":\"${MACHINE_USER}\"},\"description\":\"verdict=not-tier-0 tier=0 host=h\"}]"
+ERROR_STATUS="[{\"state\":\"error\",\"creator\":{\"login\":\"${MACHINE_USER}\"},\"description\":\"verdict=error tier=0 host=h\"}]"
+PENDING_STATUS="[{\"state\":\"pending\",\"creator\":{\"login\":\"${MACHINE_USER}\"},\"description\":\"verdict=pending tier=0 host=h\"}]"
+# Tier-1 fixtures — the gate is being hoisted to run at EVERY tier, and the
+# posted status must carry a tier=N token matching the artifact's own claimed
+# tier (PR_EVAL_TIER). These exercise that binding directly.
+TIER1_LEGIT="[{\"state\":\"success\",\"creator\":{\"login\":\"${MACHINE_USER}\"},\"description\":\"verdict=legitimate tier=1 host=h\"}]"
+TIER1_SELF_EDIT="[{\"state\":\"failure\",\"creator\":{\"login\":\"${MACHINE_USER}\"},\"description\":\"verdict=self_edit tier=1 host=h\"}]"
+TIER1_INSUFFICIENT="[{\"state\":\"failure\",\"creator\":{\"login\":\"${MACHINE_USER}\"},\"description\":\"verdict=insufficient tier=1 host=h\"}]"
+TIER1_ILLEGITIMATE="[{\"state\":\"failure\",\"creator\":{\"login\":\"${MACHINE_USER}\"},\"description\":\"verdict=illegitimate tier=1 host=h\"}]"
+# Delimiter case: a tier=1 status must NOT satisfy a tier=12 claim (substring
+# match without a delimiter would wrongly pass this).
+TIER12_LEGIT="[{\"state\":\"success\",\"creator\":{\"login\":\"${MACHINE_USER}\"},\"description\":\"verdict=legitimate tier=12 host=h\"}]"
+# Adjacent same-length-prefix delimiter case: a tier=1 status must NOT satisfy
+# a tier=10 claim either — "tier=1" is a substring of "tier=10" too, distinct
+# from the two-digit tier=12 case above (different digit count, same failure
+# mode a naive unanchored match would miss).
+TIER10_LEGIT="[{\"state\":\"success\",\"creator\":{\"login\":\"${MACHINE_USER}\"},\"description\":\"verdict=legitimate tier=10 host=h\"}]"
+# Tier=2 fixture — the third and last legal tier value ([0-2]); tier=0 and
+# tier=1 are both already exercised above, this closes the gap.
+TIER2_LEGIT="[{\"state\":\"success\",\"creator\":{\"login\":\"${MACHINE_USER}\"},\"description\":\"verdict=legitimate tier=2 host=h\"}]"
 
 # ─── Test 1: tier=0, config set, no status at all -> block ───────────────────
 run_tier_gate_test 0 "$MACHINE_USER" "[]"
@@ -218,14 +236,84 @@ rc=$?
 check "tier-review gate blocks on gh fetch failure (fail-closed)" 1 $rc
 check_msg "fetch-fail block message mentions fetch" "fetch" "$LAST_STDERR"
 
-# ─── Test 7: tier != 0 -> gate inactive (skip), merge proceeds ───────────────
+# ─── Test 7: tier=1, config set, NO tier-review status -> BLOCK ──────────────
+# The headline regression lock: the gate now runs at EVERY tier, not just
+# tier=0. Before the hoist, a tier=1 PR with no tier-review status at all
+# merged unimpeded — this must now block exactly like the tier=0 case.
 run_tier_gate_test 1 "$MACHINE_USER" "[]"
 rc=$?
-check "tier-review gate skips when tier != 0" 0 $rc
+check "tier-review gate BLOCKS at tier=1 with no status (was: skipped)" 1 $rc
+check_msg "tier=1 no-status block message mentions tier-review" "tier-review" "$LAST_STDERR"
 
 # ─── Test 8: tier=0, config key absent -> gate inactive, merge proceeds ──────
 run_tier_gate_test 0 "" "[]"
 rc=$?
 check "tier-review gate inactive when config key absent" 0 $rc
+
+# ─── Test 9: tier=1, config set, verdict=legitimate tier=1 -> ALLOW ──────────
+run_tier_gate_test 1 "$MACHINE_USER" "$TIER1_LEGIT"
+rc=$?
+check "tier-review gate passes at tier=1 with matching verdict=legitimate tier=1" 0 $rc
+
+# ─── Test 10: tier=1, status carries tier=0 token -> BLOCK (token mismatch) ──
+# A tier-0 status must not satisfy a tier-1 claim — the anti-laundering bind.
+run_tier_gate_test 1 "$MACHINE_USER" "$SUCCESS_RIGHT_CREATOR"
+rc=$?
+check "tier-review gate BLOCKS tier=1 claim satisfied by a tier=0 status" 1 $rc
+check_msg "tier-mismatch block message mentions tier" "tier" "$LAST_STDERR"
+
+# ─── Test 11: tier=0, status carries tier=1 token -> BLOCK (reverse direction)
+run_tier_gate_test 0 "$MACHINE_USER" "$TIER1_LEGIT"
+rc=$?
+check "tier-review gate BLOCKS tier=0 claim satisfied by a tier=1 status (reverse)" 1 $rc
+
+# ─── Test 12: tier=1, verdict=self_edit -> BLOCK ─────────────────────────────
+run_tier_gate_test 1 "$MACHINE_USER" "$TIER1_SELF_EDIT"
+rc=$?
+check "tier-review gate blocks tier=1 verdict=self_edit" 1 $rc
+
+# ─── Test 13: tier=1, verdict=insufficient -> BLOCK ──────────────────────────
+run_tier_gate_test 1 "$MACHINE_USER" "$TIER1_INSUFFICIENT"
+rc=$?
+check "tier-review gate blocks tier=1 verdict=insufficient" 1 $rc
+
+# ─── Test 14: tier=1, verdict=illegitimate -> BLOCK ──────────────────────────
+run_tier_gate_test 1 "$MACHINE_USER" "$TIER1_ILLEGITIMATE"
+rc=$?
+check "tier-review gate blocks tier=1 verdict=illegitimate" 1 $rc
+
+# ─── Test 15: tier=1, WRONG creator -> BLOCK (creator check must still apply
+# at every tier, not just tier=0) ─────────────────────────────────────────────
+run_tier_gate_test 1 "$MACHINE_USER" "$SUCCESS_WRONG_CREATOR"
+rc=$?
+check "tier-review gate blocks tier=1 with WRONG creator" 1 $rc
+check_msg "tier=1 wrong-creator block message names the misconfig/forgery framing" "creator" "$LAST_STDERR"
+
+# ─── Test 16: tier=1 claim, status token tier=12 -> BLOCK (delimiter case) ───
+# A naive substring match ("tier=1" found inside "tier=12 host=h") would
+# wrongly ALLOW here; only a delimited (space/EOL-bounded) match correctly
+# BLOCKS. The reverse direction (claim=12, status tier=1) can't discriminate a
+# buggy impl from a correct one — "tier=12" is never a substring of "tier=1
+# host=h" either way — so it is deliberately not tested. tier=12 is only ever
+# reachable as free text inside a status description, never as a real claimed
+# tier (PR_EVAL_TIER is sourced from the eval-artifact marker, capped at 0-2).
+run_tier_gate_test 1 "$MACHINE_USER" "$TIER12_LEGIT"
+rc=$?
+check "tier-review gate BLOCKS tier=1 claim satisfied by a tier=12 status (delimiter)" 1 $rc
+
+# ─── Test 17: tier=1 claim, status token tier=10 -> BLOCK (adjacent digit) ───
+# Same failure mode as Test 16 but with a different digit count: "tier=1" is
+# also a substring of "tier=10 host=h". A naive substring match would wrongly
+# ALLOW here too; only the delimited match correctly BLOCKS.
+run_tier_gate_test 1 "$MACHINE_USER" "$TIER10_LEGIT"
+rc=$?
+check "tier-review gate BLOCKS tier=1 claim satisfied by a tier=10 status (adjacent digit)" 1 $rc
+
+# ─── Test 18: tier=2 claim, matching verdict=legitimate tier=2 -> ALLOW ──────
+# tier=2 is the third and last legal artifact tier ([0-2]); tier=0 and tier=1
+# are both already exercised above (Tests 1-15), this closes the gap.
+run_tier_gate_test 2 "$MACHINE_USER" "$TIER2_LEGIT"
+rc=$?
+check "tier-review gate passes at tier=2 with matching verdict=legitimate tier=2" 0 $rc
 
 [[ $fails -eq 0 ]] && { echo PASS; exit 0; } || { echo "FAIL ($fails)"; exit 1; }

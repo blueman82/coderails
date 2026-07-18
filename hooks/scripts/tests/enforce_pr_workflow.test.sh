@@ -1125,9 +1125,21 @@ T_TIER_REVIEWED_42=$(mk_transcript \
   "$(mk_skill_line_with_args "pr-review-toolkit:review-pr" "42")")
 TIER0_GO_MARKER="<!-- coderails-eval-summary v1 pr=42 head_sha=${TIER_HEAD_SHA} result=GO tier=0 -->"
 
-SUCCESS_RIGHT_CREATOR="[{\"state\":\"success\",\"creator\":{\"login\":\"${MACHINE_USER}\"}}]"
-SUCCESS_WRONG_CREATOR="[{\"state\":\"success\",\"creator\":{\"login\":\"repo-owner\"}}]"
-ERROR_STATUS="[{\"state\":\"error\",\"creator\":{\"login\":\"${MACHINE_USER}\"}}]"
+# Status descriptions now always carry a tier=N token (tier-gate-runner posts
+# it on every verdict, per PR A). The gate must require verdict=legitimate AND
+# a tier token matching the artifact's own claimed tier — mirrors
+# scripts/merge.sh's fixtures.
+SUCCESS_RIGHT_CREATOR="[{\"state\":\"success\",\"creator\":{\"login\":\"${MACHINE_USER}\"},\"description\":\"verdict=legitimate tier=0 host=h\"}]"
+SUCCESS_WRONG_CREATOR="[{\"state\":\"success\",\"creator\":{\"login\":\"repo-owner\"},\"description\":\"verdict=legitimate tier=0 host=h\"}]"
+ERROR_STATUS="[{\"state\":\"error\",\"creator\":{\"login\":\"${MACHINE_USER}\"},\"description\":\"verdict=error tier=0 host=h\"}]"
+# Bare state=success with NO verdict=legitimate in the description — the hook
+# previously accepted this (state+creator only); it must now reject it.
+SUCCESS_NO_VERDICT="[{\"state\":\"success\",\"creator\":{\"login\":\"${MACHINE_USER}\"}}]"
+TIER1_LEGIT="[{\"state\":\"success\",\"creator\":{\"login\":\"${MACHINE_USER}\"},\"description\":\"verdict=legitimate tier=1 host=h\"}]"
+TIER1_SELF_EDIT="[{\"state\":\"failure\",\"creator\":{\"login\":\"${MACHINE_USER}\"},\"description\":\"verdict=self_edit tier=1 host=h\"}]"
+TIER1_INSUFFICIENT="[{\"state\":\"failure\",\"creator\":{\"login\":\"${MACHINE_USER}\"},\"description\":\"verdict=insufficient tier=1 host=h\"}]"
+TIER1_ILLEGITIMATE="[{\"state\":\"failure\",\"creator\":{\"login\":\"${MACHINE_USER}\"},\"description\":\"verdict=illegitimate tier=1 host=h\"}]"
+TIER12_LEGIT="[{\"state\":\"success\",\"creator\":{\"login\":\"${MACHINE_USER}\"},\"description\":\"verdict=legitimate tier=12 host=h\"}]"
 
 # ── Case 97: no tier-review status at all -> deny ─────────────────────────────
 out=$(
@@ -1172,13 +1184,20 @@ out=$(
 )
 check "tier-0 PR, tier-review statuses fetch fails -> deny (fail-closed)" DENY "$(decision_of "$out")"
 
-# ── Case 102: tier != 0 (tier 1) -> tier-review gate inactive, allow ──────────
+# ── Case 102: tier=1, NO tier-review status -> DENY ───────────────────────────
+# The headline regression lock: the gate now runs at EVERY tier, not just
+# tier=0. Before the hoist this was "tier-review gate inactive, allow" — a
+# tier=1 PR with no tier-review status merged unimpeded. It must now deny.
 TIER1_GO_MARKER="<!-- coderails-eval-summary v1 pr=42 head_sha=${TIER_HEAD_SHA} result=GO tier=1 -->"
 out=$(
   MOCK_GH_HEAD_SHA="$TIER_HEAD_SHA" MOCK_GH_COMMENT_BODY="$TIER1_GO_MARKER" MOCK_TR_STATUSES_JSON="[]" \
   run_eval "$(payload "gh pr merge 42 --squash" "$T_TIER_REVIEWED_42" "$REPO_TIER")"
 )
-check "tier-1 PR (not tier 0) -> tier-review gate inactive, allow" ALLOW "$(decision_of "$out")"
+check "tier-1 PR, no tier-review status -> DENY (was: gate inactive, allow)" DENY "$(decision_of "$out")"
+case "$out" in
+  *"tier-review"*) : ;;
+  *) printf 'FAIL - tier-1 no-status deny reason should mention tier-review (got: %s)\n' "$out"; fails=$((fails + 1)) ;;
+esac
 
 # ── Case 103: config key absent (REPO_EVAL has no tier_review block) -> allow ─
 out=$(
@@ -1186,5 +1205,85 @@ out=$(
   run_eval "$(payload "gh pr merge 42 --squash" "$T_REVIEWED_42" "$REPO_EVAL")"
 )
 check "tier-0 PR, config key absent -> tier-review gate inactive, allow" ALLOW "$(decision_of "$out")"
+
+# ── Case 104: tier=1, verdict=legitimate tier=1 -> ALLOW ─────────────────────
+out=$(
+  MOCK_GH_HEAD_SHA="$TIER_HEAD_SHA" MOCK_GH_COMMENT_BODY="$TIER1_GO_MARKER" MOCK_TR_STATUSES_JSON="$TIER1_LEGIT" \
+  run_eval "$(payload "gh pr merge 42 --squash" "$T_TIER_REVIEWED_42" "$REPO_TIER")"
+)
+check "tier-1 PR, tier-review verdict=legitimate tier=1 -> allow" ALLOW "$(decision_of "$out")"
+
+# ── Case 105: tier=1 claim, status carries tier=0 token -> DENY (mismatch) ───
+out=$(
+  MOCK_GH_HEAD_SHA="$TIER_HEAD_SHA" MOCK_GH_COMMENT_BODY="$TIER1_GO_MARKER" MOCK_TR_STATUSES_JSON="$SUCCESS_RIGHT_CREATOR" \
+  run_eval "$(payload "gh pr merge 42 --squash" "$T_TIER_REVIEWED_42" "$REPO_TIER")"
+)
+check "tier-1 claim satisfied by a tier=0 status -> DENY (token mismatch)" DENY "$(decision_of "$out")"
+
+# ── Case 106: tier=0 claim, status carries tier=1 token -> DENY (reverse) ────
+out=$(
+  MOCK_GH_HEAD_SHA="$TIER_HEAD_SHA" MOCK_GH_COMMENT_BODY="$TIER0_GO_MARKER" MOCK_TR_STATUSES_JSON="$TIER1_LEGIT" \
+  run_eval "$(payload "gh pr merge 42 --squash" "$T_TIER_REVIEWED_42" "$REPO_TIER")"
+)
+check "tier-0 claim satisfied by a tier=1 status -> DENY (reverse direction)" DENY "$(decision_of "$out")"
+
+# ── Case 107: tier=1, verdict=self_edit -> DENY ───────────────────────────────
+out=$(
+  MOCK_GH_HEAD_SHA="$TIER_HEAD_SHA" MOCK_GH_COMMENT_BODY="$TIER1_GO_MARKER" MOCK_TR_STATUSES_JSON="$TIER1_SELF_EDIT" \
+  run_eval "$(payload "gh pr merge 42 --squash" "$T_TIER_REVIEWED_42" "$REPO_TIER")"
+)
+check "tier-1 PR, tier-review verdict=self_edit -> deny" DENY "$(decision_of "$out")"
+
+# ── Case 108: tier=1, verdict=insufficient -> DENY ────────────────────────────
+out=$(
+  MOCK_GH_HEAD_SHA="$TIER_HEAD_SHA" MOCK_GH_COMMENT_BODY="$TIER1_GO_MARKER" MOCK_TR_STATUSES_JSON="$TIER1_INSUFFICIENT" \
+  run_eval "$(payload "gh pr merge 42 --squash" "$T_TIER_REVIEWED_42" "$REPO_TIER")"
+)
+check "tier-1 PR, tier-review verdict=insufficient -> deny" DENY "$(decision_of "$out")"
+
+# ── Case 109: tier=1, verdict=illegitimate -> DENY ────────────────────────────
+out=$(
+  MOCK_GH_HEAD_SHA="$TIER_HEAD_SHA" MOCK_GH_COMMENT_BODY="$TIER1_GO_MARKER" MOCK_TR_STATUSES_JSON="$TIER1_ILLEGITIMATE" \
+  run_eval "$(payload "gh pr merge 42 --squash" "$T_TIER_REVIEWED_42" "$REPO_TIER")"
+)
+check "tier-1 PR, tier-review verdict=illegitimate -> deny" DENY "$(decision_of "$out")"
+
+# ── Case 110: tier=1, WRONG creator -> DENY (creator check at every tier) ────
+out=$(
+  MOCK_GH_HEAD_SHA="$TIER_HEAD_SHA" MOCK_GH_COMMENT_BODY="$TIER1_GO_MARKER" MOCK_TR_STATUSES_JSON="$SUCCESS_WRONG_CREATOR" \
+  run_eval "$(payload "gh pr merge 42 --squash" "$T_TIER_REVIEWED_42" "$REPO_TIER")"
+)
+check "tier-1 PR, tier-review WRONG creator -> deny" DENY "$(decision_of "$out")"
+case "$out" in
+  *"creator"*) : ;;
+  *) printf 'FAIL - tier-1 wrong-creator deny reason should mention creator (got: %s)\n' "$out"; fails=$((fails + 1)) ;;
+esac
+
+# ── Case 111: tier=1 claim, status token tier=12 -> DENY (delimiter case) ────
+# A naive substring match ("tier=1" found inside "tier=12 host=h") would
+# wrongly ALLOW here; only a delimited (space/EOL-bounded) match correctly
+# DENIES. The reverse (claim=12) is not reachable here: the eval-artifact
+# marker regex caps tier at [0-2] (scripts/lib/eval-artifact.sh), so a
+# tier=12 marker is rejected by that earlier gate for an unrelated reason —
+# it would never exercise this gate's own tier-token comparison.
+out=$(
+  MOCK_GH_HEAD_SHA="$TIER_HEAD_SHA" MOCK_GH_COMMENT_BODY="$TIER1_GO_MARKER" MOCK_TR_STATUSES_JSON="$TIER12_LEGIT" \
+  run_eval "$(payload "gh pr merge 42 --squash" "$T_TIER_REVIEWED_42" "$REPO_TIER")"
+)
+check "tier-1 claim satisfied by a tier=12 status -> DENY (delimiter)" DENY "$(decision_of "$out")"
+
+# ── Case 112: tier=0, bare state=success with NO verdict=legitimate -> DENY ──
+# Hook parity with merge.sh: a bare state=success (no description, or a
+# description lacking verdict=legitimate) was previously ACCEPTED here (the
+# hook checked only state+creator, unlike merge.sh's description check).
+out=$(
+  MOCK_GH_HEAD_SHA="$TIER_HEAD_SHA" MOCK_GH_COMMENT_BODY="$TIER0_GO_MARKER" MOCK_TR_STATUSES_JSON="$SUCCESS_NO_VERDICT" \
+  run_eval "$(payload "gh pr merge 42 --squash" "$T_TIER_REVIEWED_42" "$REPO_TIER")"
+)
+check "tier-0 PR, bare state=success with no verdict=legitimate -> DENY (hook parity)" DENY "$(decision_of "$out")"
+case "$out" in
+  *"verdict=legitimate"*) : ;;
+  *) printf 'FAIL - no-verdict deny reason should mention verdict=legitimate (got: %s)\n' "$out"; fails=$((fails + 1)) ;;
+esac
 
 [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails)"; exit 1; }
