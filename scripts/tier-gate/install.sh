@@ -54,9 +54,9 @@ tgi_check_tools() {
 # MACHINE_USER (the login tg_post_status's live GET /user identity check
 # must match before it will ever post — see tier-gate-runner.sh's
 # tg_read_machine_user). MACHINE_USER lives here, in the same root-owned
-# file, rather than as a plist env var, because the daemon's plist only ever
-# passes TIER_GATE_CREDS (a path) — nothing else propagates into the
-# installed launchd job. Named, actionable failure per missing piece; rc 0
+# file, rather than as a plist env var. The daemon's plist passes
+# TIER_GATE_CREDS (a path) and TIER_GATE_REPO — but MACHINE_USER is
+# deliberately not among them. Named, actionable failure per missing piece; rc 0
 # only when all three are present with non-empty values.
 tgi_check_credentials() {
     local path="$1"

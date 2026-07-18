@@ -359,8 +359,8 @@ tg_read_gh_token() {
 # with a named error on stderr if the file is missing or the key is absent.
 # Lives in the SAME root-owned creds file as the other credentials — NOT an
 # env var. The daemon's plist (com.coderails.tier-gate.plist.template)
-# only ever passes TIER_GATE_CREDS (a path) via EnvironmentVariables; nothing
-# propagates a separate bare env var into the installed launchd job. Reading
+# passes TIER_GATE_CREDS (a path) and TIER_GATE_REPO via EnvironmentVariables;
+# MACHINE_USER is deliberately not among them. Reading
 # the expected login from inside the creds file (rather than trusting an
 # env var the daemon never actually receives) is what makes the identity
 # check in tg_post_status functional in production, not just in a test
