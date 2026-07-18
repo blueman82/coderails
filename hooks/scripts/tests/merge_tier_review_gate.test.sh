@@ -183,6 +183,14 @@ TIER1_ILLEGITIMATE="[{\"state\":\"failure\",\"creator\":{\"login\":\"${MACHINE_U
 # Delimiter case: a tier=1 status must NOT satisfy a tier=12 claim (substring
 # match without a delimiter would wrongly pass this).
 TIER12_LEGIT="[{\"state\":\"success\",\"creator\":{\"login\":\"${MACHINE_USER}\"},\"description\":\"verdict=legitimate tier=12 host=h\"}]"
+# Adjacent same-length-prefix delimiter case: a tier=1 status must NOT satisfy
+# a tier=10 claim either — "tier=1" is a substring of "tier=10" too, distinct
+# from the two-digit tier=12 case above (different digit count, same failure
+# mode a naive unanchored match would miss).
+TIER10_LEGIT="[{\"state\":\"success\",\"creator\":{\"login\":\"${MACHINE_USER}\"},\"description\":\"verdict=legitimate tier=10 host=h\"}]"
+# Tier=2 fixture — the third and last legal tier value ([0-2]); tier=0 and
+# tier=1 are both already exercised above, this closes the gap.
+TIER2_LEGIT="[{\"state\":\"success\",\"creator\":{\"login\":\"${MACHINE_USER}\"},\"description\":\"verdict=legitimate tier=2 host=h\"}]"
 
 # ─── Test 1: tier=0, config set, no status at all -> block ───────────────────
 run_tier_gate_test 0 "$MACHINE_USER" "[]"
@@ -292,5 +300,20 @@ check_msg "tier=1 wrong-creator block message names the misconfig/forgery framin
 run_tier_gate_test 1 "$MACHINE_USER" "$TIER12_LEGIT"
 rc=$?
 check "tier-review gate BLOCKS tier=1 claim satisfied by a tier=12 status (delimiter)" 1 $rc
+
+# ─── Test 17: tier=1 claim, status token tier=10 -> BLOCK (adjacent digit) ───
+# Same failure mode as Test 16 but with a different digit count: "tier=1" is
+# also a substring of "tier=10 host=h". A naive substring match would wrongly
+# ALLOW here too; only the delimited match correctly BLOCKS.
+run_tier_gate_test 1 "$MACHINE_USER" "$TIER10_LEGIT"
+rc=$?
+check "tier-review gate BLOCKS tier=1 claim satisfied by a tier=10 status (adjacent digit)" 1 $rc
+
+# ─── Test 18: tier=2 claim, matching verdict=legitimate tier=2 -> ALLOW ──────
+# tier=2 is the third and last legal artifact tier ([0-2]); tier=0 and tier=1
+# are both already exercised above (Tests 1-15), this closes the gap.
+run_tier_gate_test 2 "$MACHINE_USER" "$TIER2_LEGIT"
+rc=$?
+check "tier-review gate passes at tier=2 with matching verdict=legitimate tier=2" 0 $rc
 
 [[ $fails -eq 0 ]] && { echo PASS; exit 0; } || { echo "FAIL ($fails)"; exit 1; }
