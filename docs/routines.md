@@ -193,7 +193,7 @@ logs `no-drift` and stops — no branch, no PR — before any git state is
 touched, which keeps a healthy night from ever producing an empty or
 no-op PR. If drift is found, it fixes it and drives the fix through the
 full gate chain (task-evals frozen before the edit, a
-`git diff origin/main...HEAD --name-only` manifest assertion — three-dot,
+`git diff origin/main...HEAD --name-status` manifest assertion — three-dot,
 because a sibling PR merging into `main` mid-run must not make a clean
 branch look contaminated — review, post-review, post-evals, merge) and
 merges its own PR with no human in the loop.
