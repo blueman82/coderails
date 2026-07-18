@@ -293,7 +293,9 @@ failure exit.
 
 **Its full self-merge chain has never actually fired.** As of this
 writing `promotion-runs.log` holds exactly one line
-(`2026-07-12T23:32:06Z predicate=unmet retros=14 lifecycle=1 decay=0`)
+(`2026-07-12T23:32:06Z predicate=unmet retros=14 lifecycle=1 decay=0`),
+which predates the `run=ok` terminal-marker write described above and so
+carries no marker of its own
 — the predicate has stayed unmet since this routine shipped, so it has
 never gone past step 1 to open, review, or merge a PR headlessly.
 `sync-docs-nightly` (above) follows this routine's pattern — same
