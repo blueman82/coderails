@@ -301,14 +301,29 @@ tg_commit_statuses() {
 }
 
 # tg_repo_slug
-# Echoes "<owner>/<repo>" resolved from `git remote get-url origin`. Native
-# reimplementation of git-common.sh's repo() (same regex) rather than
-# sourcing it — see this file's header comment on why the daemon never
-# sources scripts/lib/*.sh at runtime. Needed because the credentialled
-# status POST (tg_post_status, below) moved off `gh api repos/{owner}/{repo}/
-# ...`, whose {owner}/{repo} placeholder gh resolves for us automatically —
-# curl has no equivalent, so this function is curl's replacement for it.
+# Echoes "<owner>/<repo>" — the repo this daemon gates. Resolved from the
+# TIER_GATE_REPO env value (an owner/repo string the plist sets, rendered at
+# install time) when present, else falls back to parsing `git remote get-url
+# origin`. Native reimplementation of git-common.sh's repo() (same regex) for
+# the fallback rather than sourcing it — see this file's header comment on why
+# the daemon never sources scripts/lib/*.sh at runtime. Needed because the
+# credentialled status POST (tg_post_status, below) moved off `gh api
+# repos/{owner}/{repo}/...`, whose {owner}/{repo} placeholder gh resolves for
+# us automatically — curl has no equivalent, so this function is curl's
+# replacement for it.
+#
+# TIER_GATE_REPO is the production path: the INSTALLED daemon runs as root from
+# its install dir (/etc/coderails-tier-gate/), which is NOT a git repo, so the
+# git-remote fallback returns empty there and every read/status-post would fail
+# closed with no repo to gate. The env value is validated to owner/repo shape
+# before use — a malformed value is ignored and the git-remote fallback runs, so
+# a garbage env can never be echoed as a slug. The fallback keeps a checkout
+# (dev, the test suite) working with no env set.
 tg_repo_slug() {
+    if [[ "${TIER_GATE_REPO:-}" =~ ^[^/]+/[^/]+$ ]]; then
+        printf '%s' "$TIER_GATE_REPO"
+        return 0
+    fi
     local url; url=$(git remote get-url origin 2>/dev/null) || return 1
     if [[ "$url" =~ github\.com[:/]([^/]+)/(.+)$ ]]; then
         local name="${BASH_REMATCH[2]}"

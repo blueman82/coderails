@@ -988,4 +988,61 @@ set_user_login_response "coderails-tier-bot"  # restore for any later use
 check "I5: failed identity fetch (empty /user) -> nothing posted (fail closed)" "" "$posted"
 check_contains "I5: failed identity fetch -> named identity error" "identity" "$out"
 
+# ══════════════════════════════════════════════════════════════════════════
+# tg_repo_slug — repo identity resolution. The installed daemon runs as root
+# from its install dir (/etc/coderails-tier-gate/), which is NOT a git repo,
+# so `git remote get-url origin` returns empty and every read/status-post
+# fails closed. TIER_GATE_REPO (an owner/repo env value, set by the plist)
+# must resolve the slug directly, with the git-remote parse kept as a fallback
+# for a checkout (tests, dev). Each test runs its cwd change and TIER_GATE_REPO
+# state in a subshell so neither leaks into the tests after it.
+# ══════════════════════════════════════════════════════════════════════════
+
+# RS1 (the fix): TIER_GATE_REPO set to an owner/repo value -> echoes it exactly.
+out=$(
+    export TIER_GATE_REPO="octo/repo"
+    tg_repo_slug
+)
+check "RS1: TIER_GATE_REPO set -> echoes it exactly" "octo/repo" "$out"
+
+# RS2 (the regression lock — the exact live-fire failure): TIER_GATE_REPO set
+# AND cwd is NOT a git repo. Pre-fix, tg_repo_slug ignores the env and runs
+# `git remote get-url origin` from a non-git cwd, which returns empty -> empty
+# slug -> the daemon can't tell which repo it gates. Post-fix, the env path
+# resolves regardless of cwd. This is the test that must be RED against the
+# pre-fix code.
+NONGIT_DIR="$TMP/not-a-git-repo"
+mkdir -p "$NONGIT_DIR"
+out=$(
+    cd "$NONGIT_DIR"
+    export TIER_GATE_REPO="octo/repo"
+    tg_repo_slug
+)
+check "RS2: TIER_GATE_REPO set + non-git cwd -> STILL echoes it (regression lock)" "octo/repo" "$out"
+
+# RS3 (fallback preserved): TIER_GATE_REPO UNSET, cwd is a git repo with a
+# github origin -> falls back to the git-remote parse (old behaviour intact).
+GITREPO_DIR="$TMP/a-git-repo"
+mkdir -p "$GITREPO_DIR"
+(
+    cd "$GITREPO_DIR"
+    git init -q
+    git remote add origin "https://github.com/fallback-owner/fallback-repo.git"
+)
+out=$(
+    cd "$GITREPO_DIR"
+    env -u TIER_GATE_REPO bash -c 'source "'"$RUNNER"'"; tg_repo_slug'
+)
+check "RS3: TIER_GATE_REPO unset + git cwd -> falls back to git-remote parse" "fallback-owner/fallback-repo" "$out"
+
+# RS4 (don't trust a garbage env value): TIER_GATE_REPO set to a malformed
+# value (not owner/repo shape) -> falls back to the git-remote parse rather
+# than echoing the junk.
+out=$(
+    cd "$GITREPO_DIR"
+    export TIER_GATE_REPO="not-a-valid-slug"
+    tg_repo_slug
+)
+check "RS4: malformed TIER_GATE_REPO -> falls back to git-remote parse" "fallback-owner/fallback-repo" "$out"
+
 [[ $fails -eq 0 ]] && { echo PASS; exit 0; } || { echo "FAIL ($fails)"; exit 1; }
