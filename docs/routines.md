@@ -272,14 +272,23 @@ from its `created` date (one lesson has recurred at least once), and (3)
 completed a full create → recur → decay lifecycle). Until all three
 hold, the routine is dormant.
 
-A dormant run still appends one line to `promotion-runs.log`
-(`<ISO8601> predicate=unmet retros=<n> lifecycle=<0|1> decay=<0|1>`) and
-stops there — no branch, no PR, no gate chain. That log line is
-deliberately this routine's `expectedArtifact` (an `exists` predicate),
-precisely so a dormant run still passes its artifact gate: dormancy is
-the expected steady state for a long while after this routine ships, not
-a failure, and the routine shouldn't escalate every week just because the
-graduation bar hasn't been met yet.
+A dormant run appends its predicate line to `promotion-runs.log`
+(`<ISO8601> predicate=unmet retros=<n> lifecycle=<0|1> decay=<0|1>`),
+then appends a `run=ok` terminal marker and stops — no branch, no PR, no
+gate chain. That `run=ok` is what passes the gate, and it is written
+deliberately: dormancy is the expected steady state for a long while
+after this routine ships, not a failure, so the routine shouldn't
+escalate every week just because the graduation bar hasn't been met yet.
+
+The gate is a `last-marker` predicate (`success: "run=ok"`, `failures:
+["abort=", "delivery=started"]`), not `exists` — `promotion-runs.log` is
+append-only, so a file-present check would keep reading green off an old
+run's line forever. Keying on the last terminal marker makes each run's
+own outcome decide. `delivery=started` is a failure marker because the
+met-path writes it immediately after `predicate=met`, before mining: any
+death anywhere in mining, drafting, or delivery leaves it as the last
+marker and the gate reads that run RED, without having to enumerate every
+failure exit.
 
 **Its full self-merge chain has never actually fired.** As of this
 writing `promotion-runs.log` holds exactly one line
