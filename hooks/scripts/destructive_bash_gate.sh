@@ -51,9 +51,9 @@ cmd=$(echo "$input" | jq -r '.tool_input.command // empty')
 #                                         whitespace, not the word
 #        ${IFS:=word} ${IFS=word}        assign-default — same reasoning
 #        ${IFS:?word} ${IFS?word}        error-if-unset — same reasoning
-#      NOT collapsed by this pass alone (left as opaque, non-matching literal
-#      text — but see the WHITESPACE-WORD CARVE-OUT below, which runs FIRST
-#      and re-collapses one specific case of it):
+#      NOT matched by this pass at all (already fully handled by the
+#      WORD-EMITTING RULE below, which runs FIRST and consumes every :+/+
+#      shape before this pass ever sees the text):
 #        ${IFS:+word} ${IFS+word}        alternate-value — the ONE operator
 #                                         whose branches are inverted: since
 #                                         IFS is normally set, this
@@ -61,10 +61,8 @@ cmd=$(echo "$input" | jq -r '.tool_input.command // empty')
 #                                         IFS's whitespace value (verified:
 #                                         bash expands `${IFS:+word}` to the
 #                                         literal text "word" when IFS is
-#                                         set). A non-whitespace word (e.g.
-#                                         SET) must stay untouched — collapsing
-#                                         it would erase real text rather than
-#                                         normalize whitespace.
+#                                         set). Handled by pass 0's
+#                                         word-emitting rule, not this pass.
 #        ${IFSx} (any identifier char    a DIFFERENT variable name, not an
 #          right after IFS)              operator on IFS at all — the first
 #                                         body character must not itself be
@@ -84,7 +82,10 @@ cmd=$(echo "$input" | jq -r '.tool_input.command // empty')
 #      elsewhere in this file / AGENTS.md — obfuscation no normal workflow
 #      emits, and an actor who can craft it already has shell capability):
 #        - a WORD containing a nested ${...} / $(...) (e.g. ${IFS:-${OTHER}},
-#          ${IFS:+${IFS}}) — the body `[^}]*` stops at the first "}".
+#          ${IFS:+${IFS}}) — the body `[^}]*` stops at the first "}". This
+#          applies equally to pass 0's own word capture below: a :+/+ word
+#          holding a nested expansion is only emitted up to its first "}",
+#          same ceiling, not a separate one.
 #        - a substring form that expands to the EMPTY string (${IFS:0:0},
 #          ${IFS:3}, offset past IFS's 3 bytes): this pass OVER-collapses it
 #          to a space, fabricating a separator bash does not create. This
@@ -95,22 +96,58 @@ cmd=$(echo "$input" | jq -r '.tool_input.command // empty')
 #          unbounded, no regex can enumerate variable names.
 #      These are recorded as a future unit (see the residual handoff); closing
 #      them needs position-based tokenisation, not more normalization passes.
-#   0. WHITESPACE-WORD CARVE-OUT (runs BEFORE pass 1, on the untouched $cmd):
-#      ${IFS:+word} / ${IFS+word} substitute the literal WORD (see above) —
-#      but the word is attacker-controlled, and when the word is ONE OR MORE
-#      literal space/tab characters, that substituted word IS whitespace,
-#      making the whole expansion a real separator with no dependency on
-#      IFS's own value at all (verified by ground truth: `rm${IFS:+ }-rf`
-#      removes a real non-empty directory; found by security review — the
-#      blanket "never collapse :+/+" exclusion in pass 1 covered the common
-#      case, `${IFS:+SET}`, but missed this one). An EMPTY word (${IFS:+})
-#      is excluded from this carve-out: it substitutes nothing, gluing the
-#      surrounding tokens together (`rm${IFS:+}-rf` -> the single, inert,
-#      nonexistent token `rm-rf`), not separating them — verified this stays
-#      harmless, so only a NON-EMPTY run of spaces/tabs is collapsed here.
-#      [[:space:]] (not \t) — POSIX bracket expressions don't treat \t as an
-#      escape, so a literal-backslash-t class silently fails to match a real
-#      tab byte; confirmed via direct testing on this machine's sed.
+#   0. WORD-EMITTING RULE FOR :+/+ (runs BEFORE pass 1, on the untouched
+#      $cmd): ${IFS:+word} / ${IFS+word} substitute the literal WORD (see
+#      above), and the word is attacker-controlled — so this pass emits the
+#      captured word VERBATIM in place of the whole expansion, for ANY word,
+#      rather than collapsing the expansion to a single space. A blanket
+#      collapse-to-space would be WRONG in two directions at once: it erases
+#      real non-whitespace text (`${IFS:+SET}` must become the literal "SET",
+#      not " "), and — the bug two prior versions of this pass had — it can
+#      UNDER-collapse a word that is whitespace-led but not whitespace-only
+#      (`${IFS:+ -r}` collapsed to " " gives "rm f", which still ALLOWS at
+#      the gate while bash still runs `rm -rf`; found by security review,
+#      confirmed by ground truth). Emitting the word verbatim glues correctly
+#      either way: a whitespace-only word (`${IFS:+ }`) becomes a real
+#      separator; a whitespace-LED word (`${IFS:+ -r}`) becomes the intended
+#      flag text with its separator attached (`rm${IFS:+ -r}f` -> `rm -rf`);
+#      a non-whitespace word (`${IFS:+SET}`, `${IFS:+x -r}`) is unchanged
+#      text, exactly as bash would expand it, so it stays exactly as
+#      dangerous or harmless as if it had been typed literally (an EMPTY
+#      word, `${IFS:+}`, emits nothing, gluing the surrounding tokens into a
+#      single inert token — `rm${IFS:+}-rf` -> `rm-rf` — verified harmless,
+#      matching bash's own empty-expansion behaviour of "no token boundary
+#      introduced"). This also covers a word that is flag text with NO
+#      leading whitespace of its own, separated from the previous token by
+#      its own separate space or ${IFS} (`rm ${IFS:+-rf} x`,
+#      `rm${IFS}${IFS:+-rf} x`) — under the old blanket exclusion the
+#      `${IFS:+-rf}` stayed opaque in both and evaded every detector while
+#      bash still expanded it to a real -rf token.
+#      [[:space:]] (not \t) is used in every OTHER pass in this file for the
+#      same documented reason (POSIX bracket expressions don't treat \t as
+#      an escape, so a literal-backslash-t class silently fails to match a
+#      real tab byte) — this pass has no [[:space:]] of its own since it
+#      captures the word unconditionally rather than testing its class, so
+#      that footgun does not apply here, but a tab-led word is still
+#      exercised by a dedicated test given the emphasis elsewhere in this
+#      file on tab as its own bypass vector. A NEWLINE-led word (e.g.
+#      ${IFS:+<NL>-r}) is NOT closed by this pass: sed operates per-line, so
+#      a real embedded newline splits the expansion across two lines before
+#      this pass's regex ever sees it as one string, and even a hypothetical
+#      cross-line match would still only feed the downstream line-oriented
+#      detectors (grep/pattern=) a verb and flag on separate lines. This is
+#      the SAME pre-existing architectural ceiling as the documented
+#      backslash-newline-continuation gap in this file's test suite (a
+#      literal `rm`+newline+`-rf`, no $IFS involved at all, already evades
+#      detection with no change from this PR — confirmed at both base and
+#      head) — not a gap this :+/+ fix introduces or leaves open within its
+#      own family, and not closable by another normalization pass.
+#      CEILING (unchanged by this pass, documented below with the other
+#      pass-1 ceilings): a word containing a NESTED ${...}/$(...) is not
+#      resolved by this pass either — `[^}]*` still stops at the first "}",
+#      so `${IFS:+${OTHER}}` is captured only up to that inner "}" and the
+#      remainder is left as stray text. That needs recursive/position-based
+#      parsing, not another sed pass; same ceiling as documented for pass 1.
 #   2. Bare $IFS: only when NOT followed by an identifier character
 #      ([A-Za-z0-9_]) or followed by end-of-string. Bash variable names
 #      extend as far as identifier characters continue, so `$IFSOMETHING` is
@@ -123,7 +160,7 @@ cmd=$(echo "$input" | jq -r '.tool_input.command // empty')
 # as before — it does not gain or lose any blocklist keyword by doing so, so
 # it stays ALLOWED; the substitution changes whitespace, never introduces or
 # removes a destructive verb/flag token.
-cmd=$(printf '%s' "$cmd" | sed -E 's/\$\{IFS:?\+[[:space:]]+\}/ /g' | sed -E 's/\$\{IFS(\}|[^A-Za-z0-9_:+}][^}]*\}|:[^+}][^}]*\})/ /g' | sed -E 's/\$IFS([^A-Za-z0-9_]|$)/ \1/g')
+cmd=$(printf '%s' "$cmd" | sed -E 's/\$\{IFS:?\+([^}]*)\}/\1/g' | sed -E 's/\$\{IFS(\}|[^A-Za-z0-9_:+}][^}]*\}|:[^+}][^}]*\})/ /g' | sed -E 's/\$IFS([^A-Za-z0-9_]|$)/ \1/g')
 
 if [ -z "$cmd" ]; then
   exit 0

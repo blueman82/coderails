@@ -948,6 +948,56 @@ check "rm \${IFS:+  }-rf (two-space word) -> deny" DENY \
 check "chmod \${IFS:+ }-R\${IFS:+ }777 (whitespace word) -> deny" DENY \
   "$(run "$(payload "chmod\${IFS:+ }-R\${IFS:+ }777 /var/www")")"
 
+# SECURITY (word-general :+/+ operator rule): the whitespace-word carve-out
+# above only re-collapses a word that is ENTIRELY whitespace. A word that
+# BEGINS with whitespace and then continues into real flag text (e.g.
+# " -r") is NOT all-whitespace, so the carve-out's own [[:space:]]+ anchor
+# does not match it, and it falls through to pass 1's blanket ":+/+ never
+# collapse" exclusion untouched — no whitespace character reaches any
+# detector, but bash still splits on the leading space and reconstructs a
+# real armed command (verified: `rm${IFS:+ -r}f /tmp/x` -> bash argv
+# [rm][-rf][/tmp/x], a real rm -rf). The fix generalises the operator rule
+# instead of adding a fourth one-off literal: emit the :+/+ word VERBATIM
+# (not collapsed to a single space) regardless of its first character. This
+# also closes a second, adjacent form the same family exposes: a word that
+# is flag text with NO leading whitespace at all, separated from the
+# preceding token by its OWN separate space or ${IFS} (e.g.
+# `rm ${IFS:+-rf} x` / `rm${IFS}${IFS:+-rf} x`) — the old blanket exclusion
+# left `${IFS:+-rf}` opaque in both, so the gate saw "rm " followed
+# immediately by "$" (not "-"), missing the \brm[[:space:]]+-rf pattern
+# entirely, while bash expands it to a real `-rf` token glued onto "rm ".
+check "rm \${IFS:+ -r}f (leading-ws-then-flag word) -> deny" DENY \
+  "$(run "$(payload "rm\${IFS:+ -r}f /tmp/x")")"
+check "git\${IFS:+ }reset\${IFS:+ --hard} (chained leading-ws words) -> deny" DENY \
+  "$(run "$(payload "git\${IFS:+ }reset\${IFS:+ --hard} HEAD~1")")"
+check "rm \${IFS:+-rf} (flag word, own separate space) -> deny" DENY \
+  "$(run "$(payload "rm \${IFS:+-rf} /tmp/x")")"
+check "rm\${IFS}\${IFS:+-rf} (flag word, own separate \${IFS}) -> deny" DENY \
+  "$(run "$(payload "rm\${IFS}\${IFS:+-rf} /tmp/x")")"
+
+# Controls that MUST stay allowed after the word-general fix — emitting the
+# word verbatim must not turn a harmless word into a destructive one.
+check "echo \${IFS:+x -r} (word starts non-whitespace, glues harmlessly) -> allow" ALLOW \
+  "$(run "$(payload "echo rm\${IFS:+x -r}f /tmp/x")")"
+
+# assign-default / error-if-unset operators on IFS: already collapsed
+# correctly by pass 1 (verified), just lacked a behavioural test.
+check "rm \${IFS:=y}-rf (assign-default) -> deny" DENY \
+  "$(run "$(payload "rm\${IFS:=y}-rf /tmp/x")")"
+check "rm \${IFS=y}-rf (assign-default, no colon) -> deny" DENY \
+  "$(run "$(payload "rm\${IFS=y}-rf /tmp/x")")"
+check "DROP \${IFS:?y}TABLE (error-if-unset) -> deny" DENY \
+  "$(run "$(payload "DROP\${IFS:?y}TABLE users;")")"
+check "DROP \${IFS?y}TABLE (error-if-unset, no colon) -> deny" DENY \
+  "$(run "$(payload "DROP\${IFS?y}TABLE users;")")"
+
+# Literal-TAB whitespace-word in the :+ carve-out — guards the
+# [[:space:]]-not-\t footgun the pass-0 comment warns about (BSD sed does
+# not treat a literal backslash-t as an escape inside a bracket class, so a
+# \t-based class would silently fail to match a real tab byte).
+check "rm \${IFS:+<TAB>-r}f (tab-leading word) -> deny" DENY \
+  "$(run "$(payload "$(printf 'rm${IFS:+\t-r}f /tmp/x')")")"
+
 # --- Deliverable B: source-drift tripwire ---------------------------------
 # Extracts the gate's blockable set (the 5 fixed-label `deny "..."` call
 # sites, plus the monolithic `pattern=` regex line verbatim) and compares it
