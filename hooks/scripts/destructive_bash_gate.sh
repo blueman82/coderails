@@ -88,10 +88,15 @@ cmd=$(echo "$input" | jq -r '.tool_input.command // empty')
 #          same ceiling, not a separate one.
 #        - a substring form that expands to the EMPTY string (${IFS:0:0},
 #          ${IFS:3}, offset past IFS's 3 bytes): this pass OVER-collapses it
-#          to a space, fabricating a separator bash does not create. This
-#          only ever fails OPEN on obfuscated input that base also allowed —
-#          it never turns a base-DENIED real command into an allow (verified
-#          non-regression), so it is a missed catch, never a lost one.
+#          to a space, fabricating a separator bash does not create. Bash
+#          itself expands e.g. rm${IFS:0:0}-rf to the single inert token
+#          "rm-rf" (command-not-found, harmless), but this pass turns it into
+#          "rm -rf" and the gate DENIES it. That is a false-DENY — it FAILS
+#          CLOSED (over-blocks), not open, and it is not a missed catch. It
+#          only ever fires on attack-shaped input (a destructive verb glued
+#          to a flag via an empty-expanding ${IFS...}); no legitimate command
+#          is written that way, so it breaks zero real workflows (verified:
+#          non-regression holds — no base-DENIED command becomes an allow).
 #        - an arbitrary user variable holding whitespace (X=' '; rm${X}-rf) —
 #          unbounded, no regex can enumerate variable names.
 #      These are recorded as a future unit (see the residual handoff); closing
