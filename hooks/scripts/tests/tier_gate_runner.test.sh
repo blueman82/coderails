@@ -241,15 +241,20 @@ check "T1: exit reports gated (tier 0, legitimate)" "0" "$?"
 check_contains "T1: pending posted before terminal" "state=pending" "$posted"
 check_contains "T1: terminal success posted" "state=success" "$posted"
 check_contains "T1: success description carries verdict=legitimate" "verdict=legitimate" "$posted"
+check_contains "T1: success description carries tier=0 token" "tier=0" "$posted"
+check_not_contains "T1: tier-0 success never carries verdict=not_tier_0 (laundering audit, reverse direction)" "verdict=not_tier_0" "$posted"
 check_contains "T1: pending posted BEFORE success (ordering)" "$(printf 'POST state=pending')" "$(printf '%s' "$posted" | head -1)"
 check_contains "T1: summary line reports tier=0" "tier=0" "$out"
 
 # ══════════════════════════════════════════════════════════════════════════
-# Test 2: tier-1/2 artifact -> posts NOTHING and reports a not_tier_0 skip.
-# (Post-nothing contract, b87272c: a tier!=0 claim mints no tier-review status
-# — merge.sh only consults the gate when PR_EVAL_TIER==0, so a tier-1/2 PR
-# needs none, and posting a reusable success was the verdict-laundering surface
-# that commit closed. No judge call, no pending step.)
+# Test 2: tier-1/2 artifact -> ATTESTS: posts `success` verdict=not_tier_0,
+# no judge call, no pending step. (Attest-all replaces post-nothing: the old
+# post-nothing contract minted no reusable token but also let a tier!=0 claim
+# skip the gate ENTIRELY — including the denylist, which only ran inside the
+# tier-0 branch — so a tier=1 claim could edit scripts/tier-gate/ and
+# self-merge unreviewed. Attest-all posts a DISTINCT, non-laundering status
+# for every tier so merge.sh/enforce_pr_workflow always find a tier-review
+# status to inspect, and the self-edit leash (below) runs for every tier.)
 # ══════════════════════════════════════════════════════════════════════════
 TEST_PR=102 TEST_SHA=sha1
 reset_gh_state
@@ -259,10 +264,79 @@ tg_judge() { echo "JUDGE CALLED — should never happen for tier 1/2" >> "$TMP/j
 rm -f "$TMP/judge_called.log"
 out=$(run_gate)
 posted=$(cat "$POSTED_LOG")
-check "T2: tier-1 artifact -> no status posted (post-nothing contract)" "" "$posted"
-check_contains "T2: summary reports the not_tier_0 skip" "reason=not_tier_0" "$out"
+check_contains "T2: tier-1 artifact -> success posted (attest-all)" "state=success" "$posted"
+check_contains "T2: success description carries verdict=not_tier_0" "verdict=not_tier_0" "$posted"
+check_contains "T2: summary reports tier=1" "tier=1" "$out"
 check_not_contains "T2: NO pending status posted for tier-1 short-circuit" "state=pending" "$posted"
 [[ -f "$TMP/judge_called.log" ]] && fails=$((fails+1)) && echo "FAIL - T2: judge was called for a tier-1 artifact" || echo "ok   - T2: judge NOT called for tier-1 artifact"
+
+# ══════════════════════════════════════════════════════════════════════════
+# Test 2b: tier-1 claim touching a denylisted path (scripts/tier-gate/ — the
+# daemon's own source) -> failure + verdict=self_edit, NO judge call. This is
+# the self-edit leash: the old post-nothing daemon never even fetched the file
+# list for a tier!=0 claim, so a tier=1 PR editing the daemon's own source
+# self-merged with no gate at all. Attest-all fetches the file list for EVERY
+# tier and blocks a self-edit before anything else.
+# ══════════════════════════════════════════════════════════════════════════
+TEST_PR=112 TEST_SHA=sha1_selfedit
+reset_gh_state
+set_files_json '[{"filename":"scripts/tier-gate/tier-gate-runner.sh","additions":3,"deletions":1}]'
+set_comment_body "$(tier1_body "$TEST_PR" "$TEST_SHA" GO)"
+tg_judge() { echo "JUDGE CALLED" >> "$TMP/judge_called_t2b.log"; printf 'legitimate\nx\n'; return 0; }
+rm -f "$TMP/judge_called_t2b.log"
+out=$(run_gate)
+posted=$(cat "$POSTED_LOG")
+check_contains "T2b: tier-1 self-edit -> failure posted" "state=failure" "$posted"
+check_contains "T2b: failure description carries verdict=self_edit" "verdict=self_edit" "$posted"
+check_contains "T2b: summary reports tier=1" "tier=1" "$out"
+check_not_contains "T2b: self-edit is never posted as success" "state=success" "$posted"
+[[ -f "$TMP/judge_called_t2b.log" ]] && fails=$((fails+1)) && echo "FAIL - T2b: judge called for a tier-1 self-edit" || echo "ok   - T2b: judge NOT called for a tier-1 self-edit"
+
+# ══════════════════════════════════════════════════════════════════════════
+# Test 2c: tier-1 claim whose files fetch fails (HTTP 500) -> error posted,
+# fail-closed. Reuses the SAME B3 fetch as tier-0 (hoisted above the tier
+# fork), so it inherits the same fail-closed posture: a failed fetch must
+# never be read as "no self-edit, proceed".
+# ══════════════════════════════════════════════════════════════════════════
+TEST_PR=113 TEST_SHA=sha1_files_500
+reset_gh_state
+set_comment_body "$(tier1_body "$TEST_PR" "$TEST_SHA" GO)"
+FILES_HTTP_CODE=500
+tg_judge() { echo "JUDGE CALLED" >> "$TMP/judge_called_t2c.log"; printf 'legitimate\nx\n'; return 0; }
+rm -f "$TMP/judge_called_t2c.log"
+out=$(run_gate)
+posted=$(cat "$POSTED_LOG")
+FILES_HTTP_CODE=200
+check_contains "T2c: tier-1 files-fetch failure -> error posted (fail closed)" "state=error" "$posted"
+check_not_contains "T2c: files-fetch failure never posted as success" "state=success" "$posted"
+[[ -f "$TMP/judge_called_t2c.log" ]] && fails=$((fails+1)) && echo "FAIL - T2c: judge called despite a failed files fetch" || echo "ok   - T2c: judge NOT called on a failed tier-1 files fetch"
+
+# ══════════════════════════════════════════════════════════════════════════
+# Test 2d: tier-1 claim with NO embedded evals.json in the artifact body ->
+# error posted, verdict=error. Presence check ONLY — the extracted content
+# must never reach the judge (there is no judge call for tier-1/2 at all).
+# ══════════════════════════════════════════════════════════════════════════
+TEST_PR=114 TEST_SHA=sha1_no_evals
+reset_gh_state
+set_files_json '[{"filename":"some/file.sh","additions":1,"deletions":0}]'
+set_comment_body "$(printf '<!-- coderails-eval-summary v1 pr=%s head_sha=%s result=GO tier=1 -->\nNo fenced json block here.' "$TEST_PR" "$TEST_SHA")"
+tg_judge() { echo "JUDGE CALLED" >> "$TMP/judge_called_t2d.log"; printf 'legitimate\nx\n'; return 0; }
+rm -f "$TMP/judge_called_t2d.log"
+out=$(run_gate)
+posted=$(cat "$POSTED_LOG")
+check_contains "T2d: tier-1 missing embedded evals -> error posted" "state=error" "$posted"
+check_contains "T2d: error description carries verdict=error" "verdict=error" "$posted"
+check_not_contains "T2d: missing embedded evals never posted as success" "state=success" "$posted"
+[[ -f "$TMP/judge_called_t2d.log" ]] && fails=$((fails+1)) && echo "FAIL - T2d: judge called despite missing embedded evals" || echo "ok   - T2d: judge NOT called for tier-1 with no embedded evals"
+
+# ══════════════════════════════════════════════════════════════════════════
+# Test 2e: cross-tier laundering audit. No tier-1/2 description may EVER
+# contain the substring verdict=legitimate (the exact token merge.sh/
+# enforce_pr_workflow treat as a genuine judged tier-0 approval — see
+# merge.sh:147). Checks every status this file posts across T2/T2b/T2c/T2d.
+# ══════════════════════════════════════════════════════════════════════════
+all_tier1_posted="$(cat "$POSTED_LOG")"
+check_not_contains "T2e: no tier-1/2 status ever carries verdict=legitimate (laundering audit)" "verdict=legitimate" "$all_tier1_posted"
 
 # ══════════════════════════════════════════════════════════════════════════
 # Test 3: already-terminal SHA (success already posted) -> no action

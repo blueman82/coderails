@@ -793,9 +793,14 @@ tg_prefilter() {
 #   2. Find the newest eval-artifact comment for that SHA. None -> no action
 #      (nothing to gate yet).
 #   3. tg_should_gate decides whether this SHA needs (re-)gating.
-#   4. tier-1/2 artifact -> short-circuit success/not-tier-0, no judge call.
-#   5. tier-0 artifact -> post pending, extract embedded evals.json, judge,
-#      post the terminal status (success|failure|error).
+#   4. Fetch the PR's changed-file list ONCE (B3 fail-closed fetch, shared by
+#      every tier) and run the self-edit leash against it.
+#   5. tier-1/2 artifact (attest-all): mechanical checks only — self-edit
+#      leash, then embedded-evals presence — then post a distinct terminal
+#      status. No judge call, no pending step.
+#   6. tier-0 artifact: post pending, extract embedded evals.json, prefilter,
+#      judge, post the terminal status (success|failure|error) — UNCHANGED
+#      from the pre-attest-all flow except the `tier=0` token in descriptions.
 # Echoes a one-line summary of the action taken (or "skip: <reason>") to
 # stdout for logging; callers/tests read this for assertions.
 tg_gate_pr() {
@@ -819,23 +824,81 @@ tg_gate_pr() {
         return 0
     fi
 
-    if [[ "$tier" != "0" ]]; then
-        # A non-tier-0 claim needs NO tier-review status, and must not get one:
-        # merge.sh only consults the tier-review gate when PR_EVAL_TIER == 0
-        # (scripts/merge.sh), so a tier-1/2 PR is gated entirely by its normal
-        # eval artifact, never by us. Posting a `success` here used to mint a
-        # reusable state=success token an adversary could launder into a tier-0
-        # pass: claim tier=1 (short-circuit success, no judge), then edit the
-        # marker to tier=0 in place — the SHA is unchanged, tg_should_gate sees
-        # the terminal success and never re-judges, and merge.sh (which reads
-        # only state+creator) can't tell that success from a real `legitimate`
-        # verdict. Posting nothing closes it: no token to launder, and a later
-        # tier=0 edit finds NO terminal status, so tg_should_gate re-judges it.
-        printf 'skip: pr=%s sha=%s reason=not_tier_0 (tier=%s, no status posted)\n' "$pr" "$sha" "$tier"
+    # ── Shared B3 fail-closed file-list fetch, hoisted above the tier fork ──
+    # Every tier needs this: the self-edit leash (below) must run BEFORE a
+    # tier-1/2 claim can short-circuit, or a tier=1 PR could edit the
+    # daemon's own source (scripts/tier-gate/) and self-merge ungated — the
+    # exact hole attest-all closes. Fetched ONCE and reused by the tier-0
+    # branch's prefilter, never re-fetched.
+    #
+    # B3 fail-closed: both filelist/line_count are derived from ONE GET
+    # /pulls/{pr}/files. curl exits 0 on an HTTP 4xx/5xx (unlike gh), so
+    # tg_gh_get's own HTTP-status check is what makes a failed fetch
+    # fail-closed here; we additionally treat an empty file list as a hard
+    # error. Letting a failed/empty fetch through would set file_count=0 /
+    # line_count=0, which SAILS THROUGH the prefilter (0 > cap is false) and
+    # would also make the self-edit leash see an empty (non-matching)
+    # filelist — a false "no self-edit" read. per_page=100 single page (no
+    # Link-following): a tier-0 diff is <=3 files by the size cap, so a PR
+    # that legitimately exceeds one page of files is already not tier-0;
+    # tier-1/2 PRs are not size-capped, but a self-edit only needs ONE
+    # matching filename to appear on page 1 to be caught.
+    local files_json
+    files_json=$(tg_gh_get "pulls/${pr}/files?per_page=100") || {
+        tg_post_status "$sha" "error" "verdict=error tier=${tier} host=$(hostname)"
+        printf 'gated: pr=%s sha=%s tier=%s verdict=error state=error reason=files_fetch_failed\n' "$pr" "$sha" "$tier"
+        return 1
+    }
+    local filelist line_count
+    filelist=$(printf '%s' "$files_json" | jq -r '.[].filename // empty' 2>/dev/null)
+    line_count=$(printf '%s' "$files_json" | jq '[.[] | .additions + .deletions] | add // 0' 2>/dev/null)
+    if [[ -z "$filelist" ]]; then
+        tg_post_status "$sha" "error" "verdict=error tier=${tier} host=$(hostname)"
+        printf 'gated: pr=%s sha=%s tier=%s verdict=error state=error reason=empty_file_list\n' "$pr" "$sha" "$tier"
+        return 1
+    fi
+
+    # Self-edit leash: a claim at ANY tier that touches scripts/tier-gate/
+    # (the daemon's own source) is blocked outright, before any tier-specific
+    # logic runs. Reuses TIER_GATE_PATH_DENYLIST — the same paths tg_prefilter
+    # blocks for tier-0 — but greps it directly rather than calling
+    # tg_prefilter, since tg_prefilter also applies the size cap, and tier-1/2
+    # is not subject to that cap.
+    local self_edit_path
+    self_edit_path=$(printf '%s\n' "$filelist" | grep -E "$TIER_GATE_PATH_DENYLIST" | head -1)
+    if [[ -n "$self_edit_path" ]]; then
+        tg_post_status "$sha" "failure" "verdict=self_edit tier=${tier} host=$(hostname)"
+        printf 'gated: pr=%s sha=%s tier=%s verdict=self_edit state=failure reason=self_edit_path=%s\n' \
+            "$pr" "$sha" "$tier" "$self_edit_path"
         return 0
     fi
 
-    tg_post_status "$sha" "pending" "verdict=pending host=$(hostname)"
+    if [[ "$tier" != "0" ]]; then
+        # Attest-all (replaces the old post-nothing contract): a tier-1/2
+        # claim gets NO judge call and NO pending status — only mechanical
+        # checks — but it MUST post a terminal status so merge.sh/
+        # enforce_pr_workflow always find a tier-review status to inspect,
+        # and so the self-edit leash above always runs. The old post-nothing
+        # design minted no reusable token, but it also meant a tier!=0 claim
+        # skipped the gate ENTIRELY (including the denylist, which only ran
+        # inside the tier-0 branch) — a tier=1 PR could edit the daemon's own
+        # source and self-merge unreviewed. verdict=not_tier_0 is a DISTINCT
+        # token from verdict=legitimate — merge.sh's tier-0 path requires the
+        # exact substring verdict=legitimate (scripts/merge.sh:147), so this
+        # can never be misread as a genuine judged approval, and PR_EVAL_TIER
+        # != 0 means merge.sh never even looks at this status.
+        local evals_json_nj; evals_json_nj=$(tg_extract_evals_json "$body")
+        if [[ -z "$evals_json_nj" ]]; then
+            tg_post_status "$sha" "error" "verdict=error tier=${tier} host=$(hostname)"
+            printf 'gated: pr=%s sha=%s tier=%s verdict=error state=error reason=no_embedded_evals_json\n' "$pr" "$sha" "$tier"
+            return 1
+        fi
+        tg_post_status "$sha" "success" "verdict=not_tier_0 tier=${tier} host=$(hostname)"
+        printf 'gated: pr=%s sha=%s tier=%s verdict=not_tier_0 state=success\n' "$pr" "$sha" "$tier"
+        return 0
+    fi
+
+    tg_post_status "$sha" "pending" "verdict=pending tier=0 host=$(hostname)"
 
     # Well-formedness gate only: a tier-0 artifact with no embedded
     # evals.json is a malformed-artifact error, independent of the judge.
@@ -843,43 +906,19 @@ tg_gate_pr() {
     # its presence is all this checks.
     local evals_json; evals_json=$(tg_extract_evals_json "$body")
     if [[ -z "$evals_json" ]]; then
-        tg_post_status "$sha" "error" "verdict=error host=$(hostname)"
+        tg_post_status "$sha" "error" "verdict=error tier=0 host=$(hostname)"
         printf 'gated: pr=%s sha=%s tier=0 verdict=error state=error reason=no_embedded_evals_json\n' "$pr" "$sha"
         return 1
     fi
 
     # Fix 2: mechanical pre-filter BEFORE any model call. filelist/line
     # count only — never diff content — so this step cannot be influenced
-    # by anything the defendant wrote.
-    #
-    # B3 fail-closed: both are derived from ONE GET /pulls/{pr}/files. curl
-    # exits 0 on an HTTP 4xx/5xx (unlike gh), so tg_gh_get's own HTTP-status
-    # check is what makes a failed fetch fail-closed here; we additionally treat
-    # an empty file list as a hard error. Letting a failed/empty fetch through
-    # would set file_count=0 / line_count=0, which SAILS THROUGH the prefilter
-    # (0 > cap is false) and reaches the judge on a phantom empty diff — the
-    # exact permissive read this gate exists to prevent. per_page=100 single
-    # page (no Link-following): a tier-0 diff is <=3 files by the size cap, so a
-    # PR that legitimately exceeds one page of files is already not tier-0.
-    local files_json
-    files_json=$(tg_gh_get "pulls/${pr}/files?per_page=100") || {
-        tg_post_status "$sha" "error" "verdict=error host=$(hostname)"
-        printf 'gated: pr=%s sha=%s tier=0 verdict=error state=error reason=files_fetch_failed\n' "$pr" "$sha"
-        return 1
-    }
-    local filelist line_count
-    filelist=$(printf '%s' "$files_json" | jq -r '.[].filename // empty' 2>/dev/null)
-    line_count=$(printf '%s' "$files_json" | jq '[.[] | .additions + .deletions] | add // 0' 2>/dev/null)
-    if [[ -z "$filelist" ]]; then
-        tg_post_status "$sha" "error" "verdict=error host=$(hostname)"
-        printf 'gated: pr=%s sha=%s tier=0 verdict=error state=error reason=empty_file_list\n' "$pr" "$sha"
-        return 1
-    fi
-
+    # by anything the defendant wrote. Uses the filelist/line_count already
+    # fetched above (shared B3 fetch); not re-fetched here.
     local prefilter_out
     prefilter_out=$(tg_prefilter "$filelist" "$line_count")
     if [[ $? -ne 0 ]]; then
-        tg_post_status "$sha" "failure" "verdict=illegitimate host=$(hostname)"
+        tg_post_status "$sha" "failure" "verdict=illegitimate tier=0 host=$(hostname)"
         printf 'gated: pr=%s sha=%s tier=0 verdict=illegitimate state=failure reason=prefilter_%s\n' \
             "$pr" "$sha" "$(printf '%s' "$prefilter_out" | tr -s ' \n' '_')"
         return 0
@@ -898,18 +937,18 @@ tg_gate_pr() {
     # changed content as a legitimate tier-0 basis.
     local diff diff_bytes
     diff=$(tg_gh_get "pulls/${pr}" "application/vnd.github.v3.diff") || {
-        tg_post_status "$sha" "error" "verdict=error host=$(hostname)"
+        tg_post_status "$sha" "error" "verdict=error tier=0 host=$(hostname)"
         printf 'gated: pr=%s sha=%s tier=0 verdict=error state=error reason=diff_fetch_failed\n' "$pr" "$sha"
         return 1
     }
     if [[ -z "$diff" ]]; then
-        tg_post_status "$sha" "error" "verdict=error host=$(hostname)"
+        tg_post_status "$sha" "error" "verdict=error tier=0 host=$(hostname)"
         printf 'gated: pr=%s sha=%s tier=0 verdict=error state=error reason=empty_diff\n' "$pr" "$sha"
         return 1
     fi
     diff_bytes=$(printf '%s' "$diff" | wc -c | tr -d ' ')
     if [[ "$diff_bytes" -gt "$TIER_GATE_MAX_DIFF_BYTES" ]]; then
-        tg_post_status "$sha" "failure" "verdict=illegitimate host=$(hostname)"
+        tg_post_status "$sha" "failure" "verdict=illegitimate tier=0 host=$(hostname)"
         printf 'gated: pr=%s sha=%s tier=0 verdict=illegitimate state=failure reason=diff_bytes_%s_over_%s\n' \
             "$pr" "$sha" "$diff_bytes" "$TIER_GATE_MAX_DIFF_BYTES"
         return 0
@@ -919,7 +958,7 @@ tg_gate_pr() {
     judge_out=$(tg_judge "$tier" "$diff")
     judge_rc=$?
     if [[ $judge_rc -ne 0 ]]; then
-        tg_post_status "$sha" "error" "verdict=error host=$(hostname)"
+        tg_post_status "$sha" "error" "verdict=error tier=0 host=$(hostname)"
         printf 'gated: pr=%s sha=%s tier=0 verdict=error state=error reason=judge_rc_%s\n' "$pr" "$sha" "$judge_rc"
         return 1
     fi
@@ -927,15 +966,15 @@ tg_gate_pr() {
     local verdict; verdict=$(printf '%s' "$judge_out" | head -1 | tr -d '[:space:]')
     case "$verdict" in
         legitimate)
-            tg_post_status "$sha" "success" "verdict=legitimate host=$(hostname)"
+            tg_post_status "$sha" "success" "verdict=legitimate tier=0 host=$(hostname)"
             printf 'gated: pr=%s sha=%s tier=0 verdict=legitimate state=success\n' "$pr" "$sha"
             ;;
         illegitimate|insufficient)
-            tg_post_status "$sha" "failure" "verdict=${verdict} host=$(hostname)"
+            tg_post_status "$sha" "failure" "verdict=${verdict} tier=0 host=$(hostname)"
             printf 'gated: pr=%s sha=%s tier=0 verdict=%s state=failure\n' "$pr" "$sha" "$verdict"
             ;;
         *)
-            tg_post_status "$sha" "error" "verdict=error host=$(hostname)"
+            tg_post_status "$sha" "error" "verdict=error tier=0 host=$(hostname)"
             printf 'gated: pr=%s sha=%s tier=0 verdict=error state=error reason=unrecognised_verdict_%s\n' "$pr" "$sha" "$verdict"
             return 1
             ;;
