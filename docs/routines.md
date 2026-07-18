@@ -155,7 +155,7 @@ Field by field:
   - `{ kind: "contains", marker }` — file present, fresh, and contains
     `marker` (itself `{date}`/`{runId}`/`{vault}`-substituted).
   - `{ kind: "last-marker", success, failures }` — file present, fresh,
-    and its terminal markers read in order. For append-only logs where
+    and its terminal markers read in order — for append-only logs where
     every run adds a line. Only the **last** terminal marker in the
     file decides: the run passes if that marker contains `success`, and
     fails if it contains any entry of `failures` — or if the file holds no
