@@ -398,5 +398,90 @@ check "DECEPTIVE-SUCCESS: exits non-zero (rev-parse guard catches the lie)" "1" 
 check "DECEPTIVE-SUCCESS: does NOT print 'Pushed'" "0" "$(printf '%s' "$OUT" | grep -c 'Pushed')"
 check "DECEPTIVE-SUCCESS: reports the specific mismatch reason" "1" "$(printf '%s' "$OUT" | grep -q 'does not match local HEAD' && echo 1 || echo 0)"
 
+# ══════════════════════════════════════════════════════════════════════════
+# ─── --add FLAG: opt-in staging of a caller's own new files ─────────────────
+# ══════════════════════════════════════════════════════════════════════════
+# Fixture carries THREE kinds of change at once: a tracked-modified file
+# (base.txt, always staged by `git add -u`), a NEW untracked file the caller
+# names via --add (mynew.txt), and a FOREIGN untracked file the caller never
+# named (foreign.txt) — proving --add stages only what it's told to, not
+# every untracked file (that would be the git-add-A over-staging bug this
+# change must avoid reintroducing).
+R=$(new_fixture add_flag_stages_named)
+BEFORE_HEAD=$(git -C "$R" rev-parse HEAD)
+echo "changed" > "$R/base.txt"
+echo "new" > "$R/mynew.txt"
+echo "not mine" > "$R/foreign.txt"
+run_push "$R" --add mynew.txt
+AFTER_HEAD=$(git -C "$R" rev-parse HEAD)
+committed_files=$(git -C "$R" show --name-only -1 --format="" HEAD 2>/dev/null)
+check "ADD-FLAG: does not crash (exit 0)" "0" "$LAST_RC"
+check "ADD-FLAG: HEAD advances (a new commit was made)" "1" "$([ "$BEFORE_HEAD" != "$AFTER_HEAD" ] && echo 1 || echo 0)"
+check "ADD-FLAG: tracked-modified file committed" "1" "$(printf '%s' "$committed_files" | grep -c base.txt)"
+check "ADD-FLAG: named new file committed" "1" "$(printf '%s' "$committed_files" | grep -c mynew.txt)"
+check "ADD-FLAG: foreign untracked file NOT committed" "0" "$(printf '%s' "$committed_files" | grep -c foreign.txt)"
+check "ADD-FLAG: foreign file still warned as untracked" "1" "$(printf '%s' "$LAST_OUT" | grep -c '^! Untracked')"
+check "ADD-FLAG: warning names the foreign file" "1" "$(printf '%s' "$LAST_OUT" | grep -c 'foreign.txt')"
+# Scoped to the untracked-file warning's OWN lines (not the whole output,
+# which legitimately mentions mynew.txt elsewhere — e.g. "create mode ...
+# mynew.txt" in git's own commit summary) — the warning block itself must not
+# name a file that --add already staged.
+check "ADD-FLAG: warning does NOT name the added file (it's no longer untracked)" "0" "$(printf '%s' "$LAST_OUT" | grep '^!' | grep -c 'mynew.txt')"
+
+# ─── --add FLAG + commit message: flag parsing doesn't corrupt either value ──
+# The add-path must not be swallowed as the commit message, and the message
+# must not be swallowed as an add-path. Asserts the commit SUBJECT exactly
+# (fixture has no JIRA key configured on this branch, so no prefix to strip).
+R=$(new_fixture add_flag_with_message)
+echo "changed" > "$R/base.txt"
+echo "new" > "$R/mynew.txt"
+run_push "$R" --add mynew.txt "my message"
+committed_files=$(git -C "$R" show --name-only -1 --format="" HEAD 2>/dev/null)
+subject=$(git -C "$R" log -1 --format=%s)
+check "ADD-FLAG+MSG: does not crash (exit 0)" "0" "$LAST_RC"
+check "ADD-FLAG+MSG: commit subject is exactly the message (not corrupted by flag parsing)" "my message" "$subject"
+check "ADD-FLAG+MSG: named new file committed" "1" "$(printf '%s' "$committed_files" | grep -c mynew.txt)"
+
+# ─── MESSAGE-FIRST ORDERING: matches push.md's actual invocation shape ──────
+# push.md invokes push.sh as `"$ARGUMENTS" --add path`, i.e. message BEFORE
+# --add, the reverse order of the ADD-FLAG+MSG case above. The `want_add`
+# latch is order-independent by construction, but this locks the specific
+# order the real caller uses rather than relying on that alone.
+R=$(new_fixture add_flag_message_first)
+echo "changed" > "$R/base.txt"
+echo "new" > "$R/mynew.txt"
+run_push "$R" "my message" --add mynew.txt
+committed_files=$(git -C "$R" show --name-only -1 --format="" HEAD 2>/dev/null)
+subject=$(git -C "$R" log -1 --format=%s)
+check "MSG-FIRST: does not crash (exit 0)" "0" "$LAST_RC"
+check "MSG-FIRST: commit subject is exactly the message" "my message" "$subject"
+check "MSG-FIRST: named new file committed" "1" "$(printf '%s' "$committed_files" | grep -c mynew.txt)"
+
+# ─── MULTIPLE --add FLAGS: each repeated --add stages its own path ──────────
+R=$(new_fixture add_flag_multiple)
+echo "changed" > "$R/base.txt"
+echo "a" > "$R/a.txt"
+echo "b" > "$R/b.txt"
+echo "not mine" > "$R/foreign2.txt"
+run_push "$R" --add a.txt --add b.txt
+committed_files=$(git -C "$R" show --name-only -1 --format="" HEAD 2>/dev/null)
+check "ADD-FLAG-MULTI: does not crash (exit 0)" "0" "$LAST_RC"
+check "ADD-FLAG-MULTI: first added path committed" "1" "$(printf '%s' "$committed_files" | grep -c a.txt)"
+check "ADD-FLAG-MULTI: second added path committed" "1" "$(printf '%s' "$committed_files" | grep -c b.txt)"
+check "ADD-FLAG-MULTI: foreign file NOT committed" "0" "$(printf '%s' "$committed_files" | grep -c foreign2.txt)"
+
+# ─── DEFAULT UNCHANGED: no --add flag ⇒ new untracked file still not staged ──
+# Regression lock: the additive --add branch must not alter the default
+# (no-flag) path. Overlaps UNTRACKED-PRESENT above by design — an explicit
+# lock scoped to this feature's own fixture, independent of that case.
+R=$(new_fixture no_add_flag_default)
+echo "changed" > "$R/base.txt"
+echo "new" > "$R/mynew.txt"
+run_push "$R"
+committed_files=$(git -C "$R" show --name-only -1 --format="" HEAD 2>/dev/null)
+check "NO-ADD-DEFAULT: does not crash (exit 0)" "0" "$LAST_RC"
+check "NO-ADD-DEFAULT: new untracked file NOT committed" "0" "$(printf '%s' "$committed_files" | grep -c mynew.txt)"
+check "NO-ADD-DEFAULT: untracked-file warning printed" "1" "$(printf '%s' "$LAST_OUT" | grep -c '^! Untracked')"
+
 printf '\n--- push_staging.test.sh: %d failing checks ---\n' "$fails"
 [ "$fails" -eq 0 ] && exit 0 || exit 1

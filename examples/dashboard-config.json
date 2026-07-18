@@ -82,7 +82,7 @@
       "expectedArtifact": {
         "artifactPath": "/path/to/.claude/coderails-dashboard/routines/docs-sync/run-{date}.log",
         "maxAgeSeconds": 129600,
-        "predicate": { "kind": "exists" }
+        "predicate": { "kind": "last-marker", "success": "run=ok", "failures": ["abort=", "refused="] }
       },
       "escalation": ["notification", "vault-note"]
     },
@@ -106,7 +106,7 @@
       "expectedArtifact": {
         "artifactPath": "/path/to/.claude/agentic-loop/-path-to-coderails-.git/promotion-runs.log",
         "maxAgeSeconds": 691200,
-        "predicate": { "kind": "exists" }
+        "predicate": { "kind": "last-marker", "success": "run=ok", "failures": ["abort=", "delivery=started"] }
       },
       "escalation": ["notification", "vault-note"]
     },

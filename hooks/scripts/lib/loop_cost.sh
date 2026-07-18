@@ -112,6 +112,48 @@ dc_mine_token_usage() {
 
   local scanned=${#transcripts[@]}
 
+  # Headless `claude -p` children (skills/dashboard/scripts/run-builder.sh's
+  # bypass spawn) land as their OWN top-level <proj>/<other-session>.jsonl
+  # with no subagents/ linkage back to this orchestrator session — no sound
+  # attribution path exists (see notes field below), so their tokens are
+  # never folded into per_model/total_tokens. But silently dropping them
+  # entirely was the bug this change exists to fix: SURFACE a count of
+  # candidate orphans instead, so a reader sees the undercount rather than
+  # trusting a silently-low total.
+  #
+  # Candidate = a top-level *.jsonl sibling in the SAME <proj> dir as the
+  # orchestrator transcript (excluding the orchestrator transcript itself),
+  # whose mtime falls within a window around the orchestrator transcript's
+  # own mtime (approximates "was active around the same time" — a bare
+  # sibling count with no time filter would include every unrelated session
+  # ever run against this repo, which is noise, not signal). Window is
+  # symmetric and overridable via CLAUDE_HEADLESS_WINDOW_SECS for tests;
+  # default 1h covers a single build's wall-clock budget
+  # (BUILDER_WALL_CLOCK_SECS default 2700s in run-builder.sh) with margin.
+  local headless_window="${CLAUDE_HEADLESS_WINDOW_SECS:-3600}"
+  # Guard a non-numeric override so the -le comparison below never leaks a raw
+  # "[: integer expression expected" to stderr — fall back to the default rather
+  # than mining a garbage window (still fail-open either way).
+  case "$headless_window" in ''|*[!0-9]*) headless_window=3600 ;; esac
+  local headless_count=0
+  # Portable mtime-in-epoch-seconds: GNU stat first, BSD/macOS stat second.
+  # f_mtime/diff are declared here, NOT inside the loop body — a `local`
+  # redeclared on each iteration makes zsh 5.9 echo "name=value" to stdout on
+  # the 2nd+ pass, corrupting this function's single-JSON-object output
+  # contract (the file has explicit zsh-compat support, so this matters).
+  local orch_mtime f_mtime diff
+  orch_mtime=$(stat -c %Y "$orch_transcript" 2>/dev/null || stat -f %m "$orch_transcript" 2>/dev/null)
+  if [ -n "$orch_mtime" ]; then
+    while IFS= read -r -d '' f; do
+      [ "$f" = "$orch_transcript" ] && continue
+      f_mtime=$(stat -c %Y "$f" 2>/dev/null || stat -f %m "$f" 2>/dev/null)
+      [ -n "$f_mtime" ] || continue
+      diff=$(( f_mtime - orch_mtime ))
+      [ "$diff" -lt 0 ] && diff=$(( -diff ))
+      [ "$diff" -le "$headless_window" ] && headless_count=$((headless_count + 1))
+    done < <(find "$proj" -maxdepth 1 -type f -name '*.jsonl' -print0 2>/dev/null)
+  fi
+
   # Per-line tolerant parse (stage 1: drop malformed lines) then aggregate
   # over the survivors (stage 2), same two-stage style as dc_extract_last_text.
   local mined
@@ -169,6 +211,7 @@ dc_mine_token_usage() {
     --slurpfile per_model <(printf '%s' "$mined") \
     --slurpfile prices "$prices_file" \
     --argjson scanned "$scanned" \
+    --argjson headless_excluded "$headless_count" \
     '
     ($per_model[0]) as $pm
     | ($prices[0]) as $pt
@@ -210,7 +253,8 @@ dc_mine_token_usage() {
         transcripts_scanned: $scanned,
         unpriced_models: $unpriced_models,
         models_used: ($per_model_out | keys | sort),
-        notes: "headless claude -p child sessions excluded (own top-level session, no parent linkage)"
+        headless_children_excluded_count: $headless_excluded,
+        notes: "headless claude -p child sessions excluded from per_model/total_tokens (own top-level session, no parent linkage to attribute their tokens) — see headless_children_excluded_count for how many candidates were detected in the same project dir within the activity window"
       }
     ' 2>/dev/null)
 

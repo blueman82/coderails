@@ -202,6 +202,122 @@ describe("checkArtifact", () => {
     expect(result.passed).toBe(false);
   });
 
+  // sync-docs-nightly's actual defect shape: an `exists` predicate accepts a
+  // log whose run aborted or was refused, as long as it wrote *something*.
+  // These two cases pin the `contains`/`run=ok` gate against that shape — an
+  // aborted/refused run must fail, and only a run that actually reached
+  // `run=ok` may pass. If checkArtifact ignored the marker and only checked
+  // presence, both assertions would pass.
+  it("fails a 'contains'/'run=ok' predicate on a docs-sync run log that aborted without reaching run=ok", () => {
+    const path = join(dir, "run-2026-07-17.log");
+    writeFileSync(path, "2026-07-17T10:00:00Z abort=duplicate-work\n2026-07-17T10:00:01Z refused=merge\n");
+    const artifact: ExpectedArtifact = {
+      artifactPath: path,
+      maxAgeSeconds: 129600,
+      predicate: { kind: "contains", marker: "run=ok" },
+    };
+    const result = checkArtifact(artifact, { ...ctx, vault: dir });
+    expect(result.passed).toBe(false);
+    expect(result.reason).toMatch(/marker/i);
+  });
+
+  it("passes a 'contains'/'run=ok' predicate on a docs-sync run log that reached run=ok", () => {
+    const path = join(dir, "run-2026-07-17.log");
+    writeFileSync(path, "2026-07-17T10:00:00Z start\n2026-07-17T10:05:00Z run=ok\n");
+    const artifact: ExpectedArtifact = {
+      artifactPath: path,
+      maxAgeSeconds: 129600,
+      predicate: { kind: "contains", marker: "run=ok" },
+    };
+    const result = checkArtifact(artifact, { ...ctx, vault: dir });
+    expect(result.passed).toBe(true);
+  });
+
+  // ---- last-marker predicate (defect 3: same-date-append false-green) ----
+  // The per-date run log holds MANY runs appended in sequence. A whole-file
+  // `contains` check false-passes an ABORTED run whenever an EARLIER run that
+  // day already wrote the success marker — the stale line is still in the file.
+  // The `last-marker` predicate keys on the LAST terminal marker so the most
+  // recent run's outcome wins. These cases pin that behaviour.
+  const lastMarker: ExpectedArtifact["predicate"] = {
+    kind: "last-marker",
+    success: "run=ok",
+    failures: ["abort=", "refused="],
+  };
+
+  // THE RED-LOCK — the exact live defect: a green run's run=ok FOLLOWED by a
+  // later same-date abort must read NOT-passed. A whole-file contains(run=ok)
+  // (what #220 shipped) returns true here — that is the production false-green
+  // reproduced live as run 8bedfa1c. This test fails against that implementation.
+  it("last-marker: run=ok followed by a later same-date abort reads NOT passed", () => {
+    const path = join(dir, "run-2026-07-17.log");
+    writeFileSync(
+      path,
+      [
+        "2026-07-17T16:11:28Z run=ok",
+        "2026-07-17T16:24:27Z abort=denylisted-doc-drift detail=docs/routines.md",
+        "",
+      ].join("\n"),
+    );
+    const artifact: ExpectedArtifact = { artifactPath: path, maxAgeSeconds: 129600, predicate: lastMarker };
+    const result = checkArtifact(artifact, { ...ctx, vault: dir });
+    expect(result.passed).toBe(false);
+    expect(result.reason).toMatch(/failure/i);
+  });
+
+  it("last-marker: run=ok as the last terminal marker (trailing non-marker note after it) reads passed", () => {
+    // A successful run may append a trailing non-terminal note AFTER run=ok
+    // (observed: note=scope-rationale at 16:18 after run=ok at 16:11). A naive
+    // last-LINE check would miss the marker; the last MARKER-SET match must win.
+    const path = join(dir, "run-2026-07-17.log");
+    writeFileSync(
+      path,
+      [
+        "2026-07-17T16:11:28Z run=ok",
+        "2026-07-17T16:18:50Z note=scope-rationale INSTALLATION.md-in-scope",
+        "",
+      ].join("\n"),
+    );
+    const artifact: ExpectedArtifact = { artifactPath: path, maxAgeSeconds: 129600, predicate: lastMarker };
+    const result = checkArtifact(artifact, { ...ctx, vault: dir });
+    expect(result.passed).toBe(true);
+    expect(result.reason).toMatch(/success/i);
+  });
+
+  it("last-marker: a refused= as the last terminal marker reads NOT passed", () => {
+    const path = join(dir, "run-2026-07-17.log");
+    writeFileSync(path, "2026-07-17T10:00:00Z run=ok\n2026-07-17T11:00:00Z refused=post-evals\n");
+    const artifact: ExpectedArtifact = { artifactPath: path, maxAgeSeconds: 129600, predicate: lastMarker };
+    const result = checkArtifact(artifact, { ...ctx, vault: dir });
+    expect(result.passed).toBe(false);
+    expect(result.reason).toMatch(/refused=/);
+  });
+
+  it("last-marker: a log with no terminal marker at all reads NOT passed", () => {
+    const path = join(dir, "run-2026-07-17.log");
+    writeFileSync(path, "2026-07-17T10:00:00Z stage=audit drift-found\n2026-07-17T10:01:00Z stage=branch\n");
+    const artifact: ExpectedArtifact = { artifactPath: path, maxAgeSeconds: 129600, predicate: lastMarker };
+    const result = checkArtifact(artifact, { ...ctx, vault: dir });
+    expect(result.passed).toBe(false);
+    expect(result.reason).toMatch(/no terminal marker/i);
+  });
+
+  it("last-marker: green-then-abort-then-green on the same date reads passed (latest run wins)", () => {
+    const path = join(dir, "run-2026-07-17.log");
+    writeFileSync(
+      path,
+      [
+        "2026-07-17T09:00:00Z run=ok",
+        "2026-07-17T12:00:00Z abort=denylisted-doc-drift",
+        "2026-07-17T15:00:00Z run=ok",
+        "",
+      ].join("\n"),
+    );
+    const artifact: ExpectedArtifact = { artifactPath: path, maxAgeSeconds: 129600, predicate: lastMarker };
+    const result = checkArtifact(artifact, { ...ctx, vault: dir });
+    expect(result.passed).toBe(true);
+  });
+
   it("fails a template using {vault} whose ../ traversal resolves outside the vault root", () => {
     const outside = join(dir, "..", "outside-secret.md");
     writeFileSync(outside, "leaked");
@@ -228,5 +344,149 @@ describe("checkArtifact", () => {
     const result = checkArtifact(artifact, { ...ctx, vault: dir });
     expect(result.reason).toMatch(/does not exist/i);
     void path;
+  });
+
+  // ---- loop-retro-promotion-weekly last-marker gate (append-log false-green,
+  // same defect class as defect 3 above, closed for this routine's own
+  // markers: run=ok / delivery=started / abort=) ----
+  //
+  // loop-retro-promotion-weekly has four terminal states (SKILL.md): (a)
+  // dormant predicate-unmet stop (now writes run=ok), (b) delivery completes
+  // through merge (writes run=ok after merge), (c) manifest abort on a
+  // zero-lesson diff (writes abort=), and (d) delivery enters but dies before
+  // merge — e.g. push/review/post-review/post-evals/merge fails (leaves
+  // delivery=started, the last thing written at §4 entry, as the final
+  // line). (d) is the gap the old `exists` predicate silently false-greened:
+  // the log file existed (from a PRIOR successful run's run=ok), so `exists`
+  // read PASSED even though the run in progress never finished. This lock
+  // uses this routine's own predicate shape, distinct from the docs-sync
+  // `lastMarker` const above (whose failures are ["abort=","refused="] and do
+  // not include "delivery=started").
+  const lrpLastMarker: ExpectedArtifact["predicate"] = {
+    kind: "last-marker",
+    success: "run=ok",
+    failures: ["abort=", "delivery=started"],
+  };
+
+  it("loop-retro-promotion: dormant-stop-only log ending in run=ok reads passed (state a)", () => {
+    const path = join(dir, "promotion-runs.log");
+    writeFileSync(
+      path,
+      "2026-07-17T09:00:00Z predicate=unmet retros=4 lifecycle=0 decay=0\n2026-07-17T09:00:01Z run=ok\n"
+    );
+    const artifact: ExpectedArtifact = { artifactPath: path, maxAgeSeconds: 691200, predicate: lrpLastMarker };
+    const result = checkArtifact(artifact, { ...ctx, vault: dir });
+    expect(result.passed).toBe(true);
+    expect(result.reason).toMatch(/success/i);
+  });
+
+  it("loop-retro-promotion: log ending in run=ok after a prior delivery=started reads passed (completed delivery, state b)", () => {
+    const path = join(dir, "promotion-runs.log");
+    writeFileSync(
+      path,
+      [
+        "2026-07-10T09:00:00Z predicate=met retros=12 lifecycle=1 decay=1",
+        "2026-07-10T09:00:01Z delivery=started",
+        "2026-07-10T09:05:00Z run=ok",
+        "",
+      ].join("\n")
+    );
+    const artifact: ExpectedArtifact = { artifactPath: path, maxAgeSeconds: 691200, predicate: lrpLastMarker };
+    const result = checkArtifact(artifact, { ...ctx, vault: dir });
+    expect(result.passed).toBe(true);
+    expect(result.reason).toMatch(/success/i);
+  });
+
+  // THE CRITICAL (d)-CASE FIXTURE. A prior run finished cleanly (run=ok), then
+  // a LATER run enters delivery (delivery=started) and dies before reaching
+  // merge — no further terminal marker is ever appended. Under `exists`, the
+  // file is present (from the old run=ok) so the gate false-greens the
+  // interrupted delivery. Under last-marker, delivery=started is the LAST
+  // terminal marker, so the gate must read NOT passed — it must not inherit
+  // the stale earlier run=ok.
+  it("loop-retro-promotion: log ending in delivery=started (with a prior run=ok) reads NOT passed — interrupted delivery, state d", () => {
+    const path = join(dir, "promotion-runs.log");
+    writeFileSync(
+      path,
+      [
+        "2026-07-10T09:00:00Z predicate=met retros=12 lifecycle=1 decay=1",
+        "2026-07-10T09:05:00Z run=ok",
+        "2026-07-17T09:00:00Z predicate=met retros=13 lifecycle=1 decay=1",
+        "2026-07-17T09:00:01Z delivery=started",
+        "",
+      ].join("\n")
+    );
+    const artifact: ExpectedArtifact = { artifactPath: path, maxAgeSeconds: 691200, predicate: lrpLastMarker };
+    const result = checkArtifact(artifact, { ...ctx, vault: dir });
+    expect(result.passed).toBe(false);
+    expect(result.reason).toMatch(/failure/i);
+
+    // Discrimination proof (SO-26): the SAME fixture file, read under the OLD
+    // `exists` predicate this routine used before this fix, reads PASSED —
+    // the false-green this lock closes. If this assertion ever failed (i.e.
+    // `exists` also failed on a present file), the "regression" this test
+    // locks would not be a regression at all.
+    const staleShapeArtifact: ExpectedArtifact = {
+      artifactPath: path,
+      maxAgeSeconds: 691200,
+      predicate: { kind: "exists" },
+    };
+    const staleResult = checkArtifact(staleShapeArtifact, { ...ctx, vault: dir });
+    expect(staleResult.passed).toBe(true);
+  });
+
+  // SKILL.md now writes `delivery=started` at §1's predicate=met determination
+  // (before §2 Mining), not at §4 Delivery's entry — so it's the fail-safe
+  // in-progress marker for the WHOLE met-path (mining + drafting + delivery),
+  // not delivery alone. The gate doesn't care where in the routine the marker
+  // was written, only that it's the LAST terminal marker in the log — so this
+  // fixture (delivery=started immediately after predicate=met, with NO
+  // delivery-stage lines at all) proves a death during Mining or Drafting
+  // reads RED exactly like a death during Delivery does (state d above).
+  it("loop-retro-promotion: log ending in delivery=started right after predicate=met (no delivery steps) reads NOT passed — death during mining/drafting", () => {
+    const path = join(dir, "promotion-runs.log");
+    writeFileSync(
+      path,
+      [
+        "2026-07-10T09:00:00Z predicate=met retros=12 lifecycle=1 decay=1",
+        "2026-07-10T09:05:00Z run=ok",
+        "2026-07-17T09:00:00Z predicate=met retros=13 lifecycle=1 decay=1",
+        "2026-07-17T09:00:01Z delivery=started",
+        "",
+      ].join("\n")
+    );
+    const artifact: ExpectedArtifact = { artifactPath: path, maxAgeSeconds: 691200, predicate: lrpLastMarker };
+    const result = checkArtifact(artifact, { ...ctx, vault: dir });
+    expect(result.passed).toBe(false);
+    expect(result.reason).toMatch(/failure/i);
+  });
+
+  it("loop-retro-promotion: log ending in abort= (with a prior run=ok) reads NOT passed — manifest abort, state c", () => {
+    const path = join(dir, "promotion-runs.log");
+    writeFileSync(
+      path,
+      [
+        "2026-07-10T09:00:00Z predicate=met retros=12 lifecycle=1 decay=1",
+        "2026-07-10T09:05:00Z run=ok",
+        "2026-07-17T09:00:00Z predicate=met retros=13 lifecycle=1 decay=1",
+        "2026-07-17T09:00:01Z delivery=started",
+        "2026-07-17T09:01:00Z abort=empty-diff-zero-lessons",
+        "",
+      ].join("\n")
+    );
+    const artifact: ExpectedArtifact = { artifactPath: path, maxAgeSeconds: 691200, predicate: lrpLastMarker };
+    const result = checkArtifact(artifact, { ...ctx, vault: dir });
+    expect(result.passed).toBe(false);
+    expect(result.reason).toMatch(/failure/i);
+
+    // Discrimination proof (SO-26), mirrored: same fixture under the OLD
+    // `exists` predicate reads PASSED — `exists` false-greens this case too.
+    const staleShapeArtifact: ExpectedArtifact = {
+      artifactPath: path,
+      maxAgeSeconds: 691200,
+      predicate: { kind: "exists" },
+    };
+    const staleResult = checkArtifact(staleShapeArtifact, { ...ctx, vault: dir });
+    expect(staleResult.passed).toBe(true);
   });
 });

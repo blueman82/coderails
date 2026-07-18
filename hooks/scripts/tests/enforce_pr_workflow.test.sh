@@ -88,6 +88,15 @@ case "$args" in
       printf '<!-- coderails-eval-summary v1 pr=%s head_sha=%s result=GO tier=1 -->' "$pr_num" "$sha" | base64
     fi
     ;;
+  "api repos/"*"/statuses"*)
+    # TIER-REVIEW GATE section (below) drives this via MOCK_TR_STATUSES_JSON /
+    # MOCK_TR_STATUSES_FAIL. Pre-existing cases in this file never set
+    # tier_review.machine_user in their repo's config, so gate_eval_artifact_for_merge's
+    # tier-review arm never calls this branch for them — this exists solely for
+    # the new section.
+    [ -n "${MOCK_TR_STATUSES_FAIL:-}" ] && exit 1
+    printf '%s' "${MOCK_TR_STATUSES_JSON:-[]}"
+    ;;
   *)
     exit 1
     ;;
@@ -1089,5 +1098,93 @@ check "bash -x scripts/merge.sh 140 -> allow (documented limit, not gated)" ALLO
 # ── Case 96 (documented limit): command bash scripts/merge.sh 140 → NOT gated ─
 check "command bash scripts/merge.sh 140 -> allow (documented limit, not gated)" ALLOW \
   "$(run "$(payload "command bash scripts/merge.sh 140" "$T")")"
+
+# ────────────────────────────────────────────────────────────────────────────
+# TIER-REVIEW GATE: gh pr merge on a tier-0 eval artifact must also pass the
+# tier-review status check (redundant defence-in-depth, mirrors scripts/
+# merge.sh's tier-review gate). Active only when config key
+# tier_review.machine_user is set AND the eval artifact's tier is 0; inactive
+# (skip) otherwise. Uses a dedicated repo fixture (REPO_TIER) whose config sets
+# tier_review.machine_user, so pre-existing cases above (none of which set
+# this key) are unaffected.
+# ────────────────────────────────────────────────────────────────────────────
+
+MACHINE_USER="coderails-tier-bot"
+REPO_TIER="$TMP/repo_tier"
+git -C "$TMP" init -q repo_tier
+git -C "$REPO_TIER" config user.email t@t.t
+git -C "$REPO_TIER" config user.name t
+git -C "$REPO_TIER" remote add origin https://github.com/acme/widgets.git
+git -C "$REPO_TIER" commit -q --allow-empty -m init
+mkdir -p "$REPO_TIER/.claude"
+printf 'jira: null\ntier_review:\n  machine_user: %s\n' "$MACHINE_USER" > "$REPO_TIER/.claude/workflow.config.yaml"
+
+TIER_HEAD_SHA="feedface0000000000000000000000000000dead"
+T_TIER_REVIEWED_42=$(mk_transcript \
+  "$(mk_skill_line "coderails:push")" \
+  "$(mk_skill_line_with_args "pr-review-toolkit:review-pr" "42")")
+TIER0_GO_MARKER="<!-- coderails-eval-summary v1 pr=42 head_sha=${TIER_HEAD_SHA} result=GO tier=0 -->"
+
+SUCCESS_RIGHT_CREATOR="[{\"state\":\"success\",\"creator\":{\"login\":\"${MACHINE_USER}\"}}]"
+SUCCESS_WRONG_CREATOR="[{\"state\":\"success\",\"creator\":{\"login\":\"repo-owner\"}}]"
+ERROR_STATUS="[{\"state\":\"error\",\"creator\":{\"login\":\"${MACHINE_USER}\"}}]"
+
+# ── Case 97: no tier-review status at all -> deny ─────────────────────────────
+out=$(
+  MOCK_GH_HEAD_SHA="$TIER_HEAD_SHA" MOCK_GH_COMMENT_BODY="$TIER0_GO_MARKER" MOCK_TR_STATUSES_JSON="[]" \
+  run_eval "$(payload "gh pr merge 42 --squash" "$T_TIER_REVIEWED_42" "$REPO_TIER")"
+)
+check "tier-0 PR, no tier-review status -> deny" DENY "$(decision_of "$out")"
+case "$out" in
+  *"tier-review"*) : ;;
+  *) printf 'FAIL - deny reason should mention tier-review (got: %s)\n' "$out"; fails=$((fails + 1)) ;;
+esac
+
+# ── Case 98: success + WRONG creator -> deny (load-bearing: creator attribution) ──
+out=$(
+  MOCK_GH_HEAD_SHA="$TIER_HEAD_SHA" MOCK_GH_COMMENT_BODY="$TIER0_GO_MARKER" MOCK_TR_STATUSES_JSON="$SUCCESS_WRONG_CREATOR" \
+  run_eval "$(payload "gh pr merge 42 --squash" "$T_TIER_REVIEWED_42" "$REPO_TIER")"
+)
+check "tier-0 PR, tier-review success but WRONG creator -> deny" DENY "$(decision_of "$out")"
+case "$out" in
+  *"creator"*) : ;;
+  *) printf 'FAIL - wrong-creator deny reason should mention creator (got: %s)\n' "$out"; fails=$((fails + 1)) ;;
+esac
+
+# ── Case 99: success + RIGHT creator -> allow ─────────────────────────────────
+out=$(
+  MOCK_GH_HEAD_SHA="$TIER_HEAD_SHA" MOCK_GH_COMMENT_BODY="$TIER0_GO_MARKER" MOCK_TR_STATUSES_JSON="$SUCCESS_RIGHT_CREATOR" \
+  run_eval "$(payload "gh pr merge 42 --squash" "$T_TIER_REVIEWED_42" "$REPO_TIER")"
+)
+check "tier-0 PR, tier-review success with RIGHT creator -> allow" ALLOW "$(decision_of "$out")"
+
+# ── Case 100: state=error -> deny ─────────────────────────────────────────────
+out=$(
+  MOCK_GH_HEAD_SHA="$TIER_HEAD_SHA" MOCK_GH_COMMENT_BODY="$TIER0_GO_MARKER" MOCK_TR_STATUSES_JSON="$ERROR_STATUS" \
+  run_eval "$(payload "gh pr merge 42 --squash" "$T_TIER_REVIEWED_42" "$REPO_TIER")"
+)
+check "tier-0 PR, tier-review state=error -> deny" DENY "$(decision_of "$out")"
+
+# ── Case 101: statuses fetch fails -> deny (fail-closed) ──────────────────────
+out=$(
+  MOCK_GH_HEAD_SHA="$TIER_HEAD_SHA" MOCK_GH_COMMENT_BODY="$TIER0_GO_MARKER" MOCK_TR_STATUSES_FAIL=1 \
+  run_eval "$(payload "gh pr merge 42 --squash" "$T_TIER_REVIEWED_42" "$REPO_TIER")"
+)
+check "tier-0 PR, tier-review statuses fetch fails -> deny (fail-closed)" DENY "$(decision_of "$out")"
+
+# ── Case 102: tier != 0 (tier 1) -> tier-review gate inactive, allow ──────────
+TIER1_GO_MARKER="<!-- coderails-eval-summary v1 pr=42 head_sha=${TIER_HEAD_SHA} result=GO tier=1 -->"
+out=$(
+  MOCK_GH_HEAD_SHA="$TIER_HEAD_SHA" MOCK_GH_COMMENT_BODY="$TIER1_GO_MARKER" MOCK_TR_STATUSES_JSON="[]" \
+  run_eval "$(payload "gh pr merge 42 --squash" "$T_TIER_REVIEWED_42" "$REPO_TIER")"
+)
+check "tier-1 PR (not tier 0) -> tier-review gate inactive, allow" ALLOW "$(decision_of "$out")"
+
+# ── Case 103: config key absent (REPO_EVAL has no tier_review block) -> allow ─
+out=$(
+  MOCK_GH_HEAD_SHA="$HEAD_SHA" MOCK_GH_COMMENT_BODY="$GO_TIER0_MARKER" MOCK_TR_STATUSES_JSON="[]" \
+  run_eval "$(payload "gh pr merge 42 --squash" "$T_REVIEWED_42" "$REPO_EVAL")"
+)
+check "tier-0 PR, config key absent -> tier-review gate inactive, allow" ALLOW "$(decision_of "$out")"
 
 [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails)"; exit 1; }

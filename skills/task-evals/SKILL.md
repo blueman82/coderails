@@ -46,6 +46,20 @@ A broken instrument looks like this in the raw output: a reporter-loading error 
 
 What to do on discovery depends on timing: at freeze time the file is not yet frozen, so a broken `cmd` or `negative_control` is simply rewritten and re-run — no amendment needed, nothing to record. Discovered after `frozen_at`/`frozen_sha` are stamped, it goes through the amendment path instead: recorded reason, assertion left unchanged, and if a grader verdict already exists for that eval, a fresh re-grade per rule 5.
 
+## Discriminating-check gate (mechanical, optional, `fixtures`-only)
+
+A frozen, blind-authored scripted check can be broken in itself — incapable of ever passing (false alarm) or ever failing (vacuous) — and the smoke-run above does not catch this, because it only proves the check *executes*, not that its verdict *tracks the input*. Real instance (loop 8b69e779): an awk formula that exited 1 unconditionally, so a genuine 39/39 pass and a genuine 18/40 fail produced identical exit codes and could never pass for any code state.
+
+An eval may carry an optional `fixtures` object on top of the schema below:
+
+```json
+"fixtures": { "good": "<sample stdin that SHOULD pass>", "bad": "<sample stdin that SHOULD fail>", "formula": "<optional: the verdict-stage command; if absent, derived as the segment after the LAST top-level pipe in cmd>" }
+```
+
+When present, `scripts/post_evals.sh validate-discriminating` pipes `fixtures.good` and `fixtures.bad` into the formula and requires opposite outcomes (good exits 0, bad exits non-zero) — rejecting the eval, by name, if both fixtures produce the same exit code (non-discriminating) or if the formula can't be reasonably derived from `cmd` (fail-closed, asks the author to supply `fixtures.formula` explicitly). The derivation splits on the last top-level pipe by text position, not shell syntax — a quoted pipe (e.g. inside an `awk` or `grep` pattern) forces `fixtures.formula` to be supplied explicitly, since the split would otherwise land inside the quoted string.
+
+**Honest boundary, stated plainly:** this gate validates only checks that carry `fixtures`. Checks without `fixtures` are grandfathered — validated exactly as they were before this gate existed, with zero behaviour change. Adding `fixtures` to an eval is opt-in, never retroactive: freezing this gate does NOT retroactively validate any existing eval or evals.json that predates it, and an author who never adds `fixtures` gets no discrimination proof at all. And even where `fixtures` is present, a pass only proves the formula CAN discriminate between these two specific inputs — it proves nothing about whether the formula tests the RIGHT claim, whether `cmd` and `fixtures.formula` stay in sync after edits, or whether the fixtures themselves are representative. This gate closes the "never fails" class of defect; it is not a general correctness proof of the check.
+
 ## Tier rules (self-exemption defence)
 
 Concrete predicates, not vibes — same design rationale as agentic-loop Phase 2.6's "what named thing does this remove?" test for disposition.
@@ -55,6 +69,8 @@ Concrete predicates, not vibes — same design rationale as agentic-loop Phase 2
 - **Tier 2 (full suite):** ≥3 work-units (the line agentic-loop Phase 2.7/Phase 3 already draw) OR any irreversible/outward surface (publish, deploy, migration, data deletion, external send). Full suite with pre+post surfaces where applicable and the GO/NO-GO rule stated in the artifact.
 
 `tier_justification` is required at every tier, not only tier 0: at tier 0 it states why the exemption is legitimate; at tier 1/2 it names which predicate fired (e.g. "2 work-units, no irreversible surface" or "≥3 work-units"). A blank justification is refused by the writer (`post_evals.sh validate-structure`, check 2) at pr scope, and by the loop gate (`loop_state_guard.sh` via `als_read_loop_evals_result`) at loop scope — the pr-scope MERGE reader itself only parses the posted marker comment (result/tier, no justification field), so enforcement there is entirely writer-side, at post time.
+
+**Tier 0's exemption claim is self-written by the same party it exempts — nothing in this skill reviews it.** Where a project has opted in (`config.tier_review.machine_user` set — see `AGENTS.md`'s Skills↔hooks seam convention and `docs/coderails/specs/tier-review-spec.md`), the tier-0 exemption is out of this skill's own hands entirely: a separate root-owned daemon (`scripts/tier-gate/`) judges the PR's claimed tier against its real, capped diff content — never the embedded `evals.json` itself, which the judge does not read — via a subscription-authenticated Claude judge outside the agent's trust domain, and posts a `tier-review` commit status that is both **server-attributed** (GitHub records who posted it) and **creator-bound** (`scripts/merge.sh`/`enforce_pr_workflow` refuse any status not posted by exactly the configured machine-user login — a mismatch is treated as a misconfiguration-or-forgery signal, not a valid verdict). This skill's own tier-0 predicate above is unchanged and still the source of truth for what the daemon judges against; the daemon does not re-derive the predicate, it verifies the PR's tier-0 *claim* against it. This raises the cost of a dishonest tier-0 from free to expensive — it is not a claim of impossibility. Absent that config, tier-0 self-exemption is unreviewed, as documented.
 
 ## Eval anatomy
 
@@ -93,6 +109,7 @@ GO requires all P0 evals to pass. P1 failures don't block the gate but must be l
       "assert": "<one-line goal-state assertion>",
       "cmd": "<command, scripted mode>",
       "negative_control": "<command proving the check can fail — required, scripted mode>",
+      "fixtures": "<OPTIONAL, scripted mode only: {good, bad, formula?} — see 'Discriminating-check gate' above. Absent = grandfathered, unvalidated by that gate>",
       "status": "pending | pass | fail",
       "evidence": "<command + exit code + output excerpt>"
     }
@@ -106,7 +123,7 @@ GO requires all P0 evals to pass. P1 failures don't block the gate but must be l
 
 `grading` (`{by, checksum, amendments_at_grade}`) is write-time provenance, absent at freeze and written only when `post_evals.sh grade-loop` grades a loop-scope file (see the Verifier agent contract below) — optional and additive; pr-scope files and every existing reader tolerate its absence. Adding it does not bump `schema_version` past 1.
 
-This copy and the design spec's copy are kept in lockstep; the enforcement components implement against this definition: `scripts/lib/eval-artifact.sh` (the marker/result SSOT), `scripts/post_evals.sh` (structural validation + result computation, invoked by `/coderails:post-evals`), and the `loop_state_guard` loop-scope gate (blocks loop completion at ≥3 work-units with no passing loop-scope `evals.json`).
+This copy and the design spec's copy are kept in lockstep; the enforcement components implement against this definition: `scripts/lib/eval-artifact.sh` (the marker/result SSOT), `scripts/post_evals.sh` (structural validation + result computation + `validate-discriminating`'s fixtures gate, invoked by `/coderails:post-evals`), and the `loop_state_guard` loop-scope gate (blocks loop completion at ≥3 work-units with no passing loop-scope `evals.json`).
 
 ## Where evals.json lives
 

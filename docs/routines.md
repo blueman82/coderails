@@ -154,6 +154,14 @@ Field by field:
   - `{ kind: "exists" }` — file present and fresh, nothing more.
   - `{ kind: "contains", marker }` — file present, fresh, and contains
     `marker` (itself `{date}`/`{runId}`/`{vault}`-substituted).
+  - `{ kind: "last-marker", success, failures }` — file present, fresh,
+    and its terminal markers read in order — for append-only logs where
+    every run adds a line. Only the **last** terminal marker in the
+    file decides: the run passes if that marker contains `success`, and
+    fails if it contains any entry of `failures` — or if the file holds no
+    terminal marker at all. A whole-file `contains` check would false-green
+    here, because an earlier run's success line survives a later run's
+    failure.
   - `{ kind: "json-field", path, value }` — file parses as JSON and the
     dotted `path` resolves to exactly `value`.
 - **`escalation`** — an array drawn from `["notification",
@@ -186,7 +194,7 @@ logs `no-drift` and stops — no branch, no PR — before any git state is
 touched, which keeps a healthy night from ever producing an empty or
 no-op PR. If drift is found, it fixes it and drives the fix through the
 full gate chain (task-evals frozen before the edit, a
-`git diff origin/main...HEAD --name-only` manifest assertion — three-dot,
+`git diff origin/main...HEAD --name-status` manifest assertion — three-dot,
 because a sibling PR merging into `main` mid-run must not make a clean
 branch look contaminated — review, post-review, post-evals, merge) and
 merges its own PR with no human in the loop.
@@ -265,18 +273,29 @@ from its `created` date (one lesson has recurred at least once), and (3)
 completed a full create → recur → decay lifecycle). Until all three
 hold, the routine is dormant.
 
-A dormant run still appends one line to `promotion-runs.log`
-(`<ISO8601> predicate=unmet retros=<n> lifecycle=<0|1> decay=<0|1>`) and
-stops there — no branch, no PR, no gate chain. That log line is
-deliberately this routine's `expectedArtifact` (an `exists` predicate),
-precisely so a dormant run still passes its artifact gate: dormancy is
-the expected steady state for a long while after this routine ships, not
-a failure, and the routine shouldn't escalate every week just because the
-graduation bar hasn't been met yet.
+A dormant run appends its predicate line to `promotion-runs.log`
+(`<ISO8601> predicate=unmet retros=<n> lifecycle=<0|1> decay=<0|1>`),
+then appends a `run=ok` terminal marker and stops — no branch, no PR, no
+gate chain. That `run=ok` is what passes the gate, and it is written
+deliberately: dormancy is the expected steady state for a long while
+after this routine ships, not a failure, so the routine shouldn't
+escalate every week just because the graduation bar hasn't been met yet.
+
+The gate is a `last-marker` predicate (`success: "run=ok"`, `failures:
+["abort=", "delivery=started"]`), not `exists` — `promotion-runs.log` is
+append-only, so a file-present check would keep reading green off an old
+run's line forever. Keying on the last terminal marker makes each run's
+own outcome decide. `delivery=started` is a failure marker because the
+met-path writes it immediately after `predicate=met`, before mining: any
+death anywhere in mining, drafting, or delivery leaves it as the last
+marker and the gate reads that run RED, without having to enumerate every
+failure exit.
 
 **Its full self-merge chain has never actually fired.** As of this
 writing `promotion-runs.log` holds exactly one line
-(`2026-07-12T23:32:06Z predicate=unmet retros=14 lifecycle=1 decay=0`)
+(`2026-07-12T23:32:06Z predicate=unmet retros=14 lifecycle=1 decay=0`),
+which predates the `run=ok` terminal-marker write described above and so
+carries no marker of its own
 — the predicate has stayed unmet since this routine shipped, so it has
 never gone past step 1 to open, review, or merge a PR headlessly.
 `sync-docs-nightly` (above) follows this routine's pattern — same
@@ -375,7 +394,7 @@ Four places, roughest signal to most precise:
    red. This is the human-readable failure history and is written for
    both routine successes (green) and failures (red) — it is not just
    an error log. **This is a distinct vault note type from the wiki
-   schema in `AGENTS.md`** (`type: routine-run`, not one of
+   schema in `AGENTS-wiki-schema.md`** (`type: routine-run`, not one of
    `command|hook|skill|design|investigation|source`) — it is not
    ingested by `/wiki-ingest` and does not follow the wiki page-format
    contract; treat it as operational output, not a wiki page. Note the

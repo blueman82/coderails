@@ -66,6 +66,16 @@ gate_loop_stop_declared() {
     als_gate_work_units_on_complete "$category" "loop_stall_guard" "$session_id"
     als_gate_proofs_on_complete "$category" "loop_stall_guard" "$session_id" "$transcript"
     als_report_cost_on_complete "$category" "loop_stall_guard" "$session_id"
+    # SINGLE-JSON-DOCUMENT emission: als_gate_proofs_on_complete (withdrawn
+    # proofs) and als_report_cost_on_complete (cost) both append to the
+    # shared $ALS_PENDING_SYSMSG accumulator (see its definition in
+    # loop_state_common.sh) instead of each emitting their own top-level
+    # {systemMessage:...} JSON — two concatenated JSON objects on one hook's
+    # stdout is not valid as a single document under a whole-buffer JSON
+    # parse. This is the ONE place either message reaches the human: emitted
+    # ONLY here, ONLY once, AFTER both gates above have had their chance to
+    # append.
+    [ -n "$ALS_PENDING_SYSMSG" ] && jq -n --arg m "$ALS_PENDING_SYSMSG" '{systemMessage: $m}' 2>/dev/null
     bump_loop_stop_count "$category"
     als_log "hook=loop_stall_guard session=$session_id invocations=$ALS_INVOCATIONS declared=1 blocked=0"
     exit 0

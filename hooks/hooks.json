@@ -48,6 +48,11 @@
           },
           {
             "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/crack_on_prose_gate.sh\"",
+            "timeout": 15
+          },
+          {
+            "type": "command",
             "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/loop_state_guard.sh\"",
             "timeout": 15
           },

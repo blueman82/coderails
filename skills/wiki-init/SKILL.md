@@ -24,7 +24,7 @@ The plugin also bundles Obsidian config files and the Marp plugin in `assets/` â
 
 1. **Raw sources** (immutable): The project codebase, git history, PRs, documentation. Read from these but never modify wiki when modifying code.
 2. **The wiki**: LLM-generated markdown in an Obsidian vault. Claude owns this layer entirely â€” creates pages, updates cross-references, maintains consistency.
-3. **The schema** (AGENTS.md): Tells the LLM how the wiki is structured, what conventions to follow, what workflows to run. Co-evolved between human and LLM over time.
+3. **The schema** (`AGENTS-wiki-schema.md`, linked from `AGENTS.md`): Tells the LLM how the wiki is structured, what conventions to follow, what workflows to run. Co-evolved between human and LLM over time.
 
 ## Instructions
 

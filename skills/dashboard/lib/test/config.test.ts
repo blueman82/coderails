@@ -293,11 +293,11 @@ describe("loadConfig against the real examples/dashboard-config.json (C3)", () =
     expect(() => loadConfig(EXAMPLE_CONFIG_PATH)).not.toThrow();
   });
 
-  it("loads all six buttons and all five routines", () => {
+  it("loads all seven buttons and all five routines", () => {
     const config = loadConfig(EXAMPLE_CONFIG_PATH);
     expect(config.buttons.map((b) => b.name)).toEqual([
       "wiki-lint",
-      "sync-docs-weekly",
+      "sync-docs",
       "memory-consolidation-weekly",
       "ask",
       "loop-retro-promotion",
@@ -306,7 +306,7 @@ describe("loadConfig against the real examples/dashboard-config.json (C3)", () =
     ]);
     expect(config.routines?.map((r) => r.name)).toEqual([
       "wiki-lint",
-      "sync-docs-weekly",
+      "sync-docs-nightly",
       "memory-consolidation-weekly",
       "loop-retro-promotion-weekly",
       "workflow-audit-weekly",
@@ -333,14 +333,17 @@ describe("loadConfig against the real examples/dashboard-config.json (C3)", () =
   // Exempt: a routine whose skill owns the path itself (memory-consolidation
   // names it in SKILL.md; wiki-lint's `{vault}/log.md` is the lint's own
   // output; loop-retro-promotion-weekly's button command never names the gate's
-  // basename 'promotion-runs.log', so the skill owns the path). Those can't
-  // drift from a command that never mentions a path.
+  // basename 'promotion-runs.log', so the skill owns the path; sync-docs-nightly's
+  // skill names its own run-log path — `run-{date}.log` — in SKILL.md section 4,
+  // so the skill owns both the path and the `run=ok` marker wording). Those
+  // can't drift from a command that never mentions a path.
   it("every routine whose skill does not own its artifact path has that path named in the button command", () => {
     const config = loadConfig(EXAMPLE_CONFIG_PATH);
     const SKILL_OWNS_ITS_PATH = new Set([
       "wiki-lint",
       "memory-consolidation-weekly",
       "loop-retro-promotion-weekly",
+      "sync-docs-nightly",
     ]);
     const byName = new Map(config.buttons.map((b) => [b.name, b]));
 
@@ -369,5 +372,24 @@ describe("loadConfig against the real examples/dashboard-config.json (C3)", () =
         `routine "${routine.name}" gates on marker "${routine.expectedArtifact.predicate.marker}" but its button command never states "${markerTail}" — the run has to guess the marker wording`,
       ).toBe(true);
     }
+  });
+
+  // sync-docs-nightly's whole purpose is rejecting a failure log. An `exists`
+  // predicate accepted ANY log (green-on-failure). A whole-file `contains`
+  // `run=ok` then false-passed an ABORTED same-date re-run, because the per-date
+  // log still held an earlier run's `run=ok` (defect 3, reproduced live as run
+  // 8bedfa1c). The gate must key on the LAST terminal marker: `last-marker`.
+  // Pin the predicate against the real config so a regression back to `exists`
+  // OR a whole-file `contains` (either of which re-opens a false-green) cannot
+  // ship green.
+  it("sync-docs-nightly's gate keys on the last terminal marker — predicate is 'last-marker', not 'exists'/'contains'", () => {
+    const config = loadConfig(EXAMPLE_CONFIG_PATH);
+    const routine = config.routines?.find((r) => r.name === "sync-docs-nightly");
+    expect(routine, "sync-docs-nightly routine not found in example config").toBeDefined();
+    expect(routine?.expectedArtifact.predicate).toEqual({
+      kind: "last-marker",
+      success: "run=ok",
+      failures: ["abort=", "refused="],
+    });
   });
 });

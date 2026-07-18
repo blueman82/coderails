@@ -1,20 +1,21 @@
 # AGENTS.md — Coderails
 
-This file is the single source the LLM reads at conversation start. It covers two
-things, in order:
+This file is the single source the LLM reads at conversation start. It is the
+entry point for two things:
 
-1. **The repo working guide** — what coderails is, how the pieces wire together,
-   the enforcement model, the hook map, workflow command architecture, and how to
-   edit this repo safely.
+1. **The repo working guide** (below) — what coderails is, how the pieces wire
+   together, the enforcement model, the hook map, workflow command
+   architecture, and how to edit this repo safely.
 2. **The wiki schema** — how the coderails wiki (a persistent, compounding
    knowledge base maintained by Claude and browsed in Obsidian) is structured,
-   maintained, and queried.
+   maintained, and queried. See
+   [`AGENTS-wiki-schema.md`](./AGENTS-wiki-schema.md) for the full reference.
 
 The wiki vault lives at the wiki vault directory (e.g. `../coderails-wiki`
 relative to the plugin, or wherever you placed it during `/wiki-init`).
 `CLAUDE.md` in this repo is a thin pointer to this file — edit here, not there.
 
-# Part 1 — Working in this repo
+# The repo working guide
 
 ## What this repo is
 
@@ -80,11 +81,32 @@ no direct pushes), which no local agent can fake. The local hook complements
 branch protection; it does not replace it. (The same honest boundary applies to
 the Stop-hook gates — they can force a declared step to appear, not to be real.)
 
-**This repo.** This repo deliberately does not enable GitHub branch protection
-(2026-07-15) — that's a standing decision, not a pending TODO. So here, the
-server-side layer described above is absent, and the enforcement ceiling is
-unmitigated: the redirect-and-audit layer is the whole story, by
-design.
+**This repo.** This repo deliberately does not enable general GitHub branch
+protection (2026-07-15) — that's a standing decision, not a pending TODO, and
+it is NOT reversed by what follows. So for ordinary PRs, the server-side layer
+described above is absent, and the enforcement ceiling is unmitigated: the
+redirect-and-audit layer is the whole story, by design.
+
+**One narrow server-side exception: the tier-review ruleset.** The owner's
+2026-07-16 instruction — a forged tier-0 verdict and a bypassed merge gate
+must both be *impossible*, not costly — is explicit authorisation for a single
+scoped carve-out, not a general reopening of branch protection. A GitHub
+ruleset on `main` requires a PR before merge and requires the `tier-review`
+commit-status context to be green; it does **not** require human reviews, and
+it does not apply any of the other branch-protection knobs (no required
+approvals, no required linear history, no other status checks). The daemon
+that posts `tier-review` (`scripts/tier-gate/`) is a root-owned launchd
+process running as a dedicated machine-user identity whose credentials only
+root can read — see `docs/coderails/specs/tier-review-spec.md`'s capability
+lattice for why the verdict is unforgeable (the agent's own `gh` token carries
+no commit-status permission) and the gate is unbypassable (that same token
+carries no `administration` permission, so it can neither push around the
+ruleset nor edit it away). This narrow ruleset is an owner-provisioned,
+owner-activated addition living entirely outside the local hook layer this
+section otherwise describes — it does not change anything about how
+`enforce_pr_workflow`/`merge.sh` behave for PRs that never carry a tier-0
+artifact, and it is dormant until the owner's Pro-or-public choice unblocks
+ruleset activation on this repo (see the spec's Availability constraint).
 
 **Sandboxed workers narrow this ceiling for worker processes only, never for the orchestrator.** With `config.sandbox_workers: true` (`skills/agentic-loop/SKILL.md` Phase 3/3a), an implementation-unit worker runs as a separate process wrapped by `@anthropic-ai/sandbox-runtime` (srt, pinned version), OS-enforced (Seatbelt on macOS, bubblewrap on Linux) — outside the agent's own trust domain, the first coderails enforcement layer that is not a hook. The orchestrator itself is never sandboxed and its ceiling above is unchanged.
 
@@ -107,7 +129,9 @@ When a skill instructs an action that a hook gates — e.g. `git merge`/`gh pr c
 
 A second, additive merge gate covers task evals: `/coderails:task-evals` generates and freezes a tiered `evals.json` for the PR (see `skills/task-evals/SKILL.md`), and `/coderails:post-evals <PR#>` validates and posts it as a SHA-bound PR comment marked `coderails-eval-summary` (built from `scripts/lib/eval-artifact.sh`). `scripts/merge.sh` reads this artifact directly after the review-artifact gate, in the same `OPEN` branch before `gh pr merge` — same fail-closed rc semantics: a `gh` fetch failure or a `NO-GO`/missing artifact both block the merge. Loop scope has its own gate: `loop_state_guard` additionally checks for a loop-scope `evals.json` when the loop's `progress.json` `work_units` field reports ≥3 units, blocking the stop if none is found — fail-open (no block) when `work_units` is absent, matching the hook's presence-not-provenance posture elsewhere. A loop-scope `result` must also be computed by `scripts/post_evals.sh grade-loop` (never hand-written by the orchestrator) and carry a valid `grading` stamp — `loop_state_guard` demotes an otherwise-valid `GO`/`TIER0` lacking that stamp to `UNSTAMPED` and blocks the same way.
 
-A third instance of the same seam: the `agentic-loop` skill's Phase 13 teardown instructs writing `retro.json` (`schema_version` 2, since the cost-mining sub-step below) beside `progress.json` before a `complete` declaration; the `loop_stall_guard` hook gates that declaration on it, accepting `schema_version >= 1` (forward-compatible, not an exact-version check). Resolution when blocked is the same as any other seam gate — do the thing the skill already told you to do: assemble and write the retro per Phase 13, then re-declare `complete`. As of `schema_version` 2, Phase 13's step 1 also sources `hooks/scripts/lib/loop_cost.sh` and runs `dc_mine_token_usage`, writing its returned object as `retro.cost` (a dated, once-frozen per-model token/USD breakdown) and lifting its `models_used` array out to top-level `retro.models_used` — not duplicated inside `cost` — fail-open (a miner failure leaves both empty, never blocks teardown) — see `skills/agentic-loop/SKILL.md`'s Phase 13, and its `teardown.md` detail-carrier, for the full field contract.
+A third, additive merge gate covers tier-0 self-exemption: when `config.tier_review.machine_user` is set (absent/null by default — inactive, other installs unaffected) AND the PR's eval artifact is tier 0, `scripts/merge.sh` and `enforce_pr_workflow` additionally require the newest `tier-review` commit status on the head SHA to be `state=success` posted by exactly that configured login — a mismatch (wrong creator, missing status, non-success state, or a `gh` fetch failure) blocks with a named remedy. This is a **redundant local layer, not the primary control**: the primary control, when active, is the server-side ruleset described in the enforcement-ceiling section above (`scripts/tier-gate/` daemon + ruleset). The local check exists to fail loudly on misconfiguration and to hold the line during the interim before the owner activates the ruleset — it is in the agent's own trust domain like every other local gate, so it complements the ruleset, never substitutes for it. See `skills/task-evals/SKILL.md`'s tier rules for what makes an artifact tier 0.
+
+A fourth instance of the same seam: the `agentic-loop` skill's Phase 13 teardown instructs writing `retro.json` (`schema_version` 2, since the cost-mining sub-step below) beside `progress.json` before a `complete` declaration; the `loop_stall_guard` hook gates that declaration on it, accepting `schema_version >= 1` (forward-compatible, not an exact-version check). Resolution when blocked is the same as any other seam gate — do the thing the skill already told you to do: assemble and write the retro per Phase 13, then re-declare `complete`. As of `schema_version` 2, Phase 13's step 1 also sources `hooks/scripts/lib/loop_cost.sh` and runs `dc_mine_token_usage`, writing its returned object as `retro.cost` (a dated, once-frozen per-model token/USD breakdown) and lifting its `models_used` array out to top-level `retro.models_used` — not duplicated inside `cost` — fail-open (a miner failure leaves both empty, never blocks teardown) — see `skills/agentic-loop/SKILL.md`'s Phase 13, and its `teardown.md` detail-carrier, for the full field contract.
 
 ## Hook event map (`hooks/hooks.json`)
 
@@ -120,13 +144,14 @@ A third instance of the same seam: the `agentic-loop` skill's Phase 13 teardown 
 | `Stop` + `SubagentStop` | `check_verify_loop.sh` | **block** outside an active agentic loop — any untagged `## Did Not Verify` bullet (only an explicit `(unverifiable: <reason>)` tag passes; enforced regardless of whether files were edited this turn); or missing section after a 3+-file turn; inside an active, incomplete loop, `Stop`-event violations demote to a model-visible warn (`additionalContext`) instead — `SubagentStop`/worker output still blocks; on `SubagentStop` reads `last_assistant_message` directly. `loop_state_guard`/`loop_stall_guard` remain Stop-only (loop-state ownership is a parent-session concept). On the `Stop` event only, exempt entirely (exit 0, logs `skipped=headless`) when `CODERAILS_HEADLESS_RUN=1` — `SubagentStop` still blocks even with the flag set; see the headless-run exemption note below. |
 | `Stop` | `voice_announce.sh` | observe-only, always exits 0 — speaks a loop lifecycle event (complete / waiting-on-human / stopped / stall) via macOS `say` when an agentic loop's stopping turn resolves. Silent outside an active loop, and silent (not a stall) when text extraction itself comes back empty. Debounced per announcement kind. Runs first in the Stop array (observe-only, so it cannot affect the other gates). |
 | `Stop` | `loop_state_guard.sh` | **block** (exit 2) when an agentic loop is active but no session-owned `progress.json` exists — enforces presence + ownership. Also gates loop-scope evals: when `progress.json`'s `work_units` field reports ≥3 units, blocks if no loop-scope `evals.json` is found beside it; fails open (no block) when `work_units` is absent. |
-| `Stop` | `loop_stall_guard.sh` | **block** (exit 2) when an agentic loop is active and incomplete with no valid `LOOP-STOP` declaration in the stopping turn; on a `complete` declaration it additionally blocks when `retro.json` beside `progress.json` is absent, malformed, or below `schema_version` 1 — the check accepts `schema_version >= 1`, so it does not reject Phase 13's current `schema_version` 2 (incl. the `cost`/`models_used` fields) — and separately blocks when a sibling `proof.json` exists but any of its frozen proofs is unexecuted-in-transcript or last-failed, mined from THIS session's own Bash tool_use/tool_result pairs by exact trimmed-command match; fails open (no block) when `proof.json` itself is absent |
+| `Stop` | `loop_stall_guard.sh` | **block** (exit 2) when an agentic loop is active and incomplete with no valid `LOOP-STOP` declaration in the stopping turn; on a `complete` declaration it additionally blocks when `retro.json` beside `progress.json` is absent, malformed, or below `schema_version` 1 — the check accepts `schema_version >= 1`, so it does not reject Phase 13's current `schema_version` 2 (incl. the `cost`/`models_used` fields) — and separately blocks when a sibling `proof.json` exists but any of its frozen proofs is unexecuted-in-transcript or last-failed, mined from THIS session's own Bash tool_use/tool_result pairs by exact trimmed-command match; fails open (no block) when `proof.json` itself is absent. A sibling `withdrawn_proofs` array (a proof withdrawn instead of fixed) is mined the same pass, stricter — an entry blocks unless its `cmd` ran and its last result was an observed failure, it carries a non-empty `withdrawn_reason`, and its `id` isn't also in `.proofs`; `.proofs`+`withdrawn_proofs` share a combined 100-entry cap |
 | `Stop` | `unregistered_loop_guard.sh` | **nudge**, never blocks — when a session is dispatch-heavy (≥3 distinct Agent-dispatch turns) with no `progress.json` and no `agentic-loop` Skill invocation in the transcript, i.e. an unregistered loop. Sibling to, not an extension of, `loop_state_guard`/`loop_stall_guard`: those gate a *registered* loop's health; this one heuristically flags a loop that looks unregistered. |
 | `Stop` + `SubagentStop` | `offload_push_guard.sh` | **nudge**, never blocks — when the final assistant text both names a `git push` targeting a repo's `main`/`master` AND carries an offload-to-user cue (a leading `! ` run-it-yourself prefix, or phrasing like "your own shell", "run this yourself") — the case where a session hands the user a push that `enforce_pr_workflow.sh` would have gated, sidestepping the gate by proxy. Nudges at most once per session. Runs LAST in both the `Stop` and `SubagentStop` arrays. On `SubagentStop`, reads `last_assistant_message` directly (same rationale as `check_confidence_labels.sh`). |
 | `PreToolUse` (Bash) | `destructive_bash_gate.sh` | **block** — permanent blocklist: `rm -rf`, `git push --force`/`-f` (naked; see force-with-lease carve-out below), `git reset --hard`, SQL `DROP TABLE/DATABASE/SCHEMA` and `TRUNCATE TABLE`, `dd if=`, `mkfs.*`, `chmod -R 777`, `git commit --no-verify`, `git clean -f/--force`, `find -delete/--delete`, `truncate -s/--size`, `shred`. Also blocks in-Bash source-file edits (`sed -i`, `perl -i`, `>` / `>>` redirects, `tee`, `cp`/`mv`/`dd of=` targeting source extensions or plugin markdown) when on main/master (best-effort). Also denies backtick, `$(...)`, and process-substitution `<(...)`/`>(...)` inside a `push.sh`/`merge.sh`/`post_review.sh`/`post_evals.sh` free-text argument. `git push --force-with-lease` is conditionally allowed (see REFERENCE.md's Hook Activation Matrix for the exact opt-in mechanism); every other pattern has no approval path besides a settings.json Bash permission rule. |
 | `PreToolUse` (Bash) | `enforce_pr_workflow.sh` | **block** — `gh pr create` without `/coderails:push`; `gh pr merge <N>` without `/pr-review-toolkit:review-pr <N>` (per-PR, consume-on-use); `git merge` on main/master without `review-pr` since the last merge; `git push` to main/master (by current branch, colon refspec, or positional bare branch token) without `review-pr`. `scripts/merge.sh <N>` (any path/quote form) is gated identically to `gh pr merge <N>` — same review-pr + eval-artifact checks. Scans `agent_transcript_path` in subagent context. `git merge-base/merge-file/merge-tree` and `--abort/--continue/--quit/--skip` excluded (the `--dry-run`/`--help` passthrough does NOT extend to `merge.sh`, whose arg parser silently ignores trailing flags). No-op if no `workflow.config.yaml`. `gh pr merge <N>`/`scripts/merge.sh <N>` (after the review-pr check passes) is also blocked without a SHA-bound `GO` coderails eval artifact for the PR's current head — same fail-closed rc semantics as `scripts/merge.sh`'s eval gate (see above); a tier-0 `GO` marker satisfies it same as any other tier. |
 | `PreToolUse` (Bash) | `test_gate.sh` | **block** on `git commit` if tests fail — opt-in only |
-| `PreToolUse` (AskUserQuestion) | `crack_on_gate.sh` | **block** — denies `AskUserQuestion` (permissionDecision `deny`) while this session's `crack_on_active` flag is stamped, i.e. after the user typed "crack on" in a raw prompt: a crack-on envelope waives human questions, so proceed autonomously or end the turn with a report. Scoped to the `AskUserQuestion` tool ONLY — the four agentic-loop hard-stops are soft turn-ending `LOOP-STOP` "report and wait" declarations, not `AskUserQuestion` calls, so this deny cannot touch them; no broader mechanism (Stop-deny, global flag) is used by design. No flag, a different session, or any other tool -> exit 0 (allow). |
+| `PreToolUse` (AskUserQuestion) | `crack_on_gate.sh` | **block** — denies `AskUserQuestion` (permissionDecision `deny`) while this session's `crack_on_active` flag is stamped, i.e. after the user typed "crack on" in a raw prompt: a crack-on envelope waives human questions, so proceed autonomously or end the turn with a report. Scoped to the `AskUserQuestion` tool ONLY — the four agentic-loop hard-stops are soft turn-ending `LOOP-STOP` "report and wait" declarations, not `AskUserQuestion` calls, so this deny cannot touch them. The PROSE half of the same waiver — a question handed back in the final message's plain text rather than via the tool — is caught separately by `crack_on_prose_gate.sh` (next row). No flag, a different session, or any other tool -> exit 0 (allow). |
+| `Stop` | `crack_on_prose_gate.sh` | **block** — the prose half of the crack-on human-ask waiver: while this session's `crack_on_active` flag is stamped, blocks (exit 2) a final assistant message that hands a QUESTION back to the user in plain text, closing the evasion where the model asks in prose instead of calling the (already-denied) `AskUserQuestion` tool. Deterministic two-tier heuristic (NOT an LLM judge): terminal `?` on the prose body's last line, first-person-modal question in the last 3 body lines, or one of ~15 high-precision second-person request phrases. Fail-closed (block) on discipline, fail-open (allow + log) on infra failure. A per-turn block counter caps at 3 (`CLAUDE_CRACK_ON_PROSE_MAX_BLOCKS`) as a release valve against infinite rephrase loops. `Stop`-only, never `SubagentStop` (a worker addresses its orchestrator, not the human). Honest ceiling: intent has no regex — a declarative handoff with no `?`, a novel second-person phrasing, or any ask after the cap passes, audited but not blocked. |
 | `PreToolUse` (Write/Edit/MultiEdit) | `no_edit_on_main.sh` | **block** — on main/master, blocks edits to ANY file EXCEPT an explicit allowlist: `.md`/`.txt`/`.rst` (plain docs), `.yaml`/`.yml`/`.json`/`.toml`/`.ini`/`.cfg` (config), the literal `.gitignore` dotfile (by basename), and `LICENSE`. Plugin source markdown (`skills/*/SKILL.md`, `commands/*.md`) is also blocked (they are source, not docs) when the file's repo carries `.claude-plugin/plugin.json`. Both the gated-ness and the branch check key off the **file's own repo** — a sibling non-plugin repo's `commands/`/`skills/` markdown is never falsely blocked. Separately, a permission-file arm blocks edits to `.claude/settings.json` / `.claude/settings.local.json` on **any** branch, in any repo (matched on the `.claude/` parent, so an unrelated `settings.json` elsewhere passes). These hold the `permissions.allow` rules that pre-approve commands upstream of every PreToolUse gate — editing them is the one move that can dismantle the discipline layer, so the agent never edits them. |
 | `PreToolUse` (Write/Edit/MultiEdit) | `comment_citation_gate.sh` | **block** — denies new/changed code comments that cite a session-artifact label (`E#:`, `F# fix/:/design`, `CHANGE B#/C#`, `Task A#`, `TA-I#`, "reviewer finding", `eval E#`, `WU#:`, `C2`, "per the plan/design/session", "per F#"). Scoped to comment-bearing content fields (`new_string`/`content`/`edits[].new_string`); `.md` files are out of scope entirely. `PR #NN` is a documented survivor — it resolves to a durable, checkable GitHub artifact. |
 
@@ -317,123 +342,11 @@ stage of `/workflow`.
 
 ---
 
-# Part 2 — The coderails wiki schema
+# The coderails wiki schema — see AGENTS-wiki-schema.md
 
-This is the single source of truth for wiki conventions. Do NOT create a separate
-`schema.md` inside the vault.
-
-## Wiki location
-
-`../coderails-wiki` (set during /wiki-init)
-
-```yaml
-git:
-  worktree: false   # personal wiki, no PR ceremony — write and commit directly
-wiki:
-  supervision: autonomous   # wiki-ingest writes and commits without a discuss-first pause.
-                             # Default when this field is absent is `discuss` (Step 3's
-                             # "discuss with the user" requirement) — this project opts
-                             # into autonomous curation explicitly; it is not the shipped
-                             # default for other coderails installs.
-```
-
-Vault structure:
-```
-coderails-wiki/
-  index.md          ← content catalog; read this first on every wiki query
-  log.md            ← append-only chronological record
-  commands/         ← one page per slash command
-  hooks/            ← one page per hook script
-  skills/           ← one page per skill
-  design/           ← architectural decisions and invariants
-  investigations/   ← point-in-time filed analyses (<topic>_<YYYY-MM-DD>.md)
-  sources/          ← ingested PR records (pr_<N>_<slug>.md)
-  templates/        ← page skeletons (command.md, hook.md, skill.md, design.md, investigation.md, source.md)
-  assets/           ← charts and images
-```
-
-## Three layers
-
-1. **Raw sources** (immutable): The plugin repo at `<plugin-install-path>/` (wherever you unzipped coderails) — commands, hooks, scripts, skills, install.sh, CLAUDE.md. Read from these; never modify source when updating wiki.
-2. **The wiki**: LLM-generated markdown in the vault above. Claude owns this layer entirely — creates pages, updates cross-references, maintains consistency.
-3. **This file (AGENTS.md)**: Tells Claude how the wiki is structured, what conventions to follow, what workflows to run. Co-evolved between the maintainer and Claude over time. The maintainer edits this file to change conventions; Claude reads it on every session.
-
-## Page types
-
-| Type | Directory | Naming | Purpose |
-|---|---|---|---|
-| command | `commands/` | `<command-name>.md` | Documents one slash command: what it does, config fields, scripts invoked |
-| hook | `hooks/` | `<script-name>.md` | Documents one hook script: event, mode, logic, block condition |
-| skill | `skills/` | `<skill-name>.md` | Documents one skill: purpose, trigger phrases, phases, failure modes encoded |
-| design | `design/` | `<topic>.md` | Architectural decisions and invariants; evergreen |
-| investigation | `investigations/` | `<topic>_<YYYY-MM-DD>.md` | Point-in-time analysis filed during a workflow session; may be superseded |
-| source | `sources/` | `pr_<N>_<slug>.md` | Immutable record of a merged PR, created by `/wiki-ingest` |
-
-**Not a wiki page type:** scheduled-routine run notes
-(`<wikiPaths[0]>/dashboard-runs/<routine>.md`, `type: routine-run`,
-written by `skills/dashboard/runner`) live inside the vault directory
-but are operational output, not wiki content — they follow none of the
-page-format rules below, are never linked via `[[wiki-links]]`, and are
-not touched by `/wiki-ingest` or `/wiki-lint`. The `type: routine-run`
-frontmatter is specific to the runner's own notes — the Obsidian
-plugin's direct-exec path writes separate per-run notes into the same
-`dashboard-runs/` folder with `status: running|done|failed`
-frontmatter and no `type` field; treat both as non-wiki operational
-output regardless of frontmatter shape. See
-[`docs/routines.md`](./docs/routines.md) for what they're for.
-
-## Page format
-
-Every page must have:
-
-```yaml
----
-title: "<Page title>"
-type: <command|hook|skill|design|investigation|source>
-created: YYYY-MM-DD
-last_updated: YYYY-MM-DD
-sources: []        # list of PR source page paths that informed this page
-tags: []           # freeform list
----
-```
-
-Body rules:
-- Use `[[wiki-links]]` for all cross-references between wiki pages.
-- Keep pages concise — under 2 minutes to read.
-- Focus on knowledge that compounds (relationships, decisions, patterns), not facts derivable directly from reading the source code.
-- Confidence-label non-trivial assertions: `(verified)` (source cited), `(inferred)` (pattern-matched), `(guess)` (explicit speculation).
-
-## Enforcement model (wiki lens)
-
-The full treatment — hooks vs commands, the enforcement ceiling, and the
-skills↔hooks seam convention — lives in the **Two enforcement mechanisms**
-section of Part 1 above. For wiki purposes the rule is: when documenting a hook
-page vs a command page, record *which* mechanism it is and *what it can/can't
-guarantee*; link the page to [[enforcement-model]] and cite the ceiling caveats
-verbatim so they aren't re-opened as findings.
-
-## Workflows
-
-### Ingest (after every PR merge)
-
-Use `/wiki-ingest` from the coderails plugin. Never write wiki pages directly for PR content.
-
-1. Create `sources/pr_<N>_<slug>.md` using `templates/source.md`
-2. Update affected concept/design/hook/command/skill pages with new knowledge
-3. Append an entry to `log.md`: `## [YYYY-MM-DD] ingest | PR #N merged: <description>`
-4. Update `index.md` if new pages were created
-5. Then run `/wiki-lint`
-
-### Query
-
-Use `/wiki-query` from the coderails plugin. The skill reads `index.md` first, then fetches relevant pages, then answers the question with citations.
-
-### Lint
-
-Use `/wiki-lint` from the coderails plugin. Always run after ingest. Checks for: orphaned pages (linked but not created), stale `last_updated` dates, missing cross-references, contradictions between pages.
-
-Fix anything directly related to the current PR; defer unrelated findings.
-
-## Evolution note
-
-This file is co-evolved. When conventions change — new page types, new frontmatter fields, naming rule changes — update this file first, then update affected pages in the vault. The maintainer edits this file; Claude reads it. The wiki is a living system, not a snapshot.
+Wiki conventions (vault location, the three layers, page types, page format,
+the wiki-lens enforcement note, and the ingest/query/lint workflows) live in
+[`AGENTS-wiki-schema.md`](./AGENTS-wiki-schema.md), split out to keep this
+file a slim working guide. That file is the single source of truth for wiki
+conventions — read it before any `/wiki-ingest`, `/wiki-query`, or `/wiki-lint`
+work.

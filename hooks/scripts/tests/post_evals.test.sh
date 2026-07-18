@@ -668,4 +668,103 @@ check "bare invocation: exits 1" 1 $rc
 [[ "$usage_out" == *"Usage"* ]]
 check "bare invocation: prints usage" 0 $?
 
+# ─── validate_embed: posted-body embedded-artifact contract ─────────────────
+# Task 2's daemon extracts the embedded evals.json from the posted PR comment
+# to judge it; this validator guarantees the comment body actually carries
+# exactly one parseable fenced JSON block that agrees with the artifact.
+# tier is read from the BODY'S OWN marker line (what the daemon triages on),
+# never from an argument — a body whose marker says tier=0 but whose block
+# disagrees is exactly the incoherence this check exists to catch.
+
+FIX_EMBED_SRC="$TMP/embed_src.json"
+jq -n --arg sha "$SHA" '{
+  schema_version: 1,
+  scope: "pr",
+  task_ref: "192",
+  tier: 0,
+  tier_justification: "single work-unit, covered by existing test",
+  head_sha: $sha,
+  evals: []
+}' > "$FIX_EMBED_SRC"
+
+mk_body() { # marker_tier json_block_or_empty num_blocks
+  local marker_tier="$1" block="$2" num_blocks="${3:-1}"
+  local out="$TMP/body_$$_$RANDOM.md"
+  {
+    printf '<!-- coderails-eval-summary v1 pr=192 head_sha=%s result=GO tier=%s -->\n' "$SHA" "$marker_tier"
+    printf '## Eval summary\n\nAll P0 evals pass.\n'
+    local i
+    for ((i=0; i<num_blocks; i++)); do
+      printf '\n```json\n%s\n```\n' "$block"
+    done
+  } > "$out"
+  printf '%s' "$out"
+}
+
+# (1) tier-0 body WITHOUT any fenced block → rc 1, named message.
+BODY_NO_BLOCK=$(mk_body "0" "" 0)
+stderr_out=$(post_evals::validate_embed "$FIX_EMBED_SRC" "$BODY_NO_BLOCK" 2>&1)
+check "validate_embed: tier-0 body without fenced block → exit 1" 1 $?
+[[ "$stderr_out" == *"fenced json block"* || "$stderr_out" == *"json block"* ]]
+check "validate_embed: no block → stderr names the missing-block reason" 0 $?
+
+# (2) tier-0 body with exactly one MATCHING block → rc 0.
+MATCHING_BLOCK=$(jq -c . "$FIX_EMBED_SRC")
+BODY_MATCH=$(mk_body "0" "$MATCHING_BLOCK" 1)
+post_evals::validate_embed "$FIX_EMBED_SRC" "$BODY_MATCH"
+check "validate_embed: tier-0 body with matching block → exit 0" 0 $?
+
+# (3) tier-1 body WITHOUT a block → rc 0 (not required at tier 1/2).
+BODY_TIER1_NO_BLOCK=$(mk_body "1" "" 0)
+post_evals::validate_embed "$FIX_EMBED_SRC" "$BODY_TIER1_NO_BLOCK"
+check "validate_embed: tier-1 body without block → exit 0 (not required)" 0 $?
+
+# (4) SO-33 control: two fenced json blocks → rc 1, named (proves the
+# validator actually counts blocks rather than vacuously finding "a" block).
+BODY_TWO_BLOCKS=$(mk_body "0" "$MATCHING_BLOCK" 2)
+stderr_out=$(post_evals::validate_embed "$FIX_EMBED_SRC" "$BODY_TWO_BLOCKS" 2>&1)
+check "validate_embed: two fenced json blocks → exit 1" 1 $?
+[[ "$stderr_out" == *"exactly one"* ]]
+check "validate_embed: two blocks → stderr names the exactly-one reason" 0 $?
+
+# (5) SO-33 control: one block present but it does NOT parse as JSON → rc 1,
+# named (proves the validator actually jq-parses the block, not just counts
+# fences).
+BODY_MALFORMED=$(mk_body "0" "NOT JSON {{{" 1)
+stderr_out=$(post_evals::validate_embed "$FIX_EMBED_SRC" "$BODY_MALFORMED" 2>&1)
+check "validate_embed: malformed (non-parsing) block → exit 1" 1 $?
+[[ "$stderr_out" == *"parse"* ]]
+check "validate_embed: malformed block → stderr names the parse failure" 0 $?
+
+# (6) SO-33 control: block parses but its .tier disagrees with the marker's
+# tier → rc 1, named (proves the validator compares tier, not just presence).
+WRONG_TIER_BLOCK=$(jq -c '.tier = 2' "$FIX_EMBED_SRC")
+BODY_WRONG_TIER=$(mk_body "0" "$WRONG_TIER_BLOCK" 1)
+stderr_out=$(post_evals::validate_embed "$FIX_EMBED_SRC" "$BODY_WRONG_TIER" 2>&1)
+check "validate_embed: block .tier disagrees with marker tier → exit 1" 1 $?
+[[ "$stderr_out" == *"tier"* ]]
+check "validate_embed: wrong tier → stderr names the tier mismatch" 0 $?
+
+# (7) SO-33 control: block parses, tier matches, but .task_ref disagrees with
+# the source evals.json's .task_ref → rc 1, named.
+WRONG_REF_BLOCK=$(jq -c '.task_ref = "999"' "$FIX_EMBED_SRC")
+BODY_WRONG_REF=$(mk_body "0" "$WRONG_REF_BLOCK" 1)
+stderr_out=$(post_evals::validate_embed "$FIX_EMBED_SRC" "$BODY_WRONG_REF" 2>&1)
+check "validate_embed: block .task_ref disagrees with source file → exit 1" 1 $?
+[[ "$stderr_out" == *"task_ref"* ]]
+check "validate_embed: wrong task_ref → stderr names the task_ref mismatch" 0 $?
+
+# (8) fail-closed: marker line unparseable (malformed/missing marker) → rc 1,
+# named — proves the tier check isn't vacuously satisfied with no marker to
+# compare against.
+BODY_NO_MARKER="$TMP/body_no_marker.md"
+{
+  printf 'not a marker line at all\n'
+  printf '\n```json\n%s\n```\n' "$MATCHING_BLOCK"
+} > "$BODY_NO_MARKER"
+stderr_out=$(post_evals::validate_embed "$FIX_EMBED_SRC" "$BODY_NO_MARKER" 2>&1)
+check "validate_embed: unparseable marker line → exit 1 (fail-closed)" 1 $?
+[[ "$stderr_out" == *"marker"* ]]
+check "validate_embed: unparseable marker → stderr names the marker reason" 0 $?
+
 [[ $fails -eq 0 ]] && { echo PASS; exit 0; } || { echo "FAIL ($fails)"; exit 1; }

@@ -27,8 +27,20 @@ Append one line to `<repo-key-dir>/promotion-runs.log`:
 <ISO8601> predicate=<met|unmet> retros=<n> lifecycle=<0|1> decay=<0|1>
 ```
 
-If the predicate is unmet, STOP here. This is a dormant run — the log line
-IS the run's artifact. No branch, no PR, no gate chain.
+If the predicate is unmet, this is a dormant run — the log line IS the run's
+artifact. No branch, no PR, no gate chain. A dormant stop is a correct,
+successful no-op, not a failure: append a `run=ok` line to
+`promotion-runs.log` so the artifact gate (a last-marker predicate, keyed on
+this file's terminal markers) reads this run as green. STOP here.
+
+If the predicate is met, append a `delivery=started` line to
+`promotion-runs.log` immediately after the `predicate=met...` line, before
+starting §2 Mining. This is the fail-safe in-progress marker for the entire
+met-path — mining, drafting, AND delivery — not delivery alone: any death
+anywhere after met-determination leaves `delivery=started` as the last
+terminal marker, so the gate reads that run RED regardless of which step it
+died in. §4 below writes the corresponding success terminal (`run=ok`) once
+delivery completes.
 
 ## 2. Mining
 
@@ -55,6 +67,16 @@ under `## Promoted lessons`, containing:
 - **Promotion date** — ISO8601.
 
 ## 4. Delivery — full gate chain, manifest-locked
+
+The `delivery=started` in-progress marker was already written in §1's
+predicate=met branch, ahead of §2 Mining — it covers this entire section too,
+so no separate write is needed here. Any run that enters this section but
+does not reach `run=ok` below (step 9's success write) leaves
+`delivery=started` as its last terminal marker, so the last-marker gate reads
+that run RED — one fail-safe write at one known point, rather than trying to
+enumerate every failure exit between here and merge. The existing `abort=`
+line on manifest failure (step 4 below) is unchanged and still fires on its
+own path.
 
 1. Fetch `origin/main`; branch off the freshly-fetched tip.
 2. Run `/coderails:task-evals` (scope: `pr`) and freeze it — BEFORE making
@@ -115,7 +137,11 @@ under `## Promoted lessons`, containing:
 
 Append a timestamped per-stage line to `promotion-runs.log` after each gate
 step above (fetch/branch, evals frozen, edit made, manifest check, push,
-review, post-review, post-evals, merge).
+review, post-review, post-evals, merge). Only after step 9 (merge) completes
+successfully, append one further line: `run=ok`. This is the ONLY point that
+writes the success marker for a delivery run — it must come after the
+per-stage "merge" line, so `run=ok` remains the log's true last terminal
+marker for a completed delivery.
 
 ## 5. Prohibitions
 
