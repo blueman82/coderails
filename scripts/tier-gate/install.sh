@@ -95,18 +95,47 @@ tgi_check_machine_user_collaborator() {
     fi
 }
 
+# ─── Repo slug resolution (rendered into the plist's TIER_GATE_REPO) ─────────
+
+# tgi_resolve_repo_slug [gh_bin]
+# Echoes the "owner/repo" slug for the repo being installed against, resolved
+# via `gh repo view --json nameWithOwner -q .nameWithOwner` (gh resolves it
+# from the cwd's git remote, exactly as the collaborator preflight already
+# relies on gh doing). [gh_bin] defaults to "gh"; tests override with a stub.
+# Echoes nothing and returns 1 on any failure or an empty/malformed result —
+# the caller fails preflight loudly rather than rendering a daemon with a blank
+# TIER_GATE_REPO, which would silently fall back to the git-remote parse that
+# fails closed from the non-git install dir. Only install.sh uses gh here; the
+# DAEMON never does (it stays curl-only per its trust-domain constraint).
+tgi_resolve_repo_slug() {
+    local gh_bin="${1:-gh}"
+    local slug
+    slug=$("$gh_bin" repo view --json nameWithOwner -q .nameWithOwner 2>/dev/null) || return 1
+    if [[ "$slug" =~ ^[^/]+/[^/]+$ ]]; then
+        printf '%s' "$slug"
+        return 0
+    fi
+    return 1
+}
+
 # ─── Plist render ──────────────────────────────────────────────────────────────
 
-# tgi_render_plist <template_path> <runner_path> <creds_path>
-# Echoes the rendered plist content: substitutes __TIER_GATE_RUNNER_PATH__ and
-# __TIER_GATE_CREDS_PATH__ with the given absolute paths. Uses awk (not sed)
-# so a path containing a slash never collides with sed's delimiter.
+# tgi_render_plist <template_path> <runner_path> <creds_path> <repo_slug>
+# Echoes the rendered plist content: substitutes __TIER_GATE_RUNNER_PATH__,
+# __TIER_GATE_CREDS_PATH__, and __TIER_GATE_REPO__ with the given values. Uses
+# awk (not sed) so a path containing a slash never collides with sed's
+# delimiter. <repo_slug> is REQUIRED (not optional): an empty value would render
+# a daemon whose TIER_GATE_REPO is blank, silently falling back to the
+# git-remote parse that fails closed from the non-git install dir — the exact
+# bug this render exists to prevent. The caller resolves it and fails preflight
+# if it can't, so render never receives an empty one.
 tgi_render_plist() {
-    local template_path="$1" runner_path="$2" creds_path="$3"
-    awk -v runner="$runner_path" -v creds="$creds_path" '
+    local template_path="$1" runner_path="$2" creds_path="$3" repo_slug="$4"
+    awk -v runner="$runner_path" -v creds="$creds_path" -v repo="$repo_slug" '
         { line = $0
           gsub(/__TIER_GATE_RUNNER_PATH__/, runner, line)
           gsub(/__TIER_GATE_CREDS_PATH__/, creds, line)
+          gsub(/__TIER_GATE_REPO__/, repo, line)
           print line
         }
     ' "$template_path"
@@ -171,6 +200,13 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     tgi_check_tools || preflight_failed=1
     tgi_check_credentials "${TGI_CREDS_SRC:-$TGI_INSTALL_ROOT/$TGI_CREDS_FILENAME}" || preflight_failed=1
     tgi_check_machine_user_collaborator "${TGI_MACHINE_USER:-}" || preflight_failed=1
+    # Resolve the repo slug NOW so a failure here fails the install loudly,
+    # rather than silently rendering a daemon with a blank TIER_GATE_REPO that
+    # fails closed at runtime from its non-git install dir.
+    REPO_SLUG=$(tgi_resolve_repo_slug) || {
+        echo 'preflight: could not resolve the repo slug (owner/repo) via `gh repo view` — run install.sh from inside the target repo checkout with gh authenticated.' >&2
+        preflight_failed=1
+    }
     if [[ "$preflight_failed" -eq 1 ]]; then
         echo "preflight FAILED — resolve the issues above and re-run." >&2
         exit 1
@@ -187,7 +223,8 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     RENDERED_PLIST=$(tgi_render_plist \
         "$SCRIPT_DIR/com.coderails.tier-gate.plist.template" \
         "$TGI_INSTALL_ROOT/tier-gate-runner.sh" \
-        "$TGI_INSTALL_ROOT/$TGI_CREDS_FILENAME")
+        "$TGI_INSTALL_ROOT/$TGI_CREDS_FILENAME" \
+        "$REPO_SLUG")
 
     echo "== tier-gate install: repo-vs-installed diff (BEFORE promote) =="
     diff_clean=1

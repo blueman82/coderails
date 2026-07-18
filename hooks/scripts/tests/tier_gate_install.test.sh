@@ -148,12 +148,62 @@ check_contains "tgi_check_machine_user_collaborator: gh reports not-found -> nam
 # ═══════════════════════════════════════════════════════════════════════════
 
 TEMPLATE="$REPO_ROOT/scripts/tier-gate/com.coderails.tier-gate.plist.template"
-rendered=$(tgi_render_plist "$TEMPLATE" "/etc/coderails-tier-gate/tier-gate-runner.sh" "/etc/coderails-tier-gate/credentials")
+rendered=$(tgi_render_plist "$TEMPLATE" "/etc/coderails-tier-gate/tier-gate-runner.sh" "/etc/coderails-tier-gate/credentials" "octo/some-repo")
 check_contains "tgi_render_plist: substitutes runner path" "<string>/etc/coderails-tier-gate/tier-gate-runner.sh</string>" "$rendered"
 check_contains "tgi_render_plist: substitutes creds path" "<string>/etc/coderails-tier-gate/credentials</string>" "$rendered"
+check_contains "tgi_render_plist: substitutes repo slug into TIER_GATE_REPO" "<string>octo/some-repo</string>" "$rendered"
 check_not_contains "tgi_render_plist: no placeholder tokens remain (runner)" "__TIER_GATE_RUNNER_PATH__" "$rendered"
 check_not_contains "tgi_render_plist: no placeholder tokens remain (creds)" "__TIER_GATE_CREDS_PATH__" "$rendered"
+check_not_contains "tgi_render_plist: no placeholder tokens remain (repo)" "__TIER_GATE_REPO__" "$rendered"
 check_contains "tgi_render_plist: preserves unrelated template content" "<string>com.coderails.tier-gate</string>" "$rendered"
+
+# ═══════════════════════════════════════════════════════════════════════════
+# tgi_resolve_repo_slug — resolves the owner/repo slug rendered into the plist's
+# TIER_GATE_REPO. Uses an injectable gh stub (like tgi_check_machine_user_
+# collaborator's [gh_bin]) so it's testable without a real gh/network.
+# ═══════════════════════════════════════════════════════════════════════════
+
+GH_SLUG_OK="$TMP/gh-slug-ok"
+cat > "$GH_SLUG_OK" <<'EOF'
+#!/bin/bash
+echo "blueman82/coderails"
+EOF
+chmod +x "$GH_SLUG_OK"
+out=$(tgi_resolve_repo_slug "$GH_SLUG_OK" 2>&1)
+rc=$?
+check "tgi_resolve_repo_slug: gh returns owner/repo -> rc 0" "0" "$rc"
+check "tgi_resolve_repo_slug: gh returns owner/repo -> echoes the slug" "blueman82/coderails" "$out"
+
+GH_SLUG_EMPTY="$TMP/gh-slug-empty"
+cat > "$GH_SLUG_EMPTY" <<'EOF'
+#!/bin/bash
+echo ""
+EOF
+chmod +x "$GH_SLUG_EMPTY"
+out=$(tgi_resolve_repo_slug "$GH_SLUG_EMPTY" 2>&1)
+rc=$?
+check "tgi_resolve_repo_slug: gh returns empty -> rc 1 (fail loudly, never blank)" "1" "$rc"
+check "tgi_resolve_repo_slug: gh returns empty -> echoes nothing" "" "$out"
+
+GH_SLUG_FAIL="$TMP/gh-slug-fail"
+cat > "$GH_SLUG_FAIL" <<'EOF'
+#!/bin/bash
+exit 1
+EOF
+chmod +x "$GH_SLUG_FAIL"
+out=$(tgi_resolve_repo_slug "$GH_SLUG_FAIL" 2>&1)
+rc=$?
+check "tgi_resolve_repo_slug: gh call fails -> rc 1" "1" "$rc"
+
+GH_SLUG_MALFORMED="$TMP/gh-slug-malformed"
+cat > "$GH_SLUG_MALFORMED" <<'EOF'
+#!/bin/bash
+echo "not-a-valid-slug"
+EOF
+chmod +x "$GH_SLUG_MALFORMED"
+out=$(tgi_resolve_repo_slug "$GH_SLUG_MALFORMED" 2>&1)
+rc=$?
+check "tgi_resolve_repo_slug: gh returns a malformed slug -> rc 1 (never renders junk)" "1" "$rc"
 
 # ═══════════════════════════════════════════════════════════════════════════
 # tgi_diff_before_promote
