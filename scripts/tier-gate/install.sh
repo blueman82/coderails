@@ -95,6 +95,23 @@ tgi_check_machine_user_collaborator() {
     fi
 }
 
+# tgi_read_machine_user_from_creds <path>
+# Echoes the MACHINE_USER= value already stored in the credentials file at
+# <path>, or nothing with rc 1 if the file is absent or has no non-empty
+# MACHINE_USER= line. Used to default TGI_MACHINE_USER on a re-install: the
+# collaborator preflight (tgi_check_machine_user_collaborator) otherwise
+# demands a login the machine already has on disk. This does NOT weaken that
+# check — it only supplies a login for it to validate; the live GitHub API
+# call still runs against whatever value is used, supplied or defaulted.
+tgi_read_machine_user_from_creds() {
+    local path="$1"
+    [[ -f "$path" ]] || return 1
+    local val
+    val=$(grep -E '^MACHINE_USER=' "$path" 2>/dev/null | head -1 | cut -d= -f2-)
+    [[ -n "$val" ]] || return 1
+    printf '%s' "$val"
+}
+
 # ─── Repo slug resolution (rendered into the plist's TIER_GATE_REPO) ─────────
 
 # tgi_resolve_repo_slug [gh_bin]
@@ -190,6 +207,26 @@ tgi_diff_before_promote() {
     return 1
 }
 
+# ─── Same-file check (guards the creds copy against install's own refusal) ───
+
+# tgi_same_file <path_a> <path_b>
+# Returns 0 when <path_a> and <path_b> are the same file — same device and
+# inode, via bash's `-ef` test, the exact criterion `install` itself uses to
+# refuse a copy. This is not a path-string or realpath comparison: it holds
+# across symlinks, non-canonical `..` segments, AND hardlinks (a hardlinked
+# src/dst are two different paths under realpath, but one file to install).
+# Returns 1 when <path_b> doesn't exist (nothing to collide with, so not
+# "same"). Exists because TGI_CREDS_SRC defaults to the install destination:
+# on a routine re-install (credentials already in place) `sudo install -m
+# 0600 "$SRC" "$DST"` gets src == dst and BSD install refuses with "same
+# file", aborting the script under `set -e` before the plist is written. The
+# caller uses this to skip the copy (not the ownership/mode enforcement that
+# follows it) when src and dst are already the same file.
+tgi_same_file() {
+    local path_a="$1" path_b="$2"
+    [[ "$path_a" -ef "$path_b" ]]
+}
+
 # ─── Entry point (root/sudo/interactive side effects — never unit-tested) ─────
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     set -euo pipefail
@@ -198,7 +235,14 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     echo "== tier-gate install: preflight =="
     preflight_failed=0
     tgi_check_tools || preflight_failed=1
-    tgi_check_credentials "${TGI_CREDS_SRC:-$TGI_INSTALL_ROOT/$TGI_CREDS_FILENAME}" || preflight_failed=1
+    CREDS_PATH="${TGI_CREDS_SRC:-$TGI_INSTALL_ROOT/$TGI_CREDS_FILENAME}"
+    tgi_check_credentials "$CREDS_PATH" || preflight_failed=1
+    # A re-install already has the machine-user login on disk (MACHINE_USER=
+    # in the credentials file) — default to it rather than demanding the
+    # operator supply a value the machine already knows. The collaborator
+    # check below still validates whatever login is used, supplied or
+    # defaulted, against the live GitHub API.
+    TGI_MACHINE_USER="${TGI_MACHINE_USER:-$(tgi_read_machine_user_from_creds "$CREDS_PATH" 2>/dev/null || true)}"
     tgi_check_machine_user_collaborator "${TGI_MACHINE_USER:-}" || preflight_failed=1
     # Resolve the repo slug NOW so a failure here fails the install loudly,
     # rather than silently rendering a daemon with a blank TIER_GATE_REPO that
@@ -246,9 +290,18 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     sudo mkdir -p "$TGI_INSTALL_ROOT"
     sudo install -m 0755 "$SCRIPT_DIR/tier-gate-runner.sh" "$TGI_INSTALL_ROOT/tier-gate-runner.sh"
     sudo install -m 0644 "$SCRIPT_DIR/judge-prompt.md" "$TGI_INSTALL_ROOT/judge-prompt.md"
-    sudo install -m 0600 "${TGI_CREDS_SRC:-$TGI_INSTALL_ROOT/$TGI_CREDS_FILENAME}" "$TGI_INSTALL_ROOT/$TGI_CREDS_FILENAME"
+    CREDS_SRC="${TGI_CREDS_SRC:-$TGI_INSTALL_ROOT/$TGI_CREDS_FILENAME}"
+    CREDS_DEST="$TGI_INSTALL_ROOT/$TGI_CREDS_FILENAME"
+    if tgi_same_file "$CREDS_SRC" "$CREDS_DEST"; then
+        # Routine re-install: TGI_CREDS_SRC defaults to the install
+        # destination, so src == dst here. `install` would refuse with
+        # "same file" — skip the copy but still enforce mode/ownership below.
+        sudo chmod 0600 "$CREDS_DEST"
+    else
+        sudo install -m 0600 "$CREDS_SRC" "$CREDS_DEST"
+    fi
     printf '%s' "$RENDERED_PLIST" | sudo tee "$TGI_PLIST_DEST" >/dev/null
-    sudo chown root:wheel "$TGI_INSTALL_ROOT/$TGI_CREDS_FILENAME"
+    sudo chown root:wheel "$CREDS_DEST"
 
     echo "== tier-gate install: launchd =="
     sudo launchctl bootout "system/com.coderails.tier-gate" 2>/dev/null || true

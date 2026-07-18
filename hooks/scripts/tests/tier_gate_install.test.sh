@@ -144,6 +144,28 @@ check "tgi_check_machine_user_collaborator: gh reports not-found -> rc 1" "1" "$
 check_contains "tgi_check_machine_user_collaborator: gh reports not-found -> named message" 'machine user "not-a-collaborator" is not resolvable as a collaborator' "$out"
 
 # ═══════════════════════════════════════════════════════════════════════════
+# tgi_read_machine_user_from_creds — defaults TGI_MACHINE_USER from the
+# MACHINE_USER= line already stored in the credentials file, so a re-install
+# doesn't demand a value the machine already knows.
+# ═══════════════════════════════════════════════════════════════════════════
+
+CREDS_WITH_USER="$TMP/creds-with-machine-user"
+printf 'GH_TOKEN=ghp_fake\nCLAUDE_CODE_OAUTH_TOKEN=oat-fake\nMACHINE_USER=coderails-tier-bot\n' > "$CREDS_WITH_USER"
+out=$(tgi_read_machine_user_from_creds "$CREDS_WITH_USER" 2>&1)
+rc=$?
+check "tgi_read_machine_user_from_creds: creds file has MACHINE_USER -> rc 0" "0" "$rc"
+check "tgi_read_machine_user_from_creds: creds file has MACHINE_USER -> echoes the login" "coderails-tier-bot" "$out"
+
+out=$(tgi_read_machine_user_from_creds "$CREDS_EMPTY" 2>&1)
+rc=$?
+check "tgi_read_machine_user_from_creds: creds file has no MACHINE_USER -> rc 1" "1" "$rc"
+check "tgi_read_machine_user_from_creds: creds file has no MACHINE_USER -> echoes nothing" "" "$out"
+
+out=$(tgi_read_machine_user_from_creds "$TMP/no-such-creds-xyz" 2>&1)
+rc=$?
+check "tgi_read_machine_user_from_creds: creds file absent -> rc 1" "1" "$rc"
+
+# ═══════════════════════════════════════════════════════════════════════════
 # tgi_render_plist
 # ═══════════════════════════════════════════════════════════════════════════
 
@@ -232,6 +254,46 @@ rc=$?
 check "tgi_diff_before_promote: differs -> rc 1 (must gate on confirmation)" "1" "$rc"
 check_contains "tgi_diff_before_promote: differs -> flags DIFFERS" "DIFFERS from installed copy" "$out"
 check_contains "tgi_diff_before_promote: differs -> shows the actual delta" "TAMPERED" "$out"
+
+# ═══════════════════════════════════════════════════════════════════════════
+# tgi_same_file — resolved-path comparison guarding the creds install copy
+# against `install: src and dst are the same file` when TGI_CREDS_SRC
+# defaults to the install destination (the normal re-install case).
+# ═══════════════════════════════════════════════════════════════════════════
+
+SAME_A="$TMP/same-file-a"
+printf 'creds\n' > "$SAME_A"
+out=$(tgi_same_file "$SAME_A" "$SAME_A" 2>&1)
+rc=$?
+check "tgi_same_file: identical path -> rc 0 (same file)" "0" "$rc"
+
+SAME_B="$TMP/same-file-b"
+printf 'other\n' > "$SAME_B"
+out=$(tgi_same_file "$SAME_A" "$SAME_B" 2>&1)
+rc=$?
+check "tgi_same_file: two distinct files -> rc 1 (different)" "1" "$rc"
+
+SAME_LINK="$TMP/same-file-link"
+ln -sf "$SAME_A" "$SAME_LINK"
+out=$(tgi_same_file "$SAME_A" "$SAME_LINK" 2>&1)
+rc=$?
+check "tgi_same_file: symlink to same target -> rc 0 (same file)" "0" "$rc"
+
+SAME_HARDLINK="$TMP/same-file-hardlink"
+ln -f "$SAME_A" "$SAME_HARDLINK"
+out=$(tgi_same_file "$SAME_A" "$SAME_HARDLINK" 2>&1)
+rc=$?
+check "tgi_same_file: hardlink to same inode -> rc 0 (same file, what install itself checks)" "0" "$rc"
+
+mkdir -p "$TMP/subdir"
+SAME_DOTDOT="$TMP/subdir/../same-file-a"
+out=$(tgi_same_file "$SAME_A" "$SAME_DOTDOT" 2>&1)
+rc=$?
+check "tgi_same_file: non-canonical ../ path to same file -> rc 0 (same file)" "0" "$rc"
+
+out=$(tgi_same_file "$SAME_A" "$TMP/no-such-file-xyz" 2>&1)
+rc=$?
+check "tgi_same_file: dst does not exist -> rc 1 (never same, install proceeds)" "1" "$rc"
 
 # ═══════════════════════════════════════════════════════════════════════════
 # tgi_classify_mode — honest MODE line from the ruleset preflight probe
