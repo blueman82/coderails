@@ -10,6 +10,9 @@ discipline loop. It combines:
   (verified)/(inferred), is blocked at stop until the `## Did Not Verify`
   section is present and resolved, and is gated on destructive bash and
   failing project tests.
+- **Tier-gate** — A three-layer verification system (local gate, daemon judge,
+  GitHub ruleset) that prevents dishonest tier classifications from being
+  merged. See [`docs/TIER-GATE.md`](./docs/TIER-GATE.md) for details.
 
 ## Install
 
