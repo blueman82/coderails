@@ -1,4 +1,7 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { mkdtempSync, rmSync, existsSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { runClaude, resolveClaudePath, DEFAULT_TIMEOUT_MS } from "../src/exec.ts";
 
 describe("resolveClaudePath", () => {
@@ -124,6 +127,87 @@ describe("runClaude", () => {
       execFileImpl,
     }).then(() => {
       expect(execFileImpl).toHaveBeenCalled();
+    });
+  });
+});
+
+// The motivating gap: a scheduled routine that runs RED left no transcript
+// on disk because runClaude returned stdout/stderr in-memory only (never
+// wrote the outputPath the sweeper had already recorded in the run ledger).
+// This mirrors route.ts, which persists the run's output to its outputPath.
+describe("runClaude output persistence", () => {
+  let dir: string;
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "exec-output-"));
+  });
+
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("writes final stdout and stderr to outputPath once the run settles successfully", () => {
+    const outputPath = join(dir, "run.log");
+    const execFileImpl = vi.fn((command, args, options, callback) => {
+      callback(null, "hello from stdout", "a warning on stderr");
+    });
+    return runClaude(["-p", "/x"], "/cwd", {
+      claudePath: "/opt/homebrew/bin/claude",
+      execFileImpl,
+      outputPath,
+    }).then((result) => {
+      expect(existsSync(outputPath)).toBe(true);
+      const content = readFileSync(outputPath, "utf-8");
+      expect(content).toContain("hello from stdout");
+      expect(content).toContain("a warning on stderr");
+      expect(result.stdout).toBe("hello from stdout");
+    });
+  });
+
+  it("persists output to outputPath even when the run exits non-zero — the RED-routine diagnosability case", () => {
+    const outputPath = join(dir, "run.log");
+    const execFileImpl = vi.fn((command, args, options, callback) => {
+      const err = Object.assign(new Error("boom"), { code: 2 });
+      callback(err, "partial work before failing", "the failure reason on stderr");
+    });
+    return runClaude(["-p", "/x"], "/cwd", {
+      claudePath: "/opt/homebrew/bin/claude",
+      execFileImpl,
+      outputPath,
+    }).then((result) => {
+      expect(result.exitCode).toBe(2);
+      const content = readFileSync(outputPath, "utf-8");
+      expect(content).toContain("partial work before failing");
+      expect(content).toContain("the failure reason on stderr");
+    });
+  });
+
+  it("creates the outputPath parent directory if it does not yet exist", () => {
+    const outputPath = join(dir, "nested", "deeper", "run.log");
+    const execFileImpl = vi.fn((command, args, options, callback) => {
+      callback(null, "output", "");
+    });
+    return runClaude(["-p", "/x"], "/cwd", {
+      claudePath: "/opt/homebrew/bin/claude",
+      execFileImpl,
+      outputPath,
+    }).then(() => {
+      expect(existsSync(outputPath)).toBe(true);
+      expect(readFileSync(outputPath, "utf-8")).toContain("output");
+    });
+  });
+
+  it("does not write any file when outputPath is omitted (backward compatible)", () => {
+    const execFileImpl = vi.fn((command, args, options, callback) => {
+      callback(null, "output", "");
+    });
+    return runClaude(["-p", "/x"], "/cwd", {
+      claudePath: "/opt/homebrew/bin/claude",
+      execFileImpl,
+    }).then((result) => {
+      expect(result.stdout).toBe("output");
+      // No outputPath supplied → nothing written; dir stays empty.
+      expect(existsSync(join(dir, "run.log"))).toBe(false);
     });
   });
 });

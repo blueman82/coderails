@@ -45,7 +45,11 @@ describe("sweepOnce", () => {
     expect(existsSync(join(queueDir, "run1.json"))).toBe(false);
     expect(existsSync(join(processingDir, "run1.json"))).toBe(false);
     expect(existsSync(join(archiveDir, "run1.json"))).toBe(true);
-    expect(runClaudeImpl).toHaveBeenCalledWith(["-p", "/coderails:wiki-lint", "--allowedTools", "Read", "Grep", "Glob"], "/tmp");
+    expect(runClaudeImpl).toHaveBeenCalledWith(
+      ["-p", "/coderails:wiki-lint", "--allowedTools", "Read", "Grep", "Glob"],
+      "/tmp",
+      expect.objectContaining({ outputPath: expect.stringContaining(runsDir) })
+    );
   });
 
   it("moves a malformed intent to quarantine and continues the sweep", async () => {
@@ -316,7 +320,11 @@ describe("sweepOnce coverage gaps (I2)", () => {
       queueDir, processingDir, archiveDir, quarantineDir, config: bypassConfig, runsDir, vaultNotesDir, runClaudeImpl,
     });
     const expectedArgv = buildArgv(bypassConfig.buttons[0], undefined);
-    expect(runClaudeImpl).toHaveBeenCalledWith(expectedArgv, "/tmp");
+    expect(runClaudeImpl).toHaveBeenCalledWith(
+      expectedArgv,
+      "/tmp",
+      expect.objectContaining({ outputPath: expect.stringContaining(runsDir) })
+    );
   });
 
   it("asserts real buildArgv output for a default (read-only) profile button", async () => {
@@ -326,7 +334,11 @@ describe("sweepOnce coverage gaps (I2)", () => {
       queueDir, processingDir, archiveDir, quarantineDir, config, runsDir, vaultNotesDir, runClaudeImpl,
     });
     const expectedArgv = buildArgv(config.buttons[0], undefined);
-    expect(runClaudeImpl).toHaveBeenCalledWith(expectedArgv, "/tmp");
+    expect(runClaudeImpl).toHaveBeenCalledWith(
+      expectedArgv,
+      "/tmp",
+      expect.objectContaining({ outputPath: expect.stringContaining(runsDir) })
+    );
   });
 
   it("asserts real buildArgv output for an input-bearing button", async () => {
@@ -336,7 +348,11 @@ describe("sweepOnce coverage gaps (I2)", () => {
       queueDir, processingDir, archiveDir, quarantineDir, config, runsDir, vaultNotesDir, runClaudeImpl,
     });
     const expectedArgv = buildArgv(config.buttons[0], "some literal input");
-    expect(runClaudeImpl).toHaveBeenCalledWith(expectedArgv, "/tmp");
+    expect(runClaudeImpl).toHaveBeenCalledWith(
+      expectedArgv,
+      "/tmp",
+      expect.objectContaining({ outputPath: expect.stringContaining(runsDir) })
+    );
   });
 
   it("rejects a {vault}-relative artifact path whose resolved location escapes to a sibling directory sharing the vault root as a string prefix (sibling-prefix traversal)", async () => {

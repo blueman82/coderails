@@ -1,5 +1,6 @@
 import { execFile as execFileReal } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
 
 export interface ExecResult {
   exitCode: number;
@@ -33,6 +34,32 @@ export interface ExecOptions {
   execFileImpl?: ExecFileFn;
   timeoutMs?: number;
   resolveClaudePathImpl?: () => string;
+  // When set, the run's final stdout+stderr is written here once the
+  // execFile callback fires (on every settle path — success, non-zero exit,
+  // timeout, or ENOENT-style spawn failure). Without this, runClaude
+  // returned its output in-memory only, so a scheduled routine that ran RED
+  // left NO transcript at the outputPath the sweeper had already recorded in
+  // the run ledger (the sync-docs-nightly RED-with-no-transcript case) —
+  // making the failure undiagnosable. This mirrors route.ts, which persists
+  // the run's output to its outputPath.
+  outputPath?: string;
+}
+
+// Best-effort persistence of a settled run's output. execFile buffers each
+// stream separately (there is no per-chunk interleaving to preserve, unlike
+// route.ts's live-streaming spawn path), so stdout and stderr are simply
+// concatenated. Plain text is written deliberately — NOT stream-json — since
+// the sole consumer here is a human diagnosing a failed routine, for whom
+// readable text beats a JSON-lines stream. A write failure is logged and
+// swallowed: losing the transcript must never mask or discard the ExecResult
+// the caller needs to gate the run.
+function persistOutput(outputPath: string, stdout: string, stderr: string): void {
+  try {
+    mkdirSync(dirname(outputPath), { recursive: true });
+    writeFileSync(outputPath, stdout + stderr);
+  } catch (err) {
+    console.error("[exec] failed to persist run output", { outputPath, err });
+  }
 }
 
 // launchd invokes this binary with NO PATH set (verified via `launchctl
@@ -74,6 +101,10 @@ export function runClaude(argv: string[], cwd: string, opts?: ExecOptions): Prom
 
   return new Promise((resolve) => {
     execFileImpl(claudePath, argv, { cwd, timeout: timeoutMs, killSignal: "SIGKILL" }, (error, stdout, stderr) => {
+      // Persist first, before any branch returns: whatever the outcome
+      // (timeout, spawn-failed, non-zero exit, or success), the stdout/stderr
+      // captured so far is exactly what a human needs to diagnose the run.
+      if (opts?.outputPath) persistOutput(opts.outputPath, stdout, stderr);
       if (error && (error as { killed?: boolean; signal?: string }).signal === "SIGKILL") {
         resolve({
           exitCode: 1,

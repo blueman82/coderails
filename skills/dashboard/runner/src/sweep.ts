@@ -254,7 +254,10 @@ export async function sweepOnce(opts: SweepOptions): Promise<SweepResult> {
         continue;
       }
 
-      const execResult = await runClaudeImpl(argv, button.cwd);
+      // Pass the same outputPath already recorded in the ledger above so the
+      // run's stdout/stderr is persisted to disk — otherwise a RED routine
+      // leaves no transcript to diagnose (the motivating gap). See exec.ts.
+      const execResult = await runClaudeImpl(argv, button.cwd, { outputPath: startRecord.outputPath });
       appendRun({ ...startRecord, endedAt: Date.now(), exitCode: execResult.exitCode }, { runsDir: opts.runsDir });
 
       if (execResult.spawnFailure) {
