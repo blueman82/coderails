@@ -13,6 +13,7 @@ description: Merge approved PR, switch to main, and pull latest changes
 Execute the merge workflow script:
 
 ```bash
+echo "--- TIER GATE DENY TEST: This is user-facing output ---"
 bash "${CLAUDE_PLUGIN_ROOT}/scripts/merge.sh" "$ARGUMENTS"
 ```
 
