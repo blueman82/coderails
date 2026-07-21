@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync, mkdirSync, writeFileSync, existsSync, utimesSync, 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { sweepOnce, ORPHAN_THRESHOLD_MS } from "../src/sweep.ts";
+import { readRuns } from "../src/runlog.ts";
 import { buildArgv } from "../../app/src/lib/argv.ts";
 import type { DashboardConfig } from "@coderails/dashboard-lib";
 
@@ -45,10 +46,19 @@ describe("sweepOnce", () => {
     expect(existsSync(join(queueDir, "run1.json"))).toBe(false);
     expect(existsSync(join(processingDir, "run1.json"))).toBe(false);
     expect(existsSync(join(archiveDir, "run1.json"))).toBe(true);
+    // Pin the EXACT path, not merely one under runsDir: the invariant this
+    // feature depends on is that the transcript lands where the ledger says
+    // it does. stringContaining(runsDir) alone still passes when the
+    // persisted filename is decoupled from startRecord.outputPath, which is
+    // precisely the "RED routine with no findable transcript" failure the
+    // feature exists to prevent.
+    const ledgerRec = readRuns(10, { runsDir }).find((r) => r.outputPath);
+    const ledgerPath = ledgerRec?.outputPath;
+    expect(ledgerPath).toBe(join(runsDir, `${ledgerRec?.runId}.log`));
     expect(runClaudeImpl).toHaveBeenCalledWith(
       ["-p", "/coderails:wiki-lint", "--allowedTools", "Read", "Grep", "Glob"],
       "/tmp",
-      expect.objectContaining({ outputPath: expect.stringContaining(runsDir) })
+      expect.objectContaining({ outputPath: ledgerPath })
     );
   });
 
