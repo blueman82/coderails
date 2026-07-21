@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync, mkdirSync, writeFileSync, existsSync, utimesSync, 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { sweepOnce, ORPHAN_THRESHOLD_MS } from "../src/sweep.ts";
+import { readRuns } from "../src/runlog.ts";
 import { buildArgv } from "../../app/src/lib/argv.ts";
 import type { DashboardConfig } from "@coderails/dashboard-lib";
 
@@ -45,7 +46,20 @@ describe("sweepOnce", () => {
     expect(existsSync(join(queueDir, "run1.json"))).toBe(false);
     expect(existsSync(join(processingDir, "run1.json"))).toBe(false);
     expect(existsSync(join(archiveDir, "run1.json"))).toBe(true);
-    expect(runClaudeImpl).toHaveBeenCalledWith(["-p", "/coderails:wiki-lint", "--allowedTools", "Read", "Grep", "Glob"], "/tmp");
+    // Pin the EXACT path, not merely one under runsDir: the invariant this
+    // feature depends on is that the transcript lands where the ledger says
+    // it does. stringContaining(runsDir) alone still passes when the
+    // persisted filename is decoupled from startRecord.outputPath, which is
+    // precisely the "RED routine with no findable transcript" failure the
+    // feature exists to prevent.
+    const ledgerRec = readRuns(10, { runsDir }).find((r) => r.outputPath);
+    const ledgerPath = ledgerRec?.outputPath;
+    expect(ledgerPath).toBe(join(runsDir, `${ledgerRec?.runId}.log`));
+    expect(runClaudeImpl).toHaveBeenCalledWith(
+      ["-p", "/coderails:wiki-lint", "--allowedTools", "Read", "Grep", "Glob"],
+      "/tmp",
+      expect.objectContaining({ outputPath: ledgerPath })
+    );
   });
 
   it("moves a malformed intent to quarantine and continues the sweep", async () => {
@@ -316,7 +330,11 @@ describe("sweepOnce coverage gaps (I2)", () => {
       queueDir, processingDir, archiveDir, quarantineDir, config: bypassConfig, runsDir, vaultNotesDir, runClaudeImpl,
     });
     const expectedArgv = buildArgv(bypassConfig.buttons[0], undefined);
-    expect(runClaudeImpl).toHaveBeenCalledWith(expectedArgv, "/tmp");
+    expect(runClaudeImpl).toHaveBeenCalledWith(
+      expectedArgv,
+      "/tmp",
+      expect.objectContaining({ outputPath: expect.stringContaining(runsDir) })
+    );
   });
 
   it("asserts real buildArgv output for a default (read-only) profile button", async () => {
@@ -326,7 +344,11 @@ describe("sweepOnce coverage gaps (I2)", () => {
       queueDir, processingDir, archiveDir, quarantineDir, config, runsDir, vaultNotesDir, runClaudeImpl,
     });
     const expectedArgv = buildArgv(config.buttons[0], undefined);
-    expect(runClaudeImpl).toHaveBeenCalledWith(expectedArgv, "/tmp");
+    expect(runClaudeImpl).toHaveBeenCalledWith(
+      expectedArgv,
+      "/tmp",
+      expect.objectContaining({ outputPath: expect.stringContaining(runsDir) })
+    );
   });
 
   it("asserts real buildArgv output for an input-bearing button", async () => {
@@ -336,7 +358,11 @@ describe("sweepOnce coverage gaps (I2)", () => {
       queueDir, processingDir, archiveDir, quarantineDir, config, runsDir, vaultNotesDir, runClaudeImpl,
     });
     const expectedArgv = buildArgv(config.buttons[0], "some literal input");
-    expect(runClaudeImpl).toHaveBeenCalledWith(expectedArgv, "/tmp");
+    expect(runClaudeImpl).toHaveBeenCalledWith(
+      expectedArgv,
+      "/tmp",
+      expect.objectContaining({ outputPath: expect.stringContaining(runsDir) })
+    );
   });
 
   it("rejects a {vault}-relative artifact path whose resolved location escapes to a sibling directory sharing the vault root as a string prefix (sibling-prefix traversal)", async () => {
