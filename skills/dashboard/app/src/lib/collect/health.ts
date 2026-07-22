@@ -3,6 +3,8 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { collectUsage, type UsageTotals } from "./usage";
 import { collectLoopCost, type CostBucket } from "./cost";
+import { collectLintFindings } from "./lint";
+import { loadConfig } from "../config";
 
 export interface HealthTile {
   key: "usage5h" | "usageWeek" | "hooksFired" | "lintFindings" | "costWeek" | "costMonth";
