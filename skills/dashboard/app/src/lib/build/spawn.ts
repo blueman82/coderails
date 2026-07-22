@@ -140,7 +140,7 @@ export function claimAndSpawnBuild(
   const buildsDir = deps.buildsDir ?? DEFAULT_BUILDS_DIR;
   const buildDir = join(buildsDir, entry.hash);
 
-  mkdirSync(buildsDir, { recursive: true });
+  mkdirSync(buildsDir, { recursive: true, mode: 0o700 });
 
   try {
     mkdirSync(buildDir);
