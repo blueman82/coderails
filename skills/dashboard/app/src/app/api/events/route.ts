@@ -74,15 +74,10 @@ export function createEventsHandler(deps: EventsHandlerDeps) {
 
     const stream = new ReadableStream<Uint8Array>({
       start(controller) {
-        console.log("[instrumentation] route: ReadableStream start called");
         const encoder = new TextEncoder();
-        console.log("[instrumentation] route: calling aggregator.start()");
         aggregator.start();
-        console.log("[instrumentation] route: aggregator.start() completed");
         controller.enqueue(encoder.encode(sseFrame("snapshot", aggregator.getSnapshot())));
-        console.log("[instrumentation] route: calling aggregator.subscribe()");
         unsubscribe = aggregator.subscribe((event, data) => {
-          console.log("[instrumentation] route: listener called with event:", event);
           try {
             controller.enqueue(encoder.encode(sseFrame(event, data)));
           } catch {
@@ -90,7 +85,6 @@ export function createEventsHandler(deps: EventsHandlerDeps) {
             // nothing to do, cancel() will run the teardown.
           }
         });
-        console.log("[instrumentation] route: aggregator.subscribe() returned");
       },
       cancel() {
         console.log("[instrumentation] route: ReadableStream cancel called");
