@@ -1229,6 +1229,21 @@ jq -e . "$FIX_SR_HONEST" >/dev/null 2>&1
 check "smoke_run: rewritten file is still valid JSON" 0 $?
 check_str "smoke_run: preserves tier_justification" "1 work-unit" "$(jq -r '.tier_justification' "$FIX_SR_HONEST")"
 
+# (X7-bis) The excerpt must retain the diagnostic line from BOTH failure
+# shapes. A tail-only excerpt looks fine against a test runner (verdict last)
+# and silently discards a stack trace's error (which is FIRST, followed by
+# hundreds of chars of frames) — losing the module-resolution tell SKILL.md
+# names as the broken-instrument signature. Measured, not assumed: node emits
+# ~917 chars with "Cannot find module" in line 1.
+head_tail_out=$(post_evals::_run_recorded 'printf "FATAL_HEAD_MARKER\n"; for i in $(seq 1 60); do echo "    at frame $i padding padding padding"; done; printf "TAIL_VERDICT_MARKER\n"')
+[[ "$head_tail_out" == *"FATAL_HEAD_MARKER"* ]]
+check "_run_recorded: excerpt retains the HEAD diagnostic (stack-trace shape)" 0 $?
+[[ "$head_tail_out" == *"TAIL_VERDICT_MARKER"* ]]
+check "_run_recorded: excerpt retains the TAIL verdict (test-runner shape)" 0 $?
+# Still bounded — a chatty runner must not bloat the artifact.
+[[ ${#head_tail_out} -lt 700 ]]
+check "_run_recorded: excerpt stays bounded on long output" 0 $?
+
 # (X8) Same fail-open lesson: no jq, no run.
 stderr_out=$(PATH="$EMPTY_BIN"; post_evals::smoke_run "$FIX_SR_HONEST" 2>&1)
 check "smoke_run: jq unavailable → exit 1 (must not fail open)" 1 $?

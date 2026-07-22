@@ -356,14 +356,23 @@ post_evals::smoke_run() {
 # "<exit_code>:<output excerpt>". stdout and stderr are merged — the tell for a
 # broken instrument is usually on stderr (a module-resolution error, a
 # not-found message), so dropping it would discard the evidence a human needs.
-# The excerpt is capped so a chatty test runner cannot bloat the artifact.
+#
+# The excerpt keeps BOTH ENDS, not just the tail, because the diagnostic line
+# sits at a different end depending on the failure. Measured against real
+# output from this repo: a test runner's verdict is in the last few lines
+# (post_evals.test.sh emits 10886 chars, PASS last), but a node stack trace
+# puts "Cannot find module" in the FIRST line and 900+ chars of stack frames
+# after it — a tail-only excerpt keeps the frames and discards the error,
+# losing exactly the module-resolution tell SKILL.md names. Capping both ends
+# also bounds the artifact against a chatty runner.
 post_evals::_run_recorded() {
     local command_text="$1" out rc
     out=$(perl -e 'alarm shift; exec "/bin/bash", "-c", shift' 10 "$command_text" 2>&1)
     rc=$?
-    # Trim to the last few lines and a hard character cap: the verdict and the
-    # error text both land at the end of typical command output.
-    out=$(printf '%s' "$out" | tail -c 400 | tr '\n' ' ')
+    out=$(printf '%s' "$out" | tr '\n' ' ')
+    if (( ${#out} > 500 )); then
+        out="${out:0:250} [...] ${out: -250}"
+    fi
     printf '%s:%s' "$rc" "$out"
 }
 
