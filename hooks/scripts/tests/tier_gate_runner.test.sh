@@ -119,6 +119,7 @@ reset_http_codes() {
     COMMENTS_HTTP_CODE=200 PULLS_HTTP_CODE=200
     COMMENTS_PAGE2_LINK=""   # if set, page 1 emits a Link: rel=next to this URL
     COMMENTS_PAGE2_HTTP_CODE=200
+    STATUS_POST_HTTP_CODE=201   # HTTP code the /statuses/ POST returns (2xx = accepted)
 }
 reset_http_codes
 
@@ -168,7 +169,7 @@ case "\$args" in
     state=\$(printf '%s' "\$args" | grep -oE '"state"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed -E 's/.*"([^"]*)"\$/\1/')
     desc=\$(printf '%s' "\$args" | grep -oE '"description"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed -E 's/.*"([^"]*)"\$/\1/')
     echo "POST state=\$state description=\$desc" >> "$POSTED_LOG"
-    printf '{}\n201'
+    printf '{}\n%s' "\$STATUS_POST_HTTP_CODE"
     ;;
   *"/commits/"*"/statuses"*)
     emit "$STATUSES_FILE" "\$STATUSES_HTTP_CODE" file
@@ -211,7 +212,8 @@ CURLSTUB
     # Export the per-endpoint HTTP codes + pagination knobs so the stub (a child
     # process) sees them.
     export FILES_HTTP_CODE DIFF_HTTP_CODE STATUSES_HTTP_CODE COMMENTS_HTTP_CODE \
-           PULLS_HTTP_CODE COMMENTS_PAGE2_LINK COMMENTS_PAGE2_HTTP_CODE
+           PULLS_HTTP_CODE COMMENTS_PAGE2_LINK COMMENTS_PAGE2_HTTP_CODE \
+           STATUS_POST_HTTP_CODE
 }
 
 # run_gate deliberately does NOT export TIER_GATE_MACHINE_USER — the
@@ -1222,5 +1224,130 @@ out=$(
     tg_repo_slug
 )
 check "RS4: malformed TIER_GATE_REPO -> falls back to git-remote parse" "fallback-owner/fallback-repo" "$out"
+
+# ══════════════════════════════════════════════════════════════════════════
+# Fix 1: tg_post_status checks the HTTP response. curl exits 0 on an HTTP
+# 401/403/422, so WITHOUT a 2xx check a rejected status post returns success
+# and tg_gate_pr logs state=success — a FALSE audit entry while GitHub has no
+# status. These tests pin: (PS1) a non-2xx POST makes tg_post_status return
+# non-zero and logs a named stderr error carrying the http code and url but
+# NEVER the token; (PS2) a 2xx POST returns 0 (negative control); (PS3)
+# tg_gate_pr's terminal-success path logs status_post_failed, not state=success,
+# when the post silently fails.
+# ══════════════════════════════════════════════════════════════════════════
+
+# PS1: non-2xx POST -> tg_post_status rc != 0 + named stderr error (code+url, no token)
+TEST_PR=401 TEST_SHA=sha_post_rejected
+reset_gh_state
+set_user_login_response "coderails-tier-bot"
+write_tier_gate_creds "ghp_secret_post_token" "coderails-tier-bot"
+out=$(
+    write_curl_stub
+    export PATH="$TMP:$PATH"
+    export TIER_GATE_CREDS="$TIER_GATE_CREDS_FILE"
+    export TIER_GATE_CURL_BIN="$TMP/curl"
+    export STATUS_POST_HTTP_CODE=403
+    tg_post_status "$TEST_SHA" "success" "verdict=legitimate tier=0 host=test" 2>&1
+)
+rc=$?
+check "PS1: non-2xx POST -> tg_post_status rc 1 (rejected post is not success)" "1" "$rc"
+check_contains "PS1: non-2xx POST -> named stderr error carries the http code" "403" "$out"
+check_contains "PS1: non-2xx POST -> named stderr error carries the statuses url" "/statuses/$TEST_SHA" "$out"
+check_not_contains "PS1: non-2xx POST -> stderr error NEVER leaks the token" "ghp_secret_post_token" "$out"
+
+# PS2: 2xx POST -> tg_post_status rc 0 (negative control for PS1)
+TEST_PR=402 TEST_SHA=sha_post_accepted
+reset_gh_state
+set_user_login_response "coderails-tier-bot"
+write_tier_gate_creds "ghp_machine_user_fixture_token" "coderails-tier-bot"
+rc=$(
+    write_curl_stub
+    export PATH="$TMP:$PATH"
+    export TIER_GATE_CREDS="$TIER_GATE_CREDS_FILE"
+    export TIER_GATE_CURL_BIN="$TMP/curl"
+    export STATUS_POST_HTTP_CODE=201
+    tg_post_status "$TEST_SHA" "success" "verdict=legitimate tier=0 host=test" >/dev/null 2>&1
+    echo $?
+)
+check "PS2: 2xx POST -> tg_post_status rc 0 (accepted)" "0" "$rc"
+
+# PS3: tg_gate_pr's terminal-success post silently fails (403) -> the summary
+# reports status_post_failed, NEVER state=success. A tier-0 legitimate verdict
+# reaches the terminal success post; the pending post also 403s, but the
+# lifecycle bug this closes is the FALSE state=success line.
+TEST_PR=403 TEST_SHA=sha_terminal_post_fails
+reset_gh_state
+set_comment_body "$(tier0_body "$TEST_PR" "$TEST_SHA" GO)"
+set_user_login_response "coderails-tier-bot"
+write_tier_gate_creds "ghp_machine_user_fixture_token" "coderails-tier-bot"
+tg_judge() { printf 'legitimate\nx\n'; return 0; }
+out=$(
+    write_curl_stub
+    export PATH="$TMP:$PATH"
+    export TIER_GATE_CREDS="$TIER_GATE_CREDS_FILE"
+    export TIER_GATE_CURL_BIN="$TMP/curl"
+    export STATUS_POST_HTTP_CODE=403
+    tg_gate_pr "$TEST_PR" 2>/dev/null
+)
+unset -f tg_judge
+check_contains "PS3: terminal post 403 -> summary reports status_post_failed" "status_post_failed" "$out"
+check_not_contains "PS3: terminal post 403 -> summary NEVER claims state=success" "state=success" "$out"
+
+# ══════════════════════════════════════════════════════════════════════════
+# Fix 3/4: tg_poll_once emits ONE heartbeat line per tick, distinguishing a
+# failed PR-list fetch (pr_fetch=FAILED) from a legitimately empty list
+# (prs=0). The rc of tg_open_prs is swallowed by `< <(...)` process
+# substitution, so tg_poll_once must capture-first to see the failure at all.
+# ══════════════════════════════════════════════════════════════════════════
+
+# PT1: PR-list fetch fails (HTTP 500 on pulls?state=open) -> heartbeat says
+# pr_fetch=FAILED, and NO PR is gated (nothing posted).
+TEST_PR=501 TEST_SHA=sha_poll_fetch_fail
+reset_gh_state
+set_comment_body "$(tier0_body "$TEST_PR" "$TEST_SHA" GO)"
+set_user_login_response "coderails-tier-bot"
+write_tier_gate_creds "ghp_machine_user_fixture_token" "coderails-tier-bot"
+tg_judge() { echo "JUDGE CALLED" >> "$TMP/judge_called_pt1.log"; printf 'legitimate\nx\n'; return 0; }
+rm -f "$TMP/judge_called_pt1.log"
+out=$(
+    write_curl_stub
+    export PATH="$TMP:$PATH"
+    export TIER_GATE_CREDS="$TIER_GATE_CREDS_FILE"
+    export TIER_GATE_CURL_BIN="$TMP/curl"
+    export PULLS_HTTP_CODE=500
+    tg_poll_once 2>&1   # heartbeat is on stderr (tg_log) — merge it in
+)
+unset -f tg_judge
+check_contains "PT1: failed PR-list fetch -> heartbeat reports pr_fetch=FAILED" "pr_fetch=FAILED" "$out"
+[[ -f "$TMP/judge_called_pt1.log" ]] && { fails=$((fails+1)); echo "FAIL - PT1: a PR was gated despite an unreadable PR list"; } || echo "ok   - PT1: no PR gated on a failed PR-list fetch"
+
+# PT2: PR-list fetch succeeds with ZERO open PRs -> heartbeat says prs=0, NOT
+# pr_fetch=FAILED (an empty list is not a fetch failure). Uses the normal curl
+# stub with an empty open-PR list; set_files/comments unused (no PR to gate).
+TEST_PR=502 TEST_SHA=sha_empty_prlist
+reset_gh_state
+set_user_login_response "coderails-tier-bot"
+write_tier_gate_creds "ghp_machine_user_fixture_token" "coderails-tier-bot"
+printf '[]' > "$TMP/empty_prs.json"
+write_curl_stub
+# Override just the open-PR list to be empty by pointing the stub at a curl that
+# returns [] for pulls?state=open; reuse the standard stub for everything else
+# is unnecessary here — nothing else is called once the list is empty.
+cat > "$TMP/curl_emptyprs" <<'EMPTYCURL'
+#!/bin/bash
+case "$*" in
+  *state=open*) printf '[]\n200' ;;
+  *) exit 0 ;;
+esac
+EMPTYCURL
+chmod +x "$TMP/curl_emptyprs"
+out=$(
+    export PATH="$TMP:$PATH"
+    export TIER_GATE_CREDS="$TIER_GATE_CREDS_FILE"
+    export TIER_GATE_CURL_BIN="$TMP/curl_emptyprs"
+    tg_poll_once 2>&1
+)
+check_contains "PT2: empty-but-successful PR list -> heartbeat reports prs=0" "prs=0" "$out"
+check_not_contains "PT2: empty list is NOT reported as a fetch failure" "pr_fetch=FAILED" "$out"
 
 [[ $fails -eq 0 ]] && { echo PASS; exit 0; } || { echo "FAIL ($fails)"; exit 1; }
