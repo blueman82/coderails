@@ -31,6 +31,42 @@ describe("runClaude", () => {
     });
   });
 
+  // execFile's default stdio gives the child a PIPE for stdin that the parent
+  // never writes to and never closes. The claude CLI waits on it and, after 3
+  // seconds, emits "Warning: no stdin data received in 3s, proceeding without
+  // it" — a mandatory ~3s stall on every scheduled routine run. Note the
+  // `stdio` OPTION cannot fix this: execFile silently drops it and always
+  // pipes all three fds. The only working mechanism is ending the returned
+  // child's stdin, which is what this pins.
+  it("ends the spawned child's stdin so the CLI does not wait 3s on an unwritten pipe", () => {
+    const end = vi.fn();
+    const execFileImpl = vi.fn((command, args, options, callback) => {
+      callback(null, "stdout output", "");
+      return { stdin: { end } };
+    });
+    return runClaude(["-p", "/x"], "/cwd", {
+      claudePath: "/opt/homebrew/bin/claude",
+      execFileImpl,
+    }).then((result) => {
+      expect(end).toHaveBeenCalled();
+      // stdout/stderr capture must be untouched by the stdin change.
+      expect(result.stdout).toBe("stdout output");
+    });
+  });
+
+  it("does not throw when the injected execFileImpl returns no child object", () => {
+    const execFileImpl = vi.fn((command, args, options, callback) => {
+      callback(null, "out", "");
+    });
+    return runClaude(["-p", "/x"], "/cwd", {
+      claudePath: "/opt/homebrew/bin/claude",
+      execFileImpl,
+    }).then((result) => {
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toBe("out");
+    });
+  });
+
   it("resolves with a nonzero exitCode and stderr when the child process errors", () => {
     const execFileImpl = vi.fn((command, args, options, callback) => {
       const err = Object.assign(new Error("boom"), { code: 1 });

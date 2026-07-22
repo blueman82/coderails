@@ -100,7 +100,8 @@ export function runClaude(argv: string[], cwd: string, opts?: ExecOptions): Prom
   const timeoutMs = opts?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 
   return new Promise((resolve) => {
-    execFileImpl(claudePath, argv, { cwd, timeout: timeoutMs, killSignal: "SIGKILL" }, (error, stdout, stderr) => {
+    const options = { cwd, timeout: timeoutMs, killSignal: "SIGKILL" as NodeJS.Signals };
+    const child = execFileImpl(claudePath, argv, options, (error, stdout, stderr) => {
       // Persist first, before any branch returns: whatever the outcome
       // (timeout, spawn-failed, non-zero exit, or success), the stdout/stderr
       // captured so far is exactly what a human needs to diagnose the run.
@@ -131,5 +132,17 @@ export function runClaude(argv: string[], cwd: string, opts?: ExecOptions): Prom
       const exitCode = !error ? 0 : typeof errorCode === "number" ? errorCode : 1;
       resolve({ exitCode, stdout, stderr });
     });
+    // Close the child's stdin immediately. execFile gives the child a stdin
+    // PIPE that this parent never writes to and never closes, so the claude
+    // CLI blocks waiting on it and after 3s emits "Warning: no stdin data
+    // received in 3s, proceeding without it" — a mandatory ~3s stall on every
+    // scheduled routine run. Passing `stdio: ["ignore", ...]` does NOT work:
+    // execFile silently drops the stdio option and always pipes all three fds
+    // (verified 2026-07-22 — child.stdin is still an open pipe). Ending the
+    // write side sends EOF, so the CLI proceeds at once. stdout/stderr stay
+    // piped and untouched — they are the ExecResult and the persisted
+    // transcript. Optional-chained throughout because the injectable
+    // execFileImpl seam used by the tests returns no child object.
+    (child as { stdin?: { end?: () => void } | null } | undefined)?.stdin?.end?.();
   });
 }
