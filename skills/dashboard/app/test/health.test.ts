@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from "vitest";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, chmodSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { collectHealth } from "../src/lib/collect/health";
@@ -262,9 +262,39 @@ describe("collectHealth", () => {
     expect(tile?.value).toBe("2");
   });
 
-  it("never throws even when called with no options (uses real default paths)", async () => {
-    await expect(collectHealth()).resolves.not.toThrow();
+  it("never throws against a mix of missing dirs, unreadable dirs, and malformed JSONL/log lines", async () => {
+    const projectsDir = makeTmpProjectsDir([
+      "not json at all",
+      assistantLine("msg_1", "2026-07-06T17:00:00.000Z", 1000, 200),
+      JSON.stringify({ type: "assistant", message: { id: "msg_2" } }), // no usage
+    ]);
+    const unreadableLoopsDir = mkdtempSync(join(tmpdir(), "dashboard-health-unreadable-loops-"));
+    tmpDirs.push(unreadableLoopsDir);
+    chmodSync(unreadableLoopsDir, 0o000);
+    const path = makeTmpDisciplineLog(["garbage line with no timestamp at all", ""]);
+
+    await expect(
+      collectHealth({
+        disciplineLogPath: path,
+        projectsDir,
+        loopsDir: unreadableLoopsDir,
+        wikiPaths: [MISSING_PROJECTS_DIR],
+      })
+    ).resolves.not.toThrow();
+
+    chmodSync(unreadableLoopsDir, 0o755); // restore before afterEach's rmSync
   });
+
+  // Deliberately calls collectHealth() with NO options so it resolves
+  // DEFAULT_PROJECTS_DIR/DEFAULT_LOOPS_DIR/DEFAULT_DISCIPLINE_LOG_PATH itself
+  // (health.ts:139-141) — the one place in this suite that exercises the
+  // defaulting rather than an injected path. That walks the real
+  // ~/.claude/projects tree, whose size varies with machine state, so this
+  // is a hang detector (is it ever going to resolve at all), not a speed
+  // gate — hence the generous timeout instead of asserting a duration.
+  it("never throws when called with no options (uses real default paths)", async () => {
+    await expect(collectHealth()).resolves.not.toThrow();
+  }, 30_000);
 
   describe("hooksFired scoped to today", () => {
     const TODAY = new Date("2026-07-06T18:00:00+01:00");
