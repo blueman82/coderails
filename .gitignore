@@ -31,3 +31,6 @@ docs/coderails/plans/
 
 # local-only competitive-analysis working notes (do not publish)
 docs/agent-stack-comparison-*.md
+
+# local-only token/cost audit working notes (do not publish)
+docs/TOKEN-REDUCTION-AUDIT.md
