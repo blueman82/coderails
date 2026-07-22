@@ -432,12 +432,20 @@ post_evals::validate_smoke_execution() {
 # function is the re-execution that replaces it, with its own worktree and
 # its own timeout.
 #
-# SURFACE EXEMPTION: scripted evals carrying surface "deployed" or
-# "fresh-clone" are skipped — neither is runnable in a local detached
-# worktree (deployed names a live post-merge endpoint; fresh-clone names a
-# clean checkout outside this worktree's scope), and neither was ever
-# runnable by smoke_run at freeze either. Skipping them here must never be
-# read as endorsing their cmd — it is a scope boundary, not a pass.
+# NO SURFACE EXEMPTION. Every scripted eval is re-executed, regardless of its
+# `surface` field. An earlier version skipped surface "deployed"/"fresh-clone"
+# on the reasoning that neither runs in a local worktree — but `surface` is
+# written by the same posting agent this gate exists to distrust, and nothing
+# in checks 1-9 constrains it. That made the exemption an attacker-writable
+# bypass: a scripted eval with a fabricated cmd plus surface="deployed" dodged
+# re-execution entirely and passed at rc=0 — the exact "hand-written smoke
+# object for a script that never existed" family this gate closes. The
+# exemption also diverged from check 10 (validate_smoke_execution), which has
+# no surface filter. The axis that legitimately excludes an eval here is
+# `mode`, not `surface`: a scripted eval has a runnable cmd by definition and
+# must be verified; agent-run evals (no cmd) are excluded by the mode filter
+# below and graded by the verifier, not here. smoke_verify runs only at
+# pr/merge scope, so this cannot touch loop-scope deployed evals.
 #
 # FAILS CLOSED, NAMED REASON, on: jq missing, the embed not parsing as JSON,
 # `git worktree add` failing (unresolvable/unfetched head_sha), and every
@@ -476,7 +484,6 @@ post_evals::smoke_verify() {
     local ids
     ids=$(jq -r '[.evals[]?
         | select(.mode == "scripted")
-        | select((.surface // "") != "deployed" and (.surface // "") != "fresh-clone")
         | .id] | .[]' "$path")
     [[ -z "$ids" ]] && return 0
 
@@ -488,6 +495,22 @@ post_evals::smoke_verify() {
     # Remove the empty dir mktemp created — `git worktree add` requires the
     # target path not already exist.
     rmdir "$worktree" 2>/dev/null
+
+    # Ensure the trusted head commit is in the local object store before
+    # checking it out. head_sha comes from the PR (GitHub), not necessarily
+    # from local history: the merge hook fires on `gh pr merge <num>` run from
+    # a checkout that may not have the branch, so the object can be absent and
+    # `git worktree add` would fail a LEGITIMATE merge. Fetch it first. A fetch
+    # failure stays fail-CLOSED (return 1) — never a fall-through to skip
+    # verification; the point of fetching is to make an honest merge succeed,
+    # not to weaken the gate when the network is down.
+    if ! git cat-file -e "${head_sha}^{commit}" 2>/dev/null; then
+        if ! git fetch origin "$head_sha" >/dev/null 2>&1; then
+            printf 'post_evals: smoke_verify: could not fetch trusted head %s to re-execute against (not in local store and fetch failed). Retry, or drive the merge from a checkout that has the head.\n' "$head_sha" >&2
+            rm -rf "$worktree" 2>/dev/null
+            return 1
+        fi
+    fi
 
     if ! git worktree add --detach "$worktree" "$head_sha" >/dev/null 2>&1; then
         printf 'post_evals: smoke_verify: git worktree add failed for head_sha %s — could not check out the trusted commit to re-execute against. Fetch the SHA, or verify it exists in this repo, then retry.\n' "$head_sha" >&2
@@ -652,7 +675,16 @@ post_evals::smoke_run() {
 post_evals::_run_recorded() {
     local command_text="$1" timeout_secs="${2:-10}" cwd="${3:-}" out rc
     if [[ -n "$cwd" ]]; then
-        out=$(cd "$cwd" && perl -e 'alarm shift; exec "/bin/bash", "-c", shift' "$timeout_secs" "$command_text" 2>&1)
+        # A cd failure here (worktree vanished between `git worktree add` and
+        # this call — a race or external rm) must NOT collapse to rc=1: rc=1 is
+        # a legitimate content-failure exit, and _is_environmental_rc doesn't
+        # cover it, so on the negative_control leg (where rc=1 reads as a pass)
+        # a cd failure would fail OPEN. Map "could not enter the dir to run" to
+        # 127 (command-not-found), which _is_environmental_rc DOES treat as
+        # "never executed" — the honest classification for a command that never
+        # ran. The `|| { echo ...; exit 127; }` runs inside the subshell.
+        out=$(cd "$cwd" 2>/dev/null || { printf 'cd-failed: %s' "$cwd"; exit 127; }
+              perl -e 'alarm shift; exec "/bin/bash", "-c", shift' "$timeout_secs" "$command_text" 2>&1)
     else
         out=$(perl -e 'alarm shift; exec "/bin/bash", "-c", shift' "$timeout_secs" "$command_text" 2>&1)
     fi
