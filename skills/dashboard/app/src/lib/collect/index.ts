@@ -179,25 +179,39 @@ export function createAggregator(deps: AggregatorDeps): Aggregator {
       console.log("[instrumentation] collectSessions returned:", result.length, "sessions");
       return result;
     }, []));
-    const loops = sortLoops(safeCall("loops", () => collectLoops(deps.loopsDir), []));
+    console.log("[instrumentation] about to call collectLoops");
+    const loops = sortLoops(safeCall("loops", () => {
+      console.log("[instrumentation] inside loops safeCall");
+      return collectLoops(deps.loopsDir);
+    }, []));
+    console.log("[instrumentation] collectLoops returned:", loops.length, "loops");
     // health reads usage transcripts (I/O-bound, hence async) and has no
     // dedicated fs signal of its own to watch beyond the projects dir already
     // watched for sessions — it rides along with the activity slice rather
     // than getting its own timer. loopsDir is passed through so the cost
     // tiles (costWeek/costMonth) read sibling retro.json files from the same
     // tree collectLoops walks.
+    console.log("[instrumentation] about to call collectHealth");
     const health = await safeCallAsync(
       "health",
-      () => collectHealth({ projectsDir: deps.projectsDir, loopsDir: deps.loopsDir }),
+      () => {
+        console.log("[instrumentation] inside health safeCallAsync");
+        return collectHealth({ projectsDir: deps.projectsDir, loopsDir: deps.loopsDir });
+      },
       []
     );
+    console.log("[instrumentation] collectHealth returned");
     const queue = deps.queueDir ? safeCall("queue", () => collectQueue(deps.queueDir!, queueLimit), []) : [];
     const builds = deps.buildsDir ? safeCall("builds", () => collectBuilds(deps.buildsDir!), []) : [];
     // Rides the activity slice like health does. First collection streams the
     // full transcript corpus once; the collector's module-scope per-file cache
     // makes every later refresh a stat() sweep plus a re-parse of only the
     // files that actually changed.
-    const contextTrend = await safeCallAsync("contextTrend", () => collectContextTrend(deps.projectsDir), null);
+    console.log("[instrumentation] about to call collectContextTrend");
+    const contextTrend = await safeCallAsync("contextTrend", () => {
+      console.log("[instrumentation] inside contextTrend safeCallAsync");
+      return collectContextTrend(deps.projectsDir);
+    }, null);
     console.log("[instrumentation] collectActivitySlice complete, sessions:", sessions.length, "contextTrend:", contextTrend);
     return { sessions, loops, health, queue, builds, contextTrend };
   }
