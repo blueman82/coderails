@@ -32,15 +32,33 @@ SHA="deadbeef"
 # Strict JSON: --argjson rejects jq's unquoted-key object syntax.
 SMOKE_OK='{"cmd_exit": 1, "negative_control_exit": 1, "cmd_output": "1 test failed", "negative_control_output": "assertion failed"}'
 
+# Check 10 (gate-time re-execution) EXECUTES every scripted eval's cmd and
+# negative_control during validate_structure at pr scope, so any fixture that
+# is expected to pass end-to-end needs commands that really resolve — a cmd
+# failing for a content reason (exit 1) and a control observed failing
+# likewise. Fixtures refused by an earlier check never reach check 10 and may
+# keep dummy command strings.
+RES_DIR="$TMP/resolvable"
+mkdir -p "$RES_DIR"
+printf '#!/bin/bash\necho "1 test failed"\nexit 1\n' > "$RES_DIR/check_a.sh"
+printf '#!/bin/bash\necho "assertion failed"\nexit 1\n' > "$RES_DIR/control_a.sh"
+printf '#!/bin/bash\necho "1 test failed"\nexit 1\n' > "$RES_DIR/check_b.sh"
+printf '#!/bin/bash\necho "assertion failed"\nexit 1\n' > "$RES_DIR/control_b.sh"
+RCMD_A="bash $RES_DIR/check_a.sh"
+RNC_A="bash $RES_DIR/control_a.sh"
+RCMD_B="bash $RES_DIR/check_b.sh"
+RNC_B="bash $RES_DIR/control_b.sh"
+
 # ─── Step 1: well-formed tier-1 fixture → validate_structure exit 0 ──────────
 FIX_OK="$TMP/ok.json"
-jq -n --arg sha "$SHA" --argjson smoke "$SMOKE_OK" '{
+jq -n --arg sha "$SHA" --argjson smoke "$SMOKE_OK" \
+      --arg ca "$RCMD_A" --arg na "$RNC_A" --arg cb "$RCMD_B" --arg nb "$RNC_B" '{
   tier: 1,
   tier_justification: "2 work-units, no irreversible surface",
   head_sha: $sha,
   evals: [
-    {id:"e1", priority:"P0", mode:"scripted", status:"pass", cmd:"run-a", negative_control:"run-a-broken", evidence:"log line 1", smoke: $smoke},
-    {id:"e2", priority:"P0", mode:"scripted", status:"pass", cmd:"run-b", negative_control:"run-b-broken", evidence:"log line 2", smoke: $smoke}
+    {id:"e1", priority:"P0", mode:"scripted", status:"pass", cmd:$ca, negative_control:$na, evidence:"log line 1", smoke: $smoke},
+    {id:"e2", priority:"P0", mode:"scripted", status:"pass", cmd:$cb, negative_control:$nb, evidence:"log line 2", smoke: $smoke}
   ]
 }' > "$FIX_OK"
 post_evals::validate_structure "$FIX_OK" 42 "$SHA"
@@ -183,12 +201,12 @@ check "validate_structure: numeric tier_justification → stderr names tier + re
 # tier 1 with a real justification string → passes check 2 (falls through to
 # later structural checks, which this fixture also satisfies, so exit 0).
 FIX_TIER1_REAL_JUST="$TMP/tier1_real_just.json"
-jq -n --arg sha "$SHA" --argjson smoke "$SMOKE_OK" '{
+jq -n --arg sha "$SHA" --argjson smoke "$SMOKE_OK" --arg ca "$RCMD_A" --arg na "$RNC_A" '{
   tier: 1,
   tier_justification: "2 work-units, no irreversible surface",
   head_sha: $sha,
   evals: [
-    {id:"e1", priority:"P0", mode:"scripted", status:"pass", cmd:"run-a", negative_control:"run-a-broken", evidence:"log", smoke: $smoke}
+    {id:"e1", priority:"P0", mode:"scripted", status:"pass", cmd:$ca, negative_control:$na, evidence:"log", smoke: $smoke}
   ]
 }' > "$FIX_TIER1_REAL_JUST"
 post_evals::validate_structure "$FIX_TIER1_REAL_JUST" 42 "$SHA"
@@ -273,12 +291,12 @@ check "validate_structure: echo-wrap wrapper → stderr names id" 0 $?
 
 # ─── check 4 (hardened): legitimately different control still accepted ──────
 FIX_LEGIT_DIFFERENT="$TMP/legit_different_nc.json"
-jq -n --arg sha "$SHA" --argjson smoke "$SMOKE_OK" '{
+jq -n --arg sha "$SHA" --argjson smoke "$SMOKE_OK" --arg ca "$RCMD_A" --arg nb "$RNC_B" '{
   tier: 1,
   tier_justification: "2 work-units, no irreversible surface",
   head_sha: $sha,
   evals: [
-    {id:"e1", priority:"P0", mode:"scripted", status:"pass", cmd:"run-a", negative_control:"break-the-fixture-under-test", evidence:"log", smoke: $smoke}
+    {id:"e1", priority:"P0", mode:"scripted", status:"pass", cmd:$ca, negative_control:$nb, evidence:"log", smoke: $smoke}
   ]
 }' > "$FIX_LEGIT_DIFFERENT"
 post_evals::validate_structure "$FIX_LEGIT_DIFFERENT" 42 "$SHA"
@@ -351,13 +369,14 @@ FREEZE_IMPL=$(git -C "$FREEZE_REPO" rev-parse HEAD)
 
 # 8a: compliant — frozen at the base commit, before any implementation.
 FIX_FREEZE_OK="$FREEZE_REPO/evals_ok.json"
-jq -n --arg sha "$SHA" --arg fsha "$FREEZE_BASE" --argjson smoke "$SMOKE_OK" '{
+jq -n --arg sha "$SHA" --arg fsha "$FREEZE_BASE" --argjson smoke "$SMOKE_OK" \
+      --arg ca "$RCMD_A" --arg na "$RNC_A" '{
   tier: 1,
   tier_justification: "1 work-unit",
   frozen_sha: $fsha,
   head_sha: $sha,
   evals: [
-    {id:"e1", priority:"P0", mode:"scripted", status:"pass", cmd:"run-a", negative_control:"run-a-broken", evidence:"log", smoke: $smoke}
+    {id:"e1", priority:"P0", mode:"scripted", status:"pass", cmd:$ca, negative_control:$na, evidence:"log", smoke: $smoke}
   ]
 }' > "$FIX_FREEZE_OK"
 post_evals::validate_structure "$FIX_FREEZE_OK" 42 "$SHA"
@@ -385,13 +404,14 @@ check "validate_structure: late freeze → stderr names frozen_sha" 0 $?
 # enforces honesty, not the impossible. The disclosure must be explicit text,
 # not a bare boolean anyone could flip silently.
 FIX_FREEZE_DISCLOSED="$FREEZE_REPO/evals_disclosed.json"
-jq -n --arg sha "$SHA" --arg fsha "$FREEZE_IMPL" --argjson smoke "$SMOKE_OK" '{
+jq -n --arg sha "$SHA" --arg fsha "$FREEZE_IMPL" --argjson smoke "$SMOKE_OK" \
+      --arg ca "$RCMD_A" --arg na "$RNC_A" '{
   tier: 1,
   tier_justification: "1 work-unit. Disclosed process gap: this evals.json was authored after implementation, not before (violates freeze-before-build). Authored at the real timestamp, not backdated.",
   frozen_sha: $fsha,
   head_sha: $sha,
   evals: [
-    {id:"e1", priority:"P0", mode:"scripted", status:"pass", cmd:"run-a", negative_control:"run-a-broken", evidence:"log", smoke: $smoke}
+    {id:"e1", priority:"P0", mode:"scripted", status:"pass", cmd:$ca, negative_control:$na, evidence:"log", smoke: $smoke}
   ]
 }' > "$FIX_FREEZE_DISCLOSED"
 post_evals::validate_structure "$FIX_FREEZE_DISCLOSED" 42 "$SHA"
@@ -937,14 +957,19 @@ SMOKE_BASE='{
   head_sha: $sha
 }'
 
+# Commands are the RESOLVABLE pair from the top of this file: most fixtures
+# here go through validate_smoke directly (recorded numbers only), but
+# FIX_SMOKE_FULL below runs the full validate_structure, where check 10
+# executes them for real.
 mk_smoke() { # <outfile> <cmd_rc> <nc_rc>  → tier-1 file with one smoke-carrying eval
-  jq -n --arg sha "$SHA" --argjson crc "$2" --argjson nrc "$3" '{
+  jq -n --arg sha "$SHA" --argjson crc "$2" --argjson nrc "$3" \
+        --arg ca "$RCMD_A" --arg na "$RNC_A" '{
     tier: 1,
     tier_justification: "1 work-unit",
     head_sha: $sha,
     evals: [
       {id:"e1", priority:"P0", mode:"scripted", status:"pending",
-       cmd:"run-a", negative_control:"run-a-broken", evidence:"log",
+       cmd:$ca, negative_control:$na, evidence:"log",
        smoke: {cmd_exit: $crc, negative_control_exit: $nrc,
                cmd_output: "1 test failed", negative_control_output: "assertion failed"}}
     ]
@@ -1247,5 +1272,134 @@ check "_run_recorded: excerpt stays bounded on long output" 0 $?
 # (X8) Same fail-open lesson: no jq, no run.
 stderr_out=$(PATH="$EMPTY_BIN"; post_evals::smoke_run "$FIX_SR_HONEST" 2>&1)
 check "smoke_run: jq unavailable → exit 1 (must not fail open)" 1 $?
+
+# ═══ validate_smoke_execution: gate-time re-execution (check 10) ════════════
+# Check 9 gates the SHAPE of recorded smoke evidence, but the agent writes
+# those numbers: a hand-written `smoke` object of plausible shape (cmd_exit 1,
+# control 1) for a cmd that never existed passes check 9 without any command
+# ever running. Check 10 closes that: at gate time, validate_structure
+# EXECUTES every scripted eval's cmd and negative_control itself and refuses
+# what it OBSERVES — an environmental outcome on either leg (126/127/timeout/
+# signal), or a control that really passes. Resolvability and control polarity
+# are build-independent (the repo's own check-9 doctrine), so unlike cmd
+# polarity they CAN be recomputed at the gate. cmd polarity stays free:
+# a built feature legitimately flips cmd from 1 to 0.
+
+G_DIR="$TMP/gate_exec"
+mkdir -p "$G_DIR"
+printf '#!/bin/bash\necho "1 test failed"\nexit 1\n' > "$G_DIR/g_check.sh"
+printf '#!/bin/bash\necho "assertion failed"\nexit 1\n' > "$G_DIR/g_control.sh"
+printf '#!/bin/bash\necho "all good"\nexit 0\n' > "$G_DIR/g_passing_check.sh"
+printf '#!/bin/bash\necho "jq-1.7.1"\nexit 0\n' > "$G_DIR/g_passing_control.sh"
+
+mk_gate() { # <outfile> <cmd> <nc> [smoke_json] → tier-1 pr-scope file
+  local smoke="${4:-$SMOKE_OK}"
+  jq -n --arg sha "$SHA" --arg cmd "$2" --arg nc "$3" --argjson smoke "$smoke" '{
+    tier: 1,
+    tier_justification: "1 work-unit",
+    head_sha: $sha,
+    evals: [
+      {id:"e1", priority:"P0", mode:"scripted", status:"pending",
+       cmd: $cmd, negative_control: $nc, evidence: "log", smoke: $smoke}
+    ]
+  }' > "$1"
+}
+
+# (G1) THE FABRICATION, end to end. cmd names a script that never existed;
+# smoke is hand-written and plausible, so check 9 passes it. The gate must
+# execute the cmd itself and refuse on the observed 127 — never trust the
+# typed number.
+FIX_G_FABRICATED="$TMP/g_fabricated.json"
+mk_gate "$FIX_G_FABRICATED" "bash $G_DIR/never_created.sh" "bash $G_DIR/g_control.sh"
+stderr_out=$(post_evals::validate_structure "$FIX_G_FABRICATED" 42 "$SHA" 2>&1)
+check "validate_structure: fabricated smoke + unresolvable cmd → exit 1 (gate re-executes)" 1 $?
+[[ "$stderr_out" == *"e1"* && "$stderr_out" == *"did not execute at the gate"* ]]
+check "validate_structure: unresolvable cmd → stderr names eval + gate-time reason" 0 $?
+
+# (G2) Honest artifact: real scripts, smoke recorded by the real executor →
+# accepted. Enforcement must not block honest work.
+FIX_G_HONEST="$TMP/g_honest.json"
+jq -n --arg sha "$SHA" --arg cmd "bash $G_DIR/g_check.sh" --arg nc "bash $G_DIR/g_control.sh" '{
+  tier: 1,
+  tier_justification: "1 work-unit",
+  head_sha: $sha,
+  evals: [
+    {id:"e1", priority:"P0", mode:"scripted", status:"pending",
+     cmd: $cmd, negative_control: $nc, evidence: "log"}
+  ]
+}' > "$FIX_G_HONEST"
+post_evals::smoke_run "$FIX_G_HONEST"
+post_evals::validate_structure "$FIX_G_HONEST" 42 "$SHA"
+check "validate_structure: honest artifact (smoke-run recorded, cmds resolve) → exit 0" 0 $?
+
+# (G2-bis) A cmd that PASSES at the gate is fine too — post-build, a content
+# pass is the expected happy case. Polarity on cmd stays unchecked.
+FIX_G_PASSING="$TMP/g_passing.json"
+mk_gate "$FIX_G_PASSING" "bash $G_DIR/g_passing_check.sh" "bash $G_DIR/g_control.sh"
+post_evals::validate_structure "$FIX_G_PASSING" 42 "$SHA"
+check "validate_structure: cmd exits 0 at the gate → exit 0 (polarity free on cmd)" 0 $?
+
+# (G3) Fabricated control evidence: the negative_control REALLY exits 0 at the
+# gate, but the typed smoke claims 1. Check 9 passes the plausible number;
+# check 10 observes the vacuous pass and refuses.
+FIX_G_VACUOUS_NC="$TMP/g_vacuous_nc.json"
+mk_gate "$FIX_G_VACUOUS_NC" "bash $G_DIR/g_check.sh" "bash $G_DIR/g_passing_control.sh"
+stderr_out=$(post_evals::validate_structure "$FIX_G_VACUOUS_NC" 42 "$SHA" 2>&1)
+check "validate_structure: negative_control really exits 0 at the gate → exit 1" 1 $?
+[[ "$stderr_out" == *"e1"* && "$stderr_out" == *"negative_control"* ]]
+check "validate_structure: vacuous control at gate → stderr names eval + negative_control" 0 $?
+
+# (G4) Unresolvable negative_control with plausible typed smoke → refused.
+FIX_G_NC_ENOENT="$TMP/g_nc_enoent.json"
+mk_gate "$FIX_G_NC_ENOENT" "bash $G_DIR/g_check.sh" "bash $G_DIR/never_created_control.sh"
+stderr_out=$(post_evals::validate_structure "$FIX_G_NC_ENOENT" 42 "$SHA" 2>&1)
+check "validate_structure: unresolvable negative_control → exit 1" 1 $?
+[[ "$stderr_out" == *"e1"* && "$stderr_out" == *"negative_control"* && "$stderr_out" == *"did not execute at the gate"* ]]
+check "validate_structure: unresolvable control → stderr names eval + gate-time reason" 0 $?
+
+# (G5) A scripted eval with an EMPTY cmd cannot execute anything — fail
+# closed, even when the typed smoke numbers look plausible.
+FIX_G_EMPTY_CMD="$TMP/g_empty_cmd.json"
+mk_gate "$FIX_G_EMPTY_CMD" "" "bash $G_DIR/g_control.sh"
+stderr_out=$(post_evals::validate_structure "$FIX_G_EMPTY_CMD" 42 "$SHA" 2>&1)
+check "validate_structure: scripted eval with empty cmd → exit 1 (fail closed)" 1 $?
+[[ "$stderr_out" == *"e1"* ]]
+check "validate_structure: empty cmd → stderr names eval" 0 $?
+
+# (G6) Direct-call scope limits: agent-run evals and tier 0 have nothing to
+# execute — exit 0, mirroring check 9's boundaries.
+FIX_G_AGENTRUN="$TMP/g_agentrun.json"
+jq -n --arg sha "$SHA" '{
+  tier: 1, tier_justification: "1 work-unit", head_sha: $sha,
+  evals: [ {id:"e1", priority:"P0", mode:"agent-run", status:"pending",
+            assert:"the UI renders", evidence:"verifier report"} ]
+}' > "$FIX_G_AGENTRUN"
+post_evals::validate_smoke_execution "$FIX_G_AGENTRUN"
+check "validate_smoke_execution: agent-run eval → exit 0 (nothing to execute)" 0 $?
+
+FIX_G_TIER0="$TMP/g_tier0.json"
+jq -n --arg sha "$SHA" '{
+  tier: 0, tier_justification: "single work-unit, covered by existing test",
+  head_sha: $sha, evals: []
+}' > "$FIX_G_TIER0"
+post_evals::validate_smoke_execution "$FIX_G_TIER0"
+check "validate_smoke_execution: tier 0 exemption → exit 0" 0 $?
+
+# (G7) Loop scope skips gate-time re-execution entirely, matching checks 8/9 —
+# loop artifacts keep their separate surface (loop_state_guard).
+FIX_G_LOOP="$TMP/g_loop.json"
+jq -n '{
+  tier: 1, tier_justification: "1 work-unit", head_sha: "abc",
+  evals: [ {id:"e1", priority:"P0", mode:"scripted", status:"pass",
+            cmd:"run-a", negative_control:"run-a-broken", evidence:"log"} ]
+}' > "$FIX_G_LOOP"
+post_evals::validate_structure "$FIX_G_LOOP" "" "" "loop"
+check "validate_structure: loop scope skips gate-time re-execution → exit 0" 0 $?
+
+# (G8) Same fail-open lesson as checks 8/9: no jq, no verdict.
+stderr_out=$(PATH="$EMPTY_BIN"; post_evals::validate_smoke_execution "$FIX_G_HONEST" 2>&1)
+check "validate_smoke_execution: jq unavailable → exit 1 (must not fail open)" 1 $?
+[[ "$stderr_out" == *"jq"* ]]
+check "validate_smoke_execution: jq unavailable → stderr names jq" 0 $?
 
 [[ $fails -eq 0 ]] && { echo PASS; exit 0; } || { echo "FAIL ($fails)"; exit 1; }

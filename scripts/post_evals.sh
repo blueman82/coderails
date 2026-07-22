@@ -142,9 +142,16 @@ post_evals::validate_structure() {
     # only the recorded outcome — but a deliberate one: loop-scope artifacts
     # are gated by a separate surface (loop_state_guard), and extending this
     # contract there is its own decision with its own callers to migrate.
+    # Check 10: gate-time re-execution. Check 9 gates the SHAPE of recorded
+    # smoke evidence, but the author writes those numbers — a hand-written
+    # `smoke` object of plausible shape for a cmd that never existed passes
+    # check 9 without any command ever running. This check never trusts a
+    # typed number: it executes cmd and negative_control itself, here, and
+    # judges only what it observes. Same pr-scope boundary as checks 8/9.
     if [[ "$scope" != "loop" ]]; then
         post_evals::validate_freeze "$path" || return 1
         post_evals::validate_smoke "$path" || return 1
+        post_evals::validate_smoke_execution "$path" || return 1
     fi
 
     return 0
@@ -255,6 +262,118 @@ post_evals::validate_smoke() {
         fi
         if post_evals::_is_environmental_rc "$nc_rc"; then
             printf 'post_evals: eval %s negative_control exited %s (command not found / crashed / timed out) — non-zero, but for an environmental reason, so it tested nothing. Fix the control, not this gate.\n' "$id" "$nc_rc" >&2
+            return 1
+        fi
+    done <<< "$ids"
+
+    return 0
+}
+
+# post_evals::validate_smoke_execution <evals_json_path>
+# Check 10's body: gate-time re-execution. For every tier>=1 scripted eval,
+# EXECUTES `cmd` and `negative_control` right now and refuses on what it
+# observes — it never reads the recorded `smoke` numbers at all.
+#
+# WHY THIS CAN RUN AT THE GATE despite freeze-before-build: check 9's own
+# doctrine already splits the recorded evidence into two kinds of fact.
+# cmd POLARITY is build-dependent — a cmd that failed at freeze legitimately
+# passes at merge, so recomputing it here would be incoherent and it stays
+# free. But RESOLVABILITY (the command can execute at all: not 126/127/
+# timeout/signal) and CONTROL POLARITY (the control is defined to fail
+# "regardless of build state" — check 9's words) are build-independent, so
+# they CAN be recomputed at the gate. The fabrication this closes: an author
+# who never runs the commands and types plausible smoke numbers (`cmd_exit:
+# 1`, control 1) for a script that was only ever intended to exist. Check 9
+# passes that shape; this check runs the command, observes 127, and refuses.
+#
+# WHAT REFUSES:
+#   - empty cmd (a scripted eval with nothing to execute is unresolvable by
+#     definition — fail closed)
+#   - cmd or negative_control observed environmental (126/127/142/>=128)
+#   - negative_control observed exiting 0 (vacuous at the gate, whatever the
+#     typed smoke claims)
+# WHAT DOES NOT: cmd exiting 0 or non-zero for a content reason — polarity
+# on cmd is the build-dependent part and stays ungated, exactly as check 9
+# permits it on the recorded value.
+#
+# EXECUTION CONTEXT: commands run in the caller's cwd through the same 10s
+# alarm wrapper smoke_run uses — the post-evals command invokes both from the
+# repo root, so a cmd that resolved for smoke-run resolves identically here.
+# Worst case added latency is 20s per scripted eval (two capped runs).
+#
+# SAFETY: this executes author-supplied command strings from a JSON file.
+# That adds no privilege the author lacks — the same principal that wrote
+# evals.json already runs arbitrary commands in this environment (smoke-run
+# executes these exact strings at freeze, the test gate runs the repo's
+# suites), and the gate runs them unprivileged, output-discarded, under the
+# alarm cap. The alternative (statically resolving the target path) would
+# mean parsing shell, which fails open on anything compound. Side effects are
+# bounded by the same contract evals already carry: an eval cmd is a check,
+# and it has always been executed by the sanctioned freeze flow.
+post_evals::validate_smoke_execution() {
+    local path="$1"
+
+    # Explicit, for the reason PR #261 paid for: a missing jq must never make
+    # a violating file indistinguishable from a compliant one.
+    if ! command -v jq >/dev/null 2>&1; then
+        printf 'post_evals: jq is required for gate-time re-execution of eval commands and was not found\n' >&2
+        return 1
+    fi
+
+    if [[ ! -f "$path" ]] || ! jq -e . "$path" >/dev/null 2>&1; then
+        printf 'post_evals: file not found or invalid JSON: %s\n' "$path" >&2
+        return 1
+    fi
+
+    local tier
+    tier=$(jq -r '.tier // ""' "$path")
+    # Tier 0 is the exemption path: no evals to execute.
+    [[ "$tier" == "0" ]] && return 0
+
+    # Only scripted evals carry commands — agent-run evals are graded by a
+    # verifier subagent. Same boundary as check 9.
+    local ids
+    ids=$(jq -r '[.evals[]? | select(.mode == "scripted") | .id] | .[]' "$path")
+    [[ -z "$ids" ]] && return 0
+
+    local id
+    while IFS= read -r id; do
+        [[ -z "$id" ]] && continue
+
+        local cmd nc
+        cmd=$(jq -r --arg id "$id" '.evals[] | select(.id == $id) | .cmd // ""' "$path")
+        nc=$(jq -r --arg id "$id" '.evals[] | select(.id == $id) | .negative_control // ""' "$path")
+
+        # Nothing to execute is not compliance — fail closed. (Check 3
+        # already refuses an empty negative_control at tier>=1; the empty-cmd
+        # case had no owner before this check.)
+        if [[ -z "$cmd" ]]; then
+            printf 'post_evals: scripted eval %s has empty cmd — nothing can execute at the gate.\n' "$id" >&2
+            return 1
+        fi
+        if [[ -z "$nc" ]]; then
+            printf 'post_evals: scripted eval %s has empty negative_control — nothing can execute at the gate.\n' "$id" >&2
+            return 1
+        fi
+
+        local out rc
+        out=$(post_evals::_run_recorded "$cmd")
+        rc="${out%%:*}"
+        out="${out#*:}"
+        if post_evals::_is_environmental_rc "$rc"; then
+            printf 'post_evals: eval %s cmd did not execute at the gate (exit %s: command not found / crashed / timed out) — recorded smoke evidence cannot stand in for a command the gate can run. Output: %s\n' "$id" "$rc" "$out" >&2
+            return 1
+        fi
+
+        out=$(post_evals::_run_recorded "$nc")
+        rc="${out%%:*}"
+        out="${out#*:}"
+        if [[ "$rc" == "0" ]]; then
+            printf 'post_evals: eval %s negative_control exited 0 at the gate — a control that passes proves nothing, whatever the recorded smoke claims. Output: %s\n' "$id" "$out" >&2
+            return 1
+        fi
+        if post_evals::_is_environmental_rc "$rc"; then
+            printf 'post_evals: eval %s negative_control did not execute at the gate (exit %s: command not found / crashed / timed out) — non-zero, but for an environmental reason, so it tested nothing. Output: %s\n' "$id" "$rc" "$out" >&2
             return 1
         fi
     done <<< "$ids"
