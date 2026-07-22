@@ -84,6 +84,15 @@ export function RailLeft() {
   const now = useNow(30_000);
   const live = liveLoops(loops, now);
   const stalled = stalledLoops(loops, now);
+  // collectHealth always returns all six keys (never a subset), so an empty
+  // health array specifically means "the activity collect hasn't resolved
+  // yet" — the initial SSE snapshot ships health:[] before the first async
+  // collect finishes, and the following "activity" frame fills it in shortly
+  // after. That's a loading state, not a collector failure, so it must not
+  // render the same "unavailable" as a tile the collector actually tried and
+  // couldn't populate (tile present, value: null). Same for every tile, so
+  // it's hoisted out of the per-tile map instead of recomputed per key.
+  const healthNotYetLoaded = health.length === 0;
 
   return (
     <section className="hud-rail hud-rail-left hud-intro-rail-left">
@@ -95,15 +104,6 @@ export function RailLeft() {
         </div>
         {kpiKeys.map((key) => {
           const tile = findTile(health, key);
-          // collectHealth always returns all six keys (never a subset), so an
-          // empty health array specifically means "the activity collect
-          // hasn't resolved yet" — the initial SSE snapshot ships health:[]
-          // before the first async collect finishes, and the following
-          // "activity" frame fills it in shortly after. That's a loading
-          // state, not a collector failure, so it must not render the same
-          // "unavailable" as a tile the collector actually tried and
-          // couldn't populate (tile present, value: null).
-          const loading = health.length === 0;
           return (
             <div className="hud-kpi" key={key}>
               <div className="hud-kpi-row">
