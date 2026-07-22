@@ -100,7 +100,7 @@ On **C**: proceed with the original prompt unchanged; Phase 0 reads it verbatim.
 
 On adopting an improved envelope (outcome **A** or **B**), update `progress.json.authorising_prompt_raw` to the adopted text so the field stays the canonical post-Phase-0 envelope. Outcome **C** needs no update — the Phase -2 stub already wrote the original prompt verbatim.
 
-The improved-and-approved prompt (or the original, if C was chosen) is what Phase 0 treats as the authorisation envelope. Phase 0's `<thinking>` block quotes it verbatim from here.
+The improved-and-approved prompt (or the original, if C was chosen; or the auto-adopted improved prompt, in a full-autonomous envelope) is what Phase 0 treats as the authorisation envelope. Phase 0's `<thinking>` block quotes it verbatim from here.
 
 ### Phase 0 — Read the authorisation envelope
 
