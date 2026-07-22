@@ -16,6 +16,7 @@ export interface CollectHealthOptions {
   disciplineLogPath?: string;
   projectsDir?: string;
   loopsDir?: string;
+  wikiPaths?: string[];
   now?: Date;
 }
 
