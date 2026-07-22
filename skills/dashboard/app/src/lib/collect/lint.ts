@@ -52,7 +52,7 @@ function mostRecentLintEntry(entries: LintEntry[]): LintEntry | null {
 function daysSince(dateStr: string, now: Date): number {
   const then = new Date(`${dateStr}T00:00:00Z`).getTime();
   const nowMs = now.getTime();
-  return Math.floor((nowMs - then) / (24 * 60 * 60_000)); // MUTATION TEST: removed clamp
+  return Math.max(0, Math.floor((nowMs - then) / (24 * 60 * 60_000)));
 }
 
 function unavailable(note: string): HealthTile {
