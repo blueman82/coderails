@@ -15,8 +15,9 @@ telemetry leaving the machine.
 Six panels:
 
 1. **SYSTEM VITALS** — usage windows, hooks fired, lint findings; hero
-   numerals + sparklines. A source that can't be read locally shows
-   "unavailable", never a guess.
+   numerals + sparklines. Tiles show "loading…" until the first activity
+   collect resolves, then "unavailable" for a source that honestly can't be
+   read locally (never a guess), or the value once collected.
 2. **DIRECTIVES** — one card per live agentic loop (last updated within 60
    minutes): title, done/total work-unit count, a per-unit checklist with
    status glyphs (done / in-flight / pending), PR chips, recent decisions,
