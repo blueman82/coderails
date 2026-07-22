@@ -1366,6 +1366,28 @@ check "validate_structure: scripted eval with empty cmd → exit 1 (fail closed)
 [[ "$stderr_out" == *"e1"* ]]
 check "validate_structure: empty cmd → stderr names eval" 0 $?
 
+# (G5-bis) A WHITESPACE-ONLY cmd is the empty-cmd bypass one step subtler:
+# `bash -c "   "` is a no-op exiting 0, which is non-environmental, and cmd
+# polarity is deliberately ungated — so without trimming, a fabricated
+# artifact whose P0 check does literally nothing walks through. Trim first;
+# blank means empty means refused.
+FIX_G_WS_CMD="$TMP/g_ws_cmd.json"
+mk_gate "$FIX_G_WS_CMD" "   " "bash $G_DIR/g_control.sh"
+stderr_out=$(post_evals::validate_structure "$FIX_G_WS_CMD" 42 "$SHA" 2>&1)
+check "validate_structure: whitespace-only cmd → exit 1 (blank is empty, fail closed)" 1 $?
+[[ "$stderr_out" == *"e1"* && "$stderr_out" == *"cmd"* ]]
+check "validate_structure: whitespace-only cmd → stderr names eval + cmd" 0 $?
+
+# (G5-ter) Same for the negative_control: a whitespace-only control happens to
+# be caught today as "exited 0", but that is polarity luck, not the empty
+# guard the header promises. It must be refused AS BLANK, before execution.
+FIX_G_WS_NC="$TMP/g_ws_nc.json"
+mk_gate "$FIX_G_WS_NC" "bash $G_DIR/g_check.sh" "  	 "
+stderr_out=$(post_evals::validate_structure "$FIX_G_WS_NC" 42 "$SHA" 2>&1)
+check "validate_structure: whitespace-only negative_control → exit 1" 1 $?
+[[ "$stderr_out" == *"e1"* && "$stderr_out" == *"negative_control"* && "$stderr_out" == *"empty"* ]]
+check "validate_structure: whitespace-only negative_control → stderr says empty, not exit-0" 0 $?
+
 # (G6) Direct-call scope limits: agent-run evals and tier 0 have nothing to
 # execute — exit 0, mirroring check 9's boundaries.
 FIX_G_AGENTRUN="$TMP/g_agentrun.json"

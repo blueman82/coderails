@@ -286,20 +286,28 @@ post_evals::validate_smoke() {
 # 1`, control 1) for a script that was only ever intended to exist. Check 9
 # passes that shape; this check runs the command, observes 127, and refuses.
 #
-# WHAT REFUSES:
-#   - empty cmd (a scripted eval with nothing to execute is unresolvable by
-#     definition — fail closed)
-#   - cmd or negative_control observed environmental (126/127/142/>=128)
-#   - negative_control observed exiting 0 (vacuous at the gate, whatever the
-#     typed smoke claims)
+# WHAT REFUSES — two distinct mechanisms:
+#   1. Blank-before-execution (trim-then-check, never reaches the runner):
+#      - empty or whitespace-only cmd (a scripted eval with nothing to
+#        execute; `bash -c "   "` would exit 0 and slip past the ungated
+#        cmd polarity, so this must be caught before execution)
+#      - empty or whitespace-only negative_control (same reasoning)
+#   2. Observed at execution:
+#      - cmd or negative_control environmental (126/127/142/>=128)
+#      - negative_control exiting 0 (vacuous at the gate, whatever the
+#        typed smoke claims)
 # WHAT DOES NOT: cmd exiting 0 or non-zero for a content reason — polarity
 # on cmd is the build-dependent part and stays ungated, exactly as check 9
 # permits it on the recorded value.
 #
 # EXECUTION CONTEXT: commands run in the caller's cwd through the same 10s
-# alarm wrapper smoke_run uses — the post-evals command invokes both from the
-# repo root, so a cmd that resolved for smoke-run resolves identically here.
-# Worst case added latency is 20s per scripted eval (two capped runs).
+# alarm wrapper smoke_run uses. Nothing here cd's: agreement with the
+# freeze-time smoke-run is a property of the documented flow (the post-evals
+# command runs validate-structure from the repo root, and the skill has
+# smoke-run invoked the same way), not something this function enforces. An
+# invocation from a different cwd can only fail closed — a relative cmd that
+# no longer resolves is a false refusal, never a false pass. Worst case
+# added latency is 20s per scripted eval (two capped runs).
 #
 # SAFETY: this executes author-supplied command strings from a JSON file.
 # That adds no privilege the author lacks — the same principal that wrote
@@ -340,13 +348,19 @@ post_evals::validate_smoke_execution() {
     while IFS= read -r id; do
         [[ -z "$id" ]] && continue
 
+        # Trim-then-check, same idiom as check 2 on tier_justification: a
+        # whitespace-only cmd is `bash -c "   "` — a no-op exiting 0, which
+        # is non-environmental, and cmd polarity is deliberately ungated, so
+        # without the trim a check that does literally nothing would be
+        # accepted. Blank means empty means refused.
         local cmd nc
-        cmd=$(jq -r --arg id "$id" '.evals[] | select(.id == $id) | .cmd // ""' "$path")
-        nc=$(jq -r --arg id "$id" '.evals[] | select(.id == $id) | .negative_control // ""' "$path")
+        cmd=$(jq -r --arg id "$id" '.evals[] | select(.id == $id) | .cmd // "" | gsub("^\\s+|\\s+$"; "")' "$path")
+        nc=$(jq -r --arg id "$id" '.evals[] | select(.id == $id) | .negative_control // "" | gsub("^\\s+|\\s+$"; "")' "$path")
 
         # Nothing to execute is not compliance — fail closed. (Check 3
-        # already refuses an empty negative_control at tier>=1; the empty-cmd
-        # case had no owner before this check.)
+        # already refuses an absent/empty-string negative_control at tier>=1;
+        # this additionally owns the whitespace-only case and the empty cmd,
+        # which had no owner before this check.)
         if [[ -z "$cmd" ]]; then
             printf 'post_evals: scripted eval %s has empty cmd — nothing can execute at the gate.\n' "$id" >&2
             return 1
