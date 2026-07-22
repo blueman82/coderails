@@ -266,6 +266,58 @@ describe("GET /api/events — activity on fs change", () => {
     expect((activity.health as unknown[]).length).toBeGreaterThan(0);
   }, 6000);
 
+  it("populates health without any watched-dir touch — the initial refreshActivity() from start() alone must eventually emit it", async () => {
+    // Reproduces the reported defect: a fresh SSE connection's first
+    // "snapshot" frame necessarily ships health:[] (aggregator.start()
+    // fires refreshActivity() without awaiting it before the snapshot is
+    // read), but nothing in the client's control ever touches
+    // projectsDir/loopsDir on a cold connection — so if health only ever
+    // repopulates on a fs-watch event (as the "activity on fs change" test
+    // above exercises), a page that never causes a watched-dir write would
+    // see health:[] forever. This test opens a connection and does NOT
+    // touch either watched dir, asserting that a populated-health frame
+    // still arrives (from start()'s own unconditional initial collect).
+    const projectsDir = tmpDir("dashboard-events-health-projects-");
+    const loopsDir = tmpDir("dashboard-events-health-loops-");
+    const runsDir = tmpDir("dashboard-events-health-runs-");
+    mkdirSync(join(projectsDir, "-proj"), { recursive: true });
+    writeFileSync(
+      join(projectsDir, "-proj", "a.jsonl"),
+      JSON.stringify({
+        type: "assistant",
+        timestamp: new Date().toISOString(),
+        message: { id: "msg_1", role: "assistant", usage: { input_tokens: 10, output_tokens: 5 } },
+      }) + "\n"
+    );
+
+    const handler = createEventsHandler({
+      config: testConfig(),
+      projectsDir,
+      loopsDir,
+      runsDir,
+      gatesPollMs: 999_999,
+    });
+    const res = handler(req());
+
+    const framesPromise = readFramesUntil(
+      res.body!,
+      (frames) =>
+        frames.some(
+          (f) => f.event === "activity" && Array.isArray((f.data as Record<string, unknown>).health) &&
+            ((f.data as Record<string, unknown>).health as unknown[]).length > 0
+        )
+    );
+    const timeout = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error("timed out waiting for a populated-health activity frame")), 5000)
+    );
+    const frames = await Promise.race([framesPromise, timeout]);
+
+    const populatedActivity = frames.find(
+      (f) => f.event === "activity" && ((f.data as Record<string, unknown>).health as unknown[]).length > 0
+    );
+    expect(populatedActivity).toBeDefined();
+  }, 6000);
+
   it("snapshot carries a builds field populated from buildsDir, and it refreshes when a build's state.json changes", async () => {
     const projectsDir = tmpDir("dashboard-events-projects-");
     const loopsDir = tmpDir("dashboard-events-loops-");
