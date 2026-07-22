@@ -1,8 +1,8 @@
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, utimesSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { collectUsage } from "../src/lib/collect/usage";
+import { collectUsage, resetUsageMemo } from "../src/lib/collect/usage";
 
 const tmpDirs: string[] = [];
 
