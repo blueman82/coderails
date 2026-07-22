@@ -64,6 +64,7 @@ export function createEventsHandler(deps: EventsHandlerDeps) {
       buildsDir: deps.buildsDir ?? DEFAULT_BUILDS_DIR,
       gatesPollMs: deps.gatesPollMs,
       activityDebounceMs: deps.activityDebounceMs,
+      contextTrendCache: sharedContextTrendCache,
       onError: (source, err) => {
         console.error(`[api/events] collector "${source}" failed:`, err);
       },
