@@ -27,6 +27,12 @@ export interface DashboardConfig {
 
 const PERMISSION_PROFILES: PermissionProfile[] = ["read-only", "standard", "auto", "bypass"];
 
+// name is a filename stem for the lock file (api/run/route.ts's
+// lockPathFor: join(locksDir, `${button}.lock`)) and a routine buttonRef
+// key — constrained to block path traversal (e.g. "../../evil") and any
+// other non-filename-safe character from reaching that join().
+const BUTTON_NAME_PATTERN = /^[a-z0-9][a-z0-9._-]{0,63}$/;
+
 const DEFAULT_CONFIG_PATH = join(homedir(), ".claude", "coderails-dashboard.json");
 
 export class ConfigError extends Error {
@@ -52,12 +58,28 @@ export function loadConfig(path?: string): DashboardConfig {
     throw new ConfigError(`Config file has malformed JSON: ${configPath}`);
   }
 
+  if (!Array.isArray(data.buttons)) {
+    throw new ConfigError(`Config file's "buttons" field must be an array: ${configPath}`);
+  }
+
   const seenNames = new Set<string>();
   for (const button of data.buttons) {
+    if (typeof button.name !== "string" || !BUTTON_NAME_PATTERN.test(button.name)) {
+      throw new ConfigError(`Button has invalid name: ${String(button.name)}`);
+    }
+
     if (seenNames.has(button.name)) {
       throw new ConfigError(`Duplicate button name: ${button.name}`);
     }
     seenNames.add(button.name);
+
+    if (typeof button.label !== "string") {
+      throw new ConfigError(`Button "${button.name}" has non-string label: ${String(button.label)}`);
+    }
+
+    if (typeof button.command !== "string") {
+      throw new ConfigError(`Button "${button.name}" has non-string command: ${String(button.command)}`);
+    }
 
     if (!PERMISSION_PROFILES.includes(button.profile)) {
       throw new ConfigError(

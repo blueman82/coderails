@@ -86,7 +86,11 @@ export function resolveQueueEntry(
     );
   }
 
-  const updated: Record<string, unknown> = { ...parsed, status: decision };
+  // hash is the validated parameter, never the file's own hash field — the
+  // file contents are otherwise-untrusted, and a caller (e.g.
+  // claimAndSpawnBuild's join(buildsDir, entry.hash)) must never see a
+  // divergent value from inside the JSON.
+  const updated: Record<string, unknown> = { ...parsed, hash, status: decision };
   writeFileSync(path, JSON.stringify(updated));
   return updated as unknown as QueueEntrySnapshot;
 }

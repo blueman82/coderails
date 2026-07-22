@@ -102,6 +102,22 @@ describe("claimAndSpawnBuild", () => {
     expect(calls).toHaveLength(1);
   });
 
+  it("security: a traversal-shaped entry.hash returns {claimed:false, error:'invalid_hash'} and performs no filesystem write", () => {
+    const buildsDir = tmpDir("dashboard-build-spawn-traversal-");
+    const outsideMarker = tmpDir("dashboard-build-spawn-traversal-outside-");
+    const traversalHash = `../../../../../../..${outsideMarker}/pwned`;
+    const entry = makeEntry({ hash: traversalHash });
+    const { fn, calls } = makeFakeSpawn();
+
+    const result = claimAndSpawnBuild(entry, { buildsDir, wrapperPath: "/bin/true", spawnImpl: fn });
+
+    expect(result).toEqual({ claimed: false, error: "invalid_hash" });
+    // No write escaped buildsDir: the outside marker dir must contain
+    // nothing this call could have written into it.
+    expect(existsSync(join(outsideMarker, "pwned"))).toBe(false);
+    expect(calls).toHaveLength(0);
+  });
+
   it("runId is the first 8 hex chars of entry.hash", () => {
     const buildsDir = tmpDir("dashboard-build-spawn-runid-");
     const entry = makeEntry();
