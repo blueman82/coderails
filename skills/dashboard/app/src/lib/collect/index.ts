@@ -187,7 +187,6 @@ export function createAggregator(deps: AggregatorDeps): Aggregator {
     );
     const queue = deps.queueDir ? safeCall("queue", () => collectQueue(deps.queueDir!, queueLimit), []) : [];
     const builds = deps.buildsDir ? safeCall("builds", () => collectBuilds(deps.buildsDir!), []) : [];
-    return { sessions, loops, health, queue, builds };
     // Rides the activity slice like health does. First collection streams the
     // full transcript corpus once; the collector's module-scope per-file cache
     // makes every later refresh a stat() sweep plus a re-parse of only the
