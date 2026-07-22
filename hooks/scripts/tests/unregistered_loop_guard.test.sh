@@ -1,7 +1,12 @@
 #!/bin/bash
 # Behavioural test for unregistered_loop_guard.sh — feeds synthetic Stop
-# payloads with fixture transcripts and asserts the nudge fires/stays silent
-# per the spec's six cases. All state lives under a temp dir
+# payloads with fixture transcripts and asserts BOTH directions of the gate:
+# an unregistered dispatch-heavy session BLOCKS (exit 2, stderr message), and
+# a registered one (stub present, or agentic-loop Skill invoked) does NOT.
+# A gate whose deny path is never exercised is unproven, so the block is
+# asserted on exit code, delivery channel, message content, persistence
+# across repeated stops, and both sides of the threshold boundary.
+# All state lives under a temp dir
 # (CLAUDE_AGENTIC_LOOP_DIR), never the repo tree. Mirrors loop_state_guard.test.sh
 # conventions.
 set -u
@@ -174,7 +179,7 @@ blank_malformed_reason=$( ( . "$GUARD"; ulg_count_dispatch_turns "$blank_malform
 mk_nudge_fires_transcript() {
   local out="$TMP/nudge_fires_$RANDOM.jsonl" i=0
   : > "$out"
-  while [ "$i" -lt 3 ]; do
+  while [ "$i" -lt 4 ]; do
     jq -cn --arg id "nf-$i" '{"type":"assistant","message":{"id":$id,"content":[{"type":"tool_use","name":"Agent","input":{}}]}}' >> "$out"
     i=$((i+1))
   done
@@ -183,9 +188,9 @@ mk_nudge_fires_transcript() {
 }
 nudge_fires_t=$(mk_nudge_fires_transcript)
 n=$( ( . "$GUARD"; ulg_count_dispatch_turns "$nudge_fires_t" ) )
-check "3 valid + 1 malformed -> count 3 (threshold crossed)" "3" "$n"
+check "4 valid + 1 malformed -> count 4 (threshold crossed)" "4" "$n"
 nudge_fires_reason=$( ( . "$GUARD"; ulg_count_dispatch_turns "$nudge_fires_t" >/dev/null; printf '%s' "$ULG_PARSE_REASON" ) )
-check "3 valid + 1 malformed -> ULG_PARSE_REASON empty" "" "$nudge_fires_reason"
+check "4 valid + 1 malformed -> ULG_PARSE_REASON empty" "" "$nudge_fires_reason"
 
 # jq not on PATH -> ULG_PARSE_REASON=jq_missing, count 0. Source the guard
 # FIRST (while jq is still reachable, since sourcing needs `dirname`), then
@@ -256,28 +261,82 @@ payload() { # transcript_path session_id -> JSON
 run() { printf '%s' "$1" | bash "$GUARD" >/dev/null 2>&1; echo $?; }               # -> exit code
 run_stdout() { printf '%s' "$1" | bash "$GUARD" 2>/dev/null; }                     # -> stdout
 
-# dispatch_turns=3, no progress.json, no Skill invocation -> exit 0 AND nudge fires.
+# -> stderr only (stdout discarded). Wrapping the stdout discard in braces and
+# putting `2>&1` last is the form shellcheck SC2069 accepts without a
+# suppression: stdout goes to /dev/null inside the group, then the group's
+# stderr is duped onto the captured stdout.
+run_stderr() { printf '%s' "$1" | { bash "$GUARD" >/dev/null; } 2>&1; }
+
+# DENY DIRECTION. dispatch_turns=3, no progress.json, no Skill invocation ->
+# exit 2 (BLOCK) with the message on stderr, the delivery shape a blocking Stop
+# hook uses (mirrors loop_stall_guard.sh's block_missing_declaration). This is
+# the whole point of the guard: advisory additionalContext was read and ignored
+# live on 2026-07-21, so the nudge became a block.
 rm -rf "$CLAUDE_AGENTIC_LOOP_DIR"
-T=$(mk_dispatch_transcript 3)
+T=$(mk_dispatch_transcript 4)
 code=$(run "$(payload "$T" S1)")
-check "3 dispatches, unregistered -> exit 0" "0" "$code"
-: > "$CLAUDE_DISCIPLINE_LOG"  # nudge-once-per-session: reset so the next call is a first nudge for S1, not a suppressed repeat
+check "4 dispatches, unregistered -> exit 2 (BLOCKS)" "2" "$code"
+err=$(run_stderr "$(payload "$T" S1)")
+[ -n "$err" ] && check "block message delivered on stderr (blocking-Stop channel)" "ok" "ok" || check "block message delivered on stderr (blocking-Stop channel)" "ok" "FAIL: empty"
+# The message must name the EXACT resolved progress.json path. A message that
+# made the model compute the path itself could re-block a complying session —
+# the one realistic way this block could have deadlocked in practice.
+expected_path=$(bash "$(cd "$(dirname "$0")/../lib" && pwd)/agentic_loop_path.sh" "$CWD" S1 2>/dev/null)
+check "block message names the exact resolved progress.json path" "ok" \
+  "$(printf '%s' "$err" | grep -qF "$expected_path" && echo ok || echo "FAIL: resolved path absent from message")"
+check "block message names the agentic-loop Skill as the other clear" "ok" \
+  "$(printf '%s' "$err" | grep -q 'agentic-loop' && echo ok || echo "FAIL: skill clear not offered")"
 out=$(run_stdout "$(payload "$T" S1)")
-event=$(printf '%s' "$out" | jq -r '.hookSpecificOutput.hookEventName // empty' 2>/dev/null)
-ctx=$(printf '%s' "$out" | jq -r '.hookSpecificOutput.additionalContext // empty' 2>/dev/null)
-check "nudge stdout hookEventName == Stop" "Stop" "$event"
-[ -n "$ctx" ] && check "nudge stdout additionalContext non-empty" "ok" "ok" || check "nudge stdout additionalContext non-empty" "ok" "FAIL: empty"
+check "block emits nothing on stdout (not an additionalContext nudge)" "" "$out"
+
+# The block must NOT be clearable by anything the model can merely assert. No
+# flag, no justification field, no "this was a one-off" declaration — the ONLY
+# clears are the two real registrations. Two checks, because a text grep alone
+# is a weak instrument:
+#   (a) the message must not carry the OLD advisory sentence, which under a
+#       block would have been the loophole ("no action is needed").
+#   (b) the behavioural proof — a session that does nothing but keep stopping
+#       stays blocked. Asserted by the repeat-stop checks above.
+# Note "one-off" legitimately appears as the LABEL for clear #1 (write the
+# stub); labelling a real clear is not offering an assertion escape, so this
+# greps the escape phrasing specifically, not the word.
+check "block message does not carry the old advisory no-action-needed escape" "ok" \
+  "$(printf '%s' "$err" | grep -qiE 'no action is needed|no action needed' && echo "FAIL: advisory escape sentence survived" || echo ok)"
+check "block message states no assertion can clear it" "ok" \
+  "$(printf '%s' "$err" | grep -qiE 'nothing you can write|no third option' && echo ok || echo "FAIL: message does not close the assertion path")"
+
+# Block REPEATS while unregistered — it is not suppressed after firing once.
+# This is the specific regression the removed nudge-once-per-session logic
+# caused: a guard that blocks once then goes quiet is the failure being fixed.
+code2=$(run "$(payload "$T" S1)")
+check "4 dispatches, unregistered, SECOND stop -> still exit 2 (no once-per-session suppression)" "2" "$code2"
+code3=$(run "$(payload "$T" S1)")
+check "4 dispatches, unregistered, THIRD stop -> still exit 2 (block persists until registered)" "2" "$code3"
+check "no already_nudged_this_session suppression remains in the log" 0 \
+  "$(grep -c 'already_nudged_this_session' "$CLAUDE_DISCIPLINE_LOG" 2>/dev/null; true)"
+
+# ALLOW DIRECTION, escape 1 of 2: writing the bare progress.json stub at the
+# resolved path clears the block. Verified empirically that a bare stub with NO
+# Skill invocation leaves loop_state_guard.sh and loop_stall_guard.sh both at
+# invocations=0/blocked=0, so this clear does not cascade into a sibling block.
+rm -rf "$CLAUDE_AGENTIC_LOOP_DIR"
+dir=$(resolved_dir S-CLEAR)
+mkdir -p "$dir"
+printf '{"schema_version":1,"status":"in-progress","session_id":"S-CLEAR"}' > "$dir/progress.json"
+code=$(run "$(payload "$T" S-CLEAR)")
+check "block CLEARED by writing the progress.json stub -> exit 0" "0" "$code"
+rm -rf "$CLAUDE_AGENTIC_LOOP_DIR"
 
 # dispatch_turns=3, progress.json present -> silent.
 rm -rf "$CLAUDE_AGENTIC_LOOP_DIR"
-T=$(mk_dispatch_transcript 3)
+T=$(mk_dispatch_transcript 4)
 dir=$(resolved_dir S1)
 mkdir -p "$dir"
 printf '{"schema_version":1,"status":"in-progress","session_id":"S1"}' > "$dir/progress.json"
 code=$(run "$(payload "$T" S1)")
 out=$(run_stdout "$(payload "$T" S1)")
-check "3 dispatches, registered (progress.json) -> exit 0" "0" "$code"
-check "3 dispatches, registered -> silent stdout" "" "$out"
+check "4 dispatches, registered (progress.json) -> exit 0 (does NOT block)" "0" "$code"
+check "4 dispatches, registered -> silent stdout" "" "$out"
 rm -rf "$CLAUDE_AGENTIC_LOOP_DIR"
 
 # dispatch_turns=3, no progress.json, but Skill invocation present -> silent.
@@ -287,15 +346,26 @@ rm -rf "$CLAUDE_AGENTIC_LOOP_DIR"
 mixed="$TMP/mixed_$RANDOM.jsonl"
 : > "$mixed"
 i=0
-while [ "$i" -lt 3 ]; do
+while [ "$i" -lt 4 ]; do
   jq -cn --arg id "mx-$i" '{"type":"assistant","message":{"id":$id,"content":[{"type":"tool_use","name":"Agent","input":{}}]}}' >> "$mixed"
   i=$((i+1))
 done
 printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Skill","input":{"skill":"coderails:agentic-loop"}}]}}' >> "$mixed"
 code=$(run "$(payload "$mixed" S1)")
 out=$(run_stdout "$(payload "$mixed" S1)")
-check "3 dispatches, no progress.json, Skill invoked -> exit 0" "0" "$code"
-check "3 dispatches, Skill invoked -> silent stdout" "" "$out"
+check "4 dispatches, no progress.json, Skill invoked -> exit 0 (does NOT block)" "0" "$code"
+check "4 dispatches, Skill invoked -> silent stdout" "" "$out"
+
+# THRESHOLD BOUNDARY. Raised 3 -> 4 with the nudge->block change: under a
+# nudge a false positive cost one ignorable line, under a block it costs a
+# forced stub write, so the bar sits above the common benign shape (a few
+# genuinely independent one-shot dispatches). Pin BOTH sides of the boundary
+# so a future edit cannot drift the threshold unnoticed.
+rm -rf "$CLAUDE_AGENTIC_LOOP_DIR"
+T3=$(mk_dispatch_transcript 3)
+check "3 dispatches (exactly below threshold) -> exit 0 (does NOT block)" "0" "$(run "$(payload "$T3" S-EDGE)")"
+T4=$(mk_dispatch_transcript 4)
+check "4 dispatches (exactly at threshold) -> exit 2 (blocks)" "2" "$(run "$(payload "$T4" S-EDGE)")"
 
 # dispatch_turns=2 (below threshold), no progress.json, no Skill invocation -> silent.
 rm -rf "$CLAUDE_AGENTIC_LOOP_DIR"
@@ -314,10 +384,12 @@ check "fan-out (5 parallel, 1 message.id) -> exit 0" "0" "$code"
 check "fan-out (5 parallel, 1 message.id) -> silent (never trips nudge)" "" "$out"
 
 # Stdin handling smoke case: pipe payload via printf (not echo), assert no hang/crash.
+# 3 unregistered dispatches now BLOCK, so the expected code here is 2, not 0 —
+# this asserts the payload was read and gated, not that the stop was allowed.
 rm -rf "$CLAUDE_AGENTIC_LOOP_DIR"
-T=$(mk_dispatch_transcript 3)
+T=$(mk_dispatch_transcript 4)
 code=$(printf '%s' "$(payload "$T" S1)" | bash "$GUARD" >/dev/null 2>&1; echo $?)
-check "direct-payload stdin smoke (printf, not echo) -> exit 0" "0" "$code"
+check "direct-payload stdin smoke (printf, not echo) -> exit 2 (payload read and gated)" "2" "$code"
 
 # End-to-end: benign-partial-skip transcript (2 valid + 1 bad line, recovered
 # count 2) stays silent because 2 is still below the >=3 threshold — not
@@ -355,17 +427,15 @@ check "all-malformed transcript end-to-end -> discipline log records reason=jq_p
   "$(grep -c 'hook=unregistered_loop_guard session=S-JQERR.*reason=jq_parse_error' "$CLAUDE_DISCIPLINE_LOG" 2>/dev/null; true)"
 
 # End-to-end core proof: 3 valid dispatch turns + 1 malformed line -> the
-# recovered count crosses the threshold and the nudge FIRES. This is the
-# fixture that proves the fix's actual purpose (the 2-valid fixture above
-# can't, since 2 stays below threshold either way).
+# recovered count crosses the threshold and the BLOCK fires. A benign partial
+# skip must not fail the guard open — the evidence is still trustworthy.
 rm -rf "$CLAUDE_AGENTIC_LOOP_DIR"
 : > "$CLAUDE_DISCIPLINE_LOG"
 nudge_fires_e2e=$(mk_nudge_fires_transcript)
 code=$(run "$(payload "$nudge_fires_e2e" S-NUDGE)")
-: > "$CLAUDE_DISCIPLINE_LOG"  # nudge-once-per-session: reset so the stdout check below is a first nudge for S-NUDGE, not a suppressed repeat
-out=$(run_stdout "$(payload "$nudge_fires_e2e" S-NUDGE)")
-check "3 valid + 1 malformed end-to-end -> exit 0" "0" "$code"
-[ -n "$out" ] && check "3 valid + 1 malformed end-to-end -> nudge fires (non-empty stdout)" "ok" "ok" || check "3 valid + 1 malformed end-to-end -> nudge fires (non-empty stdout)" "ok" "FAIL: empty"
+err=$(run_stderr "$(payload "$nudge_fires_e2e" S-NUDGE)")
+check "4 valid + 1 malformed end-to-end -> exit 2 (benign partial skip does not fail open)" "2" "$code"
+[ -n "$err" ] && check "4 valid + 1 malformed end-to-end -> block message on stderr" "ok" "ok" || check "3 valid + 1 malformed end-to-end -> block message on stderr" "ok" "FAIL: empty"
 
 # End-to-end: malformed STDIN PAYLOAD (not transcript) -> logs reason=payload_parse_error,
 # stays silent, exit 0. Distinct seam from the transcript-parse-error case above.
@@ -377,78 +447,33 @@ check "malformed stdin payload -> exit 0" "0" "$code"
 check "malformed stdin payload -> silent stdout (fail-open, no spurious nudge)" "" "$out"
 
 # =====================================================================
-# Task 4 — nudge-once-per-session suppression
+# Task 4 — the block persists across sessions and is per-session independent
 # =====================================================================
-# The guard previously re-emitted its nudge on EVERY Stop for a non-loop
-# session with no per-session termination, causing a self-perpetuating
-# loop (nudge -> honest "no action needed" turn -> Stop -> nudge again).
-# The discipline log already records "nudged=1" lines keyed by session_id
-# on the emit path, so suppression reads that log for a prior nudge for
-# THIS session_id before emitting again.
-
-# Same session, two consecutive Stop invocations, conditions unchanged
-# (3+ dispatches, no progress.json, no Skill invocation) -> nudge fires on
-# the FIRST call but NOT the second.
+# The nudge-once-per-session suppression (and its whole BRE-escaping
+# regression suite) is DELETED with the advisory design it served. A warning
+# needed a once-per-session ledger to stop re-firing forever; a block does
+# not — it must persist until the loop is actually registered, which is the
+# entire point. "Blocks once, then goes quiet" IS the failure being fixed.
+# Persistence is asserted in the DENY-direction block above (2nd/3rd stop).
+# What remains worth asserting here: two distinct unregistered sessions each
+# get blocked independently, with no cross-session ledger coupling them.
 rm -rf "$CLAUDE_AGENTIC_LOOP_DIR"
 : > "$CLAUDE_DISCIPLINE_LOG"
-T=$(mk_dispatch_transcript 3)
-out1=$(run_stdout "$(payload "$T" S-REPEAT)")
-code1=$(run "$(payload "$T" S-REPEAT)")
-check "repeat-session first Stop -> exit 0" "0" "$code1"
-[ -n "$out1" ] && check "repeat-session first Stop -> nudge fires (non-empty stdout)" "ok" "ok" || check "repeat-session first Stop -> nudge fires (non-empty stdout)" "ok" "FAIL: empty"
+T=$(mk_dispatch_transcript 4)
+code_a=$(run "$(payload "$T" S-A)")
+code_b=$(run "$(payload "$T" S-AB)")
+check "unregistered session S-A -> exit 2" "2" "$code_a"
+check "unregistered session S-AB blocked independently of S-A -> exit 2" "2" "$code_b"
 
-out2=$(run_stdout "$(payload "$T" S-REPEAT)")
-code2=$(run "$(payload "$T" S-REPEAT)")
-check "repeat-session second Stop -> exit 0" "0" "$code2"
-check "repeat-session second Stop -> nudge suppressed (silent stdout)" "" "$out2"
-already_nudged_count=$(grep -c 'session=S-REPEAT.*reason=already_nudged_this_session' "$CLAUDE_DISCIPLINE_LOG" 2>/dev/null; true)
-[ "$already_nudged_count" -ge 1 ] 2>/dev/null && check "repeat-session second Stop -> discipline log records already_nudged_this_session" "ok" "ok" || check "repeat-session second Stop -> discipline log records already_nudged_this_session" "ok" "FAIL: got $already_nudged_count"
-
-# A fresh session meeting the conditions still nudges exactly once (the
-# first-nudge path is untouched by the suppression branch).
+# Cross-session isolation of the CLEAR: registering S-A must not clear S-AB.
+dir=$(resolved_dir S-A)
+mkdir -p "$dir"
+printf '{"schema_version":1,"status":"in-progress","session_id":"S-A"}' > "$dir/progress.json"
+code_a2=$(run "$(payload "$T" S-A)")
+code_b2=$(run "$(payload "$T" S-AB)")
+check "S-A registered -> exit 0 (its own block cleared)" "0" "$code_a2"
+check "S-AB still unregistered -> exit 2 (S-A's registration does not clear it)" "2" "$code_b2"
 rm -rf "$CLAUDE_AGENTIC_LOOP_DIR"
-: > "$CLAUDE_DISCIPLINE_LOG"
-T=$(mk_dispatch_transcript 3)
-out=$(run_stdout "$(payload "$T" S-FRESH)")
-[ -n "$out" ] && check "fresh session -> nudges once (non-empty stdout)" "ok" "ok" || check "fresh session -> nudges once (non-empty stdout)" "ok" "FAIL: empty"
-check "fresh session -> exactly one nudged=1 log line" 1 \
-  "$(grep -c 'session=S-FRESH.*nudged=1' "$CLAUDE_DISCIPLINE_LOG" 2>/dev/null; true)"
-
-# Different sessions are independent: session A having already nudged must
-# NOT suppress session B's first nudge. Also proves the session-id match is
-# exact (not a substring match) — "S-A" must not match "S-AB" or vice versa.
-rm -rf "$CLAUDE_AGENTIC_LOOP_DIR"
-: > "$CLAUDE_DISCIPLINE_LOG"
-T=$(mk_dispatch_transcript 3)
-run "$(payload "$T" S-A)" >/dev/null   # session A's first (and only) nudge
-out_b=$(run_stdout "$(payload "$T" S-AB)")
-[ -n "$out_b" ] && check "distinct session S-AB not suppressed by prior S-A nudge" "ok" "ok" || check "distinct session S-AB not suppressed by prior S-A nudge" "ok" "FAIL: empty"
-
-# Reverse direction of the above: S-AB nudges first, then S-A (the substring
-# prefix) must still get its own first nudge. Proves the exact-match
-# guarantee holds regardless of which of the two session ids fires first —
-# matches the comment's "or vice versa" claim.
-rm -rf "$CLAUDE_AGENTIC_LOOP_DIR"
-: > "$CLAUDE_DISCIPLINE_LOG"
-T=$(mk_dispatch_transcript 3)
-run "$(payload "$T" S-AB)" >/dev/null   # session S-AB's first (and only) nudge
-out_a=$(run_stdout "$(payload "$T" S-A)")
-[ -n "$out_a" ] && check "distinct session S-A not suppressed by prior S-AB nudge (reverse direction)" "ok" "ok" || check "distinct session S-A not suppressed by prior S-AB nudge (reverse direction)" "ok" "FAIL: empty"
-
-# Regression: session_id is interpolated into a grep BRE pattern. A session
-# id containing a literal BRE metachar (here "." in "s.1") must not be
-# treated as a wildcard that matches an unrelated session's log line (e.g.
-# "sX1"). als_sanitise_session_id only strips "/" and collapses ".." — a
-# single "." survives untouched, so this is a real reachable session id.
-# This test must FAIL against an unescaped grep (since a BRE "." matches any
-# single char, "s.1" would wildcard-match a "session=sX1 ... nudged=1" line)
-# and PASS once the session id is escaped/matched literally before use.
-rm -rf "$CLAUDE_AGENTIC_LOOP_DIR"
-: > "$CLAUDE_DISCIPLINE_LOG"
-T=$(mk_dispatch_transcript 3)
-run "$(payload "$T" sX1)" >/dev/null   # sX1's first (and only) nudge
-out_dot=$(run_stdout "$(payload "$T" "s.1")")
-[ -n "$out_dot" ] && check "session 's.1' (literal dot) not falsely suppressed by unrelated 'sX1' nudge (BRE metachar regression)" "ok" "ok" || check "session 's.1' (literal dot) not falsely suppressed by unrelated 'sX1' nudge (BRE metachar regression)" "ok" "FAIL: empty"
 
 # =====================================================================
 # Task 5 — mktemp-failure degraded path leaves a breadcrumb (review follow-up)
@@ -478,16 +503,17 @@ PATH="$MKTEMP_FAIL_DIR:$PATH" run "$(payload "$all_malformed_mktemp_fail" S-MKTE
 check "mktemp-failure degraded path -> discipline log records reason=mktemp_unavailable" 1 \
   "$(grep -c 'hook=unregistered_loop_guard session=S-MKTEMPFAIL reason=mktemp_unavailable attribution=lost' "$CLAUDE_DISCIPLINE_LOG" 2>/dev/null; true)"
 
-# Log-only guarantee: mktemp failure must NOT change nudge/exit behaviour.
-# A transcript with 3+ real dispatches and no registration must still nudge
+# Log-only guarantee: mktemp failure must NOT change block/exit behaviour.
+# A transcript with 3+ real dispatches and no registration must still BLOCK
 # even when mktemp is broken — the breadcrumb is an EXTRA log line, not a
-# new early-exit path that could swallow a legitimate nudge.
+# new early-exit path that could swallow a legitimate block (fail-open on the
+# infrastructure defect must not become fail-open on the evidence).
 rm -rf "$CLAUDE_AGENTIC_LOOP_DIR"
 : > "$CLAUDE_DISCIPLINE_LOG"
-T=$(mk_dispatch_transcript 3)
-out_mktemp_fail=$(PATH="$MKTEMP_FAIL_DIR:$PATH" run_stdout "$(payload "$T" S-MKTEMPFAIL2)")
+T=$(mk_dispatch_transcript 4)
+err_mktemp_fail=$(PATH="$MKTEMP_FAIL_DIR:$PATH" run_stderr "$(payload "$T" S-MKTEMPFAIL2)")
 code_mktemp_fail=$(PATH="$MKTEMP_FAIL_DIR:$PATH" run "$(payload "$T" S-MKTEMPFAIL2)")
-check "mktemp-failure degraded path, 3 clean dispatches -> exit 0 (unchanged)" "0" "$code_mktemp_fail"
-[ -n "$out_mktemp_fail" ] && check "mktemp-failure degraded path -> nudge still fires (log-only change, no exit-path hijack)" "ok" "ok" || check "mktemp-failure degraded path -> nudge still fires (log-only change, no exit-path hijack)" "ok" "FAIL: empty"
+check "mktemp-failure degraded path, 4 clean dispatches -> exit 2 (still blocks)" "2" "$code_mktemp_fail"
+[ -n "$err_mktemp_fail" ] && check "mktemp-failure degraded path -> block still fires (log-only change, no exit-path hijack)" "ok" "ok" || check "mktemp-failure degraded path -> block still fires (log-only change, no exit-path hijack)" "ok" "FAIL: empty"
 
 [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails)"; exit 1; }
