@@ -82,6 +82,7 @@ export function createEventsHandler(deps: EventsHandlerDeps) {
         console.log("[instrumentation] route: aggregator.subscribe() returned");
       },
       cancel() {
+        console.log("[instrumentation] route: ReadableStream cancel called");
         unsubscribe?.();
         aggregator.stop();
       },
