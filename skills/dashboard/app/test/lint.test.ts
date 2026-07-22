@@ -82,4 +82,16 @@ describe("collectLintFindings", () => {
     const tile = collectLintFindings([vault], new Date("2026-07-22T00:00:00Z"));
     expect(tile.value).not.toBeNull();
   });
+
+  it("prefers the MOST RECENT run's structured record, not the first one appended to the file", () => {
+    // wiki-lint's Step 5 appends — so across multiple runs, the newest
+    // structured record is the LAST one in the file, not the first. A
+    // first-match regex would silently keep reporting an old count forever.
+    const vault = makeTmpVault(
+      "## [2026-07-10] lint | old run\n<!-- lint-findings: 7 -->\n\n" +
+        "## [2026-07-22] lint | latest run\n<!-- lint-findings: 2 -->\n"
+    );
+    const tile = collectLintFindings([vault], new Date("2026-07-22T00:00:00Z"));
+    expect(tile.value).toBe("2");
+  });
 });
