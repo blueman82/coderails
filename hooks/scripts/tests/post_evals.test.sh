@@ -1108,4 +1108,129 @@ mk_smoke "$FIX_SMOKE_FULL" 1 1
 post_evals::validate_structure "$FIX_SMOKE_FULL" 42 "$SHA"
 check "validate_structure: well-formed file with smoke evidence → exit 0" 0 $?
 
+# ═══ smoke_run: the executor that makes the evidence non-attestable ═════════
+# validate_smoke above checks recorded exit codes. That is necessary but not
+# sufficient: the agent writes those numbers. An agent that freezes a cmd for
+# a script it merely INTENDS to create records the code it EXPECTS (1, "the
+# assertion fails until I build it"), never having run the command — and walks
+# straight through a checker that trusts the field. That is instance 1's exact
+# failure mode, and it is why rule 5 already says a neutral script computes the
+# result and the orchestrator never hand-writes it. smoke_run applies rule 5 to
+# smoke evidence: it EXECUTES cmd and negative_control and writes the object
+# itself.
+#
+# Every test below asserts on codes smoke_run OBSERVED. No test hand-writes an
+# expected exit code into a smoke object — that is the whole point, so a fixture
+# that did would prove nothing.
+
+SR_DIR="$TMP/smoke_run"
+mkdir -p "$SR_DIR"
+
+# (X1) INSTANCE 1, END TO END. cmd names a script that does not exist. The
+# agent's INTENT (recorded below as the optimistic cmd_exit: 1) is overwritten
+# by what actually happens. Then the gate refuses it — without the test ever
+# stating 127.
+FIX_SR_ENOENT="$SR_DIR/enoent.json"
+jq -n '{
+  tier: 1, tier_justification: "1 work-unit", head_sha: "abc",
+  evals: [
+    {id:"E2", priority:"P0", mode:"scripted", status:"pending",
+     cmd:"bash '"$SR_DIR"'/never_created.sh",
+     negative_control:"bash '"$SR_DIR"'/never_created_control.sh",
+     evidence:"log",
+     smoke:{cmd_exit:1, negative_control_exit:1, cmd_output:"1 test failed"}}
+  ]
+}' > "$FIX_SR_ENOENT"
+
+post_evals::smoke_run "$FIX_SR_ENOENT"
+check "smoke_run: executes and rewrites smoke, exit 0 (recording is not judging)" 0 $?
+
+observed=$(jq -r '.evals[0].smoke.cmd_exit' "$FIX_SR_ENOENT")
+check_str "smoke_run: OVERWRITES the agent's optimistic cmd_exit with the observed one" "127" "$observed"
+
+# The recorded value must now be what the shell really returns for a missing
+# script — derived here, not asserted as a literal, so the test tracks reality.
+bash "$SR_DIR/never_created.sh" >/dev/null 2>&1
+real_rc=$?
+check_str "smoke_run: recorded cmd_exit equals the real exit of running it" "$real_rc" "$observed"
+
+# And the gate now refuses what it previously passed. This is the closed loop:
+# optimistic input → executor overwrites → validator refuses.
+post_evals::validate_smoke "$FIX_SR_ENOENT" 2>/dev/null
+check "smoke_run + validate_smoke: optimistic record for a nonexistent cmd → refused [instance 1 closed]" 1 $?
+
+# (X2) An output excerpt must be captured too — an exit code with no output is
+# not evidence a human can audit.
+excerpt=$(jq -r '.evals[0].smoke.cmd_output // ""' "$FIX_SR_ENOENT")
+[[ -n "$excerpt" ]]
+check "smoke_run: captures a cmd_output excerpt" 0 $?
+
+# (X3) The honest freeze-before-build case must survive execution: a cmd that
+# genuinely runs and genuinely fails (feature not built) is recorded as a
+# content failure, and the gate passes it. If this breaks, the executor
+# contradicts check 8.
+printf '#!/bin/bash\necho "1 test failed"\nexit 1\n' > "$SR_DIR/real_check.sh"
+printf '#!/bin/bash\necho "assertion failed"\nexit 1\n' > "$SR_DIR/real_control.sh"
+FIX_SR_HONEST="$SR_DIR/honest.json"
+jq -n '{
+  tier: 1, tier_justification: "1 work-unit", head_sha: "abc",
+  evals: [
+    {id:"E1", priority:"P0", mode:"scripted", status:"pending",
+     cmd:"bash '"$SR_DIR"'/real_check.sh",
+     negative_control:"bash '"$SR_DIR"'/real_control.sh",
+     evidence:"log"}
+  ]
+}' > "$FIX_SR_HONEST"
+post_evals::smoke_run "$FIX_SR_HONEST"
+check "smoke_run: honest not-yet-built check → exit 0" 0 $?
+check_str "smoke_run: records the real content-failure code for cmd" "1" "$(jq -r '.evals[0].smoke.cmd_exit' "$FIX_SR_HONEST")"
+post_evals::validate_smoke "$FIX_SR_HONEST"
+check "smoke_run + validate_smoke: honest freeze-before-build artifact → exit 0" 0 $?
+
+# (X4) A vacuous negative control caught by execution rather than by trust.
+# The control here SUCCEEDS — instances 2 and 3 both looked exactly like this.
+printf '#!/bin/bash\necho "jq-1.7.1"\nexit 0\n' > "$SR_DIR/vacuous_control.sh"
+FIX_SR_VACUOUS="$SR_DIR/vacuous.json"
+jq -n '{
+  tier: 1, tier_justification: "1 work-unit", head_sha: "abc",
+  evals: [
+    {id:"E3", priority:"P0", mode:"scripted", status:"pending",
+     cmd:"bash '"$SR_DIR"'/real_check.sh",
+     negative_control:"bash '"$SR_DIR"'/vacuous_control.sh",
+     evidence:"log"}
+  ]
+}' > "$FIX_SR_VACUOUS"
+post_evals::smoke_run "$FIX_SR_VACUOUS"
+check_str "smoke_run: records the vacuous control's real exit 0" "0" "$(jq -r '.evals[0].smoke.negative_control_exit' "$FIX_SR_VACUOUS")"
+post_evals::validate_smoke "$FIX_SR_VACUOUS" 2>/dev/null
+check "smoke_run + validate_smoke: vacuous control → refused [instances 2,3 closed]" 1 $?
+
+# (X5) A hanging command must not hang the freeze. The 10s alarm wrapper
+# _run_formula already uses yields 142, which validate_smoke treats as
+# environmental. Asserted via the taxonomy helper rather than by sleeping 10s.
+post_evals::_is_environmental_rc 142
+check "_is_environmental_rc: 142 (timeout) is environmental" 0 $?
+post_evals::_is_environmental_rc 1
+check "_is_environmental_rc: 1 (content failure) is NOT environmental" 1 $?
+
+# (X6) agent-run evals carry no cmd — the executor must skip them, not crash.
+FIX_SR_AGENT="$SR_DIR/agentrun.json"
+jq -n '{
+  tier: 1, tier_justification: "1 work-unit", head_sha: "abc",
+  evals: [ {id:"E1", priority:"P0", mode:"agent-run", status:"pending", assert:"UI renders", evidence:"report"} ]
+}' > "$FIX_SR_AGENT"
+post_evals::smoke_run "$FIX_SR_AGENT"
+check "smoke_run: agent-run eval skipped → exit 0" 0 $?
+check_str "smoke_run: agent-run eval gets no smoke object" "null" "$(jq -r '.evals[0].smoke | type' "$FIX_SR_AGENT")"
+
+# (X7) The file must stay valid JSON and keep its other fields — the executor
+# rewrites in place and a botched write would silently destroy the artifact.
+jq -e . "$FIX_SR_HONEST" >/dev/null 2>&1
+check "smoke_run: rewritten file is still valid JSON" 0 $?
+check_str "smoke_run: preserves tier_justification" "1 work-unit" "$(jq -r '.tier_justification' "$FIX_SR_HONEST")"
+
+# (X8) Same fail-open lesson: no jq, no run.
+stderr_out=$(PATH="$EMPTY_BIN"; post_evals::smoke_run "$FIX_SR_HONEST" 2>&1)
+check "smoke_run: jq unavailable → exit 1 (must not fail open)" 1 $?
+
 [[ $fails -eq 0 ]] && { echo PASS; exit 0; } || { echo "FAIL ($fails)"; exit 1; }

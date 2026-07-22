@@ -262,11 +262,121 @@ post_evals::validate_smoke() {
     return 0
 }
 
+# post_evals::smoke_run <evals_json_path>
+# EXECUTES every scripted eval's cmd and negative_control and writes the
+# observed exit codes and output excerpts into the file's `smoke` objects,
+# overwriting whatever was there.
+#
+# WHY THIS EXISTS SEPARATELY FROM validate_smoke: validate_smoke checks
+# recorded exit codes, which is necessary but not sufficient, because the agent
+# writes those numbers. An agent that freezes a cmd for a script it merely
+# INTENDS to create records the code it EXPECTS ("1 — the assertion fails until
+# I build it"), never having run the command, and walks straight through a
+# checker that trusts the field. That is exactly how the real instance-1 defect
+# happened, and it is why rule 5 in SKILL.md already says a neutral script
+# computes the result and the orchestrator never hand-writes it. This applies
+# rule 5 to smoke evidence: run the commands, record what happened.
+#
+# Recording is NOT judging. This function returns 0 whenever it successfully
+# ran the commands and wrote the file, even when what it observed is damning —
+# refusing is validate_smoke's job. Keeping the two apart means the recorded
+# evidence is the same whether or not anyone later gates on it.
+#
+# Commands run through the same 10s alarm wrapper _run_formula uses, so a
+# hanging command cannot hang the freeze: 127 (not found), 142 (timeout) and
+# signal deaths fall out of the real run instead of being typed in by hand.
+post_evals::smoke_run() {
+    local path="$1"
+
+    if ! command -v jq >/dev/null 2>&1; then
+        printf 'post_evals: jq is required to record smoke evidence and was not found\n' >&2
+        return 1
+    fi
+
+    if [[ ! -f "$path" ]] || ! jq -e . "$path" >/dev/null 2>&1; then
+        printf 'post_evals: file not found or invalid JSON: %s\n' "$path" >&2
+        return 1
+    fi
+
+    local ids
+    ids=$(jq -r '[.evals[]? | select(.mode == "scripted") | .id] | .[]' "$path")
+    [[ -z "$ids" ]] && return 0
+
+    local id
+    while IFS= read -r id; do
+        [[ -z "$id" ]] && continue
+
+        local cmd nc
+        cmd=$(jq -r --arg id "$id" '.evals[] | select(.id == $id) | .cmd // ""' "$path")
+        nc=$(jq -r --arg id "$id" '.evals[] | select(.id == $id) | .negative_control // ""' "$path")
+
+        local cmd_rc cmd_out nc_rc nc_out
+        cmd_rc=""; cmd_out=""; nc_rc=""; nc_out=""
+
+        if [[ -n "$cmd" ]]; then
+            cmd_out=$(post_evals::_run_recorded "$cmd")
+            cmd_rc="${cmd_out%%:*}"
+            cmd_out="${cmd_out#*:}"
+        fi
+        if [[ -n "$nc" ]]; then
+            nc_out=$(post_evals::_run_recorded "$nc")
+            nc_rc="${nc_out%%:*}"
+            nc_out="${nc_out#*:}"
+        fi
+
+        # Write in place via a temp file — a partial write must never leave a
+        # corrupted artifact behind.
+        local tmp
+        tmp=$(mktemp) || return 1
+        if ! jq --arg id "$id" \
+               --argjson crc "${cmd_rc:-null}" --argjson nrc "${nc_rc:-null}" \
+               --arg cout "$cmd_out" --arg nout "$nc_out" '
+            (.evals[] | select(.id == $id) | .smoke) = {
+                cmd_exit: $crc,
+                negative_control_exit: $nrc,
+                cmd_output: $cout,
+                negative_control_output: $nout
+            }' "$path" > "$tmp"; then
+            rm -f "$tmp"
+            printf 'post_evals: failed to record smoke evidence for eval %s in %s\n' "$id" "$path" >&2
+            return 1
+        fi
+        if ! mv "$tmp" "$path"; then
+            rm -f "$tmp"
+            printf 'post_evals: failed to write %s\n' "$path" >&2
+            return 1
+        fi
+    done <<< "$ids"
+
+    return 0
+}
+
+# post_evals::_run_recorded <command>
+# Runs <command> under the same 10s alarm wrapper _run_formula uses and echoes
+# "<exit_code>:<output excerpt>". stdout and stderr are merged — the tell for a
+# broken instrument is usually on stderr (a module-resolution error, a
+# not-found message), so dropping it would discard the evidence a human needs.
+# The excerpt is capped so a chatty test runner cannot bloat the artifact.
+post_evals::_run_recorded() {
+    local command_text="$1" out rc
+    out=$(perl -e 'alarm shift; exec "/bin/bash", "-c", shift' 10 "$command_text" 2>&1)
+    rc=$?
+    # Trim to the last few lines and a hard character cap: the verdict and the
+    # error text both land at the end of typical command output.
+    out=$(printf '%s' "$out" | tail -c 400 | tr '\n' ' ')
+    printf '%s:%s' "$rc" "$out"
+}
+
 # post_evals::_is_environmental_rc <exit_code>
 # True when an exit code signals the command did not run to a verdict:
 # 126 permission denied, 127 command not found, 142 our timeout sentinel,
-# and >=128 signal deaths. Same taxonomy validate_discriminating applies to
-# its fixtures legs, factored out so both read from one definition.
+# and >=128 signal deaths.
+#
+# validate_discriminating applies the same taxonomy to its fixtures legs but
+# deliberately keeps its own inline checks rather than calling this: it reports
+# not-found, timeout and crash with three distinct messages naming both legs'
+# exit codes, which a shared boolean cannot express. The duplication is the
+# price of those diagnostics. If the taxonomy changes, both must change.
 post_evals::_is_environmental_rc() {
     local rc="$1"
     [[ "$rc" == "126" || "$rc" == "127" ]] && return 0
@@ -641,6 +751,9 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
         validate-discriminating)
             post_evals::validate_discriminating "${2:?validate-discriminating requires a file argument}"
             ;;
+        smoke-run)
+            post_evals::smoke_run "${2:?smoke-run requires a file argument}"
+            ;;
         compute-result)
             post_evals::compute_and_validate_result "${2:?compute-result requires a file argument}"
             ;;
@@ -653,6 +766,7 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
         *)
             printf 'Usage: post_evals.sh validate-structure <path> <pr> <sha>\n' >&2
             printf '       post_evals.sh validate-discriminating <path>\n' >&2
+            printf '       post_evals.sh smoke-run <path>\n' >&2
             printf '       post_evals.sh compute-result <path>\n' >&2
             printf '       post_evals.sh validate-embed <path> <body_path>\n' >&2
             printf '       post_evals.sh grade-loop <path>\n' >&2
