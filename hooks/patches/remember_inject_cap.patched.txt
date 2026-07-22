@@ -1,0 +1,23 @@
+if [ -n "$HAS_MEMORY" ]; then
+    echo "=== MEMORY ==="
+    # LOCAL PATCH (2026-07-17, token-burn reduction): cap each memory file's
+    # injection to REMEMBER_INJECT_MAX_BYTES (default 8000) so an unbounded
+    # today-*/now.md can't bloat every session's context. Overridable via env.
+    # NOTE: this file lives in the version-pinned plugin cache (remember/0.8.3);
+    # a plugin update overwrites it -- re-apply after any remember-plugin bump.
+    REMEMBER_INJECT_MAX_BYTES="${REMEMBER_INJECT_MAX_BYTES:-8000}"
+    for MFILE in "$IDENTITY_FILE" "$CORE_MEMORIES" "$REMEMBER_TODAY_FILE" "$REMEMBER_NOW" "$REMEMBER_RECENT" "$REMEMBER_ARCHIVE"; do
+        if [ -f "$MFILE" ] && [ -s "$MFILE" ]; then
+            BASENAME=$(basename "$MFILE")
+            echo "--- $BASENAME ---"
+            if [ "$(wc -c < "$MFILE")" -gt "$REMEMBER_INJECT_MAX_BYTES" ]; then
+                head -c "$REMEMBER_INJECT_MAX_BYTES" "$MFILE"
+                printf '\n[...truncated to %s bytes by local token-burn cap; full file at %s]\n' "$REMEMBER_INJECT_MAX_BYTES" "$MFILE"
+            else
+                cat "$MFILE"
+            fi
+            echo ""
+        fi
+    done
+    echo ""
+fi
