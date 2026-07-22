@@ -111,6 +111,21 @@ tg_with_watchdog() {
     wait "$pid"
 }
 
+# ─── Logging (Fix 4) ─────────────────────────────────────────────────────────
+
+# tg_log <message...>
+# Writes ONE line to stderr prefixed with a UTC timestamp. stderr, not stdout,
+# so it never mixes into the gated:/skip: summary lines that tg_gate_pr writes
+# to stdout for its callers/tests to assert on. The daemon's plist points
+# StandardOutPath and StandardErrorPath at the SAME file
+# (/var/log/coderails-tier-gate.log), so a stderr log line still lands in the
+# operator's log — a timestamped per-tick heartbeat there makes a FROZEN log
+# (a wedged or dead daemon) self-evidently an alarm, which an untimestamped
+# log cannot show.
+tg_log() {
+    printf '%s %s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$*" >&2
+}
+
 # ─── GitHub I/O ─────────────────────────────────────────────────────────────
 # Every call — reads and the credentialled status WRITE alike — goes through
 # curl (TIER_GATE_CURL_BIN) to the GitHub REST API, carrying the machine-user
@@ -163,23 +178,60 @@ tg_gh_get() {
         -H "Authorization: Bearer ${token}" \
         -H "Accept: ${accept}")
     rc=$?
-    [[ $rc -ne 0 ]] && return 1        # watchdog/curl transport failure
+    if [[ $rc -ne 0 ]]; then            # watchdog/curl transport failure
+        # Fix 2: name the failure on stderr (completing this function's own
+        # convention — slug/creds failures above already log). Callers pipe
+        # this into jq, so a silent empty return is indistinguishable from
+        # "zero results"; the log line is what tells a stalled/rate-limited
+        # daemon apart from a genuinely empty repo. rc=124 is the watchdog
+        # timeout (see tg_with_watchdog); anything else is a curl transport
+        # error. NEVER logs the Authorization header or token.
+        tg_log "tg_gh_get: transport failure rc=${rc} url=${url}"
+        return 1
+    fi
     local code="${resp##*$'\n'}" body="${resp%$'\n'*}"
-    [[ "$code" =~ ^2[0-9][0-9]$ ]] || return 1   # HTTP 4xx/5xx -> fail closed
+    if [[ ! "$code" =~ ^2[0-9][0-9]$ ]]; then   # HTTP 4xx/5xx -> fail closed
+        # Fix 2: log the HTTP failure with the first ~200 bytes of the response
+        # body flattened to one line — the body self-identifies the cause (a
+        # rate-limit body carries "API rate limit exceeded", a 404 carries
+        # "Not Found"). NEVER logs the token/Authorization header.
+        local body_snippet
+        body_snippet=$(printf '%s' "$body" | tr '\n' ' ' | cut -c1-200)
+        tg_log "tg_gh_get: http=${code} url=${url} body=${body_snippet}"
+        return 1
+    fi
     printf '%s' "$body"
 }
 
 # tg_open_prs
-# Echoes one PR number per line for every open PR.
+# Echoes one PR number per line for every open PR. Returns tg_gh_get's rc so a
+# caller can tell a FAILED fetch from a legitimately empty list.
+#
+# Fix 3 (capture-first): capture tg_gh_get's output and rc BEFORE jq, exactly
+# as tg_commit_statuses already does. Piping `tg_gh_get | jq` binds the pipe's
+# rc to jq, not the fetch — so a failed fetch (rc 1, empty body) would read as
+# "zero open PRs" (jq of empty -> nothing, rc 0), the GATE-CRITICAL trap this
+# file documents. tg_poll_once reads this via `prs=$(tg_open_prs); rc=$?` and
+# emits pr_fetch=FAILED on a non-zero rc rather than silently gating nothing.
 tg_open_prs() {
-    tg_gh_get "pulls?state=open&per_page=100" | jq -r '.[].number // empty' 2>/dev/null
+    local raw
+    raw=$(tg_gh_get "pulls?state=open&per_page=100") || return 1
+    printf '%s' "$raw" | jq -r '.[].number // empty' 2>/dev/null
 }
 
 # tg_pr_head_sha <pr>
-# Echoes the current head SHA for <pr>.
+# Echoes the current head SHA for <pr>. Returns tg_gh_get's rc.
+#
+# Fix 3 (capture-first): same trap as tg_open_prs — capture the fetch and its
+# rc before jq so a failed head-SHA fetch propagates rc 1 (and an empty sha)
+# rather than being swallowed by the pipe. tg_gate_pr already treats an empty
+# sha as head_sha_fetch_failed; propagating the rc keeps that path honest even
+# if the fetch returns a non-empty-but-non-2xx body.
 tg_pr_head_sha() {
     local pr="$1"
-    tg_gh_get "pulls/${pr}" | jq -r '.head.sha // empty' 2>/dev/null
+    local raw
+    raw=$(tg_gh_get "pulls/${pr}") || return 1
+    printf '%s' "$raw" | jq -r '.head.sha // empty' 2>/dev/null
 }
 
 # tg_pr_comments <pr>
@@ -451,14 +503,34 @@ tg_post_status() {
     body=$(jq -n --arg state "$state" --arg context "$TIER_GATE_CONTEXT" --arg description "$description" \
         '{state: $state, context: $context, description: $description}')
 
-    tg_with_watchdog "$TIER_GATE_WATCHDOG_TIMEOUT" -- \
+    # Fix 1: check the HTTP response of the credentialled POST. curl exits 0 on
+    # an HTTP 401/403/422 (its rc reflects TRANSPORT, not HTTP status) — so
+    # WITHOUT -w '%{http_code}' + a 2xx check, a REJECTED status post returns
+    # success and tg_gate_pr logs a FALSE state=success while GitHub has no
+    # status. The nastier lifecycle bug: a `pending` POST that lands but whose
+    # terminal POST silently fails leaves a fresh pending that tg_should_gate
+    # skips until the 720s TTL. Capture the appended http_code, reject non-2xx,
+    # and on failure log the code + url (NEVER the token) and return 1.
+    local url="https://api.github.com/repos/${repo_slug}/statuses/${sha}"
+    local resp rc
+    resp=$(tg_with_watchdog "$TIER_GATE_WATCHDOG_TIMEOUT" -- \
         "$TIER_GATE_CURL_BIN" -sS --max-time "$TIER_GATE_WATCHDOG_TIMEOUT" \
-        "https://api.github.com/repos/${repo_slug}/statuses/${sha}" \
+        -w '\n%{http_code}' \
+        "$url" \
         -H "Authorization: Bearer ${token}" \
         -H "Accept: application/vnd.github+json" \
         -H "content-type: application/json" \
-        -d "$body" \
-        >/dev/null
+        -d "$body")
+    rc=$?
+    if [[ $rc -ne 0 ]]; then
+        tg_log "tg_post_status: transport failure rc=${rc} state=${state} url=${url}"
+        return 1
+    fi
+    local code="${resp##*$'\n'}"
+    if [[ ! "$code" =~ ^2[0-9][0-9]$ ]]; then
+        tg_log "tg_post_status: POST rejected http=${code} state=${state} url=${url}"
+        return 1
+    fi
 }
 
 # ─── Status lifecycle decision ───────────────────────────────────────────────
@@ -1048,12 +1120,30 @@ tg_gate_pr() {
     local verdict; verdict=$(printf '%s' "$judge_out" | head -1 | tr -d '[:space:]')
     case "$verdict" in
         legitimate)
-            tg_post_status "$sha" "success" "verdict=legitimate tier=${tier} host=$(hostname)"
-            printf 'gated: pr=%s sha=%s tier=%s verdict=legitimate state=success\n' "$pr" "$sha" "$tier"
+            # Fix 1: a status post that GitHub rejected (non-2xx) must NOT be
+            # logged as state=success — that is a FALSE audit entry (log says
+            # posted, GitHub has nothing) and, worse, leaves the earlier
+            # `pending` as the freshest status, which tg_should_gate then skips
+            # until the 720s TTL. tg_post_status now returns non-zero on a
+            # rejected/failed post; branch on it and log status_post_failed
+            # instead so a frozen post is visible in the summary line.
+            if tg_post_status "$sha" "success" "verdict=legitimate tier=${tier} host=$(hostname)"; then
+                printf 'gated: pr=%s sha=%s tier=%s verdict=legitimate state=success\n' "$pr" "$sha" "$tier"
+            else
+                printf 'gated: pr=%s sha=%s tier=%s verdict=legitimate state=status_post_failed\n' "$pr" "$sha" "$tier"
+                return 1
+            fi
             ;;
         illegitimate|insufficient)
-            tg_post_status "$sha" "failure" "verdict=${verdict} tier=${tier} host=$(hostname)"
-            printf 'gated: pr=%s sha=%s tier=%s verdict=%s state=failure\n' "$pr" "$sha" "$tier" "$verdict"
+            # Same silent-fail risk as the success branch above: a rejected
+            # `failure` post leaves a stale pending too. Report status_post_failed
+            # rather than a state=failure the daemon never actually landed.
+            if tg_post_status "$sha" "failure" "verdict=${verdict} tier=${tier} host=$(hostname)"; then
+                printf 'gated: pr=%s sha=%s tier=%s verdict=%s state=failure\n' "$pr" "$sha" "$tier" "$verdict"
+            else
+                printf 'gated: pr=%s sha=%s tier=%s verdict=%s state=status_post_failed\n' "$pr" "$sha" "$tier" "$verdict"
+                return 1
+            fi
             ;;
         *)
             tg_post_status "$sha" "error" "verdict=error tier=${tier} host=$(hostname)"
@@ -1069,12 +1159,47 @@ tg_gate_pr() {
 # One full pass over every open PR. Never aborts on a single PR's failure —
 # logs and continues (a daemon tick must not die because one PR's gh call
 # failed transiently).
+#
+# Fix 3/4: emit ONE timestamped heartbeat line per tick. The PR list is fetched
+# capture-first (tg_open_prs returns its rc) so a FAILED fetch is distinguished
+# from a legitimately empty repo:
+#   tick: prs=N          — N open PRs seen (N may be 0: an empty repo, not a failure)
+#   tick: pr_fetch=FAILED — the PR-list fetch itself failed (transport/non-2xx)
+# Without the capture-first rc, `< <(tg_open_prs)` swallows the failure (process
+# substitution discards the producer's exit status), and a failed fetch would
+# read identically to "zero open PRs" — the daemon would silently gate nothing
+# and the log would show a normal-looking empty tick. The heartbeat makes a
+# FROZEN log (a wedged or dead daemon) self-evidently an alarm: a healthy daemon
+# writes one tick line every StartInterval seconds.
+#
+# Each tg_gate_pr summary line (its stdout) is routed to the timestamped log via
+# tg_log, so the operator's log carries a UTC timestamp on every gated:/skip:
+# line the daemon has always emitted (previously written untimestamped). The
+# summary is NOT re-echoed to stdout: the plist points StandardOutPath AND
+# StandardErrorPath at the SAME file, so a bare stdout echo alongside the tg_log
+# line would land the same content in the log TWICE (once timestamped, once
+# not). tg_poll_once has no stdout consumer — the daemon's entry point runs it
+# for effect, and no test reads its stdout — so tg_log alone is the sole log path.
 tg_poll_once() {
-    local pr
+    local prs rc
+    prs=$(tg_open_prs)
+    rc=$?
+    if [[ $rc -ne 0 ]]; then
+        tg_log "tick: pr_fetch=FAILED"
+        return 0
+    fi
+    local count=0
+    if [[ -n "$prs" ]]; then
+        count=$(printf '%s\n' "$prs" | grep -c .)
+    fi
+    tg_log "tick: prs=${count}"
+
+    local pr summary
     while IFS= read -r pr; do
         [[ -n "$pr" ]] || continue
-        tg_gate_pr "$pr"
-    done < <(tg_open_prs)
+        summary=$(tg_gate_pr "$pr")
+        [[ -n "$summary" ]] && tg_log "$summary"
+    done <<< "$prs"
 }
 
 # ─── Entry point ──────────────────────────────────────────────────────────────

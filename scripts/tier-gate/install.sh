@@ -303,9 +303,58 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     printf '%s' "$RENDERED_PLIST" | sudo tee "$TGI_PLIST_DEST" >/dev/null
     sudo chown root:wheel "$CREDS_DEST"
 
+    # Fix 6: install the newsyslog config that bounds /var/log/coderails-tier-gate.log.
+    # The Fix 4 per-tick heartbeat grows this log faster, so rotation is required.
+    # /etc/newsyslog.d is the drop-in dir newsyslog(8) reads on macOS.
+    echo "== tier-gate install: log rotation =="
+    sudo install -m 0644 "$SCRIPT_DIR/coderails-tier-gate.conf" \
+        /etc/newsyslog.d/coderails-tier-gate.conf
+    echo "installed /etc/newsyslog.d/coderails-tier-gate.conf (rotate at 1MB, keep 5 gz)"
+
     echo "== tier-gate install: launchd =="
+    # Fix 6: ghost sweep. A legacy `launchctl load` (per-user) of this plist
+    # registers a permanently EX_CONFIG entry in the console user's gui/$uid (or
+    # user/$uid) domain — a dead ghost that shadows the real system-domain job
+    # in `launchctl list` and confuses debugging. The plist's
+    # LimitLoadToSessionType=System (Fix 5) prevents NEW ghosts, but an existing
+    # one must be reaped here. Resolve the console uid and boot out any
+    # per-user registration before the system bootstrap.
+    CONSOLE_UID=$(stat -f%u /dev/console 2>/dev/null || echo "")
+    if [[ -n "$CONSOLE_UID" ]]; then
+        for dom in "gui/$CONSOLE_UID" "user/$CONSOLE_UID"; do
+            if sudo launchctl print "$dom/com.coderails.tier-gate" >/dev/null 2>&1; then
+                echo "WARNING: reaping stale per-user ghost in $dom (a legacy launchctl load left it)"
+                sudo launchctl bootout "$dom/com.coderails.tier-gate" 2>/dev/null || true
+            fi
+        done
+    else
+        echo "WARNING: could not resolve console uid (stat /dev/console) — skipping per-user ghost sweep"
+    fi
+
     sudo launchctl bootout "system/com.coderails.tier-gate" 2>/dev/null || true
     sudo launchctl bootstrap system "$TGI_PLIST_DEST"
 
+    # Fix 6: post-bootstrap assertions. The system-domain job MUST be present and
+    # NO per-user ghost may remain. Fail loudly on either violation rather than
+    # reporting a false "INSTALL COMPLETE" over a job that never registered.
+    if ! sudo launchctl print "system/com.coderails.tier-gate" >/dev/null 2>&1; then
+        echo "INSTALL FAILED — system/com.coderails.tier-gate is not registered after bootstrap." >&2
+        exit 1
+    fi
+    if [[ -n "$CONSOLE_UID" ]]; then
+        for dom in "gui/$CONSOLE_UID" "user/$CONSOLE_UID"; do
+            if sudo launchctl print "$dom/com.coderails.tier-gate" >/dev/null 2>&1; then
+                echo "INSTALL FAILED — a per-user ghost in $dom survived the sweep; the daemon is double-registered." >&2
+                exit 1
+            fi
+        done
+    fi
+
     echo "INSTALL COMPLETE — daemon: com.coderails.tier-gate"
+    # Fix 6: print the canonical health check so the next debugging agent has
+    # the right command in hand rather than rediscovering it.
+    echo
+    echo "Health check:"
+    echo "  sudo launchctl print system/com.coderails.tier-gate"
+    echo "  tail -n 50 /var/log/coderails-tier-gate.log"
 fi
