@@ -22,15 +22,25 @@ check_str() { # desc expected actual
 
 SHA="deadbeef"
 
+# Check 9 (validate_smoke) requires every pr-scope tier>=1 scripted eval to
+# carry recorded freeze-time smoke evidence. Fixtures that are EXPECTED TO
+# PASS validate_structure therefore need it; fixtures that are expected to be
+# refused by an earlier check do not (first failure wins, so they never reach
+# check 9). This is the canonical shape: cmd observed failing for a content
+# reason (the feature isn't built at freeze — see freeze-before-build), and
+# the negative control observed failing likewise.
+# Strict JSON: --argjson rejects jq's unquoted-key object syntax.
+SMOKE_OK='{"cmd_exit": 1, "negative_control_exit": 1, "cmd_output": "1 test failed", "negative_control_output": "assertion failed"}'
+
 # ─── Step 1: well-formed tier-1 fixture → validate_structure exit 0 ──────────
 FIX_OK="$TMP/ok.json"
-jq -n --arg sha "$SHA" '{
+jq -n --arg sha "$SHA" --argjson smoke "$SMOKE_OK" '{
   tier: 1,
   tier_justification: "2 work-units, no irreversible surface",
   head_sha: $sha,
   evals: [
-    {id:"e1", priority:"P0", mode:"scripted", status:"pass", cmd:"run-a", negative_control:"run-a-broken", evidence:"log line 1"},
-    {id:"e2", priority:"P0", mode:"scripted", status:"pass", cmd:"run-b", negative_control:"run-b-broken", evidence:"log line 2"}
+    {id:"e1", priority:"P0", mode:"scripted", status:"pass", cmd:"run-a", negative_control:"run-a-broken", evidence:"log line 1", smoke: $smoke},
+    {id:"e2", priority:"P0", mode:"scripted", status:"pass", cmd:"run-b", negative_control:"run-b-broken", evidence:"log line 2", smoke: $smoke}
   ]
 }' > "$FIX_OK"
 post_evals::validate_structure "$FIX_OK" 42 "$SHA"
@@ -173,12 +183,12 @@ check "validate_structure: numeric tier_justification → stderr names tier + re
 # tier 1 with a real justification string → passes check 2 (falls through to
 # later structural checks, which this fixture also satisfies, so exit 0).
 FIX_TIER1_REAL_JUST="$TMP/tier1_real_just.json"
-jq -n --arg sha "$SHA" '{
+jq -n --arg sha "$SHA" --argjson smoke "$SMOKE_OK" '{
   tier: 1,
   tier_justification: "2 work-units, no irreversible surface",
   head_sha: $sha,
   evals: [
-    {id:"e1", priority:"P0", mode:"scripted", status:"pass", cmd:"run-a", negative_control:"run-a-broken", evidence:"log"}
+    {id:"e1", priority:"P0", mode:"scripted", status:"pass", cmd:"run-a", negative_control:"run-a-broken", evidence:"log", smoke: $smoke}
   ]
 }' > "$FIX_TIER1_REAL_JUST"
 post_evals::validate_structure "$FIX_TIER1_REAL_JUST" 42 "$SHA"
@@ -263,12 +273,12 @@ check "validate_structure: echo-wrap wrapper → stderr names id" 0 $?
 
 # ─── check 4 (hardened): legitimately different control still accepted ──────
 FIX_LEGIT_DIFFERENT="$TMP/legit_different_nc.json"
-jq -n --arg sha "$SHA" '{
+jq -n --arg sha "$SHA" --argjson smoke "$SMOKE_OK" '{
   tier: 1,
   tier_justification: "2 work-units, no irreversible surface",
   head_sha: $sha,
   evals: [
-    {id:"e1", priority:"P0", mode:"scripted", status:"pass", cmd:"run-a", negative_control:"break-the-fixture-under-test", evidence:"log"}
+    {id:"e1", priority:"P0", mode:"scripted", status:"pass", cmd:"run-a", negative_control:"break-the-fixture-under-test", evidence:"log", smoke: $smoke}
   ]
 }' > "$FIX_LEGIT_DIFFERENT"
 post_evals::validate_structure "$FIX_LEGIT_DIFFERENT" 42 "$SHA"
@@ -341,13 +351,13 @@ FREEZE_IMPL=$(git -C "$FREEZE_REPO" rev-parse HEAD)
 
 # 8a: compliant — frozen at the base commit, before any implementation.
 FIX_FREEZE_OK="$FREEZE_REPO/evals_ok.json"
-jq -n --arg sha "$SHA" --arg fsha "$FREEZE_BASE" '{
+jq -n --arg sha "$SHA" --arg fsha "$FREEZE_BASE" --argjson smoke "$SMOKE_OK" '{
   tier: 1,
   tier_justification: "1 work-unit",
   frozen_sha: $fsha,
   head_sha: $sha,
   evals: [
-    {id:"e1", priority:"P0", mode:"scripted", status:"pass", cmd:"run-a", negative_control:"run-a-broken", evidence:"log"}
+    {id:"e1", priority:"P0", mode:"scripted", status:"pass", cmd:"run-a", negative_control:"run-a-broken", evidence:"log", smoke: $smoke}
   ]
 }' > "$FIX_FREEZE_OK"
 post_evals::validate_structure "$FIX_FREEZE_OK" 42 "$SHA"
@@ -375,13 +385,13 @@ check "validate_structure: late freeze → stderr names frozen_sha" 0 $?
 # enforces honesty, not the impossible. The disclosure must be explicit text,
 # not a bare boolean anyone could flip silently.
 FIX_FREEZE_DISCLOSED="$FREEZE_REPO/evals_disclosed.json"
-jq -n --arg sha "$SHA" --arg fsha "$FREEZE_IMPL" '{
+jq -n --arg sha "$SHA" --arg fsha "$FREEZE_IMPL" --argjson smoke "$SMOKE_OK" '{
   tier: 1,
   tier_justification: "1 work-unit. Disclosed process gap: this evals.json was authored after implementation, not before (violates freeze-before-build). Authored at the real timestamp, not backdated.",
   frozen_sha: $fsha,
   head_sha: $sha,
   evals: [
-    {id:"e1", priority:"P0", mode:"scripted", status:"pass", cmd:"run-a", negative_control:"run-a-broken", evidence:"log"}
+    {id:"e1", priority:"P0", mode:"scripted", status:"pass", cmd:"run-a", negative_control:"run-a-broken", evidence:"log", smoke: $smoke}
   ]
 }' > "$FIX_FREEZE_DISCLOSED"
 post_evals::validate_structure "$FIX_FREEZE_DISCLOSED" 42 "$SHA"
@@ -907,5 +917,195 @@ stderr_out=$(post_evals::validate_embed "$FIX_EMBED_SRC" "$BODY_NO_MARKER" 2>&1)
 check "validate_embed: unparseable marker line → exit 1 (fail-closed)" 1 $?
 [[ "$stderr_out" == *"marker"* ]]
 check "validate_embed: unparseable marker → stderr names the marker reason" 0 $?
+
+# ═══ validate_smoke: recorded freeze-time smoke evidence ════════════════════
+# Closes the gap where a frozen eval could name a command that never existed,
+# or pair with a negative control that passed vacuously. Both defects survived
+# the skill's prose-mandated smoke-run, because nothing recorded its result.
+#
+# The load-bearing constraint: check 8 (freeze-before-build) means `cmd` is
+# EXPECTED to fail at freeze — the feature isn't built yet. So this gate must
+# NOT require cmd to exit 0. What separates a broken cmd from a legitimately
+# not-yet-passing one is the SHAPE of the outcome, not its polarity: a
+# nonexistent script exits 127 (command/file not found), whereas a real
+# assertion failure exits 1. The negative_control is different — it is defined
+# to fail regardless of build state, so its polarity IS checkable.
+
+SMOKE_BASE='{
+  tier: 1,
+  tier_justification: "1 work-unit",
+  head_sha: $sha
+}'
+
+mk_smoke() { # <outfile> <cmd_rc> <nc_rc>  → tier-1 file with one smoke-carrying eval
+  jq -n --arg sha "$SHA" --argjson crc "$2" --argjson nrc "$3" '{
+    tier: 1,
+    tier_justification: "1 work-unit",
+    head_sha: $sha,
+    evals: [
+      {id:"e1", priority:"P0", mode:"scripted", status:"pending",
+       cmd:"run-a", negative_control:"run-a-broken", evidence:"log",
+       smoke: {cmd_exit: $crc, negative_control_exit: $nrc,
+               cmd_output: "1 test failed", negative_control_output: "assertion failed"}}
+    ]
+  }' > "$1"
+}
+
+# (S1) INSTANCE 1 — a cmd naming a script that never existed. Exit 127 is
+# command-not-found: the check never reached the artifact it claims to test.
+# This must be refused even though 127 is non-zero and a not-yet-built feature
+# also exits non-zero. Polarity cannot separate them; shape can.
+FIX_SMOKE_ENOENT="$TMP/smoke_enoent.json"
+mk_smoke "$FIX_SMOKE_ENOENT" 127 1
+stderr_out=$(post_evals::validate_smoke "$FIX_SMOKE_ENOENT" 2>&1)
+check "validate_smoke: cmd exit 127 (nonexistent script) → exit 1 [instance 1]" 1 $?
+[[ "$stderr_out" == *"e1"* && "$stderr_out" == *"not found"* ]]
+check "validate_smoke: cmd 127 → stderr names the eval and the reason" 0 $?
+
+# (S1-bis) The same file with a REAL assertion failure (exit 1) must pass.
+# This is the freeze-before-build case: feature not built, check runs fine,
+# reports a genuine failure. If this fails, the gate contradicts check 8.
+FIX_SMOKE_HONEST_FAIL="$TMP/smoke_honest_fail.json"
+mk_smoke "$FIX_SMOKE_HONEST_FAIL" 1 1
+post_evals::validate_smoke "$FIX_SMOKE_HONEST_FAIL"
+check "validate_smoke: cmd exit 1 (not yet built) → exit 0 (freeze-before-build compatible)" 0 $?
+
+# (S1-ter) A cmd that already passes at freeze is also fine — a check can
+# legitimately be green if it guards an existing property.
+FIX_SMOKE_PASSING="$TMP/smoke_passing.json"
+mk_smoke "$FIX_SMOKE_PASSING" 0 1
+post_evals::validate_smoke "$FIX_SMOKE_PASSING"
+check "validate_smoke: cmd exit 0 at freeze → exit 0 (permitted)" 0 $?
+
+# (S2) INSTANCES 2 & 3 — the negative control exited 0. Instance 2: the control
+# wrote outside git, so validate_freeze SKIPPED and returned 0, which read as
+# compliance. Instance 3: the "removed" jq was still on PATH, so the control
+# passed for the wrong reason. Both look identical to a genuine pass and both
+# are caught by requiring OBSERVED non-zero on the control.
+FIX_SMOKE_NC_ZERO="$TMP/smoke_nc_zero.json"
+mk_smoke "$FIX_SMOKE_NC_ZERO" 1 0
+stderr_out=$(post_evals::validate_smoke "$FIX_SMOKE_NC_ZERO" 2>&1)
+check "validate_smoke: negative_control exit 0 → exit 1 (vacuous) [instances 2,3]" 1 $?
+[[ "$stderr_out" == *"e1"* && "$stderr_out" == *"negative_control"* ]]
+check "validate_smoke: vacuous control → stderr names eval and negative_control" 0 $?
+
+# (S3) The trap in a naive polarity check: an env-error is ALSO non-zero. A
+# control that exits 127 because its own tooling is missing tests nothing, yet
+# satisfies a bare `!= 0` assertion. This is instance 2's vacuous-pass bug
+# relocated one level up, so the control needs BOTH non-zero AND not-env-error.
+FIX_SMOKE_NC_ENOENT="$TMP/smoke_nc_enoent.json"
+mk_smoke "$FIX_SMOKE_NC_ENOENT" 1 127
+stderr_out=$(post_evals::validate_smoke "$FIX_SMOKE_NC_ENOENT" 2>&1)
+check "validate_smoke: negative_control exit 127 → exit 1 (non-zero but vacuous)" 1 $?
+
+# (S3-bis) Timeout (142) and crash (>=128) on the control are equally
+# environmental — same taxonomy validate_discriminating already uses.
+FIX_SMOKE_NC_TIMEOUT="$TMP/smoke_nc_timeout.json"
+mk_smoke "$FIX_SMOKE_NC_TIMEOUT" 1 142
+post_evals::validate_smoke "$FIX_SMOKE_NC_TIMEOUT" 2>/dev/null
+check "validate_smoke: negative_control timeout (142) → exit 1 (environmental)" 1 $?
+
+FIX_SMOKE_CMD_CRASH="$TMP/smoke_cmd_crash.json"
+mk_smoke "$FIX_SMOKE_CMD_CRASH" 139 1
+post_evals::validate_smoke "$FIX_SMOKE_CMD_CRASH" 2>/dev/null
+check "validate_smoke: cmd crash (139 SIGSEGV) → exit 1 (environmental)" 1 $?
+
+# (S4) The teeth. A scripted eval with NO smoke object at all must be refused
+# at tier>=1 — otherwise the whole gate is opt-in and an agent skips it by
+# omission, exactly as `fixtures` is skipped today.
+FIX_SMOKE_MISSING="$TMP/smoke_missing.json"
+jq -n --arg sha "$SHA" '{
+  tier: 1,
+  tier_justification: "1 work-unit",
+  head_sha: $sha,
+  evals: [
+    {id:"e1", priority:"P0", mode:"scripted", status:"pending",
+     cmd:"run-a", negative_control:"run-a-broken", evidence:"log"}
+  ]
+}' > "$FIX_SMOKE_MISSING"
+stderr_out=$(post_evals::validate_smoke "$FIX_SMOKE_MISSING" 2>&1)
+check "validate_smoke: scripted eval with no smoke object → exit 1 (not opt-in)" 1 $?
+[[ "$stderr_out" == *"smoke"* ]]
+check "validate_smoke: missing smoke → stderr names smoke" 0 $?
+
+# (S5) A malformed smoke object (exit codes absent or non-numeric) must fail
+# closed, not fall through `// ""` into a misleading pass — the same defect
+# class validate_discriminating guards with its fixtures-type check.
+FIX_SMOKE_MALFORMED="$TMP/smoke_malformed.json"
+jq -n --arg sha "$SHA" '{
+  tier: 1,
+  tier_justification: "1 work-unit",
+  head_sha: $sha,
+  evals: [
+    {id:"e1", priority:"P0", mode:"scripted", status:"pending",
+     cmd:"run-a", negative_control:"run-a-broken", evidence:"log",
+     smoke: "ran it, looked fine"}
+  ]
+}' > "$FIX_SMOKE_MALFORMED"
+stderr_out=$(post_evals::validate_smoke "$FIX_SMOKE_MALFORMED" 2>&1)
+check "validate_smoke: smoke not an object → exit 1 (fail closed)" 1 $?
+
+FIX_SMOKE_NONNUM="$TMP/smoke_nonnum.json"
+jq -n --arg sha "$SHA" '{
+  tier: 1,
+  tier_justification: "1 work-unit",
+  head_sha: $sha,
+  evals: [
+    {id:"e1", priority:"P0", mode:"scripted", status:"pending",
+     cmd:"run-a", negative_control:"run-a-broken", evidence:"log",
+     smoke: {cmd_exit: "zero", negative_control_exit: 1}}
+  ]
+}' > "$FIX_SMOKE_NONNUM"
+stderr_out=$(post_evals::validate_smoke "$FIX_SMOKE_NONNUM" 2>&1)
+check "validate_smoke: non-numeric exit code → exit 1 (fail closed)" 1 $?
+
+# (S6) Scope limits. agent-run evals carry no cmd, so they carry no smoke —
+# requiring one would block every judgement eval.
+FIX_SMOKE_AGENTRUN="$TMP/smoke_agentrun.json"
+jq -n --arg sha "$SHA" '{
+  tier: 1,
+  tier_justification: "1 work-unit",
+  head_sha: $sha,
+  evals: [
+    {id:"e1", priority:"P0", mode:"agent-run", status:"pending",
+     assert:"the UI renders", evidence:"verifier report"}
+  ]
+}' > "$FIX_SMOKE_AGENTRUN"
+post_evals::validate_smoke "$FIX_SMOKE_AGENTRUN"
+check "validate_smoke: agent-run eval needs no smoke → exit 0" 0 $?
+
+# Tier 0 is the exemption path: no evals to smoke.
+FIX_SMOKE_TIER0="$TMP/smoke_tier0.json"
+jq -n --arg sha "$SHA" '{
+  tier: 0, tier_justification: "single work-unit, covered by existing test",
+  head_sha: $sha, evals: []
+}' > "$FIX_SMOKE_TIER0"
+post_evals::validate_smoke "$FIX_SMOKE_TIER0"
+check "validate_smoke: tier 0 exemption → exit 0" 0 $?
+
+# (S7) Same fail-open lesson PR #261 paid for: without an explicit guard, a
+# missing jq makes every read empty and a violating file looks exactly like a
+# compliant one. PATH is narrowed to an EMPTY dir, not to /usr/bin:/bin —
+# instance 3 is precisely the bug of narrowing to a path that still holds jq.
+stderr_out=$(PATH="$EMPTY_BIN"; post_evals::validate_smoke "$FIX_SMOKE_NC_ZERO" 2>&1)
+check "validate_smoke: jq unavailable → exit 1 (must not fail open)" 1 $?
+[[ "$stderr_out" == *"jq"* ]]
+check "validate_smoke: jq unavailable → stderr names jq" 0 $?
+
+# (S8) Wired into validate_structure, not merely available as a function —
+# an unwired gate is documentation. A file failing only the smoke check must
+# be refused by the top-level validator every caller actually invokes.
+stderr_out=$(post_evals::validate_structure "$FIX_SMOKE_NC_ZERO" 42 "$SHA" 2>&1)
+check "validate_structure: vacuous negative control → exit 1 (smoke gate wired in)" 1 $?
+
+# Back-compat: tier-1 files predating this gate carry no smoke object. They
+# are refused by S4 above, which is intentional — but the tier-0 and agent-run
+# paths must stay open, and every pre-existing passing fixture that carries
+# scripted evals now needs smoke. Assert the well-formed fixture still passes
+# once smoke is present, so the gate is additive and not a blanket break.
+FIX_SMOKE_FULL="$TMP/smoke_full.json"
+mk_smoke "$FIX_SMOKE_FULL" 1 1
+post_evals::validate_structure "$FIX_SMOKE_FULL" 42 "$SHA"
+check "validate_structure: well-formed file with smoke evidence → exit 0" 0 $?
 
 [[ $fails -eq 0 ]] && { echo PASS; exit 0; } || { echo "FAIL ($fails)"; exit 1; }
