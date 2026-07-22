@@ -119,6 +119,7 @@ catalog: [`docs/REFERENCE.md`](./docs/REFERENCE.md).
 | Event | Script | Mode |
 |---|---|---|
 | `SessionStart` | `inject_bootstrap.sh` | silent — injects `using-coderails` skill into every new session |
+| `SessionStart` | `remember_inject_cap_guard.sh` | silent when nothing to do — re-applies the memory-injection byte cap (`REMEMBER_INJECT_MAX_BYTES`, default 8000) to the **remember** plugin after a plugin update wipes it. **Writes into another plugin's directory** under `~/.claude/plugins/cache/.../remember/<version>/scripts/`, and leaves a timestamped `.coderails-bak-*` backup (one rolling copy). Notifies only when it patches or when it refuses |
 | `UserPromptSubmit` | `inject_context.sh` | silent — prepends `[ctx]` (cwd, branch, date); on the first prompt of a session also appends the discipline reminder |
 | `UserPromptSubmit` | `crack_on_gate.sh` | silent — stamps a per-session crack-on flag when the **raw submitted prompt** contains "crack on" (case-insensitive, word-boundary); never scans the transcript or injected context |
 | `Stop` + `SubagentStop` | `check_confidence_labels.sh` | **block** outside an active agentic loop — response ≥200 chars with no `(verified)`/`(inferred)`/`(guess)` label; inside an active, incomplete loop, `Stop`-event violations demote to a model-visible warn (`additionalContext`) instead — `SubagentStop`/worker output still blocks; on `SubagentStop` reads `last_assistant_message` directly |
