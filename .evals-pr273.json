@@ -56,7 +56,13 @@
       "evidence": null
     }
   ],
-  "amendments": [],
+  "amendments": [
+    {
+      "eval": "E2",
+      "when": "2026-07-22T23:10:00Z",
+      "why": "Oracle went stale, assertion did not. E2 was frozen at 51154b3, when the surviving rules still read 'row 2/3/4 of 4'. PR review then found a real defect that freeze: deleting row 1 left the survivors declaring a denominator of 4 while only 3 rules remained, so the skill counted a rule that no longer existed. The fix (commit e44b55a) renumbered them to rows 1/2/3 of 3, which correctly broke E2's literal grep for 'row N of 4' — verified live by the fixing worker, exit 1 against HEAD. E2's underlying claim (surviving rules carry coherent numbering) was always the point and is unchanged; only the pattern encoding it was rewritten, and strengthened to also assert the absence of any stale 'of 4' denominator or incoherent 'row 4 of 3' label. The negative control now runs against 51154b3 itself, so it fires on exactly the defect review caught. No grader verdict existed at amendment time, so no re-grade is owed under rule 5."
+    }
+  ],
   "result": null,
   "graded_at": null,
   "head_sha": "51154b33c9f0f7222734cf59c6f541da0f082703"
