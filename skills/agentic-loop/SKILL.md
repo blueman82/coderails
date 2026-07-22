@@ -70,7 +70,7 @@ It surfaces ambiguities, fills gaps with grounded assumptions, and produces a re
 
 Step 2 has two paths. Which one applies is decided by the authorising prompt's envelope class (the same classification Phase 0 makes): "crack on", "human is dead", "ship N PRs without asking", "no human gates", or equivalent means full-autonomous.
 
-**Full-autonomous envelope → auto-adopt, do not ask.** An `AskUserQuestion` here is a human gate, and a full-autonomous envelope has already withdrawn consent for gates. Do not resolve that contradiction by skipping Phase -1 — the improve-prompt output is worth more in autonomous operation, not less, because there is no human downstream to catch a vague envelope. Instead: run Step 1, emit the improved prompt, and auto-adopt outcome **A** without asking. Concretely:
+**Full-autonomous envelope → auto-adopt, do not ask.** An `AskUserQuestion` here is a human gate, and a full-autonomous envelope has already withdrawn consent for gates. Do not resolve that contradiction by skipping Phase -1 — the improve-prompt output is worth more in autonomous operation, not less, because there is no human downstream to catch a vague envelope. Instead: run Step 1, auto-adopt outcome **A** without asking, and emit the improved prompt so it stays on the record. Concretely:
 
 **Do the writes first, then emit the prompt last — the order matters.** Delivery mechanism (a) below means *ending the turn* with the improved prompt as final text and no trailing tool call. Any `progress.json` write issued after that text is a trailing tool call, which by the Delivery constraint below makes the prompt invisible. Emitting first and writing second therefore defeats the visibility this path exists to preserve. So:
 
