@@ -62,6 +62,7 @@ manifest_paths=(
   hooks/scripts/loop_state_guard.sh
   hooks/scripts/no_edit_on_main.sh
   hooks/scripts/offload_push_guard.sh
+  hooks/scripts/remember_inject_cap_guard.sh
   hooks/scripts/test_gate.sh
   hooks/scripts/unregistered_loop_guard.sh
   hooks/scripts/voice_announce.sh
@@ -79,6 +80,7 @@ manifest_modes=(
   100644
   100644
   100644
+  100755
   100755
   100755
   100755

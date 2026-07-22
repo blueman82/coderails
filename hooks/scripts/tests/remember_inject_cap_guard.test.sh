@@ -27,11 +27,23 @@ check() { # desc expected actual
 # hook the block depends on: it defines the six MFILE variables and HAS_MEMORY,
 # so the fixture can actually be EXECUTED to observe injection behaviour --
 # the real hook can't be run here because it sources resolve-paths.sh et al.
+#
+# The scaffolding deliberately carries SEVERAL standalone `if ... fi` blocks, so
+# every fixture has MULTIPLE column-0 bare `fi` lines -- the same structural
+# property the real session-start-hook.sh has (8 of them). The MEMORY block's
+# own last line is a bare `fi`, so a shape gate that counts marker LINES rather
+# than matching the block as a contiguous SEQUENCE would see many "matches" and
+# refuse to patch the very file this hook exists to patch. Without these extra
+# blocks the fixtures hide that defect class entirely, and the regression is
+# only observable on a machine that happens to have the live plugin installed.
 make_fixture() { # dest block_file mem_dir
   local dest="$1" block="$2" mem="$3"
   {
     printf '%s\n' '#!/bin/bash'
     printf '%s\n' '# fixture stand-in for remember/scripts/session-start-hook.sh'
+    printf '%s\n' 'if true; then'
+    printf '%s\n' '    :'
+    printf '%s\n' 'fi'
     printf 'IDENTITY_FILE="%s/identity.md"\n' "$mem"
     printf 'CORE_MEMORIES="%s/core-memories.md"\n' "$mem"
     printf 'REMEMBER_TODAY_FILE="%s/today.md"\n' "$mem"
@@ -39,7 +51,14 @@ make_fixture() { # dest block_file mem_dir
     printf 'REMEMBER_RECENT="%s/recent.md"\n' "$mem"
     printf 'REMEMBER_ARCHIVE="%s/archive.md"\n' "$mem"
     printf '%s\n' 'HAS_MEMORY="true"'
+    # shellcheck disable=SC2016  # emitted into the fixture verbatim, not expanded here
+    printf '%s\n' 'if [ -n "$HAS_MEMORY" ]; then'
+    printf '%s\n' '    :'
+    printf '%s\n' 'fi'
     cat "$block"
+    printf '%s\n' 'if true; then'
+    printf '%s\n' '    :'
+    printf '%s\n' 'fi'
     printf '%s\n' 'echo "=== TRAILER ==="'
   } > "$dest"
   chmod +x "$dest"
@@ -64,6 +83,13 @@ memdir="$TMP/mem-b"; mkdir -p "$memdir"
 fx="$TMP/hook-b.sh"
 make_fixture "$fx" "$VENDOR" "$memdir"
 check "cap absent (precondition): sentinel not in fixture" "0" "$(grep -c REMEMBER_INJECT_MAX_BYTES "$fx" | tr -d ' ')"
+# The shape gate must match the vendor block as a contiguous SEQUENCE, not by
+# counting its marker lines. This fixture carries several column-0 bare `fi`
+# lines (as the real hook does), so a counting implementation sees >1 and
+# refuses. Assert the property here so the regression is caught hermetically,
+# on any machine, with no dependency on the live plugin cache.
+check "cap absent (precondition): fixture has MULTIPLE bare 'fi' lines" "true" \
+  "$([ "$(grep -cFx 'fi' "$fx" | tr -d ' ')" -ge 3 ] && echo true || echo false)"
 out=$(REMEMBER_HOOK_FILE="$fx" REMEMBER_PLUGIN_VERSION="9.9.9" bash "$GUARD" 2>&1)
 rc=$?
 check "cap absent: exit 0" "0" "$rc"
@@ -108,6 +134,58 @@ check "idempotent: second run silent" "" "$out2"
 check "idempotent: second run exit 0" "0" "$rc"
 check "idempotent: sentinel default-assignment line appears exactly once" "1" \
   "$(grep -c 'REMEMBER_INJECT_MAX_BYTES:-8000' "$fx" | tr -d ' ')"
+
+# --- Test (b2): the success notice must report the cap that will actually be
+# in force. The patched block reads ${REMEMBER_INJECT_MAX_BYTES:-8000}, so a
+# notice hardcoding 8000 states a number that is not the operative cap whenever
+# the environment overrides it. ---
+memdir="$TMP/mem-b2"; mkdir -p "$memdir"
+fx="$TMP/hook-b2.sh"
+make_fixture "$fx" "$VENDOR" "$memdir"
+out=$(REMEMBER_HOOK_FILE="$fx" REMEMBER_INJECT_MAX_BYTES=1234 bash "$GUARD" 2>&1)
+check "notice reports the EFFECTIVE cap under an override" "true" \
+  "$(printf '%s' "$out" | jq -r '.systemMessage // ""' | grep -q 'capped at 1234 bytes' && echo true || echo false)"
+check "notice does NOT report the hardcoded default under an override" "false" \
+  "$(printf '%s' "$out" | jq -r '.systemMessage // ""' | grep -q 'capped at 8000 bytes' && echo true || echo false)"
+
+# --- Test (b3): only ONE backup survives. Every run that reaches the backup
+# step used to leave a fresh timestamped copy behind forever, so a plugin that
+# keeps getting re-installed litters the cache with byte-identical copies.
+# The backup name is second-resolution, so repeated runs inside one second
+# collide on a single name and would pass this vacuously -- plant backups under
+# EARLIER timestamps instead, which is exactly what previous sessions leave. ---
+memdir="$TMP/mem-bak"; mkdir -p "$memdir"
+fx="$TMP/hook-bak.sh"
+make_fixture "$fx" "$VENDOR" "$memdir"
+for stamp in 20260101000000 20260102000000; do
+  cp "$fx" "$fx.coderails-bak-$stamp"
+done
+check "backup hygiene (precondition): stale backups are present" "2" \
+  "$(find "$TMP" -name 'hook-bak.sh.coderails-bak*' | wc -l | tr -d ' ')"
+REMEMBER_HOOK_FILE="$fx" bash "$GUARD" >/dev/null 2>&1
+check "backup hygiene: exactly one backup survives (stale ones reaped)" "1" \
+  "$(find "$TMP" -name 'hook-bak.sh.coderails-bak*' | wc -l | tr -d ' ')"
+check "backup hygiene: the survivor is the one this run wrote" "0" \
+  "$(grep -c REMEMBER_INJECT_MAX_BYTES "$(find "$TMP" -name 'hook-bak.sh.coderails-bak*' | head -1)" | tr -d ' ')"
+
+# --- Test (c-comment): the token present ONLY as a comment must NOT count as
+# "already capped". A bare substring grep for REMEMBER_INJECT_MAX_BYTES is
+# satisfied by a changelog line or the residue of a half-applied edit, so the
+# guard would exit silently while the truncation code is absent -- swallowing
+# the exact condition it exists to detect. Detection must key on evidence of
+# the PATCH ITSELF, not on the token appearing anywhere in the file. ---
+memdir="$TMP/mem-cc"; mkdir -p "$memdir"
+fx="$TMP/hook-cc.sh"
+make_fixture "$fx" "$VENDOR" "$memdir"
+printf '%s\n' '# REMEMBER_INJECT_MAX_BYTES was here once' >> "$fx"
+out=$(REMEMBER_HOOK_FILE="$fx" REMEMBER_PLUGIN_VERSION="9.9.9" bash "$GUARD" 2>&1)
+rc=$?
+check "token-as-comment only: exit 0" "0" "$rc"
+# shellcheck disable=SC2016  # the literal $REMEMBER_INJECT_MAX_BYTES is the point
+check "token-as-comment only: guard still applied the truncation line" "true" \
+  "$(grep -q 'head -c "\$REMEMBER_INJECT_MAX_BYTES"' "$fx" && echo true || echo false)"
+check "token-as-comment only: notice emitted (not a silent no-op)" "true" \
+  "$(printf '%s' "$out" | jq -r '.systemMessage // ""' | grep -q '9\.9\.9' && echo true || echo false)"
 
 # --- Test (d): unrecognised shape (anchor block not found) -> file NOT
 # modified, warning emitted, exit 0. Simulates a future vendor rewrite of the
@@ -224,6 +302,33 @@ check "version resolution: patched the installPath-resolved 1.2.3 file" "true" \
 check "version resolution: notice names version 1.2.3 from the manifest" "true" \
   "$(printf '%s' "$out" | jq -r '.systemMessage // ""' | grep -q '1\.2\.3' && echo true || echo false)"
 
+# --- Test (g-scope): MULTI-SCOPE manifest. Several install records can be on
+# disk at once (a stale project-scoped copy alongside the user-scoped one that
+# Claude Code actually runs). Taking the first record whose installPath exists
+# patches whichever the manifest happens to list first, so the user is told the
+# cap was re-applied while the running install stays uncapped. The user-scoped
+# record must win regardless of ordering. ---
+pdir="$TMP/plugins-scope"
+memdir="$TMP/mem-scope"; mkdir -p "$memdir"
+proj="$pdir/cache/claude-plugins-official/remember/0.1.0"
+usr="$pdir/cache/claude-plugins-official/remember/2.0.0"
+mkdir -p "$proj/scripts" "$usr/scripts"
+make_fixture "$proj/scripts/session-start-hook.sh" "$VENDOR" "$memdir"
+make_fixture "$usr/scripts/session-start-hook.sh" "$VENDOR" "$memdir"
+mkdir -p "$pdir"
+jq -n --arg proj "$proj" --arg usr "$usr" \
+  '{version:2,plugins:{"remember@claude-plugins-official":[
+     {scope:"project",installPath:$proj,version:"0.1.0"},
+     {scope:"user",installPath:$usr,version:"2.0.0"}]}}' \
+  > "$pdir/installed_plugins.json"
+out=$(CLAUDE_PLUGINS_DIR="$pdir" bash "$GUARD" 2>&1)
+check "multi-scope: the USER-scoped 2.0.0 install was patched" "true" \
+  "$(grep -q REMEMBER_INJECT_MAX_BYTES "$usr/scripts/session-start-hook.sh" && echo true || echo false)"
+check "multi-scope: the project-scoped 0.1.0 install was left alone" "false" \
+  "$(grep -q REMEMBER_INJECT_MAX_BYTES "$proj/scripts/session-start-hook.sh" && echo true || echo false)"
+check "multi-scope: notice names 2.0.0, not the first-listed 0.1.0" "true" \
+  "$(printf '%s' "$out" | jq -r '.systemMessage // ""' | grep -q '2\.0\.0' && echo true || echo false)"
+
 # --- Test (g2): manifest absent -> glob fallback picks the HIGHEST version
 # directory present, and says so. Two versions installed side by side (the
 # shape a plugin bump leaves behind); only the higher may be patched.
@@ -274,8 +379,36 @@ check "mode preservation (precondition): the patch was actually applied" "true" 
 # this hook exists to patch. Reconstruct a pristine vendor file by reverse-
 # applying the patch to a COPY of the live cache file (the real file is only
 # ever READ, never written), then assert the guard patches it.
+#
+# The against-the-live-cache half below is a BONUS: it needs the plugin
+# installed AND the deployed copy to still carry the current patched block. A
+# change to the patch text's own comment (which the guard does not re-apply,
+# since detection keys on the truncation call, not the comment) legitimately
+# makes the deployed copy stale, so the byte-exact round trip is gated on
+# freshness rather than asserted unconditionally. The hermetic coverage that
+# this test exists for -- a many-`fi` file must still patch -- lives in
+# make_fixture and runs on every machine, live cache or not.
 LIVE="$HOME/.claude/plugins/cache/claude-plugins-official/remember/0.8.3/scripts/session-start-hook.sh"
-if [ -r "$LIVE" ]; then
+live_is_current=false
+if [ -r "$LIVE" ] && grep -qF "$(head -1 "$PATCHED")" "$LIVE" 2>/dev/null; then
+  # Deployed copy carries the CURRENT patched block verbatim?
+  if awk '
+    FNR==1 { fidx++ }
+    fidx==1 { pat[++np]=$0; next }
+    { line[++nl]=$0 }
+    END {
+      for (i=1; i<=nl-np+1; i++) {
+        ok=1
+        for (j=1; j<=np; j++) if (line[i+j-1] != pat[j]) { ok=0; break }
+        if (ok) exit 0
+      }
+      exit 1
+    }
+  ' "$PATCHED" "$LIVE" 2>/dev/null; then
+    live_is_current=true
+  fi
+fi
+if [ "$live_is_current" = true ]; then
   fx="$TMP/hook-real.sh"
   # Reverse the patch: swap the patched block back to the vendor block.
   awk '
@@ -310,8 +443,39 @@ if [ -r "$LIVE" ]; then
   check "realistic fixture: round trip reproduces the live file byte-for-byte" \
     "$(shasum "$LIVE" | awk '{print $1}')" "$(shasum "$fx" | awk '{print $1}')"
 else
-  printf 'skip - realistic-shape fixture (remember plugin not installed here)\n'
+  printf 'skip - live-cache round trip (plugin absent, or deployed copy predates the current patch text)\n'
 fi
+
+# --- Test (j2): HERMETIC lossless inverse. The reverse-apply above depends on
+# the live cache; this does not. Build a PATCHED fixture, reverse the patch to
+# get the vendor shape back, run the guard over it, and assert the result is
+# byte-identical to the original. Proves vendor.txt and patched.txt are exact
+# inverses of one another on any machine. ---
+memdir="$TMP/mem-j2"; mkdir -p "$memdir"
+orig="$TMP/hook-j2-orig.sh"
+fx="$TMP/hook-j2.sh"
+make_fixture "$orig" "$PATCHED" "$memdir"
+awk '
+  FNR==1 { fidx++ }
+  fidx==1 { pat[++np]=$0; next }
+  fidx==2 { rep[++nr]=$0; next }
+  { line[++nl]=$0 }
+  END {
+    i=1
+    while (i <= nl) {
+      ok=(i+np-1 <= nl)
+      if (ok) for (j=1; j<=np; j++) if (line[i+j-1] != pat[j]) { ok=0; break }
+      if (ok) { for (j=1; j<=nr; j++) print rep[j]; i += np }
+      else { print line[i]; i++ }
+    }
+  }
+' "$PATCHED" "$VENDOR" "$orig" > "$fx"
+chmod +x "$fx"
+check "lossless inverse (precondition): reverse-apply produced an UNPATCHED file" "0" \
+  "$(grep -c REMEMBER_INJECT_MAX_BYTES "$fx" | tr -d ' ')"
+REMEMBER_HOOK_FILE="$fx" bash "$GUARD" >/dev/null 2>&1
+check "lossless inverse: re-patching reproduces the original byte-for-byte" \
+  "$(shasum "$orig" | awk '{print $1}')" "$(shasum "$fx" | awk '{print $1}')"
 
 # --- Test (i): canonical patch text missing from the repo -> the guard must
 # not half-write anything, and must not crash. ---
@@ -324,6 +488,35 @@ rc=$?
 after=$(shasum "$fx" | awk '{print $1}')
 check "patch text missing: exit 0" "0" "$rc"
 check "patch text missing: target NOT modified" "$before" "$after"
+
+# --- Test (i3): the POST-WRITE sanity gate. Before the rewrite replaces the
+# target, the guard must verify the rewrite actually contains the cap. Point
+# REMEMBER_PATCH_DIR at a patch dir whose replacement block is well-formed but
+# carries NO cap: the block match succeeds and the rewrite runs, so only the
+# post-write check can stop it. The target must be left byte-identical and the
+# guard must warn. Without this case the sanity gate can be deleted outright
+# and every other test still passes. ---
+baddir="$TMP/patches-nosentinel"; mkdir -p "$baddir"
+cp "$VENDOR" "$baddir/remember_inject_cap.vendor.txt"
+# A replacement that is valid shell and swaps in cleanly, but omits the cap.
+sed 's/=== MEMORY ===/=== MEMORY (no cap) ===/' "$VENDOR" \
+  > "$baddir/remember_inject_cap.patched.txt"
+check "sanity gate (precondition): replacement block carries no sentinel" "0" \
+  "$(grep -c REMEMBER_INJECT_MAX_BYTES "$baddir/remember_inject_cap.patched.txt" | tr -d ' ')"
+memdir="$TMP/mem-i3"; mkdir -p "$memdir"
+fx="$TMP/hook-i3.sh"
+make_fixture "$fx" "$VENDOR" "$memdir"
+before=$(shasum "$fx" | awk '{print $1}')
+out=$(REMEMBER_HOOK_FILE="$fx" REMEMBER_PATCH_DIR="$baddir" \
+  REMEMBER_PLUGIN_VERSION="9.9.9" bash "$GUARD" 2>&1)
+rc=$?
+after=$(shasum "$fx" | awk '{print $1}')
+check "sanity gate: exit 0" "0" "$rc"
+check "sanity gate: target left byte-identical (unverified rewrite refused)" "$before" "$after"
+check "sanity gate: warning emitted" "true" \
+  "$(printf '%s' "$out" | jq -r '.systemMessage // ""' | grep -qi 'did not verify' && echo true || echo false)"
+check "sanity gate: no temp file left behind" "0" \
+  "$(find "$TMP" -name 'hook-i3.sh.coderails-tmp*' | wc -l | tr -d ' ')"
 
 # shellcheck disable=SC2015  # matches the house idiom in loop_cost.test.sh
 [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails failures)"; exit 1; }

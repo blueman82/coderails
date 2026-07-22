@@ -17,10 +17,14 @@
 #   .installPath is authoritative, so a bump is followed automatically. If that
 #   manifest (or jq) is unavailable, we fall back to globbing the version
 #   directories under cache/*/remember/ and taking the HIGHEST by `sort -V`.
-#   The fallback is a heuristic: if two versions are installed side by side and
-#   Claude Code is running the lower one, we would patch the wrong tree. That
-#   is acceptable — patching an inactive copy is inert, and the manifest path
-#   is the normal case.
+#
+#   NEITHER path can prove which install Claude Code is actually running.
+#   The manifest lists one record per SCOPE, so a project-scoped install and a
+#   user-scoped one can both be on disk at different versions; we prefer scope
+#   "user" and otherwise the highest version, which is a heuristic too. The
+#   glob fallback has no scope information at all. If we guess wrong we patch
+#   an inactive copy — inert, but the notice then names a version the running
+#   session is not using, so treat the reported version as best-effort.
 #
 # HOW THE PATCH IS APPLIED
 #   Whole-block literal search/replace, not a context diff: hooks/patches/
@@ -53,6 +57,10 @@ VENDOR_BLOCK="${PATCH_DIR}/remember_inject_cap.vendor.txt"
 PATCHED_BLOCK="${PATCH_DIR}/remember_inject_cap.patched.txt"
 PLUGINS_DIR="${CLAUDE_PLUGINS_DIR:-"$HOME/.claude/plugins"}"
 SENTINEL="REMEMBER_INJECT_MAX_BYTES"
+# The single line that only exists when the patch is genuinely applied — the
+# truncation call itself. Used as the detection key, not the bare token.
+# shellcheck disable=SC2016  # the literal $REMEMBER_INJECT_MAX_BYTES is the point
+CAP_EVIDENCE='head -c "$REMEMBER_INJECT_MAX_BYTES"'
 
 # Emit a notice on BOTH channels in ONE JSON document (two concatenated
 # top-level objects would not parse as a single document — see the same note
@@ -82,19 +90,30 @@ resolve_install() {
   local manifest="$PLUGINS_DIR/installed_plugins.json" entry=""
   if [ -r "$manifest" ] && command -v jq >/dev/null 2>&1; then
     # The manifest keys plugins as "<name>@<marketplace>" and each value is an
-    # array of install records (one per scope). Take the first record whose
-    # installPath actually exists on disk.
-    entry=$(jq -r '
+    # array of install records (one per scope). Taking the FIRST record whose
+    # installPath exists is wrong when several scopes are registered: a stale
+    # project-scoped 0.1.0 listed ahead of the user-scoped 2.0.0 would be
+    # patched while the version Claude Code actually runs stays uncapped, and
+    # the notice would name the wrong version. Prefer scope "user" (the normal
+    # install), then fall back to the HIGHEST version among the rest by
+    # `sort -V`, the same version-aware ordering the glob fallback uses.
+    local records
+    records=$(jq -r '
       .plugins // {}
       | to_entries[]
       | select(.key | startswith("remember@"))
       | .value[]?
       | select(.installPath != null)
-      | "\(.version // "unknown")|\(.installPath)"
-    ' "$manifest" 2>/dev/null | while IFS='|' read -r v p; do
-        [ -d "$p" ] && { printf '%s|%s\n' "$v" "$p"; break; }
+      | "\(.scope // "unknown")|\(.version // "unknown")|\(.installPath)"
+    ' "$manifest" 2>/dev/null | while IFS='|' read -r s v p; do
+        [ -d "$p" ] && printf '%s|%s|%s\n' "$s" "$v" "$p"
       done)
-    [ -n "$entry" ] && { printf '%s\n' "$entry"; return 0; }
+    if [ -n "$records" ]; then
+      entry=$(printf '%s\n' "$records" | grep '^user|' | head -1)
+      # No user-scoped record: take the highest version present.
+      [ -n "$entry" ] || entry=$(printf '%s\n' "$records" | sort -t'|' -k2,2V | tail -1)
+    fi
+    [ -n "$entry" ] && { printf '%s\n' "${entry#*|}"; return 0; }
   fi
 
   # Fallback: glob the version directories and take the highest by `sort -V`
@@ -135,7 +154,13 @@ if [ ! -f "$TARGET" ] || [ ! -r "$TARGET" ]; then
 fi
 
 # ── Already capped? Then we are done — silently, on every normal session ────
-if grep -q "$SENTINEL" "$TARGET" 2>/dev/null; then
+# Key on EVIDENCE OF THE PATCH, not on the token. A bare substring search for
+# REMEMBER_INJECT_MAX_BYTES is satisfied by any mention at all — a comment, a
+# changelog line, the residue of a half-applied edit — so the guard would
+# conclude "capped" and exit silently while the truncation code is absent,
+# swallowing the exact condition it exists to detect. The truncation call is
+# the one line that cannot be present unless the patch actually applied.
+if grep -qF "$CAP_EVIDENCE" "$TARGET" 2>/dev/null; then
   exit 0
 fi
 
@@ -172,11 +197,26 @@ if [ "${n_block:-0}" != "1" ]; then
 fi
 
 # ── Back up, then apply atomically ─────────────────────────────────────────
+# Keep ONE rolling backup, not one per run. Every run that gets past this point
+# and then bails (unwritable temp file, failed rewrite, failed swap) used to
+# leave a backup behind forever, so a repeatedly-failing guard would litter the
+# plugin cache with a new copy every session. Only the most recent pre-patch
+# copy has any recovery value — the older ones are byte-identical to it, since
+# nothing in between ever wrote the target. The name stays timestamped because
+# the notices quote the path and a fixed name would hide which run made it.
 BACKUP="${TARGET}.coderails-bak-$(date +%Y%m%d%H%M%S)"
 if ! cp -p "$TARGET" "$BACKUP" 2>/dev/null; then
+  # A failed cp can still have created a truncated partial (e.g. under a
+  # filesystem-size limit). Remove it, matching the rm -f the awk/mv failure
+  # branches already do for their own temp file.
+  rm -f "$BACKUP"
   notify "coderails: the memory-injection byte cap is MISSING from the remember plugin (version ${VERSION}), but a backup of ${TARGET} could not be written, so nothing was changed. Re-apply the cap by hand."
   exit 0
 fi
+# Reap every earlier backup now that the new one is safely written.
+for old in "${TARGET}".coderails-bak-*; do
+  [ -f "$old" ] && [ "$old" != "$BACKUP" ] && rm -f "$old"
+done
 
 TMP_OUT="${TARGET}.coderails-tmp.$$"
 # Three input files in order: search block, replace block, target. FNR==1
@@ -208,9 +248,9 @@ if ! awk '
 fi
 
 # Sanity-gate the rewrite before it replaces anything: it must be non-empty and
-# must actually contain the sentinel. A silently-empty awk output overwriting
-# the plugin's hook would be far worse than the missing cap.
-if [ ! -s "$TMP_OUT" ] || ! grep -q "$SENTINEL" "$TMP_OUT" 2>/dev/null; then
+# must actually carry the truncation call. A silently-empty awk output
+# overwriting the plugin's hook would be far worse than the missing cap.
+if [ ! -s "$TMP_OUT" ] || ! grep -qF "$CAP_EVIDENCE" "$TMP_OUT" 2>/dev/null; then
   rm -f "$TMP_OUT"
   notify "coderails: the re-applied memory-injection byte cap did not verify, so ${TARGET} was left unchanged (backup at ${BACKUP}). Re-apply by hand."
   exit 0
@@ -232,5 +272,9 @@ if ! mv -f "$TMP_OUT" "$TARGET" 2>/dev/null; then
   exit 0
 fi
 
-notify "coderails: re-applied the memory-injection byte cap to the remember plugin (version ${VERSION}). The plugin was updated, which installed a fresh unpatched copy of session-start-hook.sh and wiped the hand-applied cap. Memory files are capped at 8000 bytes each again (override with ${SENTINEL}). Original saved to ${BACKUP}."
+# Report the cap that will actually be in force, not the patch's default: the
+# patched block reads ${REMEMBER_INJECT_MAX_BYTES:-8000}, so an override in the
+# environment makes a hardcoded "8000" a false statement.
+EFFECTIVE_CAP="${REMEMBER_INJECT_MAX_BYTES:-8000}"
+notify "coderails: re-applied the memory-injection byte cap to the remember plugin (version ${VERSION}). The plugin was updated, which installed a fresh unpatched copy of session-start-hook.sh and wiped the hand-applied cap. Memory files are capped at ${EFFECTIVE_CAP} bytes each again (override with ${SENTINEL}). Original saved to ${BACKUP}."
 exit 0

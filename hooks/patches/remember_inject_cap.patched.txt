@@ -3,8 +3,11 @@ if [ -n "$HAS_MEMORY" ]; then
     # LOCAL PATCH (2026-07-17, token-burn reduction): cap each memory file's
     # injection to REMEMBER_INJECT_MAX_BYTES (default 8000) so an unbounded
     # today-*/now.md can't bloat every session's context. Overridable via env.
-    # NOTE: this file lives in the version-pinned plugin cache (remember/0.8.3);
-    # a plugin update overwrites it -- re-apply after any remember-plugin bump.
+    # NOTE: this file lives in the version-pinned plugin cache, so a plugin
+    # update installs a fresh copy and wipes this patch. coderails re-applies it
+    # automatically at session start (hooks/scripts/remember_inject_cap_guard.sh;
+    # canonical text in hooks/patches/). Hand re-application is only needed if
+    # that guard warns it could not recognise this file's shape.
     REMEMBER_INJECT_MAX_BYTES="${REMEMBER_INJECT_MAX_BYTES:-8000}"
     for MFILE in "$IDENTITY_FILE" "$CORE_MEMORIES" "$REMEMBER_TODAY_FILE" "$REMEMBER_NOW" "$REMEMBER_RECENT" "$REMEMBER_ARCHIVE"; do
         if [ -f "$MFILE" ] && [ -s "$MFILE" ]; then
