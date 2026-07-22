@@ -180,11 +180,27 @@ describe("collectHealth", () => {
     expect(usageWeek?.value).toBe("1.5M tok");
   });
 
-  it("reports lintFindings as permanently unavailable (no persisted wiki-lint report file)", async () => {
-    const tiles = await collectHealth({ disciplineLogPath: join(tmpdir(), "does-not-exist.log") });
+  it("reports lintFindings as unavailable when no wiki vault path is configured, not permanently unavailable", async () => {
+    const tiles = await collectHealth({
+      disciplineLogPath: join(tmpdir(), "does-not-exist.log"),
+      wikiPaths: [join(tmpdir(), "does-not-exist-wiki-vault")],
+    });
     const tile = tiles.find((t) => t.key === "lintFindings");
     expect(tile?.value).toBeNull();
     expect(tile?.note).toMatch(/^unavailable: /);
+  });
+
+  it("reports a real lintFindings value when pointed at a vault with a lint log", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "dashboard-health-wiki-test-"));
+    tmpDirs.push(dir);
+    writeFileSync(join(dir, "log.md"), "## [2026-07-22] lint | clean, no defects found\n");
+    const tiles = await collectHealth({
+      disciplineLogPath: join(tmpdir(), "does-not-exist.log"),
+      wikiPaths: [dir],
+      now: new Date("2026-07-24T00:00:00Z"),
+    });
+    const tile = tiles.find((t) => t.key === "lintFindings");
+    expect(tile?.value).not.toBeNull();
   });
 
   it("reports hooksFired as unavailable with a reason when the discipline log is unreadable", async () => {
