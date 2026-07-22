@@ -66,7 +66,24 @@ If a `progress.json` already exists at the path from an earlier loop in this ses
 
 It surfaces ambiguities, fills gaps with grounded assumptions, and produces a rewritten prompt that passes its 7-foundation diagnosis. Let it run to completion before Step 2.
 
-**Step 2 — Ask the user how to proceed.**
+**Step 2 — Adopt the improved prompt. Ask only outside a full-autonomous envelope.**
+
+Step 2 has two paths. Which one applies is decided by the authorising prompt's envelope class (the same classification Phase 0 makes): "crack on", "human is dead", "ship N PRs without asking", "no human gates", or equivalent means full-autonomous.
+
+**Full-autonomous envelope → auto-adopt, do not ask.** An `AskUserQuestion` here is a human gate, and a full-autonomous envelope has already withdrawn consent for gates. Do not resolve that contradiction by skipping Phase -1 — the improve-prompt output is worth more in autonomous operation, not less, because there is no human downstream to catch a vague envelope. Instead: run Step 1, auto-adopt outcome **A** without asking, and emit the improved prompt so it stays on the record. Concretely:
+
+**Do the writes first, then emit the prompt last — the order matters.** Delivery mechanism (a) below means *ending the turn* with the improved prompt as final text and no trailing tool call. Any `progress.json` write issued after that text is a trailing tool call, which by the Delivery constraint below makes the prompt invisible. Emitting first and writing second therefore defeats the visibility this path exists to preserve. So:
+
+1. Write the improved prompt to `progress.json.authorising_prompt_raw` as the canonical envelope.
+2. Append `{phase: "-1", decision: "auto-adopted improved prompt as envelope; flip-condition: user names a divergence between the improved and original prompt"}` to `progress.json`'s `decisions_absorbed` array.
+3. Emit the improved prompt as the turn's final text (delivery mechanism (a) below), with no tool call after it, so it stays visible. Auto-adoption must not make it invisible — the user has waived the gate, not the record.
+4. Begin Phase 0 on the next turn, and note the auto-adoption at the next approval gate. Do not stall waiting for a reply — adopting a sharpened envelope is neither a verification failure nor a destructive action, so Phase 0's rule says the loop proceeds. The turn break here is a rendering requirement, not an approval gate: continue without any input.
+
+This follows Phase 2.5's handling of the design fork in full-autonomous mode — auto-adopt, record, surface later, never stall — with one difference: Phase 2.5 writes only to a file and carries no render-as-final-text constraint, so it can finish inside one turn. Phase -1 must also show the prompt to the user, which costs the turn break in step 4.
+
+The auto-adoption is bounded by the flip-condition: if the user later says the improved prompt drifted from what they meant, revert `authorising_prompt_raw` to the original and continue from there.
+
+**Any other envelope class → ask, as below.**
 
 **Delivery constraint — the improved prompt must be visible, not just asked-about.** Text emitted before a tool call is not rendered in the Claude Code terminal UI — only text with no trailing tool call, or content inside the tool call itself, reaches the user. This means "present the improved prompt as text, then call `AskUserQuestion`" silently drops the prompt: the user sees only the question, never the content it's asking about. Use one of two delivery mechanisms instead:
 - (a) End the turn with the improved prompt as the final text — no trailing tool call — and issue the `AskUserQuestion` call in the *next* turn; or
@@ -85,7 +102,7 @@ On **C**: proceed with the original prompt unchanged; Phase 0 reads it verbatim.
 
 On adopting an improved envelope (outcome **A** or **B**), update `progress.json.authorising_prompt_raw` to the adopted text so the field stays the canonical post-Phase-0 envelope. Outcome **C** needs no update — the Phase -2 stub already wrote the original prompt verbatim.
 
-The improved-and-approved prompt (or the original, if C was chosen) is what Phase 0 treats as the authorisation envelope. Phase 0's `<thinking>` block quotes it verbatim from here.
+The improved-and-approved prompt (or the original, if C was chosen; or the auto-adopted improved prompt, in a full-autonomous envelope) is what Phase 0 treats as the authorisation envelope. Phase 0's `<thinking>` block quotes it verbatim from here.
 
 ### Phase 0 — Read the authorisation envelope
 
@@ -510,7 +527,7 @@ Model an approval-gate as "pause-then-proceed", never as "do not start" — it i
 where `<category>` is exactly one of:
 - `hard-stop` — one of the four hard-stop conditions above.
 - `approval-gate` — a named risk boundary awaiting sign-off (pause-then-proceed).
-- `awaiting-input` — a planned interaction point inside the loop (the Phase -1 improve-prompt ask, the Phase 1 plan confirmation). Use this sparingly: Phase 13 reports the raw `awaiting-input` count as part of its `LOOP-STOP` breakdown.
+- `awaiting-input` — a planned interaction point inside the loop (the Phase -1 improve-prompt ask, which does NOT occur in a full-autonomous envelope since Phase -1 auto-adopts there; the Phase 1 plan confirmation). Use this sparingly: Phase 13 reports the raw `awaiting-input` count as part of its `LOOP-STOP` breakdown.
 - `complete` — all authorised work done. Declaring `complete` is the teardown: also set `progress.json` `status: "complete"` and run Phase 13 in the same turn, or the guards keep treating the loop as active. `retro.json` must exist beside `progress.json` **before** a `complete` declaration — the `loop_stall_guard` hook blocks the declaration when it is absent, malformed, or below `schema_version` 1 (the hook accepts `schema_version >= 1`) — and Phase 13's teardown write contract is what writes it, currently at `schema_version` 2. If a `proof.json` was frozen at Phase 2.7e, the same hook separately blocks the declaration when any of its proofs is unexecuted-in-this-session's-transcript or last-failed — Phase 13's teardown step 1 (run every proof `cmd` verbatim, in the orchestrator's own session) is what clears this before the declaration. If NO `proof.json` was frozen, write `progress.json` at `schema_version` 2 with `proof_disposition` set to `"none: <reason>"` before declaring — at `schema_version` >= 2 the same hook blocks an absent `proof.json` with no recorded disposition (see `loop-state.md`'s Fields table).
 
 The hook checks the declaration is present with a valid category; it cannot check the reason is honest (same boundary as the verify-loop hook). The Phase 13 category counts are the audit on that.

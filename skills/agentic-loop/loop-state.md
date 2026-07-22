@@ -44,7 +44,7 @@ be replayed to derive position, and that can leave a torn tail line after a cras
 | `disposition` | Per work-unit that retires an existing code path: `clean-break` \| `preserve-compat`. |
 | `named_blocker` | When `preserve-compat`: the specific consumer still on the old path that justifies keeping it. |
 | `removal_ticket` | When `preserve-compat`: tracks the deferred removal. |
-| `decisions_absorbed` | Chronological (oldest-first) array of `{phase, decision}` appended at each phase boundary that absorbs an in-scope decision (Phases 2.5, 2.6, 2.8, 5, 6). |
+| `decisions_absorbed` | Chronological (oldest-first) array of `{phase, decision}` appended at each phase boundary that absorbs an in-scope decision (Phases -1, 2.5, 2.6, 2.8, 5, 6). Phase -1 appends only in a full-autonomous envelope, where it auto-adopts the improve-prompt output instead of asking. |
 | `completed_marker` | Count of agentic-loop loops completed in this session; bumped at teardown, carried forward by the Phase -2 stub. |
 | `last_updated` | Refreshed at each phase boundary. |
 
