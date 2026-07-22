@@ -1160,6 +1160,264 @@ not also appear in .proofs." >&2
   fi
 }
 
+# ── Token-burn reduction gates (rows 1 and 4 of the 2026-07-17 measures) ─────
+#
+# WHY THESE ARE HOOKS AND NOT PROSE. The seven measures shipped 2026-07-17 as
+# SKILL.md prose. Row 1 said "MANDATORY" in capitals and fired ZERO times in
+# the five days after it shipped (verified 2026-07-22 by counting
+# compact_boundary records with compactMetadata.trigger=="manual" across every
+# transcript in ~/.claude/projects/ — 17 merges / 0 compactions in the worst
+# single loop). A rule nothing checks is a suggestion. These two gates make
+# rows 1 and 4 checkable by the harness, outside the model's control.
+#
+# UNGAMEABLE BY CONSTRUCTION: both key on evidence the model does not author.
+# compact_boundary records are written by the harness when /compact runs;
+# tool_use/tool_result pairs are written by the harness when a tool executes.
+# Neither is satisfiable by the model emitting a marker or asserting a reason —
+# the failure mode this repo already has a documented history of (the tier-gate
+# self-declared-tier bypass). The only way past either gate is to DO THE THING.
+#
+# TRUST BOUNDARY (same as als_gate_proofs_on_complete): the transcript is
+# treated as harness-written. A session that deliberately appends forged
+# records to its own transcript file defeats these gates, as it defeats every
+# transcript-reading hook. The target is the OBSERVED failure — silent
+# omission of a mandated step — not adversarial forgery.
+#
+# ROWS 2 AND 3 SHIP NO GATE. Deliberate, not an oversight:
+#   Row 2 (pin the orchestrator model) is observable — orchestrator model mix
+#     reads straight from .message.model. But no BLOCKING gate is
+#     constructible, for a reason no amount of predicate-tightening fixes:
+#     there is no recovery path. The model cannot change its own model with
+#     any tool call; the pin is a launch-time decision, already historical by
+#     the time a Stop hook sees it. A block saying "you drifted models" is
+#     cleared by no action the model can take — an un-clearable deadlock. The
+#     correct seam for row 2 is loop LAUNCH, not a Stop hook. (Also confounded:
+#     of 15 mixed-model transcripts sampled, the switches coincide with
+#     resume/synthetic boundaries, i.e. a session resumed under a different
+#     model, not a mid-flight unpinned orchestrator.)
+#   Row 3 (batch verification probes) is NOT reliably detectable. The
+#     transcript records that two Bash calls happened in sequence; it cannot
+#     record whether the second DEPENDED on the first. `x=$(cmd1)` then
+#     `cmd2 "$x"` split across turns is indistinguishable from lazy
+#     un-batching, so any predicate either misses real violations or blocks
+#     legitimate sequential work. A check that cannot separate those is not an
+#     enforcement mechanism. Not shipping it is more honest than shipping one
+#     that warns (a warning is what rows 1-4 already were).
+
+# Count SUCCESSFUL PR merges in the orchestrator transcript. Stdout: an integer.
+#
+# "Successful" is load-bearing, and so is the read/write distinction:
+#   - Only a WRITE action counts: `gh pr merge` or the repo's scripts/merge.sh.
+#     Read-only queries (`gh pr view ... mergeable`, `git log --merges`,
+#     `gh pr list ... mergedAt`) are everywhere in real transcripts and would
+#     make a naive /merge/ grep fire constantly — verified against the real
+#     corpus, where merge QUERIES outnumber merge ACTIONS several-fold.
+#   - A merge whose tool_result carries is_error:true FAILED, and a failed
+#     merge did not cross a PR-merge boundary, so it must not demand a
+#     compaction. Same tool_use/tool_result pairing als_gate_proofs_on_complete
+#     uses. is_error absent/null counts as success (matching gh's normal
+#     no-error shape), so the count stays a FLOOR on reality — which is the
+#     right direction: the gameable direction here is inflating compactions,
+#     not hiding merges, and a model that hides a merge gets no benefit.
+# Fail-open: jq missing, unreadable transcript, or a jq error all yield 0
+# (no merges observed -> nothing demanded).
+als_count_successful_merges() { # transcript -> integer on stdout
+  local transcript="$1"
+  command -v jq >/dev/null 2>&1 || { printf '0'; return 0; }
+  [ -r "$transcript" ] || { printf '0'; return 0; }
+  local n
+  n=$(jq -R 'fromjson? // empty' "$transcript" 2>/dev/null | jq -s -r '
+    . as $records
+    | ( [ $records[]?
+          | select(type == "object" and .type == "user")
+          | .message.content[]?
+          | select(type == "object" and .type == "tool_result")
+          | select((.tool_use_id | type) == "string")
+          | {id: .tool_use_id, is_error: (.is_error // null)} ] ) as $results
+    | [ $records[]?
+        | select(type == "object" and .type == "assistant")
+        | .message.content[]?
+        | select(type == "object" and .type == "tool_use" and .name == "Bash")
+        | select((.id | type) == "string")
+        | {id: .id, cmd: ((.input.command // "") | if type == "string" then . else "" end)}
+        # A merge ACTION, never a read-only query. Anchored to a command
+        # boundary (start, or after ; & | or whitespace) so a substring inside
+        # an unrelated word cannot match.
+        | select(.cmd | test("(^|[;&|[:space:]])(bash[[:space:]]+)?(\\./)?scripts/merge\\.sh|(^|[;&|[:space:]])gh[[:space:]]+pr[[:space:]]+merge"))
+        # Drop the ones that demonstrably failed. A tool_use with no result at
+        # all (still running / transcript truncated mid-flush) is NOT counted:
+        # an unfinished merge has not crossed a boundary yet.
+        | . as $m
+        | select( [ $results[] | select(.id == $m.id) ] | last | (. != null and .is_error != true) )
+      ] | length
+  ' 2>/dev/null)
+  case "$n" in ''|*[!0-9]*) n=0 ;; esac
+  printf '%s' "$n"
+}
+
+# Count MANUAL compactions in the orchestrator transcript. Stdout: an integer.
+# Keys on the harness-written record: type=="system", subtype=="compact_boundary",
+# compactMetadata.trigger=="manual". An "auto" trigger does NOT count — row 1
+# mandates a deliberate compaction at the merge boundary; an automatic
+# context-pressure compaction is the harness rescuing an already-full context,
+# which is the outcome row 1 exists to PREVENT, not evidence of compliance.
+# Fail-open to 0 on any infrastructure failure.
+als_count_manual_compactions() { # transcript -> integer on stdout
+  local transcript="$1"
+  command -v jq >/dev/null 2>&1 || { printf '0'; return 0; }
+  [ -r "$transcript" ] || { printf '0'; return 0; }
+  local n
+  n=$(jq -R 'fromjson? // empty' "$transcript" 2>/dev/null | jq -s -r '
+    [ .[]?
+      | select(type == "object")
+      | select(.type == "system" and .subtype == "compact_boundary")
+      | select(.compactMetadata.trigger == "manual") ] | length
+  ' 2>/dev/null)
+  case "$n" in ''|*[!0-9]*) n=0 ;; esac
+  printf '%s' "$n"
+}
+
+# ROW 1 GATE — mandatory /compact at each PR-merge boundary.
+#
+# INVARIANT (per-stop, not per-completion): on ANY stop of an active loop,
+#   manual_compactions >= successful_merges
+# Blocks with exit 2 when merges exceed compactions.
+#
+# WHY PER-STOP AND NOT AT `complete`. Two weaker thresholds were rejected:
+#   compactions >= merges checked only at `complete` is satisfiable
+#     retroactively in the worst way — the loop end-loads N compactions after
+#     the context cost has already been paid, which is precisely the saving
+#     row 1 exists to capture. It enforces a COUNT while the measure is about
+#     TIMING.
+#   compactions >= 1 is end-load-gameable by a single final /compact.
+# The per-stop form fixes both: the loop is blocked at boundary 1 and cannot
+# reach boundary 2 without compacting, so end-loading is structurally
+# impossible and each compaction lands AT its boundary. Verified against real
+# transcripts that this is achievable: orchestrators stop between merges in a
+# clean STOP/MERGE alternation (sampled 5508a7df — 17 merges, a stop before
+# and after every one), so there is always a stop at which to comply.
+#
+# RECOVERY PATH — the property that makes blocking safe rather than a
+# deadlock. The block is cleared by DOING THE THING: run /compact, stop again,
+# the counts balance, the gate passes. It is NOT clearable by asserting a
+# reason, writing a marker, or editing progress.json — there is no
+# self-attestation escape, which is the whole point. Bounded by
+# als_gate_stop_loop (the stop_hook_active release) exactly like every sibling
+# gate here, so a single stop is taxed at most once and no infinite loop is
+# possible.
+#
+# HONEST BOUNDARY: this enforces that a compaction HAPPENED at each merge
+# boundary. It cannot verify the compaction was well-timed WITHIN the turn, and
+# it cannot recover context already burned before the gate first fires. Its job
+# is to make the skip impossible-to-silently-commit, not to retroactively save
+# tokens.
+#
+# Fail-open on infrastructure (no jq, unreadable transcript -> both counts 0 ->
+# 0 >= 0 -> allow); fail-closed on evidence (merges observed, compactions
+# short -> block). Never degrades a real violation to silence.
+als_gate_compaction_per_stop() { # hook session transcript
+  local hook="$1" session="$2" transcript="$3"
+  command -v jq >/dev/null 2>&1 || { als_log "hook=$hook session=$session compaction_gate=skipped_no_jq"; return 0; }
+  [ -n "$transcript" ] && [ -r "$transcript" ] || return 0
+  local merges compactions
+  merges=$(als_count_successful_merges "$transcript")
+  compactions=$(als_count_manual_compactions "$transcript")
+  [ "$merges" -gt "$compactions" ] || { als_log "hook=$hook session=$session compaction_gate=ok merges=$merges compactions=$compactions"; return 0; }
+  als_log "hook=$hook session=$session compaction_gate=blocked merges=$merges compactions=$compactions"
+  echo "[loop-stall-guard] PR-merge boundary compaction missing: $merges successful merge(s) in this
+loop, but only $compactions manual compaction(s).
+skills/agentic-loop/SKILL.md makes /compact at each PR-merge boundary mandatory
+— it is the single largest token saving in the loop, and it went unrun for five
+days because nothing checked it.
+RECOVERY: run /compact now, then stop again. One manual compaction per merged
+PR clears this. Nothing else does — this gate counts harness-written
+compact_boundary records, so it cannot be satisfied by a marker, a note, or an
+edit to progress.json." >&2
+  exit 2
+}
+
+# ROW 4 GATE — the orchestrator never authors deliverable files inline.
+#
+# Blocks (exit 2) when the ORCHESTRATOR's own transcript contains a Write /
+# Edit / MultiEdit / NotebookEdit tool_use against a path outside the
+# allowlist. Subagent tool calls never appear in the orchestrator transcript
+# (verified against real delegating transcripts), so a file authored by a
+# spawned worker is invisible here — which is exactly the intended semantic:
+# delegation is the compliant path and it is also the path that clears the
+# gate.
+#
+# ALLOWLIST (paths the orchestrator legitimately owns), validated against the
+# real corpus rather than invented:
+#   - the loop-state dir (progress.json, spec.md, plan.md, retro.json,
+#     evals.json, proof.json) — SKILL.md names these as orchestrator output
+#   - ~/.claude/**/memory/** — the memory/handoff surface
+#   - scratchpad and temp dirs (/tmp, /private/tmp, /var/folders) — working
+#     files that never land in a PR
+# Everything else — repo source, docs, config, wiki pages — is a deliverable
+# and belongs in a worker. SKILL.md is explicit ("If you catch yourself running
+# Edit/Write/MultiEdit in main context inside an authorised loop, stop"), and
+# it delegates even the wiki ingest to a spawned agent.
+#
+# FALSE-POSITIVE VALIDATION: this allowlist was checked against every
+# orchestrator write in the real transcript corpus (3177 Write/Edit calls).
+# On loop sessions it exempts 100% of loop-state, memory and scratchpad
+# writes; the paths it flags are genuine violations of the row-4 rule —
+# orchestrators authoring specs, plans, wiki pages, and in one sampled loop
+# scripts/tier-gate/tier-gate-runner.sh itself, inline in main context.
+#
+# RECOVERY PATH: the block names the offending path and the action —
+# delegate the edit to a spawned worker. Because the check reads the
+# ORCHESTRATOR transcript only, re-doing the work in a worker genuinely
+# clears it. There is one honest caveat, stated in the block message rather
+# than hidden: a write already made is historical, so the offending call
+# cannot be un-made within the same transcript. The gate therefore fires at
+# the FIRST stop after the violation, when exactly one write has to be
+# reverted-and-delegated, not at `complete` when dozens might. Recovery is
+# "hand it to a worker and let the worker's own write stand", which is the
+# behaviour the rule wants.
+#
+# Fail-open on infrastructure; fail-closed on evidence.
+als_gate_inline_authoring() { # hook session transcript
+  local hook="$1" session="$2" transcript="$3"
+  command -v jq >/dev/null 2>&1 || { als_log "hook=$hook session=$session inline_gate=skipped_no_jq"; return 0; }
+  [ -n "$transcript" ] && [ -r "$transcript" ] || return 0
+  local loop_dir=""
+  [ -n "${ALS_PATH:-}" ] && loop_dir="$(dirname "$ALS_PATH")"
+  local offenders
+  offenders=$(jq -R 'fromjson? // empty' "$transcript" 2>/dev/null | jq -s -r --arg loopdir "$loop_dir" '
+    [ .[]?
+      | select(type == "object" and .type == "assistant")
+      | .message.content[]?
+      | select(type == "object" and .type == "tool_use")
+      | select(.name == "Write" or .name == "Edit" or .name == "MultiEdit" or .name == "NotebookEdit")
+      | (.input.file_path // "") | select(type == "string" and length > 0)
+      # Allowlist. Anchored prefix tests only — a substring match would let
+      # "/repo//memory/-in-a-name/x.go" launder a deliverable.
+      | select(
+          ( ($loopdir != "") and startswith($loopdir) ) as $in_loop
+          | ( test("/\\.claude/agentic-loop/") ) as $loopstate
+          | ( test("/\\.claude/(projects/[^/]+/)?memory/") ) as $mem
+          | ( startswith("/tmp/") or startswith("/private/tmp/") or startswith("/var/folders/") ) as $scratch
+          | ( test("/scratchpad/") ) as $pad
+          | ($in_loop or $loopstate or $mem or $scratch or $pad) | not
+        )
+    ] | unique | join(", ")
+  ' 2>/dev/null)
+  [ -n "$offenders" ] || { als_log "hook=$hook session=$session inline_gate=ok"; return 0; }
+  als_log "hook=$hook session=$session inline_gate=blocked offenders=$offenders"
+  echo "[loop-stall-guard] Orchestrator authored deliverable file(s) inline: $offenders.
+skills/agentic-loop/SKILL.md row 4: the orchestrator's own Write/Edit calls are
+for loop-state only (progress.json, spec.md, plan.md, retro.json). Every
+deliverable — code, docs, config, anything that lands in a PR — is authored by
+a spawned worker, so main context stays small.
+RECOVERY: delegate that file to a spawned worker agent and let the WORKER write
+it (worker tool calls do not appear in this transcript, so a delegated write
+clears this gate). The write above is already in the transcript and cannot be
+un-made — revert it if it should not stand, hand the task to a worker, then
+stop again." >&2
+  exit 2
+}
+
 # Reporter (NOT a gate): on a `complete` declaration, APPEND the loop's mined
 # cost to $ALS_PENDING_SYSMSG (emitted as a single top-level systemMessage at
 # the loop_stall_guard.sh call site), mechanically — so a `complete` loop can

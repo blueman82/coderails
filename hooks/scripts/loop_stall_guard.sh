@@ -97,5 +97,14 @@ als_gate_stop_loop "$stop_hook_active"
 als_gate_require_active_loop "$transcript" "loop_stall_guard" "$session_id"
 als_load_progress "$cwd" "$session_id"
 als_gate_loop_complete "loop_stall_guard" "$session_id"
+# Token-burn reduction gates (rows 1 and 4 of the 2026-07-17 measures).
+# Placed BEFORE gate_loop_stop_declared deliberately: these are PER-STOP
+# invariants, not completion checks. Running them after the declaration gate
+# would let a loop declare `awaiting-input` and sail past a missed compaction
+# boundary — the declaration would become the bypass. Placed AFTER
+# als_gate_loop_complete so a genuinely-finished, session-owned loop is never
+# retro-blocked by them.
+als_gate_compaction_per_stop "loop_stall_guard" "$session_id" "$transcript"
+als_gate_inline_authoring "loop_stall_guard" "$session_id" "$transcript"
 gate_loop_stop_declared
 block_missing_declaration

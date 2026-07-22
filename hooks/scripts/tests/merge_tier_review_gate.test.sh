@@ -81,6 +81,12 @@ cat > "$STUB_DIR/gh" <<'GHSTUB'
 #!/bin/bash
 case "$*" in
   *"pr merge"*) exit 0 ;;
+  # The tier-floor gate reads the changed-file list and the line count from
+  # GitHub. These tests exercise the tier-REVIEW gate that runs after it, so
+  # the floor must be cleared here: a one-file, two-line ordinary-path diff
+  # derives floor 0 and passes at every claimed tier.
+  *"pr diff "*"--name-only"*) printf 'docs/REFERENCE.md\n' ;;
+  *"pr view "*"additions"*) printf '2\n' ;;
   *"pr view "*"headRefName"*) printf '{"headRefName":"feature/test"}\n' ;;
   *"api repos/"*"/commits/"*"/statuses"*)
     [ -n "${MOCK_STATUSES_FAIL:-}" ] && exit 1
@@ -141,11 +147,13 @@ set -euo pipefail
 _DIR="\$(dirname "\${BASH_SOURCE[0]}")"
 source "\$_DIR/lib/git-common.sh"
 source "\$_DIR/lib/config.sh"
+source "$REPO_ROOT/scripts/lib/tier-floor.sh"
 WRAPPER
     awk '
         NR==1 { next }
         /^source.*git-common/ { next }
         /^source.*config/ { next }
+        /^source.*tier-floor/ { next }
         { print }
     ' "$MERGE_SH" >> "$wrapper"
 

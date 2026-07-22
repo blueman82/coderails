@@ -88,6 +88,19 @@ case "$args" in
       printf '<!-- coderails-eval-summary v1 pr=%s head_sha=%s result=GO tier=1 -->' "$pr_num" "$sha" | base64
     fi
     ;;
+  "pr diff "*"--name-only"*)
+    # The tier-floor gate's changed-file read. Absent MOCK_TF_FILELIST this
+    # exits 1, which is the gate's INFRASTRUCTURE case (fail-open): every
+    # pre-existing case in this file therefore sees the floor skipped, exactly
+    # as before the floor existed. The TIER-FLOOR section below sets these to
+    # exercise the gate for real.
+    [ -n "${MOCK_TF_DIFF_FAIL:-}" ] && exit 1
+    [ -z "${MOCK_TF_FILELIST+x}" ] && exit 1
+    printf '%s' "$MOCK_TF_FILELIST"
+    ;;
+  "pr view "*"--json additions"*|"pr view "*"additions,deletions"*)
+    printf '%s' "${MOCK_TF_LINES:-0}"
+    ;;
   "api repos/"*"/statuses"*)
     # TIER-REVIEW GATE section (below) drives this via MOCK_TR_STATUSES_JSON /
     # MOCK_TR_STATUSES_FAIL. Pre-existing cases in this file never set
@@ -1285,5 +1298,106 @@ case "$out" in
   *"verdict=legitimate"*) : ;;
   *) printf 'FAIL - no-verdict deny reason should mention verdict=legitimate (got: %s)\n' "$out"; fails=$((fails + 1)) ;;
 esac
+
+# ────────────────────────────────────────────────────────────────────────────
+# TIER-FLOOR GATE: `gh pr merge` on an eval artifact whose SELF-DECLARED tier
+# is below the floor derived from the diff must be denied.
+#
+# This section is load-bearing for a reason merge.sh's own test cannot cover:
+# a raw `gh pr merge <N>` never runs scripts/merge.sh, so a floor wired only
+# there would be bypassed by exactly the command this hook exists to gate.
+#
+# Unlike the tier-review gate above, the floor is NOT config-keyed — it runs
+# on every install. REPO_NO_CONFIG cannot be used (the hook no-ops entirely
+# without a workflow.config.yaml), so these reuse REPO_TIER; the tier-review
+# status is stubbed legitimate throughout so any denial observed here is the
+# floor's, not the status gate's.
+# ────────────────────────────────────────────────────────────────────────────
+
+TF_TIER0_MARKER="<!-- coderails-eval-summary v1 pr=42 head_sha=${TIER_HEAD_SHA} result=GO tier=0 -->"
+TF_TIER1_MARKER="<!-- coderails-eval-summary v1 pr=42 head_sha=${TIER_HEAD_SHA} result=GO tier=1 -->"
+TF_TIER0_LEGIT="[{\"state\":\"success\",\"creator\":{\"login\":\"${MACHINE_USER}\"},\"description\":\"verdict=legitimate tier=0 host=h\"}]"
+TF_TIER1_LEGIT="[{\"state\":\"success\",\"creator\":{\"login\":\"${MACHINE_USER}\"},\"description\":\"verdict=legitimate tier=1 host=h\"}]"
+
+# ── A tier-1 claim on a sweeping diff -> DENY ────────────────────────────────
+out=$(
+  MOCK_GH_HEAD_SHA="$TIER_HEAD_SHA" MOCK_GH_COMMENT_BODY="$TF_TIER1_MARKER" \
+  MOCK_TR_STATUSES_JSON="$TF_TIER1_LEGIT" \
+  MOCK_TF_FILELIST=$'AGENTS.md\nREADME.md\nc\nd\ne\nf\ng\nh\ni\nj' MOCK_TF_LINES="1146" \
+  run_eval "$(payload "gh pr merge 42 --squash" "$T_TIER_REVIEWED_42" "$REPO_TIER")"
+)
+check "tier-1 claim on a 10-file/1146-line diff -> DENY (tier floor)" DENY "$(decision_of "$out")"
+case "$out" in
+  *"tier-floor"*) : ;;
+  *) printf 'FAIL - floor deny reason should mention tier-floor (got: %s)\n' "$out"; fails=$((fails + 1)) ;;
+esac
+
+# ── A tier-0 claim touching the enforcement machinery -> DENY ────────────────
+# Small diff, ordinary size: only the PATH forces the floor here, so this
+# proves the path predicate is reached and not shadowed by the size caps.
+out=$(
+  MOCK_GH_HEAD_SHA="$TIER_HEAD_SHA" MOCK_GH_COMMENT_BODY="$TF_TIER0_MARKER" \
+  MOCK_TR_STATUSES_JSON="$TF_TIER0_LEGIT" \
+  MOCK_TF_FILELIST="hooks/scripts/enforce_pr_workflow.sh" MOCK_TF_LINES="2" \
+  run_eval "$(payload "gh pr merge 42 --squash" "$T_TIER_REVIEWED_42" "$REPO_TIER")"
+)
+check "tier-0 claim touching hooks/scripts/ -> DENY (tier floor)" DENY "$(decision_of "$out")"
+
+# ── A sub-tier-2 claim editing the gate's own source -> DENY ─────────────────
+out=$(
+  MOCK_GH_HEAD_SHA="$TIER_HEAD_SHA" MOCK_GH_COMMENT_BODY="$TF_TIER1_MARKER" \
+  MOCK_TR_STATUSES_JSON="$TF_TIER1_LEGIT" \
+  MOCK_TF_FILELIST="scripts/tier-gate/tier-gate-runner.sh" MOCK_TF_LINES="4" \
+  run_eval "$(payload "gh pr merge 42 --squash" "$T_TIER_REVIEWED_42" "$REPO_TIER")"
+)
+check "tier-1 claim editing the gate's own source -> DENY (tier floor)" DENY "$(decision_of "$out")"
+
+# ── A tier-0 claim on an oversize diff -> DENY ───────────────────────────────
+out=$(
+  MOCK_GH_HEAD_SHA="$TIER_HEAD_SHA" MOCK_GH_COMMENT_BODY="$TF_TIER0_MARKER" \
+  MOCK_TR_STATUSES_JSON="$TF_TIER0_LEGIT" \
+  MOCK_TF_FILELIST="docs/REFERENCE.md" MOCK_TF_LINES="205" \
+  run_eval "$(payload "gh pr merge 42 --squash" "$T_TIER_REVIEWED_42" "$REPO_TIER")"
+)
+check "tier-0 claim on a 205-line diff -> DENY (tier floor)" DENY "$(decision_of "$out")"
+
+# ── Fetch succeeded, file list empty -> DENY (fail-closed on evidence) ───────
+# Every count derived from an empty list is zero, which clears every size cap
+# vacuously; treating that as a pass would hand back the whole bypass.
+out=$(
+  MOCK_GH_HEAD_SHA="$TIER_HEAD_SHA" MOCK_GH_COMMENT_BODY="$TF_TIER0_MARKER" \
+  MOCK_TR_STATUSES_JSON="$TF_TIER0_LEGIT" \
+  MOCK_TF_FILELIST="" MOCK_TF_LINES="0" \
+  run_eval "$(payload "gh pr merge 42 --squash" "$T_TIER_REVIEWED_42" "$REPO_TIER")"
+)
+check "empty changed-file list -> DENY (fail-closed on evidence)" DENY "$(decision_of "$out")"
+
+# ── The fetch itself failed -> ALLOW (fail-open on infrastructure) ───────────
+# No evidence either way, so the floor does not block; the eval, review and
+# tier-review gates still stand.
+out=$(
+  MOCK_GH_HEAD_SHA="$TIER_HEAD_SHA" MOCK_GH_COMMENT_BODY="$TF_TIER0_MARKER" \
+  MOCK_TR_STATUSES_JSON="$TF_TIER0_LEGIT" \
+  MOCK_TF_DIFF_FAIL=1 \
+  run_eval "$(payload "gh pr merge 42 --squash" "$T_TIER_REVIEWED_42" "$REPO_TIER")"
+)
+check "diff fetch failure -> ALLOW (fail-open on infrastructure)" ALLOW "$(decision_of "$out")"
+
+# ── Honest claims still merge, or the gate is useless ────────────────────────
+out=$(
+  MOCK_GH_HEAD_SHA="$TIER_HEAD_SHA" MOCK_GH_COMMENT_BODY="$TF_TIER0_MARKER" \
+  MOCK_TR_STATUSES_JSON="$TF_TIER0_LEGIT" \
+  MOCK_TF_FILELIST="docs/REFERENCE.md" MOCK_TF_LINES="2" \
+  run_eval "$(payload "gh pr merge 42 --squash" "$T_TIER_REVIEWED_42" "$REPO_TIER")"
+)
+check "honest tier-0 claim on a tiny docs diff -> ALLOW" ALLOW "$(decision_of "$out")"
+
+out=$(
+  MOCK_GH_HEAD_SHA="$TIER_HEAD_SHA" MOCK_GH_COMMENT_BODY="$TF_TIER1_MARKER" \
+  MOCK_TR_STATUSES_JSON="$TF_TIER1_LEGIT" \
+  MOCK_TF_FILELIST="hooks/scripts/enforce_pr_workflow.sh" MOCK_TF_LINES="40" \
+  run_eval "$(payload "gh pr merge 42 --squash" "$T_TIER_REVIEWED_42" "$REPO_TIER")"
+)
+check "honest tier-1 claim on an infra path -> ALLOW" ALLOW "$(decision_of "$out")"
 
 [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails)"; exit 1; }

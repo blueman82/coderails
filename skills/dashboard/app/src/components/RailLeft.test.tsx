@@ -24,6 +24,7 @@ function emptySnapshot(overrides: Partial<DashboardSnapshot> = {}): DashboardSna
     runs: [],
     queue: [],
     builds: [],
+    contextTrend: null,
     ...overrides,
   };
 }

@@ -908,4 +908,62 @@ check "validate_embed: unparseable marker line → exit 1 (fail-closed)" 1 $?
 [[ "$stderr_out" == *"marker"* ]]
 check "validate_embed: unparseable marker → stderr names the marker reason" 0 $?
 
+# ─── validate_tier_floor: the claimed tier vs the diff-derived floor ─────────
+# Early, cheap feedback for an honest author — NOT the security boundary (a
+# dishonest actor simply never runs this script; the enforced copies are in
+# scripts/merge.sh and hooks/scripts/enforce_pr_workflow.sh). These tests stub
+# `gh` on PATH so no network is touched.
+TF_STUB="$TMP/tfstub"
+mkdir -p "$TF_STUB"
+cat > "$TF_STUB/gh" <<'TFGH'
+#!/bin/bash
+case "$*" in
+  *"pr diff "*"--name-only"*)
+    [ -n "${STUB_DIFF_FAIL:-}" ] && exit 1
+    printf '%s' "${STUB_FILELIST:-}"
+    ;;
+  *"pr view "*"additions"*) printf '%s' "${STUB_LINES:-0}" ;;
+  *) exit 1 ;;
+esac
+TFGH
+chmod +x "$TF_STUB/gh"
+
+tf_fixture() { # tier -> path
+  local p="$TMP/tf_tier_$1.json"
+  jq -n --argjson t "$1" '{tier: $t, tier_justification: "x", head_sha: "deadbeef", evals: []}' > "$p"
+  printf '%s' "$p"
+}
+
+# A tier-1 claim on a sweeping diff refuses.
+out=$(PATH="$TF_STUB:$PATH" STUB_FILELIST=$'a\nb\nc\nd\ne\nf\ng\nh\ni\nj' STUB_LINES=1146 \
+  bash "$SCRIPT" validate-tier-floor "$(tf_fixture 1)" 42 2>&1)
+check "validate_tier_floor: tier-1 claim on a 10-file/1146-line diff → exit 1" 1 $?
+[[ "$out" == *"floor 2"* ]]
+check "validate_tier_floor: refusal names the derived floor" 0 $?
+
+# A tier-0 claim touching enforcement infrastructure refuses.
+PATH="$TF_STUB:$PATH" STUB_FILELIST="hooks/scripts/enforce_pr_workflow.sh" STUB_LINES=2 \
+  bash "$SCRIPT" validate-tier-floor "$(tf_fixture 0)" 42 2>/dev/null
+check "validate_tier_floor: tier-0 claim on an infra path → exit 1" 1 $?
+
+# An honest claim passes.
+PATH="$TF_STUB:$PATH" STUB_FILELIST="docs/REFERENCE.md" STUB_LINES=2 \
+  bash "$SCRIPT" validate-tier-floor "$(tf_fixture 0)" 42 2>/dev/null
+check "validate_tier_floor: honest tier-0 claim on a tiny docs diff → exit 0" 0 $?
+
+# Claiming above the floor is never an attack.
+PATH="$TF_STUB:$PATH" STUB_FILELIST="docs/REFERENCE.md" STUB_LINES=2 \
+  bash "$SCRIPT" validate-tier-floor "$(tf_fixture 2)" 42 2>/dev/null
+check "validate_tier_floor: tier-2 claim on a floor-0 diff → exit 0" 0 $?
+
+# A failed diff fetch is infrastructure — it must not refuse.
+PATH="$TF_STUB:$PATH" STUB_DIFF_FAIL=1 \
+  bash "$SCRIPT" validate-tier-floor "$(tf_fixture 0)" 42 2>/dev/null
+check "validate_tier_floor: diff-fetch failure → exit 0 (fail-open on infra)" 0 $?
+
+# A successful fetch returning nothing is unusable evidence — it must refuse.
+PATH="$TF_STUB:$PATH" STUB_FILELIST="" STUB_LINES=0 \
+  bash "$SCRIPT" validate-tier-floor "$(tf_fixture 0)" 42 2>/dev/null
+check "validate_tier_floor: empty file list → exit 1 (fail-closed on evidence)" 1 $?
+
 [[ $fails -eq 0 ]] && { echo PASS; exit 0; } || { echo "FAIL ($fails)"; exit 1; }

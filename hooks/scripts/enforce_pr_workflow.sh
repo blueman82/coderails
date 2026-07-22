@@ -26,6 +26,12 @@
 # scripts/merge.sh also sources it in-process elsewhere.
 . "$(dirname "$0")/../../scripts/lib/git-common.sh"
 
+# tier-floor.sh — the diff-derived tier floor. Needed here, not only in
+# scripts/merge.sh: a raw `gh pr merge <N>` never runs merge.sh, so a floor
+# that lived only there would be bypassed by the very command this hook
+# exists to gate.
+. "$(dirname "$0")/../../scripts/lib/tier-floor.sh"
+
 IFS= read -r -d '' -t 5 input || true
 cmd=$(printf '%s' "$input" | jq -r '.tool_input.command // empty')
 
@@ -509,9 +515,47 @@ gate_eval_artifact_for_merge() {
       }
     }'
   else
+    gate_tier_floor "$num" || return 0
     gate_tier_review_status "$num" "$sha"
   fi
   return 0
+}
+
+# gate_tier_floor <num>
+# Blocks the merge when the PR's SELF-DECLARED tier (PR_EVAL_TIER, set by the
+# eval-artifact gate that ran immediately above) is below the floor derived
+# from the diff itself. Emits a deny decision and returns 1 when it blocks,
+# so the caller stops and does not also emit a second decision; returns 0
+# (silently) when the claim clears the floor or when the diff could not be
+# fetched at all.
+#
+# Always on — no config key, no override, unlike gate_tier_review_status.
+# The tier this consumes is the same trusted-but-self-declared value every
+# other gate here reads; this is the only check that tests it against the
+# change under review.
+gate_tier_floor() {
+  local num="$1"
+  local out rc=0
+  out=$(tier_floor::gate_pr "${PR_EVAL_TIER:-}" "$num") || rc=$?
+
+  # rc 3 is an infrastructure failure (the diff fetch itself errored) — the
+  # floor could not be evaluated, so it does not block; the eval, review and
+  # tier-review gates still apply. rc 1 (claim below the derived floor) and
+  # rc 2 (fetch succeeded but the evidence is unusable) BOTH block: an empty
+  # file list zeroes every count and would pass every size cap vacuously, so
+  # it must never be read as a pass.
+  case $rc in
+    0|3) return 0 ;;
+  esac
+
+  jq -n --arg r "Blocked: gh pr merge $num — $out" '{
+    hookSpecificOutput: {
+      hookEventName: "PreToolUse",
+      permissionDecision: "deny",
+      permissionDecisionReason: $r
+    }
+  }'
+  return 1
 }
 
 # coderails::_tier_review_machine_user <config_file>

@@ -5,6 +5,7 @@
 set -euo pipefail
 source "$(dirname "$0")/lib/git-common.sh"
 source "$(dirname "$0")/lib/config.sh"
+source "$(dirname "$0")/lib/tier-floor.sh"
 
 # coderails::_tier_review_machine_user <config_file>
 # Echoes the value of the nested key tier_review.machine_user from a
@@ -111,6 +112,26 @@ merge::main() {
                 fi
             fi
             ok "Eval artifact verified (SHA: $sha, tier ${PR_EVAL_TIER:-?})"
+
+            # ─── Derived tier-floor gate (always on, never config-keyed) ──────
+            # The tier just reported is SELF-DECLARED — parsed verbatim from a
+            # marker line the same actor wrote. Every gate above consumes it as
+            # a trusted value, so a smaller digit buys less scrutiny for free.
+            # This derives a LOWER BOUND on the tier from the diff itself
+            # (paths, file count, line count — facts fetched from GitHub, not
+            # authored by the actor) and blocks a claim below it. Claiming
+            # ABOVE the floor always passes: more scrutiny is never an attack.
+            # There is deliberately no config key and no override — unlike the
+            # tier-review status gate below, which is inactive unless
+            # tier_review.machine_user is set, this runs on every install. An
+            # opt-out the actor can write is the same hole one level up.
+            local floor_out floor_rc=0
+            floor_out=$(tier_floor::gate_pr "${PR_EVAL_TIER:-}" "$num") || floor_rc=$?
+            case $floor_rc in
+                0) ok "Tier floor verified (claimed tier ${PR_EVAL_TIER:-?} is at or above the diff-derived floor)" ;;
+                3) warn "$floor_out" ;;   # infrastructure: the diff could not be read at all — do not block the world
+                *) err "$floor_out" ;;    # rc 1 (claim below floor) and rc 2 (unusable evidence after a good fetch) both block
+            esac
 
             # ─── Tier-review gate (redundant defence-in-depth, fail-closed) ───
             # This layer is REDUNDANT BY DESIGN once the server-side ruleset is

@@ -6,6 +6,7 @@ import type { PrGate, PrGateError } from "@/lib/collect/prGates";
 import type { HealthTile } from "@/lib/collect/health";
 import type { QueueEntry } from "@/lib/collect/queue";
 import type { BuildEntry } from "@/lib/collect/builds";
+import type { ContextTrendSummary } from "@/lib/collect/contextTrend";
 import type { RunRecord } from "@/lib/runlog";
 import type { RunOutputEvent } from "@/lib/runOutputBus";
 
@@ -22,11 +23,12 @@ export interface DashboardSnapshot {
   runs: RunRecord[];
   queue: QueueEntry[];
   builds: BuildEntry[];
+  contextTrend: ContextTrendSummary | null;
 }
 
 export type ActivitySlice = Pick<
   DashboardSnapshot,
-  "sessions" | "loops" | "health" | "queue" | "builds"
+  "sessions" | "loops" | "health" | "queue" | "builds" | "contextTrend"
 >;
 
 export type DashboardEvent =
@@ -58,6 +60,7 @@ const EMPTY_SNAPSHOT: DashboardSnapshot = {
   runs: [],
   queue: [],
   builds: [],
+  contextTrend: null,
 };
 
 export const initialDashboardState: DashboardState = {

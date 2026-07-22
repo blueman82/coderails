@@ -1393,3 +1393,74 @@
     animation: none;
   }
 }
+
+/* ---------- Context trend (token-efficiency panel) ---------- */
+/* The ONE reserved caveat color: insufficient data / inert-measure states,
+   visually distinct from every signal color at a glance. Validated against
+   the dark surface with the dataviz palette validator (CVD ΔE 16.1 deutan /
+   11.3 tritan vs --rose, normal-vision ΔE 18.7, contrast ≥ 3:1). Never used
+   for signal; always paired with words, never color alone. */
+:root {
+  --caveat: #e8cc5a;
+  --caveat-dim: rgba(232, 204, 90, 0.55);
+}
+.hud-trend-chart {
+  width: 100%;
+  height: auto;
+  display: block;
+  margin-bottom: 8px;
+}
+/* Session readout under the chart — fixed height so hover never reflows the
+   rows below it. */
+.hud-trend-readout {
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  color: var(--grey);
+  text-transform: uppercase;
+  min-height: 13px;
+  margin-bottom: 8px;
+  font-variant-numeric: tabular-nums;
+}
+.hud-trend-readout.idle {
+  color: var(--grey-dim);
+}
+/* Dot-leader stat rows: label · dotted fill · value. */
+.hud-trend-row {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 9.5px;
+  letter-spacing: 0.06em;
+  color: var(--grey);
+  text-transform: uppercase;
+  margin-bottom: 5px;
+  font-variant-numeric: tabular-nums;
+}
+.hud-trend-row .hud-trend-fill {
+  flex: 1;
+  border-bottom: 1px dotted var(--grey-dim);
+  transform: translateY(-2px);
+  min-width: 8px;
+}
+.hud-trend-row .hud-trend-value {
+  color: var(--off-white);
+  white-space: nowrap;
+}
+/* Caveat lines: the reserved color plus words. Sentence case on purpose —
+   these are statements, not chrome. */
+.hud-trend-caveat {
+  font-size: 9.5px;
+  line-height: 1.5;
+  color: var(--caveat);
+  margin: 7px 0 0;
+}
+.hud-trend-footer {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--hairline);
+  font-size: 8.5px;
+  letter-spacing: 0.1em;
+  color: var(--grey-dim);
+  text-transform: uppercase;
+  line-height: 1.6;
+}
