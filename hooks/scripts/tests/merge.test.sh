@@ -70,6 +70,13 @@ pr::state()  { echo "OPEN"; }
 pr::title()  { echo "Test PR"; }
 pr::review() { echo "APPROVED"; }
 pr::exists() { return 0; }
+
+# post_evals.sh's own source line is stripped from the wrapper (like
+# git-common/config), so its real smoke_verify never runs here — this file
+# exercises the review/eval gates, not smoke_verify's own behaviour (see
+# post_evals.test.sh for that). Stubbed to succeed by default; MOCK_SMOKE_VERIFY_RC
+# lets a test flip it to prove merge.sh actually calls it and blocks on failure.
+post_evals::smoke_verify() { return "${MOCK_SMOKE_VERIFY_RC:-0}"; }
 BASELIB
 
 # Stub gh (for the post-merge branch-delete step)
@@ -130,6 +137,17 @@ pr::has_coderails_eval_for_head() {
     PR_EVAL_TIER="1"
     return 0
 }
+
+# smoke_verify's own re-execution needs a real embed to check out and run
+# against — this file doesn't test that path (see merge_evals_gate.test.sh),
+# so a minimal well-formed tier-0 embed keeps smoke_verify's own checks 1-9 a
+# fast no-op even when MOCK_SMOKE_VERIFY_RC is unset (its default stub already
+# returns 0 unconditionally, but the embed extractor itself must still
+# succeed for the caller to reach that stub at all).
+pr::coderails_eval_embed_for_head() {
+    printf '{"tier":0,"tier_justification":"stub","head_sha":"deadbeef","evals":[]}'
+    return 0
+}
 GCSTUB
 
     # Write a merge wrapper that places our stub libs where merge.sh expects them
@@ -147,6 +165,7 @@ WRAPPER
         NR==1 { next }               # skip shebang
         /^source.*git-common/ { next }  # skip original git-common source
         /^source.*config/ { next }      # skip original config source
+        /^source.*post_evals/ { next }  # skip original post_evals source (stubbed above)
         { print }
     ' "$MERGE_SH" >> "$wrapper"
 
@@ -282,6 +301,7 @@ WRAPPER
         NR==1 { next }
         /^source.*git-common/ { next }
         /^source.*config/ { next }
+        /^source.*post_evals/ { next }
         { print }
     ' "$MERGE_SH" >> "$wrapper"
 
@@ -299,5 +319,20 @@ run_gate_test_eval_fail
 rc=$?
 check "merge blocks when eval-gate stub fails (review gate passing)" 1 $rc
 check_msg "merge: eval-gate failure message mentions NO-GO" "NO-GO" "$LAST_STDERR"
+
+# ─── Test 7: smoke-verify stub returns failure → merge blocks ────────────────
+# The wiring regression lock: review AND eval gates both stub to pass here
+# (matching Test 1's happy-path fixtures — see run_gate_test's GCSTUB above),
+# so if the smoke-verify call were ever deleted from merge.sh, every other
+# test in this file would stay green. MOCK_SMOKE_VERIFY_RC flips the
+# git-common-base.sh stub (default 0) to prove merge.sh actually calls
+# post_evals::smoke_verify and blocks on its failure — the merge-gate half of
+# the acceptance proof; post_evals.test.sh proves smoke_verify's own judgment
+# is correct, this proves merge.sh actually gates on it.
+MOCK_SMOKE_VERIFY_RC=1 run_gate_test "deadbeef" 0
+rc=$?
+check "merge blocks when smoke-verify stub fails (review + eval gates passing)" 1 $rc
+check_msg "merge: smoke-verify failure message names smoke-verify" "Smoke-verify" "$LAST_STDERR"
+check_msg "merge: smoke-verify failure message names the head sha" "deadbeef" "$LAST_STDERR"
 
 [[ $fails -eq 0 ]] && { echo PASS; exit 0; } || { echo "FAIL ($fails)"; exit 1; }

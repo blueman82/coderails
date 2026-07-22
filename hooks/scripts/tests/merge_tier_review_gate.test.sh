@@ -72,6 +72,12 @@ pr::state()  { echo "OPEN"; }
 pr::title()  { echo "Test PR"; }
 pr::review() { echo "APPROVED"; }
 pr::exists() { return 0; }
+
+# post_evals.sh's own source line is stripped from the wrapper (like
+# git-common/config), so its real smoke_verify never runs here — this file
+# exercises the tier-review gate, which runs only AFTER smoke-verify passes.
+# Stubbed to always succeed: this file has no reason to vary it.
+post_evals::smoke_verify() { return 0; }
 BASELIB
 
 # Stub gh: `pr merge` / branch-delete plumbing always succeeds; the tier-review
@@ -132,6 +138,14 @@ pr::has_coderails_eval_for_head() {
     PR_EVAL_TIER="${eval_tier}"
     return 0
 }
+
+# Only reached when the eval gate above passes — a minimal well-formed
+# tier-0 embed keeps smoke_verify's own checks 1-9 a fast no-op (smoke_verify
+# itself is separately stubbed to always return 0 in git-common-base.sh).
+pr::coderails_eval_embed_for_head() {
+    printf '{"tier":0,"tier_justification":"stub","head_sha":"deadbeef","evals":[]}'
+    return 0
+}
 GCSTUB
 
     local wrapper="$STUB_DIR/merge_test.sh"
@@ -146,6 +160,7 @@ WRAPPER
         NR==1 { next }
         /^source.*git-common/ { next }
         /^source.*config/ { next }
+        /^source.*post_evals/ { next }
         { print }
     ' "$MERGE_SH" >> "$wrapper"
 

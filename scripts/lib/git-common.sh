@@ -267,6 +267,58 @@ pr::has_coderails_eval_for_head() {
     return 1
 }
 
+# pr::coderails_eval_embed_for_head <num> <sha>
+# Echoes the fenced ```json evals.json embed from the NEWEST trusted comment
+# whose marker line matches <num>/<sha> (same "newest wins" rule as
+# pr::has_coderails_eval_for_head — a PR can accumulate multiple eval-artifact
+# comments, and only the latest is authoritative). This is what
+# post_evals::smoke_verify re-executes against at merge time: the artifact as
+# actually posted to the trusted PR comment, never a local evals.json file
+# the caller might not even have (the posting agent's working copy could be
+# anywhere, or gone).
+# Exit codes (same shape as pr::has_coderails_eval_for_head):
+#   0 = found a matching marker; embed printed to stdout (may be empty if the
+#       matching comment body carried no fenced json block — caller must
+#       treat an empty embed as a failure, this function only reports
+#       whether a MARKER matched, not whether the embed itself is well-formed)
+#   1 = fetched ok, no matching marker found at all
+#   2 = gh fetch failed (fail-closed)
+pr::coderails_eval_embed_for_head() {
+    local num="$1" sha="$2"
+    local encoded_bodies
+    if ! pr::_trusted_comment_bodies_or_fail "$num"; then
+        return 2
+    fi
+    encoded_bodies="$_PR_TRUSTED_COMMENT_BODIES"
+    local newest_body=""
+    local found=1
+    local encoded body line
+    while IFS= read -r encoded; do
+        [[ -n "$encoded" ]] || continue
+        if ! body=$(printf '%s' "$encoded" | base64 -d 2>/dev/null); then
+            printf '%s! Skipping a trusted comment body: base64 decode failed%s\n' "$C_YLW" "$C_RST" >&2
+            continue
+        fi
+        while IFS= read -r line; do
+            if eval_artifact::matches_marker "$line" "$num" "$sha"; then
+                newest_body="$body"
+                found=0
+            fi
+        done <<< "$body"
+    done <<< "$encoded_bodies"
+    [[ $found -eq 0 ]] || return 1
+    # Same fenced-block extraction idiom as tier-gate-runner.sh's
+    # tg_extract_evals_json (Task 4 embed contract): echo the FIRST fenced
+    # ```json block; post_evals.sh's own validator refuses a posted artifact
+    # with more than one, so this extractor never has to arbitrate that case.
+    printf '%s\n' "$newest_body" | awk '
+        /^```json[[:space:]]*$/ { infence=1; next }
+        /^```[[:space:]]*$/ { if (infence) exit; next }
+        infence { print }
+    '
+    return 0
+}
+
 # ━━━ Sync ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # Post-merge sync: bring the default branch up to date with origin. From the
 # primary worktree this is just `checkout main; pull`. From a LINKED worktree,

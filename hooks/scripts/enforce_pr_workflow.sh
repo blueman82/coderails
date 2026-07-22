@@ -26,6 +26,13 @@
 # scripts/merge.sh also sources it in-process elsewhere.
 . "$(dirname "$0")/../../scripts/lib/git-common.sh"
 
+# post_evals.sh — needed for gate_eval_artifact_for_merge's use of
+# post_evals::smoke_verify (the merge-time re-execution gate). Sourcing runs
+# only its function definitions: the CLI dispatch at the bottom of
+# post_evals.sh is guarded by `[[ "${BASH_SOURCE[0]}" == "${0}" ]]`, which is
+# false when sourced.
+. "$(dirname "$0")/../../scripts/post_evals.sh"
+
 IFS= read -r -d '' -t 5 input || true
 cmd=$(printf '%s' "$input" | jq -r '.tool_input.command // empty')
 
@@ -509,8 +516,81 @@ gate_eval_artifact_for_merge() {
       }
     }'
   else
-    gate_tier_review_status "$num" "$sha"
+    gate_smoke_verify "$num" "$sha" && gate_tier_review_status "$num" "$sha"
   fi
+  return 0
+}
+
+# gate_smoke_verify <num> <sha>
+# Closes the same gap as scripts/merge.sh's matching gate: the eval-artifact
+# gate above only parses the marker comment's result=GO text — checks 1-10 in
+# post_evals.sh's validate_structure never ran against a raw `gh pr merge`
+# either, only in the posting agent's own session at post time. Extracts the
+# embed from the SAME trusted comment the eval-artifact gate above already
+# matched, then runs post_evals::smoke_verify: checks 1-9 plus gate-time
+# re-execution of every tier>=1 scripted eval's cmd/negative_control inside a
+# detached worktree at the trusted head SHA. Exit 0 (stand aside) on success;
+# emits a deny JSON and returns 1 on any failure — same "one deny per
+# invocation" contract as the other gates in this file, and the caller only
+# proceeds to gate_tier_review_status when this returns 0.
+gate_smoke_verify() {
+  local num="$1" sha="$2"
+
+  local embed embed_rc=0
+  embed=$(pr::coderails_eval_embed_for_head "$num" "$sha") || embed_rc=$?
+  if [ "$embed_rc" -eq 2 ]; then
+    local reason
+    case "${PR_TRUST_FETCH_FAIL_REASON:-}" in
+      identity)   reason="Blocked: gh pr merge $num — GitHub fetch failed, could not resolve the authenticated identity (gh api user) for the smoke-verify gate. Retry, or check gh auth/network." ;;
+      permission) reason="Blocked: gh pr merge $num — GitHub fetch failed, could not resolve repo permission for the smoke-verify gate. Retry, or check gh auth/network." ;;
+      tempfile)   reason="Blocked: gh pr merge $num — local temporary file allocation failed (mktemp) before any GitHub fetch was attempted for the smoke-verify gate. Check /tmp disk space or permissions, then retry." ;;
+      *)          reason="Blocked: gh pr merge $num — GitHub fetch failed, could not fetch PR comments for the smoke-verify gate. Retry, or check gh auth/network." ;;
+    esac
+    jq -n --arg r "$reason" '{
+      hookSpecificOutput: {
+        hookEventName: "PreToolUse",
+        permissionDecision: "deny",
+        permissionDecisionReason: $r
+      }
+    }'
+    return 1
+  fi
+  if [ "$embed_rc" -ne 0 ]; then
+    jq -n --arg n "$num" --arg s "$sha" '{
+      hookSpecificOutput: {
+        hookEventName: "PreToolUse",
+        permissionDecision: "deny",
+        permissionDecisionReason: ("Blocked: gh pr merge " + $n + " — no coderails eval artifact embed found for current head " + $s + ". The eval-artifact gate above should have caught this first; investigate the mismatch before merging.")
+      }
+    }'
+    return 1
+  fi
+
+  local embed_file
+  embed_file=$(mktemp) || {
+    jq -n --arg n "$num" '{
+      hookSpecificOutput: {
+        hookEventName: "PreToolUse",
+        permissionDecision: "deny",
+        permissionDecisionReason: ("Blocked: gh pr merge " + $n + " — local temporary file allocation failed (mktemp) for the smoke-verify gate. Check /tmp disk space or permissions, then retry.")
+      }
+    }'
+    return 1
+  }
+  printf '%s' "$embed" > "$embed_file"
+
+  if ! post_evals::smoke_verify "$embed_file" "$sha"; then
+    rm -f "$embed_file"
+    jq -n --arg n "$num" --arg s "$sha" '{
+      hookSpecificOutput: {
+        hookEventName: "PreToolUse",
+        permissionDecision: "deny",
+        permissionDecisionReason: ("Blocked: gh pr merge " + $n + " — smoke-verify failed for current head " + $s + ". One or more scripted evals could not be confirmed by gate-time re-execution against the trusted commit. Do not bypass; fix the eval or the artifact and re-post.")
+      }
+    }'
+    return 1
+  fi
+  rm -f "$embed_file"
   return 0
 }
 

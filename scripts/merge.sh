@@ -5,6 +5,7 @@
 set -euo pipefail
 source "$(dirname "$0")/lib/git-common.sh"
 source "$(dirname "$0")/lib/config.sh"
+source "$(dirname "$0")/post_evals.sh"
 
 # coderails::_tier_review_machine_user <config_file>
 # Echoes the value of the nested key tier_review.machine_user from a
@@ -111,6 +112,44 @@ merge::main() {
                 fi
             fi
             ok "Eval artifact verified (SHA: $sha, tier ${PR_EVAL_TIER:-?})"
+
+            # ─── Smoke-verify gate (fail-closed) ──────────────────────────────
+            # The eval-artifact gate above only parses the marker comment's
+            # result=GO text — checks 1-10 in post_evals.sh's
+            # validate_structure never ran against it here, only in the
+            # posting agent's own session at post time (advisory, not
+            # binding). This gate makes checks 1-9 plus gate-time
+            # re-execution binding at merge: it extracts the embed from the
+            # SAME trusted comment the eval-artifact gate above already
+            # matched, checks out the trusted head SHA into a detached
+            # worktree, and re-executes every tier>=1 scripted eval's cmd and
+            # negative_control there — closing the gap where a hand-written
+            # smoke object for a script that never existed passed the
+            # eval-artifact gate at rc=0 (PR post_evals.sh check 9/10 never
+            # ran). Tier 0 has an empty .evals array, so this is a fast no-op
+            # at that tier; nothing to opt out of.
+            local embed_rc
+            embed_rc=0
+            embed=$(pr::coderails_eval_embed_for_head "$num" "$sha") || embed_rc=$?
+            if [[ $embed_rc -eq 2 ]]; then
+                case "${PR_TRUST_FETCH_FAIL_REASON:-}" in
+                    identity)   err "GitHub fetch failed — could not resolve the authenticated identity (gh api user) for the smoke-verify gate. Retry, or check gh auth/network." ;;
+                    permission) err "GitHub fetch failed — could not resolve repo permission for the smoke-verify gate. Retry, or check gh auth/network." ;;
+                    tempfile)   err "Local temporary file allocation failed (mktemp) before any GitHub fetch was attempted for the smoke-verify gate. Check /tmp disk space or permissions, then retry." ;;
+                    *)          err "GitHub fetch failed — could not fetch PR comments for the smoke-verify gate. Retry, or check gh auth/network." ;;
+                esac
+            elif [[ $embed_rc -ne 0 ]]; then
+                err "No coderails eval artifact embed found for current head $sha — the eval-artifact gate above should have caught this first; investigate the mismatch before merging."
+            fi
+            local embed_file
+            embed_file=$(mktemp) || err "Local temporary file allocation failed (mktemp) for the smoke-verify gate. Check /tmp disk space or permissions, then retry."
+            printf '%s' "$embed" > "$embed_file"
+            if ! post_evals::smoke_verify "$embed_file" "$sha"; then
+                rm -f "$embed_file"
+                err "Smoke-verify failed for current head $sha — one or more scripted evals could not be confirmed by gate-time re-execution against the trusted commit. See the reason above; do not bypass, fix the eval or the artifact and re-post."
+            fi
+            rm -f "$embed_file"
+            ok "Smoke-verify passed (SHA: $sha)"
 
             # ─── Tier-review gate (redundant defence-in-depth, fail-closed) ───
             # This layer is REDUNDANT BY DESIGN once the server-side ruleset is

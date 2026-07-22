@@ -1402,4 +1402,150 @@ check "validate_smoke_execution: jq unavailable → exit 1 (must not fail open)"
 [[ "$stderr_out" == *"jq"* ]]
 check "validate_smoke_execution: jq unavailable → stderr names jq" 0 $?
 
+# ═══ validate_structure: merge scope (checks 1-9, check 10 excluded) ════════
+# The merge-time gate (smoke_verify, below) re-executes cmd/negative_control
+# itself inside a detached worktree at the trusted head SHA — running check
+# 10 too, in the CALLER's cwd under its own 10s alarm, would be wrong twice:
+# wrong directory (defeats the worktree isolation and the priming defence)
+# and wrong timeout (false-fails a real discriminate-shaped command measured
+# at 21.5s). merge scope therefore runs checks 1-9 and stops — smoke_verify
+# owns re-execution, with its own worktree and its own longer timeout.
+FIX_MERGE_SCOPE="$TMP/merge_scope.json"
+jq -n --arg sha "$SHA" '{
+  tier: 1, tier_justification: "1 work-unit", head_sha: $sha,
+  evals: [ {id:"e1", priority:"P0", mode:"scripted", status:"pending",
+            cmd:"bash /path/does/not/exist.sh", negative_control:"bash /path/does/not/exist2.sh",
+            evidence:"log", smoke: {"cmd_exit":1,"negative_control_exit":1,"cmd_output":"x","negative_control_output":"y"}} ]
+}' > "$FIX_MERGE_SCOPE"
+post_evals::validate_structure "$FIX_MERGE_SCOPE" 42 "$SHA" merge
+check "validate_structure merge scope: checks 1-9 pass, check 10 (re-exec) skipped → exit 0" 0 $?
+
+# ═══ smoke_verify: merge-time binding re-execution (checks 1-9 + gate re-exec) ══
+# THE ACCEPTANCE TEST THAT MATTERS. Before this gate existed, an artifact
+# carrying a hand-written smoke object of ALLOWED shape whose cmd names a
+# script that never existed passed the merge path at rc=0 (merge.sh/
+# enforce_pr_workflow.sh only parse the posted marker's result=GO text — they
+# never re-run anything). smoke_verify closes that: it checks out the
+# TRUSTED head SHA into a detached worktree and re-executes every tier>=1
+# scripted eval's cmd/negative_control THERE, judging only what it observes.
+#
+# Fixtures are a real throwaway git repo (not a stub) so the worktree-add and
+# re-execution are genuinely exercised, matching this file's existing
+# freeze-before-build convention (real repos, not mocked git).
+SV_REPO="$TMP/sv_repo"
+mkdir -p "$SV_REPO"
+(
+  cd "$SV_REPO" || exit 1
+  git init -q -b main
+  git config user.email t@t; git config user.name t
+  printf '#!/bin/bash\necho "real check ran"\nexit 1\n' > real_check.sh
+  printf '#!/bin/bash\necho "real control ran"\nexit 1\n' > real_control.sh
+  chmod +x real_check.sh real_control.sh
+  git add -A; git commit -qm "honest scripts committed"
+) >/dev/null 2>&1
+SV_SHA=$(git -C "$SV_REPO" rev-parse HEAD)
+
+# (SV1) THE FABRICATION: cmd names a script that was NEVER COMMITTED to the
+# repo at SV_SHA — hand-typed smoke of allowed shape ({"cmd_exit":1,
+# "negative_control_exit":1}) for a script that doesn't exist in that tree.
+# Before smoke_verify, this passed the merge path (marker said result=GO).
+FIX_SV_FABRICATED="$TMP/sv_fabricated.json"
+jq -n --arg sha "$SV_SHA" '{
+  tier: 1, tier_justification: "1 work-unit", head_sha: $sha,
+  evals: [ {id:"e1", priority:"P0", mode:"scripted", status:"pass",
+            cmd:"bash never_committed.sh", negative_control:"bash real_control.sh",
+            evidence:"log", smoke: {"cmd_exit":1,"negative_control_exit":1,"cmd_output":"","negative_control_output":""}} ]
+}' > "$FIX_SV_FABRICATED"
+stderr_out=$(cd "$SV_REPO" && post_evals::smoke_verify "$FIX_SV_FABRICATED" "$SV_SHA" 2>&1)
+sv_fabricated_rc=$?
+check "smoke_verify: BEFORE/AFTER acceptance — fabricated script at real head SHA → exit 1 (refused)" 1 $sv_fabricated_rc
+[[ "$stderr_out" == *"e1"* ]]
+check "smoke_verify: fabricated script → stderr names the eval" 0 $?
+# No leaked worktree on the refusal path.
+leaked=$(git -C "$SV_REPO" worktree list --porcelain | grep -c '^worktree ' || true)
+check "smoke_verify: refusal path leaves exactly the primary worktree (cleanup ran)" 1 "$leaked"
+
+# (SV2) Honest artifact: both scripts are real and committed at SV_SHA, both
+# observed failing for a content reason. Must be ACCEPTED.
+FIX_SV_HONEST="$TMP/sv_honest.json"
+jq -n --arg sha "$SV_SHA" '{
+  tier: 1, tier_justification: "1 work-unit", head_sha: $sha,
+  evals: [ {id:"e1", priority:"P0", mode:"scripted", status:"pass",
+            cmd:"bash real_check.sh", negative_control:"bash real_control.sh",
+            evidence:"log", smoke: {"cmd_exit":1,"negative_control_exit":1,"cmd_output":"","negative_control_output":""}} ]
+}' > "$FIX_SV_HONEST"
+stderr_out=$(cd "$SV_REPO" && post_evals::smoke_verify "$FIX_SV_HONEST" "$SV_SHA" 2>&1)
+check "smoke_verify: honest artifact, real scripts, real head SHA → exit 0 (accepted)" 0 $?
+leaked=$(git -C "$SV_REPO" worktree list --porcelain | grep -c '^worktree ' || true)
+check "smoke_verify: accept path leaves exactly the primary worktree (cleanup ran)" 1 "$leaked"
+
+# (SV3) A negative_control that REALLY exits 0 in the worktree (vacuous),
+# whatever the typed smoke claims → refused. Reuses the same observed-not-
+# recorded doctrine as check 10, now at the gate boundary.
+printf '#!/bin/bash\nexit 0\n' > "$SV_REPO/always_passes.sh"
+git -C "$SV_REPO" add -A >/dev/null; git -C "$SV_REPO" commit -qm "add passing script" >/dev/null
+SV_SHA2=$(git -C "$SV_REPO" rev-parse HEAD)
+FIX_SV_VACUOUS="$TMP/sv_vacuous.json"
+jq -n --arg sha "$SV_SHA2" '{
+  tier: 1, tier_justification: "1 work-unit", head_sha: $sha,
+  evals: [ {id:"e1", priority:"P0", mode:"scripted", status:"pass",
+            cmd:"bash real_check.sh", negative_control:"bash always_passes.sh",
+            evidence:"log", smoke: {"cmd_exit":1,"negative_control_exit":1,"cmd_output":"","negative_control_output":""}} ]
+}' > "$FIX_SV_VACUOUS"
+stderr_out=$(cd "$SV_REPO" && post_evals::smoke_verify "$FIX_SV_VACUOUS" "$SV_SHA2" 2>&1)
+check "smoke_verify: negative_control really exits 0 at the gate → exit 1" 1 $?
+[[ "$stderr_out" == *"negative_control"* ]]
+check "smoke_verify: vacuous control at gate → stderr names negative_control" 0 $?
+
+# (SV4) deployed/fresh-clone surfaces are EXEMPT — never runnable in a local
+# worktree, and never runnable by smoke_run at freeze either. A scripted eval
+# carrying one of these surfaces, with a cmd naming nothing real, must NOT be
+# executed and must NOT block an otherwise-honest artifact.
+FIX_SV_DEPLOYED="$TMP/sv_deployed.json"
+jq -n --arg sha "$SV_SHA2" '{
+  tier: 1, tier_justification: "1 work-unit", head_sha: $sha,
+  evals: [
+    {id:"e1", priority:"P0", mode:"scripted", status:"pass",
+     cmd:"bash real_check.sh", negative_control:"bash real_control.sh",
+     evidence:"log", smoke: {"cmd_exit":1,"negative_control_exit":1,"cmd_output":"","negative_control_output":""}},
+    {id:"e2", priority:"P1", mode:"scripted", status:"pass", surface:"deployed",
+     cmd:"curl https://example.invalid/never-runs-locally", negative_control:"bash never_committed_either.sh",
+     evidence:"log", smoke: {"cmd_exit":1,"negative_control_exit":1,"cmd_output":"","negative_control_output":""}}
+  ]
+}' > "$FIX_SV_DEPLOYED"
+(cd "$SV_REPO" && post_evals::smoke_verify "$FIX_SV_DEPLOYED" "$SV_SHA2")
+check "smoke_verify: deployed-surface eval is exempt, honest P0 accepted → exit 0" 0 $?
+
+# (SV5) Fail closed, named reason: jq missing.
+stderr_out=$(PATH="$EMPTY_BIN"; cd "$SV_REPO" && post_evals::smoke_verify "$FIX_SV_HONEST" "$SV_SHA" 2>&1)
+check "smoke_verify: jq unavailable → exit 1 (must not fail open)" 1 $?
+[[ "$stderr_out" == *"jq"* ]]
+check "smoke_verify: jq unavailable → stderr names jq" 0 $?
+
+# (SV6) Fail closed, named reason: worktree-add failure (a head_sha that
+# passes check 6's embed-vs-trusted-sha comparison — both arguments are the
+# same bogus value — but does not resolve to any real commit).
+BOGUS_SHA="0000000000000000000000000000000000dead"
+FIX_SV_BOGUS_SHA="$TMP/sv_bogus_sha.json"
+jq -n --arg sha "$BOGUS_SHA" '{
+  tier: 1, tier_justification: "1 work-unit", head_sha: $sha,
+  evals: [ {id:"e1", priority:"P0", mode:"scripted", status:"pass",
+            cmd:"bash real_check.sh", negative_control:"bash real_control.sh",
+            evidence:"log", smoke: {"cmd_exit":1,"negative_control_exit":1,"cmd_output":"","negative_control_output":""}} ]
+}' > "$FIX_SV_BOGUS_SHA"
+stderr_out=$(cd "$SV_REPO" && post_evals::smoke_verify "$FIX_SV_BOGUS_SHA" "$BOGUS_SHA" 2>&1)
+check "smoke_verify: unresolvable head SHA → exit 1 (worktree add fails closed)" 1 $?
+[[ "$stderr_out" == *"worktree"* ]]
+check "smoke_verify: unresolvable head SHA → stderr names worktree failure" 0 $?
+leaked=$(git -C "$SV_REPO" worktree list --porcelain | grep -c '^worktree ' || true)
+check "smoke_verify: worktree-add failure path leaves exactly the primary worktree" 1 "$leaked"
+
+# (SV7) Fail closed, named reason: unparseable embed.
+BAD_EMBED="$TMP/sv_bad_embed.json"
+printf 'NOT JSON {{{' > "$BAD_EMBED"
+stderr_out=$(cd "$SV_REPO" && post_evals::smoke_verify "$BAD_EMBED" "$SV_SHA" 2>&1)
+check "smoke_verify: unparseable embed → exit 1" 1 $?
+[[ "$stderr_out" == *"JSON"* || "$stderr_out" == *"json"* ]]
+check "smoke_verify: unparseable embed → stderr names the reason" 0 $?
+
 [[ $fails -eq 0 ]] && { echo PASS; exit 0; } || { echo "FAIL ($fails)"; exit 1; }
