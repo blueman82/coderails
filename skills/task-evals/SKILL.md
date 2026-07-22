@@ -147,7 +147,7 @@ GO requires all P0 evals to pass. P1 failures don't block the gate but must be l
 
 `smoke` is required on scripted evals at pr scope (check 9) and carries no `schema_version` bump: it is additive, and loop-scope files — which check 9 does not gate — tolerate its absence exactly as before. Loop scope is excluded deliberately, matching check 8's boundary: loop-scope artifacts are gated by `loop_state_guard`, a separate surface with its own callers, so extending the smoke contract there is its own decision rather than a side effect of this one.
 
-This copy and the design spec's copy are kept in lockstep; the enforcement components implement against this definition: `scripts/lib/eval-artifact.sh` (the marker/result SSOT), `scripts/post_evals.sh` (structural validation + result computation + `validate-discriminating`'s fixtures gate, invoked by `/coderails:post-evals`), and the `loop_state_guard` loop-scope gate (blocks loop completion at ≥3 work-units with no passing loop-scope `evals.json`).
+This file is the schema's only tracked copy — there is no separate design spec in the repo (verified: `git ls-files` matches nothing but this file). The enforcement components implement against this definition: `scripts/lib/eval-artifact.sh` (the marker/result SSOT), `scripts/post_evals.sh` (structural validation + result computation + `validate-discriminating`'s fixtures gate, invoked by `/coderails:post-evals`), and the `loop_state_guard` loop-scope gate (blocks loop completion at ≥3 work-units with no passing loop-scope `evals.json`).
 
 ## Where evals.json lives
 
