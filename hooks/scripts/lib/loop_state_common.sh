@@ -1160,30 +1160,32 @@ not also appear in .proofs." >&2
   fi
 }
 
-# ── Token-burn reduction gates (rows 1 and 4 of the 2026-07-17 measures) ─────
+# ── Token-burn reduction gate (row 4 of the 2026-07-17 measures) ────────────
 #
-# WHY THESE ARE HOOKS AND NOT PROSE. The seven measures shipped 2026-07-17 as
-# SKILL.md prose. Row 1 said "MANDATORY" in capitals and fired ZERO times in
-# the five days after it shipped (verified 2026-07-22 by counting
-# compact_boundary records with compactMetadata.trigger=="manual" across every
-# transcript in ~/.claude/projects/ — 17 merges / 0 compactions in the worst
-# single loop). A rule nothing checks is a suggestion. These two gates make
-# rows 1 and 4 checkable by the harness, outside the model's control.
+# WHY THIS IS A HOOK AND NOT PROSE. The seven measures shipped 2026-07-17 as
+# SKILL.md prose. A rule nothing checks is a suggestion. This gate makes row 4
+# checkable by the harness, outside the model's control.
 #
-# UNGAMEABLE BY CONSTRUCTION: both key on evidence the model does not author.
-# compact_boundary records are written by the harness when /compact runs;
-# tool_use/tool_result pairs are written by the harness when a tool executes.
-# Neither is satisfiable by the model emitting a marker or asserting a reason —
-# the failure mode this repo already has a documented history of (the tier-gate
-# self-declared-tier bypass). The only way past either gate is to DO THE THING.
+# UNGAMEABLE BY CONSTRUCTION: it keys on evidence the model does not author.
+# tool_use/tool_result pairs are written by the harness when a tool executes,
+# so the gate is not satisfiable by the model emitting a marker or asserting a
+# reason — the failure mode this repo already has a documented history of (the
+# tier-gate self-declared-tier bypass). The only way past the gate is to DO THE
+# THING.
 #
 # TRUST BOUNDARY (same as als_gate_proofs_on_complete): the transcript is
 # treated as harness-written. A session that deliberately appends forged
-# records to its own transcript file defeats these gates, as it defeats every
+# records to its own transcript file defeats this gate, as it defeats every
 # transcript-reading hook. The target is the OBSERVED failure — silent
 # omission of a mandated step — not adversarial forgery.
 #
-# ROWS 2 AND 3 SHIP NO GATE. Deliberate, not an oversight:
+# ROWS 1, 2 AND 3 SHIP NO GATE. Deliberate, not an oversight:
+#   Row 1 (mandatory /compact at each PR-merge boundary) shipped a per-stop
+#     blocking gate on 2026-07-17 and was REMOVED on 2026-07-22: /compact is a
+#     slash command the model cannot invoke programmatically, so a gate that
+#     blocks a stop demanding a compaction the model cannot perform is a
+#     guaranteed deadlock, and no session in the corpus ever satisfied the
+#     "manual compactions >= merges" invariant it enforced.
 #   Row 2 (pin the orchestrator model) is observable — orchestrator model mix
 #     reads straight from .message.model. But no BLOCKING gate is
 #     constructible, for a reason no amount of predicate-tightening fixes:
@@ -1203,138 +1205,6 @@ not also appear in .proofs." >&2
 #     legitimate sequential work. A check that cannot separate those is not an
 #     enforcement mechanism. Not shipping it is more honest than shipping one
 #     that warns (a warning is what rows 1-4 already were).
-
-# Count SUCCESSFUL PR merges in the orchestrator transcript. Stdout: an integer.
-#
-# "Successful" is load-bearing, and so is the read/write distinction:
-#   - Only a WRITE action counts: `gh pr merge` or the repo's scripts/merge.sh.
-#     Read-only queries (`gh pr view ... mergeable`, `git log --merges`,
-#     `gh pr list ... mergedAt`) are everywhere in real transcripts and would
-#     make a naive /merge/ grep fire constantly — verified against the real
-#     corpus, where merge QUERIES outnumber merge ACTIONS several-fold.
-#   - A merge whose tool_result carries is_error:true FAILED, and a failed
-#     merge did not cross a PR-merge boundary, so it must not demand a
-#     compaction. Same tool_use/tool_result pairing als_gate_proofs_on_complete
-#     uses. is_error absent/null counts as success (matching gh's normal
-#     no-error shape), so the count stays a FLOOR on reality — which is the
-#     right direction: the gameable direction here is inflating compactions,
-#     not hiding merges, and a model that hides a merge gets no benefit.
-# Fail-open: jq missing, unreadable transcript, or a jq error all yield 0
-# (no merges observed -> nothing demanded).
-als_count_successful_merges() { # transcript -> integer on stdout
-  local transcript="$1"
-  command -v jq >/dev/null 2>&1 || { printf '0'; return 0; }
-  [ -r "$transcript" ] || { printf '0'; return 0; }
-  local n
-  n=$(jq -R 'fromjson? // empty' "$transcript" 2>/dev/null | jq -s -r '
-    . as $records
-    | ( [ $records[]?
-          | select(type == "object" and .type == "user")
-          | .message.content[]?
-          | select(type == "object" and .type == "tool_result")
-          | select((.tool_use_id | type) == "string")
-          | {id: .tool_use_id, is_error: (.is_error // null)} ] ) as $results
-    | [ $records[]?
-        | select(type == "object" and .type == "assistant")
-        | .message.content[]?
-        | select(type == "object" and .type == "tool_use" and .name == "Bash")
-        | select((.id | type) == "string")
-        | {id: .id, cmd: ((.input.command // "") | if type == "string" then . else "" end)}
-        # A merge ACTION, never a read-only query. Anchored to a command
-        # boundary (start, or after ; & | or whitespace) so a substring inside
-        # an unrelated word cannot match.
-        | select(.cmd | test("(^|[;&|[:space:]])(bash[[:space:]]+)?(\\./)?scripts/merge\\.sh|(^|[;&|[:space:]])gh[[:space:]]+pr[[:space:]]+merge"))
-        # Drop the ones that demonstrably failed. A tool_use with no result at
-        # all (still running / transcript truncated mid-flush) is NOT counted:
-        # an unfinished merge has not crossed a boundary yet.
-        | . as $m
-        | select( [ $results[] | select(.id == $m.id) ] | last | (. != null and .is_error != true) )
-      ] | length
-  ' 2>/dev/null)
-  case "$n" in ''|*[!0-9]*) n=0 ;; esac
-  printf '%s' "$n"
-}
-
-# Count MANUAL compactions in the orchestrator transcript. Stdout: an integer.
-# Keys on the harness-written record: type=="system", subtype=="compact_boundary",
-# compactMetadata.trigger=="manual". An "auto" trigger does NOT count — row 1
-# mandates a deliberate compaction at the merge boundary; an automatic
-# context-pressure compaction is the harness rescuing an already-full context,
-# which is the outcome row 1 exists to PREVENT, not evidence of compliance.
-# Fail-open to 0 on any infrastructure failure.
-als_count_manual_compactions() { # transcript -> integer on stdout
-  local transcript="$1"
-  command -v jq >/dev/null 2>&1 || { printf '0'; return 0; }
-  [ -r "$transcript" ] || { printf '0'; return 0; }
-  local n
-  n=$(jq -R 'fromjson? // empty' "$transcript" 2>/dev/null | jq -s -r '
-    [ .[]?
-      | select(type == "object")
-      | select(.type == "system" and .subtype == "compact_boundary")
-      | select(.compactMetadata.trigger == "manual") ] | length
-  ' 2>/dev/null)
-  case "$n" in ''|*[!0-9]*) n=0 ;; esac
-  printf '%s' "$n"
-}
-
-# ROW 1 GATE — mandatory /compact at each PR-merge boundary.
-#
-# INVARIANT (per-stop, not per-completion): on ANY stop of an active loop,
-#   manual_compactions >= successful_merges
-# Blocks with exit 2 when merges exceed compactions.
-#
-# WHY PER-STOP AND NOT AT `complete`. Two weaker thresholds were rejected:
-#   compactions >= merges checked only at `complete` is satisfiable
-#     retroactively in the worst way — the loop end-loads N compactions after
-#     the context cost has already been paid, which is precisely the saving
-#     row 1 exists to capture. It enforces a COUNT while the measure is about
-#     TIMING.
-#   compactions >= 1 is end-load-gameable by a single final /compact.
-# The per-stop form fixes both: the loop is blocked at boundary 1 and cannot
-# reach boundary 2 without compacting, so end-loading is structurally
-# impossible and each compaction lands AT its boundary. Verified against real
-# transcripts that this is achievable: orchestrators stop between merges in a
-# clean STOP/MERGE alternation (sampled 5508a7df — 17 merges, a stop before
-# and after every one), so there is always a stop at which to comply.
-#
-# RECOVERY PATH — the property that makes blocking safe rather than a
-# deadlock. The block is cleared by DOING THE THING: run /compact, stop again,
-# the counts balance, the gate passes. It is NOT clearable by asserting a
-# reason, writing a marker, or editing progress.json — there is no
-# self-attestation escape, which is the whole point. Bounded by
-# als_gate_stop_loop (the stop_hook_active release) exactly like every sibling
-# gate here, so a single stop is taxed at most once and no infinite loop is
-# possible.
-#
-# HONEST BOUNDARY: this enforces that a compaction HAPPENED at each merge
-# boundary. It cannot verify the compaction was well-timed WITHIN the turn, and
-# it cannot recover context already burned before the gate first fires. Its job
-# is to make the skip impossible-to-silently-commit, not to retroactively save
-# tokens.
-#
-# Fail-open on infrastructure (no jq, unreadable transcript -> both counts 0 ->
-# 0 >= 0 -> allow); fail-closed on evidence (merges observed, compactions
-# short -> block). Never degrades a real violation to silence.
-als_gate_compaction_per_stop() { # hook session transcript
-  local hook="$1" session="$2" transcript="$3"
-  command -v jq >/dev/null 2>&1 || { als_log "hook=$hook session=$session compaction_gate=skipped_no_jq"; return 0; }
-  [ -n "$transcript" ] && [ -r "$transcript" ] || return 0
-  local merges compactions
-  merges=$(als_count_successful_merges "$transcript")
-  compactions=$(als_count_manual_compactions "$transcript")
-  [ "$merges" -gt "$compactions" ] || { als_log "hook=$hook session=$session compaction_gate=ok merges=$merges compactions=$compactions"; return 0; }
-  als_log "hook=$hook session=$session compaction_gate=blocked merges=$merges compactions=$compactions"
-  echo "[loop-stall-guard] PR-merge boundary compaction missing: $merges successful merge(s) in this
-loop, but only $compactions manual compaction(s).
-skills/agentic-loop/SKILL.md makes /compact at each PR-merge boundary mandatory
-— it is the single largest token saving in the loop, and it went unrun for five
-days because nothing checked it.
-RECOVERY: run /compact now, then stop again. One manual compaction per merged
-PR clears this. Nothing else does — this gate counts harness-written
-compact_boundary records, so it cannot be satisfied by a marker, a note, or an
-edit to progress.json." >&2
-  exit 2
-}
 
 # ROW 4 GATE — the orchestrator never authors deliverable files inline.
 #
