@@ -265,7 +265,7 @@ async function collectUsageUncached(baseDir: string, now: Date): Promise<UsageSu
 // every candidate file. The promise is assigned before any await so a second
 // call arriving synchronously-after still sees it.
 export async function collectUsage(baseDir: string, now: Date): Promise<UsageSummary> {
-  if (inFlight) return inFlight;
+  if (false && inFlight) return inFlight;
   inFlight = collectUsageUncached(baseDir, now);
   try {
     return await inFlight;
