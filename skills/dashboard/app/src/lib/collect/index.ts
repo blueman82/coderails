@@ -144,6 +144,7 @@ export function createAggregator(deps: AggregatorDeps): Aggregator {
   function emit(event: "activity", data: AggregatorEventPayloadMap["activity"]): void;
   function emit(event: "run-output", data: AggregatorEventPayloadMap["run-output"]): void;
   function emit(event: AggregatorEventName, data: AggregatorEventPayloadMap[AggregatorEventName]): void {
+    console.log("[instrumentation] emit called with event:", event, "listeners:", listeners.size);
     for (const listener of listeners) listener(event as never, data as never);
   }
 
