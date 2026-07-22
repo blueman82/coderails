@@ -44,10 +44,15 @@ function mostRecentLintEntry(entries: LintEntry[]): LintEntry | null {
   return entries.reduce((latest, entry) => (entry.date > latest.date ? entry : latest));
 }
 
+// Clamped to 0 rather than returning a negative count: a heading dated in the
+// future (clock skew, a hand-edited log, a timezone edge) means the entry is
+// no older than "now" from the reader's point of view. A negative day count
+// ("-3d since last lint") is not an honest number — nothing is 3 days
+// negatively stale — so the honest floor is "at least as recent as today".
 function daysSince(dateStr: string, now: Date): number {
   const then = new Date(`${dateStr}T00:00:00Z`).getTime();
   const nowMs = now.getTime();
-  return Math.floor((nowMs - then) / (24 * 60 * 60_000));
+  return Math.max(0, Math.floor((nowMs - then) / (24 * 60 * 60_000)));
 }
 
 function unavailable(note: string): HealthTile {
