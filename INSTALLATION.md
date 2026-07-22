@@ -130,7 +130,7 @@ like the test gate — enforces the PR chain, e.g. blocks a direct `git push` to
 `main` unless `/pr-review-toolkit:review-pr` already ran this session),
 `no_edit_on_main` (blocks editing source files, but not docs/config, while on
 `main` — use `/coderails:prep` or a worktree instead; it also blocks editing
-`.claude/settings.json`/`settings.local.json` on any branch), and
+`.claude/settings.json`/`settings.local.json` on any branch),
 `comment_citation_gate` (blocks new code comments that cite a session-artifact
 label like `E#:`/`Task A#`/`CHANGE B#` instead of stating the constraint the
 code enforces; `.md` files are exempt), and `crack_on_gate` on `AskUserQuestion`
