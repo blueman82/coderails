@@ -210,13 +210,13 @@ export function createAggregator(deps: AggregatorDeps): Aggregator {
     const queue = deps.queueDir ? safeCall("queue", () => collectQueue(deps.queueDir!, queueLimit), []) : [];
     const builds = deps.buildsDir ? safeCall("builds", () => collectBuilds(deps.buildsDir!), []) : [];
     // Rides the activity slice like health does. First collection streams the
-    // full transcript corpus once; the collector's module-scope per-file cache
-    // makes every later refresh a stat() sweep plus a re-parse of only the
-    // files that actually changed.
+    // full transcript corpus once; the collector's per-file cache (either
+    // explicit or module-scope) makes every later refresh a stat() sweep
+    // plus a re-parse of only the files that actually changed.
     console.log("[instrumentation] about to call collectContextTrend");
     const contextTrend = await safeCallAsync("contextTrend", () => {
       console.log("[instrumentation] inside contextTrend safeCallAsync");
-      return collectContextTrend(deps.projectsDir);
+      return collectContextTrend(deps.projectsDir, { cache: deps.contextTrendCache });
     }, null);
     console.log("[instrumentation] collectActivitySlice complete, sessions:", sessions.length, "contextTrend:", contextTrend);
     return { sessions, loops, health, queue, builds, contextTrend };
