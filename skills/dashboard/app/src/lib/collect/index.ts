@@ -274,8 +274,13 @@ export function createAggregator(deps: AggregatorDeps): Aggregator {
     },
 
     subscribe(listener) {
+      console.log("[instrumentation] subscribe called, listeners before:", listeners.size);
       listeners.add(listener);
-      return () => listeners.delete(listener);
+      console.log("[instrumentation] subscribe called, listeners after:", listeners.size);
+      return () => {
+        console.log("[instrumentation] unsubscribe called");
+        listeners.delete(listener);
+      };
     },
 
     start(): void {
