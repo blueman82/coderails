@@ -1269,6 +1269,23 @@ check "_run_recorded: excerpt retains the TAIL verdict (test-runner shape)" 0 $?
 [[ ${#head_tail_out} -lt 700 ]]
 check "_run_recorded: excerpt stays bounded on long output" 0 $?
 
+# (X7-ter) The alarm must bound WALL CLOCK even when the command forks. The
+# old exec-based wrapper delivered SIGALRM only to the process perl became:
+# a grandchild (the sleep inside a script) was never signalled, kept the
+# inherited stdout pipe open, and the command substitution blocked until the
+# orphan exited — observed 30s elapsed for a 10s cap, correct rc, broken
+# bound. `bash script.sh` is exactly the shape real eval cmds take, and
+# check 10 put this wrapper on the merge hot path. The fix kills the child's
+# process group. Short cap via the wrapper's timeout argument so this test
+# costs ~2s, not 10.
+printf '#!/bin/bash\nsleep 30\n' > "$SR_DIR/hang_forking.sh"
+_hang_start=$SECONDS
+hang_out=$(post_evals::_run_recorded "bash $SR_DIR/hang_forking.sh" 2)
+_hang_elapsed=$((SECONDS - _hang_start))
+check_str "_run_recorded: forking hang → rc 142 (timeout sentinel preserved)" "142" "${hang_out%%:*}"
+[[ $_hang_elapsed -lt 10 ]]
+check "_run_recorded: forking hang bounded by the cap (elapsed ${_hang_elapsed}s, want <10s)" 0 $?
+
 # (X8) Same fail-open lesson: no jq, no run.
 stderr_out=$(PATH="$EMPTY_BIN"; post_evals::smoke_run "$FIX_SR_HONEST" 2>&1)
 check "smoke_run: jq unavailable → exit 1 (must not fail open)" 1 $?
