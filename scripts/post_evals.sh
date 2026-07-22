@@ -11,7 +11,6 @@
 # BASH_SOURCE-relative so this works regardless of cwd.
 _POST_EVALS_DIR="$(dirname "${BASH_SOURCE[0]}")"
 source "${_POST_EVALS_DIR}/lib/eval-artifact.sh"
-source "${_POST_EVALS_DIR}/lib/tier-floor.sh"
 
 # post_evals::validate_structure <evals_json_path> <pr> <current_head_sha> [scope]
 # Exit 0 if the file passes every structural refusal check; exit 1 + a
@@ -145,7 +144,6 @@ post_evals::validate_structure() {
     return 0
 }
 
-<<<<<<< HEAD
 # post_evals::validate_freeze <evals_json_path>
 # Check 8's body, factored out to keep validate_structure readable.
 #
@@ -218,36 +216,6 @@ post_evals::validate_freeze() {
 
     printf 'post_evals: frozen_sha %s is not an ancestor of the branch base %s — the evals were frozen after implementation began (freeze-before-build). Fix the freeze, or disclose the late freeze in tier_justification or an amendment reason.\n' "$frozen" "$base" >&2
     return 1
-=======
-# post_evals::validate_tier_floor <evals_json_path> <pr>
-# Checks the file's own claimed .tier against the floor derived from the PR's
-# actual diff. Exit 0 if the claim clears the floor (or the diff could not be
-# fetched — infrastructure); exit 1 + a named reason otherwise.
-#
-# WHY THIS IS NOT THE CONTROL. Everything else in this file validates the
-# artifact against itself; this is the only check that tests it against the
-# change under review, so it belongs here — an author who runs post-evals
-# learns immediately, before posting, rather than at merge. But a dishonest
-# actor is under no obligation to run post_evals at all: the artifact is an
-# ordinary PR comment, and one can be hand-posted with any marker. So this is
-# fast feedback for honest authors, NOT a security boundary. The enforced
-# copies are in scripts/merge.sh and hooks/scripts/enforce_pr_workflow.sh,
-# which read the artifact off the PR and cannot be skipped by not running a
-# script. All three call the same tier_floor::gate_pr, so they cannot drift.
-post_evals::validate_tier_floor() {
-    local path="$1" pr="$2"
-
-    local tier
-    tier=$(jq -r '.tier // ""' "$path" 2>/dev/null)
-
-    local out rc=0
-    out=$(tier_floor::gate_pr "$tier" "$pr") || rc=$?
-    case $rc in
-        0) return 0 ;;
-        3) printf 'post_evals: %s\n' "$out" >&2; return 0 ;;
-        *) printf 'post_evals: %s\n' "$out" >&2; return 1 ;;
-    esac
->>>>>>> 0041f48 (WIP: context-trend panel, token-measure enforcement, tier-floor (interleaved))
 }
 
 # post_evals::validate_embed <evals_json_path> <body_path>
@@ -546,9 +514,6 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
         compute-result)
             post_evals::compute_and_validate_result "${2:?compute-result requires a file argument}"
             ;;
-        validate-tier-floor)
-            post_evals::validate_tier_floor "${2:?validate-tier-floor requires a file argument}" "${3:?validate-tier-floor requires a PR argument}"
-            ;;
         validate-embed)
             post_evals::validate_embed "${2:?validate-embed requires a file argument}" "${3:?validate-embed requires a body path argument}"
             ;;
@@ -559,7 +524,6 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
             printf 'Usage: post_evals.sh validate-structure <path> <pr> <sha>\n' >&2
             printf '       post_evals.sh validate-discriminating <path>\n' >&2
             printf '       post_evals.sh compute-result <path>\n' >&2
-                    printf '       post_evals.sh validate-tier-floor <path> <pr>\n' >&2
             printf '       post_evals.sh validate-embed <path> <body_path>\n' >&2
             printf '       post_evals.sh grade-loop <path>\n' >&2
             exit 1
