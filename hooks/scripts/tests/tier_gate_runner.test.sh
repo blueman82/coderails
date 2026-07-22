@@ -1223,4 +1223,79 @@ out=$(
 )
 check "RS4: malformed TIER_GATE_REPO -> falls back to git-remote parse" "fallback-owner/fallback-repo" "$out"
 
+# ─── tg_should_gate: error-retry (bounded), success/failure terminal ────────
+# Redefines tg_commit_statuses directly (the brief's documented approach) —
+# this stubs ONLY the I/O boundary, so the real tg_latest_status_state /
+# tg_latest_status_age_secs / case dispatch inside tg_should_gate all run for
+# real. tg_commit_statuses itself already has no test-suite coverage of its
+# own callers here, so redefining it (rather than the STATUSES_FILE/curl
+# plumbing used elsewhere in this file) keeps these cases focused on
+# tg_should_gate's dispatch logic alone.
+
+# sg_epoch_iso <seconds_ago> — echoes an ISO8601 UTC timestamp <seconds_ago>
+# seconds before now. BSD `date -r` (macOS) with a GNU `date -d @<epoch>`
+# fallback, matching tg_latest_status_age_secs's own BSD/GNU idiom.
+sg_epoch_iso() {
+    local secs_ago="$1"
+    local epoch=$(( $(date +%s) - secs_ago ))
+    date -u -r "$epoch" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
+        || date -u -d "@$epoch" +%Y-%m-%dT%H:%M:%SZ
+}
+
+# sg_statuses_of <state> <count> — echoes a newest-first JSON array of <count>
+# status objects all in <state>, each with a distinct (fresh) created_at.
+sg_statuses_of() {
+    local state="$1" count="$2"
+    local out="[" i=0
+    while [[ $i -lt $count ]]; do
+        [[ $i -gt 0 ]] && out+=","
+        out+="{\"state\":\"$state\",\"context\":\"tier-review\",\"created_at\":\"$(sg_epoch_iso "$i")\",\"description\":\"x\"}"
+        i=$((i+1))
+    done
+    out+="]"
+    printf '%s' "$out"
+}
+
+sg_check_gate() { # <desc> <expected_rc> <statuses_json>
+    local desc="$1" expected_rc="$2" sg_fixture="$3"
+    # NOTE: must NOT name this local `statuses_json` — tg_should_gate below
+    # declares its own `local statuses_json`, and since bash locals shadow
+    # down the call stack (including into command-substitution subshells),
+    # a same-named local here gets shadowed by tg_should_gate's (still
+    # unset) one before this closure's printf runs, tripping `set -u`.
+    tg_commit_statuses() { printf '%s' "$sg_fixture"; }
+    local rc
+    if tg_should_gate "some-sha"; then rc=0; else rc=1; fi
+    check "$desc" "$expected_rc" "$rc"
+}
+
+# THE FIX: a single prior `error` status, below the retry cap -> re-gate (rc 0).
+sg_check_gate "SG1: error x1 (below cap) -> re-gates" 0 "$(sg_statuses_of error 1)"
+
+# BOUNDED: at and above the cap -> skip (rc 1). Default cap is
+# TIER_GATE_MAX_ERROR_RETRIES=2, so 2 prior errors is AT the cap.
+sg_check_gate "SG2: error at cap (2 prior errors) -> skips" 1 "$(sg_statuses_of error 2)"
+sg_check_gate "SG3: error above cap (3 prior errors) -> skips" 1 "$(sg_statuses_of error 3)"
+
+# SAFETY (the invariant that matters most): success/failure stay terminal at
+# EVERY count — this already passes on the pre-fix code (error was grouped
+# with them); these cases prove the fix does not loosen that grouping when
+# error is carved out. Not a new behaviour — a preserved one.
+for n in 1 2 3 5; do
+    sg_check_gate "SG4: success x$n -> skips (terminal, unconditional)" 1 "$(sg_statuses_of success "$n")"
+    sg_check_gate "SG5: failure x$n -> skips (terminal, unconditional)" 1 "$(sg_statuses_of failure "$n")"
+done
+
+# Unknown/default state -> fails closed (skip), unchanged by this fix.
+sg_check_gate "SG6: unknown/garbage state -> skips (fails closed)" 1 '[{"state":"some_garbage_state","context":"tier-review","created_at":"2020-01-01T00:00:00Z","description":"x"}]'
+
+# Pre-existing behaviour, must not regress:
+sg_check_gate "SG7: no status at all -> re-gates" 0 '[]'
+
+fresh_pending_ts=$(sg_epoch_iso 0)
+sg_check_gate "SG8: fresh pending -> skips" 1 "[{\"state\":\"pending\",\"context\":\"tier-review\",\"created_at\":\"$fresh_pending_ts\",\"description\":\"x\"}]"
+
+stale_pending_ts=$(sg_epoch_iso $((TIER_GATE_PENDING_TTL + 60)))
+sg_check_gate "SG9: stale pending (past TTL) -> re-gates" 0 "[{\"state\":\"pending\",\"context\":\"tier-review\",\"created_at\":\"$stale_pending_ts\",\"description\":\"x\"}]"
+
 [[ $fails -eq 0 ]] && { echo PASS; exit 0; } || { echo "FAIL ($fails)"; exit 1; }
