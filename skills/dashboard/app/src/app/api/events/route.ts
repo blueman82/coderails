@@ -87,7 +87,6 @@ export function createEventsHandler(deps: EventsHandlerDeps) {
         });
       },
       cancel() {
-        console.log("[instrumentation] route: ReadableStream cancel called");
         unsubscribe?.();
         aggregator.stop();
       },
