@@ -46,7 +46,9 @@ A broken instrument looks like this in the raw output: a reporter-loading error 
 
 What to do on discovery depends on timing: at freeze time the file is not yet frozen, so a broken `cmd` or `negative_control` is simply rewritten and re-run — no amendment needed, nothing to record. Discovered after `frozen_at`/`frozen_sha` are stamped, it goes through the amendment path instead: recorded reason, assertion left unchanged, and if a grader verdict already exists for that eval, a fresh re-grade per rule 5.
 
-**The result is recorded, not attested.** Every scripted eval carries a `smoke` object holding the observed exit code of its `cmd` and its `negative_control`, plus a short output excerpt. `post_evals.sh validate-structure` (check 9) refuses any pr-scope tier≥1 scripted eval that lacks one, so this step is mandatory by mechanism rather than by honour. Record what actually happened — a fabricated exit code is a false statement in a durable artifact, not a shortcut.
+**The result is computed, not attested.** Do not hand-write the smoke evidence. Run `scripts/post_evals.sh smoke-run <evals.json>` immediately before freezing: it executes every scripted eval's `cmd` and `negative_control`, and writes the observed exit codes and output excerpts into a `smoke` object on each eval, overwriting whatever was there. `post_evals.sh validate-structure` (check 9) then refuses any pr-scope tier≥1 scripted eval lacking one.
+
+The split matters. A checker that merely *reads* recorded exit codes is not enough, because the agent writes those numbers — and an agent freezing a command for a script it intends to create records the code it *expects* (`1`, "the assertion fails until I build it"), never having run the command. That is precisely how the real defect happened. This is rule 5 applied to smoke evidence: a neutral script computes it, the author never hand-writes it. `smoke-run` records without judging — it returns 0 even when what it observed is damning, because refusing is check 9's job.
 
 Check 9 refuses three outcomes, and deliberately permits a fourth:
 
