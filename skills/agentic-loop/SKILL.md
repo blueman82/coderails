@@ -72,12 +72,14 @@ Step 2 has two paths. Which one applies is decided by the authorising prompt's e
 
 **Full-autonomous envelope → auto-adopt, do not ask.** An `AskUserQuestion` here is a human gate, and a full-autonomous envelope has already withdrawn consent for gates. Do not resolve that contradiction by skipping Phase -1 — the improve-prompt output is worth more in autonomous operation, not less, because there is no human downstream to catch a vague envelope. Instead: run Step 1, emit the improved prompt, and auto-adopt outcome **A** without asking. Concretely:
 
-1. Emit the improved prompt as final turn text (delivery mechanism (a) below) so it stays visible. Auto-adoption must not make it invisible — the user has waived the gate, not the record.
-2. Write the improved prompt to `progress.json.authorising_prompt_raw` as the canonical envelope.
-3. Append `{phase: "-1", decision: "auto-adopted improved prompt as envelope; flip-condition: user names a divergence between the improved and original prompt"}` to `progress.json`'s `decisions_absorbed` array.
-4. Note the auto-adoption at the next approval gate, and proceed to Phase 0 in the same turn. Do not stall — adopting a sharpened envelope is neither a verification failure nor a destructive action, so Phase 0's rule says the loop proceeds.
+**Do the writes first, then emit the prompt last — the order matters.** Delivery mechanism (a) below means *ending the turn* with the improved prompt as final text and no trailing tool call. Any `progress.json` write issued after that text is a trailing tool call, which by the Delivery constraint below makes the prompt invisible. Emitting first and writing second therefore defeats the visibility this path exists to preserve. So:
 
-This mirrors Phase 2.5's handling of the design fork in full-autonomous mode: auto-adopt, record, surface later, never stall.
+1. Write the improved prompt to `progress.json.authorising_prompt_raw` as the canonical envelope.
+2. Append `{phase: "-1", decision: "auto-adopted improved prompt as envelope; flip-condition: user names a divergence between the improved and original prompt"}` to `progress.json`'s `decisions_absorbed` array.
+3. Emit the improved prompt as the turn's final text (delivery mechanism (a) below), with no tool call after it, so it stays visible. Auto-adoption must not make it invisible — the user has waived the gate, not the record.
+4. Begin Phase 0 on the next turn, and note the auto-adoption at the next approval gate. Do not stall waiting for a reply — adopting a sharpened envelope is neither a verification failure nor a destructive action, so Phase 0's rule says the loop proceeds. The turn break here is a rendering requirement, not an approval gate: continue without any input.
+
+This follows Phase 2.5's handling of the design fork in full-autonomous mode — auto-adopt, record, surface later, never stall — with one difference: Phase 2.5 writes only to a file and carries no render-as-final-text constraint, so it can finish inside one turn. Phase -1 must also show the prompt to the user, which costs the turn break in step 4.
 
 The auto-adoption is bounded by the flip-condition: if the user later says the improved prompt drifted from what they meant, revert `authorising_prompt_raw` to the original and continue from there.
 
