@@ -208,7 +208,11 @@ describe("collectHealth", () => {
   });
 
   it("reports hooksFired as unavailable with a reason when the discipline log is unreadable", async () => {
-    const tiles = await collectHealth({ disciplineLogPath: join(tmpdir(), "does-not-exist.log") });
+    const tiles = await collectHealth({
+      disciplineLogPath: join(tmpdir(), "does-not-exist.log"),
+      projectsDir: MISSING_PROJECTS_DIR,
+      loopsDir: join(tmpdir(), "does-not-exist-health-loops"),
+    });
     const tile = tiles.find((t) => t.key === "hooksFired");
     expect(tile?.value).toBeNull();
     expect(tile?.note).toMatch(/^unavailable: /);
@@ -222,6 +226,8 @@ describe("collectHealth", () => {
     ]);
     const tiles = await collectHealth({
       disciplineLogPath: path,
+      projectsDir: MISSING_PROJECTS_DIR,
+      loopsDir: join(tmpdir(), "does-not-exist-health-loops"),
       now: new Date("2026-07-06T18:00:00+01:00"),
     });
     const tile = tiles.find((t) => t.key === "hooksFired");
@@ -231,7 +237,11 @@ describe("collectHealth", () => {
 
   it("counts zero for an empty discipline log without throwing", async () => {
     const path = makeTmpDisciplineLog([]);
-    const tiles = await collectHealth({ disciplineLogPath: path });
+    const tiles = await collectHealth({
+      disciplineLogPath: path,
+      projectsDir: MISSING_PROJECTS_DIR,
+      loopsDir: join(tmpdir(), "does-not-exist-health-loops"),
+    });
     const tile = tiles.find((t) => t.key === "hooksFired");
     expect(tile?.value).toBe("0");
   });
@@ -244,6 +254,8 @@ describe("collectHealth", () => {
     ]);
     const tiles = await collectHealth({
       disciplineLogPath: path,
+      projectsDir: MISSING_PROJECTS_DIR,
+      loopsDir: join(tmpdir(), "does-not-exist-health-loops"),
       now: new Date("2026-07-06T18:00:00+01:00"),
     });
     const tile = tiles.find((t) => t.key === "hooksFired");
@@ -265,7 +277,12 @@ describe("collectHealth", () => {
         "not-a-timestamp hook=weird session=abc blocked=0",
         "2026-07-06T17:30:00+01:00 hook=loop_state_guard session=abc blocked=0",
       ]);
-      const tiles = await collectHealth({ disciplineLogPath: path, now: TODAY });
+      const tiles = await collectHealth({
+        disciplineLogPath: path,
+        projectsDir: MISSING_PROJECTS_DIR,
+        loopsDir: join(tmpdir(), "does-not-exist-health-loops"),
+        now: TODAY,
+      });
       const tile = tiles.find((t) => t.key === "hooksFired");
       expect(tile?.value).toBe("2");
       expect(tile?.note).toBeUndefined();
@@ -275,7 +292,12 @@ describe("collectHealth", () => {
       const path = makeTmpDisciplineLog([
         "2026-07-06T00:00:00+01:00 hook=confidence_labels session=abc blocked=0",
       ]);
-      const tiles = await collectHealth({ disciplineLogPath: path, now: TODAY });
+      const tiles = await collectHealth({
+        disciplineLogPath: path,
+        projectsDir: MISSING_PROJECTS_DIR,
+        loopsDir: join(tmpdir(), "does-not-exist-health-loops"),
+        now: TODAY,
+      });
       const tile = tiles.find((t) => t.key === "hooksFired");
       expect(tile?.value).toBe("1");
     });
@@ -284,14 +306,24 @@ describe("collectHealth", () => {
       const path = makeTmpDisciplineLog([
         "2026-07-05T23:59:59+01:00 hook=confidence_labels session=abc blocked=0",
       ]);
-      const tiles = await collectHealth({ disciplineLogPath: path, now: TODAY });
+      const tiles = await collectHealth({
+        disciplineLogPath: path,
+        projectsDir: MISSING_PROJECTS_DIR,
+        loopsDir: join(tmpdir(), "does-not-exist-health-loops"),
+        now: TODAY,
+      });
       const tile = tiles.find((t) => t.key === "hooksFired");
       expect(tile?.value).toBe("0");
     });
 
     it("excludes lines whose leading token does not parse as a timestamp (fail-honest, does not guess their day)", async () => {
       const path = makeTmpDisciplineLog(["garbage line with no timestamp at all"]);
-      const tiles = await collectHealth({ disciplineLogPath: path, now: TODAY });
+      const tiles = await collectHealth({
+        disciplineLogPath: path,
+        projectsDir: MISSING_PROJECTS_DIR,
+        loopsDir: join(tmpdir(), "does-not-exist-health-loops"),
+        now: TODAY,
+      });
       const tile = tiles.find((t) => t.key === "hooksFired");
       expect(tile?.value).toBe("0");
     });
