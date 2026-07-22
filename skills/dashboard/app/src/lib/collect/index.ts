@@ -201,13 +201,9 @@ export function createAggregator(deps: AggregatorDeps): Aggregator {
   }
 
   async function refreshActivity(): Promise<void> {
-    console.log("[instrumentation] refreshActivity start");
     const activity = await collectActivitySlice();
-    console.log("[instrumentation] refreshActivity got activity slice");
     snapshot = { ...snapshot, ...activity };
-    console.log("[instrumentation] refreshActivity emitting activity event");
     emit("activity", activity);
-    console.log("[instrumentation] refreshActivity complete");
   }
 
   async function refreshGates(): Promise<void> {
