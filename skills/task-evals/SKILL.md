@@ -124,10 +124,11 @@ GO requires all P0 evals to pass. P1 failures don't block the gate but must be l
       "negative_control": "<command proving the check can fail — required, scripted mode>",
       "fixtures": "<OPTIONAL, scripted mode only: {good, bad, formula?} — see 'Discriminating-check gate' above. Absent = grandfathered, unvalidated by that gate>",
       "smoke": {
-        "cmd_exit": "<REQUIRED, scripted mode, pr scope: observed exit code of cmd at freeze. Non-zero for a content reason is expected (freeze-before-build); 126/127/142/>=128 is refused>",
-        "negative_control_exit": "<REQUIRED, scripted mode, pr scope: observed exit code of negative_control at freeze. Must be non-zero AND not environmental>",
-        "cmd_output": "<short excerpt of the raw output>",
-        "negative_control_output": "<short excerpt of the raw output>"
+        "_comment": "WRITTEN BY `post_evals.sh smoke-run`, never by hand — see 'Freeze-time smoke-run' above",
+        "cmd_exit": "<observed exit code of cmd at freeze. Non-zero for a content reason is expected (freeze-before-build); 126/127/142/>=128 is refused>",
+        "negative_control_exit": "<observed exit code of negative_control at freeze. Must be non-zero AND not environmental>",
+        "cmd_output": "<excerpt of the raw output, captured by smoke-run>",
+        "negative_control_output": "<excerpt of the raw output, captured by smoke-run>"
       },
       "status": "pending | pass | fail",
       "evidence": "<command + exit code + output excerpt>"
