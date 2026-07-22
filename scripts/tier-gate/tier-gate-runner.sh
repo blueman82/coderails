@@ -1,9 +1,12 @@
 #!/bin/bash
 #═══════════════════════════════════════════════════════════════════════════════
-#  tier-gate-runner.sh │ Root daemon: unforgeable tier-0 verdict poster
+#  tier-gate-runner.sh │ Root daemon: unforgeable tier verdict poster
 #  - Polls open PRs, finds the newest eval-artifact comment for the current
-#    head SHA, judges tier-0 artifacts blind, posts a `tier-review` commit
-#    status as the machine-user identity.
+#    head SHA, judges the artifact blind, posts a `tier-review` commit
+#    status as the machine-user identity. Judges and posts at EVERY tier —
+#    the tier-0-only restriction was removed when tier-1/2 judging landed, and
+#    merge.sh's matching gate runs at every tier too. Tier still selects the
+#    prefilter and size caps, not whether the daemon acts.
 #  - Deliberately self-contained: does NOT source scripts/lib/*.sh. Those
 #    files live in the login user's writable repo checkout; sourcing them at
 #    daemon runtime would let a repo edit reach back into verdict production,
@@ -190,16 +193,19 @@ tg_pr_head_sha() {
 # the same identity as the adversary. Filtering by author cannot separate the
 # honest eval-artifact author from a forger when they are one uid; it would only
 # reject the honest artifact (authored by uid 501, not the machine user) and
-# brick every genuine tier-0 PR. The real defences against a forged marker are
+# brick every genuine PR. The real defences against a forged marker are
 # elsewhere and do not depend on comment authorship:
-#   - A tier-0 claim is judged on the SHA-bound REAL diff (Fix 1/3), never on the
-#     marker's prose, so a forged `tier=0` marker still faces the judge + prefilter.
-#   - A `tier != 0` claim posts NO status (tg_gate_pr), so a forged non-tier-0
-#     marker mints no reusable success and merge.sh finds no tier-review approval
-#     -> fails closed. A later in-place edit back to tier=0 finds no terminal
-#     status and is re-judged (tg_should_gate).
+#   - The claim is judged on the SHA-bound REAL diff (Fix 1/3), never on the
+#     marker's prose, so a forged `tier=` digit still faces the judge, and at
+#     tier 0 the prefilter as well.
+#   - A forged tier claim buys nothing, because the tier no longer selects
+#     whether this daemon acts. tg_gate_pr judges and posts a status at EVERY
+#     tier, so downgrading or inflating the marker's `tier=` digit does not
+#     route the PR around the judge — it still faces the judge on the real
+#     SHA-bound diff either way. A later in-place marker edit finds no terminal
+#     status for the new claim and is re-judged (tg_should_gate).
 #   - merge.sh requires the status description to carry verdict=legitimate, so a
-#     bare state=success (however minted) is not a valid tier-0 approval.
+#     bare state=success (however minted) is not a valid approval at any tier.
 #
 # Paginated, and it MUST be: issue comments come oldest-first, so on a busy PR
 # the newest eval artifact lands on a LATER page — a single per_page=100 page
