@@ -59,10 +59,20 @@ function usageTile(key: "usage5h" | "usageWeek", totals: UsageTotals | null): He
   };
 }
 
-// wiki-lint (skills/wiki-lint/SKILL.md) reports findings conversationally and
-// persists no findings file — ship permanently unavailable rather than guess.
-function lintFindingsTile(): HealthTile {
-  return { key: "lintFindings", value: null, note: "unavailable: wiki-lint persists no report file" };
+// wikiPaths isn't passed explicitly (e.g. a caller that never wired
+// DashboardConfig through) — read the same coderails-dashboard.json config
+// every other config-derived caller uses. loadConfig() throws ConfigError on
+// a missing/malformed file (most coderails installs have no dashboard config
+// at all), which collectHealth must never propagate — caught here and
+// degraded to "no vault configured" alongside the same message
+// collectLintFindings already produces for an empty vaultPaths list.
+function resolveWikiPaths(explicit: string[] | undefined): string[] {
+  if (explicit) return explicit;
+  try {
+    return loadConfig().wikiPaths;
+  } catch {
+    return [];
+  }
 }
 
 // USD headline with two decimal places: 3.75 -> "$3.75". total_usd_estimate
