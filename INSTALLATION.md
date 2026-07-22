@@ -113,24 +113,31 @@ treat it as machine-local config, same as `.claude/settings.local.json`.
 as durable PR comments; `task-evals` freezes a game-resistant success-eval set
 at task intake and gates `/merge` on it.
 
-The one UserPromptSubmit hook, inject_context, runs silently. Four Stop hooks block
+Two UserPromptSubmit hooks run silently: inject_context, and crack_on_gate (which
+stamps a per-session flag when the raw prompt contains "crack on"). Five Stop hooks block
 via exit 2: confidence-label check, verify-loop check (both promoted from
-warn-mode on 2026-05-05), loop-state guard, and loop-stall guard. verify-loop
+warn-mode on 2026-05-05), loop-state guard, loop-stall guard, and
+crack_on_prose_gate (blocks a final message that asks the user a question in
+prose while the crack-on flag is stamped — pattern-matching, so a question with
+no interrogative marker, or any ask past its per-turn cap of 3, still gets
+through). verify-loop
 also blocks when a turn edits 3+ files and the response omits the
 Did-Not-Verify section entirely (added 2026-07-13), not just on untagged
 bullets. The same two
 content-discipline checks (confidence-label and verify-loop) also run on
 SubagentStop — so subagents are held to the same standards as the parent session.
-On PreToolUse, five hooks can block: the destructive-bash gate, the opt-in test
+On PreToolUse, six hooks can block: the destructive-bash gate, the opt-in test
 gate, the config-gated `enforce_pr_workflow` (opt-in via workflow.config.yaml,
 like the test gate — enforces the PR chain, e.g. blocks a direct `git push` to
 `main` unless `/pr-review-toolkit:review-pr` already ran this session),
 `no_edit_on_main` (blocks editing source files, but not docs/config, while on
 `main` — use `/coderails:prep` or a worktree instead; it also blocks editing
-`.claude/settings.json`/`settings.local.json` on any branch), and
+`.claude/settings.json`/`settings.local.json` on any branch),
 `comment_citation_gate` (blocks new code comments that cite a session-artifact
 label like `E#:`/`Task A#`/`CHANGE B#` instead of stating the constraint the
-code enforces; `.md` files are exempt).
+code enforces; `.md` files are exempt), and `crack_on_gate` on `AskUserQuestion`
+(denies the tool while the session's crack-on flag is stamped — proceed
+autonomously instead of asking).
 
 ## Notes
 
