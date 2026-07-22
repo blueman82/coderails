@@ -3,12 +3,22 @@ import { join } from "node:path";
 import { loadConfig, type DashboardConfig } from "../../../lib/config";
 import { createAggregator, type Aggregator, type AggregatorDeps } from "../../../lib/collect";
 import { isLocalOrigin } from "../../../lib/requestGuard";
+import type { ContextTrendFileCache } from "../../../lib/collect/contextTrend";
 
 const DEFAULT_PROJECTS_DIR = join(homedir(), ".claude", "projects");
 const DEFAULT_LOOPS_DIR = join(homedir(), ".claude", "agentic-loop");
 const DEFAULT_RUNS_DIR = join(homedir(), ".claude", "coderails-dashboard", "runs");
 const DEFAULT_QUEUE_DIR = join(homedir(), ".claude", "coderails-dashboard", "approvals");
 const DEFAULT_BUILDS_DIR = join(homedir(), ".claude", "coderails-dashboard", "builds");
+
+// Shared cache for contextTrend across all SSE connections. The collectors
+// stream transcript files (hundreds to thousands) and cache their parse
+// results keyed by (mtime, size). Sharing this cache across connections
+// means subsequent connections get a stat()-only pass instead of re-parsing.
+// This is especially critical for contextTrend in production, where module
+// scope caches can be less reliable due to bundling: explicitly passing a
+// reference ensures it persists across requests.
+const sharedContextTrendCache: ContextTrendFileCache = new Map();
 
 function sseFrame(event: string, data: unknown): string {
   return `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
