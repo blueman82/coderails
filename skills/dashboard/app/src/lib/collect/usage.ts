@@ -143,6 +143,7 @@ function sumWithinWindow(events: UsageEvent[], windowStartMs: number): UsageTota
 // recency). Never throws: an unreadable base dir degrades both sections to
 // null rather than propagating an error.
 export async function collectUsage(baseDir: string, now: Date): Promise<UsageSummary> {
+  console.log("[instrumentation] collectUsage start, baseDir:", baseDir);
   const nowMs = now.getTime();
   const weekStartMs = nowMs - SEVEN_DAYS_MS;
   const fiveHourStartMs = nowMs - FIVE_HOURS_MS;
@@ -150,11 +151,13 @@ export async function collectUsage(baseDir: string, now: Date): Promise<UsageSum
   try {
     readdirSync(baseDir);
   } catch {
+    console.log("[instrumentation] collectUsage: baseDir not readable");
     return { last5h: null, week: null };
   }
 
   const files: string[] = [];
   listJsonlFiles(baseDir, files);
+  console.log("[instrumentation] collectUsage: found", files.length, "jsonl files");
 
   const candidates = files.filter((path) => {
     try {
@@ -163,13 +166,17 @@ export async function collectUsage(baseDir: string, now: Date): Promise<UsageSum
       return false;
     }
   });
+  console.log("[instrumentation] collectUsage: found", candidates.length, "candidates in week window");
 
   const events: UsageEvent[] = [];
   const seenIds = new Set<string>();
   for (const path of candidates) {
+    console.log("[instrumentation] collectUsage: processing file", path);
     await collectFileEvents(path, seenIds, events);
+    console.log("[instrumentation] collectUsage: processed file, events now:', events.length);
   }
 
+  console.log("[instrumentation] collectUsage complete");
   return {
     last5h: sumWithinWindow(events, fiveHourStartMs),
     week: sumWithinWindow(events, weekStartMs),
