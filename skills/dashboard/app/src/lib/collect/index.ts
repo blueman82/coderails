@@ -7,10 +7,7 @@ import { collectHealth, type HealthTile } from "./health";
 import { collectPrGates, type PrGate, type PrGateError } from "./prGates";
 import { collectQueue, type QueueEntry } from "./queue";
 import { collectSessions, collectLoops, type SessionInfo, type LoopInfo } from "./sessions";
-<<<<<<< HEAD
-=======
 import { collectContextTrend, type ContextTrendSummary } from "./contextTrend";
->>>>>>> 0041f48 (WIP: context-trend panel, token-measure enforcement, tier-floor (interleaved))
 
 export interface Snapshot {
   sessions: SessionInfo[];
@@ -20,12 +17,9 @@ export interface Snapshot {
   runs: RunRecord[];
   queue: QueueEntry[];
   builds: BuildEntry[];
-<<<<<<< HEAD
-=======
   // null = source unreadable (no ~/.claude/projects), same degrade stance as
   // the usage tiles — distinct from a real summary with zero sessions.
   contextTrend: ContextTrendSummary | null;
->>>>>>> 0041f48 (WIP: context-trend panel, token-measure enforcement, tier-floor (interleaved))
 }
 
 export interface AggregatorDeps {
@@ -54,11 +48,8 @@ export type AggregatorEventName = "runs" | "gates" | "activity" | "run-output";
 export interface AggregatorEventPayloadMap {
   runs: RunRecord[];
   gates: (PrGate | PrGateError)[];
-<<<<<<< HEAD
   activity: Pick<Snapshot, "sessions" | "loops" | "health" | "queue" | "builds">;
-=======
   activity: Pick<Snapshot, "sessions" | "loops" | "health" | "queue" | "builds" | "contextTrend">;
->>>>>>> 0041f48 (WIP: context-trend panel, token-measure enforcement, tier-floor (interleaved))
   "run-output": RunOutputEvent;
 }
 
@@ -143,10 +134,7 @@ export function createAggregator(deps: AggregatorDeps): Aggregator {
     runs: [],
     queue: [],
     builds: [],
-<<<<<<< HEAD
-=======
     contextTrend: null,
->>>>>>> 0041f48 (WIP: context-trend panel, token-measure enforcement, tier-floor (interleaved))
   };
 
   // Overloaded the same way as AggregatorEventListener so each call site
@@ -183,11 +171,7 @@ export function createAggregator(deps: AggregatorDeps): Aggregator {
   }
 
   async function collectActivitySlice(): Promise<
-<<<<<<< HEAD
-    Pick<Snapshot, "sessions" | "loops" | "health" | "queue" | "builds">
-=======
     Pick<Snapshot, "sessions" | "loops" | "health" | "queue" | "builds" | "contextTrend">
->>>>>>> 0041f48 (WIP: context-trend panel, token-measure enforcement, tier-floor (interleaved))
   > {
     const sessions = sortSessions(safeCall("sessions", () => collectSessions(deps.projectsDir, Date.now()), []));
     const loops = sortLoops(safeCall("loops", () => collectLoops(deps.loopsDir), []));
@@ -204,16 +188,13 @@ export function createAggregator(deps: AggregatorDeps): Aggregator {
     );
     const queue = deps.queueDir ? safeCall("queue", () => collectQueue(deps.queueDir!, queueLimit), []) : [];
     const builds = deps.buildsDir ? safeCall("builds", () => collectBuilds(deps.buildsDir!), []) : [];
-<<<<<<< HEAD
     return { sessions, loops, health, queue, builds };
-=======
     // Rides the activity slice like health does. First collection streams the
     // full transcript corpus once; the collector's module-scope per-file cache
     // makes every later refresh a stat() sweep plus a re-parse of only the
     // files that actually changed.
     const contextTrend = await safeCallAsync("contextTrend", () => collectContextTrend(deps.projectsDir), null);
     return { sessions, loops, health, queue, builds, contextTrend };
->>>>>>> 0041f48 (WIP: context-trend panel, token-measure enforcement, tier-floor (interleaved))
   }
 
   async function refreshActivity(): Promise<void> {
