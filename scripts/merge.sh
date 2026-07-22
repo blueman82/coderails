@@ -128,7 +128,7 @@ merge::main() {
             # eval-artifact gate at rc=0 (PR post_evals.sh check 9/10 never
             # ran). Tier 0 has an empty .evals array, so this is a fast no-op
             # at that tier; nothing to opt out of.
-            local embed_rc
+            local embed embed_rc
             embed_rc=0
             embed=$(pr::coderails_eval_embed_for_head "$num" "$sha") || embed_rc=$?
             if [[ $embed_rc -eq 2 ]]; then
