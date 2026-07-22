@@ -92,7 +92,7 @@ export function RailLeft() {
   // render the same "unavailable" as a tile the collector actually tried and
   // couldn't populate (tile present, value: null). Same for every tile, so
   // it's hoisted out of the per-tile map instead of recomputed per key.
-  const healthNotYetLoaded = false;
+  const healthNotYetLoaded = health.length === 0;
 
   return (
     <section className="hud-rail hud-rail-left hud-intro-rail-left">
