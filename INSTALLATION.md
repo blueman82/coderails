@@ -133,7 +133,9 @@ like the test gate — enforces the PR chain, e.g. blocks a direct `git push` to
 `.claude/settings.json`/`settings.local.json` on any branch), and
 `comment_citation_gate` (blocks new code comments that cite a session-artifact
 label like `E#:`/`Task A#`/`CHANGE B#` instead of stating the constraint the
-code enforces; `.md` files are exempt).
+code enforces; `.md` files are exempt), and `crack_on_gate` on `AskUserQuestion`
+(denies the tool while the session's crack-on flag is stamped — proceed
+autonomously instead of asking).
 
 ## Notes
 
