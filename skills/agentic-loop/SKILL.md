@@ -66,7 +66,22 @@ If a `progress.json` already exists at the path from an earlier loop in this ses
 
 It surfaces ambiguities, fills gaps with grounded assumptions, and produces a rewritten prompt that passes its 7-foundation diagnosis. Let it run to completion before Step 2.
 
-**Step 2 — Ask the user how to proceed.**
+**Step 2 — Adopt the improved prompt. Ask only outside a full-autonomous envelope.**
+
+Step 2 has two paths. Which one applies is decided by the authorising prompt's envelope class (the same classification Phase 0 makes): "crack on", "human is dead", "ship N PRs without asking", "no human gates", or equivalent means full-autonomous.
+
+**Full-autonomous envelope → auto-adopt, do not ask.** An `AskUserQuestion` here is a human gate, and a full-autonomous envelope has already withdrawn consent for gates. Do not resolve that contradiction by skipping Phase -1 — the improve-prompt output is worth more in autonomous operation, not less, because there is no human downstream to catch a vague envelope. Instead: run Step 1, emit the improved prompt, and auto-adopt outcome **A** without asking. Concretely:
+
+1. Emit the improved prompt as final turn text (delivery mechanism (a) below) so it stays visible. Auto-adoption must not make it invisible — the user has waived the gate, not the record.
+2. Write the improved prompt to `progress.json.authorising_prompt_raw` as the canonical envelope.
+3. Append `{phase: "-1", decision: "auto-adopted improved prompt as envelope; flip-condition: user names a divergence between the improved and original prompt"}` to `progress.json`'s `decisions_absorbed` array.
+4. Note the auto-adoption at the next approval gate, and proceed to Phase 0 in the same turn. Do not stall — adopting a sharpened envelope is neither a verification failure nor a destructive action, so Phase 0's rule says the loop proceeds.
+
+This mirrors Phase 2.5's handling of the design fork in full-autonomous mode: auto-adopt, record, surface later, never stall.
+
+The auto-adoption is bounded by the flip-condition: if the user later says the improved prompt drifted from what they meant, revert `authorising_prompt_raw` to the original and continue from there.
+
+**Any other envelope class → ask, as below.**
 
 **Delivery constraint — the improved prompt must be visible, not just asked-about.** Text emitted before a tool call is not rendered in the Claude Code terminal UI — only text with no trailing tool call, or content inside the tool call itself, reaches the user. This means "present the improved prompt as text, then call `AskUserQuestion`" silently drops the prompt: the user sees only the question, never the content it's asking about. Use one of two delivery mechanisms instead:
 - (a) End the turn with the improved prompt as the final text — no trailing tool call — and issue the `AskUserQuestion` call in the *next* turn; or
