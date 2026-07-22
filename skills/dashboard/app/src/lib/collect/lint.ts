@@ -2,27 +2,46 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { HealthTile } from "./health";
 
-const LINT_HEADING_RE = /^## \[(\d{4}-\d{2}-\d{2})\] lint \|/gm;
-
 // wiki-lint (skills/wiki-lint/SKILL.md, Step 5) appends one heading per run:
 // "## [YYYY-MM-DD] lint | <summary>", where <summary> is a freeform prose
 // paragraph — not structured data. That prose is NEVER regex-scanned for a
 // findings count: a paragraph reporting "999 orphan links" would silently
 // surface 999 as though it were a real, current count, when it is just a
 // number mentioned in a sentence. The only thing read out of the prose is
-// what the heading unambiguously states — the date of the most recent run —
-// surfaced as recency (days since last lint). A real findings count is only
-// ever taken from the structured record below, which a lint run writes
-// deliberately for this purpose. Do not "improve" this into a prose regex.
+// what the heading unambiguously states — the date of each run — used to
+// pick the MOST RECENT entry (by date, not file position: wiki-lint appends,
+// so newest is normally last, but nothing should rely on that ordering) and,
+// for that entry only, surface either its structured findings count (below)
+// or honest recency (days since last lint) as a fallback. A real findings
+// count is only ever taken from the structured record, which a lint run
+// writes deliberately for this purpose. Do not "improve" this into a prose
+// regex.
+const LINT_ENTRY_RE = /^## \[(\d{4}-\d{2}-\d{2})\] lint \|.*$/gm;
 const STRUCTURED_FINDINGS_RE = /<!--\s*lint-findings:\s*(\d+)\s*-->/;
 
-function mostRecentLintDate(logContents: string): string | null {
-  let latest: string | null = null;
-  for (const match of logContents.matchAll(LINT_HEADING_RE)) {
-    const date = match[1];
-    if (latest === null || date > latest) latest = date;
-  }
-  return latest;
+interface LintEntry {
+  date: string;
+  findingsCount: string | null;
+}
+
+// Splits log.md into one entry per lint heading, each entry's text running
+// up to (not including) the next heading — so a structured record is
+// attributed to the run that produced it, not to whichever run happens to be
+// first in the file.
+function parseLintEntries(logContents: string): LintEntry[] {
+  const matches = [...logContents.matchAll(LINT_ENTRY_RE)];
+  return matches.map((match, i) => {
+    const start = match.index ?? 0;
+    const end = i + 1 < matches.length ? (matches[i + 1].index ?? logContents.length) : logContents.length;
+    const body = logContents.slice(start, end);
+    const structured = body.match(STRUCTURED_FINDINGS_RE);
+    return { date: match[1], findingsCount: structured ? structured[1] : null };
+  });
+}
+
+function mostRecentLintEntry(entries: LintEntry[]): LintEntry | null {
+  if (entries.length === 0) return null;
+  return entries.reduce((latest, entry) => (entry.date > latest.date ? entry : latest));
 }
 
 function daysSince(dateStr: string, now: Date): number {
