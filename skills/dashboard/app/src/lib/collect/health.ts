@@ -139,6 +139,7 @@ export async function collectHealth(options: CollectHealthOptions = {}): Promise
   const disciplineLogPath = options.disciplineLogPath ?? DEFAULT_DISCIPLINE_LOG_PATH;
   const projectsDir = options.projectsDir ?? DEFAULT_PROJECTS_DIR;
   const loopsDir = options.loopsDir ?? DEFAULT_LOOPS_DIR;
+  const wikiPaths = resolveWikiPaths(options.wikiPaths);
   const now = options.now ?? new Date();
   const usage = await collectUsage(projectsDir, now);
   const cost = collectLoopCost(loopsDir, now);
@@ -146,7 +147,7 @@ export async function collectHealth(options: CollectHealthOptions = {}): Promise
     usageTile("usage5h", usage.last5h),
     usageTile("usageWeek", usage.week),
     hooksFiredTile(disciplineLogPath, now),
-    lintFindingsTile(),
+    collectLintFindings(wikiPaths, now),
     costTile("costWeek", cost.week),
     costTile("costMonth", cost.month),
   ];
