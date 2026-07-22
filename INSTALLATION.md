@@ -124,7 +124,7 @@ Did-Not-Verify section entirely (added 2026-07-13), not just on untagged
 bullets. The same two
 content-discipline checks (confidence-label and verify-loop) also run on
 SubagentStop — so subagents are held to the same standards as the parent session.
-On PreToolUse, five hooks can block: the destructive-bash gate, the opt-in test
+On PreToolUse, six hooks can block: the destructive-bash gate, the opt-in test
 gate, the config-gated `enforce_pr_workflow` (opt-in via workflow.config.yaml,
 like the test gate — enforces the PR chain, e.g. blocks a direct `git push` to
 `main` unless `/pr-review-toolkit:review-pr` already ran this session),
