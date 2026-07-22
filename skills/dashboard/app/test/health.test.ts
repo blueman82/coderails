@@ -183,6 +183,8 @@ describe("collectHealth", () => {
   it("reports lintFindings as unavailable when no wiki vault path is configured, not permanently unavailable", async () => {
     const tiles = await collectHealth({
       disciplineLogPath: join(tmpdir(), "does-not-exist.log"),
+      projectsDir: MISSING_PROJECTS_DIR,
+      loopsDir: join(tmpdir(), "does-not-exist-health-loops"),
       wikiPaths: [join(tmpdir(), "does-not-exist-wiki-vault")],
     });
     const tile = tiles.find((t) => t.key === "lintFindings");
@@ -196,6 +198,8 @@ describe("collectHealth", () => {
     writeFileSync(join(dir, "log.md"), "## [2026-07-22] lint | clean, no defects found\n");
     const tiles = await collectHealth({
       disciplineLogPath: join(tmpdir(), "does-not-exist.log"),
+      projectsDir: MISSING_PROJECTS_DIR,
+      loopsDir: join(tmpdir(), "does-not-exist-health-loops"),
       wikiPaths: [dir],
       now: new Date("2026-07-24T00:00:00Z"),
     });
