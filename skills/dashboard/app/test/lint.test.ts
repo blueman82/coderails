@@ -103,4 +103,33 @@ describe("collectLintFindings", () => {
     const tile = collectLintFindings([vault], new Date("2026-07-22T00:00:00Z"));
     expect(tile.value).toBe("2");
   });
+
+  it("on a same-date tie, surfaces the record from a LATER same-date entry, not the first", () => {
+    // Multiple lint runs on the same day are normal, not an edge case (the
+    // real vault log has four same-date headings on 2026-07-22). A strict
+    // ">" comparison keeps the FIRST entry encountered on a date tie and
+    // never advances to a later same-date entry, so a structured record
+    // written by the 2nd/3rd/4th run of the day was silently never surfaced.
+    const vault = makeTmpVault(
+      "## [2026-07-22] lint | first run of the day, no record\n\n" +
+        "## [2026-07-22] lint | second run of the day, has a record\n<!-- lint-findings: 1 -->\n"
+    );
+    const tile = collectLintFindings([vault], new Date("2026-07-22T00:00:00Z"));
+    expect(tile.value).toBe("1");
+  });
+
+  it("on a same-date tie, a later entry WITHOUT a record wins over an earlier one WITH a record", () => {
+    // wiki-lint's Step 5 makes the structured record mandatory on every run
+    // (even "0" on a clean pass) — so a same-date entry legitimately missing
+    // one is not "the count is just elsewhere", it's the newest run's own
+    // state. Shadowing it with an older sibling's stale count would be
+    // dishonest: strictly the last same-date entry wins, record or not.
+    const vault = makeTmpVault(
+      "## [2026-07-22] lint | first run of the day, has a record\n<!-- lint-findings: 5 -->\n\n" +
+        "## [2026-07-22] lint | second run of the day, no record\n"
+    );
+    const tile = collectLintFindings([vault], new Date("2026-07-22T00:00:00Z"));
+    expect(tile.value).not.toBe("5");
+    expect(String(tile.value)).toMatch(/since last lint/);
+  });
 });
