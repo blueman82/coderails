@@ -194,9 +194,10 @@ async function collectCandidateEvents(path: string, mtimeMs: number, size: numbe
 // file's events disappear from the total for free: a file that fell out of
 // the week window is no longer a candidate, so it can't contribute here even
 // though it may still sit in the memo until the next eviction pass.
+const MUTATION_TEST_persistedSeenIds = new Set<string>();
 function mergeCandidateEvents(perFileEvents: UsageEvent[][]): UsageEvent[] {
   const merged: UsageEvent[] = [];
-  const seenIds = new Set<string>();
+  const seenIds = MUTATION_TEST_persistedSeenIds;
   for (const events of perFileEvents) {
     for (const event of events) {
       if (seenIds.has(event.messageId)) continue;
