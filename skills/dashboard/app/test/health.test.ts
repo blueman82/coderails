@@ -273,16 +273,22 @@ describe("collectHealth", () => {
     chmodSync(unreadableLoopsDir, 0o000);
     const path = makeTmpDisciplineLog(["garbage line with no timestamp at all", ""]);
 
-    await expect(
-      collectHealth({
-        disciplineLogPath: path,
-        projectsDir,
-        loopsDir: unreadableLoopsDir,
-        wikiPaths: [MISSING_PROJECTS_DIR],
-      })
-    ).resolves.not.toThrow();
-
-    chmodSync(unreadableLoopsDir, 0o755); // restore before afterEach's rmSync
+    // The chmod restore must run even if the assertion below fails: afterEach's
+    // rmSync(..., { force: true }) suppresses missing-path errors, not
+    // permission errors, so an unrestored 0o000 dir makes rmSync throw EACCES
+    // and turns one failure into two, leaving the unreadable dir on disk.
+    try {
+      await expect(
+        collectHealth({
+          disciplineLogPath: path,
+          projectsDir,
+          loopsDir: unreadableLoopsDir,
+          wikiPaths: [MISSING_PROJECTS_DIR],
+        })
+      ).resolves.not.toThrow();
+    } finally {
+      chmodSync(unreadableLoopsDir, 0o755); // restore before afterEach's rmSync
+    }
   });
 
   // Deliberately calls collectHealth() with NO options so it resolves
