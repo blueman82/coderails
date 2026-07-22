@@ -112,7 +112,7 @@ export function RailLeft() {
                   {KPI_LABELS[key]}
                 </span>
               </div>
-              {loading ? (
+              {healthNotYetLoaded ? (
                 <div className="hud-kpi-loading">loading…</div>
               ) : tile && tile.value !== null ? (
                 <>
