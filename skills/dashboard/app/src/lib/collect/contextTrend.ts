@@ -245,7 +245,9 @@ export async function collectContextTrend(
       if (!entry.isFile() || !entry.name.endsWith(".jsonl") || entry.name.startsWith(".")) continue;
       const path = join(projectDir, entry.name);
       seenPaths.add(path);
+      console.log("[instrumentation] contextTrend: about to statsForFile", path);
       const stats = await statsForFile(path, cache);
+      console.log("[instrumentation] contextTrend: got stats for", path);
       if (!stats) continue;
 
       for (const compaction of stats.compactions) {
