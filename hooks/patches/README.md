@@ -4,6 +4,13 @@ Canonical patch text for `hooks/scripts/remember_inject_cap_guard.sh`, the
 `SessionStart` hook that re-applies the memory-injection byte cap to the
 **remember** plugin after a plugin update wipes it.
 
+**The guard is warn-only by default and never uses this text unless you opt in.**
+remember is another maintainer's plugin, so out of the box the guard only
+reports that the cap is absent (once per plugin version) and changes nothing.
+Set `REMEMBER_INJECT_CAP_AUTOWRITE=1` in the `env` block of your `settings.json`
+to let it apply the blocks below. Everything in this file about matching and
+re-derivation applies to that opt-in path.
+
 | File | Role |
 |---|---|
 | `remember_inject_cap.vendor.txt` | The **search** block — the remember plugin's unpatched `MEMORY` block, exactly as the vendor ships it |
