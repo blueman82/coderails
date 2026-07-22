@@ -217,6 +217,7 @@ export async function collectContextTrend(
   baseDir: string,
   options: CollectContextTrendOptions = {}
 ): Promise<ContextTrendSummary | null> {
+  console.log("[instrumentation] collectContextTrend start, baseDir:", baseDir);
   const cache = options.cache ?? moduleCache;
 
   let slugs: string[];
@@ -225,7 +226,9 @@ export async function collectContextTrend(
       .filter((entry) => entry.isDirectory() && !entry.name.startsWith("."))
       .filter((entry) => entry.name.includes(PROJECT_SLUG_TOKEN))
       .map((entry) => entry.name);
+    console.log("[instrumentation] collectContextTrend: found", slugs.length, "slugs");
   } catch {
+    console.log("[instrumentation] collectContextTrend: baseDir not readable");
     return null;
   }
 
@@ -238,7 +241,9 @@ export async function collectContextTrend(
     let entries;
     try {
       entries = readdirSync(projectDir, { withFileTypes: true });
+      console.log("[instrumentation] collectContextTrend: slug", slug, "has", entries.length, "entries");
     } catch {
+      console.log("[instrumentation] collectContextTrend: slug", slug, "not readable");
       continue;
     }
     for (const entry of entries) {
