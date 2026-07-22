@@ -1402,25 +1402,7 @@ check "validate_smoke_execution: jq unavailable → exit 1 (must not fail open)"
 [[ "$stderr_out" == *"jq"* ]]
 check "validate_smoke_execution: jq unavailable → stderr names jq" 0 $?
 
-# ═══ validate_structure: merge scope (checks 1-9, check 10 excluded) ════════
-# The merge-time gate (smoke_verify, below) re-executes cmd/negative_control
-# itself inside a detached worktree at the trusted head SHA — running check
-# 10 too, in the CALLER's cwd under its own 10s alarm, would be wrong twice:
-# wrong directory (defeats the worktree isolation and the priming defence)
-# and wrong timeout (false-fails a real discriminate-shaped command measured
-# at 21.5s). merge scope therefore runs checks 1-9 and stops — smoke_verify
-# owns re-execution, with its own worktree and its own longer timeout.
-FIX_MERGE_SCOPE="$TMP/merge_scope.json"
-jq -n --arg sha "$SHA" '{
-  tier: 1, tier_justification: "1 work-unit", head_sha: $sha,
-  evals: [ {id:"e1", priority:"P0", mode:"scripted", status:"pending",
-            cmd:"bash /path/does/not/exist.sh", negative_control:"bash /path/does/not/exist2.sh",
-            evidence:"log", smoke: {"cmd_exit":1,"negative_control_exit":1,"cmd_output":"x","negative_control_output":"y"}} ]
-}' > "$FIX_MERGE_SCOPE"
-post_evals::validate_structure "$FIX_MERGE_SCOPE" 42 "$SHA" merge
-check "validate_structure merge scope: checks 1-9 pass, check 10 (re-exec) skipped → exit 0" 0 $?
-
-# ═══ smoke_verify: merge-time binding re-execution (checks 1-9 + gate re-exec) ══
+# ═══ smoke_verify: merge-time binding re-execution ══════════════════════════
 # THE ACCEPTANCE TEST THAT MATTERS. Before this gate existed, an artifact
 # carrying a hand-written smoke object of ALLOWED shape whose cmd names a
 # script that never existed passed the merge path at rc=0 (merge.sh/

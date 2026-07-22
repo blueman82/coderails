@@ -28,15 +28,17 @@ POST_EVALS_SMOKE_VERIFY_TIMEOUT="${POST_EVALS_SMOKE_VERIFY_TIMEOUT:-120}"
 # specific stderr reason otherwise. Refusals checked in order, first failure
 # wins. [scope] defaults to "pr" (existing behaviour, check 6 = head_sha vs
 # PR head); "loop" swaps check 6 to "head_sha non-blank" and ignores <pr> —
-# the loop-scope grade-loop caller passes "" for <pr> in that case. "merge"
-# behaves like "pr" through check 9 but stops BEFORE check 10 (gate-time
-# re-execution): the merge-time caller (post_evals::smoke_verify) re-executes
-# cmd/negative_control itself, inside a detached worktree at the trusted head
-# SHA with its own longer timeout — running check 10 too would re-execute a
-# second time, in the wrong directory (the caller's cwd, not the worktree)
-# under the wrong timeout (10s, too short for a real discriminate-shaped
-# command). One function, one set of check bodies, no duplication between
-# scopes.
+# the loop-scope grade-loop caller passes "" for <pr> in that case. One
+# function, one set of check bodies, no duplication between scopes.
+#
+# smoke_verify (the merge-time gate) deliberately does NOT call this function:
+# checks 1-9 are structural validation that already ran at post time in the
+# posting agent's own session, and re-imposing them at merge (tried and
+# reverted — see git history) added false-blocks unrelated to the security
+# property (check 2's tier_justification, check 6's head_sha match) without
+# adding anything a fabricator can't already fake. smoke_verify re-executes
+# cmd/negative_control directly in its own worktree with its own timeout;
+# that re-execution IS the property this system enforces at merge.
 post_evals::validate_structure() {
     local path="$1" pr="$2" current_head_sha="$3" scope="${4:-pr}"
 
@@ -169,8 +171,7 @@ post_evals::validate_structure() {
     if [[ "$scope" != "loop" ]]; then
         post_evals::validate_freeze "$path" || return 1
         post_evals::validate_smoke "$path" || return 1
-        # merge scope stops here — see the function doc comment above for why.
-        [[ "$scope" == "merge" ]] || post_evals::validate_smoke_execution "$path" || return 1
+        post_evals::validate_smoke_execution "$path" || return 1
     fi
 
     return 0
@@ -471,11 +472,17 @@ post_evals::smoke_verify() {
         return 1
     fi
 
-    # checks 1-9 first, against the embed, merge scope (no check 10 — this
-    # function's own re-execution below replaces it, in the worktree rather
-    # than the caller's cwd).
-    post_evals::validate_structure "$path" "" "$head_sha" merge || return 1
-
+    # NOT a call to validate_structure. Checks 1-9 already ran at post time
+    # (the posting agent's own /coderails:post-evals session) — they are
+    # structural validation, not the re-execution property, and re-imposing
+    # them here adds failure modes that have nothing to do with fabrication:
+    # check 2 (tier_justification) and check 6 (embed .head_sha vs the
+    # trusted sha) both false-blocked a genuine, resolvable P4 acceptance
+    # fixture during verification, for reasons unrelated to whether its cmd
+    # is real. The security property this function exists to enforce is
+    # re-execution — a fabricated cmd resolves to 127 (environmental) at any
+    # commit, an honest cmd resolves to its real exit code — and that lives
+    # entirely in the loop below, not in validate_structure.
     local tier
     tier=$(jq -r '.tier // ""' "$path")
     # Tier 0 is the exemption path: no evals to re-execute.
