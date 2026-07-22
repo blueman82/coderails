@@ -46,6 +46,21 @@ A broken instrument looks like this in the raw output: a reporter-loading error 
 
 What to do on discovery depends on timing: at freeze time the file is not yet frozen, so a broken `cmd` or `negative_control` is simply rewritten and re-run — no amendment needed, nothing to record. Discovered after `frozen_at`/`frozen_sha` are stamped, it goes through the amendment path instead: recorded reason, assertion left unchanged, and if a grader verdict already exists for that eval, a fresh re-grade per rule 5.
 
+**The result is computed, not attested.** Do not hand-write the smoke evidence. Run `scripts/post_evals.sh smoke-run <evals.json>` immediately before freezing: it executes every scripted eval's `cmd` and `negative_control`, and writes the observed exit codes and output excerpts into a `smoke` object on each eval, overwriting whatever was there. `post_evals.sh validate-structure` (check 9) then refuses any pr-scope tier≥1 scripted eval lacking one.
+
+The split matters. A checker that merely *reads* recorded exit codes is not enough, because the agent writes those numbers — and an agent freezing a command for a script it intends to create records the code it *expects* (`1`, "the assertion fails until I build it"), never having run the command. That is precisely how the real defect happened. This is rule 5 applied to smoke evidence: a neutral script computes it, the author never hand-writes it. `smoke-run` records without judging — it returns 0 even when what it observed is damning, because refusing is check 9's job.
+
+**Honest boundary, stated plainly.** Check 9 gates the *shape* of the recorded evidence; `smoke-run` is the sanctioned writer of it, but nothing in the enforcement path executes it. Freeze-before-build makes this structural rather than a wiring oversight: at freeze the feature is unbuilt and at merge it is built, so the codes cannot be recomputed at the gate. A hand-written `smoke` object of plausible shape — `cmd_exit: 1`, control non-zero and non-environmental — is therefore not mechanically distinguishable from a recorded one, and passes. What this closes is the honest-but-optimistic author who runs the commands and would otherwise be free to discard an inconvenient result; what it does not close is an author who never runs them at all. Same writer-side boundary the `fixtures` gate and `tier_justification` already carry: enforced at generation and by review, not by the gate. Mechanical closure needs a gated freeze step that stamps something unforgeable, or an external attestor outside the agent's trust domain (the tier-review daemon pattern).
+
+Check 9 refuses three outcomes, and deliberately permits a fourth:
+
+- **`cmd` exited 126/127/142/≥128** — command not found, permission denied, timeout, or a signal death. The check never reached the artifact it claims to test. This is what catches a `cmd` naming a script that was only ever intended to exist.
+- **`negative_control` exited 0** — a control that passes proves nothing. This is what catches a control whose file sat outside the tree being validated, or one that "removed" a tool still present on `PATH`.
+- **`negative_control` exited non-zero for an environmental reason** — non-zero alone is not enough, because a control that errors out on its own tooling is just as vacuous as one that passes. The control must fail for a *content* reason.
+- **Permitted: `cmd` exited non-zero for a content reason.** Freeze-before-build (check 8) means the feature is not built at freeze, so a failing `cmd` is the expected case. Check 9 keys on the *shape* of the outcome, never its polarity — requiring `cmd` to pass would contradict check 8 and block every honest freeze.
+
+This is the pass/skip/fail distinction applied where it is load-bearing: "did not run" is separated from "ran and failed", so a skip can no longer read as compliance.
+
 ## Discriminating-check gate (mechanical, optional, `fixtures`-only)
 
 A frozen, blind-authored scripted check can be broken in itself — incapable of ever passing (false alarm) or ever failing (vacuous) — and the smoke-run above does not catch this, because it only proves the check *executes*, not that its verdict *tracks the input*. Real instance (loop 8b69e779): an awk formula that exited 1 unconditionally, so a genuine 39/39 pass and a genuine 18/40 fail produced identical exit codes and could never pass for any code state.
@@ -110,6 +125,13 @@ GO requires all P0 evals to pass. P1 failures don't block the gate but must be l
       "cmd": "<command, scripted mode>",
       "negative_control": "<command proving the check can fail — required, scripted mode>",
       "fixtures": "<OPTIONAL, scripted mode only: {good, bad, formula?} — see 'Discriminating-check gate' above. Absent = grandfathered, unvalidated by that gate>",
+      "smoke": {
+        "_comment": "WRITTEN BY `post_evals.sh smoke-run`, never by hand — see 'Freeze-time smoke-run' above",
+        "cmd_exit": "<observed exit code of cmd at freeze. Non-zero for a content reason is expected (freeze-before-build); 126/127/142/>=128 is refused>",
+        "negative_control_exit": "<observed exit code of negative_control at freeze. Must be non-zero AND not environmental>",
+        "cmd_output": "<excerpt of the raw output, captured by smoke-run>",
+        "negative_control_output": "<excerpt of the raw output, captured by smoke-run>"
+      },
       "status": "pending | pass | fail",
       "evidence": "<command + exit code + output excerpt>"
     }
@@ -123,7 +145,9 @@ GO requires all P0 evals to pass. P1 failures don't block the gate but must be l
 
 `grading` (`{by, checksum, amendments_at_grade}`) is write-time provenance, absent at freeze and written only when `post_evals.sh grade-loop` grades a loop-scope file (see the Verifier agent contract below) — optional and additive; pr-scope files and every existing reader tolerate its absence. Adding it does not bump `schema_version` past 1.
 
-This copy and the design spec's copy are kept in lockstep; the enforcement components implement against this definition: `scripts/lib/eval-artifact.sh` (the marker/result SSOT), `scripts/post_evals.sh` (structural validation + result computation + `validate-discriminating`'s fixtures gate, invoked by `/coderails:post-evals`), and the `loop_state_guard` loop-scope gate (blocks loop completion at ≥3 work-units with no passing loop-scope `evals.json`).
+`smoke` is required on scripted evals at pr scope (check 9) and carries no `schema_version` bump: it is additive, and loop-scope files — which check 9 does not gate — tolerate its absence exactly as before. Loop scope is excluded deliberately, matching check 8's boundary: loop-scope artifacts are gated by `loop_state_guard`, a separate surface with its own callers, so extending the smoke contract there is its own decision rather than a side effect of this one.
+
+This file is the schema's only tracked copy — there is no separate design spec in the repo (verified: `git ls-files` matches nothing but this file). The enforcement components implement against this definition: `scripts/lib/eval-artifact.sh` (the marker/result SSOT), `scripts/post_evals.sh` (structural validation + result computation + `validate-discriminating`'s fixtures gate, invoked by `/coderails:post-evals`), and the `loop_state_guard` loop-scope gate (blocks loop completion at ≥3 work-units with no passing loop-scope `evals.json`).
 
 ## Where evals.json lives
 

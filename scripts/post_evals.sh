@@ -137,11 +137,260 @@ post_evals::validate_structure() {
     #
     # pr scope only: loop-scope artifacts live outside any repo (beside
     # progress.json) and have no branch to compare against.
+    # Check 9: recorded freeze-time smoke evidence. pr scope only, matching
+    # check 8's boundary. Not a technical limit — check 9 needs no repository,
+    # only the recorded outcome — but a deliberate one: loop-scope artifacts
+    # are gated by a separate surface (loop_state_guard), and extending this
+    # contract there is its own decision with its own callers to migrate.
     if [[ "$scope" != "loop" ]]; then
         post_evals::validate_freeze "$path" || return 1
+        post_evals::validate_smoke "$path" || return 1
     fi
 
     return 0
+}
+
+# post_evals::validate_smoke <evals_json_path>
+# Check 9's body. Requires every tier>=1 scripted eval to carry a `smoke`
+# object recording what happened when its `cmd` and `negative_control` were
+# actually executed at freeze, and refuses the outcomes that mean the check
+# tested nothing.
+#
+# WHY SHAPE, NOT POLARITY, ON cmd: check 8 makes freeze-before-build
+# mechanical, so at freeze the feature is not built and `cmd` is EXPECTED to
+# exit non-zero. A gate requiring cmd to pass would contradict check 8 and
+# block every honest freeze. What actually separates a broken cmd from a
+# legitimately not-yet-passing one is the shape of the outcome: a cmd naming a
+# script that never existed exits 127 (command/file not found) — the check
+# never reached the artifact it claims to test — whereas a real assertion
+# failure exits 1. SKILL.md already names this tell in prose ("a
+# module-resolution error instead of an install log"); this makes it
+# mechanical.
+#
+# WHY POLARITY IS CHECKABLE ON negative_control: the control is defined to
+# fail, and that is true regardless of build state. So a control observed
+# exiting 0 at freeze is vacuous by construction.
+#
+# THE TRAP THIS AVOIDS: an env-error is ALSO non-zero, so a bare `!= 0`
+# assertion on the control would accept a control that errored out for an
+# unrelated reason — the vacuous-pass bug relocated one level up. The control
+# must therefore be non-zero AND not-environmental. That distinction (real
+# failure vs. skip/error) is the tri-state applied exactly where it is
+# load-bearing, without refactoring every check in the system to carry it.
+#
+# The environmental taxonomy (127 not-found, 142 our timeout sentinel, 126
+# permission denied, >=128 signal deaths) is the same one
+# validate_discriminating already uses on its fixtures legs.
+post_evals::validate_smoke() {
+    local path="$1"
+
+    # Explicit, for the reason PR #261 paid for on validate_freeze: without
+    # this, a missing jq makes every read empty, a violating file becomes
+    # indistinguishable from a compliant one, and the gate passes while
+    # verifying nothing.
+    if ! command -v jq >/dev/null 2>&1; then
+        printf 'post_evals: jq is required to validate smoke evidence and was not found\n' >&2
+        return 1
+    fi
+
+    if [[ ! -f "$path" ]] || ! jq -e . "$path" >/dev/null 2>&1; then
+        printf 'post_evals: file not found or invalid JSON: %s\n' "$path" >&2
+        return 1
+    fi
+
+    local tier
+    tier=$(jq -r '.tier // ""' "$path")
+    # Tier 0 is the exemption path: its .evals array is empty by definition,
+    # so there is nothing to smoke-test.
+    [[ "$tier" == "0" ]] && return 0
+
+    # Only scripted evals carry commands. agent-run evals are graded by a
+    # verifier subagent and have no cmd to execute.
+    local ids
+    ids=$(jq -r '[.evals[]? | select(.mode == "scripted") | .id] | .[]' "$path")
+    [[ -z "$ids" ]] && return 0
+
+    local id
+    while IFS= read -r id; do
+        [[ -z "$id" ]] && continue
+
+        local smoke_type
+        smoke_type=$(jq -r --arg id "$id" '.evals[] | select(.id == $id) | .smoke | type' "$path")
+
+        if [[ "$smoke_type" == "null" ]]; then
+            printf 'post_evals: scripted eval %s has no smoke evidence — run its cmd and negative_control at freeze and record the result.\n' "$id" >&2
+            return 1
+        fi
+        # A string/number smoke value would fall through every per-field read
+        # below into `// ""` and produce a misleading verdict.
+        if [[ "$smoke_type" != "object" ]]; then
+            printf 'post_evals: eval %s has malformed smoke evidence (must be an object) — got %s.\n' "$id" "$smoke_type" >&2
+            return 1
+        fi
+
+        local cmd_rc nc_rc
+        cmd_rc=$(jq -r --arg id "$id" '.evals[] | select(.id == $id) | .smoke.cmd_exit // "" | if type == "number" then tostring else "" end' "$path")
+        nc_rc=$(jq -r --arg id "$id" '.evals[] | select(.id == $id) | .smoke.negative_control_exit // "" | if type == "number" then tostring else "" end' "$path")
+
+        # Absent or non-numeric exit codes fail closed: "no recorded outcome"
+        # must never read as a compliant one.
+        if [[ -z "$cmd_rc" || -z "$nc_rc" ]]; then
+            printf 'post_evals: eval %s smoke evidence needs numeric cmd_exit and negative_control_exit — got cmd_exit=%s, negative_control_exit=%s.\n' \
+                "$id" "${cmd_rc:-<missing/non-numeric>}" "${nc_rc:-<missing/non-numeric>}" >&2
+            return 1
+        fi
+
+        # cmd: environmental outcomes only. A non-zero content failure is
+        # permitted and expected — see the freeze-before-build note above.
+        if post_evals::_is_environmental_rc "$cmd_rc"; then
+            printf 'post_evals: eval %s cmd did not execute at freeze (exit %s: command not found / crashed / timed out) — it never reached the artifact it claims to check. Fix the command, not this gate.\n' "$id" "$cmd_rc" >&2
+            return 1
+        fi
+
+        # negative_control: must be observed failing, and failing for a
+        # content reason rather than an environmental one.
+        if [[ "$nc_rc" == "0" ]]; then
+            printf 'post_evals: eval %s negative_control exited 0 at freeze — a control that passes proves nothing. It must be observed failing.\n' "$id" >&2
+            return 1
+        fi
+        if post_evals::_is_environmental_rc "$nc_rc"; then
+            printf 'post_evals: eval %s negative_control exited %s (command not found / crashed / timed out) — non-zero, but for an environmental reason, so it tested nothing. Fix the control, not this gate.\n' "$id" "$nc_rc" >&2
+            return 1
+        fi
+    done <<< "$ids"
+
+    return 0
+}
+
+# post_evals::smoke_run <evals_json_path>
+# EXECUTES every scripted eval's cmd and negative_control and writes the
+# observed exit codes and output excerpts into the file's `smoke` objects,
+# overwriting whatever was there.
+#
+# WHY THIS EXISTS SEPARATELY FROM validate_smoke: validate_smoke checks
+# recorded exit codes, which is necessary but not sufficient, because the agent
+# writes those numbers. An agent that freezes a cmd for a script it merely
+# INTENDS to create records the code it EXPECTS ("1 — the assertion fails until
+# I build it"), never having run the command, and walks straight through a
+# checker that trusts the field. That is exactly how the real instance-1 defect
+# happened, and it is why rule 5 in SKILL.md already says a neutral script
+# computes the result and the orchestrator never hand-writes it. This applies
+# rule 5 to smoke evidence: run the commands, record what happened.
+#
+# Recording is NOT judging. This function returns 0 whenever it successfully
+# ran the commands and wrote the file, even when what it observed is damning —
+# refusing is validate_smoke's job. Keeping the two apart means the recorded
+# evidence is the same whether or not anyone later gates on it.
+#
+# Commands run through the same 10s alarm wrapper _run_formula uses, so a
+# hanging command cannot hang the freeze: 127 (not found), 142 (timeout) and
+# signal deaths fall out of the real run instead of being typed in by hand.
+post_evals::smoke_run() {
+    local path="$1"
+
+    if ! command -v jq >/dev/null 2>&1; then
+        printf 'post_evals: jq is required to record smoke evidence and was not found\n' >&2
+        return 1
+    fi
+
+    if [[ ! -f "$path" ]] || ! jq -e . "$path" >/dev/null 2>&1; then
+        printf 'post_evals: file not found or invalid JSON: %s\n' "$path" >&2
+        return 1
+    fi
+
+    local ids
+    ids=$(jq -r '[.evals[]? | select(.mode == "scripted") | .id] | .[]' "$path")
+    [[ -z "$ids" ]] && return 0
+
+    local id
+    while IFS= read -r id; do
+        [[ -z "$id" ]] && continue
+
+        local cmd nc
+        cmd=$(jq -r --arg id "$id" '.evals[] | select(.id == $id) | .cmd // ""' "$path")
+        nc=$(jq -r --arg id "$id" '.evals[] | select(.id == $id) | .negative_control // ""' "$path")
+
+        local cmd_rc cmd_out nc_rc nc_out
+        cmd_rc=""; cmd_out=""; nc_rc=""; nc_out=""
+
+        if [[ -n "$cmd" ]]; then
+            cmd_out=$(post_evals::_run_recorded "$cmd")
+            cmd_rc="${cmd_out%%:*}"
+            cmd_out="${cmd_out#*:}"
+        fi
+        if [[ -n "$nc" ]]; then
+            nc_out=$(post_evals::_run_recorded "$nc")
+            nc_rc="${nc_out%%:*}"
+            nc_out="${nc_out#*:}"
+        fi
+
+        # Write in place via a temp file — a partial write must never leave a
+        # corrupted artifact behind.
+        local tmp
+        tmp=$(mktemp) || return 1
+        if ! jq --arg id "$id" \
+               --argjson crc "${cmd_rc:-null}" --argjson nrc "${nc_rc:-null}" \
+               --arg cout "$cmd_out" --arg nout "$nc_out" '
+            (.evals[] | select(.id == $id) | .smoke) = {
+                cmd_exit: $crc,
+                negative_control_exit: $nrc,
+                cmd_output: $cout,
+                negative_control_output: $nout
+            }' "$path" > "$tmp"; then
+            rm -f "$tmp"
+            printf 'post_evals: failed to record smoke evidence for eval %s in %s\n' "$id" "$path" >&2
+            return 1
+        fi
+        if ! mv "$tmp" "$path"; then
+            rm -f "$tmp"
+            printf 'post_evals: failed to write %s\n' "$path" >&2
+            return 1
+        fi
+    done <<< "$ids"
+
+    return 0
+}
+
+# post_evals::_run_recorded <command>
+# Runs <command> under the same 10s alarm wrapper _run_formula uses and echoes
+# "<exit_code>:<output excerpt>". stdout and stderr are merged — the tell for a
+# broken instrument is usually on stderr (a module-resolution error, a
+# not-found message), so dropping it would discard the evidence a human needs.
+#
+# The excerpt keeps BOTH ENDS, not just the tail, because the diagnostic line
+# sits at a different end depending on the failure. Measured against real
+# output from this repo: a test runner's verdict is in the last few lines
+# (post_evals.test.sh emits 10886 chars, PASS last), but a node stack trace
+# puts "Cannot find module" in the FIRST line and 900+ chars of stack frames
+# after it — a tail-only excerpt keeps the frames and discards the error,
+# losing exactly the module-resolution tell SKILL.md names. Capping both ends
+# also bounds the artifact against a chatty runner.
+post_evals::_run_recorded() {
+    local command_text="$1" out rc
+    out=$(perl -e 'alarm shift; exec "/bin/bash", "-c", shift' 10 "$command_text" 2>&1)
+    rc=$?
+    out=$(printf '%s' "$out" | tr '\n' ' ')
+    if (( ${#out} > 500 )); then
+        out="${out:0:250} [...] ${out: -250}"
+    fi
+    printf '%s:%s' "$rc" "$out"
+}
+
+# post_evals::_is_environmental_rc <exit_code>
+# True when an exit code signals the command did not run to a verdict:
+# 126 permission denied, 127 command not found, 142 our timeout sentinel,
+# and >=128 signal deaths.
+#
+# validate_discriminating applies the same taxonomy to its fixtures legs but
+# deliberately keeps its own inline checks rather than calling this: it reports
+# not-found, timeout and crash with three distinct messages naming both legs'
+# exit codes, which a shared boolean cannot express. The duplication is the
+# price of those diagnostics. If the taxonomy changes, both must change.
+post_evals::_is_environmental_rc() {
+    local rc="$1"
+    [[ "$rc" == "126" || "$rc" == "127" ]] && return 0
+    [[ "$rc" =~ ^[0-9]+$ ]] && (( rc >= 128 )) && return 0
+    return 1
 }
 
 # post_evals::validate_freeze <evals_json_path>
@@ -511,6 +760,9 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
         validate-discriminating)
             post_evals::validate_discriminating "${2:?validate-discriminating requires a file argument}"
             ;;
+        smoke-run)
+            post_evals::smoke_run "${2:?smoke-run requires a file argument}"
+            ;;
         compute-result)
             post_evals::compute_and_validate_result "${2:?compute-result requires a file argument}"
             ;;
@@ -523,6 +775,7 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
         *)
             printf 'Usage: post_evals.sh validate-structure <path> <pr> <sha>\n' >&2
             printf '       post_evals.sh validate-discriminating <path>\n' >&2
+            printf '       post_evals.sh smoke-run <path>\n' >&2
             printf '       post_evals.sh compute-result <path>\n' >&2
             printf '       post_evals.sh validate-embed <path> <body_path>\n' >&2
             printf '       post_evals.sh grade-loop <path>\n' >&2
