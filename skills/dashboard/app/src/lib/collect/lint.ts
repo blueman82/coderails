@@ -74,14 +74,13 @@ export function collectLintFindings(vaultPaths: string[], now: Date): HealthTile
   }
   if (contents === undefined) return unavailable("wiki vault log.md not readable");
 
-  const structured = contents.match(STRUCTURED_FINDINGS_RE);
-  if (structured) {
-    return { key: "lintFindings", value: structured[1] };
+  const latest = mostRecentLintEntry(parseLintEntries(contents));
+  if (latest === null) return unavailable("no lint entries found in wiki vault log.md");
+
+  if (latest.findingsCount !== null) {
+    return { key: "lintFindings", value: latest.findingsCount, note: `last lint ${latest.date}` };
   }
 
-  const latestDate = mostRecentLintDate(contents);
-  if (latestDate === null) return unavailable("no lint entries found in wiki vault log.md");
-
-  const days = daysSince(latestDate, now);
-  return { key: "lintFindings", value: `${days}d since last lint`, note: `last lint ${latestDate}` };
+  const days = daysSince(latest.date, now);
+  return { key: "lintFindings", value: `${days}d since last lint`, note: `last lint ${latest.date}` };
 }
