@@ -37,6 +37,11 @@ export interface AggregatorDeps {
   // Test-only seam: inject a fake bus instead of the process-wide singleton
   // in ../runOutputBus.
   runOutputBus?: RunOutputBus;
+  // Optional cache for contextTrend. Passing an explicit cache ensures it
+  // persists across SSE connections and serves transcripts with stat-only
+  // re-validation rather than re-parsing. Critical for production where
+  // module-scope caches may be less reliable due to bundling.
+  contextTrendCache?: import("./contextTrend").ContextTrendFileCache;
 }
 
 export type AggregatorEventName = "runs" | "gates" | "activity" | "run-output";
