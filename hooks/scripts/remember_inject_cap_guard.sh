@@ -35,15 +35,31 @@
 #   re-apply by hand. Line-number-based tooling would drift silently across a
 #   vendor bump; a literal block match fails cleanly instead.
 #
+# WARN-ONLY BY DEFAULT
+#   coderails is a public plugin and remember is someone else's package. Writing
+#   into another plugin's source on every user's machine, unasked, is not ours
+#   to do: the 8000-byte cap is one maintainer's tuning constant, not a bug fix,
+#   and a user who never asked for it would find their plugin quietly rewritten.
+#   So the default is WARN ONLY — we say what is missing and how to turn writing
+#   on, and change nothing. Set REMEMBER_INJECT_CAP_AUTOWRITE=1 to opt in; only
+#   then does any of the patching machinery below run.
+#
+#   The warn is stamped once per plugin version (see STAMP below), because a
+#   notice that fires at every single session start is a nag with no off switch
+#   — which is the other half of the same complaint. A plugin bump warns afresh.
+#
 # SAFETY
 #   Fail-open throughout: this hook never exits non-zero and never blocks
 #   session start. It backs the target up before writing, and writes via a
 #   temp file + mv, so the target is never left half-patched.
 #
-# ENVIRONMENT (all optional; the first two exist as test seams)
-#   REMEMBER_HOOK_FILE     Target file, bypassing all version resolution.
-#   REMEMBER_PATCH_DIR     Directory holding the canonical patch text.
-#   CLAUDE_PLUGINS_DIR     Plugin root (default: $HOME/.claude/plugins).
+# ENVIRONMENT (all optional; the ones marked * exist as test seams)
+#   REMEMBER_INJECT_CAP_AUTOWRITE  "1" to permit writing. Anything else (unset
+#                            included) means warn-only. THE DEFAULT IS OFF.
+#   REMEMBER_HOOK_FILE     * Target file, bypassing all version resolution.
+#   REMEMBER_PATCH_DIR     * Directory holding the canonical patch text.
+#   REMEMBER_INJECT_STATE_DIR * Where the once-per-version warn stamp lives.
+#   CLAUDE_PLUGINS_DIR     * Plugin root (default: $HOME/.claude/plugins).
 #   REMEMBER_PLUGIN_VERSION  Version string used in the notice.
 #
 # EXIT CODES
@@ -56,6 +72,16 @@ PATCH_DIR="${REMEMBER_PATCH_DIR:-"$(cd "${SCRIPT_DIR}/.." && pwd)/patches"}"
 VENDOR_BLOCK="${PATCH_DIR}/remember_inject_cap.vendor.txt"
 PATCHED_BLOCK="${PATCH_DIR}/remember_inject_cap.patched.txt"
 PLUGINS_DIR="${CLAUDE_PLUGINS_DIR:-"$HOME/.claude/plugins"}"
+# Where the once-per-version warn stamp lives. $HOME/.claude/coderails is
+# coderails-owned scratch state, matching the sibling hooks' $HOME/.claude/
+# agentic-loop and $HOME/.claude/discipline.log. Deliberately NOT under
+# $HOME/.claude/plugins: that tree belongs to Claude Code's plugin installer,
+# and this hook must not write anywhere inside it except on the opt-in patch
+# path itself — writing our own bookkeeping there is exactly the boundary
+# violation the warn-only default exists to stop. It is also wiped by a plugin
+# reinstall, which would silently reset suppression.
+STATE_DIR="${REMEMBER_INJECT_STATE_DIR:-"$HOME/.claude/coderails"}"
+STAMP_FILE="$STATE_DIR/remember_inject_cap_warned"
 SENTINEL="REMEMBER_INJECT_MAX_BYTES"
 # The single line that only exists when the patch is genuinely applied — the
 # truncation call itself. Used as the detection key, not the bare token.
@@ -161,6 +187,38 @@ fi
 # swallowing the exact condition it exists to detect. The truncation call is
 # the one line that cannot be present unless the patch actually applied.
 if grep -qF "$CAP_EVIDENCE" "$TARGET" 2>/dev/null; then
+  exit 0
+fi
+
+# ── Writing is OPT-IN. Default: say what is missing, change nothing ────────
+# This gate sits BEFORE every write-path check below, so in warn-only mode we
+# never reach the shape check, the backup, or the rewrite. That placement also
+# settles which messages get suppressed: the opt-in notice is the ONLY one
+# reachable here, and every "unrecognised shape / backup failed / rewrite did
+# not verify" warning below names a real fault on a machine that asked us to
+# write — those still fire every session, unsuppressed, as they should.
+if [ "${REMEMBER_INJECT_CAP_AUTOWRITE:-0}" != "1" ]; then
+  # Suppress the repeat. Without this the same notice fires at EVERY session
+  # start forever, with no way to silence it — the nag half of the complaint
+  # this default exists to answer. Compare the stamp's contents to the version
+  # we are about to name: a plugin bump changes it and warns afresh.
+  prev=$(cat "$STAMP_FILE" 2>/dev/null || true)
+  [ "$prev" = "$VERSION" ] && exit 0
+
+  notify "coderails: the remember plugin (version ${VERSION}) does not have the memory-injection byte cap applied. That cap truncates each memory file the plugin injects at session start to ${SENTINEL} bytes (default 8000), which cuts token burn on large memory files. coderails will NOT modify another plugin's files without your permission, so nothing has been changed. To let coderails apply and re-apply it automatically, add \"REMEMBER_INJECT_CAP_AUTOWRITE\": \"1\" to the \"env\" block of your settings.json (~/.claude/settings.json for all projects, or .claude/settings.json in one project). Otherwise ignore this — it will not be repeated until the plugin version changes."
+
+  # Best-effort stamp. An unwritable or uncreatable state dir must cost the user
+  # nothing beyond a repeated notice — never the notice itself, never the
+  # session.
+  #
+  # The whole group is wrapped in ONE `{ ...; } 2>/dev/null`, not per-command
+  # redirects, because a failing OUTPUT REDIRECTION is diagnosed by the shell
+  # before the command is invoked, so `printf ... > "$f" 2>/dev/null` still
+  # prints "No such file or directory" to the real stderr. That matters here
+  # beyond tidiness: this hook's stdout is a JSON document Claude Code parses,
+  # and stray shell diagnostics interleaved with it break the parse — turning a
+  # best-effort stamp write into a lost notice.
+  { mkdir -p "$STATE_DIR" && printf '%s\n' "$VERSION" > "$STAMP_FILE"; } 2>/dev/null || true
   exit 0
 fi
 

@@ -16,6 +16,17 @@ TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 fails=0
 
+# The guard's DEFAULT is warn-only: it will not rewrite another plugin's source
+# unless the user opts in. Every test below this line that asserts the patch was
+# APPLIED therefore has to run in opt-in mode, so export it once for the whole
+# legacy suite rather than at ~15 separate call sites (one missed site would
+# fail confusingly). The warn-only block at the end of this file overrides it
+# explicitly per test.
+export REMEMBER_INJECT_CAP_AUTOWRITE=1
+# Never let a warn-only run write its once-per-version stamp into the real
+# $HOME/.claude/coderails — point the seam at the temp tree for the whole suite.
+export REMEMBER_INJECT_STATE_DIR="$TMP/state-default"
+
 check() { # desc expected actual
   if [ "$2" = "$3" ]; then printf 'ok   - %s\n' "$1"
   else printf 'FAIL - %s\n  expected: %q\n  actual:   %q\n' "$1" "$2" "$3"; fails=$((fails+1)); fi
@@ -517,6 +528,168 @@ check "sanity gate: warning emitted" "true" \
   "$(printf '%s' "$out" | jq -r '.systemMessage // ""' | grep -qi 'did not verify' && echo true || echo false)"
 check "sanity gate: no temp file left behind" "0" \
   "$(find "$TMP" -name 'hook-i3.sh.coderails-tmp*' | wc -l | tr -d ' ')"
+
+# ===========================================================================
+# WARN-ONLY DEFAULT. Everything above ran with REMEMBER_INJECT_CAP_AUTOWRITE=1
+# because it asserts write behaviour. The DEFAULT, though, is warn-only:
+# coderails is a public plugin and must not silently rewrite another plugin's
+# source on a user's machine. These tests unset/zero the opt-in explicitly.
+# ===========================================================================
+
+# --- Test (w1): DEFAULT (var unset), cap missing -> target byte-identical, a
+# notice explaining the opt-in emitted, exit 0, nothing written anywhere. ---
+memdir="$TMP/mem-w1"; mkdir -p "$memdir"
+fx="$TMP/hook-w1.sh"
+make_fixture "$fx" "$VENDOR" "$memdir"
+before=$(shasum "$fx" | awk '{print $1}')
+out=$(env -u REMEMBER_INJECT_CAP_AUTOWRITE REMEMBER_HOOK_FILE="$fx" \
+  REMEMBER_INJECT_STATE_DIR="$TMP/state-w1" \
+  REMEMBER_PLUGIN_VERSION="9.9.9" bash "$GUARD" 2>&1)
+rc=$?
+after=$(shasum "$fx" | awk '{print $1}')
+check "default warn-only: exit 0" "0" "$rc"
+check "default warn-only: target byte-identical (NOT rewritten)" "$before" "$after"
+check "default warn-only: no backup written" "0" \
+  "$(find "$TMP" -name 'hook-w1.sh.coderails-bak*' | wc -l | tr -d ' ')"
+check "default warn-only: no temp file left behind" "0" \
+  "$(find "$TMP" -name 'hook-w1.sh.coderails-tmp*' | wc -l | tr -d ' ')"
+check "default warn-only: notice emitted (single parseable JSON document)" "true" \
+  "$(printf '%s' "$out" | jq -e . >/dev/null 2>&1 && echo true || echo false)"
+# The notice is only useful if it names the exact opt-in switch and where to set
+# it -- a vague "the cap is missing" leaves the user with no action to take.
+check "default warn-only: notice names the opt-in env var" "true" \
+  "$(printf '%s' "$out" | jq -r '.systemMessage // ""' | grep -q 'REMEMBER_INJECT_CAP_AUTOWRITE' && echo true || echo false)"
+check "default warn-only: notice names settings.json as where to set it" "true" \
+  "$(printf '%s' "$out" | jq -r '.systemMessage // ""' | grep -q 'settings\.json' && echo true || echo false)"
+check "default warn-only: notice states coderails will not modify without permission" "true" \
+  "$(printf '%s' "$out" | jq -r '.systemMessage // ""' | grep -qi 'without your permission' && echo true || echo false)"
+check "default warn-only: notice names the plugin version" "true" \
+  "$(printf '%s' "$out" | jq -r '.systemMessage // ""' | grep -q '9\.9\.9' && echo true || echo false)"
+
+# --- Test (w2): explicit =0 is warn-only too (not just "unset"). A gate keyed
+# on "is the var set at all" would pass w1 and fail here. ---
+memdir="$TMP/mem-w2"; mkdir -p "$memdir"
+fx="$TMP/hook-w2.sh"
+make_fixture "$fx" "$VENDOR" "$memdir"
+before=$(shasum "$fx" | awk '{print $1}')
+out=$(REMEMBER_INJECT_CAP_AUTOWRITE=0 REMEMBER_HOOK_FILE="$fx" \
+  REMEMBER_INJECT_STATE_DIR="$TMP/state-w2" bash "$GUARD" 2>&1)
+rc=$?
+after=$(shasum "$fx" | awk '{print $1}')
+check "explicit =0: exit 0" "0" "$rc"
+check "explicit =0: target byte-identical (NOT rewritten)" "$before" "$after"
+check "explicit =0: notice still emitted" "true" \
+  "$(printf '%s' "$out" | jq -r '.systemMessage // ""' | grep -q 'REMEMBER_INJECT_CAP_AUTOWRITE' && echo true || echo false)"
+
+# --- Test (w3): opt-in mode on the SAME fixture shape still patches. Proves the
+# gate is the only thing standing between warn-only and the old behaviour. ---
+memdir="$TMP/mem-w3"; mkdir -p "$memdir"
+fx="$TMP/hook-w3.sh"
+make_fixture "$fx" "$VENDOR" "$memdir"
+out=$(REMEMBER_INJECT_CAP_AUTOWRITE=1 REMEMBER_HOOK_FILE="$fx" \
+  REMEMBER_PLUGIN_VERSION="9.9.9" bash "$GUARD" 2>&1)
+rc=$?
+check "opt-in =1: exit 0" "0" "$rc"
+check "opt-in =1: patch APPLIED (cap present)" "true" \
+  "$(grep -q REMEMBER_INJECT_MAX_BYTES "$fx" && echo true || echo false)"
+check "opt-in =1: notice is the re-applied one, not the opt-in nag" "false" \
+  "$(printf '%s' "$out" | jq -r '.systemMessage // ""' | grep -q 'REMEMBER_INJECT_CAP_AUTOWRITE=1' && echo true || echo false)"
+
+# --- Test (w4): SUPPRESSION. The reviewer ran three consecutive sessions on a
+# plugin whose block shape differs and got three identical nags -- no
+# suppression, no opt-out. Two warn-only runs at the SAME version must notify
+# exactly ONCE. ---
+memdir="$TMP/mem-w4"; mkdir -p "$memdir"
+fx="$TMP/hook-w4.sh"
+make_fixture "$fx" "$VENDOR" "$memdir"
+statedir="$TMP/state-w4"
+first=$(env -u REMEMBER_INJECT_CAP_AUTOWRITE REMEMBER_HOOK_FILE="$fx" \
+  REMEMBER_INJECT_STATE_DIR="$statedir" REMEMBER_PLUGIN_VERSION="1.0.0" bash "$GUARD" 2>&1)
+second=$(env -u REMEMBER_INJECT_CAP_AUTOWRITE REMEMBER_HOOK_FILE="$fx" \
+  REMEMBER_INJECT_STATE_DIR="$statedir" REMEMBER_PLUGIN_VERSION="1.0.0" bash "$GUARD" 2>&1)
+rc=$?
+check "suppression: first run notifies" "true" \
+  "$(printf '%s' "$first" | jq -r '.systemMessage // ""' | grep -q 'REMEMBER_INJECT_CAP_AUTOWRITE' && echo true || echo false)"
+check "suppression: second run at the same version is SILENT" "" "$second"
+check "suppression: second run exit 0" "0" "$rc"
+
+# --- Test (w5): a NEW version must warn again -- suppression is per-version,
+# not permanent. A plugin bump is exactly when the user needs to hear about it. ---
+third=$(env -u REMEMBER_INJECT_CAP_AUTOWRITE REMEMBER_HOOK_FILE="$fx" \
+  REMEMBER_INJECT_STATE_DIR="$statedir" REMEMBER_PLUGIN_VERSION="1.1.0" bash "$GUARD" 2>&1)
+rc=$?
+check "new version: warns again after a bump" "true" \
+  "$(printf '%s' "$third" | jq -r '.systemMessage // ""' | grep -q '1\.1\.0' && echo true || echo false)"
+check "new version: exit 0" "0" "$rc"
+# ...and the new version is now itself suppressed.
+fourth=$(env -u REMEMBER_INJECT_CAP_AUTOWRITE REMEMBER_HOOK_FILE="$fx" \
+  REMEMBER_INJECT_STATE_DIR="$statedir" REMEMBER_PLUGIN_VERSION="1.1.0" bash "$GUARD" 2>&1)
+check "new version: the bumped version is suppressed on its second run" "" "$fourth"
+
+# --- Test (w6): UNWRITABLE stamp location -> still warns, exit 0, no crash.
+# The stamp is a convenience; failing to write it must never cost the user the
+# notice or take the session down with it. ---
+memdir="$TMP/mem-w6"; mkdir -p "$memdir"
+fx="$TMP/hook-w6.sh"
+make_fixture "$fx" "$VENDOR" "$memdir"
+nowrite="$TMP/nowrite"; mkdir -p "$nowrite"; chmod 500 "$nowrite"
+out=$(env -u REMEMBER_INJECT_CAP_AUTOWRITE REMEMBER_HOOK_FILE="$fx" \
+  REMEMBER_INJECT_STATE_DIR="$nowrite/state" REMEMBER_PLUGIN_VERSION="3.3.3" bash "$GUARD" 2>&1)
+rc=$?
+chmod 700 "$nowrite"
+check "unwritable stamp dir: exit 0 (no crash)" "0" "$rc"
+check "unwritable stamp dir: notice still emitted (fail-open)" "true" \
+  "$(printf '%s' "$out" | jq -r '.systemMessage // ""' | grep -q '3\.3\.3' && echo true || echo false)"
+# The failed stamp write must not CORRUPT the notice. A failing output
+# redirection is diagnosed by the shell before the command runs, so a
+# per-command `2>/dev/null` does not suppress it and the diagnostic lands in
+# the hook's output -- where it breaks the JSON document Claude Code parses.
+# A grep-for-the-version assertion passes happily on mangled output; only
+# parsing the whole document discriminates.
+check "unwritable stamp dir: notice is still VALID JSON (no leaked shell error)" "true" \
+  "$(printf '%s' "$out" | jq -e . >/dev/null 2>&1 && echo true || echo false)"
+check "unwritable stamp dir: target still byte-identical" "true" \
+  "$(grep -qc REMEMBER_INJECT_MAX_BYTES "$fx" >/dev/null 2>&1 && echo false || echo true)"
+
+# --- Test (w7): warn-only mode must NOT write into the plugins dir at all.
+# Resolve the target through the manifest (no REMEMBER_HOOK_FILE seam) and
+# assert the whole fixture plugin tree is unchanged. ---
+pdir="$TMP/plugins-w7"
+vdir="$pdir/cache/claude-plugins-official/remember/4.5.6/scripts"
+mkdir -p "$vdir"
+memdir="$TMP/mem-w7"; mkdir -p "$memdir"
+make_fixture "$vdir/session-start-hook.sh" "$VENDOR" "$memdir"
+jq -n --arg p "$pdir/cache/claude-plugins-official/remember/4.5.6" \
+  '{version:2,plugins:{"remember@claude-plugins-official":[{scope:"user",installPath:$p,version:"4.5.6"}]}}' \
+  > "$pdir/installed_plugins.json"
+tree_before=$(find "$pdir" -type f | sort | xargs shasum | shasum | awk '{print $1}')
+out=$(env -u REMEMBER_INJECT_CAP_AUTOWRITE CLAUDE_PLUGINS_DIR="$pdir" \
+  REMEMBER_INJECT_STATE_DIR="$TMP/state-w7" bash "$GUARD" 2>&1)
+rc=$?
+tree_after=$(find "$pdir" -type f | sort | xargs shasum | shasum | awk '{print $1}')
+check "warn-only via manifest: exit 0" "0" "$rc"
+check "warn-only via manifest: plugin tree completely unchanged" "$tree_before" "$tree_after"
+check "warn-only via manifest: notice names the resolved version 4.5.6" "true" \
+  "$(printf '%s' "$out" | jq -r '.systemMessage // ""' | grep -q '4\.5\.6' && echo true || echo false)"
+
+# --- Test (w8): genuine ERROR warnings are NOT suppressed. Suppression covers
+# the opt-in notice only. An unrecognised file shape names a real fault the user
+# must see on EVERY session, not once per version. This runs in opt-in mode
+# because the shape check is only reached once writing is permitted. ---
+fx="$TMP/hook-w8.sh"
+{
+  printf '%s\n' '#!/bin/bash'
+  printf '%s\n' '# a totally different vendor shape -- no matching MEMORY block'
+} > "$fx"
+statedir="$TMP/state-w8"
+e1=$(REMEMBER_INJECT_CAP_AUTOWRITE=1 REMEMBER_HOOK_FILE="$fx" \
+  REMEMBER_INJECT_STATE_DIR="$statedir" REMEMBER_PLUGIN_VERSION="5.0.0" bash "$GUARD" 2>&1)
+e2=$(REMEMBER_INJECT_CAP_AUTOWRITE=1 REMEMBER_HOOK_FILE="$fx" \
+  REMEMBER_INJECT_STATE_DIR="$statedir" REMEMBER_PLUGIN_VERSION="5.0.0" bash "$GUARD" 2>&1)
+check "error not suppressed: first run warns about the shape" "true" \
+  "$(printf '%s' "$e1" | jq -r '.systemMessage // ""' | grep -qi 'by hand' && echo true || echo false)"
+check "error not suppressed: SECOND run warns again (real fault, not a nag)" "true" \
+  "$(printf '%s' "$e2" | jq -r '.systemMessage // ""' | grep -qi 'by hand' && echo true || echo false)"
 
 # shellcheck disable=SC2015  # matches the house idiom in loop_cost.test.sh
 [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails failures)"; exit 1; }
