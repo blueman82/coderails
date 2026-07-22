@@ -75,16 +75,25 @@ function parseUsageEvent(line: string): UsageEvent | null {
 // step re-emits an assistant line with the SAME message.id and an identical
 // cumulative usage snapshot (confirmed against real transcripts); only the
 // first occurrence of each id is kept so repeats don't inflate the total.
-async function collectFileEvents(path: string, seenIds: Set<string>, events: UsageEvent[]): Promise<void> {
+// Dedup here is WITHIN this file only — cross-file dedup happens at merge
+// time in collectUsage, never persisted (see CachedFile / mergeCandidates).
+async function collectFileEvents(path: string): Promise<UsageEvent[]> {
+  const events: UsageEvent[] = [];
+  const seenIds = new Set<string>();
   let stream;
   try {
     stream = createReadStream(path, { encoding: "utf-8" });
   } catch {
-    return;
+    return events;
   }
   const rl = createInterface({ input: stream, crlfDelay: Infinity });
   try {
     for await (const line of rl) {
+      // Cheap prefilter before the JSON.parse in parseUsageEvent: only
+      // assistant lines can ever carry a usage object, and they are a
+      // minority of lines in a real transcript (~40%, dominated by other
+      // event types) — skipping the parse on the rest cuts parse cost.
+      if (!line.includes('"type":"assistant"')) continue;
       const event = parseUsageEvent(line);
       if (!event) continue;
       if (seenIds.has(event.messageId)) continue;
@@ -97,6 +106,7 @@ async function collectFileEvents(path: string, seenIds: Set<string>, events: Usa
   } finally {
     stream.destroy();
   }
+  return events;
 }
 
 // Lists .jsonl files under dir, recursing into subdirectories. Read failures
