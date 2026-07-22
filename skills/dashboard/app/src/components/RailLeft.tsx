@@ -95,6 +95,15 @@ export function RailLeft() {
         </div>
         {kpiKeys.map((key) => {
           const tile = findTile(health, key);
+          // collectHealth always returns all six keys (never a subset), so an
+          // empty health array specifically means "the activity collect
+          // hasn't resolved yet" — the initial SSE snapshot ships health:[]
+          // before the first async collect finishes, and the following
+          // "activity" frame fills it in shortly after. That's a loading
+          // state, not a collector failure, so it must not render the same
+          // "unavailable" as a tile the collector actually tried and
+          // couldn't populate (tile present, value: null).
+          const loading = health.length === 0;
           return (
             <div className="hud-kpi" key={key}>
               <div className="hud-kpi-row">
@@ -103,7 +112,9 @@ export function RailLeft() {
                   {KPI_LABELS[key]}
                 </span>
               </div>
-              {tile && tile.value !== null ? (
+              {loading ? (
+                <div className="hud-kpi-loading">loading…</div>
+              ) : tile && tile.value !== null ? (
                 <>
                   <div className="hud-kpi-value">{tile.value}</div>
                   {(key === "costWeek" || key === "costMonth") && tile.note && (
