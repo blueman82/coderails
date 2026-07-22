@@ -283,7 +283,6 @@ export async function collectContextTrend(
   const before = sessions.filter((s) => s.startMs < CUTOVER_MS);
   const after = sessions.filter((s) => s.startMs >= CUTOVER_MS);
 
-  console.log("[instrumentation] collectContextTrend complete, sessions:", sessions.length);
   return {
     windowStartMs: WINDOW_START_MS,
     cutoverMs: CUTOVER_MS,
