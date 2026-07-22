@@ -26,7 +26,11 @@ SLEEP_S="${CLAUDE_HOOK_SLEEP_S:-0.3}"
 # data (work-unit ids, session ids) whose newlines would otherwise append extra
 # lines to the log — letting a crafted id forge a whole record, e.g. a
 # fabricated "gate=passed" with its own timestamp, in the audit trail the
-# dashboard reads. Enforcement never depended on this; the log's integrity does.
+# dashboard reads. Most enforcement here never reads this log back — the
+# log's integrity matters for the dashboard/audit trail regardless. The one
+# exception is als_gate_unstubbed_grace (below), which DOES read a prior
+# als_log line to decide a single grace-release — see its own header for why
+# that one read is bounded to honest self-deception, not adversarial forgery.
 # Escape CR/LF to literal \n / \r so the message stays one line and stays legible.
 # Escaping uses bash parameter expansion ONLY — no awk/sed/tr. als_log must keep
 # working when PATH carries almost nothing (the jq-missing retry window relies on
@@ -472,6 +476,27 @@ als_load_progress() {
   als_read_file_state "$ALS_PATH"
   ALS_REARMED=0
   if [ "$ALS_INVOCATIONS" -gt "$ALS_MARKER" ]; then ALS_REARMED=1; fi
+}
+
+# Gate: nag-once grace for an invoked-but-never-stubbed session. Fires ONLY
+# when no progress.json exists at the resolved path. If the discipline log
+# already records a delivered absent-file block for THIS session at THIS
+# invocation count, the guard stands down (exit 0) — the one-shot backstop
+# SKILL.md Phase -2 documents has already been delivered. A NEW invocation
+# increments the count, misses the grep key, and re-arms the nag. This is the
+# ONLY enforcement decision that reads the discipline log; a forged ledger
+# line would require deliberately writing a fake hook record (the same
+# adversarial-forgery class the proofs gate declares out of scope), not honest
+# self-deception. Fail-safe: if LOG_FILE is unwritable the line never lands,
+# grace never releases, and behaviour degrades to per-turn nagging — never
+# toward silent disarm.
+als_gate_unstubbed_grace() { # $1=hook $2=session
+  { [ -n "$ALS_PATH" ] && [ ! -f "$ALS_PATH" ]; } || return 0
+  local esc_sid; esc_sid=$(printf '%s' "$2" | sed 's/[.[\*^$\\]/\\&/g')
+  if grep -q "hook=loop_state_guard session=$esc_sid invocations=$ALS_INVOCATIONS .*reason=absent blocked=1" "$LOG_FILE" 2>/dev/null; then
+    als_log "hook=$1 session=$2 invocations=$ALS_INVOCATIONS unstubbed_grace=released blocked=0"
+    exit 0
+  fi
 }
 
 # Gate: skip when the loop is genuinely complete — complete, not re-armed, and

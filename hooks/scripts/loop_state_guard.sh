@@ -43,7 +43,10 @@ block_state_failure() {
 Create it at this exact path (copy it verbatim — never compute the path yourself):
   $ALS_PATH
 with this stub, then enrich it as the loop progresses:
-  $stub_schema"
+  $stub_schema
+If you loaded the agentic-loop skill only to read it or answer a question
+about it — no loop is running — do NOT create this file; this guard stands
+down after this one block."
   elif [ "$ALS_SESSION" != "$session_id" ]; then
     reason="session_mismatch"
     msg="[loop-state-guard] progress.json at:
@@ -124,6 +127,7 @@ als_gate_no_transcript "$transcript"
 als_gate_stop_loop "$stop_hook_active"
 als_gate_require_active_loop "$transcript" "loop_state_guard" "$session_id"
 als_load_progress "$cwd" "$session_id"
+als_gate_unstubbed_grace "loop_state_guard" "$session_id"
 gate_loop_evals_required
 als_gate_loop_complete "loop_state_guard" "$session_id"
 gate_present_and_owned

@@ -49,7 +49,7 @@ check() { # desc expected_code actual_code
   if [ "$2" = "$3" ]; then printf 'ok   - %s\n' "$1"
   else printf 'FAIL - %s (expected exit %s, got %s)\n' "$1" "$2" "$3"; fails=$((fails+1)); fi
 }
-reset() { rm -rf "$CLAUDE_AGENTIC_LOOP_DIR"; }
+reset() { rm -rf "$CLAUDE_AGENTIC_LOOP_DIR"; : > "$CLAUDE_DISCIPLINE_LOG"; }
 # grep -c exits 1 on zero matches even though it correctly prints "0" — count()
 # always exits 0 and prints just the count, so a zero-match assertion doesn't
 # need an `|| echo 0` fallback that (on a match count of exactly 0) would print
@@ -506,5 +506,71 @@ printf '{"schema_version":1,"status":"in-progress","session_id":"S1","completed_
 check "payload with .cwd absent -> resolves via \$PWD fallback (present+owned, allow)" 0 \
   "$(run x "$(payload_no_cwd "$T" S1)")"
 rm -rf "$(dirname "$PWD_PATH")"
+
+# =====================================================================
+# als_gate_unstubbed_grace — nag-once grace for an invoked-but-never-stubbed
+# session. Fires ONLY on absence; a session's own prior absent-block log line
+# releases the SAME (session, invocation-count) pairing exactly once — a NEW
+# invocation count re-arms. Grace must never release when progress.json
+# actually exists (that's the mismatch/stale-complete paths, unaffected).
+# =====================================================================
+
+# (1) Grace release: first run on absent file -> block (as before). Then
+# pre-seed the exact absent-block log line and re-run the SAME payload ->
+# exit 0, with unstubbed_grace=released recorded in the log.
+reset; T=$(mk_transcript 1)
+check "grace: first run, file absent -> block (unchanged)" 2 "$(run x "$(payload "$T" S1)")"
+check "grace: first run wrote the absent-block log line" 1 \
+  "$(count 'hook=loop_state_guard session=S1 invocations=1 status=absent reason=absent blocked=1' "$CLAUDE_DISCIPLINE_LOG")"
+check "grace: second run, same payload, log carries the prior absent-block -> allow" 0 "$(run x "$(payload "$T" S1)")"
+check "grace: release recorded in log as unstubbed_grace=released" 1 \
+  "$(count 'hook=loop_state_guard session=S1 invocations=1 unstubbed_grace=released blocked=0' "$CLAUDE_DISCIPLINE_LOG")"
+
+# (2) Re-invocation re-arms: after release at invocations=1, a transcript
+# with invocations=2 (still no file) -> block again (new count, no matching
+# log line for count=2 yet).
+T2=$(mk_transcript 2)
+check "grace: re-invocation (count=2) after release at count=1 -> block again (re-armed)" 2 "$(run x "$(payload "$T2" S1)")"
+
+# (3) Grace is absent-only: with progress.json PRESENT (owned by a different
+# session, i.e. mismatch), and an absent-nag line for THIS session already in
+# the log -> still block (grace must not release when the file exists).
+reset; T=$(mk_transcript 1)
+run x "$(payload "$T" S1)" >/dev/null   # seeds the absent-block line for (S1, invocations=1)
+write_file in-progress S_OTHER 0 S1     # now the file EXISTS (session mismatch)
+check "grace: file present (session mismatch) despite a seeded absent-nag line -> still block" 2 \
+  "$(run x "$(payload "$T" S1)")"
+
+# (4) Session isolation + BRE escape: S1's nag line must not leak to a
+# DIFFERENT session (S2.with.dots) hitting the identical transcript with no
+# file. Session id deliberately contains "." to exercise the grep pattern's
+# regex-escaping of the session_id.
+reset; T=$(mk_transcript 1)
+run x "$(payload "$T" S1)" >/dev/null   # seeds S1's absent-block line
+S2_DOTTED="S2.with.dots"
+check "grace: S1's nag line does not leak to a different session (S2.with.dots) -> still block" 2 \
+  "$(run x "$(payload "$T" "$S2_DOTTED")")"
+
+# (5) Unwritable-log fail-safe: point CLAUDE_DISCIPLINE_LOG at an unwritable
+# path (a directory, so any open-for-append fails) -> two consecutive runs
+# BOTH exit 2 (grace can never release; degrade to today, never silent disarm).
+reset; T=$(mk_transcript 1)
+UNWRITABLE_DIR="$TMP/unwritable-log-dir-$RANDOM"
+mkdir -p "$UNWRITABLE_DIR"
+# CLAUDE_DISCIPLINE_LOG points at a directory (not a file): als_log's own
+# printf-redirect open fails every time, so the absent-block line never
+# lands, no matter how many times the guard runs.
+rc1=$(CLAUDE_DISCIPLINE_LOG="$UNWRITABLE_DIR" run x "$(payload "$T" S1)")
+rc2=$(CLAUDE_DISCIPLINE_LOG="$UNWRITABLE_DIR" run x "$(payload "$T" S1)")
+check "grace: unwritable log, first run -> block" 2 "$rc1"
+check "grace: unwritable log, second run -> STILL block (no silent disarm)" 2 "$rc2"
+
+# (6) Compliant sequence: nag once, then write a session-owned in-progress
+# stub -> allow via the normal present-and-owned path (arming intact after
+# grace exists; grace itself is a no-op once the file exists).
+reset; T=$(mk_transcript 1)
+check "grace: compliant sequence, first run (no stub yet) -> block" 2 "$(run x "$(payload "$T" S1)")"
+write_file in-progress S1 0
+check "grace: compliant sequence, stub now written -> allow via present+owned (arming intact)" 0 "$(run x "$(payload "$T" S1)")"
 
 [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails)"; exit 1; }
