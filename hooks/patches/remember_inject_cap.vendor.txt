@@ -1,0 +1,12 @@
+if [ -n "$HAS_MEMORY" ]; then
+    echo "=== MEMORY ==="
+    for MFILE in "$IDENTITY_FILE" "$CORE_MEMORIES" "$REMEMBER_TODAY_FILE" "$REMEMBER_NOW" "$REMEMBER_RECENT" "$REMEMBER_ARCHIVE"; do
+        if [ -f "$MFILE" ] && [ -s "$MFILE" ]; then
+            BASENAME=$(basename "$MFILE")
+            echo "--- $BASENAME ---"
+            cat "$MFILE"
+            echo ""
+        fi
+    done
+    echo ""
+fi
