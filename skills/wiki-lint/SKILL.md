@@ -69,6 +69,15 @@ After reporting findings:
 
 Append to `$vault/log.md`: `## [YYYY-MM-DD] lint | <summary of findings>`
 
+Immediately after that line, append a structured findings-count record on its
+own line: `<!-- lint-findings: N -->`, where `N` is the total number of
+findings from Step 2 (contradictions + stale pages + orphan pages + missing
+concepts + missing cross-references + data gaps + inbox backlog items — sum
+every category, 0 if the pass was clean). This is a machine-readable summary
+for tooling (the dashboard's LINT FINDINGS tile) — it does not change what
+gets reported to the user in Step 3, and it is never derived by re-parsing
+the prose summary.
+
 ### Step 6: Commit
 
 **If `git.worktree` is `true`**:
