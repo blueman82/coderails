@@ -1,0 +1,63 @@
+{
+  "schema_version": 1,
+  "scope": "pr",
+  "task_ref": "PR#273 / fix/row1-magnitude-on-main",
+  "tier": 0,
+  "tier_justification": "Tier 0 exemption. Predicate checked against the real diff, not a self-assigned label: (a) SINGLE WORK-UNIT — one file, skills/agentic-loop/SKILL.md, two paragraphs deleted; (b) NO OUTWARD OR IRREVERSIBLE SURFACE — `gh pr diff 273 --name-only` returns no path under hooks/ or scripts/, no .sh/.ts/.js/.py file, no UI, CLI output, rendered artifact or served endpoint, so rule 6's user-facing predicate does not fire and no publish/deploy/migration/data-deletion/external-send is involved; (c) GOAL STATE DIRECTLY COVERED — the goal is the absence of specific prose, which a grep over merged state asserts exactly. Note the exemption is still a written artifact with executable evals carrying negative controls, not an absence.",
+  "frozen_at": "2026-07-22T22:03:07Z",
+  "frozen_sha": "51154b33c9f0f7222734cf59c6f541da0f082703",
+  "evals": [
+    {
+      "id": "E1",
+      "priority": "P0",
+      "mode": "scripted",
+      "surface": "merged-state",
+      "assert": "Row 1 of the token-burn measures is absent from skills/agentic-loop/SKILL.md — no surviving reference to the deleted rule by any of its four naming forms.",
+      "cmd": "cd /Users/harrison/Github/coderails && git show origin/main:skills/agentic-loop/SKILL.md | grep -qiE 'row 1 of 4|single largest saving|MANDATORY compaction|Compaction cadence'; test $? -eq 1",
+      "negative_control": "cd /Users/harrison/Github/coderails && git show 51154b33c9f0f7222734cf59c6f541da0f082703~1:skills/agentic-loop/SKILL.md | grep -qiE 'row 1 of 4|single largest saving|MANDATORY compaction|Compaction cadence'; test $? -eq 1",
+      "expected": "cmd exits 0 (pattern absent post-merge). negative_control exits 1 (pattern present at the pre-deletion parent commit), proving the check discriminates rather than always passing.",
+      "status": "pending",
+      "evidence": null
+    },
+    {
+      "id": "E2",
+      "priority": "P0",
+      "mode": "scripted",
+      "surface": "merged-state",
+      "assert": "Rows 2/3/4 of the token-burn measures survive the deletion and were NOT renumbered — they are referenced by number elsewhere in the repo, so renumbering would silently break those references.",
+      "cmd": "cd /Users/harrison/Github/coderails && test $(git show origin/main:skills/agentic-loop/SKILL.md | grep -coE 'row 2 of 4|row 3 of 4|row 4 of 4') -ge 2",
+      "negative_control": "cd /Users/harrison/Github/coderails && test $(git show origin/main:skills/agentic-loop/SKILL.md | grep -coE 'row 9 of 4|row 7 of 4') -ge 2",
+      "expected": "cmd exits 0 (at least two of rows 2/3/4 still named in their original numbering). negative_control exits 1 (nonexistent row numbers are not present), proving the count assertion is not vacuously true.",
+      "status": "pending",
+      "evidence": null
+    },
+    {
+      "id": "E3",
+      "priority": "P0",
+      "mode": "scripted",
+      "surface": "merged-state",
+      "assert": "No dangling reference: the deletion leaves no surviving prose anywhere in the repo that references row 1 or its enforcement gate as if it still exists.",
+      "cmd": "cd /Users/harrison/Github/coderails && git grep -iE 'row 1 of 4|rows 1 and 4|rows 1-4|als_gate_compaction_per_stop' origin/main -- ':!*.next/*' ':!node_modules/*' > /tmp/e3.out 2>&1; test ! -s /tmp/e3.out",
+      "negative_control": "cd /Users/harrison/Github/coderails && git grep -iE 'agentic' origin/main -- ':!*.next/*' > /tmp/e3n.out 2>&1; test ! -s /tmp/e3n.out",
+      "expected": "cmd exits 0 (no dangling row-1 references on merged main). negative_control exits 1 (a term that IS present produces output), proving the empty-output assertion detects real content rather than always reporting empty.",
+      "status": "pending",
+      "evidence": null
+    },
+    {
+      "id": "E4",
+      "priority": "P1",
+      "mode": "scripted",
+      "surface": "merged-state",
+      "assert": "Semantic collateral avoided: the Context-window persistence section's opening guidance ('Do not stop work early because the context window is filling') is SEPARATE general guidance and must survive the deletion.",
+      "cmd": "cd /Users/harrison/Github/coderails && git show origin/main:skills/agentic-loop/SKILL.md | grep -q 'Do not stop work early because the context window is filling'",
+      "negative_control": "cd /Users/harrison/Github/coderails && git show origin/main:skills/agentic-loop/SKILL.md | grep -q 'Do not stop work early because the banana is filling'",
+      "expected": "cmd exits 0 (the surviving guidance is present). negative_control exits 1 (a near-identical but false string is absent), proving the grep matches the specific sentence rather than any nearby text.",
+      "status": "pending",
+      "evidence": null
+    }
+  ],
+  "amendments": [],
+  "result": null,
+  "graded_at": null,
+  "head_sha": "51154b33c9f0f7222734cf59c6f541da0f082703"
+}
