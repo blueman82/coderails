@@ -103,7 +103,7 @@ export function RailLeft() {
           // state, not a collector failure, so it must not render the same
           // "unavailable" as a tile the collector actually tried and
           // couldn't populate (tile present, value: null).
-          const loading = health.length === 0;
+          const loading = false; // MUTATION TEST
           return (
             <div className="hud-kpi" key={key}>
               <div className="hud-kpi-row">

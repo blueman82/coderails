@@ -31,6 +31,63 @@ describe("runClaude", () => {
     });
   });
 
+  // execFile's default stdio gives the child a PIPE for stdin that the parent
+  // never writes to and never closes. The claude CLI waits on it and, after 3
+  // seconds, emits "Warning: no stdin data received in 3s, proceeding without
+  // it" — a mandatory ~3s stall on every scheduled routine run. Note the
+  // `stdio` OPTION cannot fix this: execFile silently drops it and always
+  // pipes all three fds. The only working mechanism is ending the returned
+  // child's stdin, which is what this pins.
+  it("ends the spawned child's stdin so the CLI does not wait 3s on an unwritten pipe", () => {
+    const end = vi.fn();
+    const execFileImpl = vi.fn((command, args, options, callback) => {
+      callback(null, "stdout output", "");
+      return { stdin: { end } };
+    });
+    return runClaude(["-p", "/x"], "/cwd", {
+      claudePath: "/opt/homebrew/bin/claude",
+      execFileImpl,
+    }).then((result) => {
+      expect(end).toHaveBeenCalled();
+      // stdout/stderr capture must be untouched by the stdin change.
+      expect(result.stdout).toBe("stdout output");
+    });
+  });
+
+  // The mock test above pins the MECHANISM (".end() was called on the object
+  // we handed back") but cannot guard the BEHAVIOUR: an earlier attempted fix
+  // (`stdio: ["ignore","pipe","pipe"]`) made a mock test pass while the real
+  // stall persisted, because execFile silently DROPS the stdio option. Only a
+  // real spawned child that reads stdin can catch that class of regression.
+  // /bin/cat reads stdin until EOF: with the fix it gets EOF at once and exits
+  // 0; without it, it blocks until timeoutMs and comes back spawnFailure
+  // "timeout". No wall-clock assertion — the ExecResult alone discriminates.
+  it("really closes a spawned process's stdin — /bin/cat exits 0 instead of blocking (real execFile, no mock)", () => {
+    return runClaude([], "/tmp", {
+      claudePath: "/bin/cat",
+      // 3s, comfortably under vitest's 5s default test timeout, so a
+      // regression fails on the honest assertion (spawnFailure "timeout")
+      // rather than on the runner giving up first.
+      timeoutMs: 3000,
+    }).then((result) => {
+      expect(result.spawnFailure).toBeUndefined();
+      expect(result.exitCode).toBe(0);
+    });
+  });
+
+  it("does not throw when the injected execFileImpl returns no child object", () => {
+    const execFileImpl = vi.fn((command, args, options, callback) => {
+      callback(null, "out", "");
+    });
+    return runClaude(["-p", "/x"], "/cwd", {
+      claudePath: "/opt/homebrew/bin/claude",
+      execFileImpl,
+    }).then((result) => {
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toBe("out");
+    });
+  });
+
   it("resolves with a nonzero exitCode and stderr when the child process errors", () => {
     const execFileImpl = vi.fn((command, args, options, callback) => {
       const err = Object.assign(new Error("boom"), { code: 1 });
