@@ -180,7 +180,7 @@ export function resetUsageMemo(): void {
 // collectFileEvents returns [] either way, cached as the current truth).
 async function collectCandidateEvents(path: string, mtimeMs: number, size: number): Promise<UsageEvent[]> {
   const cached = fileMemo.get(path);
-  if (false && cached && cached.mtimeMs === mtimeMs && cached.size === size) {
+  if (cached && cached.mtimeMs === mtimeMs && cached.size === size) {
     return cached.events;
   }
   const events = await collectFileEvents(path);
