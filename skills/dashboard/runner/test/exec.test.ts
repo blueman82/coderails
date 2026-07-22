@@ -54,6 +54,27 @@ describe("runClaude", () => {
     });
   });
 
+  // The mock test above pins the MECHANISM (".end() was called on the object
+  // we handed back") but cannot guard the BEHAVIOUR: an earlier attempted fix
+  // (`stdio: ["ignore","pipe","pipe"]`) made a mock test pass while the real
+  // stall persisted, because execFile silently DROPS the stdio option. Only a
+  // real spawned child that reads stdin can catch that class of regression.
+  // /bin/cat reads stdin until EOF: with the fix it gets EOF at once and exits
+  // 0; without it, it blocks until timeoutMs and comes back spawnFailure
+  // "timeout". No wall-clock assertion — the ExecResult alone discriminates.
+  it("really closes a spawned process's stdin — /bin/cat exits 0 instead of blocking (real execFile, no mock)", () => {
+    return runClaude([], "/tmp", {
+      claudePath: "/bin/cat",
+      // 3s, comfortably under vitest's 5s default test timeout, so a
+      // regression fails on the honest assertion (spawnFailure "timeout")
+      // rather than on the runner giving up first.
+      timeoutMs: 3000,
+    }).then((result) => {
+      expect(result.spawnFailure).toBeUndefined();
+      expect(result.exitCode).toBe(0);
+    });
+  });
+
   it("does not throw when the injected execFileImpl returns no child object", () => {
     const execFileImpl = vi.fn((command, args, options, callback) => {
       callback(null, "out", "");
