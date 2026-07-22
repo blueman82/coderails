@@ -340,13 +340,25 @@ post_evals::validate_smoke_execution() {
 
     # Only scripted evals carry commands — agent-run evals are graded by a
     # verifier subagent. Same boundary as check 9.
-    local ids
-    ids=$(jq -r '[.evals[]? | select(.mode == "scripted") | .id] | .[]' "$path")
-    [[ -z "$ids" ]] && return 0
+    #
+    # BY ARRAY INDEX, not by id: an id-based `select(.id == $id)` emits
+    # EVERY match, so two evals sharing an id would have their cmds joined
+    # into one compound script — and the last line's exit code masks an
+    # earlier 127. Index iteration executes each scripted eval exactly once
+    # regardless of id collisions; the id appears only in messages. (Checks
+    # 9 and the writer-side tools still look up by id — a duplicate id fails
+    # closed there as malformed smoke, so the chain refuses either way, but
+    # this function must hold on its own.)
+    local idxs
+    idxs=$(jq -r '.evals // [] | to_entries | map(select(.value.mode == "scripted")) | .[].key' "$path")
+    [[ -z "$idxs" ]] && return 0
 
-    local id
-    while IFS= read -r id; do
-        [[ -z "$id" ]] && continue
+    local idx
+    while IFS= read -r idx; do
+        [[ -z "$idx" ]] && continue
+
+        local id
+        id=$(jq -r --argjson i "$idx" '.evals[$i].id // "<unnamed>"' "$path")
 
         # Trim-then-check, same idiom as check 2 on tier_justification: a
         # whitespace-only cmd is `bash -c "   "` — a no-op exiting 0, which
@@ -354,8 +366,8 @@ post_evals::validate_smoke_execution() {
         # without the trim a check that does literally nothing would be
         # accepted. Blank means empty means refused.
         local cmd nc
-        cmd=$(jq -r --arg id "$id" '.evals[] | select(.id == $id) | .cmd // "" | gsub("^\\s+|\\s+$"; "")' "$path")
-        nc=$(jq -r --arg id "$id" '.evals[] | select(.id == $id) | .negative_control // "" | gsub("^\\s+|\\s+$"; "")' "$path")
+        cmd=$(jq -r --argjson i "$idx" '.evals[$i].cmd // "" | gsub("^\\s+|\\s+$"; "")' "$path")
+        nc=$(jq -r --argjson i "$idx" '.evals[$i].negative_control // "" | gsub("^\\s+|\\s+$"; "")' "$path")
 
         # Nothing to execute is not compliance — fail closed. (Check 3
         # already refuses an absent/empty-string negative_control at tier>=1;
@@ -390,7 +402,7 @@ post_evals::validate_smoke_execution() {
             printf 'post_evals: eval %s negative_control did not execute at the gate (exit %s: command not found / crashed / timed out) — non-zero, but for an environmental reason, so it tested nothing. Output: %s\n' "$id" "$rc" "$out" >&2
             return 1
         fi
-    done <<< "$ids"
+    done <<< "$idxs"
 
     return 0
 }

@@ -1418,6 +1418,31 @@ jq -n '{
 post_evals::validate_structure "$FIX_G_LOOP" "" "" "loop"
 check "validate_structure: loop scope skips gate-time re-execution → exit 0" 0 $?
 
+# (G9) Duplicate eval ids must not under-execute. An id-based jq lookup
+# emits EVERY match, so two evals sharing an id had their cmds joined into
+# one compound script whose last line's exit code masked an earlier 127 —
+# an unresolvable cmd in the first duplicate was ACCEPTED. Iterating by
+# array index executes each scripted eval exactly once, id collisions or
+# not. Direct call: in the full chain check 9 happens to refuse duplicate
+# ids first (fail-closed, as malformed smoke), so the chain never exposed
+# this — the function must hold on its own.
+FIX_G_DUP="$TMP/g_dup.json"
+jq -n --arg sha "$SHA" --arg bad "bash $G_DIR/never_created.sh" \
+      --arg good "bash $G_DIR/g_check.sh" --arg nc "bash $G_DIR/g_control.sh" \
+      --argjson smoke "$SMOKE_OK" '{
+  tier: 1, tier_justification: "1 work-unit", head_sha: $sha,
+  evals: [
+    {id:"e1", priority:"P0", mode:"scripted", status:"pending",
+     cmd:$bad, negative_control:$nc, evidence:"log", smoke:$smoke},
+    {id:"e1", priority:"P0", mode:"scripted", status:"pending",
+     cmd:$good, negative_control:$nc, evidence:"log", smoke:$smoke}
+  ]
+}' > "$FIX_G_DUP"
+stderr_out=$(post_evals::validate_smoke_execution "$FIX_G_DUP" 2>&1)
+check "validate_smoke_execution: duplicate ids, unresolvable cmd in first → exit 1" 1 $?
+[[ "$stderr_out" == *"did not execute at the gate"* ]]
+check "validate_smoke_execution: duplicate ids → stderr names the gate-time reason" 0 $?
+
 # (G8) Same fail-open lesson as checks 8/9: no jq, no verdict.
 stderr_out=$(PATH="$EMPTY_BIN"; post_evals::validate_smoke_execution "$FIX_G_HONEST" 2>&1)
 check "validate_smoke_execution: jq unavailable → exit 1 (must not fail open)" 1 $?
