@@ -128,7 +128,94 @@ post_evals::validate_structure() {
         fi
     fi
 
+    # Check 8: freeze-before-build. The task-evals skill stamps frozen_sha
+    # "before implementation starts", but until now nothing verified it —
+    # evals could be authored after the code and pointed at any commit. This
+    # makes the rule mechanical: frozen_sha must be an ancestor of the
+    # branch's merge-base with the default branch, i.e. a commit that already
+    # existed before the branch's own implementation commits.
+    #
+    # pr scope only: loop-scope artifacts live outside any repo (beside
+    # progress.json) and have no branch to compare against.
+    if [[ "$scope" != "loop" ]]; then
+        post_evals::validate_freeze "$path" || return 1
+    fi
+
     return 0
+}
+
+# post_evals::validate_freeze <evals_json_path>
+# Check 8's body, factored out to keep validate_structure readable.
+#
+# Skips (exit 0) when there is nothing to check: no frozen_sha field (every
+# artifact predating this check, plus loop scope), or the file is not inside a
+# git work tree so there is no branch to compare against. Those are absences of
+# applicability, not violations — hard-failing them would break every existing
+# caller.
+#
+# Fails closed on everything else: a frozen_sha git cannot resolve is a
+# violation, not a pass, because "git couldn't answer" must never read as
+# compliance.
+#
+# Escape hatch: a late freeze is permitted when it is DISCLOSED in writing —
+# the precedent is PR #54, whose artifact stated plainly that its evals were
+# authored after implementation and not backdated. The disclosure must be
+# explicit prose in tier_justification or an amendment reason, deliberately not
+# a boolean flag: a flag can be set silently, a sentence has to be written and
+# is visible to any human reading the artifact.
+post_evals::validate_freeze() {
+    local path="$1"
+
+    # Explicit, because the skip path below keys on an empty frozen_sha: if jq
+    # is missing, every read returns empty and a violating artifact would look
+    # exactly like one with no frozen_sha at all — the check would pass while
+    # verifying nothing. Named here rather than left to an incidental non-zero
+    # exit, so a later refactor cannot quietly turn this into a fail-open.
+    if ! command -v jq >/dev/null 2>&1; then
+        printf 'post_evals: jq is required to validate frozen_sha (freeze-before-build) and was not found\n' >&2
+        return 1
+    fi
+
+    local frozen
+    frozen=$(jq -r '.frozen_sha // "" | gsub("^\\s+|\\s+$"; "")' "$path")
+    [[ -z "$frozen" ]] && return 0
+
+    local dir
+    dir=$(cd "$(dirname "$path")" 2>/dev/null && pwd) || return 0
+    git -C "$dir" rev-parse --is-inside-work-tree >/dev/null 2>&1 || return 0
+
+    if ! git -C "$dir" cat-file -e "${frozen}^{commit}" 2>/dev/null; then
+        printf 'post_evals: frozen_sha %s does not resolve to a commit in this repository\n' "$frozen" >&2
+        return 1
+    fi
+
+    # The branch base: where this branch diverged from the default branch.
+    # Try the remote default first, then a local one, so this works both in a
+    # fetched clone and in a bare local repo with no remote.
+    local base="" ref
+    for ref in origin/HEAD origin/main origin/master main master; do
+        if git -C "$dir" rev-parse --verify --quiet "$ref" >/dev/null 2>&1; then
+            base=$(git -C "$dir" merge-base HEAD "$ref" 2>/dev/null) && [[ -n "$base" ]] && break
+            base=""
+        fi
+    done
+    # No default branch to compare against (detached, orphan, unusual layout):
+    # nothing to enforce against, so skip rather than block honest work.
+    [[ -z "$base" ]] && return 0
+
+    if git -C "$dir" merge-base --is-ancestor "$frozen" "$base" 2>/dev/null; then
+        return 0
+    fi
+
+    # Late freeze. Permitted only when disclosed in writing.
+    local disclosure
+    disclosure=$(jq -r '[(.tier_justification // ""), (.amendments[]?.why // "")] | join(" ") | ascii_downcase' "$path")
+    if [[ "$disclosure" == *"freeze"* || "$disclosure" == *"frozen"* ]]; then
+        return 0
+    fi
+
+    printf 'post_evals: frozen_sha %s is not an ancestor of the branch base %s — the evals were frozen after implementation began (freeze-before-build). Fix the freeze, or disclose the late freeze in tier_justification or an amendment reason.\n' "$frozen" "$base" >&2
+    return 1
 }
 
 # post_evals::validate_embed <evals_json_path> <body_path>

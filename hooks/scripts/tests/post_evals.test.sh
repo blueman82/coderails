@@ -313,6 +313,147 @@ check "validate_structure: tier 1 + empty evals → exit 1 (refused)" 1 $?
 [[ "$stderr_out" == *"P0"* ]]
 check "validate_structure: tier 1 + empty evals → stderr names the P0 reason" 0 $?
 
+# ─── check 8: freeze-before-build (frozen_sha must precede the branch) ────────
+# The task-evals skill stamps frozen_sha "before implementation starts", but
+# nothing verified it — an evals.json could be authored after the code and
+# backdated by pointing frozen_sha at any commit. This refusal makes the rule
+# mechanical: frozen_sha must be an ancestor of the branch's merge-base with
+# the default branch, i.e. a commit that already existed before the branch's
+# own implementation commits.
+#
+# Fixtures are real throwaway git repos, because the check is git ancestry —
+# a stubbed git would test the stub, not the rule.
+
+# Build a repo with: base commit (BASE), then two branch commits (IMPL).
+FREEZE_REPO="$TMP/freeze_repo"
+mkdir -p "$FREEZE_REPO"
+(
+  cd "$FREEZE_REPO" || exit 1
+  git init -q -b main
+  git config user.email t@t; git config user.name t
+  echo base > f.txt; git add f.txt; git commit -qm base
+  git checkout -qb feature
+  echo impl1 >> f.txt; git commit -qam impl1
+  echo impl2 >> f.txt; git commit -qam impl2
+) >/dev/null 2>&1
+FREEZE_BASE=$(git -C "$FREEZE_REPO" rev-parse main)
+FREEZE_IMPL=$(git -C "$FREEZE_REPO" rev-parse HEAD)
+
+# 8a: compliant — frozen at the base commit, before any implementation.
+FIX_FREEZE_OK="$FREEZE_REPO/evals_ok.json"
+jq -n --arg sha "$SHA" --arg fsha "$FREEZE_BASE" '{
+  tier: 1,
+  tier_justification: "1 work-unit",
+  frozen_sha: $fsha,
+  head_sha: $sha,
+  evals: [
+    {id:"e1", priority:"P0", mode:"scripted", status:"pass", cmd:"run-a", negative_control:"run-a-broken", evidence:"log"}
+  ]
+}' > "$FIX_FREEZE_OK"
+post_evals::validate_structure "$FIX_FREEZE_OK" 42 "$SHA"
+check "validate_structure: frozen_sha at branch base → exit 0 (compliant)" 0 $?
+
+# 8b: violation — frozen at one of the branch's own implementation commits,
+# i.e. the evals were written after the code. This is the defect.
+FIX_FREEZE_LATE="$FREEZE_REPO/evals_late.json"
+jq -n --arg sha "$SHA" --arg fsha "$FREEZE_IMPL" '{
+  tier: 1,
+  tier_justification: "1 work-unit",
+  frozen_sha: $fsha,
+  head_sha: $sha,
+  evals: [
+    {id:"e1", priority:"P0", mode:"scripted", status:"pass", cmd:"run-a", negative_control:"run-a-broken", evidence:"log"}
+  ]
+}' > "$FIX_FREEZE_LATE"
+stderr_out=$(post_evals::validate_structure "$FIX_FREEZE_LATE" 42 "$SHA" 2>&1)
+check "validate_structure: frozen_sha at a branch commit → exit 1 (froze after building)" 1 $?
+[[ "$stderr_out" == *"frozen_sha"* ]]
+check "validate_structure: late freeze → stderr names frozen_sha" 0 $?
+
+# 8c: disclosed late freeze passes. PR #54 set the precedent — evals authored
+# after implementation, disclosed in prose rather than backdated. The gate
+# enforces honesty, not the impossible. The disclosure must be explicit text,
+# not a bare boolean anyone could flip silently.
+FIX_FREEZE_DISCLOSED="$FREEZE_REPO/evals_disclosed.json"
+jq -n --arg sha "$SHA" --arg fsha "$FREEZE_IMPL" '{
+  tier: 1,
+  tier_justification: "1 work-unit. Disclosed process gap: this evals.json was authored after implementation, not before (violates freeze-before-build). Authored at the real timestamp, not backdated.",
+  frozen_sha: $fsha,
+  head_sha: $sha,
+  evals: [
+    {id:"e1", priority:"P0", mode:"scripted", status:"pass", cmd:"run-a", negative_control:"run-a-broken", evidence:"log"}
+  ]
+}' > "$FIX_FREEZE_DISCLOSED"
+post_evals::validate_structure "$FIX_FREEZE_DISCLOSED" 42 "$SHA"
+check "validate_structure: disclosed late freeze → exit 0 (escape hatch)" 0 $?
+
+# 8d: the disclosure must actually say something about freezing. A generic
+# justification mentioning neither must not open the hatch.
+FIX_FREEZE_FAKE_DISCLOSURE="$FREEZE_REPO/evals_fake.json"
+jq -n --arg sha "$SHA" --arg fsha "$FREEZE_IMPL" '{
+  tier: 1,
+  tier_justification: "1 work-unit, no irreversible surface",
+  frozen_sha: $fsha,
+  head_sha: $sha,
+  evals: [
+    {id:"e1", priority:"P0", mode:"scripted", status:"pass", cmd:"run-a", negative_control:"run-a-broken", evidence:"log"}
+  ]
+}' > "$FIX_FREEZE_FAKE_DISCLOSURE"
+post_evals::validate_structure "$FIX_FREEZE_FAKE_DISCLOSURE" 42 "$SHA" 2>/dev/null
+check "validate_structure: late freeze without disclosure wording → exit 1" 1 $?
+
+# 8e: an unresolvable frozen_sha fails closed — it must not fall through to a
+# pass just because git cannot answer.
+FIX_FREEZE_BOGUS="$FREEZE_REPO/evals_bogus.json"
+jq -n --arg sha "$SHA" '{
+  tier: 1,
+  tier_justification: "1 work-unit",
+  frozen_sha: "0000000000000000000000000000000000000000",
+  head_sha: $sha,
+  evals: [
+    {id:"e1", priority:"P0", mode:"scripted", status:"pass", cmd:"run-a", negative_control:"run-a-broken", evidence:"log"}
+  ]
+}' > "$FIX_FREEZE_BOGUS"
+stderr_out=$(post_evals::validate_structure "$FIX_FREEZE_BOGUS" 42 "$SHA" 2>&1)
+check "validate_structure: unresolvable frozen_sha → exit 1 (fail closed)" 1 $?
+
+# 8f: back-compat — an evals.json with no frozen_sha at all is unchanged by
+# this check. Every fixture above this block omits the field, and the loop
+# scope never carries one, so a hard failure here would break existing callers.
+post_evals::validate_structure "$FIX_OK" 42 "$SHA"
+check "validate_structure: absent frozen_sha → unaffected (back-compat)" 0 $?
+
+# 8f-bis: a violating file must not pass merely because jq is unavailable.
+# Without this, the check fails OPEN: `jq` returning nothing looks exactly like
+# "no frozen_sha field", which is the skip path. A gate that silently passes
+# when its own tooling is missing is the vacuous check this whole layer exists
+# to prevent.
+# PATH is narrowed to an empty dir inside a subshell — jq lives in /usr/bin on
+# most hosts, so trimming to system paths would not actually remove it. A
+# var-assignment prefix would not apply to a shell function either, hence the
+# explicit subshell.
+EMPTY_BIN="$TMP/empty_bin"
+mkdir -p "$EMPTY_BIN"
+stderr_out=$(PATH="$EMPTY_BIN"; post_evals::validate_freeze "$FIX_FREEZE_LATE" 2>&1)
+check "validate_freeze: jq unavailable → exit 1 (must not fail open)" 1 $?
+[[ "$stderr_out" == *"jq"* ]]
+check "validate_freeze: jq unavailable → stderr names jq" 0 $?
+
+# 8g: loop scope is out of enforcement scope for this check — loop-scope
+# artifacts live outside any repo and have no branch to compare against.
+FIX_FREEZE_LOOP="$FREEZE_REPO/evals_loop.json"
+jq -n --arg fsha "$FREEZE_IMPL" '{
+  tier: 1,
+  tier_justification: "1 work-unit",
+  frozen_sha: $fsha,
+  head_sha: "abc123",
+  evals: [
+    {id:"e1", priority:"P0", mode:"scripted", status:"pass", cmd:"run-a", negative_control:"run-a-broken", evidence:"log"}
+  ]
+}' > "$FIX_FREEZE_LOOP"
+post_evals::validate_structure "$FIX_FREEZE_LOOP" "" "" "loop"
+check "validate_structure: loop scope skips the freeze check" 0 $?
+
 FIX_TIER1_ONLY_P1="$TMP/tier1_only_p1.json"
 jq -n --arg sha "$SHA" '{
   tier: 1,
