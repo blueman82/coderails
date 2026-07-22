@@ -1,12 +1,12 @@
 import { spawn as spawnReal } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { mkdirSync, statSync, writeFileSync, unlinkSync, appendFileSync } from "node:fs";
+import { mkdirSync, statSync, writeFileSync, unlinkSync, appendFileSync, chmodSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { buildArgv } from "../../../lib/argv";
 import { loadConfig, type DashboardConfig } from "../../../lib/config";
 import { isLocalOrigin } from "../../../lib/requestGuard";
-import { appendRun, getRunToken, type RunRecord } from "../../../lib/runlog";
+import { appendRun, getRunToken, tokensEqual, type RunRecord } from "../../../lib/runlog";
 import { runOutputBus as defaultRunOutputBus, type RunOutputBus } from "../../../lib/runOutputBus";
 import { StreamJsonSplitter, parseStreamJsonLine } from "../../../lib/streamJson";
 
@@ -146,7 +146,7 @@ export function createRunHandler(deps: RunHandlerDeps) {
       return jsonResponse(400, { error: "invalid JSON body" });
     }
 
-    if (typeof payload.token !== "string" || payload.token !== deps.token) {
+    if (typeof payload.token !== "string" || !tokensEqual(deps.token, payload.token)) {
       return jsonResponse(401, { error: "unauthorized" });
     }
 
@@ -174,14 +174,25 @@ export function createRunHandler(deps: RunHandlerDeps) {
       return jsonResponse(400, { error: "invalid input" });
     }
 
-    mkdirSync(locksDir, { recursive: true });
+    // mode: 0o700 only takes effect when this call actually creates locksDir
+    // (a no-op on an existing dir) — tighten an already-existing looser dir
+    // too, same pattern as getRunToken's chmod guard in runlog.ts.
+    mkdirSync(locksDir, { recursive: true, mode: 0o700 });
+    try {
+      if ((statSync(locksDir).mode & 0o777) !== 0o700) chmodSync(locksDir, 0o700);
+    } catch {
+      // not fatal — best-effort tightening
+    }
     const lockPath = lockPathFor(locksDir, button.name);
     if (!acquireLock(lockPath)) {
       return jsonResponse(409, { error: "already running" });
     }
 
     const runId = randomBytes(8).toString("hex");
-    mkdirSync(runsDir, { recursive: true });
+    // appendRun (below) also mkdirSyncs+tightens runsDir to 0700 before the
+    // output log under it is ever written, so no separate chmod guard is
+    // needed here — mode: 0o700 covers the fresh-create case directly.
+    mkdirSync(runsDir, { recursive: true, mode: 0o700 });
     const outputPath = join(runsDir, `${runId}.log`);
     const startedAt = Date.now();
 
@@ -216,7 +227,11 @@ export function createRunHandler(deps: RunHandlerDeps) {
 
     function handleChunk(chunk: Buffer | string): void {
       const text = typeof chunk === "string" ? chunk : chunk.toString("utf-8");
-      appendFileSync(outputPath, text);
+      // mode: 0o600 — the log holds full prompts and model output, so it
+      // must not be world- or group-readable. Only applies on the creating
+      // (first) call; appendFileSync ignores mode on subsequent appends to
+      // an existing file, which is fine since the mode was already set right.
+      appendFileSync(outputPath, text, { mode: 0o600 });
       runOutputBus.publish(runId, text);
       // Non-throwing by construction (see streamJson.ts) — parsed here only
       // so a malformed/unrecognised stream-json line is observed and

@@ -222,12 +222,19 @@ describe("sweepOnce with routine artifact gating", () => {
 
 describe("sweepOnce per-intent failure boundary (B1)", () => {
   it("quarantines a poison intent whose input makes buildArgv throw, escalates runner-error, and continues to the next queued intent", async () => {
+    // inputAllowed: true — this test exercises the buildArgv-throws path
+    // specifically, which requires clearing the newer inputAllowed
+    // authorization check (above) to reach buildArgv at all.
+    const inputAllowedConfig: DashboardConfig = {
+      ...config,
+      buttons: [{ name: "wiki-lint", label: "WIKI LINT", command: "/coderails:wiki-lint", cwd: "/tmp", profile: "read-only", inputAllowed: true }],
+    };
     writeIntent("poison", { button: "wiki-lint", input: "-x", requestedAt: Date.now(), source: "cli" });
     writeIntent("healthy", { button: "wiki-lint", requestedAt: Date.now(), source: "cli" });
     const notifyImpl = vi.fn();
     const runClaudeImpl = vi.fn().mockResolvedValue({ exitCode: 0, stdout: "", stderr: "" });
     const result = await sweepOnce({
-      queueDir, processingDir, archiveDir, quarantineDir, config, runsDir, vaultNotesDir, runClaudeImpl, notifyImpl,
+      queueDir, processingDir, archiveDir, quarantineDir, config: inputAllowedConfig, runsDir, vaultNotesDir, runClaudeImpl, notifyImpl,
     });
     expect(existsSync(join(quarantineDir, "poison.json"))).toBe(true);
     expect(result.failed).toBeGreaterThanOrEqual(1);
@@ -284,6 +291,53 @@ describe("sweepOnce orphan recovery (B3)", () => {
 
     expect(existsSync(join(processingDir, "fresh-run.json"))).toBe(true);
     expect(existsSync(join(quarantineDir, "fresh-run.json"))).toBe(false);
+  });
+});
+
+describe("sweepOnce inputAllowed authorization (queue path)", () => {
+  it("quarantines an intent carrying input against an inputAllowed:false button, and never spawns", async () => {
+    const noInputConfig: DashboardConfig = {
+      ...config,
+      buttons: [{ name: "wiki-lint", label: "WIKI LINT", command: "/coderails:wiki-lint", cwd: "/tmp", profile: "read-only" }],
+    };
+    writeIntent("unauthorized-input", { button: "wiki-lint", input: "arbitrary prompt", requestedAt: Date.now(), source: "cli" });
+    const runClaudeImpl = vi.fn().mockResolvedValue({ exitCode: 0, stdout: "", stderr: "" });
+    const result = await sweepOnce({
+      queueDir, processingDir, archiveDir, quarantineDir, config: noInputConfig, runsDir, vaultNotesDir, runClaudeImpl,
+    });
+    expect(result.quarantined).toBe(1);
+    expect(existsSync(join(quarantineDir, "unauthorized-input.json"))).toBe(true);
+    expect(runClaudeImpl).not.toHaveBeenCalled();
+  });
+
+  it("still runs normally when input is carried against an inputAllowed:true button", async () => {
+    const inputAllowedConfig: DashboardConfig = {
+      ...config,
+      buttons: [{ name: "with-input", label: "WITH INPUT", command: "/coderails:assumptions", cwd: "/tmp", profile: "read-only", inputAllowed: true }],
+    };
+    writeIntent("allowed-input", { button: "with-input", input: "hello", requestedAt: Date.now(), source: "cli" });
+    const runClaudeImpl = vi.fn().mockResolvedValue({ exitCode: 0, stdout: "", stderr: "" });
+    const result = await sweepOnce({
+      queueDir, processingDir, archiveDir, quarantineDir, config: inputAllowedConfig, runsDir, vaultNotesDir, runClaudeImpl,
+    });
+    expect(result.quarantined).toBe(0);
+    expect(result.succeeded).toBe(1);
+    expect(runClaudeImpl).toHaveBeenCalled();
+  });
+
+  it("still runs normally when an intent with no input targets an inputAllowed:false button", async () => {
+    const noInputConfig: DashboardConfig = {
+      ...config,
+      buttons: [{ name: "wiki-lint", label: "WIKI LINT", command: "/coderails:wiki-lint", cwd: "/tmp", profile: "read-only" }],
+    };
+    writeIntent("no-input", { button: "wiki-lint", requestedAt: Date.now(), source: "cli" });
+    const runClaudeImpl = vi.fn().mockResolvedValue({ exitCode: 0, stdout: "", stderr: "" });
+    const result = await sweepOnce({
+      queueDir, processingDir, archiveDir, quarantineDir, config: noInputConfig, runsDir, vaultNotesDir, runClaudeImpl,
+    });
+    expect(result.quarantined).toBe(0);
+    expect(result.succeeded).toBe(1);
+    expect(runClaudeImpl).toHaveBeenCalled();
   });
 });
 
@@ -352,12 +406,18 @@ describe("sweepOnce coverage gaps (I2)", () => {
   });
 
   it("asserts real buildArgv output for an input-bearing button", async () => {
+    // inputAllowed: true — required for input to reach buildArgv at all
+    // (the inputAllowed authorization check above).
+    const inputAllowedConfig: DashboardConfig = {
+      ...config,
+      buttons: [{ name: "wiki-lint", label: "WIKI LINT", command: "/coderails:wiki-lint", cwd: "/tmp", profile: "read-only", inputAllowed: true }],
+    };
     writeIntent("input-run", { button: "wiki-lint", input: "some literal input", requestedAt: Date.now(), source: "cli" });
     const runClaudeImpl = vi.fn().mockResolvedValue({ exitCode: 0, stdout: "", stderr: "" });
     await sweepOnce({
-      queueDir, processingDir, archiveDir, quarantineDir, config, runsDir, vaultNotesDir, runClaudeImpl,
+      queueDir, processingDir, archiveDir, quarantineDir, config: inputAllowedConfig, runsDir, vaultNotesDir, runClaudeImpl,
     });
-    const expectedArgv = buildArgv(config.buttons[0], "some literal input");
+    const expectedArgv = buildArgv(inputAllowedConfig.buttons[0], "some literal input");
     expect(runClaudeImpl).toHaveBeenCalledWith(
       expectedArgv,
       "/tmp",

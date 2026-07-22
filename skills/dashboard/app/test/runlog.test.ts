@@ -1,8 +1,8 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
-import { mkdtempSync, readFileSync, rmSync, existsSync, appendFileSync, mkdirSync, writeFileSync, statSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, existsSync, appendFileSync, mkdirSync, writeFileSync, statSync, chmodSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { appendRun, readRuns, mintToken, getRunToken, type RunRecord } from "../src/lib/runlog";
+import { appendRun, readRuns, mintToken, getRunToken, tokensEqual, type RunRecord } from "../src/lib/runlog";
 
 const tmpDirs: string[] = [];
 
@@ -102,6 +102,25 @@ describe("appendRun / readRuns", () => {
     expect(finished?.exitCode).toBe(0);
     expect(finished?.endedAt).toBe(1500);
   });
+
+  it("creates the runs dir mode 0700 — not world/group readable (run logs hold prompts/output)", () => {
+    const dir = join(tmpRunsDir(), "nested", "runs");
+    appendRun(record(), { runsDir: dir });
+    expect(statSync(dir).mode & 0o777).toBe(0o700);
+  });
+
+  it("tightens an already-existing runs dir's mode to 0700, since mkdirSync's mode arg is a no-op on a dir that already exists", () => {
+    const dir = tmpRunsDir();
+    // chmodSync (unlike mkdirSync's mode, which the umask can mask down to
+    // 0700 anyway) sets the mode exactly as given, so this fixture is
+    // reliably loose regardless of this process's umask.
+    chmodSync(dir, 0o755);
+    expect(statSync(dir).mode & 0o777).toBe(0o755);
+
+    appendRun(record(), { runsDir: dir });
+
+    expect(statSync(dir).mode & 0o777).toBe(0o700);
+  });
 });
 
 describe("mintToken", () => {
@@ -193,5 +212,24 @@ describe("getRunToken", () => {
 
     vi.doUnmock("node:fs");
     vi.resetModules();
+  });
+});
+
+describe("tokensEqual", () => {
+  it("accepts the correct token", () => {
+    expect(tokensEqual("correct-token-value", "correct-token-value")).toBe(true);
+  });
+
+  it("rejects a wrong token of the same length", () => {
+    expect(tokensEqual("correct-token-value", "wrong-token-value!!")).toBe(false);
+  });
+
+  it("rejects a wrong token of a different length without throwing", () => {
+    expect(() => tokensEqual("correct-token-value", "short")).not.toThrow();
+    expect(tokensEqual("correct-token-value", "short")).toBe(false);
+  });
+
+  it("rejects an empty string", () => {
+    expect(tokensEqual("correct-token-value", "")).toBe(false);
   });
 });
