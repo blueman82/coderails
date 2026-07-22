@@ -45,6 +45,10 @@ afterEach(() => {
   }
 });
 
+beforeEach(() => {
+  resetUsageMemo();
+});
+
 describe("collectUsage", () => {
   const NOW = new Date("2026-07-06T18:00:00Z");
 
