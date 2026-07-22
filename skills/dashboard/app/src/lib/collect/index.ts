@@ -298,10 +298,12 @@ export function createAggregator(deps: AggregatorDeps): Aggregator {
       safeCall("runs", () => { reconcileOrphanRunsInLedger({ runsDir: deps.runsDir }); return undefined; }, undefined);
       const runs = safeCall("runs", () => readRuns(runsLimit, { runsDir: deps.runsDir }), []);
       snapshot = { ...snapshot, runs };
-      // Initial activity collect (sessions/loops/health) is async (health
-      // now reads usage transcripts) — fire it without blocking start(), same
-      // pattern as refreshGates below; the snapshot fills in once it resolves
-      // and "activity" listeners are notified same as any later refresh.
+      // Initial activity collect (sessions/loops/health) is async and
+      // slow (collectContextTrend streams hundreds of transcript files).
+      // Fire it without blocking start(), but don't discard the promise —
+      // it will populate the snapshot once it resolves, and the SSE
+      // listener will relay the "activity" event to the client. Subsequent
+      // activity refreshes (from fs watchers) are fire-and-forget.
       void refreshActivity();
 
       watchDir(deps.projectsDir, scheduleActivityRefresh);
