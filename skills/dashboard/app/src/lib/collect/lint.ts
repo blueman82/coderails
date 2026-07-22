@@ -42,7 +42,6 @@ function unavailable(note: string): HealthTile {
 // from the heading date. Never throws: an absent/unreadable vault (most
 // coderails users have no wiki) degrades to unavailable rather than guessing.
 export function collectLintFindings(vaultPaths: string[], now: Date): HealthTile {
-  return unavailable("MUTATION TEST: forced unconditional unavailable");
   if (vaultPaths.length === 0) return unavailable("no wiki vault configured");
 
   let contents: string | undefined;
