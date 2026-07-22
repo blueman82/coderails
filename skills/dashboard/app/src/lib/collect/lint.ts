@@ -39,9 +39,20 @@ function parseLintEntries(logContents: string): LintEntry[] {
   });
 }
 
+// Same-date ties are normal, not an edge case: wiki-lint appends one entry
+// per run, and multiple runs on the same day happen routinely. Comparing
+// with ">=" (not ">") means a later same-date entry always wins the tie,
+// record or not — log.md is append-only, so later-in-file means
+// later-in-time. wiki-lint's Step 5 makes the structured findings-count
+// record mandatory on every run (even "0" on a clean pass), so a same-date
+// entry that legitimately has no record is the newest run's own state, not
+// a gap to paper over with an older sibling's stale count. Do not revert
+// this to ">" — that silently resurrects whichever same-date entry happens
+// to appear first in the file, which is exactly backwards for an
+// append-only log.
 function mostRecentLintEntry(entries: LintEntry[]): LintEntry | null {
   if (entries.length === 0) return null;
-  return entries.reduce((latest, entry) => (entry.date > latest.date ? entry : latest));
+  return entries.reduce((latest, entry) => (entry.date >= latest.date ? entry : latest));
 }
 
 // Clamped to 0 rather than returning a negative count: a heading dated in the
