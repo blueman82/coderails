@@ -172,7 +172,13 @@ export function createAggregator(deps: AggregatorDeps): Aggregator {
   async function collectActivitySlice(): Promise<
     Pick<Snapshot, "sessions" | "loops" | "health" | "queue" | "builds" | "contextTrend">
   > {
-    const sessions = sortSessions(safeCall("sessions", () => collectSessions(deps.projectsDir, Date.now()), []));
+    console.log("[instrumentation] collectActivitySlice start, projectsDir:", deps.projectsDir);
+    const sessions = sortSessions(safeCall("sessions", () => {
+      console.log("[instrumentation] about to call collectSessions");
+      const result = collectSessions(deps.projectsDir, Date.now());
+      console.log("[instrumentation] collectSessions returned:", result.length, "sessions");
+      return result;
+    }, []));
     const loops = sortLoops(safeCall("loops", () => collectLoops(deps.loopsDir), []));
     // health reads usage transcripts (I/O-bound, hence async) and has no
     // dedicated fs signal of its own to watch beyond the projects dir already
@@ -192,6 +198,7 @@ export function createAggregator(deps: AggregatorDeps): Aggregator {
     // makes every later refresh a stat() sweep plus a re-parse of only the
     // files that actually changed.
     const contextTrend = await safeCallAsync("contextTrend", () => collectContextTrend(deps.projectsDir), null);
+    console.log("[instrumentation] collectActivitySlice complete, sessions:", sessions.length, "contextTrend:", contextTrend);
     return { sessions, loops, health, queue, builds, contextTrend };
   }
 
