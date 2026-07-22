@@ -306,8 +306,12 @@ post_evals::validate_smoke() {
 # command runs validate-structure from the repo root, and the skill has
 # smoke-run invoked the same way), not something this function enforces. An
 # invocation from a different cwd can only fail closed — a relative cmd that
-# no longer resolves is a false refusal, never a false pass. Worst case
-# added latency is 20s per scripted eval (two capped runs).
+# no longer resolves is a false refusal, never a false pass. Added latency
+# is bounded at ~20s per scripted eval (two capped runs): _run_recorded
+# kills the child's whole process group at the cap, so ordinary forking
+# commands (bash scripts, test runners) are bounded too — see its header
+# for the one honest exception (a descendant that detaches into its own
+# session escapes the group kill and can hold the pipe open longer).
 #
 # SAFETY: this executes author-supplied command strings from a JSON file.
 # That adds no privilege the author lacks — the same principal that wrote
@@ -427,9 +431,9 @@ post_evals::validate_smoke_execution() {
 # refusing is validate_smoke's job. Keeping the two apart means the recorded
 # evidence is the same whether or not anyone later gates on it.
 #
-# Commands run through the same 10s alarm wrapper _run_formula uses, so a
-# hanging command cannot hang the freeze: 127 (not found), 142 (timeout) and
-# signal deaths fall out of the real run instead of being typed in by hand.
+# Commands run through _run_recorded's 10s group-killing cap, so a hanging
+# command cannot hang the freeze: 127 (not found), 142 (timeout) and signal
+# deaths fall out of the real run instead of being typed in by hand.
 post_evals::smoke_run() {
     local path="$1"
 
@@ -496,11 +500,33 @@ post_evals::smoke_run() {
     return 0
 }
 
-# post_evals::_run_recorded <command>
-# Runs <command> under the same 10s alarm wrapper _run_formula uses and echoes
+# post_evals::_run_recorded <command> [timeout_seconds]
+# Runs <command> under a wall-clock cap (default 10s) and echoes
 # "<exit_code>:<output excerpt>". stdout and stderr are merged — the tell for a
 # broken instrument is usually on stderr (a module-resolution error, a
 # not-found message), so dropping it would discard the evidence a human needs.
+#
+# THE CAP KILLS THE PROCESS GROUP, not just the direct child. The earlier
+# exec-based idiom (`perl -e 'alarm shift; exec ...'`) delivered SIGALRM only
+# to the process perl became: a grandchild — the sleep inside `bash hang.sh`,
+# a test runner's worker — was never signalled, got reparented to init, and
+# kept the inherited stdout pipe open, so the caller's command substitution
+# blocked until the orphan exited. Correct exit code (142), broken latency
+# bound (observed 30s for a 10s cap). Since check 10 runs this on the merge
+# hot path, the bound is load-bearing: the child is made its own process
+# group leader (setpgrp) and the alarm handler KILLs the negative PGID, which
+# takes the grandchildren and closes the pipe. Timeout still reports 142,
+# the documented sentinel, regardless of the KILL. Honest caveat: a
+# descendant that detaches into its own session (a daemonizing server)
+# escapes the group kill and can still hold the pipe open — the cap bounds
+# every ordinary forking shape, not a deliberate daemon.
+#
+# _run_formula keeps the old exec idiom deliberately: it redirects the
+# command's output to /dev/null, so an orphan cannot hold its pipe open and
+# the single-process alarm is a sufficient bound there.
+#
+# [timeout_seconds] exists for the test suite (a real 10s stall per run is
+# too slow to assert on); production callers pass nothing and get 10.
 #
 # The excerpt keeps BOTH ENDS, not just the tail, because the diagnostic line
 # sits at a different end depending on the failure. Measured against real
@@ -511,8 +537,20 @@ post_evals::smoke_run() {
 # losing exactly the module-resolution tell SKILL.md names. Capping both ends
 # also bounds the artifact against a chatty runner.
 post_evals::_run_recorded() {
-    local command_text="$1" out rc
-    out=$(perl -e 'alarm shift; exec "/bin/bash", "-c", shift' 10 "$command_text" 2>&1)
+    local command_text="$1" timeout_s="${2:-10}" out rc
+    out=$(perl -e '
+        my $t = shift; my $cmd = shift;
+        my $pid = fork();
+        exit 127 unless defined $pid;
+        if ($pid == 0) { setpgrp(0, 0); exec "/bin/bash", "-c", $cmd; exit 127; }
+        my $timed_out = 0;
+        local $SIG{ALRM} = sub { $timed_out = 1; kill "KILL", -$pid; };
+        alarm $t;
+        waitpid($pid, 0);
+        alarm 0;
+        exit 142 if $timed_out;
+        exit(($? & 127) ? 128 + ($? & 127) : $? >> 8);
+    ' "$timeout_s" "$command_text" 2>&1)
     rc=$?
     out=$(printf '%s' "$out" | tr '\n' ' ')
     if (( ${#out} > 500 )); then
