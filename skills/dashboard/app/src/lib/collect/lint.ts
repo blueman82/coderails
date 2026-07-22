@@ -41,7 +41,7 @@ function parseLintEntries(logContents: string): LintEntry[] {
 
 function mostRecentLintEntry(entries: LintEntry[]): LintEntry | null {
   if (entries.length === 0) return null;
-  return entries[0];
+  return entries.reduce((latest, entry) => (entry.date > latest.date ? entry : latest));
 }
 
 function daysSince(dateStr: string, now: Date): number {
