@@ -173,7 +173,7 @@ export async function collectUsage(baseDir: string, now: Date): Promise<UsageSum
   for (const path of candidates) {
     console.log("[instrumentation] collectUsage: processing file", path);
     await collectFileEvents(path, seenIds, events);
-    console.log("[instrumentation] collectUsage: processed file, events now:', events.length);
+    console.log("[instrumentation] collectUsage: processed file, events now:", events.length);
   }
 
   console.log("[instrumentation] collectUsage complete");
