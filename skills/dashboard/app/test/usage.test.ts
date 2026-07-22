@@ -247,3 +247,53 @@ describe("collectUsage", () => {
     expect(usage.week).toEqual({ inputTokens: 0, outputTokens: 0, totalTokens: 0, cacheReadTokens: 0 });
   });
 });
+
+// vi.spyOn can't wrap a named ESM export ("Cannot redefine property"), confirmed
+// elsewhere in this suite (see runlog.test.ts) — so a re-read count is taken via
+// vi.doMock on node:fs, wrapping createReadStream with a counting spy that
+// delegates to the real implementation, then a fresh dynamic import of the
+// module under test so it picks up the mocked binding.
+describe("collectUsage memo", () => {
+  const NOW = new Date("2026-07-06T18:00:00Z");
+
+  afterEach(() => {
+    vi.doUnmock("node:fs");
+    vi.resetModules();
+  });
+
+  async function loadWithReadSpy() {
+    vi.resetModules();
+    const createReadStreamSpy = vi.fn();
+    vi.doMock("node:fs", async () => {
+      const actual = await vi.importActual<typeof import("node:fs")>("node:fs");
+      return {
+        ...actual,
+        createReadStream: (...args: Parameters<typeof actual.createReadStream>) => {
+          createReadStreamSpy(...args);
+          return actual.createReadStream(...args);
+        },
+      };
+    });
+    const mod = await import("../src/lib/collect/usage");
+    return { collectUsage: mod.collectUsage, resetUsageMemo: mod.resetUsageMemo, createReadStreamSpy };
+  }
+
+  it("does not re-read a file whose mtime and size are unchanged between collects", async () => {
+    const { collectUsage: collectUsageSpied, resetUsageMemo: reset, createReadStreamSpy } = await loadWithReadSpy();
+    reset();
+    const base = makeTmpBase();
+    writeTranscript(
+      base,
+      "-proj",
+      "a.jsonl",
+      [assistantLine("msg_1", "2026-07-06T17:00:00.000Z", { input_tokens: 10, output_tokens: 20 })],
+      NOW
+    );
+
+    await collectUsageSpied(base, NOW);
+    expect(createReadStreamSpy).toHaveBeenCalledTimes(1);
+
+    await collectUsageSpied(base, NOW);
+    expect(createReadStreamSpy).toHaveBeenCalledTimes(1); // still 1 — second collect hit the memo
+  });
+});
