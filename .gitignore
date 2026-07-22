@@ -35,3 +35,6 @@ docs/agent-stack-comparison-*.md
 # security review findings — local-only, never published: they catalogue live
 # attack surface and exact file:line sinks for this machine's install
 docs/DASHBOARD-SECURITY-REVIEW.md
+
+# local-only token/cost audit working notes (do not publish)
+docs/TOKEN-REDUCTION-AUDIT.md

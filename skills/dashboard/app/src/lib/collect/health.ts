@@ -3,6 +3,8 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { collectUsage, type UsageTotals } from "./usage";
 import { collectLoopCost, type CostBucket } from "./cost";
+import { collectLintFindings } from "./lint";
+import { loadConfig } from "../config";
 
 export interface HealthTile {
   key: "usage5h" | "usageWeek" | "hooksFired" | "lintFindings" | "costWeek" | "costMonth";
@@ -14,6 +16,7 @@ export interface CollectHealthOptions {
   disciplineLogPath?: string;
   projectsDir?: string;
   loopsDir?: string;
+  wikiPaths?: string[];
   now?: Date;
 }
 
@@ -56,10 +59,20 @@ function usageTile(key: "usage5h" | "usageWeek", totals: UsageTotals | null): He
   };
 }
 
-// wiki-lint (skills/wiki-lint/SKILL.md) reports findings conversationally and
-// persists no findings file — ship permanently unavailable rather than guess.
-function lintFindingsTile(): HealthTile {
-  return { key: "lintFindings", value: null, note: "unavailable: wiki-lint persists no report file" };
+// wikiPaths isn't passed explicitly (e.g. a caller that never wired
+// DashboardConfig through) — read the same coderails-dashboard.json config
+// every other config-derived caller uses. loadConfig() throws ConfigError on
+// a missing/malformed file (most coderails installs have no dashboard config
+// at all), which collectHealth must never propagate — caught here and
+// degraded to "no vault configured" alongside the same message
+// collectLintFindings already produces for an empty vaultPaths list.
+function resolveWikiPaths(explicit: string[] | undefined): string[] {
+  if (explicit) return explicit;
+  try {
+    return loadConfig().wikiPaths;
+  } catch {
+    return [];
+  }
 }
 
 // USD headline with two decimal places: 3.75 -> "$3.75". total_usd_estimate
@@ -126,6 +139,7 @@ export async function collectHealth(options: CollectHealthOptions = {}): Promise
   const disciplineLogPath = options.disciplineLogPath ?? DEFAULT_DISCIPLINE_LOG_PATH;
   const projectsDir = options.projectsDir ?? DEFAULT_PROJECTS_DIR;
   const loopsDir = options.loopsDir ?? DEFAULT_LOOPS_DIR;
+  const wikiPaths = resolveWikiPaths(options.wikiPaths);
   const now = options.now ?? new Date();
   const usage = await collectUsage(projectsDir, now);
   const cost = collectLoopCost(loopsDir, now);
@@ -133,7 +147,7 @@ export async function collectHealth(options: CollectHealthOptions = {}): Promise
     usageTile("usage5h", usage.last5h),
     usageTile("usageWeek", usage.week),
     hooksFiredTile(disciplineLogPath, now),
-    lintFindingsTile(),
+    collectLintFindings(wikiPaths, now),
     costTile("costWeek", cost.week),
     costTile("costMonth", cost.month),
   ];

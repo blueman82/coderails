@@ -229,6 +229,37 @@ describe("RailLeft — cost KPI tiles", () => {
   });
 });
 
+describe("RailLeft — System Vitals loading vs unavailable", () => {
+  afterEach(() => {
+    cleanup();
+  });
+
+  it("shows a loading state, not 'unavailable', for every KPI tile before the first activity frame arrives (health: [])", () => {
+    const { container } = renderRail(emptySnapshot({ health: [] }));
+    expect(container.querySelectorAll(".hud-kpi-unavailable").length).toBe(0);
+    expect(container.textContent).not.toContain("unavailable");
+    expect(container.querySelectorAll(".hud-kpi-loading").length).toBe(6);
+  });
+
+  it("still shows 'unavailable' for a tile the collector genuinely could not populate, once health has loaded", () => {
+    const { container } = renderRail(
+      emptySnapshot({
+        health: [
+          { key: "usage5h", value: "1.2M tok" },
+          { key: "usageWeek", value: "3M tok" },
+          { key: "hooksFired", value: "5" },
+          { key: "lintFindings", value: null, note: "unavailable: no wiki vault configured" },
+          { key: "costWeek", value: null, note: "unavailable: no completed loops in this window" },
+          { key: "costMonth", value: null, note: "unavailable: no completed loops in this window" },
+        ],
+      })
+    );
+    expect(container.querySelectorAll(".hud-kpi-loading").length).toBe(0);
+    const unavailable = container.querySelectorAll(".hud-kpi-unavailable");
+    expect(unavailable.length).toBe(3);
+  });
+});
+
 describe("RailLeft — loop decisions (per card)", () => {
   afterEach(() => {
     cleanup();

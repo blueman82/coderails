@@ -301,6 +301,12 @@
   margin-bottom: 8px;
   line-height: 1.4;
 }
+.hud-kpi-loading {
+  font-size: 10px;
+  color: var(--grey-dim);
+  margin-bottom: 8px;
+  line-height: 1.4;
+}
 .hud-kpi-note {
   font-size: 10px;
   color: var(--grey-dim);
