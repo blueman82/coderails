@@ -146,7 +146,10 @@ Field by field:
   for that routine and the rest of the routines still get considered.
 - **`expectedArtifact`** — the gate. `artifactPath` may contain
   `{date}` (`YYYY-MM-DD`), `{runId}`, and `{vault}` (the first entry of
-  `wikiPaths`) template tokens, substituted at check time. `maxAgeSeconds`
+  `wikiPaths`) template tokens, substituted at check time.
+  `artifactPath` is trusted, config-authored input — it must never be
+  templated from routine/intent content that isn't config itself.
+  `maxAgeSeconds`
   is how old the artifact is allowed to be — set it comfortably above the
   cadence interval (the `wiki-lint` example above uses 129600s = 36h for
   a nightly routine; the three weekly routines use 691200s = 8 days) so a

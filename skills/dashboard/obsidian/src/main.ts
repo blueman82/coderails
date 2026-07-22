@@ -131,7 +131,7 @@ export default class CommandCentrePlugin extends Plugin {
     const vault = this.app.vault;
     return {
       mkdirIntentDir: () => mkdirSync(QUEUE_DIR, { recursive: true, mode: 0o700 }),
-      writeIntentFile: (path, data) => writeFileSync(join(DASHBOARD_DIR, path), data),
+      writeIntentFile: (path, data) => writeFileSync(join(DASHBOARD_DIR, path), data, { mode: 0o600 }),
       findUnresolvedRun: (button) => this.findUnresolvedRun(button),
       createRunNote: async (path, content) => {
         // dashboard-runs/<date>-<button>.md is stable per button per day (per

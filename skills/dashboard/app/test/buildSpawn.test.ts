@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from "vitest";
-import { mkdtempSync, rmSync, existsSync, readFileSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, existsSync, readFileSync, mkdirSync, writeFileSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -102,6 +102,22 @@ describe("claimAndSpawnBuild", () => {
     expect(calls).toHaveLength(1);
   });
 
+  it("security: a traversal-shaped entry.hash returns {claimed:false, error:'invalid_hash'} and performs no filesystem write", () => {
+    const buildsDir = tmpDir("dashboard-build-spawn-traversal-");
+    const outsideMarker = tmpDir("dashboard-build-spawn-traversal-outside-");
+    const traversalHash = `../../../../../../..${outsideMarker}/pwned`;
+    const entry = makeEntry({ hash: traversalHash });
+    const { fn, calls } = makeFakeSpawn();
+
+    const result = claimAndSpawnBuild(entry, { buildsDir, wrapperPath: "/bin/true", spawnImpl: fn });
+
+    expect(result).toEqual({ claimed: false, error: "invalid_hash" });
+    // No write escaped buildsDir: the outside marker dir must contain
+    // nothing this call could have written into it.
+    expect(existsSync(join(outsideMarker, "pwned"))).toBe(false);
+    expect(calls).toHaveLength(0);
+  });
+
   it("runId is the first 8 hex chars of entry.hash", () => {
     const buildsDir = tmpDir("dashboard-build-spawn-runid-");
     const entry = makeEntry();
@@ -111,6 +127,18 @@ describe("claimAndSpawnBuild", () => {
     if (result.claimed) {
       expect(result.runId).toBe(entry.hash.slice(0, 8));
     }
+  });
+
+  it("creates a not-yet-existing buildsDir mode 0700 — not world/group readable", () => {
+    // A nested path under a tmpDir() (already 0700 from mkdtempSync) rather
+    // than tmpDir() itself: mkdirSync's mode arg only takes effect on a dir
+    // it actually creates, so the assertion must exercise that path.
+    const buildsDir = join(tmpDir("dashboard-build-spawn-mode-parent-"), "builds");
+    const entry = makeEntry();
+    const { fn } = makeFakeSpawn();
+    const result = claimAndSpawnBuild(entry, { buildsDir, wrapperPath: "/bin/true", spawnImpl: fn });
+    expect(result.claimed).toBe(true);
+    expect(statSync(buildsDir).mode & 0o777).toBe(0o700);
   });
 });
 

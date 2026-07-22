@@ -224,6 +224,16 @@ export async function sweepOnce(opts: SweepOptions): Promise<SweepResult> {
         continue;
       }
 
+      // Mirrors route.ts's POST /api/run authorization check exactly: the
+      // queue path is a second way to reach buildArgv, and without this
+      // check it would carry arbitrary input into any button's command,
+      // including buttons that never opted into inputAllowed.
+      if (intent.input !== undefined && !button.inputAllowed) {
+        renameSync(processingPath, join(opts.quarantineDir, file));
+        result.quarantined++;
+        continue;
+      }
+
       const argv = buildArgv(button, intent.input);
       const startedAt = Date.now();
       const outputRunId = randomBytes(8).toString("hex");

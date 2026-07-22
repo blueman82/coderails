@@ -1,7 +1,7 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { isLocalOrigin } from "../../../lib/requestGuard";
-import { getRunToken } from "../../../lib/runlog";
+import { getRunToken, tokensEqual } from "../../../lib/runlog";
 import {
   resolveQueueEntry,
   QueueActionError,
@@ -63,7 +63,7 @@ export function createQueueActionHandler(deps: QueueActionHandlerDeps) {
       return jsonResponse(400, { error: "invalid JSON body" });
     }
 
-    if (typeof payload.token !== "string" || payload.token !== deps.token) {
+    if (typeof payload.token !== "string" || !tokensEqual(deps.token, payload.token)) {
       return jsonResponse(401, { error: "unauthorized" });
     }
 

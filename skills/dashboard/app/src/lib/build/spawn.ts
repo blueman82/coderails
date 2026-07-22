@@ -6,6 +6,13 @@ import type { QueueEntrySnapshot } from "../collect/queueActions";
 import { buildPrompt } from "./prompt";
 
 const NAME_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;
+// entry.hash is documented (queueActions.ts) as the hex SHA-256 filename
+// stem, and the API route validates the request's hash parameter against
+// this same shape — but queueActions.ts's returned snapshot still passes
+// through an otherwise-untrusted JSON file's contents, so this is
+// defense-in-depth: re-checking here means a bug upstream can't turn
+// join(buildsDir, entry.hash) below into a path-traversal write.
+const HASH_PATTERN = /^[0-9a-f]{64}$/;
 const DEFAULT_BUILDS_DIR = join(homedir(), ".claude", "coderails-dashboard", "builds");
 const MAX_ANCESTORS = 10;
 
@@ -104,7 +111,7 @@ export interface ClaimAndSpawnBuildDeps {
 export type ClaimAndSpawnBuildResult =
   | { claimed: true; runId: string }
   | { claimed: false; alreadyClaimed: true }
-  | { claimed: false; error: "invalid_name" | "wrapper_not_found" };
+  | { claimed: false; error: "invalid_name" | "invalid_hash" | "wrapper_not_found" };
 
 // The claim-and-spawn seam: called from POST /api/queue after resolveQueueEntry
 // flips an entry to "approved" with toolName "workflow-audit:propose-skill".
@@ -126,10 +133,14 @@ export function claimAndSpawnBuild(
     return { claimed: false, error: "invalid_name" };
   }
 
+  if (!HASH_PATTERN.test(entry.hash)) {
+    return { claimed: false, error: "invalid_hash" };
+  }
+
   const buildsDir = deps.buildsDir ?? DEFAULT_BUILDS_DIR;
   const buildDir = join(buildsDir, entry.hash);
 
-  mkdirSync(buildsDir, { recursive: true });
+  mkdirSync(buildsDir, { recursive: true, mode: 0o700 });
 
   try {
     mkdirSync(buildDir);

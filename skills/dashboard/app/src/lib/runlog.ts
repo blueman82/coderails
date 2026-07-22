@@ -1,5 +1,5 @@
 import { appendFileSync, chmodSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
-import { randomBytes } from "node:crypto";
+import { randomBytes, timingSafeEqual } from "node:crypto";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { performance } from "node:perf_hooks";
@@ -41,7 +41,17 @@ function runsFilePath(opts?: RunLogOptions): string {
 // readRuns folds duplicates by taking the newest line per runId.
 export function appendRun(rec: RunRecord, opts?: RunLogOptions): void {
   const dir = opts?.runsDir ?? DEFAULT_RUNS_DIR;
-  mkdirSync(dir, { recursive: true });
+  // mode: 0o700 only takes effect when this call actually creates dir (a
+  // no-op on an existing dir, same caveat as getRunToken's mkdirSync below)
+  // — run logs hold full prompts and model output, so an already-existing
+  // dir left looser by an older version of this function is tightened here
+  // too, same pattern as the token-file convergence in getRunToken.
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  try {
+    if ((statSync(dir).mode & 0o777) !== 0o700) chmodSync(dir, 0o700);
+  } catch {
+    // not fatal — best-effort tightening, same as getRunToken's chmod guard
+  }
   appendFileSync(runsFilePath(opts), JSON.stringify(rec) + "\n");
 }
 
@@ -178,6 +188,22 @@ function tokenFilePath(dir: string = DEFAULT_TOKEN_DIR): string {
 // default dir, but keying by dir keeps the cache honest (a call for a different dir always
 // reads/writes that dir's own file, never a different dir's cached value).
 const cachedTokensByDir = new Map<string, string>();
+
+// Timing-safe comparison for the run token — the plain `!==` this replaces leaks
+// per-byte-match timing. Honest severity: Low. The token is randomBytes(32) (256
+// bits, see mintToken above) and already lands in the page HTML for anyone who can
+// load the page, so a remote timing attack to recover 256 bits from a JS string
+// compare is not practical. Fixed for hygiene, not because it's the weak link.
+//
+// timingSafeEqual throws on unequal buffer lengths, so lengths are compared first
+// and a mismatch returns false without ever calling it — an attacker-controlled
+// token length must never crash the comparison.
+export function tokensEqual(expected: string, actual: string): boolean {
+  const expectedBuf = Buffer.from(expected, "utf-8");
+  const actualBuf = Buffer.from(actual, "utf-8");
+  if (expectedBuf.length !== actualBuf.length) return false;
+  return timingSafeEqual(expectedBuf, actualBuf);
+}
 
 export function getRunToken(dir: string = DEFAULT_TOKEN_DIR): string {
   const cached = cachedTokensByDir.get(dir);

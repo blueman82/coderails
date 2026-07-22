@@ -192,4 +192,19 @@ describe("resolveQueueEntry", () => {
     expect(returned).toEqual(onDisk);
     expect(returned.status).toBe("approved");
   });
+
+  it("security: returned snapshot's hash is the validated parameter, not the file contents' hash field, when they disagree (path-traversal defense-in-depth)", () => {
+    const dir = makeTmpDir("hash-mismatch");
+    // The file is named and read by HASH_A (the validated parameter), but its
+    // own JSON contents claim a different, traversal-shaped hash. A caller
+    // that trusts the returned snapshot's hash (e.g. claimAndSpawnBuild's
+    // join(buildsDir, entry.hash)) must never see that traversal value.
+    const path = writeEntry(dir, HASH_A, { hash: "../../../../etc/evil" });
+
+    const returned = resolveQueueEntry(dir, HASH_A, "approved");
+
+    expect(returned.hash).toBe(HASH_A);
+    const onDisk = JSON.parse(readFileSync(path, "utf-8"));
+    expect(onDisk.hash).toBe(HASH_A);
+  });
 });

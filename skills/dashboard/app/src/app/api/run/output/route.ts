@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { isLocalOrigin } from "../../../../lib/requestGuard";
-import { getRunToken, readRuns } from "../../../../lib/runlog";
+import { getRunToken, readRuns, tokensEqual } from "../../../../lib/runlog";
 import { parseStreamJsonLine } from "../../../../lib/streamJson";
 
 // A completed run's log is `claude -p --output-format stream-json` output: one JSON event per
@@ -74,7 +74,7 @@ export function createRunOutputHandler(deps: RunOutputHandlerDeps) {
 
     const url = new URL(request.url);
     const token = url.searchParams.get("token");
-    if (token !== deps.token) {
+    if (token === null || !tokensEqual(deps.token, token)) {
       return jsonResponse(401, { status: "error", error: "unauthorized" });
     }
 
