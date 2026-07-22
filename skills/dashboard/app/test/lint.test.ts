@@ -83,6 +83,15 @@ describe("collectLintFindings", () => {
     expect(tile.value).not.toBeNull();
   });
 
+  it("never renders a negative day count for a lint entry dated in the future", () => {
+    // A future-dated heading (clock skew, hand-edited log, timezone edge) must
+    // not surface as e.g. "-3d since last lint" — that reads as nonsense to
+    // anyone looking at the tile.
+    const vault = makeTmpVault("## [2026-07-25] lint | prose only, no structure\n");
+    const tile = collectLintFindings([vault], new Date("2026-07-22T00:00:00Z"));
+    expect(String(tile.value)).not.toMatch(/-\d/);
+  });
+
   it("prefers the MOST RECENT run's structured record, not the first one appended to the file", () => {
     // wiki-lint's Step 5 appends — so across multiple runs, the newest
     // structured record is the LAST one in the file, not the first. A
