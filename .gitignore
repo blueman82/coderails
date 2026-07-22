@@ -31,3 +31,7 @@ docs/coderails/plans/
 
 # local-only competitive-analysis working notes (do not publish)
 docs/agent-stack-comparison-*.md
+
+# security review findings — local-only, never published: they catalogue live
+# attack surface and exact file:line sinks for this machine's install
+docs/DASHBOARD-SECURITY-REVIEW.md
