@@ -219,7 +219,9 @@ export function createAggregator(deps: AggregatorDeps): Aggregator {
     emit("activity", activity);
   }
 
-  // contextTrend streams every transcript under projectsDir — far slower than
+  // contextTrend streams every coderails orchestrator transcript under
+  // projectsDir (the collector filters to slug-matching project dirs, and
+  // reads only top-level session files, not subagent transcripts) — far slower than
   // the activity slice — so it collects on its OWN frame and never gates the
   // System Vitals / KPI tiles that ride the activity frame. A shared cache
   // (explicit or module-scope) makes every later refresh a stat() sweep plus a
