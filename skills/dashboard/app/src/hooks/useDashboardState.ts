@@ -23,17 +23,21 @@ export interface DashboardSnapshot {
   runs: RunRecord[];
   queue: QueueEntry[];
   builds: BuildEntry[];
-  contextTrend: ContextTrendSummary | null;
+  // undefined = the contextTrend collect hasn't resolved yet (loading); null =
+  // source unreadable; summary = data. It arrives on its own "context-trend"
+  // frame, decoupled from the activity slice so it never gates the KPI tiles.
+  contextTrend: ContextTrendSummary | null | undefined;
 }
 
 export type ActivitySlice = Pick<
   DashboardSnapshot,
-  "sessions" | "loops" | "health" | "queue" | "builds" | "contextTrend"
+  "sessions" | "loops" | "health" | "queue" | "builds"
 >;
 
 export type DashboardEvent =
   | { event: "snapshot"; data: DashboardSnapshot }
   | { event: "activity"; data: ActivitySlice }
+  | { event: "context-trend"; data: ContextTrendSummary | null }
   | { event: "gates"; data: (PrGate | PrGateError)[] }
   | { event: "runs"; data: RunRecord[] }
   | { event: "run-output"; data: RunOutputEvent };
