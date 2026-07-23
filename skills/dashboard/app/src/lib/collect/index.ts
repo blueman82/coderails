@@ -80,6 +80,7 @@ export interface AggregatorEventListener {
   (event: "runs", data: AggregatorEventPayloadMap["runs"]): void;
   (event: "gates", data: AggregatorEventPayloadMap["gates"]): void;
   (event: "activity", data: AggregatorEventPayloadMap["activity"]): void;
+  (event: "context-trend", data: AggregatorEventPayloadMap["context-trend"]): void;
   (event: "run-output", data: AggregatorEventPayloadMap["run-output"]): void;
 }
 
