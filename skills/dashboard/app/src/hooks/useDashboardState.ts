@@ -247,7 +247,7 @@ export interface EventSourceLike {
   onerror?: ((ev: Event) => void) | null;
 }
 
-const SSE_EVENT_NAMES: DashboardEvent["event"][] = ["snapshot", "activity", "gates", "runs", "run-output"];
+const SSE_EVENT_NAMES: DashboardEvent["event"][] = ["snapshot", "activity", "context-trend", "gates", "runs", "run-output"];
 
 export function useDashboardState(options: UseDashboardStateOptions = {}): DashboardState {
   const { createSource, url = "/api/events" } = options;
