@@ -137,25 +137,28 @@ export function ContextTrendPanel() {
     </div>
   );
 
-  // Same load-vs-failure distinction RailLeft draws for its KPI tiles: the
-  // initial SSE snapshot ships EMPTY_SNAPSHOT (health:[], contextTrend:null)
-  // before the first async activity collect resolves, then the "activity"
-  // frame fills both in. An empty health array specifically means "the
-  // activity collect hasn't resolved yet", so a null contextTrend at that
-  // point is a loading state — not the collector genuinely failing to read a
-  // usage source (which only happens once the slice HAS resolved, i.e. health
-  // is populated but contextTrend came back null).
-  const notYetLoaded = snapshot.health.length === 0;
-
-  if (!trend) {
+  // contextTrend collects on its own SSE frame (it streams every transcript,
+  // far slower than the activity slice — see collect/index.ts). Its three
+  // states map directly to what to render:
+  //   undefined = that frame hasn't arrived yet → loading
+  //   null      = frame arrived, source unreadable → unavailable
+  //   summary   = data → the chart below
+  // Keying off the field's own tri-state (rather than borrowing health's
+  // load signal) is what lets it decouple from the activity frame without
+  // flashing "unavailable" during the load window.
+  if (trend === undefined) {
     return (
       <div className="hud-block" data-testid="context-trend">
         {head}
-        {notYetLoaded ? (
-          <div className="hud-kpi-loading">loading…</div>
-        ) : (
-          <div className="hud-kpi-unavailable">unavailable: no local usage source</div>
-        )}
+        <div className="hud-kpi-loading">loading…</div>
+      </div>
+    );
+  }
+  if (trend === null) {
+    return (
+      <div className="hud-block" data-testid="context-trend">
+        {head}
+        <div className="hud-kpi-unavailable">unavailable: no local usage source</div>
       </div>
     );
   }
