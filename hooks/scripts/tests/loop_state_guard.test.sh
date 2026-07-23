@@ -551,6 +551,28 @@ S2_DOTTED="S2.with.dots"
 check "grace: S1's nag line does not leak to a different session (S2.with.dots) -> still block" 2 \
   "$(run x "$(payload "$T" "$S2_DOTTED")")"
 
+# (4b) Adversarial positive-match: seed an absent-block line for a session
+# whose NAME is regex-metachar-free ("S2xwithydots" — literal x/y where
+# S2.with.dots has dots), then run the guard as "S2.with.dots" with no
+# progress.json. An UNescaped pattern "session=S2.with.dots " would treat
+# each "." as a wildcard and WOULD match the seeded "session=S2xwithydots "
+# line, falsely releasing (exit 0). With correct BRE-escaping the literal
+# dots in the pattern must NOT match the seeded x/y line -> the guard must
+# still BLOCK (exit 2).
+reset; T=$(mk_transcript 1)
+run x "$(payload "$T" "S2xwithydots")" >/dev/null   # seeds S2xwithydots' absent-block line
+check "grace: unescaped-dot pattern must not false-match a metachar-free sibling line -> still block" 2 \
+  "$(run x "$(payload "$T" "$S2_DOTTED")")"
+
+# (4c) Dotted self-release: seed the absent-block line for the literal
+# dotted session S2.with.dots itself, then rerun as S2.with.dots -> the
+# escaped pattern must still match its OWN literal line -> RELEASE (exit 0).
+# Proves the escaping doesn't break legitimate literal matches.
+reset; T=$(mk_transcript 1)
+run x "$(payload "$T" "$S2_DOTTED")" >/dev/null   # seeds S2.with.dots' own absent-block line
+check "grace: dotted session's own seeded line still releases itself (escaping doesn't break literal matches)" 0 \
+  "$(run x "$(payload "$T" "$S2_DOTTED")")"
+
 # (5) Unwritable-log fail-safe: point CLAUDE_DISCIPLINE_LOG at an unwritable
 # path (a directory, so any open-for-append fails) -> two consecutive runs
 # BOTH exit 2 (grace can never release; degrade to today, never silent disarm).

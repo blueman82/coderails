@@ -484,12 +484,13 @@ als_load_progress() {
 # invocation count, the guard stands down (exit 0) — the one-shot backstop
 # SKILL.md Phase -2 documents has already been delivered. A NEW invocation
 # increments the count, misses the grep key, and re-arms the nag. This is the
-# ONLY enforcement decision that reads the discipline log; a forged ledger
-# line would require deliberately writing a fake hook record (the same
-# adversarial-forgery class the proofs gate declares out of scope), not honest
-# self-deception. Fail-safe: if LOG_FILE is unwritable the line never lands,
-# grace never releases, and behaviour degrades to per-turn nagging — never
-# toward silent disarm.
+# only log read that gates a *block* (unregistered_loop_guard.sh and
+# offload_push_guard.sh also read the discipline log, but each gates only a
+# nudge, not a block); a forged ledger line would require deliberately
+# writing a fake hook record (the same adversarial-forgery class the proofs
+# gate declares out of scope), not honest self-deception. Fail-safe: if
+# LOG_FILE is unwritable the line never lands, grace never releases, and
+# behaviour degrades to per-turn nagging — never toward silent disarm.
 als_gate_unstubbed_grace() { # $1=hook $2=session
   { [ -n "$ALS_PATH" ] && [ ! -f "$ALS_PATH" ]; } || return 0
   local esc_sid; esc_sid=$(printf '%s' "$2" | sed 's/[.[\*^$\\]/\\&/g')
