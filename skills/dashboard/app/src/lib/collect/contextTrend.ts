@@ -49,11 +49,18 @@ export interface ContextTrendSummary {
   compactions: CompactionEvent[];
 }
 
-// PRs #228/#229/#230 merged 2026-07-17 21:22–21:27 BST; sessions are binned
-// against the first merge (verified in the audit via git log).
+// The token-burn reduction measures shipped as PRs #228/#229/#230, merged
+// 2026-07-17 at 20:22:29Z, 20:25:46Z and 20:27:27Z (verifiable with
+// `gh pr view 228 --json mergedAt`). Sessions are binned against the FIRST of
+// those merges, so the boundary is a real, checkable repo event rather than a
+// chosen date.
 const CUTOVER_MS = Date.parse("2026-07-17T20:22:00Z");
-// The audit's symmetric analysis window start. Sessions starting earlier are
-// out of population (different skill versions, different measures).
+// Window start, picked to give the before-group a span comparable to the
+// after-group rather than an unbounded tail: it reaches ~10 days back from the
+// cutover. Sessions starting earlier are out of population — they ran against
+// materially different skill versions, so their per-turn cost is not
+// comparable. This bound only selects WHICH sessions are plotted; it does not
+// weight or adjust any of them.
 const WINDOW_START_MS = Date.parse("2026-07-07T00:00:00Z");
 // The measures under audit shipped to the coderails project; its transcript
 // dirs (primary checkout + worktree-suffixed variants) all carry this token.
