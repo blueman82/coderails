@@ -6,6 +6,7 @@ import type { PrGate, PrGateError } from "@/lib/collect/prGates";
 import type { HealthTile } from "@/lib/collect/health";
 import type { QueueEntry } from "@/lib/collect/queue";
 import type { BuildEntry } from "@/lib/collect/builds";
+import type { ContextTrendSummary } from "@/lib/collect/contextTrend";
 import type { RunRecord } from "@/lib/runlog";
 import type { RunOutputEvent } from "@/lib/runOutputBus";
 
