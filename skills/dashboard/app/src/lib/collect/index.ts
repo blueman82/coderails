@@ -18,7 +18,8 @@ export interface Snapshot {
   queue: QueueEntry[];
   builds: BuildEntry[];
   // Three states, because contextTrend collects on its OWN frame (it streams
-  // every transcript under projectsDir — far slower than the activity slice —
+  // every coderails orchestrator transcript under projectsDir — far slower
+  // than the activity slice —
   // so it must not gate the System Vitals / KPI tiles that ride the activity
   // frame):
   //   undefined = its collect hasn't resolved yet (loading)
