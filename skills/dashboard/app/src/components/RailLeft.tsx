@@ -157,6 +157,7 @@ export function RailLeft() {
         )}
       </div>
 
+      <ContextTrendPanel />
     </section>
   );
 }
