@@ -92,6 +92,13 @@ export function mergeDashboardEvent(
         status: "online",
         lastUpdate: now,
       };
+    case "context-trend":
+      return {
+        ...state,
+        snapshot: { ...state.snapshot, contextTrend: incoming.data },
+        status: "online",
+        lastUpdate: now,
+      };
     case "gates":
       return {
         ...state,
