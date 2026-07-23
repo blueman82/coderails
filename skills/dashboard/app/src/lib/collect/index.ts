@@ -175,7 +175,7 @@ export function createAggregator(deps: AggregatorDeps): Aggregator {
   }
 
   async function collectActivitySlice(): Promise<
-    Pick<Snapshot, "sessions" | "loops" | "health" | "queue" | "builds">
+    Pick<Snapshot, "sessions" | "loops" | "health" | "queue" | "builds" | "contextTrend">
   > {
     const sessions = sortSessions(safeCall("sessions", () => collectSessions(deps.projectsDir, Date.now()), []));
     const loops = sortLoops(safeCall("loops", () => collectLoops(deps.loopsDir), []));
