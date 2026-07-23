@@ -97,7 +97,7 @@ export function RailLeft() {
 
   return (
     <section className="hud-rail hud-rail-left hud-intro-rail-left">
-      <div className="hud-block">
+      <div className="hud-block" data-testid="system-vitals">
         <div className="hud-sec-head">
           <span className="hud-title">System Vitals</span>
           <span className="hud-suffix">Usage.Link</span>
