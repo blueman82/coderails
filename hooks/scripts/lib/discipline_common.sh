@@ -23,6 +23,11 @@
 #   what's left.
 dc_file_count() {
   local transcript="$1" n
+  # Objects only, for the same reason as dc_extract_last_text below: stage 1
+  # keeps any line that parses as JSON, including bare scalars, and indexing a
+  # scalar with .type makes jq error out. With stderr discarded that error is
+  # silent and the count comes back 0 — a single stray scalar line would zero
+  # the whole transcript's file count.
   n=$(jq -R 'fromjson? // empty' "$transcript" 2>/dev/null | jq -s -r '
     def is_genuine_user:
       .type == "user" and
@@ -31,7 +36,7 @@ dc_file_count() {
           elif type == "array" then ( any(.[]?; .type == "text") )
           else false end
       );
-    . as $lines
+    map(select(type == "object")) as $lines
     | ($lines | to_entries | map(select(.value | is_genuine_user)) | last.key // -1) as $cutoff
     | [ $lines[($cutoff+1):][]?
         | select(.type=="assistant")
@@ -57,8 +62,16 @@ dc_file_count() {
 #   "no text yet".
 dc_extract_last_text() {
   local transcript="$1" tail_lines="$2"
+  # `fromjson? // empty` keeps every line that parses as JSON — including lines
+  # that are valid JSON SCALARS (a bare string or number), not just objects.
+  # Indexing a scalar with .type makes jq error out ("Cannot index string with
+  # string \"type\""), and because stderr is discarded below that error is
+  # silent: the whole extraction returns empty and the caller sees "no text"
+  # rather than a failure. So filter to objects first. Same guard, same reason,
+  # as als_extract_last_text in loop_state_common.sh (added by PR #208).
   tail -n "$tail_lines" "$transcript" 2>/dev/null | jq -R 'fromjson? // empty' 2>/dev/null | jq -s -r '
     [.[]?
+     | select(type == "object")
      | select(.type == "assistant")
      | (.message.content
         | if type == "array" then [ .[]? | select(.type == "text") | .text ] | join(" ")

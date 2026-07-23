@@ -19,6 +19,19 @@
   <true/>
   <key>ThrottleInterval</key>
   <integer>60</integer>
+  <!-- A launchd-spawned process inherits `launchctl limit maxfiles` (256 on a
+       stock macOS), NOT the interactive shell's much higher soft limit. The
+       dashboard opens a recursive fs.watch handle per watched dir per SSE
+       connection, so 256 is low enough that ordinary use can exhaust the
+       descriptor table — after which the process still accepts TCP but cannot
+       open files or watches, and wedges (HTTP 000, no SSE frames, panels stuck
+       on "loading…"). The per-connection leak that made this reachable is fixed
+       in api/events/route.ts; this raises the ceiling as defence in depth. -->
+  <key>SoftResourceLimits</key>
+  <dict>
+    <key>NumberOfFiles</key>
+    <integer>4096</integer>
+  </dict>
   <key>StandardOutPath</key>
   <string>/Users/harrison/.claude/coderails-dashboard/dashboard.log</string>
   <key>StandardErrorPath</key>
