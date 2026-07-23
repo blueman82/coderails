@@ -362,6 +362,20 @@ post_evals::validate_smoke_execution() {
     # Tier 0 is the exemption path: no evals to execute.
     [[ "$tier" == "0" ]] && return 0
 
+    # Shape-guard .evals, same fail-closed guard as smoke_verify (the merge
+    # gate). A non-array .evals makes the extraction below yield no indices and
+    # the "no indices → return 0" line then passes without executing anything.
+    # This function is currently backstopped on the live validate_structure
+    # chain by check 7 (tier>=1 requires >=1 P0 eval, which a non-array .evals
+    # fails first), so the guard is belt-and-braces here — but a function that
+    # fails closed only because an earlier check happens to fire is one refactor
+    # away from a live fail-open, so it holds on its own. Guard on TYPE, never
+    # on empty indices (a valid agent-run-only array legitimately has none).
+    if ! jq -e '(.evals | type) == "array"' "$path" >/dev/null 2>&1; then
+        printf 'post_evals: validate_smoke_execution: .evals is not a JSON array (malformed or absent) — refusing.\n' >&2
+        return 1
+    fi
+
     # Only scripted evals carry commands — agent-run evals are graded by a
     # verifier subagent. Same boundary as check 9.
     #
@@ -517,6 +531,21 @@ post_evals::smoke_verify() {
     tier=$(jq -r '.tier // ""' "$path")
     # Tier 0 is the exemption path: no evals to re-execute.
     [[ "$tier" == "0" ]] && return 0
+
+    # Shape-guard .evals before trusting the index extraction below. A .evals
+    # that is not a JSON array — a scalar, string, or object — makes the
+    # `to_entries` extraction either jq-error to stderr with empty stdout (a
+    # scalar/string) or walk object keys as if they were array indices (an
+    # object). In the empty-stdout case the "no indices → return 0" line below
+    # then passes the merge gate WITHOUT re-executing anything: the exact
+    # fail-open this gate exists to prevent, one shape it did not guard. Refuse
+    # (fail closed) unless .evals is an array. Guard on TYPE, never on empty
+    # indices: a valid array whose only evals are agent-run legitimately yields
+    # no scripted indices and must still be accepted by the return below.
+    if ! jq -e '(.evals | type) == "array"' "$path" >/dev/null 2>&1; then
+        printf 'post_evals: smoke_verify: .evals is not a JSON array (malformed or absent) — refusing to trust an eval artifact whose evals cannot be enumerated for re-execution.\n' >&2
+        return 1
+    fi
 
     # Iterate scripted evals by ARRAY INDEX, never by extracting a list of
     # `id`s. `id` is agent-written and unvalidated at this gate, so keying the
