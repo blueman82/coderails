@@ -312,7 +312,8 @@ export function createAggregator(deps: AggregatorDeps): Aggregator {
       // pattern as refreshGates below; the snapshot fills in once it resolves
       // and "activity" listeners are notified same as any later refresh.
       void refreshActivity();
-      // contextTrend is much slower (streams every transcript) so it runs on
+      // contextTrend is much slower (streams every coderails orchestrator
+      // transcript) so it runs on
       // its own frame, fired here without blocking start() and independent of
       // refreshActivity — the KPI tiles must not wait on it.
       void refreshContextTrend();
