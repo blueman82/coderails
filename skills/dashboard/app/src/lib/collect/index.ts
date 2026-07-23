@@ -7,6 +7,7 @@ import { collectHealth, type HealthTile } from "./health";
 import { collectPrGates, type PrGate, type PrGateError } from "./prGates";
 import { collectQueue, type QueueEntry } from "./queue";
 import { collectSessions, collectLoops, type SessionInfo, type LoopInfo } from "./sessions";
+import { collectContextTrend, type ContextTrendSummary } from "./contextTrend";
 
 export interface Snapshot {
   sessions: SessionInfo[];
@@ -16,6 +17,17 @@ export interface Snapshot {
   runs: RunRecord[];
   queue: QueueEntry[];
   builds: BuildEntry[];
+  // Three states, because contextTrend collects on its OWN frame (it streams
+  // every coderails orchestrator transcript under projectsDir — far slower
+  // than the activity slice —
+  // so it must not gate the System Vitals / KPI tiles that ride the activity
+  // frame):
+  //   undefined = its collect hasn't resolved yet (loading)
+  //   null      = source unreadable (no ~/.claude/projects), same degrade
+  //               stance as the usage tiles — distinct from a real summary
+  //               with zero sessions
+  //   summary   = data
+  contextTrend: ContextTrendSummary | null | undefined;
 }
 
 export interface AggregatorDeps {
@@ -33,9 +45,14 @@ export interface AggregatorDeps {
   // Test-only seam: inject a fake bus instead of the process-wide singleton
   // in ../runOutputBus.
   runOutputBus?: RunOutputBus;
+  // Optional cache for contextTrend. Passing an explicit cache ensures it
+  // persists across SSE connections and serves transcripts with stat-only
+  // re-validation rather than re-parsing. Critical for production where
+  // module-scope caches may be less reliable due to bundling.
+  contextTrendCache?: import("./contextTrend").ContextTrendFileCache;
 }
 
-export type AggregatorEventName = "runs" | "gates" | "activity" | "run-output";
+export type AggregatorEventName = "runs" | "gates" | "activity" | "context-trend" | "run-output";
 
 // Maps each event name to the real payload type emitted alongside it, so a
 // call site that emits/handles the wrong shape for a given name is a compile
@@ -45,6 +62,11 @@ export interface AggregatorEventPayloadMap {
   runs: RunRecord[];
   gates: (PrGate | PrGateError)[];
   activity: Pick<Snapshot, "sessions" | "loops" | "health" | "queue" | "builds">;
+  // contextTrend collects on its own (slow) frame, decoupled from activity so
+  // it never gates the KPI tiles. null = unreadable source; a summary = data.
+  // The "loading" state is the absence of this frame (Snapshot.contextTrend
+  // starts undefined), so this payload is never undefined.
+  "context-trend": ContextTrendSummary | null;
   "run-output": RunOutputEvent;
 }
 
@@ -59,6 +81,7 @@ export interface AggregatorEventListener {
   (event: "runs", data: AggregatorEventPayloadMap["runs"]): void;
   (event: "gates", data: AggregatorEventPayloadMap["gates"]): void;
   (event: "activity", data: AggregatorEventPayloadMap["activity"]): void;
+  (event: "context-trend", data: AggregatorEventPayloadMap["context-trend"]): void;
   (event: "run-output", data: AggregatorEventPayloadMap["run-output"]): void;
 }
 
@@ -119,6 +142,7 @@ export function createAggregator(deps: AggregatorDeps): Aggregator {
   let gatesTimer: ReturnType<typeof setInterval> | undefined;
   let gatesDebounceTimer: ReturnType<typeof setTimeout> | undefined;
   let activityDebounceTimer: ReturnType<typeof setTimeout> | undefined;
+  let contextTrendDebounceTimer: ReturnType<typeof setTimeout> | undefined;
   let unsubscribeRunOutput: (() => void) | undefined;
 
   let snapshot: Snapshot = {
@@ -129,6 +153,9 @@ export function createAggregator(deps: AggregatorDeps): Aggregator {
     runs: [],
     queue: [],
     builds: [],
+    // undefined = the contextTrend collect (its own frame) hasn't resolved yet.
+    // The panel renders "loading" for undefined, "unavailable" only for null.
+    contextTrend: undefined,
   };
 
   // Overloaded the same way as AggregatorEventListener so each call site
@@ -137,6 +164,7 @@ export function createAggregator(deps: AggregatorDeps): Aggregator {
   function emit(event: "runs", data: AggregatorEventPayloadMap["runs"]): void;
   function emit(event: "gates", data: AggregatorEventPayloadMap["gates"]): void;
   function emit(event: "activity", data: AggregatorEventPayloadMap["activity"]): void;
+  function emit(event: "context-trend", data: AggregatorEventPayloadMap["context-trend"]): void;
   function emit(event: "run-output", data: AggregatorEventPayloadMap["run-output"]): void;
   function emit(event: AggregatorEventName, data: AggregatorEventPayloadMap[AggregatorEventName]): void {
     for (const listener of listeners) listener(event as never, data as never);
@@ -191,6 +219,23 @@ export function createAggregator(deps: AggregatorDeps): Aggregator {
     emit("activity", activity);
   }
 
+  // contextTrend streams every coderails orchestrator transcript under
+  // projectsDir (the collector filters to slug-matching project dirs, and
+  // reads only top-level session files, not subagent transcripts) — far slower than
+  // the activity slice — so it collects on its OWN frame and never gates the
+  // System Vitals / KPI tiles that ride the activity frame. A shared cache
+  // (explicit or module-scope) makes every later refresh a stat() sweep plus a
+  // re-parse of only the files that actually changed.
+  async function refreshContextTrend(): Promise<void> {
+    const contextTrend = await safeCallAsync(
+      "contextTrend",
+      () => collectContextTrend(deps.projectsDir, { cache: deps.contextTrendCache }),
+      null
+    );
+    snapshot = { ...snapshot, contextTrend };
+    emit("context-trend", contextTrend);
+  }
+
   async function refreshGates(): Promise<void> {
     let gates: (PrGate | PrGateError)[];
     try {
@@ -212,6 +257,11 @@ export function createAggregator(deps: AggregatorDeps): Aggregator {
   function scheduleActivityRefresh(): void {
     if (activityDebounceTimer) clearTimeout(activityDebounceTimer);
     activityDebounceTimer = setTimeout(() => void refreshActivity(), activityDebounceMs);
+  }
+
+  function scheduleContextTrendRefresh(): void {
+    if (contextTrendDebounceTimer) clearTimeout(contextTrendDebounceTimer);
+    contextTrendDebounceTimer = setTimeout(() => void refreshContextTrend(), activityDebounceMs);
   }
 
   function scheduleGatesRefresh(): void {
@@ -262,8 +312,13 @@ export function createAggregator(deps: AggregatorDeps): Aggregator {
       // pattern as refreshGates below; the snapshot fills in once it resolves
       // and "activity" listeners are notified same as any later refresh.
       void refreshActivity();
+      // contextTrend is much slower (streams every coderails orchestrator
+      // transcript) so it runs on
+      // its own frame, fired here without blocking start() and independent of
+      // refreshActivity — the KPI tiles must not wait on it.
+      void refreshContextTrend();
 
-      watchDir(deps.projectsDir, scheduleActivityRefresh);
+      watchDir(deps.projectsDir, () => { scheduleActivityRefresh(); scheduleContextTrendRefresh(); });
       watchDir(deps.loopsDir, scheduleActivityRefresh);
       if (deps.runsDir) watchDir(deps.runsDir, () => { refreshRuns(); scheduleGatesRefresh(); });
       if (deps.queueDir) watchDir(deps.queueDir, scheduleActivityRefresh);
@@ -281,6 +336,7 @@ export function createAggregator(deps: AggregatorDeps): Aggregator {
       if (gatesTimer) clearInterval(gatesTimer);
       if (gatesDebounceTimer) clearTimeout(gatesDebounceTimer);
       if (activityDebounceTimer) clearTimeout(activityDebounceTimer);
+      if (contextTrendDebounceTimer) clearTimeout(contextTrendDebounceTimer);
       unsubscribeRunOutput?.();
       unsubscribeRunOutput = undefined;
       listeners.clear();

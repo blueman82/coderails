@@ -24,6 +24,11 @@ function emptySnapshot(overrides: Partial<DashboardSnapshot> = {}): DashboardSna
     runs: [],
     queue: [],
     builds: [],
+    // Matches the real EMPTY_SNAPSHOT: contextTrend is undefined (loading) until
+    // its own SSE frame arrives, so the Context Trend panel renders "loading…"
+    // by default rather than adding a stray unavailable/chart to unrelated
+    // System Vitals assertions.
+    contextTrend: undefined,
     ...overrides,
   };
 }
@@ -236,9 +241,16 @@ describe("RailLeft — System Vitals loading vs unavailable", () => {
 
   it("shows a loading state, not 'unavailable', for every KPI tile before the first activity frame arrives (health: [])", () => {
     const { container } = renderRail(emptySnapshot({ health: [] }));
+    // Rail-wide: on the initial snapshot (health:[], contextTrend:undefined),
+    // NOTHING in the left rail may render "unavailable" — not the six System
+    // Vitals tiles (health hasn't loaded), and not the Context Trend panel (its
+    // own frame hasn't arrived, so contextTrend is undefined = loading, not the
+    // null that would mean unavailable).
     expect(container.querySelectorAll(".hud-kpi-unavailable").length).toBe(0);
     expect(container.textContent).not.toContain("unavailable");
-    expect(container.querySelectorAll(".hud-kpi-loading").length).toBe(6);
+    // Six System Vitals tiles show loading…; the Context Trend panel adds one
+    // more loading state, so seven in total across the rail.
+    expect(container.querySelectorAll(".hud-kpi-loading").length).toBe(7);
   });
 
   it("still shows 'unavailable' for a tile the collector genuinely could not populate, once health has loaded", () => {
@@ -254,8 +266,9 @@ describe("RailLeft — System Vitals loading vs unavailable", () => {
         ],
       })
     );
-    expect(container.querySelectorAll(".hud-kpi-loading").length).toBe(0);
-    const unavailable = container.querySelectorAll(".hud-kpi-unavailable");
+    const vitals = container.querySelector('[data-testid="system-vitals"]')!;
+    expect(vitals.querySelectorAll(".hud-kpi-loading").length).toBe(0);
+    const unavailable = vitals.querySelectorAll(".hud-kpi-unavailable");
     expect(unavailable.length).toBe(3);
   });
 });

@@ -28,6 +28,7 @@ function emptySnapshot(overrides: Partial<DashboardSnapshot> = {}): DashboardSna
     runs: [],
     queue: [],
     builds: [],
+    contextTrend: null,
     ...overrides,
   };
 }
@@ -75,6 +76,63 @@ describe("mergeDashboardEvent — activity", () => {
     expect(next.snapshot.gates).toEqual(base.snapshot.gates);
     expect(next.snapshot.runs).toEqual(base.snapshot.runs);
     expect(next.lastUpdate).toBe(2000);
+  });
+
+  it("does NOT carry contextTrend — that slice arrives on its own frame", () => {
+    // Regression guard for the decoupling: contextTrend must not ride the
+    // activity frame, or the slow transcript-streaming collect would gate the
+    // KPI tiles again (the ~10s cold-cache all-loading regression).
+    const base: DashboardState = {
+      snapshot: emptySnapshot({ contextTrend: undefined }),
+      status: "online",
+      lastUpdate: 500,
+      runOutput: {},
+    };
+    const activity = { sessions: [], loops: [], health: [{ key: "hooksFired" as const, value: "3" }], queue: [], builds: [] };
+    const next = mergeDashboardEvent(base, { event: "activity", data: activity }, 2000);
+    // An activity frame arriving must leave contextTrend at its loading value,
+    // NOT resolve it to null/data.
+    expect(next.snapshot.contextTrend).toBeUndefined();
+  });
+});
+
+describe("mergeDashboardEvent — context-trend", () => {
+  it("folds a context-trend frame into the snapshot without touching activity slices", () => {
+    const base: DashboardState = {
+      snapshot: emptySnapshot({
+        contextTrend: undefined,
+        health: [{ key: "hooksFired", value: "3" }],
+        sessions: [{ project: "p", lastActivity: 1, state: "active" }],
+      }),
+      status: "online",
+      lastUpdate: 500,
+      runOutput: {},
+    };
+    const summary = {
+      windowStartMs: 1,
+      cutoverMs: 2,
+      sessions: [],
+      before: { n: 0, medianPerTurn: null, q1PerTurn: null, q3PerTurn: null },
+      after: { n: 0, medianPerTurn: null, q1PerTurn: null, q3PerTurn: null },
+      compactions: [],
+    };
+    const next = mergeDashboardEvent(base, { event: "context-trend", data: summary }, 2000);
+    expect(next.snapshot.contextTrend).toEqual(summary);
+    // Untouched: activity slices remain as they were.
+    expect(next.snapshot.health).toEqual(base.snapshot.health);
+    expect(next.snapshot.sessions).toEqual(base.snapshot.sessions);
+    expect(next.lastUpdate).toBe(2000);
+  });
+
+  it("carries null (unreadable source) through as-is", () => {
+    const base: DashboardState = {
+      snapshot: emptySnapshot({ contextTrend: undefined }),
+      status: "online",
+      lastUpdate: 500,
+      runOutput: {},
+    };
+    const next = mergeDashboardEvent(base, { event: "context-trend", data: null }, 2000);
+    expect(next.snapshot.contextTrend).toBeNull();
   });
 });
 

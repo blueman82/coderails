@@ -1,6 +1,7 @@
 "use client";
 
 import { Sparkline } from "./Sparkline";
+import { ContextTrendPanel } from "./ContextTrendPanel";
 import { useDashboardContext } from "@/components/DashboardProvider";
 import { liveLoops, stalledLoops, formatRelativeAge, useNow } from "@/hooks/useDashboardState";
 import type { HealthTile } from "@/lib/collect/health";
@@ -96,7 +97,7 @@ export function RailLeft() {
 
   return (
     <section className="hud-rail hud-rail-left hud-intro-rail-left">
-      <div className="hud-block">
+      <div className="hud-block" data-testid="system-vitals">
         <div className="hud-sec-head">
           <span className="hud-title">System Vitals</span>
           <span className="hud-suffix">Usage.Link</span>
@@ -156,6 +157,7 @@ export function RailLeft() {
         )}
       </div>
 
+      <ContextTrendPanel />
     </section>
   );
 }

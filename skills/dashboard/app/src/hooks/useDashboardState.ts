@@ -6,6 +6,7 @@ import type { PrGate, PrGateError } from "@/lib/collect/prGates";
 import type { HealthTile } from "@/lib/collect/health";
 import type { QueueEntry } from "@/lib/collect/queue";
 import type { BuildEntry } from "@/lib/collect/builds";
+import type { ContextTrendSummary } from "@/lib/collect/contextTrend";
 import type { RunRecord } from "@/lib/runlog";
 import type { RunOutputEvent } from "@/lib/runOutputBus";
 
@@ -22,6 +23,10 @@ export interface DashboardSnapshot {
   runs: RunRecord[];
   queue: QueueEntry[];
   builds: BuildEntry[];
+  // undefined = the contextTrend collect hasn't resolved yet (loading); null =
+  // source unreadable; summary = data. It arrives on its own "context-trend"
+  // frame, decoupled from the activity slice so it never gates the KPI tiles.
+  contextTrend: ContextTrendSummary | null | undefined;
 }
 
 export type ActivitySlice = Pick<
@@ -32,6 +37,7 @@ export type ActivitySlice = Pick<
 export type DashboardEvent =
   | { event: "snapshot"; data: DashboardSnapshot }
   | { event: "activity"; data: ActivitySlice }
+  | { event: "context-trend"; data: ContextTrendSummary | null }
   | { event: "gates"; data: (PrGate | PrGateError)[] }
   | { event: "runs"; data: RunRecord[] }
   | { event: "run-output"; data: RunOutputEvent };
@@ -58,6 +64,7 @@ const EMPTY_SNAPSHOT: DashboardSnapshot = {
   runs: [],
   queue: [],
   builds: [],
+  contextTrend: undefined,
 };
 
 export const initialDashboardState: DashboardState = {
@@ -82,6 +89,13 @@ export function mergeDashboardEvent(
       return {
         ...state,
         snapshot: { ...state.snapshot, ...incoming.data },
+        status: "online",
+        lastUpdate: now,
+      };
+    case "context-trend":
+      return {
+        ...state,
+        snapshot: { ...state.snapshot, contextTrend: incoming.data },
         status: "online",
         lastUpdate: now,
       };
@@ -233,7 +247,7 @@ export interface EventSourceLike {
   onerror?: ((ev: Event) => void) | null;
 }
 
-const SSE_EVENT_NAMES: DashboardEvent["event"][] = ["snapshot", "activity", "gates", "runs", "run-output"];
+const SSE_EVENT_NAMES: DashboardEvent["event"][] = ["snapshot", "activity", "context-trend", "gates", "runs", "run-output"];
 
 export function useDashboardState(options: UseDashboardStateOptions = {}): DashboardState {
   const { createSource, url = "/api/events" } = options;

@@ -13,7 +13,7 @@ import type { DashboardSnapshot } from "@/hooks/useDashboardState";
 import type { RunRecord } from "@/lib/runlog";
 
 function emptySnapshot(overrides: Partial<DashboardSnapshot> = {}): DashboardSnapshot {
-  return { sessions: [], loops: [], gates: [], health: [], runs: [], queue: [], builds: [], ...overrides };
+  return { sessions: [], loops: [], gates: [], health: [], runs: [], queue: [], builds: [], contextTrend: null, ...overrides };
 }
 
 function run(overrides: Partial<RunRecord> = {}): RunRecord {
