@@ -18,9 +18,12 @@ import type { ContextTrendSummary, TrendSession } from "@/lib/collect/contextTre
 // fired zero times).
 
 // Below this many sessions a side's median is drawn in the caveat color and
-// said in words to be uncallable. Judgement constant, not statistics: the
-// audit deemed its n=10 after-group "not established" (§4.1), and this
-// only selects presentation — every session stays plotted either way.
+// said in words to be uncallable. This is a presentation threshold, not a
+// statistical test — it only picks how a median is styled and captioned; every
+// session stays plotted either way, and no value is adjusted or withheld.
+// 20 is a deliberately conservative round number: it sits above the ~10-session
+// after-group that first prompted the caveat, so a median gets called readable
+// only well clear of that size.
 const MIN_READABLE_N = 20;
 
 // ViewBox geometry. The height includes the x-axis band and compaction
