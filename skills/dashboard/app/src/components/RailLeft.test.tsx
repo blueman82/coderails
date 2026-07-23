@@ -256,8 +256,9 @@ describe("RailLeft — System Vitals loading vs unavailable", () => {
         ],
       })
     );
-    expect(container.querySelectorAll(".hud-kpi-loading").length).toBe(0);
-    const unavailable = container.querySelectorAll(".hud-kpi-unavailable");
+    const vitals = container.querySelector('[data-testid="system-vitals"]')!;
+    expect(vitals.querySelectorAll(".hud-kpi-loading").length).toBe(0);
+    const unavailable = vitals.querySelectorAll(".hud-kpi-unavailable");
     expect(unavailable.length).toBe(3);
   });
 });
