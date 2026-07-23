@@ -17,9 +17,16 @@ export interface Snapshot {
   runs: RunRecord[];
   queue: QueueEntry[];
   builds: BuildEntry[];
-  // null = source unreadable (no ~/.claude/projects), same degrade stance as
-  // the usage tiles — distinct from a real summary with zero sessions.
-  contextTrend: ContextTrendSummary | null;
+  // Three states, because contextTrend collects on its OWN frame (it streams
+  // every transcript under projectsDir — far slower than the activity slice —
+  // so it must not gate the System Vitals / KPI tiles that ride the activity
+  // frame):
+  //   undefined = its collect hasn't resolved yet (loading)
+  //   null      = source unreadable (no ~/.claude/projects), same degrade
+  //               stance as the usage tiles — distinct from a real summary
+  //               with zero sessions
+  //   summary   = data
+  contextTrend: ContextTrendSummary | null | undefined;
 }
 
 export interface AggregatorDeps {
