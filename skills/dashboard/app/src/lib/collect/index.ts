@@ -151,7 +151,9 @@ export function createAggregator(deps: AggregatorDeps): Aggregator {
     runs: [],
     queue: [],
     builds: [],
-    contextTrend: null,
+    // undefined = the contextTrend collect (its own frame) hasn't resolved yet.
+    // The panel renders "loading" for undefined, "unavailable" only for null.
+    contextTrend: undefined,
   };
 
   // Overloaded the same way as AggregatorEventListener so each call site
