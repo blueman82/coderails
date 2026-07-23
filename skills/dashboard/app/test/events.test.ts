@@ -319,7 +319,8 @@ describe("GET /api/events — activity on fs change", () => {
   }, 6000);
 
   it("emits contextTrend on its OWN 'context-trend' frame, not inside the activity slice", async () => {
-    // Decoupling guard: the contextTrend collect streams every transcript and
+    // Decoupling guard: the contextTrend collect streams every coderails
+    // orchestrator transcript and
     // is far slower than the activity slice, so it must ride a separate frame.
     // If it were folded back into "activity", the slow collect would gate the
     // KPI tiles (the ~10s cold-cache all-loading regression). Assert (1) a
