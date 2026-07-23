@@ -1002,6 +1002,20 @@ mk_smoke "$FIX_SMOKE_PASSING" 0 1
 post_evals::validate_smoke "$FIX_SMOKE_PASSING"
 check "validate_smoke: cmd exit 0 at freeze → exit 0 (permitted)" 0 $?
 
+# (S1-quater) smoke_verify_rejects_non_array_evals — the SCALAR shape is the
+# discriminating one for validate_smoke's guard: `.evals[]?` on a scalar yields
+# no ids, so before the guard the "no ids → return 0" line passed. A valid
+# array whose only eval is agent-run legitimately yields no ids and must still
+# pass (guard keys on type, not empty ids).
+SMK_SCALAR="$TMP/smoke_scalar.json"
+printf '{"tier":1,"evals":42}' > "$SMK_SCALAR"
+post_evals::validate_smoke "$SMK_SCALAR" >/dev/null 2>&1
+check "validate_smoke: scalar .evals=42 → exit 1 (fails closed)" 1 $?
+SMK_AGENTRUN="$TMP/smoke_agentrun.json"
+printf '{"tier":1,"evals":[{"id":"A","mode":"agent-run","priority":"P0"}]}' > "$SMK_AGENTRUN"
+post_evals::validate_smoke "$SMK_AGENTRUN" >/dev/null 2>&1
+check "validate_smoke: agent-run-only array → exit 0 (guard keys on type, not empty ids)" 0 $?
+
 # (S2) INSTANCES 2 & 3 — the negative control exited 0. Instance 2: the control
 # wrote outside git, so validate_freeze SKIPPED and returned 0, which read as
 # compliance. Instance 3: the "removed" jq was still on PATH, so the control
