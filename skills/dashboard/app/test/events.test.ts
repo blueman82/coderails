@@ -318,6 +318,50 @@ describe("GET /api/events — activity on fs change", () => {
     expect(populatedActivity).toBeDefined();
   }, 6000);
 
+  it("emits contextTrend on its OWN 'context-trend' frame, not inside the activity slice", async () => {
+    // Decoupling guard: the contextTrend collect streams every transcript and
+    // is far slower than the activity slice, so it must ride a separate frame.
+    // If it were folded back into "activity", the slow collect would gate the
+    // KPI tiles (the ~10s cold-cache all-loading regression). Assert (1) a
+    // "context-trend" frame arrives on a cold connection from start()'s own
+    // collect, and (2) the activity frame never carries a contextTrend key.
+    const projectsDir = tmpDir("dashboard-events-ct-projects-");
+    const loopsDir = tmpDir("dashboard-events-ct-loops-");
+    const runsDir = tmpDir("dashboard-events-ct-runs-");
+    mkdirSync(join(projectsDir, "-proj"), { recursive: true });
+    writeFileSync(
+      join(projectsDir, "-proj", "a.jsonl"),
+      JSON.stringify({
+        type: "assistant",
+        timestamp: new Date().toISOString(),
+        message: { id: "msg_1", role: "assistant", usage: { input_tokens: 10, output_tokens: 5 } },
+      }) + "\n"
+    );
+
+    const handler = createEventsHandler({
+      config: testConfig(),
+      projectsDir,
+      loopsDir,
+      runsDir,
+      gatesPollMs: 999_999,
+    });
+    const res = handler(req());
+
+    const framesPromise = readFramesUntil(res.body!, (frames) =>
+      frames.some((f) => f.event === "context-trend")
+    );
+    const timeout = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error("timed out waiting for a context-trend frame")), 5000)
+    );
+    const frames = await Promise.race([framesPromise, timeout]);
+
+    expect(frames.some((f) => f.event === "context-trend")).toBe(true);
+    // No activity frame may carry contextTrend — it is not part of that slice.
+    for (const f of frames.filter((f) => f.event === "activity")) {
+      expect(f.data as Record<string, unknown>).not.toHaveProperty("contextTrend");
+    }
+  }, 6000);
+
   it("snapshot carries a builds field populated from buildsDir, and it refreshes when a build's state.json changes", async () => {
     const projectsDir = tmpDir("dashboard-events-projects-");
     const loopsDir = tmpDir("dashboard-events-loops-");
