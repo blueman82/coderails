@@ -488,11 +488,20 @@ post_evals::smoke_verify() {
     # Tier 0 is the exemption path: no evals to re-execute.
     [[ "$tier" == "0" ]] && return 0
 
-    local ids
-    ids=$(jq -r '[.evals[]?
-        | select(.mode == "scripted")
-        | .id] | .[]' "$path")
-    [[ -z "$ids" ]] && return 0
+    # Iterate scripted evals by ARRAY INDEX, never by extracting a list of
+    # `id`s. `id` is agent-written and unvalidated at this gate, so keying the
+    # re-execution loop on it is another attacker-writable leash: an eval with
+    # id:"" yields a blank line that a skip-empties loop drops, and a duplicate
+    # id would run one eval's cmd twice while never running the other's. Index
+    # position is intrinsic to the array and cannot be forged, so every scripted
+    # eval is re-executed exactly once regardless of its id. (Same defect class
+    # as the surface exemption removed above: gate authority must never rest on
+    # a field the gated party controls.)
+    local indices
+    indices=$(jq -r '(.evals // []) | to_entries
+        | map(select(.value.mode == "scripted") | .key)
+        | .[]' "$path")
+    [[ -z "$indices" ]] && return 0
 
     local worktree
     worktree=$(mktemp -d) || {
@@ -525,13 +534,16 @@ post_evals::smoke_verify() {
         return 1
     fi
 
-    local rc=0 id
-    while IFS= read -r id; do
-        [[ -z "$id" ]] && continue
+    local rc=0 idx
+    while IFS= read -r idx; do
+        [[ -z "$idx" ]] && continue
 
-        local cmd nc
-        cmd=$(jq -r --arg id "$id" '.evals[] | select(.id == $id) | .cmd // ""' "$path")
-        nc=$(jq -r --arg id "$id" '.evals[] | select(.id == $id) | .negative_control // ""' "$path")
+        # Look the eval up by its array index, not its id. `id` is used only for
+        # human-readable messages below; it never selects which eval runs.
+        local cmd nc id
+        cmd=$(jq -r --argjson i "$idx" '.evals[$i].cmd // ""' "$path")
+        nc=$(jq -r --argjson i "$idx" '.evals[$i].negative_control // ""' "$path")
+        id=$(jq -r --argjson i "$idx" '.evals[$i].id // ("#" + ($i | tostring))' "$path")
 
         if [[ -z "$cmd" ]]; then
             printf 'post_evals: smoke_verify: scripted eval %s has empty cmd — nothing can execute at the gate.\n' "$id" >&2
@@ -563,7 +575,7 @@ post_evals::smoke_verify() {
             printf 'post_evals: smoke_verify: eval %s negative_control did not execute at the gate (exit %s: command not found / crashed / timed out) at trusted head %s — non-zero, but for an environmental reason, so it tested nothing. Output: %s\n' "$id" "$nc_rc" "$head_sha" "$nc_out" >&2
             rc=1; break
         fi
-    done <<< "$ids"
+    done <<< "$indices"
 
     git worktree remove --force "$worktree" >/dev/null 2>&1
     rm -rf "$worktree" 2>/dev/null

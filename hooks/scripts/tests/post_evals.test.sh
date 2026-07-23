@@ -1518,6 +1518,40 @@ jq -n --arg sha "$SV_SHA2" '{
 (cd "$SV_REPO" && post_evals::smoke_verify "$FIX_SV_DEPLOYED_SOLE" "$SV_SHA2" 2>/dev/null)
 check "smoke_verify: fabricated scripted cmd behind surface=deployed as SOLE P0 → REFUSED (exit 1) [the bypass]" 1 $?
 
+# (SV4-ter) The empty-id bypass: `id` is agent-written, and the re-execution
+# loop must NOT key on it. A SOLE scripted eval with id:"" and a fabricated cmd
+# must be refused — before the index-iteration fix this returned 0 (empty id ->
+# empty ids list -> return 0, re-executing nothing).
+FIX_SV_EMPTYID="$TMP/sv_emptyid.json"
+jq -n --arg sha "$SV_SHA2" '{
+  tier: 1, tier_justification: "exploit: fabricated cmd hidden behind empty id", head_sha: $sha,
+  evals: [
+    {id:"", priority:"P0", mode:"scripted", status:"pass", surface:"artifact-path",
+     cmd:"bash /tmp/coderails-never-existed-emptyid-xyz.sh", negative_control:"false",
+     evidence:"fabricated", smoke: {"cmd_exit":1,"negative_control_exit":1,"cmd_output":"","negative_control_output":""}}
+  ]
+}' > "$FIX_SV_EMPTYID"
+(cd "$SV_REPO" && post_evals::smoke_verify "$FIX_SV_EMPTYID" "$SV_SHA2" 2>/dev/null)
+check "smoke_verify: fabricated scripted cmd with id:\"\" → REFUSED (exit 1) [empty-id bypass]" 1 $?
+
+# (SV4-quater) The duplicate-id variant: two scripted evals sharing one id, the
+# second fabricated. id-based lookup would run the first twice and skip the
+# second; index iteration runs BOTH, so the fabricated one is caught.
+FIX_SV_DUPID="$TMP/sv_dupid.json"
+jq -n --arg sha "$SV_SHA2" '{
+  tier: 1, tier_justification: "exploit: fabricated cmd sharing an id with an honest eval", head_sha: $sha,
+  evals: [
+    {id:"dup", priority:"P0", mode:"scripted", status:"pass", surface:"artifact-path",
+     cmd:"bash real_check.sh", negative_control:"bash real_control.sh",
+     evidence:"honest", smoke: {"cmd_exit":1,"negative_control_exit":1,"cmd_output":"","negative_control_output":""}},
+    {id:"dup", priority:"P0", mode:"scripted", status:"pass", surface:"artifact-path",
+     cmd:"bash /tmp/coderails-never-existed-dup-xyz.sh", negative_control:"false",
+     evidence:"fabricated", smoke: {"cmd_exit":1,"negative_control_exit":1,"cmd_output":"","negative_control_output":""}}
+  ]
+}' > "$FIX_SV_DUPID"
+(cd "$SV_REPO" && post_evals::smoke_verify "$FIX_SV_DUPID" "$SV_SHA2" 2>/dev/null)
+check "smoke_verify: fabricated cmd sharing an id with an honest eval → REFUSED (exit 1) [duplicate-id bypass]" 1 $?
+
 # (SV5) Fail closed, named reason: jq missing.
 stderr_out=$(PATH="$EMPTY_BIN"; cd "$SV_REPO" && post_evals::smoke_verify "$FIX_SV_HONEST" "$SV_SHA" 2>&1)
 check "smoke_verify: jq unavailable → exit 1 (must not fail open)" 1 $?
