@@ -241,11 +241,11 @@ describe("RailLeft — System Vitals loading vs unavailable", () => {
 
   it("shows a loading state, not 'unavailable', for every KPI tile before the first activity frame arrives (health: [])", () => {
     const { container } = renderRail(emptySnapshot({ health: [] }));
-    // Rail-wide: before the first activity frame arrives, NOTHING in the left
-    // rail may render "unavailable" — not the six System Vitals tiles, and not
-    // the Context Trend panel (which also keys off the unresolved activity
-    // slice). A null contextTrend at this point is a loading state, mirroring
-    // the KPI tiles' healthNotYetLoaded distinction.
+    // Rail-wide: on the initial snapshot (health:[], contextTrend:undefined),
+    // NOTHING in the left rail may render "unavailable" — not the six System
+    // Vitals tiles (health hasn't loaded), and not the Context Trend panel (its
+    // own frame hasn't arrived, so contextTrend is undefined = loading, not the
+    // null that would mean unavailable).
     expect(container.querySelectorAll(".hud-kpi-unavailable").length).toBe(0);
     expect(container.textContent).not.toContain("unavailable");
     // Six System Vitals tiles show loading…; the Context Trend panel adds one
