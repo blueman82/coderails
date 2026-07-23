@@ -138,6 +138,7 @@ export function createAggregator(deps: AggregatorDeps): Aggregator {
     runs: [],
     queue: [],
     builds: [],
+    contextTrend: null,
   };
 
   // Overloaded the same way as AggregatorEventListener so each call site
