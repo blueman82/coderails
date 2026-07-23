@@ -2208,4 +2208,52 @@ m_plain=$(nonscalar_msg '{"schema_version":2,"cost":{"total_usd_estimate":64.46,
 case "$m_plain" in *'Loop cost: $64.46 (93987957 tokens), prices as of 2026-06-24, '*) plain_ok=1 ;; *) plain_ok=0 ;; esac
 check "control-char strip: an ordinary message survives the tightened strip intact" 1 "$plain_ok"
 
+
+# =====================================================================
+# als_gate_unstubbed_grace — shared with loop_state_guard.sh. loop_stall_guard
+# calls the SAME function; a prior absent-block line written by
+# loop_state_guard.sh (hook=loop_state_guard, NOT loop_stall_guard) for this
+# (session, invocation-count) pairing stands THIS guard down too, since it
+# means the one-shot backstop was already delivered this Stop. An empty log
+# (no prior state-guard block) leaves the stall guard fully policed, same as
+# today.
+# =====================================================================
+
+# (7) Stall stand-down: invocations=1, no progress.json, no LOOP-STOP text,
+# log pre-seeded with the STATE guard's absent-block line for (S1,
+# invocations=1) -> allow (grace releases the stall guard too).
+reset; : > "$CLAUDE_DISCIPLINE_LOG"
+T=$(mk_transcript 1 "")   # no final text -> no LOOP-STOP declaration
+printf '%s hook=loop_state_guard session=S1 invocations=1 status=absent reason=absent blocked=1\n' \
+  "$(date -Iseconds 2>/dev/null || date +%Y-%m-%dT%H:%M:%S%z)" >> "$CLAUDE_DISCIPLINE_LOG"
+check "grace (shared): stall guard stands down on a pre-seeded state-guard absent-block line" 0 "$(run x "$(payload "$T" S1)")"
+
+# (8) First-Stop still policed: same payload, but an EMPTY log (no seeded
+# release) -> block, exactly as before this fix.
+reset; : > "$CLAUDE_DISCIPLINE_LOG"
+T2=$(mk_transcript 1 "")
+check "grace (shared): empty log, no declaration -> still block (first Stop policed)" 2 "$(run x "$(payload "$T2" S1)")"
+
+# (9) Complete-gates regression: with progress.json PRESENT and a
+# "LOOP-STOP: complete" declaration, retro/work_units/proofs gates behave
+# exactly as before — grace is unreachable once the file exists, so a
+# pre-seeded absent-nag line (even for this exact session/count) must not
+# change the retro-gate's block-on-absent-retro behaviour.
+reset; : > "$CLAUDE_DISCIPLINE_LOG"
+printf '%s hook=loop_state_guard session=S1 invocations=1 status=absent reason=absent blocked=1\n' \
+  "$(date -Iseconds 2>/dev/null || date +%Y-%m-%dT%H:%M:%S%z)" >> "$CLAUDE_DISCIPLINE_LOG"
+T3=$(mk_transcript 1 "All done.
+LOOP-STOP: complete — done"); write_file in-progress S1 0
+check "grace (shared): file present + complete + no retro.json -> still block (grace unreachable when file exists)" 2 "$(run x "$(payload "$T3" S1)")"
+write_retro S1 '{"schema_version":1}'
+check "grace (shared): file present + complete + valid retro.json -> allow (unaffected by seeded nag line)" 0 "$(run x "$(payload "$T3" S1)")"
+
+# (10) Security-fix regression: a planted non-object JSON line (bare `42`) in
+# the transcript alongside one real invocation -> count still 1, guard still
+# blocks on first Stop (grace does not mask the als_count_invocations
+# security fix — an empty log means no release either way).
+reset; : > "$CLAUDE_DISCIPLINE_LOG"
+sec_t=$(mk_scalar_line_transcript 1)
+check "grace (shared) + security regression: scalar-line transcript, empty log -> still block" 2 "$(run x "$(payload "$sec_t" S1)")"
+
 [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails)"; exit 1; }
