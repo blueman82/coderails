@@ -89,10 +89,10 @@ export function createEventsHandler(deps: EventsHandlerDeps) {
     //
     // So we tear down from request abort as well, and guard with a flag because
     // both paths can fire for the same connection.
-    let releasedX = false;
+    let released = false;
     const release = () => {
-      if (releasedX) return;
-      releasedX = true;
+      if (released) return;
+      released = true;
       unsubscribe?.();
       aggregator.stop();
     };
