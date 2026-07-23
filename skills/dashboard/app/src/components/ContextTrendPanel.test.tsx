@@ -53,11 +53,20 @@ function summary(overrides: Partial<ContextTrendSummary> = {}): ContextTrendSumm
   };
 }
 
-function renderPanel(contextTrend: ContextTrendSummary | null) {
+// A non-empty health array means the activity slice has resolved, so a null
+// contextTrend is a genuine collector failure rather than a not-yet-loaded
+// state (the panel keys off snapshot.health the same way RailLeft does). Every
+// test that renders a real summary is unaffected; only the null cases care.
+const LOADED_HEALTH: DashboardSnapshot["health"] = [{ key: "hooksFired", value: "1" }];
+
+function renderPanel(
+  contextTrend: ContextTrendSummary | null,
+  health: DashboardSnapshot["health"] = LOADED_HEALTH
+) {
   return render(
     createElement(
       DashboardContextTestProvider,
-      { snapshot: emptySnapshot({ contextTrend }) },
+      { snapshot: emptySnapshot({ contextTrend, health }) },
       createElement(ContextTrendPanel)
     )
   );
