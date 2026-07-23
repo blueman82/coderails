@@ -357,10 +357,54 @@ describe("GET /api/events — activity on fs change", () => {
     const frames = await Promise.race([framesPromise, timeout]);
 
     expect(frames.some((f) => f.event === "context-trend")).toBe(true);
-    // No activity frame may carry contextTrend — it is not part of that slice.
-    for (const f of frames.filter((f) => f.event === "activity")) {
-      expect(f.data as Record<string, unknown>).not.toHaveProperty("contextTrend");
-    }
+    // The "no activity frame carries contextTrend" half of this property is
+    // asserted by the exact-key-set wire-shape guard above (the "activity on fs
+    // change" test), which enumerates the activity payload's full key set and
+    // so strictly dominates a "lacks one key" check here. Not repeated: reading
+    // stops at the first context-trend frame, which on a cold connection
+    // arrives before any activity frame, so a loop over activity frames here
+    // would iterate zero times and assert nothing.
+  }, 6000);
+
+  it("re-emits a 'context-trend' frame when projectsDir changes, not only on start()", async () => {
+    // Watch-refresh guard. start() fires refreshContextTrend() once, so a test
+    // that merely waits for A context-trend frame is satisfied by that cold
+    // start emit alone — it would still pass with scheduleContextTrendRefresh()
+    // deleted from the projectsDir watcher, leaving the panel frozen at its
+    // first-paint value while the KPI tiles kept refreshing. So count to TWO:
+    // the start() frame, then a second one caused by the fs write below. This
+    // mirrors the activity and gates collectors, which both already have a
+    // watch/debounce refresh test.
+    const projectsDir = tmpDir("dashboard-events-ctwatch-projects-");
+    const loopsDir = tmpDir("dashboard-events-ctwatch-loops-");
+    const runsDir = tmpDir("dashboard-events-ctwatch-runs-");
+    mkdirSync(join(projectsDir, "-proj"), { recursive: true });
+
+    const handler = createEventsHandler({
+      config: testConfig(),
+      projectsDir,
+      loopsDir,
+      runsDir,
+      gatesPollMs: 999_999,
+      activityDebounceMs: 50,
+    });
+    const res = handler(req());
+
+    const framesPromise = readFramesUntil(
+      res.body!,
+      (frames) => frames.filter((f) => f.event === "context-trend").length >= 2
+    );
+    const timeout = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error("timed out waiting for a SECOND context-trend frame")), 5000)
+    );
+
+    // Give the start() collect a moment to land, then touch the watched dir.
+    await new Promise((r) => setTimeout(r, 150));
+    mkdirSync(join(projectsDir, "-touched-coderails-project"), { recursive: true });
+    writeFileSync(join(projectsDir, "-touched-coderails-project", "session.jsonl"), "{}\n");
+
+    const frames = await Promise.race([framesPromise, timeout]);
+    expect(frames.filter((f) => f.event === "context-trend").length).toBeGreaterThanOrEqual(2);
   }, 6000);
 
   it("snapshot carries a builds field populated from buildsDir, and it refreshes when a build's state.json changes", async () => {
