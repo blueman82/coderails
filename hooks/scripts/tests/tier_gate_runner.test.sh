@@ -1350,4 +1350,138 @@ out=$(
 check_contains "PT2: empty-but-successful PR list -> heartbeat reports prs=0" "prs=0" "$out"
 check_not_contains "PT2: empty list is NOT reported as a fetch failure" "pr_fetch=FAILED" "$out"
 
+# ─── tg_should_gate: error-retry (bounded), success/failure terminal ────────
+# Redefines tg_commit_statuses directly (the brief's documented approach) —
+# this stubs ONLY the I/O boundary, so the real tg_latest_status_state /
+# tg_latest_status_age_secs / case dispatch inside tg_should_gate all run for
+# real. tg_commit_statuses itself already has no test-suite coverage of its
+# own callers here, so redefining it (rather than the STATUSES_FILE/curl
+# plumbing used elsewhere in this file) keeps these cases focused on
+# tg_should_gate's dispatch logic alone.
+
+# sg_epoch_iso <seconds_ago> — echoes an ISO8601 UTC timestamp <seconds_ago>
+# seconds before now. BSD `date -r` (macOS) with a GNU `date -d @<epoch>`
+# fallback, matching tg_latest_status_age_secs's own BSD/GNU idiom.
+sg_epoch_iso() {
+    local secs_ago="$1"
+    local epoch=$(( $(date +%s) - secs_ago ))
+    date -u -r "$epoch" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
+        || date -u -d "@$epoch" +%Y-%m-%dT%H:%M:%SZ
+}
+
+# sg_statuses_of <state> <count> — echoes a newest-first JSON array of <count>
+# status objects all in <state>, each with a distinct (fresh) created_at.
+sg_statuses_of() {
+    local state="$1" count="$2"
+    local out="[" i=0
+    while [[ $i -lt $count ]]; do
+        [[ $i -gt 0 ]] && out+=","
+        out+="{\"state\":\"$state\",\"context\":\"tier-review\",\"created_at\":\"$(sg_epoch_iso "$i")\",\"description\":\"x\"}"
+        i=$((i+1))
+    done
+    out+="]"
+    printf '%s' "$out"
+}
+
+sg_check_gate() { # <desc> <expected_rc> <statuses_json>
+    local desc="$1" expected_rc="$2" sg_fixture="$3"
+    # NOTE: must NOT name this local `statuses_json` — tg_should_gate below
+    # declares its own `local statuses_json`, and since bash locals shadow
+    # down the call stack (including into command-substitution subshells),
+    # a same-named local here gets shadowed by tg_should_gate's (still
+    # unset) one before this closure's printf runs, tripping `set -u`.
+    tg_commit_statuses() { printf '%s' "$sg_fixture"; }
+    local rc
+    if tg_should_gate "some-sha"; then rc=0; else rc=1; fi
+    check "$desc" "$expected_rc" "$rc"
+}
+
+# THE FIX: a single prior `error` status, below the retry cap -> re-gate (rc 0).
+sg_check_gate "SG1: error x1 (below cap) -> re-gates" 0 "$(sg_statuses_of error 1)"
+
+# BOUNDED: at and above the cap -> skip (rc 1). Default cap is
+# TIER_GATE_MAX_ERROR_RETRIES=2, so 2 prior errors is AT the cap.
+sg_check_gate "SG2: error at cap (2 prior errors) -> skips" 1 "$(sg_statuses_of error 2)"
+sg_check_gate "SG3: error above cap (3 prior errors) -> skips" 1 "$(sg_statuses_of error 3)"
+
+# SAFETY (the invariant that matters most): success/failure stay terminal at
+# EVERY count — this already passes on the pre-fix code (error was grouped
+# with them); these cases prove the fix does not loosen that grouping when
+# error is carved out. Not a new behaviour — a preserved one.
+for n in 1 2 3 5; do
+    sg_check_gate "SG4: success x$n -> skips (terminal, unconditional)" 1 "$(sg_statuses_of success "$n")"
+    sg_check_gate "SG5: failure x$n -> skips (terminal, unconditional)" 1 "$(sg_statuses_of failure "$n")"
+done
+
+# Unknown/default state -> fails closed (skip), unchanged by this fix.
+sg_check_gate "SG6: unknown/garbage state -> skips (fails closed)" 1 '[{"state":"some_garbage_state","context":"tier-review","created_at":"2020-01-01T00:00:00Z","description":"x"}]'
+
+# Pre-existing behaviour, must not regress:
+sg_check_gate "SG7: no status at all -> re-gates" 0 '[]'
+
+fresh_pending_ts=$(sg_epoch_iso 0)
+sg_check_gate "SG8: fresh pending -> skips" 1 "[{\"state\":\"pending\",\"context\":\"tier-review\",\"created_at\":\"$fresh_pending_ts\",\"description\":\"x\"}]"
+
+stale_pending_ts=$(sg_epoch_iso $((TIER_GATE_PENDING_TTL + 60)))
+sg_check_gate "SG9: stale pending (past TTL) -> re-gates" 0 "[{\"state\":\"pending\",\"context\":\"tier-review\",\"created_at\":\"$stale_pending_ts\",\"description\":\"x\"}]"
+
+# ─── tg_should_gate: REAL interleaved error/pending shape ───────────────────
+# SG1-SG9 above build fixtures with sg_statuses_of error N -- a PURE run of
+# error statuses with no pending between them. That shape never occurs from
+# the real tg_gate_pr flow: the daemon posts a fresh `pending` status before
+# EVERY judge call (unconditional, tg_post_status "$sha" "pending" ... ahead
+# of the judge/error path), so a repeatedly-crashing judge actually produces
+# (newest-first) [error, pending, error, pending, ...], not [error, error,
+# ...]. tg_leading_error_count must SKIP pending (neither count nor stop) and
+# stop only at a genuinely terminal success/failure -- otherwise the newest
+# error's leading run is always exactly 1 (the pending directly under it
+# stops the count), the cap (TIER_GATE_MAX_ERROR_RETRIES) never engages, and
+# a permanently-broken judge is re-judged forever instead of being bounded.
+
+# sg_interleaved_error_pending <error_count> — echoes a newest-first JSON
+# array alternating [error, pending, error, pending, ...] starting with
+# error, <error_count> errors total (each followed by one pending, except
+# nothing trails the last one — matches the real shape: newest status is
+# always the just-posted error itself).
+sg_interleaved_error_pending() {
+    local error_count="$1" out="[" i=0 first=true
+    while [[ $i -lt $error_count ]]; do
+        [[ "$first" == true ]] || out+=","
+        out+="{\"state\":\"error\",\"context\":\"tier-review\",\"created_at\":\"$(sg_epoch_iso $((i*2)))\",\"description\":\"x\"}"
+        first=false
+        if [[ $i -lt $((error_count - 1)) ]]; then
+            out+=",{\"state\":\"pending\",\"context\":\"tier-review\",\"created_at\":\"$(sg_epoch_iso $((i*2+1)))\",\"description\":\"x\"}"
+        fi
+        i=$((i+1))
+    done
+    out+="]"
+    printf '%s' "$out"
+}
+
+# THE BUG THIS CATCHES: 2 real errors (interleaved with the pending the
+# daemon actually posts between them) must be AT the cap and skip (rc 1) --
+# same as the pure-run SG2 case, because the daemon has genuinely tried
+# (and failed) TIER_GATE_MAX_ERROR_RETRIES times. Pre-fix, tg_leading_error_count
+# stops at the first pending under the newest error, so this reads as count=1
+# (below cap) and re-gates (rc 0) forever -- the cap never engages.
+sg_check_gate "SG10: 1 real error (interleaved shape) -> re-gates" 0 "$(sg_interleaved_error_pending 1)"
+sg_check_gate "SG11: 2 real errors (interleaved shape, at cap) -> skips" 1 "$(sg_interleaved_error_pending 2)"
+sg_check_gate "SG12: 4 real errors (interleaved shape, above cap) -> skips" 1 "$(sg_interleaved_error_pending 4)"
+
+# ─── tg_leading_error_count: direct unit tests (pin the counting logic on
+# its own, independent of tg_should_gate's dispatch) ─────────────────────────
+sg_check_count() { # <desc> <expected_count> <statuses_json>
+    local desc="$1" expected="$2" fixture="$3"
+    local actual; actual=$(tg_leading_error_count "$fixture")
+    check "$desc" "$expected" "$actual"
+}
+
+sg_check_count "SG13: count() pure [error,error] -> 2" 2 "$(sg_statuses_of error 2)"
+sg_check_count "SG14: count() interleaved [error,pending,error,pending] -> 2 (pending skipped, not a stop)" 2 "$(sg_interleaved_error_pending 2)"
+sg_check_count "SG15: count() interleaved 4 errors -> 4" 4 "$(sg_interleaved_error_pending 4)"
+sg_check_count "SG16: count() stops at success (older error not counted)" 1 '[{"state":"error","context":"tier-review","created_at":"2020-01-03T00:00:00Z"},{"state":"success","context":"tier-review","created_at":"2020-01-02T00:00:00Z"},{"state":"error","context":"tier-review","created_at":"2020-01-01T00:00:00Z"}]'
+sg_check_count "SG17: count() stops at failure (older error not counted)" 1 '[{"state":"error","context":"tier-review","created_at":"2020-01-03T00:00:00Z"},{"state":"failure","context":"tier-review","created_at":"2020-01-02T00:00:00Z"},{"state":"error","context":"tier-review","created_at":"2020-01-01T00:00:00Z"}]'
+sg_check_count "SG18: count() empty array -> 0" 0 '[]'
+sg_check_count "SG19: count() trailing pending with no leading error -> 0" 0 '[{"state":"pending","context":"tier-review","created_at":"2020-01-01T00:00:00Z"}]'
+
 [[ $fails -eq 0 ]] && { echo PASS; exit 0; } || { echo "FAIL ($fails)"; exit 1; }

@@ -20,6 +20,15 @@
 TIER_GATE_CONTEXT="tier-review"
 TIER_GATE_MARKER_VERSION="v1"
 TIER_GATE_PENDING_TTL="${TIER_GATE_PENDING_TTL:-720}"
+TIER_GATE_MAX_ERROR_RETRIES="${TIER_GATE_MAX_ERROR_RETRIES:-2}"
+# Guard against a non-numeric override: bash's `-lt` comparison in
+# tg_should_gate silently reads a malformed value as falsy rather than
+# erroring, so a typo'd env var (e.g. TIER_GATE_MAX_ERROR_RETRIES=twelve)
+# would fail closed but with no signal of why — reset to the safe default
+# instead of leaving that silent. tg_log isn't defined yet this early in the
+# file, so this can only fall back quietly; a malformed value still shows up
+# in a fresh checkout's `tg_should_gate` behaviour, just without a log line.
+[[ "$TIER_GATE_MAX_ERROR_RETRIES" =~ ^[0-9]+$ ]] || TIER_GATE_MAX_ERROR_RETRIES=2
 TIER_GATE_WATCHDOG_TIMEOUT="${TIER_GATE_WATCHDOG_TIMEOUT:-60}"
 
 # ─── Marker grammar (native re-implementation of eval_artifact.sh) ───────────
@@ -562,13 +571,58 @@ tg_latest_status_age_secs() {
     printf '%s' "$((now_epoch - created_epoch))"
 }
 
+# tg_leading_error_count <statuses_json>
+# Echoes how many `error` statuses have accumulated (newest-first) since the
+# last genuinely terminal success/failure verdict (or the start of history).
+# `pending` is skipped — neither counted nor a stop — because tg_post_status
+# posts an unconditional fresh `pending` before EVERY judge call (see
+# tg_gate_pr below), so a repeatedly-crashing judge's real status history
+# interleaves as [error, pending, error, pending, ...], not a pure run of
+# errors. Stopping at the first non-error (the earlier, wrong behaviour)
+# made that interleaved shape read as "1 leading error" forever — the newest
+# error's own just-posted pending sits directly under it — so the retry cap
+# in tg_should_gate never engaged: a permanently-broken judge was re-judged
+# on every tick, unboundedly, burning a judge call each time. Only
+# success/failure stop the count now; error increments it; everything else
+# (pending, and any other non-terminal state) falls through untouched. This
+# is what bounds error-retry: counting from GitHub's own status history
+# needs no daemon-side persistent state and survives a daemon restart.
+#
+# Fails CLOSED on a jq failure (empty/malformed statuses_json): echoes the
+# cap itself, not 0 — this file's header commits to fail-closed throughout,
+# and a 0 here would read as "no prior errors" and let tg_should_gate
+# re-gate past a JSON fault it can't actually see through. Callers compare
+# with `-lt`, so an unparseable input never looks retryable.
+tg_leading_error_count() {
+    local statuses_json="$1"
+    local count
+    count=$(printf '%s' "$statuses_json" | jq '
+        reduce .[] as $s ({stop:false, count:0};
+            if .stop or $s.state == "success" or $s.state == "failure" then .stop = true
+            elif $s.state == "error" then .count += 1
+            else . end)
+        | .count
+    ' 2>/dev/null)
+    [[ -n "$count" ]] && printf '%s' "$count" || printf '%s' "$TIER_GATE_MAX_ERROR_RETRIES"
+}
+
 # tg_should_gate <sha>
 # Exit 0 iff <sha> needs (re-)gating: no status at all, OR the newest status
 # is `pending` and older than TIER_GATE_PENDING_TTL (a stale lease — daemon
-# crashed or was killed mid-run). Exit 1 (skip) when a terminal status
-# (success|failure|error) already exists, or a FRESH pending is in flight
+# crashed or was killed mid-run), OR the newest status is `error` and the
+# error count from tg_leading_error_count — which INCLUDES the newest error
+# itself, so a count of 1 means "one error so far, this being it" — is still
+# below TIER_GATE_MAX_ERROR_RETRIES (the judge itself failed — a daemon/parse
+# fault, not a verdict on the PR — so it gets a bounded number of retries
+# rather than wedging the PR forever, or being retried forever: the count
+# reaching the cap is what makes the daemon finally stop, on the
+# TIER_GATE_MAX_ERROR_RETRIES-th error). Exit 1 (skip) when a REAL terminal
+# verdict (success|failure) already exists — these never retry,
+# unconditionally, even after any number of prior statuses — when the
+# error-retry count has reached the cap, when a FRESH pending is in flight
 # (another tick — or another daemon instance — is actively working this SHA;
-# reclaiming it too would race two judges against the same SHA).
+# reclaiming it too would race two judges against the same SHA), or for any
+# unrecognized state (fail closed).
 tg_should_gate() {
     local sha="$1"
     local statuses_json; statuses_json=$(tg_commit_statuses "$sha") || return 1
@@ -581,7 +635,11 @@ tg_should_gate() {
             local age; age=$(tg_latest_status_age_secs "$statuses_json" "$(date +%s)")
             [[ -n "$age" && "$age" -ge "$TIER_GATE_PENDING_TTL" ]]
             ;;
-        success|failure|error)
+        error)
+            local error_count; error_count=$(tg_leading_error_count "$statuses_json")
+            [[ -n "$error_count" && "$error_count" -lt "$TIER_GATE_MAX_ERROR_RETRIES" ]]
+            ;;
+        success|failure)
             return 1
             ;;
         *)
