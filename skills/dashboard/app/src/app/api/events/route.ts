@@ -93,10 +93,12 @@ export function createEventsHandler(deps: EventsHandlerDeps) {
     const release = () => {
       if (released) return;
       released = true;
+      console.error("[api/events] RELEASE fired");
       unsubscribe?.();
       aggregator.stop();
     };
 
+    console.error("[api/events] signal present:", !!request.signal, "aborted:", request.signal?.aborted);
     request.signal?.addEventListener("abort", release, { once: true });
 
     const stream = new ReadableStream<Uint8Array>({
