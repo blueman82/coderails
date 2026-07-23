@@ -208,17 +208,28 @@ export function createAggregator(deps: AggregatorDeps): Aggregator {
     );
     const queue = deps.queueDir ? safeCall("queue", () => collectQueue(deps.queueDir!, queueLimit), []) : [];
     const builds = deps.buildsDir ? safeCall("builds", () => collectBuilds(deps.buildsDir!), []) : [];
-    // contextTrend streams every transcript under projectsDir. A shared cache
-    // (explicit or module-scope) makes every later refresh a stat() sweep
-    // plus a re-parse of only the files that actually changed.
-    const contextTrend = await safeCallAsync("contextTrend", () => collectContextTrend(deps.projectsDir, { cache: deps.contextTrendCache }), null);
-    return { sessions, loops, health, queue, builds, contextTrend };
+    return { sessions, loops, health, queue, builds };
   }
 
   async function refreshActivity(): Promise<void> {
     const activity = await collectActivitySlice();
     snapshot = { ...snapshot, ...activity };
     emit("activity", activity);
+  }
+
+  // contextTrend streams every transcript under projectsDir — far slower than
+  // the activity slice — so it collects on its OWN frame and never gates the
+  // System Vitals / KPI tiles that ride the activity frame. A shared cache
+  // (explicit or module-scope) makes every later refresh a stat() sweep plus a
+  // re-parse of only the files that actually changed.
+  async function refreshContextTrend(): Promise<void> {
+    const contextTrend = await safeCallAsync(
+      "contextTrend",
+      () => collectContextTrend(deps.projectsDir, { cache: deps.contextTrendCache }),
+      null
+    );
+    snapshot = { ...snapshot, contextTrend };
+    emit("context-trend", contextTrend);
   }
 
   async function refreshGates(): Promise<void> {
