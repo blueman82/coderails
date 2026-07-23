@@ -724,4 +724,81 @@ result=$(run_with_stub "$(gh_stub_rows "$ROWS_GO")" bash -c '
 check "has_coderails_eval_for_head: second no-match call in same shell → rc=1" "rc=1" "$(printf '%s\n' "$result" | grep '^rc=')"
 check "has_coderails_eval_for_head: second no-match call → PR_EVAL_TIER does not leak from first call" "tier=" "$(printf '%s\n' "$result" | grep '^tier=')"
 
+# ─── pr::coderails_eval_embed_for_head ───────────────────────────────────────
+# Extracts the fenced ```json embed from the newest trusted comment matching
+# <num>/<sha> — what smoke_verify re-executes against at merge time. Direct
+# coverage matters because this function selects WHICH artifact gets
+# re-executed; until now it was only exercised indirectly through merge.sh's
+# stub tests, which stub it out rather than exercising the real extractor.
+FENCE='```'
+embed_body() { # <marker_line> <embed_json>
+  printf '%s\n%sjson\n%s\n%s' "$1" "$FENCE" "$2" "$FENCE"
+}
+
+EMBED_TIER0='{"tier":0,"tier_justification":"stub","head_sha":"deadbeef","evals":[]}'
+EMBED_TIER0_V2='{"tier":0,"tier_justification":"stub-v2","head_sha":"deadbeef","evals":[]}'
+
+# Correct extraction: a single trusted matching comment with one fenced block
+# → rc=0, stdout is exactly the embed JSON (byte-for-byte, not a summary).
+BODY_SIMPLE=$(embed_body "$GO_MARKER" "$EMBED_TIER0")
+ROWS_EMBED_SIMPLE=$(printf '[%s]' "$(comment_row "$TRUSTED_LOGIN" OWNER "$BODY_SIMPLE")")
+result=$(run_with_stub "$(gh_stub_rows "$ROWS_EMBED_SIMPLE")" bash -c '
+  source "'"$LIB"'"
+  out=$(pr::coderails_eval_embed_for_head 42 "deadbeef")
+  echo "rc=$?"
+  echo "out=$out"
+')
+check "coderails_eval_embed_for_head: trusted matching comment → rc=0" "rc=0" "$(printf '%s\n' "$result" | grep '^rc=')"
+check "coderails_eval_embed_for_head: extracted embed matches the fenced block verbatim" "out=$EMBED_TIER0" "$(printf '%s\n' "$result" | grep '^out=')"
+
+# No match at all → rc=1, no embed.
+result=$(run_with_stub "$(gh_stub_rows '[]')" bash -c '
+  source "'"$LIB"'"
+  out=$(pr::coderails_eval_embed_for_head 42 "deadbeef")
+  echo "rc=$?"
+  echo "out=$out"
+')
+check "coderails_eval_embed_for_head: no comments → rc=1" "rc=1" "$(printf '%s\n' "$result" | grep '^rc=')"
+check "coderails_eval_embed_for_head: no comments → empty embed" "out=" "$(printf '%s\n' "$result" | grep '^out=')"
+
+# gh fetch failure → rc=2 (fail-closed), same contract as the other readers.
+result=$(run_with_stub "$IDENTITY_FAIL_STUB" bash -c '
+  source "'"$LIB"'"
+  pr::coderails_eval_embed_for_head 42 "deadbeef"
+  echo "rc=$?"
+')
+check "coderails_eval_embed_for_head: identity fetch failure → rc=2 (fail-closed)" "rc=2" "$(printf '%s\n' "$result" | grep '^rc=')"
+
+# Newest-comment-wins: two trusted comments both matching 42/deadbeef, each
+# carrying a DIFFERENT embed — the LAST one in comment order must be the one
+# extracted, mirroring has_coderails_eval_for_head's own newest-wins rule
+# (the two functions must never disagree about which comment is authoritative
+# for the same pr/sha).
+BODY_OLD=$(embed_body "$GO_MARKER" "$EMBED_TIER0")
+BODY_NEW=$(embed_body "$GO_MARKER" "$EMBED_TIER0_V2")
+ROWS_EMBED_NEWEST=$(printf '[%s,%s]' \
+    "$(comment_row "$TRUSTED_LOGIN" OWNER "$BODY_OLD")" \
+    "$(comment_row "$TRUSTED_LOGIN" OWNER "$BODY_NEW")")
+result=$(run_with_stub "$(gh_stub_rows "$ROWS_EMBED_NEWEST")" bash -c '
+  source "'"$LIB"'"
+  out=$(pr::coderails_eval_embed_for_head 42 "deadbeef")
+  echo "rc=$?"
+  echo "out=$out"
+')
+check "coderails_eval_embed_for_head: two matching comments → rc=0" "rc=0" "$(printf '%s\n' "$result" | grep '^rc=')"
+check "coderails_eval_embed_for_head: newest comment's embed wins, not the first" "out=$EMBED_TIER0_V2" "$(printf '%s\n' "$result" | grep '^out=')"
+
+# Untrusted spoof: an attacker's comment carrying a byte-identical marker +
+# embed must be excluded before matching, same trust boundary as the other
+# readers — rc=1, no embed extracted from the forged comment.
+ROWS_EMBED_SPOOF=$(printf '[%s]' "$(comment_row "attacker" CONTRIBUTOR "$BODY_SIMPLE")")
+result=$(run_with_stub "$(gh_stub_rows "$ROWS_EMBED_SPOOF")" bash -c '
+  source "'"$LIB"'"
+  out=$(pr::coderails_eval_embed_for_head 42 "deadbeef")
+  echo "rc=$?"
+  echo "out=$out"
+')
+check "coderails_eval_embed_for_head: untrusted comment → rc=1 (spoof rejected)" "rc=1" "$(printf '%s\n' "$result" | grep '^rc=')"
+check "coderails_eval_embed_for_head: untrusted comment → empty embed" "out=" "$(printf '%s\n' "$result" | grep '^out=')"
+
 [[ $fails -eq 0 ]] && { echo PASS; exit 0; } || { echo "FAIL ($fails)"; exit 1; }

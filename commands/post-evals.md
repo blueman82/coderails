@@ -69,8 +69,10 @@ Write a summary body: per-eval pass/fail split by priority (P0/P1), plus any
 `amendments` from the evals.json — `amendments` is freeform narrative text,
 not validated by `post_evals.sh`; include it verbatim for human context. The
 prose summary itself is deliberately not grammar-gated: the JSON's structural
-guarantees (checks 1-7 in `post_evals::validate_structure`) are what the merge
-gate relies on, not the wording of this comment body. Prepend the marker,
+guarantees (checks 1-10 in `post_evals::validate_structure` at post time, and
+`post_evals::smoke_verify`'s gate-time re-execution of every scripted eval at
+merge) are what the merge gate relies on, not the wording of this comment body.
+Prepend the marker,
 append the full `evals.json` as a fenced JSON code block, so the posted
 comment begins with the marker line and ends with the complete artifact —
 this is the embed a tier-review daemon extracts and judges (never

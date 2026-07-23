@@ -35,7 +35,12 @@ printf 'jira: null\n' > "$REPO/.claude/workflow.config.yaml"
 # The dedicated "EVAL ARTIFACT GATE" section below overrides
 # MOCK_GH_HEAD_SHA / MOCK_GH_COMMENT_BODY / MOCK_GH_FETCH_FAIL per-call to
 # exercise the eval gate's own branches (no marker, NO-GO, fetch failure, …).
-DEFAULT_MOCK_SHA="cafef00d0000000000000000000000000000feed"
+# Must be a REAL, resolvable commit in $REPO: gate_smoke_verify's
+# smoke_verify runs `git worktree add --detach <tmp> "$sha"` in the payload's
+# cwd, which for every case using this default is $REPO — a fictional hex
+# string would fail worktree add and fail-closed-deny before ever reaching
+# the case's own assertion.
+DEFAULT_MOCK_SHA=$(git -C "$REPO" rev-parse HEAD)
 MOCKGH_DIR="$TMP/mockbin"
 mkdir -p "$MOCKGH_DIR"
 cat > "$MOCKGH_DIR/gh" <<MOCKGH
@@ -83,9 +88,15 @@ case "$args" in
     else
       # Default: auto-satisfy the eval gate for whatever PR number is in the
       # URL (repos/OWNER/REPO/issues/<num>/comments), at the default SHA.
+      # A trailing fenced ```json embed is appended (tier 0, empty .evals, own
+      # head_sha) so gate_smoke_verify's pr::coderails_eval_embed_for_head
+      # extraction and post_evals::smoke_verify's structural checks 1-9 also
+      # pass trivially for every pre-existing case that relies on this default
+      # (they exercise review-pr / eval-artifact / tier-review gate wiring, not
+      # smoke_verify's own tier>=1 re-execution correctness).
       pr_num=$(printf '%s' "$args" | grep -oE '/issues/[0-9]+/comments' | grep -oE '[0-9]+')
       sha="${MOCK_GH_HEAD_SHA:-$DEFAULT_SHA}"
-      printf '<!-- coderails-eval-summary v1 pr=%s head_sha=%s result=GO tier=1 -->' "$pr_num" "$sha" | base64
+      printf '<!-- coderails-eval-summary v1 pr=%s head_sha=%s result=GO tier=1 -->\n```json\n{"tier":0,"tier_justification":"stub","head_sha":"%s","evals":[]}\n```\n' "$pr_num" "$sha" "$sha" | base64
     fi
     ;;
   "api repos/"*"/statuses"*)
@@ -829,7 +840,10 @@ git -C "$REPO_EVAL" commit -q --allow-empty -m init
 mkdir -p "$REPO_EVAL/.claude"
 printf 'jira: null\n' > "$REPO_EVAL/.claude/workflow.config.yaml"
 
-HEAD_SHA="deadbeef0000000000000000000000000000beef"
+# Must resolve as a real commit IN THIS REPO ($REPO_EVAL) — smoke_verify's
+# `git worktree add --detach` runs in the payload's cwd, which for every case
+# below is $REPO_EVAL, not $REPO.
+HEAD_SHA=$(git -C "$REPO_EVAL" rev-parse HEAD)
 
 # `gh` is already mocked globally (top of file). These cases override
 # MOCK_GH_HEAD_SHA / MOCK_GH_COMMENT_BODY / MOCK_GH_FETCH_FAIL per-call to
@@ -867,7 +881,15 @@ case "$out" in
 esac
 
 # ── Case 80: GO eval marker for the head SHA -> NOT denied ──────────────────
-GO_MARKER="<!-- coderails-eval-summary v1 pr=42 head_sha=${HEAD_SHA} result=GO tier=1 -->"
+# The trailing fenced ```json embed (tier 0, empty .evals) is what
+# gate_smoke_verify's pr::coderails_eval_embed_for_head extracts and
+# smoke_verify structurally validates — this case tests the eval-artifact
+# gate's marker parsing, not smoke_verify's own tier>=1 re-execution, so the
+# embed is tier 0/empty regardless of the marker's own claimed tier=1.
+GO_MARKER="<!-- coderails-eval-summary v1 pr=42 head_sha=${HEAD_SHA} result=GO tier=1 -->
+\`\`\`json
+{\"tier\":0,\"tier_justification\":\"stub\",\"head_sha\":\"${HEAD_SHA}\",\"evals\":[]}
+\`\`\`"
 out=$(
   MOCK_GH_HEAD_SHA="$HEAD_SHA" MOCK_GH_COMMENT_BODY="$GO_MARKER" \
   run_eval "$(payload "gh pr merge 42 --squash" "$T_REVIEWED_42" "$REPO_EVAL")"
@@ -875,7 +897,10 @@ out=$(
 check "gh pr merge 42, GO eval marker tier 1 -> allow" ALLOW "$(decision_of "$out")"
 
 # ── Case 81: tier-0 GO marker -> NOT denied ──────────────────────────────────
-GO_TIER0_MARKER="<!-- coderails-eval-summary v1 pr=42 head_sha=${HEAD_SHA} result=GO tier=0 -->"
+GO_TIER0_MARKER="<!-- coderails-eval-summary v1 pr=42 head_sha=${HEAD_SHA} result=GO tier=0 -->
+\`\`\`json
+{\"tier\":0,\"tier_justification\":\"stub\",\"head_sha\":\"${HEAD_SHA}\",\"evals\":[]}
+\`\`\`"
 out=$(
   MOCK_GH_HEAD_SHA="$HEAD_SHA" MOCK_GH_COMMENT_BODY="$GO_TIER0_MARKER" \
   run_eval "$(payload "gh pr merge 42 --squash" "$T_REVIEWED_42" "$REPO_EVAL")"
@@ -883,7 +908,13 @@ out=$(
 check "gh pr merge 42, GO eval marker tier 0 -> allow" ALLOW "$(decision_of "$out")"
 
 # ── Case 82: NO-GO marker with tier N -> deny, message includes the tier ────
-NOGO_MARKER="<!-- coderails-eval-summary v1 pr=42 head_sha=${HEAD_SHA} result=NO-GO tier=2 -->"
+# NO-GO never reaches gate_smoke_verify (the eval-artifact gate denies first
+# on result=NO-GO), so this embed is never exercised — added for consistency
+# with every other marker constant in this file.
+NOGO_MARKER="<!-- coderails-eval-summary v1 pr=42 head_sha=${HEAD_SHA} result=NO-GO tier=2 -->
+\`\`\`json
+{\"tier\":0,\"tier_justification\":\"stub\",\"head_sha\":\"${HEAD_SHA}\",\"evals\":[]}
+\`\`\`"
 out=$(
   MOCK_GH_HEAD_SHA="$HEAD_SHA" MOCK_GH_COMMENT_BODY="$NOGO_MARKER" \
   run_eval "$(payload "gh pr merge 42 --squash" "$T_REVIEWED_42" "$REPO_EVAL")"
@@ -953,7 +984,10 @@ esac
 T_REVIEWED_42_MERGESH=$(mk_transcript \
   "$(mk_skill_line "coderails:push")" \
   "$(mk_skill_line_with_args "pr-review-toolkit:review-pr" "42")")
-NOGO_MARKER_MERGESH="<!-- coderails-eval-summary v1 pr=42 head_sha=${HEAD_SHA} result=NO-GO tier=1 -->"
+NOGO_MARKER_MERGESH="<!-- coderails-eval-summary v1 pr=42 head_sha=${HEAD_SHA} result=NO-GO tier=1 -->
+\`\`\`json
+{\"tier\":0,\"tier_justification\":\"stub\",\"head_sha\":\"${HEAD_SHA}\",\"evals\":[]}
+\`\`\`"
 out=$(
   MOCK_GH_HEAD_SHA="$HEAD_SHA" MOCK_GH_COMMENT_BODY="$NOGO_MARKER_MERGESH" \
   run_eval "$(payload "scripts/merge.sh 42" "$T_REVIEWED_42_MERGESH" "$REPO_EVAL")"
@@ -964,7 +998,10 @@ case "$out" in
   *) printf 'FAIL - merge.sh NO-GO deny reason should include tier (got: %s)\n' "$out"; fails=$((fails + 1)) ;;
 esac
 
-GO_MARKER_MERGESH="<!-- coderails-eval-summary v1 pr=42 head_sha=${HEAD_SHA} result=GO tier=1 -->"
+GO_MARKER_MERGESH="<!-- coderails-eval-summary v1 pr=42 head_sha=${HEAD_SHA} result=GO tier=1 -->
+\`\`\`json
+{\"tier\":0,\"tier_justification\":\"stub\",\"head_sha\":\"${HEAD_SHA}\",\"evals\":[]}
+\`\`\`"
 out=$(
   MOCK_GH_HEAD_SHA="$HEAD_SHA" MOCK_GH_COMMENT_BODY="$GO_MARKER_MERGESH" \
   run_eval "$(payload "scripts/merge.sh 42" "$T_REVIEWED_42_MERGESH" "$REPO_EVAL")"
@@ -1119,11 +1156,20 @@ git -C "$REPO_TIER" commit -q --allow-empty -m init
 mkdir -p "$REPO_TIER/.claude"
 printf 'jira: null\ntier_review:\n  machine_user: %s\n' "$MACHINE_USER" > "$REPO_TIER/.claude/workflow.config.yaml"
 
-TIER_HEAD_SHA="feedface0000000000000000000000000000dead"
+# Must resolve as a real commit IN THIS REPO ($REPO_TIER) — smoke_verify's
+# `git worktree add --detach` runs in the payload's cwd, which for every case
+# below is $REPO_TIER, not $REPO or $REPO_EVAL.
+TIER_HEAD_SHA=$(git -C "$REPO_TIER" rev-parse HEAD)
 T_TIER_REVIEWED_42=$(mk_transcript \
   "$(mk_skill_line "coderails:push")" \
   "$(mk_skill_line_with_args "pr-review-toolkit:review-pr" "42")")
-TIER0_GO_MARKER="<!-- coderails-eval-summary v1 pr=42 head_sha=${TIER_HEAD_SHA} result=GO tier=0 -->"
+# Trailing fenced ```json embed (tier 0, empty .evals) so gate_smoke_verify
+# passes through to gate_tier_review_status, which is what this section
+# actually exercises.
+TIER0_GO_MARKER="<!-- coderails-eval-summary v1 pr=42 head_sha=${TIER_HEAD_SHA} result=GO tier=0 -->
+\`\`\`json
+{\"tier\":0,\"tier_justification\":\"stub\",\"head_sha\":\"${TIER_HEAD_SHA}\",\"evals\":[]}
+\`\`\`"
 
 # Status descriptions now always carry a tier=N token (tier-gate-runner posts
 # it on every verdict, per PR A). The gate must require verdict=legitimate AND
@@ -1188,7 +1234,12 @@ check "tier-0 PR, tier-review statuses fetch fails -> deny (fail-closed)" DENY "
 # The headline regression lock: the gate now runs at EVERY tier, not just
 # tier=0. Before the hoist this was "tier-review gate inactive, allow" — a
 # tier=1 PR with no tier-review status merged unimpeded. It must now deny.
-TIER1_GO_MARKER="<!-- coderails-eval-summary v1 pr=42 head_sha=${TIER_HEAD_SHA} result=GO tier=1 -->"
+# tier=1 claim but embed is still tier 0/empty-evals — this section tests
+# gate_tier_review_status, not smoke_verify's tier>=1 re-execution path.
+TIER1_GO_MARKER="<!-- coderails-eval-summary v1 pr=42 head_sha=${TIER_HEAD_SHA} result=GO tier=1 -->
+\`\`\`json
+{\"tier\":0,\"tier_justification\":\"stub\",\"head_sha\":\"${TIER_HEAD_SHA}\",\"evals\":[]}
+\`\`\`"
 out=$(
   MOCK_GH_HEAD_SHA="$TIER_HEAD_SHA" MOCK_GH_COMMENT_BODY="$TIER1_GO_MARKER" MOCK_TR_STATUSES_JSON="[]" \
   run_eval "$(payload "gh pr merge 42 --squash" "$T_TIER_REVIEWED_42" "$REPO_TIER")"

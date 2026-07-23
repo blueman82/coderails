@@ -1402,4 +1402,204 @@ check "validate_smoke_execution: jq unavailable → exit 1 (must not fail open)"
 [[ "$stderr_out" == *"jq"* ]]
 check "validate_smoke_execution: jq unavailable → stderr names jq" 0 $?
 
+# ═══ smoke_verify: merge-time binding re-execution ══════════════════════════
+# THE ACCEPTANCE TEST THAT MATTERS. Before this gate existed, an artifact
+# carrying a hand-written smoke object of ALLOWED shape whose cmd names a
+# script that never existed passed the merge path at rc=0 (merge.sh/
+# enforce_pr_workflow.sh only parse the posted marker's result=GO text — they
+# never re-run anything). smoke_verify closes that: it checks out the
+# TRUSTED head SHA into a detached worktree and re-executes every tier>=1
+# scripted eval's cmd/negative_control THERE, judging only what it observes.
+#
+# Fixtures are a real throwaway git repo (not a stub) so the worktree-add and
+# re-execution are genuinely exercised, matching this file's existing
+# freeze-before-build convention (real repos, not mocked git).
+SV_REPO="$TMP/sv_repo"
+mkdir -p "$SV_REPO"
+(
+  cd "$SV_REPO" || exit 1
+  git init -q -b main
+  git config user.email t@t; git config user.name t
+  printf '#!/bin/bash\necho "real check ran"\nexit 1\n' > real_check.sh
+  printf '#!/bin/bash\necho "real control ran"\nexit 1\n' > real_control.sh
+  chmod +x real_check.sh real_control.sh
+  git add -A; git commit -qm "honest scripts committed"
+) >/dev/null 2>&1
+SV_SHA=$(git -C "$SV_REPO" rev-parse HEAD)
+
+# (SV1) THE FABRICATION: cmd names a script that was NEVER COMMITTED to the
+# repo at SV_SHA — hand-typed smoke of allowed shape ({"cmd_exit":1,
+# "negative_control_exit":1}) for a script that doesn't exist in that tree.
+# Before smoke_verify, this passed the merge path (marker said result=GO).
+FIX_SV_FABRICATED="$TMP/sv_fabricated.json"
+jq -n --arg sha "$SV_SHA" '{
+  tier: 1, tier_justification: "1 work-unit", head_sha: $sha,
+  evals: [ {id:"e1", priority:"P0", mode:"scripted", status:"pass",
+            cmd:"bash never_committed.sh", negative_control:"bash real_control.sh",
+            evidence:"log", smoke: {"cmd_exit":1,"negative_control_exit":1,"cmd_output":"","negative_control_output":""}} ]
+}' > "$FIX_SV_FABRICATED"
+stderr_out=$(cd "$SV_REPO" && post_evals::smoke_verify "$FIX_SV_FABRICATED" "$SV_SHA" 2>&1)
+sv_fabricated_rc=$?
+check "smoke_verify: BEFORE/AFTER acceptance — fabricated script at real head SHA → exit 1 (refused)" 1 $sv_fabricated_rc
+[[ "$stderr_out" == *"e1"* ]]
+check "smoke_verify: fabricated script → stderr names the eval" 0 $?
+# No leaked worktree on the refusal path.
+leaked=$(git -C "$SV_REPO" worktree list --porcelain | grep -c '^worktree ' || true)
+check "smoke_verify: refusal path leaves exactly the primary worktree (cleanup ran)" 1 "$leaked"
+
+# (SV2) Honest artifact: both scripts are real and committed at SV_SHA, both
+# observed failing for a content reason. Must be ACCEPTED.
+FIX_SV_HONEST="$TMP/sv_honest.json"
+jq -n --arg sha "$SV_SHA" '{
+  tier: 1, tier_justification: "1 work-unit", head_sha: $sha,
+  evals: [ {id:"e1", priority:"P0", mode:"scripted", status:"pass",
+            cmd:"bash real_check.sh", negative_control:"bash real_control.sh",
+            evidence:"log", smoke: {"cmd_exit":1,"negative_control_exit":1,"cmd_output":"","negative_control_output":""}} ]
+}' > "$FIX_SV_HONEST"
+stderr_out=$(cd "$SV_REPO" && post_evals::smoke_verify "$FIX_SV_HONEST" "$SV_SHA" 2>&1)
+check "smoke_verify: honest artifact, real scripts, real head SHA → exit 0 (accepted)" 0 $?
+leaked=$(git -C "$SV_REPO" worktree list --porcelain | grep -c '^worktree ' || true)
+check "smoke_verify: accept path leaves exactly the primary worktree (cleanup ran)" 1 "$leaked"
+
+# (SV3) A negative_control that REALLY exits 0 in the worktree (vacuous),
+# whatever the typed smoke claims → refused. Reuses the same observed-not-
+# recorded doctrine as check 10, now at the gate boundary.
+printf '#!/bin/bash\nexit 0\n' > "$SV_REPO/always_passes.sh"
+git -C "$SV_REPO" add -A >/dev/null; git -C "$SV_REPO" commit -qm "add passing script" >/dev/null
+SV_SHA2=$(git -C "$SV_REPO" rev-parse HEAD)
+FIX_SV_VACUOUS="$TMP/sv_vacuous.json"
+jq -n --arg sha "$SV_SHA2" '{
+  tier: 1, tier_justification: "1 work-unit", head_sha: $sha,
+  evals: [ {id:"e1", priority:"P0", mode:"scripted", status:"pass",
+            cmd:"bash real_check.sh", negative_control:"bash always_passes.sh",
+            evidence:"log", smoke: {"cmd_exit":1,"negative_control_exit":1,"cmd_output":"","negative_control_output":""}} ]
+}' > "$FIX_SV_VACUOUS"
+stderr_out=$(cd "$SV_REPO" && post_evals::smoke_verify "$FIX_SV_VACUOUS" "$SV_SHA2" 2>&1)
+check "smoke_verify: negative_control really exits 0 at the gate → exit 1" 1 $?
+[[ "$stderr_out" == *"negative_control"* ]]
+check "smoke_verify: vacuous control at gate → stderr names negative_control" 0 $?
+
+# (SV4) NO surface exemption: a scripted eval carrying surface "deployed" is
+# still re-executed. `surface` is agent-written and unenforced, so exempting on
+# it was an attacker-writable bypass — a fabricated scripted cmd + surface:
+# deployed dodged re-execution entirely. Here the deployed eval's cmd names
+# something unrunnable, so re-execution observes an environmental failure and
+# the artifact is REFUSED even though a sibling P0 is honest. (The gate keys on
+# `mode`, not `surface`: a scripted eval always carries a runnable cmd.)
+FIX_SV_DEPLOYED="$TMP/sv_deployed.json"
+jq -n --arg sha "$SV_SHA2" '{
+  tier: 1, tier_justification: "1 work-unit", head_sha: $sha,
+  evals: [
+    {id:"e1", priority:"P0", mode:"scripted", status:"pass",
+     cmd:"bash real_check.sh", negative_control:"bash real_control.sh",
+     evidence:"log", smoke: {"cmd_exit":1,"negative_control_exit":1,"cmd_output":"","negative_control_output":""}},
+    {id:"e2", priority:"P1", mode:"scripted", status:"pass", surface:"deployed",
+     cmd:"curl https://example.invalid/never-runs-locally", negative_control:"bash never_committed_either.sh",
+     evidence:"log", smoke: {"cmd_exit":1,"negative_control_exit":1,"cmd_output":"","negative_control_output":""}}
+  ]
+}' > "$FIX_SV_DEPLOYED"
+(cd "$SV_REPO" && post_evals::smoke_verify "$FIX_SV_DEPLOYED" "$SV_SHA2" 2>/dev/null)
+check "smoke_verify: deployed-surface scripted eval is RE-EXECUTED, fabricated cmd refused → exit 1" 1 $?
+
+# (SV4-bis) The smoking-gun regression: the fabricated deployed eval as the
+# SOLE P0, with no honest sibling to carry the load. This is the exact bypass
+# both reviewers proved — a scripted eval naming a script that never existed,
+# smoke object hand-written pass-shaped, hidden behind surface:deployed. It
+# MUST be refused. Before the fix this returned 0 (empty ids -> return 0).
+FIX_SV_DEPLOYED_SOLE="$TMP/sv_deployed_sole.json"
+jq -n --arg sha "$SV_SHA2" '{
+  tier: 1, tier_justification: "exploit: fabricated cmd hidden behind surface=deployed", head_sha: $sha,
+  evals: [
+    {id:"e1", priority:"P0", mode:"scripted", status:"pass", surface:"deployed",
+     cmd:"bash /tmp/coderails-never-existed-sole-xyz.sh", negative_control:"false",
+     evidence:"fabricated", smoke: {"cmd_exit":1,"negative_control_exit":1,"cmd_output":"","negative_control_output":""}}
+  ]
+}' > "$FIX_SV_DEPLOYED_SOLE"
+(cd "$SV_REPO" && post_evals::smoke_verify "$FIX_SV_DEPLOYED_SOLE" "$SV_SHA2" 2>/dev/null)
+check "smoke_verify: fabricated scripted cmd behind surface=deployed as SOLE P0 → REFUSED (exit 1) [the bypass]" 1 $?
+
+# (SV4-ter) The empty-id bypass: `id` is agent-written, and the re-execution
+# loop must NOT key on it. A SOLE scripted eval with id:"" and a fabricated cmd
+# must be refused — before the index-iteration fix this returned 0 (empty id ->
+# empty ids list -> return 0, re-executing nothing).
+FIX_SV_EMPTYID="$TMP/sv_emptyid.json"
+jq -n --arg sha "$SV_SHA2" '{
+  tier: 1, tier_justification: "exploit: fabricated cmd hidden behind empty id", head_sha: $sha,
+  evals: [
+    {id:"", priority:"P0", mode:"scripted", status:"pass", surface:"artifact-path",
+     cmd:"bash /tmp/coderails-never-existed-emptyid-xyz.sh", negative_control:"false",
+     evidence:"fabricated", smoke: {"cmd_exit":1,"negative_control_exit":1,"cmd_output":"","negative_control_output":""}}
+  ]
+}' > "$FIX_SV_EMPTYID"
+(cd "$SV_REPO" && post_evals::smoke_verify "$FIX_SV_EMPTYID" "$SV_SHA2" 2>/dev/null)
+check "smoke_verify: fabricated scripted cmd with id:\"\" → REFUSED (exit 1) [empty-id bypass]" 1 $?
+
+# (SV4-quater) The duplicate-id variant: two scripted evals sharing one id, the
+# second fabricated. id-based lookup would run the first twice and skip the
+# second; index iteration runs BOTH, so the fabricated one is caught.
+FIX_SV_DUPID="$TMP/sv_dupid.json"
+jq -n --arg sha "$SV_SHA2" '{
+  tier: 1, tier_justification: "exploit: fabricated cmd sharing an id with an honest eval", head_sha: $sha,
+  evals: [
+    {id:"dup", priority:"P0", mode:"scripted", status:"pass", surface:"artifact-path",
+     cmd:"bash real_check.sh", negative_control:"bash real_control.sh",
+     evidence:"honest", smoke: {"cmd_exit":1,"negative_control_exit":1,"cmd_output":"","negative_control_output":""}},
+    {id:"dup", priority:"P0", mode:"scripted", status:"pass", surface:"artifact-path",
+     cmd:"bash /tmp/coderails-never-existed-dup-xyz.sh", negative_control:"false",
+     evidence:"fabricated", smoke: {"cmd_exit":1,"negative_control_exit":1,"cmd_output":"","negative_control_output":""}}
+  ]
+}' > "$FIX_SV_DUPID"
+(cd "$SV_REPO" && post_evals::smoke_verify "$FIX_SV_DUPID" "$SV_SHA2" 2>/dev/null)
+check "smoke_verify: fabricated cmd sharing an id with an honest eval → REFUSED (exit 1) [duplicate-id bypass]" 1 $?
+
+# (SV5) Fail closed, named reason: jq missing.
+stderr_out=$(PATH="$EMPTY_BIN"; cd "$SV_REPO" && post_evals::smoke_verify "$FIX_SV_HONEST" "$SV_SHA" 2>&1)
+check "smoke_verify: jq unavailable → exit 1 (must not fail open)" 1 $?
+[[ "$stderr_out" == *"jq"* ]]
+check "smoke_verify: jq unavailable → stderr names jq" 0 $?
+
+# (SV5-bis) _run_recorded fail-closed on a cd failure. When the worktree cwd
+# vanishes between `git worktree add` and the re-execution loop (race / external
+# rm), `cd` fails. That must map to environmental (127), NOT rc=1: rc=1 is a
+# legitimate content-failure exit that _is_environmental_rc doesn't catch, so on
+# the negative_control leg (rc=1 reads as a pass) a cd-failure would fail OPEN.
+cd_out=$(post_evals::_run_recorded "echo should-not-run" 10 "$TMP/nonexistent-cwd-xyz")
+cd_rc="${cd_out%%:*}"
+check_str "_run_recorded: cd into a missing cwd → rc 127 (environmental, not a false content-fail)" "127" "$cd_rc"
+post_evals::_is_environmental_rc "$cd_rc"
+check "_run_recorded: the cd-failure rc is classified environmental (no fail-open)" 0 $?
+# And a real cwd with a genuine content failure still records rc 1, not 127.
+cd_out_real=$(post_evals::_run_recorded "exit 1" 10 "$TMP")
+check_str "_run_recorded: real cwd, genuine exit 1 → rc 1 (not mis-mapped to 127)" "1" "${cd_out_real%%:*}"
+
+# (SV6) Fail closed, named reason: an unresolvable head_sha. It is absent from
+# the local object store, so the fetch guard (added for the merge-from-any-
+# checkout case) tries `git fetch origin <sha>`, which fails for a bogus SHA
+# with no such remote object — fail-closed at the fetch step. (Before the fetch
+# guard this reached `git worktree add` directly; either way it denies. The
+# assertion accepts either "fetch" or "worktree" so it tracks the fail-closed
+# BEHAVIOUR, not which of the two guard steps caught it.)
+BOGUS_SHA="0000000000000000000000000000000000dead"
+FIX_SV_BOGUS_SHA="$TMP/sv_bogus_sha.json"
+jq -n --arg sha "$BOGUS_SHA" '{
+  tier: 1, tier_justification: "1 work-unit", head_sha: $sha,
+  evals: [ {id:"e1", priority:"P0", mode:"scripted", status:"pass",
+            cmd:"bash real_check.sh", negative_control:"bash real_control.sh",
+            evidence:"log", smoke: {"cmd_exit":1,"negative_control_exit":1,"cmd_output":"","negative_control_output":""}} ]
+}' > "$FIX_SV_BOGUS_SHA"
+stderr_out=$(cd "$SV_REPO" && post_evals::smoke_verify "$FIX_SV_BOGUS_SHA" "$BOGUS_SHA" 2>&1)
+check "smoke_verify: unresolvable head SHA → exit 1 (fails closed)" 1 $?
+[[ "$stderr_out" == *"fetch"* || "$stderr_out" == *"worktree"* ]]
+check "smoke_verify: unresolvable head SHA → stderr names the fetch/worktree failure" 0 $?
+leaked=$(git -C "$SV_REPO" worktree list --porcelain | grep -c '^worktree ' || true)
+check "smoke_verify: worktree-add failure path leaves exactly the primary worktree" 1 "$leaked"
+
+# (SV7) Fail closed, named reason: unparseable embed.
+BAD_EMBED="$TMP/sv_bad_embed.json"
+printf 'NOT JSON {{{' > "$BAD_EMBED"
+stderr_out=$(cd "$SV_REPO" && post_evals::smoke_verify "$BAD_EMBED" "$SV_SHA" 2>&1)
+check "smoke_verify: unparseable embed → exit 1" 1 $?
+[[ "$stderr_out" == *"JSON"* || "$stderr_out" == *"json"* ]]
+check "smoke_verify: unparseable embed → stderr names the reason" 0 $?
+
 [[ $fails -eq 0 ]] && { echo PASS; exit 0; } || { echo "FAIL ($fails)"; exit 1; }
