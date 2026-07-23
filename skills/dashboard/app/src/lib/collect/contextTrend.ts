@@ -2,11 +2,20 @@ import { createReadStream, readdirSync, statSync, existsSync } from "node:fs";
 import { createInterface } from "node:readline";
 import { join, basename } from "node:path";
 
-// Operationalises docs/TOKEN-REDUCTION-AUDIT.md: orchestrator-only cache-read
-// tokens per assistant turn, per agentic-loop session, across the 2026-07-17
-// token-reduction cutover. The audit's verdict is INDETERMINATE — this
-// collector reports the raw per-session series plus per-side summary stats and
-// leaves the judgement to the reader; it never computes a headline saving.
+// Measures orchestrator-only cache-read tokens per assistant turn, per
+// agentic-loop session, across the 2026-07-17 token-reduction cutover (the
+// measures shipped as PRs #228/#229/#230 — see CUTOVER_MS below).
+//
+// Whether those measures reduced token burn is NOT established: the before and
+// after groups differ in size and composition, and no controlled comparison was
+// run. So this collector deliberately reports only the raw per-session series
+// plus per-side summary stats (median, quartiles, n) and leaves the judgement
+// to the reader. It never computes a headline saving, and the panel that renders
+// it never displays one.
+//
+// (An earlier version of this comment cited docs/TOKEN-REDUCTION-AUDIT.md as the
+// source of that verdict. No such file has ever existed on any ref, so each
+// constant below now carries its own in-repo justification instead.)
 
 export interface TrendSession {
   sessionId: string;
