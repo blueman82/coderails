@@ -24,7 +24,11 @@ function emptySnapshot(overrides: Partial<DashboardSnapshot> = {}): DashboardSna
     runs: [],
     queue: [],
     builds: [],
-    contextTrend: null,
+    // Matches the real EMPTY_SNAPSHOT: contextTrend is undefined (loading) until
+    // its own SSE frame arrives, so the Context Trend panel renders "loading…"
+    // by default rather than adding a stray unavailable/chart to unrelated
+    // System Vitals assertions.
+    contextTrend: undefined,
     ...overrides,
   };
 }
