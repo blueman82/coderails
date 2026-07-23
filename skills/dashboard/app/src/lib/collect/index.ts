@@ -332,6 +332,7 @@ export function createAggregator(deps: AggregatorDeps): Aggregator {
       if (gatesTimer) clearInterval(gatesTimer);
       if (gatesDebounceTimer) clearTimeout(gatesDebounceTimer);
       if (activityDebounceTimer) clearTimeout(activityDebounceTimer);
+      if (contextTrendDebounceTimer) clearTimeout(contextTrendDebounceTimer);
       unsubscribeRunOutput?.();
       unsubscribeRunOutput = undefined;
       listeners.clear();
