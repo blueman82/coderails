@@ -161,18 +161,17 @@ describe("ContextTrendPanel — chart structure", () => {
 });
 
 describe("ContextTrendPanel — degraded states", () => {
-  it("renders unavailable when the collector had no source", () => {
+  it("renders unavailable when the collector resolved but had no source (null)", () => {
     const { container } = renderPanel(null);
     expect(container.textContent).toContain("unavailable: no local usage source");
     expect(container.querySelectorAll('[data-testid="trend-dot"]').length).toBe(0);
   });
 
-  it("renders loading, not unavailable, before the first activity frame (health: [])", () => {
-    // The initial SSE snapshot ships EMPTY_SNAPSHOT (health:[], contextTrend:
-    // null) before the async activity collect resolves. A null contextTrend at
-    // that point is a loading state — rendering "unavailable" here is the flash
-    // PR #283 removed for the KPI tiles.
-    const { container } = renderPanel(null, []);
+  it("renders loading, not unavailable, before its own frame arrives (undefined)", () => {
+    // contextTrend collects on its own (slow) SSE frame. Until that frame
+    // arrives the field is undefined — a loading state, NOT a failure. Showing
+    // "unavailable" here is the flash PR #283 removed for the KPI tiles.
+    const { container } = renderPanel(undefined);
     expect(container.textContent).toContain("loading");
     expect(container.textContent).not.toContain("unavailable");
     expect(container.querySelectorAll(".hud-kpi-loading").length).toBe(1);
