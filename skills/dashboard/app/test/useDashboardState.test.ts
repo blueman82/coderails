@@ -68,7 +68,6 @@ describe("mergeDashboardEvent — activity", () => {
       health: [{ key: "hooksFired" as const, value: "3" }],
       queue: [],
       builds: [{ schemaVersion: 1, hash: "a".repeat(64), state: "running" as const }],
-      contextTrend: null,
     };
     const next = mergeDashboardEvent(base, { event: "activity", data: activity }, 2000);
     expect(next.snapshot.sessions).toEqual(activity.sessions);
