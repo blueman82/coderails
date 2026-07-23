@@ -64,7 +64,7 @@ const EMPTY_SNAPSHOT: DashboardSnapshot = {
   runs: [],
   queue: [],
   builds: [],
-  contextTrend: null,
+  contextTrend: undefined,
 };
 
 export const initialDashboardState: DashboardState = {
