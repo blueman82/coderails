@@ -1,6 +1,7 @@
 "use client";
 
 import { Sparkline } from "./Sparkline";
+import { ContextTrendPanel } from "./ContextTrendPanel";
 import { useDashboardContext } from "@/components/DashboardProvider";
 import { liveLoops, stalledLoops, formatRelativeAge, useNow } from "@/hooks/useDashboardState";
 import type { HealthTile } from "@/lib/collect/health";
