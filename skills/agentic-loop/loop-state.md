@@ -78,7 +78,11 @@ prior file's `status` was `"complete"`.
 ## Lifecycle
 
 Enforced by the `loop_state_guard` Stop hook (presence + ownership) — it blocks any stop where an
-active loop has no session-owned file.
+active loop has no session-owned file. When `progress.json` is absent, this is a nag-once grace, not
+an unconditional block: the guard blocks once per session + invocation count, then stands down for
+the rest of that count, so a skill loaded only to read this file isn't blocked forever — a new
+invocation count re-arms the block. Session-mismatch and stale-complete-after-rearm carry no such
+grace and block every time.
 
 - **Stub-first (Phase -2):** `status: "initialising"`, stamped with this `session_id`.
 - **Enrich at Phase 0:** record the envelope verbatim in `authorising_prompt_raw`; `status: "in-progress"`.
