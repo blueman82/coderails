@@ -257,7 +257,7 @@ describe("GET /api/events — activity on fs change", () => {
     // enumerated exactly here (rather than spot-checked) so a future slice
     // drop — trail removal, or dropping any other key — is caught on the
     // wire instead of degrading silently on the client.
-    expect(Object.keys(activity).sort()).toEqual(["builds", "contextTrend", "health", "loops", "queue", "sessions"].sort());
+    expect(Object.keys(activity).sort()).toEqual(["builds", "health", "loops", "queue", "sessions"].sort());
     expect(Array.isArray(activity.sessions)).toBe(true);
     // Regression: health used to be computed alongside sessions/loops but
     // dropped before the emit, so tiles never left "unavailable" on the
