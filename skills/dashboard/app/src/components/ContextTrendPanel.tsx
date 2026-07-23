@@ -4,15 +4,18 @@ import { useRef, useState } from "react";
 import { useDashboardContext } from "@/components/DashboardProvider";
 import type { ContextTrendSummary, TrendSession } from "@/lib/collect/contextTrend";
 
-// Renders docs/TOKEN-REDUCTION-AUDIT.md as a live panel: one dot per
+// Renders the contextTrend collector's series as a live panel: one dot per
 // agentic-loop session (x = start date, y = orchestrator cache-read tokens
 // per assistant turn), the 2026-07-17 cutover drawn as an annotation the
 // series runs straight through — no gap, no color change, no causal claim.
-// The audit's verdict is indeterminate and the panel is built to keep it
-// that way: per-side medians and n are shown side by side, never a single
-// "saved X%" headline, and the reserved caveat color carries the two facts
-// that bound the reading (a small after-side n; row 1 — the measure
-// documented as the largest saving — inert since it shipped).
+//
+// Whether the cutover's measures reduced token burn is not established (see
+// the collector's header), and the panel is built to keep it that way:
+// per-side medians and n are shown side by side, never a single "saved X%"
+// headline, and the reserved caveat color carries the two facts that bound
+// the reading (a small after-side n; row 1 — the measure expected to save the
+// most — inert since it shipped, per PR #273 which removed its gate after it
+// fired zero times).
 
 // Below this many sessions a side's median is drawn in the caveat color and
 // said in words to be uncallable. Judgement constant, not statistics: the
