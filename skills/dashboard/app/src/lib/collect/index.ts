@@ -141,6 +141,7 @@ export function createAggregator(deps: AggregatorDeps): Aggregator {
   let gatesTimer: ReturnType<typeof setInterval> | undefined;
   let gatesDebounceTimer: ReturnType<typeof setTimeout> | undefined;
   let activityDebounceTimer: ReturnType<typeof setTimeout> | undefined;
+  let contextTrendDebounceTimer: ReturnType<typeof setTimeout> | undefined;
   let unsubscribeRunOutput: (() => void) | undefined;
 
   let snapshot: Snapshot = {
