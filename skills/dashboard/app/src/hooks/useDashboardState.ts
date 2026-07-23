@@ -23,11 +23,12 @@ export interface DashboardSnapshot {
   runs: RunRecord[];
   queue: QueueEntry[];
   builds: BuildEntry[];
+  contextTrend: ContextTrendSummary | null;
 }
 
 export type ActivitySlice = Pick<
   DashboardSnapshot,
-  "sessions" | "loops" | "health" | "queue" | "builds"
+  "sessions" | "loops" | "health" | "queue" | "builds" | "contextTrend"
 >;
 
 export type DashboardEvent =
