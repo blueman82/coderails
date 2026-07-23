@@ -7,6 +7,7 @@ import { collectHealth, type HealthTile } from "./health";
 import { collectPrGates, type PrGate, type PrGateError } from "./prGates";
 import { collectQueue, type QueueEntry } from "./queue";
 import { collectSessions, collectLoops, type SessionInfo, type LoopInfo } from "./sessions";
+import { collectContextTrend, type ContextTrendSummary } from "./contextTrend";
 
 export interface Snapshot {
   sessions: SessionInfo[];
@@ -16,6 +17,9 @@ export interface Snapshot {
   runs: RunRecord[];
   queue: QueueEntry[];
   builds: BuildEntry[];
+  // null = source unreadable (no ~/.claude/projects), same degrade stance as
+  // the usage tiles — distinct from a real summary with zero sessions.
+  contextTrend: ContextTrendSummary | null;
 }
 
 export interface AggregatorDeps {
