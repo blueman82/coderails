@@ -309,8 +309,12 @@ export function createAggregator(deps: AggregatorDeps): Aggregator {
       // pattern as refreshGates below; the snapshot fills in once it resolves
       // and "activity" listeners are notified same as any later refresh.
       void refreshActivity();
+      // contextTrend is much slower (streams every transcript) so it runs on
+      // its own frame, fired here without blocking start() and independent of
+      // refreshActivity — the KPI tiles must not wait on it.
+      void refreshContextTrend();
 
-      watchDir(deps.projectsDir, scheduleActivityRefresh);
+      watchDir(deps.projectsDir, () => { scheduleActivityRefresh(); scheduleContextTrendRefresh(); });
       watchDir(deps.loopsDir, scheduleActivityRefresh);
       if (deps.runsDir) watchDir(deps.runsDir, () => { refreshRuns(); scheduleGatesRefresh(); });
       if (deps.queueDir) watchDir(deps.queueDir, scheduleActivityRefresh);
