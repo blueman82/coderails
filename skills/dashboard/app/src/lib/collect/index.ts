@@ -192,7 +192,11 @@ export function createAggregator(deps: AggregatorDeps): Aggregator {
     );
     const queue = deps.queueDir ? safeCall("queue", () => collectQueue(deps.queueDir!, queueLimit), []) : [];
     const builds = deps.buildsDir ? safeCall("builds", () => collectBuilds(deps.buildsDir!), []) : [];
-    return { sessions, loops, health, queue, builds };
+    // contextTrend streams every transcript under projectsDir. A shared cache
+    // (explicit or module-scope) makes every later refresh a stat() sweep
+    // plus a re-parse of only the files that actually changed.
+    const contextTrend = await safeCallAsync("contextTrend", () => collectContextTrend(deps.projectsDir, { cache: deps.contextTrendCache }), null);
+    return { sessions, loops, health, queue, builds, contextTrend };
   }
 
   async function refreshActivity(): Promise<void> {
