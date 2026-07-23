@@ -51,7 +51,7 @@ export interface AggregatorDeps {
   contextTrendCache?: import("./contextTrend").ContextTrendFileCache;
 }
 
-export type AggregatorEventName = "runs" | "gates" | "activity" | "run-output";
+export type AggregatorEventName = "runs" | "gates" | "activity" | "context-trend" | "run-output";
 
 // Maps each event name to the real payload type emitted alongside it, so a
 // call site that emits/handles the wrong shape for a given name is a compile
