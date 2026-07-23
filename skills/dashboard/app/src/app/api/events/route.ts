@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { loadConfig, type DashboardConfig } from "../../../lib/config";
 import { createAggregator, type Aggregator, type AggregatorDeps } from "../../../lib/collect";
 import { isLocalOrigin } from "../../../lib/requestGuard";
+import type { ContextTrendFileCache } from "../../../lib/collect/contextTrend";
 
 const DEFAULT_PROJECTS_DIR = join(homedir(), ".claude", "projects");
 const DEFAULT_LOOPS_DIR = join(homedir(), ".claude", "agentic-loop");
