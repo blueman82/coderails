@@ -60,7 +60,12 @@ export type AggregatorEventName = "runs" | "gates" | "activity" | "context-trend
 export interface AggregatorEventPayloadMap {
   runs: RunRecord[];
   gates: (PrGate | PrGateError)[];
-  activity: Pick<Snapshot, "sessions" | "loops" | "health" | "queue" | "builds" | "contextTrend">;
+  activity: Pick<Snapshot, "sessions" | "loops" | "health" | "queue" | "builds">;
+  // contextTrend collects on its own (slow) frame, decoupled from activity so
+  // it never gates the KPI tiles. null = unreadable source; a summary = data.
+  // The "loading" state is the absence of this frame (Snapshot.contextTrend
+  // starts undefined), so this payload is never undefined.
+  "context-trend": ContextTrendSummary | null;
   "run-output": RunOutputEvent;
 }
 
