@@ -1269,6 +1269,23 @@ check "_run_recorded: excerpt retains the TAIL verdict (test-runner shape)" 0 $?
 [[ ${#head_tail_out} -lt 700 ]]
 check "_run_recorded: excerpt stays bounded on long output" 0 $?
 
+# (X7-ter) The alarm must bound WALL CLOCK even when the command forks. The
+# old exec-based wrapper delivered SIGALRM only to the process perl became:
+# a grandchild (the sleep inside a script) was never signalled, kept the
+# inherited stdout pipe open, and the command substitution blocked until the
+# orphan exited — observed 30s elapsed for a 10s cap, correct rc, broken
+# bound. `bash script.sh` is exactly the shape real eval cmds take, and
+# check 10 put this wrapper on the merge hot path. The fix kills the child's
+# process group. Short cap via the wrapper's timeout argument so this test
+# costs ~2s, not 10.
+printf '#!/bin/bash\nsleep 30\n' > "$SR_DIR/hang_forking.sh"
+_hang_start=$SECONDS
+hang_out=$(post_evals::_run_recorded "bash $SR_DIR/hang_forking.sh" 2)
+_hang_elapsed=$((SECONDS - _hang_start))
+check_str "_run_recorded: forking hang → rc 142 (timeout sentinel preserved)" "142" "${hang_out%%:*}"
+[[ $_hang_elapsed -lt 10 ]]
+check "_run_recorded: forking hang bounded by the cap (elapsed ${_hang_elapsed}s, want <10s)" 0 $?
+
 # (X8) Same fail-open lesson: no jq, no run.
 stderr_out=$(PATH="$EMPTY_BIN"; post_evals::smoke_run "$FIX_SR_HONEST" 2>&1)
 check "smoke_run: jq unavailable → exit 1 (must not fail open)" 1 $?
@@ -1366,6 +1383,28 @@ check "validate_structure: scripted eval with empty cmd → exit 1 (fail closed)
 [[ "$stderr_out" == *"e1"* ]]
 check "validate_structure: empty cmd → stderr names eval" 0 $?
 
+# (G5-bis) A WHITESPACE-ONLY cmd is the empty-cmd bypass one step subtler:
+# `bash -c "   "` is a no-op exiting 0, which is non-environmental, and cmd
+# polarity is deliberately ungated — so without trimming, a fabricated
+# artifact whose P0 check does literally nothing walks through. Trim first;
+# blank means empty means refused.
+FIX_G_WS_CMD="$TMP/g_ws_cmd.json"
+mk_gate "$FIX_G_WS_CMD" "   " "bash $G_DIR/g_control.sh"
+stderr_out=$(post_evals::validate_structure "$FIX_G_WS_CMD" 42 "$SHA" 2>&1)
+check "validate_structure: whitespace-only cmd → exit 1 (blank is empty, fail closed)" 1 $?
+[[ "$stderr_out" == *"e1"* && "$stderr_out" == *"cmd"* ]]
+check "validate_structure: whitespace-only cmd → stderr names eval + cmd" 0 $?
+
+# (G5-ter) Same for the negative_control: a whitespace-only control happens to
+# be caught today as "exited 0", but that is polarity luck, not the empty
+# guard the header promises. It must be refused AS BLANK, before execution.
+FIX_G_WS_NC="$TMP/g_ws_nc.json"
+mk_gate "$FIX_G_WS_NC" "bash $G_DIR/g_check.sh" "  	 "
+stderr_out=$(post_evals::validate_structure "$FIX_G_WS_NC" 42 "$SHA" 2>&1)
+check "validate_structure: whitespace-only negative_control → exit 1" 1 $?
+[[ "$stderr_out" == *"e1"* && "$stderr_out" == *"negative_control"* && "$stderr_out" == *"empty"* ]]
+check "validate_structure: whitespace-only negative_control → stderr says empty, not exit-0" 0 $?
+
 # (G6) Direct-call scope limits: agent-run evals and tier 0 have nothing to
 # execute — exit 0, mirroring check 9's boundaries.
 FIX_G_AGENTRUN="$TMP/g_agentrun.json"
@@ -1395,6 +1434,31 @@ jq -n '{
 }' > "$FIX_G_LOOP"
 post_evals::validate_structure "$FIX_G_LOOP" "" "" "loop"
 check "validate_structure: loop scope skips gate-time re-execution → exit 0" 0 $?
+
+# (G9) Duplicate eval ids must not under-execute. An id-based jq lookup
+# emits EVERY match, so two evals sharing an id had their cmds joined into
+# one compound script whose last line's exit code masked an earlier 127 —
+# an unresolvable cmd in the first duplicate was ACCEPTED. Iterating by
+# array index executes each scripted eval exactly once, id collisions or
+# not. Direct call: in the full chain check 9 happens to refuse duplicate
+# ids first (fail-closed, as malformed smoke), so the chain never exposed
+# this — the function must hold on its own.
+FIX_G_DUP="$TMP/g_dup.json"
+jq -n --arg sha "$SHA" --arg bad "bash $G_DIR/never_created.sh" \
+      --arg good "bash $G_DIR/g_check.sh" --arg nc "bash $G_DIR/g_control.sh" \
+      --argjson smoke "$SMOKE_OK" '{
+  tier: 1, tier_justification: "1 work-unit", head_sha: $sha,
+  evals: [
+    {id:"e1", priority:"P0", mode:"scripted", status:"pending",
+     cmd:$bad, negative_control:$nc, evidence:"log", smoke:$smoke},
+    {id:"e1", priority:"P0", mode:"scripted", status:"pending",
+     cmd:$good, negative_control:$nc, evidence:"log", smoke:$smoke}
+  ]
+}' > "$FIX_G_DUP"
+stderr_out=$(post_evals::validate_smoke_execution "$FIX_G_DUP" 2>&1)
+check "validate_smoke_execution: duplicate ids, unresolvable cmd in first → exit 1" 1 $?
+[[ "$stderr_out" == *"did not execute at the gate"* ]]
+check "validate_smoke_execution: duplicate ids → stderr names the gate-time reason" 0 $?
 
 # (G8) Same fail-open lesson as checks 8/9: no jq, no verdict.
 stderr_out=$(PATH="$EMPTY_BIN"; post_evals::validate_smoke_execution "$FIX_G_HONEST" 2>&1)

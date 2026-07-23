@@ -306,20 +306,32 @@ post_evals::validate_smoke() {
 # 1`, control 1) for a script that was only ever intended to exist. Check 9
 # passes that shape; this check runs the command, observes 127, and refuses.
 #
-# WHAT REFUSES:
-#   - empty cmd (a scripted eval with nothing to execute is unresolvable by
-#     definition — fail closed)
-#   - cmd or negative_control observed environmental (126/127/142/>=128)
-#   - negative_control observed exiting 0 (vacuous at the gate, whatever the
-#     typed smoke claims)
+# WHAT REFUSES — two distinct mechanisms:
+#   1. Blank-before-execution (trim-then-check, never reaches the runner):
+#      - empty or whitespace-only cmd (a scripted eval with nothing to
+#        execute; `bash -c "   "` would exit 0 and slip past the ungated
+#        cmd polarity, so this must be caught before execution)
+#      - empty or whitespace-only negative_control (same reasoning)
+#   2. Observed at execution:
+#      - cmd or negative_control environmental (126/127/142/>=128)
+#      - negative_control exiting 0 (vacuous at the gate, whatever the
+#        typed smoke claims)
 # WHAT DOES NOT: cmd exiting 0 or non-zero for a content reason — polarity
 # on cmd is the build-dependent part and stays ungated, exactly as check 9
 # permits it on the recorded value.
 #
 # EXECUTION CONTEXT: commands run in the caller's cwd through the same 10s
-# alarm wrapper smoke_run uses — the post-evals command invokes both from the
-# repo root, so a cmd that resolved for smoke-run resolves identically here.
-# Worst case added latency is 20s per scripted eval (two capped runs).
+# alarm wrapper smoke_run uses. Nothing here cd's: agreement with the
+# freeze-time smoke-run is a property of the documented flow (the post-evals
+# command runs validate-structure from the repo root, and the skill has
+# smoke-run invoked the same way), not something this function enforces. An
+# invocation from a different cwd can only fail closed — a relative cmd that
+# no longer resolves is a false refusal, never a false pass. Added latency
+# is bounded at ~20s per scripted eval (two capped runs): _run_recorded
+# kills the child's whole process group at the cap, so ordinary forking
+# commands (bash scripts, test runners) are bounded too — see its header
+# for the one honest exception (a descendant that detaches into its own
+# session escapes the group kill and can hold the pipe open longer).
 #
 # SAFETY: this executes author-supplied command strings from a JSON file.
 # That adds no privilege the author lacks — the same principal that wrote
@@ -352,21 +364,39 @@ post_evals::validate_smoke_execution() {
 
     # Only scripted evals carry commands — agent-run evals are graded by a
     # verifier subagent. Same boundary as check 9.
-    local ids
-    ids=$(jq -r '[.evals[]? | select(.mode == "scripted") | .id] | .[]' "$path")
-    [[ -z "$ids" ]] && return 0
+    #
+    # BY ARRAY INDEX, not by id: an id-based `select(.id == $id)` emits
+    # EVERY match, so two evals sharing an id would have their cmds joined
+    # into one compound script — and the last line's exit code masks an
+    # earlier 127. Index iteration executes each scripted eval exactly once
+    # regardless of id collisions; the id appears only in messages. (Checks
+    # 9 and the writer-side tools still look up by id — a duplicate id fails
+    # closed there as malformed smoke, so the chain refuses either way, but
+    # this function must hold on its own.)
+    local idxs
+    idxs=$(jq -r '.evals // [] | to_entries | map(select(.value.mode == "scripted")) | .[].key' "$path")
+    [[ -z "$idxs" ]] && return 0
 
-    local id
-    while IFS= read -r id; do
-        [[ -z "$id" ]] && continue
+    local idx
+    while IFS= read -r idx; do
+        [[ -z "$idx" ]] && continue
 
+        local id
+        id=$(jq -r --argjson i "$idx" '.evals[$i].id // "<unnamed>"' "$path")
+
+        # Trim-then-check, same idiom as check 2 on tier_justification: a
+        # whitespace-only cmd is `bash -c "   "` — a no-op exiting 0, which
+        # is non-environmental, and cmd polarity is deliberately ungated, so
+        # without the trim a check that does literally nothing would be
+        # accepted. Blank means empty means refused.
         local cmd nc
-        cmd=$(jq -r --arg id "$id" '.evals[] | select(.id == $id) | .cmd // ""' "$path")
-        nc=$(jq -r --arg id "$id" '.evals[] | select(.id == $id) | .negative_control // ""' "$path")
+        cmd=$(jq -r --argjson i "$idx" '.evals[$i].cmd // "" | gsub("^\\s+|\\s+$"; "")' "$path")
+        nc=$(jq -r --argjson i "$idx" '.evals[$i].negative_control // "" | gsub("^\\s+|\\s+$"; "")' "$path")
 
         # Nothing to execute is not compliance — fail closed. (Check 3
-        # already refuses an empty negative_control at tier>=1; the empty-cmd
-        # case had no owner before this check.)
+        # already refuses an absent/empty-string negative_control at tier>=1;
+        # this additionally owns the whitespace-only case and the empty cmd,
+        # which had no owner before this check.)
         if [[ -z "$cmd" ]]; then
             printf 'post_evals: scripted eval %s has empty cmd — nothing can execute at the gate.\n' "$id" >&2
             return 1
@@ -396,7 +426,7 @@ post_evals::validate_smoke_execution() {
             printf 'post_evals: eval %s negative_control did not execute at the gate (exit %s: command not found / crashed / timed out) — non-zero, but for an environmental reason, so it tested nothing. Output: %s\n' "$id" "$rc" "$out" >&2
             return 1
         fi
-    done <<< "$ids"
+    done <<< "$idxs"
 
     return 0
 }
@@ -603,9 +633,9 @@ post_evals::smoke_verify() {
 # refusing is validate_smoke's job. Keeping the two apart means the recorded
 # evidence is the same whether or not anyone later gates on it.
 #
-# Commands run through the same 10s alarm wrapper _run_formula uses, so a
-# hanging command cannot hang the freeze: 127 (not found), 142 (timeout) and
-# signal deaths fall out of the real run instead of being typed in by hand.
+# Commands run through _run_recorded's 10s group-killing cap, so a hanging
+# command cannot hang the freeze: 127 (not found), 142 (timeout) and signal
+# deaths fall out of the real run instead of being typed in by hand.
 post_evals::smoke_run() {
     local path="$1"
 
@@ -673,7 +703,7 @@ post_evals::smoke_run() {
 }
 
 # post_evals::_run_recorded <command> [timeout_secs] [cwd]
-# Runs <command> under the same alarm wrapper _run_formula uses and echoes
+# Runs <command> under a wall-clock cap (default 10s) and echoes
 # "<exit_code>:<output excerpt>". stdout and stderr are merged — the tell for a
 # broken instrument is usually on stderr (a module-resolution error, a
 # not-found message), so dropping it would discard the evidence a human needs.
@@ -682,6 +712,28 @@ post_evals::smoke_run() {
 # instead of the caller's own working directory — needed by smoke_verify,
 # which must execute inside its detached worktree, not wherever the merge
 # gate happens to be invoked from.
+#
+# THE CAP KILLS THE PROCESS GROUP, not just the direct child. The earlier
+# exec-based idiom (`perl -e 'alarm shift; exec ...'`) delivered SIGALRM only
+# to the process perl became: a grandchild — the sleep inside `bash hang.sh`,
+# a test runner's worker — was never signalled, got reparented to init, and
+# kept the inherited stdout pipe open, so the caller's command substitution
+# blocked until the orphan exited. Correct exit code (142), broken latency
+# bound (observed 30s for a 10s cap). Since check 10 runs this on the merge
+# hot path, the bound is load-bearing: the child is made its own process
+# group leader (setpgrp) and the alarm handler KILLs the negative PGID, which
+# takes the grandchildren and closes the pipe. Timeout still reports 142,
+# the documented sentinel, regardless of the KILL. Honest caveat: a
+# descendant that detaches into its own session (a daemonizing server)
+# escapes the group kill and can still hold the pipe open — the cap bounds
+# every ordinary forking shape, not a deliberate daemon.
+#
+# _run_formula keeps the old exec idiom deliberately: it redirects the
+# command's output to /dev/null, so an orphan cannot hold its pipe open and
+# the single-process alarm is a sufficient bound there.
+#
+# [timeout_seconds] exists for the test suite (a real 10s stall per run is
+# too slow to assert on); production callers pass nothing and get 10.
 #
 # The excerpt keeps BOTH ENDS, not just the tail, because the diagnostic line
 # sits at a different end depending on the failure. Measured against real
@@ -693,6 +745,19 @@ post_evals::smoke_run() {
 # also bounds the artifact against a chatty runner.
 post_evals::_run_recorded() {
     local command_text="$1" timeout_secs="${2:-10}" cwd="${3:-}" out rc
+    local -r _pg_kill_perl='
+        my $t = shift; my $cmd = shift;
+        my $pid = fork();
+        exit 127 unless defined $pid;
+        if ($pid == 0) { setpgrp(0, 0); exec "/bin/bash", "-c", $cmd; exit 127; }
+        my $timed_out = 0;
+        local $SIG{ALRM} = sub { $timed_out = 1; kill "KILL", -$pid; };
+        alarm $t;
+        waitpid($pid, 0);
+        alarm 0;
+        exit 142 if $timed_out;
+        exit(($? & 127) ? 128 + ($? & 127) : $? >> 8);
+    '
     if [[ -n "$cwd" ]]; then
         # A cd failure here (worktree vanished between `git worktree add` and
         # this call — a race or external rm) must NOT collapse to rc=1: rc=1 is
@@ -703,9 +768,9 @@ post_evals::_run_recorded() {
         # "never executed" — the honest classification for a command that never
         # ran. The `|| { echo ...; exit 127; }` runs inside the subshell.
         out=$(cd "$cwd" 2>/dev/null || { printf 'cd-failed: %s' "$cwd"; exit 127; }
-              perl -e 'alarm shift; exec "/bin/bash", "-c", shift' "$timeout_secs" "$command_text" 2>&1)
+              perl -e "$_pg_kill_perl" "$timeout_secs" "$command_text" 2>&1)
     else
-        out=$(perl -e 'alarm shift; exec "/bin/bash", "-c", shift' "$timeout_secs" "$command_text" 2>&1)
+        out=$(perl -e "$_pg_kill_perl" "$timeout_secs" "$command_text" 2>&1)
     fi
     rc=$?
     out=$(printf '%s' "$out" | tr '\n' ' ')
