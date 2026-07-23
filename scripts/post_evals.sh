@@ -231,6 +231,19 @@ post_evals::validate_smoke() {
     # so there is nothing to smoke-test.
     [[ "$tier" == "0" ]] && return 0
 
+    # Shape-guard .evals, same fail-closed guard as smoke_verify and
+    # validate_smoke_execution. A non-array .evals makes the `.evals[]?`
+    # extraction below yield no ids, and the "no ids → return 0" line then
+    # passes without smoke-checking anything. On the live validate_structure
+    # chain check 7 refuses a scalar/string first (no P0 found), but an object
+    # .evals passes check 7 (`.evals[]?` iterates object values) and reaches
+    # here — so this guard is load-bearing for the object shape. Guard on TYPE,
+    # never on empty ids (a valid agent-run-only array legitimately has none).
+    if ! jq -e '(.evals | type) == "array"' "$path" >/dev/null 2>&1; then
+        printf 'post_evals: validate_smoke: .evals is not a JSON array (malformed or absent) — refusing.\n' >&2
+        return 1
+    fi
+
     # Only scripted evals carry commands. agent-run evals are graded by a
     # verifier subagent and have no cmd to execute.
     local ids
@@ -361,6 +374,23 @@ post_evals::validate_smoke_execution() {
     tier=$(jq -r '.tier // ""' "$path")
     # Tier 0 is the exemption path: no evals to execute.
     [[ "$tier" == "0" ]] && return 0
+
+    # Shape-guard .evals, same fail-closed guard as smoke_verify (the merge
+    # gate). A non-array .evals makes the extraction below yield no indices and
+    # the "no indices → return 0" line then passes without executing anything.
+    # Check 7 (tier>=1 requires >=1 P0 eval) backstops the SCALAR and STRING
+    # shapes on the live validate_structure chain — its `.evals[]?` finds no P0
+    # in a scalar/string, so check 7 refuses those first. But it does NOT
+    # backstop the OBJECT shape: `.evals[]?` iterates an object's VALUES, so an
+    # object carrying a P0 passes check 7 and reaches here — this guard is what
+    # actually refuses it. So the guard is load-bearing for the object case and
+    # belt-and-braces only for scalar/string; either way it holds on its own.
+    # Guard on TYPE, never on empty indices (a valid agent-run-only array
+    # legitimately has none).
+    if ! jq -e '(.evals | type) == "array"' "$path" >/dev/null 2>&1; then
+        printf 'post_evals: validate_smoke_execution: .evals is not a JSON array (malformed or absent) — refusing.\n' >&2
+        return 1
+    fi
 
     # Only scripted evals carry commands — agent-run evals are graded by a
     # verifier subagent. Same boundary as check 9.
@@ -517,6 +547,21 @@ post_evals::smoke_verify() {
     tier=$(jq -r '.tier // ""' "$path")
     # Tier 0 is the exemption path: no evals to re-execute.
     [[ "$tier" == "0" ]] && return 0
+
+    # Shape-guard .evals before trusting the index extraction below. A .evals
+    # that is not a JSON array — a scalar, string, or object — makes the
+    # `to_entries` extraction either jq-error to stderr with empty stdout (a
+    # scalar/string) or walk object keys as if they were array indices (an
+    # object). In the empty-stdout case the "no indices → return 0" line below
+    # then passes the merge gate WITHOUT re-executing anything: the exact
+    # fail-open this gate exists to prevent, one shape it did not guard. Refuse
+    # (fail closed) unless .evals is an array. Guard on TYPE, never on empty
+    # indices: a valid array whose only evals are agent-run legitimately yields
+    # no scripted indices and must still be accepted by the return below.
+    if ! jq -e '(.evals | type) == "array"' "$path" >/dev/null 2>&1; then
+        printf 'post_evals: smoke_verify: .evals is not a JSON array (malformed or absent) — refusing to trust an eval artifact whose evals cannot be enumerated for re-execution.\n' >&2
+        return 1
+    fi
 
     # Iterate scripted evals by ARRAY INDEX, never by extracting a list of
     # `id`s. `id` is agent-written and unvalidated at this gate, so keying the

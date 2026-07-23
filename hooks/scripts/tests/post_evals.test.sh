@@ -1002,6 +1002,20 @@ mk_smoke "$FIX_SMOKE_PASSING" 0 1
 post_evals::validate_smoke "$FIX_SMOKE_PASSING"
 check "validate_smoke: cmd exit 0 at freeze → exit 0 (permitted)" 0 $?
 
+# (S1-quater) smoke_verify_rejects_non_array_evals — the SCALAR shape is the
+# discriminating one for validate_smoke's guard: `.evals[]?` on a scalar yields
+# no ids, so before the guard the "no ids → return 0" line passed. A valid
+# array whose only eval is agent-run legitimately yields no ids and must still
+# pass (guard keys on type, not empty ids).
+SMK_SCALAR="$TMP/smoke_scalar.json"
+printf '{"tier":1,"evals":42}' > "$SMK_SCALAR"
+post_evals::validate_smoke "$SMK_SCALAR" >/dev/null 2>&1
+check "validate_smoke: scalar .evals=42 → exit 1 (fails closed)" 1 $?
+SMK_AGENTRUN="$TMP/smoke_agentrun.json"
+printf '{"tier":1,"evals":[{"id":"A","mode":"agent-run","priority":"P0"}]}' > "$SMK_AGENTRUN"
+post_evals::validate_smoke "$SMK_AGENTRUN" >/dev/null 2>&1
+check "validate_smoke: agent-run-only array → exit 0 (guard keys on type, not empty ids)" 0 $?
+
 # (S2) INSTANCES 2 & 3 — the negative control exited 0. Instance 2: the control
 # wrote outside git, so validate_freeze SKIPPED and returned 0, which read as
 # compliance. Instance 3: the "removed" jq was still on PATH, so the control
@@ -1665,5 +1679,56 @@ stderr_out=$(cd "$SV_REPO" && post_evals::smoke_verify "$BAD_EMBED" "$SV_SHA" 2>
 check "smoke_verify: unparseable embed → exit 1" 1 $?
 [[ "$stderr_out" == *"JSON"* || "$stderr_out" == *"json"* ]]
 check "smoke_verify: unparseable embed → stderr names the reason" 0 $?
+
+# (SV8) smoke_verify_rejects_non_array_evals — a .evals field that is not a
+# JSON array must fail closed. Before the shape guard, a scalar or string
+# .evals made the index-extraction jq error to stderr with empty stdout, so
+# the "no indices" early-return passed the merge gate without re-executing
+# anything. Each non-array shape must now be refused (exit 1); a valid array
+# whose only eval is agent-run legitimately has nothing to re-execute and must
+# still be accepted (exit 0) — the guard keys on type, never on empty indices.
+SV_SCALAR="$TMP/sv_scalar.json"
+printf '{"tier":1,"evals":42}' > "$SV_SCALAR"
+(cd "$SV_REPO" && post_evals::smoke_verify "$SV_SCALAR" "$SV_SHA" >/dev/null 2>&1)
+check "smoke_verify: scalar .evals=42 → exit 1 (fails closed)" 1 $?
+
+SV_STRING="$TMP/sv_string.json"
+printf '{"tier":1,"evals":"notanarray"}' > "$SV_STRING"
+(cd "$SV_REPO" && post_evals::smoke_verify "$SV_STRING" "$SV_SHA" >/dev/null 2>&1)
+check "smoke_verify: string .evals → exit 1 (fails closed)" 1 $?
+
+SV_OBJECT="$TMP/sv_object.json"
+printf '{"tier":1,"evals":{"E1":{"mode":"scripted"}}}' > "$SV_OBJECT"
+(cd "$SV_REPO" && post_evals::smoke_verify "$SV_OBJECT" "$SV_SHA" >/dev/null 2>&1)
+check "smoke_verify: object .evals → exit 1 (fails closed)" 1 $?
+
+SV_AGENTRUN="$TMP/sv_agentrun.json"
+printf '{"tier":1,"evals":[{"id":"A","mode":"agent-run","priority":"P0"}]}' > "$SV_AGENTRUN"
+(cd "$SV_REPO" && post_evals::smoke_verify "$SV_AGENTRUN" "$SV_SHA" >/dev/null 2>&1)
+check "smoke_verify: valid array of only agent-run evals → exit 0 (guard keys on type, not empty indices)" 0 $?
+
+SV_ABSENT="$TMP/sv_absent.json"
+printf '{"tier":1}' > "$SV_ABSENT"
+(cd "$SV_REPO" && post_evals::smoke_verify "$SV_ABSENT" "$SV_SHA" >/dev/null 2>&1)
+check "smoke_verify: absent .evals at tier>=1 → exit 1 (fails closed)" 1 $?
+
+# (SV9) Reach-path: the embed extractor pr::coderails_eval_embed_for_head only
+# validates the marker line, never the embed's JSON shape (its own docstring),
+# so a forged comment carrying `evals: 42` is handed to smoke_verify intact.
+# This composes the real extraction awk with the real smoke_verify to prove the
+# malformed embed is REFUSED at the end of the chain merge.sh actually runs —
+# not just when smoke_verify is called with a clean fixture. The extractor is
+# sourced from git-common.sh; feed it a forged comment body and confirm the
+# awk-extracted embed (a bare `42`) drives smoke_verify to exit 1.
+SV_FORGED_BODY=$'<!-- coderails-eval-summary v1 pr=1 head_sha='"$SV_SHA"$' result=GO tier=1 -->\n```json\n{"tier":1,"evals":42}\n```'
+SV_EXTRACTED=$(printf '%s\n' "$SV_FORGED_BODY" | awk '
+    /^```json[[:space:]]*$/ { infence=1; next }
+    /^```[[:space:]]*$/ { if (infence) exit; next }
+    infence { print }')
+SV_REACH="$TMP/sv_reach.json"
+printf '%s' "$SV_EXTRACTED" > "$SV_REACH"
+check_str "reach-path: extractor preserves the malformed embed verbatim (only marker validated)" '{"tier":1,"evals":42}' "$SV_EXTRACTED"
+(cd "$SV_REPO" && post_evals::smoke_verify "$SV_REACH" "$SV_SHA" >/dev/null 2>&1)
+check "reach-path: a forged malformed embed reaching smoke_verify → exit 1 (fails closed at the end of the merge chain)" 1 $?
 
 [[ $fails -eq 0 ]] && { echo PASS; exit 0; } || { echo "FAIL ($fails)"; exit 1; }
