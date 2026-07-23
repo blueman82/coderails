@@ -137,7 +137,8 @@ export function ContextTrendPanel() {
     </div>
   );
 
-  // contextTrend collects on its own SSE frame (it streams every transcript,
+  // contextTrend collects on its own SSE frame (it streams every coderails
+  // orchestrator transcript,
   // far slower than the activity slice — see collect/index.ts). Its three
   // states map directly to what to render:
   //   undefined = that frame hasn't arrived yet → loading
