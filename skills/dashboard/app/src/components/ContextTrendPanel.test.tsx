@@ -173,6 +173,17 @@ describe("ContextTrendPanel — degraded states", () => {
     expect(container.querySelectorAll('[data-testid="trend-dot"]').length).toBe(0);
   });
 
+  it("renders loading, not unavailable, before the first activity frame (health: [])", () => {
+    // The initial SSE snapshot ships EMPTY_SNAPSHOT (health:[], contextTrend:
+    // null) before the async activity collect resolves. A null contextTrend at
+    // that point is a loading state — rendering "unavailable" here is the flash
+    // PR #283 removed for the KPI tiles.
+    const { container } = renderPanel(null, []);
+    expect(container.textContent).toContain("loading");
+    expect(container.textContent).not.toContain("unavailable");
+    expect(container.querySelectorAll(".hud-kpi-loading").length).toBe(1);
+  });
+
   it("renders an empty state when the window holds no cohort sessions", () => {
     const { container } = renderPanel(
       summary({
