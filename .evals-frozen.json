@@ -1,0 +1,63 @@
+{
+  "schema_version": 1,
+  "scope": "pr",
+  "task_ref": "fix/smoke-verify-array-guard",
+  "tier": 1,
+  "tier_justification": "Tier 1: one work-unit (a shape guard added to post_evals::smoke_verify), no irreversible/outward surface (no publish, deploy, migration, data deletion, external send). Above tier 0 because no existing test covers the malformed-.evals shape at the smoke_verify gate — the goal state is not already covered by an existing verify-criterion.",
+  "frozen_at": "2026-07-23T00:30:00Z",
+  "frozen_sha": "2bd1bce",
+  "evals": [
+    {
+      "id": "E1",
+      "priority": "P0",
+      "mode": "scripted",
+      "surface": "artifact-path",
+      "assert": "smoke-verify REFUSES (nonzero exit) an artifact whose .evals is a scalar number, where the fix makes it fail-closed.",
+      "cmd": "cd /Users/harrison/Github/coderails/.worktrees/smoke-verify-guard && f=$(mktemp) && printf '%s' '{\"tier\":1,\"evals\":42}' > \"$f\" && ! bash scripts/post_evals.sh smoke-verify \"$f\" 2bd1bce >/dev/null 2>&1 && echo REFUSED-CORRECTLY; rc=$?; unlink \"$f\"; exit $rc",
+      "negative_control": "cd /Users/harrison/Github/coderails/.worktrees/smoke-verify-guard && f=$(mktemp) && printf '%s' '{\"tier\":1,\"evals\":42}' > \"$f\" && git show origin/main:scripts/post_evals.sh > /tmp/pe-main.sh && bash /tmp/pe-main.sh smoke-verify \"$f\" 2bd1bce >/dev/null 2>&1 && echo MAIN-ACCEPTS-IT-BUG; rc=$?; unlink \"$f\"; exit $rc",
+      "expected": "cmd exits 0 (fixed code refuses the scalar). negative_control: current origin/main ACCEPTS the malformed artifact (exits 0, printing MAIN-ACCEPTS-IT-BUG) — proving the fail-open is real and the check discriminates fix-from-main.",
+      "status": "pending",
+      "evidence": ""
+    },
+    {
+      "id": "E2",
+      "priority": "P0",
+      "mode": "scripted",
+      "surface": "artifact-path",
+      "assert": "smoke-verify REFUSES an artifact whose .evals is a string, and an object — all non-array shapes fail closed.",
+      "cmd": "cd /Users/harrison/Github/coderails/.worktrees/smoke-verify-guard && for body in '{\"tier\":1,\"evals\":\"notarray\"}' '{\"tier\":1,\"evals\":{\"E1\":{\"mode\":\"scripted\"}}}'; do f=$(mktemp); printf '%s' \"$body\" > \"$f\"; if bash scripts/post_evals.sh smoke-verify \"$f\" 2bd1bce >/dev/null 2>&1; then unlink \"$f\"; echo \"LEAK: $body accepted\"; exit 1; fi; unlink \"$f\"; done; echo ALL-NON-ARRAY-REFUSED",
+      "negative_control": "cd /Users/harrison/Github/coderails/.worktrees/smoke-verify-guard && f=$(mktemp) && printf '%s' '{\"tier\":1,\"evals\":\"notarray\"}' > \"$f\" && git show origin/main:scripts/post_evals.sh > /tmp/pe-main2.sh && bash /tmp/pe-main2.sh smoke-verify \"$f\" 2bd1bce >/dev/null 2>&1 && echo MAIN-LEAKS-STRING; rc=$?; unlink \"$f\"; exit $rc",
+      "expected": "cmd exits 0 (fixed code refuses both string and object). negative_control: main accepts the string shape (exits 0), confirming the leak class.",
+      "status": "pending",
+      "evidence": ""
+    },
+    {
+      "id": "E3",
+      "priority": "P0",
+      "mode": "scripted",
+      "surface": "artifact-path",
+      "assert": "REGRESSION GUARD: a VALID array containing only agent-run (non-scripted) evals still PASSES (empty indices is legitimately nothing to re-execute — must NOT be refused).",
+      "cmd": "cd /Users/harrison/Github/coderails/.worktrees/smoke-verify-guard && f=$(mktemp) && printf '%s' '{\"tier\":1,\"evals\":[{\"id\":\"E1\",\"mode\":\"agent-run\",\"priority\":\"P0\"}]}' > \"$f\" && bash scripts/post_evals.sh smoke-verify \"$f\" 2bd1bce >/dev/null 2>&1 && echo AGENT-RUN-ONLY-PASSES; rc=$?; unlink \"$f\"; exit $rc",
+      "negative_control": "cd /Users/harrison/Github/coderails/.worktrees/smoke-verify-guard && f=$(mktemp) && printf '%s' '{\"tier\":1,\"evals\":\"notarray\"}' > \"$f\" && bash scripts/post_evals.sh smoke-verify \"$f\" 2bd1bce >/dev/null 2>&1 && echo SHOULD-NOT-PASS; rc=$?; unlink \"$f\"; exit $rc",
+      "expected": "cmd exits 0 (agent-run-only array is accepted — the fix does NOT over-tighten onto empty-indices). negative_control: the malformed string is refused by the FIXED code, so this control exits nonzero (fails), proving the check distinguishes valid-empty from malformed.",
+      "status": "pending",
+      "evidence": ""
+    },
+    {
+      "id": "E4",
+      "priority": "P1",
+      "mode": "scripted",
+      "surface": "merged-state",
+      "assert": "A regression test exists in the test suite covering the malformed-.evals shape at smoke_verify, and the full post_evals test suite passes.",
+      "cmd": "cd /Users/harrison/Github/coderails/.worktrees/smoke-verify-guard && grep -rlE 'evals.*(42|notarray|non-array|not an array|array)' hooks/scripts/tests/post_evals.test.sh >/dev/null && bash hooks/scripts/tests/post_evals.test.sh >/dev/null 2>&1 && echo SUITE-GREEN-WITH-REGRESSION-TEST",
+      "negative_control": "cd /Users/harrison/Github/coderails/.worktrees/smoke-verify-guard && grep -q '__no_such_marker_should_ever_match__' hooks/scripts/tests/post_evals.test.sh",
+      "expected": "cmd exits 0 (a malformed-.evals regression test is present AND the suite is green). negative_control exits nonzero (the bogus marker is absent).",
+      "status": "pending",
+      "evidence": ""
+    }
+  ],
+  "amendments": [],
+  "result": null,
+  "graded_at": null,
+  "head_sha": null
+}
