@@ -162,6 +162,7 @@ export function createAggregator(deps: AggregatorDeps): Aggregator {
   function emit(event: "runs", data: AggregatorEventPayloadMap["runs"]): void;
   function emit(event: "gates", data: AggregatorEventPayloadMap["gates"]): void;
   function emit(event: "activity", data: AggregatorEventPayloadMap["activity"]): void;
+  function emit(event: "context-trend", data: AggregatorEventPayloadMap["context-trend"]): void;
   function emit(event: "run-output", data: AggregatorEventPayloadMap["run-output"]): void;
   function emit(event: AggregatorEventName, data: AggregatorEventPayloadMap[AggregatorEventName]): void {
     for (const listener of listeners) listener(event as never, data as never);
