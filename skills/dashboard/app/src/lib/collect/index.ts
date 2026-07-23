@@ -256,6 +256,11 @@ export function createAggregator(deps: AggregatorDeps): Aggregator {
     activityDebounceTimer = setTimeout(() => void refreshActivity(), activityDebounceMs);
   }
 
+  function scheduleContextTrendRefresh(): void {
+    if (contextTrendDebounceTimer) clearTimeout(contextTrendDebounceTimer);
+    contextTrendDebounceTimer = setTimeout(() => void refreshContextTrend(), activityDebounceMs);
+  }
+
   function scheduleGatesRefresh(): void {
     if (gatesDebounceTimer) clearTimeout(gatesDebounceTimer);
     gatesDebounceTimer = setTimeout(() => void refreshGates(), GATES_RUNS_DEBOUNCE_MS);
