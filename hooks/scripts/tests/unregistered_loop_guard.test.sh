@@ -154,6 +154,23 @@ check "valid-JSON scalar line does not zero the dispatch count" "2" "$n"
 scalar_reason=$( ( . "$GUARD"; ulg_count_dispatch_turns "$scalar_t" >/dev/null; printf '%s' "$ULG_PARSE_REASON" ) )
 check "valid-JSON scalar line is a benign skip -> ULG_PARSE_REASON empty" "" "$scalar_reason"
 
+# An OBJECT of the wrong inner shape aborts stage 2 just as a scalar does — the
+# object guard above is necessary but NOT sufficient. `.message` as a bare
+# string yields "Cannot index string with string \"content\"". Before stage 2's
+# exit code was captured this landed as an empty count, was laundered to 0, and
+# left ULG_PARSE_REASON empty — so a transcript with real dispatches read as a
+# quiet session and the nudge never fired. The count may legitimately be 0 here
+# (the data really is unusable); what must NOT happen is 0 with no attribution.
+mk_bad_shape_transcript() {
+  local out="$TMP/bad_shape_$RANDOM.jsonl"
+  printf '%s\n' '{"type":"assistant","message":{"id":"b1","content":[{"type":"tool_use","name":"Agent","input":{}}]}}' > "$out"
+  printf '%s\n' '{"type":"assistant","message":"oops"}' >> "$out"
+  printf '%s' "$out"
+}
+bad_shape_t=$(mk_bad_shape_transcript)
+bad_shape_reason=$( ( . "$GUARD"; ulg_count_dispatch_turns "$bad_shape_t" >/dev/null; printf '%s' "$ULG_PARSE_REASON" ) )
+check "wrong-shape object aborting stage 2 is ATTRIBUTED, not silently zeroed" "jq_parse_error" "$bad_shape_reason"
+
 # Order independence: malformed line FIRST, then 2 valid lines (the existing
 # fixture above only puts the malformed line last). Stage 1 parses per-line,
 # so a bad line's position must not matter — this must still recover count 2
