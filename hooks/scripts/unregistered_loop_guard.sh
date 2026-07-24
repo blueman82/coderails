@@ -88,8 +88,20 @@ ulg_count_dispatch_turns() {
   local n
   n=0
   if [ -n "$tolerant" ]; then
+    # Objects only. Stage 1's `fromjson? // empty` drops lines that are not
+    # valid JSON, but it KEEPS lines that are valid JSON scalars (a bare string
+    # or number). Indexing a scalar with .type aborts this whole slurp
+    # ("Cannot index string with string \"type\""), and because stderr is
+    # discarded below, that abort is silent: n comes back empty, the trailing
+    # coercion turns it into 0, and ULG_PARSE_REASON is left EMPTY — so the
+    # caller reads "no dispatch turns" rather than "the count is untrustworthy",
+    # defeating the total-loss/partial-skip distinction this function exists to
+    # draw. Same guard, same reason, as dc_extract_last_text and dc_file_count
+    # in lib/discipline_common.sh (PR #290); this is the third member of that
+    # family.
     n=$(printf '%s' "$tolerant" | jq -s -r '
       [ .[]?
+        | select(type == "object")
         | select(.type == "assistant")
         | select(.message.content[]? | select(.type == "tool_use" and .name == "Agent"))
         | .message.id ]

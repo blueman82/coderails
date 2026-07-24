@@ -132,6 +132,28 @@ all_malformed_reason=$( ( . "$GUARD"; ulg_count_dispatch_turns "$all_malformed_t
 check "benign-skip and total-loss reasons are distinct (discriminator)" "ok" \
   "$([ "$parse_reason" != "$all_malformed_reason" ] && echo ok || echo "FAIL: both are '$parse_reason'")"
 
+# A line that is VALID JSON but a bare SCALAR is a different hazard from the
+# malformed lines above: stage 1's `fromjson? // empty` DROPS unparseable text
+# but KEEPS a scalar, which then reaches `.type` and aborts the whole stage-2
+# slurp. With stderr discarded that abort is silent — the count collapses to 0
+# while ULG_PARSE_REASON stays EMPTY, so the caller reads "quiet session"
+# rather than "untrustworthy count", defeating the very distinction the two
+# tests above establish. Third member of the family PR #290 guarded in
+# lib/discipline_common.sh.
+mk_scalar_transcript() {
+  local out="$TMP/scalar_$RANDOM.jsonl"
+  printf '%s\n' '{"type":"assistant","message":{"id":"m1","content":[{"type":"tool_use","name":"Agent","input":{}}]}}' > "$out"
+  printf '%s\n' '"a bare json string"' >> "$out"
+  printf '%s\n' '42' >> "$out"
+  printf '%s\n' '{"type":"assistant","message":{"id":"m2","content":[{"type":"tool_use","name":"Agent","input":{}}]}}' >> "$out"
+  printf '%s' "$out"
+}
+scalar_t=$(mk_scalar_transcript)
+n=$( ( . "$GUARD"; ulg_count_dispatch_turns "$scalar_t" ) )
+check "valid-JSON scalar line does not zero the dispatch count" "2" "$n"
+scalar_reason=$( ( . "$GUARD"; ulg_count_dispatch_turns "$scalar_t" >/dev/null; printf '%s' "$ULG_PARSE_REASON" ) )
+check "valid-JSON scalar line is a benign skip -> ULG_PARSE_REASON empty" "" "$scalar_reason"
+
 # Order independence: malformed line FIRST, then 2 valid lines (the existing
 # fixture above only puts the malformed line last). Stage 1 parses per-line,
 # so a bad line's position must not matter — this must still recover count 2
