@@ -270,9 +270,11 @@ result=$(dc_file_count "$T")
 check "wrong-shape object (.message a bare string) does not zero the count" "1" "$result"
 
 # --- Test (n): the same wrong-shape-object hazard for dc_extract_last_text --
-# a non-object element inside `.message.content` (here `.message` itself is a
-# bare ARRAY, not an object with a .content key) must not blank the extraction
-# of a later assistant turn's real text. ---
+# `.message` itself is a bare ARRAY (not an object with a .content key), which
+# aborts on `.message.content` before any element-level guard is reached, must
+# not blank the extraction of a later assistant turn's real text. (Test (n2)
+# below covers the DISTINCT hazard this test's old comment claimed to cover: a
+# non-object element INSIDE an otherwise-valid `.message.content` array.) ---
 T=$(mk_transcript \
   '{"type":"assistant","message":{"content":[{"type":"text","text":"REALTEXT"}]}}' \
   '{"type":"assistant","message":["bare"]}')
@@ -288,6 +290,29 @@ T=$(mk_transcript \
   '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Edit","input":{"file_path":"/a.py"}}]}}')
 result=$(dc_file_count "$T")
 check "wrong-shape object on a USER line (is_genuine_user hazard) does not zero the count" "1" "$result"
+
+# --- Test (o2): the content-ELEMENT-shape guard for dc_file_count -- `.message`
+# IS an object here (unlike (m)/(o)), and `.message.content` IS an array, but
+# one ELEMENT of that array is a bare string, not an object. Without the
+# `select(type == "object")` guard on the content element (immediately before
+# indexing `.type`/`.name`), this aborts the slurp identically to (m); with it,
+# the valid Edit element recovers. Verified to discriminate: removing that
+# guard alone (leaving every other guard in place) flips this test to FAIL. ---
+T=$(mk_transcript \
+  '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Edit","input":{"file_path":"/a.py"}},"bare-element"]}}')
+result=$(dc_file_count "$T")
+check "wrong-shape content ELEMENT (bare string in array) does not zero the count" "1" "$result"
+
+# --- Test (n2): the content-ELEMENT-shape guard for dc_extract_last_text --
+# same distinction as (o2): `.message.content` is an array, but one element is
+# a bare string, not an object. This is the hazard test (n)'s comment used to
+# (incorrectly) claim it covered. Verified to discriminate: removing the
+# `select(type == "object")` guard on the content element alone flips this
+# test to FAIL. ---
+T=$(mk_transcript \
+  '{"type":"assistant","message":{"content":["bare-element",{"type":"text","text":"REAL"}]}}')
+result=$(dc_extract_last_text "$T" 50)
+check "wrong-shape content ELEMENT (bare string in array) does not blank the extraction" "REAL" "$result"
 
 # --- Test (p): a shape that defeats the Layer 1 inner guards and genuinely
 # aborts stage 2 -- a tool_use block whose `.input` is a bare STRING (not an
