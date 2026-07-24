@@ -1,0 +1,47 @@
+{
+  "schema_version": 2,
+  "session_id": "4601b8c4-27d9-4460-8960-d61f090ac33a",
+  "created": "2026-07-24T02:20:00Z",
+  "loop_ordinal": "no-record: loop_ordinal = completed_marker after the Phase 13 bump; no agentic-loop was registered for this session (verified absent at /Users/harrison/.claude/agentic-loop/-Users-harrison-Github-coderails-.git/4601b8c4-27d9-4460-8960-d61f090ac33a/), so no completed_marker was ever bumped",
+  "envelope": "no-record: authorising_prompt_raw was never populated at an agentic-loop Phase 0, because this session did not run the agentic-loop skill. This retro/progress backfill was dispatched directly by the team lead as a documentation task for PR #294.",
+  "loop_stop_counts": "no-record: hook-owned field written by loop_stall_guard on a LOOP-STOP declaration; this session made no such declarations",
+  "decisions_absorbed": "no-record: loop-owned array appended at agentic-loop phase boundaries (-1, 2.5, 2.6, 2.8, 5, 6); no phase boundaries occurred in this session",
+  "disposition_record": {
+    "pr294_post_evals_numeric_id_fix": "clean-break (0 violations), diffed against progress.json's disposition field and the merged artifact — but flag the provenance: progress.json's top-level `disposition: \"clean-break\"` was NOT set at a Phase 2.6 boundary (SKILL.md:220 requires it recorded before the first spawn, appended to decisions_absorbed) because no agentic-loop ran this session (verified: no loop dir at /Users/harrison/.claude/agentic-loop/-Users-harrison-Github-coderails-.git/4601b8c4-27d9-4460-8960-d61f090ac33a/). It is an agent's after-the-fact read of the diff, not a pre-spawn declaration — the same category of field progress.json itself marks no-record everywhere else (loop_stop_counts, decisions_absorbed, completed_marker). The diff genuinely supports the label though: `git show 35dabcc60715964a6218ddd9de86b8c3c8f85198 -- scripts/post_evals.sh` is a pure +13-line addition (a type guard inserted before the existing lookup loop), nothing removed, no compat/shim/fallback path, no flag gating old vs new behavior — there is no old code path being retired at all, so 'clean-break, 0 violations' is factually accurate as a description of the shipped diff, just not as a claim that a Phase 2.6 disposition decision was made and then honoured."
+  },
+  "evals": {
+    "result": "no-record: no evals.json exists in this worktree (verified via `find . -maxdepth 1 -iname evals.json` — no match). This PR's verification artifact is proof.json instead, a separate voluntary mechanism (loop-state.md 'Siblings' section) frozen by another agent, not evals.json/task-evals.",
+    "amendments": "no-record: no evals.json exists to amend"
+  },
+  "artifacts": {
+    "pr_294": {
+      "title": "fix(post_evals): close numeric-id fail-open in smoke_run",
+      "url": "https://github.com/blueman82/coderails/pull/294",
+      "branch": "fix/post-evals-numeric-id",
+      "head_sha": "35dabcc60715964a6218ddd9de86b8c3c8f85198",
+      "state": "OPEN",
+      "verifying_check": "Self-executed (not agent-claimed): (1) `bash hooks/scripts/tests/post_evals.test.sh` run in this session, tail output 'PASS'; (2) numeric id (`{\"id\":1,...}`) piped to `./scripts/post_evals.sh smoke-run` exited 1 with stderr 'a scripted eval has a non-string id (schema requires id to be a string) — refusing.'; (3) string id (`{\"id\":\"1\",...}`) piped to the same command exited 0 and wrote real observed evidence `{\"cmd_exit\":0,\"negative_control_exit\":1,...}` to the eval's .smoke field, confirming the honest path still executes and records genuine evidence rather than being merely unblocked.",
+      "self_mergeable": true,
+      "self_mergeable_reason": "Neither changed file (scripts/post_evals.sh, hooks/scripts/tests/post_evals.test.sh) matches TIER_GATE_PATH_DENYLIST, unlike PR #288 and PR #292 in this same session which required the denylist route."
+    },
+    "pr_288": {
+      "title": "notify leak in tests",
+      "url": "https://github.com/blueman82/coderails/pull/288",
+      "state": "MERGED",
+      "merged_at": "2026-07-24T00:31:55Z",
+      "verifying_check": "gh pr view 288 --json state,mergedAt, run this session: state MERGED"
+    },
+    "pr_292": {
+      "title": "fix(u1): write a terminal marker when a routine run cannot write its own",
+      "url": "https://github.com/blueman82/coderails/pull/292",
+      "state": "MERGED",
+      "merged_at": "2026-07-24T00:58:52Z",
+      "verifying_check": "gh pr view 292 --json state,mergedAt, run this session: state MERGED"
+    }
+  },
+  "hook_blocks": "no-record: dc_mine_hook_blocks mines a SESSION's discipline log against a completed loop's session_id; this session ran no agentic loop, so mining it here would misrepresent an ordinary documentation/verification session as loop activity. Not run.",
+  "review_themes": "This session handled three defects sequentially: PR #288 (notification leak in tests), PR #292 (U1 terminal marker), and PR #294 (this one). PR #294's defect class matches a pattern already recorded in standing-orders.md: a gate's evidence-gathering step (smoke_run) could return empty without erroring, and empty was silently treated as 'ran, nothing to report' rather than as a refusal — the same shape as SO-58 (empty artifact body satisfies the gate) and SO-65 (a malformed eval structure passing its own merge gate), applied here to a jq type-mismatch rather than an authoring or embedding defect.",
+  "raw_notes": "PROVENANCE: the PR #294 defect was found incidentally, not via a dedicated audit — an eval-authoring worker building artifacts for a different PR in this session hit the null-smoke symptom (`smoke: {cmd_exit: null, ...}` recorded for an eval that should have run), and the mechanism (jq `--arg` always binds a string, so `select(.id == $id)` never matches a JSON-number id) was then verified from source. SIBLING FACT: the same file's check 10 (`post_evals::validate_smoke_execution`, scripts/post_evals.sh:415,423-424) is NOT vulnerable to this defect, but for a reason unrelated to correctness — it iterates `.evals[$idx]` by array INDEX (`--argjson i \"$idx\"`), not via the `select(.id == $id)` string-bound lookup pattern used at lines 258, 272-273, 719-720 (now guarded), 743, 1043, 1050-1053. The commit message for 35dabcc notes validate_smoke and validate_discriminating share the same `select(.id == $id)` pattern as the fixed smoke_run but were left unchanged because their existing shape checks already fail closed on a numeric id, just with a less clear message — i.e. those sites are already safe, only smoke_run had the fail-open (silent empty → exit 0) consequence.",
+  "models_used": ["claude-sonnet-5"],
+  "cost": {}
+}

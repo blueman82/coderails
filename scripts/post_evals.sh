@@ -694,6 +694,19 @@ post_evals::smoke_run() {
         return 1
     fi
 
+    # Guard id TYPE. The schema (SKILL.md) defines id as a string ("E1"); the
+    # cmd/negative_control lookups below are `select(.id == $id)` against a
+    # shell string from `--arg`, which never matches a JSON number. Without
+    # this guard a numeric id makes cmd/nc silently empty, so nothing executes
+    # and this function still records `smoke: null` and returns 0 — recording
+    # success for evidence that was never run. Fail closed instead.
+    local bad_id_type
+    bad_id_type=$(jq -r '[.evals[]? | select(.mode == "scripted") | select((.id | type) != "string")] | length > 0' "$path")
+    if [[ "$bad_id_type" == "true" ]]; then
+        printf 'post_evals: smoke_run: a scripted eval has a non-string id (schema requires id to be a string) — refusing.\n' >&2
+        return 1
+    fi
+
     local ids
     ids=$(jq -r '[.evals[]? | select(.mode == "scripted") | .id] | .[]' "$path")
     [[ -z "$ids" ]] && return 0

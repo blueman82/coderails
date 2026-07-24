@@ -1304,6 +1304,26 @@ check "_run_recorded: forking hang bounded by the cap (elapsed ${_hang_elapsed}s
 stderr_out=$(PATH="$EMPTY_BIN"; post_evals::smoke_run "$FIX_SR_HONEST" 2>&1)
 check "smoke_run: jq unavailable → exit 1 (must not fail open)" 1 $?
 
+# (X9) NUMERIC ID FAIL-OPEN. `--arg id "$id"` always binds a shell string, so
+# `select(.id == $id)` never matches a JSON-number id: cmd/nc extraction went
+# silently empty, nothing executed, and smoke_run still wrote `smoke: null`
+# and returned exit 0 — recording "done" for evidence that was never run.
+# cmd/negative_control are simple `exit N` so a real run is unmistakable from
+# a skipped one.
+FIX_SR_NUMERIC_ID="$SR_DIR/numeric_id.json"
+jq -n '{
+  tier: 1, tier_justification: "1 work-unit", head_sha: "abc",
+  evals: [
+    {id: 1, priority: "P0", mode: "scripted", status: "pending",
+     cmd: "exit 3", negative_control: "exit 4", evidence: "log"}
+  ]
+}' > "$FIX_SR_NUMERIC_ID"
+stderr_out=$(post_evals::smoke_run "$FIX_SR_NUMERIC_ID" 2>&1)
+check "smoke_run: numeric id → exit 1 (must not fail open) [FIXED — was exit 0]" 1 $?
+[[ "$stderr_out" == *"non-string id"* ]]
+check "smoke_run: numeric id → stderr names the real cause" 0 $?
+check_str "smoke_run: numeric id → smoke NOT written (still null, refused before executing)" "null" "$(jq -r '.evals[0].smoke | type' "$FIX_SR_NUMERIC_ID")"
+
 # ═══ validate_smoke_execution: gate-time re-execution (check 10) ════════════
 # Check 9 gates the SHAPE of recorded smoke evidence, but the agent writes
 # those numbers: a hand-written `smoke` object of plausible shape (cmd_exit 1,
