@@ -245,6 +245,10 @@ deny() {
       route="Safe route: use narrower recursive bits instead of a blanket 777 — 'chmod -R u+rwX,go+rX <path>' grants the owner read/write (and execute only on directories/already-executable files) while giving group/other read access, without making everything world-writable and world-executable."
       pattern_id="chmod-r-777"
       ;;
+    *".env access"*)
+      route="Safe route: don't read or write the secret file itself. To check whether a key is SET without revealing it, test the variable after loading it in a subshell (e.g. 'set -a; . ./.env; set +a; [ -n \"\$MY_KEY\" ] && echo set') — note that still requires an allow rule, so prefer asking the owner. To see the SHAPE of the file without its values, read the committed template instead ('cat .env.example'), which this hook already permits. To add or change a value, edit the file by hand outside the session. To allow this pattern, add a Bash permission rule to settings.json."
+      pattern_id="dotenv-access"
+      ;;
     *"git commit"*"--no-verify"*)
       route="Safe route: fix the failing pre-commit hook and re-run 'git commit' without --no-verify, rather than bypassing it — the hook exists to catch something before commit. If the hook itself is broken (not the change), fix the hook, don't skip it."
       pattern_id="git-commit-no-verify"
@@ -312,6 +316,69 @@ fi
 # shred (secure file deletion / overwrite)
 if echo "$cmd" | grep -qiE '\bshred\b'; then
   deny "shred"
+fi
+
+# ── .env secret-file access (read OR write) ───────────────────────────────
+# A .env file holds live credentials. Reading one (cat/less/head/tail/grep/
+# source/an editor) exfiltrates them into the transcript; writing one
+# (redirect, cp/mv onto it, rm) destroys or replaces them. Both are denied,
+# and the detector is deliberately COMMAND-AGNOSTIC: it matches the .env
+# PATH TOKEN anywhere on the line rather than enumerating reader/writer verbs,
+# because an enumeration of verbs is unbounded (cat, bat, less, more, view,
+# vim, nano, awk, sed, xxd, python -c open(...), ...) and every omission is a
+# silent bypass. Any command line that names a .env file is denied.
+#
+# Boundaries — this is the entire difficulty, since over-blocking here breaks
+# every Bash call in a session, which is worse than the gap it closes:
+#   LEFT: start-of-string, whitespace, a quote, "/" (so ./.env, ../.env and
+#     /abs/path/.env all match), a redirect char (>.env with no space), or
+#     "=" (VAR=.env). A preceding WORD character is deliberately NOT a
+#     boundary, so "myapp.env" / "config.env" do not match — the spec is
+#     dotfile-shaped, and treating any *.env as secret would deny
+#     "cat myapp.env.example". Conscious ceiling, documented below.
+#   RIGHT: end-of-string, whitespace, a quote, a shell separator (; | &),
+#     ")" or a redirect char. NOT a word char — that is what keeps ".envrc"
+#     (direnv, a different file entirely) allowed while ".env" alone denies.
+#
+# The suffixed forms (.env.local, .env.production) can't be handled by the
+# same regex: "deny .env.<suffix> EXCEPT example/sample/template/dist" is a
+# negative lookahead, which POSIX ERE (grep -E, bash 3.2 — no PCRE here)
+# cannot express. So the suffixed case extracts each matched token and tests
+# its suffix in bash instead. Only the FIRST suffix segment is compared
+# (${suffix%%.*}) — so ".env.example.md" (a docs file about the template)
+# stays allowed, while ".env.local.bak" (a backup of a REAL secret file)
+# still denies. Comparing the whole multi-part suffix instead would deny the
+# former, which is the over-block failure this block is most at risk of.
+#
+# Template allow-list is closed and small: example, sample, template, dist —
+# the four conventional "committed placeholder, no real secrets" suffixes.
+# CEILINGS (deliberate, same class as this file's other documented ones):
+#   - a template suffix not on that list (.env.defaults, .env.tpl) denies —
+#     fails CLOSED, costs one settings.json rule, leaks nothing.
+#   - a real secret file named to LOOK like a template (.env.example holding
+#     live keys) is allowed — naming convention is the only signal available
+#     to a line-oriented matcher.
+#   - a variable-held path (F=.env; cat "$F") is uncaught once the literal
+#     is out of the line, exactly like this file's existing "variable
+#     filenames remain uncaught" ceiling on the source-edit blocks.
+dotenv_hit=""
+if echo "$cmd" | grep -qE '(^|[[:space:]/'"'"'"><|;&=])\.env([[:space:]'"'"'"><|;&)]|$)'; then
+  dotenv_hit=".env"
+fi
+if [ -z "$dotenv_hit" ]; then
+  # Strip the captured left-boundary char back off each token (sed) so the
+  # ${tok#.env.} suffix extraction below sees a clean ".env.<suffix>".
+  for dotenv_tok in $(echo "$cmd" | grep -oE '(^|[[:space:]/'"'"'"><|;&=])\.env\.[A-Za-z0-9_.-]+' | sed -E 's/^[^.]*//'); do
+    dotenv_suffix=${dotenv_tok#.env.}
+    dotenv_suffix=${dotenv_suffix%%.*}
+    case "$dotenv_suffix" in
+      example|sample|template|dist) : ;;  # committed placeholder — allow
+      *) dotenv_hit="$dotenv_tok" ;;
+    esac
+  done
+fi
+if [ -n "$dotenv_hit" ]; then
+  deny ".env access"
 fi
 
 # Session cwd, read from the hook payload (.cwd), falling back to $PWD.

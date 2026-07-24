@@ -155,6 +155,111 @@ assert_specific_route "chmod -R 777 message names narrower-permission route" \
 assert_specific_route "git commit --no-verify message names fix-the-hook route" \
   "git commit -m 'wip' --no-verify" "fix the failing pre-commit hook" "don't skip it"
 
+# --- RCA item 12: .env secret-file access (read OR write) ------------------
+# The gate is command-AGNOSTIC here: it matches the .env path token, not a
+# list of reader/writer verbs, so every case below is a distinct BOUNDARY
+# being exercised (left boundary, right boundary, suffix handling), not the
+# same regex re-hit through a different verb.
+#
+# Every positive asserts DENY (the decision), not merely a non-zero exit —
+# run() reads permissionDecision out of the hook's JSON, so a hook that
+# emitted a malformed decision or simply crashed would read ALLOW and fail
+# these, rather than passing on the crash.
+
+# READS — the exfiltration direction. Verb variety here is deliberate
+# coverage of the "no verb enumeration" property: a verb-list detector would
+# have to name every one of these, and the awk/sed/editor cases are exactly
+# the ones such a list forgets.
+check ".env: cat -> deny"           DENY "$(run "$(payload "cat .env")")"
+check ".env: less -> deny"          DENY "$(run "$(payload "less .env")")"
+check ".env: head -> deny"          DENY "$(run "$(payload "head -5 .env")")"
+check ".env: tail -> deny"          DENY "$(run "$(payload "tail .env")")"
+check ".env: grep -> deny"          DENY "$(run "$(payload "grep API_KEY .env")")"
+check ".env: source -> deny"        DENY "$(run "$(payload "source .env")")"
+check ".env: awk -> deny"           DENY "$(run "$(payload "awk '{print}' .env")")"
+check ".env: editor -> deny"        DENY "$(run "$(payload "nano .env")")"
+
+# WRITES — the destroy/replace direction.
+check ".env: redirect > -> deny"    DENY "$(run "$(payload "echo 'X=1' > .env")")"
+check ".env: append >> -> deny"     DENY "$(run "$(payload "echo 'X=1' >> .env")")"
+check ".env: no-space redirect -> deny" DENY "$(run "$(payload "echo 'X=1' >.env")")"
+check ".env: cp onto it -> deny"    DENY "$(run "$(payload "cp secrets .env")")"
+check ".env: mv it -> deny"         DENY "$(run "$(payload "mv .env /tmp/x")")"
+check ".env: rm it -> deny"         DENY "$(run "$(payload "rm .env")")"
+
+# LEFT-BOUNDARY path variants — each is a different left-boundary character
+# class in the regex ("/" for the path forms, quote chars, "=").
+check ".env: ./ relative -> deny"   DENY "$(run "$(payload "cat ./.env")")"
+check ".env: ../ parent -> deny"    DENY "$(run "$(payload "cat ../.env")")"
+check ".env: absolute path -> deny" DENY "$(run "$(payload "cat /Users/x/proj/.env")")"
+check ".env: single-quoted -> deny" DENY "$(run "$(payload "cat '.env'")")"
+check ".env: double-quoted -> deny" DENY "$(run "$(payload "cat \".env\"")")"
+check ".env: VAR= assignment -> deny" DENY "$(run "$(payload "VAR=.env cat \$VAR")")"
+
+# RIGHT-BOUNDARY: a shell separator immediately after the token (no space)
+# must still terminate it — these confirm the right-boundary class, not the
+# verb.
+check ".env: semicolon after -> deny" DENY "$(run "$(payload "cat .env;echo done")")"
+check ".env: pipe after -> deny"      DENY "$(run "$(payload "cat .env|grep KEY")")"
+check ".env: && after -> deny"        DENY "$(run "$(payload "cat .env && echo ok")")"
+
+# SUFFIXED forms — the separate bash-side suffix branch (POSIX ERE has no
+# negative lookahead, so these cannot be caught by the bare-token regex).
+check ".env.local -> deny"          DENY "$(run "$(payload "cat .env.local")")"
+check ".env.production -> deny"     DENY "$(run "$(payload "cat .env.production")")"
+# .env.local.bak: a BACKUP of a real secret file. Its first suffix segment is
+# "local", so the ${suffix%%.*} first-segment comparison must still deny it —
+# this is the case that a naive "allow anything with a dotted suffix" or a
+# whole-suffix comparison against the template list would get wrong.
+check ".env.local.bak -> deny"      DENY "$(run "$(payload "cat .env.local.bak")")"
+
+# --- Near-miss ALLOW controls (over-blocking is the worse failure here) ----
+# .envrc is direnv's file — a DIFFERENT file that shares the ".env" prefix.
+# This is the single most important control in this block: it is what forces
+# the right boundary to exclude word characters.
+check ".envrc -> allow"             ALLOW "$(run "$(payload "cat .envrc")")"
+check ".envrc via direnv -> allow"  ALLOW "$(run "$(payload "direnv allow .envrc")")"
+# Committed templates — no real secrets, must stay readable.
+check ".env.example -> allow"       ALLOW "$(run "$(payload "cat .env.example")")"
+check ".env.sample -> allow"        ALLOW "$(run "$(payload "cat .env.sample")")"
+check ".env.template -> allow"      ALLOW "$(run "$(payload "cat .env.template")")"
+check ".env.dist -> allow"          ALLOW "$(run "$(payload "cat .env.dist")")"
+# A docs file ABOUT the template: first suffix segment is "example", so the
+# first-segment comparison allows it. A whole-suffix comparison would deny.
+check ".env.example.md -> allow"    ALLOW "$(run "$(payload "cat .env.example.md")")"
+# No leading dot at all — these never contain the literal ".env" as a
+# dotfile token.
+check "environment.yml -> allow"    ALLOW "$(run "$(payload "cat environment.yml")")"
+check "env.example -> allow"        ALLOW "$(run "$(payload "cat env.example")")"
+check "docs/environment.md -> allow" ALLOW "$(run "$(payload "cat docs/environment.md")")"
+# Bare env / printenv — unrelated commands that print the environment.
+check "bare env -> allow"           ALLOW "$(run "$(payload "env")")"
+check "env piped -> allow"          ALLOW "$(run "$(payload "env | sort")")"
+check "printenv -> allow"           ALLOW "$(run "$(payload "printenv")")"
+check "npm run env -> allow"        ALLOW "$(run "$(payload "npm run env")")"
+# A non-dotfile *.env: left boundary requires a non-word char before the dot,
+# so "myapp.env.example" is not treated as a .env dotfile at all.
+check "myapp.env.example -> allow"  ALLOW "$(run "$(payload "cat myapp.env.example")")"
+# .venv (python virtualenv dir) merely starts with ".ven".
+check ".venv -> allow"              ALLOW "$(run "$(payload "python -m venv .venv")")"
+
+# THE SHARPEST DISCRIMINATOR: one command line carrying BOTH an allow-token
+# (.env.example) and a deny-token (bare .env). Any implementation that greps
+# the whole line for a template name and exempts the line wholesale gets this
+# WRONG (it would allow writing the real secret file). Must DENY.
+check "cp .env.example .env (mixed) -> deny" DENY "$(run "$(payload "cp .env.example .env")")"
+# The inverse: template -> template, no real secret file named. Must ALLOW.
+check "cp .env.example .env.sample (both templates) -> allow" \
+  ALLOW "$(run "$(payload "cp .env.example .env.sample")")"
+
+# Deny MESSAGE must name a concrete route, not the generic fallback — same
+# two-part assertion the other patterns get.
+assert_specific_route ".env message names template-read + settings.json route" \
+  "cat .env" ".env.example" "settings.json"
+
+# (the pattern_id assertion for dotenv-access lives with the other
+# assert_pattern_id calls further down — that helper is defined below.)
+
 # --- Allowed commands ---
 check "ls -> allow"                 ALLOW "$(run "$(payload "ls -la")")"
 check "git status -> allow"         ALLOW "$(run "$(payload "git status")")"
@@ -1052,6 +1157,11 @@ assert_pattern_id "chmod-r-777" \
   "chmod -R 777 /var/www" "echo chmod-r-777" "chmod-r-777"
 assert_pattern_id "git-commit-no-verify" \
   "git commit -m 'wip' --no-verify" "echo git-commit-no-verify" "git-commit-no-verify"
+# dotenv-access: the id is hyphenated AND contains no ".env" substring at all
+# (it is "dotenv", not ".env"), so echoing the id cannot self-trigger the
+# gate's own .env matcher — which is precisely why the id was named that way.
+assert_pattern_id "dotenv-access" \
+  "cat .env" "echo dotenv-access" "dotenv-access"
 
 # --- Q1: source-drift tripwire extension — every route case arm (except the
 # generic "*)" fallback, exempted below) must carry a pattern_id, so a new
@@ -1138,7 +1248,8 @@ extract_pattern_line() { # gate_path -> the pattern= line verbatim
 # SAME commit whenever a new deny() call site or pattern= alternative is
 # added — that is the "one-line update with an obvious diff" the drift check
 # exists to force.
-EXPECTED_FIXED_LABELS='deny "find -delete"
+EXPECTED_FIXED_LABELS='deny ".env access"
+deny "find -delete"
 deny "git clean (force)"
 deny "git push --force"
 deny "shred"
