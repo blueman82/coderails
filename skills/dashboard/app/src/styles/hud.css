@@ -1465,3 +1465,36 @@
   margin-top: 6px;
   white-space: normal;
 }
+
+/* Narrow-viewport width robustness for the trend rows. Same fix, and the same
+   reason, as .hud-status-line in the max-width: 1100px block above — but it has
+   to live HERE, after .hud-trend-value, not up there with its sibling. A media
+   query adds no specificity, so both .hud-trend-value rules are (0,1,0) and the
+   later one in source order wins. Declared inside the earlier block, the
+   override sits above the base rule and loses to it: the computed value stays
+   nowrap at every width and the fix silently does nothing. (.hud-status-line
+   gets away with the same placement only because ITS base rule is above the
+   block, not below.)
+
+   The defect: .hud-trend-value's white-space: nowrap gives each row a hard
+   minimum width, and the value is a long string by construction
+   ("med 243K/turn · iqr 149K–326K"). Under the single-column .hud-stage the
+   rail is viewport-width, so a narrow viewport drives it below that minimum
+   and the value overflows the rail. Wrapping the value removes the forced
+   minimum; flex-wrap lets it take its own line instead of a sliver beside the
+   label; and the fill's min-width keeps the leader line drawn — without it the
+   leader collapses to 0 and the two rows wrap at different widths. Onset moves
+   with the value's own length, which varies with the data, so the widths here
+   are indicative rather than fixed thresholds. */
+@media (max-width: 1100px) {
+  .hud-trend-row {
+    flex-wrap: wrap;
+  }
+  .hud-trend-value {
+    white-space: normal;
+    min-width: 0;
+  }
+  .hud-trend-fill {
+    min-width: 12px;
+  }
+}
