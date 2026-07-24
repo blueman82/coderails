@@ -998,31 +998,6 @@
     white-space: normal;
     flex-wrap: wrap;
   }
-  /* Same fix, same reason, as .hud-status-line above. .hud-trend-value's
-     white-space: nowrap gives each trend row a hard minimum width — the value
-     is a long string by construction ("med 243K/turn · iqr 149K–326K"). Under
-     the single-column .hud-stage the rail is viewport-width, so a narrow
-     viewport drives it below that minimum and the value overflows the rail.
-     Measured on the live panel: at a 260px rail the row still fits; by 240px
-     .hud-trend-fill has collapsed to 0; at 200px the value's right edge sits
-     ~50px past the row's. The exact onset moves with the value's own length,
-     which varies with the data. Wrapping the value removes the
-     forced minimum. flex-wrap on the row lets the value take its own line
-     rather than being squeezed to a sliver beside the label, and the fill's
-     min-width keeps the leader line drawn — without it the leader collapses to
-     0 and the two rows wrap at different widths. Above ~260px nothing here
-     changes: the value fits on one line and none of these rules engage. */
-  .hud-trend-row {
-    flex-wrap: wrap;
-  }
-  .hud-trend-value {
-    white-space: normal;
-    overflow-wrap: break-word;
-    min-width: 0;
-  }
-  .hud-trend-fill {
-    min-width: 12px;
-  }
   /* HUD callouts (merge-ready / progress) land in later tasks; hidden below the breakpoint
      same as the mockup, kept here so those components inherit the rule once they exist. */
   .hud-callout,
