@@ -142,8 +142,10 @@ caching, it never drops a frame.
 `undefined` means the frame has not arrived yet (the panel shows "loading…"),
 `null` means the source was unreadable (the panel shows "unavailable"), and a
 summary object is data. Collapsing `undefined` and `null` makes the panel
-flash "unavailable" on every page load, which is the regression PR #283
-removed for the KPI tiles.
+flash "unavailable" on every page load — the same regression PR #265 removed
+for the KPI tiles, where `healthNotYetLoaded` in `RailLeft.tsx` distinguishes
+"the collect has not resolved yet" from "the collector tried and could not
+populate this tile".
 
 **Per-connection teardown:** `/api/events` releases its aggregator from the
 request's `abort` signal as well as `ReadableStream.cancel()`, plus an
