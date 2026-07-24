@@ -16,7 +16,7 @@ A PR author must run `/coderails:task-evals` to declare a tier via an `evals.jso
 
 ## Why It Exists
 
-**Security boundary:** Tier classification gates merge authority. A tier-0 claim means "this needs careful review"; a tier-2 claim means "this is safe." Forging a tier-2 classification on a tier-0 change could bypass human review via bot auto-merge or delegate-to-ci patterns. The tier-gate prevents this.
+**Security boundary:** Tier classification gates merge authority. A tier-0 claim means "this is a single covered work-unit, exempt from the full eval suite"; a tier-2 claim means "this is large or irreversible, run everything." The attack is therefore a *downward* forgery: claiming tier 0 on work that is really tier 1 or 2 buys an exemption the change has not earned, bypassing the eval suite via bot auto-merge or delegate-to-ci patterns. The tier-gate prevents this.
 
 ## The Three Layers
 
