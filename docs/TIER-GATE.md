@@ -10,7 +10,7 @@ A **self-declared tier verification system** that validates a PR's claimed tier 
 - **Tier 1** (standard): anything above tier 0 that does not meet the tier-2 predicate. This is the default for ordinary multi-step or user-facing work. A user-facing surface on its own — a UI, CLI output, a served endpoint — lands here, not tier 2.
 - **Tier 2** (full suite): either the change bundles three or more independent work-units, or it carries an irreversible or external surface (publish, deploy, migration, data deletion, external send).
 
-These predicates are restated verbatim in `scripts/tier-gate/judge-prompt.md`, which is what the daemon actually judges against.
+`scripts/tier-gate/judge-prompt.md` carries the authoritative statement of these predicates — it is what the daemon actually judges against, so read it there when the two disagree.
 
 A PR author must run `/coderails:task-evals` to declare a tier via an `evals.json` artifact, then `/coderails:post-evals` to post it. The system then verifies the claim is honest.
 
