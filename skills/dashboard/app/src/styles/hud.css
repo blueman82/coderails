@@ -1399,3 +1399,69 @@
     animation: none;
   }
 }
+
+/* ---------- Context Trend panel ---------- */
+/* Every class below was referenced by ContextTrendPanel.tsx from the day it
+   shipped but had no rule anywhere, so the whole readout fell back to the UA
+   default (~16px) — roughly 60% larger than the 10-10.5px the rest of the HUD
+   uses — and, with no min-width:0 on a flex child, it overflowed the rail and
+   clipped mid-word. Sizes here match .hud-kpi-note / .hud-empty-state so the
+   panel reads as part of the same instrument rather than a pasted-in block. */
+.hud-trend-chart {
+  width: 100%;
+  height: auto;
+  display: block;
+  margin-bottom: 8px;
+}
+.hud-trend-readout {
+  font-size: 10px;
+  line-height: 1.4;
+  color: var(--off-white);
+  margin-bottom: 6px;
+  /* The hovered string carries a date, a rate, a turn count and a side, so it
+     is long by construction. Wrap it rather than let it push the rail wide —
+     same call, and the same reason, as .hud-sec-head's white-space: normal. */
+  white-space: normal;
+  min-height: 1.4em;
+}
+/* Idle is the resting state, so it recedes; hovering promotes the text to
+   full contrast rather than changing size, which would reflow the panel. */
+.hud-trend-readout.idle {
+  color: var(--grey-dim);
+}
+.hud-trend-row {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 10px;
+  line-height: 1.5;
+  color: var(--grey);
+}
+/* flex:1 hairline leader, the same idiom .hud-sec-head .hud-rule uses. */
+.hud-trend-fill {
+  flex: 1;
+  height: 1px;
+  background: var(--hairline);
+  transform: translateY(-2px);
+}
+.hud-trend-value {
+  color: var(--off-white);
+  white-space: nowrap;
+}
+/* The reserved caveat colour: these lines carry the two facts that bound how
+   the chart may be read (a small after-side n, and row 1 being inert), so they
+   are deliberately tinted rather than left as body text. */
+.hud-trend-caveat {
+  font-size: 10px;
+  line-height: 1.4;
+  color: var(--rose-dim);
+  margin-top: 6px;
+  white-space: normal;
+}
+.hud-trend-footer {
+  font-size: 9.5px;
+  line-height: 1.4;
+  color: var(--grey-dim);
+  margin-top: 6px;
+  white-space: normal;
+}

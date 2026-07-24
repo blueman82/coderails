@@ -85,17 +85,54 @@ ulg_count_dispatch_turns() {
     printf '0'
     return
   fi
-  local n
+  local n agg_rc
   n=0
+  agg_rc=0
   if [ -n "$tolerant" ]; then
+    # Objects only. Stage 1's `fromjson? // empty` drops lines that are not
+    # valid JSON, but it KEEPS lines that are valid JSON scalars (a bare string
+    # or number). Indexing a scalar with .type aborts this whole slurp
+    # ("Cannot index string with string \"type\""), and because stderr is
+    # discarded below, that abort is silent: n comes back empty, the trailing
+    # coercion turns it into 0, and ULG_PARSE_REASON is left EMPTY — so the
+    # caller reads "no dispatch turns" rather than "the count is untrustworthy",
+    # defeating the total-loss/partial-skip distinction this function exists to
+    # draw. Same guard, same reason, as dc_extract_last_text and dc_file_count
+    # in lib/discipline_common.sh (PR #290); this is the third member of that
+    # family.
     n=$(printf '%s' "$tolerant" | jq -s -r '
       [ .[]?
+        | select(type == "object")
         | select(.type == "assistant")
         | select(.message.content[]? | select(.type == "tool_use" and .name == "Agent"))
         | .message.id ]
       | unique
       | length
     ' 2>/dev/null)
+    agg_rc=$?
+  fi
+  # Capture stage 2's exit code, exactly as stage 1 captures tolerant_rc above.
+  #
+  # The object guard on the previous line stops a top-level SCALAR aborting this
+  # slurp, but it is necessary, not sufficient: a valid JSON OBJECT of the wrong
+  # inner shape still aborts it — `.message` a bare string ("Cannot index string
+  # with string \"content\""), or a non-object element inside `.message.content`.
+  # Every such abort used to land here as an empty $n, get laundered into 0 by
+  # the case below, and leave ULG_PARSE_REASON empty — reporting a genuine
+  # 50-dispatch unregistered loop as a quiet session, the exact contract
+  # violation the tolerant parse exists to prevent.
+  #
+  # Reading the rc is trigger-independent, so it holds for shape hazards nobody
+  # has thought of yet, which chasing one guard per shape does not. Cost: a
+  # partial skip at stage 2 is now attributed as total loss rather than passed
+  # through silently. That is the correct trade for a hook whose whole job is to
+  # distinguish "untrustworthy count" from "quiet session" — over-attributing is
+  # visible, under-attributing is not.
+  if [ "${agg_rc:-0}" -ne 0 ] && [ -n "$tolerant" ]; then
+    ULG_PARSE_REASON="jq_parse_error"
+    echo "jq_parse_error" >&2
+    printf '0'
+    return
   fi
   case "$n" in (''|*[!0-9]*) n=0;; esac
   if [ "$n" -eq 0 ] && [ "$total" -gt 0 ] && [ -z "$tolerant" ]; then
