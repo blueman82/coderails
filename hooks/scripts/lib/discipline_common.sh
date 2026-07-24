@@ -24,8 +24,9 @@
 #
 #   Two-layer defense against a bad line reaching stage 2 (mirrors
 #   ulg_count_dispatch_turns in unregistered_loop_guard.sh):
-#   Layer 1 (recovery, primary) — `select(type == "object")` on line 39 stops a
-#   top-level SCALAR aborting the slurp, but it is necessary, not sufficient: a
+#   Layer 1 (recovery, primary) — `select(type == "object")` in the stage-2
+#   filter below stops a top-level SCALAR aborting the slurp, but it is
+#   necessary, not sufficient: a
 #   valid JSON OBJECT of the wrong INNER shape still aborts it — `.message` a
 #   bare string/array (indexing `.content` on it errors), or a non-object
 #   content element (indexing `.type` on it errors). Both `is_genuine_user` and
