@@ -1,0 +1,27 @@
+{
+  "schema_version": 2,
+  "proof_disposition": "none: proof.json is present (frozen by a separate agent), so this field is not consulted",
+  "session_id": "4601b8c4-27d9-4460-8960-d61f090ac33a",
+  "status": "in-progress",
+  "authorising_prompt_raw": "no-record: no registered agentic-loop directory exists at /Users/harrison/.claude/agentic-loop/-Users-harrison-Github-coderails-.git/4601b8c4-27d9-4460-8960-d61f090ac33a/ for this session — verified absent before writing this file. This session is not running the agentic-loop skill; retro-builder was dispatched directly by the team lead to backfill progress.json/retro.json/standing-orders for PR #294 as a documentation task, not as a live loop.",
+  "work_units": {
+    "pr294_post_evals_numeric_id_fix": {
+      "status": "done",
+      "description": "Close a fail-open in scripts/post_evals.sh::smoke_run: jq's `--arg id \"$id\"` always binds a shell string, so `select(.id == $id)` never matches a JSON-number eval id. cmd/negative_control lookups went silently empty, nothing executed, smoke was written as null, and the function still returned exit 0 (freeze-time smoke evidence recorded for commands never run).",
+      "fix": "Type guard added at the top of smoke_run (scripts/post_evals.sh) refusing any scripted eval with a non-string id, per the schema's existing string-id definition. +13 lines scripts/post_evals.sh, +20 lines hooks/scripts/tests/post_evals.test.sh.",
+      "pr": 294,
+      "pr_url": "https://github.com/blueman82/coderails/pull/294",
+      "branch": "fix/post-evals-numeric-id",
+      "head_sha_at_pr": "35dabcc60715964a6218ddd9de86b8c3c8f85198",
+      "worktree_head_at_teardown": "b362742bebbac0efd2ab57f6645197419525c1b",
+      "state_gh": "OPEN",
+      "self_mergeable": "yes — neither scripts/post_evals.sh nor hooks/scripts/tests/post_evals.test.sh matches TIER_GATE_PATH_DENYLIST, unlike PRs #288 and #292 in this same session",
+      "provenance": "Discovered incidentally while building eval artifacts for a different PR in this session — an eval worker hit the null-smoke symptom live, and the mechanism was then verified from source (jq --arg type binding), not found by a dedicated audit."
+    }
+  },
+  "loop_stop_counts": "no-record: hook-owned field, written by loop_stall_guard on a LOOP-STOP declaration; this session never registered as an agentic loop so the hook never ran",
+  "disposition": "clean-break",
+  "decisions_absorbed": "no-record: loop-owned field appended at agentic-loop phase boundaries (-1, 2.5, 2.6, 2.8, 5, 6); this session did not run the agentic-loop skill so no phase boundaries occurred",
+  "completed_marker": "no-record: agentic-loop-owned counter, bumped at Phase 13 teardown; not applicable outside a registered loop",
+  "last_updated": "2026-07-24T02:20:00Z"
+}
