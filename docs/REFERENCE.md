@@ -107,6 +107,40 @@ fetched once from `GET /api/run/output`
 run's `endedAt` hasn't landed yet — the client should keep using the live
 SSE buffer instead) or `{status: "error", error}`.
 
+**Context Trend and the `context-trend` SSE event:** the CONTEXT TREND panel
+(`skills/dashboard/app/src/components/ContextTrendPanel.tsx`) is fed by
+`collectContextTrend`
+(`skills/dashboard/app/src/lib/collect/contextTrend.ts`), which sweeps every
+coderails orchestrator transcript under the projects dir. That sweep is far
+slower than the activity slice, so it rides its **own** `context-trend` SSE
+event rather than the `activity` frame — otherwise it would gate the System
+Vitals KPI tiles, which must paint as soon as their own collect resolves. A
+new event name must be added in three places or the frame is silently
+dropped: the aggregator's event set and payload map
+(`src/lib/collect/index.ts`), the `DashboardEvent` union plus the
+`SSE_EVENT_NAMES` registration list the client's `addEventListener` loop
+reads (`src/hooks/useDashboardState.ts`), and — for this collector only — the
+shared parse cache passed through `src/app/api/events/route.ts`. The route
+itself forwards any `{event, data}` generically, so it needs no per-event
+change.
+
+`Snapshot.contextTrend` is **tri-state**, and each state renders differently:
+`undefined` means the frame has not arrived yet (the panel shows "loading…"),
+`null` means the source was unreadable (the panel shows "unavailable"), and a
+summary object is data. Collapsing `undefined` and `null` makes the panel
+flash "unavailable" on every page load, which is the regression PR #283
+removed for the KPI tiles.
+
+**Per-connection teardown:** `/api/events` releases its aggregator from the
+request's `abort` signal as well as `ReadableStream.cancel()`, plus an
+`if (request.signal?.aborted)` re-check after setup. `cancel()` alone fires
+only when the response *consumer* cancels — a client that simply goes away
+does not reliably trigger it, and each abandoned connection then leaked a
+recursive `fs.watch` handle per watched dir plus the gates interval. That is
+fatal under launchd, which caps the process at `launchctl limit maxfiles`
+(256 on stock macOS) rather than the shell's soft limit: once exhausted the
+server still accepts TCP but serves nothing.
+
 ---
 
 #### `workflow-audit`
