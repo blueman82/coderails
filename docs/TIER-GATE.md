@@ -4,17 +4,19 @@ The tier-gate is a three-layer enforcement system that prevents dishonest or inv
 
 ## What It Is
 
-A **self-declared tier verification system** that validates a PR's claimed tier (0, 1, or 2) against actual code impact:
+A **self-declared tier verification system** that validates a PR's claimed tier (0, 1, or 2) against actual code impact. The tier scale runs from least verification to most: tier 0 is an exemption from the full eval suite, tier 2 requires it.
 
-- **Tier 0**: User-facing changes, architecture, API changes, security, breaking changes
-- **Tier 1**: Safe mechanical changes within well-understood boundaries (refactors, internal functions, tests, docs)
-- **Tier 2**: Risk-free changes (comments, formatting, trivial config)
+- **Tier 0** (exempt, justified): all three hold — the change is a single work-unit, it has no outward or irreversible surface, and an existing test or verify-criterion already covers the goal state. A user-facing change is never tier 0, however trivial.
+- **Tier 1** (standard): anything above tier 0 that does not meet the tier-2 predicate. This is the default for ordinary multi-step or user-facing work. A user-facing surface on its own — a UI, CLI output, a served endpoint — lands here, not tier 2.
+- **Tier 2** (full suite): either the change bundles three or more independent work-units, or it carries an irreversible or external surface (publish, deploy, migration, data deletion, external send).
+
+`scripts/tier-gate/judge-prompt.md` carries the authoritative statement of these predicates — it is what the daemon actually judges against, so read it there when the two disagree.
 
 A PR author must run `/coderails:task-evals` to declare a tier via an `evals.json` artifact, then `/coderails:post-evals` to post it. The system then verifies the claim is honest.
 
 ## Why It Exists
 
-**Security boundary:** Tier classification gates merge authority. A tier-0 claim means "this needs careful review"; a tier-2 claim means "this is safe." Forging a tier-2 classification on a tier-0 change could bypass human review via bot auto-merge or delegate-to-ci patterns. The tier-gate prevents this.
+**Security boundary:** Tier classification gates merge authority. A tier-0 claim means "this is a single covered work-unit, exempt from the full eval suite"; a tier-2 claim means "this is large or irreversible, run everything." The attack is therefore a *downward* forgery: claiming tier 0 on work that is really tier 1 or 2 buys an exemption the change has not earned, bypassing the eval suite via bot auto-merge or delegate-to-ci patterns. The tier-gate prevents this.
 
 ## The Three Layers
 
@@ -32,8 +34,8 @@ Blocks merge if any check fails. This is redundant defence-in-depth: it fails lo
 A root-owned launchd process (`com.coderails.tier-gate`) runs `scripts/tier-gate/tier-gate-runner.sh` every 5 minutes. It:
 - Fetches all open PRs in the watched repo
 - For each PR with an `evals.json` artifact: runs the judge prompt (an LLM prompt in `scripts/tier-gate/judge-prompt.md`) to evaluate the claimed tier against the actual code diff
-- Posts a `tier-review` commit status with `verdict=legitimate` or `verdict=illegitimate` and the matched `tier=N` token
-- Only posts when the LLM agrees the tier is legitimate
+- Posts a `tier-review` commit status carrying a `verdict=` token and the claimed `tier=N` token. It posts on every outcome, not only on approval. The six verdicts are `legitimate` (state `success`), `illegitimate` (state `failure`), `insufficient` when the blind inputs do not support a decision either way — the judge's own verdict when a diff is empty or unreadable, and also what a tier-1 or tier-2 claim receives when the diff exceeds the size cap (a tier-0 claim over the same cap gets `illegitimate`, because size is itself a tier-0 discriminator), `self_edit` when the diff touches the tier-gate's own files, `pending` while judging is in flight, and `error` for operational failures such as an unfetchable diff or files list, a missing embedded `evals.json`, or an unusable judge response
+- Only `verdict=legitimate` at state `success` satisfies the merge gate; every other status blocks
 
 Blocks at GitHub API level: a dishonest tier can never receive a `verdict=legitimate` status.
 
