@@ -337,8 +337,24 @@ fi
 #     dotfile-shaped, and treating any *.env as secret would deny
 #     "cat myapp.env.example". Conscious ceiling, documented below.
 #   RIGHT: end-of-string, whitespace, a quote, a shell separator (; | &),
-#     ")" or a redirect char. NOT a word char — that is what keeps ".envrc"
+#     ")", a redirect char, or an editor-backup marker ("~" for vim, "#" for
+#     an emacs autosave, which brackets the name on BOTH sides so "#" is a
+#     left boundary too). NOT a word char — that is what keeps ".envrc"
 #     (direnv, a different file entirely) allowed while ".env" alone denies.
+#     ".env~" and "#.env#" hold a byte-identical copy of the secret and are
+#     created by the editor, not by a deliberate act, so excluding them left
+#     the copies reachable while the original was denied.
+#
+# CASE: matched against a lowercased copy of the line, because macOS (APFS)
+# and Windows are case-insensitive by default — ".ENV" opens the same inode
+# as ".env", so a case-sensitive matcher is defeated by pressing shift. The
+# lowercasing is done ONCE, up front, rather than by adding grep -i to the
+# two patterns: the suffix branch below strips "${tok#.env.}" and compares
+# against a lowercase allow-list, and neither parameter expansion nor `case`
+# honours grep's -i. Matching case-blind while stripping case-sensitively
+# would leave ".ENV.EXAMPLE" (a benign template, the SAME file as
+# ".env.example" on APFS) failing the strip and falling through to deny.
+# tr, not "${var,,}" — bash 3.2 is the floor for this file.
 #
 # The suffixed forms (.env.local, .env.production) can't be handled by the
 # same regex: "deny .env.<suffix> EXCEPT example/sample/template/dist" is a
@@ -362,13 +378,14 @@ fi
 #     is out of the line, exactly like this file's existing "variable
 #     filenames remain uncaught" ceiling on the source-edit blocks.
 dotenv_hit=""
-if echo "$cmd" | grep -qE '(^|[[:space:]/'"'"'"><|;&=])\.env([[:space:]'"'"'"><|;&)]|$)'; then
+dotenv_cmd=$(printf '%s' "$cmd" | tr '[:upper:]' '[:lower:]')
+if echo "$dotenv_cmd" | grep -qE '(^|[[:space:]/'"'"'"><|;&=#])\.env([[:space:]'"'"'"><|;&)~#]|$)'; then
   dotenv_hit=".env"
 fi
 if [ -z "$dotenv_hit" ]; then
   # Strip the captured left-boundary char back off each token (sed) so the
   # ${tok#.env.} suffix extraction below sees a clean ".env.<suffix>".
-  for dotenv_tok in $(echo "$cmd" | grep -oE '(^|[[:space:]/'"'"'"><|;&=])\.env\.[A-Za-z0-9_.-]+' | sed -E 's/^[^.]*//'); do
+  for dotenv_tok in $(echo "$dotenv_cmd" | grep -oE '(^|[[:space:]/'"'"'"><|;&=#])\.env\.[a-z0-9_.-]+' | sed -E 's/^[^.]*//'); do
     dotenv_suffix=${dotenv_tok#.env.}
     dotenv_suffix=${dotenv_suffix%%.*}
     case "$dotenv_suffix" in

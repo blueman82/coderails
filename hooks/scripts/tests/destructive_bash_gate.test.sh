@@ -243,6 +243,45 @@ check "myapp.env.example -> allow"  ALLOW "$(run "$(payload "cat myapp.env.examp
 # .venv (python virtualenv dir) merely starts with ".ven".
 check ".venv -> allow"              ALLOW "$(run "$(payload "python -m venv .venv")")"
 
+# CASE VARIANCE. macOS (APFS) and Windows are case-INSENSITIVE by default, so
+# ".ENV" opens the very same inode as ".env" — a case-sensitive matcher is
+# defeated by pressing shift. The rest of this file's detectors already use
+# grep -i, so matching case-insensitively here is the house convention.
+check ".ENV upper -> deny"          DENY "$(run "$(payload "cat .ENV")")"
+check ".Env mixed -> deny"          DENY "$(run "$(payload "cat .Env")")"
+check ".ENV.LOCAL suffixed -> deny" DENY "$(run "$(payload "cat .ENV.LOCAL")")"
+# The template allow-list must be case-insensitive TOO, or making the matcher
+# case-blind converts these benign files from allowed into over-blocked.
+check ".ENV.EXAMPLE -> allow"       ALLOW "$(run "$(payload "cat .ENV.EXAMPLE")")"
+check ".Env.Sample -> allow"        ALLOW "$(run "$(payload "cat .Env.Sample")")"
+# .ENVRC is direnv's file in caps — the right boundary (a word char follows)
+# must keep excluding it regardless of case.
+check ".ENVRC -> allow"             ALLOW "$(run "$(payload "cat .ENVRC")")"
+check ".VENV -> allow"              ALLOW "$(run "$(payload "python -m venv .VENV")")"
+
+# EDITOR BACKUPS / AUTOSAVES. These hold a byte-identical copy of the secret
+# and appear in a repo without anyone choosing to create them. "~" (vim) and
+# "#" (emacs autosave, which brackets the name on BOTH sides) were absent
+# from the boundary classes, so the copies were reachable while the original
+# was denied.
+check ".env~ vim backup -> deny"    DENY "$(run "$(payload "cat .env~")")"
+check "#.env# emacs autosave -> deny" DENY "$(run "$(payload "cat '#.env#'")")"
+# The dotted backup forms already deny via the suffix branch (their first
+# suffix segment is not on the template allow-list). Locked here as
+# regressions, not as new coverage.
+check ".env.swp -> deny"            DENY "$(run "$(payload "cat .env.swp")")"
+check ".env.bak -> deny"            DENY "$(run "$(payload "cat .env.bak")")"
+check ".env.save -> deny"           DENY "$(run "$(payload "cat .env.save")")"
+
+# NOT-OVER-BLOCKED. Case-insensitivity plus wider boundaries must not turn
+# the gate into a blunt instrument on ordinary paths that merely contain
+# "env" or a "~"/"#" character.
+check "README.md -> allow"          ALLOW "$(run "$(payload "cat README.md")")"
+check ".environment -> allow"       ALLOW "$(run "$(payload "cat .environment")")"
+check "envsubst -> allow"           ALLOW "$(run "$(payload "envsubst < config.tmpl")")"
+check "home-dir tilde path -> allow" ALLOW "$(run "$(payload "cat ~/notes.md")")"
+check "comment containing env -> allow" ALLOW "$(run "$(payload "echo hi # set env vars")")"
+
 # THE SHARPEST DISCRIMINATOR: one command line carrying BOTH an allow-token
 # (.env.example) and a deny-token (bare .env). Any implementation that greps
 # the whole line for a template name and exempts the line wholesale gets this
