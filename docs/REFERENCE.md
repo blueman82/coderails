@@ -114,15 +114,29 @@ SSE buffer instead) or `{status: "error", error}`.
 coderails orchestrator transcript under the projects dir. That sweep is far
 slower than the activity slice, so it rides its **own** `context-trend` SSE
 event rather than the `activity` frame — otherwise it would gate the System
-Vitals KPI tiles, which must paint as soon as their own collect resolves. A
-new event name must be added in three places or the frame is silently
-dropped: the aggregator's event set and payload map
-(`src/lib/collect/index.ts`), the `DashboardEvent` union plus the
-`SSE_EVENT_NAMES` registration list the client's `addEventListener` loop
-reads (`src/hooks/useDashboardState.ts`), and — for this collector only — the
-shared parse cache passed through `src/app/api/events/route.ts`. The route
-itself forwards any `{event, data}` generically, so it needs no per-event
-change.
+Vitals KPI tiles, which must paint as soon as their own collect resolves.
+
+Adding a new SSE event means wiring **two** places, and they fail differently
+— which is worth knowing before you debug one:
+
+- `src/lib/collect/index.ts` — the `AggregatorEventName` union, the
+  `AggregatorEventPayloadMap` entry, and the overloaded `emit`/listener
+  signatures. Miss one and it is a **compile error**: the overloads exist so a
+  mismatched event/payload pairing cannot type-check.
+- `src/hooks/useDashboardState.ts` — the `DashboardEvent` union, a
+  `mergeDashboardEvent` case, and the `SSE_EVENT_NAMES` array. That array is
+  the **silent** one: the `for (const name of SSE_EVENT_NAMES)` loop is what
+  registers each `addEventListener`, so a name missing from it means the
+  browser receives the frame, no handler fires, and nothing errors. Only the
+  hook-level wiring test catches it — a `mergeDashboardEvent` unit test cannot,
+  because it bypasses the registration entirely.
+
+`src/app/api/events/route.ts` needs **no** per-event change: its subscribe
+callback forwards any `{event, data}` through an event-name-agnostic
+`sseFrame`, with no per-event branch. It does hold
+`sharedContextTrendCache`, but that is contextTrend-specific performance
+plumbing (stat-only revalidation across connections) — omitting it forfeits
+caching, it never drops a frame.
 
 `Snapshot.contextTrend` is **tri-state**, and each state renders differently:
 `undefined` means the frame has not arrived yet (the panel shows "loading…"),
