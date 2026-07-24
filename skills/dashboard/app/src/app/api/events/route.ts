@@ -112,6 +112,15 @@ export function createEventsHandler(deps: EventsHandlerDeps) {
             // nothing to do, release() runs from cancel()/abort.
           }
         });
+        // A signal that was ALREADY aborted before this handler ran (client
+        // dropped between connection-accept and here) has fired its "abort"
+        // event in the past, so the listener registered above never fires —
+        // and teardown would fall back to the cancel() path this fix exists
+        // to stop relying on. Re-check the flag now that the aggregator is
+        // started and unsubscribe is bound, so release() has something real
+        // to tear down. Checking any earlier would stop a not-yet-started
+        // aggregator and leave the subscription dangling.
+        if (request.signal?.aborted) release();
       },
       cancel() {
         release();
