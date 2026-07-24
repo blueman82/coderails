@@ -12,7 +12,7 @@ telemetry leaving the machine.
 
 ## What it shows
 
-Six panels:
+Seven panels:
 
 1. **SYSTEM VITALS** — usage windows, hooks fired, lint findings; hero
    numerals + sparklines. Tiles show "loading…" until the first activity
@@ -25,15 +25,24 @@ Six panels:
    tracks how many loop cards are showing. Non-complete loops that have
    gone stale drop into a dim sub-list below the cards, one line per loop
    with its title and time since last update.
-3. **COMMAND DECK** — declared buttons (bounded, config-driven runs — never a
+3. **CONTEXT TREND** — one dot per agentic-loop session: x is the session's
+   start date, y is orchestrator cache-read tokens per assistant turn. The
+   2026-07-17 token-reduction cutover is drawn as an annotation the series
+   runs straight through — no gap, no colour change, no causal claim.
+   Per-side medians and n are shown side by side; a side below n=20 is
+   captioned as too few to call. Whether the cutover reduced token burn is
+   not established, and the panel is built to keep it that way: it never
+   renders a "saved X%" headline. Collects on its own SSE frame, so its slow
+   transcript sweep never delays the KPI tiles above.
+4. **COMMAND DECK** — declared buttons (bounded, config-driven runs — never a
    free prompt box) plus run history, plus a Run Output viewer: click any
    run-history row to view its output — live-streaming while the run is
    still going, settled (fetched once) once it ends.
-4. **PR GATES** — open PRs with gate state: merge-ready / blocked (missing
+5. **PR GATES** — open PRs with gate state: merge-ready / blocked (missing
    artifact) / stale (SHA mismatch).
-5. **Bottom-centre hero** — the active loop's primary directive with a big
+6. **Bottom-centre hero** — the active loop's primary directive with a big
    numeral (e.g. work units 2/7) and a micro ticker.
-6. **ASSISTANT.LINK** — pending workflow-audit approvals awaiting a
+7. **ASSISTANT.LINK** — pending workflow-audit approvals awaiting a
    decision (Approve/Deny), plus build status for approved
    `workflow-audit:propose-skill` entries as they claim, build, and open a
    PR.
@@ -123,6 +132,18 @@ reboots. The plist runs `skills/dashboard/runner/bin/dashboard-server.sh`
 with `RunAtLoad` and `KeepAlive` set — launchd starts it at login and
 restarts it if it dies. Logs go to `~/.claude/coderails-dashboard/dashboard.log`,
 same path `start-dashboard.sh` uses.
+
+The plist also sets `SoftResourceLimits.NumberOfFiles` to 4096. A
+launchd-spawned process inherits `launchctl limit maxfiles` — 256 on stock
+macOS — **not** the much higher soft limit an interactive shell reports, so
+checking `ulimit -n` in a terminal tells you nothing about the agent. The
+dashboard opens a recursive `fs.watch` handle per watched dir per SSE
+connection, and at 256 that ceiling is reachable in ordinary use. Once the
+descriptor table is exhausted the process still accepts TCP but can no longer
+open files or watches: every route returns nothing, no SSE frames arrive, and
+panels sit on "loading…" forever. If you ever see that shape, check
+`lsof -p <pid> | wc -l` against the limit — a count that climbs across
+requests and never falls is a leak, not load.
 
 **Once the agent is installed, `stop-dashboard.sh` does not stop it** — the
 agent-owned server has no pidfile for `stop-dashboard.sh` to find. Stop it

@@ -107,6 +107,56 @@ fetched once from `GET /api/run/output`
 run's `endedAt` hasn't landed yet — the client should keep using the live
 SSE buffer instead) or `{status: "error", error}`.
 
+**Context Trend and the `context-trend` SSE event:** the CONTEXT TREND panel
+(`skills/dashboard/app/src/components/ContextTrendPanel.tsx`) is fed by
+`collectContextTrend`
+(`skills/dashboard/app/src/lib/collect/contextTrend.ts`), which sweeps every
+coderails orchestrator transcript under the projects dir. That sweep is far
+slower than the activity slice, so it rides its **own** `context-trend` SSE
+event rather than the `activity` frame — otherwise it would gate the System
+Vitals KPI tiles, which must paint as soon as their own collect resolves.
+
+Adding a new SSE event means wiring **two** places, and they fail differently
+— which is worth knowing before you debug one:
+
+- `src/lib/collect/index.ts` — the `AggregatorEventName` union, the
+  `AggregatorEventPayloadMap` entry, and the overloaded `emit`/listener
+  signatures. Miss one and it is a **compile error**: the overloads exist so a
+  mismatched event/payload pairing cannot type-check.
+- `src/hooks/useDashboardState.ts` — the `DashboardEvent` union, a
+  `mergeDashboardEvent` case, and the `SSE_EVENT_NAMES` array. That array is
+  the **silent** one: the `for (const name of SSE_EVENT_NAMES)` loop is what
+  registers each `addEventListener`, so a name missing from it means the
+  browser receives the frame, no handler fires, and nothing errors. Only the
+  hook-level wiring test catches it — a `mergeDashboardEvent` unit test cannot,
+  because it bypasses the registration entirely.
+
+`src/app/api/events/route.ts` needs **no** per-event change: its subscribe
+callback forwards any `{event, data}` through an event-name-agnostic
+`sseFrame`, with no per-event branch. It does hold
+`sharedContextTrendCache`, but that is contextTrend-specific performance
+plumbing (stat-only revalidation across connections) — omitting it forfeits
+caching, it never drops a frame.
+
+`Snapshot.contextTrend` is **tri-state**, and each state renders differently:
+`undefined` means the frame has not arrived yet (the panel shows "loading…"),
+`null` means the source was unreadable (the panel shows "unavailable"), and a
+summary object is data. Collapsing `undefined` and `null` makes the panel
+flash "unavailable" on every page load — the same regression PR #265 removed
+for the KPI tiles, where `healthNotYetLoaded` in `RailLeft.tsx` distinguishes
+"the collect has not resolved yet" from "the collector tried and could not
+populate this tile".
+
+**Per-connection teardown:** `/api/events` releases its aggregator from the
+request's `abort` signal as well as `ReadableStream.cancel()`, plus an
+`if (request.signal?.aborted)` re-check after setup. `cancel()` alone fires
+only when the response *consumer* cancels — a client that simply goes away
+does not reliably trigger it, and each abandoned connection then leaked a
+recursive `fs.watch` handle per watched dir plus the gates interval. That is
+fatal under launchd, which caps the process at `launchctl limit maxfiles`
+(256 on stock macOS) rather than the shell's soft limit: once exhausted the
+server still accepts TCP but serves nothing.
+
 ---
 
 #### `workflow-audit`
