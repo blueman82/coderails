@@ -145,6 +145,30 @@ fixing.
    `run=ok` line to the run log as the last line — the canonical
    success marker the `last-marker` gate keys on.
 
+**Claim the terminal-marker slot BEFORE step 5, not only after step 9.**
+Immediately before starting step 5, append `abort=incomplete-run` to the
+run log. Then, on reaching a terminal outcome, append the real marker
+(`run=ok`, `abort=<reason>`, or `refused=<gate>`) — the gate reads the
+LAST terminal marker, so the real outcome supersedes the provisional one.
+
+This ordering exists because steps 5–9 are prose instructions executed by
+an agent session, and a session can end mid-sequence — a turn budget
+exhausted, a context limit, a killed process — without executing any
+further instruction. A marker written only after step 9 is therefore not
+guaranteed to be written at all. When that happens the run log ends with
+no terminal marker, and the gate reports "Artifact has no terminal marker"
+— a state that is indistinguishable from a run that never started, and
+unrecoverable from the artifact afterwards. Claiming the slot up front
+converts that silent gap into an honest `abort=incomplete-run`, which
+correctly reads red.
+
+Do NOT rely on the runner to write this marker for you on an interrupted
+run. The runner only writes one when it KILLED the routine itself (a
+SIGKILL timeout, where it knows the outcome). A session that ends on its
+own while the process exits 0 gives the runner no signal to act on — it
+cannot distinguish "finished but did not log it" from "failed silently",
+so it deliberately writes nothing.
+
 Any of steps 5–9 can REFUSE (a failing eval, a review that blocks, a
 merge gate that rejects) rather than the routine choosing to abort.
 Treat a refusal the same as an abort: close the PR if one is open,
@@ -184,6 +208,15 @@ outcome wins, not merely whether `run=ok` appears anywhere. A run log
 merely *existing* does not mean the night succeeded (an aborted or
 refused run still writes a log describing its own failure); only a
 trailing `run=ok` does.
+
+`abort=incomplete-run` is a fourth terminal marker, written provisionally
+before step 5 and superseded by whichever real marker the run reaches (see
+step 9). Because the gate keys on the LAST terminal marker, a run that
+completes overwrites its own provisional line in effect, while a run whose
+session ends mid-sequence leaves it standing and correctly reads red. A
+log whose last marker is `abort=incomplete-run` therefore means the run
+started the push/merge sequence and never reached a terminal outcome —
+not that it was never attempted.
 
 This routine keeps both of its config's shipped escalation channels
 (`escalation: ["notification", "vault-note"]`) — nothing here replaces
