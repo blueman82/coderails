@@ -84,6 +84,25 @@ describe("GET /api/events — connection teardown", () => {
     expect(calls.unsubscribed).toBe(1);
   });
 
+  it("releases when the signal was ALREADY aborted before the handler ran", async () => {
+    // The client can drop between connection-accept and the handler running. By
+    // then the signal's "abort" event has already fired, so a listener added
+    // inside the handler never runs — teardown would silently fall back to the
+    // cancel() path this fix exists to stop relying on, and the aggregator would
+    // leak exactly as before.
+    const { calls, impl } = countingAggregator();
+    const controller = new AbortController();
+    controller.abort(); // aborted BEFORE the handler is invoked
+    const handler = createEventsHandler({ config: testConfig(), createAggregatorImpl: impl });
+
+    const res = handler(req(controller.signal));
+    expect(res.body).toBeTruthy();
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(calls.stop).toBe(1);
+    expect(calls.unsubscribed).toBe(1);
+  });
+
   it("still tears down via cancel() when the request carries no abort signal", async () => {
     const { calls, impl } = countingAggregator();
     const handler = createEventsHandler({ config: testConfig(), createAggregatorImpl: impl });
