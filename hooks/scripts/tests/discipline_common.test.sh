@@ -293,21 +293,21 @@ check "wrong-shape object on a USER line (is_genuine_user hazard) does not zero 
 # aborts stage 2 -- a tool_use block whose `.input` is a bare STRING (not an
 # object). This is not covered by any Layer 1 guard (those check `.message`
 # and content-element shape, not `.input` shape), so it reaches Layer 2's
-# agg_rc net. Must fail OPEN to 0, not error or hang -- and per this family's
-# documented trade, over-attributes: the earlier valid Edit line is lost too,
-# since Layer 2 is a whole-slurp net, not per-line recovery.
-# NOTE: stdout "0" alone does NOT discriminate Layer 2's presence -- dc_file_count
-# already initialises n=0 before the aggregation and launders an empty/non-numeric
-# $n to 0 via the trailing `case` coercion, so an abort with NO rc-check at all
-# would ALSO print "0" on stdout. The only observable Layer-2 signal is the
-# stderr attribution, so this test asserts stderr, not stdout. ---
+# agg_rc net. Must fail OPEN to 0, not error or hang, and produce NO stderr
+# output -- dc_file_count is called unconditionally on every Stop-hook turn
+# ahead of that hook's own block-message write to the same stderr stream, so
+# an attribution echo here would land concatenated ahead of the model-facing
+# block message on every blocked turn where this hazard exists anywhere in
+# the transcript (see the function's own comment). Also over-attributes: the
+# earlier valid Edit line is lost too, since Layer 2 is a whole-slurp net,
+# not per-line recovery. ---
 T=$(mk_transcript \
   '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Edit","input":{"file_path":"/a.py"}}]}}' \
   '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Write","input":"not an object"}]}}')
 result=$(dc_file_count "$T" 2>"$TMP/p_stderr")
 stderr_result=$(cat "$TMP/p_stderr")
 check "Layer 2 net: .input-shape hazard fails open to 0 on stdout" "0" "$result"
-check "Layer 2 net: .input-shape hazard attributes jq_parse_error on stderr" "jq_parse_error" "$stderr_result"
+check "Layer 2 net: .input-shape hazard produces no stderr output" "" "$stderr_result"
 
 # --- Test (q): the same Layer-2-only hazard for dc_extract_last_text -- a
 # text block whose `.text` field is an OBJECT (not a string/number). This
@@ -315,16 +315,15 @@ check "Layer 2 net: .input-shape hazard attributes jq_parse_error on stderr" "jq
 # shape, not the `.text` value's own type), so `join(" ")` aborts trying to
 # concatenate a string accumulator with a non-string element ("string and
 # object cannot be added"), reaching Layer 2's agg_rc net. Must fail OPEN to
-# empty, not error or hang -- and over-attributes: the earlier valid "REAL"
-# text is lost too, same whole-slurp-net trade as test (p). Per test (p)'s
-# own finding, stdout alone (already "" on init) cannot discriminate Layer 2's
-# presence here either, so this asserts stderr. ---
+# empty, not error or hang, and produce NO stderr output, same reasoning as
+# test (p) -- also over-attributes: the earlier valid "REAL" text is lost too,
+# same whole-slurp-net trade. ---
 T=$(mk_transcript \
   '{"type":"assistant","message":{"content":[{"type":"text","text":"REAL"}]}}' \
   '{"type":"assistant","message":{"content":[{"type":"text","text":{"nested":"obj"}}]}}')
 result=$(dc_extract_last_text "$T" 50 2>"$TMP/q_stderr")
 stderr_result=$(cat "$TMP/q_stderr")
 check "Layer 2 net: .text-shape hazard fails open to empty on stdout" "" "$result"
-check "Layer 2 net: .text-shape hazard attributes jq_parse_error on stderr" "jq_parse_error" "$stderr_result"
+check "Layer 2 net: .text-shape hazard produces no stderr output" "" "$stderr_result"
 
 [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails failures)"; exit 1; }

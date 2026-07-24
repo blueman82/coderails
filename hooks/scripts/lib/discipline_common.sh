@@ -38,10 +38,16 @@
 #   This is trigger-independent: it catches wrong-shape hazards nobody has
 #   enumerated yet, which chasing one guard per shape does not. With Layer 1 in
 #   place this should not fire on the known hazards above — it exists for the
-#   unknown ones. On an actual Layer-2 abort (agg_rc != 0), attribute via
-#   stderr (matching ulg's `echo ... >&2`) and fail open to 0. No reason
-#   global: dc_file_count has exactly one direct caller
-#   (check_verify_loop.sh) and nothing today reads a reason for it.
+#   unknown ones. On an actual Layer-2 abort (agg_rc != 0), fail open to 0,
+#   SILENTLY (no stderr write) — unlike ulg_count_dispatch_turns, this
+#   function is called unconditionally on every Stop-hook turn from
+#   check_verify_loop.sh (line ~112), ahead of that hook's own block-message
+#   write to the SAME stderr stream (line ~260, `>&2` + `exit 2`). An attribution
+#   echo here would land concatenated ahead of the model-facing block message
+#   on every blocked turn where a Layer-2 hazard exists ANYWHERE in the
+#   transcript — visible noise for zero observability gain, since nothing
+#   consumes the token today. No reason global: dc_file_count has exactly one
+#   direct caller (check_verify_loop.sh) and nothing reads one.
 dc_file_count() {
   local transcript="$1" tolerant n agg_rc
   tolerant=$(jq -R 'fromjson? // empty' "$transcript" 2>/dev/null)
@@ -71,7 +77,6 @@ dc_file_count() {
     agg_rc=$?
   fi
   if [ "${agg_rc:-0}" -ne 0 ] && [ -n "$tolerant" ]; then
-    echo "jq_parse_error" >&2
     printf '0'
     return
   fi
@@ -87,10 +92,13 @@ dc_file_count() {
 #   Per-line tolerant parse: a single malformed line in the tail window must
 #   not collapse extraction of a genuine final message to empty — stage 1
 #   drops just the bad line, stage 2 aggregates over what's left. This
-#   function does not log on a benign per-line skip — a malformed-line skip
-#   here is silent by design, matching its prior contract of never
-#   distinguishing "malformed" from "no text yet". It DOES log (stderr only,
-#   see below) on the rarer total-abort case where stage 2 itself errors out.
+#   function does not log — a malformed-line skip is silent by design,
+#   matching its prior contract of never distinguishing "malformed" from
+#   "no text yet". This now extends to the total-abort case too (see Layer 2
+#   below): this function is called by dc_stable_text's retry loop, itself
+#   called unconditionally on every Stop-hook turn from check_verify_loop.sh
+#   ahead of that hook's own block-message write to stderr — an attribution
+#   echo here would land concatenated ahead of the model-facing block message.
 #
 #   Two-layer defense, mirrors dc_file_count above (see its comment for the
 #   full rationale) and ulg_count_dispatch_turns in unregistered_loop_guard.sh:
@@ -101,8 +109,9 @@ dc_file_count() {
 #   text from surviving lines.
 #   Layer 2 (net) — stage 2 is split into a captured intermediate ($tolerant)
 #   so its exit code ($?) can be read as a trigger-independent net for
-#   unenumerated shape hazards. On an actual abort, attribute via stderr only
-#   (no reason global — see dc_file_count's comment) and fail open to empty.
+#   unenumerated shape hazards. On an actual abort, fail open to empty
+#   SILENTLY (no reason global, no stderr write — see dc_file_count's comment
+#   for why the stderr write was dropped).
 dc_extract_last_text() {
   local transcript="$1" tail_lines="$2" tolerant text agg_rc
   # `fromjson? // empty` keeps every line that parses as JSON — including lines
@@ -131,7 +140,6 @@ dc_extract_last_text() {
     agg_rc=$?
   fi
   if [ "${agg_rc:-0}" -ne 0 ] && [ -n "$tolerant" ]; then
-    echo "jq_parse_error" >&2
     printf ''
     return
   fi
