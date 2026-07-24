@@ -254,4 +254,77 @@ T=$(mk_transcript \
 result=$(dc_extract_last_text "$T" 50)
 check "valid-JSON scalar line does not blank the extraction" "REAL ANSWER" "$result"
 
+# --- Test (m): a wrong-shape OBJECT line -- `.message` a bare STRING, not an
+# object -- must not zero the count. This is a different failure from test (k)'s
+# scalar line: `select(type == "object")` passes this line (the outer value IS
+# an object), but indexing `.message.content` on a string `.message` aborts the
+# whole `jq -s` slurp ("Cannot index string with string \"content\""). Because
+# stderr is discarded, that abort is silent and the count came back 0. Same
+# defect ulg_count_dispatch_turns carried until PR (this one); third member of
+# that family (dc_file_count, dc_extract_last_text, ulg_count_dispatch_turns). ---
+T=$(mk_transcript \
+  '{"type":"user","message":{"content":"please edit the file"}}' \
+  '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Write","input":{"file_path":"/a.txt"}}]}}' \
+  '{"type":"assistant","message":"oops"}')
+result=$(dc_file_count "$T")
+check "wrong-shape object (.message a bare string) does not zero the count" "1" "$result"
+
+# --- Test (n): the same wrong-shape-object hazard for dc_extract_last_text --
+# a non-object element inside `.message.content` (here `.message` itself is a
+# bare ARRAY, not an object with a .content key) must not blank the extraction
+# of a later assistant turn's real text. ---
+T=$(mk_transcript \
+  '{"type":"assistant","message":{"content":[{"type":"text","text":"REALTEXT"}]}}' \
+  '{"type":"assistant","message":["bare"]}')
+result=$(dc_extract_last_text "$T" 50)
+check "wrong-shape object (.message a bare array) does not blank the extraction" "REALTEXT" "$result"
+
+# --- Test (o): the same wrong-shape-object hazard reached through
+# is_genuine_user -- a bare-STRING `.message` on a USER line (not an assistant
+# line, unlike (m)) aborts the same slurp identically, because is_genuine_user
+# also indexes `.message.content`. Must recover, not zero. ---
+T=$(mk_transcript \
+  '{"type":"user","message":"oops"}' \
+  '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Edit","input":{"file_path":"/a.py"}}]}}')
+result=$(dc_file_count "$T")
+check "wrong-shape object on a USER line (is_genuine_user hazard) does not zero the count" "1" "$result"
+
+# --- Test (p): a shape that defeats the Layer 1 inner guards and genuinely
+# aborts stage 2 -- a tool_use block whose `.input` is a bare STRING (not an
+# object). This is not covered by any Layer 1 guard (those check `.message`
+# and content-element shape, not `.input` shape), so it reaches Layer 2's
+# agg_rc net. Must fail OPEN to 0, not error or hang -- and per this family's
+# documented trade, over-attributes: the earlier valid Edit line is lost too,
+# since Layer 2 is a whole-slurp net, not per-line recovery.
+# NOTE: stdout "0" alone does NOT discriminate Layer 2's presence -- dc_file_count
+# already initialises n=0 before the aggregation and launders an empty/non-numeric
+# $n to 0 via the trailing `case` coercion, so an abort with NO rc-check at all
+# would ALSO print "0" on stdout. The only observable Layer-2 signal is the
+# stderr attribution, so this test asserts stderr, not stdout. ---
+T=$(mk_transcript \
+  '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Edit","input":{"file_path":"/a.py"}}]}}' \
+  '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Write","input":"not an object"}]}}')
+result=$(dc_file_count "$T" 2>"$TMP/p_stderr")
+stderr_result=$(cat "$TMP/p_stderr")
+check "Layer 2 net: .input-shape hazard fails open to 0 on stdout" "0" "$result"
+check "Layer 2 net: .input-shape hazard attributes jq_parse_error on stderr" "jq_parse_error" "$stderr_result"
+
+# --- Test (q): the same Layer-2-only hazard for dc_extract_last_text -- a
+# text block whose `.text` field is an OBJECT (not a string/number). This
+# defeats every Layer 1 guard (those check `.message` and content-element
+# shape, not the `.text` value's own type), so `join(" ")` aborts trying to
+# concatenate a string accumulator with a non-string element ("string and
+# object cannot be added"), reaching Layer 2's agg_rc net. Must fail OPEN to
+# empty, not error or hang -- and over-attributes: the earlier valid "REAL"
+# text is lost too, same whole-slurp-net trade as test (p). Per test (p)'s
+# own finding, stdout alone (already "" on init) cannot discriminate Layer 2's
+# presence here either, so this asserts stderr. ---
+T=$(mk_transcript \
+  '{"type":"assistant","message":{"content":[{"type":"text","text":"REAL"}]}}' \
+  '{"type":"assistant","message":{"content":[{"type":"text","text":{"nested":"obj"}}]}}')
+result=$(dc_extract_last_text "$T" 50 2>"$TMP/q_stderr")
+stderr_result=$(cat "$TMP/q_stderr")
+check "Layer 2 net: .text-shape hazard fails open to empty on stdout" "" "$result"
+check "Layer 2 net: .text-shape hazard attributes jq_parse_error on stderr" "jq_parse_error" "$stderr_result"
+
 [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails failures)"; exit 1; }
