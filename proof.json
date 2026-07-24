@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "frozen_at": "2026-07-24T02:05:00Z",
+  "frozen_sha": "35dabcc60715964a6218ddd9de86b8c3c8f85198",
+  "proofs": [
+    {
+      "id": "P1",
+      "claim": "smoke_run FAILS CLOSED on a numeric eval id instead of silently recording null evidence and exiting 0.",
+      "cmd": "printf '%s' '{\"scope\":\"pr\",\"tier\":1,\"tier_justification\":\"t\",\"head_sha\":\"x\",\"evals\":[{\"id\":1,\"mode\":\"scripted\",\"priority\":\"P0\",\"cmd\":\"true\",\"negative_control\":\"false\",\"evidence\":\"e\"}]}' > /tmp/p1_numid.json; ./scripts/post_evals.sh smoke-run /tmp/p1_numid.json > /tmp/p1_out.txt 2>&1; test $? -ne 0 && grep -q 'non-string id' /tmp/p1_out.txt && echo \"P1 exit=0 refused-as-expected\"",
+      "expect": "exit 0 — smoke-run returns non-zero and names the non-string id, rather than exiting 0 with null smoke",
+      "status": "pending"
+    },
+    {
+      "id": "P2",
+      "claim": "The normal string-id path still executes and records REAL evidence, so the guard did not break honest use.",
+      "cmd": "printf '%s' '{\"scope\":\"pr\",\"tier\":1,\"tier_justification\":\"t\",\"head_sha\":\"x\",\"evals\":[{\"id\":\"1\",\"mode\":\"scripted\",\"priority\":\"P0\",\"cmd\":\"true\",\"negative_control\":\"false\",\"evidence\":\"e\"}]}' > /tmp/p2_strid.json; ./scripts/post_evals.sh smoke-run /tmp/p2_strid.json > /dev/null 2>&1 && test \"$(jq -r '.evals[0].smoke.cmd_exit')\" = \"0\" && test \"$(jq -r '.evals[0].smoke.negative_control_exit')\" = \"1\" && echo \"P2 exit=0 real-evidence-recorded\"",
+      "expect": "exit 0 — cmd_exit 0 and negative_control_exit 1 actually observed and written",
+      "status": "pending"
+    },
+    {
+      "id": "P3",
+      "claim": "The post_evals test suite passes with the guard in place.",
+      "cmd": "bash hooks/scripts/tests/post_evals.test.sh 2>&1 | tail -1 | grep -q '^PASS$' && echo \"P3 exit=0\"",
+      "expect": "exit 0 — suite reports PASS",
+      "status": "pending"
+    }
+  ]
+}
