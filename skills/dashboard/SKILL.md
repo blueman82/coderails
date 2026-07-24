@@ -133,6 +133,18 @@ with `RunAtLoad` and `KeepAlive` set — launchd starts it at login and
 restarts it if it dies. Logs go to `~/.claude/coderails-dashboard/dashboard.log`,
 same path `start-dashboard.sh` uses.
 
+The plist also sets `SoftResourceLimits.NumberOfFiles` to 4096. A
+launchd-spawned process inherits `launchctl limit maxfiles` — 256 on stock
+macOS — **not** the much higher soft limit an interactive shell reports, so
+checking `ulimit -n` in a terminal tells you nothing about the agent. The
+dashboard opens a recursive `fs.watch` handle per watched dir per SSE
+connection, and at 256 that ceiling is reachable in ordinary use. Once the
+descriptor table is exhausted the process still accepts TCP but can no longer
+open files or watches: every route returns nothing, no SSE frames arrive, and
+panels sit on "loading…" forever. If you ever see that shape, check
+`lsof -p <pid> | wc -l` against the limit — a count that climbs across
+requests and never falls is a leak, not load.
+
 **Once the agent is installed, `stop-dashboard.sh` does not stop it** — the
 agent-owned server has no pidfile for `stop-dashboard.sh` to find. Stop it
 with:
