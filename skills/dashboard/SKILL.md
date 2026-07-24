@@ -25,15 +25,24 @@ Seven panels:
    tracks how many loop cards are showing. Non-complete loops that have
    gone stale drop into a dim sub-list below the cards, one line per loop
    with its title and time since last update.
-3. **COMMAND DECK** — declared buttons (bounded, config-driven runs — never a
+3. **CONTEXT TREND** — one dot per agentic-loop session: x is the session's
+   start date, y is orchestrator cache-read tokens per assistant turn. The
+   2026-07-17 token-reduction cutover is drawn as an annotation the series
+   runs straight through — no gap, no colour change, no causal claim.
+   Per-side medians and n are shown side by side; a side below n=20 is
+   captioned as too few to call. Whether the cutover reduced token burn is
+   not established, and the panel is built to keep it that way: it never
+   renders a "saved X%" headline. Collects on its own SSE frame, so its slow
+   transcript sweep never delays the KPI tiles above.
+4. **COMMAND DECK** — declared buttons (bounded, config-driven runs — never a
    free prompt box) plus run history, plus a Run Output viewer: click any
    run-history row to view its output — live-streaming while the run is
    still going, settled (fetched once) once it ends.
-4. **PR GATES** — open PRs with gate state: merge-ready / blocked (missing
+5. **PR GATES** — open PRs with gate state: merge-ready / blocked (missing
    artifact) / stale (SHA mismatch).
-5. **Bottom-centre hero** — the active loop's primary directive with a big
+6. **Bottom-centre hero** — the active loop's primary directive with a big
    numeral (e.g. work units 2/7) and a micro ticker.
-6. **ASSISTANT.LINK** — pending workflow-audit approvals awaiting a
+7. **ASSISTANT.LINK** — pending workflow-audit approvals awaiting a
    decision (Approve/Deny), plus build status for approved
    `workflow-audit:propose-skill` entries as they claim, build, and open a
    PR.
