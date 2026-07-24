@@ -203,11 +203,19 @@
    rail scroll independently within that fixed height instead of clipping content with no
    way to reach it — min-height: 0 is what lets a flex child shrink below its content size
    so overflow-y has something to act on in the first place. */
+/* min-width: 0 is the same call as min-height: 0 above, on the other axis. Below
+   the 1100px breakpoint .hud-stage collapses to a single column, so the rail is
+   the grid item that has to track the viewport. A grid item's automatic minimum
+   size is its min-content width, so with the default min-width: auto the column
+   cannot shrink past the widest thing in the rail — measured at 404.2px, which
+   left the column frozen there and pushed content past the viewport edge on any
+   narrower screen (61.2px past at a 320px viewport). */
 .hud-rail {
   pointer-events: auto;
   display: flex;
   flex-direction: column;
   min-height: 0;
+  min-width: 0;
   overflow-y: auto;
   overflow-x: hidden;
   scrollbar-width: thin;
