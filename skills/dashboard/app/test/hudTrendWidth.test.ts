@@ -84,12 +84,12 @@ describe("hud.css Context Trend narrow-viewport width robustness", () => {
     const base = baseValueRule(css);
     const overrideMatch = css.match(/^\s+\.hud-trend-value\s*\{[^}]*white-space:\s*normal[^}]*\}/m);
     if (!overrideMatch) throw new Error("narrow-viewport .hud-trend-value override not found in hud.css");
-    // Move a copy of the override above the base rule; the ordering check must then report
-    // the override as earlier, not later.
-    const broken = css.replace(base, `${overrideMatch[0].trim()}\n${base}`);
-    const brokenOverrideIndex = broken.search(/^\s+\.hud-trend-value\s*\{[^}]*white-space:\s*normal[^}]*\}/m);
-    const brokenBaseIndex = broken.search(/^\.hud-trend-value\s*\{[^}]*\}/m);
-    expect(brokenOverrideIndex).toBeLessThan(brokenBaseIndex);
+    // Build a source where the ONLY narrow-viewport override sits above the base rule:
+    // insert an indented copy before the base rule, and drop the real one further down.
+    // The ordering check must then report the override as earlier, not later.
+    const indentedCopy = overrideMatch[0].replace(/^\n?/, "");
+    const broken = css.replace(overrideMatch[0], "").replace(base, `${indentedCopy}\n${base}`);
+    expect(overrideValueRuleIndex(broken)).toBeLessThan(baseValueRuleIndex(broken));
   });
 
   // Desktop rendering must be untouched: the base rule keeps nowrap, so above the breakpoint
