@@ -296,6 +296,46 @@ rc=$?
 check "tgi_same_file: dst does not exist -> rc 1 (never same, install proceeds)" "1" "$rc"
 
 # ═══════════════════════════════════════════════════════════════════════════
+# tgi_other_instance_labels — shared-install-root warning: names OTHER
+# installed tier-gate plists (any repo) so the confirmation prompt surfaces
+# them without requiring the operator to have read docs/comments first.
+# ═══════════════════════════════════════════════════════════════════════════
+
+OTHER_DIR="$TMP/other-plists"
+mkdir -p "$OTHER_DIR"
+
+THIS_PLIST="$OTHER_DIR/com.coderails.tier-gate.plist"
+cat > "$THIS_PLIST" <<'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>com.coderails.tier-gate</string>
+</dict></plist>
+EOF
+
+OTHER_PLIST="$OTHER_DIR/com.coderails.tier-gate.assistant-agent.plist"
+cat > "$OTHER_PLIST" <<'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>com.coderails.tier-gate.assistant-agent</string>
+</dict></plist>
+EOF
+
+if command -v /usr/libexec/PlistBuddy >/dev/null 2>&1; then
+    out=$(tgi_other_instance_labels "$THIS_PLIST" "$OTHER_DIR/com.coderails.tier-gate*.plist" 2>&1)
+    check "tgi_other_instance_labels: excludes plist_dest, echoes only the other Label" "com.coderails.tier-gate.assistant-agent" "$out"
+
+    out=$(tgi_other_instance_labels "$THIS_PLIST" "$THIS_PLIST" 2>&1)
+    check "tgi_other_instance_labels: only plist_dest matches glob -> no output" "" "$out"
+
+    out=$(tgi_other_instance_labels "$TMP/no-such-plist" "$TMP/no-plists-here-*.plist" 2>&1)
+    check "tgi_other_instance_labels: no matching plists -> no output" "" "$out"
+else
+    printf 'skip - tgi_other_instance_labels tests (PlistBuddy not available on this host)\n'
+fi
+
+# ═══════════════════════════════════════════════════════════════════════════
 # tgi_classify_mode — honest MODE line from the ruleset preflight probe
 # ═══════════════════════════════════════════════════════════════════════════
 

@@ -25,6 +25,17 @@
 #═══════════════════════════════════════════════════════════════════════════════
 set -u
 
+# Multi-repo installs share this install root: only TGI_PLIST_DEST varies
+# between instances (e.g. com.coderails.tier-gate.assistant-agent.plist,
+# TIER_GATE_REPO=blueman82/assistant-agent). TGI_INSTALL_ROOT — the runner
+# script, judge-prompt, and credentials — is NOT per-instance. Running this
+# script for ANY one repo overwrites the runner/judge-prompt/creds used by
+# EVERY other installed tier-gate daemon on this machine, not just the one
+# being (re)installed. This is intentional (one codebase, one credential
+# set) and safe at runtime (no shared mutable state — see tier-gate-runner.sh,
+# the only per-run temp file is a unique mktemp), but it means a fix landed
+# for one repo's daemon goes live for all of them on the next reinstall,
+# silently, with no per-repo opt-out.
 TGI_INSTALL_ROOT="${TGI_INSTALL_ROOT:-/etc/coderails-tier-gate}"
 TGI_CREDS_FILENAME="credentials"
 TGI_PLIST_DEST="${TGI_PLIST_DEST:-/Library/LaunchDaemons/com.coderails.tier-gate.plist}"
@@ -227,6 +238,30 @@ tgi_same_file() {
     [[ "$path_a" -ef "$path_b" ]]
 }
 
+# ─── Other-instance discovery (shared-install-root warning) ──────────────────
+
+# tgi_other_instance_labels <plist_dest> <plist_glob>
+# Echoes one Label per line for every com.coderails.tier-gate*.plist matching
+# <plist_glob> EXCEPT <plist_dest> itself (the one this run is about to
+# write). Every matching plist is assumed to share this run's TGI_INSTALL_ROOT
+# (runner script, judge-prompt, credentials) — see the TGI_INSTALL_ROOT
+# comment above: only the plist destination varies per repo instance, so any
+# other matching plist found here is a daemon whose runner/judge-prompt/creds
+# this install is about to overwrite too. Echoes nothing (rc 0) if none
+# found or a Label can't be read (PlistBuddy absent/fails — treated as no
+# other instance found rather than a preflight failure, since this is a WARN,
+# not a gate).
+tgi_other_instance_labels() {
+    local plist_dest="$1" plist_glob="$2"
+    local f label
+    for f in $plist_glob; do
+        [[ -f "$f" ]] || continue
+        [[ "$f" -ef "$plist_dest" ]] 2>/dev/null && continue
+        label=$(/usr/libexec/PlistBuddy -c "Print :Label" "$f" 2>/dev/null) || continue
+        [[ -n "$label" ]] && printf '%s\n' "$label"
+    done
+}
+
 # ─── Entry point (root/sudo/interactive side effects — never unit-tested) ─────
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     set -euo pipefail
@@ -275,8 +310,22 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     tgi_diff_before_promote "$SCRIPT_DIR/tier-gate-runner.sh" "$TGI_INSTALL_ROOT/tier-gate-runner.sh" "runner" || diff_clean=0
     tgi_diff_before_promote "$SCRIPT_DIR/judge-prompt.md" "$TGI_INSTALL_ROOT/judge-prompt.md" "judge-prompt" || diff_clean=0
 
+    # Other installed instances share this run's TGI_INSTALL_ROOT (runner,
+    # judge-prompt, creds) even though they have their own TGI_PLIST_DEST — see
+    # the TGI_INSTALL_ROOT comment above. Surface this at the confirmation
+    # prompt itself so it can't be missed by skipping docs/comments/wiki.
+    other_labels=$(tgi_other_instance_labels "$TGI_PLIST_DEST" "/Library/LaunchDaemons/com.coderails.tier-gate*.plist")
+    if [[ -n "$other_labels" ]]; then
+        printf '\nWARNING: the following OTHER installed tier-gate daemon(s) share this\n'
+        printf 'install root (%s) and will pick up this runner/judge-prompt/\n' "$TGI_INSTALL_ROOT"
+        printf 'credentials on their next tick too — not just %s:\n' "$REPO_SLUG"
+        printf '%s\n' "$other_labels" | sed 's/^/  - /'
+        diff_clean=0
+    fi
+
     if [[ "$diff_clean" -eq 0 ]]; then
-        printf '\nThe installed copy differs from the repo copy shown above.\n'
+        printf '\nThe installed copy differs from the repo copy shown above, and/or other\n'
+        printf 'installed daemons share this install root (see above).\n'
         printf 'Promote the repo copy to the root-owned install? [y/N] '
         read -r answer || answer="n"
         answer=$(printf '%s' "$answer" | tr '[:upper:]' '[:lower:]')
