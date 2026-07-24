@@ -20,7 +20,7 @@
     }
   },
   "loop_stop_counts": "no-record: hook-owned field, written by loop_stall_guard on a LOOP-STOP declaration; this session never registered as an agentic loop so the hook never ran",
-  "disposition": "clean-break",
+  "disposition": "clean-break — accurately describes the shipped diff (35dabcc, pure addition, no compat/shim path), but NOT set at a Phase 2.6 boundary: no agentic-loop ran this session. See retro.json's disposition_record for the full explanation.",
   "decisions_absorbed": "no-record: loop-owned field appended at agentic-loop phase boundaries (-1, 2.5, 2.6, 2.8, 5, 6); this session did not run the agentic-loop skill so no phase boundaries occurred",
   "completed_marker": "no-record: agentic-loop-owned counter, bumped at Phase 13 teardown; not applicable outside a registered loop",
   "last_updated": "2026-07-24T02:20:00Z"
