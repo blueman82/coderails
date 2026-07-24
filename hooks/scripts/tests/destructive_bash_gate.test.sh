@@ -266,6 +266,15 @@ check ".VENV -> allow"              ALLOW "$(run "$(payload "python -m venv .VEN
 # was denied.
 check ".env~ vim backup -> deny"    DENY "$(run "$(payload "cat .env~")")"
 check "#.env# emacs autosave -> deny" DENY "$(run "$(payload "cat '#.env#'")")"
+# An emacs autosave of a SUFFIXED secret. This travels the suffix branch, not
+# the bare-token branch above, so widening only the bare-token boundaries
+# leaves it reachable while the whole suite still reads green — which is
+# exactly the partial implementation this case exists to catch.
+check "#.env.local# autosave of suffixed -> deny" DENY "$(run "$(payload "cat '#.env.local#'")")"
+# The inverse, pinning that the widened boundaries did NOT swallow the
+# template allow-list: a backup of a TEMPLATE holds no secret, so it stays
+# allowed. Without this, denying every "~"-suffixed token would look correct.
+check ".env.example~ backup of template -> allow" ALLOW "$(run "$(payload "cat .env.example~")")"
 # The dotted backup forms already deny via the suffix branch (their first
 # suffix segment is not on the template allow-list). Locked here as
 # regressions, not as new coverage.
