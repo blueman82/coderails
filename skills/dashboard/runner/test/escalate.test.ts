@@ -140,13 +140,23 @@ describe("escalate resilience (B2)", () => {
   it("passes a reason string containing double quotes through defaultNotify's argv verbatim, never string-built into the AppleScript source", () => {
     execFileSyncMock.mockClear();
     const maliciousReason = 'exec-error: reason with "quotes" and "; do shell script "touch /tmp/pwned';
-    escalate({
-      routine: routine(),
-      runId: "inj1",
-      failureClass: "exec-error",
-      reason: maliciousReason,
-      vaultNotesDir: dir,
-    });
+    // This is the one test that asserts on defaultNotify's own body, so it
+    // must defeat that function's process.env.VITEST suppression guard.
+    // Safe to let the body run here: node:child_process is mocked file-wide
+    // above, so execFileSync is execFileSyncMock and no osascript is spawned.
+    const savedVitestEnv = process.env.VITEST;
+    delete process.env.VITEST;
+    try {
+      escalate({
+        routine: routine(),
+        runId: "inj1",
+        failureClass: "exec-error",
+        reason: maliciousReason,
+        vaultNotesDir: dir,
+      });
+    } finally {
+      if (savedVitestEnv !== undefined) process.env.VITEST = savedVitestEnv;
+    }
     expect(execFileSyncMock).toHaveBeenCalled();
     const [command, args] = execFileSyncMock.mock.calls[0];
     expect(command).toBe("osascript");

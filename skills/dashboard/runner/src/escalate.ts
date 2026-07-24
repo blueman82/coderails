@@ -24,6 +24,15 @@ export interface EscalationContext {
 // build a full EscalationContext from) can drive the same notification
 // channel escalate() uses, rather than re-implementing it.
 export function defaultNotify(title: string, message: string): void {
+  // Under vitest, suppress the real notification. Any test that drives a
+  // failure path without passing its own notifyImpl otherwise falls through
+  // to here and fires a genuine macOS notification — on 2026-07-22 a run of
+  // sweep.test.ts flooded the notification centre with "Routine failed:
+  // run-a/run-b" alerts naming test fixture paths, indistinguishable at a
+  // glance from a real routine failure. Tests that assert on this function's
+  // own body (escalate.test.ts's argv-injection test) delete process.env.VITEST
+  // around the call to opt back in.
+  if (process.env.VITEST) return;
   // macOS-only (osascript) — no cross-platform requirement exists for this
   // routine feature today. title/message are passed as trailing argv
   // elements (via `on run argv`), never interpolated into the AppleScript

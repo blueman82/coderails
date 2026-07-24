@@ -247,13 +247,13 @@ describe("sweepOnce per-intent failure boundary (B1)", () => {
   it("continues the sweep when appendRun is forced to throw mid-intent", async () => {
     writeIntent("run-a", { button: "wiki-lint", requestedAt: Date.now(), source: "cli" });
     writeIntent("run-b", { button: "wiki-lint", requestedAt: Date.now(), source: "cli" });
-    // runsDir is a file, not a directory: appendRun's mkdirSync(dir, {recursive:true}) throws ENOTDIR.
+    // runsDir is a file, not a directory: appendRun's mkdirSync(dir, {recursive:true}) throws EEXIST.
     const brokenRunsDir = join(root, "runs-is-a-file");
     writeFileSync(brokenRunsDir, "not a directory");
     const runClaudeImpl = vi.fn().mockResolvedValue({ exitCode: 0, stdout: "", stderr: "" });
     const result = await sweepOnce({
       queueDir, processingDir, archiveDir, quarantineDir, config,
-      runsDir: brokenRunsDir, vaultNotesDir, runClaudeImpl,
+      runsDir: brokenRunsDir, vaultNotesDir, runClaudeImpl, notifyImpl: vi.fn(),
     });
     // Both intents were claimed and the sweep did not crash despite every
     // appendRun call throwing.
