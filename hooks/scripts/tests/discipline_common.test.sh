@@ -232,4 +232,26 @@ T=$(mk_transcript \
 result=$(dc_file_count "$T")
 check "3 edits to one file path dedupe to 1" "1" "$result"
 
+# --- Test (k): a line that is VALID JSON but a bare SCALAR must not zero the
+# count. This is a different failure from test (h)'s malformed line: `fromjson?`
+# DROPS unparseable text, but it KEEPS a scalar, which then reaches `.type` and
+# makes jq error out ("Cannot index string with string \"type\""). Because
+# stderr is discarded, that error is silent and the whole count came back 0.
+# Same defect als_extract_last_text carried until PR #208. ---
+T=$(mk_transcript \
+  '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Edit","input":{"file_path":"/tmp/a.py"}}]}}' \
+  '42' \
+  '"a bare json string"' \
+  '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Edit","input":{"file_path":"/tmp/b.py"}}]}}')
+result=$(dc_file_count "$T")
+check "valid-JSON scalar line does not zero the count" "2" "$result"
+
+# --- Test (l): the same scalar hazard for dc_extract_last_text -- a scalar line
+# must not blank the extraction of a later assistant turn. ---
+T=$(mk_transcript \
+  '"a bare json string"' \
+  '{"type":"assistant","message":{"content":[{"type":"text","text":"REAL ANSWER"}]}}')
+result=$(dc_extract_last_text "$T" 50)
+check "valid-JSON scalar line does not blank the extraction" "REAL ANSWER" "$result"
+
 [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails failures)"; exit 1; }

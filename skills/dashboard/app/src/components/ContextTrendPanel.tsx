@@ -4,20 +4,26 @@ import { useRef, useState } from "react";
 import { useDashboardContext } from "@/components/DashboardProvider";
 import type { ContextTrendSummary, TrendSession } from "@/lib/collect/contextTrend";
 
-// Renders docs/TOKEN-REDUCTION-AUDIT.md as a live panel: one dot per
+// Renders the contextTrend collector's series as a live panel: one dot per
 // agentic-loop session (x = start date, y = orchestrator cache-read tokens
 // per assistant turn), the 2026-07-17 cutover drawn as an annotation the
 // series runs straight through — no gap, no color change, no causal claim.
-// The audit's verdict is indeterminate and the panel is built to keep it
-// that way: per-side medians and n are shown side by side, never a single
-// "saved X%" headline, and the reserved caveat color carries the two facts
-// that bound the reading (a small after-side n; row 1 — the measure
-// documented as the largest saving — inert since it shipped).
+//
+// Whether the cutover's measures reduced token burn is not established (see
+// the collector's header), and the panel is built to keep it that way:
+// per-side medians and n are shown side by side, never a single "saved X%"
+// headline, and the reserved caveat color carries the two facts that bound
+// the reading (a small after-side n; row 1 — the measure expected to save the
+// most — inert since it shipped, per PR #273 which removed its gate after it
+// fired zero times).
 
 // Below this many sessions a side's median is drawn in the caveat color and
-// said in words to be uncallable. Judgement constant, not statistics: the
-// audit deemed its n=10 after-group "not established" (§4.1), and this
-// only selects presentation — every session stays plotted either way.
+// said in words to be uncallable. This is a presentation threshold, not a
+// statistical test — it only picks how a median is styled and captioned; every
+// session stays plotted either way, and no value is adjusted or withheld.
+// 20 is a deliberately conservative round number: it sits above the ~10-session
+// after-group that first prompted the caveat, so a median gets called readable
+// only well clear of that size.
 const MIN_READABLE_N = 20;
 
 // ViewBox geometry. The height includes the x-axis band and compaction

@@ -72,6 +72,33 @@ export function createEventsHandler(deps: EventsHandlerDeps) {
 
     let unsubscribe: (() => void) | undefined;
 
+    // Teardown must be idempotent AND reachable from more than one path.
+    //
+    // ReadableStream.cancel() only fires when the response *consumer* cancels.
+    // A client that simply goes away (tab closed, network drop, curl killed)
+    // does not reliably trigger it, so relying on cancel() alone leaked the
+    // whole aggregator per abandoned connection: a recursive fs.watch handle on
+    // each of projectsDir/loopsDir/runsDir/queueDir/buildsDir, plus the gates
+    // setInterval, never released.
+    //
+    // That leak is fatal under launchd, which caps this process at
+    // `launchctl limit maxfiles` = 256 — not the shell's soft limit. A handful
+    // of page loads exhausts the descriptor table; after that the server still
+    // accepts TCP but cannot open files or watches, and it wedges: HTTP 000 on
+    // every route, no SSE frames, panels stuck on "loading…".
+    //
+    // So we tear down from request abort as well, and guard with a flag because
+    // both paths can fire for the same connection.
+    let released = false;
+    const release = () => {
+      if (released) return;
+      released = true;
+      unsubscribe?.();
+      aggregator.stop();
+    };
+
+    request.signal?.addEventListener("abort", release, { once: true });
+
     const stream = new ReadableStream<Uint8Array>({
       start(controller) {
         const encoder = new TextEncoder();
@@ -82,13 +109,21 @@ export function createEventsHandler(deps: EventsHandlerDeps) {
             controller.enqueue(encoder.encode(sseFrame(event, data)));
           } catch {
             // controller already closed (client disconnected mid-emit) —
-            // nothing to do, cancel() will run the teardown.
+            // nothing to do, release() runs from cancel()/abort.
           }
         });
+        // A signal that was ALREADY aborted before this handler ran (client
+        // dropped between connection-accept and here) has fired its "abort"
+        // event in the past, so the listener registered above never fires —
+        // and teardown would fall back to the cancel() path this fix exists
+        // to stop relying on. Re-check the flag now that the aggregator is
+        // started and unsubscribe is bound, so release() has something real
+        // to tear down. Checking any earlier would stop a not-yet-started
+        // aggregator and leave the subscription dangling.
+        if (request.signal?.aborted) release();
       },
       cancel() {
-        unsubscribe?.();
-        aggregator.stop();
+        release();
       },
     });
 

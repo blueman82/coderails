@@ -2,11 +2,20 @@ import { createReadStream, readdirSync, statSync, existsSync } from "node:fs";
 import { createInterface } from "node:readline";
 import { join, basename } from "node:path";
 
-// Operationalises docs/TOKEN-REDUCTION-AUDIT.md: orchestrator-only cache-read
-// tokens per assistant turn, per agentic-loop session, across the 2026-07-17
-// token-reduction cutover. The audit's verdict is INDETERMINATE — this
-// collector reports the raw per-session series plus per-side summary stats and
-// leaves the judgement to the reader; it never computes a headline saving.
+// Measures orchestrator-only cache-read tokens per assistant turn, per
+// agentic-loop session, across the 2026-07-17 token-reduction cutover (the
+// measures shipped as PRs #228/#229/#230 — see CUTOVER_MS below).
+//
+// Whether those measures reduced token burn is NOT established: the before and
+// after groups differ in size and composition, and no controlled comparison was
+// run. So this collector deliberately reports only the raw per-session series
+// plus per-side summary stats (median, quartiles, n) and leaves the judgement
+// to the reader. It never computes a headline saving, and the panel that renders
+// it never displays one.
+//
+// (An earlier version of this comment cited docs/TOKEN-REDUCTION-AUDIT.md as the
+// source of that verdict. No such file has ever existed on any ref, so each
+// constant below now carries its own in-repo justification instead.)
 
 export interface TrendSession {
   sessionId: string;
@@ -49,11 +58,18 @@ export interface ContextTrendSummary {
   compactions: CompactionEvent[];
 }
 
-// PRs #228/#229/#230 merged 2026-07-17 21:22–21:27 BST; sessions are binned
-// against the first merge (verified in the audit via git log).
+// The token-burn reduction measures shipped as PRs #228/#229/#230, merged
+// 2026-07-17 at 20:22:29Z, 20:25:46Z and 20:27:27Z (verifiable with
+// `gh pr view 228 --json mergedAt`). Sessions are binned against the FIRST of
+// those merges, so the boundary is a real, checkable repo event rather than a
+// chosen date.
 const CUTOVER_MS = Date.parse("2026-07-17T20:22:00Z");
-// The audit's symmetric analysis window start. Sessions starting earlier are
-// out of population (different skill versions, different measures).
+// Window start, picked to give the before-group a span comparable to the
+// after-group rather than an unbounded tail: it reaches ~10 days back from the
+// cutover. Sessions starting earlier are out of population — they ran against
+// materially different skill versions, so their per-turn cost is not
+// comparable. This bound only selects WHICH sessions are plotted; it does not
+// weight or adjust any of them.
 const WINDOW_START_MS = Date.parse("2026-07-07T00:00:00Z");
 // The measures under audit shipped to the coderails project; its transcript
 // dirs (primary checkout + worktree-suffixed variants) all carry this token.
