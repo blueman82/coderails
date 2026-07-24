@@ -12,7 +12,7 @@ telemetry leaving the machine.
 
 ## What it shows
 
-Six panels:
+Seven panels:
 
 1. **SYSTEM VITALS** — usage windows, hooks fired, lint findings; hero
    numerals + sparklines. Tiles show "loading…" until the first activity
