@@ -1471,11 +1471,7 @@
 }
 .hud-trend-value {
   color: var(--off-white);
-  /* The value carries a median and an IQR pair, so it is the longest string in
-     the row. nowrap made it unshrinkable: .hud-trend-fill (flex:1) gave up its
-     slack first, then the row overflowed the rail. Wrap it instead — the same
-     call, for the same reason, as .hud-trend-readout above. */
-  white-space: normal;
+  white-space: nowrap;
 }
 /* The reserved caveat colour: these lines carry the two facts that bound how
    the chart may be read (a small after-side n, and row 1 being inert), so they
