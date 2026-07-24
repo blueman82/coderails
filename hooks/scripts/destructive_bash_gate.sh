@@ -326,7 +326,13 @@ fi
 # PATH TOKEN anywhere on the line rather than enumerating reader/writer verbs,
 # because an enumeration of verbs is unbounded (cat, bat, less, more, view,
 # vim, nano, awk, sed, xxd, python -c open(...), ...) and every omission is a
-# silent bypass. Any command line that names a .env file is denied.
+# silent bypass. Any command line naming a .env file as a LITERAL token is
+# denied. Matching happens before the shell expands anything, so a token that
+# only becomes ".env" at expansion time is not caught — "cat .env*" and
+# "cat .en?" glob onto the real file and are ALLOWED. That is an uncovered
+# case, not a regression: no .env gate existed at all before this block. It is
+# listed with the other ceilings in docs/REFERENCE.md; do not read the
+# paragraph below as claiming the literal matcher closes it.
 #
 # Boundaries — this is the entire difficulty, since over-blocking here breaks
 # every Bash call in a session, which is worse than the gap it closes:
