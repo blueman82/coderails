@@ -34,7 +34,7 @@ Blocks merge if any check fails. This is redundant defence-in-depth: it fails lo
 A root-owned launchd process (`com.coderails.tier-gate`) runs `scripts/tier-gate/tier-gate-runner.sh` every 5 minutes. It:
 - Fetches all open PRs in the watched repo
 - For each PR with an `evals.json` artifact: runs the judge prompt (an LLM prompt in `scripts/tier-gate/judge-prompt.md`) to evaluate the claimed tier against the actual code diff
-- Posts a `tier-review` commit status carrying a `verdict=` token and the claimed `tier=N` token. It posts on every outcome, not only on approval: `verdict=legitimate` (state `success`), `verdict=illegitimate` (state `failure`), `verdict=self_edit` when the diff touches the tier-gate's own files, `verdict=pending` while judging, and `verdict=error` when it cannot fetch the diff or the files list
+- Posts a `tier-review` commit status carrying a `verdict=` token and the claimed `tier=N` token. It posts on every outcome, not only on approval. The six verdicts are `legitimate` (state `success`), `illegitimate` (state `failure`), `insufficient` when the diff is too large to judge within the size cap, `self_edit` when the diff touches the tier-gate's own files, `pending` while judging is in flight, and `error` for operational failures such as an unfetchable diff or files list, a missing embedded `evals.json`, or an unusable judge response
 - Only `verdict=legitimate` at state `success` satisfies the merge gate; every other status blocks
 
 Blocks at GitHub API level: a dishonest tier can never receive a `verdict=legitimate` status.
