@@ -114,13 +114,14 @@ as durable PR comments; `task-evals` freezes a game-resistant success-eval set
 at task intake and gates `/merge` on it.
 
 Two UserPromptSubmit hooks run silently: inject_context, and crack_on_gate (which
-stamps a per-session flag when the raw prompt contains "crack on"). Five Stop hooks block
-via exit 2: confidence-label check, verify-loop check (both promoted from
-warn-mode on 2026-05-05), loop-state guard, loop-stall guard, and
-crack_on_prose_gate (blocks a final message that asks the user a question in
+stamps a per-session flag when the raw prompt contains "crack on"). Eight Stop hooks
+are registered; five of them block via exit 2: confidence-label check, verify-loop
+check (both promoted from warn-mode on 2026-05-05), loop-state guard, loop-stall
+guard, and crack_on_prose_gate (blocks a final message that asks the user a question in
 prose while the crack-on flag is stamped — pattern-matching, so a question with
 no interrogative marker, or any ask past its per-turn cap of 3, still gets
-through). verify-loop
+through). The other three (voice_announce, unregistered_loop_guard,
+offload_push_guard) nudge only and never block. verify-loop
 also blocks when a turn edits 3+ files and the response omits the
 Did-Not-Verify section entirely (added 2026-07-13), not just on untagged
 bullets. The same two
