@@ -61,7 +61,7 @@ Edit the spec there, then ensure `tier-gate-runner.sh` and the daemon's launchd 
 When you push a PR:
 1. Run `/coderails:task-evals` to generate `evals.json` with a claimed tier
 2. Run `/coderails:post-evals` to post it on the PR
-3. Wait for the daemon to judge it (typically 5 minutes; check PR comments for `tier-review` status)
+3. Wait for the daemon to judge it (typically within 60 seconds; check PR comments for `tier-review` status)
 4. If the daemon approves (`verdict=legitimate`), merge normally
 5. If the daemon rejects (`verdict=illegitimate`), re-read the tier rules, adjust the claimed tier or the changeset, and repost
 
