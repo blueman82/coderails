@@ -90,7 +90,7 @@ These skills were written for coderails and are not vendored from elsewhere.
 
 **Purpose:** Live local web HUD showing sessions, agentic loops, PR gate states, runs, memory activity, and declared one-click triggers.
 
-**Invocation:** `/coderails:dashboard` or `scripts/start-dashboard.sh`.
+**Invocation:** `/coderails:dashboard` or `skills/dashboard/scripts/start-dashboard.sh`.
 
 **Run output viewer:** the COMMAND DECK's `OutputViewerPanel`
 (`skills/dashboard/app/src/components/OutputViewerPanel.tsx`) shows a
