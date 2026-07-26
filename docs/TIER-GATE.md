@@ -31,7 +31,7 @@ When `config.tier_review.machine_user` is set in `.claude/workflow.config.yaml`,
 Blocks merge if any check fails. This is redundant defence-in-depth: it fails loudly on misconfiguration and holds the line before the ruleset is active.
 
 **Layer 2: Daemon verdict (tier-gate-runner.sh)**
-A root-owned launchd process (`com.coderails.tier-gate`) runs `scripts/tier-gate/tier-gate-runner.sh` every 5 minutes. It:
+A root-owned launchd process (`com.coderails.tier-gate`) runs `scripts/tier-gate/tier-gate-runner.sh` every 60 seconds. It:
 - Fetches all open PRs in the watched repo
 - For each PR with an `evals.json` artifact: runs the judge prompt (an LLM prompt in `scripts/tier-gate/judge-prompt.md`) to evaluate the claimed tier against the actual code diff
 - Posts a `tier-review` commit status carrying a `verdict=` token and the claimed `tier=N` token. It posts on every outcome, not only on approval. The six verdicts are `legitimate` (state `success`), `illegitimate` (state `failure`), `insufficient` when the blind inputs do not support a decision either way — the judge's own verdict when a diff is empty or unreadable, and also what a tier-1 or tier-2 claim receives when the diff exceeds the size cap (a tier-0 claim over the same cap gets `illegitimate`, because size is itself a tier-0 discriminator), `self_edit` when the diff touches the tier-gate's own files, `pending` while judging is in flight, and `error` for operational failures such as an unfetchable diff or files list, a missing embedded `evals.json`, or an unusable judge response
@@ -61,7 +61,7 @@ Edit the spec there, then ensure `tier-gate-runner.sh` and the daemon's launchd 
 When you push a PR:
 1. Run `/coderails:task-evals` to generate `evals.json` with a claimed tier
 2. Run `/coderails:post-evals` to post it on the PR
-3. Wait for the daemon to judge it (typically 5 minutes; check PR comments for `tier-review` status)
+3. Wait for the daemon to judge it (typically within 60 seconds; check PR comments for `tier-review` status)
 4. If the daemon approves (`verdict=legitimate`), merge normally
 5. If the daemon rejects (`verdict=illegitimate`), re-read the tier rules, adjust the claimed tier or the changeset, and repost
 
