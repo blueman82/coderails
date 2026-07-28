@@ -6,7 +6,7 @@ model: sonnet
 
 # Wiki Init
 
-Bootstrap an LLM Wiki for the current project based on Karpathy's LLM Wiki pattern. Read `references/karpathy-pattern.md` for the full pattern description before starting.
+Bootstrap an LLM Wiki for the current project based on Karpathy's LLM Wiki pattern: https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f
 
 The core idea: instead of re-deriving knowledge from raw code on every question, the LLM incrementally builds and maintains a persistent wiki — a structured, interlinked collection of markdown files that compounds over time. The human browses it in Obsidian. The LLM does the bookkeeping.
 
@@ -42,7 +42,7 @@ Based on the project, propose page types and directory structure. Do NOT use har
 - **Library**: modules/, apis/, patterns/, migrations/, sources/
 - **Infrastructure**: services/, resources/, runbooks/, incidents/, sources/
 
-Common across all projects: `index.md` (catalog), `log.md` (chronological), `templates/` (page skeletons), `sources/` (ingested PRs), `investigations/` (filed-back answers). Schema lives in the project directory as AGENTS.md — not inside the vault.
+Common across all projects: `index.md` (catalog), `log.md` (chronological), `templates/` (page skeletons), `sources/` (ingested PRs), `investigations/` (filed-back answers). Schema lives in the project directory as `AGENTS-wiki-schema.md`, linked from a slim `AGENTS.md` entry point — not inside the vault.
 
 Present the proposal and iterate until the user approves. Include 3-5 seed pages you'd create first.
 
@@ -75,14 +75,16 @@ Present the proposal and iterate until the user approves. Include 3-5 seed pages
    grep -q '"marp"' "$VAULT/.obsidian/community-plugins.json" || { echo "FATAL: community-plugins.json missing marp entry"; exit 1; }
    ```
    If any check fails, stop. Do not improvise. Tell the user what failed and ask for help.
-7. Create the wiki content directories (one per approved page type) plus `templates/` and `assets/` (for matplotlib charts):
+7. Create the wiki content directories (one per approved page type) plus `templates/`. Also create `assets/` if the project expects matplotlib charts or other generated images in the wiki — it's optional, not required for every vault:
    ```bash
-   cd "$VAULT" && mkdir -p templates assets <page-type-1> <page-type-2> ...
+   cd "$VAULT" && mkdir -p templates <page-type-1> <page-type-2> ...
+   # optional, only if charts/images are expected:
+   mkdir -p assets
    ```
 
 ### Step 4: Create Foundation Files
 
-**index.md** — content catalog. Claude reads this FIRST when answering queries. Organized by page type with `[[wiki-links]]`. Mark gaps as "Not yet documented." Reference AGENTS.md as the schema location (do NOT create a separate schema.md in the vault — AGENTS.md in the project directory is the single source of truth).
+**index.md** — content catalog. Claude reads this FIRST when answering queries. Organized by page type with `[[wiki-links]]`. Mark gaps as "Not yet documented." Reference `AGENTS-wiki-schema.md` as the schema location (do NOT create a separate schema.md in the vault — `AGENTS-wiki-schema.md` in the project directory is the single source of truth).
 
 **log.md** — append-only. Each entry: `## [YYYY-MM-DD] operation | description`.
 
@@ -98,9 +100,14 @@ Read the codebase and create 5-10 pages covering the most architecturally import
 
 Discuss pages with the user as you create them — don't auto-ingest silently.
 
-### Step 6: Create AGENTS.md
+### Step 6: Create AGENTS.md and AGENTS-wiki-schema.md
 
-Create `AGENTS.md` in the project directory (not the wiki vault). This is the schema the LLM reads at conversation start. Include: wiki location, three layers, page types, page format, Ingest/Query/Lint workflows, conventions, evolution note.
+Create two files in the project directory (not the wiki vault):
+
+- **`AGENTS.md`** — a slim entry point. It points to `AGENTS-wiki-schema.md` as the source of truth for wiki conventions and, if the project already has other `AGENTS.md` content (a working guide, etc.), coexists with it rather than replacing it.
+- **`AGENTS-wiki-schema.md`** — the actual schema the LLM reads at conversation start. Include: wiki location, three layers, page types, page format, Ingest/Query/Lint workflows, conventions, evolution note.
+
+**The Page types section in `AGENTS-wiki-schema.md` must include every directory Claude will write to — `templates/` and `assets/` included, marked as structural directories rather than page types.** This matters beyond documentation: the coderails plugin's own `hooks/scripts/wiki_taxonomy_gate.sh` parses this exact section as its write allow-list, but only for the ONE vault named in the plugin's own `.claude/workflow.config.yaml` — running this skill against some other project's vault (the normal case) does not put that vault under this gate at all. When the gate does apply and does fire, a denial is explicit and logged (it names the rejected directory and the sanctioned list), not silent — but a directory created in Step 3 and omitted from this section will still be rejected on its first write. Listing a directory that doesn't exist yet on disk is harmless — the parse that builds the allow-list doesn't check the filesystem — so a vault may list `assets/` per this step while skipping its creation per Step 3; just note that the hook's secondary corroboration check separately requires at least 2 of the listed directories to actually be present on disk, so a vault can't rely on this to skip creating most of its structure.
 
 ### Step 7: Update CLAUDE.md
 
@@ -109,16 +116,18 @@ Add near the top of the project's CLAUDE.md:
 ```markdown
 ## Wiki Knowledge Base
 
-**At the start of every conversation**, read `AGENTS.md` in this directory for wiki maintenance protocols. The <project> wiki is a persistent, compounding knowledge base maintained by Claude and browsed by <user> in Obsidian. The wiki vault lives at `<vault-path-chosen-in-step-3>`.
+**At the start of every conversation**, read `AGENTS.md` in this directory — the entry point — which links to `AGENTS-wiki-schema.md` for wiki maintenance protocols. The <project> wiki is a persistent, compounding knowledge base maintained by Claude and browsed by <user> in Obsidian. The wiki vault lives at `<vault-path-chosen-in-step-3>`.
 ```
 
 ### Step 8: Setup Tooling
 
-**qmd**: Register the wiki vault as a collection and add context:
+**qmd**: Register the wiki vault as a collection and add context. `qmd collection add` errors "Collection already exists" on a rerun — guard it so re-running this step doesn't fail:
 ```bash
-qmd collection add <vault-path> --name wiki
+qmd collection list | grep -qx wiki || qmd collection add <vault-path> --name wiki
 qmd context add qmd://wiki "<description of what the wiki covers>"
 ```
+
+After any wiki changes, reindex with `qmd update && qmd embed`. Run `qmd update` first — `qmd embed` alone misses new files, since it only refreshes embeddings for already-known content hashes (inferred from qmd's documented behaviour); `qmd update` is what scans for new/changed files.
 
 **Obsidian**: Register the vault programmatically and open it:
 
