@@ -1,6 +1,7 @@
 ---
 name: memory-consolidation
 description: Use to consolidate a project's memory directory — dedupe overlapping memories, flag stale or contradicted ones, and refresh the MEMORY.md index. Trigger on "consolidate memory", "clean up memory", "memory consolidation", or when running as a scheduled routine.
+model: sonnet
 ---
 
 # Memory Consolidation

@@ -1,6 +1,7 @@
 ---
 name: task-evals
 description: 'Use at task intake, before implementation starts, to turn any non-trivial task into a frozen, tiered set of independent, game-resistant success evals — inside an agentic loop or not. Trigger at loop scope (per-loop and per-work-unit), when a plan is written, or directly on user request. Produces a frozen evals.json (schema_version 1) defining game-resistant success evals for a task, designed to gate merge at pr scope and loop completion at loop scope. Not self-verification — evals must not share an oracle with the implementation.'
+effort: high
 ---
 
 # Task Evals

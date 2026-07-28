@@ -1,6 +1,7 @@
 ---
 name: writing-plans
 description: 'Use when you have a spec or resolved design for a multi-step task and need a durable, task-by-task implementation plan before any code is written — each task with exact files, interfaces, bite-sized steps, and verify-criteria. Not for single trivial edits, which need no separate plan.'
+effort: high
 ---
 
 # Writing Plans

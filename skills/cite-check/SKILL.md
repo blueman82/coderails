@@ -5,6 +5,7 @@ agent: coderails:source-auditor
 context: fork
 background: false
 argument-hint: <claim to verify>
+effort: high
 ---
 
 # Cite-check

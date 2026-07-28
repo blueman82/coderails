@@ -5,6 +5,7 @@ context: fork
 agent: coderails:wiki-writer
 background: false
 argument-hint: <question>
+model: sonnet
 ---
 
 # Wiki Query

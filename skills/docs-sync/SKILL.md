@@ -1,6 +1,7 @@
 ---
 name: docs-sync
 description: Scheduled nightly pipeline that audits this repo's git-tracked documentation for drift against the actual codebase, and — only if drift is found — edits, pushes, reviews, and self-merges a fix with no human in the loop. Runs on a schedule, NOT for interactive use — for an interactive drift check, use /sync-docs directly instead.
+effort: high
 ---
 
 # Docs Sync

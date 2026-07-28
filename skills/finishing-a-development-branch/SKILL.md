@@ -1,6 +1,7 @@
 ---
 name: finishing-a-development-branch
 description: Use when implementation is complete and all tests pass - autonomously ships the work (push + create PR by default) and cleans up the workspace, with no human checkpoint
+effort: high
 ---
 
 # Finishing a Development Branch
