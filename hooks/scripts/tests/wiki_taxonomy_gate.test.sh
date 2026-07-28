@@ -8,20 +8,30 @@ TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 export CLAUDE_DISCIPLINE_LOG="$TMP/discipline.log"
 
-# $VAULT — a wiki repo: AGENTS.md at its root with the "wiki-vault: true"
-# marker, a "## Page types" table, AND at least 2 of those directories
-# actually present on disk (structural corroboration — see
-# wiki_taxonomy_gate.sh's rationale). All three are required; missing any
-# one means this would no longer be recognised as a vault at all.
-VAULT="$TMP/vault"
-mkdir -p "$VAULT/architecture" "$VAULT/investigations" "$VAULT/sources"
-git -C "$VAULT" init -q
-git -C "$VAULT" config user.email t@t.t
-git -C "$VAULT" config user.name t
-cat > "$VAULT/AGENTS.md" <<'EOF'
-# Wiki AGENTS.md
-
-wiki-vault: true
+# $SCHEMA — a stand-in for the PLUGIN repo, carrying the wiki schema the gate
+# reads. The taxonomy now comes from ONE fixed location (the plugin's
+# AGENTS-wiki-schema.md), not from a file at the written file's repo root.
+#
+# WHY THIS FIXTURE CHANGED: the previous version built each vault with its own
+# root AGENTS.md carrying a "wiki-vault: true" marker, and passed. The REAL
+# vault has neither file nor marker, so the shipped gate exited 0 on every
+# write and never once engaged. The suite was green against a fixture that did
+# not match production — which is exactly how the defect survived. These
+# fixtures now mirror the real shape: a vault with NO AGENTS.md of its own.
+SCHEMA="$TMP/plugin"
+mkdir -p "$SCHEMA/.claude"
+# The gate identifies the vault POSITIVELY from wiki_path, not from directory
+# shape. Structure alone over-blocks: an ordinary Claude plugin (commands/ +
+# hooks/ + skills/) and a data pipeline (sources/ + investigations/) both
+# clear a ">=2 sanctioned dirs" test, and both had unrelated writes blocked
+# when this gate identified vaults structurally. The fixture therefore needs
+# a config pointing at the vault, exactly as production does.
+cat > "$SCHEMA/.claude/workflow.config.yaml" <<'EOF'
+project: test
+wiki_path: ../vault
+EOF
+cat > "$SCHEMA/AGENTS-wiki-schema.md" <<'EOF'
+# Wiki schema
 
 ## Page types
 
@@ -31,8 +41,17 @@ wiki-vault: true
 | `investigations/` | Filed-back answers to queries |
 | `sources/` | Ingested references |
 EOF
-git -C "$VAULT" add AGENTS.md
-git -C "$VAULT" commit -q -m init
+export CLAUDE_PLUGIN_ROOT="$SCHEMA"
+
+# $VAULT — a wiki repo identified STRUCTURALLY: at least 2 of the schema's
+# sanctioned directories present on disk, and not the plugin repo itself.
+# Deliberately carries NO AGENTS.md, matching the real vault.
+VAULT="$TMP/vault"
+mkdir -p "$VAULT/architecture" "$VAULT/investigations" "$VAULT/sources"
+git -C "$VAULT" init -q
+git -C "$VAULT" config user.email t@t.t
+git -C "$VAULT" config user.name t
+git -C "$VAULT" commit -q --allow-empty -m init
 
 # $NOVAULT — a normal repo with a decisions/ dir but NO wiki AGENTS.md at all.
 NOVAULT="$TMP/novault"
@@ -212,23 +231,50 @@ check "deny reason names the rejected directory" \
   1 "$(printf '%s' "$out" | grep -c 'decisions/')"
 check "deny reason names a sanctioned directory" \
   1 "$(printf '%s' "$out" | grep -c 'investigations/')"
+# The deny reason is user-facing and must name the file the user has to edit.
+# It previously interpolated an undefined variable, so it rendered a BLANK
+# filename and directed the reader to a Page types table in AGENTS.md — a file
+# the gate no longer reads. Following the message would not have lifted the
+# block. Neither the ALLOW/DENY corpus nor any prior assertion caught it,
+# because both only inspect permissionDecision, never the reason text.
+check "deny reason names the schema file, not a blank" \
+  1 "$(printf '%s' "$out" | grep -c 'AGENTS-wiki-schema.md')"
+check "deny reason has no empty 'per :' interpolation" \
+  0 "$(printf '%s' "$out" | grep -c 'per : ')"
+check "deny reason does not misdirect to AGENTS.md" \
+  0 "$(printf '%s' "$out" | grep -c "AGENTS.md's Page types")"
 
-# Real-vault sanity check: the actual assistant-agent-wiki repo now carries
-# its own root AGENTS.md with a Page types table (fixed after this hook
-# surfaced the gap — it previously lived only in a sibling repo and this
-# hook could never reach it). Guarded to skip cleanly if the path is absent
+# Real-vault sanity check, against THIS project's configured vault. The gate
+# now identifies the vault positively from wiki_path, so a vault is gated only
+# when a plugin config points at it — an unrelated wiki on the same machine is
+# correctly NOT gated by this plugin, which is the property that stops ordinary
+# repos being misidentified. Guarded to skip cleanly if either path is absent
 # so the suite stays portable across machines/CI.
-REALWIKI="/Users/harrison/Github/assistant-agent-wiki"
-if [ -d "$REALWIKI/.git" ] && [ -f "$REALWIKI/AGENTS.md" ]; then
-  check "real wiki, unsanctioned decisions/ -> deny" \
-    DENY "$(run "$(payload Write "$REALWIKI/decisions/foo.md" "$REALWIKI")")"
-  # calendar-log.md is a real root file beyond the index.md/log.md pair —
-  # confirms root-file detection is structural (no directory component),
-  # not a hardcoded name list that would miss it.
-  check "real wiki, root calendar-log.md -> allow" \
-    ALLOW "$(run "$(payload Write "$REALWIKI/calendar-log.md" "$REALWIKI")")"
+REALPLUGIN="/Users/harrison/Github/coderails"
+REALVAULT="/Users/harrison/Github/coderails-wiki"
+if [ -f "$REALPLUGIN/.claude/workflow.config.yaml" ] && [ -d "$REALVAULT/.git" ]; then
+  # CLAUDE_PLUGIN_ROOT is read from the ENVIRONMENT, not from the payload's
+  # cwd field — point it at the real plugin for this block, then restore.
+  SAVED_ROOT="$CLAUDE_PLUGIN_ROOT"
+  export CLAUDE_PLUGIN_ROOT="$REALPLUGIN"
+  check "real vault, unsanctioned decisions/ -> deny" \
+    DENY "$(run "$(payload Write "$REALVAULT/decisions/foo.md" "$REALPLUGIN")")"
+  # A real root file beyond the index.md/log.md pair — confirms root-file
+  # detection is structural (no directory component), not a hardcoded name
+  # list that would miss it.
+  check "real vault, root log.md -> allow" \
+    ALLOW "$(run "$(payload Write "$REALVAULT/log.md" "$REALPLUGIN")")"
+  check "real vault, sanctioned sources/ -> allow" \
+    ALLOW "$(run "$(payload Write "$REALVAULT/sources/foo.md" "$REALPLUGIN")")"
+  # An unrelated vault on the same machine is not this plugin's vault.
+  UNRELATED="/Users/harrison/Github/assistant-agent-wiki"
+  if [ -d "$UNRELATED/.git" ]; then
+    check "unrelated wiki is not this plugin's vault -> allow" \
+      ALLOW "$(run "$(payload Write "$UNRELATED/decisions/foo.md" "$REALPLUGIN")")"
+  fi
+  export CLAUDE_PLUGIN_ROOT="$SAVED_ROOT"
 else
-  printf 'ok   - real wiki check skipped (path not present on this machine)\n'
+  printf 'ok   - real vault check skipped (paths not present on this machine)\n'
 fi
 
 # Real-repo false-positive check: assistant-agent is the CODE repo whose
@@ -251,19 +297,27 @@ else
   printf 'ok   - real assistant-agent repo check skipped (path not present on this machine)\n'
 fi
 
-# Taxonomy-is-dynamic: add a fake type to a temp AGENTS.md, confirm that
-# directory becomes allowed. Proves the parse is live, not hardcoded. Needs
-# >=2 real sanctioned dirs present (architecture/ + zorptastic/ itself once
-# created) to be recognised as a vault under structural corroboration.
+# Taxonomy-is-dynamic: add a fake type to the SCHEMA (not to the vault),
+# confirm that directory becomes allowed. Proves the parse is live, not
+# hardcoded, and that the live source is the plugin's schema file. Needs >=2
+# real sanctioned dirs present in the vault (architecture/ + zorptastic/) to
+# be recognised under structural corroboration.
 DYNAMIC="$TMP/dynamic"
 mkdir -p "$DYNAMIC/architecture" "$DYNAMIC/zorptastic"
 git -C "$DYNAMIC" init -q
 git -C "$DYNAMIC" config user.email t@t.t
 git -C "$DYNAMIC" config user.name t
-cat > "$DYNAMIC/AGENTS.md" <<'EOF'
-# AGENTS.md
+git -C "$DYNAMIC" commit -q --allow-empty -m init
 
-wiki-vault: true
+# Point the gate at a schema that does NOT yet name zorptastic2.
+DYNSCHEMA="$TMP/dynplugin"
+mkdir -p "$DYNSCHEMA/.claude"
+cat > "$DYNSCHEMA/.claude/workflow.config.yaml" <<'EOF'
+project: dyn
+wiki_path: ../dynamic
+EOF
+cat > "$DYNSCHEMA/AGENTS-wiki-schema.md" <<'EOF'
+# Wiki schema
 
 ## Page types
 
@@ -272,11 +326,38 @@ wiki-vault: true
 | `architecture/` | How the system is built |
 | `zorptastic/` | A made-up page type that does not exist anywhere else |
 EOF
-git -C "$DYNAMIC" add AGENTS.md
-git -C "$DYNAMIC" commit -q -m init
+export CLAUDE_PLUGIN_ROOT="$DYNSCHEMA"
 check "dynamic taxonomy: fake type not yet added -> deny" \
   DENY "$(run "$(payload Write "$DYNAMIC/zorptastic2/foo.md" "$DYNAMIC")")"
 check "dynamic taxonomy: fake type present in table -> allow" \
   ALLOW "$(run "$(payload Write "$DYNAMIC/zorptastic/foo.md" "$DYNAMIC")")"
+
+# Editing the SCHEMA changes enforcement with no hook edit — the property the
+# whole design rests on. Same path, same vault, opposite verdict, and the only
+# thing that changed is a row in the schema table.
+mkdir -p "$DYNAMIC/zorptastic2"
+printf '| `zorptastic2/` | Added after the fact |\n' >> "$DYNSCHEMA/AGENTS-wiki-schema.md"
+check "dynamic taxonomy: adding the row to the schema flips deny -> allow" \
+  ALLOW "$(run "$(payload Write "$DYNAMIC/zorptastic2/foo.md" "$DYNAMIC")")"
+
+# The plugin repo itself is never a vault, even though its own directory names
+# overlap the taxonomy it defines. This replaces the old wiki-vault marker,
+# which existed only to disambiguate a lookup that no longer happens.
+PLUGINREPO="$TMP/pluginrepo"
+mkdir -p "$PLUGINREPO/architecture" "$PLUGINREPO/sources"
+cp "$SCHEMA/AGENTS-wiki-schema.md" "$PLUGINREPO/AGENTS-wiki-schema.md"
+git -C "$PLUGINREPO" init -q
+git -C "$PLUGINREPO" config user.email t@t.t
+git -C "$PLUGINREPO" config user.name t
+git -C "$PLUGINREPO" commit -q --allow-empty -m init
+export CLAUDE_PLUGIN_ROOT="$PLUGINREPO"
+check "plugin repo is never a vault -> allow" \
+  ALLOW "$(run "$(payload Write "$PLUGINREPO/unsanctioned/foo.md" "$PLUGINREPO")")"
+
+# Schema unreachable must FAIL OPEN, never block-everything.
+export CLAUDE_PLUGIN_ROOT="$TMP/does-not-exist"
+check "schema unreachable -> fail open" \
+  ALLOW "$(run "$(payload Write "$VAULT/decisions/foo.md" "$VAULT")")"
+export CLAUDE_PLUGIN_ROOT="$SCHEMA"
 
 [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails)"; exit 1; }
