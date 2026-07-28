@@ -222,30 +222,45 @@ the `STARTING_CWD` comparison catches the more common case where the
 harness (not this shell) wrote the lock but scoped it to the worktree
 this session was running in when Step 6 started.
 
-**Live pid — tell your own session's lock from another session's.** The
-lock reason names a pid; that alone doesn't say whose it is. The tell is
-whether `$WORKTREE_PATH` is the worktree this session is running in —
-if so, the harness locked it on this session's own behalf, not because
-another session is using it:
+**Own cwd vs another session's — lead with the cwd test, not the pid.**
+The lock reason names a pid, but nothing in this repo gives an agent its
+own harness session pid to compare against it — `$$` is the subshell,
+not the session. The operative, executable test is the one already
+computed above: is `$WORKTREE_PATH` the worktree this session is running
+in (`$STARTING_CWD`)? If so, the harness locked it on this session's own
+behalf, not because another session is using it. Pid-naming is
+explanation for why the lock exists, not the check to run:
 
-- **Live pid belonging to ANOTHER session** — report and defer, never
+- **`$WORKTREE_PATH` is NOT this session's own cwd** — some other
+  session is still working in the worktree. Report and defer, never
   force. A merged PR does not by itself mean the worktree is safe to
-  remove; forcing it out would yank that other session mid-work.
-- **Live pid belonging to THIS session** (the worktree is this session's
-  own cwd) — NOT a defer case. `git worktree remove` cannot remove the
-  worktree it is run from, and forcing it (e.g. `-f`, or removing the
-  `.git` file by hand) would break the running session. Use the native
-  `ExitWorktree` tool instead, with `action: "remove"`: it exits the
-  session from the worktree and removes it in one step.
+  remove; forcing it out would yank that other session mid-work. This
+  holds even if the lock also names a pid — a live pid on another
+  session always means defer.
+- **`$WORKTREE_PATH` IS this session's own cwd** — NOT a defer case,
+  regardless of which pid the lock names. `git worktree remove` cannot
+  remove the worktree it is run from, and forcing it (e.g. `-f`, or
+  removing the `.git` file by hand) would break the running session. Use
+  the native `ExitWorktree` tool instead, with `action: "remove"` — but
+  only if it owns this worktree: it operates solely on a worktree
+  created by `EnterWorktree` *this session*. A worktree switched into via
+  `EnterWorktree`'s `path` parameter, or entered with no `EnterWorktree`
+  session active at all, is NOT owned by it — it returns `action: "keep"`
+  only, or silently no-ops, never removes. In that case fall back to `cd`
+  to the main repo root, then `git worktree remove` from there.
 
-  `ExitWorktree` refuses to remove a worktree with commits, reporting
+  When `ExitWorktree` does own the worktree: it exits the session from
+  the worktree and removes it in one step, but refuses when the worktree
+  has uncommitted files or commits not on the original branch, reporting
   them as work that would be discarded — check this before overriding
-  with `discard_changes: true`. If the branch was squash-merged, the
-  squash rewrote the SHAs, so the commits genuinely landed on
-  `origin/main` even though a SHA-based check can't see them there.
-  Confirm before overriding the refusal:
-  `git log --oneline origin/main..HEAD` is empty, **and** the PR reports
-  `state: MERGED` (`gh pr view <n> --json state`). Never pass
+  with `discard_changes: true`. If the branch was squash-merged, `git log
+  --oneline origin/main..HEAD` being empty is NOT the right confirmation
+  — squash rewrites the SHAs that land on `origin/main`, so the branch's
+  own original commit SHAs never appear in its ancestry, and this check
+  can never pass, no matter how genuinely merged the branch is. Confirm
+  content identity instead: `git diff origin/main HEAD` shows no
+  differences, **and** the PR reports `state: MERGED` (`gh pr view <n>
+  --json state`). Only override the refusal once both hold. Never pass
   `discard_changes: true` on a refusal you haven't verified this way.
 
 **Never force-remove a lock you can't attribute to a dead pid or to this
