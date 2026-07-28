@@ -75,9 +75,11 @@ Present the proposal and iterate until the user approves. Include 3-5 seed pages
    grep -q '"marp"' "$VAULT/.obsidian/community-plugins.json" || { echo "FATAL: community-plugins.json missing marp entry"; exit 1; }
    ```
    If any check fails, stop. Do not improvise. Tell the user what failed and ask for help.
-7. Create the wiki content directories (one per approved page type) plus `templates/` and `assets/` (for matplotlib charts):
+7. Create the wiki content directories (one per approved page type) plus `templates/`. Also create `assets/` if the project expects matplotlib charts or other generated images in the wiki — it's optional, not required for every vault:
    ```bash
-   cd "$VAULT" && mkdir -p templates assets <page-type-1> <page-type-2> ...
+   cd "$VAULT" && mkdir -p templates <page-type-1> <page-type-2> ...
+   # optional, only if charts/images are expected:
+   mkdir -p assets
    ```
 
 ### Step 4: Create Foundation Files
