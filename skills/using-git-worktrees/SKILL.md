@@ -206,4 +206,4 @@ Ready to implement <feature-name>
 - Verify directory is ignored for project-local
 - Auto-detect and run project setup
 - Verify clean test baseline
-- When finished with a worktree entered via a native tool, exit/remove it with that tool's counterpart (e.g., `ExitWorktree`), not `git worktree remove`.
+- When finished with a worktree entered via a native tool AND owned by it (created by `EnterWorktree` this session, not switched into via `path`), exit/remove it with that tool's counterpart (e.g., `ExitWorktree`), not `git worktree remove`. For a worktree it doesn't own, fall back to `git worktree remove` from the main repo root.
