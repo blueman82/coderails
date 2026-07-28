@@ -8,7 +8,13 @@ argument-hint: "[scope — e.g. a subdirectory or page prefix; omit to lint the 
 
 # Wiki Lint
 
-**Scope:** $ARGUMENTS (empty means lint the whole vault)
+**Scope:** $ARGUMENTS
+
+An empty scope means lint the whole vault — that is the intended default, not a
+missing argument. Unlike `wiki-ingest` and `wiki-query`, this skill has a
+meaningful behaviour with no argument, so it does not stop. Be aware the whole
+vault is in scope, and that the agent you run as can write and commit: report
+findings before making sweeping changes across pages you were not asked about.
 
 Periodically health-check the wiki. The LLM is good at finding inconsistencies, gaps, and new connections — and at suggesting further questions to ask and sources to look for.
 
