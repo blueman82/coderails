@@ -1,4 +1,5 @@
 ---
+name: verify
 description: Re-derive a specific claim from sources only - no recall, no inference, just evidence
 agent: coderails:source-auditor
 context: fork
