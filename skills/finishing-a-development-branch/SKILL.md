@@ -169,7 +169,6 @@ push+PR outcome always preserves the worktree.
 GIT_DIR=$(cd "$(git rev-parse --git-dir)" 2>/dev/null && pwd -P)
 GIT_COMMON=$(cd "$(git rev-parse --git-common-dir)" 2>/dev/null && pwd -P)
 WORKTREE_PATH=$(git rev-parse --show-toplevel)
-STARTING_CWD="$WORKTREE_PATH"  # this shell's cwd right now, before the cd below — the own-session tell
 ```
 
 **If `GIT_DIR == GIT_COMMON`:** Normal repo, no worktree to clean up. Done.
