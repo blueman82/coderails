@@ -22,23 +22,29 @@
 # unsanctioned directory was permitted silently, which is indistinguishable
 # from the gate approving it.
 #
-# A vault is now identified by two things, both necessary:
-#   1. It is NOT the plugin repo. The plugin carries the schema and has
-#      commands/, hooks/, skills/ directories whose names overlap the taxonomy
-#      it defines, so structure alone would misidentify it and block ordinary
-#      edits to this repo's own source.
-#   2. STRUCTURAL CORROBORATION: at least 2 of the parsed sanctioned
-#      directories actually exist at the written file's repo root. A genuine
-#      vault has most of its taxonomy's directories present; an unrelated repo
-#      has none of them.
+# A vault is identified POSITIVELY, from the project's configured wiki_path —
+# never from directory shape. Structure alone was tried and over-blocks:
+# measured, an ordinary Claude plugin (commands/ + hooks/ + skills/) and a
+# data pipeline (sources/ + investigations/) each clear a ">=2 sanctioned
+# dirs" test, and both had unrelated writes DENIED. Excluding just this plugin
+# does not help — every Claude plugin has that shape, and a git worktree of
+# the plugin has a different root again, so it blocks edits to the plugin's
+# own source. Identification is therefore:
+#   1. Read wiki_path from the plugin's .claude/workflow.config.yaml.
+#   2. Require the written file's repo root to BE that resolved path.
+#   3. Structural corroboration only as a secondary sanity check, so a
+#      misconfigured wiki_path pointing somewhere unrelated fails open rather
+#      than blocking every write in whatever it names.
 #
-# Fail OPEN on any ambiguity: the schema file absent, no Page types section, a
-# section present but the table shape yields zero parsed directories (an
-# unexpected format must never be misread as "empty taxonomy, block
-# everything" — worse than the drift it prevents), the write targeting the
-# plugin repo itself, or fewer than 2 sanctioned directories present at the
-# root. Blocking only fires when a vault is POSITIVELY identified AND the
-# target directory is POSITIVELY unsanctioned.
+# Fail OPEN on any ambiguity: schema absent, config absent (a project not yet
+# run through /coderails:init — matching how enforce_pr_workflow already
+# no-ops without a config), wiki_path null or unresolvable, no Page types
+# section, a table shape yielding zero parsed directories (an unexpected
+# format must never be misread as "empty taxonomy, block everything" — worse
+# than the drift it prevents), the write landing outside the configured vault,
+# or fewer than 2 sanctioned directories present in it. Blocking only fires
+# when a vault is POSITIVELY identified AND the target directory is
+# POSITIVELY unsanctioned.
 #
 # Always allowed in addition to the parsed table:
 #   raw/            — documented as immutable drop-zone input, not a page type
@@ -128,7 +134,16 @@ wiki_rel=$(awk '/^wiki_path:/{print $2; exit}' "$config" | sed -E 's/^"(.*)"$/\1
 case "$wiki_rel" in
   null|'~'|'') exit 0 ;;
 esac
-vault_root=$(cd "${CLAUDE_PLUGIN_ROOT}/$wiki_rel" 2>/dev/null && pwd -P)
+# wiki_path may be absolute or relative. Blindly joining an absolute value to
+# the plugin root produces a doubled path that cannot resolve, so the gate
+# would fail open on a config that is perfectly valid — and at least one
+# project on this machine does configure it absolutely. init.md only scaffolds
+# the relative form, so this handles a documented and an undocumented-but-real
+# shape rather than assuming the documented one is the only one in use.
+case "$wiki_rel" in
+  /*) vault_root=$(cd "$wiki_rel" 2>/dev/null && pwd -P) ;;
+  *)  vault_root=$(cd "${CLAUDE_PLUGIN_ROOT}/$wiki_rel" 2>/dev/null && pwd -P) ;;
+esac
 [ -n "$vault_root" ] || exit 0
 [ "$root" = "$vault_root" ] || exit 0
 
@@ -169,7 +184,7 @@ for dir in $sanctioned; do
 done
 
 sanctioned_list=$(printf '%s' "$sanctioned" | tr '\n' ' ')
-reason="Blocked: '$topdir' is not a sanctioned wiki page-type directory (file: $file). Sanctioned directories per $agents: $sanctioned_list. Either move this page into one of those directories, or add '$topdir' to AGENTS.md's Page types table first (which then permits it automatically)."
+reason="Blocked: '$topdir' is not a sanctioned wiki page-type directory (file: $file). Sanctioned directories per $schema: $sanctioned_list. Either move this page into one of those directories, or add '$topdir' to that file's Page types table first (which then permits it automatically)."
 
 jq -n --arg r "$reason" '{
   hookSpecificOutput: {

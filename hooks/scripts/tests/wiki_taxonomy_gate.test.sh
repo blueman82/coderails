@@ -231,6 +231,18 @@ check "deny reason names the rejected directory" \
   1 "$(printf '%s' "$out" | grep -c 'decisions/')"
 check "deny reason names a sanctioned directory" \
   1 "$(printf '%s' "$out" | grep -c 'investigations/')"
+# The deny reason is user-facing and must name the file the user has to edit.
+# It previously interpolated an undefined variable, so it rendered a BLANK
+# filename and directed the reader to a Page types table in AGENTS.md — a file
+# the gate no longer reads. Following the message would not have lifted the
+# block. Neither the ALLOW/DENY corpus nor any prior assertion caught it,
+# because both only inspect permissionDecision, never the reason text.
+check "deny reason names the schema file, not a blank" \
+  1 "$(printf '%s' "$out" | grep -c 'AGENTS-wiki-schema.md')"
+check "deny reason has no empty 'per :' interpolation" \
+  0 "$(printf '%s' "$out" | grep -c 'per : ')"
+check "deny reason does not misdirect to AGENTS.md" \
+  0 "$(printf '%s' "$out" | grep -c "AGENTS.md's Page types")"
 
 # Real-vault sanity check, against THIS project's configured vault. The gate
 # now identifies the vault positively from wiki_path, so a vault is gated only
