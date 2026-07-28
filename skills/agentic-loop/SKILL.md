@@ -1,6 +1,6 @@
 ---
 name: agentic-loop
-description: 'Multi-agent orchestration discipline — keeps the main context a pure orchestrator that never implements. Load IMMEDIATELY, over /workflow, /prep, /push and any other single-PR command, whenever the user authorises agent-driven work: "spawn a team", "create a team", "team of agents", "no human gates", "self-merge", "crack on", "without the human", "no per-PR confirmation", "agentic loop", "multi-PR", or 3+ PRs authorised in one instruction. ALSO load for autonomous merge + deploy + verify chains, even a single PR, if per-step confirmation is waived. Sits ABOVE /workflow and uses it as a subroutine. Fire aggressively — forgetting to delegate is costly in long sessions.'
+description: 'Multi-agent orchestration discipline — keeps the main context a pure orchestrator that never implements. Load IMMEDIATELY, over /workflow, /prep, /push and any other single-PR command, whenever the user authorises agent-driven work: "spawn a team", "create a team", "team of agents", "no human gates", "self-merge", "crack on", "without the human", "no per-PR confirmation", "agentic loop", "multi-PR", or 3+ PRs authorised in one instruction. ALSO load for autonomous merge + deploy + verify chains, even a single PR, if per-step confirmation is waived. NOT /workflow (single-PR prep → push → merge → wiki); it sits ABOVE /workflow and uses it as a subroutine. Fire aggressively — forgetting to delegate is costly in long sessions.'
 ---
 
 # Agentic Loop
