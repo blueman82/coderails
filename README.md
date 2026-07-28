@@ -46,7 +46,7 @@ preferred way to set up a new repo.
 | `/coderails:post-evals` | Post SHA-bound eval artifact on PR; required by `/merge` gate |
 | `/merge` | Merge approved PR, switch to main, pull |
 | `/assumptions` | List every assumption, marked verified or inferred |
-| `/verify` | Re-derive a specific claim from sources only — no recall |
+| `/coderails:verify` (skill, not a `commands/` file) | Re-derive a specific claim from sources only — no recall. Forks into `coderails:source-auditor`, so it audits with no access to the context that produced the claim |
 | `/notchecked` | List claims made but not verified |
 | `/disconfirm` | Argue against your own most recent recommendation |
 | `/test-gate-setup` | Detect the test runner and create `.claude/test_command` |
