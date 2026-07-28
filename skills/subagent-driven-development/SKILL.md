@@ -50,11 +50,11 @@ digraph process {
 
     subgraph cluster_per_task {
         label="Per Task";
-        "Dispatch implementer subagent (./implementer-prompt.md)" [shape=box];
+        "Dispatch coderails:loop-worker agent" [shape=box];
         "Implementer subagent asks questions?" [shape=diamond];
         "Answer questions, provide context" [shape=box];
         "Implementer subagent implements, tests, commits, self-reviews" [shape=box];
-        "Write diff file, dispatch task reviewer subagent (./task-reviewer-prompt.md)" [shape=box];
+        "Write diff file, dispatch pr-review-toolkit:code-reviewer" [shape=box];
         "Task reviewer reports spec ✅ and quality approved?" [shape=diamond];
         "Dispatch fix subagent for Critical/Important findings" [shape=box];
         "Mark task complete in todo list and progress ledger" [shape=box];
@@ -62,23 +62,23 @@ digraph process {
 
     "Read plan, note context and global constraints, create todos" [shape=box];
     "More tasks remain?" [shape=diamond];
-    "Dispatch final code reviewer subagent (../requesting-code-review/code-reviewer.md)" [shape=box];
+    "Dispatch final pr-review-toolkit:code-reviewer" [shape=box];
     "Use coderails:finishing-a-development-branch" [shape=box style=filled fillcolor=lightgreen];
 
-    "Read plan, note context and global constraints, create todos" -> "Dispatch implementer subagent (./implementer-prompt.md)";
-    "Dispatch implementer subagent (./implementer-prompt.md)" -> "Implementer subagent asks questions?";
+    "Read plan, note context and global constraints, create todos" -> "Dispatch coderails:loop-worker agent";
+    "Dispatch coderails:loop-worker agent" -> "Implementer subagent asks questions?";
     "Implementer subagent asks questions?" -> "Answer questions, provide context" [label="yes"];
-    "Answer questions, provide context" -> "Dispatch implementer subagent (./implementer-prompt.md)";
+    "Answer questions, provide context" -> "Dispatch coderails:loop-worker agent";
     "Implementer subagent asks questions?" -> "Implementer subagent implements, tests, commits, self-reviews" [label="no"];
-    "Implementer subagent implements, tests, commits, self-reviews" -> "Write diff file, dispatch task reviewer subagent (./task-reviewer-prompt.md)";
-    "Write diff file, dispatch task reviewer subagent (./task-reviewer-prompt.md)" -> "Task reviewer reports spec ✅ and quality approved?";
+    "Implementer subagent implements, tests, commits, self-reviews" -> "Write diff file, dispatch pr-review-toolkit:code-reviewer";
+    "Write diff file, dispatch pr-review-toolkit:code-reviewer" -> "Task reviewer reports spec ✅ and quality approved?";
     "Task reviewer reports spec ✅ and quality approved?" -> "Dispatch fix subagent for Critical/Important findings" [label="no"];
-    "Dispatch fix subagent for Critical/Important findings" -> "Write diff file, dispatch task reviewer subagent (./task-reviewer-prompt.md)" [label="re-review"];
+    "Dispatch fix subagent for Critical/Important findings" -> "Write diff file, dispatch pr-review-toolkit:code-reviewer" [label="re-review"];
     "Task reviewer reports spec ✅ and quality approved?" -> "Mark task complete in todo list and progress ledger" [label="yes"];
     "Mark task complete in todo list and progress ledger" -> "More tasks remain?";
-    "More tasks remain?" -> "Dispatch implementer subagent (./implementer-prompt.md)" [label="yes"];
-    "More tasks remain?" -> "Dispatch final code reviewer subagent (../requesting-code-review/code-reviewer.md)" [label="no"];
-    "Dispatch final code reviewer subagent (../requesting-code-review/code-reviewer.md)" -> "Use coderails:finishing-a-development-branch";
+    "More tasks remain?" -> "Dispatch coderails:loop-worker agent" [label="yes"];
+    "More tasks remain?" -> "Dispatch final pr-review-toolkit:code-reviewer" [label="no"];
+    "Dispatch final pr-review-toolkit:code-reviewer" -> "Use coderails:finishing-a-development-branch";
 }
 ```
 
@@ -270,11 +270,20 @@ a ledger file, not only in todos.
   present means a fresh session, not data loss; recover from `git log`
   regardless if the ledger and git history ever disagree.
 
-## Prompt Templates
+## Agents
 
-- [implementer-prompt.md](implementer-prompt.md) - Dispatch implementer subagent
-- [task-reviewer-prompt.md](task-reviewer-prompt.md) - Dispatch task reviewer subagent (spec compliance + code quality)
-- Final whole-branch review: use coderails:requesting-code-review's [code-reviewer.md](../requesting-code-review/code-reviewer.md)
+Dispatch these by name. Each carries its own system prompt and tool set, so pass
+only the task context — the brief path, the report path, and the diff range.
+
+- `coderails:loop-worker` — implements one task: writes code and tests, commits,
+  self-reviews, and reports with test evidence. Escalates rather than guessing.
+- `pr-review-toolkit:code-reviewer` — per-task review (spec compliance + code
+  quality) and the final whole-branch review.
+
+Do not paste an inline prompt into a `general-purpose` subagent instead. The
+agent definitions pin the model and the discipline; a generic subagent inherits
+neither, and a reviewer dispatched with write tools can edit the code it is
+supposed to be judging.
 
 ## Example Workflow
 
