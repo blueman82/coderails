@@ -318,7 +318,7 @@ cwd clears it via `ExitWorktree`.
 - Remove a worktree before confirming merge success
 - Clean up worktrees you didn't create (provenance check)
 - Run `git worktree remove` from inside the worktree
-- Force-remove a locked worktree without confirming the lock's pid is dead, or is this session's own
+- Force-remove a locked worktree without confirming the lock's pid is dead or belongs to this session
 - Defer on a live-pid lock without checking whether the pid is this session's own
 - Pass `discard_changes: true` to `ExitWorktree` without verifying a squash-merge landed
 - Introduce a human prompt/menu — this skill runs to completion autonomously
