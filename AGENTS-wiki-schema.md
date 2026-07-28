@@ -148,11 +148,9 @@ Once the vault outgrows reading `index.md` directly, use `qmd` to search it:
 
 ## Conventions
 
-- Wiki-links use `[[page_name]]` with no directory prefix — Obsidian resolves the target.
 - Frontmatter tags are lowercase and hyphenated.
 - One concept per page — split a page that covers too much.
 - Source pages reference the PR number and key files changed.
-- Keep pages under 2 minutes to read.
 
 ## Exploration boundary
 
