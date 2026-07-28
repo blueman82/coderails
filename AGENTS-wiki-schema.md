@@ -95,7 +95,7 @@ tags: []           # freeform list
 ```
 
 Body rules:
-- Use `[[wiki-links]]` for all cross-references between wiki pages.
+- Use `[[wiki-links]]` for all cross-references between wiki pages — `[[page_name]]` with no directory prefix; Obsidian resolves the target.
 - Keep pages concise — under 2 minutes to read.
 - Focus on knowledge that compounds (relationships, decisions, patterns), not facts derivable directly from reading the source code.
 - Confidence-label non-trivial assertions: `(verified)` (source cited), `(inferred)` (pattern-matched), `(guess)` (explicit speculation).
