@@ -305,8 +305,8 @@ own worktree clears it via `ExitWorktree`.
 - **Fix:** Parse the pid from the lock reason and `kill -0` it — only remove if confirmed dead; report and leave alone otherwise
 
 **Deferring on a live-pid lock that is this session's own**
-- **Problem:** The lock reason always shows a live pid when the worktree is this session's own cwd (the harness locks it on the session's behalf) — treating every live pid as "another session, defer" means this session can never finish its own worktree
-- **Fix:** Check whether the locked path is this session's own worktree before deferring; if so, use `ExitWorktree` with `action: "remove"`, not `git worktree remove`, and not a defer
+- **Problem:** The lock reason always shows a live pid when the worktree is the one this session has been working in (the harness locks it on the session's behalf) — treating every live pid as "another session, defer" means this session can never finish its own worktree
+- **Fix:** There's no reliable pid or cwd comparison to run (see Step 6) — know which worktree this session has been operating in, and if it's the locked one, use `ExitWorktree` with `action: "remove"`, not `git worktree remove`, and not a defer
 
 **Passing `discard_changes: true` to `ExitWorktree` on an unverified refusal**
 - **Problem:** `ExitWorktree` refuses when the worktree has uncommitted files or commits not on the original branch — after a squash merge those commits are real (legitimately landed on `origin/main`) but an ancestry check (`git log --oneline origin/main..HEAD`) can never see them there, since the squash rewrote the SHAs; checking ancestry means the agent can never pass the override, no matter how genuinely merged the branch is
