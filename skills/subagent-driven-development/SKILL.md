@@ -281,9 +281,15 @@ only the task context — the brief path, the report path, and the diff range.
   quality) and the final whole-branch review.
 
 Do not paste an inline prompt into a `general-purpose` subagent instead. The
-agent definitions pin the model and the discipline; a generic subagent inherits
-neither, and a reviewer dispatched with write tools can edit the code it is
-supposed to be judging.
+agent definitions pin the model and the reviewing discipline; a generic subagent
+inherits neither.
+
+Note the limit honestly: `pr-review-toolkit:code-reviewer` declares no `tools:`
+key, so it has full tool access including `Write`/`Edit`. Naming it buys a
+pinned model and a maintained review rubric, **not** a guarantee that the
+reviewer cannot edit the code it judges. Treat its read-only behaviour as
+discipline, and never let a review dispatch double as a fix dispatch — send
+fixes back to `coderails:loop-worker` as separate work.
 
 ## Example Workflow
 
