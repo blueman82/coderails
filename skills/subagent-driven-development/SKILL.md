@@ -51,12 +51,12 @@ digraph process {
     subgraph cluster_per_task {
         label="Per Task";
         "Dispatch coderails:loop-worker agent" [shape=box];
-        "Implementer subagent asks questions?" [shape=diamond];
+        "loop-worker asks questions?" [shape=diamond];
         "Answer questions, provide context" [shape=box];
-        "Implementer subagent implements, tests, commits, self-reviews" [shape=box];
+        "loop-worker implements, tests, commits, self-reviews" [shape=box];
         "Write diff file, dispatch pr-review-toolkit:code-reviewer" [shape=box];
-        "Task reviewer reports spec ✅ and quality approved?" [shape=diamond];
-        "Dispatch fix subagent for Critical/Important findings" [shape=box];
+        "Reviewer findings resolved?" [shape=diamond];
+        "Dispatch coderails:loop-worker to fix Critical/Important findings" [shape=box];
         "Mark task complete in todo list and progress ledger" [shape=box];
     }
 
@@ -66,15 +66,15 @@ digraph process {
     "Use coderails:finishing-a-development-branch" [shape=box style=filled fillcolor=lightgreen];
 
     "Read plan, note context and global constraints, create todos" -> "Dispatch coderails:loop-worker agent";
-    "Dispatch coderails:loop-worker agent" -> "Implementer subagent asks questions?";
-    "Implementer subagent asks questions?" -> "Answer questions, provide context" [label="yes"];
+    "Dispatch coderails:loop-worker agent" -> "loop-worker asks questions?";
+    "loop-worker asks questions?" -> "Answer questions, provide context" [label="yes"];
     "Answer questions, provide context" -> "Dispatch coderails:loop-worker agent";
-    "Implementer subagent asks questions?" -> "Implementer subagent implements, tests, commits, self-reviews" [label="no"];
-    "Implementer subagent implements, tests, commits, self-reviews" -> "Write diff file, dispatch pr-review-toolkit:code-reviewer";
-    "Write diff file, dispatch pr-review-toolkit:code-reviewer" -> "Task reviewer reports spec ✅ and quality approved?";
-    "Task reviewer reports spec ✅ and quality approved?" -> "Dispatch fix subagent for Critical/Important findings" [label="no"];
-    "Dispatch fix subagent for Critical/Important findings" -> "Write diff file, dispatch pr-review-toolkit:code-reviewer" [label="re-review"];
-    "Task reviewer reports spec ✅ and quality approved?" -> "Mark task complete in todo list and progress ledger" [label="yes"];
+    "loop-worker asks questions?" -> "loop-worker implements, tests, commits, self-reviews" [label="no"];
+    "loop-worker implements, tests, commits, self-reviews" -> "Write diff file, dispatch pr-review-toolkit:code-reviewer";
+    "Write diff file, dispatch pr-review-toolkit:code-reviewer" -> "Reviewer findings resolved?";
+    "Reviewer findings resolved?" -> "Dispatch coderails:loop-worker to fix Critical/Important findings" [label="no"];
+    "Dispatch coderails:loop-worker to fix Critical/Important findings" -> "Write diff file, dispatch pr-review-toolkit:code-reviewer" [label="re-review"];
+    "Reviewer findings resolved?" -> "Mark task complete in todo list and progress ledger" [label="yes"];
     "Mark task complete in todo list and progress ledger" -> "More tasks remain?";
     "More tasks remain?" -> "Dispatch coderails:loop-worker agent" [label="yes"];
     "More tasks remain?" -> "Dispatch final pr-review-toolkit:code-reviewer" [label="no"];
