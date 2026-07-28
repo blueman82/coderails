@@ -510,7 +510,13 @@ check "patch text missing: target NOT modified" "$before" "$after"
 baddir="$TMP/patches-nosentinel"; mkdir -p "$baddir"
 cp "$VENDOR" "$baddir/remember_inject_cap.vendor.txt"
 # A replacement that is valid shell and swaps in cleanly, but omits the cap.
-sed 's/=== MEMORY ===/=== MEMORY (no cap) ===/' "$VENDOR" \
+# Keyed on the `--- $BASENAME ---` echo, which is INSIDE the block. It used to
+# key on `=== MEMORY ===`, which the narrowed block no longer contains -- that
+# would make this sed a silent no-op, so the replacement would equal the vendor
+# text, the "carries no sentinel" precondition below would pass trivially, and
+# the sanity gate this case exists to exercise would never be reached.
+# shellcheck disable=SC2016  # the literal $BASENAME is the match key, not an expansion
+sed 's/--- \$BASENAME ---/--- $BASENAME (no cap) ---/' "$VENDOR" \
   > "$baddir/remember_inject_cap.patched.txt"
 check "sanity gate (precondition): replacement block carries no sentinel" "0" \
   "$(grep -c REMEMBER_INJECT_MAX_BYTES "$baddir/remember_inject_cap.patched.txt" | tr -d ' ')"

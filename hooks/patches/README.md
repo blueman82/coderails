@@ -13,8 +13,34 @@ re-derivation applies to that opt-in path.
 
 | File | Role |
 |---|---|
-| `remember_inject_cap.vendor.txt` | The **search** block — the remember plugin's unpatched `MEMORY` block, exactly as the vendor ships it |
-| `remember_inject_cap.patched.txt` | The **replace** block — the same block with the `REMEMBER_INJECT_MAX_BYTES` truncation applied |
+| `remember_inject_cap.vendor.txt` | The **search** block — the remember plugin's unpatched memory-injection `for MFILE` loop, exactly as the vendor ships it |
+| `remember_inject_cap.patched.txt` | The **replace** block — the same loop with the `REMEMBER_INJECT_MAX_BYTES` truncation applied |
+
+### Scope: the loop only, not the enclosing `if`
+
+Both blocks cover the `for MFILE ...; do ... done` loop and nothing else. They
+deliberately stop short of the surrounding `if [ -n "$HAS_MEMORY" ]; then` and
+its closing `fi`.
+
+That boundary was moved in 0.8.9 and is the point of this file. The blocks
+originally spanned the whole `if`, which made **any** vendor edit anywhere
+inside the if-body a shape mismatch. 0.8.9 appended a rotated-archives section
+between `done` and `fi`, the sequence stopped matching, and the guard refused to
+patch. The loop itself was byte-identical across 0.8.3 and 0.8.9 — only the
+region around it changed. Anchoring on just the loop matches both versions with
+one patch pair, and leaves the vendor's own additions untouched.
+
+Keep the two blocks' scopes identical. Narrowing `vendor.txt` without narrowing
+`patched.txt` emits a duplicate `if` and an orphan `fi` — broken bash that the
+guard's own `head -c` sanity check still passes. `bash -n` on the patched file
+is the check that catches it.
+
+The loop is unique in the file, but only just: the vendor runs a
+byte-identical `for MFILE in ...` line earlier to compute `HAS_MEMORY`. The two
+diverge on the next line (`[ -f "$MFILE" ]` alone vs `&& [ -s "$MFILE" ]`), so
+the 8-line sequence matches exactly once. Do not shorten the block further —
+verify any change by running the guard's own counter and confirming it reports
+exactly 1 match.
 
 ## DO NOT EDIT, REFORMAT, OR COMMENT THESE FILES
 
@@ -53,10 +79,24 @@ too when the deployed copy is still current.
 
 ## Editing the patch text legitimately
 
-If the remember plugin's `MEMORY` block genuinely changes upstream, both files
+If the remember plugin's injection loop genuinely changes upstream, both files
 have to be re-derived from the new vendor source — not hand-edited. Take the
-fresh unpatched block verbatim as the new `vendor.txt`, apply the cap to a copy
+fresh unpatched loop verbatim as the new `vendor.txt`, apply the cap to a copy
 to produce the new `patched.txt`, and run the test suite.
+
+Before committing a re-derivation, verify against the real plugin file, not
+just the fixtures:
+
+1. Run the guard's own block counter (the `awk` in
+   `remember_inject_cap_guard.sh`) over the new `vendor.txt` and the live
+   `session-start-hook.sh`. It must print exactly `1`.
+2. Run the guard with `REMEMBER_INJECT_CAP_AUTOWRITE=1` against a **copy** of
+   the live file, then `bash -n` that copy. This is the only check that catches
+   a mismatched-scope block pair.
+3. Execute the patched loop against a memory file larger than the cap and one
+   smaller, and confirm the truncation marker appears for the first and not the
+   second. Grepping for the `head -c` line proves the text landed, not that
+   truncation works.
 
 Note that editing `patched.txt`'s NOTE comment alone does **not** propagate to
 an already-patched install: the guard detects the cap by the truncation call
