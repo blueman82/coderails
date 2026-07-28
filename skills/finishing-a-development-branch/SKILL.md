@@ -296,6 +296,14 @@ cwd clears it via `ExitWorktree`.
 - **Problem:** A locked worktree can be a live session in progress (harness lock reasons embed a pid); force-removing it yanks a running session
 - **Fix:** Parse the pid from the lock reason and `kill -0` it — only remove if confirmed dead; report and leave alone otherwise
 
+**Deferring on a live-pid lock that is this session's own**
+- **Problem:** The lock reason always shows a live pid when the worktree is this session's own cwd (the harness locks it on the session's behalf) — treating every live pid as "another session, defer" means this session can never finish its own worktree
+- **Fix:** Check whether the locked path is this session's own worktree before deferring; if so, use `ExitWorktree` with `action: "remove"`, not `git worktree remove`, and not a defer
+
+**Passing `discard_changes: true` to `ExitWorktree` on an unverified refusal**
+- **Problem:** `ExitWorktree` refuses when the branch has commits — after a squash merge those commits are real (legitimately landed on `origin/main`) but invisible to a SHA-based check, since the squash rewrote the SHAs
+- **Fix:** Before overriding the refusal, confirm `git log --oneline origin/main..HEAD` is empty AND the PR reports `state: MERGED`
+
 **Discarding without reporting what's deleted**
 - **Problem:** Destructive action with no record of what was lost
 - **Fix:** Always report the branch, commits, and worktree path being deleted before proceeding
