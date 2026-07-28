@@ -1,0 +1,123 @@
+{
+  "schema_version": 1,
+  "scope": "pr",
+  "task_ref": "PR#309",
+  "tier": 1,
+  "tier_justification": "Tier 1: 7 work-units (agents/ roster, 3 fork-skill fixes, cite-check rename+move, dispatch rewiring across 5 skills, hooks.json async, description trim, docs) — above tier 0's single-work-unit predicate. No tier-2 predicate fires: no publish, deploy, migration, data deletion, or external send. HONEST DEVIATION FROM RULE 1 (freeze-before-build): this file is frozen AFTER implementation, at the request to merge an already-built PR. frozen_sha is the true freeze point (current head), not a backdated base. Consequence stated plainly: freeze-before-build's protection against evals written to fit the diff does NOT apply here, and rule 4 (oracle independence) is therefore load-bearing on its own — each assertion below is derived from the task's goal state as stated in the authorising prompts ('make coderails skills/agents/hooks efficient per the skills docs', 'no overlap with pr-review-toolkit', 'rename verify to cite-check because /verify is a built-in'), not from reading the implementation.",
+  "frozen_at": "2026-07-28T20:45:00Z",
+  "frozen_sha": "160d9d174bb3cc966e8708a1d1fc27fe4bb12ff5",
+  "evals": [
+    {
+      "id": "E1",
+      "priority": "P0",
+      "mode": "scripted",
+      "surface": "merged-state",
+      "assert": "No skill or command instructs dispatch to a bare `general-purpose` subagent as the way to do work — every dispatch site names a concrete agent.",
+      "cmd": "cd \"$(git rev-parse --show-toplevel)\" && ! grep -rn 'Subagent (general-purpose)' skills commands 2>/dev/null | grep -v node_modules | grep .",
+      "negative_control": "cd \"$(git rev-parse --show-toplevel)\" && printf 'Subagent (general-purpose): do a thing\\n' > /tmp/ng_e1.md && ! grep -rn 'Subagent (general-purpose)' /tmp/ng_e1.md | grep .",
+      "expected": "cmd exits 0 (no dispatch-form matches remain); negative control exits non-zero, proving the grep can find the pattern when it is present.",
+      "status": "pending",
+      "evidence": null
+    },
+    {
+      "id": "E2",
+      "priority": "P0",
+      "mode": "scripted",
+      "surface": "merged-state",
+      "assert": "Every skill declaring `context: fork` also declares an `agent:`, so no forked skill silently falls back to the untyped general-purpose default.",
+      "cmd": "cd \"$(git rev-parse --show-toplevel)\" && bad=0; for f in $(grep -rl '^context: fork' skills */SKILL.md 2>/dev/null | grep -v node_modules); do grep -q '^agent:' \"$f\" || { echo \"MISSING agent: $f\"; bad=1; }; done; [ \"$bad\" -eq 0 ]",
+      "negative_control": "d=$(mktemp -d) && mkdir -p \"$d/skills/x\" && printf -- '---\\ncontext: fork\\n---\\n' > \"$d/skills/x/SKILL.md\" && cd \"$d\" && bad=0; for f in $(grep -rl '^context: fork' skills 2>/dev/null); do grep -q '^agent:' \"$f\" || bad=1; done; [ \"$bad\" -eq 0 ]",
+      "expected": "cmd exits 0 (all fork skills carry agent:); negative control exits non-zero on a synthetic fork-skill lacking agent:, proving the loop detects the gap.",
+      "status": "pending",
+      "evidence": null
+    },
+    {
+      "id": "E3",
+      "priority": "P0",
+      "mode": "scripted",
+      "surface": "merged-state",
+      "assert": "No file-writing forked skill runs in the background, where its edits would land outside session checkpoints and escape /rewind.",
+      "cmd": "cd \"$(git rev-parse --show-toplevel)\" && for s in wiki-ingest wiki-query; do grep -q '^background: false' \"skills/$s/SKILL.md\" || { echo \"NOT foreground: $s\"; exit 1; }; done",
+      "negative_control": "d=$(mktemp -d) && mkdir -p \"$d/skills/wiki-ingest\" && printf -- '---\\ncontext: fork\\n---\\n' > \"$d/skills/wiki-ingest/SKILL.md\" && cd \"$d\" && for s in wiki-ingest; do grep -q '^background: false' \"skills/$s/SKILL.md\" || exit 1; done",
+      "expected": "cmd exits 0; negative control exits non-zero against a synthetic fork-skill with no background: false line.",
+      "status": "pending",
+      "evidence": null
+    },
+    {
+      "id": "E4",
+      "priority": "P0",
+      "mode": "scripted",
+      "surface": "artifact-path",
+      "assert": "Every agent this repo ships parses as valid YAML frontmatter and declares only fields the plugin agent schema supports — hooks, mcpServers and permissionMode are rejected for plugin-shipped agents.",
+      "cmd": "cd \"$(git rev-parse --show-toplevel)\" && python3 -c \"import re,glob,sys; bad=[]; [bad.append(f) for f in glob.glob('agents/*.md') if not re.match(r'^---\\n.*?\\n---\\n', open(f).read(), re.S)]; forb=[(f,k) for f in glob.glob('agents/*.md') for k in re.findall(r'^([a-z-]+):', re.match(r'^---\\n(.*?)\\n---', open(f).read(), re.S).group(1), re.M) if k in ('hooks','mcpServers','permissionMode')]; print('unparseable:',bad); print('forbidden:',forb); sys.exit(1 if bad or forb else 0)\"",
+      "negative_control": "d=$(mktemp -d) && mkdir -p \"$d/agents\" && printf -- '---\\nname: x\\nhooks:\\n  Stop: []\\n---\\n' > \"$d/agents/x.md\" && cd \"$d\" && python3 -c \"import re,glob,sys; forb=[(f,k) for f in glob.glob('agents/*.md') for k in re.findall(r'^([a-z-]+):', re.match(r'^---\\n(.*?)\\n---', open(f).read(), re.S).group(1), re.M) if k in ('hooks','mcpServers','permissionMode')]; sys.exit(1 if forb else 0)\"",
+      "expected": "cmd exits 0 (all agents parse, none use forbidden fields); negative control exits non-zero on a synthetic agent declaring hooks:.",
+      "status": "pending",
+      "evidence": null
+    },
+    {
+      "id": "E5",
+      "priority": "P0",
+      "mode": "scripted",
+      "surface": "merged-state",
+      "assert": "The claim-auditing skill does not collide with Claude Code's bundled /verify skill: it is named cite-check, and no stale reference to the old name survives anywhere in the repo.",
+      "cmd": "cd \"$(git rev-parse --show-toplevel)\" && test -f skills/cite-check/SKILL.md && grep -q '^name: cite-check' skills/cite-check/SKILL.md && test ! -e commands/verify.md && test ! -d skills/verify && ! grep -rn 'coderails:verify' README.md INSTALLATION.md docs skills commands 2>/dev/null | grep -v node_modules | grep .",
+      "negative_control": "cd \"$(git rev-parse --show-toplevel)\" && printf 'see /coderails:verify for details\\n' > /tmp/ng_e5.md && ! grep -rn 'coderails:verify' /tmp/ng_e5.md | grep .",
+      "expected": "cmd exits 0 (renamed, old paths gone, zero stale refs); negative control exits non-zero, proving the stale-ref grep fires when a reference is present.",
+      "status": "pending",
+      "evidence": null
+    },
+    {
+      "id": "E6",
+      "priority": "P0",
+      "mode": "scripted",
+      "surface": "artifact-path",
+      "assert": "hooks.json remains valid JSON and the only cosmetic Stop hook is non-blocking, while every correctness-gating Stop hook still blocks.",
+      "cmd": "cd \"$(git rev-parse --show-toplevel)\" && python3 -c \"import json,sys; d=json.load(open('hooks/hooks.json')); st=d['hooks']['Stop'][0]['hooks']; va=[h for h in st if 'voice_announce' in h['command']]; others=[h for h in st if 'voice_announce' not in h['command']]; sys.exit(0 if len(va)==1 and va[0].get('async') is True and all(h.get('async') is not True for h in others) else 1)\"",
+      "negative_control": "python3 -c \"import json,sys,tempfile,os; d={'hooks':{'Stop':[{'hooks':[{'command':'voice_announce.sh'}]}]}}; p=tempfile.mktemp(); json.dump(d,open(p,'w')); e=json.load(open(p)); st=e['hooks']['Stop'][0]['hooks']; va=[h for h in st if 'voice_announce' in h['command']]; sys.exit(0 if len(va)==1 and va[0].get('async') is True else 1)\"",
+      "expected": "cmd exits 0 (voice_announce async, no gating hook made async); negative control exits non-zero against a synthetic hooks.json where voice_announce lacks async.",
+      "status": "pending",
+      "evidence": null
+    },
+    {
+      "id": "E7",
+      "priority": "P0",
+      "mode": "scripted",
+      "surface": "fresh-clone",
+      "assert": "The repo's own hook test suite passes in full on a clean checkout of the branch — no test was broken by the rewiring, and none silently disappeared.",
+      "cmd": "cd \"$(git rev-parse --show-toplevel)\" && n=$(ls hooks/scripts/tests/*.test.sh | wc -l | tr -d ' ') && p=$(ls hooks/scripts/tests/*.test.sh | xargs -P 8 -I{} sh -c 'bash \"{}\" >/dev/null 2>&1 && echo PASS' | grep -c PASS) && echo \"$p/$n\" && [ \"$p\" = \"$n\" ]",
+      "negative_control": "d=$(mktemp -d) && mkdir -p \"$d/t\" && printf '#!/bin/bash\\nexit 1\\n' > \"$d/t/x.test.sh\" && cd \"$d\" && n=$(ls t/*.test.sh | wc -l | tr -d ' ') && p=$(ls t/*.test.sh | xargs -P 2 -I{} sh -c 'bash \"{}\" >/dev/null 2>&1 && echo PASS' | grep -c PASS); [ \"$p\" = \"$n\" ]",
+      "expected": "cmd exits 0 and prints N/N; negative control exits non-zero against a deliberately failing test, proving the pass-count comparison discriminates.",
+      "status": "pending",
+      "evidence": null
+    },
+    {
+      "id": "E8",
+      "priority": "P1",
+      "mode": "scripted",
+      "surface": "merged-state",
+      "assert": "coderails does not duplicate any agent already shipped by pr-review-toolkit, its declared dependency.",
+      "cmd": "cd \"$(git rev-parse --show-toplevel)\" && for a in code-reviewer code-simplifier comment-analyzer pr-test-analyzer silent-failure-hunter type-design-analyzer; do test ! -e \"agents/$a.md\" || { echo \"DUPLICATE: $a\"; exit 1; }; done",
+      "negative_control": "d=$(mktemp -d) && mkdir -p \"$d/agents\" && touch \"$d/agents/code-reviewer.md\" && cd \"$d\" && for a in code-reviewer; do test ! -e \"agents/$a.md\" || exit 1; done",
+      "expected": "cmd exits 0 (no overlapping agent names); negative control exits non-zero when a duplicate is planted.",
+      "status": "pending",
+      "evidence": null
+    },
+    {
+      "id": "E9",
+      "priority": "P1",
+      "mode": "scripted",
+      "surface": "merged-state",
+      "assert": "The new agents/ component type is documented for users, not shipped silently.",
+      "cmd": "cd \"$(git rev-parse --show-toplevel)\" && grep -qi '^## Agents' README.md && grep -qi '^## Agents' docs/REFERENCE.md",
+      "negative_control": "d=$(mktemp -d) && printf '# Readme\\nno agents section\\n' > \"$d/README.md\" && cd \"$d\" && grep -qi '^## Agents' README.md",
+      "expected": "cmd exits 0 (both docs carry an Agents section); negative control exits non-zero against a README with no such section.",
+      "status": "pending",
+      "evidence": null
+    }
+  ],
+  "amendments": [],
+  "result": null,
+  "graded_at": null,
+  "head_sha": "160d9d174bb3cc966e8708a1d1fc27fe4bb12ff5"
+}
