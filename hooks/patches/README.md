@@ -13,8 +13,34 @@ re-derivation applies to that opt-in path.
 
 | File | Role |
 |---|---|
-| `remember_inject_cap.vendor.txt` | The **search** block — the remember plugin's unpatched `MEMORY` block, exactly as the vendor ships it |
-| `remember_inject_cap.patched.txt` | The **replace** block — the same block with the `REMEMBER_INJECT_MAX_BYTES` truncation applied |
+| `remember_inject_cap.vendor.txt` | The **search** block — the remember plugin's unpatched memory-injection `for MFILE` loop, exactly as the vendor ships it |
+| `remember_inject_cap.patched.txt` | The **replace** block — the same loop with the `REMEMBER_INJECT_MAX_BYTES` truncation applied |
+
+### Scope: the loop only, not the enclosing `if`
+
+Both blocks cover the `for MFILE ...; do ... done` loop and nothing else. They
+deliberately stop short of the surrounding `if [ -n "$HAS_MEMORY" ]; then` and
+its closing `fi`.
+
+That boundary was moved in 0.8.9 and is the point of this file. The blocks
+originally spanned the whole `if`, which made **any** vendor edit anywhere
+inside the if-body a shape mismatch. 0.8.9 appended a rotated-archives section
+between `done` and `fi`, the sequence stopped matching, and the guard refused to
+patch. The loop itself was byte-identical across 0.8.3 and 0.8.9 — only the
+region around it changed. Anchoring on just the loop matches both versions with
+one patch pair, and leaves the vendor's own additions untouched.
+
+Keep the two blocks' scopes identical. Narrowing `vendor.txt` without narrowing
+`patched.txt` emits a duplicate `if` and an orphan `fi` — broken bash that the
+guard's own `head -c` sanity check still passes. `bash -n` on the patched file
+is the check that catches it.
+
+The loop is unique in the file, but only just: the vendor runs a
+byte-identical `for MFILE in ...` line earlier to compute `HAS_MEMORY`. The two
+diverge on the next line (`[ -f "$MFILE" ]` alone vs `&& [ -s "$MFILE" ]`), so
+the 8-line sequence matches exactly once. Do not shorten the block further —
+verify any change by running the guard's own counter and confirming it reports
+exactly 1 match.
 
 ## DO NOT EDIT, REFORMAT, OR COMMENT THESE FILES
 
