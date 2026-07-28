@@ -103,4 +103,5 @@ You: [Fix progress indicators]
 - Show code/tests that prove it works
 - Request clarification
 
-See template at: [code-reviewer.md](code-reviewer.md)
+The reviewer is the `pr-review-toolkit:code-reviewer` agent — its rubric,
+confidence scoring, and output format live in that agent definition.
