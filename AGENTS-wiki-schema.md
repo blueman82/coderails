@@ -99,6 +99,7 @@ Body rules:
 - Keep pages concise — under 2 minutes to read.
 - Focus on knowledge that compounds (relationships, decisions, patterns), not facts derivable directly from reading the source code.
 - Confidence-label non-trivial assertions: `(verified)` (source cited), `(inferred)` (pattern-matched), `(guess)` (explicit speculation).
+- Flag contradictions inline as `> ⚠️ CONTRADICTION: <description>`. `/wiki-lint` scans for this marker — write it whenever you find a page that conflicts with newer or more accurate information.
 
 ## Enforcement model (wiki lens)
 
