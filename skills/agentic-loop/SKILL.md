@@ -318,9 +318,11 @@ The hook checks the declaration is present with a valid category; it cannot chec
 
 ## A note on cadence
 
-The user does not want a running narration of "now spawning X, now waiting for Y." They want:
-- Brief status when a phase boundary is crossed
-- Evidence when claiming success
-- Clear stop on failure with the smallest readable summary
+The wanted cadence, stated directly rather than as a correction to any particular habit:
+- **Before the first tool call of a step**, one sentence stating what you're about to do.
+- **While working**, an update only when something important is found or the direction changes — not a running turn-by-turn narration.
+- **When finishing**, lead with the outcome: the first sentence answers "what happened" or "what did you find," supporting detail after.
 
 Idle pings from teammates are noise unless the artifact check (Phase 4) confirms a real failure. Don't react to every idle ping with a status update — match the cadence to the user's pull, not the runtime's push.
+
+**Orchestrator responses stay concise.** Keep caveats and disclaimers short, spend the response on the substance, and give a high-level summary unless the user has specifically asked for depth.
