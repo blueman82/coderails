@@ -316,8 +316,12 @@ cwd clears it via `ExitWorktree`.
 - **Fix:** Check whether the locked path is this session's own worktree before deferring; if so, use `ExitWorktree` with `action: "remove"`, not `git worktree remove`, and not a defer
 
 **Passing `discard_changes: true` to `ExitWorktree` on an unverified refusal**
-- **Problem:** `ExitWorktree` refuses when the branch has commits — after a squash merge those commits are real (legitimately landed on `origin/main`) but invisible to a SHA-based check, since the squash rewrote the SHAs
-- **Fix:** Before overriding the refusal, confirm `git log --oneline origin/main..HEAD` is empty AND the PR reports `state: MERGED`
+- **Problem:** `ExitWorktree` refuses when the worktree has uncommitted files or commits not on the original branch — after a squash merge those commits are real (legitimately landed on `origin/main`) but an ancestry check (`git log --oneline origin/main..HEAD`) can never see them there, since the squash rewrote the SHAs; checking ancestry means the agent can never pass the override, no matter how genuinely merged the branch is
+- **Fix:** Before overriding the refusal, confirm content identity — `git diff origin/main HEAD` shows no differences — AND the PR reports `state: MERGED`
+
+**Using `ExitWorktree` on a worktree it doesn't own**
+- **Problem:** `ExitWorktree` only operates on a worktree created by `EnterWorktree` this session — on one entered via `path`, or with no `EnterWorktree` session active, it returns `action: "keep"` only or silently no-ops, never removing anything, leaving the agent with a locked worktree and no next step
+- **Fix:** When `ExitWorktree` doesn't own the worktree, `cd` to the main repo root and use `git worktree remove` instead
 
 **Discarding without reporting what's deleted**
 - **Problem:** Destructive action with no record of what was lost
