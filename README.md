@@ -114,6 +114,24 @@ catalog: [`docs/REFERENCE.md`](./docs/REFERENCE.md).
 | `engineering-principles-go` | Go idioms and standards |
 | `engineering-principles-ts` | TypeScript idioms and standards |
 
+## Agents
+
+Skills dispatch these by name rather than pasting a prompt into a
+`general-purpose` subagent. Each definition pins the tool set, so a read-only
+reviewer physically cannot edit the work it is judging.
+
+| Agent | Purpose | Tools |
+|---|---|---|
+| `coderails:source-auditor` | Re-derives a claim from durable sources only; returns PASS/FAIL/UNSUPPORTED. Backs `/coderails:verify` | read-only |
+| `coderails:spec-reviewer` | Reviews a spec for completeness, consistency, clarity, scope, YAGNI before planning | read-only |
+| `coderails:wiki-writer` | Authors and maintains LLM Wiki pages against the schema; commits and opens PRs | read + write |
+| `coderails:loop-worker` | Implements one scoped task: code, tests, commit, self-review, evidence-backed report | read + write |
+
+Review agents are **not** duplicated here — `pr-review-toolkit@claude-plugins-official`
+already ships `code-reviewer`, `code-simplifier`, `comment-analyzer`,
+`pr-test-analyzer`, `silent-failure-hunter` and `type-design-analyzer`, and it is
+already a required dependency. coderails only fills the gaps.
+
 ## Hooks
 
 | Event | Script | Mode |
