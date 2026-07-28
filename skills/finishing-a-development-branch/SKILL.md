@@ -236,13 +236,13 @@ worktree you've been operating in this session), use it directly:
   remove` cannot remove the worktree it is run from, and forcing it
   (e.g. `-f`, or removing the `.git` file by hand) would break the
   running session. Use the native `ExitWorktree` tool instead, with
-  `action: "remove"` — but only if it owns this worktree: it operates
-  solely on a worktree created by `EnterWorktree` *this session*. A
-  worktree switched into via `EnterWorktree`'s `path` parameter, or
-  entered with no `EnterWorktree` session active at all, is NOT owned by
-  it — it returns `action: "keep"` only, or silently no-ops, never
-  removes. In that case fall back to `cd` to the main repo root, then
-  `git worktree remove` from there.
+  `action: "remove"` — but only if it owns this worktree: with no
+  `EnterWorktree` session active at all it's a no-op (nothing removed),
+  and for a worktree entered via `EnterWorktree`'s `path` parameter
+  (switching into an existing worktree, as opposed to creating one)
+  `ExitWorktree` will not remove it — only `action: "keep"` is
+  supported for that case. In either situation, fall back to `cd` to
+  the main repo root, then `git worktree remove` from there.
 
   When `ExitWorktree` does own the worktree: it exits the session from
   the worktree and removes it in one step, but refuses when the worktree
