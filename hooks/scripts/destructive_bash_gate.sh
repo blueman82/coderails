@@ -426,8 +426,20 @@ fi
 # stay ambiguous until expansion (`.??v`, or a bare `*` in a directory whose
 # only file is the secret) is still uncaught, and cannot be caught without
 # over-blocking ordinary globs.
+# A bracket group wrapping ONE literal character is equivalent to that
+# character plus a glob metacharacter: `[e]` matches exactly what `e` matches,
+# but it is a pattern, so `.[e]nv` expands onto the real file while carrying no
+# literal token for the rule above to find. Rather than enumerate where a
+# bracket may sit — which is the same enumeration mistake the boundary rule
+# above was rewritten to escape — collapse single-character bracket groups to
+# "<char>*" once, and match the SAME predicate against the collapsed form.
+# Multi-character groups and ranges (`[a-z]`, `[!x]`) are deliberately left
+# alone: they do not commit to a specific character, so collapsing them would
+# manufacture a commitment the pattern never made and over-block `ls .[a-z]*`.
+dotenv_debracket=$(printf '%s' "$dotenv_cmd" | sed -E 's/\[([a-z0-9])\]/\1*/g')
 if [ -z "$dotenv_hit" ]; then
-  if echo "$dotenv_cmd" | grep -qE '(^|[^[:alnum:]_.-])\.e(n(v)?)?[][*?]'; then
+  if echo "$dotenv_cmd" | grep -qE '(^|[^[:alnum:]_.-])\.e(n(v)?)?[][*?]' ||
+     echo "$dotenv_debracket" | grep -qE '(^|[^[:alnum:]_.-])\.e(n(v)?)?[][*?]'; then
     dotenv_hit=".env glob"
   fi
 fi

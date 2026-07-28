@@ -269,6 +269,15 @@ check "single-char wildcard -> deny" DENY "$(run "$(payload "cat .en?")")"
 check "mid-star -> deny"            DENY "$(run "$(payload "cat .e*v")")"
 check "bracket class -> deny"       DENY "$(run "$(payload "cat .en[v]")")"
 check "bracket range -> deny"       DENY "$(run "$(payload "cat .en[a-z]")")"
+# A bracket group wrapping ONE literal char is that char plus a metacharacter,
+# so it commits to the name while carrying no literal token. Collapsed before
+# matching rather than enumerating where a bracket may sit.
+check "bracket on e -> deny"        DENY "$(run "$(payload "cat .[e]nv")")"
+check "bracket on n -> deny"        DENY "$(run "$(payload "cat .e[n]v")")"
+check "all three bracketed -> deny" DENY "$(run "$(payload "cat .[e][n][v]")")"
+# Ranges and negated classes are NOT collapsed — they commit to no specific
+# character, so collapsing them would manufacture a commitment and over-block.
+check "range glob -> allow"         ALLOW "$(run "$(payload "ls .[a-z]*")")"
 check "prefix star -> deny"         DENY "$(run "$(payload "cat .en*")")"
 #
 # Over-block guard. A naive "could this glob expand onto the secret file"
