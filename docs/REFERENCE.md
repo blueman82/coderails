@@ -478,7 +478,7 @@ PASS / FAIL / UNSUPPORTED verdict per claim.
 **Tools:** `Read, Grep, Glob, Bash` (no write tools — read-only by construction).
 **Model:** `sonnet`.
 
-**Used by:** `/coderails:verify`, which forks into it so the audit runs with no
+**Used by:** `/coderails:cite-check`, which forks into it so the audit runs with no
 access to the conversation that produced the claim. Verifying a claim inside the
 context that generated it is self-verification; the fork is the point.
 
