@@ -68,11 +68,16 @@ Each agent gets:
 Issue all three subagent dispatches in the same response — they run in parallel:
 
 ```text
-Subagent (general-purpose): "Fix agent-tool-abort.test.ts failures"
-Subagent (general-purpose): "Fix batch-completion-behavior.test.ts failures"
-Subagent (general-purpose): "Fix tool-approval-race-conditions.test.ts failures"
+Agent (coderails:loop-worker): "Fix agent-tool-abort.test.ts failures"
+Agent (coderails:loop-worker): "Fix batch-completion-behavior.test.ts failures"
+Agent (coderails:loop-worker): "Fix tool-approval-race-conditions.test.ts failures"
 # All three run concurrently.
 ```
+
+Name an agent rather than dispatching `general-purpose`. `coderails:loop-worker`
+fits work that writes code and tests; use a read-only agent
+(`pr-review-toolkit:code-reviewer`, `coderails:source-auditor`) when the task
+only inspects.
 
 Multiple dispatch calls in one response = parallel execution. One per response = sequential.
 
