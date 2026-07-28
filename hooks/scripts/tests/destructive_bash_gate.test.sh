@@ -247,6 +247,54 @@ check ".venv -> allow"              ALLOW "$(run "$(payload "python -m venv .ven
 # ".ENV" opens the very same inode as ".env" — a case-sensitive matcher is
 # defeated by pressing shift. The rest of this file's detectors already use
 # grep -i, so matching case-insensitively here is the house convention.
+# --- Boundary inversion + glob-expansion detection -------------------------
+# The boundary rule is INVERTED (any non-filename character is a boundary),
+# not an enumeration of permitted separators. Before that, 18 of 19 tested
+# left-boundary characters let a command through. These cases pin the two
+# behaviours the inversion and the glob predicate are FOR; they fail if
+# either is weakened back toward an enumerated class.
+#
+# Family A — the literal token is present with a glob metacharacter after it.
+check "glob suffix -> deny"         DENY "$(run "$(payload "cat .env*")")"
+# The leading-dot editor-swap name. '.' counts as a LEFT boundary, and the
+# suffix loop's sed must strip one leading non-filename char (not "up to the
+# first dot") or the suffix reads as the whole token and the file is allowed.
+check "leading-dot swap -> deny"    DENY "$(run "$(payload "cat ..env.swp")")"
+check "leading-dot swo -> deny"     DENY "$(run "$(payload "cat ..env.swo")")"
+#
+# Family B — NO literal token on the line at all. Each of these expands to
+# exactly the real secret file, so no widening of a literal matcher reaches
+# them; they are caught by matching the glob PATTERN's committing prefix.
+check "single-char wildcard -> deny" DENY "$(run "$(payload "cat .en?")")"
+check "mid-star -> deny"            DENY "$(run "$(payload "cat .e*v")")"
+check "bracket class -> deny"       DENY "$(run "$(payload "cat .en[v]")")"
+check "bracket range -> deny"       DENY "$(run "$(payload "cat .en[a-z]")")"
+# A bracket group wrapping ONE literal char is that char plus a metacharacter,
+# so it commits to the name while carrying no literal token. Collapsed before
+# matching rather than enumerating where a bracket may sit.
+check "bracket on e -> deny"        DENY "$(run "$(payload "cat .[e]nv")")"
+check "bracket on n -> deny"        DENY "$(run "$(payload "cat .e[n]v")")"
+check "all three bracketed -> deny" DENY "$(run "$(payload "cat .[e][n][v]")")"
+# Ranges and negated classes are NOT collapsed — they commit to no specific
+# character, so collapsing them would manufacture a commitment and over-block.
+check "range glob -> allow"         ALLOW "$(run "$(payload "ls .[a-z]*")")"
+check "prefix star -> deny"         DENY "$(run "$(payload "cat .en*")")"
+#
+# Over-block guard. A naive "could this glob expand onto the secret file"
+# predicate was measured to deny 3 of 15 ordinary commands. These pin the
+# rule that a token's LITERAL characters must COMMIT to the name: a bare or
+# unanchored glob has no committing prefix and must stay allowed.
+check "bare dot-glob -> allow"      ALLOW "$(run "$(payload "ls .*")")"
+check "bare star -> allow"          ALLOW "$(run "$(payload "cat *")")"
+check "bare star echo -> allow"     ALLOW "$(run "$(payload "echo *")")"
+check "extension glob -> allow"     ALLOW "$(run "$(payload "cat *.md")")"
+check "dir glob -> allow"           ALLOW "$(run "$(payload "rm build/*")")"
+# "envrc" is not a prefix of "env", so direnv's file is not a committing
+# prefix even when globbed.
+check "direnv glob -> allow"        ALLOW "$(run "$(payload "ls .envrc*")")"
+# A filename character precedes the dot, so this is not at a boundary.
+check "prefixed glob -> allow"      ALLOW "$(run "$(payload "cat myapp.env*")")"
+
 check ".ENV upper -> deny"          DENY "$(run "$(payload "cat .ENV")")"
 check ".Env mixed -> deny"          DENY "$(run "$(payload "cat .Env")")"
 check ".ENV.LOCAL suffixed -> deny" DENY "$(run "$(payload "cat .ENV.LOCAL")")"
