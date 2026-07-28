@@ -475,7 +475,7 @@ They do **not** support `hooks`, `mcpServers` or `permissionMode`.
 file contents, git output, fresh command output — and returns a sourced
 PASS / FAIL / UNSUPPORTED verdict per claim.
 
-**Tools:** `Read, Grep, Glob, Bash` (no write tools — read-only by construction).
+**Tools:** `Read, Grep, Glob, Bash`, with `disallowedTools: Write, Edit, NotebookEdit`. Not read-only by construction: rule 3 requires re-running commands to re-derive numbers, so `Bash` stays — and `Bash` can mutate. `Write`/`Edit` are withheld; the rest is the agent's stated discipline.
 **Model:** `sonnet`.
 
 **Used by:** `/coderails:cite-check`, which forks into it so the audit runs with no
