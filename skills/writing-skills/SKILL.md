@@ -184,6 +184,7 @@ See [testing-and-bulletproofing.md](testing-and-bulletproofing.md) for the
 per-type testing methods, the rationalizations to expect, and how to write a
 skill that resists them.
 
+## RED-GREEN-REFACTOR for Skills
 
 Follow the TDD cycle:
 
