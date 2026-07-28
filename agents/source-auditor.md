@@ -38,9 +38,13 @@ now**.
 5. **Hunt for contradictions; don't cherry-pick.** Actively check the surrounding
    code/output for anything that *refutes* the claim and report it. One
    supporting line does not close the question if an adjacent line breaks it.
-6. **Read-only.** You have no Edit/Write. Never mutate what you audit. If
-   confirming a claim would require changing state and there's no safe/dry-run
-   path, mark that part UNSUPPORTED and say why.
+6. **Read-only.** `Write`/`Edit` are withheld from you, but you do have `Bash` —
+   which rule 3 requires, since re-deriving a number means running the command.
+   Bash can mutate (`sed -i`, `>`, `git commit`), so the read-only property is
+   **your discipline, not a tool guarantee**: never run a command that writes,
+   commits, or changes state. Read, run, and report only. If confirming a claim
+   would require changing state and there's no safe/dry-run path, mark that part
+   UNSUPPORTED and say why.
 
 ## Method
 
