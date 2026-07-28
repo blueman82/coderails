@@ -208,47 +208,41 @@ elif ! kill -0 "$LOCK_PID" 2>/dev/null; then
   git worktree unlock "$WORKTREE_PATH"
   git worktree remove "$WORKTREE_PATH"
   git worktree prune
-elif [ "$LOCK_PID" = "$$" ] || [ "$WORKTREE_PATH" = "$STARTING_CWD" ]; then
-  echo "Worktree $WORKTREE_PATH is locked by live pid $LOCK_PID, but that lock is THIS session's own — the harness locked it on our behalf, not another session using it. Not a defer case."
-  # own-session case — see below, don't git-worktree-remove this
 else
-  echo "Worktree $WORKTREE_PATH is locked by live pid $LOCK_PID (reason: $LOCK_REASON) — belongs to ANOTHER session, deferred until that session ends, not removing."
+  echo "Worktree $WORKTREE_PATH is locked by live pid $LOCK_PID (reason: $LOCK_REASON) — determine below whether this is THIS session's own lock or another session's before acting."
 fi
 ```
 
-The `STARTING_CWD` comparison is the operative, executable test — it
-catches the common case where the harness (not this shell) wrote the
-lock but scoped it to the worktree this session was running in when Step
-6 started. `$$` additionally catches the narrower case where the lock
-was written by this exact shell, but is not something an agent can check
-against its own harness session pid in general — see below.
+**A live pid alone doesn't say whose it is — there is no reliable shell
+test for it here.** `$$` is this snippet's own subshell pid, not the
+Claude session's pid, so it can't be compared against `LOCK_PID`. And by
+the time Step 6 runs, the shell has already `cd`'d to `MAIN_ROOT` (both
+Merge Locally and Discard do this in Step 5, before handing off to Step
+6) — so `$WORKTREE_PATH` computed above is no longer this shell's cwd
+either; comparing cwd to it would silently always say "not mine." Don't
+invent a shell one-liner for this. The real signal is procedural, not
+computed: **was this session already working in `$WORKTREE_PATH` before
+Step 6 started** — i.e. is this the worktree this whole invocation of
+the skill has been running in? If you know that (you do — you know what
+worktree you've been operating in this session), use it directly:
 
-**Own cwd vs another session's — lead with the cwd test, not the pid.**
-The lock reason names a pid, but nothing in this repo gives an agent its
-own harness session pid to compare against it — `$$` is the subshell,
-not the session. The operative, executable test is the one already
-computed above: is `$WORKTREE_PATH` the worktree this session is running
-in (`$STARTING_CWD`)? If so, the harness locked it on this session's own
-behalf, not because another session is using it. Pid-naming is
-explanation for why the lock exists, not the check to run:
-
-- **`$WORKTREE_PATH` is NOT this session's own cwd** — some other
-  session is still working in the worktree. Report and defer, never
-  force. A merged PR does not by itself mean the worktree is safe to
-  remove; forcing it out would yank that other session mid-work. This
-  holds even if the lock also names a pid — a live pid on another
-  session always means defer.
-- **`$WORKTREE_PATH` IS this session's own cwd** — NOT a defer case,
-  regardless of which pid the lock names. `git worktree remove` cannot
-  remove the worktree it is run from, and forcing it (e.g. `-f`, or
-  removing the `.git` file by hand) would break the running session. Use
-  the native `ExitWorktree` tool instead, with `action: "remove"` — but
-  only if it owns this worktree: it operates solely on a worktree
-  created by `EnterWorktree` *this session*. A worktree switched into via
-  `EnterWorktree`'s `path` parameter, or entered with no `EnterWorktree`
-  session active at all, is NOT owned by it — it returns `action: "keep"`
-  only, or silently no-ops, never removes. In that case fall back to `cd`
-  to the main repo root, then `git worktree remove` from there.
+- **This worktree is NOT the one this session has been working in** —
+  some other session holds it. Report and defer, never force. A merged
+  PR does not by itself mean the worktree is safe to remove; forcing it
+  out would yank that other session mid-work. This holds regardless of
+  which pid the lock names.
+- **This worktree IS the one this session has been working in** — NOT a
+  defer case, regardless of which pid the lock names. `git worktree
+  remove` cannot remove the worktree it is run from, and forcing it
+  (e.g. `-f`, or removing the `.git` file by hand) would break the
+  running session. Use the native `ExitWorktree` tool instead, with
+  `action: "remove"` — but only if it owns this worktree: it operates
+  solely on a worktree created by `EnterWorktree` *this session*. A
+  worktree switched into via `EnterWorktree`'s `path` parameter, or
+  entered with no `EnterWorktree` session active at all, is NOT owned by
+  it — it returns `action: "keep"` only, or silently no-ops, never
+  removes. In that case fall back to `cd` to the main repo root, then
+  `git worktree remove` from there.
 
   When `ExitWorktree` does own the worktree: it exits the session from
   the worktree and removes it in one step, but refuses when the worktree
