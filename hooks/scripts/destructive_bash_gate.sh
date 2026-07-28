@@ -385,13 +385,62 @@ fi
 #     filenames remain uncaught" ceiling on the source-edit blocks.
 dotenv_hit=""
 dotenv_cmd=$(printf '%s' "$cmd" | tr '[:upper:]' '[:lower:]')
-if echo "$dotenv_cmd" | grep -qE '(^|[[:space:]/'"'"'"><|;&=#])\.env([[:space:]'"'"'"><|;&)~#]|$)'; then
+# Boundary rule is INVERTED, not enumerated. The previous form listed the
+# characters that count as a separator, so every metacharacter nobody
+# enumerated was a permanent hole: measured 18 ALLOW / 1 DENY across 19
+# left-boundary characters. Here a boundary is any character that is NOT a
+# filename character, so an unforeseen metacharacter cannot open a new one.
+# The two sides carry DIFFERENT exclusions, on purpose:
+#   LEFT  excludes [alnum _ -]  — '.' therefore counts as a boundary, while
+#         '-' and '_' stay out so `myapp.env` / `config.env` remain allowed
+#         by their preceding filename character.
+#   RIGHT excludes [alnum _ . -] — '.' must NOT terminate the match here, or
+#         `.env.example` matches this rule directly and is denied before it
+#         ever reaches the template suffix loop below. Verified by mutation:
+#         dropping '.' from the right class over-blocked all 7 template forms.
+# The leading-dot editor-swap form (`..env.swp`) is NOT closed here — it is
+# denied by the suffix loop below, which reads its suffix as "swp" and finds
+# it absent from the template allow-list. Verified by mutation: reverting
+# this rule's left class leaves that case denied.
+if echo "$dotenv_cmd" | grep -qE '(^|[^[:alnum:]_-])\.env([^[:alnum:]_.-]|$)'; then
   dotenv_hit=".env"
 fi
+# Glob-expansion detection. Matching runs BEFORE the shell expands anything,
+# so a token that only becomes the secret filename at expansion time carries
+# no literal `.env` substring at all: `.en?`, `.e*v` and `.en[v]` each expand
+# to exactly the real file. No widening of the literal matcher above can
+# reach them — they need the glob PATTERN to be matched, not the name.
+#
+# The rule, and the reason it is this narrow: deny only when a token's
+# LITERAL (non-metacharacter) characters COMMIT to the secret filename's
+# shape — a leading '.' at a boundary, then a non-empty prefix of "env",
+# then a glob metacharacter. A bare glob has no committing literal prefix,
+# so `cat *`, `ls .*` and `echo *` stay allowed; a naive "could this glob
+# match the secret file" predicate was measured to deny 3 of 15 ordinary
+# commands, which is why that form was rejected. `.envrc*` is allowed
+# because "envrc" is not a prefix of "env", and `myapp.env*` because a
+# filename character precedes the dot.
+#
+# CEILING, stated plainly: this catches patterns that commit to the name, not
+# every pattern that could expand onto it. A token whose literal characters
+# stay ambiguous until expansion (`.??v`, or a bare `*` in a directory whose
+# only file is the secret) is still uncaught, and cannot be caught without
+# over-blocking ordinary globs.
 if [ -z "$dotenv_hit" ]; then
-  # Strip the captured left-boundary char back off each token (sed) so the
-  # ${tok#.env.} suffix extraction below sees a clean ".env.<suffix>".
-  for dotenv_tok in $(echo "$dotenv_cmd" | grep -oE '(^|[[:space:]/'"'"'"><|;&=#])\.env\.[a-z0-9_.-]+' | sed -E 's/^[^.]*//'); do
+  if echo "$dotenv_cmd" | grep -qE '(^|[^[:alnum:]_.-])\.e(n(v)?)?[][*?]'; then
+    dotenv_hit=".env glob"
+  fi
+fi
+if [ -z "$dotenv_hit" ]; then
+  # Same inverted left boundary as the matcher above — an enumerated class
+  # here would re-open on the right the hole the inversion just closed.
+  # The sed strips the captured boundary character back off each token so the
+  # ${tok#.env.} extraction below sees a clean ".env.<suffix>". It must strip
+  # ONE leading non-filename character, not "everything up to the first dot":
+  # the old `s/^[^.]*//` could not strip a leading '.', so `..env.swp` came
+  # through as "..env.swp", `${tok#.env.}` failed to match, and the suffix
+  # read back as the whole token instead of "swp" — allowing the swap file.
+  for dotenv_tok in $(echo "$dotenv_cmd" | grep -oE '(^|[^[:alnum:]_-])\.env\.[a-z0-9_.-]+' | sed -E 's/^[^[:alnum:]_.-]?//; s/^\.\././'); do
     dotenv_suffix=${dotenv_tok#.env.}
     dotenv_suffix=${dotenv_suffix%%.*}
     case "$dotenv_suffix" in
