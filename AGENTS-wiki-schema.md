@@ -150,7 +150,7 @@ Once the vault outgrows reading `index.md` directly, use `qmd` to search it:
 - `qmd search "<keywords>"` — BM25 only, fast. Best for known-term lookups.
 - `qmd get <file>` — fetch a specific page by path.
 
-**Reindex rule**: after wiki changes, run `qmd update && qmd embed`. `qmd embed` ALONE MISSES NEW FILES — it only refreshes embeddings for already-known content hashes. `qmd update` is what scans for new/changed files; it must run first.
+**Reindex rule**: after wiki changes, run `qmd update && qmd embed`. `qmd embed` alone misses new files — it only refreshes embeddings for already-known content hashes (inferred from qmd's documented behaviour). `qmd update` is what scans for new/changed files; it must run first.
 
 `qmd collection add` is first-time setup only — it errors "Collection already exists" on reruns. Don't run it as part of routine maintenance.
 
