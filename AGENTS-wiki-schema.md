@@ -51,6 +51,14 @@ coderails-wiki/
 
 ## Page types
 
+> **This section is live enforcement config, not just documentation.** At
+> runtime, `hooks/scripts/wiki_taxonomy_gate.sh` parses everything from this
+> heading up to the next `## ` heading as its write allow-list: any
+> backticked directory-slash token found anywhere in that span sanctions
+> that directory for writes. Adding, removing, or reformatting such a token
+> — in a table cell or in surrounding prose — changes what the gate
+> permits, not just what this doc says.
+
 | Type | Directory | Naming | Purpose |
 |---|---|---|---|
 | command | `commands/` | `<command-name>.md` | Documents one slash command: what it does, config fields, scripts invoked |
