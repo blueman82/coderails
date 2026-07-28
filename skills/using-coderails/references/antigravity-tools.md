@@ -57,15 +57,21 @@ Call `define_subagent` only for a custom system prompt or capability mix: set
 invoke it by the name you gave it. (`manage_subagents` lists/kills running
 subagents.)
 
-Skills dispatch with `Subagent (general-purpose):` and either reference a
-prompt-template file (e.g. `coderails:subagent-driven-development`'s
-`./implementer-prompt.md`) or supply an inline prompt. On Antigravity:
+Skills dispatch by naming an agent (e.g. `coderails:loop-worker`,
+`pr-review-toolkit:code-reviewer`) or by supplying an inline prompt. Antigravity
+has no equivalent of a named agent definition, so the agent's own system prompt
+does not come along — read the agent file and carry its body into the prompt
+yourself. On Antigravity:
 
 | Skill dispatch form | Antigravity equivalent |
 |---------------------|----------------------|
-| An implementer-style `*-prompt.md` template (writes code, runs tests) | Fill the template, then `invoke_subagent` with `TypeName: "self"` and the filled prompt |
-| A read-only reviewer template (`task-reviewer`, `code-reviewer`, `requesting-code-review`'s `./code-reviewer.md`) | `invoke_subagent` with `TypeName: "research"` and the filled review template |
-| Inline prompt (no template referenced) | `invoke_subagent` with `TypeName: "self"` (or `"research"` if the task only reads) and your inline prompt |
+| An implementer agent (`coderails:loop-worker`) — writes code, runs tests | Read the agent file, then `invoke_subagent` with `TypeName: "self"` and its body as the prompt prefix |
+| A read-only agent (`pr-review-toolkit:code-reviewer`, `coderails:spec-reviewer`, `coderails:source-auditor`) | `invoke_subagent` with `TypeName: "research"` and the agent's body as the prompt prefix |
+| Inline prompt (no agent named) | `invoke_subagent` with `TypeName: "self"` (or `"research"` if the task only reads) and your inline prompt |
+
+`TypeName: "research"` is the closest match to a read-only `tools:` list — use it
+for every reviewer/auditor agent so the read-only constraint is enforced by the
+runtime rather than only by the prompt text.
 
 ### Prompt filling
 
