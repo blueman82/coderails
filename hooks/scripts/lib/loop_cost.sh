@@ -6,9 +6,16 @@
 # dc_mine_token_usage <session_id>
 #   Mines token usage + estimated USD cost for one agentic-loop orchestrator
 #   session PLUS every worker (subagent) transcript it spawned. Stdout: a
-#   single JSON object (schema below). Fail-open to {} on ANY error (no glob
-#   hit, unreadable dir, jq failure, missing price file) — never nonzero,
-#   never block a caller, mirroring dc_mine_hook_blocks exactly.
+#   single JSON object (schema below). Fail-open on ANY error (no glob hit,
+#   unreadable dir, jq failure, missing price file) — never nonzero, never
+#   block a caller, mirroring dc_mine_hook_blocks exactly. Every environmental
+#   fail-open (no jq, no transcript, missing/invalid price file, mining/
+#   pricing jq failure — six paths, all things that can be true of a
+#   CORRECT call) returns a bare {}, with a distinct diagnostic on stderr.
+#   The one CALLER-error path — no session id argument — is additionally
+#   self-describing on STDOUT: {"error":"...","hint":"..."}, no
+#   total_tokens/total_usd_estimate/schema_version keys, so it survives
+#   2>/dev/null and can't be mistaken for a successful-but-empty mine.
 #
 #   Resolution: glob ~/.claude/projects/*/<session_id>.jsonl (override via
 #   CLAUDE_PROJECTS_DIR for tests) -> its containing dir <proj> is the
@@ -37,7 +44,7 @@
 #   usd_estimate 0, id appended to unpriced_models (never dropped, never
 #   crashed on).
 dc_mine_token_usage() {
-  local session="$1"
+  local session="${1:-}"
   local projects_dir="${CLAUDE_PROJECTS_DIR:-$HOME/.claude/projects}"
 
   # Self-path resolution, cross-shell. ${BASH_SOURCE[0]} is bash-only — under
@@ -55,7 +62,27 @@ dc_mine_token_usage() {
   local prices_file="${CLAUDE_MODEL_PRICES_FILE:-$(dirname "$self_path")/model_prices.json}"
 
   command -v jq >/dev/null 2>&1 || { echo "loop_cost: jq not found on PATH" >&2; printf '{}'; return 0; }
-  [ -n "$session" ] || { echo "loop_cost: empty session id" >&2; printf '{}'; return 0; }
+  # Caller error, not an environmental fail-open: unlike the other six bails
+  # below (no transcript, missing/invalid price file, jq/mining failures —
+  # all things that can be true of a CORRECT call), an empty session id can
+  # only happen when the caller forgot the argument. That distinction must
+  # survive a caller piping stderr to /dev/null (the reflex when calling a
+  # documented fail-open helper) — a bare `{}` here is indistinguishable from
+  # "mined successfully, nothing to report" on stdout alone, which is exactly
+  # the ambiguity that once hid a real $28.91/49.3M-token loop cost behind a
+  # silently-dropped caller error. So this ONE bail additionally emits a
+  # self-describing JSON object on STDOUT (not just stderr): an `error` field
+  # naming the problem, and a `hint` naming the fix. It still has no
+  # `total_tokens`/`total_usd_estimate`/`schema_version` keys, so any consumer
+  # checking `jq -e '.error'` or the absence of `total_tokens` can tell this
+  # apart from both a real mine and the plain `{}` the other six bails still
+  # return. Exit 0 unchanged — this is additive to the fail-open contract,
+  # not a departure from it.
+  [ -n "$session" ] || {
+    echo "loop_cost: empty session id" >&2
+    printf '{"error":"loop_cost: empty session id","hint":"dc_mine_token_usage requires a session id as its first argument"}'
+    return 0
+  }
   [ -f "$prices_file" ] || { echo "loop_cost: prices file not found at $prices_file" >&2; printf '{}'; return 0; }
 
   # session_id is harness-owned (caller-supplied), not attacker-controlled —

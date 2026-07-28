@@ -403,14 +403,38 @@ check "jq absent: still fail-opens to {} on stdout" "{}" "$stdout_out"
 check "jq absent: still exit 0" "0" "$rc"
 
 # --- Test (n): empty session id — the `[ -n "$session" ]` bail must emit a
-# distinct stderr diagnostic. Return value unchanged: still {}, still exit 0. ---
+# distinct stderr diagnostic. This is a CALLER error, not an environmental
+# fail-open, so stdout is no longer a bare {} (that shape is indistinguishable
+# from "mined successfully, nothing to report" once stderr is discarded —
+# the exact ambiguity that once hid a real $28.91/49.3M-token loop cost).
+# Stdout must instead be self-describing JSON: an `error` field, no
+# total_tokens/total_usd_estimate/schema_version keys. Exit 0 unchanged. ---
 stderr_out=$(dc_mine_token_usage "" 2>&1 1>/dev/null)
 stdout_out=$(dc_mine_token_usage "" 2>/dev/null)
 rc=0
 dc_mine_token_usage "" >/dev/null 2>&1 || rc=$?
 check "empty session id: distinct stderr diagnostic" "true" "$(printf '%s' "$stderr_out" | grep -qF "empty session id" && echo true || echo false)"
-check "empty session id: still fail-opens to {} on stdout" "{}" "$stdout_out"
+check "empty session id: stdout is valid JSON" "true" "$(printf '%s' "$stdout_out" | jq -e . >/dev/null 2>&1 && echo true || echo false)"
+check "empty session id: stdout has an .error field" "true" "$(printf '%s' "$stdout_out" | jq -e '.error' >/dev/null 2>&1 && echo true || echo false)"
+check "empty session id: .error names the fix (session id argument)" "true" "$(printf '%s' "$stdout_out" | jq -r '.hint' | grep -qF "session id" && echo true || echo false)"
+check "empty session id: stdout has NO total_tokens key (not mistakable for a real mine)" "false" "$(printf '%s' "$stdout_out" | jq -e 'has("total_tokens")' >/dev/null 2>&1 && echo true || echo false)"
 check "empty session id: still exit 0" "0" "$rc"
+
+# --- Test (n2): NO argument at all (not even ""), with stderr fully
+# discarded — the exact real-world call shape (an orchestrator invoking the
+# fail-open helper bare and piping stderr to /dev/null) that hid the real
+# cost this fix exists to surface. Requires `local session="${1:-}"` in the
+# lib: under this test file's `set -u`, `local session="$1"` with ZERO
+# positional args is an unbound-variable error that aborts the whole script
+# before this assertion ever runs — that abort would itself be a broken
+# fail-open (a caller error must never crash a `set -u` caller), so the `:-`
+# default is part of the fix, not incidental. This test FAILS against
+# origin/main's code (bare {} on stdout, no .error field) and PASSES here. ---
+stdout_out=$(dc_mine_token_usage 2>/dev/null)
+rc=0
+dc_mine_token_usage >/dev/null 2>&1 || rc=$?
+check "no argument at all: stdout alone (stderr discarded) reveals the caller error" "true" "$(printf '%s' "$stdout_out" | jq -e '.error' >/dev/null 2>&1 && echo true || echo false)"
+check "no argument at all: still exit 0 (fail-open preserved even with zero args under set -u)" "0" "$rc"
 
 # --- Test (o): no transcript found — the `[ -n "$orch_transcript" ]` bail
 # must emit a distinct stderr diagnostic naming the session, so it is no

@@ -1200,9 +1200,12 @@ not also appear in .proofs." >&2
 # own `exit 0` — i.e. they fail TOWARD blocking. This function does the
 # OPPOSITE on purpose: it must NEVER block, under any failure. Rationale:
 # dc_mine_token_usage (hooks/scripts/lib/loop_cost.sh:7-12) is contractually
-# fail-open to `{}` on any mining error and documents that it "must never
-# block a caller" — retro.json's `.cost` can legitimately be `{}` (miner ran,
-# failed open) on an otherwise perfectly valid, already-finished loop. If
+# fail-open on any mining error (environmental causes return `{}`; this
+# reporter's caller — Phase 13 — always supplies a session id, so it never
+# sees the lib's separate caller-error shape) and documents that it "must
+# never block a caller" — retro.json's `.cost` can legitimately be `{}`
+# (miner ran, failed open) on an otherwise perfectly valid, already-finished
+# loop. If
 # this reporter were written in the house fail-closed style, a miner bug
 # would deadlock a loop that has ALREADY passed the retro/work_units/proof
 # gates above it — strictly worse than the unrecorded-cost bug it exists to
