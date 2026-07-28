@@ -146,8 +146,8 @@ Fix anything directly related to the current PR; defer unrelated findings.
 
 Once the vault outgrows reading `index.md` directly, use `qmd` to search it:
 
-- `qmd query "<question>"` — hybrid BM25 + vector search with reranking. Best for open-ended questions.
-- `qmd search "<keywords>"` — BM25 only, fast. Best for known-term lookups.
+- `qmd query "<question>"` — hybrid BM25 + vector search with reranking (inferred from `qmd --help`'s query-syntax section, which accepts separate `lex:`/`vec:` lines but doesn't name the fusion explicitly). Best for open-ended questions.
+- `qmd search "<keywords>"` — BM25 only, fast (verified: `qmd --help` states "Full-text BM25 keywords (no LLM)"). Best for known-term lookups.
 - `qmd get <file>` — fetch a specific page by path.
 
 **Reindex rule**: after wiki changes, run `qmd update && qmd embed`. `qmd embed` alone misses new files — it only refreshes embeddings for already-known content hashes (inferred from qmd's documented behaviour). `qmd update` is what scans for new/changed files; it must run first.
