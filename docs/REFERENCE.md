@@ -460,10 +460,23 @@ These skills enforce engineering principles and language-specific coding standar
 
 Subagent definitions in `agents/`, auto-discovered when the plugin is enabled and
 referenced by their namespaced name (`coderails:<name>`). Skills dispatch these
-by name instead of pasting a prompt into a `general-purpose` subagent: the
-definition pins the tool set and model, so a read-only reviewer physically cannot
-edit the code it is judging, and the discipline survives even if the dispatching
+by name instead of pasting a prompt into a `general-purpose` subagent: the model
+and tool set travel with the definition, so they survive even if the dispatching
 prose is ignored.
+
+How strong that guarantee is varies per agent, and the difference matters:
+
+- **Enforced.** `spec-reviewer` declares `tools: Read, Grep, Glob` and has no
+  write capability at all.
+- **Partly enforced.** `source-auditor` withholds `Write`/`Edit` via
+  `disallowedTools` but keeps `Bash` (it must re-run commands), and `Bash` can
+  mutate — so its read-only property is partly discipline.
+- **Not enforced.** `pr-review-toolkit:code-reviewer` declares no `tools:` key
+  and therefore has full tool access. Naming it buys a pinned model and a
+  maintained rubric, not an inability to edit what it reviews.
+
+Do not describe agent dispatch as making a reviewer "physically unable" to edit
+unless that specific agent's `tools:`/`disallowedTools` actually says so.
 
 Plugin agents support `name`, `description`, `model`, `effort`, `maxTurns`,
 `tools`, `disallowedTools`, `skills`, `memory`, `background` and `isolation`.
