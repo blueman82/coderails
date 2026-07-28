@@ -126,11 +126,37 @@ Use `/wiki-ingest` from the coderails plugin. Never write wiki pages directly fo
 
 Use `/wiki-query` from the coderails plugin. The skill reads `index.md` first, then fetches relevant pages, then answers the question with citations.
 
+If answering a question reveals something non-obvious, create an investigation page in `investigations/` to file the finding back — that is the birth condition for a new investigation page.
+
 ### Lint
 
 Use `/wiki-lint` from the coderails plugin. Always run after ingest. Checks for: orphaned pages (linked but not created), stale `last_updated` dates, missing cross-references, contradictions between pages.
 
 Fix anything directly related to the current PR; defer unrelated findings.
+
+## Search
+
+Once the vault outgrows reading `index.md` directly, use `qmd` to search it:
+
+- `qmd query "<question>"` — hybrid BM25 + vector search with reranking. Best for open-ended questions.
+- `qmd search "<keywords>"` — BM25 only, fast. Best for known-term lookups.
+- `qmd get <file>` — fetch a specific page by path.
+
+**Reindex rule**: after wiki changes, run `qmd update && qmd embed`. `qmd embed` ALONE MISSES NEW FILES — it only refreshes embeddings for already-known content hashes. `qmd update` is what scans for new/changed files; it must run first.
+
+`qmd collection add` is first-time setup only — it errors "Collection already exists" on reruns. Don't run it as part of routine maintenance.
+
+## Conventions
+
+- Wiki-links use `[[page_name]]` with no directory prefix — Obsidian resolves the target.
+- Frontmatter tags are lowercase and hyphenated.
+- One concept per page — split a page that covers too much.
+- Source pages reference the PR number and key files changed.
+- Keep pages under 2 minutes to read.
+
+## Exploration boundary
+
+Subagent/code exploration explores code; the wiki captures understanding. Use exploration when a wiki operation hits a specific gap — a query found no page, an ingest touches unfamiliar code, or a lint finds a page you have specific reason to doubt. Do NOT use it to routinely validate wiki content: the wiki is trusted by default and corrected by evidence, not by standing patrols.
 
 ## Evolution note
 
