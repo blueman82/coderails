@@ -259,10 +259,10 @@ worktree you've been operating in this session), use it directly:
   `discard_changes: true` on a refusal you haven't verified this way.
 
 **Never force-remove a lock you can't attribute to a dead pid or to this
-session's own cwd.** No parseable pid and a live pid on another session
-both mean: report and leave the worktree alone. A confirmed-dead pid
-clears the lock via the git path above; a live pid on this session's own
-cwd clears it via `ExitWorktree`.
+session's own worktree.** No parseable pid and a live pid on another
+session both mean: report and leave the worktree alone. A confirmed-dead
+pid clears the lock via the git path above; a live pid on this session's
+own worktree clears it via `ExitWorktree`.
 
 **Otherwise:** The host environment (harness) owns this workspace. Do NOT remove it. If your platform provides a workspace-exit tool, use it. Otherwise, leave the workspace in place.
 
