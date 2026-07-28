@@ -2,45 +2,43 @@
 # PreToolUse hook (Write|Edit|MultiEdit): block writes into an unsanctioned
 # top-level directory of an LLM wiki vault.
 #
-# The taxonomy is READ FROM THE VAULT'S OWN AGENTS.md, never hardcoded — this
-# hook parses whatever the "## Page types" table currently says, so editing
-# that table changes enforcement automatically with no hook edit. Hardcoding
-# the list would create exactly the drift-between-doc-and-enforcement this
-# hook exists to prevent.
+# The taxonomy is READ FROM THE PLUGIN'S OWN wiki schema
+# (AGENTS-wiki-schema.md, "## Page types"), never hardcoded — this hook parses
+# whatever that table currently says, so editing it changes enforcement
+# automatically with no hook edit. Hardcoding the list would create exactly
+# the drift-between-doc-and-enforcement this hook exists to prevent.
 #
-# A vault is identified by carrying an AGENTS.md with a "## Page types"
-# section AT ITS OWN REPO ROOT. Identification keys off the FILE's own repo
-# root, never the session cwd — matches the cross-repo pattern in
-# no_edit_on_main.sh (an agent may write into a wiki from a different repo's
-# worktree, which is exactly the incident this hook exists to prevent).
+# WHY THAT FILE: AGENTS.md names AGENTS-wiki-schema.md as the wiki schema
+# reference, and its Page types table is the SAME table wiki-ingest,
+# wiki-query, wiki-lint and wiki-init read. Enforcing the table the skills
+# read is the whole point of the hook.
 #
-# A root AGENTS.md with a parseable Page types table is NOT sufficient on its
-# own: a code repo can legitimately DOCUMENT a wiki's taxonomy (e.g. the code
-# repo that builds the agent maintaining that wiki) without BEING the vault.
-# This bit a real repo (assistant-agent) whose AGENTS.md describes its wiki's
-# taxonomy from the outside — the hook denied every source write in it. So a
-# vault also requires STRUCTURAL CORROBORATION: at least 2 of the parsed
-# sanctioned directories must actually exist at the repo root. A genuine
-# vault has (most or all of) its taxonomy's directories present; a repo that
-# merely describes one elsewhere's taxonomy has none of them.
+# HISTORY, because the previous shape looked deliberate and was not: this hook
+# used to resolve AGENTS.md from the WRITTEN FILE's own repo root — i.e. from
+# the wiki vault — and additionally required a literal "wiki-vault: true"
+# marker line in it. No design document specifies either. The vault has no
+# root AGENTS.md at all, so the marker check exited 0 on every single write
+# and the gate never once engaged. It was inert, not lenient: a write into an
+# unsanctioned directory was permitted silently, which is indistinguishable
+# from the gate approving it.
 #
-# Structural corroboration alone is not airtight either: a repo whose own
-# source dirs happen to share names with a taxonomy it documents (e.g. a
-# plugin repo with commands/, hooks/, skills/ dirs whose AGENTS.md documents
-# a companion wiki using those same names) would still pass the >=2 check.
-# So a vault ALSO requires a POSITIVE MARKER: a literal "wiki-vault: true"
-# line anywhere in AGENTS.md. This is the vault self-identifying its
-# contract, rather than the hook inferring vault-ness from structure alone —
-# a repo does not carry this line by accident.
+# A vault is now identified by two things, both necessary:
+#   1. It is NOT the plugin repo. The plugin carries the schema and has
+#      commands/, hooks/, skills/ directories whose names overlap the taxonomy
+#      it defines, so structure alone would misidentify it and block ordinary
+#      edits to this repo's own source.
+#   2. STRUCTURAL CORROBORATION: at least 2 of the parsed sanctioned
+#      directories actually exist at the written file's repo root. A genuine
+#      vault has most of its taxonomy's directories present; an unrelated repo
+#      has none of them.
 #
-# Fail OPEN on any ambiguity: AGENTS.md absent, no wiki-vault: true marker,
-# no Page types section, a section present but the table shape yields zero
-# parsed directories (an unexpected format must never be misread as "empty
-# taxonomy, block everything" — that would be worse than the drift it
-# prevents), or fewer than 2 sanctioned directories actually present at the
-# root (documentation, not a vault). Blocking only fires when a vault is
-# POSITIVELY identified (marker + parseable table + structural corroboration,
-# all required) AND the target directory is POSITIVELY unsanctioned.
+# Fail OPEN on any ambiguity: the schema file absent, no Page types section, a
+# section present but the table shape yields zero parsed directories (an
+# unexpected format must never be misread as "empty taxonomy, block
+# everything" — worse than the drift it prevents), the write targeting the
+# plugin repo itself, or fewer than 2 sanctioned directories present at the
+# root. Blocking only fires when a vault is POSITIVELY identified AND the
+# target directory is POSITIVELY unsanctioned.
 #
 # Always allowed in addition to the parsed table:
 #   raw/            — documented as immutable drop-zone input, not a page type
@@ -84,17 +82,20 @@ if [ -n "$resolved_probe" ]; then
   absfile="$resolved_probe/$suffix${absfile##*/}"
 fi
 
-agents="$root/AGENTS.md"
-[ -f "$agents" ] || exit 0
-
-# Positive vault marker: a literal "wiki-vault: true" line. Required in
-# addition to the Page types table + structural corroboration below — see
-# the header comment for why structure alone isn't enough to rule out a
-# code/plugin repo whose own dirs happen to overlap a taxonomy it documents.
-grep -q '^wiki-vault: true$' "$agents" || exit 0
+# The taxonomy is read from the PLUGIN's own wiki schema, not from a file at
+# the written file's repo root. This is where the schema actually lives:
+# AGENTS.md names AGENTS-wiki-schema.md as the wiki schema reference, and its
+# "## Page types" table is the same table wiki-ingest, wiki-query, wiki-lint
+# and wiki-init already read. Enforcing the table the skills read is the whole
+# point — an earlier version resolved AGENTS.md from the WRITTEN FILE's repo
+# root, i.e. the vault, which has no such file and which no design document
+# asks for, so the gate silently failed open on every write and never once
+# engaged.
+schema="${CLAUDE_PLUGIN_ROOT:-}/AGENTS-wiki-schema.md"
+[ -f "$schema" ] || exit 0
 
 # Extract the "## Page types" section body (up to the next "## " heading or EOF).
-section=$(awk '/^## Page types/{flag=1; next} /^## /{flag=0} flag' "$agents")
+section=$(awk '/^## Page types/{flag=1; next} /^## /{flag=0} flag' "$schema")
 [ -z "$section" ] && exit 0
 
 # Parse every backticked "name/" token out of the table rows — robust to
@@ -103,18 +104,27 @@ section=$(awk '/^## Page types/{flag=1; next} /^## /{flag=0} flag' "$agents")
 sanctioned=$(printf '%s\n' "$section" | grep -oE '`[A-Za-z0-9_-]+/`' | tr -d '`')
 [ -z "$sanctioned" ] && exit 0
 
+# NEVER treat the plugin repo itself as a vault. It carries the schema and has
+# commands/, hooks/, skills/ directories whose names overlap the taxonomy it
+# defines, so structural corroboration alone would misidentify it and block
+# ordinary edits to this repo's own source. This check replaces the old
+# "wiki-vault: true" marker, which existed only to disambiguate a lookup that
+# no longer happens now the schema is read from one fixed location.
+plugin_root=$(cd "${CLAUDE_PLUGIN_ROOT:-/nonexistent}" 2>/dev/null && pwd -P)
+[ -n "$plugin_root" ] && [ "$root" = "$plugin_root" ] && exit 0
+
 # Structural corroboration: require at least 2 of the parsed sanctioned
-# directories to actually exist at the root, so a repo whose AGENTS.md merely
-# describes a taxonomy (documentation) is not mistaken for the vault itself.
+# directories to actually exist at the root, so a repo that merely happens to
+# be written into is not mistaken for the vault itself.
 present=0
 for dir in $sanctioned; do
   [ -d "$root/$dir" ] && present=$((present + 1))
 done
 [ "$present" -lt 2 ] && exit 0
 
-# This IS a vault (marker present, parseable Page types table, corroborated
-# by real sanctioned directories on disk) — resolve the target path relative
-# to the vault root and classify it.
+# This IS a vault (not the plugin repo, and corroborated by real sanctioned
+# directories on disk) — resolve the target path relative to the vault root
+# and classify it.
 case "$absfile" in
   "$root"/*) rel="${absfile#"$root"/}" ;;
   *) exit 0 ;;

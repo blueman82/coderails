@@ -8,20 +8,20 @@ TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 export CLAUDE_DISCIPLINE_LOG="$TMP/discipline.log"
 
-# $VAULT — a wiki repo: AGENTS.md at its root with the "wiki-vault: true"
-# marker, a "## Page types" table, AND at least 2 of those directories
-# actually present on disk (structural corroboration — see
-# wiki_taxonomy_gate.sh's rationale). All three are required; missing any
-# one means this would no longer be recognised as a vault at all.
-VAULT="$TMP/vault"
-mkdir -p "$VAULT/architecture" "$VAULT/investigations" "$VAULT/sources"
-git -C "$VAULT" init -q
-git -C "$VAULT" config user.email t@t.t
-git -C "$VAULT" config user.name t
-cat > "$VAULT/AGENTS.md" <<'EOF'
-# Wiki AGENTS.md
-
-wiki-vault: true
+# $SCHEMA — a stand-in for the PLUGIN repo, carrying the wiki schema the gate
+# reads. The taxonomy now comes from ONE fixed location (the plugin's
+# AGENTS-wiki-schema.md), not from a file at the written file's repo root.
+#
+# WHY THIS FIXTURE CHANGED: the previous version built each vault with its own
+# root AGENTS.md carrying a "wiki-vault: true" marker, and passed. The REAL
+# vault has neither file nor marker, so the shipped gate exited 0 on every
+# write and never once engaged. The suite was green against a fixture that did
+# not match production — which is exactly how the defect survived. These
+# fixtures now mirror the real shape: a vault with NO AGENTS.md of its own.
+SCHEMA="$TMP/plugin"
+mkdir -p "$SCHEMA"
+cat > "$SCHEMA/AGENTS-wiki-schema.md" <<'EOF'
+# Wiki schema
 
 ## Page types
 
@@ -31,8 +31,17 @@ wiki-vault: true
 | `investigations/` | Filed-back answers to queries |
 | `sources/` | Ingested references |
 EOF
-git -C "$VAULT" add AGENTS.md
-git -C "$VAULT" commit -q -m init
+export CLAUDE_PLUGIN_ROOT="$SCHEMA"
+
+# $VAULT — a wiki repo identified STRUCTURALLY: at least 2 of the schema's
+# sanctioned directories present on disk, and not the plugin repo itself.
+# Deliberately carries NO AGENTS.md, matching the real vault.
+VAULT="$TMP/vault"
+mkdir -p "$VAULT/architecture" "$VAULT/investigations" "$VAULT/sources"
+git -C "$VAULT" init -q
+git -C "$VAULT" config user.email t@t.t
+git -C "$VAULT" config user.name t
+git -C "$VAULT" commit -q --allow-empty -m init
 
 # $NOVAULT — a normal repo with a decisions/ dir but NO wiki AGENTS.md at all.
 NOVAULT="$TMP/novault"
@@ -251,19 +260,23 @@ else
   printf 'ok   - real assistant-agent repo check skipped (path not present on this machine)\n'
 fi
 
-# Taxonomy-is-dynamic: add a fake type to a temp AGENTS.md, confirm that
-# directory becomes allowed. Proves the parse is live, not hardcoded. Needs
-# >=2 real sanctioned dirs present (architecture/ + zorptastic/ itself once
-# created) to be recognised as a vault under structural corroboration.
+# Taxonomy-is-dynamic: add a fake type to the SCHEMA (not to the vault),
+# confirm that directory becomes allowed. Proves the parse is live, not
+# hardcoded, and that the live source is the plugin's schema file. Needs >=2
+# real sanctioned dirs present in the vault (architecture/ + zorptastic/) to
+# be recognised under structural corroboration.
 DYNAMIC="$TMP/dynamic"
 mkdir -p "$DYNAMIC/architecture" "$DYNAMIC/zorptastic"
 git -C "$DYNAMIC" init -q
 git -C "$DYNAMIC" config user.email t@t.t
 git -C "$DYNAMIC" config user.name t
-cat > "$DYNAMIC/AGENTS.md" <<'EOF'
-# AGENTS.md
+git -C "$DYNAMIC" commit -q --allow-empty -m init
 
-wiki-vault: true
+# Point the gate at a schema that does NOT yet name zorptastic2.
+DYNSCHEMA="$TMP/dynplugin"
+mkdir -p "$DYNSCHEMA"
+cat > "$DYNSCHEMA/AGENTS-wiki-schema.md" <<'EOF'
+# Wiki schema
 
 ## Page types
 
@@ -272,11 +285,38 @@ wiki-vault: true
 | `architecture/` | How the system is built |
 | `zorptastic/` | A made-up page type that does not exist anywhere else |
 EOF
-git -C "$DYNAMIC" add AGENTS.md
-git -C "$DYNAMIC" commit -q -m init
+export CLAUDE_PLUGIN_ROOT="$DYNSCHEMA"
 check "dynamic taxonomy: fake type not yet added -> deny" \
   DENY "$(run "$(payload Write "$DYNAMIC/zorptastic2/foo.md" "$DYNAMIC")")"
 check "dynamic taxonomy: fake type present in table -> allow" \
   ALLOW "$(run "$(payload Write "$DYNAMIC/zorptastic/foo.md" "$DYNAMIC")")"
+
+# Editing the SCHEMA changes enforcement with no hook edit — the property the
+# whole design rests on. Same path, same vault, opposite verdict, and the only
+# thing that changed is a row in the schema table.
+mkdir -p "$DYNAMIC/zorptastic2"
+printf '| `zorptastic2/` | Added after the fact |\n' >> "$DYNSCHEMA/AGENTS-wiki-schema.md"
+check "dynamic taxonomy: adding the row to the schema flips deny -> allow" \
+  ALLOW "$(run "$(payload Write "$DYNAMIC/zorptastic2/foo.md" "$DYNAMIC")")"
+
+# The plugin repo itself is never a vault, even though its own directory names
+# overlap the taxonomy it defines. This replaces the old wiki-vault marker,
+# which existed only to disambiguate a lookup that no longer happens.
+PLUGINREPO="$TMP/pluginrepo"
+mkdir -p "$PLUGINREPO/architecture" "$PLUGINREPO/sources"
+cp "$SCHEMA/AGENTS-wiki-schema.md" "$PLUGINREPO/AGENTS-wiki-schema.md"
+git -C "$PLUGINREPO" init -q
+git -C "$PLUGINREPO" config user.email t@t.t
+git -C "$PLUGINREPO" config user.name t
+git -C "$PLUGINREPO" commit -q --allow-empty -m init
+export CLAUDE_PLUGIN_ROOT="$PLUGINREPO"
+check "plugin repo is never a vault -> allow" \
+  ALLOW "$(run "$(payload Write "$PLUGINREPO/unsanctioned/foo.md" "$PLUGINREPO")")"
+
+# Schema unreachable must FAIL OPEN, never block-everything.
+export CLAUDE_PLUGIN_ROOT="$TMP/does-not-exist"
+check "schema unreachable -> fail open" \
+  ALLOW "$(run "$(payload Write "$VAULT/decisions/foo.md" "$VAULT")")"
+export CLAUDE_PLUGIN_ROOT="$SCHEMA"
 
 [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails)"; exit 1; }
