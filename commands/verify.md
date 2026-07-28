@@ -1,11 +1,22 @@
 ---
 description: Re-derive a specific claim from sources only - no recall, no inference, just evidence
+agent: coderails:source-auditor
+context: fork
+background: false
+argument-hint: <claim to verify>
 ---
 
 # Verify
 
-Re-derive the following claim using only sources in this session (tool results, file contents, user statements, git output). No recall. No inference. No "I believe" or "should be."
+Re-derive the claim(s) below using only durable sources you can read or produce
+right now — file contents, git output, and fresh command output. You have no
+conversation history, so do not rely on prior tool results or anything said
+earlier; go read or re-run it. No recall. No inference. No "I believe" or
+"should be."
 
-**Claim:** $ARGUMENTS
+**Claim(s):** $ARGUMENTS
 
-For each step, cite the source (`file:line`, tool output, exact quote). If the claim cannot be fully sourced, state precisely what is missing and what would be needed to verify it.
+Treat each claim independently and give each its own verdict (evidence for one
+never carries another). For each, cite the source (`file:line`, tool output,
+exact quote). If a claim cannot be fully sourced, state precisely what is
+missing and what would be needed to verify it.
