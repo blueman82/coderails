@@ -197,6 +197,7 @@ Ready to implement <feature-name>
 - Create worktree without verifying it's ignored (project-local)
 - Skip baseline test verification
 - Proceed with failing tests, or ask whether to proceed — stop instead
+- Use `git worktree remove` to exit a worktree you entered via a native tool (e.g., `EnterWorktree`) — use that tool's exit counterpart (`ExitWorktree`) instead.
 
 **Always:**
 - Run Step 0 detection first
@@ -205,3 +206,4 @@ Ready to implement <feature-name>
 - Verify directory is ignored for project-local
 - Auto-detect and run project setup
 - Verify clean test baseline
+- When finished with a worktree entered via a native tool, exit/remove it with that tool's counterpart (e.g., `ExitWorktree`), not `git worktree remove`.
