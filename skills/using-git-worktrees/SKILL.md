@@ -197,7 +197,7 @@ Ready to implement <feature-name>
 - Create worktree without verifying it's ignored (project-local)
 - Skip baseline test verification
 - Proceed with failing tests, or ask whether to proceed — stop instead
-- Use `git worktree remove` to exit a worktree you entered via a native tool (e.g., `EnterWorktree`) — use that tool's exit counterpart (`ExitWorktree`) instead.
+- Use `git worktree remove` to exit a worktree you entered via a native tool (e.g., `EnterWorktree`) — use that tool's exit counterpart (`ExitWorktree`) instead. **Carve-out:** this doesn't apply to a worktree `EnterWorktree` doesn't own — one switched into via its `path` parameter, or when there's no active `EnterWorktree` session at all. There, `ExitWorktree` only returns `action: "keep"` or silently no-ops; it can't remove. Fall back to `cd` to the main repo root, then `git worktree remove` (see `finishing-out.md`'s per-unit branch finishing section for the full case split).
 
 **Always:**
 - Run Step 0 detection first
