@@ -104,18 +104,38 @@ section=$(awk '/^## Page types/{flag=1; next} /^## /{flag=0} flag' "$schema")
 sanctioned=$(printf '%s\n' "$section" | grep -oE '`[A-Za-z0-9_-]+/`' | tr -d '`')
 [ -z "$sanctioned" ] && exit 0
 
-# NEVER treat the plugin repo itself as a vault. It carries the schema and has
-# commands/, hooks/, skills/ directories whose names overlap the taxonomy it
-# defines, so structural corroboration alone would misidentify it and block
-# ordinary edits to this repo's own source. This check replaces the old
-# "wiki-vault: true" marker, which existed only to disambiguate a lookup that
-# no longer happens now the schema is read from one fixed location.
-plugin_root=$(cd "${CLAUDE_PLUGIN_ROOT:-/nonexistent}" 2>/dev/null && pwd -P)
-[ -n "$plugin_root" ] && [ "$root" = "$plugin_root" ] && exit 0
+# POSITIVE vault identification: the write must land in the CONFIGURED wiki
+# vault, resolved from workflow.config.yaml's wiki_path (relative to the
+# plugin root). Structure alone is NOT sufficient and never was — measured:
+# an ordinary Claude plugin repo (commands/ + hooks/ + skills/) and a data
+# pipeline (sources/ + investigations/) both clear a ">=2 sanctioned dirs"
+# test, so a purely structural rule blocks unrelated writes in both. That is
+# the same hazard the old "wiki-vault: true" marker existed to prevent;
+# dropping the marker without a positive identifier re-opens it.
+#
+# Excluding only the plugin repo is not enough either: it stops this repo
+# being misread, not every other repo that shares the directory names.
+config="${CLAUDE_PLUGIN_ROOT:-}/.claude/workflow.config.yaml"
+[ -f "$config" ] || exit 0
+# Strip surrounding quotes: `wiki_path: "../wiki"` is valid YAML, and keeping
+# the quotes makes the cd below fail, which would fail open on a perfectly
+# good config — the gate going inert for a formatting choice is exactly the
+# silent-nothing failure this PR exists to remove.
+wiki_rel=$(awk '/^wiki_path:/{print $2; exit}' "$config" | sed -E 's/^"(.*)"$/\1/; s/^'"'"'(.*)'"'"'$/\1/')
+[ -n "$wiki_rel" ] || exit 0
+# `null` and `~` are YAML nulls — a project with no wiki configured. Not an
+# error, just nothing to gate.
+case "$wiki_rel" in
+  null|'~'|'') exit 0 ;;
+esac
+vault_root=$(cd "${CLAUDE_PLUGIN_ROOT}/$wiki_rel" 2>/dev/null && pwd -P)
+[ -n "$vault_root" ] || exit 0
+[ "$root" = "$vault_root" ] || exit 0
 
-# Structural corroboration: require at least 2 of the parsed sanctioned
-# directories to actually exist at the root, so a repo that merely happens to
-# be written into is not mistaken for the vault itself.
+# Structural corroboration, kept as a secondary sanity check: even the
+# configured vault must actually carry its taxonomy, so a misconfigured
+# wiki_path pointing at an unrelated directory fails open rather than
+# blocking every write in it.
 present=0
 for dir in $sanctioned; do
   [ -d "$root/$dir" ] && present=$((present + 1))

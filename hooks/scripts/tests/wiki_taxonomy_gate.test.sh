@@ -19,7 +19,17 @@ export CLAUDE_DISCIPLINE_LOG="$TMP/discipline.log"
 # not match production — which is exactly how the defect survived. These
 # fixtures now mirror the real shape: a vault with NO AGENTS.md of its own.
 SCHEMA="$TMP/plugin"
-mkdir -p "$SCHEMA"
+mkdir -p "$SCHEMA/.claude"
+# The gate identifies the vault POSITIVELY from wiki_path, not from directory
+# shape. Structure alone over-blocks: an ordinary Claude plugin (commands/ +
+# hooks/ + skills/) and a data pipeline (sources/ + investigations/) both
+# clear a ">=2 sanctioned dirs" test, and both had unrelated writes blocked
+# when this gate identified vaults structurally. The fixture therefore needs
+# a config pointing at the vault, exactly as production does.
+cat > "$SCHEMA/.claude/workflow.config.yaml" <<'EOF'
+project: test
+wiki_path: ../vault
+EOF
 cat > "$SCHEMA/AGENTS-wiki-schema.md" <<'EOF'
 # Wiki schema
 
@@ -222,22 +232,37 @@ check "deny reason names the rejected directory" \
 check "deny reason names a sanctioned directory" \
   1 "$(printf '%s' "$out" | grep -c 'investigations/')"
 
-# Real-vault sanity check: the actual assistant-agent-wiki repo now carries
-# its own root AGENTS.md with a Page types table (fixed after this hook
-# surfaced the gap — it previously lived only in a sibling repo and this
-# hook could never reach it). Guarded to skip cleanly if the path is absent
+# Real-vault sanity check, against THIS project's configured vault. The gate
+# now identifies the vault positively from wiki_path, so a vault is gated only
+# when a plugin config points at it — an unrelated wiki on the same machine is
+# correctly NOT gated by this plugin, which is the property that stops ordinary
+# repos being misidentified. Guarded to skip cleanly if either path is absent
 # so the suite stays portable across machines/CI.
-REALWIKI="/Users/harrison/Github/assistant-agent-wiki"
-if [ -d "$REALWIKI/.git" ] && [ -f "$REALWIKI/AGENTS.md" ]; then
-  check "real wiki, unsanctioned decisions/ -> deny" \
-    DENY "$(run "$(payload Write "$REALWIKI/decisions/foo.md" "$REALWIKI")")"
-  # calendar-log.md is a real root file beyond the index.md/log.md pair —
-  # confirms root-file detection is structural (no directory component),
-  # not a hardcoded name list that would miss it.
-  check "real wiki, root calendar-log.md -> allow" \
-    ALLOW "$(run "$(payload Write "$REALWIKI/calendar-log.md" "$REALWIKI")")"
+REALPLUGIN="/Users/harrison/Github/coderails"
+REALVAULT="/Users/harrison/Github/coderails-wiki"
+if [ -f "$REALPLUGIN/.claude/workflow.config.yaml" ] && [ -d "$REALVAULT/.git" ]; then
+  # CLAUDE_PLUGIN_ROOT is read from the ENVIRONMENT, not from the payload's
+  # cwd field — point it at the real plugin for this block, then restore.
+  SAVED_ROOT="$CLAUDE_PLUGIN_ROOT"
+  export CLAUDE_PLUGIN_ROOT="$REALPLUGIN"
+  check "real vault, unsanctioned decisions/ -> deny" \
+    DENY "$(run "$(payload Write "$REALVAULT/decisions/foo.md" "$REALPLUGIN")")"
+  # A real root file beyond the index.md/log.md pair — confirms root-file
+  # detection is structural (no directory component), not a hardcoded name
+  # list that would miss it.
+  check "real vault, root log.md -> allow" \
+    ALLOW "$(run "$(payload Write "$REALVAULT/log.md" "$REALPLUGIN")")"
+  check "real vault, sanctioned sources/ -> allow" \
+    ALLOW "$(run "$(payload Write "$REALVAULT/sources/foo.md" "$REALPLUGIN")")"
+  # An unrelated vault on the same machine is not this plugin's vault.
+  UNRELATED="/Users/harrison/Github/assistant-agent-wiki"
+  if [ -d "$UNRELATED/.git" ]; then
+    check "unrelated wiki is not this plugin's vault -> allow" \
+      ALLOW "$(run "$(payload Write "$UNRELATED/decisions/foo.md" "$REALPLUGIN")")"
+  fi
+  export CLAUDE_PLUGIN_ROOT="$SAVED_ROOT"
 else
-  printf 'ok   - real wiki check skipped (path not present on this machine)\n'
+  printf 'ok   - real vault check skipped (paths not present on this machine)\n'
 fi
 
 # Real-repo false-positive check: assistant-agent is the CODE repo whose
@@ -274,7 +299,11 @@ git -C "$DYNAMIC" commit -q --allow-empty -m init
 
 # Point the gate at a schema that does NOT yet name zorptastic2.
 DYNSCHEMA="$TMP/dynplugin"
-mkdir -p "$DYNSCHEMA"
+mkdir -p "$DYNSCHEMA/.claude"
+cat > "$DYNSCHEMA/.claude/workflow.config.yaml" <<'EOF'
+project: dyn
+wiki_path: ../dynamic
+EOF
 cat > "$DYNSCHEMA/AGENTS-wiki-schema.md" <<'EOF'
 # Wiki schema
 
