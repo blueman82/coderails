@@ -215,16 +215,17 @@ fi
 
 **A live pid alone doesn't say whose it is — there is no reliable shell
 test for it here.** `$$` is this snippet's own subshell pid, not the
-Claude session's pid, so it can't be compared against `LOCK_PID`. And by
-the time Step 6 runs, the shell has already `cd`'d to `MAIN_ROOT` (both
-Merge Locally and Discard do this in Step 5, before handing off to Step
-6) — so `$WORKTREE_PATH` computed above is no longer this shell's cwd
-either; comparing cwd to it would silently always say "not mine." Don't
-invent a shell one-liner for this. The real signal is procedural, not
-computed: **was this session already working in `$WORKTREE_PATH` before
-Step 6 started** — i.e. is this the worktree this whole invocation of
-the skill has been running in? If you know that (you do — you know what
-worktree you've been operating in this session), use it directly:
+Claude session's pid, so it can't be compared against `LOCK_PID`. And
+Step 5's Merge Locally and Discard snippets `cd` to `MAIN_ROOT` before
+handing off to Step 6, in a separate command invocation each time — cwd
+isn't guaranteed to persist between them, so `$WORKTREE_PATH` computed
+above may no longer be this shell's actual cwd either; comparing cwd to
+it is not a dependable test. Don't invent a shell one-liner for this.
+The real signal is procedural, not computed: **was this session already
+working in `$WORKTREE_PATH` before Step 6 started** — i.e. is this the
+worktree this whole invocation of the skill has been running in? If you
+know that (you do — you know what worktree you've been operating in
+this session), use it directly:
 
 - **This worktree is NOT the one this session has been working in** —
   some other session holds it. Report and defer, never force. A merged
