@@ -60,18 +60,24 @@ coderails-wiki/
 | investigation | `investigations/` | `<topic>_<YYYY-MM-DD>.md` | Point-in-time analysis filed during a workflow session; may be superseded |
 | source | `sources/` | `pr_<N>_<slug>.md` | Immutable record of a merged PR, created by `/wiki-ingest` |
 
-**Not a wiki page type:** scheduled-routine run notes
-(`<wikiPaths[0]>/dashboard-runs/<routine>.md`, `type: routine-run`,
-written by `skills/dashboard/runner`) live inside the vault directory
-but are operational output, not wiki content — they follow none of the
-page-format rules below, are never linked via `[[wiki-links]]`, and are
-not touched by `/wiki-ingest` or `/wiki-lint`. The `type: routine-run`
-frontmatter is specific to the runner's own notes — the Obsidian
-plugin's direct-exec path writes separate per-run notes into the same
-`dashboard-runs/` folder with `status: running|done|failed`
-frontmatter and no `type` field; treat both as non-wiki operational
-output regardless of frontmatter shape. See
-[`docs/routines.md`](./docs/routines.md) for what they're for.
+**Not page types — structural directories.** These hold skeletons and
+charts, carry no frontmatter, and are never `[[wiki-link]]`ed:
+
+| Directory | Naming | Purpose |
+|---|---|---|
+| `templates/` | `<page-type>.md` | Page skeletons (command.md, hook.md, skill.md, design.md, investigation.md, source.md) with the YAML frontmatter shape |
+| `assets/` | freeform | Charts and images generated for wiki pages (e.g. matplotlib output) |
+| `dashboard-runs/` | `<routine>.md` | Scheduled-routine run notes, `type: routine-run`, written by `skills/dashboard/runner` |
+
+`dashboard-runs/` content is operational output, not wiki content — it
+follows none of the page-format rules below, is never linked via
+`[[wiki-links]]`, and is not touched by `/wiki-ingest` or `/wiki-lint`.
+The `type: routine-run` frontmatter is specific to the runner's own
+notes — the Obsidian plugin's direct-exec path writes separate per-run
+notes into the same `dashboard-runs/` folder with
+`status: running|done|failed` frontmatter and no `type` field; treat
+both as non-wiki operational output regardless of frontmatter shape.
+See [`docs/routines.md`](./docs/routines.md) for what they're for.
 
 ## Page format
 
