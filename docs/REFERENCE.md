@@ -11,10 +11,11 @@ Catalogue of every coderails component (36 skills, plus hooks, commands, scripts
    - [Vendored dev-workflow skills](#vendored-dev-workflow-skills)
    - [Wiki skills](#wiki-skills)
    - [Engineering principles skills](#engineering-principles-skills)
-2. [Hook Activation Matrix](#hook-activation-matrix)
-3. [Commands](#commands)
-4. [Scripts and Libraries](#scripts-and-libraries)
-5. [Artifact and State Locations](#artifact-and-state-locations)
+2. [Agents](#agents)
+3. [Hook Activation Matrix](#hook-activation-matrix)
+4. [Commands](#commands)
+5. [Scripts and Libraries](#scripts-and-libraries)
+6. [Artifact and State Locations](#artifact-and-state-locations)
 
 ---
 
