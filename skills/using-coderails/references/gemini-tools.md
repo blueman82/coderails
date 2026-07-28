@@ -43,9 +43,12 @@ prompt yourself. On Gemini CLI:
 | Names a reviewer agent (`pr-review-toolkit:code-reviewer`, `coderails:spec-reviewer`, `coderails:source-auditor`) | Same, but state the read-only constraint explicitly in the prompt — `generalist` still has write tools |
 | Inline prompt (no agent named) | `invoke_agent` with `agent_name: "generalist"` and your inline prompt |
 
-The read-only note matters: on Claude Code a reviewer agent's `tools:` list
-physically withholds `Write`/`Edit`. Here that guarantee is prose, so an
-instruction not to edit is the only thing enforcing it.
+The read-only note matters, and the Claude Code side is weaker than it looks:
+only `coderails:spec-reviewer` truly withholds write tools via its `tools:` list.
+`coderails:source-auditor` disallows `Write`/`Edit` but keeps `Bash`, and
+`pr-review-toolkit:code-reviewer` declares no `tools:` key at all, so it has full
+access. On Gemini CLI there is no tool-level enforcement either way, so state the
+read-only constraint explicitly in the prompt for every reviewer or auditor.
 
 ### Prompt filling
 
