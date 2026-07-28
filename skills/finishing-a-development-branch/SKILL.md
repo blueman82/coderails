@@ -217,10 +217,12 @@ else
 fi
 ```
 
-`$$` catches the case where the lock was written by this exact shell;
-the `STARTING_CWD` comparison catches the more common case where the
-harness (not this shell) wrote the lock but scoped it to the worktree
-this session was running in when Step 6 started.
+The `STARTING_CWD` comparison is the operative, executable test — it
+catches the common case where the harness (not this shell) wrote the
+lock but scoped it to the worktree this session was running in when Step
+6 started. `$$` additionally catches the narrower case where the lock
+was written by this exact shell, but is not something an agent can check
+against its own harness session pid in general — see below.
 
 **Own cwd vs another session's — lead with the cwd test, not the pid.**
 The lock reason names a pid, but nothing in this repo gives an agent its
