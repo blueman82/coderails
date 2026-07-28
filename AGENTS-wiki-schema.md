@@ -152,7 +152,7 @@ Once the vault outgrows reading `index.md` directly, use `qmd` to search it:
 
 **Reindex rule**: after wiki changes, run `qmd update && qmd embed`. `qmd embed` alone misses new files — it only refreshes embeddings for already-known content hashes (inferred from qmd's documented behaviour). `qmd update` is what scans for new/changed files; it must run first.
 
-`qmd collection add` is first-time setup only — it errors "Collection already exists" on reruns. Don't run it as part of routine maintenance.
+`qmd collection add` is first-time setup only — it errors "Collection already exists" on reruns (verified: observed on a scratch collection). Don't run it as part of routine maintenance.
 
 ## Conventions
 
