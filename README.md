@@ -117,8 +117,16 @@ catalog: [`docs/REFERENCE.md`](./docs/REFERENCE.md).
 ## Agents
 
 Skills dispatch these by name rather than pasting a prompt into a
-`general-purpose` subagent. Each definition pins the tool set, so a read-only
-reviewer physically cannot edit the work it is judging.
+`general-purpose` subagent, so the model and tool set travel with the agent
+instead of depending on prose the dispatcher may ignore.
+
+How far that goes varies by agent, and the honest split is worth stating:
+`spec-reviewer` declares `tools: Read, Grep, Glob` and therefore *cannot* write.
+`source-auditor` needs `Bash` to re-derive numbers, so it withholds
+`Write`/`Edit` via `disallowedTools` but its read-only property still rests
+partly on instruction. `pr-review-toolkit:code-reviewer` declares no `tools:`
+key at all and so has full tool access — its read-only discipline is prose, not
+enforcement.
 
 | Agent | Purpose | Tools |
 |---|---|---|
