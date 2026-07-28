@@ -123,7 +123,7 @@ Add near the top of the project's CLAUDE.md:
 
 **qmd**: Register the wiki vault as a collection and add context. `qmd collection add` errors "Collection already exists" on a rerun — guard it so re-running this step doesn't fail:
 ```bash
-qmd collection list | grep -q wiki || qmd collection add <vault-path> --name wiki
+qmd collection list | grep -qx wiki || qmd collection add <vault-path> --name wiki
 qmd context add qmd://wiki "<description of what the wiki covers>"
 ```
 
