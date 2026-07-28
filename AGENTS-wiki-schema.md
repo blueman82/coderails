@@ -144,6 +144,8 @@ Fix anything directly related to the current PR; defer unrelated findings.
 
 ## Search
 
+`qmd` is an optional accelerator, not a requirement — if it isn't installed, search falls back to reading `index.md` directly, and the commands below apply only when `qmd` is present.
+
 Once the vault outgrows reading `index.md` directly, use `qmd` to search it:
 
 - `qmd query "<question>"` — hybrid BM25 + vector search with reranking (inferred from `qmd --help`'s query-syntax section, which accepts separate `lex:`/`vec:` lines but doesn't name the fusion explicitly). Best for open-ended questions.

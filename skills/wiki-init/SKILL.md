@@ -105,7 +105,7 @@ Discuss pages with the user as you create them — don't auto-ingest silently.
 Create two files in the project directory (not the wiki vault):
 
 - **`AGENTS.md`** — a slim entry point. It points to `AGENTS-wiki-schema.md` as the source of truth for wiki conventions and, if the project already has other `AGENTS.md` content (a working guide, etc.), coexists with it rather than replacing it.
-- **`AGENTS-wiki-schema.md`** — the actual schema the LLM reads at conversation start. Include: wiki location, three layers, page types, page format, Ingest/Query/Lint workflows, conventions, evolution note.
+- **`AGENTS-wiki-schema.md`** — the actual schema the LLM reads at conversation start. Include: wiki location, three layers, page types, page format, search, Ingest/Query/Lint workflows, conventions, evolution note. The Search section must note that `qmd` is optional — a fallback to reading `index.md` directly — so a machine without qmd isn't left with unconditional `qmd` instructions.
 
 **The Page types section in `AGENTS-wiki-schema.md` must include every directory Claude will write to — `templates/` and `assets/` included, marked as structural directories rather than page types.** This matters beyond documentation: the coderails plugin's own `hooks/scripts/wiki_taxonomy_gate.sh` parses this exact section as its write allow-list, but only for the ONE vault named in the plugin's own `.claude/workflow.config.yaml` — running this skill against some other project's vault (the normal case) does not put that vault under this gate at all. When the gate does apply and does fire, a denial is explicit and logged (it names the rejected directory and the sanctioned list), not silent — but a directory created in Step 3 and omitted from this section will still be rejected on its first write. Listing a directory that doesn't exist yet on disk is harmless — the parse that builds the allow-list doesn't check the filesystem — so a vault may list `assets/` per this step while skipping its creation per Step 3; just note that the hook's secondary corroboration check separately requires at least 2 of the listed directories to actually be present on disk, so a vault can't rely on this to skip creating most of its structure.
 
@@ -121,13 +121,17 @@ Add near the top of the project's CLAUDE.md:
 
 ### Step 8: Setup Tooling
 
-**qmd**: Register the wiki vault as a collection and add context. `qmd collection add` errors "Collection already exists" on a rerun — guard it so re-running this step doesn't fail:
+**qmd**: Register the wiki vault as a collection and add context — only if qmd is installed. `qmd collection add` errors "Collection already exists" on a rerun — guard it so re-running this step doesn't fail:
 ```bash
-qmd collection list | grep -qx wiki || qmd collection add <vault-path> --name wiki
-qmd context add qmd://wiki "<description of what the wiki covers>"
+if command -v qmd >/dev/null 2>&1; then
+  qmd collection list | grep -qx wiki || qmd collection add <vault-path> --name wiki
+  qmd context add qmd://wiki "<description of what the wiki covers>"
+else
+  echo "qmd not found — skipping wiki search registration. The wiki still works via index.md; install qmd later and re-run this step to enable search."
+fi
 ```
 
-After any wiki changes, reindex with `qmd update && qmd embed`. Run `qmd update` first — `qmd embed` alone misses new files, since it only refreshes embeddings for already-known content hashes (inferred from qmd's documented behaviour); `qmd update` is what scans for new/changed files.
+If qmd is installed, reindex after any wiki changes with `qmd update && qmd embed`. Run `qmd update` first — `qmd embed` alone misses new files, since it only refreshes embeddings for already-known content hashes (inferred from qmd's documented behaviour); `qmd update` is what scans for new/changed files.
 
 **Obsidian**: Register the vault programmatically and open it:
 
