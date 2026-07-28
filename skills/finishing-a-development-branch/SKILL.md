@@ -217,13 +217,10 @@ else
 fi
 ```
 
-`STARTING_CWD` is `$WORKTREE_PATH` captured at the top of this step
-(line with `WORKTREE_PATH=$(git rev-parse --show-toplevel)`, before the
-`cd "$MAIN_ROOT"` above) — save it under that name if you need it after
-the `cd`. `$$` catches the case where the lock was written by this exact
-shell; the path comparison catches the more common case where the
-harness (not this shell) wrote the lock but scoped it to this session's
-workspace.
+`$$` catches the case where the lock was written by this exact shell;
+the `STARTING_CWD` comparison catches the more common case where the
+harness (not this shell) wrote the lock but scoped it to the worktree
+this session was running in when Step 6 started.
 
 **Live pid — tell your own session's lock from another session's.** The
 lock reason names a pid; that alone doesn't say whose it is. The tell is
