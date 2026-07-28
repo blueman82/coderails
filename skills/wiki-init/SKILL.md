@@ -116,7 +116,7 @@ Add near the top of the project's CLAUDE.md:
 ```markdown
 ## Wiki Knowledge Base
 
-**At the start of every conversation**, read `AGENTS.md` in this directory for wiki maintenance protocols. The <project> wiki is a persistent, compounding knowledge base maintained by Claude and browsed by <user> in Obsidian. The wiki vault lives at `<vault-path-chosen-in-step-3>`.
+**At the start of every conversation**, read `AGENTS.md` in this directory — the entry point — which links to `AGENTS-wiki-schema.md` for wiki maintenance protocols. The <project> wiki is a persistent, compounding knowledge base maintained by Claude and browsed by <user> in Obsidian. The wiki vault lives at `<vault-path-chosen-in-step-3>`.
 ```
 
 ### Step 8: Setup Tooling
