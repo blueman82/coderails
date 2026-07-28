@@ -1,5 +1,5 @@
 ---
-name: verify
+name: cite-check
 description: Re-derive a specific claim from sources only - no recall, no inference, just evidence
 agent: coderails:source-auditor
 context: fork
@@ -7,7 +7,7 @@ background: false
 argument-hint: <claim to verify>
 ---
 
-# Verify
+# Cite-check
 
 Re-derive the claim(s) below using only durable sources you can read or produce
 right now — file contents, git output, and fresh command output. You have no
