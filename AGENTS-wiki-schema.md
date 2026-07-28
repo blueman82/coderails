@@ -1,5 +1,8 @@
 # AGENTS-wiki-schema.md — the coderails wiki schema
 
+Based on the LLM Wiki pattern:
+https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f
+
 Split out of `AGENTS.md` (2026-07-17) to keep that file a slim working guide.
 This file is the single source of truth for coderails wiki conventions — how
 the wiki is structured, maintained, and queried. `AGENTS.md` is still the
