@@ -90,10 +90,14 @@ nested `schema_version` 1, independent of the retro's), then lift its `models_us
 inside `cost`. This split is what bumps the retro's own `schema_version` to 2; the
 `cost`/`models_used` fields don't exist under `schema_version` 1.
 
-**Fail-open.** The miner never blocks teardown — on any error it returns `{}`, so both
-`retro.cost` and `retro.models_used` end up empty and a `complete` declaration proceeds exactly as
-it would with populated values. `loop_stall_guard` checks the retro's presence and
-`schema_version`, never the cost field's correctness, so a miner failure cannot stall a loop.
+**Fail-open.** The miner never blocks teardown — on any environmental error (no jq, no transcript,
+missing/invalid price file) it returns `{}`, so both `retro.cost` and `retro.models_used` end up
+empty and a `complete` declaration proceeds exactly as it would with populated values.
+`loop_stall_guard` checks the retro's presence and `schema_version`, never the cost field's
+correctness, so a miner failure cannot stall a loop. (The one CALLER-error path — invoking the
+miner with no session id, which this sub-step never does since it always has `<session_id>` in
+hand — instead returns a self-describing `{"error":...}` object on stdout; see the lib's own
+header comment.)
 
 ## Pricing is computed once and frozen
 
