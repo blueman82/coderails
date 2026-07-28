@@ -42,7 +42,7 @@ Based on the project, propose page types and directory structure. Do NOT use har
 - **Library**: modules/, apis/, patterns/, migrations/, sources/
 - **Infrastructure**: services/, resources/, runbooks/, incidents/, sources/
 
-Common across all projects: `index.md` (catalog), `log.md` (chronological), `templates/` (page skeletons), `sources/` (ingested PRs), `investigations/` (filed-back answers). Schema lives in the project directory as AGENTS.md — not inside the vault.
+Common across all projects: `index.md` (catalog), `log.md` (chronological), `templates/` (page skeletons), `sources/` (ingested PRs), `investigations/` (filed-back answers). Schema lives in the project directory as `AGENTS-wiki-schema.md`, linked from a slim `AGENTS.md` entry point — not inside the vault.
 
 Present the proposal and iterate until the user approves. Include 3-5 seed pages you'd create first.
 
