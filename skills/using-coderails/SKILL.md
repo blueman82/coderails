@@ -2,6 +2,7 @@
 name: using-coderails
 description: Use when starting any conversation - establishes how to find and use skills, requiring skill invocation before ANY response including clarifying questions
 user-invocable: false
+model: sonnet
 ---
 
 <SUBAGENT-STOP>

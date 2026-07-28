@@ -4,6 +4,7 @@ description: "Use this skill to audit the quality and structural integrity of th
 context: fork
 agent: coderails:wiki-writer
 argument-hint: "[scope — e.g. a subdirectory or page prefix; omit to lint the whole vault]"
+model: sonnet
 ---
 
 # Wiki Lint

@@ -1,6 +1,7 @@
 ---
 name: handoff
 description: Generate a structured memory file and continuation prompt for carrying work into a new Claude Code session. Use this whenever work needs to continue in a fresh session — design plans, implementation work, multi-session features, research threads. Triggers on "handoff", "hand off", "continue in new session", "pick this up later", "save this for next session", "create a handoff", or any intent to preserve session context for future continuation. Use proactively when a session is getting long and the user signals they want to wrap up but continue later.
+model: sonnet
 ---
 
 # Handoff

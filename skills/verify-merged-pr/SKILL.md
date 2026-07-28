@@ -1,6 +1,7 @@
 ---
 name: verify-merged-pr
 description: Use when an agent, teammate, CI report, or session summary claims a PR is merged and you are about to rely on that — before building on top of "it's merged", trusting a headless builder's report, or accepting a "done, PR landed" hand-off. Symptoms: someone gives you ONE PR number as the thing that landed, a status message says merged/shipped/live, or you need to confirm changes are actually on origin/main.
+model: sonnet
 ---
 
 # Verify Merged PR

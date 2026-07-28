@@ -1,6 +1,7 @@
 ---
 name: wiki-init
 description: "Initialize an LLM Wiki for the current project — a persistent, compounding knowledge base maintained by Claude and browsed in Obsidian. Use when the user wants to set up a wiki, knowledge base, or second brain for a project. Also use when they mention Karpathy's LLM Wiki pattern, AGENTS.md, or want to organize project knowledge beyond CLAUDE.md. Triggers on 'wiki init', 'create wiki', 'knowledge base', 'set up obsidian wiki', or explicit /wiki-init."
+model: sonnet
 ---
 
 # Wiki Init

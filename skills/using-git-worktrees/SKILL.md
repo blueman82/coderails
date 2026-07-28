@@ -1,6 +1,7 @@
 ---
 name: using-git-worktrees
 description: Use when starting feature work that needs isolation from current workspace or before executing implementation plans - autonomously ensures an isolated workspace exists via native tools or git worktree fallback, no human checkpoint
+model: sonnet
 ---
 
 # Using Git Worktrees

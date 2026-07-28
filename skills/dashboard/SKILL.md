@@ -1,6 +1,7 @@
 ---
 name: dashboard
 description: "Launch the coderails observability dashboard — a live local web HUD showing sessions, agentic loops, PR gate states, runs, and memory activity, with declared one-click skill triggers. Use when the user says 'dashboard', 'observability', 'command center', 'watch the system', or '/coderails:dashboard'."
+model: sonnet
 ---
 
 # Dashboard

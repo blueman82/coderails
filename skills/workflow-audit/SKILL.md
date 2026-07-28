@@ -1,6 +1,7 @@
 ---
 name: workflow-audit
 description: Use when the user asks to look at recent sessions and find repeated tasks worth turning into skills — "look at our last N sessions and pull out repeated tasks", "what do I do repeatedly that isn't a skill yet", "audit my workflows", "mine my transcripts for skill candidates", "turn my repeated tasks into skills".
+model: sonnet
 ---
 
 # Workflow Audit

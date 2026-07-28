@@ -5,6 +5,7 @@ context: fork
 agent: coderails:wiki-writer
 background: false
 argument-hint: <PR# | description of the change to record>
+model: sonnet
 ---
 
 # Wiki Ingest
