@@ -29,15 +29,18 @@ BASE_SHA=$(git rev-parse HEAD~1)  # or origin/main
 HEAD_SHA=$(git rev-parse HEAD)
 ```
 
-**2. Dispatch code reviewer subagent:**
+**2. Dispatch the code reviewer agent:**
 
-Dispatch a `general-purpose` subagent, filling the template at [code-reviewer.md](code-reviewer.md)
+Dispatch the `pr-review-toolkit:code-reviewer` agent. It carries its own review
+rubric and confidence scoring, so you supply only the context it cannot infer:
 
-**Placeholders:**
-- `{DESCRIPTION}` - Brief summary of what you built
-- `{PLAN_OR_REQUIREMENTS}` - What it should do
-- `{BASE_SHA}` - Starting commit
-- `{HEAD_SHA}` - Ending commit
+- **What you built** — brief summary
+- **What it should do** — the plan or requirements it is being reviewed against
+- **The range** — `{BASE_SHA}..{HEAD_SHA}`, and which files to focus on
+
+Name the agent rather than dispatching a `general-purpose` subagent with an
+inline prompt. The agent definition pins the model and the reviewing discipline;
+a generic subagent inherits neither.
 
 **3. Act on feedback:**
 - Fix Critical issues immediately
