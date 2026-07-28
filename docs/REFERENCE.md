@@ -456,6 +456,78 @@ These skills enforce engineering principles and language-specific coding standar
 
 ---
 
+## Agents
+
+Subagent definitions in `agents/`, auto-discovered when the plugin is enabled and
+referenced by their namespaced name (`coderails:<name>`). Skills dispatch these
+by name instead of pasting a prompt into a `general-purpose` subagent: the
+definition pins the tool set and model, so a read-only reviewer physically cannot
+edit the code it is judging, and the discipline survives even if the dispatching
+prose is ignored.
+
+Plugin agents support `name`, `description`, `model`, `effort`, `maxTurns`,
+`tools`, `disallowedTools`, `skills`, `memory`, `background` and `isolation`.
+They do **not** support `hooks`, `mcpServers` or `permissionMode`.
+
+#### `source-auditor`
+
+**Purpose:** Re-derives one or more stated claims from durable sources only —
+file contents, git output, fresh command output — and returns a sourced
+PASS / FAIL / UNSUPPORTED verdict per claim.
+
+**Tools:** `Read, Grep, Glob, Bash` (no write tools — read-only by construction).
+**Model:** `sonnet`.
+
+**Used by:** `/coderails:verify`, which forks into it so the audit runs with no
+access to the conversation that produced the claim. Verifying a claim inside the
+context that generated it is self-verification; the fork is the point.
+
+#### `spec-reviewer`
+
+**Purpose:** Reviews a spec or design document for completeness, internal
+consistency, clarity, scope and YAGNI before any implementation planning starts.
+Returns Approved or Issues Found.
+
+**Tools:** `Read, Grep, Glob` (read-only). **Model:** `sonnet`.
+
+**Used by:** `coderails:brainstorming` step 7, replacing an inline self-review.
+The author knows what they meant, so ambiguous wording reads as clear to them;
+the reviewer only knows what is on the page.
+
+#### `wiki-writer`
+
+**Purpose:** Reads, authors and maintains LLM Wiki pages against the
+`AGENTS-wiki-schema.md` contract. Writes files, commits, and opens PRs when the
+vault config requires it.
+
+**Tools:** `Read, Grep, Glob, Write, Edit, Bash`. **Model:** `sonnet`.
+
+**Used by:** `wiki-ingest`, `wiki-query`, `wiki-lint`. All three write — a
+read-only agent such as `Explore` would break them at their commit step.
+
+#### `loop-worker`
+
+**Purpose:** Implements one scoped unit of work end-to-end: code, tests, commit,
+self-review, then an evidence-backed report. Escalates (BLOCKED / NEEDS_CONTEXT)
+rather than guessing.
+
+**Tools:** `Read, Grep, Glob, Write, Edit, Bash, Skill`. **Model:** `inherit` —
+pass an explicit model at dispatch per `subagent-driven-development`'s Model
+Selection section; an unconsidered dispatch inherits the session's model, which
+is usually the most expensive one.
+
+**Used by:** `subagent-driven-development`, `dispatching-parallel-agents`.
+
+#### Agents deliberately not shipped
+
+`pr-review-toolkit@claude-plugins-official` is already a required dependency and
+already ships `code-reviewer`, `code-simplifier`, `comment-analyzer`,
+`pr-test-analyzer`, `silent-failure-hunter` and `type-design-analyzer`. coderails
+does not duplicate them — near-duplicate agents make dispatch ambiguous. Skills
+needing code review name `pr-review-toolkit:code-reviewer` directly.
+
+---
+
 ## Hook Activation Matrix
 
 Hooks run automatically on lifecycle events. They can **block** (exit 2 / `permissionDecision: deny`), **warn** (inject advisory context), or run **silently** (inject context with no visible signal). Claude has no choice about whether they run — this is the mechanical enforcement layer.
