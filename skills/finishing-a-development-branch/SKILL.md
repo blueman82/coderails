@@ -203,19 +203,51 @@ check whether that process is alive:
 LOCK_PID=$(echo "$LOCK_REASON" | grep -oE '\(pid [0-9]+ ' | grep -oE '[0-9]+')
 if [ -z "$LOCK_PID" ]; then
   echo "Worktree $WORKTREE_PATH is locked with no parseable pid (reason: $LOCK_REASON) — leaving in place, not removing."
-elif kill -0 "$LOCK_PID" 2>/dev/null; then
-  echo "Worktree $WORKTREE_PATH is locked by live pid $LOCK_PID (reason: $LOCK_REASON) — deferred until that session ends, not removing."
-else
+elif ! kill -0 "$LOCK_PID" 2>/dev/null; then
   echo "Worktree $WORKTREE_PATH is locked by stale pid $LOCK_PID (dead) — clearing lock and removing."
   git worktree unlock "$WORKTREE_PATH"
   git worktree remove "$WORKTREE_PATH"
   git worktree prune
+elif [ "$WORKTREE_PATH" = "$(cd "$OLDPWD" 2>/dev/null && pwd -P)" ]; then
+  echo "Worktree $WORKTREE_PATH is locked by live pid $LOCK_PID, but that lock is THIS session's own — the harness locked it on our behalf, not another session using it. Not a defer case."
+  # own-session case — see below, don't git-worktree-remove this
+else
+  echo "Worktree $WORKTREE_PATH is locked by live pid $LOCK_PID (reason: $LOCK_REASON) — belongs to ANOTHER session, deferred until that session ends, not removing."
 fi
 ```
 
-**Never force-remove a lock you can't attribute to a dead pid.** No
-parseable pid and a live pid both mean: report and leave the worktree
-alone. Only a confirmed-dead pid clears the lock.
+**Live pid — tell your own session's lock from another session's.** The
+lock reason names a pid; that alone doesn't say whose it is. The tell is
+whether `$WORKTREE_PATH` is the worktree you `cd`ed out of to run this
+cleanup step (`$OLDPWD` above, captured before the `cd "$MAIN_ROOT"` at
+the top of this step) — if so, the harness locked it on this session's
+own behalf, not because another session is using it:
+
+- **Live pid belonging to ANOTHER session** — report and defer, never
+  force. A merged PR does not by itself mean the worktree is safe to
+  remove; forcing it out would yank that other session mid-work.
+- **Live pid belonging to THIS session** (the worktree is this session's
+  own cwd) — NOT a defer case. `git worktree remove` cannot remove the
+  worktree it is run from, and forcing it (e.g. `-f`, or removing the
+  `.git` file by hand) would break the running session. Use the native
+  `ExitWorktree` tool instead, with `action: "remove"`: it exits the
+  session from the worktree and removes it in one step.
+
+  `ExitWorktree` refuses to remove a worktree with commits, reporting
+  them as work that would be discarded — check this before overriding
+  with `discard_changes: true`. If the branch was squash-merged, the
+  squash rewrote the SHAs, so the commits genuinely landed on
+  `origin/main` even though a SHA-based check can't see them there.
+  Confirm before overriding the refusal:
+  `git log --oneline origin/main..HEAD` is empty, **and** the PR reports
+  `state: MERGED` (`gh pr view <n> --json state`). Never pass
+  `discard_changes: true` on a refusal you haven't verified this way.
+
+**Never force-remove a lock you can't attribute to a dead pid or to this
+session's own cwd.** No parseable pid and a live pid on another session
+both mean: report and leave the worktree alone. A confirmed-dead pid
+clears the lock via the git path above; a live pid on this session's own
+cwd clears it via `ExitWorktree`.
 
 **Otherwise:** The host environment (harness) owns this workspace. Do NOT remove it. If your platform provides a workspace-exit tool, use it. Otherwise, leave the workspace in place.
 
