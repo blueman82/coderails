@@ -14,7 +14,7 @@ Skills speak in actions ("dispatch a subagent", "create a todo", "read a file").
 | Fetch a URL | `read_url_content` |
 | Search the web | `search_web` |
 | Pose a structured question to your human partner | `ask_question` |
-| Dispatch a subagent (`Subagent (general-purpose):` template) | `invoke_subagent` with a built-in `TypeName` — `self` for full-capability work, `research` for read-only (see [Subagent support](#subagent-support)) |
+| Dispatch a subagent (a skill naming an agent, e.g. `coderails:loop-worker`) | `invoke_subagent` with a built-in `TypeName` — `self` for full-capability work, `research` for read-only (see [Subagent support](#subagent-support)) |
 | Multiple parallel dispatches | Multiple entries in one `invoke_subagent` call's `Subagents` array |
 | Task tracking ("create a todo", "mark complete") | a **task artifact** — `write_to_file` with `IsArtifact: true` and `ArtifactType: "task"` (see [Task tracking](#task-tracking)). **Not** `manage_task`, which manages background processes. |
 

@@ -39,3 +39,6 @@ docs/DASHBOARD-SECURITY-REVIEW.md
 # local-only token/cost audit working notes (do not publish)
 docs/TOKEN-REDUCTION-AUDIT.md
 .evals-pr*.json
+
+# pr-scope eval working material (durable artifact is the posted PR comment)
+evals-*.json

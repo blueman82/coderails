@@ -12,7 +12,7 @@ Skills speak in actions ("dispatch a subagent", "create a todo", "read a file").
 | Search file contents | `grep` when active; otherwise `bash` with `rg`/`grep` |
 | Find files by name | `find` or `bash` with shell globs |
 | List files and subdirectories | `ls` when active; otherwise `bash` with `ls` |
-| Dispatch a subagent (`Subagent (general-purpose):` template) | Use an installed subagent tool such as `subagent` from `pi-subagents` if available |
+| Dispatch a subagent (a skill naming an agent, e.g. `coderails:loop-worker`) | Use an installed subagent tool such as `subagent` from `pi-subagents` if available |
 | Task tracking ("create a todo", "mark complete") | Use an installed todo/task tool if available, otherwise track tasks in the plan or `TODO.md` |
 
 ## Skills
