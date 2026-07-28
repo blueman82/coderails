@@ -79,10 +79,24 @@ too when the deployed copy is still current.
 
 ## Editing the patch text legitimately
 
-If the remember plugin's `MEMORY` block genuinely changes upstream, both files
+If the remember plugin's injection loop genuinely changes upstream, both files
 have to be re-derived from the new vendor source — not hand-edited. Take the
-fresh unpatched block verbatim as the new `vendor.txt`, apply the cap to a copy
+fresh unpatched loop verbatim as the new `vendor.txt`, apply the cap to a copy
 to produce the new `patched.txt`, and run the test suite.
+
+Before committing a re-derivation, verify against the real plugin file, not
+just the fixtures:
+
+1. Run the guard's own block counter (the `awk` in
+   `remember_inject_cap_guard.sh`) over the new `vendor.txt` and the live
+   `session-start-hook.sh`. It must print exactly `1`.
+2. Run the guard with `REMEMBER_INJECT_CAP_AUTOWRITE=1` against a **copy** of
+   the live file, then `bash -n` that copy. This is the only check that catches
+   a mismatched-scope block pair.
+3. Execute the patched loop against a memory file larger than the cap and one
+   smaller, and confirm the truncation marker appears for the first and not the
+   second. Grepping for the `head -c` line proves the text landed, not that
+   truncation works.
 
 Note that editing `patched.txt`'s NOTE comment alone does **not** propagate to
 an already-patched install: the guard detects the cap by the truncation call
