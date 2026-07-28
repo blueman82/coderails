@@ -208,7 +208,7 @@ elif ! kill -0 "$LOCK_PID" 2>/dev/null; then
   git worktree unlock "$WORKTREE_PATH"
   git worktree remove "$WORKTREE_PATH"
   git worktree prune
-elif [ "$WORKTREE_PATH" = "$(cd "$OLDPWD" 2>/dev/null && pwd -P)" ]; then
+elif [ "$LOCK_PID" = "$$" ] || [ "$WORKTREE_PATH" = "$STARTING_CWD" ]; then
   echo "Worktree $WORKTREE_PATH is locked by live pid $LOCK_PID, but that lock is THIS session's own — the harness locked it on our behalf, not another session using it. Not a defer case."
   # own-session case — see below, don't git-worktree-remove this
 else
@@ -216,12 +216,19 @@ else
 fi
 ```
 
+`STARTING_CWD` is `$WORKTREE_PATH` captured at the top of this step
+(line with `WORKTREE_PATH=$(git rev-parse --show-toplevel)`, before the
+`cd "$MAIN_ROOT"` above) — save it under that name if you need it after
+the `cd`. `$$` catches the case where the lock was written by this exact
+shell; the path comparison catches the more common case where the
+harness (not this shell) wrote the lock but scoped it to this session's
+workspace.
+
 **Live pid — tell your own session's lock from another session's.** The
 lock reason names a pid; that alone doesn't say whose it is. The tell is
-whether `$WORKTREE_PATH` is the worktree you `cd`ed out of to run this
-cleanup step (`$OLDPWD` above, captured before the `cd "$MAIN_ROOT"` at
-the top of this step) — if so, the harness locked it on this session's
-own behalf, not because another session is using it:
+whether `$WORKTREE_PATH` is the worktree this session is running in —
+if so, the harness locked it on this session's own behalf, not because
+another session is using it:
 
 - **Live pid belonging to ANOTHER session** — report and defer, never
   force. A merged PR does not by itself mean the worktree is safe to
