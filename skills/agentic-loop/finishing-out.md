@@ -33,15 +33,39 @@ provenance check: only remove worktrees the loop itself created (under
 `.worktrees/`/`worktrees/`), never a harness-owned workspace. This runs per-work-unit at
 Phase 4b, not deferred to the loop-level teardown.
 
-**Caveat — never remove the worktree that is the shell's current cwd.** `git worktree
-remove` fails when run from inside the worktree being removed (per
-`finishing-a-development-branch`'s Common Mistakes). `cd` to the main repo root FIRST,
-then remove. If the loop's own cwd is inside the worktree being finished, this is
-mandatory, not optional.
+**Native-first, same as entry.** `using-git-worktrees` Step 1a prefers a native worktree
+tool over `git worktree add` for entry; teardown mirrors that. If a native worktree tool
+is available (e.g. `ExitWorktree`), prefer it over the `git worktree remove` mechanics
+above. The git path is the fallback for worktrees the native tool does not own.
 
-**Caveat — a merged worktree can still be locked.** Step 6 now checks lock state before
-removing: unlocked → remove normally; locked by a live pid (another session still using
-it) → report and defer, never force; locked by a dead pid → clear the stale lock and
-remove, with a notice. A merged PR does not by itself mean the worktree is safe to
-remove — a locked-and-live worktree at Phase 4b means some other session is still
-working in it, and forcing it out mid-loop would yank that session.
+**Caveat — never remove the worktree that is the shell's current cwd, via `git worktree
+remove`.** `git worktree remove` fails when run from inside the worktree being removed
+(per `finishing-a-development-branch`'s Common Mistakes). If using the git fallback,
+`cd` to the main repo root FIRST, then remove — mandatory, not optional, when the loop's
+own cwd is inside the worktree being finished.
+
+**Caveat — a locked worktree splits into two cases that need opposite actions.** Step 6
+checks lock state before removing. The lock reason embeds a pid
+(`claude session <name> (pid NNNNN ...)`); which pid it names determines the action:
+
+- **Locked by ANOTHER session's live pid** — some other session is still working in the
+  worktree. Report and defer, never force. A merged PR does not by itself mean the
+  worktree is safe to remove — forcing it out mid-loop would yank that other session.
+- **Locked by THIS session's own pid, because the worktree is this session's own cwd** —
+  this is NOT a defer case. The lock exists because the harness locked the worktree on
+  the calling session's behalf, not because another session is using it. Use the native
+  `ExitWorktree` tool with `action: "remove"`, which exits the session from the worktree
+  and removes it in one step — `git worktree remove` cannot do this from inside the
+  worktree it's removing, and forcing the git path would break the running session.
+
+A locked-and-live worktree at Phase 4b where the live pid is a DIFFERENT session still
+means defer, never force — that rule is unchanged. Locked by a dead pid still means:
+clear the stale lock and remove, with a notice.
+
+**Caveat — `ExitWorktree` can misfire right after a squash merge.** `ExitWorktree` with
+`action: "remove"` refuses when the branch has commits, reporting them as work that
+would be discarded. After a SQUASH merge those commits are legitimately merged — the
+squash rewrote the SHAs, so a SHA-based check cannot see them on `origin/main` even
+though their content landed. Before passing `discard_changes: true`, confirm the content
+actually merged: `git log --oneline origin/main..HEAD` empty AND the PR reports `state:
+MERGED`. Never pass `discard_changes: true` on an unverified refusal.
