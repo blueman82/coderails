@@ -127,7 +127,7 @@ qmd collection list | grep -qx wiki || qmd collection add <vault-path> --name wi
 qmd context add qmd://wiki "<description of what the wiki covers>"
 ```
 
-After any wiki changes, reindex with `qmd update && qmd embed`. Run `qmd update` first — `qmd embed` alone misses new files, since it only refreshes embeddings for already-known content hashes; `qmd update` is what scans for new/changed files.
+After any wiki changes, reindex with `qmd update && qmd embed`. Run `qmd update` first — `qmd embed` alone misses new files, since it only refreshes embeddings for already-known content hashes (inferred from qmd's documented behaviour); `qmd update` is what scans for new/changed files.
 
 **Obsidian**: Register the vault programmatically and open it:
 
