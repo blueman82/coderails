@@ -1,6 +1,6 @@
 # coderails Component Reference
 
-Catalogue of every coderails component (36 skills, plus hooks, commands, scripts): what it does, when it's active, when it's NOT, and dependencies. Ground truth: all entries verified from source files. See README for a lighter overview.
+Catalogue of every coderails component (37 skills, plus hooks, commands, scripts): what it does, when it's active, when it's NOT, and dependencies. Ground truth: all entries verified from source files. See README for a lighter overview.
 
 ---
 
@@ -187,6 +187,20 @@ server still accepts TCP but serves nothing.
 **When it does NOT apply:** you performed the merge yourself this session and watched it complete, or the claim is about an open/draft PR (nothing merged to verify).
 
 **Provenance:** the first skill authored end-to-end by the dashboard Approve→build runner (above) — a `workflow-audit` proposal, Approved on the dashboard, built by a headless `skill-creator` session, and merged by hand.
+
+---
+
+#### `cite-check`
+
+**Purpose:** Re-derives a stated claim from durable sources only — file contents, git output, and fresh command output — and returns a sourced PASS / FAIL / UNSUPPORTED verdict per claim. No recall, no inference.
+
+**How it runs:** `context: fork` with `agent: coderails:source-auditor` and `background: false`. The fork is the point: an audit that runs in the context which produced the claim is self-verification, since the same reasoning that made the error is available to excuse it. The forked auditor sees only the claim text passed via `$ARGUMENTS`.
+
+**When it triggers:** invoked directly as `/coderails:cite-check <claim>`; also named by `agentic-loop` Phase 5, which applies it to the single claim "this bug currently reproduces" before spawning any fix.
+
+**Naming:** called `cite-check` rather than `verify` because `/verify` is a Claude Code **bundled** skill (build and run your app to confirm a change). A project skill of the same name overrides the bundled one, which would silently shadow a built-in with an unrelated meaning.
+
+**Dependencies:** the `coderails:source-auditor` agent.
 
 ---
 
