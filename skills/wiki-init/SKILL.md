@@ -6,7 +6,7 @@ model: sonnet
 
 # Wiki Init
 
-Bootstrap an LLM Wiki for the current project based on Karpathy's LLM Wiki pattern. Read `references/karpathy-pattern.md` for the full pattern description before starting.
+Bootstrap an LLM Wiki for the current project based on Karpathy's LLM Wiki pattern: https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f
 
 The core idea: instead of re-deriving knowledge from raw code on every question, the LLM incrementally builds and maintains a persistent wiki — a structured, interlinked collection of markdown files that compounds over time. The human browses it in Obsidian. The LLM does the bookkeeping.
 
