@@ -586,6 +586,14 @@ Hooks run automatically on lifecycle events. They can **block** (exit 2 / `permi
 - **`loop_state_guard` and `loop_stall_guard`** only enforce discipline when an `agentic-loop` Skill invocation appears in the transcript. Outside an agentic loop session they are silent no-ops.
 - **`unregistered_loop_guard`** is the inverse case: it fires precisely when NO `agentic-loop` Skill invocation appears in the transcript, but dispatch behaviour looks loop-like. It never blocks — only a nudge — so it carries no bypass mechanism.
 - **`offload_push_guard`** requires BOTH a push-to-main/master token and an offload cue in the same final message — a plain "I pushed to main" or a suggestion to run `/coderails:push` never matches, since neither carries the offload cue. Like `unregistered_loop_guard`, it never blocks and has no bypass mechanism.
+- **`voice_announce` is the only `async: true` hook**, because it is the only
+  purely cosmetic one — every other `Stop` hook gates correctness and must block
+  the turn. It keeps `timeout: 15` alongside `async`. Whether the runner still
+  applies a timeout to a backgrounded hook is **not stated in the hooks
+  documentation**; the timeout field is defined as "seconds before canceling"
+  with no async exclusion, so the entry keeps it as a bound on a runaway
+  background process. Do not remove it on the assumption it is dead config —
+  that assumption is untested, and the cost of keeping it is zero.
 - **`voice_announce`** shares its active-loop gating with `loop_state_guard`/`loop_stall_guard` (silent outside a registered, incomplete loop), but adds one more silence condition of its own: if stable text extraction comes back empty — no assistant text found, or every line in the tail window was malformed — it says nothing and logs `reason=extract_failed`, deliberately distinct from the stall announcement (empty extraction is "nothing to read yet," not "read it and it showed no declaration").
 - **`enforce_pr_workflow`** is a no-op in any repo without `workflow.config.yaml`. It only kicks in once a project is initialised with `/coderails:init`.
 - **Eval-gate coverage boundary**: the coderails eval artifact is ENFORCED at two points — `/coderails:merge` via `scripts/merge.sh` (config-independent, no opt-out) and raw `gh pr merge <N>` via this hook (config-dependent — inactive under `NO_CONFIG`, same as the rest of `enforce_pr_workflow`). It is NOT enforced on raw `git merge`/`git push` to main/master (the hook has no PR number to resolve a SHA-bound artifact against, so these stay review-gated only) or in any `NO_CONFIG` repo. **Documented residual, accepted not closed.**
