@@ -121,13 +121,17 @@ Add near the top of the project's CLAUDE.md:
 
 ### Step 8: Setup Tooling
 
-**qmd**: Register the wiki vault as a collection and add context. `qmd collection add` errors "Collection already exists" on a rerun — guard it so re-running this step doesn't fail:
+**qmd**: Register the wiki vault as a collection and add context — only if qmd is installed. `qmd collection add` errors "Collection already exists" on a rerun — guard it so re-running this step doesn't fail:
 ```bash
-qmd collection list | grep -qx wiki || qmd collection add <vault-path> --name wiki
-qmd context add qmd://wiki "<description of what the wiki covers>"
+if command -v qmd >/dev/null 2>&1; then
+  qmd collection list | grep -qx wiki || qmd collection add <vault-path> --name wiki
+  qmd context add qmd://wiki "<description of what the wiki covers>"
+else
+  echo "qmd not found — skipping wiki search registration. The wiki still works via index.md; install qmd later and re-run this step to enable search."
+fi
 ```
 
-After any wiki changes, reindex with `qmd update && qmd embed`. Run `qmd update` first — `qmd embed` alone misses new files, since it only refreshes embeddings for already-known content hashes (inferred from qmd's documented behaviour); `qmd update` is what scans for new/changed files.
+If qmd is installed, reindex after any wiki changes with `qmd update && qmd embed`. Run `qmd update` first — `qmd embed` alone misses new files, since it only refreshes embeddings for already-known content hashes (inferred from qmd's documented behaviour); `qmd update` is what scans for new/changed files.
 
 **Obsidian**: Register the vault programmatically and open it:
 
