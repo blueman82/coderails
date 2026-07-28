@@ -1,6 +1,6 @@
 # coderails Component Reference
 
-Catalogue of every coderails component (36 skills, plus hooks, commands, scripts): what it does, when it's active, when it's NOT, and dependencies. Ground truth: all entries verified from source files. See README for a lighter overview.
+Catalogue of every coderails component (37 skills, plus hooks, commands, scripts): what it does, when it's active, when it's NOT, and dependencies. Ground truth: all entries verified from source files. See README for a lighter overview.
 
 ---
 
@@ -11,10 +11,11 @@ Catalogue of every coderails component (36 skills, plus hooks, commands, scripts
    - [Vendored dev-workflow skills](#vendored-dev-workflow-skills)
    - [Wiki skills](#wiki-skills)
    - [Engineering principles skills](#engineering-principles-skills)
-2. [Hook Activation Matrix](#hook-activation-matrix)
-3. [Commands](#commands)
-4. [Scripts and Libraries](#scripts-and-libraries)
-5. [Artifact and State Locations](#artifact-and-state-locations)
+2. [Agents](#agents)
+3. [Hook Activation Matrix](#hook-activation-matrix)
+4. [Commands](#commands)
+5. [Scripts and Libraries](#scripts-and-libraries)
+6. [Artifact and State Locations](#artifact-and-state-locations)
 
 ---
 
@@ -186,6 +187,20 @@ server still accepts TCP but serves nothing.
 **When it does NOT apply:** you performed the merge yourself this session and watched it complete, or the claim is about an open/draft PR (nothing merged to verify).
 
 **Provenance:** the first skill authored end-to-end by the dashboard Approve→build runner (above) — a `workflow-audit` proposal, Approved on the dashboard, built by a headless `skill-creator` session, and merged by hand.
+
+---
+
+#### `cite-check`
+
+**Purpose:** Re-derives a stated claim from durable sources only — file contents, git output, and fresh command output — and returns a sourced PASS / FAIL / UNSUPPORTED verdict per claim. No recall, no inference.
+
+**How it runs:** `context: fork` with `agent: coderails:source-auditor` and `background: false`. The fork is the point: an audit that runs in the context which produced the claim is self-verification, since the same reasoning that made the error is available to excuse it. The forked auditor sees only the claim text passed via `$ARGUMENTS`.
+
+**When it triggers:** invoked directly as `/coderails:cite-check <claim>`; also named by `agentic-loop` Phase 5, which applies it to the single claim "this bug currently reproduces" before spawning any fix.
+
+**Naming:** called `cite-check` rather than `verify` because `/verify` is a Claude Code **bundled** skill (build and run your app to confirm a change). A project skill of the same name overrides the bundled one, which would silently shadow a built-in with an unrelated meaning.
+
+**Dependencies:** the `coderails:source-auditor` agent.
 
 ---
 
@@ -455,6 +470,91 @@ These skills enforce engineering principles and language-specific coding standar
 
 ---
 
+## Agents
+
+Subagent definitions in `agents/`, auto-discovered when the plugin is enabled and
+referenced by their namespaced name (`coderails:<name>`). Skills dispatch these
+by name instead of pasting a prompt into a `general-purpose` subagent: the model
+and tool set travel with the definition, so they survive even if the dispatching
+prose is ignored.
+
+How strong that guarantee is varies per agent, and the difference matters:
+
+- **Enforced.** `spec-reviewer` declares `tools: Read, Grep, Glob` and has no
+  write capability at all.
+- **Partly enforced.** `source-auditor` withholds `Write`/`Edit` via
+  `disallowedTools` but keeps `Bash` (it must re-run commands), and `Bash` can
+  mutate — so its read-only property is partly discipline.
+- **Not enforced.** `pr-review-toolkit:code-reviewer` declares no `tools:` key
+  and therefore has full tool access. Naming it buys a pinned model and a
+  maintained rubric, not an inability to edit what it reviews.
+
+Do not describe agent dispatch as making a reviewer "physically unable" to edit
+unless that specific agent's `tools:`/`disallowedTools` actually says so.
+
+Plugin agents support `name`, `description`, `model`, `effort`, `maxTurns`,
+`tools`, `disallowedTools`, `skills`, `memory`, `background` and `isolation`.
+They do **not** support `hooks`, `mcpServers` or `permissionMode`.
+
+#### `source-auditor`
+
+**Purpose:** Re-derives one or more stated claims from durable sources only —
+file contents, git output, fresh command output — and returns a sourced
+PASS / FAIL / UNSUPPORTED verdict per claim.
+
+**Tools:** `Read, Grep, Glob, Bash`, with `disallowedTools: Write, Edit, NotebookEdit`. Not read-only by construction: rule 3 requires re-running commands to re-derive numbers, so `Bash` stays — and `Bash` can mutate. `Write`/`Edit` are withheld; the rest is the agent's stated discipline.
+**Model:** `sonnet`.
+
+**Used by:** `/coderails:cite-check`, which forks into it so the audit runs with no
+access to the conversation that produced the claim. Verifying a claim inside the
+context that generated it is self-verification; the fork is the point.
+
+#### `spec-reviewer`
+
+**Purpose:** Reviews a spec or design document for completeness, internal
+consistency, clarity, scope and YAGNI before any implementation planning starts.
+Returns Approved or Issues Found.
+
+**Tools:** `Read, Grep, Glob` (read-only). **Model:** `sonnet`.
+
+**Used by:** `coderails:brainstorming` step 7, replacing an inline self-review.
+The author knows what they meant, so ambiguous wording reads as clear to them;
+the reviewer only knows what is on the page.
+
+#### `wiki-writer`
+
+**Purpose:** Reads, authors and maintains LLM Wiki pages against the
+`AGENTS-wiki-schema.md` contract. Writes files, commits, and opens PRs when the
+vault config requires it.
+
+**Tools:** `Read, Grep, Glob, Write, Edit, Bash`. **Model:** `sonnet`.
+
+**Used by:** `wiki-ingest`, `wiki-query`, `wiki-lint`. All three write — a
+read-only agent such as `Explore` would break them at their commit step.
+
+#### `loop-worker`
+
+**Purpose:** Implements one scoped unit of work end-to-end: code, tests, commit,
+self-review, then an evidence-backed report. Escalates (BLOCKED / NEEDS_CONTEXT)
+rather than guessing.
+
+**Tools:** `Read, Grep, Glob, Write, Edit, Bash, Skill`. **Model:** `inherit` —
+pass an explicit model at dispatch per `subagent-driven-development`'s Model
+Selection section; an unconsidered dispatch inherits the session's model, which
+is usually the most expensive one.
+
+**Used by:** `subagent-driven-development`, `dispatching-parallel-agents`.
+
+#### Agents deliberately not shipped
+
+`pr-review-toolkit@claude-plugins-official` is already a required dependency and
+already ships `code-reviewer`, `code-simplifier`, `comment-analyzer`,
+`pr-test-analyzer`, `silent-failure-hunter` and `type-design-analyzer`. coderails
+does not duplicate them — near-duplicate agents make dispatch ambiguous. Skills
+needing code review name `pr-review-toolkit:code-reviewer` directly.
+
+---
+
 ## Hook Activation Matrix
 
 Hooks run automatically on lifecycle events. They can **block** (exit 2 / `permissionDecision: deny`), **warn** (inject advisory context), or run **silently** (inject context with no visible signal). Claude has no choice about whether they run — this is the mechanical enforcement layer.
@@ -486,6 +586,14 @@ Hooks run automatically on lifecycle events. They can **block** (exit 2 / `permi
 - **`loop_state_guard` and `loop_stall_guard`** only enforce discipline when an `agentic-loop` Skill invocation appears in the transcript. Outside an agentic loop session they are silent no-ops.
 - **`unregistered_loop_guard`** is the inverse case: it fires precisely when NO `agentic-loop` Skill invocation appears in the transcript, but dispatch behaviour looks loop-like. It never blocks — only a nudge — so it carries no bypass mechanism.
 - **`offload_push_guard`** requires BOTH a push-to-main/master token and an offload cue in the same final message — a plain "I pushed to main" or a suggestion to run `/coderails:push` never matches, since neither carries the offload cue. Like `unregistered_loop_guard`, it never blocks and has no bypass mechanism.
+- **`voice_announce` is the only `async: true` hook**, because it is the only
+  purely cosmetic one — every other `Stop` hook gates correctness and must block
+  the turn. It keeps `timeout: 15` alongside `async`. Whether the runner still
+  applies a timeout to a backgrounded hook is **not stated in the hooks
+  documentation**; the timeout field is defined as "seconds before canceling"
+  with no async exclusion, so the entry keeps it as a bound on a runaway
+  background process. Do not remove it on the assumption it is dead config —
+  that assumption is untested, and the cost of keeping it is zero.
 - **`voice_announce`** shares its active-loop gating with `loop_state_guard`/`loop_stall_guard` (silent outside a registered, incomplete loop), but adds one more silence condition of its own: if stable text extraction comes back empty — no assistant text found, or every line in the tail window was malformed — it says nothing and logs `reason=extract_failed`, deliberately distinct from the stall announcement (empty extraction is "nothing to read yet," not "read it and it showed no declaration").
 - **`enforce_pr_workflow`** is a no-op in any repo without `workflow.config.yaml`. It only kicks in once a project is initialised with `/coderails:init`.
 - **Eval-gate coverage boundary**: the coderails eval artifact is ENFORCED at two points — `/coderails:merge` via `scripts/merge.sh` (config-independent, no opt-out) and raw `gh pr merge <N>` via this hook (config-dependent — inactive under `NO_CONFIG`, same as the rest of `enforce_pr_workflow`). It is NOT enforced on raw `git merge`/`git push` to main/master (the hook has no PR number to resolve a SHA-bound artifact against, so these stay review-gated only) or in any `NO_CONFIG` repo. **Documented residual, accepted not closed.**
@@ -522,7 +630,7 @@ Commands are slash commands invoked by Claude (or the user via `/coderails:<name
 | `/coderails:test-gate-setup` | Configure the test gate for the current project. Detects the test runner (npm, cargo, pytest, go test, etc.) and writes `.claude/test_command`. | Write tool; opt-in gate for `test_gate.sh` hook |
 | `/coderails:assumptions` | List every assumption currently being made (task, codebase, environment, state), marked `(verified)` or `(inferred)`. Pure inventory — does no other work. | None |
 | `/coderails:disconfirm` | Argue against the most recent recommendation — find the strongest case it is wrong. Steelmans the opposition. | None |
-| `/coderails:verify` | Re-derive a specific claim from sources only (tool results, file contents, user statements, git output). No recall, no inference. | None |
+| `/coderails:cite-check` (skill at `skills/cite-check/`, not a `commands/` file) | Re-derive a specific claim from durable sources only (file contents, git output, fresh command output). No recall, no inference. Runs `context: fork` into `coderails:source-auditor` with `background: false`, so the audit has no access to the conversation that produced the claim — verifying inside that context would be self-verification. Named `cite-check` rather than `verify` because `/verify` is a Claude Code bundled skill and a same-named project skill would override it. | `coderails:source-auditor` agent |
 | `/coderails:notchecked` | Review recent responses and list every non-trivial claim that was NOT verified. Surface gaps ruthlessly. | None |
 
 ### Config resolution (shared by `workflow`, `prep`, `push`, `init`)

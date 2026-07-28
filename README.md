@@ -46,7 +46,7 @@ preferred way to set up a new repo.
 | `/coderails:post-evals` | Post SHA-bound eval artifact on PR; required by `/merge` gate |
 | `/merge` | Merge approved PR, switch to main, pull |
 | `/assumptions` | List every assumption, marked verified or inferred |
-| `/verify` | Re-derive a specific claim from sources only — no recall |
+| `/coderails:cite-check` (skill, not a `commands/` file) | Re-derive a specific claim from sources only — no recall. Forks into `coderails:source-auditor`, so it audits with no access to the context that produced the claim. Named `cite-check`, not `verify`, because `/verify` is a Claude Code bundled skill |
 | `/notchecked` | List claims made but not verified |
 | `/disconfirm` | Argue against your own most recent recommendation |
 | `/test-gate-setup` | Detect the test runner and create `.claude/test_command` |
@@ -55,7 +55,7 @@ preferred way to set up a new repo.
 
 coderails is self-contained — it ships the dev-workflow skills it needs. `pr-review-toolkit@claude-plugins-official` is still required for the review stage of `/workflow`.
 
-36 skills are bundled across four groups. Full
+37 skills are bundled across four groups. Full
 catalog: [`docs/REFERENCE.md`](./docs/REFERENCE.md).
 
 **Dev-workflow skills**
@@ -113,6 +113,32 @@ catalog: [`docs/REFERENCE.md`](./docs/REFERENCE.md).
 | `engineering-principles-python` | Python idioms and standards |
 | `engineering-principles-go` | Go idioms and standards |
 | `engineering-principles-ts` | TypeScript idioms and standards |
+
+## Agents
+
+Skills dispatch these by name rather than pasting a prompt into a
+`general-purpose` subagent, so the model and tool set travel with the agent
+instead of depending on prose the dispatcher may ignore.
+
+How far that goes varies by agent, and the honest split is worth stating:
+`spec-reviewer` declares `tools: Read, Grep, Glob` and therefore *cannot* write.
+`source-auditor` needs `Bash` to re-derive numbers, so it withholds
+`Write`/`Edit` via `disallowedTools` but its read-only property still rests
+partly on instruction. `pr-review-toolkit:code-reviewer` declares no `tools:`
+key at all and so has full tool access — its read-only discipline is prose, not
+enforcement.
+
+| Agent | Purpose | Tools |
+|---|---|---|
+| `coderails:source-auditor` | Re-derives a claim from durable sources only; returns PASS/FAIL/UNSUPPORTED. Backs `/coderails:cite-check` | read + Bash; `Write`/`Edit` disallowed |
+| `coderails:spec-reviewer` | Reviews a spec for completeness, consistency, clarity, scope, YAGNI before planning | read-only |
+| `coderails:wiki-writer` | Authors and maintains LLM Wiki pages against the schema; commits and opens PRs | read + write |
+| `coderails:loop-worker` | Implements one scoped task: code, tests, commit, self-review, evidence-backed report | read + write |
+
+Review agents are **not** duplicated here — `pr-review-toolkit@claude-plugins-official`
+already ships `code-reviewer`, `code-simplifier`, `comment-analyzer`,
+`pr-test-analyzer`, `silent-failure-hunter` and `type-design-analyzer`, and it is
+already a required dependency. coderails only fills the gaps.
 
 ## Hooks
 

@@ -103,12 +103,12 @@ treat it as machine-local config, same as `.claude/settings.local.json`.
 |---|---|---|
 | `/workflow` `/prep` `/push` `/merge` `/coderails:init` | **Workflow & evals:** agentic-loop, task-evals | confidence-label check (Stop) |
 | `/post-review` `/post-evals` | **Planning:** planning-sequence, premortem, brainstorming, writing-plans | Did-Not-Verify check (Stop) |
-| `/assumptions` `/verify` `/notchecked` `/disconfirm` | **Dev discipline:** test-driven-development, systematic-debugging, engineering-principles (+ go/python/ts variants), verification-before-completion | destructive-bash gate (PreToolUse) |
+| `/assumptions` `/cite-check` `/notchecked` `/disconfirm` | **Dev discipline:** test-driven-development, systematic-debugging, engineering-principles (+ go/python/ts variants), verification-before-completion | destructive-bash gate (PreToolUse) |
 | `/test-gate-setup` | **Multi-agent:** dispatching-parallel-agents, subagent-driven-development, executing-plans, finishing-a-development-branch | project test gate (PreToolUse) |
 | | **Wiki:** wiki-init, wiki-query, wiki-ingest, wiki-lint | |
 | | **Review & handoff:** requesting-code-review, receiving-code-review, handoff, improve-prompt, using-git-worktrees, using-coderails, writing-skills | |
 
-36 skills ship in total (`ls skills/` in the plugin dir to see the full list).
+37 skills ship in total (`ls skills/` in the plugin dir to see the full list).
 `/post-review` and `/post-evals` post SHA-bound review/eval-artifact summaries
 as durable PR comments; `task-evals` freezes a game-resistant success-eval set
 at task intake and gates `/merge` on it.
@@ -149,7 +149,7 @@ crack-on flag is stamped — proceed autonomously instead of asking).
   inside that project, or pass `--memory-target /path/to/project/memory`.
 - **The `[ctx]` line** the discipline loop injects on each prompt is invisible to
   you — only Claude sees it. To confirm the loop is live: `/help` lists
-  `/assumptions /verify /notchecked /disconfirm`, and `~/.claude/discipline.log`
+  `/assumptions /cite-check /notchecked /disconfirm`, and `~/.claude/discipline.log`
   starts filling with entries after a few responses.
 - **`/prep`'s Jira fields must be configured for your project.** Set `jira.epic_field` (e.g. `customfield_12345`), `jira.points_field` (e.g. `customfield_67890`), and `jira.fix_version` in `workflow.config.yaml` via `/coderails:init`. Transition names are also project-specific: `/prep` attempts `config.jira.transitions.start` then `config.jira.transitions.resolve`; the resolve transition failure is non-fatal. Run `get_jira_transitions` on one of your project's issues to find the correct names.
 - **`jira.mcp_namespace`** sets the MCP tool namespace used by all Jira calls (default: `jira`). Commands build tool names like `mcp__<mcp_namespace>__create_jira_issue` at runtime, so pointing at a different Jira MCP server requires only a config change — not a command edit. If you use a non-default namespace, add `"mcp__<namespace>__*"` to `.claude/settings.json` under `permissions.allow` to avoid per-call permission prompts. Background: the `allowed-tools` frontmatter is parsed statically before config substitution runs, so it always lists the default `mcp__jira__*` tools; the `permissions.allow` rule is the machine-local home for granting non-default MCP namespaces.

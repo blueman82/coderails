@@ -12,7 +12,7 @@ Skills speak in actions ("dispatch a subagent", "create a todo", "read a file").
 | Fetch a URL | `web_fetch` |
 | Search the web | `web_search` |
 | Invoke a skill | `skill` |
-| Dispatch a subagent (`Subagent (general-purpose):` template) | `task` with `agent_type: "general-purpose"` (other accepted types: `explore`, `task`, `code-review`, `research`, `configure-copilot`) |
+| Dispatch a subagent (a skill naming an agent, e.g. `coderails:loop-worker`) | `task` with `agent_type: "general-purpose"` (other accepted types: `explore`, `task`, `code-review`, `research`, `configure-copilot`) |
 | Multiple parallel dispatches | Multiple `task` calls in one response |
 | Subagent status/output/control | `read_agent`, `list_agents`, `write_agent` |
 | Task tracking ("create a todo", "mark complete") | `update_todo` |

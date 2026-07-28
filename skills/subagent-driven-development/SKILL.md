@@ -50,35 +50,35 @@ digraph process {
 
     subgraph cluster_per_task {
         label="Per Task";
-        "Dispatch implementer subagent (./implementer-prompt.md)" [shape=box];
-        "Implementer subagent asks questions?" [shape=diamond];
+        "Dispatch coderails:loop-worker agent" [shape=box];
+        "loop-worker asks questions?" [shape=diamond];
         "Answer questions, provide context" [shape=box];
-        "Implementer subagent implements, tests, commits, self-reviews" [shape=box];
-        "Write diff file, dispatch task reviewer subagent (./task-reviewer-prompt.md)" [shape=box];
-        "Task reviewer reports spec ✅ and quality approved?" [shape=diamond];
-        "Dispatch fix subagent for Critical/Important findings" [shape=box];
+        "loop-worker implements, tests, commits, self-reviews" [shape=box];
+        "Write diff file, dispatch pr-review-toolkit:code-reviewer" [shape=box];
+        "Reviewer findings resolved?" [shape=diamond];
+        "Dispatch coderails:loop-worker to fix Critical/Important findings" [shape=box];
         "Mark task complete in todo list and progress ledger" [shape=box];
     }
 
     "Read plan, note context and global constraints, create todos" [shape=box];
     "More tasks remain?" [shape=diamond];
-    "Dispatch final code reviewer subagent (../requesting-code-review/code-reviewer.md)" [shape=box];
+    "Dispatch final pr-review-toolkit:code-reviewer" [shape=box];
     "Use coderails:finishing-a-development-branch" [shape=box style=filled fillcolor=lightgreen];
 
-    "Read plan, note context and global constraints, create todos" -> "Dispatch implementer subagent (./implementer-prompt.md)";
-    "Dispatch implementer subagent (./implementer-prompt.md)" -> "Implementer subagent asks questions?";
-    "Implementer subagent asks questions?" -> "Answer questions, provide context" [label="yes"];
-    "Answer questions, provide context" -> "Dispatch implementer subagent (./implementer-prompt.md)";
-    "Implementer subagent asks questions?" -> "Implementer subagent implements, tests, commits, self-reviews" [label="no"];
-    "Implementer subagent implements, tests, commits, self-reviews" -> "Write diff file, dispatch task reviewer subagent (./task-reviewer-prompt.md)";
-    "Write diff file, dispatch task reviewer subagent (./task-reviewer-prompt.md)" -> "Task reviewer reports spec ✅ and quality approved?";
-    "Task reviewer reports spec ✅ and quality approved?" -> "Dispatch fix subagent for Critical/Important findings" [label="no"];
-    "Dispatch fix subagent for Critical/Important findings" -> "Write diff file, dispatch task reviewer subagent (./task-reviewer-prompt.md)" [label="re-review"];
-    "Task reviewer reports spec ✅ and quality approved?" -> "Mark task complete in todo list and progress ledger" [label="yes"];
+    "Read plan, note context and global constraints, create todos" -> "Dispatch coderails:loop-worker agent";
+    "Dispatch coderails:loop-worker agent" -> "loop-worker asks questions?";
+    "loop-worker asks questions?" -> "Answer questions, provide context" [label="yes"];
+    "Answer questions, provide context" -> "Dispatch coderails:loop-worker agent";
+    "loop-worker asks questions?" -> "loop-worker implements, tests, commits, self-reviews" [label="no"];
+    "loop-worker implements, tests, commits, self-reviews" -> "Write diff file, dispatch pr-review-toolkit:code-reviewer";
+    "Write diff file, dispatch pr-review-toolkit:code-reviewer" -> "Reviewer findings resolved?";
+    "Reviewer findings resolved?" -> "Dispatch coderails:loop-worker to fix Critical/Important findings" [label="no"];
+    "Dispatch coderails:loop-worker to fix Critical/Important findings" -> "Write diff file, dispatch pr-review-toolkit:code-reviewer" [label="re-review"];
+    "Reviewer findings resolved?" -> "Mark task complete in todo list and progress ledger" [label="yes"];
     "Mark task complete in todo list and progress ledger" -> "More tasks remain?";
-    "More tasks remain?" -> "Dispatch implementer subagent (./implementer-prompt.md)" [label="yes"];
-    "More tasks remain?" -> "Dispatch final code reviewer subagent (../requesting-code-review/code-reviewer.md)" [label="no"];
-    "Dispatch final code reviewer subagent (../requesting-code-review/code-reviewer.md)" -> "Use coderails:finishing-a-development-branch";
+    "More tasks remain?" -> "Dispatch coderails:loop-worker agent" [label="yes"];
+    "More tasks remain?" -> "Dispatch final pr-review-toolkit:code-reviewer" [label="no"];
+    "Dispatch final pr-review-toolkit:code-reviewer" -> "Use coderails:finishing-a-development-branch";
 }
 ```
 
@@ -270,11 +270,26 @@ a ledger file, not only in todos.
   present means a fresh session, not data loss; recover from `git log`
   regardless if the ledger and git history ever disagree.
 
-## Prompt Templates
+## Agents
 
-- [implementer-prompt.md](implementer-prompt.md) - Dispatch implementer subagent
-- [task-reviewer-prompt.md](task-reviewer-prompt.md) - Dispatch task reviewer subagent (spec compliance + code quality)
-- Final whole-branch review: use coderails:requesting-code-review's [code-reviewer.md](../requesting-code-review/code-reviewer.md)
+Dispatch these by name. Each carries its own system prompt and tool set, so pass
+only the task context — the brief path, the report path, and the diff range.
+
+- `coderails:loop-worker` — implements one task: writes code and tests, commits,
+  self-reviews, and reports with test evidence. Escalates rather than guessing.
+- `pr-review-toolkit:code-reviewer` — per-task review (spec compliance + code
+  quality) and the final whole-branch review.
+
+Do not paste an inline prompt into a `general-purpose` subagent instead. The
+agent definitions pin the model and the reviewing discipline; a generic subagent
+inherits neither.
+
+Note the limit honestly: `pr-review-toolkit:code-reviewer` declares no `tools:`
+key, so it has full tool access including `Write`/`Edit`. Naming it buys a
+pinned model and a maintained review rubric, **not** a guarantee that the
+reviewer cannot edit the code it judges. Treat its read-only behaviour as
+discipline, and never let a review dispatch double as a fix dispatch — send
+fixes back to `coderails:loop-worker` as separate work.
 
 ## Example Workflow
 

@@ -2,9 +2,19 @@
 name: wiki-lint
 description: "Use this skill to audit the quality and structural integrity of the project's LLM Wiki — not to read or query it for information. Trigger when the user says 'wiki-lint', wants to lint the wiki, run a wiki health check, find contradictions or stale pages, detect orphaned pages or dead links, discover missing cross-references, or identify coverage gaps. The user's intent is diagnosing wiki health or improving wiki quality. Do not trigger when the user wants to look up what the wiki says about a topic, query wiki content, or read a wiki page."
 context: fork
+agent: coderails:wiki-writer
+argument-hint: "[scope — e.g. a subdirectory or page prefix; omit to lint the whole vault]"
 ---
 
 # Wiki Lint
+
+**Scope:** $ARGUMENTS
+
+An empty scope means lint the whole vault — that is the intended default, not a
+missing argument. Unlike `wiki-ingest` and `wiki-query`, this skill has a
+meaningful behaviour with no argument, so it does not stop. Be aware the whole
+vault is in scope, and that the agent you run as can write and commit: report
+findings before making sweeping changes across pages you were not asked about.
 
 Periodically health-check the wiki. The LLM is good at finding inconsistencies, gaps, and new connections — and at suggesting further questions to ask and sources to look for.
 

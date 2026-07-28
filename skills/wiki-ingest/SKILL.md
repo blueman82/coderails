@@ -2,11 +2,20 @@
 name: wiki-ingest
 description: "Use this skill when the user wants wiki pages created or updated to document a change — a merged PR, shipped feature, or engineering decision. The user always has an artifact to record (PR number, description, decision) and wants it written into the project's LLM Wiki as permanent documentation. Trigger on any request to push content into the wiki: 'ingest this', 'create wiki pages for this PR', 'add to wiki', 'document this in the wiki', 'capture this change', 'file this in the wiki'."
 context: fork
+agent: coderails:wiki-writer
+background: false
+argument-hint: <PR# | description of the change to record>
 ---
 
 # Wiki Ingest
 
 Ingest a new source into the project's LLM Wiki. A single source typically touches 3-15 wiki pages depending on project size.
+
+**Source to ingest:** $ARGUMENTS
+
+This skill runs in a forked context with no access to the conversation that
+invoked it. If the line above is empty, the source was never passed — report
+that and stop rather than guessing which artifact to record.
 
 ## Instructions
 

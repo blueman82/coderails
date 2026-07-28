@@ -12,10 +12,10 @@ export const READ_ONLY_ALLOWED_TOOLS = ["Read", "Grep", "Glob"];
 // `btn.command` (space-separated), because the claude CLI's `-p`/`--print`
 // takes exactly ONE positional prompt argument — confirmed empirically on
 // this machine 2026-07-07: passing `btn.command` and `input` as two separate
-// argv elements (e.g. `-p "/coderails:verify" -- "some claim"`) left
+// argv elements (e.g. `-p "/coderails:cite-check" -- "some claim"`) left
 // `$ARGUMENTS` empty in the invoked slash command every time, because the
 // CLI never merges a second positional into the prompt it already consumed.
-// A single combined string (`-p -- "/coderails:verify some claim"`)
+// A single combined string (`-p -- "/coderails:cite-check some claim"`)
 // delivers correctly — confirmed empirically the same day: `$ARGUMENTS` was
 // populated and the CLI's plain single-prompt form
 // (`claude -p "Reply with PONG"`, no command prefix) also replied correctly,

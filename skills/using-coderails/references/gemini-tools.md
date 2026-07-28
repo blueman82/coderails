@@ -15,7 +15,7 @@ Skills speak in actions ("dispatch a subagent", "create a todo", "read a file").
 | Fetch a URL | `web_fetch` |
 | Search the web | `google_web_search` |
 | Invoke a skill | `activate_skill` |
-| Dispatch a subagent (`Subagent (general-purpose):` template) | `invoke_agent` with `agent_name: "generalist"` (invocable via `@generalist` chat syntax — see [Subagent support](#subagent-support)) |
+| Dispatch a subagent (a skill naming an agent, e.g. `coderails:loop-worker`) | `invoke_agent` with `agent_name: "generalist"` (invocable via `@generalist` chat syntax — see [Subagent support](#subagent-support)) |
 | Multiple parallel dispatches | Multiple `invoke_agent` calls in the same response |
 | Task tracking ("create a todo", "mark complete") | `write_todos` (statuses: pending, in_progress, completed, cancelled, blocked) |
 
@@ -31,13 +31,24 @@ User-level skills live at **`~/.gemini/skills/`**, with **`~/.agents/skills/`** 
 
 Gemini CLI dispatches subagents through the `invoke_agent` tool, which takes `agent_name` and `prompt` parameters. The same dispatch is also surfaced as a chat-syntax shortcut: typing `@generalist <prompt>` is equivalent to calling `invoke_agent` with `agent_name: "generalist"`. Built-in agent names include `generalist`, `cli_help`, `codebase_investigator`, and (with browser tooling enabled) `browser_agent`.
 
-Skills dispatch with `Subagent (general-purpose):` and either reference a prompt-template file (e.g., `coderails:subagent-driven-development`'s `./implementer-prompt.md`) or supply an inline prompt. On Gemini CLI:
+Skills dispatch by naming an agent (e.g. `coderails:loop-worker`,
+`pr-review-toolkit:code-reviewer`) or by supplying an inline prompt. Gemini CLI
+has no equivalent of a named agent definition, so the agent's own system prompt
+does not come along — read the agent file and carry its instructions into the
+prompt yourself. On Gemini CLI:
 
 | Skill dispatch form | Gemini CLI equivalent |
 |---------------------|----------------------|
-| References a `*-prompt.md` template (implementer, task-reviewer, code-reviewer, etc.) | Fill the template, then `invoke_agent` with `agent_name: "generalist"` and the filled prompt |
-| References `coderails:requesting-code-review`'s `./code-reviewer.md` | `invoke_agent` with `agent_name: "generalist"` and the filled review template |
-| Inline prompt (no template referenced) | `invoke_agent` with `agent_name: "generalist"` and your inline prompt |
+| Names an implementer agent (`coderails:loop-worker`) | Read the agent file, then `invoke_agent` with `agent_name: "generalist"` and its body as the prompt prefix |
+| Names a reviewer agent (`pr-review-toolkit:code-reviewer`, `coderails:spec-reviewer`, `coderails:source-auditor`) | Same, but state the read-only constraint explicitly in the prompt — `generalist` still has write tools |
+| Inline prompt (no agent named) | `invoke_agent` with `agent_name: "generalist"` and your inline prompt |
+
+The read-only note matters, and the Claude Code side is weaker than it looks:
+only `coderails:spec-reviewer` truly withholds write tools via its `tools:` list.
+`coderails:source-auditor` disallows `Write`/`Edit` but keeps `Bash`, and
+`pr-review-toolkit:code-reviewer` declares no `tools:` key at all, so it has full
+access. On Gemini CLI there is no tool-level enforcement either way, so state the
+read-only constraint explicitly in the prompt for every reviewer or auditor.
 
 ### Prompt filling
 
