@@ -98,9 +98,14 @@ Read the codebase and create 5-10 pages covering the most architecturally import
 
 Discuss pages with the user as you create them — don't auto-ingest silently.
 
-### Step 6: Create AGENTS.md
+### Step 6: Create AGENTS.md and AGENTS-wiki-schema.md
 
-Create `AGENTS.md` in the project directory (not the wiki vault). This is the schema the LLM reads at conversation start. Include: wiki location, three layers, page types, page format, Ingest/Query/Lint workflows, conventions, evolution note.
+Create two files in the project directory (not the wiki vault):
+
+- **`AGENTS.md`** — a slim entry point. It points to `AGENTS-wiki-schema.md` as the source of truth for wiki conventions and, if the project already has other `AGENTS.md` content (a working guide, etc.), coexists with it rather than replacing it.
+- **`AGENTS-wiki-schema.md`** — the actual schema the LLM reads at conversation start. Include: wiki location, three layers, page types, page format, Ingest/Query/Lint workflows, conventions, evolution note.
+
+**The Page types table in `AGENTS-wiki-schema.md` must include every directory Claude will write to — `templates/` and `assets/` included, marked as structural directories rather than page types.** This matters beyond documentation: `hooks/scripts/wiki_taxonomy_gate.sh` parses this exact table as its write allow-list at runtime. Any top-level vault directory missing from the table has writes into it silently DENIED. A directory created in Step 3 but omitted from this table is broken on the first write.
 
 ### Step 7: Update CLAUDE.md
 
