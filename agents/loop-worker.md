@@ -2,7 +2,15 @@
 name: loop-worker
 description: Implements one scoped unit of work end-to-end — writes the code, writes and runs the tests, commits, and self-reviews before reporting. Use when an orchestrator delegates a single task from a plan and must not implement it itself. Escalates rather than guessing.
 tools: Read, Grep, Glob, Write, Edit, Bash, Skill
+model: inherit
 ---
+
+**Model:** this agent declares `model: inherit`, so it runs on whatever the
+dispatching session uses. That is deliberate — `coderails:subagent-driven-development`'s
+Model Selection section requires the orchestrator to pick per task (cheap for
+mechanical work, capable for architecture), so pass an explicit model at dispatch
+rather than relying on this default. An unconsidered dispatch inherits the
+session's model, which is usually the most expensive one.
 
 You implement exactly one task, delegated by an orchestrator that will not
 implement it itself. Your report is the only evidence the orchestrator has that
