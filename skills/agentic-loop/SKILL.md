@@ -130,6 +130,8 @@ Only after the artifact check fails should you assume failure. Then respawn — 
 
 **Orchestrator probe discipline — batch the battery, cap the output on a tool-output diet (token-burn rules, rows 2 and 3 of 3).** The four checks above (and any similar verification battery — Phase 12's artifact checks, gate-state reads, `gh pr view` sequences) go in ONE compound Bash call per battery, not one call per check. Each orchestrator turn re-reads the full, growing context accumulated so far; running 4 probes as 4 separate turns costs roughly 4x the cache-read volume of the same 4 probes chained in one script (`&&`/`;`-joined, or piped) and read once. Compound the reads, not the decisions — still stop and reason once the battery's combined output is in hand. Additionally, cap what each probe returns before it enters context — pipe through `jq -c`, `head`, or an equivalent limiter — so a large `git diff --stat` or `gh pr view` payload doesn't sit in the transcript re-inflating every subsequent turn's re-read for the rest of the loop.
 
+The same rationale applies beyond Bash: independent non-Bash tool calls — `Read`, `Grep`, `Glob`, a rung-1 `Agent` call — that don't depend on each other's output also belong in one turn, emitted in parallel, not spread across sequential turns. Two constraints this doesn't override: if a call's parameters depend on a previous call's output, sequence it instead — never fill in a placeholder or guess a missing parameter to force it into the same batch; and parallel emission never substitutes for Phase 3 rung 2 — the moment the work is 3+ units or has a cross-unit dependency, spawn the named-teammate team with a `blockedBy` task list instead of firing more solo `Agent` calls in parallel.
+
 ### Phase 4b — PR review invokes `/pr-review-toolkit:review-pr <PR#>` as a Skill, then `/coderails:post-review <PR#>`
 
 When a phase reaches "review the PR" (after a `/workflow` agent has pushed a PR, before merge), invoke the **`/pr-review-toolkit:review-pr <PR#>`** Skill — passing the PR number as the argument — which itself fans out the six specialised reviewers plus a security pass. Do NOT hand-roll the reviewers as separate `Agent` or `Task` spawns; use the Skill invocation.
@@ -316,9 +318,11 @@ The hook checks the declaration is present with a valid category; it cannot chec
 
 ## A note on cadence
 
-The user does not want a running narration of "now spawning X, now waiting for Y." They want:
-- Brief status when a phase boundary is crossed
-- Evidence when claiming success
-- Clear stop on failure with the smallest readable summary
+The wanted cadence, stated directly rather than as a correction to any particular habit:
+- **Before the first tool call of a step**, one sentence stating what you're about to do.
+- **While working**, an update only when something important is found or the direction changes — not a running turn-by-turn narration.
+- **When finishing**, lead with the outcome: the first sentence answers "what happened" or "what did you find," supporting detail after.
 
 Idle pings from teammates are noise unless the artifact check (Phase 4) confirms a real failure. Don't react to every idle ping with a status update — match the cadence to the user's pull, not the runtime's push.
+
+**Orchestrator responses stay concise.** Keep caveats and disclaimers short, spend the response on the substance, and give a high-level summary unless the user has specifically asked for depth.
