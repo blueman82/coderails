@@ -114,7 +114,7 @@ Match the confirmation cadence to the envelope class for the rest of the session
 
 ### Phase 0.4 — Surface the orchestrator's model cost to the user at loop launch
 
-**Token-burn rule (row 1 of 3).** The orchestrator cannot change its own model — `/model` is a user-typed slash command; nothing available to the orchestrator sets it. So the only executable action here is to tell the user. At loop launch — alongside Phase 0's envelope read, before Phase 1's plan — state once, in your own output, that this session's model bills every turn of the loop, and that switching it is theirs via `/model` before the loop gets long. Then continue; this is a notice, not a gate, never stall for a reply. Distinct from Phase 2.8's worker routing (spawned workers, not the orchestrator itself). See [model-routing.md](model-routing.md) for why the cost compounds.
+**Token-burn rule (row 1 of 3).** The orchestrator cannot change its own model — `/model` is a user-typed slash command; nothing available to the orchestrator sets it. So the only executable action here is to tell the user. At loop launch — alongside Phase 0's envelope read, before Phase 1's plan — state once, in your own output, that this session's model bills every turn of the loop, and that switching it is theirs via `/model` before the loop gets long. Then continue; this is a notice, not a gate, never stall for a reply. Distinct from Phase 2.8's worker routing (spawned workers, not the orchestrator itself); given once at launch, not repeated per phase. See [model-routing.md](model-routing.md) for why the cost compounds.
 
 ### Phase 0.5 — Orchestrator operating rules (the conductor obeys its own rules)
 
