@@ -175,9 +175,14 @@ Any of steps 5–9 can REFUSE rather than the routine choosing to abort.
 exits non-zero, that is a refusal.** This is deliberately keyed on the
 exit code rather than on a list of rejecting reasons, because a list
 only covers the outcomes someone thought to enumerate. `scripts/merge.sh`
-alone has more than thirty distinct non-zero exits, all through one
-shared `err` function, and a run must terminate on every one of them —
-including the ones added after this sentence was written.
+alone has more than thirty distinct non-zero exits through one shared
+`err` function, PLUS failures that bypass `err` entirely — it runs under
+`set -euo pipefail`, so an unguarded command aborts the script directly
+(the `gh pr merge` call is exactly this: its own comment says "its
+failure must abort"). Counting the `err` calls therefore does not
+enumerate the exits either, which is the point. A run must terminate on
+every one of them, including the ones added after this sentence was
+written.
 
 Treat a refusal the same as an abort: close the PR if one is open,
 delete the branch locally and on the remote, and append a
