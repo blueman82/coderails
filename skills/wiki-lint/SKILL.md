@@ -30,7 +30,8 @@ Extract:
 - `git.worktree` — whether to use worktree/PR flow (`true`) or write directly (`false`)
 - `git.bypass_flag` — env var for PR creation/merge (e.g. `BYPASS_REVIEW=1`)
 - `git.pull_path` — path to pull after merge
-- `git.stale_days` — days before a page is considered stale (default: 30)
+- `git.stale_days` — age in days before a page becomes a **candidate** for the
+  staleness check (default: 30). Age alone never makes a page stale; see Step 2.
 
 **If `git.worktree` is `true`** (team repos):
 ```bash
@@ -53,7 +54,49 @@ Read all markdown files in `$vault` (excluding `.obsidian/`, `templates/`, `inbo
 
 **Contradictions**: Pages with `⚠️ CONTRADICTION` flags. Also look for claims that newer sources have superseded.
 
-**Stale pages**: Where `last_updated` is more than `git.stale_days` (default 30) days ago.
+**Stale pages**: Where `last_updated` is more than `git.stale_days` (default 30)
+days ago **and** at least one of the page's `sources:` has changed since that
+stamp. Date alone is not staleness — a page whose sources have not moved is
+correctly dated, not stale.
+
+Resolve each `sources:` entry to a path in the code repo. An entry starting
+`sources/` names another wiki page, not a repo file — resolve it one hop
+further by reading that page's own `sources:`, and only fall back to date-only
+if the hop still yields no repo path. A `skills/foo.md` entry usually means
+`skills/foo/SKILL.md`; a bare hook name usually means `hooks/scripts/<name>.sh`.
+
+For every entry that resolves, compare its last commit date against the page's
+`last_updated`:
+
+```bash
+git -C "$repo" log -1 --format=%cI -- "$source_path"
+```
+
+Use the commit date, never filesystem mtime — `git clone`/`checkout`/`pull`
+stamp mtime at checkout time, so in a fresh clone every file looks equally
+new and the check silently stops discriminating.
+
+Compare with a **7-day grace window**: treat a source as moved only if its
+commit date is more than 7 days after the page's `last_updated`. A page is
+written from a source in the same week it lands, and `last_updated` is a date
+while the commit is a timestamp, so a 0-7 day gap is authoring lag, not drift.
+Without the window, a bulk commit (an import, a mass reformat, a rename sweep)
+re-dates hundreds of files at once and flags every page written just before it.
+
+Classify the result:
+- **No source moved past the window** → not a finding. Do not report it, and do
+  not bump `last_updated`; a blind bump converts "unverified" into "verified"
+  with no verification.
+- **A source moved past the window** → check the diff before reporting. If the
+  commit changed only formatting, a rename, or a line the page does not cover,
+  it is not drift. If it changed something the page states, report it as a
+  **missing cross-reference**, not a stale page, naming the exact commit — so
+  the follow-up is a real `/wiki-ingest` rather than a date edit.
+- **Page has no repo-resolvable `sources:` even after one hop** → fall back to
+  the date-only rule, and say in the report that the check was date-only.
+
+`sources/` and `investigations/` pages are point-in-time records; age is their
+correct state. Exclude them from this check entirely.
 
 **Orphan pages**: Zero inbound links (exclude index.md, log.md, AGENTS.md).
 
