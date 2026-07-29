@@ -64,23 +64,35 @@ correctly dated, not stale.
 
 Resolve each `sources:` entry, in this order. Stop at the first hit:
 
-1. **It exists in the vault** (`$vault/<entry>`) → it names another wiki page,
-   not a repo file. Not comparable; skip it. Test by existence, not by a
+1. **It exists in the repo**, either as `$repo/<entry>` or as
+   `$repo/<entry-without-.md>/SKILL.md` → use it. The first covers full paths
+   like `hooks/scripts/lib/loop_cost.sh` and bare repo-root files like
+   `AGENTS.md` or `install.sh`; the second covers the `skills/foo.md` shorthand
+   for `skills/foo/SKILL.md`.
+
+   **Try both repo forms before testing the vault.** A wiki page that mirrors a
+   repo file has the same path in both trees — `commands/push.md` is a real file
+   in the repo *and* a page in the vault, and `skills/dashboard.md` is a vault
+   page whose repo form is `skills/dashboard/SKILL.md`. Testing the vault first
+   classifies such a page's own source as "another wiki page" and silently drops
+   it to date-only. That is the bug this ordering exists to prevent, and it
+   applies to the shorthand exactly as it does to the exact path.
+2. **It exists in the vault** (`$vault/<entry>`) and neither repo form hit → it
+   names another wiki page. Not comparable; skip it. Test by existence, not by a
    `sources/` prefix — real entries also point at `design/…` and
    `investigations/…` pages.
-2. **It exists in the repo** (`$repo/<entry>`) → use it. This covers both full
-   paths like `hooks/scripts/loop_cost.sh` and bare repo-root files like
-   `AGENTS.md` or `install.sh`.
-3. **`$repo/<entry-without-.md>/SKILL.md` exists** → use it. A `skills/foo.md`
-   entry is shorthand for `skills/foo/SKILL.md`. Rare: most entries already
-   write the full path.
-4. **Nothing exists** → the entry resolves to nothing. Do **not** treat that as
+3. **Nothing exists** → the entry resolves to nothing. Do **not** treat that as
    "not moved" — it is unresolvable, which is its own outcome below. Some real
    entries point outside the repo entirely (`~/.claude/settings.json`, another
    repo's slug).
 
-A page whose entries all land on 1 or 4 has nothing to compare and falls
-through to the date-only rule below.
+Step 1 is the only comparable outcome. A page whose entries all land on 2 or 3
+has nothing to compare and falls through to the date-only rule below.
+
+"Present in both trees means the repo file" holds in this vault — every
+colliding entry is a repo file the wiki mirrors — but it is a property of how
+this vault names its sources, not a law. Re-check it against your own vault
+before relying on it, the same way you re-check the grace window.
 
 Check **every** entry that resolves, not just the first. One moved source is
 enough to make the page a finding; the rest still need checking, because the
@@ -151,7 +163,12 @@ Classify the result:
   the entry. Do not silently treat it as unchanged, and do not let it clear a
   page that other sources have already flagged.
 - **Page has no repo-resolvable `sources:` at all** → fall back to the
-  date-only rule, and say in the report that the check was date-only.
+  date-only rule and apply it: over `git.stale_days`, the page **is** a stale
+  finding. Say in the report that the check was date-only, so the finding
+  carries its own weaker provenance. Falling back is not clearing — a page
+  nothing could be compared against is less verified than one whose sources
+  were checked, not more. Do not bump `last_updated` to close it; that is the
+  unverified-to-verified conversion this whole rule exists to prevent.
 
 `sources/` and `investigations/` pages are point-in-time records; age is their
 correct state. Exclude them from this check entirely.
