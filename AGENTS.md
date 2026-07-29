@@ -209,10 +209,11 @@ re-opened as findings.
   (Phases 2, 2.5, 3, 3a, 9, 10 — as of this writing; the role table lives in
   Phase 2.8, and the per-role effort defaults plus the fable-escalation rule in
   its `model-routing.md` detail-carrier) — but no hook gates
-  `Agent`/`Task` spawn calls on the requested model — the only `PreToolUse`
-  matchers in `hooks/hooks.json` are `Bash` and `Write|Edit|MultiEdit`; the
-  remaining registered events (SessionStart/UserPromptSubmit/Stop/SubagentStop)
-  gate no tool calls.
+  `Agent`/`Task` spawn calls on the requested model — the registered
+  `PreToolUse` matchers in `hooks/hooks.json` are `Bash`, `AskUserQuestion`,
+  and `Write|Edit|MultiEdit`, none of which matches an agent-spawn tool call;
+  the remaining registered events
+  (SessionStart/UserPromptSubmit/Stop/SubagentStop) gate no tool calls.
   This is deliberate: routing exists for cost and latency, not correctness — PR
   gates (review, evals, hook-seam) are model-independent, so a `frontier`-role
   worker still produces a valid, fully-gated PR; nothing load-bearing breaks if
