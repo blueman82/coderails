@@ -163,7 +163,12 @@ Classify the result:
   the entry. Do not silently treat it as unchanged, and do not let it clear a
   page that other sources have already flagged.
 - **Page has no repo-resolvable `sources:` at all** → fall back to the
-  date-only rule, and say in the report that the check was date-only.
+  date-only rule and apply it: over `git.stale_days`, the page **is** a stale
+  finding. Say in the report that the check was date-only, so the finding
+  carries its own weaker provenance. Falling back is not clearing — a page
+  nothing could be compared against is less verified than one whose sources
+  were checked, not more. Do not bump `last_updated` to close it; that is the
+  unverified-to-verified conversion this whole rule exists to prevent.
 
 `sources/` and `investigations/` pages are point-in-time records; age is their
 correct state. Exclude them from this check entirely.
