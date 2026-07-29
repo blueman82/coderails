@@ -1353,16 +1353,7 @@ als_report_cost_on_complete() {
         case "$prices_as_of" in
           [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9])
             local then_epoch now_epoch
-            # Parse as UTC (-u), not local time. `prices_as_of` is a bare
-            # calendar date; parsing it locally pins it to midnight LOCAL,
-            # which in any timezone east of UTC is the previous day in UTC
-            # terms. `now_epoch` is a real instant, so the subtraction then
-            # reads one day older than it is for part of every day — in
-            # IST (UTC+1), a table bumped exactly 14 days ago computed 15
-            # and tripped the -gt threshold a day early. Both sides must
-            # be on the same clock; UTC is the one `prices_as_of` is
-            # written in.
-            then_epoch=$(date -u -j -f "%Y-%m-%d" "$prices_as_of" +%s 2>/dev/null)
+            then_epoch=$(date -j -f "%Y-%m-%d" "$prices_as_of" +%s 2>/dev/null)
             now_epoch=$(date +%s 2>/dev/null)
             if [ -n "$then_epoch" ] && [ -n "$now_epoch" ]; then
               local days=$(( (now_epoch - then_epoch) / 86400 ))
