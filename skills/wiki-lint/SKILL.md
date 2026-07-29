@@ -27,6 +27,9 @@ Periodically health-check the wiki. The LLM is good at finding inconsistencies, 
 
 Extract:
 - `vault` — absolute path to the wiki vault
+- `repo` — absolute path to the **code** repo root: the directory containing
+  the `AGENTS.md` you just located. Step 2's staleness check compares against
+  its git history, so resolve this explicitly rather than assuming cwd.
 - `git.worktree` — whether to use worktree/PR flow (`true`) or write directly (`false`)
 - `git.bypass_flag` — env var for PR creation/merge (e.g. `BYPASS_REVIEW=1`)
 - `git.pull_path` — path to pull after merge
@@ -59,11 +62,25 @@ days ago **and** at least one of the page's `sources:` has changed since that
 stamp. Date alone is not staleness — a page whose sources have not moved is
 correctly dated, not stale.
 
-Resolve each `sources:` entry to a path in the code repo. A `skills/foo.md`
-entry usually means `skills/foo/SKILL.md`; a bare hook name usually means
-`hooks/scripts/<name>.sh`. An entry starting `sources/` names another wiki
-page, not a repo file — it does not resolve, so a page whose `sources:` are all
-wiki pages falls through to the date-only rule below.
+Resolve each `sources:` entry, in this order. Stop at the first hit:
+
+1. **It exists in the vault** (`$vault/<entry>`) → it names another wiki page,
+   not a repo file. Not comparable; skip it. Test by existence, not by a
+   `sources/` prefix — real entries also point at `design/…` and
+   `investigations/…` pages.
+2. **It exists in the repo** (`$repo/<entry>`) → use it. This covers both full
+   paths like `hooks/scripts/loop_cost.sh` and bare repo-root files like
+   `AGENTS.md` or `install.sh`.
+3. **`$repo/<entry-without-.md>/SKILL.md` exists** → use it. A `skills/foo.md`
+   entry is shorthand for `skills/foo/SKILL.md`. Rare: most entries already
+   write the full path.
+4. **Nothing exists** → the entry resolves to nothing. Do **not** treat that as
+   "not moved" — it is unresolvable, which is its own outcome below. Some real
+   entries point outside the repo entirely (`~/.claude/settings.json`, another
+   repo's slug).
+
+A page whose entries all land on 1 or 4 has nothing to compare and falls
+through to the date-only rule below.
 
 Check **every** entry that resolves, not just the first. One moved source is
 enough to make the page a finding; the rest still need checking, because the
@@ -73,6 +90,12 @@ date on the current branch against the page's `last_updated`:
 ```bash
 git -C "$repo" log -1 --format=%cI -- "$source_path"
 ```
+
+**An empty result is not a date.** This command prints nothing and still exits
+0 when the path is untracked or misspelled. Never compare an empty string
+against `last_updated` — an empty value silently reads as "not moved", which is
+a fail-open on the one check this rule exists to perform. Treat empty as
+unresolvable and use the branch below.
 
 Use the commit date, never filesystem mtime — `git clone`/`checkout`/`pull`
 stamp mtime at checkout time, so in a fresh clone every file looks equally
@@ -85,31 +108,50 @@ while the commit is a timestamp, so a 0-7 day gap is authoring lag, not drift.
 Without the window, a bulk commit (an import, a mass reformat, a rename sweep)
 re-dates hundreds of files at once and flags every page written just before it.
 
-7 is calibrated, not derived: it was set against coderails' own 133-file import
-at `cb9404b`, which re-dated every file at one timestamp and produced 5 false
-positives on a 1-day gap. Re-check it against your own vault — if authoring lag
-there routinely exceeds a week, raise it, and say in the report which value the
-pass used.
+7 is calibrated, not derived — it was set against one repo whose bulk commit
+touched 133 files at a single timestamp and produced 5 false positives on a
+1-day gap. Re-check it against your own vault: if authoring lag there routinely
+exceeds a week, raise it, and say in the report which value the pass used.
 
 Classify the result:
 - **No source moved past the window** → not a finding. Do not report it, and do
   not bump `last_updated`; a blind bump converts "unverified" into "verified"
   with no verification.
 - **Any source moved past the window** → read that source's diff over the
-  drifted span before reporting:
+  drifted span before reporting. Find the base commit first, and check it:
 
   ```bash
-  git -C "$repo" diff "$(git -C "$repo" log -1 --format=%H \
-      --before="<page's last_updated>" -- "$source_path")"..HEAD -- "$source_path"
+  base=$(git -C "$repo" log -1 --format=%H \
+      --before="<page's last_updated>" -- "$source_path")
+  ```
+
+  If `base` is **empty**, the source has no commit at all before the page's
+  stamp — its entire history postdates the page. That is the strongest drift
+  signal there is, not the weakest. Diff the whole history instead:
+  `git -C "$repo" log -p -- "$source_path"`. Do not run `"$base"..HEAD` with an
+  empty `base`: it collapses to `..HEAD`, which git reads as `HEAD..HEAD` and
+  prints an empty diff with exit 0 — indistinguishable from "no change".
+
+  Otherwise diff normally:
+
+  ```bash
+  git -C "$repo" diff "$base"..HEAD -- "$source_path"
   ```
 
   If it changed only formatting, a rename, or a line the page does not cover,
   it is not drift. If it changed something the page states, report it as a
-  **missing cross-reference**, not a stale page, naming every source that moved
-  and its exact commit — so the follow-up is a real `/wiki-ingest` rather than
-  a date edit.
-- **Page has no repo-resolvable `sources:`** → fall back to the date-only rule,
-  and say in the report that the check was date-only.
+  **source-drift** finding, naming every source that moved and its exact
+  commit — so the follow-up is a real `/wiki-ingest` rather than a date edit.
+  Count it under **missing cross-references** in Step 5's total; it is the
+  closest existing category and the total is a sum, so nothing is lost or
+  double-counted. Say "source drift" in the prose so it is not confused with an
+  unlinked-concept finding.
+- **A source resolved to nothing, or its commit date came back empty** → report
+  it as a **data gap**: the page cites a source the linter cannot locate. Name
+  the entry. Do not silently treat it as unchanged, and do not let it clear a
+  page that other sources have already flagged.
+- **Page has no repo-resolvable `sources:` at all** → fall back to the
+  date-only rule, and say in the report that the check was date-only.
 
 `sources/` and `investigations/` pages are point-in-time records; age is their
 correct state. Exclude them from this check entirely.
