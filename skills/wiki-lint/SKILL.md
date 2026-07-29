@@ -65,8 +65,10 @@ entry usually means `skills/foo/SKILL.md`; a bare hook name usually means
 page, not a repo file — it does not resolve, so a page whose `sources:` are all
 wiki pages falls through to the date-only rule below.
 
-For every entry that resolves, compare its last commit date against the page's
-`last_updated`:
+Check **every** entry that resolves, not just the first. One moved source is
+enough to make the page a finding; the rest still need checking, because the
+report must name each source that moved. For each, compare the last commit
+date on the current branch against the page's `last_updated`:
 
 ```bash
 git -C "$repo" log -1 --format=%cI -- "$source_path"
@@ -83,15 +85,29 @@ while the commit is a timestamp, so a 0-7 day gap is authoring lag, not drift.
 Without the window, a bulk commit (an import, a mass reformat, a rename sweep)
 re-dates hundreds of files at once and flags every page written just before it.
 
+7 is calibrated, not derived: it was set against coderails' own 133-file import
+at `cb9404b`, which re-dated every file at one timestamp and produced 5 false
+positives on a 1-day gap. Re-check it against your own vault — if authoring lag
+there routinely exceeds a week, raise it, and say in the report which value the
+pass used.
+
 Classify the result:
 - **No source moved past the window** → not a finding. Do not report it, and do
   not bump `last_updated`; a blind bump converts "unverified" into "verified"
   with no verification.
-- **A source moved past the window** → check the diff before reporting. If the
-  commit changed only formatting, a rename, or a line the page does not cover,
+- **Any source moved past the window** → read that source's diff over the
+  drifted span before reporting:
+
+  ```bash
+  git -C "$repo" diff "$(git -C "$repo" log -1 --format=%H \
+      --before="<page's last_updated>" -- "$source_path")"..HEAD -- "$source_path"
+  ```
+
+  If it changed only formatting, a rename, or a line the page does not cover,
   it is not drift. If it changed something the page states, report it as a
-  **missing cross-reference**, not a stale page, naming the exact commit — so
-  the follow-up is a real `/wiki-ingest` rather than a date edit.
+  **missing cross-reference**, not a stale page, naming every source that moved
+  and its exact commit — so the follow-up is a real `/wiki-ingest` rather than
+  a date edit.
 - **Page has no repo-resolvable `sources:`** → fall back to the date-only rule,
   and say in the report that the check was date-only.
 
