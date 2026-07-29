@@ -79,5 +79,5 @@ this section is about the `Model:` stamp assigned to spawned workers. Why it mat
 orchestrator re-reads its whole growing context on every turn for the life of the loop, so
 whatever cache-read rate its own model carries compounds across the entire session, and that rate
 differs sharply by tier — see `hooks/scripts/lib/model_prices.json` for current per-model rates.
-The orchestrator cannot act on this itself (Phase 0.4's `/model` rule); the mechanism here is only
+The orchestrator cannot act on this itself (Phase 0.4 — `/model` is the user's to type); the mechanism here is only
 why the token-burn notice to the user matters.
