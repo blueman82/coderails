@@ -64,13 +64,17 @@ correctly dated, not stale.
 
 Resolve each `sources:` entry, in this order. Stop at the first hit:
 
-1. **It exists in the vault** (`$vault/<entry>`) → it names another wiki page,
-   not a repo file. Not comparable; skip it. Test by existence, not by a
+1. **It exists in the repo** (`$repo/<entry>`) → use it. This covers full paths
+   like `hooks/scripts/loop_cost.sh` and bare repo-root files like `AGENTS.md`
+   or `install.sh`. **Check the repo first, before the vault.** A wiki page that
+   mirrors a repo file has the same path in both — `commands/push.md` is a real
+   file in the repo *and* a page in the vault — and testing the vault first
+   would classify that page's own source as "another wiki page", silently
+   dropping it to date-only. That is the bug this ordering exists to prevent.
+2. **It exists in the vault** (`$vault/<entry>`) but not in the repo → it names
+   another wiki page. Not comparable; skip it. Test by existence, not by a
    `sources/` prefix — real entries also point at `design/…` and
    `investigations/…` pages.
-2. **It exists in the repo** (`$repo/<entry>`) → use it. This covers both full
-   paths like `hooks/scripts/loop_cost.sh` and bare repo-root files like
-   `AGENTS.md` or `install.sh`.
 3. **`$repo/<entry-without-.md>/SKILL.md` exists** → use it. A `skills/foo.md`
    entry is shorthand for `skills/foo/SKILL.md`. Rare: most entries already
    write the full path.
