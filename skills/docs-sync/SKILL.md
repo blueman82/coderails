@@ -170,8 +170,20 @@ own while the process exits 0 gives the runner no signal to act on — it
 cannot distinguish "finished but did not log it" from "failed silently",
 so it deliberately writes nothing.
 
-Any of steps 5–9 can REFUSE (a failing eval, a review that blocks, a
-merge gate that rejects) rather than the routine choosing to abort.
+Any of steps 5–9 can REFUSE rather than the routine choosing to abort.
+**The trigger is the mechanism, not the reason: if the step's command
+exits non-zero, that is a refusal.** This is deliberately keyed on the
+exit code rather than on a list of rejecting reasons, because a list
+only covers the outcomes someone thought to enumerate. `scripts/merge.sh`
+alone has more than thirty distinct non-zero exits through one shared
+`err` function, PLUS failures that bypass `err` entirely — it runs under
+`set -euo pipefail`, so an unguarded command aborts the script directly
+(the `gh pr merge` call is exactly this: its own comment says "its
+failure must abort"). Counting the `err` calls therefore does not
+enumerate the exits either, which is the point. A run must terminate on
+every one of them, including the ones added after this sentence was
+written.
+
 Treat a refusal the same as an abort: close the PR if one is open,
 delete the branch locally and on the remote, and append a
 `refused=<gate>` line to the run log (e.g. `refused=post-evals` or
@@ -181,6 +193,21 @@ in the same run and never relax the gate that refused. **Never append
 writes `abort=`/`refused=` only; the success marker is written on
 successful completion of a no-drift or merged night and on no other
 path.
+
+**A non-zero exit that is neither a pass nor a rejection is still a
+refusal.** The worked example is a `pending` `tier-review` status:
+`/coderails:merge` exits non-zero because the tier-gate daemon has not
+yet posted its verdict — the gate has not rejected the PR, it has not
+yet judged it. Write `refused=merge` and clean up, exactly as for a
+rejection. **Never wait, poll, or retry for a gate to resolve**, and
+**never invent a new marker** to describe an outcome the terminal set
+does not name. Both were tried on 2026-07-26 and 2026-07-27: the run
+logged `merge-blocked reason=tier-review-pending`, a string that appears
+in no config's `failures` list and which the `last-marker` gate
+therefore cannot see, then waited for the status to resolve until the
+session ended. The three terminal markers (`run=ok`, `abort=<reason>`,
+`refused=<gate>`) are the complete set — an outcome that is not one of
+them is not a new marker, it is a refusal that has not been written yet.
 
 Append a timestamped per-stage line to the run log after each gate step
 above (fetch/branch, evals frozen, edit made, manifest check, push,

@@ -403,6 +403,24 @@ post_evals::validate_smoke_execution() {
     # 9 and the writer-side tools still look up by id — a duplicate id fails
     # closed there as malformed smoke, so the chain refuses either way, but
     # this function must hold on its own.)
+    # `mode` is written by the posting agent and every scripted-eval check in
+    # this file is a `select(.mode == "scripted")` filter — so a mode that is
+    # not exactly that string is invisible to ALL of them at once (checks 3, 4,
+    # 9, 10 and smoke_verify), and the empty list then hits the `return 0`
+    # below as silent success. Verified: a vacuous negative_control refused at
+    # rc=1 under mode:"scripted" passes at rc=0 under mode:"Scripted" or with
+    # mode omitted entirely — the omitted form needs no adversary, just a
+    # schema-sloppy agent. Same principle this function already applies to
+    # `id` (iterate by index, never trust a gated-party field to select what
+    # gets checked); `mode` was the remaining instance. The enum is
+    # authoritative in skills/task-evals/SKILL.md: scripted | agent-run.
+    local bad_mode
+    bad_mode=$(jq -r '[.evals[]? | select(((.mode // "") | IN("scripted","agent-run")) | not) | .id // "<unnamed>"] | first // ""' "$path")
+    if [[ -n "$bad_mode" ]]; then
+        printf 'post_evals: eval %s has an unrecognised mode (must be "scripted" or "agent-run") — refusing: an unrecognised or absent mode silently excludes the eval from every gate check.\n' "$bad_mode" >&2
+        return 1
+    fi
+
     local idxs
     idxs=$(jq -r '.evals // [] | to_entries | map(select(.value.mode == "scripted")) | .[].key' "$path")
     [[ -z "$idxs" ]] && return 0
@@ -572,6 +590,22 @@ post_evals::smoke_verify() {
     # eval is re-executed exactly once regardless of its id. (Same defect class
     # as the surface exemption removed above: gate authority must never rest on
     # a field the gated party controls.)
+    # `mode` is the remaining instance of the defect class named directly above:
+    # it selects WHICH evals this gate re-executes, and the gated party writes
+    # it. A mode that is not exactly "scripted" drops the eval out of every
+    # check in this file at once, and an all-dropped array reaches the
+    # `return 0` below as silent success. Verified against this gate: an
+    # artifact whose sole P0 carries a vacuous negative_control is refused at
+    # rc=1 with mode:"scripted" and accepted at rc=0 with mode:"Scripted" or
+    # with no mode field at all. Refuse the unrecognised value rather than
+    # guessing an intent for it.
+    local sv_bad_mode
+    sv_bad_mode=$(jq -r '[.evals[]? | select(((.mode // "") | IN("scripted","agent-run")) | not) | .id // "<unnamed>"] | first // ""' "$path")
+    if [[ -n "$sv_bad_mode" ]]; then
+        printf 'post_evals: smoke_verify: eval %s has an unrecognised mode (must be "scripted" or "agent-run") — refusing: an unrecognised or absent mode silently excludes the eval from every gate check.\n' "$sv_bad_mode" >&2
+        return 1
+    fi
+
     local indices
     indices=$(jq -r '(.evals // []) | to_entries
         | map(select(.value.mode == "scripted") | .key)
@@ -790,6 +824,23 @@ post_evals::smoke_run() {
 # command's output to /dev/null, so an orphan cannot hold its pipe open and
 # the single-process alarm is a sufficient bound there.
 #
+# STDIN IS REDIRECTED FROM /dev/null, and that is a gate correctness
+# property, not tidiness. Every PRODUCTION caller runs this inside a
+# `while IFS= read -r ... done <<< "$list"` loop — smoke_run over `$ids`,
+# validate_smoke_execution over `$idxs`, smoke_verify over `$indices` — so
+# the loop body's stdin IS
+# the remaining eval list. An eval whose cmd reads stdin (`cat`, `xargs`,
+# a test runner that drains it) consumed that list, and the loop then
+# exited early having silently skipped every subsequent eval — while still
+# returning 0. In smoke_run that lost the smoke evidence (check 9 catches
+# the absence downstream, so it failed closed). In validate_smoke_execution
+# (check 10) and smoke_verify it FAILED OPEN: the skipped evals were never
+# executed, so a vacuous negative_control that the gate refuses on its own
+# (`negative_control: "true"`, "a control that passes proves nothing") was
+# silently accepted when any earlier eval ate stdin. Verified by A/B: the
+# same artifact exits 1 alone and 0 behind a stdin-consuming eval. An eval
+# command needing real stdin should pipe it in explicitly.
+#
 # [timeout_seconds] exists for the test suite (a real 10s stall per run is
 # too slow to assert on); production callers pass nothing and get 10.
 #
@@ -826,9 +877,9 @@ post_evals::_run_recorded() {
         # "never executed" — the honest classification for a command that never
         # ran. The `|| { echo ...; exit 127; }` runs inside the subshell.
         out=$(cd "$cwd" 2>/dev/null || { printf 'cd-failed: %s' "$cwd"; exit 127; }
-              perl -e "$_pg_kill_perl" "$timeout_secs" "$command_text" 2>&1)
+              perl -e "$_pg_kill_perl" "$timeout_secs" "$command_text" </dev/null 2>&1)
     else
-        out=$(perl -e "$_pg_kill_perl" "$timeout_secs" "$command_text" 2>&1)
+        out=$(perl -e "$_pg_kill_perl" "$timeout_secs" "$command_text" </dev/null 2>&1)
     fi
     rc=$?
     out=$(printf '%s' "$out" | tr '\n' ' ')
