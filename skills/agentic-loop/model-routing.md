@@ -3,7 +3,7 @@
 Detail-carrier for Phase 2.8. The main skill keeps the imperative (assign a role to every Phase
 3/3a build task before any worker spawns, record the set once, use the role table); this file is
 the escalation and effort rules you consult **when writing a `Model:` stamp** or deciding whether
-a task justifies a stronger tier.
+a task justifies a stronger tier — plus a closing note on the orchestrator's own model (Phase 0.4).
 
 ## Contents
 
