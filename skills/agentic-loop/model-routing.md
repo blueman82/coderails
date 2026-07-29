@@ -13,6 +13,7 @@ a task justifies a stronger tier.
 - [Fallback valves live in the stamp](#fallback-valves-live-in-the-stamp)
 - [Escalation is safe by construction](#escalation-is-safe-by-construction)
 - [Inline sites elsewhere](#inline-sites-elsewhere)
+- [The orchestrator's own model (Phase 0.4)](#the-orchestrators-own-model-phase-04)
 
 ## frontier resolves to opus
 
