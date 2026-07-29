@@ -85,14 +85,23 @@ tg_extract_evals_json() {
 # Runs <cmd...> bounded by <timeout_secs>. Exit 124 on expiry (matching
 # coreutils `timeout`'s convention) so callers can distinguish "the external
 # call itself failed" from "the external call never returned". Falls back to
-# a manual background+kill loop if `timeout` isn't on PATH (e.g. some macOS
-# base installs lack GNU timeout without coreutils).
+# a manual background+kill loop only if NEITHER `timeout` nor `gtimeout` is
+# on PATH — macOS ships neither in its base install, and Homebrew coreutils
+# installs GNU timeout under the `gtimeout` name, so a coreutils host takes
+# the fast path rather than the fallback.
 # The fallback backgrounds <cmd...> in its OWN process group (`set -m` +
 # subshell) so that on expiry `kill -9 -"$pid"` (negative PID = kill the
 # whole group) reaps any child processes <cmd...> itself spawned — killing
 # only the direct child would leave orphaned descendants holding the
 # caller's stdout pipe open, hanging any `$(tg_with_watchdog ...)` command
 # substitution forever even though this function itself has returned 124.
+# That group-kill protection is the FALLBACK's alone; the two external-binary
+# branches rely on the binary's own child reaping.
+# The fallback's expiry is bounded by whole-second `SECONDS` ticks measured
+# from loop entry, so it can fire up to ~1s BEFORE <timeout_secs> elapses
+# (measured: a nominal 2s expired in 1.53-1.67s). It never fires late. At the
+# 60s production default that is noise; callers needing a precise floor must
+# not rely on this path.
 tg_with_watchdog() {
     local timeout_secs="$1"; shift
     [[ "$1" == "--" ]] && shift
