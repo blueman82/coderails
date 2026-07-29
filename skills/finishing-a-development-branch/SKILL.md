@@ -203,19 +203,67 @@ check whether that process is alive:
 LOCK_PID=$(echo "$LOCK_REASON" | grep -oE '\(pid [0-9]+ ' | grep -oE '[0-9]+')
 if [ -z "$LOCK_PID" ]; then
   echo "Worktree $WORKTREE_PATH is locked with no parseable pid (reason: $LOCK_REASON) — leaving in place, not removing."
-elif kill -0 "$LOCK_PID" 2>/dev/null; then
-  echo "Worktree $WORKTREE_PATH is locked by live pid $LOCK_PID (reason: $LOCK_REASON) — deferred until that session ends, not removing."
-else
+elif ! kill -0 "$LOCK_PID" 2>/dev/null; then
   echo "Worktree $WORKTREE_PATH is locked by stale pid $LOCK_PID (dead) — clearing lock and removing."
   git worktree unlock "$WORKTREE_PATH"
   git worktree remove "$WORKTREE_PATH"
   git worktree prune
+else
+  echo "Worktree $WORKTREE_PATH is locked by live pid $LOCK_PID (reason: $LOCK_REASON) — determine below whether this is THIS session's own lock or another session's before acting."
 fi
 ```
 
-**Never force-remove a lock you can't attribute to a dead pid.** No
-parseable pid and a live pid both mean: report and leave the worktree
-alone. Only a confirmed-dead pid clears the lock.
+**A live pid alone doesn't say whose it is — there is no reliable shell
+test for it here.** `$$` is this snippet's own subshell pid, not the
+Claude session's pid, so it can't be compared against `LOCK_PID`. And
+Step 5's Merge Locally and Discard snippets `cd` to `MAIN_ROOT` before
+handing off to Step 6, in a separate command invocation each time — cwd
+isn't guaranteed to persist between them, so `$WORKTREE_PATH` computed
+above may no longer be this shell's actual cwd either; comparing cwd to
+it is not a dependable test. Don't invent a shell one-liner for this.
+The real signal is procedural, not computed: **was this session already
+working in `$WORKTREE_PATH` before Step 6 started** — i.e. is this the
+worktree this whole invocation of the skill has been running in? If you
+know that (you do — you know what worktree you've been operating in
+this session), use it directly:
+
+- **This worktree is NOT the one this session has been working in** —
+  some other session holds it. Report and defer, never force. A merged
+  PR does not by itself mean the worktree is safe to remove; forcing it
+  out would yank that other session mid-work. This holds regardless of
+  which pid the lock names.
+- **This worktree IS the one this session has been working in** — NOT a
+  defer case, regardless of which pid the lock names. `git worktree
+  remove` cannot remove the worktree it is run from, and forcing it
+  (e.g. `-f`, or removing the `.git` file by hand) would break the
+  running session. Use the native `ExitWorktree` tool instead, with
+  `action: "remove"` — but only if it owns this worktree: with no
+  `EnterWorktree` session active at all it's a no-op (nothing removed),
+  and for a worktree entered via `EnterWorktree`'s `path` parameter
+  (switching into an existing worktree, as opposed to creating one)
+  `ExitWorktree` will not remove it — only `action: "keep"` is
+  supported for that case. In either situation, fall back to `cd` to
+  the main repo root, then `git worktree remove` from there.
+
+  When `ExitWorktree` does own the worktree: it exits the session from
+  the worktree and removes it in one step, but refuses when the worktree
+  has uncommitted files or commits not on the original branch, reporting
+  them as work that would be discarded — check this before overriding
+  with `discard_changes: true`. If the branch was squash-merged, `git log
+  --oneline origin/main..HEAD` being empty is NOT the right confirmation
+  — squash rewrites the SHAs that land on `origin/main`, so the branch's
+  own original commit SHAs never appear in its ancestry, and this check
+  can never pass, no matter how genuinely merged the branch is. Confirm
+  content identity instead: `git diff origin/main HEAD` shows no
+  differences, **and** the PR reports `state: MERGED` (`gh pr view <n>
+  --json state`). Only override the refusal once both hold. Never pass
+  `discard_changes: true` on a refusal you haven't verified this way.
+
+**Never force-remove a lock you can't attribute to a dead pid or to this
+session's own worktree.** No parseable pid and a live pid on another
+session both mean: report and leave the worktree alone. A confirmed-dead
+pid clears the lock via the git path above; a live pid on this session's
+own worktree clears it via `ExitWorktree`.
 
 **Otherwise:** The host environment (harness) owns this workspace. Do NOT remove it. If your platform provides a workspace-exit tool, use it. Otherwise, leave the workspace in place.
 
@@ -257,6 +305,18 @@ alone. Only a confirmed-dead pid clears the lock.
 - **Problem:** A locked worktree can be a live session in progress (harness lock reasons embed a pid); force-removing it yanks a running session
 - **Fix:** Parse the pid from the lock reason and `kill -0` it — only remove if confirmed dead; report and leave alone otherwise
 
+**Deferring on a live-pid lock that is this session's own**
+- **Problem:** The lock reason always shows a live pid when the worktree is the one this session has been working in (the harness locks it on the session's behalf) — treating every live pid as "another session, defer" means this session can never finish its own worktree
+- **Fix:** There's no reliable pid or cwd comparison to run (see Step 6) — know which worktree this session has been operating in, and if it's the locked one, use `ExitWorktree` with `action: "remove"`, not `git worktree remove`, and not a defer
+
+**Passing `discard_changes: true` to `ExitWorktree` on an unverified refusal**
+- **Problem:** `ExitWorktree` refuses when the worktree has uncommitted files or commits not on the original branch — after a squash merge those commits are real (legitimately landed on `origin/main`) but an ancestry check (`git log --oneline origin/main..HEAD`) can never see them there, since the squash rewrote the SHAs; checking ancestry means the agent can never pass the override, no matter how genuinely merged the branch is
+- **Fix:** Before overriding the refusal, confirm content identity — `git diff origin/main HEAD` shows no differences — AND the PR reports `state: MERGED`
+
+**Using `ExitWorktree` on a worktree it doesn't own**
+- **Problem:** With no `EnterWorktree` session active, `ExitWorktree` is a no-op; for a worktree entered via `EnterWorktree`'s `path` parameter, it will not remove — only `action: "keep"` is supported. Either way `action: "remove"` doesn't remove anything, leaving the agent with a locked worktree and no next step
+- **Fix:** When `ExitWorktree` can't remove the worktree, `cd` to the main repo root and use `git worktree remove` instead
+
 **Discarding without reporting what's deleted**
 - **Problem:** Destructive action with no record of what was lost
 - **Fix:** Always report the branch, commits, and worktree path being deleted before proceeding
@@ -271,7 +331,9 @@ alone. Only a confirmed-dead pid clears the lock.
 - Remove a worktree before confirming merge success
 - Clean up worktrees you didn't create (provenance check)
 - Run `git worktree remove` from inside the worktree
-- Force-remove a locked worktree without confirming the lock's pid is dead
+- Force-remove a locked worktree without confirming the lock's pid is dead or the worktree is this session's own
+- Defer on a live-pid lock without checking whether the worktree is the one this session has been working in
+- Pass `discard_changes: true` to `ExitWorktree` without verifying a squash-merge landed
 - Introduce a human prompt/menu — this skill runs to completion autonomously
 
 **Always:**
