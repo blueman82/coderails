@@ -112,9 +112,9 @@ Then respond.
 
 Match the confirmation cadence to the envelope class for the rest of the session — every "do you want me to..." inside an authorised envelope is a stall the user has to clear, and stalls cost more than the occasional over-reach you'd avoid by asking.
 
-### Phase 0.4 — Pin the orchestrator's own model at loop launch
+### Phase 0.4 — Surface the orchestrator's model cost to the user at loop launch
 
-**Token-burn rule (row 1 of 3).** At loop launch — alongside Phase 0's envelope read, before Phase 1's plan — pin the orchestrator's own model explicitly via `/model` (`opus` or `sonnet`) — never leave it on an unpinned default. An unpinned default can silently resolve to a costlier frontier tier (e.g. 2x the cache-read rate of a pinned mid-tier model), and the orchestrator re-reads its whole growing context on every turn for the life of the loop, so the rate compounds across the entire session. This is distinct from Phase 2.8's worker model routing — that table assigns roles to spawned workers; this pin is for the orchestrator (main context) itself, decided once at launch, not re-litigated per phase.
+**Token-burn rule (row 1 of 3).** The orchestrator cannot change its own model — `/model` is a user-typed slash command, and no tool, setting, or environment variable available to the orchestrator sets it. So the only executable action here is to tell the user. At loop launch — alongside Phase 0's envelope read, before Phase 1's plan — state in your own output, once, that the model this session is running on will bill every turn of the loop, and that switching it is theirs to do with `/model` before the loop gets long. Then continue; this is a notice, not a gate, so never stall for a reply. Why it matters: the orchestrator re-reads its whole growing context on every turn for the life of the loop, so the model's cache-read rate compounds across the entire session — a frontier tier can cost roughly 2x a mid tier for identical work. This is distinct from Phase 2.8's worker model routing — that table assigns roles to spawned workers; this notice is about the orchestrator (main context) itself, given once at launch, not repeated per phase.
 
 ### Phase 0.5 — Orchestrator operating rules (the conductor obeys its own rules)
 
