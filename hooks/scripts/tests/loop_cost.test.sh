@@ -80,11 +80,17 @@ check "worker inclusion: nested subagent transcript found via recursion" "true" 
 result=$(printf '%s' "$out" | jq -r '.transcripts_scanned')
 check "worker inclusion: transcripts_scanned counts orchestrator + 1 nested subagent = 2" "2" "$result"
 
-# --- Test (c): fail-open — unknown session id -> {} and exit 0 (E4) ---
+# --- Test (c): unknown session id -> self-describing error object (CALLER
+# error, not an environmental fail-open — same class as empty session id) and
+# exit 0 (E4). Updated from the old {} contract: a wrong/stale/typo'd session
+# id is NOT a correct call, so it must be distinguishable from a genuine
+# empty mine on stdout alone, same as the empty-session-id path. ---
 rc_out=$(dc_mine_token_usage "session-does-not-exist-anywhere" 2>/dev/null)
 rc=$?
-check "fail-open: unknown session id -> exit 0" "0" "$rc"
-check "fail-open: unknown session id -> {}" "{}" "$rc_out"
+check "unresolvable session id: exit 0" "0" "$rc"
+check "unresolvable session id: stdout is valid JSON" "true" "$(printf '%s' "$rc_out" | jq -e . >/dev/null 2>&1 && echo true || echo false)"
+check "unresolvable session id: stdout has an .error field" "true" "$(printf '%s' "$rc_out" | jq -e '.error' >/dev/null 2>&1 && echo true || echo false)"
+check "unresolvable session id: stdout has NO total_tokens key" "false" "$(printf '%s' "$rc_out" | jq -e 'has("total_tokens")' >/dev/null 2>&1 && echo true || echo false)"
 
 # --- Test (d): synthetic model skip — a message.model=="<synthetic>" line excluded ---
 sess="synthetic-session"
@@ -330,23 +336,26 @@ else
   printf 'skip - zsh self-path test (zsh not available on this machine)\n'
 fi
 
-# --- Test (k2): zsh no-transcript fail-open — under zsh, an unmatched glob
+# --- Test (k2): zsh no-transcript caller error — under zsh, an unmatched glob
 # is a hard error (nomatch is on by default), NOT a silent empty expansion
 # like bash. Reaching the "for f in .../*/\"$session.jsonl\"" loop with a
-# session that has no transcript anywhere must still fail-open to {} with
-# exit 0, not crash with "no matches found" before the
-# `[ -n "$orch_transcript" ] || { printf '{}'; return 0; }` guard ever runs.
-# Must run under GENUINE zsh (a bash-only test can't reproduce this — bash
-# expands the unmatched glob to the literal pattern, which is silently
-# skipped by the `[ -f "$f" ] || continue` check, so it never crashes there
-# in the first place). Skips gracefully if zsh is unavailable. ---
+# session that has no transcript anywhere must still emit the self-describing
+# error object with exit 0, not crash with "no matches found" before the
+# `[ -n "$orch_transcript" ] || { ...; return 0; }` guard ever runs. Updated
+# from the old {} contract (test (c) above) — an unresolvable session id is a
+# CALLER error now, not a bare fail-open. Must run under GENUINE zsh (a
+# bash-only test can't reproduce this — bash expands the unmatched glob to
+# the literal pattern, which is silently skipped by the `[ -f "$f" ] ||
+# continue` check, so it never crashes there in the first place). Skips
+# gracefully if zsh is unavailable. ---
 if command -v zsh >/dev/null 2>&1; then
   zsh_out=$(CLAUDE_PROJECTS_DIR="$TMP/projects" CLAUDE_MODEL_PRICES_FILE="$PRICES" zsh -c "
     . '$LIB'
     dc_mine_token_usage 'no-such-session-xyz'
   " 2>/dev/null)
   zsh_rc=$?
-  check "zsh no-transcript: fail-opens to {} (not a crash)" "{}" "$zsh_out"
+  check "zsh no-transcript: stdout is valid JSON (not a crash)" "true" "$(printf '%s' "$zsh_out" | jq -e . >/dev/null 2>&1 && echo true || echo false)"
+  check "zsh no-transcript: stdout has an .error field" "true" "$(printf '%s' "$zsh_out" | jq -e '.error' >/dev/null 2>&1 && echo true || echo false)"
   check "zsh no-transcript: exit code 0" "0" "$zsh_rc"
 else
   printf 'skip - zsh no-transcript fail-open test (zsh not available on this machine)\n'
@@ -403,29 +412,105 @@ check "jq absent: still fail-opens to {} on stdout" "{}" "$stdout_out"
 check "jq absent: still exit 0" "0" "$rc"
 
 # --- Test (n): empty session id — the `[ -n "$session" ]` bail must emit a
-# distinct stderr diagnostic. Return value unchanged: still {}, still exit 0. ---
+# distinct stderr diagnostic. This is a CALLER error, not an environmental
+# fail-open, so stdout is no longer a bare {} (that shape is indistinguishable
+# from "mined successfully, nothing to report" once stderr is discarded —
+# the exact ambiguity that once hid a real $28.91/49.3M-token loop cost).
+# Stdout must instead be self-describing JSON: an `error` field, no
+# total_tokens/total_usd_estimate/schema_version keys. Exit 0 unchanged. ---
 stderr_out=$(dc_mine_token_usage "" 2>&1 1>/dev/null)
 stdout_out=$(dc_mine_token_usage "" 2>/dev/null)
 rc=0
 dc_mine_token_usage "" >/dev/null 2>&1 || rc=$?
 check "empty session id: distinct stderr diagnostic" "true" "$(printf '%s' "$stderr_out" | grep -qF "empty session id" && echo true || echo false)"
-check "empty session id: still fail-opens to {} on stdout" "{}" "$stdout_out"
+check "empty session id: stdout is valid JSON" "true" "$(printf '%s' "$stdout_out" | jq -e . >/dev/null 2>&1 && echo true || echo false)"
+check "empty session id: stdout has an .error field" "true" "$(printf '%s' "$stdout_out" | jq -e '.error' >/dev/null 2>&1 && echo true || echo false)"
+check "empty session id: .error names the fix (session id argument)" "true" "$(printf '%s' "$stdout_out" | jq -r '.hint' | grep -qF "session id" && echo true || echo false)"
+check "empty session id: stdout has NO total_tokens key (not mistakable for a real mine)" "false" "$(printf '%s' "$stdout_out" | jq -e 'has("total_tokens")' >/dev/null 2>&1 && echo true || echo false)"
 check "empty session id: still exit 0" "0" "$rc"
 
+# --- Test (n2): NO argument at all (not even ""), with stderr fully
+# discarded — the exact real-world call shape (an orchestrator invoking the
+# fail-open helper bare and piping stderr to /dev/null) that hid the real
+# cost this fix exists to surface. Requires `local session="${1:-}"` in the
+# lib: under this test file's `set -u`, `local session="$1"` with ZERO
+# positional args is an unbound-variable error that aborts the whole script
+# before this assertion ever runs — that abort would itself be a broken
+# fail-open (a caller error must never crash a `set -u` caller), so the `:-`
+# default is part of the fix, not incidental. This test FAILS against
+# origin/main's code (bare {} on stdout, no .error field) and PASSES here. ---
+stdout_out=$(dc_mine_token_usage 2>/dev/null)
+rc=0
+dc_mine_token_usage >/dev/null 2>&1 || rc=$?
+check "no argument at all: stdout alone (stderr discarded) reveals the caller error" "true" "$(printf '%s' "$stdout_out" | jq -e '.error' >/dev/null 2>&1 && echo true || echo false)"
+check "no argument at all: still exit 0 (fail-open preserved even with zero args under set -u)" "0" "$rc"
+
+# --- Test (n3): ordering — the empty-session-id caller-error bail must fire
+# even when jq is ALSO absent from PATH, i.e. it must be checked BEFORE the
+# `command -v jq` bail, not after. If ordered the other way, a jq-absent
+# environment would shadow a genuine zero-argument caller error behind the
+# jq bail's plain {} instead of the self-describing error object. Reuses
+# test (m)'s fresh-subshell PATH shim (bash caches a resolved command in its
+# hash table, so a one-shot PATH= prefix alone would not force `command -v
+# jq` to re-search) with ZERO positional args instead of a session id. The
+# empty PATH also hides `dirname` (used for self-path resolution earlier in
+# the function), which emits a harmless "dirname: command not found" to
+# stderr — assert on stdout only, never 2>&1, so that noise doesn't corrupt
+# the JSON-validity check. This test FAILS against origin/main's code
+# (jq-not-found bail fires first, plain {} on stdout, no .error field) and
+# PASSES here. ---
+empty_path_dir_n3="$TMP/empty-path-n3"
+mkdir -p "$empty_path_dir_n3"
+run_jq_absent_no_args() {
+  CLAUDE_PROJECTS_DIR="$TMP/projects" CLAUDE_MODEL_PRICES_FILE="$PRICES" bash -c "
+    PATH='$empty_path_dir_n3'
+    . '$LIB'
+    dc_mine_token_usage
+  "
+}
+stdout_out=$(run_jq_absent_no_args 2>/dev/null)
+rc=0
+run_jq_absent_no_args >/dev/null 2>&1 || rc=$?
+check "ordering: jq absent + zero args still yields the caller-error object (not jq's plain {})" "true" "$(printf '%s' "$stdout_out" | jq -e '.error' >/dev/null 2>&1 && echo true || echo false)"
+check "ordering: jq absent + zero args still exit 0" "0" "$rc"
+
 # --- Test (o): no transcript found — the `[ -n "$orch_transcript" ]` bail
-# must emit a distinct stderr diagnostic naming the session, so it is no
-# longer indistinguishable from "jq missing" or "prices file missing" (the
-# ambiguity that cost prior loops wrong root-cause guesses — test (c) above
-# already covers the return-value half; this covers the NEW stderr half).
-# Return value unchanged: still {}, still exit 0. ---
+# must emit a distinct stderr diagnostic naming the session (unchanged), but
+# is now a CALLER error, not an environmental fail-open: a wrong/stale/
+# typo'd session id is NOT a correct call, and is the MORE LIKELY real-world
+# mistake (easier to pass than no id at all). It is the same failure class as
+# the empty-session-id path (test (n) below) — a bare {} on stdout is
+# indistinguishable from "mined successfully, nothing to report" once stderr
+# is discarded, which is exactly the ambiguity that once hid a real
+# $28.91/49.3M-token loop cost. Stdout must be self-describing JSON: an
+# `error` field, no total_tokens/total_usd_estimate/schema_version keys.
+# Exit 0 unchanged. This test FAILS against origin/main's code (bare {} on
+# stdout, no .error field) and PASSES here — see (o RED/GREEN) below for the
+# demonstration of both directions. ---
 sess="no-transcript-diag-session"
 stderr_out=$(dc_mine_token_usage "$sess" 2>&1 1>/dev/null)
 stdout_out=$(dc_mine_token_usage "$sess" 2>/dev/null)
 rc=0
 dc_mine_token_usage "$sess" >/dev/null 2>&1 || rc=$?
 check "no transcript: distinct stderr diagnostic mentions the session" "true" "$(printf '%s' "$stderr_out" | grep -qF "no transcript found" && printf '%s' "$stderr_out" | grep -qF "$sess" && echo true || echo false)"
-check "no transcript: still fail-opens to {} on stdout" "{}" "$stdout_out"
+check "no transcript: stdout is valid JSON" "true" "$(printf '%s' "$stdout_out" | jq -e . >/dev/null 2>&1 && echo true || echo false)"
+check "no transcript: stdout has an .error field" "true" "$(printf '%s' "$stdout_out" | jq -e '.error' >/dev/null 2>&1 && echo true || echo false)"
+check "no transcript: .error names the session id" "true" "$(printf '%s' "$stdout_out" | jq -r '.error' | grep -qF "$sess" && echo true || echo false)"
+check "no transcript: .hint names the fix" "true" "$(printf '%s' "$stdout_out" | jq -r '.hint' | grep -qF "session id" && echo true || echo false)"
+check "no transcript: stdout has NO total_tokens key (not mistakable for a real mine)" "false" "$(printf '%s' "$stdout_out" | jq -e 'has("total_tokens")' >/dev/null 2>&1 && echo true || echo false)"
 check "no transcript: still exit 0" "0" "$rc"
+
+# --- Test (o2): a session id containing a literal double-quote and backslash
+# resolves (via als_sanitise_session_id, which strips "/" and collapses ".."
+# but NOT '"' or '\') to an unresolvable session — the JSON string built at
+# the :127 bail must not be corrupted by those characters landing raw inside
+# it. Proves the printf '%s' format-arg substitution plus the belt-and-braces
+# strip actually produces valid JSON, not just "looks right" on an ordinary
+# session id. ---
+sess='ab"c\de'
+stdout_out=$(dc_mine_token_usage "$sess" 2>/dev/null)
+check "no transcript, quote/backslash in session id: stdout still valid JSON" "true" "$(printf '%s' "$stdout_out" | jq -e . >/dev/null 2>&1 && echo true || echo false)"
+check "no transcript, quote/backslash in session id: stdout has an .error field" "true" "$(printf '%s' "$stdout_out" | jq -e '.error' >/dev/null 2>&1 && echo true || echo false)"
 
 # --- Fault-injection harness for tests (p)/(q): a jq SHIM placed first on
 # PATH that fails (or emits garbage) ONLY for the stage-2 aggregation jq
