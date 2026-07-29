@@ -220,6 +220,25 @@ if [ -f "$SKILL_PATH" ]; then
     "yes" "$(grep -q 'refused=<gate>' "$SKILL_PATH" && echo yes || echo no)"
   check "SKILL.md's abort contract names the abort=<reason> marker specifically" \
     "yes" "$(grep -q 'abort=<reason>' "$SKILL_PATH" && echo yes || echo no)"
+
+  # The 2026-07-26/27 stall: merge.sh exited non-zero because the
+  # tier-review status was `pending`. The refusal contract enumerated
+  # gates that REJECT, so `pending` matched neither a pass nor a
+  # rejection; the agent invented `merge-blocked reason=tier-review-
+  # pending` — a marker in the failures set of no config — treated it as
+  # non-terminal, and waited until the session died. The provisional
+  # abort=incomplete-run stood and the gate read red. These four checks
+  # anchor the contract on the MECHANISM (a non-zero exit) rather than an
+  # enumeration of reasons, which is the only form that covers an
+  # outcome nobody enumerated in advance.
+  check "SKILL.md keys the terminal rule on a non-zero EXIT (mechanism), not only on enumerated rejecting reasons" \
+    "yes" "$(grep -qi 'exits non-zero' "$SKILL_PATH" && echo yes || echo no)"
+  check "SKILL.md forbids inventing a marker outside the defined terminal set (the merge-blocked failure mode)" \
+    "yes" "$(grep -qi 'never invent a new marker' "$SKILL_PATH" && echo yes || echo no)"
+  check "SKILL.md forbids waiting/polling on an unresolved gate instead of terminating" \
+    "yes" "$(grep -qi 'never wait, poll, or retry' "$SKILL_PATH" && echo yes || echo no)"
+  check "SKILL.md names the pending tier-review case as the worked example of a non-rejecting non-zero exit" \
+    "yes" "$(grep -qi 'tier-review' "$SKILL_PATH" && echo yes || echo no)"
   check "SKILL.md's failure-visibility section states it writes into the run-note (not just logs)" \
     "yes" "$(grep -qi 'writes its reason into the run-note' "$SKILL_PATH" && echo yes || echo no)"
   check "SKILL.md states plainly there is no dashboard alert or PR comment for a failed run" \
@@ -280,6 +299,14 @@ if [ -f "$SKILL_PATH" ]; then
     'documents that define'
   neg_check "negative control: PreToolUse-honesty check goes RED without its sentence" \
     'do not fire.*it reduces the risk of self-governance drift'
+  neg_check "negative control: non-zero-exit mechanism check goes RED without its clause" \
+    'exits non-zero'
+  neg_check "negative control: never-invent-a-marker check goes RED without its sentence" \
+    'never invent a new marker'
+  neg_check "negative control: never-wait-on-a-gate check goes RED without its sentence" \
+    'never wait, poll, or retry'
+  neg_check "negative control: pending-tier-review worked-example check goes RED without it" \
+    'tier-review'
 fi
 
 if [ "$checks" -eq 0 ]; then
