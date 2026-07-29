@@ -99,6 +99,9 @@ tg_with_watchdog() {
     if command -v timeout >/dev/null 2>&1; then
         timeout "$timeout_secs" "$@"
         return $?
+    elif command -v gtimeout >/dev/null 2>&1; then
+        gtimeout "$timeout_secs" "$@"
+        return $?
     fi
     local was_monitor=0
     case "$-" in *m*) was_monitor=1 ;; esac
@@ -106,11 +109,10 @@ tg_with_watchdog() {
     "$@" &
     local pid=$!
     [[ $was_monitor -eq 0 ]] && set +m
-    local waited=0
+    local start=$SECONDS
     while kill -0 "$pid" 2>/dev/null; do
-        sleep 1
-        waited=$((waited + 1))
-        if [[ $waited -ge $timeout_secs ]]; then
+        sleep 0.1
+        if (( SECONDS - start >= timeout_secs )); then
             kill -9 -"$pid" 2>/dev/null
             kill -9 "$pid" 2>/dev/null
             wait "$pid" 2>/dev/null
