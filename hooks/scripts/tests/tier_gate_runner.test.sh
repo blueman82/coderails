@@ -1058,6 +1058,106 @@ check_not_contains "J14: never reports bare 'legitimate' for an invalid verdict"
 write_claude_stub "$(claude_success_body legitimate "fine")"  # restore
 
 # ══════════════════════════════════════════════════════════════════════════
+# J15-J20: tg_judge failure diagnostics.
+#
+# WHY: 8 of 56 live judgements failed with the single string
+# "tg_judge: error: claude/parse failure after retry", which collapses every
+# distinct cause into one message and discards `response` and
+# tg_judge_call_claude's rc. Log timestamps split the real failures into two
+# clusters (15-17s and 61-189s), so at least two different causes produce that
+# one string and NOTHING in the log distinguishes them.
+#
+# These tests pin that each failure names its own cause. They assert on
+# STDERR only: J1/J2/J3/J10/J12 assert `head -1` of tg_judge's STDOUT is the
+# bare verdict, so a diagnostic on stdout would break them.
+# ══════════════════════════════════════════════════════════════════════════
+
+# write_failing_claude_stub <exit_code> [body]
+# A stub that exits non-zero (a CALL failure, distinct from a parse failure).
+write_failing_claude_stub() { # exit_code [body]
+    local code="$1" body="${2:-}"
+    {
+        printf '#!/bin/bash\n'
+        printf 'COUNT_FILE=%q\n' "$CLAUDE_CALLS"
+        printf 'n=$(( $(wc -l < "$COUNT_FILE" 2>/dev/null || echo 0) + 1 ))\n'
+        printf 'echo "call $n" >> "$COUNT_FILE"\n'
+        printf 'printf %q\n' "$body"
+        printf 'exit %d\n' "$code"
+    } > "$CLAUDE_STUB_BIN"
+    chmod +x "$CLAUDE_STUB_BIN"
+}
+
+# ── J15: a CALL failure (claude exits non-zero) is named as such ────────────
+: > "$CLAUDE_CALLS"
+write_creds "oat-fixture-token"
+write_failing_claude_stub 1 ""
+out=$(run_judge_with_stderr "$FIXTURE_TIER" "$FIXTURE_DIFF")
+rc=$?
+check "J15: call failure -> tg_judge still rc 1 (contract unchanged)" "1" "$rc"
+check_contains "J15: diagnostic reports the claude exit code" "rc=1" "$out"
+check_contains "J15: diagnostic names which attempt" "attempt=1" "$out"
+check_contains "J15: second attempt also diagnosed" "attempt=2" "$out"
+
+# ── J16: watchdog kill is distinguishable (rc=124), not just 'parse failure' ─
+# This is the discriminator for the 61-189s live cluster.
+: > "$CLAUDE_CALLS"
+write_hanging_claude_stub
+out=$(run_judge_with_stderr "$FIXTURE_TIER" "$FIXTURE_DIFF")
+rc=$?
+check "J16: hung call -> rc 1" "1" "$rc"
+check_contains "J16: watchdog kill surfaces as rc=124, not a generic parse failure" "rc=124" "$out"
+
+# ── J17: a PARSE failure is distinguished from a call failure ───────────────
+# claude exits 0 and returns a body, but the body is not the expected shape.
+: > "$CLAUDE_CALLS"
+write_claude_stub 'not json at all' 'still not json'
+out=$(run_judge_with_stderr "$FIXTURE_TIER" "$FIXTURE_DIFF")
+rc=$?
+check "J17: parse failure -> rc 1" "1" "$rc"
+check_contains "J17: parse failure reports the call SUCCEEDED (rc=0)" "rc=0" "$out"
+check_contains "J17: parse failure reports the response was not valid JSON" "json=no" "$out"
+check_contains "J17: parse failure reports the response byte length" "bytes=" "$out"
+
+# ── J18: an is_error envelope (auth / usage-limit shape) is named ───────────
+# Candidate cause for the FAST 15-17s live cluster: a valid JSON envelope that
+# reports its own failure. Must be distinguishable from malformed output.
+: > "$CLAUDE_CALLS"
+err_body=$(jq -nc '{type:"result", subtype:"error_during_execution", is_error:true, result:""}')
+write_claude_stub "$err_body" "$err_body"
+out=$(run_judge_with_stderr "$FIXTURE_TIER" "$FIXTURE_DIFF")
+rc=$?
+check "J18: is_error envelope -> rc 1 (never mined for a verdict)" "1" "$rc"
+check_contains "J18: is_error surfaced in the diagnostic" "is_error=true" "$out"
+check_contains "J18: valid JSON reported as such (distinguishes from J17)" "json=yes" "$out"
+check_contains "J18: envelope subtype surfaced" "error_during_execution" "$out"
+
+# ── J19: the OAuth token NEVER appears in any diagnostic ────────────────────
+# The log is world-readable (/var/log/coderails-tier-gate.log). A response
+# excerpt must be redacted even if a token somehow reaches the response body.
+: > "$CLAUDE_CALLS"
+write_creds "sk-ant-oat01-SECRETVALUE-must-never-be-logged"
+leak_body='{"oops":"sk-ant-oat01-SECRETVALUE-must-never-be-logged trailing"}'
+write_claude_stub "$leak_body" "$leak_body"
+out=$(run_judge_with_stderr "$FIXTURE_TIER" "$FIXTURE_DIFF")
+rc=$?
+check "J19: unparseable body -> rc 1" "1" "$rc"
+check_not_contains "J19: token value never reaches any log line" "SECRETVALUE" "$out"
+check_not_contains "J19: no sk-ant- prefixed secret in any log line" "sk-ant-oat01-" "$out"
+write_creds "oat-fixture-token"  # restore
+
+# ── J20: success path emits NO diagnostic noise on stdout ──────────────────
+# Negative control for J15-J19. Proves the diagnostics are conditional on
+# failure, not unconditional lines that would make the above vacuous.
+: > "$CLAUDE_CALLS"
+write_claude_stub "$(claude_success_body legitimate "clean")"
+out=$(run_judge "$FIXTURE_TIER" "$FIXTURE_DIFF")
+rc=$?
+check "J20: success -> rc 0" "0" "$rc"
+check "J20: stdout line 1 still the bare verdict (no diagnostic leaked)" "legitimate" "$(printf '%s' "$out" | head -1 | tr -d '[:space:]')"
+check_not_contains "J20: no attempt= diagnostic on the success path stdout" "attempt=" "$out"
+write_claude_stub "$(claude_success_body legitimate "fine")"  # restore
+
+# ══════════════════════════════════════════════════════════════════════════
 # Fix 7: tg_post_status carries the machine-user credential via curl
 # (never gh), guarded by a live GET /user identity check. Tests inspect the
 # REAL curl invocation (auth header / endpoint hit) — never just the return

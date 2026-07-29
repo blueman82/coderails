@@ -833,14 +833,90 @@ tg_judge() {
     local prompt_text
     prompt_text=$(tg_judge_build_prompt "$claimed_tier" "$diff")
 
-    local attempt response parsed
+    local attempt response parsed call_rc started elapsed
     for attempt in 1 2; do
+        started=$(date +%s)
         response=$(tg_judge_call_claude "$oauth_token" "$prompt_text")
+        call_rc=$?
+        elapsed=$(( $(date +%s) - started ))
         parsed=$(tg_judge_parse_verdict "$response") && { printf '%s' "$parsed"; return 0; }
+        tg_judge_log_failed_attempt "$attempt" "$call_rc" "$elapsed" "$response"
     done
 
     printf 'tg_judge: error: claude/parse failure after retry\n' >&2
     return 1
+}
+
+# tg_judge_redact <text>
+# Strips anything shaped like a Claude OAuth token before it can reach the log.
+# /var/log/coderails-tier-gate.log is world-readable (mode 644 per
+# coderails-tier-gate.conf), so this runs UNCONDITIONALLY rather than on the
+# assumption that a token cannot reach $response. The judge holds a live
+# CLAUDE_CODE_OAUTH_TOKEN and $response is the claude subprocess's raw stdout;
+# if that subprocess ever echoed its own argv or environment (a debug dump, an
+# error quoting the env), the token would land in the excerpt. Redacting always
+# costs one sed and removes the entire class, rather than betting the secret on
+# claude's output discipline. Also strips generic sk-/Bearer credential shapes
+# so a token format change does not silently reopen the hole.
+tg_judge_redact() {
+    printf '%s' "$1" | sed -E \
+        -e 's/sk-[A-Za-z0-9_-]{8,}/[REDACTED]/g' \
+        -e 's/(oat[0-9]*|oauth)[-_][A-Za-z0-9_-]{8,}/[REDACTED]/g' \
+        -e 's/([Bb]earer[[:space:]]+)[A-Za-z0-9._-]{8,}/\1[REDACTED]/g'
+}
+
+# tg_judge_log_failed_attempt <attempt> <call_rc> <elapsed_s> <response>
+# Emits ONE stderr line naming why this attempt failed, replacing the single
+# generic "claude/parse failure after retry" string that collapsed every cause
+# into one message and discarded both $response and tg_judge_call_claude's rc.
+#
+# Written because 8 of 56 live judgements failed with that one string and the
+# log could not distinguish them: their durations split into a 15-17s cluster
+# and a 61-189s cluster, so at least two different causes shared one message.
+# The fields below are exactly the ones that separate the candidates:
+#   rc=124                     -> tg_with_watchdog killed the call (its expiry
+#                                 convention, line ~117); the call never returned
+#   rc!=0 and rc!=124          -> claude itself exited non-zero (a CALL failure)
+#   rc=0 json=no               -> claude returned something unparseable
+#   rc=0 json=yes is_error=true-> a valid envelope reporting its own failure
+#                                 (auth, usage limit); subtype names which
+#   rc=0 json=yes is_error=false-> a well-formed envelope whose verdict is
+#                                 absent or off-enum
+# bytes= distinguishes an empty response (killed before output) from a
+# truncated one from a complete one — indistinguishable in the log until now.
+#
+# STDERR, never stdout: tg_judge's stdout is its return channel (the verdict
+# line), and the runner's tests assert `head -1` of it is the bare verdict.
+# The daemon's plist points StandardOutPath and StandardErrorPath at the same
+# file, so a stderr line still reaches the operator's log.
+#
+# Diagnoses only; it changes no control flow. tg_judge's contract (rc 1 on
+# failure, two attempts, retry conditional on failure) is untouched — the cause
+# is still unknown, and remediation before it is identified would spend the
+# only signal available.
+tg_judge_log_failed_attempt() {
+    local attempt="$1" call_rc="$2" elapsed="$3" response="$4"
+    local json_ok="no" is_error="" subtype=""
+    if printf '%s' "$response" | jq -e . >/dev/null 2>&1; then
+        json_ok="yes"
+        is_error=$(printf '%s' "$response" | jq -r '.is_error // empty' 2>/dev/null)
+        subtype=$(printf '%s' "$response" | jq -r '.subtype // empty' 2>/dev/null)
+    fi
+    tg_log "tg_judge: attempt=$attempt rc=$call_rc elapsed_s=$elapsed" \
+           "bytes=${#response} json=$json_ok" \
+           "is_error=${is_error:-none} subtype=${subtype:-none}"
+
+    # Bounded, redacted excerpt: the response is the one artifact that names
+    # the cause, and it was previously discarded entirely. 200 chars is enough
+    # to identify an error envelope or a prose preamble without dumping a full
+    # diff-sized body into the log. Newlines/tabs collapse to spaces so one
+    # attempt stays one grep-able line (the runner's own reason= convention,
+    # see tg_gate_pr's `tr -s ' \n' '_'`).
+    if [[ -n "$response" ]]; then
+        local excerpt
+        excerpt=$(tg_judge_redact "${response:0:200}" | tr -s '\n\t' '  ')
+        tg_log "tg_judge: attempt=$attempt excerpt=$excerpt"
+    fi
 }
 
 # ─── Pre-filter (Fix 2): mechanical size/path gate BEFORE any model call ────
