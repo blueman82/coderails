@@ -237,8 +237,12 @@ if [ -f "$SKILL_PATH" ]; then
     "yes" "$(grep -qi 'never invent a new marker' "$SKILL_PATH" && echo yes || echo no)"
   check "SKILL.md forbids waiting/polling on an unresolved gate instead of terminating" \
     "yes" "$(grep -qi 'never wait, poll, or retry' "$SKILL_PATH" && echo yes || echo no)"
+  # Anchored on the full clause, not the bare token `tier-review`: that token
+  # appears in ordinary prose all over this file, so a substring check would
+  # stay green if the worked example itself were deleted — the exact weakness
+  # a negative control is supposed to expose.
   check "SKILL.md names the pending tier-review case as the worked example of a non-rejecting non-zero exit" \
-    "yes" "$(grep -qi 'tier-review' "$SKILL_PATH" && echo yes || echo no)"
+    "yes" "$(grep -qi 'worked example is a .pending. .tier-review. status' "$SKILL_PATH" && echo yes || echo no)"
   check "SKILL.md's failure-visibility section states it writes into the run-note (not just logs)" \
     "yes" "$(grep -qi 'writes its reason into the run-note' "$SKILL_PATH" && echo yes || echo no)"
   check "SKILL.md states plainly there is no dashboard alert or PR comment for a failed run" \
@@ -306,7 +310,7 @@ if [ -f "$SKILL_PATH" ]; then
   neg_check "negative control: never-wait-on-a-gate check goes RED without its sentence" \
     'never wait, poll, or retry'
   neg_check "negative control: pending-tier-review worked-example check goes RED without it" \
-    'tier-review'
+    'worked example is a .pending. .tier-review. status'
 fi
 
 if [ "$checks" -eq 0 ]; then

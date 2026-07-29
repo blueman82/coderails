@@ -1494,6 +1494,32 @@ check "validate_smoke_execution: duplicate ids, unresolvable cmd in first → ex
 [[ "$stderr_out" == *"did not execute at the gate"* ]]
 check "validate_smoke_execution: duplicate ids → stderr names the gate-time reason" 0 $?
 
+# (G9-bis) STDIN ISOLATION at check 10 — the OTHER fail-open site. The
+# re-execution loop is `while IFS= read -r idx ... done <<< "$idxs"`, so an
+# eval whose cmd reads stdin consumed the remaining index list, the loop
+# exited early, and every later eval went UNEXECUTED while the function
+# still returned 0. That silently accepted a vacuous negative_control the
+# gate refuses in isolation. Both evals must be mode:"scripted" — the
+# selector at validate_smoke_execution's `map(select(.value.mode ==
+# "scripted"))` is what builds $idxs, so a non-scripted eval never enters
+# the loop and the regression would not be exercised.
+FIX_G_STDIN="$TMP/g_stdin.json"
+jq -n --arg sha "$SHA" --argjson smoke "$SMOKE_OK" '{
+  tier: 1, tier_justification: "1 work-unit", head_sha: $sha,
+  evals: [
+    {id:"eater", priority:"P0", mode:"scripted", status:"pending",
+     cmd:"cat > /dev/null; echo ate", negative_control:"false",
+     evidence:"log", smoke:$smoke},
+    {id:"vacuous", priority:"P0", mode:"scripted", status:"pending",
+     cmd:"echo hi", negative_control:"true",
+     evidence:"log", smoke:$smoke}
+  ]
+}' > "$FIX_G_STDIN"
+stderr_out=$(post_evals::validate_smoke_execution "$FIX_G_STDIN" 2>&1)
+check "validate_smoke_execution: vacuous control behind a stdin-eating eval → exit 1 [the fail-open]" 1 $?
+[[ "$stderr_out" == *"negative_control exited 0 at the gate"* ]]
+check "validate_smoke_execution: stdin-eater case refuses for the RIGHT reason (vacuous control, not an environmental skip)" 0 $?
+
 # (G8) Same fail-open lesson as checks 8/9: no jq, no verdict.
 stderr_out=$(PATH="$EMPTY_BIN"; post_evals::validate_smoke_execution "$FIX_G_HONEST" 2>&1)
 check "validate_smoke_execution: jq unavailable → exit 1 (must not fail open)" 1 $?
@@ -1713,8 +1739,56 @@ jq -n --arg sha "$SV_SHA2" '{
      smoke: {"cmd_exit":0,"negative_control_exit":1,"cmd_output":"hi","negative_control_output":"x"}}
   ]
 }' > "$FIX_SV_STDIN"
-(cd "$SV_REPO" && post_evals::smoke_verify "$FIX_SV_STDIN" "$SV_SHA2" 2>/dev/null)
-check "smoke_verify: vacuous control behind a stdin-eating eval → REFUSED (exit 1) [the fail-open]" 1 $?
+sv_stdin_err=$( (cd "$SV_REPO" && post_evals::smoke_verify "$FIX_SV_STDIN" "$SV_SHA2") 2>&1 ); sv_stdin_rc=$?
+check "smoke_verify: vacuous control behind a stdin-eating eval → REFUSED (exit 1) [the fail-open]" 1 "$sv_stdin_rc"
+# Exit code alone is not enough: smoke_verify returns 1 from six other paths
+# (jq missing, non-array .evals, fetch failure, worktree-add failure, empty
+# cmd, empty nc). Bind the assertion to the REASON, or a regression that
+# changes why it refuses keeps this test green.
+[[ "$sv_stdin_err" == *"negative_control exited 0 at the gate"* ]]
+check "smoke_verify: stdin-eater case refuses for the VACUOUS-CONTROL reason, not an environmental one" 0 $?
+
+# (SV5-quater) `mode` is written by the gated party and every scripted-eval
+# check is a `select(.mode == "scripted")` filter, so a mode that is not that
+# exact string drops the eval out of ALL of them and the empty list reads as
+# success. The absent-mode form needs no adversary. Same defect class as the
+# id-keyed selection this function already fixed.
+FIX_SV_MODE="$TMP/sv_mode.json"
+jq -n --arg sha "$SV_SHA2" '{
+  tier: 1, tier_justification: "exploit: vacuous control hidden by an unrecognised mode", head_sha: $sha,
+  evals: [
+    {id:"vacuous", priority:"P0", mode:"Scripted", status:"pass", surface:"artifact-path",
+     cmd:"echo hi", negative_control:"true", evidence:"e",
+     smoke: {"cmd_exit":0,"negative_control_exit":1,"cmd_output":"hi","negative_control_output":"x"}}
+  ]
+}' > "$FIX_SV_MODE"
+(cd "$SV_REPO" && post_evals::smoke_verify "$FIX_SV_MODE" "$SV_SHA2" 2>/dev/null)
+check "smoke_verify: unrecognised mode capitalisation → REFUSED (exit 1) [gate-disabling bypass]" 1 $?
+
+FIX_SV_NOMODE="$TMP/sv_nomode.json"
+jq -n --arg sha "$SV_SHA2" '{
+  tier: 1, tier_justification: "exploit: vacuous control hidden by an absent mode", head_sha: $sha,
+  evals: [
+    {id:"vacuous", priority:"P0", status:"pass", surface:"artifact-path",
+     cmd:"echo hi", negative_control:"true", evidence:"e",
+     smoke: {"cmd_exit":0,"negative_control_exit":1,"cmd_output":"hi","negative_control_output":"x"}}
+  ]
+}' > "$FIX_SV_NOMODE"
+(cd "$SV_REPO" && post_evals::smoke_verify "$FIX_SV_NOMODE" "$SV_SHA2" 2>/dev/null)
+check "smoke_verify: absent mode field → REFUSED (exit 1) [no adversary needed]" 1 $?
+
+# A legitimate agent-run eval must still be accepted — the guard refuses
+# unrecognised modes, not every non-scripted one.
+FIX_SV_AGENTOK="$TMP/sv_agentok.json"
+jq -n --arg sha "$SV_SHA2" '{
+  tier: 1, tier_justification: "control: agent-run is a legal mode", head_sha: $sha,
+  evals: [
+    {id:"a1", priority:"P0", mode:"agent-run", status:"pass", surface:"artifact-path",
+     assert:"judged by a fresh grader", evidence:"e"}
+  ]
+}' > "$FIX_SV_AGENTOK"
+(cd "$SV_REPO" && post_evals::smoke_verify "$FIX_SV_AGENTOK" "$SV_SHA2" 2>/dev/null)
+check "smoke_verify: legitimate agent-run eval still accepted (guard is an enum, not a scripted-only rule)" 0 $?
 
 # (SV6) Fail closed, named reason: an unresolvable head_sha. It is absent from
 # the local object store, so the fetch guard (added for the merge-from-any-
