@@ -3,7 +3,7 @@
 Detail-carrier for Phase 2.8. The main skill keeps the imperative (assign a role to every Phase
 3/3a build task before any worker spawns, record the set once, use the role table); this file is
 the escalation and effort rules you consult **when writing a `Model:` stamp** or deciding whether
-a task justifies a stronger tier.
+a task justifies a stronger tier — plus a closing note on the orchestrator's own model (Phase 0.4).
 
 ## Contents
 
@@ -13,6 +13,7 @@ a task justifies a stronger tier.
 - [Fallback valves live in the stamp](#fallback-valves-live-in-the-stamp)
 - [Escalation is safe by construction](#escalation-is-safe-by-construction)
 - [Inline sites elsewhere](#inline-sites-elsewhere)
+- [The orchestrator's own model (Phase 0.4)](#the-orchestrators-own-model-phase-04)
 
 ## frontier resolves to opus
 
@@ -70,3 +71,13 @@ Phase 2.8 routes Phase 3/3a *build* tasks only. Agents spawned at other phases �
 pre-flight agent, the Phase 2.5 design-fork agent, and Phase 9's wiki and sync-docs delegates —
 are each assigned their role inline at their own spawn point, using Phase 2.8's vocabulary and
 table.
+
+## The orchestrator's own model (Phase 0.4)
+
+This concerns the orchestrator's own (main-context) model, not worker routing — everything above
+this section is about the `Model:` stamp assigned to spawned workers. Why it matters: the
+orchestrator re-reads its whole growing context on every turn for the life of the loop, so
+whatever cache-read rate its own model carries compounds across the entire session, and that rate
+differs sharply by tier — see `hooks/scripts/lib/model_prices.json` for current per-model rates.
+The orchestrator cannot act on this itself (Phase 0.4 — `/model` is the user's to type); the mechanism here is only
+why the token-burn notice to the user matters.
