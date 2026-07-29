@@ -59,11 +59,11 @@ days ago **and** at least one of the page's `sources:` has changed since that
 stamp. Date alone is not staleness — a page whose sources have not moved is
 correctly dated, not stale.
 
-Resolve each `sources:` entry to a path in the code repo. An entry starting
-`sources/` names another wiki page, not a repo file — resolve it one hop
-further by reading that page's own `sources:`, and only fall back to date-only
-if the hop still yields no repo path. A `skills/foo.md` entry usually means
-`skills/foo/SKILL.md`; a bare hook name usually means `hooks/scripts/<name>.sh`.
+Resolve each `sources:` entry to a path in the code repo. A `skills/foo.md`
+entry usually means `skills/foo/SKILL.md`; a bare hook name usually means
+`hooks/scripts/<name>.sh`. An entry starting `sources/` names another wiki
+page, not a repo file — it does not resolve, so a page whose `sources:` are all
+wiki pages falls through to the date-only rule below.
 
 For every entry that resolves, compare its last commit date against the page's
 `last_updated`:
@@ -92,8 +92,8 @@ Classify the result:
   it is not drift. If it changed something the page states, report it as a
   **missing cross-reference**, not a stale page, naming the exact commit — so
   the follow-up is a real `/wiki-ingest` rather than a date edit.
-- **Page has no repo-resolvable `sources:` even after one hop** → fall back to
-  the date-only rule, and say in the report that the check was date-only.
+- **Page has no repo-resolvable `sources:`** → fall back to the date-only rule,
+  and say in the report that the check was date-only.
 
 `sources/` and `investigations/` pages are point-in-time records; age is their
 correct state. Exclude them from this check entirely.
