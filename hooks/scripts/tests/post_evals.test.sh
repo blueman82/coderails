@@ -1670,6 +1670,52 @@ check "_run_recorded: the cd-failure rc is classified environmental (no fail-ope
 cd_out_real=$(post_evals::_run_recorded "exit 1" 10 "$TMP")
 check_str "_run_recorded: real cwd, genuine exit 1 → rc 1 (not mis-mapped to 127)" "1" "${cd_out_real%%:*}"
 
+# (SV5-ter) STDIN ISOLATION. Every caller of _run_recorded runs it inside a
+# `while IFS= read -r ... done <<< "$ids"` loop, so the loop body's stdin IS the
+# remaining eval list. An eval whose cmd reads stdin (cat, xargs, a test runner
+# that drains it) ate that list, the loop exited early having silently skipped
+# every later eval, and the function still returned 0. In smoke_run that lost
+# the smoke evidence; in check 10 and smoke_verify it FAILED OPEN — a vacuous
+# negative_control refused on its own was accepted behind a stdin-eater.
+# The three checks below are the discriminator: the stdin-eater must NOT see
+# the caller's stdin, and the loops must reach every eval regardless.
+stdin_out=$(printf 'LEAKED_STDIN\n' | post_evals::_run_recorded "cat")
+check_str "_run_recorded: cmd reading stdin gets /dev/null, not the caller's stdin" "0:" "$stdin_out"
+
+# smoke_run must record smoke for EVERY eval even when the first one eats stdin.
+SR_STDIN="$TMP/sr_stdin.json"
+jq -n '{
+  schema_version: 1, scope: "pr", tier: 1,
+  evals: [
+    {id:"E1", priority:"P0", mode:"scripted", surface:"artifact-path",
+     cmd:"cat > /dev/null; echo ate-stdin", negative_control:"false"},
+    {id:"E2", priority:"P0", mode:"scripted", surface:"artifact-path",
+     cmd:"echo two", negative_control:"false"},
+    {id:"E3", priority:"P0", mode:"scripted", surface:"artifact-path",
+     cmd:"echo three", negative_control:"false"}
+  ]}' > "$SR_STDIN"
+post_evals::smoke_run "$SR_STDIN" >/dev/null 2>&1
+sr_recorded=$(jq '[.evals[] | select(has("smoke"))] | length' "$SR_STDIN")
+check_str "smoke_run: a stdin-consuming eval does not truncate the loop (all 3 recorded)" "3" "$sr_recorded"
+
+# smoke_verify (the MERGE-TIME gate) must still refuse a vacuous negative_control
+# when an earlier eval eats stdin. Run live against the real test repo/SHA, not
+# by code inspection: this is the site where the truncation failed OPEN.
+FIX_SV_STDIN="$TMP/sv_stdin.json"
+jq -n --arg sha "$SV_SHA2" '{
+  tier: 1, tier_justification: "exploit: vacuous control hidden behind a stdin-eating eval", head_sha: $sha,
+  evals: [
+    {id:"eater", priority:"P0", mode:"scripted", status:"pass", surface:"artifact-path",
+     cmd:"cat > /dev/null; echo ate", negative_control:"false", evidence:"e",
+     smoke: {"cmd_exit":0,"negative_control_exit":1,"cmd_output":"ate","negative_control_output":"x"}},
+    {id:"vacuous", priority:"P0", mode:"scripted", status:"pass", surface:"artifact-path",
+     cmd:"echo hi", negative_control:"true", evidence:"e",
+     smoke: {"cmd_exit":0,"negative_control_exit":1,"cmd_output":"hi","negative_control_output":"x"}}
+  ]
+}' > "$FIX_SV_STDIN"
+(cd "$SV_REPO" && post_evals::smoke_verify "$FIX_SV_STDIN" "$SV_SHA2" 2>/dev/null)
+check "smoke_verify: vacuous control behind a stdin-eating eval → REFUSED (exit 1) [the fail-open]" 1 $?
+
 # (SV6) Fail closed, named reason: an unresolvable head_sha. It is absent from
 # the local object store, so the fetch guard (added for the merge-from-any-
 # checkout case) tries `git fetch origin <sha>`, which fails for a bogus SHA

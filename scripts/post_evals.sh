@@ -790,6 +790,21 @@ post_evals::smoke_run() {
 # command's output to /dev/null, so an orphan cannot hold its pipe open and
 # the single-process alarm is a sufficient bound there.
 #
+# STDIN IS REDIRECTED FROM /dev/null, and that is a gate correctness
+# property, not tidiness. Every caller runs this inside a
+# `while IFS= read -r ... done <<< "$ids"` loop, so the loop body's stdin IS
+# the remaining eval list. An eval whose cmd reads stdin (`cat`, `xargs`,
+# a test runner that drains it) consumed that list, and the loop then
+# exited early having silently skipped every subsequent eval — while still
+# returning 0. In smoke_run that lost the smoke evidence (check 9 catches
+# the absence downstream, so it failed closed). In validate_smoke_execution
+# (check 10) and smoke_verify it FAILED OPEN: the skipped evals were never
+# executed, so a vacuous negative_control that the gate refuses on its own
+# (`negative_control: "true"`, "a control that passes proves nothing") was
+# silently accepted when any earlier eval ate stdin. Verified by A/B: the
+# same artifact exits 1 alone and 0 behind a stdin-consuming eval. An eval
+# command needing real stdin should pipe it in explicitly.
+#
 # [timeout_seconds] exists for the test suite (a real 10s stall per run is
 # too slow to assert on); production callers pass nothing and get 10.
 #
@@ -826,9 +841,9 @@ post_evals::_run_recorded() {
         # "never executed" — the honest classification for a command that never
         # ran. The `|| { echo ...; exit 127; }` runs inside the subshell.
         out=$(cd "$cwd" 2>/dev/null || { printf 'cd-failed: %s' "$cwd"; exit 127; }
-              perl -e "$_pg_kill_perl" "$timeout_secs" "$command_text" 2>&1)
+              perl -e "$_pg_kill_perl" "$timeout_secs" "$command_text" </dev/null 2>&1)
     else
-        out=$(perl -e "$_pg_kill_perl" "$timeout_secs" "$command_text" 2>&1)
+        out=$(perl -e "$_pg_kill_perl" "$timeout_secs" "$command_text" </dev/null 2>&1)
     fi
     rc=$?
     out=$(printf '%s' "$out" | tr '\n' ' ')
