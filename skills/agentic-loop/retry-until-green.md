@@ -17,13 +17,13 @@ shows the exhausted attempts, not just the final failure.
 verification failure turns out to be multiple independent broken things, don't fix them one at a
 time. A single test run failing across 2+ unrelated files/subsystems with different root causes
 (not "fixing one might fix the others") is exactly that skill's trigger condition. Dispatch one
-focused agent per independent failure domain, in parallel, each scoped to its own file/subsystem
+focused agent per independent failure domain, `subagent_type: coderails:loop-worker`, in parallel, each scoped to its own file/subsystem
 with an explicit "don't touch other code" constraint; integrate and re-run the full suite once
 they all report back. This is a parallelisation tactic inside one retry-until-green cycle, not a
 substitute for it — the bound is per failure (as stated above), so each independent failure domain
 gets its own 5-attempt budget, not a pool shared or split across the dispatched agents. A
 genuinely single, related failure (fixing one thing likely fixes the rest) should NOT be split
-into parallel agents — that's this skill's own explicit "don't use when" case.
+into parallel agents — that's this skill's own explicit "don't use when" case. **Never substitute generic agents for failure-domain fixers.** Each domain needs test-first / verify-before-report discipline; a named loop-worker type embeds these constraints at dispatch.
 
 **Cause not obvious — use `coderails:systematic-debugging`.** "Diagnose" above is not "try
 something plausible." If the first fix attempt doesn't make the cause clear, the second attempt
