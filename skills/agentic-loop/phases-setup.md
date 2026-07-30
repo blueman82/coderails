@@ -174,7 +174,7 @@ Spawn one design agent, `subagent_type: coderails:design-scout`, role assigned p
 - Return ONE recommended shape, the rejected alternatives with the reason each lost, and the single fact that would flip the recommendation.
 - Apply `/coderails:brainstorming`'s design-quality discipline *without* its human-approval gates: weigh the viable approaches against each other rather than taking the first that works, cut anything speculative (**YAGNI**), and prefer the shape whose units stay small and independently testable (**design-for-isolation**). The loop can't run brainstorming itself (its steps block on a human — see Phase 2.7); this reuses its *thinking*, not its control flow.
 
-**Do not use the generic agent trio for design forks.** Design forks need deep code-path reading and tradeoff weighting; a generic agent cannot self-verify it read the actual paths instead of guessing.
+**Do not substitute a generic agent for `coderails:design-scout` here.** Design forks need deep code-path reading and tradeoff weighting; a generic agent cannot self-verify it read the actual paths instead of guessing.
 
 What happens with that recommendation depends on the envelope class (Phase 0) — this phase resolves the fork, it does NOT add a new human gate:
 - **Full-autonomous ("crack on / ship N PRs without asking"):** auto-adopt the design agent's recommendation, record the chosen shape and the flip-condition in `progress.json` — append `{phase: "2.5", decision: "<chosen shape + flip-condition>"}` to `progress.json`'s `decisions_absorbed` array — and note it at the next approval-gate. Do NOT stall for sign-off — a design fork is neither a verification failure nor a destructive action, so Phase 0 says the loop proceeds.
