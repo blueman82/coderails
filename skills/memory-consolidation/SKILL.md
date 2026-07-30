@@ -53,6 +53,30 @@ For each merge or deletion decided in Step 3: update or remove the
 affected memory file(s), then update `MEMORY.md`'s index line(s) to match.
 Never leave `MEMORY.md` pointing at a file that no longer exists.
 
+**Never shorten an index line by cutting it.** A size-pressure nudge (a
+hook warning the index is approaching a read-limit) may fire while you
+work — it is a prompt to compress, never an instruction to truncate.
+Byte-truncating a line mid-clause silently destroys information with no
+record of what was lost, and nothing else in this system holds a second
+copy of it once that happens.
+
+The file's own frontmatter `description:` field is the durable source of
+truth for its one-line summary — it is written once, at memory-creation
+time, and normal sessions do not touch it again. When shortening an index
+line, derive it from `description:`, not from the previous index line:
+condense the description's wording, but never drop a fact it states
+(the incident, the concrete consequence, the specific next action). If a
+compressed line still can't hold the load-bearing fact, move that detail
+into the memory file's own body instead of dropping it — the index line
+may then simply point there.
+
+Before finishing this step, re-check every index line you touched: does
+it end on a complete clause (not a bare article, preposition, or
+conjunction), and does it still carry the specific fact — a name, a PR
+number, a concrete failure mode — that made the original entry worth
+recording? A line that reads as a complete sentence but lost its
+concrete details has been damaged just as much as one cut mid-word.
+
 ### Step 5: Write the durable report artifact
 
 Write `~/.claude/coderails-dashboard/routines/memory-consolidation/report-{date}.md`
