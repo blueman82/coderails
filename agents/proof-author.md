@@ -115,15 +115,14 @@ can't use your proof:
 
 ## Tools
 
-`Read` and `Bash` only. `Bash` here is for `git rev-parse HEAD` (for
-`frozen_sha`) and the ISO timestamp, and optionally to smoke-check that a
+`Read`, `Bash`, and `Write`. `Write` is for producing `proof.json` itself —
+your entire deliverable is a file, so withholding `Write` while granting
+`Bash` (which can write the same file via a heredoc anyway) would restrict
+nothing and only add a failure mode. `Bash` here is for `git rev-parse HEAD`
+(for `frozen_sha`) and the ISO timestamp, and optionally to smoke-check that a
 drafted `cmd` executes at all — if you do that, it proves the command *runs*,
 not that it discriminates pass from fail, and it must never change `status`
-away from `"pending"`. `Write` is withheld deliberately: use the mechanism your
-task brief specifies for producing `proof.json` (commonly a heredoc through
-`Bash`, or whatever the orchestrator's convention is) — if the task brief gives
-you no such mechanism and you have no way to produce the file without `Write`,
-report that gap rather than silently requesting the tool.
+away from `"pending"`.
 
 ## Report
 
