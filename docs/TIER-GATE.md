@@ -61,7 +61,7 @@ The tracked sources are authoritative, each for its own part:
 | Tier predicates as authored for eval declaration | `skills/task-evals/SKILL.md` |
 | Promoting edited files to the running daemon | `scripts/tier-gate/install.sh` |
 
-To change tier behaviour, edit the relevant file above and keep this document in sync with it. The precedence rule stated at the top of this document applies here too: where anything disagrees with `scripts/tier-gate/judge-prompt.md` about the tier predicates, the judge prompt wins.
+To change tier behaviour, edit the relevant file above and keep this document in sync with it. The precedence rule stated above (What It Is) applies here too — `judge-prompt.md` wins on any disagreement about the tier predicates.
 
 Editing a tracked file is not enough on its own. The daemon runs from a root-owned install root (`/etc/coderails-tier-gate` by default) and resolves `scripts/tier-gate/judge-prompt.md` relative to the running script, so `scripts/tier-gate/install.sh` must promote the edited runner and judge prompt before the change takes effect.
 
