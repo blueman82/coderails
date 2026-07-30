@@ -55,8 +55,7 @@ The tracked sources are authoritative, each for its own part:
 | What | Where |
 |---|---|
 | Tier definitions and classification rules the daemon judges against | `scripts/tier-gate/judge-prompt.md` |
-| Judge model routing and the judge's response schema | `scripts/tier-gate/tier-gate-runner.sh` |
-| Path denylist, prefilter, size caps, and the runner-minted verdicts | `scripts/tier-gate/tier-gate-runner.sh` |
+| Judge model routing and response schema, path denylist, prefilter, size caps, and the runner-minted verdicts | `scripts/tier-gate/tier-gate-runner.sh` |
 | Daemon poll interval and run-as-root configuration | `scripts/tier-gate/com.coderails.tier-gate.plist.template` |
 | Merge-side status validation (creator, verdict, tier binding) | `scripts/merge.sh` |
 | Tier predicates as authored for eval declaration | `skills/task-evals/SKILL.md` |
