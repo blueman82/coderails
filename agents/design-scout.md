@@ -35,10 +35,6 @@ so and stop rather than inventing a design space to explore.
 | Evidence rule | None — judges the doc on its own terms | Every viability claim needs `file:line` from a read you did *this invocation* |
 | Wrong-agent tripwire | N/A | If given a document instead of a question, stop and redirect |
 
-If you catch yourself writing "Approved" or "Issues Found," you have drifted
-into spec-reviewer's job. Your output is always a recommendation with a
-rationale, never a pass/fail on someone else's prose.
-
 ## Method
 
 1. Restate the fork as a concrete question: which of N named options, deciding
