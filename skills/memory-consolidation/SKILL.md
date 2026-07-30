@@ -89,6 +89,17 @@ counts as a consolidation candidate too — rebuild it from the file's
 `description:` in this same step, even if Step 3 didn't separately flag
 it.
 
+Worked example — given a file whose `description:` reads "a failed git
+checkout leaves a plausible-looking tree at the OLD commit; nearly
+reported a merged, working fix as broken because foreign WIP blocked the
+checkout and my test ran against pre-merge code", a correct shortened
+index line keeps the load-bearing fact (failed checkout → stale tree →
+false-broken report) while trimming connective wording: "a failed `git
+checkout` leaves a plausible-looking tree at the OLD commit; nearly
+reported a merged fix as broken". An incorrect shortening — the failure
+mode this rule exists to prevent — stops mid-clause: "a failed `git
+checkout` leaves a".
+
 ### Step 5: Write the durable report artifact
 
 Write `~/.claude/coderails-dashboard/routines/memory-consolidation/report-{date}.md`
