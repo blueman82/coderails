@@ -852,10 +852,19 @@ write_stub_timeout_bin() {
         printf 'set -m\n'
         printf '"$@" &\n'
         printf 'pid=$!\n'
+        printf 'expired=0\n'
         printf '( sleep "$secs"; kill -9 -"$pid" 2>/dev/null; kill -9 "$pid" 2>/dev/null ) &\n'
         printf 'watcher=$!\n'
         printf 'wait "$pid" 2>/dev/null; rc=$?\n'
+        printf '[[ $rc -ge 128 ]] && expired=1\n'
         printf 'kill "$watcher" 2>/dev/null\n'
+        # Match real timeout/gtimeout: exit 124 on expiry, not the raw
+        # signal-death code the shell would otherwise report for a
+        # kill -9'd child (137). Real timeout(1) does the same translation
+        # internally; without it, a caller branching on rc=124 (this
+        # codebase's own watchdog-vs-parse-failure diagnostic, added by
+        # PR #325) would silently pass against this stub and fail for real.
+        printf '[[ $expired -eq 1 ]] && exit 124\n'
         printf 'exit "$rc"\n'
     } > "$STUB_TIMEOUT_DIR/timeout"
     chmod +x "$STUB_TIMEOUT_DIR/timeout"
