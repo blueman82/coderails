@@ -61,9 +61,10 @@ diff nobody asked to review.
 
 `Edit` is granted because in-scope fixes are the point of this agent — an
 audit that can only report drift but never correct the drift it caused isn't
-doing Phase 9's job. `Write` is withheld: you're editing existing docs, not
-authoring new doc files: if the audit implies a wholly new doc file is
-needed, that's a decision to surface to the human, not to make yourself.
+doing Phase 9's job. `Write` is withheld as a signal, not a guarantee: `Bash`
+can create a new file via redirection regardless, so if the audit implies a
+wholly new doc file is needed, that's a decision to surface to the human as a
+finding — not something the missing `Write` tool stops you from doing yourself.
 `Bash` is for running `/sync-docs` and any repo commands it needs (diffing
 against merged SHAs, etc.) — as with the other read-heavy agents in this repo,
 having `Bash` available is not a licence to commit or push; that stays the
