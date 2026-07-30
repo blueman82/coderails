@@ -148,7 +148,7 @@ Spawn a single pre-flight agent, `subagent_type: coderails:preflight-scout`, who
 - An instruction to invoke each relevant skill via its `Skill` tool call
 - An instruction to return one consolidated report (plan-sequence findings + premortem failure modes + assumptions inventory + wiki findings)
 
-**Never substitute a generic agent here.** The pre-flight stage requires grounded risk identification from actual codebase state — a generic agent would re-derive the premortem and planning logic inline, fragmenting discipline across workers and inflating prompt tokens per scout.
+**Never substitute a generic agent here.** The pre-flight stage requires grounded risk identification from actual codebase state — a generic agent would re-derive the premortem and planning logic inline, fragmenting discipline across workers.
 
 Include `/coderails:wiki-query` in the pre-flight agent's skill list, scoped to the **whole plan theme** (not per-PR). The query is something like: "What does the wiki cover about [overall theme of the agentic loop]? Identify cross-PR constraints, gaps, superseded decisions, and anything the plan assumes but isn't enforced in code." This pre-empts the per-PR `/coderails:wiki-query` that `/coderails:workflow` Phase 2 runs — see Phase 9 for why per-PR wiki steps are suppressed inside this loop.
 
