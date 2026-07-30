@@ -46,15 +46,21 @@ When active, a GitHub ruleset on `main` requires:
 
 This is the primary control, enforced at GitHub's edge — no local agent can fake a status or bypass the ruleset without write access to the GitHub API. Activation awaits owner provisioning.
 
-## How to Find and Edit the Spec
+## Where the Authoritative Definitions Live
 
-The authoritative spec lives at `docs/coderails/specs/tier-review-spec.md`. It defines:
-- The judge prompt and LLM routing
-- Capability lattice: why the machine user's credentials are unforgeable
-- Availability constraints (when the ruleset activates)
-- Tier definitions and classification rules
+There is no tracked design spec for the tier-gate. The original design document was written to `docs/coderails/specs/`, which is gitignored — session-local working documents, never tracked in the repo (owner decision, 2026-07-11). A clone does not contain it, so it cannot be the authority for anything.
 
-Edit the spec there, then ensure `tier-gate-runner.sh` and the daemon's launchd plist stay in sync with any config changes.
+The tracked sources are authoritative, each for its own part:
+
+| What | Where |
+|---|---|
+| Tier definitions and classification rules the daemon judges against | `scripts/tier-gate/judge-prompt.md` |
+| Verdict vocabulary, path denylist, prefilter and size caps | `scripts/tier-gate/tier-gate-runner.sh` |
+| Daemon poll interval and run-as-root configuration | `scripts/tier-gate/com.coderails.tier-gate.plist.template` |
+| Merge-side status validation (creator, verdict, tier binding) | `scripts/merge.sh` |
+| Tier predicates as authored by the skill that declares them | `skills/task-evals/SKILL.md` |
+
+To change tier behaviour, edit the relevant file above and keep this document in sync with it. Where this document and `scripts/tier-gate/judge-prompt.md` disagree about the tier predicates, the judge prompt wins — it is what the daemon actually evaluates.
 
 ## For Contributors
 
