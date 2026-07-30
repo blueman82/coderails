@@ -152,10 +152,12 @@ merge::main() {
             ok "Smoke-verify passed (SHA: $sha)"
 
             # ─── Tier-review gate (redundant defence-in-depth, fail-closed) ───
-            # This layer is REDUNDANT BY DESIGN once the server-side ruleset is
-            # live (belt-and-braces): it exists to fail loudly on misconfiguration
-            # and to hold the line during the pre-ruleset interim. It is NOT the
-            # primary control — do not delete it as dead code once the ruleset is
+            # This layer is redundant defence-in-depth alongside the now-active
+            # server-side ruleset: it fails loudly on misconfiguration, and it
+            # still matters even with the ruleset active because the ruleset's
+            # bypass actor (the repo admin role) can push straight past it;
+            # this local check has no such bypass. It is NOT the primary
+            # control — do not delete it as dead code once the ruleset is
             # active; it is the only local check that catches a machine-user
             # misconfiguration before GitHub itself would. Config-keyed and
             # inactive by default: only runs when config key
