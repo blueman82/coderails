@@ -69,6 +69,14 @@ check "run_all.sh call 1 -> allow" allow "$(decision "$F1" "$RA_CMD")"
 check "run_all.sh call 2 -> allow" allow "$(decision "$F1" "$RA_CMD")"
 check "run_all.sh call 3 -> deny"  deny  "$(decision "$F1" "$RA_CMD")"
 check "run_all.sh call 4 -> still deny" deny "$(decision "$F1" "$RA_CMD")"
+# Lock cleanup: the trap must rmdir the per-target lock dir on every exit
+# path, allow or deny alike -- otherwise a stale lock would silently brick
+# all future calls on this branch/target with no override.
+if [ -d "$STATE1/verification-ceiling/unit-run-all__run_all.count.lock" ]; then
+  echo "FAIL - lock dir not cleaned up after deny-path exit"; fails=$((fails+1))
+else
+  echo "ok   - lock dir cleaned up after deny-path exit"
+fi
 unset CLAUDE_AGENTIC_LOOP_DIR
 
 # --- post_evals.sh validate-structure cap: 1st/2nd allow, 3rd deny ---
