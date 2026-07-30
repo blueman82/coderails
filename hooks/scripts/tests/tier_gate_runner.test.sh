@@ -769,6 +769,8 @@ CLAUDE_CALLS="$TMP/claude_calls.log"
 CLAUDE_RESPONSES="$TMP/claude_responses"
 CLAUDE_STUB_BIN="$TMP/claude-judge-stub"
 JUDGE_HOME_PIN="$TMP/judge-home-pin"; mkdir -p "$JUDGE_HOME_PIN"
+STUB_TIMEOUT_DIR="$TMP/stub-timeout-bin"
+STUB_TIMEOUT_CALLS="$TMP/stub_timeout_calls.log"
 
 write_creds() { # <oauth_token>
     printf 'CLAUDE_CODE_OAUTH_TOKEN=%s\n' "$1" > "$CREDS_FILE"
@@ -835,9 +837,46 @@ write_hanging_claude_stub() {
     chmod +x "$CLAUDE_STUB_BIN"
 }
 
+# write_stub_timeout_bin — a minimal GNU-coreutils-compatible `timeout` stub
+# (`timeout <secs> <cmd...>`), written into its own directory so tests can
+# put ONLY it on PATH ahead of the scrubbed set — proving tg_with_watchdog's
+# external-binary branch is taken, without depending on host coreutils being
+# installed (the mirror-image of the fallback determinism fix above: this
+# stub keeps that coverage even on a host WITHOUT coreutils).
+write_stub_timeout_bin() {
+    mkdir -p "$STUB_TIMEOUT_DIR"
+    {
+        printf '#!/bin/bash\n'
+        printf 'echo "stub-timeout-called" >> %q\n' "$STUB_TIMEOUT_CALLS"
+        printf 'secs="$1"; shift\n'
+        printf 'set -m\n'
+        printf '"$@" &\n'
+        printf 'pid=$!\n'
+        printf 'expired=0\n'
+        printf '( sleep "$secs"; kill -9 -"$pid" 2>/dev/null; kill -9 "$pid" 2>/dev/null ) &\n'
+        printf 'watcher=$!\n'
+        printf 'wait "$pid" 2>/dev/null; rc=$?\n'
+        printf '[[ $rc -ge 128 ]] && expired=1\n'
+        printf 'kill "$watcher" 2>/dev/null\n'
+        # Match real timeout/gtimeout: exit 124 on expiry, not the raw
+        # signal-death code the shell would otherwise report for a
+        # kill -9'd child (137). Real timeout(1) does the same translation
+        # internally; without it, a caller branching on rc=124 (this
+        # codebase's own watchdog-vs-parse-failure diagnostic, added by
+        # PR #325) would silently pass against this stub and fail for real.
+        printf '[[ $expired -eq 1 ]] && exit 124\n'
+        printf 'exit "$rc"\n'
+    } > "$STUB_TIMEOUT_DIR/timeout"
+    chmod +x "$STUB_TIMEOUT_DIR/timeout"
+}
+
 run_judge() { # claimed_tier diff
     (
-        export PATH="$TMP:$PATH"
+        # PATH is scrubbed, not prepended: this must exercise tg_with_watchdog's
+        # manual fallback deterministically. A prepend would let a host with
+        # coreutils installed (gtimeout on PATH) silently take the external-
+        # binary fast path instead, leaving the fallback branch untested.
+        export PATH="$TMP:/usr/bin:/bin:/usr/sbin:/sbin"
         export TIER_GATE_CREDS="$CREDS_FILE"
         export TIER_GATE_CLAUDE_BIN="$CLAUDE_STUB_BIN"
         export TIER_GATE_JUDGE_HOME="$JUDGE_HOME_PIN"
@@ -851,12 +890,29 @@ run_judge() { # claimed_tier diff
 # runner's own convention — see tg_gate_pr's other error paths).
 run_judge_with_stderr() { # claimed_tier diff
     (
-        export PATH="$TMP:$PATH"
+        # Scrubbed, not prepended — see run_judge's comment above.
+        export PATH="$TMP:/usr/bin:/bin:/usr/sbin:/sbin"
         export TIER_GATE_CREDS="$CREDS_FILE"
         export TIER_GATE_CLAUDE_BIN="$CLAUDE_STUB_BIN"
         export TIER_GATE_JUDGE_HOME="$JUDGE_HOME_PIN"
         export TIER_GATE_WATCHDOG_TIMEOUT=2
         tg_judge "$1" "$2" 2>&1
+    )
+}
+
+# run_judge_external — same as run_judge, but PATH is scrubbed then a
+# directory holding ONLY a stub `timeout` is prepended, so tg_with_watchdog's
+# first `command -v timeout` check resolves to the stub and takes the
+# external-binary branch deterministically — coverage for the branch that
+# run_judge's scrub above intentionally excludes.
+run_judge_external() { # claimed_tier diff
+    (
+        export PATH="$STUB_TIMEOUT_DIR:/usr/bin:/bin:/usr/sbin:/sbin"
+        export TIER_GATE_CREDS="$CREDS_FILE"
+        export TIER_GATE_CLAUDE_BIN="$CLAUDE_STUB_BIN"
+        export TIER_GATE_JUDGE_HOME="$JUDGE_HOME_PIN"
+        export TIER_GATE_WATCHDOG_TIMEOUT=2
+        tg_judge "$1" "$2"
     )
 }
 
@@ -945,6 +1001,27 @@ check "J8: hung judge call -> tg_judge rc 1 (never hangs the daemon)" "1" "$rc"
 # CI runner while still proving the call does NOT block indefinitely.
 [[ $elapsed -lt 20 ]] && echo "ok   - J8: bounded wall-clock (${elapsed}s < 20s, not an indefinite hang)" \
     || { echo "FAIL - J8: wall-clock ${elapsed}s exceeded bound — watchdog not wired to the judge call"; fails=$((fails+1)); }
+
+# ── Test J8b: external-binary branch (tg_with_watchdog's `command -v timeout`
+#    path) is taken and bounds a hung judge call, same as J8's fallback-path
+#    assertion — coverage for the branch J8/run_judge's PATH scrub excludes.
+#    Uses a stub `timeout` (not host coreutils) so this passes deterministically
+#    whether or not coreutils is installed on the runner. ───────────────────
+: > "$CLAUDE_CALLS"
+: > "$STUB_TIMEOUT_CALLS"
+write_stub_timeout_bin
+write_hanging_claude_stub
+start_ts=$(date +%s)
+out=$(run_judge_external "$FIXTURE_TIER" "$FIXTURE_DIFF")
+rc=$?
+end_ts=$(date +%s)
+elapsed=$((end_ts - start_ts))
+# tg_judge retries once on failure (same retry-once pattern as J4/J8), so a
+# hung call invokes the external timeout binary twice, not once.
+check "J8b: external-binary branch was actually taken (stub timeout invoked, once per retry attempt)" "2" "$(wc -l < "$STUB_TIMEOUT_CALLS" | tr -d ' ')"
+check "J8b: hung judge call via external timeout -> tg_judge rc 1 (never hangs)" "1" "$rc"
+[[ $elapsed -lt 20 ]] && echo "ok   - J8b: bounded wall-clock (${elapsed}s < 20s, not an indefinite hang)" \
+    || { echo "FAIL - J8b: wall-clock ${elapsed}s exceeded bound — external-binary path not wired to the judge call"; fails=$((fails+1)); }
 
 # ── Test J9 (fix 6): DELETED. Its predecessor asserted the runner "never shells
 #    out to the claude CLI" — the v4 spec's central constraint that a
