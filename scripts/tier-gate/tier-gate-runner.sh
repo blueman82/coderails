@@ -30,6 +30,16 @@ TIER_GATE_MAX_ERROR_RETRIES="${TIER_GATE_MAX_ERROR_RETRIES:-2}"
 # in a fresh checkout's `tg_should_gate` behaviour, just without a log line.
 [[ "$TIER_GATE_MAX_ERROR_RETRIES" =~ ^[0-9]+$ ]] || TIER_GATE_MAX_ERROR_RETRIES=2
 TIER_GATE_WATCHDOG_TIMEOUT="${TIER_GATE_WATCHDOG_TIMEOUT:-60}"
+# Same guard as TIER_GATE_MAX_ERROR_RETRIES above: a malformed override (e.g.
+# TIER_GATE_WATCHDOG_TIMEOUT=sixty) is fed straight into tg_with_watchdog's
+# timeout_secs, which is also passed to curl's --max-time. Verified: `timeout`/
+# `gtimeout` and curl both reject a non-numeric value outright (rc 125 / rc 2)
+# rather than misreading it as zero — a loud but unexplained failure. Only
+# tg_with_watchdog's bash-fallback path (no timeout/gtimeout on PATH) is
+# genuinely silent: its `SECONDS - start >= timeout_secs` check reads a
+# non-numeric timeout_secs as 0 in arithmetic context and fires on the first
+# tick. Reset to the safe default so neither failure mode happens.
+[[ "$TIER_GATE_WATCHDOG_TIMEOUT" =~ ^[0-9]+$ ]] || TIER_GATE_WATCHDOG_TIMEOUT=60
 
 # ─── Marker grammar (native re-implementation of eval_artifact.sh) ───────────
 
