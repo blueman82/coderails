@@ -110,8 +110,8 @@ ruleset nor edit it away). This narrow ruleset is an owner-provisioned,
 owner-activated addition living entirely outside the local hook layer this
 section otherwise describes — it does not change anything about how
 `enforce_pr_workflow`/`merge.sh` behave for PRs that never carry a tier-0
-artifact, and it is dormant until the owner's Pro-or-public choice unblocks
-ruleset activation on this repo.
+artifact. The ruleset is active (`gh api repos/blueman82/coderails/rulesets`
+shows `protect_main` with `enforcement: active`).
 
 **Sandboxed workers narrow this ceiling for worker processes only, never for the orchestrator.** With `config.sandbox_workers: true` (`skills/agentic-loop/SKILL.md` Phase 3/3a), an implementation-unit worker runs as a separate process wrapped by `@anthropic-ai/sandbox-runtime` (srt, pinned version), OS-enforced (Seatbelt on macOS, bubblewrap on Linux) — outside the agent's own trust domain, the first coderails enforcement layer that is not a hook. The orchestrator itself is never sandboxed and its ceiling above is unchanged.
 
