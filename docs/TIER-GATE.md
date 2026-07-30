@@ -75,3 +75,9 @@ When you push a PR:
 5. If the daemon rejects (`verdict=illegitimate`), re-read the tier rules, adjust the claimed tier or the changeset, and repost
 
 The deny path fires when a claimed tier is dishonest: the daemon judges your change against its tier definition and posts `verdict=illegitimate`, which blocks both the local merge gate and the GitHub ruleset.
+
+### Testing the watchdog fallback
+
+`tg_with_watchdog()` in `scripts/tier-gate/tier-gate-runner.sh` takes the external-binary path (`timeout`/`gtimeout`) when either is on `PATH`, and only falls back to a manual polling loop when neither resolves. Homebrew coreutils (providing `gtimeout`, and shadowing `timeout` on macOS) may or may not be installed on a given host — so which branch runs is host-dependent unless `PATH` is controlled for.
+
+Any timing measurement or manual test of the **fallback** path specifically must scrub `PATH` to `/usr/bin:/bin:/usr/sbin:/sbin` first. Measuring the fallback on a host with coreutils installed, without scrubbing, silently measures the external-binary path instead. This bit during PR #328: eval E1 exited 2 SKIP-UNMEASURABLE, and a 17s suite run was briefly reported as speedup evidence when it had never entered the modified code path.
