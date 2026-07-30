@@ -169,7 +169,7 @@ Collect all reports, aggregate into Critical / Important / Suggestion, and feed 
 
 ### Phase 5 — Disprove the premise before each fix
 
-Before spawning a "bug fix" agent for any reported regression, use a two-agent split: spawn `subagent_type: coderails:source-auditor` FIRST to disprove-the-premise, THEN `subagent_type: coderails:loop-worker` for the fix.
+Before spawning a "bug fix" agent for any reported regression, use a two-agent split: spawn `subagent_type: coderails:source-auditor` FIRST to disprove-the-premise, THEN `subagent_type: coderails:loop-worker` for the fix. **Do not substitute a generic agent for either half of this split.** A generic agent collapses the split back into one step, so the premise never gets independently disproved and a fix can ship against a bug that doesn't reproduce.
 
 **Disprove-the-premise agent, `subagent_type: coderails:source-auditor`, always first:** this agent's prompt must require:
 
