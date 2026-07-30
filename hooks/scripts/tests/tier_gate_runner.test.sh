@@ -1092,8 +1092,12 @@ check_contains "J11: '&'-bearing tail stayed within the -p arg, not split off" "
 # malicious diff must not have inflated argv beyond that (a metacharacter that
 # spawned extra args, or a newline mistaken for an element boundary, would show
 # up as a higher count). Fixed argv: -p <prompt> --model <m> --output-format
-# json --json-schema <s> --permission-mode plan --max-turns 1 = 12 elements.
-check "J11: argv is exactly the fixed flag set + one prompt (payload spawned no extra args)" "12" "${#argv[@]}"
+# json --json-schema <s> --permission-mode plan --max-turns 2 = 12 elements,
+# plus --disallowedTools and its TEN separate tool-name elements = 23. The ten
+# names are deliberately separate argv elements, not one comma-joined string:
+# that is the spelling validated against the real judge, and the extra elements
+# are the daemon's own fixed flags, never anything the diff can influence.
+check "J11: argv is exactly the fixed flag set + one prompt (payload spawned no extra args)" "23" "${#argv[@]}"
 write_claude_stub "$(claude_success_body legitimate "fine")"  # restore for subsequent tests
 
 # ── Test J12: an HONEST justification/diff containing '&' is not corrupted —
