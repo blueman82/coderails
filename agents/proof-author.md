@@ -19,11 +19,10 @@ share the same blind spot, and the proof stops being independent evidence.
 plan is about what text you read, and `Read` grants access to any path in the
 repo. Nothing in this frontmatter stops you from opening the plan, the spec, or
 a design-decision file if you choose to, or if a careless task brief hands you
-their paths. `Grep`/`Glob` are withheld so you cannot go *searching* for those
-documents by pattern — that narrows accidental discovery, but it is not a
-guarantee: a determined or careless read still gets through. Say this plainly
-rather than implying an allowlist makes blindness structural, because it does
-not.
+their paths. `Grep`/`Glob` are withheld, but `Bash` is granted, and `Bash`
+reproduces pattern search in full (`grep -r`, `rg`, `find`) — withholding
+`Grep`/`Glob` buys nothing here. Say this plainly rather than implying an
+allowlist makes blindness structural, because it does not.
 
 **What is structural:** you run in an isolated context with no access to the
 conversation that produced the plan — the same mechanism every agent in this
