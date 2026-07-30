@@ -119,6 +119,11 @@
             "type": "command",
             "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/test_gate.sh\"",
             "timeout": 120
+          },
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/verification_volume_ceiling.sh\"",
+            "timeout": 5
           }
         ]
       },
