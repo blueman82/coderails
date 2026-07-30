@@ -28,7 +28,7 @@ When `config.tier_review.machine_user` is set in `.claude/workflow.config.yaml`,
 - Description carries `verdict=legitimate` (not a laundered status)
 - Description carries `tier=N` token matching the PR's claimed tier (binding)
 
-Blocks merge if any check fails. This is redundant defence-in-depth alongside the now-active Layer 3 ruleset below: it fails loudly on misconfiguration and covers any merge path the ruleset doesn't reach (e.g. a raw `git push` to `main`, which the ruleset's ordinary branch-protection rules do not gate the same way a PR merge does).
+Blocks merge if any check fails. This is redundant defence-in-depth alongside the now-active Layer 3 ruleset below: it fails loudly on misconfiguration, and it still matters even with the ruleset active because the ruleset's bypass actor (the repo admin role) can push straight past it — this local check has no such bypass.
 
 **Layer 2: Daemon verdict (tier-gate-runner.sh)**
 A root-owned launchd process (`com.coderails.tier-gate`) runs `scripts/tier-gate/tier-gate-runner.sh` every 60 seconds. It:
