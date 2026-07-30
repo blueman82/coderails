@@ -625,14 +625,16 @@ coderails::_tier_review_machine_user() {
 # status of state=success, posted by the configured machine user, whose
 # description carries verdict=legitimate AND a tier=N token matching this
 # artifact's own claimed tier (PR_EVAL_TIER, set by pr::has_coderails_eval_for_head
-# in the caller). This layer is REDUNDANT BY DESIGN once the server-side
-# ruleset is live (belt-and-braces) — it exists to fail loudly on
-# misconfiguration and to hold the line during the pre-ruleset interim. It is
-# NOT the primary control — do not delete it as dead code once the ruleset is
-# active; it is the only local check that catches a machine-user
-# misconfiguration before GitHub itself would. Config-keyed and inactive by
-# default: only runs when config key tier_review.machine_user is set (config
-# absent -> other installs unaffected). Runs at EVERY tier — the daemon
+# in the caller). This layer is redundant defence-in-depth alongside the
+# now-active server-side ruleset — it fails loudly on misconfiguration, and
+# it still matters even with the ruleset active because the ruleset's bypass
+# actor (the repo admin role) can push straight past it; this local check
+# has no such bypass. It is NOT the primary control — do not delete it as
+# dead code once the ruleset is active; it is the only local check that
+# catches a machine-user misconfiguration before GitHub itself would.
+# Config-keyed and inactive by default: only runs when config key
+# tier_review.machine_user is set (config absent -> other installs
+# unaffected). Runs at EVERY tier — the daemon
 # (tier-gate-runner) now judges every tier, not just tier 0, so this gate is
 # no longer restricted to PR_EVAL_TIER=0. Emits a deny JSON on any failure;
 # emits nothing (stands aside) when inactive or when the check passes — same
