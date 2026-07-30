@@ -26,14 +26,33 @@ new_fixture() { # branch_name -> prints fixture dir path
   printf '%s' "$dir"
 }
 
+raw_output() { # cwd cmd -> raw stdout of the hook
+  local cwd="$1" cmd="$2"
+  jq -n --arg cwd "$cwd" --arg cmd "$cmd" '{tool_name:"Bash",tool_input:{command:$cmd},cwd:$cwd}' | bash "$HOOK" 2>/dev/null
+}
+
 decision() { # cwd cmd -> "allow" | "deny"
-  local cwd="$1" cmd="$2" out
-  out=$(jq -n --arg cwd "$cwd" --arg cmd "$cmd" '{tool_name:"Bash",tool_input:{command:$cmd},cwd:$cwd}' | bash "$HOOK" 2>/dev/null)
+  local out
+  out=$(raw_output "$1" "$2")
   if [ -z "$out" ]; then
     printf 'allow'
     return
   fi
   printf '%s' "$out" | jq -r '.hookSpecificOutput.permissionDecision // "allow"'
+}
+
+reason() { # cwd cmd -> permissionDecisionReason string (empty if none/allow)
+  local out
+  out=$(raw_output "$1" "$2")
+  [ -z "$out" ] && return
+  printf '%s' "$out" | jq -r '.hookSpecificOutput.permissionDecisionReason // empty'
+}
+
+json_object_count() { # cwd cmd -> number of JSON objects/values on stdout
+  local out
+  out=$(raw_output "$1" "$2")
+  [ -z "$out" ] && { printf '0'; return; }
+  printf '%s' "$out" | jq -s 'length' 2>/dev/null || printf 'unparseable'
 }
 
 check() { # desc expected actual
@@ -107,6 +126,69 @@ for i in 1 2 3; do
   check "unrelated npm test $i -> allow" allow "$(decision "$F6" "npm test")"
 done
 unset CLAUDE_AGENTIC_LOOP_DIR
+
+# --- Fix 1a: state-dir mkdir failure must deny (fail closed), not silently allow ---
+# ENOTDIR fixture: CLAUDE_AGENTIC_LOOP_DIR points at a path segment that is a
+# regular file, so `mkdir -p .../verification-ceiling` fails deterministically
+# regardless of uid (root-immune, unlike chmod 000).
+F7=$(new_fixture "unit-mkdir-fail")
+NOTADIR="$TMP/notadir-$$"
+: > "$NOTADIR"
+export CLAUDE_AGENTIC_LOOP_DIR="$NOTADIR"
+D=$(decision "$F7" "$RA_CMD")
+R=$(reason "$F7" "$RA_CMD")
+check "mkdir failure -> deny" deny "$D"
+case "$R" in
+  *"3rd+"*) echo "FAIL - mkdir-failure reason looks like the invocation-ceiling reason, not a state-write failure ($R)"; fails=$((fails+1)) ;;
+  *"state directory"*) echo "ok   - mkdir-failure reason is state-write-specific ($R)" ;;
+  *) echo "FAIL - mkdir-failure reason does not mention the state directory ($R)"; fails=$((fails+1)) ;;
+esac
+unset CLAUDE_AGENTIC_LOOP_DIR
+unlink_tree "$F7" 2>/dev/null
+
+# --- Fix 1b: count-file write failure must deny (fail closed) ---
+# EISDIR fixture: pre-create the count file path AS A DIRECTORY, so state_dir
+# itself stays writable (mkdir -p succeeds) but the `printf > "$count_file"`
+# redirect fails.
+F8=$(new_fixture "unit-write-fail")
+STATE8=$(mktemp -d -p "$TMP")
+export CLAUDE_AGENTIC_LOOP_DIR="$STATE8"
+BRANCH8_SLUG="unit-write-fail"
+mkdir -p "$STATE8/verification-ceiling/${BRANCH8_SLUG}__run_all.count"
+D=$(decision "$F8" "$RA_CMD")
+R=$(reason "$F8" "$RA_CMD")
+check "count-file write failure -> deny" deny "$D"
+case "$R" in
+  *"3rd+"*) echo "FAIL - write-failure reason looks like the invocation-ceiling reason, not a state-write failure ($R)"; fails=$((fails+1)) ;;
+  *"count file"*) echo "ok   - write-failure reason is state-write-specific ($R)" ;;
+  *) echo "FAIL - write-failure reason does not mention the count file ($R)"; fails=$((fails+1)) ;;
+esac
+JC=$(json_object_count "$F8" "$RA_CMD")
+check "count-file write failure -> exactly one JSON object on stdout" 1 "$JC"
+unset CLAUDE_AGENTIC_LOOP_DIR
+unlink_tree "$STATE8/verification-ceiling/${BRANCH8_SLUG}__run_all.count" 2>/dev/null
+unlink_tree "$F8" 2>/dev/null
+
+# --- Fix 2: lock contention must deny after timeout (fail closed), not skip counting ---
+# Pre-create the exact lock dir the hook would need, so it can never acquire
+# and must time out (~2s wall clock expected).
+F9=$(new_fixture "unit-lock-contend")
+STATE9=$(mktemp -d -p "$TMP")
+export CLAUDE_AGENTIC_LOOP_DIR="$STATE9"
+BRANCH9_SLUG="unit-lock-contend"
+mkdir -p "$STATE9/verification-ceiling"
+mkdir -p "$STATE9/verification-ceiling/${BRANCH9_SLUG}__run_all.count.lock"
+D=$(decision "$F9" "$RA_CMD")
+R=$(reason "$F9" "$RA_CMD")
+check "lock contention -> deny" deny "$D"
+case "$R" in
+  *"3rd+"*) echo "FAIL - lock-contention reason looks like the invocation-ceiling reason, not a lock failure ($R)"; fails=$((fails+1)) ;;
+  *"lock"*) echo "ok   - lock-contention reason is lock-specific ($R)" ;;
+  *) echo "FAIL - lock-contention reason does not mention the lock ($R)"; fails=$((fails+1)) ;;
+esac
+unset CLAUDE_AGENTIC_LOOP_DIR
+unlink_tree "$STATE9/verification-ceiling/${BRANCH9_SLUG}__run_all.count.lock" 2>/dev/null
+unlink_tree "$F9" 2>/dev/null
 
 if [ "$fails" -eq 0 ]; then
   echo "PASS"

@@ -56,14 +56,64 @@ branch_slug=$(printf '%s' "$branch" | tr '/' '-')
 
 base="${CLAUDE_AGENTIC_LOOP_DIR:-$HOME/.claude/agentic-loop}"
 state_dir="$base/verification-ceiling"
-mkdir -p "$state_dir" 2>/dev/null
+
+deny_state_failure() {
+  # Fail closed: this is a hard-block hook, so if the count can't be reliably
+  # read/written/locked, the safe default is to deny rather than silently let
+  # the cap disappear (matches crack_on_gate.sh's write-check convention).
+  jq -n --arg r "$1" '{
+    hookSpecificOutput: {
+      hookEventName: "PreToolUse",
+      permissionDecision: "deny",
+      permissionDecisionReason: $r
+    }
+  }'
+  exit 0
+}
+
+if ! mkdir -p "$state_dir" 2>/dev/null; then
+  deny_state_failure "Verification-volume ceiling: could not create its state directory ($state_dir) to track invocation counts, so the count for this work-unit branch cannot be reliably tracked. Failing closed (deny) rather than silently letting the ceiling disappear."
+fi
+
 count_file="$state_dir/${branch_slug}__${target}.count"
+lock_dir="${count_file}.lock"
+
+# mkdir-based lock around the count-file read-modify-write critical section:
+# atomic mkdir succeeds/fails uniquely with no external dependency. Retry for
+# up to ~1.5s (well inside this hook's 5s hooks.json timeout budget, which
+# also covers the earlier `read -t 5` and jq calls) before failing closed.
+lock_acquired=0
+attempt=0
+while [ "$attempt" -lt 15 ]; do
+  if mkdir "$lock_dir" 2>/dev/null; then
+    lock_acquired=1
+    break
+  fi
+  attempt=$((attempt + 1))
+  sleep 0.1
+done
+
+if [ "$lock_acquired" -ne 1 ]; then
+  script_name="hooks/scripts/tests/run_all.sh"
+  [ "$target" = "post_evals" ] && script_name="scripts/post_evals.sh validate-structure"
+  deny_state_failure "Verification-volume ceiling: could not acquire the per-target lock for $script_name on work-unit branch '$branch' within the timeout — a concurrent invocation is holding it. Failing closed (deny) rather than risk an undercounted read-modify-write."
+fi
+trap 'rmdir "$lock_dir" 2>/dev/null' EXIT
 
 count=0
 [ -f "$count_file" ] && count=$(cat "$count_file" 2>/dev/null)
 case "$count" in
   ''|*[!0-9]*) count=0 ;;
 esac
+
+# Single write of count+1, done up front so it covers both the allow and the
+# deny path (the deny path also increments, so a retried 3rd+ call doesn't
+# reset the count) — matches the previous behaviour with one write instead of
+# two, since emitting deny JSON and THEN writing would put two JSON values on
+# stdout if the second write also needed to emit on failure.
+if ! printf '%s' "$((count + 1))" > "$count_file" 2>/dev/null; then
+  deny_state_failure "Verification-volume ceiling: could not write its invocation-count file ($count_file) for work-unit branch '$branch'. Failing closed (deny) rather than silently letting the ceiling reset to 0 on every call."
+fi
 
 if [ "$count" -ge 2 ]; then
   script_name="hooks/scripts/tests/run_all.sh"
@@ -76,10 +126,7 @@ if [ "$count" -ge 2 ]; then
       permissionDecisionReason: $r
     }
   }'
-  # Increment even on the denied call, so a retried 3rd call doesn't reset.
-  printf '%s' "$((count + 1))" > "$count_file"
   exit 0
 fi
 
-printf '%s' "$((count + 1))" > "$count_file"
 exit 0
