@@ -651,15 +651,17 @@ tg_should_gate() {
 # ─── Judge (Task 3): blind verdict via a claude -p subscription subprocess ───
 
 # TIER_GATE_JUDGE_MODEL: pinned model constant for the judge call.
-# claude-haiku-4-5 — chosen deliberately over the "always use Opus 4.8"
-# default: this is a cheap, deterministic classification task (three-way
-# verdict + one-paragraph reason), the exact use case the model catalog names
-# Haiku for. The frozen spec/plan require `temperature: 0` for determinism;
-# current-generation models (Opus 4.8/4.7, Sonnet 5, Fable 5) REJECT any
-# non-default temperature/top_p/top_k with a 400 — only prior-generation
-# models (Haiku 4.5, Sonnet 4.5 and older) still accept it. Haiku 4.5 is the
-# one model satisfying every constraint at once: cheap, active/current,
-# classification-appropriate, and temperature-compatible.
+# claude-haiku-4-5 over the "always use Opus" default: a three-way verdict
+# against explicit predicates is a cheap classification task, and this runs on
+# every tier-0 PR.
+#
+# Not a determinism guarantee — repeated calls on identical input return
+# differently-worded `reason` strings. The verdict enum is constrained by
+# --json-schema, the prose is not.
+#
+# Unvalidated for verdict ACCURACY: no eval scores this judge against PRs with
+# known-correct tiers. Changing the model changes what the gate DECIDES, so it
+# needs that eval first.
 TIER_GATE_JUDGE_MODEL="claude-haiku-4-5"
 TIER_GATE_JUDGE_PROMPT_PATH="${TIER_GATE_JUDGE_PROMPT_PATH:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/judge-prompt.md}"
 
@@ -747,9 +749,26 @@ TIER_GATE_JUDGE_SCHEMA='{"type":"object","properties":{"verdict":{"type":"string
 # pinned to TIER_GATE_JUDGE_HOME (root-owned) so claude cannot discover a
 # uid-501-planted CLAUDE.md / settings.json / MCP config — the cwd/HOME
 # re-entry of the injection class Fix 1 deleted. --json-schema constrains the
-# verdict enum (Fix 4); --max-turns 1 and permission-mode plan keep it a pure
-# read-and-classify call with no tool surface. The binary is
-# TIER_GATE_CLAUDE_BIN (root-owned), never uid 501's.
+# verdict enum (Fix 4). The binary is TIER_GATE_CLAUDE_BIN (root-owned), never
+# uid 501's.
+#
+# TOOL SURFACE — what is and is not true here (measured, not assumed):
+#   - `--permission-mode plan` does NOT block tool execution. Measured: at
+#     --max-turns 2 the judge read a mode-600 root-owned file and put its
+#     contents in `reason`, the field posted to the PR as a commit status.
+#     Plan mode alone is not a containment boundary.
+#   - What actually kept the surface closed before this change was
+#     `--max-turns 1` — the model got no second turn in which to act on a
+#     tool request. That is a side effect of the budget, not a deny rule.
+#   - --max-turns is now 2, which deliberately gives up that side effect, so
+#     `--disallowedTools` is load-bearing enforcement, not decoration.
+#     --allowedTools cannot express "deny everything" (measured: it leaked
+#     3/3), so a denylist is the only mechanism available.
+#
+# KNOWN LIMITATION, accepted: the denylist names tools explicitly, so it fails
+# OPEN for any tool name Claude Code ships in future. It is strictly better
+# than the prior state and is not a completeness claim. Closing it properly
+# needs a working allowlist mechanism, which is upstream of this repo.
 # NOTE: claude has NO --cwd flag (verified against --help) — the working
 # directory is inherited from the process, so the cwd pin is enforced by
 # `cd`-ing into the root-owned dir in a subshell BEFORE exec, not by a claude
@@ -769,7 +788,8 @@ tg_judge_call_claude() {
             --output-format json \
             --json-schema "$6" \
             --permission-mode plan \
-            --max-turns 1' \
+            --max-turns 2 \
+            --disallowedTools Read Write Edit Bash Glob Grep WebFetch WebSearch Task NotebookEdit' \
         _ "$TIER_GATE_JUDGE_HOME" "$oauth_token" "$TIER_GATE_CLAUDE_BIN" \
           "$prompt_text" "$TIER_GATE_JUDGE_MODEL" "$TIER_GATE_JUDGE_SCHEMA"
 }
