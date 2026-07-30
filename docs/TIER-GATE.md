@@ -44,7 +44,7 @@ When active, a GitHub ruleset on `main` requires:
 - PR before merge
 - `tier-review` status must be `success` (posted by the machine user)
 
-This is the primary control, enforced at GitHub's edge — no local agent can fake a status or bypass the ruleset without write access to the GitHub API. Activation awaits owner provisioning.
+This is the primary control, enforced at GitHub's edge — no local agent can fake a status or bypass the ruleset without write access to the GitHub API. The ruleset is active (`gh api repos/blueman82/coderails/rulesets` shows `protect_main` with `enforcement: active`).
 
 ## Where the Authoritative Definitions Live
 
