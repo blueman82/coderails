@@ -48,7 +48,7 @@ This is the primary control, enforced at GitHub's edge — no local agent can fa
 
 ## Where the Authoritative Definitions Live
 
-There is no tracked design spec for the tier-gate. The original design document was written to `docs/coderails/specs/`, which has been gitignored since 2026-07-11 — specs are session-local working documents, not repo artifacts (owner decision; the directory's contents were removed from tracking in that same change). A clone does not contain that file, so nothing in it can be cited as authority here.
+There is no tracked design spec for the tier-gate. `docs/coderails/specs/` has been gitignored since 2026-07-11 — specs are session-local working documents, not repo artifacts (owner decision; other spec/plan files were removed from tracking in that same change). A file named `tier-review-spec.md` was never tracked at any point in this repo's history — it was not among the files removed, and no design document by that name exists to cite as authority here.
 
 The tracked sources are authoritative, each for its own part:
 
