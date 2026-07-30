@@ -28,7 +28,7 @@ When `config.tier_review.machine_user` is set in `.claude/workflow.config.yaml`,
 - Description carries `verdict=legitimate` (not a laundered status)
 - Description carries `tier=N` token matching the PR's claimed tier (binding)
 
-Blocks merge if any check fails. This is redundant defence-in-depth: it fails loudly on misconfiguration and holds the line before the ruleset is active.
+Blocks merge if any check fails. This is redundant defence-in-depth alongside the now-active Layer 3 ruleset below: it fails loudly on misconfiguration, and it still matters even with the ruleset active because the ruleset's bypass actor (the repo admin role) can push straight past it — this local check has no such bypass.
 
 **Layer 2: Daemon verdict (tier-gate-runner.sh)**
 A root-owned launchd process (`com.coderails.tier-gate`) runs `scripts/tier-gate/tier-gate-runner.sh` every 60 seconds. It:
@@ -44,17 +44,26 @@ When active, a GitHub ruleset on `main` requires:
 - PR before merge
 - `tier-review` status must be `success` (posted by the machine user)
 
-This is the primary control, enforced at GitHub's edge — no local agent can fake a status or bypass the ruleset without write access to the GitHub API. Activation awaits owner provisioning.
+This is the primary control, enforced at GitHub's edge — no local agent can fake a status or bypass the ruleset without write access to the GitHub API. The ruleset is active (`gh api repos/blueman82/coderails/rulesets` shows `protect_main` with `enforcement: active`).
 
-## How to Find and Edit the Spec
+## Where the Authoritative Definitions Live
 
-The authoritative spec lives at `docs/coderails/specs/tier-review-spec.md`. It defines:
-- The judge prompt and LLM routing
-- Capability lattice: why the machine user's credentials are unforgeable
-- Availability constraints (when the ruleset activates)
-- Tier definitions and classification rules
+There is no tracked design spec for the tier-gate. `docs/coderails/specs/` has been gitignored since 2026-07-11 — specs are session-local working documents, not repo artifacts (owner decision; other spec/plan files were removed from tracking in that same change). A file named `tier-review-spec.md` was never tracked at any point in this repo's history — it was not among the files removed, and no design document by that name exists to cite as authority here.
 
-Edit the spec there, then ensure `tier-gate-runner.sh` and the daemon's launchd plist stay in sync with any config changes.
+The tracked sources are authoritative, each for its own part:
+
+| What | Where |
+|---|---|
+| Tier definitions and classification rules the daemon judges against | `scripts/tier-gate/judge-prompt.md` |
+| Judge model routing and response schema, path denylist, prefilter, size caps, and the runner-minted verdicts | `scripts/tier-gate/tier-gate-runner.sh` |
+| Daemon poll interval and run-as-root configuration | `scripts/tier-gate/com.coderails.tier-gate.plist.template` |
+| Merge-side status validation (creator, verdict, tier binding) | `scripts/merge.sh` |
+| Tier predicates as authored for eval declaration | `skills/task-evals/SKILL.md` |
+| Promoting edited files to the running daemon | `scripts/tier-gate/install.sh` |
+
+To change tier behaviour, edit the relevant file above and keep this document in sync with it. The precedence rule stated above (What It Is) applies here too — `judge-prompt.md` wins on any disagreement about the tier predicates.
+
+Editing a tracked file is not enough on its own. The daemon runs from a root-owned install root (`/etc/coderails-tier-gate` by default) and resolves `scripts/tier-gate/judge-prompt.md` relative to the running script, so `scripts/tier-gate/install.sh` must promote the edited runner and judge prompt before the change takes effect.
 
 ## For Contributors
 
