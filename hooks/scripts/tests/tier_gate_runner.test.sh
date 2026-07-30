@@ -837,7 +837,11 @@ write_hanging_claude_stub() {
 
 run_judge() { # claimed_tier diff
     (
-        export PATH="$TMP:$PATH"
+        # PATH is scrubbed, not prepended: this must exercise tg_with_watchdog's
+        # manual fallback deterministically. A prepend would let a host with
+        # coreutils installed (gtimeout on PATH) silently take the external-
+        # binary fast path instead, leaving the fallback branch untested.
+        export PATH="$TMP:/usr/bin:/bin:/usr/sbin:/sbin"
         export TIER_GATE_CREDS="$CREDS_FILE"
         export TIER_GATE_CLAUDE_BIN="$CLAUDE_STUB_BIN"
         export TIER_GATE_JUDGE_HOME="$JUDGE_HOME_PIN"
@@ -851,7 +855,8 @@ run_judge() { # claimed_tier diff
 # runner's own convention — see tg_gate_pr's other error paths).
 run_judge_with_stderr() { # claimed_tier diff
     (
-        export PATH="$TMP:$PATH"
+        # Scrubbed, not prepended — see run_judge's comment above.
+        export PATH="$TMP:/usr/bin:/bin:/usr/sbin:/sbin"
         export TIER_GATE_CREDS="$CREDS_FILE"
         export TIER_GATE_CLAUDE_BIN="$CLAUDE_STUB_BIN"
         export TIER_GATE_JUDGE_HOME="$JUDGE_HOME_PIN"
