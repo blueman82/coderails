@@ -97,7 +97,7 @@ Include this line in every agent prompt:
 
 ### Phase 3a — Single routed agent for impl + verify (the spawned-team-is-overkill case)
 
-For self-contained work that doesn't justify a team — a bug fix, one PR, a single-file change, a tight sequence of steps with shared context — spawn **one** `Agent`, at the role Phase 2.8 assigned, that owns both the implementation **and** the verification, then reports back a confidence-labelled result. Main context stays the orchestrator; it does not make the edit itself.
+For self-contained work that doesn't justify a team — a bug fix, one PR, a single-file change, a tight sequence of steps with shared context — spawn **one** `Agent`, `subagent_type: coderails:loop-worker`, at the role Phase 2.8 assigned, that owns both the implementation **and** the verification, then reports back a confidence-labelled result. Main context stays the orchestrator; it does not make the edit itself.
 
 One agent does both impl and verify (not two) because verification output is dense — exactly the kind that fills main context. The agent self-verifies; main context spot-checks only at dependency boundaries (Phase 12) or when the artifact check is cheap and the stakes are high.
 
