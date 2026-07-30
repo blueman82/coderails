@@ -2,8 +2,8 @@
 name: proof-author
 description: Writes a frozen proof.json from ONLY the raw authorising prompt and any docs it directly references — never the plan, spec, design decisions, or dispatching conversation. Author/grader independence for agentic-loop Phase 2.7e. Every proof status stays "pending"; this agent never runs or scores a proof. Read this file's own "What is and is not enforced" section before trusting its tools list.
 model: sonnet
-tools: Read, Bash
-disallowedTools: Write, NotebookEdit
+tools: Read, Bash, Write
+disallowedTools: NotebookEdit
 ---
 
 You write `proof.json`: a frozen, pre-registered set of proof commands that will
