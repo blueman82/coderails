@@ -48,19 +48,20 @@ This is the primary control, enforced at GitHub's edge — no local agent can fa
 
 ## Where the Authoritative Definitions Live
 
-There is no tracked design spec for the tier-gate. The original design document was written to `docs/coderails/specs/`, which is gitignored — session-local working documents, never tracked in the repo (owner decision, 2026-07-11). A clone does not contain it, so it cannot be the authority for anything.
+There is no tracked design spec for the tier-gate. The original design document was written to `docs/coderails/specs/`, which has been gitignored since 2026-07-11 — specs are session-local working documents, not repo artifacts (owner decision; the directory's contents were removed from tracking in that same change). A clone does not contain that file, so nothing in it can be cited as authority here.
 
 The tracked sources are authoritative, each for its own part:
 
 | What | Where |
 |---|---|
 | Tier definitions and classification rules the daemon judges against | `scripts/tier-gate/judge-prompt.md` |
-| Verdict vocabulary, path denylist, prefilter and size caps | `scripts/tier-gate/tier-gate-runner.sh` |
+| Judge model routing and the judge's response schema | `scripts/tier-gate/tier-gate-runner.sh` |
+| Path denylist, prefilter, size caps, and the runner-minted verdicts | `scripts/tier-gate/tier-gate-runner.sh` |
 | Daemon poll interval and run-as-root configuration | `scripts/tier-gate/com.coderails.tier-gate.plist.template` |
 | Merge-side status validation (creator, verdict, tier binding) | `scripts/merge.sh` |
-| Tier predicates as authored by the skill that declares them | `skills/task-evals/SKILL.md` |
+| Tier predicates as authored for eval declaration | `skills/task-evals/SKILL.md` |
 
-To change tier behaviour, edit the relevant file above and keep this document in sync with it. Where this document and `scripts/tier-gate/judge-prompt.md` disagree about the tier predicates, the judge prompt wins — it is what the daemon actually evaluates.
+To change tier behaviour, edit the relevant file above and keep this document in sync with it. The precedence rule stated at the top of this document applies here too: where anything disagrees with `scripts/tier-gate/judge-prompt.md` about the tier predicates, the judge prompt wins. Note that the daemon reads its own installed copy — `install.sh` places the runner and judge prompt under a root-owned install root, so an edit to the tracked file takes effect only after a re-install.
 
 ## For Contributors
 
