@@ -60,8 +60,11 @@ The tracked sources are authoritative, each for its own part:
 | Daemon poll interval and run-as-root configuration | `scripts/tier-gate/com.coderails.tier-gate.plist.template` |
 | Merge-side status validation (creator, verdict, tier binding) | `scripts/merge.sh` |
 | Tier predicates as authored for eval declaration | `skills/task-evals/SKILL.md` |
+| Promoting edited files to the running daemon | `scripts/tier-gate/install.sh` |
 
-To change tier behaviour, edit the relevant file above and keep this document in sync with it. The precedence rule stated at the top of this document applies here too: where anything disagrees with `scripts/tier-gate/judge-prompt.md` about the tier predicates, the judge prompt wins. Note that the daemon reads its own installed copy — `install.sh` places the runner and judge prompt under a root-owned install root, so an edit to the tracked file takes effect only after a re-install.
+To change tier behaviour, edit the relevant file above and keep this document in sync with it. The precedence rule stated at the top of this document applies here too: where anything disagrees with `scripts/tier-gate/judge-prompt.md` about the tier predicates, the judge prompt wins.
+
+Editing a tracked file is not enough on its own. The daemon runs from a root-owned install root (`/etc/coderails-tier-gate` by default) and resolves `judge-prompt.md` relative to the running script, so `scripts/tier-gate/install.sh` must promote the edited runner and judge prompt before the change takes effect.
 
 ## For Contributors
 
