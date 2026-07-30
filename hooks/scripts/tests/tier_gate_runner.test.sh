@@ -1584,4 +1584,43 @@ sg_check_count "SG17: count() stops at failure (older error not counted)" 1 '[{"
 sg_check_count "SG18: count() empty array -> 0" 0 '[]'
 sg_check_count "SG19: count() trailing pending with no leading error -> 0" 0 '[{"state":"pending","context":"tier-review","created_at":"2020-01-01T00:00:00Z"}]'
 
+# ─── TIER_GATE_WATCHDOG_TIMEOUT numeric guard (mirrors the
+# TIER_GATE_MAX_ERROR_RETRIES guard immediately above it in the runner) ───────
+# Re-sources the runner in a subshell with the given override so each case
+# observes the guard's own coercion, independent of every other test's state.
+wt_check_guard() { # <desc> <override_value> <expected_TIER_GATE_WATCHDOG_TIMEOUT>
+    local desc="$1" override="$2" expected="$3"
+    local actual
+    actual=$(TIER_GATE_WATCHDOG_TIMEOUT="$override" bash -c '
+        source "$1" >/dev/null 2>&1
+        printf "%s" "$TIER_GATE_WATCHDOG_TIMEOUT"
+    ' _ "$RUNNER")
+    check "$desc" "$expected" "$actual"
+}
+
+# WT1 is a PIN, not a discriminator: bash's own "${VAR:-60}" on line 32
+# already maps an empty override to 60 before the regex guard ever runs, so
+# this case is green with or without the guard (confirmed by the RED
+# observation below). Kept to document the pre-existing default, not to test
+# the new guard.
+wt_check_guard 'WT1 (pin, not a discriminator -- see comment): empty string -> 60 via "${VAR:-60}", not the regex guard' '' '60'
+wt_check_guard 'WT2: pure alpha ("sixty") -> falls back to 60' 'sixty' '60'
+wt_check_guard 'WT3: numeric prefix with trailing garbage ("60x") -> falls back to 60' '60x' '60'
+# WT4 is also a PIN, not a discriminator: "0" matches ^[0-9]+$ so it passes
+# through unchanged both before and after the guard. Kept as an instrument
+# check that the harness reads the real variable rather than always emitting
+# 60. On accepting "0" itself: `timeout 0` / `curl --max-time 0` both DISABLE
+# their timeout (unbounded), per `man timeout` ("A duration of 0 disables the
+# associated timeout") and a live `curl --max-time 0` probe -- verified on
+# this machine. So "0" is NOT the fire-on-first-tick harm the guard exists to
+# prevent (that harm is a MALFORMED value hitting tg_with_watchdog's bash
+# fallback loop, whose `SECONDS - start >= timeout_secs` is vacuously true at
+# timeout_secs=0 -- but that fallback only runs when neither `timeout` nor
+# `gtimeout` is on PATH). The guard's job is catching typos (non-numeric
+# input), not second-guessing an operator's explicit "0" -- that stays
+# accepted, same as TIER_GATE_MAX_ERROR_RETRIES's identical regex accepts 0.
+wt_check_guard 'WT4 (pin, not a discriminator -- see comment): "0" passes through unguarded (explicit "no timeout", not the malformed-input harm)' '0' '0'
+wt_check_guard 'WT5: negative ("-1") -> falls back to 60' '-1' '60'
+wt_check_guard 'WT6: command-injection-shaped ("5;echo PWNED") -> falls back to 60' '5;echo PWNED' '60'
+
 [[ $fails -eq 0 ]] && { echo PASS; exit 0; } || { echo "FAIL ($fails)"; exit 1; }
