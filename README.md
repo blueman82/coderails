@@ -134,11 +134,14 @@ enforcement.
 | `coderails:spec-reviewer` | Reviews a spec for completeness, consistency, clarity, scope, YAGNI before planning | read-only |
 | `coderails:wiki-writer` | Authors and maintains LLM Wiki pages against the schema; commits and opens PRs | read + write |
 | `coderails:loop-worker` | Implements one scoped task: code, tests, commit, self-review, evidence-backed report | read + write |
+| `coderails:deploy-safety-reviewer` | Reviews a PR/change for deploy-safety risk — rollback risk, blast radius, migration/schema safety, feature-flag applicability, deploy-time observability coverage | read + Bash; `Write`/`Edit` disallowed |
 
 Review agents are **not** duplicated here — `pr-review-toolkit@claude-plugins-official`
 already ships `code-reviewer`, `code-simplifier`, `comment-analyzer`,
 `pr-test-analyzer`, `silent-failure-hunter` and `type-design-analyzer`, and it is
-already a required dependency. coderails only fills the gaps.
+already a required dependency. coderails only fills the gaps; `deploy-safety-reviewer`
+above is one such gap — it covers deploy-safety concerns none of the six address,
+and explicitly defers code-level error-handling correctness to `silent-failure-hunter`.
 
 ## Hooks
 
