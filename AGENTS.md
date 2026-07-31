@@ -214,28 +214,41 @@ re-opened as findings.
   expected to demote from a block to a nudge once the artifact gate is live and
   verified in practice — ordering constraint: never before, or a window opens
   where neither gate is active.
-- **Model-role routing for spawned workers is advisory, not hook-enforced.**
+- **Model-role routing for spawned workers is advisory, and only ADVISORY-hook-enforced.**
   `agentic-loop` SKILL.md's Phase 2.8 assigns a capability role
   (`fast-mechanical`/`default`/`frontier`) plus a reasoning-effort level to
   every task before it spawns, and
   asserts the resulting role at each spawn site across the skill
   (Phases 2, 2.5, 3, 3a, 9, 10 — as of this writing; the role table lives in
   Phase 2.8, and the per-role effort defaults plus the fable-escalation rule in
-  its `model-routing.md` detail-carrier) — but no hook gates
-  `Agent`/`Task` spawn calls on the requested model — the registered
-  `PreToolUse` matchers in `hooks/hooks.json` are `Bash`, `AskUserQuestion`,
-  and `Write|Edit|MultiEdit`, none of which matches an agent-spawn tool call;
-  the remaining registered events
-  (SessionStart/UserPromptSubmit/Stop/SubagentStop) gate no tool calls.
-  This is deliberate: routing exists for cost and latency, not correctness — PR
-  gates (review, evals, hook-seam) are model-independent, so a `frontier`-role
-  worker still produces a valid, fully-gated PR; nothing load-bearing breaks if
-  a role assignment is ignored. Phase 2.8 also sanctions a legitimate
-  role-vs-role judgement call (bounded `default` vs. genuinely-ambiguous
-  `frontier`-first for a design-fork investigation) that a blunt model-gate hook
-  cannot distinguish from a disallowed worker spawn without a self-reported
-  carve-out flag — which reintroduces the same trust-the-agent problem one
-  level down.
+  its `model-routing.md` detail-carrier). `agent_model_routing_nudge.sh`
+  (`PreToolUse`, matcher `Agent`) is the one hook that touches this: when an
+  `Agent` dispatch's `tool_input.model` is absent and its
+  `description`/`prompt` text carries a mechanical/rote signal word
+  (rename/format/boilerplate/scaffold/...) or a complex/architectural one
+  (design/architecture/redesign/...), it injects an `additionalContext` nudge
+  suggesting `haiku` or `opus` respectively — advisory only, no
+  `permissionDecision`, never a deny, and silent when both or neither signal
+  family matches (ambiguous) or `model` is already set. It does not gate
+  `Agent`/`Task` spawn calls on the requested model — no hook can enforce
+  *correct* role selection, only nudge on an absent one; a `frontier`-role
+  worker still produces a valid, fully-gated PR, and a knowingly-declined
+  nudge is not a violation of anything. `agent_only_gate.sh` (`PreToolUse`,
+  matcher `Bash|Edit|Write|MultiEdit|Read|Grep|Glob|WebFetch|NotebookEdit`)
+  separately nudges (and, opt-in via `AGENT_ONLY_GATE_ENFORCE=1`, hard-blocks)
+  inline do-work tool calls made by the top-level orchestrator session,
+  detected via the `agent_id` field's presence/absence in the `PreToolUse`
+  payload — see the hook event map below for the full contract and its
+  documented detection limitation. This is deliberate: routing exists for
+  cost and latency, not correctness — PR gates (review, evals, hook-seam) are
+  model-independent, so a `frontier`-role worker still produces a valid,
+  fully-gated PR; nothing load-bearing breaks if a role assignment is
+  ignored. Phase 2.8 also sanctions a legitimate role-vs-role judgement call
+  (bounded `default` vs. genuinely-ambiguous `frontier`-first for a
+  design-fork investigation) that a blunt model-gate hook cannot distinguish
+  from a disallowed worker spawn without a self-reported carve-out flag —
+  which reintroduces the same trust-the-agent problem one level down; the
+  advisory nudge above sidesteps this by never denying anything.
 - **Headless-run exemption is env-triggered, Stop-event only, inside the agent trust
   domain — consistent with the documented ceiling.** Three Stop hooks consume the
   flag: `check_confidence_labels.sh`, `check_verify_loop.sh`, and
