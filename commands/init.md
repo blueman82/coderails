@@ -27,6 +27,7 @@ Create `workflow.config.yaml` in the current project directory. This file is rea
    - **Jira resolve transition name** (on PR merge, e.g. `"Resolved"`) — or blank
    - **Jira MCP tool namespace** (the `<ns>` between `mcp__` and `__` in your Jira MCP's tool names, e.g. `jira`, `acme-jira`, `atlassian`) — default: `jira`. Only relevant if Jira is configured.
    - **Wiki path** (relative to project dir, e.g. `../my-project-wiki`) — or "none"
+   - **Wiki supervision mode** (`discuss` or `autonomous`) — default: `discuss`. See the `wiki-ingest` skill for what each mode does.
    - **Worktree base path** — where sibling worktrees will be created. Default: parent directory of the git root (i.e. `dirname $(git rev-parse --show-toplevel)`). Show the resolved default to the user so they can confirm or override.
    - **Worktree script** (path from project root, e.g. `./worktree-add`) — or "none"
    - **Engineering-principles paths** (comma-separated glob patterns, e.g. `**/container.py,**/typed_di/**`) — or "none"
