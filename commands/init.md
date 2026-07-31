@@ -28,6 +28,9 @@ Create `workflow.config.yaml` in the current project directory. This file is rea
    - **Jira MCP tool namespace** (the `<ns>` between `mcp__` and `__` in your Jira MCP's tool names, e.g. `jira`, `acme-jira`, `atlassian`) — default: `jira`. Only relevant if Jira is configured.
    - **Wiki path** (relative to project dir, e.g. `../my-project-wiki`) — or "none"
    - **Wiki supervision mode** (`discuss` or `autonomous`) — default: `discuss`. See the `wiki-ingest` skill for what each mode does.
+   - **Wiki git worktree flow** (`true` = PR flow, `false` = write and commit directly to the vault) — default: `true`. Only relevant if a wiki path is set.
+   - **Wiki git bypass flag** (env var to set when creating/merging the wiki's own PRs, e.g. `BYPASS_REVIEW=1`) — or "none". Only relevant if wiki git worktree flow is `true`.
+   - **Wiki git pull path** (a source repo to `git pull` after a wiki PR merges) — or "none". Only relevant if wiki git worktree flow is `true`.
    - **Worktree base path** — where sibling worktrees will be created. Default: parent directory of the git root (i.e. `dirname $(git rev-parse --show-toplevel)`). Show the resolved default to the user so they can confirm or override.
    - **Worktree script** (path from project root, e.g. `./worktree-add`) — or "none"
    - **Engineering-principles paths** (comma-separated glob patterns, e.g. `**/container.py,**/typed_di/**`) — or "none"
