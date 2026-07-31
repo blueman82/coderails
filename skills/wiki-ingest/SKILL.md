@@ -85,13 +85,15 @@ WORKTREE_PATH="$vault"
 
 **From description**: Ask which files changed, or use `git log` to find relevant commits.
 
-### Step 3: Discuss Key Takeaways (unless `wiki.supervision: autonomous`)
+### Step 3: Discuss Key Takeaways (unless `wiki_supervision: autonomous`)
 
-**If `wiki.supervision` is `autonomous`:** skip straight to Step 4. Curate and commit without
-pausing — that is what this setting means. Do not add your own confirmation checkpoint before
-Step 6's commit either; `autonomous` covers the whole ingest, not just this step.
+**If `wiki_supervision` (from the project's `.claude/workflow.config.yaml`, see Step 0) is
+`autonomous`:** skip straight to Step 4. Curate and commit without pausing — that is what this
+setting means. Do not add your own confirmation checkpoint before Step 6's commit either;
+`autonomous` covers the whole ingest, not just this step.
 
-**Otherwise (the default — `discuss`, or the field absent):** before writing anything, discuss
+**Otherwise (the default — `discuss`, the field absent, or no config file resolved):** before
+writing anything, discuss
 with the user:
 - What are the key changes / main ideas?
 - What should the wiki emphasise?
