@@ -27,6 +27,10 @@ Create `workflow.config.yaml` in the current project directory. This file is rea
    - **Jira resolve transition name** (on PR merge, e.g. `"Resolved"`) — or blank
    - **Jira MCP tool namespace** (the `<ns>` between `mcp__` and `__` in your Jira MCP's tool names, e.g. `jira`, `acme-jira`, `atlassian`) — default: `jira`. Only relevant if Jira is configured.
    - **Wiki path** (relative to project dir, e.g. `../my-project-wiki`) — or "none"
+   - **Wiki supervision mode** (`discuss` or `autonomous`) — default: `discuss`. See the `wiki-ingest` skill for what each mode does.
+   - **Wiki git worktree flow** (`true` = PR flow, `false` = write and commit directly to the vault) — default: `true`. Only relevant if a wiki path is set.
+   - **Wiki git bypass flag** (env var to set when creating/merging the wiki's own PRs, e.g. `BYPASS_REVIEW=1`) — or "none". Only relevant if wiki git worktree flow is `true`.
+   - **Wiki git pull path** (a source repo to `git pull` after a wiki PR merges) — or "none". Only relevant if wiki git worktree flow is `true`.
    - **Worktree base path** — where sibling worktrees will be created. Default: parent directory of the git root (i.e. `dirname $(git rev-parse --show-toplevel)`). Show the resolved default to the user so they can confirm or override.
    - **Worktree script** (path from project root, e.g. `./worktree-add`) — or "none"
    - **Engineering-principles paths** (comma-separated glob patterns, e.g. `**/container.py,**/typed_di/**`) — or "none"
@@ -40,6 +44,10 @@ Example output:
 ```yaml
 project: my-project
 wiki_path: ../my-project-wiki    # or null
+wiki_supervision: discuss   # or "autonomous" — see wiki-ingest skill
+wiki_git_worktree: true   # true = PR flow for wiki commits, false = write directly
+wiki_git_bypass_flag: null   # e.g. "BYPASS_REVIEW=1" — env var for the wiki's own PR create/merge
+wiki_git_pull_path: null   # e.g. /path/to/source-repo — pulled after a wiki PR merges
 worktree_base: /Users/john/Downloads  # parent dir of git root, or whatever the user specified
 worktree_script: ./worktree-add   # or null
 jira:

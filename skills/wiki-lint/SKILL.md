@@ -23,20 +23,22 @@ Periodically health-check the wiki. The LLM is good at finding inconsistencies, 
 
 ### Step 0: Load the Schema
 
-`AGENTS.md` at the project's git root is loaded into context at session start (per the project's `CLAUDE.md`) — use that content. The wiki schema itself (page types, page format, the three layers) lives in `AGENTS-wiki-schema.md`, which `AGENTS.md` links to; read it for the full schema. If `AGENTS.md` isn't present in context (e.g. a fresh fork with no prior context), do not assume cwd: walk up from the current directory, checking each level for `AGENTS.md`, up to the git repository root (same pattern as `coderails::config_path` in `scripts/lib/config.sh`) — a fork's cwd may be a subdirectory of the project repo. If no `AGENTS.md` is found by the git root, tell the user to run `/wiki-init` first. (The wiki vault itself, e.g. `../coderails-wiki`, is a separate sibling repo the project's `AGENTS.md` points to by absolute path — it is not where `AGENTS.md` lives, and a fork should never need to be running from inside it.)
+`AGENTS.md` at the project's git root is loaded into context at session start (per the project's `CLAUDE.md`) — use that content. The wiki schema itself (page types, page format, the three layers) lives in `AGENTS-wiki-schema.md`, which `AGENTS.md` links to; read it for the full schema. If `AGENTS.md` isn't present in context (e.g. a fresh fork with no prior context), do not assume cwd: walk up from the current directory, checking each level for `AGENTS.md`, up to the git repository root (same pattern as `coderails::config_path` in `scripts/lib/config.sh`) — a fork's cwd may be a subdirectory of the project repo. If no `AGENTS.md` is found by the git root, tell the user to run `/wiki-init` first. (The wiki vault itself, e.g. `../coderails-wiki`, is a separate sibling repo the project's `.claude/workflow.config.yaml` points to; it is not where `AGENTS.md` lives, and a fork should never need to be running from inside it.)
 
-Extract:
-- `vault` — absolute path to the wiki vault
-- `repo` — absolute path to the **code** repo root: the directory containing
-  the `AGENTS.md` you just located. Step 2's staleness check compares against
-  its git history, so resolve this explicitly rather than assuming cwd.
-- `git.worktree` — whether to use worktree/PR flow (`true`) or write directly (`false`)
-- `git.bypass_flag` — env var for PR creation/merge (e.g. `BYPASS_REVIEW=1`)
-- `git.pull_path` — path to pull after merge
-- `git.stale_days` — age in days before a page becomes a **candidate** for the
+`repo` — absolute path to the **code** repo root: the directory containing the `AGENTS.md` you just located. Step 2's staleness check compares against its git history, so resolve this explicitly rather than assuming cwd.
+
+The git/vault settings below are **not** read from AGENTS.md — they are flat keys in that same `repo`'s `.claude/workflow.config.yaml`, resolved with the same walk-up pattern as `coderails::config_path` in `scripts/lib/config.sh`: starting from `repo`, check each directory up to its git root for `.claude/workflow.config.yaml`; the first one found wins.
+
+- `wiki_path` — the wiki vault path; resolved relative to the directory containing that `workflow.config.yaml` unless already absolute. This is `vault` below.
+- `wiki_git_worktree` — whether to use worktree/PR flow (`true`) or write directly (`false`). Default when absent: **`true`** (PR flow) — the fail-safe choice, since defaulting to direct-write would silently start committing straight to the vault for a project that expected review.
+- `wiki_git_bypass_flag` — env var for PR creation/merge (e.g. `BYPASS_REVIEW=1`)
+- `wiki_git_pull_path` — path to pull after merge. Default when absent: skip the post-merge pull.
+- `wiki_stale_days` — age in days before a page becomes a **candidate** for the
   staleness check (default: 30). Age alone never makes a page stale; see Step 2.
 
-**If `git.worktree` is `true`** (team repos):
+Set `vault` to the resolved `wiki_path` for the rest of this skill.
+
+**If `wiki_git_worktree` is `true`** (team repos):
 ```bash
 BRANCH="chore/wiki-lint-$(date +%Y%m%d-%H%M%S)"
 WORKTREE_PATH="${vault}-lint-$(date +%Y%m%d-%H%M%S)"
@@ -44,7 +46,7 @@ git -C "$vault" worktree add -b "$BRANCH" "$WORKTREE_PATH" origin/main
 # All file writes target WORKTREE_PATH
 ```
 
-**If `git.worktree` is `false`** (personal wikis):
+**If `wiki_git_worktree` is `false`** (personal wikis):
 ```bash
 WORKTREE_PATH="$vault"
 ```
@@ -57,7 +59,7 @@ Read all markdown files in `$vault` (excluding `.obsidian/`, `templates/`, `inbo
 
 **Contradictions**: Pages with `⚠️ CONTRADICTION` flags. Also look for claims that newer sources have superseded.
 
-**Stale pages**: Where `last_updated` is more than `git.stale_days` (default 30)
+**Stale pages**: Where `last_updated` is more than `wiki_stale_days` (default 30)
 days ago **and** at least one of the page's `sources:` has changed since that
 stamp. Date alone is not staleness — a page whose sources have not moved is
 correctly dated, not stale.
@@ -163,7 +165,7 @@ Classify the result:
   the entry. Do not silently treat it as unchanged, and do not let it clear a
   page that other sources have already flagged.
 - **Page has no repo-resolvable `sources:` at all** → fall back to the
-  date-only rule and apply it: over `git.stale_days`, the page **is** a stale
+  date-only rule and apply it: over `wiki_stale_days`, the page **is** a stale
   finding. Say in the report that the check was date-only, so the finding
   carries its own weaker provenance. Falling back is not clearing — a page
   nothing could be compared against is less verified than one whose sources
@@ -209,24 +211,24 @@ the prose summary.
 
 ### Step 6: Commit
 
-**If `git.worktree` is `true`**:
+**If `wiki_git_worktree` is `true`**:
 ```bash
 cd "$WORKTREE_PATH"
 git add -A
 git commit -m "wiki(lint): <summary of fixes>"
 git push -u origin "$BRANCH"
-${git.bypass_flag} gh pr create --title "wiki(lint): <summary>" --body "Findings: <list>"
-${git.bypass_flag} gh pr merge --squash --delete-branch
+${wiki_git_bypass_flag} gh pr create --title "wiki(lint): <summary>" --body "Findings: <list>"
+${wiki_git_bypass_flag} gh pr merge --squash --delete-branch
 # Note: enforce_pr_workflow gates `gh pr create`/`gh pr merge` only in a repo that has a
 # workflow.config.yaml (a wiki vault usually has none → no-op). When it does apply, the
 # satisfier is /coderails:push (create) or /pr-review-toolkit:review-pr (merge) having run
-# this session, or a settings.json Bash permission. ${git.bypass_flag} is the wiki's own
+# this session, or a settings.json Bash permission. ${wiki_git_bypass_flag} is the wiki's own
 # delivery bypass, separate from that hook.
-git -C "${git.pull_path}" pull
+git -C "${wiki_git_pull_path}" pull
 git -C "$vault" worktree remove "$WORKTREE_PATH"
 ```
 
-**If `git.worktree` is `false`**:
+**If `wiki_git_worktree` is `false`**:
 ```bash
 cd "$vault"
 git add -A

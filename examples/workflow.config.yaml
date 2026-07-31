@@ -1,5 +1,16 @@
 project: my-project
 wiki_path: null
+# Wiki supervision mode for wiki-ingest: "discuss" (default, pauses to discuss
+# before writing) or "autonomous" (curates and commits without pausing).
+# Default/absent = discuss.
+wiki_supervision: discuss
+# Wiki git flow, read by wiki-ingest/wiki-lint/wiki-query. wiki_git_worktree:
+# true = PR flow for wiki commits (default/absent = true, the fail-safe
+# choice); false = write and commit directly to the vault. The other two
+# only apply when wiki_git_worktree is true.
+wiki_git_worktree: true
+wiki_git_bypass_flag: null   # e.g. "BYPASS_REVIEW=1" — env var for the wiki's own PR create/merge
+wiki_git_pull_path: null   # e.g. /path/to/source-repo — pulled after a wiki PR merges
 worktree_base: null
 worktree_script: null
 jira: null

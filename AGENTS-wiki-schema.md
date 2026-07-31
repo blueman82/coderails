@@ -17,16 +17,10 @@ This is the single source of truth for wiki conventions. Do NOT create a separat
 
 `../coderails-wiki` (set during /wiki-init)
 
-```yaml
-git:
-  worktree: false   # personal wiki, no PR ceremony — write and commit directly
-wiki:
-  supervision: autonomous   # wiki-ingest writes and commits without a discuss-first pause.
-                             # Default when this field is absent is `discuss` (Step 3's
-                             # "discuss with the user" requirement) — this project opts
-                             # into autonomous curation explicitly; it is not the shipped
-                             # default for other coderails installs.
-```
+Vault path and git flow (`wiki_path`, `wiki_git_worktree`, `wiki_git_bypass_flag`,
+`wiki_git_pull_path`) and supervision mode (`wiki_supervision`) are flat keys in this
+project's `.claude/workflow.config.yaml`, not in this file — see the `wiki-ingest`,
+`wiki-lint`, and `wiki-query` skills' Step 0 for resolution.
 
 Vault structure:
 ```

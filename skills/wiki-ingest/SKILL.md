@@ -22,41 +22,50 @@ that and stop rather than guessing which artifact to record.
 
 ### Step 0: Load the Schema
 
-`AGENTS.md` at the project's git root is loaded into context at session start (per the project's `CLAUDE.md`) — use that content. The wiki schema itself (page types, page format, the three layers) lives in `AGENTS-wiki-schema.md`, which `AGENTS.md` links to; read it for the full schema. If `AGENTS.md` isn't present in context (e.g. a fresh fork with no prior context), do not assume cwd: walk up from the current directory, checking each level for `AGENTS.md`, up to the git repository root (same pattern as `coderails::config_path` in `scripts/lib/config.sh`) — a fork's cwd may be a subdirectory of the project repo. If no `AGENTS.md` is found by the git root, tell the user to run `/wiki-init` first. (The wiki vault itself, e.g. `../coderails-wiki`, is a separate sibling repo the project's `AGENTS.md` points to by absolute path — it is not where `AGENTS.md` lives, and a fork should never need to be running from inside it.)
+`AGENTS.md` at the project's git root is loaded into context at session start (per the project's `CLAUDE.md`) — use that content. The wiki schema itself (page types, page format, the three layers) lives in `AGENTS-wiki-schema.md`, which `AGENTS.md` links to; read it for the full schema. If `AGENTS.md` isn't present in context (e.g. a fresh fork with no prior context), do not assume cwd: walk up from the current directory, checking each level for `AGENTS.md`, up to the git repository root (same pattern as `coderails::config_path` in `scripts/lib/config.sh`) — a fork's cwd may be a subdirectory of the project repo. If no `AGENTS.md` is found by the git root, tell the user to run `/wiki-init` first. (The wiki vault itself, e.g. `../coderails-wiki`, is a separate sibling repo the project's `.claude/workflow.config.yaml` points to; it is not where `AGENTS.md` lives, and a fork should never need to be running from inside it.)
 
-This is the single source of truth for:
-- `vault` — absolute path to the wiki vault
-- `git.worktree` — whether to use git worktree/PR flow (`true`) or write directly (`false`)
-- `git.bypass_flag` — env var to set when creating/merging PRs (e.g. `BYPASS_REVIEW=1`)
-- `git.pull_path` — path to pull after merge
-- `wiki.supervision` — `discuss` (default when absent) or `autonomous`; see Step 3
+The git/vault/supervision settings below are **not** read from AGENTS.md — they are flat
+keys in that same project's `.claude/workflow.config.yaml` (the repo the source being
+ingested belongs to, i.e. wherever `AGENTS.md` was found above), resolved with the same
+walk-up pattern as `coderails::config_path` in `scripts/lib/config.sh`: starting from the
+project repo location, check each directory up to its git root for
+`.claude/workflow.config.yaml`; the first one found wins.
 
-**Example AGENTS.md git section (team repo with PR flow):**
+- `wiki_path` — the wiki vault path; resolved relative to the directory containing that
+  `workflow.config.yaml` unless already absolute. Referred to as `vault` below.
+- `wiki_git_worktree` — whether to use git worktree/PR flow (`true`) or write directly
+  (`false`). Default when absent: **`true`** (PR flow) — the fail-safe choice, since
+  defaulting to direct-write would silently start committing straight to the vault for a
+  project that expected review.
+- `wiki_git_bypass_flag` — env var to set when creating/merging PRs (e.g. `BYPASS_REVIEW=1`)
+- `wiki_git_pull_path` — path to pull after merge. Default when absent: skip the post-merge
+  pull.
+- `wiki_supervision` — `discuss` (default) or `autonomous`; see Step 3.
+
+**Example `.claude/workflow.config.yaml` (team repo with PR flow):**
 ```yaml
-git:
-  worktree: true
-  bypass_flag: BYPASS_REVIEW=1
-  pull_path: /path/to/your/source-repo
+wiki_path: ../my-project-wiki
+wiki_git_worktree: true
+wiki_git_bypass_flag: BYPASS_REVIEW=1
+wiki_git_pull_path: /path/to/your/source-repo
 ```
 
-**Example AGENTS.md git section (personal wiki, no PR ceremony):**
+**Example `.claude/workflow.config.yaml` (personal wiki, no PR ceremony, autonomous curation):**
 ```yaml
-git:
-  worktree: false
+wiki_path: ../my-project-wiki
+wiki_git_worktree: false
+wiki_supervision: autonomous   # opt into autonomous curation
 ```
-
-**Example AGENTS.md wiki supervision section (opt into autonomous curation):**
-```yaml
-wiki:
-  supervision: autonomous
-```
-If `wiki.supervision` is absent from AGENTS.md, treat it as `discuss` — the field must be
+If no config file resolves, or it resolves but has no `wiki_supervision` key, or the key
+is set to anything other than `autonomous`, treat it as `discuss` — the field must be
 explicitly set to `autonomous` to skip Step 3's pause. Never infer autonomy from context,
 momentum, or a prior authorization earlier in the same turn.
 
+Set `vault` to the resolved `wiki_path` for the rest of this skill.
+
 ### Step 1: Set Up Workspace
 
-**If `git.worktree` is `true`** (team repos — prevents parallel session conflicts):
+**If `wiki_git_worktree` is `true`** (team repos — prevents parallel session conflicts):
 ```bash
 BRANCH="chore/wiki-$(date +%Y%m%d-%H%M%S)"
 WORKTREE_PATH="${vault}-worktree-$(date +%Y%m%d-%H%M%S)"
@@ -64,7 +73,7 @@ git -C "$vault" worktree add -b "$BRANCH" "$WORKTREE_PATH" origin/main
 # All file writes target WORKTREE_PATH
 ```
 
-**If `git.worktree` is `false`** (personal wikis — write directly):
+**If `wiki_git_worktree` is `false`** (personal wikis — write directly):
 ```bash
 # Write directly to vault path — no worktree needed
 WORKTREE_PATH="$vault"
@@ -78,13 +87,15 @@ WORKTREE_PATH="$vault"
 
 **From description**: Ask which files changed, or use `git log` to find relevant commits.
 
-### Step 3: Discuss Key Takeaways (unless `wiki.supervision: autonomous`)
+### Step 3: Discuss Key Takeaways (unless `wiki_supervision: autonomous`)
 
-**If `wiki.supervision` is `autonomous`:** skip straight to Step 4. Curate and commit without
-pausing — that is what this setting means. Do not add your own confirmation checkpoint before
-Step 6's commit either; `autonomous` covers the whole ingest, not just this step.
+**If `wiki_supervision` (from the project's `.claude/workflow.config.yaml`, see Step 0) is
+`autonomous`:** skip straight to Step 4. Curate and commit without pausing — that is what this
+setting means. Do not add your own confirmation checkpoint before Step 6's commit either;
+`autonomous` covers the whole ingest, not just this step.
 
-**Otherwise (the default — `discuss`, or the field absent):** before writing anything, discuss
+**Otherwise (the default — `discuss`, the field absent, or no config file resolved):** before
+writing anything, discuss
 with the user:
 - What are the key changes / main ideas?
 - What should the wiki emphasise?
@@ -112,24 +123,24 @@ Cross-reference aggressively with `[[wiki-links]]`. Flag contradictions: `> ⚠�
 
 ### Step 6: Commit
 
-**If `git.worktree` is `true`**:
+**If `wiki_git_worktree` is `true`**:
 ```bash
 cd "$WORKTREE_PATH"
 git add -A
 git commit -m "wiki: ingest <description>"
 git push -u origin "$BRANCH"
-${git.bypass_flag} gh pr create --title "wiki: ingest <description>" --body "Pages created/updated: <list>"
-${git.bypass_flag} gh pr merge --squash --delete-branch
+${wiki_git_bypass_flag} gh pr create --title "wiki: ingest <description>" --body "Pages created/updated: <list>"
+${wiki_git_bypass_flag} gh pr merge --squash --delete-branch
 # Note: enforce_pr_workflow gates `gh pr create`/`gh pr merge` only in a repo that has a
 # workflow.config.yaml (a wiki vault usually has none → no-op). When it does apply, the
 # satisfier is /coderails:push (create) or /pr-review-toolkit:review-pr (merge) having run
-# this session, or a settings.json Bash permission. ${git.bypass_flag} is the wiki's own
+# this session, or a settings.json Bash permission. ${wiki_git_bypass_flag} is the wiki's own
 # delivery bypass, separate from that hook.
-git -C "${git.pull_path}" pull
+git -C "${wiki_git_pull_path}" pull
 git -C "$vault" worktree remove "$WORKTREE_PATH"
 ```
 
-**If `git.worktree` is `false`**:
+**If `wiki_git_worktree` is `false`**:
 ```bash
 cd "$vault"
 git add -A
