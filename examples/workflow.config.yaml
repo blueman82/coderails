@@ -1,5 +1,9 @@
 project: my-project
 wiki_path: null
+# Wiki supervision mode for wiki-ingest: "discuss" (default, pauses to discuss
+# before writing) or "autonomous" (curates and commits without pausing).
+# Default/absent = discuss.
+wiki_supervision: discuss
 worktree_base: null
 worktree_script: null
 jira: null
