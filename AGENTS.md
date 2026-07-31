@@ -316,7 +316,8 @@ re-opened as findings.
   `no_edit_on_main.sh`, `destructive_bash_gate.sh`, `test_gate.sh`,
   `comment_citation_gate.sh`, `wiki_taxonomy_gate.sh`, `crack_on_gate.sh`,
   `crack_on_prose_gate.sh`, `offload_push_guard.sh`, `unregistered_loop_guard.sh`,
-  `remember_inject_cap_guard.sh`) uses inline `if`-blocks — that pattern is equally fine.
+  `remember_inject_cap_guard.sh`, `agent_only_gate.sh`,
+  `agent_model_routing_nudge.sh`) uses inline `if`-blocks — that pattern is equally fine.
   Support/context scripts (`inject_context.sh`, `inject_bootstrap.sh`)
   also use inline blocks but are not part of the gate-pattern convention.
   New scripts should prefer named gate functions. Cheap skip-gates first, expensive
