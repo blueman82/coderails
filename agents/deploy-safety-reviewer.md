@@ -1,6 +1,6 @@
 ---
 name: deploy-safety-reviewer
-description: Reviews a PR or planned change for deploy-safety risk — rollback risk, blast radius, monitoring/observability gaps, migration/schema backward-compatibility, and feature-flag applicability — and returns ONE verdict with a named risk boundary. Read-only. Distinct from code-reviewer (correctness/quality) and security-auditor (auth/injection/secrets): this agent owns whether a *correct, secure* change is still unsafe to deploy. Use before merging a change with a runtime/production surface, not for docs-only or test-only diffs.
+description: Reviews a PR or planned change for deploy-safety risk — rollback risk, blast radius, monitoring/observability gaps, migration/schema backward-compatibility, and feature-flag applicability — and returns ONE verdict with a named risk boundary. Read-only. Distinct from code-reviewer (correctness/quality) and security-auditor (auth/injection/secrets) — this agent owns whether a correct, secure change is still unsafe to deploy. Use before merging a change with a runtime/production surface, not for docs-only or test-only diffs.
 model: sonnet
 tools: Read, Grep, Glob, Bash
 disallowedTools: Write, Edit, NotebookEdit
