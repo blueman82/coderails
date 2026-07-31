@@ -45,6 +45,9 @@ Example output:
 project: my-project
 wiki_path: ../my-project-wiki    # or null
 wiki_supervision: discuss   # or "autonomous" — see wiki-ingest skill
+wiki_git_worktree: true   # true = PR flow for wiki commits, false = write directly
+wiki_git_bypass_flag: null   # e.g. "BYPASS_REVIEW=1" — env var for the wiki's own PR create/merge
+wiki_git_pull_path: null   # e.g. /path/to/source-repo — pulled after a wiki PR merges
 worktree_base: /Users/john/Downloads  # parent dir of git root, or whatever the user specified
 worktree_script: ./worktree-add   # or null
 jira:
