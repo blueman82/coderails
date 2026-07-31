@@ -29,7 +29,6 @@ This is the single source of truth for:
 - `git.worktree` — whether to use git worktree/PR flow (`true`) or write directly (`false`)
 - `git.bypass_flag` — env var to set when creating/merging PRs (e.g. `BYPASS_REVIEW=1`)
 - `git.pull_path` — path to pull after merge
-- `wiki.supervision` — `discuss` (default when absent) or `autonomous`; see Step 3
 
 **Example AGENTS.md git section (team repo with PR flow):**
 ```yaml
@@ -45,12 +44,20 @@ git:
   worktree: false
 ```
 
-**Example AGENTS.md wiki supervision section (opt into autonomous curation):**
+**Wiki supervision mode** — `discuss` or `autonomous`; see Step 3 — is not read from
+AGENTS.md. It is the `wiki_supervision` field of the *project's own*
+`.claude/workflow.config.yaml` (the repo the source being ingested belongs to, i.e.
+wherever `AGENTS.md` was found in this step — not the vault, which usually has no
+`workflow.config.yaml` of its own). Resolve that config file with the same walk-up
+pattern as `coderails::config_path` in `scripts/lib/config.sh`: starting from the
+project repo location, check each directory up to its git root for
+`.claude/workflow.config.yaml`; the first one found wins.
+
 ```yaml
-wiki:
-  supervision: autonomous
+wiki_supervision: autonomous   # opt into autonomous curation
 ```
-If `wiki.supervision` is absent from AGENTS.md, treat it as `discuss` — the field must be
+If no config file resolves, or it resolves but has no `wiki_supervision` key, or the key
+is set to anything other than `autonomous`, treat it as `discuss` — the field must be
 explicitly set to `autonomous` to skip Step 3's pause. Never infer autonomy from context,
 momentum, or a prior authorization earlier in the same turn.
 
