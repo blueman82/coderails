@@ -41,6 +41,7 @@ Example output:
 ```yaml
 project: my-project
 wiki_path: ../my-project-wiki    # or null
+wiki_supervision: discuss   # or "autonomous" — see wiki-ingest skill
 worktree_base: /Users/john/Downloads  # parent dir of git root, or whatever the user specified
 worktree_script: ./worktree-add   # or null
 jira:
