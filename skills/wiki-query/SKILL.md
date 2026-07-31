@@ -58,8 +58,8 @@ When the answer reveals something non-obvious or reusable:
 2. Update `$vault/index.md`
 3. Append to `$vault/log.md`: `## [YYYY-MM-DD] query-file-back | <question summary>`
 
-**If `git.worktree` is `true`** (from AGENTS.md): use a worktree branch and PR — same pattern as wiki-ingest Step 1 and Step 6.
+**If `wiki_git_worktree` is `true`**: use a worktree branch and PR — same pattern as wiki-ingest Step 1 and Step 6.
 
-**If `git.worktree` is `false`**: write directly and commit to the vault.
+**If `wiki_git_worktree` is `false`**: write directly and commit to the vault.
 
 Good answers compound the knowledge base. File back anything that took real effort to assemble.
