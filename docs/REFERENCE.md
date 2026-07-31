@@ -553,6 +553,15 @@ already ships `code-reviewer`, `code-simplifier`, `comment-analyzer`,
 does not duplicate them — near-duplicate agents make dispatch ambiguous. Skills
 needing code review name `pr-review-toolkit:code-reviewer` directly.
 
+`agents/deploy-safety-reviewer.md` is not a near-duplicate of this list: it
+covers deploy-safety concerns — rollback risk, blast radius, migration/schema
+safety, feature-flag applicability, and deploy-time observability coverage —
+that no `pr-review-toolkit` agent addresses. Its one point of potential
+overlap, observability, is deliberately narrowed to the ops-visibility
+question (does alerting/dashboard/runbook coverage match the change's blast
+radius) and explicitly defers code-level error-handling correctness to
+`silent-failure-hunter`.
+
 ---
 
 ## Hook Activation Matrix
