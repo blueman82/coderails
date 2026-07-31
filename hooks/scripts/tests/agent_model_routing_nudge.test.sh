@@ -33,8 +33,6 @@ agent_payload() { # description prompt [model] -> Agent PreToolUse json
   fi
 }
 
-suggestion_of() { printf '%s' "$1" | jq -r '.hookSpecificOutput.additionalContext // empty' | grep -oE 'model: \\"[a-z]+\\"' | grep -oE '[a-z]+"?$' | tr -d '"'; }
-
 # =====================================================================
 # Scenario: mechanical/rote wording, no model -> nudge haiku
 # =====================================================================
