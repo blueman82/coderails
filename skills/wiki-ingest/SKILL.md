@@ -73,7 +73,7 @@ git -C "$vault" worktree add -b "$BRANCH" "$WORKTREE_PATH" origin/main
 # All file writes target WORKTREE_PATH
 ```
 
-**If `git.worktree` is `false`** (personal wikis — write directly):
+**If `wiki_git_worktree` is `false`** (personal wikis — write directly):
 ```bash
 # Write directly to vault path — no worktree needed
 WORKTREE_PATH="$vault"
@@ -123,24 +123,24 @@ Cross-reference aggressively with `[[wiki-links]]`. Flag contradictions: `> ⚠�
 
 ### Step 6: Commit
 
-**If `git.worktree` is `true`**:
+**If `wiki_git_worktree` is `true`**:
 ```bash
 cd "$WORKTREE_PATH"
 git add -A
 git commit -m "wiki: ingest <description>"
 git push -u origin "$BRANCH"
-${git.bypass_flag} gh pr create --title "wiki: ingest <description>" --body "Pages created/updated: <list>"
-${git.bypass_flag} gh pr merge --squash --delete-branch
+${wiki_git_bypass_flag} gh pr create --title "wiki: ingest <description>" --body "Pages created/updated: <list>"
+${wiki_git_bypass_flag} gh pr merge --squash --delete-branch
 # Note: enforce_pr_workflow gates `gh pr create`/`gh pr merge` only in a repo that has a
 # workflow.config.yaml (a wiki vault usually has none → no-op). When it does apply, the
 # satisfier is /coderails:push (create) or /pr-review-toolkit:review-pr (merge) having run
-# this session, or a settings.json Bash permission. ${git.bypass_flag} is the wiki's own
+# this session, or a settings.json Bash permission. ${wiki_git_bypass_flag} is the wiki's own
 # delivery bypass, separate from that hook.
-git -C "${git.pull_path}" pull
+git -C "${wiki_git_pull_path}" pull
 git -C "$vault" worktree remove "$WORKTREE_PATH"
 ```
 
-**If `git.worktree` is `false`**:
+**If `wiki_git_worktree` is `false`**:
 ```bash
 cd "$vault"
 git add -A

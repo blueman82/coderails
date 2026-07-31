@@ -59,7 +59,7 @@ Read all markdown files in `$vault` (excluding `.obsidian/`, `templates/`, `inbo
 
 **Contradictions**: Pages with `⚠️ CONTRADICTION` flags. Also look for claims that newer sources have superseded.
 
-**Stale pages**: Where `last_updated` is more than `git.stale_days` (default 30)
+**Stale pages**: Where `last_updated` is more than `wiki_stale_days` (default 30)
 days ago **and** at least one of the page's `sources:` has changed since that
 stamp. Date alone is not staleness — a page whose sources have not moved is
 correctly dated, not stale.
@@ -165,7 +165,7 @@ Classify the result:
   the entry. Do not silently treat it as unchanged, and do not let it clear a
   page that other sources have already flagged.
 - **Page has no repo-resolvable `sources:` at all** → fall back to the
-  date-only rule and apply it: over `git.stale_days`, the page **is** a stale
+  date-only rule and apply it: over `wiki_stale_days`, the page **is** a stale
   finding. Say in the report that the check was date-only, so the finding
   carries its own weaker provenance. Falling back is not clearing — a page
   nothing could be compared against is less verified than one whose sources
@@ -211,24 +211,24 @@ the prose summary.
 
 ### Step 6: Commit
 
-**If `git.worktree` is `true`**:
+**If `wiki_git_worktree` is `true`**:
 ```bash
 cd "$WORKTREE_PATH"
 git add -A
 git commit -m "wiki(lint): <summary of fixes>"
 git push -u origin "$BRANCH"
-${git.bypass_flag} gh pr create --title "wiki(lint): <summary>" --body "Findings: <list>"
-${git.bypass_flag} gh pr merge --squash --delete-branch
+${wiki_git_bypass_flag} gh pr create --title "wiki(lint): <summary>" --body "Findings: <list>"
+${wiki_git_bypass_flag} gh pr merge --squash --delete-branch
 # Note: enforce_pr_workflow gates `gh pr create`/`gh pr merge` only in a repo that has a
 # workflow.config.yaml (a wiki vault usually has none → no-op). When it does apply, the
 # satisfier is /coderails:push (create) or /pr-review-toolkit:review-pr (merge) having run
-# this session, or a settings.json Bash permission. ${git.bypass_flag} is the wiki's own
+# this session, or a settings.json Bash permission. ${wiki_git_bypass_flag} is the wiki's own
 # delivery bypass, separate from that hook.
-git -C "${git.pull_path}" pull
+git -C "${wiki_git_pull_path}" pull
 git -C "$vault" worktree remove "$WORKTREE_PATH"
 ```
 
-**If `git.worktree` is `false`**:
+**If `wiki_git_worktree` is `false`**:
 ```bash
 cd "$vault"
 git add -A
