@@ -22,38 +22,38 @@ that and stop rather than guessing which artifact to record.
 
 ### Step 0: Load the Schema
 
-`AGENTS.md` at the project's git root is loaded into context at session start (per the project's `CLAUDE.md`) — use that content. The wiki schema itself (page types, page format, the three layers) lives in `AGENTS-wiki-schema.md`, which `AGENTS.md` links to; read it for the full schema. If `AGENTS.md` isn't present in context (e.g. a fresh fork with no prior context), do not assume cwd: walk up from the current directory, checking each level for `AGENTS.md`, up to the git repository root (same pattern as `coderails::config_path` in `scripts/lib/config.sh`) — a fork's cwd may be a subdirectory of the project repo. If no `AGENTS.md` is found by the git root, tell the user to run `/wiki-init` first. (The wiki vault itself, e.g. `../coderails-wiki`, is a separate sibling repo the project's `AGENTS.md` points to by absolute path — it is not where `AGENTS.md` lives, and a fork should never need to be running from inside it.)
+`AGENTS.md` at the project's git root is loaded into context at session start (per the project's `CLAUDE.md`) — use that content. The wiki schema itself (page types, page format, the three layers) lives in `AGENTS-wiki-schema.md`, which `AGENTS.md` links to; read it for the full schema. If `AGENTS.md` isn't present in context (e.g. a fresh fork with no prior context), do not assume cwd: walk up from the current directory, checking each level for `AGENTS.md`, up to the git repository root (same pattern as `coderails::config_path` in `scripts/lib/config.sh`) — a fork's cwd may be a subdirectory of the project repo. If no `AGENTS.md` is found by the git root, tell the user to run `/wiki-init` first. (The wiki vault itself, e.g. `../coderails-wiki`, is a separate sibling repo the project's `.claude/workflow.config.yaml` points to; it is not where `AGENTS.md` lives, and a fork should never need to be running from inside it.)
 
-This is the single source of truth for:
-- `vault` — absolute path to the wiki vault
-- `git.worktree` — whether to use git worktree/PR flow (`true`) or write directly (`false`)
-- `git.bypass_flag` — env var to set when creating/merging PRs (e.g. `BYPASS_REVIEW=1`)
-- `git.pull_path` — path to pull after merge
-
-**Example AGENTS.md git section (team repo with PR flow):**
-```yaml
-git:
-  worktree: true
-  bypass_flag: BYPASS_REVIEW=1
-  pull_path: /path/to/your/source-repo
-```
-
-**Example AGENTS.md git section (personal wiki, no PR ceremony):**
-```yaml
-git:
-  worktree: false
-```
-
-**Wiki supervision mode** — `discuss` or `autonomous`; see Step 3 — is not read from
-AGENTS.md. It is the `wiki_supervision` field of the *project's own*
-`.claude/workflow.config.yaml` (the repo the source being ingested belongs to, i.e.
-wherever `AGENTS.md` was found in this step — not the vault, which usually has no
-`workflow.config.yaml` of its own). Resolve that config file with the same walk-up
-pattern as `coderails::config_path` in `scripts/lib/config.sh`: starting from the
+The git/vault/supervision settings below are **not** read from AGENTS.md — they are flat
+keys in that same project's `.claude/workflow.config.yaml` (the repo the source being
+ingested belongs to, i.e. wherever `AGENTS.md` was found above), resolved with the same
+walk-up pattern as `coderails::config_path` in `scripts/lib/config.sh`: starting from the
 project repo location, check each directory up to its git root for
 `.claude/workflow.config.yaml`; the first one found wins.
 
+- `wiki_path` — the wiki vault path; resolved relative to the directory containing that
+  `workflow.config.yaml` unless already absolute. Referred to as `vault` below.
+- `wiki_git_worktree` — whether to use git worktree/PR flow (`true`) or write directly
+  (`false`). Default when absent: **`true`** (PR flow) — the fail-safe choice, since
+  defaulting to direct-write would silently start committing straight to the vault for a
+  project that expected review.
+- `wiki_git_bypass_flag` — env var to set when creating/merging PRs (e.g. `BYPASS_REVIEW=1`)
+- `wiki_git_pull_path` — path to pull after merge. Default when absent: skip the post-merge
+  pull.
+- `wiki_supervision` — `discuss` (default) or `autonomous`; see Step 3.
+
+**Example `.claude/workflow.config.yaml` (team repo with PR flow):**
 ```yaml
+wiki_path: ../my-project-wiki
+wiki_git_worktree: true
+wiki_git_bypass_flag: BYPASS_REVIEW=1
+wiki_git_pull_path: /path/to/your/source-repo
+```
+
+**Example `.claude/workflow.config.yaml` (personal wiki, no PR ceremony, autonomous curation):**
+```yaml
+wiki_path: ../my-project-wiki
+wiki_git_worktree: false
 wiki_supervision: autonomous   # opt into autonomous curation
 ```
 If no config file resolves, or it resolves but has no `wiki_supervision` key, or the key
@@ -61,9 +61,11 @@ is set to anything other than `autonomous`, treat it as `discuss` — the field 
 explicitly set to `autonomous` to skip Step 3's pause. Never infer autonomy from context,
 momentum, or a prior authorization earlier in the same turn.
 
+Set `vault` to the resolved `wiki_path` for the rest of this skill.
+
 ### Step 1: Set Up Workspace
 
-**If `git.worktree` is `true`** (team repos — prevents parallel session conflicts):
+**If `wiki_git_worktree` is `true`** (team repos — prevents parallel session conflicts):
 ```bash
 BRANCH="chore/wiki-$(date +%Y%m%d-%H%M%S)"
 WORKTREE_PATH="${vault}-worktree-$(date +%Y%m%d-%H%M%S)"
