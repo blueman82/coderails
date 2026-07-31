@@ -251,6 +251,37 @@ re-opened as findings.
   from a disallowed worker spawn without a self-reported carve-out flag —
   which reintroduces the same trust-the-agent problem one level down; the
   advisory nudge above sidesteps this by never denying anything.
+- **`agent_only_gate`'s main-vs-subagent detection is real but narrow, and the
+  gate is nudge-by-default for a structural reason, not a hedge.** The
+  detection signal (`agent_id` present in the `PreToolUse` payload iff the
+  call originates inside a dispatched subagent) was confirmed empirically on
+  Claude Code 2.1.220 by a live probe: an isolated headless session with a
+  capture-only `PreToolUse` hook, one top-level `Bash` call, one top-level
+  `Agent` dispatch call, and one `Bash` call made BY the dispatched subagent —
+  the first two carried no `agent_id`/`agent_type` keys at all, the third
+  carried both, while `session_id` was identical across all three (so
+  `session_id` alone cannot distinguish them; `agent_id` is the only field
+  that does). This is a genuine discriminator, not a heuristic — but it only
+  answers "did this specific tool call originate at top level," not "is the
+  orchestrator cooperating with the discipline this hook exists to enforce."
+  A top-level session that does real work in-context and never once calls
+  `Agent` is invisible to a PreToolUse hook by construction — there is
+  nothing to intercept until a do-work tool call is actually attempted, and
+  once attempted, allowing or nudging it is the only lever this hook has; it
+  cannot compel a dispatch to happen instead. Separately, a hard top-level
+  block is not the default because it would deadlock this repo's own
+  shipping path: `enforce_pr_workflow.sh`, `scripts/merge.sh`, and every
+  workflow command assume the orchestrator runs `gh`/`git`/`scripts/*.sh`
+  inline as Bash — a blanket block would stop the orchestrator from ever
+  completing the very workflow chain that ships a PR, including this hook's
+  own. `AGENT_ONLY_GATE_ENFORCE=1` opts into hard-blocking with a carve-out
+  for exactly that workflow-chain family (mirrors `test_gate.sh`'s
+  opt-in-only posture and `remember_inject_cap_guard.sh`'s write-nothing
+  default). One documented unknown: a session started with `claude --agent
+  <name>` reportedly sets `agent_type` on every call including top-level ones
+  (per the hooks documentation), with no `agent_id` — the live probe used a
+  plain headless session, not `--agent` mode, so this hook's behaviour under
+  `--agent` mode is unverified, not confirmed either way.
 - **Headless-run exemption is env-triggered, Stop-event only, inside the agent trust
   domain — consistent with the documented ceiling.** Three Stop hooks consume the
   flag: `check_confidence_labels.sh`, `check_verify_loop.sh`, and
