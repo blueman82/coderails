@@ -30,6 +30,174 @@ coderails::_tier_review_machine_user() {
     ' "$config_file" 2>/dev/null
 }
 
+# coderails::_wiki_debt_epoch_pr <config_file>
+# Echoes the value of the top-level key wiki_debt_epoch_pr from a
+# workflow.config.yaml, or nothing if the key is absent. Same minimal
+# single-purpose awk extractor shape as coderails::_tier_review_machine_user
+# above — still not a generic config system. One deliberate ordering
+# difference from that older extractor: the inline comment is stripped BEFORE
+# the surrounding quotes, so `key: "80" # note` yields `80`, not `80"` (quote
+# stripping first leaves the trailing quote glued to the value).
+coderails::_wiki_debt_epoch_pr() {
+    local config_file="$1"
+    [[ -f "$config_file" ]] || return 0
+    awk '
+        /^wiki_debt_epoch_pr:/ {
+            sub(/^wiki_debt_epoch_pr:[[:space:]]*/, "")
+            gsub(/[[:space:]]*#.*$/, "")
+            gsub(/[[:space:]]+$/, "")
+            gsub(/^["'"'"']|["'"'"']$/, "")
+            print
+            exit
+        }
+    ' "$config_file" 2>/dev/null
+}
+
+# coderails::_wiki_path <config_file>
+# Echoes the value of the top-level key wiki_path from a workflow.config.yaml,
+# or nothing if absent. No sourceable resolver exists for this key —
+# hooks/scripts/wiki_taxonomy_gate.sh parses it inline for its own purposes —
+# so this mirrors that hook's handling (quote stripping; the caller treats
+# YAML nulls `null`/`~` as unset) in the same extractor shape as above.
+coderails::_wiki_path() {
+    local config_file="$1"
+    [[ -f "$config_file" ]] || return 0
+    awk '
+        /^wiki_path:/ {
+            sub(/^wiki_path:[[:space:]]*/, "")
+            gsub(/[[:space:]]*#.*$/, "")
+            gsub(/[[:space:]]+$/, "")
+            gsub(/^["'"'"']|["'"'"']$/, "")
+            print
+            exit
+        }
+    ' "$config_file" 2>/dev/null
+}
+
+# merge::has_wiki_ingest_for_merged_prs <pr_number>
+# Wiki-ingest debt gate (config-keyed, fail-closed). Blocks the merge while
+# any PR merged AFTER config key wiki_debt_epoch_pr remains unrepresented in
+# the configured wiki vault's origin/main — either by a sources/*.md page
+# whose `origin:` frontmatter names the PR, or by an anchored no-op ledger
+# entry in log.md (`## [YYYY-MM-DD] no-op | <repo> PR #N — reason`).
+#
+# CONFIG-KEYED AND INERT BY DEFAULT: merge.sh is repo-generic, so a repo
+# without wiki_debt_epoch_pr (or without wiki_path) gets a one-line skip
+# notice and no behaviour change. When both keys are set, every failure mode
+# is fail-closed: a gh/network failure, an unresolvable wiki_path, or a
+# failed vault fetch all err and block — never a silent skip, which would be
+# indistinguishable from the gate approving the debt.
+#
+# REGEX IDENTITY REQUIREMENT: the two coverage regexes below are a frozen
+# contract — a future proactive sweep family re-implements them and the two
+# must stay character-exact identical, or the gate and the sweep would
+# disagree about what counts as covered. Change them only in lockstep. The
+# exact forms, with ${repo_escaped} = the repo short name with ERE
+# metacharacters backslash-escaped (repo names may contain ".", an ERE
+# wildcard) and ${n} = the candidate PR number:
+#   log.md:   ^## \[[0-9]{4}-[0-9]{2}-[0-9]{2}\] no-op \| ${repo_escaped} PR #${n}([^0-9]|$)
+#   sources/: ^origin:(.*[^A-Za-z0-9._-])?${repo_escaped} PRs? [^\"]*#${n}([^0-9]|$)
+# The sources regex's (.*[^A-Za-z0-9._-])? group is a left boundary: the char
+# before the repo name must be the start (right after "origin:") or a
+# non-repo-name char, so a suffix-colliding repo ("xtest-repo") can never
+# clear "test-repo". The log.md regex's literal "| " prefix already bounds
+# its left side.
+#
+# The PR being merged is excluded from its own debt check (its ingest happens
+# after this merge), and only the vault's origin/main counts — a local,
+# unpushed wiki page is not durable coverage, hence the single fetch first.
+merge::has_wiki_ingest_for_merged_prs() {
+    local num="$1"
+    local config epoch="" wiki_rel=""
+    config=$(coderails::config_path "$PWD")
+    if [[ -n "$config" ]]; then
+        epoch=$(coderails::_wiki_debt_epoch_pr "$config") \
+            || err "Could not read $config for the wiki-ingest debt gate."
+        wiki_rel=$(coderails::_wiki_path "$config") \
+            || err "Could not read $config for the wiki-ingest debt gate."
+    fi
+    case "$wiki_rel" in null|'~') wiki_rel="" ;; esac
+    if [[ -z "$epoch" || -z "$wiki_rel" ]]; then
+        info "Wiki-ingest debt gate (has_wiki_ingest_for_merged_prs) skipped — wiki_debt_epoch_pr and/or wiki_path not configured."
+        return 0
+    fi
+    if ! [[ "$epoch" =~ ^[0-9]+$ ]]; then
+        err "wiki_debt_epoch_pr ('$epoch') is not a PR number — fix .claude/workflow.config.yaml."
+    fi
+
+    # wiki_path may be relative (resolved against the config's project root —
+    # the directory holding .claude/, same base wiki_taxonomy_gate.sh uses) or
+    # absolute. Configured-but-unresolvable is a block, not a skip.
+    local project_root vault
+    project_root=$(dirname "$(dirname "$config")")
+    case "$wiki_rel" in
+        /*) vault=$(cd "$wiki_rel" 2>/dev/null && pwd -P) || vault="" ;;
+        *)  vault=$(cd "$project_root/$wiki_rel" 2>/dev/null && pwd -P) || vault="" ;;
+    esac
+    if [[ -z "$vault" ]]; then
+        err "wiki_path ('$wiki_rel') does not resolve to a directory — fix it (or unset wiki_debt_epoch_pr to disable the wiki-ingest debt gate)."
+    fi
+
+    local repo
+    repo=$(repo) || err "Could not resolve the origin repo for the wiki-ingest debt gate."
+    repo="${repo##*/}"
+    # repo() can succeed with EMPTY output (non-github origin URL) — an empty
+    # $repo would collapse the coverage regexes into matching ANY repo's
+    # coverage, so emptiness is a hard block, not a passthrough.
+    [[ -n "$repo" ]] || err "Could not resolve the origin repo for the wiki-ingest debt gate."
+    # ERE-escape the repo name before regex interpolation ("." in a repo name
+    # would otherwise act as a wildcard — "myXrepo" coverage clearing "my.repo").
+    local repo_escaped
+    repo_escaped=$(printf '%s' "$repo" | sed 's/[][$.*+?^(){}|\\]/\\&/g')
+
+    local merged
+    merged=$(gh pr list --state merged --json number --limit 100 2>/dev/null) \
+        || err "GitHub fetch failed — could not list merged PRs for the wiki-ingest debt gate. Retry, or check gh auth/network."
+    # gh can exit 0 with empty stdout on some failure modes — jq would then
+    # "parse" nothing and the gate would silently see zero merged PRs.
+    [[ -n "$merged" ]] || err "GitHub returned an empty merged-PR response for the wiki-ingest debt gate."
+    local merged_count
+    merged_count=$(printf '%s' "$merged" | jq -r 'length' 2>/dev/null) \
+        || err "Could not parse the merged PR list for the wiki-ingest debt gate."
+    # gh pr list returns newest-first, so a full window truncates the OLDEST
+    # merged PRs — exactly the ones most likely to carry unpaid debt. A full
+    # window means unknown PRs went unchecked: fail closed.
+    if [[ "$merged_count" -eq 100 ]]; then
+        err "merged-PR window full — advance wiki_debt_epoch_pr or raise the limit."
+    fi
+    local candidates
+    candidates=$(printf '%s' "$merged" | jq -r --argjson epoch "$epoch" --argjson cur "$num" \
+        '.[].number | select(. > $epoch and . != $cur)' 2>/dev/null) \
+        || err "Could not parse the merged PR list for the wiki-ingest debt gate."
+    if [[ -z "$candidates" ]]; then
+        ok "Wiki-ingest debt clear (no merged PRs after epoch #$epoch)"
+        return 0
+    fi
+
+    git -C "$vault" fetch -q origin main \
+        || err "Wiki fetch failed — could not fetch origin main in $vault for the wiki-ingest debt gate. Retry, or check the vault path/network."
+    # A fetch that succeeds without materialising the ref would make every
+    # grep below report "not covered" against a wiki that was never searched.
+    git -C "$vault" rev-parse -q --verify origin/main >/dev/null \
+        || err "vault has no origin/main ref after the fetch — the wiki was never searched; fix the vault's origin remote for the wiki-ingest debt gate."
+
+    local n uncovered=""
+    while IFS= read -r n; do
+        [[ -z "$n" ]] && continue
+        if git -C "$vault" grep -qE "^## \[[0-9]{4}-[0-9]{2}-[0-9]{2}\] no-op \| ${repo_escaped} PR #${n}([^0-9]|$)" origin/main -- log.md \
+           || git -C "$vault" grep -qE "^origin:(.*[^A-Za-z0-9._-])?${repo_escaped} PRs? [^\"]*#${n}([^0-9]|$)" origin/main -- sources/; then
+            continue
+        fi
+        uncovered="${uncovered:+$uncovered }#$n"
+    done <<< "$candidates"
+
+    if [[ -n "$uncovered" ]]; then
+        err "Wiki-ingest debt: merged ${repo} PR(s) not covered in the wiki: ${uncovered} — clear each with a sources/*.md page whose origin: names the PR, or a log.md entry '## [YYYY-MM-DD] no-op | ${repo} PR #N — reason', then retry."
+    fi
+    ok "Wiki-ingest debt clear (all merged PRs after epoch #$epoch covered)"
+    return 0
+}
+
 merge::main() {
     local arg="${1:-auto}" br=$(branch) m=$(main)
 
@@ -210,6 +378,12 @@ merge::main() {
                 fi
                 ok "Tier-review verified (SHA: $sha, creator: $tr_creator, verdict=legitimate, tier=${PR_EVAL_TIER})"
             fi
+
+            # ─── Wiki-ingest debt gate (config-keyed, fail-closed) ────────────
+            # Third artifact gate: blocks while any post-epoch merged PR lacks
+            # wiki coverage. Inert unless wiki_debt_epoch_pr + wiki_path are
+            # configured — see merge::has_wiki_ingest_for_merged_prs above.
+            merge::has_wiki_ingest_for_merged_prs "$num"
 
             step "Merging"
             gh pr merge "$num" --merge          # remote merge ONLY — its failure must abort; branch cleanup is separate + non-fatal
