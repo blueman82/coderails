@@ -127,11 +127,17 @@ Did-Not-Verify section entirely (added 2026-07-13), not just on untagged
 bullets. The same two
 content-discipline checks (confidence-label and verify-loop) also run on
 SubagentStop — so subagents are held to the same standards as the parent session.
-On PreToolUse, seven hooks can block: the destructive-bash gate, the opt-in test
-gate, the config-gated `enforce_pr_workflow` (opt-in via workflow.config.yaml,
+On PreToolUse, nine hooks can block: the destructive-bash gate, the opt-in test
+gate, `verification_volume_ceiling` (unconditional hard block on the 3rd+
+invocation, per work-unit branch, of the full test suite or a post-evals
+validate-structure ceremony — no opt-in, no override), the config-gated
+`enforce_pr_workflow` (opt-in via workflow.config.yaml,
 like the test gate — enforces the PR chain, e.g. blocks a direct `git push` to
 `main` unless `/pr-review-toolkit:review-pr` already ran this session),
-`no_edit_on_main` (blocks editing source files, but not docs/config, while on
+`agent_only_gate` (opt-in via `AGENT_ONLY_GATE_ENFORCE=1` — nudges by default,
+hard-blocks a do-work tool call running inline in the top-level orchestrator
+session when enforced, with a carve-out for this repo's own git/gh/workflow
+plumbing), `no_edit_on_main` (blocks editing source files, but not docs/config, while on
 `main` — use `/coderails:prep` or a worktree instead; it also blocks editing
 `.claude/settings.json`/`settings.local.json` on any branch),
 `comment_citation_gate` (blocks new code comments that cite a session-artifact
