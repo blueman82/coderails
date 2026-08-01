@@ -11,7 +11,10 @@
 # exercised for real. The vault is a REAL git repo pair (remote + clone) so
 # `git fetch origin main` and the two `git grep` coverage regexes run against
 # a genuine origin/main ref, not stubs. Only gh (merged-PR list, merge
-# plumbing) and the sibling gates' pr::* helpers are stubbed.
+# plumbing) and the sibling gates' pr::* helpers are stubbed — plus, for
+# single tests, env-driven overrides: MOCK_REPO (repo() output),
+# MOCK_MERGED_EMPTY (gh exits 0 with empty stdout), MOCK_FETCH_NOOP (git
+# fetch succeeds without materialising any ref).
 set -u
 
 REPO_ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
@@ -62,7 +65,9 @@ dirty()   { return 1; }
 clean()   { return 0; }
 main()    { echo "main"; }
 
-repo()    { echo "test-owner/test-repo"; }
+# repo() honours MOCK_REPO when SET (even set-empty — the ${var-default}
+# form), so tests can reproduce repo()'s real empty-output-exit-0 mode.
+repo()    { echo "${MOCK_REPO-test-owner/test-repo}"; }
 protected() { return 1; }
 sync::main_branch() { return 0; }
 
@@ -96,6 +101,7 @@ cat > "$STUB_DIR/gh" <<'GHSTUB'
 case "$*" in
   *"pr list"*"--state merged"*)
     [ -n "${MOCK_MERGED_FAIL:-}" ] && exit 1
+    [ -n "${MOCK_MERGED_EMPTY:-}" ] && exit 0
     printf '%s' "${MOCK_MERGED_JSON:-[]}"
     ;;
   *"pr merge"*) exit 0 ;;
@@ -112,6 +118,7 @@ cat > "$STUB_DIR/git" <<'GITSTUB'
 case "$*" in
   *"push origin --delete"*) exit 0 ;;
   *"branch -D"*) exit 0 ;;
+  *" fetch "*) if [ -n "${MOCK_FETCH_NOOP:-}" ]; then exit 0; fi; exec /usr/bin/git "$@" ;;
   *) exec /usr/bin/git "$@" ;;
 esac
 GITSTUB
@@ -134,6 +141,28 @@ awk '
     { print }
 ' "$MERGE_SH" >> "$WRAPPER"
 
+# ─── Gate-only wrapper: calls merge::has_wiki_ingest_for_merged_prs directly ─
+# Needed for the unreadable-config test: in the full merge::main path the
+# PRE-EXISTING tier-review extractor call (not wrapped in `|| err`) dies first
+# under set -e, masking the wiki gate's own fail-loud branch.
+GATE_WRAPPER="$STUB_DIR/gate_only_test.sh"
+cat > "$GATE_WRAPPER" <<WRAPPERHEAD
+#!/bin/bash
+set -euo pipefail
+_DIR="\$(dirname "\${BASH_SOURCE[0]}")"
+source "\$_DIR/lib/git-common-base.sh"
+source "\$_DIR/lib/config.sh"
+WRAPPERHEAD
+awk '
+    NR==1 { next }
+    /^source.*git-common/ { next }
+    /^source.*config/ { next }
+    /^source.*post_evals/ { next }
+    /^merge::main "\$@"/ { next }
+    { print }
+' "$MERGE_SH" >> "$GATE_WRAPPER"
+printf 'merge::has_wiki_ingest_for_merged_prs "$@"\n' >> "$GATE_WRAPPER"
+
 # run_wiki_gate_test: <config_mode> <log_line> <src_line> <merged_json> [gh_fail] [break_fetch]
 #   config_mode: both | noepoch | nowiki
 #   log_line:    line committed into the vault's log.md (besides "# Log")
@@ -152,6 +181,8 @@ run_wiki_gate_test() {
         both)    printf 'wiki_path: ../%s\nwiki_debt_epoch_pr: 80\n' "$vault_name" ;;
         noepoch) printf 'wiki_path: ../%s\n' "$vault_name" ;;
         nowiki)  printf 'wiki_debt_epoch_pr: 80\n' ;;
+        badpath) printf 'wiki_path: ../no-such-vault-dir\nwiki_debt_epoch_pr: 80\n' ;;
+        quoted)  printf 'wiki_path: "../%s" # vault dir\nwiki_debt_epoch_pr: "80" # epoch note\n' "$vault_name" ;;
     esac > "$TMP/proj/.claude/workflow.config.yaml"
 
     mkdir -p "$vr/sources"
@@ -239,6 +270,7 @@ check_msg "gh-failure block message mentions the fetch" "GitHub fetch failed" "$
 run_wiki_gate_test both "$NOOP_85" 'origin: unrelated' "$MERGED_85" "" breakfetch
 rc=$?
 check "wiki-debt gate blocks when the vault fetch fails (fail closed)" 1 $rc
+check_msg "vault-fetch block message names the wiki fetch" "Wiki fetch failed" "$LAST_STDERR"
 
 # ─── Test 12: at/below-epoch merged PRs are filtered out ─────────────────────
 # Epoch is 80; the merged list holds only numbers <= 80 (42, 79, 80), all
@@ -260,5 +292,105 @@ check "wiki-debt gate: at/below-epoch merged PRs produce no candidates" 0 $rc
 rc=$?
 LAST_STDERR=$(cat "$TMP/stderr_run" 2>/dev/null || true)
 check "wiki-debt gate: the PR being merged is excluded from candidates" 0 $rc
+
+# ─── Test 14: repo() empty-output-exit-0 -> BLOCK (no false coverage) ────────
+# repo() succeeds with EMPTY output on a non-github origin URL; an empty repo
+# name would collapse the sources regex into matching ANY repo's coverage.
+# The vault deliberately holds coverage for #85 (under test-repo) that the
+# collapsed regex WOULD have matched — the gate must err instead.
+export MOCK_REPO=""
+run_wiki_gate_test both "$NOOP_85" 'origin: test-repo PRs #85' "$MERGED_85"
+rc=$?
+unset MOCK_REPO
+check "wiki-debt gate blocks when repo() resolves to empty (fail closed)" 1 $rc
+check_msg "empty-repo block message names the repo resolution" "Could not resolve the origin repo" "$LAST_STDERR"
+
+# ─── Test 15: configured-but-unresolvable wiki_path -> BLOCK, not skip ───────
+run_wiki_gate_test badpath 'nothing relevant' 'origin: unrelated' "$MERGED_85"
+rc=$?
+check "wiki-debt gate blocks when the configured wiki_path does not resolve" 1 $rc
+check_msg "unresolvable-path block message says it does not resolve" "does not resolve" "$LAST_STDERR"
+
+# ─── Test 16: suffix-colliding repo must NOT clear (left boundary) ───────────
+# "origin: xtest-repo PRs #85" must not cover test-repo's #85.
+run_wiki_gate_test both 'nothing relevant' 'origin: xtest-repo PRs #85' "$MERGED_85"
+rc=$?
+check "wiki-debt gate: suffix-colliding repo coverage (xtest-repo) does not clear test-repo" 1 $rc
+
+# ─── Test 17: dotted repo name — "." must not act as an ERE wildcard ─────────
+# repo my.repo with only myXrepo coverage in the vault must still block.
+export MOCK_REPO="test-owner/my.repo"
+run_wiki_gate_test both '## [2026-08-01] no-op | myXrepo PR #85 — theirs' 'origin: myXrepo PRs #85' "$MERGED_85"
+rc=$?
+check "wiki-debt gate: myXrepo coverage does not clear my.repo (dot escaped)" 1 $rc
+
+# ─── Test 18: dotted repo name still matches ITSELF after escaping ───────────
+run_wiki_gate_test both 'nothing relevant' 'origin: my.repo PRs #85' "$MERGED_85"
+rc=$?
+unset MOCK_REPO
+check "wiki-debt gate: my.repo coverage clears my.repo (escaping is not over-broad)" 0 $rc
+
+# ─── Test 19: gh exits 0 with EMPTY stdout -> BLOCK (fail closed) ────────────
+export MOCK_MERGED_EMPTY=1
+run_wiki_gate_test both "$NOOP_85" 'origin: unrelated' "$MERGED_85"
+rc=$?
+unset MOCK_MERGED_EMPTY
+check "wiki-debt gate blocks when gh returns empty stdout at exit 0" 1 $rc
+check_msg "empty-response block message names the empty response" "empty merged-PR response" "$LAST_STDERR"
+
+# ─── Test 20: merged-PR window full (100 entries) -> BLOCK (truncation) ──────
+# All 100 entries sit at/below the epoch, so without the window check the
+# gate would pass with zero candidates — the check must fire regardless,
+# because a full window means older post-epoch PRs may have been truncated.
+MERGED_100=$(jq -nc '[range(100) | {number: 79}]')
+run_wiki_gate_test both 'nothing relevant' 'origin: unrelated' "$MERGED_100"
+rc=$?
+check "wiki-debt gate blocks when the merged-PR window is full (100 entries)" 1 $rc
+check_msg "full-window block message says how to clear it" "merged-PR window full" "$LAST_STDERR"
+
+# ─── Test 21: fetch succeeds but origin/main ref is absent -> BLOCK ──────────
+# A no-op "successful" fetch against a vault clone with no origin/main must
+# block — otherwise every candidate reads as 'not covered' against a wiki
+# that was never searched.
+testn=$((testn+1))
+vault="$TMP/vault$testn"
+mkdir -p "$vault"
+git -C "$vault" init -q -b main
+git -C "$vault" remote add origin "$TMP/no-such-remote"
+printf 'wiki_path: ../vault%s\nwiki_debt_epoch_pr: 80\n' "$testn" > "$TMP/proj/.claude/workflow.config.yaml"
+(
+    export PATH="$STUB_DIR:$PATH"
+    export MOCK_MERGED_JSON="$MERGED_85"
+    export MOCK_FETCH_NOOP=1
+    bash "$WRAPPER" 42 2>"$TMP/stderr_run" >"$TMP/stdout_run"
+)
+rc=$?
+LAST_STDERR=$(cat "$TMP/stderr_run" 2>/dev/null || true)
+check "wiki-debt gate blocks when the vault has no origin/main ref after fetch" 1 $rc
+check_msg "missing-ref block message names the absent ref" "no origin/main ref" "$LAST_STDERR"
+
+# ─── Test 22: quoted values with inline comments parse cleanly ───────────────
+# wiki_debt_epoch_pr: "80" # note  must yield 80 (comment stripped BEFORE
+# quotes), and the quoted-with-comment wiki_path must resolve — the covered
+# vault then lets the merge proceed.
+run_wiki_gate_test quoted "$NOOP_85" 'origin: unrelated' "$MERGED_85"
+rc=$?
+check "wiki-debt gate parses quoted config values with inline comments" 0 $rc
+
+# ─── Test 23: unreadable config -> loud err, not a silent set -e death ───────
+# Uses the gate-only wrapper (see above): the full merge::main path dies
+# earlier at the pre-existing unwrapped tier-review extractor call.
+printf 'wiki_path: ../vault%s\nwiki_debt_epoch_pr: 80\n' "$testn" > "$TMP/proj/.claude/workflow.config.yaml"
+chmod 000 "$TMP/proj/.claude/workflow.config.yaml"
+(
+    export PATH="$STUB_DIR:$PATH"
+    export MOCK_MERGED_JSON="$MERGED_85"
+    bash "$GATE_WRAPPER" 42 2>"$TMP/stderr_run" >"$TMP/stdout_run"
+)
+rc=$?
+LAST_STDERR=$(cat "$TMP/stderr_run" 2>/dev/null || true)
+chmod 644 "$TMP/proj/.claude/workflow.config.yaml"
+check "wiki-debt gate errs loudly when the config file is unreadable" 1 $rc
+check_msg "unreadable-config block message names the config read" "Could not read" "$LAST_STDERR"
 
 [[ $fails -eq 0 ]] && { echo PASS; exit 0; } || { echo "FAIL ($fails)"; exit 1; }

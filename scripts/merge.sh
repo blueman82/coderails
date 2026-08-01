@@ -34,16 +34,19 @@ coderails::_tier_review_machine_user() {
 # Echoes the value of the top-level key wiki_debt_epoch_pr from a
 # workflow.config.yaml, or nothing if the key is absent. Same minimal
 # single-purpose awk extractor shape as coderails::_tier_review_machine_user
-# above — still not a generic config system.
+# above — still not a generic config system. One deliberate ordering
+# difference from that older extractor: the inline comment is stripped BEFORE
+# the surrounding quotes, so `key: "80" # note` yields `80`, not `80"` (quote
+# stripping first leaves the trailing quote glued to the value).
 coderails::_wiki_debt_epoch_pr() {
     local config_file="$1"
     [[ -f "$config_file" ]] || return 0
     awk '
         /^wiki_debt_epoch_pr:/ {
             sub(/^wiki_debt_epoch_pr:[[:space:]]*/, "")
-            gsub(/^["'"'"']|["'"'"']$/, "")
             gsub(/[[:space:]]*#.*$/, "")
             gsub(/[[:space:]]+$/, "")
+            gsub(/^["'"'"']|["'"'"']$/, "")
             print
             exit
         }
@@ -62,9 +65,9 @@ coderails::_wiki_path() {
     awk '
         /^wiki_path:/ {
             sub(/^wiki_path:[[:space:]]*/, "")
-            gsub(/^["'"'"']|["'"'"']$/, "")
             gsub(/[[:space:]]*#.*$/, "")
             gsub(/[[:space:]]+$/, "")
+            gsub(/^["'"'"']|["'"'"']$/, "")
             print
             exit
         }
@@ -88,7 +91,17 @@ coderails::_wiki_path() {
 # REGEX IDENTITY REQUIREMENT: the two coverage regexes below are a frozen
 # contract — a future proactive sweep family re-implements them and the two
 # must stay character-exact identical, or the gate and the sweep would
-# disagree about what counts as covered. Change them only in lockstep.
+# disagree about what counts as covered. Change them only in lockstep. The
+# exact forms, with ${repo_escaped} = the repo short name with ERE
+# metacharacters backslash-escaped (repo names may contain ".", an ERE
+# wildcard) and ${n} = the candidate PR number:
+#   log.md:   ^## \[[0-9]{4}-[0-9]{2}-[0-9]{2}\] no-op \| ${repo_escaped} PR #${n}([^0-9]|$)
+#   sources/: ^origin:(.*[^A-Za-z0-9._-])?${repo_escaped} PRs? [^\"]*#${n}([^0-9]|$)
+# The sources regex's (.*[^A-Za-z0-9._-])? group is a left boundary: the char
+# before the repo name must be the start (right after "origin:") or a
+# non-repo-name char, so a suffix-colliding repo ("xtest-repo") can never
+# clear "test-repo". The log.md regex's literal "| " prefix already bounds
+# its left side.
 #
 # The PR being merged is excluded from its own debt check (its ingest happens
 # after this merge), and only the vault's origin/main counts — a local,
@@ -98,8 +111,10 @@ merge::has_wiki_ingest_for_merged_prs() {
     local config epoch="" wiki_rel=""
     config=$(coderails::config_path "$PWD")
     if [[ -n "$config" ]]; then
-        epoch=$(coderails::_wiki_debt_epoch_pr "$config")
-        wiki_rel=$(coderails::_wiki_path "$config")
+        epoch=$(coderails::_wiki_debt_epoch_pr "$config") \
+            || err "Could not read $config for the wiki-ingest debt gate."
+        wiki_rel=$(coderails::_wiki_path "$config") \
+            || err "Could not read $config for the wiki-ingest debt gate."
     fi
     case "$wiki_rel" in null|'~') wiki_rel="" ;; esac
     if [[ -z "$epoch" || -z "$wiki_rel" ]]; then
@@ -126,10 +141,30 @@ merge::has_wiki_ingest_for_merged_prs() {
     local repo
     repo=$(repo) || err "Could not resolve the origin repo for the wiki-ingest debt gate."
     repo="${repo##*/}"
+    # repo() can succeed with EMPTY output (non-github origin URL) — an empty
+    # $repo would collapse the coverage regexes into matching ANY repo's
+    # coverage, so emptiness is a hard block, not a passthrough.
+    [[ -n "$repo" ]] || err "Could not resolve the origin repo for the wiki-ingest debt gate."
+    # ERE-escape the repo name before regex interpolation ("." in a repo name
+    # would otherwise act as a wildcard — "myXrepo" coverage clearing "my.repo").
+    local repo_escaped
+    repo_escaped=$(printf '%s' "$repo" | sed 's/[][$.*+?^(){}|\\]/\\&/g')
 
     local merged
     merged=$(gh pr list --state merged --json number --limit 100 2>/dev/null) \
         || err "GitHub fetch failed — could not list merged PRs for the wiki-ingest debt gate. Retry, or check gh auth/network."
+    # gh can exit 0 with empty stdout on some failure modes — jq would then
+    # "parse" nothing and the gate would silently see zero merged PRs.
+    [[ -n "$merged" ]] || err "GitHub returned an empty merged-PR response for the wiki-ingest debt gate."
+    local merged_count
+    merged_count=$(printf '%s' "$merged" | jq -r 'length' 2>/dev/null) \
+        || err "Could not parse the merged PR list for the wiki-ingest debt gate."
+    # gh pr list returns newest-first, so a full window truncates the OLDEST
+    # merged PRs — exactly the ones most likely to carry unpaid debt. A full
+    # window means unknown PRs went unchecked: fail closed.
+    if [[ "$merged_count" -eq 100 ]]; then
+        err "merged-PR window full — advance wiki_debt_epoch_pr or raise the limit."
+    fi
     local candidates
     candidates=$(printf '%s' "$merged" | jq -r --argjson epoch "$epoch" --argjson cur "$num" \
         '.[].number | select(. > $epoch and . != $cur)' 2>/dev/null) \
@@ -141,12 +176,16 @@ merge::has_wiki_ingest_for_merged_prs() {
 
     git -C "$vault" fetch -q origin main \
         || err "Wiki fetch failed — could not fetch origin main in $vault for the wiki-ingest debt gate. Retry, or check the vault path/network."
+    # A fetch that succeeds without materialising the ref would make every
+    # grep below report "not covered" against a wiki that was never searched.
+    git -C "$vault" rev-parse -q --verify origin/main >/dev/null \
+        || err "vault has no origin/main ref after the fetch — the wiki was never searched; fix the vault's origin remote for the wiki-ingest debt gate."
 
     local n uncovered=""
     while IFS= read -r n; do
         [[ -z "$n" ]] && continue
-        if git -C "$vault" grep -qE "^## \[[0-9]{4}-[0-9]{2}-[0-9]{2}\] no-op \| ${repo} PR #${n}([^0-9]|$)" origin/main -- log.md \
-           || git -C "$vault" grep -qE "^origin:.*${repo} PRs? [^\"]*#${n}([^0-9]|$)" origin/main -- sources/; then
+        if git -C "$vault" grep -qE "^## \[[0-9]{4}-[0-9]{2}-[0-9]{2}\] no-op \| ${repo_escaped} PR #${n}([^0-9]|$)" origin/main -- log.md \
+           || git -C "$vault" grep -qE "^origin:(.*[^A-Za-z0-9._-])?${repo_escaped} PRs? [^\"]*#${n}([^0-9]|$)" origin/main -- sources/; then
             continue
         fi
         uncovered="${uncovered:+$uncovered }#$n"
