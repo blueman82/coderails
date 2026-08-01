@@ -81,6 +81,7 @@ catalog: [`docs/REFERENCE.md`](./docs/REFERENCE.md).
 
 | Skill | Purpose |
 |---|---|
+| `cite-check` | Re-derive a specific claim from sources only — no recall, no inference, just evidence |
 | `dashboard` | Live local web HUD: sessions, loops, PR gate states, runs, memory activity |
 | `fable-mode` | High-autonomy self-verifying working mode for non-trivial tasks |
 | `handoff` | Structured memory + continuation prompt for a fresh session |
