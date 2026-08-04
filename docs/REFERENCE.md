@@ -545,6 +545,65 @@ is usually the most expensive one.
 
 **Used by:** `subagent-driven-development`, `dispatching-parallel-agents`.
 
+#### `design-scout`
+
+**Purpose:** Given an unresolved architectural fork (which primitive, which
+topology, which of several viable shapes), reads the actual code paths and
+originates ONE recommendation with a named flip-condition — never reviews an
+existing document. Mandatory primitive-contract read whenever a shared lock,
+queue, transaction, or similar is called in nested/recursive/parallel/re-entrant
+contexts.
+
+**Tools:** `Read, Grep, Glob, Bash`, with `disallowedTools: Write, Edit, NotebookEdit`.
+**Model:** `inherit` — `phases-setup.md`'s Phase 2.5 routes this agent at
+`default` or `frontier` per Phase 2.8's table; pass the model explicitly at
+dispatch rather than relying on this default.
+
+**Used by:** `agentic-loop` Phase 2.5 design forks.
+
+#### `docs-auditor`
+
+**Purpose:** Runs `/sync-docs` to audit the repo's own in-tree docs (README.md,
+AGENTS.md, docs/REFERENCE.md, etc.) for drift against just-merged code, then
+triages findings — fixes only drift the loop's own PRs introduced, surfaces
+pre-existing drift to the human rather than folding it in. Distinct from
+`wiki-writer`, which maintains the external wiki vault, not in-tree docs.
+
+**Tools:** `Read, Grep, Glob, Bash, Edit, Skill`, with `disallowedTools: Write, NotebookEdit`.
+**Model:** `sonnet`.
+
+**Used by:** `agentic-loop` Phase 9.
+
+#### `preflight-scout`
+
+**Purpose:** Runs the pre-planning skill sequence (planning-sequence, premortem,
+assumptions, notchecked, wiki-query) plus a retro-intake pass over
+`standing-orders.md` and recent `retro.json` files, then returns one
+consolidated pre-flight report. Additive-only — never relaxes a gate, skips a
+phase, or pre-justifies an eval amendment.
+
+**Tools:** `Read, Grep, Glob, Bash, Skill`, with `disallowedTools: Write, Edit, NotebookEdit`.
+**Model:** `sonnet`.
+
+**Used by:** `agentic-loop` Phase 2 pre-flight.
+
+#### `proof-author`
+
+**Purpose:** Writes a frozen `proof.json` from ONLY the raw authorising prompt
+and any docs it directly references — never the plan, spec, design decisions, or
+dispatching conversation. Author/grader independence for agentic-loop Phase
+2.7e. Every proof status stays `pending`; this agent never runs or scores a
+proof.
+
+**Tools:** `Read, Bash, Write`, with `disallowedTools: NotebookEdit`. Blindness
+to the plan is not tool-enforced — `Bash` reproduces `Grep`/`Glob`'s pattern
+search in full, and nothing stops the agent opening the plan if a careless task
+brief hands it the path. What is structural: it runs in an isolated context with
+no access to the conversation that produced the plan.
+**Model:** `sonnet`.
+
+**Used by:** `agentic-loop` Phase 2.7e.
+
 #### Agents deliberately not shipped
 
 `pr-review-toolkit@claude-plugins-official` is already a required dependency and
