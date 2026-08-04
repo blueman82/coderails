@@ -561,7 +561,7 @@ dispatch rather than relying on this default.
 
 **Used by:** `agentic-loop` Phase 2.5 design forks.
 
-#### `docs-auditor`
+#### `coderails:docs-auditor`
 
 **Purpose:** Runs `/sync-docs` to audit the repo's own in-tree docs (README.md,
 AGENTS.md, docs/REFERENCE.md, etc.) for drift against just-merged code, then
