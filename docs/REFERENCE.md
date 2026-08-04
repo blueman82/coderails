@@ -574,7 +574,7 @@ pre-existing drift to the human rather than folding it in. Distinct from
 
 **Used by:** `agentic-loop` Phase 9.
 
-#### `preflight-scout`
+#### `coderails:preflight-scout`
 
 **Purpose:** Runs the pre-planning skill sequence (planning-sequence, premortem,
 assumptions, notchecked, wiki-query) plus a retro-intake pass over
