@@ -545,7 +545,7 @@ is usually the most expensive one.
 
 **Used by:** `subagent-driven-development`, `dispatching-parallel-agents`.
 
-#### `design-scout`
+#### `coderails:design-scout`
 
 **Purpose:** Given an unresolved architectural fork (which primitive, which
 topology, which of several viable shapes), reads the actual code paths and
