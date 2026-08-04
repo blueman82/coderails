@@ -135,6 +135,10 @@ enforcement.
 | `coderails:wiki-writer` | Authors and maintains LLM Wiki pages against the schema; commits and opens PRs | read + write |
 | `coderails:loop-worker` | Implements one scoped task: code, tests, commit, self-review, evidence-backed report | read + write |
 | `coderails:deploy-safety-reviewer` | Reviews a PR/change for deploy-safety risk — rollback risk, blast radius, migration/schema safety, feature-flag applicability, deploy-time observability coverage | read + Bash; `Write`/`Edit` disallowed |
+| `coderails:design-scout` | Given an unresolved architectural fork, reads the actual code paths and originates ONE recommendation with a named flip-condition | read + Bash; `Write`/`Edit` disallowed |
+| `coderails:docs-auditor` | Runs `/sync-docs` to audit in-tree docs for drift against just-merged code, then triages: fixes loop-introduced drift, surfaces pre-existing drift | read + Bash + Edit; `Write` disallowed |
+| `coderails:preflight-scout` | Runs the pre-planning skill sequence (planning-sequence, premortem, assumptions, notchecked, wiki-query) plus a retro-intake pass, returns one consolidated pre-flight report | read + Bash; `Write`/`Edit` disallowed |
+| `coderails:proof-author` | Writes a frozen `proof.json` from only the raw authorising prompt and directly-referenced docs — author/grader independence for agentic-loop Phase 2.7e | Read, Bash, Write; `NotebookEdit` disallowed |
 
 Review agents are **not** duplicated here — `pr-review-toolkit@claude-plugins-official`
 already ships `code-reviewer`, `code-simplifier`, `comment-analyzer`,
