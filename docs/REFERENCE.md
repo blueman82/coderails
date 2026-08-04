@@ -587,7 +587,7 @@ phase, or pre-justifies an eval amendment.
 
 **Used by:** `agentic-loop` Phase 2 pre-flight.
 
-#### `proof-author`
+#### `coderails:proof-author`
 
 **Purpose:** Writes a frozen `proof.json` from ONLY the raw authorising prompt
 and any docs it directly references — never the plan, spec, design decisions, or
