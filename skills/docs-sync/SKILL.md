@@ -216,11 +216,19 @@ review, post-review, post-evals, merge) — same convention as
 
 ## 4. Run log and failure visibility
 
-One append-only log at the config's `expectedArtifact.artifactPath`
-(`run-{date}.log`), one line per stage per run, timestamped ISO8601. The
-no-drift short-circuit (step 2) and every delivery stage (step 3) write
-to this same file — it is both this routine's durable record of what
-happened on a given night AND the artifact its gate checks, mirroring
+One append-only log at the config's `expectedArtifact.artifactPath` —
+which for this routine is the absolute path
+`/Users/harrison/.claude/coderails-dashboard/routines/docs-sync/run-{date}.log`
+(`{date}` = the run's own UTC date, `YYYY-MM-DD`). Write to that absolute
+path and no other. Never write the run log to a repo-relative path such
+as `.claude/docs-sync-runs/`, and never adopt a pre-existing log file
+found at a different location just because it is there — a log at any
+other path is invisible to the gate, which reads only `artifactPath`. If
+that file appears absent at write time, create it; do not relocate the
+write. One line per stage per run, timestamped ISO8601. The no-drift
+short-circuit (step 2) and every delivery stage (step 3) write to this
+same file — it is both this routine's durable record of what happened on
+a given night AND the artifact its gate checks, mirroring
 `loop-retro-promotion`'s `promotion-runs.log` convention.
 
 `run=ok` is the canonical terminal success marker: the config's
