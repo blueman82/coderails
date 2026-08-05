@@ -545,6 +545,69 @@ is usually the most expensive one.
 
 **Used by:** `subagent-driven-development`, `dispatching-parallel-agents`.
 
+#### `design-scout`
+
+**Purpose:** Given an unresolved architectural fork (which primitive, which
+topology, which of several viable shapes), reads the actual code paths and
+originates ONE recommendation with a named flip-condition — never reviews an
+existing document. Mandatory primitive-contract read whenever a shared lock,
+queue, transaction, or similar is called in nested/recursive/parallel/
+re-entrant contexts.
+
+**Tools:** `Read, Grep, Glob, Bash`, with `disallowedTools: Write, Edit, NotebookEdit` — read-only is discipline, not a tool guarantee, same framing as `source-auditor`. **Model:** `inherit` — pass an explicit model at dispatch; `default` for a bounded choice, `frontier` for a genuinely ambiguous fork.
+
+**Used by:** `skills/agentic-loop/phases-setup.md` Phase 2.5, for design forks.
+
+#### `docs-auditor`
+
+**Purpose:** Runs `/sync-docs` to audit the repo's own in-tree docs (README.md,
+AGENTS.md, docs/REFERENCE.md, etc.) for drift against just-merged code, then
+triages findings — fixes only drift the loop's own PRs introduced, surfaces
+pre-existing drift to the human rather than folding it in. Distinct from
+`wiki-writer`, which maintains the external wiki vault, not in-tree docs.
+
+**Tools:** `Read, Grep, Glob, Bash, Edit, Skill`, with `disallowedTools: Write, NotebookEdit` — `Edit` is granted because in-scope fixes are the point of this agent; `Write` is withheld as a signal, not a guarantee. **Model:** `sonnet`.
+
+**Used by:** `skills/agentic-loop/SKILL.md` Phase 9, at the `default` role.
+
+#### `preflight-scout`
+
+**Purpose:** Runs the pre-planning skill sequence (`planning-sequence`,
+`premortem`, `assumptions`, `notchecked`, `wiki-query`) plus a retro-intake
+pass over `standing-orders.md` and recent `retro.json` files, then returns one
+consolidated pre-flight report. Additive-only — never relaxes a gate, skips a
+phase, or pre-justifies an eval amendment.
+
+**Tools:** `Read, Grep, Glob, Bash, Skill`, with `disallowedTools: Write, Edit, NotebookEdit`. **Model:** `sonnet`.
+
+**Used by:** `skills/agentic-loop/phases-setup.md` Phase 2 pre-flight.
+
+#### `proof-author`
+
+**Purpose:** Writes a frozen `proof.json` from ONLY the raw authorising
+prompt and any docs it directly references — never the plan, spec, design
+decisions, or dispatching conversation. Author/grader independence: every
+proof status stays `"pending"`; this agent never runs or scores a proof.
+
+**Tools:** `Read, Bash, Write`, with `disallowedTools: NotebookEdit` — blindness to the plan is an enforced *behaviour* (the self-abort tripwire), not a tool restriction; see the agent's own "What is and is not enforced" section. **Model:** `sonnet`.
+
+**Used by:** `skills/agentic-loop/phases-setup.md` Phase 2.7e, freezing `proof.json` beside `evals.json`.
+
+#### `deploy-safety-reviewer`
+
+**Purpose:** Reviews a PR or planned change for deploy-safety risk — rollback
+risk, blast radius, deploy-time observability coverage, migration/schema
+backward-compatibility, and feature-flag applicability — and returns ONE
+verdict with a named risk boundary. Distinct from `pr-review-toolkit:code-reviewer`
+(correctness/quality), `/security-review` (auth/injection/secrets), and
+`pr-review-toolkit:silent-failure-hunter` (swallowed exceptions, error-handling
+correctness) — see "Agents deliberately not shipped" below for how it avoids
+duplicating that toolkit.
+
+**Tools:** `Read, Grep, Glob, Bash`, with `disallowedTools: Write, Edit, NotebookEdit` — read-only is discipline, not a tool guarantee, same framing as `source-auditor` and `design-scout`. **Model:** `sonnet`.
+
+**Used by:** `skills/agentic-loop/SKILL.md`'s review step, alongside the six `pr-review-toolkit` reviewers and the security pass, for any change with a runtime/production surface.
+
 #### Agents deliberately not shipped
 
 `pr-review-toolkit@claude-plugins-official` is already a required dependency and
