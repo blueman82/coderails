@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildArgv, READ_ONLY_ALLOWED_TOOLS } from "../src/lib/argv";
+import { buildArgv, READ_ONLY_ALLOWED_TOOLS, NON_INTERACTIVE_FRAMING } from "../src/lib/argv";
 import type { ButtonDef } from "../src/lib/config";
 
 function button(overrides: Partial<ButtonDef> = {}): ButtonDef {
@@ -16,14 +16,14 @@ function button(overrides: Partial<ButtonDef> = {}): ButtonDef {
 describe("buildArgv", () => {
   it("builds a bare -p argv for a standard-profile button", () => {
     const argv = buildArgv(button({ profile: "standard" }));
-    expect(argv).toEqual(["-p", "/coderails:wiki-lint"]);
+    expect(argv).toEqual(["-p", `${NON_INTERACTIVE_FRAMING} /coderails:wiki-lint`]);
   });
 
   it("appends --allowedTools with the read-only set for a read-only-profile button", () => {
     const argv = buildArgv(button({ profile: "read-only" }));
     expect(argv).toEqual([
       "-p",
-      "/coderails:wiki-lint",
+      `${NON_INTERACTIVE_FRAMING} /coderails:wiki-lint`,
       "--allowedTools",
       ...READ_ONLY_ALLOWED_TOOLS,
     ]);
@@ -33,7 +33,7 @@ describe("buildArgv", () => {
     const argv = buildArgv(button({ profile: "bypass", bypassPermissions: true }));
     expect(argv).toEqual([
       "-p",
-      "/coderails:wiki-lint",
+      `${NON_INTERACTIVE_FRAMING} /coderails:wiki-lint`,
       "--dangerously-skip-permissions",
     ]);
   });
@@ -42,7 +42,7 @@ describe("buildArgv", () => {
     const argv = buildArgv(button({ profile: "auto" }));
     expect(argv).toEqual([
       "-p",
-      "/coderails:wiki-lint",
+      `${NON_INTERACTIVE_FRAMING} /coderails:wiki-lint`,
       "--permission-mode",
       "auto",
     ]);
@@ -50,12 +50,12 @@ describe("buildArgv", () => {
 
   it("merges input into a single prompt string after a '--' end-of-options sentinel, so the CLI's single positional prompt argument carries both (the CLI never merges two separate positionals — confirmed empirically, see comment above)", () => {
     const argv = buildArgv(button({ profile: "standard" }), "extra context here");
-    expect(argv).toEqual(["-p", "--", "/coderails:wiki-lint extra context here"]);
+    expect(argv).toEqual(["-p", "--", `${NON_INTERACTIVE_FRAMING} /coderails:wiki-lint extra context here`]);
   });
 
   it("still separates command from input with a space rather than string concatenation", () => {
     const argv = buildArgv(button({ profile: "standard" }), "; rm -rf /");
-    expect(argv).toEqual(["-p", "--", "/coderails:wiki-lint ; rm -rf /"]);
+    expect(argv).toEqual(["-p", "--", `${NON_INTERACTIVE_FRAMING} /coderails:wiki-lint ; rm -rf /`]);
   });
 
   it("places the '--' sentinel and merged prompt after profile flags for a read-only-profile button", () => {
@@ -65,13 +65,26 @@ describe("buildArgv", () => {
       "--allowedTools",
       ...READ_ONLY_ALLOWED_TOOLS,
       "--",
-      "/coderails:wiki-lint note",
+      `${NON_INTERACTIVE_FRAMING} /coderails:wiki-lint note`,
     ]);
   });
 
   it("uses input alone as the prompt when the button's command is empty (free-text ask button)", () => {
     const argv = buildArgv(button({ profile: "standard", command: "" }), "what does this codebase do?");
-    expect(argv).toEqual(["-p", "--", "what does this codebase do?"]);
+    expect(argv).toEqual(["-p", "--", `${NON_INTERACTIVE_FRAMING} what does this codebase do?`]);
+  });
+
+  it("prepends the non-interactive framing to the prompt when input is undefined (no-input branch)", () => {
+    const argv = buildArgv(button({ profile: "standard" }));
+    expect(argv[1]).toContain(NON_INTERACTIVE_FRAMING);
+    expect(argv[1].startsWith(NON_INTERACTIVE_FRAMING)).toBe(true);
+  });
+
+  it("prepends the non-interactive framing to the merged prompt when input is present (input branch)", () => {
+    const argv = buildArgv(button({ profile: "standard" }), "extra context here");
+    const prompt = argv[argv.length - 1];
+    expect(prompt).toContain(NON_INTERACTIVE_FRAMING);
+    expect(prompt.startsWith(NON_INTERACTIVE_FRAMING)).toBe(true);
   });
 
   it("rejects input that starts with '-' (flag smuggling) by throwing", () => {
