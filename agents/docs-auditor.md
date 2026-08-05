@@ -2,7 +2,7 @@
 name: docs-auditor
 description: Runs /sync-docs to audit the repo's own in-tree docs (README.md, AGENTS.md, docs/REFERENCE.md, etc.) for drift against just-merged code, then triages findings — fixes only drift the loop's own PRs introduced, surfaces pre-existing drift to the human rather than folding it in. Use for agentic-loop Phase 9. Distinct from wiki-writer, which maintains the external wiki vault, not in-tree docs.
 model: sonnet
-tools: Read, Grep, Glob, Bash, Edit, Skill
+tools: Read, Grep, Glob, Bash, Edit, Skill, Task
 disallowedTools: Write, NotebookEdit
 ---
 
