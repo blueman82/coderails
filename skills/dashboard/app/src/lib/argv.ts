@@ -54,6 +54,25 @@ function profileFlags(profile: ButtonDef["profile"]): string[] {
   return [];
 }
 
+// Every dashboard-dispatched run is headless (`-p`, no human watching stdout)
+// — confirmed by investigating a real failing run: the final assistant text
+// ended with a live question addressed to a human ("Want me to archive those
+// now, or leave for your review first?"), even though the run's own
+// `--allowedTools` never included an interactive-question tool and no such
+// tool-call appears in the transcript. The model wasn't blocked; it just
+// wrote in a conversational, human-addressed style out of interactive-session
+// habit. Prepending this framing to every constructed prompt — not just for
+// memory-consolidation, but for every button/routine that flows through
+// buildArgv — closes that gap at the one choke point rather than requiring
+// every SKILL.md to opt in individually. Kept to a single line (no embedded
+// newlines) so it can't alter argv shape; prepended to `prompt`/`btn.command`
+// text, never assigned to `input`, so it can never touch the flag-smuggling
+// check above (that check runs on `input` only).
+const NON_INTERACTIVE_FRAMING =
+  "This is an unattended, headless run with no human watching output in real time. " +
+  "Do not address a human or end your final text with a question. " +
+  "Write findings only to whatever report/artifact file the invoked skill specifies.";
+
 export function buildArgv(btn: ButtonDef, rawInput?: string): string[] {
   // Normalise first: empty or whitespace-only input is treated exactly like
   // no input at all. route.ts does no trim/empty check of its own (only the
