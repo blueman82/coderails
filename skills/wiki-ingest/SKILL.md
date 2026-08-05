@@ -38,8 +38,9 @@ project repo location, check each directory up to its git root for
   defaulting to direct-write would silently start committing straight to the vault for a
   project that expected review.
 - `wiki_git_bypass_flag` — env var to set when creating/merging PRs (e.g. `BYPASS_REVIEW=1`)
-- `wiki_git_pull_path` — path to pull after merge. Default when absent: skip the post-merge
-  pull.
+- `wiki_git_pull_path` — path to `git pull` from after a human merges the ingest PR (this
+  skill no longer merges or pulls itself — see Step 6). Default when absent: no pull path is
+  suggested in Step 7's report.
 - `wiki_supervision` — `discuss` (default) or `autonomous`; see Step 3.
 
 **Example `.claude/workflow.config.yaml` (team repo with PR flow):**
@@ -134,6 +135,10 @@ ${wiki_git_bypass_flag} gh pr create --title "wiki: ingest <description>" --body
 # backgrounded/detached execution. wiki-ingest never merges its own PR: report
 # the PR URL/number back (Step 7) and end. A human, or an explicit separate
 # follow-up instruction, merges it.
+# WORKTREE_PATH is deliberately left on disk here — it holds the branch backing
+# the open PR above, so removing it now would delete work in flight. Report its
+# path in Step 7; whoever merges the PR removes it afterward with:
+#   git -C "$vault" worktree remove "$WORKTREE_PATH"
 # Note: enforce_pr_workflow gates `gh pr create` only in a repo that has a
 # workflow.config.yaml (a wiki vault usually has none → no-op). When it does apply, the
 # satisfier is /coderails:push having run this session, or a settings.json Bash permission.
@@ -149,7 +154,7 @@ git commit -m "wiki: ingest <description>"
 
 ### Step 7: Report
 
-Pages created/updated, new wiki-links added, gaps identified. **If worktree flow: the PR URL/number is the final deliverable — report it and stop. The PR is not merged by this skill; a human, or an explicit separate follow-up instruction, merges it.**
+Pages created/updated, new wiki-links added, gaps identified. **If worktree flow: the PR URL/number is the final deliverable — report it and stop. The PR is not merged by this skill; a human, or an explicit separate follow-up instruction, merges it.** Also report `WORKTREE_PATH` and the cleanup command from Step 6, so whoever merges the PR knows to remove the worktree afterward.
 
 ### Step 8: Run wiki-lint
 
