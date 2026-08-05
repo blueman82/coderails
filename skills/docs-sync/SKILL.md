@@ -219,7 +219,10 @@ review, post-review, post-evals, merge) — same convention as
 One append-only log at the config's `expectedArtifact.artifactPath` —
 which for this routine is the absolute path
 `/Users/harrison/.claude/coderails-dashboard/routines/docs-sync/run-{date}.log`
-(`{date}` = the run's own UTC date, `YYYY-MM-DD`). Write to that absolute
+(`{date}` = the run's own LOCAL calendar date, `YYYY-MM-DD` — the runner
+derives it via `localDateIso()` in `skills/dashboard/runner/src/sweep.ts`,
+deliberately local rather than UTC, so a run near midnight keys the
+artifact to its local date, not its UTC one). Write to that absolute
 path and no other. Never write the run log to a repo-relative path such
 as `.claude/docs-sync-runs/`, and never adopt a pre-existing log file
 found at a different location just because it is there — a log at any
