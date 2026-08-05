@@ -68,7 +68,7 @@ function profileFlags(profile: ButtonDef["profile"]): string[] {
 // newlines) so it can't alter argv shape; prepended to `prompt`/`btn.command`
 // text, never assigned to `input`, so it can never touch the flag-smuggling
 // check above (that check runs on `input` only).
-const NON_INTERACTIVE_FRAMING =
+export const NON_INTERACTIVE_FRAMING =
   "This is an unattended, headless run with no human watching output in real time. " +
   "Do not address a human or end your final text with a question. " +
   "Write findings only to whatever report/artifact file the invoked skill specifies.";
