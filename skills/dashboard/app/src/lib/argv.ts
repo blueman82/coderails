@@ -87,16 +87,19 @@ export function buildArgv(btn: ButtonDef, rawInput?: string): string[] {
     if (btn.command.trim() === "") {
       throw new Error("buildArgv: refusing to spawn an empty prompt (no command and no input)");
     }
-    return ["-p", btn.command, ...profileFlags(btn.profile)];
+    return ["-p", `${NON_INTERACTIVE_FRAMING} ${btn.command}`, ...profileFlags(btn.profile)];
   }
 
   // Checked against the trimmed value so whitespace can't smuggle a flag
   // past a naive startsWith check (e.g. "  --dangerously-skip-permissions").
+  // Checked BEFORE framing is prepended, and against raw `input` alone —
+  // NON_INTERACTIVE_FRAMING is never assigned to `input`, so it can never
+  // reach or influence this check.
   if (input.trim().startsWith("-")) {
     throw new Error(`buildArgv: input must not start with '-' (got: ${input})`);
   }
 
   const prompt = btn.command ? `${btn.command} ${input}` : input;
 
-  return ["-p", ...profileFlags(btn.profile), "--", prompt];
+  return ["-p", ...profileFlags(btn.profile), "--", `${NON_INTERACTIVE_FRAMING} ${prompt}`];
 }
