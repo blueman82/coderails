@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { createRunHandler } from "../src/app/api/run/route";
 import type { DashboardConfig } from "../src/lib/config";
 import { createRunOutputBus } from "../src/lib/runOutputBus";
+import { NON_INTERACTIVE_FRAMING } from "../src/lib/argv";
 
 const tmpDirs: string[] = [];
 
