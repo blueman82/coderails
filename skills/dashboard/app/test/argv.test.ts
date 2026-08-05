@@ -117,14 +117,14 @@ describe("buildArgv", () => {
     const withEmptyInput = buildArgv(button({ profile: "standard" }), "");
     const withNoInput = buildArgv(button({ profile: "standard" }));
     expect(withEmptyInput).toEqual(withNoInput);
-    expect(withEmptyInput).toEqual(["-p", "/coderails:wiki-lint"]);
+    expect(withEmptyInput).toEqual(["-p", `${NON_INTERACTIVE_FRAMING} /coderails:wiki-lint`]);
   });
 
   it("treats whitespace-only input exactly like no input at all, for a normal (non-empty command) button", () => {
     const withWhitespaceInput = buildArgv(button({ profile: "standard" }), "   ");
     const withNoInput = buildArgv(button({ profile: "standard" }));
     expect(withWhitespaceInput).toEqual(withNoInput);
-    expect(withWhitespaceInput).toEqual(["-p", "/coderails:wiki-lint"]);
+    expect(withWhitespaceInput).toEqual(["-p", `${NON_INTERACTIVE_FRAMING} /coderails:wiki-lint`]);
   });
 
   it("covers a bypass-profile button with input: profile flag first, then the sentinel and merged prompt", () => {
@@ -133,7 +133,7 @@ describe("buildArgv", () => {
       "-p",
       "--dangerously-skip-permissions",
       "--",
-      "/coderails:wiki-lint go",
+      `${NON_INTERACTIVE_FRAMING} /coderails:wiki-lint go`,
     ]);
   });
 
@@ -144,13 +144,13 @@ describe("buildArgv", () => {
       "--permission-mode",
       "auto",
       "--",
-      "/coderails:wiki-lint go",
+      `${NON_INTERACTIVE_FRAMING} /coderails:wiki-lint go`,
     ]);
   });
 
   it("does not insert a '--' sentinel when there is no input", () => {
     const argv = buildArgv(button({ profile: "standard" }));
-    expect(argv).toEqual(["-p", "/coderails:wiki-lint"]);
+    expect(argv).toEqual(["-p", `${NON_INTERACTIVE_FRAMING} /coderails:wiki-lint`]);
     expect(argv).not.toContain("--");
   });
 
