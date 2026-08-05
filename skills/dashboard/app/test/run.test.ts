@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { createRunHandler } from "../src/app/api/run/route";
 import type { DashboardConfig } from "../src/lib/config";
 import { createRunOutputBus } from "../src/lib/runOutputBus";
+import { NON_INTERACTIVE_FRAMING } from "../src/lib/argv";
 
 const tmpDirs: string[] = [];
 
@@ -415,7 +416,7 @@ describe("POST /api/run — spawn shape", () => {
     await handler(req({ token: TOKEN, button: "with-input", input: "hello" }));
     const args = fake!.calls[0].args as string[];
     expect(args).toContain("--allowedTools");
-    expect(args[args.length - 1]).toBe("/coderails:assumptions hello");
+    expect(args[args.length - 1]).toBe(`${NON_INTERACTIVE_FRAMING} /coderails:assumptions hello`);
   });
 });
 

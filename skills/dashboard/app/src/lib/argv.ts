@@ -54,6 +54,31 @@ function profileFlags(profile: ButtonDef["profile"]): string[] {
   return [];
 }
 
+// Every dashboard-dispatched run is headless (`-p`, no human watching
+// stdout) — per an investigation of a real failing run's transcript: the
+// final assistant text ended with a live question addressed to a human
+// ("Want me to archive those now, or leave for your review first?"), even
+// though the run's own `--allowedTools` never included an interactive-
+// question tool and no such tool-call appears in the transcript. The model
+// wasn't blocked; it just wrote in a conversational, human-addressed style
+// out of interactive-session habit. Prepending this framing to every
+// constructed prompt — not just for memory-consolidation, but for every
+// button/routine that flows through buildArgv — closes that gap at the one
+// choke point rather than requiring every SKILL.md to opt in individually.
+// Kept to a single line (no embedded newlines) so it can't alter argv shape;
+// prepended to `prompt`/`btn.command` text, never assigned to `input`, so it
+// can never touch the flag-smuggling check above (that check runs on
+// `input` only). Prepending (rather than appending) still delivers the
+// slash command correctly — confirmed empirically on this machine
+// 2026-08-05: `claude -p "<this framing text> /coderails:assumptions"` and
+// `claude -p -- "<this framing text> /coderails:cite-check the earth is
+// round"` both invoked the named skill with `$ARGUMENTS` populated
+// correctly, not the framing prose being misparsed as the command.
+export const NON_INTERACTIVE_FRAMING =
+  "This is an unattended, headless run with no human watching output in real time. " +
+  "Do not address a human or end your final text with a question. " +
+  "Write findings only to whatever report/artifact file the invoked skill specifies.";
+
 export function buildArgv(btn: ButtonDef, rawInput?: string): string[] {
   // Normalise first: empty or whitespace-only input is treated exactly like
   // no input at all. route.ts does no trim/empty check of its own (only the
@@ -68,16 +93,19 @@ export function buildArgv(btn: ButtonDef, rawInput?: string): string[] {
     if (btn.command.trim() === "") {
       throw new Error("buildArgv: refusing to spawn an empty prompt (no command and no input)");
     }
-    return ["-p", btn.command, ...profileFlags(btn.profile)];
+    return ["-p", `${NON_INTERACTIVE_FRAMING} ${btn.command}`, ...profileFlags(btn.profile)];
   }
 
   // Checked against the trimmed value so whitespace can't smuggle a flag
   // past a naive startsWith check (e.g. "  --dangerously-skip-permissions").
+  // Checked BEFORE framing is prepended, and against raw `input` alone —
+  // NON_INTERACTIVE_FRAMING is never assigned to `input`, so it can never
+  // reach or influence this check.
   if (input.trim().startsWith("-")) {
     throw new Error(`buildArgv: input must not start with '-' (got: ${input})`);
   }
 
   const prompt = btn.command ? `${btn.command} ${input}` : input;
 
-  return ["-p", ...profileFlags(btn.profile), "--", prompt];
+  return ["-p", ...profileFlags(btn.profile), "--", `${NON_INTERACTIVE_FRAMING} ${prompt}`];
 }
