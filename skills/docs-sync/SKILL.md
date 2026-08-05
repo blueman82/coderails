@@ -220,7 +220,7 @@ One append-only log at the config's `expectedArtifact.artifactPath`,
 which is currently
 `~/.claude/coderails-dashboard/routines/docs-sync/run-{date}.log`
 (verify against `~/.claude/coderails-dashboard.json` if this ever looks
-stale) (`{date}` = the run's own LOCAL calendar date, `YYYY-MM-DD` — the
+stale; `{date}` = the run's own LOCAL calendar date, `YYYY-MM-DD` — the
 runner derives it via `localDateIso()` in
 `skills/dashboard/runner/src/sweep.ts`, deliberately local rather than
 UTC, so a run near midnight keys the artifact to its local date, not its
