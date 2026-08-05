@@ -191,6 +191,56 @@ merge::has_wiki_ingest_for_merged_prs() {
         uncovered="${uncovered:+$uncovered }#$n"
     done <<< "$candidates"
 
+    # ─── Coverage-in-progress check (open wiki-ingest PR) ─────────────────
+    # wiki-ingest's PR flow (wiki_git_worktree: true) no longer self-merges —
+    # its output page lands on an OPEN PR's head, not origin/main, until a
+    # human merges it. Without this check, every PR-flow ingest would be a
+    # false "uncovered" violation between `gh pr create` and human merge,
+    # hard-blocking this repo's own next unrelated /coderails:merge on a PR
+    # only a human can close. An open vault PR whose head already carries the
+    # coverage line is in-progress, not missing — but a merged, closed, or
+    # never-opened ingest still hard-blocks (fail-closed unchanged).
+    if [[ -n "$uncovered" ]]; then
+        local vault_url vault_repo=""
+        vault_url=$(git -C "$vault" remote get-url origin 2>/dev/null) || vault_url=""
+        if [[ "$vault_url" =~ github\.com[:/]([^/]+)/(.+)$ ]]; then
+            local vname="${BASH_REMATCH[2]}"
+            vname="${vname%/}"; vname="${vname%.git}"
+            vault_repo="${BASH_REMATCH[1]}/${vname}"
+        fi
+        if [[ -z "$vault_repo" ]]; then
+            err "Wiki-ingest debt: could not resolve the vault's GitHub repo (non-github origin?) to check for in-progress ingest PRs, and ${uncovered} remain uncovered on origin/main — fix the vault's origin remote, or clear the debt directly, then retry."
+        fi
+        local open_heads open_rc=0
+        open_heads=$(gh pr list --repo "$vault_repo" --state open --json headRefName -q '.[].headRefName' 2>/dev/null) || open_rc=$?
+        if [[ $open_rc -ne 0 ]]; then
+            err "Wiki-ingest debt: GitHub fetch failed — could not list open PRs on vault $vault_repo to check for in-progress ingest coverage of ${uncovered}. Retry, or check gh auth/network."
+        fi
+        if [[ -n "$open_heads" ]]; then
+            local un href still_uncovered="" in_progress=""
+            for un in $uncovered; do
+                n="${un#\#}"
+                local covered_in_progress=""
+                while IFS= read -r href; do
+                    [[ -z "$href" ]] && continue
+                    git -C "$vault" fetch -q origin "$href" 2>/dev/null || continue
+                    if git -C "$vault" grep -qE "^## \[[0-9]{4}-[0-9]{2}-[0-9]{2}\] no-op \| ${repo_escaped} PR #${n}([^0-9]|$)" FETCH_HEAD -- log.md \
+                       || git -C "$vault" grep -qE "^origin:(.*[^A-Za-z0-9._-])?${repo_escaped} PRs? [^\"]*#${n}([^0-9]|$)" FETCH_HEAD -- sources/; then
+                        covered_in_progress="$href"
+                        break
+                    fi
+                done <<< "$open_heads"
+                if [[ -n "$covered_in_progress" ]]; then
+                    in_progress="${in_progress:+$in_progress }${un}(vault:$covered_in_progress)"
+                else
+                    still_uncovered="${still_uncovered:+$still_uncovered }${un}"
+                fi
+            done
+            [[ -n "$in_progress" ]] && warn "Wiki-ingest debt coverage in progress (open vault PR, not yet merged — will re-check next merge): ${in_progress}"
+            uncovered="$still_uncovered"
+        fi
+    fi
+
     if [[ -n "$uncovered" ]]; then
         err "Wiki-ingest debt: merged ${repo} PR(s) not covered in the wiki: ${uncovered} — clear each with a sources/*.md page whose origin: names the PR, or a log.md entry '## [YYYY-MM-DD] no-op | ${repo} PR #N — reason', then retry."
     fi

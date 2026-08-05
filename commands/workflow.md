@@ -170,7 +170,8 @@ Execute in order:
 
 1. `/coderails:merge` — merges the PR, switches back to `main`, pulls latest. Do not re-ask about merge strategy flags.
 2. **If `config.wiki_path` is non-null**: `/wiki-ingest` — creates the source page in `<config.wiki_path>/sources/pr_<N>_*.md`, updates affected wiki pages, refreshes the index, appends to the log. Never write wiki pages directly — always use the skill.
-3. **If `config.wiki_path` is non-null**: `/wiki-lint` — checks for contradictions, stale pages, orphans, missing cross-references. Fix anything directly related to this PR; defer anything else.
+3. **If `config.wiki_path` is non-null AND `config.wiki_git_worktree` is `false` (direct-write)**: `/wiki-lint` — checks for contradictions, stale pages, orphans, missing cross-references. Fix anything directly related to this PR; defer anything else.
+   **If `config.wiki_git_worktree` is `true`, or the key is absent from config (wiki-ingest's own Step 0 fail-safe default is `true` — PR flow), do not run `/wiki-lint` here.** The wiki-ingest PR from step 2 is still open — `/wiki-lint` audits the vault's merged state (`origin/main`), which doesn't yet include the pages just ingested (same reasoning as wiki-ingest's own Step 8). Run `/wiki-lint` as a separate follow-up once that PR has actually merged.
 
 Report: merge commit SHA, wiki source page path (if wiki enabled), any lint findings that need follow-up.
 
