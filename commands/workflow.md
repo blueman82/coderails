@@ -30,7 +30,7 @@ This command is the umbrella for the canonical code-change workflow. The rules i
 - **Engineering-principles pre-flight**: run `config.engineering_principles_skill` (default: `/engineering-principles-python`) before pushing if the diff touches paths listed in `config.engineering_principles_paths` (or any file with ≥20 lines changed)
 - **Adversarial PR review**: use `/pr-review-toolkit:review-pr`, not manual Agent fan-out — runs 4+ specialist agents in parallel
 - **Apply findings inline**: on authorized ship-it, apply blocking and worthwhile review findings directly; do not re-ask per finding
-- **Wiki after merge**: after every merge run BOTH `/wiki-ingest` AND `/wiki-lint` (if `config.wiki_path` is non-null)
+- **Wiki after merge**: after every merge run `/wiki-ingest` (if `config.wiki_path` is non-null); also run `/wiki-lint` immediately only when `config.wiki_git_worktree` is `false` (direct-write) — for PR flow (`true`, or the key absent) `/wiki-lint` is deferred until the ingest PR merges, see Phase 5
 - **Parallel tool calls**: when multiple tool calls or file reads have no dependency between them, issue them in parallel in a single message — not sequentially. Never serialize work that can run concurrently.
 
 Phase 2b (design adversarial review) is distinct from Phase 3 (`/pr-review-toolkit:review-pr`): Phase 2b reviews the *design page* before coding, Phase 3 reviews the *code* before merge. Both are required on non-trivial features.
@@ -173,7 +173,7 @@ Execute in order:
 3. **If `config.wiki_path` is non-null AND `config.wiki_git_worktree` is `false` (direct-write)**: `/wiki-lint` — checks for contradictions, stale pages, orphans, missing cross-references. Fix anything directly related to this PR; defer anything else.
    **If `config.wiki_git_worktree` is `true`, or the key is absent from config (wiki-ingest's own Step 0 fail-safe default is `true` — PR flow), do not run `/wiki-lint` here.** The wiki-ingest PR from step 2 is still open — `/wiki-lint` audits the vault's merged state (`origin/main`), which doesn't yet include the pages just ingested (same reasoning as wiki-ingest's own Step 8). Run `/wiki-lint` as a separate follow-up once that PR has actually merged.
 
-Report: merge commit SHA, wiki source page path (if wiki enabled), any lint findings that need follow-up.
+Report: merge commit SHA, wiki source page path (if wiki enabled), any lint findings that need follow-up (if lint ran).
 
 ## Worktree cleanup
 
