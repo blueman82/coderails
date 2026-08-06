@@ -91,8 +91,11 @@ coderails::_wiki_path() {
 # REGEX IDENTITY REQUIREMENT: the two coverage regexes below are a frozen
 # contract — a future proactive sweep family re-implements them and the two
 # must stay character-exact identical, or the gate and the sweep would
-# disagree about what counts as covered. Change them only in lockstep. The
-# exact forms, with ${repo_escaped} = the repo short name with ERE
+# disagree about what counts as covered. Change them only in lockstep. Both
+# patterns now appear THREE times in this function — against origin/main
+# below, and again against each open vault PR head's FETCH_HEAD in the
+# coverage-in-progress check further down — every copy must move together.
+# The exact forms, with ${repo_escaped} = the repo short name with ERE
 # metacharacters backslash-escaped (repo names may contain ".", an ERE
 # wildcard) and ${n} = the candidate PR number:
 #   log.md:   ^## \[[0-9]{4}-[0-9]{2}-[0-9]{2}\] no-op \| ${repo_escaped} PR #${n}([^0-9]|$)
@@ -191,10 +194,103 @@ merge::has_wiki_ingest_for_merged_prs() {
         uncovered="${uncovered:+$uncovered }#$n"
     done <<< "$candidates"
 
+    # ─── Coverage-in-progress check (open vault PR) ────────────────────────
+    # wiki-ingest's PR flow (wiki_git_worktree: true) no longer self-merges —
+    # its output page lands on an OPEN PR's head, not origin/main, until a
+    # human merges it. Without this check, every PR-flow ingest would be a
+    # false "uncovered" violation between `gh pr create` and human merge,
+    # hard-blocking this repo's own next unrelated /coderails:merge on a PR
+    # only a human can close. Any open PR on the vault (not just one this
+    # gate can identify as wiki-ingest's own — headRefName alone doesn't
+    # distinguish that) whose head already carries the coverage line is
+    # in-progress, not missing — but a merged, closed, or never-opened
+    # ingest still hard-blocks (fail-closed unchanged). Introduces a third
+    # gate outcome alongside the pre-existing covered/uncovered pair: see
+    # the REGEX IDENTITY REQUIREMENT note above — the same two coverage
+    # regexes are reused verbatim below, now duplicated a third time (also
+    # against FETCH_HEAD); any edit to those patterns must update every
+    # copy, including this one, in lockstep.
+    local in_progress=""
+    if [[ -n "$uncovered" ]]; then
+        local vault_url vault_repo=""
+        vault_url=$(git -C "$vault" remote get-url origin 2>/dev/null) || vault_url=""
+        if [[ "$vault_url" =~ github\.com[:/]([^/]+)/(.+)$ ]]; then
+            local vname="${BASH_REMATCH[2]}"
+            vname="${vname%/}"; vname="${vname%.git}"
+            vault_repo="${BASH_REMATCH[1]}/${vname}"
+        fi
+        if [[ -z "$vault_repo" ]]; then
+            # Not a failure — a vault with a non-github.com origin simply has
+            # no open-PR concept to probe. Warn (visibility) and fall through
+            # to the pre-existing origin/main verdict unchanged; do not
+            # misdiagnose this as a remote misconfiguration to fix.
+            warn "Wiki-ingest debt: in-progress-coverage probe skipped (vault origin is not a github.com URL) — verdict based on origin/main only."
+        else
+            local open_heads open_rc=0
+            open_heads=$(gh pr list --repo "$vault_repo" --state open --json headRefName --limit 100 -q '.[].headRefName' 2>/dev/null) || open_rc=$?
+            if [[ $open_rc -ne 0 ]]; then
+                err "Wiki-ingest debt: GitHub fetch failed — could not list open PRs on vault $vault_repo to check for in-progress ingest coverage of ${uncovered}. Retry, or check gh auth/network."
+            fi
+            # Same fail-closed posture as the merged-PR window above: a full
+            # window of 100 open PRs on the vault means some may be truncated
+            # and unchecked — that could hide real coverage-in-progress and
+            # cause a false hard-block, so warn rather than silently
+            # proceeding as if the list were complete.
+            if [[ $(printf '%s\n' "$open_heads" | grep -c .) -eq 100 ]]; then
+                warn "Wiki-ingest debt: vault $vault_repo has 100+ open PRs — in-progress-coverage probe may have missed some; a false debt block is possible."
+            fi
+            if [[ -n "$open_heads" ]]; then
+                # Loop heads OUTER, still-uncovered numbers INNER: one fetch
+                # per head (FETCH_HEAD is always the head just fetched — no
+                # named refs, no vault-side state, nothing to clean up), and
+                # each covered number is dropped from $remaining as it's
+                # found so later heads only check what's left. A per-ref
+                # fetch failure is tracked, not silently skipped: if any open
+                # head fails to fetch while debt still remains uncovered
+                # after the loop, that's surfaced as a hard err rather than
+                # silently downgrading to "no coverage" — a single stale ref
+                # is enough to make the verdict unverifiable, not just a
+                # full vault/network outage, because that one ref might have
+                # been the PR carrying the coverage line.
+                local href remaining="$uncovered" failed_hrefs=""
+                while IFS= read -r href; do
+                    [[ -z "$href" || -z "$remaining" ]] && continue
+                    if ! git -C "$vault" fetch -q origin "$href" 2>/dev/null; then
+                        failed_hrefs="${failed_hrefs:+$failed_hrefs }${href}"
+                        continue
+                    fi
+                    local un next_remaining=""
+                    for un in $remaining; do
+                        n="${un#\#}"
+                        if git -C "$vault" grep -qE "^## \[[0-9]{4}-[0-9]{2}-[0-9]{2}\] no-op \| ${repo_escaped} PR #${n}([^0-9]|$)" FETCH_HEAD -- log.md \
+                           || git -C "$vault" grep -qE "^origin:(.*[^A-Za-z0-9._-])?${repo_escaped} PRs? [^\"]*#${n}([^0-9]|$)" FETCH_HEAD -- sources/; then
+                            in_progress="${in_progress:+$in_progress }${un}(vault:$href)"
+                        else
+                            next_remaining="${next_remaining:+$next_remaining }${un}"
+                        fi
+                    done
+                    remaining="$next_remaining"
+                done <<< "$open_heads"
+                if [[ -n "$failed_hrefs" ]]; then
+                    warn "Wiki-ingest debt: could not fetch open vault PR head(s) to check in-progress coverage: ${failed_hrefs} — treating as unchecked, not as absent."
+                fi
+                [[ -n "$in_progress" ]] && warn "Wiki-ingest debt coverage in progress (open vault PR, not yet merged — will re-check next merge): ${in_progress}"
+                if [[ -n "$remaining" && -n "$failed_hrefs" ]]; then
+                    err "Wiki-ingest debt: could not verify in-progress coverage for ${remaining} — fetch failed for open vault PR head(s) ${failed_hrefs}, so this may be unchecked debt rather than confirmed debt. Retry, or check the vault path/network, then retry the merge."
+                fi
+                uncovered="$remaining"
+            fi
+        fi
+    fi
+
     if [[ -n "$uncovered" ]]; then
         err "Wiki-ingest debt: merged ${repo} PR(s) not covered in the wiki: ${uncovered} — clear each with a sources/*.md page whose origin: names the PR, or a log.md entry '## [YYYY-MM-DD] no-op | ${repo} PR #N — reason', then retry."
     fi
-    ok "Wiki-ingest debt clear (all merged PRs after epoch #$epoch covered)"
+    if [[ -n "$in_progress" ]]; then
+        ok "Wiki-ingest debt: no hard violations (some PRs have coverage in progress on an open vault PR, not yet merged — see warning above; epoch #$epoch)"
+    else
+        ok "Wiki-ingest debt clear (all merged PRs after epoch #$epoch covered)"
+    fi
     return 0
 }
 
