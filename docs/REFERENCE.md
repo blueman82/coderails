@@ -545,6 +545,72 @@ is usually the most expensive one.
 
 **Used by:** `subagent-driven-development`, `dispatching-parallel-agents`.
 
+#### `design-scout`
+
+**Purpose:** Given an unresolved architectural fork (which primitive, which
+topology, which of several viable shapes), reads the actual code paths and
+originates ONE recommendation with a named flip-condition — never reviews an
+existing document. Mandatory primitive-contract read whenever a shared lock,
+queue, transaction, or similar is called in nested/recursive/parallel/
+re-entrant contexts.
+
+**Tools:** `Read, Grep, Glob, Bash`, with `disallowedTools: Write, Edit, NotebookEdit` (read-only discipline, not a tool guarantee — `Bash` can mutate). **Model:** `inherit` — pass an explicit model at dispatch; `agentic-loop` Phase 2.5 routes `default` or `frontier` per Phase 2.8's table.
+
+**Used by:** `agentic-loop` Phase 2.5 design forks.
+
+#### `docs-auditor`
+
+**Purpose:** Runs `/sync-docs` to audit the repo's own in-tree docs
+(README.md, AGENTS.md, docs/REFERENCE.md, etc.) for drift against just-merged
+code, then triages findings — fixes only drift the loop's own PRs introduced,
+surfaces pre-existing drift to the human rather than folding it in. Distinct
+from `wiki-writer`, which maintains the external wiki vault, not in-tree docs.
+
+**Tools:** `Read, Grep, Glob, Bash, Edit, Skill, Task`, with `disallowedTools: Write, NotebookEdit`. **Model:** `sonnet`.
+
+**Used by:** `agentic-loop` Phase 9.
+
+#### `preflight-scout`
+
+**Purpose:** Runs the pre-planning skill sequence (planning-sequence,
+premortem, assumptions, notchecked, wiki-query) plus a retro-intake pass over
+`standing-orders.md` and recent `retro.json` files, then returns one
+consolidated pre-flight report. Additive-only — never relaxes a gate, skips a
+phase, or pre-justifies an eval amendment.
+
+**Tools:** `Read, Grep, Glob, Bash, Skill`, with `disallowedTools: Write, Edit, NotebookEdit`. **Model:** `sonnet`.
+
+**Used by:** `agentic-loop` Phase 2 pre-flight.
+
+#### `proof-author`
+
+**Purpose:** Writes a frozen `proof.json` from ONLY the raw authorising
+prompt and any docs it directly references — never the plan, spec, design
+decisions, or dispatching conversation. Author/grader independence for
+`agentic-loop` Phase 2.7e. Every proof status stays `"pending"`; this agent
+never runs or scores a proof.
+
+**Tools:** `Read, Bash, Write`, with `disallowedTools: NotebookEdit`. **Model:** `sonnet`.
+
+**Used by:** `agentic-loop` Phase 2.7e.
+
+#### `deploy-safety-reviewer`
+
+**Purpose:** Reviews a PR or planned change for deploy-safety risk —
+rollback risk, blast radius, deploy-time observability coverage,
+migration/schema backward-compatibility, and feature-flag applicability —
+and returns ONE verdict with a named risk boundary. Distinct from
+`pr-review-toolkit:code-reviewer` (correctness/quality), `/security-review`
+(auth/injection/secrets), and `pr-review-toolkit:silent-failure-hunter`
+(swallowed exceptions, error-handling correctness) — this agent owns whether
+a correct, secure, non-silently-failing change is still unsafe to deploy.
+
+**Tools:** `Read, Grep, Glob, Bash`, with `disallowedTools: Write, Edit, NotebookEdit` (read-only discipline, not a tool guarantee, same framing as `source-auditor`/`design-scout`). **Model:** `sonnet`.
+
+**Used by:** any change with a runtime/production surface, before merge — see
+"Agents deliberately not shipped" below for why it exists alongside the
+`pr-review-toolkit` review agents rather than duplicating them.
+
 #### Agents deliberately not shipped
 
 `pr-review-toolkit@claude-plugins-official` is already a required dependency and
