@@ -238,6 +238,9 @@ git commit -m "wiki(lint): <summary of findings>"
 ### Step 7: Pairing note
 
 Lint does not need to trigger a follow-up ingest — this direction is
-one-way. It's `coderails:wiki-ingest` that always pairs forward into a
-lint pass (see that skill's own Step 8); this skill is the target of that
-pairing, not a source of a new obligation back onto ingest.
+one-way. It's `coderails:wiki-ingest` that pairs forward into a lint pass
+(see that skill's own Step 8) — immediately for direct-write
+(`wiki_git_worktree: false`), or as a separate follow-up once the ingest
+PR merges for PR flow (`wiki_git_worktree: true`, the default); this
+skill is the target of that pairing, not a source of a new obligation
+back onto ingest.

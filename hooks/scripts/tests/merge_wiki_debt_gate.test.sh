@@ -10,11 +10,17 @@
 # relative wiki_path resolution (against the config's project root) is
 # exercised for real. The vault is a REAL git repo pair (remote + clone) so
 # `git fetch origin main` and the two `git grep` coverage regexes run against
-# a genuine origin/main ref, not stubs. Only gh (merged-PR list, merge
-# plumbing) and the sibling gates' pr::* helpers are stubbed — plus, for
-# single tests, env-driven overrides: MOCK_REPO (repo() output),
-# MOCK_MERGED_EMPTY (gh exits 0 with empty stdout), MOCK_FETCH_NOOP (git
-# fetch succeeds without materialising any ref).
+# a genuine origin/main ref, not stubs. gh (merged-PR list, open-PR list,
+# merge plumbing), `git remote get-url origin` (conditionally, for the
+# coverage-in-progress probe's vault-repo resolution — MOCK_VAULT_GITHUB),
+# and the sibling gates' pr::* helpers are stubbed — plus, for single tests,
+# env-driven overrides: MOCK_REPO (repo() output), MOCK_MERGED_EMPTY (gh
+# exits 0 with empty stdout), MOCK_FETCH_NOOP (git fetch succeeds without
+# materialising any ref), MOCK_OPEN_HEADS (open-PR head ref names for the
+# coverage-in-progress probe), MOCK_OPEN_FAIL (gh pr list --state open exits
+# 1), MOCK_VAULT_GITHUB (makes the vault's origin resolve as a github.com
+# URL so the probe engages, while fetch/grep/clone still hit the real local
+# vault remote).
 set -u
 
 REPO_ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
@@ -95,7 +101,8 @@ BASELIB
 # stays inactive here — this file exercises only the wiki-ingest debt gate.
 
 # Stub gh: merge plumbing always succeeds; the merged-PR list is driven by
-# MOCK_MERGED_JSON / MOCK_MERGED_FAIL env vars set per-test.
+# MOCK_MERGED_JSON / MOCK_MERGED_FAIL env vars set per-test. The open-PR list
+# (coverage-in-progress probe) is driven by MOCK_OPEN_HEADS / MOCK_OPEN_FAIL.
 cat > "$STUB_DIR/gh" <<'GHSTUB'
 #!/bin/bash
 case "$*" in
@@ -103,6 +110,10 @@ case "$*" in
     [ -n "${MOCK_MERGED_FAIL:-}" ] && exit 1
     [ -n "${MOCK_MERGED_EMPTY:-}" ] && exit 0
     printf '%s' "${MOCK_MERGED_JSON:-[]}"
+    ;;
+  *"pr list"*"--state open"*)
+    [ -n "${MOCK_OPEN_FAIL:-}" ] && exit 1
+    printf '%s' "${MOCK_OPEN_HEADS:-}"
     ;;
   *"pr merge"*) exit 0 ;;
   *"pr view "*"headRefName"*) printf '{"headRefName":"feature/test"}\n' ;;
@@ -119,6 +130,17 @@ case "$*" in
   *"push origin --delete"*) exit 0 ;;
   *"branch -D"*) exit 0 ;;
   *" fetch "*) if [ -n "${MOCK_FETCH_NOOP:-}" ]; then exit 0; fi; exec /usr/bin/git "$@" ;;
+  *"remote get-url origin"*)
+    # Only the coverage-in-progress probe's vault-repo resolution consults
+    # this — MOCK_VAULT_GITHUB makes the vault LOOK like a github.com origin
+    # so that probe engages, while every other git command (fetch, grep,
+    # clone) still passes through to the vault's real local remote below.
+    if [ -n "${MOCK_VAULT_GITHUB:-}" ]; then
+      echo "https://github.com/test-owner/wiki-vault.git"
+    else
+      exec /usr/bin/git "$@"
+    fi
+    ;;
   *) exec /usr/bin/git "$@" ;;
 esac
 GITSTUB
@@ -392,5 +414,120 @@ LAST_STDERR=$(cat "$TMP/stderr_run" 2>/dev/null || true)
 chmod 644 "$TMP/proj/.claude/workflow.config.yaml"
 check "wiki-debt gate errs loudly when the config file is unreadable" 1 $rc
 check_msg "unreadable-config block message names the config read" "Could not read" "$LAST_STDERR"
+
+# ─── Test 24: gh pr list --state open failure -> BLOCK (fail closed) ────────
+# Mirrors test 10 (the merged-PR list failure) for the open-PR list call the
+# coverage-in-progress probe makes: a gh/network failure there must block,
+# not silently proceed as if no open PRs existed.
+testn=$((testn+1))
+vr="$TMP/vr$testn"; vault="$TMP/vault$testn"
+mkdir -p "$vr/sources"
+printf '%s\n' '# Log' 'nothing relevant' > "$vr/log.md"
+printf '%s\n' '---' 'origin: unrelated' '---' > "$vr/sources/p.md"
+git -C "$vr" init -q -b main
+git -C "$vr" add -A
+git -C "$vr" -c user.email=t@t -c user.name=t commit -qm init
+git clone -q "$vr" "$vault"
+printf 'wiki_path: ../vault%s\nwiki_debt_epoch_pr: 80\n' "$testn" > "$TMP/proj/.claude/workflow.config.yaml"
+(
+    export PATH="$STUB_DIR:$PATH"
+    export MOCK_MERGED_JSON="$MERGED_85"
+    export MOCK_VAULT_GITHUB=1
+    export MOCK_OPEN_FAIL=1
+    bash "$WRAPPER" 42 2>"$TMP/stderr_run" >"$TMP/stdout_run"
+)
+rc=$?
+LAST_STDERR=$(cat "$TMP/stderr_run" 2>/dev/null || true)
+check "wiki-debt gate blocks when gh pr list --state open fails (fail closed)" 1 $rc
+check_msg "open-list failure block message mentions the fetch" "GitHub fetch failed" "$LAST_STDERR"
+
+# ─── Test 25: open vault PR head carries coverage -> in-progress, exit 0 ─────
+# origin/main has no coverage for #85 (candidate stays uncovered from the
+# origin/main-only loop), but an OPEN vault PR's head already carries a
+# sources/ page covering it — the coverage-in-progress probe must demote
+# this from a hard violation and let the merge proceed.
+testn=$((testn+1))
+vr="$TMP/vr$testn"; vault="$TMP/vault$testn"
+mkdir -p "$vr/sources"
+printf '%s\n' '# Log' 'nothing relevant' > "$vr/log.md"
+printf '%s\n' '---' 'origin: unrelated' '---' > "$vr/sources/p.md"
+git -C "$vr" init -q -b main
+git -C "$vr" add -A
+git -C "$vr" -c user.email=t@t -c user.name=t commit -qm init
+git clone -q "$vr" "$vault"
+git -C "$vr" checkout -qb chore/wiki-inprogress
+mkdir -p "$vr/sources"
+printf '%s\n' '---' 'origin: test-repo PR #85' '---' > "$vr/sources/p2.md"
+git -C "$vr" add -A
+git -C "$vr" -c user.email=t@t -c user.name=t commit -qm "wiki: ingest #85"
+git -C "$vr" checkout -q main
+printf 'wiki_path: ../vault%s\nwiki_debt_epoch_pr: 80\n' "$testn" > "$TMP/proj/.claude/workflow.config.yaml"
+(
+    export PATH="$STUB_DIR:$PATH"
+    export MOCK_MERGED_JSON="$MERGED_85"
+    export MOCK_OPEN_HEADS="chore/wiki-inprogress"
+    export MOCK_VAULT_GITHUB=1
+    bash "$WRAPPER" 42 2>"$TMP/stderr_run" >"$TMP/stdout_run"
+)
+rc=$?
+LAST_STDERR=$(cat "$TMP/stderr_run" 2>/dev/null || true)
+check "wiki-debt gate: coverage on an open vault PR head demotes debt to in-progress (exit 0)" 0 $rc
+
+# ─── Test 26: open vault PR exists but carries no coverage -> exit 1 ─────────
+# Proves test 24 isn't "any open PR suppresses debt" — an open PR whose head
+# does NOT carry the coverage line must still leave #85 as a hard violation.
+testn=$((testn+1))
+vr="$TMP/vr$testn"; vault="$TMP/vault$testn"
+mkdir -p "$vr/sources"
+printf '%s\n' '# Log' 'nothing relevant' > "$vr/log.md"
+printf '%s\n' '---' 'origin: unrelated' '---' > "$vr/sources/p.md"
+git -C "$vr" init -q -b main
+git -C "$vr" add -A
+git -C "$vr" -c user.email=t@t -c user.name=t commit -qm init
+git clone -q "$vr" "$vault"
+git -C "$vr" checkout -qb chore/wiki-unrelated
+printf '%s\n' '---' 'origin: unrelated' '---' > "$vr/sources/p3.md"
+git -C "$vr" add -A
+git -C "$vr" -c user.email=t@t -c user.name=t commit -qm "wiki: ingest something else"
+git -C "$vr" checkout -q main
+printf 'wiki_path: ../vault%s\nwiki_debt_epoch_pr: 80\n' "$testn" > "$TMP/proj/.claude/workflow.config.yaml"
+(
+    export PATH="$STUB_DIR:$PATH"
+    export MOCK_MERGED_JSON="$MERGED_85"
+    export MOCK_OPEN_HEADS="chore/wiki-unrelated"
+    export MOCK_VAULT_GITHUB=1
+    bash "$WRAPPER" 42 2>"$TMP/stderr_run" >"$TMP/stdout_run"
+)
+rc=$?
+LAST_STDERR=$(cat "$TMP/stderr_run" 2>/dev/null || true)
+check "wiki-debt gate: an open vault PR without coverage does not clear debt (exit 1)" 1 $rc
+check_msg "still-uncovered block message names #85" "#85" "$LAST_STDERR"
+
+# ─── Test 27: fetch fails for the open head while debt remains -> exit 1 ─────
+# MOCK_OPEN_HEADS names a branch that does not exist on the vault's origin,
+# so the per-head fetch fails. With real debt still uncovered, this must be
+# a hard err with a message distinct from "not covered" — an unverifiable
+# probe is not the same as confirmed debt.
+testn=$((testn+1))
+vr="$TMP/vr$testn"; vault="$TMP/vault$testn"
+mkdir -p "$vr/sources"
+printf '%s\n' '# Log' 'nothing relevant' > "$vr/log.md"
+printf '%s\n' '---' 'origin: unrelated' '---' > "$vr/sources/p.md"
+git -C "$vr" init -q -b main
+git -C "$vr" add -A
+git -C "$vr" -c user.email=t@t -c user.name=t commit -qm init
+git clone -q "$vr" "$vault"
+printf 'wiki_path: ../vault%s\nwiki_debt_epoch_pr: 80\n' "$testn" > "$TMP/proj/.claude/workflow.config.yaml"
+(
+    export PATH="$STUB_DIR:$PATH"
+    export MOCK_MERGED_JSON="$MERGED_85"
+    export MOCK_OPEN_HEADS="does-not-exist-on-origin"
+    export MOCK_VAULT_GITHUB=1
+    bash "$WRAPPER" 42 2>"$TMP/stderr_run" >"$TMP/stdout_run"
+)
+rc=$?
+LAST_STDERR=$(cat "$TMP/stderr_run" 2>/dev/null || true)
+check "wiki-debt gate: unfetchable open head with remaining debt is a hard err" 1 $rc
+check_msg "unverifiable-probe block message is distinct from plain uncovered debt" "could not verify" "$LAST_STDERR"
 
 [[ $fails -eq 0 ]] && { echo PASS; exit 0; } || { echo "FAIL ($fails)"; exit 1; }
