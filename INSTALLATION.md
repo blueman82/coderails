@@ -82,10 +82,12 @@ yourself:
 bash scripts/integrity-gate/setup.sh
 ```
 
-That owner-run helper prompts for the dedicated GitHub machine-user token and
-then installs the independent root-owned launchd validator. To select the
-prompt non-interactively, use `bash install.sh --integrity-gate`; to suppress
-it, use `bash install.sh --no-integrity-gate`.
+That owner-run helper first uses your current `gh` login to create or verify an
+active `coderails-integrity-review` ruleset on `main`, with an explicit
+confirmation before creation. It then prompts for the dedicated GitHub
+machine-user token and installs the independent root-owned launchd validator.
+To select the prompt non-interactively, use `bash install.sh --integrity-gate`;
+to suppress it, use `bash install.sh --no-integrity-gate`.
 
 **3. Restart Claude Code, then run in order:**
 
