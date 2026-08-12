@@ -4,12 +4,12 @@ Detail-carrier for two loop-finish mechanics referenced from the main skill by a
 link each: the orchestrator's own completion claim (Phase 13), and per-work-unit branch
 cleanup (Phase 4b).
 
-## Orchestrator-level verification-before-completion at loop finish-out
+## Orchestrator-level superpowers:verification-before-completion at loop finish-out
 
-SKILL.md's two existing `verification-before-completion` references (Phase 3/3a worker
+SKILL.md's two existing `superpowers:verification-before-completion` references (Phase 3/3a worker
 construction-discipline lines) discipline the WORKERS' claims. Nothing disciplines the
 ORCHESTRATOR's own final completion claim. Before the Phase 13 `complete` LOOP-STOP
-declaration, the orchestrator applies `coderails:verification-before-completion` to its
+declaration, the orchestrator applies `superpowers:verification-before-completion` to its
 OWN completion claim — "all authorised work done, all gates passed" is itself a
 completion claim that requires fresh verification evidence, not recall.
 
@@ -24,16 +24,16 @@ claim — Phase 12 already covers per-unit merge-claim re-checks, and adding VBC
 here would duplicate Phase 12. This is the single aggregate check at loop end, not a
 repeat of the per-merge one.
 
-## Per-unit branch finishing via finishing-a-development-branch
+## Per-unit branch finishing via superpowers:finishing-a-development-branch
 
 When a work-unit's PR is merged, finish the branch/worktree using
-`coderails:finishing-a-development-branch`'s Step 6 mechanics: `cd` to main repo root,
+`superpowers:finishing-a-development-branch`'s Step 6 mechanics: `cd` to main repo root,
 check lock state, `git worktree remove <path>`, `git worktree prune` — gated by the
 provenance check: only remove worktrees the loop itself created (under
 `.worktrees/`/`worktrees/`), never a harness-owned workspace. This runs per-work-unit at
 Phase 4b, not deferred to the loop-level teardown.
 
-**Native-first, same as entry.** `using-git-worktrees` Step 1a prefers a native worktree
+**Native-first, same as entry.** `superpowers:using-git-worktrees` Step 1a prefers a native worktree
 tool over `git worktree add` for entry; teardown mirrors that. If a native worktree tool
 is available (e.g. `ExitWorktree`) **and it owns this worktree**, prefer it over the
 `git worktree remove` mechanics above. The git path below is the fallback both for
@@ -43,7 +43,7 @@ resolution below says to defer instead of remove.
 **Scope limit — `ExitWorktree` only owns what it created this session.** It operates
 only on a worktree created by `EnterWorktree` *in this same session*. A worktree
 switched into via `EnterWorktree`'s `path` parameter (e.g. one created by
-`git worktree add` per `using-git-worktrees` Step 1b, then entered by path) is NOT owned
+`git worktree add` per `superpowers:using-git-worktrees` Step 1b, then entered by path) is NOT owned
 by it — calling `ExitWorktree` there yields `action: "keep"` only, never `"remove"`.
 Called with no active `EnterWorktree` session at all, it is a silent no-op: it reports no
 active worktree session and changes nothing on disk. In either case, do not treat a
@@ -52,7 +52,7 @@ root, then `git worktree remove` (Step 6 mechanics above).
 
 **Caveat — never remove the worktree that is the shell's current cwd, via `git worktree
 remove`.** `git worktree remove` fails when run from inside the worktree being removed
-(per `finishing-a-development-branch`'s Common Mistakes). If using the git fallback,
+(per `superpowers:finishing-a-development-branch`'s Common Mistakes). If using the git fallback,
 `cd` to the main repo root FIRST, then remove — mandatory, not optional, when the loop's
 own cwd is inside the worktree being finished.
 

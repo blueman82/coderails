@@ -12,6 +12,7 @@ one — `/push` and `/merge` shell out to `gh`.
 - `git`, `gh`, `jq` on your PATH (the installer checks and stops if any are missing)
 - An authenticated GitHub CLI (`gh auth login`). For enterprise GitHub: `gh auth login --hostname <your-git-host>` (e.g. `git.example.com`)
 - `pr-review-toolkit@claude-plugins-official` installed — required for the review stage of `/workflow`
+- `superpowers@claude-plugins-official` installed — required for dev-workflow skills (planning, TDD, systematic debugging, code review, git worktrees)
 - **For Jira features** (`/prep`, `/workflow`, `/push` auto-resolve): a Jira MCP server, reachable via your configured MCP tool namespace. Jira is optional — leave `jira: null` in `workflow.config.yaml` unless you've configured a Jira MCP server. The commands build Jira tool names at runtime from `config.jira.mcp_namespace` in `workflow.config.yaml` (default: `jira`, giving `mcp__jira__*`). Set `mcp_namespace` to match your server (e.g. `acme-jira`, `atlassian`) — no edits to command files needed. For non-default namespaces, add a `permissions.allow` rule to `.claude/settings.json` so calls run without prompting: `"mcp__<namespace>__*"`. Without a Jira MCP, `/prep` still creates branches and `/push` still opens PRs — only the Jira ticket/resolve steps no-op.
 
 ## Migrating from the old separate plugins
@@ -78,6 +79,7 @@ It does everything that has to happen outside Claude Code:
 /plugin marketplace add ~/Documents/Github/coderails
 /plugin install coderails@coderails
 /plugin install pr-review-toolkit@claude-plugins-official
+/plugin install superpowers@claude-plugins-official
 /reload-plugins
 ```
 
@@ -102,13 +104,16 @@ treat it as machine-local config, same as `.claude/settings.local.json`.
 | Commands | Skills | Hooks (automatic) |
 |---|---|---|
 | `/workflow` `/prep` `/push` `/merge` `/coderails:init` | **Workflow & evals:** agentic-loop, task-evals | confidence-label check (Stop) |
-| `/post-review` `/post-evals` | **Planning:** planning-sequence, premortem, brainstorming, writing-plans | Did-Not-Verify check (Stop) |
-| `/assumptions` `/cite-check` `/notchecked` `/disconfirm` | **Dev discipline:** test-driven-development, systematic-debugging, engineering-principles (+ go/python/ts variants), verification-before-completion | destructive-bash gate (PreToolUse) |
-| `/test-gate-setup` | **Multi-agent:** dispatching-parallel-agents, subagent-driven-development, executing-plans, finishing-a-development-branch | project test gate (PreToolUse) |
+| `/post-review` `/post-evals` | **Planning:** planning-sequence, premortem, `superpowers:brainstorming`, `superpowers:writing-plans` | Did-Not-Verify check (Stop) |
+| `/assumptions` `/cite-check` `/notchecked` `/disconfirm` | **Dev discipline:** `superpowers:test-driven-development`, `superpowers:systematic-debugging`, engineering-principles (+ go/python/ts variants), `superpowers:verification-before-completion` | destructive-bash gate (PreToolUse) |
+| `/test-gate-setup` | **Multi-agent:** `superpowers:dispatching-parallel-agents`, `superpowers:subagent-driven-development`, `superpowers:executing-plans`, `superpowers:finishing-a-development-branch` | project test gate (PreToolUse) |
 | | **Wiki:** wiki-init, wiki-query, wiki-ingest, wiki-lint | |
-| | **Review & handoff:** requesting-code-review, receiving-code-review, handoff, improve-prompt, using-git-worktrees, using-coderails, writing-skills | |
+| | **Review & handoff:** `superpowers:requesting-code-review`, `superpowers:receiving-code-review`, handoff, improve-prompt, `superpowers:using-git-worktrees`, using-coderails, `superpowers:writing-skills` | |
 
-37 skills ship in total (`ls skills/` in the plugin dir to see the full list).
+24 skills ship in total (`ls skills/` in the plugin dir to see the full list).
+General dev-workflow skills — planning, TDD, debugging, code review,
+worktrees — are provided by the required `superpowers@claude-plugins-official`
+plugin, not bundled here.
 `/post-review` and `/post-evals` post SHA-bound review/eval-artifact summaries
 as durable PR comments; `task-evals` freezes a game-resistant success-eval set
 at task intake and gates `/merge` on it.

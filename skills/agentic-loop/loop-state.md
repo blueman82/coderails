@@ -119,7 +119,7 @@ is still your job; the guard only catches its absence.
 
 ## Siblings in the same directory
 
-- **`sdd-ledger.md`** — when a work-unit delegates to `subagent-driven-development`, that skill's ledger lives beside `progress.json`, written by its own workspace helper rather than by this skill.
+- **`sdd-ledger.md`** — when a work-unit delegates to `superpowers:subagent-driven-development`, that skill's ledger lives beside `progress.json`, written by its own workspace helper rather than by this skill.
 - **`retro.json`** — session-keyed, beside `progress.json`, written once by the Phase 13 teardown contract.
 - **`evals.json`** — loop-scope and pr-scope, frozen at Phase 2.7c/2.7d via `/coderails:task-evals`; see `skills/agentic-loop/SKILL.md` for the field contract.
 - **`proof.json`** — loop-scope, frozen at Phase 2.7e beside `evals.json`, by a SEPARATE agent given only `authorising_prompt_raw` (never the plan/spec/conversation) — generalising `task-evals`' grader-independence to the author. Schema: `{"schema_version":1,"frozen_at","frozen_sha","proofs":[{"id","claim","cmd","expect","status":"pending"}]}`. Voluntary adoption, same posture as `evals.json`: a loop with no executable surface writes none, and records that choice in `decisions_absorbed` **and** in `progress.json`'s own `proof_disposition` field (see the Fields table above) — the latter is what the gate actually reads.

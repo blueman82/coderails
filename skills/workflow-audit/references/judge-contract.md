@@ -58,7 +58,7 @@ following holds. These are checked in order; the first that fires is the
    reflects a convention specific to one repo or project (e.g. a recurring
    command tied to one project's build script) rather than a task a user
    would want repeated across different projects. This is the
-   `writing-skills` rule: don't create skills for project-specific
+   `superpowers:writing-skills` rule: don't create skills for project-specific
    conventions.
 2. **Already covered by an existing skill.** The cluster's task overlaps
    with the name/description of a skill already in the supplied existing-skill

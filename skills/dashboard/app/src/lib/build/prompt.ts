@@ -91,7 +91,7 @@ ${JSON.stringify(
 
 Authoring: drive the /skill-creator:skill-creator create flow, fully specified from the data above so its intake questions are answerable from context. Skip its human eval-viewer loop. Write 2-3 eval prompts to the skill's evals/evals.json but do not run the benchmark viewer.
 
-Stop condition, substituted from coderails:writing-skills: RED — run a fresh-subagent baseline pressure-test scenario without the new skill present, and document what it actually does. GREEN — write the minimal SKILL.md under skills/<proposed_name>/ addressing the observed baseline failures. REFACTOR — re-test under the same pressure and close any loopholes found. Done means the pressure re-test passes.
+Stop condition, substituted from superpowers:writing-skills: RED — run a fresh-subagent baseline pressure-test scenario without the new skill present, and document what it actually does. GREEN — write the minimal SKILL.md under skills/<proposed_name>/ addressing the observed baseline failures. REFACTOR — re-test under the same pressure and close any loopholes found. Done means the pressure re-test passes.
 
 Transcript mining: you MAY read the sessions transcripts listed above locally for understanding. You MUST NOT put verbatim transcript prose, file contents, or paths into the skill, its tests, the PR description, or any committed artifact — generic derived intent only.
 

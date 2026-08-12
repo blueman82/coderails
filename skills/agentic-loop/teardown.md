@@ -125,4 +125,4 @@ This step is additive-or-recurrence-only: no metric-based removal anywhere.
 ## Steps 4 and 5
 
 4. **Write feedback-type auto-memories** for lessons that generalise beyond this loop.
-5. **Only then** set `progress.json` `status: "complete"` and declare `LOOP-STOP: complete`. First apply `coderails:verification-before-completion` to the orchestrator's own completion claim (SKILL.md's Phase 13 links the `finishing-out.md` detail). The `loop_stall_guard` proof gate blocks the declaration itself if Step 1 was skipped or left a proof unexecuted/failed — it does not need a separate manual check here.
+5. **Only then** set `progress.json` `status: "complete"` and declare `LOOP-STOP: complete`. First apply `superpowers:verification-before-completion` to the orchestrator's own completion claim (SKILL.md's Phase 13 links the `finishing-out.md` detail). The `loop_stall_guard` proof gate blocks the declaration itself if Step 1 was skipped or left a proof unexecuted/failed — it does not need a separate manual check here.

@@ -6,7 +6,7 @@ model: sonnet
 
 # Workflow Audit
 
-Mines Claude Code session transcripts for tool-use patterns that repeat across sessions, judges which ones are genuine candidates for a new skill, and creates each proposed skill through the normal `writing-skills` TDD process and a full PR gate.
+Mines Claude Code session transcripts for tool-use patterns that repeat across sessions, judges which ones are genuine candidates for a new skill, and creates each proposed skill through the normal `superpowers:writing-skills` TDD process and a full PR gate.
 
 ## Overview
 
@@ -119,9 +119,9 @@ Unless the run is in queue-mode (section 5), every candidate the judge marked `p
 
 For each proposed candidate, in sequence, never batched:
 
-1. Author the skill via `/skill-creator:skill-creator` (per the owner's 2026-07-07 directive) fully specified from the candidate's own judge-contract fields, skipping its human-facing eval-viewer step in a headless run. Substitute `coderails:writing-skills`'s RED/GREEN/REFACTOR discipline as the stop condition, since skill-creator itself has no autonomous "done" signal: RED — run a fresh-subagent baseline pressure-test scenario *without* the new skill present, and document what it actually does. GREEN — write the minimal `SKILL.md` addressing the observed baseline failures. REFACTOR — re-test under the same pressure and close any loopholes found.
+1. Author the skill via `/skill-creator:skill-creator` (per the owner's 2026-07-07 directive) fully specified from the candidate's own judge-contract fields, skipping its human-facing eval-viewer step in a headless run. Substitute `superpowers:writing-skills`'s RED/GREEN/REFACTOR discipline as the stop condition, since skill-creator itself has no autonomous "done" signal: RED — run a fresh-subagent baseline pressure-test scenario *without* the new skill present, and document what it actually does. GREEN — write the minimal `SKILL.md` addressing the observed baseline failures. REFACTOR — re-test under the same pressure and close any loopholes found.
 2. Land the new skill in the coderails repo as a plugin skill, via its own branch and PR, through the full gate sequence: `test_gate` → `pr-review-toolkit:review-pr` → security review → `post-review` → pr-scope evals → merge. Never commit straight to `main`, and never write into a user's personal `~/.claude/skills` directory — this is a repo skill, not a local one.
-3. **Stop after this skill is merged before starting the next proposed candidate.** Batching multiple skill creations without testing and shipping each individually is the exact anti-pattern `writing-skills` prohibits — apply it here too.
+3. **Stop after this skill is merged before starting the next proposed candidate.** Batching multiple skill creations without testing and shipping each individually is the exact anti-pattern `superpowers:writing-skills` prohibits — apply it here too.
 
 ## 9. Wrap-up
 
