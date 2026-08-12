@@ -179,10 +179,10 @@ function readLastUpdatedMs(record: Record<string, unknown>, progressPath: string
 }
 
 // Mirrors als_read_loop_evals_result (hooks/scripts/lib/loop_state_common.sh):
-// GO or a justified TIER0 exemption count as frozen; NO-GO, UNJUSTIFIED,
+// GO or a justified VERIFICATION_LEVEL0 exemption count as frozen; NO-GO, UNJUSTIFIED,
 // ABSENT, wrong scope, or malformed JSON do not. An explicit NO-GO wins over
-// the tier-0 exemption, same precedence as the bash SSOT.
-// Also mirrors the hook's UNSTAMPED check: GO/TIER0 additionally require a
+// the verification_level-0 exemption, same precedence as the bash SSOT.
+// Also mirrors the hook's UNSTAMPED check: GO/VERIFICATION_LEVEL0 additionally require a
 // `.grading` stamp (post_evals.sh grade-loop's provenance record) to read as
 // frozen — both `.grading.by` and `.grading.checksum` must be present AND
 // non-empty, matching the bash reader's `[ -z "$stamped_by" ] || [ -z
@@ -194,7 +194,7 @@ function readEvalsFrozen(loopDir: string): boolean {
   const data = readJson(join(loopDir, "evals.json"));
   if (!isRecord(data)) return false;
   if (data.scope !== "loop") return false;
-  const justification = typeof data.tier_justification === "string" ? data.tier_justification.trim() : "";
+  const justification = typeof data.verification_justification === "string" ? data.verification_justification.trim() : "";
   if (!justification) return false;
   if (data.result === "NO-GO") return false;
   const grading = isRecord(data.grading) ? data.grading : undefined;
@@ -202,7 +202,7 @@ function readEvalsFrozen(loopDir: string): boolean {
   const stampedChecksum = typeof grading?.checksum === "string" ? grading.checksum.trim() : "";
   if (!stampedBy || !stampedChecksum) return false;
   if (data.result === "GO") return true;
-  if (data.tier === 0) return true;
+  if (data.verification_level === 0) return true;
   return false;
 }
 

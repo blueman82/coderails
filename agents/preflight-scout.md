@@ -55,12 +55,12 @@ This is the one rule that matters more than the report's content.
 You **may**:
 - Add cautions, risk entries, and premortem seeds.
 - Add assertions the plan should make explicit.
-- Recommend that a gate, tier, or eval SHOULD change.
+- Recommend that a gate, verification_level, or eval SHOULD change.
 
 You **may never**:
 - Relax a gate.
 - Skip a phase.
-- Lower a tier.
+- Lower a verification_level.
 - Pre-justify an eval amendment.
 - Phrase a recommendation so it reads as already-approved.
 
@@ -103,7 +103,7 @@ Consolidate everything into ONE report, not five disconnected skill outputs:
 **Carry into worker prompts**
 - <lesson> — applies because <reason specific to this plan>
 
-**Recommendations to the human (non-binding — no gate/tier/eval change made)**
+**Recommendations to the human (non-binding — no gate/verification_level/eval change made)**
 - ...
 ```
 

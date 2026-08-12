@@ -83,28 +83,28 @@ gate_loop_evals_required() {
       local loop_dir; loop_dir=$(dirname "$ALS_PATH")
       als_read_loop_evals_result "$loop_dir"
       case "$ALS_LOOP_EVALS_RESULT" in
-        GO|TIER0)
+        GO|VERIFICATION_LEVEL0)
           als_log "hook=loop_state_guard session=$session_id work_units=$ALS_WORK_UNIT_COUNT evals=$ALS_LOOP_EVALS_RESULT blocked=0"
           ;;
         NO-GO|ABSENT)
           als_log "hook=loop_state_guard session=$session_id work_units=$ALS_WORK_UNIT_COUNT evals=$ALS_LOOP_EVALS_RESULT blocked=1"
           echo "[loop-state-guard] Loop complete with $ALS_WORK_UNIT_COUNT work-units, but no passing loop-scope evals.json found at:
   $loop_dir/evals.json
-Generate loop-scope evals via /coderails:task-evals (or a justified tier-0 exemption) and grade them GO before declaring complete." >&2
+Generate loop-scope evals via /coderails:task-evals (or a justified verification_level-0 exemption) and grade them GO before declaring complete." >&2
           exit 2
           ;;
         UNJUSTIFIED)
           als_log "hook=loop_state_guard session=$session_id work_units=$ALS_WORK_UNIT_COUNT evals=$ALS_LOOP_EVALS_RESULT blocked=1"
           echo "[loop-state-guard] Loop complete with $ALS_WORK_UNIT_COUNT work-units, and evals.json at:
   $loop_dir/evals.json
-grades GO/TIER0 but is missing a non-blank tier_justification. Add a tier_justification (at tier 0: why the exemption is legitimate; at tier 1/2: which tier predicate fired) before declaring complete." >&2
+grades GO/VERIFICATION_LEVEL0 but is missing a non-blank verification_justification. Add a verification_justification (at verification_level 0: why the exemption is legitimate; at verification_level 1/2: which verification_level predicate fired) before declaring complete." >&2
           exit 2
           ;;
         UNSTAMPED)
           als_log "hook=loop_state_guard session=$session_id work_units=$ALS_WORK_UNIT_COUNT evals=$ALS_LOOP_EVALS_RESULT blocked=1"
           echo "[loop-state-guard] Loop complete with $ALS_WORK_UNIT_COUNT work-units, and evals.json at:
   $loop_dir/evals.json
-grades GO/TIER0 but is missing a valid grading stamp. Grade it via:
+grades GO/VERIFICATION_LEVEL0 but is missing a valid grading stamp. Grade it via:
   \"\${CLAUDE_PLUGIN_ROOT}/scripts/post_evals.sh\" grade-loop $loop_dir/evals.json
 The stamp catches accidental drift (a status edited after grading), not deliberate tampering — treat .grading as provenance, not proof against forgery." >&2
           exit 2

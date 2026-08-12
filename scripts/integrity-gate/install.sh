@@ -1,23 +1,19 @@
 #!/bin/bash
 #═══════════════════════════════════════════════════════════════════════════════
-#  install.sh │ Installs the tier-gate root daemon
-#  - Preflight: gh/jq/curl present; credentials file exists with all three
-#    keys (machine-user GH_TOKEN + CLAUDE_CODE_OAUTH_TOKEN + MACHINE_USER); machine
+#  install.sh │ Installs the integrity-gate root daemon
+#  - Preflight: gh/jq/curl present; credentials file exists with the two
+#    keys (machine-user GH_TOKEN + MACHINE_USER); machine
 #    user resolvable as a repo collaborator; ruleset visibility (honest MODE).
-#  - Renders com.coderails.tier-gate.plist.template with real paths.
-#  - Prints a repo-vs-installed diff for the runner + judge prompt and refuses
+#  - Renders com.coderails.integrity-gate.plist.template with real paths.
+#  - Prints a repo-vs-installed diff for the runner and refuses
 #    to promote without confirmation — per spec decision 3, the live runner +
-#    judge prompt are root-owned installed copies; repo copies are source
-#    only, so a PR that tampers with the judge prompt must be SHOWN to the
-#    owner before it is ever deployed, never silently promoted.
-#  - sudo-installs the plist + root-owned 0600 credentials + the runner and
-#    judge prompt themselves under the same root-owned install root (so the
-#    daemon's default TIER_GATE_JUDGE_PROMPT_PATH — a sibling of its own
-#    BASH_SOURCE — resolves to the installed copy, never the repo's).
+#    runner is a root-owned installed copy; the repo copy is source only, so
+#    changes must be shown to the owner before deployment.
+#  - sudo-installs the plist + root-owned 0600 credentials + the runner.
 #
 #  Testable without root: preflight predicates, plist rendering, and the
 #  diff-before-promote computation are pure functions with no side effects,
-#  sourceable and callable directly (see tier_gate_install.test.sh). Every
+#  sourceable and callable directly (see integrity_gate_install.test.sh). Every
 #  side effect requiring root or an interactive confirmation — sudo install,
 #  copying into /etc, launchctl bootstrap — lives behind the
 #  `[[ "${BASH_SOURCE[0]}" == "${0}" ]]` main-guard below and is never
@@ -26,19 +22,19 @@
 set -u
 
 # Multi-repo installs share this install root: only TGI_PLIST_DEST varies
-# between instances (e.g. com.coderails.tier-gate.assistant-agent.plist,
-# TIER_GATE_REPO=blueman82/assistant-agent). TGI_INSTALL_ROOT — the runner
-# script, judge-prompt, and credentials — is NOT per-instance. Running this
-# script for ANY one repo overwrites the runner/judge-prompt/creds used by
-# EVERY other installed tier-gate daemon on this machine, not just the one
+# between instances (e.g. com.coderails.integrity-gate.assistant-agent.plist,
+# INTEGRITY_GATE_REPO=blueman82/assistant-agent). TGI_INSTALL_ROOT — the runner
+# script and credentials — is NOT per-instance. Running this script for ANY
+# one repo overwrites the runner/creds used by
+# EVERY other installed integrity-gate daemon on this machine, not just the one
 # being (re)installed. This is intentional (one codebase, one credential
-# set) and safe at runtime (no shared mutable state — see tier-gate-runner.sh,
+# set) and safe at runtime (no shared mutable state — see integrity-gate-runner.sh,
 # the only per-run temp file is a unique mktemp), but it means a fix landed
 # for one repo's daemon goes live for all of them on the next reinstall,
 # silently, with no per-repo opt-out.
-TGI_INSTALL_ROOT="${TGI_INSTALL_ROOT:-/etc/coderails-tier-gate}"
+TGI_INSTALL_ROOT="${TGI_INSTALL_ROOT:-/etc/coderails-integrity-gate}"
 TGI_CREDS_FILENAME="credentials"
-TGI_PLIST_DEST="${TGI_PLIST_DEST:-/Library/LaunchDaemons/com.coderails.tier-gate.plist}"
+TGI_PLIST_DEST="${TGI_PLIST_DEST:-/Library/LaunchDaemons/com.coderails.integrity-gate.plist}"
 
 # ─── Preflight: tool presence ─────────────────────────────────────────────────
 
@@ -60,23 +56,22 @@ tgi_check_tools() {
 
 # tgi_check_credentials <path>
 # Verifies <path> exists and contains all THREE required keys: GH_TOKEN (the
-# machine-user identity's curl/gh calls), CLAUDE_CODE_OAUTH_TOKEN (the judge's
-# subscription auth — the owner's Claude subscription, never a metered key), and
-# MACHINE_USER (the login tg_post_status's live GET /user identity check
-# must match before it will ever post — see tier-gate-runner.sh's
+# machine-user identity's curl/gh calls) and MACHINE_USER (the login
+# tg_post_status's live GET /user identity check
+# must match before it will ever post — see integrity-gate-runner.sh's
 # tg_read_machine_user). MACHINE_USER lives here, in the same root-owned
 # file, rather than as a plist env var, because the daemon's plist only ever
-# passes TIER_GATE_CREDS (a path) — nothing else propagates into the
+# passes INTEGRITY_GATE_CREDS (a path) — nothing else propagates into the
 # installed launchd job. Named, actionable failure per missing piece; rc 0
 # only when all three are present with non-empty values.
 tgi_check_credentials() {
     local path="$1"
     if [[ ! -f "$path" ]]; then
-        printf 'preflight: credentials file not found at %s — create it (KEY=value lines) with GH_TOKEN, MACHINE_USER, and CLAUDE_CODE_OAUTH_TOKEN before installing.\n' "$path"
+        printf 'preflight: credentials file not found at %s — create it (KEY=value lines) with GH_TOKEN and MACHINE_USER before installing.\n' "$path"
         return 1
     fi
     local ok=1 key
-    for key in GH_TOKEN MACHINE_USER CLAUDE_CODE_OAUTH_TOKEN; do
+    for key in GH_TOKEN MACHINE_USER; do
         local val
         val=$(grep -E "^${key}=" "$path" 2>/dev/null | head -1 | cut -d= -f2-)
         if [[ -z "$val" ]]; then
@@ -97,7 +92,7 @@ tgi_check_credentials() {
 tgi_check_machine_user_collaborator() {
     local login="$1" gh_bin="${2:-gh}"
     if [[ -z "$login" ]]; then
-        printf 'preflight: no machine-user login provided — set TGI_MACHINE_USER (or pass one) to the tier-review machine-user GitHub login.\n'
+    printf 'preflight: no machine-user login provided — set TGI_MACHINE_USER (or pass one) to the integrity machine-user GitHub login.\n'
         return 1
     fi
     if ! "$gh_bin" api "repos/{owner}/{repo}/collaborators/${login}" >/dev/null 2>&1; then
@@ -123,7 +118,7 @@ tgi_read_machine_user_from_creds() {
     printf '%s' "$val"
 }
 
-# ─── Repo slug resolution (rendered into the plist's TIER_GATE_REPO) ─────────
+# ─── Repo slug resolution (rendered into the plist's INTEGRITY_GATE_REPO) ─────────
 
 # tgi_resolve_repo_slug [gh_bin]
 # Echoes the "owner/repo" slug for the repo being installed against, resolved
@@ -132,7 +127,7 @@ tgi_read_machine_user_from_creds() {
 # relies on gh doing). [gh_bin] defaults to "gh"; tests override with a stub.
 # Echoes nothing and returns 1 on any failure or an empty/malformed result —
 # the caller fails preflight loudly rather than rendering a daemon with a blank
-# TIER_GATE_REPO, which would silently fall back to the git-remote parse that
+# INTEGRITY_GATE_REPO, which would silently fall back to the git-remote parse that
 # fails closed from the non-git install dir. Only install.sh uses gh here; the
 # DAEMON never does (it stays curl-only per its trust-domain constraint).
 tgi_resolve_repo_slug() {
@@ -149,11 +144,11 @@ tgi_resolve_repo_slug() {
 # ─── Plist render ──────────────────────────────────────────────────────────────
 
 # tgi_render_plist <template_path> <runner_path> <creds_path> <repo_slug>
-# Echoes the rendered plist content: substitutes __TIER_GATE_RUNNER_PATH__,
-# __TIER_GATE_CREDS_PATH__, and __TIER_GATE_REPO__ with the given values. Uses
+# Echoes the rendered plist content: substitutes __INTEGRITY_GATE_RUNNER_PATH__,
+# __INTEGRITY_GATE_CREDS_PATH__, and __INTEGRITY_GATE_REPO__ with the given values. Uses
 # awk (not sed) so a path containing a slash never collides with sed's
 # delimiter. <repo_slug> is REQUIRED (not optional): an empty value would render
-# a daemon whose TIER_GATE_REPO is blank, silently falling back to the
+# a daemon whose INTEGRITY_GATE_REPO is blank, silently falling back to the
 # git-remote parse that fails closed from the non-git install dir — the exact
 # bug this render exists to prevent. The caller resolves it and fails preflight
 # if it can't, so render never receives an empty one.
@@ -161,9 +156,9 @@ tgi_render_plist() {
     local template_path="$1" runner_path="$2" creds_path="$3" repo_slug="$4"
     awk -v runner="$runner_path" -v creds="$creds_path" -v repo="$repo_slug" '
         { line = $0
-          gsub(/__TIER_GATE_RUNNER_PATH__/, runner, line)
-          gsub(/__TIER_GATE_CREDS_PATH__/, creds, line)
-          gsub(/__TIER_GATE_REPO__/, repo, line)
+          gsub(/__INTEGRITY_GATE_RUNNER_PATH__/, runner, line)
+          gsub(/__INTEGRITY_GATE_CREDS_PATH__/, creds, line)
+          gsub(/__INTEGRITY_GATE_REPO__/, repo, line)
           print line
         }
     ' "$template_path"
@@ -241,12 +236,12 @@ tgi_same_file() {
 # ─── Other-instance discovery (shared-install-root warning) ──────────────────
 
 # tgi_other_instance_labels <plist_dest> <plist_glob>
-# Echoes one Label per line for every com.coderails.tier-gate*.plist matching
+# Echoes one Label per line for every com.coderails.integrity-gate*.plist matching
 # <plist_glob> EXCEPT <plist_dest> itself (the one this run is about to
 # write). Every matching plist is assumed to share this run's TGI_INSTALL_ROOT
-# (runner script, judge-prompt, credentials) — see the TGI_INSTALL_ROOT
+# (runner script, credentials) — see the TGI_INSTALL_ROOT
 # comment above: only the plist destination varies per repo instance, so any
-# other matching plist found here is a daemon whose runner/judge-prompt/creds
+# other matching plist found here is a daemon whose runner/creds
 # this install is about to overwrite too. Echoes nothing (rc 0) if none
 # found or a Label can't be read (PlistBuddy absent/fails — treated as no
 # other instance found rather than a preflight failure, since this is a WARN,
@@ -267,7 +262,7 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     set -euo pipefail
     SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
-    echo "== tier-gate install: preflight =="
+    echo "== integrity-gate install: preflight =="
     preflight_failed=0
     tgi_check_tools || preflight_failed=1
     CREDS_PATH="${TGI_CREDS_SRC:-$TGI_INSTALL_ROOT/$TGI_CREDS_FILENAME}"
@@ -280,7 +275,7 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     TGI_MACHINE_USER="${TGI_MACHINE_USER:-$(tgi_read_machine_user_from_creds "$CREDS_PATH" 2>/dev/null || true)}"
     tgi_check_machine_user_collaborator "${TGI_MACHINE_USER:-}" || preflight_failed=1
     # Resolve the repo slug NOW so a failure here fails the install loudly,
-    # rather than silently rendering a daemon with a blank TIER_GATE_REPO that
+    # rather than silently rendering a daemon with a blank INTEGRITY_GATE_REPO that
     # fails closed at runtime from its non-git install dir.
     REPO_SLUG=$(tgi_resolve_repo_slug) || {
         echo 'preflight: could not resolve the repo slug (owner/repo) via `gh repo view` — run install.sh from inside the target repo checkout with gh authenticated.' >&2
@@ -292,32 +287,31 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     fi
     echo "preflight OK"
 
-    echo "== tier-gate install: ruleset visibility =="
+    echo "== integrity-gate install: ruleset visibility =="
     rules_json=$(gh api "repos/{owner}/{repo}/rules/branches/main" 2>/dev/null || printf '')
     tgi_classify_mode "$rules_json"
     echo
     echo "(WARN only — install proceeds either way; this states which mode the merge gate runs in.)"
 
-    echo "== tier-gate install: render plist =="
+    echo "== integrity-gate install: render plist =="
     RENDERED_PLIST=$(tgi_render_plist \
-        "$SCRIPT_DIR/com.coderails.tier-gate.plist.template" \
-        "$TGI_INSTALL_ROOT/tier-gate-runner.sh" \
+        "$SCRIPT_DIR/com.coderails.integrity-gate.plist.template" \
+        "$TGI_INSTALL_ROOT/integrity-gate-runner.sh" \
         "$TGI_INSTALL_ROOT/$TGI_CREDS_FILENAME" \
         "$REPO_SLUG")
 
-    echo "== tier-gate install: repo-vs-installed diff (BEFORE promote) =="
+    echo "== integrity-gate install: repo-vs-installed diff (BEFORE promote) =="
     diff_clean=1
-    tgi_diff_before_promote "$SCRIPT_DIR/tier-gate-runner.sh" "$TGI_INSTALL_ROOT/tier-gate-runner.sh" "runner" || diff_clean=0
-    tgi_diff_before_promote "$SCRIPT_DIR/judge-prompt.md" "$TGI_INSTALL_ROOT/judge-prompt.md" "judge-prompt" || diff_clean=0
+    tgi_diff_before_promote "$SCRIPT_DIR/integrity-gate-runner.sh" "$TGI_INSTALL_ROOT/integrity-gate-runner.sh" "runner" || diff_clean=0
 
     # Other installed instances share this run's TGI_INSTALL_ROOT (runner,
-    # judge-prompt, creds) even though they have their own TGI_PLIST_DEST — see
+    # creds) even though they have their own TGI_PLIST_DEST — see
     # the TGI_INSTALL_ROOT comment above. Surface this at the confirmation
     # prompt itself so it can't be missed by skipping docs/comments/wiki.
-    other_labels=$(tgi_other_instance_labels "$TGI_PLIST_DEST" "/Library/LaunchDaemons/com.coderails.tier-gate*.plist")
+    other_labels=$(tgi_other_instance_labels "$TGI_PLIST_DEST" "/Library/LaunchDaemons/com.coderails.integrity-gate*.plist")
     if [[ -n "$other_labels" ]]; then
-        printf '\nWARNING: the following OTHER installed tier-gate daemon(s) share this\n'
-        printf 'install root (%s) and will pick up this runner/judge-prompt/\n' "$TGI_INSTALL_ROOT"
+        printf '\nWARNING: the following OTHER installed integrity-gate daemon(s) share this\n'
+        printf 'install root (%s) and will pick up this runner/\n' "$TGI_INSTALL_ROOT"
         printf 'credentials on their next tick too — not just %s:\n' "$REPO_SLUG"
         printf '%s\n' "$other_labels" | sed 's/^/  - /'
         diff_clean=0
@@ -335,10 +329,9 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
         fi
     fi
 
-    echo "== tier-gate install: sudo install =="
+    echo "== integrity-gate install: sudo install =="
     sudo mkdir -p "$TGI_INSTALL_ROOT"
-    sudo install -m 0755 "$SCRIPT_DIR/tier-gate-runner.sh" "$TGI_INSTALL_ROOT/tier-gate-runner.sh"
-    sudo install -m 0644 "$SCRIPT_DIR/judge-prompt.md" "$TGI_INSTALL_ROOT/judge-prompt.md"
+    sudo install -m 0755 "$SCRIPT_DIR/integrity-gate-runner.sh" "$TGI_INSTALL_ROOT/integrity-gate-runner.sh"
     CREDS_SRC="${TGI_CREDS_SRC:-$TGI_INSTALL_ROOT/$TGI_CREDS_FILENAME}"
     CREDS_DEST="$TGI_INSTALL_ROOT/$TGI_CREDS_FILENAME"
     if tgi_same_file "$CREDS_SRC" "$CREDS_DEST"; then
@@ -352,15 +345,15 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     printf '%s' "$RENDERED_PLIST" | sudo tee "$TGI_PLIST_DEST" >/dev/null
     sudo chown root:wheel "$CREDS_DEST"
 
-    # Fix 6: install the newsyslog config that bounds /var/log/coderails-tier-gate.log.
+    # Fix 6: install the newsyslog config that bounds /var/log/coderails-integrity-gate.log.
     # The Fix 4 per-tick heartbeat grows this log faster, so rotation is required.
     # /etc/newsyslog.d is the drop-in dir newsyslog(8) reads on macOS.
-    echo "== tier-gate install: log rotation =="
-    sudo install -m 0644 "$SCRIPT_DIR/coderails-tier-gate.conf" \
-        /etc/newsyslog.d/coderails-tier-gate.conf
-    echo "installed /etc/newsyslog.d/coderails-tier-gate.conf (rotate at 1MB, keep 5 gz)"
+    echo "== integrity-gate install: log rotation =="
+    sudo install -m 0644 "$SCRIPT_DIR/coderails-integrity-gate.conf" \
+        /etc/newsyslog.d/coderails-integrity-gate.conf
+    echo "installed /etc/newsyslog.d/coderails-integrity-gate.conf (rotate at 1MB, keep 5 gz)"
 
-    echo "== tier-gate install: launchd =="
+    echo "== integrity-gate install: launchd =="
     # Fix 6: ghost sweep. A legacy `launchctl load` (per-user) of this plist
     # registers a permanently EX_CONFIG entry in the console user's gui/$uid (or
     # user/$uid) domain — a dead ghost that shadows the real system-domain job
@@ -371,39 +364,39 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     CONSOLE_UID=$(stat -f%u /dev/console 2>/dev/null || echo "")
     if [[ -n "$CONSOLE_UID" ]]; then
         for dom in "gui/$CONSOLE_UID" "user/$CONSOLE_UID"; do
-            if sudo launchctl print "$dom/com.coderails.tier-gate" >/dev/null 2>&1; then
+            if sudo launchctl print "$dom/com.coderails.integrity-gate" >/dev/null 2>&1; then
                 echo "WARNING: reaping stale per-user ghost in $dom (a legacy launchctl load left it)"
-                sudo launchctl bootout "$dom/com.coderails.tier-gate" 2>/dev/null || true
+                sudo launchctl bootout "$dom/com.coderails.integrity-gate" 2>/dev/null || true
             fi
         done
     else
         echo "WARNING: could not resolve console uid (stat /dev/console) — skipping per-user ghost sweep"
     fi
 
-    sudo launchctl bootout "system/com.coderails.tier-gate" 2>/dev/null || true
+    sudo launchctl bootout "system/com.coderails.integrity-gate" 2>/dev/null || true
     sudo launchctl bootstrap system "$TGI_PLIST_DEST"
 
     # Fix 6: post-bootstrap assertions. The system-domain job MUST be present and
     # NO per-user ghost may remain. Fail loudly on either violation rather than
     # reporting a false "INSTALL COMPLETE" over a job that never registered.
-    if ! sudo launchctl print "system/com.coderails.tier-gate" >/dev/null 2>&1; then
-        echo "INSTALL FAILED — system/com.coderails.tier-gate is not registered after bootstrap." >&2
+    if ! sudo launchctl print "system/com.coderails.integrity-gate" >/dev/null 2>&1; then
+        echo "INSTALL FAILED — system/com.coderails.integrity-gate is not registered after bootstrap." >&2
         exit 1
     fi
     if [[ -n "$CONSOLE_UID" ]]; then
         for dom in "gui/$CONSOLE_UID" "user/$CONSOLE_UID"; do
-            if sudo launchctl print "$dom/com.coderails.tier-gate" >/dev/null 2>&1; then
+            if sudo launchctl print "$dom/com.coderails.integrity-gate" >/dev/null 2>&1; then
                 echo "INSTALL FAILED — a per-user ghost in $dom survived the sweep; the daemon is double-registered." >&2
                 exit 1
             fi
         done
     fi
 
-    echo "INSTALL COMPLETE — daemon: com.coderails.tier-gate"
+    echo "INSTALL COMPLETE — daemon: com.coderails.integrity-gate"
     # Fix 6: print the canonical health check so the next debugging agent has
     # the right command in hand rather than rediscovering it.
     echo
     echo "Health check:"
-    echo "  sudo launchctl print system/com.coderails.tier-gate"
-    echo "  tail -n 50 /var/log/coderails-tier-gate.log"
+    echo "  sudo launchctl print system/com.coderails.integrity-gate"
+    echo "  tail -n 50 /var/log/coderails-integrity-gate.log"
 fi

@@ -2,7 +2,7 @@
 # Behavioural tests for the eval-artifact gate in scripts/merge.sh — the gate
 # inserted directly after the existing review-artifact gate. Mirrors
 # merge.test.sh's stub-dir/wrapper technique, additionally stubbing
-# pr::has_coderails_eval_for_head to control its exit code and PR_EVAL_TIER.
+# pr::has_coderails_eval_for_head to control its exit code and PR_EVAL_VERIFICATION_LEVEL.
 set -u
 
 REPO_ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
@@ -95,13 +95,13 @@ esac
 GITSTUB
 chmod +x "$STUB_DIR/git"
 
-# run_evals_gate_test: <review_exit> <eval_exit> <eval_tier> [trust_fail_reason]
+# run_evals_gate_test: <review_exit> <eval_exit> <eval_verification_level> [trust_fail_reason]
 # Always uses a valid sha/review pass so only the eval gate's behaviour varies,
 # unless review_exit is set nonzero to prove short-circuit ordering.
 # [trust_fail_reason] (identity/permission/comments) lets a test assert
 # merge.sh's eval-gate case-branch message names the real cause.
 run_evals_gate_test() {
-    local review_exit="$1" eval_exit="$2" eval_tier="$3" trust_fail_reason="${4:-}"
+    local review_exit="$1" eval_exit="$2" eval_verification_level="$3" trust_fail_reason="${4:-}"
     local stderr_file="$TMP/stderr_run"
     local stdout_file="$TMP/stdout_run"
 
@@ -118,19 +118,19 @@ pr::has_coderails_review_for_head() {
 }
 
 pr::has_coderails_eval_for_head() {
-    PR_EVAL_TIER="${eval_tier}"
+    PR_EVAL_VERIFICATION_LEVEL="${eval_verification_level}"
     PR_TRUST_FETCH_FAIL_REASON="${trust_fail_reason}"
     [[ -z "\${PR_TRUST_FETCH_FAIL_REASON}" ]] && unset PR_TRUST_FETCH_FAIL_REASON
     return ${eval_exit}
 }
 
 # Only reached when the eval gate above passes — a minimal well-formed
-# tier-0 embed keeps smoke_verify's own checks 1-9 a fast no-op (the stub in
+# verification_level-0 embed keeps smoke_verify's own checks 1-9 a fast no-op (the stub in
 # git-common-base.sh already short-circuits smoke_verify itself to
 # MOCK_SMOKE_VERIFY_RC, but the extractor still needs to succeed for the
 # caller to reach it).
 pr::coderails_eval_embed_for_head() {
-    printf '{"tier":0,"tier_justification":"stub","head_sha":"deadbeef","evals":[]}'
+    printf '{"verification_level":0,"verification_justification":"stub","head_sha":"deadbeef","evals":[]}'
     return 0
 }
 GCSTUB
@@ -165,19 +165,19 @@ WRAPPER
 run_evals_gate_test 0 0 1
 check "merge proceeds when both review and eval gates pass" 0 $?
 
-# ─── Test 2: no eval artifact (eval_exit=1, no tier) → merge blocks ──────────
+# ─── Test 2: no eval artifact (eval_exit=1, no verification_level) → merge blocks ──────────
 run_evals_gate_test 0 1 ""
 rc=$?
 check "merge blocks when no eval artifact found" 1 $rc
 check_msg "merge: no-artifact message mentions 'No coderails eval artifact'" "No coderails eval artifact" "$LAST_STDERR"
 check_msg "merge: no-artifact message names current head sha" "deadbeef" "$LAST_STDERR"
 
-# ─── Test 3: NO-GO eval artifact (eval_exit=1, tier=1) → merge blocks, names tier ──
+# ─── Test 3: NO-GO eval artifact (eval_exit=1, verification_level=1) → merge blocks, names verification_level ──
 run_evals_gate_test 0 1 1
 rc=$?
 check "merge blocks on NO-GO eval artifact" 1 $rc
 check_msg "merge: NO-GO message mentions NO-GO" "NO-GO" "$LAST_STDERR"
-check_msg "merge: NO-GO message names tier 1" "tier 1" "$LAST_STDERR"
+check_msg "merge: NO-GO message names verification_level 1" "verification_level 1" "$LAST_STDERR"
 
 # ─── Test 4: gh fetch failed for eval gate (eval_exit=2) → merge blocks distinctly ──
 run_evals_gate_test 0 2 ""
@@ -227,11 +227,11 @@ check "merge: eval-gate tempfile and fallback fetch-fail messages are DISTINCT" 
 check "merge: eval-gate tempfile and identity fetch-fail messages are DISTINCT" "true" \
   "$([[ "$EVAL_TEMPFILE_MSG" != "$EVAL_IDENTITY_MSG" ]] && echo true || echo false)"
 
-# ─── Test 5: NO-GO at tier 0 (defensive case — shouldn't normally happen) ────
+# ─── Test 5: NO-GO at verification_level 0 (defensive case — shouldn't normally happen) ────
 run_evals_gate_test 0 1 0
 rc=$?
-check "merge blocks on NO-GO at tier 0 (defensive)" 1 $rc
-check_msg "merge: tier-0 NO-GO message names tier 0" "tier 0" "$LAST_STDERR"
+check "merge blocks on NO-GO at verification_level 0 (defensive)" 1 $rc
+check_msg "merge: verification_level-0 NO-GO message names verification_level 0" "verification_level 0" "$LAST_STDERR"
 
 # ─── Test 6: gate order — review gate blocks first, eval gate never runs ─────
 # Stub pr::has_coderails_eval_for_head to exit 99 if called at all, proving

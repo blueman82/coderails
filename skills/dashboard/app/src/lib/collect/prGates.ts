@@ -14,7 +14,7 @@ export interface PrGate {
   headSha: string;
   review: "present" | "missing" | "stale";
   evals: "pass" | "fail" | "missing" | "stale";
-  tier?: string;
+  verification_level?: string;
   state: GateState;
 }
 
@@ -32,11 +32,11 @@ function escapeRegExp(value: string): string {
 }
 
 // Matches a comment body against the eval-marker grammar for `pr`, at ANY
-// result/tier, mirroring eval_artifact::parse_result/parse_tier
+// result/verification_level, mirroring eval_artifact::parse_result/parse_verification_level
 // (scripts/lib/eval-artifact.sh) EXACTLY: those functions anchor the WHOLE
-// LINE (`^<!-- ... -->$`) and restrict result to GO|NO-GO, tier to a single
+// LINE (`^<!-- ... -->$`) and restrict result to GO|NO-GO, verification_level to a single
 // digit [0-2] — a marker embedded mid-sentence, or carrying an out-of-range
-// tier or non-vocabulary result, fails closed in the shell and must fail
+// verification_level or non-vocabulary result, fails closed in the shell and must fail
 // closed here too. We split the body into lines and test each line whole
 // against an anchored pattern, rather than scanning the body as one blob
 // with an unanchored regex. pr/headSha are compared via string equality
@@ -46,17 +46,17 @@ function matchEvalMarkers(
   body: string,
   version: string,
   pr: number
-): { headSha: string; result: string; tier: string }[] {
+): { headSha: string; result: string; verification_level: string }[] {
   const escapedVersion = escapeRegExp(version);
   const pattern = new RegExp(
-    `^<!-- coderails-eval-summary ${escapedVersion} pr=(\\S+) head_sha=(\\S+) result=(GO|NO-GO) tier=([0-2]) -->$`
+    `^<!-- coderails-eval-summary ${escapedVersion} pr=(\\S+) head_sha=(\\S+) result=(GO|NO-GO) verification_level=([0-2]) -->$`
   );
-  const matches: { headSha: string; result: string; tier: string }[] = [];
+  const matches: { headSha: string; result: string; verification_level: string }[] = [];
   for (const line of body.split("\n")) {
     const m = pattern.exec(line);
     if (!m) continue;
     if (m[1] !== String(pr)) continue;
-    matches.push({ headSha: m[2], result: m[3], tier: m[4] });
+    matches.push({ headSha: m[2], result: m[3], verification_level: m[4] });
   }
   return matches;
 }
@@ -94,7 +94,7 @@ export function parseGates(prJson: unknown, comments: unknown[]): PrGate {
 
   const versions = readMarkerVersions();
 
-  let newestEval: { headSha: string; result: string; tier: string } | undefined;
+  let newestEval: { headSha: string; result: string; verification_level: string } | undefined;
   let newestReview: { headSha: string } | undefined;
 
   for (const entry of comments) {
@@ -145,7 +145,7 @@ export function parseGates(prJson: unknown, comments: unknown[]): PrGate {
         : "blocked";
 
   const gate: PrGate = { repo: "", number, title, headSha, review, evals, state };
-  if (newestEval?.tier !== undefined) gate.tier = newestEval.tier;
+  if (newestEval?.verification_level !== undefined) gate.verification_level = newestEval.verification_level;
   return gate;
 }
 

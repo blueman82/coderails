@@ -36,7 +36,7 @@ Create `workflow.config.yaml` in the current project directory. This file is rea
    - **Engineering-principles paths** (comma-separated glob patterns, e.g. `**/container.py,**/typed_di/**`) — or "none"
    - **Engineering-principles skill** (the slash-command to run, e.g. `/engineering-principles-python`, `/engineering-principles-go`, `/engineering-principles-ts`, `/engineering-principles-bash`) — detect a sensible default: look for `go.mod` → `/engineering-principles-go`, `package.json` with `.ts` files → `/engineering-principles-ts`, no `go.mod`/`package.json` but `.sh` files present (e.g. an all-shell `bin/`/`scripts/` layout) → `/engineering-principles-bash`, otherwise `/engineering-principles-python`. Ask and let the user override. Answer "none" to disable engineering-principles entirely.
    - **Sandbox workers** — dispatch agentic-loop implementation-unit workers as separate OS-sandboxed processes (`@anthropic-ai/sandbox-runtime`) instead of in-process `Agent` calls, for write containment outside the agent's trust domain. Requires node/npx and a supported platform (macOS Seatbelt, Linux/WSL2 bubblewrap). Default: `false` (or omit the field — same effect).
-   - **Tier-review machine user** (advanced, most projects should answer "none") — the GitHub login of a dedicated machine-user identity that posts `tier-review` commit statuses. When set, `scripts/merge.sh` and the `enforce_pr_workflow` hook additionally require, for any PR at any tier, that the newest `tier-review` status on the head SHA be `success` and posted by exactly this login. This is a redundant local gate (defence-in-depth) — the primary control is a server-side ruleset. Default: `null` (or omit the field — same effect, check inactive).
+   - **Integrity machine user** (advanced, most projects should answer "none") — the GitHub login of a dedicated machine-user identity that posts SHA-bound `integrity-review` attestations. When set, `scripts/merge.sh` and the `enforce_pr_workflow` hook require a successful attestation from exactly this login. Default: `null` (or omit the field — same effect, check inactive).
 
 6. Write `workflow.config.yaml` at the resolved config path from step 3 with the collected values. Use `null` for any field answered "none".
 
@@ -68,8 +68,8 @@ engineering_principles_paths:
 # or: engineering_principles_paths: null
 engineering_principles_skill: "/engineering-principles-python"   # nil = skip engineering-principles entirely; /engineering-principles-go, /engineering-principles-ts, /engineering-principles-bash also supported
 sandbox_workers: false   # true = agentic-loop dispatches implementation-unit workers via @anthropic-ai/sandbox-runtime (OS write containment); requires node/npx, macOS or Linux/WSL2
-tier_review:
-  machine_user: null   # GitHub login of the tier-review machine user; null/omitted = local gate inactive
+integrity_review:
+  machine_user: null   # GitHub login of the integrity machine user; null/omitted = local gate inactive
 ```
 
 7. Report the path written and remind the user to commit it.

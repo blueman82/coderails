@@ -374,9 +374,9 @@ describe("collectLoops", () => {
     expect(loops[0].lastUpdatedMs).toBe(mtime.getTime());
   });
 
-  it("reports evalsFrozen true for a tier-0 exemption verdict with a grading stamp", () => {
+  it("reports evalsFrozen true for a verification_level-0 exemption verdict with a grading stamp", () => {
     const base = makeTmpBase();
-    const dir = join(base, "-tier0-project", "S5");
+    const dir = join(base, "-verification_level0-project", "S5");
     mkdirSync(dir, { recursive: true });
     writeFileSync(
       join(dir, "progress.json"),
@@ -386,8 +386,8 @@ describe("collectLoops", () => {
       join(dir, "evals.json"),
       JSON.stringify({
         scope: "loop",
-        tier: 0,
-        tier_justification: "docs-only loop, no runtime behaviour",
+        verification_level: 0,
+        verification_justification: "docs-only loop, no runtime behaviour",
         grading: { by: "post_evals.sh grade-loop", checksum: "abc123" },
       })
     );
@@ -395,9 +395,9 @@ describe("collectLoops", () => {
     expect(loops[0].evalsFrozen).toBe(true);
   });
 
-  it("reports evalsFrozen false for a tier-0 exemption whose result is explicitly NO-GO (NO-GO takes precedence over the tier-0 exemption)", () => {
+  it("reports evalsFrozen false for a verification_level-0 exemption whose result is explicitly NO-GO (NO-GO takes precedence over the verification_level-0 exemption)", () => {
     const base = makeTmpBase();
-    const dir = join(base, "-tier0-nogo-project", "S5b");
+    const dir = join(base, "-verification_level0-nogo-project", "S5b");
     mkdirSync(dir, { recursive: true });
     writeFileSync(
       join(dir, "progress.json"),
@@ -408,8 +408,8 @@ describe("collectLoops", () => {
       JSON.stringify({
         scope: "loop",
         result: "NO-GO",
-        tier: 0,
-        tier_justification: "docs-only loop, no runtime behaviour",
+        verification_level: 0,
+        verification_justification: "docs-only loop, no runtime behaviour",
         grading: { by: "post_evals.sh grade-loop", checksum: "abc123" },
       })
     );
@@ -427,13 +427,13 @@ describe("collectLoops", () => {
     );
     writeFileSync(
       join(dir, "evals.json"),
-      JSON.stringify({ scope: "loop", result: "NO-GO", tier: 1, tier_justification: "2 work-units, no irreversible surface" })
+      JSON.stringify({ scope: "loop", result: "NO-GO", verification_level: 1, verification_justification: "2 work-units, no irreversible surface" })
     );
     const loops = collectLoops(base);
     expect(loops[0].evalsFrozen).toBe(false);
   });
 
-  it("reports evalsFrozen false when evals.json is GO but tier_justification is blank (unjustified)", () => {
+  it("reports evalsFrozen false when evals.json is GO but verification_justification is blank (unjustified)", () => {
     const base = makeTmpBase();
     const dir = join(base, "-unjustified-project", "S7");
     mkdirSync(dir, { recursive: true });
@@ -443,7 +443,7 @@ describe("collectLoops", () => {
     );
     writeFileSync(
       join(dir, "evals.json"),
-      JSON.stringify({ scope: "loop", result: "GO", tier: 1, tier_justification: "" })
+      JSON.stringify({ scope: "loop", result: "GO", verification_level: 1, verification_justification: "" })
     );
     const loops = collectLoops(base);
     expect(loops[0].evalsFrozen).toBe(false);
@@ -459,7 +459,7 @@ describe("collectLoops", () => {
     );
     writeFileSync(
       join(dir, "evals.json"),
-      JSON.stringify({ scope: "loop", result: "GO", tier: 1, tier_justification: "2 work-units, no irreversible surface" })
+      JSON.stringify({ scope: "loop", result: "GO", verification_level: 1, verification_justification: "2 work-units, no irreversible surface" })
     );
     const loops = collectLoops(base);
     expect(loops[0].evalsFrozen).toBe(false);
@@ -478,8 +478,8 @@ describe("collectLoops", () => {
       JSON.stringify({
         scope: "loop",
         result: "GO",
-        tier: 1,
-        tier_justification: "2 work-units, no irreversible surface",
+        verification_level: 1,
+        verification_justification: "2 work-units, no irreversible surface",
         grading: { checksum: "abc123" },
       })
     );
@@ -500,8 +500,8 @@ describe("collectLoops", () => {
       JSON.stringify({
         scope: "loop",
         result: "GO",
-        tier: 1,
-        tier_justification: "2 work-units, no irreversible surface",
+        verification_level: 1,
+        verification_justification: "2 work-units, no irreversible surface",
         grading: { by: "", checksum: "" },
       })
     );

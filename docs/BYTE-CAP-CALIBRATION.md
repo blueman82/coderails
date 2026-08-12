@@ -44,7 +44,7 @@ If observed burn is `X` tokens:
 
 ## Measurement Example
 
-**Hypothetical loop** (this repo, add tier-gate docs):
+**Hypothetical loop** (this repo, add integrity-gate docs):
 ```
 Turn 1 (planning):           12k tokens
 Turn 2 (implementation):      45k tokens

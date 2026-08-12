@@ -62,7 +62,7 @@ describe("renderCommandCentre — metrics", () => {
         activeSessions: 0,
         hooksFired: 0,
         lintFindings: 0,
-        latestMerge: { title: "coderails #5 — task-evals wiring", prCount: 5, testCount: 22, tier: "P0" },
+        latestMerge: { title: "coderails #5 — task-evals wiring", prCount: 5, testCount: 22, verification_level: "P0" },
       },
       activity: [],
       buttons: [],

@@ -1,5 +1,5 @@
 #!/bin/bash
-# Behavioural tests for scripts/tier-gate/install.sh — preflight predicates,
+# Behavioural tests for scripts/integrity-gate/install.sh — preflight predicates,
 # plist rendering, and the diff-before-promote computation. These are the
 # parts of install.sh with no root/sudo/interactive side effect (see the
 # file's own header comment): the test sources it (main-guard prevents the
@@ -8,7 +8,7 @@
 set -u
 
 REPO_ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
-INSTALLER="$REPO_ROOT/scripts/tier-gate/install.sh"
+INSTALLER="$REPO_ROOT/scripts/integrity-gate/install.sh"
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 
@@ -79,7 +79,6 @@ out=$(tgi_check_credentials "$CREDS_EMPTY" 2>&1)
 rc=$?
 check "tgi_check_credentials: empty file -> rc 1" "1" "$rc"
 check_contains "tgi_check_credentials: empty file -> names GH_TOKEN" "missing a non-empty GH_TOKEN=" "$out"
-check_contains "tgi_check_credentials: empty file -> names CLAUDE_CODE_OAUTH_TOKEN" "missing a non-empty CLAUDE_CODE_OAUTH_TOKEN=" "$out"
 check_contains "tgi_check_credentials: empty file -> names MACHINE_USER" "missing a non-empty MACHINE_USER=" "$out"
 
 CREDS_ONE_KEY="$TMP/creds-one-key"
@@ -88,25 +87,23 @@ out=$(tgi_check_credentials "$CREDS_ONE_KEY" 2>&1)
 rc=$?
 check "tgi_check_credentials: only GH_TOKEN -> rc 1" "1" "$rc"
 check_not_contains "tgi_check_credentials: only GH_TOKEN -> does not also complain about GH_TOKEN" "missing a non-empty GH_TOKEN=" "$out"
-check_contains "tgi_check_credentials: only GH_TOKEN -> names missing CLAUDE_CODE_OAUTH_TOKEN" "missing a non-empty CLAUDE_CODE_OAUTH_TOKEN=" "$out"
 check_contains "tgi_check_credentials: only GH_TOKEN -> names missing MACHINE_USER" "missing a non-empty MACHINE_USER=" "$out"
 
 CREDS_TWO_KEYS="$TMP/creds-two-keys"
-printf 'GH_TOKEN=ghp_fake\nCLAUDE_CODE_OAUTH_TOKEN=oat-fake\n' > "$CREDS_TWO_KEYS"
+printf 'GH_TOKEN=ghp_fake\nMACHINE_USER=bot\n' > "$CREDS_TWO_KEYS"
 out=$(tgi_check_credentials "$CREDS_TWO_KEYS" 2>&1)
 rc=$?
-check "tgi_check_credentials: two of three keys (no MACHINE_USER) -> rc 1" "1" "$rc"
-check_contains "tgi_check_credentials: two of three keys -> names missing MACHINE_USER" "missing a non-empty MACHINE_USER=" "$out"
+check "tgi_check_credentials: two required keys -> rc 0" "0" "$rc"
 
 CREDS_ALL_THREE="$TMP/creds-all-three"
-printf 'GH_TOKEN=ghp_fake\nCLAUDE_CODE_OAUTH_TOKEN=oat-fake\nMACHINE_USER=coderails-tier-bot\n' > "$CREDS_ALL_THREE"
+printf 'GH_TOKEN=ghp_fake\nCLAUDE_CODE_OAUTH_TOKEN=oat-fake\nMACHINE_USER=coderails-verification_level-bot\n' > "$CREDS_ALL_THREE"
 out=$(tgi_check_credentials "$CREDS_ALL_THREE" 2>&1)
 rc=$?
 check "tgi_check_credentials: all three keys -> rc 0" "0" "$rc"
 check "tgi_check_credentials: all three keys -> no output" "" "$out"
 
 CREDS_BLANK_VAL="$TMP/creds-blank-val"
-printf 'GH_TOKEN=\nCLAUDE_CODE_OAUTH_TOKEN=oat-fake\nMACHINE_USER=coderails-tier-bot\n' > "$CREDS_BLANK_VAL"
+printf 'GH_TOKEN=\nCLAUDE_CODE_OAUTH_TOKEN=oat-fake\nMACHINE_USER=coderails-verification_level-bot\n' > "$CREDS_BLANK_VAL"
 out=$(tgi_check_credentials "$CREDS_BLANK_VAL" 2>&1)
 rc=$?
 check "tgi_check_credentials: blank GH_TOKEN value -> rc 1 (not just key presence)" "1" "$rc"
@@ -127,7 +124,7 @@ cat > "$GH_STUB_OK" <<'EOF'
 exit 0
 EOF
 chmod +x "$GH_STUB_OK"
-out=$(tgi_check_machine_user_collaborator "coderails-tier-bot" "$GH_STUB_OK" 2>&1)
+out=$(tgi_check_machine_user_collaborator "coderails-verification_level-bot" "$GH_STUB_OK" 2>&1)
 rc=$?
 check "tgi_check_machine_user_collaborator: gh reports collaborator -> rc 0" "0" "$rc"
 check "tgi_check_machine_user_collaborator: gh reports collaborator -> no output" "" "$out"
@@ -150,11 +147,11 @@ check_contains "tgi_check_machine_user_collaborator: gh reports not-found -> nam
 # ═══════════════════════════════════════════════════════════════════════════
 
 CREDS_WITH_USER="$TMP/creds-with-machine-user"
-printf 'GH_TOKEN=ghp_fake\nCLAUDE_CODE_OAUTH_TOKEN=oat-fake\nMACHINE_USER=coderails-tier-bot\n' > "$CREDS_WITH_USER"
+printf 'GH_TOKEN=ghp_fake\nCLAUDE_CODE_OAUTH_TOKEN=oat-fake\nMACHINE_USER=coderails-verification_level-bot\n' > "$CREDS_WITH_USER"
 out=$(tgi_read_machine_user_from_creds "$CREDS_WITH_USER" 2>&1)
 rc=$?
 check "tgi_read_machine_user_from_creds: creds file has MACHINE_USER -> rc 0" "0" "$rc"
-check "tgi_read_machine_user_from_creds: creds file has MACHINE_USER -> echoes the login" "coderails-tier-bot" "$out"
+check "tgi_read_machine_user_from_creds: creds file has MACHINE_USER -> echoes the login" "coderails-verification_level-bot" "$out"
 
 out=$(tgi_read_machine_user_from_creds "$CREDS_EMPTY" 2>&1)
 rc=$?
@@ -169,19 +166,19 @@ check "tgi_read_machine_user_from_creds: creds file absent -> rc 1" "1" "$rc"
 # tgi_render_plist
 # ═══════════════════════════════════════════════════════════════════════════
 
-TEMPLATE="$REPO_ROOT/scripts/tier-gate/com.coderails.tier-gate.plist.template"
-rendered=$(tgi_render_plist "$TEMPLATE" "/etc/coderails-tier-gate/tier-gate-runner.sh" "/etc/coderails-tier-gate/credentials" "octo/some-repo")
-check_contains "tgi_render_plist: substitutes runner path" "<string>/etc/coderails-tier-gate/tier-gate-runner.sh</string>" "$rendered"
-check_contains "tgi_render_plist: substitutes creds path" "<string>/etc/coderails-tier-gate/credentials</string>" "$rendered"
-check_contains "tgi_render_plist: substitutes repo slug into TIER_GATE_REPO" "<string>octo/some-repo</string>" "$rendered"
-check_not_contains "tgi_render_plist: no placeholder tokens remain (runner)" "__TIER_GATE_RUNNER_PATH__" "$rendered"
-check_not_contains "tgi_render_plist: no placeholder tokens remain (creds)" "__TIER_GATE_CREDS_PATH__" "$rendered"
-check_not_contains "tgi_render_plist: no placeholder tokens remain (repo)" "__TIER_GATE_REPO__" "$rendered"
-check_contains "tgi_render_plist: preserves unrelated template content" "<string>com.coderails.tier-gate</string>" "$rendered"
+TEMPLATE="$REPO_ROOT/scripts/integrity-gate/com.coderails.integrity-gate.plist.template"
+rendered=$(tgi_render_plist "$TEMPLATE" "/etc/coderails-integrity-gate/integrity-gate-runner.sh" "/etc/coderails-integrity-gate/credentials" "octo/some-repo")
+check_contains "tgi_render_plist: substitutes runner path" "<string>/etc/coderails-integrity-gate/integrity-gate-runner.sh</string>" "$rendered"
+check_contains "tgi_render_plist: substitutes creds path" "<string>/etc/coderails-integrity-gate/credentials</string>" "$rendered"
+check_contains "tgi_render_plist: substitutes repo slug into INTEGRITY_GATE_REPO" "<string>octo/some-repo</string>" "$rendered"
+check_not_contains "tgi_render_plist: no placeholder tokens remain (runner)" "__INTEGRITY_GATE_RUNNER_PATH__" "$rendered"
+check_not_contains "tgi_render_plist: no placeholder tokens remain (creds)" "__INTEGRITY_GATE_CREDS_PATH__" "$rendered"
+check_not_contains "tgi_render_plist: no placeholder tokens remain (repo)" "__INTEGRITY_GATE_REPO__" "$rendered"
+check_contains "tgi_render_plist: preserves unrelated template content" "<string>com.coderails.integrity-gate</string>" "$rendered"
 
 # ═══════════════════════════════════════════════════════════════════════════
 # tgi_resolve_repo_slug — resolves the owner/repo slug rendered into the plist's
-# TIER_GATE_REPO. Uses an injectable gh stub (like tgi_check_machine_user_
+# INTEGRITY_GATE_REPO. Uses an injectable gh stub (like tgi_check_machine_user_
 # collaborator's [gh_bin]) so it's testable without a real gh/network.
 # ═══════════════════════════════════════════════════════════════════════════
 
@@ -297,34 +294,34 @@ check "tgi_same_file: dst does not exist -> rc 1 (never same, install proceeds)"
 
 # ═══════════════════════════════════════════════════════════════════════════
 # tgi_other_instance_labels — shared-install-root warning: names OTHER
-# installed tier-gate plists (any repo) so the confirmation prompt surfaces
+# installed integrity-gate plists (any repo) so the confirmation prompt surfaces
 # them without requiring the operator to have read docs/comments first.
 # ═══════════════════════════════════════════════════════════════════════════
 
 OTHER_DIR="$TMP/other-plists"
 mkdir -p "$OTHER_DIR"
 
-THIS_PLIST="$OTHER_DIR/com.coderails.tier-gate.plist"
+THIS_PLIST="$OTHER_DIR/com.coderails.integrity-gate.plist"
 cat > "$THIS_PLIST" <<'EOF'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
-  <key>Label</key><string>com.coderails.tier-gate</string>
+  <key>Label</key><string>com.coderails.integrity-gate</string>
 </dict></plist>
 EOF
 
-OTHER_PLIST="$OTHER_DIR/com.coderails.tier-gate.assistant-agent.plist"
+OTHER_PLIST="$OTHER_DIR/com.coderails.integrity-gate.assistant-agent.plist"
 cat > "$OTHER_PLIST" <<'EOF'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
-  <key>Label</key><string>com.coderails.tier-gate.assistant-agent</string>
+  <key>Label</key><string>com.coderails.integrity-gate.assistant-agent</string>
 </dict></plist>
 EOF
 
 if command -v /usr/libexec/PlistBuddy >/dev/null 2>&1; then
-    out=$(tgi_other_instance_labels "$THIS_PLIST" "$OTHER_DIR/com.coderails.tier-gate*.plist" 2>&1)
-    check "tgi_other_instance_labels: excludes plist_dest, echoes only the other Label" "com.coderails.tier-gate.assistant-agent" "$out"
+    out=$(tgi_other_instance_labels "$THIS_PLIST" "$OTHER_DIR/com.coderails.integrity-gate*.plist" 2>&1)
+    check "tgi_other_instance_labels: excludes plist_dest, echoes only the other Label" "com.coderails.integrity-gate.assistant-agent" "$out"
 
     out=$(tgi_other_instance_labels "$THIS_PLIST" "$THIS_PLIST" 2>&1)
     check "tgi_other_instance_labels: only plist_dest matches glob -> no output" "" "$out"

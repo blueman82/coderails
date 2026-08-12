@@ -446,7 +446,7 @@ gate_eval_artifact_for_merge() {
   # arg) — cd into the payload's cwd before calling any of them. This is the
   # hook's own process and it exits right after, so a plain `cd` (not a
   # subshell) is safe and is required: a subshell would swallow the
-  # PR_EVAL_TIER / PR_TRUST_FETCH_FAIL_REASON globals the deny messages below
+  # PR_EVAL_VERIFICATION_LEVEL / PR_TRUST_FETCH_FAIL_REASON globals the deny messages below
   # need from pr::has_coderails_eval_for_head.
   cd "$cwd" 2>/dev/null || {
     jq -n '{
@@ -503,8 +503,8 @@ gate_eval_artifact_for_merge() {
     }'
   elif [ "$eval_rc" -ne 0 ]; then
     local reason
-    if [ -n "${PR_EVAL_TIER:-}" ]; then
-      reason="Blocked: gh pr merge $num — eval artifact for current head $sha is NO-GO (tier $PR_EVAL_TIER). Resolve failing P0 evals and re-run /coderails:post-evals."
+    if [ -n "${PR_EVAL_VERIFICATION_LEVEL:-}" ]; then
+      reason="Blocked: gh pr merge $num — eval artifact for current head $sha is NO-GO (verification_level $PR_EVAL_VERIFICATION_LEVEL). Resolve failing P0 evals and re-run /coderails:post-evals."
     else
       reason="Blocked: gh pr merge $num — no coderails eval artifact for current head $sha. Run /coderails:task-evals then /coderails:post-evals after /pr-review-toolkit:review-pr."
     fi
@@ -516,7 +516,7 @@ gate_eval_artifact_for_merge() {
       }
     }'
   else
-    gate_smoke_verify "$num" "$sha" && gate_tier_review_status "$num" "$sha"
+    gate_smoke_verify "$num" "$sha" && gate_integrity_status "$num" "$sha"
   fi
   return 0
 }
@@ -528,11 +528,11 @@ gate_eval_artifact_for_merge() {
 # either, only in the posting agent's own session at post time. Extracts the
 # embed from the SAME trusted comment the eval-artifact gate above already
 # matched, then runs post_evals::smoke_verify: checks 1-9 plus gate-time
-# re-execution of every tier>=1 scripted eval's cmd/negative_control inside a
+# re-execution of every verification_level>=1 scripted eval's cmd/negative_control inside a
 # detached worktree at the trusted head SHA. Exit 0 (stand aside) on success;
 # emits a deny JSON and returns 1 on any failure — same "one deny per
 # invocation" contract as the other gates in this file, and the caller only
-# proceeds to gate_tier_review_status when this returns 0.
+  # proceeds to gate_integrity_status when this returns 0.
 gate_smoke_verify() {
   local num="$1" sha="$2"
 
@@ -594,19 +594,19 @@ gate_smoke_verify() {
   return 0
 }
 
-# coderails::_tier_review_machine_user <config_file>
-# Echoes the value of the nested key tier_review.machine_user from a
+# coderails::_integrity_machine_user <config_file>
+# Echoes the value of the nested key integrity_review.machine_user from a
 # workflow.config.yaml, or nothing if the key/block is absent. Mirrors
 # scripts/merge.sh's identically-named function (no shared lib file is in
 # this task's manifest, so both gates carry their own copy) — no generic
 # nested-key YAML reader exists in this repo (scripts/lib/config.sh only
 # locates the file); this is a minimal, single-purpose extractor for this
 # one key, not a new config system.
-coderails::_tier_review_machine_user() {
+coderails::_integrity_machine_user() {
   local config_file="$1"
   [ -f "$config_file" ] || return 0
   awk '
-    /^tier_review:[[:space:]]*$/ { in_block=1; next }
+    /^integrity_review:[[:space:]]*$/ { in_block=1; next }
     in_block && /^[^[:space:]]/ { in_block=0 }
     in_block && /^[[:space:]]+machine_user:/ {
       sub(/^[[:space:]]+machine_user:[[:space:]]*/, "")
@@ -619,13 +619,12 @@ coderails::_tier_review_machine_user() {
   ' "$config_file" 2>/dev/null
 }
 
-# gate_tier_review_status <num> <sha>
+# gate_integrity_status <num> <sha>
 # Redundant defence-in-depth layer (fail-closed): once the eval-artifact gate
-# above has ALREADY passed, this additionally requires a `tier-review` commit
+# above has ALREADY passed, this additionally requires a `integrity-review` commit
 # status of state=success, posted by the configured machine user, whose
-# description carries verdict=legitimate AND a tier=N token matching this
-# artifact's own claimed tier (PR_EVAL_TIER, set by pr::has_coderails_eval_for_head
-# in the caller). This layer is redundant defence-in-depth alongside the
+# description carries integrity=pass and the exact head SHA. This layer is
+# redundant defence-in-depth alongside the
 # now-active server-side ruleset — it fails loudly on misconfiguration, and
 # it still matters even with the ruleset active because the ruleset's bypass
 # actor (the repo admin role) can push straight past it; this local check
@@ -633,24 +632,24 @@ coderails::_tier_review_machine_user() {
 # dead code once the ruleset is active; it is the only local check that
 # catches a machine-user misconfiguration before GitHub itself would.
 # Config-keyed and inactive by default: only runs when config key
-# tier_review.machine_user is set (config absent -> other installs
-# unaffected). Runs at EVERY tier — the daemon
-# (tier-gate-runner) now judges every tier, not just tier 0, so this gate is
-# no longer restricted to PR_EVAL_TIER=0. Emits a deny JSON on any failure;
+# integrity_review.machine_user is set (config absent -> other installs
+# unaffected). Runs at EVERY verification_level — the daemon
+# (integrity-gate-runner) attests every evidence artifact without classifying it,
+# so this gate is not restricted to one kind of change. Emits a deny JSON on any failure;
 # emits nothing (stands aside) when inactive or when the check passes — same
 # "one deny per invocation" contract as gate_eval_artifact_for_merge's caller.
-gate_tier_review_status() {
+gate_integrity_status() {
   local num="$1" sha="$2"
   local config_file; config_file=$(coderails::config_path "$cwd")
   [ -z "$config_file" ] && return 0
-  local machine_user; machine_user=$(coderails::_tier_review_machine_user "$config_file")
+  local machine_user; machine_user=$(coderails::_integrity_machine_user "$config_file")
   [ -z "$machine_user" ] && return 0
 
   local statuses tr_rc=0
   statuses=$(gh api "repos/$(repo)/commits/${sha}/statuses" --paginate \
-    --jq '[.[] | select(.context == "tier-review")]' 2>/dev/null) || tr_rc=$?
+    --jq '[.[] | select(.context == "integrity-review")]' 2>/dev/null) || tr_rc=$?
   if [ "$tr_rc" -ne 0 ]; then
-    jq -n --arg r "Blocked: gh pr merge $num — GitHub fetch failed, could not fetch tier-review status for $sha. Retry, or check gh auth/network." '{
+    jq -n --arg r "Blocked: gh pr merge $num — GitHub fetch failed, could not fetch integrity-review status for $sha. Retry, or check gh auth/network." '{
       hookSpecificOutput: {
         hookEventName: "PreToolUse",
         permissionDecision: "deny",
@@ -667,36 +666,14 @@ gate_tier_review_status() {
 
   local reason=""
   if [ -z "$state" ]; then
-    reason="Blocked: gh pr merge $num — no tier-review status found for $sha. The tier-gate daemon has not judged this SHA yet. Wait for it, or kickstart it, then retry."
+    reason="Blocked: gh pr merge $num — no integrity-review status found for $sha. The integrity daemon has not attested this SHA yet. Wait for it, or kickstart it, then retry."
   elif [ "$state" != "success" ]; then
-    reason="Blocked: gh pr merge $num — tier-review status for $sha is '$state' (not success). The tier-gate daemon has not approved this SHA. Resolve and retry."
+    reason="Blocked: gh pr merge $num — integrity-review status for $sha is '$state' (not success). The integrity daemon has not attested this SHA. Resolve and retry."
   elif [ "$creator" != "$machine_user" ]; then
-    reason="Blocked: gh pr merge $num — tier-review status for $sha was posted by '$creator', not the configured machine user '$machine_user'. This is a misconfiguration-or-forgery signal, not a valid verdict. Do not bypass; investigate the creator mismatch."
+    reason="Blocked: gh pr merge $num — integrity-review status for $sha was posted by '$creator', not the configured machine user '$machine_user'. Investigate the creator mismatch."
   else
-    case "$description" in
-      *"verdict=legitimate"*) : ;;
-      *)
-        # state=success is necessary but NOT sufficient: only a genuine
-        # `legitimate` judgment carries verdict=legitimate in its description
-        # (tier-gate-runner tg_gate_pr). Mirrors scripts/merge.sh's identical
-        # check — closes the verdict-laundering path where an otherwise-
-        # minted success is reused as a pass.
-        reason="Blocked: gh pr merge $num — tier-review status for $sha is success but its description ('$description') does not carry verdict=legitimate. This is not a genuine approval (e.g. a laundered or non-judged status). Do not bypass; investigate."
-        ;;
-    esac
-    if [ -z "$reason" ]; then
-      case "$description" in
-        *[[:space:]]tier=${PR_EVAL_TIER}[[:space:]]*|*[[:space:]]tier=${PR_EVAL_TIER}) : ;;
-        tier=${PR_EVAL_TIER}[[:space:]]*|tier=${PR_EVAL_TIER}) : ;;
-        *)
-          # Tier-binding (anti-laundering): the status description must carry
-          # a tier=N token matching THIS artifact's own claimed tier.
-          # Space/end-of-string delimited so tier=1 can never satisfy tier=12
-          # (or vice versa) via a bare substring match. Mirrors
-          # scripts/merge.sh's identical check.
-          reason="Blocked: gh pr merge $num — tier-review status for $sha carries description ('$description') that does not match this artifact's claimed tier ${PR_EVAL_TIER}. A status minted for a different tier cannot satisfy this claim. Do not bypass; investigate."
-          ;;
-      esac
+    if ! [[ "$description" =~ (^|[[:space:]])integrity=pass([[:space:]]|$) ]] || ! [[ "$description" =~ (^|[[:space:]])sha=${sha}([[:space:]]|$) ]]; then
+      reason="Blocked: gh pr merge $num — integrity-review status for $sha is not a valid SHA-bound pass attestation. Do not bypass; investigate."
     fi
   fi
 

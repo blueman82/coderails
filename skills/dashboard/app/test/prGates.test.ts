@@ -12,8 +12,8 @@ if (!versions.eval || !versions.review) {
 const EVAL_VER = versions.eval;
 const REVIEW_VER = versions.review;
 
-function evalMarker(pr: number, headSha: string, result: "GO" | "NO-GO", tier: number): string {
-  return `<!-- coderails-eval-summary ${EVAL_VER} pr=${pr} head_sha=${headSha} result=${result} tier=${tier} -->`;
+function evalMarker(pr: number, headSha: string, result: "GO" | "NO-GO", verification_level: number): string {
+  return `<!-- coderails-eval-summary ${EVAL_VER} pr=${pr} head_sha=${headSha} result=${result} verification_level=${verification_level} -->`;
 }
 
 function reviewMarker(pr: number, headSha: string): string {
@@ -49,7 +49,7 @@ describe("parseGates", () => {
       headSha: HEAD_SHA,
       review: "present",
       evals: "pass",
-      tier: "1",
+      verification_level: "1",
       state: "merge-ready",
     });
   });
@@ -86,7 +86,7 @@ describe("parseGates", () => {
     expect(gate.review).toBe("missing");
     expect(gate.evals).toBe("missing");
     expect(gate.state).toBe("blocked");
-    expect(gate.tier).toBeUndefined();
+    expect(gate.verification_level).toBeUndefined();
   });
 
   it("reports review missing when only an eval marker is present", () => {
@@ -118,16 +118,16 @@ describe("parseGates", () => {
     expect(gate.evals).toBe("missing");
   });
 
-  it("rejects an eval marker with an out-of-range tier (shell grammar caps tier at [0-2])", () => {
+  it("rejects an eval marker with an out-of-range verification_level (shell grammar caps verification_level at [0-2])", () => {
     const gate = parseGates(prJson(), [
-      comment(`<!-- coderails-eval-summary ${EVAL_VER} pr=4 head_sha=${HEAD_SHA} result=GO tier=99 -->`),
+      comment(`<!-- coderails-eval-summary ${EVAL_VER} pr=4 head_sha=${HEAD_SHA} result=GO verification_level=99 -->`),
     ]);
     expect(gate.evals).toBe("missing");
   });
 
   it("rejects an eval marker with a non-vocabulary result (shell grammar allows only GO|NO-GO)", () => {
     const gate = parseGates(prJson(), [
-      comment(`<!-- coderails-eval-summary ${EVAL_VER} pr=4 head_sha=${HEAD_SHA} result=MAYBE tier=1 -->`),
+      comment(`<!-- coderails-eval-summary ${EVAL_VER} pr=4 head_sha=${HEAD_SHA} result=MAYBE verification_level=1 -->`),
     ]);
     expect(gate.evals).toBe("missing");
   });
@@ -152,7 +152,7 @@ describe("parseGates", () => {
       comment(evalMarker(4, HEAD_SHA, "GO", 2)),
     ]);
     expect(gate.evals).toBe("pass");
-    expect(gate.tier).toBe("2");
+    expect(gate.verification_level).toBe("2");
   });
 
   it("degrades gracefully on malformed prJson (not an object), returning missing/blocked rather than throwing", () => {

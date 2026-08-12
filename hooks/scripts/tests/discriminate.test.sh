@@ -31,8 +31,8 @@ SHA="deadbeef"
 FIX_REAL_BUG="$TMP/real_bug.json"
 BROKEN_FORMULA='awk -F'"'"'[ /]'"'"' '"'"'/suites passed/ {found=1; ok=($(NF-3) == $(NF-2))} END {exit (found && ok) ? 0 : 1}'"'"''
 jq -n --arg sha "$SHA" --arg formula "$BROKEN_FORMULA" '{
-  tier: 1,
-  tier_justification: "1 work-unit, scripted change",
+  verification_level: 1,
+  verification_justification: "1 work-unit, scripted change",
   head_sha: $sha,
   evals: [
     {
@@ -58,8 +58,8 @@ check "validate_discriminating: broken awk -> stderr mentions the shared exit co
 FIX_REPAIRED="$TMP/repaired.json"
 REPAIRED_FORMULA='awk '"'"'/suites passed/ {found=1; split($3,a,"/"); ok=(a[1]==a[2] && a[1]>0)} END {exit (found && ok) ? 0 : 1}'"'"''
 jq -n --arg sha "$SHA" --arg formula "$REPAIRED_FORMULA" '{
-  tier: 1,
-  tier_justification: "1 work-unit, scripted change",
+  verification_level: 1,
+  verification_justification: "1 work-unit, scripted change",
   head_sha: $sha,
   evals: [
     {
@@ -80,8 +80,8 @@ check "validate_discriminating: repaired awk formula -> exit 0 (accepted)" 0 $?
 # ─── case 3: vacuous-pass rejection (formula exits 0 on both fixtures) ──────
 FIX_VACUOUS="$TMP/vacuous.json"
 jq -n --arg sha "$SHA" '{
-  tier: 1,
-  tier_justification: "1 work-unit, scripted change",
+  verification_level: 1,
+  verification_justification: "1 work-unit, scripted change",
   head_sha: $sha,
   evals: [
     {
@@ -106,8 +106,8 @@ check "validate_discriminating: vacuous-pass -> stderr mentions the shared exit 
 # ─── case 4: grandfathering — no fixtures field validates as today ─────────
 FIX_NO_FIXTURES="$TMP/no_fixtures.json"
 jq -n --arg sha "$SHA" '{
-  tier: 1,
-  tier_justification: "1 work-unit, scripted change",
+  verification_level: 1,
+  verification_justification: "1 work-unit, scripted change",
   head_sha: $sha,
   evals: [
     {id: "e1", priority: "P0", mode: "scripted", status: "pass", cmd: "run-a", negative_control: "run-a-broken", evidence: "log"}
@@ -119,8 +119,8 @@ check "validate_discriminating: no fixtures field -> exit 0 (grandfathered)" 0 $
 # ─── case 5: formula-not-derivable — no pipe in cmd, no explicit fixtures.formula ─
 FIX_NO_FORMULA="$TMP/no_formula.json"
 jq -n --arg sha "$SHA" '{
-  tier: 1,
-  tier_justification: "1 work-unit, scripted change",
+  verification_level: 1,
+  verification_justification: "1 work-unit, scripted change",
   head_sha: $sha,
   evals: [
     {
@@ -139,8 +139,8 @@ check "validate_discriminating: formula-not-derivable -> stderr tells author to 
 # ─── case 6: environmental failure is distinct from non-discriminating ──────
 FIX_ENV_FAIL="$TMP/env_fail.json"
 jq -n --arg sha "$SHA" '{
-  tier: 1,
-  tier_justification: "1 work-unit, scripted change",
+  verification_level: 1,
+  verification_justification: "1 work-unit, scripted change",
   head_sha: $sha,
   evals: [
     {
@@ -165,8 +165,8 @@ check "validate_discriminating: nonexistent binary -> stderr names the eval id" 
 # ─── case 7: existing structure checks still fire when fixtures are present ─
 FIX_STRUCTURE_STILL_FIRES="$TMP/structure_still_fires.json"
 jq -n --arg sha "$SHA" '{
-  tier: 1,
-  tier_justification: "1 work-unit, scripted change",
+  verification_level: 1,
+  verification_justification: "1 work-unit, scripted change",
   head_sha: $sha,
   evals: [
     {
@@ -183,7 +183,7 @@ jq -n --arg sha "$SHA" '{
   ]
 }' > "$FIX_STRUCTURE_STILL_FIRES"
 stderr_out=$(post_evals::validate_structure "$FIX_STRUCTURE_STILL_FIRES" 42 "$SHA" 2>&1)
-check "validate_structure: tier>=1 scripted eval with empty negative_control (fixtures present) -> exit 1" 1 $?
+check "validate_structure: verification_level>=1 scripted eval with empty negative_control (fixtures present) -> exit 1" 1 $?
 [[ "$stderr_out" == *"e1"* && "$stderr_out" == *"empty negative_control"* ]]
 check "validate_structure: empty negative_control still fires with fixtures present" 0 $?
 
@@ -195,8 +195,8 @@ check "validate_structure: empty negative_control still fires with fixtures pres
 # message, not be conflated with non-discriminating.
 FIX_INVERTED="$TMP/inverted.json"
 jq -n --arg sha "$SHA" '{
-  tier: 1,
-  tier_justification: "1 work-unit, scripted change",
+  verification_level: 1,
+  verification_justification: "1 work-unit, scripted change",
   head_sha: $sha,
   evals: [
     {
@@ -221,8 +221,8 @@ check "validate_discriminating: inverted case -> stderr is a DISTINCT message fr
 # ─── case 9: fixtures.formula explicit override takes precedence over cmd parsing ─
 FIX_EXPLICIT_FORMULA="$TMP/explicit_formula.json"
 jq -n --arg sha "$SHA" --arg formula "$REPAIRED_FORMULA" '{
-  tier: 1,
-  tier_justification: "1 work-unit, scripted change",
+  verification_level: 1,
+  verification_justification: "1 work-unit, scripted change",
   head_sha: $sha,
   evals: [
     {
@@ -244,8 +244,8 @@ check "validate_discriminating: explicit fixtures.formula used even when cmd has
 # The gate must check EVERY eval carrying fixtures, not just the first.
 FIX_MULTI="$TMP/multi.json"
 jq -n --arg sha "$SHA" '{
-  tier: 1,
-  tier_justification: "2 work-units, scripted change",
+  verification_level: 1,
+  verification_justification: "2 work-units, scripted change",
   head_sha: $sha,
   evals: [
     {id: "e1", priority: "P0", mode: "scripted", status: "pass", cmd: "run-a", negative_control: "run-a-broken", evidence: "log"},
@@ -271,8 +271,8 @@ check "validate_discriminating: multi-eval -> stderr names the offending id (e2,
 # checking a real bad fixture.
 FIX_BAD_OMITTED="$TMP/bad_omitted.json"
 jq -n --arg sha "$SHA" '{
-  tier: 1,
-  tier_justification: "1 work-unit, scripted change",
+  verification_level: 1,
+  verification_justification: "1 work-unit, scripted change",
   head_sha: $sha,
   evals: [
     {
@@ -295,8 +295,8 @@ check "validate_discriminating: bad omitted -> stderr names the eval id" 0 $?
 # checking a real good fixture the author wrote.
 FIX_GOOD_OMITTED="$TMP/good_omitted.json"
 jq -n --arg sha "$SHA" '{
-  tier: 1,
-  tier_justification: "1 work-unit, scripted change",
+  verification_level: 1,
+  verification_justification: "1 work-unit, scripted change",
   head_sha: $sha,
   evals: [
     {
@@ -320,8 +320,8 @@ printf '#!/bin/bash\necho hi\n' > "$NOPERM"
 chmod -x "$NOPERM"
 FIX_ENV_126="$TMP/env_126.json"
 jq -n --arg sha "$SHA" --arg noperm "$NOPERM" '{
-  tier: 1,
-  tier_justification: "1 work-unit, scripted change",
+  verification_level: 1,
+  verification_justification: "1 work-unit, scripted change",
   head_sha: $sha,
   evals: [
     {
@@ -345,8 +345,8 @@ check "validate_discriminating: exit 126 -> stderr does NOT claim non-discrimina
 # content fail — a crash is not a discrimination signal.
 FIX_ENV_137="$TMP/env_137.json"
 jq -n --arg sha "$SHA" '{
-  tier: 1,
-  tier_justification: "1 work-unit, scripted change",
+  verification_level: 1,
+  verification_justification: "1 work-unit, scripted change",
   head_sha: $sha,
   evals: [
     {
@@ -370,8 +370,8 @@ check "validate_discriminating: exit 137 -> stderr does NOT claim non-discrimina
 # message, not get swallowed by the new >=128 environmental-suspect check.
 FIX_TIMEOUT="$TMP/timeout.json"
 jq -n --arg sha "$SHA" '{
-  tier: 1,
-  tier_justification: "1 work-unit, scripted change",
+  verification_level: 1,
+  verification_justification: "1 work-unit, scripted change",
   head_sha: $sha,
   evals: [
     {
@@ -390,8 +390,8 @@ check "validate_discriminating: timeout message still distinct (not swallowed by
 # ─── case 16: malformed fixtures (not an object) -> reject with distinct message ─
 FIX_MALFORMED="$TMP/malformed.json"
 jq -n --arg sha "$SHA" '{
-  tier: 1,
-  tier_justification: "1 work-unit, scripted change",
+  verification_level: 1,
+  verification_justification: "1 work-unit, scripted change",
   head_sha: $sha,
   evals: [
     {
@@ -416,8 +416,8 @@ check "validate_discriminating: malformed fixtures -> stderr names id + says 'ob
 # it exit 0, bad="y" makes it exit 1 — accepted via derivation, not override.
 FIX_DERIVED="$TMP/derived.json"
 jq -n --arg sha "$SHA" '{
-  tier: 1,
-  tier_justification: "1 work-unit, scripted change",
+  verification_level: 1,
+  verification_justification: "1 work-unit, scripted change",
   head_sha: $sha,
   evals: [
     {

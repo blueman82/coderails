@@ -8,7 +8,7 @@
 # is a discipline Stop hook in the check_confidence_labels/check_verify_loop
 # family (sources lib/discipline_common.sh, blocks via exit 2 + stderr).
 #
-# Classifier — deterministic two-tier heuristic, NOT an LLM judge. A judge
+# Classifier — deterministic two-verification_level heuristic, NOT an LLM judge. A judge
 # was considered and rejected for a Stop hook: seconds of latency on every
 # in-envelope turn end, a network/API dependency inside the hook sandbox,
 # nondeterminism that can't be locked in a fixture test, and a new failure
@@ -16,17 +16,17 @@
 # The heuristic's known miss-cases are bounded and documented below instead.
 #   preprocess — drop fenced code blocks (``` toggle), inline backtick spans,
 #     and blockquote lines (quoted material is not the model asking).
-#   tier 1 (positional) — the last content line of the prose body (the text
+#   verification_level 1 (positional) — the last content line of the prose body (the text
 #     before a trailing "## Did Not Verify" section) OR of the whole message
 #     ends with "?" (trailing quotes/brackets/markdown stripped first). A
 #     question nothing follows is a question awaiting an answer; the
 #     self-answered rhetorical form ("Should I use X? No — because ...")
 #     carries its answer after the "?" and does not match.
-#   tier 1b (positional) — a whole-line first-person-modal question
+#   verification_level 1b (positional) — a whole-line first-person-modal question
 #     ("Should I ...?", "Shall we ...?") within the last 3 content lines of
 #     the prose body — catches the ask when a structural trailer (DNV
 #     section, LOOP-STOP line) follows it.
-#   tier 2 (phrase) — high-precision second-person request phrases anywhere
+#   verification_level 2 (phrase) — high-precision second-person request phrases anywhere
 #     in the prose ("do you want", "let me know which", "would you prefer",
 #     "awaiting your", ...) — question mark or not. These are addressed TO
 #     the user by construction, so position doesn't matter.
@@ -54,7 +54,7 @@
 #
 # Agentic-loop hard-stops: untouched. A well-formed stopping turn ends with
 # its declarative `LOOP-STOP: <category> — <reason>` line (the skill's
-# ending-line contract), which no tier matches. This gate never prevents
+# ending-line contract), which no verification_level matches. This gate never prevents
 # stopping-with-a-report — it prevents stopping-with-a-question, and the cap
 # guarantees any stop eventually lands even if mis-worded.
 #
@@ -68,7 +68,7 @@
 # prose, and intent has no regex. What it cannot catch:
 #   - a declarative handoff with no interrogative marker at all ("Two options
 #     exist: A and B." / "Blocked pending your decision on X." phrased novelly),
-#   - novel second-person phrasings outside the tier-2 list,
+#   - novel second-person phrasings outside the verification_level-2 list,
 #   - a question inside plain double quotes (only backtick/fence/blockquote
 #     quoting is stripped — a terminal quoted question is a known FP, and a
 #     mid-message one a known miss),
@@ -173,25 +173,25 @@ ends_with_q() {
 matched=""
 snippet=""
 
-# tier 1 — terminal question mark on the body's or the message's last line.
+# verification_level 1 — terminal question mark on the body's or the message's last line.
 if ends_with_q "$body_last"; then
-  matched="tier1_body_last"; snippet="$body_last"
+  matched="verification_level1_body_last"; snippet="$body_last"
 elif ends_with_q "$whole_last"; then
-  matched="tier1_whole_last"; snippet="$whole_last"
+  matched="verification_level1_whole_last"; snippet="$whole_last"
 fi
 
-# tier 1b — whole-line first-person-modal question in the body's last 3
+# verification_level 1b — whole-line first-person-modal question in the body's last 3
 # content lines (catches the ask when a structural trailer follows it).
 # Line-terminal "?" required, so "Should I use X? No — ..." never matches.
 if [ -z "$matched" ]; then
   p1='(^|[^[:alnum:]])(should|shall|could|can|may|must|do|would) (i|we) [^?]*\?[[:space:]]*$'
   hit=$(printf '%s\n' "$body_tail3" | grep -iE "$p1" | head -n 1)
   if [ -n "$hit" ]; then
-    matched="tier1b_modal"; snippet="$hit"
+    matched="verification_level1b_modal"; snippet="$hit"
   fi
 fi
 
-# tier 2 — second-person request phrases, message-wide. Each is addressed to
+# verification_level 2 — second-person request phrases, message-wide. Each is addressed to
 # the user by construction; position doesn't matter.
 if [ -z "$matched" ]; then
   ask_patterns=(
@@ -214,7 +214,7 @@ if [ -z "$matched" ]; then
   for p in "${ask_patterns[@]}"; do
     hit=$(printf '%s\n' "$stripped" | grep -iE "$p" | head -n 1)
     if [ -n "$hit" ]; then
-      matched="tier2"; snippet="$hit"
+      matched="verification_level2"; snippet="$hit"
       break
     fi
   done
@@ -228,7 +228,7 @@ fi
 # ── Question detected while crack-on active ────────────────────────────────
 if [ "$count" -ge "$MAX_BLOCKS" ]; then
   # Release valve: cap reached this turn — allow the stop, loudly audited.
-  log_line "hook=crack_on_prose_gate event=Stop session=$session_id text_len=${#text} matched=1 tier=$matched count=$count capped=1 blocked=0"
+  log_line "hook=crack_on_prose_gate event=Stop session=$session_id text_len=${#text} matched=1 verification_level=$matched count=$count capped=1 blocked=0"
   exit 0
 fi
 
@@ -237,10 +237,10 @@ if ! printf '%s' "$newcount" > "$count_file" 2>/dev/null; then
   # Cannot record the block — an uncounted block could cycle forever, so
   # fail open (allow) with an audit line instead. Same stand-aside direction
   # as crack_on_gate.sh's unkeyable-stamp case.
-  log_line "hook=crack_on_prose_gate event=Stop session=$session_id matched=1 tier=$matched blocked=0 err=count_write_failed"
+  log_line "hook=crack_on_prose_gate event=Stop session=$session_id matched=1 verification_level=$matched blocked=0 err=count_write_failed"
   exit 0
 fi
 
-log_line "hook=crack_on_prose_gate event=Stop session=$session_id text_len=${#text} matched=1 tier=$matched count=$newcount blocked=1"
+log_line "hook=crack_on_prose_gate event=Stop session=$session_id text_len=${#text} matched=1 verification_level=$matched count=$newcount blocked=1"
 echo "[crack-on-block] A crack-on envelope is active in this session and your final message hands a question back to the user (matched: \"${snippet}\"). Asking the human is suppressed in BOTH forms — the AskUserQuestion tool and prose. Make the call yourself inside the envelope scope and keep working, or end with a declarative report / LOOP-STOP declaration stating what you did, what you decided, and what remains. Do not end the turn with a question, and do not rephrase this one." >&2
 exit 2

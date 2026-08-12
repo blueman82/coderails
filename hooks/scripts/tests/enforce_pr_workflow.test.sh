@@ -28,7 +28,7 @@ printf 'jira: null\n' > "$REPO/.claude/workflow.config.yaml"
 # for the whole suite, by a fake script on PATH.
 #
 # Default behaviour (no env override): resolves a fixed head SHA and returns a
-# single GO-tier-1 marker for whatever PR number appears in the comments URL
+# single GO-verification_level-1 marker for whatever PR number appears in the comments URL
 # at that fixed SHA — this transparently satisfies the eval gate for every
 # PRE-EXISTING `gh pr merge` ALLOW case in this file (they exercise the
 # review-pr gate only and were not written with the eval gate in mind).
@@ -88,22 +88,22 @@ case "$args" in
     else
       # Default: auto-satisfy the eval gate for whatever PR number is in the
       # URL (repos/OWNER/REPO/issues/<num>/comments), at the default SHA.
-      # A trailing fenced ```json embed is appended (tier 0, empty .evals, own
+      # A trailing fenced ```json embed is appended (verification_level 0, empty .evals, own
       # head_sha) so gate_smoke_verify's pr::coderails_eval_embed_for_head
       # extraction and post_evals::smoke_verify's structural checks 1-9 also
       # pass trivially for every pre-existing case that relies on this default
-      # (they exercise review-pr / eval-artifact / tier-review gate wiring, not
-      # smoke_verify's own tier>=1 re-execution correctness).
+      # (they exercise review-pr / eval-artifact / integrity-review gate wiring, not
+      # smoke_verify's own verification_level>=1 re-execution correctness).
       pr_num=$(printf '%s' "$args" | grep -oE '/issues/[0-9]+/comments' | grep -oE '[0-9]+')
       sha="${MOCK_GH_HEAD_SHA:-$DEFAULT_SHA}"
-      printf '<!-- coderails-eval-summary v1 pr=%s head_sha=%s result=GO tier=1 -->\n```json\n{"tier":0,"tier_justification":"stub","head_sha":"%s","evals":[]}\n```\n' "$pr_num" "$sha" "$sha" | base64
+      printf '<!-- coderails-eval-summary v1 pr=%s head_sha=%s result=GO verification_level=1 -->\n```json\n{"verification_level":0,"verification_justification":"stub","head_sha":"%s","evals":[]}\n```\n' "$pr_num" "$sha" "$sha" | base64
     fi
     ;;
   "api repos/"*"/statuses"*)
-    # TIER-REVIEW GATE section (below) drives this via MOCK_TR_STATUSES_JSON /
+    # VERIFICATION_LEVEL-REVIEW GATE section (below) drives this via MOCK_TR_STATUSES_JSON /
     # MOCK_TR_STATUSES_FAIL. Pre-existing cases in this file never set
-    # tier_review.machine_user in their repo's config, so gate_eval_artifact_for_merge's
-    # tier-review arm never calls this branch for them — this exists solely for
+    # integrity_review.machine_user in their repo's config, so gate_eval_artifact_for_merge's
+    # integrity-review arm never calls this branch for them — this exists solely for
     # the new section.
     [ -n "${MOCK_TR_STATUSES_FAIL:-}" ] && exit 1
     printf '%s' "${MOCK_TR_STATUSES_JSON:-[]}"
@@ -850,7 +850,7 @@ HEAD_SHA=$(git -C "$REPO_EVAL" rev-parse HEAD)
 # exercise the eval gate's branches directly, rather than relying on the
 # default auto-GO behaviour used by the pre-existing review-pr-only cases.
 
-# run_eval: like run(), but also captures the deny reason text for tier assertions.
+# run_eval: like run(), but also captures the deny reason text for verification_level assertions.
 run_eval() {
   printf '%s' "$1" | bash "$HOOK" 2>/dev/null
 }
@@ -881,48 +881,48 @@ case "$out" in
 esac
 
 # ── Case 80: GO eval marker for the head SHA -> NOT denied ──────────────────
-# The trailing fenced ```json embed (tier 0, empty .evals) is what
+# The trailing fenced ```json embed (verification_level 0, empty .evals) is what
 # gate_smoke_verify's pr::coderails_eval_embed_for_head extracts and
 # smoke_verify structurally validates — this case tests the eval-artifact
-# gate's marker parsing, not smoke_verify's own tier>=1 re-execution, so the
-# embed is tier 0/empty regardless of the marker's own claimed tier=1.
-GO_MARKER="<!-- coderails-eval-summary v1 pr=42 head_sha=${HEAD_SHA} result=GO tier=1 -->
+# gate's marker parsing, not smoke_verify's own verification_level>=1 re-execution, so the
+# embed is verification_level 0/empty regardless of the marker's own claimed verification_level=1.
+GO_MARKER="<!-- coderails-eval-summary v1 pr=42 head_sha=${HEAD_SHA} result=GO verification_level=1 -->
 \`\`\`json
-{\"tier\":0,\"tier_justification\":\"stub\",\"head_sha\":\"${HEAD_SHA}\",\"evals\":[]}
+{\"verification_level\":0,\"verification_justification\":\"stub\",\"head_sha\":\"${HEAD_SHA}\",\"evals\":[]}
 \`\`\`"
 out=$(
   MOCK_GH_HEAD_SHA="$HEAD_SHA" MOCK_GH_COMMENT_BODY="$GO_MARKER" \
   run_eval "$(payload "gh pr merge 42 --squash" "$T_REVIEWED_42" "$REPO_EVAL")"
 )
-check "gh pr merge 42, GO eval marker tier 1 -> allow" ALLOW "$(decision_of "$out")"
+check "gh pr merge 42, GO eval marker verification_level 1 -> allow" ALLOW "$(decision_of "$out")"
 
-# ── Case 81: tier-0 GO marker -> NOT denied ──────────────────────────────────
-GO_TIER0_MARKER="<!-- coderails-eval-summary v1 pr=42 head_sha=${HEAD_SHA} result=GO tier=0 -->
+# ── Case 81: verification_level-0 GO marker -> NOT denied ──────────────────────────────────
+GO_VERIFICATION_LEVEL0_MARKER="<!-- coderails-eval-summary v1 pr=42 head_sha=${HEAD_SHA} result=GO verification_level=0 -->
 \`\`\`json
-{\"tier\":0,\"tier_justification\":\"stub\",\"head_sha\":\"${HEAD_SHA}\",\"evals\":[]}
+{\"verification_level\":0,\"verification_justification\":\"stub\",\"head_sha\":\"${HEAD_SHA}\",\"evals\":[]}
 \`\`\`"
 out=$(
-  MOCK_GH_HEAD_SHA="$HEAD_SHA" MOCK_GH_COMMENT_BODY="$GO_TIER0_MARKER" \
+  MOCK_GH_HEAD_SHA="$HEAD_SHA" MOCK_GH_COMMENT_BODY="$GO_VERIFICATION_LEVEL0_MARKER" \
   run_eval "$(payload "gh pr merge 42 --squash" "$T_REVIEWED_42" "$REPO_EVAL")"
 )
-check "gh pr merge 42, GO eval marker tier 0 -> allow" ALLOW "$(decision_of "$out")"
+check "gh pr merge 42, GO eval marker verification_level 0 -> allow" ALLOW "$(decision_of "$out")"
 
-# ── Case 82: NO-GO marker with tier N -> deny, message includes the tier ────
+# ── Case 82: NO-GO marker with verification_level N -> deny, message includes the verification_level ────
 # NO-GO never reaches gate_smoke_verify (the eval-artifact gate denies first
 # on result=NO-GO), so this embed is never exercised — added for consistency
 # with every other marker constant in this file.
-NOGO_MARKER="<!-- coderails-eval-summary v1 pr=42 head_sha=${HEAD_SHA} result=NO-GO tier=2 -->
+NOGO_MARKER="<!-- coderails-eval-summary v1 pr=42 head_sha=${HEAD_SHA} result=NO-GO verification_level=2 -->
 \`\`\`json
-{\"tier\":0,\"tier_justification\":\"stub\",\"head_sha\":\"${HEAD_SHA}\",\"evals\":[]}
+{\"verification_level\":0,\"verification_justification\":\"stub\",\"head_sha\":\"${HEAD_SHA}\",\"evals\":[]}
 \`\`\`"
 out=$(
   MOCK_GH_HEAD_SHA="$HEAD_SHA" MOCK_GH_COMMENT_BODY="$NOGO_MARKER" \
   run_eval "$(payload "gh pr merge 42 --squash" "$T_REVIEWED_42" "$REPO_EVAL")"
 )
-check "gh pr merge 42, NO-GO eval marker tier 2 -> deny" DENY "$(decision_of "$out")"
+check "gh pr merge 42, NO-GO eval marker verification_level 2 -> deny" DENY "$(decision_of "$out")"
 case "$out" in
-  *"tier 2"*) : ;;
-  *) printf 'FAIL - NO-GO deny reason should include tier (got: %s)\n' "$out"; fails=$((fails + 1)) ;;
+  *"verification_level 2"*) : ;;
+  *) printf 'FAIL - NO-GO deny reason should include verification_level (got: %s)\n' "$out"; fails=$((fails + 1)) ;;
 esac
 
 # ── Case 83: gh fetch fails -> deny (fail-closed), reason includes a retry hint
@@ -984,9 +984,9 @@ esac
 T_REVIEWED_42_MERGESH=$(mk_transcript \
   "$(mk_skill_line "coderails:push")" \
   "$(mk_skill_line_with_args "pr-review-toolkit:review-pr" "42")")
-NOGO_MARKER_MERGESH="<!-- coderails-eval-summary v1 pr=42 head_sha=${HEAD_SHA} result=NO-GO tier=1 -->
+NOGO_MARKER_MERGESH="<!-- coderails-eval-summary v1 pr=42 head_sha=${HEAD_SHA} result=NO-GO verification_level=1 -->
 \`\`\`json
-{\"tier\":0,\"tier_justification\":\"stub\",\"head_sha\":\"${HEAD_SHA}\",\"evals\":[]}
+{\"verification_level\":0,\"verification_justification\":\"stub\",\"head_sha\":\"${HEAD_SHA}\",\"evals\":[]}
 \`\`\`"
 out=$(
   MOCK_GH_HEAD_SHA="$HEAD_SHA" MOCK_GH_COMMENT_BODY="$NOGO_MARKER_MERGESH" \
@@ -994,13 +994,13 @@ out=$(
 )
 check "scripts/merge.sh 42, NO-GO eval marker -> deny (eval gate reached via merge.sh pr_num)" DENY "$(decision_of "$out")"
 case "$out" in
-  *"tier 1"*) : ;;
-  *) printf 'FAIL - merge.sh NO-GO deny reason should include tier (got: %s)\n' "$out"; fails=$((fails + 1)) ;;
+  *"verification_level 1"*) : ;;
+  *) printf 'FAIL - merge.sh NO-GO deny reason should include verification_level (got: %s)\n' "$out"; fails=$((fails + 1)) ;;
 esac
 
-GO_MARKER_MERGESH="<!-- coderails-eval-summary v1 pr=42 head_sha=${HEAD_SHA} result=GO tier=1 -->
+GO_MARKER_MERGESH="<!-- coderails-eval-summary v1 pr=42 head_sha=${HEAD_SHA} result=GO verification_level=1 -->
 \`\`\`json
-{\"tier\":0,\"tier_justification\":\"stub\",\"head_sha\":\"${HEAD_SHA}\",\"evals\":[]}
+{\"verification_level\":0,\"verification_justification\":\"stub\",\"head_sha\":\"${HEAD_SHA}\",\"evals\":[]}
 \`\`\`"
 out=$(
   MOCK_GH_HEAD_SHA="$HEAD_SHA" MOCK_GH_COMMENT_BODY="$GO_MARKER_MERGESH" \
@@ -1135,206 +1135,3 @@ check "bash -x scripts/merge.sh 140 -> allow (documented limit, not gated)" ALLO
 # ── Case 96 (documented limit): command bash scripts/merge.sh 140 → NOT gated ─
 check "command bash scripts/merge.sh 140 -> allow (documented limit, not gated)" ALLOW \
   "$(run "$(payload "command bash scripts/merge.sh 140" "$T")")"
-
-# ────────────────────────────────────────────────────────────────────────────
-# TIER-REVIEW GATE: gh pr merge on a tier-0 eval artifact must also pass the
-# tier-review status check (redundant defence-in-depth, mirrors scripts/
-# merge.sh's tier-review gate). Active only when config key
-# tier_review.machine_user is set AND the eval artifact's tier is 0; inactive
-# (skip) otherwise. Uses a dedicated repo fixture (REPO_TIER) whose config sets
-# tier_review.machine_user, so pre-existing cases above (none of which set
-# this key) are unaffected.
-# ────────────────────────────────────────────────────────────────────────────
-
-MACHINE_USER="coderails-tier-bot"
-REPO_TIER="$TMP/repo_tier"
-git -C "$TMP" init -q repo_tier
-git -C "$REPO_TIER" config user.email t@t.t
-git -C "$REPO_TIER" config user.name t
-git -C "$REPO_TIER" remote add origin https://github.com/acme/widgets.git
-git -C "$REPO_TIER" commit -q --allow-empty -m init
-mkdir -p "$REPO_TIER/.claude"
-printf 'jira: null\ntier_review:\n  machine_user: %s\n' "$MACHINE_USER" > "$REPO_TIER/.claude/workflow.config.yaml"
-
-# Must resolve as a real commit IN THIS REPO ($REPO_TIER) — smoke_verify's
-# `git worktree add --detach` runs in the payload's cwd, which for every case
-# below is $REPO_TIER, not $REPO or $REPO_EVAL.
-TIER_HEAD_SHA=$(git -C "$REPO_TIER" rev-parse HEAD)
-T_TIER_REVIEWED_42=$(mk_transcript \
-  "$(mk_skill_line "coderails:push")" \
-  "$(mk_skill_line_with_args "pr-review-toolkit:review-pr" "42")")
-# Trailing fenced ```json embed (tier 0, empty .evals) so gate_smoke_verify
-# passes through to gate_tier_review_status, which is what this section
-# actually exercises.
-TIER0_GO_MARKER="<!-- coderails-eval-summary v1 pr=42 head_sha=${TIER_HEAD_SHA} result=GO tier=0 -->
-\`\`\`json
-{\"tier\":0,\"tier_justification\":\"stub\",\"head_sha\":\"${TIER_HEAD_SHA}\",\"evals\":[]}
-\`\`\`"
-
-# Status descriptions now always carry a tier=N token (tier-gate-runner posts
-# it on every verdict, per PR A). The gate must require verdict=legitimate AND
-# a tier token matching the artifact's own claimed tier — mirrors
-# scripts/merge.sh's fixtures.
-SUCCESS_RIGHT_CREATOR="[{\"state\":\"success\",\"creator\":{\"login\":\"${MACHINE_USER}\"},\"description\":\"verdict=legitimate tier=0 host=h\"}]"
-SUCCESS_WRONG_CREATOR="[{\"state\":\"success\",\"creator\":{\"login\":\"repo-owner\"},\"description\":\"verdict=legitimate tier=0 host=h\"}]"
-ERROR_STATUS="[{\"state\":\"error\",\"creator\":{\"login\":\"${MACHINE_USER}\"},\"description\":\"verdict=error tier=0 host=h\"}]"
-# Bare state=success with NO verdict=legitimate in the description — the hook
-# previously accepted this (state+creator only); it must now reject it.
-SUCCESS_NO_VERDICT="[{\"state\":\"success\",\"creator\":{\"login\":\"${MACHINE_USER}\"}}]"
-TIER1_LEGIT="[{\"state\":\"success\",\"creator\":{\"login\":\"${MACHINE_USER}\"},\"description\":\"verdict=legitimate tier=1 host=h\"}]"
-TIER1_SELF_EDIT="[{\"state\":\"failure\",\"creator\":{\"login\":\"${MACHINE_USER}\"},\"description\":\"verdict=self_edit tier=1 host=h\"}]"
-TIER1_INSUFFICIENT="[{\"state\":\"failure\",\"creator\":{\"login\":\"${MACHINE_USER}\"},\"description\":\"verdict=insufficient tier=1 host=h\"}]"
-TIER1_ILLEGITIMATE="[{\"state\":\"failure\",\"creator\":{\"login\":\"${MACHINE_USER}\"},\"description\":\"verdict=illegitimate tier=1 host=h\"}]"
-TIER12_LEGIT="[{\"state\":\"success\",\"creator\":{\"login\":\"${MACHINE_USER}\"},\"description\":\"verdict=legitimate tier=12 host=h\"}]"
-
-# ── Case 97: no tier-review status at all -> deny ─────────────────────────────
-out=$(
-  MOCK_GH_HEAD_SHA="$TIER_HEAD_SHA" MOCK_GH_COMMENT_BODY="$TIER0_GO_MARKER" MOCK_TR_STATUSES_JSON="[]" \
-  run_eval "$(payload "gh pr merge 42 --squash" "$T_TIER_REVIEWED_42" "$REPO_TIER")"
-)
-check "tier-0 PR, no tier-review status -> deny" DENY "$(decision_of "$out")"
-case "$out" in
-  *"tier-review"*) : ;;
-  *) printf 'FAIL - deny reason should mention tier-review (got: %s)\n' "$out"; fails=$((fails + 1)) ;;
-esac
-
-# ── Case 98: success + WRONG creator -> deny (load-bearing: creator attribution) ──
-out=$(
-  MOCK_GH_HEAD_SHA="$TIER_HEAD_SHA" MOCK_GH_COMMENT_BODY="$TIER0_GO_MARKER" MOCK_TR_STATUSES_JSON="$SUCCESS_WRONG_CREATOR" \
-  run_eval "$(payload "gh pr merge 42 --squash" "$T_TIER_REVIEWED_42" "$REPO_TIER")"
-)
-check "tier-0 PR, tier-review success but WRONG creator -> deny" DENY "$(decision_of "$out")"
-case "$out" in
-  *"creator"*) : ;;
-  *) printf 'FAIL - wrong-creator deny reason should mention creator (got: %s)\n' "$out"; fails=$((fails + 1)) ;;
-esac
-
-# ── Case 99: success + RIGHT creator -> allow ─────────────────────────────────
-out=$(
-  MOCK_GH_HEAD_SHA="$TIER_HEAD_SHA" MOCK_GH_COMMENT_BODY="$TIER0_GO_MARKER" MOCK_TR_STATUSES_JSON="$SUCCESS_RIGHT_CREATOR" \
-  run_eval "$(payload "gh pr merge 42 --squash" "$T_TIER_REVIEWED_42" "$REPO_TIER")"
-)
-check "tier-0 PR, tier-review success with RIGHT creator -> allow" ALLOW "$(decision_of "$out")"
-
-# ── Case 100: state=error -> deny ─────────────────────────────────────────────
-out=$(
-  MOCK_GH_HEAD_SHA="$TIER_HEAD_SHA" MOCK_GH_COMMENT_BODY="$TIER0_GO_MARKER" MOCK_TR_STATUSES_JSON="$ERROR_STATUS" \
-  run_eval "$(payload "gh pr merge 42 --squash" "$T_TIER_REVIEWED_42" "$REPO_TIER")"
-)
-check "tier-0 PR, tier-review state=error -> deny" DENY "$(decision_of "$out")"
-
-# ── Case 101: statuses fetch fails -> deny (fail-closed) ──────────────────────
-out=$(
-  MOCK_GH_HEAD_SHA="$TIER_HEAD_SHA" MOCK_GH_COMMENT_BODY="$TIER0_GO_MARKER" MOCK_TR_STATUSES_FAIL=1 \
-  run_eval "$(payload "gh pr merge 42 --squash" "$T_TIER_REVIEWED_42" "$REPO_TIER")"
-)
-check "tier-0 PR, tier-review statuses fetch fails -> deny (fail-closed)" DENY "$(decision_of "$out")"
-
-# ── Case 102: tier=1, NO tier-review status -> DENY ───────────────────────────
-# The headline regression lock: the gate now runs at EVERY tier, not just
-# tier=0. Before the hoist this was "tier-review gate inactive, allow" — a
-# tier=1 PR with no tier-review status merged unimpeded. It must now deny.
-# tier=1 claim but embed is still tier 0/empty-evals — this section tests
-# gate_tier_review_status, not smoke_verify's tier>=1 re-execution path.
-TIER1_GO_MARKER="<!-- coderails-eval-summary v1 pr=42 head_sha=${TIER_HEAD_SHA} result=GO tier=1 -->
-\`\`\`json
-{\"tier\":0,\"tier_justification\":\"stub\",\"head_sha\":\"${TIER_HEAD_SHA}\",\"evals\":[]}
-\`\`\`"
-out=$(
-  MOCK_GH_HEAD_SHA="$TIER_HEAD_SHA" MOCK_GH_COMMENT_BODY="$TIER1_GO_MARKER" MOCK_TR_STATUSES_JSON="[]" \
-  run_eval "$(payload "gh pr merge 42 --squash" "$T_TIER_REVIEWED_42" "$REPO_TIER")"
-)
-check "tier-1 PR, no tier-review status -> DENY (was: gate inactive, allow)" DENY "$(decision_of "$out")"
-case "$out" in
-  *"tier-review"*) : ;;
-  *) printf 'FAIL - tier-1 no-status deny reason should mention tier-review (got: %s)\n' "$out"; fails=$((fails + 1)) ;;
-esac
-
-# ── Case 103: config key absent (REPO_EVAL has no tier_review block) -> allow ─
-out=$(
-  MOCK_GH_HEAD_SHA="$HEAD_SHA" MOCK_GH_COMMENT_BODY="$GO_TIER0_MARKER" MOCK_TR_STATUSES_JSON="[]" \
-  run_eval "$(payload "gh pr merge 42 --squash" "$T_REVIEWED_42" "$REPO_EVAL")"
-)
-check "tier-0 PR, config key absent -> tier-review gate inactive, allow" ALLOW "$(decision_of "$out")"
-
-# ── Case 104: tier=1, verdict=legitimate tier=1 -> ALLOW ─────────────────────
-out=$(
-  MOCK_GH_HEAD_SHA="$TIER_HEAD_SHA" MOCK_GH_COMMENT_BODY="$TIER1_GO_MARKER" MOCK_TR_STATUSES_JSON="$TIER1_LEGIT" \
-  run_eval "$(payload "gh pr merge 42 --squash" "$T_TIER_REVIEWED_42" "$REPO_TIER")"
-)
-check "tier-1 PR, tier-review verdict=legitimate tier=1 -> allow" ALLOW "$(decision_of "$out")"
-
-# ── Case 105: tier=1 claim, status carries tier=0 token -> DENY (mismatch) ───
-out=$(
-  MOCK_GH_HEAD_SHA="$TIER_HEAD_SHA" MOCK_GH_COMMENT_BODY="$TIER1_GO_MARKER" MOCK_TR_STATUSES_JSON="$SUCCESS_RIGHT_CREATOR" \
-  run_eval "$(payload "gh pr merge 42 --squash" "$T_TIER_REVIEWED_42" "$REPO_TIER")"
-)
-check "tier-1 claim satisfied by a tier=0 status -> DENY (token mismatch)" DENY "$(decision_of "$out")"
-
-# ── Case 106: tier=0 claim, status carries tier=1 token -> DENY (reverse) ────
-out=$(
-  MOCK_GH_HEAD_SHA="$TIER_HEAD_SHA" MOCK_GH_COMMENT_BODY="$TIER0_GO_MARKER" MOCK_TR_STATUSES_JSON="$TIER1_LEGIT" \
-  run_eval "$(payload "gh pr merge 42 --squash" "$T_TIER_REVIEWED_42" "$REPO_TIER")"
-)
-check "tier-0 claim satisfied by a tier=1 status -> DENY (reverse direction)" DENY "$(decision_of "$out")"
-
-# ── Case 107: tier=1, verdict=self_edit -> DENY ───────────────────────────────
-out=$(
-  MOCK_GH_HEAD_SHA="$TIER_HEAD_SHA" MOCK_GH_COMMENT_BODY="$TIER1_GO_MARKER" MOCK_TR_STATUSES_JSON="$TIER1_SELF_EDIT" \
-  run_eval "$(payload "gh pr merge 42 --squash" "$T_TIER_REVIEWED_42" "$REPO_TIER")"
-)
-check "tier-1 PR, tier-review verdict=self_edit -> deny" DENY "$(decision_of "$out")"
-
-# ── Case 108: tier=1, verdict=insufficient -> DENY ────────────────────────────
-out=$(
-  MOCK_GH_HEAD_SHA="$TIER_HEAD_SHA" MOCK_GH_COMMENT_BODY="$TIER1_GO_MARKER" MOCK_TR_STATUSES_JSON="$TIER1_INSUFFICIENT" \
-  run_eval "$(payload "gh pr merge 42 --squash" "$T_TIER_REVIEWED_42" "$REPO_TIER")"
-)
-check "tier-1 PR, tier-review verdict=insufficient -> deny" DENY "$(decision_of "$out")"
-
-# ── Case 109: tier=1, verdict=illegitimate -> DENY ────────────────────────────
-out=$(
-  MOCK_GH_HEAD_SHA="$TIER_HEAD_SHA" MOCK_GH_COMMENT_BODY="$TIER1_GO_MARKER" MOCK_TR_STATUSES_JSON="$TIER1_ILLEGITIMATE" \
-  run_eval "$(payload "gh pr merge 42 --squash" "$T_TIER_REVIEWED_42" "$REPO_TIER")"
-)
-check "tier-1 PR, tier-review verdict=illegitimate -> deny" DENY "$(decision_of "$out")"
-
-# ── Case 110: tier=1, WRONG creator -> DENY (creator check at every tier) ────
-out=$(
-  MOCK_GH_HEAD_SHA="$TIER_HEAD_SHA" MOCK_GH_COMMENT_BODY="$TIER1_GO_MARKER" MOCK_TR_STATUSES_JSON="$SUCCESS_WRONG_CREATOR" \
-  run_eval "$(payload "gh pr merge 42 --squash" "$T_TIER_REVIEWED_42" "$REPO_TIER")"
-)
-check "tier-1 PR, tier-review WRONG creator -> deny" DENY "$(decision_of "$out")"
-case "$out" in
-  *"creator"*) : ;;
-  *) printf 'FAIL - tier-1 wrong-creator deny reason should mention creator (got: %s)\n' "$out"; fails=$((fails + 1)) ;;
-esac
-
-# ── Case 111: tier=1 claim, status token tier=12 -> DENY (delimiter case) ────
-# A naive substring match ("tier=1" found inside "tier=12 host=h") would
-# wrongly ALLOW here; only a delimited (space/EOL-bounded) match correctly
-# DENIES. The reverse (claim=12) is not reachable here: the eval-artifact
-# marker regex caps tier at [0-2] (scripts/lib/eval-artifact.sh), so a
-# tier=12 marker is rejected by that earlier gate for an unrelated reason —
-# it would never exercise this gate's own tier-token comparison.
-out=$(
-  MOCK_GH_HEAD_SHA="$TIER_HEAD_SHA" MOCK_GH_COMMENT_BODY="$TIER1_GO_MARKER" MOCK_TR_STATUSES_JSON="$TIER12_LEGIT" \
-  run_eval "$(payload "gh pr merge 42 --squash" "$T_TIER_REVIEWED_42" "$REPO_TIER")"
-)
-check "tier-1 claim satisfied by a tier=12 status -> DENY (delimiter)" DENY "$(decision_of "$out")"
-
-# ── Case 112: tier=0, bare state=success with NO verdict=legitimate -> DENY ──
-# Hook parity with merge.sh: a bare state=success (no description, or a
-# description lacking verdict=legitimate) was previously ACCEPTED here (the
-# hook checked only state+creator, unlike merge.sh's description check).
-out=$(
-  MOCK_GH_HEAD_SHA="$TIER_HEAD_SHA" MOCK_GH_COMMENT_BODY="$TIER0_GO_MARKER" MOCK_TR_STATUSES_JSON="$SUCCESS_NO_VERDICT" \
-  run_eval "$(payload "gh pr merge 42 --squash" "$T_TIER_REVIEWED_42" "$REPO_TIER")"
-)
-check "tier-0 PR, bare state=success with no verdict=legitimate -> DENY (hook parity)" DENY "$(decision_of "$out")"
-case "$out" in
-  *"verdict=legitimate"*) : ;;
-  *) printf 'FAIL - no-verdict deny reason should mention verdict=legitimate (got: %s)\n' "$out"; fails=$((fails + 1)) ;;
-esac
-
-[ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails)"; exit 1; }

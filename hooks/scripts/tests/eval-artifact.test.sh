@@ -21,17 +21,17 @@ check_str() { # desc expected actual
 # ─── marker output ───────────────────────────────────────────────────────────
 MARKER=$(eval_artifact::marker 123 abc GO 1)
 check_str "marker produces exact literal" \
-  "<!-- coderails-eval-summary v1 pr=123 head_sha=abc result=GO tier=1 -->" \
+  "<!-- coderails-eval-summary v1 pr=123 head_sha=abc result=GO verification_level=1 -->" \
   "$MARKER"
 
-# ─── matches_marker: exact match at GO/tier=1 → exit 0 ───────────────────────
+# ─── matches_marker: exact match at GO/verification_level=1 → exit 0 ───────────────────────
 eval_artifact::matches_marker "$MARKER" 123 abc
 check "matches_marker: exact marker → exit 0" 0 $?
 
-# ─── matches_marker only asserts pr+sha identity, not result/tier ────────────
-NOGO_LINE="<!-- coderails-eval-summary v1 pr=123 head_sha=abc result=NO-GO tier=0 -->"
+# ─── matches_marker only asserts pr+sha identity, not result/verification_level ────────────
+NOGO_LINE="<!-- coderails-eval-summary v1 pr=123 head_sha=abc result=NO-GO verification_level=0 -->"
 eval_artifact::matches_marker "$NOGO_LINE" 123 abc
-check "matches_marker: same pr/sha, different result/tier → still exit 0" 0 $?
+check "matches_marker: same pr/sha, different result/verification_level → still exit 0" 0 $?
 
 # ─── wrong PR number → exit 1 ────────────────────────────────────────────────
 eval_artifact::matches_marker "$MARKER" 999 abc
@@ -42,12 +42,12 @@ eval_artifact::matches_marker "$MARKER" 123 wrongsha
 check "matches_marker: wrong sha → exit 1" 1 $?
 
 # ─── v2 marker line → exit 1 (fail-closed on unknown version) ────────────────
-V2_LINE="<!-- coderails-eval-summary v2 pr=123 head_sha=abc result=GO tier=1 -->"
+V2_LINE="<!-- coderails-eval-summary v2 pr=123 head_sha=abc result=GO verification_level=1 -->"
 eval_artifact::matches_marker "$V2_LINE" 123 abc
 check "matches_marker: v2 marker → exit 1 (unknown version fail-closed)" 1 $?
 
 # ─── truncated line (missing trailing ' -->') → exit 1 ───────────────────────
-TRUNCATED="<!-- coderails-eval-summary v1 pr=123 head_sha=abc result=GO tier=1"
+TRUNCATED="<!-- coderails-eval-summary v1 pr=123 head_sha=abc result=GO verification_level=1"
 eval_artifact::matches_marker "$TRUNCATED" 123 abc
 check "matches_marker: missing trailing ' -->' → exit 1" 1 $?
 
@@ -57,17 +57,17 @@ eval_artifact::matches_marker "$JUNK_WRAPPED" 123 abc
 check "matches_marker: junk-wrapped marker → exit 1 (exact anchoring, not substring)" 1 $?
 
 # ─── invalid result value → exit 1 (grammar violation) ───────────────────────
-INVALID_RESULT="<!-- coderails-eval-summary v1 pr=123 head_sha=abc result=MAYBE tier=1 -->"
+INVALID_RESULT="<!-- coderails-eval-summary v1 pr=123 head_sha=abc result=MAYBE verification_level=1 -->"
 eval_artifact::matches_marker "$INVALID_RESULT" 123 abc
 check "matches_marker: invalid result value → exit 1" 1 $?
 
-# ─── invalid tier digit (3) → exit 1 (boundary: grammar only allows 0-2) ─────
-INVALID_TIER="<!-- coderails-eval-summary v1 pr=123 head_sha=abc result=GO tier=3 -->"
-eval_artifact::matches_marker "$INVALID_TIER" 123 abc
-check "matches_marker: tier digit 3 → exit 1 (grammar boundary)" 1 $?
+# ─── invalid verification_level digit (3) → exit 1 (boundary: grammar only allows 0-2) ─────
+INVALID_VERIFICATION_LEVEL="<!-- coderails-eval-summary v1 pr=123 head_sha=abc result=GO verification_level=3 -->"
+eval_artifact::matches_marker "$INVALID_VERIFICATION_LEVEL" 123 abc
+check "matches_marker: verification_level digit 3 → exit 1 (grammar boundary)" 1 $?
 
 # ─── lowercase result casing ("go") → exit 1 (grammar is case-sensitive) ─────
-LOWERCASE_RESULT="<!-- coderails-eval-summary v1 pr=123 head_sha=abc result=go tier=1 -->"
+LOWERCASE_RESULT="<!-- coderails-eval-summary v1 pr=123 head_sha=abc result=go verification_level=1 -->"
 eval_artifact::matches_marker "$LOWERCASE_RESULT" 123 abc
 check "matches_marker: lowercase 'go' not accepted as GO → exit 1" 1 $?
 
@@ -81,7 +81,7 @@ check "matches_marker: pr containing regex metacharacters never matches unrelate
 
 # A line whose body literally contains regex-metacharacter junk shaped like a
 # pr value must not spuriously match a real numeric pr via pattern semantics.
-JUNK_PR_LINE="<!-- coderails-eval-summary v1 pr=1|.* head_sha=abc result=GO tier=1 -->"
+JUNK_PR_LINE="<!-- coderails-eval-summary v1 pr=1|.* head_sha=abc result=GO verification_level=1 -->"
 eval_artifact::matches_marker "$JUNK_PR_LINE" 123 abc
 check "matches_marker: regex-metacharacter-shaped pr in line body doesn't match a different pr" 1 $?
 eval_artifact::matches_marker "$JUNK_PR_LINE" "$REGEX_JUNK_PR" abc
@@ -92,17 +92,17 @@ PREFIXED="not a marker but has: $MARKER"
 eval_artifact::matches_marker "$PREFIXED" 123 abc
 check "matches_marker: prefixed marker line → exit 1 (literal equality, not substring)" 1 $?
 
-# ─── parse_result / parse_tier ────────────────────────────────────────────────
-GO_TIER2=$(eval_artifact::marker 5 shaX GO 2)
-check_str "parse_result: matched GO line → GO" "GO" "$(eval_artifact::parse_result "$GO_TIER2")"
-check_str "parse_tier: matched tier=2 line → 2" "2" "$(eval_artifact::parse_tier "$GO_TIER2")"
+# ─── parse_result / parse_verification_level ────────────────────────────────────────────────
+GO_VERIFICATION_LEVEL2=$(eval_artifact::marker 5 shaX GO 2)
+check_str "parse_result: matched GO line → GO" "GO" "$(eval_artifact::parse_result "$GO_VERIFICATION_LEVEL2")"
+check_str "parse_verification_level: matched verification_level=2 line → 2" "2" "$(eval_artifact::parse_verification_level "$GO_VERIFICATION_LEVEL2")"
 
-NOGO_TIER0=$(eval_artifact::marker 5 shaX NO-GO 0)
-check_str "parse_result: matched NO-GO line → NO-GO" "NO-GO" "$(eval_artifact::parse_result "$NOGO_TIER0")"
-check_str "parse_tier: matched tier=0 line → 0" "0" "$(eval_artifact::parse_tier "$NOGO_TIER0")"
+NOGO_VERIFICATION_LEVEL0=$(eval_artifact::marker 5 shaX NO-GO 0)
+check_str "parse_result: matched NO-GO line → NO-GO" "NO-GO" "$(eval_artifact::parse_result "$NOGO_VERIFICATION_LEVEL0")"
+check_str "parse_verification_level: matched verification_level=0 line → 0" "0" "$(eval_artifact::parse_verification_level "$NOGO_VERIFICATION_LEVEL0")"
 
 check_str "parse_result: unmatched/junk line → empty" "" "$(eval_artifact::parse_result "not a marker")"
-check_str "parse_tier: unmatched/junk line → empty" "" "$(eval_artifact::parse_tier "not a marker")"
+check_str "parse_verification_level: unmatched/junk line → empty" "" "$(eval_artifact::parse_verification_level "not a marker")"
 
 # ─── compute_go ────────────────────────────────────────────────────────────────
 TMP=$(mktemp -d)

@@ -7,7 +7,7 @@ export interface LatestMerge {
   title: string;
   prCount: number;
   testCount: number;
-  tier: string;
+  verification_level: string;
 }
 
 export interface Metrics {
@@ -121,7 +121,7 @@ function renderMetricsPanel(container: HTMLElement, metrics: Metrics | null): vo
       el(
         "div",
         "cc-merge-stats",
-        `${merge.prCount} PRS ${merge.testCount} TESTS TIER ${merge.tier}`
+        `${merge.prCount} PRS ${merge.testCount} TESTS VERIFICATION_LEVEL ${merge.verification_level}`
       )
     );
     container.appendChild(banner);

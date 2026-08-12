@@ -222,9 +222,9 @@ if [ -f "$SKILL_PATH" ]; then
     "yes" "$(grep -q 'abort=<reason>' "$SKILL_PATH" && echo yes || echo no)"
 
   # The 2026-07-26/27 stall: merge.sh exited non-zero because the
-  # tier-review status was `pending`. The refusal contract enumerated
+  # integrity-review status was `pending`. The refusal contract enumerated
   # gates that REJECT, so `pending` matched neither a pass nor a
-  # rejection; the agent invented `merge-blocked reason=tier-review-
+  # rejection; the agent invented `merge-blocked reason=integrity-review-
   # pending` — a marker in the failures set of no config — treated it as
   # non-terminal, and waited until the session died. The provisional
   # abort=incomplete-run stood and the gate read red. These four checks
@@ -237,12 +237,12 @@ if [ -f "$SKILL_PATH" ]; then
     "yes" "$(grep -qi 'never invent a new marker' "$SKILL_PATH" && echo yes || echo no)"
   check "SKILL.md forbids waiting/polling on an unresolved gate instead of terminating" \
     "yes" "$(grep -qi 'never wait, poll, or retry' "$SKILL_PATH" && echo yes || echo no)"
-  # Anchored on the full clause, not the bare token `tier-review`: that token
+  # Anchored on the full clause, not the bare token `integrity-review`: that token
   # appears in ordinary prose all over this file, so a substring check would
   # stay green if the worked example itself were deleted — the exact weakness
   # a negative control is supposed to expose.
-  check "SKILL.md names the pending tier-review case as the worked example of a non-rejecting non-zero exit" \
-    "yes" "$(grep -qi 'worked example is a .pending. .tier-review. status' "$SKILL_PATH" && echo yes || echo no)"
+  check "SKILL.md names the pending integrity-review case as the worked example of a non-rejecting non-zero exit" \
+    "yes" "$(grep -qi 'worked example is a .pending. .integrity-review. status' "$SKILL_PATH" && echo yes || echo no)"
   check "SKILL.md's failure-visibility section states it writes into the run-note (not just logs)" \
     "yes" "$(grep -qi 'writes its reason into the run-note' "$SKILL_PATH" && echo yes || echo no)"
   check "SKILL.md states plainly there is no dashboard alert or PR comment for a failed run" \
@@ -309,8 +309,8 @@ if [ -f "$SKILL_PATH" ]; then
     'never invent a new marker'
   neg_check "negative control: never-wait-on-a-gate check goes RED without its sentence" \
     'never wait, poll, or retry'
-  neg_check "negative control: pending-tier-review worked-example check goes RED without it" \
-    'worked example is a .pending. .tier-review. status'
+  neg_check "negative control: pending-integrity-review worked-example check goes RED without it" \
+    'worked example is a .pending. .integrity-review. status'
 fi
 
 if [ "$checks" -eq 0 ]; then

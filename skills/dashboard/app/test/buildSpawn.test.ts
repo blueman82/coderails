@@ -259,7 +259,7 @@ describe("resolveDefaultWrapperPath", () => {
       expect(resolved).toBe(envWrapper);
     });
 
-    it("rejects a CODERAILS_BUILDER_WRAPPER override that fails the identity check, falling through to the next tier rather than trusting it blindly", () => {
+    it("rejects a CODERAILS_BUILDER_WRAPPER override that fails the identity check, falling through to the next verification_level rather than trusting it blindly", () => {
       const envDir = tmpDir("dashboard-resolve-wrapper-env-bad-");
       const badWrapper = join(envDir, "run-builder.sh");
       writeFileSync(badWrapper, "#!/bin/bash\necho 'not the real wrapper'\n");

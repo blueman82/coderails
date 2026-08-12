@@ -1,11 +1,11 @@
 #!/bin/bash
 # Behavioural tests for the wiki-ingest debt gate in scripts/merge.sh
 # (merge::has_wiki_ingest_for_merged_prs) — the config-keyed, fail-closed
-# gate inserted after the smoke-verify/tier-review gates and before the merge
+# gate inserted after the smoke-verify/integrity-review gates and before the merge
 # action. Active only when config keys wiki_debt_epoch_pr AND wiki_path are
 # both set; otherwise inert (one-line skip notice, merge proceeds).
 #
-# Mirrors merge_tier_review_gate.test.sh's stub-dir/wrapper technique. The
+# Mirrors merge_integrity_review_gate.test.sh's stub-dir/wrapper technique. The
 # fake config lives at $TMP/proj/.claude/workflow.config.yaml so the gate's
 # relative wiki_path resolution (against the config's project root) is
 # exercised for real. The vault is a REAL git repo pair (remote + clone) so
@@ -90,14 +90,14 @@ pr::exists() { return 0; }
 
 pr::head_sha() { echo "deadbeef"; }
 pr::has_coderails_review_for_head() { return 0; }
-pr::has_coderails_eval_for_head() { PR_EVAL_TIER="0"; return 0; }
+pr::has_coderails_eval_for_head() { PR_EVAL_VERIFICATION_LEVEL="0"; return 0; }
 pr::coderails_eval_embed_for_head() {
-    printf '{"tier":0,"tier_justification":"stub","head_sha":"deadbeef","evals":[]}'
+    printf '{"verification_level":0,"verification_justification":"stub","head_sha":"deadbeef","evals":[]}'
     return 0
 }
 post_evals::smoke_verify() { return 0; }
 BASELIB
-# The fake config never sets tier_review.machine_user, so the tier-review gate
+# The fake config never sets integrity_review.machine_user, so the integrity-review gate
 # stays inactive here — this file exercises only the wiki-ingest debt gate.
 
 # Stub gh: merge plumbing always succeeds; the merged-PR list is driven by
@@ -165,7 +165,7 @@ awk '
 
 # ─── Gate-only wrapper: calls merge::has_wiki_ingest_for_merged_prs directly ─
 # Needed for the unreadable-config test: in the full merge::main path the
-# PRE-EXISTING tier-review extractor call (not wrapped in `|| err`) dies first
+# PRE-EXISTING integrity-review extractor call (not wrapped in `|| err`) dies first
 # under set -e, masking the wiki gate's own fail-loud branch.
 GATE_WRAPPER="$STUB_DIR/gate_only_test.sh"
 cat > "$GATE_WRAPPER" <<WRAPPERHEAD
@@ -401,7 +401,7 @@ check "wiki-debt gate parses quoted config values with inline comments" 0 $rc
 
 # ─── Test 23: unreadable config -> loud err, not a silent set -e death ───────
 # Uses the gate-only wrapper (see above): the full merge::main path dies
-# earlier at the pre-existing unwrapped tier-review extractor call.
+# earlier at the pre-existing unwrapped integrity-review extractor call.
 printf 'wiki_path: ../vault%s\nwiki_debt_epoch_pr: 80\n' "$testn" > "$TMP/proj/.claude/workflow.config.yaml"
 chmod 000 "$TMP/proj/.claude/workflow.config.yaml"
 (

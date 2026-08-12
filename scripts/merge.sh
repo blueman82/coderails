@@ -7,17 +7,17 @@ source "$(dirname "$0")/lib/git-common.sh"
 source "$(dirname "$0")/lib/config.sh"
 source "$(dirname "$0")/post_evals.sh"
 
-# coderails::_tier_review_machine_user <config_file>
-# Echoes the value of the nested key tier_review.machine_user from a
+# coderails::_integrity_machine_user <config_file>
+# Echoes the value of the nested key integrity_review.machine_user from a
 # workflow.config.yaml, or nothing if the key/block is absent. No generic
 # nested-key YAML reader exists in this repo (scripts/lib/config.sh only
 # locates the file) — this is a minimal, single-purpose extractor for this
 # one key, not a new config system.
-coderails::_tier_review_machine_user() {
+coderails::_integrity_machine_user() {
     local config_file="$1"
     [[ -f "$config_file" ]] || return 0
     awk '
-        /^tier_review:[[:space:]]*$/ { in_block=1; next }
+        /^integrity_review:[[:space:]]*$/ { in_block=1; next }
         in_block && /^[^[:space:]]/ { in_block=0 }
         in_block && /^[[:space:]]+machine_user:/ {
             sub(/^[[:space:]]+machine_user:[[:space:]]*/, "")
@@ -33,7 +33,7 @@ coderails::_tier_review_machine_user() {
 # coderails::_wiki_debt_epoch_pr <config_file>
 # Echoes the value of the top-level key wiki_debt_epoch_pr from a
 # workflow.config.yaml, or nothing if the key is absent. Same minimal
-# single-purpose awk extractor shape as coderails::_tier_review_machine_user
+# single-purpose awk extractor shape as coderails::_integrity_machine_user
 # above — still not a generic config system. One deliberate ordering
 # difference from that older extractor: the inline comment is stripped BEFORE
 # the surrounding quotes, so `key: "80" # note` yields `80`, not `80"` (quote
@@ -369,13 +369,13 @@ merge::main() {
                     *)          err "GitHub fetch failed — could not fetch PR comments for eval artifact. Retry, or check gh auth/network." ;;
                 esac
             elif [[ $eval_gate_rc -ne 0 ]]; then
-                if [[ -n "${PR_EVAL_TIER:-}" ]]; then
-                    err "Eval artifact for current head $sha is NO-GO (tier $PR_EVAL_TIER) — resolve failing P0 evals and re-run /coderails:post-evals."
+                if [[ -n "${PR_EVAL_VERIFICATION_LEVEL:-}" ]]; then
+                    err "Eval artifact for current head $sha is NO-GO (verification_level $PR_EVAL_VERIFICATION_LEVEL) — resolve failing P0 evals and re-run /coderails:post-evals."
                 else
                     err "No coderails eval artifact for current head $sha — run /coderails:task-evals then /coderails:post-evals after /pr-review-toolkit:review-pr."
                 fi
             fi
-            ok "Eval artifact verified (SHA: $sha, tier ${PR_EVAL_TIER:-?})"
+            ok "Eval artifact verified (SHA: $sha, verification_level ${PR_EVAL_VERIFICATION_LEVEL:-?})"
 
             # ─── Smoke-verify gate (fail-closed) ──────────────────────────────
             # The eval-artifact gate above only parses the marker comment's
@@ -386,12 +386,12 @@ merge::main() {
             # re-execution binding at merge: it extracts the embed from the
             # SAME trusted comment the eval-artifact gate above already
             # matched, checks out the trusted head SHA into a detached
-            # worktree, and re-executes every tier>=1 scripted eval's cmd and
+            # worktree, and re-executes every verification_level>=1 scripted eval's cmd and
             # negative_control there — closing the gap where a hand-written
             # smoke object for a script that never existed passed the
             # eval-artifact gate at rc=0 (PR post_evals.sh check 9/10 never
-            # ran). Tier 0 has an empty .evals array, so this is a fast no-op
-            # at that tier; nothing to opt out of.
+            # ran). Verification level 0 has an empty .evals array, so this is a fast no-op
+            # at that verification_level; nothing to opt out of.
             local embed embed_rc
             embed_rc=0
             embed=$(pr::coderails_eval_embed_for_head "$num" "$sha") || embed_rc=$?
@@ -415,7 +415,7 @@ merge::main() {
             rm -f "$embed_file"
             ok "Smoke-verify passed (SHA: $sha)"
 
-            # ─── Tier-review gate (redundant defence-in-depth, fail-closed) ───
+            # ─── Integrity attestation gate (redundant defence-in-depth, fail-closed) ───
             # This layer is redundant defence-in-depth alongside the now-active
             # server-side ruleset: it fails loudly on misconfiguration, and it
             # still matters even with the ruleset active because the ruleset's
@@ -425,54 +425,34 @@ merge::main() {
             # active; it is the only local check that catches a machine-user
             # misconfiguration before GitHub itself would. Config-keyed and
             # inactive by default: only runs when config key
-            # tier_review.machine_user is set — the daemon (tier-gate-runner)
-            # now judges EVERY tier, not just tier 0, so this gate runs at
-            # every tier too (no more `PR_EVAL_TIER == 0` restriction). A
-            # missing/failed status now blocks merges at every tier — fail-
-            # closed is symmetric across tiers, never bypassed.
-            local tier_review_config; tier_review_config=$(coderails::config_path "$PWD")
-            local tier_review_machine_user=""
-            if [[ -n "$tier_review_config" ]]; then
-                tier_review_machine_user=$(coderails::_tier_review_machine_user "$tier_review_config")
+            # integrity_review.machine_user is set. The daemon attests the
+            # current SHA's evidence and never evaluates verification_level semantics.
+            local integrity_config; integrity_config=$(coderails::config_path "$PWD")
+            local integrity_machine_user=""
+            if [[ -n "$integrity_config" ]]; then
+                integrity_machine_user=$(coderails::_integrity_machine_user "$integrity_config")
             fi
-            if [[ -n "$tier_review_machine_user" ]]; then
+            if [[ -n "$integrity_machine_user" ]]; then
                 local tr_statuses tr_rc=0
                 tr_statuses=$(gh api "repos/$(repo)/commits/${sha}/statuses" --paginate \
-                    --jq '[.[] | select(.context == "tier-review")]' 2>/dev/null) || tr_rc=$?
+                    --jq '[.[] | select(.context == "integrity-review")]' 2>/dev/null) || tr_rc=$?
                 if [[ $tr_rc -ne 0 ]]; then
-                    err "GitHub fetch failed — could not fetch tier-review status for $sha. Retry, or check gh auth/network."
+                    err "GitHub fetch failed — could not fetch integrity-review status for $sha. Retry, or check gh auth/network."
                 fi
                 local tr_state tr_creator tr_desc
                 tr_state=$(printf '%s' "$tr_statuses" | jq -r '.[0].state // empty' 2>/dev/null)
                 tr_creator=$(printf '%s' "$tr_statuses" | jq -r '.[0].creator.login // empty' 2>/dev/null)
                 tr_desc=$(printf '%s' "$tr_statuses" | jq -r '.[0].description // empty' 2>/dev/null)
                 if [[ -z "$tr_state" ]]; then
-                    err "No tier-review status found for $sha — the tier-gate daemon has not judged this SHA yet. Wait for it, or kickstart it, then retry."
+                    err "No integrity-review status found for $sha — the integrity daemon has not attested this SHA yet. Wait for it, or kickstart it, then retry."
                 elif [[ "$tr_state" != "success" ]]; then
-                    err "tier-review status for $sha is '$tr_state' (not success) — the tier-gate daemon has not approved this SHA. Resolve and retry."
-                elif [[ "$tr_creator" != "$tier_review_machine_user" ]]; then
-                    err "tier-review status for $sha was posted by '$tr_creator', not the configured machine user '$tier_review_machine_user' — this is a misconfiguration-or-forgery signal, not a valid verdict. Do not bypass; investigate the creator mismatch."
-                elif [[ "$tr_desc" != *"verdict=legitimate"* ]]; then
-                    # state=success is necessary but NOT sufficient: only a
-                    # genuine `legitimate` judgment carries verdict=legitimate
-                    # in its description (tier-gate-runner tg_gate_pr).
-                    # Requiring it here closes the verdict-laundering path
-                    # where an otherwise-minted success is reused as a pass —
-                    # a bare state check cannot distinguish those, the
-                    # description can.
-                    err "tier-review status for $sha is success but its description ('$tr_desc') does not carry verdict=legitimate — this is not a genuine approval (e.g. a laundered or non-judged status). Do not bypass; investigate."
-                elif ! [[ "$tr_desc" =~ (^|[[:space:]])tier=${PR_EVAL_TIER}($|[[:space:]]) ]]; then
-                    # Tier-binding (anti-laundering): the status description
-                    # must carry a tier=N token matching THIS artifact's own
-                    # claimed tier. Space/end-of-string delimited so tier=1
-                    # can never satisfy tier=12 (or vice versa) via a bare
-                    # substring match. A status minted against one claimed
-                    # tier must never satisfy a different claim — this is the
-                    # reason tier-gate-runner puts the token in every
-                    # description; this is the first thing that consumes it.
-                    err "tier-review status for $sha carries description ('$tr_desc') that does not match this artifact's claimed tier ${PR_EVAL_TIER} — a status minted for a different tier cannot satisfy this claim. Do not bypass; investigate."
+                    err "integrity-review status for $sha is '$tr_state' (not success) — the integrity daemon has not attested this SHA. Resolve and retry."
+                elif [[ "$tr_creator" != "$integrity_machine_user" ]]; then
+                    err "integrity-review status for $sha was posted by '$tr_creator', not the configured machine user '$integrity_machine_user' — investigate the creator mismatch."
+                elif ! [[ "$tr_desc" =~ (^|[[:space:]])integrity=pass([[:space:]]|$) ]] || ! [[ "$tr_desc" =~ (^|[[:space:]])sha=${sha}([[:space:]]|$) ]]; then
+                    err "integrity-review status for $sha is not a valid SHA-bound pass attestation. Do not bypass; investigate."
                 fi
-                ok "Tier-review verified (SHA: $sha, creator: $tr_creator, verdict=legitimate, tier=${PR_EVAL_TIER})"
+                ok "Integrity attestation verified (SHA: $sha, creator: $tr_creator)"
             fi
 
             # ─── Wiki-ingest debt gate (config-keyed, fail-closed) ────────────

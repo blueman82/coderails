@@ -195,14 +195,14 @@ successful completion of a no-drift or merged night and on no other
 path.
 
 **A non-zero exit that is neither a pass nor a rejection is still a
-refusal.** The worked example is a `pending` `tier-review` status:
-`/coderails:merge` exits non-zero because the tier-gate daemon has not
-yet posted its verdict — the gate has not rejected the PR, it has not
-yet judged it. Write `refused=merge` and clean up, exactly as for a
+refusal.** The worked example is a `pending` `integrity-review` status:
+`/coderails:merge` exits non-zero because the integrity daemon has not
+yet posted its attestation — the gate has not rejected the PR, it has not
+yet attested it. Write `refused=merge` and clean up, exactly as for a
 rejection. **Never wait, poll, or retry for a gate to resolve**, and
 **never invent a new marker** to describe an outcome the terminal set
 does not name. Both were tried on 2026-07-26 and 2026-07-27: the run
-logged `merge-blocked reason=tier-review-pending`, a string that appears
+logged `merge-blocked reason=integrity-review-pending`, a string that appears
 in no config's `failures` list and which the `last-marker` gate
 therefore cannot see, then waited for the status to resolve until the
 session ended. The three terminal markers (`run=ok`, `abort=<reason>`,
