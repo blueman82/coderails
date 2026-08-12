@@ -55,7 +55,7 @@ else `default` is the floor and `frontier` needs a reason.
 
 Never improvised by a worker. If a task needs an escape hatch (e.g. "fast-mechanical; default
 fallback after two failed gate attempts"), write the exact valve condition into the plan's
-`Model:` stamp (`coderails:writing-plans`) or, for a loop below the plan.md threshold, into the
+`Model:` stamp (`superpowers:writing-plans`) or, for a loop below the plan.md threshold, into the
 task description's `Model:` bullet (Phase 3/3a). The valve must already be named in the prompt, or
 it does not exist for the worker.
 

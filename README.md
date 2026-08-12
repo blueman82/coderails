@@ -53,34 +53,38 @@ preferred way to set up a new repo.
 
 ## Skills
 
-coderails is self-contained — it ships the dev-workflow skills it needs. `pr-review-toolkit@claude-plugins-official` is still required for the review stage of `/workflow`.
+coderails ships its own coderails-specific skills. General dev-workflow
+discipline — planning, TDD, systematic debugging, code review, git worktrees —
+comes from the required `superpowers@claude-plugins-official` plugin
+dependency; install it alongside coderails. `pr-review-toolkit@claude-plugins-official`
+is still required for the review stage of `/workflow`.
 
-37 skills are bundled across four groups. Full
+24 skills are bundled across three groups. Full
 catalog: [`docs/REFERENCE.md`](./docs/REFERENCE.md).
 
-**Dev-workflow skills**
+**Required plugin dependency: `superpowers@claude-plugins-official`**
 
 | Skill | Purpose |
 |---|---|
-| `agentic-loop` | Multi-agent orchestration: spawned teams, no-human-gates, multi-PR loops |
-| `brainstorming` | Explore intent and requirements before implementation |
-| `dispatching-parallel-agents` | Fan-out independent tasks across agents |
-| `executing-plans` | Drive a written plan to completion |
-| `finishing-a-development-branch` | Final checks before merging |
-| `receiving-code-review` | Apply review feedback systematically |
-| `requesting-code-review` | Prepare a PR for review |
-| `subagent-driven-development` | Delegate implementation tasks to subagents |
-| `systematic-debugging` | Structured root-cause analysis |
-| `test-driven-development` | Red-green-refactor discipline |
-| `using-git-worktrees` | Parallel work via git worktrees |
-| `verification-before-completion` | Final verification pass before declaring done |
-| `writing-plans` | Convert specs into step-by-step plans |
-| `writing-skills` | Scaffold new skills from scratch |
+| `superpowers:brainstorming` | Explore intent and requirements before implementation |
+| `superpowers:dispatching-parallel-agents` | Fan-out independent tasks across agents |
+| `superpowers:executing-plans` | Drive a written plan to completion |
+| `superpowers:finishing-a-development-branch` | Final checks before merging |
+| `superpowers:receiving-code-review` | Apply review feedback systematically |
+| `superpowers:requesting-code-review` | Prepare a PR for review |
+| `superpowers:subagent-driven-development` | Delegate implementation tasks to subagents |
+| `superpowers:systematic-debugging` | Structured root-cause analysis |
+| `superpowers:test-driven-development` | Red-green-refactor discipline |
+| `superpowers:using-git-worktrees` | Parallel work via git worktrees |
+| `superpowers:verification-before-completion` | Final verification pass before declaring done |
+| `superpowers:writing-plans` | Convert specs into step-by-step plans |
+| `superpowers:writing-skills` | Scaffold new skills from scratch |
 
 **coderails-original**
 
 | Skill | Purpose |
 |---|---|
+| `agentic-loop` | Multi-agent orchestration: spawned teams, no-human-gates, multi-PR loops |
 | `cite-check` | Re-derive a specific claim from sources only — no recall, no inference. Forks into `coderails:source-auditor`, so it audits with no access to the context that produced the claim |
 | `dashboard` | Live local web HUD: sessions, loops, PR gate states, runs, memory activity |
 | `fable-mode` | High-autonomy self-verifying working mode for non-trivial tasks |
@@ -195,6 +199,7 @@ unaffected. Requires `node`/`npx`, macOS or Linux/WSL2.
 - `gh`, `jq`, `git`
 - For `/push` / `/merge`: a **GitHub**-hosted repo with an authenticated `gh` CLI (`gh auth login`) — the workflow uses `gh`, so non-GitHub remotes (GitLab/Bitbucket/Gitea) are not supported.
 - `pr-review-toolkit@claude-plugins-official` for the review stage of `/workflow`
+- `superpowers@claude-plugins-official` for dev-workflow skills (planning, TDD, debugging, code review, worktrees)
 - For sandboxed workers (opt-in): `node`/`npx`, macOS or Linux/WSL2
 
 ## Uninstall

@@ -1,6 +1,6 @@
 # coderails Component Reference
 
-Catalogue of every coderails component (37 skills, plus hooks, commands, scripts): what it does, when it's active, when it's NOT, and dependencies. Ground truth: all entries verified from source files. See README for a lighter overview.
+Catalogue of every coderails component (24 skills, plus hooks, commands, scripts): what it does, when it's active, when it's NOT, and dependencies. General dev-workflow skills (planning, TDD, debugging, code review, worktrees) are provided by the required `superpowers@claude-plugins-official` plugin dependency, not bundled here. Ground truth: all entries verified from source files. See README for a lighter overview.
 
 ---
 
@@ -8,7 +8,7 @@ Catalogue of every coderails component (37 skills, plus hooks, commands, scripts
 
 1. [Skills](#skills)
    - [Coderails-original skills](#coderails-original-skills)
-   - [Vendored dev-workflow skills](#vendored-dev-workflow-skills)
+   - [Required plugin dependency: superpowers](#required-plugin-dependency-superpowers)
    - [Wiki skills](#wiki-skills)
    - [Engineering principles skills](#engineering-principles-skills)
 2. [Agents](#agents)
@@ -37,7 +37,7 @@ These skills were written for coderails and are not vendored from elsewhere.
 
 **Key discipline:** Main context is a pure orchestrator. Every code change (even single-file edits) goes to a spawned Sonnet agent. The orchestrator never implements; it delegates to agents, verifies artifacts, and escalates to a spawned team only for ≥3 sequential PRs or dependency chains.
 
-**Dependencies:** Reads and writes `progress.json` (ephemeral loop state — path computed by `hooks/scripts/lib/agentic_loop_path.sh`, never manually). Invokes `coderails:writing-plans`, `coderails:premortem`, `coderails:brainstorming`, `coderails:handoff` as sub-skills. Interacts with `loop_state_guard` and `loop_stall_guard` Stop hooks.
+**Dependencies:** Reads and writes `progress.json` (ephemeral loop state — path computed by `hooks/scripts/lib/agentic_loop_path.sh`, never manually). Invokes `superpowers:writing-plans`, `coderails:premortem`, `superpowers:brainstorming`, `coderails:handoff` as sub-skills. Interacts with `loop_state_guard` and `loop_stall_guard` Stop hooks.
 
 ---
 
@@ -81,7 +81,7 @@ These skills were written for coderails and are not vendored from elsewhere.
 
 **Purpose:** Game-resistant success-eval generation. Produces a frozen `evals.json` (scope `pr` or `loop`, tiers 0-2) with negative controls and grader independence, so success is judged against a fixed target instead of hand-waved after the fact.
 
-**When it triggers:** Invoked at agentic-loop Phase 2.7, at plan completion per `writing-plans` (after stress-test, before implementation dispatch), or directly.
+**When it triggers:** Invoked at agentic-loop Phase 2.7, at plan completion per `superpowers:writing-plans` (after stress-test, before implementation dispatch), or directly.
 
 **Dependencies:** Consumed by `scripts/post_evals.sh` (`pr` scope, merge gate) and the `loop_state_guard` hook (`loop` scope gate).
 
@@ -162,7 +162,7 @@ server still accepts TCP but serves nothing.
 
 #### `workflow-audit`
 
-**Purpose:** Mines Claude Code session transcripts for tool-use patterns that repeat across sessions, judges which ones are genuine candidates for a new skill, and — only after explicit owner approval — creates each approved skill through the normal `writing-skills` TDD process and a full PR gate.
+**Purpose:** Mines Claude Code session transcripts for tool-use patterns that repeat across sessions, judges which ones are genuine candidates for a new skill, and — only after explicit owner approval — creates each approved skill through the normal `superpowers:writing-skills` TDD process and a full PR gate.
 
 **When it triggers:** "look at our last N sessions and pull out repeated tasks", "what do I do repeatedly that isn't a skill yet", "audit my workflows", "mine my transcripts for skill candidates", "turn my repeated tasks into skills".
 
@@ -264,114 +264,6 @@ server still accepts TCP but serves nothing.
 
 ---
 
-### Vendored dev-workflow skills
-
-These are coderails' general development-discipline skills (not coderails-specific workflow) — they ship with the plugin, so no external skill plugin is required.
-
-#### `brainstorming`
-
-**Purpose:** Explores user intent, requirements, and design before implementation. Required before any creative work.
-
-**When it triggers:** MUST be used before creating features, building components, adding functionality, or modifying behaviour. Mandatory pre-implementation gate. Saves spec to a session-local scratch path — `docs/coderails/specs/` is gitignored, never tracked in the repo (owner decision, 2026-07-11).
-
-**When it does NOT apply:** Pure investigation/research turns with no implementation intent.
-
----
-
-#### `writing-plans`
-
-**Purpose:** Turn a resolved spec into an ordered set of self-contained implementation tasks, each with exact files, interfaces, bite-sized steps, and verify-criteria.
-
-**When it triggers:** After a spec exists and work spans multiple tasks, files, or reviewable units. Not for single trivial edits.
-
-**Plan storage:** `docs/coderails/plans/` is gitignored — plans are session-local working documents, never tracked in the repo (owner decision, 2026-07-11). The agentic loop's `plan.md` is a special case — it lives in the loop-state dir outside the repo alongside `progress.json`, same treatment.
-
-**Next step (required):** After the self-review gate, the plan goes through `/coderails:planning-sequence` (Pre-Parade → Premortem → Red Team) before implementation hands off to `subagent-driven-development`/`executing-plans`. Findings fold back into the plan inline.
-
----
-
-#### `subagent-driven-development`
-
-**Purpose:** Execute implementation plans with independent tasks in the current session using sub-agents.
-
-**When it triggers:** When executing a written implementation plan with tasks that can be parallelised.
-
----
-
-#### `dispatching-parallel-agents`
-
-**Purpose:** Pattern for dispatching 2+ independent tasks to parallel agents to avoid sequential bottlenecks.
-
-**When it triggers:** When facing 2+ independent tasks with no shared state or sequential dependencies.
-
----
-
-#### `executing-plans`
-
-**Purpose:** Execute a written implementation plan in a separate session with review checkpoints.
-
-**When it triggers:** When a written implementation plan exists and needs to be executed with oversight.
-
----
-
-#### `using-git-worktrees`
-
-**Purpose:** Ensure an isolated workspace exists via native tools or git worktree fallback before feature work.
-
-**When it triggers:** When starting feature work that needs isolation from the current workspace, or before executing implementation plans.
-
----
-
-#### `requesting-code-review`
-
-**Purpose:** Guide the code review request process to ensure work is complete and requirements are met.
-
-**When it triggers:** When completing tasks, implementing major features, or before merging.
-
----
-
-#### `receiving-code-review`
-
-**Purpose:** Ensure code review feedback is handled with technical rigor and verification, not performative agreement or blind implementation.
-
-**When it triggers:** When receiving code review feedback, before implementing suggestions — especially when feedback seems unclear or technically questionable.
-
----
-
-#### `finishing-a-development-branch`
-
-**Purpose:** Presents structured options (merge, PR, cleanup) for integrating completed work when implementation is done and all tests pass.
-
-**When it triggers:** When implementation is complete, all tests pass, and a decision is needed on how to integrate the work.
-
----
-
-#### `systematic-debugging`
-
-**Purpose:** Structured debugging approach before proposing fixes for bugs, test failures, or unexpected behaviour.
-
-**When it triggers:** When encountering any bug, test failure, or unexpected behaviour — before proposing fixes.
-
----
-
-#### `test-driven-development`
-
-**Purpose:** Red-green-refactor discipline: write the failing test first, watch it fail for the right reason, write minimal code to pass, refactor.
-
-**When it triggers:** When about to implement or fix code that can carry a test — features, bugfixes, or refactors that add or alter a function, method, or branch.
-
-**When it does NOT apply:** Docs, config, or prose edits with no testable code — those verify by inspection.
-
----
-
-#### `verification-before-completion`
-
-**Purpose:** Run verification commands and confirm output before making any success claims. Evidence before assertions.
-
-**When it triggers:** When about to claim work is complete, fixed, or passing, before committing or creating PRs.
-
----
-
 #### `using-coderails`
 
 **Purpose:** Establishes how to find and use skills at session start. Requires skill invocation before ANY response including clarifying questions.
@@ -380,11 +272,38 @@ These are coderails' general development-discipline skills (not coderails-specif
 
 ---
 
-#### `writing-skills`
+### Required plugin dependency: superpowers
 
-**Purpose:** Guidance for creating new skills, editing existing skills, or verifying skills work before deployment.
+These are general development-discipline skills (not coderails-specific
+workflow). coderails no longer bundles them — they are provided by the
+required `superpowers@claude-plugins-official` plugin (see
+[Requirements](../README.md#requirements)/[INSTALLATION.md](../INSTALLATION.md)).
+Without that plugin installed, the skill names below resolve to nothing.
 
-**When it triggers:** When creating, editing, or verifying skills.
+| Skill | Purpose |
+|---|---|
+| `superpowers:brainstorming` | Explores user intent, requirements, and design before implementation. Required before any creative work |
+| `superpowers:writing-plans` | Turns a resolved spec into an ordered set of self-contained implementation tasks, each with exact files, interfaces, bite-sized steps, and verify-criteria |
+| `superpowers:subagent-driven-development` | Executes implementation plans with independent tasks in the current session using sub-agents |
+| `superpowers:dispatching-parallel-agents` | Dispatches 2+ independent tasks to parallel agents to avoid sequential bottlenecks |
+| `superpowers:executing-plans` | Executes a written implementation plan in a separate session with review checkpoints |
+| `superpowers:using-git-worktrees` | Ensures an isolated workspace exists via native tools or git worktree fallback before feature work |
+| `superpowers:requesting-code-review` | Guides the code review request process to ensure work is complete and requirements are met |
+| `superpowers:receiving-code-review` | Ensures code review feedback is handled with technical rigor and verification, not performative agreement or blind implementation |
+| `superpowers:finishing-a-development-branch` | Presents structured options (merge, PR, cleanup) for integrating completed work when implementation is done and all tests pass |
+| `superpowers:systematic-debugging` | Structured debugging approach before proposing fixes for bugs, test failures, or unexpected behaviour |
+| `superpowers:test-driven-development` | Red-green-refactor discipline: write the failing test first, watch it fail for the right reason, write minimal code to pass, refactor |
+| `superpowers:verification-before-completion` | Runs verification commands and confirms output before making any success claims. Evidence before assertions |
+| `superpowers:writing-skills` | Guidance for creating new skills, editing existing skills, or verifying skills work before deployment |
+
+After the self-review gate, a `superpowers:writing-plans` plan goes through
+`/coderails:planning-sequence` (Pre-Parade → Premortem → Red Team) before
+implementation hands off to `superpowers:subagent-driven-development`/
+`superpowers:executing-plans`. Plan storage: `docs/coderails/plans/` is
+gitignored — plans are session-local working documents, never tracked in the
+repo (owner decision, 2026-07-11). The agentic loop's `plan.md` is a special
+case — it lives in the loop-state dir outside the repo alongside
+`progress.json`, same treatment.
 
 ---
 
@@ -517,7 +436,7 @@ Returns Approved or Issues Found.
 
 **Tools:** `Read, Grep, Glob` (read-only). **Model:** `sonnet`.
 
-**Used by:** `coderails:brainstorming` step 7, replacing an inline self-review.
+**Used by:** `superpowers:brainstorming` step 7, replacing an inline self-review.
 The author knows what they meant, so ambiguous wording reads as clear to them;
 the reviewer only knows what is on the page.
 
@@ -539,11 +458,11 @@ self-review, then an evidence-backed report. Escalates (BLOCKED / NEEDS_CONTEXT)
 rather than guessing.
 
 **Tools:** `Read, Grep, Glob, Write, Edit, Bash, Skill`. **Model:** `inherit` —
-pass an explicit model at dispatch per `subagent-driven-development`'s Model
+pass an explicit model at dispatch per `superpowers:subagent-driven-development`'s Model
 Selection section; an unconsidered dispatch inherits the session's model, which
 is usually the most expensive one.
 
-**Used by:** `subagent-driven-development`, `dispatching-parallel-agents`.
+**Used by:** `superpowers:subagent-driven-development`, `superpowers:dispatching-parallel-agents`.
 
 #### `design-scout`
 
@@ -756,11 +675,11 @@ source "${CLAUDE_PLUGIN_ROOT}/scripts/lib/config.sh" && coderails::resolve_confi
 |---|---|---|---|
 | `workflow.config.yaml` | first `.claude/workflow.config.yaml` found walking from cwd up to git root (`$(pwd)/.claude/` for `/init`) | Yes | Project-specific config for jira, wiki, worktree, engineering-principles. Created by `/coderails:init`. |
 | `.claude/test_command` | Project working directory | Yes (project-local) | Plain-text file containing the test command. Created by `/coderails:test-gate-setup`. Activates `test_gate.sh`. |
-| Specs from brainstorming | Session-local scratch path (`docs/coderails/specs/` is gitignored) | No — ephemeral, never tracked | Written by `brainstorming` skill after design resolution. Owner decision 2026-07-11: use `coderails:handoff` or a wiki page for a durable record instead. |
-| Plans from writing-plans | Session-local scratch path (`docs/coderails/plans/` is gitignored) | No — ephemeral, never tracked | Written by `writing-plans` skill. Same owner decision, 2026-07-11. |
+| Specs from brainstorming | Session-local scratch path (`docs/coderails/specs/` is gitignored) | No — ephemeral, never tracked | Written by `superpowers:brainstorming` after design resolution. Owner decision 2026-07-11: use `coderails:handoff` or a wiki page for a durable record instead. |
+| Plans from writing-plans | Session-local scratch path (`docs/coderails/plans/` is gitignored) | No — ephemeral, never tracked | Written by `superpowers:writing-plans`. Same owner decision, 2026-07-11. |
 | Agentic loop `progress.json` | `~/.claude/agentic-loop/<repo-or-cwd-slug>/<session_id>/progress.json` | No — ephemeral loop state, outside the repo | Dynamic position tracker for the loop. Path computed by `agentic_loop_path.sh` — keyed to the repo (shared across its worktrees) when cwd is inside a git repo, falling back to cwd otherwise. Session-keyed. When the canonical slug has no file, the helper probes `<base>/*/<session_id>/progress.json` so state written under a different slug (older helper version, mid-loop cwd drift) is still found by session_id. |
 | Agentic loop `spec.md` | Same dir as `progress.json` | No — ephemeral loop state | Written by the agentic-loop orchestrator for ≥3-unit loops. Not a PR deliverable. |
-| Agentic loop `plan.md` | Same dir as `progress.json` | No — ephemeral loop state | Written by `coderails:writing-plans` as invoked by the agentic-loop. Consumed, not write-only: the orchestrator re-reads it after compaction to recover scope. |
+| Agentic loop `plan.md` | Same dir as `progress.json` | No — ephemeral loop state | Written by `superpowers:writing-plans` as invoked by the agentic-loop. Consumed, not write-only: the orchestrator re-reads it after compaction to recover scope. |
 | `evals.json` (pr scope) | Working material only — no fixed path; wherever the invoking workflow placed it (e.g. current working tree or a path named in the worker prompt) | No — the durable artifact is the SHA-bound `coderails-eval-summary` PR comment, not this file | Generated and frozen per PR; validated and posted by `/coderails:post-evals` via `scripts/post_evals.sh` + `scripts/lib/eval-artifact.sh`. |
 | `evals.json` (loop scope) | Same dir as `progress.json` | No — ephemeral loop state | Read by the `loop_state_guard.sh` hook when `progress.json`'s `work_units` ≥ 3; blocks `Stop` if absent. |
 | Discipline log | `~/.claude/discipline.log` (or `$CLAUDE_DISCIPLINE_LOG`) | No | Structured `key=value` log appended by hooks on every fire. Never committed. |
@@ -768,4 +687,4 @@ source "${CLAUDE_PLUGIN_ROOT}/scripts/lib/config.sh" && coderails::resolve_confi
 
 ### The ephemeral vs committed boundary
 
-The loop's `spec.md`, `plan.md`, and `progress.json` live in `~/.claude/agentic-loop/` — **outside** the code repo. They are loop state keyed to this orchestrator run, not shareable design records. If work needs handing to a human, `coderails:handoff` is the right tool. Committed artifacts (brainstorming specs, writing-plans plans) live in `docs/coderails/` inside the repo and are permanent.
+The loop's `spec.md`, `plan.md`, and `progress.json` live in `~/.claude/agentic-loop/` — **outside** the code repo. They are loop state keyed to this orchestrator run, not shareable design records. If work needs handing to a human, `coderails:handoff` is the right tool. Committed artifacts (`superpowers:brainstorming` specs, `superpowers:writing-plans` plans) live in `docs/coderails/` inside the repo and are permanent.

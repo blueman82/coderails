@@ -13,7 +13,7 @@ mis-specified test; hitting it is itself useful information for the human, not a
 loop. Log each attempt's diagnosis in `progress.json` so the eventual hard-stop report (if reached)
 shows the exhausted attempts, not just the final failure.
 
-**Multiple independent failures — use `coderails:dispatching-parallel-agents`.** When a
+**Multiple independent failures — use `superpowers:dispatching-parallel-agents`.** When a
 verification failure turns out to be multiple independent broken things, don't fix them one at a
 time. A single test run failing across 2+ unrelated files/subsystems with different root causes
 (not "fixing one might fix the others") is exactly that skill's trigger condition. Dispatch one
@@ -25,13 +25,13 @@ gets its own 5-attempt budget, not a pool shared or split across the dispatched 
 genuinely single, related failure (fixing one thing likely fixes the rest) should NOT be split
 into parallel agents — that's this skill's own explicit "don't use when" case. **Never substitute generic agents for failure-domain fixers.** Each domain needs test-first / verify-before-report discipline; a named loop-worker type embeds these constraints at dispatch.
 
-**Cause not obvious — use `coderails:systematic-debugging`.** "Diagnose" above is not "try
+**Cause not obvious — use `superpowers:systematic-debugging`.** "Diagnose" above is not "try
 something plausible." If the first fix attempt doesn't make the cause clear, the second attempt
-should be preceded by an actual `coderails:systematic-debugging` invocation rather than another ad
+should be preceded by an actual `superpowers:systematic-debugging` invocation rather than another ad
 hoc guess. This is distinct from Phase 5's premise-disproven check: Phase 5 asks "does this bug
 exist at all, verified against source-of-truth" *before* any fix work starts;
-`systematic-debugging` is *how* to investigate a confirmed, reproducing failure once inside the
+`superpowers:systematic-debugging` is *how* to investigate a confirmed, reproducing failure once inside the
 retry cycle. A guessed fix that happens to pass does not excuse skipping this — it just means the
-next unrelated failure gets the same undisciplined treatment. Each `systematic-debugging`
+next unrelated failure gets the same undisciplined treatment. Each `superpowers:systematic-debugging`
 invocation still counts toward the 5-attempt bound; it makes the attempts count for more, not more
 of them.

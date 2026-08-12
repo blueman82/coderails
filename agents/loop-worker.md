@@ -6,7 +6,7 @@ model: inherit
 ---
 
 **Model:** this agent declares `model: inherit`, so it runs on whatever the
-dispatching session uses. That is deliberate — `coderails:subagent-driven-development`'s
+dispatching session uses. That is deliberate — `superpowers:subagent-driven-development`'s
 Model Selection section requires the orchestrator to pick per task (cheap for
 mechanical work, capable for architecture), so pass an explicit model at dispatch
 rather than relying on this default. An unconsidered dispatch inherits the
