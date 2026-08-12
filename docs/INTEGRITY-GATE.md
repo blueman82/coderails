@@ -29,3 +29,8 @@ After changing the runner, run `scripts/integrity-gate/install.sh` to promote it
 to the root-owned install location. Owner setup must also change the protected
 GitHub status context to `integrity-review` and verify the ruleset before relying
 on server-side blocking.
+
+For a one-command product install, run the repository `install.sh`. It offers
+the gate but never executes `sudo` or handles credentials. The owner must run
+the printed `bash scripts/integrity-gate/setup.sh` command manually; that
+helper performs the token check and privileged installation.

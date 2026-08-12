@@ -73,6 +73,20 @@ It does everything that has to happen outside Claude Code:
 - seeds four feedback memories (won't overwrite)
 - aligns script permissions with their git index mode (tracked executables get `+x`, tracked sourced-only libs stay non-executable; untracked files default to `+x`)
 
+The installer also offers the optional integrity gate. It never runs `sudo`,
+reads a token, or grants privileged access to Claude, Codex, or any other
+agent. If you choose it, the installer prints one command for you to run
+yourself:
+
+```bash
+bash scripts/integrity-gate/setup.sh
+```
+
+That owner-run helper prompts for the dedicated GitHub machine-user token and
+then installs the independent root-owned launchd validator. To select the
+prompt non-interactively, use `bash install.sh --integrity-gate`; to suppress
+it, use `bash install.sh --no-integrity-gate`.
+
 **3. Restart Claude Code, then run in order:**
 
 ```
