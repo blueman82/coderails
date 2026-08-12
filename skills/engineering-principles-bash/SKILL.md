@@ -1,26 +1,14 @@
 ---
 name: engineering-principles-bash
 description: Bash/shell-specific coding standards and idioms. Invoked by engineering-principles coordinator or directly for shell script files.
-allowed-tools: Read, Write, Edit, Glob, Grep, mcp__mcp-exec__*
+allowed-tools: Read, Write, Edit, Glob, Grep, Bash, mcp__mcp-exec__*
 paths: "**/*.sh"
 ---
 
 # Engineering Principles Bash - Language-Specific Standards
 
 **Version:** 1.0.0
-**Purpose:** Enforce shell idioms and safety patterns on `.sh` files (and shebang-identified shell scripts without a `.sh` extension — see Detection below).
-
----
-
-## Detection
-
-Not every shell script ends in `.sh`. If a file has no recognized extension, check its shebang line before assuming it falls outside this skill's scope:
-
-```bash
-head -1 "$file" | grep -qE '^#!.*\b(bash|sh)\b'
-```
-
-`#!/bin/bash`, `#!/usr/bin/env bash`, and `#!/bin/sh` all qualify. This matters for hook scripts, git hooks, and CI entrypoints that are frequently extensionless.
+**Purpose:** Enforce shell idioms and safety patterns on `.sh` files. Shebang-identified shell scripts without a `.sh` extension are routed here by the `engineering-principles` coordinator's own dispatch table before this skill loads — see that skill's Phase 0 for the detection logic; this file doesn't need to duplicate it.
 
 ---
 
@@ -48,7 +36,7 @@ head -1 "$file" | grep -qE '^#!.*\b(bash|sh)\b'
 - **`cd` inside a subshell, not the caller's shell**, when you only need a temporary directory change: `(cd "$dir" && cmd)` instead of `cd "$dir"; cmd; cd -` — the subshell can't leak a directory change back to the rest of the script even if an earlier step fails partway through.
 
 ### Fail-Fast Argument & Precondition Validation
-- **Validate arguments before doing any work**, and fail with a clear message on stderr, not a silent default. `scripts/merge.sh` and `scripts/push.sh` in this repo call `require::feature` / `require::repo` / `require::clean` (from `scripts/lib/git-common.sh`) as guard clauses right after arg parsing, before any git state is mutated.
+- **Validate arguments before doing any work**, and fail with a clear message on stderr, not a silent default. `scripts/push.sh` calls `require::feature` / `require::repo` (from `scripts/lib/git-common.sh`) as guard clauses right after arg parsing, before any git state is mutated; `scripts/merge.sh` calls `require::repo` the same way. `require::clean` is also defined in `git-common.sh` but is not currently called by either script — it's only stubbed out in test files today, so treat it as defined-but-unused rather than an active guard clause.
 - **A helper that can fail must say why it failed**, not just return non-zero. `git-common.sh`'s `err()` helper (`printf ... >&2; exit 1`) centralizes this so every guard clause reports consistently instead of each call site inventing its own message.
 - **No silent `|| true` without a reason.** `|| true` (or `|| :`) suppresses a command's failure — sometimes correct (a best-effort cleanup step, a check where "not found" and "lookup failed" are both fine to treat as absent), but it hides a real bug just as often. When you use it, say in a comment *why* this particular failure is safe to ignore. `hooks/scripts/test_gate.sh`'s `IFS= read -r -d '' -t 5 input || true` is safe because a `read` timeout on stdin still leaves `$input` usable; that's worth a one-line note, and ideally the script should have one.
 
@@ -59,15 +47,19 @@ head -1 "$file" | grep -qE '^#!.*\b(bash|sh)\b'
 
 ### Avoiding Global Mutable State
 - **Prefer `local` for every function-scoped variable.** A bash function's variables are global by default; forgetting `local` on a loop counter or accumulator is a classic source of one function silently corrupting another's state. Every function in `scripts/lib/git-common.sh` and `scripts/push.sh` declares its variables with `local` (`local force_with_lease=0 msg="" want_add=0`) at the top of the function body.
-- **Command substitution runs in a subshell — a variable assigned inside `$(...)` never survives back to the caller.** This repo's `git-common.sh` documents this exact footgun at length on `pr::_trusted_login`, `pr::_trusted_permission`, and `pr::_trusted_comment_bodies_or_fail`: those functions need their assignments to escape into the caller's shell, so they are called as plain statements (`pr::_trusted_comment_bodies_or_fail "$num"`) and read the resulting globals afterward — never as `foo=$(pr::_trusted_comment_bodies_or_fail "$num")`, which would silently discard the escape. When you need a function's side-effect variables to persist, don't wrap the call in `$(...)`; when you only need its stdout, `$(...)` is exactly right and the transience is a feature, not a bug.
-- **When a "cache" variable is meant to persist across an entire script run but the function is invoked via `$(...)`, it won't** — treat any state you actually need to survive as either a return value the caller captures explicitly, or accept that the "cache" only survives within one subshell's lifetime (as documented for `_PR_TRUSTED_LOGIN` in this repo).
+- **Command substitution runs in a subshell — a variable assigned inside `$(...)` never survives back to the caller.** This repo's `git-common.sh` deliberately exploits both sides of that fact, and the two patterns are opposites, not the same rule applied three times:
+  - `pr::_trusted_login` and `pr::_trusted_permission` only need to hand a value back via stdout, so they *are* called via command substitution (`trusted=$(pr::_trusted_login)`, `permission=$(pr::_trusted_permission)`, both inside `pr::_trusted_comment_bodies`). Each has an internal `_PR_TRUSTED_LOGIN`/`_PR_TRUSTED_PERMISSION` variable, but per their own header comments this is explicitly **not** a cache that survives across calls — every `$(...)` invocation starts a fresh subshell, so the variable never makes it back to the caller. It only guards against a redundant fetch if the function happened to be called more than once inside the same subshell's lifetime.
+  - `pr::_trusted_comment_bodies_or_fail`, by contrast, genuinely needs its assignments (`PR_TRUST_FETCH_FAIL_REASON`, `_PR_TRUSTED_COMMENT_BODIES`) to escape into the caller's shell, so it is called as a plain statement (`pr::_trusted_comment_bodies_or_fail "$num"`) and the caller reads the resulting globals afterward — never as `foo=$(pr::_trusted_comment_bodies_or_fail "$num")`, which would silently discard the escape.
+
+  When you only need a function's stdout, `$(...)` is exactly right and the subshell's transience is a feature; when you need its side-effect variables to persist into the caller's shell, don't wrap the call in `$(...)`.
+- **A `$(...)`-wrapped "cache" variable only survives within that one subshell's lifetime — never across the whole script run.** `_PR_TRUSTED_LOGIN` and `_PR_TRUSTED_PERMISSION` in this repo explicitly disclaim caching across processes/subshells despite the variable name suggesting persistence. Treat any state you actually need to survive as either a return value the caller captures explicitly (`$(...)`), or a global set by a function called as a plain statement (never `$(...)`-wrapped), as `pr::_trusted_comment_bodies_or_fail` does.
 
 ### `shellcheck`-Clean Patterns
 - Run `shellcheck` on every new or modified script when it's available (`command -v shellcheck`). Common findings worth fixing on sight:
   - **SC2086** (unquoted variable) — quote it.
   - **SC2046** (unquoted command substitution) — quote it, or if word-splitting is intentional, mark it with a `# shellcheck disable=SC2046` comment explaining why.
   - **SC2164** (`cd` without `||` or `set -e` covering it) — `cd "$dir" || exit 1` or rely on an active `set -e`, explicitly.
-  - **SC2155** (`local x=$(cmd)` masks `cmd`'s exit status with `local`'s own) — declare and assign on separate lines: `local x; x=$(cmd)`. `scripts/push.sh` calls this out directly: "`local push_output=$(...)` would mask git's exit status with `local`'s own (always-zero) status."
+  - **SC2155** (`local x=$(cmd)` masks `cmd`'s exit status with `local`'s own) — declare and assign on separate lines: `local x; x=$(cmd)`. `scripts/push.sh` calls this out directly for its own `push_output`/`push_rc` capture: "`local push_output=$(...)` would mask git's exit status with `local`'s own (always-zero) status." Note this fix is applied in that one spot only — the same file still has uncited `local br=$(branch)`, `local num=$(pr::num)`, and `local url=$(gh pr create ...)` elsewhere, so don't treat `push.sh` as universally SC2155-clean; treat the cited line as the example, not the whole file.
   - **SC2181** (checking `$?` instead of the command directly) — `if cmd; then` not `cmd; if [[ $? -eq 0 ]]; then`.
 - A `# shellcheck disable=SCxxxx` is a documented exception, not a way to silence the tool — it should sit next to a comment explaining why the flagged pattern is intentional here.
 
@@ -113,12 +105,14 @@ process() {
 
 ```bash
 # AFTER (set -e at script top; quoted expansions; [[ ]]; no eval — direct
-# invocation with an array; local; direct test; explained || true)
+# invocation with an array; local; direct test; positionals consumed before
+# the array capture, so `shift` isn't dead code; no unnecessary || true —
+# `rm -f` already exits 0 on missing files)
 set -euo pipefail
 
 process() {
-  local files=("$@")
   local pattern="$1"; shift
+  local files=("$@")
   local f
   for f in "${files[@]}"; do
     [[ -f "$f" ]] || continue
@@ -126,8 +120,7 @@ process() {
       printf 'Found match in %s\n' "$f"
     fi
   done
-  # Best-effort: scratch files may not exist on a clean run.
-  rm -f /tmp/scratch* || true
+  rm -f /tmp/scratch*
 }
 ```
 
@@ -152,7 +145,8 @@ main() {
   git rev-parse --verify "$branch" >/dev/null 2>&1 \
     || { printf 'Unknown branch: %s\n' "$branch" >&2; exit 1; }
 
-  # ... actual work ...
+  # ... actual work, e.g. skip an interactive confirmation when --force was given ...
+  [[ "$force" -eq 1 ]] || : # placeholder: real work reads $force here
 }
 
 main "$@"
@@ -168,13 +162,13 @@ main "$@"
 # (that decision belongs to the top-level script that sources this file).
 
 widget::create() {
-  local name="$1"
+  local name="${1:-}"
   [[ -n "$name" ]] || { printf 'widget::create: name required\n' >&2; return 1; }
   printf 'created %s\n' "$name"
 }
 
 widget::exists() {
-  local name="$1"
+  local name="${1:-}"
   [[ -f "$name.widget" ]]
 }
 ```
