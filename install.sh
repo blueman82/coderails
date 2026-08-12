@@ -325,7 +325,14 @@ hline
 #   libs        — sourced helpers (not executed directly, not in hooks.json)
 #   hooks       — every command registered in hooks/hooks.json
 #   skill_sh    — *.sh launchers inside skills/*/scripts/ (run directly; .cjs/.js do not need +x)
+# Some hooks.json entries are inline commands (e.g. a bare `printf '...'` that
+# emits JSON directly) rather than a path to a script file — the grep keeps
+# only commands that actually reference a ${CLAUDE_PLUGIN_ROOT}/ script path,
+# so an inline command's own words never get word-split into the chmod loop
+# below as bogus filenames (`|| true` because zero matches is a valid state
+# under pipefail, not an error).
 _hook_scripts=$(jq -r '.hooks[][].hooks[].command // empty' "$PLUGIN_DIR/hooks/hooks.json" \
+  | { grep -F '${CLAUDE_PLUGIN_ROOT}/' || true; } \
   | sed 's|"${CLAUDE_PLUGIN_ROOT}/||g; s/"//g')
 _lib_scripts=$(cd "$PLUGIN_DIR" && printf '%s\n' hooks/scripts/lib/*.sh 2>/dev/null)
 _skill_scripts=$(cd "$PLUGIN_DIR" && printf '%s\n' skills/*/scripts/*.sh 2>/dev/null)
