@@ -22,7 +22,7 @@ check_str() { # desc expected actual
 
 SHA="deadbeef"
 
-# Check 9 (validate_smoke) requires every pr-scope tier>=1 scripted eval to
+# Check 9 (validate_smoke) requires every pr-scope verification_level>=1 scripted eval to
 # carry recorded freeze-time smoke evidence. Fixtures that are EXPECTED TO
 # PASS validate_structure therefore need it; fixtures that are expected to be
 # refused by an earlier check do not (first failure wins, so they never reach
@@ -49,12 +49,12 @@ RNC_A="bash $RES_DIR/control_a.sh"
 RCMD_B="bash $RES_DIR/check_b.sh"
 RNC_B="bash $RES_DIR/control_b.sh"
 
-# ─── Step 1: well-formed tier-1 fixture → validate_structure exit 0 ──────────
+# ─── Step 1: well-formed verification_level-1 fixture → validate_structure exit 0 ──────────
 FIX_OK="$TMP/ok.json"
 jq -n --arg sha "$SHA" --argjson smoke "$SMOKE_OK" \
       --arg ca "$RCMD_A" --arg na "$RNC_A" --arg cb "$RCMD_B" --arg nb "$RNC_B" '{
-  tier: 1,
-  tier_justification: "2 work-units, no irreversible surface",
+  verification_level: 1,
+  verification_justification: "2 work-units, no irreversible surface",
   head_sha: $sha,
   evals: [
     {id:"e1", priority:"P0", mode:"scripted", status:"pass", cmd:$ca, negative_control:$na, evidence:"log line 1", smoke: $smoke},
@@ -62,7 +62,7 @@ jq -n --arg sha "$SHA" --argjson smoke "$SMOKE_OK" \
   ]
 }' > "$FIX_OK"
 post_evals::validate_structure "$FIX_OK" 42 "$SHA"
-check "validate_structure: well-formed tier-1 fixture → exit 0" 0 $?
+check "validate_structure: well-formed verification_level-1 fixture → exit 0" 0 $?
 
 # ─── check 1: file not found / invalid JSON ──────────────────────────────────
 NOFILE="$TMP/does_not_exist.json"
@@ -78,160 +78,160 @@ check "validate_structure: invalid JSON → exit 1" 1 $?
 [[ "$stderr_out" == *"file not found or invalid JSON"* ]]
 check "validate_structure: invalid JSON → stderr mentions reason" 0 $?
 
-# ─── check 2: tier_justification required at EVERY tier (owner directive) ────
-FIX_TIER0_EMPTY="$TMP/tier0_empty.json"
+# ─── check 2: verification_justification required at EVERY verification_level (owner directive) ────
+FIX_VERIFICATION_LEVEL0_EMPTY="$TMP/verification_level0_empty.json"
 jq -n --arg sha "$SHA" '{
-  tier: 0,
-  tier_justification: "",
+  verification_level: 0,
+  verification_justification: "",
   head_sha: $sha,
   evals: []
-}' > "$FIX_TIER0_EMPTY"
-stderr_out=$(post_evals::validate_structure "$FIX_TIER0_EMPTY" 42 "$SHA" 2>&1)
-check "validate_structure: tier 0 empty tier_justification → exit 1" 1 $?
-[[ "$stderr_out" == *"tier 0"*"requires"*"tier_justification"* ]]
-check "validate_structure: tier 0 empty tier_justification → stderr mentions reason" 0 $?
+}' > "$FIX_VERIFICATION_LEVEL0_EMPTY"
+stderr_out=$(post_evals::validate_structure "$FIX_VERIFICATION_LEVEL0_EMPTY" 42 "$SHA" 2>&1)
+check "validate_structure: verification_level 0 empty verification_justification → exit 1" 1 $?
+[[ "$stderr_out" == *"verification_level 0"*"requires"*"verification_justification"* ]]
+check "validate_structure: verification_level 0 empty verification_justification → stderr mentions reason" 0 $?
 
-# tier-0 exemption path: non-empty tier_justification, empty evals → exit 0
-FIX_TIER0_OK="$TMP/tier0_ok.json"
+# verification_level-0 exemption path: non-empty verification_justification, empty evals → exit 0
+FIX_VERIFICATION_LEVEL0_OK="$TMP/verification_level0_ok.json"
 jq -n --arg sha "$SHA" '{
-  tier: 0,
-  tier_justification: "single work-unit, covered by existing test",
+  verification_level: 0,
+  verification_justification: "single work-unit, covered by existing test",
   head_sha: $sha,
   evals: []
-}' > "$FIX_TIER0_OK"
-post_evals::validate_structure "$FIX_TIER0_OK" 42 "$SHA"
-check "validate_structure: tier 0 with justification, empty evals → exit 0" 0 $?
-result=$(post_evals::compute_and_validate_result "$FIX_TIER0_OK")
-check_str "compute_and_validate_result: tier-0 exemption → GO (vacuous)" "GO" "$result"
+}' > "$FIX_VERIFICATION_LEVEL0_OK"
+post_evals::validate_structure "$FIX_VERIFICATION_LEVEL0_OK" 42 "$SHA"
+check "validate_structure: verification_level 0 with justification, empty evals → exit 0" 0 $?
+result=$(post_evals::compute_and_validate_result "$FIX_VERIFICATION_LEVEL0_OK")
+check_str "compute_and_validate_result: verification_level-0 exemption → GO (vacuous)" "GO" "$result"
 
-# tier 1 with null tier_justification → refused (this is the new behaviour;
-# previously only tier 0 was checked, so this used to pass check 2 and fall
+# verification_level 1 with null verification_justification → refused (this is the new behaviour;
+# previously only verification_level 0 was checked, so this used to pass check 2 and fall
 # through to later checks).
-FIX_TIER1_NULL_JUST="$TMP/tier1_null_just.json"
+FIX_VERIFICATION_LEVEL1_NULL_JUST="$TMP/verification_level1_null_just.json"
 jq -n --arg sha "$SHA" '{
-  tier: 1,
-  tier_justification: null,
+  verification_level: 1,
+  verification_justification: null,
   head_sha: $sha,
   evals: [
     {id:"e1", priority:"P0", mode:"scripted", status:"pass", cmd:"run-a", negative_control:"run-a-broken", evidence:"log"}
   ]
-}' > "$FIX_TIER1_NULL_JUST"
-stderr_out=$(post_evals::validate_structure "$FIX_TIER1_NULL_JUST" 42 "$SHA" 2>&1)
-check "validate_structure: tier 1 null tier_justification → exit 1" 1 $?
-[[ "$stderr_out" == *"tier 1"*"requires"*"tier_justification"* ]]
-check "validate_structure: tier 1 null tier_justification → stderr names tier + reason" 0 $?
+}' > "$FIX_VERIFICATION_LEVEL1_NULL_JUST"
+stderr_out=$(post_evals::validate_structure "$FIX_VERIFICATION_LEVEL1_NULL_JUST" 42 "$SHA" 2>&1)
+check "validate_structure: verification_level 1 null verification_justification → exit 1" 1 $?
+[[ "$stderr_out" == *"verification_level 1"*"requires"*"verification_justification"* ]]
+check "validate_structure: verification_level 1 null verification_justification → stderr names verification_level + reason" 0 $?
 
-# tier 2 with empty-string tier_justification → refused.
-FIX_TIER2_EMPTY_JUST="$TMP/tier2_empty_just.json"
+# verification_level 2 with empty-string verification_justification → refused.
+FIX_VERIFICATION_LEVEL2_EMPTY_JUST="$TMP/verification_level2_empty_just.json"
 jq -n --arg sha "$SHA" '{
-  tier: 2,
-  tier_justification: "",
+  verification_level: 2,
+  verification_justification: "",
   head_sha: $sha,
   evals: [
     {id:"e1", priority:"P0", mode:"scripted", status:"pass", cmd:"run-a", negative_control:"run-a-broken", evidence:"log"}
   ]
-}' > "$FIX_TIER2_EMPTY_JUST"
-stderr_out=$(post_evals::validate_structure "$FIX_TIER2_EMPTY_JUST" 42 "$SHA" 2>&1)
-check "validate_structure: tier 2 empty tier_justification → exit 1" 1 $?
-[[ "$stderr_out" == *"tier 2"*"requires"*"tier_justification"* ]]
-check "validate_structure: tier 2 empty tier_justification → stderr names tier + reason" 0 $?
+}' > "$FIX_VERIFICATION_LEVEL2_EMPTY_JUST"
+stderr_out=$(post_evals::validate_structure "$FIX_VERIFICATION_LEVEL2_EMPTY_JUST" 42 "$SHA" 2>&1)
+check "validate_structure: verification_level 2 empty verification_justification → exit 1" 1 $?
+[[ "$stderr_out" == *"verification_level 2"*"requires"*"verification_justification"* ]]
+check "validate_structure: verification_level 2 empty verification_justification → stderr names verification_level + reason" 0 $?
 
-# tier 2 with whitespace-only tier_justification → still refused (must not
+# verification_level 2 with whitespace-only verification_justification → still refused (must not
 # just be non-empty string, must be non-blank).
-FIX_TIER2_WHITESPACE_JUST="$TMP/tier2_whitespace_just.json"
+FIX_VERIFICATION_LEVEL2_WHITESPACE_JUST="$TMP/verification_level2_whitespace_just.json"
 jq -n --arg sha "$SHA" '{
-  tier: 2,
-  tier_justification: "   ",
+  verification_level: 2,
+  verification_justification: "   ",
   head_sha: $sha,
   evals: [
     {id:"e1", priority:"P0", mode:"scripted", status:"pass", cmd:"run-a", negative_control:"run-a-broken", evidence:"log"}
   ]
-}' > "$FIX_TIER2_WHITESPACE_JUST"
-stderr_out=$(post_evals::validate_structure "$FIX_TIER2_WHITESPACE_JUST" 42 "$SHA" 2>&1)
-check "validate_structure: tier 2 whitespace-only tier_justification → exit 1" 1 $?
-[[ "$stderr_out" == *"tier 2"*"requires"*"tier_justification"* ]]
-check "validate_structure: tier 2 whitespace-only tier_justification → stderr names tier + reason" 0 $?
+}' > "$FIX_VERIFICATION_LEVEL2_WHITESPACE_JUST"
+stderr_out=$(post_evals::validate_structure "$FIX_VERIFICATION_LEVEL2_WHITESPACE_JUST" 42 "$SHA" 2>&1)
+check "validate_structure: verification_level 2 whitespace-only verification_justification → exit 1" 1 $?
+[[ "$stderr_out" == *"verification_level 2"*"requires"*"verification_justification"* ]]
+check "validate_structure: verification_level 2 whitespace-only verification_justification → stderr names verification_level + reason" 0 $?
 
-# tier>=1 with tier_justification KEY ABSENT entirely (not just blank) →
+# verification_level>=1 with verification_justification KEY ABSENT entirely (not just blank) →
 # refused, same as an explicit blank (reviewer request: missing-key fixture).
-FIX_TIER1_NO_KEY="$TMP/tier1_no_key.json"
+FIX_VERIFICATION_LEVEL1_NO_KEY="$TMP/verification_level1_no_key.json"
 jq -n --arg sha "$SHA" '{
-  tier: 1,
+  verification_level: 1,
   head_sha: $sha,
   evals: [
     {id:"e1", priority:"P0", mode:"scripted", status:"pass", cmd:"run-a", negative_control:"run-a-broken", evidence:"log"}
   ]
-}' > "$FIX_TIER1_NO_KEY"
-stderr_out=$(post_evals::validate_structure "$FIX_TIER1_NO_KEY" 42 "$SHA" 2>&1)
-check "validate_structure: tier 1, tier_justification key absent → exit 1" 1 $?
-[[ "$stderr_out" == *"tier 1"*"requires"*"tier_justification"* ]]
-check "validate_structure: tier 1, tier_justification key absent → stderr names tier + reason" 0 $?
+}' > "$FIX_VERIFICATION_LEVEL1_NO_KEY"
+stderr_out=$(post_evals::validate_structure "$FIX_VERIFICATION_LEVEL1_NO_KEY" 42 "$SHA" 2>&1)
+check "validate_structure: verification_level 1, verification_justification key absent → exit 1" 1 $?
+[[ "$stderr_out" == *"verification_level 1"*"requires"*"verification_justification"* ]]
+check "validate_structure: verification_level 1, verification_justification key absent → stderr names verification_level + reason" 0 $?
 
-# tier key ALSO absent (alongside tier_justification) → the message's tier
-# interpolation must render a placeholder, not a blank "tier  requires...".
-FIX_NO_TIER_NO_JUST="$TMP/no_tier_no_just.json"
+# verification_level key ALSO absent (alongside verification_justification) → the message's verification_level
+# interpolation must render a placeholder, not a blank "verification_level  requires...".
+FIX_NO_VERIFICATION_LEVEL_NO_JUST="$TMP/no_verification_level_no_just.json"
 jq -n --arg sha "$SHA" '{
   head_sha: $sha,
   evals: []
-}' > "$FIX_NO_TIER_NO_JUST"
-stderr_out=$(post_evals::validate_structure "$FIX_NO_TIER_NO_JUST" 42 "$SHA" 2>&1)
-check "validate_structure: tier key absent, tier_justification key absent → exit 1" 1 $?
-[[ "$stderr_out" == *"tier <unset> requires"*"tier_justification"* ]]
-check "validate_structure: tier key absent → stderr renders <unset> placeholder, not blank" 0 $?
+}' > "$FIX_NO_VERIFICATION_LEVEL_NO_JUST"
+stderr_out=$(post_evals::validate_structure "$FIX_NO_VERIFICATION_LEVEL_NO_JUST" 42 "$SHA" 2>&1)
+check "validate_structure: verification_level key absent, verification_justification key absent → exit 1" 1 $?
+[[ "$stderr_out" == *"verification_level <unset> requires"*"verification_justification"* ]]
+check "validate_structure: verification_level key absent → stderr renders <unset> placeholder, not blank" 0 $?
 
-# non-string tier_justification (a number) → jq's gsub errors on a non-string
+# non-string verification_justification (a number) → jq's gsub errors on a non-string
 # operand ("number (42) cannot be matched, as it is not a string"), so the
 # $(...) capture is empty and check 2's blank-justification branch fires →
 # refused, fail-closed. Pinned here so a future trim rewrite can't silently
 # start accepting non-string values (reviewer request).
 FIX_NUMERIC_JUST="$TMP/numeric_just.json"
 jq -n --arg sha "$SHA" '{
-  tier: 1,
-  tier_justification: 42,
+  verification_level: 1,
+  verification_justification: 42,
   head_sha: $sha,
   evals: [
     {id:"e1", priority:"P0", mode:"scripted", status:"pass", cmd:"run-a", negative_control:"run-a-broken", evidence:"log"}
   ]
 }' > "$FIX_NUMERIC_JUST"
 stderr_out=$(post_evals::validate_structure "$FIX_NUMERIC_JUST" 42 "$SHA" 2>&1)
-check "validate_structure: numeric tier_justification (42) → exit 1 (jq type error, fail-closed)" 1 $?
-[[ "$stderr_out" == *"tier 1"*"requires"*"tier_justification"* ]]
-check "validate_structure: numeric tier_justification → stderr names tier + reason" 0 $?
+check "validate_structure: numeric verification_justification (42) → exit 1 (jq type error, fail-closed)" 1 $?
+[[ "$stderr_out" == *"verification_level 1"*"requires"*"verification_justification"* ]]
+check "validate_structure: numeric verification_justification → stderr names verification_level + reason" 0 $?
 
-# tier 1 with a real justification string → passes check 2 (falls through to
+# verification_level 1 with a real justification string → passes check 2 (falls through to
 # later structural checks, which this fixture also satisfies, so exit 0).
-FIX_TIER1_REAL_JUST="$TMP/tier1_real_just.json"
+FIX_VERIFICATION_LEVEL1_REAL_JUST="$TMP/verification_level1_real_just.json"
 jq -n --arg sha "$SHA" --argjson smoke "$SMOKE_OK" --arg ca "$RCMD_A" --arg na "$RNC_A" '{
-  tier: 1,
-  tier_justification: "2 work-units, no irreversible surface",
+  verification_level: 1,
+  verification_justification: "2 work-units, no irreversible surface",
   head_sha: $sha,
   evals: [
     {id:"e1", priority:"P0", mode:"scripted", status:"pass", cmd:$ca, negative_control:$na, evidence:"log", smoke: $smoke}
   ]
-}' > "$FIX_TIER1_REAL_JUST"
-post_evals::validate_structure "$FIX_TIER1_REAL_JUST" 42 "$SHA"
-check "validate_structure: tier 1 with real justification → exit 0" 0 $?
+}' > "$FIX_VERIFICATION_LEVEL1_REAL_JUST"
+post_evals::validate_structure "$FIX_VERIFICATION_LEVEL1_REAL_JUST" 42 "$SHA"
+check "validate_structure: verification_level 1 with real justification → exit 0" 0 $?
 
-# ─── check 3: tier>=1 scripted eval with empty negative_control ─────────────
+# ─── check 3: verification_level>=1 scripted eval with empty negative_control ─────────────
 FIX_EMPTY_NC="$TMP/empty_nc.json"
 jq -n --arg sha "$SHA" '{
-  tier: 1,
-  tier_justification: "2 work-units, no irreversible surface",
+  verification_level: 1,
+  verification_justification: "2 work-units, no irreversible surface",
   head_sha: $sha,
   evals: [
     {id:"e1", priority:"P0", mode:"scripted", status:"pass", cmd:"run-a", negative_control:"", evidence:"log"}
   ]
 }' > "$FIX_EMPTY_NC"
 stderr_out=$(post_evals::validate_structure "$FIX_EMPTY_NC" 42 "$SHA" 2>&1)
-check "validate_structure: tier>=1 scripted eval empty negative_control → exit 1" 1 $?
+check "validate_structure: verification_level>=1 scripted eval empty negative_control → exit 1" 1 $?
 [[ "$stderr_out" == *"e1"* && "$stderr_out" == *"empty negative_control"* ]]
 check "validate_structure: empty negative_control → stderr names id + reason" 0 $?
 
 # ─── check 4: negative_control textually identical to cmd ───────────────────
 FIX_IDENTICAL_NC="$TMP/identical_nc.json"
 jq -n --arg sha "$SHA" '{
-  tier: 1,
-  tier_justification: "2 work-units, no irreversible surface",
+  verification_level: 1,
+  verification_justification: "2 work-units, no irreversible surface",
   head_sha: $sha,
   evals: [
     {id:"e1", priority:"P0", mode:"scripted", status:"pass", cmd:"run-a", negative_control:"run-a", evidence:"log"}
@@ -247,8 +247,8 @@ check "validate_structure: identical negative_control → stderr names id + reas
 # whitespace — still the same command, must be rejected.
 FIX_TRAILING_SPACE="$TMP/trailing_space_nc.json"
 jq -n --arg sha "$SHA" '{
-  tier: 1,
-  tier_justification: "2 work-units, no irreversible surface",
+  verification_level: 1,
+  verification_justification: "2 work-units, no irreversible surface",
   head_sha: $sha,
   evals: [
     {id:"e1", priority:"P0", mode:"scripted", status:"pass", cmd:"run-a", negative_control:"run-a  ", evidence:"log"}
@@ -262,8 +262,8 @@ check "validate_structure: trailing-space variant → stderr names id + reason" 
 # ─── check 4 (hardened): "true; cmd" wrapper rejected ────────────────────────
 FIX_TRUE_WRAP="$TMP/true_wrap_nc.json"
 jq -n --arg sha "$SHA" '{
-  tier: 1,
-  tier_justification: "2 work-units, no irreversible surface",
+  verification_level: 1,
+  verification_justification: "2 work-units, no irreversible surface",
   head_sha: $sha,
   evals: [
     {id:"e1", priority:"P0", mode:"scripted", status:"pass", cmd:"run-a", negative_control:"true; run-a", evidence:"log"}
@@ -277,8 +277,8 @@ check "validate_structure: 'true; cmd' wrapper → stderr names id" 0 $?
 # ─── check 4 (hardened): echo-wrap rejected ──────────────────────────────────
 FIX_ECHO_WRAP="$TMP/echo_wrap_nc.json"
 jq -n --arg sha "$SHA" '{
-  tier: 1,
-  tier_justification: "2 work-units, no irreversible surface",
+  verification_level: 1,
+  verification_justification: "2 work-units, no irreversible surface",
   head_sha: $sha,
   evals: [
     {id:"e1", priority:"P0", mode:"scripted", status:"pass", cmd:"run-a", negative_control:"echo x && run-a", evidence:"log"}
@@ -292,8 +292,8 @@ check "validate_structure: echo-wrap wrapper → stderr names id" 0 $?
 # ─── check 4 (hardened): legitimately different control still accepted ──────
 FIX_LEGIT_DIFFERENT="$TMP/legit_different_nc.json"
 jq -n --arg sha "$SHA" --argjson smoke "$SMOKE_OK" --arg ca "$RCMD_A" --arg nb "$RNC_B" '{
-  tier: 1,
-  tier_justification: "2 work-units, no irreversible surface",
+  verification_level: 1,
+  verification_justification: "2 work-units, no irreversible surface",
   head_sha: $sha,
   evals: [
     {id:"e1", priority:"P0", mode:"scripted", status:"pass", cmd:$ca, negative_control:$nb, evidence:"log", smoke: $smoke}
@@ -305,8 +305,8 @@ check "validate_structure: legitimately different negative_control (different co
 # ─── check 5: P0 eval with empty evidence ────────────────────────────────────
 FIX_EMPTY_EVIDENCE="$TMP/empty_evidence.json"
 jq -n --arg sha "$SHA" '{
-  tier: 1,
-  tier_justification: "2 work-units, no irreversible surface",
+  verification_level: 1,
+  verification_justification: "2 work-units, no irreversible surface",
   head_sha: $sha,
   evals: [
     {id:"e1", priority:"P0", mode:"scripted", status:"pass", cmd:"run-a", negative_control:"run-a-broken", evidence:""}
@@ -323,23 +323,23 @@ check "validate_structure: head_sha mismatch → exit 1" 1 $?
 [[ "$stderr_out" == *"$SHA"* && "$stderr_out" == *"newsha"* ]]
 check "validate_structure: head_sha mismatch → stderr mentions both shas" 0 $?
 
-# ─── check 7: tier >= 1 requires at least one P0 eval (closes vacuous-GO gap) ──
-# A tier-1+ artifact with an empty .evals array or only P1 evals currently
+# ─── check 7: verification_level >= 1 requires at least one P0 eval (closes vacuous-GO gap) ──
+# A verification_level-1+ artifact with an empty .evals array or only P1 evals currently
 # computes GO past every other refusal (compute_go's P0-only gate is vacuously
 # satisfied when there are no P0 evals at all). This refusal closes that gap
 # at the WRITER layer; eval_artifact::compute_go's pure-function semantics are
 # unchanged.
-FIX_TIER1_EMPTY_EVALS="$TMP/tier1_empty_evals.json"
+FIX_VERIFICATION_LEVEL1_EMPTY_EVALS="$TMP/verification_level1_empty_evals.json"
 jq -n --arg sha "$SHA" '{
-  tier: 1,
-  tier_justification: "2 work-units, no irreversible surface",
+  verification_level: 1,
+  verification_justification: "2 work-units, no irreversible surface",
   head_sha: $sha,
   evals: []
-}' > "$FIX_TIER1_EMPTY_EVALS"
-stderr_out=$(post_evals::validate_structure "$FIX_TIER1_EMPTY_EVALS" 42 "$SHA" 2>&1)
-check "validate_structure: tier 1 + empty evals → exit 1 (refused)" 1 $?
+}' > "$FIX_VERIFICATION_LEVEL1_EMPTY_EVALS"
+stderr_out=$(post_evals::validate_structure "$FIX_VERIFICATION_LEVEL1_EMPTY_EVALS" 42 "$SHA" 2>&1)
+check "validate_structure: verification_level 1 + empty evals → exit 1 (refused)" 1 $?
 [[ "$stderr_out" == *"P0"* ]]
-check "validate_structure: tier 1 + empty evals → stderr names the P0 reason" 0 $?
+check "validate_structure: verification_level 1 + empty evals → stderr names the P0 reason" 0 $?
 
 # ─── check 8: freeze-before-build (frozen_sha must precede the branch) ────────
 # The task-evals skill stamps frozen_sha "before implementation starts", but
@@ -371,8 +371,8 @@ FREEZE_IMPL=$(git -C "$FREEZE_REPO" rev-parse HEAD)
 FIX_FREEZE_OK="$FREEZE_REPO/evals_ok.json"
 jq -n --arg sha "$SHA" --arg fsha "$FREEZE_BASE" --argjson smoke "$SMOKE_OK" \
       --arg ca "$RCMD_A" --arg na "$RNC_A" '{
-  tier: 1,
-  tier_justification: "1 work-unit",
+  verification_level: 1,
+  verification_justification: "1 work-unit",
   frozen_sha: $fsha,
   head_sha: $sha,
   evals: [
@@ -386,8 +386,8 @@ check "validate_structure: frozen_sha at branch base → exit 0 (compliant)" 0 $
 # i.e. the evals were written after the code. This is the defect.
 FIX_FREEZE_LATE="$FREEZE_REPO/evals_late.json"
 jq -n --arg sha "$SHA" --arg fsha "$FREEZE_IMPL" '{
-  tier: 1,
-  tier_justification: "1 work-unit",
+  verification_level: 1,
+  verification_justification: "1 work-unit",
   frozen_sha: $fsha,
   head_sha: $sha,
   evals: [
@@ -406,8 +406,8 @@ check "validate_structure: late freeze → stderr names frozen_sha" 0 $?
 FIX_FREEZE_DISCLOSED="$FREEZE_REPO/evals_disclosed.json"
 jq -n --arg sha "$SHA" --arg fsha "$FREEZE_IMPL" --argjson smoke "$SMOKE_OK" \
       --arg ca "$RCMD_A" --arg na "$RNC_A" '{
-  tier: 1,
-  tier_justification: "1 work-unit. Disclosed process gap: this evals.json was authored after implementation, not before (violates freeze-before-build). Authored at the real timestamp, not backdated.",
+  verification_level: 1,
+  verification_justification: "1 work-unit. Disclosed process gap: this evals.json was authored after implementation, not before (violates freeze-before-build). Authored at the real timestamp, not backdated.",
   frozen_sha: $fsha,
   head_sha: $sha,
   evals: [
@@ -421,8 +421,8 @@ check "validate_structure: disclosed late freeze → exit 0 (escape hatch)" 0 $?
 # justification mentioning neither must not open the hatch.
 FIX_FREEZE_FAKE_DISCLOSURE="$FREEZE_REPO/evals_fake.json"
 jq -n --arg sha "$SHA" --arg fsha "$FREEZE_IMPL" '{
-  tier: 1,
-  tier_justification: "1 work-unit, no irreversible surface",
+  verification_level: 1,
+  verification_justification: "1 work-unit, no irreversible surface",
   frozen_sha: $fsha,
   head_sha: $sha,
   evals: [
@@ -436,8 +436,8 @@ check "validate_structure: late freeze without disclosure wording → exit 1" 1 
 # pass just because git cannot answer.
 FIX_FREEZE_BOGUS="$FREEZE_REPO/evals_bogus.json"
 jq -n --arg sha "$SHA" '{
-  tier: 1,
-  tier_justification: "1 work-unit",
+  verification_level: 1,
+  verification_justification: "1 work-unit",
   frozen_sha: "0000000000000000000000000000000000000000",
   head_sha: $sha,
   evals: [
@@ -473,8 +473,8 @@ check "validate_freeze: jq unavailable → stderr names jq" 0 $?
 # artifacts live outside any repo and have no branch to compare against.
 FIX_FREEZE_LOOP="$FREEZE_REPO/evals_loop.json"
 jq -n --arg fsha "$FREEZE_IMPL" '{
-  tier: 1,
-  tier_justification: "1 work-unit",
+  verification_level: 1,
+  verification_justification: "1 work-unit",
   frozen_sha: $fsha,
   head_sha: "abc123",
   evals: [
@@ -484,40 +484,40 @@ jq -n --arg fsha "$FREEZE_IMPL" '{
 post_evals::validate_structure "$FIX_FREEZE_LOOP" "" "" "loop"
 check "validate_structure: loop scope skips the freeze check" 0 $?
 
-FIX_TIER1_ONLY_P1="$TMP/tier1_only_p1.json"
+FIX_VERIFICATION_LEVEL1_ONLY_P1="$TMP/verification_level1_only_p1.json"
 jq -n --arg sha "$SHA" '{
-  tier: 1,
-  tier_justification: "2 work-units, no irreversible surface",
+  verification_level: 1,
+  verification_justification: "2 work-units, no irreversible surface",
   head_sha: $sha,
   evals: [
     {id:"e1", priority:"P1", mode:"scripted", status:"pass", cmd:"run-a", negative_control:"run-a-broken", evidence:"log"}
   ]
-}' > "$FIX_TIER1_ONLY_P1"
-stderr_out=$(post_evals::validate_structure "$FIX_TIER1_ONLY_P1" 42 "$SHA" 2>&1)
-check "validate_structure: tier 1 + only-P1 evals → exit 1 (refused)" 1 $?
+}' > "$FIX_VERIFICATION_LEVEL1_ONLY_P1"
+stderr_out=$(post_evals::validate_structure "$FIX_VERIFICATION_LEVEL1_ONLY_P1" 42 "$SHA" 2>&1)
+check "validate_structure: verification_level 1 + only-P1 evals → exit 1 (refused)" 1 $?
 [[ "$stderr_out" == *"P0"* ]]
-check "validate_structure: tier 1 + only-P1 evals → stderr names the P0 reason" 0 $?
+check "validate_structure: verification_level 1 + only-P1 evals → stderr names the P0 reason" 0 $?
 
-# tier 0 + empty evals is the exemption path — must still pass (already
-# covered by FIX_TIER0_OK above; re-assert here to pin it against check 7).
-post_evals::validate_structure "$FIX_TIER0_OK" 42 "$SHA"
-check "validate_structure: tier 0 + empty evals → exit 0 (exemption unaffected by check 7)" 0 $?
+# verification_level 0 + empty evals is the exemption path — must still pass (already
+# covered by FIX_VERIFICATION_LEVEL0_OK above; re-assert here to pin it against check 7).
+post_evals::validate_structure "$FIX_VERIFICATION_LEVEL0_OK" 42 "$SHA"
+check "validate_structure: verification_level 0 + empty evals → exit 0 (exemption unaffected by check 7)" 0 $?
 
-# ─── ordering: check 2 fires before check 3 (tier 0 has no scripted evals to fail check 3) ──
-# (implicitly proven by FIX_TIER0_OK passing above; explicit ordering test below)
+# ─── ordering: check 2 fires before check 3 (verification_level 0 has no scripted evals to fail check 3) ──
+# (implicitly proven by FIX_VERIFICATION_LEVEL0_OK passing above; explicit ordering test below)
 FIX_ORDER="$TMP/order.json"
 jq -n --arg sha "$SHA" '{
-  tier: 0,
-  tier_justification: "",
+  verification_level: 0,
+  verification_justification: "",
   head_sha: $sha,
   evals: [
     {id:"e1", priority:"P0", mode:"scripted", status:"pass", cmd:"run-a", negative_control:"", evidence:""}
   ]
 }' > "$FIX_ORDER"
 stderr_out=$(post_evals::validate_structure "$FIX_ORDER" 42 "$SHA" 2>&1)
-check "validate_structure: tier-0 check fires before negative_control/evidence checks" 1 $?
-[[ "$stderr_out" == *"tier 0 requires"* ]]
-check "validate_structure: order proof — stderr is the tier-0 message, not later checks" 0 $?
+check "validate_structure: verification_level-0 check fires before negative_control/evidence checks" 1 $?
+[[ "$stderr_out" == *"verification_level 0 requires"* ]]
+check "validate_structure: order proof — stderr is the verification_level-0 message, not later checks" 0 $?
 
 # ─── compute_and_validate_result ─────────────────────────────────────────────
 result=$(post_evals::compute_and_validate_result "$FIX_OK")
@@ -525,8 +525,8 @@ check_str "compute_and_validate_result: all-pass fixture → GO" "GO" "$result"
 
 FIX_FAIL="$TMP/fail.json"
 jq -n --arg sha "$SHA" '{
-  tier: 1,
-  tier_justification: "2 work-units, no irreversible surface",
+  verification_level: 1,
+  verification_justification: "2 work-units, no irreversible surface",
   head_sha: $sha,
   evals: [
     {id:"e1", priority:"P0", mode:"scripted", status:"fail", cmd:"run-a", negative_control:"run-a-broken", evidence:"log"}
@@ -544,8 +544,8 @@ check_str "compute_and_validate_result: P0 fail → NO-GO" "NO-GO" "$result"
 FIX_LOOP_GO="$TMP/loop_go.json"
 jq -n --arg sha "$SHA" '{
   scope: "loop",
-  tier: 1,
-  tier_justification: "3 work-units, no irreversible surface",
+  verification_level: 1,
+  verification_justification: "3 work-units, no irreversible surface",
   head_sha: $sha,
   evals: [
     {id:"e1", priority:"P0", mode:"scripted", status:"pass", cmd:"run-a", negative_control:"run-a-broken", evidence:"log 1"},
@@ -569,8 +569,8 @@ check_str "grade_loop: written checksum matches independent recomputation" "$exp
 FIX_LOOP_NOGO="$TMP/loop_nogo.json"
 jq -n --arg sha "$SHA" '{
   scope: "loop",
-  tier: 1,
-  tier_justification: "3 work-units, no irreversible surface",
+  verification_level: 1,
+  verification_justification: "3 work-units, no irreversible surface",
   head_sha: $sha,
   evals: [
     {id:"e1", priority:"P0", mode:"scripted", status:"fail", cmd:"run-a", negative_control:"run-a-broken", evidence:"log 1"}
@@ -582,35 +582,35 @@ check_str "grade_loop: P0-fail -> echoes NO-GO" "NO-GO" "$grade_out"
 check_str "grade_loop: P0-fail -> writes .result=NO-GO" "NO-GO" "$(jq -r '.result' "$FIX_LOOP_NOGO")"
 check_str "grade_loop: P0-fail -> .grading.by still stamped" "post_evals.sh grade-loop" "$(jq -r '.grading.by // ""' "$FIX_LOOP_NOGO")"
 
-# (c) tier-0 exemption fixture (empty evals + justification) -> stamps.
-FIX_LOOP_TIER0="$TMP/loop_tier0.json"
+# (c) verification_level-0 exemption fixture (empty evals + justification) -> stamps.
+FIX_LOOP_VERIFICATION_LEVEL0="$TMP/loop_verification_level0.json"
 jq -n --arg sha "$SHA" '{
   scope: "loop",
-  tier: 0,
-  tier_justification: "docs-only loop, no runtime behaviour",
+  verification_level: 0,
+  verification_justification: "docs-only loop, no runtime behaviour",
   head_sha: $sha,
   evals: []
-}' > "$FIX_LOOP_TIER0"
-grade_out=$(post_evals::grade_loop "$FIX_LOOP_TIER0")
-check "grade_loop: tier-0 exemption -> exit 0" 0 $?
-check_str "grade_loop: tier-0 exemption -> echoes GO (vacuous)" "GO" "$grade_out"
-check_str "grade_loop: tier-0 exemption -> .grading.by stamped" "post_evals.sh grade-loop" "$(jq -r '.grading.by // ""' "$FIX_LOOP_TIER0")"
+}' > "$FIX_LOOP_VERIFICATION_LEVEL0"
+grade_out=$(post_evals::grade_loop "$FIX_LOOP_VERIFICATION_LEVEL0")
+check "grade_loop: verification_level-0 exemption -> exit 0" 0 $?
+check_str "grade_loop: verification_level-0 exemption -> echoes GO (vacuous)" "GO" "$grade_out"
+check_str "grade_loop: verification_level-0 exemption -> .grading.by stamped" "post_evals.sh grade-loop" "$(jq -r '.grading.by // ""' "$FIX_LOOP_VERIFICATION_LEVEL0")"
 
-# (d) grade-loop refuses a fixture with blank tier_justification (reuses check 2).
+# (d) grade-loop refuses a fixture with blank verification_justification (reuses check 2).
 FIX_LOOP_BLANK_JUST="$TMP/loop_blank_just.json"
 jq -n --arg sha "$SHA" '{
   scope: "loop",
-  tier: 1,
-  tier_justification: "",
+  verification_level: 1,
+  verification_justification: "",
   head_sha: $sha,
   evals: [
     {id:"e1", priority:"P0", mode:"scripted", status:"pass", cmd:"run-a", negative_control:"run-a-broken", evidence:"log 1"}
   ]
 }' > "$FIX_LOOP_BLANK_JUST"
 stderr_out=$(post_evals::grade_loop "$FIX_LOOP_BLANK_JUST" 2>&1)
-check "grade_loop: blank tier_justification -> exit 1 (refused)" 1 $?
-[[ "$stderr_out" == *"tier_justification"* ]]
-check "grade_loop: blank tier_justification -> stderr mentions tier_justification" 0 $?
+check "grade_loop: blank verification_justification -> exit 1 (refused)" 1 $?
+[[ "$stderr_out" == *"verification_justification"* ]]
+check "grade_loop: blank verification_justification -> stderr mentions verification_justification" 0 $?
 [[ -z "$(jq -r '.result // ""' "$FIX_LOOP_BLANK_JUST")" ]]
 check "grade_loop: refused fixture -> no .result written" 0 $?
 
@@ -618,8 +618,8 @@ check "grade_loop: refused fixture -> no .result written" 0 $?
 FIX_LOOP_BLANK_SHA="$TMP/loop_blank_sha.json"
 jq -n '{
   scope: "loop",
-  tier: 1,
-  tier_justification: "3 work-units, no irreversible surface",
+  verification_level: 1,
+  verification_justification: "3 work-units, no irreversible surface",
   head_sha: "",
   evals: [
     {id:"e1", priority:"P0", mode:"scripted", status:"pass", cmd:"run-a", negative_control:"run-a-broken", evidence:"log 1"}
@@ -657,8 +657,8 @@ mkdir -p "$FIX_WRITE_FAIL_DIR"
 FIX_WRITE_FAIL="$FIX_WRITE_FAIL_DIR/loop.json"
 jq -n --arg sha "$SHA" '{
   scope: "loop",
-  tier: 1,
-  tier_justification: "3 work-units, no irreversible surface",
+  verification_level: 1,
+  verification_justification: "3 work-units, no irreversible surface",
   head_sha: $sha,
   evals: [
     {id:"e1", priority:"P0", mode:"scripted", status:"pass", cmd:"run-a", negative_control:"run-a-broken", evidence:"log 1"}
@@ -684,7 +684,7 @@ check "grade_loop: write failure -> no .grading present" 0 $?
 # (1) first grade stamps amendments_at_grade: 0 with no amendments.
 FIX_AAG0="$TMP/aag0.json"
 jq -n --arg sha "$SHA" '{
-  scope: "loop", tier: 1, tier_justification: "1 work-unit, scripted change", head_sha: $sha,
+  scope: "loop", verification_level: 1, verification_justification: "1 work-unit, scripted change", head_sha: $sha,
   evals: [ {id:"e1", priority:"P0", mode:"scripted", status:"pass", cmd:"run-a", negative_control:"run-a-broken", evidence:"log"} ]
 }' > "$FIX_AAG0"
 post_evals::grade_loop "$FIX_AAG0" >/dev/null
@@ -694,7 +694,7 @@ check_str "grade_loop backstop: amendments_at_grade stamped 0" "0" "$(jq -r '.gr
 # (1b) first grade with 2 pre-grade amendments stamps 2 (rule 1's escape valve, no gate).
 FIX_AAG2="$TMP/aag2.json"
 jq -n --arg sha "$SHA" '{
-  scope: "loop", tier: 1, tier_justification: "1 work-unit, scripted change", head_sha: $sha,
+  scope: "loop", verification_level: 1, verification_justification: "1 work-unit, scripted change", head_sha: $sha,
   evals: [ {id:"e1", priority:"P0", mode:"scripted", status:"pass", cmd:"run-a", negative_control:"run-a-broken", evidence:"log"} ],
   amendments: [ {eval:"e1", when:"2026-07-12T00:00:00Z", why:"pre-grade fix a"},
                 {eval:"e1", when:"2026-07-12T00:01:00Z", why:"pre-grade fix b"} ]
@@ -744,7 +744,7 @@ check "grade_loop backstop: blank regraded_by -> exit 1 (refused)" 1 $?
 # (6) prior grading object WITHOUT amendments_at_grade (old writer) reads as 0.
 FIX_OLD="$TMP/old_writer.json"
 jq -n --arg sha "$SHA" '{
-  scope: "loop", tier: 1, tier_justification: "1 work-unit, scripted change", head_sha: $sha,
+  scope: "loop", verification_level: 1, verification_justification: "1 work-unit, scripted change", head_sha: $sha,
   evals: [ {id:"e1", priority:"P0", mode:"scripted", status:"pass", cmd:"run-a", negative_control:"run-a-broken", evidence:"log"} ]
 }' > "$FIX_OLD"
 post_evals::grade_loop "$FIX_OLD" >/dev/null
@@ -757,7 +757,7 @@ check "grade_loop backstop: old stamp w/o amendments_at_grade treated as 0 -> re
 # shorthand a negligent orchestrator writes) refuses instead of grading.
 FIX_MALF="$TMP/malformed_amend.json"
 jq -n --arg sha "$SHA" '{
-  scope: "loop", tier: 1, tier_justification: "1 work-unit, scripted change", head_sha: $sha,
+  scope: "loop", verification_level: 1, verification_justification: "1 work-unit, scripted change", head_sha: $sha,
   evals: [ {id:"e1", priority:"P0", mode:"scripted", status:"pass", cmd:"run-a", negative_control:"run-a-broken", evidence:"log"} ]
 }' > "$FIX_MALF"
 post_evals::grade_loop "$FIX_MALF" >/dev/null
@@ -769,7 +769,7 @@ check "grade_loop backstop: non-object amendment entry -> exit 1 (fail closed)" 
 # first-grade path — grade residue (.graded_at/.result) still trips the gate.
 FIX_REGEN="$TMP/regen.json"
 jq -n --arg sha "$SHA" '{
-  scope: "loop", tier: 1, tier_justification: "1 work-unit, scripted change", head_sha: $sha,
+  scope: "loop", verification_level: 1, verification_justification: "1 work-unit, scripted change", head_sha: $sha,
   evals: [ {id:"e1", priority:"P0", mode:"scripted", status:"pass", cmd:"run-a", negative_control:"run-a-broken", evidence:"log"} ]
 }' > "$FIX_REGEN"
 post_evals::grade_loop "$FIX_REGEN" >/dev/null
@@ -782,7 +782,7 @@ check "grade_loop backstop: del(.grading) with grade residue -> still refused" 1
 # `length` semantics unless explicitly guarded — refuse instead of grading.
 FIX_SCALAR="$TMP/scalar_amend.json"
 jq -n --arg sha "$SHA" '{
-  scope: "loop", tier: 1, tier_justification: "1 work-unit, scripted change", head_sha: $sha,
+  scope: "loop", verification_level: 1, verification_justification: "1 work-unit, scripted change", head_sha: $sha,
   evals: [ {id:"e1", priority:"P0", mode:"scripted", status:"pass", cmd:"run-a", negative_control:"run-a-broken", evidence:"log"} ]
 }' > "$FIX_SCALAR"
 post_evals::grade_loop "$FIX_SCALAR" >/dev/null
@@ -795,7 +795,7 @@ check "grade_loop backstop: scalar-number amendments -> exit 1 (refused)" 1 $?
 # mutation would let this slip through since not every entry is unattested).
 FIX_MIXED="$TMP/mixed_batch.json"
 jq -n --arg sha "$SHA" '{
-  scope: "loop", tier: 1, tier_justification: "1 work-unit, scripted change", head_sha: $sha,
+  scope: "loop", verification_level: 1, verification_justification: "1 work-unit, scripted change", head_sha: $sha,
   evals: [ {id:"e1", priority:"P0", mode:"scripted", status:"pass", cmd:"run-a", negative_control:"run-a-broken", evidence:"log"} ]
 }' > "$FIX_MIXED"
 post_evals::grade_loop "$FIX_MIXED" >/dev/null
@@ -823,7 +823,7 @@ check_str "grade_loop backstop: amendments_at_grade restamped to 3" "3" "$(jq -r
 # jq's `and` short-circuits so a non-string never reaches `test`.
 FIX_NONSTR="$TMP/nonstring_regraded_by.json"
 jq -n --arg sha "$SHA" '{
-  scope: "loop", tier: 1, tier_justification: "1 work-unit, scripted change", head_sha: $sha,
+  scope: "loop", verification_level: 1, verification_justification: "1 work-unit, scripted change", head_sha: $sha,
   evals: [ {id:"e1", priority:"P0", mode:"scripted", status:"pass", cmd:"run-a", negative_control:"run-a-broken", evidence:"log"} ]
 }' > "$FIX_NONSTR"
 post_evals::grade_loop "$FIX_NONSTR" >/dev/null
@@ -843,8 +843,8 @@ check "bare invocation: prints usage" 0 $?
 # Task 2's daemon extracts the embedded evals.json from the posted PR comment
 # to judge it; this validator guarantees the comment body actually carries
 # exactly one parseable fenced JSON block that agrees with the artifact.
-# tier is read from the BODY'S OWN marker line (what the daemon triages on),
-# never from an argument — a body whose marker says tier=0 but whose block
+# verification_level is read from the BODY'S OWN marker line (what the daemon triages on),
+# never from an argument — a body whose marker says verification_level=0 but whose block
 # disagrees is exactly the incoherence this check exists to catch.
 
 FIX_EMBED_SRC="$TMP/embed_src.json"
@@ -852,17 +852,17 @@ jq -n --arg sha "$SHA" '{
   schema_version: 1,
   scope: "pr",
   task_ref: "192",
-  tier: 0,
-  tier_justification: "single work-unit, covered by existing test",
+  verification_level: 0,
+  verification_justification: "single work-unit, covered by existing test",
   head_sha: $sha,
   evals: []
 }' > "$FIX_EMBED_SRC"
 
-mk_body() { # marker_tier json_block_or_empty num_blocks
-  local marker_tier="$1" block="$2" num_blocks="${3:-1}"
+mk_body() { # marker_verification_level json_block_or_empty num_blocks
+  local marker_verification_level="$1" block="$2" num_blocks="${3:-1}"
   local out="$TMP/body_$$_$RANDOM.md"
   {
-    printf '<!-- coderails-eval-summary v1 pr=192 head_sha=%s result=GO tier=%s -->\n' "$SHA" "$marker_tier"
+    printf '<!-- coderails-eval-summary v1 pr=192 head_sha=%s result=GO verification_level=%s -->\n' "$SHA" "$marker_verification_level"
     printf '## Eval summary\n\nAll P0 evals pass.\n'
     local i
     for ((i=0; i<num_blocks; i++)); do
@@ -872,23 +872,23 @@ mk_body() { # marker_tier json_block_or_empty num_blocks
   printf '%s' "$out"
 }
 
-# (1) tier-0 body WITHOUT any fenced block → rc 1, named message.
+# (1) verification_level-0 body WITHOUT any fenced block → rc 1, named message.
 BODY_NO_BLOCK=$(mk_body "0" "" 0)
 stderr_out=$(post_evals::validate_embed "$FIX_EMBED_SRC" "$BODY_NO_BLOCK" 2>&1)
-check "validate_embed: tier-0 body without fenced block → exit 1" 1 $?
+check "validate_embed: verification_level-0 body without fenced block → exit 1" 1 $?
 [[ "$stderr_out" == *"fenced json block"* || "$stderr_out" == *"json block"* ]]
 check "validate_embed: no block → stderr names the missing-block reason" 0 $?
 
-# (2) tier-0 body with exactly one MATCHING block → rc 0.
+# (2) verification_level-0 body with exactly one MATCHING block → rc 0.
 MATCHING_BLOCK=$(jq -c . "$FIX_EMBED_SRC")
 BODY_MATCH=$(mk_body "0" "$MATCHING_BLOCK" 1)
 post_evals::validate_embed "$FIX_EMBED_SRC" "$BODY_MATCH"
-check "validate_embed: tier-0 body with matching block → exit 0" 0 $?
+check "validate_embed: verification_level-0 body with matching block → exit 0" 0 $?
 
-# (3) tier-1 body WITHOUT a block → rc 0 (not required at tier 1/2).
-BODY_TIER1_NO_BLOCK=$(mk_body "1" "" 0)
-post_evals::validate_embed "$FIX_EMBED_SRC" "$BODY_TIER1_NO_BLOCK"
-check "validate_embed: tier-1 body without block → exit 0 (not required)" 0 $?
+# (3) verification_level-1 body WITHOUT a block → rc 0 (not required at verification_level 1/2).
+BODY_VERIFICATION_LEVEL1_NO_BLOCK=$(mk_body "1" "" 0)
+post_evals::validate_embed "$FIX_EMBED_SRC" "$BODY_VERIFICATION_LEVEL1_NO_BLOCK"
+check "validate_embed: verification_level-1 body without block → exit 0 (not required)" 0 $?
 
 # (4) SO-33 control: two fenced json blocks → rc 1, named (proves the
 # validator actually counts blocks rather than vacuously finding "a" block).
@@ -907,16 +907,16 @@ check "validate_embed: malformed (non-parsing) block → exit 1" 1 $?
 [[ "$stderr_out" == *"parse"* ]]
 check "validate_embed: malformed block → stderr names the parse failure" 0 $?
 
-# (6) SO-33 control: block parses but its .tier disagrees with the marker's
-# tier → rc 1, named (proves the validator compares tier, not just presence).
-WRONG_TIER_BLOCK=$(jq -c '.tier = 2' "$FIX_EMBED_SRC")
-BODY_WRONG_TIER=$(mk_body "0" "$WRONG_TIER_BLOCK" 1)
-stderr_out=$(post_evals::validate_embed "$FIX_EMBED_SRC" "$BODY_WRONG_TIER" 2>&1)
-check "validate_embed: block .tier disagrees with marker tier → exit 1" 1 $?
-[[ "$stderr_out" == *"tier"* ]]
-check "validate_embed: wrong tier → stderr names the tier mismatch" 0 $?
+# (6) SO-33 control: block parses but its .verification_level disagrees with the marker's
+# verification_level → rc 1, named (proves the validator compares verification_level, not just presence).
+WRONG_VERIFICATION_LEVEL_BLOCK=$(jq -c '.verification_level = 2' "$FIX_EMBED_SRC")
+BODY_WRONG_VERIFICATION_LEVEL=$(mk_body "0" "$WRONG_VERIFICATION_LEVEL_BLOCK" 1)
+stderr_out=$(post_evals::validate_embed "$FIX_EMBED_SRC" "$BODY_WRONG_VERIFICATION_LEVEL" 2>&1)
+check "validate_embed: block .verification_level disagrees with marker verification_level → exit 1" 1 $?
+[[ "$stderr_out" == *"verification_level"* ]]
+check "validate_embed: wrong verification_level → stderr names the verification_level mismatch" 0 $?
 
-# (7) SO-33 control: block parses, tier matches, but .task_ref disagrees with
+# (7) SO-33 control: block parses, verification_level matches, but .task_ref disagrees with
 # the source evals.json's .task_ref → rc 1, named.
 WRONG_REF_BLOCK=$(jq -c '.task_ref = "999"' "$FIX_EMBED_SRC")
 BODY_WRONG_REF=$(mk_body "0" "$WRONG_REF_BLOCK" 1)
@@ -926,7 +926,7 @@ check "validate_embed: block .task_ref disagrees with source file → exit 1" 1 
 check "validate_embed: wrong task_ref → stderr names the task_ref mismatch" 0 $?
 
 # (8) fail-closed: marker line unparseable (malformed/missing marker) → rc 1,
-# named — proves the tier check isn't vacuously satisfied with no marker to
+# named — proves the verification_level check isn't vacuously satisfied with no marker to
 # compare against.
 BODY_NO_MARKER="$TMP/body_no_marker.md"
 {
@@ -952,8 +952,8 @@ check "validate_embed: unparseable marker → stderr names the marker reason" 0 
 # to fail regardless of build state, so its polarity IS checkable.
 
 SMOKE_BASE='{
-  tier: 1,
-  tier_justification: "1 work-unit",
+  verification_level: 1,
+  verification_justification: "1 work-unit",
   head_sha: $sha
 }'
 
@@ -961,11 +961,11 @@ SMOKE_BASE='{
 # here go through validate_smoke directly (recorded numbers only), but
 # FIX_SMOKE_FULL below runs the full validate_structure, where check 10
 # executes them for real.
-mk_smoke() { # <outfile> <cmd_rc> <nc_rc>  → tier-1 file with one smoke-carrying eval
+mk_smoke() { # <outfile> <cmd_rc> <nc_rc>  → verification_level-1 file with one smoke-carrying eval
   jq -n --arg sha "$SHA" --argjson crc "$2" --argjson nrc "$3" \
         --arg ca "$RCMD_A" --arg na "$RNC_A" '{
-    tier: 1,
-    tier_justification: "1 work-unit",
+    verification_level: 1,
+    verification_justification: "1 work-unit",
     head_sha: $sha,
     evals: [
       {id:"e1", priority:"P0", mode:"scripted", status:"pending",
@@ -1008,11 +1008,11 @@ check "validate_smoke: cmd exit 0 at freeze → exit 0 (permitted)" 0 $?
 # array whose only eval is agent-run legitimately yields no ids and must still
 # pass (guard keys on type, not empty ids).
 SMK_SCALAR="$TMP/smoke_scalar.json"
-printf '{"tier":1,"evals":42}' > "$SMK_SCALAR"
+printf '{"verification_level":1,"evals":42}' > "$SMK_SCALAR"
 post_evals::validate_smoke "$SMK_SCALAR" >/dev/null 2>&1
 check "validate_smoke: scalar .evals=42 → exit 1 (fails closed)" 1 $?
 SMK_AGENTRUN="$TMP/smoke_agentrun.json"
-printf '{"tier":1,"evals":[{"id":"A","mode":"agent-run","priority":"P0"}]}' > "$SMK_AGENTRUN"
+printf '{"verification_level":1,"evals":[{"id":"A","mode":"agent-run","priority":"P0"}]}' > "$SMK_AGENTRUN"
 post_evals::validate_smoke "$SMK_AGENTRUN" >/dev/null 2>&1
 check "validate_smoke: agent-run-only array → exit 0 (guard keys on type, not empty ids)" 0 $?
 
@@ -1050,12 +1050,12 @@ post_evals::validate_smoke "$FIX_SMOKE_CMD_CRASH" 2>/dev/null
 check "validate_smoke: cmd crash (139 SIGSEGV) → exit 1 (environmental)" 1 $?
 
 # (S4) The teeth. A scripted eval with NO smoke object at all must be refused
-# at tier>=1 — otherwise the whole gate is opt-in and an agent skips it by
+# at verification_level>=1 — otherwise the whole gate is opt-in and an agent skips it by
 # omission, exactly as `fixtures` is skipped today.
 FIX_SMOKE_MISSING="$TMP/smoke_missing.json"
 jq -n --arg sha "$SHA" '{
-  tier: 1,
-  tier_justification: "1 work-unit",
+  verification_level: 1,
+  verification_justification: "1 work-unit",
   head_sha: $sha,
   evals: [
     {id:"e1", priority:"P0", mode:"scripted", status:"pending",
@@ -1072,8 +1072,8 @@ check "validate_smoke: missing smoke → stderr names smoke" 0 $?
 # class validate_discriminating guards with its fixtures-type check.
 FIX_SMOKE_MALFORMED="$TMP/smoke_malformed.json"
 jq -n --arg sha "$SHA" '{
-  tier: 1,
-  tier_justification: "1 work-unit",
+  verification_level: 1,
+  verification_justification: "1 work-unit",
   head_sha: $sha,
   evals: [
     {id:"e1", priority:"P0", mode:"scripted", status:"pending",
@@ -1086,8 +1086,8 @@ check "validate_smoke: smoke not an object → exit 1 (fail closed)" 1 $?
 
 FIX_SMOKE_NONNUM="$TMP/smoke_nonnum.json"
 jq -n --arg sha "$SHA" '{
-  tier: 1,
-  tier_justification: "1 work-unit",
+  verification_level: 1,
+  verification_justification: "1 work-unit",
   head_sha: $sha,
   evals: [
     {id:"e1", priority:"P0", mode:"scripted", status:"pending",
@@ -1102,8 +1102,8 @@ check "validate_smoke: non-numeric exit code → exit 1 (fail closed)" 1 $?
 # requiring one would block every judgement eval.
 FIX_SMOKE_AGENTRUN="$TMP/smoke_agentrun.json"
 jq -n --arg sha "$SHA" '{
-  tier: 1,
-  tier_justification: "1 work-unit",
+  verification_level: 1,
+  verification_justification: "1 work-unit",
   head_sha: $sha,
   evals: [
     {id:"e1", priority:"P0", mode:"agent-run", status:"pending",
@@ -1113,14 +1113,14 @@ jq -n --arg sha "$SHA" '{
 post_evals::validate_smoke "$FIX_SMOKE_AGENTRUN"
 check "validate_smoke: agent-run eval needs no smoke → exit 0" 0 $?
 
-# Tier 0 is the exemption path: no evals to smoke.
-FIX_SMOKE_TIER0="$TMP/smoke_tier0.json"
+# Verification level 0 is the exemption path: no evals to smoke.
+FIX_SMOKE_VERIFICATION_LEVEL0="$TMP/smoke_verification_level0.json"
 jq -n --arg sha "$SHA" '{
-  tier: 0, tier_justification: "single work-unit, covered by existing test",
+  verification_level: 0, verification_justification: "single work-unit, covered by existing test",
   head_sha: $sha, evals: []
-}' > "$FIX_SMOKE_TIER0"
-post_evals::validate_smoke "$FIX_SMOKE_TIER0"
-check "validate_smoke: tier 0 exemption → exit 0" 0 $?
+}' > "$FIX_SMOKE_VERIFICATION_LEVEL0"
+post_evals::validate_smoke "$FIX_SMOKE_VERIFICATION_LEVEL0"
+check "validate_smoke: verification_level 0 exemption → exit 0" 0 $?
 
 # (S7) Same fail-open lesson PR #261 paid for: without an explicit guard, a
 # missing jq makes every read empty and a violating file looks exactly like a
@@ -1137,8 +1137,8 @@ check "validate_smoke: jq unavailable → stderr names jq" 0 $?
 stderr_out=$(post_evals::validate_structure "$FIX_SMOKE_NC_ZERO" 42 "$SHA" 2>&1)
 check "validate_structure: vacuous negative control → exit 1 (smoke gate wired in)" 1 $?
 
-# Back-compat: tier-1 files predating this gate carry no smoke object. They
-# are refused by S4 above, which is intentional — but the tier-0 and agent-run
+# Back-compat: verification_level-1 files predating this gate carry no smoke object. They
+# are refused by S4 above, which is intentional — but the verification_level-0 and agent-run
 # paths must stay open, and every pre-existing passing fixture that carries
 # scripted evals now needs smoke. Assert the well-formed fixture still passes
 # once smoke is present, so the gate is additive and not a blanket break.
@@ -1171,7 +1171,7 @@ mkdir -p "$SR_DIR"
 # stating 127.
 FIX_SR_ENOENT="$SR_DIR/enoent.json"
 jq -n '{
-  tier: 1, tier_justification: "1 work-unit", head_sha: "abc",
+  verification_level: 1, verification_justification: "1 work-unit", head_sha: "abc",
   evals: [
     {id:"E2", priority:"P0", mode:"scripted", status:"pending",
      cmd:"bash '"$SR_DIR"'/never_created.sh",
@@ -1212,7 +1212,7 @@ printf '#!/bin/bash\necho "1 test failed"\nexit 1\n' > "$SR_DIR/real_check.sh"
 printf '#!/bin/bash\necho "assertion failed"\nexit 1\n' > "$SR_DIR/real_control.sh"
 FIX_SR_HONEST="$SR_DIR/honest.json"
 jq -n '{
-  tier: 1, tier_justification: "1 work-unit", head_sha: "abc",
+  verification_level: 1, verification_justification: "1 work-unit", head_sha: "abc",
   evals: [
     {id:"E1", priority:"P0", mode:"scripted", status:"pending",
      cmd:"bash '"$SR_DIR"'/real_check.sh",
@@ -1231,7 +1231,7 @@ check "smoke_run + validate_smoke: honest freeze-before-build artifact → exit 
 printf '#!/bin/bash\necho "jq-1.7.1"\nexit 0\n' > "$SR_DIR/vacuous_control.sh"
 FIX_SR_VACUOUS="$SR_DIR/vacuous.json"
 jq -n '{
-  tier: 1, tier_justification: "1 work-unit", head_sha: "abc",
+  verification_level: 1, verification_justification: "1 work-unit", head_sha: "abc",
   evals: [
     {id:"E3", priority:"P0", mode:"scripted", status:"pending",
      cmd:"bash '"$SR_DIR"'/real_check.sh",
@@ -1255,7 +1255,7 @@ check "_is_environmental_rc: 1 (content failure) is NOT environmental" 1 $?
 # (X6) agent-run evals carry no cmd — the executor must skip them, not crash.
 FIX_SR_AGENT="$SR_DIR/agentrun.json"
 jq -n '{
-  tier: 1, tier_justification: "1 work-unit", head_sha: "abc",
+  verification_level: 1, verification_justification: "1 work-unit", head_sha: "abc",
   evals: [ {id:"E1", priority:"P0", mode:"agent-run", status:"pending", assert:"UI renders", evidence:"report"} ]
 }' > "$FIX_SR_AGENT"
 post_evals::smoke_run "$FIX_SR_AGENT"
@@ -1266,7 +1266,7 @@ check_str "smoke_run: agent-run eval gets no smoke object" "null" "$(jq -r '.eva
 # rewrites in place and a botched write would silently destroy the artifact.
 jq -e . "$FIX_SR_HONEST" >/dev/null 2>&1
 check "smoke_run: rewritten file is still valid JSON" 0 $?
-check_str "smoke_run: preserves tier_justification" "1 work-unit" "$(jq -r '.tier_justification' "$FIX_SR_HONEST")"
+check_str "smoke_run: preserves verification_justification" "1 work-unit" "$(jq -r '.verification_justification' "$FIX_SR_HONEST")"
 
 # (X7-bis) The excerpt must retain the diagnostic line from BOTH failure
 # shapes. A tail-only excerpt looks fine against a test runner (verdict last)
@@ -1312,7 +1312,7 @@ check "smoke_run: jq unavailable → exit 1 (must not fail open)" 1 $?
 # a skipped one.
 FIX_SR_NUMERIC_ID="$SR_DIR/numeric_id.json"
 jq -n '{
-  tier: 1, tier_justification: "1 work-unit", head_sha: "abc",
+  verification_level: 1, verification_justification: "1 work-unit", head_sha: "abc",
   evals: [
     {id: 1, priority: "P0", mode: "scripted", status: "pending",
      cmd: "exit 3", negative_control: "exit 4", evidence: "log"}
@@ -1343,11 +1343,11 @@ printf '#!/bin/bash\necho "assertion failed"\nexit 1\n' > "$G_DIR/g_control.sh"
 printf '#!/bin/bash\necho "all good"\nexit 0\n' > "$G_DIR/g_passing_check.sh"
 printf '#!/bin/bash\necho "jq-1.7.1"\nexit 0\n' > "$G_DIR/g_passing_control.sh"
 
-mk_gate() { # <outfile> <cmd> <nc> [smoke_json] → tier-1 pr-scope file
+mk_gate() { # <outfile> <cmd> <nc> [smoke_json] → verification_level-1 pr-scope file
   local smoke="${4:-$SMOKE_OK}"
   jq -n --arg sha "$SHA" --arg cmd "$2" --arg nc "$3" --argjson smoke "$smoke" '{
-    tier: 1,
-    tier_justification: "1 work-unit",
+    verification_level: 1,
+    verification_justification: "1 work-unit",
     head_sha: $sha,
     evals: [
       {id:"e1", priority:"P0", mode:"scripted", status:"pending",
@@ -1371,8 +1371,8 @@ check "validate_structure: unresolvable cmd → stderr names eval + gate-time re
 # accepted. Enforcement must not block honest work.
 FIX_G_HONEST="$TMP/g_honest.json"
 jq -n --arg sha "$SHA" --arg cmd "bash $G_DIR/g_check.sh" --arg nc "bash $G_DIR/g_control.sh" '{
-  tier: 1,
-  tier_justification: "1 work-unit",
+  verification_level: 1,
+  verification_justification: "1 work-unit",
   head_sha: $sha,
   evals: [
     {id:"e1", priority:"P0", mode:"scripted", status:"pending",
@@ -1439,30 +1439,30 @@ check "validate_structure: whitespace-only negative_control → exit 1" 1 $?
 [[ "$stderr_out" == *"e1"* && "$stderr_out" == *"negative_control"* && "$stderr_out" == *"empty"* ]]
 check "validate_structure: whitespace-only negative_control → stderr says empty, not exit-0" 0 $?
 
-# (G6) Direct-call scope limits: agent-run evals and tier 0 have nothing to
+# (G6) Direct-call scope limits: agent-run evals and verification_level 0 have nothing to
 # execute — exit 0, mirroring check 9's boundaries.
 FIX_G_AGENTRUN="$TMP/g_agentrun.json"
 jq -n --arg sha "$SHA" '{
-  tier: 1, tier_justification: "1 work-unit", head_sha: $sha,
+  verification_level: 1, verification_justification: "1 work-unit", head_sha: $sha,
   evals: [ {id:"e1", priority:"P0", mode:"agent-run", status:"pending",
             assert:"the UI renders", evidence:"verifier report"} ]
 }' > "$FIX_G_AGENTRUN"
 post_evals::validate_smoke_execution "$FIX_G_AGENTRUN"
 check "validate_smoke_execution: agent-run eval → exit 0 (nothing to execute)" 0 $?
 
-FIX_G_TIER0="$TMP/g_tier0.json"
+FIX_G_VERIFICATION_LEVEL0="$TMP/g_verification_level0.json"
 jq -n --arg sha "$SHA" '{
-  tier: 0, tier_justification: "single work-unit, covered by existing test",
+  verification_level: 0, verification_justification: "single work-unit, covered by existing test",
   head_sha: $sha, evals: []
-}' > "$FIX_G_TIER0"
-post_evals::validate_smoke_execution "$FIX_G_TIER0"
-check "validate_smoke_execution: tier 0 exemption → exit 0" 0 $?
+}' > "$FIX_G_VERIFICATION_LEVEL0"
+post_evals::validate_smoke_execution "$FIX_G_VERIFICATION_LEVEL0"
+check "validate_smoke_execution: verification_level 0 exemption → exit 0" 0 $?
 
 # (G7) Loop scope skips gate-time re-execution entirely, matching checks 8/9 —
 # loop artifacts keep their separate surface (loop_state_guard).
 FIX_G_LOOP="$TMP/g_loop.json"
 jq -n '{
-  tier: 1, tier_justification: "1 work-unit", head_sha: "abc",
+  verification_level: 1, verification_justification: "1 work-unit", head_sha: "abc",
   evals: [ {id:"e1", priority:"P0", mode:"scripted", status:"pass",
             cmd:"run-a", negative_control:"run-a-broken", evidence:"log"} ]
 }' > "$FIX_G_LOOP"
@@ -1481,7 +1481,7 @@ FIX_G_DUP="$TMP/g_dup.json"
 jq -n --arg sha "$SHA" --arg bad "bash $G_DIR/never_created.sh" \
       --arg good "bash $G_DIR/g_check.sh" --arg nc "bash $G_DIR/g_control.sh" \
       --argjson smoke "$SMOKE_OK" '{
-  tier: 1, tier_justification: "1 work-unit", head_sha: $sha,
+  verification_level: 1, verification_justification: "1 work-unit", head_sha: $sha,
   evals: [
     {id:"e1", priority:"P0", mode:"scripted", status:"pending",
      cmd:$bad, negative_control:$nc, evidence:"log", smoke:$smoke},
@@ -1505,7 +1505,7 @@ check "validate_smoke_execution: duplicate ids → stderr names the gate-time re
 # the loop and the regression would not be exercised.
 FIX_G_STDIN="$TMP/g_stdin.json"
 jq -n --arg sha "$SHA" --argjson smoke "$SMOKE_OK" '{
-  tier: 1, tier_justification: "1 work-unit", head_sha: $sha,
+  verification_level: 1, verification_justification: "1 work-unit", head_sha: $sha,
   evals: [
     {id:"eater", priority:"P0", mode:"scripted", status:"pending",
      cmd:"cat > /dev/null; echo ate", negative_control:"false",
@@ -1532,7 +1532,7 @@ check "validate_smoke_execution: jq unavailable → stderr names jq" 0 $?
 # script that never existed passed the merge path at rc=0 (merge.sh/
 # enforce_pr_workflow.sh only parse the posted marker's result=GO text — they
 # never re-run anything). smoke_verify closes that: it checks out the
-# TRUSTED head SHA into a detached worktree and re-executes every tier>=1
+# TRUSTED head SHA into a detached worktree and re-executes every verification_level>=1
 # scripted eval's cmd/negative_control THERE, judging only what it observes.
 #
 # Fixtures are a real throwaway git repo (not a stub) so the worktree-add and
@@ -1557,7 +1557,7 @@ SV_SHA=$(git -C "$SV_REPO" rev-parse HEAD)
 # Before smoke_verify, this passed the merge path (marker said result=GO).
 FIX_SV_FABRICATED="$TMP/sv_fabricated.json"
 jq -n --arg sha "$SV_SHA" '{
-  tier: 1, tier_justification: "1 work-unit", head_sha: $sha,
+  verification_level: 1, verification_justification: "1 work-unit", head_sha: $sha,
   evals: [ {id:"e1", priority:"P0", mode:"scripted", status:"pass",
             cmd:"bash never_committed.sh", negative_control:"bash real_control.sh",
             evidence:"log", smoke: {"cmd_exit":1,"negative_control_exit":1,"cmd_output":"","negative_control_output":""}} ]
@@ -1575,7 +1575,7 @@ check "smoke_verify: refusal path leaves exactly the primary worktree (cleanup r
 # observed failing for a content reason. Must be ACCEPTED.
 FIX_SV_HONEST="$TMP/sv_honest.json"
 jq -n --arg sha "$SV_SHA" '{
-  tier: 1, tier_justification: "1 work-unit", head_sha: $sha,
+  verification_level: 1, verification_justification: "1 work-unit", head_sha: $sha,
   evals: [ {id:"e1", priority:"P0", mode:"scripted", status:"pass",
             cmd:"bash real_check.sh", negative_control:"bash real_control.sh",
             evidence:"log", smoke: {"cmd_exit":1,"negative_control_exit":1,"cmd_output":"","negative_control_output":""}} ]
@@ -1593,7 +1593,7 @@ git -C "$SV_REPO" add -A >/dev/null; git -C "$SV_REPO" commit -qm "add passing s
 SV_SHA2=$(git -C "$SV_REPO" rev-parse HEAD)
 FIX_SV_VACUOUS="$TMP/sv_vacuous.json"
 jq -n --arg sha "$SV_SHA2" '{
-  tier: 1, tier_justification: "1 work-unit", head_sha: $sha,
+  verification_level: 1, verification_justification: "1 work-unit", head_sha: $sha,
   evals: [ {id:"e1", priority:"P0", mode:"scripted", status:"pass",
             cmd:"bash real_check.sh", negative_control:"bash always_passes.sh",
             evidence:"log", smoke: {"cmd_exit":1,"negative_control_exit":1,"cmd_output":"","negative_control_output":""}} ]
@@ -1612,7 +1612,7 @@ check "smoke_verify: vacuous control at gate → stderr names negative_control" 
 # `mode`, not `surface`: a scripted eval always carries a runnable cmd.)
 FIX_SV_DEPLOYED="$TMP/sv_deployed.json"
 jq -n --arg sha "$SV_SHA2" '{
-  tier: 1, tier_justification: "1 work-unit", head_sha: $sha,
+  verification_level: 1, verification_justification: "1 work-unit", head_sha: $sha,
   evals: [
     {id:"e1", priority:"P0", mode:"scripted", status:"pass",
      cmd:"bash real_check.sh", negative_control:"bash real_control.sh",
@@ -1632,7 +1632,7 @@ check "smoke_verify: deployed-surface scripted eval is RE-EXECUTED, fabricated c
 # MUST be refused. Before the fix this returned 0 (empty ids -> return 0).
 FIX_SV_DEPLOYED_SOLE="$TMP/sv_deployed_sole.json"
 jq -n --arg sha "$SV_SHA2" '{
-  tier: 1, tier_justification: "exploit: fabricated cmd hidden behind surface=deployed", head_sha: $sha,
+  verification_level: 1, verification_justification: "exploit: fabricated cmd hidden behind surface=deployed", head_sha: $sha,
   evals: [
     {id:"e1", priority:"P0", mode:"scripted", status:"pass", surface:"deployed",
      cmd:"bash /tmp/coderails-never-existed-sole-xyz.sh", negative_control:"false",
@@ -1648,7 +1648,7 @@ check "smoke_verify: fabricated scripted cmd behind surface=deployed as SOLE P0 
 # empty ids list -> return 0, re-executing nothing).
 FIX_SV_EMPTYID="$TMP/sv_emptyid.json"
 jq -n --arg sha "$SV_SHA2" '{
-  tier: 1, tier_justification: "exploit: fabricated cmd hidden behind empty id", head_sha: $sha,
+  verification_level: 1, verification_justification: "exploit: fabricated cmd hidden behind empty id", head_sha: $sha,
   evals: [
     {id:"", priority:"P0", mode:"scripted", status:"pass", surface:"artifact-path",
      cmd:"bash /tmp/coderails-never-existed-emptyid-xyz.sh", negative_control:"false",
@@ -1663,7 +1663,7 @@ check "smoke_verify: fabricated scripted cmd with id:\"\" → REFUSED (exit 1) [
 # second; index iteration runs BOTH, so the fabricated one is caught.
 FIX_SV_DUPID="$TMP/sv_dupid.json"
 jq -n --arg sha "$SV_SHA2" '{
-  tier: 1, tier_justification: "exploit: fabricated cmd sharing an id with an honest eval", head_sha: $sha,
+  verification_level: 1, verification_justification: "exploit: fabricated cmd sharing an id with an honest eval", head_sha: $sha,
   evals: [
     {id:"dup", priority:"P0", mode:"scripted", status:"pass", surface:"artifact-path",
      cmd:"bash real_check.sh", negative_control:"bash real_control.sh",
@@ -1711,7 +1711,7 @@ check_str "_run_recorded: cmd reading stdin gets /dev/null, not the caller's std
 # smoke_run must record smoke for EVERY eval even when the first one eats stdin.
 SR_STDIN="$TMP/sr_stdin.json"
 jq -n '{
-  schema_version: 1, scope: "pr", tier: 1,
+  schema_version: 1, scope: "pr", verification_level: 1,
   evals: [
     {id:"E1", priority:"P0", mode:"scripted", surface:"artifact-path",
      cmd:"cat > /dev/null; echo ate-stdin", negative_control:"false"},
@@ -1729,7 +1729,7 @@ check_str "smoke_run: a stdin-consuming eval does not truncate the loop (all 3 r
 # by code inspection: this is the site where the truncation failed OPEN.
 FIX_SV_STDIN="$TMP/sv_stdin.json"
 jq -n --arg sha "$SV_SHA2" '{
-  tier: 1, tier_justification: "exploit: vacuous control hidden behind a stdin-eating eval", head_sha: $sha,
+  verification_level: 1, verification_justification: "exploit: vacuous control hidden behind a stdin-eating eval", head_sha: $sha,
   evals: [
     {id:"eater", priority:"P0", mode:"scripted", status:"pass", surface:"artifact-path",
      cmd:"cat > /dev/null; echo ate", negative_control:"false", evidence:"e",
@@ -1755,7 +1755,7 @@ check "smoke_verify: stdin-eater case refuses for the VACUOUS-CONTROL reason, no
 # id-keyed selection this function already fixed.
 FIX_SV_MODE="$TMP/sv_mode.json"
 jq -n --arg sha "$SV_SHA2" '{
-  tier: 1, tier_justification: "exploit: vacuous control hidden by an unrecognised mode", head_sha: $sha,
+  verification_level: 1, verification_justification: "exploit: vacuous control hidden by an unrecognised mode", head_sha: $sha,
   evals: [
     {id:"vacuous", priority:"P0", mode:"Scripted", status:"pass", surface:"artifact-path",
      cmd:"echo hi", negative_control:"true", evidence:"e",
@@ -1767,7 +1767,7 @@ check "smoke_verify: unrecognised mode capitalisation → REFUSED (exit 1) [gate
 
 FIX_SV_NOMODE="$TMP/sv_nomode.json"
 jq -n --arg sha "$SV_SHA2" '{
-  tier: 1, tier_justification: "exploit: vacuous control hidden by an absent mode", head_sha: $sha,
+  verification_level: 1, verification_justification: "exploit: vacuous control hidden by an absent mode", head_sha: $sha,
   evals: [
     {id:"vacuous", priority:"P0", status:"pass", surface:"artifact-path",
      cmd:"echo hi", negative_control:"true", evidence:"e",
@@ -1781,7 +1781,7 @@ check "smoke_verify: absent mode field → REFUSED (exit 1) [no adversary needed
 # unrecognised modes, not every non-scripted one.
 FIX_SV_AGENTOK="$TMP/sv_agentok.json"
 jq -n --arg sha "$SV_SHA2" '{
-  tier: 1, tier_justification: "control: agent-run is a legal mode", head_sha: $sha,
+  verification_level: 1, verification_justification: "control: agent-run is a legal mode", head_sha: $sha,
   evals: [
     {id:"a1", priority:"P0", mode:"agent-run", status:"pass", surface:"artifact-path",
      assert:"judged by a fresh grader", evidence:"e"}
@@ -1800,7 +1800,7 @@ check "smoke_verify: legitimate agent-run eval still accepted (guard is an enum,
 BOGUS_SHA="0000000000000000000000000000000000dead"
 FIX_SV_BOGUS_SHA="$TMP/sv_bogus_sha.json"
 jq -n --arg sha "$BOGUS_SHA" '{
-  tier: 1, tier_justification: "1 work-unit", head_sha: $sha,
+  verification_level: 1, verification_justification: "1 work-unit", head_sha: $sha,
   evals: [ {id:"e1", priority:"P0", mode:"scripted", status:"pass",
             cmd:"bash real_check.sh", negative_control:"bash real_control.sh",
             evidence:"log", smoke: {"cmd_exit":1,"negative_control_exit":1,"cmd_output":"","negative_control_output":""}} ]
@@ -1828,29 +1828,29 @@ check "smoke_verify: unparseable embed → stderr names the reason" 0 $?
 # whose only eval is agent-run legitimately has nothing to re-execute and must
 # still be accepted (exit 0) — the guard keys on type, never on empty indices.
 SV_SCALAR="$TMP/sv_scalar.json"
-printf '{"tier":1,"evals":42}' > "$SV_SCALAR"
+printf '{"verification_level":1,"evals":42}' > "$SV_SCALAR"
 (cd "$SV_REPO" && post_evals::smoke_verify "$SV_SCALAR" "$SV_SHA" >/dev/null 2>&1)
 check "smoke_verify: scalar .evals=42 → exit 1 (fails closed)" 1 $?
 
 SV_STRING="$TMP/sv_string.json"
-printf '{"tier":1,"evals":"notanarray"}' > "$SV_STRING"
+printf '{"verification_level":1,"evals":"notanarray"}' > "$SV_STRING"
 (cd "$SV_REPO" && post_evals::smoke_verify "$SV_STRING" "$SV_SHA" >/dev/null 2>&1)
 check "smoke_verify: string .evals → exit 1 (fails closed)" 1 $?
 
 SV_OBJECT="$TMP/sv_object.json"
-printf '{"tier":1,"evals":{"E1":{"mode":"scripted"}}}' > "$SV_OBJECT"
+printf '{"verification_level":1,"evals":{"E1":{"mode":"scripted"}}}' > "$SV_OBJECT"
 (cd "$SV_REPO" && post_evals::smoke_verify "$SV_OBJECT" "$SV_SHA" >/dev/null 2>&1)
 check "smoke_verify: object .evals → exit 1 (fails closed)" 1 $?
 
 SV_AGENTRUN="$TMP/sv_agentrun.json"
-printf '{"tier":1,"evals":[{"id":"A","mode":"agent-run","priority":"P0"}]}' > "$SV_AGENTRUN"
+printf '{"verification_level":1,"evals":[{"id":"A","mode":"agent-run","priority":"P0"}]}' > "$SV_AGENTRUN"
 (cd "$SV_REPO" && post_evals::smoke_verify "$SV_AGENTRUN" "$SV_SHA" >/dev/null 2>&1)
 check "smoke_verify: valid array of only agent-run evals → exit 0 (guard keys on type, not empty indices)" 0 $?
 
 SV_ABSENT="$TMP/sv_absent.json"
-printf '{"tier":1}' > "$SV_ABSENT"
+printf '{"verification_level":1}' > "$SV_ABSENT"
 (cd "$SV_REPO" && post_evals::smoke_verify "$SV_ABSENT" "$SV_SHA" >/dev/null 2>&1)
-check "smoke_verify: absent .evals at tier>=1 → exit 1 (fails closed)" 1 $?
+check "smoke_verify: absent .evals at verification_level>=1 → exit 1 (fails closed)" 1 $?
 
 # (SV9) Reach-path: the embed extractor pr::coderails_eval_embed_for_head only
 # validates the marker line, never the embed's JSON shape (its own docstring),
@@ -1860,14 +1860,14 @@ check "smoke_verify: absent .evals at tier>=1 → exit 1 (fails closed)" 1 $?
 # not just when smoke_verify is called with a clean fixture. The extractor is
 # sourced from git-common.sh; feed it a forged comment body and confirm the
 # awk-extracted embed (a bare `42`) drives smoke_verify to exit 1.
-SV_FORGED_BODY=$'<!-- coderails-eval-summary v1 pr=1 head_sha='"$SV_SHA"$' result=GO tier=1 -->\n```json\n{"tier":1,"evals":42}\n```'
+SV_FORGED_BODY=$'<!-- coderails-eval-summary v1 pr=1 head_sha='"$SV_SHA"$' result=GO verification_level=1 -->\n```json\n{"verification_level":1,"evals":42}\n```'
 SV_EXTRACTED=$(printf '%s\n' "$SV_FORGED_BODY" | awk '
     /^```json[[:space:]]*$/ { infence=1; next }
     /^```[[:space:]]*$/ { if (infence) exit; next }
     infence { print }')
 SV_REACH="$TMP/sv_reach.json"
 printf '%s' "$SV_EXTRACTED" > "$SV_REACH"
-check_str "reach-path: extractor preserves the malformed embed verbatim (only marker validated)" '{"tier":1,"evals":42}' "$SV_EXTRACTED"
+check_str "reach-path: extractor preserves the malformed embed verbatim (only marker validated)" '{"verification_level":1,"evals":42}' "$SV_EXTRACTED"
 (cd "$SV_REPO" && post_evals::smoke_verify "$SV_REACH" "$SV_SHA" >/dev/null 2>&1)
 check "reach-path: a forged malformed embed reaching smoke_verify → exit 1 (fails closed at the end of the merge chain)" 1 $?
 

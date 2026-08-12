@@ -232,17 +232,17 @@ pr::has_coderails_review_for_head() {
 # before matching (see pr::_trusted_comment_bodies). A PR can accumulate
 # multiple eval-artifact comments over its lifetime, so the LAST matching
 # marker line in comment order is authoritative — NOT the first. On any
-# matching line, sets the global PR_EVAL_TIER to the parsed tier digit of the
+# matching line, sets the global PR_EVAL_VERIFICATION_LEVEL to the parsed verification_level digit of the
 # newest match.
 # Exit codes (same shape as pr::has_coderails_review_for_head):
 #   0 = newest matching artifact has result=GO
 #   1 = fetched ok, no matching artifact at all, or the newest matching
-#       artifact is NO-GO (PR_EVAL_TIER is still set in the latter case so
-#       the caller can report which tier failed)
+#       artifact is NO-GO (PR_EVAL_VERIFICATION_LEVEL is still set in the latter case so
+#       the caller can report which verification_level failed)
 #   2 = gh fetch failed (fail-closed)
 pr::has_coderails_eval_for_head() {
     local num="$1" sha="$2"
-    unset PR_EVAL_TIER
+    unset PR_EVAL_VERIFICATION_LEVEL
     local encoded_bodies
     if ! pr::_trusted_comment_bodies_or_fail "$num"; then
         return 2
@@ -259,7 +259,7 @@ pr::has_coderails_eval_for_head() {
         while IFS= read -r line; do
             if eval_artifact::matches_marker "$line" "$num" "$sha"; then
                 newest_result=$(eval_artifact::parse_result "$line")
-                PR_EVAL_TIER=$(eval_artifact::parse_tier "$line")
+                PR_EVAL_VERIFICATION_LEVEL=$(eval_artifact::parse_verification_level "$line")
             fi
         done <<< "$body"
     done <<< "$encoded_bodies"
@@ -307,7 +307,7 @@ pr::coderails_eval_embed_for_head() {
         done <<< "$body"
     done <<< "$encoded_bodies"
     [[ $found -eq 0 ]] || return 1
-    # Same fenced-block extraction idiom as tier-gate-runner.sh's
+    # Same fenced-block extraction idiom as integrity-gate-runner.sh's
     # tg_extract_evals_json (Task 4 embed contract): echo the FIRST fenced
     # ```json block; post_evals.sh's own validator refuses a posted artifact
     # with more than one, so this extractor never has to arbitrate that case.

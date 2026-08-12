@@ -96,7 +96,7 @@ function renderMetricsPanel(container, metrics) {
       el(
         "div",
         "cc-merge-stats",
-        `${merge.prCount} PRS ${merge.testCount} TESTS TIER ${merge.tier}`
+        `${merge.prCount} PRS ${merge.testCount} TESTS VERIFICATION LEVEL ${merge.verification_level}`
       )
     );
     container.appendChild(banner);

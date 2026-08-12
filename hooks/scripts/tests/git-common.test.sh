@@ -333,7 +333,7 @@ check "has_coderails_review_for_head: comments fetch failure → exit 2 (fail-cl
 # The 0/1/2 return-code contract on the public reader functions is unchanged
 # (both still return 2 for any of the three failure modes, asserted above and
 # below) — the internal cause is surfaced via a global variable set by
-# pr::_trusted_comment_bodies (mirrors the existing PR_EVAL_TIER pattern of a
+# pr::_trusted_comment_bodies (mirrors the existing PR_EVAL_VERIFICATION_LEVEL pattern of a
 # global set alongside a return code), so merge.sh's caller can print a
 # message naming which fetch actually failed instead of always blaming
 # "comments".
@@ -506,22 +506,22 @@ GO_MARKER=$(eval_artifact::marker 42 "deadbeef" GO 1)
 NOGO_MARKER=$(eval_artifact::marker 42 "deadbeef" NO-GO 2)
 NOMATCH_MARKER=$(eval_artifact::marker 42 "othersha" GO 1)
 
-# The eval reader is exercised against both pr 42 and 999 (PR_EVAL_TIER leak
+# The eval reader is exercised against both pr 42 and 999 (PR_EVAL_VERIFICATION_LEVEL leak
 # test uses a second pr number) — gh_stub_rows already matches "comments
 # --paginate" generically, so it's reused here rather than duplicated.
 
 # Stub: comment body contains a matching GO marker from a trusted OWNER →
-# exit 0, PR_EVAL_TIER set
+# exit 0, PR_EVAL_VERIFICATION_LEVEL set
 ROWS_GO=$(printf '[%s]' "$(comment_row "$TRUSTED_LOGIN" OWNER "$GO_MARKER")")
 : > "$STUB_ARGS_LOG"
 result=$(run_with_stub "$(gh_stub_rows "$ROWS_GO")" bash -c '
   source "'"$LIB"'"
   pr::has_coderails_eval_for_head 42 "deadbeef"
   echo "rc=$?"
-  echo "tier=$PR_EVAL_TIER"
+  echo "verification_level=$PR_EVAL_VERIFICATION_LEVEL"
 ')
 check "has_coderails_eval_for_head: trusted matching GO marker → rc=0" "rc=0" "$(printf '%s\n' "$result" | grep '^rc=')"
-check "has_coderails_eval_for_head: trusted matching GO marker → PR_EVAL_TIER=1" "tier=1" "$(printf '%s\n' "$result" | grep '^tier=')"
+check "has_coderails_eval_for_head: trusted matching GO marker → PR_EVAL_VERIFICATION_LEVEL=1" "verification_level=1" "$(printf '%s\n' "$result" | grep '^verification_level=')"
 
 # Fetch-shape assertion: same as the review reader's, proving the eval reader
 # also issues a paginated issues/<n>/comments fetch (both readers share
@@ -538,10 +538,10 @@ result=$(run_with_stub "$(gh_stub_rows "$ROWS_SPOOF_GO")" bash -c '
   source "'"$LIB"'"
   pr::has_coderails_eval_for_head 42 "deadbeef"
   echo "rc=$?"
-  echo "tier=${PR_EVAL_TIER:-}"
+  echo "verification_level=${PR_EVAL_VERIFICATION_LEVEL:-}"
 ')
 check "has_coderails_eval_for_head: untrusted GO marker → rc=1 (spoof rejected)" "rc=1" "$(printf '%s\n' "$result" | grep '^rc=')"
-check "has_coderails_eval_for_head: untrusted GO marker → PR_EVAL_TIER empty (never set from untrusted)" "tier=" "$(printf '%s\n' "$result" | grep '^tier=')"
+check "has_coderails_eval_for_head: untrusted GO marker → PR_EVAL_VERIFICATION_LEVEL empty (never set from untrusted)" "verification_level=" "$(printf '%s\n' "$result" | grep '^verification_level=')"
 
 # Spoof rejection: untrusted login WITH write permission → rc=1 (isolates the login
 # check from the permission check, same as the review reader's equivalent)
@@ -550,10 +550,10 @@ result=$(run_with_stub "$(gh_stub_rows "$ROWS_ATTACKER_WRITE_GO" WRITE)" bash -c
   source "'"$LIB"'"
   pr::has_coderails_eval_for_head 42 "deadbeef"
   echo "rc=$?"
-  echo "tier=${PR_EVAL_TIER:-}"
+  echo "verification_level=${PR_EVAL_VERIFICATION_LEVEL:-}"
 ')
 check "has_coderails_eval_for_head: untrusted login, write permission → rc=1 (login check isolated from permission check)" "rc=1" "$(printf '%s\n' "$result" | grep '^rc=')"
-check "has_coderails_eval_for_head: untrusted login, write permission → PR_EVAL_TIER empty" "tier=" "$(printf '%s\n' "$result" | grep '^tier=')"
+check "has_coderails_eval_for_head: untrusted login, write permission → PR_EVAL_VERIFICATION_LEVEL empty" "verification_level=" "$(printf '%s\n' "$result" | grep '^verification_level=')"
 
 # PERMISSION-TRUST (eval reader): trusted login, non-OWNER (MEMBER)
 # association, write permission → rc=0 (org-collaborator trusted — mirrors
@@ -563,10 +563,10 @@ result=$(run_with_stub "$(gh_stub_rows "$ROWS_TRUSTED_MEMBER_GO" WRITE)" bash -c
   source "'"$LIB"'"
   pr::has_coderails_eval_for_head 42 "deadbeef"
   echo "rc=$?"
-  echo "tier=${PR_EVAL_TIER:-}"
+  echo "verification_level=${PR_EVAL_VERIFICATION_LEVEL:-}"
 ')
 check "has_coderails_eval_for_head: trusted login, MEMBER association, write permission → rc=0" "rc=0" "$(printf '%s\n' "$result" | grep '^rc=')"
-check "has_coderails_eval_for_head: trusted login, MEMBER association, write permission → PR_EVAL_TIER=1" "tier=1" "$(printf '%s\n' "$result" | grep '^tier=')"
+check "has_coderails_eval_for_head: trusted login, MEMBER association, write permission → PR_EVAL_VERIFICATION_LEVEL=1" "verification_level=1" "$(printf '%s\n' "$result" | grep '^verification_level=')"
 
 # PERMISSION-DENY (eval reader): trusted login but permission=READ → rc=1
 # (proves permission genuinely gates, not a login-only check in disguise)
@@ -575,31 +575,31 @@ result=$(run_with_stub "$(gh_stub_rows "$ROWS_TRUSTED_READ_GO" READ)" bash -c '
   source "'"$LIB"'"
   pr::has_coderails_eval_for_head 42 "deadbeef"
   echo "rc=$?"
-  echo "tier=${PR_EVAL_TIER:-}"
+  echo "verification_level=${PR_EVAL_VERIFICATION_LEVEL:-}"
 ')
 check "has_coderails_eval_for_head: trusted login, permission=READ → rc=1 (permission denies trust)" "rc=1" "$(printf '%s\n' "$result" | grep '^rc=')"
-check "has_coderails_eval_for_head: trusted login, permission=READ → PR_EVAL_TIER empty" "tier=" "$(printf '%s\n' "$result" | grep '^tier=')"
+check "has_coderails_eval_for_head: trusted login, permission=READ → PR_EVAL_VERIFICATION_LEVEL empty" "verification_level=" "$(printf '%s\n' "$result" | grep '^verification_level=')"
 
 # FAIL-CLOSED (eval reader): permission lookup itself fails → rc=2
 result=$(run_with_stub "$PERMISSION_FAIL_STUB" bash -c '
   source "'"$LIB"'"
   pr::has_coderails_eval_for_head 42 "deadbeef"
   echo "rc=$?"
-  echo "tier=${PR_EVAL_TIER:-}"
+  echo "verification_level=${PR_EVAL_VERIFICATION_LEVEL:-}"
 ')
 check "has_coderails_eval_for_head: permission lookup failure → rc=2 (fail-closed)" "rc=2" "$(printf '%s\n' "$result" | grep '^rc=')"
-check "has_coderails_eval_for_head: permission lookup failure → PR_EVAL_TIER empty" "tier=" "$(printf '%s\n' "$result" | grep '^tier=')"
+check "has_coderails_eval_for_head: permission lookup failure → PR_EVAL_VERIFICATION_LEVEL empty" "verification_level=" "$(printf '%s\n' "$result" | grep '^verification_level=')"
 
-# Stub: no comments (empty array) → rc=1, PR_EVAL_TIER unset (mirrors the
+# Stub: no comments (empty array) → rc=1, PR_EVAL_VERIFICATION_LEVEL unset (mirrors the
 # review reader's empty-comment-list case, for the eval reader too)
 result=$(run_with_stub "$(gh_stub_rows '[]')" bash -c '
   source "'"$LIB"'"
   pr::has_coderails_eval_for_head 42 "deadbeef"
   echo "rc=$?"
-  echo "tier=${PR_EVAL_TIER:-}"
+  echo "verification_level=${PR_EVAL_VERIFICATION_LEVEL:-}"
 ')
 check "has_coderails_eval_for_head: no comments → rc=1" "rc=1" "$(printf '%s\n' "$result" | grep '^rc=')"
-check "has_coderails_eval_for_head: no comments → PR_EVAL_TIER empty" "tier=" "$(printf '%s\n' "$result" | grep '^tier=')"
+check "has_coderails_eval_for_head: no comments → PR_EVAL_VERIFICATION_LEVEL empty" "verification_level=" "$(printf '%s\n' "$result" | grep '^verification_level=')"
 
 # Multi-line body: GO marker on its own line, surrounded by prose (mirrors the
 # review reader's equivalent — every eval fixture so far has been a bare
@@ -610,52 +610,52 @@ result=$(run_with_stub "$(gh_stub_rows "$ROWS_MULTILINE_GO")" bash -c '
   source "'"$LIB"'"
   pr::has_coderails_eval_for_head 42 "deadbeef"
   echo "rc=$?"
-  echo "tier=${PR_EVAL_TIER:-}"
+  echo "verification_level=${PR_EVAL_VERIFICATION_LEVEL:-}"
 ')
 check "has_coderails_eval_for_head: GO marker on its own line within a multi-line prose body → rc=0" "rc=0" "$(printf '%s\n' "$result" | grep '^rc=')"
-check "has_coderails_eval_for_head: GO marker within multi-line body → PR_EVAL_TIER=1" "tier=1" "$(printf '%s\n' "$result" | grep '^tier=')"
+check "has_coderails_eval_for_head: GO marker within multi-line body → PR_EVAL_VERIFICATION_LEVEL=1" "verification_level=1" "$(printf '%s\n' "$result" | grep '^verification_level=')"
 
-# Stub: identity fetch fails → exit 2, PR_EVAL_TIER unset/empty
+# Stub: identity fetch fails → exit 2, PR_EVAL_VERIFICATION_LEVEL unset/empty
 result=$(run_with_stub "$IDENTITY_FAIL_STUB" bash -c '
   source "'"$LIB"'"
   pr::has_coderails_eval_for_head 42 "deadbeef"
   echo "rc=$?"
-  echo "tier=${PR_EVAL_TIER:-}"
+  echo "verification_level=${PR_EVAL_VERIFICATION_LEVEL:-}"
 ')
 check "has_coderails_eval_for_head: identity fetch fails → rc=2" "rc=2" "$(printf '%s\n' "$result" | grep '^rc=')"
-check "has_coderails_eval_for_head: identity fetch fails → PR_EVAL_TIER empty" "tier=" "$(printf '%s\n' "$result" | grep '^tier=')"
+check "has_coderails_eval_for_head: identity fetch fails → PR_EVAL_VERIFICATION_LEVEL empty" "verification_level=" "$(printf '%s\n' "$result" | grep '^verification_level=')"
 
-# Stub: comments fetch fails (identity ok) → exit 2, PR_EVAL_TIER unset/empty
+# Stub: comments fetch fails (identity ok) → exit 2, PR_EVAL_VERIFICATION_LEVEL unset/empty
 result=$(run_with_stub "$COMMENTS_FAIL_STUB" bash -c '
   source "'"$LIB"'"
   pr::has_coderails_eval_for_head 42 "deadbeef"
   echo "rc=$?"
-  echo "tier=${PR_EVAL_TIER:-}"
+  echo "verification_level=${PR_EVAL_VERIFICATION_LEVEL:-}"
 ')
 check "has_coderails_eval_for_head: comments fetch fails → rc=2" "rc=2" "$(printf '%s\n' "$result" | grep '^rc=')"
-check "has_coderails_eval_for_head: comments fetch fails → PR_EVAL_TIER empty" "tier=" "$(printf '%s\n' "$result" | grep '^tier=')"
+check "has_coderails_eval_for_head: comments fetch fails → PR_EVAL_VERIFICATION_LEVEL empty" "verification_level=" "$(printf '%s\n' "$result" | grep '^verification_level=')"
 
-# Stub: matching pr/sha but NO-GO → exit 1, PR_EVAL_TIER still set (so merge.sh can report it)
+# Stub: matching pr/sha but NO-GO → exit 1, PR_EVAL_VERIFICATION_LEVEL still set (so merge.sh can report it)
 ROWS_NOGO=$(printf '[%s]' "$(comment_row "$TRUSTED_LOGIN" OWNER "$NOGO_MARKER")")
 result=$(run_with_stub "$(gh_stub_rows "$ROWS_NOGO")" bash -c '
   source "'"$LIB"'"
   pr::has_coderails_eval_for_head 42 "deadbeef"
   echo "rc=$?"
-  echo "tier=$PR_EVAL_TIER"
+  echo "verification_level=$PR_EVAL_VERIFICATION_LEVEL"
 ')
 check "has_coderails_eval_for_head: NO-GO marker → rc=1" "rc=1" "$(printf '%s\n' "$result" | grep '^rc=')"
-check "has_coderails_eval_for_head: NO-GO marker → PR_EVAL_TIER=2" "tier=2" "$(printf '%s\n' "$result" | grep '^tier=')"
+check "has_coderails_eval_for_head: NO-GO marker → PR_EVAL_VERIFICATION_LEVEL=2" "verification_level=2" "$(printf '%s\n' "$result" | grep '^verification_level=')"
 
-# Stub: no matching marker at all → exit 1, PR_EVAL_TIER empty
+# Stub: no matching marker at all → exit 1, PR_EVAL_VERIFICATION_LEVEL empty
 ROWS_NOMATCH=$(printf '[%s]' "$(comment_row "$TRUSTED_LOGIN" OWNER "$NOMATCH_MARKER")")
 result=$(run_with_stub "$(gh_stub_rows "$ROWS_NOMATCH")" bash -c '
   source "'"$LIB"'"
   pr::has_coderails_eval_for_head 42 "deadbeef"
   echo "rc=$?"
-  echo "tier=${PR_EVAL_TIER:-}"
+  echo "verification_level=${PR_EVAL_VERIFICATION_LEVEL:-}"
 ')
 check "has_coderails_eval_for_head: no matching marker → rc=1" "rc=1" "$(printf '%s\n' "$result" | grep '^rc=')"
-check "has_coderails_eval_for_head: no matching marker → PR_EVAL_TIER empty" "tier=" "$(printf '%s\n' "$result" | grep '^tier=')"
+check "has_coderails_eval_for_head: no matching marker → PR_EVAL_VERIFICATION_LEVEL empty" "verification_level=" "$(printf '%s\n' "$result" | grep '^verification_level=')"
 
 # ─── has_coderails_eval_for_head: NEWEST-match-wins (not first-match-wins) ───
 # A PR can accumulate multiple eval-artifact comments over its lifetime (e.g.
@@ -674,10 +674,10 @@ result=$(run_with_stub "$(gh_stub_rows "$ROWS_GO_THEN_NOGO")" bash -c '
   source "'"$LIB"'"
   pr::has_coderails_eval_for_head 42 "deadbeef"
   echo "rc=$?"
-  echo "tier=$PR_EVAL_TIER"
+  echo "verification_level=$PR_EVAL_VERIFICATION_LEVEL"
 ')
 check "has_coderails_eval_for_head: GO then NO-GO (same sha) → rc=1 (newest wins)" "rc=1" "$(printf '%s\n' "$result" | grep '^rc=')"
-check "has_coderails_eval_for_head: GO then NO-GO (same sha) → PR_EVAL_TIER=2 (from newest)" "tier=2" "$(printf '%s\n' "$result" | grep '^tier=')"
+check "has_coderails_eval_for_head: GO then NO-GO (same sha) → PR_EVAL_VERIFICATION_LEVEL=2 (from newest)" "verification_level=2" "$(printf '%s\n' "$result" | grep '^verification_level=')"
 
 # (b) NO-GO comment then GO comment (same pr/sha, legit fix-and-repost path) → newest (GO) wins → rc=0
 ROWS_NOGO_THEN_GO=$(printf '[%s,%s]' \
@@ -687,10 +687,10 @@ result=$(run_with_stub "$(gh_stub_rows "$ROWS_NOGO_THEN_GO")" bash -c '
   source "'"$LIB"'"
   pr::has_coderails_eval_for_head 42 "deadbeef"
   echo "rc=$?"
-  echo "tier=$PR_EVAL_TIER"
+  echo "verification_level=$PR_EVAL_VERIFICATION_LEVEL"
 ')
 check "has_coderails_eval_for_head: NO-GO then GO (same sha) → rc=0 (newest wins)" "rc=0" "$(printf '%s\n' "$result" | grep '^rc=')"
-check "has_coderails_eval_for_head: NO-GO then GO (same sha) → PR_EVAL_TIER=1 (from newest)" "tier=1" "$(printf '%s\n' "$result" | grep '^tier=')"
+check "has_coderails_eval_for_head: NO-GO then GO (same sha) → PR_EVAL_VERIFICATION_LEVEL=1 (from newest)" "verification_level=1" "$(printf '%s\n' "$result" | grep '^verification_level=')"
 
 # (c) NEWEST-WINS SURVIVES the author filter: trusted older GO, trusted newer
 # NO-GO, then an UNTRUSTED forged GO newer still → the forged row must be
@@ -704,25 +704,25 @@ result=$(run_with_stub "$(gh_stub_rows "$ROWS_FORGED_NEWEST")" bash -c '
   source "'"$LIB"'"
   pr::has_coderails_eval_for_head 42 "deadbeef"
   echo "rc=$?"
-  echo "tier=$PR_EVAL_TIER"
+  echo "verification_level=$PR_EVAL_VERIFICATION_LEVEL"
 ')
 check "has_coderails_eval_for_head: trusted GO, trusted NO-GO, then FORGED newer GO → rc=1 (forgery ignored, newest-wins survives)" "rc=1" "$(printf '%s\n' "$result" | grep '^rc=')"
-check "has_coderails_eval_for_head: forged newer GO ignored → PR_EVAL_TIER=2 (from newest TRUSTED match)" "tier=2" "$(printf '%s\n' "$result" | grep '^tier=')"
+check "has_coderails_eval_for_head: forged newer GO ignored → PR_EVAL_VERIFICATION_LEVEL=2 (from newest TRUSTED match)" "verification_level=2" "$(printf '%s\n' "$result" | grep '^verification_level=')"
 
-# ─── has_coderails_eval_for_head: PR_EVAL_TIER does not leak across calls ────
-# The function must unset PR_EVAL_TIER at entry so a second, non-matching call
+# ─── has_coderails_eval_for_head: PR_EVAL_VERIFICATION_LEVEL does not leak across calls ────
+# The function must unset PR_EVAL_VERIFICATION_LEVEL at entry so a second, non-matching call
 # in the same shell can't inherit a stale value from a prior matching call.
 # Second call targets a different pr/sha with the SAME rows (no matching
-# marker for pr=999), so any leaked tier would surface as a false positive.
+# marker for pr=999), so any leaked verification_level would surface as a false positive.
 result=$(run_with_stub "$(gh_stub_rows "$ROWS_GO")" bash -c '
   source "'"$LIB"'"
   pr::has_coderails_eval_for_head 42 "deadbeef" >/dev/null 2>&1
   pr::has_coderails_eval_for_head 999 "othersha" >/dev/null 2>&1
   echo "rc=$?"
-  echo "tier=${PR_EVAL_TIER:-}"
+  echo "verification_level=${PR_EVAL_VERIFICATION_LEVEL:-}"
 ')
 check "has_coderails_eval_for_head: second no-match call in same shell → rc=1" "rc=1" "$(printf '%s\n' "$result" | grep '^rc=')"
-check "has_coderails_eval_for_head: second no-match call → PR_EVAL_TIER does not leak from first call" "tier=" "$(printf '%s\n' "$result" | grep '^tier=')"
+check "has_coderails_eval_for_head: second no-match call → PR_EVAL_VERIFICATION_LEVEL does not leak from first call" "verification_level=" "$(printf '%s\n' "$result" | grep '^verification_level=')"
 
 # ─── pr::coderails_eval_embed_for_head ───────────────────────────────────────
 # Extracts the fenced ```json embed from the newest trusted comment matching
@@ -735,12 +735,12 @@ embed_body() { # <marker_line> <embed_json>
   printf '%s\n%sjson\n%s\n%s' "$1" "$FENCE" "$2" "$FENCE"
 }
 
-EMBED_TIER0='{"tier":0,"tier_justification":"stub","head_sha":"deadbeef","evals":[]}'
-EMBED_TIER0_V2='{"tier":0,"tier_justification":"stub-v2","head_sha":"deadbeef","evals":[]}'
+EMBED_VERIFICATION_LEVEL0='{"verification_level":0,"verification_justification":"stub","head_sha":"deadbeef","evals":[]}'
+EMBED_VERIFICATION_LEVEL0_V2='{"verification_level":0,"verification_justification":"stub-v2","head_sha":"deadbeef","evals":[]}'
 
 # Correct extraction: a single trusted matching comment with one fenced block
 # → rc=0, stdout is exactly the embed JSON (byte-for-byte, not a summary).
-BODY_SIMPLE=$(embed_body "$GO_MARKER" "$EMBED_TIER0")
+BODY_SIMPLE=$(embed_body "$GO_MARKER" "$EMBED_VERIFICATION_LEVEL0")
 ROWS_EMBED_SIMPLE=$(printf '[%s]' "$(comment_row "$TRUSTED_LOGIN" OWNER "$BODY_SIMPLE")")
 result=$(run_with_stub "$(gh_stub_rows "$ROWS_EMBED_SIMPLE")" bash -c '
   source "'"$LIB"'"
@@ -749,7 +749,7 @@ result=$(run_with_stub "$(gh_stub_rows "$ROWS_EMBED_SIMPLE")" bash -c '
   echo "out=$out"
 ')
 check "coderails_eval_embed_for_head: trusted matching comment → rc=0" "rc=0" "$(printf '%s\n' "$result" | grep '^rc=')"
-check "coderails_eval_embed_for_head: extracted embed matches the fenced block verbatim" "out=$EMBED_TIER0" "$(printf '%s\n' "$result" | grep '^out=')"
+check "coderails_eval_embed_for_head: extracted embed matches the fenced block verbatim" "out=$EMBED_VERIFICATION_LEVEL0" "$(printf '%s\n' "$result" | grep '^out=')"
 
 # No match at all → rc=1, no embed.
 result=$(run_with_stub "$(gh_stub_rows '[]')" bash -c '
@@ -774,8 +774,8 @@ check "coderails_eval_embed_for_head: identity fetch failure → rc=2 (fail-clos
 # extracted, mirroring has_coderails_eval_for_head's own newest-wins rule
 # (the two functions must never disagree about which comment is authoritative
 # for the same pr/sha).
-BODY_OLD=$(embed_body "$GO_MARKER" "$EMBED_TIER0")
-BODY_NEW=$(embed_body "$GO_MARKER" "$EMBED_TIER0_V2")
+BODY_OLD=$(embed_body "$GO_MARKER" "$EMBED_VERIFICATION_LEVEL0")
+BODY_NEW=$(embed_body "$GO_MARKER" "$EMBED_VERIFICATION_LEVEL0_V2")
 ROWS_EMBED_NEWEST=$(printf '[%s,%s]' \
     "$(comment_row "$TRUSTED_LOGIN" OWNER "$BODY_OLD")" \
     "$(comment_row "$TRUSTED_LOGIN" OWNER "$BODY_NEW")")
@@ -786,7 +786,7 @@ result=$(run_with_stub "$(gh_stub_rows "$ROWS_EMBED_NEWEST")" bash -c '
   echo "out=$out"
 ')
 check "coderails_eval_embed_for_head: two matching comments → rc=0" "rc=0" "$(printf '%s\n' "$result" | grep '^rc=')"
-check "coderails_eval_embed_for_head: newest comment's embed wins, not the first" "out=$EMBED_TIER0_V2" "$(printf '%s\n' "$result" | grep '^out=')"
+check "coderails_eval_embed_for_head: newest comment's embed wins, not the first" "out=$EMBED_VERIFICATION_LEVEL0_V2" "$(printf '%s\n' "$result" | grep '^out=')"
 
 # Untrusted spoof: an attacker's comment carrying a byte-identical marker +
 # embed must be excluded before matching, same trust boundary as the other

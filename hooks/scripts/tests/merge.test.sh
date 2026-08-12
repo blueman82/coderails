@@ -134,18 +134,18 @@ pr::has_coderails_review_for_head() {
 # review-artifact gate in isolation. See merge_evals_gate.test.sh for the
 # eval gate's own behavioural coverage.
 pr::has_coderails_eval_for_head() {
-    PR_EVAL_TIER="1"
+    PR_EVAL_VERIFICATION_LEVEL="1"
     return 0
 }
 
 # smoke_verify's own re-execution needs a real embed to check out and run
 # against — this file doesn't test that path (see merge_evals_gate.test.sh),
-# so a minimal well-formed tier-0 embed keeps smoke_verify's own checks 1-9 a
+# so a minimal well-formed verification_level-0 embed keeps smoke_verify's own checks 1-9 a
 # fast no-op even when MOCK_SMOKE_VERIFY_RC is unset (its default stub already
 # returns 0 unconditionally, but the embed extractor itself must still
 # succeed for the caller to reach that stub at all).
 pr::coderails_eval_embed_for_head() {
-    printf '{"tier":0,"tier_justification":"stub","head_sha":"deadbeef","evals":[]}'
+    printf '{"verification_level":0,"verification_justification":"stub","head_sha":"deadbeef","evals":[]}'
     return 0
 }
 GCSTUB
@@ -284,7 +284,7 @@ pr::has_coderails_review_for_head() {
 }
 
 pr::has_coderails_eval_for_head() {
-    PR_EVAL_TIER="1"
+    PR_EVAL_VERIFICATION_LEVEL="1"
     return 1
 }
 GCSTUB

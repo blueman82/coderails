@@ -35,7 +35,7 @@ POST_EVALS_SMOKE_VERIFY_TIMEOUT="${POST_EVALS_SMOKE_VERIFY_TIMEOUT:-120}"
 # checks 1-9 are structural validation that already ran at post time in the
 # posting agent's own session, and re-imposing them at merge (tried and
 # reverted — see git history) added false-blocks unrelated to the security
-# property (check 2's tier_justification, check 6's head_sha match) without
+# property (check 2's verification_justification, check 6's head_sha match) without
 # adding anything a fabricator can't already fake. smoke_verify re-executes
 # cmd/negative_control directly in its own worktree with its own timeout;
 # that re-execution IS the property this system enforces at merge.
@@ -48,31 +48,31 @@ post_evals::validate_structure() {
         return 1
     fi
 
-    local tier
-    tier=$(jq -r '.tier // ""' "$path")
+    local verification_level
+    verification_level=$(jq -r '.verification_level // ""' "$path")
 
-    # Check 2: every tier requires a non-blank tier_justification — tier 0
-    # justifies the exemption itself; tier>=1 justifies which tier predicate
-    # fired (owner directive: tightens this from tier-0-only to all tiers).
+    # Check 2: every verification_level requires a non-blank verification_justification — verification_level 0
+    # justifies the exemption itself; verification_level>=1 justifies which verification_level predicate
+    # fired (owner directive: tightens this from verification_level-0-only to all verification levels).
     # "Non-blank" is trim-then-check, not merely non-empty, so a
     # whitespace-only string doesn't slip through.
     local justification
-    justification=$(jq -r '.tier_justification // "" | gsub("^\\s+|\\s+$"; "")' "$path")
+    justification=$(jq -r '.verification_justification // "" | gsub("^\\s+|\\s+$"; "")' "$path")
     if [[ -z "$justification" ]]; then
-        printf 'post_evals: tier %s requires a non-blank tier_justification\n' "${tier:-<unset>}" >&2
+        printf 'post_evals: verification_level %s requires a non-blank verification_justification\n' "${verification_level:-<unset>}" >&2
         return 1
     fi
 
     # Checks 3-5 only apply when there are scripted/P0 evals to check — a
-    # tier-0 exemption file has an empty (or absent) .evals array, so none of
+    # verification_level-0 exemption file has an empty (or absent) .evals array, so none of
     # these can fire against it.
 
-    # Check 3: tier>=1 scripted eval with empty negative_control.
-    if [[ "$tier" != "0" ]]; then
+    # Check 3: verification_level>=1 scripted eval with empty negative_control.
+    if [[ "$verification_level" != "0" ]]; then
         local bad_id
         bad_id=$(jq -r '[.evals[]? | select(.mode == "scripted") | select((.negative_control // "") == "") | .id] | first // ""' "$path")
         if [[ -n "$bad_id" ]]; then
-            printf 'post_evals: tier>=1 scripted eval %s has empty negative_control\n' "$bad_id" >&2
+            printf 'post_evals: verification_level>=1 scripted eval %s has empty negative_control\n' "$bad_id" >&2
             return 1
         fi
     fi
@@ -134,16 +134,16 @@ post_evals::validate_structure() {
         return 1
     fi
 
-    # Check 7: tier>=1 requires at least one P0 eval. Without this, a tier-1+
+    # Check 7: verification_level>=1 requires at least one P0 eval. Without this, a verification_level-1+
     # artifact with an empty (or only-P1) .evals array computes GO past every
     # other refusal — eval_artifact::compute_go's P0-only gate is vacuously
-    # satisfied when there are no P0 evals to fail. Tier 0 is exempt (that's
-    # its whole point: the tier_justification in check 2 stands in for evals).
-    if [[ "$tier" != "0" ]]; then
+    # satisfied when there are no P0 evals to fail. Verification level 0 is exempt (that's
+    # its whole point: the verification_justification in check 2 stands in for evals).
+    if [[ "$verification_level" != "0" ]]; then
         local has_p0
         has_p0=$(jq -r '[.evals[]? | select(.priority == "P0")] | length > 0' "$path")
         if [[ "$has_p0" != "true" ]]; then
-            printf 'post_evals: tier>=1 requires at least one P0 eval in .evals\n' >&2
+            printf 'post_evals: verification_level>=1 requires at least one P0 eval in .evals\n' >&2
             return 1
         fi
     fi
@@ -178,7 +178,7 @@ post_evals::validate_structure() {
 }
 
 # post_evals::validate_smoke <evals_json_path>
-# Check 9's body. Requires every tier>=1 scripted eval to carry a `smoke`
+# Check 9's body. Requires every verification_level>=1 scripted eval to carry a `smoke`
 # object recording what happened when its `cmd` and `negative_control` were
 # actually executed at freeze, and refuses the outcomes that mean the check
 # tested nothing.
@@ -225,11 +225,11 @@ post_evals::validate_smoke() {
         return 1
     fi
 
-    local tier
-    tier=$(jq -r '.tier // ""' "$path")
-    # Tier 0 is the exemption path: its .evals array is empty by definition,
+    local verification_level
+    verification_level=$(jq -r '.verification_level // ""' "$path")
+    # Verification level 0 is the exemption path: its .evals array is empty by definition,
     # so there is nothing to smoke-test.
-    [[ "$tier" == "0" ]] && return 0
+    [[ "$verification_level" == "0" ]] && return 0
 
     # Shape-guard .evals, same fail-closed guard as smoke_verify and
     # validate_smoke_execution. A non-array .evals makes the `.evals[]?`
@@ -328,7 +328,7 @@ post_evals::_scripted_indices() {
 }
 
 # post_evals::validate_smoke_execution <evals_json_path>
-# Check 10's body: gate-time re-execution. For every tier>=1 scripted eval,
+# Check 10's body: gate-time re-execution. For every verification_level>=1 scripted eval,
 # EXECUTES `cmd` and `negative_control` right now and refuses on what it
 # observes — it never reads the recorded `smoke` numbers at all.
 #
@@ -395,15 +395,15 @@ post_evals::validate_smoke_execution() {
         return 1
     fi
 
-    local tier
-    tier=$(jq -r '.tier // ""' "$path")
-    # Tier 0 is the exemption path: no evals to execute.
-    [[ "$tier" == "0" ]] && return 0
+    local verification_level
+    verification_level=$(jq -r '.verification_level // ""' "$path")
+    # Verification level 0 is the exemption path: no evals to execute.
+    [[ "$verification_level" == "0" ]] && return 0
 
     # Shape-guard .evals, same fail-closed guard as smoke_verify (the merge
     # gate). A non-array .evals makes the extraction below yield no indices and
     # the "no indices → return 0" line then passes without executing anything.
-    # Check 7 (tier>=1 requires >=1 P0 eval) backstops the SCALAR and STRING
+    # Check 7 (verification_level>=1 requires >=1 P0 eval) backstops the SCALAR and STRING
     # shapes on the live validate_structure chain — its `.evals[]?` finds no P0
     # in a scalar/string, so check 7 refuses those first. But it does NOT
     # backstop the OBJECT shape: `.evals[]?` iterates an object's VALUES, so an
@@ -447,7 +447,7 @@ post_evals::validate_smoke_execution() {
         local id
         id=$(jq -r --argjson i "$idx" '.evals[$i].id // "<unnamed>"' "$path")
 
-        # Trim-then-check, same idiom as check 2 on tier_justification: a
+        # Trim-then-check, same idiom as check 2 on verification_justification: a
         # whitespace-only cmd is `bash -c "   "` — a no-op exiting 0, which
         # is non-environmental, and cmd polarity is deliberately ungated, so
         # without the trim a check that does literally nothing would be
@@ -457,7 +457,7 @@ post_evals::validate_smoke_execution() {
         nc=$(jq -r --argjson i "$idx" '.evals[$i].negative_control // "" | gsub("^\\s+|\\s+$"; "")' "$path")
 
         # Nothing to execute is not compliance — fail closed. (Check 3
-        # already refuses an absent/empty-string negative_control at tier>=1;
+        # already refuses an absent/empty-string negative_control at verification_level>=1;
         # this additionally owns the whitespace-only case and the empty cmd,
         # which had no owner before this check.)
         if [[ -z "$cmd" ]]; then
@@ -569,17 +569,17 @@ post_evals::smoke_verify() {
     # (the posting agent's own /coderails:post-evals session) — they are
     # structural validation, not the re-execution property, and re-imposing
     # them here adds failure modes that have nothing to do with fabrication:
-    # check 2 (tier_justification) and check 6 (embed .head_sha vs the
+    # check 2 (verification_justification) and check 6 (embed .head_sha vs the
     # trusted sha) both false-blocked a genuine, resolvable P4 acceptance
     # fixture during verification, for reasons unrelated to whether its cmd
     # is real. The security property this function exists to enforce is
     # re-execution — a fabricated cmd resolves to 127 (environmental) at any
     # commit, an honest cmd resolves to its real exit code — and that lives
     # entirely in the loop below, not in validate_structure.
-    local tier
-    tier=$(jq -r '.tier // ""' "$path")
-    # Tier 0 is the exemption path: no evals to re-execute.
-    [[ "$tier" == "0" ]] && return 0
+    local verification_level
+    verification_level=$(jq -r '.verification_level // ""' "$path")
+    # Verification level 0 is the exemption path: no evals to re-execute.
+    [[ "$verification_level" == "0" ]] && return 0
 
     # Shape-guard .evals before trusting the index extraction below. A .evals
     # that is not a JSON array — a scalar, string, or object — makes the
@@ -925,7 +925,7 @@ post_evals::_is_environmental_rc() {
 # Escape hatch: a late freeze is permitted when it is DISCLOSED in writing —
 # the precedent is PR #54, whose artifact stated plainly that its evals were
 # authored after implementation and not backdated. The disclosure must be
-# explicit prose in tier_justification or an amendment reason, deliberately not
+# explicit prose in verification_justification or an amendment reason, deliberately not
 # a boolean flag: a flag can be set silently, a sentence has to be written and
 # is visible to any human reading the artifact.
 post_evals::validate_freeze() {
@@ -974,24 +974,24 @@ post_evals::validate_freeze() {
 
     # Late freeze. Permitted only when disclosed in writing.
     local disclosure
-    disclosure=$(jq -r '[(.tier_justification // ""), (.amendments[]?.why // "")] | join(" ") | ascii_downcase' "$path")
+    disclosure=$(jq -r '[(.verification_justification // ""), (.amendments[]?.why // "")] | join(" ") | ascii_downcase' "$path")
     if [[ "$disclosure" == *"freeze"* || "$disclosure" == *"frozen"* ]]; then
         return 0
     fi
 
-    printf 'post_evals: frozen_sha %s is not an ancestor of the branch base %s — the evals were frozen after implementation began (freeze-before-build). Fix the freeze, or disclose the late freeze in tier_justification or an amendment reason.\n' "$frozen" "$base" >&2
+    printf 'post_evals: frozen_sha %s is not an ancestor of the branch base %s — the evals were frozen after implementation began (freeze-before-build). Fix the freeze, or disclose the late freeze in verification_justification or an amendment reason.\n' "$frozen" "$base" >&2
     return 1
 }
 
 # post_evals::validate_embed <evals_json_path> <body_path>
 # Validates the POSTED COMMENT BODY (not the source file alone): the body
-# must carry a marker line whose tier this function reads via
-# eval_artifact::parse_tier (the SSOT the tier-gate daemon itself triages
+# must carry a marker line whose verification_level this function reads via
+# eval_artifact::parse_verification_level (the SSOT the integrity-gate daemon itself triages
 # on — never taken as an argument, so a body whose marker disagrees with its
-# own embedded block can't slip past). tier!=0 → not required, exit 0
-# immediately (tier-1/2 artifacts are short-circuited by the daemon). At
-# tier 0: the body must contain EXACTLY ONE fenced ```json block, it must
-# parse as JSON, its .tier must equal the marker's tier, and its .task_ref
+# own embedded block can't slip past). verification_level!=0 → not required, exit 0
+# immediately (verification_level-1/2 artifacts are short-circuited by the daemon). At
+# verification_level 0: the body must contain EXACTLY ONE fenced ```json block, it must
+# parse as JSON, its .verification_level must equal the marker's verification_level, and its .task_ref
 # must equal <evals_json_path>'s own .task_ref (the file already validated
 # by validate_structure earlier in the same posting flow — comparing against
 # the numeric PR argument would be wrong since task_ref may legitimately be
@@ -1007,23 +1007,23 @@ post_evals::validate_embed() {
 
     local marker_line
     marker_line=$(head -n 1 "$body_path")
-    local marker_tier
-    marker_tier=$(eval_artifact::parse_tier "$marker_line")
-    if [[ -z "$marker_tier" ]]; then
+    local marker_verification_level
+    marker_verification_level=$(eval_artifact::parse_verification_level "$marker_line")
+    if [[ -z "$marker_verification_level" ]]; then
         printf 'post_evals: validate_embed: body marker line does not parse (missing or malformed marker): %s\n' "$body_path" >&2
         return 1
     fi
 
-    # Not required at tier 1/2 — the daemon short-circuits those to
-    # success/not-tier-0 without extracting an embedded artifact.
-    if [[ "$marker_tier" != "0" ]]; then
+    # Not required at verification_level 1/2 — the daemon short-circuits those to
+    # success/not-verification_level-0 without extracting an embedded artifact.
+    if [[ "$marker_verification_level" != "0" ]]; then
         return 0
     fi
 
     local block_count
     block_count=$(grep -c '^```json[[:space:]]*$' "$body_path")
     if [[ "$block_count" -ne 1 ]]; then
-        printf 'post_evals: validate_embed: tier-0 body must contain exactly one fenced json block, found %s\n' "$block_count" >&2
+        printf 'post_evals: validate_embed: verification_level-0 body must contain exactly one fenced json block, found %s\n' "$block_count" >&2
         return 1
     fi
 
@@ -1034,10 +1034,10 @@ post_evals::validate_embed() {
         return 1
     fi
 
-    local block_tier
-    block_tier=$(jq -r '.tier // ""' <<<"$block")
-    if [[ "$block_tier" != "$marker_tier" ]]; then
-        printf 'post_evals: validate_embed: embedded block tier (%s) does not match marker tier (%s)\n' "$block_tier" "$marker_tier" >&2
+    local block_verification_level
+    block_verification_level=$(jq -r '.verification_level // ""' <<<"$block")
+    if [[ "$block_verification_level" != "$marker_verification_level" ]]; then
+        printf 'post_evals: validate_embed: embedded block verification_level (%s) does not match marker verification_level (%s)\n' "$block_verification_level" "$marker_verification_level" >&2
         return 1
     fi
 

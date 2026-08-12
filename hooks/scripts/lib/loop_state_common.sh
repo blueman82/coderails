@@ -532,38 +532,38 @@ als_read_work_units() {
 }
 
 # Read the loop-scope evals verdict from a sibling evals.json into global
-# ALS_LOOP_EVALS_RESULT: GO | TIER0 | NO-GO | UNJUSTIFIED | ABSENT. ABSENT
+# ALS_LOOP_EVALS_RESULT: GO | VERIFICATION_LEVEL0 | NO-GO | UNJUSTIFIED | ABSENT. ABSENT
 # covers no file, malformed JSON, or a non-"loop" scope (a stray pr-scope file
 # must never satisfy the loop gate). Sibling to als_read_work_units for the
 # same reason.
 #
-# tier_justification is required at every tier (owner directive), mirroring
+# verification_justification is required at every verification_level (owner directive), mirroring
 # post_evals::validate_structure check 2 — eval_artifact::compute_go (the
-# only place .result is derived) never inspects tier_justification, so a
+# only place .result is derived) never inspects verification_justification, so a
 # blank justification must be caught here or a GO-but-unjustified artifact
 # would silently satisfy the loop gate. UNJUSTIFIED is distinct from NO-GO so
 # the guard's block message can name the actual defect (missing
-# tier_justification) instead of misattributing it to a failed eval run.
+# verification_justification) instead of misattributing it to a failed eval run.
 # Legacy flip: pre-existing GO loop artifacts written before this check
-# existed, and lacking tier_justification, now block (owner directive
+# existed, and lacking verification_justification, now block (owner directive
 # 2026-07-06) rather than silently passing as before.
 #
-# Explicit NO-GO wins at every tier, including tier 0 (owner directive
+# Explicit NO-GO wins at every verification_level, including verification_level 0 (owner directive
 # 2026-07-06): an exemption justifies having no evals, not overriding a
-# recorded failure. So a tier-0 artifact with justification but no result
-# field still reads TIER0 (the legitimate exemption), but a tier-0 artifact
-# that explicitly recorded result:"NO-GO" must block like any other tier.
+# recorded failure. So a verification_level-0 artifact with justification but no result
+# field still reads VERIFICATION_LEVEL0 (the legitimate exemption), but a verification_level-0 artifact
+# that explicitly recorded result:"NO-GO" must block like any other verification_level.
 #
-# UNSTAMPED (added for grade-loop): a GO or TIER0 verdict is demoted to
+# UNSTAMPED (added for grade-loop): a GO or VERIFICATION_LEVEL0 verdict is demoted to
 # UNSTAMPED when the file lacks a valid post_evals.sh grade-loop stamp — no
 # `.grading.by`/`.grading.checksum`, or the checksum recomputed against the
 # file's OWN `.result` doesn't match what's stored. This is what makes GO/
-# TIER0 mean "graded by the neutral script", not "someone wrote GO into the
+# VERIFICATION_LEVEL0 mean "graded by the neutral script", not "someone wrote GO into the
 # file". NO-GO/UNJUSTIFIED are untouched — they already block, and an
 # unstamped NO-GO is not a forgery risk (nothing to gain by faking a
 # rejection). Fail-closed: if eval-artifact.sh can't be sourced or
 # grading_checksum can't be called, treat that exactly like a missing stamp
-# (UNSTAMPED), never fall through to GO/TIER0.
+# (UNSTAMPED), never fall through to GO/VERIFICATION_LEVEL0.
 als_read_loop_evals_result() {
   ALS_LOOP_EVALS_RESULT="ABSENT"
   command -v jq >/dev/null 2>&1 || { als_log "hook=loop_state_guard evals=skipped reason=jq_missing"; return 0; }
@@ -572,19 +572,19 @@ als_read_loop_evals_result() {
   jq -e . "$f" >/dev/null 2>&1 || return 0
   local scope; scope=$(jq -r '.scope // ""' "$f" 2>/dev/null)
   [ "$scope" = "loop" ] || return 0
-  local result tier justification
+  local result verification_level justification
   result=$(jq -r '.result // ""' "$f" 2>/dev/null)
-  tier=$(jq -r '.tier // -1' "$f" 2>/dev/null)
-  justification=$(jq -r '.tier_justification // "" | gsub("^\\s+|\\s+$"; "")' "$f" 2>/dev/null)
+  verification_level=$(jq -r '.verification_level // -1' "$f" 2>/dev/null)
+  justification=$(jq -r '.verification_justification // "" | gsub("^\\s+|\\s+$"; "")' "$f" 2>/dev/null)
   if [ -z "$justification" ]; then ALS_LOOP_EVALS_RESULT="UNJUSTIFIED"
   elif [ "$result" = "GO" ]; then ALS_LOOP_EVALS_RESULT="GO"
   elif [ "$result" = "NO-GO" ]; then ALS_LOOP_EVALS_RESULT="NO-GO"
-  elif [ "$tier" = "0" ]; then ALS_LOOP_EVALS_RESULT="TIER0"
+  elif [ "$verification_level" = "0" ]; then ALS_LOOP_EVALS_RESULT="VERIFICATION_LEVEL0"
   else ALS_LOOP_EVALS_RESULT="NO-GO"
   fi
 
   case "$ALS_LOOP_EVALS_RESULT" in
-    GO|TIER0)
+    GO|VERIFICATION_LEVEL0)
       local stamped_by stamped_checksum recomputed
       stamped_by=$(jq -r '.grading.by // ""' "$f" 2>/dev/null)
       stamped_checksum=$(jq -r '.grading.checksum // ""' "$f" 2>/dev/null)

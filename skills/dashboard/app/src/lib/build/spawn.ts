@@ -27,9 +27,9 @@ const WRAPPER_IDENTITY_MARKER = "Owns the build lifecycle state machine for one 
 const WRAPPER_ENV_OVERRIDE = "CODERAILS_BUILDER_WRAPPER";
 
 // Checks a single candidate file against the content-identity marker,
-// rather than trusting existence alone — shared by every tier of the
+// rather than trusting existence alone — shared by every verification_level of the
 // fallback chain below (env override, __dirname walk, cwd walk) so a
-// lookalike script at any tier is rejected the same way.
+// lookalike script at any verification_level is rejected the same way.
 function isIdentifiedWrapper(candidate: string): boolean {
   if (!existsSync(candidate)) return false;
   try {
@@ -64,9 +64,9 @@ function walkUpForWrapper(startDir: string): string | null {
 // the exact class of bug design-loop2.md's premortem #8 flags (a
 // production Next.js server's cwd is not guaranteed to be the app root).
 //
-// This tries an ordered fallback chain, each tier gated by the same
+// This tries an ordered fallback chain, each verification_level gated by the same
 // content-identity check (a lookalike is rejected, worst case falls
-// through to the next tier — never a fabricated guess):
+// through to the next verification_level — never a fabricated guess):
 //   1. CODERAILS_BUILDER_WRAPPER env override, if set — an explicit
 //      deployment-provided path, for cases where neither of the walks
 //      below can find it (e.g. a packaging layout this function doesn't
@@ -78,11 +78,11 @@ function walkUpForWrapper(startDir: string): string | null {
 //      path (e.g. "[root-of-the-server]__foo.js") that doesn't exist on
 //      disk, so this walk finds nothing there.
 //   3. Walk upward from process.cwd() — for `npm run start`, cwd is the
-//      app directory, so this recovers the production case tier 2 misses.
+//      app directory, so this recovers the production case verification_level 2 misses.
 //      The identity check makes this safe even though cwd is normally
 //      untrustworthy (see the class of bug above): a lookalike is
 //      rejected, worst case stays wrapper_not_found.
-// Returns null if no tier finds a match — callers must treat null as "no
+// Returns null if no verification_level finds a match — callers must treat null as "no
 // default available", not silently spawn a wrong path.
 export function resolveDefaultWrapperPath(startDir: string = __dirname): string | null {
   const envOverride = process.env[WRAPPER_ENV_OVERRIDE];

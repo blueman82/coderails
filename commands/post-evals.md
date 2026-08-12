@@ -47,11 +47,11 @@ Run the discriminating-check gate before posting. Abort if it fails — do not p
 
 If exit code is non-zero, print the validation error and **stop** — do not post.
 
-## Step 4 — Compute result and read tier
+## Step 4 — Compute result and read verification_level
 
 ```bash
 RESULT=$(./scripts/post_evals.sh compute-result <evals_json_path>)
-TIER=$(jq -r '.tier' <evals_json_path>)
+VERIFICATION_LEVEL=$(jq -r '.verification_level' <evals_json_path>)
 ```
 
 `RESULT` is always derived by `post_evals.sh` from per-eval statuses — never hand-written.
@@ -62,7 +62,7 @@ Source the eval-artifact lib to build the marker:
 
 ```bash
 source "${CLAUDE_PLUGIN_ROOT}/scripts/lib/eval-artifact.sh"
-MARKER=$(eval_artifact::marker "$ARGUMENTS" "$HEAD_SHA" "$RESULT" "$TIER")
+MARKER=$(eval_artifact::marker "$ARGUMENTS" "$HEAD_SHA" "$RESULT" "$VERIFICATION_LEVEL")
 ```
 
 Write a summary body: per-eval pass/fail split by priority (P0/P1), plus any
@@ -75,7 +75,7 @@ merge) are what the merge gate relies on, not the wording of this comment body.
 Prepend the marker,
 append the full `evals.json` as a fenced JSON code block, so the posted
 comment begins with the marker line and ends with the complete artifact —
-this is the embed a tier-review daemon extracts and judges (never
+this is the embed the integrity daemon extracts and validates (never
 hand-summarised; the raw file, verbatim). Use a `FENCE` variable rather than
 literal triple-backticks inside this script, since a literal fence would
 terminate this instruction's own surrounding code block:
@@ -92,7 +92,7 @@ FENCE='```'
 ```
 
 Before posting, validate the composed body embeds the artifact correctly
-(required at tier 0; a no-op exit-0 at tier 1/2):
+(required at verification_level 0; a no-op exit-0 at verification_level 1/2):
 
 ```bash
 ./scripts/post_evals.sh validate-embed <evals_json_path> /tmp/coderails-evals-body-$$.md
@@ -138,4 +138,4 @@ fi
 
 ## Step 7 — Report
 
-Print the posted comment URL and the computed result/tier so the user can verify the artifact on the PR.
+Print the posted comment URL and the computed result/verification_level so the user can verify the artifact on the PR.
