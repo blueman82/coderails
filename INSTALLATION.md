@@ -105,12 +105,12 @@ treat it as machine-local config, same as `.claude/settings.local.json`.
 |---|---|---|
 | `/workflow` `/prep` `/push` `/merge` `/coderails:init` | **Workflow & evals:** agentic-loop, task-evals | confidence-label check (Stop) |
 | `/post-review` `/post-evals` | **Planning:** planning-sequence, premortem, `superpowers:brainstorming`, `superpowers:writing-plans` | Did-Not-Verify check (Stop) |
-| `/assumptions` `/cite-check` `/notchecked` `/disconfirm` | **Dev discipline:** `superpowers:test-driven-development`, `superpowers:systematic-debugging`, engineering-principles (+ go/python/ts variants), `superpowers:verification-before-completion` | destructive-bash gate (PreToolUse) |
+| `/assumptions` `/cite-check` `/notchecked` `/disconfirm` | **Dev discipline:** `superpowers:test-driven-development`, `superpowers:systematic-debugging`, engineering-principles (+ go/python/ts/bash variants), `superpowers:verification-before-completion` | destructive-bash gate (PreToolUse) |
 | `/test-gate-setup` | **Multi-agent:** `superpowers:dispatching-parallel-agents`, `superpowers:subagent-driven-development`, `superpowers:executing-plans`, `superpowers:finishing-a-development-branch` | project test gate (PreToolUse) |
 | | **Wiki:** wiki-init, wiki-query, wiki-ingest, wiki-lint | |
 | | **Review & handoff:** `superpowers:requesting-code-review`, `superpowers:receiving-code-review`, handoff, improve-prompt, `superpowers:using-git-worktrees`, using-coderails, `superpowers:writing-skills` | |
 
-24 skills ship in total (`ls skills/` in the plugin dir to see the full list).
+25 skills ship in total (`ls skills/` in the plugin dir to see the full list).
 General dev-workflow skills — planning, TDD, debugging, code review,
 worktrees — are provided by the required `superpowers@claude-plugins-official`
 plugin, not bundled here.
