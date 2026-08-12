@@ -1,6 +1,6 @@
 ---
 name: engineering-principles
-description: Enforce engineering principles (YAGNI, KISS, DRY, Fail Fast, SSOT, Law of Demeter) and language-specific coding standards (Python/Go/TypeScript) on code being written or modified. Uses Serena LSP for call site analysis and reference counting. Use PROACTIVELY when writing, modifying, or reviewing code. Triggers on code changes, "enforce standards", "check principles", "apply standards", "code quality", or explicit /engineering-principles command.
+description: Enforce engineering principles (YAGNI, KISS, DRY, Fail Fast, SSOT, Law of Demeter) and language-specific coding standards (Python/Go/TypeScript/Bash) on code being written or modified. Uses Serena LSP for call site analysis and reference counting. Use PROACTIVELY when writing, modifying, or reviewing code. Triggers on code changes, "enforce standards", "check principles", "apply standards", "code quality", or explicit /engineering-principles command.
 allowed-tools: Read, Write, Edit, Glob, Grep, Skill, mcp__mcp-exec__*
 ---
 
@@ -30,6 +30,7 @@ allowed-tools: Read, Write, Edit, Glob, Grep, Skill, mcp__mcp-exec__*
 | `.go` | Execute `engineering-principles-go` skill |
 | `.py` | Execute `engineering-principles-python` skill |
 | `.ts`, `.tsx` | Execute `engineering-principles-ts` skill |
+| `.sh` (or no extension with a `bash`/`sh` shebang, e.g. `#!/usr/bin/env bash`) | Execute `engineering-principles-bash` skill |
 
 **The language-specific skill provides idioms, patterns, and examples. This coordinator provides universal principles and MCP analysis.**
 
@@ -235,6 +236,7 @@ Read the file extension. **Invoke the matching language skill:**
 - `.go` → `engineering-principles-go`
 - `.py` → `engineering-principles-python`
 - `.ts`/`.tsx` → `engineering-principles-ts`
+- `.sh` (or no extension with a `bash`/`sh` shebang) → `engineering-principles-bash`
 
 ### Step 2: Analyze
 - **If Serena available:** Run symbol overview, reference counting, depth analysis (Phase 2)
