@@ -302,6 +302,31 @@ post_evals::validate_smoke() {
     return 0
 }
 
+# post_evals::_scripted_indices <evals_json_path> <error_label> <mode_error_prefix>
+# Validate the shared eval shape before returning scripted array indices. The
+# caller supplies prefixes so the existing fail-closed diagnostics stay stable.
+post_evals::_scripted_indices() {
+    local path="$1" error_label="$2" mode_error_prefix="$3"
+
+    if ! jq -e '(.evals | type) == "array"' "$path" >/dev/null 2>&1; then
+        local shape_error="post_evals: ${error_label}: .evals is not a JSON array (malformed or absent) — refusing."
+        [[ "$error_label" == smoke_verify ]] && shape_error='post_evals: smoke_verify: .evals is not a JSON array (malformed or absent) — refusing to trust an eval artifact whose evals cannot be enumerated for re-execution.'
+        printf '%s\n' "$shape_error" >&2
+        return 1
+    fi
+
+    local bad_mode
+    bad_mode=$(jq -r '[.evals[]? | select(((.mode // "") | IN("scripted","agent-run")) | not) | .id // "<unnamed>"] | first // ""' "$path")
+    if [[ -n "$bad_mode" ]]; then
+        printf '%s eval %s has an unrecognised mode (must be "scripted" or "agent-run") — refusing: an unrecognised or absent mode silently excludes the eval from every gate check.\n' "$mode_error_prefix" "$bad_mode" >&2
+        return 1
+    fi
+
+    jq -r '(.evals // []) | to_entries
+        | map(select(.value.mode == "scripted") | .key)
+        | .[]' "$path"
+}
+
 # post_evals::validate_smoke_execution <evals_json_path>
 # Check 10's body: gate-time re-execution. For every tier>=1 scripted eval,
 # EXECUTES `cmd` and `negative_control` right now and refuses on what it
@@ -387,11 +412,6 @@ post_evals::validate_smoke_execution() {
     # belt-and-braces only for scalar/string; either way it holds on its own.
     # Guard on TYPE, never on empty indices (a valid agent-run-only array
     # legitimately has none).
-    if ! jq -e '(.evals | type) == "array"' "$path" >/dev/null 2>&1; then
-        printf 'post_evals: validate_smoke_execution: .evals is not a JSON array (malformed or absent) — refusing.\n' >&2
-        return 1
-    fi
-
     # Only scripted evals carry commands — agent-run evals are graded by a
     # verifier subagent. Same boundary as check 9.
     #
@@ -414,15 +434,10 @@ post_evals::validate_smoke_execution() {
     # `id` (iterate by index, never trust a gated-party field to select what
     # gets checked); `mode` was the remaining instance. The enum is
     # authoritative in skills/task-evals/SKILL.md: scripted | agent-run.
-    local bad_mode
-    bad_mode=$(jq -r '[.evals[]? | select(((.mode // "") | IN("scripted","agent-run")) | not) | .id // "<unnamed>"] | first // ""' "$path")
-    if [[ -n "$bad_mode" ]]; then
-        printf 'post_evals: eval %s has an unrecognised mode (must be "scripted" or "agent-run") — refusing: an unrecognised or absent mode silently excludes the eval from every gate check.\n' "$bad_mode" >&2
+    local idxs
+    if ! idxs=$(post_evals::_scripted_indices "$path" validate_smoke_execution 'post_evals:'); then
         return 1
     fi
-
-    local idxs
-    idxs=$(jq -r '.evals // [] | to_entries | map(select(.value.mode == "scripted")) | .[].key' "$path")
     [[ -z "$idxs" ]] && return 0
 
     local idx
@@ -576,11 +591,6 @@ post_evals::smoke_verify() {
     # (fail closed) unless .evals is an array. Guard on TYPE, never on empty
     # indices: a valid array whose only evals are agent-run legitimately yields
     # no scripted indices and must still be accepted by the return below.
-    if ! jq -e '(.evals | type) == "array"' "$path" >/dev/null 2>&1; then
-        printf 'post_evals: smoke_verify: .evals is not a JSON array (malformed or absent) — refusing to trust an eval artifact whose evals cannot be enumerated for re-execution.\n' >&2
-        return 1
-    fi
-
     # Iterate scripted evals by ARRAY INDEX, never by extracting a list of
     # `id`s. `id` is agent-written and unvalidated at this gate, so keying the
     # re-execution loop on it is another attacker-writable leash: an eval with
@@ -599,17 +609,10 @@ post_evals::smoke_verify() {
     # rc=1 with mode:"scripted" and accepted at rc=0 with mode:"Scripted" or
     # with no mode field at all. Refuse the unrecognised value rather than
     # guessing an intent for it.
-    local sv_bad_mode
-    sv_bad_mode=$(jq -r '[.evals[]? | select(((.mode // "") | IN("scripted","agent-run")) | not) | .id // "<unnamed>"] | first // ""' "$path")
-    if [[ -n "$sv_bad_mode" ]]; then
-        printf 'post_evals: smoke_verify: eval %s has an unrecognised mode (must be "scripted" or "agent-run") — refusing: an unrecognised or absent mode silently excludes the eval from every gate check.\n' "$sv_bad_mode" >&2
+    local indices
+    if ! indices=$(post_evals::_scripted_indices "$path" smoke_verify 'post_evals: smoke_verify:'); then
         return 1
     fi
-
-    local indices
-    indices=$(jq -r '(.evals // []) | to_entries
-        | map(select(.value.mode == "scripted") | .key)
-        | .[]' "$path")
     [[ -z "$indices" ]] && return 0
 
     local worktree

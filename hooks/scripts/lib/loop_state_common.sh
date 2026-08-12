@@ -455,6 +455,12 @@ als_gate_stop_loop() {
   fi
 }
 
+# Case-insensitive check shared by the complete-only gates below.
+als_is_complete_category() {
+  local category_lc; category_lc=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')
+  [ "$category_lc" = "complete" ]
+}
+
 # Gate: skip if no agentic-loop Skill invocation found — not a loop.
 # Sets global ALS_INVOCATIONS. Logs and exits when invocations = 0.
 # Takes hook name as arg so the log line carries the correct hook= tag.
@@ -607,8 +613,7 @@ als_read_loop_evals_result() {
 # and blocks, so an empty/garbage retro can never pass as fail-never.
 als_gate_retro_on_complete() {
   local category="$1" hook="$2" session="$3"
-  local category_lc; category_lc=$(printf '%s' "$category" | tr '[:upper:]' '[:lower:]')
-  [ "$category_lc" = "complete" ] || return 0
+  als_is_complete_category "$category" || return 0
   command -v jq >/dev/null 2>&1 || { als_log "hook=$hook session=$session retro_gate=skipped_no_jq"; return 0; }
   [ -n "$ALS_PATH" ] || { ALS_RETRO_STATE="no_als_path"; als_log "hook=$hook session=$session retro=no_als_path blocked=1"; echo "[loop-stall-guard] retro gate: ALS_PATH unset — cannot locate retro.json." >&2; exit 2; }
   local retro; retro="$(dirname "$ALS_PATH")/retro.json"
@@ -675,8 +680,7 @@ Phase 13), write it, then re-declare complete." >&2
 # rebuild the non-enforcement this gate exists to remove.
 als_gate_work_units_on_complete() {
   local category="$1" hook="$2" session="$3"
-  local category_lc; category_lc=$(printf '%s' "$category" | tr '[:upper:]' '[:lower:]')
-  [ "$category_lc" = "complete" ] || return 0
+  als_is_complete_category "$category" || return 0
   command -v jq >/dev/null 2>&1 || { als_log "hook=$hook session=$session work_units_gate=skipped_no_jq"; return 0; }
   [ -n "$ALS_PATH" ] && [ -f "$ALS_PATH" ] || return 0
   jq -e . "$ALS_PATH" >/dev/null 2>&1 || return 0
@@ -822,8 +826,7 @@ listed unit(s), then re-declare complete." >&2
 # an attacker from inflating proof.json unboundedly without it.
 als_gate_proofs_on_complete() {
   local category="$1" hook="$2" session="$3" transcript="$4"
-  local category_lc; category_lc=$(printf '%s' "$category" | tr '[:upper:]' '[:lower:]')
-  [ "$category_lc" = "complete" ] || return 0
+  als_is_complete_category "$category" || return 0
   command -v jq >/dev/null 2>&1 || { als_log "hook=$hook session=$session proof_gate=skipped_no_jq"; return 0; }
   [ -n "$ALS_PATH" ] || return 0
   local proof_file; proof_file="$(dirname "$ALS_PATH")/proof.json"
@@ -1270,8 +1273,7 @@ not also appear in .proofs." >&2
 ALS_PRICE_STALE_DAYS=14
 als_report_cost_on_complete() {
   local category="$1" hook="$2" session="$3"
-  local category_lc; category_lc=$(printf '%s' "$category" | tr '[:upper:]' '[:lower:]')
-  [ "$category_lc" = "complete" ] || return 0
+  als_is_complete_category "$category" || return 0
   command -v jq >/dev/null 2>&1 || { als_log "hook=$hook session=$session cost_report=skipped_no_jq"; return 0; }
   [ -n "$ALS_PATH" ] || { als_log "hook=$hook session=$session cost_report=skipped_no_als_path"; return 0; }
   local retro; retro="$(dirname "$ALS_PATH")/retro.json"
