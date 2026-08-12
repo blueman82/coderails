@@ -4,11 +4,18 @@ set -euo pipefail
 PLUGIN_DIR="$(cd "$(dirname "$0")" && pwd)"
 DRY_RUN=0
 MEMORY_TARGET=""
+INTEGRITY_GATE=ask
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --dry-run) DRY_RUN=1; shift ;;
     --memory-target) MEMORY_TARGET="${2:-}"; shift 2 ;;
+    --integrity-gate) INTEGRITY_GATE=yes; shift ;;
+    --no-integrity-gate) INTEGRITY_GATE=no; shift ;;
+    --help|-h)
+      printf 'Usage: %s [--dry-run] [--integrity-gate|--no-integrity-gate] [--memory-target PATH]\n' "$0"
+      exit 0
+      ;;
     *) printf 'Unknown arg: %s\n' "$1" >&2; exit 1 ;;
   esac
 done
@@ -214,6 +221,23 @@ fi
 
 progress_bar "ALL SYSTEMS" 20
 printf '\n'
+
+# ── Optional product-neutral integrity gate ───────────────────────────────────
+if [[ "$INTEGRITY_GATE" == ask && "$INTERACTIVE" -eq 1 ]]; then
+  printf "${BOLD}  OPTIONAL INTEGRITY GATE${NC}\n"
+  hline
+  printf '  Independent GitHub merge attestor for Claude, Codex, or any other client.\n'
+  printf '  The installer will not run sudo or handle credentials for you.\n'
+  read -r -p '  Show the owner-run setup command? [y/N] ' answer
+  [[ "$answer" =~ ^[Yy]$ ]] && INTEGRITY_GATE=yes || INTEGRITY_GATE=no
+  printf '\n'
+fi
+
+if [[ "$INTEGRITY_GATE" == yes ]]; then
+  printf '  Optional gate setup (run this yourself in your terminal):\n'
+  printf '    bash %q\n' "$PLUGIN_DIR/scripts/integrity-gate/setup.sh"
+  printf '  Nothing privileged was run by this installer.\n\n'
+fi
 
 # ── 1b. Migration scan — old plugins must be uninstalled from the REPL first ──
 # A shell script cannot uninstall a Claude Code plugin: only `/plugin uninstall`

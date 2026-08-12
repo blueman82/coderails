@@ -45,6 +45,7 @@ manifest_paths=(
   scripts/sandbox/sandbox-probe.sh
   scripts/integrity-gate/integrity-gate-runner.sh
   scripts/integrity-gate/install.sh
+  scripts/integrity-gate/setup.sh
   scripts/merge.sh
   scripts/post_review.sh
   scripts/post_evals.sh
@@ -83,6 +84,7 @@ manifest_modes=(
   100644
   100644
   100644
+  100755
   100755
   100755
   100755
