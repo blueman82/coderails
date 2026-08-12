@@ -59,7 +59,7 @@ comes from the required `superpowers@claude-plugins-official` plugin
 dependency; install it alongside coderails. `pr-review-toolkit@claude-plugins-official`
 is still required for the review stage of `/workflow`.
 
-24 skills are bundled across three groups. Full
+25 skills are bundled across three groups. Full
 catalog: [`docs/REFERENCE.md`](./docs/REFERENCE.md).
 
 **Required plugin dependency: `superpowers@claude-plugins-official`**
@@ -118,6 +118,7 @@ catalog: [`docs/REFERENCE.md`](./docs/REFERENCE.md).
 | `engineering-principles-python` | Python idioms and standards |
 | `engineering-principles-go` | Go idioms and standards |
 | `engineering-principles-ts` | TypeScript idioms and standards |
+| `engineering-principles-bash` | Bash/shell idioms and standards |
 
 ## Agents
 
