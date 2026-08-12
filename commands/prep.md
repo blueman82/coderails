@@ -91,7 +91,7 @@ Write the stub at the printed path with these fields:
 
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "session_id": "<this session's id>",
   "status": "in-progress",
   "created": "<ISO8601 timestamp>",
