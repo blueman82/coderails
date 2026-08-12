@@ -127,7 +127,7 @@ Did-Not-Verify section entirely (added 2026-07-13), not just on untagged
 bullets. The same two
 content-discipline checks (confidence-label and verify-loop) also run on
 SubagentStop — so subagents are held to the same standards as the parent session.
-On PreToolUse, seven hooks can block: the destructive-bash gate, the opt-in test
+On PreToolUse, eight hooks can block: the destructive-bash gate, the opt-in test
 gate, the config-gated `enforce_pr_workflow` (opt-in via workflow.config.yaml,
 like the test gate — enforces the PR chain, e.g. blocks a direct `git push` to
 `main` unless `/pr-review-toolkit:review-pr` already ran this session),
@@ -138,9 +138,12 @@ like the test gate — enforces the PR chain, e.g. blocks a direct `git push` to
 label like `E#:`/`Task A#`/`CHANGE B#` instead of stating the constraint the
 code enforces; `.md` files are exempt), `wiki_taxonomy_gate` (blocks a write into
 an LLM wiki vault's top-level directory that isn't sanctioned by the vault's own
-`AGENTS.md` "## Page types" table; fails open on any ambiguity), and
-`crack_on_gate` on `AskUserQuestion` (denies the tool while the session's
-crack-on flag is stamped — proceed autonomously instead of asking).
+`AGENTS.md` "## Page types" table; fails open on any ambiguity),
+`verification_volume_ceiling` (hard-blocks, with no override, the 3rd+
+invocation per work-unit of `hooks/scripts/tests/run_all.sh` or a
+`scripts/post_evals.sh` validate-structure ceremony), and `crack_on_gate` on
+`AskUserQuestion` (denies the tool while the session's crack-on flag is
+stamped — proceed autonomously instead of asking).
 
 ## Notes
 
