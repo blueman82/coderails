@@ -36,7 +36,7 @@ gate_present_and_owned() {
 }
 
 block_state_failure() {
-  stub_schema='{ "schema_version": 1, "session_id": "<this-session-id>", "status": "initialising", "created": "<ISO8601>", "authorising_prompt_raw": "<verbatim authorising prompt>", "completed_marker": 0 }'
+  stub_schema='{ "schema_version": 2, "session_id": "<this-session-id>", "status": "initialising", "created": "<ISO8601>", "authorising_prompt_raw": "<verbatim authorising prompt>", "completed_marker": 0 }'
   if [ ! -f "$ALS_PATH" ]; then
     reason="absent"
     msg="[loop-state-guard] Agentic loop active but no progress.json found.
