@@ -24,6 +24,7 @@ Authoritative files:
 | Local merge validation | `scripts/merge.sh`, `hooks/scripts/enforce_pr_workflow.sh` |
 | Artifact format | `scripts/lib/eval-artifact.sh` |
 | Installation and promotion | `scripts/integrity-gate/install.sh` |
+| Owner-run ruleset and credential setup | `scripts/integrity-gate/setup.sh` |
 
 After changing the runner, run `scripts/integrity-gate/install.sh` to promote it
 to the root-owned install location. The owner-run setup helper creates or
