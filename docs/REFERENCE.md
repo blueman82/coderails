@@ -489,11 +489,11 @@ re-entrant contexts.
 
 **Purpose:** Given a Phase 1 plan that retires existing code paths,
 recommends clean-break or preserve-compat per retirement unit from the
-actual consumers and constraints. Read-only — never reviews an existing
-document, originates the recommendation from the plan and the named
-retired paths.
+actual consumers and constraints. Defaults to clean-break; preserve-compat
+requires a specific named consumer that cannot migrate in this unit, plus a
+removal ticket.
 
-**Tools:** `Read, Grep, Glob, Bash`, with `disallowedTools: Write, Edit, NotebookEdit` (read-only discipline, not a tool guarantee — `Bash` can mutate). **Model:** `inherit`.
+**Tools:** `Read, Grep, Glob, Bash`, with `disallowedTools: Write, Edit, NotebookEdit` (read-only discipline, not a tool guarantee — `Bash` can mutate). **Model:** `inherit` — pass an explicit model at dispatch; `agentic-loop` Phase 2.6 assigns its role inline per Phase 2.8's table (see `model-routing.md`'s "Inline sites elsewhere").
 
 **Used by:** `agentic-loop` Phase 2.6 disposition decisions.
 
