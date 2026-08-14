@@ -275,7 +275,7 @@ skills:
     required_inputs: [recent session transcripts]
     output_contract: List of repeated tasks worth turning into skills.
   deploy-safety-reviewer:
-    graph_role: U4b-review[i]
+    graph_role: U4b-review
     source_kind: agent
     claude:
       path: agents/deploy-safety-reviewer.md
@@ -319,7 +319,7 @@ skills:
     required_inputs: [just-merged code, in-tree docs]
     output_contract: Drift findings triaged, fixing only drift the loop's own PRs introduced.
   loop-worker:
-    graph_role: U3[i]
+    graph_role: U3
     source_kind: agent
     claude:
       path: agents/loop-worker.md
@@ -352,7 +352,7 @@ skills:
     required_inputs: [raw authorising prompt and directly referenced docs]
     output_contract: Frozen proof.json with every status "pending", author/grader independence preserved.
   source-auditor:
-    graph_role: U4b-review[i]
+    graph_role: U4b-review
     source_kind: agent
     claude:
       path: agents/source-auditor.md
@@ -418,7 +418,7 @@ skills:
     required_inputs: [project-name (optional)]
     output_contract: Scaffolded workflow.config.yaml for the current project.
   merge:
-    graph_role: U4b-merge-gate[i]
+    graph_role: U4b-merge-gate
     source_kind: command
     claude:
       path: commands/merge.md
@@ -440,7 +440,7 @@ skills:
     required_inputs: [claims made in session]
     output_contract: List of claims made but not actually verified.
   post-evals:
-    graph_role: U4b-merge-gate[i]
+    graph_role: U4b-merge-gate
     source_kind: command
     claude:
       path: commands/post-evals.md
@@ -451,7 +451,7 @@ skills:
     required_inputs: [PR#]
     output_contract: Validated, SHA-bound eval-artifact summary posted as a durable PR artifact.
   post-review:
-    graph_role: U4b-review[i]
+    graph_role: U4b-review
     source_kind: command
     claude:
       path: commands/post-review.md
@@ -473,7 +473,7 @@ skills:
     required_inputs: [branch name, optional type/summary/description]
     output_contract: Safety branch, new feature/bug branch, and Jira ticket created.
   push:
-    graph_role: U6[i]
+    graph_role: U6
     source_kind: command
     claude:
       path: commands/push.md
