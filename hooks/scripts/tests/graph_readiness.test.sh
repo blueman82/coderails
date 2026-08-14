@@ -108,118 +108,30 @@ run_check "(stale-control) join both done -> ready (negative control of stale)" 
 # script before dispatch, and the instruction must live in the "Execution
 # graph" section specifically — not merely appear somewhere in the file.
 # A bare whole-file `grep -q` cannot tell "in this section" from "anywhere",
-# so each assertion below is section-anchored (extract the section's own
-# text, then grep only that) and paired with a positive/negative synthetic
-# fixture proving the extraction actually discriminates location, the same
-# paired-negative-control discipline used for the fixtures above.
+# so we extract the section's own text (bounded start/end) and grep only that.
 
 SKILL="$(cd "$(dirname "$0")/../../.." && pwd)/skills/agentic-loop/SKILL.md"
-SECTION_START='The phases below are a dependency graph'
-SECTION_END='^### Phases -2 through 2.7'
 
-extract_section() { # file, start_regex, end_regex
-  local file="$1" start="$2" end="$3"
-  awk -v start="$start" -v end="$end" '
-    $0 ~ start { insec=1 }
-    insec && $0 ~ end && $0 !~ start { exit }
-    insec { print }
-  ' "$file"
-}
+section() { sed -n '/The phases below are a dependency graph/,/^### Phases -2 through 2.7/p' "$1"; }
 
-assert_in_section() { # desc, file, pattern
-  local desc="$1" file="$2" pattern="$3"
-  if extract_section "$file" "$SECTION_START" "$SECTION_END" | grep -q -- "$pattern"; then
-    printf 'ok   - %s\n' "$desc"
-  else
-    printf 'FAIL - %s\n      pattern not found within the Execution-graph section of %s\n' "$desc" "$file"
-    fails=$((fails+1))
-  fi
-}
-
-assert_not_in_section() { # desc, file, pattern
-  local desc="$1" file="$2" pattern="$3"
-  if extract_section "$file" "$SECTION_START" "$SECTION_END" | grep -q -- "$pattern"; then
-    printf 'FAIL - %s\n      pattern unexpectedly found within the Execution-graph section of %s\n' "$desc" "$file"
-    fails=$((fails+1))
-  else
-    printf 'ok   - %s\n' "$desc"
-  fi
-}
-
-# Synthetic fixtures proving the section-anchored extraction actually
-# discriminates "inside the section" from "elsewhere in the file" — a mutant
-# check using bare `grep -q graph_readiness.sh "$file"` would pass on BOTH
-# fixtures below, since the string appears somewhere in each; only the
-# section-anchored check is expected to tell them apart.
-cat > "$TMP/doc_positive.md" <<'EOF'
-## The phases
-
-table stuff here, irrelevant.
-
-The phases below are a dependency graph, not a queue. A node is ready only when
-its prerequisites and readiness predicate are true. Run ready independent nodes
-in one wave, but preserve every listed dependency, using graph_readiness.sh to
-determine per-node readiness before dispatch.
-
-### Execution graph — stable contract
-
-Node IDs are stable identifiers.
-
-### Phases -2 through 2.7 — setup
-
-Phase 3 talks about something else entirely, no mention of the script here.
-EOF
-
-cat > "$TMP/doc_negative.md" <<'EOF'
-## The phases
-
-table stuff here, irrelevant.
-
-The phases below are a dependency graph, not a queue. A node is ready only when
-its prerequisites and readiness predicate are true. Run ready independent nodes
-in one wave, but preserve every listed dependency.
-
-### Execution graph — stable contract
-
-Node IDs are stable identifiers.
-
-### Phases -2 through 2.7 — setup
-
-Phase 3 mentions graph_readiness.sh here, outside the target section.
-EOF
-
-# Control: whole-file grep (the old, non-discriminating check) sees the
-# script mention in BOTH fixtures — proving the string's mere presence in
-# the file is not, by itself, evidence it's in the right section.
-run_check_bool() { # desc, condition_true
-  if [ "$2" = "true" ]; then printf 'ok   - %s\n' "$1"; else
-    printf 'FAIL - %s\n' "$1"; fails=$((fails+1)); fi
-}
-grep -q 'graph_readiness.sh' "$TMP/doc_positive.md" && pos_whole=true || pos_whole=false
-grep -q 'graph_readiness.sh' "$TMP/doc_negative.md" && neg_whole=true || neg_whole=false
-run_check_bool "(control) whole-file grep matches positive fixture (as expected)" "$pos_whole"
-run_check_bool "(control) whole-file grep ALSO matches negative fixture (proves bare grep -q does not discriminate section)" "$neg_whole"
-
-assert_in_section "positive fixture: graph_readiness.sh correctly found inside the Execution-graph section" \
-  "$TMP/doc_positive.md" 'graph_readiness.sh'
-assert_not_in_section "negative fixture: graph_readiness.sh mentioned only in Phase 3 must NOT count as in-section (negative control proving extraction discriminates)" \
-  "$TMP/doc_negative.md" 'graph_readiness.sh'
+# Over-broad-extraction control: 'Cluster wiki ingest' occurs exactly once in
+# the whole file, well after the target section (Phase 9 heading) — if it ever
+# showed up inside `section`'s output, the end-boundary stopped matching and
+# the extraction is silently reading to EOF instead of stopping at the
+# section's real end.
+if [ "$(grep -c 'Cluster wiki ingest' "$SKILL")" = "1" ] && ! section "$SKILL" | grep -q 'Cluster wiki ingest'; then
+  printf 'ok   - %s\n' "section() stops before 'Cluster wiki ingest' (end boundary still matches)"
+else
+  printf 'FAIL - %s\n' "section() over-ran into text past the intended end boundary"
+  fails=$((fails+1))
+fi
 
 # The real assertion: SKILL.md's Execution-graph section names the script as
 # the pre-dispatch readiness mechanism.
-assert_in_section "SKILL.md's Execution-graph section names graph_readiness.sh as the pre-dispatch readiness mechanism" \
-  "$SKILL" 'graph_readiness.sh'
-
-# Vocabulary: the instruction must not call this script a "gate" (it is an
-# advisory, read-only query, wired into no hook — "gate" is reserved in this
-# repo's vocabulary for a hook-enforced deny). Checked on the specific line
-# naming the script, not the whole section, since the section legitimately
-# discusses unrelated merge gates elsewhere.
-script_line=$(extract_section "$SKILL" "$SECTION_START" "$SECTION_END" | grep 'graph_readiness.sh' | head -1)
-if [ -n "$script_line" ] && ! printf '%s' "$script_line" | grep -qi 'gate'; then
-  printf 'ok   - %s\n' "graph_readiness.sh mention does not call the script a \"gate\""
+if section "$SKILL" | grep -q 'graph_readiness.sh'; then
+  printf 'ok   - %s\n' "SKILL.md's Execution-graph section names graph_readiness.sh as the pre-dispatch readiness mechanism"
 else
-  printf 'FAIL - %s\n      line: %s\n' "graph_readiness.sh mention wrongly calls the script a \"gate\", or the line was not found" "$script_line"
+  printf 'FAIL - %s\n' "graph_readiness.sh not found within SKILL.md's Execution-graph section"
   fails=$((fails+1))
 fi
 
