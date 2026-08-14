@@ -28,9 +28,31 @@ Nineteen-plus numbered phases (−2 through 13, with lettered sub-phases) is too
 | Review & Ship | 4b, 5, 6, 7&8 |
 | Wrap-up | 9, 10, 11, 12, 13 |
 
-The phases below are sequential. Run them in order. Inside an authorised loop, phases 4-6 repeat per PR / per work-unit.
+The phases below are a dependency graph, not a queue. Run every ready node, in
+one dispatch wave where possible; a node becomes ready when its listed inputs
+exist. The orchestrator is the only state writer: collect concurrent results,
+then perform one `progress.json` read-modify-write before releasing dependent
+nodes. Inside an authorised loop, phases 4-6 repeat per PR / per work-unit.
 
-### Phases -2 through 2.7 — setup, before any delegation
+The initial graph is deliberately small:
+
+```text
+-2 -> -1 -> 0 -> 0.4 -> 0.5 -> 1 -> 2
+                                  |\
+                                  | `-> 2.6 disposition-scout --`
+                                  `--> 2.5 design-scout ---------+-> 2.7a -> 2.7b -> 2.8 -> 3 -> 4 -> 4b -> 13
+                                  `--> 2.7c/2.7d/2.7e ----------'
+```
+
+`2.5` and `2.6` return decisions only; the orchestrator absorbs both in one
+state write. `2.7c`, `2.7d`, and `2.7e` are independent blind-input branches
+and may run together once their own triggers and `authorising_prompt_raw` are
+available. `2.7a` consumes both fork results; `2.7b` consumes `2.7a`.
+A branch with no trigger is skipped and recorded, not treated as a failed node.
+Later review, repair, and wrap-up nodes still follow their existing
+per-work-unit dependencies.
+
+### Phases -2 through 2.7 — setup graph, before implementation delegation
 
 Stub `progress.json`, sharpen the authorising prompt, read the envelope, run
 pre-flight checks via spawned agents, resolve design forks and disposition, and
@@ -41,6 +63,11 @@ run once, before Phase 2.8 routes any work. Skipping them is how loops start on
 an unresolved design.
 
 ### Phase 2.8 — Route: assign a model role per task
+
+Run this after the plan-producing branches that it consumes. It is not a
+global barrier for independent evidence branches: 2.7c/2.7d/2.7e may finish
+before or alongside it, but implementation cannot start until all required
+inputs for that work-unit are present.
 
 Every loop assigns a **model role** to every Phase 3/3a build task before any
 worker spawns — even a 1-2 unit loop that skips Phase 2.7 entirely. Decide once,

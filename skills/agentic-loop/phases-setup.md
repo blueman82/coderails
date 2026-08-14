@@ -186,7 +186,16 @@ Either way the fork is closed by ONE design artifact before building starts — 
 
 ### Phase 2.6 — Resolve disposition before replacement work (clean-break vs preserve-compat)
 
-When the Phase 1 plan contains a work-unit that **retires an existing code path** — there is a *named thing being replaced* (a function, module, endpoint, schema, or flag the change removes from use) — resolve its **disposition** once, up front, before the first spawn. This is the migration analogue of Phase 2.5's design fork: asked once, not re-litigated.
+When the Phase 1 plan contains a work-unit that **retires an existing code path** — there is a *named thing being replaced* (a function, module, endpoint, schema, or flag the change removes from use) — resolve its **disposition** once, up front, before the first implementation spawn. This is the migration analogue of Phase 2.5's design fork: asked once, not re-litigated.
+
+This is a graph branch. Dispatch `subagent_type: coderails:disposition-scout`
+concurrently with Phase 2.5's `design-scout`, giving it only the Phase 1 plan
+and the named retirement paths. It returns one disposition recommendation per
+retirement unit and writes no loop state. If there is no retirement trigger,
+skip this node. Assign its inline model role using the same `default` versus
+`frontier` rule as Phase 2.5. After both branches return, the orchestrator
+validates the results and performs one `progress.json` update for both
+decisions; neither worker may read-modify-write that file.
 
 **Trigger precisely.** The fork fires only when an existing path is being *retired*, not merely when new code calls or wraps old code. If nothing is being removed from use, there is no disposition question. A concrete "what named thing does this remove?" test is deliberately harder to self-exempt from than a vague "is this a migration?".
 
@@ -200,7 +209,7 @@ When the Phase 1 plan contains a work-unit that **retires an existing code path*
 - **Full-autonomous:** adopt clean-break by default, record it, proceed. Surface a preserve-compat choice (with its named blocker) at the next approval-gate; do not stall.
 - **Narrow-fix / diagnostic / ambiguous:** surface the disposition as one decision — "clean-break recommended, here's why" — bounded like Phase 1 (ask once, don't loop).
 
-**Record** per work-unit in `progress.json`: `disposition`, and when `preserve-compat`, the `named_blocker` and a mandatory `removal_ticket`. The disposition decision also appends `{phase: "2.6", decision: "<clean-break or preserve-compat, with named_blocker if applicable>"}` to `progress.json`'s `decisions_absorbed` array.
+**Record** per work-unit in `progress.json`: `disposition`, and when `preserve-compat`, the `named_blocker` and a mandatory `removal_ticket`. After the graph branch returns, the orchestrator appends `{phase: "2.6", decision: "<clean-break or preserve-compat, with named_blocker if applicable>"}` to `progress.json`'s `decisions_absorbed` array as part of the single reconvergence write.
 
 ### Phase 2.7 — Commit the resolved design to durable `spec.md` and `plan.md`
 
@@ -208,7 +217,9 @@ The **2.7a/2.7b** design-doc sub-steps fire ONLY when the loop has **≥3 work-u
 
 **2.7c and 2.7e carry their own independent triggers and are NOT gated by the ≥3-work-unit threshold above** — a loop can skip 2.7a/2.7b entirely and still owe 2.7c and/or 2.7e. 2.7c fires on either of its own two stated triggers (verification_level-2-eligibility on work-unit count, or an irreversible-surface trigger, independently of each other and of 2.7a/2.7b). 2.7e fires for ANY loop with an executable surface, whatever its unit count, even when the rest of Phase 2.7 is skipped.
 
-When 2.7a/2.7b fire, run both sub-steps in order:
+When the design-doc branch fires, run 2.7a after both 2.5 and 2.6 have
+reconverged, then run 2.7b. The independent evidence branches 2.7c, 2.7d,
+and 2.7e may run concurrently with that work when their own inputs are ready.
 
 **2.7a — write `spec.md`.** Write a durable `spec.md` to the loop-state dir — the path printed by the loop-state path helper (`hooks/scripts/lib/agentic_loop_path.sh`, run at Phase -2), next to `progress.json`, outside the code repo, **not committed** (loop state, not a PR deliverable). This is a **commit of design the loop has already resolved**, not interactive brainstorming — a loop cannot brainstorm with itself; the forks were closed at 2.5 and 2.6. Record:
 - the authorisation envelope verbatim (Phase 0);
