@@ -6,7 +6,7 @@ cleanup (Phase 4b).
 
 ## Orchestrator-level superpowers:verification-before-completion at loop finish-out
 
-SKILL.md's two existing `superpowers:verification-before-completion` references (Phase 3/3a worker
+The graph's `S13-complete` node and SKILL.md's two existing `superpowers:verification-before-completion` references (Phase 3/3a worker
 construction-discipline lines) discipline the WORKERS' claims. Nothing disciplines the
 ORCHESTRATOR's own final completion claim. Before the Phase 13 `complete` LOOP-STOP
 declaration, the orchestrator applies `superpowers:verification-before-completion` to its

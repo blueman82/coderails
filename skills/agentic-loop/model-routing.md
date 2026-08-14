@@ -68,7 +68,7 @@ and latency, never for correctness; do not read a role mismatch as a quality ris
 ## Inline sites elsewhere
 
 Phase 2.8 routes Phase 3/3a *build* tasks only. Agents spawned at other phases — the Phase 2
-pre-flight agent, the Phase 2.5 design-fork agent, and Phase 9's wiki and sync-docs delegates —
+pre-flight agent, the Phase 2.5 design-fork agent, the Phase 2.6 disposition agent, and Phase 9's wiki and sync-docs delegates —
 are each assigned their role inline at their own spawn point, using Phase 2.8's vocabulary and
 table.
 

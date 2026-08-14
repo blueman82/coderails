@@ -40,11 +40,12 @@ be replayed to derive position, and that can leave a torn tail line after a cras
 | `status` | `initialising` → `in-progress` → `complete` (see Lifecycle). |
 | `authorising_prompt_raw` | The authorisation envelope, verbatim. |
 | `work_units` | JSON object keyed by unit id; each entry carries at least a `status`. In-flight values are `pending`/`in-progress`/`blocked` (with `blockedBy`); only `done` and `dropped` (with a mandatory sibling `dropped_reason`) are terminal — see below. `merged`/`complete`/other synonyms are retired: do not mint new status values. |
+| `graph` | Durable execution graph: `{nodes, edges, joins}`. Node keys are the stable IDs from `SKILL.md` (`S*`, `U<i>*`, `J*`, or `G*`); each node stores `status`, `outcome`, and `retry: {attempts, max}`. `edges` are `{from,to}` dependency edges; `joins` are `{id, mode:"all", inputs}` and must name existing nodes. |
 | `loop_stop_counts` | **HOOK-OWNED.** Per-category counts `{hard-stop, approval-gate, awaiting-input, complete}`, for Phase 13. |
 | `disposition` | Per work-unit that retires an existing code path: `clean-break` \| `preserve-compat`. |
 | `named_blocker` | When `preserve-compat`: the specific consumer still on the old path that justifies keeping it. |
 | `removal_ticket` | When `preserve-compat`: tracks the deferred removal. |
-| `decisions_absorbed` | Chronological (oldest-first) array of `{phase, decision}` appended at each phase boundary that absorbs an in-scope decision (Phases -1, 2.5, 2.6, 2.8, 5, 6). Phase -1 appends only in a full-autonomous envelope, where it auto-adopts the improve-prompt output instead of asking. |
+| `decisions_absorbed` | Chronological (oldest-first) array of `{phase, decision}` appended at each phase boundary that absorbs an in-scope decision (Phases -1, 2.5, 2.6, 2.8, 5, 6). Phase -1 appends only in a full-autonomous envelope, where it auto-adopts the improve-prompt output instead of asking. In the Phase 2.5/2.6 graph wave, both worker results are collected and appended by the orchestrator in one read-modify-write; workers never write this field. |
 | `completed_marker` | Count of agentic-loop loops completed in this session; bumped at teardown, carried forward by the Phase -2 stub. |
 | `last_updated` | Refreshed at each phase boundary. |
 
@@ -68,6 +69,19 @@ an individual unit that cannot be proven terminal fails closed, so one malformed
 launder an unfinished unit into a completion. This is structural enforcement of "nothing is
 deferred": prose alone (a standing order) was observed to fail, so the gate makes deferral
 impossible rather than merely discouraged.
+
+**`graph` is durable coordination state, not a scheduler.** The orchestrator records the
+graph after each wave and is the only writer. A node is ready when every incoming edge names a
+terminal-success predecessor (`done` or `skipped`) and its own `status` is `pending` or `ready`;
+`blocked` means a prerequisite is not terminal and is not a terminal outcome. Terminal outcomes
+are `done`, `skipped`, `failed`, and `hard-stop`; `skipped` carries a reason, while `failed` and
+`hard-stop` carry the observed failure. `retry.attempts` starts at zero and may not exceed
+`retry.max`, which is an integer from 0 through 5. A retry increments `attempts` only for a
+distinct diagnosed attempt; once the bound is reached, the node terminates as `hard-stop`.
+Edges must reference existing node IDs, cannot self-loop, and a join's `mode: "all"` releases
+only after every listed input is terminal-success. This records dependencies, readiness, outcomes,
+retries, and joins without adding a scheduler or UI; malformed graph entries are not evidence of
+readiness and must be treated as blocked by the orchestrator.
 
 **`loop_stop_counts` is written solely by the `loop_stall_guard` hook** on each valid `LOOP-STOP`
 declaration. The orchestrator never writes or increments it. On any wholesale rewrite of the file

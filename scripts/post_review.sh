@@ -11,6 +11,7 @@
 # BASH_SOURCE-relative so this works regardless of cwd.
 _POST_REVIEW_DIR="$(dirname "${BASH_SOURCE[0]}")"
 source "${_POST_REVIEW_DIR}/lib/review-artifact.sh"
+source "${_POST_REVIEW_DIR}/../hooks/scripts/lib/loop_state_common.sh"
 
 # post_review::validate_summary <file>
 # Reads summary body from <file>; exit 0 if it satisfies the grammar, exit 1 + stderr reason.
@@ -87,8 +88,8 @@ post_review::write_cache() {
         return 0
     fi
 
-    local tmp="${path}.tmp"
-    if jq --arg pr "$pr" \
+    if als_atomic_progress_update "$path" \
+          --arg pr "$pr" \
           --arg sha "$head_sha" \
           --arg url "$url" \
           --arg author "$author" \
@@ -101,15 +102,10 @@ post_review::write_cache() {
               summary_url: $url,
               summary_author: $author,
               posted_at: $posted_at
-          }' "$path" > "$tmp"; then
-        if ! mv "$tmp" "$path"; then
-            printf 'write_cache: mv failed — progress.json left unchanged\n' >&2
-            rm -f "$tmp" 2>/dev/null || true
-            return 1
-        fi
+          }'; then
+        :
     else
-        rm -f "$tmp"
-        printf 'write_cache: jq failed — progress.json left unchanged\n' >&2
+        printf 'write_cache: update failed — progress.json left unchanged\n' >&2
         return 1
     fi
 }

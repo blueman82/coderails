@@ -1,6 +1,7 @@
 # Retry-until-green
 
-Not a stop condition — applies BEFORE hard-stop #1 in the main skill's stop-conditions section.
+Not a stop condition — applies to the `U5 -> U5-repair -> U4` edge in the
+execution graph, BEFORE hard-stop #1 in the main skill's stop-conditions section.
 
 A single failing test, lint error, or verification check is not, by itself, a reason to stop and
 ask. Diagnose the failure, fix it, re-verify — in a tight cycle — the same way a human engineer
@@ -11,7 +12,8 @@ reproduces — at that point it has stopped being "a bug to fix" and become "a w
 bound exists so retry-until-green cannot become an infinite loop against a fundamentally broken or
 mis-specified test; hitting it is itself useful information for the human, not a failure of the
 loop. Log each attempt's diagnosis in `progress.json` so the eventual hard-stop report (if reached)
-shows the exhausted attempts, not just the final failure.
+shows the exhausted attempts, not just the final failure. An identical retry
+does not advance the edge.
 
 **Multiple independent failures — use `superpowers:dispatching-parallel-agents`.** When a
 verification failure turns out to be multiple independent broken things, don't fix them one at a

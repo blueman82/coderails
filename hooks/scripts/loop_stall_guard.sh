@@ -40,13 +40,11 @@ bump_loop_stop_count() {
   local category="$1"
   command -v jq >/dev/null 2>&1 || return 0
   [ -n "$ALS_PATH" ] && [ -f "$ALS_PATH" ] || return 0
-  local tmp="${ALS_PATH}.tmp"
-  if jq --arg cat "$category" \
-        '.loop_stop_counts[$cat] = ((.loop_stop_counts[$cat] // 0) + 1)' \
-        "$ALS_PATH" > "$tmp" 2>/dev/null; then
-    mv "$tmp" "$ALS_PATH" 2>/dev/null || { rm -f "$tmp" 2>/dev/null; als_log "hook=loop_stall_guard session=$session_id counter_write=mv_failed category=$category"; }
+  if als_atomic_progress_update "$ALS_PATH" \
+        --arg cat "$category" \
+        '.loop_stop_counts[$cat] = ((.loop_stop_counts[$cat] // 0) + 1)'; then
+    :
   else
-    rm -f "$tmp" 2>/dev/null
     als_log "hook=loop_stall_guard session=$session_id counter_write=jq_failed category=$category"
   fi
 }

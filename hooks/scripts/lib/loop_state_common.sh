@@ -42,6 +42,27 @@ als_log() {
   { printf '%s %s\n' "$(date -Iseconds 2>/dev/null || date +%Y-%m-%dT%H:%M:%S%z)" "$msg" >> "$LOG_FILE"; } 2>/dev/null
 }
 
+# Serialize local progress.json read-modify-write operations and replace the
+# file atomically. A lock directory is used because mkdir is atomic on the
+# local filesystem; failure to acquire it never overwrites another writer's
+# update. The lock is deliberately conservative: a crashed writer can leave
+# it behind, so callers keep their existing best-effort/fail-closed policy.
+als_atomic_progress_update() (
+  local path="$1"; shift
+  local lock="${path}.lock" tmp="" attempts=0
+  [ -f "$path" ] || return 1
+  while ! mkdir "$lock" 2>/dev/null; do
+    attempts=$((attempts + 1))
+    [ "$attempts" -ge "$MAX_ATTEMPTS" ] && return 1
+    sleep "$SLEEP_S"
+  done
+  trap 'rm -f "$tmp" 2>/dev/null; rmdir "$lock" 2>/dev/null' EXIT HUP INT TERM
+  tmp=$(mktemp "${path}.tmp.XXXXXX") || return 1
+  jq "$@" "$path" > "$tmp" 2>/dev/null || return 1
+  mv "$tmp" "$path" 2>/dev/null || return 1
+  tmp=""
+)
+
 # Shared accumulator for the `complete`-only systemMessage: als_gate_proofs_on_complete
 # (withdrawn_proofs) and als_report_cost_on_complete (cost) both run in the
 # SAME loop_stall_guard.sh hook invocation and each has its own reason to
