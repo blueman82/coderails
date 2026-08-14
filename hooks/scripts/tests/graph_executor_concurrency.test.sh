@@ -1,9 +1,20 @@
 #!/bin/bash
 # Regression: two concurrent progress.json writers must not lose each
-# other's updates (AC-8). Ports post_review.test.sh's slow-jq-shim race
-# widener verbatim (lines 181-206) rather than inventing a new one: one
-# writer is graph_executor_apply_wave (Unit 2), the other an unrelated
-# als_atomic_progress_update mutation on the same file.
+# other's updates (AC-8). Adapts post_review.test.sh's slow-jq-shim race
+# widener (lines 181-206): a uniform pre-call sleep doesn't work here
+# because graph_executor_apply_wave makes an extra pre-lock jq shape-check
+# call that als_atomic_progress_update's single writer doesn't have, so a
+# flat sleep-before-every-call shim staggers the two writers apart in time
+# instead of making them overlap -- they end up serializing by accident,
+# never actually contending for the lock. The shim below sleeps AFTER the
+# real jq returns, and only for progress.json paths, so the unrelated
+# shape-check call isn't delayed and the lock-held window is what's
+# widened, not unrelated jq calls.
+#
+# Discriminating power re-verified directly (not taken on faith): with
+# als_atomic_progress_update's mkdir-lock block mutated out of
+# loop_state_common.sh, this test FAILS 5/5 runs (a lost update surfaces as
+# a wrong/null counter value); with the lock intact, it PASSES 5/5 runs.
 set -u
 LIB="$(cd "$(dirname "$0")/../lib" && pwd)/graph_executor.sh"
 
@@ -31,7 +42,12 @@ jq -n '
 JQ_BIN=$(command -v jq)
 SLOW_BIN="$TMP/slow-bin"
 mkdir -p "$SLOW_BIN"
-printf '#!/bin/bash\nsleep 0.1\nexec %s "$@"\n' "$JQ_BIN" > "$SLOW_BIN/jq"
+cat > "$SLOW_BIN/jq" <<SHIM
+#!/bin/bash
+$JQ_BIN "\$@"; rc=\$?
+case " \$* " in *progress.json*) sleep 0.1;; esac
+exit \$rc
+SHIM
 chmod +x "$SLOW_BIN/jq"
 
 PATH="$SLOW_BIN:$PATH" CLAUDE_HOOK_MAX_ATTEMPTS=100 CLAUDE_HOOK_SLEEP_S=0.01 \
