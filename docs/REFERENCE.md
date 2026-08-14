@@ -485,6 +485,18 @@ re-entrant contexts.
 
 **Used by:** `agentic-loop` Phase 2.5 design forks.
 
+#### `disposition-scout`
+
+**Purpose:** Given a Phase 1 plan that retires existing code paths,
+recommends clean-break or preserve-compat per retirement unit from the
+actual consumers and constraints. Read-only — never reviews an existing
+document, originates the recommendation from the plan and the named
+retired paths.
+
+**Tools:** `Read, Grep, Glob, Bash`, with `disallowedTools: Write, Edit, NotebookEdit` (read-only discipline, not a tool guarantee — `Bash` can mutate). **Model:** `inherit`.
+
+**Used by:** `agentic-loop` Phase 2.6 disposition decisions.
+
 #### `docs-auditor`
 
 **Purpose:** Runs `/sync-docs` to audit the repo's own in-tree docs
