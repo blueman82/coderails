@@ -142,7 +142,7 @@ enforcement.
 | `coderails:loop-worker` | Implements one scoped task: code, tests, commit, self-review, evidence-backed report | read + write |
 | `coderails:deploy-safety-reviewer` | Reviews a PR/change for deploy-safety risk — rollback risk, blast radius, migration/schema safety, feature-flag applicability, deploy-time observability coverage | read + Bash; `Write`/`Edit` disallowed |
 | `coderails:design-scout` | Resolves one unresolved architectural fork by reading actual code paths and originating ONE recommendation with a named flip-condition; never reviews an existing document | read + Bash; `Write`/`Edit` disallowed |
-| `coderails:disposition-scout` | Given a Phase 1 plan that retires existing code paths, recommends clean-break or preserve-compat per retirement unit from the actual consumers and constraints. Read-only | read + Bash; `Write`/`Edit` disallowed |
+| `coderails:disposition-scout` | Resolves the clean-break vs preserve-compat fork per retirement unit in a Phase 1 plan, from the actual consumers and constraints | read + Bash; `Write`/`Edit` disallowed |
 | `coderails:docs-auditor` | Runs `/sync-docs` to audit in-tree docs for drift against just-merged code; fixes only loop-caused drift, surfaces pre-existing drift to the human | read + Bash + `Edit`; `Write` disallowed |
 | `coderails:preflight-scout` | Runs the pre-planning skill sequence (planning-sequence, premortem, assumptions, notchecked, wiki-query) plus a retro-intake pass; additive-only, never relaxes a gate | read + Bash; `Write`/`Edit` disallowed |
 | `coderails:proof-author` | Writes a frozen `proof.json` from only the raw authorising prompt and directly-referenced docs — never the plan or dispatching conversation; every proof stays `pending` | read + Bash + `Write` |
