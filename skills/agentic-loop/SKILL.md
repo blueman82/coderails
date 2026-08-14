@@ -42,6 +42,17 @@ nodes run once per work-unit `i`; `J*` nodes are explicit joins. A skipped node
 is still recorded as `skipped: <predicate>` in loop state; it is not a failed
 node and cannot satisfy a prerequisite by omission.
 
+**Dispatch gate — query readiness, don't infer it.** Before dispatching any
+wave, enumerate the candidate nodes (pending nodes whose prerequisites might
+now be satisfied) and run `hooks/scripts/lib/graph_readiness.sh <progress.json
+path> <node-id>` for each candidate. Dispatch only the nodes the script
+reports `ready` for, together, in one wave; a `blocked` result means that node
+waits for a later wave, not an error. The script is read-only/advisory — it
+only answers the readiness query, it never writes state — so the orchestrator
+itself still decides not to dispatch a blocked node and remains the sole
+writer of `progress.json.graph` after the wave returns (cross-referenced at
+Phase 3's dispatch step, below).
+
 ```text
 S-2 -> S-1 -> S0 -> S0.4 -> S0.5 -> S1 -> S2
                                       |       |
@@ -163,6 +174,16 @@ even when it skipped Phase 2.7.
 ### Phase 3 — Delegate all implementation to routed workers; spawn a team when work has ≥3 sequential units or dependency chains
 
 **Default: main context never implements.** It orchestrates — plans, delegates, verifies. Every implementation unit (even a single-file edit, even a tight sequential step) goes to a spawned worker at the role Phase 2.8 assigned it — the `default` role unless Phase 2.8 routed otherwise. The two reasons, in order: keep main context clean (frontier-verification_level context is scarce and fills fast in long sessions), and keep cost down (`default` does the typing, not `frontier`). Treat a `frontier`-role worker, or a file edit done directly in main context, as the exception that needs a reason, not the default.
+
+**Before dispatching a wave, run the readiness gate (see the Execution graph
+section's dispatch gate, above).** For every pending node whose prerequisites
+might now be satisfied, run `hooks/scripts/lib/graph_readiness.sh
+<progress.json path> <node-id>` and dispatch only the nodes it reports `ready`
+for, together, in one wave. A `blocked` result isn't a failure — it means that
+node isn't ready yet and waits for a later wave. The script is
+read-only/advisory: it answers the readiness query only, and the orchestrator
+remains the sole writer of `progress.json.graph`, absorbing the wave's results
+in one read-modify-write after it returns.
 
 The delegation decision is a two-rung ladder, not "delegate vs. do it yourself":
 
