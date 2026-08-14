@@ -18,10 +18,13 @@ def validate(event: dict) -> tuple[bool, str]:
     if event["event"] == "complete":
         if state.get("status") != "complete":
             return False, "complete requires state.status=complete"
-        if any(node.get("outcome") not in {"done", "skipped"} for node in nodes.values()):
+        if not isinstance(nodes, dict) or any(
+            not isinstance(node, dict) or node.get("outcome") not in {"done", "skipped"}
+            for node in nodes.values()
+        ):
             return False, "complete requires every graph node to be terminal-success"
-        if "retro" not in state:
-            return False, "complete requires retro"
+        if not isinstance(state.get("retro"), dict):
+            return False, "complete requires retro object"
     return True, "allowed"
 
 

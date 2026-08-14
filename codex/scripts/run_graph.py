@@ -17,11 +17,11 @@ def main() -> int:
     parser.add_argument("--state", type=Path, required=True)
     args = parser.parse_args()
     graph = build_graph()
-    if args.state.exists() and args.state.stat().st_size:
+    if args.state.exists():
         prior = json.loads(args.state.read_text(encoding="utf-8"))
         graph = prior["graph"]
     execute(graph)
-    write_json(args.state, {
+    state = {
         "schema_version": 1,
         "status": "complete",
         "provider": "codex",
@@ -29,8 +29,9 @@ def main() -> int:
         "proof_disposition": "none: graph runner has no code proof surface",
         "retro": {"provider": "codex", "status": "complete"},
         "graph": graph,
-    })
-    print(json.dumps({"status": "complete", "nodes": len(graph["nodes"])}))
+    }
+    write_json(args.state, state)
+    print(json.dumps({"status": state["status"], "nodes": len(graph["nodes"])}))
     return 0
 
 

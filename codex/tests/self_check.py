@@ -21,21 +21,31 @@ def main() -> int:
     assert seen.index("S2.5") < seen.index("J2")
     assert seen.index("S2.6") < seen.index("J2")
 
-    attempts = {"S2": 0}
-    retry_graph = build_graph(("2",))
-    retry_graph["nodes"]["S2"]["retry"]["max"] = 2
+    graph = build_graph(("A", "B"))
+    attempts = {"SA": 0}
     def retry(node):
         attempts[node] = attempts.get(node, 0) + 1
-        return "failed" if attempts[node] == 1 else "done"
-    execute(retry_graph, retry)
-    assert attempts["S2"] == 2
+        return "failed" if node == "SA" else "done"
+    try:
+        execute(graph, retry)
+    except ValueError as error:
+        assert "blocked" in str(error)
+    assert attempts["SA"] == 5
+    assert graph["nodes"]["SA"]["outcome"] == "hard-stop"
+    assert graph["nodes"]["SB"]["outcome"] == "pending"
+
+    graph = build_graph(("A", "B"))
+    calls = []
+    execute(graph, lambda node: calls.append((node, graph["nodes"][node]["outcome"])) or "done")
+    assert calls[:2] == [("SA", "pending"), ("SB", "pending")]
 
     hook = ROOT / "codex/hooks/lifecycle.py"
     valid = {"event": "complete", "state": {"status": "complete", "graph": graph, "retro": {}}}
     result = subprocess.run([sys.executable, str(hook)], input=json.dumps(valid), text=True, capture_output=True)
     assert result.returncode == 0, result.stdout
-    missing = {"event": "complete", "state": {"status": "complete", "graph": graph}}
-    assert subprocess.run([sys.executable, str(hook)], input=json.dumps(missing), text=True).returncode == 1
+    invalid = {"event": "complete", "state": {"status": "complete", "graph": graph}}
+    result = subprocess.run([sys.executable, str(hook)], input=json.dumps(invalid), text=True, capture_output=True)
+    assert result.returncode == 1, result.stdout
     print("PASS")
     return 0
 

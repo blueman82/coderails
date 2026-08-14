@@ -17,7 +17,7 @@ PHASES = (
 
 
 def node_id(phase: str) -> str:
-    return f"S{phase}" if phase not in {"-2", "-1"} else f"S{phase}"
+    return f"S{phase}"
 
 
 def build_graph(phases: Iterable[str] = PHASES) -> dict:
@@ -44,45 +44,59 @@ def build_graph(phases: Iterable[str] = PHASES) -> dict:
 
 def ready(graph: dict, node: str) -> bool:
     nodes, edges, joins = graph["nodes"], graph["edges"], graph.get("joins", {})
+    if node not in nodes or nodes[node].get("status") not in {"pending", "ready"}:
+        return False
     predecessors = joins[node]["inputs"] if joins.get(node, {}).get("mode") == "all" else [
         edge["from"] for edge in edges if edge["to"] == node
     ]
-    return all(nodes.get(item, {}).get("outcome") in {"done", "skipped"} for item in predecessors)
+    return bool(all(item in nodes for item in predecessors) and all(
+        nodes[item].get("outcome") in {"done", "skipped"} for item in predecessors
+    ))
 
 
 def execute(graph: dict, handler: Callable[[str], str] | None = None) -> dict:
     """Run ready nodes in waves, collecting each wave before persisting it."""
     handler = handler or (lambda _node: "done")
-    remaining = set(graph["nodes"])
+    remaining = {
+        node for node, value in graph["nodes"].items()
+        if value.get("outcome") not in {"done", "skipped", "failed", "hard-stop"}
+    }
     while remaining:
         wave = sorted(node for node in remaining if ready(graph, node))
         if not wave:
             raise ValueError(f"graph is blocked or cyclic: {sorted(remaining)}")
         results = []
         for node in wave:
-            state = graph["nodes"][node]
-            maximum = state.get("retry", {}).get("max", 5)
+            value = graph["nodes"][node]
+            retry = value.get("retry", {})
+            maximum = retry.get("max", 5)
+            if not isinstance(maximum, int) or isinstance(maximum, bool) or not 0 <= maximum <= 5:
+                raise ValueError(f"phase {node} has invalid retry.max")
+            attempts = retry.get("attempts", 0)
+            if not isinstance(attempts, int) or isinstance(attempts, bool) or not 0 <= attempts <= maximum:
+                raise ValueError(f"phase {node} has invalid retry.attempts")
             outcome = "stale"
             candidate = "stale"
-            while state.get("retry", {}).get("attempts", 0) < maximum:
+            while attempts < maximum:
                 try:
                     candidate = handler(node)
                 except Exception:
                     candidate = "failed"
-                state.setdefault("retry", {})["attempts"] = state.get("retry", {}).get("attempts", 0) + 1
-                if candidate in {"done", "skipped"}:
+                if candidate not in {"done", "skipped", "failed", "stale", "hard-stop"}:
+                    raise ValueError(f"phase {node} returned invalid outcome: {candidate}")
+                attempts += 1
+                if candidate in {"done", "skipped", "hard-stop"}:
                     outcome = candidate
                     break
-            if outcome == "stale" and candidate in {"failed", "hard-stop"}:
+            if outcome == "stale" and candidate in {"failed", "stale"}:
                 outcome = "hard-stop"
-            results.append((node, outcome))
-        for node, outcome in results:
+            results.append((node, outcome, attempts))
+        for node, outcome, attempts in results:
             graph["nodes"][node].update(
-                status=outcome,
-                outcome=outcome,
-                provider="codex",
+                status=outcome, outcome=outcome, provider="codex",
                 skill_id=f"coderails.phase-{node.removeprefix('S')}",
                 implementation="codex/runtime/graph.py",
+                retry={"attempts": attempts, "max": graph["nodes"][node]["retry"]["max"]},
             )
             remaining.remove(node)
     return graph
