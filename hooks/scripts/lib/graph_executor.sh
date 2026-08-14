@@ -25,10 +25,15 @@
 #     decisions_absorbed entry, via ONE als_atomic_progress_update call.
 #     Returns 1 (no write attempted) if wave-results is not a JSON object,
 #     has no node entries, names any node id not already present in
-#     .graph.nodes, or gives any node a status/outcome outside
-#     graph_contract.test.sh's enum or a retry.attempts > retry.max
-#     (fail-closed by design — this function never creates a graph node,
-#     and never lands a value that violates the graph's own contract).
+#     .graph.nodes, or gives any node a status/outcome/retry violating
+#     graph_contract.test.sh's own contract (status/outcome must be in its
+#     enum via IN()-membership — not jq's index(), which does subsequence
+#     search and would wrongly accept an array like ["done"]; retry.attempts
+#     and retry.max must both be numbers, attempts >= 0, max in 0..5,
+#     attempts <= max) — the exact predicate is lifted from that test, not
+#     re-derived, so this guard can't drift weaker than it (fail-closed by
+#     design — this function never creates a graph node, and never lands a
+#     value that violates the graph's own contract).
 #     ALL validation, including the id-existence check, runs INSIDE the
 #     locked jq filter via jq's error(...) (which aborts the filter, so
 #     als_atomic_progress_update's `mv` never runs) — not via a pre-lock
@@ -67,10 +72,16 @@ graph_executor_apply_wave() {
     type == "object" and ((keys - ["decisions_absorbed"]) | length > 0)
   ' >/dev/null 2>&1 || return 1
 
+  # Enum/retry predicate lifted verbatim from graph_contract.test.sh (same
+  # IN()-membership and 4-constraint retry check that test already enforces
+  # on a written file) — not re-derived, so this guard can't drift weaker
+  # than the contract it's supposed to uphold. IN() (not index()) is
+  # required: jq's index() does subsequence search on an array needle, so
+  # index() would wrongly accept status:["done"] as valid; IN() is true
+  # membership and also correctly rejects an explicit null.
   als_atomic_progress_update "$path" \
     --argjson wave "$wave_json" '
-    ["pending","ready","running","blocked","done","skipped","failed","hard-stop","stale"] as $valid_enum
-    | (.graph.nodes // {}) as $nodes
+    (.graph.nodes // {}) as $nodes
     | ($wave | del(.decisions_absorbed)) as $results
     | .graph.nodes = ($results | reduce keys[] as $id ($nodes;
         if ($nodes | has($id) | not) then
@@ -78,12 +89,15 @@ graph_executor_apply_wave() {
         else
           (($nodes[$id] // {}) * $results[$id]) as $merged
           | .[$id] = (
-              if $merged.status != null and ($valid_enum | index($merged.status) | not)
+              if ($merged.status // null | IN("pending","ready","running","blocked","done","skipped","failed","hard-stop","stale") | not)
               then error("graph_executor: node \($id) has invalid status \($merged.status)")
-              elif $merged.outcome != null and ($valid_enum | index($merged.outcome) | not)
+              elif ($merged.outcome // null | IN("pending","ready","running","blocked","done","skipped","failed","hard-stop","stale") | not)
               then error("graph_executor: node \($id) has invalid outcome \($merged.outcome)")
-              elif $merged.retry.attempts != null and $merged.retry.max != null
-                   and ($merged.retry.attempts > $merged.retry.max)
+              elif ($merged.retry.attempts | type != "number" or . < 0)
+              then error("graph_executor: node \($id) has invalid retry.attempts \($merged.retry.attempts)")
+              elif ($merged.retry.max | type != "number" or . < 0 or . > 5)
+              then error("graph_executor: node \($id) has invalid retry.max \($merged.retry.max)")
+              elif ($merged.retry.attempts > $merged.retry.max)
               then error("graph_executor: node \($id) has retry.attempts > retry.max")
               else $merged
               end

@@ -96,9 +96,9 @@ call_count2=$(wc -l < "$CALL_LOG" | tr -d ' ')
   || fail "non-object wave-results fails closed, no write attempted" "rc=$rc2 call_count=$call_count2"
 
 # --- fail-closed: an id not already in .graph.nodes must never be created.
-# The check runs INSIDE the locked jq filter (I2 fix, closes a TOCTOU race
-# a pre-lock read would have), so als_atomic_progress_update IS still
-# called (call_count=1) — but its own jq errors, so no write lands.
+# The check runs INSIDE the locked jq filter, closing the TOCTOU race a
+# pre-lock read would have, so als_atomic_progress_update IS still called
+# (call_count=1) — but its own jq errors, so no write lands.
 : > "$CALL_LOG"
 graph_executor_apply_wave "$TMP/progress.json" '{"NOPE": {"status":"done","outcome":"done"}}'
 rc3=$?
@@ -134,8 +134,65 @@ a_attempts_after=$(jq -r '.graph.nodes.A.retry.attempts' "$TMP/retry_fixture.jso
   && ok "retry.attempts > retry.max fails closed, node unchanged" \
   || fail "retry.attempts > retry.max fails closed" "rc=$rc5 attempts_after=$a_attempts_after"
 
-# --- I2 regression: id-existence check must read LIVE file state under the
-# lock, not a pre-lock snapshot (TOCTOU). Simulate a node already having been
+# --- array-typed status must not pass enum membership. jq's index() does
+# subsequence search on an array needle, so index(["done"]) would wrongly
+# match a valid element -- the guard uses IN() (true membership) instead.
+jq -n '
+  { graph: { nodes: { A:{status:"pending",outcome:"pending",retry:{attempts:0,max:5}} },
+             edges: [], joins: {} },
+    decisions_absorbed: [] }
+' > "$TMP/array_status_fixture.json"
+graph_executor_apply_wave "$TMP/array_status_fixture.json" '{"A":{"status":["done"]}}'
+rc8=$?
+a_status_after_arr=$(jq -c '.graph.nodes.A.status' "$TMP/array_status_fixture.json")
+[ "$rc8" -ne 0 ] && [ "$a_status_after_arr" = '"pending"' ] \
+  && ok "array-typed status fails closed, node unchanged" \
+  || fail "array-typed status fails closed" "rc=$rc8 status_after=$a_status_after_arr"
+
+# --- retry.max above the contract's cap of 5, and negative attempts, must
+# both fail closed -- a bare "attempts > max" comparison alone lets both
+# slide through (99 > 5 is a valid state under that check; -3 > 5 is false).
+jq -n '
+  { graph: { nodes: { A:{status:"pending",outcome:"pending",retry:{attempts:0,max:5}} },
+             edges: [], joins: {} },
+    decisions_absorbed: [] }
+' > "$TMP/retry_cap_fixture.json"
+graph_executor_apply_wave "$TMP/retry_cap_fixture.json" '{"A":{"status":"done","outcome":"done","retry":{"attempts":0,"max":99}}}'
+rc9=$?
+a_max_after=$(jq -r '.graph.nodes.A.retry.max' "$TMP/retry_cap_fixture.json")
+[ "$rc9" -ne 0 ] && [ "$a_max_after" = "5" ] \
+  && ok "retry.max above the contract cap of 5 fails closed, node unchanged" \
+  || fail "retry.max above the contract cap of 5 fails closed" "rc=$rc9 max_after=$a_max_after"
+
+jq -n '
+  { graph: { nodes: { A:{status:"pending",outcome:"pending",retry:{attempts:0,max:5}} },
+             edges: [], joins: {} },
+    decisions_absorbed: [] }
+' > "$TMP/retry_negative_fixture.json"
+graph_executor_apply_wave "$TMP/retry_negative_fixture.json" '{"A":{"status":"done","outcome":"done","retry":{"attempts":-3,"max":5}}}'
+rc10=$?
+a_attempts_after_neg=$(jq -r '.graph.nodes.A.retry.attempts' "$TMP/retry_negative_fixture.json")
+[ "$rc10" -ne 0 ] && [ "$a_attempts_after_neg" = "0" ] \
+  && ok "negative retry.attempts fails closed, node unchanged" \
+  || fail "negative retry.attempts fails closed" "rc=$rc10 attempts_after=$a_attempts_after_neg"
+
+# --- explicit "status": null in a wave-result must not bypass the guard and
+# NULL OUT the existing node's valid status (distinguishing "field omitted"
+# from "field explicitly null" matters here).
+jq -n '
+  { graph: { nodes: { A:{status:"pending",outcome:"pending",retry:{attempts:0,max:5}} },
+             edges: [], joins: {} },
+    decisions_absorbed: [] }
+' > "$TMP/null_status_fixture.json"
+graph_executor_apply_wave "$TMP/null_status_fixture.json" '{"A":{"status":null}}'
+rc11=$?
+a_status_after_null=$(jq -c '.graph.nodes.A.status' "$TMP/null_status_fixture.json")
+[ "$rc11" -ne 0 ] && [ "$a_status_after_null" = '"pending"' ] \
+  && ok "explicit status:null fails closed, existing status not nulled out" \
+  || fail "explicit status:null fails closed" "rc=$rc11 status_after=$a_status_after_null"
+
+# --- id-existence check must read LIVE file state under the lock, not a
+# pre-lock snapshot (TOCTOU). Simulate a node already having been
 # removed by a prior writer by the time apply_wave's own locked jq runs —
 # there is no separate pre-lock read to go stale, since the check lives
 # inside the same jq program that performs the write.
