@@ -104,4 +104,35 @@ run_check "(stale) join with one stale input -> blocked (stale is not terminal-s
 run_check "(stale-control) join both done -> ready (negative control of stale)" \
   "$TMP/join_both_done.json" J ready 0
 
+# --- Doc-wiring checks: SKILL.md must instruct the orchestrator to call this
+# script before dispatch, and the instruction must live in the "Execution
+# graph" section specifically — not merely appear somewhere in the file.
+# A bare whole-file `grep -q` cannot tell "in this section" from "anywhere",
+# so we extract the section's own text (bounded start/end) and grep only that.
+
+SKILL="$(cd "$(dirname "$0")/../../.." && pwd)/skills/agentic-loop/SKILL.md"
+
+section() { sed -n '/The phases below are a dependency graph/,/^### Phases -2 through 2.7/p' "$1"; }
+
+# Over-broad-extraction control: 'Cluster wiki ingest' occurs exactly once in
+# the whole file, well after the target section (Phase 9 heading) — if it ever
+# showed up inside `section`'s output, the end-boundary stopped matching and
+# the extraction is silently reading to EOF instead of stopping at the
+# section's real end.
+if [ "$(grep -c 'Cluster wiki ingest' "$SKILL")" = "1" ] && ! section "$SKILL" | grep -q 'Cluster wiki ingest'; then
+  printf 'ok   - %s\n' "section() stops before 'Cluster wiki ingest' (end boundary still matches)"
+else
+  printf 'FAIL - %s\n' "section() over-ran into text past the intended end boundary"
+  fails=$((fails+1))
+fi
+
+# The real assertion: SKILL.md's Execution-graph section names the script as
+# the pre-dispatch readiness mechanism.
+if section "$SKILL" | grep -q 'graph_readiness.sh'; then
+  printf 'ok   - %s\n' "SKILL.md's Execution-graph section names graph_readiness.sh as the pre-dispatch readiness mechanism"
+else
+  printf 'FAIL - %s\n' "graph_readiness.sh not found within SKILL.md's Execution-graph section"
+  fails=$((fails+1))
+fi
+
 [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails)"; exit 1; }
