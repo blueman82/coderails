@@ -2,11 +2,11 @@
   "schema_version": 1,
   "provider": "codex",
   "package": "coderails-codex",
-  "source_root": "packages/codex",
-  "manifest": "manifest.json",
-  "installer": "install.json",
+  "source_root": ".",
+  "manifest": ".codex-plugin/plugin.json",
+  "installer": "packages/codex/install.json",
   "layout": {
-    "skills": "skills",
-    "fixtures": "fixtures"
+    "runtime": "codex",
+    "fixtures": "packages/fixtures/codex"
   }
 }
