@@ -51,18 +51,39 @@ def ready(graph: dict, node: str) -> bool:
 
 
 def execute(graph: dict, handler: Callable[[str], str] | None = None) -> dict:
-    """Run ready nodes in waves; handler returns ``done`` or ``skipped``."""
+    """Run ready nodes in waves, collecting each wave before persisting it."""
     handler = handler or (lambda _node: "done")
     remaining = set(graph["nodes"])
     while remaining:
         wave = sorted(node for node in remaining if ready(graph, node))
         if not wave:
             raise ValueError(f"graph is blocked or cyclic: {sorted(remaining)}")
+        results = []
         for node in wave:
-            outcome = handler(node)
-            if outcome not in {"done", "skipped"}:
-                raise ValueError(f"phase {node} returned non-terminal outcome: {outcome}")
-            graph["nodes"][node].update(status=outcome, outcome=outcome)
+            state = graph["nodes"][node]
+            maximum = state.get("retry", {}).get("max", 5)
+            outcome = "stale"
+            candidate = "stale"
+            while state.get("retry", {}).get("attempts", 0) < maximum:
+                try:
+                    candidate = handler(node)
+                except Exception:
+                    candidate = "failed"
+                state.setdefault("retry", {})["attempts"] = state.get("retry", {}).get("attempts", 0) + 1
+                if candidate in {"done", "skipped"}:
+                    outcome = candidate
+                    break
+            if outcome == "stale" and candidate in {"failed", "hard-stop"}:
+                outcome = "hard-stop"
+            results.append((node, outcome))
+        for node, outcome in results:
+            graph["nodes"][node].update(
+                status=outcome,
+                outcome=outcome,
+                provider="codex",
+                skill_id=f"coderails.phase-{node.removeprefix('S')}",
+                implementation="codex/runtime/graph.py",
+            )
             remaining.remove(node)
     return graph
 
@@ -78,4 +99,3 @@ def write_json(path: Path, value: dict) -> None:
     finally:
         if os.path.exists(temporary):
             os.unlink(temporary)
-

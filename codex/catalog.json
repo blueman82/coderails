@@ -1,6 +1,7 @@
 {
   "name": "coderails",
   "provider": "codex",
+  "skill_index": "skills/index.yaml",
   "roots": ["skills", "agents", "commands", "hooks"],
   "phase_graph": "runtime/graph.py",
   "lifecycle": "hooks/lifecycle.py"

@@ -9,7 +9,9 @@ check() {
   local provider="$1" case_name="$2" want="$3"; shift 3
   local fixture="$ROOT/packages/fixtures/$provider/$case_name.json" out rc
   out=$(bash "$HELPER" "$fixture" "$1"); rc=$?
-  if [ "$out" = "$want" ] && { [ "$want" = ready ] && [ "$rc" -eq 0 ] || [ "$want" = blocked ] && [ "$rc" -eq 1 ]; }; then
+  expected_rc=1
+  [ "$want" = ready ] && expected_rc=0
+  if [ "$out" = "$want" ] && [ "$rc" -eq "$expected_rc" ]; then
     printf 'ok   - %s/%s: %s\n' "$provider" "$case_name" "$want"
   else
     printf 'FAIL - %s/%s: expected %s, got %s (exit %s)\n' "$provider" "$case_name" "$want" "$out" "$rc"
