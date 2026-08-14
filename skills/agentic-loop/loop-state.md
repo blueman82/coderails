@@ -75,7 +75,12 @@ graph after each wave and is the only writer. A node is ready when every incomin
 terminal-success predecessor (`done` or `skipped`) and its own `status` is `pending` or `ready`;
 `blocked` means a prerequisite is not terminal and is not a terminal outcome. Terminal outcomes
 are `done`, `skipped`, `failed`, and `hard-stop`; `skipped` carries a reason, while `failed` and
-`hard-stop` carry the observed failure. `retry.attempts` starts at zero and may not exceed
+`hard-stop` carry the observed failure. A `stale` value additionally marks a dispatched node whose
+worker went idle without reporting — distinct from a confirmed `failed` report or a healthy
+`running` state; like every value other than `done`/`skipped` it is not terminal-success, so it
+cannot satisfy a dependent edge or a `mode:"all"` join's readiness (see
+`hooks/scripts/lib/graph_readiness.sh` and `graph_contract.test.sh`'s enum). `retry.attempts`
+starts at zero and may not exceed
 `retry.max`, which is an integer from 0 through 5. A retry increments `attempts` only for a
 distinct diagnosed attempt; once the bound is reached, the node terminates as `hard-stop`.
 Edges must reference existing node IDs, cannot self-loop, and a join's `mode: "all"` releases
