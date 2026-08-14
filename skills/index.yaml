@@ -1,0 +1,507 @@
+skills:
+  agentic-loop:
+    graph_role: null
+    source_kind: skill
+    claude:
+      path: skills/agentic-loop/SKILL.md
+      status: active
+    codex:
+      path: null
+      status: planned
+    required_inputs: [authorising prompt, envelope/stop-conditions context]
+    output_contract: Multi-agent orchestration discipline keeping the main context a pure orchestrator that never implements.
+  cite-check:
+    graph_role: null
+    source_kind: skill
+    claude:
+      path: skills/cite-check/SKILL.md
+      status: active
+    codex:
+      path: null
+      status: planned
+    required_inputs: [claim to verify]
+    output_contract: Re-derived claim backed by sources only, no recall or inference.
+  dashboard:
+    graph_role: null
+    source_kind: skill
+    claude:
+      path: skills/dashboard/SKILL.md
+      status: active
+    codex:
+      path: null
+      status: planned
+    required_inputs: []
+    output_contract: Live local observability HUD for sessions, loops, PR gate states, runs, and memory activity.
+  docs-sync:
+    graph_role: S9-docs
+    source_kind: skill
+    claude:
+      path: skills/docs-sync/SKILL.md
+      status: active
+    codex:
+      path: null
+      status: planned
+    required_inputs: [git-tracked docs, current codebase state]
+    output_contract: Scheduled nightly drift audit that edits, pushes, reviews, and self-merges a fix when drift is found.
+  engineering-principles-bash:
+    graph_role: null
+    source_kind: skill
+    claude:
+      path: skills/engineering-principles-bash/SKILL.md
+      status: active
+    codex:
+      path: null
+      status: planned
+    required_inputs: [changed shell script files]
+    output_contract: Bash/shell-specific coding standards and idioms enforcement.
+  engineering-principles-go:
+    graph_role: null
+    source_kind: skill
+    claude:
+      path: skills/engineering-principles-go/SKILL.md
+      status: active
+    codex:
+      path: null
+      status: planned
+    required_inputs: [changed Go files]
+    output_contract: Go-specific coding standards and idioms enforcement.
+  engineering-principles-python:
+    graph_role: null
+    source_kind: skill
+    claude:
+      path: skills/engineering-principles-python/SKILL.md
+      status: active
+    codex:
+      path: null
+      status: planned
+    required_inputs: [changed Python files]
+    output_contract: Python-specific coding standards and idioms enforcement.
+  engineering-principles-ts:
+    graph_role: null
+    source_kind: skill
+    claude:
+      path: skills/engineering-principles-ts/SKILL.md
+      status: active
+    codex:
+      path: null
+      status: planned
+    required_inputs: [changed TypeScript files]
+    output_contract: TypeScript-specific coding standards and idioms enforcement.
+  engineering-principles:
+    graph_role: null
+    source_kind: skill
+    claude:
+      path: skills/engineering-principles/SKILL.md
+      status: active
+    codex:
+      path: null
+      status: planned
+    required_inputs: [code being written or modified]
+    output_contract: Enforces YAGNI/KISS/DRY/Fail Fast/SSOT/Law of Demeter plus language-specific standards via Serena LSP.
+  fable-mode:
+    graph_role: null
+    source_kind: skill
+    claude:
+      path: skills/fable-mode/SKILL.md
+      status: active
+    codex:
+      path: null
+      status: planned
+    required_inputs: [task description]
+    output_contract: High-autonomy, self-verifying, evidence-grounded working mode for non-trivial tasks.
+  handoff:
+    graph_role: null
+    source_kind: skill
+    claude:
+      path: skills/handoff/SKILL.md
+      status: active
+    codex:
+      path: null
+      status: planned
+    required_inputs: [current session context]
+    output_contract: Structured memory file and continuation prompt for carrying work into a new session.
+  improve-prompt:
+    graph_role: S-1
+    source_kind: skill
+    claude:
+      path: skills/improve-prompt/SKILL.md
+      status: active
+    codex:
+      path: null
+      status: planned
+    required_inputs: [raw prompt to improve]
+    output_contract: Rewritten prompt with ambiguities surfaced and gaps filled with reasonable assumptions.
+  loop-retro-promotion:
+    graph_role: null
+    source_kind: skill
+    claude:
+      path: skills/loop-retro-promotion/SKILL.md
+      status: active
+    codex:
+      path: null
+      status: planned
+    required_inputs: [accumulated agentic-loop retro.json files]
+    output_contract: Scheduled pipeline mining retros for repo-agnostic lessons promoted into learned-failure-modes.md.
+  memory-consolidation:
+    graph_role: null
+    source_kind: skill
+    claude:
+      path: skills/memory-consolidation/SKILL.md
+      status: active
+    codex:
+      path: null
+      status: planned
+    required_inputs: [project memory directory]
+    output_contract: Deduped, de-staled memory directory with a refreshed MEMORY.md index.
+  planning-sequence:
+    graph_role: null
+    source_kind: skill
+    claude:
+      path: skills/planning-sequence/SKILL.md
+      status: active
+    codex:
+      path: null
+      status: planned
+    required_inputs: [plan, idea, or decision to stress-test]
+    output_contract: Three-stage Pre-Parade, Premortem, and Red Team analysis run in order.
+  premortem:
+    graph_role: null
+    source_kind: skill
+    claude:
+      path: skills/premortem/SKILL.md
+      status: active
+    codex:
+      path: null
+      status: planned
+    required_inputs: [plan, decision, or approach to stress-test]
+    output_contract: Backwards-reasoned failure modes and causes assuming the plan already failed.
+  sync-docs:
+    graph_role: null
+    source_kind: skill
+    claude:
+      path: skills/sync-docs/SKILL.md
+      status: active
+    codex:
+      path: null
+      status: planned
+    required_inputs: [project docs and codebase]
+    output_contract: Documentation drift analysis and sync report, optionally with Serena semantic discovery.
+  task-evals:
+    graph_role: S2.7c
+    source_kind: skill
+    claude:
+      path: skills/task-evals/SKILL.md
+      status: active
+    codex:
+      path: null
+      status: planned
+    required_inputs: [task definition, plan]
+    output_contract: Frozen evals.json (schema_version 1) of independent, game-resistant success evals gating merge/loop completion.
+  using-coderails:
+    graph_role: null
+    source_kind: skill
+    claude:
+      path: skills/using-coderails/SKILL.md
+      status: active
+    codex:
+      path: null
+      status: planned
+    required_inputs: [conversation start]
+    output_contract: Establishes how to find and use skills before any response.
+  verify-merged-pr:
+    graph_role: G12
+    source_kind: skill
+    claude:
+      path: skills/verify-merged-pr/SKILL.md
+      status: active
+    codex:
+      path: null
+      status: planned
+    required_inputs: [PR number or merge claim to verify]
+    output_contract: Confirms a PR's changes are actually on origin/main before anything is built on top of the claim.
+  wiki-ingest:
+    graph_role: S9-wiki
+    source_kind: skill
+    claude:
+      path: skills/wiki-ingest/SKILL.md
+      status: active
+    codex:
+      path: null
+      status: planned
+    required_inputs: [PR number or description of the change to record]
+    output_contract: Wiki pages created or updated in the project's LLM Wiki documenting a merged change.
+  wiki-init:
+    graph_role: null
+    source_kind: skill
+    claude:
+      path: skills/wiki-init/SKILL.md
+      status: active
+    codex:
+      path: null
+      status: planned
+    required_inputs: [project to initialize a wiki for]
+    output_contract: Initialized LLM Wiki vault for the current project.
+  wiki-lint:
+    graph_role: null
+    source_kind: skill
+    claude:
+      path: skills/wiki-lint/SKILL.md
+      status: active
+    codex:
+      path: null
+      status: planned
+    required_inputs: [existing LLM Wiki vault, optional scope]
+    output_contract: Audit of wiki quality and structural integrity — contradictions, stale pages, orphans, dead links, coverage gaps.
+  wiki-query:
+    graph_role: null
+    source_kind: skill
+    claude:
+      path: skills/wiki-query/SKILL.md
+      status: active
+    codex:
+      path: null
+      status: planned
+    required_inputs: [question]
+    output_contract: Answer grounded in wiki content, optionally rendered as slides or charts.
+  workflow-audit:
+    graph_role: null
+    source_kind: skill
+    claude:
+      path: skills/workflow-audit/SKILL.md
+      status: active
+    codex:
+      path: null
+      status: planned
+    required_inputs: [recent session transcripts]
+    output_contract: List of repeated tasks worth turning into skills.
+  deploy-safety-reviewer:
+    graph_role: U4b-review[i]
+    source_kind: agent
+    claude:
+      path: agents/deploy-safety-reviewer.md
+      status: active
+    codex:
+      path: null
+      status: planned
+    required_inputs: [PR or planned change with a runtime/production surface]
+    output_contract: One verdict with a named risk boundary on deploy-safety risk.
+  design-scout:
+    graph_role: S2.5
+    source_kind: agent
+    claude:
+      path: agents/design-scout.md
+      status: active
+    codex:
+      path: null
+      status: planned
+    required_inputs: [unresolved architectural fork, actual code paths]
+    output_contract: One recommendation with a named flip-condition for the design fork.
+  disposition-scout:
+    graph_role: S2.6
+    source_kind: agent
+    claude:
+      path: agents/disposition-scout.md
+      status: active
+    codex:
+      path: .codex/skills/disposition-scout/SKILL.md
+      status: active
+    required_inputs: [Phase 1 plan, retired code paths]
+    output_contract: clean-break or preserve-compat recommendation per retirement unit with evidence and flip-condition.
+  docs-auditor:
+    graph_role: S9-docs
+    source_kind: agent
+    claude:
+      path: agents/docs-auditor.md
+      status: active
+    codex:
+      path: null
+      status: planned
+    required_inputs: [just-merged code, in-tree docs]
+    output_contract: Drift findings triaged, fixing only drift the loop's own PRs introduced.
+  loop-worker:
+    graph_role: U3[i]
+    source_kind: agent
+    claude:
+      path: agents/loop-worker.md
+      status: active
+    codex:
+      path: null
+      status: planned
+    required_inputs: [one scoped unit of work from a plan]
+    output_contract: Implemented, tested, self-reviewed code with a committed artifact/open PR.
+  preflight-scout:
+    graph_role: S2
+    source_kind: agent
+    claude:
+      path: agents/preflight-scout.md
+      status: active
+    codex:
+      path: null
+      status: planned
+    required_inputs: [loop task context]
+    output_contract: Consolidated pre-flight report from planning-sequence, premortem, assumptions, notchecked, wiki-query, and retro intake.
+  proof-author:
+    graph_role: S2.7e
+    source_kind: agent
+    claude:
+      path: agents/proof-author.md
+      status: active
+    codex:
+      path: null
+      status: planned
+    required_inputs: [raw authorising prompt and directly referenced docs]
+    output_contract: Frozen proof.json with every status "pending", author/grader independence preserved.
+  source-auditor:
+    graph_role: U4b-review[i]
+    source_kind: agent
+    claude:
+      path: agents/source-auditor.md
+      status: active
+    codex:
+      path: null
+      status: planned
+    required_inputs: [stated claim, durable sources]
+    output_contract: Sourced PASS / FAIL / UNSUPPORTED verdict re-derived from files, git, and fresh command output.
+  spec-reviewer:
+    graph_role: S2.7a
+    source_kind: agent
+    claude:
+      path: agents/spec-reviewer.md
+      status: active
+    codex:
+      path: null
+      status: planned
+    required_inputs: [spec or design document]
+    output_contract: Completeness, consistency, clarity, scope, and YAGNI review before implementation planning starts.
+  wiki-writer:
+    graph_role: S9-wiki
+    source_kind: agent
+    claude:
+      path: agents/wiki-writer.md
+      status: active
+    codex:
+      path: null
+      status: planned
+    required_inputs: [wiki ingest/query/lint task, AGENTS-wiki-schema.md contract]
+    output_contract: Wiki pages read, authored, and maintained, with commits and PRs when the vault config requires it.
+  assumptions:
+    graph_role: null
+    source_kind: command
+    claude:
+      path: commands/assumptions.md
+      status: active
+    codex:
+      path: null
+      status: planned
+    required_inputs: [current working context]
+    output_contract: Every current assumption listed, marked verified or inferred.
+  disconfirm:
+    graph_role: null
+    source_kind: command
+    claude:
+      path: commands/disconfirm.md
+      status: active
+    codex:
+      path: null
+      status: planned
+    required_inputs: [most recent recommendation]
+    output_contract: Strongest case against the most recent recommendation.
+  init:
+    graph_role: null
+    source_kind: command
+    claude:
+      path: commands/init.md
+      status: active
+    codex:
+      path: null
+      status: planned
+    required_inputs: [project-name (optional)]
+    output_contract: Scaffolded workflow.config.yaml for the current project.
+  merge:
+    graph_role: U4b-merge-gate[i]
+    source_kind: command
+    claude:
+      path: commands/merge.md
+      status: active
+    codex:
+      path: null
+      status: planned
+    required_inputs: [pr-number | branch-name | auto]
+    output_contract: Approved PR merged, switched to main, and pulled latest changes.
+  notchecked:
+    graph_role: null
+    source_kind: command
+    claude:
+      path: commands/notchecked.md
+      status: active
+    codex:
+      path: null
+      status: planned
+    required_inputs: [claims made in session]
+    output_contract: List of claims made but not actually verified.
+  post-evals:
+    graph_role: U4b-merge-gate[i]
+    source_kind: command
+    claude:
+      path: commands/post-evals.md
+      status: active
+    codex:
+      path: null
+      status: planned
+    required_inputs: [PR#]
+    output_contract: Validated, SHA-bound eval-artifact summary posted as a durable PR artifact.
+  post-review:
+    graph_role: U4b-review[i]
+    source_kind: command
+    claude:
+      path: commands/post-review.md
+      status: active
+    codex:
+      path: null
+      status: planned
+    required_inputs: [PR#]
+    output_contract: Validated, SHA-bound review summary posted as a durable PR artifact.
+  prep:
+    graph_role: null
+    source_kind: command
+    claude:
+      path: commands/prep.md
+      status: active
+    codex:
+      path: null
+      status: planned
+    required_inputs: [branch name, optional type/summary/description]
+    output_contract: Safety branch, new feature/bug branch, and Jira ticket created.
+  push:
+    graph_role: U6[i]
+    source_kind: command
+    claude:
+      path: commands/push.md
+      status: active
+    codex:
+      path: null
+      status: planned
+    required_inputs: [commit message (optional), working tree changes]
+    output_contract: Changes added, committed, pushed, and a PR created.
+  test-gate-setup:
+    graph_role: null
+    source_kind: command
+    claude:
+      path: commands/test-gate-setup.md
+      status: active
+    codex:
+      path: null
+      status: planned
+    required_inputs: [current project]
+    output_contract: Detected test runner and created .claude/test_command.
+  workflow:
+    graph_role: null
+    source_kind: command
+    claude:
+      path: commands/workflow.md
+      status: active
+    codex:
+      path: null
+      status: planned
+    required_inputs: [branch, description]
+    output_contract: "Full feature workflow orchestrated end-to-end: prep, push, review, merge, wiki-ingest/lint."
