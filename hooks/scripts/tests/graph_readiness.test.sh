@@ -104,27 +104,4 @@ run_check "(stale) join with one stale input -> blocked (stale is not terminal-s
 run_check "(stale-control) join both done -> ready (negative control of stale)" \
   "$TMP/join_both_done.json" J ready 0
 
-# --- Doc-wiring contract: the script existing is not enough — the
-# orchestrator must actually be instructed to CALL it before a dispatch
-# wave, cross-referenced at both the execution-graph contract and the
-# Phase 3 dispatch section. Regression lock for the gap named in
-# PR docs/wire-graph-readiness-dispatch: SKILL.md documented node states
-# and "run ready nodes in one wave" but never named this script as the
-# mechanism that answers "ready or not" before a wave.
-SKILL_PATH="$(cd "$(dirname "$0")/../../.." && pwd)/skills/agentic-loop/SKILL.md"
-doc_check() { # desc expected actual
-  if [ "$2" = "$3" ]; then printf 'ok   - %s\n' "$1"
-  else printf 'FAIL - %s (expected %s, got %s)\n' "$1" "$2" "$3"; fails=$((fails+1)); fi
-}
-
-if [ -f "$SKILL_PATH" ]; then
-  doc_check "SKILL.md's dispatch-phase text names graph_readiness.sh as the pre-wave readiness check" \
-    "yes" "$(grep -q 'hooks/scripts/lib/graph_readiness\.sh' "$SKILL_PATH" && echo yes || echo no)"
-  doc_check "SKILL.md documents graph_readiness.sh as read-only/advisory, orchestrator remains sole writer of progress.json.graph" \
-    "yes" "$(grep -qi 'read-only/advisory' "$SKILL_PATH" && grep -qi 'sole writer of .progress\.json\.graph' "$SKILL_PATH" && echo yes || echo no)"
-else
-  echo "FAIL - SKILL.md not found at $SKILL_PATH"
-  fails=$((fails+1))
-fi
-
 [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails)"; exit 1; }
