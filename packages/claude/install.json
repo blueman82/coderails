@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "provider": "claude",
+  "command": "bash install.sh",
+  "dry_run": "bash install.sh --dry-run",
+  "post_install": [
+    "/plugin install coderails@coderails",
+    "/reload-plugins"
+  ],
+  "credentials": "host_oauth"
+}

@@ -1,0 +1,1 @@
+{"provider":"claude","graph":{"nodes":{"dispatched":{"outcome":"done"},"next":{"outcome":"pending"}},"edges":[{"from":"dispatched","to":"next"}]}}

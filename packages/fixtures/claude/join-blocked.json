@@ -1,0 +1,1 @@
+{"provider":"claude","graph":{"nodes":{"join":{"outcome":"pending"},"left":{"outcome":"done"},"right":{"outcome":"running"}},"edges":[],"joins":{"join":{"mode":"all","inputs":["left","right"]}}}}

@@ -1,0 +1,7 @@
+{
+  "schema_version": 1,
+  "provider": "codex",
+  "command": "codex plugin install packages/codex",
+  "dry_run": "codex plugin install --help",
+  "credentials": "host_oauth"
+}

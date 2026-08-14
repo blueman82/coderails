@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "provider": "codex",
+  "package": "coderails-codex",
+  "source_root": "packages/codex",
+  "manifest": "manifest.json",
+  "installer": "install.json",
+  "layout": {
+    "skills": "skills",
+    "fixtures": "fixtures"
+  }
+}
