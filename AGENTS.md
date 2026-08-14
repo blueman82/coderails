@@ -54,7 +54,9 @@ commands/*.md                   → slash commands (frontmatter + prose instruct
   └─ scripts/sandbox/*.sh       → srt sandbox wrapper for spawned workers (see "Sandboxed workers")
   └─ scripts/integrity-gate/*        → root-owned launchd daemon that posts the `integrity-review` commit status
 skills/*/SKILL.md               → skills with triggering descriptions
-agents/*.md                     → subagent definitions the skills spawn (loop-worker,
+agents/*.md                     → subagent definitions the skills spawn (deploy-safety-reviewer,
+                                  design-scout, disposition-scout, docs-auditor,
+                                  loop-worker, preflight-scout, proof-author,
                                   source-auditor, spec-reviewer, wiki-writer)
 instructions/                   → the discipline rules appended to ~/.claude/CLAUDE.md
 starter-memory/                 → feedback memories seeded into the user's memory dir
