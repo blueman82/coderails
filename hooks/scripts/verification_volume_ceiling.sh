@@ -54,7 +54,7 @@ branch=$(git -C "$cwd" branch --show-current 2>/dev/null)
 [ -z "$branch" ] && branch="(no-branch)"
 branch_slug=$(printf '%s' "$branch" | tr '/' '-')
 
-base="${CLAUDE_AGENTIC_LOOP_DIR:-$HOME/.claude/agentic-loop}"
+base="${CLAUDE_AGENTIC_LOOP_DIR:-$HOME/.coderails/agentic-loop}"
 state_dir="$base/verification-ceiling"
 
 deny_state_failure() {

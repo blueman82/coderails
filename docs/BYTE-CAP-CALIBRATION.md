@@ -22,7 +22,7 @@ Use `/coderails:agentic-loop` with a typical task (2–3 implementation units):
 ### Step 2: Examine Loop Artifacts
 
 After loop completion, find:
-- **`~/.claude/agentic-loop/<session_id>/retro.json`** — contains `cost.total_tokens` (as of schema_version ≥ 2)
+- **`~/.coderails/agentic-loop/<session_id>/retro.json`** — contains `cost.total_tokens` (as of schema_version ≥ 2)
 - **Dashboard metrics** — `/coderails:dashboard` live-shows cost per dispatch
 - **PR comment artifact** — `/coderails:post-evals` posts grading info with final token/USD spend
 

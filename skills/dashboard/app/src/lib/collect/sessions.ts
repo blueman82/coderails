@@ -206,7 +206,7 @@ function readEvalsFrozen(loopDir: string): boolean {
   return false;
 }
 
-// baseDir is a ~/.claude/agentic-loop-shaped tree: <baseDir>/<slug>/<sessionId>/
+// baseDir is a ~/.coderails/agentic-loop-shaped tree: <baseDir>/<slug>/<sessionId>/
 // holding progress.json (+ optional sibling evals.json). Distinct from
 // collectSessions' base above — see that function's comment.
 export function collectLoops(baseDir: string): LoopInfo[] {

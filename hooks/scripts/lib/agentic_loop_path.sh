@@ -15,7 +15,7 @@
 #              Hook scripts receive session_id via the Stop-hook JSON payload
 #              instead, and pass it explicitly.
 # Path:  <base>/<slug>/<session_id>/progress.json
-#   base = $CLAUDE_AGENTIC_LOOP_DIR (override for tests) or $HOME/.claude/agentic-loop
+#   base = $CLAUDE_AGENTIC_LOOP_DIR (override for tests) or $HOME/.coderails/agentic-loop
 #   slug = when cwd is inside a git repo, `git -C "$cwd" rev-parse
 #          --path-format=absolute --git-common-dir` (slugified the same way, "/" ->
 #          "-") — keys the path to the REPO, not the raw cwd, so a worktree hop
@@ -94,7 +94,7 @@ fi
 # transform is intentionally duplicated, not unified; update both on any change.
 session_id=$(printf '%s' "$session_id" | tr '/' '_')
 session_id=$(printf '%s' "$session_id" | sed 's/\.\.//g')
-base="${CLAUDE_AGENTIC_LOOP_DIR:-$HOME/.claude/agentic-loop}"
+base="${CLAUDE_AGENTIC_LOOP_DIR:-$HOME/.coderails/agentic-loop}"
 git_common_dir=$(command -v git >/dev/null 2>&1 && git -C "$cwd" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)
 # A git older than 2.31 doesn't recognise --path-format and echoes it back
 # verbatim alongside a RELATIVE .git path, exiting 0 (not a failure by exit

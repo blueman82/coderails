@@ -8,11 +8,11 @@ check() { # desc, expected, actual
   else printf 'FAIL - %s\n      expected: %s\n      actual:   %s\n' "$1" "$2" "$3"; fails=$((fails+1)); fi
 }
 
-# 1. Default base is $HOME/.claude/agentic-loop; slug replaces / with -; session_id
+# 1. Default base is $HOME/.coderails/agentic-loop; slug replaces / with -; session_id
 #    passed explicitly as arg 2.
 unset CLAUDE_AGENTIC_LOOP_DIR CLAUDE_CODE_SESSION_ID
 check "default base + slug + explicit session_id" \
-  "$HOME/.claude/agentic-loop/-Users-foo-bar/S1/progress.json" \
+  "$HOME/.coderails/agentic-loop/-Users-foo-bar/S1/progress.json" \
   "$(bash "$HELPER" /Users/foo/bar S1)"
 
 # 2. Env override redirects the base (used by the guard's behavioural tests).

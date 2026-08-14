@@ -6,7 +6,7 @@ import { isLocalOrigin } from "../../../lib/requestGuard";
 import type { ContextTrendFileCache } from "../../../lib/collect/contextTrend";
 
 const DEFAULT_PROJECTS_DIR = join(homedir(), ".claude", "projects");
-const DEFAULT_LOOPS_DIR = join(homedir(), ".claude", "agentic-loop");
+const DEFAULT_LOOPS_DIR = join(homedir(), ".coderails", "agentic-loop");
 const DEFAULT_RUNS_DIR = join(homedir(), ".claude", "coderails-dashboard", "runs");
 const DEFAULT_QUEUE_DIR = join(homedir(), ".claude", "coderails-dashboard", "approvals");
 const DEFAULT_BUILDS_DIR = join(homedir(), ".claude", "coderails-dashboard", "builds");
