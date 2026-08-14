@@ -95,14 +95,88 @@ call_count2=$(wc -l < "$CALL_LOG" | tr -d ' ')
 [ "$rc2" -ne 0 ] && [ "$call_count2" = "0" ] && ok "non-object wave-results fails closed, no write attempted" \
   || fail "non-object wave-results fails closed, no write attempted" "rc=$rc2 call_count=$call_count2"
 
-# --- fail-closed: an id not already in .graph.nodes must never be created ---
+# --- fail-closed: an id not already in .graph.nodes must never be created.
+# The check runs INSIDE the locked jq filter (I2 fix, closes a TOCTOU race
+# a pre-lock read would have), so als_atomic_progress_update IS still
+# called (call_count=1) — but its own jq errors, so no write lands.
 : > "$CALL_LOG"
 graph_executor_apply_wave "$TMP/progress.json" '{"NOPE": {"status":"done","outcome":"done"}}'
 rc3=$?
 call_count3=$(wc -l < "$CALL_LOG" | tr -d ' ')
 nope_exists=$(jq 'has("NOPE") | not' <(jq '.graph.nodes' "$TMP/progress.json"))
-[ "$rc3" -ne 0 ] && [ "$call_count3" = "0" ] && [ "$nope_exists" = "true" ] \
+[ "$rc3" -ne 0 ] && [ "$call_count3" = "1" ] && [ "$nope_exists" = "true" ] \
   && ok "unknown node id fails closed, never created" \
   || fail "unknown node id fails closed, never created" "rc=$rc3 call_count=$call_count3 not_created=$nope_exists"
+
+# --- fail-closed: invalid status/outcome enum value never lands ---
+jq -n '
+  { graph: { nodes: { A:{status:"pending",outcome:"pending",retry:{attempts:0,max:5}} },
+             edges: [], joins: {} },
+    decisions_absorbed: [] }
+' > "$TMP/enum_fixture.json"
+graph_executor_apply_wave "$TMP/enum_fixture.json" '{"A":{"status":"merged","outcome":"done"}}'
+rc4=$?
+a_status_after=$(jq -r '.graph.nodes.A.status' "$TMP/enum_fixture.json")
+[ "$rc4" -ne 0 ] && [ "$a_status_after" = "pending" ] \
+  && ok "invalid status enum value (e.g. retired 'merged') fails closed, node unchanged" \
+  || fail "invalid status enum value fails closed" "rc=$rc4 status_after=$a_status_after"
+
+# --- fail-closed: retry.attempts > retry.max never lands ---
+jq -n '
+  { graph: { nodes: { A:{status:"pending",outcome:"pending",retry:{attempts:0,max:5}} },
+             edges: [], joins: {} },
+    decisions_absorbed: [] }
+' > "$TMP/retry_fixture.json"
+graph_executor_apply_wave "$TMP/retry_fixture.json" '{"A":{"status":"done","outcome":"done","retry":{"attempts":9,"max":5}}}'
+rc5=$?
+a_attempts_after=$(jq -r '.graph.nodes.A.retry.attempts' "$TMP/retry_fixture.json")
+[ "$rc5" -ne 0 ] && [ "$a_attempts_after" = "0" ] \
+  && ok "retry.attempts > retry.max fails closed, node unchanged" \
+  || fail "retry.attempts > retry.max fails closed" "rc=$rc5 attempts_after=$a_attempts_after"
+
+# --- I2 regression: id-existence check must read LIVE file state under the
+# lock, not a pre-lock snapshot (TOCTOU). Simulate a node already having been
+# removed by a prior writer by the time apply_wave's own locked jq runs —
+# there is no separate pre-lock read to go stale, since the check lives
+# inside the same jq program that performs the write.
+jq -n '{ graph: { nodes: {}, edges: [], joins: {} }, decisions_absorbed: [] }' > "$TMP/race_fixture.json"
+graph_executor_apply_wave "$TMP/race_fixture.json" '{"A":{"status":"done","outcome":"done"}}'
+rc6=$?
+a_created=$(jq 'has("A")' <(jq '.graph.nodes' "$TMP/race_fixture.json"))
+[ "$rc6" -ne 0 ] && [ "$a_created" = "false" ] \
+  && ok "id-existence check reads live file state (no pre-lock snapshot to race)" \
+  || fail "id-existence check reads live file state" "rc=$rc6 created=$a_created"
+
+# --- S5: a non-object node value (e.g. a bare string) must never clobber
+# an existing node's fields; als_atomic_progress_update's jq errors on the
+# `*` merge against a non-object, so no write attempt lands.
+jq -n '
+  { graph: { nodes: { A:{status:"pending",outcome:"pending",retry:{attempts:0,max:5}} },
+             edges: [], joins: {} },
+    decisions_absorbed: [] }
+' > "$TMP/s5_fixture.json"
+graph_executor_apply_wave "$TMP/s5_fixture.json" '{"A":"clobbered"}'
+rc7=$?
+a_after_s5=$(jq -c '.graph.nodes.A' "$TMP/s5_fixture.json")
+[ "$rc7" -ne 0 ] && [ "$a_after_s5" = '{"status":"pending","outcome":"pending","retry":{"attempts":0,"max":5}}' ] \
+  && ok "non-object node value fails closed, existing node untouched" \
+  || fail "non-object node value fails closed" "rc=$rc7 a_after=$a_after_s5"
+
+# --- S4: ready_nodes fails closed on unparseable progress.json (symmetry
+# with graph_readiness.sh and apply_wave, both of which fail closed on the
+# same input) instead of silently reporting zero ready nodes.
+printf 'not json' > "$TMP/corrupt.json"
+ready3=$(graph_executor_ready_nodes "$TMP/corrupt.json"); rc_corrupt=$?
+[ "$rc_corrupt" -ne 0 ] && [ -z "$ready3" ] \
+  && ok "ready_nodes fails closed on unparseable progress.json" \
+  || fail "ready_nodes fails closed on unparseable progress.json" "rc=$rc_corrupt out=$ready3"
+
+# --- S4 control: a valid file with an empty (zero-node) graph is NOT an
+# error -- must still return 0 with empty output, distinct from corrupt-JSON.
+jq -n '{ graph: { nodes: {}, edges: [], joins: {} } }' > "$TMP/empty_nodes.json"
+ready4=$(graph_executor_ready_nodes "$TMP/empty_nodes.json"); rc_empty=$?
+[ "$rc_empty" -eq 0 ] && [ -z "$ready4" ] \
+  && ok "ready_nodes returns 0 on a valid empty-nodes graph (negative control of the corrupt-JSON case)" \
+  || fail "ready_nodes returns 0 on a valid empty-nodes graph" "rc=$rc_empty out=$ready4"
 
 [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails)"; exit 1; }
