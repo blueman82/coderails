@@ -91,6 +91,12 @@ only after every listed input is terminal-success. This records dependencies, re
 retries, and joins without adding a scheduler or UI; malformed graph entries are not evidence of
 readiness and must be treated as blocked by the orchestrator.
 
+**`work_units` and `graph.nodes` are intentionally separate views; `als_gate_work_units_on_complete`
+never reads `.graph` — verified 2026-08-15.** The two fields can legitimately diverge (a unit id with
+no mirroring graph node, or a graph node with no mirroring work_unit) without the completion gate
+false-blocking, because its jq program's only input is `.work_units`. No reconciliation mechanism
+exists or is needed between them.
+
 **`loop_stop_counts` is written solely by the `loop_stall_guard` hook** on each valid `LOOP-STOP`
 declaration. The orchestrator never writes or increments it. On any wholesale rewrite of the file
 you must re-read the existing `progress.json` first and carry `loop_stop_counts` forward by the
