@@ -16,7 +16,7 @@
 #     AskUserQuestion calls, so they are untouched by design.
 #
 # The flag lives at a SESSION-ONLY path: <base>/<session_id>/crack_on_active
-# (base = $CLAUDE_AGENTIC_LOOP_DIR or $HOME/.claude/agentic-loop). It is
+# (base = $CLAUDE_AGENTIC_LOOP_DIR or $HOME/.coderails/agentic-loop). It is
 # deliberately NOT derived from lib/agentic_loop_path.sh: that helper resolves
 # its dir by progress.json EXISTENCE (canonical-then-probe), so a flag routed
 # through it can be stamped under one slug and read under another whenever
@@ -42,7 +42,7 @@ log_line() { printf '%s %s\n' "$(date -Iseconds 2>/dev/null || date +%Y-%m-%dT%H
 # — intentionally duplicated, this script stays dependency-free like they do.
 flag_path() {
   local base sid
-  base="${CLAUDE_AGENTIC_LOOP_DIR:-$HOME/.claude/agentic-loop}"
+  base="${CLAUDE_AGENTIC_LOOP_DIR:-$HOME/.coderails/agentic-loop}"
   sid=$(printf '%s' "$session_id" | tr '/' '_')
   sid=$(printf '%s' "$sid" | sed 's/\.\.//g')
   [ -z "$sid" ] && return 1

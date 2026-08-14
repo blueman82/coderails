@@ -103,7 +103,7 @@ function sumBucket(entries: LoopCostEntry[], startMs: number, endMs: number): Co
   };
 }
 
-// baseDir is the same ~/.claude/agentic-loop-shaped tree collectLoops walks:
+// baseDir is the same ~/.coderails/agentic-loop-shaped tree collectLoops walks:
 // <baseDir>/<slug>/<sessionId>/, each holding a sibling retro.json next to
 // progress.json. Buckets by two windows: WEEK (rolling 7 days from now) and
 // MONTH (current calendar month, boundaries by month not by a fixed day

@@ -110,7 +110,7 @@ fi
 # so this hook and the stamping hook can never resolve different paths.
 flag_path() {
   local base sid
-  base="${CLAUDE_AGENTIC_LOOP_DIR:-$HOME/.claude/agentic-loop}"
+  base="${CLAUDE_AGENTIC_LOOP_DIR:-$HOME/.coderails/agentic-loop}"
   sid=$(printf '%s' "$session_id" | tr '/' '_')
   sid=$(printf '%s' "$sid" | sed 's/\.\.//g')
   [ -z "$sid" ] && return 1

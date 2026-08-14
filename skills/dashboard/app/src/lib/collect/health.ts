@@ -22,7 +22,7 @@ export interface CollectHealthOptions {
 
 const DEFAULT_DISCIPLINE_LOG_PATH = join(homedir(), ".claude", "discipline.log");
 const DEFAULT_PROJECTS_DIR = join(homedir(), ".claude", "projects");
-const DEFAULT_LOOPS_DIR = join(homedir(), ".claude", "agentic-loop");
+const DEFAULT_LOOPS_DIR = join(homedir(), ".coderails", "agentic-loop");
 
 // Local calendar-day key (YYYY-MM-DD) for a Date, in that Date's own zone
 // offset — used to compare a log line's leading timestamp against "now"'s
