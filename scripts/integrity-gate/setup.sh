@@ -13,8 +13,18 @@ for tool in gh jq curl git; do
   command -v "$tool" >/dev/null 2>&1 || die "$tool is required"
 done
 
-REPO_SLUG=$(gh repo view --json nameWithOwner -q .nameWithOwner 2>/dev/null) \
-  || die "run this from a GitHub repository with gh authenticated"
+gh_recovery() {
+  printf '\nGitHub access needs recovery. Run:\n  gh auth status\n  gh auth login --hostname github.com\nFor another GitHub host, replace github.com with that host.\n' >&2
+  read -r -p 'Complete gh recovery, then press Enter to retry (Ctrl-C cancels): ' _ \
+    || die 'gh recovery cancelled; setup stopped'
+}
+
+if ! REPO_SLUG=$(gh repo view --json nameWithOwner -q .nameWithOwner 2>/dev/null); then
+  printf 'Could not reach GitHub or use the current gh authentication.\n' >&2
+  gh_recovery
+  REPO_SLUG=$(gh repo view --json nameWithOwner -q .nameWithOwner 2>/dev/null) \
+    || die 'gh retry failed; check GitHub connectivity and repository access'
+fi
 
 RULESET_NAME="coderails-integrity-review"
 
@@ -26,9 +36,22 @@ ruleset_matches() {
   jq -e --arg name "$RULESET_NAME" '.name == $name and .target == "branch" and .enforcement == "active" and ((.bypass_actors // []) | length) == 0 and ((.conditions.ref_name.include // []) | index("refs/heads/main")) != null and ([.rules[] | select(.type == "pull_request")] | length) == 1 and ([.rules[] | select(.type == "required_status_checks") | .parameters.required_status_checks[] | select(.context == "integrity-review")] | length) == 1' >/dev/null
 }
 
+gh_api_json() {
+  local endpoint="$1" expected="$2" response
+  if ! response=$(gh api "$endpoint" 2>/dev/null) || ! jq -e "$expected" >/dev/null <<<"$response"; then
+    printf 'Could not read valid JSON from GitHub; gh authentication or connectivity may be unavailable.\n' >&2
+    gh_recovery
+    response=$(gh api "$endpoint" 2>/dev/null) \
+      || die 'gh retry failed; check GitHub connectivity and repository access'
+    jq -e "$expected" >/dev/null <<<"$response" \
+      || die 'gh retry returned malformed JSON; setup stopped'
+  fi
+  printf '%s' "$response"
+}
+
 configure_ruleset() {
   local rulesets existing payload answer
-  rulesets=$(gh api "repos/$REPO_SLUG/rulesets?per_page=100" 2>/dev/null) || die "could not read repository rulesets; owner gh auth needs repository administration access"
+  rulesets=$(gh_api_json "repos/$REPO_SLUG/rulesets?per_page=100" 'type == "array"')
   existing=$(printf '%s' "$rulesets" | jq -c --arg name "$RULESET_NAME" '[.[] | select(.name == $name)] | .[0] // empty')
   if [[ -n "$existing" ]]; then
     if ruleset_matches <<<"$existing"; then
@@ -42,7 +65,7 @@ configure_ruleset() {
   read -r -p 'Create this ruleset using the owner gh account? [y/N] ' answer
   [[ "$answer" =~ ^[Yy]$ ]] || die 'ruleset creation cancelled; validator installation not started'
   gh api "repos/$REPO_SLUG/rulesets" --method POST --input - <<<"$payload" >/dev/null || die 'GitHub rejected ruleset creation; check owner administration permission and repository plan'
-  rulesets=$(gh api "repos/$REPO_SLUG/rulesets?per_page=100" 2>/dev/null) || die 'ruleset was created but could not be re-read'
+  rulesets=$(gh_api_json "repos/$REPO_SLUG/rulesets?per_page=100" 'type == "array"')
   existing=$(printf '%s' "$rulesets" | jq -c --arg name "$RULESET_NAME" '[.[] | select(.name == $name)] | .[0] // empty')
   ruleset_matches <<<"$existing" || die 'created ruleset failed verification'
   printf 'GitHub ruleset created and verified: %s\n' "$RULESET_NAME"
