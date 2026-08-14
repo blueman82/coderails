@@ -1,0 +1,6 @@
+{
+  "name": "coderails-codex-runtime",
+  "version": "0.1.0",
+  "description": "Provider-native coderails graph runtime",
+  "license": "MIT"
+}
