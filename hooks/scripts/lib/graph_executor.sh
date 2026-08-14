@@ -31,17 +31,21 @@
 #     search and would wrongly accept an array like ["done"]; retry.attempts
 #     and retry.max must both be numbers, attempts >= 0, max in 0..5,
 #     attempts <= max) — the exact predicate is lifted from that test, not
-#     re-derived, so this guard can't drift weaker than it (fail-closed by
-#     design — this function never creates a graph node, and never lands a
-#     value that violates the graph's own contract).
+#     re-derived, so this guard can't drift weaker than it. Also rejects a
+#     bare "stale" write: any node whose merged status OR outcome is
+#     "stale" must carry a sibling stale_check field shaped
+#     {"checked":true,"method":"<string>","result":"<string>"} (both
+#     strings non-empty) in the SAME wave-result — per loop-state.md's
+#     stale field docs, idle is not evidence, it must be paired with an
+#     artifact check (fail-closed by design — this function never creates
+#     a graph node, and never lands a value that violates the graph's own
+#     contract).
 #     ALL validation, including the id-existence check, runs INSIDE the
 #     locked jq filter via jq's error(...) (which aborts the filter, so
 #     als_atomic_progress_update's `mv` never runs) — not via a pre-lock
 #     read — because a pre-lock read-then-decide is a TOCTOU race: another
 #     writer can delete/mutate a node between the check and the locked
 #     write. See als_atomic_progress_update's own mkdir-lock (loop_state_common.sh).
-#     Callers wanting a "write bare stale" guard (unit 5 / AC-9) add that
-#     validation into the same jq program below.
 
 GRAPH_EXECUTOR_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=./loop_state_common.sh
@@ -99,6 +103,12 @@ graph_executor_apply_wave() {
               then error("graph_executor: node \($id) has invalid retry.max \($merged.retry.max)")
               elif ($merged.retry.attempts > $merged.retry.max)
               then error("graph_executor: node \($id) has retry.attempts > retry.max")
+              elif (($merged.status == "stale" or $merged.outcome == "stale")
+                    and (($merged.stale_check | type) != "object"
+                         or $merged.stale_check.checked != true
+                         or (($merged.stale_check.method | type) != "string" or ($merged.stale_check.method | length) == 0)
+                         or (($merged.stale_check.result | type) != "string" or ($merged.stale_check.result | length) == 0)))
+              then error("graph_executor: node \($id) writes stale without a valid stale_check")
               else $merged
               end
             )
