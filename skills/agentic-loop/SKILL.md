@@ -29,11 +29,17 @@ Nineteen-plus numbered phases (−2 through 13, with lettered sub-phases) is too
 | Wrap-up | 9, 10, 11, 12, 13 |
 
 The phases below are a dependency graph, not a queue. A node is ready only when
-its prerequisites and readiness predicate are true. Run ready independent nodes
-in one wave, but preserve every listed dependency. The orchestrator is the only
-writer of `progress.json`: collect a wave's results, then do one read-modify-
-write before releasing its join. Inside an authorised loop, the `U*` lane below
-repeats per work-unit.
+its prerequisites and readiness predicate are true — before dispatching any
+candidate node, run the read-only readiness query
+`${CLAUDE_PLUGIN_ROOT}/hooks/scripts/lib/graph_readiness.sh <path-to-progress.json> <node-id>`
+and dispatch only nodes it reports `ready` for; its `blocked` output means "not
+yet ready to dispatch" and does not distinguish a genuine unmet dependency from
+unreadable state, since it fail-closes the same way on missing/malformed
+`progress.json` as on a real non-terminal predecessor. Run ready independent
+nodes in one wave, but preserve every listed dependency. The orchestrator is
+the only writer of `progress.json`: collect a wave's results, then do one
+read-modify-write before releasing its join. Inside an authorised loop, the
+`U*` lane below repeats per work-unit.
 
 ### Execution graph — stable contract
 
