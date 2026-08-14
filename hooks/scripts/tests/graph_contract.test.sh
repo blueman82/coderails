@@ -25,8 +25,8 @@ if jq -e '
   | (.graph.joins // {}) as $joins
   | ($nodes | type == "object" and (keys | all(test("^(S|U|J|G)[A-Za-z0-9._/-]*$"))))
   and ($nodes | to_entries | all(
-      (.value.status | IN("pending","ready","running","blocked","done","skipped","failed","hard-stop"))
-      and (.value.outcome | IN("pending","ready","running","blocked","done","skipped","failed","hard-stop"))
+      (.value.status | IN("pending","ready","running","blocked","done","skipped","failed","hard-stop","stale"))
+      and (.value.outcome | IN("pending","ready","running","blocked","done","skipped","failed","hard-stop","stale"))
       and (.value.retry.attempts | type == "number" and . >= 0)
       and (.value.retry.max | type == "number" and . >= 0 and . <= 5)
       and (.value.retry.attempts <= .value.retry.max)
