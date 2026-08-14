@@ -6,7 +6,7 @@ and disposition, and committing the design to `spec.md`/`plan.md`.
 
 Read this in full at loop start. Phase 2.8 onward lives in SKILL.md.
 
-### Phase -2 — Stub `progress.json` first (the literal first action)
+### `S-2` — Phase -2: Stub `progress.json` first (the literal first action)
 
 Before Phase -1 — before anything else — write a `progress.json` stub. This guarantees the loop's durable state file exists before the first stop, so the `loop_state_guard` Stop hook never trips a compliant loop; the block degrades to a backstop for a skipped stub.
 
@@ -25,9 +25,18 @@ It prints the absolute path. Write the stub there with the Write tool (it create
   "status": "initialising",
   "created": "<ISO8601 timestamp>",
   "authorising_prompt_raw": "<the user's authorising prompt, verbatim — Phase -1 updates this if an improved prompt is adopted>",
-  "completed_marker": <carry forward the prior file's completed_marker if one exists at this path, else 0>
+  "completed_marker": <carry forward the prior file's completed_marker if one exists at this path, else 0>,
+  "graph": {
+    "nodes": {"S-2": {"status": "running", "outcome": "running", "retry": {"attempts": 0, "max": 5}}},
+    "edges": [],
+    "joins": {}
+  }
 }
 ```
+
+The stub records `S-2` immediately; each later phase boundary adds its stable node and
+dependency edges in the same orchestrator-owned write. Do not create a second scheduler or let
+workers update `graph` directly.
 
 If a `progress.json` already exists at the path from an earlier loop in this session, read its `completed_marker` and carry it forward into the new stub (do not reset it to 0) — this is what lets the guard tell a genuinely-finished loop from a new one that re-armed it (see the teardown rule below).
 
@@ -35,7 +44,7 @@ If a `progress.json` already exists at the path from an earlier loop in this ses
 - Prior file `status != "complete"` (mid-loop re-stub, e.g. a recovery after a restart): carry `loop_stop_counts` forward verbatim into the new stub, so a mid-loop recovery doesn't silently reset the count the `loop_stall_guard` hook has been maintaining. Carry `authorising_prompt_raw` forward verbatim too — a re-stub refilled from conversation memory instead of the prior file's value would silently drift the eval author's canonical anchor.
 - Prior file `status == "complete"` (re-arming for a NEW loop): reset `loop_stop_counts` to `{}` (omit the field from the stub) — the completed loop's counts are already preserved in its own `retro.json`; carrying them forward would bleed the finished loop's stop counts into the new loop's Phase 13 report.
 
-### Phase -1 — Sharpen the authorising prompt
+### `S-1` — Phase -1: Sharpen the authorising prompt
 
 **Run this phase UNLESS the user's prompt explicitly opts out.** Opt-out signals: "just do it", "skip improve-prompt", "don't improve the prompt", or any language that makes the directive unambiguous. On opt-out, skip directly to Phase 0. (Note: improve-prompt itself treats "just do it" as an unconditional skip — align with that.)
 
@@ -83,7 +92,7 @@ On adopting an improved envelope (outcome **A** or **B**), update `progress.json
 
 The improved-and-approved prompt (or the original, if C was chosen; or the auto-adopted improved prompt, in a full-autonomous envelope) is what Phase 0 treats as the authorisation envelope. Phase 0's `<thinking>` block quotes it verbatim from here.
 
-### Phase 0 — Read the authorisation envelope
+### `S0` — Phase 0: Read the authorisation envelope
 
 Before doing anything, ask: what did the user actually authorise?
 
@@ -112,11 +121,11 @@ Then respond.
 
 Match the confirmation cadence to the envelope class for the rest of the session — every "do you want me to..." inside an authorised envelope is a stall the user has to clear, and stalls cost more than the occasional over-reach you'd avoid by asking.
 
-### Phase 0.4 — Surface the orchestrator's model cost to the user at loop launch
+### `S0.4` — Phase 0.4: Surface the orchestrator's model cost to the user at loop launch
 
 **Token-burn rule (row 1 of 3).** The orchestrator cannot change its own model — `/model` is a user-typed slash command; nothing available to the orchestrator sets it. So the only executable action here is to tell the user. At loop launch — alongside Phase 0's envelope read, before Phase 1's plan — state once, in your own output, that this session's model bills every turn of the loop, and that switching it is theirs via `/model` before the loop gets long. Then continue; this is a notice, not a gate, never stall for a reply. Distinct from Phase 2.8's worker routing (spawned workers, not the orchestrator itself); given once at launch, not repeated per phase. See [model-routing.md](model-routing.md) for why the cost compounds.
 
-### Phase 0.5 — Orchestrator operating rules (the conductor obeys its own rules)
+### `S0.5` — Phase 0.5: Orchestrator operating rules (the conductor obeys its own rules)
 
 The orchestrator (main context) is subject to the same discipline it imposes on workers. Inside an active, incomplete loop, the two discipline Stop hooks — confidence-label and verify-loop — demote a would-be block to a model-visible warn (`additionalContext` on the Stop event) rather than stopping the turn outright; the discipline itself hasn't changed, the warn is the correction signal the orchestrator acts on next turn. Outside an active loop, and for worker output (SubagentStop), both hooks still block outright. Even at warn-level, a missed warn is still a cost — it's the cost this skill exists to keep to a minimum, just paid as a drifted transcript instead of a forced regeneration.
 
@@ -126,7 +135,7 @@ Main context must, in its own output (not just in spawned-agent prompts):
 - Never narrate a claim about an artifact (PR merged, deploy live) without having run the check this turn (Phase 12).
 - End any stopping turn inside an active loop with a LOOP-STOP declaration line — `LOOP-STOP: <hard-stop|approval-gate|awaiting-input|complete> — <reason>` — as the FINAL line of the turn, emitted in the SAME turn as the confidence-label and Did-Not-Verify requirements above — that ending-line position is the contract this skill defines and the hook's category accounting assumes: when a turn carries more than one LOOP-STOP-shaped line (e.g. a quoted example), `loop_stall_guard` counts only the last one, so the last line must be the declaration that reflects the turn's actual outcome. Bundling all three matters more, not less, in the warn era: the confidence-label and verify-loop hooks no longer block the orchestrator's in-loop Stop turns, so nothing else forces those labels and DNV tags into the transcript — the bundle is what keeps them present for post-hoc audit, and one composed ending beats clearing one stop hook only to trip another (`loop_stall_guard` still blocks). Declaring `complete` means the loop is done: also set `progress.json` `status: "complete"` and run the Phase 13 teardown. The declaration line is all that's required — `loop_stop_counts` is HOOK-OWNED: the `loop_stall_guard` hook itself increments the matching category on a valid declaration; never write or compute this field yourself.
 
-### Phase 1 — State the plan in bullets, ask once
+### `S1` — Phase 1: State the plan in bullets, ask once
 
 Before the first agent spawn, write the full plan: phases, which agents per phase, parallel vs sequential, stop conditions. Use bullets. Keep it tight — the user reads this fast and decides whether to redirect.
 
@@ -139,7 +148,7 @@ Do not loop more than twice on plan negotiation. If the third pass is needed, so
 
 The harness choice itself — which loop skill drives this (`/coderails:agentic-loop` vs a flat loop vs a goal runner) — is part of the authorisation envelope (Phase 0), not a Phase 1 question. Resolve it once when reading the envelope and never re-surface it as "which approach do you want?".
 
-### Phase 2 — Pre-flight checks via spawned agents, not main context
+### `S2` — Phase 2: Pre-flight checks via spawned agents, not main context
 
 Pre-planning skills (`/coderails:planning-sequence`, `/coderails:premortem`, `/coderails:assumptions`, `/coderails:notchecked`, `/coderails:wiki-query`) belong in a delegated agent, not in main context.
 
@@ -164,7 +173,12 @@ Spawn this pre-flight agent at the `default` role — it's running skills, not m
 
 Do this check even when the base looks clean — two cheap git reads pre-empt a worker's PR silently inheriting another session's WIP from a dirty base, which otherwise only surfaces at the merge gate.
 
-### Phase 2.5 — Resolve design forks before execution, not during it
+### `S2.5` — Phase 2.5: Resolve design forks before execution, not during it
+
+`S2.5` and `S2.6` are sibling graph branches after `S2`: when both triggers
+exist, dispatch their scouts in one wave. They reconverge at `J2`; the
+orchestrator validates both results and performs the single state write before
+releasing `S2.7a`.
 
 If the plan contains an unresolved architectural choice (which primitive, which topology, which of several viable shapes), resolve it BEFORE entering Phase 3 — not through live back-and-forth once workers are spawning.
 
@@ -184,18 +198,14 @@ Either way the fork is closed by ONE design artifact before building starts — 
 
 **Where the design artifact is written — never onto local `main`.** Any phase that produces a file — a design investigation page, a recon note, a `progress.json` — writes it *outside the code repo's working tree*: to the wiki vault (`config.wiki_path`) if it is wiki-bound, otherwise a temp dir outside the repo. It is promoted into the PR worktree only at build time (Phase 3); it never lands on local `main`, where an untracked file silently pollutes the base every worker branches from — exactly the contamination the Phase 2 clean-base check then has to catch downstream. The recon/design phase is logically read-only with respect to the code repo; keep it literally so.
 
-### Phase 2.6 — Resolve disposition before replacement work (clean-break vs preserve-compat)
+### `S2.6` — Phase 2.6: Resolve disposition before replacement work (clean-break vs preserve-compat)
 
-When the Phase 1 plan contains a work-unit that **retires an existing code path** — there is a *named thing being replaced* (a function, module, endpoint, schema, or flag the change removes from use) — resolve its **disposition** once, up front, before the first implementation spawn. This is the migration analogue of Phase 2.5's design fork: asked once, not re-litigated.
+When the Phase 1 plan contains a work-unit that **retires an existing code path** — there is a *named thing being replaced* (a function, module, endpoint, schema, or flag the change removes from use) — resolve its **disposition** once, up front, before the first spawn. This is the migration analogue of Phase 2.5's design fork: asked once, not re-litigated.
 
-This is a graph branch. Dispatch `subagent_type: coderails:disposition-scout`
-concurrently with Phase 2.5's `design-scout`, giving it only the Phase 1 plan
-and the named retirement paths. It returns one disposition recommendation per
-retirement unit and writes no loop state. If there is no retirement trigger,
-skip this node. Assign its inline model role using the same `default` versus
-`frontier` rule as Phase 2.5. After both branches return, the orchestrator
-validates the results and performs one `progress.json` update for both
-decisions; neither worker may read-modify-write that file.
+When triggered, run the disposition scout as the `S2.6` sibling of `S2.5`,
+giving it the Phase 1 plan and named retirement paths. It returns one result per
+retirement unit and writes no loop state. If no path is retired, record the
+conditional skip and let `J2` release without this branch.
 
 **Trigger precisely.** The fork fires only when an existing path is being *retired*, not merely when new code calls or wraps old code. If nothing is being removed from use, there is no disposition question. A concrete "what named thing does this remove?" test is deliberately harder to self-exempt from than a vague "is this a migration?".
 
@@ -209,17 +219,19 @@ decisions; neither worker may read-modify-write that file.
 - **Full-autonomous:** adopt clean-break by default, record it, proceed. Surface a preserve-compat choice (with its named blocker) at the next approval-gate; do not stall.
 - **Narrow-fix / diagnostic / ambiguous:** surface the disposition as one decision — "clean-break recommended, here's why" — bounded like Phase 1 (ask once, don't loop).
 
-**Record** per work-unit in `progress.json`: `disposition`, and when `preserve-compat`, the `named_blocker` and a mandatory `removal_ticket`. After the graph branch returns, the orchestrator appends `{phase: "2.6", decision: "<clean-break or preserve-compat, with named_blocker if applicable>"}` to `progress.json`'s `decisions_absorbed` array as part of the single reconvergence write.
+**Record** per work-unit in `progress.json`: `disposition`, and when `preserve-compat`, the `named_blocker` and a mandatory `removal_ticket`. The disposition decision also appends `{phase: "2.6", decision: "<clean-break or preserve-compat, with named_blocker if applicable>"}` to `progress.json`'s `decisions_absorbed` array.
 
-### Phase 2.7 — Commit the resolved design to durable `spec.md` and `plan.md`
+### `S2.7` — Phase 2.7: Commit the resolved design to durable `spec.md` and `plan.md`
 
 The **2.7a/2.7b** design-doc sub-steps fire ONLY when the loop has **≥3 work-units or a cross-unit dependency** — the same line Phase 3 draws to choose a spawned team over a single agent. A 1–2-unit fix that Phase 3 routes to a single agent needs no separate design docs: the envelope (Phase 0) + `progress.json` + the one self-contained task description already carry everything. If the loop is below that threshold, skip 2.7a/2.7b.
 
 **2.7c and 2.7e carry their own independent triggers and are NOT gated by the ≥3-work-unit threshold above** — a loop can skip 2.7a/2.7b entirely and still owe 2.7c and/or 2.7e. 2.7c fires on either of its own two stated triggers (verification_level-2-eligibility on work-unit count, or an irreversible-surface trigger, independently of each other and of 2.7a/2.7b). 2.7e fires for ANY loop with an executable surface, whatever its unit count, even when the rest of Phase 2.7 is skipped.
 
-When the design-doc branch fires, run 2.7a after both 2.5 and 2.6 have
-reconverged, then run 2.7b. The independent evidence branches 2.7c, 2.7d,
-and 2.7e may run concurrently with that work when their own inputs are ready.
+When 2.7a/2.7b fire, `J2` first joins the triggered Phase 2.5 and 2.6
+results. The orchestrator validates both and performs one state update; a
+skipped branch is recorded as skipped. Then run 2.7a and 2.7b in order. The
+independent evidence branches 2.7c, 2.7d, and 2.7e may run in the same wave
+when their own inputs are ready:
 
 **2.7a — write `spec.md`.** Write a durable `spec.md` to the loop-state dir — the path printed by the loop-state path helper (`hooks/scripts/lib/agentic_loop_path.sh`, run at Phase -2), next to `progress.json`, outside the code repo, **not committed** (loop state, not a PR deliverable). This is a **commit of design the loop has already resolved**, not interactive brainstorming — a loop cannot brainstorm with itself; the forks were closed at 2.5 and 2.6. Record:
 - the authorisation envelope verbatim (Phase 0);

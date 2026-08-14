@@ -178,4 +178,30 @@ BODY
 post_review::validate_summary "$BODY_AMB" 2>/dev/null
 check "validate_summary: ambiguous '## No findings' + structured headings → exit 1" 1 $?
 
+# ─── Regression: progress writers must not lose each other's updates ──────────
+# Both callers perform a read-modify-write on the same progress.json. Delay jq
+# to make the old unlocked window overlap reliably, then assert both updates
+# survive the atomic, locked protocol.
+JQ_BIN=$(command -v jq)
+SLOW_BIN="$TMP/slow-bin"
+mkdir -p "$SLOW_BIN"
+printf '#!/bin/bash\nsleep 0.1\nexec %s "$@"\n' "$JQ_BIN" > "$SLOW_BIN/jq"
+chmod +x "$SLOW_BIN/jq"
+jq '.loop_stop_counts = {}' "$PROG" > "$PROG.reset"
+mv "$PROG.reset" "$PROG"
+
+PATH="$SLOW_BIN:$PATH" CLAUDE_HOOK_MAX_ATTEMPTS=100 CLAUDE_HOOK_SLEEP_S=0.01 \
+  bash -c 'source "$1"; post_review::write_cache "$2" 43 sha43 url43 author43 time43' \
+  bash "$SCRIPT" "$PROG" & writer_review=$!
+PATH="$SLOW_BIN:$PATH" CLAUDE_HOOK_MAX_ATTEMPTS=100 CLAUDE_HOOK_SLEEP_S=0.01 \
+  bash -c 'source "$1"; als_atomic_progress_update "$2" --arg cat complete ".loop_stop_counts[\$cat] = ((.loop_stop_counts[\$cat] // 0) + 1)"' \
+  bash "$SCRIPT" "$PROG" & writer_counter=$!
+wait "$writer_review"; review_rc=$?
+wait "$writer_counter"; counter_rc=$?
+
+check "concurrent progress writers: review update succeeds" 0 "$review_rc"
+check "concurrent progress writers: counter update succeeds" 0 "$counter_rc"
+check_val "concurrent progress writers: review survives" "43" "$(jq -r '.review.pr' "$PROG")"
+check_val "concurrent progress writers: counter survives" "1" "$(jq -r '.loop_stop_counts.complete' "$PROG")"
+
 [[ $fails -eq 0 ]] && { echo PASS; exit 0; } || { echo "FAIL ($fails)"; exit 1; }
