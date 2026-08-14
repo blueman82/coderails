@@ -25,17 +25,25 @@ skills.each_with_index do |skill, i|
   id = skill["id"]
   abort "skills index: duplicate or invalid id #{id.inspect}" unless id.is_a?(String) && id.match?(/\Acoderails\.[a-z0-9-]+\z/) && ids[id].nil?
   ids[id] = true
-  claude_paths << skill["claude_path"]
   abort "skills index: #{id} has invalid status" unless %w[active planned].include?(skill["status"])
   providers = skill["provider_status"]
   abort "skills index: #{id} provider_status must name claude and codex" unless providers.is_a?(Hash) && %w[claude codex].all? { |p| %w[active planned].include?(providers[p]) }
   %w[claude codex].each do |provider|
     path = skill["#{provider}_path"]
     if providers[provider] == "active"
-      abort "skills index: active #{provider} implementation missing for #{id}" unless path.is_a?(String) && File.file?(File.join(root, path))
-    elsif !path.nil? && File.file?(File.join(root, path))
-      abort "skills index: planned #{provider} implementation is routable for #{id}"
+      resolved = path.is_a?(String) ? File.expand_path(path, root) : nil
+      abort "skills index: active #{provider} implementation missing for #{id}" unless resolved && resolved.start_with?("#{root}/") && File.file?(resolved)
+    elsif !path.nil?
+      resolved = path.is_a?(String) ? File.expand_path(path, root) : nil
+      abort "skills index: planned #{provider} path must be null or absent for #{id}" if resolved && resolved.start_with?("#{root}/") && File.file?(resolved)
     end
+  end
+  claude_paths << skill["claude_path"] if providers["claude"] == "active"
+  if skill["status"] == "active" && providers["claude"] != "active"
+    abort "skills index: active skill #{id} has no active Claude implementation"
+  end
+  if providers["codex"] == "active" && skill["codex_path"] != "codex/skills/catalog.md"
+    abort "skills index: active Codex route must use the Codex catalog for #{id}"
   end
   abort "skills index: #{id} requires non-empty routing_triggers" unless skill["routing_triggers"].is_a?(Array) && skill["routing_triggers"].any? { |t| t.is_a?(String) && !t.empty? }
 end

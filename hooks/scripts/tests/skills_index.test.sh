@@ -9,7 +9,7 @@ index="$ROOT/skills/index.yaml"
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 cp "$index" "$tmp/index.yaml"
-sed -i '' 's/codex: planned/codex: active/g' "$tmp/index.yaml"
+sed -i '' 's/codex: active/codex: planned/' "$tmp/index.yaml"
 if "$validator" "$tmp/index.yaml" >/dev/null 2>&1; then
   echo "FAIL planned implementation was routable"
   exit 1
