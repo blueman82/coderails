@@ -162,7 +162,7 @@ skills:
     codex:
       path: null
       status: planned
-    required_inputs: [plan, idea, or decision to stress-test]
+    required_inputs: "plan, idea, or decision to stress-test"
     output_contract: Three-stage Pre-Parade, Premortem, and Red Team analysis run in order.
   premortem:
     graph_role: null
@@ -173,7 +173,7 @@ skills:
     codex:
       path: null
       status: planned
-    required_inputs: [plan, decision, or approach to stress-test]
+    required_inputs: "plan, decision, or approach to stress-test"
     output_contract: Backwards-reasoned failure modes and causes assuming the plan already failed.
   sync-docs:
     graph_role: null
