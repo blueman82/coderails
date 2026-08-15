@@ -1,0 +1,7 @@
+{
+  "scope": "loop",
+  "result": "GO",
+  "verification_level": 1,
+  "verification_justification": "2 work-units, no irreversible surface",
+  "grading": { "by": "post_evals.sh grade-loop", "checksum": "abc123" }
+}

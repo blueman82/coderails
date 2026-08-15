@@ -1,25 +1,13 @@
 ---
-provider: codex
-id: assumptions
-source_kind: command
-graph_role: null
-required_inputs: [current working context]
-output_contract: Every current assumption listed, marked verified or inferred.
-status: active
+description: List every assumption you are currently making, marked verified or inferred
 ---
 
-# assumptions
+# Assumptions Surface
 
-This is the native Codex implementation for `assumptions`.
+List every assumption you are currently making about the user's task, the codebase, the environment, or any state. For each, mark:
+- `(verified)` — directly observed this session via tool result, file read, or explicit user statement
+- `(inferred)` — pattern-matched, recalled, or assumed from context
 
-## Execution
+Format as a table with columns: Assumption | Source | Confidence.
 
-Perform the requested operation against the supplied context. Validate inputs before changing state, fail closed on missing prerequisites, and return the declared output contract with exact evidence.
-
-## Inputs
-
-Required: `[current working context]`.
-
-## Result
-
-Produce: `Every current assumption listed, marked verified or inferred.`.
+Do NOT proceed with any other work in this turn. Pure inventory.

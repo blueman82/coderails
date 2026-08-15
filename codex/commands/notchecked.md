@@ -1,25 +1,14 @@
 ---
-provider: codex
-id: notchecked
-source_kind: command
-graph_role: null
-required_inputs: [claims made in session]
-output_contract: List of claims made but not actually verified.
-status: active
+description: List claims you made but did not actually verify - the gap between assertion and evidence
 ---
 
-# notchecked
+# Not Checked
 
-This is the native Codex implementation for `notchecked`.
+Review your recent responses in this conversation. List every non-trivial claim you made that was NOT actually verified — i.e., claims you wrote with confidence but did not back with a tool result, file read, or user-provided fact.
 
-## Execution
+For each, state:
+- The claim, in one sentence
+- Why you didn't verify (cost, oversight, assumed obvious, etc.)
+- What verification would look like now
 
-Perform the requested operation against the supplied context. Validate inputs before changing state, fail closed on missing prerequisites, and return the declared output contract with exact evidence.
-
-## Inputs
-
-Required: `[claims made in session]`.
-
-## Result
-
-Produce: `List of claims made but not actually verified.`.
+Be ruthless. Do not defend the claims; surface the gaps.

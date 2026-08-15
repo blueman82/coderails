@@ -16,7 +16,7 @@ def main() -> int:
     assert len(routes) == 46, len(routes)
     assert len({route.path for route in routes}) == len(routes)
     assert {route.kind for route in routes} == {"skills", "agents", "commands"}
-    assert resolve("cite-check", kind="skills") == ROOT / "codex/skills/cite-check.md"
+    assert resolve("cite-check", kind="skills") == ROOT / ".codex/skills/cite-check/SKILL.md"
     assert resolve("disposition-scout", kind="agents") == ROOT / ".codex/skills/disposition-scout/SKILL.md"
     for bad in ("missing-route", "catalog"):
         try:
@@ -28,12 +28,12 @@ def main() -> int:
     with tempfile.TemporaryDirectory() as directory:
         root = Path(directory)
         (root / "skills").mkdir()
-        (root / "codex/skills").mkdir(parents=True)
+        (root / ".codex/skills/cite-check").mkdir(parents=True)
         index = ROOT / "skills/index.yaml"
         text = index.read_text(encoding="utf-8")
         (root / "skills/index.yaml").write_text(text, encoding="utf-8")
-        shutil.copy(ROOT / "codex/skills/cite-check.md", root / "codex/skills/cite-check.md")
-        planned = text.replace("path: codex/skills/cite-check.md\n      status: active", "path: codex/skills/cite-check.md\n      status: planned")
+        shutil.copy(ROOT / ".codex/skills/cite-check/SKILL.md", root / ".codex/skills/cite-check/SKILL.md")
+        planned = text.replace("path: .codex/skills/cite-check/SKILL.md\n      status: active", "path: .codex/skills/cite-check/SKILL.md\n      status: planned")
         (root / "skills/index.yaml").write_text(planned, encoding="utf-8")
         try:
             resolve("cite-check", kind="skills", root=root)
@@ -41,7 +41,7 @@ def main() -> int:
             pass
         else:
             raise AssertionError("planned route resolved")
-        missing = text.replace("path: codex/skills/cite-check.md", "path: codex/skills/missing.md")
+        missing = text.replace("path: .codex/skills/cite-check/SKILL.md", "path: .codex/skills/missing/SKILL.md")
         (root / "skills/index.yaml").write_text(missing, encoding="utf-8")
         try:
             resolve("cite-check", kind="skills", root=root)

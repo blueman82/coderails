@@ -1,25 +1,28 @@
 ---
-provider: codex
-id: test-gate-setup
-source_kind: command
-graph_role: null
-required_inputs: [current project]
-output_contract: Detected test runner and created the project test command configuration.
-status: active
+description: Set up the test gate for the current project — detects test runner and creates .codex/test_command
 ---
 
-# test-gate-setup
+# Test Gate Setup
 
-This is the native Codex implementation for `test-gate-setup`.
+Set up the test gate hook for the current project. This makes `git commit` automatically run tests first — if they fail, the commit is denied.
 
-## Execution
+## Steps
 
-Perform the requested operation against the supplied context. Validate inputs before changing state, fail closed on missing prerequisites, and return the declared output contract with exact evidence.
+1. Check if `.codex/test_command` already exists in the current working directory. If it does, read it and report what's configured. Ask if the user wants to change it.
 
-## Inputs
+2. If it doesn't exist, detect the project's test runner by checking for these files (in order):
+   - `package.json` → check for a `test` script → use `npm test`
+   - `Cargo.toml` → use `cargo test`
+   - `pyproject.toml` or `setup.py` or `setup.cfg` → use `pytest -x`
+   - `go.mod` → use `go test ./...`
+   - `Makefile` → check for a `test` target → use `make test`
+   - `mix.exs` → use `mix test`
+   - `Gemfile` → use `bundle exec rspec`
 
-Required: `[current project]`.
+3. If a test runner is detected, propose it to the user. If multiple are detected, ask which one to use. If none are detected, ask the user to provide the command.
 
-## Result
+4. Create the `.codex` directory if it doesn't exist, then write the single-line test command to `.codex/test_command`.
 
-Produce: `Detected test runner and created the project test command configuration.`.
+5. Run the test command once to verify it works. Report the result.
+
+6. Confirm: "Test gate is active. Every `git commit` in this project will run `<command>` first. Remove `.codex/test_command` to disable."

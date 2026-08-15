@@ -14,9 +14,9 @@ fact that would flip it. Do not create, edit, or delete any file.
 
 ## Codex tool mapping
 
-Ported from the Claude agent per `skills/using-coderails/references/codex-tools.md`'s
+Ported from the this provider agent per `skills/using-coderails/references/codex-tools.md`'s
 action-mapping table. This agent is read-only (no Write/Edit/NotebookEdit on
-the Claude side), so only the read-side mappings apply:
+the this provider side), so only the read-side mappings apply:
 
 | Action | Codex tool |
 |---|---|

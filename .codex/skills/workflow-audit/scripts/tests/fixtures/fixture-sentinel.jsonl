@@ -1,0 +1,1 @@
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"Bash","input":{"command":"curl -H 'Authorization: Bearer SENTINEL_sk_live_99xyz' https://api.example.com/v1/resource"}}]},"timestamp":"2026-07-03T11:00:00Z"}

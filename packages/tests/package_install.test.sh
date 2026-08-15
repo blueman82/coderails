@@ -19,7 +19,9 @@ check_cmd "Claude installer parses" bash -n "$ROOT/install.sh"
 check_cmd "Codex plugin manifest exists" test -f "$ROOT/.codex-plugin/plugin.json"
 check_value "Codex plugin name" "$(jq -r .name "$ROOT/.codex-plugin/plugin.json")" coderails-codex
 for path in skills commands hooks; do
-  check_value "Codex $path path" "$(jq -r ".$path" "$ROOT/.codex-plugin/plugin.json")" "./codex/$path/"
+  expected_path="./codex/$path/"
+  [ "$path" = skills ] && expected_path="./.codex/skills/"
+  check_value "Codex $path path" "$(jq -r ".$path" "$ROOT/.codex-plugin/plugin.json")" "$expected_path"
 done
 check_cmd "Codex runtime exists" test -f "$ROOT/codex/scripts/run_graph.py"
 check_value "Codex package is independent" "$(jq -r .source_root "$ROOT/packages/codex/manifest.json")" .

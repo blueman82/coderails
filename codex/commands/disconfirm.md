@@ -1,25 +1,14 @@
 ---
-provider: codex
-id: disconfirm
-source_kind: command
-graph_role: null
-required_inputs: [most recent recommendation]
-output_contract: Strongest case against the most recent recommendation.
-status: active
+description: Argue against your own most recent recommendation - find the strongest case it is wrong
 ---
 
-# disconfirm
+# Disconfirm
 
-This is the native Codex implementation for `disconfirm`.
+Take your most recent recommendation, suggestion, or conclusion. Argue against it. Find the strongest case that it is wrong, incomplete, or harmful. Consider:
 
-## Execution
+- What evidence would falsify it?
+- What edge cases break it?
+- What did the analysis miss or assume away?
+- Who would push back, and on what grounds?
 
-Perform the requested operation against the supplied context. Validate inputs before changing state, fail closed on missing prerequisites, and return the declared output contract with exact evidence.
-
-## Inputs
-
-Required: `[most recent recommendation]`.
-
-## Result
-
-Produce: `Strongest case against the most recent recommendation.`.
+Steelman the opposition. Do not hedge. After the disconfirmation, state honestly whether your original recommendation still holds.
