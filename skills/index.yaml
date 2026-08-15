@@ -6,7 +6,7 @@ skills:
       path: skills/agentic-loop/SKILL.md
       status: active
     codex:
-      path: codex/skills/catalog.md
+      path: codex/skills/agentic-loop.md
       status: active
     required_inputs: [authorising prompt, envelope/stop-conditions context]
     output_contract: Multi-agent orchestration discipline keeping the main context a pure orchestrator that never implements.
@@ -17,7 +17,7 @@ skills:
       path: skills/cite-check/SKILL.md
       status: active
     codex:
-      path: codex/skills/catalog.md
+      path: codex/skills/cite-check.md
       status: active
     required_inputs: [claim to verify]
     output_contract: Re-derived claim backed by sources only, no recall or inference.
@@ -28,7 +28,7 @@ skills:
       path: skills/dashboard/SKILL.md
       status: active
     codex:
-      path: codex/skills/catalog.md
+      path: codex/skills/dashboard.md
       status: active
     required_inputs: []
     output_contract: Live local observability HUD for sessions, loops, PR gate states, runs, and memory activity.
@@ -39,7 +39,7 @@ skills:
       path: skills/docs-sync/SKILL.md
       status: active
     codex:
-      path: codex/skills/catalog.md
+      path: codex/skills/docs-sync.md
       status: active
     required_inputs: [git-tracked docs, current codebase state]
     output_contract: Scheduled nightly drift audit that edits, pushes, reviews, and self-merges a fix when drift is found.
@@ -50,7 +50,7 @@ skills:
       path: skills/engineering-principles-bash/SKILL.md
       status: active
     codex:
-      path: codex/skills/catalog.md
+      path: codex/skills/engineering-principles-bash.md
       status: active
     required_inputs: [changed shell script files]
     output_contract: Bash/shell-specific coding standards and idioms enforcement.
@@ -61,7 +61,7 @@ skills:
       path: skills/engineering-principles-go/SKILL.md
       status: active
     codex:
-      path: codex/skills/catalog.md
+      path: codex/skills/engineering-principles-go.md
       status: active
     required_inputs: [changed Go files]
     output_contract: Go-specific coding standards and idioms enforcement.
@@ -72,7 +72,7 @@ skills:
       path: skills/engineering-principles-python/SKILL.md
       status: active
     codex:
-      path: codex/skills/catalog.md
+      path: codex/skills/engineering-principles-python.md
       status: active
     required_inputs: [changed Python files]
     output_contract: Python-specific coding standards and idioms enforcement.
@@ -83,7 +83,7 @@ skills:
       path: skills/engineering-principles-ts/SKILL.md
       status: active
     codex:
-      path: codex/skills/catalog.md
+      path: codex/skills/engineering-principles-ts.md
       status: active
     required_inputs: [changed TypeScript files]
     output_contract: TypeScript-specific coding standards and idioms enforcement.
@@ -94,7 +94,7 @@ skills:
       path: skills/engineering-principles/SKILL.md
       status: active
     codex:
-      path: codex/skills/catalog.md
+      path: codex/skills/engineering-principles.md
       status: active
     required_inputs: [code being written or modified]
     output_contract: Enforces YAGNI/KISS/DRY/Fail Fast/SSOT/Law of Demeter plus language-specific standards via Serena LSP.
@@ -105,7 +105,7 @@ skills:
       path: skills/fable-mode/SKILL.md
       status: active
     codex:
-      path: codex/skills/catalog.md
+      path: codex/skills/fable-mode.md
       status: active
     required_inputs: [task description]
     output_contract: High-autonomy, self-verifying, evidence-grounded working mode for non-trivial tasks.
@@ -116,7 +116,7 @@ skills:
       path: skills/handoff/SKILL.md
       status: active
     codex:
-      path: codex/skills/catalog.md
+      path: codex/skills/handoff.md
       status: active
     required_inputs: [current session context]
     output_contract: Structured memory file and continuation prompt for carrying work into a new session.
@@ -127,7 +127,7 @@ skills:
       path: skills/improve-prompt/SKILL.md
       status: active
     codex:
-      path: codex/skills/catalog.md
+      path: codex/skills/improve-prompt.md
       status: active
     required_inputs: [raw prompt to improve]
     output_contract: Rewritten prompt with ambiguities surfaced and gaps filled with reasonable assumptions.
@@ -138,7 +138,7 @@ skills:
       path: skills/loop-retro-promotion/SKILL.md
       status: active
     codex:
-      path: codex/skills/catalog.md
+      path: codex/skills/loop-retro-promotion.md
       status: active
     required_inputs: [accumulated agentic-loop retro.json files]
     output_contract: Scheduled pipeline mining retros for repo-agnostic lessons promoted into learned-failure-modes.md.
@@ -149,7 +149,7 @@ skills:
       path: skills/memory-consolidation/SKILL.md
       status: active
     codex:
-      path: codex/skills/catalog.md
+      path: codex/skills/memory-consolidation.md
       status: active
     required_inputs: [project memory directory]
     output_contract: Deduped, de-staled memory directory with a refreshed MEMORY.md index.
@@ -160,7 +160,7 @@ skills:
       path: skills/planning-sequence/SKILL.md
       status: active
     codex:
-      path: codex/skills/catalog.md
+      path: codex/skills/planning-sequence.md
       status: active
     required_inputs: "plan, idea, or decision to stress-test"
     output_contract: Three-stage Pre-Parade, Premortem, and Red Team analysis run in order.
@@ -171,7 +171,7 @@ skills:
       path: skills/premortem/SKILL.md
       status: active
     codex:
-      path: codex/skills/catalog.md
+      path: codex/skills/premortem.md
       status: active
     required_inputs: "plan, decision, or approach to stress-test"
     output_contract: Backwards-reasoned failure modes and causes assuming the plan already failed.
@@ -182,7 +182,7 @@ skills:
       path: skills/sync-docs/SKILL.md
       status: active
     codex:
-      path: codex/skills/catalog.md
+      path: codex/skills/sync-docs.md
       status: active
     required_inputs: [project docs and codebase]
     output_contract: Documentation drift analysis and sync report, optionally with Serena semantic discovery.
@@ -193,7 +193,7 @@ skills:
       path: skills/task-evals/SKILL.md
       status: active
     codex:
-      path: codex/skills/catalog.md
+      path: codex/skills/task-evals.md
       status: active
     required_inputs: [task definition, plan]
     output_contract: Frozen evals.json (schema_version 1) of independent, game-resistant success evals gating merge/loop completion.
@@ -204,7 +204,7 @@ skills:
       path: skills/using-coderails/SKILL.md
       status: active
     codex:
-      path: codex/skills/catalog.md
+      path: codex/skills/using-coderails.md
       status: active
     required_inputs: [conversation start]
     output_contract: Establishes how to find and use skills before any response.
@@ -215,7 +215,7 @@ skills:
       path: skills/verify-merged-pr/SKILL.md
       status: active
     codex:
-      path: codex/skills/catalog.md
+      path: codex/skills/verify-merged-pr.md
       status: active
     required_inputs: [PR number or merge claim to verify]
     output_contract: Confirms a PR's changes are actually on origin/main before anything is built on top of the claim.
@@ -226,7 +226,7 @@ skills:
       path: skills/wiki-ingest/SKILL.md
       status: active
     codex:
-      path: codex/skills/catalog.md
+      path: codex/skills/wiki-ingest.md
       status: active
     required_inputs: [PR number or description of the change to record]
     output_contract: Wiki pages created or updated in the project's LLM Wiki documenting a merged change.
@@ -237,7 +237,7 @@ skills:
       path: skills/wiki-init/SKILL.md
       status: active
     codex:
-      path: codex/skills/catalog.md
+      path: codex/skills/wiki-init.md
       status: active
     required_inputs: [project to initialize a wiki for]
     output_contract: Initialized LLM Wiki vault for the current project.
@@ -248,7 +248,7 @@ skills:
       path: skills/wiki-lint/SKILL.md
       status: active
     codex:
-      path: codex/skills/catalog.md
+      path: codex/skills/wiki-lint.md
       status: active
     required_inputs: [existing LLM Wiki vault, optional scope]
     output_contract: Audit of wiki quality and structural integrity — contradictions, stale pages, orphans, dead links, coverage gaps.
@@ -259,7 +259,7 @@ skills:
       path: skills/wiki-query/SKILL.md
       status: active
     codex:
-      path: codex/skills/catalog.md
+      path: codex/skills/wiki-query.md
       status: active
     required_inputs: [question]
     output_contract: Answer grounded in wiki content, optionally rendered as slides or charts.
@@ -270,7 +270,7 @@ skills:
       path: skills/workflow-audit/SKILL.md
       status: active
     codex:
-      path: codex/skills/catalog.md
+      path: codex/skills/workflow-audit.md
       status: active
     required_inputs: [recent session transcripts]
     output_contract: List of repeated tasks worth turning into skills.
@@ -281,7 +281,7 @@ skills:
       path: agents/deploy-safety-reviewer.md
       status: active
     codex:
-      path: codex/agents/catalog.md
+      path: codex/agents/deploy-safety-reviewer.md
       status: active
     required_inputs: [PR or planned change with a runtime/production surface]
     output_contract: One verdict with a named risk boundary on deploy-safety risk.
@@ -292,7 +292,7 @@ skills:
       path: agents/design-scout.md
       status: active
     codex:
-      path: codex/agents/catalog.md
+      path: codex/agents/design-scout.md
       status: active
     required_inputs: [unresolved architectural fork, actual code paths]
     output_contract: One recommendation with a named flip-condition for the design fork.
@@ -303,7 +303,7 @@ skills:
       path: agents/disposition-scout.md
       status: active
     codex:
-      path: codex/agents/catalog.md
+      path: codex/agents/disposition-scout.md
       status: active
     required_inputs: [Phase 1 plan, retired code paths]
     output_contract: clean-break or preserve-compat recommendation per retirement unit with evidence and flip-condition.
@@ -314,7 +314,7 @@ skills:
       path: agents/docs-auditor.md
       status: active
     codex:
-      path: codex/agents/catalog.md
+      path: codex/agents/docs-auditor.md
       status: active
     required_inputs: [just-merged code, in-tree docs]
     output_contract: Drift findings triaged, fixing only drift the loop's own PRs introduced.
@@ -325,7 +325,7 @@ skills:
       path: agents/loop-worker.md
       status: active
     codex:
-      path: codex/agents/catalog.md
+      path: codex/agents/loop-worker.md
       status: active
     required_inputs: [one scoped unit of work from a plan]
     output_contract: Implemented, tested, self-reviewed code with a committed artifact/open PR.
@@ -336,7 +336,7 @@ skills:
       path: agents/preflight-scout.md
       status: active
     codex:
-      path: codex/agents/catalog.md
+      path: codex/agents/preflight-scout.md
       status: active
     required_inputs: [loop task context]
     output_contract: Consolidated pre-flight report from planning-sequence, premortem, assumptions, notchecked, wiki-query, and retro intake.
@@ -347,7 +347,7 @@ skills:
       path: agents/proof-author.md
       status: active
     codex:
-      path: codex/agents/catalog.md
+      path: codex/agents/proof-author.md
       status: active
     required_inputs: [raw authorising prompt and directly referenced docs]
     output_contract: Frozen proof.json with every status "pending", author/grader independence preserved.
@@ -358,7 +358,7 @@ skills:
       path: agents/source-auditor.md
       status: active
     codex:
-      path: codex/agents/catalog.md
+      path: codex/agents/source-auditor.md
       status: active
     required_inputs: [stated claim, durable sources]
     output_contract: Sourced PASS / FAIL / UNSUPPORTED verdict re-derived from files, git, and fresh command output.
@@ -369,7 +369,7 @@ skills:
       path: agents/spec-reviewer.md
       status: active
     codex:
-      path: codex/agents/catalog.md
+      path: codex/agents/spec-reviewer.md
       status: active
     required_inputs: [spec or design document]
     output_contract: Completeness, consistency, clarity, scope, and YAGNI review before implementation planning starts.
@@ -380,7 +380,7 @@ skills:
       path: agents/wiki-writer.md
       status: active
     codex:
-      path: codex/agents/catalog.md
+      path: codex/agents/wiki-writer.md
       status: active
     required_inputs: [wiki ingest/query/lint task, AGENTS-wiki-schema.md contract]
     output_contract: Wiki pages read, authored, and maintained, with commits and PRs when the vault config requires it.
@@ -391,7 +391,7 @@ skills:
       path: commands/assumptions.md
       status: active
     codex:
-      path: codex/commands/catalog.md
+      path: codex/commands/assumptions.md
       status: active
     required_inputs: [current working context]
     output_contract: Every current assumption listed, marked verified or inferred.
@@ -402,7 +402,7 @@ skills:
       path: commands/disconfirm.md
       status: active
     codex:
-      path: codex/commands/catalog.md
+      path: codex/commands/disconfirm.md
       status: active
     required_inputs: [most recent recommendation]
     output_contract: Strongest case against the most recent recommendation.
@@ -413,7 +413,7 @@ skills:
       path: commands/init.md
       status: active
     codex:
-      path: codex/commands/catalog.md
+      path: codex/commands/init.md
       status: active
     required_inputs: [project-name (optional)]
     output_contract: Scaffolded workflow.config.yaml for the current project.
@@ -424,7 +424,7 @@ skills:
       path: commands/merge.md
       status: active
     codex:
-      path: codex/commands/catalog.md
+      path: codex/commands/merge.md
       status: active
     required_inputs: [pr-number | branch-name | auto]
     output_contract: Approved PR merged, switched to main, and pulled latest changes.
@@ -435,7 +435,7 @@ skills:
       path: commands/notchecked.md
       status: active
     codex:
-      path: codex/commands/catalog.md
+      path: codex/commands/notchecked.md
       status: active
     required_inputs: [claims made in session]
     output_contract: List of claims made but not actually verified.
@@ -446,7 +446,7 @@ skills:
       path: commands/post-evals.md
       status: active
     codex:
-      path: codex/commands/catalog.md
+      path: codex/commands/post-evals.md
       status: active
     required_inputs: [PR#]
     output_contract: Validated, SHA-bound eval-artifact summary posted as a durable PR artifact.
@@ -457,7 +457,7 @@ skills:
       path: commands/post-review.md
       status: active
     codex:
-      path: codex/commands/catalog.md
+      path: codex/commands/post-review.md
       status: active
     required_inputs: [PR#]
     output_contract: Validated, SHA-bound review summary posted as a durable PR artifact.
@@ -468,7 +468,7 @@ skills:
       path: commands/prep.md
       status: active
     codex:
-      path: codex/commands/catalog.md
+      path: codex/commands/prep.md
       status: active
     required_inputs: [branch name, optional type/summary/description]
     output_contract: Safety branch, new feature/bug branch, and Jira ticket created.
@@ -479,7 +479,7 @@ skills:
       path: commands/push.md
       status: active
     codex:
-      path: codex/commands/catalog.md
+      path: codex/commands/push.md
       status: active
     required_inputs: [commit message (optional), working tree changes]
     output_contract: Changes added, committed, pushed, and a PR created.
@@ -490,7 +490,7 @@ skills:
       path: commands/test-gate-setup.md
       status: active
     codex:
-      path: codex/commands/catalog.md
+      path: codex/commands/test-gate-setup.md
       status: active
     required_inputs: [current project]
     output_contract: Detected test runner and created .claude/test_command.
@@ -501,7 +501,7 @@ skills:
       path: commands/workflow.md
       status: active
     codex:
-      path: codex/commands/catalog.md
+      path: codex/commands/workflow.md
       status: active
     required_inputs: [branch, description]
     output_contract: "Full feature workflow orchestrated end-to-end: prep, push, review, merge, wiki-ingest/lint."
