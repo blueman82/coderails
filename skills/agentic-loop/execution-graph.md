@@ -48,15 +48,25 @@ fork/join wave in the graph:
    once the full wave's results are collected, to fold them into
    `.graph.nodes` (bounded-retry/hard-stop bookkeeping included).
 5. **`J2` release is a separate, explicit second write — MUST NOT be
-   skipped.** `graph_dispatch_record` folds `S2.5`/`S2.6`'s own results into
-   `.graph.nodes` but has no join-release logic of its own, and
-   `graph_readiness.sh` gates `S2.7a` (and every other node downstream of
-   `J2`) on `J2`'s own status field, not merely on its predecessors'
-   outcomes. After `graph_dispatch_record` absorbs the `S2.5`/`S2.6` results,
-   the orchestrator MUST perform one further read-modify-write setting `J2`
-   itself to a terminal `done` or `skipped` status/outcome. Skipping this
-   write leaves `J2` — and every downstream node — permanently blocked, even
-   though `S2.5`/`S2.6` both completed.
+   skipped.** `J2` is never a dispatch target (`graph_dispatch_plan` reports
+   it as `kind:"join"`, never sent to `Agent`), so no wave-results object
+   ever contains a `"J2"` key, and `graph_dispatch_record`'s fold only writes
+   keys present in the results object it is handed — `J2` is never folded
+   automatically. Join nodes have no special readiness-gating logic:
+   `graph_readiness.sh`'s join branch only changes which nodes count as
+   *predecessors* for a downstream node (substituting the join's `inputs`
+   list for raw edges); `J2` itself is read and gated like any ordinary
+   node, on its own `.status` (for its own pending/ready state) and, for
+   nodes downstream of it, on its `.outcome` (predecessors are gated on
+   `.outcome` being a terminal-success value: `done`/`skipped`). After
+   `graph_dispatch_record` absorbs the `S2.5`/`S2.6` results, the
+   orchestrator MUST perform one further read-modify-write setting `J2`
+   itself to a terminal `done` or `skipped` value in BOTH its `.status` and
+   `.outcome` fields — matching the convention `graph_dispatch_record`'s own
+   fold uses when it writes a node's result (`status` and `outcome` set
+   together to the same final value), since other code paths may read
+   either field. Skipping this write leaves `J2` — and every downstream
+   node — permanently blocked, even though `S2.5`/`S2.6` both completed.
 
 **Known ceiling — `retry.attempts` read is outside the write lock.**
 `graph_dispatch_record` computes each node's `retry.attempts` via its own
