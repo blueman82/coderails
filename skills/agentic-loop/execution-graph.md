@@ -6,7 +6,7 @@ predicate, or skip condition; the phase prose in SKILL.md covers what to *do*, t
 what makes a node *ready*.
 
 Before dispatching any candidate node, run the read-only readiness query
-`${CLAUDE_PLUGIN_ROOT}/hooks/scripts/lib/graph_readiness.sh <path-to-progress.json> <node-id>`
+`$(git -C <repo> rev-parse --show-toplevel)/hooks/scripts/lib/graph_readiness.sh <path-to-progress.json> <node-id>`
 and dispatch only nodes it reports `ready` for. Its `blocked` output means "not
 yet ready to dispatch" — it fail-closes the same way on missing or malformed
 `progress.json` as on a real non-terminal predecessor, so it cannot distinguish
@@ -16,6 +16,56 @@ Run ready independent nodes in one wave, but preserve every listed dependency.
 The orchestrator is the only writer of `progress.json`: collect a wave's results, then do one
 read-modify-write before releasing its join. Inside an authorised loop, the
 `U*` lane below repeats per work-unit.
+
+**Resolving and recording a wave — `graph_dispatch.sh`.** Use
+`$(git -C <repo> rev-parse --show-toplevel)/hooks/scripts/lib/graph_dispatch.sh`
+(repo-root-relative, same reasoning as the `graph_readiness.sh` path above —
+`${CLAUDE_PLUGIN_ROOT}` is empty in an orchestrator Bash call and is never a
+valid path prefix here) for the S2.5/S2.6 fork through the `J2` join, and for
+any other fork/join wave in the graph:
+
+1. Source the script and call `graph_dispatch_plan <path-to-progress.json>
+   <path-to-skills/index.yaml>` to resolve the current ready wave's dispatch
+   targets — one JSON-lines object per ready node — BEFORE running any real
+   `Agent` dispatch. A `kind:"join"` line (e.g. `J2`) is not a dispatch
+   target; only `kind:"dispatch"` lines with `unresolved:false` are.
+2. Dispatch the real `Agent` calls for that wave's resolved targets.
+3. **Wave-completeness — confirm before recording.** `graph_dispatch_record`'s
+   own jq only iterates keys present in the results object it is handed — it
+   cannot itself detect a wave where a dispatched node never reported back.
+   Before calling it, confirm every node `graph_dispatch_plan` reported as a
+   dispatch target in this wave has a result in hand (a skipped branch still
+   records an explicit skip, same convention as this file's skip column) —
+   do not call `graph_dispatch_record` with a partial wave.
+4. Call `graph_dispatch_record <path-to-progress.json> <wave-results-json>`
+   once the full wave's results are collected, to fold them into
+   `.graph.nodes` (bounded-retry/hard-stop bookkeeping included).
+5. **`J2` release is a separate, explicit second write — MUST NOT be
+   skipped.** `graph_dispatch_record` folds `S2.5`/`S2.6`'s own results into
+   `.graph.nodes` but has no join-release logic of its own, and
+   `graph_readiness.sh` gates `S2.7a` (and every other node downstream of
+   `J2`) on `J2`'s own status field, not merely on its predecessors'
+   outcomes. After `graph_dispatch_record` absorbs the `S2.5`/`S2.6` results,
+   the orchestrator MUST perform one further read-modify-write setting `J2`
+   itself to a terminal `done` or `skipped` status/outcome. Skipping this
+   write leaves `J2` — and every downstream node — permanently blocked, even
+   though `S2.5`/`S2.6` both completed.
+
+**Known ceiling — `retry.attempts` read is outside the write lock.**
+`graph_dispatch_record` computes each node's `retry.attempts` via its own
+unlocked `jq` read of `progress.json`, before handing the folded result to
+`graph_executor_apply_wave`'s locked read-modify-write. Two orchestrator
+sessions calling `graph_dispatch_record` concurrently against the same
+`progress.json` could both read a stale `attempts` value, undercounting the
+retry bound. `graph_executor.sh`/`graph_readiness.sh` are the frozen,
+byte-verified contract this loop was scoped never to touch, so the fix is
+deferred rather than made here: single-orchestrator-per-`progress.json` (the
+existing "orchestrator is the only writer" rule two paragraphs up) is the
+current mitigation, not a real fix for true concurrent writers.
+`# ponytail: unlocked pre-read of retry.attempts in graph_dispatch_record,
+race under concurrent writers — move the read inside
+graph_executor_apply_wave's lock if concurrent orchestrators on one
+progress.json ever becomes a real scenario.`
 
 Node IDs are stable documentation identifiers. `S*` nodes run once; `U<i>*`
 nodes run once per work-unit `i`; `J*` nodes are explicit joins. A skipped node
