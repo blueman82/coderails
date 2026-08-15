@@ -417,6 +417,62 @@ als_read_file_state() {
   fi
 }
 
+# als_mark_complete <cwd> <session_id>
+#   Atomically stamps progress.json BOTH status:"complete" AND
+#   completed_marker together, so the two fields can never land in separate
+#   writes with a re-arm-detection gap between them. Fixes the bug where no
+#   caller ever wrote completed_marker: it defaulted to 0 forever, so
+#   ALS_INVOCATIONS (always >0 once a loop has run) read as "rearmed" on
+#   every subsequent turn of an already-completed session
+#   (loop_state_guard.sh's stale_complete_rearmed false-positive).
+#
+#   completed_marker is stamped to the SAME live invocation count the guards
+#   themselves compare against (via als_stable_invocations on the resolved
+#   transcript) — not a hand-derived ordinal. loop-state.md's older "prior
+#   completed_marker plus 1" ordinal assumes the skill is invoked exactly
+#   once per loop, which als_count_invocations' own header disproves (a
+#   slash-started loop that also later re-invokes the Skill tool
+#   programmatically counts 2) — an ordinal would under-stamp that case and
+#   the false-positive would survive this fix. Marking against the live
+#   count is what als_load_progress's rearm check (ALS_INVOCATIONS >
+#   ALS_MARKER) is actually measured against, so it's the only value that
+#   makes rearmed=0 hold immediately after this call.
+#
+#   Transcript resolution mirrors loop_cost.sh's dc_mine_token_usage: glob
+#   ${CLAUDE_PROJECTS_DIR:-$HOME/.claude/projects}/*/<session_id>.jsonl for
+#   the orchestrator's own transcript. session_id must already be sanitised
+#   via als_sanitise_session_id, same requirement as every other caller of
+#   als_resolve_path in this file.
+#
+#   Fails CLOSED (returns 1, writes nothing) rather than stamping a
+#   fabricated value: als_stable_invocations is contractually fail-open (jq
+#   missing / unreadable transcript -> 0), which is correct for a GATE but
+#   wrong for a WRITER — a loop cannot genuinely be completing at
+#   invocations=0, so a resolved count of 0 (no transcript found, or a
+#   mining failure) means "could not determine the count", not "the count is
+#   zero". Stamping 0 in that case would silently recreate the exact bug
+#   this function exists to fix, just with the file LOOKING correctly
+#   written. Same failure posture as als_atomic_progress_update itself
+#   (return 1, no partial write) — callers must check the exit status.
+als_mark_complete() {
+  local cwd="$1" session="$2"
+  local path; path=$(als_resolve_path "$cwd" "$session")
+  [ -n "$path" ] && [ -f "$path" ] || return 1
+  local projects_dir="${CLAUDE_PROJECTS_DIR:-$HOME/.claude/projects}"
+  local transcript="" f
+  for f in "$projects_dir"/*/"$session.jsonl"; do
+    [ -f "$f" ] || continue
+    transcript="$f"
+    break
+  done
+  [ -n "$transcript" ] || return 1
+  local n; n=$(als_stable_invocations "$transcript")
+  case "$n" in (''|*[!0-9]*) n=0;; esac
+  [ "$n" -gt 0 ] || return 1
+  als_atomic_progress_update "$path" --argjson n "$n" \
+    '.status = "complete" | .completed_marker = $n'
+}
+
 # als_loop_active_incomplete <transcript_path> <cwd> <session_id>
 #   Non-exiting predicate for the discipline hooks' Stop-only warn demotion
 #   (PR1 of the ceremony-noise-reduction loop). Returns 0 (true, shell

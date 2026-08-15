@@ -121,7 +121,14 @@ grace and block every time.
 - **Stub-first (Phase -2):** `status: "initialising"`, stamped with this `session_id`.
 - **Enrich at Phase 0:** record the envelope verbatim in `authorising_prompt_raw`; `status: "in-progress"`.
 - **Update at each phase boundary:** `graph` node states, work-unit states, disposition fields, `last_updated` — carry `loop_stop_counts` forward per the rule above.
-- **Teardown at Phase 13:** `status: "complete"`, and set `completed_marker` to the number of agentic-loop loops run in this session so far — the prior `completed_marker` (default 0) **plus 1**. Because this skill is invoked once per loop, that ordinal matches the guard's count of agentic-loop invocations, which is how the guard distinguishes a finished loop from a new one.
+- **Teardown at Phase 13:** call `als_mark_complete <cwd> <session_id>` (from
+  `lib/loop_state_common.sh`) to set `status: "complete"` and `completed_marker` together,
+  atomically — never write `status: "complete"` via a bare `als_atomic_progress_update` call, or
+  `completed_marker` is silently left unstamped. `completed_marker` is set to the LIVE
+  agentic-loop invocation count at that moment (the same count `als_stable_invocations` computes
+  from the transcript, not a hand-derived "prior value plus 1" ordinal) — a slash-started loop
+  that also later re-invokes the Skill tool programmatically counts 2, so an ordinal would
+  under-stamp that case.
 
 ## Recency
 
@@ -129,8 +136,8 @@ A prior loop's `status: "complete"` must not silence the guard for a later loop 
 session. Phase -2's stub-first overwrite (`status` back to `initialising`) is the primary re-arm
 signal. `completed_marker` is the backstop: if a new loop skips its stub, the guard still sees the
 current invocation count exceed the recorded `completed_marker` and blocks, forcing
-re-initialisation. This is why teardown must bump `completed_marker` and stub-first must carry it
-forward.
+re-initialisation. This is why teardown must call `als_mark_complete` (never a bare write of
+`status: "complete"`) and stub-first must carry `completed_marker` forward.
 
 ## Concurrent loops in one directory
 

@@ -29,104 +29,15 @@ Nineteen-plus numbered phases (−2 through 13, with lettered sub-phases) is too
 | Wrap-up | 9, 10, 11, 12, 13 |
 
 The phases below are a dependency graph, not a queue. A node is ready only when
-its prerequisites and readiness predicate are true — before dispatching any
-candidate node, run the read-only readiness query
-`${CLAUDE_PLUGIN_ROOT}/hooks/scripts/lib/graph_readiness.sh <path-to-progress.json> <node-id>`
-and dispatch only nodes it reports `ready` for. Its `blocked` output means "not
-yet ready to dispatch" — it fail-closes the same way on missing or malformed
-`progress.json` as on a real non-terminal predecessor, so it cannot distinguish
-the two. Conversely, a node with no recorded incoming edges is vacuously
-`ready` — register the candidate's node and edges before querying, not after.
-Run ready independent nodes in one wave, but preserve every listed dependency.
-The orchestrator is the only writer of `progress.json`: collect a wave's results, then do one
-read-modify-write before releasing its join. Inside an authorised loop, the
-`U*` lane below repeats per work-unit.
+its prerequisites and readiness predicate are true.
 
 ### Execution graph — stable contract
 
-Node IDs are stable documentation identifiers. `S*` nodes run once; `U<i>*`
-nodes run once per work-unit `i`; `J*` nodes are explicit joins. A skipped node
-is still recorded as `skipped: <predicate>` in loop state; it is not a failed
-node and cannot satisfy a prerequisite by omission.
-
-```text
-S-2 -> S-1 -> S0 -> S0.4 -> S0.5 -> S1 -> S2
-                                      |       |
-                                      |       +--> S2.5 --+
-                                      |       +--> S2.6 --+--> J2 --> S2.7a --> S2.7b --+
-                                      |       +--> S2.7c -------------------------------+
-                                      |       +--> S2.7d[i] -----------------------------+--> S2.8 --> J2.8
-                                      |       +--> S2.7e -------------------------------+
-                                      |                                                    |
-                                      +----------------------------------------------------+
-                                                                                           v
-                  +--> U3[i] --> U4[i] --> U4b-review[i] --> U5[i] --> U6[i] --> U7/8[i]
-                  |       ^                 |                    |          |          |
-J2.8 ------------+       |                 |                    +----------+----------+
-                  |       |                 +--> U5-repair[i] --/           |
-                  |       +-------------------- retry-until-green ----------+
-                  |                                                            v
-                  |                                                     U4b-merge-gate[i]
-                  |                                                            |
-                  +<-- U10-respawn[i] <---------------------------------------+
-                                                                               v
-                                                                        J12-all-units
-                                                                               |
-                                                                    S9-wiki -> S9-docs
-                                                                               |
-                                                                    S13-proof -> S13-retro
-                                                                               |
-                                                                        S13-complete
-```
-
-The diagram is a shape guide; the table is authoritative where a line would be
-ambiguous.
-
-| ID | Node / true prerequisites | Ready when | Conditional skip or join |
-|---|---|---|---|
-| `S-2` | Stub state | path helper returns the session-owned state path | never skipped |
-| `S-1` | Improve prompt | prompt is adopted, revised, or explicit opt-out is recorded | full-autonomous auto-adopts; otherwise one bounded input point |
-| `S0` | Read envelope | envelope class and stop conditions are recorded | never skipped |
-| `S0.4` | Model-cost notice | notice emitted | never a gate; no model switch is performed by the orchestrator |
-| `S0.5` | Operating rules | confidence, verification, and `LOOP-STOP` rules are active | never skipped |
-| `S1` | Plan | work-unit list, dependencies, and success criteria exist | Phase 1 confirmation may be `awaiting-input` |
-| `S2` | Plan | pre-flight agent result, wiki/theme intake, retro lessons, and clean-base check exist | never spawn implementation before this node |
-| `S2.5` | `S2` | design scout returned a recommendation and flip-condition | skip when no unresolved design fork |
-| `S2.6` | `S2` | disposition scout returned a result for every retirement unit | skip when no named existing path is retired |
-| `J2` | `S2.5` and `S2.6` | all triggered scouts returned; orchestrator validated and absorbed both results in one state write | skipped branches contribute an explicit skip record |
-| `S2.7a` | `J2` | durable `spec.md` exists | only if `work_units >= 3` or a cross-unit dependency exists |
-| `S2.7b` | `S2.7a` | durable `plan.md` exists and matches the work-unit list | same predicate as `S2.7a`; `S2.7b` is sequential after it |
-| `S2.7c` | `S2` plus authorising prompt | loop-scope evals are frozen before build | required for a Phase 2.7 loop or an irreversible-surface trigger |
-| `S2.7d[i]` | `S2` plus each unit definition | PR-scope evals are frozen before that unit builds | skip only for a unit with no PR; required before its merge gate |
-| `S2.7e` | `S2` plus executable-surface decision | blind `proof.json` exists, or explicit no-executable disposition is recorded | required for every executable loop; independent of `S2.7a/b` |
-| `S2.8` | `S2` and `S2.7b` when triggered | every build unit has one recorded model role | may run beside independent evidence branches; never releases a unit without its required inputs |
-| `J2.8` | `S2.8`, plus `S2.7d[i]`/`S2.7e` where required | all inputs for the first eligible unit are present | later units wait on their own true prerequisites |
-| `U3[i]` | `J2.8`, unit dependencies, and required eval/proof inputs | worker produced the unit's committed artifact/OPEN PR terminal state | units with `blockedBy` dependencies wait; independent units may run in waves |
-| `U4[i]` | `U3[i]` | artifact, worktree, PR, and worker report were checked by the orchestrator | idle is not failure; failed artifact check enters repair |
-| `U4b-review[i]` | `U4[i]` | required review Skill, security/deploy review when triggered, and SHA-bound post-review artifact exist | review findings go to `U5[i]`; no merge on a missing artifact |
-| `U5[i]` | `U4b-review[i]` or a verified reported regression | source-of-truth premise is confirmed and diagnosis is disconfirmed | premise disproven is a hard-stop; otherwise spawn the repair worker |
-| `U5-repair[i]` | `U5[i]` | distinct fix attempt applied and locally verified | back to `U4[i]`; at most 5 distinct attempts per failure |
-| `U6[i]` | current unit is verified and any in-scope confirmation decision is resolved | envelope permits autonomous continuation or required approval is granted | no extra ask inside the envelope |
-| `U7/8[i]` | `U6[i]` | stack-specific push/deploy tactic completed, if applicable | skip when no push/deploy surface; these phases do not add generic policy |
-| `U4b-merge-gate[i]` | `U4b-review[i]`, `U6[i]`, `U7/8[i]`, PR-scope eval, review artifact, and integrity attestation | exact-head review/eval/integrity checks and gate-time smoke pass; merge reports `MERGED` | any missing/stale/failing gate enters `U5-repair[i]` or hard-stop after retry bound |
-| `U10-respawn[i]` | `U4[i]` artifact check shows dispatch failure/idle without artifact | new versioned worker name and fresh dispatch exist | not triggered by an idle ping alone; returns to `U4[i]` |
-| `J12-all-units` | every unit's merge gate passed | each merged PR and dependent deployment evidence is freshly rechecked | no unit may be silently omitted |
-| `G10` | any respawn path | every replacement worker name is versioned | cross-cutting Phase 10 guard; no standalone work |
-| `G11` | every worker dispatch and report | prompts and reports carry confidence labels | cross-cutting Phase 11 guard; no standalone work |
-| `G12` | every artifact boundary | the orchestrator freshly rechecks the artifact before releasing a dependent node | cross-cutting Phase 12 guard; `J12-all-units` is its final aggregate join |
-| `S9-wiki` | `J12-all-units` | clustered wiki ingest and lint landed and were verified on `origin/main` | skip only when no wiki update is in scope; still record the skip |
-| `S9-docs` | `S9-wiki` | one `/sync-docs` audit completed and findings triaged | pre-existing drift is reported, not folded into scope |
-| `S13-proof` | `S9-docs` | every frozen proof command ran verbatim in the orchestrator session and passed | absent proof requires the recorded no-executable disposition |
-| `S13-retro` | `S13-proof` | Phase 13 report, cost, decisions, artifacts, eval result, standing orders, and feedback are written | never a mid-loop checkpoint |
-| `S13-complete` | `S13-retro` | final aggregate verification passes; `progress.json` is complete and `retro.json` is valid | terminal node; emits `LOOP-STOP: complete` |
-
-`S0.5`, `U4`, `U4b-review`, `U6`, and `S13-complete` carry the Phase 11/12
-confidence-label and fresh-evidence rules; they are guards on the nodes above,
-not extra work. A review finding, failing eval, smoke failure, or verification
-failure follows `U5 -> U5-repair -> U4` and consumes one distinct retry attempt.
-After five diagnosed attempts for the same failure, the edge terminates at the
-hard-stop rather than looping. Independent failure domains may use parallel
-repair workers, each with its own bound, then join at `U4`.
+**Read [execution-graph.md](execution-graph.md) in full before dispatching any node.** It has the
+full node table (every phase's true prerequisites, readiness predicate, and skip condition), the
+ASCII shape diagram, and the `graph_readiness.sh` usage contract — the read-only query that gates
+every dispatch decision below. Node IDs (`S*` run once, `U<i>*` run once per work-unit, `J*`/`G*`
+are joins/cross-cutting guards) are referenced by these names throughout the rest of this file.
 
 ### Phases -2 through 2.7 — setup, before any delegation
 
@@ -154,13 +65,10 @@ model release touches; the roles themselves are durable.
 | `default` | sonnet | TDD / mechanical / multi-file work; the fallback when uncertain (cost control) |
 | `frontier` | opus at `xhigh` effort (fable escalation — see [model-routing.md](model-routing.md)) | Design-judgement UI/architecture units; genuinely ambiguous investigations |
 
-**`frontier` resolves to opus, never automatically to fable** — escalating to fable needs a named
-capability reason in the stamp. **Effort is part of the stamp:** every `Model:` stamp names role
-AND effort (`frontier` → opus at `xhigh`; `default` → sonnet at `high`; `fast-mechanical` →
-haiku), and tuning effort is the first lever, model escalation the second. **Investigations get
-`frontier` FIRST**, not escalated-to — the one place `default`-first cost control does not apply.
-**Fallback valves live in the stamp, never improvised by a worker.** Full escalation rules, the
-effort table, and the inline-spawn sites at other phases: see [model-routing.md](model-routing.md).
+**Read [model-routing.md](model-routing.md) in full before writing any `Model:` stamp** — it has
+the escalation rule (`frontier` resolves to opus, never automatically to fable, without a named
+capability reason), the effort table (effort is part of every stamp, tuned before escalating the
+model), the investigations-get-`frontier`-first exception, and the fallback-valve discipline.
 
 **Record the assignment set once.** Append one `decisions_absorbed` entry covering
 every task's role assignment for this loop — `{phase: "2.8", decision: "<task id:
@@ -235,38 +143,9 @@ The same rationale applies beyond Bash: independent non-Bash tool calls — `Rea
 
 ### Phase 4b — PR review invokes `/pr-review-toolkit:review-pr <PR#>` as a Skill, then `/coderails:post-review <PR#>`
 
-When a phase reaches "review the PR" (after a `/workflow` agent has pushed a PR, before merge), invoke the **`/pr-review-toolkit:review-pr <PR#>`** Skill — passing the PR number as the argument — which itself fans out the six specialised reviewers plus a security pass. Do NOT hand-roll the reviewers as separate `Agent` or `Task` spawns; use the Skill invocation.
+When a phase reaches "review the PR" (after a `/workflow` agent has pushed a PR, before merge), invoke the **`/pr-review-toolkit:review-pr <PR#>`** Skill — passing the PR number as the argument — which itself fans out six specialised reviewers plus a security pass. Do NOT hand-roll the reviewers as separate `Agent`/`Task` spawns. **This is REQUIRED to satisfy the merge gate** — `enforce_pr_workflow` only accepts the `review-pr` Skill (with the PR number in args) as merge evidence; a hand-rolled fanout leaves no evidence the gate recognises. After findings are applied and pushed, invoke `/coderails:post-review <PR#>` to post the SHA-bound review artifact `/merge` requires. Before `/coderails:merge`, also produce the independent eval artifact via `/coderails:task-evals` (scope `pr`) then `/coderails:post-evals` — `scripts/merge.sh` hard-gates on both artifacts, no config opt-out. Immediately after `/coderails:merge` confirms the PR merged, tear down this work-unit's worktree (`superpowers:finishing-a-development-branch` Step 6, mechanics in [finishing-out.md](finishing-out.md)).
 
-**Invoking `/pr-review-toolkit:review-pr <PR#>` with the PR number is REQUIRED to satisfy the merge gate, because `enforce_pr_workflow` only accepts the `review-pr` Skill (with the PR number in args) as merge evidence — a manually-spawned agent fanout leaves no evidence the gate recognises and the merge will block.** The gate also recognises `scripts/merge.sh <PR#>` invocations (not just raw `gh pr merge`) as the same merge subcommand, so a hand-rolled review cannot merge through the wrapper script either.
-
-**Review verification_level ladder.** All verification levels — regardless of the PR's own eval-artifact verification_level (a separate, orthogonal check) — invoke `/pr-review-toolkit:review-pr <PR#>` (the toolkit self-scales its reviewer fan-out by change shape) plus `/coderails:post-review <PR#>`. Only at verification_level 0 MAY the separate `/security-review` pass below be skipped, and only after checking the actual diff file list (`gh pr diff <PR#> --name-only` or `git diff origin/main...HEAD --name-only`): any path under `hooks/` or `scripts/`, or any change touching auth/exec/network-fetch code, FORCES the security pass regardless of declared verification_level. The override keys off the diff, never the self-assigned verification_level label. Verification level 1/2 PRs run the full Phase 4b unchanged, security pass included.
-
-**After `review-pr` completes and all applied findings (blocking and worthwhile) are committed and pushed, invoke `/coderails:post-review <PR#>`.** This posts the SHA-bound review artifact — a machine-marked GitHub comment — that the `/merge` gate requires before merging. Loop symmetry: this is the same artifact gate that `/coderails:workflow`'s Phase 3 wires in for non-loop use. Both paths produce the same artifact; `/merge` checks both the same way. Run `post-review` after findings are applied and the follow-up commit is pushed, so the artifact is stamped against the final head SHA.
-
-Before `/coderails:merge`, the loop must also produce a second, independent artifact: run `/coderails:task-evals` (scope: `pr`; docs-only/single-unit PRs that meet its verification_level-0 predicate get the lightweight exemption path) then `/coderails:post-evals`. `scripts/merge.sh` hard-gates on this eval artifact separately from the review artifact above — same fail-closed posture, no config opt-out.
-
-**Worktree teardown, immediately after `/coderails:merge` confirms this work-unit's PR is merged.** A work-unit's worktree (created per the `origin/main`-based instruction above) is scoped to that one PR — once it's merged, the worktree has no further purpose and must not be left to accumulate across a multi-work-unit loop. Clean up the worktree using `superpowers:finishing-a-development-branch`'s Step 6 mechanics — the commands, provenance check, and cwd-pinned-worktree caveat are in [finishing-out.md](finishing-out.md). When the worktree is the orchestrator's own cwd, teardown uses the native exit-worktree tool (e.g. `ExitWorktree`) rather than `git worktree remove` — see finishing-out.md for the lock-case split. (The PR is already merged via `/coderails:merge` at this point, so this is the Step 6 cleanup only, not the skill's push/PR outcome-selection.) This runs per-work-unit at this point in Phase 4b — not deferred to Phase 9/13's loop-level teardown, which handles wiki/retro artifacts, not worktrees.
-
-The six review dimensions the Skill covers:
-
-| # | Reviewer | Reviews | Runs when |
-|---|---|---|---|
-| 1 | `code-reviewer` | General quality + CLAUDE.md compliance, bugs | always |
-| 2 | `pr-test-analyzer` | Behavioural test coverage, mock-tautology, critical gaps | test files changed (almost always) |
-| 3 | `silent-failure-hunter` | Swallowed exceptions, message-loss, spurious-success error paths | error handling / catch blocks / queue-delete semantics changed |
-| 4 | `type-design-analyzer` | Protocol/type invariants, illegal-states-unrepresentable | new/changed types or protocol surfaces |
-| 5 | `comment-analyzer` | Comment/docstring accuracy, comment rot | comments/docstrings added or behaviour-changing extractions |
-| 6 | `code-simplifier` | Dead code from extractions, duplication, over-engineering (report-only, no edits) | always (polish pass) |
-
-Collect all reports, aggregate into Critical / Important / Suggestion, and feed any MERGE-BLOCKER back to a fix agent (Phase 5/10) BEFORE merge.
-
-**Plus the native `/security-review` pass.** Alongside the six agents, run Claude Code's built-in `/security-review` on the same branch diff as part of this gate — it is a dedicated security review (auth/authz surfaces, injection, secret leakage, unsafe deserialisation, SSRF) that the six general reviewers do not specialise in. Run it in the worktree so it sees the branch's pending changes. Fold its findings into the same Critical / Important / Suggestion aggregation; any security MERGE-BLOCKER blocks merge exactly like a code finding (Phase 5/10) BEFORE merge.
-
-**Plus `subagent_type: coderails:deploy-safety-reviewer` when the change has a runtime/production surface.** This is a coderails repo agent, not one of the six `pr-review-toolkit` reviewers above, and does not substitute for the `review-pr` Skill invocation the merge gate requires. Spawn it as a separate `Agent` call, alongside the six and the security pass, for any change with a runtime/production surface — not just schema/migration or flag/infra-config diffs, but any change that ships to production (matching the agent's own wrong-agent tripwire, which returns NOT APPLICABLE for docs-only/comment-only/test-only diffs). It reviews rollback risk, blast radius, deploy-time observability coverage, and migration/rollout safety, none of which the six reviewers or `/security-review` cover. Fold its findings into the same Critical / Important / Suggestion aggregation; a DO NOT SHIP verdict blocks merge exactly like a code finding (Phase 5/10) BEFORE merge.
-
-**Clean-break gate (when the unit's disposition is `clean-break`).** The `code-simplifier` pass — already independent of the worker (separately spawned, read-only) — is additionally instructed to hunt **relabelled compatibility**: a surviving old code path renamed to "fallback", "adapter", "guard", "transitional", or "bridge". It checks whether an **old code path still executes**, not whether the literal word "shim" appears. On a clean-break unit, its findings of surviving compat are **MERGE-BLOCKERS**, not row 6's default report-only suggestions. **The orchestrator cannot downgrade this finding unilaterally.** Its only two moves: (a) fix it — remove the compat path, or (b) declare a hard-stop and hand it to a human, logged with who/when/SHA/reason. If a fully-unattended envelope cannot tolerate ever hard-stopping here, the human must grant auto-demote authority explicitly **at envelope-authorisation time** (Phase 0) — never something the orchestrator grants itself mid-run. The why: letting the orchestrator grade an independent reviewer's finding reintroduces the same self-attestation loophole one level up.
-
-**Do not substitute the generic `architect-review` + `debugger` + `ai-engineer` trio here.** That trio is a separate general-purpose adversarial pattern for design stress-tests before a thing is built — it is NOT the PR-review step. The canonical review step is `/pr-review-toolkit:review-pr all` = the six agents above. PR review is a specialised gate requiring knowledge of the codebase's review culture and the PR's own change shape; a generic agent cannot carry that context.
+**Read [phase-4b-review.md](phase-4b-review.md) in full before running this phase** for: the six-reviewer table and when each runs, the review-verification_level ladder (when `/security-review` may be skipped), the mandatory `/security-review` and `deploy-safety-reviewer` add-ons, and the clean-break MERGE-BLOCKER gate (the orchestrator cannot downgrade a surviving-compat finding unilaterally on a `clean-break` unit).
 
 ### Phase 5 — Disprove the premise before each fix
 
@@ -301,33 +180,9 @@ Deploy and push gotchas tied to a particular stack — skip-validation flags whe
 
 ### Phase 9 — Cluster wiki ingest, don't fragment
 
-Delegate wiki ingest and lint to a spawned agent, `subagent_type: coderails:wiki-writer`, once at the end of the loop, with all related PRs as a cluster — not once per PR. Lint must always pair with ingest — running one without the other leaves the wiki either unverified (ingest with no lint) or unrefreshed (lint with no ingest); treat the two as one step, not two optional ones. **Do not substitute a generic agent for wiki operations.** Wiki authoring requires schema-aware vault ingestion and self-linting against the AGENTS-wiki-schema, which the named `wiki-writer` type carries; the push/PR sequence itself is not part of the type — it must travel in the task brief and repo config, same as for any other agent, so state it explicitly rather than assuming the type name covers it. The wiki vault is an external checkout another session may have open concurrently — Phase 3a's shared-checkout isolation bullet applies to this dispatch too; carry it into the wiki-writer's prompt the same way.
+Delegate wiki ingest and lint to a spawned agent, `subagent_type: coderails:wiki-writer`, once at the end of the loop, with all related PRs as a cluster — not once per PR. Lint must always pair with ingest. **Do not substitute a generic agent for wiki operations** — wiki authoring requires schema-aware vault ingestion and self-linting against the AGENTS-wiki-schema, which the named `wiki-writer` type carries; the push/PR sequence and Phase 3a's shared-checkout isolation must still travel in the prompt explicitly. One source page covers the cluster; avoid one-per-PR sprawl. After the cluster ingest+lint, run `/sync-docs` ONCE at the loop boundary (delegated to `subagent_type: coderails:docs-auditor`) to audit the repo's own in-tree docs for drift — fix only drift this loop's own PRs introduced; surface pre-existing drift rather than folding it into scope.
 
-One source page covers the cluster; updates to entities/services/concepts pages aggregate the cluster's changes. If the loop's PRs aren't thematically related (rare — a spawned team's task list usually clusters them), one ingest per cluster theme is fine. Avoid one-per-PR sprawl.
-
-**Suppressing per-PR wiki steps in spawned `/coderails:workflow` agents:** place the following line as the **FIRST instruction** in every spawned agent's prompt inside this loop (not buried mid-section, not under the task-specific scope, not after the workflow steps — first):
-
-> "When running /workflow inside this agentic-loop, skip /workflow's wiki sub-steps (Phase 2 `/coderails:wiki-query` and Phase 5 `/coderails:wiki-ingest`/`/coderails:wiki-lint`). The orchestrator runs these at the loop boundary — running them per-PR causes redundant ingests and fragmented wiki context."
-
-**Why first-line, not just "include":** workers shortcut past mid-section process notes and treat anything that appears to constrain the workflow steps as "optional polish." **Scope-suppression instructions go above scope-additive instructions in worker prompts.**
-
-The orchestrator handles both ends: Phase 2 (plan-level wiki read before coding starts) and Phase 9 (cluster ingest+lint after all PRs are merged).
-
-**Wiki commits are artifacts too — verify they reached `origin/main`, and deliver them the way *this* repo accepts.** A delegated wiki agent reports a *commit SHA*, not a merged PR — and a commit is not a push. Close two failure modes at the loop boundary: (1) the agent commits to **local `main`** and never pushes — work stranded; (2) the agent pushes wiki files **direct to `main`**, which a branch-protection ruleset rejects.
-
-**Delivery is repo-specific.** If `main` is ruleset-protected, the wiki agent must deliver via a branch + PR off freshly-fetched `origin/main`, merged like any other change. Only where a repo *deliberately* permits direct wiki commits (e.g. a wiki dir gated behind a bypass env var) is a direct push acceptable — and even then it must be verified to have landed.
-
-**Then verify, after `git fetch origin`:** confirm the content is on `origin/main` via the wiki PR's `mergedAt` or `git show origin/main:<wiki-file>`. Do **not** confirm a merge with `git merge-base --is-ancestor <agent-sha> origin/main` — a squash-merge rewrites the SHA, so the agent's commit is never an ancestor even when its content landed (`--is-ancestor` is the right probe only for *detecting* an unpushed commit before merge). A committed-but-unpushed SHA is a textbook false-success; the "committed" ping is a claim, not evidence (Phase 12).
-
-**Docs-drift check — run `/sync-docs` at the loop boundary**
-
-After the cluster wiki ingest+lint, the orchestrator runs `/sync-docs` ONCE at the loop boundary. Wiki ingest updates the external knowledge base; `/sync-docs` is the complement — it audits the repo's own in-tree docs (e.g. README.md, AGENTS.md, docs/REFERENCE.md) for drift against the just-merged code.
-
-Run it even without Serena (the `--semantic` backend) — omit `--semantic` for the traditional file-comparison audit, which still catches drift. Do not skip `/sync-docs` just because Serena isn't installed.
-
-Delegate it to a spawned agent, `subagent_type: coderails:docs-auditor`, at the `default` role, same as the wiki-writer agent — both inline-assigned (like Phase 2's; Phase 2.8 routes build tasks only) — to keep orchestrator context clean. **Do not substitute a generic agent for docs auditing.** In-tree documentation has repo-specific structure and conventions; a docs-auditor type knows to check against the actual repo's doc architecture, not generic drift categories.
-
-**Disposition of findings:** `/sync-docs` surfaces drift; the orchestrator must triage. Fix only drift the loop's own PRs introduced. Surface pre-existing drift to the user rather than silently folding unrelated doc fixes into the loop — that is scope creep. This mirrors the loop's finding-triage discipline.
+**Read [phase-9-wiki-docs.md](phase-9-wiki-docs.md) in full before running this phase** for: the required first-line wiki-step-suppression instruction for spawned `/workflow` agents, the wiki-delivery verification mechanics (commit SHA vs. merged PR, ruleset-protected `main`, the `--is-ancestor` squash-merge trap), and the docs-drift findings disposition rule.
 
 ### Phase 10 — Use v2/v3 names when respawning a stuck agent
 
@@ -373,7 +228,7 @@ This is the factory's own audit — raw facts for the human to judge, not a self
 2. **Assemble `retro.json` (`schema_version` 2) beside `progress.json`** — envelope, `loop_stop_counts` and `decisions_absorbed` copied verbatim from `progress.json` (never recomputed or reconstructed from memory), disposition record, evals, artifacts, hook blocks, `models_used`, and `cost`. The schema has **no `verdict` field** — raw and unscored is structural: the retro records what happened, it does not grade it. Mine cost via `dc_mine_token_usage` (fail-open: it never blocks teardown, though a caller-error — no/unresolvable session id — returns a self-describing `{"error":...}` object instead of `{}`; check `.error` before treating the result as an empty mine), and price once — nothing downstream re-prices.
 3. **Update `standing-orders.md` (at the repo-key dir).** Match this loop's failure modes against existing entries (match resets `loops_since_recurrence` to 0; new modes append), increment non-matched entries, and MOVE an entry to `standing-orders-decayed.md` at K=5 — a tombstone, **never a delete**. Additive-or-recurrence-only: no metric-based removal anywhere.
 4. **Write feedback-type auto-memories** for lessons that generalise beyond this loop.
-5. **Only then** set `progress.json` `status: "complete"` and declare `LOOP-STOP: complete`. First apply `superpowers:verification-before-completion` to the orchestrator's own completion claim, per [finishing-out.md](finishing-out.md). The `loop_stall_guard` proof gate blocks the declaration itself when any proof is unexecuted-in-transcript or last-failed — it does not need a separate manual check here, but the declaration will bounce back with the offending proof id(s) named if step 1 was skipped or incomplete.
+5. **Only then** call `als_mark_complete <cwd> <session_id>` (from `lib/loop_state_common.sh`) to set `progress.json` `status: "complete"` and stamp `completed_marker` together — never a bare write of `status: "complete"`, which leaves `completed_marker` unstamped and false-positives `loop_state_guard` on later turns (see [teardown.md](teardown.md) step 5). Then declare `LOOP-STOP: complete`. First apply `superpowers:verification-before-completion` to the orchestrator's own completion claim, per [finishing-out.md](finishing-out.md). The `loop_stall_guard` proof gate blocks the declaration itself when any proof is unexecuted-in-transcript or last-failed — it does not need a separate manual check here, but the declaration will bounce back with the offending proof id(s) named if step 1 was skipped or incomplete.
 
 ## Context-window persistence
 
@@ -417,7 +272,7 @@ where `<category>` is exactly one of:
 - `hard-stop` — one of the four hard-stop conditions above.
 - `approval-gate` — a named risk boundary awaiting sign-off (pause-then-proceed).
 - `awaiting-input` — a planned interaction point inside the loop (the Phase -1 improve-prompt ask, which does NOT occur in a full-autonomous envelope since Phase -1 auto-adopts there; the Phase 1 plan confirmation). Use this sparingly: Phase 13 reports the raw `awaiting-input` count as part of its `LOOP-STOP` breakdown.
-- `complete` — all authorised work done. Declaring `complete` is the teardown: also set `progress.json` `status: "complete"` and run Phase 13 in the same turn, or the guards keep treating the loop as active. `retro.json` must exist beside `progress.json` **before** a `complete` declaration — the `loop_stall_guard` hook blocks the declaration when it is absent, malformed, or below `schema_version` 1 (the hook accepts `schema_version >= 1`) — and Phase 13's teardown write contract is what writes it, currently at `schema_version` 2. If a `proof.json` was frozen at Phase 2.7e, the same hook separately blocks the declaration when any of its proofs is unexecuted-in-this-session's-transcript or last-failed — Phase 13's teardown step 1 (run every proof `cmd` verbatim, in the orchestrator's own session) is what clears this before the declaration. If NO `proof.json` was frozen, write `progress.json` at `schema_version` 2 with `proof_disposition` set to `"none: <reason>"` before declaring — at `schema_version` >= 2 the same hook blocks an absent `proof.json` with no recorded disposition (see `loop-state.md`'s Fields table).
+- `complete` — all authorised work done. Declaring `complete` is the teardown: also call `als_mark_complete` (see step 5 above) to set `progress.json` `status: "complete"` and run Phase 13 in the same turn, or the guards keep treating the loop as active. `retro.json` must exist beside `progress.json` **before** a `complete` declaration — the `loop_stall_guard` hook blocks the declaration when it is absent, malformed, or below `schema_version` 1 (the hook accepts `schema_version >= 1`) — and Phase 13's teardown write contract is what writes it, currently at `schema_version` 2. If a `proof.json` was frozen at Phase 2.7e, the same hook separately blocks the declaration when any of its proofs is unexecuted-in-this-session's-transcript or last-failed — Phase 13's teardown step 1 (run every proof `cmd` verbatim, in the orchestrator's own session) is what clears this before the declaration. If NO `proof.json` was frozen, write `progress.json` at `schema_version` 2 with `proof_disposition` set to `"none: <reason>"` before declaring — at `schema_version` >= 2 the same hook blocks an absent `proof.json` with no recorded disposition (see `loop-state.md`'s Fields table).
 
 The hook checks the declaration is present with a valid category; it cannot check the reason is honest (same boundary as the verify-loop hook). The Phase 13 category counts are the audit on that.
 
