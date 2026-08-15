@@ -11,6 +11,16 @@ when a sibling `proof.json` exists but any of its frozen proofs is unexecuted-in
 last-failed — so every proof cmd must be run, in the foreground, in the orchestrator's own
 session, before the declaration too (Step 1 below).
 
+**Graph dispatch boundary.** `S13-proof`, `S13-retro`, and `S13-complete` have no `graph_role`
+entry anywhere in `skills/index.yaml`, so `graph_dispatch_plan`
+(`hooks/scripts/lib/graph_dispatch.sh`) reports all three as `unresolved:true` — there is nothing
+for it to resolve. By current design these are orchestrator-authored writes (retro.json assembly,
+standing-orders.md update, `als_mark_complete`), not agent dispatches, so extending the
+`graph_dispatch_plan`/`graph_dispatch_record` contract to this phase may not be the right shape at
+all; that's a design question for whoever owns Phase 2/2.5's graph-dispatch canonicalization, not
+something this file should paper over with invented wiring prose. See
+`hooks/scripts/tests/graph_dispatch_downstream.test.sh` for the characterization evidence.
+
 ## Contents
 
 - [The Phase 13 self-audit report](#the-phase-13-self-audit-report)
