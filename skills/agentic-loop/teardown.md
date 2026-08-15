@@ -125,4 +125,14 @@ This step is additive-or-recurrence-only: no metric-based removal anywhere.
 ## Steps 4 and 5
 
 4. **Write feedback-type auto-memories** for lessons that generalise beyond this loop.
-5. **Only then** set `progress.json` `status: "complete"` and declare `LOOP-STOP: complete`. First apply `superpowers:verification-before-completion` to the orchestrator's own completion claim (SKILL.md's Phase 13 links the `finishing-out.md` detail). The `loop_stall_guard` proof gate blocks the declaration itself if Step 1 was skipped or left a proof unexecuted/failed — it does not need a separate manual check here.
+5. **Only then** call `als_mark_complete <cwd> <session_id>` (from `lib/loop_state_common.sh`) to
+   set `progress.json` `status: "complete"` and stamp `completed_marker` together — e.g.
+   `bash -c 'source "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/lib/loop_state_common.sh" && als_mark_complete "$PWD" "<session_id>"'`.
+   Never write `status: "complete"` via a bare `als_atomic_progress_update` call — that leaves
+   `completed_marker` unstamped at its prior value (permanently 0 for a loop's first completion),
+   which false-positives `loop_state_guard`'s `stale_complete_rearmed` block on every later turn of
+   the same session. Then declare `LOOP-STOP: complete`. First apply
+   `superpowers:verification-before-completion` to the orchestrator's own completion claim
+   (SKILL.md's Phase 13 links the `finishing-out.md` detail). The `loop_stall_guard` proof gate
+   blocks the declaration itself if Step 1 was skipped or left a proof unexecuted/failed — it does
+   not need a separate manual check here.
