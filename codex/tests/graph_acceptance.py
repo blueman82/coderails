@@ -12,7 +12,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).parents[2]
 sys.path.insert(0, str(ROOT / "codex"))
-from runtime.graph import PHASES, build_graph, execute, ready  # noqa: E402
+from runtime.graph import build_graph, execute, ready  # noqa: E402
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -53,10 +53,10 @@ class CodexGraphAcceptance(unittest.TestCase):
             implementations = Path(directory) / "implementations.json"
             local = [sys.executable, "-c", "print('fixture')"]
             implementations.write_text(json.dumps({
-                node: {"command": local, "path": "codex/tests/graph_acceptance.py"}
+                node: {"command": local, "provider": "codex", "skill_id": f"fixture.{node}", "implementation_path": "codex/tests/graph_acceptance.py"}
                 for node in build_graph()["nodes"]
             }))
-            command = [sys.executable, str(ROOT / "codex/scripts/run_graph.py"), "--state", str(state), "--implementations", str(implementations)]
+            command = [sys.executable, str(ROOT / "codex/scripts/run_graph.py"), "--state", str(state), "--implementations", str(implementations), "--contract", str(ROOT / "skills/agentic-loop/execution-graph.md")]
             first = subprocess.run(command, capture_output=True, text=True, check=True)
             self.assertIn('"status": "complete"', first.stdout)
             saved = json.loads(state.read_text(encoding="utf-8"))
@@ -71,7 +71,7 @@ class CodexGraphAcceptance(unittest.TestCase):
     def test_completion_teardown_and_index_negative_control(self) -> None:
         lifecycle = ROOT / "codex/hooks/lifecycle.py"
         graph = build_graph(("A",))
-        execute(graph, {"SA": {"outcome": "done"}})
+        execute(graph, {"SA": {"provider": "codex", "skill_id": "test.complete", "implementation_path": "codex/tests", "test_only": True, "outcome": "done"}})
         good = {"event": "complete", "state": {"status": "complete", "graph": graph, "retro": {"provider": "codex"}}}
         result = subprocess.run([sys.executable, str(lifecycle)], input=json.dumps(good), text=True, capture_output=True)
         self.assertEqual(result.returncode, 0, result.stdout)

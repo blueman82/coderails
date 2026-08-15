@@ -16,10 +16,10 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--state", type=Path, required=True)
     parser.add_argument("--implementations", type=Path, required=True, help="JSON node implementation records")
-    parser.add_argument("--contract", type=Path)
+    parser.add_argument("--contract", type=Path, required=True, help="canonical execution-graph.md path")
     args = parser.parse_args()
     implementations = json.loads(args.implementations.read_text(encoding="utf-8"))
-    graph = build_graph(contract_path=args.contract) if args.contract else build_graph()
+    graph = build_graph(contract_path=args.contract)
     if args.state.exists():
         prior = json.loads(args.state.read_text(encoding="utf-8"))
         graph = prior["graph"]
@@ -36,7 +36,7 @@ def main() -> int:
     }
     write_json(args.state, state)
     print(json.dumps({"status": state["status"], "nodes": len(graph["nodes"])}))
-    return 0
+    return 0 if successful else 1
 
 
 if __name__ == "__main__":

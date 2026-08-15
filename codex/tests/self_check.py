@@ -14,12 +14,10 @@ from runtime.graph import build_graph, execute  # noqa: E402
 
 
 def main() -> int:
-    graph = build_graph(("2", "2.5", "2.6", "2.7a"))
+    graph = build_graph()
     seen = []
     execute(graph, lambda node: seen.append(node) or "done")
-    assert seen.index("S2") < seen.index("S2.5")
-    assert seen.index("S2.5") < seen.index("J2")
-    assert seen.index("S2.6") < seen.index("J2")
+    assert all(seen.index(edge["from"]) < seen.index(edge["to"]) for edge in graph["edges"])
 
     graph = build_graph(("A", "B"))
     attempts = {"SA": 0}
@@ -32,7 +30,7 @@ def main() -> int:
         assert "blocked" in str(error)
     assert attempts["SA"] == 5
     assert graph["nodes"]["SA"]["outcome"] == "hard-stop"
-    assert graph["nodes"]["SB"]["outcome"] == "pending"
+    assert graph["nodes"]["SB"]["outcome"] == "hard-stop"
 
     graph = build_graph(("A", "B"))
     calls = []

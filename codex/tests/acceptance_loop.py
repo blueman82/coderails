@@ -22,7 +22,7 @@ def main() -> int:
     command = [sys.executable, "-c", "print('local Codex fixture gate')"]
     fixture_nodes = ("A", "B", "C")
     implementations = {
-        node: {"command": command, "provider": "codex", "skill_id": f"fixture.{node}", "path": "codex/tests/acceptance_loop.py"}
+        node: {"command": command, "provider": "codex", "skill_id": f"fixture.{node}", "implementation_path": "codex/tests/acceptance_loop.py"}
         for node in fixture_nodes
     }
     if args.state.exists():
@@ -34,6 +34,11 @@ def main() -> int:
                 node: {"command": command, "provider": "codex", "skill_id": f"fixture.{node}", "path": "codex/tests/acceptance_loop.py"}
                 for node in graph["nodes"]
             }
+    if args.phase_graph:
+        implementations = {
+            node: {"command": command, "provider": "codex", "skill_id": f"fixture.{node}", "implementation_path": "codex/tests/acceptance_loop.py"}
+            for node in graph["nodes"]
+        }
         graph["artifacts"] = {"kind": "fixture", "external_gates": "not executed"}
 
     def persist(value: dict) -> None:
@@ -41,12 +46,13 @@ def main() -> int:
 
     execute(graph, implementations, state_path=args.state, persist=persist)
     state = json.loads(args.state.read_text(encoding="utf-8"))
-    state.update(status="complete", provider="codex", artifacts=graph.get("artifacts", {}))
-    state["retro"] = {"provider": "codex", "status": "complete", "external_gates": "not executed; fixture only"}
+    successful = all(node.get("outcome") in {"done", "skipped"} for node in graph["nodes"].values())
+    state.update(status="complete" if successful else "hard-stop", provider="codex", artifacts=graph.get("artifacts", {}))
+    state["retro"] = {"provider": "codex", "status": state["status"], "external_gates": "not executed; fixture only"}
     from runtime.graph import write_json
     write_json(args.state, state)
     print(json.dumps({"status": state["status"], "state": str(args.state)}))
-    return 0
+    return 0 if successful else 1
 
 
 if __name__ == "__main__":

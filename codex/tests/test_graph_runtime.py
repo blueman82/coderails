@@ -9,25 +9,69 @@ from pathlib import Path
 ROOT = Path(__file__).parents[2]
 sys.path.insert(0, str(ROOT / "codex"))
 
-from runtime.graph import build_graph, execute, load_contract  # noqa: E402
+from runtime.graph import build_graph, execute, load_contract, ready  # noqa: E402
 
 
 PASS = [sys.executable, "-c", "print('ok')"]
 
 
 class GraphRuntimeTests(unittest.TestCase):
+    def test_contract_parser_preserves_only_declared_nodes_edges_and_join(self) -> None:
+        contract = """# contract
+
+| ID | Node / true prerequisites | Ready when | Conditional skip or join |
+|---|---|---|---|
+| `root` | Stub state | ready | never |
+| `left` | `root` | ready | never |
+| `right` | `root` | ready | never |
+| `join` | `left` and `right` | ready | explicit join |
+
+```text
+root -> left
+root -> right
+left -> join
+right -> join
+```
+"""
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "execution-graph.md"
+            path.write_text(contract)
+            graph = build_graph(contract_path=path)
+        self.assertEqual(set(graph["nodes"]), {"root", "left", "right", "join"})
+        self.assertNotIn("J12-all", graph["nodes"])
+        self.assertEqual(graph["joins"]["join"]["inputs"], ["left", "right"])
+        self.assertFalse(ready(graph, "left"))
+
+    def test_contract_template_expands_only_from_explicit_work_units(self) -> None:
+        contract = """| ID | Node / true prerequisites | Ready when | Conditional skip or join |
+|---|---|---|---|
+| `start` | Stub state | ready | never |
+| `U3[i]` | `start` | ready | per work unit |
+| `join` | `U3[i]` | ready | explicit join |
+"""
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "execution-graph.md"
+            path.write_text(contract)
+            graph = build_graph(contract_path=path, work_units=[{"id": "one"}, {"id": "two"}])
+        self.assertEqual(set(graph["nodes"]), {"start", "U3[one]", "U3[two]", "join"})
+
     def test_loads_nodes_from_canonical_contract(self) -> None:
         nodes = load_contract(ROOT / "skills/agentic-loop/execution-graph.md")
         ids = {node["id"] for node in nodes}
         self.assertIn("S-2", ids)
         self.assertIn("S13-complete", ids)
         self.assertNotIn("PHASES", ids)
+        self.assertEqual(set(build_graph(contract_path=ROOT / "skills/agentic-loop/execution-graph.md")["nodes"]), ids)
+
+    def test_vertical_contract_edges_block_late_join_until_predecessor(self) -> None:
+        graph = build_graph(contract_path=ROOT / "skills/agentic-loop/execution-graph.md")
+        self.assertFalse(ready(graph, "J12-all-units"))
 
     def test_dispatches_independent_wave_then_join_and_persists(self) -> None:
-        graph = build_graph(("P", "A", "B", "C"), joins={"C": ["A", "B"]})
+        graph = build_graph(("P", "A", "B", "C"), joins={"C": ["A", "B"]}, edges=[("P", "A"), ("P", "B")])
         snapshots = []
         implementations = {
-            node: {"command": PASS, "skill_id": f"skill-{node}", "path": f"codex/{node}.md"}
+            node: {"command": PASS, "provider": "codex", "skill_id": f"skill-{node}", "implementation_path": f"codex/{node}.md"}
             for node in graph["nodes"]
         }
         execute(graph, implementations, persist=lambda value: snapshots.append(json.loads(json.dumps(value))))
@@ -41,14 +85,14 @@ class GraphRuntimeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             state = Path(directory) / "progress.json"
             outcomes = iter(["failed", "done"])
-            execute(graph, {"SA": {"outcome": lambda: next(outcomes)}}, state_path=state)
+            execute(graph, {"SA": {"provider": "codex", "skill_id": "test.retry", "implementation_path": "codex/tests", "test_only": True, "outcome": lambda: next(outcomes)}}, state_path=state)
             self.assertEqual(graph["nodes"]["SA"]["retry"]["attempts"], 2)
             resumed = json.loads(state.read_text())
-            execute(resumed["graph"], {"SA": {"command": PASS}}, state_path=state)
+            execute(resumed["graph"], {"SA": {"command": PASS, "provider": "codex", "skill_id": "test.resume", "implementation_path": "codex/tests"}}, state_path=state)
             self.assertEqual(resumed["graph"]["nodes"]["SA"]["outcome"], "done")
 
         failed = build_graph(("A",))
-        execute(failed, {"SA": {"outcome": "failed"}})
+        execute(failed, {"SA": {"provider": "codex", "skill_id": "test.failed", "implementation_path": "codex/tests", "test_only": True, "outcome": "failed"}})
         self.assertEqual(failed["nodes"]["SA"]["outcome"], "hard-stop")
 
     def test_missing_implementation_and_gate_unavailability_fail_closed(self) -> None:
@@ -58,9 +102,22 @@ class GraphRuntimeTests(unittest.TestCase):
         self.assertEqual(node["outcome"], "hard-stop")
         self.assertIn("missing implementation", node["evidence"][-1]["output"])
 
+    def test_invalid_metadata_and_blocked_dependents_are_hard_stop(self) -> None:
+        graph = build_graph(("A", "B"))
+        execute(graph, {"SA": {"command": [sys.executable, "-c", "exit(1)"]}})
+        self.assertEqual(graph["nodes"]["SA"]["outcome"], "hard-stop")
+        self.assertEqual(graph["nodes"]["SB"]["outcome"], "hard-stop")
+        self.assertIn("blocked by", graph["nodes"]["SB"]["evidence"][-1]["output"])
+
+    def test_invalid_mapping_metadata_is_durable(self) -> None:
+        graph = build_graph(("A",))
+        execute(graph, {"SA": {"command": PASS, "provider": "claude", "skill_id": "x", "path": "x"}})
+        self.assertEqual(graph["nodes"]["SA"]["outcome"], "hard-stop")
+        self.assertIn("provider", graph["nodes"]["SA"]["evidence"][-1]["output"])
+
     def test_completion_requires_all_nodes_done_or_skipped(self) -> None:
         graph = build_graph(("A", "B"))
-        execute(graph, {"SA": {"command": PASS}, "SB": {"outcome": "skipped", "evidence": "not in scope"}})
+        execute(graph, {"SA": {"command": PASS, "provider": "codex", "skill_id": "test.a", "implementation_path": "codex/tests"}, "SB": {"provider": "codex", "skill_id": "test.b", "implementation_path": "codex/tests", "test_only": True, "outcome": "skipped", "evidence": "not in scope"}})
         self.assertEqual({node["outcome"] for node in graph["nodes"].values()}, {"done", "skipped"})
 
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Provider-neutral Codex graph executor driven by the canonical graph contract."""
+"""Codex graph executor driven only by the checked-in execution graph contract."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import json
 import os
 import re
 import tempfile
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -15,32 +15,91 @@ from runtime.dispatch import dispatch
 
 CONTRACT = Path(__file__).parents[2] / "skills/agentic-loop/execution-graph.md"
 OUTCOMES = {"done", "skipped", "failed", "stale", "hard-stop"}
-NODE_RE = re.compile(r"^\|\s*`([^`]+)`\s*\|\s*(.*?)\s*\|\s*(.*?)\s*\|")
-REF_RE = re.compile(r"\b(?:S|U|J|G)-?[0-9]+(?:\.[0-9]+)?(?:[a-z])?(?:\[[^]]+\])?(?:-[a-z]+)?\b")
+
+
+def _cells(line: str) -> list[str]:
+    if not line.lstrip().startswith("|"):
+        return []
+    return [cell.strip() for cell in line.strip().strip("|").split("|")]
+
+
+def _code_spans(value: str) -> list[str]:
+    return re.findall(r"`([^`]+)`", value)
 
 
 def load_contract(path: Path = CONTRACT) -> list[dict[str, Any]]:
-    """Read node IDs and prerequisite references from execution-graph.md."""
-    records = []
-    for line in path.read_text(encoding="utf-8").splitlines():
-        match = NODE_RE.match(line)
-        if match:
-            node, prerequisites, ready_when = match.groups()
-            records.append({"id": node, "prerequisites": REF_RE.findall(prerequisites), "ready_when": ready_when})
+    """Parse the Markdown table without inventing IDs or prerequisite names."""
+    lines = path.read_text(encoding="utf-8").splitlines()
+    records: list[dict[str, Any]] = []
+    in_table = False
+    for line in lines:
+        cells = _cells(line)
+        if not cells:
+            if in_table:
+                break
+            continue
+        if cells[0] == "ID":
+            in_table = True
+            continue
+        if not in_table or not cells[0].startswith("`") or not cells[0].endswith("`"):
+            continue
+        node_id = cells[0][1:-1]
+        prerequisites = cells[1] if len(cells) > 1 else ""
+        conditional = cells[3] if len(cells) > 3 else ""
+        records.append({
+            "id": node_id,
+            "prerequisites": _code_spans(prerequisites),
+            "conditional": conditional,
+        })
     if not records:
-        raise ValueError(f"no graph nodes found in {path}")
+        raise ValueError(f"no graph contract table found in {path}")
+    ids = {record["id"] for record in records}
+    for record in records:
+        unknown = [ref for ref in record["prerequisites"] if ref not in ids]
+        if unknown:
+            raise ValueError(f"{record['id']} references undeclared node(s): {unknown}")
     return records
 
 
-PHASES = tuple(record["id"].removeprefix("S") for record in load_contract()) if CONTRACT.is_file() else ()
-
-
-def node_id(phase: str) -> str:
-    return f"S{phase}"
+def _diagram_edges(path: Path, ids: set[str]) -> list[tuple[str, str]]:
+    """Read only exact declared IDs connected by arrows in the contract diagram."""
+    edges: set[tuple[str, str]] = set()
+    in_diagram = False
+    token_re = re.compile("|".join(re.escape(item) for item in sorted(ids, key=len, reverse=True)))
+    diagram: list[str] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if line.strip().startswith("```text"):
+            in_diagram = True
+            continue
+        if in_diagram and line.strip() == "```":
+            break
+        if not in_diagram:
+            continue
+        diagram.append(line)
+        found = list(token_re.finditer(line))
+        for left, right in zip(found, found[1:]):
+            if "->" in line[left.end():right.start()]:
+                edges.add((left.group(), right.group()))
+    for index, line in enumerate(diagram):
+        if line.strip() != "v":
+            continue
+        prior = next((list(token_re.finditer(diagram[pos])) for pos in range(index - 1, max(-1, index - 4), -1) if token_re.search(diagram[pos])), [])
+        following = next((list(token_re.finditer(diagram[pos])) for pos in range(index + 1, min(len(diagram), index + 4)) if token_re.search(diagram[pos])), [])
+        if prior and following:
+            source = min(prior, key=lambda match: abs(match.start() - line.find("v"))).group()
+            target = min(following, key=lambda match: abs(match.start() - line.find("v"))).group()
+            edges.add((source, target))
+    return sorted(edges)
 
 
 def _node(name: str) -> dict[str, Any]:
     return {"status": "pending", "outcome": "pending", "retry": {"attempts": 0, "max": 5}, "name": name}
+
+
+def _expand(value: str, work_units: Sequence[str] | None) -> list[str]:
+    if "[i]" not in value or not work_units:
+        return [value]
+    return [value.replace("[i]", f"[{unit}]") for unit in work_units]
 
 
 def build_graph(
@@ -48,101 +107,127 @@ def build_graph(
     *,
     contract_path: Path = CONTRACT,
     joins: Mapping[str, Iterable[str]] | None = None,
+    edges: Iterable[tuple[str, str]] | None = None,
+    work_units: Sequence[str | Mapping[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    """Build graph state from the contract; ``phases`` exists only for small tests."""
+    """Build from the contract; ``phases``/``joins`` are test-only graph fixtures."""
     if phases is not None:
-        phases = tuple(phases)
-        exact = bool(joins) and any(name in phases for name in joins)
-        ids = list(phases) if exact else [node_id(phase) for phase in phases]
+        names = tuple(phases)
+        exact = bool(joins) and any(name in names for name in joins)
+        ids = list(names) if exact else [f"S{name}" for name in names]
         nodes = {name: _node(name) for name in ids}
-        edges = [] if exact else [{"from": a, "to": b} for a, b in zip(ids, ids[1:])]
+        edge_list = list(edges or ()) if exact else [(left, right) for left, right in zip(ids, ids[1:])]
         join_map = {name: {"id": name, "mode": "all", "inputs": list(inputs)} for name, inputs in (joins or {}).items()}
-        if exact and "P" in nodes:
-            edges.extend({"from": "P", "to": item} for join in join_map.values() for item in join["inputs"] if item in nodes)
-        for name, record in join_map.items():
-            edges = [edge for edge in edges if edge["to"] != name]
-            edges.extend({"from": item, "to": name} for item in record["inputs"])
+        for name, join in join_map.items():
+            edge_list.extend((item, name) for item in join["inputs"])
             nodes.setdefault(name, _node(name))
-        if {"S2", "S2.5", "S2.6", "S2.7a"}.issubset(nodes) and "J2" not in nodes:
-            nodes["J2"] = _node("J2")
-            join_map["J2"] = {"id": "J2", "mode": "all", "inputs": ["S2.5", "S2.6"]}
-            edges = [edge for edge in edges if edge["to"] not in {"S2.5", "S2.6", "S2.7a"}]
-            edges += [
-                {"from": "S2", "to": "S2.5"}, {"from": "S2", "to": "S2.6"},
-                {"from": "S2.5", "to": "J2"}, {"from": "S2.6", "to": "J2"},
-                {"from": "J2", "to": "S2.7a"},
-            ]
-        return {"nodes": nodes, "edges": edges, "joins": join_map, "contract": "test graph"}
+        return {"nodes": nodes, "edges": [{"from": left, "to": right} for left, right in edge_list], "joins": join_map, "contract": "test graph"}
 
+    if not contract_path.is_file():
+        raise ValueError(f"contract_path does not exist: {contract_path}")
     records = load_contract(contract_path)
-    nodes = {record["id"]: _node(record["id"]) for record in records}
-    edges: list[dict[str, str]] = []
-    join_map: dict[str, Any] = {}
-    previous = None
+    unit_names = None
+    if work_units is not None:
+        unit_names = [str(unit.get("id", index)) if isinstance(unit, Mapping) else str(unit) for index, unit in enumerate(work_units)]
+    declared = {record["id"] for record in records}
+    node_names = [name for record in records for name in _expand(record["id"], unit_names)]
+    nodes = {name: _node(name) for name in node_names}
+    edges: set[tuple[str, str]] = set()
     for record in records:
-        name = record["id"]
-        refs = [ref for ref in record["prerequisites"] if ref in nodes or ref.startswith(("J", "G"))]
-        if not refs and previous:
-            refs = [previous]
-        for ref in refs:
-            nodes.setdefault(ref, _node(ref))
-            edges.append({"from": ref, "to": name})
-        previous = name
-    # The contract names J2 as the setup join and gives its two inputs in the diagram.
-    if "J2" in {ref for edge in edges for ref in (edge["from"], edge["to"])} and "J2" not in join_map:
-        inputs = [name for name in ("S2.5", "S2.6") if name in nodes]
-        join_map["J2"] = {"id": "J2", "mode": "all", "inputs": inputs}
-        nodes["J2"] = _node("J2")
-        edges = [edge for edge in edges if edge["to"] != "J2"]
-        edges.extend({"from": item, "to": "J2"} for item in inputs)
-    return {"nodes": nodes, "edges": edges, "joins": join_map, "contract": str(contract_path)}
+        targets = _expand(record["id"], unit_names)
+        for prerequisite in record["prerequisites"]:
+            sources = _expand(prerequisite, unit_names)
+            for source in sources:
+                for target in targets:
+                    edges.add((source, target))
+    for source, target in _diagram_edges(contract_path, declared):
+        for expanded_source in _expand(source, unit_names):
+            for expanded_target in _expand(target, unit_names):
+                edges.add((expanded_source, expanded_target))
+    edge_list = [{"from": source, "to": target} for source, target in sorted(edges)]
+    joins_map: dict[str, Any] = {}
+    for name in nodes:
+        inputs = [edge["from"] for edge in edge_list if edge["to"] == name]
+        if len(inputs) > 1 or name.startswith("J"):
+            joins_map[name] = {"id": name, "mode": "all", "inputs": inputs}
+    return {"nodes": nodes, "edges": edge_list, "joins": joins_map, "contract": str(contract_path)}
 
 
 def ready(graph: dict[str, Any], node: str) -> bool:
     nodes, edges, joins = graph["nodes"], graph["edges"], graph.get("joins", {})
     if node not in nodes or nodes[node].get("outcome") not in {"pending", "ready"}:
         return False
-    predecessors = joins[node]["inputs"] if joins.get(node, {}).get("mode") == "all" else [
-        edge["from"] for edge in edges if edge["to"] == node
-    ]
+    predecessors = joins[node]["inputs"] if node in joins else [edge["from"] for edge in edges if edge["to"] == node]
     return all(item in nodes and nodes[item].get("outcome") in {"done", "skipped"} for item in predecessors)
 
 
-def _record_result(record: dict[str, Any], node: dict[str, Any], attempt: int, outcome: str, output: str) -> None:
-    node.setdefault("evidence", []).append({"attempt": attempt, "outcome": outcome, "output": output})
-    node["retry"]["attempts"] = attempt
-    record["last_outcome"] = outcome
+def _test_callback_records(graph: dict[str, Any], handler: Callable[[str], str]) -> dict[str, Any]:
+    return {
+        name: {
+            "provider": "codex", "skill_id": f"test.callback.{name}",
+            "implementation_path": "codex/tests", "test_only": True,
+            "outcome": (lambda name=name: handler(name)),
+        }
+        for name in graph["nodes"]
+    }
 
 
-def _invoke(record: Any, cwd: str | None) -> tuple[str, str]:
-    if callable(record):
-        value = record()
-        return value, "callable implementation"
-    if isinstance(record, str):
-        return record, "configured outcome"
+def _metadata_error(record: Any) -> str | None:
     if not isinstance(record, dict):
-        return "failed", "implementation record must be an object"
+        return "implementation mapping must be an object"
+    if record.get("provider") != "codex":
+        return "provider must be codex"
+    if not isinstance(record.get("skill_id"), str) or not record["skill_id"].strip():
+        return "skill_id is required"
+    if not isinstance(record.get("implementation_path"), str) or not record["implementation_path"].strip():
+        return "implementation_path is required"
+    command = record.get("command")
+    test_outcome = record.get("outcome")
+    if command is not None and (not isinstance(command, list) or not command or any(not isinstance(item, str) or not item for item in command)):
+        return "command must be a non-empty string array"
+    if command is None and not (record.get("test_only") and test_outcome is not None):
+        return "executable command is required"
+    return None
+
+
+def _invoke(record: dict[str, Any], cwd: str | None) -> tuple[str, str]:
     if record.get("outcome") is not None:
         value = record["outcome"]() if callable(record["outcome"]) else record["outcome"]
-        return value, str(record.get("evidence", "configured outcome"))
-    command = record.get("command")
-    if not isinstance(command, list):
-        return "failed", "implementation record has no executable command"
-    return dispatch(command, record.get("cwd", cwd))
+        return value, str(record.get("evidence", "configured test outcome"))
+    return dispatch(record["command"], record.get("cwd", cwd))
+
+
+def _evidence(node: dict[str, Any], attempt: int, outcome: str, output: str) -> None:
+    node.setdefault("evidence", []).append({"attempt": attempt, "outcome": outcome, "output": output})
+    node["retry"]["attempts"] = attempt
+
+
+def _propagate_blocks(graph: dict[str, Any]) -> None:
+    changed = True
+    while changed:
+        changed = False
+        for name, node in graph["nodes"].items():
+            if node.get("outcome") in {"done", "skipped", "hard-stop"}:
+                continue
+            predecessors = [edge["from"] for edge in graph["edges"] if edge["to"] == name]
+            blocked = [item for item in predecessors if graph["nodes"].get(item, {}).get("outcome") in {"failed", "stale", "hard-stop"}]
+            if blocked:
+                node.update(status="hard-stop", outcome="hard-stop")
+                _evidence(node, node["retry"]["attempts"], "hard-stop", f"blocked by hard-stop predecessor(s): {blocked}")
+                changed = True
 
 
 def execute(
     graph: dict[str, Any],
-    implementations: Mapping[str, Any] | None = None,
+    implementations: Mapping[str, Any] | Callable[[str], str] | None = None,
     *,
     state_path: Path | None = None,
     persist: Callable[[dict[str, Any]], None] | None = None,
     cwd: str | None = None,
 ) -> dict[str, Any]:
-    """Run each ready wave, persist only after collecting the complete wave."""
+    """Dispatch complete ready waves and atomically persist after each wave."""
     if callable(implementations):
-        handler = implementations
-        implementations = {name: (lambda name=name: handler(name)) for name in graph["nodes"]}
+        implementations = _test_callback_records(graph, implementations)
     implementations = implementations or {}
     terminal = {"done", "skipped", "hard-stop"}
     while True:
@@ -153,43 +238,47 @@ def execute(
         if not wave:
             for name in remaining:
                 node = graph["nodes"][name]
-                node.setdefault("evidence", []).append({"attempt": node["retry"]["attempts"], "outcome": "hard-stop", "output": "blocked by failed or unresolved predecessor"})
+                node.update(status="hard-stop", outcome="hard-stop")
+                _evidence(node, node["retry"]["attempts"], "hard-stop", "blocked by unresolved predecessor or cycle")
             _persist(graph, state_path, persist)
             return graph
-        results = []
+        results: list[tuple[str, str]] = []
         for name in wave:
             node = graph["nodes"][name]
             record = implementations.get(name, node.get("implementation_record"))
             metadata = record if isinstance(record, dict) else {}
             node["provider"] = metadata.get("provider", "codex")
-            node["skill_id"] = metadata.get("skill_id", f"coderails.{name}")
-            node["implementation_path"] = metadata.get("path", metadata.get("implementation_path", ""))
+            node["skill_id"] = metadata.get("skill_id", "")
+            node["implementation_path"] = metadata.get("implementation_path", "")
+            error = "missing implementation mapping" if record is None else _metadata_error(record)
+            if error:
+                node.update(status="hard-stop", outcome="hard-stop")
+                _evidence(node, node["retry"]["attempts"], "hard-stop", error)
+                results.append((name, "hard-stop"))
+                continue
             maximum = node["retry"].get("max", 5)
             attempts = node["retry"].get("attempts", 0)
             if not isinstance(maximum, int) or isinstance(maximum, bool) or not 0 <= maximum <= 5:
                 raise ValueError(f"node {name} has invalid retry.max")
-            if record is None:
-                _record_result(metadata, node, attempts, "hard-stop", "missing implementation record")
-                results.append((name, "hard-stop"))
-                continue
             outcome = "failed"
             while attempts < maximum:
                 attempts += 1
                 try:
                     outcome, output = _invoke(record, cwd)
-                except Exception as error:  # an unavailable external gate is durable failure, never success
+                except Exception as error:  # external credentials/integrations fail closed here
                     outcome, output = "failed", f"dispatch error: {error}"
                 if outcome not in OUTCOMES:
                     outcome, output = "failed", f"invalid implementation outcome: {outcome}"
-                _record_result(metadata, node, attempts, outcome, output)
+                _evidence(node, attempts, outcome, output)
                 if outcome in {"done", "skipped", "hard-stop"}:
                     break
             if outcome in {"failed", "stale"}:
                 outcome = "hard-stop"
-                node.setdefault("evidence", []).append({"attempt": attempts, "outcome": outcome, "output": "retry limit exhausted"})
+                _evidence(node, attempts, "hard-stop", "retry limit exhausted")
             results.append((name, outcome))
         for name, outcome in results:
             graph["nodes"][name].update(status=outcome, outcome=outcome)
+        _propagate_blocks(graph)
         _persist(graph, state_path, persist)
 
 
