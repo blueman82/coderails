@@ -120,7 +120,7 @@ grace and block every time.
 
 - **Stub-first (Phase -2):** `status: "initialising"`, stamped with this `session_id`.
 - **Enrich at Phase 0:** record the envelope verbatim in `authorising_prompt_raw`; `status: "in-progress"`.
-- **Update at each phase boundary:** current phase, work-unit states, disposition fields, `last_updated` — carry `loop_stop_counts` forward per the rule above.
+- **Update at each phase boundary:** `graph` node states, work-unit states, disposition fields, `last_updated` — carry `loop_stop_counts` forward per the rule above.
 - **Teardown at Phase 13:** `status: "complete"`, and set `completed_marker` to the number of agentic-loop loops run in this session so far — the prior `completed_marker` (default 0) **plus 1**. Because this skill is invoked once per loop, that ordinal matches the guard's count of agentic-loop invocations, which is how the guard distinguishes a finished loop from a new one.
 
 ## Recency
