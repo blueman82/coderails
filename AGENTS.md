@@ -54,10 +54,16 @@ commands/*.md                   → slash commands (frontmatter + prose instruct
   └─ scripts/sandbox/*.sh       → srt sandbox wrapper for spawned workers (see "Sandboxed workers")
   └─ scripts/integrity-gate/*        → root-owned launchd daemon that posts the `integrity-review` commit status
 skills/*/SKILL.md               → skills with triggering descriptions
+skills/index.yaml               → provider-routing schema (per skill_id: claude/codex path + status),
+                                  resolved by hooks/scripts/lib/skill_route.sh
 agents/*.md                     → subagent definitions the skills spawn (deploy-safety-reviewer,
                                   design-scout, disposition-scout, docs-auditor,
                                   loop-worker, preflight-scout, proof-author,
                                   source-auditor, spec-reviewer, wiki-writer)
+.codex/skills/*/SKILL.md        → Codex-provider sibling bodies for skills/agents routed to codex in
+                                  skills/index.yaml (e.g. disposition-scout)
+.github/prompts/*.prompt.md     → thin Codex entrypoints that route to the canonical Claude body per
+                                  skills/index.yaml; add no instructions of their own
 instructions/                   → the discipline rules appended to ~/.claude/CLAUDE.md
 starter-memory/                 → feedback memories seeded into the user's memory dir
 docs/                           → long-form reference split out of this file
