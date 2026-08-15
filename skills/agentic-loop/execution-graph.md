@@ -6,8 +6,15 @@ predicate, or skip condition; the phase prose in SKILL.md covers what to *do*, t
 what makes a node *ready*.
 
 Before dispatching any candidate node, run the read-only readiness query
-`$(git -C <repo> rev-parse --show-toplevel)/hooks/scripts/lib/graph_readiness.sh <path-to-progress.json> <node-id>`
-and dispatch only nodes it reports `ready` for. Its `blocked` output means "not
+`${PLUGIN_ROOT}/hooks/scripts/lib/graph_readiness.sh <path-to-progress.json> <node-id>`,
+where `PLUGIN_ROOT` resolves to `${CLAUDE_PLUGIN_ROOT}` when that env var is set
+(the packaged-install case), or else to the coderails plugin's own install
+directory — never to `git rev-parse --show-toplevel` of the invoking repo,
+which is the *user's* project and does not contain this script. This is the
+same fallback convention `hooks/scripts/inject_bootstrap.sh` uses for its own
+`PLUGIN_ROOT` resolution (env var first, then a path derived from the script's
+own on-disk location) — follow that pattern here too.
+Dispatch only nodes it reports `ready` for. Its `blocked` output means "not
 yet ready to dispatch" — it fail-closes the same way on missing or malformed
 `progress.json` as on a real non-terminal predecessor, so it cannot distinguish
 the two. Conversely, a node with no recorded incoming edges is vacuously
