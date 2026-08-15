@@ -15,19 +15,23 @@ from runtime.graph import build_graph, execute, write_json  # noqa: E402
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--state", type=Path, required=True)
+    parser.add_argument("--implementations", type=Path, required=True, help="JSON node implementation records")
+    parser.add_argument("--contract", type=Path)
     args = parser.parse_args()
-    graph = build_graph()
+    implementations = json.loads(args.implementations.read_text(encoding="utf-8"))
+    graph = build_graph(contract_path=args.contract) if args.contract else build_graph()
     if args.state.exists():
         prior = json.loads(args.state.read_text(encoding="utf-8"))
         graph = prior["graph"]
-    execute(graph)
+    execute(graph, implementations, state_path=args.state)
+    successful = all(node["outcome"] in {"done", "skipped"} for node in graph["nodes"].values())
     state = {
-        "schema_version": 1,
-        "status": "complete",
+        "schema_version": 2,
+        "status": "complete" if successful else "hard-stop",
         "provider": "codex",
         "implementation": "codex/runtime/graph.py",
-        "proof_disposition": "none: graph runner has no code proof surface",
-        "retro": {"provider": "codex", "status": "complete"},
+        "proof_disposition": "none: implementation records own executable proof surface",
+        "retro": {"provider": "codex", "status": "complete" if successful else "hard-stop"},
         "graph": graph,
     }
     write_json(args.state, state)

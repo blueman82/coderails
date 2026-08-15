@@ -50,13 +50,19 @@ class CodexGraphAcceptance(unittest.TestCase):
         self.assertNotIn("claude", str(Path(sys.modules["runtime.graph"].__file__)))
         with tempfile.TemporaryDirectory() as directory:
             state = Path(directory) / "progress.json"
-            command = [sys.executable, str(ROOT / "codex/scripts/run_graph.py"), "--state", str(state)]
+            implementations = Path(directory) / "implementations.json"
+            local = [sys.executable, "-c", "print('fixture')"]
+            implementations.write_text(json.dumps({
+                node: {"command": local, "path": "codex/tests/graph_acceptance.py"}
+                for node in build_graph()["nodes"]
+            }))
+            command = [sys.executable, str(ROOT / "codex/scripts/run_graph.py"), "--state", str(state), "--implementations", str(implementations)]
             first = subprocess.run(command, capture_output=True, text=True, check=True)
             self.assertIn('"status": "complete"', first.stdout)
             saved = json.loads(state.read_text(encoding="utf-8"))
             self.assertEqual(saved["provider"], "codex")
             self.assertEqual(saved["implementation"], "codex/runtime/graph.py")
-            self.assertEqual(set(PHASES), {node.removeprefix("S") for node in saved["graph"]["nodes"] if node != "J2"})
+            self.assertEqual(set(build_graph()["nodes"]), set(saved["graph"]["nodes"]))
             self.assertTrue(all(node["outcome"] in {"done", "skipped"} for node in saved["graph"]["nodes"].values()))
             before = state.read_text(encoding="utf-8")
             subprocess.run(command, capture_output=True, text=True, check=True)
@@ -65,7 +71,7 @@ class CodexGraphAcceptance(unittest.TestCase):
     def test_completion_teardown_and_index_negative_control(self) -> None:
         lifecycle = ROOT / "codex/hooks/lifecycle.py"
         graph = build_graph(("A",))
-        execute(graph)
+        execute(graph, {"SA": {"outcome": "done"}})
         good = {"event": "complete", "state": {"status": "complete", "graph": graph, "retro": {"provider": "codex"}}}
         result = subprocess.run([sys.executable, str(lifecycle)], input=json.dumps(good), text=True, capture_output=True)
         self.assertEqual(result.returncode, 0, result.stdout)
