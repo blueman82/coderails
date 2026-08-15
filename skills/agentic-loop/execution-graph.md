@@ -20,7 +20,7 @@ read-modify-write before releasing its join. Inside an authorised loop, the
 **Resolving and recording a wave — `graph_dispatch.sh`.** Use
 `$(git -C <repo> rev-parse --show-toplevel)/hooks/scripts/lib/graph_dispatch.sh`
 (repo-root-relative, same reasoning as the `graph_readiness.sh` path above —
-`${CLAUDE_PLUGIN_ROOT}` is empty in an orchestrator Bash call and is never a
+the plugin-root env var is empty in an orchestrator Bash call and is never a
 valid path prefix here) for the S2.5/S2.6 fork through the `J2` join, and for
 any other fork/join wave in the graph:
 
