@@ -43,6 +43,7 @@ manifest_paths=(
   hooks/scripts/lib/graph_readiness.sh
   hooks/scripts/lib/graph_executor.sh
   hooks/scripts/lib/skill_route.sh
+  hooks/scripts/lib/codex_dispatch.sh
   scripts/sandbox/render-settings.sh
   scripts/sandbox/spawn-sandboxed-worker.sh
   scripts/sandbox/sandbox-probe.sh
@@ -91,6 +92,7 @@ manifest_modes=(
   100755
   100644
   100755
+  100644
   100755
   100755
   100755
