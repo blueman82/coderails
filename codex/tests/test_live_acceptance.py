@@ -13,6 +13,22 @@ from tests import live_acceptance  # noqa: E402
 
 
 class LiveAcceptanceNegativeTests(unittest.TestCase):
+    def test_live_resume_loads_graph_and_makes_no_second_exec_calls(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            state = Path(directory) / "state.json"
+            argv = ["live_acceptance.py", "--state", str(state), "--scenario", "live"]
+            with patch.object(sys, "argv", argv), patch("runtime.graph.codex_exec", return_value=("done", '{"type":"turn.completed"}')) as invoke:
+                self.assertEqual(live_acceptance.main(), 0)
+                first = json.loads(state.read_text())
+                evidence_count = sum(len(node.get("evidence", [])) for node in first["graph"]["nodes"].values())
+                first_calls = invoke.call_count
+                self.assertEqual(live_acceptance.main(), 0)
+                second = json.loads(state.read_text())
+            self.assertEqual(first_calls, 3)
+            self.assertEqual(invoke.call_count, first_calls)
+            self.assertEqual(sum(len(node.get("evidence", [])) for node in second["graph"]["nodes"].values()), evidence_count)
+            self.assertEqual(first["revision"], second["revision"])
+
     def run_scenario(self, scenario: str) -> dict:
         with tempfile.TemporaryDirectory() as directory:
             state = Path(directory) / "state.json"
