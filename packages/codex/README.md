@@ -8,6 +8,12 @@ The only repository-wide contract is the optional routing record at
 provider's files. Dispatch receives a JSON request and runs the requested
 provider-native command; graph state is JSON and is atomically replaced.
 
+`runtime/graph.py` is a generated standalone copy of the canonical
+`codex/runtime/graph.py`. From the repository root, run
+`python3 codex/scripts/sync_package_runtime.py` to refresh it and
+`python3 codex/tests/runtime_parity.py` to fail on drift. The package copy is
+kept so this directory remains independently runnable after installation.
+
 ## Enforcement ceiling
 
 The lifecycle checker is mechanical when the Codex host invokes it, but this
