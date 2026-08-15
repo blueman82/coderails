@@ -1,0 +1,20 @@
+{
+  "name": "coderails",
+  "interface": {
+    "displayName": "Coderails"
+  },
+  "plugins": [
+    {
+      "name": "coderails-codex",
+      "source": {
+        "source": "local",
+        "path": "./"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Developer Tools"
+    }
+  ]
+}
