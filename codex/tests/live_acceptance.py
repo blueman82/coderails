@@ -26,9 +26,9 @@ def main() -> int:
         for name in graph["nodes"]
     }
     if args.scenario == "failure":
-        implementations["SA"]["cwd"] = str(args.state.parent / "missing-worktree")
+        implementations["A"]["cwd"] = str(args.state.parent / "missing-worktree")
     if args.scenario == "missing":
-        del implementations["SB"]
+        del implementations["B"]
     if args.scenario == "refusal":
         event = {"event": "complete", "state": {"status": "complete", "graph": {"nodes": {"A": {"outcome": "done"}}}}}
         allowed, reason = validate(event)
