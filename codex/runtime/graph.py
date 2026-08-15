@@ -44,7 +44,7 @@ def build_graph(phases: Iterable[str] = PHASES) -> dict:
 
 def ready(graph: dict, node: str) -> bool:
     nodes, edges, joins = graph["nodes"], graph["edges"], graph.get("joins", {})
-    if node not in nodes or nodes[node].get("status") not in {"pending", "ready"}:
+    if node not in nodes or nodes[node].get("status", nodes[node].get("outcome")) not in {"pending", "ready"}:
         return False
     predecessors = joins[node]["inputs"] if joins.get(node, {}).get("mode") == "all" else [
         edge["from"] for edge in edges if edge["to"] == node
