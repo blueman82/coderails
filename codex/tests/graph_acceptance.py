@@ -12,7 +12,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).parents[2]
 sys.path.insert(0, str(ROOT / "codex"))
-from runtime.graph import build_graph, execute, ready  # noqa: E402
+from runtime.graph import REQUIRED_GATES, build_graph, execute, ready  # noqa: E402
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -52,15 +52,20 @@ class CodexGraphAcceptance(unittest.TestCase):
             state = Path(directory) / "progress.json"
             implementations = Path(directory) / "implementations.json"
             local = [sys.executable, "-c", "print('fixture')"]
-            implementations.write_text(json.dumps({
+            graph_nodes = list(build_graph()["nodes"])
+            config = {"mode": "fixture", "nodes": {
                 node: {"command": local, "provider": "codex", "skill_id": f"fixture.{node}", "implementation_path": "codex/tests/graph_acceptance.py"}
-                for node in build_graph()["nodes"]
-            }))
+                for node in graph_nodes
+            }, "gates": {}}
+            for kind, node in zip(REQUIRED_GATES, graph_nodes[:len(REQUIRED_GATES)]):
+                config["gates"][kind] = {"node": node, "command": local, "provider": "codex", "skill_id": f"fixture.gate.{kind}", "implementation_path": "codex/tests/graph_acceptance.py"}
+            implementations.write_text(json.dumps(config))
             command = [sys.executable, str(ROOT / "codex/scripts/run_graph.py"), "--state", str(state), "--implementations", str(implementations), "--contract", str(ROOT / "skills/agentic-loop/execution-graph.md")]
             first = subprocess.run(command, capture_output=True, text=True, check=True)
-            self.assertIn('"status": "complete"', first.stdout)
+            self.assertIn('"status": "fixture"', first.stdout)
             saved = json.loads(state.read_text(encoding="utf-8"))
             self.assertEqual(saved["provider"], "codex")
+            self.assertEqual(saved["status"], "fixture")
             self.assertEqual(saved["implementation"], "codex/runtime/graph.py")
             self.assertEqual(set(build_graph()["nodes"]), set(saved["graph"]["nodes"]))
             self.assertTrue(all(node["outcome"] in {"done", "skipped"} for node in saved["graph"]["nodes"].values()))
@@ -72,7 +77,8 @@ class CodexGraphAcceptance(unittest.TestCase):
         lifecycle = ROOT / "codex/hooks/lifecycle.py"
         graph = build_graph(("A",))
         execute(graph, {"SA": {"provider": "codex", "skill_id": "test.complete", "implementation_path": "codex/tests", "test_only": True, "outcome": "done"}})
-        good = {"event": "complete", "state": {"status": "complete", "graph": graph, "retro": {"provider": "codex"}}}
+        gates = {kind: {"node": "SA", "outcome": "done", "evidence": [{"outcome": "done"}]} for kind in REQUIRED_GATES}
+        good = {"event": "complete", "state": {"status": "complete", "graph": graph, "gates": gates, "teardown": {"provider": "codex", "evidence": [{"outcome": "done"}]}, "retro": {"provider": "codex", "status": "complete"}}}
         result = subprocess.run([sys.executable, str(lifecycle)], input=json.dumps(good), text=True, capture_output=True)
         self.assertEqual(result.returncode, 0, result.stdout)
         bad = {"event": "complete", "state": {"status": "complete", "graph": graph}}
@@ -80,6 +86,21 @@ class CodexGraphAcceptance(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertTrue((ROOT / "skills/index.yaml").is_file())
         self.assertEqual(subprocess.run(["bash", str(ROOT / "scripts/validate-skills-index.sh")], capture_output=True).returncode, 0)
+
+    def test_runner_missing_gate_configuration_is_non_complete(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            state = Path(directory) / "progress.json"
+            config = Path(directory) / "implementations.json"
+            config.write_text(json.dumps({"nodes": {}, "gates": {}}))
+            result = subprocess.run([
+                sys.executable, str(ROOT / "codex/scripts/run_graph.py"),
+                "--state", str(state), "--implementations", str(config),
+                "--contract", str(ROOT / "skills/agentic-loop/execution-graph.md"),
+            ], capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0)
+            saved = json.loads(state.read_text(encoding="utf-8"))
+            self.assertEqual(saved["status"], "hard-stop")
+            self.assertFalse(any(node["outcome"] == "pending" for node in saved["graph"]["nodes"].values()))
 
 
 if __name__ == "__main__":

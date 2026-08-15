@@ -11,7 +11,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).parents[2]
 sys.path.insert(0, str(ROOT / "codex"))
-from runtime.graph import build_graph, execute  # noqa: E402
+from runtime.graph import REQUIRED_GATES, apply_work_unit_disposition, build_graph, execute, gate_snapshot, prepare_implementations  # noqa: E402
 
 
 def main() -> int:
@@ -41,13 +41,34 @@ def main() -> int:
         }
         graph["artifacts"] = {"kind": "fixture", "external_gates": "not executed"}
 
+    if not args.phase_graph:
+        for kind in REQUIRED_GATES:
+            name = f"fixture-gate-{kind}"
+            graph["nodes"][name] = {"status": "pending", "outcome": "pending", "dispatch": True, "retry": {"attempts": 0, "max": 1}, "name": name}
+            graph["edges"].append({"from": "C", "to": name})
+    apply_work_unit_disposition(graph, None)
+    config = {"mode": "fixture", "nodes": {}, "gates": {}}
+    for node in graph["nodes"]:
+        config["nodes"][node] = {"command": command, "provider": "codex", "skill_id": f"fixture.{node}", "implementation_path": "codex/tests/acceptance_loop.py"}
+    gate_nodes = [name for name, value in graph["nodes"].items() if value.get("dispatch", True) and "[i]" not in name][:len(REQUIRED_GATES)]
+    if not args.phase_graph:
+        gate_nodes = [f"fixture-gate-{kind}" for kind in REQUIRED_GATES]
+    for kind, node in zip(REQUIRED_GATES, gate_nodes):
+        config["gates"][kind] = {"node": node, "command": command, "provider": "codex", "skill_id": f"fixture.gate.{kind}", "implementation_path": "codex/tests/acceptance_loop.py"}
+    implementations, errors = prepare_implementations(graph, config)
+    graph["configuration_errors"] = errors
+
     def persist(value: dict) -> None:
         print(json.dumps({"wave": [name for name, node in value["nodes"].items() if node["outcome"] != "pending"]}))
 
-    execute(graph, implementations, state_path=args.state, persist=persist)
+    execute(graph, implementations if not errors else {}, state_path=args.state, persist=persist)
     state = json.loads(args.state.read_text(encoding="utf-8"))
-    successful = all(node.get("outcome") in {"done", "skipped"} for node in graph["nodes"].values())
+    gates = gate_snapshot(graph, config)
+    successful = not errors and all(node.get("outcome") in {"done", "skipped"} for node in graph["nodes"].values()) and all(gate.get("outcome") == "done" and gate.get("evidence") for gate in gates.values())
     state.update(status="complete" if successful else "hard-stop", provider="codex", artifacts=graph.get("artifacts", {}))
+    state["status"] = "fixture" if successful else "hard-stop"
+    state["gates"] = gates
+    state["teardown"] = {"provider": "codex", "evidence": gates.get("teardown", {}).get("evidence", [])} if successful else None
     state["retro"] = {"provider": "codex", "status": state["status"], "external_gates": "not executed; fixture only"}
     from runtime.graph import write_json
     write_json(args.state, state)

@@ -6,6 +6,8 @@ from __future__ import annotations
 import json
 import sys
 
+REQUIRED_GATES = ("review", "eval", "proof", "integrity", "wiki", "teardown")
+
 
 def validate(event: dict) -> tuple[bool, str]:
     if not isinstance(event, dict) or not isinstance(event.get("event"), str):
@@ -23,8 +25,21 @@ def validate(event: dict) -> tuple[bool, str]:
             for node in nodes.values()
         ):
             return False, "complete requires every graph node to be terminal-success"
-        if not isinstance(state.get("retro"), dict):
-            return False, "complete requires retro object"
+        if state.get("mode") == "fixture" or state.get("status") == "fixture":
+            return False, "fixture state cannot be complete"
+        gates = state.get("gates")
+        if not isinstance(gates, dict):
+            return False, "complete requires gate evidence"
+        for gate in REQUIRED_GATES:
+            evidence = gates.get(gate)
+            if not isinstance(evidence, dict) or evidence.get("outcome") not in {"done", "skipped"} or not evidence.get("evidence"):
+                return False, f"complete requires evidence for gate {gate}"
+        teardown = state.get("teardown")
+        if not isinstance(teardown, dict) or teardown.get("provider") != "codex" or not teardown.get("evidence"):
+            return False, "complete requires Codex teardown evidence"
+        retro = state.get("retro")
+        if not isinstance(retro, dict) or retro.get("provider") != "codex" or retro.get("status") != "complete":
+            return False, "complete requires valid Codex retro"
     return True, "allowed"
 
 

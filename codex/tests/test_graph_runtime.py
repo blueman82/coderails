@@ -9,7 +9,16 @@ from pathlib import Path
 ROOT = Path(__file__).parents[2]
 sys.path.insert(0, str(ROOT / "codex"))
 
-from runtime.graph import build_graph, execute, load_contract, ready  # noqa: E402
+from runtime.graph import (  # noqa: E402
+    REQUIRED_GATES,
+    StateConflict,
+    apply_work_unit_disposition,
+    build_graph,
+    execute,
+    load_contract,
+    prepare_implementations,
+    ready,
+)
 
 
 PASS = [sys.executable, "-c", "print('ok')"]
@@ -54,6 +63,49 @@ right -> join
             path.write_text(contract)
             graph = build_graph(contract_path=path, work_units=[{"id": "one"}, {"id": "two"}])
         self.assertEqual(set(graph["nodes"]), {"start", "U3[one]", "U3[two]", "join"})
+
+    def test_guard_nodes_are_metadata_only_and_no_work_units_skip_templates(self) -> None:
+        graph = build_graph(contract_path=ROOT / "skills/agentic-loop/execution-graph.md")
+        for name in ("G10", "G11", "G12"):
+            self.assertFalse(graph["nodes"][name]["dispatch"])
+        apply_work_unit_disposition(graph, None)
+        self.assertTrue(all(graph["nodes"][name]["outcome"] == "skipped" for name in graph["nodes"] if "[i]" in name))
+
+    def test_gate_configuration_is_explicit_and_complete(self) -> None:
+        graph = build_graph(("root", "review", "eval", "proof", "integrity", "wiki", "teardown"))
+        config = {"nodes": {}, "gates": {}}
+        nodes = list(graph["nodes"])
+        for name in nodes:
+            config["nodes"][name] = {"command": PASS, "provider": "codex", "skill_id": f"fixture.{name}", "implementation_path": "codex/tests"}
+        for kind, node in zip(REQUIRED_GATES, nodes[1:]):
+            config["gates"][kind] = {"node": node, "command": PASS, "provider": "codex", "skill_id": f"gate.{kind}", "implementation_path": "codex/tests"}
+        mappings, errors = prepare_implementations(graph, config)
+        self.assertEqual(errors, [])
+        self.assertEqual(set(REQUIRED_GATES), {mappings[node]["gate"] for node in nodes[1:]})
+        _, errors = prepare_implementations(graph, {"nodes": config["nodes"], "gates": {"review": config["gates"]["review"]}})
+        self.assertTrue(any("missing gate" in error for error in errors))
+
+    def test_catalog_route_must_resolve_to_declared_codex_path(self) -> None:
+        graph = build_graph(("A", "review", "eval", "proof", "integrity", "wiki", "teardown"))
+        record = {"command": PASS, "provider": "codex", "skill_id": "cite-check", "implementation_path": ".codex/skills/cite-check/SKILL.md", "catalog_route": "cite-check", "catalog_kind": "skills"}
+        node_records = {name: {"command": PASS, "provider": "codex", "skill_id": "test." + name, "implementation_path": "codex/tests"} for name in graph["nodes"]}
+        node_records["SA"] = record
+        gates = {kind: {"node": node, **node_records[node]} for kind, node in zip(REQUIRED_GATES, list(graph["nodes"])[1:])}
+        mappings, errors = prepare_implementations(graph, {"nodes": node_records, "gates": gates}, catalog_root=ROOT)
+        self.assertEqual(errors, [])
+        record["catalog_route"] = "missing-route"
+        _, errors = prepare_implementations(graph, {"nodes": node_records, "gates": gates}, catalog_root=ROOT)
+        self.assertTrue(any("catalog" in error for error in errors))
+
+    def test_stale_revision_cannot_overwrite_newer_state(self) -> None:
+        graph = build_graph(("A",))
+        with tempfile.TemporaryDirectory() as directory:
+            state = Path(directory) / "progress.json"
+            execute(graph, {"SA": {"command": PASS, "provider": "codex", "skill_id": "test.a", "implementation_path": "codex/tests"}}, state_path=state, expected_revision=0)
+            before = state.read_text()
+            with self.assertRaises(StateConflict):
+                execute(build_graph(("A",)), {"SA": {"command": PASS, "provider": "codex", "skill_id": "test.a", "implementation_path": "codex/tests"}}, state_path=state, expected_revision=0)
+            self.assertEqual(state.read_text(), before)
 
     def test_loads_nodes_from_canonical_contract(self) -> None:
         nodes = load_contract(ROOT / "skills/agentic-loop/execution-graph.md")

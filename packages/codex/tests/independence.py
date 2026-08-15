@@ -14,12 +14,29 @@ assert not any(forbidden in path.read_text(encoding="utf-8").lower() for path in
 with tempfile.TemporaryDirectory() as directory:
     package = Path(directory) / "package"
     shutil.copytree(ROOT, package)
-    graph = Path(directory) / "graph.json"
     state = Path(directory) / "state.json"
-    graph.write_text(json.dumps({"nodes": {"one": {"outcome": "pending", "retry": {"max": 1}}}, "edges": [], "joins": {}}))
-    subprocess.run([sys.executable, str(package / "scripts/run_graph.py"), "--graph", str(graph), "--state", str(state)], check=True)
-    subprocess.run([sys.executable, str(package / "scripts/teardown.py"), str(state)], check=True)
+    contract = Path(directory) / "execution-graph.md"
+    contract.write_text("""| ID | Node / true prerequisites | Ready when | Conditional skip or join |
+|---|---|---|---|
+| `root` | Stub state | ready | never |
+| `review` | `root` | ready | never |
+| `eval` | `root` | ready | never |
+| `proof` | `root` | ready | never |
+| `integrity` | `root` | ready | never |
+| `wiki` | `root` | ready | never |
+| `teardown` | `root` | ready | never |
+""")
+    config = {"nodes": {}, "gates": {}}
+    command = ["sh", "-c", "printf package"]
+    nodes = ["root", "review", "eval", "proof", "integrity", "wiki", "teardown"]
+    for node in nodes:
+        config["nodes"][node] = {"command": command, "provider": "codex", "skill_id": "package." + node, "implementation_path": "runtime/graph.py"}
+    for kind, node in zip(("review", "eval", "proof", "integrity", "wiki", "teardown"), nodes[1:]):
+        config["gates"][kind] = {"node": node, "command": command, "provider": "codex", "skill_id": "package.gate." + kind, "implementation_path": "runtime/graph.py"}
+    implementations = Path(directory) / "implementations.json"
+    implementations.write_text(json.dumps(config))
+    subprocess.run([sys.executable, str(package / "scripts/run_graph.py"), "--contract", str(contract), "--implementations", str(implementations), "--state", str(state)], check=True)
     subprocess.run([sys.executable, str(package / "scripts/complete.py"), str(state)], check=True)
     completed = json.loads(state.read_text(encoding="utf-8"))
-    assert completed["completed"] is True and completed["teardown"]["provider"] == "codex"
+    assert completed["status"] == "complete" and completed["completed"] is True and completed["teardown"]["provider"] == "codex"
 print("PASS")

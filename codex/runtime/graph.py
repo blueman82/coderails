@@ -6,7 +6,9 @@ from __future__ import annotations
 import json
 import os
 import re
+import sys
 import tempfile
+import fcntl
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
@@ -15,6 +17,11 @@ from runtime.dispatch import dispatch
 
 CONTRACT = Path(__file__).parents[2] / "skills/agentic-loop/execution-graph.md"
 OUTCOMES = {"done", "skipped", "failed", "stale", "hard-stop"}
+REQUIRED_GATES = ("review", "eval", "proof", "integrity", "wiki", "teardown")
+
+
+class StateConflict(RuntimeError):
+    """The state file advanced after this orchestrator loaded it."""
 
 
 def _cells(line: str) -> list[str]:
@@ -50,6 +57,7 @@ def load_contract(path: Path = CONTRACT) -> list[dict[str, Any]]:
             "id": node_id,
             "prerequisites": _code_spans(prerequisites),
             "conditional": conditional,
+            "dispatch": not any(marker in conditional.lower() for marker in ("no standalone work", "cross-cutting")),
         })
     if not records:
         raise ValueError(f"no graph contract table found in {path}")
@@ -93,7 +101,7 @@ def _diagram_edges(path: Path, ids: set[str]) -> list[tuple[str, str]]:
 
 
 def _node(name: str) -> dict[str, Any]:
-    return {"status": "pending", "outcome": "pending", "retry": {"attempts": 0, "max": 5}, "name": name}
+    return {"status": "pending", "outcome": "pending", "retry": {"attempts": 0, "max": 5}, "name": name, "dispatch": True}
 
 
 def _expand(value: str, work_units: Sequence[str] | None) -> list[str]:
@@ -131,7 +139,8 @@ def build_graph(
         unit_names = [str(unit.get("id", index)) if isinstance(unit, Mapping) else str(unit) for index, unit in enumerate(work_units)]
     declared = {record["id"] for record in records}
     node_names = [name for record in records for name in _expand(record["id"], unit_names)]
-    nodes = {name: _node(name) for name in node_names}
+    dispatchable = {name: record["dispatch"] for record in records for name in _expand(record["id"], unit_names)}
+    nodes = {name: dict(_node(name), dispatch=dispatchable[name]) for name in node_names}
     edges: set[tuple[str, str]] = set()
     for record in records:
         targets = _expand(record["id"], unit_names)
@@ -153,6 +162,62 @@ def build_graph(
     return {"nodes": nodes, "edges": edge_list, "joins": joins_map, "contract": str(contract_path)}
 
 
+def apply_work_unit_disposition(graph: dict[str, Any], work_units: Sequence[Any] | None) -> None:
+    """Explicitly skip templated nodes when no work-unit list was supplied."""
+    if work_units:
+        return
+    for name, node in graph["nodes"].items():
+        if "[i]" in name and node.get("outcome") == "pending":
+            node.update(status="skipped", outcome="skipped")
+            _evidence(node, node["retry"]["attempts"], "skipped", "no work_units supplied; templated lane explicitly skipped")
+
+
+def prepare_implementations(graph: dict[str, Any], config: Mapping[str, Any], *, catalog_root: Path | None = None) -> tuple[dict[str, dict[str, Any]], list[str]]:
+    """Validate explicit node/gate mappings and attach gate identity to nodes."""
+    if not isinstance(config, Mapping):
+        return {}, ["implementation configuration must be an object"]
+    node_records = config.get("nodes", {})
+    gate_records = config.get("gates", {})
+    if not isinstance(node_records, Mapping) or not isinstance(gate_records, Mapping):
+        return {}, ["implementation configuration requires nodes and gates objects"]
+    mappings = {str(name): dict(record) for name, record in node_records.items() if isinstance(record, Mapping)}
+    errors: list[str] = []
+    seen: set[str] = set()
+    for kind in REQUIRED_GATES:
+        record = gate_records.get(kind)
+        if not isinstance(record, Mapping):
+            errors.append(f"missing gate implementation: {kind}")
+            continue
+        node = record.get("node")
+        if not isinstance(node, str) or node not in graph["nodes"]:
+            errors.append(f"gate {kind} references missing graph node")
+            continue
+        if node in seen:
+            errors.append(f"multiple gates map to node: {node}")
+            continue
+        seen.add(node)
+        mapping = dict(record)
+        mapping["gate"] = kind
+        mappings[node] = mapping
+    for name, node in graph["nodes"].items():
+        if node.get("dispatch") and node.get("outcome") not in {"done", "skipped"} and name not in mappings:
+            errors.append(f"missing implementation mapping: {name}")
+    for name, record in mappings.items():
+        error = _metadata_error(record, catalog_root=catalog_root)
+        if error:
+            errors.append(f"{name}: {error}")
+    return mappings, errors
+
+
+def gate_snapshot(graph: dict[str, Any], config: Mapping[str, Any]) -> dict[str, Any]:
+    result = {}
+    for kind, record in (config.get("gates", {}) if isinstance(config, Mapping) else {}).items():
+        if isinstance(record, Mapping) and isinstance(record.get("node"), str):
+            node = graph["nodes"].get(record["node"], {})
+            result[kind] = {"node": record["node"], "outcome": node.get("outcome"), "evidence": node.get("evidence", [])}
+    return result
+
+
 def ready(graph: dict[str, Any], node: str) -> bool:
     nodes, edges, joins = graph["nodes"], graph["edges"], graph.get("joins", {})
     if node not in nodes or nodes[node].get("outcome") not in {"pending", "ready"}:
@@ -172,7 +237,7 @@ def _test_callback_records(graph: dict[str, Any], handler: Callable[[str], str])
     }
 
 
-def _metadata_error(record: Any) -> str | None:
+def _metadata_error(record: Any, *, catalog_root: Path | None = None) -> str | None:
     if not isinstance(record, dict):
         return "implementation mapping must be an object"
     if record.get("provider") != "codex":
@@ -181,6 +246,20 @@ def _metadata_error(record: Any) -> str | None:
         return "skill_id is required"
     if not isinstance(record.get("implementation_path"), str) or not record["implementation_path"].strip():
         return "implementation_path is required"
+    if record.get("catalog_route") is not None:
+        if catalog_root is None:
+            return "catalog resolver root is required"
+        try:
+            catalog_dir = catalog_root / "codex"
+            if str(catalog_dir) not in sys.path:
+                sys.path.insert(0, str(catalog_dir))
+            from catalog import resolve  # type: ignore
+            resolved = resolve(str(record["catalog_route"]), kind=record.get("catalog_kind"), root=catalog_root)
+            expected = resolved.relative_to(catalog_root).as_posix()
+            if expected != record["implementation_path"]:
+                return f"catalog path mismatch: expected {expected}"
+        except Exception as error:
+            return f"catalog route unavailable: {error}"
     command = record.get("command")
     test_outcome = record.get("outcome")
     if command is not None and (not isinstance(command, list) or not command or any(not isinstance(item, str) or not item for item in command)):
@@ -224,6 +303,7 @@ def execute(
     state_path: Path | None = None,
     persist: Callable[[dict[str, Any]], None] | None = None,
     cwd: str | None = None,
+    expected_revision: int | None = None,
 ) -> dict[str, Any]:
     """Dispatch complete ready waves and atomically persist after each wave."""
     if callable(implementations):
@@ -240,11 +320,16 @@ def execute(
                 node = graph["nodes"][name]
                 node.update(status="hard-stop", outcome="hard-stop")
                 _evidence(node, node["retry"]["attempts"], "hard-stop", "blocked by unresolved predecessor or cycle")
-            _persist(graph, state_path, persist)
+            expected_revision = _persist(graph, state_path, persist, expected_revision)
             return graph
         results: list[tuple[str, str]] = []
         for name in wave:
             node = graph["nodes"][name]
+            if not node.get("dispatch", True):
+                node.update(status="skipped", outcome="skipped")
+                _evidence(node, node["retry"]["attempts"], "skipped", "cross-cutting guard metadata; no standalone dispatch")
+                results.append((name, "skipped"))
+                continue
             record = implementations.get(name, node.get("implementation_record"))
             metadata = record if isinstance(record, dict) else {}
             node["provider"] = metadata.get("provider", "codex")
@@ -279,17 +364,40 @@ def execute(
         for name, outcome in results:
             graph["nodes"][name].update(status=outcome, outcome=outcome)
         _propagate_blocks(graph)
-        _persist(graph, state_path, persist)
+        expected_revision = _persist(graph, state_path, persist, expected_revision)
 
 
-def _persist(graph: dict[str, Any], state_path: Path | None, persist: Callable[[dict[str, Any]], None] | None) -> None:
+def _persist(graph: dict[str, Any], state_path: Path | None, persist: Callable[[dict[str, Any]], None] | None, expected_revision: int | None) -> int | None:
     if persist:
         persist(graph)
     if state_path:
-        write_json(state_path, {"schema_version": 2, "status": "running", "provider": "codex", "graph": graph})
+        with _state_lock(state_path, exclusive=True):
+            current = _read_unlocked(state_path).get("revision", 0) if state_path.exists() else 0
+            if expected_revision is not None and current != expected_revision:
+                raise StateConflict(f"state revision changed: expected {expected_revision}, found {current}")
+            revision = current + 1
+            graph["revision"] = revision
+            _atomic_write(state_path, {"schema_version": 2, "status": "running", "provider": "codex", "revision": revision, "graph": graph})
+            return revision
+    return expected_revision
 
 
-def write_json(path: Path, value: dict[str, Any]) -> None:
+def _state_lock(path: Path, *, exclusive: bool):
+    lock = open(str(path) + ".lock", "a+")
+    fcntl.flock(lock.fileno(), fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH)
+    return lock
+
+
+def _read_unlocked(path: Path) -> dict[str, Any]:
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def read_json(path: Path) -> dict[str, Any]:
+    with _state_lock(path, exclusive=False):
+        return _read_unlocked(path)
+
+
+def _atomic_write(path: Path, value: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
     try:
@@ -300,3 +408,8 @@ def write_json(path: Path, value: dict[str, Any]) -> None:
     finally:
         if os.path.exists(temporary):
             os.unlink(temporary)
+
+
+def write_json(path: Path, value: dict[str, Any]) -> None:
+    with _state_lock(path, exclusive=True):
+        _atomic_write(path, value)

@@ -38,7 +38,8 @@ def main() -> int:
     assert calls[:2] == [("SA", "pending"), ("SB", "pending")]
 
     hook = ROOT / "codex/hooks/lifecycle.py"
-    valid = {"event": "complete", "state": {"status": "complete", "graph": graph, "retro": {}}}
+    gates = {kind: {"node": "SA", "outcome": "done", "evidence": [{"outcome": "done"}]} for kind in ("review", "eval", "proof", "integrity", "wiki", "teardown")}
+    valid = {"event": "complete", "state": {"status": "complete", "graph": graph, "gates": gates, "teardown": {"provider": "codex", "evidence": [{"outcome": "done"}]}, "retro": {"provider": "codex", "status": "complete"}}}
     result = subprocess.run([sys.executable, str(hook)], input=json.dumps(valid), text=True, capture_output=True)
     assert result.returncode == 0, result.stdout
     invalid = {"event": "complete", "state": {"status": "complete", "graph": graph}}
