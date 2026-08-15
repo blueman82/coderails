@@ -303,7 +303,7 @@ skills:
       path: agents/disposition-scout.md
       status: active
     codex:
-      path: codex/agents/disposition-scout.md
+      path: .codex/skills/disposition-scout/SKILL.md
       status: active
     required_inputs: [Phase 1 plan, retired code paths]
     output_contract: clean-break or preserve-compat recommendation per retirement unit with evidence and flip-condition.

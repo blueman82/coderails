@@ -17,6 +17,7 @@ def main() -> int:
     assert len({route.path for route in routes}) == len(routes)
     assert {route.kind for route in routes} == {"skills", "agents", "commands"}
     assert resolve("cite-check", kind="skills") == ROOT / "codex/skills/cite-check.md"
+    assert resolve("disposition-scout", kind="agents") == ROOT / ".codex/skills/disposition-scout/SKILL.md"
     for bad in ("missing-route", "catalog"):
         try:
             resolve(bad, root=ROOT)

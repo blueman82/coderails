@@ -75,7 +75,10 @@ def resolve(route_id: str, *, kind: str | None = None, root: Path | None = None)
     native = root / route.path
     if route.status != "active":
         raise CatalogError(f"inactive Codex route: {key[0]}/{key[1]}")
-    if not route.path.as_posix().startswith("codex/") or not native.is_file():
+    native_path = route.path.as_posix()
+    valid_path = native_path == f"codex/{route.kind}/{route.route_id}.md"
+    valid_path |= route.kind == "agents" and native_path == f".codex/skills/{route.route_id}/SKILL.md"
+    if not valid_path or not native.is_file():
         raise CatalogError(f"missing Codex implementation: {key[0]}/{key[1]}")
     return native
 
