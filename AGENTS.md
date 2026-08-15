@@ -55,7 +55,7 @@ commands/*.md                   → slash commands (frontmatter + prose instruct
   └─ scripts/integrity-gate/*        → root-owned launchd daemon that posts the `integrity-review` commit status
 skills/*/SKILL.md               → skills with triggering descriptions
 skills/index.yaml               → provider-routing schema (per skill_id: claude/codex path + status),
-                                  resolved by scripts/lib/skill_route.sh
+                                  resolved by hooks/scripts/lib/skill_route.sh
 agents/*.md                     → subagent definitions the skills spawn (deploy-safety-reviewer,
                                   design-scout, disposition-scout, docs-auditor,
                                   loop-worker, preflight-scout, proof-author,
