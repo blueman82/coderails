@@ -65,13 +65,10 @@ model release touches; the roles themselves are durable.
 | `default` | sonnet | TDD / mechanical / multi-file work; the fallback when uncertain (cost control) |
 | `frontier` | opus at `xhigh` effort (fable escalation — see [model-routing.md](model-routing.md)) | Design-judgement UI/architecture units; genuinely ambiguous investigations |
 
-**`frontier` resolves to opus, never automatically to fable** — escalating to fable needs a named
-capability reason in the stamp. **Effort is part of the stamp:** every `Model:` stamp names role
-AND effort (`frontier` → opus at `xhigh`; `default` → sonnet at `high`; `fast-mechanical` →
-haiku), and tuning effort is the first lever, model escalation the second. **Investigations get
-`frontier` FIRST**, not escalated-to — the one place `default`-first cost control does not apply.
-**Fallback valves live in the stamp, never improvised by a worker.** Full escalation rules, the
-effort table, and the inline-spawn sites at other phases: see [model-routing.md](model-routing.md).
+**Read [model-routing.md](model-routing.md) in full before writing any `Model:` stamp** — it has
+the escalation rule (`frontier` resolves to opus, never automatically to fable, without a named
+capability reason), the effort table (effort is part of every stamp, tuned before escalating the
+model), the investigations-get-`frontier`-first exception, and the fallback-valve discipline.
 
 **Record the assignment set once.** Append one `decisions_absorbed` entry covering
 every task's role assignment for this loop — `{phase: "2.8", decision: "<task id:
