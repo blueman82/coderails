@@ -42,7 +42,8 @@ result=$(jq --arg node "$node" '
      then ($joins[$node].inputs // [])
      else ($edges | map(select(.to == $node) | .from))
      end) as $preds
-  | ($preds | all($nodes[.].outcome // "" | IN("done","skipped")))
+  | (($nodes[$node].status // "pending") | IN("pending","ready"))
+    and ($preds | all($nodes[.].outcome // "" | IN("done","skipped")))
 ' "$path" 2>/dev/null)
 rc=$?
 
