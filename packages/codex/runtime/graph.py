@@ -9,6 +9,7 @@ import re
 import sys
 import tempfile
 import fcntl
+from concurrent.futures import ThreadPoolExecutor
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
@@ -356,6 +357,46 @@ def _propagate_blocks(graph: dict[str, Any]) -> None:
                 changed = True
 
 
+def _run_node(name: str, node: dict[str, Any], record: Any, cwd: str | None, catalog_root: Path | None) -> tuple[str, dict[str, Any], str]:
+    """Execute one ready node without touching shared graph state."""
+    metadata = record if isinstance(record, dict) else {}
+    result = {"provider": metadata.get("provider", "codex"), "skill_id": metadata.get("skill_id", ""), "implementation_path": metadata.get("implementation_path", "")}
+    error = "missing implementation mapping" if record is None else _metadata_error(record, catalog_root=catalog_root)
+    if error:
+        return name, {"status": "hard-stop", "outcome": "hard-stop", "evidence": [{"attempt": node["retry"]["attempts"], "outcome": "hard-stop", "output": error}]}, "hard-stop"
+    maximum = node["retry"].get("max", 5)
+    attempts = node["retry"].get("attempts", 0)
+    if not isinstance(maximum, int) or isinstance(maximum, bool) or not 0 <= maximum <= 5:
+        raise ValueError(f"node {name} has invalid retry.max")
+    evidence = []
+    outcome = "failed"
+    while attempts < maximum:
+        attempts += 1
+        try:
+            outcome, output = _invoke(record, cwd)
+        except Exception as error:  # external credentials/integrations fail closed here
+            outcome, output = "failed", f"dispatch error: {error}"
+        if outcome not in OUTCOMES:
+            outcome, output = "failed", f"invalid implementation outcome: {outcome}"
+        entry = {"attempt": attempts, "outcome": outcome, "output": output}
+        if metadata.get("adapter") == "codex-exec":
+            entry.update({"provider": "codex", "invocation": "codex exec", "mode": "live"})
+        if outcome == "done" and metadata.get("gate") and metadata.get("mode") != "fixture":
+            path = Path(metadata["artifact_path"])
+            if not path.is_absolute():
+                path = Path(metadata.get("cwd", cwd or Path.cwd())) / path
+            run = metadata["_run"]
+            entry.update({"gate": metadata["gate"], "provider": "codex", "artifact_path": str(path), "run_id": run["run_id"], "revision": run["revision"], "head": run["head"]})
+        evidence.append(entry)
+        if outcome in {"done", "skipped", "hard-stop"}:
+            break
+    if outcome in {"failed", "stale"}:
+        outcome = "hard-stop"
+        evidence.append({"attempt": attempts, "outcome": "hard-stop", "output": "retry limit exhausted"})
+    result.update({"status": outcome, "outcome": outcome, "evidence": evidence, "retry": {"attempts": attempts, "max": maximum}})
+    return name, result, outcome
+
+
 def execute(
     graph: dict[str, Any],
     implementations: Mapping[str, Any] | Callable[[str], str] | None = None,
@@ -383,55 +424,19 @@ def execute(
                 _evidence(node, node["retry"]["attempts"], "hard-stop", "blocked by unresolved predecessor or cycle")
             expected_revision = _persist(graph, state_path, persist, expected_revision)
             return graph
-        results: list[tuple[str, str]] = []
+        runnable = [name for name in wave if graph["nodes"][name].get("dispatch", True)]
+        results = []
+        with ThreadPoolExecutor(max_workers=max(1, len(runnable))) as pool:
+            futures = [pool.submit(_run_node, name, graph["nodes"][name], implementations.get(name, graph["nodes"][name].get("implementation_record")), cwd, catalog_root) for name in runnable]
+            for future in futures:
+                results.append(future.result())
         for name in wave:
-            node = graph["nodes"][name]
-            if not node.get("dispatch", True):
-                node.update(status="skipped", outcome="skipped")
-                _evidence(node, node["retry"]["attempts"], "skipped", "cross-cutting guard metadata; no standalone dispatch")
-                results.append((name, "skipped"))
-                continue
-            record = implementations.get(name, node.get("implementation_record"))
-            metadata = record if isinstance(record, dict) else {}
-            node["provider"] = metadata.get("provider", "codex")
-            node["skill_id"] = metadata.get("skill_id", "")
-            node["implementation_path"] = metadata.get("implementation_path", "")
-            error = "missing implementation mapping" if record is None else _metadata_error(record, catalog_root=catalog_root)
-            if error:
-                node.update(status="hard-stop", outcome="hard-stop")
-                _evidence(node, node["retry"]["attempts"], "hard-stop", error)
-                results.append((name, "hard-stop"))
-                continue
-            maximum = node["retry"].get("max", 5)
-            attempts = node["retry"].get("attempts", 0)
-            if not isinstance(maximum, int) or isinstance(maximum, bool) or not 0 <= maximum <= 5:
-                raise ValueError(f"node {name} has invalid retry.max")
-            outcome = "failed"
-            while attempts < maximum:
-                attempts += 1
-                try:
-                    outcome, output = _invoke(record, cwd)
-                except Exception as error:  # external credentials/integrations fail closed here
-                    outcome, output = "failed", f"dispatch error: {error}"
-                if outcome not in OUTCOMES:
-                    outcome, output = "failed", f"invalid implementation outcome: {outcome}"
-                _evidence(node, attempts, outcome, output)
-                if metadata.get("adapter") == "codex-exec":
-                    node["evidence"][-1].update({"provider": "codex", "invocation": "codex exec", "mode": "live"})
-                if outcome == "done" and metadata.get("gate") and metadata.get("mode") != "fixture":
-                    path = Path(metadata["artifact_path"])
-                    if not path.is_absolute():
-                        path = Path(metadata.get("cwd", cwd or Path.cwd())) / path
-                    run = metadata["_run"]
-                    node["evidence"][-1].update({"gate": metadata["gate"], "provider": "codex", "artifact_path": str(path), "run_id": run["run_id"], "revision": run["revision"], "head": run["head"]})
-                if outcome in {"done", "skipped", "hard-stop"}:
-                    break
-            if outcome in {"failed", "stale"}:
-                outcome = "hard-stop"
-                _evidence(node, attempts, "hard-stop", "retry limit exhausted")
-            results.append((name, outcome))
-        for name, outcome in results:
-            graph["nodes"][name].update(status=outcome, outcome=outcome)
+            if not graph["nodes"][name].get("dispatch", True):
+                graph["nodes"][name].update(status="skipped", outcome="skipped")
+                _evidence(graph["nodes"][name], graph["nodes"][name]["retry"]["attempts"], "skipped", "cross-cutting guard metadata; no standalone dispatch")
+            else:
+                _, update, _ = next(item for item in results if item[0] == name)
+                graph["nodes"][name].update(update)
         _propagate_blocks(graph)
         expected_revision = _persist(graph, state_path, persist, expected_revision)
 

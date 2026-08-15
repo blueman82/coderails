@@ -11,3 +11,8 @@ validator as required.
 Live node records use the `codex-exec` adapter, which invokes the authenticated
 host CLI as `codex exec --json --ephemeral -C <worktree> -` with the node prompt
 on stdin. Fixture records continue to use explicit test commands.
+
+Run the host-authenticated acceptance path with
+`python3 codex/tests/live_acceptance.py --state /tmp/codex-live.json`; rerun
+with the same state to verify resume. `--scenario failure`, `missing`, and
+`refusal` exercise fail-closed and completion-gate boundaries.
