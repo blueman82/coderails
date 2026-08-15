@@ -82,7 +82,13 @@ repo writes it to `progress.json` today. Like every value other than `done`/`ski
 terminal-success, so it cannot satisfy a dependent edge or a `mode:"all"` join's readiness (see
 `hooks/scripts/lib/graph_readiness.sh`, which treats it generically as non-terminal). Per
 `SKILL.md`'s Phase 4 ("idle is not failure"), any future producer of this value must not treat a
-bare idle signal as sufficient evidence — it must be paired with an artifact check. `retry.attempts`
+bare idle signal as sufficient evidence — it must be paired with an artifact check.
+`hooks/scripts/lib/graph_executor.sh` enforces this structurally: any node whose merged `status`
+OR `outcome` is `stale` must carry a sibling `stale_check` field —
+`{"checked":true,"method":"<string>","result":"<string>"}`, both strings non-empty — in the SAME
+wave-result, or the write is refused (fail-closed, inside the same locked read-modify-write as the
+rest of graph_executor's contract checks). `method` names what artifact check was run (e.g. `"gh pr
+view"`, `"git status"`); `result` records what it found. `retry.attempts`
 starts at zero and may not exceed
 `retry.max`, which is an integer from 0 through 5. A retry increments `attempts` only for a
 distinct diagnosed attempt; once the bound is reached, the node terminates as `hard-stop`.
