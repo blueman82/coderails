@@ -9,8 +9,9 @@ ID, loads its instruction, and invokes the JSON graph runner or lifecycle
 validator as required.
 
 Live node records use the `codex-exec` adapter, which invokes the authenticated
-host CLI as `codex exec --json --ephemeral -C <worktree> -` with the node prompt
-on stdin. Fixture records continue to use explicit test commands.
+host CLI as `codex exec --json --ephemeral --ignore-user-config -C <worktree> -`
+with the node prompt on stdin. Fixture records continue to use explicit test
+commands.
 
 Run the host-authenticated acceptance path with
 `python3 codex/tests/live_acceptance.py --state /tmp/codex-live.json`; rerun

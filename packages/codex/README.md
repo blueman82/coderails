@@ -24,5 +24,5 @@ Retries are bounded by each node's `retry.max` (0 through 5); exhausted work is
 `hard-stop`, never silently successful.
 
 Live node records use the package-local `codex-exec` adapter and the host's
-authenticated `codex exec --json --ephemeral -C <worktree> -` CLI primitive;
-fixture records remain explicit test commands.
+authenticated `codex exec --json --ephemeral --ignore-user-config -C <worktree> -`
+CLI primitive; fixture records remain explicit test commands.

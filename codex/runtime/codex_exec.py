@@ -14,7 +14,7 @@ def invoke(prompt: str, cwd: str | None = None, *, runner: Callable[..., subproc
         raise ValueError("Codex exec prompt must be non-empty")
     if cwd is None:
         raise ValueError("Codex exec cwd is required")
-    command = ["codex", "exec", "--json", "--ephemeral", "-C", cwd, "-"]
+    command = ["codex", "exec", "--json", "--ephemeral", "--ignore-user-config", "-C", cwd, "-"]
     result = runner(command, cwd=cwd, input=prompt, text=True, capture_output=True, check=False)
     output = (result.stdout or "") + (result.stderr or "")
     if not output.strip():

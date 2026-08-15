@@ -38,7 +38,7 @@ class GraphRuntimeTests(unittest.TestCase):
         outcome, output = invoke("run node", "/tmp/worktree", runner=runner)
         self.assertEqual(outcome, "done")
         self.assertIn("turn.completed", output)
-        self.assertEqual(calls[0][0], ["codex", "exec", "--json", "--ephemeral", "-C", "/tmp/worktree", "-"])
+        self.assertEqual(calls[0][0], ["codex", "exec", "--json", "--ephemeral", "--ignore-user-config", "-C", "/tmp/worktree", "-"])
         self.assertEqual(calls[0][1]["input"], "run node")
 
     def test_codex_exec_adapter_rejects_empty_and_provider_error_output(self) -> None:
