@@ -1,7 +1,7 @@
 #!/bin/bash
 # graph_readiness.sh — pure read-only readiness query for progress.json's
 # durable execution graph (see skills/agentic-loop/loop-state.md's `graph`
-# field docs and SKILL.md's "Execution graph" section).
+# field docs and skills/agentic-loop/execution-graph.md's node table).
 #
 # Usage: graph_readiness.sh <path-to-progress.json> <node-id>
 # Prints exactly "ready" or "blocked" to stdout (nothing else on stdout).
