@@ -27,12 +27,17 @@
 #     (after every dispatched node in the wave has reported back — never
 #     partial) and applies bounded-retry/hard-stop bookkeeping before
 #     calling graph_executor_apply_wave exactly once, same one-write-per-
-#     wave contract graph_executor.sh already guarantees. A reported
-#     "failed" outcome increments retry.attempts and is downgraded to
-#     status/outcome "running" (i.e. still in play) as long as attempts
-#     stays below retry.max; once attempts reaches max the node is written
-#     as "hard-stop" instead of "failed" so a blocked graph is visible
-#     without another wave being computed against it.
+#     wave contract graph_executor.sh already guarantees. Each result must
+#     name its outcome via an "outcome" key or, failing that, a "status"
+#     key — a result naming NEITHER aborts the whole wave rather than
+#     being silently treated as a reported failure (a bare "done" or
+#     "stale" result recorded only via "status" must never be mistaken
+#     for a retry). A reported "failed" outcome increments retry.attempts
+#     (capped at retry.max) and is downgraded to status/outcome "running"
+#     (i.e. still in play) while attempts stays below retry.max; once
+#     attempts reaches max the node is written as "hard-stop" instead of
+#     "failed" so a blocked graph is visible without another wave being
+#     computed against it.
 
 GRAPH_DISPATCH_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=./graph_executor.sh
@@ -168,10 +173,12 @@ graph_dispatch_plan() {
 }
 
 # graph_dispatch_record <progress.json> <wave-results JSON>
-# wave-results shape: {"<node_id>": {"outcome":"done"|"skipped"|"failed",
-#   "provider":"claude", "skill_id":..., "implementation":...,
+# wave-results shape: {"<node_id>": {"outcome":"done"|"skipped"|"failed"|
+#   "stale" (accepts "status" as a fallback key when "outcome" is
+#   absent — at least one of the two is REQUIRED, or the whole wave is
+#   rejected), "provider":"claude", "skill_id":..., "implementation":...,
 #   "evidence":... (optional, e.g. PR number/path), "stale_check":...
-#   (only when outcome is "stale")}, ...}, plus optional sibling
+#   (only when outcome/status is "stale")}, ...}, plus optional sibling
 # "decisions_absorbed" — same envelope graph_executor_apply_wave already
 # accepts, passed straight through for that field.
 #
@@ -192,37 +199,53 @@ graph_dispatch_record() {
   # Needs BOTH the wave results and progress.json's current retry state
   # (to increment attempts from the right baseline on resume) — one jq
   # pass reading progress.json, with the wave passed in as --argjson.
+  #
+  # $reported: a result must name its outcome via `outcome` or, failing
+  # that, `status` (both are accepted on input — see this function's own
+  # header) — never silently defaulted to "failed". A result naming
+  # NEITHER aborts the whole wave via error() (same fail-closed posture
+  # graph_executor_apply_wave already uses for its own contract
+  # violations) rather than mis-recording a real done/skipped/stale
+  # result as a phantom retry, which would also defeat the stale_check
+  # gate below it (a "status":"stale" result with no "outcome" would
+  # otherwise be silently rewritten to "running" before ever reaching
+  # graph_executor_apply_wave's stale_check enforcement).
+  #
+  # $attempts is capped at $max via `min` — an uncapped increment can
+  # exceed $max (e.g. a caller re-reporting "failed" against an
+  # already-exhausted node, or a legitimate retry.max:0 seed failing
+  # once) and graph_executor_apply_wave's own attempts<=max contract
+  # would then abort the ENTIRE wave inside the lock, discarding every
+  # other node's result in it — capping here keeps that abort scoped to
+  # a genuine contract violation, not a same-wave side effect of one
+  # node's own bookkeeping.
   local folded
   folded=$(jq -c --argjson wave "$wave_json" '
     (.graph.nodes // {}) as $nodes
     | ($wave | del(.decisions_absorbed)) as $results
-    | {
-        decisions_absorbed: ($wave.decisions_absorbed // []),
-        nodes: (
-          $results | keys | reduce .[] as $id ({}; . + {
-            ($id): (
-              (($nodes[$id].retry.attempts // 0)) as $prev_attempts
-              | (($nodes[$id].retry.max // 5)) as $max
-              | ($results[$id]) as $r
-              | ($r.outcome // "failed") as $reported
-              | (if $reported == "failed" then ($prev_attempts + 1) else $prev_attempts end) as $attempts
-              | (if $reported == "failed" and $attempts >= $max then "hard-stop"
-                 elif $reported == "failed" then "running"
-                 else $reported end) as $final
-              | $r + {
-                  status: $final,
-                  outcome: $final,
-                  retry: {attempts: $attempts, max: $max}
-                }
-            )
-          })
+    | (reduce ($results | keys[]) as $id ({}; . + {
+        ($id): (
+          (($nodes[$id].retry.attempts // 0)) as $prev_attempts
+          | (($nodes[$id].retry.max // 5)) as $max
+          | ($results[$id]) as $r
+          | ($r.outcome // $r.status // null) as $reported
+          | (if $reported == null
+             then error("graph_dispatch: node \($id) reported neither outcome nor status")
+             else $reported end) as $reported
+          | (if $reported == "failed" then ([$prev_attempts + 1, $max] | min) else $prev_attempts end) as $attempts
+          | (if $reported == "failed" and $attempts >= $max then "hard-stop"
+             elif $reported == "failed" then "running"
+             else $reported end) as $final
+          | $r + {
+              status: $final,
+              outcome: $final,
+              retry: {attempts: $attempts, max: $max}
+            }
         )
-      }
+      }))
+      + {decisions_absorbed: ($wave.decisions_absorbed // [])}
   ' "$progress")
   [ -n "$folded" ] || return 1
 
-  local final_wave
-  final_wave=$(jq -c '.nodes + {decisions_absorbed: .decisions_absorbed}' <<<"$folded")
-
-  graph_executor_apply_wave "$progress" "$final_wave"
+  graph_executor_apply_wave "$progress" "$folded"
 }

@@ -154,4 +154,72 @@ unresolved9=$(printf '%s' "$out" | jq -r 'select(.node_id=="J2") | .unresolved')
   && ok "plan reports a ready join node as kind:join, not unresolved" \
   || fail "plan reports join node as kind:join" "kind=$kind9 unresolved=$unresolved9"
 
+# --- 10: record — a "done" result reported via "status" only (no
+# "outcome" key) must land as done, never silently miscast as a failed
+# retry (regression: review found `$r.outcome // "failed"` treated a
+# missing outcome key as a reported failure) ---
+jq -n '{ graph: { nodes: { A:{status:"running",outcome:"running",retry:{attempts:0,max:5}} }, edges: [], joins: {} } }' > "$TMP/f10.json"
+graph_dispatch_record "$TMP/f10.json" '{"A":{"status":"done","provider":"claude","evidence":"PR #1"}}'
+rc10=$?
+status10=$(jq -r '.graph.nodes.A.status' "$TMP/f10.json")
+attempts10=$(jq -r '.graph.nodes.A.retry.attempts' "$TMP/f10.json")
+[ "$rc10" -eq 0 ] && [ "$status10" = "done" ] && [ "$attempts10" = "0" ] \
+  && ok "record: status-only done result lands as done, not miscast as failed retry" \
+  || fail "record: status-only done result" "rc=$rc10 status=$status10 attempts=$attempts10"
+
+# --- 11: record — a "stale" result reported via "status" only still
+# requires (and is gated by) stale_check, same as an "outcome":"stale"
+# result (regression: the missing-outcome default previously rewrote
+# this to "running" before graph_executor_apply_wave's stale_check
+# guard ever saw it) ---
+jq -n '{ graph: { nodes: { A:{status:"running",outcome:"running",retry:{attempts:0,max:5}} }, edges: [], joins: {} } }' > "$TMP/f11.json"
+graph_dispatch_record "$TMP/f11.json" '{"A":{"status":"stale"}}'
+rc11a=$?
+[ "$rc11a" -ne 0 ] && ok "record: status-only stale with no stale_check is refused (not silently rewritten to running)" \
+  || fail "record: status-only bare stale refused" "rc=$rc11a"
+
+graph_dispatch_record "$TMP/f11.json" '{"A":{"status":"stale","stale_check":{"checked":true,"method":"gh pr view","result":"no PR found"}}}'
+rc11b=$?
+status11b=$(jq -r '.graph.nodes.A.status' "$TMP/f11.json")
+[ "$rc11b" -eq 0 ] && [ "$status11b" = "stale" ] \
+  && ok "record: status-only stale WITH valid stale_check succeeds" \
+  || fail "record: status-only stale with valid stale_check" "rc=$rc11b status=$status11b"
+
+# --- 12: record — a result naming NEITHER outcome nor status aborts the
+# wave rather than being silently treated as failed ---
+jq -n '{ graph: { nodes: { A:{status:"pending",outcome:"pending",retry:{attempts:0,max:5}} }, edges: [], joins: {} } }' > "$TMP/f12.json"
+graph_dispatch_record "$TMP/f12.json" '{"A":{"provider":"claude"}}'
+rc12=$?
+status12=$(jq -r '.graph.nodes.A.status' "$TMP/f12.json")
+[ "$rc12" -ne 0 ] && [ "$status12" = "pending" ] \
+  && ok "record: result naming neither outcome nor status is refused, node unchanged" \
+  || fail "record: neither outcome nor status refused" "rc=$rc12 status=$status12"
+
+# --- 13: record — attempts is capped at max, so a wave containing a
+# node re-reporting failure past its bound does NOT discard a sibling
+# node's real result in the same wave (regression: uncapped attempts
+# could exceed max, tripping graph_executor_apply_wave's attempts<=max
+# contract check INSIDE the lock and rejecting the entire wave) ---
+jq -n '{ graph: { nodes: { A:{status:"running",outcome:"running",retry:{attempts:2,max:2}}, B:{status:"pending",outcome:"pending",retry:{attempts:0,max:5}} }, edges: [], joins: {} } }' > "$TMP/f13.json"
+graph_dispatch_record "$TMP/f13.json" '{"A":{"outcome":"failed"},"B":{"outcome":"done"}}'
+rc13=$?
+statusA13=$(jq -r '.graph.nodes.A.status' "$TMP/f13.json")
+attemptsA13=$(jq -r '.graph.nodes.A.retry.attempts' "$TMP/f13.json")
+statusB13=$(jq -r '.graph.nodes.B.status' "$TMP/f13.json")
+[ "$rc13" -eq 0 ] && [ "$statusA13" = "hard-stop" ] && [ "$attemptsA13" = "2" ] && [ "$statusB13" = "done" ] \
+  && ok "record: attempts capped at max, sibling node B's done result survives A re-failing past its bound" \
+  || fail "record: attempts capped, sibling survives" "rc=$rc13 A.status=$statusA13 A.attempts=$attemptsA13 B.status=$statusB13"
+
+# --- 14: record — retry.max:0 (a legitimate "no retries" seed) is
+# handled correctly on first failure, not treated as an overflow that
+# discards a sibling node ---
+jq -n '{ graph: { nodes: { A:{status:"pending",outcome:"pending",retry:{attempts:0,max:0}}, B:{status:"pending",outcome:"pending",retry:{attempts:0,max:5}} }, edges: [], joins: {} } }' > "$TMP/f14.json"
+graph_dispatch_record "$TMP/f14.json" '{"A":{"outcome":"failed"},"B":{"outcome":"done"}}'
+rc14=$?
+statusA14=$(jq -r '.graph.nodes.A.status' "$TMP/f14.json")
+statusB14=$(jq -r '.graph.nodes.B.status' "$TMP/f14.json")
+[ "$rc14" -eq 0 ] && [ "$statusA14" = "hard-stop" ] && [ "$statusB14" = "done" ] \
+  && ok "record: retry.max:0 node hits hard-stop on first failure, sibling B unaffected" \
+  || fail "record: retry.max:0 handled correctly" "rc=$rc14 A.status=$statusA14 B.status=$statusB14"
+
 [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails)"; exit 1; }
