@@ -5,6 +5,11 @@
 # of at loop completion. Helper conventions copied verbatim (in spirit) from
 # loop_state_guard_evals.test.sh, per this repo's "bash test files are
 # self-contained" pattern.
+#
+# work_units is a PLAN-TIME roster (loop-state.md's Fields table: entries
+# exist with status "pending" BEFORE any dispatch) — fixtures below use
+# "pending" for pre-dispatch state, never "done" (a post-dispatch status a
+# pre-dispatch fixture cannot honestly claim).
 set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"
 GUARD="$HERE/../loop_dispatch_guard.sh"
@@ -27,13 +32,13 @@ SLUG="-work-project"
 file_dir() { printf '%s/%s/%s' "$CLAUDE_AGENTIC_LOOP_DIR" "$SLUG" "$1"; }
 file_path() { printf '%s/progress.json' "$(file_dir "$1")"; }
 
-# write_file: session_id completed_marker [work_units_json]
+# write_file: session_id [work_units_json] [status]
 write_file() {
-  local session="$1" marker="$2" wu="${3:-{\}}"
+  local session="$1" wu="${2:-{\}}" status="${3:-in-progress}"
   local dir; dir=$(file_dir "$session")
   mkdir -p "$dir"
-  jq -n --arg session "$session" --argjson marker "$marker" --argjson wu "$wu" \
-    '{schema_version:1, status:"in-progress", session_id:$session, completed_marker:$marker, work_units:$wu}' \
+  jq -n --arg session "$session" --arg status "$status" --argjson wu "$wu" \
+    '{schema_version:1, status:$status, session_id:$session, completed_marker:0, work_units:$wu}' \
     > "$dir/progress.json"
 }
 
@@ -50,13 +55,19 @@ is_denied() { # stdout_json -> 0 if permissionDecision=deny, 1 otherwise
   printf '%s' "$1" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null 2>&1
 }
 
-WU2='{"wu1":{"status":"done"},"wu2":{"status":"done"}}'
-WU3='{"wu1":{"status":"done"},"wu2":{"status":"done"},"wu3":{"status":"done"}}'
+WU1_PENDING='{"wu1":{"status":"pending"}}'
+WU2_PENDING='{"wu1":{"status":"pending"},"wu2":{"status":"pending"}}'
+WU3_PENDING='{"wu1":{"status":"pending"},"wu2":{"status":"pending"},"wu3":{"status":"pending"}}'
+WU5_PENDING='{"wu1":{"status":"pending"},"wu2":{"status":"pending"},"wu3":{"status":"pending"},"wu4":{"status":"pending"},"wu5":{"status":"pending"}}'
 
 # ── Non-Agent tool call -> always allow, no matter the state ────────────────
-reset; write_file S1 0 "$WU3"
-out=$(echo '{"tool_name":"Bash","tool_input":{"command":"ls"},"session_id":"S1","cwd":"'"$CWD"'"}' | bash "$GUARD")
-check "non-Agent tool call -> allow (empty stdout)" "" "$out"
+# Carries a STRAY subagent_type key on a Bash call, so this exercises the
+# tool_name=="Agent" filter specifically — deleting that filter would let a
+# non-Agent call with this key fall through to the roster check below and
+# wrongly deny, which this assertion would then catch.
+reset; write_file S1 "$WU3_PENDING"
+out=$(echo '{"tool_name":"Bash","tool_input":{"command":"ls","subagent_type":"coderails:loop-worker"},"session_id":"S1","cwd":"'"$CWD"'"}' | bash "$GUARD")
+check "non-Agent tool call (stray subagent_type key) -> allow (empty stdout)" "" "$out"
 
 # ── No progress.json at all -> allow (nothing registered yet) ───────────────
 reset
@@ -64,66 +75,93 @@ out=$(run "$(payload S1 coderails:loop-worker)")
 check "no progress.json -> allow" "" "$out"
 
 # ── Non-implementation-unit subagent_type -> always allow, regardless of count
-reset; write_file S1 0 "$WU3"
+reset; write_file S1 "$WU3_PENDING"
 out=$(run "$(payload S1 coderails:preflight-scout)")
-check "non-implementation-unit subagent_type, 3 prior units, no evals.json -> allow" "" "$out"
-[ -z "$out" ]
-check "non-implementation-unit subagent_type is not denied" 0 $?
+check "non-implementation-unit subagent_type, 3-unit roster, no evals.json -> allow" "" "$out"
 
-# ── Below threshold: 1 prior unit -> next dispatch is ordinal #2 -> allow ───
-reset; write_file S1 0 '{"wu1":{"status":"done"}}'
+# ── Session mismatch -> allow (evals/roster of a foreign session's loop must
+# never be read against this session's dispatch) ────────────────────────────
+reset; write_file OTHER "$WU3_PENDING"
 out=$(run "$(payload S1 coderails:loop-worker)")
-check "1 prior work_unit (dispatch ordinal #2), no evals.json -> allow (below threshold)" "" "$out"
+check "session mismatch (progress.json owned by OTHER, dispatch is S1) -> allow" "" "$out"
 
-# ── At/above threshold: 2 prior units -> this dispatch is #3 -> no evals.json -> BLOCK
-reset; write_file S1 0 "$WU2"
+# ── Below threshold: 1-unit roster, all pending, no evals.json -> allow ─────
+reset; write_file S1 "$WU1_PENDING"
+out=$(run "$(payload S1 coderails:loop-worker)")
+check "1-unit roster (all pending), no evals.json -> allow (below threshold)" "" "$out"
+
+# ── Below threshold: 2-unit roster, all pending, no evals.json -> allow ─────
+reset; write_file S1 "$WU2_PENDING"
+out=$(run "$(payload S1 coderails:loop-worker)")
+check "2-unit roster (all pending), no evals.json -> allow (below threshold)" "" "$out"
+
+# ── At threshold: 3-unit roster, ALL PENDING (nothing dispatched yet), no
+# evals.json -> BLOCK on the FIRST implementation-unit dispatch. This is the
+# core regression case: roster size alone (not a dispatch ordinal) decides
+# whether Phase 2.7 applies, so the very first dispatch of a >=3-unit loop is
+# gated exactly like its third. ─────────────────────────────────────────────
+reset; write_file S1 "$WU3_PENDING"
 out=$(run "$(payload S1 coderails:loop-worker)")
 is_denied "$out"
-check "2 prior work_units (dispatch ordinal #3), no evals.json -> BLOCK" 0 $?
+check "3-unit roster ALL PENDING (first dispatch), no evals.json -> BLOCK" 0 $?
 case "$out" in
   *"evals.json"*"Phase 2.7c"*) : ;;
   *) fails=$((fails+1)); printf 'FAIL - deny reason missing evals.json/Phase 2.7c mention: %s\n' "$out" ;;
 esac
 
 # ── At threshold, evals.json present, GO, justified, STAMPED -> allow ───────
-reset; write_file S1 0 "$WU2"
-jq -n '{scope:"loop", verification_level:1, verification_justification:"2 work-units, no irreversible surface", head_sha:"deadbeef", evals:[{id:"e1",priority:"P0",mode:"scripted",status:"pass",cmd:"run-a",negative_control:"run-a-broken",evidence:"log"}]}' > "$(file_dir S1)/evals.json"
+reset; write_file S1 "$WU3_PENDING"
+jq -n '{scope:"loop", verification_level:1, verification_justification:"3 work-units, no irreversible surface", head_sha:"deadbeef", evals:[{id:"e1",priority:"P0",mode:"scripted",status:"pass",cmd:"run-a",negative_control:"run-a-broken",evidence:"log"}]}' > "$(file_dir S1)/evals.json"
 stamp "$(file_dir S1)/evals.json"
 out=$(run "$(payload S1 coderails:loop-worker)")
-check "2 prior units, GO evals justified+stamped -> allow" "" "$out"
+check "3-unit roster, GO evals justified+stamped -> allow" "" "$out"
 
 # ── At threshold, evals.json present, VERIFICATION_LEVEL0, justified, STAMPED -> allow
-reset; write_file S1 0 "$WU2"
+reset; write_file S1 "$WU3_PENDING"
 jq -n '{scope:"loop", verification_level:0, verification_justification:"docs-only loop, no runtime behaviour", head_sha:"deadbeef", evals:[]}' > "$(file_dir S1)/evals.json"
 stamp "$(file_dir S1)/evals.json"
 out=$(run "$(payload S1 coderails:loop-worker)")
-check "2 prior units, VERIFICATION_LEVEL0 justified+stamped -> allow" "" "$out"
+check "3-unit roster, VERIFICATION_LEVEL0 justified+stamped -> allow" "" "$out"
 
 # ── At threshold, evals.json NO-GO -> BLOCK ─────────────────────────────────
-reset; write_file S1 0 "$WU2"
-jq -n '{scope:"loop", result:"NO-GO", verification_level:1, verification_justification:"2 work-units, no irreversible surface"}' > "$(file_dir S1)/evals.json"
+reset; write_file S1 "$WU3_PENDING"
+jq -n '{scope:"loop", result:"NO-GO", verification_level:1, verification_justification:"3 work-units, no irreversible surface"}' > "$(file_dir S1)/evals.json"
 out=$(run "$(payload S1 coderails:loop-worker)")
 is_denied "$out"
-check "2 prior units, NO-GO evals -> BLOCK" 0 $?
+check "3-unit roster, NO-GO evals -> BLOCK" 0 $?
 
 # ── At threshold, evals.json GO but UNJUSTIFIED -> BLOCK ────────────────────
-reset; write_file S1 0 "$WU2"
+reset; write_file S1 "$WU3_PENDING"
 jq -n '{scope:"loop", result:"GO", verification_level:1, verification_justification:""}' > "$(file_dir S1)/evals.json"
 out=$(run "$(payload S1 coderails:loop-worker)")
 is_denied "$out"
-check "2 prior units, GO but unjustified evals -> BLOCK" 0 $?
+check "3-unit roster, GO but unjustified evals -> BLOCK" 0 $?
 
 # ── At threshold, evals.json hand-written GO, never stamped -> BLOCK (UNSTAMPED)
-reset; write_file S1 0 "$WU2"
+reset; write_file S1 "$WU3_PENDING"
 jq -n '{scope:"loop", result:"GO", verification_level:1, verification_justification:"hand-written, never graded"}' > "$(file_dir S1)/evals.json"
 out=$(run "$(payload S1 coderails:loop-worker)")
 is_denied "$out"
-check "2 prior units, hand-written GO never stamped -> BLOCK (UNSTAMPED)" 0 $?
+check "3-unit roster, hand-written GO never stamped -> BLOCK (UNSTAMPED)" 0 $?
 
-# ── Well above threshold: 5 prior units, no evals.json -> BLOCK ─────────────
-reset; write_file S1 0 '{"wu1":{"status":"done"},"wu2":{"status":"done"},"wu3":{"status":"done"},"wu4":{"status":"done"},"wu5":{"status":"done"}}'
+# ── Well above threshold: 5-unit roster, all pending, no evals.json -> BLOCK
+reset; write_file S1 "$WU5_PENDING"
 out=$(run "$(payload S1 coderails:loop-worker)")
 is_denied "$out"
-check "5 prior work_units, no evals.json -> BLOCK" 0 $?
+check "5-unit roster (all pending), no evals.json -> BLOCK" 0 $?
+
+# ── Documented ceiling (Blocker 2, disclosed not closed): a stale evals.json
+# left over from a PRIOR loop, with progress.json now RE-ARMED for a NEW loop
+# (status back to in-progress post-Phase-0, same session, same path) still
+# satisfies the gate. This is a KNOWN, DISCLOSED gap (see header) — this test
+# documents the gap exists rather than asserting it is closed, so a future
+# fix that removes the gap doesn't silently go unnoticed (this assertion will
+# then need updating to expect BLOCK, which is the intended trigger to revisit
+# it).
+reset; write_file S1 "$WU3_PENDING"
+jq -n '{scope:"loop", verification_level:1, verification_justification:"prior loop, 3 work-units", head_sha:"deadbeef", evals:[{id:"e1",priority:"P0",mode:"scripted",status:"pass",cmd:"run-a",negative_control:"run-a-broken",evidence:"log"}]}' > "$(file_dir S1)/evals.json"
+stamp "$(file_dir S1)/evals.json"
+out=$(run "$(payload S1 coderails:loop-worker)")
+check "KNOWN GAP (disclosed, not closed): stale same-session evals.json still satisfies a re-armed loop's dispatch -> allow" "" "$out"
 
 [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails)"; exit 1; }
