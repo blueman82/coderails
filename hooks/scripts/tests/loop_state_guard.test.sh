@@ -595,4 +595,63 @@ check "grace: compliant sequence, first run (no stub yet) -> block" 2 "$(run x "
 write_file in-progress S1 0
 check "grace: compliant sequence, stub now written -> allow via present+owned (arming intact)" 0 "$(run x "$(payload "$T" S1)")"
 
+# =====================================================================
+# als_mark_complete — atomically stamps status:"complete" AND
+# completed_marker together, so a completed loop never false-positives
+# loop_state_guard's stale_complete_rearmed block on a later turn (the bug:
+# nothing ever wrote completed_marker, so it defaulted to 0 forever and any
+# invocation count > 0 after completion looked like a rearm).
+# =====================================================================
+
+# als_mark_complete resolves its transcript via the SAME
+# CLAUDE_PROJECTS_DIR/*/<session_id>.jsonl glob loop_cost.sh's
+# dc_mine_token_usage uses — build that layout under a scratch projects dir
+# rather than the real transcript path passed to the guard above (which
+# lives wherever the test fixture put it, not under a projects dir).
+PROJECTS_DIR="$TMP/projects"
+mk_projects_transcript() { # session_id n_invocations -> path (also the glob target)
+  local sid="$1" n="$2" proj="$PROJECTS_DIR/proj1" out
+  mkdir -p "$proj"
+  out="$proj/$sid.jsonl"
+  : > "$out"
+  local i=0
+  while [ "$i" -lt "$n" ]; do
+    printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Skill","input":{"skill":"coderails:agentic-loop"}}]}}' >> "$out"
+    i=$((i+1))
+  done
+  printf '%s' "$out"
+}
+
+# (1) als_mark_complete stamps completed_marker to the LIVE invocation count
+# (not the pre-existing marker value), and status to "complete", in one
+# write.
+reset; rm -rf "$PROJECTS_DIR"
+write_file in-progress MC1 0
+mc_t=$(mk_projects_transcript MC1 3)
+CLAUDE_PROJECTS_DIR="$PROJECTS_DIR" call_lib_fn als_mark_complete "$CWD" MC1 >/dev/null
+mc_path=$(file_path MC1)
+check "als_mark_complete: status -> complete" "complete" "$(jq -r '.status' "$mc_path" 2>/dev/null)"
+check "als_mark_complete: completed_marker -> live invocation count (3)" "3" "$(jq -r '.completed_marker' "$mc_path" 2>/dev/null)"
+
+# (2) A file stamped via als_mark_complete does NOT trip loop_state_guard's
+# stale_complete_rearmed block on the very next turn against the SAME
+# transcript (guard behaviour is otherwise correct: a marker left at its old
+# value, e.g. 0, WOULD correctly block here — that's als_gate_loop_complete
+# working as designed on an under-stamped file, not the bug under test).
+check "als_mark_complete: guard allows the next stop (no stale_complete_rearmed)" 0 \
+  "$(run x "$(payload "$mc_t" MC1)")"
+check "als_mark_complete: discipline log carries no stale_complete_rearmed for MC1" 0 \
+  "$(count 'session=MC1.*reason=stale_complete_rearmed' "$CLAUDE_DISCIPLINE_LOG")"
+
+# (3) Fail-closed: no transcript resolvable under CLAUDE_PROJECTS_DIR for
+# this session -> als_mark_complete returns non-zero and leaves the file
+# untouched (never fabricates completed_marker: 0 to "succeed").
+reset; rm -rf "$PROJECTS_DIR"
+write_file in-progress MC2 0
+mkdir -p "$PROJECTS_DIR/proj1"   # dir exists, but no MC2.jsonl inside it
+mc2_rc=$(CLAUDE_PROJECTS_DIR="$PROJECTS_DIR" call_lib_fn als_mark_complete "$CWD" MC2 >/dev/null 2>&1; echo $?)
+check "als_mark_complete: no resolvable transcript -> non-zero exit (fail closed)" 1 "$mc2_rc"
+check "als_mark_complete: no resolvable transcript -> status left unchanged" "in-progress" \
+  "$(jq -r '.status' "$(file_path MC2)" 2>/dev/null)"
+
 [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails)"; exit 1; }
