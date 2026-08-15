@@ -6,6 +6,28 @@ from __future__ import annotations
 import json
 import sys
 
+REQUIRED_GATES = ("review", "eval", "proof", "integrity", "wiki", "teardown")
+GATE_RESULTS = {"review": ("review_status", "pass"), "eval": ("result", "GO"), "proof": ("result", "pass"), "integrity": ("integrity", "pass"), "wiki": ("result", "pass"), "teardown": ("result", "pass")}
+
+
+def _gate_marker_valid(kind: str, value: object) -> bool:
+    if not isinstance(value, dict) or value.get("outcome") not in {"done", "skipped"}:
+        return False
+    field, expected = GATE_RESULTS[kind]
+    for item in value.get("evidence", []):
+        if not isinstance(item, dict) or item.get("gate") != kind or item.get("provider") != "codex":
+            continue
+        path = item.get("artifact_path")
+        if not isinstance(path, str) or not path.strip():
+            continue
+        try:
+            artifact = json.loads(open(path, encoding="utf-8").read())
+        except (OSError, json.JSONDecodeError):
+            continue
+        if isinstance(artifact, dict) and artifact.get("schema_version") == 1 and artifact.get("gate") == kind and artifact.get("provider") == "codex" and all(artifact.get(key) == item.get(key) for key in ("run_id", "revision", "head")) and artifact.get(field) == expected:
+            return True
+    return False
+
 
 def validate(event: dict) -> tuple[bool, str]:
     if not isinstance(event, dict) or not isinstance(event.get("event"), str):
@@ -23,8 +45,21 @@ def validate(event: dict) -> tuple[bool, str]:
             for node in nodes.values()
         ):
             return False, "complete requires every graph node to be terminal-success"
-        if not isinstance(state.get("retro"), dict):
-            return False, "complete requires retro object"
+        if state.get("mode") == "fixture" or state.get("status") == "fixture":
+            return False, "fixture state cannot be complete"
+        gates = state.get("gates")
+        if not isinstance(gates, dict):
+            return False, "complete requires gate evidence"
+        for gate in REQUIRED_GATES:
+            evidence = gates.get(gate)
+            if not _gate_marker_valid(gate, evidence):
+                return False, f"complete requires evidence for gate {gate}"
+        teardown = state.get("teardown")
+        if not isinstance(teardown, dict) or teardown.get("provider") != "codex" or not teardown.get("evidence"):
+            return False, "complete requires Codex teardown evidence"
+        retro = state.get("retro")
+        if not isinstance(retro, dict) or retro.get("provider") != "codex" or retro.get("status") != "complete":
+            return False, "complete requires valid Codex retro"
     return True, "allowed"
 
 
