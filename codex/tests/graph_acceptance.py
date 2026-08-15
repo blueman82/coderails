@@ -93,6 +93,17 @@ class CodexGraphAcceptance(unittest.TestCase):
         self.assertTrue((ROOT / "skills/index.yaml").is_file())
         self.assertEqual(subprocess.run(["bash", str(ROOT / "scripts/validate-skills-index.sh")], capture_output=True).returncode, 0)
 
+    def test_completion_refuses_stale_gate_artifact(self) -> None:
+        graph = build_graph(("A",))
+        execute(graph, {"SA": {"provider": "codex", "skill_id": "test.complete", "implementation_path": "codex/tests", "test_only": True, "outcome": "done"}})
+        with tempfile.TemporaryDirectory() as directory:
+            artifact = Path(directory) / "review.json"
+            artifact.write_text(json.dumps({"schema_version": 1, "gate": "review", "provider": "codex", "run_id": "old", "revision": "0", "head": "old", "review_status": "pass"}), encoding="utf-8")
+            state = {"event": "complete", "state": {"status": "complete", "graph": graph, "gates": {"review": {"outcome": "done", "evidence": [{"gate": "review", "provider": "codex", "artifact_path": str(artifact), "run_id": "current", "revision": "0", "head": "current"}]}}}}
+            result = subprocess.run([sys.executable, str(ROOT / "codex/hooks/lifecycle.py")], input=json.dumps(state), text=True, capture_output=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("review", result.stdout)
+
     def test_runner_missing_gate_configuration_is_non_complete(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             state = Path(directory) / "progress.json"

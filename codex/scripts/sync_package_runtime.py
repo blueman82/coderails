@@ -12,6 +12,8 @@ from pathlib import Path
 ROOT = Path(__file__).parents[2]
 SOURCE = ROOT / "codex/runtime/graph.py"
 TARGET = ROOT / "packages/codex/runtime/graph.py"
+ADAPTER_SOURCE = ROOT / "codex/runtime/codex_exec.py"
+ADAPTER_TARGET = ROOT / "packages/codex/runtime/codex_exec.py"
 
 
 def main() -> int:
@@ -25,7 +27,8 @@ def main() -> int:
 
     source = SOURCE.read_bytes()
     if args.check:
-        if not TARGET.is_file() or TARGET.read_bytes() != source:
+        if (not TARGET.is_file() or TARGET.read_bytes() != source or
+                not ADAPTER_TARGET.is_file() or ADAPTER_TARGET.read_bytes() != ADAPTER_SOURCE.read_bytes()):
             print(f"generated runtime is stale: {TARGET.relative_to(ROOT)}", file=sys.stderr)
             return 1
         print("PASS: package graph runtime matches codex/runtime/graph.py")
@@ -33,6 +36,7 @@ def main() -> int:
 
     TARGET.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(SOURCE, TARGET)
+    shutil.copy2(ADAPTER_SOURCE, ADAPTER_TARGET)
     print(f"synced {TARGET.relative_to(ROOT)}")
     return 0
 

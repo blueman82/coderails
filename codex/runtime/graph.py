@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from runtime.dispatch import dispatch
+from runtime.codex_exec import invoke as codex_exec
 
 CONTRACT = Path(__file__).parents[2] / "skills/agentic-loop/execution-graph.md"
 OUTCOMES = {"done", "skipped", "failed", "stale", "hard-stop"}
@@ -282,12 +283,17 @@ def _metadata_error(record: Any, *, catalog_root: Path | None = None) -> str | N
                 return f"catalog path mismatch: expected {expected}"
         except Exception as error:
             return f"catalog route unavailable: {error}"
+    adapter = record.get("adapter")
+    if adapter is not None and adapter != "codex-exec":
+        return "adapter must be codex-exec"
     command = record.get("command")
     test_outcome = record.get("outcome")
     if command is not None and (not isinstance(command, list) or not command or any(not isinstance(item, str) or not item for item in command)):
         return "command must be a non-empty string array"
-    if command is None and not (record.get("test_only") and test_outcome is not None):
+    if command is None and adapter != "codex-exec" and not (record.get("test_only") and test_outcome is not None):
         return "executable command is required"
+    if adapter == "codex-exec" and (not isinstance(record.get("prompt"), str) or not record["prompt"].strip()):
+        return "Codex exec prompt is required"
     if record.get("gate") and record.get("mode", "live") != "fixture":
         run = record.get("_run")
         provenance = record.get("provenance")
@@ -307,7 +313,11 @@ def _invoke(record: dict[str, Any], cwd: str | None) -> tuple[str, str]:
     if record.get("outcome") is not None and not live_gate:
         value = record["outcome"]() if callable(record["outcome"]) else record["outcome"]
         return value, str(record.get("evidence", "configured test outcome"))
-    outcome, output = dispatch(record["command"], record.get("cwd", cwd))
+    execution_cwd = record.get("cwd", cwd)
+    if record.get("adapter") == "codex-exec":
+        outcome, output = codex_exec(record["prompt"], execution_cwd)
+    else:
+        outcome, output = dispatch(record["command"], execution_cwd)
     if outcome == "done" and record.get("gate") and record.get("mode", "live") != "fixture":
         kind = record["gate"]
         path = Path(record["artifact_path"])
@@ -406,6 +416,8 @@ def execute(
                 if outcome not in OUTCOMES:
                     outcome, output = "failed", f"invalid implementation outcome: {outcome}"
                 _evidence(node, attempts, outcome, output)
+                if metadata.get("adapter") == "codex-exec":
+                    node["evidence"][-1].update({"provider": "codex", "invocation": "codex exec", "mode": "live"})
                 if outcome == "done" and metadata.get("gate") and metadata.get("mode") != "fixture":
                     path = Path(metadata["artifact_path"])
                     if not path.is_absolute():

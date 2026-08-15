@@ -4,6 +4,7 @@ import json
 import sys
 import tempfile
 import unittest
+from types import SimpleNamespace
 from pathlib import Path
 
 ROOT = Path(__file__).parents[2]
@@ -19,12 +20,39 @@ from runtime.graph import (  # noqa: E402
     prepare_implementations,
     ready,
 )
+from runtime.codex_exec import invoke  # noqa: E402
 
 
 PASS = [sys.executable, "-c", "print('ok')"]
 
 
 class GraphRuntimeTests(unittest.TestCase):
+    def test_codex_exec_adapter_uses_documented_cli_and_preserves_live_evidence(self) -> None:
+        calls = []
+
+        def runner(command, **kwargs):
+            calls.append((command, kwargs))
+            return SimpleNamespace(returncode=0, stdout='{"type":"turn.completed"}\n', stderr="")
+
+        outcome, output = invoke("run node", "/tmp/worktree", runner=runner)
+        self.assertEqual(outcome, "done")
+        self.assertIn("turn.completed", output)
+        self.assertEqual(calls[0][0], ["codex", "exec", "--json", "--ephemeral", "-C", "/tmp/worktree", "-"])
+        self.assertEqual(calls[0][1]["input"], "run node")
+
+    def test_graph_node_routes_through_codex_exec_adapter(self) -> None:
+        graph = build_graph(("A",))
+        import runtime.graph as graph_module
+        original = graph_module.codex_exec
+        try:
+            graph_module.codex_exec = lambda prompt, cwd: ("done", f"live:{prompt}:{cwd}")
+            execute(graph, {"SA": {"adapter": "codex-exec", "prompt": "do A", "cwd": "/tmp/worktree", "provider": "codex", "skill_id": "node.A", "implementation_path": "codex/runtime/codex_exec.py"}})
+        finally:
+            graph_module.codex_exec = original
+        evidence = graph["nodes"]["SA"]["evidence"][-1]
+        self.assertEqual(graph["nodes"]["SA"]["outcome"], "done")
+        self.assertEqual(evidence["invocation"], "codex exec")
+        self.assertEqual(evidence["mode"], "live")
     def test_contract_parser_preserves_only_declared_nodes_edges_and_join(self) -> None:
         contract = """# contract
 
