@@ -110,13 +110,15 @@ right -> join
     def test_live_gate_requires_specific_marker_and_provenance(self) -> None:
         graph = build_graph(("A",))
         record = {
-            "command": ["sh", "-c", "printf generic"],
+            "command": ["sh", "-c", "printf 'coderails-gate kind=review provider=codex artifact=synthetic provenance=synthetic'"],
             "provider": "codex", "skill_id": "gate.review", "implementation_path": "codex/tests",
-            "gate": "review", "artifact": "review-artifact", "provenance": {"provider": "codex", "route": "review-route"},
+            "gate": "review", "mode": "live", "artifact_path": "missing-review.json",
+            "provenance": {"provider": "codex", "route": "review-route", "run_id": "run-1", "revision": "1", "head": "head-1"},
+            "_run": {"run_id": "run-1", "revision": "1", "head": "head-1"},
         }
         execute(graph, {"SA": record})
         self.assertEqual(graph["nodes"]["SA"]["outcome"], "hard-stop")
-        self.assertTrue(any("gate marker" in evidence["output"] for evidence in graph["nodes"]["SA"]["evidence"]))
+        self.assertTrue(any("artifact validation failed" in evidence["output"] for evidence in graph["nodes"]["SA"]["evidence"]))
 
     def test_final_state_cas_rejects_stale_writer(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

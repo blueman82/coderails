@@ -33,7 +33,7 @@ def main() -> int:
     apply_work_unit_disposition(graph, work_units)
     mappings, configuration_errors = prepare_implementations(graph, implementations, catalog_root=args.catalog_root)
     graph["configuration_errors"] = configuration_errors
-    execute(graph, mappings if not configuration_errors else {}, state_path=args.state, expected_revision=revision)
+    execute(graph, mappings if not configuration_errors else {}, state_path=args.state, expected_revision=revision, catalog_root=args.catalog_root)
     gates = gate_snapshot(graph, implementations)
     successful = not configuration_errors and all(node.get("outcome") in {"done", "skipped"} for node in graph["nodes"].values()) and all(gate.get("outcome") in {"done", "skipped"} and gate.get("evidence") for gate in gates.values())
     mode = implementations.get("mode", "live") if isinstance(implementations, dict) else "live"

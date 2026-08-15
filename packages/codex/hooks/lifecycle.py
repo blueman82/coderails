@@ -5,17 +5,26 @@ import json
 import sys
 
 REQUIRED_GATES = ("review", "eval", "proof", "integrity", "wiki", "teardown")
+GATE_RESULTS = {"review": ("review_status", "pass"), "eval": ("result", "GO"), "proof": ("result", "pass"), "integrity": ("integrity", "pass"), "wiki": ("result", "pass"), "teardown": ("result", "pass")}
 
 
 def _gate_marker_valid(kind: str, value: object) -> bool:
     if not isinstance(value, dict) or value.get("outcome") not in {"done", "skipped"}:
         return False
-    return any(
-        isinstance(item, dict)
-        and f"coderails-gate kind={kind} provider=codex artifact=" in item.get("output", "")
-        and "provenance=" in item.get("output", "")
-        for item in value.get("evidence", [])
-    )
+    field, expected = GATE_RESULTS[kind]
+    for item in value.get("evidence", []):
+        if not isinstance(item, dict) or item.get("gate") != kind or item.get("provider") != "codex":
+            continue
+        path = item.get("artifact_path")
+        if not isinstance(path, str) or not path.strip():
+            continue
+        try:
+            artifact = json.loads(open(path, encoding="utf-8").read())
+        except (OSError, json.JSONDecodeError):
+            continue
+        if isinstance(artifact, dict) and artifact.get("schema_version") == 1 and artifact.get("gate") == kind and artifact.get("provider") == "codex" and all(artifact.get(key) == item.get(key) for key in ("run_id", "revision", "head")) and artifact.get(field) == expected:
+            return True
+    return False
 
 
 def validate(event: dict) -> tuple[bool, str]:

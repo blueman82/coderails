@@ -26,14 +26,18 @@ with tempfile.TemporaryDirectory() as directory:
 | `wiki` | `root` | ready | never |
 | `teardown` | `root` | ready | never |
 """)
-    config = {"mode": "live", "nodes": {}, "gates": {}}
+    run = {"run_id": "package-test-run", "revision": "0", "head": "package-test-head"}
+    config = {"mode": "live", "run": run, "nodes": {}, "gates": {}}
     command = ["sh", "-c", "printf package"]
     nodes = ["root", "review", "eval", "proof", "integrity", "wiki", "teardown"]
     for node in nodes:
         config["nodes"][node] = {"command": command, "provider": "codex", "skill_id": "package." + node, "implementation_path": "runtime/graph.py"}
     for kind, node in zip(("review", "eval", "proof", "integrity", "wiki", "teardown"), nodes[1:]):
-        gate_command = ["sh", "-c", f"printf 'coderails-gate kind={kind} provider=codex artifact=package-{kind} provenance=package-route'"]
-        config["gates"][kind] = {"node": node, "command": gate_command, "provider": "codex", "skill_id": "package.gate." + kind, "implementation_path": "runtime/graph.py", "artifact": "package-" + kind, "provenance": {"provider": "codex", "route": "package-route"}}
+        artifact = Path(directory) / (kind + ".json")
+        field, expected = {"review": ("review_status", "pass"), "eval": ("result", "GO"), "proof": ("result", "pass"), "integrity": ("integrity", "pass"), "wiki": ("result", "pass"), "teardown": ("result", "pass")} [kind]
+        artifact.write_text(json.dumps({"schema_version": 1, "gate": kind, "provider": "codex", "run_id": run["run_id"], "revision": run["revision"], "head": run["head"], field: expected}))
+        gate_command = ["sh", "-c", f"printf package-{kind}"]
+        config["gates"][kind] = {"node": node, "command": gate_command, "provider": "codex", "skill_id": "package.gate." + kind, "implementation_path": "runtime/graph.py", "catalog_route": "graph-runtime", "catalog_kind": "runtime", "artifact": str(artifact), "artifact_path": str(artifact), "provenance": {"provider": "codex", "route": "package-route", **run}}
     implementations = Path(directory) / "implementations.json"
     implementations.write_text(json.dumps(config))
     subprocess.run([sys.executable, str(package / "scripts/run_graph.py"), "--contract", str(contract), "--implementations", str(implementations), "--state", str(state), "--catalog-root", str(package)], check=True)

@@ -18,6 +18,7 @@ from runtime.dispatch import dispatch
 CONTRACT = Path(__file__).parents[2] / "skills/agentic-loop/execution-graph.md"
 OUTCOMES = {"done", "skipped", "failed", "stale", "hard-stop"}
 REQUIRED_GATES = ("review", "eval", "proof", "integrity", "wiki", "teardown")
+GATE_RESULTS = {"review": ("review_status", "pass"), "eval": ("result", "GO"), "proof": ("result", "pass"), "integrity": ("integrity", "pass"), "wiki": ("result", "pass"), "teardown": ("result", "pass")}
 
 
 class StateConflict(RuntimeError):
@@ -200,11 +201,9 @@ def prepare_implementations(graph: dict[str, Any], config: Mapping[str, Any], *,
         mapping = dict(record)
         mapping["gate"] = kind
         mapping["mode"] = mode
+        mapping["_run"] = config.get("run")
         if mode != "fixture":
-            artifact = mapping.get("artifact")
             provenance = mapping.get("provenance")
-            if not isinstance(artifact, str) or not artifact.strip():
-                errors.append(f"gate {kind} requires an artifact marker")
             if not isinstance(provenance, Mapping) or provenance.get("provider") != "codex" or not isinstance(provenance.get("route"), str) or not provenance["route"].strip():
                 errors.append(f"gate {kind} requires Codex provenance and route")
         mappings[node] = mapping
@@ -263,12 +262,22 @@ def _metadata_error(record: Any, *, catalog_root: Path | None = None) -> str | N
         if catalog_root is None:
             return "catalog resolver root is required"
         try:
-            catalog_dir = catalog_root / "codex"
-            if str(catalog_dir) not in sys.path:
-                sys.path.insert(0, str(catalog_dir))
-            from catalog import resolve  # type: ignore
-            resolved = resolve(str(record["catalog_route"]), kind=record.get("catalog_kind"), root=catalog_root)
-            expected = resolved.relative_to(catalog_root).as_posix()
+            package_catalog = catalog_root / "catalog.json"
+            if package_catalog.is_file():
+                catalog = json.loads(package_catalog.read_text(encoding="utf-8"))
+                route = catalog.get("routes", {}).get(record.get("catalog_kind", "skills"), {}).get(str(record["catalog_route"]))
+                if not isinstance(route, Mapping) or route.get("status") != "active":
+                    raise ValueError("unknown or inactive package route")
+                expected = str(route["path"])
+                if not (catalog_root / expected).is_file():
+                    raise ValueError("package route target is missing")
+            else:
+                catalog_dir = catalog_root / "codex"
+                if str(catalog_dir) not in sys.path:
+                    sys.path.insert(0, str(catalog_dir))
+                from catalog import resolve  # type: ignore
+                resolved = resolve(str(record["catalog_route"]), kind=record.get("catalog_kind"), root=catalog_root)
+                expected = resolved.relative_to(catalog_root).as_posix()
             if expected != record["implementation_path"]:
                 return f"catalog path mismatch: expected {expected}"
         except Exception as error:
@@ -279,6 +288,15 @@ def _metadata_error(record: Any, *, catalog_root: Path | None = None) -> str | N
         return "command must be a non-empty string array"
     if command is None and not (record.get("test_only") and test_outcome is not None):
         return "executable command is required"
+    if record.get("gate") and record.get("mode", "live") != "fixture":
+        run = record.get("_run")
+        provenance = record.get("provenance")
+        if not isinstance(run, Mapping) or not all(isinstance(run.get(key), str) and run[key].strip() for key in ("run_id", "revision", "head")):
+            return "live gate requires run_id, revision, and head context"
+        if not isinstance(record.get("artifact_path"), str) or not record["artifact_path"].strip():
+            return "live gate requires artifact_path"
+        if not isinstance(provenance, Mapping) or provenance.get("provider") != "codex" or any(provenance.get(key) != run[key] for key in ("run_id", "revision", "head")):
+            return "live gate provenance is not bound to the current run"
     return None
 
 
@@ -289,11 +307,19 @@ def _invoke(record: dict[str, Any], cwd: str | None) -> tuple[str, str]:
     outcome, output = dispatch(record["command"], record.get("cwd", cwd))
     if outcome == "done" and record.get("gate") and record.get("mode", "live") != "fixture":
         kind = record["gate"]
-        artifact = record.get("artifact", "")
-        route = record.get("provenance", {}).get("route", "")
-        marker = f"coderails-gate kind={kind} provider=codex artifact={artifact} provenance={route}"
-        if marker not in output:
-            return "failed", f"gate marker missing: expected {marker}"
+        path = Path(record["artifact_path"])
+        if not path.is_absolute():
+            path = Path(record.get("cwd", cwd or Path.cwd())) / path
+        try:
+            artifact = json.loads(path.read_text(encoding="utf-8"))
+            field, expected = GATE_RESULTS[kind]
+            run = record["_run"]
+            if not isinstance(artifact, dict) or artifact.get("schema_version") != 1 or artifact.get("gate") != kind or artifact.get("provider") != "codex" or any(artifact.get(key) != run[key] for key in ("run_id", "revision", "head")) or artifact.get(field) != expected:
+                return "failed", f"artifact validation failed for gate {kind}"
+        except (OSError, ValueError, json.JSONDecodeError) as error:
+            return "failed", f"artifact validation failed for gate {kind}: {error}"
+        run = record["_run"]
+        return "done", f"artifact validated gate={kind} provider=codex artifact_path={path} run_id={run['run_id']} revision={run['revision']} head={run['head']}"
     return outcome, output
 
 
@@ -325,6 +351,7 @@ def execute(
     persist: Callable[[dict[str, Any]], None] | None = None,
     cwd: str | None = None,
     expected_revision: int | None = None,
+    catalog_root: Path | None = None,
 ) -> dict[str, Any]:
     """Dispatch complete ready waves and atomically persist after each wave."""
     if callable(implementations):
@@ -356,7 +383,7 @@ def execute(
             node["provider"] = metadata.get("provider", "codex")
             node["skill_id"] = metadata.get("skill_id", "")
             node["implementation_path"] = metadata.get("implementation_path", "")
-            error = "missing implementation mapping" if record is None else _metadata_error(record)
+            error = "missing implementation mapping" if record is None else _metadata_error(record, catalog_root=catalog_root)
             if error:
                 node.update(status="hard-stop", outcome="hard-stop")
                 _evidence(node, node["retry"]["attempts"], "hard-stop", error)
@@ -376,6 +403,12 @@ def execute(
                 if outcome not in OUTCOMES:
                     outcome, output = "failed", f"invalid implementation outcome: {outcome}"
                 _evidence(node, attempts, outcome, output)
+                if outcome == "done" and metadata.get("gate") and metadata.get("mode") != "fixture":
+                    path = Path(metadata["artifact_path"])
+                    if not path.is_absolute():
+                        path = Path(metadata.get("cwd", cwd or Path.cwd())) / path
+                    run = metadata["_run"]
+                    node["evidence"][-1].update({"gate": metadata["gate"], "provider": "codex", "artifact_path": str(path), "run_id": run["run_id"], "revision": run["revision"], "head": run["head"]})
                 if outcome in {"done", "skipped", "hard-stop"}:
                     break
             if outcome in {"failed", "stale"}:

@@ -77,10 +77,16 @@ class CodexGraphAcceptance(unittest.TestCase):
         lifecycle = ROOT / "codex/hooks/lifecycle.py"
         graph = build_graph(("A",))
         execute(graph, {"SA": {"provider": "codex", "skill_id": "test.complete", "implementation_path": "codex/tests", "test_only": True, "outcome": "done"}})
-        gates = {kind: {"node": "SA", "outcome": "done", "evidence": [{"output": f"coderails-gate kind={kind} provider=codex artifact=test provenance=test"}]} for kind in REQUIRED_GATES}
-        good = {"event": "complete", "state": {"status": "complete", "graph": graph, "gates": gates, "teardown": {"provider": "codex", "evidence": [{"outcome": "done"}]}, "retro": {"provider": "codex", "status": "complete"}}}
-        result = subprocess.run([sys.executable, str(lifecycle)], input=json.dumps(good), text=True, capture_output=True)
-        self.assertEqual(result.returncode, 0, result.stdout)
+        with tempfile.TemporaryDirectory() as directory:
+            results = {"review": ("review_status", "pass"), "eval": ("result", "GO"), "proof": ("result", "pass"), "integrity": ("integrity", "pass"), "wiki": ("result", "pass"), "teardown": ("result", "pass")}
+            gates = {}
+            for kind, (field, expected) in results.items():
+                artifact = Path(directory) / (kind + ".json")
+                artifact.write_text(json.dumps({"schema_version": 1, "gate": kind, "provider": "codex", "run_id": "test", "revision": "0", "head": "test", field: expected}))
+                gates[kind] = {"node": "SA", "outcome": "done", "evidence": [{"gate": kind, "provider": "codex", "artifact_path": str(artifact), "run_id": "test", "revision": "0", "head": "test"}]}
+            good = {"event": "complete", "state": {"status": "complete", "graph": graph, "gates": gates, "teardown": {"provider": "codex", "evidence": [{"outcome": "done"}]}, "retro": {"provider": "codex", "status": "complete"}}}
+            result = subprocess.run([sys.executable, str(lifecycle)], input=json.dumps(good), text=True, capture_output=True)
+            self.assertEqual(result.returncode, 0, result.stdout)
         bad = {"event": "complete", "state": {"status": "complete", "graph": graph}}
         result = subprocess.run([sys.executable, str(lifecycle)], input=json.dumps(bad), text=True, capture_output=True)
         self.assertNotEqual(result.returncode, 0)
