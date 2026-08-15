@@ -104,11 +104,11 @@ graph_executor_apply_wave() {
               elif ($merged.retry.attempts > $merged.retry.max)
               then error("graph_executor: node \($id) has retry.attempts > retry.max")
               elif (($merged.status == "stale" or $merged.outcome == "stale")
-                    and (($merged.stale_check | type) != "object"
-                         or $merged.stale_check.checked != true
-                         or (($merged.stale_check.method | type) != "string" or ($merged.stale_check.method | length) == 0)
-                         or (($merged.stale_check.result | type) != "string" or ($merged.stale_check.result | length) == 0)))
-              then error("graph_executor: node \($id) writes stale without a valid stale_check")
+                    and (($results[$id].stale_check | type) != "object"
+                         or $results[$id].stale_check.checked != true
+                         or (($results[$id].stale_check.method | type) != "string" or ($results[$id].stale_check.method | length) == 0)
+                         or (($results[$id].stale_check.result | type) != "string" or ($results[$id].stale_check.result | length) == 0)))
+              then error("graph_executor: node \($id) writes stale without a valid stale_check in THIS wave own result (an old stale_check surviving from a prior wave merge does not count)")
               else $merged
               end
             )

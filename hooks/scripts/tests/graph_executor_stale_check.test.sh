@@ -3,8 +3,12 @@
 # stale field docs and SKILL.md Phase 4 ("idle is not failure"), a bare idle
 # signal is not sufficient evidence -- any node whose merged status OR
 # outcome is "stale" must carry a sibling stale_check field
-# ({"checked":true,"method":"<string>","result":"<string>"}) in the SAME
-# wave-result, or graph_executor_apply_wave refuses the write.
+# ({"checked":true,"method":"<string>","result":"<string>"}) in THIS SAME
+# wave's own result, or graph_executor_apply_wave refuses the write. "THIS
+# SAME wave" is validated against the wave-results argument itself, not
+# the post-merge node state -- an earlier wave's stale_check surviving in
+# progress.json must not satisfy a later wave's own bare stale write (see
+# the multi-wave test below).
 set -u
 
 TESTS_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -76,5 +80,20 @@ graph_executor_apply_wave "$TMP/f7.json" '{"A":{"status":"blocked","outcome":"st
 rc7=$?
 [ "$rc7" -ne 0 ] && ok "outcome:stale alone (status not stale) still requires stale_check" \
   || fail "outcome:stale alone still requires stale_check" "rc=$rc7"
+
+# --- multi-wave: a stale_check from an EARLIER wave must not satisfy a
+# LATER wave's own stale write. The guard must validate THIS wave's own
+# result payload, not the merged node state (which still carries the old
+# stale_check from wave 1's successful write).
+fresh_fixture "$TMP/f8.json"
+graph_executor_apply_wave "$TMP/f8.json" '{"A":{"status":"stale","outcome":"stale","stale_check":{"checked":true,"method":"gh pr view","result":"no PR found"}}}'
+rc8a=$?
+graph_executor_apply_wave "$TMP/f8.json" '{"A":{"status":"stale","outcome":"stale"}}'
+rc8b=$?
+stale_check_after8=$(jq -c '.graph.nodes.A.stale_check' "$TMP/f8.json")
+[ "$rc8a" -eq 0 ] && [ "$rc8b" -ne 0 ] \
+  && [ "$stale_check_after8" = '{"checked":true,"method":"gh pr view","result":"no PR found"}' ] \
+  && ok "a later wave's bare stale write is refused even though an earlier wave's stale_check survives in merged state" \
+  || fail "later wave without its own stale_check is refused" "rc8a=$rc8a rc8b=$rc8b stale_check_after=$stale_check_after8"
 
 [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails)"; exit 1; }
