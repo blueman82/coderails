@@ -5,6 +5,14 @@ wiki ingest once at the loop end, then run `/sync-docs` once); this file is the 
 suppression mechanics, the wiki-delivery verification steps, and the docs-drift disposition rule
 you consult while running it.
 
+**Graph dispatch boundary.** `S9-wiki` and `S9-docs` DO resolve cleanly today: `graph_dispatch_plan`
+(`hooks/scripts/lib/graph_dispatch.sh`) resolves them to `wiki-writer` and `docs-auditor`
+respectively, each an unambiguous agent-tier match in `skills/index.yaml`. These two nodes are the
+exception among the downstream graph-dispatch boundaries documented across this phase family —
+they're plan-ready even though no call site wires `graph_dispatch_plan`/`graph_dispatch_record`
+into this phase yet. See `hooks/scripts/tests/graph_dispatch_downstream.test.sh` for the
+characterization evidence.
+
 **Suppressing per-PR wiki steps in spawned `/coderails:workflow` agents:** place the following line as the **FIRST instruction** in every spawned agent's prompt inside this loop (not buried mid-section, not under the task-specific scope, not after the workflow steps — first):
 
 > "When running /workflow inside this agentic-loop, skip /workflow's wiki sub-steps (Phase 2 `/coderails:wiki-query` and Phase 5 `/coderails:wiki-ingest`/`/coderails:wiki-lint`). The orchestrator runs these at the loop boundary — running them per-PR causes redundant ingests and fragmented wiki context."
