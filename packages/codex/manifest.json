@@ -3,10 +3,13 @@
   "provider": "codex",
   "package": "coderails-codex",
   "source_root": ".",
-  "manifest": ".codex-plugin/plugin.json",
-  "installer": "packages/codex/install.json",
-  "layout": {
-    "runtime": "codex",
-    "fixtures": "packages/fixtures/codex"
-  }
+  "plugin": ".codex-plugin/plugin.json",
+  "entrypoints": {
+    "run": "scripts/run_graph.py",
+    "dispatch": "scripts/dispatch.py",
+    "complete": "scripts/complete.py",
+    "teardown": "scripts/teardown.py",
+    "lifecycle": "hooks/lifecycle.py"
+  },
+  "shared_contract": "external:skills/index.yaml"
 }

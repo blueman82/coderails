@@ -1,5 +1,18 @@
 # Coderails Codex package
 
-The Codex plugin is rooted at the repository's `.codex-plugin/` and `codex/`
-paths. This directory contains its package metadata and provider fixtures; it
-does not depend on the Claude plugin tree.
+This directory is the complete installable payload. Copy it elsewhere and run
+`codex plugin install .`; it needs only Python 3 and the host's Codex OAuth.
+
+The only repository-wide contract is the optional routing record at
+`skills/index.yaml`. The runtime does not import, source, or discover any other
+provider's files. Dispatch receives a JSON request and runs the requested
+provider-native command; graph state is JSON and is atomically replaced.
+
+## Enforcement ceiling
+
+The lifecycle checker is mechanical when the Codex host invokes it, but this
+package cannot force an invocation, inspect an omitted host action, or provide
+server-side branch protection. Completion is accepted only after every node is
+successful, teardown metadata exists, and the lifecycle checker returns zero.
+Retries are bounded by each node's `retry.max` (0 through 5); exhausted work is
+`hard-stop`, never silently successful.
