@@ -120,6 +120,17 @@ right -> join
         self.assertEqual(graph["nodes"]["SA"]["outcome"], "hard-stop")
         self.assertTrue(any("artifact validation failed" in evidence["output"] for evidence in graph["nodes"]["SA"]["evidence"]))
 
+    def test_all_done_live_gate_outcomes_cannot_bypass_missing_artifacts(self) -> None:
+        graph = build_graph(("root", "review", "eval", "proof", "integrity", "wiki", "teardown"))
+        run = {"run_id": "run-1", "revision": "1", "head": "head-1"}
+        mappings = {"Sroot": {"command": PASS, "provider": "codex", "skill_id": "node.root", "implementation_path": "codex/tests"}}
+        for kind, node in zip(REQUIRED_GATES, list(graph["nodes"])[1:]):
+            mappings[node] = {"command": PASS, "outcome": "done", "provider": "codex", "skill_id": "gate." + kind, "implementation_path": "codex/tests", "gate": kind, "mode": "live", "artifact_path": "missing-" + kind + ".json", "provenance": {"provider": "codex", "route": "test-route", **run}, "_run": run}
+        execute(graph, mappings)
+        self.assertEqual(graph["nodes"]["Sroot"]["outcome"], "done")
+        self.assertTrue(all(graph["nodes"][node]["outcome"] == "hard-stop" for node in list(graph["nodes"])[1:]))
+        self.assertTrue(all(any("artifact validation failed" in item["output"] or "blocked by hard-stop" in item["output"] for item in graph["nodes"][node]["evidence"]) for node in list(graph["nodes"])[1:]))
+
     def test_final_state_cas_rejects_stale_writer(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             state = Path(directory) / "progress.json"

@@ -301,7 +301,10 @@ def _metadata_error(record: Any, *, catalog_root: Path | None = None) -> str | N
 
 
 def _invoke(record: dict[str, Any], cwd: str | None) -> tuple[str, str]:
-    if record.get("outcome") is not None:
+    live_gate = record.get("mode", "live") != "fixture" and (
+        record.get("gate") in REQUIRED_GATES or record.get("gate") is not None or record.get("artifact_path") is not None
+    )
+    if record.get("outcome") is not None and not live_gate:
         value = record["outcome"]() if callable(record["outcome"]) else record["outcome"]
         return value, str(record.get("evidence", "configured test outcome"))
     outcome, output = dispatch(record["command"], record.get("cwd", cwd))
