@@ -52,8 +52,25 @@ run_check "real index: descriptor carries source_kind and codex_tool mapping" \
 # --- Fail-closed passthrough from skill_route.sh itself ---
 run_check "skill_route fail-closed passes through: unknown skill_id" \
   "$REAL_INDEX" totally-unknown-skill-id 1 "NO_PROVIDER_MAPPING"
+
+# Keep planned-provider coverage independent of the completed real catalog.
+PLANNED_INDEX="$TMP/planned-index.yaml"
+cat > "$PLANNED_INDEX" <<'YAML'
+skills:
+  planned-codex-skill:
+    graph_role: null
+    source_kind: skill
+    claude:
+      path: skills/planned-codex-skill/SKILL.md
+      status: active
+    codex:
+      path: codex/skills/planned-codex-skill.md
+      status: planned
+    required_inputs: [x]
+    output_contract: fixture entry whose codex provider remains planned.
+YAML
 run_check "skill_route fail-closed passes through: agentic-loop codex is planned" \
-  "$REAL_INDEX" agentic-loop 1 "NO_PROVIDER_MAPPING"
+  "$PLANNED_INDEX" planned-codex-skill 1 "NO_PROVIDER_MAPPING"
 
 # --- Fake repo root for confinement/existence/tool-mapping fixtures ---
 # Fixture layout mirrors the real tree exactly (index at <root>/skills/index.yaml)
