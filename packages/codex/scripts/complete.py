@@ -19,4 +19,4 @@ allowed, reason = validate({"event": "complete", "state": state})
 if not allowed:
     raise SystemExit(f"completion refused: {reason}")
 state.update(status="complete", completed=True)
-write_json(args.state, state)
+write_json(args.state, state, expected_revision=state.get("revision", 0))

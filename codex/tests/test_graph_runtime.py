@@ -73,7 +73,7 @@ right -> join
 
     def test_gate_configuration_is_explicit_and_complete(self) -> None:
         graph = build_graph(("root", "review", "eval", "proof", "integrity", "wiki", "teardown"))
-        config = {"nodes": {}, "gates": {}}
+        config = {"mode": "fixture", "nodes": {}, "gates": {}}
         nodes = list(graph["nodes"])
         for name in nodes:
             config["nodes"][name] = {"command": PASS, "provider": "codex", "skill_id": f"fixture.{name}", "implementation_path": "codex/tests"}
@@ -82,7 +82,7 @@ right -> join
         mappings, errors = prepare_implementations(graph, config)
         self.assertEqual(errors, [])
         self.assertEqual(set(REQUIRED_GATES), {mappings[node]["gate"] for node in nodes[1:]})
-        _, errors = prepare_implementations(graph, {"nodes": config["nodes"], "gates": {"review": config["gates"]["review"]}})
+        _, errors = prepare_implementations(graph, {"mode": "fixture", "nodes": config["nodes"], "gates": {"review": config["gates"]["review"]}})
         self.assertTrue(any("missing gate" in error for error in errors))
 
     def test_catalog_route_must_resolve_to_declared_codex_path(self) -> None:
@@ -91,10 +91,10 @@ right -> join
         node_records = {name: {"command": PASS, "provider": "codex", "skill_id": "test." + name, "implementation_path": "codex/tests"} for name in graph["nodes"]}
         node_records["SA"] = record
         gates = {kind: {"node": node, **node_records[node]} for kind, node in zip(REQUIRED_GATES, list(graph["nodes"])[1:])}
-        mappings, errors = prepare_implementations(graph, {"nodes": node_records, "gates": gates}, catalog_root=ROOT)
+        mappings, errors = prepare_implementations(graph, {"mode": "fixture", "nodes": node_records, "gates": gates}, catalog_root=ROOT)
         self.assertEqual(errors, [])
         record["catalog_route"] = "missing-route"
-        _, errors = prepare_implementations(graph, {"nodes": node_records, "gates": gates}, catalog_root=ROOT)
+        _, errors = prepare_implementations(graph, {"mode": "fixture", "nodes": node_records, "gates": gates}, catalog_root=ROOT)
         self.assertTrue(any("catalog" in error for error in errors))
 
     def test_stale_revision_cannot_overwrite_newer_state(self) -> None:
@@ -106,6 +106,26 @@ right -> join
             with self.assertRaises(StateConflict):
                 execute(build_graph(("A",)), {"SA": {"command": PASS, "provider": "codex", "skill_id": "test.a", "implementation_path": "codex/tests"}}, state_path=state, expected_revision=0)
             self.assertEqual(state.read_text(), before)
+
+    def test_live_gate_requires_specific_marker_and_provenance(self) -> None:
+        graph = build_graph(("A",))
+        record = {
+            "command": ["sh", "-c", "printf generic"],
+            "provider": "codex", "skill_id": "gate.review", "implementation_path": "codex/tests",
+            "gate": "review", "artifact": "review-artifact", "provenance": {"provider": "codex", "route": "review-route"},
+        }
+        execute(graph, {"SA": record})
+        self.assertEqual(graph["nodes"]["SA"]["outcome"], "hard-stop")
+        self.assertTrue(any("gate marker" in evidence["output"] for evidence in graph["nodes"]["SA"]["evidence"]))
+
+    def test_final_state_cas_rejects_stale_writer(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            state = Path(directory) / "progress.json"
+            state.write_text(json.dumps({"revision": 3}))
+            with self.assertRaises(StateConflict):
+                from runtime.graph import write_json
+                write_json(state, {"revision": 4}, expected_revision=2)
+            self.assertEqual(json.loads(state.read_text())["revision"], 3)
 
     def test_loads_nodes_from_canonical_contract(self) -> None:
         nodes = load_contract(ROOT / "skills/agentic-loop/execution-graph.md")

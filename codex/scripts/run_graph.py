@@ -26,6 +26,7 @@ def main() -> int:
     parser.add_argument("--implementations", type=Path, required=True, help="JSON node implementation records")
     parser.add_argument("--contract", type=Path, required=True, help="canonical execution-graph.md path")
     parser.add_argument("--work-units", type=Path, help="JSON array or object containing work_units")
+    parser.add_argument("--catalog-root", type=Path, help="repository root used for Codex catalog route resolution")
     args = parser.parse_args()
     implementations = json.loads(args.implementations.read_text(encoding="utf-8"))
     work_units = None
@@ -39,7 +40,7 @@ def main() -> int:
         graph = prior["graph"]
         revision = prior.get("revision", 0)
     apply_work_unit_disposition(graph, work_units)
-    mappings, configuration_errors = prepare_implementations(graph, implementations, catalog_root=Path(__file__).parents[2])
+    mappings, configuration_errors = prepare_implementations(graph, implementations, catalog_root=args.catalog_root or Path(__file__).parents[2])
     graph["configuration_errors"] = configuration_errors
     execute(graph, mappings if not configuration_errors else {}, state_path=args.state, expected_revision=revision)
     gates = gate_snapshot(graph, implementations)
@@ -58,7 +59,7 @@ def main() -> int:
         "retro": {"provider": "codex", "status": status, "external_gates": "not executed; fixture only" if mode == "fixture" else "configured Codex commands"},
         "graph": graph,
     }
-    write_json(args.state, state)
+    write_json(args.state, state, expected_revision=graph.get("revision", revision))
     print(json.dumps({"status": state["status"], "nodes": len(graph["nodes"])}))
     return 0 if status in {"complete", "fixture"} else 1
 

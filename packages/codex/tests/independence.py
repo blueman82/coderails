@@ -26,16 +26,17 @@ with tempfile.TemporaryDirectory() as directory:
 | `wiki` | `root` | ready | never |
 | `teardown` | `root` | ready | never |
 """)
-    config = {"nodes": {}, "gates": {}}
+    config = {"mode": "live", "nodes": {}, "gates": {}}
     command = ["sh", "-c", "printf package"]
     nodes = ["root", "review", "eval", "proof", "integrity", "wiki", "teardown"]
     for node in nodes:
         config["nodes"][node] = {"command": command, "provider": "codex", "skill_id": "package." + node, "implementation_path": "runtime/graph.py"}
     for kind, node in zip(("review", "eval", "proof", "integrity", "wiki", "teardown"), nodes[1:]):
-        config["gates"][kind] = {"node": node, "command": command, "provider": "codex", "skill_id": "package.gate." + kind, "implementation_path": "runtime/graph.py"}
+        gate_command = ["sh", "-c", f"printf 'coderails-gate kind={kind} provider=codex artifact=package-{kind} provenance=package-route'"]
+        config["gates"][kind] = {"node": node, "command": gate_command, "provider": "codex", "skill_id": "package.gate." + kind, "implementation_path": "runtime/graph.py", "artifact": "package-" + kind, "provenance": {"provider": "codex", "route": "package-route"}}
     implementations = Path(directory) / "implementations.json"
     implementations.write_text(json.dumps(config))
-    subprocess.run([sys.executable, str(package / "scripts/run_graph.py"), "--contract", str(contract), "--implementations", str(implementations), "--state", str(state)], check=True)
+    subprocess.run([sys.executable, str(package / "scripts/run_graph.py"), "--contract", str(contract), "--implementations", str(implementations), "--state", str(state), "--catalog-root", str(package)], check=True)
     subprocess.run([sys.executable, str(package / "scripts/complete.py"), str(state)], check=True)
     completed = json.loads(state.read_text(encoding="utf-8"))
     assert completed["status"] == "complete" and completed["completed"] is True and completed["teardown"]["provider"] == "codex"

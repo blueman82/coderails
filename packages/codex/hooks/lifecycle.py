@@ -7,6 +7,17 @@ import sys
 REQUIRED_GATES = ("review", "eval", "proof", "integrity", "wiki", "teardown")
 
 
+def _gate_marker_valid(kind: str, value: object) -> bool:
+    if not isinstance(value, dict) or value.get("outcome") not in {"done", "skipped"}:
+        return False
+    return any(
+        isinstance(item, dict)
+        and f"coderails-gate kind={kind} provider=codex artifact=" in item.get("output", "")
+        and "provenance=" in item.get("output", "")
+        for item in value.get("evidence", [])
+    )
+
+
 def validate(event: dict) -> tuple[bool, str]:
     if not isinstance(event, dict) or not isinstance(event.get("event"), str):
         return False, "event must contain a string event"
@@ -26,7 +37,7 @@ def validate(event: dict) -> tuple[bool, str]:
             return False, "complete requires gate evidence"
         for gate in REQUIRED_GATES:
             evidence = gates.get(gate)
-            if not isinstance(evidence, dict) or evidence.get("outcome") not in {"done", "skipped"} or not evidence.get("evidence"):
+            if not _gate_marker_valid(gate, evidence):
                 return False, f"complete requires evidence for gate {gate}"
         teardown = state.get("teardown")
         if not isinstance(teardown, dict) or teardown.get("provider") != "codex" or not teardown.get("evidence"):

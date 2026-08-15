@@ -38,7 +38,7 @@ def main() -> int:
     assert calls[:2] == [("SA", "pending"), ("SB", "pending")]
 
     hook = ROOT / "codex/hooks/lifecycle.py"
-    gates = {kind: {"node": "SA", "outcome": "done", "evidence": [{"outcome": "done"}]} for kind in ("review", "eval", "proof", "integrity", "wiki", "teardown")}
+    gates = {kind: {"node": "SA", "outcome": "done", "evidence": [{"output": f"coderails-gate kind={kind} provider=codex artifact=test provenance=test"}]} for kind in ("review", "eval", "proof", "integrity", "wiki", "teardown")}
     valid = {"event": "complete", "state": {"status": "complete", "graph": graph, "gates": gates, "teardown": {"provider": "codex", "evidence": [{"outcome": "done"}]}, "retro": {"provider": "codex", "status": "complete"}}}
     result = subprocess.run([sys.executable, str(hook)], input=json.dumps(valid), text=True, capture_output=True)
     assert result.returncode == 0, result.stdout

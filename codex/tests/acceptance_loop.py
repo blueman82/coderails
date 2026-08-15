@@ -71,7 +71,7 @@ def main() -> int:
     state["teardown"] = {"provider": "codex", "evidence": gates.get("teardown", {}).get("evidence", [])} if successful else None
     state["retro"] = {"provider": "codex", "status": state["status"], "external_gates": "not executed; fixture only"}
     from runtime.graph import write_json
-    write_json(args.state, state)
+    write_json(args.state, state, expected_revision=state.get("revision", 0))
     print(json.dumps({"status": state["status"], "state": str(args.state)}))
     return 0 if successful else 1
 

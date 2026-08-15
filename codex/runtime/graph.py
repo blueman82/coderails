@@ -182,6 +182,7 @@ def prepare_implementations(graph: dict[str, Any], config: Mapping[str, Any], *,
         return {}, ["implementation configuration requires nodes and gates objects"]
     mappings = {str(name): dict(record) for name, record in node_records.items() if isinstance(record, Mapping)}
     errors: list[str] = []
+    mode = config.get("mode", "live")
     seen: set[str] = set()
     for kind in REQUIRED_GATES:
         record = gate_records.get(kind)
@@ -198,7 +199,19 @@ def prepare_implementations(graph: dict[str, Any], config: Mapping[str, Any], *,
         seen.add(node)
         mapping = dict(record)
         mapping["gate"] = kind
+        mapping["mode"] = mode
+        if mode != "fixture":
+            artifact = mapping.get("artifact")
+            provenance = mapping.get("provenance")
+            if not isinstance(artifact, str) or not artifact.strip():
+                errors.append(f"gate {kind} requires an artifact marker")
+            if not isinstance(provenance, Mapping) or provenance.get("provider") != "codex" or not isinstance(provenance.get("route"), str) or not provenance["route"].strip():
+                errors.append(f"gate {kind} requires Codex provenance and route")
         mappings[node] = mapping
+    if mode != "fixture":
+        commands = [tuple(record.get("command", ())) for record in mappings.values() if record.get("gate")]
+        if len(commands) == len(REQUIRED_GATES) and len(set(commands)) == 1:
+            errors.append("live gate commands must be gate-specific")
     for name, node in graph["nodes"].items():
         if node.get("dispatch") and node.get("outcome") not in {"done", "skipped"} and name not in mappings:
             errors.append(f"missing implementation mapping: {name}")
@@ -273,7 +286,15 @@ def _invoke(record: dict[str, Any], cwd: str | None) -> tuple[str, str]:
     if record.get("outcome") is not None:
         value = record["outcome"]() if callable(record["outcome"]) else record["outcome"]
         return value, str(record.get("evidence", "configured test outcome"))
-    return dispatch(record["command"], record.get("cwd", cwd))
+    outcome, output = dispatch(record["command"], record.get("cwd", cwd))
+    if outcome == "done" and record.get("gate") and record.get("mode", "live") != "fixture":
+        kind = record["gate"]
+        artifact = record.get("artifact", "")
+        route = record.get("provenance", {}).get("route", "")
+        marker = f"coderails-gate kind={kind} provider=codex artifact={artifact} provenance={route}"
+        if marker not in output:
+            return "failed", f"gate marker missing: expected {marker}"
+    return outcome, output
 
 
 def _evidence(node: dict[str, Any], attempt: int, outcome: str, output: str) -> None:
@@ -410,6 +431,9 @@ def _atomic_write(path: Path, value: dict[str, Any]) -> None:
             os.unlink(temporary)
 
 
-def write_json(path: Path, value: dict[str, Any]) -> None:
+def write_json(path: Path, value: dict[str, Any], *, expected_revision: int | None = None) -> None:
     with _state_lock(path, exclusive=True):
+        current = _read_unlocked(path).get("revision", 0) if path.exists() else 0
+        if expected_revision is not None and current != expected_revision:
+            raise StateConflict(f"final state revision changed: expected {expected_revision}, found {current}")
         _atomic_write(path, value)
