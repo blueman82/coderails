@@ -1,0 +1,1475 @@
+/* Ported from an owner-approved HTML mockup during initial design. Static layout only —
+   the sphere background, HUD callouts, and command-deck interactivity land in later
+   tasks (9c/9d). */
+
+:root {
+  --void: #0d0708;
+  --void-2: #120a0c;
+  /* Idle = dusty rose (h=350). Task 9d ramps these on <html> while a run is in flight. */
+  --accent-h: 350;
+  --accent-s: 45%;
+  --accent-l: 72%;
+  --rose: hsl(var(--accent-h) var(--accent-s) var(--accent-l));
+  --rose-dim: hsla(var(--accent-h), var(--accent-s), var(--accent-l), 0.45);
+  --rose-faint: hsla(var(--accent-h), var(--accent-s), var(--accent-l), 0.14);
+  --off-white: #f3ecec;
+  --grey: rgba(255, 255, 255, 0.48);
+  --grey-dim: rgba(255, 255, 255, 0.28);
+  --hairline: hsla(var(--accent-h), var(--accent-s), var(--accent-l), 0.16);
+  --mono: ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
+}
+
+.hud-root {
+  width: 100%;
+  height: 100%;
+  background: radial-gradient(ellipse 70% 60% at 50% 46%, #1a1012 0%, var(--void) 55%, var(--void-2) 100%);
+  color: var(--off-white);
+  font-family: var(--mono);
+  color-scheme: dark;
+}
+
+/* ---------- Background layers (placeholder slots for Task 9c) ---------- */
+.hud-bg-canvas {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.hud-floor-fade {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 30vh;
+  z-index: 1;
+  pointer-events: none;
+  background: linear-gradient(to top, rgba(13, 7, 8, 0.85), transparent);
+}
+
+/* ---------- Stage grid ---------- */
+.hud-stage {
+  position: fixed;
+  inset: 0;
+  z-index: 2;
+  padding: 32px;
+  display: grid;
+  grid-template-columns: 330px 1fr 300px;
+  grid-template-rows: auto 1fr auto;
+  gap: 0 28px;
+  pointer-events: none;
+  min-width: 0;
+}
+.hud-stage a,
+.hud-stage button,
+.hud-stage [data-clickable] {
+  pointer-events: auto;
+}
+
+/* ---------- Header band ---------- */
+.hud-header {
+  grid-column: 1 / -1;
+  grid-row: 1;
+  /* 1fr auto 1fr instead of flex space-between: space-between centres the middle
+     child between whatever the outer two children's content happens to measure —
+     here a wide wordmark+subtitle block vs a narrow clock, which skewed the status
+     line ~264px right of true page-centre. Equal 1fr tracks give the middle column
+     an actual page-centred slot regardless of sibling width — minmax(0, 1fr), not a
+     bare 1fr, because a bare 1fr track's minimum defaults to its content's width
+     (`auto`), and the wordmark's long subtitle is wide enough to blow that "equal
+     share" and skew the centre right back off-page. */
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: flex-start;
+  padding-bottom: 18px;
+  border-bottom: 1px solid var(--hairline);
+  margin-bottom: 22px;
+  min-width: 0;
+}
+.hud-header .hud-status-line {
+  justify-self: center;
+}
+.hud-header .hud-clock-block {
+  justify-self: end;
+}
+.hud-wordmark {
+  font-size: 34px;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  color: var(--off-white);
+  text-shadow: 0 0 24px hsla(var(--accent-h), var(--accent-s), var(--accent-l), 0.25);
+}
+.hud-wordmark-sub {
+  margin-top: 8px;
+  font-size: 10px;
+  letter-spacing: 0.22em;
+  color: var(--grey-dim);
+  text-transform: uppercase;
+}
+.hud-status-line {
+  align-self: center;
+  font-size: 10.5px;
+  letter-spacing: 0.2em;
+  color: var(--grey);
+  text-transform: uppercase;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+.hud-status-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--rose);
+  box-shadow: 0 0 8px var(--rose);
+  display: inline-block;
+  animation: hud-dot-pulse 2.4s ease-in-out infinite;
+}
+@keyframes hud-dot-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.4;
+  }
+}
+.hud-status-dot.reconnecting {
+  background: var(--grey-dim);
+  box-shadow: none;
+  animation: none;
+}
+.hud-status-last-update {
+  color: var(--grey-dim);
+  font-size: 9.5px;
+}
+.hud-clock-block {
+  text-align: right;
+}
+.hud-clock-big {
+  font-size: 40px;
+  font-weight: 500;
+  color: var(--off-white);
+  letter-spacing: 0.02em;
+  font-variant-numeric: tabular-nums;
+}
+.hud-clock-big .hud-clock-secs {
+  font-size: 22px;
+  color: var(--rose);
+}
+.hud-clock-date {
+  margin-top: 6px;
+  font-size: 10px;
+  letter-spacing: 0.2em;
+  color: var(--grey-dim);
+  text-transform: uppercase;
+}
+
+/* ---------- Section header pattern ---------- */
+.hud-sec-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+.hud-sec-head .hud-title {
+  font-size: 10.5px;
+  letter-spacing: 0.24em;
+  color: var(--off-white);
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.hud-sec-head .hud-suffix {
+  font-size: 9px;
+  letter-spacing: 0.18em;
+  color: var(--grey-dim);
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.hud-sec-head .hud-rule {
+  flex: 1;
+  height: 1px;
+  background: var(--hairline);
+  transform: translateY(1px);
+}
+
+/* ---------- Rails ---------- */
+/* grid-row: 2 is a 1fr track (see .hud-stage), so each rail's height is capped by the
+   viewport regardless of how much content it holds (KPIs/directives on the
+   left; command deck/PR gates/ASSISTANT.LINK on the right). overflow-y: auto lets each
+   rail scroll independently within that fixed height instead of clipping content with no
+   way to reach it — min-height: 0 is what lets a flex child shrink below its content size
+   so overflow-y has something to act on in the first place. */
+/* min-width: 0 is the same call as min-height: 0 above, on the other axis. Below
+   the 1100px breakpoint .hud-stage collapses to a single column, so the rail is
+   the grid item that has to track the viewport. A grid item's automatic minimum
+   size is its min-content width, so with the default min-width: auto the column
+   cannot shrink past the widest thing in the rail — measured at 404.2px, which
+   left the column frozen there and pushed content past the viewport edge on any
+   narrower screen (61.2px past at a 320px viewport). */
+.hud-rail {
+  pointer-events: auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: var(--rose-dim) transparent;
+}
+.hud-rail::-webkit-scrollbar {
+  width: 6px;
+}
+.hud-rail::-webkit-scrollbar-track {
+  background: transparent;
+}
+.hud-rail::-webkit-scrollbar-thumb {
+  background-color: var(--rose-dim);
+  border-radius: 3px;
+}
+.hud-rail-left {
+  grid-column: 1;
+  grid-row: 2;
+}
+.hud-rail-right {
+  grid-column: 3;
+  grid-row: 2;
+}
+
+.hud-block {
+  border: 1px solid var(--hairline);
+  background: rgba(255, 255, 255, 0.02);
+  padding: 14px 14px 12px;
+  margin-bottom: 14px;
+  position: relative;
+}
+.hud-block::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--rose-dim);
+}
+.hud-block:last-child {
+  margin-bottom: 0;
+}
+
+/* ---------- KPI modules ---------- */
+.hud-kpi {
+  margin-bottom: 18px;
+}
+.hud-kpi:last-child {
+  margin-bottom: 0;
+}
+.hud-kpi-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+.hud-kpi-label {
+  font-size: 9.5px;
+  letter-spacing: 0.18em;
+  color: var(--grey);
+  text-transform: uppercase;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.hud-kpi-label .hud-bullet {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--rose);
+  box-shadow: 0 0 5px var(--rose);
+  flex-shrink: 0;
+}
+.hud-kpi-delta {
+  font-size: 9.5px;
+  letter-spacing: 0.08em;
+  color: var(--rose);
+}
+.hud-kpi-value {
+  font-size: 30px;
+  color: var(--off-white);
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  margin-bottom: 8px;
+  font-variant-numeric: tabular-nums;
+}
+.hud-kpi-unavailable {
+  font-size: 10px;
+  color: var(--grey-dim);
+  margin-bottom: 8px;
+  line-height: 1.4;
+}
+.hud-kpi-loading {
+  font-size: 10px;
+  color: var(--grey-dim);
+  margin-bottom: 8px;
+  line-height: 1.4;
+}
+.hud-kpi-note {
+  font-size: 10px;
+  color: var(--grey-dim);
+  margin-top: -4px;
+  margin-bottom: 8px;
+  line-height: 1.4;
+}
+.hud-kpi-value .hud-unit {
+  font-size: 15px;
+  color: var(--grey);
+}
+.hud-spark {
+  width: 100%;
+  height: 20px;
+  display: block;
+}
+
+/* ---------- Shared empty state ---------- */
+.hud-empty-state {
+  font-size: 10.5px;
+  color: var(--grey-dim);
+  font-style: italic;
+}
+
+/* ---------- Directives (checklist) ---------- */
+.hud-directive-item {
+  display: flex;
+  gap: 9px;
+  align-items: flex-start;
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--grey);
+  margin-bottom: 9px;
+}
+.hud-directive-item .hud-box {
+  font-size: 12px;
+  color: var(--rose-dim);
+  flex-shrink: 0;
+  margin-top: -1px;
+}
+.hud-directive-item.done {
+  opacity: 0.45;
+  text-decoration: line-through;
+  text-decoration-color: var(--grey-dim);
+}
+.hud-directive-item.done .hud-box {
+  color: var(--rose);
+}
+.hud-directive-footer {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--hairline);
+  font-size: 9.5px;
+  letter-spacing: 0.14em;
+  color: var(--grey-dim);
+  text-transform: uppercase;
+}
+.hud-decision-item {
+  font-size: 10.5px;
+  line-height: 1.5;
+  color: var(--grey-dim);
+  font-style: italic;
+  margin-bottom: 6px;
+}
+
+/* ---------- Multi-loop cards ---------- */
+/* One card per live loop under the Directives block. Cards stack with a
+   hairline separator so several loops read as distinct panels within the
+   same block idiom (hud-block / hud-sec-head). */
+.hud-loop-card {
+  padding-bottom: 12px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid var(--hairline);
+}
+.hud-loop-card:last-child {
+  border-bottom: none;
+  margin-bottom: 0;
+  padding-bottom: 0;
+}
+.hud-loop-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.hud-loop-title {
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--off-white);
+  /* Wrap, don't clip — house rule; long loop titles stay readable. */
+  overflow-wrap: break-word;
+  min-width: 0;
+}
+.hud-loop-count {
+  font-size: 10px;
+  color: var(--grey-dim);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.hud-unit-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.hud-unit-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.hud-unit-key {
+  overflow-wrap: break-word;
+}
+.hud-pr-chip {
+  font-size: 8.5px;
+  letter-spacing: 0.1em;
+  color: var(--grey-dim);
+  text-transform: uppercase;
+  border: 1px solid var(--hairline);
+  border-radius: 999px;
+  padding: 1px 7px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.hud-unit-desc {
+  font-size: 10px;
+  line-height: 1.45;
+  color: var(--grey-dim);
+  /* Wrap, don't clip — house rule; full description stays readable. */
+  overflow-wrap: break-word;
+}
+
+/* ---------- Stalled loops sub-list ---------- */
+/* Loops idle past the live window get one dim line each here instead of a full
+   card. */
+.hud-stalled-list {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--hairline);
+}
+.hud-stalled-row {
+  font-size: 10px;
+  line-height: 1.6;
+  color: var(--grey-dim);
+  overflow-wrap: break-word;
+}
+
+/* ---------- Command deck ---------- */
+.hud-deck-status {
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  color: var(--grey-dim);
+  text-transform: uppercase;
+  /* Dynamic content ("Idle · 0/8 Active · 0 Queued") — nowrap forced it past the fixed
+     300px right rail's edge at every desktop width (the rail's own width doesn't grow
+     with viewport, so `.hud-rule` shrinking to 0 was never enough headroom). Wrapping
+     instead of clipping keeps the count readable rather than silently truncating it. */
+  white-space: normal;
+  min-width: 0;
+}
+.hud-active-cmd-list:empty {
+  display: none;
+}
+.hud-active-cmd-row {
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  color: var(--rose);
+  text-shadow: 0 0 8px hsla(var(--accent-h), var(--accent-s), var(--accent-l), 0.5);
+  text-transform: uppercase;
+  margin-bottom: 8px;
+}
+.hud-cmd-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px 16px;
+  margin-bottom: 14px;
+}
+.hud-cmd {
+  background: none;
+  border: none;
+  padding: 0;
+  text-align: left;
+  font-family: var(--mono);
+  cursor: pointer;
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  font-size: 10.5px;
+  letter-spacing: 0.1em;
+  color: var(--grey);
+  text-transform: uppercase;
+  transition: color 0.15s ease;
+}
+.hud-cmd .hud-bullet {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--rose);
+  box-shadow: 0 0 5px var(--rose);
+  flex-shrink: 0;
+  transition: box-shadow 0.15s ease;
+}
+.hud-cmd .hud-label {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: inline-block;
+  max-width: 100px;
+}
+.hud-cmd:hover {
+  color: var(--off-white);
+}
+.hud-cmd:hover .hud-label {
+  text-decoration: underline;
+  text-decoration-color: var(--rose-dim);
+  text-underline-offset: 3px;
+}
+.hud-cmd:focus-visible {
+  outline: 1px solid var(--rose);
+  outline-offset: 3px;
+}
+.hud-cmd.running {
+  color: var(--off-white);
+}
+.hud-cmd.running .hud-bullet {
+  box-shadow: 0 0 5px var(--rose);
+  animation: hud-cmd-pulse 0.9s ease-in-out infinite;
+}
+@keyframes hud-cmd-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
+  }
+}
+
+.hud-run-history {
+  margin-bottom: 16px;
+}
+.hud-run-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  padding: 5px 0;
+  color: var(--grey);
+}
+.hud-run-row .hud-glyph {
+  color: var(--rose);
+  margin-right: 6px;
+}
+.hud-run-row .status-ok {
+  color: var(--rose);
+}
+.hud-run-row .status-fail {
+  color: var(--grey-dim);
+}
+
+.hud-deck-footnote {
+  font-size: 8.5px;
+  letter-spacing: 0.1em;
+  color: var(--grey-dim);
+  text-transform: uppercase;
+  padding-top: 10px;
+  border-top: 1px solid var(--hairline);
+}
+
+/* ---------- Run output viewer ---------- */
+/* .hud-run-row-selectable overrides .hud-run-row's default div styling onto a <button> (the
+   run-history rows here double as the output viewer's run picker) — reset the button chrome
+   first, then reapply the same layout .hud-run-row already uses elsewhere. */
+.hud-run-row-selectable {
+  width: 100%;
+  background: none;
+  border: none;
+  font-family: var(--mono);
+  cursor: pointer;
+  text-align: left;
+}
+.hud-run-row-selectable:hover {
+  color: var(--off-white);
+}
+.hud-run-row-selectable.selected {
+  color: var(--off-white);
+}
+.hud-run-row-selectable.selected .hud-glyph {
+  text-shadow: 0 0 6px hsla(var(--accent-h), var(--accent-s), var(--accent-l), 0.6);
+}
+/* ---------- Run output overlay ---------- */
+/* Clicking a history row opens this in-page overlay (a framed HUD pane over the whole stage, not
+   a browser window), rendering the run's output as sanitized markdown. It replaces the retired
+   inline <pre> viewer that squished the same text into a small box below the list. Portaled to
+   document.body so the fixed backdrop covers the HUD regardless of the history box's position. */
+.hud-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px;
+}
+.hud-overlay-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(13, 7, 8, 0.72);
+  backdrop-filter: blur(2px);
+}
+/* The framed pane: sized to a readable measure, auto-sized to content up to 80vh then its body
+   scrolls internally. Shares the hud-block idiom — same void background, rose hairline border. */
+.hud-overlay-panel {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: min(70ch, 100%);
+  max-height: 80vh;
+  background: linear-gradient(180deg, var(--void-2), var(--void));
+  border: 1px solid var(--rose-dim);
+  box-shadow: 0 0 40px rgba(0, 0, 0, 0.6), 0 0 0 1px var(--hairline) inset;
+  font-family: var(--mono);
+}
+.hud-overlay-head {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--hairline);
+  background: rgba(255, 255, 255, 0.04);
+}
+.hud-overlay-title {
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--off-white);
+}
+.hud-overlay-meta {
+  flex: 1;
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--grey);
+}
+/* Resets default button chrome the same way .hud-run-row-selectable does, then restyles as a
+   small HUD close control. */
+.hud-overlay-close {
+  margin: 0;
+  padding: 2px 8px;
+  background: none;
+  border: 1px solid var(--hairline);
+  border-radius: 2px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--grey);
+  cursor: pointer;
+}
+.hud-overlay-close:hover {
+  color: var(--off-white);
+  border-color: var(--rose-dim);
+}
+.hud-overlay-body {
+  /* min-height:0 lets this flex child shrink below its content height so overflow-y actually
+     scrolls INSIDE the panel (header stays pinned, panel capped at 80vh) instead of the whole
+     panel growing past its max-height. Without it a flex item's default min-height:auto wins. */
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 16px 20px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--rose-dim) transparent;
+}
+
+/* Rendered-markdown typography inside the overlay body — readable prose, not squished mono text.
+   Kept scoped under .hud-markdown so it can't leak onto the rest of the HUD's mono chrome. */
+.hud-markdown {
+  color: var(--off-white);
+  font-size: 13px;
+  line-height: 1.7;
+  word-break: break-word;
+}
+.hud-markdown h1,
+.hud-markdown h2,
+.hud-markdown h3 {
+  color: var(--off-white);
+  letter-spacing: 0.02em;
+  line-height: 1.3;
+  margin: 1.1em 0 0.5em;
+}
+.hud-markdown h1 {
+  font-size: 1.5em;
+}
+.hud-markdown h2 {
+  font-size: 1.25em;
+}
+.hud-markdown h3 {
+  font-size: 1.1em;
+}
+.hud-markdown h1:first-child,
+.hud-markdown h2:first-child,
+.hud-markdown h3:first-child,
+.hud-markdown p:first-child {
+  margin-top: 0;
+}
+.hud-markdown p,
+.hud-markdown ul,
+.hud-markdown ol {
+  margin: 0.6em 0;
+}
+.hud-markdown ul,
+.hud-markdown ol {
+  padding-left: 1.4em;
+}
+.hud-markdown li {
+  margin: 0.25em 0;
+}
+.hud-markdown a {
+  color: var(--rose);
+  text-decoration: underline;
+}
+.hud-markdown code {
+  font-family: var(--mono);
+  font-size: 0.9em;
+  background: rgba(255, 255, 255, 0.06);
+  padding: 1px 4px;
+  border-radius: 2px;
+}
+.hud-markdown pre {
+  margin: 0.8em 0;
+  padding: 12px;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--hairline);
+  border-radius: 2px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--rose-dim) transparent;
+}
+.hud-markdown pre code {
+  background: none;
+  padding: 0;
+  color: var(--grey);
+  line-height: 1.6;
+}
+.hud-markdown blockquote {
+  margin: 0.8em 0;
+  padding-left: 12px;
+  border-left: 2px solid var(--rose-dim);
+  color: var(--grey);
+}
+
+/* ---------- PR gates ---------- */
+.hud-gate-row {
+  padding: 9px 0;
+  border-bottom: 1px solid var(--hairline);
+}
+.hud-gate-row:last-child {
+  border-bottom: none;
+}
+.hud-gate-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 10.5px;
+  color: var(--off-white);
+  margin-bottom: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.hud-gate-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 9.5px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--grey-dim);
+}
+.hud-gate-status.ready {
+  color: var(--rose);
+}
+.hud-gate-status .hud-diamond {
+  font-size: 9px;
+}
+
+.hud-reserved-row {
+  margin-top: 16px;
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  color: var(--grey-dim);
+  text-transform: uppercase;
+}
+
+/* ---------- Assistant.Link queue (pending approvals) ---------- */
+.hud-queue-input-preview {
+  font-family: var(--mono);
+  font-size: 8.5px;
+  letter-spacing: 0.02em;
+  color: var(--grey-dim);
+  white-space: pre-wrap;
+  word-break: break-all;
+  margin: 4px 0;
+}
+.hud-queue-proposal-preview {
+  margin: 4px 0;
+}
+.hud-queue-proposal-name {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: var(--off-white);
+}
+.hud-queue-proposal-description,
+.hud-queue-proposal-summary {
+  font-size: 9px;
+  color: var(--grey);
+  margin-top: 2px;
+}
+.hud-queue-proposal-stats {
+  font-family: var(--mono);
+  font-size: 8.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--grey-dim);
+  margin-top: 4px;
+}
+.hud-queue-proposal-chain {
+  font-family: var(--mono);
+  font-size: 8.5px;
+  color: var(--grey-dim);
+  word-break: break-all;
+  margin-top: 2px;
+}
+.hud-queue-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+.hud-queue-approve,
+.hud-queue-deny {
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  background: none;
+  border: 1px solid var(--hairline);
+  padding: 3px 8px;
+  cursor: pointer;
+  color: var(--grey);
+}
+.hud-queue-approve:hover {
+  color: var(--off-white);
+  border-color: var(--rose);
+}
+.hud-queue-deny:hover {
+  color: var(--off-white);
+  border-color: var(--rose);
+}
+.hud-queue-approve:disabled,
+.hud-queue-deny:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* ---------- Assistant.Link build status (approve-builder pipeline) ---------- */
+.hud-build-status {
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  margin-top: 4px;
+}
+.hud-build-status a {
+  color: inherit;
+}
+.hud-build-building {
+  color: var(--grey);
+}
+.hud-build-pr-open {
+  color: var(--rose);
+}
+.hud-build-resolved {
+  color: var(--grey-dim);
+}
+.hud-build-failed,
+.hud-build-dead {
+  color: var(--grey-dim);
+}
+/* Elapsed + heartbeat freshness suffix on a running build — dimmer than
+   the phase label it trails. */
+.hud-build-detail {
+  color: var(--grey-dim);
+}
+
+/* ---------- Bottom centre directive ---------- */
+.hud-bottom-centre {
+  grid-column: 1 / -1;
+  grid-row: 3;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  pointer-events: none;
+  padding-top: 12px;
+}
+.hud-bc-label {
+  font-size: 9.5px;
+  letter-spacing: 0.24em;
+  color: var(--grey-dim);
+  text-transform: uppercase;
+  margin-bottom: 4px;
+}
+.hud-bc-loop-name {
+  /* Wrap, don't clip — same house style as the ticker below and the
+     status-line/deck-status overflow fixes; long loop names stay readable. */
+  max-width: 90vw;
+  white-space: normal;
+  overflow-wrap: break-word;
+}
+.hud-bc-units {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  line-height: 1;
+}
+.hud-bc-value {
+  font-size: 110px;
+  font-weight: 500;
+  color: var(--off-white);
+  letter-spacing: -0.02em;
+  text-shadow: 0 0 40px hsla(var(--accent-h), var(--accent-s), var(--accent-l), 0.2);
+}
+.hud-bc-units-label {
+  font-size: 13px;
+  letter-spacing: 0.2em;
+  color: var(--grey);
+  text-transform: uppercase;
+}
+.hud-bc-ticker {
+  margin-top: 8px;
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  color: var(--grey-dim);
+  text-transform: uppercase;
+}
+
+@media (max-width: 1100px) {
+  .hud-root {
+    /* .hud-stage below switches to position: absolute + height: auto so it can grow past
+       100vh; that only contributes to *this* element's scrollable overflow (and overflow-y:
+       auto below has something to scroll) if .hud-root is itself the absolute box's
+       containing block — hence position: relative here. */
+    position: relative;
+    overflow-y: auto;
+  }
+  .hud-stage {
+    position: absolute;
+    inset: 0 0 auto 0;
+    height: auto;
+    min-height: 100vh;
+    grid-template-columns: 1fr;
+    grid-template-rows: auto auto auto auto;
+  }
+  .hud-rail-left {
+    grid-column: 1;
+    grid-row: 2;
+  }
+  .hud-rail-right {
+    grid-column: 1;
+    grid-row: 3;
+  }
+  .hud-bottom-centre {
+    grid-row: 4;
+  }
+  .hud-rail {
+    overflow: visible;
+  }
+  /* .hud-status-line's white-space: nowrap forces the header's flex row to its full
+     min-content width, which under the single-column .hud-stage above becomes that
+     column's width — wide enough to push .hud-cmd-input (width: 100%, in the right
+     rail's 1fr 1fr command grid) past the viewport edge. Wrapping it here removes that
+     forced minimum so the column — and everything inside it — fits. */
+  .hud-status-line {
+    white-space: normal;
+    flex-wrap: wrap;
+  }
+  /* HUD callouts (merge-ready / progress) land in later tasks; hidden below the breakpoint
+     same as the mockup, kept here so those components inherit the rule once they exist. */
+  .hud-callout,
+  .hud-leader,
+  .hud-progress {
+    display: none;
+  }
+}
+
+/* Phone widths: builds on the max-width: 1100px stack above (already single-column). The
+   sphere is decorative background there — on a phone it just eats space behind data panels
+   that are already full-bleed, so it's hidden outright rather than shrunk. Body type gets a
+   readable bump (desktop's 9-10.5px is tuned for a monitor, not a handheld), and interactive
+   rows/buttons get real touch targets. */
+@media (max-width: 640px) {
+  .hud-stage {
+    padding: 16px;
+    gap: 0 16px;
+  }
+  .hud-bg-canvas {
+    display: none;
+  }
+  /* Desktop's 3-column header (wordmark | status-line | clock, see .hud-header's comment)
+     crushes the wordmark and clock into overlapping text at phone width — neither column
+     has room to breathe once the middle "auto" column claims its space. Stack them instead. */
+  .hud-header {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto auto auto;
+    row-gap: 10px;
+  }
+  .hud-header .hud-status-line,
+  .hud-header .hud-clock-block {
+    justify-self: start;
+  }
+  .hud-wordmark {
+    font-size: 22px;
+  }
+  .hud-block {
+    font-size: 12.5px;
+    line-height: 1.5;
+  }
+  .hud-run-row,
+  .hud-run-row-selectable {
+    font-size: 12.5px;
+    padding: 11px 0;
+    min-height: 44px;
+    align-items: center;
+  }
+  .hud-cmd {
+    font-size: 13px;
+    padding: 11px 0;
+    min-height: 44px;
+  }
+  .hud-cmd-grid {
+    grid-template-columns: 1fr;
+  }
+  .hud-cmd .hud-label {
+    max-width: none;
+  }
+  .hud-deck-status,
+  .hud-active-cmd-row,
+  .hud-deck-footnote {
+    font-size: 11px;
+  }
+  .hud-bc-value {
+    font-size: 56px;
+  }
+  .hud-bc-units-label {
+    font-size: 12px;
+  }
+  .hud-overlay {
+    padding: 12px;
+  }
+  .hud-overlay-panel {
+    width: min(70ch, 92vw);
+  }
+}
+
+/* Short desktop windows: keep the 3-column layout, but stop clipping rail content at the
+   fold — let the page scroll instead of pinning .hud-stage to a fixed 100vh box. The
+   sphere background (.hud-bg-canvas, position: fixed) stays put either way. */
+@media (max-height: 760px) {
+  .hud-root {
+    /* see the max-width: 1100px query's comment on .hud-root — same reason. */
+    position: relative;
+    overflow-y: auto;
+  }
+  .hud-stage {
+    position: absolute;
+    inset: 0 0 auto 0;
+    height: auto;
+    min-height: 100vh;
+  }
+  .hud-rail {
+    overflow: visible;
+  }
+}
+
+/* ---------- Command deck: run-lifecycle states (Task 9d) ---------- */
+/* .hud-cmd.running .hud-bullet is already defined above (Task 9a) — reused as-is. */
+.hud-cmd.flare .hud-label {
+  animation: hud-flare-flash 0.55s ease;
+}
+@keyframes hud-flare-flash {
+  0% {
+    color: var(--off-white);
+    text-shadow: 0 0 14px rgba(255, 255, 255, 0.9);
+  }
+  100% {
+    color: var(--grey);
+    text-shadow: none;
+  }
+}
+.hud-cmd.shake {
+  animation: hud-cmd-shake 0.35s ease;
+}
+@keyframes hud-cmd-shake {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  25% {
+    transform: translateX(-3px);
+  }
+  75% {
+    transform: translateX(3px);
+  }
+}
+@keyframes hud-complete-flash {
+  0% {
+    background: hsl(120 90% 55%);
+    box-shadow: 0 0 12px hsl(120 90% 55%);
+  }
+  100% {
+    background: var(--rose);
+    box-shadow: 0 0 5px var(--rose);
+  }
+}
+@keyframes hud-fail-flash {
+  0%,
+  50% {
+    background: var(--rose);
+    box-shadow: 0 0 20px var(--rose);
+  }
+  100% {
+    background: var(--rose);
+    box-shadow: 0 0 5px var(--rose);
+  }
+}
+.hud-cmd.completed .hud-bullet {
+  animation: hud-complete-flash 1.5s ease forwards;
+}
+.hud-cmd.failed .hud-bullet {
+  animation: hud-fail-flash 1.5s ease forwards;
+}
+.hud-cmd-input {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--hairline);
+  color: var(--off-white);
+  font-family: var(--mono);
+  font-size: 9.5px;
+  letter-spacing: 0.04em;
+  padding: 3px 7px;
+  width: 100%;
+  margin-top: 4px;
+}
+.hud-cmd-input:focus {
+  outline: none;
+  border-color: var(--rose);
+}
+.hud-cmd .tag {
+  font-size: 7.5px;
+  letter-spacing: 0.14em;
+  color: var(--rose-dim);
+  text-transform: uppercase;
+  margin-left: 4px;
+}
+.hud-cmd-error {
+  font-size: 8.5px;
+  letter-spacing: 0.04em;
+  color: var(--rose);
+  margin-top: 2px;
+}
+.hud-run-row.new {
+  animation: hud-run-in 0.4s ease;
+}
+@keyframes hud-run-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ---------- HUD callouts (merge-ready + per-run progress), floating over the sphere ---------- */
+.hud-callout {
+  position: fixed;
+  z-index: 3;
+  pointer-events: auto;
+  border: 1px solid var(--hairline);
+  background: rgba(13, 7, 8, 0.92);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  padding: 12px 16px;
+  min-width: 200px;
+  font-size: 10px;
+  cursor: grab;
+  user-select: none;
+}
+.hud-callout.dragging {
+  cursor: grabbing;
+}
+.hud-callout.dismissable {
+  transition: opacity 0.3s ease;
+}
+.hud-callout-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+.hud-callout .hud-diamond {
+  color: var(--rose);
+  font-size: 10px;
+}
+.hud-callout .hud-label {
+  letter-spacing: 0.16em;
+  color: var(--off-white);
+  text-transform: uppercase;
+  flex: 1;
+}
+.hud-callout-close {
+  background: none;
+  border: none;
+  color: var(--grey-dim);
+  cursor: pointer;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1;
+  padding: 2px 4px;
+}
+.hud-callout-close:hover {
+  color: var(--off-white);
+}
+.hud-callout-sub {
+  color: var(--rose-dim);
+  letter-spacing: 0.08em;
+}
+.hud-leader {
+  position: fixed;
+  width: 1px;
+  background: linear-gradient(to bottom, var(--hairline), transparent);
+  z-index: 3;
+  pointer-events: none;
+}
+
+/* ---------- Run-progress callout ---------- */
+.hud-progress {
+  padding-bottom: 15px; /* room for .hud-progress-bar-track, pinned absolutely to the box's bottom edge */
+}
+.hud-progress-status {
+  letter-spacing: 0.06em;
+  color: var(--grey-dim);
+}
+.hud-progress-elapsed {
+  color: var(--grey);
+  font-variant-numeric: tabular-nums;
+}
+.hud-progress-bar-track {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 3px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+.hud-progress-bar-fill {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, var(--rose-dim), var(--rose));
+  box-shadow: 0 0 8px hsla(var(--accent-h), var(--accent-s), var(--accent-l), 0.6);
+  transition: width 0.1s linear;
+}
+.hud-progress.flash .hud-callout-top .hud-label {
+  animation: hud-progress-flash 0.5s ease;
+}
+@keyframes hud-progress-flash {
+  0% {
+    color: var(--off-white);
+    text-shadow: 0 0 16px rgba(255, 255, 255, 0.95);
+  }
+  100% {
+    color: var(--off-white);
+    text-shadow: none;
+  }
+}
+.hud-progress.fade-out {
+  transition: opacity 0.6s ease;
+  opacity: 0;
+}
+
+/* ---------- Intro reveal (Task 9d): staged fade/slide-in, WAAPI/CSS only — no GSAP ---------- */
+.hud-intro-wordmark {
+  animation: hud-intro-wordmark 0.9s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+@keyframes hud-intro-wordmark {
+  from {
+    opacity: 0;
+    letter-spacing: 0.6em;
+    filter: blur(10px);
+  }
+  to {
+    opacity: 1;
+    filter: blur(0);
+  }
+}
+.hud-intro-fade {
+  animation: hud-intro-fade 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation-delay: 0.4s;
+}
+@keyframes hud-intro-fade {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.hud-intro-rail-left {
+  animation: hud-intro-slide-left 0.6s cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation-delay: 0.6s;
+}
+.hud-intro-rail-right {
+  animation: hud-intro-slide-right 0.6s cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation-delay: 0.45s;
+}
+@keyframes hud-intro-slide-left {
+  from {
+    opacity: 0;
+    transform: translateX(-24px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+@keyframes hud-intro-slide-right {
+  from {
+    opacity: 0;
+    transform: translateX(24px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+.hud-intro-bottom {
+  animation: hud-intro-fade-up 0.6s cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation-delay: 0.9s;
+}
+@keyframes hud-intro-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (max-width: 1100px) {
+  .hud-callout,
+  .hud-leader,
+  .hud-progress {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hud-status-dot,
+  .hud-cmd.running .hud-bullet,
+  .hud-cmd.shake,
+  .hud-cmd.flare .hud-label,
+  .hud-run-row.new,
+  .hud-progress.flash .hud-callout-top .hud-label,
+  .hud-intro-wordmark,
+  .hud-intro-fade,
+  .hud-intro-rail-left,
+  .hud-intro-rail-right,
+  .hud-intro-bottom {
+    animation: none;
+  }
+}
+
+/* ---------- Context Trend panel ---------- */
+/* Every class below was referenced by ContextTrendPanel.tsx from the day it
+   shipped but had no rule anywhere, so the whole readout fell back to the UA
+   default (~16px) — roughly 60% larger than the 10-10.5px the rest of the HUD
+   uses — and, with no min-width:0 on a flex child, it overflowed the rail and
+   clipped mid-word. Sizes here match .hud-kpi-note / .hud-empty-state so the
+   panel reads as part of the same instrument rather than a pasted-in block. */
+.hud-trend-chart {
+  width: 100%;
+  height: auto;
+  display: block;
+  margin-bottom: 8px;
+}
+.hud-trend-readout {
+  font-size: 10px;
+  line-height: 1.4;
+  color: var(--off-white);
+  margin-bottom: 6px;
+  /* The hovered string carries a date, a rate, a turn count and a side, so it
+     is long by construction. Wrap it rather than let it push the rail wide —
+     same call, and the same reason, as .hud-sec-head's white-space: normal. */
+  white-space: normal;
+  min-height: 1.4em;
+}
+/* Idle is the resting state, so it recedes; hovering promotes the text to
+   full contrast rather than changing size, which would reflow the panel. */
+.hud-trend-readout.idle {
+  color: var(--grey-dim);
+}
+.hud-trend-row {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 10px;
+  line-height: 1.5;
+  color: var(--grey);
+}
+/* flex:1 hairline leader, the same idiom .hud-sec-head .hud-rule uses. */
+.hud-trend-fill {
+  flex: 1;
+  height: 1px;
+  background: var(--hairline);
+  transform: translateY(-2px);
+}
+.hud-trend-value {
+  color: var(--off-white);
+  white-space: nowrap;
+}
+/* The reserved caveat colour: these lines carry the two facts that bound how
+   the chart may be read (a small after-side n, and row 1 being inert), so they
+   are deliberately tinted rather than left as body text. */
+.hud-trend-caveat {
+  font-size: 10px;
+  line-height: 1.4;
+  color: var(--rose-dim);
+  margin-top: 6px;
+  white-space: normal;
+}
+.hud-trend-footer {
+  font-size: 9.5px;
+  line-height: 1.4;
+  color: var(--grey-dim);
+  margin-top: 6px;
+  white-space: normal;
+}

@@ -17,7 +17,7 @@ entries = data["skills"]
 abort "skills index: skills must be a non-empty mapping" unless entries.is_a?(Hash) && !entries.empty?
 
 directories = {
-  "skill" => {"claude" => "skills", "codex" => "codex/skills"},
+  "skill" => {"claude" => "skills", "codex" => ".codex/skills"},
   "agent" => {"claude" => "agents", "codex" => "codex/agents"},
   "command" => {"claude" => "commands", "codex" => "codex/commands"}
 }
@@ -28,8 +28,8 @@ expected = {
     "command" => Dir[File.join(root, "commands/*.md")]
   },
   "codex" => {
-    "skill" => Dir[File.join(root, "codex/skills/*.md")],
-    "agent" => Dir[File.join(root, "codex/agents/*.md")] + Dir[File.join(root, ".codex/skills/*/SKILL.md")],
+    "skill" => Dir[File.join(root, ".codex/skills/*/SKILL.md")].reject { |path| path.end_with?("/disposition-scout/SKILL.md") },
+    "agent" => Dir[File.join(root, "codex/agents/*.md")] + Dir[File.join(root, ".codex/skills/disposition-scout/SKILL.md")],
     "command" => Dir[File.join(root, "codex/commands/*.md")]
   }
 }.transform_values { |kinds| kinds.transform_values { |paths| paths.map { |path| path.delete_prefix("#{root}/") }.sort } }
@@ -53,7 +53,7 @@ entries.each do |id, entry|
       resolved = path.is_a?(String) ? File.expand_path(path, root) : nil
       abort "skills index: active #{provider} implementation missing for #{id}" unless resolved && resolved.start_with?("#{root}/") && File.file?(resolved)
       valid_path = path.start_with?("#{directories[kind][provider]}/")
-      valid_path ||= kind == "agent" && provider == "codex" && path == ".codex/skills/#{id}/SKILL.md"
+      valid_path ||= provider == "codex" && %w[skill agent].include?(kind) && path == ".codex/skills/#{id}/SKILL.md"
       abort "skills index: #{id} has wrong #{provider} kind directory" unless valid_path
       seen[provider][kind] << path
     elsif !route["path"].nil?

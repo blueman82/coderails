@@ -1,25 +1,24 @@
 ---
-provider: codex
-id: cite-check
-source_kind: skill
-graph_role: null
-required_inputs: [claim to verify]
-output_contract: Re-derived claim backed by sources only, no recall or inference.
-status: active
+name: cite-check
+description: Re-derive a specific claim from sources only - no recall, no inference, just evidence
+agent: coderails:source-auditor
+context: fork
+background: false
+argument-hint: <claim to verify>
+effort: high
 ---
 
-# cite-check
+# Cite-check
 
-This is the native Codex implementation for `cite-check`.
+Re-derive the claim(s) below using only durable sources you can read or produce
+right now — file contents, git output, and fresh command output. You have no
+conversation history, so do not rely on prior tool results or anything said
+earlier; go read or re-run it. No recall. No inference. No "I believe" or
+"should be."
 
-## Execution
+**Claim(s):** $ARGUMENTS
 
-Apply this capability to the current request and available workspace state. Inspect relevant evidence before making claims, keep scope bounded by the request, and return the declared output contract.
-
-## Inputs
-
-Required: `[claim to verify]`.
-
-## Result
-
-Produce: `Re-derived claim backed by sources only, no recall or inference.`.
+Treat each claim independently and give each its own verdict (evidence for one
+never carries another). For each, cite the source (`file:line`, tool output,
+exact quote). If a claim cannot be fully sourced, state precisely what is
+missing and what would be needed to verify it.

@@ -1,6 +1,6 @@
 {
   "name": "coderails-codex",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Provider-native Coderails workflow and graph runtime for Codex",
   "author": {
     "name": "Gary Harrison",
