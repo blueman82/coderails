@@ -1,13 +1,13 @@
 {
   "name": "coderails-codex",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Provider-native Coderails workflow and graph runtime for Codex",
   "author": {
     "name": "Gary Harrison",
     "email": "gjharrison01@gmail.com"
   },
   "license": "MIT",
-  "skills": "./codex/skills/",
+  "skills": "./.codex/skills/",
   "commands": "./codex/commands/",
   "hooks": "./codex/hooks/"
 }
