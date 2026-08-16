@@ -13,9 +13,13 @@
 #      U4 itself is orchestrator-internal (no index.yaml graph_role match,
 #      confirmed this session) and is NOT dispatched via graph_dispatch_plan
 #      — this test does not invent one.
-#   3. A second join beyond J2: S9-wiki and S9-docs, chained sequentially
-#      per execution-graph.md's own S9-wiki -> S9-docs edge (both resolve
-#      cleanly in skills/index.yaml: wiki-writer, docs-auditor).
+#   3. A second real join beyond J2: J2.8, per execution-graph.md's own node
+#      table (prerequisites S2.8 plus S2.7d[i]/S2.7e; releases U3[i]). Like
+#      J2, J2.8 has no index.yaml graph_role entry (it's a readiness point,
+#      not a dispatch target) — graph_dispatch_plan correctly reports it as
+#      kind:"join", never attempting to dispatch it. Red/green halves mirror
+#      block 1: downstream U3 is blocked before the explicit J2.8-release
+#      write, ready after.
 set -u
 
 TESTS_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -87,22 +91,37 @@ post_u4=$(bash "$LIB_DIR/graph_readiness.sh" "$TMP/u34.json" "U4")
   && ok "acceptance: U3->U4 sequential link — U4 blocked pre-U3, ready post-U3-done" \
   || fail "acceptance: U3->U4 sequential link" "pre_u4=$pre_u4 post_u4=$post_u4"
 
-# --- 3: a second join beyond J2 — S9-wiki -> S9-docs, both real index.yaml
-# targets (wiki-writer, docs-auditor), chained sequentially per
-# execution-graph.md's own S9-wiki -> S9-docs edge ---
+# --- 3a: a second real join beyond J2 — J2.8, per execution-graph.md's node
+# table (prerequisites S2.8, S2.7d[i]/S2.7e; releases U3[i]). J2.8 has no
+# graph_role entry in index.yaml (same situation as J2 and U4), so plan must
+# report kind:"join", never a dispatch target. ---
 jq -n '{ graph: { nodes: {
-    "S9-wiki": {status:"pending", outcome:"pending", retry:{attempts:0,max:5}},
-    "S9-docs": {status:"pending", outcome:"pending", retry:{attempts:0,max:5}}
-  }, edges: [{from:"S9-wiki",to:"S9-docs"}], joins: {} } }' > "$TMP/s9.json"
-plan_s9=$(graph_dispatch_plan "$TMP/s9.json" "$INDEX_YAML")
-wiki_id=$(printf '%s' "$plan_s9" | jq -r 'select(.node_id=="S9-wiki") | .skill_id')
-pre_docs=$(bash "$LIB_DIR/graph_readiness.sh" "$TMP/s9.json" "S9-docs")
-graph_dispatch_record "$TMP/s9.json" '{"S9-wiki":{"outcome":"done","evidence":"acceptance-test throwaway wiki PR"}}' >/dev/null
-post_docs_target=$(graph_dispatch_plan "$TMP/s9.json" "$INDEX_YAML" | jq -r 'select(.node_id=="S9-docs") | .skill_id')
-post_docs_ready=$(bash "$LIB_DIR/graph_readiness.sh" "$TMP/s9.json" "S9-docs")
-[ "$wiki_id" = "wiki-writer" ] && [ "$pre_docs" = "blocked" ] \
-  && [ "$post_docs_target" = "docs-auditor" ] && [ "$post_docs_ready" = "ready" ] \
-  && ok "acceptance: second join beyond J2 — S9-wiki(wiki-writer) -> S9-docs(docs-auditor) end to end" \
-  || fail "acceptance: S9-wiki -> S9-docs" "wiki_id=$wiki_id pre_docs=$pre_docs post_docs_target=$post_docs_target post_docs_ready=$post_docs_ready"
+    "S2.8": {status:"done", outcome:"done", retry:{attempts:0,max:5}},
+    "S2.7d": {status:"done", outcome:"done", retry:{attempts:0,max:5}},
+    "J2.8": {status:"pending", outcome:"pending", retry:{attempts:0,max:5}},
+    "U3": {status:"pending", outcome:"pending", retry:{attempts:0,max:5}}
+  }, edges: [{from:"J2.8",to:"U3"}],
+     joins: {"J2.8":{mode:"all", inputs:["S2.8","S2.7d"]}} } }' > "$TMP/j28.json"
+plan_j28=$(graph_dispatch_plan "$TMP/j28.json" "$INDEX_YAML")
+j28_kind=$(printf '%s' "$plan_j28" | jq -r 'select(.node_id=="J2.8") | .kind')
+j28_skill=$(printf '%s' "$plan_j28" | jq -r 'select(.node_id=="J2.8") | .skill_id')
+[ "$j28_kind" = "join" ] && [ "$j28_skill" = "null" ] \
+  && ok "acceptance: plan reports J2.8 as kind:join, never a dispatch target" \
+  || fail "acceptance: J2.8 plan kind" "j28_kind=$j28_kind j28_skill=$j28_skill"
+
+# --- 3b (RED HALF): U3 is BLOCKED before the explicit J2.8-release write,
+# even though S2.8/S2.7d are already done — mirrors block 1's red half: a
+# join's inputs being done does not itself release the join. ---
+pre_u3=$(bash "$LIB_DIR/graph_readiness.sh" "$TMP/j28.json" "U3")
+[ "$pre_u3" = "blocked" ] \
+  && ok "acceptance (red half): U3 still blocked before explicit J2.8 release" \
+  || fail "acceptance red half: U3 should be blocked pre-release" "got=$pre_u3"
+
+# --- 3c: after the explicit J2.8 release write, U3 becomes ready ---
+jq '.graph.nodes["J2.8"].status = "done" | .graph.nodes["J2.8"].outcome = "done"' "$TMP/j28.json" > "$TMP/j28.json.tmp" && mv "$TMP/j28.json.tmp" "$TMP/j28.json"
+post_u3=$(bash "$LIB_DIR/graph_readiness.sh" "$TMP/j28.json" "U3")
+[ "$post_u3" = "ready" ] \
+  && ok "acceptance: second join beyond J2 — U3 ready after explicit J2.8 release write" \
+  || fail "acceptance: U3 should be ready post-J2.8-release" "got=$post_u3"
 
 [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails)"; exit 1; }
