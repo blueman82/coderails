@@ -41,13 +41,3 @@ Run it even without Serena (the `--semantic` backend) — omit `--semantic` for 
 Delegate it to a spawned agent, `subagent_type: coderails:docs-auditor`, at the `default` role, same as the wiki-writer agent — both inline-assigned (like Phase 2's; Phase 2.8 routes build tasks only) — to keep orchestrator context clean. **Do not substitute a generic agent for docs auditing.** In-tree documentation has repo-specific structure and conventions; a docs-auditor type knows to check against the actual repo's doc architecture, not generic drift categories.
 
 **Disposition of findings:** `/sync-docs` surfaces drift; the orchestrator must triage. Fix only drift the loop's own PRs introduced. Surface pre-existing drift to the user rather than silently folding unrelated doc fixes into the loop — that is scope creep. This mirrors the loop's finding-triage discipline.
-
-**These two phase steps are graph nodes and resolve cleanly today.** `S9-wiki`
-and `S9-docs` both resolve through `graph_dispatch_plan` unambiguously
-(`wiki-writer` and `docs-auditor`, agent-tier, `unresolved:false`) — unlike
-`U4b-review`/`U4b-merge-gate`, which remain unresolved per PR #411's
-characterization test. The dispatch sequencing for this pair — a plain
-sequential edge, `S9-wiki` then `S9-docs`, no join — is documented in
-[execution-graph.md](execution-graph.md)'s `S9-wiki -> S9-docs` and
-`J12-all-units` subsection. `hooks/scripts/tests/graph_dispatch_j12_s9.test.sh`
-is the acceptance evidence for this link.
