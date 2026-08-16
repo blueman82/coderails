@@ -7,14 +7,20 @@ what makes a node *ready*.
 
 Before dispatching any candidate node, run the read-only readiness query
 `${PLUGIN_ROOT}/hooks/scripts/lib/graph_readiness.sh <path-to-progress.json> <node-id>`,
-where `PLUGIN_ROOT` is `${CLAUDE_PLUGIN_ROOT}` — never `git rev-parse
---show-toplevel` of the invoking repo, which is the *user's* project and does
-not contain this script. If `${CLAUDE_PLUGIN_ROOT}` is not set in your shell,
-do **not** guess this path — unlike the `progress.json` stub path (Phase -2),
-there is no hook or helper that hands you your own plugin install directory,
-so any substitute you construct is a guess dressed as a derivation. Surface
-that the env var is unset and stop rather than dispatching against a guessed
-path.
+where `PLUGIN_ROOT` resolves as follows. Prefer `${CLAUDE_PLUGIN_ROOT}` when
+it is set in your shell (the packaged-install case). It is normally unset in
+an orchestrator-issued Bash call, though — that variable is only substituted
+inside `hooks.json`'s own hook command strings, never into your own Bash tool
+calls. When unset, do not construct or guess a path — reuse the plugin root
+you already have from this session's own rendered context instead: the
+currently-loaded skill's own "Base directory for this skill:" line, or a
+plugin-root path already substituted into other rendered skill/template text
+this session (e.g. a `source` command from a `/coderails:*` slash command).
+Never `git rev-parse --show-toplevel` of the invoking repo — that's the
+*user's* project, not the plugin's location. Do not fall back to a versioned
+plugin cache directory either (e.g. under `~/.claude/plugins/cache/`) — it can
+hold a stale snapshot of these scripts that silently diverges from the live
+dev repo.
 Dispatch only nodes it reports `ready` for. Its `blocked` output means "not
 yet ready to dispatch" — it fail-closes the same way on missing or malformed
 `progress.json` as on a real non-terminal predecessor, so it cannot distinguish
@@ -27,8 +33,10 @@ read-modify-write before releasing its join. Inside an authorised loop, the
 
 **Resolving and recording a wave — `graph_dispatch.sh`.** Use
 `${PLUGIN_ROOT}/hooks/scripts/lib/graph_dispatch.sh` (same `PLUGIN_ROOT`
-resolution as the `graph_readiness.sh` path above — `${CLAUDE_PLUGIN_ROOT}`,
-never guessed, never the invoking repo's toplevel) for the S2.5/S2.6 fork
+resolution as the `graph_readiness.sh` path above — prefer
+`${CLAUDE_PLUGIN_ROOT}` when set, otherwise reuse the plugin root already
+visible in this session's rendered context; never guessed, never the invoking
+repo's toplevel, never the versioned plugin cache) for the S2.5/S2.6 fork
 through the `J2` join, and for any other fork/join wave in the graph:
 
 1. Source the script and call `graph_dispatch_plan <path-to-progress.json>
