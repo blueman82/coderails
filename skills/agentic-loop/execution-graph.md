@@ -27,10 +27,9 @@ read-modify-write before releasing its join. Inside an authorised loop, the
 
 **Resolving and recording a wave — `graph_dispatch.sh`.** Use
 `${PLUGIN_ROOT}/hooks/scripts/lib/graph_dispatch.sh` (same `PLUGIN_ROOT`
-resolution as the `graph_readiness.sh` path above — prefer `${CLAUDE_PLUGIN_ROOT}`,
-fall back to the plugin's own install directory, never to the invoking repo's
-toplevel) for the S2.5/S2.6 fork through the `J2` join, and for any other
-fork/join wave in the graph:
+resolution as the `graph_readiness.sh` path above — `${CLAUDE_PLUGIN_ROOT}`,
+never guessed, never the invoking repo's toplevel) for the S2.5/S2.6 fork
+through the `J2` join, and for any other fork/join wave in the graph:
 
 1. Source the script and call `graph_dispatch_plan <path-to-progress.json>
    <path-to-skills/index.yaml>` to resolve the current ready wave's dispatch
