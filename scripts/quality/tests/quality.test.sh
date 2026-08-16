@@ -13,6 +13,8 @@ printf 'x \n' >"$fixture/trailing.py"
 if python3 "$checker" --strict --root "$fixture" >/dev/null 2>&1; then
     echo 'quality.test: formatting negative control unexpectedly passed' >&2
     exit 1
+else
+    :
 fi
 
 if python3 "$checker" --root "$fixture" >/dev/null 2>&1; then
@@ -26,12 +28,16 @@ printf '{\n' >"$fixture/bad.json"
 if python3 "$checker" --strict --root "$fixture" >/dev/null 2>&1; then
     echo 'quality.test: JSON negative control unexpectedly passed' >&2
     exit 1
+else
+    :
 fi
 
 printf 'x\n%.0s' {1..5} >"$fixture/long.py"
 if python3 "$checker" --strict --root "$fixture" --max-loc 3 >/dev/null 2>&1; then
     echo 'quality.test: LOC negative control unexpectedly passed' >&2
     exit 1
+else
+    :
 fi
 
 python3 - "$fixture/long.py" <<'PY'
@@ -43,6 +49,8 @@ PY
 if python3 "$checker" --strict --root "$fixture" --max-function-lines 3 >/dev/null 2>&1; then
     echo 'quality.test: function-size negative control unexpectedly passed' >&2
     exit 1
+else
+    :
 fi
 
 {
@@ -53,21 +61,28 @@ fi
 if python3 "$checker" --strict --root "$fixture" --max-function-lines 3 >/dev/null 2>&1; then
     echo 'quality.test: Bash function-size negative control unexpectedly passed' >&2
     exit 1
+else
+    :
 fi
 
-printf '# return value = 1\n' >"$fixture/prose.py"
-python3 "$checker" --strict --root "$fixture" >/dev/null
+mkdir -p "$fixture/prose"
+printf '# return value = 1\n' >"$fixture/prose/prose.py"
+python3 "$checker" --strict --root "$fixture/prose" >/dev/null
 
 printf '# def removed():\n' >"$fixture/commented.py"
 if python3 "$checker" --strict --root "$fixture" >/dev/null 2>&1; then
     echo 'quality.test: commented-code negative control unexpectedly passed' >&2
     exit 1
+else
+    :
 fi
 
 printf 'return value = 1\n' >"$fixture/bad.py"
 if python3 "$checker" --strict --root "$fixture" >/dev/null 2>&1; then
     echo 'quality.test: syntax negative control unexpectedly passed' >&2
     exit 1
+else
+    :
 fi
 
 echo 'quality.test: PASS'
