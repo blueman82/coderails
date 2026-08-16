@@ -174,6 +174,20 @@ if run_block "join: both-skipped even when files happen to be absent from disk (
   check "precedence 1-before-2: both-skipped wins over missing-evidence" "skipped" "$(jq -r '.outcome' "$OUT")"
 fi
 
+if run_block "join: both-skipped succeeds even when the canonical §3.1 record was never written (precedence over canonical-record existence)"; then
+  # The realistic both-skipped scenario: the node was never under
+  # parallel-review mode, so the fan-out step that writes the §3.1
+  # canonical digest record never ran either. The both-skipped check
+  # must not require that record to exist.
+  OUT="$TMP/join_both_skipped_no_canonical.json"
+  parallel_review_join::evaluate "$TMP/canonical-never-written.json" "" "" skipped skipped \
+    "$RUN_ID" "$REVISION" "$HEAD_SHA" "orchestrator" "$NODE" "$OUT"
+  rc=$?
+  check "precedence 1-before-canonical-read: exits 0 with no canonical record on disk" 0 "$rc"
+  check "precedence 1-before-canonical-read: outcome is skipped" "skipped" "$(jq -r '.outcome' "$OUT")"
+  check "precedence 1-before-canonical-read: frozen_input_digest is null" "null" "$(jq -r '.frozen_input_digest' "$OUT")"
+fi
+
 # ═══════════════════════════ join: missing-evidence ════════════════════════
 if run_block "join: missing-evidence asymmetric skip"; then
   CLAUDE_OK2="$TMP/claude_ok2.json"

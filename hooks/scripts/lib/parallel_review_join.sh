@@ -126,32 +126,38 @@ parallel_review_join::evaluate() {
     return 1
   fi
 
-  for outcome in "$claude_outcome" "$codex_outcome"; do
-    if [ "$outcome" != "done" ] && [ "$outcome" != "skipped" ]; then
-      echo "parallel_review_join::evaluate: node outcome must be exactly 'done' or 'skipped', got: $outcome" >&2
+  local node_outcome
+  for node_outcome in "$claude_outcome" "$codex_outcome"; do
+    if [ "$node_outcome" != "done" ] && [ "$node_outcome" != "skipped" ]; then
+      echo "parallel_review_join::evaluate: node outcome must be exactly 'done' or 'skipped', got: $node_outcome" >&2
       return 1
     fi
   done
 
-  if [ ! -f "$canonical_path" ]; then
-    echo "parallel_review_join::evaluate: canonical digest record not found: $canonical_path" >&2
-    return 1
-  fi
-
-  local canonical_digest
-  canonical_digest=$(jq -r '.digest // empty' "$canonical_path")
-  if [ -z "$canonical_digest" ]; then
-    echo "parallel_review_join::evaluate: canonical digest record has no .digest: $canonical_path" >&2
-    return 1
-  fi
-
-  local outcome="" hard_stop_reason="null"
+  local outcome="" hard_stop_reason="null" canonical_digest=""
 
   # ── check 1: both-skipped -> join skips, never a hard-stop ──────────────
+  # Runs BEFORE the canonical-record read: the intentional both-skipped
+  # case (§4.4's conditional, or apply_work_unit_disposition) is exactly
+  # the case where the fan-out step never ran, so the §3.1 canonical
+  # record may legitimately not exist either. Requiring it here would
+  # turn the "never a hard-stop" case into a refusal.
   if [ "$claude_outcome" = "skipped" ] && [ "$codex_outcome" = "skipped" ]; then
     outcome="skipped"
     hard_stop_reason="null"
+    [ -f "$canonical_path" ] && canonical_digest=$(jq -r '.digest // empty' "$canonical_path")
   else
+    if [ ! -f "$canonical_path" ]; then
+      echo "parallel_review_join::evaluate: canonical digest record not found: $canonical_path" >&2
+      return 1
+    fi
+
+    canonical_digest=$(jq -r '.digest // empty' "$canonical_path")
+    if [ -z "$canonical_digest" ]; then
+      echo "parallel_review_join::evaluate: canonical digest record has no .digest: $canonical_path" >&2
+      return 1
+    fi
+
     # ── check 2: missing-evidence ──────────────────────────────────────────
     local claude_exists=0 codex_exists=0
     [ -n "$claude_path" ] && [ -f "$claude_path" ] && claude_exists=1
@@ -167,11 +173,12 @@ parallel_review_join::evaluate() {
 
     # ── check 3: stale-evidence ─────────────────────────────────────────────
     if [ -z "$outcome" ]; then
-      for path in "$claude_path" "$codex_path"; do
+      local record_path
+      for record_path in "$claude_path" "$codex_path"; do
         local run_id revision head_sha
-        run_id=$(jq -r '.run_id // empty' "$path")
-        revision=$(jq -r '.revision // empty' "$path")
-        head_sha=$(jq -r '.head // empty' "$path")
+        run_id=$(jq -r '.run_id // empty' "$record_path")
+        revision=$(jq -r '.revision // empty' "$record_path")
+        head_sha=$(jq -r '.head // empty' "$record_path")
         if [ "$run_id" != "$expected_run_id" ] || [ "$revision" != "$expected_revision" ] || [ "$head_sha" != "$expected_head" ]; then
           outcome="hard-stop"; hard_stop_reason="stale-evidence"
           break
@@ -181,9 +188,10 @@ parallel_review_join::evaluate() {
 
     # ── check 4: mismatched-evidence (vs canonical, never vs each other) ────
     if [ -z "$outcome" ]; then
-      for path in "$claude_path" "$codex_path"; do
+      local record_path
+      for record_path in "$claude_path" "$codex_path"; do
         local record_digest
-        record_digest=$(jq -r '.frozen_input_digest // empty' "$path")
+        record_digest=$(jq -r '.frozen_input_digest // empty' "$record_path")
         if [ "$record_digest" != "$canonical_digest" ]; then
           outcome="hard-stop"; hard_stop_reason="mismatched-evidence"
           break
@@ -230,7 +238,7 @@ parallel_review_join::evaluate() {
       schema_version: 1,
       node: $node,
       policy: $policy,
-      frozen_input_digest: $digest,
+      frozen_input_digest: (if $digest == "" then null else $digest end),
       inputs: { claude: $claude_inputs, codex: $codex_inputs },
       outcome: $outcome,
       hard_stop_reason: (if $hard_stop_reason == "null" then null else $hard_stop_reason end),
