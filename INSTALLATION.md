@@ -115,6 +115,15 @@ then `install`.
 your own `.claude/workflow.config.yaml` if it holds real project or Jira values —
 treat it as machine-local config, same as `.claude/settings.local.json`.
 
+For Coderails itself, activate the repository quality hook once per clone:
+
+```
+git config core.hooksPath scripts/git-hooks
+```
+
+See [docs/CODE-QUALITY.md](./docs/CODE-QUALITY.md) for the strict and warn-only
+commands, threshold overrides, optional Bash tools, and known coverage ceiling.
+
 ## What you get
 
 | Commands | Skills | Hooks (automatic) |
