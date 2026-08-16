@@ -7,13 +7,14 @@ what makes a node *ready*.
 
 Before dispatching any candidate node, run the read-only readiness query
 `${PLUGIN_ROOT}/hooks/scripts/lib/graph_readiness.sh <path-to-progress.json> <node-id>`,
-where `PLUGIN_ROOT` resolves to `${CLAUDE_PLUGIN_ROOT}` when that env var is set
-(the packaged-install case), or else to the coderails plugin's own install
-directory — never to `git rev-parse --show-toplevel` of the invoking repo,
-which is the *user's* project and does not contain this script. This is the
-same fallback convention `hooks/scripts/inject_bootstrap.sh` uses for its own
-`PLUGIN_ROOT` resolution (env var first, then a path derived from the script's
-own on-disk location) — follow that pattern here too.
+where `PLUGIN_ROOT` is `${CLAUDE_PLUGIN_ROOT}` — never `git rev-parse
+--show-toplevel` of the invoking repo, which is the *user's* project and does
+not contain this script. If `${CLAUDE_PLUGIN_ROOT}` is not set in your shell,
+do **not** guess this path — unlike the `progress.json` stub path (Phase -2),
+there is no hook or helper that hands you your own plugin install directory,
+so any substitute you construct is a guess dressed as a derivation. Surface
+that the env var is unset and stop rather than dispatching against a guessed
+path.
 Dispatch only nodes it reports `ready` for. Its `blocked` output means "not
 yet ready to dispatch" — it fail-closes the same way on missing or malformed
 `progress.json` as on a real non-terminal predecessor, so it cannot distinguish
