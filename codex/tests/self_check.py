@@ -40,13 +40,15 @@ def main() -> int:
 
     hook = ROOT / "codex/hooks/lifecycle.py"
     with tempfile.TemporaryDirectory() as directory:
+        run = {"run_id": "test", "revision": "0", "head": "test"}
         results = {"review": ("review_status", "pass"), "eval": ("result", "GO"), "proof": ("result", "pass"), "integrity": ("integrity", "pass"), "wiki": ("result", "pass"), "teardown": ("result", "pass")}
         gates = {}
         for kind, (field, expected) in results.items():
             artifact = Path(directory) / (kind + ".json")
             artifact.write_text(json.dumps({"schema_version": 1, "gate": kind, "provider": "codex", "run_id": "test", "revision": "0", "head": "test", field: expected}))
             gates[kind] = {"node": "SA", "outcome": "done", "evidence": [{"gate": kind, "provider": "codex", "artifact_path": str(artifact), "run_id": "test", "revision": "0", "head": "test"}]}
-        valid = {"event": "complete", "state": {"status": "complete", "graph": graph, "gates": gates, "teardown": {"provider": "codex", "evidence": [{"outcome": "done"}]}, "retro": {"provider": "codex", "status": "complete"}}}
+        gates["teardown"]["outcome"] = "done"
+        valid = {"event": "complete", "state": {"status": "complete", "graph": graph, "run": run, "gates": gates, "teardown": {"provider": "codex", "gate": "teardown", "outcome": "done", "evidence": gates["teardown"]["evidence"]}, "retro": {"provider": "codex", "status": "complete", **run}}}
         result = subprocess.run([sys.executable, str(hook)], input=json.dumps(valid), text=True, capture_output=True)
         assert result.returncode == 0, result.stdout
     invalid = {"event": "complete", "state": {"status": "complete", "graph": graph}}

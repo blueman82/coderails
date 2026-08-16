@@ -210,7 +210,7 @@ def prepare_implementations(graph: dict[str, Any], config: Mapping[str, Any], *,
                 errors.append(f"gate {kind} requires Codex provenance and route")
         mappings[node] = mapping
     if mode != "fixture":
-        commands = [tuple(record.get("command", ())) for record in mappings.values() if record.get("gate")]
+        commands = [tuple(record.get("command", ())) if record.get("adapter") != "codex-exec" else record.get("prompt", "") for record in mappings.values() if record.get("gate")]
         if len(commands) == len(REQUIRED_GATES) and len(set(commands)) == 1:
             errors.append("live gate commands must be gate-specific")
     for name, node in graph["nodes"].items():

@@ -4,6 +4,7 @@ import json
 import sys
 import tempfile
 import unittest
+import subprocess
 from pathlib import Path
 from unittest.mock import patch
 
@@ -13,6 +14,35 @@ from tests import live_acceptance  # noqa: E402
 
 
 class LiveAcceptanceNegativeTests(unittest.TestCase):
+    def test_canonical_acceptance_creates_all_run_bound_artifacts_and_lifecycle_passes(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            state = Path(directory) / "state.json"
+
+            def fake_codex(prompt, cwd):
+                command = prompt.split(": ", 1)[1]
+                result = subprocess.run(command, shell=True, cwd=cwd, capture_output=True, text=True, check=False)
+                return ("done" if result.returncode == 0 else "failed", '{"type":"turn.completed"}\n' + result.stdout + result.stderr)
+
+            self.assertEqual(live_acceptance.run_canonical(state, invoke=fake_codex), 0)
+            saved = json.loads(state.read_text())
+            self.assertEqual(saved["status"], "complete")
+            for gate in ("review", "eval", "proof", "integrity", "wiki", "teardown"):
+                artifact = Path(directory) / "artifacts" / f"{gate}.json"
+                value = json.loads(artifact.read_text())
+                self.assertEqual({value[k] for k in ("schema_version", "gate", "provider", "run_id", "revision", "head")} , {1, gate, "codex", saved["run"]["run_id"], saved["run"]["revision"], saved["run"]["head"]})
+                self.assertTrue(Path(directory, "artifacts", f"{gate}.raw.jsonl").is_file())
+
+    def test_canonical_lifecycle_refuses_missing_and_stale_gate(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            state = Path(directory) / "state.json"
+            self.assertEqual(live_acceptance.run_canonical(state, invoke=lambda prompt, cwd: ("done", "{") if subprocess.run(prompt.split(": ", 1)[1], shell=True, cwd=cwd).returncode == 0 else ("failed", "producer failed")), 0)
+            saved = json.loads(state.read_text())
+            missing = json.loads(json.dumps(saved))
+            missing["gates"].pop("wiki")
+            self.assertFalse(live_acceptance.validate({"event": "complete", "state": missing})[0])
+            stale = json.loads(json.dumps(saved))
+            stale["run"]["head"] = "stale-head"
+            self.assertFalse(live_acceptance.validate({"event": "complete", "state": stale})[0])
     def test_live_resume_loads_graph_and_makes_no_second_exec_calls(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             state = Path(directory) / "state.json"
