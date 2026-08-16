@@ -84,7 +84,9 @@ class CodexGraphAcceptance(unittest.TestCase):
                 artifact = Path(directory) / (kind + ".json")
                 artifact.write_text(json.dumps({"schema_version": 1, "gate": kind, "provider": "codex", "run_id": "test", "revision": "0", "head": "test", field: expected}))
                 gates[kind] = {"node": "SA", "outcome": "done", "evidence": [{"gate": kind, "provider": "codex", "artifact_path": str(artifact), "run_id": "test", "revision": "0", "head": "test"}]}
-            good = {"event": "complete", "state": {"status": "complete", "graph": graph, "gates": gates, "teardown": {"provider": "codex", "evidence": [{"outcome": "done"}]}, "retro": {"provider": "codex", "status": "complete"}}}
+            run = {"run_id": "test", "revision": "0", "head": "test"}
+            gates["teardown"]["outcome"] = "done"
+            good = {"event": "complete", "state": {"status": "complete", "graph": graph, "run": run, "gates": gates, "teardown": {"provider": "codex", "gate": "teardown", "outcome": "done", "evidence": gates["teardown"]["evidence"]}, "retro": {"provider": "codex", "status": "complete", **run}}}
             result = subprocess.run([sys.executable, str(lifecycle)], input=json.dumps(good), text=True, capture_output=True)
             self.assertEqual(result.returncode, 0, result.stdout)
         bad = {"event": "complete", "state": {"status": "complete", "graph": graph}}
@@ -92,6 +94,17 @@ class CodexGraphAcceptance(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertTrue((ROOT / "skills/index.yaml").is_file())
         self.assertEqual(subprocess.run(["bash", str(ROOT / "scripts/validate-skills-index.sh")], capture_output=True).returncode, 0)
+
+    def test_completion_refuses_stale_gate_artifact(self) -> None:
+        graph = build_graph(("A",))
+        execute(graph, {"SA": {"provider": "codex", "skill_id": "test.complete", "implementation_path": "codex/tests", "test_only": True, "outcome": "done"}})
+        with tempfile.TemporaryDirectory() as directory:
+            artifact = Path(directory) / "review.json"
+            artifact.write_text(json.dumps({"schema_version": 1, "gate": "review", "provider": "codex", "run_id": "old", "revision": "0", "head": "old", "review_status": "pass"}), encoding="utf-8")
+            state = {"event": "complete", "state": {"status": "complete", "graph": graph, "run": {"run_id": "current", "revision": "0", "head": "current"}, "gates": {"review": {"outcome": "done", "evidence": [{"gate": "review", "provider": "codex", "artifact_path": str(artifact), "run_id": "current", "revision": "0", "head": "current"}]}}}}
+            result = subprocess.run([sys.executable, str(ROOT / "codex/hooks/lifecycle.py")], input=json.dumps(state), text=True, capture_output=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("review", result.stdout)
 
     def test_runner_missing_gate_configuration_is_non_complete(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

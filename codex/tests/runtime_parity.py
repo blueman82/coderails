@@ -14,6 +14,7 @@ def main() -> int:
     result = subprocess.run([sys.executable, str(CHECK), "--check"], text=True, capture_output=True)
     assert result.returncode == 0, result.stderr or result.stdout
     assert (ROOT / "packages/codex/runtime/graph.py").read_bytes() == (ROOT / "codex/runtime/graph.py").read_bytes()
+    assert (ROOT / "packages/codex/runtime/codex_exec.py").read_bytes() == (ROOT / "codex/runtime/codex_exec.py").read_bytes()
     print("PASS: standalone package graph runtime has no hand-maintained drift")
     return 0
 

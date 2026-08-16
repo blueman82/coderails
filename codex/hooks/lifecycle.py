@@ -5,12 +5,13 @@ from __future__ import annotations
 
 import json
 import sys
+from pathlib import Path
 
 REQUIRED_GATES = ("review", "eval", "proof", "integrity", "wiki", "teardown")
 GATE_RESULTS = {"review": ("review_status", "pass"), "eval": ("result", "GO"), "proof": ("result", "pass"), "integrity": ("integrity", "pass"), "wiki": ("result", "pass"), "teardown": ("result", "pass")}
 
 
-def _gate_marker_valid(kind: str, value: object) -> bool:
+def _gate_marker_valid(kind: str, value: object, run: dict | None = None) -> bool:
     if not isinstance(value, dict) or value.get("outcome") not in {"done", "skipped"}:
         return False
     field, expected = GATE_RESULTS[kind]
@@ -21,10 +22,10 @@ def _gate_marker_valid(kind: str, value: object) -> bool:
         if not isinstance(path, str) or not path.strip():
             continue
         try:
-            artifact = json.loads(open(path, encoding="utf-8").read())
+            artifact = json.loads(Path(path).read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             continue
-        if isinstance(artifact, dict) and artifact.get("schema_version") == 1 and artifact.get("gate") == kind and artifact.get("provider") == "codex" and all(artifact.get(key) == item.get(key) for key in ("run_id", "revision", "head")) and artifact.get(field) == expected:
+        if isinstance(artifact, dict) and artifact.get("schema_version") == 1 and artifact.get("gate") == kind and artifact.get("provider") == "codex" and all(artifact.get(key) == item.get(key) for key in ("run_id", "revision", "head")) and (run is None or all(artifact.get(key) == run.get(key) for key in ("run_id", "revision", "head"))) and artifact.get(field) == expected:
             return True
     return False
 
@@ -50,15 +51,18 @@ def validate(event: dict) -> tuple[bool, str]:
         gates = state.get("gates")
         if not isinstance(gates, dict):
             return False, "complete requires gate evidence"
+        run = state.get("run")
+        if not isinstance(run, dict) or not all(isinstance(run.get(key), str) and run[key].strip() for key in ("run_id", "revision", "head")):
+            return False, "complete requires current run identity"
         for gate in REQUIRED_GATES:
             evidence = gates.get(gate)
-            if not _gate_marker_valid(gate, evidence):
+            if not _gate_marker_valid(gate, evidence, run):
                 return False, f"complete requires evidence for gate {gate}"
         teardown = state.get("teardown")
-        if not isinstance(teardown, dict) or teardown.get("provider") != "codex" or not teardown.get("evidence"):
+        if not isinstance(teardown, dict) or teardown.get("provider") != "codex" or not teardown.get("evidence") or not _gate_marker_valid("teardown", teardown, run):
             return False, "complete requires Codex teardown evidence"
         retro = state.get("retro")
-        if not isinstance(retro, dict) or retro.get("provider") != "codex" or retro.get("status") != "complete":
+        if not isinstance(retro, dict) or retro.get("provider") != "codex" or retro.get("status") != "complete" or any(retro.get(key) != run.get(key) for key in ("run_id", "revision", "head")):
             return False, "complete requires valid Codex retro"
     return True, "allowed"
 

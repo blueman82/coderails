@@ -3,7 +3,9 @@ from __future__ import annotations
 import json
 import sys
 import tempfile
+import threading
 import unittest
+from types import SimpleNamespace
 from pathlib import Path
 
 ROOT = Path(__file__).parents[2]
@@ -19,12 +21,45 @@ from runtime.graph import (  # noqa: E402
     prepare_implementations,
     ready,
 )
+from runtime.codex_exec import invoke  # noqa: E402
 
 
 PASS = [sys.executable, "-c", "print('ok')"]
 
 
 class GraphRuntimeTests(unittest.TestCase):
+    def test_codex_exec_adapter_uses_documented_cli_and_preserves_live_evidence(self) -> None:
+        calls = []
+
+        def runner(command, **kwargs):
+            calls.append((command, kwargs))
+            return SimpleNamespace(returncode=0, stdout='{"type":"turn.completed"}\n', stderr="")
+
+        outcome, output = invoke("run node", "/tmp/worktree", runner=runner)
+        self.assertEqual(outcome, "done")
+        self.assertIn("turn.completed", output)
+        self.assertEqual(calls[0][0], ["codex", "exec", "--json", "--ephemeral", "--ignore-user-config", "-C", "/tmp/worktree", "-"])
+        self.assertEqual(calls[0][1]["input"], "run node")
+
+    def test_codex_exec_adapter_rejects_empty_and_provider_error_output(self) -> None:
+        empty = lambda *args, **kwargs: SimpleNamespace(returncode=0, stdout="", stderr="")
+        error = lambda *args, **kwargs: SimpleNamespace(returncode=0, stdout='{"type":"item.completed","item":{"type":"error","message":"auth failed"}}\n', stderr="")
+        self.assertEqual(invoke("run", "/tmp/worktree", runner=empty)[0], "failed")
+        self.assertEqual(invoke("run", "/tmp/worktree", runner=error)[0], "failed")
+
+    def test_graph_node_routes_through_codex_exec_adapter(self) -> None:
+        graph = build_graph(("A",))
+        import runtime.graph as graph_module
+        original = graph_module.codex_exec
+        try:
+            graph_module.codex_exec = lambda prompt, cwd: ("done", f"live:{prompt}:{cwd}")
+            execute(graph, {"SA": {"adapter": "codex-exec", "prompt": "do A", "cwd": "/tmp/worktree", "provider": "codex", "skill_id": "node.A", "implementation_path": "codex/runtime/codex_exec.py"}})
+        finally:
+            graph_module.codex_exec = original
+        evidence = graph["nodes"]["SA"]["evidence"][-1]
+        self.assertEqual(graph["nodes"]["SA"]["outcome"], "done")
+        self.assertEqual(evidence["invocation"], "codex exec")
+        self.assertEqual(evidence["mode"], "live")
     def test_contract_parser_preserves_only_declared_nodes_edges_and_join(self) -> None:
         contract = """# contract
 
@@ -164,6 +199,23 @@ right -> join
         self.assertTrue(all(snapshot["nodes"]["C"]["outcome"] == "pending" for snapshot in snapshots[:1]))
         self.assertGreaterEqual(len(snapshots), 3)
 
+    def test_independent_ready_nodes_run_concurrently_before_one_wave_persist(self) -> None:
+        graph = build_graph(("root", "A", "B", "C"), joins={"C": ["A", "B"]}, edges=[("root", "A"), ("root", "B")])
+        barrier = threading.Barrier(2)
+        calls = []
+        def work(name):
+            if name in {"A", "B"}:
+                barrier.wait(timeout=2)
+            calls.append(name)
+            return "done"
+        implementations = {name: {"provider": "codex", "skill_id": name, "implementation_path": "codex/tests", "test_only": True, "outcome": lambda name=name: work(name)} for name in graph["nodes"]}
+        snapshots = []
+        execute(graph, implementations, persist=lambda value: snapshots.append(json.loads(json.dumps(value))))
+        self.assertEqual(graph["nodes"]["C"]["outcome"], "done")
+        self.assertEqual(calls.count("A"), 1)
+        self.assertEqual(calls.count("B"), 1)
+        self.assertEqual(len(snapshots), 3)
+
     def test_resume_retries_and_failure_are_durable(self) -> None:
         graph = build_graph(("A",))
         graph["nodes"]["SA"]["retry"]["max"] = 2
@@ -179,6 +231,20 @@ right -> join
         failed = build_graph(("A",))
         execute(failed, {"SA": {"provider": "codex", "skill_id": "test.failed", "implementation_path": "codex/tests", "test_only": True, "outcome": "failed"}})
         self.assertEqual(failed["nodes"]["SA"]["outcome"], "hard-stop")
+
+    def test_resume_after_interruption_keeps_completed_wave(self) -> None:
+        graph = build_graph(("A", "B", "C"), joins={"C": ["A", "B"]}, edges=[("A", "C"), ("B", "C")])
+        with tempfile.TemporaryDirectory() as directory:
+            state = Path(directory) / "progress.json"
+            interrupted = {"provider": "codex", "skill_id": "test.c", "implementation_path": "codex/tests", "test_only": True, "outcome": lambda: (_ for _ in ()).throw(KeyboardInterrupt())}
+            with self.assertRaises(KeyboardInterrupt):
+                execute(graph, {"A": {"command": PASS, "provider": "codex", "skill_id": "test.a", "implementation_path": "codex/tests"}, "B": {"command": PASS, "provider": "codex", "skill_id": "test.b", "implementation_path": "codex/tests"}, "C": interrupted}, state_path=state)
+            saved = json.loads(state.read_text())
+            self.assertEqual(saved["graph"]["nodes"]["A"]["outcome"], "done")
+            resumed = saved["graph"]
+            execute(resumed, {"C": {"command": PASS, "provider": "codex", "skill_id": "test.c.resume", "implementation_path": "codex/tests"}, "A": {}, "B": {}}, state_path=state, expected_revision=saved["revision"])
+            self.assertEqual(resumed["nodes"]["C"]["outcome"], "done")
+            self.assertEqual(resumed["nodes"]["A"]["retry"]["attempts"], 1)
 
     def test_missing_implementation_and_gate_unavailability_fail_closed(self) -> None:
         graph = build_graph(("U4b-review",), joins={"U4b-review": []})
