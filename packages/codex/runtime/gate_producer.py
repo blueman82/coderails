@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -26,8 +27,13 @@ def produce(gate: str, artifact: Path, raw: Path, run_id: str, revision: str, he
         raise ValueError(f"unknown gate: {gate}")
     prompt = f"Codex E3 {gate} gate: report GATE_{gate.upper()}_OK. Do not edit files or run commands."
     outcome, output = executor(prompt, cwd)
+    raw.parent.mkdir(parents=True, exist_ok=True)
+    raw.write_text(output, encoding="utf-8")
     if outcome != "done":
         raise RuntimeError(f"Codex gate execution failed for {gate}: {output}")
+    marker = f"GATE_{gate.upper()}_OK"
+    if not re.search(rf"(?<![A-Z0-9_]){re.escape(marker)}(?![A-Z0-9_])", output):
+        raise RuntimeError(f"Codex gate output missing {marker}: {output}")
     field, result = RESULTS[gate]
     value = {
         "schema_version": 1,
@@ -40,8 +46,6 @@ def produce(gate: str, artifact: Path, raw: Path, run_id: str, revision: str, he
         "raw_evidence": str(raw),
     }
     artifact.parent.mkdir(parents=True, exist_ok=True)
-    raw.parent.mkdir(parents=True, exist_ok=True)
-    raw.write_text(output, encoding="utf-8")
     artifact.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
     if gate == "teardown" and retro is not None:
         retro.parent.mkdir(parents=True, exist_ok=True)

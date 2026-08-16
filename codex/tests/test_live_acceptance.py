@@ -12,13 +12,23 @@ from unittest.mock import patch
 ROOT = Path(__file__).parents[2]
 sys.path.insert(0, str(ROOT / "codex"))
 from tests import live_acceptance  # noqa: E402
+from runtime.gate_producer import produce  # noqa: E402
 
 
 class LiveAcceptanceNegativeTests(unittest.TestCase):
     def fake_codex(self, directory: str) -> None:
         binary = Path(directory) / "codex"
-        binary.write_text("#!/bin/sh\nprintf '%s\\n' '{\"type\":\"turn.completed\"}'\n")
+        binary.write_text("#!/bin/sh\nprompt=$(cat)\nmarker=$(printf '%s' \"$prompt\" | grep -oE 'PHASE_[A-Za-z0-9_./-]+_OK|GATE_[A-Za-z0-9_./-]+_OK' | head -1)\nprintf '%s\\n' \"{\\\"type\\\":\\\"item.completed\\\",\\\"marker\\\":\\\"$marker\\\"}\"\nprintf '%s\\n' '{\"type\":\"turn.completed\"}'\n")
         binary.chmod(0o755)
+
+    def test_gate_producer_rejects_unrelated_success_output(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            artifact = Path(directory) / "review.json"
+            raw = Path(directory) / "review.raw.jsonl"
+            with self.assertRaisesRegex(RuntimeError, "GATE_REVIEW_OK"):
+                produce("review", artifact, raw, "run", "1", "head", directory, executor=lambda _prompt, _cwd: ("done", '{"type":"turn.completed"}\nUNRELATED_OK\n'))
+            self.assertFalse(artifact.exists())
+            self.assertIn("turn.completed", raw.read_text())
 
     def test_canonical_acceptance_creates_all_run_bound_artifacts_and_lifecycle_passes(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

@@ -12,12 +12,16 @@ from pathlib import Path
 ROOT = Path(__file__).parents[2]
 sys.path.insert(0, str(ROOT / "codex"))
 from hooks.lifecycle import validate  # noqa: E402
-from runtime.graph import REQUIRED_GATES, build_graph, execute, gate_snapshot, prepare_implementations, write_json  # noqa: E402
+from runtime.graph import REQUIRED_GATES, apply_work_unit_disposition, build_graph, execute, gate_snapshot, prepare_implementations, write_json  # noqa: E402
 
 
 def canonical_config(state: Path) -> tuple[dict, dict, dict]:
     run = {"run_id": f"codex-{state.stem}", "revision": "1", "head": subprocess.check_output(["git", "-C", str(ROOT), "rev-parse", "HEAD"], text=True).strip()}
     graph = build_graph()
+    apply_work_unit_disposition(graph, None)
+    for node, record in graph["nodes"].items():
+        if not record.get("dispatch", True) and record["outcome"] == "pending":
+            record.update(status="skipped", outcome="skipped")
     for kind in REQUIRED_GATES:
         node = f"E3-gate-{kind}"
         graph["nodes"][node] = {"status": "pending", "outcome": "pending", "retry": {"attempts": 0, "max": 1}, "name": node, "dispatch": True}
@@ -25,7 +29,16 @@ def canonical_config(state: Path) -> tuple[dict, dict, dict]:
     artifacts = state.parent / "artifacts"
     config = {"mode": "live", "run": run, "nodes": {}, "gates": {}}
     for node in graph["nodes"]:
-        config["nodes"][node] = {"provider": "codex", "skill_id": f"canonical.{node}", "implementation_path": "codex/tests/live_acceptance.py", "test_only": True, "outcome": "done"}
+        if graph["nodes"][node]["outcome"] == "skipped":
+            continue
+        config["nodes"][node] = {
+            "adapter": "codex-exec",
+            "prompt": f"Complete canonical graph node {node}; report PHASE_{node}_OK. Do not edit files or run additional commands.",
+            "cwd": str(ROOT),
+            "provider": "codex",
+            "skill_id": f"canonical.{node}",
+            "implementation_path": "codex/runtime/codex_exec.py",
+        }
     for kind in REQUIRED_GATES:
         node = f"E3-gate-{kind}"
         artifact = artifacts / f"{kind}.json"
