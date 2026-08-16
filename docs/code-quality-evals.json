@@ -1,0 +1,185 @@
+{
+  "schema_version": 1,
+  "scope": "pr",
+  "task_ref": "feat/code-quality-discipline",
+  "verification_level": 2,
+  "verification_justification": "This changes commit-time and edit-time enforcement across multiple source languages and hook surfaces.",
+  "frozen_at": "2026-08-16T12:14:36+01:00",
+  "frozen_sha": "04325e16b14c055da87ec52ea964a3206e30cb94",
+  "evals": [
+    {
+      "id": "E1",
+      "priority": "P0",
+      "mode": "scripted",
+      "surface": "merged-state",
+      "assert": "The strict quality check rejects a tracked source file over the default LOC limit and accepts an intentional threshold override.",
+      "cmd": "scripts/quality/check.sh --strict --root scripts/quality",
+      "negative_control": "python3 scripts/quality/check.py --strict --root scripts/quality --max-loc 1",
+      "status": "pending",
+      "evidence": "Freeze smoke-run observed cmd exit 0 and negative_control exit 1.",
+      "smoke": {
+        "cmd_exit": 0,
+        "negative_control_exit": 1,
+        "cmd_output": "quality: scanned 3 file(s), 0 finding(s) quality: shellcheck unavailable; Bash semantic lint is advisory until installed. quality: shfmt unavailable; Bash formatting is covered by whitespace checks only. quality: strict checks passed.",
+        "negative_control_output": "/Users/garyharr/Github/coderails-quality-discipline/scripts/quality/check.py: 166 lines (max 1) /Users/garyharr/Github/coderails-quality-discipline/scripts/quality/check.sh: 61 lines (max 1) /Users/garyharr/Github/coderails-quality-discipline/scripts/quality/tests/quality.test.sh: 63 lines (max 1) quality: scanned 3 file(s), 3 finding(s)"
+      }
+    },
+    {
+      "id": "E2",
+      "priority": "P0",
+      "mode": "scripted",
+      "surface": "merged-state",
+      "assert": "The strict quality check rejects oversized Python functions/methods and does not reject a function at the configured boundary.",
+      "cmd": "scripts/quality/check.sh --strict --root scripts/quality",
+      "negative_control": "python3 scripts/quality/check.py --strict --root scripts/quality --max-function-lines 1",
+      "status": "pending",
+      "evidence": "Freeze smoke-run observed cmd exit 0 and negative_control exit 1.",
+      "smoke": {
+        "cmd_exit": 0,
+        "negative_control_exit": 1,
+        "cmd_output": "quality: scanned 3 file(s), 0 finding(s) quality: shellcheck unavailable; Bash semantic lint is advisory until installed. quality: shfmt unavailable; Bash formatting is covered by whitespace checks only. quality: strict checks passed.",
+        "negative_control_output": "/Users/garyharr/Github/coderails-quality-discipline/scripts/quality/check.py:33: function source_files is 20 lines (max 1) /Users/garyharr/Github/coderails-quality-discipline/scripts/quality/check.py:55: function finding is 3 lines (max 1) /Users/gar [...] ails-quality-discipline/scripts/quality/check.py:119: function parse_args is 13 lines (max 1) /Users/garyharr/Github/coderails-quality-discipline/scripts/quality/check.py:134: function main is 29 lines (max 1) quality: scanned 3 file(s), 8 finding(s)"
+      }
+    },
+    {
+      "id": "E3",
+      "priority": "P0",
+      "mode": "scripted",
+      "surface": "merged-state",
+      "assert": "The strict quality check rejects trailing whitespace or malformed structured files, while warn-only mode reports the finding and exits successfully.",
+      "cmd": "scripts/quality/check.sh --strict --root scripts/quality",
+      "negative_control": "python3 -c 'import subprocess, tempfile; from pathlib import Path; d=Path(tempfile.mkdtemp()); (d / \"bad.json\").write_text(\"{\", encoding=\"utf-8\"); raise SystemExit(subprocess.run([\"python3\", \"scripts/quality/check.py\", \"--strict\", \"--root\", str(d)]).returncode)'",
+      "status": "pending",
+      "evidence": "Freeze smoke-run observed cmd exit 0 and negative_control exit 1.",
+      "smoke": {
+        "cmd_exit": 0,
+        "negative_control_exit": 1,
+        "cmd_output": "quality: scanned 3 file(s), 0 finding(s) quality: shellcheck unavailable; Bash semantic lint is advisory until installed. quality: shfmt unavailable; Bash formatting is covered by whitespace checks only. quality: strict checks passed.",
+        "negative_control_output": "/private/var/folders/68/dqf5r6bd2bz5zjlq1ww2tfm00000gn/T/tmpcjynzpil/bad.json: missing final newline /private/var/folders/68/dqf5r6bd2bz5zjlq1ww2tfm00000gn/T/tmpcjynzpil/bad.json:1: invalid JSON: Expecting property name enclosed in double quotes quality: scanned 1 file(s), 2 finding(s)"
+      }
+    },
+    {
+      "id": "E4",
+      "priority": "P0",
+      "mode": "scripted",
+      "surface": "merged-state",
+      "assert": "Available language checks run for Python, Bash, and dashboard TypeScript without treating missing optional tools as successful strict findings.",
+      "cmd": "scripts/quality/check.sh --strict --root scripts/quality",
+      "negative_control": "python3 scripts/quality/check.py --strict --root scripts/quality --max-loc 1",
+      "status": "pending",
+      "evidence": "Freeze smoke-run observed cmd exit 0 and negative_control exit 1.",
+      "smoke": {
+        "cmd_exit": 0,
+        "negative_control_exit": 1,
+        "cmd_output": "quality: scanned 3 file(s), 0 finding(s) quality: shellcheck unavailable; Bash semantic lint is advisory until installed. quality: shfmt unavailable; Bash formatting is covered by whitespace checks only. quality: strict checks passed.",
+        "negative_control_output": "/Users/garyharr/Github/coderails-quality-discipline/scripts/quality/check.py: 166 lines (max 1) /Users/garyharr/Github/coderails-quality-discipline/scripts/quality/check.sh: 61 lines (max 1) /Users/garyharr/Github/coderails-quality-discipline/scripts/quality/tests/quality.test.sh: 63 lines (max 1) quality: scanned 3 file(s), 3 finding(s)"
+      }
+    },
+    {
+      "id": "E5",
+      "priority": "P0",
+      "mode": "scripted",
+      "surface": "merged-state",
+      "assert": "The commented-out-code heuristic catches representative dead code but ignores documentation comments and ordinary prose.",
+      "cmd": "scripts/quality/check.sh --strict --root scripts/quality",
+      "negative_control": "python3 -c 'import subprocess, tempfile; from pathlib import Path; d=Path(tempfile.mkdtemp()); (d / \"bad.sh\").write_text(\"# function removed() {\" + chr(10), encoding=\"utf-8\"); raise SystemExit(subprocess.run([\"python3\", \"scripts/quality/check.py\", \"--strict\", \"--root\", str(d)]).returncode)'",
+      "status": "pending",
+      "evidence": "Freeze smoke-run observed cmd exit 0 and negative_control exit 1.",
+      "smoke": {
+        "cmd_exit": 0,
+        "negative_control_exit": 1,
+        "cmd_output": "quality: scanned 3 file(s), 0 finding(s) quality: shellcheck unavailable; Bash semantic lint is advisory until installed. quality: shfmt unavailable; Bash formatting is covered by whitespace checks only. quality: strict checks passed.",
+        "negative_control_output": "/private/var/folders/68/dqf5r6bd2bz5zjlq1ww2tfm00000gn/T/tmp_lkowi8_/bad.sh:1: looks like commented-out code quality: scanned 1 file(s), 1 finding(s)"
+      }
+    },
+    {
+      "id": "E6",
+      "priority": "P0",
+      "mode": "scripted",
+      "surface": "merged-state",
+      "assert": "The commit-time gate runs the strict quality check and repository tests and blocks when either fails.",
+      "cmd": "scripts/quality/check.sh --strict --changed",
+      "negative_control": "python3 scripts/quality/check.py --strict --root scripts/quality --max-loc 1",
+      "status": "pending",
+      "evidence": "Freeze smoke-run observed cmd exit 0 and negative_control exit 1.",
+      "smoke": {
+        "cmd_exit": 0,
+        "negative_control_exit": 1,
+        "cmd_output": "quality: scanned 6 file(s), 0 finding(s) quality: shellcheck unavailable; Bash semantic lint is advisory until installed. quality: shfmt unavailable; Bash formatting is covered by whitespace checks only. quality: strict checks passed.",
+        "negative_control_output": "/Users/garyharr/Github/coderails-quality-discipline/scripts/quality/check.py: 166 lines (max 1) /Users/garyharr/Github/coderails-quality-discipline/scripts/quality/check.sh: 61 lines (max 1) /Users/garyharr/Github/coderails-quality-discipline/scripts/quality/tests/quality.test.sh: 63 lines (max 1) quality: scanned 3 file(s), 3 finding(s)"
+      }
+    },
+    {
+      "id": "E7",
+      "priority": "P0",
+      "mode": "scripted",
+      "surface": "merged-state",
+      "assert": "The warn-only developer command reports quality findings without blocking, while strict mode returns non-zero for the same finding.",
+      "cmd": "scripts/quality/check.sh",
+      "negative_control": "python3 scripts/quality/check.py --strict --root scripts/quality --max-loc 1",
+      "status": "pending",
+      "evidence": "Freeze smoke-run observed cmd exit 0 and negative_control exit 1.",
+      "smoke": {
+        "cmd_exit": 0,
+        "negative_control_exit": 1,
+        "cmd_output": "/Users/garyharr/Github/coderails-quality-discipline/codex/commands/prep.md: missing final newline /Users/garyharr/Github/coderails-quality-discipline/codex/runtime/graph.py: 492 lines (max 400) /Users/garyharr/Github/coderails-quality-discipline/comm [...] x 400) quality: scanned 429 file(s), 70 finding(s) quality: shellcheck unavailable; Bash semantic lint is advisory until installed. quality: shfmt unavailable; Bash formatting is covered by whitespace checks only. quality: warn-only checks completed.",
+        "negative_control_output": "/Users/garyharr/Github/coderails-quality-discipline/scripts/quality/check.py: 166 lines (max 1) /Users/garyharr/Github/coderails-quality-discipline/scripts/quality/check.sh: 61 lines (max 1) /Users/garyharr/Github/coderails-quality-discipline/scripts/quality/tests/quality.test.sh: 63 lines (max 1) quality: scanned 3 file(s), 3 finding(s)"
+      }
+    },
+    {
+      "id": "E8",
+      "priority": "P1",
+      "mode": "scripted",
+      "surface": "merged-state",
+      "assert": "Edit-time quality feedback is warn-only and returns success when its input is malformed, unavailable, or from a non-source file.",
+      "cmd": "printf '{}' | hooks/scripts/quality_feedback.sh",
+      "negative_control": "python3 scripts/quality/check.py --strict --root scripts/quality --max-loc 1",
+      "status": "pending",
+      "evidence": "Freeze smoke-run observed cmd exit 0 and negative_control exit 1.",
+      "smoke": {
+        "cmd_exit": 0,
+        "negative_control_exit": 1,
+        "cmd_output": "",
+        "negative_control_output": "/Users/garyharr/Github/coderails-quality-discipline/scripts/quality/check.py: 166 lines (max 1) /Users/garyharr/Github/coderails-quality-discipline/scripts/quality/check.sh: 61 lines (max 1) /Users/garyharr/Github/coderails-quality-discipline/scripts/quality/tests/quality.test.sh: 63 lines (max 1) quality: scanned 3 file(s), 3 finding(s)"
+      }
+    },
+    {
+      "id": "E9",
+      "priority": "P1",
+      "mode": "scripted",
+      "surface": "merged-state",
+      "assert": "Quality command and hook timeouts or missing optional tools fail closed for strict checks and never silently become a pass.",
+      "cmd": "scripts/quality/check.sh --strict --root scripts/quality",
+      "negative_control": "python3 scripts/quality/check.py --strict --root scripts/quality --max-loc 1",
+      "status": "pending",
+      "evidence": "Freeze smoke-run observed cmd exit 0 and negative_control exit 1.",
+      "smoke": {
+        "cmd_exit": 0,
+        "negative_control_exit": 1,
+        "cmd_output": "quality: scanned 3 file(s), 0 finding(s) quality: shellcheck unavailable; Bash semantic lint is advisory until installed. quality: shfmt unavailable; Bash formatting is covered by whitespace checks only. quality: strict checks passed.",
+        "negative_control_output": "/Users/garyharr/Github/coderails-quality-discipline/scripts/quality/check.py: 166 lines (max 1) /Users/garyharr/Github/coderails-quality-discipline/scripts/quality/check.sh: 61 lines (max 1) /Users/garyharr/Github/coderails-quality-discipline/scripts/quality/tests/quality.test.sh: 63 lines (max 1) quality: scanned 3 file(s), 3 finding(s)"
+      }
+    },
+    {
+      "id": "E10",
+      "priority": "P0",
+      "mode": "scripted",
+      "surface": "merged-state",
+      "assert": "The quality checks preserve existing provider/package boundaries and do not flag comments, generated artifacts, or valid configuration merely because they match a heuristic token.",
+      "cmd": "scripts/quality/check.sh --strict --root scripts/quality",
+      "negative_control": "python3 -c 'raise SystemExit(1)'",
+      "status": "pending",
+      "evidence": "Freeze smoke-run observed cmd exit 0 and negative_control exit 1.",
+      "smoke": {
+        "cmd_exit": 0,
+        "negative_control_exit": 1,
+        "cmd_output": "quality: scanned 3 file(s), 0 finding(s) quality: shellcheck unavailable; Bash semantic lint is advisory until installed. quality: shfmt unavailable; Bash formatting is covered by whitespace checks only. quality: strict checks passed.",
+        "negative_control_output": ""
+      }
+    }
+  ],
+  "amendments": [],
+  "result": null,
+  "graded_at": null,
+  "head_sha": "04325e16b14c055da87ec52ea964a3206e30cb94"
+}
