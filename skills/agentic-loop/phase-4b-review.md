@@ -5,6 +5,16 @@ Detail-carrier for [SKILL.md](SKILL.md)'s Phase 4b. The main skill keeps the imp
 is the six-reviewer breakdown, the security/deploy-safety add-ons, the clean-break gate, and the
 worktree-teardown mechanics you consult while running it.
 
+**Graph dispatch boundary.** `U4b-review` and `U4b-merge-gate` are graph nodes with `graph_role`
+entries in `skills/index.yaml`, but `graph_dispatch_plan` (`hooks/scripts/lib/graph_dispatch.sh`)
+currently resolves BOTH as `unresolved:true` — `U4b-review` has three same-tier matches
+(`deploy-safety-reviewer`, `source-auditor`, plus `post-review` at command tier), `U4b-merge-gate`
+has two command-tier matches (`merge`, `post-evals`) — so this phase is not yet reachable through
+the `graph_dispatch_plan`/`graph_dispatch_record` contract. The Skill-based invocation
+(`/pr-review-toolkit:review-pr`, `/coderails:post-review`, `/coderails:merge`) documented in this
+file remains the operative mechanism until that ambiguity is resolved upstream. See
+`hooks/scripts/tests/graph_dispatch_downstream.test.sh` for the characterization evidence.
+
 When a phase reaches "review the PR" (after a `/workflow` agent has pushed a PR, before merge), invoke the **`/pr-review-toolkit:review-pr <PR#>`** Skill — passing the PR number as the argument — which itself fans out the six specialised reviewers plus a security pass. Do NOT hand-roll the reviewers as separate `Agent` or `Task` spawns; use the Skill invocation.
 
 **Invoking `/pr-review-toolkit:review-pr <PR#>` with the PR number is REQUIRED to satisfy the merge gate, because `enforce_pr_workflow` only accepts the `review-pr` Skill (with the PR number in args) as merge evidence — a manually-spawned agent fanout leaves no evidence the gate recognises and the merge will block.** The gate also recognises `scripts/merge.sh <PR#>` invocations (not just raw `gh pr merge`) as the same merge subcommand, so a hand-rolled review cannot merge through the wrapper script either.
