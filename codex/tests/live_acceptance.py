@@ -21,7 +21,19 @@ def canonical_config(state: Path) -> tuple[dict, dict, dict]:
     apply_work_unit_disposition(graph, None)
     for node, record in graph["nodes"].items():
         if not record.get("dispatch", True) and record["outcome"] == "pending":
-            record.update(status="skipped", outcome="skipped")
+            record.update(
+                status="skipped",
+                outcome="skipped",
+                evidence=[{
+                    "attempt": 0,
+                    "outcome": "skipped",
+                    "output": "cross-cutting guard metadata; no standalone dispatch",
+                    "mode": "live",
+                    "provider": "codex",
+                    "route": "codex-exec",
+                    **run,
+                }],
+            )
     for kind in REQUIRED_GATES:
         node = f"E3-gate-{kind}"
         graph["nodes"][node] = {"status": "pending", "outcome": "pending", "retry": {"attempts": 0, "max": 1}, "name": node, "dispatch": True}

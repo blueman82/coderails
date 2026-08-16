@@ -73,6 +73,16 @@ class LiveAcceptanceNegativeTests(unittest.TestCase):
             self.assertEqual(sum(len(node.get("evidence", [])) for node in second["graph"]["nodes"].values()), evidence_count)
             self.assertEqual(first["revision"], second["revision"])
 
+    def test_canonical_guard_metadata_is_live_and_explicit(self) -> None:
+        graph, _, run = live_acceptance.canonical_config(Path("/tmp/canonical.json"))
+        for name in ("G10", "G11", "G12"):
+            node = graph["nodes"][name]
+            self.assertEqual(node["outcome"], "skipped")
+            evidence = node["evidence"][-1]
+            self.assertEqual(evidence["provider"], "codex")
+            self.assertEqual(evidence["route"], "codex-exec")
+            self.assertEqual({evidence[key] for key in ("run_id", "revision", "head")}, {run[key] for key in ("run_id", "revision", "head")})
+
     def run_scenario(self, scenario: str) -> dict:
         with tempfile.TemporaryDirectory() as directory:
             state = Path(directory) / "state.json"
