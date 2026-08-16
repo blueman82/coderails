@@ -20,7 +20,9 @@ Never `git rev-parse --show-toplevel` of the invoking repo — that's the
 *user's* project, not the plugin's location. Do not fall back to a versioned
 plugin cache directory either (e.g. under `~/.claude/plugins/cache/`) — it can
 hold a stale snapshot of these scripts that silently diverges from the live
-dev repo.
+dev repo. If neither `${CLAUDE_PLUGIN_ROOT}` nor a plugin-root path is
+available anywhere in this session's rendered context, stop — report that the
+plugin root is unresolvable and do not dispatch the node.
 Dispatch only nodes it reports `ready` for. Its `blocked` output means "not
 yet ready to dispatch" — it fail-closes the same way on missing or malformed
 `progress.json` as on a real non-terminal predecessor, so it cannot distinguish
