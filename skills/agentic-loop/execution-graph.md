@@ -217,6 +217,18 @@ ambiguous.
 | `S13-retro` | `S13-proof` | Phase 13 report, cost, decisions, artifacts, eval result, standing orders, and feedback are written | never a mid-loop checkpoint |
 | `S13-complete` | `S13-retro` | final aggregate verification passes; `progress.json` is complete and `retro.json` is valid | terminal node; emits `LOOP-STOP: complete` |
 
+`U4b-review-claude[i]`, `U4b-review-codex[i]`, and `J4b-review[i]` are staged
+per `docs/DESIGN-MIXED-PROVIDER-REVIEW.md` §4.4 (frozen spec) — illustrative
+only, not yet wired as anything's true prerequisite. `U5[i]` and
+`U4b-merge-gate[i]` still list `U4b-review[i]` as their true prerequisite,
+unchanged. Rerouting them onto `J4b-review[i]` is deferred to a separate,
+Codex-owned change: per the spec's §7.2, any node staged into this table
+becomes dispatchable by construction unless its conditional cell carries the
+`load_contract` "no standalone work"/"cross-cutting" markers (forbidden here,
+since it would fail-open the join's own hard-stop) — and a dispatchable node
+requires a `graph.py` implementation mapping, which `prepare_implementations`
+enforces and which does not exist yet for these nodes.
+
 `S0.5`, `U4`, `U4b-review`, `U6`, and `S13-complete` carry the Phase 11/12
 confidence-label and fresh-evidence rules; they are guards on the nodes above,
 not extra work. A review finding, failing eval, smoke failure, or verification
