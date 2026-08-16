@@ -12,7 +12,7 @@ cp "$index" "$tmp/index.yaml"
 ruby -e '
   path = ARGV.fetch(0)
   text = File.read(path)
-  text.sub!(/(  agentic-loop:\n.*?    codex:\n      path: codex\/skills\/agentic-loop\.md\n      status:) active/m, "\\1 planned")
+  text.sub!(/(  agentic-loop:\n.*?    codex:\n      path: \.codex\/skills\/agentic-loop\/SKILL\.md\n      status:) active/m, "\\1 planned")
   abort "fixture mutation failed" unless text != File.read(path)
   File.write(path, text)
 ' "$tmp/index.yaml"
@@ -24,7 +24,7 @@ cp "$index" "$tmp/wrong-kind.yaml"
 ruby -e '
   path = ARGV.fetch(0)
   text = File.read(path)
-  text.sub!("path: codex/skills/agentic-loop.md", "path: codex/agents/deploy-safety-reviewer.md")
+  text.sub!("path: .codex/skills/agentic-loop/SKILL.md", "path: codex/agents/deploy-safety-reviewer.md")
   abort "fixture mutation failed" unless text != File.read(path)
   File.write(path, text)
 ' "$tmp/wrong-kind.yaml"
