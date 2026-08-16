@@ -109,13 +109,19 @@ j28_skill=$(printf '%s' "$plan_j28" | jq -r 'select(.node_id=="J2.8") | .skill_i
   && ok "acceptance: plan reports J2.8 as kind:join, never a dispatch target" \
   || fail "acceptance: J2.8 plan kind" "j28_kind=$j28_kind j28_skill=$j28_skill"
 
-# --- 3b (RED HALF): U3 is BLOCKED before the explicit J2.8-release write,
-# even though S2.8/S2.7d are already done — mirrors block 1's red half: a
-# join's inputs being done does not itself release the join. ---
+# --- 3b: U3 is BLOCKED before the explicit J2.8-release write, even though
+# S2.8/S2.7d are already done. NOTE: this does NOT exercise J2.8's own join
+# logic the way block 1's red half exercises J2 — graph_readiness.sh only
+# consults the joins map for the QUERIED node, and U3 itself has no joins
+# entry (only J2.8 does), so this assertion takes the plain-edges branch
+# unconditionally and would report "blocked" regardless of whether J2.8's
+# join-release logic is correct. It only proves U3's own edge from J2.8 is
+# still unsatisfied pre-release — real join-release coverage for J2.8 lives
+# in 3a (kind:join, never a dispatch target) and 3c (ready post-release). ---
 pre_u3=$(bash "$LIB_DIR/graph_readiness.sh" "$TMP/j28.json" "U3")
 [ "$pre_u3" = "blocked" ] \
-  && ok "acceptance (red half): U3 still blocked before explicit J2.8 release" \
-  || fail "acceptance red half: U3 should be blocked pre-release" "got=$pre_u3"
+  && ok "acceptance: U3's edge from J2.8 still unsatisfied pre-release (not a join-logic test, see comment above)" \
+  || fail "acceptance: U3 should be blocked pre-release" "got=$pre_u3"
 
 # --- 3c: after the explicit J2.8 release write, U3 becomes ready ---
 jq '.graph.nodes["J2.8"].status = "done" | .graph.nodes["J2.8"].outcome = "done"' "$TMP/j28.json" > "$TMP/j28.json.tmp" && mv "$TMP/j28.json.tmp" "$TMP/j28.json"
