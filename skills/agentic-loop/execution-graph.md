@@ -104,6 +104,40 @@ race under concurrent writers — move the read inside
 graph_executor_apply_wave's lock if concurrent orchestrators on one
 progress.json ever becomes a real scenario.`
 
+**`S9-wiki -> S9-docs` and the `J12-all-units` release — `graph_dispatch.sh`.**
+Use `${PLUGIN_ROOT}/hooks/scripts/lib/graph_dispatch.sh` (same `PLUGIN_ROOT`
+resolution as the `graph_readiness.sh` path above — prefer
+`${CLAUDE_PLUGIN_ROOT}` when set, otherwise reuse the plugin root already
+visible in this session's rendered context; never guessed, never the invoking
+repo's toplevel, never the versioned plugin cache) for the tail of the graph,
+past the last unit's merge gate:
+
+1. `S9-wiki -> S9-docs` is a plain sequential edge, not a join — no second
+   write is needed for it. Call `graph_dispatch_plan` once `J12-all-units` is
+   terminal-success; it resolves `S9-wiki` to `wiki-writer`
+   (`kind:"dispatch"`, `unresolved:false`). Dispatch the real `Agent` call,
+   then call `graph_dispatch_record` with `S9-wiki`'s result. Only after that
+   record call does a fresh `graph_dispatch_plan` resolve `S9-docs` to
+   `docs-auditor` — `graph_readiness.sh` reports `S9-docs` `blocked` until
+   `S9-wiki`'s outcome lands as `done`/`skipped`, same as any other sequential
+   edge in this graph.
+2. `J12-all-units` release is a separate, explicit second write — MUST NOT
+   be skipped, same rule as `J2` above. `J12-all-units` is never a dispatch
+   target (`graph_dispatch_plan` reports it as `kind:"join"`, never sent to
+   `Agent`), so no wave-results object ever contains a `"J12-all-units"` key,
+   and `graph_dispatch_record`'s fold only writes keys present in the results
+   object it is handed — `J12-all-units` is never folded automatically.
+   Recording every unit's `U4b-merge-gate[i]` as done does not release it:
+   after the last unit's merge gate reports terminal, the orchestrator MUST
+   perform one further read-modify-write setting `J12-all-units` itself to a
+   terminal `done` (or `skipped`, only if genuinely no units exist — should
+   not happen in practice) value in BOTH its `.status` and `.outcome` fields,
+   matching the same convention used for `J2`'s release. **No unit may be
+   silently omitted from what `J12-all-units` waits on** — every unit's
+   `U4b-merge-gate[i]` outcome must be present and terminal-success before
+   this release write, or `S9-wiki` and everything after it stays permanently
+   blocked even though every unit actually finished.
+
 Node IDs are stable documentation identifiers. `S*` nodes run once; `U<i>*`
 nodes run once per work-unit `i`; `J*` nodes are explicit joins. A skipped node
 is still recorded as `skipped: <predicate>` in loop state; it is not a failed

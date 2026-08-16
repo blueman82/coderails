@@ -7,11 +7,16 @@ you consult while running it.
 
 **Graph dispatch boundary.** `S9-wiki` and `S9-docs` DO resolve cleanly today: `graph_dispatch_plan`
 (`hooks/scripts/lib/graph_dispatch.sh`) resolves them to `wiki-writer` and `docs-auditor`
-respectively, each an unambiguous agent-tier match in `skills/index.yaml`. These two nodes are the
-exception among the downstream graph-dispatch boundaries documented across this phase family —
-they're plan-ready even though no call site wires `graph_dispatch_plan`/`graph_dispatch_record`
-into this phase yet. See `hooks/scripts/tests/graph_dispatch_downstream.test.sh` for the
-characterization evidence.
+respectively, each an unambiguous agent-tier match in `skills/index.yaml` — unlike
+`U4b-review`/`U4b-merge-gate`, which remain unresolved per the same characterization test. These
+two nodes are the exception among the downstream graph-dispatch boundaries documented across this
+phase family — they're plan-ready even though no call site wires
+`graph_dispatch_plan`/`graph_dispatch_record` into this phase yet. See
+`hooks/scripts/tests/graph_dispatch_downstream.test.sh` for the characterization evidence. The
+orchestrator-side invocation sequence for this sequential `S9-wiki -> S9-docs` link, plus the
+`J12-all-units` join release that gates it, is documented in
+[execution-graph.md](execution-graph.md)'s `S9-wiki -> S9-docs` and `J12-all-units` subsection, with
+acceptance evidence in `hooks/scripts/tests/graph_dispatch_j12_s9.test.sh`.
 
 **Suppressing per-PR wiki steps in spawned `/coderails:workflow` agents:** place the following line as the **FIRST instruction** in every spawned agent's prompt inside this loop (not buried mid-section, not under the task-specific scope, not after the workflow steps — first):
 
