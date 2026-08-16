@@ -8,20 +8,29 @@ what makes a node *ready*.
 Before dispatching any candidate node, run the read-only readiness query
 `${PLUGIN_ROOT}/hooks/scripts/lib/graph_readiness.sh <path-to-progress.json> <node-id>`,
 where `PLUGIN_ROOT` resolves as follows. Prefer `${CLAUDE_PLUGIN_ROOT}` when
-it is set in your shell (the packaged-install case). It is normally unset in
-an orchestrator-issued Bash call, though — it is not substituted into your
-own Bash tool calls, even though it is substituted elsewhere (e.g. command
-frontmatter, `hooks.json`'s own hook command strings). When unset, do not
-construct or guess a path — reuse the plugin root
-you already have from this session's own rendered context instead: the
-currently-loaded skill's own "Base directory for this skill:" line, or a
-plugin-root path already substituted into other rendered skill/template text
-this session (e.g. a `source` command from a `/coderails:*` slash command).
-Never `git rev-parse --show-toplevel` of the invoking repo — that's the
-*user's* project, not the plugin's location. Do not fall back to a versioned
-plugin cache directory either (e.g. under `~/.claude/plugins/cache/`) — it can
-hold a stale snapshot of these scripts that silently diverges from the live
-dev repo. If neither `${CLAUDE_PLUGIN_ROOT}` nor a plugin-root path is
+it is set in your shell — it is substituted in command frontmatter and in
+`hooks.json`'s own hook command strings, for both a directory-marketplace and
+a packaged install, but it is normally unset in an orchestrator-issued Bash
+call, since it is not substituted into your own Bash tool calls. Before
+dispatching against whatever it resolves to, confirm the script actually
+exists at that path (e.g. `[ -f "$PLUGIN_ROOT/hooks/scripts/lib/graph_readiness.sh" ]`)
+— a packaged install's cache copy can predate this script's introduction, and
+`graph_readiness.sh`'s own `blocked` output is indistinguishable from a real
+non-terminal predecessor, so a missing-script call would silently read as
+every node being blocked rather than as a resolution failure. If the file is
+missing, stop and report that PLUGIN_ROOT resolved to a directory without this
+script — do not dispatch. When `${CLAUDE_PLUGIN_ROOT}` is unset, do not
+construct or guess a path — reuse the plugin root you already have from this
+session's own rendered context instead: the currently-loaded skill's own
+"Base directory for this skill:" line, or a plugin-root path already
+substituted into other rendered skill/template text this session (e.g. a
+`source` command from a `/coderails:*` slash command). Never `git rev-parse
+--show-toplevel` of the invoking repo — that's the *user's* project, not the
+plugin's location. Do not hand-construct a versioned plugin cache path (e.g.
+guessing a version under `~/.claude/plugins/cache/`) — if `${CLAUDE_PLUGIN_ROOT}`
+itself resolves to a cache copy, that's the harness's answer and the
+file-existence check above is what catches a stale one, not a blanket ban on
+the directory. If neither `${CLAUDE_PLUGIN_ROOT}` nor a plugin-root path is
 available anywhere in this session's rendered context, stop — report that the
 plugin root is unresolvable and do not dispatch the node.
 Dispatch only nodes it reports `ready` for. Its `blocked` output means "not
