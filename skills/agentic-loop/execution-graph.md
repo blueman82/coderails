@@ -6,8 +6,34 @@ predicate, or skip condition; the phase prose in SKILL.md covers what to *do*, t
 what makes a node *ready*.
 
 Before dispatching any candidate node, run the read-only readiness query
-`${CLAUDE_PLUGIN_ROOT}/hooks/scripts/lib/graph_readiness.sh <path-to-progress.json> <node-id>`
-and dispatch only nodes it reports `ready` for. Its `blocked` output means "not
+`${PLUGIN_ROOT}/hooks/scripts/lib/graph_readiness.sh <path-to-progress.json> <node-id>`,
+where `PLUGIN_ROOT` resolves as follows. Prefer `${CLAUDE_PLUGIN_ROOT}` when
+it is set in your shell — it is substituted in command frontmatter and in
+`hooks.json`'s own hook command strings, for both a directory-marketplace and
+a packaged install, but it is normally unset in an orchestrator-issued Bash
+call, since it is not substituted into your own Bash tool calls. Before
+dispatching against whatever it resolves to, confirm the script actually
+exists at that path (e.g. `[ -f "$PLUGIN_ROOT/hooks/scripts/lib/graph_readiness.sh" ]`)
+— a packaged install's cache copy can predate this script's introduction, and
+`graph_readiness.sh`'s own `blocked` output is indistinguishable from a real
+non-terminal predecessor, so a missing-script call would silently read as
+every node being blocked rather than as a resolution failure. If the file is
+missing, stop and report that PLUGIN_ROOT resolved to a directory without this
+script — do not dispatch. When `${CLAUDE_PLUGIN_ROOT}` is unset, do not
+construct or guess a path — reuse the plugin root you already have from this
+session's own rendered context instead: the currently-loaded skill's own
+"Base directory for this skill:" line, or a plugin-root path already
+substituted into other rendered skill/template text this session (e.g. a
+`source` command from a `/coderails:*` slash command). Never `git rev-parse
+--show-toplevel` of the invoking repo — that's the *user's* project, not the
+plugin's location. Do not hand-construct a versioned plugin cache path (e.g.
+guessing a version under `~/.claude/plugins/cache/`) — if `${CLAUDE_PLUGIN_ROOT}`
+itself resolves to a cache copy, that's the harness's answer and the
+file-existence check above is what catches a stale one, not a blanket ban on
+the directory. If neither `${CLAUDE_PLUGIN_ROOT}` nor a plugin-root path is
+available anywhere in this session's rendered context, stop — report that the
+plugin root is unresolvable and do not dispatch the node.
+Dispatch only nodes it reports `ready` for. Its `blocked` output means "not
 yet ready to dispatch" — it fail-closes the same way on missing or malformed
 `progress.json` as on a real non-terminal predecessor, so it cannot distinguish
 the two. Conversely, a node with no recorded incoming edges is vacuously
@@ -16,6 +42,67 @@ Run ready independent nodes in one wave, but preserve every listed dependency.
 The orchestrator is the only writer of `progress.json`: collect a wave's results, then do one
 read-modify-write before releasing its join. Inside an authorised loop, the
 `U*` lane below repeats per work-unit.
+
+**Resolving and recording a wave — `graph_dispatch.sh`.** Use
+`${PLUGIN_ROOT}/hooks/scripts/lib/graph_dispatch.sh` (same `PLUGIN_ROOT`
+resolution as the `graph_readiness.sh` path above — prefer
+`${CLAUDE_PLUGIN_ROOT}` when set, otherwise reuse the plugin root already
+visible in this session's rendered context; never guessed, never the invoking
+repo's toplevel, never the versioned plugin cache) for the S2.5/S2.6 fork
+through the `J2` join, and for any other fork/join wave in the graph:
+
+1. Source the script and call `graph_dispatch_plan <path-to-progress.json>
+   <path-to-skills/index.yaml>` to resolve the current ready wave's dispatch
+   targets — one JSON-lines object per ready node — BEFORE running any real
+   `Agent` dispatch. A `kind:"join"` line (e.g. `J2`) is not a dispatch
+   target; only `kind:"dispatch"` lines with `unresolved:false` are.
+2. Dispatch the real `Agent` calls for that wave's resolved targets.
+3. **Wave-completeness — confirm before recording.** `graph_dispatch_record`'s
+   own jq only iterates keys present in the results object it is handed — it
+   cannot itself detect a wave where a dispatched node never reported back.
+   Before calling it, confirm every node `graph_dispatch_plan` reported as a
+   dispatch target in this wave has a result in hand (a skipped branch still
+   records an explicit skip, same convention as this file's skip column) —
+   do not call `graph_dispatch_record` with a partial wave.
+4. Call `graph_dispatch_record <path-to-progress.json> <wave-results-json>`
+   once the full wave's results are collected, to fold them into
+   `.graph.nodes` (bounded-retry/hard-stop bookkeeping included).
+5. **`J2` release is a separate, explicit second write — MUST NOT be
+   skipped.** `J2` is never a dispatch target (`graph_dispatch_plan` reports
+   it as `kind:"join"`, never sent to `Agent`), so no wave-results object
+   ever contains a `"J2"` key, and `graph_dispatch_record`'s fold only writes
+   keys present in the results object it is handed — `J2` is never folded
+   automatically. Join nodes have no special readiness-gating logic:
+   `graph_readiness.sh`'s join branch only changes which nodes count as
+   *predecessors* for a downstream node (substituting the join's `inputs`
+   list for raw edges); `J2` itself is read and gated like any ordinary
+   node, on its own `.status` (for its own pending/ready state) and, for
+   nodes downstream of it, on its `.outcome` (predecessors are gated on
+   `.outcome` being a terminal-success value: `done`/`skipped`). After
+   `graph_dispatch_record` absorbs the `S2.5`/`S2.6` results, the
+   orchestrator MUST perform one further read-modify-write setting `J2`
+   itself to a terminal `done` or `skipped` value in BOTH its `.status` and
+   `.outcome` fields — matching the convention `graph_dispatch_record`'s own
+   fold uses when it writes a node's result (`status` and `outcome` set
+   together to the same final value), since other code paths may read
+   either field. Skipping this write leaves `J2` — and every downstream
+   node — permanently blocked, even though `S2.5`/`S2.6` both completed.
+
+**Known ceiling — `retry.attempts` read is outside the write lock.**
+`graph_dispatch_record` computes each node's `retry.attempts` via its own
+unlocked `jq` read of `progress.json`, before handing the folded result to
+`graph_executor_apply_wave`'s locked read-modify-write. Two orchestrator
+sessions calling `graph_dispatch_record` concurrently against the same
+`progress.json` could both read a stale `attempts` value, undercounting the
+retry bound. `graph_executor.sh`/`graph_readiness.sh` are the frozen,
+byte-verified contract this loop was scoped never to touch, so the fix is
+deferred rather than made here: single-orchestrator-per-`progress.json` (the
+existing "orchestrator is the only writer" rule two paragraphs up) is the
+current mitigation, not a real fix for true concurrent writers.
+`# ponytail: unlocked pre-read of retry.attempts in graph_dispatch_record,
+race under concurrent writers — move the read inside
+graph_executor_apply_wave's lock if concurrent orchestrators on one
+progress.json ever becomes a real scenario.`
 
 Node IDs are stable documentation identifiers. `S*` nodes run once; `U<i>*`
 nodes run once per work-unit `i`; `J*` nodes are explicit joins. A skipped node
