@@ -9,9 +9,10 @@ Before dispatching any candidate node, run the read-only readiness query
 `${PLUGIN_ROOT}/hooks/scripts/lib/graph_readiness.sh <path-to-progress.json> <node-id>`,
 where `PLUGIN_ROOT` resolves as follows. Prefer `${CLAUDE_PLUGIN_ROOT}` when
 it is set in your shell (the packaged-install case). It is normally unset in
-an orchestrator-issued Bash call, though — that variable is only substituted
-inside `hooks.json`'s own hook command strings, never into your own Bash tool
-calls. When unset, do not construct or guess a path — reuse the plugin root
+an orchestrator-issued Bash call, though — it is not substituted into your
+own Bash tool calls, even though it is substituted elsewhere (e.g. command
+frontmatter, `hooks.json`'s own hook command strings). When unset, do not
+construct or guess a path — reuse the plugin root
 you already have from this session's own rendered context instead: the
 currently-loaded skill's own "Base directory for this skill:" line, or a
 plugin-root path already substituted into other rendered skill/template text
