@@ -6,7 +6,6 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-import shlex
 import subprocess
 from pathlib import Path
 
@@ -31,12 +30,11 @@ def canonical_config(state: Path) -> tuple[dict, dict, dict]:
         node = f"E3-gate-{kind}"
         artifact = artifacts / f"{kind}.json"
         raw = artifacts / f"{kind}.raw.jsonl"
-        command = [sys.executable, str(ROOT / "codex/runtime/gate_producer.py"), "--gate", kind, "--artifact", str(artifact), "--raw", str(raw), "--run-id", run["run_id"], "--revision", run["revision"], "--head", run["head"]]
+        command = [sys.executable, str(ROOT / "codex/runtime/gate_producer.py"), "--gate", kind, "--artifact", str(artifact), "--raw", str(raw), "--run-id", run["run_id"], "--revision", run["revision"], "--head", run["head"], "--cwd", str(ROOT)]
         if kind == "teardown":
             command += ["--retro", str(state.parent / "retro.json")]
-        prompt = "You are the Codex gate producer. Use your shell tool now and execute exactly this command; do not merely describe it, and do not create files any other way: " + shlex.join(command)
-        config["nodes"][node] = {"adapter": "codex-exec", "prompt": prompt, "cwd": str(ROOT), "provider": "codex", "skill_id": f"canonical.gate.{kind}", "implementation_path": "codex/runtime/gate_producer.py"}
-        config["gates"][kind] = {"node": node, "adapter": "codex-exec", "prompt": config["nodes"][node]["prompt"], "cwd": str(ROOT), "provider": "codex", "skill_id": f"canonical.gate.{kind}", "implementation_path": "codex/runtime/gate_producer.py", "artifact_path": str(artifact), "provenance": {"provider": "codex", "route": "codex-exec", **run}}
+        config["nodes"][node] = {"command": command, "provider": "codex", "skill_id": f"canonical.gate.{kind}", "implementation_path": "codex/runtime/gate_producer.py"}
+        config["gates"][kind] = {"node": node, "gate": kind, "command": command, "provider": "codex", "skill_id": f"canonical.gate.{kind}", "implementation_path": "codex/runtime/gate_producer.py", "artifact_path": str(artifact), "provenance": {"provider": "codex", "route": "codex-exec", **run}}
     return graph, config, run
 
 

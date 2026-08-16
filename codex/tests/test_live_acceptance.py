@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -14,16 +15,17 @@ from tests import live_acceptance  # noqa: E402
 
 
 class LiveAcceptanceNegativeTests(unittest.TestCase):
+    def fake_codex(self, directory: str) -> None:
+        binary = Path(directory) / "codex"
+        binary.write_text("#!/bin/sh\nprintf '%s\\n' '{\"type\":\"turn.completed\"}'\n")
+        binary.chmod(0o755)
+
     def test_canonical_acceptance_creates_all_run_bound_artifacts_and_lifecycle_passes(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             state = Path(directory) / "state.json"
-
-            def fake_codex(prompt, cwd):
-                command = prompt.split(": ", 1)[1]
-                result = subprocess.run(command, shell=True, cwd=cwd, capture_output=True, text=True, check=False)
-                return ("done" if result.returncode == 0 else "failed", '{"type":"turn.completed"}\n' + result.stdout + result.stderr)
-
-            self.assertEqual(live_acceptance.run_canonical(state, invoke=fake_codex), 0)
+            self.fake_codex(directory)
+            with patch.dict(os.environ, {"PATH": f"{directory}:{os.environ['PATH']}"}):
+                self.assertEqual(live_acceptance.run_canonical(state), 0)
             saved = json.loads(state.read_text())
             self.assertEqual(saved["status"], "complete")
             for gate in ("review", "eval", "proof", "integrity", "wiki", "teardown"):
@@ -35,7 +37,9 @@ class LiveAcceptanceNegativeTests(unittest.TestCase):
     def test_canonical_lifecycle_refuses_missing_and_stale_gate(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             state = Path(directory) / "state.json"
-            self.assertEqual(live_acceptance.run_canonical(state, invoke=lambda prompt, cwd: ("done", "{") if subprocess.run(prompt.split(": ", 1)[1], shell=True, cwd=cwd).returncode == 0 else ("failed", "producer failed")), 0)
+            self.fake_codex(directory)
+            with patch.dict(os.environ, {"PATH": f"{directory}:{os.environ['PATH']}"}):
+                self.assertEqual(live_acceptance.run_canonical(state), 0)
             saved = json.loads(state.read_text())
             missing = json.loads(json.dumps(saved))
             missing["gates"].pop("wiki")

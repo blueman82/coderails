@@ -5,7 +5,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parents[1]))
+from runtime.codex_exec import invoke  # noqa: E402
 
 RESULTS = {
     "review": ("review_status", "pass"),
@@ -17,9 +21,13 @@ RESULTS = {
 }
 
 
-def produce(gate: str, artifact: Path, raw: Path, run_id: str, revision: str, head: str, retro: Path | None = None) -> dict:
+def produce(gate: str, artifact: Path, raw: Path, run_id: str, revision: str, head: str, cwd: str, retro: Path | None = None, executor=invoke) -> dict:
     if gate not in RESULTS:
         raise ValueError(f"unknown gate: {gate}")
+    prompt = f"Codex E3 {gate} gate: report GATE_{gate.upper()}_OK. Do not edit files or run commands."
+    outcome, output = executor(prompt, cwd)
+    if outcome != "done":
+        raise RuntimeError(f"Codex gate execution failed for {gate}: {output}")
     field, result = RESULTS[gate]
     value = {
         "schema_version": 1,
@@ -33,7 +41,7 @@ def produce(gate: str, artifact: Path, raw: Path, run_id: str, revision: str, he
     }
     artifact.parent.mkdir(parents=True, exist_ok=True)
     raw.parent.mkdir(parents=True, exist_ok=True)
-    raw.write_text(json.dumps({"provider": "codex", "gate": gate, "run_id": run_id, "revision": revision, "head": head}, sort_keys=True) + "\n", encoding="utf-8")
+    raw.write_text(output, encoding="utf-8")
     artifact.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
     if gate == "teardown" and retro is not None:
         retro.parent.mkdir(parents=True, exist_ok=True)
@@ -49,9 +57,10 @@ def main() -> int:
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--revision", required=True)
     parser.add_argument("--head", required=True)
+    parser.add_argument("--cwd", required=True)
     parser.add_argument("--retro", type=Path)
     args = parser.parse_args()
-    print(json.dumps(produce(args.gate, args.artifact, args.raw, args.run_id, args.revision, args.head, args.retro)))
+    print(json.dumps(produce(args.gate, args.artifact, args.raw, args.run_id, args.revision, args.head, args.cwd, args.retro)))
     return 0
 
 
