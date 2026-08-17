@@ -66,8 +66,8 @@
       "assert": "The spec never contains a fully-specified dual-execution schema/record shape inside a fenced code block -- deferred prose mentions are fine, a concrete implementable contract for it is not, per SS0/SS8's explicit out-of-scope declaration.",
       "cmd": "REPO=$(git rev-parse --show-toplevel); DOC=\"$REPO/docs/DESIGN-MIXED-PROVIDER-REVIEW.md\"; hits=$(awk '/^```/{f=!f;next} f' \"$DOC\" | grep -cF 'dual-execution'); [ \"$hits\" -eq 0 ]",
       "negative_control": "DOC=$(mktemp); printf '## Forbidden scope test\\n\\n```json\\n{\\n  \"mode\": \"dual-execution\",\\n  \"implementers\": [ {\"provider\": \"claude\"}, {\"provider\": \"codex\"} ]\\n}\\n```\\n' > \"$DOC\"; hits=$(awk '/^```/{f=!f;next} f' \"$DOC\" | grep -cF 'dual-execution'); [ \"$hits\" -eq 0 ]; rc=$?; unlink \"$DOC\"; exit $rc",
-      "status": "pending",
-      "evidence": "",
+      "status": "pass",
+      "evidence": "Graded 2026-08-17T12:50:59Z against head 3a074aa2acf22daf9718c93042523503e43943dc. cmd re-run fresh: exit 0 — no fenced code block in the spec mentions 'dual-execution', confirming the deferred scope stays deferred. negative_control re-run fresh: exit 1 against the fixture doc that injects a fenced dual-execution block, confirming the check discriminates.",
       "smoke": {
         "cmd_exit": 0,
         "negative_control_exit": 1,
