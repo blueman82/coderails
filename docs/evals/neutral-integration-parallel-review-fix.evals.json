@@ -1,0 +1,97 @@
+{
+  "schema_version": 1,
+  "scope": "pr",
+  "task_ref": "PR #418 (neutral-integration/parallel-review) NO-GO remediation: base-branch traceability + live graph-runtime break",
+  "verification_level": 1,
+  "verification_justification": "Corrects two independently-reviewed critical blockers on an existing open PR (docs/design-contract ancestry, and three dispatchable execution-graph.md rows with no Codex-side implementation mapping). No new deployed/outward surface is introduced by the fix itself \u2014 it removes rows and merges a doc commit \u2014 so no verification_level-2 predicate fires. Not verification_level 0: the two blockers were freshly found by an independent review and have no pre-existing test/verify-criterion covering them (the exec_bit_invariant test only started covering the 2 target scripts because this fix registers them). Strongest surface (rule 6): the goal state is 'does this branch's own history and live-parsed contract satisfy what the review demanded' \u2014 git ancestry checks and a live call into codex/runtime/graph.py's own prepare_implementations are the direct exercise of that surface, not a substitute for it.",
+  "frozen_at": "2026-08-17T09:20:00Z",
+  "frozen_sha": "d4b753958f1d0e92d9ca1a232f95267017a0655c",
+  "evals": [
+    {
+      "id": "F1",
+      "priority": "P0",
+      "mode": "scripted",
+      "surface": "artifact-path",
+      "assert": "The frozen design-contract commit 0c7b463910fb8ad1cc251f1afcf279b180696ee (docs/DESIGN-MIXED-PROVIDER-REVIEW.md + docs/evals/mixed-provider-review.evals.json) is a real ancestor of this branch's HEAD, and both files are present and non-empty at HEAD \u2014 closing the base-branch traceability break the independent review found (neither file existed anywhere in PR #418's own history before this fix).",
+      "cmd": "REPO=$(git rev-parse --show-toplevel); cd \"$REPO\"; git merge-base --is-ancestor 0c7b463910fb8ad1cc251f1afcf279b180696ee HEAD || { echo 'design contract commit is not an ancestor of HEAD'; exit 1; }; for f in docs/DESIGN-MIXED-PROVIDER-REVIEW.md docs/evals/mixed-provider-review.evals.json; do [ -s \"$f\" ] || { echo \"missing or empty: $f\"; exit 1; }; done; exit 0",
+      "negative_control": "REPO=$(git rev-parse --show-toplevel); cd \"$REPO\"; git merge-base --is-ancestor 0c7b463910fb8ad1cc251f1afcf279b180696ee c07f2641bf713d1198b6c1c0f6257014b866d13c && { echo 'unexpectedly an ancestor of the original PR head'; exit 0; }; exit 1",
+      "status": "pending",
+      "evidence": "",
+      "smoke": {
+        "cmd_exit": 0,
+        "negative_control_exit": 1,
+        "cmd_output": "",
+        "negative_control_output": ""
+      }
+    },
+    {
+      "id": "F2",
+      "priority": "P0",
+      "mode": "scripted",
+      "surface": "artifact-path",
+      "assert": "skills/agentic-loop/execution-graph.md no longer contains the three staged node ids (U4b-review-claude[i], U4b-review-codex[i], J4b-review[i]) or the illustrative-staging prose paragraph that named them \u2014 closing the live-break the review found (those rows were dispatchable by construction with no Codex-side implementation mapping).",
+      "cmd": "REPO=$(git rev-parse --show-toplevel); DOC=\"$REPO/skills/agentic-loop/execution-graph.md\"; ! grep -qE 'U4b-review-claude\\[i\\]|U4b-review-codex\\[i\\]|J4b-review\\[i\\]' \"$DOC\"",
+      "negative_control": "DOC=$(mktemp); printf '| `U4b-review-claude[i]` | `U4b-review[i]` | stub | stub |\\n' > \"$DOC\"; ! grep -qE 'U4b-review-claude\\[i\\]|U4b-review-codex\\[i\\]|J4b-review\\[i\\]' \"$DOC\"; rc=$?; unlink \"$DOC\"; exit $rc",
+      "status": "pending",
+      "evidence": "",
+      "smoke": {
+        "cmd_exit": 0,
+        "negative_control_exit": 1,
+        "cmd_output": "",
+        "negative_control_output": ""
+      }
+    },
+    {
+      "id": "F3",
+      "priority": "P0",
+      "mode": "scripted",
+      "surface": "code",
+      "assert": "codex/runtime/graph.py's prepare_implementations() called against this branch's execution-graph.md, in live mode with an empty implementations config and 2 templated work units, produces the identical set of 'missing implementation mapping' errors as the same call against origin/main's execution-graph.md \u2014 i.e. this PR introduces zero new dispatch regressions to the live Codex graph runtime.",
+      "cmd": "REPO=$(git rev-parse --show-toplevel); cd \"$REPO\"; MAIN_DOC=$(mktemp); git show origin/main:skills/agentic-loop/execution-graph.md > \"$MAIN_DOC\" 2>/dev/null || git show main:skills/agentic-loop/execution-graph.md > \"$MAIN_DOC\"; python3 - \"$MAIN_DOC\" \"$REPO/skills/agentic-loop/execution-graph.md\" \"$REPO/codex\" <<'PYEOF'\nimport sys\nfrom pathlib import Path\nmain_doc, new_doc, codex_dir = sys.argv[1], sys.argv[2], sys.argv[3]\nsys.path.insert(0, codex_dir)\nfrom runtime import graph\ndef missing(path):\n    g = graph.build_graph(contract_path=Path(path), work_units=['a', 'b'])\n    _, errors = graph.prepare_implementations(g, {'mode': 'live', 'nodes': {}, 'gates': {}})\n    return sorted(e for e in errors if 'missing implementation mapping' in e)\nm, n = missing(main_doc), missing(new_doc)\nif m != n:\n    print('DIFF main-only:', sorted(set(m) - set(n)))\n    print('DIFF new-only:', sorted(set(n) - set(m)))\n    sys.exit(1)\nsys.exit(0)\nPYEOF\nrc=$?; unlink \"$MAIN_DOC\"; exit $rc",
+      "negative_control": "REPO=$(git rev-parse --show-toplevel); cd \"$REPO\"; BAD_DOC=$(mktemp); git show origin/main:skills/agentic-loop/execution-graph.md > \"$BAD_DOC\"; printf '| `Zextra-staged-node[i]` | `U4[i]` | stub | stub |\\n' >> \"$BAD_DOC\"; python3 - \"$BAD_DOC\" \"$REPO/skills/agentic-loop/execution-graph.md\" \"$REPO/codex\" <<'PYEOF'\nimport sys\nfrom pathlib import Path\nmain_doc, new_doc, codex_dir = sys.argv[1], sys.argv[2], sys.argv[3]\nsys.path.insert(0, codex_dir)\nfrom runtime import graph\ndef missing(path):\n    g = graph.build_graph(contract_path=Path(path), work_units=['a', 'b'])\n    _, errors = graph.prepare_implementations(g, {'mode': 'live', 'nodes': {}, 'gates': {}})\n    return sorted(e for e in errors if 'missing implementation mapping' in e)\nm, n = missing(main_doc), missing(new_doc)\nsys.exit(0 if m == n else 1)\nPYEOF\nrc=$?; unlink \"$BAD_DOC\"; [ \"$rc\" -ne 0 ]",
+      "status": "pending",
+      "evidence": "",
+      "smoke": {
+        "cmd_exit": 0,
+        "negative_control_exit": 1,
+        "cmd_output": "",
+        "negative_control_output": ""
+      }
+    },
+    {
+      "id": "F4",
+      "priority": "P1",
+      "mode": "scripted",
+      "surface": "code",
+      "assert": "hooks/scripts/tests/exec_bit_invariant.test.sh's manifest now includes both hooks/scripts/lib/parallel_review_join.sh (100644, source-only) and scripts/validate-skills-index.sh (100755, direct-invoked) at their actual tracked git modes, and the full test no longer fails for either script (only the disclosed, out-of-scope pre-existing graph_dispatch.sh/loop_dispatch_guard.sh gaps remain).",
+      "cmd": "REPO=$(git rev-parse --show-toplevel); cd \"$REPO\"; OUT=$(bash hooks/scripts/tests/exec_bit_invariant.test.sh 2>&1); echo \"$OUT\" | grep -q 'FAIL.*parallel_review_join.sh' && { echo 'parallel_review_join.sh still flagged'; exit 1; }; echo \"$OUT\" | grep -q 'FAIL.*validate-skills-index.sh' && { echo 'validate-skills-index.sh still flagged'; exit 1; }; exit 0",
+      "negative_control": "REPO=$(git rev-parse --show-toplevel); cd \"$REPO\"; TMP=$(mktemp); sed '/^  hooks\\/scripts\\/lib\\/parallel_review_join.sh$/d' hooks/scripts/tests/exec_bit_invariant.test.sh > \"$TMP\"; OUT=$(bash \"$TMP\" 2>&1); echo \"$OUT\" | grep -q 'FAIL.*parallel_review_join.sh'; rc=$?; unlink \"$TMP\"; exit $rc",
+      "status": "pending",
+      "evidence": "",
+      "smoke": {
+        "cmd_exit": 0,
+        "negative_control_exit": 1,
+        "cmd_output": "",
+        "negative_control_output": ""
+      }
+    },
+    {
+      "id": "F5",
+      "priority": "P0",
+      "mode": "scripted",
+      "surface": "artifact-path",
+      "assert": "All pre-existing test suites this fix touches or depends on (graph_*.test.sh, parallel_review*.test.sh, skills_index.test.sh) still PASS, and Codex's own 22-test test_graph_runtime.py suite still passes \u2014 the fix introduced no regression to previously-green coverage.",
+      "cmd": "REPO=$(git rev-parse --show-toplevel); cd \"$REPO\"; fail=0; for t in hooks/scripts/tests/graph_dispatch_acceptance.test.sh hooks/scripts/tests/graph_dispatch_j12_s9.test.sh hooks/scripts/tests/graph_contract.test.sh hooks/scripts/tests/graph_readiness.test.sh hooks/scripts/tests/graph_executor_concurrency.test.sh hooks/scripts/tests/parallel_review.test.sh hooks/scripts/tests/parallel_review_join.test.sh hooks/scripts/tests/parallel_review_harness.test.sh hooks/scripts/tests/skills_index.test.sh hooks/scripts/tests/graph_executor.test.sh hooks/scripts/tests/graph_dispatch.test.sh hooks/scripts/tests/graph_executor_stale_check.test.sh hooks/scripts/tests/graph_two_unit_fanout.test.sh hooks/scripts/tests/graph_dispatch_downstream.test.sh; do bash \"$t\" >/dev/null 2>&1 || { echo \"FAIL: $t\"; fail=1; }; done; python3 -m unittest codex.tests.test_graph_runtime >/dev/null 2>&1 || { echo 'FAIL: codex.tests.test_graph_runtime'; fail=1; }; exit $fail",
+      "negative_control": "REPO=$(git rev-parse --show-toplevel); cd \"$REPO\"; FAILING=$(mktemp); printf '#!/bin/bash\\necho DELIBERATE-FAILURE-FOR-NEGATIVE-CONTROL\\nexit 1\\n' > \"$FAILING\"; fail=0; for t in \"$FAILING\" hooks/scripts/tests/graph_contract.test.sh; do bash \"$t\" >/dev/null 2>&1 || { echo \"FAIL: $t\"; fail=1; }; done; unlink \"$FAILING\"; exit $fail",
+      "status": "pending",
+      "evidence": "",
+      "smoke": {
+        "cmd_exit": 0,
+        "negative_control_exit": 1,
+        "cmd_output": "",
+        "negative_control_output": "FAIL: /var/folders/rv/gfgdzw2x1692pf9jfkk85qq00000gn/T/tmp.fCBZ1lou89\n"
+      }
+    }
+  ],
+  "amendments": []
+}
