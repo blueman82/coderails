@@ -36,7 +36,7 @@
       "cmd": "REPO=$(git rev-parse --show-toplevel); DOC=\"$REPO/skills/agentic-loop/execution-graph.md\"; ! grep -qE 'U4b-review-claude\\[i\\]|U4b-review-codex\\[i\\]|J4b-review\\[i\\]' \"$DOC\"",
       "negative_control": "DOC=$(mktemp); printf '| `U4b-review-claude[i]` | `U4b-review[i]` | stub | stub |\\n' > \"$DOC\"; ! grep -qE 'U4b-review-claude\\[i\\]|U4b-review-codex\\[i\\]|J4b-review\\[i\\]' \"$DOC\"; rc=$?; unlink \"$DOC\"; exit $rc",
       "status": "pass",
-      "evidence": "Graded against head 826e77790a1517a2dd2a2cdd7ee362d1d5294896. cmd: grep for the three staged node ids against skills/agentic-loop/execution-graph.md finds none (cmd exits 0) — the rows are gone. negative_control: a fixture doc containing the injected U4b-review-claude[i] row makes the same grep match, so the negated assertion exits 1, confirming the control discriminates.",
+      "evidence": "Re-graded 2026-08-17T12:55:26Z against final PR head 3a074aa2acf22daf9718c93042523503e43943dc (cmd and negative_control re-run fresh, not relabeled). cmd: grep for the three staged node ids against skills/agentic-loop/execution-graph.md finds none (cmd exits 0) — the rows are gone. negative_control: a fixture doc containing the injected U4b-review-claude[i] row makes the same grep match, so the negated assertion exits 1, confirming the control discriminates. (Previously graded against 826e7779; underlying file unchanged between that head and this one, confirmed via git diff --stat.)",
       "smoke": {
         "cmd_exit": 0,
         "negative_control_exit": 1,
