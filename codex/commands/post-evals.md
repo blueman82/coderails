@@ -8,6 +8,12 @@ Post a machine-marked, SHA-bound eval summary comment to the PR. This creates
 the durable artifact that `/coderails:merge` verifies before merging. Run this
 after `/coderails:task-evals` has produced an `evals.json` for this PR.
 
+## Authority boundary
+
+- Committed `docs/evals/*.json` files and local `evals.json` files are working material only; they are never live PR-readiness evidence.
+- For PR readiness, fetch the current PR head and require the newest trusted SHA-bound `coderails-eval-summary` PR comment/embed for that exact head.
+- Missing, stale, mismatched, rejected, untrusted, or fetch-failed eval evidence is `NO-GO`.
+
 ## Current PR State
 
 - Open PRs: !`gh pr list --state open --limit 10`
