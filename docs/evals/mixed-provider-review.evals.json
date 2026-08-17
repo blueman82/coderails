@@ -98,9 +98,14 @@
       "eval": "ALL",
       "when": "2026-08-16T10:25:18Z",
       "why": "removed hardcoded /Users/harrison absolute paths from cmd/negative_control for portability; replaced with git rev-parse --show-toplevel derivation; logic/assertions/citations unchanged"
+    },
+    {
+      "eval": "ALL",
+      "when": "2026-08-17T12:50:59Z",
+      "why": "This frozen file's evals had never been graded — all 5 (E1-E5) carried status:\"pending\" and evidence:\"\" despite already having smoke evidence recorded at freeze time (2026-08-16). A verifier flagged E1's empty evidence via post_evals.sh validate-structure check 5, which reports the first offending P0 id; in fact all 5 were ungraded, not only E1. This amendment records a grading pass performed directly against PR #418's exact head (3a074aa2acf22daf9718c93042523503e43943dc, verified live via gh pr view immediately before grading): every eval's cmd and negative_control were re-run fresh (not copied from the frozen smoke object) and the result written into status/evidence per-eval below. All 5 pass at this head. No assert/cmd/negative_control/citation text was changed by this amendment -- only status, evidence, and this amendments entry were added, plus the file's own head_sha/graded_at footer fields. result is intentionally left for scripts/post_evals.sh compute-result to derive, per this repo's rule that a neutral script computes the result, never an agent by hand. This grading pass does not constitute or claim a GO for PR #418 overall -- see the PR's own review comments for that separately-tracked determination."
     }
   ],
   "result": null,
-  "graded_at": null,
-  "head_sha": "cbfa64a61b12207f6218f6a61f2bea606c2eac9a"
+  "graded_at": "2026-08-17T12:50:59Z",
+  "head_sha": "3a074aa2acf22daf9718c93042523503e43943dc"
 }
