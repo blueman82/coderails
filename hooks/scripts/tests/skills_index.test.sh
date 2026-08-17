@@ -17,8 +17,8 @@ ruby -e '
   File.write(path, text)
 ' "$tmp/index.yaml"
 if "$validator" "$tmp/index.yaml" >/dev/null 2>&1; then
-  echo "FAIL planned implementation was routable"
-  exit 1
+    echo "FAIL planned implementation was routable"
+    exit 1
 fi
 cp "$index" "$tmp/wrong-kind.yaml"
 ruby -e '
@@ -29,8 +29,8 @@ ruby -e '
   File.write(path, text)
 ' "$tmp/wrong-kind.yaml"
 if "$validator" "$tmp/wrong-kind.yaml" >/dev/null 2>&1; then
-  echo "FAIL wrong-kind implementation was routable"
-  exit 1
+    echo "FAIL wrong-kind implementation was routable"
+    exit 1
 fi
 cp "$index" "$tmp/bad-graph-policy-mode.yaml"
 ruby -e '
