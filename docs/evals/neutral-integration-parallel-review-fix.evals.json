@@ -6,8 +6,8 @@
   "verification_justification": "Corrects two independently-reviewed critical blockers on an existing open PR (docs/design-contract ancestry, and three dispatchable execution-graph.md rows with no Codex-side implementation mapping). No new deployed/outward surface is introduced by the fix itself \u2014 it removes rows and merges a doc commit \u2014 so no verification_level-2 predicate fires. Not verification_level 0: the two blockers were freshly found by an independent review and have no pre-existing test/verify-criterion covering them (the exec_bit_invariant test only started covering the 2 target scripts because this fix registers them). Strongest surface (rule 6): the goal state is 'does this branch's own history and live-parsed contract satisfy what the review demanded' \u2014 git ancestry checks and a live call into codex/runtime/graph.py's own prepare_implementations are the direct exercise of that surface, not a substitute for it.",
   "frozen_at": "2026-08-17T09:20:00Z",
   "frozen_sha": "d4b753958f1d0e92d9ca1a232f95267017a0655c",
-  "graded_at": "2026-08-17T09:11:13Z",
-  "head_sha": "826e77790a1517a2dd2a2cdd7ee362d1d5294896",
+  "graded_at": "2026-08-17T12:55:26Z",
+  "head_sha": "3a074aa2acf22daf9718c93042523503e43943dc",
   "result": "GO",
   "evals": [
     {
