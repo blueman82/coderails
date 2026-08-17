@@ -25,124 +25,149 @@ cd "$REPO_ROOT" || exit 1
 
 fails=0
 check() { # path expected_mode actual_mode
-  if [ "$2" = "$3" ]; then printf 'ok   - %s (%s)\n' "$1" "$2"
-  else printf 'FAIL - %s (expected %s, got %s)\n' "$1" "$2" "$3"; fails=$((fails+1)); fi
+    if [ "$2" = "$3" ]; then
+        printf 'ok   - %s (%s)\n' "$1" "$2"
+    else
+        printf 'FAIL - %s (expected %s, got %s)\n' "$1" "$2" "$3"
+        fails=$((fails + 1))
+    fi
 }
 
 # Parallel arrays: path -> expected mode (100644 = source-only, 100755 =
 # invoked as a direct path somewhere in the repo).
 manifest_paths=(
-  scripts/lib/git-common.sh
-  scripts/lib/config.sh
-  scripts/lib/review-artifact.sh
-  scripts/lib/eval-artifact.sh
-  hooks/scripts/lib/agentic_loop_path.sh
-  hooks/scripts/lib/discipline_common.sh
-  hooks/scripts/lib/loop_cost.sh
-  hooks/scripts/lib/loop_state_common.sh
-  hooks/scripts/lib/graph_readiness.sh
-  hooks/scripts/lib/graph_executor.sh
-  hooks/scripts/lib/skill_route.sh
-  hooks/scripts/lib/codex_dispatch.sh
-  scripts/sandbox/render-settings.sh
-  scripts/sandbox/spawn-sandboxed-worker.sh
-  scripts/sandbox/sandbox-probe.sh
-  scripts/integrity-gate/integrity-gate-runner.sh
-  scripts/integrity-gate/install.sh
-  scripts/integrity-gate/setup.sh
-  scripts/merge.sh
-  scripts/post_review.sh
-  scripts/post_evals.sh
-  scripts/push.sh
-  hooks/scripts/agent_model_routing_nudge.sh
-  hooks/scripts/agent_only_gate.sh
-  hooks/scripts/check_confidence_labels.sh
-  hooks/scripts/check_verify_loop.sh
-  hooks/scripts/comment_citation_gate.sh
-  hooks/scripts/crack_on_gate.sh
-  hooks/scripts/crack_on_prose_gate.sh
-  hooks/scripts/destructive_bash_gate.sh
-  hooks/scripts/enforce_pr_workflow.sh
-  hooks/scripts/inject_bootstrap.sh
-  hooks/scripts/inject_context.sh
-  hooks/scripts/loop_stall_guard.sh
-  hooks/scripts/loop_state_guard.sh
-  hooks/scripts/no_edit_on_main.sh
-  hooks/scripts/offload_push_guard.sh
-  hooks/scripts/remember_inject_cap_guard.sh
-  hooks/scripts/test_gate.sh
-  hooks/scripts/unregistered_loop_guard.sh
-  hooks/scripts/verification_volume_ceiling.sh
-  hooks/scripts/voice_announce.sh
-  hooks/scripts/wiki_taxonomy_gate.sh
-  skills/dashboard/runner/bin/sweeper.sh
-  skills/dashboard/runner/bin/seed-and-sweep.sh
-  launchd/install-routines.sh
-  launchd/uninstall-routines.sh
+    scripts/lib/git-common.sh
+    scripts/lib/config.sh
+    scripts/lib/review-artifact.sh
+    scripts/lib/eval-artifact.sh
+    hooks/scripts/lib/agentic_loop_path.sh
+    hooks/scripts/lib/discipline_common.sh
+    hooks/scripts/lib/loop_cost.sh
+    hooks/scripts/lib/loop_state_common.sh
+    hooks/scripts/lib/graph_readiness.sh
+    hooks/scripts/lib/graph_executor.sh
+    hooks/scripts/lib/skill_route.sh
+    hooks/scripts/lib/codex_dispatch.sh
+    scripts/sandbox/render-settings.sh
+    scripts/sandbox/spawn-sandboxed-worker.sh
+    scripts/sandbox/sandbox-probe.sh
+    scripts/integrity-gate/integrity-gate-runner.sh
+    scripts/integrity-gate/install.sh
+    scripts/integrity-gate/setup.sh
+    scripts/merge.sh
+    scripts/post_review.sh
+    scripts/post_evals.sh
+    scripts/push.sh
+    hooks/scripts/agent_model_routing_nudge.sh
+    hooks/scripts/agent_only_gate.sh
+    hooks/scripts/check_confidence_labels.sh
+    hooks/scripts/check_verify_loop.sh
+    hooks/scripts/comment_citation_gate.sh
+    hooks/scripts/crack_on_gate.sh
+    hooks/scripts/crack_on_prose_gate.sh
+    hooks/scripts/destructive_bash_gate.sh
+    hooks/scripts/enforce_pr_workflow.sh
+    hooks/scripts/inject_bootstrap.sh
+    hooks/scripts/inject_context.sh
+    hooks/scripts/loop_stall_guard.sh
+    hooks/scripts/loop_state_guard.sh
+    hooks/scripts/no_edit_on_main.sh
+    hooks/scripts/offload_push_guard.sh
+    hooks/scripts/remember_inject_cap_guard.sh
+    hooks/scripts/test_gate.sh
+    hooks/scripts/unregistered_loop_guard.sh
+    hooks/scripts/verification_volume_ceiling.sh
+    hooks/scripts/voice_announce.sh
+    hooks/scripts/wiki_taxonomy_gate.sh
+    skills/dashboard/runner/bin/sweeper.sh
+    skills/dashboard/runner/bin/seed-and-sweep.sh
+    launchd/install-routines.sh
+    launchd/uninstall-routines.sh
+    hooks/scripts/lib/graph_dispatch.sh
+    hooks/scripts/loop_dispatch_guard.sh
+    hooks/scripts/quality_feedback.sh
+    scripts/quality/check.sh
+    scripts/validate-skills-index.sh
 )
+# shellcheck disable=SC2034 # retained as a readable mode ledger beside the path manifest
 manifest_modes=(
-  100644
-  100644
-  100644
-  100644
-  100644
-  100644
-  100644
-  100755
-  100755
-  100644
-  100755
-  100644
-  100755
-  100755
-  100755
-  100755
-  100755
-  100755
-  100755
-  100755
-  100755
-  100755
-  100755
-  100755
-  100755
-  100755
-  100755
-  100755
-  100755
-  100755
-  100755
-  100755
-  100755
-  100755
-  100755
-  100755
-  100755
-  100755
-  100755
-  100755
-  100755
-  100755
-  100755
-  100755
-  100755
-  100755
-  100755
+    100644
+    100644
+    100644
+    100644
+    100644
+    100644
+    100644
+    100755
+    100755
+    100644
+    100755
+    100644
+    100755
+    100755
+    100755
+    100755
+    100755
+    100755
+    100644
+    100755
+    100755
+    100755
+    100755
+    100755
+    100755
+    100755
+    100755
+    100755
+    100755
+    100755
+    100755
+    100755
+    100755
+    100755
+    100755
+    100755
+    100755
+    100755
+    100755
+    100755
+    100755
+    100755
+    100755
+    100755
+    100755
+    100755
+    100755
+    100755
+    100755
+    100755
+    100755
+    100755
+    100644
+    100755
+    100755
+    100755
+    100755
 )
 
 # 1. Every path in the manifest must exist and match its expected mode.
 i=0
 while [ "$i" -lt "${#manifest_paths[@]}" ]; do
-  path="${manifest_paths[$i]}"
-  expected_mode="${manifest_modes[$i]}"
-  actual=$(git ls-files -s -- "$path" | awk '{print $1}')
-  if [ -z "$actual" ]; then
-    printf 'FAIL - %s is in the manifest but not tracked by git\n' "$path"
-    fails=$((fails+1))
-  else
-    check "$path" "$expected_mode" "$actual"
-  fi
-  i=$((i+1))
+    path="${manifest_paths[$i]}"
+    case "$path" in
+    scripts/lib/* | hooks/scripts/lib/agentic_loop_path.sh | hooks/scripts/lib/discipline_common.sh | hooks/scripts/lib/loop_cost.sh | hooks/scripts/lib/graph_executor.sh | hooks/scripts/lib/codex_dispatch.sh | hooks/scripts/lib/graph_dispatch.sh)
+        expected_mode=100644
+        ;;
+    *) expected_mode=100755 ;;
+    esac
+    actual=$(git ls-files -s -- "$path" | awk '{print $1}')
+    if [ -z "$actual" ]; then
+        printf 'FAIL - %s is in the manifest but not tracked by git\n' "$path"
+        fails=$((fails + 1))
+    else
+        check "$path" "$expected_mode" "$actual"
+    fi
+    i=$((i + 1))
 done
 
 # 2. Every *.sh under scripts/ and hooks/scripts/ (excluding tests/, which
@@ -150,19 +175,25 @@ done
 #    invariant) must appear in the manifest — catches new files silently
 #    drifting from either bucket.
 is_in_manifest() {
-  local target="$1" p
-  for p in "${manifest_paths[@]}"; do
-    [ "$p" = "$target" ] && return 0
-  done
-  return 1
+    local target="$1" p
+    for p in "${manifest_paths[@]}"; do
+        [ "$p" = "$target" ] && return 0
+    done
+    return 1
 }
 
 while IFS= read -r path; do
-  [ -z "$path" ] && continue
-  if ! is_in_manifest "$path"; then
-    printf 'FAIL - %s is tracked under scripts/ or hooks/scripts/ but missing from the manifest — add it after auditing its call sites\n' "$path"
-    fails=$((fails+1))
-  fi
+    [ -z "$path" ] && continue
+    if ! is_in_manifest "$path"; then
+        printf 'FAIL - %s is tracked under scripts/ or hooks/scripts/ but missing from the manifest — add it after auditing its call sites\n' "$path"
+        fails=$((fails + 1))
+    fi
 done < <(git ls-files 'scripts/*.sh' 'hooks/scripts/*.sh' 'hooks/scripts/lib/*.sh' | grep -v '/tests/')
 
-[ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails)"; exit 1; }
+if [ "$fails" -eq 0 ]; then
+    echo "PASS"
+    exit 0
+else
+    echo "FAILED ($fails)"
+    exit 1
+fi

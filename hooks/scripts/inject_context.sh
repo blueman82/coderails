@@ -6,6 +6,9 @@
 IFS= read -r -d '' -t 5 input || true
 
 ctx="[ctx] $(date '+%Y-%m-%d') | cwd=$(pwd) | branch=$(git branch --show-current 2>/dev/null || echo none)"
-ctx="${ctx} | [discipline] Label every non-trivial claim (verified)/(inferred)/(guess). After multi-file changes include ## Did Not Verify listing what was not checked."
+transcript_path=$(printf '%s' "$input" | jq -r '.transcript_path // empty' 2>/dev/null || true)
+if [ -z "$transcript_path" ] || [ ! -s "$transcript_path" ]; then
+    ctx="${ctx} | [discipline] Label every non-trivial claim (verified)/(inferred)/(guess). After multi-file changes include ## Did Not Verify listing what was not checked."
+fi
 
 printf '{"hookSpecificOutput":{"hookEventName":"UserPromptSubmit","additionalContext":"%s"}}\n' "$ctx"
