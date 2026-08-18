@@ -22,7 +22,7 @@
         "negative_control_output": "Traceback (most recent call last):   File \"<string>\", line 1, in <module> AssertionError"
       },
       "status": "pass",
-      "evidence": "python3 -m unittest codex.tests.test_live_graph_wiring.LiveGraphWiringTests.test_loads_both_provider_routes_and_rejects_bad_policy => exit 0; rerun at exact PR head 821d411120f95b1449be1e3d8bb50e7920e2bd56"
+      "evidence": "python3 -m unittest codex.tests.test_live_graph_wiring.LiveGraphWiringTests.test_loads_both_provider_routes_and_rejects_bad_policy => exit 0; rerun at exact PR head c0de43f61021c4d2740a6130e0a29ed0680c304e"
     },
     {
       "id": "E2",
@@ -39,7 +39,7 @@
         "negative_control_output": "Traceback (most recent call last):   File \"<string>\", line 1, in <module> AssertionError"
       },
       "status": "pass",
-      "evidence": "python3 -m unittest codex.tests.test_live_graph_wiring.LiveGraphWiringTests.test_join_is_atomic_and_blocks_downstream_on_bad_evidence => exit 0; rerun at exact PR head 821d411120f95b1449be1e3d8bb50e7920e2bd56"
+      "evidence": "python3 -m unittest codex.tests.test_live_graph_wiring.LiveGraphWiringTests.test_join_is_atomic_and_blocks_downstream_on_bad_evidence => exit 0; rerun at exact PR head c0de43f61021c4d2740a6130e0a29ed0680c304e"
     },
     {
       "id": "E3",
@@ -56,7 +56,7 @@
         "negative_control_output": ""
       },
       "status": "pass",
-      "evidence": "grep -qF 'J4b-review[i]' skills/agentic-loop/execution-graph.md && grep -qF '| `U5[i]` | `J4b-review[i]`' skills/agentic-loop/execution-graph.md && grep -qF '| `U4b-merge-gate[i]` | `J4b-review[i]`' skills/agentic-loop/execution-graph.md => exit 0; rerun at exact PR head 821d411120f95b1449be1e3d8bb50e7920e2bd56"
+      "evidence": "grep -qF 'J4b-review[i]' skills/agentic-loop/execution-graph.md && grep -qF '| `U5[i]` | `J4b-review[i]`' skills/agentic-loop/execution-graph.md && grep -qF '| `U4b-merge-gate[i]` | `J4b-review[i]`' skills/agentic-loop/execution-graph.md => exit 0; rerun at exact PR head c0de43f61021c4d2740a6130e0a29ed0680c304e"
     },
     {
       "id": "E4",
@@ -73,7 +73,7 @@
         "negative_control_output": "Traceback (most recent call last):   File \"<string>\", line 1, in <module>   File \"/Applications/Xcode.app/Contents/Developer/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/pathlib.py\", line 1249, in read_bytes     with self.open(mode [...] ontents/Developer/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/pathlib.py\", line 1110, in _opener     return self._accessor.open(self, flags, mode) FileNotFoundError: [Errno 2] No such file or directory: '/tmp/nonexistent-graph.py'"
       },
       "status": "pass",
-      "evidence": "python3 codex/tests/runtime_parity.py => exit 0; rerun at exact PR head 821d411120f95b1449be1e3d8bb50e7920e2bd56"
+      "evidence": "python3 codex/tests/runtime_parity.py => exit 0; rerun at exact PR head c0de43f61021c4d2740a6130e0a29ed0680c304e"
     },
     {
       "id": "E5",
@@ -90,7 +90,7 @@
         "negative_control_output": "Traceback (most recent call last):   File \"<string>\", line 1, in <module> AssertionError"
       },
       "status": "pass",
-      "evidence": "bash packages/tests/codex_package.test.sh => exit 0; rerun at exact PR head 821d411120f95b1449be1e3d8bb50e7920e2bd56"
+      "evidence": "bash packages/tests/codex_package.test.sh => exit 0; rerun at exact PR head c0de43f61021c4d2740a6130e0a29ed0680c304e"
     },
     {
       "id": "E6",
@@ -107,11 +107,11 @@
         "negative_control_output": "Traceback (most recent call last):   File \"<string>\", line 1, in <module> AssertionError"
       },
       "status": "pass",
-      "evidence": "bash hooks/scripts/tests/exec_bit_invariant.test.sh => exit 0; rerun at exact PR head 821d411120f95b1449be1e3d8bb50e7920e2bd56"
+      "evidence": "bash hooks/scripts/tests/exec_bit_invariant.test.sh => exit 0; rerun at exact PR head c0de43f61021c4d2740a6130e0a29ed0680c304e"
     }
   ],
   "amendments": [],
   "result": null,
   "graded_at": null,
-  "head_sha": "821d411120f95b1449be1e3d8bb50e7920e2bd56"
+  "head_sha": "c0de43f61021c4d2740a6130e0a29ed0680c304e"
 }
