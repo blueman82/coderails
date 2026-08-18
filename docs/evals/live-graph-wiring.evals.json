@@ -3,7 +3,7 @@
   "scope": "pr",
   "task_ref": "codex/live-graph-wiring",
   "verification_level": 2,
-  "verification_justification": "This change has multiple work units and an outward release decision: graph state must not release downstream work without a valid neutral mixed-provider join.",
+  "verification_justification": "This change has multiple work units and an outward release decision: graph state must not release downstream work without a valid neutral mixed-provider join. The suite was frozen before implementation at the prior exact PR head; smoke evidence was refreshed after correcting the E6 negative control definition, and all final commands were rerun at the posted head.",
   "frozen_at": "2026-08-18T15:03:19Z",
   "frozen_sha": "e8704dd0ac1b915ad2b38fabfaf5ceb527a00598",
   "evals": [
@@ -20,7 +20,9 @@
         "negative_control_exit": 1,
         "cmd_output": ". ---------------------------------------------------------------------- Ran 1 test in 0.002s  OK",
         "negative_control_output": "Traceback (most recent call last):   File \"<string>\", line 1, in <module> AssertionError"
-      }
+      },
+      "status": "pass",
+      "evidence": "python3 -m unittest codex.tests.test_live_graph_wiring.LiveGraphWiringTests.test_loads_both_provider_routes_and_rejects_bad_policy => exit 0; rerun at exact PR head 821d411120f95b1449be1e3d8bb50e7920e2bd56"
     },
     {
       "id": "E2",
@@ -35,7 +37,9 @@
         "negative_control_exit": 1,
         "cmd_output": ". ---------------------------------------------------------------------- Ran 1 test in 0.003s  OK",
         "negative_control_output": "Traceback (most recent call last):   File \"<string>\", line 1, in <module> AssertionError"
-      }
+      },
+      "status": "pass",
+      "evidence": "python3 -m unittest codex.tests.test_live_graph_wiring.LiveGraphWiringTests.test_join_is_atomic_and_blocks_downstream_on_bad_evidence => exit 0; rerun at exact PR head 821d411120f95b1449be1e3d8bb50e7920e2bd56"
     },
     {
       "id": "E3",
@@ -50,7 +54,9 @@
         "negative_control_exit": 1,
         "cmd_output": "",
         "negative_control_output": ""
-      }
+      },
+      "status": "pass",
+      "evidence": "grep -qF 'J4b-review[i]' skills/agentic-loop/execution-graph.md && grep -qF '| `U5[i]` | `J4b-review[i]`' skills/agentic-loop/execution-graph.md && grep -qF '| `U4b-merge-gate[i]` | `J4b-review[i]`' skills/agentic-loop/execution-graph.md => exit 0; rerun at exact PR head 821d411120f95b1449be1e3d8bb50e7920e2bd56"
     },
     {
       "id": "E4",
@@ -65,7 +71,9 @@
         "negative_control_exit": 1,
         "cmd_output": "PASS: standalone package graph runtime has no hand-maintained drift",
         "negative_control_output": "Traceback (most recent call last):   File \"<string>\", line 1, in <module>   File \"/Applications/Xcode.app/Contents/Developer/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/pathlib.py\", line 1249, in read_bytes     with self.open(mode [...] ontents/Developer/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/pathlib.py\", line 1110, in _opener     return self._accessor.open(self, flags, mode) FileNotFoundError: [Errno 2] No such file or directory: '/tmp/nonexistent-graph.py'"
-      }
+      },
+      "status": "pass",
+      "evidence": "python3 codex/tests/runtime_parity.py => exit 0; rerun at exact PR head 821d411120f95b1449be1e3d8bb50e7920e2bd56"
     },
     {
       "id": "E5",
@@ -80,7 +88,9 @@
         "negative_control_exit": 1,
         "cmd_output": "ok - jq ok - jq ok - python3 {\"status\": \"complete\", \"nodes\": 7} PASS ok - copied package is independent PASS",
         "negative_control_output": "Traceback (most recent call last):   File \"<string>\", line 1, in <module> AssertionError"
-      }
+      },
+      "status": "pass",
+      "evidence": "bash packages/tests/codex_package.test.sh => exit 0; rerun at exact PR head 821d411120f95b1449be1e3d8bb50e7920e2bd56"
     },
     {
       "id": "E6",
@@ -95,11 +105,13 @@
         "negative_control_exit": 1,
         "cmd_output": "ok   - scripts/lib/git-common.sh (100644) ok   - scripts/lib/config.sh (100644) ok   - scripts/lib/review-artifact.sh (100644) ok   - scripts/lib/eval-artifact.sh (100644) ok   - hooks/scripts/lib/agentic_loop_path.sh (100644) ok   - hooks/scripts/li [...] scripts/wiki_taxonomy_gate.sh (100755) ok   - skills/dashboard/runner/bin/sweeper.sh (100755) ok   - skills/dashboard/runner/bin/seed-and-sweep.sh (100755) ok   - launchd/install-routines.sh (100755) ok   - launchd/uninstall-routines.sh (100755) PASS",
         "negative_control_output": "Traceback (most recent call last):   File \"<string>\", line 1, in <module> AssertionError"
-      }
+      },
+      "status": "pass",
+      "evidence": "bash hooks/scripts/tests/exec_bit_invariant.test.sh => exit 0; rerun at exact PR head 821d411120f95b1449be1e3d8bb50e7920e2bd56"
     }
   ],
   "amendments": [],
   "result": null,
   "graded_at": null,
-  "head_sha": "e8704dd0ac1b915ad2b38fabfaf5ceb527a00598"
+  "head_sha": "821d411120f95b1449be1e3d8bb50e7920e2bd56"
 }
