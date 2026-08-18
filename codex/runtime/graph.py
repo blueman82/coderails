@@ -9,6 +9,7 @@ import re
 import sys
 import tempfile
 import fcntl
+from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from pathlib import Path
@@ -361,6 +362,16 @@ def _parallel_review_input_digest(record: Mapping[str, Any] | None) -> str | Non
     return record.get("digest") or record.get("frozen_input_digest")
 
 
+def _valid_parallel_review_timestamp(value: Any) -> bool:
+    if not isinstance(value, str) or not value.strip():
+        return False
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    return parsed.tzinfo is not None
+
+
 def evaluate_parallel_review_join(
     canonical_input: Mapping[str, Any] | Path,
     reviewer_records: Mapping[str, Mapping[str, Any] | Path | None],
@@ -415,11 +426,15 @@ def evaluate_parallel_review_join(
         if outcomes.get(provider) == "skipped" or record is None:
             base["hard_stop_reason"] = "missing-evidence"
             return base
-        if record.get("provider") != provider or not isinstance(record.get("route"), str) or not record["route"].strip():
-            base["hard_stop_reason"] = "mismatched-evidence"
-            return base
-        provenance = record.get("provenance")
-        if not isinstance(provenance, Mapping) or provenance.get("provider") != provider:
+        required_fields = ("run_id", "revision", "head", "frozen_input_digest")
+        if (
+            record.get("schema_version") != 1
+            or record.get("gate") != PARALLEL_REVIEW_GATE
+            or record.get("provider") != provider
+            or record.get("digest_algorithm") != "sha256"
+            or any(not isinstance(record.get(field), str) or not record[field].strip() for field in required_fields)
+            or not _valid_parallel_review_timestamp(record.get("written_at"))
+        ):
             base["hard_stop_reason"] = "mismatched-evidence"
             return base
         if expected_run and any(record.get(key) != expected_run.get(key) for key in ("run_id", "revision", "head")):

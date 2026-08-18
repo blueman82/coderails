@@ -44,9 +44,10 @@ class LiveGraphWiringTests(unittest.TestCase):
             canonical.write_text(json.dumps({"digest": "abc"}), encoding="utf-8")
             for path, provider in ((claude, "claude"), (codex, "codex")):
                 path.write_text(json.dumps({
-                    **run, "provider": provider, "route": provider,
-                    "frozen_input_digest": "abc", "verdict": {"outcome": "approve", "reasoning": "ok"},
-                    "provenance": {"provider": provider},
+                    "schema_version": 1, "gate": "parallel-review", "node": "U4b-review[i]",
+                    **run, "provider": provider, "frozen_input_digest": "abc",
+                    "digest_algorithm": "sha256", "verdict": {"outcome": "approve", "reasoning": "ok"},
+                    "written_at": "2026-08-18T10:00:00Z",
                 }), encoding="utf-8")
             state = root / "progress.json"
             state.write_text(json.dumps({"revision": 0}), encoding="utf-8")

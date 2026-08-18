@@ -41,12 +41,13 @@ class GraphRuntimeTests(unittest.TestCase):
             return {
                 "schema_version": 1,
                 "gate": PARALLEL_REVIEW_GATE,
+                "node": "U4b-review[i]",
                 "provider": provider,
                 **run,
                 "frozen_input_digest": digest,
+                "digest_algorithm": "sha256",
                 "verdict": {"outcome": outcome, "reasoning": f"{provider} observed evidence"},
-                "route": f"{provider}/reviewer.md",
-                "provenance": {"provider": provider},
+                "written_at": "2026-08-18T10:00:00Z",
                 **overrides,
             }
 
@@ -67,6 +68,9 @@ class GraphRuntimeTests(unittest.TestCase):
         conflict = evaluate_parallel_review_join(canonical, {"claude": record("claude"), "codex": record("codex", outcome="reject")}, expected_run=run)
         self.assertEqual(conflict["hard_stop_reason"], "conflicting-verdicts")
 
+        missing_field = evaluate_parallel_review_join(canonical, {"claude": record("claude", written_at=""), "codex": record("codex")}, expected_run=run)
+        self.assertEqual(missing_field["hard_stop_reason"], "mismatched-evidence")
+
     def test_codex_parallel_review_artifact_uses_native_invocation_and_digest(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             artifact = Path(directory) / "codex.json"
@@ -77,7 +81,9 @@ class GraphRuntimeTests(unittest.TestCase):
                 "provider": "codex",
                 **run,
                 "frozen_input_digest": "digest-1",
+                "digest_algorithm": "sha256",
                 "verdict": {"outcome": "approve", "reasoning": "reviewed"},
+                "written_at": "2026-08-18T10:00:00Z",
             }))
             graph = build_graph(("A",))
             import runtime.graph as graph_module
