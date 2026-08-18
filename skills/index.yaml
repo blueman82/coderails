@@ -508,14 +508,9 @@ skills:
 
 # graph_policies — Claude-owned provider-side routing only, per
 # design/mixed-provider-review-contract (frozen commit 0c7b4639) §2.2. This
-# registers the Claude and Codex reviewer routes plus the join block for the
-# parallel-review policy on the pilot node U4b-review, matching §2.2's full
-# illustrative shape. mode: parallel-review is the only legal value (spec
-# §1); this section does not apply the policy to any live dispatch path —
-# hooks/scripts/lib/graph_dispatch.sh, the file that would consume it, is
-# untouched by this change. J4b-review (the join.node value) is staged as an
-# illustrative row in execution-graph.md per spec §4.4 but is not yet a
-# dispatchable node with a Codex-side implementation mapping (spec §7.2).
+# registers the Claude and Codex reviewer routes plus the neutral join block
+# for the live parallel-review pilot. The Codex runtime consumes this block;
+# Claude provider dispatch remains in its own provider-owned path.
 graph_policies:
   U4b-review:
     mode: parallel-review

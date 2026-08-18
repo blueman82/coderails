@@ -12,10 +12,12 @@ ROOT = Path(__file__).parents[2]
 sys.path.insert(0, str(ROOT / "codex"))
 
 from runtime.graph import (  # noqa: E402
+    PARALLEL_REVIEW_GATE,
     REQUIRED_GATES,
     StateConflict,
     apply_work_unit_disposition,
     build_graph,
+    evaluate_parallel_review_join,
     execute,
     load_contract,
     prepare_implementations,
@@ -28,6 +30,71 @@ PASS = [sys.executable, "-c", "print('ok')"]
 
 
 class GraphRuntimeTests(unittest.TestCase):
+    def test_parallel_review_is_not_a_required_gate_kind(self) -> None:
+        self.assertNotIn(PARALLEL_REVIEW_GATE, REQUIRED_GATES)
+
+    def test_parallel_review_join_requires_both_fresh_matching_approvals(self) -> None:
+        canonical = {"digest": "digest-1"}
+        run = {"run_id": "run-1", "revision": "rev-1", "head": "head-1"}
+
+        def record(provider: str, *, digest: str = "digest-1", outcome: str = "approve", **overrides):
+            return {
+                "schema_version": 1,
+                "gate": PARALLEL_REVIEW_GATE,
+                "provider": provider,
+                **run,
+                "frozen_input_digest": digest,
+                "verdict": {"outcome": outcome, "reasoning": f"{provider} observed evidence"},
+                "route": f"{provider}/reviewer.md",
+                "provenance": {"provider": provider},
+                **overrides,
+            }
+
+        good = evaluate_parallel_review_join(canonical, {"claude": record("claude"), "codex": record("codex")}, expected_run=run)
+        self.assertEqual(good["outcome"], "pass")
+        self.assertIsNone(good["hard_stop_reason"])
+
+        self.assertEqual(
+            evaluate_parallel_review_join(canonical, {}, reviewer_outcomes={"claude": "skipped", "codex": "skipped"})["outcome"],
+            "skipped",
+        )
+        missing = evaluate_parallel_review_join(canonical, {"claude": record("claude")}, reviewer_outcomes={"claude": "done", "codex": "skipped"}, expected_run=run)
+        self.assertEqual(missing["hard_stop_reason"], "missing-evidence")
+        stale = evaluate_parallel_review_join(canonical, {"claude": record("claude", run_id="old"), "codex": record("codex")}, expected_run=run)
+        self.assertEqual(stale["hard_stop_reason"], "stale-evidence")
+        mismatched = evaluate_parallel_review_join(canonical, {"claude": record("claude", digest="other"), "codex": record("codex")}, expected_run=run)
+        self.assertEqual(mismatched["hard_stop_reason"], "mismatched-evidence")
+        conflict = evaluate_parallel_review_join(canonical, {"claude": record("claude"), "codex": record("codex", outcome="reject")}, expected_run=run)
+        self.assertEqual(conflict["hard_stop_reason"], "conflicting-verdicts")
+
+    def test_codex_parallel_review_artifact_uses_native_invocation_and_digest(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            artifact = Path(directory) / "codex.json"
+            run = {"run_id": "run-1", "revision": "rev-1", "head": "head-1"}
+            artifact.write_text(json.dumps({
+                "schema_version": 1,
+                "gate": PARALLEL_REVIEW_GATE,
+                "provider": "codex",
+                **run,
+                "frozen_input_digest": "digest-1",
+                "verdict": {"outcome": "approve", "reasoning": "reviewed"},
+            }))
+            graph = build_graph(("A",))
+            import runtime.graph as graph_module
+            original = graph_module.codex_exec
+            try:
+                graph_module.codex_exec = lambda _prompt, _cwd: ("done", "native codex result")
+                execute(graph, {"SA": {
+                    "adapter": "codex-exec", "prompt": "review frozen artifact", "provider": "codex",
+                    "skill_id": "review.parallel", "implementation_path": "codex/runtime/graph.py",
+                    "gate": PARALLEL_REVIEW_GATE, "mode": "live", "artifact_path": str(artifact),
+                    "frozen_input_digest": "digest-1", "provenance": {"provider": "codex", "route": "codex/agents/spec-reviewer.md", **run}, "_run": run,
+                }})
+            finally:
+                graph_module.codex_exec = original
+            self.assertEqual(graph["nodes"]["SA"]["outcome"], "done")
+            self.assertEqual(graph["nodes"]["SA"]["evidence"][-1]["invocation"], "codex exec")
+
     def test_codex_exec_adapter_uses_documented_cli_and_preserves_live_evidence(self) -> None:
         calls = []
 
