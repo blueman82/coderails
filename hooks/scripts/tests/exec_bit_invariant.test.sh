@@ -25,12 +25,8 @@ cd "$REPO_ROOT" || exit 1
 
 fails=0
 check() { # path expected_mode actual_mode
-    if [ "$2" = "$3" ]; then
-        printf 'ok   - %s (%s)\n' "$1" "$2"
-    else
-        printf 'FAIL - %s (expected %s, got %s)\n' "$1" "$2" "$3"
-        fails=$((fails + 1))
-    fi
+  if [ "$2" = "$3" ]; then printf 'ok   - %s (%s)\n' "$1" "$2"
+  else printf 'FAIL - %s (expected %s, got %s)\n' "$1" "$2" "$3"; fails=$((fails+1)); fi
 }
 
 # Parallel arrays: path -> expected mode (100644 = source-only, 100755 =
@@ -46,6 +42,7 @@ manifest_paths=(
   hooks/scripts/lib/loop_state_common.sh
   hooks/scripts/lib/graph_readiness.sh
   hooks/scripts/lib/graph_executor.sh
+  hooks/scripts/lib/graph_dispatch.sh
   hooks/scripts/lib/skill_route.sh
   hooks/scripts/lib/codex_dispatch.sh
   hooks/scripts/lib/parallel_review.sh
@@ -74,6 +71,7 @@ manifest_paths=(
   hooks/scripts/inject_bootstrap.sh
   hooks/scripts/inject_context.sh
   hooks/scripts/loop_stall_guard.sh
+  hooks/scripts/loop_dispatch_guard.sh
   hooks/scripts/loop_state_guard.sh
   hooks/scripts/no_edit_on_main.sh
   hooks/scripts/offload_push_guard.sh
@@ -87,12 +85,7 @@ manifest_paths=(
   skills/dashboard/runner/bin/seed-and-sweep.sh
   launchd/install-routines.sh
   launchd/uninstall-routines.sh
-  hooks/scripts/lib/graph_dispatch.sh
-  hooks/scripts/loop_dispatch_guard.sh
-  hooks/scripts/quality_feedback.sh
-  scripts/quality/check.sh
 )
-# shellcheck disable=SC2034 # retained as a readable mode ledger beside the path manifest
 manifest_modes=(
   100644
   100644
@@ -104,6 +97,7 @@ manifest_modes=(
   100755
   100755
   100644
+  100644
   100755
   100644
   100644
@@ -143,9 +137,6 @@ manifest_modes=(
   100755
   100755
   100755
-  100755
-  100755
-  100644
   100755
   100755
   100755
@@ -154,21 +145,16 @@ manifest_modes=(
 # 1. Every path in the manifest must exist and match its expected mode.
 i=0
 while [ "$i" -lt "${#manifest_paths[@]}" ]; do
-    path="${manifest_paths[$i]}"
-    case "$path" in
-    scripts/lib/* | hooks/scripts/lib/agentic_loop_path.sh | hooks/scripts/lib/discipline_common.sh | hooks/scripts/lib/loop_cost.sh | hooks/scripts/lib/graph_executor.sh | hooks/scripts/lib/codex_dispatch.sh | hooks/scripts/lib/graph_dispatch.sh | hooks/scripts/lib/parallel_review.sh | hooks/scripts/lib/parallel_review_harness.sh | hooks/scripts/lib/parallel_review_join.sh)
-        expected_mode=100644
-        ;;
-    *) expected_mode=100755 ;;
-    esac
-    actual=$(git ls-files -s -- "$path" | awk '{print $1}')
-    if [ -z "$actual" ]; then
-        printf 'FAIL - %s is in the manifest but not tracked by git\n' "$path"
-        fails=$((fails + 1))
-    else
-        check "$path" "$expected_mode" "$actual"
-    fi
-    i=$((i + 1))
+  path="${manifest_paths[$i]}"
+  expected_mode="${manifest_modes[$i]}"
+  actual=$(git ls-files -s -- "$path" | awk '{print $1}')
+  if [ -z "$actual" ]; then
+    printf 'FAIL - %s is in the manifest but not tracked by git\n' "$path"
+    fails=$((fails+1))
+  else
+    check "$path" "$expected_mode" "$actual"
+  fi
+  i=$((i+1))
 done
 
 # 2. Every *.sh under scripts/ and hooks/scripts/ (excluding tests/, which
@@ -176,25 +162,19 @@ done
 #    invariant) must appear in the manifest — catches new files silently
 #    drifting from either bucket.
 is_in_manifest() {
-    local target="$1" p
-    for p in "${manifest_paths[@]}"; do
-        [ "$p" = "$target" ] && return 0
-    done
-    return 1
+  local target="$1" p
+  for p in "${manifest_paths[@]}"; do
+    [ "$p" = "$target" ] && return 0
+  done
+  return 1
 }
 
 while IFS= read -r path; do
-    [ -z "$path" ] && continue
-    if ! is_in_manifest "$path"; then
-        printf 'FAIL - %s is tracked under scripts/ or hooks/scripts/ but missing from the manifest — add it after auditing its call sites\n' "$path"
-        fails=$((fails + 1))
-    fi
+  [ -z "$path" ] && continue
+  if ! is_in_manifest "$path"; then
+    printf 'FAIL - %s is tracked under scripts/ or hooks/scripts/ but missing from the manifest — add it after auditing its call sites\n' "$path"
+    fails=$((fails+1))
+  fi
 done < <(git ls-files 'scripts/*.sh' 'hooks/scripts/*.sh' 'hooks/scripts/lib/*.sh' | grep -v '/tests/')
 
-if [ "$fails" -eq 0 ]; then
-    echo "PASS"
-    exit 0
-else
-    echo "FAILED ($fails)"
-    exit 1
-fi
+[ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails)"; exit 1; }

@@ -55,6 +55,11 @@ class GraphRuntimeTests(unittest.TestCase):
         self.assertEqual(good["outcome"], "pass")
         self.assertIsNone(good["hard_stop_reason"])
 
+        wrong_provider = evaluate_parallel_review_join(canonical, {"claude": record("codex"), "codex": record("codex")}, expected_run=run)
+        self.assertEqual(wrong_provider["hard_stop_reason"], "mismatched-evidence")
+        unexpected_provider = evaluate_parallel_review_join(canonical, {"claude": record("claude"), "codex": record("codex"), "other": record("other")}, expected_run=run)
+        self.assertEqual(unexpected_provider["hard_stop_reason"], "missing-evidence")
+
         self.assertEqual(
             evaluate_parallel_review_join(canonical, {}, reviewer_outcomes={"claude": "skipped", "codex": "skipped"})["outcome"],
             "skipped",

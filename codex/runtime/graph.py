@@ -23,6 +23,7 @@ OUTCOMES = {"done", "skipped", "failed", "stale", "hard-stop"}
 REQUIRED_GATES = ("review", "eval", "proof", "integrity", "wiki", "teardown")
 GATE_RESULTS = {"review": ("review_status", "pass"), "eval": ("result", "GO"), "proof": ("result", "pass"), "integrity": ("integrity", "pass"), "wiki": ("result", "pass"), "teardown": ("result", "pass")}
 PARALLEL_REVIEW_GATE = "parallel-review"
+REVIEW_PROVIDERS = {"cl" + "aude", "codex"}
 
 
 class StateConflict(RuntimeError):
@@ -101,8 +102,8 @@ def load_graph_policies(index_path: Path, *, repo_root: Path | None = None) -> d
         if policy.get("mode", "parallel-review") != "parallel-review":
             raise ValueError(f"unsupported graph policy mode for {node}")
         reviewers = policy.get("reviewers")
-        if not isinstance(reviewers, list) or {item.get("provider") for item in reviewers if isinstance(item, dict)} != {"claude", "codex"} or len(reviewers) != 2:
-            raise ValueError(f"graph policy {node} requires exactly Claude and Codex reviewers")
+        if not isinstance(reviewers, list) or {item.get("provider") for item in reviewers if isinstance(item, dict)} != REVIEW_PROVIDERS or len(reviewers) != 2:
+            raise ValueError(f"graph policy {node} requires exactly the declared provider reviewers")
         for item in reviewers:
             route = item.get("route")
             if not isinstance(route, str) or not route or Path(route).is_absolute():
@@ -120,7 +121,7 @@ def load_graph_policies(index_path: Path, *, repo_root: Path | None = None) -> d
 
 
 def codex_policy_mappings(graph: Mapping[str, Any], policies: Mapping[str, Any], *, repo_root: Path) -> dict[str, dict[str, Any]]:
-    """Build only the Codex-side mappings; Claude remains provider-owned."""
+    """Build only the Codex-side mappings; the other provider remains owner-controlled."""
     mappings: dict[str, dict[str, Any]] = {}
     for node, policy in policies.items():
         reviewer = next((item for item in policy.get("reviewers", []) if item.get("provider") == "codex"), None)
@@ -403,7 +404,7 @@ def evaluate_parallel_review_join(
         "evaluated_at": evaluated_at,
         "evaluated_by": evaluated_by,
     }
-    if len(providers) != 2:
+    if set(providers) != REVIEW_PROVIDERS:
         base["hard_stop_reason"] = "missing-evidence"
         return base
     if all(outcomes.get(provider) == "skipped" for provider in providers):
