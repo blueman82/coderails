@@ -40,6 +40,15 @@ There is no build step and no compiled artifact. "Source" is markdown (commands,
 skills) and bash (hook scripts, workflow scripts). It is version-controlled in
 your own private fork/repo.
 
+### Agentic-loop graph runtime
+
+The `agentic-loop` skill creates durable graph state in `progress.json`, including
+nodes, edges, joins, status, outcomes, and retries. It provides readiness checks
+and plan/record helpers for dispatching and recording waves. This is a manually
+operated graph runtime: the model must read the graph, dispatch ready work, and
+record results; it is not an automatic scheduler. Automatic Claude+Codex
+orchestration and join release for `parallel-review` are not yet wired in.
+
 ## How the pieces wire together
 
 ```
