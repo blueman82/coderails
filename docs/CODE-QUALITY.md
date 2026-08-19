@@ -13,7 +13,10 @@ bash scripts/quality/tests/quality.test.sh
 git config core.hooksPath scripts/git-hooks
 ```
 
-The default per-file limit is 400 lines (`MAX_LOC` overrides it). Python
+The default per-file limit is 400 lines (`MAX_LOC` overrides it). The checked-in
+`skills/index.yaml` routing index has an approved 600-line exception because its
+indentation-preserving single-document shape is consumed by shell and Python
+parsers; all other source files remain subject to the 400-line limit. Python
 function/method size defaults to 100 lines (`MAX_FUNCTION_LINES` overrides it).
 Strict commit checks inspect changed tracked files, so existing debt is visible
 without making an unrelated edit uncommittable. A deliberate threshold override

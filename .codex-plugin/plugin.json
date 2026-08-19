@@ -8,6 +8,5 @@
   },
   "license": "MIT",
   "skills": "./.codex/skills/",
-  "commands": "./codex/commands/",
-  "hooks": "./codex/hooks/"
+  "commands": "./codex/commands/"
 }

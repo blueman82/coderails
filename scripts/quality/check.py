@@ -14,6 +14,10 @@ from pathlib import Path
 
 DEFAULT_LOC = 400
 DEFAULT_FUNCTION_LINES = 100
+# Approved structural exception: this generated routing index is intentionally
+# larger than the source-file budget because its consumers require one stable
+# indentation-preserving document.
+LOC_EXCEPTIONS = {"skills/index.yaml": 600}
 SOURCE_ROOTS = (
     ".claude-plugin",
     "agents",
@@ -168,8 +172,9 @@ def main() -> int:
     for path in files:
         text = path.read_text(encoding="utf-8")
         line_count = len(text.splitlines())
-        if line_count > args.max_loc:
-            issues.append(finding(path, f"{line_count} lines (max {args.max_loc})"))
+        limit = LOC_EXCEPTIONS.get(path.relative_to(root).as_posix(), args.max_loc)
+        if line_count > limit:
+            issues.append(finding(path, f"{line_count} lines (max {limit})"))
         issues.extend(check_format(path, text))
         if path.suffix == ".py":
             issues.extend(check_python(path, text, args.max_function_lines))
