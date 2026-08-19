@@ -12,6 +12,24 @@ done
 python3 "$repo_root/scripts/quality/check.py" "$@"
 
 findings=0
+shell_files=()
+while IFS= read -r shell_file; do
+    shell_files+=("$shell_file")
+done < <(find "$repo_root/hooks" "$repo_root/scripts" -type f \( -name '*.sh' -o -name '*.bash' \) -print)
+if ((changed_only)); then
+    changed_files=$(
+        git -C "$repo_root" diff --name-only HEAD
+        git -C "$repo_root" diff --cached --name-only
+    )
+    filtered_shell_files=()
+    for shell_file in "${shell_files[@]}"; do
+        shell_relative=${shell_file#"$repo_root"/}
+        while IFS= read -r changed_file; do
+            [[ "$shell_relative" == "$changed_file" ]] && filtered_shell_files+=("$shell_file") && break
+        done <<<"$changed_files"
+    done
+    shell_files=("${filtered_shell_files[@]}")
+fi
 
 read_shell_files() {
 	shell_files=()

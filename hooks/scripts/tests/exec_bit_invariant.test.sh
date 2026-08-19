@@ -89,6 +89,7 @@ manifest_paths=(
 	launchd/install-routines.sh
 	launchd/uninstall-routines.sh
 )
+# shellcheck disable=SC2034 # retained as a readable mode ledger beside the path manifest
 manifest_modes=(
 	100644
 	100644
