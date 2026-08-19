@@ -505,3 +505,22 @@ skills:
       status: active
     required_inputs: [branch, description]
     output_contract: "Full feature workflow orchestrated end-to-end: prep, push, review, merge, wiki-ingest/lint."
+
+# graph_policies — Claude-owned provider-side routing only, per
+# design/mixed-provider-review-contract (frozen commit 0c7b4639) §2.2. This
+# registers the Claude and Codex reviewer routes plus the neutral join block
+# for the live parallel-review pilot. The Codex runtime consumes this block;
+# Claude provider dispatch remains in its own provider-owned path.
+graph_policies:
+  U4b-review:
+    mode: parallel-review
+    reviewers:
+      - provider: claude
+        route: agents/deploy-safety-reviewer.md
+      - provider: codex
+        route: codex/agents/deploy-safety-reviewer.md
+    join:
+      node: J4b-review
+      policy: unanimous
+    frozen_input:
+      digest_algorithm: sha256

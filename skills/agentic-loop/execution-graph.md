@@ -154,7 +154,7 @@ S-2 -> S-1 -> S0 -> S0.4 -> S0.5 -> S1 -> S2
                                       |                                                    |
                                       +----------------------------------------------------+
                                                                                            v
-                  +--> U3[i] --> U4[i] --> U4b-review[i] --> U5[i] --> U6[i] --> U7/8[i]
+                  +--> U3[i] --> U4[i] --> U4b-review[i] --> U4b-review-claude[i] --> J4b-review[i] --> U5[i] --> U6[i] --> U7/8[i]
                   |       ^                 |                    |          |          |
 J2.8 ------------+       |                 |                    +----------+----------+
                   |       |                 +--> U5-repair[i] --/           |
@@ -198,11 +198,14 @@ ambiguous.
 | `U3[i]` | `J2.8`, unit dependencies, and required eval/proof inputs | worker produced the unit's committed artifact/OPEN PR terminal state | units with `blockedBy` dependencies wait; independent units may run in waves |
 | `U4[i]` | `U3[i]` | artifact, worktree, PR, and worker report were checked by the orchestrator | idle is not failure; failed artifact check enters repair |
 | `U4b-review[i]` | `U4[i]` | required review Skill, security/deploy review when triggered, and SHA-bound post-review artifact exist | review findings go to `U5[i]`; no merge on a missing artifact |
-| `U5[i]` | `U4b-review[i]` or a verified reported regression | source-of-truth premise is confirmed and diagnosis is disconfirmed | premise disproven is a hard-stop; otherwise spawn the repair worker |
+| `U4b-review-claude[i]` | `U4b-review[i]` | Claude reviewer wrote `claude.json` evidence record bound to the frozen-input digest | skip when node is not under `parallel-review` mode |
+| `U4b-review-codex[i]` | `U4b-review[i]` | Codex reviewer wrote `codex.json` evidence record bound to the frozen-input digest | skip when node is not under `parallel-review` mode |
+| `J4b-review[i]` | `U4b-review-claude[i]` and `U4b-review-codex[i]` | both evidence records present, fresh, and matching; join record written | disagreement or any reject is a durable hard-stop, not a retry |
+| `U5[i]` | `J4b-review[i]` | source-of-truth premise is confirmed and diagnosis is disconfirmed | premise disproven is a hard-stop; otherwise spawn the repair worker |
 | `U5-repair[i]` | `U5[i]` | distinct fix attempt applied and locally verified | back to `U4[i]`; at most 5 distinct attempts per failure |
 | `U6[i]` | current unit is verified and any in-scope confirmation decision is resolved | envelope permits autonomous continuation or required approval is granted | no extra ask inside the envelope |
 | `U7/8[i]` | `U6[i]` | stack-specific push/deploy tactic completed, if applicable | skip when no push/deploy surface; these phases do not add generic policy |
-| `U4b-merge-gate[i]` | `U4b-review[i]`, `U6[i]`, `U7/8[i]`, PR-scope eval, review artifact, and integrity attestation | exact-head review/eval/integrity checks and gate-time smoke pass; merge reports `MERGED` | any missing/stale/failing gate enters `U5-repair[i]` or hard-stop after retry bound |
+| `U4b-merge-gate[i]` | `J4b-review[i]`, `U6[i]`, `U7/8[i]`, PR-scope eval, review artifact, and integrity attestation | exact-head review/eval/integrity checks and gate-time smoke pass; merge reports `MERGED` | any missing/stale/failing gate enters `U5-repair[i]` or hard-stop after retry bound |
 | `U10-respawn[i]` | `U4[i]` artifact check shows dispatch failure/idle without artifact | new versioned worker name and fresh dispatch exist | not triggered by an idle ping alone; returns to `U4[i]` |
 | `J12-all-units` | every unit's merge gate passed | each merged PR and dependent deployment evidence is freshly rechecked | no unit may be silently omitted |
 | `G10` | any respawn path | every replacement worker name is versioned | cross-cutting Phase 10 guard; no standalone work |

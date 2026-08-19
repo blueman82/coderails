@@ -1,0 +1,117 @@
+{
+  "schema_version": 1,
+  "scope": "pr",
+  "task_ref": "codex/live-graph-wiring",
+  "verification_level": 2,
+  "verification_justification": "This change has multiple work units and an outward release decision: graph state must not release downstream work without a valid neutral mixed-provider join. The suite was frozen before implementation at the prior exact PR head; smoke evidence was refreshed after correcting the E6 negative control definition, and all final commands were rerun at the posted head.",
+  "frozen_at": "2026-08-18T15:03:19Z",
+  "frozen_sha": "e8704dd0ac1b915ad2b38fabfaf5ceb527a00598",
+  "evals": [
+    {
+      "id": "E1",
+      "priority": "P0",
+      "mode": "scripted",
+      "surface": "artifact-path",
+      "assert": "The Codex runtime safely consumes the checked-in graph_policies block and resolves exactly Claude and Codex routes.",
+      "cmd": "python3 -m unittest codex.tests.test_live_graph_wiring.LiveGraphWiringTests.test_loads_both_provider_routes_and_rejects_bad_policy",
+      "negative_control": "python3 -c 'from pathlib import Path; p=Path(\"codex/tests/test_live_graph_wiring.py\"); s=p.read_text(); assert \"assertRaises(ValueError)\" not in s'",
+      "smoke": {
+        "cmd_exit": 0,
+        "negative_control_exit": 1,
+        "cmd_output": ". ---------------------------------------------------------------------- Ran 1 test in 0.002s  OK",
+        "negative_control_output": "Traceback (most recent call last):   File \"<string>\", line 1, in <module> AssertionError"
+      },
+      "status": "pass",
+      "evidence": "python3 -m unittest codex.tests.test_live_graph_wiring.LiveGraphWiringTests.test_loads_both_provider_routes_and_rejects_bad_policy => exit 0; rerun at exact PR head c0de43f61021c4d2740a6130e0a29ed0680c304e"
+    },
+    {
+      "id": "E2",
+      "priority": "P0",
+      "mode": "scripted",
+      "surface": "artifact-path",
+      "assert": "The neutral join accepts matching provider evidence and atomically records the join with graph state.",
+      "cmd": "python3 -m unittest codex.tests.test_live_graph_wiring.LiveGraphWiringTests.test_join_is_atomic_and_blocks_downstream_on_bad_evidence",
+      "negative_control": "python3 -c 'from pathlib import Path; p=Path(\"codex/tests/test_live_graph_wiring.py\"); s=p.read_text(); assert \"parallel_review_join\" not in s'",
+      "smoke": {
+        "cmd_exit": 0,
+        "negative_control_exit": 1,
+        "cmd_output": ". ---------------------------------------------------------------------- Ran 1 test in 0.003s  OK",
+        "negative_control_output": "Traceback (most recent call last):   File \"<string>\", line 1, in <module> AssertionError"
+      },
+      "status": "pass",
+      "evidence": "python3 -m unittest codex.tests.test_live_graph_wiring.LiveGraphWiringTests.test_join_is_atomic_and_blocks_downstream_on_bad_evidence => exit 0; rerun at exact PR head c0de43f61021c4d2740a6130e0a29ed0680c304e"
+    },
+    {
+      "id": "E3",
+      "priority": "P0",
+      "mode": "scripted",
+      "surface": "artifact-path",
+      "assert": "The graph contract routes U5 and the merge gate through J4b-review and declares both provider reviewer nodes.",
+      "cmd": "grep -qF 'J4b-review[i]' skills/agentic-loop/execution-graph.md && grep -qF '| `U5[i]` | `J4b-review[i]`' skills/agentic-loop/execution-graph.md && grep -qF '| `U4b-merge-gate[i]` | `J4b-review[i]`' skills/agentic-loop/execution-graph.md",
+      "negative_control": "tmp=$(mktemp); sed 's/| `U5\\[i\\]` | `J4b-review\\[i\\]`/| `U5[i]` | `U4b-review[i]`/' skills/agentic-loop/execution-graph.md > \"$tmp\"; grep -qF '| `U5[i]` | `J4b-review[i]`' \"$tmp\"; rc=$?; rm -f \"$tmp\"; exit $rc",
+      "smoke": {
+        "cmd_exit": 0,
+        "negative_control_exit": 1,
+        "cmd_output": "",
+        "negative_control_output": ""
+      },
+      "status": "pass",
+      "evidence": "grep -qF 'J4b-review[i]' skills/agentic-loop/execution-graph.md && grep -qF '| `U5[i]` | `J4b-review[i]`' skills/agentic-loop/execution-graph.md && grep -qF '| `U4b-merge-gate[i]` | `J4b-review[i]`' skills/agentic-loop/execution-graph.md => exit 0; rerun at exact PR head c0de43f61021c4d2740a6130e0a29ed0680c304e"
+    },
+    {
+      "id": "E4",
+      "priority": "P0",
+      "mode": "scripted",
+      "surface": "artifact-path",
+      "assert": "The canonical Codex runtime and generated package runtime remain byte-identical.",
+      "cmd": "python3 codex/tests/runtime_parity.py",
+      "negative_control": "python3 -c 'from pathlib import Path; assert Path(\"codex/runtime/graph.py\").read_bytes() != Path(\"/tmp/nonexistent-graph.py\").read_bytes()'",
+      "smoke": {
+        "cmd_exit": 0,
+        "negative_control_exit": 1,
+        "cmd_output": "PASS: standalone package graph runtime has no hand-maintained drift",
+        "negative_control_output": "Traceback (most recent call last):   File \"<string>\", line 1, in <module>   File \"/Applications/Xcode.app/Contents/Developer/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/pathlib.py\", line 1249, in read_bytes     with self.open(mode [...] ontents/Developer/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/pathlib.py\", line 1110, in _opener     return self._accessor.open(self, flags, mode) FileNotFoundError: [Errno 2] No such file or directory: '/tmp/nonexistent-graph.py'"
+      },
+      "status": "pass",
+      "evidence": "python3 codex/tests/runtime_parity.py => exit 0; rerun at exact PR head c0de43f61021c4d2740a6130e0a29ed0680c304e"
+    },
+    {
+      "id": "E5",
+      "priority": "P0",
+      "mode": "scripted",
+      "surface": "artifact-path",
+      "assert": "The standalone Codex package contains no provider-specific Claude implementation text and executes from copied package-local paths.",
+      "cmd": "bash packages/tests/codex_package.test.sh",
+      "negative_control": "python3 -c 'from pathlib import Path; assert \"cl\" + \"aude\" in Path(\"packages/codex/runtime/graph.py\").read_text(encoding=\"utf-8\").lower()'",
+      "smoke": {
+        "cmd_exit": 0,
+        "negative_control_exit": 1,
+        "cmd_output": "ok - jq ok - jq ok - python3 {\"status\": \"complete\", \"nodes\": 7} PASS ok - copied package is independent PASS",
+        "negative_control_output": "Traceback (most recent call last):   File \"<string>\", line 1, in <module> AssertionError"
+      },
+      "status": "pass",
+      "evidence": "bash packages/tests/codex_package.test.sh => exit 0; rerun at exact PR head c0de43f61021c4d2740a6130e0a29ed0680c304e"
+    },
+    {
+      "id": "E6",
+      "priority": "P0",
+      "mode": "scripted",
+      "surface": "artifact-path",
+      "assert": "Every directly invoked tracked shell script has the required executable mode and every sourced-only script remains non-executable.",
+      "cmd": "bash hooks/scripts/tests/exec_bit_invariant.test.sh",
+      "negative_control": "python3 -c 'from pathlib import Path; assert \"hooks/scripts/lib/graph_dispatch.sh\" not in Path(\"hooks/scripts/tests/exec_bit_invariant.test.sh\").read_text()'",
+      "smoke": {
+        "cmd_exit": 0,
+        "negative_control_exit": 1,
+        "cmd_output": "ok   - scripts/lib/git-common.sh (100644) ok   - scripts/lib/config.sh (100644) ok   - scripts/lib/review-artifact.sh (100644) ok   - scripts/lib/eval-artifact.sh (100644) ok   - hooks/scripts/lib/agentic_loop_path.sh (100644) ok   - hooks/scripts/li [...] scripts/wiki_taxonomy_gate.sh (100755) ok   - skills/dashboard/runner/bin/sweeper.sh (100755) ok   - skills/dashboard/runner/bin/seed-and-sweep.sh (100755) ok   - launchd/install-routines.sh (100755) ok   - launchd/uninstall-routines.sh (100755) PASS",
+        "negative_control_output": "Traceback (most recent call last):   File \"<string>\", line 1, in <module> AssertionError"
+      },
+      "status": "pass",
+      "evidence": "bash hooks/scripts/tests/exec_bit_invariant.test.sh => exit 0; rerun at exact PR head c0de43f61021c4d2740a6130e0a29ed0680c304e"
+    }
+  ],
+  "amendments": [],
+  "result": null,
+  "graded_at": null,
+  "head_sha": "c0de43f61021c4d2740a6130e0a29ed0680c304e"
+}

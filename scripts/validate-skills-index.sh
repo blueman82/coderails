@@ -11,7 +11,24 @@ index = ENV.fetch("INDEX")
 root = ENV.fetch("ROOT")
 data = YAML.safe_load(File.read(index), permitted_classes: [], aliases: false)
 abort "skills index: root must be a mapping" unless data.is_a?(Hash)
-abort "skills index: root must contain only skills" unless data.keys == ["skills"]
+abort "skills index: root must contain only skills and graph_policies" unless (data.keys - ["skills", "graph_policies"]).empty? && data.key?("skills")
+
+if data.key?("graph_policies")
+  policies = data["graph_policies"]
+  abort "graph_policies: must be a non-empty mapping" unless policies.is_a?(Hash) && !policies.empty?
+  policies.each do |node_id, policy|
+    abort "graph_policies: #{node_id.inspect} must be a mapping" unless node_id.is_a?(String) && policy.is_a?(Hash)
+    abort "graph_policies: #{node_id} mode must be exactly 'parallel-review'" unless policy["mode"] == "parallel-review"
+    reviewers = policy["reviewers"]
+    abort "graph_policies: #{node_id} reviewers must be a non-empty array" unless reviewers.is_a?(Array) && !reviewers.empty?
+    reviewers.each do |reviewer|
+      abort "graph_policies: #{node_id} reviewer entry must be a mapping" unless reviewer.is_a?(Hash)
+      abort "graph_policies: #{node_id} reviewer provider must be claude or codex" unless %w[claude codex].include?(reviewer["provider"])
+      route = reviewer["route"]
+      abort "graph_policies: #{node_id} reviewer route missing for #{reviewer["provider"]}" unless route.is_a?(String) && File.file?(File.expand_path(route, root))
+    end
+  end
+end
 
 entries = data["skills"]
 abort "skills index: skills must be a non-empty mapping" unless entries.is_a?(Hash) && !entries.empty?

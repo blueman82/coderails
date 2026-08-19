@@ -5,18 +5,30 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 import tempfile
 import fcntl
+from datetime import datetime, timezone
 from concurrent.futures import ThreadPoolExecutor
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-from runtime.contract import CONTRACT, apply_work_unit_disposition, build_graph, load_contract
+from runtime.contract import (
+    CONTRACT,
+    apply_work_unit_disposition,
+    build_graph,
+    codex_policy_mappings,
+    load_contract,
+    load_graph_policies,
+)
 from runtime.dispatch import dispatch
+from runtime.parallel_review import PARALLEL_REVIEW_GATE, REVIEW_PROVIDERS, evaluate_parallel_review_join
+from runtime.validation import _metadata_error, _test_callback_records
 from runtime.codex_exec import invoke as codex_exec
 
+CONTRACT = Path(__file__).parents[2] / "skills/agentic-loop/execution-graph.md"
 OUTCOMES = {"done", "skipped", "failed", "stale", "hard-stop"}
 REQUIRED_GATES = ("review", "eval", "proof", "integrity", "wiki", "teardown")
 GATE_RESULTS = {"review": ("review_status", "pass"), "eval": ("result", "GO"), "proof": ("result", "pass"), "integrity": ("integrity", "pass"), "wiki": ("result", "pass"), "teardown": ("result", "pass")}
@@ -91,71 +103,35 @@ def ready(graph: dict[str, Any], node: str) -> bool:
     return all(item in nodes and nodes[item].get("outcome") in {"done", "skipped"} for item in predecessors)
 
 
-def _test_callback_records(graph: dict[str, Any], handler: Callable[[str], str]) -> dict[str, Any]:
-    return {
-        name: {
-            "provider": "codex", "skill_id": f"test.callback.{name}",
-            "implementation_path": "codex/tests", "test_only": True,
-            "outcome": (lambda name=name: handler(name)),
-        }
-        for name in graph["nodes"]
-    }
-
-
-def _metadata_error(record: Any, *, catalog_root: Path | None = None) -> str | None:
-    if not isinstance(record, dict):
-        return "implementation mapping must be an object"
-    if record.get("provider") != "codex":
-        return "provider must be codex"
-    if not isinstance(record.get("skill_id"), str) or not record["skill_id"].strip():
-        return "skill_id is required"
-    if not isinstance(record.get("implementation_path"), str) or not record["implementation_path"].strip():
-        return "implementation_path is required"
-    if record.get("catalog_route") is not None:
-        if catalog_root is None:
-            return "catalog resolver root is required"
-        try:
-            package_catalog = catalog_root / "catalog.json"
-            if package_catalog.is_file():
-                catalog = json.loads(package_catalog.read_text(encoding="utf-8"))
-                route = catalog.get("routes", {}).get(record.get("catalog_kind", "skills"), {}).get(str(record["catalog_route"]))
-                if not isinstance(route, Mapping) or route.get("status") != "active":
-                    raise ValueError("unknown or inactive package route")
-                expected = str(route["path"])
-                if not (catalog_root / expected).is_file():
-                    raise ValueError("package route target is missing")
-            else:
-                catalog_dir = catalog_root / "codex"
-                if str(catalog_dir) not in sys.path:
-                    sys.path.insert(0, str(catalog_dir))
-                from catalog import resolve  # type: ignore
-                resolved = resolve(str(record["catalog_route"]), kind=record.get("catalog_kind"), root=catalog_root)
-                expected = resolved.relative_to(catalog_root).as_posix()
-            if expected != record["implementation_path"]:
-                return f"catalog path mismatch: expected {expected}"
-        except Exception as error:
-            return f"catalog route unavailable: {error}"
-    adapter = record.get("adapter")
-    if adapter is not None and adapter != "codex-exec":
-        return "adapter must be codex-exec"
-    command = record.get("command")
-    test_outcome = record.get("outcome")
-    if command is not None and (not isinstance(command, list) or not command or any(not isinstance(item, str) or not item for item in command)):
-        return "command must be a non-empty string array"
-    if command is None and adapter != "codex-exec" and not (record.get("test_only") and test_outcome is not None):
-        return "executable command is required"
-    if adapter == "codex-exec" and (not isinstance(record.get("prompt"), str) or not record["prompt"].strip()):
-        return "Codex exec prompt is required"
-    if record.get("gate") and record.get("mode", "live") != "fixture":
-        run = record.get("_run")
-        provenance = record.get("provenance")
-        if not isinstance(run, Mapping) or not all(isinstance(run.get(key), str) and run[key].strip() for key in ("run_id", "revision", "head")):
-            return "live gate requires run_id, revision, and head context"
-        if not isinstance(record.get("artifact_path"), str) or not record["artifact_path"].strip():
-            return "live gate requires artifact_path"
-        if not isinstance(provenance, Mapping) or provenance.get("provider") != "codex" or any(provenance.get(key) != run[key] for key in ("run_id", "revision", "head")):
-            return "live gate provenance is not bound to the current run"
-    return None
+def persist_parallel_review_join(
+    graph: dict[str, Any],
+    policy: Mapping[str, Any],
+    canonical_input: Mapping[str, Any] | Path,
+    reviewer_records: Mapping[str, Mapping[str, Any] | Path | None],
+    *,
+    expected_run: Mapping[str, str],
+    state_path: Path,
+    expected_revision: int | None = None,
+) -> dict[str, Any]:
+    """Evaluate and atomically persist the neutral join plus graph state."""
+    join_node = str(policy.get("join", {}).get("node", ""))
+    if join_node not in graph.get("nodes", {}) and f"{join_node}[i]" in graph.get("nodes", {}):
+        join_node = f"{join_node}[i]"
+    if join_node not in graph.get("nodes", {}):
+        raise ValueError(f"parallel-review join node is not in graph: {join_node}")
+    join = evaluate_parallel_review_join(
+        canonical_input,
+        reviewer_records,
+        expected_run=expected_run,
+        node=join_node,
+        evaluated_at=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+    )
+    outcome = "done" if join["outcome"] == "pass" else join["outcome"]
+    graph["nodes"][join_node].update(status=outcome, outcome=outcome, parallel_review=join)
+    _evidence(graph["nodes"][join_node], graph["nodes"][join_node]["retry"]["attempts"], outcome, join.get("hard_stop_reason") or "unanimous approval")
+    graph["parallel_review_join"] = join
+    _persist(graph, state_path, persist=None, expected_revision=expected_revision, parallel_review=join)
+    return join
 
 
 def _invoke(record: dict[str, Any], cwd: str | None) -> tuple[str, str]:
@@ -177,9 +153,15 @@ def _invoke(record: dict[str, Any], cwd: str | None) -> tuple[str, str]:
             path = Path(record.get("cwd", cwd or Path.cwd())) / path
         try:
             artifact = json.loads(path.read_text(encoding="utf-8"))
-            field, expected = GATE_RESULTS[kind]
             run = record["_run"]
-            if not isinstance(artifact, dict) or artifact.get("schema_version") != 1 or artifact.get("gate") != kind or artifact.get("provider") != "codex" or any(artifact.get(key) != run[key] for key in ("run_id", "revision", "head")) or artifact.get(field) != expected:
+            valid = isinstance(artifact, dict) and artifact.get("schema_version") == 1 and artifact.get("gate") == kind and artifact.get("provider") == "codex" and all(artifact.get(key) == run[key] for key in ("run_id", "revision", "head"))
+            if kind == PARALLEL_REVIEW_GATE:
+                verdict = artifact.get("verdict") if isinstance(artifact, dict) else None
+                valid = valid and artifact.get("frozen_input_digest") == record.get("frozen_input_digest") and isinstance(verdict, dict) and verdict.get("outcome") in {"approve", "reject"} and str(verdict.get("reasoning", "")).strip()
+            else:
+                field, expected = GATE_RESULTS[kind]
+                valid = valid and artifact.get(field) == expected
+            if not valid:
                 return "failed", f"artifact validation failed for gate {kind}"
         except (OSError, ValueError, json.JSONDecodeError) as error:
             return "failed", f"artifact validation failed for gate {kind}: {error}"
@@ -257,6 +239,7 @@ def execute(
     cwd: str | None = None,
     expected_revision: int | None = None,
     catalog_root: Path | None = None,
+    stop_before: set[str] | None = None,
 ) -> dict[str, Any]:
     """Dispatch complete ready waves and atomically persist after each wave."""
     if callable(implementations):
@@ -275,6 +258,8 @@ def execute(
                 _evidence(node, node["retry"]["attempts"], "hard-stop", "blocked by unresolved predecessor or cycle")
             expected_revision = _persist(graph, state_path, persist, expected_revision)
             return graph
+        if stop_before and stop_before.intersection(wave):
+            return graph
         runnable = [name for name in wave if graph["nodes"][name].get("dispatch", True)]
         results = []
         with ThreadPoolExecutor(max_workers=max(1, len(runnable))) as pool:
@@ -292,7 +277,7 @@ def execute(
         expected_revision = _persist(graph, state_path, persist, expected_revision)
 
 
-def _persist(graph: dict[str, Any], state_path: Path | None, persist: Callable[[dict[str, Any]], None] | None, expected_revision: int | None) -> int | None:
+def _persist(graph: dict[str, Any], state_path: Path | None, persist: Callable[[dict[str, Any]], None] | None, expected_revision: int | None, parallel_review: Mapping[str, Any] | None = None) -> int | None:
     if persist:
         persist(graph)
     if state_path:
@@ -302,7 +287,11 @@ def _persist(graph: dict[str, Any], state_path: Path | None, persist: Callable[[
                 raise StateConflict(f"state revision changed: expected {expected_revision}, found {current}")
             revision = current + 1
             graph["revision"] = revision
-            _atomic_write(state_path, {"schema_version": 2, "status": "running", "provider": "codex", "revision": revision, "graph": graph})
+            state = {"schema_version": 2, "status": "running", "provider": "codex", "revision": revision, "graph": graph}
+            join = parallel_review or graph.get("parallel_review_join")
+            if isinstance(join, Mapping):
+                state["parallel_review_join"] = dict(join)
+            _atomic_write(state_path, state)
             return revision
     return expected_revision
 
