@@ -31,7 +31,28 @@ if ((changed_only)); then
     shell_files=("${filtered_shell_files[@]}")
 fi
 
+read_shell_files() {
+    shell_files=()
+    if ((changed_only)); then
+        while IFS= read -r shell_file; do
+            case "$shell_file" in
+            hooks/*.sh | hooks/*.bash | scripts/*.sh | scripts/*.bash)
+                [[ -f "$repo_root/$shell_file" ]] && shell_files+=("$repo_root/$shell_file")
+                ;;
+            esac
+        done < <((
+            git diff --name-only HEAD
+            git diff --cached --name-only
+        ) | sort -u)
+    else
+        while IFS= read -r shell_file; do
+            shell_files+=("$shell_file")
+        done < <(find "$repo_root/hooks" "$repo_root/scripts" -type f \( -name '*.sh' -o -name '*.bash' \) -print)
+    fi
+}
+
 if command -v shellcheck >/dev/null 2>&1; then
+    read_shell_files
     if ((${#shell_files[@]} > 0)); then
         shellcheck "${shell_files[@]}" || findings=1
     fi
@@ -40,6 +61,7 @@ else
 fi
 
 if command -v shfmt >/dev/null 2>&1; then
+    read_shell_files
     ((${#shell_files[@]} == 0)) || shfmt -i 4 -d "${shell_files[@]}" || findings=1
 else
     printf '%s\n' 'quality: shfmt unavailable; Bash formatting is covered by whitespace checks only.' >&2

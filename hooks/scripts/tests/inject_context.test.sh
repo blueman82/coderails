@@ -9,35 +9,46 @@ fails=0
 
 # Build an empty transcript (no prior assistant turns).
 mk_empty_transcript() {
-  local out="$TMP/t_empty_$RANDOM.jsonl"
-  : > "$out"
-  printf '%s' "$out"
+    local out="$TMP/t_empty_$RANDOM.jsonl"
+    : >"$out"
+    printf '%s' "$out"
 }
 
-# Build a transcript with one prior assistant turn (non-first prompt).
+# Build a transcript with one prior assistant turn (later prompt).
 mk_transcript_with_prior() {
-  local out="$TMP/t_prior_$RANDOM.jsonl"
-  printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"text","text":"Hello"}]}}' > "$out"
-  printf '%s' "$out"
+    local out="$TMP/t_prior_$RANDOM.jsonl"
+    printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"text","text":"Hello"}]}}' >"$out"
+    printf '%s' "$out"
 }
 
 run() { # json -> hook output
-  printf '%s' "$1" | bash "$HOOK" 2>/dev/null
+    printf '%s' "$1" | bash "$HOOK" 2>/dev/null
 }
 
 check() { # desc expected actual
-  if [ "$2" = "$3" ]; then printf 'ok   - %s\n' "$1"
-  else printf 'FAIL - %s (expected %s, got %s)\n' "$1" "$2" "$3"; fails=$((fails+1)); fi
+    if [ "$2" = "$3" ]; then
+        printf 'ok   - %s\n' "$1"
+    else
+        printf 'FAIL - %s (expected %s, got %s)\n' "$1" "$2" "$3"
+        fails=$((fails + 1))
+    fi
 }
 
 check_contains() { # desc substring output
-  if printf '%s' "$3" | grep -q "$2"; then printf 'ok   - %s\n' "$1"
-  else printf 'FAIL - %s (expected to contain "%s")\n' "$1" "$2"; fails=$((fails+1)); fi
+    if printf '%s' "$3" | grep -q "$2"; then
+        printf 'ok   - %s\n' "$1"
+    else
+        printf 'FAIL - %s (expected to contain "%s")\n' "$1" "$2"
+        fails=$((fails + 1))
+    fi
 }
 
 # Case 1: output is valid JSON with hookSpecificOutput
 out=$(run '{"session_id":"S1"}')
-check "output is valid JSON" 0 "$(printf '%s' "$out" | jq -e . >/dev/null 2>&1; echo $?)"
+check "output is valid JSON" 0 "$(
+    printf '%s' "$out" | jq -e . >/dev/null 2>&1
+    echo $?
+)"
 
 # Case 2: hookEventName is UserPromptSubmit
 out=$(run '{"session_id":"S1"}')
@@ -65,14 +76,20 @@ T=$(mk_empty_transcript)
 out=$(run "{\"session_id\":\"S1\",\"transcript_path\":\"$T\"}")
 check_contains "first prompt has discipline reminder" "[discipline]" "$(printf '%s' "$out" | jq -r '.hookSpecificOutput.additionalContext')"
 
-# Case 8: non-first prompt (prior assistant turn exists) -> no discipline reminder
+# Case 8: later prompt (prior assistant turn exists) -> reminder is omitted
 T=$(mk_transcript_with_prior)
 out=$(run "{\"session_id\":\"S1\",\"transcript_path\":\"$T\"}")
 ctx=$(printf '%s' "$out" | jq -r '.hookSpecificOutput.additionalContext')
-if printf '%s' "$ctx" | grep -q "\[discipline\]"; then
-  printf 'FAIL - non-first prompt should not contain discipline reminder\n'; fails=$((fails+1))
+if ! printf '%s' "$ctx" | grep -q "\[discipline\]"; then
+    printf 'ok   - later prompt omits discipline reminder\n'
 else
-  printf 'ok   - non-first prompt has no discipline reminder\n'
+    printf 'FAIL - later prompt should omit discipline reminder\n'
+    fails=$((fails + 1))
 fi
 
-[ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails)"; exit 1; }
+if [ "$fails" -eq 0 ]; then
+    echo "PASS"
+    exit 0
+fi
+echo "FAILED ($fails)"
+exit 1
