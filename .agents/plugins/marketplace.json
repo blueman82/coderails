@@ -8,7 +8,7 @@
       "name": "coderails-codex",
       "source": {
         "source": "local",
-        "path": "./"
+        "path": "./packages/codex"
       },
       "policy": {
         "installation": "AVAILABLE",

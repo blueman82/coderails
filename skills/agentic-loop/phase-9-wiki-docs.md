@@ -5,15 +5,9 @@ wiki ingest once at the loop end, then run `/sync-docs` once); this file is the 
 suppression mechanics, the wiki-delivery verification steps, and the docs-drift disposition rule
 you consult while running it.
 
-**Graph dispatch boundary.** `S9-wiki` and `S9-docs` DO resolve cleanly today: `graph_dispatch_plan`
-(`hooks/scripts/lib/graph_dispatch.sh`) resolves them to `wiki-writer` and `docs-auditor`
-respectively, each an unambiguous agent-tier match in `skills/index.yaml` — unlike
-`U4b-review`/`U4b-merge-gate`, which remain unresolved per the same characterization test. These
-two nodes are the exception among the downstream graph-dispatch boundaries documented across this
-phase family — they're plan-ready even though no call site wires
-`graph_dispatch_plan`/`graph_dispatch_record` into this phase yet. See
-`hooks/scripts/tests/graph_dispatch_downstream.test.sh` for the characterization evidence. The
-orchestrator-side invocation sequence for this sequential `S9-wiki -> S9-docs` link, plus the
+**Graph dispatch boundary.** The Claude-owned role map in `graph_dispatch.sh` resolves `S9-wiki`
+to `wiki-writer` and `S9-docs` to `docs-auditor`. The orchestrator-side invocation sequence for
+this sequential `S9-wiki -> S9-docs` link, plus the
 `J12-all-units` join release that gates it, is documented in
 [execution-graph.md](execution-graph.md)'s `S9-wiki -> S9-docs` and `J12-all-units` subsection, with
 acceptance evidence in `hooks/scripts/tests/graph_dispatch_j12_s9.test.sh`.

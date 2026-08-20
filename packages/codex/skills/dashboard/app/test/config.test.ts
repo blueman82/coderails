@@ -1,0 +1,249 @@
+import { describe, it, expect, afterEach } from "vitest";
+import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { loadConfig, visibleButtons, ConfigError, type DashboardConfig } from "../src/lib/config";
+
+const tmpDirs: string[] = [];
+
+function writeConfig(contents: unknown): string {
+  const dir = mkdtempSync(join(tmpdir(), "dashboard-config-test-"));
+  tmpDirs.push(dir);
+  const path = join(dir, "config.json");
+  writeFileSync(path, JSON.stringify(contents));
+  return path;
+}
+
+afterEach(() => {
+  for (const dir of tmpDirs.splice(0)) {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+const validConfig: DashboardConfig = {
+  repos: ["blueman82/coderails"],
+  wikiPaths: ["/tmp/coderails-wiki"],
+  buttons: [
+    {
+      name: "wiki-lint",
+      label: "WIKI LINT",
+      command: "$coderails-codex:wiki-lint",
+      cwd: "/tmp/coderails",
+      profile: "standard",
+    },
+  ],
+};
+
+describe("loadConfig", () => {
+  it("parses a valid config", () => {
+    const path = writeConfig(validConfig);
+    const config = loadConfig(path);
+    expect(config).toEqual(validConfig);
+  });
+
+  it("throws ConfigError naming the path when the file is missing", () => {
+    const missingPath = join(tmpdir(), "does-not-exist-dashboard-config.json");
+    expect(() => loadConfig(missingPath)).toThrow(ConfigError);
+    expect(() => loadConfig(missingPath)).toThrow(missingPath);
+  });
+
+  it("throws ConfigError naming the path when the file has malformed JSON", () => {
+    const dir = mkdtempSync(join(tmpdir(), "dashboard-config-test-"));
+    tmpDirs.push(dir);
+    const path = join(dir, "config.json");
+    writeFileSync(path, "{ not valid json");
+    expect(() => loadConfig(path)).toThrow(ConfigError);
+    expect(() => loadConfig(path)).toThrow(path);
+    expect(() => loadConfig(path)).toThrow(/json/i);
+  });
+
+  it("throws when button names are duplicated", () => {
+    const path = writeConfig({
+      ...validConfig,
+      buttons: [
+        validConfig.buttons[0],
+        { ...validConfig.buttons[0] },
+      ],
+    });
+    expect(() => loadConfig(path)).toThrow(ConfigError);
+    expect(() => loadConfig(path)).toThrow(/name/i);
+  });
+
+  it("throws when a button's cwd is relative", () => {
+    const path = writeConfig({
+      ...validConfig,
+      buttons: [
+        {
+          ...validConfig.buttons[0],
+          cwd: "relative/path",
+        },
+      ],
+    });
+    expect(() => loadConfig(path)).toThrow(ConfigError);
+    expect(() => loadConfig(path)).toThrow(/cwd/i);
+  });
+
+  it("throws when a button's profile is unknown", () => {
+    const path = writeConfig({
+      ...validConfig,
+      buttons: [
+        {
+          ...validConfig.buttons[0],
+          profile: "admin",
+        },
+      ],
+    });
+    expect(() => loadConfig(path)).toThrow(ConfigError);
+    expect(() => loadConfig(path)).toThrow(/profile/i);
+  });
+
+  it("accepts a button with profile 'auto'", () => {
+    const path = writeConfig({
+      ...validConfig,
+      buttons: [
+        {
+          ...validConfig.buttons[0],
+          profile: "auto",
+        },
+      ],
+    });
+    const config = loadConfig(path);
+    expect(config.buttons[0].profile).toBe("auto");
+  });
+
+  it("accepts a button with hidden: true", () => {
+    const path = writeConfig({
+      ...validConfig,
+      buttons: [
+        {
+          ...validConfig.buttons[0],
+          hidden: true,
+        },
+      ],
+    });
+    const config = loadConfig(path);
+    expect(config.buttons[0].hidden).toBe(true);
+  });
+
+  it("throws when a button's hidden field is not a boolean", () => {
+    const path = writeConfig({
+      ...validConfig,
+      buttons: [
+        {
+          ...validConfig.buttons[0],
+          hidden: "yes",
+        },
+      ],
+    });
+    expect(() => loadConfig(path)).toThrow(ConfigError);
+    expect(() => loadConfig(path)).toThrow(/hidden/i);
+  });
+
+  it("leaves hidden undefined when absent", () => {
+    const path = writeConfig(validConfig);
+    const config = loadConfig(path);
+    expect(config.buttons[0].hidden).toBeUndefined();
+  });
+
+  it("throws ConfigError (not a TypeError) when buttons is missing", () => {
+    const path = writeConfig({
+      repos: validConfig.repos,
+      wikiPaths: validConfig.wikiPaths,
+    });
+    expect(() => loadConfig(path)).toThrow(ConfigError);
+    expect(() => loadConfig(path)).toThrow(/buttons/i);
+  });
+
+  it("throws ConfigError (not a misleading 'unknown profile: undefined') when buttons is a string", () => {
+    const path = writeConfig({
+      ...validConfig,
+      buttons: "not-an-array",
+    });
+    expect(() => loadConfig(path)).toThrow(ConfigError);
+    expect(() => loadConfig(path)).toThrow(/buttons/i);
+  });
+
+  it("throws when a button's command is not a string", () => {
+    const path = writeConfig({
+      ...validConfig,
+      buttons: [{ ...validConfig.buttons[0], command: 123 }],
+    });
+    expect(() => loadConfig(path)).toThrow(ConfigError);
+    expect(() => loadConfig(path)).toThrow(/command/i);
+  });
+
+  it("throws when a button's label is not a string", () => {
+    const path = writeConfig({
+      ...validConfig,
+      buttons: [{ ...validConfig.buttons[0], label: 123 }],
+    });
+    expect(() => loadConfig(path)).toThrow(ConfigError);
+    expect(() => loadConfig(path)).toThrow(/label/i);
+  });
+
+  it("throws when a button's name is not a string", () => {
+    const path = writeConfig({
+      ...validConfig,
+      buttons: [{ ...validConfig.buttons[0], name: 123 }],
+    });
+    expect(() => loadConfig(path)).toThrow(ConfigError);
+    expect(() => loadConfig(path)).toThrow(/name/i);
+  });
+
+  it("throws when a button's name contains a path-traversal segment (security: name is used as a lock-file stem)", () => {
+    const path = writeConfig({
+      ...validConfig,
+      buttons: [{ ...validConfig.buttons[0], name: "../../evil" }],
+    });
+    expect(() => loadConfig(path)).toThrow(ConfigError);
+    expect(() => loadConfig(path)).toThrow(/name/i);
+  });
+
+  it("accepts every button name from the live dashboard config's naming style (real-world names must not regress)", () => {
+    const realNames = [
+      "wiki-lint",
+      "deep-research",
+      "wiki-query",
+      "ask",
+      "memory-consolidation-weekly",
+      "loop-retro-promotion",
+      "inbox-brief",
+      "workflow-audit-weekly",
+      "sync-docs",
+    ];
+    for (const name of realNames) {
+      const path = writeConfig({
+        ...validConfig,
+        buttons: [{ ...validConfig.buttons[0], name }],
+      });
+      expect(() => loadConfig(path)).not.toThrow();
+    }
+  });
+});
+
+describe("visibleButtons", () => {
+  it("excludes buttons with hidden: true", () => {
+    const config: DashboardConfig = {
+      ...validConfig,
+      buttons: [
+        validConfig.buttons[0],
+        { ...validConfig.buttons[0], name: "hidden-button", hidden: true },
+      ],
+    };
+    expect(visibleButtons(config).map((b) => b.name)).toEqual(["wiki-lint"]);
+  });
+
+  it("includes buttons with hidden absent or false", () => {
+    const config: DashboardConfig = {
+      ...validConfig,
+      buttons: [
+        validConfig.buttons[0],
+        { ...validConfig.buttons[0], name: "explicit-false", hidden: false },
+      ],
+    };
+    expect(visibleButtons(config).map((b) => b.name)).toEqual([
+      "wiki-lint",
+      "explicit-false",
+    ]);
+  });
+});

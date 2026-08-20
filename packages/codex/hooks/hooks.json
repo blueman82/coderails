@@ -1,0 +1,127 @@
+{
+  "description": "Native Codex discipline hooks for Coderails.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${PLUGIN_ROOT}/hooks/scripts/inject_bootstrap.sh\"",
+            "timeout": 10,
+            "additionalContextLimit": 1200
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${PLUGIN_ROOT}/hooks/scripts/inject_context.sh\"",
+            "timeout": 10,
+            "additionalContextLimit": 500
+          },
+          {
+            "type": "command",
+            "command": "\"${PLUGIN_ROOT}/hooks/scripts/crack_on_gate.sh\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${PLUGIN_ROOT}/hooks/scripts/check_confidence_labels.sh\"",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "\"${PLUGIN_ROOT}/hooks/scripts/crack_on_prose_gate.sh\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${PLUGIN_ROOT}/hooks/scripts/check_confidence_labels.sh\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "^Bash$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${PLUGIN_ROOT}/hooks/scripts/destructive_bash_gate.sh\"",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "\"${PLUGIN_ROOT}/hooks/scripts/test_gate.sh\"",
+            "timeout": 120
+          },
+          {
+            "type": "command",
+            "command": "\"${PLUGIN_ROOT}/hooks/scripts/verification_volume_ceiling.sh\"",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "matcher": "^request_user_input$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${PLUGIN_ROOT}/hooks/scripts/crack_on_gate.sh\"",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "matcher": "^apply_patch$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${PLUGIN_ROOT}/hooks/scripts/no_edit_on_main.sh\"",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "\"${PLUGIN_ROOT}/hooks/scripts/comment_citation_gate.sh\"",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "\"${PLUGIN_ROOT}/hooks/scripts/wiki_taxonomy_gate.sh\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "^apply_patch$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${PLUGIN_ROOT}/hooks/scripts/quality_feedback.sh\"",
+            "timeout": 15,
+            "additionalContextLimit": 1000
+          }
+        ]
+      }
+    ]
+  }
+}

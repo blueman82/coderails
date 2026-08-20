@@ -40,6 +40,19 @@ else
     :
 fi
 
+legacy_loc="$fixture/legacy-loc/packages/codex/scripts"
+mkdir -p "$legacy_loc"
+printf ':\n%.0s' {1..512} >"$legacy_loc/merge.sh"
+python3 "$checker" --strict --root "$fixture/legacy-loc" >/dev/null
+printf ':\n' >>"$legacy_loc/merge.sh"
+if output="$(python3 "$checker" --strict --root "$fixture/legacy-loc" 2>&1)"; then
+    echo 'quality.test: legacy LOC growth unexpectedly passed' >&2
+    exit 1
+elif [[ "$output" != *"513 lines (max 512)"* ]]; then
+    echo 'quality.test: legacy LOC growth reported the wrong ceiling' >&2
+    exit 1
+fi
+
 python3 - "$fixture/long.py" <<'PY'
 from pathlib import Path
 import sys
@@ -63,6 +76,27 @@ if python3 "$checker" --strict --root "$fixture" --max-function-lines 3 >/dev/nu
     exit 1
 else
     :
+fi
+
+legacy_function="$fixture/legacy-function/packages/codex/scripts"
+mkdir -p "$legacy_function"
+{
+    printf 'push::main() {\n'
+    printf '  :\n%.0s' {1..118}
+    printf '}\n'
+} >"$legacy_function/push.sh"
+python3 "$checker" --strict --root "$fixture/legacy-function" >/dev/null
+{
+    printf 'push::main() {\n'
+    printf '  :\n%.0s' {1..119}
+    printf '}\n'
+} >"$legacy_function/push.sh"
+if output="$(python3 "$checker" --strict --root "$fixture/legacy-function" 2>&1)"; then
+    echo 'quality.test: legacy function growth unexpectedly passed' >&2
+    exit 1
+elif [[ "$output" != *"function push::main is 121 lines (max 120)"* ]]; then
+    echo 'quality.test: legacy function growth reported the wrong ceiling' >&2
+    exit 1
 fi
 
 mkdir -p "$fixture/prose"

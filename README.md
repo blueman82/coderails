@@ -1,8 +1,8 @@
 # coderails
 
-coderails is a Claude Code workflow plugin: the prep → push → merge → wiki
-command chain plus planning/orchestration skills and a self-checking
-discipline loop. It combines:
+coderails ships two independent workflow plugins: the root Claude Code plugin
+and the native Codex plugin under `packages/codex/`. Each has its own skills,
+agents, and hooks; neither dispatches to the other. They provide:
 
 - **Workflow** — the `prep → push → merge → wiki` command chain plus the
   agentic-loop, planning-sequence, premortem, and handoff skills.
@@ -21,13 +21,18 @@ See [INSTALLATION.md](./INSTALLATION.md). Short version:
 ```bash
 git clone https://github.com/blueman82/coderails.git ~/Documents/Github/coderails
 cd ~/Documents/Github/coderails
-bash install.sh --dry-run
-bash install.sh
+bash install.sh --provider claude --dry-run
+bash install.sh --provider claude
 # restart Claude Code, then:
 #   /plugin marketplace add ~/Documents/Github/coderails
 #   /plugin install coderails@coderails
 #   /reload-plugins
 ```
+
+For Codex, use `bash install.sh --provider codex` instead. It registers the
+plugin and installs its bundled agent definitions under `${CODEX_HOME:-~/.codex}/agents`.
+Codex skips plugin hooks until you review and trust them. After installation,
+start a fresh Codex session, run `/hooks`, and review and trust the Coderails hooks.
 
 Per project, run once: `/coderails:init` scaffolds `.claude/workflow.config.yaml`
 from [`examples/workflow.config.yaml`](./examples/workflow.config.yaml) — the

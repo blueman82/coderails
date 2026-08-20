@@ -47,11 +47,6 @@ manifest_paths=(
     hooks/scripts/lib/graph_readiness.sh
     hooks/scripts/lib/graph_executor.sh
     hooks/scripts/lib/graph_dispatch.sh
-    hooks/scripts/lib/skill_route.sh
-    hooks/scripts/lib/codex_dispatch.sh
-    hooks/scripts/lib/parallel_review.sh
-    hooks/scripts/lib/parallel_review_harness.sh
-    hooks/scripts/lib/parallel_review_join.sh
     scripts/sandbox/render-settings.sh
     scripts/sandbox/spawn-sandboxed-worker.sh
     scripts/sandbox/sandbox-probe.sh
@@ -62,7 +57,6 @@ manifest_paths=(
     scripts/post_review.sh
     scripts/post_evals.sh
     scripts/push.sh
-    scripts/validate-skills-index.sh
     hooks/scripts/agent_model_routing_nudge.sh
     hooks/scripts/agent_only_gate.sh
     hooks/scripts/check_confidence_labels.sh
@@ -104,12 +98,6 @@ manifest_modes=(
     100755
     100644
     100644
-    100755
-    100644
-    100644
-    100644
-    100644
-    100755
     100755
     100755
     100755

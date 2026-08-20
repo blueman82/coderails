@@ -4,8 +4,8 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
-POST_EVALS_DOC="$ROOT/codex/commands/post-evals.md"
-TASK_EVALS_DOC="$ROOT/codex/skills/task-evals.md"
+POST_EVALS_DOC="$ROOT/packages/codex/skills/post-evals/SKILL.md"
+TASK_EVALS_DOC="$ROOT/packages/codex/skills/task-evals/SKILL.md"
 MERGE_SH="$ROOT/scripts/merge.sh"
 
 fails=0
@@ -38,14 +38,16 @@ check_not_contains() {
     fi
 }
 
-for doc in "$POST_EVALS_DOC" "$TASK_EVALS_DOC"; do
-    check_contains "$doc" 'Committed `docs/evals/*.json` files and local `evals.json` files are working material only; they are never live PR-readiness evidence.' \
-        "$(basename "$doc"): local eval JSON is non-authoritative"
-    check_contains "$doc" 'For PR readiness, fetch the current PR head and require the newest trusted SHA-bound `coderails-eval-summary` PR comment/embed for that exact head.' \
-        "$(basename "$doc"): PR readiness requires trusted exact-head comment/embed"
-    check_contains "$doc" 'Missing, stale, mismatched, rejected, untrusted, or fetch-failed eval evidence is `NO-GO`.' \
-        "$(basename "$doc"): stale or untrusted eval evidence is NO-GO"
-done
+check_contains "$POST_EVALS_DOC" 'Local or committed eval files are working material, not PR-readiness evidence.' \
+    'post-evals: local eval JSON is non-authoritative'
+check_contains "$POST_EVALS_DOC" 'Fetch the current head with `gh pr view <pr> --json headRefOid -q .headRefOid`.' \
+    'post-evals: PR readiness fetches the exact head'
+check_contains "$POST_EVALS_DOC" 'The marker must remain bound to the validated pull request and its currently fetched head.' \
+    'post-evals: durable marker stays exact-head bound'
+check_contains "$POST_EVALS_DOC" 'Never treat missing, stale, mismatched, rejected, untrusted, or unavailable evidence as success.' \
+    'post-evals: stale or untrusted evidence cannot pass'
+check_contains "$TASK_EVALS_DOC" 'PR scope** → the file is working material only. The durable artifact is the SHA-bound PR comment' \
+    'task-evals: PR-scope file is working material and the comment is authoritative'
 
 check_contains "$MERGE_SH" 'sha=$(pr::head_sha "$num")' \
     'merge gate fetches current PR head SHA'

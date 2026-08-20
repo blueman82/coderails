@@ -5,15 +5,10 @@ Detail-carrier for [SKILL.md](SKILL.md)'s Phase 4b. The main skill keeps the imp
 is the six-reviewer breakdown, the security/deploy-safety add-ons, the clean-break gate, and the
 worktree-teardown mechanics you consult while running it.
 
-**Graph dispatch boundary.** `U4b-review` and `U4b-merge-gate` are graph nodes with `graph_role`
-entries in `skills/index.yaml`, but `graph_dispatch_plan` (`hooks/scripts/lib/graph_dispatch.sh`)
-currently resolves BOTH as `unresolved:true` — `U4b-review` has three same-tier matches
-(`deploy-safety-reviewer`, `source-auditor`, plus `post-review` at command tier), `U4b-merge-gate`
-has two command-tier matches (`merge`, `post-evals`) — so this phase is not yet reachable through
-the `graph_dispatch_plan`/`graph_dispatch_record` contract. The Skill-based invocation
-(`/pr-review-toolkit:review-pr`, `/coderails:post-review`, `/coderails:merge`) documented in this
-file remains the operative mechanism until that ambiguity is resolved upstream. See
-`hooks/scripts/tests/graph_dispatch_downstream.test.sh` for the characterization evidence.
+**Graph dispatch boundary.** `U4b-review` and `U4b-merge-gate` deliberately have no direct target
+in `graph_dispatch.sh`: each is a workflow gate with several required actions, not one agent job.
+`graph_dispatch_plan` therefore reports them as `unresolved:true`. Use the Skill-based review,
+artifact, eval, and merge sequence documented below.
 
 When a phase reaches "review the PR" (after a `/workflow` agent has pushed a PR, before merge), invoke the **`/pr-review-toolkit:review-pr <PR#>`** Skill — passing the PR number as the argument — which itself fans out the six specialised reviewers plus a security pass. Do NOT hand-roll the reviewers as separate `Agent` or `Task` spawns; use the Skill invocation.
 
