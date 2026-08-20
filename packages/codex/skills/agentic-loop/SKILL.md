@@ -37,7 +37,7 @@ For a new loop, record the user's authorised outcome, session id, unique loop id
 
 An all-input join is a node plus an entry such as `"J":{"mode":"all","inputs":["A","B"],"released":false}`. Downstream edges originate at `J`. Unknown nodes, malformed state, cycles, inconsistent joins, or running nodes outside an active wave fail closed.
 
-Create and grade loop-local `evals.json` beside `progress.json` before build. It must carry this exact `session_id`, `loop_id`, and graph `revision`. The provider-local dispatch hook blocks native worker calls when graph ownership or graded loop evidence is missing or foreign.
+Create and grade loop-local `evals.json` beside `progress.json` before build. It must carry this exact `session_id` and `loop_id`; those stable fields authorize dispatch across waves, so `begin-wave` does not invalidate the loop's eval authority. Keep its revision field as the revision it graded. The provider-local dispatch hook blocks native worker calls when graph ownership or graded loop evidence is missing or foreign.
 
 Run `python3 "$SKILL_DIR/scripts/graph.py" inspect "$STATE"`. Inspection is the resume source of truth: loop and session identity, revision, active wave, running nodes, ready nodes, and hard-stop reason. Never reconstruct these from chat history.
 
@@ -68,7 +68,7 @@ For a confirmed failure, make at most five distinct diagnosed repairs. Repeating
 
 ## Complete
 
-Before completion, write beside the state:
+Before completion, update and regrade `evals.json` against the graph's exact current revision, then write beside the state:
 
 - graded `evals.json` for the current session, loop, and revision;
 - non-empty `proof.json` for the same session and loop, with every proof carrying a nonblank executable `cmd` and `status: "pass"`;
@@ -82,4 +82,11 @@ python3 "$SKILL_DIR/scripts/graph.py" complete "$STATE" \
   --transcript "$TRANSCRIPT_PATH"
 ```
 
-Completion refuses an active wave, pending/running/hard-stop nodes, a graph hard-stop, unreleased joins, wrong-loop evidence, stale eval revision, missing or ungraded evals, missing proof, or missing retro. It mines this session's Codex JSONL rollout and requires the last exact trimmed execution of every proof command to have completed successfully. This is local redirect-and-audit evidence, not a privilege boundary. Success atomically marks the loop complete and increments its revision. The provider-local Stop hook recomputes the same observed proof result before allowing a completed loop to end. A durable graph hard-stop may end only with a `LOOP-STOP: waiting-on-human|stopped|stall` report-and-wait declaration.
+Run each proof command through `functions.exec` using this canonical nested-result output; replace the placeholder with the proof's exact command so transcript matching remains exact:
+
+```javascript
+const result = await tools.exec_command({cmd: "<exact proof command>"});
+text(JSON.stringify({exit_code: result.exit_code, output: result.output}));
+```
+
+Completion refuses an active wave, pending/running/hard-stop nodes, a graph hard-stop, unreleased joins, wrong-loop evidence, stale eval revision, missing or ungraded evals, missing proof, or missing retro. It mines this session's Codex JSONL rollout and requires the last exact trimmed execution of every proof command to carry a nested integer `exit_code` of zero; the outer `functions.exec` text `Script completed` alone is never proof of the inner command's success. This is local redirect-and-audit evidence, not a privilege boundary. Success atomically marks the loop complete and increments its revision. The provider-local Stop hook recomputes the same observed proof result before allowing a completed loop to end. A durable graph hard-stop may end only when the final nonblank report line is exactly `LOOP-STOP: waiting-on-human`, `LOOP-STOP: stopped`, or `LOOP-STOP: stall`.

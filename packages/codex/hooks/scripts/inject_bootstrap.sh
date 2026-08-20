@@ -14,8 +14,9 @@ resume=""
 if [[ -n "$session_id" && -n "$cwd" ]]; then
     state=$(hook::loop_state_path "$cwd" "$session_id")
     if [[ -f "$state" ]]; then
-        resume=$(python3 "$PLUGIN_ROOT/skills/agentic-loop/scripts/graph.py" inspect "$state" 2>/dev/null)
-        [[ -n "$resume" ]] || resume='invalid graph state; repair before dispatch'
+        inspection=$(python3 "$PLUGIN_ROOT/skills/agentic-loop/scripts/graph.py" inspect "$state" 2>/dev/null)
+        [[ -n "$inspection" ]] || inspection='invalid graph state; repair before dispatch'
+        resume="$state: $inspection"
     else
         resume="no active graph; new graph path: $state"
     fi

@@ -48,12 +48,12 @@ def _grading_checksum(evals: dict[str, Any], result: str) -> str:
     return hashlib.sha256(f"{encoded}\n{result}".encode()).hexdigest()
 
 
-def validate_evals(state: dict[str, Any], revision: int, path: Path) -> None:
+def validate_evals(state: dict[str, Any], revision: int | None, path: Path) -> None:
     evals = _load(path, "evals")
     _matching(evals, state, "evals")
     if evals.get("scope") != "loop" or evals.get("task_ref") != state["loop_id"]:
         raise EvidenceError("evals are not scoped to this loop")
-    if evals.get("revision") != revision:
+    if revision is not None and evals.get("revision") != revision:
         raise EvidenceError("evals revision does not match the graph")
     _nonempty(evals.get("verification_justification"), "evals.verification_justification")
     result = evals.get("result")
@@ -138,24 +138,23 @@ def _exec_result(payload: dict[str, Any]) -> tuple[str, bool] | None:
     if not isinstance(call_id, str) or not call_id:
         return None
     output = payload.get("output")
-    if isinstance(output, str):
-        try:
-            parsed = json.loads(output)
-        except json.JSONDecodeError:
-            parsed = None
-        if isinstance(parsed, dict):
-            exit_code = parsed.get("exit_code")
-            passed = isinstance(exit_code, int) and not isinstance(exit_code, bool) and exit_code == 0
-            return call_id, passed
-        return call_id, output.startswith("Script completed\n")
     if isinstance(output, list):
-        text = "".join(
+        output = "".join(
             item.get("text", "")
             for item in output
             if isinstance(item, dict) and isinstance(item.get("text"), str)
         )
-        return call_id, text.startswith("Script completed\n")
-    return call_id, False
+    if not isinstance(output, str):
+        return call_id, False
+    try:
+        parsed = json.loads(output)
+    except json.JSONDecodeError:
+        return call_id, False
+    if not isinstance(parsed, dict):
+        return call_id, False
+    exit_code = parsed.get("exit_code")
+    passed = isinstance(exit_code, int) and not isinstance(exit_code, bool) and exit_code == 0
+    return call_id, passed
 
 
 def _validate_observed_proofs(proofs: list[Any], transcript_path: Path | None) -> None:

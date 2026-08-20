@@ -40,7 +40,12 @@ inspection=$(python3 "$graph" inspect "$state" 2>/dev/null) || {
     hook::deny "Graph worker dispatch requires valid provider-local graph state."
     exit 0
 }
-[[ $(printf '%s' "$inspection" | jq -r '.status // empty') != "complete" ]] || exit 0
+if [[ $(printf '%s' "$inspection" | jq -r '.status // empty') == "complete" ]]; then
+    case "$task_name" in
+    loop_worker_* | loop-worker-*) hook::deny "A completed graph cannot dispatch graph workers." ;;
+    esac
+    exit 0
+fi
 authorization=$(python3 "$graph" authorize-dispatch "$state" \
     --session "$session_id" --task "$task_name" --evals "$evals" 2>/dev/null)
 if [[ -z "$authorization" ]]; then

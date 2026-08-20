@@ -93,9 +93,10 @@ def _validate_state(state: Any) -> dict[str, Any]:
             raise GraphError(f"join {join_id} references an unknown or identical input")
         dependencies[join_id].update(inputs)
         released = join["released"]
-        join_done = nodes[join_id]["status"] == "done"
-        if released != join_done:
+        if released != (nodes[join_id]["status"] == "done"):
             raise GraphError(f"join {join_id} release state disagrees with its node")
+        if released and not all(nodes[node_id]["status"] in SUCCESS for node_id in inputs):
+            raise GraphError(f"join {join_id} released before every input succeeded")
     outgoing: dict[str, set[str]] = {node_id: set() for node_id in nodes}
     indegree = {node_id: len(required) for node_id, required in dependencies.items()}
     for target, required in dependencies.items():
@@ -342,7 +343,7 @@ def _authorize_dispatch(path: Path, session: str, task_name: str, evals_path: Pa
     active_wave = state["graph"]["active_wave"]
     if active_wave is None or node_id not in active_wave["nodes"]:
         raise GraphError("graph worker node is not in the active wave")
-    validate_evals(state, state["revision"], evals_path)
+    validate_evals(state, None, evals_path)
     return {
         "loop_id": state["loop_id"], "node": node_id, "task_name": task_name,
         "wave_id": active_wave["id"], "revision": state["revision"],

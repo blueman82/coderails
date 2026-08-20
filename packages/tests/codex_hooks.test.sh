@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Nested shell and jq programs are intentionally single-quoted for literal expansion.
+# shellcheck disable=SC2016
 set -u
 
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
@@ -103,12 +105,12 @@ for protected_command in \
   'sed -i s/x/y/ .codex/requirements.toml' \
   'perl -i -pe s/x/y/ .codex/config.toml'; do
   protected_output=$(run_bash_hook "$HOOKS/scripts/destructive_bash_gate.sh" "$test_repo" "$protected_command")
-  printf '%s' "$protected_output" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null 2>&1 \
-    || protected_writes_denied=0
+  printf '%s' "$protected_output" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null 2>&1 ||
+    protected_writes_denied=0
 done
 absolute_config_output=$(run_bash_hook "$HOOKS/scripts/destructive_bash_gate.sh" "$test_repo" "cat $test_repo/.codex/config.toml")
-printf '%s' "$absolute_config_output" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null 2>&1 \
-  || protected_writes_denied=0
+printf '%s' "$absolute_config_output" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null 2>&1 ||
+  protected_writes_denied=0
 check "literal native config paths are denied on every branch" test "$protected_writes_denied" -eq 1
 
 lookalikes_allowed=1
@@ -136,15 +138,19 @@ jq -n --arg sha "$git_head" '{schema_version:1,scope:"loop",task_ref:"loop-1",ve
 jq -n '{session_id:"s-complete",loop_id:"loop-1",proofs:[{id:"P1",cmd:"true",status:"pass",evidence:"observed"}]}' >"$graph_dir/proof.json"
 jq -n '{schema_version:2,session_id:"s-complete",loop_id:"loop-1",status:"complete"}' >"$graph_dir/retro.json"
 proof_transcript="$graph_dir/transcript.jsonl"
-jq -cn '{type:"response_item",payload:{type:"custom_tool_call",name:"exec",call_id:"proof-call",input:"const r = await tools.exec_command({cmd:\"true\"});"}}' >"$proof_transcript"
-jq -cn '{type:"response_item",payload:{type:"custom_tool_call_output",call_id:"proof-call",output:[{type:"input_text",text:"Script completed\nWall time 0.1 seconds\nOutput:\n"}]}}' >>"$proof_transcript"
+jq -cn '{type:"response_item",payload:{type:"custom_tool_call",name:"exec",call_id:"proof-call",input:"const r = await tools.exec_command({cmd:\"true\"}); text(JSON.stringify({exit_code:r.exit_code,output:r.output}));"}}' >"$proof_transcript"
+jq -cn '{type:"response_item",payload:{type:"custom_tool_call_output",call_id:"proof-call",output:[{type:"input_text",text:"{\"exit_code\":0,\"output\":\"\"}"}]}}' >>"$proof_transcript"
 jq '.graph.nodes.A.status="done" | .graph.nodes.A.outcome="done"' "$graph_dir/progress.json" >"$graph_dir/done.json"
 mv "$graph_dir/done.json" "$graph_dir/progress.json"
 python3 "$PACKAGE/skills/agentic-loop/scripts/graph.py" complete "$graph_dir/progress.json" --session s-complete --evals "$graph_dir/evals.json" --proof "$graph_dir/proof.json" --retro "$graph_dir/retro.json" --transcript "$proof_transcript" >/dev/null
 complete_stop=$(jq -cn --arg transcript "$proof_transcript" '{session_id:"s-complete",cwd:"/tmp",hook_event_name:"Stop",last_assistant_message:"done",transcript_path:$transcript}' | CODERAILS_AGENTIC_LOOP_DIR="$graph_root" PLUGIN_ROOT="$PACKAGE" "$HOOKS/scripts/graph_completion_guard.sh")
 check "completed native graph allows Stop" test -z "$complete_stop"
-jq -cn '{type:"response_item",payload:{type:"custom_tool_call",name:"exec",call_id:"proof-failed",input:"const r = await tools.exec_command({cmd:\"true\"});"}}' >>"$proof_transcript"
-jq -cn '{type:"response_item",payload:{type:"custom_tool_call_output",call_id:"proof-failed",output:[{type:"input_text",text:"Script failed with exit code 1\n"}]}}' >>"$proof_transcript"
+jq -cn '{type:"response_item",payload:{type:"custom_tool_call",name:"exec",call_id:"proof-outer-only",input:"const r = await tools.exec_command({cmd:\"true\"}); text(r.output);"}}' >>"$proof_transcript"
+jq -cn '{type:"response_item",payload:{type:"custom_tool_call_output",call_id:"proof-outer-only",output:[{type:"input_text",text:"Script completed\nWall time 0.1 seconds\nProcess exited with code 1\nFinal output:"}]}}' >>"$proof_transcript"
+outer_only_stop=$(jq -cn --arg transcript "$proof_transcript" '{session_id:"s-complete",cwd:"/tmp",hook_event_name:"Stop",last_assistant_message:"done",transcript_path:$transcript}' | CODERAILS_AGENTIC_LOOP_DIR="$graph_root" PLUGIN_ROOT="$PACKAGE" "$HOOKS/scripts/graph_completion_guard.sh")
+check "completed native graph rejects outer-only Script completed proof" sh -c 'printf "%s" "$1" | jq -e ".decision == \"block\""' sh "$outer_only_stop"
+jq -cn '{type:"response_item",payload:{type:"custom_tool_call",name:"exec",call_id:"proof-failed",input:"const r = await tools.exec_command({cmd:\"true\"}); text(JSON.stringify({exit_code:r.exit_code,output:r.output}));"}}' >>"$proof_transcript"
+jq -cn '{type:"response_item",payload:{type:"custom_tool_call_output",call_id:"proof-failed",output:[{type:"input_text",text:"{\"exit_code\":1,\"output\":\"\"}"}]}}' >>"$proof_transcript"
 failed_proof_stop=$(jq -cn --arg transcript "$proof_transcript" '{session_id:"s-complete",cwd:"/tmp",hook_event_name:"Stop",last_assistant_message:"done",transcript_path:$transcript}' | CODERAILS_AGENTIC_LOOP_DIR="$graph_root" PLUGIN_ROOT="$PACKAGE" "$HOOKS/scripts/graph_completion_guard.sh")
 check "completed native graph rejects a last-failed proof command" sh -c 'printf "%s" "$1" | jq -e ".decision == \"block\""' sh "$failed_proof_stop"
 

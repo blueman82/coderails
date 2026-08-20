@@ -25,8 +25,11 @@ inspection=$(python3 "$graph" inspect "$state" 2>/dev/null) || {
 hard_stop=$(printf '%s' "$inspection" | jq -r '.hard_stop != null')
 message=$(printf '%s' "$HOOK_INPUT" | jq -r '.last_assistant_message // empty' 2>/dev/null)
 transcript=$(printf '%s' "$HOOK_INPUT" | jq -r '.transcript_path // empty' 2>/dev/null)
-if [[ "$hard_stop" == "true" && "$message" =~ LOOP-STOP:[[:space:]]*(waiting-on-human|stopped|stall) ]]; then
-    exit 0
+if [[ "$hard_stop" == "true" ]]; then
+    final_line=$(printf '%s\n' "$message" | awk 'NF { line = $0 } END { print line }')
+    case "$final_line" in
+    "LOOP-STOP: waiting-on-human" | "LOOP-STOP: stopped" | "LOOP-STOP: stall") exit 0 ;;
+    esac
 fi
 loop_dir=$(dirname "$state")
 if python3 "$graph" verify-completion "$state" --session "$session_id" \
