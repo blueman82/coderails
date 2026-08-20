@@ -12,6 +12,7 @@ done
 python3 "$repo_root/scripts/quality/check.py" "$@"
 
 findings=0
+shell_files=()
 
 read_shell_files() {
     shell_files=()
