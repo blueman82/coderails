@@ -37,7 +37,7 @@ gate_present_and_owned() {
 }
 
 block_state_failure() {
-    stub_schema='{ "schema_version": 2, "session_id": "<this-session-id>", "status": "initialising", "created": "<ISO8601>", "authorising_prompt_raw": "<verbatim authorising prompt>", "completed_marker": 0 }'
+    stub_schema='{ "schema_version": 2, "session_id": "<this-session-id>", "loop_id": "<unique-nonblank-loop-id>", "revision": 0, "status": "initialising", "created": "<ISO8601>", "authorising_prompt_raw": "<verbatim authorising prompt>", "completed_marker": 0 }'
     if [ ! -f "$ALS_PATH" ]; then
         reason="absent"
         msg="[loop-state-guard] Agentic loop active but no progress.json found.
@@ -87,7 +87,12 @@ gate_loop_evals_required() {
             local loop_id revision
             loop_id=$(jq -r '.loop_id // ""' "$ALS_PATH" 2>/dev/null)
             revision=$(jq -r '.revision // ""' "$ALS_PATH" 2>/dev/null)
-            if [ -n "$loop_id" ] && ! jq -e --arg session "$session_id" --arg loop "$loop_id" --arg revision "$revision" \
+            if jq -e '(.graph | type) == "object"' "$ALS_PATH" >/dev/null 2>&1 &&
+                ! jq -e '(.loop_id | type) == "string" and (.loop_id | length) > 0 and
+                    (.revision | type) == "number" and (.revision | floor) == .revision' \
+                    "$ALS_PATH" >/dev/null 2>&1; then
+                ALS_LOOP_EVALS_RESULT="STALE"
+            elif [ -n "$loop_id" ] && ! jq -e --arg session "$session_id" --arg loop "$loop_id" --arg revision "$revision" \
                 '.session_id == $session and .loop_id == $loop and ((.revision | tostring) == $revision)' \
                 "$loop_dir/evals.json" >/dev/null 2>&1; then
                 ALS_LOOP_EVALS_RESULT="STALE"

@@ -55,9 +55,16 @@ gate_graph_complete() {
     als_is_complete_category "$category" || return 0
     command -v jq >/dev/null 2>&1 || return 0
     [ -n "$ALS_PATH" ] && [ -f "$ALS_PATH" ] || return 0
-    local loop
+    jq -e '(.graph | type) == "object"' "$ALS_PATH" >/dev/null 2>&1 || return 0
+    local loop revision
     loop=$(jq -r '.loop_id // ""' "$ALS_PATH" 2>/dev/null)
-    [ -n "$loop" ] || return 0
+    revision=$(jq -r '.revision // ""' "$ALS_PATH" 2>/dev/null)
+    if ! jq -e '(.loop_id | type) == "string" and (.loop_id | length) > 0 and
+      (.revision | type) == "number" and (.revision | floor) == .revision' \
+        "$ALS_PATH" >/dev/null 2>&1; then
+        echo "[loop-stall-guard] LOOP-STOP: complete refused: graph identity is missing or malformed." >&2
+        exit 2
+    fi
     if ! jq -e '
       (.graph | type) == "object" and .graph.active_wave == null and .graph.hard_stop == null
       and ([.graph.nodes[] | select(.status | IN("done","skipped") | not)] | length) == 0
@@ -66,9 +73,8 @@ gate_graph_complete() {
         echo "[loop-stall-guard] LOOP-STOP: complete refused: the durable graph is unfinished." >&2
         exit 2
     fi
-    local loop_dir revision
+    local loop_dir
     loop_dir=$(dirname "$ALS_PATH")
-    revision=$(jq -r '.revision // ""' "$ALS_PATH" 2>/dev/null)
     als_read_loop_evals_result "$loop_dir"
     if ! jq -e --arg session "$session_id" --arg loop "$loop" --arg revision "$revision" '
       .session_id == $session and .loop_id == $loop and ((.revision | tostring) == $revision)

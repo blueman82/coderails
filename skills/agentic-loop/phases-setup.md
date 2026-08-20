@@ -22,6 +22,8 @@ It prints the absolute path. Write the stub there with the Write tool (it create
 {
   "schema_version": 2,
   "session_id": "<this session's id>",
+  "loop_id": "<a unique non-blank id for this loop>",
+  "revision": 0,
   "status": "initialising",
   "created": "<ISO8601 timestamp>",
   "authorising_prompt_raw": "<the user's authorising prompt, verbatim — Phase -1 updates this if an improved prompt is adopted>",
@@ -38,7 +40,7 @@ The stub records `S-2` immediately; each later phase boundary adds its stable no
 dependency edges in the same orchestrator-owned write. Do not create a second scheduler or let
 workers update `graph` directly.
 
-If a `progress.json` already exists at the path from an earlier loop in this session, read its `completed_marker` and carry it forward into the new stub (do not reset it to 0) — this is what lets the guard tell a genuinely-finished loop from a new one that re-armed it (see the teardown rule below).
+If a `progress.json` already exists at the path from an earlier loop in this session, read its `completed_marker` and carry it forward into the new stub (do not reset it to 0) — this is what lets the guard tell a genuinely-finished loop from a new one that re-armed it (see the teardown rule below). A re-armed NEW loop always gets a new `loop_id` and resets `revision` to `0`; a mid-loop recovery preserves both values. Never omit or reuse the prior loop's `loop_id` for a new graph.
 
 `loop_stop_counts` gets different treatment depending on the prior file's `status`, because it is HOOK-OWNED (see Context-window persistence below):
 - Prior file `status != "complete"` (mid-loop re-stub, e.g. a recovery after a restart): carry `loop_stop_counts` forward verbatim into the new stub, so a mid-loop recovery doesn't silently reset the count the `loop_stall_guard` hook has been maintaining. Carry `authorising_prompt_raw` forward verbatim too — a re-stub refilled from conversation memory instead of the prior file's value would silently drift the eval author's canonical anchor.

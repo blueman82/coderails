@@ -31,19 +31,9 @@
 #
 # Ownership check (mirrors loop_state_guard.sh's own session_mismatch
 # precedent): evals.json is only trusted when this session owns the
-# progress.json it sits beside (ALS_SESSION == session_id) — a stray
-# evals.json belonging to a foreign session's progress.json at this path
-# must never satisfy this gate. KNOWN CEILING: this does NOT detect a
-# same-session RE-ARM (Phase -2 stub-first resets status to "initialising",
-# but by the time Phase 3 dispatches a worker, status has already advanced
-# to "in-progress" indistinguishably from a fresh loop — and evals.json
-# itself carries no loop-instance identity for a dispatch-time check to
-# compare against). A re-armed loop, in the SAME session, whose 3rd-unit
-# dispatch finds a stale evals.json left over from a PRIOR completed loop at
-# this same path can still pass through ungated. Closing that gap needs
-# either evals.json to carry loop-instance identity or Phase -2 stub-first
-# to clear/rename a prior evals.json — both are schema/skill changes outside
-# this hook's scope; not closed here.
+# progress.json it sits beside and carries the same stable loop_id. Revision
+# is deliberately not bound at dispatch because begin-wave increments it
+# before the worker is spawned; completion binds the final revision.
 #
 # PreToolUse block contract (AGENTS.md "Hook script conventions"): emit
 # hookSpecificOutput.permissionDecision:"deny" JSON to stdout, then exit 0 —
@@ -96,6 +86,14 @@ if [ -f "$als_path" ]; then
         unit_count=0
         loop_dir=$(dirname "$als_path")
         state_reason="progress.json belongs to session '$ALS_SESSION', not '$session_id'"
+    elif jq -e '(.graph | type) == "object"' "$als_path" >/dev/null 2>&1 &&
+        ! jq -e '(.loop_id | type) == "string" and (.loop_id | length) > 0 and
+            (.revision | type) == "number" and (.revision | floor) == .revision' \
+            "$als_path" >/dev/null 2>&1; then
+        ALS_LOOP_EVALS_RESULT="MISSING_IDENTITY"
+        unit_count=0
+        loop_dir=$(dirname "$als_path")
+        state_reason="graph state is missing a non-blank loop_id or integer revision"
     else
         state_reason=""
     fi
@@ -123,9 +121,8 @@ fi
 loop_dir=$(dirname "$als_path")
 als_read_loop_evals_result "$loop_dir"
 loop_id=$(jq -r '.loop_id // ""' "$als_path" 2>/dev/null)
-revision=$(jq -r '.revision // ""' "$als_path" 2>/dev/null)
-if [ -n "$loop_id" ] && ! jq -e --arg session "$session_id" --arg loop "$loop_id" --arg revision "$revision" \
-    '.session_id == $session and .loop_id == $loop and ((.revision | tostring) == $revision)' \
+if [ -n "$loop_id" ] && ! jq -e --arg session "$session_id" --arg loop "$loop_id" \
+    '.session_id == $session and .loop_id == $loop' \
     "$loop_dir/evals.json" >/dev/null 2>&1; then
     ALS_LOOP_EVALS_RESULT="STALE"
 fi

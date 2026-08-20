@@ -178,20 +178,33 @@ out=$(run "$(payload S1 coderails:loop-worker)")
 is_denied "$out"
 check "5-unit roster (all pending), no evals.json -> BLOCK" 0 $?
 
-# ── Documented ceiling (Blocker 2, disclosed not closed): a stale evals.json
-# left over from a PRIOR loop, with progress.json now RE-ARMED for a NEW loop
-# (status back to in-progress post-Phase-0, same session, same path) still
-# satisfies the gate. This is a KNOWN, DISCLOSED gap (see header) — this test
-# documents the gap exists rather than asserting it is closed, so a future
-# fix that removes the gap doesn't silently go unnoticed (this assertion will
-# then need updating to expect BLOCK, which is the intended trigger to revisit
-# it).
+# ── A stale evals.json from a prior loop cannot authorise a re-armed graph. ──
 reset
 write_file S1 "$WU3_PENDING"
-jq -n '{scope:"loop", verification_level:1, verification_justification:"prior loop, 3 work-units", head_sha:"deadbeef", evals:[{id:"e1",priority:"P0",mode:"scripted",status:"pass",cmd:"run-a",negative_control:"run-a-broken",evidence:"log"}]}' >"$(file_dir S1)/evals.json"
+jq '. + {loop_id:"loop-new",revision:0,graph:{nodes:{},edges:[],joins:{}}}' \
+    "$(file_path S1)" >"$(file_path S1).tmp" && mv "$(file_path S1).tmp" "$(file_path S1)"
+jq -n '{scope:"loop",session_id:"S1",loop_id:"loop-old",revision:7,verification_level:1,verification_justification:"prior loop, 3 work-units",head_sha:"deadbeef",evals:[{id:"e1",priority:"P0",mode:"scripted",status:"pass",cmd:"run-a",negative_control:"run-a-broken",evidence:"log"}]}' >"$(file_dir S1)/evals.json"
 stamp "$(file_dir S1)/evals.json"
 out=$(run "$(payload S1 coderails:loop-worker)")
-check "KNOWN GAP (disclosed, not closed): stale same-session evals.json still satisfies a re-armed loop's dispatch -> allow" "" "$out"
+is_denied "$out"
+check "stale same-session evals.json from a prior loop -> BLOCK" 0 $?
+
+# ── Every graph record needs stable loop identity before dispatch. ───────────
+reset
+write_file S1 "$WU3_PENDING"
+jq '. + {graph:{nodes:{},edges:[],joins:{}},revision:0}' \
+    "$(file_path S1)" >"$(file_path S1).tmp" && mv "$(file_path S1).tmp" "$(file_path S1)"
+out=$(run "$(payload S1 coderails:loop-worker)")
+is_denied "$out"
+check "graph state missing loop_id -> BLOCK" 0 $?
+
+reset
+write_file S1 "$WU3_PENDING"
+jq '. + {graph:{nodes:{},edges:[],joins:{}},loop_id:"loop-new"}' \
+    "$(file_path S1)" >"$(file_path S1).tmp" && mv "$(file_path S1).tmp" "$(file_path S1)"
+out=$(run "$(payload S1 coderails:loop-worker)")
+is_denied "$out"
+check "graph state missing revision -> BLOCK" 0 $?
 
 [ "$fails" -eq 0 ] && {
     echo "PASS"

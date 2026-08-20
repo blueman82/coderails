@@ -305,10 +305,8 @@ test_dispatch_guards() {
     local state="$TMP/$CURRENT_PROVIDER.dispatch.json" evals="$TMP/$CURRENT_PROVIDER.dispatch-evals.json" nodes
     nodes=$(jq -cn --argjson a "$(node)" '{A:$a}')
     write_graph "$state" "$nodes" '[]' '{}'
-    jq '.work_units={one:{status:"pending"},two:{status:"pending"},three:{status:"pending"}}' \
-        "$state" >"$state.tmp" && mv "$state.tmp" "$state"
-    write_completion_artifacts "$state" "$evals" \
-        "$TMP/$CURRENT_PROVIDER.dispatch-proof.json" "$TMP/$CURRENT_PROVIDER.dispatch-retro.json"
+    jq '.work_units={one:{status:"pending"},two:{status:"pending"},three:{status:"pending"}}' "$state" >"$state.tmp" && mv "$state.tmp" "$state"
+    write_completion_artifacts "$state" "$evals" "$TMP/$CURRENT_PROVIDER.dispatch-proof.json" "$TMP/$CURRENT_PROVIDER.dispatch-retro.json"
 
     if provider_authorize_dispatch "$state" "$evals" "session-$CURRENT_PROVIDER" native >/dev/null 2>&1; then
         pass "owned native dispatch with matching loop evidence is allowed"
@@ -319,6 +317,17 @@ test_dispatch_guards() {
         "$state" provider_authorize_dispatch "$TMP/missing-progress.json" "$evals" "session-$CURRENT_PROVIDER" native
     expect_rejected_unchanged "worker dispatch blocks foreign loop state" \
         "$state" provider_authorize_dispatch "$state" "$evals" foreign-session native
+    jq '.loop_id="stale-loop"' "$evals" >"$evals.tmp" && mv "$evals.tmp" "$evals"
+    expect_rejected_unchanged "worker dispatch blocks stale loop-eval identity" "$state" \
+        provider_authorize_dispatch "$state" "$evals" "session-$CURRENT_PROVIDER" native
+    write_completion_artifacts "$state" "$evals" "$TMP/$CURRENT_PROVIDER.dispatch-proof.json" "$TMP/$CURRENT_PROVIDER.dispatch-retro.json"
+    jq 'del(.loop_id)' "$state" >"$state.tmp" && mv "$state.tmp" "$state"
+    expect_rejected_unchanged "worker dispatch blocks graph state without loop identity" "$state" \
+        provider_authorize_dispatch "$state" "$evals" "session-$CURRENT_PROVIDER" native
+    jq --arg loop "loop-$CURRENT_PROVIDER-1" '.loop_id=$loop | del(.revision)' \
+        "$state" >"$state.tmp" && mv "$state.tmp" "$state"
+    expect_rejected_unchanged "worker dispatch blocks graph state without revision" "$state" \
+        provider_authorize_dispatch "$state" "$evals" "session-$CURRENT_PROVIDER" native
     : >"$evals"
     expect_rejected_unchanged "sandbox dispatch cannot bypass the same evidence gate" \
         "$state" provider_authorize_dispatch "$state" "$evals" "session-$CURRENT_PROVIDER" sandbox
