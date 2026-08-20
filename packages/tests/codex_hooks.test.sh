@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Nested shell and jq programs are intentionally single-quoted for literal expansion.
+# Nested child-shell and jq programs are intentionally single-quoted for literal expansion.
 # shellcheck disable=SC2016
 set -u
 
@@ -53,8 +53,38 @@ while IFS= read -r command; do
 done < <(jq -r '.hooks[][] | .hooks[] | .command' "$HOOKS/hooks.json")
 check "hook command paths exist" test "$missing" -eq 0
 
-bootstrap=$(printf '%s' '{"session_id":"s1","cwd":"/tmp","hook_event_name":"SessionStart","source":"startup"}' | PLUGIN_ROOT="$PACKAGE" "$HOOKS/scripts/inject_bootstrap.sh")
+bootstrap_repo=$(mktemp -d "${TMPDIR:-/tmp}/coderails-codex-bootstrap.XXXXXX")
+git -C "$bootstrap_repo" init -q
+mkdir -p "$bootstrap_repo/.codex"
+printf 'sandbox_workers: true\n' > "$bootstrap_repo/.codex/workflow.config.yaml"
+bootstrap_before=$(shasum "$bootstrap_repo/.codex/workflow.config.yaml")
+bootstrap=$(printf '%s' "{\"session_id\":\"s1\",\"cwd\":\"$bootstrap_repo\",\"hook_event_name\":\"SessionStart\",\"source\":\"startup\"}" | PLUGIN_ROOT="$PACKAGE" "$HOOKS/scripts/inject_bootstrap.sh")
 check "bootstrap returns native orchestration and graph guidance" sh -c 'printf "%s" "$1" | jq -e ".hookSpecificOutput.additionalContext | contains(\"using-coderails\") and contains(\"top-level session as the orchestrator\") and contains(\"delegate do-work tool calls with spawn_agent\") and contains(\"Native graph resume\")"' sh "$bootstrap"
+check "startup nudges for legacy config" sh -c 'printf "%s" "$1" | jq -r ".hookSpecificOutput.additionalContext" | grep -Fq '\''$coderails-codex:init'\''' sh "$bootstrap"
+resume=$(printf '%s' "{\"cwd\":\"$bootstrap_repo\",\"source\":\"resume\"}" | PLUGIN_ROOT="$PACKAGE" "$HOOKS/scripts/inject_bootstrap.sh")
+check "resume does not nudge" sh -c '! printf "%s" "$1" | jq -r ".hookSpecificOutput.additionalContext" | grep -Fq '\''$coderails-codex:init'\''' sh "$resume"
+clear=$(printf '%s' "{\"cwd\":\"$bootstrap_repo\",\"source\":\"clear\"}" | PLUGIN_ROOT="$PACKAGE" "$HOOKS/scripts/inject_bootstrap.sh")
+check "clear does not nudge" sh -c '! printf "%s" "$1" | jq -r ".hookSpecificOutput.additionalContext" | grep -Fq '\''$coderails-codex:init'\''' sh "$clear"
+compact=$(printf '%s' "{\"cwd\":\"$bootstrap_repo\",\"source\":\"compact\"}" | PLUGIN_ROOT="$PACKAGE" "$HOOKS/scripts/inject_bootstrap.sh")
+check "compact does not nudge" sh -c '! printf "%s" "$1" | jq -r ".hookSpecificOutput.additionalContext" | grep -Fq '\''$coderails-codex:init'\''' sh "$compact"
+check "startup does not alter config" test "$bootstrap_before" = "$(shasum "$bootstrap_repo/.codex/workflow.config.yaml")"
+mkdir -p "$bootstrap_repo/.coderails"
+printf 'sandbox_workers: true\n' > "$bootstrap_repo/.coderails/workflow.config.yaml"
+configured=$(printf '%s' "{\"cwd\":\"$bootstrap_repo\",\"source\":\"startup\"}" | PLUGIN_ROOT="$PACKAGE" "$HOOKS/scripts/inject_bootstrap.sh")
+check "canonical config suppresses nudge" sh -c '! printf "%s" "$1" | jq -r ".hookSpecificOutput.additionalContext" | grep -Fq '\''$coderails-codex:init'\''' sh "$configured"
+rm -rf "$bootstrap_repo"
+
+config_repo=$(mktemp -d "${TMPDIR:-/tmp}/coderails-codex-config.XXXXXX")
+git -C "$config_repo" init -q
+mkdir -p "$config_repo/.codex"
+printf 'project: legacy\n' > "$config_repo/.codex/workflow.config.yaml"
+legacy_result=$(bash -c '. "$1"; coderails::resolve_config "$2"' sh "$PACKAGE/scripts/lib/config.sh" "$config_repo")
+check "legacy config is not a runtime fallback" test "$legacy_result" = "NO_CONFIG"
+mkdir -p "$config_repo/.coderails"
+printf 'project: canonical\n' > "$config_repo/.coderails/workflow.config.yaml"
+canonical_result=$(bash -c '. "$1"; coderails::resolve_config "$2"' sh "$PACKAGE/scripts/lib/config.sh" "$config_repo")
+check "native resolver reads canonical config" test "$canonical_result" = "project: canonical"
+rm -rf "$config_repo"
 
 missing_dispatch=$(printf '%s' '{"session_id":"missing","cwd":"/tmp","hook_event_name":"PreToolUse","tool_name":"spawn_agent","tool_input":{"task_name":"loop-worker-A","message":"work"}}' | CODERAILS_AGENTIC_LOOP_DIR="${TMPDIR:-/tmp}/coderails-codex-hooks-missing-$$" PLUGIN_ROOT="$PACKAGE" "$HOOKS/scripts/loop_dispatch_guard.sh")
 check "native worker dispatch without loop state is denied" sh -c 'printf "%s" "$1" | jq -e ".hookSpecificOutput.permissionDecision == \"deny\""' sh "$missing_dispatch"

@@ -21,11 +21,36 @@ if [[ -n "$session_id" && -n "$cwd" ]]; then
         resume="no active graph; new graph path: $state"
     fi
 fi
+input=$HOOK_INPUT
 
 if [[ -f "$SKILL" ]]; then
     context="Coderails is active. Load coderails-codex:using-coderails before acting, then every relevant native skill. Keep the top-level session as the orchestrator and delegate do-work tool calls with spawn_agent. Native graph resume: $resume"
 else
     context="Coderails is active, but its native using-coderails skill is missing at $SKILL. Report this before substantive work. Native graph resume: $resume"
+fi
+
+source_kind=$(printf '%s' "$input" | jq -r '.source // empty' 2>/dev/null || true)
+cwd=$(printf '%s' "$input" | jq -r '.cwd // empty' 2>/dev/null || true)
+if [[ "$source_kind" == "startup" && -n "$cwd" ]]; then
+    git_root=$(git -C "$cwd" rev-parse --show-toplevel 2>/dev/null || true)
+    if [[ -n "$git_root" ]]; then
+        probe=$(cd "$cwd" 2>/dev/null && pwd -P || true)
+        legacy_found=0
+        while [[ -n "$probe" ]]; do
+            if [[ -f "$probe/.coderails/workflow.config.yaml" ]]; then
+                legacy_found=0
+                break
+            fi
+            if [[ -f "$probe/.claude/workflow.config.yaml" || -f "$probe/.codex/workflow.config.yaml" ]]; then
+                legacy_found=1
+            fi
+            [[ "$probe" == "$git_root" || "$probe" == "/" ]] && break
+            probe=$(dirname "$probe")
+        done
+        if [[ "$legacy_found" -eq 1 ]]; then
+            context+=$'\n\nLegacy Coderails workflow configuration found. Run $coderails-codex:init to migrate it to .coderails/workflow.config.yaml.'
+        fi
+    fi
 fi
 
 jq -n --arg context "$context" '{

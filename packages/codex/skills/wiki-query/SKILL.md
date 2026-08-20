@@ -19,12 +19,12 @@ than inferring one.
 
 ### Step 1: Load the Schema
 
-`AGENTS.md` at the project's git root is loaded into context at session start — use that content for conventions. The wiki schema itself (page types, page format, the three layers) lives in `AGENTS-wiki-schema.md`, which `AGENTS.md` links to; read it for the full schema. If `AGENTS.md` isn't present in context (e.g. a fresh fork with no prior context), do not assume cwd: walk up from the current directory, checking each level for `AGENTS.md`, up to the git repository root. If no `AGENTS.md` is found by the git root, tell the user to invoke `$coderails-codex:wiki-init` first. (The wiki vault itself, e.g. `../coderails-wiki`, is a separate sibling repo the project's `.codex/workflow.config.yaml` points to; it is not where `AGENTS.md` lives, and a fork should never need to be running from inside it.)
+`AGENTS.md` at the project's git root is loaded into context at session start — use that content for conventions. The wiki schema itself (page types, page format, the three layers) lives in `AGENTS-wiki-schema.md`, which `AGENTS.md` links to; read it for the full schema. If `AGENTS.md` isn't present in context (e.g. a fresh fork with no prior context), do not assume cwd: walk up from the current directory, checking each level for `AGENTS.md`, up to the git repository root. If no `AGENTS.md` is found by the git root, tell the user to invoke `$coderails-codex:wiki-init` first. (The wiki vault itself, e.g. `../coderails-wiki`, is a separate sibling repo the project's `.coderails/workflow.config.yaml` points to; it is not where `AGENTS.md` lives, and a fork should never need to be running from inside it.)
 
 The vault path and git flow are **not** read from AGENTS.md — they are the `wiki_path` and
-`wiki_git_worktree` flat keys in that same project's `.codex/workflow.config.yaml`, resolved
+`wiki_git_worktree` flat keys in that same project's `.coderails/workflow.config.yaml`, resolved
 by walking up from the project repo location to its git root and checking for
-`.codex/workflow.config.yaml`; the first one found wins. Set `vault` to the resolved
+`.coderails/workflow.config.yaml`; the first one found wins. Set `vault` to the resolved
 `wiki_path` (relative to the directory containing that `workflow.config.yaml` unless already
 absolute).
 

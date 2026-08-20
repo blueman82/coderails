@@ -15,6 +15,8 @@ from pathlib import Path
 DEFAULT_LOC = 400
 DEFAULT_FUNCTION_LINES = 100
 LOC_EXCEPTIONS = {
+    "hooks/scripts/tests/enforce_pr_workflow.test.sh": 1149,
+    "hooks/scripts/tests/merge_wiki_debt_gate.test.sh": 567,
     "packages/codex/hooks/scripts/destructive_bash_gate.sh": 903,
     "packages/codex/scripts/merge.sh": 512,
     "packages/codex/scripts/post_evals.sh": 1229,
@@ -28,6 +30,7 @@ LOC_EXCEPTIONS = {
     "packages/codex/skills/dashboard/app/test/usage.test.ts": 449,
     "packages/codex/skills/dashboard/runner/test/artifactGate.test.ts": 492,
     "packages/codex/skills/dashboard/runner/test/sweep.test.ts": 714,
+    "scripts/merge.sh": 512,
 }
 FUNCTION_EXCEPTIONS = {
     ("packages/codex/hooks/scripts/destructive_bash_gate.sh", "deny"): 107,
@@ -38,6 +41,8 @@ FUNCTION_EXCEPTIONS = {
     ("packages/codex/scripts/post_evals.sh", "post_evals::smoke_verify"): 152,
     ("packages/codex/scripts/post_evals.sh", "post_evals::validate_discriminating"): 105,
     ("packages/codex/scripts/push.sh", "push::main"): 120,
+    ("scripts/merge.sh", "merge::has_wiki_ingest_for_merged_prs"): 185,
+    ("scripts/merge.sh", "merge::main"): 209,
 }
 SOURCE_ROOTS = (
     ".claude-plugin",

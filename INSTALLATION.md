@@ -106,14 +106,16 @@ then `install`.
 **4. Per project (run once per repo):**
 
 ```
-/coderails:init               # scaffolds .claude/workflow.config.yaml
+/coderails:init               # scaffolds .coderails/workflow.config.yaml
 /coderails:test-gate-setup     # optional — blocks commits when tests fail
 ```
 
-`/coderails:init` scaffolds `.claude/workflow.config.yaml` from
-[`examples/workflow.config.yaml`](./examples/workflow.config.yaml). Don't commit
-your own `.claude/workflow.config.yaml` if it holds real project or Jira values —
-treat it as machine-local config, same as `.claude/settings.local.json`.
+`/coderails:init` writes `.coderails/workflow.config.yaml` in the current
+directory. It scaffolds new settings when no legacy config exists. When migrating,
+it preserves the legacy contents, schema, and values, validates the canonical
+file, then moves the legacy files to the macOS Trash. Runtime reads do not fall
+back to legacy paths. Review the result before committing it as shared project
+config; it is not machine-local config like `.claude/settings.local.json`.
 
 For Coderails itself, activate the repository quality hook once per clone:
 

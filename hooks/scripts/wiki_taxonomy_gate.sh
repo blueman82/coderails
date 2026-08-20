@@ -30,7 +30,7 @@
 # does not help — every Claude plugin has that shape, and a git worktree of
 # the plugin has a different root again, so it blocks edits to the plugin's
 # own source. Identification is therefore:
-#   1. Read wiki_path from the plugin's .claude/workflow.config.yaml.
+#   1. Read wiki_path from the plugin's .coderails/workflow.config.yaml.
 #   2. Require the written file's repo root to BE that resolved path.
 #   3. Structural corroboration only as a secondary sanity check, so a
 #      misconfigured wiki_path pointing somewhere unrelated fails open rather
@@ -59,8 +59,8 @@ file=$(printf '%s' "$input" | jq -r '.tool_input.file_path // empty')
 cwd=$(printf '%s' "$input" | jq -r '.cwd // empty')
 [ -z "$cwd" ] && cwd="$PWD"
 case "$file" in
-  /*) absfile="$file" ;;
-  *)  absfile="$cwd/$file" ;;
+/*) absfile="$file" ;;
+*) absfile="$cwd/$file" ;;
 esac
 
 # The file (and its parent dirs) may not exist yet — walk up to the nearest
@@ -70,8 +70,8 @@ esac
 probe=$(dirname "$absfile")
 suffix=""
 while [ ! -d "$probe" ] && [ "$probe" != "/" ] && [ -n "$probe" ]; do
-  suffix="${probe##*/}/$suffix"
-  probe=$(dirname "$probe")
+    suffix="${probe##*/}/$suffix"
+    probe=$(dirname "$probe")
 done
 
 root=$(git -C "$probe" rev-parse --show-toplevel 2>/dev/null)
@@ -85,7 +85,7 @@ root=$(git -C "$probe" rev-parse --show-toplevel 2>/dev/null)
 # stops at an existing dir or "/"), so `cd` here cannot fail the same way.
 resolved_probe=$(cd "$probe" 2>/dev/null && pwd -P)
 if [ -n "$resolved_probe" ]; then
-  absfile="$resolved_probe/$suffix${absfile##*/}"
+    absfile="$resolved_probe/$suffix${absfile##*/}"
 fi
 
 # The taxonomy is read from the PLUGIN's own wiki schema, not from a file at
@@ -107,6 +107,8 @@ section=$(awk '/^## Page types/{flag=1; next} /^## /{flag=0} flag' "$schema")
 # Parse every backticked "name/" token out of the table rows — robust to
 # column position (directory-first or type-first layouts) since it keys on
 # token shape, not column index.
+# Backticks are literal wiki markup in this regular expression.
+# shellcheck disable=SC2016
 sanctioned=$(printf '%s\n' "$section" | grep -oE '`[A-Za-z0-9_-]+/`' | tr -d '`')
 [ -z "$sanctioned" ] && exit 0
 
@@ -121,7 +123,7 @@ sanctioned=$(printf '%s\n' "$section" | grep -oE '`[A-Za-z0-9_-]+/`' | tr -d '`'
 #
 # Excluding only the plugin repo is not enough either: it stops this repo
 # being misread, not every other repo that shares the directory names.
-config="${CLAUDE_PLUGIN_ROOT:-}/.claude/workflow.config.yaml"
+config="${CLAUDE_PLUGIN_ROOT:-}/.coderails/workflow.config.yaml"
 [ -f "$config" ] || exit 0
 # Strip surrounding quotes: `wiki_path: "../wiki"` is valid YAML, and keeping
 # the quotes makes the cd below fail, which would fail open on a perfectly
@@ -132,7 +134,7 @@ wiki_rel=$(awk '/^wiki_path:/{print $2; exit}' "$config" | sed -E 's/^"(.*)"$/\1
 # `null` and `~` are YAML nulls — a project with no wiki configured. Not an
 # error, just nothing to gate.
 case "$wiki_rel" in
-  null|'~'|'') exit 0 ;;
+null | '~' | '') exit 0 ;;
 esac
 # wiki_path may be absolute or relative. Blindly joining an absolute value to
 # the plugin root produces a doubled path that cannot resolve, so the gate
@@ -141,8 +143,8 @@ esac
 # the relative form, so this handles a documented and an undocumented-but-real
 # shape rather than assuming the documented one is the only one in use.
 case "$wiki_rel" in
-  /*) vault_root=$(cd "$wiki_rel" 2>/dev/null && pwd -P) ;;
-  *)  vault_root=$(cd "${CLAUDE_PLUGIN_ROOT}/$wiki_rel" 2>/dev/null && pwd -P) ;;
+/*) vault_root=$(cd "$wiki_rel" 2>/dev/null && pwd -P) ;;
+*) vault_root=$(cd "${CLAUDE_PLUGIN_ROOT}/$wiki_rel" 2>/dev/null && pwd -P) ;;
 esac
 [ -n "$vault_root" ] || exit 0
 [ "$root" = "$vault_root" ] || exit 0
@@ -153,7 +155,7 @@ esac
 # blocking every write in it.
 present=0
 for dir in $sanctioned; do
-  [ -d "$root/$dir" ] && present=$((present + 1))
+    [ -d "$root/$dir" ] && present=$((present + 1))
 done
 [ "$present" -lt 2 ] && exit 0
 
@@ -161,26 +163,26 @@ done
 # directories on disk) — resolve the target path relative to the vault root
 # and classify it.
 case "$absfile" in
-  "$root"/*) rel="${absfile#"$root"/}" ;;
-  *) exit 0 ;;
+"$root"/*) rel="${absfile#"$root"/}" ;;
+*) exit 0 ;;
 esac
 
 # Vault-root files (no directory component) always pass.
 case "$rel" in
-  */*) ;;
-  *) exit 0 ;;
+*/*) ;;
+*) exit 0 ;;
 esac
 
 topdir="${rel%%/*}/"
 
 # Structural escapes: raw/ (documented drop-zone input) and dotfile tooling dirs.
 case "$topdir" in
-  raw/|.git/|.obsidian/|.claude/) exit 0 ;;
+raw/ | .git/ | .obsidian/ | .claude/) exit 0 ;;
 esac
 
 # Sanctioned per the parsed table -> allow.
 for dir in $sanctioned; do
-  [ "$dir" = "$topdir" ] && exit 0
+    [ "$dir" = "$topdir" ] && exit 0
 done
 
 sanctioned_list=$(printf '%s' "$sanctioned" | tr '\n' ' ')
@@ -195,6 +197,6 @@ jq -n --arg r "$reason" '{
 }'
 
 log="${CLAUDE_DISCIPLINE_LOG:-$HOME/.claude/discipline.log}"
-printf 'hook=wiki_taxonomy_gate decision=deny reason=unsanctioned_dir file=%s\n' "$file" >> "$log" 2>/dev/null
+printf 'hook=wiki_taxonomy_gate decision=deny reason=unsanctioned_dir file=%s\n' "$file" >>"$log" 2>/dev/null
 
 exit 0

@@ -22,14 +22,14 @@ that and stop rather than guessing which artifact to record.
 
 ### Step 0: Load the Schema
 
-`AGENTS.md` at the project's git root is loaded into context at session start (per the project's `CLAUDE.md`) — use that content. The wiki schema itself (page types, page format, the three layers) lives in `AGENTS-wiki-schema.md`, which `AGENTS.md` links to; read it for the full schema. If `AGENTS.md` isn't present in context (e.g. a fresh fork with no prior context), do not assume cwd: walk up from the current directory, checking each level for `AGENTS.md`, up to the git repository root (same pattern as `coderails::config_path` in `scripts/lib/config.sh`) — a fork's cwd may be a subdirectory of the project repo. If no `AGENTS.md` is found by the git root, tell the user to run `/wiki-init` first. (The wiki vault itself, e.g. `../coderails-wiki`, is a separate sibling repo the project's `.claude/workflow.config.yaml` points to; it is not where `AGENTS.md` lives, and a fork should never need to be running from inside it.)
+`AGENTS.md` at the project's git root is loaded into context at session start (per the project's `CLAUDE.md`) — use that content. The wiki schema itself (page types, page format, the three layers) lives in `AGENTS-wiki-schema.md`, which `AGENTS.md` links to; read it for the full schema. If `AGENTS.md` isn't present in context (e.g. a fresh fork with no prior context), do not assume cwd: walk up from the current directory, checking each level for `AGENTS.md`, up to the git repository root (same pattern as `coderails::config_path` in `scripts/lib/config.sh`) — a fork's cwd may be a subdirectory of the project repo. If no `AGENTS.md` is found by the git root, tell the user to run `/wiki-init` first. (The wiki vault itself, e.g. `../coderails-wiki`, is a separate sibling repo the project's `.coderails/workflow.config.yaml` points to; it is not where `AGENTS.md` lives, and a fork should never need to be running from inside it.)
 
 The git/vault/supervision settings below are **not** read from AGENTS.md — they are flat
-keys in that same project's `.claude/workflow.config.yaml` (the repo the source being
+keys in that same project's `.coderails/workflow.config.yaml` (the repo the source being
 ingested belongs to, i.e. wherever `AGENTS.md` was found above), resolved with the same
 walk-up pattern as `coderails::config_path` in `scripts/lib/config.sh`: starting from the
 project repo location, check each directory up to its git root for
-`.claude/workflow.config.yaml`; the first one found wins.
+`.coderails/workflow.config.yaml`; the first one found wins.
 
 - `wiki_path` — the wiki vault path; resolved relative to the directory containing that
   `workflow.config.yaml` unless already absolute. Referred to as `vault` below.
@@ -43,7 +43,7 @@ project repo location, check each directory up to its git root for
   suggested in Step 7's report.
 - `wiki_supervision` — `discuss` (default) or `autonomous`; see Step 3.
 
-**Example `.claude/workflow.config.yaml` (team repo with PR flow):**
+**Example `.coderails/workflow.config.yaml` (team repo with PR flow):**
 ```yaml
 wiki_path: ../my-project-wiki
 wiki_git_worktree: true
@@ -51,7 +51,7 @@ wiki_git_bypass_flag: BYPASS_REVIEW=1
 wiki_git_pull_path: /path/to/your/source-repo
 ```
 
-**Example `.claude/workflow.config.yaml` (personal wiki, no PR ceremony, autonomous curation):**
+**Example `.coderails/workflow.config.yaml` (personal wiki, no PR ceremony, autonomous curation):**
 ```yaml
 wiki_path: ../my-project-wiki
 wiki_git_worktree: false
@@ -90,7 +90,7 @@ WORKTREE_PATH="$vault"
 
 ### Step 3: Discuss Key Takeaways (unless `wiki_supervision: autonomous`)
 
-**If `wiki_supervision` (from the project's `.claude/workflow.config.yaml`, see Step 0) is
+**If `wiki_supervision` (from the project's `.coderails/workflow.config.yaml`, see Step 0) is
 `autonomous`:** skip straight to Step 4. Curate and commit without pausing — that is what this
 setting means. Do not add your own confirmation checkpoint before Step 6's commit either;
 `autonomous` covers the whole ingest, not just this step.
