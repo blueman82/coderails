@@ -56,37 +56,23 @@ through the `J2` join, and for any other fork/join wave in the graph:
    targets — one JSON-lines object per ready node — BEFORE running any real
    `Agent` dispatch. A `kind:"join"` line (e.g. `J2`) is not a dispatch
    target; only `kind:"dispatch"` lines with `unresolved:false` are.
-2. Dispatch the real `Agent` calls for that wave's resolved targets.
-3. **Wave-completeness — confirm before recording.** `graph_dispatch_record`'s
-   own jq only iterates keys present in the results object it is handed — it
-   cannot itself detect a wave where a dispatched node never reported back.
-   Before calling it, confirm every node `graph_dispatch_plan` reported as a
-   dispatch target in this wave has a result in hand (a skipped branch still
-   records an explicit skip, same convention as this file's skip column) —
-   do not call `graph_dispatch_record` with a partial wave.
-4. Call `graph_dispatch_record <path-to-progress.json> <wave-results-json>`
-   once the full wave's results are collected, to fold them into
-   `.graph.nodes` (bounded-retry/hard-stop bookkeeping included).
-5. **`J2` release is a separate, explicit second write — MUST NOT be
-   skipped.** `J2` is never a dispatch target (`graph_dispatch_plan` reports
-   it as `kind:"join"`, never sent to `Agent`), so no wave-results object
-   ever contains a `"J2"` key, and `graph_dispatch_record`'s fold only writes
-   keys present in the results object it is handed — `J2` is never folded
-   automatically. Join nodes have no special readiness-gating logic:
-   `graph_readiness.sh`'s join branch only changes which nodes count as
-   *predecessors* for a downstream node (substituting the join's `inputs`
-   list for raw edges); `J2` itself is read and gated like any ordinary
-   node, on its own `.status` (for its own pending/ready state) and, for
-   nodes downstream of it, on its `.outcome` (predecessors are gated on
-   `.outcome` being a terminal-success value: `done`/`skipped`). After
-   `graph_dispatch_record` absorbs the `S2.5`/`S2.6` results, the
-   orchestrator MUST perform one further read-modify-write setting `J2`
-   itself to a terminal `done` or `skipped` value in BOTH its `.status` and
-   `.outcome` fields — matching the convention `graph_dispatch_record`'s own
-   fold uses when it writes a node's result (`status` and `outcome` set
-   together to the same final value), since other code paths may read
-   either field. Skipping this write leaves `J2` — and every downstream
-   node — permanently blocked, even though `S2.5`/`S2.6` both completed.
+2. Call `graph_dispatch_begin_wave <path-to-progress.json>` immediately before
+   dispatch. Keep its returned `wave_id`; this atomically records the exact
+   ready nodes as running. If it fails, do not dispatch.
+3. Dispatch each real `Agent` call with this exact first prompt line, followed
+   by the worker instructions: `CODERAILS_GRAPH_DISPATCH={"session_id":"<session-id>","loop_id":"<loop-id>","revision":<revision>,"wave_id":"<wave-id>","node_id":"<node-id>"}`.
+   The `loop_dispatch_guard` denies a missing, malformed, stale, or foreign
+   envelope. Graph waves use the orchestrator's own Agent tool calls only.
+4. **Wave-completeness — confirm before recording.** Before recording, confirm
+   every node in the active wave has a result in hand. A skipped branch still
+   records an explicit skip, same convention as this file's skip column. Do
+   not call `graph_dispatch_record` with a partial wave.
+5. Call `graph_dispatch_record <path-to-progress.json>
+   '{"wave_id":"<wave-id>","results":<wave-results-json>}'` once the full
+   wave is collected. Missing, stale, partial, or extra results are rejected
+   without changing state. The same locked write applies retry/hard-stop
+   bookkeeping and releases every newly satisfied all-input join, including
+   `J2`; never hand-edit a join node.
 
 **Known ceiling — `retry.attempts` read is outside the write lock.**
 `graph_dispatch_record` computes each node's `retry.attempts` via its own
@@ -115,28 +101,18 @@ past the last unit's merge gate:
 1. `S9-wiki -> S9-docs` is a plain sequential edge, not a join — no second
    write is needed for it. Call `graph_dispatch_plan` once `J12-all-units` is
    terminal-success; it resolves `S9-wiki` to `wiki-writer`
-   (`kind:"dispatch"`, `unresolved:false`). Dispatch the real `Agent` call,
-   then call `graph_dispatch_record` with `S9-wiki`'s result. Only after that
+   (`kind:"dispatch"`, `unresolved:false`). Begin the wave, dispatch the real
+   `Agent` call, then call `graph_dispatch_record` with the returned `wave_id`
+   and `S9-wiki` under `results`. Only after that
    record call does a fresh `graph_dispatch_plan` resolve `S9-docs` to
    `docs-auditor` — `graph_readiness.sh` reports `S9-docs` `blocked` until
    `S9-wiki`'s outcome lands as `done`/`skipped`, same as any other sequential
    edge in this graph.
-2. `J12-all-units` release is a separate, explicit second write — MUST NOT
-   be skipped, same rule as `J2` above. `J12-all-units` is never a dispatch
-   target (`graph_dispatch_plan` reports it as `kind:"join"`, never sent to
-   `Agent`), so no wave-results object ever contains a `"J12-all-units"` key,
-   and `graph_dispatch_record`'s fold only writes keys present in the results
-   object it is handed — `J12-all-units` is never folded automatically.
-   Recording every unit's `U4b-merge-gate[i]` as done does not release it:
-   after the last unit's merge gate reports terminal, the orchestrator MUST
-   perform one further read-modify-write setting `J12-all-units` itself to a
-   terminal `done` (or `skipped`, only if genuinely no units exist — should
-   not happen in practice) value in BOTH its `.status` and `.outcome` fields,
-   matching the same convention used for `J2`'s release. **No unit may be
-   silently omitted from what `J12-all-units` waits on** — every unit's
-   `U4b-merge-gate[i]` outcome must be present and terminal-success before
-   this release write, or `S9-wiki` and everything after it stays permanently
-   blocked even though every unit actually finished.
+2. `J12-all-units` is never dispatched. The exact wave record containing its
+   final `U4b-merge-gate[i]` input releases it automatically in the same locked
+   write. **No unit may be silently omitted from what `J12-all-units` waits
+   on** — every unit's merge-gate node remains a declared join input, and the
+   join releases only when every input is terminal-success.
 
 Node IDs are stable documentation identifiers. `S*` nodes run once; `U<i>*`
 nodes run once per work-unit `i`; `J*` nodes are explicit joins. A skipped node

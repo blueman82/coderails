@@ -171,6 +171,38 @@ helpers_have_modes() {
   done
 }
 
+native_graph_contract_exists() {
+  local graph="$PACKAGE/skills/agentic-loop/scripts/graph.py"
+  [[ -x "$graph" ]] || return 1
+  python3 "$graph" --help | grep -q 'authorize-dispatch' || return 1
+  python3 "$graph" --help | grep -q 'verify-completion' || return 1
+  grep -q 'spawn_agent' "$PACKAGE/skills/agentic-loop/SKILL.md" || return 1
+  grep -q 'begin-wave' "$PACKAGE/skills/agentic-loop/SKILL.md" || return 1
+  grep -q 'update_plan.*display only' "$PACKAGE/skills/agentic-loop/SKILL.md" || return 1
+  ! grep -Eiq 'claude -p|codex exec|pr-review-toolkit|background scheduler' "$PACKAGE/skills/agentic-loop/SKILL.md"
+}
+
+package_grades_loop_evals() {
+  local tmp evals sha rc
+  tmp=$(mktemp -d)
+  evals="$tmp/evals.json"
+  sha=$(git -C "$ROOT" rev-parse HEAD)
+  jq -n --arg sha "$sha" '{
+    schema_version:1,scope:"loop",task_ref:"loop-package",verification_level:0,
+    verification_justification:"package fixture",frozen_sha:$sha,head_sha:$sha,
+    session_id:"session-package",loop_id:"loop-package",revision:1,
+    evals:[],amendments:[],result:null,graded_at:null
+  }' >"$evals"
+  if ! "$PACKAGE/scripts/post_evals.sh" grade-loop "$evals" >/dev/null; then
+    rm -r "$tmp"
+    return 1
+  fi
+  jq -e '.result == "GO" and .grading.by == "post_evals.sh grade-loop" and (.grading.checksum | test("^[0-9a-f]{64}$"))' "$evals" >/dev/null
+  rc=$?
+  rm -r "$tmp"
+  return "$rc"
+}
+
 provider_split_is_clean() {
   local path
   for path in \
@@ -203,6 +235,8 @@ check "prep resolves the nearest project config" prep_uses_nearest_project_confi
 check "exactly 10 native custom agents" agents_are_native
 check "native hook commands resolve under PLUGIN_ROOT" hooks_are_native
 check "package helper modes" helpers_have_modes
+check "native Codex graph contract" native_graph_contract_exists
+check "package-local helper grades loop evals" package_grades_loop_evals
 check "provider split and cleanup" provider_split_is_clean
 
 if [[ "$FAILS" -eq 0 ]]; then

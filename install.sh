@@ -505,6 +505,7 @@ if [[ "$DRY_RUN" -eq 1 ]]; then
   flash_dry "drop stale keys (settings + known_marketplaces): workflow-tools, claude-guardrails"
   flash_dry "remove empty stale marketplace cache dirs under $MKT_DIR (if any)"
 else
+  mkdir -p "$HOME/.claude"
   [[ -f "$SETTINGS" ]] || printf '{}\n' > "$SETTINGS"
   cp "$SETTINGS" "$SETTINGS.bak"
   tmp=$(mktemp)

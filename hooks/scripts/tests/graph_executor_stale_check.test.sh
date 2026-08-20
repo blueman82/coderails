@@ -9,6 +9,7 @@
 # the post-merge node state -- an earlier wave's stale_check surviving in
 # progress.json must not satisfy a later wave's own bare stale write (see
 # the multi-wave test below).
+# shellcheck disable=SC1091,SC2015 # Computed library source and assertion chains are intentional.
 set -u
 
 TESTS_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -18,16 +19,20 @@ trap 'rm -rf "$TMP"' EXIT
 
 fails=0
 ok() { printf 'ok   - %s\n' "$1"; }
-fail() { printf 'FAIL - %s\n      %s\n' "$1" "$2"; fails=$((fails+1)); }
+fail() {
+    printf 'FAIL - %s\n      %s\n' "$1" "$2"
+    fails=$((fails + 1))
+}
 
 . "$LIB_DIR/graph_executor.sh"
 
 fresh_fixture() { # outfile
-  jq -n '
-    { graph: { nodes: { A:{status:"pending",outcome:"pending",retry:{attempts:0,max:5}} },
+    jq -n '
+    { schema_version:2, status:"in-progress", session_id:"session-test", loop_id:"loop-test", revision:1,
+      graph: { nodes: { A:{status:"pending",outcome:"pending",retry:{attempts:0,max:5},evidence:[]} },
                edges: [], joins: {} },
       decisions_absorbed: [] }
-  ' > "$1"
+  ' >"$1"
 }
 
 # --- refuses: stale with no stale_check at all ---
@@ -35,9 +40,9 @@ fresh_fixture "$TMP/f1.json"
 graph_executor_apply_wave "$TMP/f1.json" '{"A":{"status":"stale","outcome":"stale"}}'
 rc1=$?
 status_after1=$(jq -r '.graph.nodes.A.status' "$TMP/f1.json")
-[ "$rc1" -ne 0 ] && [ "$status_after1" = "pending" ] \
-  && ok "bare stale (no stale_check) refused, node unchanged" \
-  || fail "bare stale (no stale_check) refused" "rc=$rc1 status_after=$status_after1"
+[ "$rc1" -ne 0 ] && [ "$status_after1" = "pending" ] &&
+    ok "bare stale (no stale_check) refused, node unchanged" ||
+    fail "bare stale (no stale_check) refused" "rc=$rc1 status_after=$status_after1"
 
 # --- refuses: stale_check present but checked:false ---
 fresh_fixture "$TMP/f2.json"
@@ -62,24 +67,24 @@ graph_executor_apply_wave "$TMP/f5.json" '{"A":{"status":"stale","outcome":"stal
 rc5=$?
 status_after5=$(jq -r '.graph.nodes.A.status' "$TMP/f5.json")
 stale_check_after5=$(jq -c '.graph.nodes.A.stale_check' "$TMP/f5.json")
-[ "$rc5" -eq 0 ] && [ "$status_after5" = "stale" ] \
-  && [ "$stale_check_after5" = '{"checked":true,"method":"gh pr view","result":"no PR found"}' ] \
-  && ok "stale WITH valid stale_check succeeds, both fields land together" \
-  || fail "stale WITH valid stale_check succeeds" "rc=$rc5 status=$status_after5 stale_check=$stale_check_after5"
+[ "$rc5" -eq 0 ] && [ "$status_after5" = "stale" ] &&
+    [ "$stale_check_after5" = '{"checked":true,"method":"gh pr view","result":"no PR found"}' ] &&
+    ok "stale WITH valid stale_check succeeds, both fields land together" ||
+    fail "stale WITH valid stale_check succeeds" "rc=$rc5 status=$status_after5 stale_check=$stale_check_after5"
 
 # --- unaffected: a non-stale write needs no stale_check ---
 fresh_fixture "$TMP/f6.json"
 graph_executor_apply_wave "$TMP/f6.json" '{"A":{"status":"done","outcome":"done"}}'
 rc6=$?
-[ "$rc6" -eq 0 ] && ok "non-stale write requires no stale_check (unaffected)" \
-  || fail "non-stale write requires no stale_check" "rc=$rc6"
+[ "$rc6" -eq 0 ] && ok "non-stale write requires no stale_check (unaffected)" ||
+    fail "non-stale write requires no stale_check" "rc=$rc6"
 
 # --- refuses: outcome:"stale" alone (status not stale) still requires stale_check ---
 fresh_fixture "$TMP/f7.json"
 graph_executor_apply_wave "$TMP/f7.json" '{"A":{"status":"blocked","outcome":"stale"}}'
 rc7=$?
-[ "$rc7" -ne 0 ] && ok "outcome:stale alone (status not stale) still requires stale_check" \
-  || fail "outcome:stale alone still requires stale_check" "rc=$rc7"
+[ "$rc7" -ne 0 ] && ok "outcome:stale alone (status not stale) still requires stale_check" ||
+    fail "outcome:stale alone still requires stale_check" "rc=$rc7"
 
 # --- multi-wave: a stale_check from an EARLIER wave must not satisfy a
 # LATER wave's own stale write. The guard must validate THIS wave's own
@@ -91,9 +96,15 @@ rc8a=$?
 graph_executor_apply_wave "$TMP/f8.json" '{"A":{"status":"stale","outcome":"stale"}}'
 rc8b=$?
 stale_check_after8=$(jq -c '.graph.nodes.A.stale_check' "$TMP/f8.json")
-[ "$rc8a" -eq 0 ] && [ "$rc8b" -ne 0 ] \
-  && [ "$stale_check_after8" = '{"checked":true,"method":"gh pr view","result":"no PR found"}' ] \
-  && ok "a later wave's bare stale write is refused even though an earlier wave's stale_check survives in merged state" \
-  || fail "later wave without its own stale_check is refused" "rc8a=$rc8a rc8b=$rc8b stale_check_after=$stale_check_after8"
+[ "$rc8a" -eq 0 ] && [ "$rc8b" -ne 0 ] &&
+    [ "$stale_check_after8" = '{"checked":true,"method":"gh pr view","result":"no PR found"}' ] &&
+    ok "a later wave's bare stale write is refused even though an earlier wave's stale_check survives in merged state" ||
+    fail "later wave without its own stale_check is refused" "rc8a=$rc8a rc8b=$rc8b stale_check_after=$stale_check_after8"
 
-[ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails)"; exit 1; }
+[ "$fails" -eq 0 ] && {
+    echo "PASS"
+    exit 0
+} || {
+    echo "FAILED ($fails)"
+    exit 1
+}

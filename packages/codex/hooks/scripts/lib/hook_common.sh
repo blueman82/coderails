@@ -41,6 +41,32 @@ hook::session_dir() {
     printf '%s/sessions/%s\n' "$data_dir" "$safe"
 }
 
+hook::loop_root() {
+    printf '%s\n' "${CODERAILS_AGENTIC_LOOP_DIR:-$(hook::data_dir)/agentic-loop}"
+}
+
+hook::loop_state_path() {
+    local cwd="$1" session_id="$2" safe root git_dir slug canonical candidate match=""
+    safe=$(printf '%s' "$session_id" | tr '/' '_' | sed 's/\.\.//g')
+    [[ -n "$safe" ]] || return 1
+    root=$(hook::loop_root)
+    git_dir=$(git -C "$cwd" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)
+    case "$git_dir" in
+      /*) slug=$(printf '%s' "$git_dir" | sed 's#/#-#g') ;;
+      *) slug=$(printf '%s' "$cwd" | sed 's#/#-#g') ;;
+    esac
+    canonical="$root/$slug/$safe/progress.json"
+    if [[ -e "$canonical" ]]; then
+        printf '%s\n' "$canonical"
+        return 0
+    fi
+    for candidate in "$root"/*/"$safe"/progress.json; do
+        [[ -e "$candidate" ]] || continue
+        [[ -z "$match" || "$candidate" < "$match" ]] && match="$candidate"
+    done
+    printf '%s\n' "${match:-$canonical}"
+}
+
 hook::patch_paths() {
     local command
     command=$(printf '%s' "$HOOK_INPUT" | jq -r '.tool_input.command // empty' 2>/dev/null)

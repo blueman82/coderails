@@ -1,4 +1,5 @@
 #!/bin/bash
+# shellcheck disable=SC1091,SC2016 # Runtime-resolved sources and literal jq programs are intentional.
 # graph_executor.sh — wave collect-and-write for progress.json's durable
 # execution graph (see skills/agentic-loop/loop-state.md's `graph` field
 # docs). Per spec.md D1: collects an entire wave's results, then performs
@@ -29,7 +30,7 @@
 #     graph_contract.test.sh's own contract (status/outcome must be in its
 #     enum via IN()-membership — not jq's index(), which does subsequence
 #     search and would wrongly accept an array like ["done"]; retry.attempts
-#     and retry.max must both be numbers, attempts >= 0, max in 0..5,
+#     and retry.max must both be numbers, attempts >= 0, max in 1..5,
 #     attempts <= max) — the exact predicate is lifted from that test, not
 #     re-derived, so this guard can't drift weaker than it. Also rejects a
 #     bare "stale" write: any node whose merged status OR outcome is
@@ -51,42 +52,141 @@ GRAPH_EXECUTOR_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=./loop_state_common.sh
 . "$GRAPH_EXECUTOR_DIR/loop_state_common.sh"
 
+graph_executor_graph_valid() {
+    local path="$1"
+    jq -e '
+      .graph as $g
+      | ($g.nodes) as $nodes
+      | ($g.edges) as $edges
+      | ($g.joins) as $joins
+      | ($g.active_wave) as $active
+      | ($g.hard_stop) as $hard_stop
+      | ($edges + [$joins | to_entries[] as $join
+                    | $join.value.inputs[]? | {from:.,to:$join.key}]) as $dependencies
+      | .schema_version == 2
+        and (.status | IN("initialising","in-progress","complete"))
+        and (.session_id | type) == "string" and (.session_id | length) > 0
+        and (.loop_id | type) == "string" and (.loop_id | length) > 0
+        and (.revision | type) == "number" and (.revision | floor) == .revision and .revision > 0
+        and ($g | type) == "object"
+        and ($nodes | type) == "object"
+        and ($edges | type) == "array"
+        and ($joins | type) == "object"
+        and ([$nodes | to_entries[]
+              | select((.value | type) != "object"
+                       or (.value.status | IN("pending","ready","running","blocked","done","skipped","failed","hard-stop","stale") | not)
+                       or (.value.outcome | IN("pending","ready","running","blocked","done","skipped","failed","hard-stop","stale") | not)
+                       or .value.status != .value.outcome
+                       or (.value.evidence | type) != "array"
+                       or (.value.retry.attempts | type) != "number"
+                       or (.value.retry.max | type) != "number"
+                       or .value.retry.attempts < 0
+                       or .value.retry.max < 1
+                       or .value.retry.max > 5
+                       or .value.retry.attempts > .value.retry.max)] | length) == 0
+        and ([$edges[] as $edge
+              | select(($edge | type) != "object"
+                       or ($edge.from | type) != "string"
+                       or ($edge.to | type) != "string"
+                       or ($nodes | has($edge.from) | not)
+                       or ($nodes | has($edge.to) | not))] | length) == 0
+        and ([$joins | to_entries[] as $join
+              | select(($nodes | has($join.key) | not)
+                       or ($join.value | type) != "object"
+                       or $join.value.mode != "all"
+                       or ($join.value.inputs | type) != "array"
+                       or ($join.value.inputs | length) == 0
+                       or ([$join.value.inputs[] as $input
+                            | select(($input | type) != "string" or ($nodes | has($input) | not))] | length) != 0
+                       or (($join.value | has("released")) and ($join.value.released | type) != "boolean")
+                       or (($join.value.released // false) != ($nodes[$join.key].status == "done"))
+                       or (($join.value.released // false)
+                           and ($join.value.inputs | all(. as $input
+                               | ($nodes[$input].outcome // "") | IN("done","skipped")) | not)))] | length) == 0
+        and ($hard_stop == null or ($hard_stop | type) == "object")
+        and (($active == null)
+             or (($active | type) == "object"
+                 and ($active.wave_id | type) == "string"
+                 and $active.wave_id == ("wave-" + (.revision | tostring))
+                 and $active.revision == .revision
+                 and ($active.nodes | type) == "array"
+                 and ($active.nodes | length) > 0
+                 and ($active.nodes | unique | length) == ($active.nodes | length)
+                 and ([$active.nodes[] as $id
+                       | select(($id | type) != "string" or ($nodes | has($id) | not))] | length) == 0))
+        and (([$nodes | to_entries[] | select(.value.status == "running") | .key] | sort)
+             == (if $active == null then [] else ($active.nodes | sort) end))
+        and (((reduce range(0; ($nodes | length)) as $i ($dependencies;
+                  . + [.[] as $left
+                       | .[] as $right
+                       | select($left.to == $right.from)
+                       | {from:$left.from,to:$right.to}]
+                  | unique_by([.from,.to])))
+              | any(.from == .to)) | not)
+    ' "$path" >/dev/null 2>&1
+}
+
 graph_executor_ready_nodes() {
-  local path="$1"
-  [ -f "$path" ] || return 1
-  local node
-  jq -e -r '(.graph.nodes // {}) | keys[]' "$path" 2>/dev/null | while IFS= read -r node; do
-    [ "$(bash "$GRAPH_EXECUTOR_DIR/graph_readiness.sh" "$path" "$node")" = "ready" ] && printf '%s\n' "$node"
-  done
-  local jq_rc="${PIPESTATUS[0]}"
-  [ "$jq_rc" -eq 0 ] || [ "$jq_rc" -eq 4 ] || return 1
-  return 0
+    local path="$1"
+    [ -f "$path" ] || return 1
+    graph_executor_graph_valid "$path" || return 1
+    local node
+    jq -e -r '(.graph.nodes // {}) | keys[]' "$path" 2>/dev/null | while IFS= read -r node; do
+        [ "$(bash "$GRAPH_EXECUTOR_DIR/graph_readiness.sh" "$path" "$node")" = "ready" ] && printf '%s\n' "$node"
+    done
+    local jq_rc="${PIPESTATUS[0]}"
+    [ "$jq_rc" -eq 0 ] || [ "$jq_rc" -eq 4 ] || return 1
+    return 0
 }
 
 graph_executor_apply_wave() {
-  local path="$1" wave_json="$2"
-  [ -f "$path" ] || return 1
-
-  # Cheap shape check outside the lock (not a security/race boundary — just
-  # avoids taking the lock for an obviously-malformed input). The
-  # authoritative check, including id-existence, is the jq program below,
-  # which runs INSIDE als_atomic_progress_update's lock against the
-  # freshly-read file, so nothing checked here needs to be trusted twice.
-  printf '%s' "$wave_json" | jq -e '
+    local path="$1" wave_json="$2" wave_id="${3:-}"
+    [ -f "$path" ] || return 1
+    printf '%s' "$wave_json" | jq -e '
     type == "object" and ((keys - ["decisions_absorbed"]) | length > 0)
   ' >/dev/null 2>&1 || return 1
-
-  # Enum/retry predicate lifted verbatim from graph_contract.test.sh (same
-  # IN()-membership and 4-constraint retry check that test already enforces
-  # on a written file) — not re-derived, so this guard can't drift weaker
-  # than the contract it's supposed to uphold. IN() (not index()) is
-  # required: jq's index() does subsequence search on an array needle, so
-  # index() would wrongly accept status:["done"] as valid; IN() is true
-  # membership and also correctly rejects an explicit null.
-  als_atomic_progress_update "$path" \
-    --argjson wave "$wave_json" '
+    als_atomic_progress_update "$path" \
+        --argjson wave "$wave_json" --arg wave_id "$wave_id" '
     (.graph.nodes // {}) as $nodes
     | ($wave | del(.decisions_absorbed)) as $results
+    | (.graph.active_wave) as $active | (.graph.hard_stop) as $hard_stop
+    | (.graph.edges + [.graph.joins | to_entries[] as $join | $join.value.inputs[]? | {from:.,to:$join.key}]) as $dependencies
+    | ($active != null) as $tracked_wave
+    | if (.schema_version != 2 or (.status | IN("initialising","in-progress","complete") | not) or (.session_id | type) != "string" or (.session_id | length) == 0 or (.loop_id | type) != "string" or (.loop_id | length) == 0
+          or (.revision | type) != "number" or (.revision | floor) != .revision or .revision <= 0
+          or (.graph | type) != "object" or ($nodes | type) != "object"
+          or ((.graph.edges // null) | type) != "array" or ((.graph.joins // null) | type) != "object"
+          or ([$nodes | to_entries[] | select((.value | type) != "object"
+                        or (.value.status | IN("pending","ready","running","blocked","done","skipped","failed","hard-stop","stale") | not)
+                        or (.value.outcome | IN("pending","ready","running","blocked","done","skipped","failed","hard-stop","stale") | not)
+                        or .value.status != .value.outcome or (.value.evidence | type) != "array" or (.value.retry.attempts | type) != "number" or (.value.retry.max | type) != "number"
+                        or .value.retry.attempts < 0 or .value.retry.max < 1 or .value.retry.max > 5 or .value.retry.attempts > .value.retry.max)] | length) != 0
+          or ([.graph.edges[] as $edge | select(($edge | type) != "object" or ($edge.from | type) != "string" or ($edge.to | type) != "string"
+                        or ($nodes | has($edge.from) | not) or ($nodes | has($edge.to) | not))] | length) != 0
+          or ([.graph.joins | to_entries[] as $join | select(($nodes | has($join.key) | not) or ($join.value | type) != "object"
+                        or $join.value.mode != "all" or ($join.value.inputs | type) != "array" or ($join.value.inputs | length) == 0
+                        or ([$join.value.inputs[] as $input | select(($input | type) != "string" or ($nodes | has($input) | not))] | length) != 0
+                        or (($join.value | has("released")) and ($join.value.released | type) != "boolean")
+                        or (($join.value.released // false) != ($nodes[$join.key].status == "done"))
+                        or (($join.value.released // false) and ($join.value.inputs
+                            | all(. as $input | ($nodes[$input].outcome // "") | IN("done","skipped")) | not)))] | length) != 0
+          or ($hard_stop != null and (($hard_stop | type) != "object"))
+          or (($active != null) and (($active | type) != "object" or ($active.wave_id | type) != "string"
+                   or $active.wave_id != ("wave-" + (.revision | tostring)) or $active.revision != .revision
+                   or ($active.nodes | type) != "array" or ($active.nodes | length) == 0 or ($active.nodes | unique | length) != ($active.nodes | length)
+                   or ([$active.nodes[] as $id | select(($id | type) != "string" or ($nodes | has($id) | not))] | length) != 0))
+          or (([$nodes | to_entries[] | select(.value.status == "running") | .key] | sort)
+              != (if $active == null then [] else ($active.nodes | sort) end))
+          or ((reduce range(0; ($nodes | length)) as $i ($dependencies; . + [.[] as $left | .[] as $right
+                 | select($left.to == $right.from) | {from:$left.from,to:$right.to}] | unique_by([.from,.to]))) | any(.from == .to)))
+      then error("graph_executor: malformed graph") elif ($tracked_wave
+            and ((.graph.active_wave | type) != "object"
+                 or $wave_id == ""
+                 or .graph.active_wave.wave_id != $wave_id
+                 or (.graph.active_wave.nodes | type) != "array"
+                 or ((.graph.active_wave.nodes | sort) != ($results | keys | sort))))
+      then error("graph_executor: results must exactly match the active wave") else .
+      end
     | .graph.nodes = ($results | reduce keys[] as $id ($nodes;
         if ($nodes | has($id) | not) then
           error("graph_executor: unknown node id \($id), refusing to create")
@@ -97,9 +197,11 @@ graph_executor_apply_wave() {
               then error("graph_executor: node \($id) has invalid status \($merged.status)")
               elif ($merged.outcome // null | IN("pending","ready","running","blocked","done","skipped","failed","hard-stop","stale") | not)
               then error("graph_executor: node \($id) has invalid outcome \($merged.outcome)")
+              elif ($merged.status != $merged.outcome)
+              then error("graph_executor: node \($id) status and outcome disagree")
               elif ($merged.retry.attempts | type != "number" or . < 0)
               then error("graph_executor: node \($id) has invalid retry.attempts \($merged.retry.attempts)")
-              elif ($merged.retry.max | type != "number" or . < 0 or . > 5)
+              elif ($merged.retry.max | type != "number" or . < 1 or . > 5)
               then error("graph_executor: node \($id) has invalid retry.max \($merged.retry.max)")
               elif ($merged.retry.attempts > $merged.retry.max)
               then error("graph_executor: node \($id) has retry.attempts > retry.max")
@@ -115,5 +217,25 @@ graph_executor_apply_wave() {
         end
       ))
     | .decisions_absorbed = ((.decisions_absorbed // []) + ($wave.decisions_absorbed // []))
+    | if $tracked_wave then
+        (.graph.nodes) as $updated_nodes
+        |
+        .graph.joins = (reduce (.graph.joins | keys[]) as $join (.graph.joins;
+          if ((.[$join].released // false) == false
+              and (.[$join].inputs | all(. as $input
+                    | ($updated_nodes[$input].outcome // "") | IN("done","skipped"))))
+          then .[$join].released = true
+          else .
+          end))
+        | .graph.nodes = (reduce (.graph.joins | to_entries[]
+                                  | select(.value.released == true) | .key) as $join (.graph.nodes;
+            .[$join].status = "done" | .[$join].outcome = "done"))
+        | .graph.active_wave = null
+        | .revision = ((.revision // 0) + 1)
+        | ([.graph.nodes | to_entries[] | select(.value.status == "hard-stop") | .key] | sort) as $stops
+        | .graph.hard_stop = (if ($stops | length) == 0 then null
+                              else {node_id:$stops[0],reason:"retry exhausted"} end)
+      else .
+      end
   '
 }

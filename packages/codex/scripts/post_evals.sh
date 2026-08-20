@@ -24,21 +24,15 @@ source "${_POST_EVALS_DIR}/lib/eval-artifact.sh"
 # the default is what should hold in this repo.
 POST_EVALS_SMOKE_VERIFY_TIMEOUT="${POST_EVALS_SMOKE_VERIFY_TIMEOUT:-120}"
 
-# post_evals::validate_structure <evals_json_path> <pr> <current_head_sha>
+# post_evals::validate_structure <evals_json_path> <pr> <current_head_sha> [scope]
 # Exit 0 if the file passes every structural refusal check; exit 1 + a
 # specific stderr reason otherwise. Refusals are checked in order and the
 # first failure wins.
 #
-# smoke_verify (the merge-time gate) deliberately does NOT call this function:
-# checks 1-9 are structural validation that already ran at post time in the
-# posting agent's own session, and re-imposing them at merge (tried and
-# reverted — see git history) added false-blocks unrelated to the security
-# property (check 2's verification_justification, check 6's head_sha match) without
-# adding anything a fabricator can't already fake. smoke_verify re-executes
-# cmd/negative_control directly in its own worktree with its own timeout;
-# that re-execution IS the property this system enforces at merge.
+# smoke_verify deliberately skips this post-time structure check and enforces
+# merge-time command re-execution in its own worktree instead.
 post_evals::validate_structure() {
-    local path="$1" current_head_sha="$3"
+    local path="$1" current_head_sha="$3" scope="${4:-pr}"
 
     # Check 1: file exists and is valid JSON.
     if [[ ! -f "$path" ]] || ! jq -e . "$path" >/dev/null 2>&1; then
@@ -117,10 +111,14 @@ post_evals::validate_structure() {
         return 1
     fi
 
-    # Check 6: head_sha must match the PR's current head.
+    # Check 6: PR scope binds head_sha to the current PR. Loop scope has no
+    # PR, but still requires a non-blank commit identity.
     local file_sha
     file_sha=$(jq -r '.head_sha // ""' "$path")
-    if [[ "$file_sha" != "$current_head_sha" ]]; then
+    if [[ "$scope" == "loop" && -z "$file_sha" ]]; then
+        printf 'post_evals: evals.json head_sha must be non-blank (loop scope)\n' >&2
+        return 1
+    elif [[ "$scope" != "loop" && "$file_sha" != "$current_head_sha" ]]; then
         printf 'post_evals: evals.json head_sha (%s) does not match current PR head (%s)\n' "$file_sha" "$current_head_sha" >&2
         return 1
     fi
@@ -139,13 +137,7 @@ post_evals::validate_structure() {
         fi
     fi
 
-    # Check 8: freeze-before-build. The task-evals skill stamps frozen_sha
-    # "before implementation starts", but until now nothing verified it —
-    # evals could be authored after the code and pointed at any commit. This
-    # makes the rule mechanical: frozen_sha must be an ancestor of the
-    # branch's merge-base with the default branch, i.e. a commit that already
-    # existed before the branch's own implementation commits.
-    #
+    # Checks 8-10 are PR-only freeze and smoke validation.
     # Check 9: recorded freeze-time smoke evidence.
     # Check 10: gate-time re-execution. Check 9 gates the SHAPE of recorded
     # smoke evidence, but the author writes those numbers — a hand-written
@@ -153,9 +145,11 @@ post_evals::validate_structure() {
     # check 9 without any command ever running. This check never trusts a
     # typed number: it executes cmd and negative_control itself, here, and
     # judges only what it observes. Same pr-scope boundary as checks 8/9.
-    post_evals::validate_freeze "$path" || return 1
-    post_evals::validate_smoke "$path" || return 1
-    post_evals::validate_smoke_execution "$path" || return 1
+    if [[ "$scope" != "loop" ]]; then
+        post_evals::validate_freeze "$path" || return 1
+        post_evals::validate_smoke "$path" || return 1
+        post_evals::validate_smoke_execution "$path" || return 1
+    fi
 
     return 0
 }
@@ -1195,6 +1189,7 @@ post_evals::compute_and_validate_result() {
 #   ./scripts/post_evals.sh validate-structure <path> <pr> <sha>
 #   ./scripts/post_evals.sh validate-discriminating <path>
 #   ./scripts/post_evals.sh compute-result <path>
+#   ./scripts/post_evals.sh grade-loop <path>
 #   ./scripts/post_evals.sh smoke-verify <embed_json_path> <head_sha>
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     case "${1:-}" in
@@ -1216,6 +1211,9 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     validate-embed)
         post_evals::validate_embed "${2:?validate-embed requires a file argument}" "${3:?validate-embed requires a body path argument}"
         ;;
+    grade-loop)
+        post_evals::grade_loop "${2:?grade-loop requires a file argument}"
+        ;;
     *)
         printf 'Usage: post_evals.sh validate-structure <path> <pr> <sha>\n' >&2
         printf '       post_evals.sh validate-discriminating <path>\n' >&2
@@ -1223,6 +1221,7 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
         printf '       post_evals.sh smoke-verify <embed_json_path> <head_sha>\n' >&2
         printf '       post_evals.sh compute-result <path>\n' >&2
         printf '       post_evals.sh validate-embed <path> <body_path>\n' >&2
+        printf '       post_evals.sh grade-loop <path>\n' >&2
         exit 1
         ;;
     esac

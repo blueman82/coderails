@@ -1,124 +1,92 @@
 ---
 name: agentic-loop
-description: Coordinate autonomous multi-step work with native Codex subagents. Use when the user asks for a team, several independent work units, a multi-PR run, or an end-to-end task without routine check-ins.
+description: Coordinate autonomous multi-step work with native Codex subagents and a durable, fail-closed execution graph. Use for teams, dependent work units, multi-PR runs, or end-to-end work without routine check-ins.
 ---
 
 # Agentic Loop
 
-Keep the main session as the orchestrator. Delegate implementation and focused investigation, maintain one visible plan, verify results from current-session evidence, and finish the authorised scope without routine hand-backs.
+Keep the main Codex session as orchestrator. Workers implement; the orchestrator owns one durable graph and is its only writer. `update_plan` is display only and never decides readiness, resume, or completion.
 
-## Read the authorisation envelope
+The graph helper is `scripts/graph.py` beside this skill. It uses only the Python standard library. It calculates and records work but never starts agents, another provider, a nested session, or a scheduler.
 
-Before dispatching work, record:
+## Start or resume
 
-- the exact outcome the user authorised;
-- actions inside and outside that scope;
-- irreversible or externally visible actions that still require approval;
-- concrete success checks.
+Read the SessionStart bootstrap text first. It reports either the active state path and inspection or the path for a new `progress.json`. Reuse that exact path after compaction or resume.
 
-Do not ask again about routine steps already covered by the envelope. Stop for a missing material decision, an unauthorised destructive action, or a verification failure that remains after bounded repair attempts.
-
-## Plan the work
-
-Use `update_plan` as the live todo list. Split work into independently verifiable units and name dependencies in each item. Keep at most one plan item `in_progress` unless independent units are actively running together.
-
-For long work, optionally keep a small `progress.json` in a task-specific scratch directory outside the repository:
+For a new loop, record the user's authorised outcome, session id, unique loop id, success checks, work-unit nodes, dependency edges, and all-input joins. Write schema version 2 before any worker dispatch:
 
 ```json
 {
-  "status": "in_progress",
+  "schema_version": 2,
+  "session_id": "current-session-id",
+  "loop_id": "unique-loop-id",
+  "revision": 1,
+  "status": "in-progress",
   "scope": "authorised outcome",
-  "units": [
-    {"id": "unit-1", "status": "pending", "depends_on": []}
-  ],
-  "decisions": [],
-  "evidence": []
+  "graph": {
+    "nodes": {
+      "A": {"status":"pending","outcome":"pending","retry":{"attempts":0,"max":5},"evidence":[]}
+    },
+    "edges": [],
+    "joins": {},
+    "active_wave": null,
+    "hard_stop": null
+  }
 }
 ```
 
-The orchestrator is the only writer. Re-read it after compaction or when resuming. It is a simple checkpoint, not a scheduler or enforcement mechanism.
+An all-input join is a node plus an entry such as `"J":{"mode":"all","inputs":["A","B"],"released":false}`. Downstream edges originate at `J`. Unknown nodes, malformed state, cycles, inconsistent joins, or running nodes outside an active wave fail closed.
 
-## Choose workers
+Create and grade loop-local `evals.json` beside `progress.json` before build. It must carry this exact `session_id` and `loop_id`; those stable fields authorize dispatch across waves, so `begin-wave` does not invalidate the loop's eval authority. Keep its revision field as the revision it graded. The provider-local dispatch hook blocks native worker calls when graph ownership or graded loop evidence is missing or foreign.
 
-Use an installed Coderails custom agent when its purpose matches the unit:
+Run `python3 "$SKILL_DIR/scripts/graph.py" inspect "$STATE"`. Inspection is the resume source of truth: loop and session identity, revision, active wave, running nodes, ready nodes, and hard-stop reason. Never reconstruct these from chat history.
 
-| Custom agent | Use |
-|---|---|
-| `preflight-scout` | Read-only intake, conflicts, and risk discovery |
-| `design-scout` | A real design choice that must be resolved before building |
-| `disposition-scout` | Decide whether replaced code should be removed or temporarily retained |
-| `source-auditor` | Verify a reported symptom or factual claim before a fix |
-| `loop-worker` | Implement and verify a scoped unit |
-| `spec-reviewer` | Independently compare the result with the requested outcome |
-| `deploy-safety-reviewer` | Review rollback, blast radius, and production safety |
-| `docs-auditor` | Check documentation affected by the completed work |
-| `wiki-writer` | Record an approved completed change in the project wiki |
-| `proof-author` | Define observable checks before implementation when independence matters |
+## Run one wave
 
-Use the normal Codex worker when no custom agent is a better fit. Do not invent a provider handoff.
+Every dispatch wave follows this order:
 
-## Dispatch with native Codex tools
+1. Run `graph.py begin-wave "$STATE"`. This fully validates the graph, refuses an existing active wave, records the complete deterministic ready set as running, increments the revision, and prints the wave id, node list, and `task_names` mapping. Calling `begin-wave` is mandatory before `spawn_agent`. `inspect` repeats the mapping while a wave is active.
+2. Call native `spawn_agent` exactly once for each printed node, using its exact printed task name. Each name is `loop_worker_` plus the lowercase UTF-8 hex encoding of the node id, so it satisfies the native task-name grammar and reversibly binds to one node without collisions. Use installed Codex custom agents where appropriate. Give each worker a self-contained prompt containing its node id, exact scope, allowed paths, worktree, exclusions, checks, required artifact, and concise evidence report. Do not use another provider or start a nested Codex session.
+3. Use `wait_agent` until every node in the active wave has a terminal report. A quiet worker is not proof of failure: inspect its artifact, then use `send_message` or `followup_task` for one focused correction if needed.
+4. Verify each report against the actual diff, test output, PR state, or other current artifact. A worker summary alone is not evidence.
+5. Build one result object containing exactly every active-wave node and no other key. Each result is `{"outcome":"done|skipped|failed","evidence":"observed evidence"}`. Record it with:
 
-For each ready unit:
+```bash
+python3 "$SKILL_DIR/scripts/graph.py" record-wave "$STATE" \
+  '{"wave_id":"wave-N","results":{"A":{"outcome":"done","evidence":"check passed"}}}'
+```
 
-1. Call `spawn_agent` with a self-contained prompt.
-2. Save the returned id and add the unit to `update_plan`.
-3. Collect the result with `wait_agent`.
-4. Use `send_input` only for a specific correction or missing check.
-5. Call `close_agent` when the worker is complete, failed, or abandoned.
+Partial, extra, malformed, or wrong-wave results are rejected without changing state. A failed node increments its attempts and preserves evidence. It returns to pending while attempts remain; exhaustion becomes a durable hard-stop. Successful all-input joins release deterministically after every input succeeds. Repeat from `inspect`, then `begin-wave`.
 
-Respect a user-set concurrency limit. Otherwise run no more than three independent workers at once. Never dispatch a unit whose dependency is unfinished.
-
-Each worker prompt must include:
-
-- the exact task and allowed paths;
-- the checkout or worktree path;
-- relevant facts already verified in this session;
-- the expected files or external artifacts;
-- the checks the worker must run;
-- explicit exclusions and permission limits;
-- the required terminal result and concise report format.
-
-Require the worker to report the files changed, commands run, observed results, and anything not verified. A task list entry is not a substitute for this prompt.
-
-## Keep ownership clear
-
-Give each unit one owner. When reports cross in flight or a worker goes quiet, inspect the actual artifact before redispatching. An idle or missing message is not proof that the work failed.
-
-If the artifact is missing, send one focused follow-up with `send_input`. If it still cannot continue, close it and spawn a replacement with a distinct unit name. Do not keep dead workers open.
-
-## Verify before fixing
-
-For a reported bug or stale-state claim, first spawn `source-auditor` with read-only instructions to reproduce the symptom from the source of truth. Start implementation only when the symptom is observed. If it is disproven, report that evidence and stop the fix.
-
-For a confirmed failure, allow up to five distinct diagnosed repair attempts. Repeating the same action is not a new attempt. Stop and report after the bound is exhausted.
+Respect any user concurrency limit; otherwise use at most three workers at once. If a ready wave is larger, do not dispatch an unrecorded subset: define a graph whose wave width respects the limit before starting it.
 
 ## Review and release
 
-After implementation, spawn a fresh Codex reviewer such as `spec-reviewer`. Give it the user request, success criteria, and current diff or artifact, but not the implementer's conclusions. Add `deploy-safety-reviewer` only when the change has a production or release surface.
+Keep review provider-local. Use fresh Codex reviewer workers and the Codex workflow skills for review evidence, eval evidence, push, and merge. Review and release may be graph nodes, but never cross-provider joins. Treat every worker result as a claim until checked.
 
-Treat worker reports as claims. Before releasing a dependent unit or reporting completion, re-check the relevant artifact in the current session: repository status, diff, test result, PR state, deployment record, or log entry. Use the repository's Codex workflow skills for push, review evidence, eval evidence, and merge when those steps are in scope.
+For a confirmed failure, make at most five distinct diagnosed repairs. Repeating the same action is not a new attempt. Stop on exhausted verification, a disproved premise, a material choice outside the authorised scope, or an unauthorised irreversible action. Record the reason in graph evidence and `hard_stop`.
 
-## Finish
+## Complete
 
-Before the final response:
+Before completion, update and regrade `evals.json` against the graph's exact current revision, then write beside the state:
 
-1. Wait for or close every active worker.
-2. Re-run the smallest complete set of success checks in the current session.
-3. Mark every plan item completed or state why it was dropped.
-4. Report the produced artifacts, verification evidence, and remaining limits.
+- graded `evals.json` for the current session, loop, and revision;
+- non-empty `proof.json` for the same session and loop, with every proof carrying a nonblank executable `cmd` and `status: "pass"`;
+- `retro.json` for the same session and loop, schema version 1 or newer, with `status: "complete"`.
 
-For long work, write a minimal `retro.json` beside `progress.json`:
+Then run:
 
-```json
-{
-  "status": "complete",
-  "scope": "authorised outcome",
-  "artifacts": [],
-  "verification": [],
-  "unverified": [],
-  "decisions": []
-}
+```bash
+python3 "$SKILL_DIR/scripts/graph.py" complete "$STATE" \
+  --session "$SESSION" --evals "$EVALS" --proof "$PROOF" --retro "$RETRO" \
+  --transcript "$TRANSCRIPT_PATH"
 ```
 
-Do not claim completion from worker summaries alone. The final claim must rest on evidence observed in the current session.
+Run each proof command through `functions.exec` using this canonical nested-result output; replace the placeholder with the proof's exact command so transcript matching remains exact:
+
+```javascript
+const result = await tools.exec_command({cmd: "<exact proof command>"});
+text(JSON.stringify({loop_id: "<current loop id>", exit_code: result.exit_code, output: result.output}));
+```
+
+Completion refuses an active wave, pending/running/hard-stop nodes, a graph hard-stop, unreleased joins, wrong-loop evidence, stale eval revision, missing or ungraded evals, missing proof, or missing retro. It mines this session's Codex JSONL rollout and requires the last exact trimmed execution of every proof command in the current loop to carry a nested integer `exit_code` of zero and, for canonical results, the current `loop_id`; commands explicitly recorded under an earlier loop's turn context cannot replay. The outer `functions.exec` text `Script completed` alone is never proof of the inner command's success. This is local redirect-and-audit evidence, not a privilege boundary. Success atomically marks the loop complete and increments its revision. The provider-local Stop hook recomputes the same observed proof result before allowing a completed loop to end. A durable graph hard-stop may end only when the final nonblank report line is exactly `LOOP-STOP: waiting-on-human`, `LOOP-STOP: stopped`, or `LOOP-STOP: stall`.

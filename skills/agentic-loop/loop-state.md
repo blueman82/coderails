@@ -37,6 +37,8 @@ be replayed to derive position, and that can leave a torn tail line after a cras
 | `schema_version` | 1 for `progress.json` written before `proof_disposition` existed; write `2` going forward so `als_gate_proofs_on_complete` enforces the disposition requirement below (schema_version < 2 is grandfathered to the old fail-open-on-absence behaviour — see that gate's own header for the removal condition). |
 | `proof_disposition` | Required at `schema_version` 2 when no `proof.json` is frozen: the bare string `"none"` or a `"none: <reason>"`-prefixed value (e.g. `"none: no executable surface"`) records that skip visibly. Any other value — including one that merely starts with the letters "none" without the colon, e.g. `"nonexistent"` — or an absent/null field, blocks `complete` — see `als_gate_proofs_on_complete`. Never consulted once `proof.json` exists. |
 | `session_id` | This session's id; the guard's ownership check compares it against the file's own path. |
+| `loop_id` | Unique non-blank identity for this loop. Preserve it during mid-loop rewrites; create a new value when re-arming for a new loop. Dispatch evals bind `session_id` + `loop_id`. |
+| `revision` | Non-negative integer graph revision, starting at `0`. Graph operations advance it; completion evidence binds the final value. |
 | `status` | `initialising` → `in-progress` → `complete` (see Lifecycle). |
 | `authorising_prompt_raw` | The authorisation envelope, verbatim. |
 | `work_units` | JSON object keyed by unit id; each entry carries at least a `status`. In-flight values are `pending`/`in-progress`/`blocked` (with `blockedBy`); only `done` and `dropped` (with a mandatory sibling `dropped_reason`) are terminal — see below. `merged`/`complete`/other synonyms are retired: do not mint new status values. |
@@ -70,7 +72,10 @@ launder an unfinished unit into a completion. This is structural enforcement of 
 deferred": prose alone (a standing order) was observed to fail, so the gate makes deferral
 impossible rather than merely discouraged.
 
-**`graph` is durable coordination state, not a scheduler.** The orchestrator records the
+**`graph` is durable coordination state, not a scheduler.** Every new or re-armed graph record
+must carry a unique non-blank `loop_id` and integer `revision`; missing identity fails closed.
+Dispatch evidence binds the stable `session_id` + `loop_id`, not `revision`, because beginning a
+wave advances the revision before dispatch. Completion evidence binds all three values. The orchestrator records the
 graph after each wave and is the only writer. A node is ready when every incoming edge names a
 terminal-success predecessor (`done` or `skipped`) and its own `status` is `pending` or `ready`;
 `blocked` means a prerequisite is not terminal and is not a terminal outcome. Terminal outcomes
@@ -90,7 +95,7 @@ wave-result, or the write is refused (fail-closed, inside the same locked read-m
 rest of graph_executor's contract checks). `method` names what artifact check was run (e.g. `"gh pr
 view"`, `"git status"`); `result` records what it found. `retry.attempts`
 starts at zero and may not exceed
-`retry.max`, which is an integer from 0 through 5. A retry increments `attempts` only for a
+`retry.max`, which is an integer from 1 through 5. A retry increments `attempts` only for a
 distinct diagnosed attempt; once the bound is reached, the node terminates as `hard-stop`.
 Edges must reference existing node IDs, cannot self-loop, and a join's `mode: "all"` releases
 only after every listed input is terminal-success. This records dependencies, readiness, outcomes,
@@ -118,7 +123,7 @@ the rest of that count, so a skill loaded only to read this file isn't blocked f
 invocation count re-arms the block. Session-mismatch and stale-complete-after-rearm carry no such
 grace and block every time.
 
-- **Stub-first (Phase -2):** `status: "initialising"`, stamped with this `session_id`.
+- **Stub-first (Phase -2):** `status: "initialising"`, stamped with this `session_id`, a new unique non-blank `loop_id`, and integer `revision: 0`.
 - **Enrich at Phase 0:** record the envelope verbatim in `authorising_prompt_raw`; `status: "in-progress"`.
 - **Update at each phase boundary:** `graph` node states, work-unit states, disposition fields, `last_updated` — carry `loop_stop_counts` forward per the rule above.
 - **Teardown at Phase 13:** call `als_mark_complete <cwd> <session_id>` (from
