@@ -34,9 +34,10 @@ plugin and installs its bundled agent definitions under `${CODEX_HOME:-~/.codex}
 Codex skips plugin hooks until you review and trust them. After installation,
 start a fresh Codex session, run `/hooks`, and review and trust the Coderails hooks.
 
-Per project, run once: `/coderails:init` scaffolds `.coderails/workflow.config.yaml`
-from [`examples/workflow.config.yaml`](./examples/workflow.config.yaml) — the
-preferred way to set up a new repo.
+Per project, run once: Claude Code users run `/coderails:init`; Codex users run
+`$coderails-codex:init`. Both scaffold `.coderails/workflow.config.yaml` from
+[`examples/workflow.config.yaml`](./examples/workflow.config.yaml) — the preferred
+way to set up a new repo.
 
 ## Commands
 
