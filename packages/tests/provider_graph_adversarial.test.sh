@@ -119,12 +119,17 @@ write_evals() {
 write_completion_evidence() {
 	local state="$1" evals="$2" proof="$3" retro="$4"
 	write_evals "$evals" "$(jq -r '.revision' "$state")"
-	jq -n '{session_id:"session-test",loop_id:"loop-test",proofs:[{id:"P1",status:"pass",evidence:"observed"}]}' >"$proof"
+	jq -n '{session_id:"session-test",loop_id:"loop-test",proofs:[{id:"P1",cmd:"true",status:"pass",evidence:"observed"}]}' >"$proof"
+	printf '%s\n' \
+		'{"type":"function_call","name":"exec_command","call_id":"proof-1","arguments":"{\"cmd\":\"true\"}"}' \
+		'{"type":"function_call_output","call_id":"proof-1","output":"{\"exit_code\":0}"}' \
+		>"${proof}.transcript.jsonl"
 	jq -n '{schema_version:2,session_id:"session-test",loop_id:"loop-test",status:"complete"}' >"$retro"
 }
 codex_complete() {
 	python3 "$ROOT/packages/codex/skills/agentic-loop/scripts/graph.py" complete "$1" \
-		--session session-test --evals "$2" --proof "$3" --retro "$4"
+		--session session-test --evals "$2" --proof "$3" --retro "$4" \
+		--transcript "${3}.transcript.jsonl"
 }
 test_codex_completion_evidence() {
 	local state="$TMP/codex.complete.$RANDOM.json" evals="$TMP/evals.$RANDOM" proof="$TMP/proof.$RANDOM" retro="$TMP/retro.$RANDOM"
@@ -187,7 +192,7 @@ test_codex_dispatch_guard() {
 	local guard="$ROOT/packages/codex/hooks/scripts/loop_dispatch_guard.sh" root input
 	root="$TMP/dispatch.valid"
 	dispatch_fixture "$root"
-	input=$(dispatch_input spawn_agent loop-worker-A)
+	input=$(dispatch_input spawn_agent loop_worker_41)
 	expect_hook_allowed "canonical owned spawn_agent is allowed" hook_denied "$guard" "$root" "$input"
 	expect_denied "Claude Agent is never a Codex matcher alias" hook_denied "$guard" "$root" "$(dispatch_input Agent loop-worker-A)"
 
@@ -196,7 +201,7 @@ test_codex_dispatch_guard() {
 	expect_denied "dispatch requires an active wave" hook_denied "$guard" "$root" "$input"
 	root="$TMP/dispatch.task"
 	dispatch_fixture "$root"
-	expect_denied "caller-chosen task name cannot bypass node ownership" hook_denied "$guard" "$root" "$(dispatch_input spawn_agent loop-worker-BYPASS)"
+	expect_denied "caller-chosen task name cannot bypass node ownership" hook_denied "$guard" "$root" "$(dispatch_input spawn_agent loop_worker_425950415353)"
 	root="$TMP/dispatch.pr"
 	dispatch_fixture "$root" yes pr
 	expect_denied "PR-scope evals do not authorize loop dispatch" hook_denied "$guard" "$root" "$input"
@@ -251,7 +256,7 @@ negative_control() {
 	local fake="$TMP/permissive-guard.sh" root="$TMP/negative"
 	printf '%s\n' '#!/usr/bin/env bash' 'exit 0' >"$fake"
 	chmod +x "$fake"
-	expect_denied "permissive fake guard is detected" hook_denied "$fake" "$root" "$(dispatch_input spawn_agent loop-worker-A)"
+	expect_denied "permissive fake guard is detected" hook_denied "$fake" "$root" "$(dispatch_input spawn_agent loop_worker_41)"
 }
 
 if [[ "${1:-}" == "--negative-control" ]]; then

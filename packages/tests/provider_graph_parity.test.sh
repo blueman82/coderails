@@ -117,12 +117,12 @@ provider_can_complete() {
             --session "$session" --evals "$evals" --proof "$proof" --retro "$retro"
     else
         codex_graph_call complete "$state" \
-            --session "$session" --evals "$evals" --proof "$proof" --retro "$retro"
+            --session "$session" --evals "$evals" --proof "$proof" --retro "$retro" --transcript "${proof}.transcript.jsonl"
     fi
 }
 provider_authorize_dispatch() {
     local state="$1" evals="$2" session="$3" mode="$4"
-    local guard input guard_root state_dir output node="A"
+    local guard input guard_root state_dir output node="A" dispatch
     [[ ! -f "$state" ]] || node=$(jq -r '.graph.active_wave.nodes[0] // "A"' "$state")
     guard_root="$TMP/guard.$CURRENT_PROVIDER.$RANDOM"
     state_dir="$guard_root/fixture/$session"
@@ -131,17 +131,18 @@ provider_authorize_dispatch() {
     [[ -f "$evals" ]] && ln -s "$evals" "$state_dir/evals.json"
     if [[ "$CURRENT_PROVIDER" == "claude" ]]; then
         guard="$CLAUDE_GUARD"
+        dispatch=$(jq -c --arg node "$node" '{session_id,loop_id,revision,wave_id:.graph.active_wave.wave_id,node_id:$node}' "$state" 2>/dev/null || true)
         if [[ "$mode" == "sandbox" ]]; then
-            input=$(jq -cn --arg session "$session" --arg cwd "$ROOT" \
-                '{tool_name:"Bash",session_id:$session,cwd:$cwd,tool_input:{command:"scripts/sandbox/spawn-sandboxed-worker.sh worktree prompt model"}}')
+            input=$(jq -cn --arg session "$session" --arg cwd "$ROOT" --arg prompt "CODERAILS_GRAPH_DISPATCH=$dispatch"$'\n'"Implement graph work unit" \
+                '{tool_name:"Bash",session_id:$session,cwd:$cwd,tool_input:{command:"scripts/sandbox/spawn-sandboxed-worker.sh worktree prompt model",prompt:$prompt}}')
         else
-            input=$(jq -cn --arg session "$session" --arg cwd "$ROOT" \
-                '{tool_name:"Agent",session_id:$session,cwd:$cwd,tool_input:{subagent_type:"coderails:loop-worker"}}')
+            input=$(jq -cn --arg session "$session" --arg cwd "$ROOT" --arg prompt "CODERAILS_GRAPH_DISPATCH=$dispatch"$'\n'"Implement graph work unit" \
+                '{tool_name:"Agent",session_id:$session,cwd:$cwd,tool_input:{subagent_type:"coderails:loop-worker",prompt:$prompt}}')
         fi
     else
         [[ "$mode" != "sandbox" ]] || return 1
         guard="$CODEX_GUARD"
-        input=$(jq -cn --arg session "$session" --arg cwd "$ROOT" --arg task "loop-worker-$node" \
+        input=$(jq -cn --arg session "$session" --arg cwd "$ROOT" --arg task "loop_worker_$(printf '%s' "$node" | od -An -tx1 | tr -d ' \n')" \
             '{tool_name:"spawn_agent",session_id:$session,cwd:$cwd,tool_input:{task_name:$task,message:"Implement graph work unit"}}')
     fi
     [[ -x "$guard" ]] || return 127
@@ -263,7 +264,8 @@ write_completion_artifacts() {
         }' >"$evals"
     "$ROOT/scripts/post_evals.sh" grade-loop "$evals" >/dev/null
     jq -n --arg session "$session" --arg loop "$loop" \
-        '{session_id:$session,loop_id:$loop,proofs:[{id:"P1",status:"pass",evidence:"ran"}]}' >"$proof"
+        '{session_id:$session,loop_id:$loop,proofs:[{id:"P1",cmd:"true",status:"pass",evidence:"ran"}]}' >"$proof"
+    printf '%s\n' '{"type":"function_call","name":"exec_command","call_id":"proof-1","arguments":"{\"cmd\":\"true\"}"}' '{"type":"function_call_output","call_id":"proof-1","output":"{\"exit_code\":0}"}' >"${proof}.transcript.jsonl"
     jq -n --arg session "$session" --arg loop "$loop" \
         '{schema_version:2,session_id:$session,loop_id:$loop,status:"complete"}' >"$retro"
 }
