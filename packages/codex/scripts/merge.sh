@@ -129,7 +129,7 @@ merge::has_wiki_ingest_for_merged_prs() {
         return 0
     fi
     if ! [[ "$epoch" =~ ^[0-9]+$ ]]; then
-        err "wiki_debt_epoch_pr ('$epoch') is not a PR number — fix .codex/workflow.config.yaml."
+        err "wiki_debt_epoch_pr ('$epoch') is not a PR number — fix .coderails/workflow.config.yaml."
     fi
 
     # wiki_path may be relative (resolved against the config's project root —
@@ -335,7 +335,7 @@ merge::main() {
             ok "Approved"
         }
         if [[ -z "$(coderails::config_path "$PWD")" ]]; then
-            info "No .codex/workflow.config.yaml — review and eval artifact gates still apply."
+            info "No .coderails/workflow.config.yaml — review and eval artifact gates still apply."
         fi
 
         # ─── Review artifact gate (fail-closed) ───────────────────────────

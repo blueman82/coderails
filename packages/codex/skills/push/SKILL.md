@@ -10,7 +10,7 @@ Use the package-local [push helper](../../scripts/push.sh) for the final stage, 
 ## Before pushing
 
 1. Confirm the current directory is a Git repository and the current branch is neither `main` nor `master`. Stop on either failure.
-2. Resolve the nearest `.codex/workflow.config.yaml` between the current directory and the repository root. Treat an absent file as no project config.
+2. Resolve the nearest `.coderails/workflow.config.yaml` between the current directory and the repository root. Treat an absent file as no project config.
 3. Unless the user requested quick mode, inspect changed files against the remote default branch. If configured `engineering_principles_paths` match, invoke `$coderails-codex:engineering-principles` on those files.
 4. Treat violations of documented architecture, registration rules, or required contract tests as blocking. Present them and use `request_user_input` to ask whether to fix them or push as-is. If user input is unavailable, stop before pushing. Style and naming suggestions are non-blocking.
 

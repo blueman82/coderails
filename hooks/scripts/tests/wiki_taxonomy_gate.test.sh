@@ -19,18 +19,18 @@ export CLAUDE_DISCIPLINE_LOG="$TMP/discipline.log"
 # not match production — which is exactly how the defect survived. These
 # fixtures now mirror the real shape: a vault with NO AGENTS.md of its own.
 SCHEMA="$TMP/plugin"
-mkdir -p "$SCHEMA/.claude"
+mkdir -p "$SCHEMA/.coderails"
 # The gate identifies the vault POSITIVELY from wiki_path, not from directory
 # shape. Structure alone over-blocks: an ordinary Claude plugin (commands/ +
 # hooks/ + skills/) and a data pipeline (sources/ + investigations/) both
 # clear a ">=2 sanctioned dirs" test, and both had unrelated writes blocked
 # when this gate identified vaults structurally. The fixture therefore needs
 # a config pointing at the vault, exactly as production does.
-cat > "$SCHEMA/.claude/workflow.config.yaml" <<'EOF'
+cat >"$SCHEMA/.coderails/workflow.config.yaml" <<'EOF'
 project: test
 wiki_path: ../vault
 EOF
-cat > "$SCHEMA/AGENTS-wiki-schema.md" <<'EOF'
+cat >"$SCHEMA/AGENTS-wiki-schema.md" <<'EOF'
 # Wiki schema
 
 ## Page types
@@ -67,7 +67,7 @@ mkdir -p "$NOSECTION"
 git -C "$NOSECTION" init -q
 git -C "$NOSECTION" config user.email t@t.t
 git -C "$NOSECTION" config user.name t
-printf '# AGENTS.md\n\nSome other content.\n' > "$NOSECTION/AGENTS.md"
+printf '# AGENTS.md\n\nSome other content.\n' >"$NOSECTION/AGENTS.md"
 git -C "$NOSECTION" add AGENTS.md
 git -C "$NOSECTION" commit -q -m init
 
@@ -78,7 +78,7 @@ mkdir -p "$BADSHAPE"
 git -C "$BADSHAPE" init -q
 git -C "$BADSHAPE" config user.email t@t.t
 git -C "$BADSHAPE" config user.name t
-cat > "$BADSHAPE/AGENTS.md" <<'EOF'
+cat >"$BADSHAPE/AGENTS.md" <<'EOF'
 # AGENTS.md
 
 ## Page types
@@ -91,50 +91,54 @@ git -C "$BADSHAPE" commit -q -m init
 fails=0
 
 payload() { # tool file_path cwd -> json
-  printf '{"tool_name":"%s","tool_input":{"file_path":"%s"},"cwd":"%s"}' "$1" "$2" "$3"
+    printf '{"tool_name":"%s","tool_input":{"file_path":"%s"},"cwd":"%s"}' "$1" "$2" "$3"
 }
 run() { # payload -> DENY|ALLOW
-  local out
-  out=$(printf '%s' "$1" | bash "$HOOK" 2>/dev/null)
-  if printf '%s' "$out" | grep -q '"permissionDecision": *"deny"'; then echo DENY; else echo ALLOW; fi
+    local out
+    out=$(printf '%s' "$1" | bash "$HOOK" 2>/dev/null)
+    if printf '%s' "$out" | grep -q '"permissionDecision": *"deny"'; then echo DENY; else echo ALLOW; fi
 }
 check() { # desc expected actual
-  if [ "$2" = "$3" ]; then printf 'ok   - %s\n' "$1"
-  else printf 'FAIL - %s (expected %s, got %s)\n' "$1" "$2" "$3"; fails=$((fails+1)); fi
+    if [ "$2" = "$3" ]; then
+        printf 'ok   - %s\n' "$1"
+    else
+        printf 'FAIL - %s (expected %s, got %s)\n' "$1" "$2" "$3"
+        fails=$((fails + 1))
+    fi
 }
 
 # Vault + sanctioned directory -> allow.
 check "vault, sanctioned investigations/ -> allow" \
-  ALLOW "$(run "$(payload Write "$VAULT/investigations/foo.md" "$VAULT")")"
+    ALLOW "$(run "$(payload Write "$VAULT/investigations/foo.md" "$VAULT")")"
 
 # Vault + unsanctioned directory -> deny (the incident case).
 check "vault, unsanctioned decisions/ -> deny" \
-  DENY "$(run "$(payload Write "$VAULT/decisions/foo.md" "$VAULT")")"
+    DENY "$(run "$(payload Write "$VAULT/decisions/foo.md" "$VAULT")")"
 
 # Vault + raw/ (structural, not a page type) -> allow.
 check "vault, raw/ -> allow" \
-  ALLOW "$(run "$(payload Write "$VAULT/raw/dropped.pdf" "$VAULT")")"
+    ALLOW "$(run "$(payload Write "$VAULT/raw/dropped.pdf" "$VAULT")")"
 
 # Vault-root file -> allow.
 check "vault, root index.md -> allow" \
-  ALLOW "$(run "$(payload Write "$VAULT/index.md" "$VAULT")")"
+    ALLOW "$(run "$(payload Write "$VAULT/index.md" "$VAULT")")"
 
 # Vault + dotfile tooling dir -> allow.
 check "vault, .obsidian/ dir -> allow" \
-  ALLOW "$(run "$(payload Write "$VAULT/.obsidian/workspace.json" "$VAULT")")"
+    ALLOW "$(run "$(payload Write "$VAULT/.obsidian/workspace.json" "$VAULT")")"
 
 # Non-vault repo, ANY path incl. a decisions/ dir -> allow (inert outside wikis).
 check "non-vault repo, decisions/ -> allow" \
-  ALLOW "$(run "$(payload Write "$NOVAULT/decisions/foo.md" "$NOVAULT")")"
+    ALLOW "$(run "$(payload Write "$NOVAULT/decisions/foo.md" "$NOVAULT")")"
 
 # Vault whose AGENTS.md lacks a Page types section -> allow (fail-open).
 check "AGENTS.md with no Page types section -> allow" \
-  ALLOW "$(run "$(payload Write "$NOSECTION/decisions/foo.md" "$NOSECTION")")"
+    ALLOW "$(run "$(payload Write "$NOSECTION/decisions/foo.md" "$NOSECTION")")"
 
 # Page types section present but table shape unparseable (zero dirs) -> allow
 # (fail-open direction; an empty parse must never be read as an empty taxonomy).
 check "Page types section, unparseable table -> allow" \
-  ALLOW "$(run "$(payload Write "$BADSHAPE/decisions/foo.md" "$BADSHAPE")")"
+    ALLOW "$(run "$(payload Write "$BADSHAPE/decisions/foo.md" "$BADSHAPE")")"
 
 # $DOCREPO — the regression this hook shipped with and team-lead caught live:
 # a CODE repo whose root AGENTS.md documents a taxonomy it does not itself
@@ -148,7 +152,7 @@ mkdir -p "$DOCREPO/src" "$DOCREPO/lib"
 git -C "$DOCREPO" init -q
 git -C "$DOCREPO" config user.email t@t.t
 git -C "$DOCREPO" config user.name t
-cat > "$DOCREPO/AGENTS.md" <<'EOF'
+cat >"$DOCREPO/AGENTS.md" <<'EOF'
 # AGENTS.md
 
 ## Page types
@@ -162,9 +166,9 @@ EOF
 git -C "$DOCREPO" add AGENTS.md
 git -C "$DOCREPO" commit -q -m init
 check "code repo documenting a taxonomy it doesn't implement, src/ -> allow" \
-  ALLOW "$(run "$(payload Write "$DOCREPO/src/app.ts" "$DOCREPO")")"
+    ALLOW "$(run "$(payload Write "$DOCREPO/src/app.ts" "$DOCREPO")")"
 check "code repo documenting a taxonomy it doesn't implement, lib/ -> allow" \
-  ALLOW "$(run "$(payload Write "$DOCREPO/lib/util.ts" "$DOCREPO")")"
+    ALLOW "$(run "$(payload Write "$DOCREPO/lib/util.ts" "$DOCREPO")")"
 
 # $ONEDIR — a repo with exactly ONE sanctioned dir present (below the >=2
 # threshold) -> still not a vault, still allow. Confirms the threshold is a
@@ -174,7 +178,7 @@ mkdir -p "$ONEDIR/architecture" "$ONEDIR/src"
 git -C "$ONEDIR" init -q
 git -C "$ONEDIR" config user.email t@t.t
 git -C "$ONEDIR" config user.name t
-cat > "$ONEDIR/AGENTS.md" <<'EOF'
+cat >"$ONEDIR/AGENTS.md" <<'EOF'
 # AGENTS.md
 
 ## Page types
@@ -188,7 +192,7 @@ EOF
 git -C "$ONEDIR" add AGENTS.md
 git -C "$ONEDIR" commit -q -m init
 check "only 1 sanctioned dir present (below threshold), src/ -> allow" \
-  ALLOW "$(run "$(payload Write "$ONEDIR/src/app.ts" "$ONEDIR")")"
+    ALLOW "$(run "$(payload Write "$ONEDIR/src/app.ts" "$ONEDIR")")"
 
 # $NOMARKER — the coderails-shaped case: a plugin/code repo whose AGENTS.md
 # has a parseable Page types table AND clears the >=2 structural threshold
@@ -205,7 +209,7 @@ mkdir -p "$NOMARKER/commands" "$NOMARKER/hooks" "$NOMARKER/skills"
 git -C "$NOMARKER" init -q
 git -C "$NOMARKER" config user.email t@t.t
 git -C "$NOMARKER" config user.name t
-cat > "$NOMARKER/AGENTS.md" <<'EOF'
+cat >"$NOMARKER/AGENTS.md" <<'EOF'
 # AGENTS.md
 
 ## Page types
@@ -219,18 +223,18 @@ EOF
 git -C "$NOMARKER" add AGENTS.md
 git -C "$NOMARKER" commit -q -m init
 check "overlapping dirs + parseable table but NO marker, hooks/ -> allow" \
-  ALLOW "$(run "$(payload Write "$NOMARKER/hooks/foo.sh" "$NOMARKER")")"
+    ALLOW "$(run "$(payload Write "$NOMARKER/hooks/foo.sh" "$NOMARKER")")"
 check "overlapping dirs + parseable table but NO marker, commands/ -> allow" \
-  ALLOW "$(run "$(payload Write "$NOMARKER/commands/foo.md" "$NOMARKER")")"
+    ALLOW "$(run "$(payload Write "$NOMARKER/commands/foo.md" "$NOMARKER")")"
 
 # Negative control: prove DENY actually fires, not just that the script exits 0.
 out=$(printf '%s' "$(payload Write "$VAULT/decisions/foo.md" "$VAULT")" | bash "$HOOK" 2>/dev/null)
 check "deny output carries permissionDecision=deny literally" \
-  1 "$(printf '%s' "$out" | grep -c '"permissionDecision": *"deny"')"
+    1 "$(printf '%s' "$out" | grep -c '"permissionDecision": *"deny"')"
 check "deny reason names the rejected directory" \
-  1 "$(printf '%s' "$out" | grep -c 'decisions/')"
+    1 "$(printf '%s' "$out" | grep -c 'decisions/')"
 check "deny reason names a sanctioned directory" \
-  1 "$(printf '%s' "$out" | grep -c 'investigations/')"
+    1 "$(printf '%s' "$out" | grep -c 'investigations/')"
 # The deny reason is user-facing and must name the file the user has to edit.
 # It previously interpolated an undefined variable, so it rendered a BLANK
 # filename and directed the reader to a Page types table in AGENTS.md — a file
@@ -238,11 +242,11 @@ check "deny reason names a sanctioned directory" \
 # block. Neither the ALLOW/DENY corpus nor any prior assertion caught it,
 # because both only inspect permissionDecision, never the reason text.
 check "deny reason names the schema file, not a blank" \
-  1 "$(printf '%s' "$out" | grep -c 'AGENTS-wiki-schema.md')"
+    1 "$(printf '%s' "$out" | grep -c 'AGENTS-wiki-schema.md')"
 check "deny reason has no empty 'per :' interpolation" \
-  0 "$(printf '%s' "$out" | grep -c 'per : ')"
+    0 "$(printf '%s' "$out" | grep -c 'per : ')"
 check "deny reason does not misdirect to AGENTS.md" \
-  0 "$(printf '%s' "$out" | grep -c "AGENTS.md's Page types")"
+    0 "$(printf '%s' "$out" | grep -c "AGENTS.md's Page types")"
 
 # Real-vault sanity check, against THIS project's configured vault. The gate
 # now identifies the vault positively from wiki_path, so a vault is gated only
@@ -252,29 +256,29 @@ check "deny reason does not misdirect to AGENTS.md" \
 # so the suite stays portable across machines/CI.
 REALPLUGIN="/Users/harrison/Github/coderails"
 REALVAULT="/Users/harrison/Github/coderails-wiki"
-if [ -f "$REALPLUGIN/.claude/workflow.config.yaml" ] && [ -d "$REALVAULT/.git" ]; then
-  # CLAUDE_PLUGIN_ROOT is read from the ENVIRONMENT, not from the payload's
-  # cwd field — point it at the real plugin for this block, then restore.
-  SAVED_ROOT="$CLAUDE_PLUGIN_ROOT"
-  export CLAUDE_PLUGIN_ROOT="$REALPLUGIN"
-  check "real vault, unsanctioned decisions/ -> deny" \
-    DENY "$(run "$(payload Write "$REALVAULT/decisions/foo.md" "$REALPLUGIN")")"
-  # A real root file beyond the index.md/log.md pair — confirms root-file
-  # detection is structural (no directory component), not a hardcoded name
-  # list that would miss it.
-  check "real vault, root log.md -> allow" \
-    ALLOW "$(run "$(payload Write "$REALVAULT/log.md" "$REALPLUGIN")")"
-  check "real vault, sanctioned sources/ -> allow" \
-    ALLOW "$(run "$(payload Write "$REALVAULT/sources/foo.md" "$REALPLUGIN")")"
-  # An unrelated vault on the same machine is not this plugin's vault.
-  UNRELATED="/Users/harrison/Github/assistant-agent-wiki"
-  if [ -d "$UNRELATED/.git" ]; then
-    check "unrelated wiki is not this plugin's vault -> allow" \
-      ALLOW "$(run "$(payload Write "$UNRELATED/decisions/foo.md" "$REALPLUGIN")")"
-  fi
-  export CLAUDE_PLUGIN_ROOT="$SAVED_ROOT"
+if [ -f "$REALPLUGIN/.coderails/workflow.config.yaml" ] && [ -d "$REALVAULT/.git" ]; then
+    # CLAUDE_PLUGIN_ROOT is read from the ENVIRONMENT, not from the payload's
+    # cwd field — point it at the real plugin for this block, then restore.
+    SAVED_ROOT="$CLAUDE_PLUGIN_ROOT"
+    export CLAUDE_PLUGIN_ROOT="$REALPLUGIN"
+    check "real vault, unsanctioned decisions/ -> deny" \
+        DENY "$(run "$(payload Write "$REALVAULT/decisions/foo.md" "$REALPLUGIN")")"
+    # A real root file beyond the index.md/log.md pair — confirms root-file
+    # detection is structural (no directory component), not a hardcoded name
+    # list that would miss it.
+    check "real vault, root log.md -> allow" \
+        ALLOW "$(run "$(payload Write "$REALVAULT/log.md" "$REALPLUGIN")")"
+    check "real vault, sanctioned sources/ -> allow" \
+        ALLOW "$(run "$(payload Write "$REALVAULT/sources/foo.md" "$REALPLUGIN")")"
+    # An unrelated vault on the same machine is not this plugin's vault.
+    UNRELATED="/Users/harrison/Github/assistant-agent-wiki"
+    if [ -d "$UNRELATED/.git" ]; then
+        check "unrelated wiki is not this plugin's vault -> allow" \
+            ALLOW "$(run "$(payload Write "$UNRELATED/decisions/foo.md" "$REALPLUGIN")")"
+    fi
+    export CLAUDE_PLUGIN_ROOT="$SAVED_ROOT"
 else
-  printf 'ok   - real vault check skipped (paths not present on this machine)\n'
+    printf 'ok   - real vault check skipped (paths not present on this machine)\n'
 fi
 
 # Real-repo false-positive check: assistant-agent is the CODE repo whose
@@ -287,14 +291,14 @@ fi
 # skip cleanly if the path is absent.
 REALCODEREPO="/Users/harrison/Github/assistant-agent"
 if [ -d "$REALCODEREPO/.git" ] && [ -f "$REALCODEREPO/AGENTS.md" ]; then
-  check "real assistant-agent repo, proactive/ -> allow" \
-    ALLOW "$(run "$(payload Write "$REALCODEREPO/proactive/memoryIndex.ts" "$REALCODEREPO")")"
-  check "real assistant-agent repo, bridge/ -> allow" \
-    ALLOW "$(run "$(payload Write "$REALCODEREPO/bridge/telegram-bridge.ts" "$REALCODEREPO")")"
-  check "real assistant-agent repo, gate/ -> allow" \
-    ALLOW "$(run "$(payload Write "$REALCODEREPO/gate/sendGate.ts" "$REALCODEREPO")")"
+    check "real assistant-agent repo, proactive/ -> allow" \
+        ALLOW "$(run "$(payload Write "$REALCODEREPO/proactive/memoryIndex.ts" "$REALCODEREPO")")"
+    check "real assistant-agent repo, bridge/ -> allow" \
+        ALLOW "$(run "$(payload Write "$REALCODEREPO/bridge/telegram-bridge.ts" "$REALCODEREPO")")"
+    check "real assistant-agent repo, gate/ -> allow" \
+        ALLOW "$(run "$(payload Write "$REALCODEREPO/gate/sendGate.ts" "$REALCODEREPO")")"
 else
-  printf 'ok   - real assistant-agent repo check skipped (path not present on this machine)\n'
+    printf 'ok   - real assistant-agent repo check skipped (path not present on this machine)\n'
 fi
 
 # Taxonomy-is-dynamic: add a fake type to the SCHEMA (not to the vault),
@@ -311,12 +315,12 @@ git -C "$DYNAMIC" commit -q --allow-empty -m init
 
 # Point the gate at a schema that does NOT yet name zorptastic2.
 DYNSCHEMA="$TMP/dynplugin"
-mkdir -p "$DYNSCHEMA/.claude"
-cat > "$DYNSCHEMA/.claude/workflow.config.yaml" <<'EOF'
+mkdir -p "$DYNSCHEMA/.coderails"
+cat >"$DYNSCHEMA/.coderails/workflow.config.yaml" <<'EOF'
 project: dyn
 wiki_path: ../dynamic
 EOF
-cat > "$DYNSCHEMA/AGENTS-wiki-schema.md" <<'EOF'
+cat >"$DYNSCHEMA/AGENTS-wiki-schema.md" <<'EOF'
 # Wiki schema
 
 ## Page types
@@ -328,17 +332,19 @@ cat > "$DYNSCHEMA/AGENTS-wiki-schema.md" <<'EOF'
 EOF
 export CLAUDE_PLUGIN_ROOT="$DYNSCHEMA"
 check "dynamic taxonomy: fake type not yet added -> deny" \
-  DENY "$(run "$(payload Write "$DYNAMIC/zorptastic2/foo.md" "$DYNAMIC")")"
+    DENY "$(run "$(payload Write "$DYNAMIC/zorptastic2/foo.md" "$DYNAMIC")")"
 check "dynamic taxonomy: fake type present in table -> allow" \
-  ALLOW "$(run "$(payload Write "$DYNAMIC/zorptastic/foo.md" "$DYNAMIC")")"
+    ALLOW "$(run "$(payload Write "$DYNAMIC/zorptastic/foo.md" "$DYNAMIC")")"
 
 # Editing the SCHEMA changes enforcement with no hook edit — the property the
 # whole design rests on. Same path, same vault, opposite verdict, and the only
 # thing that changed is a row in the schema table.
 mkdir -p "$DYNAMIC/zorptastic2"
-printf '| `zorptastic2/` | Added after the fact |\n' >> "$DYNSCHEMA/AGENTS-wiki-schema.md"
+# Backticks are literal Markdown in this fixture.
+# shellcheck disable=SC2016
+printf '| `zorptastic2/` | Added after the fact |\n' >>"$DYNSCHEMA/AGENTS-wiki-schema.md"
 check "dynamic taxonomy: adding the row to the schema flips deny -> allow" \
-  ALLOW "$(run "$(payload Write "$DYNAMIC/zorptastic2/foo.md" "$DYNAMIC")")"
+    ALLOW "$(run "$(payload Write "$DYNAMIC/zorptastic2/foo.md" "$DYNAMIC")")"
 
 # The plugin repo itself is never a vault, even though its own directory names
 # overlap the taxonomy it defines. This replaces the old wiki-vault marker,
@@ -352,12 +358,18 @@ git -C "$PLUGINREPO" config user.name t
 git -C "$PLUGINREPO" commit -q --allow-empty -m init
 export CLAUDE_PLUGIN_ROOT="$PLUGINREPO"
 check "plugin repo is never a vault -> allow" \
-  ALLOW "$(run "$(payload Write "$PLUGINREPO/unsanctioned/foo.md" "$PLUGINREPO")")"
+    ALLOW "$(run "$(payload Write "$PLUGINREPO/unsanctioned/foo.md" "$PLUGINREPO")")"
 
 # Schema unreachable must FAIL OPEN, never block-everything.
 export CLAUDE_PLUGIN_ROOT="$TMP/does-not-exist"
 check "schema unreachable -> fail open" \
-  ALLOW "$(run "$(payload Write "$VAULT/decisions/foo.md" "$VAULT")")"
+    ALLOW "$(run "$(payload Write "$VAULT/decisions/foo.md" "$VAULT")")"
 export CLAUDE_PLUGIN_ROOT="$SCHEMA"
 
-[ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails)"; exit 1; }
+if [ "$fails" -eq 0 ]; then
+    echo "PASS"
+    exit 0
+else
+    echo "FAILED ($fails)"
+    exit 1
+fi

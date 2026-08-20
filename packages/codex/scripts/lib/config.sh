@@ -2,9 +2,9 @@
 #═══════════════════════════════════════════════════════════════════════════════
 #  config.sh │ Codex workflow.config.yaml resolution
 #═══════════════════════════════════════════════════════════════════════════════
-# Single source of truth for locating a project's Codex workflow config.
+# Single source of truth for locating a project's workflow config.
 # Resolution walks up from a start directory to the git root; the first
-# .codex/workflow.config.yaml found wins. Layout-agnostic: standalone repos,
+# .coderails/workflow.config.yaml found wins. Layout-agnostic: standalone repos,
 # classic projects/<name>/ monorepos, and arbitrary layouts (apps/web,
 # services/api, …) all resolve from any subdir. Nearest wins — replacement, not
 # inheritance/merge.
@@ -14,7 +14,7 @@
 # empty output, not non-zero exit.
 
 # coderails::config_path [start_dir]
-#   Echo the first .codex/workflow.config.yaml found walking from start_dir
+#   Echo the first .coderails/workflow.config.yaml found walking from start_dir
 #   (default: $PWD) up to its git root; echo nothing if none / not in a repo.
 coderails::config_path() {
     local start="${1:-$PWD}"
@@ -28,8 +28,8 @@ coderails::config_path() {
     start=$(cd "$start" 2>/dev/null && pwd -P) || return 0
     d="$start"
     while :; do
-        [[ -f "$d/.codex/workflow.config.yaml" ]] && {
-            printf '%s\n' "$d/.codex/workflow.config.yaml"
+        [[ -f "$d/.coderails/workflow.config.yaml" ]] && {
+            printf '%s\n' "$d/.coderails/workflow.config.yaml"
             return 0
         }
         # Hard floor on "/" as well as git_root: even if a namespace mismatch slips

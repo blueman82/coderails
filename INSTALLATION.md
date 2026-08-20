@@ -106,14 +106,14 @@ then `install`.
 **4. Per project (run once per repo):**
 
 ```
-/coderails:init               # scaffolds .claude/workflow.config.yaml
+/coderails:init               # scaffolds .coderails/workflow.config.yaml
 /coderails:test-gate-setup     # optional — blocks commits when tests fail
 ```
 
-`/coderails:init` scaffolds `.claude/workflow.config.yaml` from
-[`examples/workflow.config.yaml`](./examples/workflow.config.yaml). Don't commit
-your own `.claude/workflow.config.yaml` if it holds real project or Jira values —
-treat it as machine-local config, same as `.claude/settings.local.json`.
+`/coderails:init` scaffolds `.coderails/workflow.config.yaml` from
+[`examples/workflow.config.yaml`](./examples/workflow.config.yaml). Review values
+before committing `.coderails/workflow.config.yaml` as shared project config. It
+is not machine-local config like `.claude/settings.local.json`.
 
 For Coderails itself, activate the repository quality hook once per clone:
 

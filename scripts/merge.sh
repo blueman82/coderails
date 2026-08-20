@@ -3,8 +3,12 @@
 #  merge.sh │ verify → merge → sync
 #═══════════════════════════════════════════════════════════════════════════════
 set -euo pipefail
+# These package-local sources are resolved from the runtime script path.
+# shellcheck disable=SC1091
 source "$(dirname "$0")/lib/git-common.sh"
+# shellcheck disable=SC1091
 source "$(dirname "$0")/lib/config.sh"
+# shellcheck disable=SC1091
 source "$(dirname "$0")/post_evals.sh"
 
 # coderails::_integrity_machine_user <config_file>
@@ -114,18 +118,18 @@ merge::has_wiki_ingest_for_merged_prs() {
     local config epoch="" wiki_rel=""
     config=$(coderails::config_path "$PWD")
     if [[ -n "$config" ]]; then
-        epoch=$(coderails::_wiki_debt_epoch_pr "$config") \
-            || err "Could not read $config for the wiki-ingest debt gate."
-        wiki_rel=$(coderails::_wiki_path "$config") \
-            || err "Could not read $config for the wiki-ingest debt gate."
+        epoch=$(coderails::_wiki_debt_epoch_pr "$config") ||
+            err "Could not read $config for the wiki-ingest debt gate."
+        wiki_rel=$(coderails::_wiki_path "$config") ||
+            err "Could not read $config for the wiki-ingest debt gate."
     fi
-    case "$wiki_rel" in null|'~') wiki_rel="" ;; esac
+    case "$wiki_rel" in null | '~') wiki_rel="" ;; esac
     if [[ -z "$epoch" || -z "$wiki_rel" ]]; then
         info "Wiki-ingest debt gate (has_wiki_ingest_for_merged_prs) skipped — wiki_debt_epoch_pr and/or wiki_path not configured."
         return 0
     fi
     if ! [[ "$epoch" =~ ^[0-9]+$ ]]; then
-        err "wiki_debt_epoch_pr ('$epoch') is not a PR number — fix .claude/workflow.config.yaml."
+        err "wiki_debt_epoch_pr ('$epoch') is not a PR number — fix .coderails/workflow.config.yaml."
     fi
 
     # wiki_path may be relative (resolved against the config's project root —
@@ -134,8 +138,8 @@ merge::has_wiki_ingest_for_merged_prs() {
     local project_root vault
     project_root=$(dirname "$(dirname "$config")")
     case "$wiki_rel" in
-        /*) vault=$(cd "$wiki_rel" 2>/dev/null && pwd -P) || vault="" ;;
-        *)  vault=$(cd "$project_root/$wiki_rel" 2>/dev/null && pwd -P) || vault="" ;;
+    /*) vault=$(cd "$wiki_rel" 2>/dev/null && pwd -P) || vault="" ;;
+    *) vault=$(cd "$project_root/$wiki_rel" 2>/dev/null && pwd -P) || vault="" ;;
     esac
     if [[ -z "$vault" ]]; then
         err "wiki_path ('$wiki_rel') does not resolve to a directory — fix it (or unset wiki_debt_epoch_pr to disable the wiki-ingest debt gate)."
@@ -154,14 +158,14 @@ merge::has_wiki_ingest_for_merged_prs() {
     repo_escaped=$(printf '%s' "$repo" | sed 's/[][$.*+?^(){}|\\]/\\&/g')
 
     local merged
-    merged=$(gh pr list --state merged --json number --limit 100 2>/dev/null) \
-        || err "GitHub fetch failed — could not list merged PRs for the wiki-ingest debt gate. Retry, or check gh auth/network."
+    merged=$(gh pr list --state merged --json number --limit 100 2>/dev/null) ||
+        err "GitHub fetch failed — could not list merged PRs for the wiki-ingest debt gate. Retry, or check gh auth/network."
     # gh can exit 0 with empty stdout on some failure modes — jq would then
     # "parse" nothing and the gate would silently see zero merged PRs.
     [[ -n "$merged" ]] || err "GitHub returned an empty merged-PR response for the wiki-ingest debt gate."
     local merged_count
-    merged_count=$(printf '%s' "$merged" | jq -r 'length' 2>/dev/null) \
-        || err "Could not parse the merged PR list for the wiki-ingest debt gate."
+    merged_count=$(printf '%s' "$merged" | jq -r 'length' 2>/dev/null) ||
+        err "Could not parse the merged PR list for the wiki-ingest debt gate."
     # gh pr list returns newest-first, so a full window truncates the OLDEST
     # merged PRs — exactly the ones most likely to carry unpaid debt. A full
     # window means unknown PRs went unchecked: fail closed.
@@ -170,29 +174,29 @@ merge::has_wiki_ingest_for_merged_prs() {
     fi
     local candidates
     candidates=$(printf '%s' "$merged" | jq -r --argjson epoch "$epoch" --argjson cur "$num" \
-        '.[].number | select(. > $epoch and . != $cur)' 2>/dev/null) \
-        || err "Could not parse the merged PR list for the wiki-ingest debt gate."
+        '.[].number | select(. > $epoch and . != $cur)' 2>/dev/null) ||
+        err "Could not parse the merged PR list for the wiki-ingest debt gate."
     if [[ -z "$candidates" ]]; then
         ok "Wiki-ingest debt clear (no merged PRs after epoch #$epoch)"
         return 0
     fi
 
-    git -C "$vault" fetch -q origin main \
-        || err "Wiki fetch failed — could not fetch origin main in $vault for the wiki-ingest debt gate. Retry, or check the vault path/network."
+    git -C "$vault" fetch -q origin main ||
+        err "Wiki fetch failed — could not fetch origin main in $vault for the wiki-ingest debt gate. Retry, or check the vault path/network."
     # A fetch that succeeds without materialising the ref would make every
     # grep below report "not covered" against a wiki that was never searched.
-    git -C "$vault" rev-parse -q --verify origin/main >/dev/null \
-        || err "vault has no origin/main ref after the fetch — the wiki was never searched; fix the vault's origin remote for the wiki-ingest debt gate."
+    git -C "$vault" rev-parse -q --verify origin/main >/dev/null ||
+        err "vault has no origin/main ref after the fetch — the wiki was never searched; fix the vault's origin remote for the wiki-ingest debt gate."
 
     local n uncovered=""
     while IFS= read -r n; do
         [[ -z "$n" ]] && continue
-        if git -C "$vault" grep -qE "^## \[[0-9]{4}-[0-9]{2}-[0-9]{2}\] no-op \| ${repo_escaped} PR #${n}([^0-9]|$)" origin/main -- log.md \
-           || git -C "$vault" grep -qE "^origin:(.*[^A-Za-z0-9._-])?${repo_escaped} PRs? [^\"]*#${n}([^0-9]|$)" origin/main -- sources/; then
+        if git -C "$vault" grep -qE "^## \[[0-9]{4}-[0-9]{2}-[0-9]{2}\] no-op \| ${repo_escaped} PR #${n}([^0-9]|$)" origin/main -- log.md ||
+            git -C "$vault" grep -qE "^origin:(.*[^A-Za-z0-9._-])?${repo_escaped} PRs? [^\"]*#${n}([^0-9]|$)" origin/main -- sources/; then
             continue
         fi
         uncovered="${uncovered:+$uncovered }#$n"
-    done <<< "$candidates"
+    done <<<"$candidates"
 
     # ─── Coverage-in-progress check (open vault PR) ────────────────────────
     # wiki-ingest's PR flow (wiki_git_worktree: true) no longer self-merges —
@@ -216,7 +220,8 @@ merge::has_wiki_ingest_for_merged_prs() {
         vault_url=$(git -C "$vault" remote get-url origin 2>/dev/null) || vault_url=""
         if [[ "$vault_url" =~ github\.com[:/]([^/]+)/(.+)$ ]]; then
             local vname="${BASH_REMATCH[2]}"
-            vname="${vname%/}"; vname="${vname%.git}"
+            vname="${vname%/}"
+            vname="${vname%.git}"
             vault_repo="${BASH_REMATCH[1]}/${vname}"
         fi
         if [[ -z "$vault_repo" ]]; then
@@ -262,15 +267,15 @@ merge::has_wiki_ingest_for_merged_prs() {
                     local un next_remaining=""
                     for un in $remaining; do
                         n="${un#\#}"
-                        if git -C "$vault" grep -qE "^## \[[0-9]{4}-[0-9]{2}-[0-9]{2}\] no-op \| ${repo_escaped} PR #${n}([^0-9]|$)" FETCH_HEAD -- log.md \
-                           || git -C "$vault" grep -qE "^origin:(.*[^A-Za-z0-9._-])?${repo_escaped} PRs? [^\"]*#${n}([^0-9]|$)" FETCH_HEAD -- sources/; then
+                        if git -C "$vault" grep -qE "^## \[[0-9]{4}-[0-9]{2}-[0-9]{2}\] no-op \| ${repo_escaped} PR #${n}([^0-9]|$)" FETCH_HEAD -- log.md ||
+                            git -C "$vault" grep -qE "^origin:(.*[^A-Za-z0-9._-])?${repo_escaped} PRs? [^\"]*#${n}([^0-9]|$)" FETCH_HEAD -- sources/; then
                             in_progress="${in_progress:+$in_progress }${un}(vault:$href)"
                         else
                             next_remaining="${next_remaining:+$next_remaining }${un}"
                         fi
                     done
                     remaining="$next_remaining"
-                done <<< "$open_heads"
+                done <<<"$open_heads"
                 if [[ -n "$failed_hrefs" ]]; then
                     warn "Wiki-ingest debt: could not fetch open vault PR head(s) to check in-progress coverage: ${failed_hrefs} — treating as unchecked, not as absent."
                 fi
@@ -295,7 +300,9 @@ merge::has_wiki_ingest_for_merged_prs() {
 }
 
 merge::main() {
-    local arg="${1:-auto}" br=$(branch) m=$(main)
+    local arg="${1:-auto}" br m
+    br=$(branch)
+    m=$(main)
 
     require::repo
 
@@ -304,168 +311,169 @@ merge::main() {
     # ─── Resolve PR ───────────────────────────────────────────────────────────
     local num
     case "$arg" in
-        auto)
-            [[ $br == "$m" ]] && err "On $m ─ specify PR# or branch"
-            num=$(pr::num "$br") || err "No PR for $br"
-            ;;
-        [0-9]*)
-            num=$arg
-            ;;
-        *)
-            num=$(pr::num "$arg") || err "No PR for $arg"
-            ;;
+    auto)
+        [[ $br == "$m" ]] && err "On $m ─ specify PR# or branch"
+        num=$(pr::num "$br") || err "No PR for $br"
+        ;;
+    [0-9]*)
+        num=$arg
+        ;;
+    *)
+        num=$(pr::num "$arg") || err "No PR for $arg"
+        ;;
     esac
 
     info "PR #$num │ $(pr::title "$num")"
 
     # ─── Merge ────────────────────────────────────────────────────────────────
     case $(pr::state "$num") in
-        MERGED) warn "Already merged" ;;
-        CLOSED) err "PR closed (not merged)" ;;
-        OPEN)
-            protected && {
-                [[ $(pr::review "$num") == APPROVED ]] || err "Not approved ($(pr::review "$num"))"
-                ok "Approved"
-            }
-            if [[ -z "$(coderails::config_path "$PWD")" ]]; then
-                info "No workflow.config.yaml — enforce_pr_workflow hook is inactive, but the review artifact gate still applies."
-            fi
+    MERGED) warn "Already merged" ;;
+    CLOSED) err "PR closed (not merged)" ;;
+    OPEN)
+        protected && {
+            [[ $(pr::review "$num") == APPROVED ]] || err "Not approved ($(pr::review "$num"))"
+            ok "Approved"
+        }
+        if [[ -z "$(coderails::config_path "$PWD")" ]]; then
+            info "No workflow.config.yaml — enforce_pr_workflow hook is inactive, but the review artifact gate still applies."
+        fi
 
-            # ─── Review artifact gate (fail-closed) ───────────────────────────
-            # Requires a coderails review comment on the PR matching the current
-            # head SHA. No match → block. No fallback to local files.
-            local sha
-            sha=$(pr::head_sha "$num")
-            if [[ -z "$sha" ]]; then
-                err "GitHub fetch failed — could not resolve PR head SHA. Retry, or check gh auth/network."
-            fi
-            local gate_rc
-            gate_rc=0
-            pr::has_coderails_review_for_head "$num" "$sha" || gate_rc=$?
-            if [[ $gate_rc -eq 2 ]]; then
-                case "${PR_TRUST_FETCH_FAIL_REASON:-}" in
-                    identity)   err "GitHub fetch failed — could not resolve the authenticated identity (gh api user). Retry, or check gh auth/network." ;;
-                    permission) err "GitHub fetch failed — could not resolve repo permission for the authenticated identity. Retry, or check gh auth/network." ;;
-                    tempfile)   err "Local temporary file allocation failed (mktemp) before any GitHub fetch was attempted. Check /tmp disk space or permissions, then retry." ;;
-                    *)          err "GitHub fetch failed — could not fetch PR comments. Retry, or check gh auth/network." ;;
-                esac
-            elif [[ $gate_rc -ne 0 ]]; then
-                err "No coderails review artifact for current head $sha — run /coderails:post-review after /pr-review-toolkit:review-pr (or add a 'gh pr merge' permission to bypass)."
-            fi
-            ok "Review artifact verified (SHA: $sha)"
+        # ─── Review artifact gate (fail-closed) ───────────────────────────
+        # Requires a coderails review comment on the PR matching the current
+        # head SHA. No match → block. No fallback to local files.
+        local sha
+        sha=$(pr::head_sha "$num")
+        if [[ -z "$sha" ]]; then
+            err "GitHub fetch failed — could not resolve PR head SHA. Retry, or check gh auth/network."
+        fi
+        local gate_rc
+        gate_rc=0
+        pr::has_coderails_review_for_head "$num" "$sha" || gate_rc=$?
+        if [[ $gate_rc -eq 2 ]]; then
+            case "${PR_TRUST_FETCH_FAIL_REASON:-}" in
+            identity) err "GitHub fetch failed — could not resolve the authenticated identity (gh api user). Retry, or check gh auth/network." ;;
+            permission) err "GitHub fetch failed — could not resolve repo permission for the authenticated identity. Retry, or check gh auth/network." ;;
+            tempfile) err "Local temporary file allocation failed (mktemp) before any GitHub fetch was attempted. Check /tmp disk space or permissions, then retry." ;;
+            *) err "GitHub fetch failed — could not fetch PR comments. Retry, or check gh auth/network." ;;
+            esac
+        elif [[ $gate_rc -ne 0 ]]; then
+            err "No coderails review artifact for current head $sha — run /coderails:post-review after /pr-review-toolkit:review-pr (or add a 'gh pr merge' permission to bypass)."
+        fi
+        ok "Review artifact verified (SHA: $sha)"
 
-            # ─── Eval artifact gate (fail-closed) ─────────────────────────────
-            # Requires a coderails eval comment on the PR matching the current
-            # head SHA with result=GO. No match → block. No fallback, no
-            # config opt-out (same posture as the review gate).
-            local eval_gate_rc
-            eval_gate_rc=0
-            pr::has_coderails_eval_for_head "$num" "$sha" || eval_gate_rc=$?
-            if [[ $eval_gate_rc -eq 2 ]]; then
-                case "${PR_TRUST_FETCH_FAIL_REASON:-}" in
-                    identity)   err "GitHub fetch failed — could not resolve the authenticated identity (gh api user) for the eval artifact gate. Retry, or check gh auth/network." ;;
-                    permission) err "GitHub fetch failed — could not resolve repo permission for the eval artifact gate. Retry, or check gh auth/network." ;;
-                    tempfile)   err "Local temporary file allocation failed (mktemp) before any GitHub fetch was attempted for the eval artifact gate. Check /tmp disk space or permissions, then retry." ;;
-                    *)          err "GitHub fetch failed — could not fetch PR comments for eval artifact. Retry, or check gh auth/network." ;;
-                esac
-            elif [[ $eval_gate_rc -ne 0 ]]; then
-                if [[ -n "${PR_EVAL_VERIFICATION_LEVEL:-}" ]]; then
-                    err "Eval artifact for current head $sha is NO-GO (verification_level $PR_EVAL_VERIFICATION_LEVEL) — resolve failing P0 evals and re-run /coderails:post-evals."
-                else
-                    err "No coderails eval artifact for current head $sha — run /coderails:task-evals then /coderails:post-evals after /pr-review-toolkit:review-pr."
-                fi
+        # ─── Eval artifact gate (fail-closed) ─────────────────────────────
+        # Requires a coderails eval comment on the PR matching the current
+        # head SHA with result=GO. No match → block. No fallback, no
+        # config opt-out (same posture as the review gate).
+        local eval_gate_rc
+        eval_gate_rc=0
+        pr::has_coderails_eval_for_head "$num" "$sha" || eval_gate_rc=$?
+        if [[ $eval_gate_rc -eq 2 ]]; then
+            case "${PR_TRUST_FETCH_FAIL_REASON:-}" in
+            identity) err "GitHub fetch failed — could not resolve the authenticated identity (gh api user) for the eval artifact gate. Retry, or check gh auth/network." ;;
+            permission) err "GitHub fetch failed — could not resolve repo permission for the eval artifact gate. Retry, or check gh auth/network." ;;
+            tempfile) err "Local temporary file allocation failed (mktemp) before any GitHub fetch was attempted for the eval artifact gate. Check /tmp disk space or permissions, then retry." ;;
+            *) err "GitHub fetch failed — could not fetch PR comments for eval artifact. Retry, or check gh auth/network." ;;
+            esac
+        elif [[ $eval_gate_rc -ne 0 ]]; then
+            if [[ -n "${PR_EVAL_VERIFICATION_LEVEL:-}" ]]; then
+                err "Eval artifact for current head $sha is NO-GO (verification_level $PR_EVAL_VERIFICATION_LEVEL) — resolve failing P0 evals and re-run /coderails:post-evals."
+            else
+                err "No coderails eval artifact for current head $sha — run /coderails:task-evals then /coderails:post-evals after /pr-review-toolkit:review-pr."
             fi
-            ok "Eval artifact verified (SHA: $sha, verification_level ${PR_EVAL_VERIFICATION_LEVEL:-?})"
+        fi
+        ok "Eval artifact verified (SHA: $sha, verification_level ${PR_EVAL_VERIFICATION_LEVEL:-?})"
 
-            # ─── Smoke-verify gate (fail-closed) ──────────────────────────────
-            # The eval-artifact gate above only parses the marker comment's
-            # result=GO text — checks 1-10 in post_evals.sh's
-            # validate_structure never ran against it here, only in the
-            # posting agent's own session at post time (advisory, not
-            # binding). This gate makes checks 1-9 plus gate-time
-            # re-execution binding at merge: it extracts the embed from the
-            # SAME trusted comment the eval-artifact gate above already
-            # matched, checks out the trusted head SHA into a detached
-            # worktree, and re-executes every verification_level>=1 scripted eval's cmd and
-            # negative_control there — closing the gap where a hand-written
-            # smoke object for a script that never existed passed the
-            # eval-artifact gate at rc=0 (PR post_evals.sh check 9/10 never
-            # ran). Verification level 0 has an empty .evals array, so this is a fast no-op
-            # at that verification_level; nothing to opt out of.
-            local embed embed_rc
-            embed_rc=0
-            embed=$(pr::coderails_eval_embed_for_head "$num" "$sha") || embed_rc=$?
-            if [[ $embed_rc -eq 2 ]]; then
-                case "${PR_TRUST_FETCH_FAIL_REASON:-}" in
-                    identity)   err "GitHub fetch failed — could not resolve the authenticated identity (gh api user) for the smoke-verify gate. Retry, or check gh auth/network." ;;
-                    permission) err "GitHub fetch failed — could not resolve repo permission for the smoke-verify gate. Retry, or check gh auth/network." ;;
-                    tempfile)   err "Local temporary file allocation failed (mktemp) before any GitHub fetch was attempted for the smoke-verify gate. Check /tmp disk space or permissions, then retry." ;;
-                    *)          err "GitHub fetch failed — could not fetch PR comments for the smoke-verify gate. Retry, or check gh auth/network." ;;
-                esac
-            elif [[ $embed_rc -ne 0 ]]; then
-                err "No coderails eval artifact embed found for current head $sha — the eval-artifact gate above should have caught this first; investigate the mismatch before merging."
-            fi
-            local embed_file
-            embed_file=$(mktemp) || err "Local temporary file allocation failed (mktemp) for the smoke-verify gate. Check /tmp disk space or permissions, then retry."
-            printf '%s' "$embed" > "$embed_file"
-            if ! post_evals::smoke_verify "$embed_file" "$sha"; then
-                rm -f "$embed_file"
-                err "Smoke-verify failed for current head $sha — one or more scripted evals could not be confirmed by gate-time re-execution against the trusted commit. See the reason above; do not bypass, fix the eval or the artifact and re-post."
-            fi
+        # ─── Smoke-verify gate (fail-closed) ──────────────────────────────
+        # The eval-artifact gate above only parses the marker comment's
+        # result=GO text — checks 1-10 in post_evals.sh's
+        # validate_structure never ran against it here, only in the
+        # posting agent's own session at post time (advisory, not
+        # binding). This gate makes checks 1-9 plus gate-time
+        # re-execution binding at merge: it extracts the embed from the
+        # SAME trusted comment the eval-artifact gate above already
+        # matched, checks out the trusted head SHA into a detached
+        # worktree, and re-executes every verification_level>=1 scripted eval's cmd and
+        # negative_control there — closing the gap where a hand-written
+        # smoke object for a script that never existed passed the
+        # eval-artifact gate at rc=0 (PR post_evals.sh check 9/10 never
+        # ran). Verification level 0 has an empty .evals array, so this is a fast no-op
+        # at that verification_level; nothing to opt out of.
+        local embed embed_rc
+        embed_rc=0
+        embed=$(pr::coderails_eval_embed_for_head "$num" "$sha") || embed_rc=$?
+        if [[ $embed_rc -eq 2 ]]; then
+            case "${PR_TRUST_FETCH_FAIL_REASON:-}" in
+            identity) err "GitHub fetch failed — could not resolve the authenticated identity (gh api user) for the smoke-verify gate. Retry, or check gh auth/network." ;;
+            permission) err "GitHub fetch failed — could not resolve repo permission for the smoke-verify gate. Retry, or check gh auth/network." ;;
+            tempfile) err "Local temporary file allocation failed (mktemp) before any GitHub fetch was attempted for the smoke-verify gate. Check /tmp disk space or permissions, then retry." ;;
+            *) err "GitHub fetch failed — could not fetch PR comments for the smoke-verify gate. Retry, or check gh auth/network." ;;
+            esac
+        elif [[ $embed_rc -ne 0 ]]; then
+            err "No coderails eval artifact embed found for current head $sha — the eval-artifact gate above should have caught this first; investigate the mismatch before merging."
+        fi
+        local embed_file
+        embed_file=$(mktemp) || err "Local temporary file allocation failed (mktemp) for the smoke-verify gate. Check /tmp disk space or permissions, then retry."
+        printf '%s' "$embed" >"$embed_file"
+        if ! post_evals::smoke_verify "$embed_file" "$sha"; then
             rm -f "$embed_file"
-            ok "Smoke-verify passed (SHA: $sha)"
+            err "Smoke-verify failed for current head $sha — one or more scripted evals could not be confirmed by gate-time re-execution against the trusted commit. See the reason above; do not bypass, fix the eval or the artifact and re-post."
+        fi
+        rm -f "$embed_file"
+        ok "Smoke-verify passed (SHA: $sha)"
 
-            # ─── Integrity attestation gate (redundant defence-in-depth, fail-closed) ───
-            # This layer is redundant defence-in-depth alongside the now-active
-            # server-side ruleset: it fails loudly on misconfiguration, and it
-            # still matters even with the ruleset active because the ruleset's
-            # bypass actor (the repo admin role) can push straight past it;
-            # this local check has no such bypass. It is NOT the primary
-            # control — do not delete it as dead code once the ruleset is
-            # active; it is the only local check that catches a machine-user
-            # misconfiguration before GitHub itself would. Config-keyed and
-            # inactive by default: only runs when config key
-            # integrity_review.machine_user is set. The daemon attests the
-            # current SHA's evidence and never evaluates verification_level semantics.
-            local integrity_config; integrity_config=$(coderails::config_path "$PWD")
-            local integrity_machine_user=""
-            if [[ -n "$integrity_config" ]]; then
-                integrity_machine_user=$(coderails::_integrity_machine_user "$integrity_config")
+        # ─── Integrity attestation gate (redundant defence-in-depth, fail-closed) ───
+        # This layer is redundant defence-in-depth alongside the now-active
+        # server-side ruleset: it fails loudly on misconfiguration, and it
+        # still matters even with the ruleset active because the ruleset's
+        # bypass actor (the repo admin role) can push straight past it;
+        # this local check has no such bypass. It is NOT the primary
+        # control — do not delete it as dead code once the ruleset is
+        # active; it is the only local check that catches a machine-user
+        # misconfiguration before GitHub itself would. Config-keyed and
+        # inactive by default: only runs when config key
+        # integrity_review.machine_user is set. The daemon attests the
+        # current SHA's evidence and never evaluates verification_level semantics.
+        local integrity_config
+        integrity_config=$(coderails::config_path "$PWD")
+        local integrity_machine_user=""
+        if [[ -n "$integrity_config" ]]; then
+            integrity_machine_user=$(coderails::_integrity_machine_user "$integrity_config")
+        fi
+        if [[ -n "$integrity_machine_user" ]]; then
+            local tr_statuses tr_rc=0
+            tr_statuses=$(gh api "repos/$(repo)/commits/${sha}/statuses" --paginate \
+                --jq '[.[] | select(.context == "integrity-review")]' 2>/dev/null) || tr_rc=$?
+            if [[ $tr_rc -ne 0 ]]; then
+                err "GitHub fetch failed — could not fetch integrity-review status for $sha. Retry, or check gh auth/network."
             fi
-            if [[ -n "$integrity_machine_user" ]]; then
-                local tr_statuses tr_rc=0
-                tr_statuses=$(gh api "repos/$(repo)/commits/${sha}/statuses" --paginate \
-                    --jq '[.[] | select(.context == "integrity-review")]' 2>/dev/null) || tr_rc=$?
-                if [[ $tr_rc -ne 0 ]]; then
-                    err "GitHub fetch failed — could not fetch integrity-review status for $sha. Retry, or check gh auth/network."
-                fi
-                local tr_state tr_creator tr_desc
-                tr_state=$(printf '%s' "$tr_statuses" | jq -r '.[0].state // empty' 2>/dev/null)
-                tr_creator=$(printf '%s' "$tr_statuses" | jq -r '.[0].creator.login // empty' 2>/dev/null)
-                tr_desc=$(printf '%s' "$tr_statuses" | jq -r '.[0].description // empty' 2>/dev/null)
-                if [[ -z "$tr_state" ]]; then
-                    err "No integrity-review status found for $sha — the integrity daemon has not attested this SHA yet. Wait for it, or kickstart it, then retry."
-                elif [[ "$tr_state" != "success" ]]; then
-                    err "integrity-review status for $sha is '$tr_state' (not success) — the integrity daemon has not attested this SHA. Resolve and retry."
-                elif [[ "$tr_creator" != "$integrity_machine_user" ]]; then
-                    err "integrity-review status for $sha was posted by '$tr_creator', not the configured machine user '$integrity_machine_user' — investigate the creator mismatch."
-                elif ! [[ "$tr_desc" =~ (^|[[:space:]])integrity=pass([[:space:]]|$) ]] || ! [[ "$tr_desc" =~ (^|[[:space:]])sha=${sha}([[:space:]]|$) ]]; then
-                    err "integrity-review status for $sha is not a valid SHA-bound pass attestation. Do not bypass; investigate."
-                fi
-                ok "Integrity attestation verified (SHA: $sha, creator: $tr_creator)"
+            local tr_state tr_creator tr_desc
+            tr_state=$(printf '%s' "$tr_statuses" | jq -r '.[0].state // empty' 2>/dev/null)
+            tr_creator=$(printf '%s' "$tr_statuses" | jq -r '.[0].creator.login // empty' 2>/dev/null)
+            tr_desc=$(printf '%s' "$tr_statuses" | jq -r '.[0].description // empty' 2>/dev/null)
+            if [[ -z "$tr_state" ]]; then
+                err "No integrity-review status found for $sha — the integrity daemon has not attested this SHA yet. Wait for it, or kickstart it, then retry."
+            elif [[ "$tr_state" != "success" ]]; then
+                err "integrity-review status for $sha is '$tr_state' (not success) — the integrity daemon has not attested this SHA. Resolve and retry."
+            elif [[ "$tr_creator" != "$integrity_machine_user" ]]; then
+                err "integrity-review status for $sha was posted by '$tr_creator', not the configured machine user '$integrity_machine_user' — investigate the creator mismatch."
+            elif ! [[ "$tr_desc" =~ (^|[[:space:]])integrity=pass([[:space:]]|$) ]] || ! [[ "$tr_desc" =~ (^|[[:space:]])sha=${sha}([[:space:]]|$) ]]; then
+                err "integrity-review status for $sha is not a valid SHA-bound pass attestation. Do not bypass; investigate."
             fi
+            ok "Integrity attestation verified (SHA: $sha, creator: $tr_creator)"
+        fi
 
-            # ─── Wiki-ingest debt gate (config-keyed, fail-closed) ────────────
-            # Third artifact gate: blocks while any post-epoch merged PR lacks
-            # wiki coverage. Inert unless wiki_debt_epoch_pr + wiki_path are
-            # configured — see merge::has_wiki_ingest_for_merged_prs above.
-            merge::has_wiki_ingest_for_merged_prs "$num"
+        # ─── Wiki-ingest debt gate (config-keyed, fail-closed) ────────────
+        # Third artifact gate: blocks while any post-epoch merged PR lacks
+        # wiki coverage. Inert unless wiki_debt_epoch_pr + wiki_path are
+        # configured — see merge::has_wiki_ingest_for_merged_prs above.
+        merge::has_wiki_ingest_for_merged_prs "$num"
 
-            step "Merging"
-            gh pr merge "$num" --merge          # remote merge ONLY — its failure must abort; branch cleanup is separate + non-fatal
-            ok "Merged"
-            ;;
-        *) err "Unknown state" ;;
+        step "Merging"
+        gh pr merge "$num" --merge # remote merge ONLY — its failure must abort; branch cleanup is separate + non-fatal
+        ok "Merged"
+        ;;
+    *) err "Unknown state" ;;
     esac
 
     # ─── Sync ─────────────────────────────────────────────────────────────────
@@ -479,16 +487,20 @@ merge::main() {
     # fails (and, under set -e, aborts the whole script) when another worktree has
     # the branch checked out — reporting an already-merged PR as failed. Cleanup is
     # decoupled and non-fatal here instead.
-    local head; head=$(gh pr view "$num" --json headRefName -q .headRefName 2>/dev/null || true)
+    local head
+    head=$(gh pr view "$num" --json headRefName -q .headRefName 2>/dev/null || true)
     if [[ -n "${head:-}" && "$head" != "$m" ]]; then
-        git push origin --delete "$head" &>/dev/null \
-            && ok "Deleted remote branch $head" \
-            || warn "Remote branch $head not deleted (already gone?)"
+        if git push origin --delete "$head" &>/dev/null; then
+            ok "Deleted remote branch $head"
+        else
+            warn "Remote branch $head not deleted (already gone?)"
+        fi
         if git branch -D "$head" &>/dev/null; then
             ok "Deleted local branch $head"
         else
-            local wt; wt=$(git worktree list --porcelain \
-                | awk -v b="branch refs/heads/$head" '/^worktree /{p=$2} $0==b{print p}' || true)
+            local wt
+            wt=$(git worktree list --porcelain |
+                awk -v b="branch refs/heads/$head" '/^worktree /{p=$2} $0==b{print p}' || true)
             warn "Local branch $head kept${wt:+ (worktree $wt holds it — remove manually)}"
         fi
     fi
