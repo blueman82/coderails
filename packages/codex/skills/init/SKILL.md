@@ -12,11 +12,12 @@ Create the provider-neutral `.coderails/workflow.config.yaml` for the current pr
 1. Run `git rev-parse --show-toplevel` to find the repository root.
 2. Use the current directory as the configuration scope. This allows a monorepo subdirectory to have its own settings.
 3. Set the target to `<current-directory>/.coderails/workflow.config.yaml`.
-4. Inspect `<current-directory>/.claude/workflow.config.yaml` and `<current-directory>/.codex/workflow.config.yaml` as legacy inputs.
+4. Before migration, confirm that every provider the user will continue to use is upgraded and reloaded to a version that reads `.coderails/workflow.config.yaml`. If any is not, stop and report it. Do not call or reload another provider.
+5. Inspect `<current-directory>/.claude/workflow.config.yaml` and `<current-directory>/.codex/workflow.config.yaml` as legacy inputs.
    - If both exist, compare them byte-for-byte with `cmp -s`. If they differ, stop before writing anything and ask the user to reconcile them. Never choose one silently.
    - If one exists, or both exist and match, read one and write its complete contents unchanged to the canonical target. Do not collect replacement settings: unknown fields and values, including `sandbox_workers`, must survive migration.
    - If the canonical target exists, read it and ask for confirmation before replacing it. Preserve it unless replacement is explicitly approved.
-5. When no legacy input exists, use the project name supplied in the user's request; otherwise use the current directory's basename, then collect settings below.
+6. When no legacy input exists, use the project name supplied in the user's request; otherwise use the current directory's basename, then collect settings below.
 
 ## Collect settings
 

@@ -119,4 +119,19 @@ else
     :
 fi
 
+changed_only_repo="$fixture/changed-only"
+mkdir -p "$changed_only_repo/scripts/quality" "$changed_only_repo/docs"
+cp "$repo_root/scripts/quality/check.sh" "$checker" "$changed_only_repo/scripts/quality/"
+printf 'baseline\n' >"$changed_only_repo/docs/note.md"
+git -C "$changed_only_repo" init -q
+git -C "$changed_only_repo" config user.email 'quality.test@example.invalid'
+git -C "$changed_only_repo" config user.name 'Quality Test'
+git -C "$changed_only_repo" add .
+git -C "$changed_only_repo" commit -qm baseline
+printf 'changed\n' >>"$changed_only_repo/docs/note.md"
+if ! (cd "$changed_only_repo" && /bin/bash scripts/quality/check.sh --strict --changed >/dev/null); then
+    echo 'quality.test: changed-only non-shell scan unexpectedly failed' >&2
+    exit 1
+fi
+
 echo 'quality.test: PASS'

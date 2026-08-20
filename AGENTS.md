@@ -403,12 +403,14 @@ by `scripts/merge.sh` (`lib/config.sh`) and `hooks/scripts/enforce_pr_workflow.s
 (`../../scripts/lib/config.sh`) — the hook's opt-in detection MUST use the same
 resolver as the commands, or the merge gate would silently go inactive in a
 non-`projects/` layout. If you add a config field, update **all four** of
-`workflow.md`, `prep.md`, `push.md`, and `init.md` — but for two different reasons.
+`workflow.md`, `prep.md`, `push.md`, and `init.md`.
 `workflow.md`/`prep.md`/`push.md` each *read* the file independently via the shared
-resolver in their frontmatter; `init.md` never calls the resolver at all — it is the
-scaffolder, prompting for each field and *writing* a fresh `workflow.config.yaml`, so
-it needs the new field added to what it emits. `NO_CONFIG` is the sentinel for "not
-initialised."
+resolver in their frontmatter. `init.md` instead writes
+`$(pwd)/.coderails/workflow.config.yaml`: it scaffolds a new file when no legacy
+file exists, or preserves the complete legacy contents, schema, and values when
+migrating. It validates the canonical file before moving the legacy files to the
+macOS Trash. There is no runtime fallback to legacy paths. `NO_CONFIG` is the
+sentinel for "not initialised."
 
 **`scripts/` vs `commands/`** — `push.sh`/`merge.sh` hold the deterministic git
 plumbing (commit, push, `gh pr create`, merge). The `.md` commands hold the

@@ -13,13 +13,14 @@ Create the provider-neutral `.coderails/workflow.config.yaml` in the current pro
 1. Determine the git root: `git rev-parse --show-toplevel`
 2. Determine the project name: use `$ARGUMENTS` if provided, otherwise `basename $(pwd)`
 3. Determine the config path: `$(pwd)/.coderails/workflow.config.yaml` (create `.coderails/` if needed). The workflow commands resolve config by walking up from the current directory to the git root — the first `.coderails/workflow.config.yaml` found wins (see "Config resolution" in `AGENTS.md`). Run `/init` from the directory whose config you want to set: a project subdir in a monorepo, or the git root for a standalone repo.
-4. Check the target and both legacy paths in this same directory: `.claude/workflow.config.yaml` and `.codex/workflow.config.yaml`.
+4. Before migration, confirm that every provider the user will continue to use is upgraded and reloaded to a version that reads `.coderails/workflow.config.yaml`. If any is not, stop and report it. Do not call or reload another provider.
+5. Check the target and both legacy paths in this same directory: `.claude/workflow.config.yaml` and `.codex/workflow.config.yaml`.
    - If both legacy files exist, compare them byte-for-byte with `cmp -s`. If they differ, stop before writing anything and ask the user to reconcile them. Never choose one silently.
    - If one legacy file exists, or both exist and match, migrate by reading that file and writing its complete contents unchanged to the canonical target. Do not prompt field-by-field: preserving unknown fields and values, including `sandbox_workers`, is required.
    - If the canonical target already exists, confirm before replacing it.
    - If no legacy file exists, continue with the field collection below.
 
-5. Ask the user for each field (one prompt is fine — list all fields at once):
+6. Ask the user for each field (one prompt is fine — list all fields at once):
    - **Jira project key** (e.g. `MYPROJ`) — or "none"
    - **Jira epic key** (e.g. `MYPROJ-100`) — or "none"
    - **Jira component name** (e.g. `MyComponent`) — or "none"
@@ -42,7 +43,7 @@ Create the provider-neutral `.coderails/workflow.config.yaml` in the current pro
    - **Sandbox workers** — dispatch agentic-loop implementation-unit workers as separate OS-sandboxed processes (`@anthropic-ai/sandbox-runtime`) instead of in-process `Agent` calls, for write containment outside the agent's trust domain. Requires node/npx and a supported platform (macOS Seatbelt, Linux/WSL2 bubblewrap). Default: `false` (or omit the field — same effect).
    - **Integrity machine user** (advanced, most projects should answer "none") — the GitHub login of a dedicated machine-user identity that posts SHA-bound `integrity-review` attestations. When set, `scripts/merge.sh` and the `enforce_pr_workflow` hook require a successful attestation from exactly this login. Default: `null` (or omit the field — same effect, check inactive).
 
-6. Write `workflow.config.yaml` at the resolved config path from step 3 with the collected values. Use `null` for any field answered "none". Then validate the file with Ruby's standard YAML parser (`ruby -e 'require "yaml"; YAML.safe_load_file(ARGV.fetch(0), permitted_classes: [], aliases: false)' <path>`). If the write or validation fails, stop. Leave every legacy file untouched and report the failure.
+7. Write `workflow.config.yaml` at the resolved config path from step 3 with the collected values. Use `null` for any field answered "none". Then validate the file with Ruby's standard YAML parser (`ruby -e 'require "yaml"; YAML.safe_load_file(ARGV.fetch(0), permitted_classes: [], aliases: false)' <path>`). If the write or validation fails, stop. Leave every legacy file untouched and report the failure.
 
 Example output:
 ```yaml
@@ -76,11 +77,11 @@ integrity_review:
   machine_user: null   # GitHub login of the integrity machine user; null/omitted = local gate inactive
 ```
 
-7. After the canonical file validates, move each legacy file found in step 4 to the macOS Trash using Finder via `osascript`, one at a time. After each move, check that source path no longer exists. If a move or check fails, stop immediately: report the failed file and every file already moved, and do not attempt the remaining files. Never delete a legacy file directly. Files already moved remain recoverable in Trash; the moves are not atomic.
+8. After the canonical file validates, move each legacy file found in step 5 to the macOS Trash using Finder via `osascript`, one at a time. After each move, check that source path no longer exists. If a move or check fails, stop immediately: report the failed file and every file already moved, and do not attempt the remaining files. Never delete a legacy file directly. Files already moved remain recoverable in Trash; the moves are not atomic.
 
-8. Report the path written, any legacy files moved to Trash, and remind the user to commit the canonical file.
+9. Report the path written, any legacy files moved to Trash, and remind the user to commit the canonical file.
 
-9. If `config.jira.mcp_namespace` was set to anything other than the default `jira`, tell the user:
+10. If `config.jira.mcp_namespace` was set to anything other than the default `jira`, tell the user:
 
    > Your Jira MCP namespace is `<mcp_namespace>`. The `allowed-tools` frontmatter in the workflow commands pre-authorises `mcp__jira__*` for the default namespace; calls to `mcp__<mcp_namespace>__*` will still work but will fall through to the normal permission system (one-time prompt or auto-allowed by a `settings.json` rule).
    >

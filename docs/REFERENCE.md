@@ -659,7 +659,7 @@ Commands are slash commands invoked by Claude (or the user via `/coderails:<name
 | `/coderails:cite-check` (skill at `skills/cite-check/`, not a `commands/` file) | Re-derive a specific claim from durable sources only (file contents, git output, fresh command output). No recall, no inference. Runs `context: fork` into `coderails:source-auditor` with `background: false`, so the audit has no access to the conversation that produced the claim — verifying inside that context would be self-verification. Named `cite-check` rather than `verify` because `/verify` is a Claude Code bundled skill and a same-named project skill would override it. | `coderails:source-auditor` agent |
 | `/coderails:notchecked` | Review recent responses and list every non-trivial claim that was NOT verified. Surface gaps ruthlessly. | None |
 
-### Config resolution (shared by `workflow`, `prep`, `push`, `init`)
+### Config resolution (`workflow`, `prep`, and `push`) and init scope
 
 Every workflow command reads `workflow.config.yaml` via a shared resolver sourced from `scripts/lib/config.sh`:
 
@@ -668,6 +668,13 @@ source "${CLAUDE_PLUGIN_ROOT}/scripts/lib/config.sh" && coderails::resolve_confi
 ```
 
 `coderails::config_path [dir]` walks up from `dir` (default `$PWD`) to the git root — the first `.coderails/workflow.config.yaml` found wins, empty if none; `coderails::resolve_config` echoes its contents or `NO_CONFIG`. Layout-agnostic: standalone repos, classic `projects/<name>/` monorepos, and arbitrary layouts (`apps/web`, `services/api`, …) all resolve from any subdir. The same resolver is sourced by `scripts/merge.sh` and `gate_config_present()` in `hooks/scripts/enforce_pr_workflow.sh`. `NO_CONFIG` is the sentinel for "not initialised." All workflow commands degrade gracefully: Jira steps no-op, wiki steps skip, engineering-principles pre-flight skips, `enforce_pr_workflow` hook is inactive.
+
+`/coderails:init` does not use the resolver to choose its target. It writes
+`$(pwd)/.coderails/workflow.config.yaml`, so the current directory defines the
+scope. With no legacy file it scaffolds a new config. During migration it preserves
+the complete legacy contents, schema, and values, validates the canonical file,
+then moves the legacy files to the macOS Trash. Runtime reads never fall back to
+legacy paths.
 
 ---
 

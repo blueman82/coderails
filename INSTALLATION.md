@@ -110,10 +110,12 @@ then `install`.
 /coderails:test-gate-setup     # optional — blocks commits when tests fail
 ```
 
-`/coderails:init` scaffolds `.coderails/workflow.config.yaml` from
-[`examples/workflow.config.yaml`](./examples/workflow.config.yaml). Review values
-before committing `.coderails/workflow.config.yaml` as shared project config. It
-is not machine-local config like `.claude/settings.local.json`.
+`/coderails:init` writes `.coderails/workflow.config.yaml` in the current
+directory. It scaffolds new settings when no legacy config exists. When migrating,
+it preserves the legacy contents, schema, and values, validates the canonical
+file, then moves the legacy files to the macOS Trash. Runtime reads do not fall
+back to legacy paths. Review the result before committing it as shared project
+config; it is not machine-local config like `.claude/settings.local.json`.
 
 For Coderails itself, activate the repository quality hook once per clone:
 
