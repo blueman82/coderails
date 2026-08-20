@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -81,7 +82,12 @@ def validate_evals(state: dict[str, Any], revision: int, path: Path) -> None:
 
 
 def validate_completion_evidence(
-    state: dict[str, Any], revision: int, evals_path: Path, proof_path: Path, retro_path: Path
+    state: dict[str, Any],
+    revision: int,
+    evals_path: Path,
+    proof_path: Path,
+    retro_path: Path,
+    transcript_path: Path | None,
 ) -> None:
     proof = _load(proof_path, "proof")
     retro = _load(retro_path, "retro")
@@ -96,9 +102,82 @@ def validate_completion_evidence(
         if item.get("status") != "pass":
             raise EvidenceError("proof evidence is missing or not passing")
         _nonempty(item.get("id"), f"proof.proofs[{index}].id")
+        _nonempty(item.get("cmd"), f"proof.proofs[{index}].cmd")
         _nonempty(item.get("evidence"), f"proof.proofs[{index}].evidence")
+    _validate_observed_proofs(proofs, transcript_path)
     schema_version = retro.get("schema_version")
     if isinstance(schema_version, bool) or not isinstance(schema_version, int) or schema_version < 1:
         raise EvidenceError("retro evidence is incomplete")
     if retro.get("status") != "complete":
         raise EvidenceError("retro evidence is incomplete")
+
+
+def _exec_command(payload: dict[str, Any]) -> tuple[str, str] | None:
+    if payload.get("type") == "function_call" and payload.get("name") == "exec_command":
+        arguments = payload.get("arguments")
+        try:
+            parsed = json.loads(arguments) if isinstance(arguments, str) else arguments
+        except json.JSONDecodeError:
+            return None
+        if isinstance(parsed, dict) and isinstance(parsed.get("cmd"), str):
+            return str(payload.get("call_id", "")), parsed["cmd"].strip()
+    if payload.get("type") == "custom_tool_call" and payload.get("name") == "exec":
+        source = payload.get("input")
+        if not isinstance(source, str) or "tools.exec_command" not in source:
+            return None
+        match = re.search(r'\bcmd\s*:\s*("(?:\\.|[^"\\])*")', source)
+        if match:
+            return str(payload.get("call_id", "")), json.loads(match.group(1)).strip()
+    return None
+
+
+def _exec_result(payload: dict[str, Any]) -> tuple[str, bool] | None:
+    if payload.get("type") not in {"function_call_output", "custom_tool_call_output"}:
+        return None
+    call_id = payload.get("call_id")
+    if not isinstance(call_id, str) or not call_id:
+        return None
+    output = payload.get("output")
+    if isinstance(output, str):
+        try:
+            parsed = json.loads(output)
+        except json.JSONDecodeError:
+            parsed = None
+        if isinstance(parsed, dict):
+            exit_code = parsed.get("exit_code")
+            passed = isinstance(exit_code, int) and not isinstance(exit_code, bool) and exit_code == 0
+            return call_id, passed
+        return call_id, output.startswith("Script completed\n")
+    if isinstance(output, list):
+        text = "".join(
+            item.get("text", "")
+            for item in output
+            if isinstance(item, dict) and isinstance(item.get("text"), str)
+        )
+        return call_id, text.startswith("Script completed\n")
+    return call_id, False
+
+
+def _validate_observed_proofs(proofs: list[Any], transcript_path: Path | None) -> None:
+    if transcript_path is None:
+        raise EvidenceError("proof commands were not observed in this session")
+    calls: list[tuple[str, str]] = []
+    results: dict[str, bool] = {}
+    try:
+        with transcript_path.open(encoding="utf-8") as transcript:
+            for line in transcript:
+                record = json.loads(line)
+                payload = record.get("payload", record) if isinstance(record, dict) else {}
+                if not isinstance(payload, dict):
+                    continue
+                if call := _exec_command(payload):
+                    calls.append(call)
+                if result := _exec_result(payload):
+                    results[result[0]] = result[1]
+    except (OSError, json.JSONDecodeError) as error:
+        raise EvidenceError(f"proof transcript is missing or invalid: {error}") from error
+    for raw_proof in proofs:
+        command = raw_proof["cmd"].strip()
+        matching = [call_id for call_id, observed in calls if observed == command]
+        if not matching or results.get(matching[-1]) is not True:
+            raise EvidenceError(f"proof command was unexecuted or last-failed: {command}")

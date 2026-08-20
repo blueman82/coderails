@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any, Iterator
 
 from graph_evidence import EvidenceError, validate_completion_evidence, validate_evals
+from graph_identity import IdentityError, active_nodes, task_name, task_node
 
 
 STATUSES = {"pending", "running", "done", "skipped", "hard-stop"}
@@ -61,7 +62,7 @@ def _validate_state(state: Any) -> dict[str, Any]:
         attempts, maximum = retry.get("attempts"), retry.get("max")
         if any(isinstance(value, bool) or not isinstance(value, int) for value in (attempts, maximum)):
             raise GraphError(f"node {node_id} retry counts must be integers")
-        if attempts < 0 or maximum < 1 or attempts > maximum:
+        if attempts < 0 or not 1 <= maximum <= 5 or attempts > maximum:
             raise GraphError(f"node {node_id} has invalid retry bounds")
         if not isinstance(node.get("evidence"), list):
             raise GraphError(f"node {node_id}.evidence must be an array")
@@ -114,18 +115,8 @@ def _validate_state(state: Any) -> dict[str, Any]:
     if "active_wave" not in graph or "hard_stop" not in graph:
         raise GraphError("graph must declare active_wave and hard_stop")
     active_wave = graph["active_wave"]
-    if active_wave is not None:
-        wave = _object(active_wave, "graph.active_wave")
-        _nonempty(wave.get("id"), "graph.active_wave.id")
-        wave_nodes = wave.get("nodes")
-        if not isinstance(wave_nodes, list) or not wave_nodes or any(not isinstance(item, str) for item in wave_nodes):
-            raise GraphError("graph.active_wave.nodes must be a non-empty unique array")
-        if len(wave_nodes) != len(set(wave_nodes)):
-            raise GraphError("graph.active_wave.nodes must be a non-empty unique array")
-        if any(node_id not in nodes or nodes[node_id]["status"] != "running" for node_id in wave_nodes):
-            raise GraphError("graph.active_wave must contain known running nodes")
     running = {node_id for node_id, node in nodes.items() if node["status"] == "running"}
-    active = set(active_wave["nodes"]) if active_wave is not None else set()
+    active = active_nodes(active_wave, nodes, revision)
     if running != active:
         raise GraphError("running nodes must exactly match the active wave")
     if graph["hard_stop"] is not None and not isinstance(graph["hard_stop"], dict):
@@ -218,10 +209,11 @@ def _begin_wave(path: Path) -> dict[str, Any]:
         for node_id in nodes:
             graph["nodes"][node_id]["status"] = "running"
             graph["nodes"][node_id]["outcome"] = "running"
-        graph["active_wave"] = {"id": wave_id, "nodes": nodes}
+        task_names = {node_id: task_name(node_id) for node_id in nodes}
+        graph["active_wave"] = {"id": wave_id, "revision": revision, "nodes": nodes}
         state["revision"] = revision
         _write(path, state)
-        return {"wave_id": wave_id, "nodes": nodes, "revision": revision}
+        return {"wave_id": wave_id, "nodes": nodes, "task_names": task_names, "revision": revision}
 
 
 def _results(raw: Any, active_wave: dict[str, Any]) -> dict[str, Any]:
@@ -282,6 +274,8 @@ def _inspect(path: Path) -> dict[str, Any]:
     return {
         "session_id": state["session_id"], "loop_id": state["loop_id"], "revision": state["revision"],
         "status": state.get("status"), "active_wave": graph["active_wave"],
+        "task_names": ({node_id: task_name(node_id) for node_id in graph["active_wave"]["nodes"]}
+                       if graph["active_wave"] is not None else {}),
         "running": sorted(node_id for node_id, node in graph["nodes"].items() if node["status"] == "running"),
         "ready": _ready(state) if graph["active_wave"] is None and graph["hard_stop"] is None else [], "hard_stop": graph["hard_stop"],
     }
@@ -294,6 +288,7 @@ def _validate_completion(
     evals_path: Path,
     proof_path: Path,
     retro_path: Path,
+    transcript_path: Path | None,
 ) -> None:
     graph = state["graph"]
     if state["session_id"] != session:
@@ -310,16 +305,16 @@ def _validate_completion(
     unreleased = sorted(join_id for join_id, join in graph["joins"].items() if not join["released"])
     if unreleased:
         raise GraphError(f"cannot complete unreleased joins: {', '.join(unreleased)}")
-    validate_completion_evidence(state, revision, evals_path, proof_path, retro_path)
+    validate_completion_evidence(state, revision, evals_path, proof_path, retro_path, transcript_path)
 
 
-def _complete(path: Path, session: str, evals_path: Path, proof_path: Path, retro_path: Path) -> dict[str, Any]:
+def _complete(path: Path, session: str, evals_path: Path, proof_path: Path, retro_path: Path, transcript_path: Path | None) -> dict[str, Any]:
     with _locked(path):
         state = _load(path)
         if state["status"] == "complete":
             raise GraphError("graph is already complete")
         revision = state["revision"]
-        _validate_completion(state, session, revision, evals_path, proof_path, retro_path)
+        _validate_completion(state, session, revision, evals_path, proof_path, retro_path, transcript_path)
         state["status"] = "complete"
         state["revision"] += 1
         state["completion"] = {"revision": revision}
@@ -327,13 +322,13 @@ def _complete(path: Path, session: str, evals_path: Path, proof_path: Path, retr
         return {"status": "complete", "loop_id": state["loop_id"], "revision": state["revision"]}
 
 
-def _verify_completion(path: Path, session: str, evals_path: Path, proof_path: Path, retro_path: Path) -> dict[str, Any]:
+def _verify_completion(path: Path, session: str, evals_path: Path, proof_path: Path, retro_path: Path, transcript_path: Path | None) -> dict[str, Any]:
     state = _load(path)
     completion = _object(state.get("completion"), "completion")
     revision = completion.get("revision")
     if state["status"] != "complete" or revision != state["revision"] - 1:
         raise GraphError("graph has no valid completion record")
-    _validate_completion(state, session, revision, evals_path, proof_path, retro_path)
+    _validate_completion(state, session, revision, evals_path, proof_path, retro_path, transcript_path)
     return {"status": "complete", "loop_id": state["loop_id"], "revision": state["revision"]}
 
 
@@ -341,14 +336,17 @@ def _authorize_dispatch(path: Path, session: str, task_name: str, evals_path: Pa
     state = _load(path)
     if state["session_id"] != session:
         raise GraphError("session does not own this loop")
-    prefix = "loop-worker-"
-    if not task_name.startswith(prefix) or not (node_id := task_name.removeprefix(prefix)):
-        raise GraphError("graph worker task name must identify one node")
+    if state["status"] == "complete":
+        raise GraphError("completed graph does not own worker dispatch")
+    node_id = task_node(task_name)
     active_wave = state["graph"]["active_wave"]
     if active_wave is None or node_id not in active_wave["nodes"]:
         raise GraphError("graph worker node is not in the active wave")
     validate_evals(state, state["revision"], evals_path)
-    return {"loop_id": state["loop_id"], "node": node_id, "wave_id": active_wave["id"]}
+    return {
+        "loop_id": state["loop_id"], "node": node_id, "task_name": task_name,
+        "wave_id": active_wave["id"], "revision": state["revision"],
+    }
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -371,6 +369,7 @@ def _parser() -> argparse.ArgumentParser:
         complete.add_argument("--session", required=True)
         for option in ("evals", "proof", "retro"):
             complete.add_argument(f"--{option}", required=True, type=Path)
+        complete.add_argument("--transcript", type=Path)
     return parser
 
 
@@ -386,10 +385,10 @@ def main() -> int:
         elif args.command == "authorize-dispatch":
             output = _authorize_dispatch(args.state, args.session, args.task, args.evals)
         elif args.command == "complete":
-            output = _complete(args.state, args.session, args.evals, args.proof, args.retro)
+            output = _complete(args.state, args.session, args.evals, args.proof, args.retro, args.transcript)
         else:
-            output = _verify_completion(args.state, args.session, args.evals, args.proof, args.retro)
-    except (GraphError, EvidenceError) as error:
+            output = _verify_completion(args.state, args.session, args.evals, args.proof, args.retro, args.transcript)
+    except (GraphError, EvidenceError, IdentityError) as error:
         print(f"graph: {error}", file=sys.stderr)
         return 1
     print(json.dumps(output, sort_keys=True))

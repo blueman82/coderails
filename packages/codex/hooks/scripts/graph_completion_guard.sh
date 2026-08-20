@@ -24,12 +24,14 @@ inspection=$(python3 "$graph" inspect "$state" 2>/dev/null) || {
 }
 hard_stop=$(printf '%s' "$inspection" | jq -r '.hard_stop != null')
 message=$(printf '%s' "$HOOK_INPUT" | jq -r '.last_assistant_message // empty' 2>/dev/null)
+transcript=$(printf '%s' "$HOOK_INPUT" | jq -r '.transcript_path // empty' 2>/dev/null)
 if [[ "$hard_stop" == "true" && "$message" =~ LOOP-STOP:[[:space:]]*(waiting-on-human|stopped|stall) ]]; then
     exit 0
 fi
 loop_dir=$(dirname "$state")
 if python3 "$graph" verify-completion "$state" --session "$session_id" \
     --evals "$loop_dir/evals.json" --proof "$loop_dir/proof.json" --retro "$loop_dir/retro.json" \
+    --transcript "$transcript" \
     >/dev/null 2>&1; then
     exit 0
 fi

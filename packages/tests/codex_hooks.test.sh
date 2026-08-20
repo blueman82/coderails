@@ -133,13 +133,20 @@ check "incomplete native graph blocks Stop" sh -c 'printf "%s" "$1" | jq -e ".de
 git_head=$(git -C "$ROOT" rev-parse HEAD)
 jq -n --arg sha "$git_head" '{schema_version:1,scope:"loop",task_ref:"loop-1",verification_level:0,verification_justification:"hook fixture",frozen_at:"2026-08-20T00:00:00Z",frozen_sha:$sha,head_sha:$sha,session_id:"s-complete",loop_id:"loop-1",revision:1,evals:[],amendments:[],result:null,graded_at:null}' >"$graph_dir/evals.json"
 "$ROOT/scripts/post_evals.sh" grade-loop "$graph_dir/evals.json" >/dev/null
-jq -n '{session_id:"s-complete",loop_id:"loop-1",proofs:[{id:"P1",status:"pass",evidence:"observed"}]}' >"$graph_dir/proof.json"
+jq -n '{session_id:"s-complete",loop_id:"loop-1",proofs:[{id:"P1",cmd:"true",status:"pass",evidence:"observed"}]}' >"$graph_dir/proof.json"
 jq -n '{schema_version:2,session_id:"s-complete",loop_id:"loop-1",status:"complete"}' >"$graph_dir/retro.json"
+proof_transcript="$graph_dir/transcript.jsonl"
+jq -cn '{type:"response_item",payload:{type:"custom_tool_call",name:"exec",call_id:"proof-call",input:"const r = await tools.exec_command({cmd:\"true\"});"}}' >"$proof_transcript"
+jq -cn '{type:"response_item",payload:{type:"custom_tool_call_output",call_id:"proof-call",output:[{type:"input_text",text:"Script completed\nWall time 0.1 seconds\nOutput:\n"}]}}' >>"$proof_transcript"
 jq '.graph.nodes.A.status="done" | .graph.nodes.A.outcome="done"' "$graph_dir/progress.json" >"$graph_dir/done.json"
 mv "$graph_dir/done.json" "$graph_dir/progress.json"
-python3 "$PACKAGE/skills/agentic-loop/scripts/graph.py" complete "$graph_dir/progress.json" --session s-complete --evals "$graph_dir/evals.json" --proof "$graph_dir/proof.json" --retro "$graph_dir/retro.json" >/dev/null
-complete_stop=$(printf '%s' '{"session_id":"s-complete","cwd":"/tmp","hook_event_name":"Stop","last_assistant_message":"done"}' | CODERAILS_AGENTIC_LOOP_DIR="$graph_root" PLUGIN_ROOT="$PACKAGE" "$HOOKS/scripts/graph_completion_guard.sh")
+python3 "$PACKAGE/skills/agentic-loop/scripts/graph.py" complete "$graph_dir/progress.json" --session s-complete --evals "$graph_dir/evals.json" --proof "$graph_dir/proof.json" --retro "$graph_dir/retro.json" --transcript "$proof_transcript" >/dev/null
+complete_stop=$(jq -cn --arg transcript "$proof_transcript" '{session_id:"s-complete",cwd:"/tmp",hook_event_name:"Stop",last_assistant_message:"done",transcript_path:$transcript}' | CODERAILS_AGENTIC_LOOP_DIR="$graph_root" PLUGIN_ROOT="$PACKAGE" "$HOOKS/scripts/graph_completion_guard.sh")
 check "completed native graph allows Stop" test -z "$complete_stop"
+jq -cn '{type:"response_item",payload:{type:"custom_tool_call",name:"exec",call_id:"proof-failed",input:"const r = await tools.exec_command({cmd:\"true\"});"}}' >>"$proof_transcript"
+jq -cn '{type:"response_item",payload:{type:"custom_tool_call_output",call_id:"proof-failed",output:[{type:"input_text",text:"Script failed with exit code 1\n"}]}}' >>"$proof_transcript"
+failed_proof_stop=$(jq -cn --arg transcript "$proof_transcript" '{session_id:"s-complete",cwd:"/tmp",hook_event_name:"Stop",last_assistant_message:"done",transcript_path:$transcript}' | CODERAILS_AGENTIC_LOOP_DIR="$graph_root" PLUGIN_ROOT="$PACKAGE" "$HOOKS/scripts/graph_completion_guard.sh")
+check "completed native graph rejects a last-failed proof command" sh -c 'printf "%s" "$1" | jq -e ".decision == \"block\""' sh "$failed_proof_stop"
 
 check "unsupported subagent detection is absent" sh -c '! grep -R -E "agent_id" "$1"' sh "$HOOKS"
 check "hook text names only native orchestration" sh -c '! grep -R -E "[Aa]gent tool" "$1"' sh "$HOOKS"
