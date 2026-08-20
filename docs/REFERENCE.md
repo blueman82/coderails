@@ -204,9 +204,9 @@ server still accepts TCP but serves nothing.
 
 ---
 
-#### `fable-mode`
+#### `execution-discipline`
 
-**Purpose:** Closes the behavioural gap between Claude Opus-class models and Claude Fable 5 by adopting its working habits deliberately: specify-before-start, high autonomy, first-shot correctness, instruction retention over long sessions, and rigorous self-verification.
+**Purpose:** Establishes working habits for specify-before-start, high autonomy, first-shot correctness, instruction retention over long sessions, and rigorous self-verification.
 
 **When it triggers:** Any non-trivial task — multi-step work, anything involving files or tool calls, analysis, building something, debugging, research, document creation, or long-running work. Applied before starting work, not after, since it changes how the work is done.
 
