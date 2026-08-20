@@ -92,7 +92,7 @@ catalog: [`docs/REFERENCE.md`](./docs/REFERENCE.md).
 | `agentic-loop` | Multi-agent orchestration: spawned teams, no-human-gates, multi-PR loops |
 | `cite-check` | Re-derive a specific claim from sources only — no recall, no inference. Forks into `coderails:source-auditor`, so it audits with no access to the context that produced the claim |
 | `dashboard` | Live local web HUD: sessions, loops, PR gate states, runs, memory activity |
-| `fable-mode` | High-autonomy self-verifying working mode for non-trivial tasks |
+| `execution-discipline` | High-autonomy, self-verifying work for non-trivial tasks |
 | `handoff` | Structured memory + continuation prompt for a fresh session |
 | `improve-prompt` | Surfaces ambiguities and rewrites underspecified prompts |
 | `docs-sync` | Scheduled nightly pipeline that audits git-tracked docs for drift and, only if drift is found, edits/pushes/reviews/self-merges the fix through the full gate chain (scheduled, not for interactive use) |

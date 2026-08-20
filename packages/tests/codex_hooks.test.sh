@@ -18,13 +18,13 @@ check() {
 }
 
 run_bash_hook() {
-  local hook="$1" cwd="$2" command="$3"
-  jq -nc --arg cwd "$cwd" --arg command "$command" '{
+  local hook="$1" cwd="$2" command="$3" workdir="${4:-}"
+  jq -nc --arg cwd "$cwd" --arg command "$command" --arg workdir "$workdir" '{
     session_id: "s1",
     cwd: $cwd,
     hook_event_name: "PreToolUse",
     tool_name: "Bash",
-    tool_input: {command: $command}
+    tool_input: {command: $command, workdir: $workdir}
   }' | "$hook"
 }
 
@@ -58,6 +58,29 @@ trap 'rm -rf "$security_tmp"' EXIT
 test_repo="$security_tmp/repo"
 git init -q "$test_repo"
 git -C "$test_repo" symbolic-ref HEAD refs/heads/feature/native-config-probes
+
+main_repo="$security_tmp/main-repo"
+feature_repo="$security_tmp/feature-repo"
+pwd_repo="$security_tmp/pwd-repo"
+ceiling_data="$security_tmp/verification-data"
+git init -q "$main_repo"
+git -C "$main_repo" symbolic-ref HEAD refs/heads/main
+git init -q "$feature_repo"
+git -C "$feature_repo" symbolic-ref HEAD refs/heads/feature/e5
+git init -q "$pwd_repo"
+git -C "$pwd_repo" symbolic-ref HEAD refs/heads/feature/pwd
+workdir_output=$(PLUGIN_DATA="$ceiling_data" run_bash_hook "$HOOKS/scripts/verification_volume_ceiling.sh" "$main_repo" "packages/tests/codex_hooks.test.sh" "$feature_repo")
+cwd_output=$(PLUGIN_DATA="$ceiling_data" run_bash_hook "$HOOKS/scripts/verification_volume_ceiling.sh" "$main_repo" "packages/tests/codex_hooks.test.sh")
+pwd_output=$(cd "$pwd_repo" && PLUGIN_DATA="$ceiling_data" run_bash_hook "$HOOKS/scripts/verification_volume_ceiling.sh" "" "packages/tests/codex_hooks.test.sh")
+if [[ -z "$workdir_output$cwd_output$pwd_output" ]] &&
+  grep -qx 1 "$ceiling_data/verification-ceiling/feature-e5__full-suite.count" &&
+  grep -qx 1 "$ceiling_data/verification-ceiling/main__full-suite.count" &&
+  grep -qx 1 "$ceiling_data/verification-ceiling/feature-pwd__full-suite.count"; then
+  printf 'ok   - verification ceiling uses workdir, cwd, then PWD\n'
+else
+  printf 'FAIL - verification ceiling uses workdir, cwd, then PWD\n'
+  fails=$((fails + 1))
+fi
 
 mkdir -p "$test_repo/.codex"
 repo_marker="$security_tmp/repo-command-ran"
