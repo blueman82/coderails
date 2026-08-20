@@ -2,13 +2,7 @@
 # Frozen provider-parity acceptance test. Both adapters below drive independent
 # provider-owned implementations through the same behavioural cases.
 #
-# Codex's provider-local CLI contract is intentionally small and stable:
-#   graph.py begin-wave STATE
-#   graph.py record-wave STATE RESULTS_JSON
-#   graph.py inspect STATE
-#   graph.py complete STATE --session ID --evals FILE --proof FILE --retro FILE
-# Claude keeps its shell implementation; this test's adapter maps those same
-# behaviours to provider-local functions without sharing code between providers.
+# The adapters map provider-local operations without sharing implementation code.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -97,11 +91,14 @@ provider_begin_wave() {
     fi
 }
 provider_record_wave() {
-    local state="$1" results="$2"
+    local state="$1" results="$2" wave_key="id" envelope
+    [[ "$CURRENT_PROVIDER" == "claude" ]] && wave_key="wave_id"
+    envelope=$(jq -cn --arg wave_id "$(jq -r --arg key "$wave_key" '.graph.active_wave[$key] // empty' "$state")" \
+        --argjson results "$results" '{wave_id:$wave_id,results:$results}')
     if [[ "$CURRENT_PROVIDER" == "claude" ]]; then
-        claude_graph_call graph_dispatch_record "$state" "$results"
+        claude_graph_call graph_dispatch_record "$state" "$envelope"
     else
-        codex_graph_call record-wave "$state" "$results"
+        codex_graph_call record-wave "$state" "$envelope"
     fi
 }
 provider_inspect() {
@@ -125,7 +122,8 @@ provider_can_complete() {
 }
 provider_authorize_dispatch() {
     local state="$1" evals="$2" session="$3" mode="$4"
-    local guard input guard_root state_dir output
+    local guard input guard_root state_dir output node="A"
+    [[ ! -f "$state" ]] || node=$(jq -r '.graph.active_wave.nodes[0] // "A"' "$state")
     guard_root="$TMP/guard.$CURRENT_PROVIDER.$RANDOM"
     state_dir="$guard_root/fixture/$session"
     mkdir -p "$state_dir"
@@ -143,8 +141,8 @@ provider_authorize_dispatch() {
     else
         [[ "$mode" != "sandbox" ]] || return 1
         guard="$CODEX_GUARD"
-        input=$(jq -cn --arg session "$session" --arg cwd "$ROOT" \
-            '{tool_name:"spawn_agent",session_id:$session,cwd:$cwd,tool_input:{task_name:"loop-worker",message:"Implement graph work unit"}}')
+        input=$(jq -cn --arg session "$session" --arg cwd "$ROOT" --arg task "loop-worker-$node" \
+            '{tool_name:"spawn_agent",session_id:$session,cwd:$cwd,tool_input:{task_name:$task,message:"Implement graph work unit"}}')
     fi
     [[ -x "$guard" ]] || return 127
     output=$(printf '%s' "$input" | \
@@ -306,6 +304,7 @@ test_dispatch_guards() {
     nodes=$(jq -cn --argjson a "$(node)" '{A:$a}')
     write_graph "$state" "$nodes" '[]' '{}'
     jq '.work_units={one:{status:"pending"},two:{status:"pending"},three:{status:"pending"}}' "$state" >"$state.tmp" && mv "$state.tmp" "$state"
+    provider_begin_wave "$state" >/dev/null
     write_completion_artifacts "$state" "$evals" "$TMP/$CURRENT_PROVIDER.dispatch-proof.json" "$TMP/$CURRENT_PROVIDER.dispatch-retro.json"
 
     if provider_authorize_dispatch "$state" "$evals" "session-$CURRENT_PROVIDER" native >/dev/null 2>&1; then
