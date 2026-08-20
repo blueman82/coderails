@@ -14,9 +14,4 @@ scripts/quality/check.sh --strict --changed
 echo 'pre-commit: shell test suites'
 bash hooks/scripts/tests/run_all.sh
 
-if [[ -f codex/tests/self_check.py ]]; then
-    echo 'pre-commit: Python self-check'
-    python3 codex/tests/self_check.py
-fi
-
 echo 'pre-commit: OK'

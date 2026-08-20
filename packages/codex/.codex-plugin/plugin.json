@@ -1,7 +1,6 @@
 {
   "name": "coderails-codex",
-  "version": "0.1.0",
-  "description": "Provider-native Coderails graph runtime for Codex",
-  "license": "MIT",
-  "provider": "codex"
+  "version": "0.2.0",
+  "description": "Native Coderails workflow and guardrails for Codex",
+  "skills": "./skills/"
 }

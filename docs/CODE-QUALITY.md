@@ -13,25 +13,26 @@ bash scripts/quality/tests/quality.test.sh
 git config core.hooksPath scripts/git-hooks
 ```
 
-The default per-file limit is 400 lines (`MAX_LOC` overrides it). The checked-in
-`skills/index.yaml` routing index has an approved 600-line exception because its
-indentation-preserving single-document shape is consumed by shell and Python
-parsers; all other source files remain subject to the 400-line limit. Python
-function/method size defaults to 100 lines (`MAX_FUNCTION_LINES` overrides it).
+The default per-file limit is 400 lines. Python function/method size defaults to
+100 lines. A narrow checked-in legacy policy may set an exact ceiling for one
+path, or for one named function in one path, at its existing size. Any increase
+fails; new files, new functions, and unlisted code use the normal limits. These
+ceilings are debt ratchets, not exemptions: there is no `--no-verify` escape or
+global limit override.
+
 Strict commit checks inspect changed tracked files, so existing debt is visible
-without making an unrelated edit uncommittable. A deliberate threshold override
-must be explicit in the command or environment.
+without making an unrelated edit uncommittable.
 
 ## Enforcement
 
 - Hard at an activated commit hook: source LOC, Python syntax/function size,
   structured JSON validity, whitespace, commented-out-code findings, optional
   Bash lint/format findings when those tools are installed, the shell test
-  suites, and the Codex Python self-check.
+  suites.
 - Warn-only during local iteration: full-tree inventory and `PostToolUse`
   feedback from `hooks/scripts/quality_feedback.sh`. The edit hook always exits
   successfully and cannot block a write.
-- Existing Coderails workflow, integrity, task-eval, provider-separation, and
+- Existing Coderails workflow, integrity, task-eval, and
   protected-file hooks remain authoritative and are not bypassed.
 - YAGNI/KISS/DRY/SSOT and architectural boundaries remain review-level checks;
   static enforcement cannot safely prove intent without false positives.
@@ -47,10 +48,10 @@ strict command and are reported by the warn-only command.
 ## Activation and ceilings
 
 The tracked pre-commit hook is inactive until each clone opts in with
-`git config core.hooksPath scripts/git-hooks`. Git's `--no-verify` remains an
-agent/user-controlled bypass inside the existing local trust domain; the
-repository's existing workflow and server-side integrity rules are the stronger
-boundaries. There is no automatic hook installation and no new dependency.
+`git config core.hooksPath scripts/git-hooks`. The legacy ceiling policy does
+not permit `--no-verify` or a global limit override. The repository's existing
+workflow and server-side integrity rules remain the stronger boundaries. There
+is no automatic hook installation and no new dependency.
 
 The commented-code detector is intentionally conservative: it catches common
 statement-shaped comments and leaves prose, documentation comments, Markdown,

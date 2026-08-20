@@ -28,8 +28,13 @@ the local `integrity_review.machine_user` configuration.
 
 ## What this repo is
 
-`coderails` is a **Claude Code plugin** — not an application. It ships as a zip,
-installs via `install.sh` + `/plugin install`, and bundles three things:
+`coderails` contains two independent plugins — not an application:
+
+- The working Claude Code plugin lives at the repository root.
+- The native Codex plugin lives at `packages/codex/`.
+
+`install.sh` defaults to Claude; pass `--provider codex` for Codex. The Claude
+plugin bundles three things:
 
 1. **Workflow commands** — the `prep → push → merge → wiki` chain (`commands/*.md`)
 2. **Skills** — agentic-loop, planning-sequence, premortem, handoff (`skills/*/SKILL.md`)
@@ -46,8 +51,8 @@ The `agentic-loop` skill creates durable graph state in `progress.json`, includi
 nodes, edges, joins, status, outcomes, and retries. It provides readiness checks
 and plan/record helpers for dispatching and recording waves. This is a manually
 operated graph runtime: the model must read the graph, dispatch ready work, and
-record results; it is not an automatic scheduler. Automatic Claude+Codex
-orchestration and join release for `parallel-review` are not yet wired in.
+record results; it is not an automatic scheduler. This graph belongs only to
+the root Claude plugin.
 
 ## How the pieces wire together
 
@@ -63,16 +68,16 @@ commands/*.md                   → slash commands (frontmatter + prose instruct
   └─ scripts/sandbox/*.sh       → srt sandbox wrapper for spawned workers (see "Sandboxed workers")
   └─ scripts/integrity-gate/*        → root-owned launchd daemon that posts the `integrity-review` commit status
 skills/*/SKILL.md               → skills with triggering descriptions
-skills/index.yaml               → provider-routing schema (per skill_id: claude/codex path + status),
-                                  resolved by hooks/scripts/lib/skill_route.sh
 agents/*.md                     → subagent definitions the skills spawn (deploy-safety-reviewer,
                                   design-scout, disposition-scout, docs-auditor,
                                   loop-worker, preflight-scout, proof-author,
                                   source-auditor, spec-reviewer, wiki-writer)
-.codex/skills/*/SKILL.md        → Codex-provider sibling bodies for skills/agents routed to codex in
-                                  skills/index.yaml (e.g. disposition-scout)
-.github/prompts/*.prompt.md     → thin Codex entrypoints that route to the canonical Claude body per
-                                  skills/index.yaml; add no instructions of their own
+packages/codex/                 → independent native Codex plugin root
+  ├─ .codex-plugin/plugin.json  → Codex plugin manifest
+  ├─ skills/*/SKILL.md          → native Codex skills, including former commands
+  ├─ hooks/hooks.json           → Codex hook registration
+  ├─ hooks/scripts/*.sh         → Codex-only hook scripts using PLUGIN_ROOT
+  └─ agents/*.toml              → agents installed by install.sh --provider codex
 instructions/                   → the discipline rules appended to ~/.claude/CLAUDE.md
 starter-memory/                 → feedback memories seeded into the user's memory dir
 docs/                           → long-form reference split out of this file

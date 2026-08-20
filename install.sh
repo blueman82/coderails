@@ -3,22 +3,36 @@ set -euo pipefail
 
 PLUGIN_DIR="$(cd "$(dirname "$0")" && pwd)"
 DRY_RUN=0
+PROVIDER=claude
 MEMORY_TARGET=""
+MEMORY_TARGET_SET=0
 INTEGRITY_GATE=ask
+INTEGRITY_GATE_SET=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --dry-run) DRY_RUN=1; shift ;;
-    --memory-target) MEMORY_TARGET="${2:-}"; shift 2 ;;
-    --integrity-gate) INTEGRITY_GATE=yes; shift ;;
-    --no-integrity-gate) INTEGRITY_GATE=no; shift ;;
+    --provider) PROVIDER="${2:-}"; shift 2 ;;
+    --memory-target) MEMORY_TARGET="${2:-}"; MEMORY_TARGET_SET=1; shift 2 ;;
+    --integrity-gate) INTEGRITY_GATE=yes; INTEGRITY_GATE_SET=1; shift ;;
+    --no-integrity-gate) INTEGRITY_GATE=no; INTEGRITY_GATE_SET=1; shift ;;
     --help|-h)
-      printf 'Usage: %s [--dry-run] [--integrity-gate|--no-integrity-gate] [--memory-target PATH]\n' "$0"
+      printf 'Usage: %s [--provider claude|codex] [--dry-run] [--integrity-gate|--no-integrity-gate] [--memory-target PATH]\n' "$0"
       exit 0
       ;;
     *) printf 'Unknown arg: %s\n' "$1" >&2; exit 1 ;;
   esac
 done
+
+case "$PROVIDER" in
+  claude|codex) ;;
+  *) printf 'Invalid provider: %s (expected claude or codex)\n' "$PROVIDER" >&2; exit 1 ;;
+esac
+
+if [[ "$PROVIDER" == codex && ( "$MEMORY_TARGET_SET" -eq 1 || "$INTEGRITY_GATE_SET" -eq 1 ) ]]; then
+  printf '%s\n' '--memory-target and integrity-gate options are Claude-only' >&2
+  exit 1
+fi
 
 # ── ANSI ──────────────────────────────────────────────────────────────────────
 R='\033[0;31m'   BR='\033[1;31m'
@@ -89,6 +103,91 @@ flash_dry() { printf "  ${BC}[ ⟳ DRY-RUN  ]${NC}  ${W}would: %s${NC}\n" "$1"; 
 flash_warn(){ printf "  ${Y}[ ⚠ CONFLICT ]${NC}  %s\n" "$1"; }
 flash_cp()  { printf "  ${BG}[ ✔ COPIED   ]${NC}  ${W}%s${NC}\n" "$1"; }
 flash_skip(){ printf "  ${DIM}[ · SKIP     ]${NC}  ${DIM}%s${NC}\n" "$1"; }
+
+codex_atomic_copy() {
+  local source="$1" target="$2" target_dir tmp
+  target_dir=$(dirname "$target")
+  tmp=$(mktemp "$target_dir/.coderails-agent.XXXXXX")
+  cp "$source" "$tmp"
+  chmod 644 "$tmp"
+  mv "$tmp" "$target"
+}
+
+codex_install() {
+  local codex_root="${CODEX_HOME:-$HOME/.codex}"
+  local source_dir="$PLUGIN_DIR/packages/codex/agents"
+  local target_dir="$codex_root/agents"
+  local timestamp name source target backup count
+  local names=(deploy-safety-reviewer design-scout disposition-scout docs-auditor loop-worker preflight-scout proof-author source-auditor spec-reviewer wiki-writer)
+
+  command -v codex >/dev/null 2>&1 || { printf '%s\n' 'Codex CLI is required' >&2; return 1; }
+  [[ -d "$source_dir" && ! -L "$source_dir" ]] || { printf 'Invalid Codex agent source directory: %s\n' "$source_dir" >&2; return 1; }
+  count=$(find "$source_dir" -maxdepth 1 -type f -name '*.toml' | wc -l | tr -d ' ')
+  [[ "$count" == 10 ]] || { printf 'Expected 10 Codex agents, found %s\n' "$count" >&2; return 1; }
+  [[ ! -e "$target_dir" || ( -d "$target_dir" && ! -L "$target_dir" ) ]] || { printf 'Invalid Codex agents directory: %s\n' "$target_dir" >&2; return 1; }
+
+  timestamp=$(date -u +%Y%m%dT%H%M%SZ)
+  for name in "${names[@]}"; do
+    source="$source_dir/$name.toml"
+    target="$target_dir/$name.toml"
+    [[ -f "$source" && ! -L "$source" ]] || { printf 'Invalid Codex agent source: %s\n' "$source" >&2; return 1; }
+    grep -Fxq '# Managed by Coderails Codex plugin' "$source" \
+      && grep -Fxq "name = \"$name\"" "$source" \
+      && grep -q '^description = ' "$source" \
+      && grep -q '^developer_instructions = """$' "$source" \
+      || { printf 'Invalid Codex agent source: %s\n' "$source" >&2; return 1; }
+
+    if [[ -L "$target" || ( -e "$target" && ! -f "$target" ) ]]; then
+      printf 'Refusing non-regular Codex agent target: %s\n' "$target" >&2
+      return 1
+    fi
+    if [[ -f "$target" && ! -L "$target" ]] && ! cmp -s "$source" "$target"; then
+      grep -Fxq '# Managed by Coderails Codex plugin' "$target" \
+        || { printf 'Refusing unrelated Codex agent collision: %s\n' "$target" >&2; return 1; }
+      backup="$target.coderails-backup-$timestamp"
+      [[ ! -e "$backup" && ! -L "$backup" ]] \
+        || { printf 'Refusing existing Codex agent backup: %s\n' "$backup" >&2; return 1; }
+    fi
+  done
+
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    printf 'would: codex plugin marketplace add %s\n' "$PLUGIN_DIR"
+    printf '%s\n' 'would: codex plugin add coderails-codex@coderails'
+    for name in "${names[@]}"; do
+      source="$source_dir/$name.toml"
+      target="$target_dir/$name.toml"
+      if [[ ! -e "$target" ]]; then
+        printf 'would: install agent %s\n' "$target"
+      elif cmp -s "$source" "$target"; then
+        printf 'would: skip identical agent %s\n' "$target"
+      else
+        printf 'would: back up and update managed agent %s\n' "$target"
+      fi
+    done
+    printf '%s\n' 'would: after installation, start a fresh Codex session, run /hooks, and review and trust the Coderails hooks; Codex skips plugin hooks until then.'
+    return 0
+  fi
+
+  mkdir -p "$codex_root"
+  [[ -d "$codex_root" && ! -L "$codex_root" ]] \
+    || { printf 'Invalid Codex home directory: %s\n' "$codex_root" >&2; return 1; }
+  codex plugin marketplace add "$PLUGIN_DIR"
+  codex plugin add coderails-codex@coderails
+  mkdir -p "$target_dir"
+  for name in "${names[@]}"; do
+    source="$source_dir/$name.toml"
+    target="$target_dir/$name.toml"
+    if [[ -f "$target" ]] && cmp -s "$source" "$target"; then
+      continue
+    fi
+    if [[ -f "$target" ]]; then
+      cp -p "$target" "$target.coderails-backup-$timestamp"
+    fi
+    codex_atomic_copy "$source" "$target"
+  done
+  printf '%s\n' 'Codex skips plugin hooks until you review and trust them.'
+  printf '%s\n' 'Start a fresh Codex session, run /hooks, then review and trust the Coderails hooks.'
+}
 
 # ── Matrix rain intro (interactive only) ──────────────────────────────────────
 matrix_rain() {
@@ -185,6 +284,11 @@ print_claude_steps() {
 # ═════════════════════════════════════════════════════════════════════════════
 #  MAIN
 # ═════════════════════════════════════════════════════════════════════════════
+
+if [[ "$PROVIDER" == codex ]]; then
+  codex_install
+  exit $?
+fi
 
 matrix_rain
 print_title

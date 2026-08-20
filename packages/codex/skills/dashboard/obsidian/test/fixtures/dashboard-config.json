@@ -1,0 +1,20 @@
+{
+  "repos": ["blueman82/coderails"],
+  "wikiPaths": ["/tmp/coderails-wiki"],
+  "buttons": [
+    {
+      "name": "wiki-lint",
+      "label": "WIKI LINT",
+      "command": "$coderails-codex:wiki-lint",
+      "cwd": "/tmp/coderails",
+      "profile": "standard"
+    },
+    {
+      "name": "sync-docs",
+      "label": "SYNC DOCS",
+      "command": "$coderails-codex:sync-docs",
+      "cwd": "/tmp/coderails",
+      "profile": "read-only"
+    }
+  ]
+}
