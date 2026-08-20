@@ -167,6 +167,16 @@ helpers_have_modes() {
   done
 }
 
+native_graph_contract_exists() {
+  local graph="$PACKAGE/skills/agentic-loop/scripts/graph.py"
+  [[ -x "$graph" ]] || return 1
+  python3 "$graph" --help | grep -q '{begin-wave,inspect,record-wave,complete}' || return 1
+  grep -q 'spawn_agent' "$PACKAGE/skills/agentic-loop/SKILL.md" || return 1
+  grep -q 'begin-wave' "$PACKAGE/skills/agentic-loop/SKILL.md" || return 1
+  grep -q 'update_plan.*display only' "$PACKAGE/skills/agentic-loop/SKILL.md" || return 1
+  ! grep -Eiq 'claude -p|codex exec|pr-review-toolkit|background scheduler' "$PACKAGE/skills/agentic-loop/SKILL.md"
+}
+
 provider_split_is_clean() {
   local path
   for path in \
@@ -198,6 +208,7 @@ check "11 migrated commands exist as skills" migrated_commands_exist
 check "exactly 10 native custom agents" agents_are_native
 check "native hook commands resolve under PLUGIN_ROOT" hooks_are_native
 check "package helper modes" helpers_have_modes
+check "native Codex graph contract" native_graph_contract_exists
 check "provider split and cleanup" provider_split_is_clean
 
 if [[ "$FAILS" -eq 0 ]]; then

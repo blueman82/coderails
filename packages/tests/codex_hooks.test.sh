@@ -30,7 +30,7 @@ run_bash_hook() {
 
 check "hooks.json parses" jq -e . "$HOOKS/hooks.json"
 check "native matcher names" jq -e '
-  [.hooks.PreToolUse[].matcher] == ["^Bash$", "^request_user_input$", "^apply_patch$"] and
+  [.hooks.PreToolUse[].matcher] == ["^Bash$", "^request_user_input$", "^(spawn_agent|Agent)$", "^apply_patch$"] and
   [.hooks.PostToolUse[].matcher] == ["^apply_patch$"]
 ' "$HOOKS/hooks.json"
 check "all commands use PLUGIN_ROOT" jq -e '
@@ -38,7 +38,11 @@ check "all commands use PLUGIN_ROOT" jq -e '
 ' "$HOOKS/hooks.json"
 check "no legacy plugin-root variables" sh -c '! grep -R -E "CLAUDE_PLUGIN_ROOT|CODEX_PLUGIN_ROOT" "$1"' sh "$HOOKS"
 check "no lifecycle adapter" test ! -e "$HOOKS/lifecycle.py"
-check "no graph or parallel hooks" sh -c '! grep -R -E "graph_|parallel-review|parallel_review|enforce_pr_workflow|loop_state_guard" "$1"' sh "$HOOKS"
+check "native graph hooks are registered" jq -e '
+  ([.hooks.Stop[].hooks[].command] | index("\"${PLUGIN_ROOT}/hooks/scripts/graph_completion_guard.sh\"")) != null and
+  ([.hooks.PreToolUse[] | select(.matcher == "^(spawn_agent|Agent)$") | .hooks[].command] == ["\"${PLUGIN_ROOT}/hooks/scripts/loop_dispatch_guard.sh\""])
+' "$HOOKS/hooks.json"
+check "shared and cross-provider hooks stay absent" sh -c '! grep -R -E "parallel-review|parallel_review|enforce_pr_workflow|claude -p|codex exec" "$1"' sh "$HOOKS"
 
 missing=0
 while IFS= read -r command; do
@@ -48,7 +52,10 @@ done < <(jq -r '.hooks[][] | .hooks[] | .command' "$HOOKS/hooks.json")
 check "hook command paths exist" test "$missing" -eq 0
 
 bootstrap=$(printf '%s' '{"session_id":"s1","cwd":"/tmp","hook_event_name":"SessionStart","source":"startup"}' | PLUGIN_ROOT="$PACKAGE" "$HOOKS/scripts/inject_bootstrap.sh")
-check "bootstrap returns native orchestration guidance" sh -c 'printf "%s" "$1" | jq -e ".hookSpecificOutput.additionalContext | contains(\"using-coderails\") and contains(\"top-level session as the orchestrator\") and contains(\"delegate do-work tool calls with spawn_agent\")"' sh "$bootstrap"
+check "bootstrap returns native orchestration and graph guidance" sh -c 'printf "%s" "$1" | jq -e ".hookSpecificOutput.additionalContext | contains(\"using-coderails\") and contains(\"top-level session as the orchestrator\") and contains(\"delegate do-work tool calls with spawn_agent\") and contains(\"Native graph resume\")"' sh "$bootstrap"
+
+missing_dispatch=$(printf '%s' '{"session_id":"missing","cwd":"/tmp","hook_event_name":"PreToolUse","tool_name":"spawn_agent","tool_input":{"task_name":"loop-worker","message":"work"}}' | CODERAILS_AGENTIC_LOOP_DIR="${TMPDIR:-/tmp}/coderails-codex-hooks-missing-$$" PLUGIN_ROOT="$PACKAGE" "$HOOKS/scripts/loop_dispatch_guard.sh")
+check "native worker dispatch without loop state is denied" sh -c 'printf "%s" "$1" | jq -e ".hookSpecificOutput.permissionDecision == \"deny\""' sh "$missing_dispatch"
 
 destructive=$(printf '%s' '{"session_id":"s1","cwd":"/tmp","hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"rm -rf /tmp/example"}}' | "$HOOKS/scripts/destructive_bash_gate.sh")
 check "destructive Bash is denied" sh -c 'printf "%s" "$1" | jq -e ".hookSpecificOutput.permissionDecision == \"deny\""' sh "$destructive"
@@ -113,6 +120,20 @@ for lookalike_command in \
   [[ -z "$lookalike_output" ]] || lookalikes_allowed=0
 done
 check "similar non-config paths remain allowed" test "$lookalikes_allowed" -eq 1
+
+graph_root="$security_tmp/graph-loops"
+graph_dir="$graph_root/fixture/s-complete"
+mkdir -p "$graph_dir"
+jq -n '{
+  schema_version:2,session_id:"s-complete",loop_id:"loop-1",revision:1,status:"in-progress",
+  graph:{nodes:{A:{status:"pending",outcome:"pending",retry:{attempts:0,max:2},evidence:[]}},edges:[],joins:{},active_wave:null,hard_stop:null}
+}' >"$graph_dir/progress.json"
+incomplete_stop=$(printf '%s' '{"session_id":"s-complete","cwd":"/tmp","hook_event_name":"Stop","last_assistant_message":"done"}' | CODERAILS_AGENTIC_LOOP_DIR="$graph_root" PLUGIN_ROOT="$PACKAGE" "$HOOKS/scripts/graph_completion_guard.sh")
+check "incomplete native graph blocks Stop" sh -c 'printf "%s" "$1" | jq -e ".decision == \"block\""' sh "$incomplete_stop"
+jq '.status="complete" | .graph.nodes.A.status="done" | .graph.nodes.A.outcome="done"' "$graph_dir/progress.json" >"$graph_dir/complete.json"
+mv "$graph_dir/complete.json" "$graph_dir/progress.json"
+complete_stop=$(printf '%s' '{"session_id":"s-complete","cwd":"/tmp","hook_event_name":"Stop","last_assistant_message":"done"}' | CODERAILS_AGENTIC_LOOP_DIR="$graph_root" PLUGIN_ROOT="$PACKAGE" "$HOOKS/scripts/graph_completion_guard.sh")
+check "completed native graph allows Stop" test -z "$complete_stop"
 
 check "unsupported subagent detection is absent" sh -c '! grep -R -E "agent_id" "$1"' sh "$HOOKS"
 check "all hook text avoids Agent tool wording" sh -c '! grep -R -F "Agent tool" "$1"' sh "$HOOKS"
