@@ -30,11 +30,11 @@ run_check() { # desc, fixture, node, expected_stdout, expected_exit
 build_single_pred() { # outfile pred_outcome
     jq -n --arg po "$2" '
     {
-      session_id:"session-test", loop_id:"loop-test", revision:1,
+      schema_version:2, status:"in-progress", session_id:"session-test", loop_id:"loop-test", revision:1,
       graph: {
         nodes: {
-          A: {status:$po, outcome:$po, retry:{attempts:0,max:5}},
-          B: {status:"pending", outcome:"pending", retry:{attempts:0,max:5}}
+          A: {status:$po, outcome:$po, retry:{attempts:0,max:5}, evidence:[]},
+          B: {status:"pending", outcome:"pending", retry:{attempts:0,max:5}, evidence:[]}
         },
         edges: [{from:"A",to:"B"}],
         joins: {}
@@ -47,12 +47,12 @@ build_single_pred() { # outfile pred_outcome
 build_join() { # outfile x_outcome y_outcome
     jq -n --arg xo "$2" --arg yo "$3" '
     {
-      session_id:"session-test", loop_id:"loop-test", revision:1,
+      schema_version:2, status:"in-progress", session_id:"session-test", loop_id:"loop-test", revision:1,
       graph: {
         nodes: {
-          X: {status:$xo, outcome:$xo, retry:{attempts:0,max:5}},
-          Y: {status:$yo, outcome:$yo, retry:{attempts:0,max:5}},
-          J: {status:"pending", outcome:"pending", retry:{attempts:0,max:5}}
+          X: {status:$xo, outcome:$xo, retry:{attempts:0,max:5}, evidence:[]},
+          Y: {status:$yo, outcome:$yo, retry:{attempts:0,max:5}, evidence:[]},
+          J: {status:"pending", outcome:"pending", retry:{attempts:0,max:5}, evidence:[]}
         },
         edges: [{from:"X",to:"J"},{from:"Y",to:"J"}],
         joins: {J:{id:"J",mode:"all",inputs:["X","Y"]}}

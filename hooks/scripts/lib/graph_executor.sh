@@ -63,7 +63,9 @@ graph_executor_graph_valid() {
       | ($g.hard_stop) as $hard_stop
       | ($edges + [$joins | to_entries[] as $join
                     | $join.value.inputs[]? | {from:.,to:$join.key}]) as $dependencies
-      | (.session_id | type) == "string" and (.session_id | length) > 0
+      | .schema_version == 2
+        and (.status | IN("initialising","in-progress","complete"))
+        and (.session_id | type) == "string" and (.session_id | length) > 0
         and (.loop_id | type) == "string" and (.loop_id | length) > 0
         and (.revision | type) == "number" and (.revision | floor) == .revision and .revision > 0
         and ($g | type) == "object"
@@ -75,6 +77,7 @@ graph_executor_graph_valid() {
                        or (.value.status | IN("pending","ready","running","blocked","done","skipped","failed","hard-stop","stale") | not)
                        or (.value.outcome | IN("pending","ready","running","blocked","done","skipped","failed","hard-stop","stale") | not)
                        or .value.status != .value.outcome
+                       or (.value.evidence | type) != "array"
                        or (.value.retry.attempts | type) != "number"
                        or (.value.retry.max | type) != "number"
                        or .value.retry.attempts < 0
@@ -149,14 +152,14 @@ graph_executor_apply_wave() {
     | (.graph.active_wave) as $active | (.graph.hard_stop) as $hard_stop
     | (.graph.edges + [.graph.joins | to_entries[] as $join | $join.value.inputs[]? | {from:.,to:$join.key}]) as $dependencies
     | ($active != null) as $tracked_wave
-    | if ((.session_id | type) != "string" or (.session_id | length) == 0 or (.loop_id | type) != "string" or (.loop_id | length) == 0
+    | if (.schema_version != 2 or (.status | IN("initialising","in-progress","complete") | not) or (.session_id | type) != "string" or (.session_id | length) == 0 or (.loop_id | type) != "string" or (.loop_id | length) == 0
           or (.revision | type) != "number" or (.revision | floor) != .revision or .revision <= 0
           or (.graph | type) != "object" or ($nodes | type) != "object"
           or ((.graph.edges // null) | type) != "array" or ((.graph.joins // null) | type) != "object"
           or ([$nodes | to_entries[] | select((.value | type) != "object"
                         or (.value.status | IN("pending","ready","running","blocked","done","skipped","failed","hard-stop","stale") | not)
                         or (.value.outcome | IN("pending","ready","running","blocked","done","skipped","failed","hard-stop","stale") | not)
-                        or .value.status != .value.outcome or (.value.retry.attempts | type) != "number" or (.value.retry.max | type) != "number"
+                        or .value.status != .value.outcome or (.value.evidence | type) != "array" or (.value.retry.attempts | type) != "number" or (.value.retry.max | type) != "number"
                         or .value.retry.attempts < 0 or .value.retry.max < 1 or .value.retry.max > 5 or .value.retry.attempts > .value.retry.max)] | length) != 0
           or ([.graph.edges[] as $edge | select(($edge | type) != "object" or ($edge.from | type) != "string" or ($edge.to | type) != "string"
                         or ($nodes | has($edge.from) | not) or ($nodes | has($edge.to) | not))] | length) != 0

@@ -40,7 +40,9 @@ fail() {
 
 stamp_identity() {
     local path="$1"
-    jq '. + {session_id:"session-test",loop_id:"loop-test",revision:1}' "$path" >"$path.tmp" && mv "$path.tmp" "$path"
+    jq '. + {schema_version:2,status:"in-progress",session_id:"session-test",loop_id:"loop-test",revision:1}
+        | .graph.nodes |= with_entries(if (.value | type) == "object" and (.value | has("evidence") | not)
+            then .value.evidence = [] else . end)' "$path" >"$path.tmp" && mv "$path.tmp" "$path"
 }
 
 record_ready_wave() {

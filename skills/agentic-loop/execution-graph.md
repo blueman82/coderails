@@ -62,8 +62,7 @@ through the `J2` join, and for any other fork/join wave in the graph:
 3. Dispatch each real `Agent` call with this exact first prompt line, followed
    by the worker instructions: `CODERAILS_GRAPH_DISPATCH={"session_id":"<session-id>","loop_id":"<loop-id>","revision":<revision>,"wave_id":"<wave-id>","node_id":"<node-id>"}`.
    The `loop_dispatch_guard` denies a missing, malformed, stale, or foreign
-   envelope. Put the same line first in the prompt file passed to
-   `spawn-sandboxed-worker.sh`; its explicit guard call enforces the same owner.
+   envelope. Graph waves use the orchestrator's own Agent tool calls only.
 4. **Wave-completeness — confirm before recording.** Before recording, confirm
    every node in the active wave has a result in hand. A skipped branch still
    records an explicit skip, same convention as this file's skip column. Do

@@ -222,7 +222,7 @@ jq '. + {schema_version:2,loop_id:"loop-new",revision:2,
     graph:{nodes:{A:{status:"running",outcome:"running",retry:{attempts:0,max:2},evidence:[]}},edges:[],joins:{},
            active_wave:{wave_id:"wave-2",revision:2,nodes:["A"]},hard_stop:null}}' \
     "$(file_path S1)" >"$(file_path S1).tmp" && mv "$(file_path S1).tmp" "$(file_path S1)"
-jq -n '{scope:"loop",session_id:"S1",loop_id:"loop-new",revision:2,verification_level:0,
+jq -n '{scope:"loop",session_id:"S1",loop_id:"loop-new",revision:1,verification_level:0,
     verification_justification:"dispatch ownership fixture",head_sha:"deadbeef",evals:[]}' >"$(file_dir S1)/evals.json"
 stamp "$(file_dir S1)/evals.json"
 
@@ -240,8 +240,9 @@ check "wrong Agent graph revision -> BLOCK" 0 $?
 out=$(run "$(payload S1 coderails:preflight-scout)")
 is_denied "$out"
 check "another Agent type cannot bypass active-wave ownership -> BLOCK" 0 $?
-out=$(run "$(graph_payload Bash S1 A wave-2 2)")
-check "sandbox wrapper uses the same exact graph ownership envelope -> allow" "" "$out"
+out=$(run "$(jq -cn --arg session S1 --arg cwd "$CWD" '{tool_name:"Bash",session_id:$session,cwd:$cwd,
+    tool_input:{command:"scripts/sandbox/spawn-sandboxed-worker.sh worktree prompt model"}}')")
+check "sandbox wrapper stays outside graph ownership -> allow" "" "$out"
 
 [ "$fails" -eq 0 ] && {
     echo "PASS"

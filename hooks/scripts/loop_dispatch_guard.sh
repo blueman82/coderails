@@ -11,7 +11,8 @@
 #
 # Scope: implementation workers only. In-process workers are Agent calls whose
 # subagent_type is coderails:loop-worker. Sandboxed workers call this same guard
-# from spawn-sandboxed-worker.sh before launching the separate process.
+# from spawn-sandboxed-worker.sh before launching the separate process, but are
+# outside graph dispatch ownership; graph waves use native Agent calls only.
 #
 # Reuses the shared work-unit counter (als_read_work_units) and evals-result
 # reader (als_read_loop_evals_result) from lib/loop_state_common.sh verbatim
@@ -113,7 +114,7 @@ if [ -n "$state_reason" ]; then
     loop_dispatch_deny "$state_reason. Implementation workers require session-owned loop state before dispatch." "$ALS_LOOP_EVALS_RESULT"
 fi
 
-if jq -e '(.graph | type) == "object"' "$als_path" >/dev/null 2>&1; then
+if [ "$is_agent" -eq 1 ] && jq -e '(.graph | type) == "object"' "$als_path" >/dev/null 2>&1; then
     graph_executor_graph_valid "$als_path" ||
         loop_dispatch_deny "graph state is malformed" "MALFORMED_GRAPH"
 
@@ -163,9 +164,8 @@ fi
 loop_dir=$(dirname "$als_path")
 als_read_loop_evals_result "$loop_dir"
 loop_id=$(jq -r '.loop_id // ""' "$als_path" 2>/dev/null)
-revision=$(jq -r '.revision // empty' "$als_path" 2>/dev/null)
-if [ -n "$loop_id" ] && ! jq -e --arg session "$session_id" --arg loop "$loop_id" --argjson revision "$revision" \
-    '.session_id == $session and .loop_id == $loop and .revision == $revision' \
+if [ -n "$loop_id" ] && ! jq -e --arg session "$session_id" --arg loop "$loop_id" \
+    '.session_id == $session and .loop_id == $loop' \
     "$loop_dir/evals.json" >/dev/null 2>&1; then
     ALS_LOOP_EVALS_RESULT="STALE"
 fi

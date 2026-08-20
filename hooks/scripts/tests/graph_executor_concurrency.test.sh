@@ -42,8 +42,8 @@ check_val() { # desc expected actual
 
 PROG="$TMP/progress.json"
 jq -n '
-  { session_id:"session-test", loop_id:"loop-test", revision:1,
-    graph: { nodes: { A:{status:"pending",outcome:"pending",retry:{attempts:0,max:5}} },
+  { schema_version:2, status:"in-progress", session_id:"session-test", loop_id:"loop-test", revision:1,
+    graph: { nodes: { A:{status:"pending",outcome:"pending",retry:{attempts:0,max:5},evidence:[]} },
              edges: [], joins: {} },
     decisions_absorbed: [],
     loop_stop_counts: {} }

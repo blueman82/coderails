@@ -39,6 +39,8 @@ GRAPH_DISPATCH_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 GRAPH_DISPATCH_ROOT="$(cd "$GRAPH_DISPATCH_DIR/../../.." && pwd)"
 # shellcheck disable=SC1091  # path is resolved from this sourced file at runtime
 . "$GRAPH_DISPATCH_DIR/graph_executor.sh"
+# shellcheck disable=SC1091  # path is resolved from this sourced file at runtime
+. "$GRAPH_DISPATCH_ROOT/scripts/lib/eval-artifact.sh"
 
 # Claude owns this graph and its dispatch targets. Ambiguous orchestration
 # nodes are deliberately absent so they fail closed as unresolved.
@@ -222,7 +224,7 @@ graph_dispatch_complete() {
     [ -f "$progress" ] && [ -f "$evals" ] && [ -f "$proof" ] && [ -f "$retro" ] || return 1
     _graph_dispatch_graph_valid "$progress" || return 1
 
-    local loop revision
+    local loop revision stamped_checksum recomputed_checksum
     loop=$(jq -r '.loop_id // empty' "$progress")
     revision=$(jq -r '.revision // -1' "$progress")
     [ -n "$session" ] && [ "$(jq -r '.session_id // empty' "$progress")" = "$session" ] && [ -n "$loop" ] || return 1
@@ -234,10 +236,16 @@ graph_dispatch_complete() {
     ' "$progress" >/dev/null 2>&1 || return 1
     jq -e --arg session "$session" --arg loop "$loop" --argjson revision "$revision" '
       .scope == "loop" and .session_id == $session and .loop_id == $loop and .revision == $revision
-      and ((.verification_level == 0) or .result == "GO")
+      and .result == "GO"
       and ((.verification_justification // "") | type == "string" and length > 0)
-      and ((.grading.by // "") | length > 0) and ((.grading.checksum // "") | length > 0)
+      and .grading.by == "post_evals.sh grade-loop"
+      and ((.grading.checksum // "") | type == "string" and length > 0)
+      and (.grading.amendments_at_grade == ((.amendments // []) | length))
     ' "$evals" >/dev/null 2>&1 || return 1
+    eval_artifact::compute_go "$evals" || return 1
+    stamped_checksum=$(jq -r '.grading.checksum' "$evals") || return 1
+    recomputed_checksum=$(eval_artifact::grading_checksum "$evals" GO) || return 1
+    [ -n "$recomputed_checksum" ] && [ "$stamped_checksum" = "$recomputed_checksum" ] || return 1
     jq -e --arg session "$session" --arg loop "$loop" '
       .session_id == $session and .loop_id == $loop
       and (.proofs | type == "array" and length > 0)

@@ -42,7 +42,9 @@ result=$(jq -e --arg node "$node" '
   | ($g.hard_stop) as $hard_stop
   | ($edges + [$joins | to_entries[] as $join
                 | $join.value.inputs[]? | {from:.,to:$join.key}]) as $dependencies
-  | if ((.session_id | type) != "string" or (.session_id | length) == 0
+  | if (.schema_version != 2
+        or (.status | IN("initialising","in-progress","complete") | not)
+        or (.session_id | type) != "string" or (.session_id | length) == 0
         or (.loop_id | type) != "string" or (.loop_id | length) == 0
         or (.revision | type) != "number" or (.revision | floor) != .revision or .revision <= 0
         or ($g | type) != "object"
@@ -55,6 +57,7 @@ result=$(jq -e --arg node "$node" '
                        or (.value.status | IN("pending","ready","running","blocked","done","skipped","failed","hard-stop","stale") | not)
                        or (.value.outcome | IN("pending","ready","running","blocked","done","skipped","failed","hard-stop","stale") | not)
                        or .value.status != .value.outcome
+                       or (.value.evidence | type) != "array"
                        or (.value.retry.attempts | type) != "number"
                        or (.value.retry.max | type) != "number"
                        or .value.retry.attempts < 0

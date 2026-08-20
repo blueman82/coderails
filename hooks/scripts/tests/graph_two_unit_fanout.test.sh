@@ -34,13 +34,13 @@ run_check() { # desc, fixture, node, expected_stdout, expected_exit
 build_fixture() { # outfile a_outcome b_outcome
     jq -n --arg ao "$2" --arg bo "$3" '
     {
-      session_id:"session-test", loop_id:"loop-test", revision:1,
+      schema_version:2, status:"in-progress", session_id:"session-test", loop_id:"loop-test", revision:1,
       graph: {
         nodes: {
-          P: {status:"done", outcome:"done", retry:{attempts:0,max:5}},
-          A: {status:$ao, outcome:$ao, retry:{attempts:0,max:5}},
-          B: {status:$bo, outcome:$bo, retry:{attempts:0,max:5}},
-          C: {status:"pending", outcome:"pending", retry:{attempts:0,max:5}}
+          P: {status:"done", outcome:"done", retry:{attempts:0,max:5}, evidence:[]},
+          A: {status:$ao, outcome:$ao, retry:{attempts:0,max:5}, evidence:[]},
+          B: {status:$bo, outcome:$bo, retry:{attempts:0,max:5}, evidence:[]},
+          C: {status:"pending", outcome:"pending", retry:{attempts:0,max:5}, evidence:[]}
         },
         edges: [{from:"P",to:"A"},{from:"P",to:"B"},{from:"A",to:"C"},{from:"B",to:"C"}],
         joins: {C:{id:"C",mode:"all",inputs:["A","B"]}}

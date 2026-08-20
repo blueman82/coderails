@@ -41,11 +41,9 @@ model="$3"
 # no Claude session and remain launcher tests, not loop dispatches.
 if [[ -n "${CLAUDE_CODE_SESSION_ID:-}" ]]; then
     [[ -x "$DISPATCH_GUARD" ]] || die "loop dispatch guard not found: $DISPATCH_GUARD"
-    dispatch_envelope=$(head -n 1 "$prompt_file")
     guard_input=$(jq -cn --arg session "$CLAUDE_CODE_SESSION_ID" --arg cwd "$worktree" \
         --arg command "scripts/sandbox/spawn-sandboxed-worker.sh $worktree $prompt_file $model" \
-        --arg prompt "$dispatch_envelope" \
-        '{tool_name:"Bash",session_id:$session,cwd:$cwd,tool_input:{command:$command,prompt:$prompt}}')
+        '{tool_name:"Bash",session_id:$session,cwd:$cwd,tool_input:{command:$command}}')
     guard_output=$(printf '%s' "$guard_input" | "$DISPATCH_GUARD")
     if printf '%s' "$guard_output" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null 2>&1; then
         die "$(printf '%s' "$guard_output" | jq -r '.hookSpecificOutput.permissionDecisionReason')"

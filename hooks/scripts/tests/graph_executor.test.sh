@@ -21,7 +21,9 @@ fail() {
 
 stamp_identity() {
     local path="$1"
-    jq '. + {session_id:"session-test",loop_id:"loop-test",revision:1}' "$path" >"$path.tmp" && mv "$path.tmp" "$path"
+    jq '. + {schema_version:2,status:"in-progress",session_id:"session-test",loop_id:"loop-test",revision:1}
+        | .graph.nodes |= with_entries(if (.value | type) == "object" and (.value | has("evidence") | not)
+            then .value.evidence = [] else . end)' "$path" >"$path.tmp" && mv "$path.tmp" "$path"
 }
 
 # --- fixture progress.json: two pending nodes A, B, no edges/joins ---
@@ -236,7 +238,7 @@ stamp_identity "$TMP/s5_fixture.json"
 graph_executor_apply_wave "$TMP/s5_fixture.json" '{"A":"clobbered"}'
 rc7=$?
 a_after_s5=$(jq -c '.graph.nodes.A' "$TMP/s5_fixture.json")
-[ "$rc7" -ne 0 ] && [ "$a_after_s5" = '{"status":"pending","outcome":"pending","retry":{"attempts":0,"max":5}}' ] &&
+[ "$rc7" -ne 0 ] && [ "$a_after_s5" = '{"status":"pending","outcome":"pending","retry":{"attempts":0,"max":5},"evidence":[]}' ] &&
     ok "non-object node value fails closed, existing node untouched" ||
     fail "non-object node value fails closed" "rc=$rc7 a_after=$a_after_s5"
 
