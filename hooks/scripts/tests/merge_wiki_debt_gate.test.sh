@@ -6,7 +6,7 @@
 # both set; otherwise inert (one-line skip notice, merge proceeds).
 #
 # Mirrors merge_integrity_review_gate.test.sh's stub-dir/wrapper technique. The
-# fake config lives at $TMP/proj/.claude/workflow.config.yaml so the gate's
+# fake config lives at $TMP/proj/.coderails/workflow.config.yaml so the gate's
 # relative wiki_path resolution (against the config's project root) is
 # exercised for real. The vault is a REAL git repo pair (remote + clone) so
 # `git fetch origin main` and the two `git grep` coverage regexes run against
@@ -32,30 +32,38 @@ fails=0
 testn=0
 
 check() { # desc expected_exit actual_exit
-  if [[ "$2" == "$3" ]]; then printf 'ok   - %s\n' "$1"
-  else printf 'FAIL - %s\n  expected exit: %s\n  actual exit:   %s\n' "$1" "$2" "$3"; fails=$((fails+1)); fi
+    if [[ "$2" == "$3" ]]; then
+        printf 'ok   - %s\n' "$1"
+    else
+        printf 'FAIL - %s\n  expected exit: %s\n  actual exit:   %s\n' "$1" "$2" "$3"
+        fails=$((fails + 1))
+    fi
 }
 
 check_msg() { # desc pattern output
-  if echo "$3" | grep -qF "$2"; then printf 'ok   - %s\n' "$1"
-  else printf 'FAIL - %s\n  expected pattern: %s\n  actual output:   %s\n' "$1" "$2" "$3"; fails=$((fails+1)); fi
+    if echo "$3" | grep -qF "$2"; then
+        printf 'ok   - %s\n' "$1"
+    else
+        printf 'FAIL - %s\n  expected pattern: %s\n  actual output:   %s\n' "$1" "$2" "$3"
+        fails=$((fails + 1))
+    fi
 }
 
 # ─── Build a stub dir that merge.sh will source ──────────────────────────────
 STUB_DIR="$TMP/stubs"
-mkdir -p "$STUB_DIR/lib" "$TMP/proj/.claude"
+mkdir -p "$STUB_DIR/lib" "$TMP/proj/.coderails"
 
-# Stub config.sh — points at the per-run fake config under $TMP/proj/.claude
+# Stub config.sh — points at the per-run fake config under $TMP/proj/.coderails
 # so the gate's project-root-relative wiki_path resolution is real.
-cat > "$STUB_DIR/lib/config.sh" <<CONFIGSTUB
+cat >"$STUB_DIR/lib/config.sh" <<CONFIGSTUB
 #!/bin/bash
-coderails::config_path() { echo "$TMP/proj/.claude/workflow.config.yaml"; }
-coderails::resolve_config() { cat "$TMP/proj/.claude/workflow.config.yaml" 2>/dev/null || echo "NO_CONFIG"; }
+coderails::config_path() { echo "$TMP/proj/.coderails/workflow.config.yaml"; }
+coderails::resolve_config() { cat "$TMP/proj/.coderails/workflow.config.yaml" 2>/dev/null || echo "NO_CONFIG"; }
 CONFIGSTUB
 
 # Stub git-common.sh base (always constant). repo() returns test-owner/test-repo,
 # so the gate's repo-qualified regexes must match on the short name "test-repo".
-cat > "$STUB_DIR/lib/git-common-base.sh" <<'BASELIB'
+cat >"$STUB_DIR/lib/git-common-base.sh" <<'BASELIB'
 #!/bin/bash
 readonly C_RED='' C_GRN='' C_YLW='' C_BLU='' C_DIM='' C_BLD='' C_RST='' 2>/dev/null || true
 info()    { printf '%s\n' "$1"; }
@@ -103,7 +111,7 @@ BASELIB
 # Stub gh: merge plumbing always succeeds; the merged-PR list is driven by
 # MOCK_MERGED_JSON / MOCK_MERGED_FAIL env vars set per-test. The open-PR list
 # (coverage-in-progress probe) is driven by MOCK_OPEN_HEADS / MOCK_OPEN_FAIL.
-cat > "$STUB_DIR/gh" <<'GHSTUB'
+cat >"$STUB_DIR/gh" <<'GHSTUB'
 #!/bin/bash
 case "$*" in
   *"pr list"*"--state merged"*)
@@ -122,9 +130,9 @@ esac
 GHSTUB
 chmod +x "$STUB_DIR/gh"
 
-# git stub: branch cleanup plumbing silently succeeds; everything else (the
+# Stub behavior: branch cleanup plumbing silently succeeds; everything else (the
 # gate's real fetch/grep against the vault fixture) passes through to real git.
-cat > "$STUB_DIR/git" <<'GITSTUB'
+cat >"$STUB_DIR/git" <<'GITSTUB'
 #!/bin/bash
 case "$*" in
   *"push origin --delete"*) exit 0 ;;
@@ -148,7 +156,7 @@ chmod +x "$STUB_DIR/git"
 
 # ─── Wrapper: real merge.sh with lib sources swapped for the stubs ───────────
 WRAPPER="$STUB_DIR/merge_test.sh"
-cat > "$WRAPPER" <<WRAPPERHEAD
+cat >"$WRAPPER" <<WRAPPERHEAD
 #!/bin/bash
 set -euo pipefail
 _DIR="\$(dirname "\${BASH_SOURCE[0]}")"
@@ -161,14 +169,14 @@ awk '
     /^source.*config/ { next }
     /^source.*post_evals/ { next }
     { print }
-' "$MERGE_SH" >> "$WRAPPER"
+' "$MERGE_SH" >>"$WRAPPER"
 
 # ─── Gate-only wrapper: calls merge::has_wiki_ingest_for_merged_prs directly ─
 # Needed for the unreadable-config test: in the full merge::main path the
 # PRE-EXISTING integrity-review extractor call (not wrapped in `|| err`) dies first
 # under set -e, masking the wiki gate's own fail-loud branch.
 GATE_WRAPPER="$STUB_DIR/gate_only_test.sh"
-cat > "$GATE_WRAPPER" <<WRAPPERHEAD
+cat >"$GATE_WRAPPER" <<WRAPPERHEAD
 #!/bin/bash
 set -euo pipefail
 _DIR="\$(dirname "\${BASH_SOURCE[0]}")"
@@ -182,8 +190,8 @@ awk '
     /^source.*post_evals/ { next }
     /^merge::main "\$@"/ { next }
     { print }
-' "$MERGE_SH" >> "$GATE_WRAPPER"
-printf 'merge::has_wiki_ingest_for_merged_prs "$@"\n' >> "$GATE_WRAPPER"
+' "$MERGE_SH" >>"$GATE_WRAPPER"
+printf 'merge::has_wiki_ingest_for_merged_prs "$@"\n' >>"$GATE_WRAPPER"
 
 # run_wiki_gate_test: <config_mode> <log_line> <src_line> <merged_json> [gh_fail] [break_fetch]
 #   config_mode: both | noepoch | nowiki
@@ -196,20 +204,20 @@ run_wiki_gate_test() {
     local config_mode="$1" log_line="$2" src_line="$3" merged_json="$4" gh_fail="${5:-}" break_fetch="${6:-}"
     local stderr_file="$TMP/stderr_run" stdout_file="$TMP/stdout_run"
 
-    testn=$((testn+1))
+    testn=$((testn + 1))
     local vr="$TMP/vr$testn" vault_name="vault$testn" vault="$TMP/vault$testn"
 
     case "$config_mode" in
-        both)    printf 'wiki_path: ../%s\nwiki_debt_epoch_pr: 80\n' "$vault_name" ;;
-        noepoch) printf 'wiki_path: ../%s\n' "$vault_name" ;;
-        nowiki)  printf 'wiki_debt_epoch_pr: 80\n' ;;
-        badpath) printf 'wiki_path: ../no-such-vault-dir\nwiki_debt_epoch_pr: 80\n' ;;
-        quoted)  printf 'wiki_path: "../%s" # vault dir\nwiki_debt_epoch_pr: "80" # epoch note\n' "$vault_name" ;;
-    esac > "$TMP/proj/.claude/workflow.config.yaml"
+    both) printf 'wiki_path: ../%s\nwiki_debt_epoch_pr: 80\n' "$vault_name" ;;
+    noepoch) printf 'wiki_path: ../%s\n' "$vault_name" ;;
+    nowiki) printf 'wiki_debt_epoch_pr: 80\n' ;;
+    badpath) printf 'wiki_path: ../no-such-vault-dir\nwiki_debt_epoch_pr: 80\n' ;;
+    quoted) printf 'wiki_path: "../%s" # vault dir\nwiki_debt_epoch_pr: "80" # epoch note\n' "$vault_name" ;;
+    esac >"$TMP/proj/.coderails/workflow.config.yaml"
 
     mkdir -p "$vr/sources"
-    printf '%s\n' '# Log' "$log_line" > "$vr/log.md"
-    printf '%s\n' '---' "$src_line" '---' > "$vr/sources/p.md"
+    printf '%s\n' '# Log' "$log_line" >"$vr/log.md"
+    printf '%s\n' '---' "$src_line" '---' >"$vr/sources/p.md"
     git -C "$vr" init -q -b main
     git -C "$vr" add -A
     git -C "$vr" -c user.email=t@t -c user.name=t commit -qm init
@@ -218,6 +226,8 @@ run_wiki_gate_test() {
         git -C "$vault" remote set-url origin "$TMP/missing-remote"
     fi
 
+    # This subshell deliberately contains each test case's environment.
+    # shellcheck disable=SC2030,SC2031
     (
         export PATH="$STUB_DIR:$PATH"
         export MOCK_MERGED_JSON="$merged_json"
@@ -305,10 +315,12 @@ check "wiki-debt gate: at/below-epoch merged PRs produce no candidates" 0 $rc
 # ─── Test 13: the PR being merged is excluded from its own debt check ────────
 # Merged list holds only #81 (post-epoch, uncovered); merging PR IS 81 (gh
 # sometimes lists a just-merged PR). Must not block itself.
+# This subshell deliberately contains this test case's environment.
+# shellcheck disable=SC2030,SC2031
 (
     export PATH="$STUB_DIR:$PATH"
     export MOCK_MERGED_JSON='[{"number":81}]'
-    printf 'wiki_path: ../vault%s\nwiki_debt_epoch_pr: 80\n' "$testn" > "$TMP/proj/.claude/workflow.config.yaml"
+    printf 'wiki_path: ../vault%s\nwiki_debt_epoch_pr: 80\n' "$testn" >"$TMP/proj/.coderails/workflow.config.yaml"
     bash "$WRAPPER" 81 2>"$TMP/stderr_run" >"$TMP/stdout_run"
 )
 rc=$?
@@ -374,12 +386,14 @@ check_msg "full-window block message says how to clear it" "merged-PR window ful
 # A no-op "successful" fetch against a vault clone with no origin/main must
 # block — otherwise every candidate reads as 'not covered' against a wiki
 # that was never searched.
-testn=$((testn+1))
+testn=$((testn + 1))
 vault="$TMP/vault$testn"
 mkdir -p "$vault"
 git -C "$vault" init -q -b main
 git -C "$vault" remote add origin "$TMP/no-such-remote"
-printf 'wiki_path: ../vault%s\nwiki_debt_epoch_pr: 80\n' "$testn" > "$TMP/proj/.claude/workflow.config.yaml"
+printf 'wiki_path: ../vault%s\nwiki_debt_epoch_pr: 80\n' "$testn" >"$TMP/proj/.coderails/workflow.config.yaml"
+# This subshell deliberately contains this test case's environment.
+# shellcheck disable=SC2030,SC2031
 (
     export PATH="$STUB_DIR:$PATH"
     export MOCK_MERGED_JSON="$MERGED_85"
@@ -402,8 +416,10 @@ check "wiki-debt gate parses quoted config values with inline comments" 0 $rc
 # ─── Test 23: unreadable config -> loud err, not a silent set -e death ───────
 # Uses the gate-only wrapper (see above): the full merge::main path dies
 # earlier at the pre-existing unwrapped integrity-review extractor call.
-printf 'wiki_path: ../vault%s\nwiki_debt_epoch_pr: 80\n' "$testn" > "$TMP/proj/.claude/workflow.config.yaml"
-chmod 000 "$TMP/proj/.claude/workflow.config.yaml"
+printf 'wiki_path: ../vault%s\nwiki_debt_epoch_pr: 80\n' "$testn" >"$TMP/proj/.coderails/workflow.config.yaml"
+chmod 000 "$TMP/proj/.coderails/workflow.config.yaml"
+# This subshell deliberately contains this test case's environment.
+# shellcheck disable=SC2030,SC2031
 (
     export PATH="$STUB_DIR:$PATH"
     export MOCK_MERGED_JSON="$MERGED_85"
@@ -411,7 +427,7 @@ chmod 000 "$TMP/proj/.claude/workflow.config.yaml"
 )
 rc=$?
 LAST_STDERR=$(cat "$TMP/stderr_run" 2>/dev/null || true)
-chmod 644 "$TMP/proj/.claude/workflow.config.yaml"
+chmod 644 "$TMP/proj/.coderails/workflow.config.yaml"
 check "wiki-debt gate errs loudly when the config file is unreadable" 1 $rc
 check_msg "unreadable-config block message names the config read" "Could not read" "$LAST_STDERR"
 
@@ -419,16 +435,19 @@ check_msg "unreadable-config block message names the config read" "Could not rea
 # Mirrors test 10 (the merged-PR list failure) for the open-PR list call the
 # coverage-in-progress probe makes: a gh/network failure there must block,
 # not silently proceed as if no open PRs existed.
-testn=$((testn+1))
-vr="$TMP/vr$testn"; vault="$TMP/vault$testn"
+testn=$((testn + 1))
+vr="$TMP/vr$testn"
+vault="$TMP/vault$testn"
 mkdir -p "$vr/sources"
-printf '%s\n' '# Log' 'nothing relevant' > "$vr/log.md"
-printf '%s\n' '---' 'origin: unrelated' '---' > "$vr/sources/p.md"
+printf '%s\n' '# Log' 'nothing relevant' >"$vr/log.md"
+printf '%s\n' '---' 'origin: unrelated' '---' >"$vr/sources/p.md"
 git -C "$vr" init -q -b main
 git -C "$vr" add -A
 git -C "$vr" -c user.email=t@t -c user.name=t commit -qm init
 git clone -q "$vr" "$vault"
-printf 'wiki_path: ../vault%s\nwiki_debt_epoch_pr: 80\n' "$testn" > "$TMP/proj/.claude/workflow.config.yaml"
+printf 'wiki_path: ../vault%s\nwiki_debt_epoch_pr: 80\n' "$testn" >"$TMP/proj/.coderails/workflow.config.yaml"
+# This subshell deliberately contains this test case's environment.
+# shellcheck disable=SC2030,SC2031
 (
     export PATH="$STUB_DIR:$PATH"
     export MOCK_MERGED_JSON="$MERGED_85"
@@ -446,22 +465,25 @@ check_msg "open-list failure block message mentions the fetch" "GitHub fetch fai
 # origin/main-only loop), but an OPEN vault PR's head already carries a
 # sources/ page covering it — the coverage-in-progress probe must demote
 # this from a hard violation and let the merge proceed.
-testn=$((testn+1))
-vr="$TMP/vr$testn"; vault="$TMP/vault$testn"
+testn=$((testn + 1))
+vr="$TMP/vr$testn"
+vault="$TMP/vault$testn"
 mkdir -p "$vr/sources"
-printf '%s\n' '# Log' 'nothing relevant' > "$vr/log.md"
-printf '%s\n' '---' 'origin: unrelated' '---' > "$vr/sources/p.md"
+printf '%s\n' '# Log' 'nothing relevant' >"$vr/log.md"
+printf '%s\n' '---' 'origin: unrelated' '---' >"$vr/sources/p.md"
 git -C "$vr" init -q -b main
 git -C "$vr" add -A
 git -C "$vr" -c user.email=t@t -c user.name=t commit -qm init
 git clone -q "$vr" "$vault"
 git -C "$vr" checkout -qb chore/wiki-inprogress
 mkdir -p "$vr/sources"
-printf '%s\n' '---' 'origin: test-repo PR #85' '---' > "$vr/sources/p2.md"
+printf '%s\n' '---' 'origin: test-repo PR #85' '---' >"$vr/sources/p2.md"
 git -C "$vr" add -A
 git -C "$vr" -c user.email=t@t -c user.name=t commit -qm "wiki: ingest #85"
 git -C "$vr" checkout -q main
-printf 'wiki_path: ../vault%s\nwiki_debt_epoch_pr: 80\n' "$testn" > "$TMP/proj/.claude/workflow.config.yaml"
+printf 'wiki_path: ../vault%s\nwiki_debt_epoch_pr: 80\n' "$testn" >"$TMP/proj/.coderails/workflow.config.yaml"
+# This subshell deliberately contains this test case's environment.
+# shellcheck disable=SC2030,SC2031
 (
     export PATH="$STUB_DIR:$PATH"
     export MOCK_MERGED_JSON="$MERGED_85"
@@ -476,21 +498,24 @@ check "wiki-debt gate: coverage on an open vault PR head demotes debt to in-prog
 # ─── Test 26: open vault PR exists but carries no coverage -> exit 1 ─────────
 # Proves test 24 isn't "any open PR suppresses debt" — an open PR whose head
 # does NOT carry the coverage line must still leave #85 as a hard violation.
-testn=$((testn+1))
-vr="$TMP/vr$testn"; vault="$TMP/vault$testn"
+testn=$((testn + 1))
+vr="$TMP/vr$testn"
+vault="$TMP/vault$testn"
 mkdir -p "$vr/sources"
-printf '%s\n' '# Log' 'nothing relevant' > "$vr/log.md"
-printf '%s\n' '---' 'origin: unrelated' '---' > "$vr/sources/p.md"
+printf '%s\n' '# Log' 'nothing relevant' >"$vr/log.md"
+printf '%s\n' '---' 'origin: unrelated' '---' >"$vr/sources/p.md"
 git -C "$vr" init -q -b main
 git -C "$vr" add -A
 git -C "$vr" -c user.email=t@t -c user.name=t commit -qm init
 git clone -q "$vr" "$vault"
 git -C "$vr" checkout -qb chore/wiki-unrelated
-printf '%s\n' '---' 'origin: unrelated' '---' > "$vr/sources/p3.md"
+printf '%s\n' '---' 'origin: unrelated' '---' >"$vr/sources/p3.md"
 git -C "$vr" add -A
 git -C "$vr" -c user.email=t@t -c user.name=t commit -qm "wiki: ingest something else"
 git -C "$vr" checkout -q main
-printf 'wiki_path: ../vault%s\nwiki_debt_epoch_pr: 80\n' "$testn" > "$TMP/proj/.claude/workflow.config.yaml"
+printf 'wiki_path: ../vault%s\nwiki_debt_epoch_pr: 80\n' "$testn" >"$TMP/proj/.coderails/workflow.config.yaml"
+# This subshell deliberately contains this test case's environment.
+# shellcheck disable=SC2030,SC2031
 (
     export PATH="$STUB_DIR:$PATH"
     export MOCK_MERGED_JSON="$MERGED_85"
@@ -508,16 +533,19 @@ check_msg "still-uncovered block message names #85" "#85" "$LAST_STDERR"
 # so the per-head fetch fails. With real debt still uncovered, this must be
 # a hard err with a message distinct from "not covered" — an unverifiable
 # probe is not the same as confirmed debt.
-testn=$((testn+1))
-vr="$TMP/vr$testn"; vault="$TMP/vault$testn"
+testn=$((testn + 1))
+vr="$TMP/vr$testn"
+vault="$TMP/vault$testn"
 mkdir -p "$vr/sources"
-printf '%s\n' '# Log' 'nothing relevant' > "$vr/log.md"
-printf '%s\n' '---' 'origin: unrelated' '---' > "$vr/sources/p.md"
+printf '%s\n' '# Log' 'nothing relevant' >"$vr/log.md"
+printf '%s\n' '---' 'origin: unrelated' '---' >"$vr/sources/p.md"
 git -C "$vr" init -q -b main
 git -C "$vr" add -A
 git -C "$vr" -c user.email=t@t -c user.name=t commit -qm init
 git clone -q "$vr" "$vault"
-printf 'wiki_path: ../vault%s\nwiki_debt_epoch_pr: 80\n' "$testn" > "$TMP/proj/.claude/workflow.config.yaml"
+printf 'wiki_path: ../vault%s\nwiki_debt_epoch_pr: 80\n' "$testn" >"$TMP/proj/.coderails/workflow.config.yaml"
+# This subshell deliberately contains this test case's environment.
+# shellcheck disable=SC2030,SC2031
 (
     export PATH="$STUB_DIR:$PATH"
     export MOCK_MERGED_JSON="$MERGED_85"
@@ -530,4 +558,10 @@ LAST_STDERR=$(cat "$TMP/stderr_run" 2>/dev/null || true)
 check "wiki-debt gate: unfetchable open head with remaining debt is a hard err" 1 $rc
 check_msg "unverifiable-probe block message is distinct from plain uncovered debt" "could not verify" "$LAST_STDERR"
 
-[[ $fails -eq 0 ]] && { echo PASS; exit 0; } || { echo "FAIL ($fails)"; exit 1; }
+if [[ $fails -eq 0 ]]; then
+    echo PASS
+    exit 0
+else
+    echo "FAIL ($fails)"
+    exit 1
+fi

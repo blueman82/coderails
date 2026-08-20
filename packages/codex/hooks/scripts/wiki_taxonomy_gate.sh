@@ -14,8 +14,8 @@ project_root=$(git -C "$cwd" rev-parse --show-toplevel 2>/dev/null)
 probe="$cwd"
 config=""
 while :; do
-    if [[ -f "$probe/.codex/workflow.config.yaml" ]]; then
-        config="$probe/.codex/workflow.config.yaml"
+    if [[ -f "$probe/.coderails/workflow.config.yaml" ]]; then
+        config="$probe/.coderails/workflow.config.yaml"
         break
     fi
     [[ "$probe" == "$project_root" ]] && break
@@ -31,7 +31,7 @@ sanctioned=$(printf '%s\n' "$section" | grep -oE '`[A-Za-z0-9_-]+/`' | tr -d '`'
 [[ -n "$sanctioned" ]] || exit 0
 wiki_path=$(awk '/^wiki_path:/{print $2; exit}' "$config" | sed -E 's/^"(.*)"$/\1/; s/^'"'"'(.*)'"'"'$/\1/')
 case "$wiki_path" in "" | null | '~') exit 0 ;; esac
-config_dir=$(dirname "$config")
+config_dir=$(dirname "$(dirname "$config")")
 case "$wiki_path" in
 /*) vault="$wiki_path" ;;
 *) vault="$config_dir/$wiki_path" ;;

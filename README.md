@@ -34,16 +34,17 @@ plugin and installs its bundled agent definitions under `${CODEX_HOME:-~/.codex}
 Codex skips plugin hooks until you review and trust them. After installation,
 start a fresh Codex session, run `/hooks`, and review and trust the Coderails hooks.
 
-Per project, run once: `/coderails:init` scaffolds `.claude/workflow.config.yaml`
-from [`examples/workflow.config.yaml`](./examples/workflow.config.yaml) — the
-preferred way to set up a new repo.
+Per project, run once: Claude Code users run `/coderails:init`; Codex users run
+`$coderails-codex:init`. Both scaffold `.coderails/workflow.config.yaml` from
+[`examples/workflow.config.yaml`](./examples/workflow.config.yaml) — the preferred
+way to set up a new repo.
 
 ## Commands
 
 | Command | What it does |
 |---|---|
 | `/workflow` | Orchestrate the full feature workflow: prep → code → push → review → merge → wiki |
-| `/coderails:init` | Scaffold `.claude/workflow.config.yaml` for the current repo |
+| `/coderails:init` | Scaffold `.coderails/workflow.config.yaml` for the current repo |
 | `/prep` | Safety branch + feature branch + Jira ticket |
 | `/push` | Stage, commit, push, open PR with reviewers; auto-resolve linked Jira |
 | `/post-review` | Post SHA-bound review artifact on PR; required by `/merge` gate |
@@ -184,12 +185,12 @@ and explicitly defers code-level error-handling correctness to `silent-failure-h
 | `PreToolUse` (Agent) | `agent_model_routing_nudge.sh` | **advisory nudge only** — when no `model` is set and the dispatch description/prompt matches a mechanical or complex/architectural word list, suggests `haiku` or `opus` respectively; never blocks |
 | `PreToolUse` (Write/Edit/MultiEdit) | `no_edit_on_main.sh` | **block** — on main/master, blocks edits to any file EXCEPT an explicit allowlist (`.md`/`.txt`/`.rst`, `.yaml`/`.yml`/`.json`/`.toml`/`.ini`/`.cfg`, `.gitignore`, `LICENSE`); plugin-source markdown (`skills/*/SKILL.md`, `commands/*.md`) is also blocked. Also blocks `.claude/settings.json` / `.claude/settings.local.json` edits on **any** branch (the permission files that can bypass every gate) |
 | `PreToolUse` (Write/Edit/MultiEdit) | `comment_citation_gate.sh` | **block** — blocks new comment content that cites a session-artifact label (`E#:`, `F# fix`, `CHANGE B#`/`C#`, `Task A#`, `TA-I#`, "reviewer finding", "per the plan", etc.) instead of stating the constraint the code enforces; `.md` files exempt; fails open |
-| `PreToolUse` (Write/Edit/MultiEdit) | `wiki_taxonomy_gate.sh` | **block** — inert until `.claude/workflow.config.yaml` exists at the plugin root (gitignored, absent on a fresh clone until `/coderails:init` scaffolds it); once present, in an LLM wiki vault (identified positively: the write's repo root must equal `wiki_path`, resolved relative to `CLAUDE_PLUGIN_ROOT` unless absolute, corroborated by ≥2 of the parsed "## Page types" directories existing on disk as a secondary sanity check), blocks a write into a top-level directory not sanctioned by that section (read from the plugin's `AGENTS-wiki-schema.md`); taxonomy is parsed live, never hardcoded; fails open on any ambiguity (schema absent, no config, the vault not being a git repo, `wiki_path` unresolvable, no section, unparseable, write outside the configured vault, or <2 directories present) |
+| `PreToolUse` (Write/Edit/MultiEdit) | `wiki_taxonomy_gate.sh` | **block** — inert until `.coderails/workflow.config.yaml` exists at the plugin root (absent on a fresh clone until `/coderails:init` scaffolds it); once present, in an LLM wiki vault (identified positively: the write's repo root must equal `wiki_path`, resolved relative to `CLAUDE_PLUGIN_ROOT` unless absolute, corroborated by ≥2 of the parsed "## Page types" directories existing on disk as a secondary sanity check), blocks a write into a top-level directory not sanctioned by that section (read from the plugin's `AGENTS-wiki-schema.md`); taxonomy is parsed live, never hardcoded; fails open on any ambiguity (schema absent, no config, the vault not being a git repo, `wiki_path` unresolvable, no section, unparseable, write outside the configured vault, or <2 directories present) |
 | `PostToolUse` (Write/Edit/MultiEdit) | `quality_feedback.sh` | **warn-only** — injects quality feedback into `PostToolUse` context; always exits successfully and cannot block a write |
 
 ## Sandboxed workers
 
-With `config.sandbox_workers: true` (`.claude/workflow.config.yaml`), the
+With `config.sandbox_workers: true` (`.coderails/workflow.config.yaml`), the
 agentic-loop dispatches implementation-unit workers via
 `@anthropic-ai/sandbox-runtime` (`scripts/sandbox/spawn-sandboxed-worker.sh`),
 an OS-enforced filesystem containment layer (Seatbelt on macOS, bubblewrap on

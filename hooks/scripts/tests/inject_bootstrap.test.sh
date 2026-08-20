@@ -8,20 +8,29 @@ TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 fails=0
 
-check() { if [ "$2" = "$3" ]; then printf 'ok   - %s\n' "$1"; else printf 'FAIL - %s (expected: %s, got: %s)\n' "$1" "$2" "$3"; fails=$((fails+1)); fi; }
+check() { if [ "$2" = "$3" ]; then printf 'ok   - %s\n' "$1"; else
+    printf 'FAIL - %s (expected: %s, got: %s)\n' "$1" "$2" "$3"
+    fails=$((fails + 1))
+fi; }
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 
 PLUGIN_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 
 run_hook() {
-  # Run with CLAUDE_PLUGIN_ROOT resolved relative to the test file (portable).
-  CLAUDE_PLUGIN_ROOT="$PLUGIN_ROOT" bash "$SCRIPT"
+    # Run with CLAUDE_PLUGIN_ROOT resolved relative to the test file (portable).
+    CLAUDE_PLUGIN_ROOT="$PLUGIN_ROOT" bash "$SCRIPT"
+}
+
+run_hook_for() {
+    local cwd="$1" source="$2"
+    jq -nc --arg cwd "$cwd" --arg source "$source" '{cwd: $cwd, source: $source}' |
+        CLAUDE_PLUGIN_ROOT="$PLUGIN_ROOT" bash "$SCRIPT"
 }
 
 run_hook_missing_skill() {
-  # Run with a plugin root whose skills dir doesn't contain using-coderails.
-  CLAUDE_PLUGIN_ROOT="$TMP/nonexistent" bash "$SCRIPT"
+    # Run with a plugin root whose skills dir doesn't contain using-coderails.
+    CLAUDE_PLUGIN_ROOT="$TMP/nonexistent" bash "$SCRIPT"
 }
 
 # ── Gate 1: exits 0 with a valid CLAUDE_PLUGIN_ROOT ─────────────────────────
@@ -47,7 +56,7 @@ check "context embeds using-coderails skill content" "1" "$_g5"
 
 # ── Gate 6: context contains coderails branding ──────────────────────────────
 check "context contains You have coderails" "1" \
-  "$(echo "$ctx" | grep -c 'You have coderails' | xargs)"
+    "$(echo "$ctx" | grep -c 'You have coderails' | xargs)"
 
 # ── Gate 7: output carries only coderails branding (no stray legacy brand) ───
 # Checks for the old plugin name; written as concatenated parts so this file
@@ -77,7 +86,7 @@ mkdir -p "$FAKE_ROOT/skills/using-coderails"
 # Write a SKILL.md with a literal \n two-char sequence and a literal \" sequence
 # as text (not real escape sequences — just backslash followed by n / quote).
 printf 'Skill line with literal \\n and also literal \\" sequences.\n' \
-  > "$FAKE_ROOT/skills/using-coderails/SKILL.md"
+    >"$FAKE_ROOT/skills/using-coderails/SKILL.md"
 
 out3=$(CLAUDE_PLUGIN_ROOT="$FAKE_ROOT" bash "$SCRIPT" 2>/dev/null)
 ctx3=$(printf '%s' "$out3" | jq -r '.hookSpecificOutput.additionalContext // empty')
@@ -88,4 +97,31 @@ check "additionalContext contains verbatim backslash-n after jq decode" "1" "$_h
 printf '%s' "$ctx3" | grep -qF '\\n' && _double_nl=1 || _double_nl=0
 check "additionalContext has no double-escaped newlines" "0" "$_double_nl"
 
-[ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails)"; exit 1; }
+# ── Gate 11: canonical-config migration nudge is startup-only and read-only ─
+REPO="$TMP/repo"
+mkdir -p "$REPO/.claude"
+git -C "$REPO" init -q
+printf 'sandbox_workers: true\n' >"$REPO/.claude/workflow.config.yaml"
+before=$(find "$REPO" -type f -exec shasum {} \;)
+startup_ctx=$(run_hook_for "$REPO" startup | jq -r '.hookSpecificOutput.additionalContext')
+check "startup nudges for legacy config" "1" "$(printf '%s' "$startup_ctx" | grep -c '/coderails:init' | xargs)"
+resume_ctx=$(run_hook_for "$REPO" resume | jq -r '.hookSpecificOutput.additionalContext')
+check "resume does not nudge" "0" "$(printf '%s' "$resume_ctx" | grep -c '/coderails:init' | xargs)"
+clear_ctx=$(run_hook_for "$REPO" clear | jq -r '.hookSpecificOutput.additionalContext')
+check "clear does not nudge" "0" "$(printf '%s' "$clear_ctx" | grep -c '/coderails:init' | xargs)"
+compact_ctx=$(run_hook_for "$REPO" compact | jq -r '.hookSpecificOutput.additionalContext')
+check "compact does not nudge" "0" "$(printf '%s' "$compact_ctx" | grep -c '/coderails:init' | xargs)"
+after=$(find "$REPO" -type f -exec shasum {} \;)
+check "startup does not alter config" "$before" "$after"
+mkdir -p "$REPO/.coderails"
+printf 'sandbox_workers: true\n' >"$REPO/.coderails/workflow.config.yaml"
+configured_ctx=$(run_hook_for "$REPO" startup | jq -r '.hookSpecificOutput.additionalContext')
+check "canonical config suppresses nudge" "0" "$(printf '%s' "$configured_ctx" | grep -c '/coderails:init' | xargs)"
+
+if [ "$fails" -eq 0 ]; then
+    echo "PASS"
+    exit 0
+else
+    echo "FAILED ($fails)"
+    exit 1
+fi

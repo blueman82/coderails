@@ -18,7 +18,7 @@ If the branch is missing or ambiguous, use `request_user_input` to ask only for 
 
 ## Read project configuration
 
-Read `.codex/workflow.config.yaml` from the Git root when it exists. Otherwise use:
+Resolve the nearest `.coderails/workflow.config.yaml` by walking from the current directory upward to the Git root. The first file found wins. Otherwise use:
 
 - `worktree_base`: the Git root.
 - `worktree_script`: unset.

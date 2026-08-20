@@ -7,12 +7,15 @@
 # runtime hook logs (machine-local, not source)
 logs/
 
-# superpowers:subagent-driven-development progress ledger (machine-local coordination scratch)
-.coderails/
+# coderails runtime state (machine-local coordination scratch); the project
+# workflow config is the one committable file in this directory.
+**/.coderails/*
+!.coderails/workflow.config.yaml
 
-# per-project workflow config — local, may hold project-specific (e.g. Jira) values; never commit to the generic repo
+# legacy provider-local config directories
 .claude/
 **/workflow.config.yaml
+!**/.coderails/workflow.config.yaml
 
 # machine-local git worktree dirs
 .worktrees
