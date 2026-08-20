@@ -374,14 +374,14 @@ test_provider_boundaries() {
     fi
 }
 negative_control() {
-    CURRENT_PROVIDER="negative-control"
-    local fixture='{"nodes":["A"]}'
-    if [[ "$(printf '%s' "$fixture" | jq -c '.nodes')" == '["A","B"]' ]]; then
-        printf 'FAIL - negative-control: deliberate bad wave was not detected\n'
-        return 0
-    fi
-    printf 'NEGATIVE CONTROL - deliberate incomplete wave detected\n'
-    return 1
+	CURRENT_PROVIDER="negative-control"
+	local mutation_dir="$TMP/mutated-codex" source="$ROOT/packages/codex/skills/agentic-loop/scripts"
+	mkdir -p "$mutation_dir"
+	cp "$source/"{graph_evidence.py,graph_identity.py} "$mutation_dir"
+	sed 's/if set(results) != set(active_wave\["nodes"\]):/if False:/' \
+		"$source/graph.py" >"$mutation_dir/graph.py"
+	CODEX_GRAPH="$mutation_dir/graph.py" test_active_wave_atomicity
+	return "$((FAILS > 0))"
 }
 
 if [[ "${1:-}" == "--negative-control" ]]; then

@@ -275,7 +275,8 @@ negative_control() {
 	local mutation_dir="$TMP/mutated-codex"
 	mkdir -p "$mutation_dir"
 	cp "$ROOT/packages/codex/skills/agentic-loop/scripts/graph_evidence.py" "$mutation_dir/graph_evidence.py"
-	sed 's/attempts < 0 or maximum < 1/attempts < 0 or maximum < 0/' \
+	cp "$ROOT/packages/codex/skills/agentic-loop/scripts/graph_identity.py" "$mutation_dir/graph_identity.py"
+	sed 's/not 1 <= maximum <= 5/not 0 <= maximum <= 5/' \
 		"$ROOT/packages/codex/skills/agentic-loop/scripts/graph.py" >"$mutation_dir/graph.py"
 	chmod +x "$mutation_dir/graph.py"
 	CODEX_GRAPH="$mutation_dir/graph.py"
