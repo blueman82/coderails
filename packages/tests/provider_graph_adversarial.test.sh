@@ -232,7 +232,7 @@ test_codex_lifecycle_hooks() {
 	write_graph "$state" "$(jq -cn --argjson a "$(node hard-stop)" '{A:$a}')" '[]' '{"node":"A","reason":"owner decision"}'
 	install_hook_state "$state" "$root"
 	expect_hook_allowed "hard-stop report-and-wait may stop without fake completion" stop_blocked "$root" \
-		"LOOP-STOP: waiting-on-human — hard-stop recorded; report and wait"
+		$'Hard-stop recorded; report and wait.\nLOOP-STOP: waiting-on-human'
 	output=$(hook_output "$ROOT/packages/codex/hooks/scripts/inject_bootstrap.sh" "$root" \
 		"$(jq -cn --arg cwd "$ROOT" '{session_id:"session-test",cwd:$cwd,hook_event_name:"SessionStart"}')")
 	if printf '%s' "$output" | jq -e '.hookSpecificOutput.additionalContext | contains("loop-test") and contains("hard_stop")' >/dev/null; then
