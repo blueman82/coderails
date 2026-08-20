@@ -59,7 +59,7 @@ comes from the required `superpowers@claude-plugins-official` plugin
 dependency; install it alongside coderails. `pr-review-toolkit@claude-plugins-official`
 is still required for the review stage of `/workflow`.
 
-25 skills are bundled across three groups. Full
+25 skills are bundled across four groups. Full
 catalog: [`docs/REFERENCE.md`](./docs/REFERENCE.md).
 
 **Required plugin dependency: `superpowers@claude-plugins-official`**
