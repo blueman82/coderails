@@ -46,7 +46,7 @@ Run `python3 "$SKILL_DIR/scripts/graph.py" inspect "$STATE"`. Inspection is the 
 Every dispatch wave follows this order:
 
 1. Run `graph.py begin-wave "$STATE"`. This fully validates the graph, refuses an existing active wave, records the complete deterministic ready set as running, increments the revision, and prints the wave id and node list. Calling `begin-wave` is mandatory before `spawn_agent`.
-2. Call native `spawn_agent` exactly once for each printed node, naming it `loop-worker-<node-id>` so the provider-local dispatch guard can identify implementation work. Use installed Codex custom agents where appropriate. Give each worker a self-contained prompt containing its node id, exact scope, allowed paths, worktree, exclusions, checks, required artifact, and concise evidence report. Do not use another provider or start a nested Codex session.
+2. Call native `spawn_agent` exactly once for each printed node, naming it `loop-worker-<node-id>` so the provider-local dispatch guard can prove that node belongs to the active wave. Use installed Codex custom agents where appropriate. Give each worker a self-contained prompt containing its node id, exact scope, allowed paths, worktree, exclusions, checks, required artifact, and concise evidence report. Do not use another provider or start a nested Codex session.
 3. Use `wait_agent` until every node in the active wave has a terminal report. A quiet worker is not proof of failure: inspect its artifact, then use `send_message` or `followup_task` for one focused correction if needed.
 4. Verify each report against the actual diff, test output, PR state, or other current artifact. A worker summary alone is not evidence.
 5. Build one result object containing exactly every active-wave node and no other key. Each result is `{"outcome":"done|skipped|failed","evidence":"observed evidence"}`. Record it with:
@@ -81,4 +81,4 @@ python3 "$SKILL_DIR/scripts/graph.py" complete "$STATE" \
   --session "$SESSION" --evals "$EVALS" --proof "$PROOF" --retro "$RETRO"
 ```
 
-Completion refuses an active wave, pending/running/hard-stop nodes, a graph hard-stop, unreleased joins, wrong-loop evidence, stale eval revision, missing or ungraded evals, missing proof, or missing retro. Success atomically marks the loop complete and increments its revision. The provider-local Stop hook blocks ending an incomplete registered loop.
+Completion refuses an active wave, pending/running/hard-stop nodes, a graph hard-stop, unreleased joins, wrong-loop evidence, stale eval revision, missing or ungraded evals, missing proof, or missing retro. Success atomically marks the loop complete and increments its revision. The provider-local Stop hook revalidates the same sibling evidence before allowing a completed loop to end. A durable graph hard-stop may end only with a `LOOP-STOP: waiting-on-human|stopped|stall` report-and-wait declaration.

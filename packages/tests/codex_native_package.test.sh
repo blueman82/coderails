@@ -170,7 +170,8 @@ helpers_have_modes() {
 native_graph_contract_exists() {
   local graph="$PACKAGE/skills/agentic-loop/scripts/graph.py"
   [[ -x "$graph" ]] || return 1
-  python3 "$graph" --help | grep -q '{begin-wave,inspect,record-wave,complete}' || return 1
+  python3 "$graph" --help | grep -q 'authorize-dispatch' || return 1
+  python3 "$graph" --help | grep -q 'verify-completion' || return 1
   grep -q 'spawn_agent' "$PACKAGE/skills/agentic-loop/SKILL.md" || return 1
   grep -q 'begin-wave' "$PACKAGE/skills/agentic-loop/SKILL.md" || return 1
   grep -q 'update_plan.*display only' "$PACKAGE/skills/agentic-loop/SKILL.md" || return 1

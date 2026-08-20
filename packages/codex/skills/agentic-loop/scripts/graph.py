@@ -12,6 +12,8 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator
 
+from graph_evidence import EvidenceError, validate_completion_evidence, validate_evals
+
 
 STATUSES = {"pending", "running", "done", "skipped", "hard-stop"}
 SUCCESS = {"done", "skipped"}
@@ -44,7 +46,6 @@ def _validate_state(state: Any) -> dict[str, Any]:
     revision = root.get("revision")
     if not isinstance(revision, int) or isinstance(revision, bool) or revision < 0:
         raise GraphError("revision must be a non-negative integer")
-
     graph = _object(root.get("graph"), "graph")
     nodes = _object(graph.get("nodes"), "graph.nodes")
     if not nodes:
@@ -54,6 +55,8 @@ def _validate_state(state: Any) -> dict[str, Any]:
         node = _object(raw_node, f"node {node_id}")
         if node.get("status") not in STATUSES:
             raise GraphError(f"node {node_id} has invalid status")
+        if node.get("outcome") != node["status"]:
+            raise GraphError(f"node {node_id} status and outcome disagree")
         retry = _object(node.get("retry"), f"node {node_id}.retry")
         attempts, maximum = retry.get("attempts"), retry.get("max")
         if any(isinstance(value, bool) or not isinstance(value, int) for value in (attempts, maximum)):
@@ -62,7 +65,6 @@ def _validate_state(state: Any) -> dict[str, Any]:
             raise GraphError(f"node {node_id} has invalid retry bounds")
         if not isinstance(node.get("evidence"), list):
             raise GraphError(f"node {node_id}.evidence must be an array")
-
     edges = graph.get("edges")
     if not isinstance(edges, list):
         raise GraphError("graph.edges must be an array")
@@ -74,7 +76,6 @@ def _validate_state(state: Any) -> dict[str, Any]:
         if source not in nodes or target not in nodes or source == target:
             raise GraphError(f"edge {index} references an unknown or identical node")
         dependencies[target].add(source)
-
     joins = _object(graph.get("joins"), "graph.joins")
     for join_id, raw_join in joins.items():
         if join_id not in nodes:
@@ -94,7 +95,6 @@ def _validate_state(state: Any) -> dict[str, Any]:
         join_done = nodes[join_id]["status"] == "done"
         if released != join_done:
             raise GraphError(f"join {join_id} release state disagrees with its node")
-
     outgoing: dict[str, set[str]] = {node_id: set() for node_id in nodes}
     indegree = {node_id: len(required) for node_id, required in dependencies.items()}
     for target, required in dependencies.items():
@@ -111,7 +111,6 @@ def _validate_state(state: Any) -> dict[str, Any]:
                 queue.append(target)
     if seen != len(nodes):
         raise GraphError("graph contains a dependency cycle")
-
     if "active_wave" not in graph or "hard_stop" not in graph:
         raise GraphError("graph must declare active_wave and hard_stop")
     active_wave = graph["active_wave"]
@@ -125,8 +124,10 @@ def _validate_state(state: Any) -> dict[str, Any]:
             raise GraphError("graph.active_wave.nodes must be a non-empty unique array")
         if any(node_id not in nodes or nodes[node_id]["status"] != "running" for node_id in wave_nodes):
             raise GraphError("graph.active_wave must contain known running nodes")
-    if any(node["status"] == "running" for node in nodes.values()) and active_wave is None:
-        raise GraphError("running nodes require an active wave")
+    running = {node_id for node_id, node in nodes.items() if node["status"] == "running"}
+    active = set(active_wave["nodes"]) if active_wave is not None else set()
+    if running != active:
+        raise GraphError("running nodes must exactly match the active wave")
     if graph["hard_stop"] is not None and not isinstance(graph["hard_stop"], dict):
         raise GraphError("graph.hard_stop must be null or an object")
     hard_stop_nodes = [node_id for node_id, node in nodes.items() if node["status"] == "hard-stop"]
@@ -225,18 +226,21 @@ def _begin_wave(path: Path) -> dict[str, Any]:
 
 def _results(raw: Any, active_wave: dict[str, Any]) -> dict[str, Any]:
     envelope = _object(raw, "results")
-    if "results" in envelope or "wave_id" in envelope:
-        if envelope.get("wave_id") != active_wave["id"]:
-            raise GraphError("result wave id does not match the active wave")
-        envelope = _object(envelope.get("results"), "results.results")
-    if set(envelope) != set(active_wave["nodes"]):
+    if set(envelope) != {"wave_id", "results"}:
+        raise GraphError("results must contain exactly wave_id and results")
+    if envelope["wave_id"] != active_wave["id"]:
+        raise GraphError("result wave id does not match the active wave")
+    results = _object(envelope["results"], "results.results")
+    if set(results) != set(active_wave["nodes"]):
         raise GraphError("result keys must exactly match the active wave")
-    for node_id, raw_result in envelope.items():
+    for node_id, raw_result in results.items():
         result = _object(raw_result, f"result {node_id}")
+        if set(result) != {"outcome", "evidence"}:
+            raise GraphError(f"result {node_id} must contain exactly outcome and evidence")
         if result.get("outcome") not in {"done", "skipped", "failed"}:
             raise GraphError(f"result {node_id} has invalid outcome")
         _nonempty(result.get("evidence"), f"result {node_id}.evidence")
-    return envelope
+    return results
 
 
 def _record_wave(path: Path, raw_results: str) -> dict[str, Any]:
@@ -264,11 +268,7 @@ def _record_wave(path: Path, raw_results: str) -> dict[str, Any]:
                 continue
             node["status"] = "hard-stop"
             node["outcome"] = "hard-stop"
-            graph["hard_stop"] = {
-                "node": node_id,
-                "reason": "retry exhaustion",
-                "evidence": result["evidence"],
-            }
+            graph["hard_stop"] = {"node": node_id, "reason": "retry exhaustion", "evidence": result["evidence"]}
         graph["active_wave"] = None
         released = _release_joins(state)
         state["revision"] += 1
@@ -280,72 +280,75 @@ def _inspect(path: Path) -> dict[str, Any]:
     state = _load(path)
     graph = state["graph"]
     return {
-        "session_id": state["session_id"],
-        "loop_id": state["loop_id"],
-        "revision": state["revision"],
-        "status": state.get("status"),
-        "active_wave": graph["active_wave"],
+        "session_id": state["session_id"], "loop_id": state["loop_id"], "revision": state["revision"],
+        "status": state.get("status"), "active_wave": graph["active_wave"],
         "running": sorted(node_id for node_id, node in graph["nodes"].items() if node["status"] == "running"),
-        "ready": _ready(state) if graph["active_wave"] is None and graph["hard_stop"] is None else [],
-        "hard_stop": graph["hard_stop"],
+        "ready": _ready(state) if graph["active_wave"] is None and graph["hard_stop"] is None else [], "hard_stop": graph["hard_stop"],
     }
 
 
-def _load_evidence(path: Path, label: str) -> dict[str, Any]:
-    try:
-        with path.open(encoding="utf-8") as handle:
-            return _object(json.load(handle), label)
-    except (OSError, json.JSONDecodeError) as error:
-        raise GraphError(f"{label} is missing or invalid: {error}") from error
-
-
-def _matching_evidence(evidence: dict[str, Any], state: dict[str, Any], label: str) -> None:
-    if evidence.get("session_id") != state["session_id"] or evidence.get("loop_id") != state["loop_id"]:
-        raise GraphError(f"{label} belongs to a different loop")
+def _validate_completion(
+    state: dict[str, Any],
+    session: str,
+    revision: int,
+    evals_path: Path,
+    proof_path: Path,
+    retro_path: Path,
+) -> None:
+    graph = state["graph"]
+    if state["session_id"] != session:
+        raise GraphError("session does not own this loop")
+    if graph["active_wave"] is not None:
+        raise GraphError("cannot complete with an active wave")
+    unfinished = sorted(
+        node_id for node_id, node in graph["nodes"].items() if node["status"] not in {"done", "skipped"}
+    )
+    if unfinished:
+        raise GraphError(f"cannot complete unfinished nodes: {', '.join(unfinished)}")
+    if graph["hard_stop"] is not None:
+        raise GraphError("cannot complete a hard-stopped graph")
+    unreleased = sorted(join_id for join_id, join in graph["joins"].items() if not join["released"])
+    if unreleased:
+        raise GraphError(f"cannot complete unreleased joins: {', '.join(unreleased)}")
+    validate_completion_evidence(state, revision, evals_path, proof_path, retro_path)
 
 
 def _complete(path: Path, session: str, evals_path: Path, proof_path: Path, retro_path: Path) -> dict[str, Any]:
     with _locked(path):
         state = _load(path)
-        graph = state["graph"]
-        if state["session_id"] != session:
-            raise GraphError("session does not own this loop")
-        if graph["active_wave"] is not None:
-            raise GraphError("cannot complete with an active wave")
-        unfinished = sorted(
-            node_id for node_id, node in graph["nodes"].items() if node["status"] not in {"done", "skipped"}
-        )
-        if unfinished:
-            raise GraphError(f"cannot complete unfinished nodes: {', '.join(unfinished)}")
-        if graph["hard_stop"] is not None:
-            raise GraphError("cannot complete a hard-stopped graph")
-        unreleased = sorted(join_id for join_id, join in graph["joins"].items() if not join["released"])
-        if unreleased:
-            raise GraphError(f"cannot complete unreleased joins: {', '.join(unreleased)}")
-
-        evals = _load_evidence(evals_path, "evals")
-        proof = _load_evidence(proof_path, "proof")
-        retro = _load_evidence(retro_path, "retro")
-        for label, evidence in (("evals", evals), ("proof", proof), ("retro", retro)):
-            _matching_evidence(evidence, state, label)
-        if evals.get("revision") != state["revision"]:
-            raise GraphError("evals revision does not match the graph")
-        if evals.get("result") not in {"GO", "VERIFICATION_LEVEL0"}:
-            raise GraphError("evals are not graded GO")
-        grading = evals.get("grading")
-        if not isinstance(grading, dict) or not grading.get("by") or not grading.get("checksum"):
-            raise GraphError("evals grading stamp is missing")
-        proofs = proof.get("proofs")
-        if not isinstance(proofs, list) or not proofs or any(item.get("status") != "pass" for item in proofs if isinstance(item, dict)):
-            raise GraphError("proof evidence is missing or not passing")
-        if any(not isinstance(item, dict) for item in proofs):
-            raise GraphError("proof evidence is malformed")
-        if not isinstance(retro.get("schema_version"), int) or retro["schema_version"] < 1 or retro.get("status") != "complete":
-            raise GraphError("retro evidence is incomplete")
+        if state["status"] == "complete":
+            raise GraphError("graph is already complete")
+        revision = state["revision"]
+        _validate_completion(state, session, revision, evals_path, proof_path, retro_path)
         state["status"] = "complete"
         state["revision"] += 1
+        state["completion"] = {"revision": revision}
         _write(path, state)
         return {"status": "complete", "loop_id": state["loop_id"], "revision": state["revision"]}
+
+
+def _verify_completion(path: Path, session: str, evals_path: Path, proof_path: Path, retro_path: Path) -> dict[str, Any]:
+    state = _load(path)
+    completion = _object(state.get("completion"), "completion")
+    revision = completion.get("revision")
+    if state["status"] != "complete" or revision != state["revision"] - 1:
+        raise GraphError("graph has no valid completion record")
+    _validate_completion(state, session, revision, evals_path, proof_path, retro_path)
+    return {"status": "complete", "loop_id": state["loop_id"], "revision": state["revision"]}
+
+
+def _authorize_dispatch(path: Path, session: str, task_name: str, evals_path: Path) -> dict[str, Any]:
+    state = _load(path)
+    if state["session_id"] != session:
+        raise GraphError("session does not own this loop")
+    prefix = "loop-worker-"
+    if not task_name.startswith(prefix) or not (node_id := task_name.removeprefix(prefix)):
+        raise GraphError("graph worker task name must identify one node")
+    active_wave = state["graph"]["active_wave"]
+    if active_wave is None or node_id not in active_wave["nodes"]:
+        raise GraphError("graph worker node is not in the active wave")
+    validate_evals(state, state["revision"], evals_path)
+    return {"loop_id": state["loop_id"], "node": node_id, "wave_id": active_wave["id"]}
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -357,12 +360,17 @@ def _parser() -> argparse.ArgumentParser:
     record = commands.add_parser("record-wave")
     record.add_argument("state", type=Path)
     record.add_argument("results_json")
-    complete = commands.add_parser("complete")
-    complete.add_argument("state", type=Path)
-    complete.add_argument("--session", required=True)
-    complete.add_argument("--evals", required=True, type=Path)
-    complete.add_argument("--proof", required=True, type=Path)
-    complete.add_argument("--retro", required=True, type=Path)
+    dispatch = commands.add_parser("authorize-dispatch")
+    dispatch.add_argument("state", type=Path)
+    for option in ("session", "task"):
+        dispatch.add_argument(f"--{option}", required=True)
+    dispatch.add_argument("--evals", required=True, type=Path)
+    for name in ("complete", "verify-completion"):
+        complete = commands.add_parser(name)
+        complete.add_argument("state", type=Path)
+        complete.add_argument("--session", required=True)
+        for option in ("evals", "proof", "retro"):
+            complete.add_argument(f"--{option}", required=True, type=Path)
     return parser
 
 
@@ -375,9 +383,13 @@ def main() -> int:
             output = _record_wave(args.state, args.results_json)
         elif args.command == "inspect":
             output = _inspect(args.state)
-        else:
+        elif args.command == "authorize-dispatch":
+            output = _authorize_dispatch(args.state, args.session, args.task, args.evals)
+        elif args.command == "complete":
             output = _complete(args.state, args.session, args.evals, args.proof, args.retro)
-    except GraphError as error:
+        else:
+            output = _verify_completion(args.state, args.session, args.evals, args.proof, args.retro)
+    except (GraphError, EvidenceError) as error:
         print(f"graph: {error}", file=sys.stderr)
         return 1
     print(json.dumps(output, sort_keys=True))

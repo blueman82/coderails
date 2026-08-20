@@ -95,7 +95,7 @@
         ]
       },
       {
-        "matcher": "^(spawn_agent|Agent)$",
+        "matcher": "^spawn_agent$",
         "hooks": [
           {
             "type": "command",
