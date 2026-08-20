@@ -43,7 +43,7 @@ Create the provider-neutral `.coderails/workflow.config.yaml` in the current pro
    - **Sandbox workers** — dispatch agentic-loop implementation-unit workers as separate OS-sandboxed processes (`@anthropic-ai/sandbox-runtime`) instead of in-process `Agent` calls, for write containment outside the agent's trust domain. Requires node/npx and a supported platform (macOS Seatbelt, Linux/WSL2 bubblewrap). Default: `false` (or omit the field — same effect).
    - **Integrity machine user** (advanced, most projects should answer "none") — the GitHub login of a dedicated machine-user identity that posts SHA-bound `integrity-review` attestations. When set, `scripts/merge.sh` and the `enforce_pr_workflow` hook require a successful attestation from exactly this login. Default: `null` (or omit the field — same effect, check inactive).
 
-7. Write `workflow.config.yaml` at the resolved config path from step 3 with the collected values. Use `null` for any field answered "none". Then validate the file with Ruby's standard YAML parser (`ruby -e 'require "yaml"; YAML.safe_load_file(ARGV.fetch(0), permitted_classes: [], aliases: false)' <path>`). If the write or validation fails, stop. Leave every legacy file untouched and report the failure.
+7. Write `workflow.config.yaml` at the resolved config path from step 3 with the collected values. Use `null` for any field answered "none". Then validate the file with Ruby's standard YAML parser (`ruby -e 'require "yaml"; YAML.safe_load(File.read(ARGV.fetch(0)), permitted_classes: [], aliases: false)' <path>`). If the write or validation fails, stop. Leave every legacy file untouched and report the failure.
 
 Example output:
 ```yaml

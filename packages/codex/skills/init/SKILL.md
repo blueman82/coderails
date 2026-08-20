@@ -68,7 +68,7 @@ integrity_review:
 
 Use `jira: null`, `engineering_principles_paths: null`, or other `null` values where the user disabled an optional feature.
 
-Validate the canonical file with Ruby's standard YAML parser (`ruby -e 'require "yaml"; YAML.safe_load_file(ARGV.fetch(0), permitted_classes: [], aliases: false)' <path>`). If the write or validation fails, stop, leave every legacy file untouched, and report the failure.
+Validate the canonical file with Ruby's standard YAML parser (`ruby -e 'require "yaml"; YAML.safe_load(File.read(ARGV.fetch(0)), permitted_classes: [], aliases: false)' <path>`). If the write or validation fails, stop, leave every legacy file untouched, and report the failure.
 
 Only after validation succeeds, move each legacy file found above to the macOS Trash using Finder via `osascript`, one at a time. After each move, check that source path no longer exists. If a move or check fails, stop immediately: report the failed file and every file already moved, and do not attempt the remaining files. Never delete a legacy file directly. Anything already moved remains recoverable in Trash; the moves are not atomic.
 
