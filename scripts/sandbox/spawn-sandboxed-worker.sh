@@ -17,23 +17,44 @@ SRT_VERSION="0.0.65"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RENDER_SETTINGS="$SCRIPT_DIR/render-settings.sh"
+DISPATCH_GUARD="$SCRIPT_DIR/../../hooks/scripts/loop_dispatch_guard.sh"
 
-die() { printf 'spawn-sandboxed-worker: %s\n' "$1" >&2; exit 1; }
+die() {
+    printf 'spawn-sandboxed-worker: %s\n' "$1" >&2
+    exit 1
+}
 
 # ─── Preconditions ──────────────────────────────────────────────────────────
 [ "$#" -eq 3 ] || die "expected 3 args (worktree prompt_file model), got $#: usage: spawn-sandboxed-worker.sh <worktree> <prompt_file> <model>"
 
-worktree="$1"; prompt_file="$2"; model="$3"
+worktree="$1"
+prompt_file="$2"
+model="$3"
 
 [ -d "$worktree" ] || die "worktree is not an existing directory: $worktree"
 [ -f "$prompt_file" ] || die "prompt_file is not an existing file: $prompt_file"
 [ -f "$RENDER_SETTINGS" ] || die "render-settings.sh not found: $RENDER_SETTINGS"
 
+# Claude Code exports the current session id to Bash tool calls. Reuse the
+# in-process implementation-worker decision before the sandbox path creates
+# scratch state or starts a child process. Direct standalone smoke tests have
+# no Claude session and remain launcher tests, not loop dispatches.
+if [[ -n "${CLAUDE_CODE_SESSION_ID:-}" ]]; then
+    [[ -x "$DISPATCH_GUARD" ]] || die "loop dispatch guard not found: $DISPATCH_GUARD"
+    guard_input=$(jq -cn --arg session "$CLAUDE_CODE_SESSION_ID" --arg cwd "$worktree" \
+        --arg command "scripts/sandbox/spawn-sandboxed-worker.sh $worktree $prompt_file $model" \
+        '{tool_name:"Bash",session_id:$session,cwd:$cwd,tool_input:{command:$command}}')
+    guard_output=$(printf '%s' "$guard_input" | "$DISPATCH_GUARD")
+    if printf '%s' "$guard_output" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null 2>&1; then
+        die "$(printf '%s' "$guard_output" | jq -r '.hookSpecificOutput.permissionDecisionReason')"
+    fi
+fi
+
 # Resolves the PRIMARY repo's .git (not the worktree's own pointer file) —
 # a linked worktree's object/ref writes land in the primary's
 # .git/worktrees/<name> and shared object store.
-primary_git=$(git -C "$worktree" rev-parse --path-format=absolute --git-common-dir 2>&1) \
-  || die "worktree is not inside a git repo (git-common-dir resolution failed for $worktree): $primary_git"
+primary_git=$(git -C "$worktree" rev-parse --path-format=absolute --git-common-dir 2>&1) ||
+    die "worktree is not inside a git repo (git-common-dir resolution failed for $worktree): $primary_git"
 
 command -v npx >/dev/null 2>&1 || die "npx not found on PATH (required to run srt)"
 command -v gh >/dev/null 2>&1 || die "gh not found on PATH (required to obtain GH_TOKEN)"
@@ -43,12 +64,12 @@ command -v gh >/dev/null 2>&1 || die "gh not found on PATH (required to obtain G
 # denied by the rendered settings, so scratch must land under $TMPDIR.
 base_tmpdir="${TMPDIR:-/tmp}"
 base_tmpdir="${base_tmpdir%/}"
-scratch=$(mktemp -d "$base_tmpdir/sandbox-worker.XXXXXX") \
-  || die "could not create scratch dir under $base_tmpdir"
+scratch=$(mktemp -d "$base_tmpdir/sandbox-worker.XXXXXX") ||
+    die "could not create scratch dir under $base_tmpdir"
 
 settings_path="$scratch/srt-settings.json"
-"$RENDER_SETTINGS" "$worktree" "$scratch" "$primary_git" "$settings_path" >/dev/null \
-  || die "render-settings.sh failed for worktree=$worktree scratch=$scratch primary_git=$primary_git"
+"$RENDER_SETTINGS" "$worktree" "$scratch" "$primary_git" "$settings_path" >/dev/null ||
+    die "render-settings.sh failed for worktree=$worktree scratch=$scratch primary_git=$primary_git"
 
 # XDG_CACHE_HOME redirected to scratch so claude -p's own cache need is met
 # WITHOUT allowlisting ~/.cache (correction 3, verified live srt 0.0.65:
@@ -116,14 +137,14 @@ unset CODERAILS_HEADLESS_RUN
 # three indirect signals because this line was missing. An audit trail that
 # requires forensic reconstruction is a gap in the artifact, not in the auditor.
 printf 'spawn-sandboxed-worker: npx --yes @anthropic-ai/sandbox-runtime@%s --settings %s claude -p <%s> --model %s --dangerously-skip-permissions\n' \
-  "$SRT_VERSION" "$settings_path" "$prompt_file" "$model" | tee "$log_file"
+    "$SRT_VERSION" "$settings_path" "$prompt_file" "$model" | tee "$log_file"
 
 set +e
 npx --yes "@anthropic-ai/sandbox-runtime@$SRT_VERSION" \
-  --settings "$settings_path" \
-  claude -p "$(cat "$prompt_file")" --model "$model" \
-  --dangerously-skip-permissions \
-  2>&1 | tee -a "$log_file"
+    --settings "$settings_path" \
+    claude -p "$(cat "$prompt_file")" --model "$model" \
+    --dangerously-skip-permissions \
+    2>&1 | tee -a "$log_file"
 rc="${PIPESTATUS[0]}"
 set -e
 

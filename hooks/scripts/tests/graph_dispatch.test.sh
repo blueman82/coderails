@@ -67,8 +67,8 @@ graph_dispatch_record "$TMP/f3.json" '{"A":{"outcome":"failed","provider":"claud
 rc3=$?
 status3=$(jq -r '.graph.nodes.A.status' "$TMP/f3.json")
 attempts3=$(jq -r '.graph.nodes.A.retry.attempts' "$TMP/f3.json")
-[ "$rc3" -eq 0 ] && [ "$status3" = "running" ] && [ "$attempts3" = "1" ] &&
-    ok "record: failed outcome increments attempts (0->1), node stays running" ||
+[ "$rc3" -eq 0 ] && [ "$status3" = "pending" ] && [ "$attempts3" = "1" ] &&
+    ok "record: failed outcome increments attempts (0->1), node returns to pending" ||
     fail "record: failed outcome increments attempts" "rc=$rc3 status=$status3 attempts=$attempts3"
 
 # --- 4: record — retry.max reached -> hard-stop ---

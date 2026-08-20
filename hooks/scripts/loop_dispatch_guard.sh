@@ -1,4 +1,5 @@
 #!/bin/bash
+# shellcheck disable=SC1091 # The shared hook library is resolved relative to this installed script.
 # PreToolUse hook (Agent) — Phase 2.7 dispatch-time enforcement. Mirrors
 # loop_state_guard.sh's work-unit-count + loop-scope-evals check (see that
 # file's gate_loop_evals_required), but fires BEFORE an implementation-unit
@@ -8,20 +9,9 @@
 # the completion-time gate only ever caught it after the work was already
 # done.
 #
-# Scope: this gate only inspects `Agent` dispatches whose subagent_type is
-# coderails:loop-worker — the implementation-unit type used by the in-process
-# Agent-tool dispatch path in skills/agentic-loop/SKILL.md Phase 3/3a
-# (confirmed by direct read, not assumed). Every other subagent_type (scouts,
-# auditors, wiki-writer, generic, review agents, etc.) is out of scope and
-# always allowed — narrowing to the one type this gate is meant to govern.
-#
-# KNOWN CEILING (SKILL.md line ~93): when config.sandbox_workers is true,
-# implementation-unit workers dispatch via
-# scripts/sandbox/spawn-sandboxed-worker.sh as a separate OS process (npx
-# exec), never as an in-process Agent tool_use — so this hook's
-# PreToolUse:Agent matcher never fires for the sandboxed path at all. This
-# gate does not, and cannot, cover sandboxed dispatch; out of scope for this
-# hook, not a bug.
+# Scope: implementation workers only. In-process workers are Agent calls whose
+# subagent_type is coderails:loop-worker. Sandboxed workers call this same guard
+# from spawn-sandboxed-worker.sh before launching the separate process.
 #
 # Reuses the shared work-unit counter (als_read_work_units) and evals-result
 # reader (als_read_loop_evals_result) from lib/loop_state_common.sh verbatim
@@ -72,20 +62,51 @@
 IFS= read -r -d '' -t 5 input || true
 
 tool_name=$(printf '%s' "$input" | jq -r '.tool_name // empty' 2>/dev/null)
-[ "$tool_name" = "Agent" ] || exit 0
-
 subagent_type=$(printf '%s' "$input" | jq -r '.tool_input.subagent_type // empty' 2>/dev/null)
-[ "$subagent_type" = "coderails:loop-worker" ] || exit 0
+command=$(printf '%s' "$input" | jq -r '.tool_input.command // empty' 2>/dev/null)
+is_worker=0
+if [ "$tool_name" = "Agent" ] && [ "$subagent_type" = "coderails:loop-worker" ]; then
+    is_worker=1
+elif [ "$tool_name" = "Bash" ]; then
+    case "$command" in
+    *scripts/sandbox/spawn-sandboxed-worker.sh*)
+        subagent_type="sandboxed-loop-worker"
+        is_worker=1
+        ;;
+    esac
+fi
+[ "$is_worker" -eq 1 ] || exit 0
 
 session_id=$(als_sanitise_session_id "$(printf '%s' "$input" | jq -r '.session_id // "?"' 2>/dev/null)")
 cwd=$(printf '%s' "$input" | jq -r '.cwd // empty' 2>/dev/null)
 [ -z "$cwd" ] && cwd="$PWD"
 
 als_path=$(als_resolve_path "$cwd" "$session_id")
-[ -n "$als_path" ] && [ -f "$als_path" ] || exit 0
+[ -n "$als_path" ] && [ -f "$als_path" ] || {
+    ALS_LOOP_EVALS_RESULT="MISSING_STATE"
+    unit_count=0
+    loop_dir=$(dirname "$als_path")
+    state_reason="no owned progress.json was found"
+}
 
-als_read_file_state "$als_path"
-[ "$ALS_SESSION" = "$session_id" ] || exit 0
+if [ -f "$als_path" ]; then
+    als_read_file_state "$als_path"
+    if [ "$ALS_SESSION" != "$session_id" ]; then
+        ALS_LOOP_EVALS_RESULT="FOREIGN_STATE"
+        unit_count=0
+        loop_dir=$(dirname "$als_path")
+        state_reason="progress.json belongs to session '$ALS_SESSION', not '$session_id'"
+    else
+        state_reason=""
+    fi
+fi
+
+if [ -n "$state_reason" ]; then
+    als_log "hook=loop_dispatch_guard session=$session_id subagent_type=$subagent_type state=$ALS_LOOP_EVALS_RESULT blocked=1"
+    reason="[loop-dispatch-guard] Blocked: $state_reason. Implementation workers require session-owned loop state before dispatch."
+    jq -n --arg r "$reason" '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"deny",permissionDecisionReason:$r}}'
+    exit 0
+fi
 
 als_read_work_units "$als_path"
 unit_count="$ALS_WORK_UNIT_COUNT"
@@ -95,15 +116,22 @@ unit_count="$ALS_WORK_UNIT_COUNT"
 # dispatch, including its first, because the roster size alone is what
 # decided Phase 2.7 applied to this loop.
 if [ "$unit_count" -lt 3 ]; then
-  als_log "hook=loop_dispatch_guard session=$session_id subagent_type=$subagent_type work_units=$unit_count evals=skipped-below-threshold blocked=0"
-  exit 0
+    als_log "hook=loop_dispatch_guard session=$session_id subagent_type=$subagent_type work_units=$unit_count evals=skipped-below-threshold blocked=0"
+    exit 0
 fi
 
 loop_dir=$(dirname "$als_path")
 als_read_loop_evals_result "$loop_dir"
+loop_id=$(jq -r '.loop_id // ""' "$als_path" 2>/dev/null)
+revision=$(jq -r '.revision // ""' "$als_path" 2>/dev/null)
+if [ -n "$loop_id" ] && ! jq -e --arg session "$session_id" --arg loop "$loop_id" --arg revision "$revision" \
+    '.session_id == $session and .loop_id == $loop and ((.revision | tostring) == $revision)' \
+    "$loop_dir/evals.json" >/dev/null 2>&1; then
+    ALS_LOOP_EVALS_RESULT="STALE"
+fi
 
 case "$ALS_LOOP_EVALS_RESULT" in
-  GO|VERIFICATION_LEVEL0)
+GO | VERIFICATION_LEVEL0)
     als_log "hook=loop_dispatch_guard session=$session_id subagent_type=$subagent_type work_units=$unit_count evals=$ALS_LOOP_EVALS_RESULT blocked=0"
     exit 0
     ;;

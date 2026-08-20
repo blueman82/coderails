@@ -29,15 +29,48 @@ path="${1:-}"
 node="${2:-}"
 
 if [ -z "$path" ] || [ -z "$node" ] || [ ! -f "$path" ]; then
-  echo "blocked"
-  exit 1
+    echo "blocked"
+    exit 1
 fi
 
-result=$(jq --arg node "$node" '
+result=$(jq -e --arg node "$node" '
   .graph as $g
-  | ($g.nodes // {}) as $nodes
-  | ($g.edges // []) as $edges
-  | ($g.joins // {}) as $joins
+  | ($g.nodes) as $nodes
+  | ($g.edges) as $edges
+  | ($g.joins) as $joins
+  | if (($g | type) != "object"
+        or ($nodes | type) != "object"
+        or ($edges | type) != "array"
+        or ($joins | type) != "object"
+        or ($nodes | has($node) | not)
+        or ([$nodes | to_entries[]
+              | select((.value | type) != "object"
+                       or (.value.status | IN("pending","ready","running","blocked","done","skipped","failed","hard-stop","stale") | not)
+                       or (.value.outcome | IN("pending","ready","running","blocked","done","skipped","failed","hard-stop","stale") | not)
+                       or (.value.retry.attempts | type) != "number"
+                       or (.value.retry.max | type) != "number"
+                       or .value.retry.attempts < 0
+                       or .value.retry.max < 0
+                       or .value.retry.max > 5
+                       or .value.retry.attempts > .value.retry.max)] | length) != 0
+        or ([$edges[] as $edge
+              | select(($edge | type) != "object"
+                       or ($edge.from | type) != "string"
+                       or ($edge.to | type) != "string"
+                       or ($nodes | has($edge.from) | not)
+                       or ($nodes | has($edge.to) | not))] | length) != 0
+        or ([$joins | to_entries[] as $join
+              | select(($nodes | has($join.key) | not)
+                       or ($join.value | type) != "object"
+                       or $join.value.mode != "all"
+                       or ($join.value.inputs | type) != "array"
+                       or ($join.value.inputs | length) == 0
+                       or ([$join.value.inputs[] as $input
+                            | select(($input | type) != "string" or ($nodes | has($input) | not))] | length) != 0
+                       or (($join.value | has("released")) and ($join.value.released | type) != "boolean"))] | length) != 0)
+    then error("invalid graph")
+    else .
+    end
   | (if (($joins[$node] // null) != null) and ($joins[$node].mode == "all")
      then ($joins[$node].inputs // [])
      else ($edges | map(select(.to == $node) | .from))
@@ -48,9 +81,9 @@ result=$(jq --arg node "$node" '
 rc=$?
 
 if [ "$rc" -eq 0 ] && [ "$result" = "true" ]; then
-  echo "ready"
-  exit 0
+    echo "ready"
+    exit 0
 else
-  echo "blocked"
-  exit 1
+    echo "blocked"
+    exit 1
 fi

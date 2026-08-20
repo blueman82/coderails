@@ -1,4 +1,5 @@
 #!/bin/bash
+# shellcheck disable=SC2016 # jq programs use single quotes so shell variables stay jq variables.
 # graph_dispatch.sh — Claude dispatch layer on top of
 # graph_executor.sh/graph_readiness.sh (both reused verbatim).
 #
@@ -139,6 +140,145 @@ graph_dispatch_plan() {
     done
 }
 
+_graph_dispatch_graph_valid() {
+    local progress="$1"
+    jq -e '
+      .graph as $g
+      | ($g.nodes) as $nodes
+      | ($g.edges) as $edges
+      | ($g.joins) as $joins
+      | ($g | type) == "object"
+        and ($nodes | type) == "object"
+        and ($edges | type) == "array"
+        and ($joins | type) == "object"
+        and ([$nodes | to_entries[]
+              | select((.value | type) != "object"
+                       or (.value.status | IN("pending","ready","running","blocked","done","skipped","failed","hard-stop","stale") | not)
+                       or (.value.outcome | IN("pending","ready","running","blocked","done","skipped","failed","hard-stop","stale") | not)
+                       or (.value.retry.attempts | type) != "number"
+                       or (.value.retry.max | type) != "number"
+                       or .value.retry.attempts < 0
+                       or .value.retry.max < 0
+                       or .value.retry.max > 5
+                       or .value.retry.attempts > .value.retry.max)] | length) == 0
+        and ([$edges[] as $edge
+              | select(($edge | type) != "object"
+                       or ($edge.from | type) != "string"
+                       or ($edge.to | type) != "string"
+                       or ($nodes | has($edge.from) | not)
+                       or ($nodes | has($edge.to) | not))] | length) == 0
+        and ([$joins | to_entries[] as $join
+              | select(($nodes | has($join.key) | not)
+                       or ($join.value | type) != "object"
+                       or $join.value.mode != "all"
+                       or ($join.value.inputs | type) != "array"
+                       or ($join.value.inputs | length) == 0
+                       or ([$join.value.inputs[] as $input
+                            | select(($input | type) != "string"
+                                     or ($nodes | has($input) | not))] | length) != 0
+                       or (($join.value | has("released")) and ($join.value.released | type) != "boolean"))] | length) == 0
+    ' "$progress" >/dev/null 2>&1
+}
+
+graph_dispatch_begin_wave() {
+    local progress="$1" ready_json
+    [ -f "$progress" ] || return 1
+    _graph_dispatch_graph_valid "$progress" || return 1
+    ready_json=$(graph_executor_ready_nodes "$progress" |
+        jq -Rsc 'split("\n") | map(select(length > 0)) | sort') || return 1
+    [ "$(printf '%s' "$ready_json" | jq 'length')" -gt 0 ] || return 1
+
+    als_atomic_progress_update "$progress" --argjson wave_nodes "$ready_json" '
+      (.graph.nodes) as $nodes
+      | (.graph.edges) as $edges
+      | (.graph.joins) as $joins
+      | if .graph.active_wave != null then error("graph_dispatch: active wave already exists") else . end
+      | ([ $nodes | keys[] as $id
+           | select(($joins | has($id) | not)
+                    and ($nodes[$id].status | IN("pending","ready"))
+                    and ([ $edges[] | select(.to == $id) | .from ]
+                         | all(. as $pred | ($nodes[$pred].outcome // "") | IN("done","skipped"))))
+           | $id ] | sort) as $live_ready
+      | if $live_ready != $wave_nodes then error("graph_dispatch: ready wave changed") else . end
+      | .revision = ((.revision // 0) + 1)
+      | .graph.active_wave = {revision:.revision,nodes:$wave_nodes}
+      | reduce $wave_nodes[] as $id (.;
+          .graph.nodes[$id].status = "running"
+          | .graph.nodes[$id].outcome = "running")
+    ' || return 1
+
+    jq -c '{nodes:.graph.active_wave.nodes,revision:.revision}' "$progress"
+}
+
+graph_dispatch_inspect() {
+    local progress="$1" ready_json
+    [ -f "$progress" ] || return 1
+    _graph_dispatch_graph_valid "$progress" || return 1
+    ready_json=$(graph_executor_ready_nodes "$progress" |
+        jq -Rsc 'split("\n") | map(select(length > 0)) | sort') || return 1
+    jq -c --argjson ready "$ready_json" '{
+      session_id,loop_id,revision,
+      active_wave:.graph.active_wave,
+      running:[.graph.nodes | to_entries[] | select(.value.status == "running") | .key] | sort,
+      ready:$ready,
+      hard_stop:.graph.hard_stop
+    }' "$progress"
+}
+
+graph_dispatch_complete() {
+    local progress="$1" session="" evals="" proof="" retro=""
+    shift
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+        --session)
+            session="${2:-}"
+            shift 2
+            ;;
+        --evals)
+            evals="${2:-}"
+            shift 2
+            ;;
+        --proof)
+            proof="${2:-}"
+            shift 2
+            ;;
+        --retro)
+            retro="${2:-}"
+            shift 2
+            ;;
+        *) return 1 ;;
+        esac
+    done
+    [ -f "$progress" ] && [ -f "$evals" ] && [ -f "$proof" ] && [ -f "$retro" ] || return 1
+    _graph_dispatch_graph_valid "$progress" || return 1
+
+    local loop revision
+    loop=$(jq -r '.loop_id // empty' "$progress")
+    revision=$(jq -r '.revision // -1' "$progress")
+    [ -n "$session" ] && [ "$(jq -r '.session_id // empty' "$progress")" = "$session" ] && [ -n "$loop" ] || return 1
+    jq -e '
+      .graph.active_wave == null
+      and .graph.hard_stop == null
+      and ([.graph.nodes[] | select(.status | IN("done","skipped") | not)] | length) == 0
+      and ([.graph.joins[] | select(.released != true)] | length) == 0
+    ' "$progress" >/dev/null 2>&1 || return 1
+    jq -e --arg session "$session" --arg loop "$loop" --argjson revision "$revision" '
+      .scope == "loop" and .session_id == $session and .loop_id == $loop and .revision == $revision
+      and ((.verification_level == 0) or .result == "GO")
+      and ((.verification_justification // "") | type == "string" and length > 0)
+      and ((.grading.by // "") | length > 0) and ((.grading.checksum // "") | length > 0)
+    ' "$evals" >/dev/null 2>&1 || return 1
+    jq -e --arg session "$session" --arg loop "$loop" '
+      .session_id == $session and .loop_id == $loop
+      and (.proofs | type == "array" and length > 0)
+      and (.proofs | all(.status == "pass" and ((.evidence // "") | length > 0)))
+    ' "$proof" >/dev/null 2>&1 || return 1
+    jq -e --arg session "$session" --arg loop "$loop" '
+      (.schema_version | type == "number" and . >= 1)
+      and .session_id == $session and .loop_id == $loop and .status == "complete"
+    ' "$retro" >/dev/null 2>&1
+}
+
 # graph_dispatch_record <progress.json> <wave-results JSON>
 # wave-results shape: {"<node_id>": {"outcome":"done"|"skipped"|"failed"|
 #   "stale" (accepts "status" as a fallback key when "outcome" is
@@ -158,6 +298,7 @@ graph_dispatch_plan() {
 graph_dispatch_record() {
     local progress="$1" wave_json="$2"
     [ -f "$progress" ] || return 1
+    _graph_dispatch_graph_valid "$progress" || return 1
 
     printf '%s' "$wave_json" | jq -e '
     type == "object" and ((keys - ["decisions_absorbed"]) | length > 0)
@@ -201,12 +342,16 @@ graph_dispatch_record() {
              else $reported end) as $reported
           | (if $reported == "failed" then ([$prev_attempts + 1, $max] | min) else $prev_attempts end) as $attempts
           | (if $reported == "failed" and $attempts >= $max then "hard-stop"
-             elif $reported == "failed" then "running"
+             elif $reported == "failed" then "pending"
              else $reported end) as $final
           | $r + {
               status: $final,
               outcome: $final,
-              retry: {attempts: $attempts, max: $max}
+              retry: {attempts: $attempts, max: $max},
+              evidence: ((if (($nodes[$id].evidence // []) | type) == "array"
+                          then ($nodes[$id].evidence // []) else [$nodes[$id].evidence] end)
+                         + (if (($r.evidence // []) | type) == "array"
+                            then ($r.evidence // []) else [$r.evidence] end))
             }
         )
       }))
