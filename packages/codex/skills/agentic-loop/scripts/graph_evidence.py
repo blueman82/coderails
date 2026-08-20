@@ -104,7 +104,7 @@ def validate_completion_evidence(
         _nonempty(item.get("id"), f"proof.proofs[{index}].id")
         _nonempty(item.get("cmd"), f"proof.proofs[{index}].cmd")
         _nonempty(item.get("evidence"), f"proof.proofs[{index}].evidence")
-    _validate_observed_proofs(proofs, transcript_path)
+    _validate_observed_proofs(proofs, transcript_path, state["loop_id"])
     schema_version = retro.get("schema_version")
     if isinstance(schema_version, bool) or not isinstance(schema_version, int) or schema_version < 1:
         raise EvidenceError("retro evidence is incomplete")
@@ -131,7 +131,7 @@ def _exec_command(payload: dict[str, Any]) -> tuple[str, str] | None:
     return None
 
 
-def _exec_result(payload: dict[str, Any]) -> tuple[str, bool] | None:
+def _exec_result(payload: dict[str, Any]) -> tuple[str, bool, str | None] | None:
     if payload.get("type") not in {"function_call_output", "custom_tool_call_output"}:
         return None
     call_id = payload.get("call_id")
@@ -145,38 +145,53 @@ def _exec_result(payload: dict[str, Any]) -> tuple[str, bool] | None:
             if isinstance(item, dict) and isinstance(item.get("text"), str)
         )
     if not isinstance(output, str):
-        return call_id, False
+        return call_id, False, None
     try:
         parsed = json.loads(output)
     except json.JSONDecodeError:
-        return call_id, False
+        return call_id, False, None
     if not isinstance(parsed, dict):
-        return call_id, False
+        return call_id, False, None
     exit_code = parsed.get("exit_code")
     passed = isinstance(exit_code, int) and not isinstance(exit_code, bool) and exit_code == 0
-    return call_id, passed
+    result_loop = parsed.get("loop_id")
+    if "loop_id" in parsed and not isinstance(result_loop, str):
+        passed = False
+    return call_id, passed, result_loop if isinstance(result_loop, str) else None
 
 
-def _validate_observed_proofs(proofs: list[Any], transcript_path: Path | None) -> None:
+def _validate_observed_proofs(proofs: list[Any], transcript_path: Path | None, loop_id: str) -> None:
     if transcript_path is None:
         raise EvidenceError("proof commands were not observed in this session")
-    calls: list[tuple[str, str]] = []
-    results: dict[str, bool] = {}
+    calls: list[tuple[str, str, str | None]] = []
+    results: dict[str, tuple[bool, str | None]] = {}
+    transcript_loop: str | None = None
     try:
         with transcript_path.open(encoding="utf-8") as transcript:
             for line in transcript:
                 record = json.loads(line)
+                if isinstance(record, dict) and record.get("type") == "turn_context":
+                    context = record.get("payload")
+                    if isinstance(context, dict) and "loop_id" in context:
+                        observed_loop = context["loop_id"]
+                        transcript_loop = observed_loop if isinstance(observed_loop, str) else ""
+                    continue
                 payload = record.get("payload", record) if isinstance(record, dict) else {}
                 if not isinstance(payload, dict):
                     continue
                 if call := _exec_command(payload):
-                    calls.append(call)
+                    calls.append((*call, transcript_loop))
                 if result := _exec_result(payload):
-                    results[result[0]] = result[1]
+                    results[result[0]] = (result[1], result[2])
     except (OSError, json.JSONDecodeError) as error:
         raise EvidenceError(f"proof transcript is missing or invalid: {error}") from error
     for raw_proof in proofs:
         command = raw_proof["cmd"].strip()
-        matching = [call_id for call_id, observed in calls if observed == command]
-        if not matching or results.get(matching[-1]) is not True:
+        matching = [
+            call_id
+            for call_id, observed, observed_loop in calls
+            if observed == command and observed_loop in {None, loop_id}
+        ]
+        result = results.get(matching[-1]) if matching else None
+        if result is None or result[0] is not True or result[1] not in {None, loop_id}:
             raise EvidenceError(f"proof command was unexecuted or last-failed: {command}")

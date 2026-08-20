@@ -161,13 +161,22 @@ jq -n --arg sha "$git_head" '{schema_version:1,scope:"loop",task_ref:"loop-1",ve
 jq -n '{session_id:"s-complete",loop_id:"loop-1",proofs:[{id:"P1",cmd:"true",status:"pass",evidence:"observed"}]}' >"$graph_dir/proof.json"
 jq -n '{schema_version:2,session_id:"s-complete",loop_id:"loop-1",status:"complete"}' >"$graph_dir/retro.json"
 proof_transcript="$graph_dir/transcript.jsonl"
-jq -cn '{type:"response_item",payload:{type:"custom_tool_call",name:"exec",call_id:"proof-call",input:"const r = await tools.exec_command({cmd:\"true\"}); text(JSON.stringify({exit_code:r.exit_code,output:r.output}));"}}' >"$proof_transcript"
-jq -cn '{type:"response_item",payload:{type:"custom_tool_call_output",call_id:"proof-call",output:[{type:"input_text",text:"{\"exit_code\":0,\"output\":\"\"}"}]}}' >>"$proof_transcript"
+jq -cn '{type:"turn_context",payload:{session_id:"s-complete",loop_id:"loop-1"}}' >"$proof_transcript"
+jq -cn '{type:"response_item",payload:{type:"custom_tool_call",name:"exec",call_id:"proof-call",input:"const r = await tools.exec_command({cmd:\"true\"}); text(JSON.stringify({loop_id:\"loop-1\",exit_code:r.exit_code,output:r.output}));"}}' >>"$proof_transcript"
+jq -cn '{type:"response_item",payload:{type:"custom_tool_call_output",call_id:"proof-call",output:[{type:"input_text",text:"{\"loop_id\":\"loop-1\",\"exit_code\":0,\"output\":\"\"}"}]}}' >>"$proof_transcript"
 jq '.graph.nodes.A.status="done" | .graph.nodes.A.outcome="done"' "$graph_dir/progress.json" >"$graph_dir/done.json"
 mv "$graph_dir/done.json" "$graph_dir/progress.json"
 python3 "$PACKAGE/skills/agentic-loop/scripts/graph.py" complete "$graph_dir/progress.json" --session s-complete --evals "$graph_dir/evals.json" --proof "$graph_dir/proof.json" --retro "$graph_dir/retro.json" --transcript "$proof_transcript" >/dev/null
 complete_stop=$(jq -cn --arg transcript "$proof_transcript" '{session_id:"s-complete",cwd:"/tmp",hook_event_name:"Stop",last_assistant_message:"done",transcript_path:$transcript}' | CODERAILS_AGENTIC_LOOP_DIR="$graph_root" PLUGIN_ROOT="$PACKAGE" "$HOOKS/scripts/graph_completion_guard.sh")
 check "completed native graph allows Stop" test -z "$complete_stop"
+replay_transcript="$graph_dir/replay.jsonl"
+jq -cn '{type:"turn_context",payload:{session_id:"s-complete",loop_id:"loop-old"}}' >"$replay_transcript"
+jq -cn '{type:"response_item",payload:{type:"custom_tool_call",name:"exec",call_id:"old-proof",input:"const r = await tools.exec_command({cmd:\"true\"}); text(JSON.stringify({loop_id:\"loop-old\",exit_code:r.exit_code,output:r.output}));"}}' >>"$replay_transcript"
+jq -cn '{type:"response_item",payload:{type:"custom_tool_call_output",call_id:"old-proof",output:[{type:"input_text",text:"{\"loop_id\":\"loop-old\",\"exit_code\":0,\"output\":\"\"}"}]}}' >>"$replay_transcript"
+check "completed native graph rejects earlier-loop proof replay" \
+  sh -c '! python3 "$1" verify-completion "$2" --session s-complete --evals "$3" --proof "$4" --retro "$5" --transcript "$6" >/dev/null 2>&1' sh \
+  "$PACKAGE/skills/agentic-loop/scripts/graph.py" "$graph_dir/progress.json" "$graph_dir/evals.json" \
+  "$graph_dir/proof.json" "$graph_dir/retro.json" "$replay_transcript"
 jq -cn '{type:"response_item",payload:{type:"custom_tool_call",name:"exec",call_id:"proof-outer-only",input:"const r = await tools.exec_command({cmd:\"true\"}); text(r.output);"}}' >>"$proof_transcript"
 jq -cn '{type:"response_item",payload:{type:"custom_tool_call_output",call_id:"proof-outer-only",output:[{type:"input_text",text:"Script completed\nWall time 0.1 seconds\nProcess exited with code 1\nFinal output:"}]}}' >>"$proof_transcript"
 outer_only_stop=$(jq -cn --arg transcript "$proof_transcript" '{session_id:"s-complete",cwd:"/tmp",hook_event_name:"Stop",last_assistant_message:"done",transcript_path:$transcript}' | CODERAILS_AGENTIC_LOOP_DIR="$graph_root" PLUGIN_ROOT="$PACKAGE" "$HOOKS/scripts/graph_completion_guard.sh")
