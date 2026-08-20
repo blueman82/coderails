@@ -3,11 +3,27 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "$0")/../../.." && pwd)"
 checker="$repo_root/scripts/quality/check.py"
+wrapper="$repo_root/scripts/quality/check.sh"
 fixture="$(mktemp -d "${TMPDIR:-/tmp}/coderails-quality.XXXXXX")"
 trap 'rm -rf "$fixture"' EXIT
 
 printf 'short = 1\n' >"$fixture/good.py"
 python3 "$checker" --strict --root "$fixture" >/dev/null
+
+markdown_repo="$fixture/markdown-only"
+mkdir -p "$markdown_repo/hooks" "$markdown_repo/scripts/quality" "$markdown_repo/skills"
+cp "$wrapper" "$checker" "$markdown_repo/scripts/quality/"
+printf '# note\n' >"$markdown_repo/skills/note.md"
+git -C "$markdown_repo" init -q
+git -C "$markdown_repo" config user.email test@example.com
+git -C "$markdown_repo" config user.name Test
+git -C "$markdown_repo" add .
+git -C "$markdown_repo" commit -qm baseline
+printf '# changed note\n' >"$markdown_repo/skills/note.md"
+if ! (cd "$markdown_repo" && /bin/bash scripts/quality/check.sh --strict --changed >/dev/null); then
+    echo 'quality.test: Bash 3.2 Markdown-only changed check unexpectedly failed' >&2
+    exit 1
+fi
 
 printf 'x \n' >"$fixture/trailing.py"
 if python3 "$checker" --strict --root "$fixture" >/dev/null 2>&1; then
