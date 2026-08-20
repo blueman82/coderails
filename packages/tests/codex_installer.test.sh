@@ -70,6 +70,17 @@ check "default provider matches explicit Claude dry-run" \
   bash -c '[[ "$1" -eq 0 && "$2" -eq 0 ]] && cmp -s "$3" "$4"' _ \
   "$default_rc" "$claude_rc" "$TMP/default.out" "$TMP/claude.out"
 
+# A real default-provider install must bootstrap Claude state from an empty
+# HOME without creating Codex state.
+home="$TMP/empty-claude-home"
+mkdir -p "$home"
+HOME="$home" bash "$ROOT/install.sh" --no-integrity-gate </dev/null > "$TMP/empty-claude.out" 2>&1
+empty_claude_rc=$?
+registered_path=$(jq -r '.extraKnownMarketplaces.coderails.source.path // "null"' "$home/.claude/settings.json" 2>/dev/null)
+check "default Claude install succeeds with an empty HOME" test "$empty_claude_rc" -eq 0
+check "default Claude install registers its marketplace" test "$registered_path" = "$ROOT"
+check "default Claude install does not create Codex state" test ! -e "$home/.codex"
+
 # Codex install stays isolated from Claude state and installs every packaged agent.
 home="$TMP/codex-home"
 log="$TMP/codex.log"
