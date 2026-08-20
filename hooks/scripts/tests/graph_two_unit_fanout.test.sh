@@ -9,6 +9,7 @@
 # graph_contract.test.sh) — this test never mutates graph.nodes on an
 # existing file; only the orchestrator's als_atomic_progress_update does
 # that, once per real wave (see loop_state_common.sh).
+# shellcheck disable=SC2015 # Final assertion chain is the suite's established tally idiom.
 set -u
 
 HELPER="$(cd "$(dirname "$0")/.." && pwd)/lib/graph_readiness.sh"
@@ -17,21 +18,23 @@ trap 'rm -rf "$TMP"' EXIT
 
 fails=0
 run_check() { # desc, fixture, node, expected_stdout, expected_exit
-  local desc="$1" fixture="$2" node="$3" want_out="$4" want_exit="$5"
-  local out rc
-  out=$(bash "$HELPER" "$fixture" "$node"); rc=$?
-  if [ "$out" = "$want_out" ] && [ "$rc" = "$want_exit" ]; then
-    printf 'ok   - %s\n' "$desc"
-  else
-    printf 'FAIL - %s\n      expected: out=%s exit=%s\n      actual:   out=%s exit=%s\n' \
-      "$desc" "$want_out" "$want_exit" "$out" "$rc"
-    fails=$((fails+1))
-  fi
+    local desc="$1" fixture="$2" node="$3" want_out="$4" want_exit="$5"
+    local out rc
+    out=$(bash "$HELPER" "$fixture" "$node")
+    rc=$?
+    if [ "$out" = "$want_out" ] && [ "$rc" = "$want_exit" ]; then
+        printf 'ok   - %s\n' "$desc"
+    else
+        printf 'FAIL - %s\n      expected: out=%s exit=%s\n      actual:   out=%s exit=%s\n' \
+            "$desc" "$want_out" "$want_exit" "$out" "$rc"
+        fails=$((fails + 1))
+    fi
 }
 
 build_fixture() { # outfile a_outcome b_outcome
-  jq -n --arg ao "$2" --arg bo "$3" '
+    jq -n --arg ao "$2" --arg bo "$3" '
     {
+      session_id:"session-test", loop_id:"loop-test", revision:1,
       graph: {
         nodes: {
           P: {status:"done", outcome:"done", retry:{attempts:0,max:5}},
@@ -43,7 +46,7 @@ build_fixture() { # outfile a_outcome b_outcome
         joins: {C:{id:"C",mode:"all",inputs:["A","B"]}}
       }
     }
-  ' > "$1"
+  ' >"$1"
 }
 
 # Wave 1: neither A nor B has finished yet, but their shared predecessor P is
@@ -66,4 +69,10 @@ run_check "wave2b: C blocked while A is not done" "$TMP/wave2b.json" C blocked 1
 build_fixture "$TMP/wave3.json" "done" "done"
 run_check "wave3: C ready once both A and B are done" "$TMP/wave3.json" C ready 0
 
-[ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails)"; exit 1; }
+[ "$fails" -eq 0 ] && {
+    echo "PASS"
+    exit 0
+} || {
+    echo "FAILED ($fails)"
+    exit 1
+}

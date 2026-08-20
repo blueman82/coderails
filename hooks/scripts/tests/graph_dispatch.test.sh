@@ -33,7 +33,13 @@ fail() {
 # shellcheck disable=SC1091  # library path is resolved from this test file at runtime
 . "$LIB_DIR/graph_dispatch.sh"
 
+stamp_identity() {
+    local path="$1"
+    jq '. + {session_id:"session-test",loop_id:"loop-test",revision:1}' "$path" >"$path.tmp" && mv "$path.tmp" "$path"
+}
+
 begin_wave() {
+    stamp_identity "$1"
     graph_dispatch_begin_wave "$1" >/dev/null
 }
 
@@ -52,6 +58,7 @@ jq -n '
       "S2.5": {status:"pending", outcome:"pending", retry:{attempts:0,max:5}, graph_role:"S2.5"}
     }, edges: [{from:"S2",to:"S2.5"}], joins: {} } }
 ' >"$TMP/plan1.json"
+stamp_identity "$TMP/plan1.json"
 out=$(graph_dispatch_plan "$TMP/plan1.json")
 skill_id=$(printf '%s' "$out" | jq -r 'select(.node_id=="S2.5") | .skill_id')
 unresolved=$(printf '%s' "$out" | jq -r 'select(.node_id=="S2.5") | .unresolved')
@@ -66,6 +73,7 @@ jq -n '
       "U4b-review": {status:"pending", outcome:"pending", retry:{attempts:0,max:5}, graph_role:"U4b-review"}
     }, edges: [{from:"S2",to:"U4b-review"}], joins: {} } }
 ' >"$TMP/plan2.json"
+stamp_identity "$TMP/plan2.json"
 out=$(graph_dispatch_plan "$TMP/plan2.json")
 unresolved=$(printf '%s' "$out" | jq -r 'select(.node_id=="U4b-review") | .unresolved')
 skill_id=$(printf '%s' "$out" | jq -r 'select(.node_id=="U4b-review") | .skill_id')
@@ -146,6 +154,7 @@ jq -n '
       "S2.5": {status:"pending", outcome:"pending", retry:{attempts:0,max:5}}
     }, edges: [{from:"S2",to:"S2.5"}], joins: {} } }
 ' >"$TMP/plan8.json"
+stamp_identity "$TMP/plan8.json"
 out=$(graph_dispatch_plan "$TMP/plan8.json")
 skill_id=$(printf '%s' "$out" | jq -r 'select(.node_id=="S2.5") | .skill_id')
 [ "$skill_id" = "design-scout" ] &&
@@ -163,6 +172,7 @@ jq -n '
     }, edges: [{from:"S2.5",to:"J2"},{from:"S2.6",to:"J2"}],
        joins: {J2:{id:"J2",mode:"all",inputs:["S2.5","S2.6"]}} } }
 ' >"$TMP/plan9.json"
+stamp_identity "$TMP/plan9.json"
 out=$(graph_dispatch_plan "$TMP/plan9.json")
 kind9=$(printf '%s' "$out" | jq -r 'select(.node_id=="J2") | .kind')
 unresolved9=$(printf '%s' "$out" | jq -r 'select(.node_id=="J2") | .unresolved')
@@ -230,18 +240,15 @@ statusB13=$(jq -r '.graph.nodes.B.status' "$TMP/f13.json")
     ok "record: attempts capped at max, sibling node B's done result survives A re-failing past its bound" ||
     fail "record: attempts capped, sibling survives" "rc=$rc13 A.status=$statusA13 A.attempts=$attemptsA13 B.status=$statusB13"
 
-# --- 14: record — retry.max:0 (a legitimate "no retries" seed) is
-# handled correctly on first failure, not treated as an overflow that
-# discards a sibling node ---
+# --- 14: retry.max:0 is outside the graph contract's 1..5 domain. ---
 jq -n '{ graph: { nodes: { A:{status:"pending",outcome:"pending",retry:{attempts:0,max:0}}, B:{status:"pending",outcome:"pending",retry:{attempts:0,max:5}} }, edges: [], joins: {} } }' >"$TMP/f14.json"
 begin_wave "$TMP/f14.json"
-record_active_wave "$TMP/f14.json" '{"A":{"outcome":"failed"},"B":{"outcome":"done"}}'
 rc14=$?
 statusA14=$(jq -r '.graph.nodes.A.status' "$TMP/f14.json")
 statusB14=$(jq -r '.graph.nodes.B.status' "$TMP/f14.json")
-[ "$rc14" -eq 0 ] && [ "$statusA14" = "hard-stop" ] && [ "$statusB14" = "done" ] &&
-    ok "record: retry.max:0 node hits hard-stop on first failure, sibling B unaffected" ||
-    fail "record: retry.max:0 handled correctly" "rc=$rc14 A.status=$statusA14 B.status=$statusB14"
+[ "$rc14" -ne 0 ] && [ "$statusA14" = "pending" ] && [ "$statusB14" = "pending" ] &&
+    ok "begin: retry.max:0 is rejected without changing sibling state" ||
+    fail "begin: retry.max:0 rejected" "rc=$rc14 A.status=$statusA14 B.status=$statusB14"
 
 [ "$fails" -eq 0 ] && {
     echo "PASS"

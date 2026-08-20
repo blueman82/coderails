@@ -35,6 +35,11 @@ fail() {
 # shellcheck disable=SC1091  # library path is resolved from this test file at runtime
 . "$LIB_DIR/graph_dispatch.sh"
 
+stamp_identity() {
+    local path="$1"
+    jq '. + {session_id:"session-test",loop_id:"loop-test",revision:1}' "$path" >"$path.tmp" && mv "$path.tmp" "$path"
+}
+
 record_ready_wave() {
     local progress="$1" results="$2" wave_id envelope
     graph_dispatch_begin_wave "$progress" >/dev/null || return 1
@@ -51,6 +56,7 @@ jq -n '{ graph: { nodes: {
     "S9-wiki": {status:"pending", outcome:"pending", retry:{attempts:0,max:5}},
     "S9-docs": {status:"pending", outcome:"pending", retry:{attempts:0,max:5}}
   }, edges: [{from:"J12-all-units",to:"S9-wiki"},{from:"S9-wiki",to:"S9-docs"}], joins: {} } }' >"$TMP/s9.json"
+stamp_identity "$TMP/s9.json"
 plan1=$(graph_dispatch_plan "$TMP/s9.json")
 s9wiki_id=$(printf '%s' "$plan1" | jq -r 'select(.node_id=="S9-wiki") | .skill_id')
 s9wiki_unresolved=$(printf '%s' "$plan1" | jq -r 'select(.node_id=="S9-wiki") | .unresolved')
@@ -85,6 +91,7 @@ jq -n '{ graph: { nodes: {
     "S9-wiki": {status:"pending", outcome:"pending", retry:{attempts:0,max:5}}
   }, edges: [{from:"J12-all-units",to:"S9-wiki"}],
      joins: {"J12-all-units":{mode:"all", inputs:["U4b-merge-gate[1]","U4b-merge-gate[2]"]}} } }' >"$TMP/j12.json"
+stamp_identity "$TMP/j12.json"
 record_ready_wave "$TMP/j12.json" '{"U4b-merge-gate[1]":{"outcome":"done"},"U4b-merge-gate[2]":{"outcome":"done"}}' >/dev/null
 post_release=$(bash "$LIB_DIR/graph_readiness.sh" "$TMP/j12.json" "S9-wiki")
 j12_released=$(jq -r '.graph.joins["J12-all-units"].released' "$TMP/j12.json")
@@ -101,6 +108,7 @@ jq -n '{ graph: { nodes: {
     "S9-wiki": {status:"pending", outcome:"pending", retry:{attempts:0,max:5}}
   }, edges: [{from:"J12-all-units",to:"S9-wiki"}],
      joins: {"J12-all-units":{mode:"all", inputs:["U4b-merge-gate[1]","U4b-merge-gate[2]"]}} } }' >"$TMP/j12b.json"
+stamp_identity "$TMP/j12b.json"
 plan_j12=$(graph_dispatch_plan "$TMP/j12b.json")
 j12_kind=$(printf '%s' "$plan_j12" | jq -r 'select(.node_id=="J12-all-units") | .kind')
 j12_skill=$(printf '%s' "$plan_j12" | jq -r 'select(.node_id=="J12-all-units") | .skill_id')

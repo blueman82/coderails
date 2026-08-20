@@ -95,7 +95,7 @@ wave-result, or the write is refused (fail-closed, inside the same locked read-m
 rest of graph_executor's contract checks). `method` names what artifact check was run (e.g. `"gh pr
 view"`, `"git status"`); `result` records what it found. `retry.attempts`
 starts at zero and may not exceed
-`retry.max`, which is an integer from 0 through 5. A retry increments `attempts` only for a
+`retry.max`, which is an integer from 1 through 5. A retry increments `attempts` only for a
 distinct diagnosed attempt; once the bound is reached, the node terminates as `hard-stop`.
 Edges must reference existing node IDs, cannot self-loop, and a join's `mode: "all"` releases
 only after every listed input is terminal-success. This records dependencies, readiness, outcomes,

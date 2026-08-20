@@ -29,34 +29,43 @@
 # as its third, because the roster size (not dispatch count) is what decides
 # whether Phase 2.7 ever applied to this loop at all.
 #
-# Ownership check (mirrors loop_state_guard.sh's own session_mismatch
-# precedent): evals.json is only trusted when this session owns the
-# progress.json it sits beside and carries the same stable loop_id. Revision
-# is deliberately not bound at dispatch because begin-wave increments it
-# before the worker is spawned; completion binds the final revision.
+# Ownership check: graph-backed dispatch requires a prompt envelope bound to
+# this session, loop, revision, active wave, and running node. evals.json is
+# trusted only when it carries the same identity and a valid grading stamp.
 #
 # PreToolUse block contract (AGENTS.md "Hook script conventions"): emit
 # hookSpecificOutput.permissionDecision:"deny" JSON to stdout, then exit 0 —
 # never exit 2 in a PreToolUse hook (exit 2 is the Stop-hook contract
 # loop_state_guard.sh uses; a different hook family, different contract).
 #
-# Fail-open posture (mirrors loop_state_guard.sh's own choices, not a new
-# policy): no progress.json -> allow (no loop registered yet, or this
-# dispatch predates Phase -2's stub write — nothing to gate against). Any
-# read/parse failure inside the shared helpers already resolves to their
-# own fail-open defaults (0 work units / ABSENT evals), so this hook adds
-# no additional failure handling on top of what those helpers already do.
+# Fail-closed posture for loop work: an implementation worker without owned
+# state is denied, and any graph-backed Agent dispatch requires a valid graph
+# plus the exact active-wave envelope. An unrelated Agent call with no loop
+# state remains outside this gate.
 
 . "$(dirname "$0")/lib/loop_state_common.sh"
+# shellcheck source=./lib/graph_executor.sh
+. "$(dirname "$0")/lib/graph_executor.sh"
+
+loop_dispatch_deny() { # reason state
+    local deny_reason="$1" state="$2"
+    als_log "hook=loop_dispatch_guard session=$session_id subagent_type=$subagent_type state=$state blocked=1"
+    jq -n --arg r "[loop-dispatch-guard] Blocked: $deny_reason" \
+        '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"deny",permissionDecisionReason:$r}}'
+    exit 0
+}
 
 IFS= read -r -d '' -t 5 input || true
 
 tool_name=$(printf '%s' "$input" | jq -r '.tool_name // empty' 2>/dev/null)
 subagent_type=$(printf '%s' "$input" | jq -r '.tool_input.subagent_type // empty' 2>/dev/null)
 command=$(printf '%s' "$input" | jq -r '.tool_input.command // empty' 2>/dev/null)
+prompt=$(printf '%s' "$input" | jq -r '.tool_input.prompt // empty' 2>/dev/null)
+is_agent=0
 is_worker=0
-if [ "$tool_name" = "Agent" ] && [ "$subagent_type" = "coderails:loop-worker" ]; then
-    is_worker=1
+if [ "$tool_name" = "Agent" ]; then
+    is_agent=1
+    [ "$subagent_type" = "coderails:loop-worker" ] && is_worker=1
 elif [ "$tool_name" = "Bash" ]; then
     case "$command" in
     *scripts/sandbox/spawn-sandboxed-worker.sh*)
@@ -65,7 +74,7 @@ elif [ "$tool_name" = "Bash" ]; then
         ;;
     esac
 fi
-[ "$is_worker" -eq 1 ] || exit 0
+[ "$is_agent" -eq 1 ] || [ "$is_worker" -eq 1 ] || exit 0
 
 session_id=$(als_sanitise_session_id "$(printf '%s' "$input" | jq -r '.session_id // "?"' 2>/dev/null)")
 cwd=$(printf '%s' "$input" | jq -r '.cwd // empty' 2>/dev/null)
@@ -73,6 +82,7 @@ cwd=$(printf '%s' "$input" | jq -r '.cwd // empty' 2>/dev/null)
 
 als_path=$(als_resolve_path "$cwd" "$session_id")
 [ -n "$als_path" ] && [ -f "$als_path" ] || {
+    [ "$is_worker" -eq 1 ] || exit 0
     ALS_LOOP_EVALS_RESULT="MISSING_STATE"
     unit_count=0
     loop_dir=$(dirname "$als_path")
@@ -100,11 +110,43 @@ if [ -f "$als_path" ]; then
 fi
 
 if [ -n "$state_reason" ]; then
-    als_log "hook=loop_dispatch_guard session=$session_id subagent_type=$subagent_type state=$ALS_LOOP_EVALS_RESULT blocked=1"
-    reason="[loop-dispatch-guard] Blocked: $state_reason. Implementation workers require session-owned loop state before dispatch."
-    jq -n --arg r "$reason" '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"deny",permissionDecisionReason:$r}}'
-    exit 0
+    loop_dispatch_deny "$state_reason. Implementation workers require session-owned loop state before dispatch." "$ALS_LOOP_EVALS_RESULT"
 fi
+
+if jq -e '(.graph | type) == "object"' "$als_path" >/dev/null 2>&1; then
+    graph_executor_graph_valid "$als_path" ||
+        loop_dispatch_deny "graph state is malformed" "MALFORMED_GRAPH"
+
+    dispatch_line="${prompt%%$'\n'*}"
+    case "$dispatch_line" in
+    CODERAILS_GRAPH_DISPATCH=*) dispatch_json="${dispatch_line#CODERAILS_GRAPH_DISPATCH=}" ;;
+    *) loop_dispatch_deny "the Agent prompt is missing its CODERAILS_GRAPH_DISPATCH ownership envelope" "MISSING_ENVELOPE" ;;
+    esac
+    printf '%s' "$dispatch_json" | jq -e '
+      type == "object"
+      and ((keys - ["session_id","loop_id","revision","wave_id","node_id"]) | length == 0)
+      and (.session_id | type) == "string" and (.session_id | length) > 0
+      and (.loop_id | type) == "string" and (.loop_id | length) > 0
+      and (.revision | type) == "number" and (.revision | floor) == .revision and .revision > 0
+      and (.wave_id | type) == "string" and (.wave_id | length) > 0
+      and (.node_id | type) == "string" and (.node_id | length) > 0
+    ' >/dev/null 2>&1 || loop_dispatch_deny "the Agent dispatch envelope is malformed" "MALFORMED_ENVELOPE"
+
+    jq -e --arg session "$session_id" --argjson dispatch "$dispatch_json" '
+      .session_id == $session
+      and .session_id == $dispatch.session_id
+      and .loop_id == $dispatch.loop_id
+      and .revision == $dispatch.revision
+      and (.graph.active_wave | type) == "object"
+      and .graph.active_wave.wave_id == $dispatch.wave_id
+      and .graph.active_wave.revision == $dispatch.revision
+      and (.graph.active_wave.nodes | index($dispatch.node_id)) != null
+      and .graph.nodes[$dispatch.node_id].status == "running"
+    ' "$als_path" >/dev/null 2>&1 ||
+        loop_dispatch_deny "the Agent dispatch envelope does not own an exact node in the active wave" "FOREIGN_DISPATCH"
+fi
+
+[ "$is_worker" -eq 1 ] || exit 0
 
 als_read_work_units "$als_path"
 unit_count="$ALS_WORK_UNIT_COUNT"
@@ -121,8 +163,9 @@ fi
 loop_dir=$(dirname "$als_path")
 als_read_loop_evals_result "$loop_dir"
 loop_id=$(jq -r '.loop_id // ""' "$als_path" 2>/dev/null)
-if [ -n "$loop_id" ] && ! jq -e --arg session "$session_id" --arg loop "$loop_id" \
-    '.session_id == $session and .loop_id == $loop' \
+revision=$(jq -r '.revision // empty' "$als_path" 2>/dev/null)
+if [ -n "$loop_id" ] && ! jq -e --arg session "$session_id" --arg loop "$loop_id" --argjson revision "$revision" \
+    '.session_id == $session and .loop_id == $loop and .revision == $revision' \
     "$loop_dir/evals.json" >/dev/null 2>&1; then
     ALS_LOOP_EVALS_RESULT="STALE"
 fi

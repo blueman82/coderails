@@ -60,6 +60,15 @@ payload() {
         "$2" "$1" "$CWD"
 }
 
+graph_payload() { # tool_name session node wave revision
+    local tool="$1" session="$2" node="$3" wave="$4" revision="$5" prompt
+    prompt=$(jq -cn --arg session "$session" --arg node "$node" --arg wave "$wave" --argjson revision "$revision" \
+        '"CODERAILS_GRAPH_DISPATCH=" + ({session_id:$session,loop_id:"loop-new",revision:$revision,wave_id:$wave,node_id:$node}|tojson)')
+    jq -cn --arg tool "$tool" --arg session "$session" --arg cwd "$CWD" --argjson prompt "$prompt" '
+      {tool_name:$tool,session_id:$session,cwd:$cwd,
+       tool_input:{subagent_type:"coderails:loop-worker",command:"scripts/sandbox/spawn-sandboxed-worker.sh worktree prompt model",prompt:$prompt}}'
+}
+
 run() { echo "$1" | bash "$GUARD"; } # -> stdout (JSON block, or empty on allow)
 reset() { rm -rf "$CLAUDE_AGENTIC_LOOP_DIR"; }
 
@@ -205,6 +214,34 @@ jq '. + {graph:{nodes:{},edges:[],joins:{}},loop_id:"loop-new"}' \
 out=$(run "$(payload S1 coderails:loop-worker)")
 is_denied "$out"
 check "graph state missing revision -> BLOCK" 0 $?
+
+# ── Graph-backed dispatch is bound to the exact running node and active wave. ─
+reset
+write_file S1 "$WU3_PENDING"
+jq '. + {schema_version:2,loop_id:"loop-new",revision:2,
+    graph:{nodes:{A:{status:"running",outcome:"running",retry:{attempts:0,max:2},evidence:[]}},edges:[],joins:{},
+           active_wave:{wave_id:"wave-2",revision:2,nodes:["A"]},hard_stop:null}}' \
+    "$(file_path S1)" >"$(file_path S1).tmp" && mv "$(file_path S1).tmp" "$(file_path S1)"
+jq -n '{scope:"loop",session_id:"S1",loop_id:"loop-new",revision:2,verification_level:0,
+    verification_justification:"dispatch ownership fixture",head_sha:"deadbeef",evals:[]}' >"$(file_dir S1)/evals.json"
+stamp "$(file_dir S1)/evals.json"
+
+out=$(run "$(graph_payload Agent S1 A wave-2 2)")
+check "exact Agent graph ownership envelope -> allow" "" "$out"
+out=$(run "$(graph_payload Agent S1 B wave-2 2)")
+is_denied "$out"
+check "foreign Agent graph node -> BLOCK" 0 $?
+out=$(run "$(graph_payload Agent S1 A wave-1 2)")
+is_denied "$out"
+check "stale Agent graph wave -> BLOCK" 0 $?
+out=$(run "$(graph_payload Agent S1 A wave-2 1)")
+is_denied "$out"
+check "wrong Agent graph revision -> BLOCK" 0 $?
+out=$(run "$(payload S1 coderails:preflight-scout)")
+is_denied "$out"
+check "another Agent type cannot bypass active-wave ownership -> BLOCK" 0 $?
+out=$(run "$(graph_payload Bash S1 A wave-2 2)")
+check "sandbox wrapper uses the same exact graph ownership envelope -> allow" "" "$out"
 
 [ "$fails" -eq 0 ] && {
     echo "PASS"

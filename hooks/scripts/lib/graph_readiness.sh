@@ -42,7 +42,10 @@ result=$(jq -e --arg node "$node" '
   | ($g.hard_stop) as $hard_stop
   | ($edges + [$joins | to_entries[] as $join
                 | $join.value.inputs[]? | {from:.,to:$join.key}]) as $dependencies
-  | if (($g | type) != "object"
+  | if ((.session_id | type) != "string" or (.session_id | length) == 0
+        or (.loop_id | type) != "string" or (.loop_id | length) == 0
+        or (.revision | type) != "number" or (.revision | floor) != .revision or .revision <= 0
+        or ($g | type) != "object"
         or ($nodes | type) != "object"
         or ($edges | type) != "array"
         or ($joins | type) != "object"
@@ -55,7 +58,7 @@ result=$(jq -e --arg node "$node" '
                        or (.value.retry.attempts | type) != "number"
                        or (.value.retry.max | type) != "number"
                        or .value.retry.attempts < 0
-                       or .value.retry.max < 0
+                       or .value.retry.max < 1
                        or .value.retry.max > 5
                        or .value.retry.attempts > .value.retry.max)] | length) != 0
         or ([$edges[] as $edge
@@ -72,13 +75,17 @@ result=$(jq -e --arg node "$node" '
                        or ($join.value.inputs | length) == 0
                        or ([$join.value.inputs[] as $input
                             | select(($input | type) != "string" or ($nodes | has($input) | not))] | length) != 0
-                       or (($join.value | has("released")) and ($join.value.released | type) != "boolean"))] | length) != 0
+                       or (($join.value | has("released")) and ($join.value.released | type) != "boolean")
+                       or (($join.value.released // false) != ($nodes[$join.key].status == "done"))
+                       or (($join.value.released // false)
+                           and ($join.value.inputs | all(. as $input
+                               | ($nodes[$input].outcome // "") | IN("done","skipped")) | not)))] | length) != 0
         or ($hard_stop != null and (($hard_stop | type) != "object"))
         or (($active != null)
             and (($active | type) != "object"
                  or ($active.wave_id | type) != "string"
-                 or ($active.wave_id | length) == 0
-                 or ($active.revision | type) != "number"
+                 or $active.wave_id != ("wave-" + (.revision | tostring))
+                 or $active.revision != .revision
                  or ($active.nodes | type) != "array"
                  or ($active.nodes | length) == 0
                  or ($active.nodes | unique | length) != ($active.nodes | length)

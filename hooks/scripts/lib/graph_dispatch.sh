@@ -270,6 +270,7 @@ graph_dispatch_record() {
     local progress="$1" envelope_json="$2" wave_json wave_id
     [ -f "$progress" ] || return 1
     _graph_dispatch_graph_valid "$progress" || return 1
+    jq -e '(.graph.active_wave | type) == "object"' "$progress" >/dev/null 2>&1 || return 1
 
     printf '%s' "$envelope_json" | jq -e '
       type == "object"
@@ -299,8 +300,8 @@ graph_dispatch_record() {
     #
     # $attempts is capped at $max via `min` — an uncapped increment can
     # exceed $max (e.g. a caller re-reporting "failed" against an
-    # already-exhausted node, or a legitimate retry.max:0 seed failing
-    # once) and graph_executor_apply_wave's own attempts<=max contract
+    # already-exhausted node) and graph_executor_apply_wave's own
+    # attempts<=max contract
     # would then abort the ENTIRE wave inside the lock, discarding every
     # other node's result in it — capping here keeps that abort scoped to
     # a genuine contract violation, not a same-wave side effect of one

@@ -38,6 +38,11 @@ fail() {
 # shellcheck disable=SC1091  # library path is resolved from this test file at runtime
 . "$LIB_DIR/graph_dispatch.sh"
 
+stamp_identity() {
+    local path="$1"
+    jq '. + {session_id:"session-test",loop_id:"loop-test",revision:1}' "$path" >"$path.tmp" && mv "$path.tmp" "$path"
+}
+
 record_ready_wave() {
     local progress="$1" results="$2" wave_id envelope
     graph_dispatch_begin_wave "$progress" >/dev/null || return 1
@@ -56,6 +61,7 @@ jq -n '{ graph: { nodes: {
     "S2.7a": {status:"pending", outcome:"pending", retry:{attempts:0,max:5}}
   }, edges: [{from:"S2",to:"S2.5"},{from:"S2",to:"S2.6"},{from:"J2",to:"S2.7a"}],
      joins: {J2:{mode:"all", inputs:["S2.5","S2.6"]}} } }' >"$TMP/j2.json"
+stamp_identity "$TMP/j2.json"
 plan_out=$(graph_dispatch_plan "$TMP/j2.json")
 s25_id=$(printf '%s' "$plan_out" | jq -r 'select(.node_id=="S2.5") | .skill_id')
 s26_id=$(printf '%s' "$plan_out" | jq -r 'select(.node_id=="S2.6") | .skill_id')
@@ -77,6 +83,7 @@ jq -n '{ graph: { nodes: {
     "U3": {status:"pending", outcome:"pending", retry:{attempts:0,max:5}},
     "U4": {status:"pending", outcome:"pending", retry:{attempts:0,max:5}}
   }, edges: [{from:"U3",to:"U4"}], joins: {} } }' >"$TMP/u34.json"
+stamp_identity "$TMP/u34.json"
 plan_u3=$(graph_dispatch_plan "$TMP/u34.json")
 u3_id=$(printf '%s' "$plan_u3" | jq -r 'select(.node_id=="U3") | .skill_id')
 u3_unresolved=$(printf '%s' "$plan_u3" | jq -r 'select(.node_id=="U3") | .unresolved')
@@ -105,6 +112,7 @@ jq -n '{ graph: { nodes: {
     "U3": {status:"pending", outcome:"pending", retry:{attempts:0,max:5}}
   }, edges: [{from:"J2.8",to:"U3"}],
      joins: {"J2.8":{mode:"all", inputs:["S2.8","S2.7d"]}} } }' >"$TMP/j28.json"
+stamp_identity "$TMP/j28.json"
 plan_j28=$(graph_dispatch_plan "$TMP/j28.json")
 j28_kind=$(printf '%s' "$plan_j28" | jq -r 'select(.node_id=="J2.8") | .kind')
 j28_skill=$(printf '%s' "$plan_j28" | jq -r 'select(.node_id=="J2.8") | .skill_id')
@@ -127,7 +135,10 @@ pre_u3=$(bash "$LIB_DIR/graph_readiness.sh" "$TMP/j28.json" "U3")
     fail "acceptance: U3 should be blocked pre-release" "got=$pre_u3"
 
 # --- 3c: after the explicit J2.8 release write, U3 becomes ready ---
-jq '.graph.nodes["J2.8"].status = "done" | .graph.nodes["J2.8"].outcome = "done"' "$TMP/j28.json" >"$TMP/j28.json.tmp" && mv "$TMP/j28.json.tmp" "$TMP/j28.json"
+jq '.graph.nodes["J2.8"].status = "done"
+    | .graph.nodes["J2.8"].outcome = "done"
+    | .graph.joins["J2.8"].released = true' \
+    "$TMP/j28.json" >"$TMP/j28.json.tmp" && mv "$TMP/j28.json.tmp" "$TMP/j28.json"
 post_u3=$(bash "$LIB_DIR/graph_readiness.sh" "$TMP/j28.json" "U3")
 [ "$post_u3" = "ready" ] &&
     ok "acceptance: second join beyond J2 — U3 ready after explicit J2.8 release write" ||
