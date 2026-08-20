@@ -38,6 +38,10 @@ result=$(jq -e --arg node "$node" '
   | ($g.nodes) as $nodes
   | ($g.edges) as $edges
   | ($g.joins) as $joins
+  | ($g.active_wave) as $active
+  | ($g.hard_stop) as $hard_stop
+  | ($edges + [$joins | to_entries[] as $join
+                | $join.value.inputs[]? | {from:.,to:$join.key}]) as $dependencies
   | if (($g | type) != "object"
         or ($nodes | type) != "object"
         or ($edges | type) != "array"
@@ -47,6 +51,7 @@ result=$(jq -e --arg node "$node" '
               | select((.value | type) != "object"
                        or (.value.status | IN("pending","ready","running","blocked","done","skipped","failed","hard-stop","stale") | not)
                        or (.value.outcome | IN("pending","ready","running","blocked","done","skipped","failed","hard-stop","stale") | not)
+                       or .value.status != .value.outcome
                        or (.value.retry.attempts | type) != "number"
                        or (.value.retry.max | type) != "number"
                        or .value.retry.attempts < 0
@@ -67,7 +72,27 @@ result=$(jq -e --arg node "$node" '
                        or ($join.value.inputs | length) == 0
                        or ([$join.value.inputs[] as $input
                             | select(($input | type) != "string" or ($nodes | has($input) | not))] | length) != 0
-                       or (($join.value | has("released")) and ($join.value.released | type) != "boolean"))] | length) != 0)
+                       or (($join.value | has("released")) and ($join.value.released | type) != "boolean"))] | length) != 0
+        or ($hard_stop != null and (($hard_stop | type) != "object"))
+        or (($active != null)
+            and (($active | type) != "object"
+                 or ($active.wave_id | type) != "string"
+                 or ($active.wave_id | length) == 0
+                 or ($active.revision | type) != "number"
+                 or ($active.nodes | type) != "array"
+                 or ($active.nodes | length) == 0
+                 or ($active.nodes | unique | length) != ($active.nodes | length)
+                 or ([$active.nodes[] as $id
+                      | select(($id | type) != "string" or ($nodes | has($id) | not))] | length) != 0))
+        or (([$nodes | to_entries[] | select(.value.status == "running") | .key] | sort)
+            != (if $active == null then [] else ($active.nodes | sort) end))
+        or ((reduce range(0; ($nodes | length)) as $i ($dependencies;
+               . + [.[] as $left
+                    | .[] as $right
+                    | select($left.to == $right.from)
+                    | {from:$left.from,to:$right.to}]
+               | unique_by([.from,.to])))
+            | any(.from == .to)))
     then error("invalid graph")
     else .
     end

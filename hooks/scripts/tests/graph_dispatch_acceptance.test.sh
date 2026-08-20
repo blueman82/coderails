@@ -38,6 +38,15 @@ fail() {
 # shellcheck disable=SC1091  # library path is resolved from this test file at runtime
 . "$LIB_DIR/graph_dispatch.sh"
 
+record_ready_wave() {
+    local progress="$1" results="$2" wave_id envelope
+    graph_dispatch_begin_wave "$progress" >/dev/null || return 1
+    wave_id=$(jq -r '.graph.active_wave.wave_id' "$progress")
+    envelope=$(jq -cn --arg wave_id "$wave_id" --argjson results "$results" \
+        '{wave_id:$wave_id,results:$results}')
+    graph_dispatch_record "$progress" "$envelope"
+}
+
 # --- 1a: plan resolves the S2.5/S2.6 wave for real (skill_ids only, no mock) ---
 jq -n '{ graph: { nodes: {
     S2: {status:"done", outcome:"done", retry:{attempts:0,max:5}},
@@ -54,22 +63,14 @@ s26_id=$(printf '%s' "$plan_out" | jq -r 'select(.node_id=="S2.6") | .skill_id')
     ok "acceptance: plan resolves real S2.5/S2.6 dispatch targets" ||
     fail "acceptance: plan resolves S2.5/S2.6" "s25=$s25_id s26=$s26_id"
 
-# --- 1b (RED HALF): S2.7a is BLOCKED before the explicit J2-release write,
-# even though S2.5/S2.6 have both already been recorded done via
-# graph_dispatch_record. This is the prose rule under test: record alone
-# does not release the join. ---
-graph_dispatch_record "$TMP/j2.json" '{"S2.5":{"outcome":"done"},"S2.6":{"outcome":"done"}}' >/dev/null
-pre_release=$(bash "$LIB_DIR/graph_readiness.sh" "$TMP/j2.json" "S2.7a")
-[ "$pre_release" = "blocked" ] &&
-    ok "acceptance (red half): S2.7a still blocked after record, before explicit J2 release" ||
-    fail "acceptance red half: S2.7a should be blocked pre-release" "got=$pre_release"
-
-# --- 1c: after the explicit second write releasing J2, S2.7a becomes ready ---
-jq '.graph.nodes["J2"].status = "done" | .graph.nodes["J2"].outcome = "done"' "$TMP/j2.json" >"$TMP/j2.json.tmp" && mv "$TMP/j2.json.tmp" "$TMP/j2.json"
+# --- 1b: recording the exact active wave releases its satisfied join in
+# the same locked write, so downstream work becomes ready deterministically. ---
+record_ready_wave "$TMP/j2.json" '{"S2.5":{"outcome":"done"},"S2.6":{"outcome":"done"}}' >/dev/null
 post_release=$(bash "$LIB_DIR/graph_readiness.sh" "$TMP/j2.json" "S2.7a")
-[ "$post_release" = "ready" ] &&
-    ok "acceptance: S2.7a ready after explicit J2 release write" ||
-    fail "acceptance: S2.7a should be ready post-release" "got=$post_release"
+j2_released=$(jq -r '.graph.joins.J2.released' "$TMP/j2.json")
+[ "$post_release" = "ready" ] && [ "$j2_released" = "true" ] &&
+    ok "acceptance: exact wave result releases J2 and makes S2.7a ready" ||
+    fail "acceptance: J2 should release with its completed wave" "ready=$post_release released=$j2_released"
 
 # --- 2a: sequential U3[i] -> U4[i] link — plan resolves U3 to a real target ---
 jq -n '{ graph: { nodes: {
@@ -87,7 +88,7 @@ u4_listed=$(printf '%s' "$plan_u3" | jq -r 'select(.node_id=="U4") | .node_id')
 # --- 2b: U4 blocked before U3 reports; U4 ready after graph_dispatch_record
 # folds a real "done" result for U3 (sequential link proven end to end) ---
 pre_u4=$(bash "$LIB_DIR/graph_readiness.sh" "$TMP/u34.json" "U4")
-graph_dispatch_record "$TMP/u34.json" '{"U3":{"outcome":"done","evidence":"acceptance-test throwaway PR"}}' >/dev/null
+record_ready_wave "$TMP/u34.json" '{"U3":{"outcome":"done","evidence":"acceptance-test throwaway PR"}}' >/dev/null
 post_u4=$(bash "$LIB_DIR/graph_readiness.sh" "$TMP/u34.json" "U4")
 [ "$pre_u4" = "blocked" ] && [ "$post_u4" = "ready" ] &&
     ok "acceptance: U3->U4 sequential link — U4 blocked pre-U3, ready post-U3-done" ||

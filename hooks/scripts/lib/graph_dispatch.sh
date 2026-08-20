@@ -18,7 +18,7 @@
 #     line (JSON Lines), for the orchestrator session to read and dispatch
 #     via its own Agent tool calls — this function never dispatches itself.
 #
-#   graph_dispatch_record <progress.json> <wave-results JSON>
+#   graph_dispatch_record <progress.json> <wave-envelope JSON>
 #     Takes the orchestrator's REAL collected Agent results for a wave
 #     (after every dispatched node in the wave has reported back — never
 #     partial) and applies bounded-retry/hard-stop bookkeeping before
@@ -142,48 +142,16 @@ graph_dispatch_plan() {
 
 _graph_dispatch_graph_valid() {
     local progress="$1"
-    jq -e '
-      .graph as $g
-      | ($g.nodes) as $nodes
-      | ($g.edges) as $edges
-      | ($g.joins) as $joins
-      | ($g | type) == "object"
-        and ($nodes | type) == "object"
-        and ($edges | type) == "array"
-        and ($joins | type) == "object"
-        and ([$nodes | to_entries[]
-              | select((.value | type) != "object"
-                       or (.value.status | IN("pending","ready","running","blocked","done","skipped","failed","hard-stop","stale") | not)
-                       or (.value.outcome | IN("pending","ready","running","blocked","done","skipped","failed","hard-stop","stale") | not)
-                       or (.value.retry.attempts | type) != "number"
-                       or (.value.retry.max | type) != "number"
-                       or .value.retry.attempts < 0
-                       or .value.retry.max < 0
-                       or .value.retry.max > 5
-                       or .value.retry.attempts > .value.retry.max)] | length) == 0
-        and ([$edges[] as $edge
-              | select(($edge | type) != "object"
-                       or ($edge.from | type) != "string"
-                       or ($edge.to | type) != "string"
-                       or ($nodes | has($edge.from) | not)
-                       or ($nodes | has($edge.to) | not))] | length) == 0
-        and ([$joins | to_entries[] as $join
-              | select(($nodes | has($join.key) | not)
-                       or ($join.value | type) != "object"
-                       or $join.value.mode != "all"
-                       or ($join.value.inputs | type) != "array"
-                       or ($join.value.inputs | length) == 0
-                       or ([$join.value.inputs[] as $input
-                            | select(($input | type) != "string"
-                                     or ($nodes | has($input) | not))] | length) != 0
-                       or (($join.value | has("released")) and ($join.value.released | type) != "boolean"))] | length) == 0
-    ' "$progress" >/dev/null 2>&1
+    graph_executor_graph_valid "$progress"
 }
 
 graph_dispatch_begin_wave() {
     local progress="$1" ready_json
     [ -f "$progress" ] || return 1
     _graph_dispatch_graph_valid "$progress" || return 1
+    jq -e '(.graph.hard_stop // null) == null
+           and ([.graph.nodes[] | select(.status == "hard-stop")] | length) == 0' \
+        "$progress" >/dev/null 2>&1 || return 1
     ready_json=$(graph_executor_ready_nodes "$progress" |
         jq -Rsc 'split("\n") | map(select(length > 0)) | sort') || return 1
     [ "$(printf '%s' "$ready_json" | jq 'length')" -gt 0 ] || return 1
@@ -192,6 +160,8 @@ graph_dispatch_begin_wave() {
       (.graph.nodes) as $nodes
       | (.graph.edges) as $edges
       | (.graph.joins) as $joins
+      | if .graph.hard_stop != null or ([.graph.nodes[] | select(.status == "hard-stop")] | length) != 0
+        then error("graph_dispatch: graph has a hard stop") else . end
       | if .graph.active_wave != null then error("graph_dispatch: active wave already exists") else . end
       | ([ $nodes | keys[] as $id
            | select(($joins | has($id) | not)
@@ -201,13 +171,13 @@ graph_dispatch_begin_wave() {
            | $id ] | sort) as $live_ready
       | if $live_ready != $wave_nodes then error("graph_dispatch: ready wave changed") else . end
       | .revision = ((.revision // 0) + 1)
-      | .graph.active_wave = {revision:.revision,nodes:$wave_nodes}
+      | .graph.active_wave = {wave_id:("wave-" + (.revision | tostring)),revision:.revision,nodes:$wave_nodes}
       | reduce $wave_nodes[] as $id (.;
           .graph.nodes[$id].status = "running"
           | .graph.nodes[$id].outcome = "running")
     ' || return 1
 
-    jq -c '{nodes:.graph.active_wave.nodes,revision:.revision}' "$progress"
+    jq -c '{nodes:.graph.active_wave.nodes,revision:.revision,wave_id:.graph.active_wave.wave_id}' "$progress"
 }
 
 graph_dispatch_inspect() {
@@ -279,15 +249,16 @@ graph_dispatch_complete() {
     ' "$retro" >/dev/null 2>&1
 }
 
-# graph_dispatch_record <progress.json> <wave-results JSON>
-# wave-results shape: {"<node_id>": {"outcome":"done"|"skipped"|"failed"|
+# graph_dispatch_record <progress.json> <wave-envelope JSON>
+# wave-envelope shape: {"wave_id":"...","results":{"<node_id>":
+# {"outcome":"done"|"skipped"|"failed"|
 #   "stale" (accepts "status" as a fallback key when "outcome" is
 #   absent — at least one of the two is REQUIRED, or the whole wave is
 #   rejected), "provider":"claude", "skill_id":..., "implementation":...,
 #   "evidence":... (optional, e.g. PR number/path), "stale_check":...
 #   (only when outcome/status is "stale")}, ...}, plus optional sibling
-# "decisions_absorbed" — same envelope graph_executor_apply_wave already
-# accepts, passed straight through for that field.
+# "decisions_absorbed" — an optional sibling of results, passed through to
+# graph_executor_apply_wave.
 #
 # This function is the ONLY place retry.attempts is incremented and
 # hard-stop is decided; graph_executor_apply_wave itself never mutates
@@ -296,13 +267,20 @@ graph_dispatch_complete() {
 # result, so a resumed run picks up the right attempt count rather than
 # resetting it.
 graph_dispatch_record() {
-    local progress="$1" wave_json="$2"
+    local progress="$1" envelope_json="$2" wave_json wave_id
     [ -f "$progress" ] || return 1
     _graph_dispatch_graph_valid "$progress" || return 1
 
-    printf '%s' "$wave_json" | jq -e '
-    type == "object" and ((keys - ["decisions_absorbed"]) | length > 0)
-  ' >/dev/null 2>&1 || return 1
+    printf '%s' "$envelope_json" | jq -e '
+      type == "object"
+      and ((keys - ["wave_id","results","decisions_absorbed"]) | length == 0)
+      and (.wave_id | type) == "string" and (.wave_id | length) > 0
+      and (.results | type) == "object" and (.results | length) > 0
+      and ((.decisions_absorbed // []) | type) == "array"
+    ' >/dev/null 2>&1 || return 1
+    wave_id=$(printf '%s' "$envelope_json" | jq -r '.wave_id') || return 1
+    wave_json=$(printf '%s' "$envelope_json" | jq -c \
+        '.results + {decisions_absorbed:(.decisions_absorbed // [])}') || return 1
 
     # Needs BOTH the wave results and progress.json's current retry state
     # (to increment attempts from the right baseline on resume) — one jq
@@ -359,5 +337,5 @@ graph_dispatch_record() {
   ' "$progress")
     [ -n "$folded" ] || return 1
 
-    graph_executor_apply_wave "$progress" "$folded"
+    graph_executor_apply_wave "$progress" "$folded" "$wave_id"
 }

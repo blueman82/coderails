@@ -52,9 +52,74 @@ GRAPH_EXECUTOR_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=./loop_state_common.sh
 . "$GRAPH_EXECUTOR_DIR/loop_state_common.sh"
 
+graph_executor_graph_valid() {
+    local path="$1"
+    jq -e '
+      .graph as $g
+      | ($g.nodes) as $nodes
+      | ($g.edges) as $edges
+      | ($g.joins) as $joins
+      | ($g.active_wave) as $active
+      | ($g.hard_stop) as $hard_stop
+      | ($edges + [$joins | to_entries[] as $join
+                    | $join.value.inputs[]? | {from:.,to:$join.key}]) as $dependencies
+      | ($g | type) == "object"
+        and ($nodes | type) == "object"
+        and ($edges | type) == "array"
+        and ($joins | type) == "object"
+        and ([$nodes | to_entries[]
+              | select((.value | type) != "object"
+                       or (.value.status | IN("pending","ready","running","blocked","done","skipped","failed","hard-stop","stale") | not)
+                       or (.value.outcome | IN("pending","ready","running","blocked","done","skipped","failed","hard-stop","stale") | not)
+                       or .value.status != .value.outcome
+                       or (.value.retry.attempts | type) != "number"
+                       or (.value.retry.max | type) != "number"
+                       or .value.retry.attempts < 0
+                       or .value.retry.max < 0
+                       or .value.retry.max > 5
+                       or .value.retry.attempts > .value.retry.max)] | length) == 0
+        and ([$edges[] as $edge
+              | select(($edge | type) != "object"
+                       or ($edge.from | type) != "string"
+                       or ($edge.to | type) != "string"
+                       or ($nodes | has($edge.from) | not)
+                       or ($nodes | has($edge.to) | not))] | length) == 0
+        and ([$joins | to_entries[] as $join
+              | select(($nodes | has($join.key) | not)
+                       or ($join.value | type) != "object"
+                       or $join.value.mode != "all"
+                       or ($join.value.inputs | type) != "array"
+                       or ($join.value.inputs | length) == 0
+                       or ([$join.value.inputs[] as $input
+                            | select(($input | type) != "string" or ($nodes | has($input) | not))] | length) != 0
+                       or (($join.value | has("released")) and ($join.value.released | type) != "boolean"))] | length) == 0
+        and ($hard_stop == null or ($hard_stop | type) == "object")
+        and (($active == null)
+             or (($active | type) == "object"
+                 and ($active.wave_id | type) == "string"
+                 and ($active.wave_id | length) > 0
+                 and ($active.revision | type) == "number"
+                 and ($active.nodes | type) == "array"
+                 and ($active.nodes | length) > 0
+                 and ($active.nodes | unique | length) == ($active.nodes | length)
+                 and ([$active.nodes[] as $id
+                       | select(($id | type) != "string" or ($nodes | has($id) | not))] | length) == 0))
+        and (([$nodes | to_entries[] | select(.value.status == "running") | .key] | sort)
+             == (if $active == null then [] else ($active.nodes | sort) end))
+        and (((reduce range(0; ($nodes | length)) as $i ($dependencies;
+                  . + [.[] as $left
+                       | .[] as $right
+                       | select($left.to == $right.from)
+                       | {from:$left.from,to:$right.to}]
+                  | unique_by([.from,.to])))
+              | any(.from == .to)) | not)
+    ' "$path" >/dev/null 2>&1
+}
+
 graph_executor_ready_nodes() {
     local path="$1"
     [ -f "$path" ] || return 1
+    graph_executor_graph_valid "$path" || return 1
     local node
     jq -e -r '(.graph.nodes // {}) | keys[]' "$path" 2>/dev/null | while IFS= read -r node; do
         [ "$(bash "$GRAPH_EXECUTOR_DIR/graph_readiness.sh" "$path" "$node")" = "ready" ] && printf '%s\n' "$node"
@@ -65,54 +130,52 @@ graph_executor_ready_nodes() {
 }
 
 graph_executor_apply_wave() {
-    local path="$1" wave_json="$2"
+    local path="$1" wave_json="$2" wave_id="${3:-}"
     [ -f "$path" ] || return 1
-
-    # Cheap shape check outside the lock. The authoritative check, including
-    # id-existence, is the jq program below,
-    # which runs INSIDE als_atomic_progress_update's lock against the
-    # freshly-read file, so nothing checked here needs to be trusted twice.
     printf '%s' "$wave_json" | jq -e '
     type == "object" and ((keys - ["decisions_absorbed"]) | length > 0)
   ' >/dev/null 2>&1 || return 1
     als_atomic_progress_update "$path" \
-        --argjson wave "$wave_json" '
+        --argjson wave "$wave_json" --arg wave_id "$wave_id" '
     (.graph.nodes // {}) as $nodes
     | ($wave | del(.decisions_absorbed)) as $results
-    | (.graph | has("active_wave")) as $tracked_wave
-    | if (($nodes | type) != "object"
+    | (.graph.active_wave) as $active | (.graph.hard_stop) as $hard_stop
+    | (.graph.edges + [.graph.joins | to_entries[] as $join | $join.value.inputs[]? | {from:.,to:$join.key}]) as $dependencies
+    | ($active != null) as $tracked_wave
+    | if ((.graph | type) != "object"
+          or ($nodes | type) != "object"
           or ((.graph.edges // null) | type) != "array"
           or ((.graph.joins // null) | type) != "object"
-          or ([$nodes | to_entries[]
-               | select((.value | type) != "object"
+          or ([$nodes | to_entries[] | select((.value | type) != "object"
                         or (.value.status | IN("pending","ready","running","blocked","done","skipped","failed","hard-stop","stale") | not)
                         or (.value.outcome | IN("pending","ready","running","blocked","done","skipped","failed","hard-stop","stale") | not)
-                        or (.value.retry.attempts | type) != "number"
-                        or (.value.retry.max | type) != "number"
-                        or .value.retry.attempts < 0 or .value.retry.max < 0
-                        or .value.retry.max > 5 or .value.retry.attempts > .value.retry.max)] | length) != 0
-          or ([.graph.edges[] as $edge
-               | select(($edge | type) != "object"
-                        or ($edge.from | type) != "string"
-                        or ($edge.to | type) != "string"
-                        or ($nodes | has($edge.from) | not)
-                        or ($nodes | has($edge.to) | not))] | length) != 0
-          or ([.graph.joins | to_entries[] as $join
-               | select(($nodes | has($join.key) | not)
-                        or ($join.value | type) != "object"
-                        or $join.value.mode != "all"
-                        or ($join.value.inputs | type) != "array"
-                        or ($join.value.inputs | length) == 0
+                        or .value.status != .value.outcome or (.value.retry.attempts | type) != "number" or (.value.retry.max | type) != "number"
+                        or .value.retry.attempts < 0 or .value.retry.max < 0 or .value.retry.max > 5 or .value.retry.attempts > .value.retry.max)] | length) != 0
+          or ([.graph.edges[] as $edge | select(($edge | type) != "object" or ($edge.from | type) != "string" or ($edge.to | type) != "string"
+                        or ($nodes | has($edge.from) | not) or ($nodes | has($edge.to) | not))] | length) != 0
+          or ([.graph.joins | to_entries[] as $join | select(($nodes | has($join.key) | not) or ($join.value | type) != "object"
+                        or $join.value.mode != "all" or ($join.value.inputs | type) != "array" or ($join.value.inputs | length) == 0
                         or ([$join.value.inputs[] as $input
-                             | select(($input | type) != "string"
-                                      or ($nodes | has($input) | not))] | length) != 0)] | length) != 0)
-      then error("graph_executor: malformed graph")
-      elif ($tracked_wave
+                             | select(($input | type) != "string" or ($nodes | has($input) | not))] | length) != 0
+                        or (($join.value | has("released")) and ($join.value.released | type) != "boolean"))] | length) != 0
+          or ($hard_stop != null and (($hard_stop | type) != "object"))
+          or (($active != null) and (($active | type) != "object" or ($active.wave_id | type) != "string" or ($active.wave_id | length) == 0
+                   or ($active.revision | type) != "number" or ($active.nodes | type) != "array" or ($active.nodes | length) == 0 or ($active.nodes | unique | length) != ($active.nodes | length)
+                   or ([$active.nodes[] as $id
+                        | select(($id | type) != "string" or ($nodes | has($id) | not))] | length) != 0))
+          or (([$nodes | to_entries[] | select(.value.status == "running") | .key] | sort)
+              != (if $active == null then [] else ($active.nodes | sort) end))
+          or ((reduce range(0; ($nodes | length)) as $i ($dependencies;
+                 . + [.[] as $left | .[] as $right | select($left.to == $right.from) | {from:$left.from,to:$right.to}]
+                 | unique_by([.from,.to])))
+              | any(.from == .to)))
+      then error("graph_executor: malformed graph") elif ($tracked_wave
             and ((.graph.active_wave | type) != "object"
+                 or $wave_id == ""
+                 or .graph.active_wave.wave_id != $wave_id
                  or (.graph.active_wave.nodes | type) != "array"
                  or ((.graph.active_wave.nodes | sort) != ($results | keys | sort))))
-      then error("graph_executor: results must exactly match the active wave")
-      else .
+      then error("graph_executor: results must exactly match the active wave") else .
       end
     | .graph.nodes = ($results | reduce keys[] as $id ($nodes;
         if ($nodes | has($id) | not) then
@@ -124,6 +187,8 @@ graph_executor_apply_wave() {
               then error("graph_executor: node \($id) has invalid status \($merged.status)")
               elif ($merged.outcome // null | IN("pending","ready","running","blocked","done","skipped","failed","hard-stop","stale") | not)
               then error("graph_executor: node \($id) has invalid outcome \($merged.outcome)")
+              elif ($merged.status != $merged.outcome)
+              then error("graph_executor: node \($id) status and outcome disagree")
               elif ($merged.retry.attempts | type != "number" or . < 0)
               then error("graph_executor: node \($id) has invalid retry.attempts \($merged.retry.attempts)")
               elif ($merged.retry.max | type != "number" or . < 0 or . > 5)

@@ -33,6 +33,18 @@ fail() {
 # shellcheck disable=SC1091  # library path is resolved from this test file at runtime
 . "$LIB_DIR/graph_dispatch.sh"
 
+begin_wave() {
+    graph_dispatch_begin_wave "$1" >/dev/null
+}
+
+record_active_wave() {
+    local progress="$1" results="$2" wave_id envelope
+    wave_id=$(jq -r '.graph.active_wave.wave_id' "$progress")
+    envelope=$(jq -cn --arg wave_id "$wave_id" --argjson results "$results" \
+        '{wave_id:$wave_id,results:$results}')
+    graph_dispatch_record "$progress" "$envelope"
+}
+
 # --- 1: plan resolves a ready node with an unambiguous graph_role ---
 jq -n '
   { graph: { nodes: {
@@ -63,7 +75,8 @@ skill_id=$(printf '%s' "$out" | jq -r 'select(.node_id=="U4b-review") | .skill_i
 
 # --- 3: record — failed outcome increments attempts, stays in play ---
 jq -n '{ graph: { nodes: { A:{status:"pending",outcome:"pending",retry:{attempts:0,max:2}} }, edges: [], joins: {} } }' >"$TMP/f3.json"
-graph_dispatch_record "$TMP/f3.json" '{"A":{"outcome":"failed","provider":"claude","skill_id":"loop-worker"}}'
+begin_wave "$TMP/f3.json"
+record_active_wave "$TMP/f3.json" '{"A":{"outcome":"failed","provider":"claude","skill_id":"loop-worker"}}'
 rc3=$?
 status3=$(jq -r '.graph.nodes.A.status' "$TMP/f3.json")
 attempts3=$(jq -r '.graph.nodes.A.retry.attempts' "$TMP/f3.json")
@@ -72,7 +85,8 @@ attempts3=$(jq -r '.graph.nodes.A.retry.attempts' "$TMP/f3.json")
     fail "record: failed outcome increments attempts" "rc=$rc3 status=$status3 attempts=$attempts3"
 
 # --- 4: record — retry.max reached -> hard-stop ---
-graph_dispatch_record "$TMP/f3.json" '{"A":{"outcome":"failed","provider":"claude","skill_id":"loop-worker"}}'
+begin_wave "$TMP/f3.json"
+record_active_wave "$TMP/f3.json" '{"A":{"outcome":"failed","provider":"claude","skill_id":"loop-worker"}}'
 rc4=$?
 status4=$(jq -r '.graph.nodes.A.status' "$TMP/f3.json")
 attempts4=$(jq -r '.graph.nodes.A.retry.attempts' "$TMP/f3.json")
@@ -87,19 +101,21 @@ ready5=$(graph_executor_ready_nodes "$TMP/f3.json")
     fail "resume: hard-stop node not re-listed" "ready5=$ready5"
 
 jq -n '{ graph: { nodes: { A:{status:"pending",outcome:"pending",retry:{attempts:0,max:5}} }, edges: [], joins: {} } }' >"$TMP/f5b.json"
-graph_dispatch_record "$TMP/f5b.json" '{"A":{"outcome":"done","provider":"claude","skill_id":"loop-worker","evidence":"PR #999"}}' >/dev/null
+begin_wave "$TMP/f5b.json"
+record_active_wave "$TMP/f5b.json" '{"A":{"outcome":"done","provider":"claude","skill_id":"loop-worker","evidence":"PR #999"}}' >/dev/null
 ready5b=$(graph_executor_ready_nodes "$TMP/f5b.json")
 [ -z "$ready5b" ] && ok "resume: done node A not re-listed by graph_executor_ready_nodes" ||
     fail "resume: done node not re-listed" "ready5b=$ready5b"
 
 # --- 6: stale contract still enforced through the wrapper ---
-jq -n '{ graph: { nodes: { A:{status:"running",outcome:"running",retry:{attempts:0,max:5}} }, edges: [], joins: {} } }' >"$TMP/f6.json"
-graph_dispatch_record "$TMP/f6.json" '{"A":{"status":"stale","outcome":"stale"}}'
+jq -n '{ graph: { nodes: { A:{status:"pending",outcome:"pending",retry:{attempts:0,max:5}} }, edges: [], joins: {} } }' >"$TMP/f6.json"
+begin_wave "$TMP/f6.json"
+record_active_wave "$TMP/f6.json" '{"A":{"status":"stale","outcome":"stale"}}'
 rc6a=$?
 [ "$rc6a" -ne 0 ] && ok "record: bare stale (no stale_check) refused through the wrapper" ||
     fail "record: bare stale refused" "rc=$rc6a"
 
-graph_dispatch_record "$TMP/f6.json" '{"A":{"status":"stale","outcome":"stale","stale_check":{"checked":true,"method":"gh pr view","result":"no PR found"}}}'
+record_active_wave "$TMP/f6.json" '{"A":{"status":"stale","outcome":"stale","stale_check":{"checked":true,"method":"gh pr view","result":"no PR found"}}}'
 rc6b=$?
 status6b=$(jq -r '.graph.nodes.A.status' "$TMP/f6.json")
 [ "$rc6b" -eq 0 ] && [ "$status6b" = "stale" ] &&
@@ -108,6 +124,7 @@ status6b=$(jq -r '.graph.nodes.A.status' "$TMP/f6.json")
 
 # --- 7: exactly ONE als_atomic_progress_update call per graph_dispatch_record ---
 jq -n '{ graph: { nodes: { A:{status:"pending",outcome:"pending",retry:{attempts:0,max:5}}, B:{status:"pending",outcome:"pending",retry:{attempts:0,max:5}} }, edges: [], joins: {} } }' >"$TMP/f7.json"
+begin_wave "$TMP/f7.json"
 CALL_LOG="$TMP/calls.log"
 : >"$CALL_LOG"
 eval "$(declare -f als_atomic_progress_update | sed '1s/als_atomic_progress_update/__real_als_atomic_progress_update/')"
@@ -115,7 +132,7 @@ als_atomic_progress_update() {
     echo "call" >>"$CALL_LOG"
     __real_als_atomic_progress_update "$@"
 }
-graph_dispatch_record "$TMP/f7.json" '{"A":{"outcome":"done","provider":"claude"},"B":{"outcome":"done","provider":"claude"}}' >/dev/null
+record_active_wave "$TMP/f7.json" '{"A":{"outcome":"done","provider":"claude"},"B":{"outcome":"done","provider":"claude"}}' >/dev/null
 call_count=$(wc -l <"$CALL_LOG" | tr -d ' ')
 [ "$call_count" = "1" ] && ok "record: exactly ONE als_atomic_progress_update call for a 2-node wave" ||
     fail "record: exactly ONE write per wave" "call_count=$call_count"
@@ -157,8 +174,9 @@ unresolved9=$(printf '%s' "$out" | jq -r 'select(.node_id=="J2") | .unresolved')
 # "outcome" key) must land as done, never silently miscast as a failed
 # retry (regression: review found `$r.outcome // "failed"` treated a
 # missing outcome key as a reported failure) ---
-jq -n '{ graph: { nodes: { A:{status:"running",outcome:"running",retry:{attempts:0,max:5}} }, edges: [], joins: {} } }' >"$TMP/f10.json"
-graph_dispatch_record "$TMP/f10.json" '{"A":{"status":"done","provider":"claude","evidence":"PR #1"}}'
+jq -n '{ graph: { nodes: { A:{status:"pending",outcome:"pending",retry:{attempts:0,max:5}} }, edges: [], joins: {} } }' >"$TMP/f10.json"
+begin_wave "$TMP/f10.json"
+record_active_wave "$TMP/f10.json" '{"A":{"status":"done","provider":"claude","evidence":"PR #1"}}'
 rc10=$?
 status10=$(jq -r '.graph.nodes.A.status' "$TMP/f10.json")
 attempts10=$(jq -r '.graph.nodes.A.retry.attempts' "$TMP/f10.json")
@@ -171,13 +189,14 @@ attempts10=$(jq -r '.graph.nodes.A.retry.attempts' "$TMP/f10.json")
 # result (regression: the missing-outcome default previously rewrote
 # this to "running" before graph_executor_apply_wave's stale_check
 # guard ever saw it) ---
-jq -n '{ graph: { nodes: { A:{status:"running",outcome:"running",retry:{attempts:0,max:5}} }, edges: [], joins: {} } }' >"$TMP/f11.json"
-graph_dispatch_record "$TMP/f11.json" '{"A":{"status":"stale"}}'
+jq -n '{ graph: { nodes: { A:{status:"pending",outcome:"pending",retry:{attempts:0,max:5}} }, edges: [], joins: {} } }' >"$TMP/f11.json"
+begin_wave "$TMP/f11.json"
+record_active_wave "$TMP/f11.json" '{"A":{"status":"stale"}}'
 rc11a=$?
 [ "$rc11a" -ne 0 ] && ok "record: status-only stale with no stale_check is refused (not silently rewritten to running)" ||
     fail "record: status-only bare stale refused" "rc=$rc11a"
 
-graph_dispatch_record "$TMP/f11.json" '{"A":{"status":"stale","stale_check":{"checked":true,"method":"gh pr view","result":"no PR found"}}}'
+record_active_wave "$TMP/f11.json" '{"A":{"status":"stale","stale_check":{"checked":true,"method":"gh pr view","result":"no PR found"}}}'
 rc11b=$?
 status11b=$(jq -r '.graph.nodes.A.status' "$TMP/f11.json")
 [ "$rc11b" -eq 0 ] && [ "$status11b" = "stale" ] &&
@@ -187,11 +206,12 @@ status11b=$(jq -r '.graph.nodes.A.status' "$TMP/f11.json")
 # --- 12: record — a result naming NEITHER outcome nor status aborts the
 # wave rather than being silently treated as failed ---
 jq -n '{ graph: { nodes: { A:{status:"pending",outcome:"pending",retry:{attempts:0,max:5}} }, edges: [], joins: {} } }' >"$TMP/f12.json"
-graph_dispatch_record "$TMP/f12.json" '{"A":{"provider":"claude"}}'
+begin_wave "$TMP/f12.json"
+record_active_wave "$TMP/f12.json" '{"A":{"provider":"claude"}}'
 rc12=$?
 status12=$(jq -r '.graph.nodes.A.status' "$TMP/f12.json")
-[ "$rc12" -ne 0 ] && [ "$status12" = "pending" ] &&
-    ok "record: result naming neither outcome nor status is refused, node unchanged" ||
+[ "$rc12" -ne 0 ] && [ "$status12" = "running" ] &&
+    ok "record: result naming neither outcome nor status is refused, active wave unchanged" ||
     fail "record: neither outcome nor status refused" "rc=$rc12 status=$status12"
 
 # --- 13: record — attempts is capped at max, so a wave containing a
@@ -199,8 +219,9 @@ status12=$(jq -r '.graph.nodes.A.status' "$TMP/f12.json")
 # node's real result in the same wave (regression: uncapped attempts
 # could exceed max, tripping graph_executor_apply_wave's attempts<=max
 # contract check INSIDE the lock and rejecting the entire wave) ---
-jq -n '{ graph: { nodes: { A:{status:"running",outcome:"running",retry:{attempts:2,max:2}}, B:{status:"pending",outcome:"pending",retry:{attempts:0,max:5}} }, edges: [], joins: {} } }' >"$TMP/f13.json"
-graph_dispatch_record "$TMP/f13.json" '{"A":{"outcome":"failed"},"B":{"outcome":"done"}}'
+jq -n '{ graph: { nodes: { A:{status:"pending",outcome:"pending",retry:{attempts:2,max:2}}, B:{status:"pending",outcome:"pending",retry:{attempts:0,max:5}} }, edges: [], joins: {} } }' >"$TMP/f13.json"
+begin_wave "$TMP/f13.json"
+record_active_wave "$TMP/f13.json" '{"A":{"outcome":"failed"},"B":{"outcome":"done"}}'
 rc13=$?
 statusA13=$(jq -r '.graph.nodes.A.status' "$TMP/f13.json")
 attemptsA13=$(jq -r '.graph.nodes.A.retry.attempts' "$TMP/f13.json")
@@ -213,7 +234,8 @@ statusB13=$(jq -r '.graph.nodes.B.status' "$TMP/f13.json")
 # handled correctly on first failure, not treated as an overflow that
 # discards a sibling node ---
 jq -n '{ graph: { nodes: { A:{status:"pending",outcome:"pending",retry:{attempts:0,max:0}}, B:{status:"pending",outcome:"pending",retry:{attempts:0,max:5}} }, edges: [], joins: {} } }' >"$TMP/f14.json"
-graph_dispatch_record "$TMP/f14.json" '{"A":{"outcome":"failed"},"B":{"outcome":"done"}}'
+begin_wave "$TMP/f14.json"
+record_active_wave "$TMP/f14.json" '{"A":{"outcome":"failed"},"B":{"outcome":"done"}}'
 rc14=$?
 statusA14=$(jq -r '.graph.nodes.A.status' "$TMP/f14.json")
 statusB14=$(jq -r '.graph.nodes.B.status' "$TMP/f14.json")
