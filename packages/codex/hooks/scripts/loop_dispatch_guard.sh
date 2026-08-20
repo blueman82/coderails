@@ -8,8 +8,8 @@ hook::read_input
 
 tool_name=$(printf '%s' "$HOOK_INPUT" | jq -r '.tool_name // empty' 2>/dev/null)
 [[ "$tool_name" == "spawn_agent" ]] || {
-	hook::deny "Codex graph workers must use native spawn_agent."
-	exit 0
+    hook::deny "Codex graph workers must use native spawn_agent."
+    exit 0
 }
 task_name=$(printf '%s' "$HOOK_INPUT" | jq -r '.tool_input.task_name // empty' 2>/dev/null)
 [[ "$task_name" == loop-worker-* ]] || exit 0
@@ -17,30 +17,30 @@ task_name=$(printf '%s' "$HOOK_INPUT" | jq -r '.tool_input.task_name // empty' 2
 session_id=$(printf '%s' "$HOOK_INPUT" | jq -r '.session_id // empty' 2>/dev/null)
 cwd=$(printf '%s' "$HOOK_INPUT" | jq -r '.cwd // empty' 2>/dev/null)
 [[ -n "$session_id" && -n "$cwd" ]] || {
-	hook::deny "Graph worker dispatch requires a session id and working directory."
-	exit 0
+    hook::deny "Graph worker dispatch requires a session id and working directory."
+    exit 0
 }
 state=$(hook::loop_state_path "$cwd" "$session_id") || {
-	hook::deny "Graph worker dispatch could not resolve this session's progress.json."
-	exit 0
+    hook::deny "Graph worker dispatch could not resolve this session's progress.json."
+    exit 0
 }
 [[ -f "$state" ]] || {
-	hook::deny "Graph worker dispatch requires this session's progress.json. Start the native graph before spawn_agent."
-	exit 0
+    hook::deny "Graph worker dispatch requires this session's progress.json. Start the native graph before spawn_agent."
+    exit 0
 }
 
 PLUGIN_ROOT="${PLUGIN_ROOT:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
 graph="$PLUGIN_ROOT/skills/agentic-loop/scripts/graph.py"
 evals="$(dirname "$state")/evals.json"
 [[ -x "$graph" ]] || {
-	hook::deny "Graph worker dispatch requires the provider-local graph helper."
-	exit 0
+    hook::deny "Graph worker dispatch requires the provider-local graph helper."
+    exit 0
 }
 authorization=$(python3 "$graph" authorize-dispatch "$state" \
-	--session "$session_id" --task "$task_name" --evals "$evals" 2>/dev/null)
+    --session "$session_id" --task "$task_name" --evals "$evals" 2>/dev/null)
 if [[ -z "$authorization" ]]; then
-	hook::deny "Graph worker dispatch requires valid state, active-wave ownership, and graded loop evidence."
-	exit 0
+    hook::deny "Graph worker dispatch requires valid state, active-wave ownership, and graded loop evidence."
+    exit 0
 fi
 
 loop_id=$(printf '%s' "$authorization" | jq -r '.loop_id')
