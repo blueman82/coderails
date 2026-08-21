@@ -162,6 +162,52 @@ test_transcript_evidence_rejections() {
 	command_rejected_unchanged "$state" python3 "$GRAPH" record-wave "$state" "$payload"
 }
 
+validate_worker_refs() {
+	PYTHONPATH="$(dirname "$GRAPH")" python3 -c \
+		'import json,sys; from graph_evidence import validate_worker_evidence; validate_worker_evidence(json.load(open(sys.argv[1], encoding="utf-8")))' "$1"
+}
+
+test_wave_tamper_and_followup() {
+	local state reference followup payload
+
+	reset_transcript
+	state="$TMP/wave-tamper.json"
+	write_graph "$state" "$(jq -cn --argjson a "$(node)" '{A:$a}')"
+	python3 "$GRAPH" begin-wave "$state" >/dev/null
+	codex_fixture::append_wave "$state"
+	python3 "$GRAPH" record-wave "$state" "$(record_payload "$state")" >/dev/null
+	jq '(.graph.nodes.A.evidence[] | select(type == "object")).wave_id="wave-999"' "$state" >"$state.tmp"
+	mv "$state.tmp" "$state"
+	command_rejected_unchanged "$state" validate_worker_refs "$state"
+
+	reset_transcript
+	state="$TMP/followup-success.json"
+	write_graph "$state" "$(jq -cn --argjson a "$(node)" '{A:$a}')"
+	python3 "$GRAPH" begin-wave "$state" >/dev/null
+	reference=$(codex_fixture::append_attempt session-test loop_worker_41 1 wave-2)
+	followup=$(codex_fixture::append_followup session-test "$reference")
+	python3 "$GRAPH" record-wave "$state" "$(record_payload "$state")" >/dev/null
+	[[ "$(jq -r '.graph.nodes.A.evidence[] | select(type == "object") | .task_complete_turn_id' "$state")" == "$followup" ]]
+
+	reset_transcript
+	state="$TMP/followup-failed.json"
+	write_graph "$state" "$(jq -cn --argjson a "$(node)" '{A:$a}')"
+	python3 "$GRAPH" begin-wave "$state" >/dev/null
+	reference=$(codex_fixture::append_attempt session-test loop_worker_41 1 wave-2)
+	codex_fixture::append_followup session-test "$reference" turn_aborted >/dev/null
+	payload=$(record_payload "$state")
+	command_rejected_unchanged "$state" python3 "$GRAPH" record-wave "$state" "$payload"
+
+	reset_transcript
+	state="$TMP/followup-stale.json"
+	write_graph "$state" "$(jq -cn --argjson a "$(node)" '{A:$a}')"
+	python3 "$GRAPH" begin-wave "$state" >/dev/null
+	reference=$(codex_fixture::append_attempt session-test loop_worker_41 1 wave-2)
+	python3 "$GRAPH" record-wave "$state" "$(record_payload "$state")" >/dev/null
+	codex_fixture::append_followup session-test "$reference" >/dev/null
+	command_rejected_unchanged "$state" validate_worker_refs "$state"
+}
+
 install_state() {
 	local source="$1" root="$2"
 	mkdir -p "$root/fixture/session-test"
@@ -326,6 +372,7 @@ check 'stable loop evals survive begin-wave while completion stays revision-boun
 check 'SessionStart includes the exact resolved progress.json path' test_bootstrap_exact_path
 check 'hard-stop waiver requires a final nonblank LOOP-STOP declaration' test_hard_stop_final_line
 check 'native transcript evidence rejects missing, duplicate, foreign, stale, failed, and reused records' test_transcript_evidence_rejections
+check 'stored waves reject tampering and child follow-ups require the final successful completion' test_wave_tamper_and_followup
 mutation_control
 
 if [[ "$FAILS" -eq 0 && "$CONTROL_FAILED" -eq 0 ]]; then

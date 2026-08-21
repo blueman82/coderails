@@ -56,7 +56,19 @@ codex_fixture::append_attempt() {
     }' >>"$child"
 	jq -cn --argjson attempt "$attempt" --arg wave "$wave" --arg call "$call" \
 		--arg agent "$agent" --arg turn "$turn" '{kind:"codex_agent",attempt:$attempt,
-      wave_id:$wave,spawn_call_id:$call,agent_thread_id:$agent,task_complete_turn_id:$turn}'
+	      wave_id:$wave,spawn_call_id:$call,agent_thread_id:$agent,task_complete_turn_id:$turn}'
+}
+
+codex_fixture::append_followup() {
+	local session="$1" reference="$2" terminal="${3:-task_complete}" agent child turn
+	agent=$(jq -r '.agent_thread_id' <<<"$reference")
+	child="$(dirname "$(codex_fixture::parent "$session")")/rollout-fixture-$agent.jsonl"
+	turn="turn-followup-$(wc -l <"$child")"
+	jq -cn --arg turn "$turn" '{timestamp:"2026-08-21T00:00:04Z",type:"event_msg",
+      payload:{type:"task_started",turn_id:$turn}}' >>"$child"
+	jq -cn --arg turn "$turn" --arg terminal "$terminal" '{timestamp:"2026-08-21T00:00:05Z",
+      type:"event_msg",payload:{type:$terminal,turn_id:$turn}}' >>"$child"
+	printf '%s\n' "$turn"
 }
 
 codex_fixture::append_wave() {
@@ -72,11 +84,12 @@ codex_fixture::append_wave() {
 
 codex_fixture::bind_done_nodes() {
 	local state="$1" session node task attempt reference temporary
+	jq '.revision=3' "$state" >"$state.tmp" && mv "$state.tmp" "$state"
 	session=$(jq -r '.session_id' "$state")
 	while IFS= read -r node; do
 		task="loop_worker_$(printf '%s' "$node" | od -An -tx1 | tr -d ' \n')"
 		attempt=$(( $(jq -r --arg node "$node" '.graph.nodes[$node].retry.attempts' "$state") + 1 ))
-		reference=$(codex_fixture::append_attempt "$session" "$task" "$attempt" "wave-fixture-$attempt")
+		reference=$(codex_fixture::append_attempt "$session" "$task" "$attempt" "wave-2")
 		temporary="$state.tmp"
 		jq --arg node "$node" --argjson reference "$reference" \
 			'.graph.nodes[$node].evidence += ["fixture evidence",$reference]' "$state" >"$temporary"
