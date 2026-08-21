@@ -256,13 +256,21 @@ check "sandbox wrapper stays outside graph ownership -> allow" "" "$out"
 #
 # frozen_evals: writes an ungraded loop-scope suite for session $1 into its
 # loop dir. $2 = evals array JSON, $3 = verification_level, $4 = justification.
+# Emits the field set a REAL /coderails:task-evals freeze produces, including
+# frozen_sha/frozen_at. A helper that omitted them would make every negative
+# case below pass for the WRONG reason (denied on a missing frozen_sha rather
+# than on the property the test is named for). head_sha is deliberately null:
+# the live suite carries null there, because head_sha records which commit was
+# GRADED and at freeze time nothing has been.
 frozen_evals() {
     jq -n --argjson evals "$2" --argjson lvl "$3" --arg j "$4" --arg s "$1" \
-        '{scope:"loop", session_id:$s, loop_id:"loop-new", revision:0,
+        '{schema_version:1, scope:"loop", session_id:$s, loop_id:"loop-new", revision:0,
           verification_level:$lvl, verification_justification:$j,
-          head_sha:"deadbeef", evals:$evals}' >"$(file_dir "$1")/evals.json"
+          frozen_at:"2026-08-21T00:00:00Z", frozen_sha:"aaaabbbbcccc",
+          head_sha:null, amendments:[], result:null, grading:null, evals:$evals}' \
+        >"$(file_dir "$1")/evals.json"
 }
-P0_PENDING='[{"id":"E1","priority":"P0","mode":"scripted","status":"pending","cmd":"run-a","negative_control":"run-a-broken","evidence":""}]'
+P0_PENDING='[{"id":"E1","priority":"P0","mode":"scripted","status":"pending","cmd":"bash run-a.sh","negative_control":"bash run-a-broken.sh","evidence":""}]'
 JUST="verification_level-2 predicate fired: 3 work-units in the roster"
 
 # 1. POSITIVE — frozen, valid, ungraded, session-matched, >=1 P0 -> ALLOW.
@@ -339,6 +347,12 @@ is_denied "$out"
 check "FROZEN: only P1 evals (zero P0) at verification_level 2 -> BLOCK" 0 $?
 
 # 7. NEGATIVE — blank / whitespace-only verification_justification -> DENY.
+# NOTE ON WHAT THIS ACTUALLY GUARDS: als_evals_are_frozen has no
+# justification clause, and the reader's UNJUSTIFIED branch fires BEFORE the
+# FROZEN branch in the if-chain. So this pins BRANCH ORDER, not the
+# predicate: the file below satisfies als_evals_are_frozen outright, and only
+# the earlier UNJUSTIFIED branch stops it. Reversing that order would open
+# the gate to unjustified suites, which is why the case stays.
 reset
 write_file S1 "$WU3_PENDING"
 jq '. + {loop_id:"loop-new"}' "$(file_path S1)" >"$(file_path S1).tmp" && mv "$(file_path S1).tmp" "$(file_path S1)"
@@ -347,15 +361,18 @@ out=$(run "$(payload S1 coderails:loop-worker)")
 is_denied "$out"
 check "FROZEN: whitespace-only verification_justification -> BLOCK" 0 $?
 
-# 7b. NEGATIVE — same session, same loop_id, but a PRIOR revision.
-# loop_dispatch_guard's identity check (lines ~167-171) compares session_id
-# and loop_id only, NOT revision — unlike loop_state_guard and
-# loop_stall_guard, which compare all three. That asymmetry is pre-existing
-# and out of scope here, but FROZEN must not be the thing that makes it
-# exploitable. This pins the actual behaviour instead of inferring it: a
-# stale prior-revision suite normally arrives GRADED (it went through a
-# completion attempt), and a graded file is by definition not ungraded, so
-# FROZEN cannot launder it.
+# 7b. Prior revision, same session + same loop_id -> ALLOW, deterministically.
+# This is DESIGNED behaviour, not a tolerated boundary. loop-state.md:77:
+# "Dispatch evidence binds the stable session_id + loop_id, not revision,
+# because beginning a wave advances the revision before dispatch. Completion
+# evidence binds all three values."
+#
+# Binding revision at dispatch would re-create the very deadlock this PR
+# fixes, in a new form: every wave start bumps the revision, so a suite frozen
+# once at Phase 2.7c would invalidate itself on the first wave. Both halves
+# below assert ALLOW outright — an earlier revision of this file used an
+# if/else where BOTH branches called check() with a passing expectation, which
+# recorded whatever the code did as acceptable and could never fail.
 reset
 write_file S1 "$WU3_PENDING"
 jq '. + {loop_id:"loop-new",revision:2}' "$(file_path S1)" >"$(file_path S1).tmp" && mv "$(file_path S1).tmp" "$(file_path S1)"
@@ -365,27 +382,140 @@ jq -n '{scope:"loop", session_id:"S1", loop_id:"loop-new", revision:0, verificat
     >"$(file_dir S1)/evals.json"
 stamp "$(file_dir S1)/evals.json"
 out=$(run "$(payload S1 coderails:loop-worker)")
-if is_denied "$out"; then
-    check "FROZEN: prior-revision GRADED suite, same session+loop -> BLOCK" 0 0
-else
-    # Documented pre-existing boundary, not a FROZEN regression: this path is
-    # reached via the long-standing GO branch, which FROZEN did not touch.
-    check "FROZEN: prior-revision GRADED suite allowed via pre-existing GO path (revision unchecked at dispatch)" "" "$out"
-fi
+check "prior-revision GRADED suite, same session+loop -> allow (loop-state.md:77)" "" "$out"
 
-# The FROZEN-specific half: an UNGRADED prior-revision suite. This is the one
-# FROZEN itself could newly admit, so it is asserted directly.
 reset
 write_file S1 "$WU3_PENDING"
 jq '. + {loop_id:"loop-new",revision:2}' "$(file_path S1)" >"$(file_path S1).tmp" && mv "$(file_path S1).tmp" "$(file_path S1)"
 frozen_evals S1 "$P0_PENDING" 2 "$JUST"
 jq '. + {revision:0}' "$(file_dir S1)/evals.json" >"$(file_dir S1)/e.tmp" && mv "$(file_dir S1)/e.tmp" "$(file_dir S1)/evals.json"
 out=$(run "$(payload S1 coderails:loop-worker)")
-if is_denied "$out"; then
-    check "FROZEN: prior-revision UNGRADED suite -> BLOCK" 0 0
-else
-    check "FROZEN: prior-revision UNGRADED suite allowed (revision unchecked at dispatch — pre-existing boundary)" "" "$out"
-fi
+check "prior-revision FROZEN suite, same session+loop -> allow (loop-state.md:77)" "" "$out"
+
+# 7c. The hollow-file forgery, pinned to the LITERAL shape found in review.
+# Six hand-typed keys, one eval carrying nothing but a priority: no id, mode,
+# cmd, negative_control, status, frozen_sha, head_sha or schema_version. This
+# passed an earlier revision of the FROZEN predicate and opened the dispatch
+# gate. The predicate floor is now validate_structure's freeze-time-satisfiable
+# subset, so a shape the project's own eval validator rejects cannot open it.
+reset
+write_file S1 "$WU3_PENDING"
+jq '. + {loop_id:"loop-new"}' "$(file_path S1)" >"$(file_path S1).tmp" && mv "$(file_path S1).tmp" "$(file_path S1)"
+printf '%s' '{"scope":"loop","session_id":"S1","loop_id":"loop-new","verification_level":2,"verification_justification":"x","evals":[{"priority":"P0"}]}' >"$(file_dir S1)/evals.json"
+out=$(run "$(payload S1 coderails:loop-worker)")
+is_denied "$out"
+check "FROZEN: hollow 6-key hand-typed file -> BLOCK (forgery floor)" 0 $?
+
+# 7d. Per-field forgery floor. Each case starts from a REAL frozen suite and
+# removes exactly ONE field, so each asserts its own named property rather
+# than tripping over a shared missing field.
+reset
+write_file S1 "$WU3_PENDING"
+jq '. + {loop_id:"loop-new"}' "$(file_path S1)" >"$(file_path S1).tmp" && mv "$(file_path S1).tmp" "$(file_path S1)"
+frozen_evals S1 "$P0_PENDING" 2 "$JUST"
+jq 'del(.frozen_sha)' "$(file_dir S1)/evals.json" >"$(file_dir S1)/e.tmp" && mv "$(file_dir S1)/e.tmp" "$(file_dir S1)/evals.json"
+out=$(run "$(payload S1 coderails:loop-worker)")
+is_denied "$out"
+check "FROZEN: frozen_sha absent -> BLOCK (no freeze-before-build evidence)" 0 $?
+
+reset
+write_file S1 "$WU3_PENDING"
+jq '. + {loop_id:"loop-new"}' "$(file_path S1)" >"$(file_path S1).tmp" && mv "$(file_path S1).tmp" "$(file_path S1)"
+frozen_evals S1 "$P0_PENDING" 2 "$JUST"
+jq '.evals[0].mode = "handwave"' "$(file_dir S1)/evals.json" >"$(file_dir S1)/e.tmp" && mv "$(file_dir S1)/e.tmp" "$(file_dir S1)/evals.json"
+out=$(run "$(payload S1 coderails:loop-worker)")
+is_denied "$out"
+check "FROZEN: unrecognised eval mode -> BLOCK" 0 $?
+
+reset
+write_file S1 "$WU3_PENDING"
+jq '. + {loop_id:"loop-new"}' "$(file_path S1)" >"$(file_path S1).tmp" && mv "$(file_path S1).tmp" "$(file_path S1)"
+frozen_evals S1 "$P0_PENDING" 2 "$JUST"
+jq '.evals[0].negative_control = "   "' "$(file_dir S1)/evals.json" >"$(file_dir S1)/e.tmp" && mv "$(file_dir S1)/e.tmp" "$(file_dir S1)/evals.json"
+out=$(run "$(payload S1 coderails:loop-worker)")
+is_denied "$out"
+check "FROZEN: scripted eval with blank negative_control -> BLOCK" 0 $?
+
+# An `agent-run` eval legitimately carries no cmd/negative_control (validator
+# check 3 scopes its demand to scripted evals, and the live suite has exactly
+# this shape). Guards against overtightening that would deny the real path.
+reset
+write_file S1 "$WU3_PENDING"
+jq '. + {loop_id:"loop-new"}' "$(file_path S1)" >"$(file_path S1).tmp" && mv "$(file_path S1).tmp" "$(file_path S1)"
+frozen_evals S1 '[{"id":"E1","priority":"P0","mode":"agent-run","status":"pending","cmd":"","negative_control":"","evidence":""}]' 2 "$JUST"
+out=$(run "$(payload S1 coderails:loop-worker)")
+check "FROZEN: agent-run P0 with empty cmd/negative_control -> allow (matches live suite)" "" "$out"
+
+# 7e. Ownership: a blank loop_id must NOT short-circuit the ownership check.
+# Previously `[ -n "$loop_id" ] && ...` meant a blank loop_id skipped
+# ownership entirely, so a leftover suite owned by a different session AND a
+# different loop authorised dispatch. loop_dir is keyed per SESSION, not per
+# loop, so a stale file in the same directory is the realistic case.
+reset
+write_file S1 "$WU3_PENDING"   # no loop_id, no graph -> blank loop_id at the check
+jq -n '{scope:"loop", session_id:"A-DIFFERENT-SESSION", loop_id:"a-different-loop",
+    verification_level:2, verification_justification:"leftover from an earlier loop",
+    frozen_sha:"aaaabbbbcccc", result:null, grading:null,
+    evals:[{id:"E1",priority:"P0",mode:"scripted",status:"pending",cmd:"bash run-a.sh",negative_control:"bash run-a-broken.sh",evidence:""}]}' \
+    >"$(file_dir S1)/evals.json"
+out=$(run "$(payload S1 coderails:loop-worker)")
+is_denied "$out"
+check "FROZEN: blank loop_id cannot skip the ownership check -> BLOCK" 0 $?
+case "$out" in
+*STALE*) : ;;
+*)
+    fails=$((fails + 1))
+    printf 'FAIL - blank loop_id + foreign session should deny as STALE, got: %s\n' "$out"
+    ;;
+esac
+
+# The other side of that fix: a blank loop_id is a legacy non-graph loop, NOT
+# by itself an ownership violation. When the suite belongs to THIS session it
+# must still dispatch — denying wholesale would break a legitimately graded
+# GO in such a loop. (Covered for the graded case by the GO/LEVEL0 fixtures
+# above, which have no loop_id; asserted here for the FROZEN path.)
+reset
+write_file S1 "$WU3_PENDING"   # no loop_id, no graph
+frozen_evals S1 "$P0_PENDING" 2 "$JUST"
+jq 'del(.loop_id)' "$(file_dir S1)/evals.json" >"$(file_dir S1)/e.tmp" && mv "$(file_dir S1)/e.tmp" "$(file_dir S1)/evals.json"
+out=$(run "$(payload S1 coderails:loop-worker)")
+check "FROZEN: blank loop_id, suite owned by THIS session -> allow (legacy non-graph loop)" "" "$out"
+
+# 7f. The UNGRADED discriminator, at dispatch level. `(.result == null) and
+# (.grading == null)` is the clause that DEFINES this state — mutation
+# testing found it caught by a single reader test with the whole dispatch
+# suite staying green. A partially-graded file must not open the gate: if
+# either field is present the suite is not ungraded, whatever else it looks
+# like.
+reset
+write_file S1 "$WU3_PENDING"
+jq '. + {loop_id:"loop-new"}' "$(file_path S1)" >"$(file_path S1).tmp" && mv "$(file_path S1).tmp" "$(file_path S1)"
+frozen_evals S1 "$P0_PENDING" 2 "$JUST"
+jq '.grading = {by:"post_evals.sh grade-loop", checksum:"deadbeef"}' "$(file_dir S1)/evals.json" >"$(file_dir S1)/e.tmp" && mv "$(file_dir S1)/e.tmp" "$(file_dir S1)/evals.json"
+out=$(run "$(payload S1 coderails:loop-worker)")
+is_denied "$out"
+check "FROZEN: .grading present (not ungraded) -> BLOCK" 0 $?
+
+reset
+write_file S1 "$WU3_PENDING"
+jq '. + {loop_id:"loop-new"}' "$(file_path S1)" >"$(file_path S1).tmp" && mv "$(file_path S1).tmp" "$(file_path S1)"
+frozen_evals S1 "$P0_PENDING" 2 "$JUST"
+jq '.result = "GO"' "$(file_dir S1)/evals.json" >"$(file_dir S1)/e.tmp" && mv "$(file_dir S1)/e.tmp" "$(file_dir S1)/evals.json"
+out=$(run "$(payload S1 coderails:loop-worker)")
+is_denied "$out"
+check "FROZEN: .result set without a grading stamp -> BLOCK (UNSTAMPED, never FROZEN)" 0 $?
+
+# 7g. The NUMERIC verification_level guard, at dispatch level. Also caught by
+# only one reader test under mutation. A JSON string "2" must not satisfy
+# `>= 1` via coercion — otherwise a hand-typed file picks its own level.
+reset
+write_file S1 "$WU3_PENDING"
+jq '. + {loop_id:"loop-new"}' "$(file_path S1)" >"$(file_path S1).tmp" && mv "$(file_path S1).tmp" "$(file_path S1)"
+frozen_evals S1 "$P0_PENDING" 2 "$JUST"
+jq '.verification_level = "2"' "$(file_dir S1)/evals.json" >"$(file_dir S1)/e.tmp" && mv "$(file_dir S1)/e.tmp" "$(file_dir S1)/evals.json"
+out=$(run "$(payload S1 coderails:loop-worker)")
+is_denied "$out"
+check "FROZEN: verification_level is the STRING \"2\" -> BLOCK (no coercion)" 0 $?
 
 # 8. REGRESSION — a genuinely graded GO suite is still allowed. FROZEN is an
 # ADDITIONAL accepted state, never a replacement for the graded one.
