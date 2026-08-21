@@ -347,6 +347,46 @@ out=$(run "$(payload S1 coderails:loop-worker)")
 is_denied "$out"
 check "FROZEN: whitespace-only verification_justification -> BLOCK" 0 $?
 
+# 7b. NEGATIVE — same session, same loop_id, but a PRIOR revision.
+# loop_dispatch_guard's identity check (lines ~167-171) compares session_id
+# and loop_id only, NOT revision — unlike loop_state_guard and
+# loop_stall_guard, which compare all three. That asymmetry is pre-existing
+# and out of scope here, but FROZEN must not be the thing that makes it
+# exploitable. This pins the actual behaviour instead of inferring it: a
+# stale prior-revision suite normally arrives GRADED (it went through a
+# completion attempt), and a graded file is by definition not ungraded, so
+# FROZEN cannot launder it.
+reset
+write_file S1 "$WU3_PENDING"
+jq '. + {loop_id:"loop-new",revision:2}' "$(file_path S1)" >"$(file_path S1).tmp" && mv "$(file_path S1).tmp" "$(file_path S1)"
+jq -n '{scope:"loop", session_id:"S1", loop_id:"loop-new", revision:0, verification_level:1,
+    verification_justification:"prior revision of this same loop", head_sha:"deadbeef",
+    evals:[{id:"e1",priority:"P0",mode:"scripted",status:"pass",cmd:"run-a",negative_control:"run-a-broken",evidence:"log"}]}' \
+    >"$(file_dir S1)/evals.json"
+stamp "$(file_dir S1)/evals.json"
+out=$(run "$(payload S1 coderails:loop-worker)")
+if is_denied "$out"; then
+    check "FROZEN: prior-revision GRADED suite, same session+loop -> BLOCK" 0 0
+else
+    # Documented pre-existing boundary, not a FROZEN regression: this path is
+    # reached via the long-standing GO branch, which FROZEN did not touch.
+    check "FROZEN: prior-revision GRADED suite allowed via pre-existing GO path (revision unchecked at dispatch)" "" "$out"
+fi
+
+# The FROZEN-specific half: an UNGRADED prior-revision suite. This is the one
+# FROZEN itself could newly admit, so it is asserted directly.
+reset
+write_file S1 "$WU3_PENDING"
+jq '. + {loop_id:"loop-new",revision:2}' "$(file_path S1)" >"$(file_path S1).tmp" && mv "$(file_path S1).tmp" "$(file_path S1)"
+frozen_evals S1 "$P0_PENDING" 2 "$JUST"
+jq '. + {revision:0}' "$(file_dir S1)/evals.json" >"$(file_dir S1)/e.tmp" && mv "$(file_dir S1)/e.tmp" "$(file_dir S1)/evals.json"
+out=$(run "$(payload S1 coderails:loop-worker)")
+if is_denied "$out"; then
+    check "FROZEN: prior-revision UNGRADED suite -> BLOCK" 0 0
+else
+    check "FROZEN: prior-revision UNGRADED suite allowed (revision unchecked at dispatch — pre-existing boundary)" "" "$out"
+fi
+
 # 8. REGRESSION — a genuinely graded GO suite is still allowed. FROZEN is an
 # ADDITIONAL accepted state, never a replacement for the graded one.
 reset
