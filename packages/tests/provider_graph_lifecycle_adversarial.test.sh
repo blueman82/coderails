@@ -7,6 +7,10 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 TMP="$(mktemp -d)"
 trap 'rm -r "$TMP"' EXIT
+export HOME="$TMP/home"
+# shellcheck source=packages/tests/lib/codex_transcript_fixture.sh
+source "$ROOT/packages/tests/lib/codex_transcript_fixture.sh"
+codex_fixture::init session-test
 FAILS=0
 PROVIDER=""
 CODEX_GRAPH="${CODEX_GRAPH_OVERRIDE:-$ROOT/packages/codex/skills/agentic-loop/scripts/graph.py}"

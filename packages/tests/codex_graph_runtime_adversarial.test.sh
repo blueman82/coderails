@@ -9,6 +9,10 @@ GRAPH="$PACKAGE/skills/agentic-loop/scripts/graph.py"
 HOOKS="$PACKAGE/hooks/scripts"
 TMP="$(mktemp -d)"
 trap 'rm -r "$TMP"' EXIT
+export HOME="$TMP/home"
+# shellcheck source=packages/tests/lib/codex_transcript_fixture.sh
+source "$ROOT/packages/tests/lib/codex_transcript_fixture.sh"
+codex_fixture::init session-test
 FAILS=0
 CONTROL_FAILED=0
 FAILED_CASES=()
@@ -77,6 +81,85 @@ command_rejected_unchanged() {
 		printf 'rejection changed graph state'
 		return 1
 	fi
+}
+
+reset_transcript() {
+	rm -r "$HOME/.codex/sessions"
+	codex_fixture::init session-test
+}
+
+record_payload() {
+	local state="$1" outcome="${2:-done}" wave
+	wave=$(jq -r '.graph.active_wave.id' "$state")
+	jq -cn --arg wave "$wave" --arg outcome "$outcome" \
+		'{wave_id:$wave,results:{A:{outcome:$outcome,evidence:"checked"}}}'
+}
+
+test_transcript_evidence_rejections() {
+	local state reference child parent call old_agent payload
+
+	reset_transcript
+	state="$TMP/evidence-missing.json"
+	write_graph "$state" "$(jq -cn --argjson a "$(node)" '{A:$a}')"
+	python3 "$GRAPH" begin-wave "$state" >/dev/null
+	payload=$(record_payload "$state")
+	command_rejected_unchanged "$state" python3 "$GRAPH" record-wave "$state" "$payload"
+
+	reset_transcript
+	state="$TMP/evidence-duplicate.json"
+	write_graph "$state" "$(jq -cn --argjson a "$(node)" '{A:$a}')"
+	python3 "$GRAPH" begin-wave "$state" >/dev/null
+	codex_fixture::append_attempt session-test loop_worker_41 1 wave-2 >/dev/null
+	codex_fixture::append_attempt session-test loop_worker_41 1 wave-2 >/dev/null
+	payload=$(record_payload "$state")
+	command_rejected_unchanged "$state" python3 "$GRAPH" record-wave "$state" "$payload"
+
+	reset_transcript
+	state="$TMP/evidence-foreign.json"
+	write_graph "$state" "$(jq -cn --argjson a "$(node)" '{A:$a}')"
+	python3 "$GRAPH" begin-wave "$state" >/dev/null
+	reference=$(codex_fixture::append_attempt session-test loop_worker_41 1 wave-2)
+	child="$(dirname "$(codex_fixture::parent session-test)")/rollout-fixture-$(jq -r '.agent_thread_id' <<<"$reference").jsonl"
+	jq -c 'if .type == "session_meta" then .payload.parent_thread_id="foreign" else . end' "$child" >"$child.tmp"
+	mv "$child.tmp" "$child"
+	payload=$(record_payload "$state")
+	command_rejected_unchanged "$state" python3 "$GRAPH" record-wave "$state" "$payload"
+
+	reset_transcript
+	state="$TMP/evidence-stale.json"
+	write_graph "$state" "$(jq -cn --argjson a "$(node)" '{A:$a}')"
+	codex_fixture::append_attempt session-test loop_worker_41 1 wave-2 >/dev/null
+	python3 "$GRAPH" begin-wave "$state" >/dev/null
+	payload=$(record_payload "$state")
+	command_rejected_unchanged "$state" python3 "$GRAPH" record-wave "$state" "$payload"
+
+	reset_transcript
+	state="$TMP/evidence-failed.json"
+	write_graph "$state" "$(jq -cn --argjson a "$(node)" '{A:$a}')"
+	python3 "$GRAPH" begin-wave "$state" >/dev/null
+	reference=$(codex_fixture::append_attempt session-test loop_worker_41 1 wave-2)
+	child="$(dirname "$(codex_fixture::parent session-test)")/rollout-fixture-$(jq -r '.agent_thread_id' <<<"$reference").jsonl"
+	jq -c 'if .payload.type == "task_complete" then .payload.type="turn_aborted" else . end' "$child" >"$child.tmp"
+	mv "$child.tmp" "$child"
+	payload=$(record_payload "$state")
+	command_rejected_unchanged "$state" python3 "$GRAPH" record-wave "$state" "$payload"
+
+	reset_transcript
+	state="$TMP/evidence-reused.json"
+	write_graph "$state" "$(jq -cn --argjson a "$(node)" '{A:$a}')"
+	python3 "$GRAPH" begin-wave "$state" >/dev/null
+	codex_fixture::append_attempt session-test loop_worker_41 1 wave-2 >/dev/null
+	python3 "$GRAPH" record-wave "$state" "$(record_payload "$state" failed)" >/dev/null
+	python3 "$GRAPH" begin-wave "$state" >/dev/null
+	reference=$(codex_fixture::append_attempt session-test loop_worker_41 2 wave-4)
+	old_agent=$(jq -r '.graph.nodes.A.evidence[] | select(type == "object") | .agent_thread_id' "$state")
+	call=$(jq -r '.spawn_call_id' <<<"$reference")
+	parent=$(codex_fixture::parent session-test)
+	jq -c --arg call "$call" --arg agent "$old_agent" \
+		'if .payload.item.id == $call then .payload.item.agent_thread_id=$agent else . end' "$parent" >"$parent.tmp"
+	mv "$parent.tmp" "$parent"
+	payload=$(record_payload "$state")
+	command_rejected_unchanged "$state" python3 "$GRAPH" record-wave "$state" "$payload"
 }
 
 install_state() {
@@ -223,6 +306,7 @@ mutation_control() {
 	fi
 	write_graph "$original" "$(jq -cn --argjson a "$(node)" '{A:$a}')"
 	python3 "$GRAPH" begin-wave "$original" >/dev/null
+	codex_fixture::append_wave "$original"
 	cp "$original" "$mutated"
 	wave=$(jq -r '.graph.active_wave.id' "$original")
 	envelope=$(jq -cn --arg wave "$wave" '{wave_id:$wave,results:{}}')
@@ -241,6 +325,7 @@ check 'completed graph denies graph-named spawn and allows unrelated spawn' test
 check 'stable loop evals survive begin-wave while completion stays revision-bound' test_stable_eval_identity
 check 'SessionStart includes the exact resolved progress.json path' test_bootstrap_exact_path
 check 'hard-stop waiver requires a final nonblank LOOP-STOP declaration' test_hard_stop_final_line
+check 'native transcript evidence rejects missing, duplicate, foreign, stale, failed, and reused records' test_transcript_evidence_rejections
 mutation_control
 
 if [[ "$FAILS" -eq 0 && "$CONTROL_FAILED" -eq 0 ]]; then
