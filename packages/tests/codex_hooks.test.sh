@@ -96,6 +96,10 @@ check "destructive Bash is denied" sh -c 'printf "%s" "$1" | jq -e ".hookSpecifi
 
 security_tmp=$(mktemp -d "${TMPDIR:-/tmp}/coderails-codex-hooks.XXXXXX")
 trap 'rm -rf "$security_tmp"' EXIT
+default_loop_root=$(HOME="$security_tmp/home" PLUGIN_DATA="$security_tmp/plugin-data" CODERAILS_AGENTIC_LOOP_DIR='' bash -c '. "$1"; hook::loop_root' sh "$HOOKS/scripts/lib/hook_common.sh")
+check "native loop root ignores plugin data" test "$default_loop_root" = "$security_tmp/home/.coderails/agentic-loop"
+override_loop_root=$(CODERAILS_AGENTIC_LOOP_DIR="$security_tmp/custom-loops" bash -c '. "$1"; hook::loop_root' sh "$HOOKS/scripts/lib/hook_common.sh")
+check "native loop root supports override" test "$override_loop_root" = "$security_tmp/custom-loops"
 test_repo="$security_tmp/repo"
 git init -q "$test_repo"
 git -C "$test_repo" symbolic-ref HEAD refs/heads/feature/native-config-probes

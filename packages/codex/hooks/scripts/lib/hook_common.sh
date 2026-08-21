@@ -42,7 +42,7 @@ hook::session_dir() {
 }
 
 hook::loop_root() {
-    printf '%s\n' "${CODERAILS_AGENTIC_LOOP_DIR:-$(hook::data_dir)/agentic-loop}"
+    printf '%s\n' "${CODERAILS_AGENTIC_LOOP_DIR:-$HOME/.coderails/agentic-loop}"
 }
 
 hook::loop_state_path() {
