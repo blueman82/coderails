@@ -9,6 +9,27 @@ export HOME="$TMP/home"
 # shellcheck source=packages/tests/lib/codex_transcript_fixture.sh
 source "$ROOT/packages/tests/lib/codex_transcript_fixture.sh"
 codex_fixture::init session-codex
+# Claude binds evidence to Agent tool_uses in its own session transcript, so
+# the Claude side needs a planted transcript exactly as Codex needs a planted
+# rollout. $HOME is already redirected into $TMP above, so this writes nowhere
+# real. Without it the structured-evidence assertion below could never run for
+# Claude and "parity" would be unfalsifiable.
+# shellcheck source=hooks/scripts/tests/lib/claude_transcript_fixture.sh
+source "$ROOT/hooks/scripts/tests/lib/claude_transcript_fixture.sh"
+CLAUDE_PROJECTS="$TMP/home/.claude/projects"
+claude_fixture_append_wave() { # state
+	local state="$1" session wave node
+	session=$(jq -r '.session_id // empty' "$state") || return 0
+	[[ -n "$session" ]] || return 0
+	wave=$(jq -r '.graph.active_wave.wave_id // empty' "$state")
+	[[ -n "$wave" ]] || return 0
+	[[ -f "$(claude_fixture::transcript "$CLAUDE_PROJECTS" "$session")" ]] ||
+		claude_fixture::init "$CLAUDE_PROJECTS" "$session"
+	while IFS= read -r node; do
+		[[ -n "$node" ]] || continue
+		claude_fixture::append_spawn "$CLAUDE_PROJECTS" "$session" "$node" "$wave" >/dev/null
+	done < <(jq -r '.graph.active_wave.nodes[]? // empty' "$state")
+}
 FAILS=0 CURRENT_PROVIDER=""
 pass() { printf 'ok   - %s: %s\n' "$CURRENT_PROVIDER" "$1"; }
 fail() {
@@ -81,6 +102,7 @@ provider_record_wave() {
     envelope=$(jq -cn --arg wave_id "$(jq -r --arg key "$wave_key" '.graph.active_wave[$key] // empty' "$state")" \
         --argjson results "$results" '{wave_id:$wave_id,results:$results}')
     if [[ "$CURRENT_PROVIDER" == "claude" ]]; then
+		claude_fixture_append_wave "$state"
         claude_graph_call graph_dispatch_record "$state" "$envelope"
     else
 		codex_fixture::append_wave "$state"
@@ -220,11 +242,23 @@ test_retry_and_hard_stop() {
             'true' "$(jq -r --arg provider "$CURRENT_PROVIDER" '.graph.nodes.A.status == "hard-stop" and
               .graph.nodes.A.retry.attempts == 2 and .graph.hard_stop != null and
               ([.graph.nodes.A.evidence[] | select(type == "string")] | length) == 2 and
-              ($provider != "codex" or ([.graph.nodes.A.evidence[] | select(type == "object")] as $refs |
+              # Both providers must bind each attempt to unforgeable transcript
+              # references. The LOGICAL schema is shared and asserted here for
+              # every provider: one structured ref per attempt, attempts 1 and
+              # 2, distinct waves, and provenance ids unique across attempts so
+              # no reference is ever reused. The ID FIELD NAMES are deliberately
+              # provider-native (PR #427 keeps the plugins independent), so the
+              # names are selected per provider rather than the assertion being
+              # skipped for anyone.
+              (([.graph.nodes.A.evidence[] | select(type == "object")] as $refs |
+                (if $provider == "codex"
+                 then ["spawn_call_id","agent_thread_id","task_complete_turn_id"]
+                 else ["tool_use_id","record_uuid"] end) as $id_fields |
+                ($refs | length) == 2 and
                 [$refs[].attempt] == [1,2] and ([$refs[].wave_id] | unique | length) == 2 and
-                ([$refs[].spawn_call_id] | unique | length) == 2 and
-                ([$refs[].agent_thread_id] | unique | length) == 2 and
-                ([$refs[].task_complete_turn_id] | unique | length) == 2))' "$state")"
+                ($id_fields | all(. as $f |
+                  ([$refs[] | .[$f]] | unique | length) == 2 and
+                  ([$refs[] | .[$f] | select(type == "string" and length > 0)] | length) == 2))))' "$state")"
     else
         fail "retry exhaustion becomes a hard-stop with evidence" "start or record failed"
     fi

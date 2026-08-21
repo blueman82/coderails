@@ -41,6 +41,8 @@ GRAPH_DISPATCH_ROOT="$(cd "$GRAPH_DISPATCH_DIR/../../.." && pwd)"
 . "$GRAPH_DISPATCH_DIR/graph_executor.sh"
 # shellcheck disable=SC1091  # path is resolved from this sourced file at runtime
 . "$GRAPH_DISPATCH_ROOT/scripts/lib/eval-artifact.sh"
+# shellcheck disable=SC1091  # path is resolved from this sourced file at runtime
+. "$GRAPH_DISPATCH_DIR/graph_evidence.sh"
 
 # Claude owns this graph and its dispatch targets. Ambiguous orchestration
 # nodes are deliberately absent so they fail closed as unresolved.
@@ -147,8 +149,16 @@ _graph_dispatch_graph_valid() {
     graph_executor_graph_valid "$progress"
 }
 
+# Records the wave's transcript cursor alongside its node set: the length of
+# this session's own Claude Code transcript at the moment the wave opens. Only
+# Agent spawns appearing AFTER that line may later bind as evidence for this
+# wave's nodes, so a spawn from an earlier wave cannot be replayed into it
+# (see graph_evidence.sh). The cursor is omitted — not faked — when no
+# transcript resolves (every existing test fixture, and any non-session
+# caller); a wave without a cursor still binds by node+wave id, it simply has
+# no lower bound to enforce.
 graph_dispatch_begin_wave() {
-    local progress="$1" ready_json
+    local progress="$1" ready_json session cursor cursor_json='null'
     [ -f "$progress" ] || return 1
     _graph_dispatch_graph_valid "$progress" || return 1
     jq -e '(.graph.hard_stop // null) == null
@@ -158,7 +168,14 @@ graph_dispatch_begin_wave() {
         jq -Rsc 'split("\n") | map(select(length > 0)) | sort') || return 1
     [ "$(printf '%s' "$ready_json" | jq 'length')" -gt 0 ] || return 1
 
-    als_atomic_progress_update "$progress" --argjson wave_nodes "$ready_json" '
+    session=$(jq -r '.session_id // empty' "$progress" 2>/dev/null)
+    if [ -n "$session" ] && cursor=$(graph_evidence_transcript "$session" |
+        { read -r t && graph_evidence_cursor "$t"; }); then
+        case "$cursor" in '' | *[!0-9]*) cursor_json='null' ;; *) cursor_json="$cursor" ;; esac
+    fi
+
+    als_atomic_progress_update "$progress" --argjson wave_nodes "$ready_json" \
+        --argjson transcript_cursor "$cursor_json" '
       (.graph.nodes) as $nodes
       | (.graph.edges) as $edges
       | (.graph.joins) as $joins
@@ -173,7 +190,8 @@ graph_dispatch_begin_wave() {
            | $id ] | sort) as $live_ready
       | if $live_ready != $wave_nodes then error("graph_dispatch: ready wave changed") else . end
       | .revision = ((.revision // 0) + 1)
-      | .graph.active_wave = {wave_id:("wave-" + (.revision | tostring)),revision:.revision,nodes:$wave_nodes}
+      | .graph.active_wave = ({wave_id:("wave-" + (.revision | tostring)),revision:.revision,nodes:$wave_nodes}
+          + (if $transcript_cursor == null then {} else {transcript_cursor:$transcript_cursor} end))
       | reduce $wave_nodes[] as $id (.;
           .graph.nodes[$id].status = "running"
           | .graph.nodes[$id].outcome = "running")
@@ -346,5 +364,15 @@ graph_dispatch_record() {
   ' "$progress")
     [ -n "$folded" ] || return 1
 
-    graph_executor_apply_wave "$progress" "$folded" "$wave_id"
+    # Provenance gate. Every node's evidence is bound to a real Agent tool_use
+    # in this session's own transcript before anything is written; a claim
+    # that cannot be bound aborts the WHOLE wave here, so durable state is
+    # never touched by a forged, replayed or reused reference. Runs after the
+    # retry fold so the bound reference carries the right attempt number, and
+    # before apply_wave so the rejection costs no state write.
+    local bound
+    bound=$(graph_evidence_bind_wave "$progress" "$folded") || return 1
+    [ -n "$bound" ] || return 1
+
+    graph_executor_apply_wave "$progress" "$bound" "$wave_id"
 }
