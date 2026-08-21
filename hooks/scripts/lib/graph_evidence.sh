@@ -251,5 +251,10 @@ graph_evidence_bind_wave() {
             end
         )
       | .out
-    ' "$progress" 2>/dev/null
+    ' "$progress"
+    # stderr is deliberately NOT suppressed: every denial above is raised via
+    # error() with a "graph_evidence:" message naming the node and the reason.
+    # Swallowing it would make a cursor denial indistinguishable from a wave-id
+    # mismatch, both to an operator reading a refused wave and to a test
+    # asserting that it denied for the right reason.
 }

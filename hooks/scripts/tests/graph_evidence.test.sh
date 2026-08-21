@@ -26,6 +26,27 @@ expect_eq() { # name expected actual
 	if [[ "$3" == "$2" ]]; then pass "$1"; else fail "$1" "expected=$2 actual=$3"; fi
 }
 
+# Assert a record is REFUSED *and* that it was refused for the stated reason.
+# Exit status alone cannot tell a cursor denial from a wave-id mismatch, so a
+# test named for one property would still pass if another property did the
+# rejecting. Matching the `graph_evidence:` message binds the test to the
+# mechanism it claims to cover.
+expect_denied() { # name reason_substring state envelope
+	local name="$1" reason="$2" state="$3" envelope="$4" before output
+	before="$state.before.$RANDOM"
+	cp "$state" "$before"
+	if output=$(graph_dispatch_record "$state" "$envelope" 2>&1); then
+		fail "$name" "record was ACCEPTED; expected refusal for: $reason"
+	elif ! printf '%s' "$output" | grep -q -- "$reason"; then
+		fail "$name" "refused, but not for '$reason'; got: $(printf '%s' "$output" | tr '\n' ' ')"
+	elif ! cmp -s "$before" "$state"; then
+		fail "$name" "refusal changed durable state"
+	else
+		pass "$name"
+	fi
+	rm -f "$before"
+}
+
 # A two-node in-progress graph with an active wave, optionally carrying a
 # transcript cursor. Mirrors the seed shape graph_dispatch_begin_wave writes.
 write_state() { # path cursor_json [attempts]
@@ -80,6 +101,53 @@ if record "$state" N1 "$GEN1" >/dev/null 2>&1; then
            | length == 1 and .[0].tool_use_id == $id' "$state")"
 else
 	fail "genuine own-node spawn after the cursor is accepted" "record refused a genuine claim"
+fi
+
+# --- NEGATIVE: the cursor itself, isolated ----------------------------------
+# The pre-cursor case above uses wave-0, so the wave_id mismatch alone rejects
+# it and the cursor never participates — deleting the `.line > $cursor` filter
+# leaves it green. This case is the only shape that isolates the lower bound:
+# SAME node, SAME wave_id as the wave under test, but recorded BEFORE the
+# cursor. Only the cursor can reject it.
+STALE_SESSION="session-fixture-stale"
+claude_fixture::init "$PROJECTS" "$STALE_SESSION"
+STALE=$(claude_fixture::append_spawn "$PROJECTS" "$STALE_SESSION" N1 wave-1 toolu_STALEWAVE01)
+STALE_CURSOR=$(claude_fixture::cursor "$PROJECTS" "$STALE_SESSION")
+claude_fixture::append_spawn "$PROJECTS" "$STALE_SESSION" N2 wave-1 toolu_STALESIB002 >/dev/null
+
+state="$TMP/cursor_isolated.json"
+jq -n --arg session "$STALE_SESSION" --argjson c "$STALE_CURSOR" '
+  {status:"running",outcome:"running",retry:{attempts:0,max:2},evidence:[]} as $n
+  | {schema_version:2,session_id:$session,loop_id:"loop-fixture",revision:1,
+     status:"in-progress",
+     graph:{nodes:{N1:$n,N2:$n},edges:[],joins:{},
+            active_wave:{wave_id:"wave-1",revision:1,nodes:["N1","N2"],transcript_cursor:$c},
+            hard_stop:null}}' >"$state"
+expect_denied "a same-wave spawn recorded before the cursor is refused" \
+	"cites an unbindable spawn" "$state" \
+	"$(jq -cn --arg id "$STALE" '{wave_id:"wave-1",results:{
+        N1:{outcome:"done",evidence:[{spawn_ref:$id}]},
+        N2:{outcome:"done",evidence:[]}}}')"
+
+# --- NEGATIVE: corrupt transcript with NOTHING cited ------------------------
+# The dangerous degradation: if a malformed transcript fell back to an empty
+# spawn list instead of denying, every node citing nothing would pass through
+# silently unbound — a whole wave recorded with zero provenance, and no other
+# test would notice. This is what pins the fail-closed line itself.
+state="$TMP/corrupt_uncited.json"
+write_state "$state" "$CURSOR"
+cp "$state" "$TMP/corrupt.before"
+mkdir -p "$TMP/corrupt/fixture-project"
+printf '{"type":"assistant"\ngarbage not json\n' >"$TMP/corrupt/fixture-project/$SESSION.jsonl"
+uncited=$(jq -cn '{wave_id:"wave-1",results:{
+    N1:{outcome:"done",evidence:[]},N2:{outcome:"done",evidence:[]}}}')
+if CLAUDE_PROJECTS_DIR="$TMP/corrupt" graph_dispatch_record "$state" "$uncited" >/dev/null 2>&1; then
+	fail "a corrupt transcript refuses even an uncited wave" \
+		"whole wave recorded with zero provenance from an unreadable transcript"
+else
+	pass "a corrupt transcript refuses even an uncited wave"
+	expect_eq "the refused corrupt-transcript wave left state untouched" 'same' \
+		"$(cmp -s "$TMP/corrupt.before" "$state" && echo same || echo changed)"
 fi
 
 # --- NEGATIVE: forgery — id appears nowhere in the transcript ---------------
