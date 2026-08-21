@@ -23,24 +23,37 @@ It prints the absolute path. Write the stub there with the Write tool (it create
   "schema_version": 2,
   "session_id": "<this session's id>",
   "loop_id": "<a unique non-blank id for this loop>",
-  "revision": 0,
+  "revision": 1,
   "status": "initialising",
   "created": "<ISO8601 timestamp>",
   "authorising_prompt_raw": "<the user's authorising prompt, verbatim — Phase -1 updates this if an improved prompt is adopted>",
   "completed_marker": <carry forward the prior file's completed_marker if one exists at this path, else 0>,
   "graph": {
-    "nodes": {"S-2": {"status": "running", "outcome": "running", "retry": {"attempts": 0, "max": 5}}},
+    "nodes": {"S-2": {"status": "running", "outcome": "running", "retry": {"attempts": 0, "max": 5}, "evidence": []}},
     "edges": [],
-    "joins": {}
+    "joins": {},
+    "active_wave": {"wave_id": "wave-1", "revision": 1, "nodes": ["S-2"]}
   }
 }
 ```
+
+**Copy the stub verbatim — every field above is load-bearing.** `graph_executor_graph_valid`
+(`hooks/scripts/lib/graph_executor.sh`) validates this shape, and the dispatch gate refuses every
+Agent dispatch against a graph that fails it. Three fields are easy to "tidy" into a rejection:
+- `revision` must be `1`, not `0` — the validator requires `revision > 0`, so a graph never has a
+  revision of zero. Stubbing `S-2` as running IS the first wave, which is revision `1`.
+- `S-2` carries an explicit `evidence: []`. An absent key reads as `null`, not as an empty array,
+  and every node must have an array.
+- `S-2` is `running` under the stub's own `active_wave`, and the two must agree exactly: the set of
+  running nodes must equal `active_wave.nodes`. Do not "fix" `S-2` to `pending` — that leaves an
+  `active_wave` naming a non-running node, which is equally invalid. `wave_id` is always
+  `"wave-" + revision`, so revision `1` means `"wave-1"`.
 
 The stub records `S-2` immediately; each later phase boundary adds its stable node and
 dependency edges in the same orchestrator-owned write. Do not create a second scheduler or let
 workers update `graph` directly.
 
-If a `progress.json` already exists at the path from an earlier loop in this session, read its `completed_marker` and carry it forward into the new stub (do not reset it to 0) — this is what lets the guard tell a genuinely-finished loop from a new one that re-armed it (see the teardown rule below). A re-armed NEW loop always gets a new `loop_id` and resets `revision` to `0`; a mid-loop recovery preserves both values. Never omit or reuse the prior loop's `loop_id` for a new graph.
+If a `progress.json` already exists at the path from an earlier loop in this session, read its `completed_marker` and carry it forward into the new stub (do not reset it to 0) — this is what lets the guard tell a genuinely-finished loop from a new one that re-armed it (see the teardown rule below). A re-armed NEW loop always gets a new `loop_id` and resets `revision` to `1` (the stub's own first wave — never `0`, which the graph validator rejects); a mid-loop recovery preserves both values. Never omit or reuse the prior loop's `loop_id` for a new graph.
 
 `loop_stop_counts` gets different treatment depending on the prior file's `status`, because it is HOOK-OWNED (see Context-window persistence below):
 - Prior file `status != "complete"` (mid-loop re-stub, e.g. a recovery after a restart): carry `loop_stop_counts` forward verbatim into the new stub, so a mid-loop recovery doesn't silently reset the count the `loop_stall_guard` hook has been maintaining. Carry `authorising_prompt_raw` forward verbatim too — a re-stub refilled from conversation memory instead of the prior file's value would silently drift the eval author's canonical anchor.
