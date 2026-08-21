@@ -2256,4 +2256,67 @@ reset; : > "$CLAUDE_DISCIPLINE_LOG"
 sec_t=$(mk_scalar_line_transcript 1)
 check "grace (shared) + security regression: scalar-line transcript, empty log -> still block" 2 "$(run x "$(payload "$sec_t" S1)")"
 
+# ── FROZEN blocks completion HERE TOO (the second completion gate) ──────────
+# The safety argument for FROZEN is "it opens DISPATCH, not completion" — and
+# there are TWO completion gates. loop_state_guard has its own case for this;
+# without this block, loop_stall_guard's half of that claim rested on reading
+# the code rather than running it.
+#
+# Asserts the FROZEN-SPECIFIC stderr as well as exit 2, deliberately: the
+# FROZEN arm and the generic fail-closed default BOTH exit 2, so the message
+# is the arm's only behavioural difference. An exit-code-only assertion stays
+# green if the arm is deleted.
+run_err_sg() { echo "$2" | bash "$GUARD" 2>&1 >/dev/null; }
+
+reset
+d=$(file_dir S1); mkdir -p "$d"
+# A completed graph, so every gate BEFORE the evals check passes and the
+# evals result is what actually decides the outcome.
+jq -n '{schema_version:1, status:"in-progress", session_id:"S1", completed_marker:0,
+    loop_id:"loop-frozen", revision:3,
+    work_units:{U1:{status:"done"},U2:{status:"done"},U3:{status:"done"}},
+    graph:{nodes:{A:{status:"done"}}, edges:[], joins:{}, active_wave:null, hard_stop:null}}' \
+    >"$d/progress.json"
+# A genuine frozen-but-ungraded suite: exactly the state a loop is in while
+# still building, and exactly what authorised its dispatch.
+jq -n '{schema_version:1, scope:"loop", session_id:"S1", loop_id:"loop-frozen", revision:3,
+    verification_level:2, verification_justification:"3 work-units in the roster",
+    frozen_at:"2026-08-21T00:00:00Z", frozen_sha:"aaaabbbbcccc", head_sha:null,
+    amendments:[], result:null, grading:null,
+    evals:[{id:"E1",priority:"P0",mode:"scripted",status:"pending",
+            cmd:"bash run-a.sh",negative_control:"bash run-a-broken.sh",evidence:""}]}' \
+    >"$d/evals.json"
+# Satisfy the gates that run BEFORE the evals check (retro, work-units,
+# proofs) so the evals result is genuinely what decides the outcome — not a
+# missing retro.json standing in for it. Without this the exit-2 assertion
+# would pass for an unintended reason.
+write_retro S1 '{"schema_version":1,"lessons":[]}'
+frozen_t=$(mk_transcript 1 "LOOP-STOP: complete — all PRs merged")
+check "FROZEN suite still BLOCKS a complete declaration at loop_stall_guard (exit 2)" \
+    2 "$(run x "$(payload "$frozen_t" S1)")"
+frozen_err=$(run_err_sg x "$(payload "$frozen_t" S1)")
+case "$frozen_err" in
+*"loop evals are FROZEN"*) : ;;
+*)
+    fails=$((fails + 1))
+    printf 'FAIL - stall-guard FROZEN stderr should name the FROZEN state, got: %s\n' "$frozen_err"
+    ;;
+esac
+# The clarifying line is the whole point of the arm: "evals are FROZEN" alone
+# reads like a pass to someone seeing it at a stop.
+case "$frozen_err" in
+*"authorised dispatch, not completion"*) : ;;
+*)
+    fails=$((fails + 1))
+    printf 'FAIL - stall-guard FROZEN stderr missing the dispatch-vs-completion clarification, got: %s\n' "$frozen_err"
+    ;;
+esac
+case "$frozen_err" in
+*"grade-loop"*) : ;;
+*)
+    fails=$((fails + 1))
+    printf 'FAIL - stall-guard FROZEN stderr should point at grade-loop, got: %s\n' "$frozen_err"
+    ;;
+esac
+
 [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails)"; exit 1; }

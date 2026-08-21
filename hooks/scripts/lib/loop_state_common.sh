@@ -608,8 +608,76 @@ als_read_work_units() {
   fi
 }
 
+# als_evals_are_frozen <evals_json_path>
+# Exit 0 iff the file is a FROZEN pre-build suite. The floor is deliberately
+# post_evals::validate_structure's own freeze-time-satisfiable subset — the
+# checks a REAL /coderails:task-evals freeze already passes — so this state
+# can never be opened by a shape the project's own eval validator would
+# reject. A hand-typed file with only {scope, session_id, loop_id,
+# verification_level, verification_justification, evals:[{priority:"P0"}]}
+# must NOT read FROZEN: that is six keys of forgery, and the state it would
+# open is a dispatch gate.
+#
+# Required, and why each is freeze-time-honest:
+#   verification_level  NUMBER >= 1 (level 0 has its own state, via a grade)
+#   .result/.grading    both absent/null — the UNGRADED discriminator
+#   frozen_sha          non-blank. THE freeze-before-build field, and the only
+#                       one that evidences the property this state is named
+#                       after. validate_freeze (check 8) skips a blank one at
+#                       loop scope, so requiring it here is a deliberate
+#                       tightening BEYOND the validator, not a mirror of it.
+#   .evals              ARRAY with >= 1 P0 (validator check 7)
+#   per eval            non-blank .id and .mode in {scripted, agent-run}
+#                       (validator's mode check) — applied to EVERY eval,
+#                       matching the validator's own unfiltered `.evals[]?`
+#   scripted evals      additionally non-blank .cmd and .negative_control
+#                       (validator check 3, which likewise selects only
+#                       `.mode == "scripted"`)
+#
+# NOT required, and this is load-bearing rather than an oversight:
+#   head_sha   Validator check 6 demands it non-blank at loop scope, but that
+#              is a GRADE-time field: it records which commit was graded, and
+#              at freeze time nothing has been graded. The real live suite
+#              carries `"head_sha": null`. Requiring it here would deny every
+#              genuine Phase 2.7c freeze — verified against the live loop dir,
+#              which is exactly what the mandatory real-suite check is for.
+#   evidence   Validator check 5 demands non-empty evidence per P0. That is
+#              THE check a freeze cannot satisfy (every P0 is `pending` with
+#              empty evidence) and the whole reason this state exists.
+#   cmd/negative_control on `agent-run` evals — the live suite has P0s at
+#              mode "agent-run" with both empty, and validator check 3 scopes
+#              its demand to scripted evals for the same reason.
+#
+# So the floor is precisely "validate_structure minus check 5, minus check 6's
+# head_sha clause, plus a mandatory frozen_sha".
+#
+# The discriminator for ungraded-ness is deliberately NOT per-eval "pending"
+# status. Keying off pending would make the state depend on build progress:
+# a half-run suite (some pass, some pending) would read FROZEN and re-open
+# the dispatch gate mid-build. Grading provenance is the honest signal —
+# post_evals.sh grade-loop ALWAYS writes both .result and .grading, so
+# "neither present" is precisely "grade-loop has not run".
+#
+# One jq program, one `jq -e` exit code: no bash string comparison against a
+# jq capture, which is how a wrong-shape file silently reads as empty and
+# then as a pass. Malformed JSON exits non-zero here and stays NO-GO.
+als_evals_are_frozen() {
+  jq -e '
+    def nonblank($s): ($s // "") | type == "string" and (gsub("^\\s+|\\s+$"; "") | length) > 0;
+    (.verification_level | type) == "number" and .verification_level >= 1
+    and (.result == null) and (.grading == null)
+    and nonblank(.frozen_sha)
+    and (.evals | type) == "array"
+    and ([.evals[] | select(.priority == "P0")] | length) >= 1
+    and ([.evals[] | select((nonblank(.id) and (.mode | IN("scripted","agent-run"))) | not)] | length) == 0
+    and ([.evals[] | select(.mode == "scripted")
+                   | select((nonblank(.cmd) and nonblank(.negative_control)) | not)] | length) == 0
+  ' "$1" >/dev/null 2>&1
+}
+
 # Read the loop-scope evals verdict from a sibling evals.json into global
-# ALS_LOOP_EVALS_RESULT: GO | VERIFICATION_LEVEL0 | NO-GO | UNJUSTIFIED | ABSENT. ABSENT
+# ALS_LOOP_EVALS_RESULT: GO | VERIFICATION_LEVEL0 | FROZEN | NO-GO | UNJUSTIFIED |
+# UNSTAMPED | ABSENT. ABSENT
 # covers no file, malformed JSON, or a non-"loop" scope (a stray pr-scope file
 # must never satisfy the loop gate). Sibling to als_read_work_units for the
 # same reason.
@@ -641,6 +709,23 @@ als_read_work_units() {
 # rejection). Fail-closed: if eval-artifact.sh can't be sourced or
 # grading_checksum can't be called, treat that exactly like a missing stamp
 # (UNSTAMPED), never fall through to GO/VERIFICATION_LEVEL0.
+#
+# FROZEN: a PRE-BUILD state, carved out of the final `else` that would
+# otherwise read NO-GO. It means "a real loop-scope suite was frozen before
+# the build" — see als_evals_are_frozen for the exact predicate. It exists
+# because a grade cannot exist pre-build: Phase 2.7c freezes evals while every
+# P0 is still `pending` with empty evidence, and post_evals.sh grade-loop
+# REFUSES to grade that file (validate_structure check 5). A dispatch gate
+# demanding GO therefore demanded a grade that by construction only exists
+# AFTER the work it was gating, so a >=3-work-unit loop could never dispatch
+# its first implementation worker.
+#
+# FROZEN is accepted at DISPATCH time only (loop_dispatch_guard). Every
+# COMPLETION-time caller — loop_state_guard, loop_stall_guard — must keep
+# accepting only GO/VERIFICATION_LEVEL0, so a frozen-but-ungraded suite still
+# blocks a `complete` declaration. Adding a state here widens nothing on its
+# own: both completion callers already route unknown states into a
+# fail-closed branch.
 als_read_loop_evals_result() {
   ALS_LOOP_EVALS_RESULT="ABSENT"
   command -v jq >/dev/null 2>&1 || { als_log "hook=loop_state_guard evals=skipped reason=jq_missing"; return 0; }
@@ -657,6 +742,7 @@ als_read_loop_evals_result() {
   elif [ "$result" = "GO" ]; then ALS_LOOP_EVALS_RESULT="GO"
   elif [ "$result" = "NO-GO" ]; then ALS_LOOP_EVALS_RESULT="NO-GO"
   elif [ "$verification_level" = "0" ]; then ALS_LOOP_EVALS_RESULT="VERIFICATION_LEVEL0"
+  elif als_evals_are_frozen "$f"; then ALS_LOOP_EVALS_RESULT="FROZEN"
   else ALS_LOOP_EVALS_RESULT="NO-GO"
   fi
 

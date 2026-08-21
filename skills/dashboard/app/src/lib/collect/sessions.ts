@@ -190,6 +190,15 @@ function readLastUpdatedMs(record: Record<string, unknown>, progressPath: string
 // recomputation here, unlike the hook, since this is a display surface
 // (KISS); a status edited after grading without re-stamping will still show
 // frozen here even though the hook would demote it to UNSTAMPED.
+//
+// KNOWN, DELIBERATE DIVERGENCE: the bash reader also returns FROZEN — a
+// frozen-but-ungraded suite (non-blank `frozen_sha`, no `.result`/`.grading`,
+// >=1 P0) that `loop_dispatch_guard.sh` accepts at DISPATCH time, because a
+// grade cannot exist before the build it gates. This mirror does not
+// implement FROZEN, so a genuinely frozen pre-build suite shows here as NOT
+// frozen. That is display-only and fail-safe in the conservative direction
+// (it under-reports, never over-reports). Not replicated because this surface
+// is descriptive, not a gate, and the bash reader is the SSOT.
 function readEvalsFrozen(loopDir: string): boolean {
   const data = readJson(join(loopDir, "evals.json"));
   if (!isRecord(data)) return false;

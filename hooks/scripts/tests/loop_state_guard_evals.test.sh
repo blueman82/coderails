@@ -486,4 +486,162 @@ reset; T=$(mk_transcript 1); write_file complete S1 1 S1 "$WU3"
 jq -n '{scope:"loop", result:"GO", verification_level:1, verification_justification:"hand-written, never graded"}' > "$(file_dir S1)/evals.json"
 check "stop_hook_active:true short-circuits UNSTAMPED -> allow" 0 "$(run x "$(payload "$T" S1 true)")"
 
+# ── FROZEN: the pre-build state, and what it must NOT open ──────────────────
+# FROZEN names a suite that is frozen, structurally valid, loop-scoped,
+# justified, has >=1 P0, and is UNGRADED (no .result, no .grading). It exists
+# so loop_dispatch_guard can gate on "a real suite was frozen before build"
+# instead of on a completion-time grade that cannot exist pre-build. It is a
+# DISPATCH-time state only: every completion-time caller must keep refusing it.
+
+# Reader level: the exact shape a real Phase 2.7c freeze produces.
+d=$(mktemp -d "$TMP/loopdir.XXXX")
+jq -n '{schema_version:1, scope:"loop", verification_level:2, verification_justification:"3 work-units in the roster",
+  frozen_at:"2026-08-21T00:00:00Z", frozen_sha:"aaaabbbbcccc", head_sha:null, amendments:[], result:null, grading:null,
+  evals:[{id:"E1",priority:"P0",mode:"scripted",status:"pending",cmd:"bash run-a.sh",negative_control:"bash run-a-broken.sh",evidence:""}]}' > "$d/evals.json"
+als_read_loop_evals_result "$d"
+check "FROZEN: ungraded loop suite, level 2, 1 pending P0 -> FROZEN" "FROZEN" "$ALS_LOOP_EVALS_RESULT"
+
+# The forgery floor. FROZEN's predicate is validate_structure's
+# freeze-time-satisfiable subset, so a shape the project's own eval validator
+# would reject must never read FROZEN. This is the LITERAL hollow file found
+# in review: six hand-typed keys, one eval carrying nothing but a priority.
+d=$(mktemp -d "$TMP/loopdir.XXXX")
+printf '%s' '{"scope":"loop","session_id":"S1","loop_id":"loop-new","verification_level":2,"verification_justification":"x","evals":[{"priority":"P0"}]}' > "$d/evals.json"
+als_read_loop_evals_result "$d"
+check "FROZEN: hollow 6-key hand-typed file -> NO-GO (forgery floor)" "NO-GO" "$ALS_LOOP_EVALS_RESULT"
+
+# frozen_sha is THE freeze-before-build field — the only evidence of the
+# property this state is named after. validate_freeze (check 8) skips a blank
+# one at loop scope, so requiring it here is a deliberate tightening beyond
+# the validator.
+d=$(mktemp -d "$TMP/loopdir.XXXX")
+jq -n '{schema_version:1, scope:"loop", verification_level:2, verification_justification:"probe", head_sha:null, result:null, grading:null,
+  evals:[{id:"E1",priority:"P0",mode:"scripted",status:"pending",cmd:"bash run-a.sh",negative_control:"bash run-a-broken.sh",evidence:""}]}' > "$d/evals.json"
+als_read_loop_evals_result "$d"
+check "FROZEN: frozen_sha absent -> NO-GO (no freeze-before-build evidence)" "NO-GO" "$ALS_LOOP_EVALS_RESULT"
+
+# head_sha must NOT be required: it is a GRADE-time field recording which
+# commit was graded, and the REAL live suite carries "head_sha": null.
+# Requiring it would deny every genuine Phase 2.7c freeze. This fixture is the
+# live shape; if it ever reads NO-GO the predicate has overtightened.
+d=$(mktemp -d "$TMP/loopdir.XXXX")
+jq -n '{schema_version:1, scope:"loop", verification_level:2, verification_justification:"probe",
+  frozen_at:"2026-08-21T00:00:00Z", frozen_sha:"aaaabbbbcccc", head_sha:null, amendments:[], result:null, grading:null,
+  evals:[{id:"E1",priority:"P0",mode:"scripted",status:"pending",cmd:"bash run-a.sh",negative_control:"bash run-a-broken.sh",evidence:""}]}' > "$d/evals.json"
+als_read_loop_evals_result "$d"
+check "FROZEN: head_sha null (the live shape) -> FROZEN (grade-time field, not freeze-time)" "FROZEN" "$ALS_LOOP_EVALS_RESULT"
+
+# An agent-run eval legitimately carries no cmd/negative_control — validator
+# check 3 scopes its demand to scripted evals, and the live suite has P0s of
+# exactly this shape.
+d=$(mktemp -d "$TMP/loopdir.XXXX")
+jq -n '{schema_version:1, scope:"loop", verification_level:2, verification_justification:"probe",
+  frozen_sha:"aaaabbbbcccc", head_sha:null, result:null, grading:null,
+  evals:[{id:"E1",priority:"P0",mode:"agent-run",status:"pending",cmd:"",negative_control:"",evidence:""}]}' > "$d/evals.json"
+als_read_loop_evals_result "$d"
+check "FROZEN: agent-run P0 with empty cmd/negative_control -> FROZEN (matches live suite)" "FROZEN" "$ALS_LOOP_EVALS_RESULT"
+
+# A scripted eval, by contrast, must carry both (validator check 3).
+d=$(mktemp -d "$TMP/loopdir.XXXX")
+jq -n '{schema_version:1, scope:"loop", verification_level:2, verification_justification:"probe",
+  frozen_sha:"aaaabbbbcccc", head_sha:null, result:null, grading:null,
+  evals:[{id:"E1",priority:"P0",mode:"scripted",status:"pending",cmd:"bash run-a.sh",negative_control:"   ",evidence:""}]}' > "$d/evals.json"
+als_read_loop_evals_result "$d"
+check "FROZEN: scripted eval with blank negative_control -> NO-GO" "NO-GO" "$ALS_LOOP_EVALS_RESULT"
+
+d=$(mktemp -d "$TMP/loopdir.XXXX")
+jq -n '{schema_version:1, scope:"loop", verification_level:2, verification_justification:"probe",
+  frozen_sha:"aaaabbbbcccc", head_sha:null, result:null, grading:null,
+  evals:[{id:"E1",priority:"P0",mode:"handwave",status:"pending",cmd:"bash run-a.sh",negative_control:"bash run-a-broken.sh",evidence:""}]}' > "$d/evals.json"
+als_read_loop_evals_result "$d"
+check "FROZEN: unrecognised eval mode -> NO-GO" "NO-GO" "$ALS_LOOP_EVALS_RESULT"
+
+# Zero P0s at level>=1 must stay NO-GO: the verification_level-0 exemption is
+# the ONLY path that may pass with no P0 evals, and it requires a real grade.
+d=$(mktemp -d "$TMP/loopdir.XXXX")
+jq -n '{scope:"loop", verification_level:2, verification_justification:"probe", evals:[]}' > "$d/evals.json"
+als_read_loop_evals_result "$d"
+check "FROZEN: ungraded level-2 suite with zero evals -> NO-GO (not FROZEN)" "NO-GO" "$ALS_LOOP_EVALS_RESULT"
+
+d=$(mktemp -d "$TMP/loopdir.XXXX")
+jq -n '{scope:"loop", verification_level:2, verification_justification:"probe",
+  evals:[{id:"E1",priority:"P1",mode:"scripted",status:"pending",cmd:"run-a",negative_control:"run-a-broken",evidence:""}]}' > "$d/evals.json"
+als_read_loop_evals_result "$d"
+check "FROZEN: ungraded level-2 suite with only P1 evals -> NO-GO (not FROZEN)" "NO-GO" "$ALS_LOOP_EVALS_RESULT"
+
+# .evals of the wrong TYPE must fail closed, not read as "some P0s present".
+# jq helpers in this repo silently return empty on wrong-shape JSON, so this
+# pins the type guard rather than trusting an empty result to mean "no".
+d=$(mktemp -d "$TMP/loopdir.XXXX")
+jq -n '{scope:"loop", verification_level:2, verification_justification:"probe", evals:{"E1":{priority:"P0"}}}' > "$d/evals.json"
+als_read_loop_evals_result "$d"
+check "FROZEN: .evals is an object, not an array -> NO-GO (fail closed)" "NO-GO" "$ALS_LOOP_EVALS_RESULT"
+
+# verification_level 0 must never read FROZEN — it has its own state, reached
+# only through a real grade. Two paths to one place with different rules is
+# exactly the widening this gate must not allow.
+d=$(mktemp -d "$TMP/loopdir.XXXX")
+jq -n '{scope:"loop", verification_level:0, verification_justification:"docs-only exemption",
+  evals:[{id:"E1",priority:"P0",mode:"scripted",status:"pending",cmd:"run-a",negative_control:"run-a-broken",evidence:""}]}' > "$d/evals.json"
+als_read_loop_evals_result "$d"
+check "FROZEN: verification_level 0 ungraded -> UNSTAMPED (never FROZEN)" "UNSTAMPED" "$ALS_LOOP_EVALS_RESULT"
+
+# A non-numeric verification_level cannot satisfy the >=1 precondition.
+d=$(mktemp -d "$TMP/loopdir.XXXX")
+jq -n '{scope:"loop", verification_level:"2", verification_justification:"probe",
+  evals:[{id:"E1",priority:"P0",mode:"scripted",status:"pending",cmd:"run-a",negative_control:"run-a-broken",evidence:""}]}' > "$d/evals.json"
+als_read_loop_evals_result "$d"
+check "FROZEN: verification_level is the STRING \"2\" -> NO-GO (numeric guard)" "NO-GO" "$ALS_LOOP_EVALS_RESULT"
+
+# An explicit NO-GO still wins even when everything else looks frozen: a
+# recorded failure is not an ungraded file.
+d=$(mktemp -d "$TMP/loopdir.XXXX")
+jq -n '{scope:"loop", result:"NO-GO", verification_level:2, verification_justification:"probe",
+  evals:[{id:"E1",priority:"P0",mode:"scripted",status:"pending",cmd:"run-a",negative_control:"run-a-broken",evidence:""}]}' > "$d/evals.json"
+als_read_loop_evals_result "$d"
+check "FROZEN: explicit result NO-GO with P0s present -> NO-GO (not FROZEN)" "NO-GO" "$ALS_LOOP_EVALS_RESULT"
+
+# A file carrying a grading stamp is not ungraded, whatever .result says.
+d=$(mktemp -d "$TMP/loopdir.XXXX")
+jq -n '{scope:"loop", verification_level:2, verification_justification:"probe", grading:{by:"post_evals.sh grade-loop",checksum:"deadbeef"},
+  evals:[{id:"E1",priority:"P0",mode:"scripted",status:"pending",cmd:"run-a",negative_control:"run-a-broken",evidence:""}]}' > "$d/evals.json"
+als_read_loop_evals_result "$d"
+check "FROZEN: .grading present but .result absent -> NO-GO (not ungraded)" "NO-GO" "$ALS_LOOP_EVALS_RESULT"
+
+# ── TEST 10 (the load-bearing one): FROZEN opens DISPATCH, never COMPLETION ──
+# This is what proves the dispatch gate was opened without opening the
+# completion gate. A frozen-but-ungraded suite is exactly the state a loop is
+# in while it is still building; declaring `complete` from there must still be
+# refused by loop_state_guard with exit 2.
+reset; T=$(mk_transcript 1); write_file complete S1 1 S1 "$WU3"
+jq -n '{schema_version:1, scope:"loop", verification_level:2, verification_justification:"3 work-units in the roster",
+  frozen_at:"2026-08-21T00:00:00Z", frozen_sha:"aaaabbbbcccc", head_sha:null, amendments:[], result:null, grading:null,
+  evals:[{id:"E1",priority:"P0",mode:"scripted",status:"pending",cmd:"bash run-a.sh",negative_control:"bash run-a-broken.sh",evidence:""}]}' > "$(file_dir S1)/evals.json"
+code=$(run x "$(payload "$T" S1)")
+err=$(run_err x "$(payload "$T" S1)")
+check "e2e TEST 10: FROZEN suite still BLOCKS a complete declaration (exit 2)" 2 "$code"
+# The generic unrecognised-result arm would tell the reader to "regenerate it
+# via /coderails:task-evals" — which would destroy a valid frozen suite. The
+# FROZEN arm must name grade-loop instead.
+case "$err" in
+  *"grade-loop"*) : ;;
+  *) fails=$((fails+1)); printf 'FAIL - FROZEN e2e stderr should point at grade-loop, got: %s\n' "$err" ;;
+esac
+# ...and must be the FROZEN arm's own message, not the generic fail-closed
+# default. Asserted POSITIVELY on a sentinel unique to the FROZEN arm rather
+# than negatively on the generic arm's wording: a negative match against a
+# literal phrase goes silently vacuous the moment that phrase is reworded,
+# passing because the string exists nowhere. This assertion can only pass if
+# the FROZEN arm actually produced the message.
+case "$err" in
+  *"is FROZEN but never graded"*) : ;;
+  *) fails=$((fails+1)); printf 'FAIL - FROZEN e2e stderr is not the FROZEN arm message: %s\n' "$err" ;;
+esac
+# The remediation must be "grade it", never "re-freeze it": re-freezing after
+# the build forfeits the freeze-before-build provenance.
+case "$err" in
+  *"Do NOT regenerate"*) : ;;
+  *) fails=$((fails+1)); printf 'FAIL - FROZEN e2e stderr does not warn against regenerating the suite: %s\n' "$err" ;;
+esac
+
 [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails)"; exit 1; }

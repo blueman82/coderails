@@ -164,23 +164,67 @@ fi
 loop_dir=$(dirname "$als_path")
 als_read_loop_evals_result "$loop_dir"
 loop_id=$(jq -r '.loop_id // ""' "$als_path" 2>/dev/null)
-if [ -n "$loop_id" ] && ! jq -e --arg session "$session_id" --arg loop "$loop_id" \
+if [ -z "$loop_id" ]; then
+    # Blank loop_id used to SHORT-CIRCUIT this entire condition
+    # (`[ -n "$loop_id" ] && ...`), so ownership went unchecked and a leftover
+    # evals.json owned by a different session authorised dispatch. The
+    # MISSING_IDENTITY arm at ~line 100 only fires when `.graph` is an object,
+    # so a non-graph loop reached here unguarded. loop_dir is keyed per
+    # SESSION, not per loop, so a stale suite in the same directory is the
+    # realistic case. Structural tightening in als_evals_are_frozen cannot
+    # cover it: frozen_sha, id, mode and negative_control are CONTENT fields,
+    # and a well-formed foreign suite satisfies every one of them.
+    #
+    # Check what IS checkable rather than denying wholesale. A blank loop_id
+    # is a legacy non-graph loop, not by itself an ownership violation, so
+    # denying outright would break a legitimately graded GO in such a loop.
+    #
+    # Scoped to a suite that ACTUALLY CLAIMS a session: only a non-null
+    # .session_id is compared. A legacy artifact predating session stamping
+    # has no .session_id to contradict, and demanding one here would newly
+    # reject files that every prior version of this guard accepted — the
+    # regression this branch exists to avoid. A suite that DOES name a
+    # session must name this one.
+    #
+    # HONEST RESIDUALS, neither closable here: (1) with no loop_id to compare
+    # against, a suite from a DIFFERENT loop in the SAME session still passes
+    # — inventing a loop_id would be worse; (2) a suite carrying no
+    # .session_id at all is unbindable by construction.
+    if jq -e '(.session_id | type) == "string"' "$loop_dir/evals.json" >/dev/null 2>&1 &&
+        ! jq -e --arg session "$session_id" '.session_id == $session' \
+            "$loop_dir/evals.json" >/dev/null 2>&1; then
+        ALS_LOOP_EVALS_RESULT="STALE"
+    fi
+elif ! jq -e --arg session "$session_id" --arg loop "$loop_id" \
     '.session_id == $session and .loop_id == $loop' \
     "$loop_dir/evals.json" >/dev/null 2>&1; then
+    # Binds session_id + loop_id ONLY, never revision — loop-state.md:77:
+    # "Dispatch evidence binds the stable session_id + loop_id, not revision,
+    # because beginning a wave advances the revision before dispatch."
+    # Adding revision here would re-create the deadlock in a new form: every
+    # wave start bumps the revision, so a frozen suite would invalidate
+    # itself on the first wave.
     ALS_LOOP_EVALS_RESULT="STALE"
 fi
 
+# FROZEN is accepted HERE and nowhere else. At dispatch time the only thing
+# that can honestly be checked is that a real loop-scope suite was frozen
+# before the build — not that it passed, which is a completion-time fact. The
+# completion-time callers (loop_state_guard, loop_stall_guard) still accept
+# only GO/VERIFICATION_LEVEL0, so this opens dispatch without opening merge.
 case "$ALS_LOOP_EVALS_RESULT" in
-GO | VERIFICATION_LEVEL0)
+GO | VERIFICATION_LEVEL0 | FROZEN)
     als_log "hook=loop_dispatch_guard session=$session_id subagent_type=$subagent_type work_units=$unit_count evals=$ALS_LOOP_EVALS_RESULT blocked=0"
     exit 0
     ;;
 esac
 
 als_log "hook=loop_dispatch_guard session=$session_id subagent_type=$subagent_type work_units=$unit_count evals=$ALS_LOOP_EVALS_RESULT blocked=1"
-reason="[loop-dispatch-guard] Blocked: this loop's work_units roster has $unit_count entries (>=3), but no frozen, graded loop-scope evals.json was found at:
+reason="[loop-dispatch-guard] Blocked: this loop's work_units roster has $unit_count entries (>=3), but no frozen loop-scope evals.json was found at:
   $loop_dir/evals.json
-Phase 2.7c (freeze loop-scope evals via /coderails:task-evals) must run and be graded GO (or a justified verification_level-0 exemption) before any implementation-unit (coderails:loop-worker) worker is dispatched in a >=3-unit loop — evals must be frozen BEFORE build, not checked only at loop completion. Current evals.json state: $ALS_LOOP_EVALS_RESULT."
+Phase 2.7c (freeze loop-scope evals via /coderails:task-evals) must run before any implementation-unit (coderails:loop-worker) worker is dispatched in a >=3-unit loop — evals must be frozen BEFORE build, not checked only at loop completion. Current evals.json state: $ALS_LOOP_EVALS_RESULT.
+
+At dispatch time this gate requires a FROZEN suite, NOT a graded one: a loop-scope evals.json owned by this session and loop, with a non-blank verification_justification, .evals an array holding at least one P0, and ungraded (no .result, no .grading). Grading is loop-END work (Phase 13, post_evals.sh grade-loop) — do NOT run grade-loop now to satisfy this gate; at freeze time every P0 is still 'pending' with empty evidence and grade-loop will correctly refuse the file. A genuinely graded GO, or a graded verification_level-0 exemption, also passes here."
 jq -n --arg r "$reason" '{
   hookSpecificOutput: {
     hookEventName: "PreToolUse",
