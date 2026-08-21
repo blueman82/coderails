@@ -609,7 +609,8 @@ als_read_work_units() {
 }
 
 # Read the loop-scope evals verdict from a sibling evals.json into global
-# ALS_LOOP_EVALS_RESULT: GO | VERIFICATION_LEVEL0 | NO-GO | UNJUSTIFIED | ABSENT. ABSENT
+# ALS_LOOP_EVALS_RESULT: GO | VERIFICATION_LEVEL0 | FROZEN | NO-GO | UNJUSTIFIED |
+# UNSTAMPED | ABSENT. ABSENT
 # covers no file, malformed JSON, or a non-"loop" scope (a stray pr-scope file
 # must never satisfy the loop gate). Sibling to als_read_work_units for the
 # same reason.
@@ -641,6 +642,47 @@ als_read_work_units() {
 # rejection). Fail-closed: if eval-artifact.sh can't be sourced or
 # grading_checksum can't be called, treat that exactly like a missing stamp
 # (UNSTAMPED), never fall through to GO/VERIFICATION_LEVEL0.
+#
+# FROZEN: a PRE-BUILD state, carved out of the final `else` that would
+# otherwise read NO-GO. It means "a real loop-scope suite was frozen before
+# the build" — see als_evals_are_frozen for the exact predicate. It exists
+# because a grade cannot exist pre-build: Phase 2.7c freezes evals while every
+# P0 is still `pending` with empty evidence, and post_evals.sh grade-loop
+# REFUSES to grade that file (validate_structure check 5). A dispatch gate
+# demanding GO therefore demanded a grade that by construction only exists
+# AFTER the work it was gating, so a >=3-work-unit loop could never dispatch
+# its first implementation worker.
+#
+# FROZEN is accepted at DISPATCH time only (loop_dispatch_guard). Every
+# COMPLETION-time caller — loop_state_guard, loop_stall_guard — must keep
+# accepting only GO/VERIFICATION_LEVEL0, so a frozen-but-ungraded suite still
+# blocks a `complete` declaration. Adding a state here widens nothing on its
+# own: both completion callers already route unknown states into a
+# fail-closed branch.
+# als_evals_are_frozen <evals_json_path>
+# Exit 0 iff the file is a FROZEN pre-build suite: verification_level is a
+# NUMBER >= 1, .evals is an ARRAY holding at least one .priority=="P0" entry,
+# and the file is UNGRADED — both .result and .grading absent or null.
+#
+# The discriminator is ungraded-ness, deliberately NOT per-eval "pending"
+# status. Keying off pending would make the state depend on build progress:
+# a half-run suite (some pass, some pending) would read FROZEN and re-open
+# the dispatch gate mid-build. Grading provenance is the honest signal —
+# post_evals.sh grade-loop ALWAYS writes both .result and .grading, so
+# "neither present" is precisely "grade-loop has not run".
+#
+# One jq program, one `jq -e` exit code: no bash string comparison against a
+# jq capture, which is how a wrong-shape file silently reads as empty and
+# then as a pass. Malformed JSON exits non-zero here and stays NO-GO.
+als_evals_are_frozen() {
+  jq -e '
+    (.verification_level | type) == "number" and .verification_level >= 1
+    and (.result == null) and (.grading == null)
+    and (.evals | type) == "array"
+    and ([.evals[] | select(.priority == "P0")] | length) >= 1
+  ' "$1" >/dev/null 2>&1
+}
+
 als_read_loop_evals_result() {
   ALS_LOOP_EVALS_RESULT="ABSENT"
   command -v jq >/dev/null 2>&1 || { als_log "hook=loop_state_guard evals=skipped reason=jq_missing"; return 0; }
@@ -657,6 +699,7 @@ als_read_loop_evals_result() {
   elif [ "$result" = "GO" ]; then ALS_LOOP_EVALS_RESULT="GO"
   elif [ "$result" = "NO-GO" ]; then ALS_LOOP_EVALS_RESULT="NO-GO"
   elif [ "$verification_level" = "0" ]; then ALS_LOOP_EVALS_RESULT="VERIFICATION_LEVEL0"
+  elif als_evals_are_frozen "$f"; then ALS_LOOP_EVALS_RESULT="FROZEN"
   else ALS_LOOP_EVALS_RESULT="NO-GO"
   fi
 

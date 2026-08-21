@@ -244,6 +244,129 @@ out=$(run "$(jq -cn --arg session S1 --arg cwd "$CWD" '{tool_name:"Bash",session
     tool_input:{command:"scripts/sandbox/spawn-sandboxed-worker.sh worktree prompt model"}}')")
 check "sandbox wrapper stays outside graph ownership -> allow" "" "$out"
 
+# ── FROZEN: the pre-build state ─────────────────────────────────────────────
+# Phase 2.7c freezes loop-scope evals BEFORE the build. At that instant every
+# P0 is "pending" with empty evidence, so post_evals.sh grade-loop REFUSES to
+# grade the file (validate_structure check 5: "P0 eval <id> has empty
+# evidence"). A dispatch gate that demanded GO therefore demanded a grade that
+# by construction only exists AFTER the work it was gating — a >=3-unit loop
+# could never dispatch its first implementation worker. FROZEN is the honest
+# pre-build state: a frozen, structurally-valid, session-bound, loop-scope,
+# ungraded suite with at least one P0.
+#
+# frozen_evals: writes an ungraded loop-scope suite for session $1 into its
+# loop dir. $2 = evals array JSON, $3 = verification_level, $4 = justification.
+frozen_evals() {
+    jq -n --argjson evals "$2" --argjson lvl "$3" --arg j "$4" --arg s "$1" \
+        '{scope:"loop", session_id:$s, loop_id:"loop-new", revision:0,
+          verification_level:$lvl, verification_justification:$j,
+          head_sha:"deadbeef", evals:$evals}' >"$(file_dir "$1")/evals.json"
+}
+P0_PENDING='[{"id":"E1","priority":"P0","mode":"scripted","status":"pending","cmd":"run-a","negative_control":"run-a-broken","evidence":""}]'
+JUST="verification_level-2 predicate fired: 3 work-units in the roster"
+
+# 1. POSITIVE — frozen, valid, ungraded, session-matched, >=1 P0 -> ALLOW.
+reset
+write_file S1 "$WU3_PENDING"
+jq '. + {loop_id:"loop-new"}' "$(file_path S1)" >"$(file_path S1).tmp" && mv "$(file_path S1).tmp" "$(file_path S1)"
+frozen_evals S1 "$P0_PENDING" 2 "$JUST"
+out=$(run "$(payload S1 coderails:loop-worker)")
+check "FROZEN: 3-unit roster, frozen ungraded suite with 1 pending P0 -> allow" "" "$out"
+
+# 2. NEGATIVE — evals.json absent entirely -> DENY.
+reset
+write_file S1 "$WU3_PENDING"
+jq '. + {loop_id:"loop-new"}' "$(file_path S1)" >"$(file_path S1).tmp" && mv "$(file_path S1).tmp" "$(file_path S1)"
+out=$(run "$(payload S1 coderails:loop-worker)")
+is_denied "$out"
+check "FROZEN: evals.json absent -> BLOCK" 0 $?
+
+# 3. NEGATIVE — evals.json present but unparseable -> DENY (never reads FROZEN).
+reset
+write_file S1 "$WU3_PENDING"
+jq '. + {loop_id:"loop-new"}' "$(file_path S1)" >"$(file_path S1).tmp" && mv "$(file_path S1).tmp" "$(file_path S1)"
+printf '{ this is not json' >"$(file_dir S1)/evals.json"
+out=$(run "$(payload S1 coderails:loop-worker)")
+is_denied "$out"
+check "FROZEN: malformed evals.json -> BLOCK" 0 $?
+
+# 4. NEGATIVE — suite belongs to a different session / a different loop.
+reset
+write_file S1 "$WU3_PENDING"
+jq '. + {loop_id:"loop-new"}' "$(file_path S1)" >"$(file_path S1).tmp" && mv "$(file_path S1).tmp" "$(file_path S1)"
+frozen_evals S1 "$P0_PENDING" 2 "$JUST"
+jq '. + {session_id:"OTHER"}' "$(file_dir S1)/evals.json" >"$(file_dir S1)/e.tmp" && mv "$(file_dir S1)/e.tmp" "$(file_dir S1)/evals.json"
+out=$(run "$(payload S1 coderails:loop-worker)")
+is_denied "$out"
+check "FROZEN: frozen suite owned by another session_id -> BLOCK" 0 $?
+
+reset
+write_file S1 "$WU3_PENDING"
+jq '. + {loop_id:"loop-new"}' "$(file_path S1)" >"$(file_path S1).tmp" && mv "$(file_path S1).tmp" "$(file_path S1)"
+frozen_evals S1 "$P0_PENDING" 2 "$JUST"
+jq '. + {loop_id:"loop-old"}' "$(file_dir S1)/evals.json" >"$(file_dir S1)/e.tmp" && mv "$(file_dir S1)/e.tmp" "$(file_dir S1)/evals.json"
+out=$(run "$(payload S1 coderails:loop-worker)")
+is_denied "$out"
+check "FROZEN: frozen suite owned by another loop_id -> BLOCK" 0 $?
+
+# 5. NEGATIVE — scope != "loop". A pr-scope suite cannot authorise a loop gate.
+reset
+write_file S1 "$WU3_PENDING"
+jq '. + {loop_id:"loop-new"}' "$(file_path S1)" >"$(file_path S1).tmp" && mv "$(file_path S1).tmp" "$(file_path S1)"
+frozen_evals S1 "$P0_PENDING" 2 "$JUST"
+jq '. + {scope:"pr"}' "$(file_dir S1)/evals.json" >"$(file_dir S1)/e.tmp" && mv "$(file_dir S1)/e.tmp" "$(file_dir S1)/evals.json"
+out=$(run "$(payload S1 coderails:loop-worker)")
+is_denied "$out"
+check "FROZEN: scope=pr frozen suite -> BLOCK" 0 $?
+
+# 6. NEGATIVE — zero P0 evals at verification_level >= 1. This is THE
+# fail-closed case: the verification_level-0 escape hatch (evals:[] graded GO)
+# must not become reachable at level >= 1 through the ungraded path.
+reset
+write_file S1 "$WU3_PENDING"
+jq '. + {loop_id:"loop-new"}' "$(file_path S1)" >"$(file_path S1).tmp" && mv "$(file_path S1).tmp" "$(file_path S1)"
+frozen_evals S1 '[]' 2 "$JUST"
+out=$(run "$(payload S1 coderails:loop-worker)")
+is_denied "$out"
+check "FROZEN: zero evals at verification_level 2 -> BLOCK (level-0 hatch stays shut)" 0 $?
+
+reset
+write_file S1 "$WU3_PENDING"
+jq '. + {loop_id:"loop-new"}' "$(file_path S1)" >"$(file_path S1).tmp" && mv "$(file_path S1).tmp" "$(file_path S1)"
+frozen_evals S1 '[{"id":"E1","priority":"P1","mode":"scripted","status":"pending","cmd":"run-a","negative_control":"run-a-broken","evidence":""}]' 2 "$JUST"
+out=$(run "$(payload S1 coderails:loop-worker)")
+is_denied "$out"
+check "FROZEN: only P1 evals (zero P0) at verification_level 2 -> BLOCK" 0 $?
+
+# 7. NEGATIVE — blank / whitespace-only verification_justification -> DENY.
+reset
+write_file S1 "$WU3_PENDING"
+jq '. + {loop_id:"loop-new"}' "$(file_path S1)" >"$(file_path S1).tmp" && mv "$(file_path S1).tmp" "$(file_path S1)"
+frozen_evals S1 "$P0_PENDING" 2 "   "
+out=$(run "$(payload S1 coderails:loop-worker)")
+is_denied "$out"
+check "FROZEN: whitespace-only verification_justification -> BLOCK" 0 $?
+
+# 8. REGRESSION — a genuinely graded GO suite is still allowed. FROZEN is an
+# ADDITIONAL accepted state, never a replacement for the graded one.
+reset
+write_file S1 "$WU3_PENDING"
+jq '. + {loop_id:"loop-new"}' "$(file_path S1)" >"$(file_path S1).tmp" && mv "$(file_path S1).tmp" "$(file_path S1)"
+jq -n '{scope:"loop", session_id:"S1", loop_id:"loop-new", revision:0, verification_level:1,
+    verification_justification:"3 work-units, no irreversible surface", head_sha:"deadbeef",
+    evals:[{id:"e1",priority:"P0",mode:"scripted",status:"pass",cmd:"run-a",negative_control:"run-a-broken",evidence:"log"}]}' \
+    >"$(file_dir S1)/evals.json"
+stamp "$(file_dir S1)/evals.json"
+out=$(run "$(payload S1 coderails:loop-worker)")
+check "FROZEN regression: genuinely graded GO suite still -> allow" "" "$out"
+
+# 9. REGRESSION — a sub-3-unit loop still skips the gate entirely, even with
+# no evals.json at all. FROZEN must not pull the <3-unit path into the gate.
+reset
+write_file S1 "$WU2_PENDING"
+out=$(run "$(payload S1 coderails:loop-worker)")
+check "FROZEN regression: 2-unit roster with no evals.json still skips gate" "" "$out"
+
 [ "$fails" -eq 0 ] && {
     echo "PASS"
     exit 0

@@ -115,6 +115,20 @@ Generate loop-scope evals via /coderails:task-evals (or a justified verification
 grades GO/VERIFICATION_LEVEL0 but is missing a non-blank verification_justification. Add a verification_justification (at verification_level 0: why the exemption is legitimate; at verification_level 1/2: which verification_level predicate fired) before declaring complete." >&2
                 exit 2
                 ;;
+            FROZEN)
+                # FROZEN opens DISPATCH (loop_dispatch_guard), never
+                # completion. Without this arm the generic fail-closed default
+                # below would still block — correctly — but would tell the
+                # reader to "regenerate it via /coderails:task-evals", which
+                # would destroy a valid frozen suite and forfeit its
+                # freeze-before-build provenance. Grade it, don't re-freeze it.
+                als_log "hook=loop_state_guard session=$session_id work_units=$ALS_WORK_UNIT_COUNT evals=$ALS_LOOP_EVALS_RESULT blocked=1"
+                echo "[loop-state-guard] Loop complete with $ALS_WORK_UNIT_COUNT work-units, and evals.json at:
+  $loop_dir/evals.json
+is FROZEN but never graded — it is the pre-build state that authorised dispatch, not a completion verdict. Do NOT regenerate it: re-freezing after the build forfeits freeze-before-build. Run the evals, record real evidence per P0, then grade it via:
+  \"\${CLAUDE_PLUGIN_ROOT}/scripts/post_evals.sh\" grade-loop $loop_dir/evals.json" >&2
+                exit 2
+                ;;
             UNSTAMPED)
                 als_log "hook=loop_state_guard session=$session_id work_units=$ALS_WORK_UNIT_COUNT evals=$ALS_LOOP_EVALS_RESULT blocked=1"
                 echo "[loop-state-guard] Loop complete with $ALS_WORK_UNIT_COUNT work-units, and evals.json at:

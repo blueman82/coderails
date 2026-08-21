@@ -81,8 +81,15 @@ gate_graph_complete() {
     ' "$loop_dir/evals.json" >/dev/null 2>&1; then
         ALS_LOOP_EVALS_RESULT="STALE"
     fi
+    # Completion demands a real graded verdict. FROZEN is a DISPATCH-time
+    # state (loop_dispatch_guard) and falls into the fail-closed default
+    # below by construction — spelled out in the message because "evals are
+    # FROZEN" otherwise reads like a pass to someone seeing it at a stop.
     case "$ALS_LOOP_EVALS_RESULT" in GO | VERIFICATION_LEVEL0) ;; *)
         echo "[loop-stall-guard] LOOP-STOP: complete refused: loop evals are $ALS_LOOP_EVALS_RESULT." >&2
+        if [ "$ALS_LOOP_EVALS_RESULT" = "FROZEN" ]; then
+            echo "[loop-stall-guard] FROZEN means the suite was frozen pre-build and never graded — it authorised dispatch, not completion. Run the evals, record evidence per P0, then: post_evals.sh grade-loop <loop_dir>/evals.json" >&2
+        fi
         exit 2
         ;;
     esac

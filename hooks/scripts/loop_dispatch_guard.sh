@@ -170,8 +170,13 @@ if [ -n "$loop_id" ] && ! jq -e --arg session "$session_id" --arg loop "$loop_id
     ALS_LOOP_EVALS_RESULT="STALE"
 fi
 
+# FROZEN is accepted HERE and nowhere else. At dispatch time the only thing
+# that can honestly be checked is that a real loop-scope suite was frozen
+# before the build — not that it passed, which is a completion-time fact. The
+# completion-time callers (loop_state_guard, loop_stall_guard) still accept
+# only GO/VERIFICATION_LEVEL0, so this opens dispatch without opening merge.
 case "$ALS_LOOP_EVALS_RESULT" in
-GO | VERIFICATION_LEVEL0)
+GO | VERIFICATION_LEVEL0 | FROZEN)
     als_log "hook=loop_dispatch_guard session=$session_id subagent_type=$subagent_type work_units=$unit_count evals=$ALS_LOOP_EVALS_RESULT blocked=0"
     exit 0
     ;;
@@ -180,7 +185,9 @@ esac
 als_log "hook=loop_dispatch_guard session=$session_id subagent_type=$subagent_type work_units=$unit_count evals=$ALS_LOOP_EVALS_RESULT blocked=1"
 reason="[loop-dispatch-guard] Blocked: this loop's work_units roster has $unit_count entries (>=3), but no frozen, graded loop-scope evals.json was found at:
   $loop_dir/evals.json
-Phase 2.7c (freeze loop-scope evals via /coderails:task-evals) must run and be graded GO (or a justified verification_level-0 exemption) before any implementation-unit (coderails:loop-worker) worker is dispatched in a >=3-unit loop — evals must be frozen BEFORE build, not checked only at loop completion. Current evals.json state: $ALS_LOOP_EVALS_RESULT."
+Phase 2.7c (freeze loop-scope evals via /coderails:task-evals) must run before any implementation-unit (coderails:loop-worker) worker is dispatched in a >=3-unit loop — evals must be frozen BEFORE build, not checked only at loop completion. Current evals.json state: $ALS_LOOP_EVALS_RESULT.
+
+At dispatch time this gate requires a FROZEN suite, NOT a graded one: a loop-scope evals.json owned by this session and loop, with a non-blank verification_justification, .evals an array holding at least one P0, and ungraded (no .result, no .grading). Grading is loop-END work (Phase 13, post_evals.sh grade-loop) — do NOT run grade-loop now to satisfy this gate; at freeze time every P0 is still 'pending' with empty evidence and grade-loop will correctly refuse the file. A genuinely graded GO, or a graded verification_level-0 exemption, also passes here."
 jq -n --arg r "$reason" '{
   hookSpecificOutput: {
     hookEventName: "PreToolUse",
