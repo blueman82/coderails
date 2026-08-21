@@ -197,9 +197,30 @@ graph_evidence_bind_wave() {
           ($wave[$id]) as $result
           | if $id == "decisions_absorbed" then .out[$id] = $result
             else
-              ((($result.evidence // []) | if type == "array" then . else [$result.evidence] end)) as $evidence
-              | ([ $evidence[] | select(type == "object" and has("spawn_ref")) | .spawn_ref ]) as $claims
-              | ([ $evidence[] | select((type == "object" and has("spawn_ref")) | not) ]) as $kept
+              ((($result.evidence // []) | if type == "array" then . else [$result.evidence] end)) as $all_evidence
+              # graph_dispatch_record prepends the EXISTING node evidence
+              # (earlier attempts of this node) before handing the wave over, so
+              # only the tail is caller-supplied. Provenance refs this gate
+              # minted on a previous attempt live in that prefix and must be
+              # carried through untouched — re-validating them would refuse
+              # every retry, since those spawns predate the current cursor.
+              | ((($nodes[$id].evidence // []) | if type == "array" then . else [$nodes[$id].evidence] end)) as $carried
+              | ($all_evidence[:($carried | length)]) as $prefix
+              | (if $prefix == $carried then $all_evidence[($carried | length):]
+                 else $all_evidence end) as $evidence
+              | (if $prefix == $carried then $carried else [] end) as $carried_kept
+              # A claim is ANY caller-supplied object that asserts provenance:
+              # the documented {spawn_ref} form, or an object already wearing
+              # the bound shape (kind/tool_use_id). Only this gate may mint a
+              # provenance reference — otherwise a caller bypasses the whole
+              # check by writing the OUTPUT shape directly instead of a claim.
+              | ([ $evidence[] | select(type == "object")
+                   | (.spawn_ref? // .tool_use_id?
+                      // (if (.kind? == "claude_agent") then "" else null end))
+                   | select(. != null) ]) as $claims
+              | ([ $evidence[] | select((type == "object"
+                     and (has("spawn_ref") or has("tool_use_id")
+                          or (.kind? == "claude_agent"))) | not) ]) as $kept
               | ([ $spawns[]
                    | select(.node_id == $id and .wave_id == $wave_id and .line > $cursor) ]) as $matches
               | if ($matches | length) > 1
@@ -208,7 +229,7 @@ graph_evidence_bind_wave() {
                 then
                   if ($claims | length) > 0
                   then error("graph_evidence: node \($id) cites an unbindable spawn \($claims[0])")
-                  else .out[$id] = $result
+                  else .out[$id] = ($result + {evidence: ($carried_kept + $kept)})
                   end
                 else
                   ($matches[0]) as $m
@@ -218,7 +239,7 @@ graph_evidence_bind_wave() {
                     then error("graph_evidence: spawn \($m.tool_use_id) is already bound")
                     else
                       .used += [$m.tool_use_id]
-                      | .out[$id] = ($result + {evidence: ($kept + [{
+                      | .out[$id] = ($result + {evidence: ($carried_kept + $kept + [{
                             kind: "claude_agent",
                             attempt: (($nodes[$id].retry.attempts // 0) + 1),
                             wave_id: $wave_id,
