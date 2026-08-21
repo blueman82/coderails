@@ -49,6 +49,18 @@ Agent dispatch against a graph that fails it. Three fields are easy to "tidy" in
   `active_wave` naming a non-running node, which is equally invalid. `wave_id` is always
   `"wave-" + revision`, so revision `1` means `"wave-1"`.
 
+**Close `S-2`'s own wave before your first real dispatch.** The stub opens `wave-1` with `S-2`
+running, so the graph already has an `active_wave` — and `graph_dispatch_begin_wave` refuses
+outright while one is open (it exits non-zero with **no error message**, so an unexplained `rc=1`
+at your first wave means this, not a broken graph). Record `S-2` first, then begin the real wave:
+
+> `graph_dispatch_record <path-to-progress.json> '{"wave_id":"wave-1","results":{"S-2":{"outcome":"done","evidence":["<what proves the stub was written>"]}}}'`
+
+The `wave_id` and the `results` key-set must match the open `active_wave` **exactly** — `"wave-1"`
+and exactly `S-2`, no more and no fewer — or the write errors with "results must exactly match the
+active wave" and nothing changes. This clears `active_wave` and leaves `S-2` `done`; only then does
+`begin_wave` succeed and return your first real wave.
+
 The stub records `S-2` immediately; each later phase boundary adds its stable node and
 dependency edges in the same orchestrator-owned write. Do not create a second scheduler or let
 workers update `graph` directly.
