@@ -38,7 +38,7 @@ be replayed to derive position, and that can leave a torn tail line after a cras
 | `proof_disposition` | Required at `schema_version` 2 when no `proof.json` is frozen: the bare string `"none"` or a `"none: <reason>"`-prefixed value (e.g. `"none: no executable surface"`) records that skip visibly. Any other value — including one that merely starts with the letters "none" without the colon, e.g. `"nonexistent"` — or an absent/null field, blocks `complete` — see `als_gate_proofs_on_complete`. Never consulted once `proof.json` exists. |
 | `session_id` | This session's id; the guard's ownership check compares it against the file's own path. |
 | `loop_id` | Unique non-blank identity for this loop. Preserve it during mid-loop rewrites; create a new value when re-arming for a new loop. Dispatch evals bind `session_id` + `loop_id`. |
-| `revision` | Non-negative integer graph revision, starting at `0`. Graph operations advance it; completion evidence binds the final value. |
+| `revision` | Positive integer graph revision, starting at `1` (the Phase -2 stub's own first wave). `graph_executor_graph_valid` requires `revision > 0`, so `0` is never a valid value. Graph operations advance it; completion evidence binds the final value. |
 | `status` | `initialising` → `in-progress` → `complete` (see Lifecycle). |
 | `authorising_prompt_raw` | The authorisation envelope, verbatim. |
 | `work_units` | JSON object keyed by unit id; each entry carries at least a `status`. In-flight values are `pending`/`in-progress`/`blocked` (with `blockedBy`); only `done` and `dropped` (with a mandatory sibling `dropped_reason`) are terminal — see below. `merged`/`complete`/other synonyms are retired: do not mint new status values. |
@@ -123,7 +123,7 @@ the rest of that count, so a skill loaded only to read this file isn't blocked f
 invocation count re-arms the block. Session-mismatch and stale-complete-after-rearm carry no such
 grace and block every time.
 
-- **Stub-first (Phase -2):** `status: "initialising"`, stamped with this `session_id`, a new unique non-blank `loop_id`, and integer `revision: 0`.
+- **Stub-first (Phase -2):** `status: "initialising"`, stamped with this `session_id`, a new unique non-blank `loop_id`, and integer `revision: 1` — with `S-2` running under a matching `active_wave` (`wave-1`). See phases-setup.md's Phase -2 stub for the exact shape; it is validated, not decorative.
 - **Enrich at Phase 0:** record the envelope verbatim in `authorising_prompt_raw`; `status: "in-progress"`.
 - **Update at each phase boundary:** `graph` node states, work-unit states, disposition fields, `last_updated` — carry `loop_stop_counts` forward per the rule above.
 - **Teardown at Phase 13:** call `als_mark_complete <cwd> <session_id>` (from
