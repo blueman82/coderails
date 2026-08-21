@@ -57,11 +57,10 @@ GRAPH_EVIDENCE_ENVELOPE_KEY="CODERAILS_GRAPH_DISPATCH"
 # call. Pointing it at a hand-authored transcript elsewhere otherwise lets
 # fabricated spawns "derive" fake truth and bind.
 #
-# Tests legitimately need a transcript outside $HOME, so an explicit,
-# obviously-named opt-out exists. It is deliberately NOT the same variable:
-# an env var a test sets on purpose cannot be reached by accident, and the
-# name says what it is.
-GRAPH_EVIDENCE_TEST_ESCAPE="GRAPH_EVIDENCE_ALLOW_UNPINNED_TRANSCRIPT"
+# The pin is UNCONDITIONAL — there is no env opt-out. An escape hatch the
+# constrained party can set is not a barrier, it is a second door: whoever can
+# export CLAUDE_PROJECTS_DIR can export the escape just as easily. Tests get
+# isolation by redirecting HOME itself, which moves the pin with them.
 graph_evidence_transcript() {
     local session="$1" projects_dir default_dir f
     [ -n "$session" ] || return 1
@@ -70,12 +69,10 @@ graph_evidence_transcript() {
     esac
     default_dir="$HOME/.claude/projects"
     projects_dir="${CLAUDE_PROJECTS_DIR:-$default_dir}"
-    if [ "${!GRAPH_EVIDENCE_TEST_ESCAPE:-}" != "1" ]; then
-        case "$projects_dir" in
-        "$default_dir" | "$default_dir"/*) ;;
-        *) return 1 ;; # redirected outside $HOME: refuse to read it at all
-        esac
-    fi
+    case "$projects_dir" in
+    "$default_dir" | "$default_dir"/*) ;;
+    *) return 1 ;; # redirected outside $HOME: refuse to read it at all
+    esac
     for f in "$projects_dir"/*/"$session.jsonl"; do
         [ -f "$f" ] || continue
         printf '%s\n' "$f"

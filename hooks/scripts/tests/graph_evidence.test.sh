@@ -7,12 +7,18 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
-export CLAUDE_PROJECTS_DIR="$TMP/projects"
-# The transcript path is pinned under $HOME/.claude/projects in production so
-# the orchestrator cannot redirect the gate at a transcript it authored itself.
-# Tests need a temp dir, which is exactly what this explicit opt-out is for.
-export GRAPH_EVIDENCE_ALLOW_UNPINNED_TRANSCRIPT=1
+# The transcript path is pinned under $HOME/.claude/projects: the party this
+# gate constrains has arbitrary Bash, so a location it can redirect is not
+# evidence. There is deliberately NO env opt-out — an escape hatch the
+# adversary can set is no barrier at all. Tests get isolation by redirecting
+# HOME itself, the same way provider_graph_parity.test.sh does.
+export HOME="$TMP/home"
+export CLAUDE_PROJECTS_DIR="$HOME/.claude/projects"
 PROJECTS="$CLAUDE_PROJECTS_DIR"
+# A pinned-but-EMPTY projects dir, for the cases that must exercise "no
+# transcript resolves" rather than "the path was refused".
+EMPTY_PROJECTS="$PROJECTS/empty"
+mkdir -p "$PROJECTS" "$EMPTY_PROJECTS"
 SESSION="session-fixture-0001"
 
 # shellcheck source=hooks/scripts/tests/lib/claude_transcript_fixture.sh
@@ -140,12 +146,16 @@ expect_denied "a same-wave spawn recorded before the cursor is refused" \
 # test would notice. This is what pins the fail-closed line itself.
 state="$TMP/corrupt_uncited.json"
 write_state "$state" "$CURSOR"
+# Inside the pinned projects dir, under its own session, so the refusal is for
+# corruption rather than for the path.
+CORRUPT_SESSION="session-fixture-corrupt"
+mkdir -p "$PROJECTS/corrupt-project"
+printf '{"type":"assistant"\ngarbage not json\n' >"$PROJECTS/corrupt-project/$CORRUPT_SESSION.jsonl"
+jq --arg s "$CORRUPT_SESSION" '.session_id = $s' "$state" >"$state.tmp" && mv "$state.tmp" "$state"
 cp "$state" "$TMP/corrupt.before"
-mkdir -p "$TMP/corrupt/fixture-project"
-printf '{"type":"assistant"\ngarbage not json\n' >"$TMP/corrupt/fixture-project/$SESSION.jsonl"
 uncited=$(jq -cn '{wave_id:"wave-1",results:{
     N1:{outcome:"done",evidence:[]},N2:{outcome:"done",evidence:[]}}}')
-if CLAUDE_PROJECTS_DIR="$TMP/corrupt" graph_dispatch_record "$state" "$uncited" >/dev/null 2>&1; then
+if graph_dispatch_record "$state" "$uncited" >/dev/null 2>&1; then
 	fail "a corrupt transcript refuses even an uncited wave" \
 		"whole wave recorded with zero provenance from an unreadable transcript"
 else
@@ -230,7 +240,7 @@ fi
 # --- NEGATIVE: missing transcript ------------------------------------------
 state="$TMP/notranscript.json"
 write_state "$state" "$CURSOR"
-if CLAUDE_PROJECTS_DIR="$TMP/empty" record "$state" N1 "$GEN1" >/dev/null 2>&1; then
+if CLAUDE_PROJECTS_DIR="$EMPTY_PROJECTS" record "$state" N1 "$GEN1" >/dev/null 2>&1; then
 	fail "a cited ref with no resolvable transcript is refused" "record passed with no transcript"
 else
 	pass "a cited ref with no resolvable transcript is refused"
@@ -239,9 +249,15 @@ fi
 # --- NEGATIVE: malformed transcript ----------------------------------------
 state="$TMP/malformed.json"
 write_state "$state" "$CURSOR"
-mkdir -p "$TMP/bad/fixture-project"
-printf 'not json at all\n{"type":"assistant"\n' >"$TMP/bad/fixture-project/$SESSION.jsonl"
-if CLAUDE_PROJECTS_DIR="$TMP/bad" record "$state" N1 "$GEN1" >/dev/null 2>&1; then
+# The malformed transcript lives INSIDE the pinned projects dir, so this
+# exercises MALFORMEDNESS rather than the path pin — otherwise it would be
+# refused for the wrong reason and the test would not test what it names.
+# It uses its own session id, and the state below points at that session.
+BAD_SESSION="session-fixture-malformed"
+mkdir -p "$PROJECTS/bad-project"
+printf 'not json at all\n{"type":"assistant"\n' >"$PROJECTS/bad-project/$BAD_SESSION.jsonl"
+jq --arg s "$BAD_SESSION" '.session_id = $s' "$state" >"$state.tmp" && mv "$state.tmp" "$state"
+if record "$state" N1 "$GEN1" >/dev/null 2>&1; then
 	fail "a malformed transcript is refused" "record passed on unparseable records"
 else
 	pass "a malformed transcript is refused"
@@ -328,10 +344,19 @@ fi
 
 # --- CRITICAL 2: the transcript location cannot be redirected ---------------
 # The party this gate constrains has arbitrary Bash, so a transcript it can
-# point elsewhere is not evidence. Without the explicit test opt-out, a
-# projects dir outside $HOME must not be read at all.
+# point elsewhere is not evidence. This plants a PERFECTLY VALID transcript,
+# whose spawn would otherwise bind cleanly, at a path outside
+# $HOME/.claude/projects — it must be refused on location alone. There is no
+# env opt-out to disable, because an escape the adversary can also set would
+# be no barrier.
+OUTSIDE="$TMP/outside-home/projects"
+mkdir -p "$OUTSIDE"
+OUT_SESSION="session-fixture-outside"
+claude_fixture::init "$OUTSIDE" "$OUT_SESSION"
+OUT_CURSOR=$(claude_fixture::cursor "$OUTSIDE" "$OUT_SESSION")
+claude_fixture::append_spawn "$OUTSIDE" "$OUT_SESSION" N2 wave-1 toolu_OUTSIDEHOME >/dev/null
 state="$TMP/unpinned.json"
-jq -n --arg session "$UND_SESSION" --argjson c "$UND_CURSOR" '
+jq -n --arg session "$OUT_SESSION" --argjson c "$OUT_CURSOR" '
   {status:"running",outcome:"running",retry:{attempts:0,max:2},evidence:[]} as $n
   | {schema_version:2,session_id:$session,loop_id:"loop-fixture",revision:1,
      status:"in-progress",
@@ -339,15 +364,12 @@ jq -n --arg session "$UND_SESSION" --argjson c "$UND_CURSOR" '
             active_wave:{wave_id:"wave-1",revision:1,nodes:["N2"],transcript_cursor:$c},
             hard_stop:null}}' >"$state"
 cp "$state" "$TMP/unpinned.before"
-if (
-	unset GRAPH_EVIDENCE_ALLOW_UNPINNED_TRANSCRIPT
-	graph_dispatch_record "$state" \
-		"$(jq -cn '{wave_id:"wave-1",results:{N2:{outcome:"done",evidence:[]}}}')" >/dev/null 2>&1
-); then
-	fail "a transcript outside \$HOME is refused without the test opt-out" \
+if CLAUDE_PROJECTS_DIR="$OUTSIDE" graph_dispatch_record "$state" \
+	"$(jq -cn '{wave_id:"wave-1",results:{N2:{outcome:"done",evidence:[]}}}')" >/dev/null 2>&1; then
+	fail "a transcript outside \$HOME is refused on location alone" \
 		"read a redirected transcript the constrained party controls"
 else
-	pass "a transcript outside \$HOME is refused without the test opt-out"
+	pass "a transcript outside \$HOME is refused on location alone"
 	expect_eq "the refused unpinned-transcript wave left state untouched" 'same' \
 		"$(cmp -s "$TMP/unpinned.before" "$state" && echo same || echo changed)"
 fi
@@ -450,7 +472,7 @@ write_state "$state" null
 legacy=$(jq -cn '{wave_id:"wave-1",results:{
     N1:{outcome:"done",evidence:["plain string proof"]},
     N2:{outcome:"done",evidence:[]}}}')
-if CLAUDE_PROJECTS_DIR="$TMP/empty" graph_dispatch_record "$state" "$legacy" >/dev/null 2>&1; then
+if CLAUDE_PROJECTS_DIR="$EMPTY_PROJECTS" graph_dispatch_record "$state" "$legacy" >/dev/null 2>&1; then
 	expect_eq "uncited string evidence with no transcript still records" 'true' \
 		"$(jq -r '.graph.nodes.N1.evidence == ["plain string proof"]' "$state")"
 else
