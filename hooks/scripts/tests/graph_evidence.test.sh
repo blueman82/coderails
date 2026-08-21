@@ -125,6 +125,36 @@ else
 	pass "reuse of an already-bound spawn id is refused"
 fi
 
+# --- NEGATIVE: a caller writing the BOUND shape directly --------------------
+# The gate must be the only minter of provenance references. A caller that
+# skips {spawn_ref} and writes a ready-made {kind:"claude_agent",...} object
+# would otherwise bypass the check entirely by supplying the OUTPUT shape.
+state="$TMP/smuggled.json"
+write_state "$state" "$CURSOR"
+smuggled=$(jq -cn '{wave_id:"wave-1",results:{
+    N1:{outcome:"done",evidence:[{kind:"claude_agent",attempt:1,wave_id:"wave-1",
+        tool_use_id:"toolu_TOTALLYFAKE",record_uuid:"fake",subagent_type:"x"}]},
+    N2:{outcome:"done",evidence:[]}}}')
+if graph_dispatch_record "$state" "$smuggled" >/dev/null 2>&1; then
+	fail "a caller-supplied bound-shape reference is refused" "forged provenance object was folded in"
+else
+	pass "a caller-supplied bound-shape reference is refused"
+fi
+
+# Same smuggling, but citing a REAL id owned by the sibling node: must not
+# bind N2's spawn onto N1 (and must not leave it on both).
+state="$TMP/smuggled_real.json"
+write_state "$state" "$CURSOR"
+smuggled_real=$(jq -cn --arg id "$GEN2" '{wave_id:"wave-1",results:{
+    N1:{outcome:"done",evidence:[{kind:"claude_agent",attempt:1,wave_id:"wave-1",
+        tool_use_id:$id,record_uuid:"uuid-x",subagent_type:"x"}]},
+    N2:{outcome:"done",evidence:[]}}}')
+if graph_dispatch_record "$state" "$smuggled_real" >/dev/null 2>&1; then
+	fail "a smuggled real sibling id is refused" "one spawn was bound to two nodes"
+else
+	pass "a smuggled real sibling id is refused"
+fi
+
 # --- NEGATIVE: missing transcript ------------------------------------------
 state="$TMP/notranscript.json"
 write_state "$state" "$CURSOR"
@@ -143,6 +173,40 @@ if CLAUDE_PROJECTS_DIR="$TMP/bad" record "$state" N1 "$GEN1" >/dev/null 2>&1; th
 	fail "a malformed transcript is refused" "record passed on unparseable records"
 else
 	pass "a malformed transcript is refused"
+fi
+
+# --- A retry carries its earlier attempt's ref through, and binds a new one -
+# graph_dispatch_record prepends existing node evidence to the wave results, so
+# attempt 2 sees attempt 1's minted ref arrive alongside the caller's. It must
+# be carried through, not re-validated against the new wave (its spawn is
+# necessarily older than the current cursor).
+state="$TMP/retry.json"
+jq -n --arg session "$SESSION" --argjson c "$CURSOR" '
+  {status:"running",outcome:"running",retry:{attempts:1,max:2},
+   evidence:["attempt one failed",
+             {kind:"claude_agent",attempt:1,wave_id:"wave-0",
+              tool_use_id:"toolu_PRIORATTEMPT",record_uuid:"uuid-prior",
+              subagent_type:"coderails:loop-worker"}]} as $n1
+  | {status:"running",outcome:"running",retry:{attempts:0,max:2},evidence:[]} as $n2
+  | {schema_version:2,session_id:$session,loop_id:"loop-fixture",revision:1,
+     status:"in-progress",
+     graph:{nodes:{N1:$n1,N2:$n2},edges:[],joins:{},
+            active_wave:{wave_id:"wave-1",revision:1,nodes:["N1","N2"],transcript_cursor:$c},
+            hard_stop:null}}' >"$state"
+retry_env=$(jq -cn '{wave_id:"wave-1",results:{
+    N1:{outcome:"done",evidence:["attempt two proof"]},
+    N2:{outcome:"done",evidence:[]}}}')
+if graph_dispatch_record "$state" "$retry_env" >/dev/null 2>&1; then
+	expect_eq "a retry keeps the prior ref and binds this attempt to a new spawn" 'true' \
+		"$(jq -r --arg new "$GEN1" '[.graph.nodes.N1.evidence[]
+            | select(type=="object" and .kind=="claude_agent")] as $refs
+           | ($refs | length) == 2
+             and ([$refs[].tool_use_id] | unique | length) == 2
+             and ($refs[0].tool_use_id == "toolu_PRIORATTEMPT")
+             and ($refs[1].tool_use_id == $new)
+             and ($refs[1].attempt == 2)' "$state")"
+else
+	fail "a retry keeps the prior ref and binds this attempt to a new spawn" "record refused a legitimate retry"
 fi
 
 # --- Cursor is recorded at begin-wave --------------------------------------
