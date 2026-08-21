@@ -6,6 +6,10 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 TMP="$(mktemp -d)"
 trap 'rm -r "$TMP"' EXIT
+export HOME="$TMP/home"
+# shellcheck source=packages/tests/lib/codex_transcript_fixture.sh
+source "$ROOT/packages/tests/lib/codex_transcript_fixture.sh"
+codex_fixture::init session-test
 FAILS=0
 CLAUDE_GRAPH="$ROOT/hooks/scripts/lib/graph_dispatch.sh"
 CODEX_PACKAGE="$ROOT/packages/codex"
@@ -180,6 +184,7 @@ test_clean_cache_codex_lifecycle() {
 	task="loop_worker_41"
 	expect_ok "clean-cache Codex authorizes exact owned dispatch" python3 "$graph" authorize-dispatch "$state" \
 		--session session-test --task "$task" --evals "$evals"
+	codex_fixture::append_wave "$state"
 	python3 "$graph" record-wave "$state" '{"wave_id":"wave-2","results":{"A":{"outcome":"done","evidence":"done"}}}' >/dev/null
 	revision=$(jq -r '.revision' "$state")
 	write_evals "$evals" "$revision" "$grader"

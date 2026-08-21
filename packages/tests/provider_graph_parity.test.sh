@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
-# Frozen provider-parity acceptance test. Both adapters below drive independent
-# provider-owned implementations through the same behavioural cases.
-#
-# The adapters map provider-local operations without sharing implementation code.
+# Frozen provider-parity acceptance test for independent provider implementations.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 TMP="$(mktemp -d)"
 trap 'rm -r "$TMP"' EXIT
+export HOME="$TMP/home"
+# shellcheck source=packages/tests/lib/codex_transcript_fixture.sh
+source "$ROOT/packages/tests/lib/codex_transcript_fixture.sh"
+codex_fixture::init session-codex
 FAILS=0 CURRENT_PROVIDER=""
 pass() { printf 'ok   - %s: %s\n' "$CURRENT_PROVIDER" "$1"; }
 fail() {
@@ -37,27 +38,11 @@ expect_rejected_unchanged() {
 }
 write_graph() {
     local path="$1" nodes="$2" edges="$3" joins="$4"
-    jq -n \
-        --arg session_id "session-$CURRENT_PROVIDER" \
-        --arg loop_id "loop-$CURRENT_PROVIDER-1" \
-        --argjson nodes "$nodes" \
-        --argjson edges "$edges" \
-        --argjson joins "$joins" '
-        {
-          schema_version: 2,
-          session_id: $session_id,
-          loop_id: $loop_id,
-          revision: 1,
-          status: "in-progress",
-          graph: {
-            nodes: $nodes,
-            edges: $edges,
-            joins: $joins,
-            active_wave: null,
-            hard_stop: null
-          }
-        }
-    ' >"$path"
+    jq -n --arg session "session-$CURRENT_PROVIDER" --arg loop "loop-$CURRENT_PROVIDER-1" \
+        --argjson nodes "$nodes" --argjson edges "$edges" --argjson joins "$joins" '{
+          schema_version:2,session_id:$session,loop_id:$loop,revision:1,status:"in-progress",
+          graph:{nodes:$nodes,edges:$edges,joins:$joins,active_wave:null,hard_stop:null}
+        }' >"$path"
 }
 node() {
     local status="${1:-pending}" attempts="${2:-0}" max="${3:-2}"
@@ -98,6 +83,7 @@ provider_record_wave() {
     if [[ "$CURRENT_PROVIDER" == "claude" ]]; then
         claude_graph_call graph_dispatch_record "$state" "$envelope"
     else
+		codex_fixture::append_wave "$state"
         codex_graph_call record-wave "$state" "$envelope"
     fi
 }
@@ -231,7 +217,14 @@ test_retry_and_hard_stop() {
     if provider_begin_wave "$state" >/dev/null 2>&1 &&
        provider_record_wave "$state" '{"A":{"outcome":"failed","evidence":"attempt two failed"}}' >/dev/null 2>&1; then
         expect_eq "retry exhaustion becomes a hard-stop with evidence" \
-            'true' "$(jq -r '.graph.nodes.A.status == "hard-stop" and .graph.nodes.A.retry.attempts == 2 and .graph.hard_stop != null and (.graph.nodes.A.evidence | length) == 2' "$state")"
+            'true' "$(jq -r --arg provider "$CURRENT_PROVIDER" '.graph.nodes.A.status == "hard-stop" and
+              .graph.nodes.A.retry.attempts == 2 and .graph.hard_stop != null and
+              ([.graph.nodes.A.evidence[] | select(type == "string")] | length) == 2 and
+              ($provider != "codex" or ([.graph.nodes.A.evidence[] | select(type == "object")] as $refs |
+                [$refs[].attempt] == [1,2] and ([$refs[].wave_id] | unique | length) == 2 and
+                ([$refs[].spawn_call_id] | unique | length) == 2 and
+                ([$refs[].agent_thread_id] | unique | length) == 2 and
+                ([$refs[].task_complete_turn_id] | unique | length) == 2))' "$state")"
     else
         fail "retry exhaustion becomes a hard-stop with evidence" "start or record failed"
     fi
@@ -278,6 +271,7 @@ test_completion_guards() {
     nodes=$(jq -cn --argjson a "$(node 'done' 0 2)" --argjson j "$(node 'done' 0 2)" --argjson c "$(node 'done' 0 2)" '{A:$a,J:$j,C:$c}')
     write_graph "$state" "$nodes" '[{"from":"J","to":"C"}]' \
         '{"J":{"mode":"all","inputs":["A"],"released":true}}'
+	[[ "$CURRENT_PROVIDER" != "codex" ]] || codex_fixture::bind_done_nodes "$state"
     write_completion_artifacts "$state" "$evals" "$proof" "$retro"
 
     if provider_can_complete "$state" "$evals" "$proof" "$retro" >/dev/null 2>&1; then

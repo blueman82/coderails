@@ -6,6 +6,8 @@ set -u
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 PACKAGE="$ROOT/packages/codex"
 HOOKS="$PACKAGE/hooks"
+# shellcheck source=packages/tests/lib/codex_transcript_fixture.sh
+source "$ROOT/packages/tests/lib/codex_transcript_fixture.sh"
 fails=0
 
 check() {
@@ -185,8 +187,15 @@ jq -n '{
 }' >"$graph_dir/progress.json"
 incomplete_stop=$(printf '%s' '{"session_id":"s-complete","cwd":"/tmp","hook_event_name":"Stop","last_assistant_message":"done"}' | CODERAILS_AGENTIC_LOOP_DIR="$graph_root" PLUGIN_ROOT="$PACKAGE" "$HOOKS/scripts/graph_completion_guard.sh")
 check "incomplete native graph blocks Stop" sh -c 'printf "%s" "$1" | jq -e ".decision == \"block\""' sh "$incomplete_stop"
+export HOME="$security_tmp/home"
+codex_fixture::init s-complete
+python3 "$PACKAGE/skills/agentic-loop/scripts/graph.py" begin-wave "$graph_dir/progress.json" >/dev/null
+codex_fixture::append_wave "$graph_dir/progress.json"
+python3 "$PACKAGE/skills/agentic-loop/scripts/graph.py" record-wave "$graph_dir/progress.json" \
+  '{"wave_id":"wave-2","results":{"A":{"outcome":"done","evidence":"hook fixture"}}}' >/dev/null
+graph_revision=$(jq -r '.revision' "$graph_dir/progress.json")
 git_head=$(git -C "$ROOT" rev-parse HEAD)
-jq -n --arg sha "$git_head" '{schema_version:1,scope:"loop",task_ref:"loop-1",verification_level:0,verification_justification:"hook fixture",frozen_at:"2026-08-20T00:00:00Z",frozen_sha:$sha,head_sha:$sha,session_id:"s-complete",loop_id:"loop-1",revision:1,evals:[],amendments:[],result:null,graded_at:null}' >"$graph_dir/evals.json"
+jq -n --arg sha "$git_head" --argjson revision "$graph_revision" '{schema_version:1,scope:"loop",task_ref:"loop-1",verification_level:0,verification_justification:"hook fixture",frozen_at:"2026-08-20T00:00:00Z",frozen_sha:$sha,head_sha:$sha,session_id:"s-complete",loop_id:"loop-1",revision:$revision,evals:[],amendments:[],result:null,graded_at:null}' >"$graph_dir/evals.json"
 "$ROOT/scripts/post_evals.sh" grade-loop "$graph_dir/evals.json" >/dev/null
 jq -n '{session_id:"s-complete",loop_id:"loop-1",proofs:[{id:"P1",cmd:"true",status:"pass",evidence:"observed"}]}' >"$graph_dir/proof.json"
 jq -n '{schema_version:2,session_id:"s-complete",loop_id:"loop-1",status:"complete"}' >"$graph_dir/retro.json"
@@ -194,8 +203,6 @@ proof_transcript="$graph_dir/transcript.jsonl"
 jq -cn '{type:"turn_context",payload:{session_id:"s-complete",loop_id:"loop-1"}}' >"$proof_transcript"
 jq -cn '{type:"response_item",payload:{type:"custom_tool_call",name:"exec",call_id:"proof-call",input:"const r = await tools.exec_command({cmd:\"true\"}); text(JSON.stringify({loop_id:\"loop-1\",exit_code:r.exit_code,output:r.output}));"}}' >>"$proof_transcript"
 jq -cn '{type:"response_item",payload:{type:"custom_tool_call_output",call_id:"proof-call",output:[{type:"input_text",text:"{\"loop_id\":\"loop-1\",\"exit_code\":0,\"output\":\"\"}"}]}}' >>"$proof_transcript"
-jq '.graph.nodes.A.status="done" | .graph.nodes.A.outcome="done"' "$graph_dir/progress.json" >"$graph_dir/done.json"
-mv "$graph_dir/done.json" "$graph_dir/progress.json"
 python3 "$PACKAGE/skills/agentic-loop/scripts/graph.py" complete "$graph_dir/progress.json" --session s-complete --evals "$graph_dir/evals.json" --proof "$graph_dir/proof.json" --retro "$graph_dir/retro.json" --transcript "$proof_transcript" >/dev/null
 complete_stop=$(jq -cn --arg transcript "$proof_transcript" '{session_id:"s-complete",cwd:"/tmp",hook_event_name:"Stop",last_assistant_message:"done",transcript_path:$transcript}' | CODERAILS_AGENTIC_LOOP_DIR="$graph_root" PLUGIN_ROOT="$PACKAGE" "$HOOKS/scripts/graph_completion_guard.sh")
 check "completed native graph allows Stop" test -z "$complete_stop"

@@ -7,6 +7,10 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 TMP="$(mktemp -d)"
 trap 'rm -r "$TMP"' EXIT
+export HOME="$TMP/home"
+# shellcheck source=packages/tests/lib/codex_transcript_fixture.sh
+source "$ROOT/packages/tests/lib/codex_transcript_fixture.sh"
+codex_fixture::init session-test
 FAILS=0
 PROVIDER=""
 CODEX_GRAPH="${CODEX_GRAPH_OVERRIDE:-$ROOT/packages/codex/skills/agentic-loop/scripts/graph.py}"
@@ -201,16 +205,53 @@ codex_hook_denied() {
 	printf '%s' "$output" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null 2>&1
 }
 test_codex_dispatch_names() {
-	local state="$TMP/codex.dispatch.json" root="$TMP/codex-dispatch" evals
-	fresh_wave "$state" >/dev/null
+	local state="$TMP/codex.dispatch.json" root="$TMP/codex-dispatch" evals first second
+	first=$(fresh_wave "$state")
 	install_hook_state "$state" "$root"
 	evals="$root/fixture/session-test/evals.json"
+	if [[ $(jq -r '.task_names.A' <<<"$first") == loop_worker_41 ]]; then
+		pass "first attempt keeps the original native task name"
+	else
+		fail "first attempt keeps the original native task name" "$first"
+	fi
 	expect_allowed "lowercase reversible task name binds to node A" python3 "$CODEX_GRAPH" authorize-dispatch "$state" \
 		--session session-test --task loop_worker_41 --evals "$evals"
 	expect_rejected "hyphen/uppercase task name is not native-canonical" "$state" python3 "$CODEX_GRAPH" authorize-dispatch "$state" \
 		--session session-test --task loop-worker-A --evals "$evals"
 	expect_denied "arbitrary renamed spawn_agent cannot bypass an active graph" codex_hook_denied "$root" \
 		"$(codex_dispatch_input harmless_reviewer)"
+
+	codex_fixture::append_wave "$state"
+	python3 "$CODEX_GRAPH" record-wave "$state" \
+		'{"wave_id":"wave-2","results":{"A":{"outcome":"failed","evidence":"retry"}}}' >/dev/null
+	second=$(python3 "$CODEX_GRAPH" begin-wave "$state")
+	if [[ $(jq -r '.task_names.A' <<<"$second") == loop_worker_41_a2 \
+		&& $(python3 "$CODEX_GRAPH" inspect "$state" | jq -r '.task_names.A') == loop_worker_41_a2 ]]; then
+		pass "retry begin and inspect use a unique native task name"
+	else
+		fail "retry begin and inspect use a unique native task name" "$second"
+	fi
+	install_hook_state "$state" "$root"
+	evals="$root/fixture/session-test/evals.json"
+	expect_allowed "retry authorization requires the exact attempt task name" python3 "$CODEX_GRAPH" authorize-dispatch "$state" \
+		--session session-test --task loop_worker_41_a2 --evals "$evals"
+	expect_rejected "retry authorization rejects the first-attempt name" "$state" python3 "$CODEX_GRAPH" authorize-dispatch "$state" \
+		--session session-test --task loop_worker_41 --evals "$evals"
+	expect_not_denied "dispatch hook allows the exact retry task name" codex_hook_denied "$root" \
+		"$(codex_dispatch_input loop_worker_41_a2)"
+	expect_denied "dispatch hook rejects the reused first-attempt name" codex_hook_denied "$root" \
+		"$(codex_dispatch_input loop_worker_41)"
+	codex_fixture::append_wave "$state"
+	python3 "$CODEX_GRAPH" record-wave "$state" \
+		'{"wave_id":"wave-4","results":{"A":{"outcome":"done","evidence":"done"}}}' >/dev/null
+	if jq -e '[.graph.nodes.A.evidence[] | select(type == "object")] as $refs |
+		[$refs[].attempt] == [1,2] and ([$refs[].spawn_call_id] | unique | length) == 2 and
+		([$refs[].agent_thread_id] | unique | length) == 2 and
+		([$refs[].task_complete_turn_id] | unique | length) == 2' "$state" >/dev/null; then
+		pass "two native-format retry attempts keep distinct transcript references"
+	else
+		fail "two native-format retry attempts keep distinct transcript references" "references were reused"
+	fi
 }
 
 test_codex_wave_identity() {
