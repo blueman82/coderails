@@ -16,7 +16,12 @@ codex_fixture::init session-codex
 # Claude and "parity" would be unfalsifiable.
 # shellcheck source=hooks/scripts/tests/lib/claude_transcript_fixture.sh
 source "$ROOT/hooks/scripts/tests/lib/claude_transcript_fixture.sh"
-CLAUDE_PROJECTS="$TMP/home/.claude/projects"
+# Pin the transcript dir explicitly: graph_evidence resolves
+# ${CLAUDE_PROJECTS_DIR:-$HOME/.claude/projects}, so an ambient
+# CLAUDE_PROJECTS_DIR in the caller's environment would otherwise point the
+# binding past this fixture and silently fail the assertion below.
+export CLAUDE_PROJECTS_DIR="$TMP/home/.claude/projects"
+CLAUDE_PROJECTS="$CLAUDE_PROJECTS_DIR"
 claude_fixture_append_wave() { # state
 	local state="$1" session wave node
 	session=$(jq -r '.session_id // empty' "$state") || return 0
