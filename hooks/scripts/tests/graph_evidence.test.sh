@@ -433,10 +433,60 @@ jq -n --arg session "$SESSION" --argjson c "$CURSOR" --arg id "$GEN1" '
        edges:[],joins:{},
        active_wave:{wave_id:"wave-1",revision:1,nodes:["N1","N2"],transcript_cursor:$c},
        hard_stop:null}}' >"$state"
+# The id N1 would otherwise bind is already bound (nested) under N2, so it is
+# consumed and N1 has no candidate left — refused rather than binding one spawn
+# to two nodes. The message names the empty-candidate outcome; the invariant
+# under test is that the id is NOT reused, asserted below.
 expect_denied "a nested already-bound id still blocks reuse" \
-	"is already bound" "$state" \
+	"has no spawn in wave-1" "$state" \
 	"$(jq -cn '{wave_id:"wave-1",results:{
         N1:{outcome:"done",evidence:[]},N2:{outcome:"done",evidence:[]}}}')"
+
+# --- FAN-OUT: one node, several concurrent spawns in a single wave ----------
+# Observed live in this repo: a single node dispatched to three agents at once
+# inside one wave. apply_wave writes each node once per wave, so all of them
+# are present when the wave is recorded. Requiring exactly one spawn per node
+# would deny those legitimate waves outright.
+FAN_SESSION="session-fixture-fanout"
+claude_fixture::init "$PROJECTS" "$FAN_SESSION"
+FAN_CURSOR=$(claude_fixture::cursor "$PROJECTS" "$FAN_SESSION")
+claude_fixture::append_spawn "$PROJECTS" "$FAN_SESSION" N1 wave-1 toolu_FAN1 >/dev/null
+claude_fixture::append_spawn "$PROJECTS" "$FAN_SESSION" N1 wave-1 toolu_FAN2 >/dev/null
+claude_fixture::append_spawn "$PROJECTS" "$FAN_SESSION" N1 wave-1 toolu_FAN3 >/dev/null
+state="$TMP/fanout.json"
+jq -n --arg session "$FAN_SESSION" --argjson c "$FAN_CURSOR" '
+  {status:"running",outcome:"running",retry:{attempts:0,max:2},evidence:[]} as $n
+  | {schema_version:2,session_id:$session,loop_id:"loop-fixture",revision:1,
+     status:"in-progress",
+     graph:{nodes:{N1:$n},edges:[],joins:{},
+            active_wave:{wave_id:"wave-1",revision:1,nodes:["N1"],transcript_cursor:$c},
+            hard_stop:null}}' >"$state"
+if graph_dispatch_record "$state" \
+	"$(jq -cn '{wave_id:"wave-1",results:{N1:{outcome:"done",evidence:["fanned out"]}}}')" \
+	>/dev/null 2>&1; then
+	expect_eq "a node with several spawns in one wave binds one of them" 'true' \
+		"$(jq -r '[.graph.nodes.N1.evidence[] | select(type=="object")] as $refs
+              | ($refs | length) == 1
+                and (["toolu_FAN1","toolu_FAN2","toolu_FAN3"] | index($refs[0].tool_use_id)) != null' "$state")"
+else
+	fail "a node with several spawns in one wave binds one of them" \
+		"fan-out was refused; a legitimate wave cannot be recorded"
+fi
+
+# Fan-out must not weaken WHICH ids are acceptable: a forged id is still
+# refused even when the node has several genuine spawns to choose from.
+state="$TMP/fanout_forged.json"
+jq -n --arg session "$FAN_SESSION" --argjson c "$FAN_CURSOR" '
+  {status:"running",outcome:"running",retry:{attempts:0,max:2},evidence:[]} as $n
+  | {schema_version:2,session_id:$session,loop_id:"loop-fixture",revision:1,
+     status:"in-progress",
+     graph:{nodes:{N1:$n},edges:[],joins:{},
+            active_wave:{wave_id:"wave-1",revision:1,nodes:["N1"],transcript_cursor:$c},
+            hard_stop:null}}' >"$state"
+expect_denied "fan-out does not make a forged id acceptable" \
+	"cites a spawn it does not own" "$state" \
+	"$(jq -cn '{wave_id:"wave-1",results:{
+        N1:{outcome:"done",evidence:[{spawn_ref:"toolu_FANFORGED"}]}}}')"
 
 # --- The cursor counts records the way the spawn walk numbers them ----------
 # `wc -l` counts newlines, so a transcript caught mid-append (final line not yet

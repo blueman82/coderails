@@ -267,6 +267,9 @@ graph_evidence_bind_wave() {
       | reduce ($wave | keys[]) as $id (
           {out: {}, used: $already_bound};
           ($wave[$id]) as $result
+          # Captured while `.` is still the reduce state — inside the pipeline
+          # below `.` becomes each intermediate value, not the accumulator.
+          | (.used) as $used_ids
           | if $id == "decisions_absorbed" then .out[$id] = $result
             else
               ((($result.evidence // []) | if type == "array" then . else [$result.evidence] end)) as $all_evidence
@@ -295,11 +298,26 @@ graph_evidence_bind_wave() {
               | ([ $evidence[] | select(looks_provenance)
                    | (norm_ids | if length > 0 then .[0] else "" end) ]) as $claims
               | ([ $evidence[] | select(looks_provenance | not) ]) as $kept
+              # Spawns this node genuinely owns in this wave, after the cursor,
+              # oldest first. A node legitimately has MORE THAN ONE: a real wave
+              # fans a single node out to several agents at once (observed live
+              # in this repo — one node with three concurrent Agent calls inside
+              # one wave, e.g. a review node dispatching three reviewers), and
+              # apply_wave writes each node exactly once per wave, so all of
+              # them are present by the time the wave is recorded. Demanding
+              # exactly one would therefore deny legitimate waves.
+              #
+              # Loosening HOW MANY does not loosen WHICH: a bound id must still
+              # come from this list (own node, own wave, after the cursor) and
+              # must still be unused, so forgery, cross-node replay, pre-cursor
+              # replay and reuse all still fail.
               | ([ if $cursor_raw == null then empty else $spawns[] end
-                   | select(.node_id == $id and .wave_id == $wave_id and .line > $cursor) ]) as $matches
-              | if ($matches | length) > 1
-                then error("graph_evidence: node \($id) matches multiple spawns in \($wave_id)")
-                elif ($matches | length) == 0
+                   | select(.node_id == $id and .wave_id == $wave_id and .line > $cursor) ]
+                 | sort_by(.line)) as $candidates
+              | ([ $candidates[] | . as $c
+                   | select(($used_ids | index($c.tool_use_id)) == null) ]) as $free
+              | ($free | if length > 0 then [.[-1]] else [] end) as $matches
+              | if ($matches | length) == 0
                 then
                   if ($claims | length) > 0
                   then error("graph_evidence: node \($id) cites an unbindable spawn \($claims[0])")
@@ -312,7 +330,13 @@ graph_evidence_bind_wave() {
                   end
                 else
                   ($matches[0]) as $m
-                  | if ($claims | map(select(. != $m.tool_use_id)) | length) > 0
+                  # A claim may name ANY spawn this node genuinely owns in this
+                  # wave (with fan-out, several are legitimate) — but nothing
+                  # else. A forged, cross-node, cross-wave or pre-cursor id is
+                  # absent from $candidates and still fails here.
+                  | ([ $candidates[] | .tool_use_id ]) as $ownable
+                  | if ($claims | map(. as $cl | select(($ownable | index($cl)) == null))
+                         | length) > 0
                     then error("graph_evidence: node \($id) cites a spawn it does not own")
                     elif (.used | index($m.tool_use_id)) != null
                     then error("graph_evidence: spawn \($m.tool_use_id) is already bound")
