@@ -44,17 +44,38 @@
 GRAPH_EVIDENCE_ENVELOPE_KEY="CODERAILS_GRAPH_DISPATCH"
 
 # graph_evidence_transcript <session_id>
-# Resolve this session's transcript. Mirrors the established repo idiom
-# (loop_cost.sh / loop_state_common.sh): glob
-# ${CLAUDE_PROJECTS_DIR:-$HOME/.claude/projects}/*/<session_id>.jsonl.
-# Prints the path; returns 1 when none resolves.
+# Resolve this session's transcript by globbing
+# <projects_dir>/*/<session_id>.jsonl. Prints the path; returns 1 when none
+# resolves.
+#
+# The party this gate constrains is the orchestrator's own self-report, and
+# that party has arbitrary Bash — so the transcript location must NOT be
+# something it can redirect. CLAUDE_PROJECTS_DIR is honoured (it is the
+# established repo idiom, used by loop_cost.sh and loop_state_common.sh) only
+# while it stays UNDER $HOME/.claude/projects, which is the one place the
+# orchestrator cannot author records into without actually making the tool
+# call. Pointing it at a hand-authored transcript elsewhere otherwise lets
+# fabricated spawns "derive" fake truth and bind.
+#
+# Tests legitimately need a transcript outside $HOME, so an explicit,
+# obviously-named opt-out exists. It is deliberately NOT the same variable:
+# an env var a test sets on purpose cannot be reached by accident, and the
+# name says what it is.
+GRAPH_EVIDENCE_TEST_ESCAPE="GRAPH_EVIDENCE_ALLOW_UNPINNED_TRANSCRIPT"
 graph_evidence_transcript() {
-    local session="$1" projects_dir f
+    local session="$1" projects_dir default_dir f
     [ -n "$session" ] || return 1
     case "$session" in
     */* | ..*) return 1 ;; # never let a session id escape the projects dir
     esac
-    projects_dir="${CLAUDE_PROJECTS_DIR:-$HOME/.claude/projects}"
+    default_dir="$HOME/.claude/projects"
+    projects_dir="${CLAUDE_PROJECTS_DIR:-$default_dir}"
+    if [ "${!GRAPH_EVIDENCE_TEST_ESCAPE:-}" != "1" ]; then
+        case "$projects_dir" in
+        "$default_dir" | "$default_dir"/*) ;;
+        *) return 1 ;; # redirected outside $HOME: refuse to read it at all
+        esac
+    fi
     for f in "$projects_dir"/*/"$session.jsonl"; do
         [ -f "$f" ] || continue
         printf '%s\n' "$f"
@@ -116,14 +137,20 @@ graph_evidence_spawns() {
 }
 
 # graph_evidence_cursor <transcript>
-# The wave's lower bound: the transcript's current length at begin-wave. Any
-# Agent spawn bindable to that wave must appear STRICTLY AFTER this line, so a
-# spawn from an earlier wave cannot be replayed into this one. A line count is
-# sufficient and monotonic — the transcript is append-only JSON Lines.
+# The wave's lower bound: the number of RECORDS already in the transcript at
+# begin-wave. Any Agent spawn bindable to that wave must appear STRICTLY AFTER
+# this record, so a spawn from an earlier wave cannot be replayed into it.
+#
+# Counts records exactly as graph_evidence_spawns numbers them — non-empty
+# lines — rather than newlines. `wc -l` counts newlines, so a final line
+# written without a trailing newline (a transcript caught mid-append) would go
+# uncounted here while still being numbered by the splitter, leaving a spawn on
+# that line looking one position past the cursor. That is precisely the replay
+# the cursor exists to prevent.
 graph_evidence_cursor() {
     local transcript="$1"
     [ -f "$transcript" ] || return 1
-    wc -l <"$transcript" | tr -d ' '
+    grep -c '[^[:space:]]' "$transcript" 2>/dev/null || true
 }
 
 # graph_evidence_bind_wave <progress.json> <wave_json>
@@ -168,30 +195,78 @@ graph_evidence_bind_wave() {
         | .[] | select(type == "object" and has("spawn_ref")) ] | length' 2>/dev/null)
     case "$cited_count" in '' | *[!0-9]*) return 1 ;; esac
 
+    # transcript_clean drives the difference between "this node genuinely has
+    # no spawn to bind" and "we could not look". Only a transcript that
+    # RESOLVED and PARSED lets the gate demand a binding; anything else leaves
+    # the legacy posture, where an uncited node passes through.
+    local transcript_clean=false raw_spawns rc
     if transcript=$(graph_evidence_transcript "$session"); then
-        # One jq -e over the whole file: empty output here means "no spawns",
-        # non-zero means "unreadable", and the two are never conflated.
-        if ! spawns_json=$(graph_evidence_spawns "$transcript" "$session" |
-            jq -e -c --slurp '.' 2>/dev/null); then
+        # Capture the walk's own exit status. A pipeline reports only its last
+        # command, and `jq -e --slurp` turns empty input into [] with rc 0, so
+        # piping straight into it would discard the walk's rc=5 abort on a
+        # malformed record — the very failure this must fail closed on.
+        raw_spawns=$(graph_evidence_spawns "$transcript" "$session")
+        rc=$?
+        if [ "$rc" -ne 0 ]; then
             return 1 # malformed/unreadable transcript: fail closed, always
         fi
+        spawns_json=$(printf '%s' "$raw_spawns" | jq -c --slurp '.' 2>/dev/null) || return 1
+        [ -n "$spawns_json" ] || return 1
+        transcript_clean=true
     else
         [ "$cited_count" -eq 0 ] || return 1 # a claim with nothing to check it against
+        # A cursor in active_wave means begin-wave DID resolve this transcript.
+        # If it is unreadable now — deleted, or CLAUDE_PROJECTS_DIR redirected
+        # away from $HOME between begin-wave and record — the wave cannot be
+        # verified and must not be recorded on trust.
+        if jq -e '(.graph.active_wave.transcript_cursor // null) != null' \
+            "$progress" >/dev/null 2>&1; then
+            return 1
+        fi
         spawns_json='[]'
     fi
 
-    jq -e -c --argjson spawns "$spawns_json" --argjson wave "$wave_json" '
+    jq -e -c --argjson spawns "$spawns_json" --argjson wave "$wave_json" \
+        --argjson transcript_clean "$transcript_clean" '
+      # Normalising detectors, applied to ONE caller-supplied evidence entry.
+      # Both walk the entry recursively (..) so nesting and array-wrapping
+      # cannot hide provenance, and fold case/punctuation so a trailing space
+      # or a homoglyph-ish variant still trips. String leaves are scanned too,
+      # so the bound shape serialised as a JSON string is caught.
+      def norm_ids:
+        [ .. | objects | (.spawn_ref?, .tool_use_id?) | select(type == "string") ];
+      def looks_provenance:
+        ([ .. | objects | (.kind?, .spawn_ref?, .tool_use_id?)
+           | select(type == "string") ]
+         | any(ascii_downcase | gsub("[^a-z_]"; "") | test("claude_agent|toolu")))
+        or ([ .. | strings ]
+            | any(test("toolu_|\"kind\"\\s*:\\s*\"claude_agent")));
       (.graph.active_wave // {}) as $active
       | ($active.wave_id // null) as $wave_id
-      # A wave with no recorded cursor has no lower bound. Waves begun before
-      # this change carry none; they still bind by node+wave, they just cannot
-      # exclude a pre-wave spawn. Documented ceiling, not a silent pass.
-      | ($active.transcript_cursor // -1) as $cursor
+      # A wave with no recorded cursor has no lower bound, so it cannot tell a
+      # fresh spawn from an old one with the same wave id. Rather than binding
+      # unbounded (which let a six-lines-earlier wave-1 spawn replay into a new
+      # wave-1), a cursorless wave binds NOTHING: $matches is forced empty
+      # below. Combined with $binding_required, that makes a missing cursor
+      # inert in both directions — it can neither mint a reference nor be used
+      # to demand one. Legacy waves keep working precisely because they also
+      # cannot be required to bind.
+      | ($active.transcript_cursor // null) as $cursor_raw
+      | ($cursor_raw // -1) as $cursor
+      # Binding is MANDATORY when the gate can actually see the truth: a cursor
+      # was recorded, the transcript resolved and parsed clean, and the node is
+      # not a join. Without this, a node that simply stays silent is never
+      # checked — the party the gate constrains could opt out of it by
+      # reporting plain-string evidence and citing nothing.
+      | ($cursor_raw != null and $transcript_clean) as $binding_required
+      | (.graph.joins // {}) as $joins
       | (.graph.nodes // {}) as $nodes
       # Every tool_use_id already bound anywhere in the graph — the reuse set.
-      | ([ $nodes[]? | (.evidence // [])
-           | if type == "array" then . else [.] end
-           | .[] | select(type == "object") | .tool_use_id? | select(. != null) ]) as $already_bound
+      # Descends recursively (..): a top-level-only scan missed ids nested in
+      # an array or under another key, which let the same real spawn bind to a
+      # second node.
+      | ([ $nodes[]? | (.evidence // []) | .. | objects
+           | .tool_use_id? | select(type == "string") ]) as $already_bound
       | reduce ($wave | keys[]) as $id (
           {out: {}, used: $already_bound};
           ($wave[$id]) as $result
@@ -209,19 +284,21 @@ graph_evidence_bind_wave() {
               | (if $prefix == $carried then $all_evidence[($carried | length):]
                  else $all_evidence end) as $evidence
               | (if $prefix == $carried then $carried else [] end) as $carried_kept
-              # A claim is ANY caller-supplied object that asserts provenance:
-              # the documented {spawn_ref} form, or an object already wearing
-              # the bound shape (kind/tool_use_id). Only this gate may mint a
-              # provenance reference — otherwise a caller bypasses the whole
-              # check by writing the OUTPUT shape directly instead of a claim.
-              | ([ $evidence[] | select(type == "object")
-                   | (.spawn_ref? // .tool_use_id?
-                      // (if (.kind? == "claude_agent") then "" else null end))
-                   | select(. != null) ]) as $claims
-              | ([ $evidence[] | select((type == "object"
-                     and (has("spawn_ref") or has("tool_use_id")
-                          or (.kind? == "claude_agent"))) | not) ]) as $kept
-              | ([ $spawns[]
+              # A claim is ANY caller-supplied evidence entry that asserts
+              # provenance ANYWHERE inside it. Only this gate may mint a
+              # reference, so rather than enumerating forged shapes — which
+              # loses to array-wrapping, nesting, a trailing space, a homoglyph
+              # or the shape as a JSON string — each entry is NORMALISED
+              # (recursively walked, its string leaves included) and rejected
+              # if it carries provenance-ish content at any depth.
+              #
+              # `claim_of` returns the cited id (or "" when the entry is
+              # provenance-shaped without a usable id, which still counts as a
+              # claim and so still has to match a real spawn).
+              | ([ $evidence[] | select(looks_provenance)
+                   | (norm_ids | if length > 0 then .[0] else "" end) ]) as $claims
+              | ([ $evidence[] | select(looks_provenance | not) ]) as $kept
+              | ([ if $cursor_raw == null then empty else $spawns[] end
                    | select(.node_id == $id and .wave_id == $wave_id and .line > $cursor) ]) as $matches
               | if ($matches | length) > 1
                 then error("graph_evidence: node \($id) matches multiple spawns in \($wave_id)")
@@ -229,6 +306,11 @@ graph_evidence_bind_wave() {
                 then
                   if ($claims | length) > 0
                   then error("graph_evidence: node \($id) cites an unbindable spawn \($claims[0])")
+                  # Citing nothing must not be a way out. When the gate can see
+                  # the truth, a non-join node with no spawn in this wave was
+                  # never dispatched, whatever it reports about itself.
+                  elif ($binding_required and ($joins | has($id) | not))
+                  then error("graph_evidence: node \($id) has no spawn in \($wave_id); nothing to bind")
                   else .out[$id] = ($result + {evidence: ($carried_kept + $kept)})
                   end
                 else

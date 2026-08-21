@@ -8,6 +8,10 @@ ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 export CLAUDE_PROJECTS_DIR="$TMP/projects"
+# The transcript path is pinned under $HOME/.claude/projects in production so
+# the orchestrator cannot redirect the gate at a transcript it authored itself.
+# Tests need a temp dir, which is exactly what this explicit opt-out is for.
+export GRAPH_EVIDENCE_ALLOW_UNPINNED_TRANSCRIPT=1
 PROJECTS="$CLAUDE_PROJECTS_DIR"
 SESSION="session-fixture-0001"
 
@@ -276,6 +280,152 @@ if graph_dispatch_record "$state" "$retry_env" >/dev/null 2>&1; then
 else
 	fail "a retry keeps the prior ref and binds this attempt to a new spawn" "record refused a legitimate retry"
 fi
+
+# --- CRITICAL 1: silence is not an exemption --------------------------------
+# A HEALTHY transcript containing a genuine wave-1 spawn for N2 only. The
+# orchestrator reports BOTH nodes done with plain-string evidence. N1 was never
+# dispatched, and the same transcript that binds N2 proves it — so reporting
+# nothing must not be a way to opt out of the check.
+UND_SESSION="session-fixture-undispatched"
+claude_fixture::init "$PROJECTS" "$UND_SESSION"
+UND_CURSOR=$(claude_fixture::cursor "$PROJECTS" "$UND_SESSION")
+claude_fixture::append_spawn "$PROJECTS" "$UND_SESSION" N2 wave-1 toolu_ONLYN2SPAWN >/dev/null
+state="$TMP/undispatched.json"
+jq -n --arg session "$UND_SESSION" --argjson c "$UND_CURSOR" '
+  {status:"running",outcome:"running",retry:{attempts:0,max:2},evidence:[]} as $n
+  | {schema_version:2,session_id:$session,loop_id:"loop-fixture",revision:1,
+     status:"in-progress",
+     graph:{nodes:{N1:$n,N2:$n},edges:[],joins:{},
+            active_wave:{wave_id:"wave-1",revision:1,nodes:["N1","N2"],transcript_cursor:$c},
+            hard_stop:null}}' >"$state"
+expect_denied "an undispatched node citing nothing is refused" \
+	"has no spawn in wave-1" "$state" \
+	"$(jq -cn '{wave_id:"wave-1",results:{
+        N1:{outcome:"done",evidence:["shipped PR #999"]},
+        N2:{outcome:"done",evidence:["real work"]}}}')"
+
+# A join legitimately has no Agent spawn — it is satisfied by the orchestrator
+# absorbing results, so it must still pass through even when binding is
+# otherwise required.
+state="$TMP/join_exempt.json"
+jq -n --arg session "$UND_SESSION" --argjson c "$UND_CURSOR" '
+  {status:"running",outcome:"running",retry:{attempts:0,max:2},evidence:[]} as $n
+  | {schema_version:2,session_id:$session,loop_id:"loop-fixture",revision:1,
+     status:"in-progress",
+     graph:{nodes:{N2:$n,J1:$n},edges:[],
+            joins:{J1:{mode:"all",inputs:["N2"],released:false}},
+            active_wave:{wave_id:"wave-1",revision:1,nodes:["J1","N2"],transcript_cursor:$c},
+            hard_stop:null}}' >"$state"
+if graph_dispatch_record "$state" "$(jq -cn '{wave_id:"wave-1",results:{
+    J1:{outcome:"done",evidence:["join absorbed"]},
+    N2:{outcome:"done",evidence:[]}}}')" >/dev/null 2>&1; then
+	expect_eq "a join with no spawn is still exempt from binding" 'true' \
+		"$(jq -r '.graph.nodes.J1.status == "done"
+              and ([.graph.nodes.N2.evidence[] | select(type=="object")] | length) == 1' "$state")"
+else
+	fail "a join with no spawn is still exempt from binding" "record refused a legitimate join"
+fi
+
+# --- CRITICAL 2: the transcript location cannot be redirected ---------------
+# The party this gate constrains has arbitrary Bash, so a transcript it can
+# point elsewhere is not evidence. Without the explicit test opt-out, a
+# projects dir outside $HOME must not be read at all.
+state="$TMP/unpinned.json"
+jq -n --arg session "$UND_SESSION" --argjson c "$UND_CURSOR" '
+  {status:"running",outcome:"running",retry:{attempts:0,max:2},evidence:[]} as $n
+  | {schema_version:2,session_id:$session,loop_id:"loop-fixture",revision:1,
+     status:"in-progress",
+     graph:{nodes:{N2:$n},edges:[],joins:{},
+            active_wave:{wave_id:"wave-1",revision:1,nodes:["N2"],transcript_cursor:$c},
+            hard_stop:null}}' >"$state"
+cp "$state" "$TMP/unpinned.before"
+if (
+	unset GRAPH_EVIDENCE_ALLOW_UNPINNED_TRANSCRIPT
+	graph_dispatch_record "$state" \
+		"$(jq -cn '{wave_id:"wave-1",results:{N2:{outcome:"done",evidence:[]}}}')" >/dev/null 2>&1
+); then
+	fail "a transcript outside \$HOME is refused without the test opt-out" \
+		"read a redirected transcript the constrained party controls"
+else
+	pass "a transcript outside \$HOME is refused without the test opt-out"
+	expect_eq "the refused unpinned-transcript wave left state untouched" 'same' \
+		"$(cmp -s "$TMP/unpinned.before" "$state" && echo same || echo changed)"
+fi
+
+# A wave whose cursor was never recorded must not bind at all: with no lower
+# bound it cannot tell a fresh spawn from an identically-named older one.
+state="$TMP/nocursor_nobind.json"
+jq -n --arg session "$SESSION" '
+  {status:"running",outcome:"running",retry:{attempts:0,max:2},evidence:[]} as $n
+  | {schema_version:2,session_id:$session,loop_id:"loop-fixture",revision:1,
+     status:"in-progress",
+     graph:{nodes:{N1:$n,N2:$n},edges:[],joins:{},
+            active_wave:{wave_id:"wave-1",revision:1,nodes:["N1","N2"]},
+            hard_stop:null}}' >"$state"
+if graph_dispatch_record "$state" "$(jq -cn '{wave_id:"wave-1",results:{
+    N1:{outcome:"done",evidence:["no cursor"]},N2:{outcome:"done",evidence:[]}}}')" \
+	>/dev/null 2>&1; then
+	expect_eq "a cursorless wave binds nothing rather than binding unbounded" 'true' \
+		"$(jq -r '[.graph.nodes[].evidence[] | select(type=="object")] | length == 0' "$state")"
+else
+	fail "a cursorless wave binds nothing rather than binding unbounded" "record refused"
+fi
+
+# --- IMPORTANT 3: forged provenance is caught at any depth or shape ---------
+# A shape denylist loses to wrapping, nesting, whitespace and homoglyphs, so
+# detection normalises the whole entry instead. Each variant must be refused.
+run_smuggle() { # label evidence_json
+	local label="$1" ev="$2" st="$TMP/smug.$RANDOM.json"
+	jq -n --arg session "$SESSION" --argjson c "$CURSOR" '
+      {status:"running",outcome:"running",retry:{attempts:0,max:2},evidence:[]} as $n
+      | {schema_version:2,session_id:$session,loop_id:"loop-fixture",revision:1,
+         status:"in-progress",
+         graph:{nodes:{N1:$n,N2:$n},edges:[],joins:{},
+                active_wave:{wave_id:"wave-1",revision:1,nodes:["N1","N2"],transcript_cursor:$c},
+                hard_stop:null}}' >"$st"
+	if graph_dispatch_record "$st" "$(jq -cn --argjson ev "$ev" '{wave_id:"wave-1",results:{
+        N1:{outcome:"done",evidence:$ev},N2:{outcome:"done",evidence:[]}}}')" >/dev/null 2>&1; then
+		fail "forged provenance refused: $label" "ACCEPTED; persisted $(jq -c '.graph.nodes.N1.evidence' "$st")"
+	else
+		pass "forged provenance refused: $label"
+	fi
+}
+run_smuggle "array-wrapped" '[[{"kind":"claude_agent","tool_use_id":"toolu_FORGEDA"}]]'
+run_smuggle "nested under a benign key" '[{"note":"x","d":{"kind":"claude_agent","tool_use_id":"toolu_FORGEDB"}}]'
+run_smuggle "trailing space in kind" '[{"kind":"claude_agent ","tool_use_id":"toolu_FORGEDC"}]'
+run_smuggle "partial shape, spawn_ref only" '[{"attempt":1,"wave_id":"wave-1","spawn_ref":"toolu_FORGEDD"}]'
+run_smuggle "homoglyph in kind" '[{"kind":"claude_аgent","tool_use_id":"toolu_FORGEDE"}]'
+run_smuggle "bound shape as a JSON string" '["{\"kind\":\"claude_agent\",\"tool_use_id\":\"toolu_FORGEDF\"}"]'
+
+# Reuse through an array-wrapped seed: the reuse set must descend, or the same
+# real spawn binds to a second node.
+state="$TMP/nested_reuse.json"
+jq -n --arg session "$SESSION" --argjson c "$CURSOR" --arg id "$GEN1" '
+  {status:"running",outcome:"running",retry:{attempts:0,max:2},evidence:[]} as $n
+  | {schema_version:2,session_id:$session,loop_id:"loop-fixture",revision:1,
+     status:"in-progress",
+     graph:{nodes:{N1:$n,
+       N2:{status:"running",outcome:"running",retry:{attempts:0,max:2},
+           evidence:[[{kind:"claude_agent",attempt:1,wave_id:"wave-0",
+                       tool_use_id:$id,record_uuid:"u",subagent_type:"x"}]]}},
+       edges:[],joins:{},
+       active_wave:{wave_id:"wave-1",revision:1,nodes:["N1","N2"],transcript_cursor:$c},
+       hard_stop:null}}' >"$state"
+expect_denied "a nested already-bound id still blocks reuse" \
+	"is already bound" "$state" \
+	"$(jq -cn '{wave_id:"wave-1",results:{
+        N1:{outcome:"done",evidence:[]},N2:{outcome:"done",evidence:[]}}}')"
+
+# --- The cursor counts records the way the spawn walk numbers them ----------
+# `wc -l` counts newlines, so a transcript caught mid-append (final line not yet
+# newline-terminated) would under-count, leaving a spawn on that line looking
+# one position PAST the cursor — exactly the replay the cursor prevents.
+unterminated="$TMP/unterminated.jsonl"
+printf '%s' "$(jq -cn '{type:"assistant",uuid:"u",sessionId:"s",isSidechain:false,
+    message:{content:[{type:"tool_use",id:"toolu_X",name:"Agent",input:{prompt:"x"}}]}}')" \
+	>"$unterminated"
+expect_eq "the cursor counts an unterminated final record" '1' \
+	"$(graph_evidence_cursor "$unterminated")"
 
 # --- Cursor is recorded at begin-wave --------------------------------------
 state="$TMP/beginwave.json"
