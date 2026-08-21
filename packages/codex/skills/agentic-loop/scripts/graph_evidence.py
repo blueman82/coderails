@@ -145,7 +145,7 @@ def _verify_reference(
     indexes: tuple[dict[str, list[tuple[int, str]]], dict[str, list[str]], dict[str, list[dict[str, Any]]]],
 ) -> int:
     spawns, results, activities = indexes
-    expected_task = task_name(node_id)
+    expected_task = task_name(node_id, reference["attempt"])
     call_id = reference["spawn_call_id"]
     if len(spawns.get(call_id, [])) != 1:
         raise EvidenceError(f"node {node_id} spawn reference is missing or duplicate")
@@ -219,7 +219,8 @@ def bind_worker_evidence(state: dict[str, Any], active_wave: dict[str, Any]) -> 
         raise EvidenceError("active wave has no valid transcript cursor")
     references: dict[str, dict[str, Any]] = {}
     for node_id in active_wave["nodes"]:
-        expected_task = task_name(node_id)
+        attempt = state["graph"]["nodes"][node_id]["retry"]["attempts"] + 1
+        expected_task = task_name(node_id, attempt)
         matching = [(call_id, items[0][0]) for call_id, items in indexes[0].items()
                     if len(items) == 1 and items[0][0] > cursor
                     and items[0][1] == expected_task]
@@ -233,7 +234,7 @@ def bind_worker_evidence(state: dict[str, Any], active_wave: dict[str, Any]) -> 
         terminal = _child_terminal(state["session_id"], expected_task, agent_thread_id)
         reference = {
             "kind": "codex_agent",
-            "attempt": state["graph"]["nodes"][node_id]["retry"]["attempts"] + 1,
+            "attempt": attempt,
             "wave_id": active_wave["id"],
             "spawn_call_id": call_id,
             "agent_thread_id": agent_thread_id,
@@ -246,7 +247,6 @@ def bind_worker_evidence(state: dict[str, Any], active_wave: dict[str, Any]) -> 
         used.update(identifiers)
         references[node_id] = reference
     return references
-
 def validate_worker_evidence(state: dict[str, Any]) -> None:
     _stored_references(state, True)
 

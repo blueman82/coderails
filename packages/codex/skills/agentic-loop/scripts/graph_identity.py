@@ -8,21 +8,26 @@ class IdentityError(ValueError):
     pass
 
 
-def task_name(node_id: str) -> str:
-    return f"loop_worker_{node_id.encode().hex()}"
+def task_name(node_id: str, attempt: int = 1) -> str:
+    if isinstance(attempt, bool) or not isinstance(attempt, int) or attempt < 1:
+        raise IdentityError("graph worker attempt must be a positive integer")
+    suffix = "" if attempt == 1 else f"_a{attempt}"
+    return f"loop_worker_{node_id.encode().hex()}{suffix}"
 
 
 def task_node(name: str) -> str:
-    if not re.fullmatch(r"loop_worker_[0-9a-f]+", name):
+    match = re.fullmatch(r"loop_worker_([0-9a-f]+)(?:_a([2-9][0-9]*))?", name)
+    if match is None:
         raise IdentityError("graph worker task name must use the native lowercase format")
-    encoded = name.removeprefix("loop_worker_")
+    encoded, retry = match.groups()
+    attempt = int(retry) if retry else 1
     if len(encoded) % 2:
         raise IdentityError("graph worker task name is not reversible")
     try:
         node_id = bytes.fromhex(encoded).decode()
     except (UnicodeDecodeError, ValueError) as error:
         raise IdentityError("graph worker task name is not reversible") from error
-    if not node_id or task_name(node_id) != name:
+    if not node_id or task_name(node_id, attempt) != name:
         raise IdentityError("graph worker task name is not canonical")
     return node_id
 

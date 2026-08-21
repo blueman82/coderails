@@ -24,7 +24,6 @@ SUCCESS = {"done", "skipped"}
 
 class GraphError(ValueError):
     pass
-
 def _object(value: Any, label: str) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise GraphError(f"{label} must be an object")
@@ -207,7 +206,7 @@ def _begin_wave(path: Path) -> dict[str, Any]:
         for node_id in nodes:
             graph["nodes"][node_id]["status"] = "running"
             graph["nodes"][node_id]["outcome"] = "running"
-        task_names = {node_id: task_name(node_id) for node_id in nodes}
+        task_names = {node_id: task_name(node_id, graph["nodes"][node_id]["retry"]["attempts"] + 1) for node_id in nodes}
         graph["active_wave"] = {"id": wave_id, "revision": revision, "nodes": nodes,
                                 "transcript_cursor": cursor}
         state["revision"] = revision
@@ -272,7 +271,7 @@ def _inspect(path: Path) -> dict[str, Any]:
     return {
         "session_id": state["session_id"], "loop_id": state["loop_id"], "revision": state["revision"],
         "status": state.get("status"), "active_wave": graph["active_wave"],
-        "task_names": ({node_id: task_name(node_id) for node_id in graph["active_wave"]["nodes"]}
+        "task_names": ({node_id: task_name(node_id, graph["nodes"][node_id]["retry"]["attempts"] + 1) for node_id in graph["active_wave"]["nodes"]}
                        if graph["active_wave"] is not None else {}),
         "running": sorted(node_id for node_id, node in graph["nodes"].items() if node["status"] == "running"),
         "ready": _ready(state) if graph["active_wave"] is None and graph["hard_stop"] is None else [], "hard_stop": graph["hard_stop"],
@@ -332,22 +331,24 @@ def _verify_completion(path: Path, session: str, evals_path: Path, proof_path: P
     return {"status": "complete", "loop_id": state["loop_id"], "revision": state["revision"]}
 
 
-def _authorize_dispatch(path: Path, session: str, task_name: str, evals_path: Path) -> dict[str, Any]:
+def _authorize_dispatch(path: Path, session: str, task: str, evals_path: Path) -> dict[str, Any]:
     state = _load(path)
     if state["session_id"] != session:
         raise GraphError("session does not own this loop")
     if state["status"] == "complete":
         raise GraphError("completed graph does not own worker dispatch")
-    node_id = task_node(task_name)
+    node_id = task_node(task)
     active_wave = state["graph"]["active_wave"]
     if active_wave is None or node_id not in active_wave["nodes"]:
         raise GraphError("graph worker node is not in the active wave")
+    attempt = state["graph"]["nodes"][node_id]["retry"]["attempts"] + 1
+    if task_name(node_id, attempt) != task:
+        raise GraphError("graph worker task name does not match the active attempt")
     validate_evals(state, None, evals_path)
     return {
-        "loop_id": state["loop_id"], "node": node_id, "task_name": task_name,
+        "loop_id": state["loop_id"], "node": node_id, "task_name": task,
         "wave_id": active_wave["id"], "revision": state["revision"],
     }
-
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Operate one native Codex agentic-loop graph.")

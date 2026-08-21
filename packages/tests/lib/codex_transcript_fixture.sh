@@ -78,6 +78,7 @@ codex_fixture::append_wave() {
 	while IFS= read -r node; do
 		task="loop_worker_$(printf '%s' "$node" | od -An -tx1 | tr -d ' \n')"
 		attempt=$(( $(jq -r --arg node "$node" '.graph.nodes[$node].retry.attempts' "$state") + 1 ))
+		[[ "$attempt" -eq 1 ]] || task="${task}_a${attempt}"
 		codex_fixture::append_attempt "$session" "$task" "$attempt" "$wave" >/dev/null
 	done < <(jq -r '.graph.active_wave.nodes[]' "$state")
 }
@@ -89,6 +90,7 @@ codex_fixture::bind_done_nodes() {
 	while IFS= read -r node; do
 		task="loop_worker_$(printf '%s' "$node" | od -An -tx1 | tr -d ' \n')"
 		attempt=$(( $(jq -r --arg node "$node" '.graph.nodes[$node].retry.attempts' "$state") + 1 ))
+		[[ "$attempt" -eq 1 ]] || task="${task}_a${attempt}"
 		reference=$(codex_fixture::append_attempt "$session" "$task" "$attempt" "wave-2")
 		temporary="$state.tmp"
 		jq --arg node "$node" --argjson reference "$reference" \
