@@ -537,6 +537,130 @@ write_file S1 "$WU2_PENDING"
 out=$(run "$(payload S1 coderails:loop-worker)")
 check "FROZEN regression: 2-unit roster with no evals.json still skips gate" "" "$out"
 
+# ── Graph-owned dispatch of ANY subagent_type is gated on evals ─────────────
+# graph_dispatch.sh's role table maps only ONE of six node roles to
+# coderails:loop-worker (S2 -> preflight-scout, S2.7e -> proof-author,
+# S9-wiki -> wiki-writer, S9-docs -> docs-auditor, U3 -> loop-worker). Gating
+# on subagent_type therefore left five roles able to build before the freeze.
+# A dispatch is gate-eligible when it carries a validated
+# CODERAILS_GRAPH_DISPATCH envelope owning a running node in the active wave.
+#
+# EXEMPTION RULE: gate-eligibility is keyed on the NODE ID, never the
+# subagent_type. Nodes at or before the J2.8 freeze join (S-*, S0*, S1, S2*,
+# J2*) author the very evals a downstream node is gated on, so they are
+# exempt; everything else (U*, S9-*, S13-*, J12-*, and any unrecognised id)
+# is gated. Unknown ids land in the GATED bucket deliberately: a new
+# downstream node then fails closed, and a new pre-freeze node blocks loudly
+# until the list is updated, which is the safe failure direction for a gate
+# this repo has a history of shipping fail-OPEN.
+#
+# graph_state: writes graph loop state whose active wave holds $2 as running.
+graph_state() { # session node
+    write_file "$1" "$WU3_PENDING"
+    jq --arg n "$2" '. + {schema_version:2,loop_id:"loop-new",revision:2,
+        graph:{nodes:{($n):{status:"running",outcome:"running",retry:{attempts:0,max:2},evidence:[]}},
+               edges:[],joins:{},active_wave:{wave_id:"wave-2",revision:2,nodes:[$n]},hard_stop:null}}' \
+        "$(file_path "$1")" >"$(file_path "$1").tmp" && mv "$(file_path "$1").tmp" "$(file_path "$1")"
+}
+
+# typed_graph_payload: session node subagent_type
+typed_graph_payload() {
+    local prompt
+    prompt=$(jq -cn --arg session "$1" --arg node "$2" \
+        '"CODERAILS_GRAPH_DISPATCH=" + ({session_id:$session,loop_id:"loop-new",revision:2,wave_id:"wave-2",node_id:$node}|tojson)')
+    jq -cn --arg session "$1" --arg cwd "$CWD" --arg st "$3" --argjson prompt "$prompt" \
+        '{tool_name:"Agent",session_id:$session,cwd:$cwd,tool_input:{subagent_type:$st,prompt:$prompt}}'
+}
+
+# NEGATIVE — a downstream node dispatched as a NON-loop-worker type, 3-unit
+# roster, no evals at all -> DENIED. This is the whole gap: before this change
+# coderails:docs-auditor exited the gate before the evals read was ever
+# reached.
+reset
+graph_state S1 S9-docs
+out=$(run "$(typed_graph_payload S1 S9-docs coderails:docs-auditor)")
+is_denied "$out"
+check "graph-owned docs-auditor at downstream node, no evals -> BLOCK" 0 $?
+
+# POSITIVE — the identical dispatch with a valid frozen suite -> ALLOWED. A
+# change that denied everything unconditionally would pass the negative case
+# above and fail here.
+reset
+graph_state S1 S9-docs
+frozen_evals S1 "$P0_PENDING" 2 "$JUST"
+out=$(run "$(typed_graph_payload S1 S9-docs coderails:docs-auditor)")
+check "graph-owned docs-auditor at downstream node, frozen suite -> allow" "" "$out"
+
+# BOOTSTRAP — the eval-authoring nodes necessarily run BEFORE evals exist.
+# Gating them would make the node that writes evals.json undispatchable.
+reset
+graph_state S1 S2.7c
+out=$(run "$(typed_graph_payload S1 S2.7c coderails:task-evals)")
+check "eval-authoring node S2.7c, no evals.json -> allow (bootstrap)" "" "$out"
+
+reset
+graph_state S1 S2.7e
+out=$(run "$(typed_graph_payload S1 S2.7e coderails:proof-author)")
+check "eval-authoring node S2.7e, no evals.json -> allow (bootstrap)" "" "$out"
+
+# Pre-freeze scouts produce the material evals are written FROM, so they are
+# exempt too. S2-audit is a real ad-hoc runtime id absent from the role table;
+# it must classify by its S2 prefix, not by role resolution.
+reset
+graph_state S1 S2
+out=$(run "$(typed_graph_payload S1 S2 coderails:preflight-scout)")
+check "pre-freeze node S2, no evals.json -> allow (bootstrap)" "" "$out"
+
+reset
+graph_state S1 S2-audit
+out=$(run "$(typed_graph_payload S1 S2-audit coderails:preflight-scout)")
+check "unmapped pre-freeze node S2-audit, no evals.json -> allow (bootstrap)" "" "$out"
+
+# The exemption must NOT become a loop-worker bypass: a coderails:loop-worker
+# dispatched under an eval-authoring node id is still gated. Keying the
+# exemption purely on node id, evaluated ahead of is_worker, would open a hole
+# in the exact path this gate was built for.
+reset
+graph_state S1 S2.7c
+out=$(run "$(typed_graph_payload S1 S2.7c coderails:loop-worker)")
+is_denied "$out"
+check "loop-worker under an eval-authoring node id -> BLOCK (no bypass)" 0 $?
+
+# An unrecognised node id fails CLOSED, not open.
+reset
+graph_state S1 U3-b
+out=$(run "$(typed_graph_payload S1 U3-b coderails:docs-auditor)")
+is_denied "$out"
+check "unmapped downstream node U3-b, no evals -> BLOCK (fail closed)" 0 $?
+
+# REGRESSION — a non-graph loop (no .graph key) keeps its old behaviour: a
+# non-worker Agent call is not gate-eligible, so it stays outside this gate.
+# Widening to arbitrary Agent calls would risk locking out the session.
+reset
+write_file S1 "$WU3_PENDING"
+out=$(run "$(payload S1 coderails:preflight-scout)")
+check "non-graph loop, non-worker Agent call -> allow (unchanged)" "" "$out"
+
+# REGRESSION — no progress.json at all: a non-worker Agent call must still be
+# allowed. Denying here would block every Agent dispatch in any session with
+# no loop state, which is a session lockout. A graph-owned dispatch cannot
+# reach this path: gate-eligibility requires .graph to be an object in an
+# existing state file, so the envelope below is validated only when state
+# exists. Nothing else in this suite pins that line.
+reset
+out=$(run "$(payload S1 coderails:preflight-scout)")
+check "no progress.json, non-worker Agent call -> allow (no lockout)" "" "$out"
+out=$(run "$(typed_graph_payload S1 S9-docs coderails:docs-auditor)")
+check "no progress.json, graph-enveloped non-worker -> allow (no lockout)" "" "$out"
+
+# REGRESSION — #433's FROZEN acceptance still holds at dispatch for a
+# graph-owned non-worker node.
+reset
+graph_state S1 S9-wiki
+frozen_evals S1 "$P0_PENDING" 2 "$JUST"
+out=$(run "$(typed_graph_payload S1 S9-wiki coderails:wiki-writer)")
+check "FROZEN still accepted at dispatch for a graph-owned wiki-writer" "" "$out"
+
 [ "$fails" -eq 0 ] && {
     echo "PASS"
     exit 0

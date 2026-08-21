@@ -9,10 +9,14 @@
 # the completion-time gate only ever caught it after the work was already
 # done.
 #
-# Scope: implementation workers only. In-process workers are Agent calls whose
-# subagent_type is coderails:loop-worker. Sandboxed workers call this same guard
-# from spawn-sandboxed-worker.sh before launching the separate process, but are
+# Scope: implementation workers AND every graph-owned dispatch downstream of
+# the freeze. In-process workers are Agent calls whose subagent_type is
+# coderails:loop-worker. Sandboxed workers call this same guard from
+# spawn-sandboxed-worker.sh before launching the separate process, but are
 # outside graph dispatch ownership; graph waves use native Agent calls only.
+# Gating on subagent_type alone was not enough: only one of six graph node
+# roles maps to coderails:loop-worker, so five roles could build before the
+# freeze. Gate-eligibility is therefore keyed on the dispatched NODE ID.
 #
 # Reuses the shared work-unit counter (als_read_work_units) and evals-result
 # reader (als_read_loop_evals_result) from lib/loop_state_common.sh verbatim
@@ -64,6 +68,8 @@ command=$(printf '%s' "$input" | jq -r '.tool_input.command // empty' 2>/dev/nul
 prompt=$(printf '%s' "$input" | jq -r '.tool_input.prompt // empty' 2>/dev/null)
 is_agent=0
 is_worker=0
+is_graph_gated=0
+dispatch_node=""
 if [ "$tool_name" = "Agent" ]; then
     is_agent=1
     [ "$subagent_type" = "coderails:loop-worker" ] && is_worker=1
@@ -132,6 +138,7 @@ if [ "$is_agent" -eq 1 ] && jq -e '(.graph | type) == "object"' "$als_path" >/de
       and (.wave_id | type) == "string" and (.wave_id | length) > 0
       and (.node_id | type) == "string" and (.node_id | length) > 0
     ' >/dev/null 2>&1 || loop_dispatch_deny "the Agent dispatch envelope is malformed" "MALFORMED_ENVELOPE"
+    dispatch_node=$(printf '%s' "$dispatch_json" | jq -r '.node_id')
 
     jq -e --arg session "$session_id" --argjson dispatch "$dispatch_json" '
       .session_id == $session
@@ -145,9 +152,34 @@ if [ "$is_agent" -eq 1 ] && jq -e '(.graph | type) == "object"' "$als_path" >/de
       and .graph.nodes[$dispatch.node_id].status == "running"
     ' "$als_path" >/dev/null 2>&1 ||
         loop_dispatch_deny "the Agent dispatch envelope does not own an exact node in the active wave" "FOREIGN_DISPATCH"
+
+    # A graph-owned dispatch is gated on evals regardless of subagent_type.
+    # lib/graph_dispatch.sh maps only ONE of six node roles to
+    # coderails:loop-worker (S2 -> preflight-scout, S2.7e -> proof-author,
+    # S9-wiki -> wiki-writer, S9-docs -> docs-auditor, U3 -> loop-worker), so
+    # gating on subagent_type let five roles build before the freeze. The
+    # rule is uniform: evals are validated on every graph dispatch.
+    #
+    # Keyed on NODE ID, never subagent_type or the resolved role: the real
+    # runtime ids "S2-audit" and "U3-b" are absent from that role table, so
+    # role resolution cannot classify them, while their prefixes can.
+    #
+    # Exempt = at or before the J2.8 freeze join (execution-graph.md's node
+    # table): these nodes author the very evals a later node is gated on, so
+    # gating them would make evals.json undispatchable. Everything else — U*,
+    # S9-*, S13-*, J12-*, and any UNRECOGNISED id — is gated, so a new
+    # downstream node fails closed and a new pre-freeze node blocks loudly
+    # rather than silently opening the gate.
+    case "$dispatch_node" in
+    S-* | S0* | S1 | S1[!0-9]* | S2 | S2[!0-9]* | J2 | J2[!0-9]*) is_graph_gated=0 ;;
+    *) is_graph_gated=1 ;;
+    esac
 fi
 
-[ "$is_worker" -eq 1 ] || exit 0
+# is_worker is checked SEPARATELY and never short-circuited by the exemption:
+# a coderails:loop-worker stays gated even under an eval-authoring node id,
+# or the exemption would become a bypass of the exact path this gate guards.
+[ "$is_worker" -eq 1 ] || [ "$is_graph_gated" -eq 1 ] || exit 0
 
 als_read_work_units "$als_path"
 unit_count="$ALS_WORK_UNIT_COUNT"
@@ -222,7 +254,7 @@ esac
 als_log "hook=loop_dispatch_guard session=$session_id subagent_type=$subagent_type work_units=$unit_count evals=$ALS_LOOP_EVALS_RESULT blocked=1"
 reason="[loop-dispatch-guard] Blocked: this loop's work_units roster has $unit_count entries (>=3), but no frozen loop-scope evals.json was found at:
   $loop_dir/evals.json
-Phase 2.7c (freeze loop-scope evals via /coderails:task-evals) must run before any implementation-unit (coderails:loop-worker) worker is dispatched in a >=3-unit loop — evals must be frozen BEFORE build, not checked only at loop completion. Current evals.json state: $ALS_LOOP_EVALS_RESULT.
+Phase 2.7c (freeze loop-scope evals via /coderails:task-evals) must run before any implementation-unit worker OR any graph node downstream of the J2.8 freeze join (dispatched node: '${dispatch_node:-n/a}') is dispatched in a >=3-unit loop — evals must be frozen BEFORE build, not checked only at loop completion. Nodes at or before the freeze (S-*, S0*, S1, S2*, J2*) are exempt because they author the evals themselves. Current evals.json state: $ALS_LOOP_EVALS_RESULT.
 
 At dispatch time this gate requires a FROZEN suite, NOT a graded one: a loop-scope evals.json owned by this session and loop, with a non-blank verification_justification, .evals an array holding at least one P0, and ungraded (no .result, no .grading). Grading is loop-END work (Phase 13, post_evals.sh grade-loop) — do NOT run grade-loop now to satisfy this gate; at freeze time every P0 is still 'pending' with empty evidence and grade-loop will correctly refuse the file. A genuinely graded GO, or a graded verification_level-0 exemption, also passes here."
 jq -n --arg r "$reason" '{
