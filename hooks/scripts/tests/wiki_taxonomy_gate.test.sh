@@ -10,7 +10,7 @@ export CLAUDE_DISCIPLINE_LOG="$TMP/discipline.log"
 
 # $SCHEMA — a stand-in for the PLUGIN repo, carrying the wiki schema the gate
 # reads. The taxonomy now comes from ONE fixed location (the plugin's
-# AGENTS-wiki-schema.md), not from a file at the written file's repo root.
+# AGENTS.md), not from a file at the written file's repo root.
 #
 # WHY THIS FIXTURE CHANGED: the previous version built each vault with its own
 # root AGENTS.md carrying a "wiki-vault: true" marker, and passed. The REAL
@@ -30,8 +30,8 @@ cat >"$SCHEMA/.coderails/workflow.config.yaml" <<'EOF'
 project: test
 wiki_path: ../vault
 EOF
-cat >"$SCHEMA/AGENTS-wiki-schema.md" <<'EOF'
-# Wiki schema
+cat >"$SCHEMA/AGENTS.md" <<'EOF'
+# AGENTS.md
 
 ## Page types
 
@@ -242,7 +242,7 @@ check "deny reason names a sanctioned directory" \
 # block. Neither the ALLOW/DENY corpus nor any prior assertion caught it,
 # because both only inspect permissionDecision, never the reason text.
 check "deny reason names the schema file, not a blank" \
-    1 "$(printf '%s' "$out" | grep -c 'AGENTS-wiki-schema.md')"
+    1 "$(printf '%s' "$out" | grep -c '/AGENTS.md')"
 check "deny reason has no empty 'per :' interpolation" \
     0 "$(printf '%s' "$out" | grep -c 'per : ')"
 check "deny reason does not misdirect to AGENTS.md" \
@@ -320,8 +320,8 @@ cat >"$DYNSCHEMA/.coderails/workflow.config.yaml" <<'EOF'
 project: dyn
 wiki_path: ../dynamic
 EOF
-cat >"$DYNSCHEMA/AGENTS-wiki-schema.md" <<'EOF'
-# Wiki schema
+cat >"$DYNSCHEMA/AGENTS.md" <<'EOF'
+# AGENTS.md
 
 ## Page types
 
@@ -342,7 +342,7 @@ check "dynamic taxonomy: fake type present in table -> allow" \
 mkdir -p "$DYNAMIC/zorptastic2"
 # Backticks are literal Markdown in this fixture.
 # shellcheck disable=SC2016
-printf '| `zorptastic2/` | Added after the fact |\n' >>"$DYNSCHEMA/AGENTS-wiki-schema.md"
+printf '| `zorptastic2/` | Added after the fact |\n' >>"$DYNSCHEMA/AGENTS.md"
 check "dynamic taxonomy: adding the row to the schema flips deny -> allow" \
     ALLOW "$(run "$(payload Write "$DYNAMIC/zorptastic2/foo.md" "$DYNAMIC")")"
 
@@ -351,7 +351,7 @@ check "dynamic taxonomy: adding the row to the schema flips deny -> allow" \
 # which existed only to disambiguate a lookup that no longer happens.
 PLUGINREPO="$TMP/pluginrepo"
 mkdir -p "$PLUGINREPO/architecture" "$PLUGINREPO/sources"
-cp "$SCHEMA/AGENTS-wiki-schema.md" "$PLUGINREPO/AGENTS-wiki-schema.md"
+cp "$SCHEMA/AGENTS.md" "$PLUGINREPO/AGENTS.md"
 git -C "$PLUGINREPO" init -q
 git -C "$PLUGINREPO" config user.email t@t.t
 git -C "$PLUGINREPO" config user.name t

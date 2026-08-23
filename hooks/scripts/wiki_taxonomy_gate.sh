@@ -3,15 +3,16 @@
 # top-level directory of an LLM wiki vault.
 #
 # The taxonomy is READ FROM THE PLUGIN'S OWN wiki schema
-# (AGENTS-wiki-schema.md, "## Page types"), never hardcoded — this hook parses
-# whatever that table currently says, so editing it changes enforcement
-# automatically with no hook edit. Hardcoding the list would create exactly
-# the drift-between-doc-and-enforcement this hook exists to prevent.
+# (AGENTS.md, "## Page types" section under "# Wiki schema"), never
+# hardcoded — this hook parses whatever that table currently says, so
+# editing it changes enforcement automatically with no hook edit.
+# Hardcoding the list would create exactly the drift-between-doc-and-
+# enforcement this hook exists to prevent.
 #
-# WHY THAT FILE: AGENTS.md names AGENTS-wiki-schema.md as the wiki schema
-# reference, and its Page types table is the SAME table wiki-ingest,
-# wiki-query, wiki-lint and wiki-init read. Enforcing the table the skills
-# read is the whole point of the hook.
+# WHY THAT FILE: AGENTS.md's own Page types table is the SAME table
+# wiki-ingest, wiki-query, wiki-lint and wiki-init read (it used to live in
+# a separate AGENTS-wiki-schema.md, merged into AGENTS.md). Enforcing the
+# table the skills read is the whole point of the hook.
 #
 # HISTORY, because the previous shape looked deliberate and was not: this hook
 # used to resolve AGENTS.md from the WRITTEN FILE's own repo root — i.e. from
@@ -90,14 +91,13 @@ fi
 
 # The taxonomy is read from the PLUGIN's own wiki schema, not from a file at
 # the written file's repo root. This is where the schema actually lives:
-# AGENTS.md names AGENTS-wiki-schema.md as the wiki schema reference, and its
-# "## Page types" table is the same table wiki-ingest, wiki-query, wiki-lint
-# and wiki-init already read. Enforcing the table the skills read is the whole
-# point — an earlier version resolved AGENTS.md from the WRITTEN FILE's repo
-# root, i.e. the vault, which has no such file and which no design document
-# asks for, so the gate silently failed open on every write and never once
-# engaged.
-schema="${CLAUDE_PLUGIN_ROOT:-}/AGENTS-wiki-schema.md"
+# AGENTS.md's "## Page types" table (under its "# Wiki schema" section) is
+# the same table wiki-ingest, wiki-query, wiki-lint and wiki-init already
+# read. Enforcing the table the skills read is the whole point — an earlier
+# version resolved AGENTS.md from the WRITTEN FILE's repo root, i.e. the
+# vault, which has no such file and which no design document asks for, so
+# the gate silently failed open on every write and never once engaged.
+schema="${CLAUDE_PLUGIN_ROOT:-}/AGENTS.md"
 [ -f "$schema" ] || exit 0
 
 # Extract the "## Page types" section body (up to the next "## " heading or EOF).
