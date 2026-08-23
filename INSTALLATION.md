@@ -174,10 +174,15 @@ an LLM wiki vault's top-level directory that isn't sanctioned by the vault's own
 `verification_volume_ceiling` (hard-blocks, with no override, the 3rd+
 invocation per work-unit of `hooks/scripts/tests/run_all.sh` or a
 `scripts/post_evals.sh` validate-structure ceremony), `loop_dispatch_guard` on `Agent` dispatches
-(denies spawning a `coderails:loop-worker` when the loop's `progress.json`
-lists three or more work-units and its loop-scope `evals.json` has not yet
-been frozen or graded GO — the dispatch-time counterpart to
-`loop_state_guard`'s completion-time check), and `crack_on_gate` on
+(denies a dispatch when the loop's `progress.json` lists three or more
+work-units and its loop-scope `evals.json` does not read `GO`,
+`VERIFICATION_LEVEL0`, or `FROZEN`; also denies an implementation worker
+that has no session-owned loop state at all. In a graph-backed loop the
+gate is keyed on the graph node id rather than the subagent type, so
+downstream and unrecognised nodes are gated too — it fails closed), the
+opt-in `agent_only_gate` (nudges by default; blocks the orchestrator's own
+inline do-work tool calls only under `AGENT_ONLY_GATE_ENFORCE=1`), and
+`crack_on_gate` on
 `AskUserQuestion` (denies the tool while the session's crack-on flag is
 stamped — proceed autonomously instead of asking).
 
