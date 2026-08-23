@@ -4,6 +4,8 @@ Single source read at conversation start. Covers the repo working guide (below) 
 
 Wiki vault: `../coderails-wiki` relative to the plugin, or wherever `/wiki-init` placed it.
 
+For any coderails question, lookup, or context, use the `wiki-query` skill; for staleness or health checks, use `wiki-lint`. Prefer both over grepping source or the vault directly — the wiki holds compounded understanding, not just facts derivable from re-reading code.
+
 ## Current integrity-gate replacement
 
 The semantic judge is replaced by a root-owned mechanical `integrity-review` attestor. Checks SHA-bound review/eval evidence, command/eval structure, policy paths, provenance fields, bounded diff input — never classifies work or asks an LLM for a verdict. Authoritative: `docs/INTEGRITY-GATE.md`, `scripts/integrity-gate/integrity-gate-runner.sh`, `integrity_review.machine_user` config.
@@ -254,16 +256,6 @@ Body rules: `[[wiki-links]]` for cross-references (`[[page_name]]`, no directory
 **Query** — `/wiki-query` reads `index.md` first, fetches relevant pages, answers with citations. If a query reveals something non-obvious, file it back as an `investigations/` page — that is the birth condition for one.
 
 **Lint** — `/wiki-lint`, always after ingest. Checks orphaned pages, stale `last_updated`, missing cross-references, contradictions. Fix anything related to the current PR; defer unrelated findings.
-
-## Search
-
-`qmd` is an optional accelerator — absent, search falls back to reading `index.md` directly.
-
-- `qmd query "<question>"` — hybrid BM25 + vector search with reranking (inferred). Best for open-ended questions.
-- `qmd search "<keywords>"` — BM25 only, fast (verified: `qmd --help` states "Full-text BM25 keywords (no LLM)"). Best for known-term lookups.
-- `qmd get <file>` — fetch a specific page by path.
-
-**Reindex**: after wiki changes, run `qmd update && qmd embed` — `embed` alone only refreshes already-known content hashes (inferred); `update` scans for new/changed files and must run first. `qmd collection add` is first-time setup only (errors "Collection already exists" on reruns, verified) — don't run it as routine maintenance.
 
 ## Conventions
 

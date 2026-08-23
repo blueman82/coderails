@@ -36,7 +36,7 @@ absolute).
 
 1. Read `$vault/index.md` first — scan for relevant pages
 2. Read relevant wiki pages — drill into matches
-3. Use qmd if available: `qmd search "<query>"` for ranked results
+3. `qmd` is an optional accelerator — absent, rely on steps 1–2. `qmd query "<question>"` for hybrid BM25 + vector search on open-ended questions; `qmd search "<keywords>"` for fast BM25-only known-term lookups; `qmd get <file>` to fetch a specific page by path.
 4. Fall back to raw code/codebase only if the wiki doesn't cover the topic
 
 Synthesize the answer from wiki pages with citations: "According to [[page_name]]..."
@@ -61,5 +61,7 @@ When the answer reveals something non-obvious or reusable:
 **If `wiki_git_worktree` is `true`**: use a worktree branch and PR — same pattern as wiki-ingest Step 1 and Step 6.
 
 **If `wiki_git_worktree` is `false`**: write directly and commit to the vault.
+
+After writing, reindex if `qmd` is available: `qmd update && qmd embed` (`update` must run first to pick up new/changed files; `embed` alone only refreshes already-known content hashes — not `qmd collection add`, which is first-time setup only).
 
 Good answers compound the knowledge base. File back anything that took real effort to assemble.

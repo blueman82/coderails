@@ -235,6 +235,8 @@ git add -A
 git commit -m "wiki(lint): <summary of findings>"
 ```
 
+If `qmd` is available, reindex after committing: `qmd update && qmd embed` (`update` must run first to pick up new/changed files; `embed` alone only refreshes already-known content hashes).
+
 ### Step 7: Pairing note
 
 Lint does not need to trigger a follow-up ingest — this direction is
