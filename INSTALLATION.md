@@ -173,7 +173,11 @@ an LLM wiki vault's top-level directory that isn't sanctioned by the vault's own
 `AGENTS.md` "## Page types" table; fails open on any ambiguity),
 `verification_volume_ceiling` (hard-blocks, with no override, the 3rd+
 invocation per work-unit of `hooks/scripts/tests/run_all.sh` or a
-`scripts/post_evals.sh` validate-structure ceremony), and `crack_on_gate` on
+`scripts/post_evals.sh` validate-structure ceremony), `loop_dispatch_guard` on `Agent` dispatches
+(denies spawning a `coderails:loop-worker` when the loop's `progress.json`
+lists three or more work-units and its loop-scope `evals.json` has not yet
+been frozen or graded GO — the dispatch-time counterpart to
+`loop_state_guard`'s completion-time check), and `crack_on_gate` on
 `AskUserQuestion` (denies the tool while the session's crack-on flag is
 stamped — proceed autonomously instead of asking).
 
