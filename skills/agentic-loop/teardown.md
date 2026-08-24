@@ -63,6 +63,7 @@ Written at `schema_version` 2, beside `progress.json`.
 | Field | Notes |
 |---|---|
 | `session_id`, `created` | Identity and timestamp. |
+| `loop_id` | Copied **verbatim** from `progress.json`. |
 | `loop_ordinal` | = `completed_marker` after `als_mark_complete` stamps it (the live agentic-loop invocation count, not a running loop-number ordinal — see `loop-state.md`). |
 | `envelope` | Verbatim from `progress.json`'s `authorising_prompt_raw`. |
 | `loop_stop_counts` | Copied **verbatim** from `progress.json` — HOOK-OWNED, never recomputed. |

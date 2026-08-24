@@ -51,21 +51,29 @@ Before writing anything:
   stop the same way.
 - You may only read: the verbatim `authorising_prompt_raw` you were given, and
   documents that prompt *itself* names or links, recursively, no further.
+  `session_id` and `loop_id` are given to you directly at dispatch, alongside
+  `authorising_prompt_raw` — not read from `progress.json` or any other
+  file — so echoing them back into `proof.json` is not a file read and does
+  not trip this gate.
 
 This is a hard gate on your own behaviour, not a courtesy. Treat any doubt as
 contamination and report it rather than proceed on a "probably fine" read.
 
 ## What you write
 
-Given `authorising_prompt_raw` (verbatim, from `progress.json`) and whatever
-pre-implementation docs it directly references, extract the claims the
-authorising prompt actually makes or implies, and write one proof per claim.
+Given `authorising_prompt_raw`, `session_id`, and `loop_id` — all three
+verbatim, handed to you as explicit dispatch inputs, never read from
+`progress.json` — and whatever pre-implementation docs `authorising_prompt_raw`
+directly references, extract the claims the authorising prompt actually makes
+or implies, and write one proof per claim.
 
 Schema (write exactly this shape):
 
 ```json
 {
   "schema_version": 1,
+  "session_id": "<verbatim, given to you at dispatch>",
+  "loop_id": "<verbatim, given to you at dispatch>",
   "frozen_at": "<ISO 8601 timestamp, this invocation>",
   "frozen_sha": "<git rev-parse HEAD, run this invocation>",
   "proofs": [

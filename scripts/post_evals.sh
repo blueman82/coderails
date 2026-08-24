@@ -1196,7 +1196,9 @@ post_evals::compute_and_validate_result() {
 # Neutral loop-scope grading: validates structure (loop variant — no PR arg,
 # check 6 = head_sha non-blank), computes result via eval_artifact::compute_go
 # (unchanged SSOT), then atomically writes .result, .graded_at (ISO8601 UTC),
-# and .grading = {by, checksum, amendments_at_grade} into the file. Echoes GO/NO-GO on success;
+# .grading = {by, checksum, amendments_at_grade}, and — read fresh from the
+# sibling progress.json at grade time — .session_id/.loop_id/.revision, into
+# the file. Echoes GO/NO-GO on success;
 # exit 0 on a successful grade (even NO-GO — a graded NO-GO is still a
 # completed, stamped grade), exit 1 on validation refusal (nothing written)
 # OR on a write/install failure (jq or mv) — both checked explicitly so a
@@ -1242,13 +1244,38 @@ post_evals::grade_loop() {
     local checksum; checksum=$(eval_artifact::grading_checksum "$path" "$result")
     local graded_at; graded_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
+    # Completion evidence (loop_state_guard/loop_stall_guard) binds
+    # session_id+loop_id+revision between progress.json and evals.json, but
+    # nothing upstream (task-evals freeze, this function) ever wrote those
+    # into evals.json — read them fresh from the sibling progress.json (same
+    # dir as $path, per agentic_loop_path.sh) at grade time, the latest point
+    # revision can be read since it advances every wave. Absent/unreadable
+    # progress.json fails open (grade still proceeds; these are additive
+    # fields, not gating ones) since progress.json is loop-state, not always
+    # present in isolated/test contexts.
+    local progress_json; progress_json="$(dirname "$path")/progress.json"
+    if [[ -f "$progress_json" ]] && ! jq -e . "$progress_json" >/dev/null 2>&1; then
+        printf 'post_evals: warning — %s exists but does not parse; identity fields not stamped\n' "$progress_json" >&2
+    fi
+    local psession ploop prevision
+    psession=$(jq -r '.session_id // empty' "$progress_json" 2>/dev/null)
+    ploop=$(jq -r '.loop_id // empty' "$progress_json" 2>/dev/null)
+    prevision=$(jq -r '.revision // empty' "$progress_json" 2>/dev/null)
+    [[ "$prevision" =~ ^-?[0-9]+$ ]] || prevision=null
+
     local tmp; tmp="${path}.tmp.$$"
     if ! jq --arg result "$result" \
        --arg graded_at "$graded_at" \
        --arg by "post_evals.sh grade-loop" \
        --arg checksum "$checksum" \
        --argjson amendments_at_grade "$amend_count" \
-       '.result = $result | .graded_at = $graded_at | .grading = {by: $by, checksum: $checksum, amendments_at_grade: $amendments_at_grade}' \
+       --arg session_id "$psession" \
+       --arg loop_id "$ploop" \
+       --argjson revision "$prevision" \
+       '.result = $result | .graded_at = $graded_at | .grading = {by: $by, checksum: $checksum, amendments_at_grade: $amendments_at_grade}
+        | (if $session_id != "" then .session_id = $session_id else . end)
+        | (if $loop_id != "" then .loop_id = $loop_id else . end)
+        | (if $revision != null then .revision = $revision else . end)' \
        "$path" > "$tmp"; then
         rm -f "$tmp"
         printf 'post_evals: grade-loop failed to write graded output for %s\n' "$path" >&2

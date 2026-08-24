@@ -832,6 +832,59 @@ jq '.amendments = [ {eval:"e1", when:"2026-07-12T07:00:00Z", why:"post-verdict f
 post_evals::grade_loop "$FIX_NONSTR" 2>/dev/null
 check "grade_loop backstop: non-string regraded_by (number) -> exit 1 (refused)" 1 $?
 
+# ─── grade_loop: .revision stamp (R7) ────────────────────────────────────────
+# loop_state_guard/loop_stall_guard bind session_id+loop_id+revision between
+# progress.json and evals.json at completion, but nothing wrote .revision (or
+# session_id/loop_id) into evals.json. grade_loop must read progress.json
+# (sibling of evals.json, same dir) fresh at grade time and stamp all three.
+
+# (a) sibling progress.json present -> .session_id/.loop_id/.revision stamped
+# to match, .revision as a JSON number (not a string).
+FIX_REV_DIR="$TMP/revstamp_present"
+mkdir -p "$FIX_REV_DIR"
+FIX_REV="$FIX_REV_DIR/evals.json"
+jq -n '{schema_version: 2, session_id: "sess-abc", loop_id: "loop-xyz", revision: 4}' \
+  > "$FIX_REV_DIR/progress.json"
+jq -n --arg sha "$SHA" '{
+  scope: "loop", verification_level: 1, verification_justification: "3 work-units, no irreversible surface", head_sha: $sha,
+  evals: [ {id:"e1", priority:"P0", mode:"scripted", status:"pass", cmd:"run-a", negative_control:"run-a-broken", evidence:"log"} ]
+}' > "$FIX_REV"
+post_evals::grade_loop "$FIX_REV" >/dev/null
+check "grade_loop: revision stamp -> exit 0" 0 $?
+check_str "grade_loop: .session_id stamped from progress.json" "sess-abc" "$(jq -r '.session_id // ""' "$FIX_REV")"
+check_str "grade_loop: .loop_id stamped from progress.json" "loop-xyz" "$(jq -r '.loop_id // ""' "$FIX_REV")"
+check_str "grade_loop: .revision stamped from progress.json" "4" "$(jq -r '.revision // ""' "$FIX_REV")"
+check_str "grade_loop: .revision written as a JSON number, not a string" "number" "$(jq -r '.revision | type' "$FIX_REV")"
+
+# (b) no sibling progress.json -> grade still succeeds (fail-open on the new
+# fields; does not regress the existing no-progress.json fixtures above,
+# which all live at bare $TMP paths with no sibling progress.json).
+FIX_REV_ABSENT="$TMP/revstamp_absent.json"
+jq -n --arg sha "$SHA" '{
+  scope: "loop", verification_level: 1, verification_justification: "3 work-units, no irreversible surface", head_sha: $sha,
+  evals: [ {id:"e1", priority:"P0", mode:"scripted", status:"pass", cmd:"run-a", negative_control:"run-a-broken", evidence:"log"} ]
+}' > "$FIX_REV_ABSENT"
+post_evals::grade_loop "$FIX_REV_ABSENT" >/dev/null
+check "grade_loop: no sibling progress.json -> still grades (exit 0)" 0 $?
+check_str "grade_loop: no sibling progress.json -> writes .result=GO" "GO" "$(jq -r '.result' "$FIX_REV_ABSENT")"
+
+# (c) revision stamp does not perturb the grading checksum (checksum canon is
+# .evals[] {id,priority,status} + result only — verified against
+# eval_artifact::grading_checksum directly, not just that grade_loop exits 0).
+expected_checksum_rev=$(eval_artifact::grading_checksum "$FIX_REV" "GO")
+written_checksum_rev=$(jq -r '.grading.checksum // ""' "$FIX_REV")
+check_str "grade_loop: revision stamp -> checksum still matches independent recomputation" "$expected_checksum_rev" "$written_checksum_rev"
+
+# (d) grade_loop's real output satisfies loop_stall_guard.sh's own identity
+# predicate (hooks/scripts/loop_stall_guard.sh:79-81) — copied inline here
+# since that script parses stdin/exits and isn't sourced as a lib; ceiling:
+# this drifts silently if the guard's predicate is edited without updating
+# this copy.
+jq -e --arg session "sess-abc" --arg loop "loop-xyz" --arg revision "4" '
+  .session_id == $session and .loop_id == $loop and ((.revision | tostring) == $revision)
+' "$FIX_REV" >/dev/null 2>&1
+check "grade_loop: real output satisfies loop_stall_guard's session_id+loop_id+revision predicate" 0 $?
+
 # ─── CLI dispatch: bare invocation prints usage, exits 1 ─────────────────────
 usage_out=$(bash "$SCRIPT" 2>&1)
 rc=$?
