@@ -72,8 +72,8 @@ Schema (write exactly this shape):
 ```json
 {
   "schema_version": 1,
-  "session_id": "<verbatim from progress.json's own session_id>",
-  "loop_id": "<verbatim from progress.json's own loop_id>",
+  "session_id": "<verbatim, given to you at dispatch>",
+  "loop_id": "<verbatim, given to you at dispatch>",
   "frozen_at": "<ISO 8601 timestamp, this invocation>",
   "frozen_sha": "<git rev-parse HEAD, run this invocation>",
   "proofs": [
