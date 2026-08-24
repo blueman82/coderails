@@ -48,6 +48,8 @@ manifest_paths=(
     hooks/scripts/lib/graph_executor.sh
     hooks/scripts/lib/graph_dispatch.sh
     hooks/scripts/lib/graph_evidence.sh
+    hooks/scripts/lib/graph_evidence_bind.sh
+    hooks/scripts/lib/graph_evidence_revalidate.sh
     scripts/sandbox/render-settings.sh
     scripts/sandbox/spawn-sandboxed-worker.sh
     scripts/sandbox/sandbox-probe.sh
@@ -97,6 +99,8 @@ manifest_modes=(
     100644
     100755
     100755
+    100644
+    100644
     100644
     100644
     100644

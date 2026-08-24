@@ -41,8 +41,16 @@ GRAPH_DISPATCH_ROOT="$(cd "$GRAPH_DISPATCH_DIR/../../.." && pwd)"
 . "$GRAPH_DISPATCH_DIR/graph_executor.sh"
 # shellcheck disable=SC1091  # path is resolved from this sourced file at runtime
 . "$GRAPH_DISPATCH_ROOT/scripts/lib/eval-artifact.sh"
+# graph_evidence_bind.sh and graph_evidence_revalidate.sh each transitively
+# source graph_evidence.sh themselves (idempotent — function defs and one
+# constant, safe to load twice). Sourced separately, not chained, because
+# graph_evidence_revalidate_all does not depend on anything in
+# graph_evidence_bind.sh — chaining one through the other would be a
+# fabricated dependency between the bind-time and completion-time gates.
 # shellcheck disable=SC1091  # path is resolved from this sourced file at runtime
-. "$GRAPH_DISPATCH_DIR/graph_evidence.sh"
+. "$GRAPH_DISPATCH_DIR/graph_evidence_bind.sh"
+# shellcheck disable=SC1091  # path is resolved from this sourced file at runtime
+. "$GRAPH_DISPATCH_DIR/graph_evidence_revalidate.sh"
 
 # Claude owns this graph and its dispatch targets. Ambiguous orchestration
 # nodes are deliberately absent so they fail closed as unresolved.
@@ -241,6 +249,13 @@ graph_dispatch_complete() {
     done
     [ -f "$progress" ] && [ -f "$evals" ] && [ -f "$proof" ] && [ -f "$retro" ] || return 1
     _graph_dispatch_graph_valid "$progress" || return 1
+    # Revalidate every already-bound "done" node's evidence again, right
+    # before completion is allowed — a bind that was genuinely valid when
+    # graph_dispatch_record ran must still be valid now, not just trusted
+    # forever. See graph_evidence_revalidate_all's own header for what it
+    # re-checks and why (transcript mutated after bind is exactly the case
+    # this line exists to catch).
+    graph_evidence_revalidate_all "$progress" || return 1
 
     local loop revision stamped_checksum recomputed_checksum
     loop=$(jq -r '.loop_id // empty' "$progress")
