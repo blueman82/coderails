@@ -4,7 +4,7 @@
 # loop_state_guard.sh's work-unit-count + loop-scope-evals check (see that
 # file's gate_loop_evals_required), but fires BEFORE an implementation-unit
 # worker is spawned instead of at loop completion. loop_state_guard.sh alone
-# left a gap: a >=3-work-unit loop could dispatch every worker before
+# left a gap: a >=1-work-unit loop could dispatch every worker before
 # evals.json ever existed, defeating the freeze-before-build discipline —
 # the completion-time gate only ever caught it after the work was already
 # done.

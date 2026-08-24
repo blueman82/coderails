@@ -176,7 +176,7 @@ invocation per work-unit of `hooks/scripts/tests/run_all.sh` or a
 `scripts/post_evals.sh` validate-structure ceremony), `loop_dispatch_guard` on `Agent` dispatches
 (for a `coderails:loop-worker`, or for a graph-backed dispatch at a
 non-exempt node — the two conditions are a union, not a substitution —
-denies when the loop's `progress.json` lists three or more work-units and
+denies when the loop's `progress.json` lists one or more work-units and
 its loop-scope `evals.json` does not read `GO`, `VERIFICATION_LEVEL0`, or
 `FROZEN`; downstream and unrecognised graph nodes are gated too, so it
 fails closed. It also denies an implementation worker that has no

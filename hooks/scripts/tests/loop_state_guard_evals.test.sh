@@ -277,6 +277,7 @@ run_err() { echo "$2" | bash "$GUARD" 2>&1 >/dev/null; }        # -> stderr
 reset() { rm -rf "$CLAUDE_AGENTIC_LOOP_DIR"; }
 
 WU3='{"wu1":{"status":"done"},"wu2":{"status":"done"},"wu3":{"status":"done"}}'
+WU1='{"wu1":{"status":"done"}}'
 WU0='{}'
 WU5='{"wu1":{"status":"done"},"wu2":{"status":"done"},"wu3":{"status":"done"},"wu4":{"status":"done"},"wu5":{"status":"done"}}'
 
@@ -292,6 +293,26 @@ case "$err" in
   *"loop-scope evals"*"$(file_dir S1)/evals.json"*) : ;;
   *) fails=$((fails+1)); printf 'FAIL - stderr missing expected evals path/text: %s\n' "$err" ;;
 esac
+
+# At the new boundary: complete, owned, 1 work_unit, no sibling evals.json ->
+# block. Pins the exact threshold this PR moved (work_units >= 1, not >= 3):
+# a 1-unit loop must be gated at completion exactly like a 3-unit one.
+reset; T=$(mk_transcript 1); write_file complete S1 1 S1 "$WU1"
+err=$(run_err x "$(payload "$T" S1)")
+code=$(run x "$(payload "$T" S1)")
+check "complete+owned+1 work_unit+no evals.json -> block (exit 2)" 2 "$code"
+case "$err" in
+  *"loop-scope evals"*"$(file_dir S1)/evals.json"*) : ;;
+  *) fails=$((fails+1)); printf 'FAIL - 1-unit stderr missing expected evals path/text: %s\n' "$err" ;;
+esac
+
+# At the new boundary: 1 work_unit, evals.json present, GO, justified,
+# STAMPED -> allow. Proves the lowered threshold still opens completion once
+# evals are genuinely graded, not just that it closes it.
+reset; T=$(mk_transcript 1); write_file complete S1 1 S1 "$WU1"
+jq -n '{scope:"loop", verification_level:1, verification_justification:"1 work-unit, no irreversible surface", head_sha:"deadbeef", evals:[{id:"e1",priority:"P0",mode:"scripted",status:"pass",cmd:"run-a",negative_control:"run-a-broken",evidence:"log"}]}' > "$(file_dir S1)/evals.json"
+stamp "$(file_dir S1)/evals.json"
+check "1 work_unit, GO evals justified + stamped -> allow" 0 "$(run x "$(payload "$T" S1)")"
 
 # evals.json present, scope loop, result GO, justified, STAMPED -> allow (exit 0).
 reset; T=$(mk_transcript 1); write_file complete S1 1 S1 "$WU3"
