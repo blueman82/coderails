@@ -61,9 +61,11 @@ contamination and report it rather than proceed on a "probably fine" read.
 
 ## What you write
 
-Given `authorising_prompt_raw` (verbatim, from `progress.json`) and whatever
-pre-implementation docs it directly references, extract the claims the
-authorising prompt actually makes or implies, and write one proof per claim.
+Given `authorising_prompt_raw`, `session_id`, and `loop_id` — all three
+verbatim, handed to you as explicit dispatch inputs, never read from
+`progress.json` — and whatever pre-implementation docs `authorising_prompt_raw`
+directly references, extract the claims the authorising prompt actually makes
+or implies, and write one proof per claim.
 
 Schema (write exactly this shape):
 
