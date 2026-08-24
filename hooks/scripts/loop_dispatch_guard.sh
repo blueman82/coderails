@@ -4,7 +4,7 @@
 # loop_state_guard.sh's work-unit-count + loop-scope-evals check (see that
 # file's gate_loop_evals_required), but fires BEFORE an implementation-unit
 # worker is spawned instead of at loop completion. loop_state_guard.sh alone
-# left a gap: a >=3-work-unit loop could dispatch every worker before
+# left a gap: a >=1-work-unit loop could dispatch every worker before
 # evals.json ever existed, defeating the freeze-before-build discipline —
 # the completion-time gate only ever caught it after the work was already
 # done.
@@ -28,7 +28,7 @@
 # work_units OBJECT regardless of status — per loop-state.md's Fields table,
 # work_units is a PLAN-TIME roster (entries exist with status "pending"
 # BEFORE any dispatch, per Phase 1/2.7b), not a dispatch counter. So this
-# gate reads work_units as "is this a >=3-unit loop" (loop_state_guard.sh's
+# gate reads work_units as "is this a >=1-unit loop" (loop_state_guard.sh's
 # own semantic at completion), never as "is this the Nth dispatch" — a
 # 3-unit loop's FIRST implementation-unit dispatch is gated exactly the same
 # as its third, because the roster size (not dispatch count) is what decides
@@ -185,10 +185,10 @@ als_read_work_units "$als_path"
 unit_count="$ALS_WORK_UNIT_COUNT"
 
 # Roster-size threshold, not a dispatch ordinal: work_units is a PLAN-TIME
-# roster (see header) — a >=3-unit loop is gated on EVERY implementation-unit
+# roster (see header) — a >=1-unit loop is gated on EVERY implementation-unit
 # dispatch, including its first, because the roster size alone is what
 # decided Phase 2.7 applied to this loop.
-if [ "$unit_count" -lt 3 ]; then
+if [ "$unit_count" -lt 1 ]; then
     als_log "hook=loop_dispatch_guard session=$session_id subagent_type=$subagent_type work_units=$unit_count evals=skipped-below-threshold blocked=0"
     exit 0
 fi
@@ -252,9 +252,9 @@ GO | VERIFICATION_LEVEL0 | FROZEN)
 esac
 
 als_log "hook=loop_dispatch_guard session=$session_id subagent_type=$subagent_type work_units=$unit_count evals=$ALS_LOOP_EVALS_RESULT blocked=1"
-reason="[loop-dispatch-guard] Blocked: this loop's work_units roster has $unit_count entries (>=3), but no frozen loop-scope evals.json was found at:
+reason="[loop-dispatch-guard] Blocked: this loop's work_units roster has $unit_count entries (>=1), but no frozen loop-scope evals.json was found at:
   $loop_dir/evals.json
-Phase 2.7c (freeze loop-scope evals via /coderails:task-evals) must run before any implementation-unit worker OR any graph node downstream of the J2.8 freeze join (dispatched node: '${dispatch_node:-n/a}') is dispatched in a >=3-unit loop — evals must be frozen BEFORE build, not checked only at loop completion. Nodes at or before the freeze (S-*, S0*, S1, S2*, J2*) are exempt because they author the evals themselves. Current evals.json state: $ALS_LOOP_EVALS_RESULT.
+Phase 2.7c (freeze loop-scope evals via /coderails:task-evals) must run before any implementation-unit worker OR any graph node downstream of the J2.8 freeze join (dispatched node: '${dispatch_node:-n/a}') is dispatched in a >=1-unit loop — evals must be frozen BEFORE build, not checked only at loop completion. Nodes at or before the freeze (S-*, S0*, S1, S2*, J2*) are exempt because they author the evals themselves. Current evals.json state: $ALS_LOOP_EVALS_RESULT.
 
 At dispatch time this gate requires a FROZEN suite, NOT a graded one: a loop-scope evals.json owned by this session and loop, with a non-blank verification_justification, .evals an array holding at least one P0, and ungraded (no .result, no .grading). Grading is loop-END work (Phase 13, post_evals.sh grade-loop) — do NOT run grade-loop now to satisfy this gate; at freeze time every P0 is still 'pending' with empty evidence and grade-loop will correctly refuse the file. A genuinely graded GO, or a graded verification_level-0 exemption, also passes here."
 jq -n --arg r "$reason" '{

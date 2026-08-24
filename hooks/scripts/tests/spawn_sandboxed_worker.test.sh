@@ -1,4 +1,5 @@
 #!/bin/bash
+# shellcheck disable=SC2015 # Final assertion chain is the suite's established tally idiom.
 # Behavioural tests for scripts/sandbox/spawn-sandboxed-worker.sh — the
 # headless sandboxed-worker launcher. Cases (a)/(b) are precondition checks
 # that run everywhere (no srt exec). Cases (c)/(d) and the child-inheritance
@@ -31,6 +32,29 @@ export GH_TOKEN
 PROMPT_FILE="$TMP/prompt.txt"
 printf 'say ok\n' > "$PROMPT_FILE"
 
+# spawn-sandboxed-worker.sh routes through loop_dispatch_guard.sh whenever
+# CLAUDE_CODE_SESSION_ID is set (true inside a real Claude Code Bash call,
+# including this test's own invocation). Without an isolated
+# CLAUDE_AGENTIC_LOOP_DIR + stub progress.json, the guard falls through to
+# whatever real ~/.coderails/agentic-loop state exists for the running
+# session — an unrelated ambient loop's ownership/work_units state, not this
+# test's own fixture — so seed isolation up front, before ANY $SPAWN call
+# that reaches the guard (case (b) below included). A 0-work-unit roster
+# stays below the dispatch-time threshold (loop_dispatch_guard.sh's
+# work_units >= 1 gate) and needs no evals.json stub, matching
+# loop_dispatch_guard.test.sh's own isolation idiom.
+CLAUDE_AGENTIC_LOOP_DIR="$TMP/loop-state"
+export CLAUDE_AGENTIC_LOOP_DIR
+seed_progress_json() { # worktree
+  [[ -n "${CLAUDE_CODE_SESSION_ID:-}" ]] || return 0
+  local path
+  path=$(bash "$REPO_ROOT/hooks/scripts/lib/agentic_loop_path.sh" "$1" "$CLAUDE_CODE_SESSION_ID")
+  mkdir -p "$(dirname "$path")"
+  jq -n --arg session "$CLAUDE_CODE_SESSION_ID" \
+      '{schema_version:1, status:"in-progress", session_id:$session, completed_marker:0, work_units:{}}' \
+      >"$path"
+}
+
 # ─── (a) missing worktree arg → rc non-zero + named error ──────────────────
 rc=0; err=$("$SPAWN" 2>&1) || rc=$?
 check "missing all args -> non-zero" "1" "$([ "$rc" -ne 0 ] && echo 1 || echo 0)"
@@ -39,6 +63,7 @@ check_contains "missing all args -> error names worktree" "worktree" "$err"
 # ─── (b) non-git worktree → named error mentioning git-common-dir ──────────
 NOT_A_REPO="$TMP/not-a-repo"
 mkdir -p "$NOT_A_REPO"
+seed_progress_json "$NOT_A_REPO"
 rc=0; err=$("$SPAWN" "$NOT_A_REPO" "$PROMPT_FILE" "claude-haiku-4-5-20251001" 2>&1) || rc=$?
 check "non-git worktree -> non-zero" "1" "$([ "$rc" -ne 0 ] && echo 1 || echo 0)"
 check_contains "non-git worktree -> error mentions git-common-dir" "git-common-dir" "$err"
@@ -62,6 +87,7 @@ else
 
   WORKTREE="$TMP/wt"
   git -C "$REPO" worktree add -q "$WORKTREE" -b test-branch >/dev/null 2>&1
+  seed_progress_json "$WORKTREE"
 
   STUBDIR="$TMP/stubbin"
   mkdir -p "$STUBDIR"

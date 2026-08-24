@@ -6,6 +6,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 PACKAGE="$ROOT/packages/codex"
 GRAPH="$PACKAGE/skills/agentic-loop/scripts/graph.py"
+SHAPES="$ROOT/packages/tests/codex_graph_evidence_shapes.test.sh"
 HOOKS="$PACKAGE/hooks/scripts"
 TMP="$(mktemp -d)"
 trap 'rm -r "$TMP"' EXIT
@@ -165,6 +166,10 @@ test_transcript_evidence_rejections() {
 validate_worker_refs() {
 	PYTHONPATH="$(dirname "$GRAPH")" python3 -c \
 		'import json,sys; from graph_evidence import validate_worker_evidence; validate_worker_evidence(json.load(open(sys.argv[1], encoding="utf-8")))' "$1"
+}
+
+test_evidence_shape_normalization() {
+	bash "$SHAPES"
 }
 
 test_wave_tamper_and_followup() {
@@ -337,6 +342,12 @@ test_hard_stop_final_line() {
 	fi
 }
 
+test_graph_error_boundary() {
+	PYTHONPATH="$(dirname "$GRAPH")" python3 -c 'import argparse, graph, unittest; from graph_identity import GraphError
+graph._parser = lambda: argparse.Namespace(parse_args=lambda: argparse.Namespace(command="inspect", state=None)); graph._inspect = lambda _: (_ for _ in ()).throw(GraphError("expected")); assert graph.main() == 1
+graph._inspect = lambda _: (_ for _ in ()).throw(ValueError("unexpected")); unittest.TestCase().assertRaises(ValueError, graph.main)'
+}
+
 mutation_control() {
 	local mutation="$TMP/mutated-production" original="$TMP/control-original.json"
 	local mutated="$TMP/control-mutated.json" envelope wave
@@ -371,8 +382,10 @@ check 'completed graph denies graph-named spawn and allows unrelated spawn' test
 check 'stable loop evals survive begin-wave while completion stays revision-bound' test_stable_eval_identity
 check 'SessionStart includes the exact resolved progress.json path' test_bootstrap_exact_path
 check 'hard-stop waiver requires a final nonblank LOOP-STOP declaration' test_hard_stop_final_line
+check 'CLI handles GraphError but lets unexpected ValueError escape' test_graph_error_boundary
 check 'native transcript evidence rejects missing, duplicate, foreign, stale, failed, and reused records' test_transcript_evidence_rejections
 check 'stored waves reject tampering and child follow-ups require the final successful completion' test_wave_tamper_and_followup
+check 'worker evidence shapes are classified recursively without rejecting benign nesting' test_evidence_shape_normalization
 mutation_control
 
 if [[ "$FAILS" -eq 0 && "$CONTROL_FAILED" -eq 0 ]]; then

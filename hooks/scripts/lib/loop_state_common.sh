@@ -717,7 +717,7 @@ als_evals_are_frozen() {
 # P0 is still `pending` with empty evidence, and post_evals.sh grade-loop
 # REFUSES to grade that file (validate_structure check 5). A dispatch gate
 # demanding GO therefore demanded a grade that by construction only exists
-# AFTER the work it was gating, so a >=3-work-unit loop could never dispatch
+# AFTER the work it was gating, so a >=1-work-unit loop could never dispatch
 # its first implementation worker.
 #
 # FROZEN is accepted at DISPATCH time only (loop_dispatch_guard). Every
