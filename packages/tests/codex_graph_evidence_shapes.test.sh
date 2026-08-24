@@ -139,6 +139,38 @@ reject_unchanged() {
 	fi
 }
 
+join_completion_contract() {
+	local clean="$1" candidate="$2" evals="$3" proof="$4" retro="$5" transcript="$6" reference="$7"
+	local name encoded shape
+	jq --argjson j "$(node done)" \
+		'.graph.nodes.J=$j | .graph.nodes.J.evidence=[{note:"ordinary join evidence"}] |
+		 .graph.joins.J={mode:"all",inputs:["A","B"],released:true}' "$clean" >"$candidate"
+	python3 "$GRAPH" complete "$candidate" --session session-test --evals "$evals" \
+		--proof "$proof" --retro "$retro" --transcript "$transcript" >/dev/null
+	IFS=$'\t' read -r name encoded < <(attack_rows "$reference" | head -1)
+	shape=$(printf '%s' "$encoded" | base64 --decode)
+	jq --argjson j "$(node done)" --argjson shape "$shape" \
+		'.graph.nodes.J=$j | .graph.nodes.J.evidence=[$shape] |
+		 .graph.joins.J={mode:"all",inputs:["A","B"],released:true}' "$clean" >"$candidate"
+	reject_unchanged "join completion mutation $name" "$candidate" \
+		python3 "$GRAPH" complete "$candidate" --session session-test --evals "$evals" \
+		--proof "$proof" --retro "$retro" --transcript "$transcript"
+}
+
+duplicate_terminal_contract() {
+	local state="$TMP/evidence-duplicate-terminal.json" reference child terminal payload
+	rm -r "$HOME/.codex/sessions"
+	codex_fixture::init session-test
+	write_graph "$state" "$(jq -cn --argjson a "$(node)" '{A:$a}')"
+	python3 "$GRAPH" begin-wave "$state" >/dev/null
+	reference=$(codex_fixture::append_attempt session-test loop_worker_41 1 wave-2)
+	child="$(dirname "$(codex_fixture::parent session-test)")/rollout-fixture-$(jq -r '.agent_thread_id' <<<"$reference").jsonl"
+	terminal=$(jq -c 'select(.payload.type == "task_complete")' "$child")
+	printf '%s\n' "$terminal" >>"$child"
+	payload=$(record_payload "$state")
+	reject_unchanged "duplicate final terminal" "$state" python3 "$GRAPH" record-wave "$state" "$payload"
+}
+
 main() {
 	local state="$TMP/evidence-shapes.json" candidate="$TMP/evidence-shape.json"
 	local reference retry_reference name encoded shape benign duplicate reuse wave call envelope
@@ -209,6 +241,7 @@ main() {
 	cp "$clean" "$candidate"
 	python3 "$GRAPH" complete "$candidate" --session session-test --evals "$evals" \
 		--proof "$proof" --retro "$retro" --transcript "$transcript" >/dev/null
+	join_completion_contract "$clean" "$candidate" "$evals" "$proof" "$retro" "$transcript" "$retry_reference"
 	while IFS=$'\t' read -r name encoded; do
 		shape=$(printf '%s' "$encoded" | base64 --decode)
 		jq --argjson shape "$shape" '.graph.nodes.A.evidence += [$shape]' "$clean" >"$candidate"
@@ -231,6 +264,7 @@ main() {
 	wave=$(jq -r '.graph.active_wave.id' "$reuse")
 	envelope=$(jq -cn --arg wave "$wave" '{wave_id:$wave,results:{B:{outcome:"done",evidence:"checked"}}}')
 	reject_unchanged "nested reuse" "$reuse" python3 "$GRAPH" record-wave "$reuse" "$envelope"
+	duplicate_terminal_contract
 
 	printf 'PASS - native Codex recursive worker-evidence shapes\n'
 }

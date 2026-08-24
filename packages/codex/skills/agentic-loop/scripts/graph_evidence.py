@@ -101,8 +101,8 @@ def _child_terminal(parent_session: str, expected_task: str, agent_thread_id: st
     if not isinstance(turn_id, str):
         raise GraphError(f"child {agent_thread_id} has an invalid final task_complete")
     starts = [event for event in events if event.get("type") == "task_started" and event.get("turn_id") == turn_id]
-    if len(starts) != 1:
-        raise GraphError(f"child {agent_thread_id} task_complete has no matching task_started")
+    if len(starts) != 1 or sum(event.get("turn_id") == turn_id for event in terminals) != 1:
+        raise GraphError(f"child {agent_thread_id} task_complete has no unique matching task_started")
     return turn_id
 
 def _reference(value: Any, label: str) -> dict[str, Any]:
@@ -169,6 +169,7 @@ def _stored_references(state: dict[str, Any], require_complete: bool,
     ordinary: list[object] = []
     for node_id, node in state["graph"]["nodes"].items():
         if node_id in state["graph"]["joins"]:
+            ordinary.extend(node["evidence"])
             continue
         references = []
         for index, item in enumerate(node["evidence"]):
