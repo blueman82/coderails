@@ -1,16 +1,77 @@
 from __future__ import annotations
 
+import json
 import re
+import unicodedata
+from collections.abc import Iterable
 from typing import Any
 
 
-class IdentityError(ValueError):
-    pass
+class GraphError(ValueError):
+    """Mark an expected graph validation failure."""
+
+
+REFERENCE_KEYS = {
+    "kind",
+    "attempt",
+    "wave_id",
+    "spawn_call_id",
+    "agent_thread_id",
+    "task_complete_turn_id",
+}
+IDENTIFIER_KEYS = {"spawn_call_id", "agent_thread_id", "task_complete_turn_id"}
+RESERVED_TOKENS = REFERENCE_KEYS | {"codex_agent"}
+
+
+def _normalized(value: str) -> str:
+    return unicodedata.normalize("NFKC", value).strip()
+
+
+def _reserved_matches(value: str) -> set[str]:
+    candidate = _normalized(value).casefold()
+    return {
+        token
+        for token in RESERVED_TOKENS
+        if len(candidate) == len(token)
+        and any(character.isascii() for character in candidate)
+        and all(character == expected or not character.isascii()
+                for character, expected in zip(candidate, token))
+    }
+
+
+def classify_worker_evidence(value: object) -> tuple[bool, set[str]]:
+    """Return a worker-shaped boolean and normalized identifier set for nested data."""
+    if isinstance(value, str):
+        normalized = _normalized(value)
+        try:
+            value = json.loads(normalized)
+        except json.JSONDecodeError:
+            return "codex_agent" in _reserved_matches(normalized), set()
+    items: Iterable[tuple[object, object]]
+    if isinstance(value, dict):
+        items = value.items()
+    elif isinstance(value, list):
+        items = enumerate(value)
+    else:
+        items = ()
+    shaped = False
+    identifiers: set[str] = set()
+    for raw_key, item in items:
+        matches = _reserved_matches(raw_key) if isinstance(raw_key, str) else set()
+        shaped = shaped or bool(matches & REFERENCE_KEYS)
+        if matches & IDENTIFIER_KEYS and isinstance(item, str):
+            normalized_item = _normalized(item)
+            if normalized_item:
+                identifiers.add(normalized_item)
+        item_shaped, item_identifiers = classify_worker_evidence(item)
+        shaped = shaped or item_shaped
+        identifiers.update(item_identifiers)
+    return shaped, identifiers
 
 
 def task_name(node_id: str, attempt: int = 1) -> str:
     if isinstance(attempt, bool) or not isinstance(attempt, int) or attempt < 1:
-        raise IdentityError("graph worker attempt must be a positive integer")
+        raise GraphError("graph worker attempt must be a positive integer")
     suffix = "" if attempt == 1 else f"_a{attempt}"
     return f"loop_worker_{node_id.encode().hex()}{suffix}"
 
@@ -18,17 +79,17 @@ def task_name(node_id: str, attempt: int = 1) -> str:
 def task_node(name: str) -> str:
     match = re.fullmatch(r"loop_worker_([0-9a-f]+)(?:_a([2-9][0-9]*))?", name)
     if match is None:
-        raise IdentityError("graph worker task name must use the native lowercase format")
+        raise GraphError("graph worker task name must use the native lowercase format")
     encoded, retry = match.groups()
     attempt = int(retry) if retry else 1
     if len(encoded) % 2:
-        raise IdentityError("graph worker task name is not reversible")
+        raise GraphError("graph worker task name is not reversible")
     try:
         node_id = bytes.fromhex(encoded).decode()
     except (UnicodeDecodeError, ValueError) as error:
-        raise IdentityError("graph worker task name is not reversible") from error
+        raise GraphError("graph worker task name is not reversible") from error
     if not node_id or task_name(node_id, attempt) != name:
-        raise IdentityError("graph worker task name is not canonical")
+        raise GraphError("graph worker task name is not canonical")
     return node_id
 
 
@@ -36,9 +97,9 @@ def active_nodes(active_wave: Any, nodes: dict[str, Any], revision: int) -> set[
     if active_wave is None:
         return set()
     if not isinstance(active_wave, dict):
-        raise IdentityError("graph.active_wave must be an object")
+        raise GraphError("graph.active_wave must be an object")
     if active_wave.get("id") != f"wave-{revision}" or active_wave.get("revision") != revision:
-        raise IdentityError("graph.active_wave identity must match the root revision")
+        raise GraphError("graph.active_wave identity must match the root revision")
     wave_nodes = active_wave.get("nodes")
     if (
         not isinstance(wave_nodes, list)
@@ -46,7 +107,7 @@ def active_nodes(active_wave: Any, nodes: dict[str, Any], revision: int) -> set[
         or any(not isinstance(item, str) for item in wave_nodes)
         or len(wave_nodes) != len(set(wave_nodes))
     ):
-        raise IdentityError("graph.active_wave.nodes must be a non-empty unique array")
+        raise GraphError("graph.active_wave.nodes must be a non-empty unique array")
     if any(node_id not in nodes or nodes[node_id]["status"] != "running" for node_id in wave_nodes):
-        raise IdentityError("graph.active_wave must contain known running nodes")
+        raise GraphError("graph.active_wave must contain known running nodes")
     return set(wave_nodes)
