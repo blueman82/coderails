@@ -76,8 +76,8 @@ is_denied() { # stdout_json -> 0 if permissionDecision=deny, 1 otherwise
     printf '%s' "$1" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null 2>&1
 }
 
+WU0_PENDING='{}'
 WU1_PENDING='{"wu1":{"status":"pending"}}'
-WU2_PENDING='{"wu1":{"status":"pending"},"wu2":{"status":"pending"}}'
 WU3_PENDING='{"wu1":{"status":"pending"},"wu2":{"status":"pending"},"wu3":{"status":"pending"}}'
 WU5_PENDING='{"wu1":{"status":"pending"},"wu2":{"status":"pending"},"wu3":{"status":"pending"},"wu4":{"status":"pending"},"wu5":{"status":"pending"}}'
 
@@ -110,22 +110,16 @@ out=$(run "$(payload S1 coderails:loop-worker)")
 is_denied "$out"
 check "session mismatch (progress.json owned by OTHER, dispatch is S1) -> BLOCK" 0 $?
 
-# ── Below threshold: 1-unit roster, all pending, no evals.json -> allow ─────
+# ── Below threshold: 0-unit roster, no evals.json -> allow ──────────────────
 reset
-write_file S1 "$WU1_PENDING"
+write_file S1 "$WU0_PENDING"
 out=$(run "$(payload S1 coderails:loop-worker)")
-check "1-unit roster (all pending), no evals.json -> allow (below threshold)" "" "$out"
+check "0-unit roster, no evals.json -> allow (below threshold)" "" "$out"
 
-# ── Below threshold: 2-unit roster, all pending, no evals.json -> allow ─────
-reset
-write_file S1 "$WU2_PENDING"
-out=$(run "$(payload S1 coderails:loop-worker)")
-check "2-unit roster (all pending), no evals.json -> allow (below threshold)" "" "$out"
-
-# ── At threshold: 3-unit roster, ALL PENDING (nothing dispatched yet), no
+# ── Above threshold: 3-unit roster, ALL PENDING (nothing dispatched yet), no
 # evals.json -> BLOCK on the FIRST implementation-unit dispatch. This is the
 # core regression case: roster size alone (not a dispatch ordinal) decides
-# whether Phase 2.7 applies, so the very first dispatch of a >=3-unit loop is
+# whether Phase 2.7 applies, so the very first dispatch of a >=1-unit loop is
 # gated exactly like its third. ─────────────────────────────────────────────
 reset
 write_file S1 "$WU3_PENDING"
@@ -139,6 +133,25 @@ case "$out" in
     printf 'FAIL - deny reason missing evals.json/Phase 2.7c mention: %s\n' "$out"
     ;;
 esac
+
+# ── At the new boundary: 1-unit roster, ALL PENDING, no evals.json -> BLOCK.
+# This pins the exact threshold this PR moved (work_units >= 1, not >= 3): a
+# 1-unit loop must be gated on its very first dispatch, same as a 3-unit one.
+reset
+write_file S1 "$WU1_PENDING"
+out=$(run "$(payload S1 coderails:loop-worker)")
+is_denied "$out"
+check "1-unit roster ALL PENDING (first dispatch), no evals.json -> BLOCK" 0 $?
+
+# ── At the new boundary: 1-unit roster, evals.json present, GO, justified,
+# STAMPED -> allow. Proves the lowered threshold still opens the gate once
+# evals are genuinely frozen/graded, not just that it closes it.
+reset
+write_file S1 "$WU1_PENDING"
+jq -n '{scope:"loop", verification_level:1, verification_justification:"1 work-unit, no irreversible surface", head_sha:"deadbeef", evals:[{id:"e1",priority:"P0",mode:"scripted",status:"pass",cmd:"run-a",negative_control:"run-a-broken",evidence:"log"}]}' >"$(file_dir S1)/evals.json"
+stamp "$(file_dir S1)/evals.json"
+out=$(run "$(payload S1 coderails:loop-worker)")
+check "1-unit roster, GO evals justified+stamped -> allow" "" "$out"
 
 # ── At threshold, evals.json present, GO, justified, STAMPED -> allow ───────
 reset
@@ -249,7 +262,7 @@ check "sandbox wrapper stays outside graph ownership -> allow" "" "$out"
 # P0 is "pending" with empty evidence, so post_evals.sh grade-loop REFUSES to
 # grade the file (validate_structure check 5: "P0 eval <id> has empty
 # evidence"). A dispatch gate that demanded GO therefore demanded a grade that
-# by construction only exists AFTER the work it was gating — a >=3-unit loop
+# by construction only exists AFTER the work it was gating — a >=1-unit loop
 # could never dispatch its first implementation worker. FROZEN is the honest
 # pre-build state: a frozen, structurally-valid, session-bound, loop-scope,
 # ungraded suite with at least one P0.
@@ -530,12 +543,13 @@ stamp "$(file_dir S1)/evals.json"
 out=$(run "$(payload S1 coderails:loop-worker)")
 check "FROZEN regression: genuinely graded GO suite still -> allow" "" "$out"
 
-# 9. REGRESSION — a sub-3-unit loop still skips the gate entirely, even with
-# no evals.json at all. FROZEN must not pull the <3-unit path into the gate.
+# 9. REGRESSION — a sub-1-unit (0-unit) loop still skips the gate entirely,
+# even with no evals.json at all. FROZEN must not pull the <1-unit path into
+# the gate.
 reset
-write_file S1 "$WU2_PENDING"
+write_file S1 "$WU0_PENDING"
 out=$(run "$(payload S1 coderails:loop-worker)")
-check "FROZEN regression: 2-unit roster with no evals.json still skips gate" "" "$out"
+check "FROZEN regression: 0-unit roster with no evals.json still skips gate" "" "$out"
 
 # ── Graph-owned dispatch of ANY subagent_type is gated on evals ─────────────
 # graph_dispatch.sh's role table maps only ONE of six node roles to

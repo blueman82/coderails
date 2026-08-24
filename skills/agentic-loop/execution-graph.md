@@ -166,7 +166,7 @@ ambiguous.
 | `J2` | `S2.5` and `S2.6` | all triggered scouts returned; orchestrator validated and absorbed both results in one state write | skipped branches contribute an explicit skip record |
 | `S2.7a` | `J2` | durable `spec.md` exists | only if `work_units >= 3` or a cross-unit dependency exists |
 | `S2.7b` | `S2.7a` | durable `plan.md` exists and matches the work-unit list | same predicate as `S2.7a`; `S2.7b` is sequential after it |
-| `S2.7c` | `S2` plus authorising prompt | loop-scope evals are frozen before build | required for a Phase 2.7 loop or an irreversible-surface trigger |
+| `S2.7c` | `S2` plus authorising prompt | loop-scope evals are frozen before build | required for any `work_units >= 1` loop or an irreversible-surface trigger; NOT gated by `S2.7a`'s ≥3-work-unit threshold |
 | `S2.7d[i]` | `S2` plus each unit definition | PR-scope evals are frozen before that unit builds | skip only for a unit with no PR; required before its merge gate |
 | `S2.7e` | `S2` plus executable-surface decision | blind `proof.json` exists, or explicit no-executable disposition is recorded | required for every executable loop; independent of `S2.7a/b` |
 | `S2.8` | `S2` and `S2.7b` when triggered | every build unit has one recorded model role | may run beside independent evidence branches; never releases a unit without its required inputs |
