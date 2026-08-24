@@ -236,25 +236,14 @@ GRAPH_EVIDENCE_REVALIDATE_JQ_MAIN=$(cat <<'JQ_MAIN_EOF'
       # is never asked for a spawn it was never bound against, which is what
       # keeps the legacy completion path working.
       #
-      # Matched on the spawn row's OWN node_id, not just its id, mirroring
-      # bind's `.node_id == $id` candidate filter. Deliberately NOT matched on
-      # wave_id, unlike bind: bind is minting a reference from a spawn in the
-      # wave it is recording, so wave-scoping there is exact, whereas
-      # revalidation re-checks a history that legitimately spans every wave
-      # a node ever retried in. The entry's own .wave_id could be compared,
-      # but it is written into progress.json and is therefore attacker-writable
-      # post-bind — comparing two fields the forger controls adds no
-      # discrimination, while the spawn row's node_id comes from the
-      # transcript envelope, which the forger cannot reach.
-      #
-      # dispatch_status is deliberately NOT filtered here. bind refuses a
-      # teammate_spawned spawn only on its DONE branch (graph_evidence_bind.sh
-      # line 342), which sits AFTER the non-done branch (line 325) — so a
-      # retry carry-forward or a skipped node legitimately holds bound
-      # evidence for a mailbox-dispatched spawn, and refusing it in this
-      # all-entries presence scan would deadlock it. The teammate_spawned
-      # demand belongs where bind makes it: on the qualifying-entry check for
-      # done nodes below.
+      # Matched on the spawn row's OWN node_id, mirroring bind's
+      # `.node_id == $id` candidate filter — see this file's SPAWN PRESENCE
+      # header for why wave_id is deliberately omitted (the entry's wave_id is
+      # attacker-writable post-bind; the row's node_id is not) and why
+      # dispatch_status is filtered on the qualifying-entry check below rather
+      # than in this all-entries scan (bind refuses teammate_spawned only on
+      # its done branch, so filtering here would deadlock a legitimate
+      # mailbox-dispatched retry carry-forward or skipped node).
       #
       # `. as $e` first: inside the inner select the input is a spawn row, so
       # a bare `.tool_use_id` there would read the ROW's id, not the entry's.
@@ -289,12 +278,20 @@ GRAPH_EVIDENCE_REVALIDATE_JQ_MAIN=$(cat <<'JQ_MAIN_EOF'
               # it can never prove completion the way an async_launched spawn
               # does. Made here rather than in the presence scan above because
               # bind makes it only on its done branch too.
+              #
+              # node_id is deliberately NOT re-matched here: $missing_spawn is
+              # raised BEFORE this reduce, so any entry reaching this point
+              # already proved a same-node spawn row exists for its id. Adding
+              # it back could only discriminate if two rows sharing one
+              # tool_use_id carried different dispatch_status values, which
+              # graph_evidence.sh makes impossible ($status_by_tool is a
+              # from_entries map keyed on tool_use_id alone) — dead weight no
+              # test could pin.
               ([ $bound[] | . as $ev
                  | select($ev.node_id == $id and ($ev.agent_id // "") != ""
                           and $ev.tool_use_id != null)
                  | select([ $spawn_rows[]
                             | select(.tool_use_id == $ev.tool_use_id
-                                     and .node_id == $ev.node_id
                                      and (.dispatch_status // "") != "teammate_spawned") ]
                           | length > 0)
                  | ($notif_by_tool[$ev.tool_use_id] // []) as $notifs

@@ -328,6 +328,58 @@ else
 		"$state_donor" "$SESSION_DONOR"
 fi
 
+# --- cross-node donor spawn on a SKIPPED node ---------------------------------
+# The done-node case above is refused by EITHER node_id clause (the presence
+# scan's or the qualifying-entry check's), so neither is individually pinned by
+# it — a mutation dropping just one still passes. A SKIPPED node never reaches
+# the qualifying-entry check at all (that is done-only), so only the presence
+# scan's node_id match can refuse this, which is what pins it.
+SESSION_DONORSKIP="tamper-donorskip"
+claude_fixture::init "$PROJECTS" "$SESSION_DONORSKIP"
+CURSOR_DONORSKIP=$(claude_fixture::cursor "$PROJECTS" "$SESSION_DONORSKIP")
+claude_fixture::append_spawn "$PROJECTS" "$SESSION_DONORSKIP" N1 wave-1 toolu_DSKDONE01 >/dev/null
+claude_fixture::append_spawn "$PROJECTS" "$SESSION_DONORSKIP" N2 wave-1 toolu_DSKCARRY01 >/dev/null
+append_notification "$PROJECTS" "$SESSION_DONORSKIP" toolu_DSKDONE01 completed
+state_donorskip="$TMP/state_donorskip.json"
+jq -n --arg session "$SESSION_DONORSKIP" --arg loop "$LOOP" --argjson c "$CURSOR_DONORSKIP" '
+  {status:"running",outcome:"running",retry:{attempts:0,max:2},evidence:[]} as $n
+  | {schema_version:2,session_id:$session,loop_id:$loop,revision:1,status:"in-progress",
+     graph:{nodes:{N1:$n,N2:$n},edges:[],joins:{},
+            active_wave:{wave_id:"wave-1",revision:1,nodes:["N1","N2"],transcript_cursor:$c},
+            hard_stop:null}}' >"$state_donorskip"
+graph_dispatch_record "$state_donorskip" \
+	"$(jq -cn '{wave_id:"wave-1",results:{N1:{outcome:"done",evidence:[]},
+                    N2:{outcome:"failed",evidence:[]}}}')" >/dev/null 2>&1
+rc_donorskip=$?
+jq '.graph.active_wave = null | .revision = 2
+  | .graph.nodes.N2.status = "skipped" | .graph.nodes.N2.outcome = "skipped"' \
+	"$state_donorskip" >"$state_donorskip.tmp" && mv "$state_donorskip.tmp" "$state_donorskip"
+write_valid_triple "$SESSION_DONORSKIP" "$LOOP" 2 "$TMP/e_$SESSION_DONORSKIP.json" \
+	"$TMP/p_$SESSION_DONORSKIP.json" "$TMP/r_$SESSION_DONORSKIP.json"
+# Delete the SKIPPED node's own spawn, then re-point its carried entry at a
+# spawn that genuinely exists but belongs to N1. No agent_id is involved, so
+# the uniqueness scan sees one tool_use_id on two nodes... which it WOULD catch
+# — so N1's own entry is dropped, leaving the donor id bound only on N2.
+transcript_donorskip=$(claude_fixture::transcript "$PROJECTS" "$SESSION_DONORSKIP")
+grep -v 'toolu_DSKCARRY01' "$transcript_donorskip" >"$transcript_donorskip.tmp" &&
+	mv "$transcript_donorskip.tmp" "$transcript_donorskip"
+jq '.graph.nodes.N2.evidence = [(.graph.nodes.N2.evidence[0]
+      | .tool_use_id = "toolu_DSKDONE01" | .record_uuid = "uuid-toolu_DSKDONE01")]
+  | .graph.nodes.N1.status = "skipped" | .graph.nodes.N1.outcome = "skipped"
+  | .graph.nodes.N1.evidence = []' \
+	"$state_donorskip" >"$state_donorskip.tmp" && mv "$state_donorskip.tmp" "$state_donorskip"
+if [ "$rc_donorskip" -ne 0 ] ||
+	! jq -e '.graph.nodes.N2.evidence[0].tool_use_id == "toolu_DSKDONE01"
+             and ((.graph.nodes.N2.evidence[0] | has("agent_id")) | not)' \
+		"$state_donorskip" >/dev/null 2>&1; then
+	fail "a skipped node citing another node's spawn is refused" \
+		"setup: the bind or the re-point did not happen (rc=$rc_donorskip)"
+	SETUP_FAILS=$((SETUP_FAILS + 1))
+else
+	assert_refused_revalidation "a skipped node citing another node's spawn is refused" \
+		"$state_donorskip" "$SESSION_DONORSKIP"
+fi
+
 # --- a SURVIVING session-mismatched spawn row ---------------------------------
 # Distinct from deleting the record: the dispatch record stays, but the
 # envelope's OWN session_id is mutated to disagree with the session. The
