@@ -471,9 +471,23 @@ if [ "$rc_team" -ne 0 ] ||
 	fail "a done node re-pointed at a teammate_spawned spawn is refused" \
 		"setup: the bind or the re-point did not happen (rc=$rc_team)"
 	SETUP_FAILS=$((SETUP_FAILS + 1))
+elif out=$(complete_with "$state_team" "$SESSION_TEAM"); then
+	fail "a done node re-pointed at a teammate_spawned spawn is refused" \
+		"completion SUCCEEDED on a mailbox-dispatched spawn (bypass)"
+# Wording-specific on BOTH sides, not assert_refused_revalidation's bare
+# grep for 'revalidat' — that helper passes on ANY revalidation refusal,
+# which is exactly how this case shipped refusing for the WRONG reason.
+# The notification for toolu_TEAMMAIL01 exists and reports completed, so
+# blaming notification evidence sends the operator hunting a non-problem;
+# only the dispatch_status clause can refuse this case.
+elif ! printf '%s' "$out" | grep -qi -- 'mailbox/teammate'; then
+	fail "a done node re-pointed at a teammate_spawned spawn is refused" \
+		"refused, but the reason did not name the mailbox/teammate cause; got: $out"
+elif printf '%s' "$out" | grep -qi -- 'no still-valid completed-notification'; then
+	fail "a done node re-pointed at a teammate_spawned spawn is refused" \
+		"refused with the generic notification-evidence message, misnaming the cause; got: $out"
 else
-	assert_refused_revalidation "a done node re-pointed at a teammate_spawned spawn is refused" \
-		"$state_team" "$SESSION_TEAM"
+	pass "a done node re-pointed at a teammate_spawned spawn is refused"
 fi
 
 # --- a multi-attempt (retried) node still completes ---------------------------
@@ -555,11 +569,22 @@ fi
 # here: an intact transcript still completes, and deleting the SKIPPED node's
 # own spawn record is refused (naming that node), so the arm cannot silently
 # rot into either a deadlock or a hole.
+#
+# The skipped node's spawn is ALSO marked teammate_spawned, which makes this the
+# ACCEPT arm for the dispatch_status asymmetry: graph_evidence_revalidate.sh
+# deliberately does NOT filter dispatch_status in its all-entries spawn-presence
+# scan, precisely so a legitimately mailbox-dispatched skipped node (or retry
+# carry-forward) is not deadlocked — the demand is made only on a DONE node's
+# qualifying entry, mirroring where bind makes it. Until now that was asserted
+# in prose only; this pins it. N2 reports "failed", so bind takes its non-done
+# branch and never reaches the teammate_spawned refusal, and the done-only
+# terminal recheck never reaches N2 at all.
 SESSION_SKIP="complete-skipnode"
 claude_fixture::init "$PROJECTS" "$SESSION_SKIP"
 CURSOR_SKIP=$(claude_fixture::cursor "$PROJECTS" "$SESSION_SKIP")
 claude_fixture::append_spawn "$PROJECTS" "$SESSION_SKIP" N1 wave-1 toolu_SKIPDONE01 >/dev/null
 claude_fixture::append_spawn "$PROJECTS" "$SESSION_SKIP" N2 wave-1 toolu_SKIPCARRY01 >/dev/null
+claude_fixture::append_dispatch_status "$PROJECTS" "$SESSION_SKIP" toolu_SKIPCARRY01 teammate_spawned
 append_notification "$PROJECTS" "$SESSION_SKIP" toolu_SKIPDONE01 completed
 state_skip="$TMP/state_skip.json"
 jq -n --arg session "$SESSION_SKIP" --arg loop "$LOOP" --argjson c "$CURSOR_SKIP" '
@@ -603,7 +628,7 @@ elif complete_with "$state_skip" "$SESSION_SKIP" >/dev/null 2>&1; then
 	fi
 else
 	fail "a skipped node carrying bound evidence still completes" \
-		"the spawn demand deadlocked a legitimately skipped node"
+		"the spawn demand deadlocked a legitimately skipped, mailbox-dispatched node"
 fi
 
 # --- the legacy/cursorless path must still complete --------------------------

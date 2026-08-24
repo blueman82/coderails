@@ -310,6 +310,30 @@ GRAPH_EVIDENCE_REVALIDATE_JQ_MAIN=$(cat <<'JQ_MAIN_EOF'
                 # exists to avoid. See the WIDENING note in this file's header.
                 elif ([ $bound[] | select(.node_id == $id and .is_object) ] | length) == 0
                 then error("graph_evidence: revalidation found no structured bound entry on node \($id); its evidence is a string or array, not the bound object shape")
+                # A node whose otherwise-qualifying entry was excluded ONLY by
+                # the dispatch_status clause reaches the terminal else too, and
+                # the notification is not the cause there: it exists and it
+                # reports completed. Named separately for the same reason the
+                # unstructured-entry branch above is — the terminal else is a
+                # catch-all, and letting a mailbox dispatch fall into it sends
+                # the operator hunting a notification that is present and fine.
+                #
+                # The inner select is the exact complement of the qualifying
+                # clause above (`!=` becomes `==`), so this branch names the
+                # cause only when that clause is what rejected the entry.
+                # node_id is not re-matched, for the same reason it is not
+                # matched there: $missing_spawn already proved a same-node row
+                # exists for this id, and $status_by_tool in graph_evidence.sh
+                # is keyed on tool_use_id alone, so two rows sharing an id
+                # cannot disagree on dispatch_status.
+                elif ([ $bound[] | . as $ev
+                        | select($ev.node_id == $id and ($ev.agent_id // "") != ""
+                                 and $ev.tool_use_id != null)
+                        | select([ $spawn_rows[]
+                                   | select(.tool_use_id == $ev.tool_use_id
+                                            and (.dispatch_status // "") == "teammate_spawned") ]
+                                 | length > 0) ] | length) > 0
+                then error("graph_evidence: revalidation found node \($id) bound to a spawn dispatched via mailbox/teammate; mailbox-dispatched agents report completion as a <teammate-message> carrying no harness discriminator, so they cannot prove completion — re-dispatch via unnamed Agent for nodes that must bind as done")
                 else error("graph_evidence: revalidation found no still-valid completed-notification evidence for node \($id)")
                 end
             end)
