@@ -52,6 +52,22 @@ claude_fixture::append_spawn() { # projects_dir session_id node_id wave_id [tool
 	printf '%s\n' "$tool_use_id"
 }
 
+# Append the tool_result record that graph_evidence_spawns joins in by
+# tool_use_id to derive a spawn row's dispatch_status. Shape mirrors the live
+# one graph_evidence.sh documents: a `type:"user"` record whose
+# .message.content[0] carries {tool_use_id, type:"tool_result"}, with the
+# status on .toolUseResult.status. A mailbox/teammate dispatch reports
+# "teammate_spawned" here; a normal unnamed Agent dispatch "async_launched".
+claude_fixture::append_dispatch_status() { # projects_dir session_id tool_use_id status
+	local path
+	path=$(claude_fixture::transcript "$1" "$2")
+	jq -cn --arg session "$2" --arg id "$3" --arg status "$4" '{
+          type:"user",uuid:("result-" + $id),parentUuid:("uuid-" + $id),
+          sessionId:$session,isSidechain:false,
+          toolUseResult:{status:$status},
+          message:{role:"user",content:[{tool_use_id:$id,type:"tool_result",content:"ok"}]}}' >>"$path"
+}
+
 # Append an unrelated non-Agent record, so cursor/offset arithmetic is exercised
 # against a transcript that is not purely spawns (the real one is ~80% Bash).
 claude_fixture::append_noise() { # projects_dir session_id

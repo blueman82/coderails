@@ -77,10 +77,21 @@ GRAPH_EVIDENCE_REVALIDATE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 #     record while leaving the <task-notification> block intact previously
 #     still passed, because only notification presence was ever re-derived.
 #
-#     Session-mismatched spawn rows are EXCLUDED from the satisfying set,
-#     mirroring graph_evidence_bind_wave's own refusal to bind them: accepting
-#     any spawn row regardless of the envelope's own session_id would reopen
-#     the cross-session replay path bind already closes.
+#     The demand is keyed on the spawn row, not on a bare id: the row must be
+#     session-matched AND its own transcript envelope must name THE SAME NODE
+#     the entry sits on. A flat "does this id exist anywhere" test let a
+#     done node whose own dispatch record was deleted forge a citation of
+#     a different, still-running node's real live spawn — the id existed, so the
+#     demand was satisfied by a spawn that was never bindable to this node.
+#     Session-mismatched rows are excluded for the same reason bind refuses
+#     them: accepting any row regardless of the envelope's own session_id
+#     would reopen the cross-session replay path bind already closes.
+#
+#     dispatch_status is NOT filtered in this presence scan, because bind
+#     refuses a teammate_spawned spawn only on its DONE branch — a retry
+#     carry-forward or a skipped node legitimately carries mailbox-dispatched
+#     evidence. That demand is made instead on the terminal-result recheck's
+#     qualifying entry, exactly where bind makes it.
 #
 #     The earlier deferral of this check reasoned that re-deriving spawn
 #     presence "cannot distinguish a legitimate spawn-less bind from a
@@ -106,10 +117,22 @@ GRAPH_EVIDENCE_REVALIDATE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 #     same session transcript — pinned by the "a retried node with a
 #     carried-forward attempt entry still completes" and "a skipped node
 #     carrying bound evidence still completes" cases in
-#     graph_dispatch_complete.test.sh, with the matching deletion arms pinned
-#     alongside them. The consequence to be aware of is that a graph now
+#     graph_dispatch_complete.test.sh, each with its own deletion arm pinned
+#     alongside it. The consequence to be aware of is that a graph now
 #     depends on its FULL dispatch history surviving in the transcript, not
 #     just the attempts that finally succeeded.
+#
+#     A THIRD widening, disclosed rather than filtered: `looks_provenance`
+#     scans string leaves, so a legacy plain-STRING entry merely MENTIONING a
+#     tool_use_id or "kind":"claude_agent" as free text now selects into the
+#     bound set, normalises to no ids at all, and can never yield a qualifying
+#     entry — so completion is refused. Accepted, not fixed: demanding a
+#     top-level JSON object before consulting looks_provenance would drop the
+#     array-wrapped AND JSON-string forgeries back out of the check entirely,
+#     since neither is a top-level object (measured, not assumed). The refusal
+#     instead NAMES this cause rather than blaming notification evidence. A
+#     legacy string with no provenance-ish text is unaffected: it never
+#     selects, and its graph still short-circuits at the probe.
 #
 # Fails closed (non-zero, a NAMED "graph_evidence: ... revalidation ..."
 # reason on stderr) on any failure, including an unreadable/malformed
@@ -131,13 +154,24 @@ JQ_PROBE_EOF
 )
 GRAPH_EVIDENCE_REVALIDATE_JQ_MAIN=$(cat <<'JQ_MAIN_EOF'
       ($notifications | group_by(.tool_use_id) | map({key: .[0].tool_use_id, value: .}) | from_entries) as $notif_by_tool
-      # Freshly re-derived spawn presence, session-matched only. A row whose
-      # own envelope session_id disagrees with this session is excluded, the
-      # same exclusion graph_evidence_bind_wave applies before binding —
-      # honouring it here too keeps a cross-session replayed envelope from
-      # satisfying a spawn demand it could never have satisfied at bind time.
+      # Freshly re-derived spawn ROWS, session-matched only. A row whose own
+      # envelope session_id disagrees with this session is excluded, the same
+      # exclusion graph_evidence_bind_wave applies before binding — honouring
+      # it here too keeps a cross-session replayed envelope from satisfying a
+      # spawn demand it could never have satisfied at bind time.
+      #
+      # Kept as ROWS, not flattened to a bare id list. A flat list can only
+      # answer "does this id exist anywhere in the transcript", which is not
+      # the question: graph_evidence_bind_wave binds a spawn to a node only
+      # when the spawn's OWN envelope names that node (bind's $candidates
+      # filter, `.node_id == $id`), so an id that exists but belongs to a
+      # DIFFERENT node was never bindable here. Answering only the flat
+      # question let a done node whose own spawn record was deleted forge a
+      # citation of a second, still-running node's real live spawn and pass.
+      # The row's .node_id comes from the transcript envelope, which the
+      # party editing progress.json cannot reach.
       | ([ $spawns[] | select((.session_mismatch // false) != true)
-           | .tool_use_id | select(type == "string") ]) as $spawn_ids
+           | select((.tool_use_id | type) == "string") ]) as $spawn_rows
       | (.graph.nodes // {}) as $nodes
       # Entries are selected with the bind-time normalising detector, NOT an
       # exact .kind match, so every forged variant is dragged INTO this check
@@ -154,6 +188,7 @@ GRAPH_EVIDENCE_REVALIDATE_JQ_MAIN=$(cat <<'JQ_MAIN_EOF'
           | (.value.evidence // []) | if type == "array" then . else [.] end
           | .[] | select(looks_provenance)
           | {node_id: $id,
+             is_object: (type == "object"),
              tool_use_id: (if type == "object" then (.tool_use_id? // null) else null end),
              agent_id: (if type == "object" then (.agent_id? // null) else null end)}
           | .tool_use_id = (if (.tool_use_id | type) == "string" then .tool_use_id else null end)
@@ -200,10 +235,33 @@ GRAPH_EVIDENCE_REVALIDATE_JQ_MAIN=$(cat <<'JQ_MAIN_EOF'
       # cursorless/legacy-graph bind, or a carried-forward retry reference)
       # is never asked for a spawn it was never bound against, which is what
       # keeps the legacy completion path working.
-      # `. as $e` first: inside `index(...)` the input is $spawn_ids, so a bare
-      # `.tool_use_id` there would index the ID ARRAY, not the entry.
+      #
+      # Matched on the spawn row's OWN node_id, not just its id, mirroring
+      # bind's `.node_id == $id` candidate filter. Deliberately NOT matched on
+      # wave_id, unlike bind: bind is minting a reference from a spawn in the
+      # wave it is recording, so wave-scoping there is exact, whereas
+      # revalidation re-checks a history that legitimately spans every wave
+      # a node ever retried in. The entry's own .wave_id could be compared,
+      # but it is written into progress.json and is therefore attacker-writable
+      # post-bind — comparing two fields the forger controls adds no
+      # discrimination, while the spawn row's node_id comes from the
+      # transcript envelope, which the forger cannot reach.
+      #
+      # dispatch_status is deliberately NOT filtered here. bind refuses a
+      # teammate_spawned spawn only on its DONE branch (graph_evidence_bind.sh
+      # line 342), which sits AFTER the non-done branch (line 325) — so a
+      # retry carry-forward or a skipped node legitimately holds bound
+      # evidence for a mailbox-dispatched spawn, and refusing it in this
+      # all-entries presence scan would deadlock it. The teammate_spawned
+      # demand belongs where bind makes it: on the qualifying-entry check for
+      # done nodes below.
+      #
+      # `. as $e` first: inside the inner select the input is a spawn row, so
+      # a bare `.tool_use_id` there would read the ROW's id, not the entry's.
       | ([ $bound[] | . as $e | select($e.tool_use_id != null)
-           | select(($spawn_ids | index($e.tool_use_id)) == null) ]) as $missing_spawn
+           | select([ $spawn_rows[]
+                      | select(.tool_use_id == $e.tool_use_id
+                               and .node_id == $e.node_id) ] | length == 0) ]) as $missing_spawn
       | if $dup_tool or $dup_agent
         then error("graph_evidence: revalidation found a tool_use_id or agent_id bound to more than one node")
         elif ($missing_spawn | length) > 0
@@ -211,24 +269,49 @@ GRAPH_EVIDENCE_REVALIDATE_JQ_MAIN=$(cat <<'JQ_MAIN_EOF'
         else
           reduce $done_with_evidence[] as $id (null;
             if . != null then . else
-              # A qualifying entry must now clear THREE things, all read at the
-              # top level: a minted agent_id, a still-present session-matched
-              # spawn for its tool_use_id, and a still-valid completed
-              # notification agreeing with that agent_id. The spawn clause is
-              # what a forged entry cannot satisfy, because every forged
-              # variant buries or omits its ids instead of presenting them at
-              # the top level. So a forged entry never becomes the qualifying
-              # entry for a node, and a node whose only real entry was
-              # overwritten by a forged one is left with no qualifier at all.
+              # A qualifying entry must clear FOUR things, all read at the top
+              # level: a minted agent_id, a still-present session-matched spawn
+              # for its tool_use_id that the transcript says belongs to THIS
+              # node, that spawn not being a mailbox/teammate dispatch, and a
+              # still-valid completed notification agreeing with that agent_id.
+              #
+              # Each clause closes a different forged shape: the spawn clause
+              # refuses a buried/nested tool_use_id (arraywrap, nested,
+              # jsonstring — those bury their ids, so nothing is read at the
+              # top level to match a spawn against); the agent_id clause
+              # refuses a shape presenting a real top-level tool_use_id but
+              # never minting an agent_id (trailspace, homoglyph, spawnref).
+              #
+              # The dispatch_status clause mirrors graph_evidence_bind.sh line
+              # 342, which refuses to bind a DONE node against a
+              # teammate_spawned spawn: a mailbox dispatch reports completion
+              # as a <teammate-message> carrying no harness discriminator, so
+              # it can never prove completion the way an async_launched spawn
+              # does. Made here rather than in the presence scan above because
+              # bind makes it only on its done branch too.
               ([ $bound[] | . as $ev
                  | select($ev.node_id == $id and ($ev.agent_id // "") != ""
-                          and $ev.tool_use_id != null
-                          and ($spawn_ids | index($ev.tool_use_id)) != null)
+                          and $ev.tool_use_id != null)
+                 | select([ $spawn_rows[]
+                            | select(.tool_use_id == $ev.tool_use_id
+                                     and .node_id == $ev.node_id
+                                     and (.dispatch_status // "") != "teammate_spawned") ]
+                          | length > 0)
                  | ($notif_by_tool[$ev.tool_use_id] // []) as $notifs
                  | ([ $notifs[] | select(.status == "completed" and ((.result // "") | length) > 0) ]) as $good
                  | select(($good | length) > 0 and ($ev.agent_id == ($good[0].task_id // $ev.tool_use_id))) ]
                  | length > 0) as $has_valid_qualifying_entry
               | if $has_valid_qualifying_entry then null
+                # A node whose bound entries are ALL bare strings reaches here
+                # too, and blaming notification evidence would misname the
+                # cause: nothing was ever bound: `looks_provenance` scans
+                # string leaves (deliberately — that is what drags the
+                # jsonstring forgery in), so a legacy free-text entry merely
+                # mentioning toolu_/claude_agent selects into $bound and
+                # normalises to no ids at all. See the WIDENING note in this
+                # file's header for why that is disclosed rather than filtered.
+                elif ([ $bound[] | select(.node_id == $id and .is_object) ] | length) == 0
+                then error("graph_evidence: revalidation found only free-text evidence resembling provenance content on node \($id); no bound entry to re-verify")
                 else error("graph_evidence: revalidation found no still-valid completed-notification evidence for node \($id)")
                 end
             end)

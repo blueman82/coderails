@@ -16,6 +16,7 @@ DEFAULT_LOC = 400
 DEFAULT_FUNCTION_LINES = 100
 LOC_EXCEPTIONS = {
     "hooks/scripts/tests/enforce_pr_workflow.test.sh": 1149,
+    "hooks/scripts/tests/graph_dispatch_complete.test.sh": 600,
     "hooks/scripts/tests/merge_wiki_debt_gate.test.sh": 567,
     "packages/codex/hooks/scripts/destructive_bash_gate.sh": 903,
     "packages/codex/scripts/merge.sh": 512,

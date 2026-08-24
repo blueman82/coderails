@@ -260,6 +260,156 @@ else
 	SETUP_FAILS=$((SETUP_FAILS + 1))
 fi
 
+# --- CROSS-NODE DONOR SPAWN ---------------------------------------------------
+# Every other spawn-deletion case above deletes the ONLY spawn in its
+# transcript, so a presence check asking merely "does this id exist anywhere"
+# passes them all. This case is the one that shape cannot catch: N1 is done
+# with its OWN dispatch record deleted, while N2 is left RUNNING (never
+# done/skipped, so the global-uniqueness scan never sees it) holding a real,
+# session-matched, notification-backed spawn. N1's evidence is forged to cite
+# N2's ids. Pre-fix the id existed in the transcript and N1 completed.
+#
+# Both nodes are dispatched in the wave because graph_executor_graph_valid
+# demands the set of "running" nodes equal the active wave's node set exactly;
+# N2 is dropped back to a non-terminal state afterwards, which is what keeps
+# it out of the done-or-skipped uniqueness scan.
+SESSION_DONOR="tamper-donorspawn"
+claude_fixture::init "$PROJECTS" "$SESSION_DONOR"
+CURSOR_DONOR=$(claude_fixture::cursor "$PROJECTS" "$SESSION_DONOR")
+claude_fixture::append_spawn "$PROJECTS" "$SESSION_DONOR" N1 wave-1 toolu_DONORVICTIM01 >/dev/null
+claude_fixture::append_spawn "$PROJECTS" "$SESSION_DONOR" N2 wave-1 toolu_DONORLIVE01 >/dev/null
+append_notification "$PROJECTS" "$SESSION_DONOR" toolu_DONORVICTIM01 completed
+# The donor spawn is fully legitimate: real record, session-matched, and its
+# OWN completed notification. Without this the forged agent_id could not match
+# a task_id and the case would refuse on the notification clause instead.
+append_notification "$PROJECTS" "$SESSION_DONOR" toolu_DONORLIVE01 completed
+state_donor="$TMP/state_donor.json"
+jq -n --arg session "$SESSION_DONOR" --arg loop "$LOOP" --argjson c "$CURSOR_DONOR" '
+  {status:"running",outcome:"running",retry:{attempts:0,max:2},evidence:[]} as $n
+  | {schema_version:2,session_id:$session,loop_id:$loop,revision:1,status:"in-progress",
+     graph:{nodes:{N1:$n,N2:$n},edges:[],joins:{},
+            active_wave:{wave_id:"wave-1",revision:1,nodes:["N1","N2"],transcript_cursor:$c},
+            hard_stop:null}}' >"$state_donor"
+graph_dispatch_record "$state_donor" \
+	"$(jq -cn '{wave_id:"wave-1",results:{N1:{outcome:"done",evidence:[]},
+                    N2:{outcome:"done",evidence:[]}}}')" >/dev/null 2>&1
+rc_donor=$?
+# N2 back to a non-terminal state, and its bound evidence dropped, so the
+# uniqueness scan cannot see the donor ids on two nodes — the node_id clause
+# is then the only thing that can refuse this case.
+jq '.graph.active_wave = null | .revision = 2
+  | .graph.nodes.N2.status = "pending" | .graph.nodes.N2.outcome = "pending"
+  | .graph.nodes.N2.evidence = []' "$state_donor" >"$state_donor.tmp" &&
+	mv "$state_donor.tmp" "$state_donor"
+write_valid_triple "$SESSION_DONOR" "$LOOP" 2 "$TMP/e_$SESSION_DONOR.json" \
+	"$TMP/p_$SESSION_DONOR.json" "$TMP/r_$SESSION_DONOR.json"
+# Delete N1's own dispatch record, then forge N1's evidence onto the donor ids.
+transcript_donor=$(claude_fixture::transcript "$PROJECTS" "$SESSION_DONOR")
+grep -v 'toolu_DONORVICTIM01' "$transcript_donor" >"$transcript_donor.tmp" &&
+	mv "$transcript_donor.tmp" "$transcript_donor"
+jq '.graph.nodes.N1.evidence = [{kind:"claude_agent",attempt:1,wave_id:"wave-1",
+      tool_use_id:"toolu_DONORLIVE01",agent_id:"toolu_DONORLIVE01",
+      record_uuid:"uuid-toolu_DONORLIVE01",subagent_type:"coderails:loop-worker"}]' \
+	"$state_donor" >"$state_donor.tmp" && mv "$state_donor.tmp" "$state_donor"
+if [ "$rc_donor" -ne 0 ]; then
+	fail "a done node citing another node's live spawn is refused" \
+		"setup: the legitimate bind did not happen (rc=$rc_donor)"
+	SETUP_FAILS=$((SETUP_FAILS + 1))
+elif ! jq -e '(.graph.nodes.N2.status | IN("done","skipped")) | not' "$state_donor" >/dev/null 2>&1; then
+	fail "a done node citing another node's live spawn is refused" \
+		"setup: the donor node is terminal, so uniqueness would catch this instead"
+	SETUP_FAILS=$((SETUP_FAILS + 1))
+elif grep -q 'toolu_DONORVICTIM01' "$transcript_donor"; then
+	fail "a done node citing another node's live spawn is refused" \
+		"setup: N1's own spawn record was not stripped"
+	SETUP_FAILS=$((SETUP_FAILS + 1))
+else
+	assert_refused_revalidation "a done node citing another node's live spawn is refused" \
+		"$state_donor" "$SESSION_DONOR"
+fi
+
+# --- a SURVIVING session-mismatched spawn row ---------------------------------
+# Distinct from deleting the record: the dispatch record stays, but the
+# envelope's OWN session_id is mutated to disagree with the session. The
+# record's .sessionId is left alone deliberately — mutating THAT drops the row
+# from graph_evidence_spawns entirely, which would measure absence rather than
+# the session_mismatch exclusion under test.
+SESSION_MISMATCH="tamper-sessionmismatch"
+if state_mismatch=$(bind_done_node "$SESSION_MISMATCH" "toolu_MISMATCH01"); then
+	transcript_mismatch=$(claude_fixture::transcript "$PROJECTS" "$SESSION_MISMATCH")
+	# Guarded on content being an ARRAY: a notification record carries
+	# .message.content as a plain string, and indexing that aborts the parse.
+	jq -c 'if ((.message.content | type) == "array")
+	          and ((.message.content[0].name? // "") == "Agent")
+	       then .message.content[0].input.prompt =
+	         ((.message.content[0].input.prompt | split("\n")[0]
+	           | ltrimstr("CODERAILS_GRAPH_DISPATCH=") | fromjson
+	           | .session_id = "some-other-session"
+	           | "CODERAILS_GRAPH_DISPATCH=" + tojson) + "\nwork unit body")
+	       else . end' "$transcript_mismatch" >"$transcript_mismatch.tmp" &&
+		mv "$transcript_mismatch.tmp" "$transcript_mismatch"
+	spawn_row_mismatch=$(graph_evidence_spawns "$transcript_mismatch" "$SESSION_MISMATCH")
+	if ! printf '%s' "$spawn_row_mismatch" | jq -e 'select(.session_mismatch == true)' >/dev/null 2>&1; then
+		fail "a surviving session-mismatched spawn row is refused" \
+			"setup: the row is not session_mismatch:true; got: $spawn_row_mismatch"
+		SETUP_FAILS=$((SETUP_FAILS + 1))
+	else
+		assert_refused_revalidation "a surviving session-mismatched spawn row is refused" \
+			"$state_mismatch" "$SESSION_MISMATCH"
+	fi
+else
+	fail "a surviving session-mismatched spawn row is refused" "setup: legitimate bind did not happen"
+	SETUP_FAILS=$((SETUP_FAILS + 1))
+fi
+
+# --- a teammate_spawned spawn cited post-bind ---------------------------------
+# graph_evidence_bind.sh refuses to bind a DONE node against a mailbox/teammate
+# dispatch (line 342). Revalidation must make the same demand, or a post-bind
+# hand-edit re-points a done node at a teammate_spawned spawn it could never
+# have bound to. BOTH spawns belong to N1 (bind's own comment documents
+# fan-out as legitimate) so the node_id clause cannot refuse this case for the
+# wrong reason — only the dispatch_status clause can.
+SESSION_TEAM="tamper-teammate"
+claude_fixture::init "$PROJECTS" "$SESSION_TEAM"
+CURSOR_TEAM=$(claude_fixture::cursor "$PROJECTS" "$SESSION_TEAM")
+# The mailbox spawn is written FIRST: bind takes the LAST free candidate
+# ($free | .[-1]), and binding a done node against a teammate_spawned spawn is
+# exactly what bind refuses — so the legitimate async_launched one must be last
+# or the setup bind fails and the case proves nothing.
+claude_fixture::append_spawn "$PROJECTS" "$SESSION_TEAM" N1 wave-1 toolu_TEAMMAIL01 >/dev/null
+claude_fixture::append_dispatch_status "$PROJECTS" "$SESSION_TEAM" toolu_TEAMMAIL01 teammate_spawned
+claude_fixture::append_spawn "$PROJECTS" "$SESSION_TEAM" N1 wave-1 toolu_TEAMREAL01 >/dev/null
+claude_fixture::append_dispatch_status "$PROJECTS" "$SESSION_TEAM" toolu_TEAMREAL01 async_launched
+append_notification "$PROJECTS" "$SESSION_TEAM" toolu_TEAMREAL01 completed
+append_notification "$PROJECTS" "$SESSION_TEAM" toolu_TEAMMAIL01 completed
+state_team="$TMP/state_team.json"
+jq -n --arg session "$SESSION_TEAM" --arg loop "$LOOP" --argjson c "$CURSOR_TEAM" '
+  {schema_version:2,session_id:$session,loop_id:$loop,revision:1,status:"in-progress",
+   graph:{nodes:{N1:{status:"running",outcome:"running",retry:{attempts:0,max:2},evidence:[]}},
+          edges:[],joins:{},
+          active_wave:{wave_id:"wave-1",revision:1,nodes:["N1"],transcript_cursor:$c},
+          hard_stop:null}}' >"$state_team"
+graph_dispatch_record "$state_team" \
+	"$(jq -cn '{wave_id:"wave-1",results:{N1:{outcome:"done",evidence:[]}}}')" >/dev/null 2>&1
+rc_team=$?
+jq '.graph.active_wave = null | .revision = 2' "$state_team" >"$state_team.tmp" && mv "$state_team.tmp" "$state_team"
+write_valid_triple "$SESSION_TEAM" "$LOOP" 2 "$TMP/e_$SESSION_TEAM.json" \
+	"$TMP/p_$SESSION_TEAM.json" "$TMP/r_$SESSION_TEAM.json"
+# Re-point the bound entry at the teammate_spawned spawn, ids consistent.
+jq '.graph.nodes.N1.evidence = [(.graph.nodes.N1.evidence[0]
+      | .tool_use_id = "toolu_TEAMMAIL01" | .agent_id = "toolu_TEAMMAIL01"
+      | .record_uuid = "uuid-toolu_TEAMMAIL01")]' \
+	"$state_team" >"$state_team.tmp" && mv "$state_team.tmp" "$state_team"
+if [ "$rc_team" -ne 0 ] ||
+	! jq -e '.graph.nodes.N1.evidence[0].tool_use_id == "toolu_TEAMMAIL01"' "$state_team" >/dev/null 2>&1; then
+	fail "a done node re-pointed at a teammate_spawned spawn is refused" \
+		"setup: the bind or the re-point did not happen (rc=$rc_team)"
+	SETUP_FAILS=$((SETUP_FAILS + 1))
+else
+	assert_refused_revalidation "a done node re-pointed at a teammate_spawned spawn is refused" \
+		"$state_team" "$SESSION_TEAM"
+fi
+
 # --- a multi-attempt (retried) node still completes ---------------------------
 # The spawn-presence demand applies per ENTRY, and a retried node carries an
 # EXTRA entry from its failed attempt (a tool_use_id with no agent_id). This
@@ -305,6 +455,29 @@ if [ "$rc_retry1" -ne 0 ] || [ "$rc_retry2" -ne 0 ] ||
 	SETUP_FAILS=$((SETUP_FAILS + 1))
 elif complete_with "$state_retry" "$SESSION_RETRY" >/dev/null 2>&1; then
 	pass "a retried node with a carried-forward attempt entry still completes"
+	# Deletion arm, mirroring the skipped-node one below: delete the
+	# CARRIED-FORWARD attempt's own spawn record (not the successful one) and
+	# the graph must be refused. Without this the widening's claim that a
+	# carried-forward entry is genuinely re-checked rests on the accept arm
+	# alone, which passes whether or not the demand is actually made.
+	transcript_retry=$(claude_fixture::transcript "$PROJECTS" "$SESSION_RETRY")
+	grep -v 'toolu_RETRYATT1' "$transcript_retry" >"$transcript_retry.tmp" &&
+		mv "$transcript_retry.tmp" "$transcript_retry"
+	if grep -q 'toolu_RETRYATT2' "$transcript_retry"; then
+		if out=$(complete_with "$state_retry" "$SESSION_RETRY"); then
+			fail "a retried node whose carried-forward spawn is deleted is refused" \
+				"completion SUCCEEDED with the failed attempt's spawn gone"
+		elif ! printf '%s' "$out" | grep -q -- 'toolu_RETRYATT1'; then
+			fail "a retried node whose carried-forward spawn is deleted is refused" \
+				"refused, but did not name the deleted attempt's spawn; got: $out"
+		else
+			pass "a retried node whose carried-forward spawn is deleted is refused"
+		fi
+	else
+		fail "a retried node whose carried-forward spawn is deleted is refused" \
+			"setup: the successful attempt's spawn was stripped too"
+		SETUP_FAILS=$((SETUP_FAILS + 1))
+	fi
 else
 	fail "a retried node with a carried-forward attempt entry still completes" \
 		"the per-entry spawn demand deadlocked a legitimately retried node"
@@ -385,6 +558,35 @@ if complete_with "$state_legacy" "$SESSION_LEGACY" >/dev/null 2>&1; then
 else
 	fail "a legacy done node with unbound string evidence still completes" \
 		"the widened selector regressed the cursorless/legacy completion path"
+fi
+
+# --- a legacy STRING entry that merely mentions provenance text ---------------
+# Disclosed widening, not a fix: looks_provenance scans string leaves (that is
+# what drags the JSON-string forgery in), so a free-text legacy entry
+# mentioning toolu_ selects into the bound set, normalises to no ids, so its
+# owning node can never produce a qualifying entry. Refused — and the
+# refusal must NAME that cause rather than blaming notification evidence, or
+# an operator debugs the wrong thing. The transcript must exist and resolve,
+# or the refusal comes from the transcript resolver instead.
+SESSION_STRPROV="complete-stringprovenance"
+claude_fixture::init "$PROJECTS" "$SESSION_STRPROV"
+claude_fixture::append_noise "$PROJECTS" "$SESSION_STRPROV"
+state_strprov="$TMP/state_strprov.json"
+jq -n --arg session "$SESSION_STRPROV" --arg loop "$LOOP" '
+  {schema_version:2,session_id:$session,loop_id:$loop,revision:2,status:"in-progress",
+   graph:{nodes:{N1:{status:"done",outcome:"done",retry:{attempts:0,max:2},
+                     evidence:["worker finished, dispatch was toolu_ABC123"]}},
+          edges:[],joins:{},active_wave:null,hard_stop:null}}' >"$state_strprov"
+write_valid_triple "$SESSION_STRPROV" "$LOOP" 2 "$TMP/e_$SESSION_STRPROV.json" \
+	"$TMP/p_$SESSION_STRPROV.json" "$TMP/r_$SESSION_STRPROV.json"
+if out=$(complete_with "$state_strprov" "$SESSION_STRPROV"); then
+	fail "a legacy string mentioning provenance text is refused by name" \
+		"completion succeeded; the disclosed widening is not what actually happens"
+elif ! printf '%s' "$out" | grep -qi -- 'free-text'; then
+	fail "a legacy string mentioning provenance text is refused by name" \
+		"refused, but the reason did not name the free-text cause; got: $out"
+else
+	pass "a legacy string mentioning provenance text is refused by name"
 fi
 
 [ "$SETUP_FAILS" -gt 0 ] && printf 'NOTE: %d case(s) failed in SETUP — those measure the fixture, not the gate.\n' "$SETUP_FAILS"
