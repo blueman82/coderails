@@ -130,9 +130,11 @@ GRAPH_EVIDENCE_REVALIDATE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 #     top-level JSON object before consulting looks_provenance would drop the
 #     array-wrapped AND JSON-string forgeries back out of the check entirely,
 #     since neither is a top-level object (measured, not assumed). The refusal
-#     instead NAMES this cause rather than blaming notification evidence. A
-#     legacy string with no provenance-ish text is unaffected: it never
-#     selects, and its graph still short-circuits at the probe.
+#     instead names the cause — no STRUCTURED bound entry — rather than blaming
+#     notification evidence. Worded shape-neutrally because an array-wrapped
+#     forgery reaches the same branch and is not free text. A legacy string with
+#     no provenance-ish text is unaffected: it never selects, and its graph
+#     still short-circuits at the probe.
 #
 # Fails closed (non-zero, a NAMED "graph_evidence: ... revalidation ..."
 # reason on stderr) on any failure, including an unreadable/malformed
@@ -299,16 +301,15 @@ GRAPH_EVIDENCE_REVALIDATE_JQ_MAIN=$(cat <<'JQ_MAIN_EOF'
                  | select(($good | length) > 0 and ($ev.agent_id == ($good[0].task_id // $ev.tool_use_id))) ]
                  | length > 0) as $has_valid_qualifying_entry
               | if $has_valid_qualifying_entry then null
-                # A node whose bound entries are ALL bare strings reaches here
-                # too, and blaming notification evidence would misname the
-                # cause: nothing was ever bound: `looks_provenance` scans
-                # string leaves (deliberately — that is what drags the
-                # jsonstring forgery in), so a legacy free-text entry merely
-                # mentioning toolu_/claude_agent selects into $bound and
-                # normalises to no ids at all. See the WIDENING note in this
-                # file's header for why that is disclosed rather than filtered.
+                # A node none of whose selected entries is an object reaches
+                # here too; blaming notification evidence would misname the
+                # cause, since nothing structured was ever bound. Worded
+                # shape-neutrally on purpose: both a legacy free-text string
+                # and an array-wrapped forgery land here, and calling an array
+                # "free text" would be the same misattribution this branch
+                # exists to avoid. See the WIDENING note in this file's header.
                 elif ([ $bound[] | select(.node_id == $id and .is_object) ] | length) == 0
-                then error("graph_evidence: revalidation found only free-text evidence resembling provenance content on node \($id); no bound entry to re-verify")
+                then error("graph_evidence: revalidation found no structured bound entry on node \($id); its evidence is a string or array, not the bound object shape")
                 else error("graph_evidence: revalidation found no still-valid completed-notification evidence for node \($id)")
                 end
             end)

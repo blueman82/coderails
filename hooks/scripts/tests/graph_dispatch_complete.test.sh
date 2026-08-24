@@ -190,6 +190,20 @@ fi
 # reason and prove nothing.
 check_forged_shape "forged shape: array-wrapped evidence is refused" \
 	arraywrap '[[{kind:"claude_agent",tool_use_id:$t}]]'
+# An array-wrapped forgery reaches the same no-structured-entry branch a legacy
+# free-text string does (neither is a top-level object), so that branch's
+# message must stay shape-NEUTRAL. Pinned here because wording it as "free text"
+# would misattribute this shape's cause — the exact defect the branch exists to
+# avoid, and one no assertion grepping only for "revalidat" would catch.
+if out=$(complete_with "$TMP/state_tamper-arraywrap.json" "tamper-arraywrap" 2>&1); then
+	fail "the array-wrapped refusal message is not worded as free text" \
+		"completion succeeded, so no message was produced"
+elif printf '%s' "$out" | grep -qi -- 'free-text'; then
+	fail "the array-wrapped refusal message is not worded as free text" \
+		"an array-wrapped forgery was blamed on free text; got: $out"
+else
+	pass "the array-wrapped refusal message is not worded as free text"
+fi
 check_forged_shape "forged shape: evidence nested under a benign key is refused" \
 	nested '[{note:"x",d:{kind:"claude_agent",tool_use_id:$t}}]'
 check_forged_shape "forged shape: a trailing space in .kind is refused" \
@@ -634,9 +648,9 @@ write_valid_triple "$SESSION_STRPROV" "$LOOP" 2 "$TMP/e_$SESSION_STRPROV.json" \
 if out=$(complete_with "$state_strprov" "$SESSION_STRPROV"); then
 	fail "a legacy string mentioning provenance text is refused by name" \
 		"completion succeeded; the disclosed widening is not what actually happens"
-elif ! printf '%s' "$out" | grep -qi -- 'free-text'; then
+elif ! printf '%s' "$out" | grep -qi -- 'no structured bound entry'; then
 	fail "a legacy string mentioning provenance text is refused by name" \
-		"refused, but the reason did not name the free-text cause; got: $out"
+		"refused, but the reason did not name the unstructured-entry cause; got: $out"
 else
 	pass "a legacy string mentioning provenance text is refused by name"
 fi
