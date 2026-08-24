@@ -12,10 +12,10 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator
 
-from graph_evidence import (EvidenceError, bind_worker_evidence, transcript_cursor,
+from graph_evidence import (bind_worker_evidence, transcript_cursor,
                             validate_completion_evidence, validate_evals,
                             validate_worker_evidence)
-from graph_identity import IdentityError, active_nodes, task_name, task_node
+from graph_identity import active_nodes, task_name, task_node
 
 
 STATUSES = {"pending", "running", "done", "skipped", "hard-stop"}
@@ -389,7 +389,7 @@ def main() -> int:
             output = _complete(args.state, args.session, args.evals, args.proof, args.retro, args.transcript)
         else:
             output = _verify_completion(args.state, args.session, args.evals, args.proof, args.retro, args.transcript)
-    except (GraphError, EvidenceError, IdentityError) as error:
+    except ValueError as error:
         print(f"graph: {error}", file=sys.stderr)
         return 1
     print(json.dumps(output, sort_keys=True))
