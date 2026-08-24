@@ -93,12 +93,23 @@ gate_graph_complete() {
         exit 2
         ;;
     esac
-    jq -e --arg session "$session_id" --arg loop "$loop" '
-    .session_id == $session and .loop_id == $loop and (.proofs | type == "array" and length > 0)
-  ' "$loop_dir/proof.json" >/dev/null 2>&1 || {
-        echo "[loop-stall-guard] LOOP-STOP: complete refused: proof.json belongs to another loop." >&2
-        exit 2
-    }
+    # Absence is already fully adjudicated by als_gate_proofs_on_complete
+    # (called just before this function, in gate_loop_stop_declared): it
+    # exits 2 on every illegitimate absence and allows the two legitimate
+    # ones (grandfathered schema_version, or a valid proof_disposition).
+    # Re-requiring proof.json to exist here would make that escape hatch
+    # unreachable for any loop using .graph. Only check identity when the
+    # file is actually present — the one thing the sibling gate does not
+    # verify (it never compares proof.json's session_id/loop_id against the
+    # current loop).
+    if [ -f "$loop_dir/proof.json" ]; then
+        jq -e --arg session "$session_id" --arg loop "$loop" '
+      .session_id == $session and .loop_id == $loop
+    ' "$loop_dir/proof.json" >/dev/null 2>&1 || {
+            echo "[loop-stall-guard] LOOP-STOP: complete refused: proof.json belongs to another loop." >&2
+            exit 2
+        }
+    fi
     jq -e --arg session "$session_id" --arg loop "$loop" '
     .session_id == $session and .loop_id == $loop
   ' "$loop_dir/retro.json" >/dev/null 2>&1 || {
