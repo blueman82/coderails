@@ -41,8 +41,16 @@ GRAPH_DISPATCH_ROOT="$(cd "$GRAPH_DISPATCH_DIR/../../.." && pwd)"
 . "$GRAPH_DISPATCH_DIR/graph_executor.sh"
 # shellcheck disable=SC1091  # path is resolved from this sourced file at runtime
 . "$GRAPH_DISPATCH_ROOT/scripts/lib/eval-artifact.sh"
+# graph_evidence_bind.sh and graph_evidence_revalidate.sh each transitively
+# source graph_evidence.sh themselves (idempotent — function defs and one
+# constant, safe to load twice). Sourced separately, not chained, because
+# graph_evidence_revalidate_all does not depend on anything in
+# graph_evidence_bind.sh — chaining one through the other would be a
+# fabricated dependency between the bind-time and completion-time gates.
 # shellcheck disable=SC1091  # path is resolved from this sourced file at runtime
-. "$GRAPH_DISPATCH_DIR/graph_evidence.sh"
+. "$GRAPH_DISPATCH_DIR/graph_evidence_bind.sh"
+# shellcheck disable=SC1091  # path is resolved from this sourced file at runtime
+. "$GRAPH_DISPATCH_DIR/graph_evidence_revalidate.sh"
 
 # Claude owns this graph and its dispatch targets. Ambiguous orchestration
 # nodes are deliberately absent so they fail closed as unresolved.
