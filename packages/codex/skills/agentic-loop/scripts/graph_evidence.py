@@ -161,20 +161,22 @@ def _verify_reference(
     if terminal != reference["task_complete_turn_id"]:
         raise GraphError(f"node {node_id} task_complete reference does not match its child")
     return spawn_line
-
-def _stored_references(state: dict[str, Any], require_complete: bool) -> set[str]:
+def _stored_references(state: dict[str, Any], require_complete: bool,
+                       known_identifiers: set[str] | None = None) -> set[str]:
     indexes = _parent_indexes(_records(_thread_transcript(state["session_id"]), "parent transcript"))
-    used: set[str] = set()
+    used = set(known_identifiers or ())
     waves: set[int] = set()
+    ordinary: list[object] = []
     for node_id, node in state["graph"]["nodes"].items():
         if node_id in state["graph"]["joins"]:
             continue
         references = []
         for index, item in enumerate(node["evidence"]):
             shaped, identifiers = classify_worker_evidence(item)
-            if shaped:
-                # Worker-shaped evidence must be a canonical top-level reference object.
-                references.append((_reference(item, f"node {node_id}.evidence[{index}]"), identifiers))
+            if not shaped:
+                ordinary.append(item)
+                continue
+            references.append((_reference(item, f"node {node_id}.evidence[{index}]"), identifiers))
         expected_count = node["retry"]["attempts"] + (1 if node["status"] in {"done", "skipped"} else 0)
         if sorted(item[0]["attempt"] for item in references) != list(range(1, expected_count + 1)):
             raise GraphError(f"node {node_id} transcript attempts do not match its graph state")
@@ -202,11 +204,13 @@ def _stored_references(state: dict[str, Any], require_complete: bool) -> set[str
         expected = set(range(last_wave - 2 * (len(waves) - 1), last_wave + 1, 2))
         if waves != expected:
             raise GraphError("stored worker wave evidence does not match graph revisions")
+    if any(classify_worker_evidence(item, used)[0] for item in ordinary):
+        raise GraphError("stored evidence contains noncanonical worker evidence")
     return used
-
-def bind_worker_evidence(state: dict[str, Any], active_wave: dict[str, Any]) -> dict[str, dict[str, Any]]:
+def bind_worker_evidence(state: dict[str, Any], active_wave: dict[str, Any]
+                         ) -> tuple[dict[str, dict[str, Any]], set[str]]:
     """Bind current-wave transcript records to each dispatched worker node."""
-    used = _stored_references(state, False)
+    used: set[str] = set()
     parent = _records(_thread_transcript(state["session_id"]), "parent transcript")
     indexes = _parent_indexes(parent)
     cursor = active_wave.get("transcript_cursor")
@@ -241,17 +245,14 @@ def bind_worker_evidence(state: dict[str, Any], active_wave: dict[str, Any]) -> 
         _verify_reference(state, node_id, reference, indexes)
         used.update(identifiers)
         references[node_id] = reference
-    return references
-
-
+    used = _stored_references(state, False, used)
+    return references, used
 def validate_worker_evidence(state: dict[str, Any]) -> None:
     """Validate all stored worker evidence against native transcripts."""
     _stored_references(state, True)
-
 def _matching(evidence: dict[str, Any], state: dict[str, Any], label: str) -> None:
     if evidence.get("session_id") != state["session_id"] or evidence.get("loop_id") != state["loop_id"]:
         raise GraphError(f"{label} belongs to a different loop")
-
 def _grading_checksum(evals: dict[str, Any], result: str) -> str:
     raw_evals = evals.get("evals")
     if not isinstance(raw_evals, list):

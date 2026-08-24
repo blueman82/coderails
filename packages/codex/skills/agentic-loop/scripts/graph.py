@@ -240,9 +240,9 @@ def _record_wave(path: Path, raw_results: str) -> dict[str, Any]:
         if graph["active_wave"] is None:
             raise GraphError("no active wave exists")
         results = _results(parsed_results, graph["active_wave"])
-        if any(classify_worker_evidence(result["evidence"])[0] for result in results.values()):
+        references, identifiers = bind_worker_evidence(state, graph["active_wave"])
+        if any(classify_worker_evidence(result["evidence"], identifiers)[0] for result in results.values()):
             raise GraphError("result evidence must not contain worker evidence")
-        references = bind_worker_evidence(state, graph["active_wave"])
         for node_id in sorted(results):
             result, node = results[node_id], graph["nodes"][node_id]
             node["evidence"].append(result["evidence"])
