@@ -6,7 +6,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from graph_identity import task_name
+from graph_identity import REFERENCE_KEYS, classify_worker_evidence, task_name
 
 
 class EvidenceError(ValueError):
@@ -107,9 +107,6 @@ def _child_terminal(parent_session: str, expected_task: str, agent_thread_id: st
         raise EvidenceError(f"child {agent_thread_id} task_complete has no matching task_started")
     return turn_id
 
-
-REFERENCE_KEYS = {"kind", "attempt", "wave_id", "spawn_call_id", "agent_thread_id",
-                  "task_complete_turn_id"}
 def _reference(value: Any, label: str) -> dict[str, Any]:
     reference = _object(value, label)
     if set(reference) != REFERENCE_KEYS or reference.get("kind") != "codex_agent":
@@ -168,32 +165,31 @@ def _verify_reference(
     return spawn_line
 
 def _stored_references(state: dict[str, Any], require_complete: bool) -> set[str]:
-    parent = _records(_thread_transcript(state["session_id"]), "parent transcript")
-    indexes = _parent_indexes(parent)
-    joins = state["graph"]["joins"]
+    indexes = _parent_indexes(_records(_thread_transcript(state["session_id"]), "parent transcript"))
     used: set[str] = set()
     waves: set[int] = set()
     for node_id, node in state["graph"]["nodes"].items():
-        if node_id in joins:
+        if node_id in state["graph"]["joins"]:
             continue
-        references = [_reference(item, f"node {node_id}.evidence[{index}]")
-                      for index, item in enumerate(node["evidence"])
-                      if isinstance(item, dict) and item.get("kind") == "codex_agent"]
+        references = []
+        for index, item in enumerate(node["evidence"]):
+            shaped, identifiers = classify_worker_evidence(item)
+            if shaped:
+                # Worker-shaped evidence must be a canonical top-level reference object.
+                references.append((_reference(item, f"node {node_id}.evidence[{index}]"), identifiers))
         expected_count = node["retry"]["attempts"] + (1 if node["status"] in {"done", "skipped"} else 0)
-        if len(references) != expected_count or sorted(item["attempt"] for item in references) != list(range(1, expected_count + 1)):
+        if sorted(item[0]["attempt"] for item in references) != list(range(1, expected_count + 1)):
             raise EvidenceError(f"node {node_id} transcript attempts do not match its graph state")
         if require_complete and node["status"] not in {"done", "skipped"}:
             raise EvidenceError(f"node {node_id} has no completed transcript-backed attempt")
         previous_line = previous_wave = 0
-        for reference in sorted(references, key=lambda item: item["attempt"]):
+        for reference, identifiers in sorted(references, key=lambda item: item[0]["attempt"]):
             match = re.fullmatch(r"wave-([1-9][0-9]*)", reference["wave_id"])
             wave = int(match.group(1)) if match else 0
             if wave <= previous_wave:
                 raise EvidenceError(f"node {node_id} has stale or invalid wave evidence")
             previous_wave = wave
             waves.add(wave)
-            identifiers = {reference["spawn_call_id"], reference["agent_thread_id"],
-                           reference["task_complete_turn_id"]}
             if used & identifiers:
                 raise EvidenceError(f"node {node_id} reuses transcript evidence")
             used.update(identifiers)
@@ -211,6 +207,7 @@ def _stored_references(state: dict[str, Any], require_complete: bool) -> set[str
     return used
 
 def bind_worker_evidence(state: dict[str, Any], active_wave: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """Bind current-wave transcript records to each dispatched worker node."""
     used = _stored_references(state, False)
     parent = _records(_thread_transcript(state["session_id"]), "parent transcript")
     indexes = _parent_indexes(parent)
@@ -247,7 +244,10 @@ def bind_worker_evidence(state: dict[str, Any], active_wave: dict[str, Any]) -> 
         used.update(identifiers)
         references[node_id] = reference
     return references
+
+
 def validate_worker_evidence(state: dict[str, Any]) -> None:
+    """Validate all stored worker evidence against native transcripts."""
     _stored_references(state, True)
 
 def _matching(evidence: dict[str, Any], state: dict[str, Any], label: str) -> None:

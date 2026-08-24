@@ -6,6 +6,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 PACKAGE="$ROOT/packages/codex"
 GRAPH="$PACKAGE/skills/agentic-loop/scripts/graph.py"
+SHAPES="$ROOT/packages/tests/codex_graph_evidence_shapes.test.sh"
 HOOKS="$PACKAGE/hooks/scripts"
 TMP="$(mktemp -d)"
 trap 'rm -r "$TMP"' EXIT
@@ -165,6 +166,10 @@ test_transcript_evidence_rejections() {
 validate_worker_refs() {
 	PYTHONPATH="$(dirname "$GRAPH")" python3 -c \
 		'import json,sys; from graph_evidence import validate_worker_evidence; validate_worker_evidence(json.load(open(sys.argv[1], encoding="utf-8")))' "$1"
+}
+
+test_evidence_shape_normalization() {
+	bash "$SHAPES"
 }
 
 test_wave_tamper_and_followup() {
@@ -373,6 +378,7 @@ check 'SessionStart includes the exact resolved progress.json path' test_bootstr
 check 'hard-stop waiver requires a final nonblank LOOP-STOP declaration' test_hard_stop_final_line
 check 'native transcript evidence rejects missing, duplicate, foreign, stale, failed, and reused records' test_transcript_evidence_rejections
 check 'stored waves reject tampering and child follow-ups require the final successful completion' test_wave_tamper_and_followup
+check 'worker evidence shapes are classified recursively without rejecting benign nesting' test_evidence_shape_normalization
 mutation_control
 
 if [[ "$FAILS" -eq 0 && "$CONTROL_FAILED" -eq 0 ]]; then
