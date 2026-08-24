@@ -51,6 +51,10 @@ Before writing anything:
   stop the same way.
 - You may only read: the verbatim `authorising_prompt_raw` you were given, and
   documents that prompt *itself* names or links, recursively, no further.
+  `session_id` and `loop_id` are given to you directly at dispatch, alongside
+  `authorising_prompt_raw` — not read from `progress.json` or any other
+  file — so echoing them back into `proof.json` is not a file read and does
+  not trip this gate.
 
 This is a hard gate on your own behaviour, not a courtesy. Treat any doubt as
 contamination and report it rather than proceed on a "probably fine" read.
