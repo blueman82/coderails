@@ -52,7 +52,7 @@ be replayed to derive position, and that can leave a torn tail line after a cras
 | `last_updated` | Refreshed at each phase boundary. |
 
 **`work_units` feeds the loop-scope eval gate.** `loop_state_guard` reads `.work_units | length`
-to decide whether the ≥3-work-unit eval threshold applies, and fails open (no block) when the
+to decide whether the ≥1-work-unit eval threshold applies, and fails open (no block) when the
 field is absent — so keep it populated whenever the loop tracks ≥1 work-unit.
 
 **`work_units` also feeds the `loop_stall_guard` deferral gate.** A `LOOP-STOP: complete`
