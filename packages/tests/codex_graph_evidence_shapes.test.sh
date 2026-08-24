@@ -163,6 +163,15 @@ main() {
 	cp "$reuse" "$clean"
 	python3 "$GRAPH" record-wave "$clean" "$(record_payload "$clean" B)" >/dev/null
 
+	wave=$(jq -r '.graph.active_wave.id' "$reuse")
+	while IFS=$'\t' read -r name encoded; do
+		shape=$(printf '%s' "$encoded" | base64 --decode)
+		envelope=$(jq -cn --arg wave "$wave" --argjson shape "$shape" \
+			'{wave_id:$wave,results:{B:{outcome:"done",evidence:$shape}}}')
+		reject_unchanged "current result $name" "$reuse" \
+			python3 "$GRAPH" record-wave "$reuse" "$envelope"
+	done < <(attack_rows "$retry_reference")
+
 	while IFS=$'\t' read -r name encoded; do
 		shape=$(printf '%s' "$encoded" | base64 --decode)
 		jq --argjson shape "$shape" '.graph.nodes.A.evidence += [$shape]' "$reuse" >"$candidate"
