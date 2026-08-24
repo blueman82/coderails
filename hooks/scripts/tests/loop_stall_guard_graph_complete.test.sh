@@ -52,6 +52,7 @@ run_capture_stderr() { # payload -> sets $RC_OUT and $STDERR_OUT (no subshell)
 # post_evals::grade_loop, so "properly stamped" test fixtures are byte-
 # identical to what the writer produces — never hand-computed here (same
 # pattern as loop_state_guard_evals.test.sh).
+# shellcheck disable=SC1090
 stamp() { ( source "$POST_EVALS" >/dev/null 2>&1; post_evals::grade_loop "$1" >/dev/null ) || { printf 'stamp: grade_loop refused %s\n' "$1" >&2; return 1; } }
 
 # Shared fixture builder: a completed graph + all-done work_units + a real
@@ -154,4 +155,4 @@ jq -n '{schema_version:1, session_id:"S1", loop_id:"loop-graph5", proofs:[], wit
 t5=$(mk_transcript "LOOP-STOP: complete — no executable surface")
 check "present, matching-identity, empty proof.json -> allow" 0 "$(run x "$(payload "$t5" S1)")"
 
-[ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails)"; exit 1; }
+if [ "$fails" -eq 0 ]; then echo "PASS"; exit 0; else echo "FAILED ($fails)"; exit 1; fi
