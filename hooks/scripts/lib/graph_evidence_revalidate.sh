@@ -96,16 +96,20 @@ GRAPH_EVIDENCE_REVALIDATE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 #     never bound against.
 #
 #     WIDENING, recorded rather than left to be discovered: this demand covers
-#     EVERY entry asserting a tool_use_id, including a carried-forward
-#     failed-attempt reference that has no agent_id — such an entry was
-#     previously re-checked for nothing at all. It is still a correct demand
-#     (that entry was bound against a real spawn too), and a legitimately
-#     retried node completes normally because every attempt's spawn lives in
-#     the same session transcript — pinned by the "a retried node with a
-#     carried-forward attempt entry still completes" case in
-#     graph_dispatch_complete.test.sh. The consequence to be aware of is that
-#     a done node now depends on its FULL dispatch history surviving in the
-#     transcript, not just the attempt that finally succeeded.
+#     EVERY entry asserting a tool_use_id on a "done" OR "skipped" node, which
+#     includes two shapes previously re-checked for nothing at all — a
+#     carried-forward failed-attempt reference with no agent_id, and a skipped
+#     node's carried evidence (the terminal-result recheck is done-only, so a
+#     skipped node was scanned for uniqueness alone). Both are still correct
+#     demands: each such entry was bound against a real spawn too. Neither
+#     deadlocks a legitimate graph, because every attempt's spawn lives in the
+#     same session transcript — pinned by the "a retried node with a
+#     carried-forward attempt entry still completes" and "a skipped node
+#     carrying bound evidence still completes" cases in
+#     graph_dispatch_complete.test.sh, with the matching deletion arms pinned
+#     alongside them. The consequence to be aware of is that a graph now
+#     depends on its FULL dispatch history surviving in the transcript, not
+#     just the attempts that finally succeeded.
 #
 # Fails closed (non-zero, a NAMED "graph_evidence: ... revalidation ..."
 # reason on stderr) on any failure, including an unreadable/malformed
