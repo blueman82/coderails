@@ -1254,6 +1254,9 @@ post_evals::grade_loop() {
     # fields, not gating ones) since progress.json is loop-state, not always
     # present in isolated/test contexts.
     local progress_json; progress_json="$(dirname "$path")/progress.json"
+    if [[ -f "$progress_json" ]] && ! jq -e . "$progress_json" >/dev/null 2>&1; then
+        printf 'post_evals: warning — %s exists but does not parse; identity fields not stamped\n' "$progress_json" >&2
+    fi
     local psession ploop prevision
     psession=$(jq -r '.session_id // empty' "$progress_json" 2>/dev/null)
     ploop=$(jq -r '.loop_id // empty' "$progress_json" 2>/dev/null)

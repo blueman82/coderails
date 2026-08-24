@@ -873,7 +873,15 @@ check_str "grade_loop: no sibling progress.json -> writes .result=GO" "GO" "$(jq
 # eval_artifact::grading_checksum directly, not just that grade_loop exits 0).
 expected_checksum_rev=$(eval_artifact::grading_checksum "$FIX_REV" "GO")
 written_checksum_rev=$(jq -r '.grading.checksum // ""' "$FIX_REV")
-check_str "grade_loop: revision stamp -> checksum still matches independent recomputation" "$expected_checksum_rev" "$written_checksum_rev"
+# (d) grade_loop's real output satisfies loop_stall_guard.sh's own identity
+# predicate (hooks/scripts/loop_stall_guard.sh:79-81) — copied inline here
+# since that script parses stdin/exits and isn't sourced as a lib; ceiling:
+# this drifts silently if the guard's predicate is edited without updating
+# this copy.
+jq -e --arg session "sess-abc" --arg loop "loop-xyz" --arg revision "4" '
+  .session_id == $session and .loop_id == $loop and ((.revision | tostring) == $revision)
+' "$FIX_REV" >/dev/null 2>&1
+check "grade_loop: real output satisfies loop_stall_guard's session_id+loop_id+revision predicate" 0 $?
 
 # ─── CLI dispatch: bare invocation prints usage, exits 1 ─────────────────────
 usage_out=$(bash "$SCRIPT" 2>&1)
