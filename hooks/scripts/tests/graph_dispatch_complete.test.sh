@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2016 # jq programs use single quotes so shell variables stay jq variables.
+# shellcheck disable=SC1091 # sourced siblings are resolved at runtime; the gate runs shellcheck without -x.
 # graph_dispatch_complete.test.sh — completion-time revalidation.
 #
 # graph_dispatch_record binds each "done" node's evidence to a real, verified
@@ -160,6 +162,229 @@ elif ! printf '%s' "$out" | grep -qi -- 'transcript'; then
 		"refused, but not with a transcript-naming reason; got: $out"
 else
 	pass "an unparseable transcript at revalidate-time fails closed"
+fi
+
+# --- tamper-AFTER-bind: forged evidence shapes that used to fall out of the
+# revalidation filter entirely ------------------------------------------------
+#
+# Every case below starts from a GENUINE bind (real spawn + real completed
+# notification, graph_dispatch_record returning 0 — asserted, not assumed) and
+# only then hand-edits the evidence. That ordering is the whole point: a test
+# that let the bind fail would "pass" for the wrong reason, proving nothing
+# about revalidation.
+#
+# Pre-fix, the revalidation filter selected bound evidence with an exact
+# `select(type == "object" and .kind == "claude_agent")`. Each shape here
+# dodges that exact match, so the node read as "nothing bound" and completion
+# was allowed. The fix selects with bind's own normalising detector instead.
+SETUP_FAILS=0
+
+# Legitimately bind node N1 for $1 (session) with tool_use_id $2, leave the
+# graph one step from completion, and echo the state path. Echoes nothing and
+# returns non-zero if the bind itself did not happen.
+bind_done_node() { # session tool_use_id
+	local session="$1" tid="$2" cursor state rc
+	claude_fixture::init "$PROJECTS" "$session"
+	cursor=$(claude_fixture::cursor "$PROJECTS" "$session")
+	claude_fixture::append_spawn "$PROJECTS" "$session" N1 wave-1 "$tid" >/dev/null
+	append_notification "$PROJECTS" "$session" "$tid" completed
+	state="$TMP/state_$session.json"
+	jq -n --arg session "$session" --arg loop "$LOOP" --argjson c "$cursor" '
+      {status:"running",outcome:"running",retry:{attempts:0,max:2},evidence:[]} as $n
+      | {schema_version:2,session_id:$session,loop_id:$loop,revision:1,status:"in-progress",
+         graph:{nodes:{N1:$n},edges:[],joins:{},
+                active_wave:{wave_id:"wave-1",revision:1,nodes:["N1"],transcript_cursor:$c},
+                hard_stop:null}}' >"$state"
+	graph_dispatch_record "$state" \
+		"$(jq -cn '{wave_id:"wave-1",results:{N1:{outcome:"done",evidence:[]}}}')" >/dev/null 2>&1
+	rc=$?
+	[ "$rc" -eq 0 ] || return 1
+	# The bind must actually have written claude_agent evidence — otherwise a
+	# later "refused" result would be measuring an empty graph, not a tamper.
+	jq -e '.graph.nodes.N1.evidence[0].kind == "claude_agent"' "$state" >/dev/null 2>&1 || return 1
+	jq '.graph.active_wave = null | .revision = 2' "$state" >"$state.tmp" && mv "$state.tmp" "$state"
+	write_valid_triple "$session" "$LOOP" 2 "$TMP/e_$session.json" "$TMP/p_$session.json" "$TMP/r_$session.json"
+	printf '%s\n' "$state"
+}
+
+# Assert graph_dispatch_complete REFUSES $2 (a state) for a revalidation reason.
+assert_refused_revalidation() { # label state session
+	local label="$1" state="$2" session="$3" out
+	if out=$(graph_dispatch_complete "$state" --session "$session" \
+		--evals "$TMP/e_$session.json" --proof "$TMP/p_$session.json" \
+		--retro "$TMP/r_$session.json" 2>&1); then
+		fail "$label" "completion SUCCEEDED on tampered evidence (bypass)"
+	elif ! printf '%s' "$out" | grep -qi -- 'revalidat'; then
+		fail "$label" "refused, but not for a revalidation reason; got: $out"
+	else
+		pass "$label"
+	fi
+}
+
+# One forged shape: bind for real, overwrite N1.evidence, expect refusal.
+check_forged_shape() { # label session_suffix jq_evidence_expr
+	local label="$1" session="tamper-$2" tid="toolu_FORGED$2" state
+	if ! state=$(bind_done_node "$session" "$tid"); then
+		fail "$label" "setup: a legitimate bind did not happen, so the case proves nothing"
+		SETUP_FAILS=$((SETUP_FAILS + 1))
+		return
+	fi
+	jq --arg t "$tid" ".graph.nodes.N1.evidence = $3" "$state" >"$state.tmp" && mv "$state.tmp" "$state"
+	assert_refused_revalidation "$label" "$state" "$session"
+}
+
+check_forged_shape "forged shape: array-wrapped evidence is refused" \
+	arraywrap '[[{kind:"claude_agent",tool_use_id:$t}]]'
+check_forged_shape "forged shape: evidence nested under a benign key is refused" \
+	nested '[{note:"x",d:{kind:"claude_agent",tool_use_id:$t}}]'
+check_forged_shape "forged shape: a trailing space in .kind is refused" \
+	trailspace '[{kind:"claude_agent ",tool_use_id:$t}]'
+check_forged_shape "forged shape: a partial spawn_ref-only entry is refused" \
+	spawnref '[{attempt:1,wave_id:"wave-1",spawn_ref:$t}]'
+check_forged_shape "forged shape: a homoglyph in .kind is refused" \
+	homoglyph '[{kind:"claude_аgent",tool_use_id:$t}]'
+check_forged_shape "forged shape: the bound shape as a JSON string is refused" \
+	jsonstring '[("{\"kind\":\"claude_agent\",\"tool_use_id\":\"" + $t + "\"}")]'
+
+# --- nested worker-reuse: one node cites another node's already-bound ids,
+# buried under a benign key ---------------------------------------------------
+#
+# This is the case that pins the deep-select/shallow-READ asymmetry. The ids
+# here are REAL and belong to a genuinely bound node, so a revalidation that
+# extracted fields recursively would find a valid tool_use_id and agent_id on
+# this entry and let it qualify. Selecting deeply while reading only the top
+# level is what refuses it.
+SESSION_REUSE="tamper-nestedreuse"
+if state_reuse=$(bind_done_node "$SESSION_REUSE" "toolu_NESTEDREUSE01"); then
+	jq '.graph.nodes.N2 = {status:"done",outcome:"done",retry:{attempts:0,max:2},
+        evidence:[{note:"carried",inner:(.graph.nodes.N1.evidence[0])}]}' \
+		"$state_reuse" >"$state_reuse.tmp" && mv "$state_reuse.tmp" "$state_reuse"
+	assert_refused_revalidation "nested reuse of another node's bound ids is refused" \
+		"$state_reuse" "$SESSION_REUSE"
+else
+	fail "nested reuse of another node's bound ids is refused" "setup: legitimate bind did not happen"
+	SETUP_FAILS=$((SETUP_FAILS + 1))
+fi
+
+# --- top-level duplicate reuse (regression guard) ----------------------------
+# Already refused by the pre-fix global-uniqueness check. Kept so the
+# field-extraction change cannot silently drop that existing protection.
+SESSION_DUP="tamper-dupids"
+if state_dup=$(bind_done_node "$SESSION_DUP" "toolu_DUPIDS01"); then
+	jq '.graph.nodes.N2 = {status:"done",outcome:"done",retry:{attempts:0,max:2},
+        evidence:[(.graph.nodes.N1.evidence[0])]}' \
+		"$state_dup" >"$state_dup.tmp" && mv "$state_dup.tmp" "$state_dup"
+	assert_refused_revalidation "a tool_use_id bound to two nodes is still refused" \
+		"$state_dup" "$SESSION_DUP"
+else
+	fail "a tool_use_id bound to two nodes is still refused" "setup: legitimate bind did not happen"
+	SETUP_FAILS=$((SETUP_FAILS + 1))
+fi
+
+# --- spawn record deleted, notification kept ---------------------------------
+# Revalidation used to re-derive notification presence only, so deleting the
+# Agent dispatch record while leaving the <task-notification> intact passed.
+SESSION_NOSPAWN="tamper-nospawn"
+if state_nospawn=$(bind_done_node "$SESSION_NOSPAWN" "toolu_NOSPAWN01"); then
+	transcript_nospawn=$(claude_fixture::transcript "$PROJECTS" "$SESSION_NOSPAWN")
+	# Strip ONLY the Agent tool_use dispatch record written by
+	# claude_fixture::append_spawn; the notification record stays.
+	grep -v '"name":"Agent"' "$transcript_nospawn" >"$transcript_nospawn.tmp" &&
+		mv "$transcript_nospawn.tmp" "$transcript_nospawn"
+	if grep -q '"name":"Agent"' "$transcript_nospawn"; then
+		fail "a deleted spawn record with the notification kept is refused" \
+			"setup: the Agent record was not actually stripped"
+		SETUP_FAILS=$((SETUP_FAILS + 1))
+	elif ! grep -q 'task-notification' "$transcript_nospawn"; then
+		fail "a deleted spawn record with the notification kept is refused" \
+			"setup: the notification was stripped too, so this is not the case under test"
+		SETUP_FAILS=$((SETUP_FAILS + 1))
+	else
+		assert_refused_revalidation "a deleted spawn record with the notification kept is refused" \
+			"$state_nospawn" "$SESSION_NOSPAWN"
+	fi
+else
+	fail "a deleted spawn record with the notification kept is refused" "setup: legitimate bind did not happen"
+	SETUP_FAILS=$((SETUP_FAILS + 1))
+fi
+
+# --- a multi-attempt (retried) node still completes ---------------------------
+# The spawn-presence demand applies per ENTRY, and a retried node carries an
+# EXTRA entry from its failed attempt (a tool_use_id with no agent_id). This
+# pins that such a node still completes on an intact transcript — if it did
+# not, every node that ever retried before finishing would deadlock, which is
+# the exact failure the per-entry keying exists to avoid.
+SESSION_RETRY="complete-retry"
+claude_fixture::init "$PROJECTS" "$SESSION_RETRY"
+CURSOR_R1=$(claude_fixture::cursor "$PROJECTS" "$SESSION_RETRY")
+claude_fixture::append_spawn "$PROJECTS" "$SESSION_RETRY" N1 wave-1 toolu_RETRYATT1 >/dev/null
+state_retry="$TMP/state_retry.json"
+jq -n --arg session "$SESSION_RETRY" --arg loop "$LOOP" --argjson c "$CURSOR_R1" '
+  {schema_version:2,session_id:$session,loop_id:$loop,revision:1,status:"in-progress",
+   graph:{nodes:{N1:{status:"running",outcome:"running",retry:{attempts:0,max:3},evidence:[]}},
+          edges:[],joins:{},
+          active_wave:{wave_id:"wave-1",revision:1,nodes:["N1"],transcript_cursor:$c},
+          hard_stop:null}}' >"$state_retry"
+# Attempt 1 fails: binds a spawn reference with NO agent_id (no notification).
+graph_dispatch_record "$state_retry" \
+	"$(jq -cn '{wave_id:"wave-1",results:{N1:{outcome:"failed",evidence:[]}}}')" >/dev/null 2>&1
+rc_retry1=$?
+# Attempt 2 succeeds: binds a second spawn WITH an agent_id.
+CURSOR_R2=$(claude_fixture::cursor "$PROJECTS" "$SESSION_RETRY")
+claude_fixture::append_spawn "$PROJECTS" "$SESSION_RETRY" N1 wave-2 toolu_RETRYATT2 >/dev/null
+append_notification "$PROJECTS" "$SESSION_RETRY" toolu_RETRYATT2 completed
+jq --argjson c "$CURSOR_R2" '.revision = 2
+  | .graph.nodes.N1.status = "running" | .graph.nodes.N1.outcome = "running"
+  | .graph.active_wave = {wave_id:"wave-2",revision:2,nodes:["N1"],transcript_cursor:$c}' \
+	"$state_retry" >"$state_retry.tmp" && mv "$state_retry.tmp" "$state_retry"
+graph_dispatch_record "$state_retry" \
+	"$(jq -cn '{wave_id:"wave-2",results:{N1:{outcome:"done",evidence:[]}}}')" >/dev/null 2>&1
+rc_retry2=$?
+jq '.graph.active_wave = null | .revision = 3' "$state_retry" >"$state_retry.tmp" && mv "$state_retry.tmp" "$state_retry"
+write_valid_triple "$SESSION_RETRY" "$LOOP" 3 "$TMP/e_$SESSION_RETRY.json" \
+	"$TMP/p_$SESSION_RETRY.json" "$TMP/r_$SESSION_RETRY.json"
+# Both attempts must actually be on the node, or this proves nothing.
+if [ "$rc_retry1" -ne 0 ] || [ "$rc_retry2" -ne 0 ] ||
+	! jq -e '(.graph.nodes.N1.evidence | length) == 2
+             and (.graph.nodes.N1.evidence[0] | has("agent_id") | not)
+             and (.graph.nodes.N1.evidence[1].agent_id != null)' "$state_retry" >/dev/null 2>&1; then
+	fail "a retried node with a carried-forward attempt entry still completes" \
+		"setup: the two-attempt evidence trail was not built (rc1=$rc_retry1 rc2=$rc_retry2)"
+	SETUP_FAILS=$((SETUP_FAILS + 1))
+elif graph_dispatch_complete "$state_retry" --session "$SESSION_RETRY" \
+	--evals "$TMP/e_$SESSION_RETRY.json" --proof "$TMP/p_$SESSION_RETRY.json" \
+	--retro "$TMP/r_$SESSION_RETRY.json" >/dev/null 2>&1; then
+	pass "a retried node with a carried-forward attempt entry still completes"
+else
+	fail "a retried node with a carried-forward attempt entry still completes" \
+		"the per-entry spawn demand deadlocked a legitimately retried node"
+fi
+
+# --- the legacy/cursorless path must still complete --------------------------
+# A "done" node whose evidence was never bound to a transcript (a plain string)
+# has nothing to re-verify, and revalidation must stay additive rather than
+# becoming a new requirement for graphs that were never asked to bind.
+SESSION_LEGACY="complete-legacy"
+state_legacy="$TMP/state_legacy.json"
+jq -n --arg session "$SESSION_LEGACY" --arg loop "$LOOP" '
+  {schema_version:2,session_id:$session,loop_id:$loop,revision:2,status:"in-progress",
+   graph:{nodes:{N1:{status:"done",outcome:"done",retry:{attempts:0,max:2},
+                     evidence:["did the work"]}},
+          edges:[],joins:{},active_wave:null,hard_stop:null}}' >"$state_legacy"
+write_valid_triple "$SESSION_LEGACY" "$LOOP" 2 "$TMP/e_$SESSION_LEGACY.json" \
+	"$TMP/p_$SESSION_LEGACY.json" "$TMP/r_$SESSION_LEGACY.json"
+if graph_dispatch_complete "$state_legacy" --session "$SESSION_LEGACY" \
+	--evals "$TMP/e_$SESSION_LEGACY.json" --proof "$TMP/p_$SESSION_LEGACY.json" \
+	--retro "$TMP/r_$SESSION_LEGACY.json" >/dev/null 2>&1; then
+	pass "a legacy done node with unbound string evidence still completes"
+else
+	fail "a legacy done node with unbound string evidence still completes" \
+		"the widened selector regressed the cursorless/legacy completion path"
+fi
+
+if [ "$SETUP_FAILS" -gt 0 ]; then
+	printf 'NOTE: %d case(s) failed during SETUP — those results measure the fixture, not the gate.\n' \
+		"$SETUP_FAILS"
 fi
 
 if [[ "$FAILS" -eq 0 ]]; then

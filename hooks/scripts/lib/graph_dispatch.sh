@@ -43,10 +43,14 @@ GRAPH_DISPATCH_ROOT="$(cd "$GRAPH_DISPATCH_DIR/../../.." && pwd)"
 . "$GRAPH_DISPATCH_ROOT/scripts/lib/eval-artifact.sh"
 # graph_evidence_bind.sh and graph_evidence_revalidate.sh each transitively
 # source graph_evidence.sh themselves (idempotent — function defs and one
-# constant, safe to load twice). Sourced separately, not chained, because
-# graph_evidence_revalidate_all does not depend on anything in
-# graph_evidence_bind.sh — chaining one through the other would be a
-# fabricated dependency between the bind-time and completion-time gates.
+# constant, safe to load twice). Both are still sourced explicitly here so
+# this file's own dependencies are readable at a glance rather than implied
+# by a transitive chain. graph_evidence_revalidate.sh now sources
+# graph_evidence_bind.sh itself for GRAPH_EVIDENCE_BIND_JQ_DEFS: the
+# completion-time gate must select bound evidence with the SAME normalising
+# detector the bind-time gate used, or a shape bind would have refused can be
+# hand-edited in afterwards and revalidation will not even see it. That is a
+# real shared-contract dependency, not a fabricated one.
 # shellcheck disable=SC1091  # path is resolved from this sourced file at runtime
 . "$GRAPH_DISPATCH_DIR/graph_evidence_bind.sh"
 # shellcheck disable=SC1091  # path is resolved from this sourced file at runtime
