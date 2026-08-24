@@ -151,7 +151,7 @@ enforcement.
 | `coderails:disposition-scout` | Resolves the clean-break vs preserve-compat fork per retirement unit in a Phase 1 plan, from the actual consumers and constraints | read + Bash; `Write`/`Edit` disallowed |
 | `coderails:docs-auditor` | Runs `/sync-docs` to audit in-tree docs for drift against just-merged code; fixes only loop-caused drift, surfaces pre-existing drift to the human | read + Bash + `Edit`; `Write` disallowed |
 | `coderails:preflight-scout` | Runs the pre-planning skill sequence (planning-sequence, premortem, assumptions, notchecked, wiki-query) plus a retro-intake pass; additive-only, never relaxes a gate | read + Bash; `Write`/`Edit` disallowed |
-| `coderails:proof-author` | Writes a frozen `proof.json` from only the raw authorising prompt and directly-referenced docs — never the plan or dispatching conversation; every proof stays `pending` | read + Bash + `Write` |
+| `coderails:proof-author` | Writes a frozen `proof.json` from `authorising_prompt_raw` + `session_id` + `loop_id` (explicit dispatch inputs) and directly-referenced docs — never the plan or dispatching conversation; every proof stays `pending` | read + Bash + `Write` |
 
 Review agents are **not** duplicated here — `pr-review-toolkit@claude-plugins-official`
 already ships `code-reviewer`, `code-simplifier`, `comment-analyzer`,
