@@ -277,7 +277,7 @@ run_err() { echo "$2" | bash "$GUARD" 2>&1 >/dev/null; }        # -> stderr
 reset() { rm -rf "$CLAUDE_AGENTIC_LOOP_DIR"; }
 
 WU3='{"wu1":{"status":"done"},"wu2":{"status":"done"},"wu3":{"status":"done"}}'
-WU2='{"wu1":{"status":"done"},"wu2":{"status":"done"}}'
+WU0='{}'
 WU5='{"wu1":{"status":"done"},"wu2":{"status":"done"},"wu3":{"status":"done"},"wu4":{"status":"done"},"wu5":{"status":"done"}}'
 
 # Core behaviour test: complete, owned, 3 work_units, no sibling evals.json.
@@ -336,9 +336,9 @@ case "$err" in
   *) fails=$((fails+1)); printf 'FAIL - stderr missing loop dir path: %s\n' "$err" ;;
 esac
 
-# Only 2 work_units, no evals.json at all -> allow (verification_level trigger not met, <3 skips read).
-reset; T=$(mk_transcript 1); write_file complete S1 1 S1 "$WU2"
-check "2 work_units, no evals.json -> allow (below threshold)" 0 "$(run x "$(payload "$T" S1)")"
+# 0 work_units, no evals.json at all -> allow (verification_level trigger not met, <1 skips read).
+reset; T=$(mk_transcript 1); write_file complete S1 1 S1 "$WU0"
+check "0 work_units, no evals.json -> allow (below threshold)" 0 "$(run x "$(payload "$T" S1)")"
 
 # work_units absent entirely (legacy loop) -> fail-open, allow.
 reset; T=$(mk_transcript 1); write_file complete S1 1

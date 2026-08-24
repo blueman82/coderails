@@ -80,7 +80,7 @@ gate_loop_evals_required() {
     # to a caller placed after it.
     if [ "$ALS_STATUS" = "complete" ] && [ "$ALS_REARMED" -eq 0 ] && [ "$ALS_SESSION" = "$session_id" ]; then
         als_read_work_units "$ALS_PATH"
-        if [ "$ALS_WORK_UNIT_COUNT" -ge 3 ]; then
+        if [ "$ALS_WORK_UNIT_COUNT" -ge 1 ]; then
             local loop_dir
             loop_dir=$(dirname "$ALS_PATH")
             als_read_loop_evals_result "$loop_dir"
