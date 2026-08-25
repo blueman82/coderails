@@ -680,6 +680,220 @@ else
 	pass "a legacy string mentioning provenance text is refused by name"
 fi
 
+# --- NOT a case under test: a SINGLE done node whose evidence is emptied,
+# with no surviving sibling evidence anywhere in the graph -------------------
+# This shape is not, and cannot be, refused by this mechanism, and is not
+# tested here for that reason (a fixture asserting refusal here would itself
+# be wrong). With nothing left bound anywhere, there is no surviving sibling
+# entry to prove the wave that dispatched this node ever bound anything
+# real — that is information-theoretically identical to a cursorless wave
+# that legitimately never bound this same node, which MUST still complete
+# (see the cursorless-wave negative controls below). Disclosed as an accepted
+# limit of this mechanism in the PR description, not fixed.
+
+# --- ALL evidence deleted from a SECOND done node, while a FIRST done node's
+# bound evidence is left intact ------------------------------------------------
+# With N1's bound evidence still present, the probe finds it, JQ_MAIN runs —
+# and N2 (also done, also genuinely dispatched in the SAME bound wave, but
+# with evidence:[]) must still be independently demanded: N1's surviving
+# evidence proves wave-1 genuinely bound something, so N2's absence from
+# $bound cannot be explained by "wave-1 never bound anyone" the way a
+# cursorless wave can. This is the case that pins the demand is made
+# per-dispatched-node inside JQ_MAIN, scoped to $bound_waves, not merely at
+# the top-level probe.
+SESSION_EMPTIED2="tamper-emptiedevidence-twonode"
+claude_fixture::init "$PROJECTS" "$SESSION_EMPTIED2"
+CURSOR_EMPTIED2=$(claude_fixture::cursor "$PROJECTS" "$SESSION_EMPTIED2")
+claude_fixture::append_spawn "$PROJECTS" "$SESSION_EMPTIED2" N1 wave-1 toolu_EMPTIED2N101 >/dev/null
+claude_fixture::append_spawn "$PROJECTS" "$SESSION_EMPTIED2" N2 wave-1 toolu_EMPTIED2N201 >/dev/null
+append_notification "$PROJECTS" "$SESSION_EMPTIED2" toolu_EMPTIED2N101 completed
+append_notification "$PROJECTS" "$SESSION_EMPTIED2" toolu_EMPTIED2N201 completed
+state_emptied2="$TMP/state_emptied2.json"
+jq -n --arg session "$SESSION_EMPTIED2" --arg loop "$LOOP" --argjson c "$CURSOR_EMPTIED2" '
+  {status:"running",outcome:"running",retry:{attempts:0,max:2},evidence:[]} as $n
+  | {schema_version:2,session_id:$session,loop_id:$loop,revision:1,status:"in-progress",
+     graph:{nodes:{N1:$n,N2:$n},edges:[],joins:{},
+            active_wave:{wave_id:"wave-1",revision:1,nodes:["N1","N2"],transcript_cursor:$c},
+            hard_stop:null}}' >"$state_emptied2"
+graph_dispatch_record "$state_emptied2" \
+	"$(jq -cn '{wave_id:"wave-1",results:{N1:{outcome:"done",evidence:[]},N2:{outcome:"done",evidence:[]}}}')" \
+	>/dev/null 2>&1
+rc_emptied2=$?
+jq '.graph.active_wave = null | .revision = 2' "$state_emptied2" >"$state_emptied2.tmp" &&
+	mv "$state_emptied2.tmp" "$state_emptied2"
+write_valid_triple "$SESSION_EMPTIED2" "$LOOP" 2 "$TMP/e_$SESSION_EMPTIED2.json" \
+	"$TMP/p_$SESSION_EMPTIED2.json" "$TMP/r_$SESSION_EMPTIED2.json"
+if [ "$rc_emptied2" -ne 0 ] ||
+	! jq -e '.graph.nodes.N1.evidence[0].kind == "claude_agent"
+	         and .graph.nodes.N2.evidence[0].kind == "claude_agent"' \
+		"$state_emptied2" >/dev/null 2>&1; then
+	fail "a second done node's deleted evidence is refused even when a sibling node's evidence survives" \
+		"setup: both nodes did not bind legitimately (rc=$rc_emptied2)"
+	SETUP_FAILS=$((SETUP_FAILS + 1))
+else
+	jq '.graph.nodes.N2.evidence = []' "$state_emptied2" >"$state_emptied2.tmp" &&
+		mv "$state_emptied2.tmp" "$state_emptied2"
+	if out=$(complete_with "$state_emptied2" "$SESSION_EMPTIED2"); then
+		fail "a second done node's deleted evidence is refused even when a sibling node's evidence survives" \
+			"completion SUCCEEDED with N2's evidence emptied while N1's evidence and both real spawns survive (bypass)"
+	elif ! printf '%s' "$out" | grep -qi -- 'revalidat'; then
+		fail "a second done node's deleted evidence is refused even when a sibling node's evidence survives" \
+			"refused, but not for a revalidation reason; got: $out"
+	else
+		pass "a second done node's deleted evidence is refused even when a sibling node's evidence survives"
+	fi
+fi
+
+# --- negative control: a done node with NO real dispatch in the transcript
+# at all must still pass (do not regress the legitimate legacy/no-graph-
+# dispatch case) -------------------------------------------------------------
+# No Agent tool_use for N1 exists anywhere in this transcript — the node was
+# never dispatched via the graph, e.g. loop-scope work done directly. This
+# must behave exactly like the existing "legacy" cases above: complete
+# without demanding evidence it was never bound against.
+SESSION_NEVERDISPATCHED="complete-neverdispatched"
+claude_fixture::init "$PROJECTS" "$SESSION_NEVERDISPATCHED"
+claude_fixture::append_noise "$PROJECTS" "$SESSION_NEVERDISPATCHED"
+state_neverdispatched="$TMP/state_neverdispatched.json"
+jq -n --arg session "$SESSION_NEVERDISPATCHED" --arg loop "$LOOP" '
+  {schema_version:2,session_id:$session,loop_id:$loop,revision:2,status:"in-progress",
+   graph:{nodes:{N1:{status:"done",outcome:"done",retry:{attempts:0,max:2},
+                     evidence:[]}},
+          edges:[],joins:{},active_wave:null,hard_stop:null}}' >"$state_neverdispatched"
+write_valid_triple "$SESSION_NEVERDISPATCHED" "$LOOP" 2 "$TMP/e_$SESSION_NEVERDISPATCHED.json" \
+	"$TMP/p_$SESSION_NEVERDISPATCHED.json" "$TMP/r_$SESSION_NEVERDISPATCHED.json"
+if complete_with "$state_neverdispatched" "$SESSION_NEVERDISPATCHED" >/dev/null 2>&1; then
+	pass "a done node never dispatched via the graph still completes (negative control)"
+else
+	fail "a done node never dispatched via the graph still completes (negative control)" \
+		"the empty-evidence fix regressed a legitimately never-bound node"
+fi
+
+# --- negative control: a REAL spawn exists, but its wave was CURSORLESS, so
+# bind itself left the node legitimately unbound — completion must still
+# succeed ----------------------------------------------------------------
+# The case review caught: an earlier version of the empty-evidence fix
+# demanded evidence for EVERY node any spawn row names, wider than bind's own
+# candidate contract (node_id + wave_id + line > cursor). A cursorless wave
+# forces bind's own $matches empty (graph_evidence_bind.sh's own comment),
+# so a node dispatched inside one has a real Agent spawn in the transcript
+# but NO bound evidence — by design, not tamper. Built through the REAL
+# graph_dispatch_record path (active_wave carries no transcript_cursor key
+# at all, exactly what graph_dispatch_begin_wave omits when no transcript
+# resolves at wave-open time), not a hand-written progress.json, so this
+# is not a fixture artifact.
+SESSION_CURSORLESS="complete-cursorless"
+claude_fixture::init "$PROJECTS" "$SESSION_CURSORLESS"
+claude_fixture::append_spawn "$PROJECTS" "$SESSION_CURSORLESS" N1 wave-1 toolu_CURSORLESS01 >/dev/null
+state_cursorless="$TMP/state_cursorless.json"
+jq -n --arg session "$SESSION_CURSORLESS" --arg loop "$LOOP" '
+  {schema_version:2,session_id:$session,loop_id:$loop,revision:1,status:"in-progress",
+   graph:{nodes:{N1:{status:"running",outcome:"running",retry:{attempts:0,max:2},evidence:[]}},
+          edges:[],joins:{},
+          active_wave:{wave_id:"wave-1",revision:1,nodes:["N1"]},
+          hard_stop:null}}' >"$state_cursorless"
+graph_dispatch_record "$state_cursorless" \
+	"$(jq -cn '{wave_id:"wave-1",results:{N1:{outcome:"done",evidence:[]}}}')" >/dev/null 2>&1
+rc_cursorless=$?
+jq '.graph.active_wave = null | .revision = 2' "$state_cursorless" >"$state_cursorless.tmp" &&
+	mv "$state_cursorless.tmp" "$state_cursorless"
+write_valid_triple "$SESSION_CURSORLESS" "$LOOP" 2 "$TMP/e_$SESSION_CURSORLESS.json" \
+	"$TMP/p_$SESSION_CURSORLESS.json" "$TMP/r_$SESSION_CURSORLESS.json"
+if [ "$rc_cursorless" -ne 0 ] || ! jq -e '.graph.nodes.N1.evidence == []' "$state_cursorless" >/dev/null 2>&1; then
+	fail "a cursorless-wave done node with a real but legitimately-unbound spawn still completes" \
+		"setup: record did not happen or bound evidence unexpectedly landed on N1 (rc=$rc_cursorless)"
+	SETUP_FAILS=$((SETUP_FAILS + 1))
+elif complete_with "$state_cursorless" "$SESSION_CURSORLESS" >/dev/null 2>&1; then
+	pass "a cursorless-wave done node with a real but legitimately-unbound spawn still completes"
+else
+	fail "a cursorless-wave done node with a real but legitimately-unbound spawn still completes" \
+		"the empty-evidence fix regressed a legitimately unbound cursorless-wave node"
+fi
+
+# --- same cursorless-wave case, but the node ends up SKIPPED instead of
+# done, mirroring the reviewer's third reproduced variant --------------------
+SESSION_CURSORLESS_SKIP="complete-cursorlessskip"
+claude_fixture::init "$PROJECTS" "$SESSION_CURSORLESS_SKIP"
+claude_fixture::append_spawn "$PROJECTS" "$SESSION_CURSORLESS_SKIP" N1 wave-1 toolu_CURSORLESSSKIP01 >/dev/null
+state_cursorless_skip="$TMP/state_cursorlessskip.json"
+jq -n --arg session "$SESSION_CURSORLESS_SKIP" --arg loop "$LOOP" '
+  {schema_version:2,session_id:$session,loop_id:$loop,revision:1,status:"in-progress",
+   graph:{nodes:{N1:{status:"running",outcome:"running",retry:{attempts:0,max:2},evidence:[]}},
+          edges:[],joins:{},
+          active_wave:{wave_id:"wave-1",revision:1,nodes:["N1"]},
+          hard_stop:null}}' >"$state_cursorless_skip"
+graph_dispatch_record "$state_cursorless_skip" \
+	"$(jq -cn '{wave_id:"wave-1",results:{N1:{outcome:"failed",evidence:[]}}}')" >/dev/null 2>&1
+rc_cursorless_skip=$?
+jq '.graph.active_wave = null | .revision = 2
+  | .graph.nodes.N1.status = "skipped" | .graph.nodes.N1.outcome = "skipped"' \
+	"$state_cursorless_skip" >"$state_cursorless_skip.tmp" && mv "$state_cursorless_skip.tmp" "$state_cursorless_skip"
+write_valid_triple "$SESSION_CURSORLESS_SKIP" "$LOOP" 2 "$TMP/e_$SESSION_CURSORLESS_SKIP.json" \
+	"$TMP/p_$SESSION_CURSORLESS_SKIP.json" "$TMP/r_$SESSION_CURSORLESS_SKIP.json"
+if [ "$rc_cursorless_skip" -ne 0 ] ||
+	! jq -e '.graph.nodes.N1.evidence == [] and .graph.nodes.N1.status == "skipped"' \
+		"$state_cursorless_skip" >/dev/null 2>&1; then
+	fail "a cursorless-wave SKIPPED node with a real but legitimately-unbound spawn still completes" \
+		"setup: record did not happen or bound evidence unexpectedly landed on N1 (rc=$rc_cursorless_skip)"
+	SETUP_FAILS=$((SETUP_FAILS + 1))
+elif complete_with "$state_cursorless_skip" "$SESSION_CURSORLESS_SKIP" >/dev/null 2>&1; then
+	pass "a cursorless-wave SKIPPED node with a real but legitimately-unbound spawn still completes"
+else
+	fail "a cursorless-wave SKIPPED node with a real but legitimately-unbound spawn still completes" \
+		"the empty-evidence fix regressed a legitimately unbound cursorless-wave skipped node"
+fi
+
+# --- cross-wave boundary, nothing tampered: a legitimately-bound wave-1 node
+# alongside a legitimately cursorless wave-2 node in the SAME graph --------
+# $bound_waves is keyed per wave_id, not per graph — reviewed and confirmed:
+# a wave with its own surviving bound entry does NOT extend protection to a
+# DIFFERENT wave in the same graph (disclosed as a residual in the PR body).
+# This fixture pins the un-tampered side of that same boundary: N1's real
+# bind in a cursored wave-1 must not somehow cause N2's legitimately-unbound
+# cursorless wave-2 dispatch to be wrongly demanded evidence it was never
+# bound against. Nothing here is tampered — both nodes' evidence is exactly
+# what graph_dispatch_record legitimately wrote.
+SESSION_CROSSWAVE="complete-crosswave-boundary"
+claude_fixture::init "$PROJECTS" "$SESSION_CROSSWAVE"
+CURSOR_CROSSWAVE=$(claude_fixture::cursor "$PROJECTS" "$SESSION_CROSSWAVE")
+claude_fixture::append_spawn "$PROJECTS" "$SESSION_CROSSWAVE" N1 wave-1 toolu_CROSSWAVEN101 >/dev/null
+append_notification "$PROJECTS" "$SESSION_CROSSWAVE" toolu_CROSSWAVEN101 completed
+state_crosswave="$TMP/state_crosswave.json"
+jq -n --arg session "$SESSION_CROSSWAVE" --arg loop "$LOOP" --argjson c "$CURSOR_CROSSWAVE" '
+  {schema_version:2,session_id:$session,loop_id:$loop,revision:1,status:"in-progress",
+   graph:{nodes:{N1:{status:"running",outcome:"running",retry:{attempts:0,max:2},evidence:[]},
+                 N2:{status:"pending",outcome:"pending",retry:{attempts:0,max:2},evidence:[]}},
+          edges:[],joins:{},
+          active_wave:{wave_id:"wave-1",revision:1,nodes:["N1"],transcript_cursor:$c},
+          hard_stop:null}}' >"$state_crosswave"
+graph_dispatch_record "$state_crosswave" \
+	"$(jq -cn '{wave_id:"wave-1",results:{N1:{outcome:"done",evidence:[]}}}')" >/dev/null 2>&1
+rc_crosswave1=$?
+# wave-2 is CURSORLESS by construction: no transcript_cursor key at all.
+jq '.graph.active_wave = {wave_id:"wave-2",revision:2,nodes:["N2"]}
+  | .graph.nodes.N2.status = "running" | .graph.nodes.N2.outcome = "running"
+  | .revision = 2' "$state_crosswave" >"$state_crosswave.tmp" && mv "$state_crosswave.tmp" "$state_crosswave"
+claude_fixture::append_spawn "$PROJECTS" "$SESSION_CROSSWAVE" N2 wave-2 toolu_CROSSWAVEN201 >/dev/null
+graph_dispatch_record "$state_crosswave" \
+	"$(jq -cn '{wave_id:"wave-2",results:{N2:{outcome:"done",evidence:[]}}}')" >/dev/null 2>&1
+rc_crosswave2=$?
+jq '.graph.active_wave = null | .revision = 3' "$state_crosswave" >"$state_crosswave.tmp" &&
+	mv "$state_crosswave.tmp" "$state_crosswave"
+write_valid_triple "$SESSION_CROSSWAVE" "$LOOP" 3 "$TMP/e_$SESSION_CROSSWAVE.json" \
+	"$TMP/p_$SESSION_CROSSWAVE.json" "$TMP/r_$SESSION_CROSSWAVE.json"
+if [ "$rc_crosswave1" -ne 0 ] || [ "$rc_crosswave2" -ne 0 ] ||
+	! jq -e '.graph.nodes.N1.evidence[0].kind == "claude_agent" and (.graph.nodes.N2.evidence == [])' \
+		"$state_crosswave" >/dev/null 2>&1; then
+	fail "a legitimately-bound wave-1 node alongside a legitimately-unbound cursorless wave-2 node still completes" \
+		"setup: wave-1 did not bind or wave-2 unexpectedly bound (rc1=$rc_crosswave1 rc2=$rc_crosswave2)"
+	SETUP_FAILS=$((SETUP_FAILS + 1))
+elif complete_with "$state_crosswave" "$SESSION_CROSSWAVE" >/dev/null 2>&1; then
+	pass "a legitimately-bound wave-1 node alongside a legitimately-unbound cursorless wave-2 node still completes"
+else
+	fail "a legitimately-bound wave-1 node alongside a legitimately-unbound cursorless wave-2 node still completes" \
+		"cross-wave scoping wrongly demanded evidence for N2's legitimately-unbound cursorless wave-2 dispatch"
+fi
+
 [ "$SETUP_FAILS" -gt 0 ] && printf 'NOTE: %d case(s) failed in SETUP — those measure the fixture, not the gate.\n' "$SETUP_FAILS"
 
 if [[ "$FAILS" -eq 0 ]]; then

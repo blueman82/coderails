@@ -16,8 +16,8 @@ DEFAULT_LOC = 400
 DEFAULT_FUNCTION_LINES = 100
 LOC_EXCEPTIONS = {
     "hooks/scripts/tests/enforce_pr_workflow.test.sh": 1149,
-    "hooks/scripts/tests/graph_dispatch_complete.test.sh": 700,
-    "hooks/scripts/lib/graph_evidence_revalidate.sh": 421,
+    "hooks/scripts/tests/graph_dispatch_complete.test.sh": 905,
+    "hooks/scripts/lib/graph_evidence_revalidate.sh": 540,
     "hooks/scripts/tests/merge_wiki_debt_gate.test.sh": 567,
     "hooks/scripts/lib/loop_state_common.sh": 1606,
     "hooks/scripts/tests/loop_stall_guard.test.sh": 2323,
