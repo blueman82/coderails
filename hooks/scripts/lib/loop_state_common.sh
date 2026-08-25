@@ -1,4 +1,5 @@
 #!/bin/bash
+# shellcheck disable=SC1091 # library path is resolved from this file at runtime
 # loop_state_common.sh — shared detection for the agentic-loop Stop guards.
 # SOURCED (not executed) by loop_state_guard.sh (presence/ownership) and
 # loop_stall_guard.sh (anti-stall). Single source for: env defaults, the
@@ -8,6 +9,7 @@
 
 # Single source of truth for the LOOP-STOP category vocabulary. The anti-stall guard
 # builds BOTH its match regex and its block message from this, so they can't disagree.
+# shellcheck disable=SC2034  # consumed by voice_announce.sh / loop_stall_guard.sh, which source this file
 LOOP_STOP_VOCAB="hard-stop|approval-gate|awaiting-input|complete"
 
 LOG_FILE="${CLAUDE_DISCIPLINE_LOG:-$HOME/.claude/discipline.log}"
@@ -398,6 +400,7 @@ als_stable_last_text() {
     attempts=$((attempts + 1))
     [ "$attempts" -lt "$max_attempts" ] && sleep "$sleep_s"
   done
+  # shellcheck disable=SC2034  # documented output global for callers of this function (see comment above)
   ALS_LAST_ATTEMPTS=$attempts
   printf '%s' "$text"
 }
@@ -469,6 +472,7 @@ als_mark_complete() {
   local n; n=$(als_stable_invocations "$transcript")
   case "$n" in (''|*[!0-9]*) n=0;; esac
   [ "$n" -gt 0 ] || return 1
+  # shellcheck disable=SC2016  # literal jq program; $n is a jq variable, not a shell expansion
   als_atomic_progress_update "$path" --argjson n "$n" \
     '.status = "complete" | .completed_marker = $n'
 }
@@ -604,6 +608,7 @@ als_read_work_units() {
   if [ -n "$1" ] && [ -f "$1" ]; then
     local n; n=$(jq -r '(.work_units // {}) | length' "$1" 2>/dev/null)
     case "$n" in (''|*[!0-9]*) n=0;; esac
+    # shellcheck disable=SC2034  # consumed by loop_state_guard.sh / loop_dispatch_guard.sh, which source this file
     ALS_WORK_UNIT_COUNT=$n
   fi
 }
@@ -1518,7 +1523,7 @@ als_report_cost_on_complete() {
         case "$prices_as_of" in
           [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9])
             local then_epoch now_epoch
-            then_epoch=$(date -j -f "%Y-%m-%d" "$prices_as_of" +%s 2>/dev/null)
+            then_epoch=$(date -u -j -f "%Y-%m-%d" "$prices_as_of" +%s 2>/dev/null)
             now_epoch=$(date +%s 2>/dev/null)
             if [ -n "$then_epoch" ] && [ -n "$now_epoch" ]; then
               local days=$(( (now_epoch - then_epoch) / 86400 ))
