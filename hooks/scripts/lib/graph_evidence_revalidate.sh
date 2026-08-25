@@ -36,11 +36,16 @@ GRAPH_EVIDENCE_REVALIDATE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # mutated (or evidence hand-edited) AFTER a legitimate bind cannot ride that
 # earlier trust all the way to completion.
 #
-# A graph with NO claude_agent-kind evidence anywhere (every node bound
+# A graph with NO claude_agent-kind evidence anywhere, AND no real Agent
+# dispatch in the transcript for any done/skipped node (every node bound
 # legacy-style — a plain string, or no transcript ever resolved at bind
-# time) has nothing this function can or must re-verify, and completes
-# exactly as it always could: revalidation is additive on top of a real
-# bind, never a new requirement for a graph that was never asked to bind.
+# time, or the transcript no longer resolves at all), has nothing this
+# function can or must re-verify, and completes exactly as it always could:
+# revalidation is additive on top of a real bind, never a new requirement for
+# a graph that was never asked to bind. But a node the transcript proves WAS
+# genuinely dispatched must still have surviving bound evidence — see
+# EVIDENCE PRESENCE below — or the deletion of a real bind would be
+# indistinguishable from a node that was never asked to bind at all.
 #
 # Otherwise, re-checks:
 #   * the parent session transcript still resolves and parses cleanly
@@ -122,6 +127,23 @@ GRAPH_EVIDENCE_REVALIDATE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 #     depends on its FULL dispatch history surviving in the transcript, not
 #     just the attempts that finally succeeded.
 #
+#   * EVIDENCE PRESENCE, the exact complement of spawn presence above: every
+#     done/skipped node that a real, session-matched Agent spawn in the
+#     transcript names ($spawn_rows' own .node_id, never anything read from
+#     progress.json) must still have AT LEAST ONE entry in $bound. Spawn
+#     presence asks "does every bound entry's claimed spawn still exist";
+#     this asks the reverse — "does every genuinely-dispatched node still
+#     have ANY bound evidence at all". Deleting a node's evidence array
+#     OUTRIGHT (not disguising it — removing it) previously fell out of
+#     every check above, INCLUDING the leading probe: with nothing left that
+#     looks_provenance-shaped on that node, a graph where that was the only
+#     bound node anywhere read as "nothing to revalidate" and short-circuited
+#     before ever reaching this jq program, indistinguishable from a node
+#     that was legitimately never dispatched via the graph at all. The probe
+#     no longer makes that completion decision by itself (see the bash
+#     driver below) — it now only decides whether an unresolvable transcript
+#     can still be treated as the legacy/no-transcript case.
+#
 #     A THIRD widening, disclosed rather than filtered: `looks_provenance`
 #     scans string leaves, so a legacy plain-STRING entry merely MENTIONING a
 #     tool_use_id or "kind":"claude_agent" as free text now selects into the
@@ -133,8 +155,9 @@ GRAPH_EVIDENCE_REVALIDATE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 #     instead names the cause — no STRUCTURED bound entry — rather than blaming
 #     notification evidence. Worded shape-neutrally because an array-wrapped
 #     forgery reaches the same branch and is not free text. A legacy string with
-#     no provenance-ish text is unaffected: it never selects, and its graph
-#     still short-circuits at the probe.
+#     no provenance-ish text is unaffected: it never selects, and — provided
+#     the transcript also has no real dispatch for that node — its graph
+#     still completes via the legacy path.
 #
 # Fails closed (non-zero, a NAMED "graph_evidence: ... revalidation ..."
 # reason on stderr) on any failure, including an unreadable/malformed
@@ -253,10 +276,39 @@ GRAPH_EVIDENCE_REVALIDATE_JQ_MAIN=$(cat <<'JQ_MAIN_EOF'
            | select([ $spawn_rows[]
                       | select(.tool_use_id == $e.tool_use_id
                                and .node_id == $e.node_id) ] | length == 0) ]) as $missing_spawn
+      # EVIDENCE-PRESENCE re-derivation — the exact complement of the spawn-
+      # presence check above. That check asks "does every bound entry's
+      # claimed spawn still exist"; this asks the reverse: "does every
+      # dispatched node still have a bound entry at all". Neither question
+      # subsumes the other. A done/skipped node whose evidence array is
+      # emptied OUTRIGHT (not disguised — genuinely removed) selects nothing
+      # into $bound, so it is invisible to every check above it, including
+      # the PROBE this function runs first: if this was the only node with
+      # bound evidence anywhere in the graph, the probe finds nothing
+      # provenance-shaped at all and — pre-this-clause — the whole function
+      # returned 0 (allow completion), indistinguishable from a graph that
+      # legitimately never bound anything. That fast path is still taken
+      # (this function does not even reach JQ_MAIN in that case) — this
+      # clause is what closes the gap for a graph where at least ONE other
+      # node's evidence survives, driving probe_rc to 0 and JQ_MAIN to run.
+      # The single-node blind spot is closed by demoting the probe to a mere
+      # transcript-resolution shortcut in the bash driver below, not by
+      # anything in this jq program.
+      #
+      # $dispatched is derived from $spawn_rows (already session-matched),
+      # never from progress.json, so the party editing evidence cannot also
+      # spoof which nodes "dispatched" — a spawn row exists only if
+      # graph_evidence_spawns found a real Agent tool_use in the transcript.
+      | ([ $spawn_rows[] | .node_id | select(type == "string") ] | unique) as $dispatched
+      | ([ $dispatched[] | . as $nid
+           | select(($nodes[$nid].status // "") | IN("done","skipped"))
+           | select([ $bound[] | select(.node_id == $nid) ] | length == 0) ]) as $evidence_gone
       | if $dup_tool or $dup_agent
         then error("graph_evidence: revalidation found a tool_use_id or agent_id bound to more than one node")
         elif ($missing_spawn | length) > 0
         then error("graph_evidence: revalidation found no Agent spawn in the transcript for tool_use_id \($missing_spawn[0].tool_use_id) bound to node \($missing_spawn[0].node_id)")
+        elif ($evidence_gone | length) > 0
+        then error("graph_evidence: revalidation found a real Agent spawn in the transcript for node \($evidence_gone[0]) but no bound evidence survives on it")
         else
           reduce $done_with_evidence[] as $id (null;
             if . != null then . else
@@ -349,10 +401,15 @@ graph_evidence_revalidate_all() {
     session=$(jq -r '.session_id // empty' "$progress" 2>/dev/null) || return 1
     [ -n "$session" ] || return 1
 
-    # Nothing bound to revalidate — a legacy/no-transcript graph completes
-    # exactly as it always could. The selector here MUST match the uniqueness
-    # scan below (done-or-skipped) or a graph whose only claude_agent evidence
-    # sits on a skipped node would short-circuit here and never reach it.
+    # Does ANYTHING on a done/skipped node currently look provenance-shaped?
+    # This probe alone can no longer decide "nothing to revalidate" (see
+    # $evidence_gone in JQ_MAIN below for why: a graph can have real dispatch
+    # history for a node whose evidence was since deleted outright, which
+    # this probe cannot distinguish from a node that was never dispatched at
+    # all). It is kept only to answer a narrower question: whether a session
+    # whose transcript no longer resolves can still be treated as the
+    # legitimate legacy/no-transcript case, or must fail closed — see the
+    # transcript-resolution check below, the only place this flag is read.
     #
     # `looks_provenance` (bind's own detector, reused verbatim) replaces what
     # used to be an exact `select(type == "object" and .kind == "claude_agent")`
@@ -362,18 +419,17 @@ graph_evidence_revalidate_all() {
     # recursively and scans string leaves, so wrapping/nesting/whitespace/
     # homoglyph/stringified-JSON variants all still select, and therefore all
     # still have to prove themselves below.
-    local probe_rc
+    local probe_rc nothing_bound=0
     jq -e "$GRAPH_EVIDENCE_BIND_JQ_DEFS
 $GRAPH_EVIDENCE_REVALIDATE_JQ_PROBE" "$progress" >/dev/null 2>&1
     probe_rc=$?
-    # rc=1: the jq boolean expression evaluated false — genuinely nothing
-    # bound, proceed to completion as always. Any OTHER nonzero (a crash on a
-    # malformed node shape, e.g. rc=5) must fail closed with a named reason
-    # instead of being folded into the same "nothing to revalidate" exit, or
-    # the header's own "fails closed on any failure" claim would be false for
-    # this probe specifically.
+    # rc=1: the jq boolean expression evaluated false — nothing on this graph
+    # currently looks bound. Any OTHER nonzero (a crash on a malformed node
+    # shape, e.g. rc=5) must fail closed with a named reason instead of being
+    # folded into the same exit, or the header's own "fails closed on any
+    # failure" claim would be false for this probe specifically.
     if [ "$probe_rc" -eq 1 ]; then
-        return 0
+        nothing_bound=1
     elif [ "$probe_rc" -ne 0 ]; then
         printf 'graph_evidence: revalidation could not evaluate bound evidence in %s\n' \
             "$progress" >&2
@@ -382,6 +438,16 @@ $GRAPH_EVIDENCE_REVALIDATE_JQ_PROBE" "$progress" >/dev/null 2>&1
 
     local transcript raw_notifications notif_rc notifications_json
     if ! transcript=$(graph_evidence_transcript "$session"); then
+        # A transcript that no longer resolves at all cannot re-derive spawn
+        # presence for $evidence_gone below either, so a graph with nothing
+        # currently bound stays on the legacy/no-transcript completion path
+        # exactly as before. A graph that DOES have something bound but whose
+        # transcript is now unresolvable must fail closed — that case was
+        # already refused before this change (the "transcript mutated after
+        # bind" test below pins it) and stays refused here.
+        if [ "$nothing_bound" -eq 1 ]; then
+            return 0
+        fi
         printf 'graph_evidence: revalidation could not resolve the transcript for session %s\n' \
             "$session" >&2
         return 1

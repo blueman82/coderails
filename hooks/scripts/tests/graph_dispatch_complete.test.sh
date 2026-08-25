@@ -680,6 +680,112 @@ else
 	pass "a legacy string mentioning provenance text is refused by name"
 fi
 
+# --- ALL evidence deleted from a done node whose dispatch really happened ----
+# Distinct from every forged-shape case above: those hand-edit the evidence
+# INTO a disguised shape that still (once normalised) selects for
+# looks_provenance. Here the evidence array is emptied outright — nothing
+# left to select — while the transcript's real Agent spawn AND its completed
+# notification are left fully intact. Pre-fix, the probe at the top of
+# graph_evidence_revalidate_all finds nothing looks_provenance-shaped on any
+# done/skipped node (probe_rc=1) and returns 0 immediately, indistinguishable
+# from a graph that legitimately never bound anything. That fast path cannot
+# tell "never bound" apart from "was bound, evidence since deleted" — this
+# pins the second case must fail closed.
+SESSION_EMPTIED="tamper-emptiedevidence"
+if state_emptied=$(bind_done_node "$SESSION_EMPTIED" "toolu_EMPTIED01"); then
+	jq '.graph.nodes.N1.evidence = []' "$state_emptied" >"$state_emptied.tmp" &&
+		mv "$state_emptied.tmp" "$state_emptied"
+	if out=$(complete_with "$state_emptied" "$SESSION_EMPTIED"); then
+		fail "a done node whose bound evidence is deleted outright is refused" \
+			"completion SUCCEEDED with evidence emptied while a real spawn+notification survive (bypass)"
+	elif ! printf '%s' "$out" | grep -qi -- 'revalidat'; then
+		fail "a done node whose bound evidence is deleted outright is refused" \
+			"refused, but not for a revalidation reason; got: $out"
+	else
+		pass "a done node whose bound evidence is deleted outright is refused"
+	fi
+else
+	fail "a done node whose bound evidence is deleted outright is refused" "setup: legitimate bind did not happen"
+	SETUP_FAILS=$((SETUP_FAILS + 1))
+fi
+
+# --- ALL evidence deleted from a SECOND done node, while a FIRST done node's
+# bound evidence is left intact ------------------------------------------------
+# The single-node case above always drives probe_rc==1 (nothing anywhere looks
+# provenance-shaped), so a fix scoped only to that fast path would look
+# complete while leaving a second, harder path open: with N1's bound evidence
+# still present, the probe finds it, JQ_MAIN runs instead of the fast path —
+# and N2 (also done, also genuinely dispatched, but with evidence:[]) must
+# still be independently demanded. This is the case that pins the demand is
+# made per-dispatched-node inside JQ_MAIN, not only at the top-level probe.
+SESSION_EMPTIED2="tamper-emptiedevidence-twonode"
+claude_fixture::init "$PROJECTS" "$SESSION_EMPTIED2"
+CURSOR_EMPTIED2=$(claude_fixture::cursor "$PROJECTS" "$SESSION_EMPTIED2")
+claude_fixture::append_spawn "$PROJECTS" "$SESSION_EMPTIED2" N1 wave-1 toolu_EMPTIED2N101 >/dev/null
+claude_fixture::append_spawn "$PROJECTS" "$SESSION_EMPTIED2" N2 wave-1 toolu_EMPTIED2N201 >/dev/null
+append_notification "$PROJECTS" "$SESSION_EMPTIED2" toolu_EMPTIED2N101 completed
+append_notification "$PROJECTS" "$SESSION_EMPTIED2" toolu_EMPTIED2N201 completed
+state_emptied2="$TMP/state_emptied2.json"
+jq -n --arg session "$SESSION_EMPTIED2" --arg loop "$LOOP" --argjson c "$CURSOR_EMPTIED2" '
+  {status:"running",outcome:"running",retry:{attempts:0,max:2},evidence:[]} as $n
+  | {schema_version:2,session_id:$session,loop_id:$loop,revision:1,status:"in-progress",
+     graph:{nodes:{N1:$n,N2:$n},edges:[],joins:{},
+            active_wave:{wave_id:"wave-1",revision:1,nodes:["N1","N2"],transcript_cursor:$c},
+            hard_stop:null}}' >"$state_emptied2"
+graph_dispatch_record "$state_emptied2" \
+	"$(jq -cn '{wave_id:"wave-1",results:{N1:{outcome:"done",evidence:[]},N2:{outcome:"done",evidence:[]}}}')" \
+	>/dev/null 2>&1
+rc_emptied2=$?
+jq '.graph.active_wave = null | .revision = 2' "$state_emptied2" >"$state_emptied2.tmp" &&
+	mv "$state_emptied2.tmp" "$state_emptied2"
+write_valid_triple "$SESSION_EMPTIED2" "$LOOP" 2 "$TMP/e_$SESSION_EMPTIED2.json" \
+	"$TMP/p_$SESSION_EMPTIED2.json" "$TMP/r_$SESSION_EMPTIED2.json"
+if [ "$rc_emptied2" -ne 0 ] ||
+	! jq -e '.graph.nodes.N1.evidence[0].kind == "claude_agent"
+	         and .graph.nodes.N2.evidence[0].kind == "claude_agent"' \
+		"$state_emptied2" >/dev/null 2>&1; then
+	fail "a second done node's deleted evidence is refused even when a sibling node's evidence survives" \
+		"setup: both nodes did not bind legitimately (rc=$rc_emptied2)"
+	SETUP_FAILS=$((SETUP_FAILS + 1))
+else
+	jq '.graph.nodes.N2.evidence = []' "$state_emptied2" >"$state_emptied2.tmp" &&
+		mv "$state_emptied2.tmp" "$state_emptied2"
+	if out=$(complete_with "$state_emptied2" "$SESSION_EMPTIED2"); then
+		fail "a second done node's deleted evidence is refused even when a sibling node's evidence survives" \
+			"completion SUCCEEDED with N2's evidence emptied while N1's evidence and both real spawns survive (bypass)"
+	elif ! printf '%s' "$out" | grep -qi -- 'revalidat'; then
+		fail "a second done node's deleted evidence is refused even when a sibling node's evidence survives" \
+			"refused, but not for a revalidation reason; got: $out"
+	else
+		pass "a second done node's deleted evidence is refused even when a sibling node's evidence survives"
+	fi
+fi
+
+# --- negative control: a done node with NO real dispatch in the transcript
+# at all must still pass (do not regress the legitimate legacy/no-graph-
+# dispatch case) -------------------------------------------------------------
+# No Agent tool_use for N1 exists anywhere in this transcript — the node was
+# never dispatched via the graph, e.g. loop-scope work done directly. This
+# must behave exactly like the existing "legacy" cases above: complete
+# without demanding evidence it was never bound against.
+SESSION_NEVERDISPATCHED="complete-neverdispatched"
+claude_fixture::init "$PROJECTS" "$SESSION_NEVERDISPATCHED"
+claude_fixture::append_noise "$PROJECTS" "$SESSION_NEVERDISPATCHED"
+state_neverdispatched="$TMP/state_neverdispatched.json"
+jq -n --arg session "$SESSION_NEVERDISPATCHED" --arg loop "$LOOP" '
+  {schema_version:2,session_id:$session,loop_id:$loop,revision:2,status:"in-progress",
+   graph:{nodes:{N1:{status:"done",outcome:"done",retry:{attempts:0,max:2},
+                     evidence:[]}},
+          edges:[],joins:{},active_wave:null,hard_stop:null}}' >"$state_neverdispatched"
+write_valid_triple "$SESSION_NEVERDISPATCHED" "$LOOP" 2 "$TMP/e_$SESSION_NEVERDISPATCHED.json" \
+	"$TMP/p_$SESSION_NEVERDISPATCHED.json" "$TMP/r_$SESSION_NEVERDISPATCHED.json"
+if complete_with "$state_neverdispatched" "$SESSION_NEVERDISPATCHED" >/dev/null 2>&1; then
+	pass "a done node never dispatched via the graph still completes (negative control)"
+else
+	fail "a done node never dispatched via the graph still completes (negative control)" \
+		"the empty-evidence fix regressed a legitimately never-bound node"
+fi
+
 [ "$SETUP_FAILS" -gt 0 ] && printf 'NOTE: %d case(s) failed in SETUP — those measure the fixture, not the gate.\n' "$SETUP_FAILS"
 
 if [[ "$FAILS" -eq 0 ]]; then
