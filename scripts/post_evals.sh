@@ -10,6 +10,7 @@
 # Source marker SSOT (needed for compute_and_validate_result).
 # BASH_SOURCE-relative so this works regardless of cwd.
 _POST_EVALS_DIR="$(dirname "${BASH_SOURCE[0]}")"
+# shellcheck disable=SC1091 # dynamic path, resolved at runtime relative to BASH_SOURCE
 source "${_POST_EVALS_DIR}/lib/eval-artifact.sh"
 
 # Timeout for smoke_verify's gate-time re-execution, distinct from (and much
@@ -40,6 +41,7 @@ POST_EVALS_SMOKE_VERIFY_TIMEOUT="${POST_EVALS_SMOKE_VERIFY_TIMEOUT:-120}"
 # cmd/negative_control directly in its own worktree with its own timeout;
 # that re-execution IS the property this system enforces at merge.
 post_evals::validate_structure() {
+    # shellcheck disable=SC2034 # pr kept for call-site symmetry with other post_evals:: fns; unused here
     local path="$1" pr="$2" current_head_sha="$3" scope="${4:-pr}"
 
     # Check 1: file exists and is valid JSON.
@@ -172,6 +174,56 @@ post_evals::validate_structure() {
         post_evals::validate_freeze "$path" || return 1
         post_evals::validate_smoke "$path" || return 1
         post_evals::validate_smoke_execution "$path" || return 1
+    fi
+
+    # Check 11: new_cases[] join integrity. A later reviewer can discover a
+    # case the frozen suite never anticipated — distinct from amendments[]
+    # (edits an existing eval) and withdrawn_proofs (a proof that ran and
+    # legitimately failed). Each new_cases[] entry names the .evals[].id it
+    # was folded into; if that id doesn't exist in THIS file's .evals[], the
+    # entry references a case that was never actually graded — refuse.
+    # Absent/empty new_cases[] is a no-op (most PRs never use this field).
+    # Scope-independent, like checks 1-7: no repo or execution needed.
+    #
+    # Shape-guarded like check 9/10's .evals guard: a non-array new_cases
+    # (object/string/number) must not silently iterate zero elements and pass
+    # — that would make a malformed new_cases[] indistinguishable from an
+    # absent one. An entry with no id, an empty id, or a non-object entry is
+    # counted as an offender too — .id defaulting to "" via `// ""` must
+    # never fall through the "no match found" branch as if it matched.
+    if jq -e 'has("new_cases") and ((.new_cases | type) != "array")' "$path" >/dev/null 2>&1; then
+        printf 'post_evals: new_cases is not a JSON array (malformed) — refusing.\n' >&2
+        return 1
+    fi
+    local offender_count orphan_new_case
+    offender_count=$(jq -r '
+        [.evals[]?.id] as $eval_ids
+        | [.new_cases[]?
+            | . as $entry
+            | (($entry | type) == "object") as $is_obj
+            | (if $is_obj then ($entry.id // "") else "" end) as $nc_id
+            | select(($is_obj | not)
+                      or ($nc_id == "")
+                      or ($eval_ids | index($nc_id) | not))]
+        | length
+    ' "$path")
+    if [[ "$offender_count" != "0" ]]; then
+        orphan_new_case=$(jq -r '
+            [.evals[]?.id] as $eval_ids
+            | [.new_cases[]?
+                | . as $entry
+                | (($entry | type) == "object") as $is_obj
+                | (if $is_obj then ($entry.id // "") else "" end) as $nc_id
+                | select(($is_obj | not)
+                          or ($nc_id == "")
+                          or ($eval_ids | index($nc_id) | not))
+                | (if $is_obj then ($entry.id // "<missing id>")
+                   | if . == "" then "<empty id>" else . end
+                   else "<non-object entry>" end)]
+            | first
+        ' "$path")
+        printf 'post_evals: new_cases[] entry %s has no matching .evals[].id\n' "$orphan_new_case" >&2
+        return 1
     fi
 
     return 0
@@ -857,6 +909,7 @@ post_evals::smoke_run() {
 # also bounds the artifact against a chatty runner.
 post_evals::_run_recorded() {
     local command_text="$1" timeout_secs="${2:-10}" cwd="${3:-}" out rc
+    # shellcheck disable=SC2016 # single-quoted Perl source, not a shell expansion
     local -r _pg_kill_perl='
         my $t = shift; my $cmd = shift;
         my $pid = fork();
@@ -914,9 +967,9 @@ post_evals::_is_environmental_rc() {
 #
 # Skips (exit 0) when there is nothing to check: no frozen_sha field (every
 # artifact predating this check, plus loop scope), or the file is not inside a
-# git work tree so there is no branch to compare against. Those are absences of
-# applicability, not violations — hard-failing them would break every existing
-# caller.
+# repo working tree so there is no branch to compare against. Those are
+# absences of applicability, not violations — hard-failing them would break
+# every existing caller.
 #
 # Fails closed on everything else: a frozen_sha git cannot resolve is a
 # violation, not a pass, because "git couldn't answer" must never read as
