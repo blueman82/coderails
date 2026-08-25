@@ -15,7 +15,7 @@ from typing import Any, Iterator
 from graph_evidence import (bind_worker_evidence, transcript_cursor,
                             validate_completion_evidence, validate_evals,
                             validate_worker_evidence)
-from graph_identity import GraphError, active_nodes, task_name, task_node
+from graph_identity import GraphError, active_nodes, classify_worker_evidence, task_name, task_node
 
 
 STATUSES = {"pending", "running", "done", "skipped", "hard-stop"}
@@ -240,7 +240,9 @@ def _record_wave(path: Path, raw_results: str) -> dict[str, Any]:
         if graph["active_wave"] is None:
             raise GraphError("no active wave exists")
         results = _results(parsed_results, graph["active_wave"])
-        references = bind_worker_evidence(state, graph["active_wave"])
+        references, identifiers = bind_worker_evidence(state, graph["active_wave"])
+        if any(classify_worker_evidence(result["evidence"], identifiers)[0] for result in results.values()):
+            raise GraphError("result evidence must not contain worker evidence")
         for node_id in sorted(results):
             result, node = results[node_id], graph["nodes"][node_id]
             node["evidence"].append(result["evidence"])

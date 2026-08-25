@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import re
 import unicodedata
-from collections.abc import Iterable
 from typing import Any
 
 
@@ -21,6 +20,8 @@ REFERENCE_KEYS = {
 }
 IDENTIFIER_KEYS = {"spawn_call_id", "agent_thread_id", "task_complete_turn_id"}
 RESERVED_TOKENS = REFERENCE_KEYS | {"codex_agent"}
+_MAX_EVIDENCE_INPUT_UNITS = 1 << 20
+_MAX_EVIDENCE_WORK_UNITS = 8 << 20
 
 
 def _normalized(value: str) -> str:
@@ -29,43 +30,69 @@ def _normalized(value: str) -> str:
 
 def _reserved_matches(value: str) -> set[str]:
     candidate = _normalized(value).casefold()
-    return {
-        token
-        for token in RESERVED_TOKENS
-        if len(candidate) == len(token)
-        and any(character.isascii() for character in candidate)
-        and all(character == expected or not character.isascii()
-                for character, expected in zip(candidate, token))
-    }
+    return {candidate} if candidate in RESERVED_TOKENS else set()
 
 
-def classify_worker_evidence(value: object) -> tuple[bool, set[str]]:
+def classify_worker_evidence(
+    value: object,
+    known_identifiers: set[str] | frozenset[str] = frozenset(),
+) -> tuple[bool, set[str]]:
     """Return a worker-shaped boolean and normalized identifier set for nested data."""
-    if isinstance(value, str):
-        normalized = _normalized(value)
-        try:
-            value = json.loads(normalized)
-        except json.JSONDecodeError:
-            return "codex_agent" in _reserved_matches(normalized), set()
-    items: Iterable[tuple[object, object]]
-    if isinstance(value, dict):
-        items = value.items()
-    elif isinstance(value, list):
-        items = enumerate(value)
-    else:
-        items = ()
+    normalized_identifiers = {_normalized(identifier) for identifier in known_identifiers}
+    stack = [(value, True, False)]
+    seen_containers: dict[int, object] = {}
+    input_units = work_units = 0
     shaped = False
     identifiers: set[str] = set()
-    for raw_key, item in items:
-        matches = _reserved_matches(raw_key) if isinstance(raw_key, str) else set()
-        shaped = shaped or bool(matches & REFERENCE_KEYS)
-        if matches & IDENTIFIER_KEYS and isinstance(item, str):
-            normalized_item = _normalized(item)
-            if normalized_item:
-                identifiers.add(normalized_item)
-        item_shaped, item_identifiers = classify_worker_evidence(item)
-        shaped = shaped or item_shaped
-        identifiers.update(item_identifiers)
+    while stack:
+        item, is_input, is_identifier = stack.pop()
+        if isinstance(item, str):
+            units = len(item)
+        elif item is None:
+            units = 4
+        elif isinstance(item, bool):
+            units = 5
+        elif isinstance(item, (int, float)):
+            try:
+                units = len(str(item))
+            except ValueError as error:
+                raise GraphError("worker evidence exceeds classifier limits") from error
+        else:
+            units = 1
+        input_units += units if is_input else 0
+        work_units += units
+        if input_units > _MAX_EVIDENCE_INPUT_UNITS or work_units > _MAX_EVIDENCE_WORK_UNITS:
+            raise GraphError("worker evidence exceeds classifier limits")
+        if isinstance(item, str):
+            normalized = _normalized(item)
+            if normalized in normalized_identifiers:
+                shaped = True
+                identifiers.add(normalized)
+            if is_identifier and normalized:
+                identifiers.add(normalized)
+            try:
+                decoded = json.loads(normalized)
+            except json.JSONDecodeError:
+                matches = _reserved_matches(normalized)
+                shaped = shaped or bool(matches)
+            except RecursionError as error:
+                raise GraphError("worker evidence exceeds classifier limits") from error
+            else:
+                stack.append((decoded, False, is_identifier))
+            continue
+        if not isinstance(item, (dict, list)):
+            continue
+        identity = id(item)
+        if identity in seen_containers:
+            raise GraphError("worker evidence contains a repeated container")
+        seen_containers[identity] = item
+        if isinstance(item, list):
+            stack.extend((nested, is_input, is_identifier) for nested in item)
+            continue
+        for raw_key, nested in item.items():
+            matches = _reserved_matches(raw_key) if isinstance(raw_key, str) else set()
+            stack.extend(((raw_key, is_input, False),
+                          (nested, is_input, bool(matches & IDENTIFIER_KEYS))))
     return shaped, identifiers
 
 
