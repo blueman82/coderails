@@ -36,16 +36,19 @@ GRAPH_EVIDENCE_REVALIDATE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # mutated (or evidence hand-edited) AFTER a legitimate bind cannot ride that
 # earlier trust all the way to completion.
 #
-# A graph with NO claude_agent-kind evidence anywhere, AND no real Agent
-# dispatch in the transcript for any done/skipped node (every node bound
-# legacy-style — a plain string, or no transcript ever resolved at bind
-# time, or the transcript no longer resolves at all), has nothing this
-# function can or must re-verify, and completes exactly as it always could:
-# revalidation is additive on top of a real bind, never a new requirement for
-# a graph that was never asked to bind. But a node the transcript proves WAS
-# genuinely dispatched must still have surviving bound evidence — see
-# EVIDENCE PRESENCE below — or the deletion of a real bind would be
-# indistinguishable from a node that was never asked to bind at all.
+# A graph with NO claude_agent-kind evidence anywhere (every node bound
+# legacy-style — a plain string, no transcript ever resolved at bind time, or
+# the transcript no longer resolves at all) has nothing this function can or
+# must re-verify, and completes exactly as it always could: revalidation is
+# additive on top of a real bind, never a new requirement for a graph that
+# was never asked to bind. A node the transcript names as genuinely
+# dispatched must still have surviving bound evidence IF a sibling node's
+# surviving evidence proves the same wave actually bound something — see
+# EVIDENCE PRESENCE below for why that qualifier is load-bearing, not
+# incidental: with no surviving sibling anywhere, a real dispatch and a
+# never-asked-to-bind dispatch are indistinguishable from what progress.json
+# and the transcript can prove at completion time, and that residual is
+# disclosed rather than closed (see this file's own EVIDENCE PRESENCE notes).
 #
 # Otherwise, re-checks:
 #   * the parent session transcript still resolves and parses cleanly
@@ -127,22 +130,43 @@ GRAPH_EVIDENCE_REVALIDATE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 #     depends on its FULL dispatch history surviving in the transcript, not
 #     just the attempts that finally succeeded.
 #
-#   * EVIDENCE PRESENCE, the exact complement of spawn presence above: every
-#     done/skipped node that a real, session-matched Agent spawn in the
-#     transcript names ($spawn_rows' own .node_id, never anything read from
-#     progress.json) must still have AT LEAST ONE entry in $bound. Spawn
-#     presence asks "does every bound entry's claimed spawn still exist";
-#     this asks the reverse — "does every genuinely-dispatched node still
-#     have ANY bound evidence at all". Deleting a node's evidence array
-#     OUTRIGHT (not disguising it — removing it) previously fell out of
-#     every check above, INCLUDING the leading probe: with nothing left that
-#     looks_provenance-shaped on that node, a graph where that was the only
-#     bound node anywhere read as "nothing to revalidate" and short-circuited
-#     before ever reaching this jq program, indistinguishable from a node
-#     that was legitimately never dispatched via the graph at all. The probe
-#     no longer makes that completion decision by itself (see the bash
-#     driver below) — it now only decides whether an unresolvable transcript
-#     can still be treated as the legacy/no-transcript case.
+#   * EVIDENCE PRESENCE, the exact complement of spawn presence above, but
+#     narrower than "every node any spawn row names" — that wider form was
+#     shipped, then refused in review as a critical regression: bind itself
+#     leaves a node legitimately UNBOUND whenever its wave never resolved a
+#     transcript_cursor (a cursorless wave forces bind's own $matches empty;
+#     see graph_evidence_bind.sh), and the wider form demanded evidence bind
+#     never demanded in the first place.
+#
+#     Narrowed to: a done/skipped node named by a spawn row whose OWN
+#     wave_id is a $bound_waves member — a wave PROVEN (by a still-surviving
+#     $bound entry citing one of that wave's own spawn's tool_use_ids) to
+#     have actually bound something — but with zero surviving $bound entries
+#     of its own. A sibling node's surviving evidence is what proves the wave
+#     was real and cursor-respecting; this node's absence from $bound is then
+#     unexplainable except by deletion after a genuine bind. A cursorless (or
+#     otherwise legitimately-never-bound) wave's wave_id never enters
+#     $bound_waves, so its nodes are never demanded — closing the regression
+#     at the root rather than special-casing it.
+#
+#     Deleting a node's evidence array OUTRIGHT (not disguising it — removing
+#     it) previously fell out of every check above, including the leading
+#     probe. With THIS node the only one ever bound in the whole graph, the
+#     probe finding nothing is now correctly indistinguishable from "nothing
+#     was ever bound" — there is no surviving sibling to prove a real,
+#     cursor-respecting wave existed, so revalidation has no anchor to refuse
+#     from. That is an accepted, disclosed limit of this mechanism (see the
+#     PR description), not a gap this clause closes: it only refuses when a
+#     SIBLING's surviving evidence proves the wave that dispatched the
+#     now-empty node truly bound something.
+#
+#     $bound_waves/$dispatched are derived from $spawn_rows' own .wave_id/
+#     .node_id fields — transcript-sourced, never read from progress.json —
+#     so the party editing evidence cannot also spoof which wave/node
+#     "dispatched." The probe no longer makes the "nothing to revalidate"
+#     decision by itself on the unresolvable-transcript path (see the bash
+#     driver below) — it now only decides whether that path can still be
+#     treated as the legacy/no-transcript case.
 #
 #     A THIRD widening, disclosed rather than filtered: `looks_provenance`
 #     scans string leaves, so a legacy plain-STRING entry merely MENTIONING a
@@ -277,29 +301,45 @@ GRAPH_EVIDENCE_REVALIDATE_JQ_MAIN=$(cat <<'JQ_MAIN_EOF'
                       | select(.tool_use_id == $e.tool_use_id
                                and .node_id == $e.node_id) ] | length == 0) ]) as $missing_spawn
       # EVIDENCE-PRESENCE re-derivation — the exact complement of the spawn-
-      # presence check above. That check asks "does every bound entry's
-      # claimed spawn still exist"; this asks the reverse: "does every
-      # dispatched node still have a bound entry at all". Neither question
-      # subsumes the other. A done/skipped node whose evidence array is
-      # emptied OUTRIGHT (not disguised — genuinely removed) selects nothing
-      # into $bound, so it is invisible to every check above it, including
-      # the PROBE this function runs first: if this was the only node with
-      # bound evidence anywhere in the graph, the probe finds nothing
-      # provenance-shaped at all and — pre-this-clause — the whole function
-      # returned 0 (allow completion), indistinguishable from a graph that
-      # legitimately never bound anything. That fast path is still taken
-      # (this function does not even reach JQ_MAIN in that case) — this
-      # clause is what closes the gap for a graph where at least ONE other
-      # node's evidence survives, driving probe_rc to 0 and JQ_MAIN to run.
-      # The single-node blind spot is closed by demoting the probe to a mere
-      # transcript-resolution shortcut in the bash driver below, not by
-      # anything in this jq program.
+      # presence check above, but DELIBERATELY NARROWER than "every node any
+      # spawn row names" (an earlier version of this clause used exactly that
+      # wider set and was refused as a critical regression in review: it
+      # demanded evidence for cursorless-wave nodes bind ITSELF never demands
+      # evidence for — see graph_evidence_bind.sh's own comment on
+      # `$matches is forced empty` for a cursorless wave. A node bind
+      # legitimately left unbound must still complete unbound; this clause
+      # must refuse ONLY a node whose evidence bind actually wrote and a
+      # later hand-edit then deleted).
       #
-      # $dispatched is derived from $spawn_rows (already session-matched),
-      # never from progress.json, so the party editing evidence cannot also
-      # spoof which nodes "dispatched" — a spawn row exists only if
-      # graph_evidence_spawns found a real Agent tool_use in the transcript.
-      | ([ $spawn_rows[] | .node_id | select(type == "string") ] | unique) as $dispatched
+      # $bound_waves is the set of wave_ids PROVEN to have bound something:
+      # a spawn row's tool_use_id appearing in $bound_tools (an id some
+      # surviving evidence entry still cites) is transcript-evidence that
+      # THIS wave actually produced a binding. Reading wave_id off the SPAWN
+      # ROW, never off the evidence entry's own (attacker-writable, see the
+      # SPAWN PRESENCE comment above) copy, keeps this untamperable the same
+      # way the rest of this file is.
+      #
+      # A done/skipped node named by a spawn row whose wave_id is in
+      # $bound_waves, but with zero surviving $bound entries of its own, had
+      # its evidence deleted from a wave that DID bind — not a cursorless or
+      # otherwise legitimately-unbound wave. That is the tamper this clause
+      # exists to catch: a sibling node's bound evidence proves the wave was
+      # a real, cursor-respecting, binding wave, and this node's absence from
+      # $bound is then unexplainable except by deletion.
+      #
+      # RESIDUAL, disclosed rather than closed: bind's own candidate filter
+      # additionally requires `.line > $cursor` (a spawn recorded before the
+      # wave's own cursor is not bindable). This derivation reconstructs
+      # node_id and wave_id but not the cursor bound, because the cursor
+      # itself is not durably retained per-wave once completion clears
+      # active_wave. A pre-cursor spawn row sitting in an otherwise-bound
+      # wave_id would still be counted as "dispatched" here. See the PR
+      # description for why this is accepted rather than built out further.
+      | ([ $bound[] | .tool_use_id | select(. != null) ] | unique) as $bound_tools
+      | ([ $spawn_rows[] | select(.tool_use_id as $t | $bound_tools | index($t))
+           | .wave_id | select(type == "string") ] | unique) as $bound_waves
+      | ([ $spawn_rows[] | select(.wave_id as $w | $bound_waves | index($w))
+           | .node_id | select(type == "string") ] | unique) as $dispatched
       | ([ $dispatched[] | . as $nid
            | select(($nodes[$nid].status // "") | IN("done","skipped"))
            | select([ $bound[] | select(.node_id == $nid) ] | length == 0) ]) as $evidence_gone
