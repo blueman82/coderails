@@ -306,9 +306,11 @@ GRAPH_EVIDENCE_REVALIDATE_JQ_MAIN=$(cat <<'JQ_MAIN_EOF'
       # keeps the legacy completion path working.
       #
       # Matched on the spawn row's OWN node_id, mirroring bind's
-      # `.node_id == $id` filter (wave_id checked separately below — a retry
-      # can legitimately re-dispatch into a new wave). `. as $e` first: the
-      # inner select's input is a spawn row.
+      # `.node_id == $id` candidate filter — the entry's wave_id is
+      # attacker-writable post-bind; the row's node_id is not. (wave_id IS
+      # now checked, separately, in the WAVE-ID CHECK below.)
+      # `. as $e` first: inside the inner select the input is a spawn row, so
+      # a bare `.tool_use_id` there would read the ROW's id, not the entry's.
       | ([ $bound[] | . as $e | select($e.tool_use_id != null)
            | select([ $spawn_rows[]
                       | select(.tool_use_id == $e.tool_use_id
