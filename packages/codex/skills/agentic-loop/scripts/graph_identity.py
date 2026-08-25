@@ -46,13 +46,13 @@ def classify_worker_evidence(
 ) -> tuple[bool, set[str]]:
     """Return a worker-shaped boolean and normalized identifier set for nested data."""
     normalized_identifiers = {_normalized(identifier) for identifier in known_identifiers}
-    stack = [(value, True, False, False)]
+    stack = [(value, True, False)]
     seen_containers: dict[int, object] = {}
     input_units = work_units = 0
     shaped = False
     identifiers: set[str] = set()
     while stack:
-        item, is_input, is_key, is_identifier = stack.pop()
+        item, is_input, is_identifier = stack.pop()
         if isinstance(item, str):
             units = len(item)
         elif item is None:
@@ -81,11 +81,11 @@ def classify_worker_evidence(
                 decoded = json.loads(normalized)
             except json.JSONDecodeError:
                 matches = _reserved_matches(normalized)
-                shaped = shaped or bool(matches & ({"codex_agent"} | (REFERENCE_KEYS if is_key else set())))
+                shaped = shaped or bool(matches)
             except RecursionError as error:
                 raise GraphError("worker evidence exceeds classifier limits") from error
             else:
-                stack.append((decoded, False, is_key, is_identifier))
+                stack.append((decoded, False, is_identifier))
             continue
         if not isinstance(item, (dict, list)):
             continue
@@ -94,12 +94,12 @@ def classify_worker_evidence(
             raise GraphError("worker evidence contains a repeated container")
         seen_containers[identity] = item
         if isinstance(item, list):
-            stack.extend((nested, is_input, False, is_identifier) for nested in item)
+            stack.extend((nested, is_input, is_identifier) for nested in item)
             continue
         for raw_key, nested in item.items():
             matches = _reserved_matches(raw_key) if isinstance(raw_key, str) else set()
-            stack.extend(((raw_key, is_input, True, False),
-                          (nested, is_input, False, bool(matches & IDENTIFIER_KEYS))))
+            stack.extend(((raw_key, is_input, False),
+                          (nested, is_input, bool(matches & IDENTIFIER_KEYS))))
     return shaped, identifiers
 
 

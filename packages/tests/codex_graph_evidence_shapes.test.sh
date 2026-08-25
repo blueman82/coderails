@@ -43,9 +43,9 @@ from graph_identity import GraphError, classify_worker_evidence as classify
 assert classify("codеx_agent") == (True, set())
 assert classify({"spаwn_call_id": "call"}) == (True, {"call"})
 assert classify({"spawn_call_id": "123"}) == (True, {"123"})
-for token in ("kind", "attempt", "wave_id", "spawn_call_id", "agent_thread_id", "task_complete_turn_id"):
-    assert classify(token) == (False, set())
-assert classify("codex_agent") == (True, set())
+for token in ("kind", "attempt", "wave_id", "spawn_call_id", "agent_thread_id", "task_complete_turn_id", "codex_agent"):
+    assert classify(token) == (True, set())
+    assert classify({"note": json.dumps(json.dumps(token))}) == (True, set())
 for identifier in ("call-1", "thread-1", "turn-1"):
     assert classify(identifier, {identifier}) == (True, {identifier})
 encoded = {"spawn_call_id": "call"}
@@ -56,7 +56,7 @@ benign = "checked"
 for _ in range(12):
     benign = json.dumps(benign)
 assert classify({"note": [benign]}) == (False, set())
-assert classify(json.dumps(json.dumps("agent_thread_id"))) == (False, set())
+assert classify(json.dumps(json.dumps("agent_thread_id"))) == (True, set())
 assert classify("γειά σου") == (False, set())
 assert classify({"ключ": "значение"}) == (False, set())
 try:
@@ -89,6 +89,11 @@ attacks = [
     ("Unicode partial field", {"spаwn_call_id": encoded(reference["spawn_call_id"])}),
     ("whitespace encoding", encoded(f"  {json.dumps(reference)}  \n")),
 ]
+for token in ("kind", "attempt", "wave_id", "spawn_call_id", "agent_thread_id", "task_complete_turn_id", "codex_agent"):
+    attacks.extend((
+        (f"plain marker value {token}", token),
+        (f"encoded nested marker value {token}", {"note": [encoded(token)]}),
+    ))
 attacks.extend(
     (f"isolated reused {key}", encoded({key: reference[key]}))
     for key in ("spawn_call_id", "agent_thread_id", "task_complete_turn_id")
@@ -171,6 +176,20 @@ duplicate_terminal_contract() {
 	reject_unchanged "duplicate final terminal" "$state" python3 "$GRAPH" record-wave "$state" "$payload"
 }
 
+marker_value_contract() {
+	local state="$1" control="$2" token wave envelope
+	for token in kind attempt wave_id spawn_call_id agent_thread_id task_complete_turn_id codex_agent; do
+		cp "$state" "$control"
+		wave=$(jq -r '.graph.active_wave.id' "$control")
+		envelope=$(jq -cn --arg wave "$wave" --arg token "$token" \
+			'{wave_id:$wave,results:{A:{outcome:"done",evidence:$token}}}')
+		reject_unchanged "plain marker value $token" "$control" \
+			python3 "$GRAPH" record-wave "$control" "$envelope"
+	done
+	cp "$state" "$control"
+	python3 "$GRAPH" record-wave "$control" "$(record_payload "$control")" >/dev/null
+}
+
 main() {
 	local state="$TMP/evidence-shapes.json" candidate="$TMP/evidence-shape.json"
 	local reference retry_reference name encoded shape benign duplicate reuse wave call envelope
@@ -182,13 +201,7 @@ main() {
 	python3 "$GRAPH" begin-wave "$state" >/dev/null
 	reference=$(codex_fixture::append_attempt session-test loop_worker_41 1 wave-2)
 	control="$TMP/evidence-plain-token.json"
-	for token in kind attempt wave_id spawn_call_id agent_thread_id task_complete_turn_id; do
-		cp "$state" "$control"
-		wave=$(jq -r '.graph.active_wave.id' "$control")
-		envelope=$(jq -cn --arg wave "$wave" --arg token "$token" \
-			'{wave_id:$wave,results:{A:{outcome:"done",evidence:$token}}}')
-		python3 "$GRAPH" record-wave "$control" "$envelope" >/dev/null
-	done
+	marker_value_contract "$state" "$control"
 	python3 "$GRAPH" record-wave "$state" "$(record_payload "$state")" >/dev/null
 	validate_worker_refs "$state"
 
