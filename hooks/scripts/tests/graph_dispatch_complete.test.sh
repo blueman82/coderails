@@ -490,6 +490,25 @@ else
 	pass "a done node re-pointed at a teammate_spawned spawn is refused"
 fi
 
+# --- a bound entry's wave_id is forged after bind ------------------------------
+# The evidence entry's own .wave_id is attacker-writable post-bind (unlike the
+# spawn row's, which is read from the transcript envelope). Bind wrote
+# wave_id:"wave-1" to match the real spawn row's own wave_id; a hand-edit that
+# changes ONLY .wave_id (tool_use_id, agent_id, record_uuid all left alone, so
+# every other clause still finds a valid match) claims this entry was bound in
+# a wave the real spawn row does not agree with. Nothing before this fix reads
+# .wave_id at all, so the forged value rode to completion unexamined.
+SESSION_WAVEFORGE="tamper-waveforge"
+if state_waveforge=$(bind_done_node "$SESSION_WAVEFORGE" "toolu_WAVEFORGE01"); then
+	jq '.graph.nodes.N1.evidence[0].wave_id = "wave-99"' \
+		"$state_waveforge" >"$state_waveforge.tmp" && mv "$state_waveforge.tmp" "$state_waveforge"
+	assert_refused_revalidation "a bound entry's forged wave_id is refused" \
+		"$state_waveforge" "$SESSION_WAVEFORGE"
+else
+	fail "a bound entry's forged wave_id is refused" "setup: legitimate bind did not happen"
+	SETUP_FAILS=$((SETUP_FAILS + 1))
+fi
+
 # --- a multi-attempt (retried) node still completes ---------------------------
 # The spawn-presence demand applies per ENTRY, and a retried node carries an
 # EXTRA entry from its failed attempt (a tool_use_id with no agent_id). This

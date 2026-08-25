@@ -134,6 +134,11 @@ GRAPH_EVIDENCE_REVALIDATE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 #     depends on its FULL dispatch history surviving in the transcript, not
 #     just the attempts that finally succeeded.
 #
+#   * WAVE-ID CHECK: a bound entry's .wave_id must agree with the same-node
+#     spawn row its tool_use_id resolves to, else it was hand-edited
+#     post-bind (legacy entries with no wave_id exempt). .attempt stays
+#     unchecked (no transcript source) but is NOT ceremony — see PR.
+#
 #   * EVIDENCE PRESENCE, the exact complement of spawn presence above, but
 #     narrower than "every node any spawn row names" — that wider form was
 #     shipped, then refused in review as a critical regression: bind itself
@@ -252,9 +257,11 @@ GRAPH_EVIDENCE_REVALIDATE_JQ_MAIN=$(cat <<'JQ_MAIN_EOF'
           | {node_id: $id,
              is_object: (type == "object"),
              tool_use_id: (if type == "object" then (.tool_use_id? // null) else null end),
-             agent_id: (if type == "object" then (.agent_id? // null) else null end)}
+             agent_id: (if type == "object" then (.agent_id? // null) else null end),
+             wave_id: (if type == "object" then (.wave_id? // null) else null end)}
           | .tool_use_id = (if (.tool_use_id | type) == "string" then .tool_use_id else null end)
-          | .agent_id = (if (.agent_id | type) == "string" then .agent_id else null end) ] as $bound
+          | .agent_id = (if (.agent_id | type) == "string" then .agent_id else null end)
+          | .wave_id = (if (.wave_id | type) == "string" then .wave_id else null end) ] as $bound
       # Global uniqueness across every done-or-skipped node evidence: a
       # tool_use_id or agent_id bound to more than one node is tamper,
       # whatever the transcript says now.
@@ -299,20 +306,18 @@ GRAPH_EVIDENCE_REVALIDATE_JQ_MAIN=$(cat <<'JQ_MAIN_EOF'
       # keeps the legacy completion path working.
       #
       # Matched on the spawn row's OWN node_id, mirroring bind's
-      # `.node_id == $id` candidate filter — see this file's SPAWN PRESENCE
-      # header for why wave_id is deliberately omitted (the entry's wave_id is
-      # attacker-writable post-bind; the row's node_id is not) and why
-      # dispatch_status is filtered on the qualifying-entry check below rather
-      # than in this all-entries scan (bind refuses teammate_spawned only on
-      # its done branch, so filtering here would deadlock a legitimate
-      # mailbox-dispatched retry carry-forward or skipped node).
-      #
-      # `. as $e` first: inside the inner select the input is a spawn row, so
-      # a bare `.tool_use_id` there would read the ROW's id, not the entry's.
+      # `.node_id == $id` filter (wave_id checked separately below — a retry
+      # can legitimately re-dispatch into a new wave). `. as $e` first: the
+      # inner select's input is a spawn row.
       | ([ $bound[] | . as $e | select($e.tool_use_id != null)
            | select([ $spawn_rows[]
                       | select(.tool_use_id == $e.tool_use_id
                                and .node_id == $e.node_id) ] | length == 0) ]) as $missing_spawn
+      # WAVE-ID CHECK, per this file's header.
+      | ([ $bound[] | . as $e | select($e.tool_use_id != null and $e.wave_id != null)
+           | ([ $spawn_rows[] | select(.tool_use_id == $e.tool_use_id and .node_id == $e.node_id) ]) as $rows
+           | select(($rows | length) > 0 and ([ $rows[] | select(.wave_id == $e.wave_id) ] | length) == 0)
+         ]) as $wave_id_mismatch
       # EVIDENCE-PRESENCE re-derivation — the exact complement of the spawn-
       # presence check above, but DELIBERATELY NARROWER than "every node any
       # spawn row names" (an earlier version of this clause used exactly that
@@ -360,6 +365,8 @@ GRAPH_EVIDENCE_REVALIDATE_JQ_MAIN=$(cat <<'JQ_MAIN_EOF'
         then error("graph_evidence: revalidation found a tool_use_id or agent_id bound to more than one node")
         elif ($missing_spawn | length) > 0
         then error("graph_evidence: revalidation found no Agent spawn in the transcript for tool_use_id \($missing_spawn[0].tool_use_id) bound to node \($missing_spawn[0].node_id)")
+        elif ($wave_id_mismatch | length) > 0
+        then error("graph_evidence: revalidation found node \($wave_id_mismatch[0].node_id) evidence claiming wave_id \($wave_id_mismatch[0].wave_id), which disagrees with the transcript's own spawn record for tool_use_id \($wave_id_mismatch[0].tool_use_id)")
         elif ($evidence_gone | length) > 0
         then error("graph_evidence: revalidation found a real Agent spawn in the transcript for node \($evidence_gone[0]) but no bound evidence survives on it")
         else
