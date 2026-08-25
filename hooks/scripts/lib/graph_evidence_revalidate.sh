@@ -42,13 +42,17 @@ GRAPH_EVIDENCE_REVALIDATE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # must re-verify, and completes exactly as it always could: revalidation is
 # additive on top of a real bind, never a new requirement for a graph that
 # was never asked to bind. A node the transcript names as genuinely
-# dispatched must still have surviving bound evidence IF a sibling node's
-# surviving evidence proves the same wave actually bound something — see
-# EVIDENCE PRESENCE below for why that qualifier is load-bearing, not
-# incidental: with no surviving sibling anywhere, a real dispatch and a
-# never-asked-to-bind dispatch are indistinguishable from what progress.json
-# and the transcript can prove at completion time, and that residual is
-# disclosed rather than closed (see this file's own EVIDENCE PRESENCE notes).
+# dispatched must still have surviving bound evidence IF a sibling node
+# dispatched in THE SAME WAVE has surviving evidence proving that wave
+# actually bound something — see EVIDENCE PRESENCE below for why that
+# qualifier is load-bearing, not incidental, and scoped PER WAVE, not per
+# graph: with no surviving sibling in that same wave (whether because the
+# wave held only this one node, or because every node in a multi-node wave
+# was also stripped, or because the surviving evidence sits in a DIFFERENT
+# wave of the same graph), a real dispatch and a never-asked-to-bind dispatch
+# are indistinguishable from what progress.json and the transcript can prove
+# at completion time. That residual is disclosed rather than closed (see
+# this file's own EVIDENCE PRESENCE notes and the PR description).
 #
 # Otherwise, re-checks:
 #   * the parent session transcript still resolves and parses cleanly
@@ -151,14 +155,23 @@ GRAPH_EVIDENCE_REVALIDATE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 #
 #     Deleting a node's evidence array OUTRIGHT (not disguising it — removing
 #     it) previously fell out of every check above, including the leading
-#     probe. With THIS node the only one ever bound in the whole graph, the
-#     probe finding nothing is now correctly indistinguishable from "nothing
-#     was ever bound" — there is no surviving sibling to prove a real,
-#     cursor-respecting wave existed, so revalidation has no anchor to refuse
-#     from. That is an accepted, disclosed limit of this mechanism (see the
-#     PR description), not a gap this clause closes: it only refuses when a
-#     SIBLING's surviving evidence proves the wave that dispatched the
-#     now-empty node truly bound something.
+#     probe. The anchor this clause needs is a SURVIVING SIBLING ENTRY IN THE
+#     SAME WAVE — $bound_waves is keyed per wave_id, not per graph. If a wave
+#     has no surviving bound entry of its own (every node dispatched in that
+#     specific wave had its evidence deleted, whether that wave held one node
+#     or several), that wave's own wave_id never enters $bound_waves and none
+#     of its nodes are demanded — the probe finding nothing looks correctly
+#     indistinguishable from "nothing was ever bound" for that wave, exactly
+#     as it does for a genuinely cursorless wave. A wave whose OTHER node's
+#     evidence survives IS caught (the two-node-same-wave test below pins
+#     this); a DIFFERENT wave in the same graph having a surviving bound node
+#     does not extend protection to this wave. Two shapes fall outside this
+#     clause's reach as a result: a cross-wave sibling deletion, and a node
+#     retried across two waves whose every attempt's evidence was deleted.
+#     Both are accepted, disclosed limits of this mechanism (see the PR
+#     description), not a gap this clause closes: it only refuses when a
+#     SIBLING IN THE SAME WAVE's surviving evidence proves that specific wave
+#     truly bound something.
 #
 #     $bound_waves/$dispatched are derived from $spawn_rows' own .wave_id/
 #     .node_id fields — transcript-sourced, never read from progress.json —

@@ -843,6 +843,57 @@ else
 		"the empty-evidence fix regressed a legitimately unbound cursorless-wave skipped node"
 fi
 
+# --- cross-wave boundary, nothing tampered: a legitimately-bound wave-1 node
+# alongside a legitimately cursorless wave-2 node in the SAME graph --------
+# $bound_waves is keyed per wave_id, not per graph — reviewed and confirmed:
+# a wave with its own surviving bound entry does NOT extend protection to a
+# DIFFERENT wave in the same graph (disclosed as a residual in the PR body).
+# This fixture pins the un-tampered side of that same boundary: N1's real
+# bind in a cursored wave-1 must not somehow cause N2's legitimately-unbound
+# cursorless wave-2 dispatch to be wrongly demanded evidence it was never
+# bound against. Nothing here is tampered — both nodes' evidence is exactly
+# what graph_dispatch_record legitimately wrote.
+SESSION_CROSSWAVE="complete-crosswave-boundary"
+claude_fixture::init "$PROJECTS" "$SESSION_CROSSWAVE"
+CURSOR_CROSSWAVE=$(claude_fixture::cursor "$PROJECTS" "$SESSION_CROSSWAVE")
+claude_fixture::append_spawn "$PROJECTS" "$SESSION_CROSSWAVE" N1 wave-1 toolu_CROSSWAVEN101 >/dev/null
+append_notification "$PROJECTS" "$SESSION_CROSSWAVE" toolu_CROSSWAVEN101 completed
+state_crosswave="$TMP/state_crosswave.json"
+jq -n --arg session "$SESSION_CROSSWAVE" --arg loop "$LOOP" --argjson c "$CURSOR_CROSSWAVE" '
+  {schema_version:2,session_id:$session,loop_id:$loop,revision:1,status:"in-progress",
+   graph:{nodes:{N1:{status:"running",outcome:"running",retry:{attempts:0,max:2},evidence:[]},
+                 N2:{status:"pending",outcome:"pending",retry:{attempts:0,max:2},evidence:[]}},
+          edges:[],joins:{},
+          active_wave:{wave_id:"wave-1",revision:1,nodes:["N1"],transcript_cursor:$c},
+          hard_stop:null}}' >"$state_crosswave"
+graph_dispatch_record "$state_crosswave" \
+	"$(jq -cn '{wave_id:"wave-1",results:{N1:{outcome:"done",evidence:[]}}}')" >/dev/null 2>&1
+rc_crosswave1=$?
+# wave-2 is CURSORLESS by construction: no transcript_cursor key at all.
+jq '.graph.active_wave = {wave_id:"wave-2",revision:2,nodes:["N2"]}
+  | .graph.nodes.N2.status = "running" | .graph.nodes.N2.outcome = "running"
+  | .revision = 2' "$state_crosswave" >"$state_crosswave.tmp" && mv "$state_crosswave.tmp" "$state_crosswave"
+claude_fixture::append_spawn "$PROJECTS" "$SESSION_CROSSWAVE" N2 wave-2 toolu_CROSSWAVEN201 >/dev/null
+graph_dispatch_record "$state_crosswave" \
+	"$(jq -cn '{wave_id:"wave-2",results:{N2:{outcome:"done",evidence:[]}}}')" >/dev/null 2>&1
+rc_crosswave2=$?
+jq '.graph.active_wave = null | .revision = 3' "$state_crosswave" >"$state_crosswave.tmp" &&
+	mv "$state_crosswave.tmp" "$state_crosswave"
+write_valid_triple "$SESSION_CROSSWAVE" "$LOOP" 3 "$TMP/e_$SESSION_CROSSWAVE.json" \
+	"$TMP/p_$SESSION_CROSSWAVE.json" "$TMP/r_$SESSION_CROSSWAVE.json"
+if [ "$rc_crosswave1" -ne 0 ] || [ "$rc_crosswave2" -ne 0 ] ||
+	! jq -e '.graph.nodes.N1.evidence[0].kind == "claude_agent" and (.graph.nodes.N2.evidence == [])' \
+		"$state_crosswave" >/dev/null 2>&1; then
+	fail "a legitimately-bound wave-1 node alongside a legitimately-unbound cursorless wave-2 node still completes" \
+		"setup: wave-1 did not bind or wave-2 unexpectedly bound (rc1=$rc_crosswave1 rc2=$rc_crosswave2)"
+	SETUP_FAILS=$((SETUP_FAILS + 1))
+elif complete_with "$state_crosswave" "$SESSION_CROSSWAVE" >/dev/null 2>&1; then
+	pass "a legitimately-bound wave-1 node alongside a legitimately-unbound cursorless wave-2 node still completes"
+else
+	fail "a legitimately-bound wave-1 node alongside a legitimately-unbound cursorless wave-2 node still completes" \
+		"cross-wave scoping wrongly demanded evidence for N2's legitimately-unbound cursorless wave-2 dispatch"
+fi
+
 [ "$SETUP_FAILS" -gt 0 ] && printf 'NOTE: %d case(s) failed in SETUP — those measure the fixture, not the gate.\n' "$SETUP_FAILS"
 
 if [[ "$FAILS" -eq 0 ]]; then
