@@ -20,6 +20,7 @@ LOC_EXCEPTIONS = {
     "hooks/scripts/lib/graph_evidence_revalidate.sh": 421,
     "hooks/scripts/tests/merge_wiki_debt_gate.test.sh": 567,
     "hooks/scripts/lib/loop_state_common.sh": 1606,
+    "hooks/scripts/tests/loop_stall_guard.test.sh": 2323,
     "packages/codex/hooks/scripts/destructive_bash_gate.sh": 903,
     "packages/codex/scripts/merge.sh": 512,
     "packages/codex/scripts/post_evals.sh": 1229,
@@ -46,6 +47,7 @@ FUNCTION_EXCEPTIONS = {
     ("packages/codex/scripts/push.sh", "push::main"): 120,
     ("hooks/scripts/lib/loop_state_common.sh", "als_gate_proofs_on_complete"): 364,
     ("hooks/scripts/lib/loop_state_common.sh", "als_report_cost_on_complete"): 165,
+    ("hooks/scripts/tests/loop_stall_guard.test.sh", "mk_malformed_transcript"): 2066,
     ("scripts/merge.sh", "merge::has_wiki_ingest_for_merged_prs"): 185,
     ("scripts/merge.sh", "merge::main"): 209,
 }

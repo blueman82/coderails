@@ -1,4 +1,5 @@
 #!/bin/bash
+# shellcheck disable=SC1091,SC2034,SC2016,SC2126,SC2069,SC2015 # Runtime-resolved library sources, unused vars consumed by the sourced lib, literal jq/case patterns in single quotes, and the suite's established idioms (grep|wc -l tally, ok||fail chains) are all intentional here.
 # Behavioural test for loop_stall_guard.sh — feeds synthetic Stop payloads with
 # fixture transcripts (an agentic-loop invocation + a final assistant message) and
 # asserts exit codes for every gate. State lives under a temp dir, never the repo.
@@ -2134,7 +2135,7 @@ if [ -n "$stale_days" ] && [ -f "$real_prices" ] && command -v jq >/dev/null 2>&
   real_date=$(jq -r '.prices_as_of // empty' "$real_prices" 2>/dev/null)
   case "$real_date" in
     [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9])
-      real_epoch=$(date -j -f "%Y-%m-%d" "$real_date" +%s 2>/dev/null)
+      real_epoch=$(date -u -j -f "%Y-%m-%d" "$real_date" +%s 2>/dev/null)
       if [ -n "$real_epoch" ]; then
         real_age=$(( ( $(date +%s) - real_epoch ) / 86400 ))
         m_real=$(nonscalar_msg "$(jq -cn --arg d "$real_date" \
