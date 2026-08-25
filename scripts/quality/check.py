@@ -35,6 +35,7 @@ LOC_EXCEPTIONS = {
     "packages/codex/skills/dashboard/runner/test/artifactGate.test.ts": 492,
     "packages/codex/skills/dashboard/runner/test/sweep.test.ts": 714,
     "scripts/merge.sh": 512,
+    "scripts/post_evals.sh": 1386,
 }
 FUNCTION_EXCEPTIONS = {
     ("packages/codex/hooks/scripts/destructive_bash_gate.sh", "deny"): 107,
@@ -50,6 +51,10 @@ FUNCTION_EXCEPTIONS = {
     ("hooks/scripts/tests/loop_stall_guard.test.sh", "mk_malformed_transcript"): 2066,
     ("scripts/merge.sh", "merge::has_wiki_ingest_for_merged_prs"): 185,
     ("scripts/merge.sh", "merge::main"): 209,
+    ("scripts/post_evals.sh", "post_evals::validate_structure"): 188,
+    ("scripts/post_evals.sh", "post_evals::validate_smoke_execution"): 113,
+    ("scripts/post_evals.sh", "post_evals::smoke_verify"): 147,
+    ("scripts/post_evals.sh", "post_evals::validate_discriminating"): 105,
 }
 SOURCE_ROOTS = (
     ".claude-plugin",
