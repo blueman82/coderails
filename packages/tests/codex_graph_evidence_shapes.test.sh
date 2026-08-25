@@ -40,12 +40,27 @@ classifier_contract() {
 	PYTHONPATH="$(dirname "$GRAPH")" python3 -c '
 import json
 from graph_identity import GraphError, classify_worker_evidence as classify
+lookalikes = {
+    "a":"а", "c":"с", "d":"ԁ", "e":"е", "g":"ɡ", "h":"һ", "i":"і",
+    "k":"κ", "l":"ӏ", "m":"м", "n":"ո", "o":"ο", "p":"р", "r":"г",
+    "s":"ѕ", "t":"τ", "u":"υ", "v":"ν", "w":"ω", "x":"х", "_":"ˍ",
+}
 assert classify("codеx_agent") == (True, set())
 assert classify({"spаwn_call_id": "call"}) == (True, {"call"})
 assert classify({"spawn_call_id": "123"}) == (True, {"123"})
 for token in ("kind", "attempt", "wave_id", "spawn_call_id", "agent_thread_id", "task_complete_turn_id", "codex_agent"):
     assert classify(token) == (True, set())
     assert classify({"note": json.dumps(json.dumps(token))}) == (True, set())
+    variants = [
+        token[:index] + lookalikes[character] + token[index + 1:]
+        for index, character in enumerate(token) if character in lookalikes
+    ]
+    variants.append("".join(lookalikes.get(character, character) for character in token))
+    variants.append("".join(chr(ord(character) + 0xFEE0) if "!" <= character <= "~" else character for character in token))
+    for variant in variants:
+        assert classify(variant)[0]
+        assert classify({variant: "ordinary"})[0]
+        assert classify({"note": json.dumps(json.dumps(variant, ensure_ascii=False), ensure_ascii=False)})[0]
 for identifier in ("call-1", "thread-1", "turn-1"):
     assert classify(identifier, {identifier}) == (True, {identifier})
 encoded = {"spawn_call_id": "call"}
@@ -59,6 +74,7 @@ assert classify({"note": [benign]}) == (False, set())
 assert classify(json.dumps(json.dumps("agent_thread_id"))) == (True, set())
 assert classify("γειά σου") == (False, set())
 assert classify({"ключ": "значение"}) == (False, set())
+assert classify("k💩nd") == (False, set())
 try:
     classify("x" * ((1 << 20) + 1))
 except GraphError:
@@ -81,6 +97,12 @@ def encoded(value, depth=4):
         value = json.dumps(value, ensure_ascii=False)
     return value
 
+lookalikes = {
+    "a":"а", "c":"с", "d":"ԁ", "e":"е", "g":"ɡ", "h":"һ", "i":"і",
+    "k":"κ", "l":"ӏ", "m":"м", "n":"ո", "o":"ο", "p":"р", "r":"г",
+    "s":"ѕ", "t":"τ", "u":"υ", "v":"ν", "w":"ω", "x":"х", "_":"ˍ",
+}
+
 attacks = [
     ("repeated JSON", encoded(reference, 12)),
     ("nested arrays and values", {"note": [[encoded({"inner": [encoded(reference)]})]]}),
@@ -90,9 +112,13 @@ attacks = [
     ("whitespace encoding", encoded(f"  {json.dumps(reference)}  \n")),
 ]
 for token in ("kind", "attempt", "wave_id", "spawn_call_id", "agent_thread_id", "task_complete_turn_id", "codex_agent"):
+    mixed = "".join(lookalikes.get(character, character) for character in token)
     attacks.extend((
         (f"plain marker value {token}", token),
         (f"encoded nested marker value {token}", {"note": [encoded(token)]}),
+        (f"mixed marker value {token}", mixed),
+        (f"mixed marker key {token}", {mixed: "ordinary"}),
+        (f"encoded mixed marker value {token}", {"note": [encoded(mixed)]}),
     ))
 attacks.extend(
     (f"isolated reused {key}", encoded({key: reference[key]}))
@@ -158,6 +184,14 @@ join_completion_contract() {
 		'.graph.nodes.J=$j | .graph.nodes.J.evidence=[$shape] |
 		 .graph.joins.J={mode:"all",inputs:["A","B"],released:true}' "$clean" >"$candidate"
 	reject_unchanged "join completion mutation $name" "$candidate" \
+		python3 "$GRAPH" complete "$candidate" --session session-test --evals "$evals" \
+		--proof "$proof" --retro "$retro" --transcript "$transcript"
+	encoded=$(attack_rows "$reference" | awk -F '\t' '$1 == "mixed marker value task_complete_turn_id" {print $2}')
+	shape=$(printf '%s' "$encoded" | base64 --decode)
+	jq --argjson j "$(node done)" --argjson shape "$shape" \
+		'.graph.nodes.J=$j | .graph.nodes.J.evidence=[$shape] |
+		 .graph.joins.J={mode:"all",inputs:["A","B"],released:true}' "$clean" >"$candidate"
+	reject_unchanged "join completion mixed marker" "$candidate" \
 		python3 "$GRAPH" complete "$candidate" --session session-test --evals "$evals" \
 		--proof "$proof" --retro "$retro" --transcript "$transcript"
 }

@@ -20,6 +20,11 @@ REFERENCE_KEYS = {
 }
 IDENTIFIER_KEYS = {"spawn_call_id", "agent_thread_id", "task_complete_turn_id"}
 RESERVED_TOKENS = REFERENCE_KEYS | {"codex_agent"}
+_RESERVED_LOOKALIKES = str.maketrans({
+    "а": "a", "с": "c", "ԁ": "d", "е": "e", "ɡ": "g", "һ": "h", "і": "i",
+    "κ": "k", "ӏ": "l", "м": "m", "ո": "n", "ο": "o", "р": "p", "г": "r",
+    "ѕ": "s", "τ": "t", "υ": "u", "ν": "v", "ω": "w", "х": "x", "ˍ": "_",
+})
 _MAX_EVIDENCE_INPUT_UNITS = 1 << 20
 _MAX_EVIDENCE_WORK_UNITS = 8 << 20
 
@@ -29,15 +34,8 @@ def _normalized(value: str) -> str:
 
 
 def _reserved_matches(value: str) -> set[str]:
-    candidate = _normalized(value).casefold()
-    return {
-        token
-        for token in RESERVED_TOKENS
-        if len(candidate) == len(token)
-        and any(character.isascii() for character in candidate)
-        and all(character == expected or not character.isascii()
-                for character, expected in zip(candidate, token))
-    }
+    candidate = _normalized(value).casefold().translate(_RESERVED_LOOKALIKES)
+    return {candidate} & RESERVED_TOKENS
 
 
 def classify_worker_evidence(
