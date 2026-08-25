@@ -42,17 +42,23 @@ GRAPH_EVIDENCE_REVALIDATE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # must re-verify, and completes exactly as it always could: revalidation is
 # additive on top of a real bind, never a new requirement for a graph that
 # was never asked to bind. A node the transcript names as genuinely
-# dispatched must still have surviving bound evidence IF a sibling node
-# dispatched in THE SAME WAVE has surviving evidence proving that wave
-# actually bound something — see EVIDENCE PRESENCE below for why that
-# qualifier is load-bearing, not incidental, and scoped PER WAVE, not per
-# graph: with no surviving sibling in that same wave (whether because the
-# wave held only this one node, or because every node in a multi-node wave
-# was also stripped, or because the surviving evidence sits in a DIFFERENT
-# wave of the same graph), a real dispatch and a never-asked-to-bind dispatch
-# are indistinguishable from what progress.json and the transcript can prove
-# at completion time. That residual is disclosed rather than closed (see
-# this file's own EVIDENCE PRESENCE notes and the PR description).
+# dispatched must still have surviving bound evidence if EITHER of two
+# independent anchors proves the wave that dispatched it genuinely bound
+# something — see EVIDENCE PRESENCE below for why each anchor is load-bearing:
+#   * a SIBLING node dispatched in THE SAME WAVE has surviving evidence, or
+#   * .graph.wave_history (written durably at wave-open time by
+#     graph_dispatch_begin_wave, and NOT cleared by completion the way
+#     .graph.active_wave is) recorded that wave's own cursor and node set.
+# A wave with a wave_history entry is now caught even when every one of its
+# nodes' evidence was wiped outright and no sibling survives anywhere — the
+# gap this file used to disclose here. What remains a genuinely
+# indistinguishable, disclosed limit is narrower now: a wave that legitimately
+# never recorded a wave_history entry (a pre-fix loop, or a genuinely
+# cursorless wave) AND has no surviving sibling either — that shape is still
+# information-theoretically identical to "never dispatched" from what
+# progress.json and the transcript can prove at completion time. See this
+# file's own EVIDENCE PRESENCE notes and the PR description for the
+# begun-then-abandoned-wave flip-condition this still does not close.
 #
 # Otherwise, re-checks:
 #   * the parent session transcript still resolves and parses cleanly
@@ -160,31 +166,42 @@ GRAPH_EVIDENCE_REVALIDATE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 #
 #     Deleting a node's evidence array OUTRIGHT (not disguising it — removing
 #     it) previously fell out of every check above, including the leading
-#     probe. The anchor this clause needs is a SURVIVING SIBLING ENTRY IN THE
-#     SAME WAVE — $bound_waves is keyed per wave_id, not per graph. If a wave
-#     has no surviving bound entry of its own (every node dispatched in that
-#     specific wave had its evidence deleted, whether that wave held one node
-#     or several), that wave's own wave_id never enters $bound_waves and none
-#     of its nodes are demanded — the probe finding nothing looks correctly
-#     indistinguishable from "nothing was ever bound" for that wave, exactly
-#     as it does for a genuinely cursorless wave. A wave whose OTHER node's
-#     evidence survives IS caught (the two-node-same-wave test below pins
-#     this); a DIFFERENT wave in the same graph having a surviving bound node
-#     does not extend protection to this wave. Two shapes fall outside this
-#     clause's reach as a result: a cross-wave sibling deletion, and a node
-#     retried across two waves whose every attempt's evidence was deleted.
-#     Both are accepted, disclosed limits of this mechanism (see the PR
-#     description), not a gap this clause closes: it only refuses when a
-#     SIBLING IN THE SAME WAVE's surviving evidence proves that specific wave
-#     truly bound something.
+#     probe. The SIBLING-ANCHORED branch of this clause needs a SURVIVING
+#     SIBLING ENTRY IN THE SAME WAVE — $bound_waves is keyed per wave_id, not
+#     per graph. If a wave has no surviving bound entry of its own (every node
+#     dispatched in that specific wave had its evidence deleted, whether that
+#     wave held one node or several), the sibling-anchored branch alone can no
+#     longer tell that wave apart from a genuinely cursorless one.
 #
-#     $bound_waves/$dispatched are derived from $spawn_rows' own .wave_id/
-#     .node_id fields — transcript-sourced, never read from progress.json —
-#     so the party editing evidence cannot also spoof which wave/node
-#     "dispatched." The probe no longer makes the "nothing to revalidate"
-#     decision by itself on the unresolvable-transcript path (see the bash
-#     driver below) — it now only decides whether that path can still be
-#     treated as the legacy/no-transcript case.
+#     That used to be the end of the story: a wave whose OTHER node's evidence
+#     survives was caught (the two-node-same-wave test below pins this), but a
+#     wave with EVERY node's evidence wiped, or a lone-node wave, was not — a
+#     cross-wave sibling deletion and a node retried across two waves whose
+#     every attempt's evidence was deleted were both accepted, disclosed
+#     limits.
+#
+#     Both of those are now closed by a SECOND, independent anchor:
+#     .graph.wave_history (written durably by graph_dispatch_begin_wave the
+#     moment a cursored wave opens — see that function's own header) survives
+#     graph_executor_apply_wave's `.graph.active_wave = null` at completion,
+#     so it does not need any sibling evidence to still exist. $dispatched
+#     below is the union of the SIBLING-anchored set this comment describes
+#     and the wave_history-anchored set (see the WAVE-HISTORY WIDENING comment
+#     at $dispatched's own derivation) — either anchor alone is now sufficient
+#     to prove a wave genuinely bound something and demand each of its
+#     dispatched nodes still carry evidence.
+#
+#     $bound_waves and the sibling-anchored half of $dispatched are derived
+#     from $spawn_rows' own .wave_id/.node_id fields — transcript-sourced,
+#     never read from progress.json — so the party editing evidence cannot
+#     also spoof which wave/node "dispatched." The wave_history-anchored half
+#     reads .graph.wave_history, which lives in progress.json itself and is
+#     therefore orchestrator-editable — see that derivation's own comment for
+#     the two-coordinated-edits framing this implies. The probe no longer
+#     makes the "nothing to revalidate" decision by itself on the
+#     unresolvable-transcript path (see the bash driver below) — it only
+#     decides whether that path can still be treated as the legacy/
+#     no-transcript case.
 #
 #     A THIRD widening, disclosed rather than filtered: `looks_provenance`
 #     scans string leaves, so a legacy plain-STRING entry merely MENTIONING a
@@ -347,19 +364,66 @@ GRAPH_EVIDENCE_REVALIDATE_JQ_MAIN=$(cat <<'JQ_MAIN_EOF'
       # a real, cursor-respecting, binding wave, and this node's absence from
       # $bound is then unexplainable except by deletion.
       #
-      # RESIDUAL, disclosed rather than closed: bind's own candidate filter
-      # additionally requires `.line > $cursor` (a spawn recorded before the
-      # wave's own cursor is not bindable). This derivation reconstructs
-      # node_id and wave_id but not the cursor bound, because the cursor
-      # itself is not durably retained per-wave once completion clears
-      # active_wave. A pre-cursor spawn row sitting in an otherwise-bound
-      # wave_id would still be counted as "dispatched" here. See the PR
-      # description for why this is accepted rather than built out further.
+      # $bound_waves/$dispatched_by_sibling above reconstruct node_id and
+      # wave_id but not the cursor bind's own candidate filter also requires
+      # (`.line > $cursor` — a spawn recorded before the wave's own cursor is
+      # not bindable), so a pre-cursor spawn row sitting in an otherwise-bound
+      # wave_id is still counted as sibling-"dispatched". That gap is now
+      # closed on the wave_history-anchored path below ($dispatched_by_history
+      # applies its own `$r.line > $wh[$r.wave_id].cursor` clause), because
+      # the cursor IS now durably retained per-wave — via
+      # .graph.wave_history, written at wave-open time and surviving
+      # completion's `.graph.active_wave = null` — where it used to be lost
+      # the moment a wave completed. Still orchestrator-editable (it lives in
+      # the same progress.json as everything else this file re-derives), so a
+      # deliberate tamperer can still forge it — see this file's PR
+      # description for the "two coordinated edits, not zero" framing that
+      # applies here too. The sibling-anchored path's own reconstruction stays
+      # as-is; the union with the history-anchored path is what closes this
+      # specific gap, not a change to this derivation itself.
       | ([ $bound[] | .tool_use_id | select(. != null) ] | unique) as $bound_tools
       | ([ $spawn_rows[] | select(.tool_use_id as $t | $bound_tools | index($t))
            | .wave_id | select(type == "string") ] | unique) as $bound_waves
       | ([ $spawn_rows[] | select(.wave_id as $w | $bound_waves | index($w))
-           | .node_id | select(type == "string") ] | unique) as $dispatched
+           | .node_id | select(type == "string") ] | unique) as $dispatched_by_sibling
+      # WAVE-HISTORY WIDENING, additive on top of $dispatched_by_sibling above,
+      # never a narrowing of it: graph_dispatch_begin_wave now durably records
+      # each cursored wave's own {cursor, nodes} into .graph.wave_history at
+      # the moment it opens (see that function's own header) — a signal that
+      # survives graph_executor_apply_wave's `.graph.active_wave = null` at
+      # completion, unlike the cursor $dispatched_by_sibling above relies on a
+      # SURVIVING SIBLING to reconstruct. A wave_history entry proves a wave
+      # was genuinely opened with these exact nodes and this exact cursor
+      # WITHOUT needing any of its own evidence to still survive, closing the
+      # residual the pre-fix comment (still above, corrected) described.
+      #
+      # All three clauses below are independently required — each closes a
+      # distinct false-positive/false-negative case measured during design
+      # review (see the header note this widening replaces):
+      #   * $wh[$r.wave_id] != null — only waves that actually recorded a
+      #     cursor participate; a cursorless wave has no wave_history entry at
+      #     all (the write side omits the key, never writes null), so its
+      #     nodes stay exempt exactly as $dispatched_by_sibling already
+      #     exempts them.
+      #   * $r.line > $wh[$r.wave_id].cursor — a spawn row whose OWN wave_id
+      #     was forward-forged into a dispatch prompt before that wave's
+      #     cursor was actually recorded (the orchestrator can write
+      #     wave_id:"wave-4" into a prompt before wave-4 exists) is rejected;
+      #     mirrors bind's own `.line > $cursor` candidate filter.
+      #   * $wh[$r.wave_id].nodes | index($r.node_id) — a stray or replayed
+      #     dispatch envelope naming a node/wave pair that was never actually
+      #     part of the recorded wave's own node set is rejected. Without
+      #     this, a re-dispatch or a copied prompt could drag an uninvolved id
+      #     into the demanded set and false-refuse an honest graph — this was
+      #     a real bug in an earlier, simpler version of this design that used
+      #     only {cursor:N} with no node list.
+      | (.graph.wave_history // {}) as $wh
+      | ([ $spawn_rows[] | . as $r
+           | select(($r.wave_id | type) == "string" and ($wh[$r.wave_id] // null) != null)
+           | select($r.line > $wh[$r.wave_id].cursor)
+           | select($wh[$r.wave_id].nodes | index($r.node_id))
+           | $r.node_id ]) as $dispatched_by_history
+      | (($dispatched_by_sibling + $dispatched_by_history) | unique) as $dispatched
       | ([ $dispatched[] | . as $nid
            | select(($nodes[$nid].status // "") | IN("done","skipped"))
            | select([ $bound[] | select(.node_id == $nid) ] | length == 0) ]) as $evidence_gone
