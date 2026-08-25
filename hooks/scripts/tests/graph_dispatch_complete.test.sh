@@ -680,16 +680,258 @@ else
 	pass "a legacy string mentioning provenance text is refused by name"
 fi
 
-# --- NOT a case under test: a SINGLE done node whose evidence is emptied,
-# with no surviving sibling evidence anywhere in the graph -------------------
-# This shape is not, and cannot be, refused by this mechanism, and is not
-# tested here for that reason (a fixture asserting refusal here would itself
-# be wrong). With nothing left bound anywhere, there is no surviving sibling
-# entry to prove the wave that dispatched this node ever bound anything
-# real — that is information-theoretically identical to a cursorless wave
-# that legitimately never bound this same node, which MUST still complete
-# (see the cursorless-wave negative controls below). Disclosed as an accepted
-# limit of this mechanism in the PR description, not fixed.
+# --- WAVE-HISTORY: a SINGLE done node whose evidence is emptied, with no
+# surviving sibling evidence anywhere in the graph ---------------------------
+# This shape used to be undetectable by this mechanism (the comment this
+# block replaces explained why: no surviving sibling entry could prove the
+# wave ever bound anything real, making it information-theoretically
+# identical to a legitimately cursorless wave). .graph.wave_history closes it:
+# graph_dispatch_begin_wave durably records the wave's own {cursor, nodes} the
+# moment it opens, and that record survives completion's own
+# `.graph.active_wave = null`, so it no longer needs a surviving sibling to
+# prove the wave was real. Driven through the REAL graph_dispatch_begin_wave
+# and graph_dispatch_record — not a hand-built progress.json — so
+# .graph.wave_history is written by the actual production write path.
+new_wave_state() { # session node_id -> writes+prints a fresh single-node progress.json path
+	local session="$1" node="$2" state="$TMP/state_wavehist_$1.json"
+	jq -n --arg session "$session" --arg loop "$LOOP" --arg node "$node" '
+      {schema_version:2,session_id:$session,loop_id:$loop,revision:1,status:"in-progress",
+       graph:{nodes:{($node):{status:"pending",outcome:"pending",retry:{attempts:0,max:2},evidence:[]}},
+              edges:[],joins:{},active_wave:null,hard_stop:null}}' >"$state"
+	printf '%s\n' "$state"
+}
+
+# Drive a genuine cursored wave-open + dispatch + record for a single node
+# N1, via the REAL production functions, and return the resulting revision on
+# stdout — or nothing, non-zero, if any real step failed.
+drive_wavehist_bind() { # session outcome(done|failed) -> echoes "revision tool_use_id" on success
+	local session="$1" outcome="$2"
+	local tid="toolu_WAVEHIST_${session//[^A-Za-z0-9]/_}" state
+	claude_fixture::init "$PROJECTS" "$session"
+	claude_fixture::append_noise "$PROJECTS" "$session"
+	state=$(new_wave_state "$session" N1)
+	graph_dispatch_begin_wave "$state" >/dev/null 2>&1 || return 1
+	local wave_id
+	wave_id=$(jq -r '.graph.active_wave.wave_id' "$state") || return 1
+	[ -n "$wave_id" ] && [ "$wave_id" != "null" ] || return 1
+	claude_fixture::append_spawn "$PROJECTS" "$session" N1 "$wave_id" "$tid" >/dev/null
+	[ "$outcome" = "done" ] && append_notification "$PROJECTS" "$session" "$tid" completed
+	graph_dispatch_record "$state" \
+		"$(jq -cn --arg w "$wave_id" --arg o "$outcome" '{wave_id:$w,results:{N1:{outcome:$o,evidence:[]}}}')" \
+		>/dev/null 2>&1 || return 1
+	local revision
+	revision=$(jq -r '.revision' "$state") || return 1
+	printf '%s %s %s\n' "$state" "$revision" "$tid"
+}
+
+# --- (a) a DONE node with a real cursored dispatch, all evidence in its wave
+# deleted, no surviving sibling anywhere — must now REFUSE ------------------
+SESSION_WAVEHIST_DONE="wavehist-done"
+if out=$(drive_wavehist_bind "$SESSION_WAVEHIST_DONE" "done"); then
+	read -r wh_state wh_revision wh_tid <<<"$out"
+	if ! jq -e '.graph.nodes.N1.evidence[0].kind == "claude_agent"
+	             and (.graph.wave_history | keys | length) > 0' "$wh_state" >/dev/null 2>&1; then
+		fail "a done node's evidence-wiped wave with no sibling is now refused (wave_history)" \
+			"setup: bind did not write claude_agent evidence, or wave_history is empty"
+		SETUP_FAILS=$((SETUP_FAILS + 1))
+	else
+		write_valid_triple "$SESSION_WAVEHIST_DONE" "$LOOP" "$wh_revision" \
+			"$TMP/e_$SESSION_WAVEHIST_DONE.json" "$TMP/p_$SESSION_WAVEHIST_DONE.json" "$TMP/r_$SESSION_WAVEHIST_DONE.json"
+		jq '.graph.nodes.N1.evidence = []' "$wh_state" >"$wh_state.tmp" && mv "$wh_state.tmp" "$wh_state"
+		assert_refused_revalidation "a done node's evidence-wiped wave with no sibling is now refused (wave_history)" \
+			"$wh_state" "$SESSION_WAVEHIST_DONE"
+	fi
+else
+	fail "a done node's evidence-wiped wave with no sibling is now refused (wave_history)" \
+		"setup: the real begin_wave/record path did not bind legitimately"
+	SETUP_FAILS=$((SETUP_FAILS + 1))
+fi
+
+# --- (b) same shape, but the node is SKIPPED instead of done ---------------
+SESSION_WAVEHIST_SKIP="wavehist-skip"
+if out=$(drive_wavehist_bind "$SESSION_WAVEHIST_SKIP" failed); then
+	read -r wh_state wh_revision wh_tid <<<"$out"
+	jq '.graph.nodes.N1.status = "skipped" | .graph.nodes.N1.outcome = "skipped"' \
+		"$wh_state" >"$wh_state.tmp" && mv "$wh_state.tmp" "$wh_state"
+	if ! jq -e '.graph.nodes.N1.evidence[0].kind == "claude_agent"
+	             and (.graph.wave_history | keys | length) > 0' "$wh_state" >/dev/null 2>&1; then
+		fail "a skipped node's evidence-wiped wave with no sibling is now refused (wave_history)" \
+			"setup: bind did not carry claude_agent evidence, or wave_history is empty"
+		SETUP_FAILS=$((SETUP_FAILS + 1))
+	else
+		write_valid_triple "$SESSION_WAVEHIST_SKIP" "$LOOP" "$wh_revision" \
+			"$TMP/e_$SESSION_WAVEHIST_SKIP.json" "$TMP/p_$SESSION_WAVEHIST_SKIP.json" "$TMP/r_$SESSION_WAVEHIST_SKIP.json"
+		jq '.graph.nodes.N1.evidence = []' "$wh_state" >"$wh_state.tmp" && mv "$wh_state.tmp" "$wh_state"
+		assert_refused_revalidation "a skipped node's evidence-wiped wave with no sibling is now refused (wave_history)" \
+			"$wh_state" "$SESSION_WAVEHIST_SKIP"
+	fi
+else
+	fail "a skipped node's evidence-wiped wave with no sibling is now refused (wave_history)" \
+		"setup: the real begin_wave/record path did not bind legitimately"
+	SETUP_FAILS=$((SETUP_FAILS + 1))
+fi
+
+# --- (c) NEGATIVE CONTROL: same shape, but wave_history is ABSENT (a pre-fix
+# loop, or a genuinely cursorless wave) — must still PASS, exactly as before -
+# Built by taking the SAME real bind as (a) and then stripping wave_history,
+# which honestly simulates "this loop predates the fix" without fighting the
+# fact that even an empty transcript yields a real numeric cursor (0) through
+# the real begin_wave path, which would make a hand-built cursorless fixture
+# here dishonest.
+SESSION_WAVEHIST_NOHISTORY="wavehist-nohistory"
+if out=$(drive_wavehist_bind "$SESSION_WAVEHIST_NOHISTORY" "done"); then
+	read -r wh_state wh_revision wh_tid <<<"$out"
+	if ! jq -e '.graph.nodes.N1.evidence[0].kind == "claude_agent"
+	             and (.graph.wave_history | keys | length) > 0' "$wh_state" >/dev/null 2>&1; then
+		fail "a done node with no wave_history entry still completes (negative control)" \
+			"setup: bind did not write claude_agent evidence, or wave_history is empty"
+		SETUP_FAILS=$((SETUP_FAILS + 1))
+	else
+		write_valid_triple "$SESSION_WAVEHIST_NOHISTORY" "$LOOP" "$wh_revision" \
+			"$TMP/e_$SESSION_WAVEHIST_NOHISTORY.json" "$TMP/p_$SESSION_WAVEHIST_NOHISTORY.json" \
+			"$TMP/r_$SESSION_WAVEHIST_NOHISTORY.json"
+		jq '.graph.nodes.N1.evidence = [] | del(.graph.wave_history)' \
+			"$wh_state" >"$wh_state.tmp" && mv "$wh_state.tmp" "$wh_state"
+		if complete_with "$wh_state" "$SESSION_WAVEHIST_NOHISTORY" >/dev/null 2>&1; then
+			pass "a done node with no wave_history entry still completes (negative control)"
+		else
+			fail "a done node with no wave_history entry still completes (negative control)" \
+				"completion was refused even though wave_history is absent (pre-fix/cursorless simulation regressed)"
+		fi
+	fi
+else
+	fail "a done node with no wave_history entry still completes (negative control)" \
+		"setup: the real begin_wave/record path did not bind legitimately"
+	SETUP_FAILS=$((SETUP_FAILS + 1))
+fi
+
+# --- (d) a stray/replayed dispatch envelope naming a node NOT in the wave's
+# recorded node list must NOT be wrongly demanded ----------------------------
+# The pre-existing SIBLING-anchored path ($dispatched_by_sibling, unmodified)
+# already demands evidence for any node whose spawn row shares a wave_id with
+# a wave that has SOME surviving bound entry ($bound_waves). To isolate the
+# NEW wave_history-anchored path specifically, the stray row's wave_id must
+# have a wave_history entry but must NOT be in $bound_waves — i.e. N1's own
+# spawn/notification records (the only thing that could put wave-2 into
+# $bound_waves) are stripped from the transcript entirely, and N1's evidence
+# is emptied too, so wave-2 is demanded ONLY via wave_history, never via a
+# surviving sibling. (N1 itself, now carrying no evidence and no transcript
+# spawn, is demanded by neither path — the same accepted, disclosed limit
+# this file's header already documents; this fixture is not testing N1.)
+SESSION_WAVEHIST_STRAY="wavehist-stray"
+if out=$(drive_wavehist_bind "$SESSION_WAVEHIST_STRAY" "done"); then
+	read -r wh_state wh_revision wh_tid <<<"$out"
+	wave_id_stray=$(jq -r '.graph.wave_history | keys[0]' "$wh_state")
+	transcript_stray=$(claude_fixture::transcript "$PROJECTS" "$SESSION_WAVEHIST_STRAY")
+	# Strip N1's own spawn AND notification records (both carry $wh_tid) so
+	# wave-2 has zero surviving spawn rows -> wave-2 stays OUT of $bound_waves.
+	grep -v "$wh_tid" "$transcript_stray" >"$transcript_stray.tmp" && mv "$transcript_stray.tmp" "$transcript_stray"
+	jq '.graph.nodes.N1.evidence = []' "$wh_state" >"$wh_state.tmp" && mv "$wh_state.tmp" "$wh_state"
+	# N2: a second, real graph node, dispatched and completed in its OWN
+	# separate wave via the REAL graph_dispatch_record path but with its
+	# active_wave HAND-WRITTEN (bypassing graph_dispatch_begin_wave, so N2's
+	# own wave never gets a wave_history entry — load-bearing: it is what
+	# keeps this fixture about N2's stray row citing wave-2, not about N2's
+	# own wave). wave_id must literally be "wave-<current revision>" —
+	# graph_executor_graph_valid's own contract on .graph.active_wave.
+	jq '.graph.nodes.N2 = {status:"running",outcome:"running",retry:{attempts:0,max:2},evidence:[]}
+      | .graph.active_wave = {wave_id:("wave-" + (.revision|tostring)),revision:.revision,nodes:["N2"]}' \
+		"$wh_state" >"$wh_state.tmp" && mv "$wh_state.tmp" "$wh_state"
+	wave_id_n2=$(jq -r '.graph.active_wave.wave_id' "$wh_state")
+	graph_dispatch_record "$wh_state" \
+		"$(jq -cn --arg w "$wave_id_n2" '{wave_id:$w,results:{N2:{outcome:"done",evidence:[]}}}')" >/dev/null 2>&1
+	rc_stray_n2=$?
+	wh_revision=$(jq -r '.revision' "$wh_state")
+	# Plant a stray spawn row citing wave-2's OWN wave_id (the wave
+	# wave_history recorded for N1 alone) but naming N2 — a node wave-2's own
+	# recorded node list never included. Appended after wave-2's own cursor,
+	# so the cursor clause alone cannot explain a refusal here; only the
+	# node-list clause can.
+	claude_fixture::append_spawn "$PROJECTS" "$SESSION_WAVEHIST_STRAY" N2 "$wave_id_stray" toolu_STRAYNODE01 >/dev/null
+	if [ "$rc_stray_n2" -ne 0 ] ||
+		! jq -e '.graph.nodes.N2.status == "done" and .graph.nodes.N2.evidence == []
+                 and (.graph.wave_history[$w].nodes | index("N1")) != null' --arg w "$wave_id_stray" \
+			"$wh_state" >/dev/null 2>&1 ||
+		grep -q "$wh_tid" "$transcript_stray"; then
+		fail "a stray dispatch envelope naming a node outside the wave's recorded list is not wrongly demanded" \
+			"setup: N2 did not reach the expected state, or N1's own spawn/notification survived stripping (rc_n2=$rc_stray_n2)"
+		SETUP_FAILS=$((SETUP_FAILS + 1))
+	else
+		write_valid_triple "$SESSION_WAVEHIST_STRAY" "$LOOP" "$wh_revision" \
+			"$TMP/e_$SESSION_WAVEHIST_STRAY.json" "$TMP/p_$SESSION_WAVEHIST_STRAY.json" \
+			"$TMP/r_$SESSION_WAVEHIST_STRAY.json"
+		if complete_with "$wh_state" "$SESSION_WAVEHIST_STRAY" >/dev/null 2>&1; then
+			pass "a stray dispatch envelope naming a node outside the wave's recorded list is not wrongly demanded"
+		else
+			fail "a stray dispatch envelope naming a node outside the wave's recorded list is not wrongly demanded" \
+				"completion was refused; N2 was wrongly demanded evidence from wave-2's stray row despite never being in wave-2's own node list"
+		fi
+	fi
+else
+	fail "a stray dispatch envelope naming a node outside the wave's recorded list is not wrongly demanded" \
+		"setup: the real begin_wave/record path did not bind legitimately"
+	SETUP_FAILS=$((SETUP_FAILS + 1))
+fi
+
+# --- (extra, cursor discrimination) a spawn row forward-forged BEFORE its
+# claimed wave's own cursor was recorded must NOT be wrongly demanded --------
+# A spawn row for N1 is planted in the transcript BEFORE graph_dispatch_begin_
+# wave ever runs (so its .line is <= the wave's own recorded cursor) but
+# citing the wave_id that begin_wave is about to mint — exactly the forgery
+# the `$r.line > $wh[$r.wave_id].cursor` clause exists to reject: an
+# orchestrator writing a dispatch prompt for a wave that does not exist yet.
+# N1 is then completed via a real, SEPARATE cursorless bind (never through the
+# wave the pre-cursor row claims), so its evidence is legitimately empty. If
+# the cursor clause were missing, this pre-cursor row would still satisfy
+# `$wh[$r.wave_id] != null` and the node-list clause (N1 IS the wave's own
+# recorded node), wrongly pulling N1 into $dispatched_by_history and refusing
+# a graph that never actually bound N1 in that wave.
+SESSION_WAVEHIST_PRECURSOR="wavehist-precursor"
+claude_fixture::init "$PROJECTS" "$SESSION_WAVEHIST_PRECURSOR"
+# The forged row: appended FIRST, before any noise or begin_wave call, so its
+# line number sits at or before whatever cursor begin_wave is about to record.
+claude_fixture::append_spawn "$PROJECTS" "$SESSION_WAVEHIST_PRECURSOR" N1 wave-2 toolu_PRECURSOR01 >/dev/null
+claude_fixture::append_noise "$PROJECTS" "$SESSION_WAVEHIST_PRECURSOR"
+state_precursor=$(new_wave_state "$SESSION_WAVEHIST_PRECURSOR" N1)
+graph_dispatch_begin_wave "$state_precursor" >/dev/null 2>&1
+rc_precursor_begin=$?
+wave_id_precursor=$(jq -r '.graph.active_wave.wave_id // empty' "$state_precursor")
+precursor_cursor=$(jq -r '.graph.active_wave.transcript_cursor // empty' "$state_precursor")
+# N1 completes via a SEPARATE, hand-written, genuinely cursorless wave (no
+# transcript_cursor key) — never through wave_id_precursor at all — so its
+# evidence is legitimately empty and this is not a case the sibling-anchored
+# path could confuse with a real bind either.
+jq '.graph.active_wave = {wave_id:("wave-" + (.revision|tostring)),revision:.revision,nodes:["N1"]}' \
+	"$state_precursor" >"$state_precursor.tmp" && mv "$state_precursor.tmp" "$state_precursor"
+wave_id_cursorless=$(jq -r '.graph.active_wave.wave_id' "$state_precursor")
+graph_dispatch_record "$state_precursor" \
+	"$(jq -cn --arg w "$wave_id_cursorless" '{wave_id:$w,results:{N1:{outcome:"done",evidence:[]}}}')" >/dev/null 2>&1
+rc_precursor_record=$?
+revision_precursor=$(jq -r '.revision' "$state_precursor")
+if [ "$rc_precursor_begin" -ne 0 ] || [ "$rc_precursor_record" -ne 0 ] ||
+	[ -z "$wave_id_precursor" ] || [ "$wave_id_precursor" != "wave-2" ] ||
+	! jq -e --arg w "$wave_id_precursor" \
+		'(.graph.wave_history[$w].nodes | index("N1")) != null
+         and .graph.nodes.N1.status == "done" and .graph.nodes.N1.evidence == []' \
+		"$state_precursor" >/dev/null 2>&1; then
+	fail "a spawn row forward-forged before its claimed wave's own cursor is not wrongly demanded" \
+		"setup: begin_wave did not mint wave-2 as expected, or N1 did not complete cursorless (rc_begin=$rc_precursor_begin rc_record=$rc_precursor_record wave_id=$wave_id_precursor)"
+	SETUP_FAILS=$((SETUP_FAILS + 1))
+elif [ "$precursor_cursor" -lt 1 ]; then
+	fail "a spawn row forward-forged before its claimed wave's own cursor is not wrongly demanded" \
+		"setup: the pre-cursor spawn row's line does not actually precede the wave's own cursor (cursor=$precursor_cursor)"
+	SETUP_FAILS=$((SETUP_FAILS + 1))
+else
+	write_valid_triple "$SESSION_WAVEHIST_PRECURSOR" "$LOOP" "$revision_precursor" \
+		"$TMP/e_$SESSION_WAVEHIST_PRECURSOR.json" "$TMP/p_$SESSION_WAVEHIST_PRECURSOR.json" \
+		"$TMP/r_$SESSION_WAVEHIST_PRECURSOR.json"
+	if complete_with "$state_precursor" "$SESSION_WAVEHIST_PRECURSOR" >/dev/null 2>&1; then
+		pass "a spawn row forward-forged before its claimed wave's own cursor is not wrongly demanded"
+	else
+		fail "a spawn row forward-forged before its claimed wave's own cursor is not wrongly demanded" \
+			"completion was refused; the pre-cursor row was wrongly counted as dispatched in wave-2"
+	fi
+fi
 
 # --- ALL evidence deleted from a SECOND done node, while a FIRST done node's
 # bound evidence is left intact ------------------------------------------------

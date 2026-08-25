@@ -169,6 +169,17 @@ _graph_dispatch_graph_valid() {
 # transcript resolves (every existing test fixture, and any non-session
 # caller); a wave without a cursor still binds by node+wave id, it simply has
 # no lower bound to enforce.
+#
+# The SAME {cursor, nodes} pair is also folded into .graph.wave_history,
+# keyed by this wave's own wave_id, whenever a cursor resolves (omitted, not
+# written as null, for a cursorless wave — same convention as
+# .graph.active_wave.transcript_cursor above). Unlike .graph.active_wave,
+# wave_history is never cleared — graph_executor_apply_wave's own completion
+# path only nulls active_wave, so a wave_history entry durably survives past
+# that wave's completion. This is what lets graph_evidence_revalidate_all
+# prove a wave genuinely bound something even after every one of its nodes'
+# evidence has since been deleted, with no surviving sibling left to infer it
+# from — see that file's own header for the read side of this contract.
 graph_dispatch_begin_wave() {
     local progress="$1" ready_json session cursor cursor_json='null'
     [ -f "$progress" ] || return 1
@@ -204,6 +215,10 @@ graph_dispatch_begin_wave() {
       | .revision = ((.revision // 0) + 1)
       | .graph.active_wave = ({wave_id:("wave-" + (.revision | tostring)),revision:.revision,nodes:$wave_nodes}
           + (if $transcript_cursor == null then {} else {transcript_cursor:$transcript_cursor} end))
+      | .graph.wave_history = ((.graph.wave_history // {})
+          + (if $transcript_cursor == null then {}
+             else {(.graph.active_wave.wave_id):
+                    {cursor:$transcript_cursor, nodes:$wave_nodes}} end))
       | reduce $wave_nodes[] as $id (.;
           .graph.nodes[$id].status = "running"
           | .graph.nodes[$id].outcome = "running")
