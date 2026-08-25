@@ -40,6 +40,11 @@ manifest_paths=(
     scripts/lib/config.sh
     scripts/lib/review-artifact.sh
     scripts/lib/eval-artifact.sh
+    scripts/lib/post_evals_structure.sh
+    scripts/lib/post_evals_smoke_freeze.sh
+    scripts/lib/post_evals_smoke_gate.sh
+    scripts/lib/post_evals_smoke_run.sh
+    scripts/lib/post_evals_freeze.sh
     hooks/scripts/lib/agentic_loop_path.sh
     hooks/scripts/lib/discipline_common.sh
     hooks/scripts/lib/loop_cost.sh
@@ -90,6 +95,11 @@ manifest_paths=(
     scripts/quality/check.sh
 )
 manifest_modes=(
+    100644
+    100644
+    100644
+    100644
+    100644
     100644
     100644
     100644
