@@ -40,11 +40,13 @@ classifier_contract() {
 	PYTHONPATH="$(dirname "$GRAPH")" python3 -c '
 import json
 from graph_identity import GraphError, classify_worker_evidence as classify
-assert classify("codеx_agent") == (True, set())
-assert classify({"spаwn_call_id": "call"}) == (True, {"call"})
+assert classify("codеx_agent") == (False, set())
+assert classify({"spаwn_call_id": "call"}) == (False, set())
 assert classify({"spawn_call_id": "123"}) == (True, {"123"})
 for token in ("kind", "attempt", "wave_id", "spawn_call_id", "agent_thread_id", "task_complete_turn_id", "codex_agent"):
     assert classify(token) == (True, set())
+    fullwidth = "".join(chr(ord(character) + 0xFEE0) for character in token)
+    assert classify(fullwidth) == (True, set())
     assert classify({"note": json.dumps(json.dumps(token))}) == (True, set())
 for identifier in ("call-1", "thread-1", "turn-1"):
     assert classify(identifier, {identifier}) == (True, {identifier})
@@ -59,6 +61,8 @@ assert classify({"note": [benign]}) == (False, set())
 assert classify(json.dumps(json.dumps("agent_thread_id"))) == (True, set())
 assert classify("γειά σου") == (False, set())
 assert classify({"ключ": "значение"}) == (False, set())
+for value in ("k💩nd", "sp💩wn_call_id", "w🌲ve_id", "agent_🧭hread_id", "codex_🐎gent"):
+    assert classify(value) == (False, set())
 try:
     classify("x" * ((1 << 20) + 1))
 except GraphError:
@@ -86,7 +90,6 @@ attacks = [
     ("nested arrays and values", {"note": [[encoded({"inner": [encoded(reference)]})]]}),
     ("reference hidden in key", {encoded(reference): "checked"}),
     ("encoded marker key", {encoded("spawn_call_id"): reference["spawn_call_id"]}),
-    ("Unicode partial field", {"spаwn_call_id": encoded(reference["spawn_call_id"])}),
     ("whitespace encoding", encoded(f"  {json.dumps(reference)}  \n")),
 ]
 for token in ("kind", "attempt", "wave_id", "spawn_call_id", "agent_thread_id", "task_complete_turn_id", "codex_agent"):
@@ -109,6 +112,23 @@ for name, attack in attacks:
     payload = base64.b64encode(json.dumps(attack, ensure_ascii=False).encode()).decode()
     print(f"{name}\t{payload}")
 PY
+}
+
+ordinary_unicode_json() {
+	jq -cn '["k💩nd","sp💩wn_call_id","w🌲ve_id","agent_🧭hread_id","codex_🐎gent"]'
+}
+
+ordinary_unicode_contract() {
+	local state="$1" control="$2" values wave envelope
+	values=$(ordinary_unicode_json)
+	wave=$(jq -r '.graph.active_wave.id' "$state")
+	while IFS= read -r value; do
+		cp "$state" "$control"
+		envelope=$(jq -cn --arg wave "$wave" --arg value "$value" \
+			'{wave_id:$wave,results:{A:{outcome:"done",evidence:$value}}}')
+		python3 "$GRAPH" record-wave "$control" "$envelope" >/dev/null
+		validate_worker_refs "$control"
+	done < <(jq -r '.[]' <<<"$values")
 }
 
 write_completion_evidence() {
@@ -146,9 +166,11 @@ reject_unchanged() {
 
 join_completion_contract() {
 	local clean="$1" candidate="$2" evals="$3" proof="$4" retro="$5" transcript="$6" reference="$7"
-	local name encoded shape
+	local name encoded shape ordinary
+	ordinary=$(ordinary_unicode_json)
 	jq --argjson j "$(node done)" \
-		'.graph.nodes.J=$j | .graph.nodes.J.evidence=[{note:"ordinary join evidence"}] |
+		--argjson ordinary "$ordinary" \
+		'.graph.nodes.J=$j | .graph.nodes.J.evidence=[{note:"ordinary join evidence",values:$ordinary}] |
 		 .graph.joins.J={mode:"all",inputs:["A","B"],released:true}' "$clean" >"$candidate"
 	python3 "$GRAPH" complete "$candidate" --session session-test --evals "$evals" \
 		--proof "$proof" --retro "$retro" --transcript "$transcript" >/dev/null
@@ -202,6 +224,7 @@ main() {
 	reference=$(codex_fixture::append_attempt session-test loop_worker_41 1 wave-2)
 	control="$TMP/evidence-plain-token.json"
 	marker_value_contract "$state" "$control"
+	ordinary_unicode_contract "$state" "$control"
 	python3 "$GRAPH" record-wave "$state" "$(record_payload "$state")" >/dev/null
 	validate_worker_refs "$state"
 
@@ -251,7 +274,8 @@ main() {
 	transcript="$TMP/proof.jsonl"
 	write_completion_evidence "$clean" "$evals" "$proof" "$retro" "$transcript"
 	candidate="$TMP/evidence-completion-control.json"
-	cp "$clean" "$candidate"
+	jq --argjson ordinary "$(ordinary_unicode_json)" \
+		'.graph.nodes.A.evidence += [{ordinary_unicode:$ordinary}]' "$clean" >"$candidate"
 	python3 "$GRAPH" complete "$candidate" --session session-test --evals "$evals" \
 		--proof "$proof" --retro "$retro" --transcript "$transcript" >/dev/null
 	join_completion_contract "$clean" "$candidate" "$evals" "$proof" "$retro" "$transcript" "$retry_reference"

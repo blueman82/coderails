@@ -30,14 +30,7 @@ def _normalized(value: str) -> str:
 
 def _reserved_matches(value: str) -> set[str]:
     candidate = _normalized(value).casefold()
-    return {
-        token
-        for token in RESERVED_TOKENS
-        if len(candidate) == len(token)
-        and any(character.isascii() for character in candidate)
-        and all(character == expected or not character.isascii()
-                for character, expected in zip(candidate, token))
-    }
+    return {candidate} if candidate in RESERVED_TOKENS else set()
 
 
 def classify_worker_evidence(
