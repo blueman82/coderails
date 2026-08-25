@@ -269,9 +269,11 @@ GRAPH_EVIDENCE_REVALIDATE_JQ_MAIN=$(cat <<'JQ_MAIN_EOF'
           | {node_id: $id,
              is_object: (type == "object"),
              tool_use_id: (if type == "object" then (.tool_use_id? // null) else null end),
-             agent_id: (if type == "object" then (.agent_id? // null) else null end)}
+             agent_id: (if type == "object" then (.agent_id? // null) else null end),
+             attempt: (if type == "object" then (.attempt? // null) else null end)}
           | .tool_use_id = (if (.tool_use_id | type) == "string" then .tool_use_id else null end)
-          | .agent_id = (if (.agent_id | type) == "string" then .agent_id else null end) ] as $bound
+          | .agent_id = (if (.agent_id | type) == "string" then .agent_id else null end)
+          | .attempt = (if (.attempt | type) == "number" then .attempt else null end) ] as $bound
       # Global uniqueness across every done-or-skipped node evidence: a
       # tool_use_id or agent_id bound to more than one node is tamper,
       # whatever the transcript says now.
@@ -305,6 +307,44 @@ GRAPH_EVIDENCE_REVALIDATE_JQ_MAIN=$(cat <<'JQ_MAIN_EOF'
       | ([ $bound[] | .node_id ] | unique) as $done_or_skipped_ids
       | ($done_or_skipped_ids
          | map(select(($nodes[.].status // "") == "done"))) as $done_with_evidence
+      # PER-ATTEMPT SEQUENCE recheck, "done" nodes only (mirrors
+      # graph_evidence.py's `sorted(attempts) != range(1, expected_count+1)`).
+      # The per-node presence/uniqueness/terminal-result checks above all pass
+      # once a "done" node has ANY one qualifying entry — they never verify
+      # that the SURVIVING bound entries are the exact attempt sequence bind
+      # produced. Deleting an earlier FAILED attempt's entry while keeping the
+      # later successful one satisfies every check above yet erases real
+      # retry history; this closes that gap by demanding the bound attempt
+      # numbers equal the exact contiguous run 1..expected_count, where
+      # expected_count is retry.attempts + 1 (bind mints each entry's
+      # .attempt as retry.attempts-at-bind-time + 1, and a successful "done"
+      # never increments .attempts further — see graph_dispatch_record, the
+      # only place .attempts is incremented, and only on a "failed" report).
+      #
+      # Deliberately "done" nodes ONLY, not "skipped" too, unlike Python's
+      # unconditional +1: a node marked "skipped" after a "failed" report
+      # already has retry.attempts incremented to account for that failed
+      # attempt, so its own bound entry attempt numbers are already exactly
+      # 1..retry.attempts with no "+1" — a skipped node legitimately never
+      # earns the extra successful-completion attempt a done node does. The
+      # existing "a skipped node carrying bound evidence still completes"
+      # case (one failed attempt, retry.attempts=1, one bound entry with
+      # attempt=1) pins this: applying the done formula there would demand
+      # attempts [1,2] against an actual [1] and false-reject a legitimate,
+      # already-tested graph.
+      #
+      # Only counts entries selected below via `.is_object` (a structured
+      # bound object — a legacy free-text string or array-wrapped forgery has
+      # no top-level .attempt and normalises to null). A node with zero
+      # structured entries at all is left to the existing, more specific
+      # "no structured bound entry" branch further down rather than being
+      # preempted here with a less precise reason.
+      | ([ $done_with_evidence[] | . as $id
+           | select([ $bound[] | select(.node_id == $id and .is_object) ] | length > 0)
+           | (($nodes[$id].retry.attempts // 0) + 1) as $expected_count
+           | ([ $bound[] | select(.node_id == $id and .is_object) | .attempt ] | sort) as $attempts
+           | select($attempts != [range(1; $expected_count + 1)])
+           | $id ]) as $bad_attempt_sequence
       # SPAWN-PRESENCE re-derivation, per ENTRY and only for entries that
       # actually assert a top-level tool_use_id. Such an entry can only have
       # been written by graph_evidence_bind_wave, which mints tool_use_id
@@ -426,6 +466,8 @@ GRAPH_EVIDENCE_REVALIDATE_JQ_MAIN=$(cat <<'JQ_MAIN_EOF'
         then error("graph_evidence: revalidation found no Agent spawn in the transcript for tool_use_id \($missing_spawn[0].tool_use_id) bound to node \($missing_spawn[0].node_id)")
         elif ($evidence_gone | length) > 0
         then error("graph_evidence: revalidation found a real Agent spawn in the transcript for node \($evidence_gone[0]) but no bound evidence survives on it")
+        elif ($bad_attempt_sequence | length) > 0
+        then error("graph_evidence: revalidation found node \($bad_attempt_sequence[0]) missing one or more of its bound retry attempts; surviving evidence does not form a contiguous attempt sequence")
         else
           reduce $done_with_evidence[] as $id (null;
             if . != null then . else

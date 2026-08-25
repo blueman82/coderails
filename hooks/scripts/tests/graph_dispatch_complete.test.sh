@@ -1136,6 +1136,69 @@ else
 		"cross-wave scoping wrongly demanded evidence for N2's legitimately-unbound cursorless wave-2 dispatch"
 fi
 
+# --- per-attempt sequence: deleting only the FAILED attempt's evidence,
+# keeping the successful retry's, must still be refused ---------------------
+# The per-node presence/uniqueness/spawn checks above all pass on this shape:
+# the node still has ONE valid claude_agent entry with an agent_id, a live
+# spawn, and a completed notification — exactly what the terminal-result
+# recheck (JQ_MAIN, "Checked PER NODE") demands. What none of those checks
+# verify is that the SURVIVING entries are the ATTEMPT SEQUENCE bind actually
+# produced (1..retry.attempts+1, contiguous) rather than any one qualifying
+# leftover. Deleting the earlier failed attempt's entry and keeping only the
+# later successful one satisfies every existing check while erasing the
+# node's real retry history — this is the gap graph_evidence.py's
+# `sorted(attempts) != range(1, expected_count+1)` check closes for Codex and
+# this bash gate does not yet close for Claude.
+#
+# Built via the REAL dispatch path (graph_dispatch_record), mirroring the
+# frozen eval's own tamper_probe.sh fixture and the existing
+# "a retried node with a carried-forward attempt entry still completes" case
+# above — never a hand-built evidence blob.
+SESSION_ATTSEQ="complete-attempt-sequence"
+claude_fixture::init "$PROJECTS" "$SESSION_ATTSEQ"
+CURSOR_AS1=$(claude_fixture::cursor "$PROJECTS" "$SESSION_ATTSEQ")
+claude_fixture::append_spawn "$PROJECTS" "$SESSION_ATTSEQ" N1 wave-1 toolu_ATTSEQ1 >/dev/null
+state_attseq="$TMP/state_attseq.json"
+jq -n --arg session "$SESSION_ATTSEQ" --arg loop "$LOOP" --argjson c "$CURSOR_AS1" '
+  {schema_version:2,session_id:$session,loop_id:$loop,revision:1,status:"in-progress",
+   graph:{nodes:{N1:{status:"running",outcome:"running",retry:{attempts:0,max:3},evidence:[]}},
+          edges:[],joins:{},
+          active_wave:{wave_id:"wave-1",revision:1,nodes:["N1"],transcript_cursor:$c},
+          hard_stop:null}}' >"$state_attseq"
+# Attempt 1 fails: binds a spawn reference with NO agent_id (no notification).
+graph_dispatch_record "$state_attseq" \
+	"$(jq -cn '{wave_id:"wave-1",results:{N1:{outcome:"failed",evidence:[]}}}')" >/dev/null 2>&1
+rc_attseq1=$?
+# Attempt 2 succeeds: binds a second spawn WITH an agent_id.
+CURSOR_AS2=$(claude_fixture::cursor "$PROJECTS" "$SESSION_ATTSEQ")
+claude_fixture::append_spawn "$PROJECTS" "$SESSION_ATTSEQ" N1 wave-2 toolu_ATTSEQ2 >/dev/null
+append_notification "$PROJECTS" "$SESSION_ATTSEQ" toolu_ATTSEQ2 completed
+jq --argjson c "$CURSOR_AS2" '.revision = 2
+  | .graph.nodes.N1.status = "running" | .graph.nodes.N1.outcome = "running"
+  | .graph.active_wave = {wave_id:"wave-2",revision:2,nodes:["N1"],transcript_cursor:$c}' \
+	"$state_attseq" >"$state_attseq.tmp" && mv "$state_attseq.tmp" "$state_attseq"
+graph_dispatch_record "$state_attseq" \
+	"$(jq -cn '{wave_id:"wave-2",results:{N1:{outcome:"done",evidence:[]}}}')" >/dev/null 2>&1
+rc_attseq2=$?
+jq '.graph.active_wave = null | .revision = 3' "$state_attseq" >"$state_attseq.tmp" && mv "$state_attseq.tmp" "$state_attseq"
+write_valid_triple "$SESSION_ATTSEQ" "$LOOP" 3 "$TMP/e_$SESSION_ATTSEQ.json" \
+	"$TMP/p_$SESSION_ATTSEQ.json" "$TMP/r_$SESSION_ATTSEQ.json"
+if [ "$rc_attseq1" -ne 0 ] || [ "$rc_attseq2" -ne 0 ] ||
+	! jq -e '[.graph.nodes.N1.evidence[] | select(type=="object") | .attempt] == [1,2]' \
+		"$state_attseq" >/dev/null 2>&1; then
+	fail "a done node whose attempt-1 evidence is deleted while attempt-2's remains is refused" \
+		"setup: the two-attempt evidence trail was not built (rc1=$rc_attseq1 rc2=$rc_attseq2)"
+	SETUP_FAILS=$((SETUP_FAILS + 1))
+else
+	# The attack: delete ONLY the attempt-1 claude_agent evidence object,
+	# keeping attempt-2's — a non-contiguous [2] where [1,2] must be present.
+	jq '.graph.nodes.N1.evidence |= [.[] | select(type != "object" or .attempt != 1)]' \
+		"$state_attseq" >"$state_attseq.tmp" && mv "$state_attseq.tmp" "$state_attseq"
+	assert_refused_revalidation \
+		"a done node whose attempt-1 evidence is deleted while attempt-2's remains is refused" \
+		"$state_attseq" "$SESSION_ATTSEQ"
+fi
+
 [ "$SETUP_FAILS" -gt 0 ] && printf 'NOTE: %d case(s) failed in SETUP — those measure the fixture, not the gate.\n' "$SETUP_FAILS"
 
 if [[ "$FAILS" -eq 0 ]]; then
