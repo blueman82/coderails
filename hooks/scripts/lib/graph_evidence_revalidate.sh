@@ -163,13 +163,13 @@ GRAPH_EVIDENCE_REVALIDATE_JQ_MAIN=$(cat <<'JQ_MAIN_EOF'
       # keeps the legacy completion path working.
       #
       # Matched on the spawn row's OWN node_id, mirroring bind's
-      # `.node_id == $id` candidate filter — see this file's SPAWN PRESENCE
-      # header for why wave_id is deliberately omitted (the entry's wave_id is
-      # attacker-writable post-bind; the row's node_id is not) and why
-      # dispatch_status is filtered on the qualifying-entry check below rather
-      # than in this all-entries scan (bind refuses teammate_spawned only on
-      # its done branch, so filtering here would deadlock a legitimate
-      # mailbox-dispatched retry carry-forward or skipped node).
+      # `.node_id == $id` candidate filter. wave_id is deliberately omitted
+      # (the entry's wave_id is attacker-writable post-bind; the row's node_id
+      # is not). dispatch_status is filtered on the qualifying-entry check
+      # below rather than in this all-entries scan, because bind refuses
+      # teammate_spawned only on its done branch — filtering here would
+      # deadlock a legitimate mailbox-dispatched retry carry-forward or
+      # skipped node.
       #
       # `. as $e` first: inside the inner select the input is a spawn row, so
       # a bare `.tool_use_id` there would read the ROW's id, not the entry's.
