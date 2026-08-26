@@ -39,7 +39,9 @@ An all-input join is a node plus an entry such as `"J":{"mode":"all","inputs":["
 
 Create and grade loop-local `evals.json` beside `progress.json` before build. It must carry this exact `session_id` and `loop_id`; those stable fields authorize dispatch across waves, so `begin-wave` does not invalidate the loop's eval authority. Keep its revision field as the revision it graded. The provider-local dispatch hook blocks native worker calls when graph ownership or graded loop evidence is missing or foreign.
 
-Before dispatching a writing node without an existing worktree, invoke `prep`. It creates the worktree and, for a non-Git folder, creates the local `main` repository and initial commit it needs. Do not add a remote.
+For a graph with three or more work units, or any cross-unit dependency, apply `superpowers:brainstorming`'s design-quality discipline without its interactive human-approval gate. Write or reuse `spec.md` and `plan.md` beside `progress.json`, outside the code repository. `plan.md` is the static source of truth for scope and decomposition; `progress.json` is the dynamic record of position and outcomes. Derive node scope from the plan, and reread both files on resume. Do not create these files for one or two self-contained units.
+
+Before dispatching a writing node, invoke `superpowers:using-git-worktrees`. Use Coderails `prep` to perform the resulting worktree setup; it creates the worktree and, for a non-Git folder, the local `main` repository and initial commit it needs. Do not add a remote.
 
 Run `python3 "$SKILL_DIR/scripts/graph.py" inspect "$STATE"`. Inspection is the resume source of truth: loop and session identity, revision, active wave, running nodes, ready nodes, and hard-stop reason. Never reconstruct these from chat history.
 
@@ -48,7 +50,7 @@ Run `python3 "$SKILL_DIR/scripts/graph.py" inspect "$STATE"`. Inspection is the 
 Every dispatch wave follows this order:
 
 1. Run `graph.py begin-wave "$STATE"`. This fully validates the graph, refuses an existing active wave, records the complete deterministic ready set as running, increments the revision, and prints the wave id, node list, and `task_names` mapping. Calling `begin-wave` is mandatory before `spawn_agent`. `inspect` repeats the mapping while a wave is active.
-2. Call native `spawn_agent` exactly once for each printed node, using its exact printed task name. Attempt 1 keeps `loop_worker_` plus the lowercase UTF-8 hex encoding of the node id; retries append `_aN`, so every attempt has a new native task path while remaining reversible. Use installed Codex custom agents where appropriate. Give each worker a self-contained prompt containing its node id, exact scope, allowed paths, worktree, exclusions, checks, required artifact, and concise evidence report. Do not use another provider or start a nested Codex session.
+2. Call native `spawn_agent` exactly once for each printed node, using its exact printed task name. Attempt 1 keeps `loop_worker_` plus the lowercase UTF-8 hex encoding of the node id; retries append `_aN`, so every attempt has a new native task path while remaining reversible. Use installed Codex custom agents where appropriate. Give each worker a self-contained prompt containing its node id, exact scope, allowed paths, worktree, exclusions, checks, required artifact, and concise evidence report. For testable code, require `superpowers:test-driven-development`; require `superpowers:subagent-driven-development` for worker construction and `superpowers:verification-before-completion` before its report. Do not use another provider or start a nested Codex session.
 3. Use `wait_agent` until every node in the active wave has a terminal report. `wait_agent` reports only timeout or completion; `record-wave` resolves each task name through this session's native spawn result, `SubAgentActivity`, child transcript, and successful `task_complete`. A quiet worker is not proof of failure: inspect its artifact, then use `send_message` or `followup_task` for one focused correction if needed.
 4. Verify each report against the actual diff, test output, PR state, or other current artifact. A worker summary alone is not evidence.
 5. Build one result object containing exactly every active-wave node and no other key. Each result is `{"outcome":"done|skipped|failed","evidence":"observed evidence"}`. Record it with:
@@ -66,7 +68,7 @@ Respect any user concurrency limit; otherwise use at most three workers at once.
 
 Keep review provider-local. Use fresh Codex reviewer workers and the Codex workflow skills for review evidence, eval evidence, push, and merge. Review and release may be graph nodes, but never cross-provider joins. Treat every worker result as a claim until checked.
 
-For a confirmed failure, make at most five distinct diagnosed repairs. Repeating the same action is not a new attempt. Stop on exhausted verification, a disproved premise, a material choice outside the authorised scope, or an unauthorised irreversible action. Record the reason in graph evidence and `hard_stop`.
+For a confirmed failure, make at most five distinct diagnosed repairs. When the cause is not obvious, invoke `superpowers:systematic-debugging` before another repair. Repeating the same action is not a new attempt. Stop on exhausted verification, a disproved premise, a material choice outside the authorised scope, or an unauthorised irreversible action. Record the reason in graph evidence and `hard_stop`. After a merged work-unit PR, use `superpowers:finishing-a-development-branch` for its worktree cleanup.
 
 ## Complete
 
@@ -76,7 +78,7 @@ Before completion, update and regrade `evals.json` against the graph's exact cur
 - non-empty `proof.json` for the same session and loop, with every proof carrying a nonblank executable `cmd` and `status: "pass"`;
 - `retro.json` for the same session and loop, schema version 1 or newer, with `status: "complete"`.
 
-Then run:
+Apply `superpowers:verification-before-completion` to the orchestrator's completion claim. Then run:
 
 ```bash
 python3 "$SKILL_DIR/scripts/graph.py" complete "$STATE" \
