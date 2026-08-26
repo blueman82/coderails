@@ -185,6 +185,7 @@ native_graph_contract_exists() {
   python3 "$graph" --help | grep -q 'authorize-dispatch' || return 1
   python3 "$graph" --help | grep -q 'verify-completion' || return 1
   grep -q 'spawn_agent' "$PACKAGE/skills/agentic-loop/SKILL.md" || return 1
+  grep -q 'superpowers:dispatching-parallel-agents' "$PACKAGE/skills/agentic-loop/SKILL.md" || return 1
   grep -q 'begin-wave' "$PACKAGE/skills/agentic-loop/SKILL.md" || return 1
   grep -q 'update_plan.*display only' "$PACKAGE/skills/agentic-loop/SKILL.md" || return 1
   grep -q 'superpowers:brainstorming' "$PACKAGE/skills/agentic-loop/SKILL.md" || return 1
