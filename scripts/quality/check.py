@@ -18,7 +18,6 @@ LOC_EXCEPTIONS = {
     "hooks/scripts/tests/enforce_pr_workflow.test.sh": 1149,
     "hooks/scripts/lib/graph_dispatch.sh": 412,
     "hooks/scripts/tests/graph_dispatch_complete.test.sh": 1210,
-    "hooks/scripts/lib/graph_evidence_revalidate.sh": 646,
     "hooks/scripts/tests/merge_wiki_debt_gate.test.sh": 567,
     "hooks/scripts/lib/loop_state_common.sh": 1606,
     "hooks/scripts/tests/loop_stall_guard.test.sh": 2323,
