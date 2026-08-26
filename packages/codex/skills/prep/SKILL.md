@@ -18,6 +18,16 @@ If the branch is missing or ambiguous, use `request_user_input` to ask only for 
 
 ## Read project configuration
 
+Before resolving the Git root or configuration, run `git rev-parse --show-toplevel`. If the current folder is not in a Git repository, create the local-only base required for the worktree:
+
+```bash
+git init -b main
+git add -A
+git commit --allow-empty -m "Initial project"
+```
+
+Stop and report the exact failing command if any command fails (for example, Git author identity is not configured). Do not add a remote, create a hosted repository, push, or create a pull request.
+
 Resolve the nearest `.coderails/workflow.config.yaml` by walking from the current directory upward to the Git root. The first file found wins. Otherwise use:
 
 - `worktree_base`: the Git root.
@@ -38,7 +48,7 @@ Do not change configuration. Ignore Claude-specific configuration.
    git worktree add <path> -b <branch>
    ```
 
-Report the created branch and absolute worktree path.
+Report the created branch and absolute worktree path. In a local-only repository, `main` is the base; do not create or require `origin`.
 
 ## Create a Jira ticket when configured
 
