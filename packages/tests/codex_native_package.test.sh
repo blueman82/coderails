@@ -188,6 +188,7 @@ native_graph_contract_exists() {
   grep -q 'begin-wave' "$PACKAGE/skills/agentic-loop/SKILL.md" || return 1
   grep -q 'update_plan.*display only' "$PACKAGE/skills/agentic-loop/SKILL.md" || return 1
   grep -q 'superpowers:brainstorming' "$PACKAGE/skills/agentic-loop/SKILL.md" || return 1
+  grep -q 'superpowers:writing-plans' "$PACKAGE/skills/agentic-loop/SKILL.md" || return 1
   grep -q 'spec.md.*plan.md.*progress.json' "$PACKAGE/skills/agentic-loop/SKILL.md" || return 1
   grep -q 'superpowers:using-git-worktrees' "$PACKAGE/skills/agentic-loop/SKILL.md" || return 1
   grep -q 'superpowers:test-driven-development' "$PACKAGE/skills/agentic-loop/SKILL.md" || return 1
