@@ -6,7 +6,17 @@ and disposition, and committing the design to `spec.md`/`plan.md`.
 
 Read this in full at loop start. Phase 2.8 onward lives in SKILL.md.
 
-### `S-2` — Phase -2: Stub `progress.json` first (the literal first action)
+### `S-2` — Phase -2: Bootstrap a local repo, then stub `progress.json`
+
+Before resolving the loop-state path, check whether the current folder is inside a Git repository with `git rev-parse --show-toplevel`. If it is not, create the local-only base required for worktree isolation:
+
+```bash
+git init -b main
+git add -A
+git commit --allow-empty -m "Initial project"
+```
+
+Stop and report the exact failing command if any of these commands fails (for example, Git author identity is not configured). Do not add a remote, create a hosted repository, push, or create a pull request. This is the only action before the state stub: it ensures the path helper below keys the loop to the repository it just created rather than to the pre-Git folder path.
 
 Before Phase -1 — before anything else — write a `progress.json` stub. This guarantees the loop's durable state file exists before the first stop, so the `loop_state_guard` Stop hook never trips a compliant loop; the block degrades to a backstop for a skipped stub.
 
@@ -194,8 +204,8 @@ Include `/coderails:wiki-query` in the pre-flight agent's skill list, scoped to 
 
 Spawn this pre-flight agent at the `default` role — it's running skills, not making architectural decisions, and `default` controls cost. (One of the two assignment sites Phase 2.8 doesn't cover — this agent runs before 2.8 exists in the sequence, so it gets its role inline, here.)
 
-**Clean-base check (mandatory orchestrator action in main context, before ANY worker is spawned).** Run `git fetch origin` then `git log --oneline origin/main..main` and `git status --short` yourself. If local `main` carries commits `origin/main` does not, or has uncommitted/untracked files, the base is DIRTY — a parallel session (or an earlier uncommitted edit) has polluted it. When the base is dirty:
-- NEVER let a worker branch off local `main`. Every worker MUST create its worktree via `superpowers:using-git-worktrees`, which accepts a declared base ref — the orchestrator must state one explicitly, by name, in the worker prompt: "Use the using-git-worktrees skill with base ref `origin/main` — not local `main`, not HEAD." This keeps worktree mechanics (native-tool detection, ignore-verification, directory selection) on the shared skill instead of Phase 3 reinventing them inline, while the `origin/main`-base requirement — a loop-specific safety invariant — travels through the skill's own declared-base-ref mechanism rather than being asserted outside it.
+**Clean-base check (mandatory orchestrator action in main context, before ANY worker is spawned).** First check whether `origin` exists. When it does, run `git fetch origin`, then `git log --oneline origin/main..main` and `git status --short`; the base ref is `origin/main`. Without `origin`, run `git log --oneline main..HEAD` and `git status --short`; the base ref is `main`. If the current branch carries commits the selected base ref does not, or has uncommitted/untracked files, the base is DIRTY — a parallel session (or an earlier uncommitted edit) has polluted it. When the base is dirty:
+- NEVER let a worker branch off the current checkout. Every worker MUST create its worktree via `superpowers:using-git-worktrees`, which accepts a declared base ref — the orchestrator must state the selected base ref explicitly, by name, in the worker prompt: use `origin/main` when `origin` exists or `main` otherwise; never use HEAD. This keeps worktree mechanics (native-tool detection, ignore-verification, directory selection) on the shared skill instead of Phase 3 reinventing them inline, while the selected-base-ref requirement travels through the skill's own declared-base-ref mechanism rather than being asserted outside it.
 - Carry the foreign file names into worker prompts as an explicit "these are not yours — never stage, commit, or include them" exclusion list.
 
 Do this check even when the base looks clean — two cheap git reads pre-empt a worker's PR silently inheriting another session's WIP from a dirty base, which otherwise only surfaces at the merge gate.

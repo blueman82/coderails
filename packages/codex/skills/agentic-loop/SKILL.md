@@ -39,6 +39,8 @@ An all-input join is a node plus an entry such as `"J":{"mode":"all","inputs":["
 
 Create and grade loop-local `evals.json` beside `progress.json` before build. It must carry this exact `session_id` and `loop_id`; those stable fields authorize dispatch across waves, so `begin-wave` does not invalidate the loop's eval authority. Keep its revision field as the revision it graded. The provider-local dispatch hook blocks native worker calls when graph ownership or graded loop evidence is missing or foreign.
 
+Before dispatching a writing node without an existing worktree, invoke `prep`. It creates the worktree and, for a non-Git folder, creates the local `main` repository and initial commit it needs. Do not add a remote.
+
 Run `python3 "$SKILL_DIR/scripts/graph.py" inspect "$STATE"`. Inspection is the resume source of truth: loop and session identity, revision, active wave, running nodes, ready nodes, and hard-stop reason. Never reconstruct these from chat history.
 
 ## Run one wave

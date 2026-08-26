@@ -91,6 +91,14 @@ prep_uses_nearest_project_config() {
   grep -Fq 'walking from the current directory upward to the Git root' "$PACKAGE/skills/prep/SKILL.md"
 }
 
+prep_bootstraps_local_projects() {
+  local prep="$PACKAGE/skills/prep/SKILL.md"
+  grep -Fq 'git init -b main' "$prep" || return 1
+  grep -Fq 'git add -A' "$prep" || return 1
+  grep -Fq 'git commit --allow-empty -m "Initial project"' "$prep" || return 1
+  grep -Fq 'Do not add a remote' "$prep"
+}
+
 agents_are_native() {
   python3 - "$PACKAGE/agents" <<'PY'
 import pathlib
@@ -232,6 +240,7 @@ check "37 native skills have name and description" skills_have_frontmatter
 check "all native skills pass quick_validate" skills_pass_quick_validate
 check "11 migrated commands exist as skills" migrated_commands_exist
 check "prep resolves the nearest project config" prep_uses_nearest_project_config
+check "prep bootstraps a local-only project" prep_bootstraps_local_projects
 check "exactly 10 native custom agents" agents_are_native
 check "native hook commands resolve under PLUGIN_ROOT" hooks_are_native
 check "package helper modes" helpers_have_modes
