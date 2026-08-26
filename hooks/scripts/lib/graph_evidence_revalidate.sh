@@ -131,21 +131,25 @@ GRAPH_EVIDENCE_REVALIDATE_JQ_MAIN=$(cat <<'JQ_MAIN_EOF'
       # successful one erases real retry history undetected. Close that by
       # demanding the bound attempts equal the contiguous run 1..expected_count,
       # where expected_count = retry.attempts + 1 (bind mints each entry's
-      # .attempt as retry.attempts-at-bind-time + 1; graph_dispatch_record only
-      # increments .attempts on a "failed" report, never on "done").
+      # .attempt as retry.attempts-at-bind-time + 1).
       #
-      # "done" only, not "skipped" like Python's unconditional +1: a skipped
-      # node's retry.attempts was already incremented by its own terminal
-      # "failed" report, so its bound attempts are already exactly
-      # 1..retry.attempts with no extra +1 — the done formula would demand
-      # [1,2] against a legitimate skipped node's actual [1] (pinned by the
-      # existing "a skipped node carrying bound evidence still completes"
-      # case) and false-reject it.
+      # "done" only, not "skipped": bash's graph_dispatch_record increments
+      # .attempts on every "failed" report (incl. the hard-stop one), never
+      # on "done" — so a skipped node's retry.attempts already equals its
+      # bound attempts with no extra +1; the done formula would demand
+      # [1,2] against its actual [1] (pinned by "a skipped node carrying
+      # bound evidence still completes") and false-reject it. Python's own
+      # `(1 if status in {"done","skipped"} else 0)` also excludes
+      # "skipped" — not "unconditionally", per an earlier draft here.
       #
-      # `.is_object` only: a legacy string or array-wrapped forgery has no
-      # top-level .attempt and normalises to null. A node with zero structured
-      # entries is left to the more specific "no structured bound entry"
-      # branch further down.
+      # `.is_object` only: a legacy string/array forgery has no top-level
+      # .attempt; a node with zero structured entries is left to the more
+      # specific "no structured bound entry" branch further down.
+      #
+      # Disclosed residual, same shape as EVIDENCE-PRESENCE's "two
+      # coordinated edits, not zero" below: editing BOTH the surviving
+      # entry's .attempt and the node's retry.attempts (same orchestrator-
+      # owned progress.json) together defeats this — PR's Security scope.
       | ([ $done_with_evidence[] | . as $id
            | select([ $bound[] | select(.node_id == $id and .is_object) ] | length > 0)
            | (($nodes[$id].retry.attempts // 0) + 1) as $expected_count

@@ -1183,15 +1183,26 @@ rc_attseq2=$?
 jq '.graph.active_wave = null | .revision = 3' "$state_attseq" >"$state_attseq.tmp" && mv "$state_attseq.tmp" "$state_attseq"
 write_valid_triple "$SESSION_ATTSEQ" "$LOOP" 3 "$TMP/e_$SESSION_ATTSEQ.json" \
 	"$TMP/p_$SESSION_ATTSEQ.json" "$TMP/r_$SESSION_ATTSEQ.json"
+attseq_setup_reason="setup: the two-attempt evidence trail was not built (rc1=$rc_attseq1 rc2=$rc_attseq2)"
 if [ "$rc_attseq1" -ne 0 ] || [ "$rc_attseq2" -ne 0 ] ||
 	! jq -e '[.graph.nodes.N1.evidence[] | select(type=="object") | .attempt] == [1,2]' \
 		"$state_attseq" >/dev/null 2>&1; then
-	fail "a done node whose attempt-1 evidence is deleted while attempt-2's remains is refused" \
-		"setup: the two-attempt evidence trail was not built (rc1=$rc_attseq1 rc2=$rc_attseq2)"
-	SETUP_FAILS=$((SETUP_FAILS + 1))
+	fail "a done node whose attempt-1 evidence is deleted while attempt-2's remains is refused" "$attseq_setup_reason"
+	fail "a done node with an intact contiguous 2-attempt evidence trail still completes" "$attseq_setup_reason"
+	SETUP_FAILS=$((SETUP_FAILS + 2))
 else
-	# The attack: delete ONLY the attempt-1 claude_agent evidence object,
-	# keeping attempt-2's — a non-contiguous [2] where [1,2] must be present.
+	# Positive control on a COPY, before any tampering: proves the refusal
+	# below reacts to the deletion, not this fixture shape outright.
+	state_attseq_intact="$TMP/state_attseq_intact.json"
+	cp "$state_attseq" "$state_attseq_intact"
+	if complete_with "$state_attseq_intact" "$SESSION_ATTSEQ" >/dev/null 2>&1; then
+		pass "a done node with an intact contiguous 2-attempt evidence trail still completes"
+	else
+		fail "a done node with an intact contiguous 2-attempt evidence trail still completes" \
+			"completion was refused on untampered, contiguous [1,2] evidence"
+	fi
+	# The attack: delete ONLY the attempt-1 evidence object, keeping
+	# attempt-2's; no other field (retry.attempts included) touched.
 	jq '.graph.nodes.N1.evidence |= [.[] | select(type != "object" or .attempt != 1)]' \
 		"$state_attseq" >"$state_attseq.tmp" && mv "$state_attseq.tmp" "$state_attseq"
 	assert_refused_revalidation \
