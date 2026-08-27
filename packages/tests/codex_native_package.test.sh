@@ -185,8 +185,20 @@ native_graph_contract_exists() {
   python3 "$graph" --help | grep -q 'authorize-dispatch' || return 1
   python3 "$graph" --help | grep -q 'verify-completion' || return 1
   grep -q 'spawn_agent' "$PACKAGE/skills/agentic-loop/SKILL.md" || return 1
+  grep -q 'superpowers:dispatching-parallel-agents' "$PACKAGE/skills/agentic-loop/SKILL.md" || return 1
   grep -q 'begin-wave' "$PACKAGE/skills/agentic-loop/SKILL.md" || return 1
   grep -q 'update_plan.*display only' "$PACKAGE/skills/agentic-loop/SKILL.md" || return 1
+  grep -q 'superpowers:brainstorming' "$PACKAGE/skills/agentic-loop/SKILL.md" || return 1
+  grep -q 'superpowers:writing-plans' "$PACKAGE/skills/agentic-loop/SKILL.md" || return 1
+  grep -q 'three or more work units, or any cross-unit dependency' "$PACKAGE/skills/agentic-loop/SKILL.md" || return 1
+  grep -q 'spec.md.*beside.*progress.json' "$PACKAGE/skills/agentic-loop/SKILL.md" || return 1
+  grep -q 'reread.*spec.md.*plan.md.*resume' "$PACKAGE/skills/agentic-loop/SKILL.md" || return 1
+  grep -q 'superpowers:using-git-worktrees' "$PACKAGE/skills/agentic-loop/SKILL.md" || return 1
+  grep -q 'superpowers:test-driven-development' "$PACKAGE/skills/agentic-loop/SKILL.md" || return 1
+  grep -q 'superpowers:subagent-driven-development' "$PACKAGE/skills/agentic-loop/SKILL.md" || return 1
+  grep -q 'superpowers:verification-before-completion' "$PACKAGE/skills/agentic-loop/SKILL.md" || return 1
+  grep -q 'superpowers:systematic-debugging' "$PACKAGE/skills/agentic-loop/SKILL.md" || return 1
+  grep -q 'superpowers:finishing-a-development-branch' "$PACKAGE/skills/agentic-loop/SKILL.md" || return 1
   ! grep -Eiq 'claude -p|codex exec|pr-review-toolkit|background scheduler' "$PACKAGE/skills/agentic-loop/SKILL.md"
 }
 

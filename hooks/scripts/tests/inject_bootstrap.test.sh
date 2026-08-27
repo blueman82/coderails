@@ -58,12 +58,14 @@ check "context embeds using-coderails skill content" "1" "$_g5"
 check "context contains You have coderails" "1" \
     "$(echo "$ctx" | grep -c 'You have coderails' | xargs)"
 
-# ── Gate 7: output carries only coderails branding (no stray legacy brand) ───
-# Checks for the old plugin name; written as concatenated parts so this file
-# itself doesn't contain the literal string and passes the scrub gate.
-_legacy="super""powers"
+# ── Gate 7: output permits installed providers, not retired Coderails skills ─
+# `superpowers:*` is intentionally injected by using-coderails.  The retired
+# `coderails:brainstorming` identifier is the legacy branding to reject.
+_legacy="coderails:""brainstorming"
+printf '%s' "$_legacy" | grep -qi "$_legacy" && _legacy_detected=1 || _legacy_detected=0
+check "legacy identifier is detected" "1" "$_legacy_detected"
 echo "$out" | grep -qi "$_legacy" && _g7=1 || _g7=0
-check "output contains no legacy branding" "0" "$_g7"
+check "output contains no retired Coderails skill identifier" "0" "$_g7"
 
 # ── Gate 8: hookEventName is SessionStart ────────────────────────────────────
 event=$(echo "$out" | jq -r '.hookSpecificOutput.hookEventName // empty')
