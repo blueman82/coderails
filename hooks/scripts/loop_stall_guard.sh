@@ -135,14 +135,13 @@ emit_graph_human_request() {
     safe=$(printf '%s' "$loop" | tr -c '[:alnum:]_.-' '_')
     marker="$(dirname "$ALS_PATH")/.human-approval-${safe}-${revision}"
     message="Human approval required: the native graph is unresolved. Approve the next action or resume the loop; stopping remains blocked until the graph is complete."
-    if mkdir "$marker" 2>/dev/null; then
-        jq -n --arg m "$message" '{systemMessage: $m}' 2>/dev/null || true # best-effort: message output cannot weaken the block
-    elif [[ ! -d "$marker" ]]; then
+    if ! mkdir "$marker" 2>/dev/null; then
+        [[ -d "$marker" ]] && return 0
         # A marker write failure must not weaken the graph block; repeat the
         # notice rather than silently hiding a required human escalation.
         als_log "hook=loop_stall_guard session=$session_id human_request=dedupe_write_failed"
-        jq -n --arg m "$message" '{systemMessage: $m}' 2>/dev/null || true # best-effort: message output cannot weaken the block
     fi
+    jq -n --arg m "$message" '{systemMessage: $m}' 2>/dev/null || true # best-effort: message output cannot weaken the block
     return 0
 }
 

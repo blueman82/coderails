@@ -58,10 +58,8 @@ hook::log "hook=graph_completion_guard session=$session_id blocked=1"
 if [[ -n "$loop_id" && "$revision" =~ ^[0-9]+$ ]] && mkdir "$marker" 2>/dev/null; then
     jq -n --arg reason "Native graph unresolved; stopping remains blocked." --arg message "$message" \
         '{decision:"block",reason:$reason,systemMessage:$message}'
-elif [[ -n "$loop_id" && "$revision" =~ ^[0-9]+$ && -d "$marker" ]]; then
-    hook::continue_turn "Native graph unresolved; stopping remains blocked."
 else
-    # Keep invalid or unwriteable state fail-closed and visible.
+    # Keep repeated, invalid, or unwriteable state fail-closed and visible.
     hook::continue_turn "Native graph unresolved; stopping remains blocked."
 fi
 exit 0
