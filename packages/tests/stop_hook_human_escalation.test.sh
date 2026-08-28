@@ -206,6 +206,28 @@ run_claude
 check "Claude connected graph stays blocked" 2 "$CLAUDE_RC"
 check "Claude connected graph emits the request" 1 "$(printf '%s' "$CLAUDE_OUT" | jq -e -s 'length == 1 and .[0].systemMessage != null' >/dev/null 2>&1 && echo 1 || echo 0)"
 
+jq '.loop_id = "loop-17" | .graph.nodes = {A:{status:"pending"}} | .graph.edges = [{from:"A",to:"A"}] | .graph.joins = {}' \
+  "$claude_root/$slug/S1/progress.json" >"$TMP/progress.json" &&
+  mv "$TMP/progress.json" "$claude_root/$slug/S1/progress.json"
+jq -n '{session_id:"S1",loop_id:"loop-17",revision:1,result:"GO"}' >"$claude_root/$slug/S1/evals.json"
+jq '.loop_id = "loop-17"' "$claude_root/$slug/S1/retro.json" >"$TMP/retro.json" &&
+  mv "$TMP/retro.json" "$claude_root/$slug/S1/retro.json"
+run_claude
+check "Claude self-edge stays blocked" 2 "$CLAUDE_RC"
+check "Claude self-edge emits no approval request" "" "$CLAUDE_OUT"
+check "Claude self-edge explains graph repair" 1 "$(printf '%s' "$CLAUDE_ERR" | grep -qi 'graph shape' && echo 1 || echo 0)"
+
+jq '.loop_id = "loop-18" | .graph.nodes = {A:{status:"pending"},B:{status:"pending"}} | .graph.edges = [{from:"A",to:"B"},{from:"B",to:"A"}] | .graph.joins = {}' \
+  "$claude_root/$slug/S1/progress.json" >"$TMP/progress.json" &&
+  mv "$TMP/progress.json" "$claude_root/$slug/S1/progress.json"
+jq -n '{session_id:"S1",loop_id:"loop-18",revision:1,result:"GO"}' >"$claude_root/$slug/S1/evals.json"
+jq '.loop_id = "loop-18"' "$claude_root/$slug/S1/retro.json" >"$TMP/retro.json" &&
+  mv "$TMP/retro.json" "$claude_root/$slug/S1/retro.json"
+run_claude
+check "Claude dependency cycle stays blocked" 2 "$CLAUDE_RC"
+check "Claude dependency cycle emits no approval request" "" "$CLAUDE_OUT"
+check "Claude dependency cycle explains graph repair" 1 "$(printf '%s' "$CLAUDE_ERR" | grep -qi 'graph shape' && echo 1 || echo 0)"
+
 jq '.loop_id = "loop-13" | .graph.nodes = {A:{status:"done"}} | .graph.edges = [] | .graph.joins = {A:"join"}' \
   "$claude_root/$slug/S1/progress.json" >"$TMP/progress.json" &&
   mv "$TMP/progress.json" "$claude_root/$slug/S1/progress.json"
