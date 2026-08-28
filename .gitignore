@@ -13,7 +13,7 @@ logs/
 # legacy provider-local config directories
 .claude/
 **/workflow.config.yaml
-/.tmp
+**/.tmp/
 
 # machine-local git worktree dirs
 .worktrees

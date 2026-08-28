@@ -116,6 +116,7 @@ check "legacy configs are ignored" "" "$(resolve "$LEGACY")"
 # scopes; all .coderails/ contents are machine-local.
 IGNORES="$TMP/ignores"
 mkdir -p "$IGNORES/.coderails" "$IGNORES/nested/.coderails"
+mkdir -p "$IGNORES/.tmp" "$IGNORES/nested/.tmp"
 git -C "$IGNORES" init -q
 cp "$ROOT/.gitignore" "$IGNORES/.gitignore"
 : >"$IGNORES/.coderails/progress.json"
@@ -126,6 +127,8 @@ check "root runtime state is ignored" ignored "$(git -C "$IGNORES" check-ignore 
 check "root canonical config is ignored" ignored "$(git -C "$IGNORES" check-ignore -q .coderails/workflow.config.yaml && printf ignored || printf committable)"
 check "nested runtime state is ignored" ignored "$(git -C "$IGNORES" check-ignore -q nested/.coderails/progress.json && printf ignored || printf committable)"
 check "nested canonical config is ignored" ignored "$(git -C "$IGNORES" check-ignore -q nested/.coderails/workflow.config.yaml && printf ignored || printf committable)"
+check "root scratch directory is ignored" ignored "$(git -C "$IGNORES" check-ignore -q .tmp/scratch && printf ignored || printf committable)"
+check "nested scratch directory is ignored" ignored "$(git -C "$IGNORES" check-ignore -q nested/.tmp/scratch && printf ignored || printf committable)"
 
 if [ "$fails" -eq 0 ]; then
     echo "PASS"
