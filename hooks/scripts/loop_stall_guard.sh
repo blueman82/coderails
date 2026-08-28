@@ -70,7 +70,8 @@ gate_graph_complete() {
       and ([.graph.nodes[] | select(.status | IN("done","skipped") | not)] | length) == 0
       and ([.graph.joins[] | select(.released != true)] | length) == 0
     ' "$ALS_PATH" >/dev/null 2>&1; then
-        echo "[loop-stall-guard] LOOP-STOP: complete refused: the durable graph is unfinished." >&2
+        emit_graph_human_request
+        echo "[loop-stall-guard] Native graph unresolved; stopping remains blocked." >&2
         exit 2
     fi
     local loop_dir
@@ -118,6 +119,33 @@ gate_graph_complete() {
     }
 }
 
+emit_graph_human_request() {
+    command -v jq >/dev/null 2>&1 || return 1
+    [ -n "$ALS_PATH" ] && [ -f "$ALS_PATH" ] || return 1
+    jq -e '
+      (.graph | type) == "object" and
+      (([.graph.nodes[]? | select((.status // "") | IN("done","skipped") | not)] | length) > 0 or
+       ([.graph.joins[]? | select(.released != true)] | length) > 0 or
+       .graph.active_wave != null or .graph.hard_stop != null)
+    ' "$ALS_PATH" >/dev/null 2>&1 || return 1
+    local loop revision safe marker message
+    loop=$(jq -r '.loop_id // empty' "$ALS_PATH" 2>/dev/null)
+    revision=$(jq -r '.revision // empty' "$ALS_PATH" 2>/dev/null)
+    [[ -n "$loop" && "$revision" =~ ^[0-9]+$ ]] || return 1
+    safe=$(printf '%s' "$loop" | tr -c '[:alnum:]_.-' '_')
+    marker="$(dirname "$ALS_PATH")/.human-approval-${safe}-${revision}"
+    message="Human approval required: the native graph is unresolved. Approve the next action or resume the loop; stopping remains blocked until the graph is complete."
+    if mkdir "$marker" 2>/dev/null; then
+        jq -n --arg m "$message" '{systemMessage: $m}' 2>/dev/null || true # best-effort: message output cannot weaken the block
+    elif [[ ! -d "$marker" ]]; then
+        # A marker write failure must not weaken the graph block; repeat the
+        # notice rather than silently hiding a required human escalation.
+        als_log "hook=loop_stall_guard session=$session_id human_request=dedupe_write_failed"
+        jq -n --arg m "$message" '{systemMessage: $m}' 2>/dev/null || true # best-effort: message output cannot weaken the block
+    fi
+    return 0
+}
+
 gate_loop_stop_declared() {
     # Stable extract rides out the transcript-flush race (shared with voice_announce.sh).
     text=$(als_stable_last_text "$transcript" "$TAIL_LINES" "$MAX_ATTEMPTS" "$SLEEP_S")
@@ -151,7 +179,12 @@ gate_loop_stop_declared() {
 }
 
 block_missing_declaration() {
-    als_log "hook=loop_stall_guard session=$session_id invocations=$ALS_INVOCATIONS declared=0 blocked=1"
+    if emit_graph_human_request; then
+        als_log "hook=loop_stall_guard session=$session_id invocations=$ALS_INVOCATIONS declared=0 blocked=1 graph_unresolved=1"
+        echo "[loop-stall-guard] Native graph unresolved; stopping remains blocked." >&2
+        exit 2
+    fi
+    als_log "hook=loop-stall_guard session=$session_id invocations=$ALS_INVOCATIONS declared=0 blocked=1"
     echo "[loop-stall-guard] Active agentic loop, no LOOP-STOP declaration in your last message.
 Continue the loop, OR declare your stop by ending your message with a line:
   LOOP-STOP: <${LOOP_STOP_VOCAB}> — <reason>
