@@ -196,6 +196,16 @@ check "Claude unknown edge node stays blocked" 2 "$CLAUDE_RC"
 check "Claude unknown edge node emits no approval request" "" "$CLAUDE_OUT"
 check "Claude unknown edge node explains graph repair" 1 "$(printf '%s' "$CLAUDE_ERR" | grep -qi 'graph shape' && echo 1 || echo 0)"
 
+jq '.loop_id = "loop-16" | .graph.nodes = {A:{status:"done"},B:{status:"pending"}} | .graph.edges = [{from:"A",to:"B"}] | .graph.joins = {}' \
+  "$claude_root/$slug/S1/progress.json" >"$TMP/progress.json" &&
+  mv "$TMP/progress.json" "$claude_root/$slug/S1/progress.json"
+jq -n '{session_id:"S1",loop_id:"loop-16",revision:1,result:"GO"}' >"$claude_root/$slug/S1/evals.json"
+jq '.loop_id = "loop-16"' "$claude_root/$slug/S1/retro.json" >"$TMP/retro.json" &&
+  mv "$TMP/retro.json" "$claude_root/$slug/S1/retro.json"
+run_claude
+check "Claude connected graph stays blocked" 2 "$CLAUDE_RC"
+check "Claude connected graph emits the request" 1 "$(printf '%s' "$CLAUDE_OUT" | jq -e -s 'length == 1 and .[0].systemMessage != null' >/dev/null 2>&1 && echo 1 || echo 0)"
+
 jq '.loop_id = "loop-13" | .graph.nodes = {A:{status:"done"}} | .graph.edges = [] | .graph.joins = {A:"join"}' \
   "$claude_root/$slug/S1/progress.json" >"$TMP/progress.json" &&
   mv "$TMP/progress.json" "$claude_root/$slug/S1/progress.json"
@@ -270,6 +280,17 @@ run_codex
 check "Codex repeated unresolved graph stays blocked" 1 "$(printf '%s' "$CODEX_OUT" | jq -e '.decision == "block"' >/dev/null 2>&1 && echo 1 || echo 0)"
 check "Codex repeated block does not repeat human request" "" "$(printf '%s' "$CODEX_OUT" | jq -r '.systemMessage // empty')"
 check "Codex repeated block does not repeat raw graph dump" 0 "$(printf '%s' "$CODEX_OUT" | grep -c 'progress.json\|active_wave\|nodes' || true)"
+
+for unresolved_status in ready blocked failed stale; do
+  jq --arg status "$unresolved_status" --arg loop "loop-codex-status-$unresolved_status" \
+    '.loop_id = $loop | .graph.nodes.A.status = $status | .graph.nodes.A.outcome = $status | .graph.hard_stop = null' \
+    "$codex_root/$slug/S1/progress.json" >"$TMP/progress.json" &&
+    mv "$TMP/progress.json" "$codex_root/$slug/S1/progress.json"
+  rm -rf "$codex_root/$slug/S1/.human-approval-loop-codex-status-${unresolved_status}-1"
+  run_codex
+  check "Codex $unresolved_status graph stays blocked" 1 "$(printf '%s' "$CODEX_OUT" | jq -e '.decision == "block"' >/dev/null 2>&1 && echo 1 || echo 0)"
+  check "Codex $unresolved_status graph emits the request" 1 "$(printf '%s' "$CODEX_OUT" | jq -e '.systemMessage != null' >/dev/null 2>&1 && echo 1 || echo 0)"
+done
 
 codex_marker_failure_root="$TMP/codex-marker-failure"
 mkdir -p "$codex_marker_failure_root/$slug/S3"

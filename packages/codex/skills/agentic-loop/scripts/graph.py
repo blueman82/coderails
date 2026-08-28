@@ -18,7 +18,7 @@ from graph_evidence import (bind_worker_evidence, transcript_cursor,
 from graph_identity import GraphError, active_nodes, classify_worker_evidence, task_name, task_node
 
 
-STATUSES = {"pending", "running", "done", "skipped", "hard-stop"}
+STATUSES = {"pending", "ready", "running", "blocked", "done", "skipped", "failed", "hard-stop", "stale"}
 SUCCESS = {"done", "skipped"}
 
 

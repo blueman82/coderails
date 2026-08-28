@@ -137,20 +137,20 @@ graph_shape_valid() {
         (.value.status | type) != "string" or
         (.value.status | IN("pending", "ready", "running", "blocked", "done", "skipped", "failed", "hard-stop", "stale") | not)
       )] | length) == 0 and
-      ([.graph.edges[] | select(
-        (type) != "object" or
-        (.from | type) != "string" or (.from | length) == 0 or
-        (.to | type) != "string" or (.to | length) == 0 or
-        ($nodes | has(.from) | not) or ($nodes | has(.to) | not)
+      ([.graph.edges[] as $edge | select(
+        ($edge | type) != "object" or
+        ($edge.from | type) != "string" or ($edge.from | length) == 0 or
+        ($edge.to | type) != "string" or ($edge.to | length) == 0 or
+        ($nodes | has($edge.from) | not) or ($nodes | has($edge.to) | not)
       )] | length) == 0 and
-      ([.graph.joins | to_entries[] | select(
-        (.key | type) != "string" or (.key | length) == 0 or
-        (.value | type) != "object" or
-        (.value.mode != "all") or
-        ((.value | has("released")) and (.value.released | type) != "boolean") or
-        ((.value.inputs | type) != "array") or (.value.inputs | length) == 0 or
-        ($nodes | has(.key) | not) or
-        ([.value.inputs[] as $input
+      ([.graph.joins | to_entries[] as $join | select(
+        ($join.key | type) != "string" or ($join.key | length) == 0 or
+        ($join.value | type) != "object" or
+        ($join.value.mode != "all") or
+        (($join.value | has("released")) and ($join.value.released | type) != "boolean") or
+        (($join.value.inputs | type) != "array") or ($join.value.inputs | length) == 0 or
+        ($nodes | has($join.key) | not) or
+        ([$join.value.inputs[] as $input
           | select(($input | type) != "string" or ($input | length) == 0 or ($nodes | has($input) | not))] | length) > 0
       )] | length) == 0 and
       (.graph | has("active_wave") and has("hard_stop")) and
