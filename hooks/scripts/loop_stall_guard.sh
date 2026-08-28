@@ -65,11 +65,11 @@ gate_graph_complete() {
         echo "[loop-stall-guard] LOOP-STOP: complete refused: graph identity is missing or malformed." >&2
         exit 2
     fi
+    if ! graph_shape_valid; then
+        echo "[loop-stall-guard] LOOP-STOP: complete refused: graph shape is missing or malformed. Repair progress.json before declaring complete." >&2
+        exit 2
+    fi
     if ! jq -e '
-      (.graph | type) == "object" and
-      (.graph.nodes | type) == "object" and (.graph.nodes | length) > 0 and
-      (.graph.edges | type) == "array" and
-      (.graph.joins | type) == "object" and
       .graph.active_wave == null and .graph.hard_stop == null
       and ([.graph.nodes[] | select(.status | IN("done","skipped") | not)] | length) == 0
       and ([.graph.joins[] | select(.released != true)] | length) == 0
@@ -123,19 +123,26 @@ gate_graph_complete() {
     }
 }
 
+graph_shape_valid() {
+    jq -e '
+      (.graph | type) == "object" and
+      (.graph.nodes | type) == "object" and (.graph.nodes | length) > 0 and
+      (.graph.edges | type) == "array" and
+      (.graph.joins | type) == "object" and
+      (.graph | has("active_wave") and has("hard_stop")) and
+      (.graph.active_wave == null or (.graph.active_wave | type) == "object") and
+      (.graph.hard_stop == null or (.graph.hard_stop | type) == "object")
+    ' "$ALS_PATH" >/dev/null 2>&1
+}
+
 emit_graph_human_request() {
     command -v jq >/dev/null 2>&1 || return 1
     [ -n "$ALS_PATH" ] && [ -f "$ALS_PATH" ] || return 1
+    graph_shape_valid || return 1
     jq -e '
-      try (
-        (.graph | type) != "object" or
-        (.graph.nodes | type) != "object" or (.graph.nodes | length) == 0 or
-        (.graph.edges | type) != "array" or
-        (.graph.joins | type) != "object" or
-        ([.graph.nodes[] | select((.status // "") | IN("done","skipped") | not)] | length) > 0 or
-        ([.graph.joins[] | select(.released != true)] | length) > 0 or
-        .graph.active_wave != null or .graph.hard_stop != null
-      ) catch true
+      ([.graph.nodes[] | select((.status // "") | IN("done","skipped") | not)] | length) > 0 or
+      ([.graph.joins[] | select(.released != true)] | length) > 0 or
+      .graph.active_wave != null or .graph.hard_stop != null
     ' "$ALS_PATH" >/dev/null 2>&1 || return 1
     local loop revision safe marker message
     loop=$(jq -r '.loop_id // empty' "$ALS_PATH" 2>/dev/null)
@@ -179,7 +186,11 @@ gate_loop_stop_declared() {
         # parse. This is the ONE place either message reaches the human: emitted
         # ONLY here, ONLY once, AFTER both gates above have had their chance to
         # append.
-        [ -n "$ALS_PENDING_SYSMSG" ] && jq -n --arg m "$ALS_PENDING_SYSMSG" '{systemMessage: $m}' 2>/dev/null
+        if [ -n "$ALS_PENDING_SYSMSG" ] && ! jq -n --arg m "$ALS_PENDING_SYSMSG" '{systemMessage: $m}' 2>/dev/null; then
+            als_log "hook=loop_stall_guard session=$session_id output=system_message_failed blocked=1"
+            echo "[loop-stall-guard] Stop response output failed; stopping remains blocked." >&2
+            exit 2
+        fi
         bump_loop_stop_count "$category"
         als_log "hook=loop_stall_guard session=$session_id invocations=$ALS_INVOCATIONS declared=1 blocked=0"
         exit 0
@@ -187,6 +198,11 @@ gate_loop_stop_declared() {
 }
 
 block_missing_declaration() {
+    if command -v jq >/dev/null 2>&1 && [ -n "$ALS_PATH" ] && [ -f "$ALS_PATH" ] &&
+        jq -e '(.graph | type) == "object"' "$ALS_PATH" >/dev/null 2>&1 && ! graph_shape_valid; then
+        echo "[loop-stall-guard] Native graph shape is missing or malformed; repair progress.json before stopping." >&2
+        exit 2
+    fi
     if emit_graph_human_request; then
         als_log "hook=loop_stall_guard session=$session_id invocations=$ALS_INVOCATIONS declared=0 blocked=1 graph_unresolved=1"
         echo "[loop-stall-guard] Native graph unresolved; stopping remains blocked." >&2

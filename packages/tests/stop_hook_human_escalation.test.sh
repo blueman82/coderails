@@ -120,7 +120,53 @@ jq '.loop_id = "loop-6"' "$claude_root/$slug/S1/retro.json" >"$TMP/retro.json" &
   mv "$TMP/retro.json" "$claude_root/$slug/S1/retro.json"
 run_claude
 check "Claude empty graph stays blocked" 2 "$CLAUDE_RC"
-check "Claude empty graph requests human approval" 1 "$(printf '%s' "$CLAUDE_OUT" | jq -e -s 'length == 1 and .[0].systemMessage != null' >/dev/null 2>&1 && echo 1 || echo 0)"
+check "Claude empty graph emits no approval request" "" "$CLAUDE_OUT"
+check "Claude empty graph explains graph repair" 1 "$(printf '%s' "$CLAUDE_ERR" | grep -qi 'graph shape' && echo 1 || echo 0)"
+
+jq '.loop_id = "loop-7" | .graph.nodes = {A:{status:"done"}} | .graph.edges = {} | .graph.joins = {}' \
+  "$claude_root/$slug/S1/progress.json" >"$TMP/progress.json" &&
+  mv "$TMP/progress.json" "$claude_root/$slug/S1/progress.json"
+jq -n '{session_id:"S1",loop_id:"loop-7",revision:1,result:"GO"}' >"$claude_root/$slug/S1/evals.json"
+jq '.loop_id = "loop-7"' "$claude_root/$slug/S1/retro.json" >"$TMP/retro.json" &&
+  mv "$TMP/retro.json" "$claude_root/$slug/S1/retro.json"
+run_claude
+check "Claude malformed edges stay blocked" 2 "$CLAUDE_RC"
+check "Claude malformed edges emit no approval request" "" "$CLAUDE_OUT"
+check "Claude malformed edges explain graph repair" 1 "$(printf '%s' "$CLAUDE_ERR" | grep -qi 'graph shape' && echo 1 || echo 0)"
+
+jq '.loop_id = "loop-8" | .graph.edges = [] | .graph.joins = []' \
+  "$claude_root/$slug/S1/progress.json" >"$TMP/progress.json" &&
+  mv "$TMP/progress.json" "$claude_root/$slug/S1/progress.json"
+jq -n '{session_id:"S1",loop_id:"loop-8",revision:1,result:"GO"}' >"$claude_root/$slug/S1/evals.json"
+jq '.loop_id = "loop-8"' "$claude_root/$slug/S1/retro.json" >"$TMP/retro.json" &&
+  mv "$TMP/retro.json" "$claude_root/$slug/S1/retro.json"
+run_claude
+check "Claude malformed joins stay blocked" 2 "$CLAUDE_RC"
+check "Claude malformed joins emit no approval request" "" "$CLAUDE_OUT"
+check "Claude malformed joins explain graph repair" 1 "$(printf '%s' "$CLAUDE_ERR" | grep -qi 'graph shape' && echo 1 || echo 0)"
+
+jq '.loop_id = "loop-10" | del(.graph.active_wave) | del(.graph.hard_stop)' \
+  "$claude_root/$slug/S1/progress.json" >"$TMP/progress.json" &&
+  mv "$TMP/progress.json" "$claude_root/$slug/S1/progress.json"
+jq -n '{session_id:"S1",loop_id:"loop-10",revision:1,result:"GO"}' >"$claude_root/$slug/S1/evals.json"
+jq '.loop_id = "loop-10"' "$claude_root/$slug/S1/retro.json" >"$TMP/retro.json" &&
+  mv "$TMP/retro.json" "$claude_root/$slug/S1/retro.json"
+run_claude
+check "Claude missing graph control fields stays blocked" 2 "$CLAUDE_RC"
+check "Claude missing graph control fields emit no approval request" "" "$CLAUDE_OUT"
+check "Claude missing graph control fields explain graph repair" 1 "$(printf '%s' "$CLAUDE_ERR" | grep -qi 'graph shape' && echo 1 || echo 0)"
+
+jq '.loop_id = "loop-9" | .schema_version = 2 | .proof_disposition = "none: no executable surface" | .graph.nodes = {A:{status:"done"}} | .graph.edges = [] | .graph.joins = {} | .graph.active_wave = null | .graph.hard_stop = null' \
+  "$claude_root/$slug/S1/progress.json" >"$TMP/progress.json" &&
+  mv "$TMP/progress.json" "$claude_root/$slug/S1/progress.json"
+jq -n '{schema_version:2,session_id:"S1",loop_id:"loop-9",cost:{total_usd_estimate:1,total_tokens:2,prices_as_of:"2026-08-28"}}' \
+  >"$claude_root/$slug/S1/retro.json"
+jq -n --arg head "$(git -C "$ROOT" rev-parse HEAD)" '{scope:"loop",session_id:"S1",loop_id:"loop-9",revision:1,verification_level:0,verification_justification:"focused regression",frozen_sha:$head,head_sha:$head,evals:[],result:"GO"}' \
+  >"$claude_root/$slug/S1/evals.json"
+bash "$ROOT/scripts/post_evals.sh" grade-loop "$claude_root/$slug/S1/evals.json" >/dev/null
+PATH="$claude_output_failure_bin:$PATH" run_claude
+check "Claude completion output failure stays blocked" 2 "$CLAUDE_RC"
+check "Claude completion output failure reports the block" 1 "$(printf '%s' "$CLAUDE_ERR" | grep -qi 'output' && echo 1 || echo 0)"
 
 codex_root="$TMP/codex-loops"
 mkdir -p "$codex_root/$slug/S1"
