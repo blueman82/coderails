@@ -114,6 +114,22 @@ CODEX_OUT=$(cat "$codex_marker_failure_out")
 check "Codex marker write failure stays blocked" 1 "$(printf '%s' "$CODEX_OUT" | jq -e '.decision == "block"' >/dev/null 2>&1 && echo 1 || echo 0)"
 check "Codex marker write failure still requests human approval" 1 "$(printf '%s' "$CODEX_OUT" | jq -e '.systemMessage != null' >/dev/null 2>&1 && echo 1 || echo 0)"
 
+codex_output_failure_bin="$TMP/codex-output-failure-bin"
+mkdir -p "$codex_output_failure_bin"
+cat >"$codex_output_failure_bin/jq" <<'EOF'
+#!/usr/bin/env bash
+if [[ "$*" == *'--arg message'* ]]; then
+  exit 1
+fi
+exec /usr/bin/jq "$@"
+EOF
+chmod +x "$codex_output_failure_bin/jq"
+codex_output_failure_out="$TMP/codex-output-failure.out"
+PATH="$codex_output_failure_bin:$PATH" run_codex_at "$codex_marker_failure_root" S3 "$codex_output_failure_out"
+CODEX_OUT=$(cat "$codex_output_failure_out")
+check "Codex output-generation failure stays blocked" 1 "$(printf '%s' "$CODEX_OUT" | jq -e '.decision == "block"' >/dev/null 2>&1 && echo 1 || echo 0)"
+check "Codex output-generation failure still requests human approval" 1 "$(printf '%s' "$CODEX_OUT" | jq -e '.systemMessage != null' >/dev/null 2>&1 && echo 1 || echo 0)"
+
 codex_malformed_root="$TMP/codex-malformed"
 mkdir -p "$codex_malformed_root/$slug/S4"
 printf '{not-json\n' >"$codex_malformed_root/$slug/S4/progress.json"

@@ -70,6 +70,12 @@ else
     hook::continue_turn "Native graph unresolved; stopping remains blocked."
     exit 0
 fi
-jq -n --arg reason "Native graph unresolved; stopping remains blocked." --arg message "$message" \
-    '{decision:"block",reason:$reason,systemMessage:$message}' || rmdir "$marker" 2>/dev/null || true
+if ! jq -n --arg reason "Native graph unresolved; stopping remains blocked." --arg message "$message" \
+    '{decision:"block",reason:$reason,systemMessage:$message}'; then
+    hook::log "hook=graph_completion_guard session=$session_id human_request=response_write_failed"
+    if ! printf '%s\n' '{"decision":"block","reason":"Native graph unresolved; stopping remains blocked.","systemMessage":"Human approval required: the native graph is unresolved. Stopping remains blocked."}'; then
+        rmdir "$marker" 2>/dev/null || true
+        exit 2
+    fi
+fi
 exit 0
