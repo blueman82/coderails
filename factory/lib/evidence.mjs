@@ -1,4 +1,4 @@
-const credentialName = "(?:api[_-]?key|token|secret|password)";
+const credentialName = "(?:(?:access|refresh)[_-]?token|client[_-]?secret|api[_-]?key|token|secret|password)";
 const maskedCredential = "[credential masked]";
 const credentialKey = new RegExp(`^${credentialName}$`, "i");
 

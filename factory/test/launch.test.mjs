@@ -95,6 +95,22 @@ test("observes the native progress graph after provider JSON announces its sessi
   assert.equal(run.store.snapshot().selectedRun.graph.state, "ready");
 });
 
+test("falls back to the native loop's existing session path when its canonical slug moved", async () => {
+  const child = controlledChild();
+  const reads = [];
+  const run = createLauncher({
+    store: createRunStore(), projects: createProjectRegistry({ coderails: { cwd: "/safe/coderails" } }), createId: () => "run-1",
+    spawn: () => child, now: () => "2026-08-27T10:00:00.000Z", gitCommonDir: () => "/safe/coderails/.git", loopRoot: "/tmp/loops",
+    readDir: async () => [{ name: "old-slug", isDirectory: () => true }],
+    readProgress: async (path) => { reads.push(path); if (path.includes("old-slug")) return JSON.stringify({ graph: { nodes: {}, edges: [], joins: {} } }); const error = new Error("missing"); error.code = "ENOENT"; throw error; },
+  });
+  run.launch({ projectId: "coderails", provider: "codex", prompt: "test" });
+  child.stdout.emit("data", '{"type":"thread.started","thread_id":"session-1"}\n');
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(run.store.snapshot().selectedRun.graph.state, "ready");
+  assert.ok(reads.some((path) => path === "/tmp/loops/old-slug/session-1/progress.json"));
+});
+
 test("keeps a provider run failed when its process errors before close", () => {
   const child = controlledChild();
   const run = launcher({ spawn: () => child });

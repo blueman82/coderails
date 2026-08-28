@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { execFileSync, spawn as spawnChild } from "node:child_process";
-import { readFile } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -31,7 +31,25 @@ function progressPath(loopRoot, gitCommonDir, sessionId) {
   return join(loopRoot, gitCommonDir.replaceAll("/", "-"), sessionId.replaceAll("/", "_").replaceAll("..", ""), "progress.json");
 }
 
-export function createLauncher({ store, projects, createId = randomUUID, now = () => new Date().toISOString(), spawn = spawnChild, readProgress = readFile, gitCommonDir = defaultGitCommonDir, loopRoot = process.env.CODERAILS_AGENTIC_LOOP_DIR ?? join(homedir(), ".coderails", "agentic-loop"), refreshMs = 500 }) {
+async function readNativeProgress({ loopRoot, gitCommonDir, sessionId, readProgress, readDir }) {
+  const canonical = progressPath(loopRoot, gitCommonDir, sessionId);
+  const session = sessionId.replaceAll("/", "_").replaceAll("..", "");
+  let paths = [canonical];
+  try {
+    const slugs = (await readDir(loopRoot, { withFileTypes: true })).filter((entry) => entry.isDirectory()).map((entry) => entry.name).sort();
+    paths = [...new Set([canonical, ...slugs.map((slug) => join(loopRoot, slug, session, "progress.json"))])];
+  } catch {}
+  let missing;
+  for (const path of paths) {
+    try { return await readProgress(path, "utf8"); } catch (error) {
+      if (error?.code !== "ENOENT") throw error;
+      missing = error;
+    }
+  }
+  throw missing;
+}
+
+export function createLauncher({ store, projects, createId = randomUUID, now = () => new Date().toISOString(), spawn = spawnChild, readProgress = readFile, readDir = readdir, gitCommonDir = defaultGitCommonDir, loopRoot = process.env.CLAUDE_AGENTIC_LOOP_DIR ?? process.env.CODERAILS_AGENTIC_LOOP_DIR ?? join(homedir(), ".coderails", "agentic-loop"), refreshMs = 500 }) {
   function append(runId, order, type, payload) {
     store.appendEvidence({ runId, order, type, source: "provider", timestamp: now(), payload });
   }
@@ -64,7 +82,7 @@ export function createLauncher({ store, projects, createId = randomUUID, now = (
       const observeProgress = async () => {
         if (!observedSessionId) return;
         try {
-          const state = await readProgress(progressPath(loopRoot, gitCommonDir(project.cwd), observedSessionId), "utf8");
+          const state = await readNativeProgress({ loopRoot, gitCommonDir: gitCommonDir(project.cwd), sessionId: observedSessionId, readProgress, readDir });
           store.setProgress(runId, JSON.parse(state));
         } catch (error) {
           if (error?.code !== "ENOENT") append(runId, ++order, "progress_observation_error", error instanceof Error ? error.message : String(error));

@@ -31,3 +31,13 @@ test("masks JSON-formatted credential values without hiding other fields", () =>
   assert.match(evidence.payload, /"message":"keep this"/);
   assert.doesNotMatch(evidence.payload, /sentinel-token/);
 });
+
+test("masks compound credential names in provider output", () => {
+  const evidence = safeEvidence({
+    runId: "run-1", order: 7, type: "tool_result", source: "provider", timestamp: "2026-08-27T10:00:00Z",
+    payload: "access_token=sentinel refresh_token=also-secret client_secret=private",
+  });
+  assert.equal(evidence.redacted, true);
+  assert.doesNotMatch(evidence.payload, /sentinel|also-secret|private/);
+  assert.match(evidence.payload, /access_token=\[credential masked\]/);
+});
