@@ -66,7 +66,11 @@ gate_graph_complete() {
         exit 2
     fi
     if ! jq -e '
-      (.graph | type) == "object" and .graph.active_wave == null and .graph.hard_stop == null
+      (.graph | type) == "object" and
+      (.graph.nodes | type) == "object" and (.graph.nodes | length) > 0 and
+      (.graph.edges | type) == "array" and
+      (.graph.joins | type) == "object" and
+      .graph.active_wave == null and .graph.hard_stop == null
       and ([.graph.nodes[] | select(.status | IN("done","skipped") | not)] | length) == 0
       and ([.graph.joins[] | select(.released != true)] | length) == 0
     ' "$ALS_PATH" >/dev/null 2>&1; then
@@ -123,10 +127,15 @@ emit_graph_human_request() {
     command -v jq >/dev/null 2>&1 || return 1
     [ -n "$ALS_PATH" ] && [ -f "$ALS_PATH" ] || return 1
     jq -e '
-      (.graph | type) == "object" and
-      (([.graph.nodes[]? | select((.status // "") | IN("done","skipped") | not)] | length) > 0 or
-       ([.graph.joins[]? | select(.released != true)] | length) > 0 or
-       .graph.active_wave != null or .graph.hard_stop != null)
+      try (
+        (.graph | type) != "object" or
+        (.graph.nodes | type) != "object" or (.graph.nodes | length) == 0 or
+        (.graph.edges | type) != "array" or
+        (.graph.joins | type) != "object" or
+        ([.graph.nodes[] | select((.status // "") | IN("done","skipped") | not)] | length) > 0 or
+        ([.graph.joins[] | select(.released != true)] | length) > 0 or
+        .graph.active_wave != null or .graph.hard_stop != null
+      ) catch true
     ' "$ALS_PATH" >/dev/null 2>&1 || return 1
     local loop revision safe marker message
     loop=$(jq -r '.loop_id // empty' "$ALS_PATH" 2>/dev/null)

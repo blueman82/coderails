@@ -67,12 +67,60 @@ run_claude
 check "Claude repeated missing declaration stays blocked" 2 "$CLAUDE_RC"
 check "Claude repeated missing declaration does not repeat request" "" "$CLAUDE_OUT"
 
+jq '.loop_id = "loop-3"' "$claude_root/$slug/S1/progress.json" >"$TMP/progress.json" &&
+  mv "$TMP/progress.json" "$claude_root/$slug/S1/progress.json"
+: >"$claude_root/$slug/S1/.human-approval-loop-3-1"
+run_claude
+check "Claude marker write failure stays blocked" 2 "$CLAUDE_RC"
+check "Claude marker write failure still requests human approval" 1 "$(printf '%s' "$CLAUDE_OUT" | jq -e -s 'length == 1 and .[0].systemMessage != null' >/dev/null 2>&1 && echo 1 || echo 0)"
+
+jq '.loop_id = "loop-4"' "$claude_root/$slug/S1/progress.json" >"$TMP/progress.json" &&
+  mv "$TMP/progress.json" "$claude_root/$slug/S1/progress.json"
+rm -f "$claude_root/$slug/S1/.human-approval-loop-4-1"
+claude_output_failure_bin="$TMP/claude-output-failure-bin"
+mkdir -p "$claude_output_failure_bin"
+cat >"$claude_output_failure_bin/jq" <<'EOF'
+#!/usr/bin/env bash
+if [[ "$1" == "-n" ]]; then
+  exit 1
+fi
+exec /usr/bin/jq "$@"
+EOF
+chmod +x "$claude_output_failure_bin/jq"
+PATH="$claude_output_failure_bin:$PATH" run_claude
+check "Claude output-generation failure stays blocked" 2 "$CLAUDE_RC"
+check "Claude output-generation failure does not expose raw prompt" 0 "$(printf '%s' "$CLAUDE_OUT$CLAUDE_ERR" | grep -c 'Active agentic loop\|Continue the loop\|LOOP-STOP:' || true)"
+
 jq '.loop_id = null' "$claude_root/$slug/S1/progress.json" >"$TMP/progress.json" &&
   mv "$TMP/progress.json" "$claude_root/$slug/S1/progress.json"
 claude_transcript="$TMP/claude.jsonl"
 run_claude
 check "Claude malformed graph identity stays blocked" 2 "$CLAUDE_RC"
 check "Claude malformed graph identity explains repair" 1 "$(printf '%s' "$CLAUDE_ERR" | grep -qi 'graph identity' && echo 1 || echo 0)"
+
+jq '.loop_id = "loop-5" | .status = "complete" | .graph.nodes.A.status = "done"' \
+  "$claude_root/$slug/S1/progress.json" >"$TMP/progress.json" &&
+  mv "$TMP/progress.json" "$claude_root/$slug/S1/progress.json"
+jq '.loop_id = "loop-5"' "$claude_root/$slug/S1/retro.json" >"$TMP/retro.json" &&
+  mv "$TMP/retro.json" "$claude_root/$slug/S1/retro.json"
+claude_transcript="$TMP/claude.jsonl"
+run_claude
+check "Claude complete graph with missing eval evidence stays blocked" 2 "$CLAUDE_RC"
+check "Claude missing eval evidence explains repair" 1 "$(printf '%s' "$CLAUDE_ERR" | grep -qi 'evals are STALE' && echo 1 || echo 0)"
+jq -n '{session_id:"OTHER",loop_id:"other",revision:99,result:"GO"}' >"$claude_root/$slug/S1/evals.json"
+run_claude
+check "Claude mismatched eval evidence stays blocked" 2 "$CLAUDE_RC"
+check "Claude mismatched eval evidence explains repair" 1 "$(printf '%s' "$CLAUDE_ERR" | grep -qi 'evals are STALE' && echo 1 || echo 0)"
+
+jq '.loop_id = "loop-6" | .status = "complete" | .graph.nodes = {} | .graph.joins = {} | .graph.edges = []' \
+  "$claude_root/$slug/S1/progress.json" >"$TMP/progress.json" &&
+  mv "$TMP/progress.json" "$claude_root/$slug/S1/progress.json"
+jq -n '{session_id:"S1",loop_id:"loop-6",revision:1,result:"GO"}' >"$claude_root/$slug/S1/evals.json"
+jq '.loop_id = "loop-6"' "$claude_root/$slug/S1/retro.json" >"$TMP/retro.json" &&
+  mv "$TMP/retro.json" "$claude_root/$slug/S1/retro.json"
+run_claude
+check "Claude empty graph stays blocked" 2 "$CLAUDE_RC"
+check "Claude empty graph requests human approval" 1 "$(printf '%s' "$CLAUDE_OUT" | jq -e -s 'length == 1 and .[0].systemMessage != null' >/dev/null 2>&1 && echo 1 || echo 0)"
 
 codex_root="$TMP/codex-loops"
 mkdir -p "$codex_root/$slug/S1"
