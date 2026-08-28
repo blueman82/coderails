@@ -95,6 +95,20 @@ run_claude
 check "Claude retry after output failure stays blocked" 2 "$CLAUDE_RC"
 check "Claude retry after output failure emits the request" 1 "$(printf '%s' "$CLAUDE_OUT" | jq -e -s 'length == 1 and .[0].systemMessage != null' >/dev/null 2>&1 && echo 1 || echo 0)"
 
+for unresolved_status in ready running blocked failed stale; do
+  jq --arg status "$unresolved_status" --arg loop "loop-status-$unresolved_status" \
+    '.loop_id = $loop | .graph.nodes = {A:{status:$status}} | .graph.edges = [] | .graph.joins = {}' \
+    "$claude_root/$slug/S1/progress.json" >"$TMP/progress.json" &&
+    mv "$TMP/progress.json" "$claude_root/$slug/S1/progress.json"
+  jq --arg loop "loop-status-$unresolved_status" '.loop_id = $loop' "$claude_root/$slug/S1/retro.json" >"$TMP/retro.json" &&
+    mv "$TMP/retro.json" "$claude_root/$slug/S1/retro.json"
+  jq --arg loop "loop-status-$unresolved_status" '{session_id:"S1",loop_id:$loop,revision:1,result:"GO"}' \
+    >"$claude_root/$slug/S1/evals.json"
+  run_claude
+  check "Claude $unresolved_status graph stays blocked" 2 "$CLAUDE_RC"
+  check "Claude $unresolved_status graph emits the request" 1 "$(printf '%s' "$CLAUDE_OUT" | jq -e -s 'length == 1 and .[0].systemMessage != null' >/dev/null 2>&1 && echo 1 || echo 0)"
+done
+
 jq '.loop_id = null' "$claude_root/$slug/S1/progress.json" >"$TMP/progress.json" &&
   mv "$TMP/progress.json" "$claude_root/$slug/S1/progress.json"
 claude_transcript="$TMP/claude.jsonl"
@@ -171,6 +185,17 @@ check "Claude malformed edge member stays blocked" 2 "$CLAUDE_RC"
 check "Claude malformed edge member emits no approval request" "" "$CLAUDE_OUT"
 check "Claude malformed edge member explains graph repair" 1 "$(printf '%s' "$CLAUDE_ERR" | grep -qi 'graph shape' && echo 1 || echo 0)"
 
+jq '.loop_id = "loop-14" | .graph.nodes = {A:{status:"done"}} | .graph.edges = [{from:"ghost",to:"A"}] | .graph.joins = {}' \
+  "$claude_root/$slug/S1/progress.json" >"$TMP/progress.json" &&
+  mv "$TMP/progress.json" "$claude_root/$slug/S1/progress.json"
+jq -n '{session_id:"S1",loop_id:"loop-14",revision:1,result:"GO"}' >"$claude_root/$slug/S1/evals.json"
+jq '.loop_id = "loop-14"' "$claude_root/$slug/S1/retro.json" >"$TMP/retro.json" &&
+  mv "$TMP/retro.json" "$claude_root/$slug/S1/retro.json"
+run_claude
+check "Claude unknown edge node stays blocked" 2 "$CLAUDE_RC"
+check "Claude unknown edge node emits no approval request" "" "$CLAUDE_OUT"
+check "Claude unknown edge node explains graph repair" 1 "$(printf '%s' "$CLAUDE_ERR" | grep -qi 'graph shape' && echo 1 || echo 0)"
+
 jq '.loop_id = "loop-13" | .graph.nodes = {A:{status:"done"}} | .graph.edges = [] | .graph.joins = {A:"join"}' \
   "$claude_root/$slug/S1/progress.json" >"$TMP/progress.json" &&
   mv "$TMP/progress.json" "$claude_root/$slug/S1/progress.json"
@@ -181,6 +206,17 @@ run_claude
 check "Claude malformed join member stays blocked" 2 "$CLAUDE_RC"
 check "Claude malformed join member emits no approval request" "" "$CLAUDE_OUT"
 check "Claude malformed join member explains graph repair" 1 "$(printf '%s' "$CLAUDE_ERR" | grep -qi 'graph shape' && echo 1 || echo 0)"
+
+jq '.loop_id = "loop-15" | .graph.nodes = {A:{status:"done"}} | .graph.edges = [] | .graph.joins = {A:{mode:"all",released:false,inputs:["ghost"]}}' \
+  "$claude_root/$slug/S1/progress.json" >"$TMP/progress.json" &&
+  mv "$TMP/progress.json" "$claude_root/$slug/S1/progress.json"
+jq -n '{session_id:"S1",loop_id:"loop-15",revision:1,result:"GO"}' >"$claude_root/$slug/S1/evals.json"
+jq '.loop_id = "loop-15"' "$claude_root/$slug/S1/retro.json" >"$TMP/retro.json" &&
+  mv "$TMP/retro.json" "$claude_root/$slug/S1/retro.json"
+run_claude
+check "Claude unknown join node stays blocked" 2 "$CLAUDE_RC"
+check "Claude unknown join node emits no approval request" "" "$CLAUDE_OUT"
+check "Claude unknown join node explains graph repair" 1 "$(printf '%s' "$CLAUDE_ERR" | grep -qi 'graph shape' && echo 1 || echo 0)"
 
 jq '.loop_id = "loop-10" | del(.graph.active_wave) | del(.graph.hard_stop)' \
   "$claude_root/$slug/S1/progress.json" >"$TMP/progress.json" &&

@@ -125,28 +125,33 @@ gate_graph_complete() {
 
 graph_shape_valid() {
     jq -e '
-      (.graph | type) == "object" and
+      (.graph) as $graph
+      | ($graph.nodes) as $nodes
+      | (.graph | type) == "object" and
       (.graph.nodes | type) == "object" and (.graph.nodes | length) > 0 and
       (.graph.edges | type) == "array" and
       (.graph.joins | type) == "object" and
-      ([.graph.nodes | to_entries[] | select(
+      ([$nodes | to_entries[] | select(
         (.key | type) != "string" or (.key | length) == 0 or
         (.value | type) != "object" or
         (.value.status | type) != "string" or
-        (.value.status | IN("pending", "running", "done", "skipped", "hard-stop") | not)
+        (.value.status | IN("pending", "ready", "running", "blocked", "done", "skipped", "failed", "hard-stop", "stale") | not)
       )] | length) == 0 and
       ([.graph.edges[] | select(
         (type) != "object" or
         (.from | type) != "string" or (.from | length) == 0 or
-        (.to | type) != "string" or (.to | length) == 0
+        (.to | type) != "string" or (.to | length) == 0 or
+        ($nodes | has(.from) | not) or ($nodes | has(.to) | not)
       )] | length) == 0 and
       ([.graph.joins | to_entries[] | select(
         (.key | type) != "string" or (.key | length) == 0 or
         (.value | type) != "object" or
         (.value.mode != "all") or
-        ((.value.released | type) != "boolean") or
+        ((.value | has("released")) and (.value.released | type) != "boolean") or
         ((.value.inputs | type) != "array") or (.value.inputs | length) == 0 or
-        ([.value.inputs[] | select((type) != "string" or length == 0)] | length) > 0
+        ($nodes | has(.key) | not) or
+        ([.value.inputs[] as $input
+          | select(($input | type) != "string" or ($input | length) == 0 or ($nodes | has($input) | not))] | length) > 0
       )] | length) == 0 and
       (.graph | has("active_wave") and has("hard_stop")) and
       (.graph.active_wave == null or (.graph.active_wave | type) == "object") and
