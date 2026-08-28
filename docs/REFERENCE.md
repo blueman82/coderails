@@ -604,7 +604,7 @@ Hooks run automatically on lifecycle events. They can **block** (exit 2 / `permi
 
 ### Notes on the activation conditions
 
-- **Unresolved graph escalation**: the first blocked stop emits one clear human approval request; repeated stops suppress the duplicate request while keeping the graph block fail-closed.
+- **Unresolved graph escalation**: Claude's `loop_stall_guard.sh` and Codex's native `graph_completion_guard.sh` each emit one clear human approval request on the first blocked stop; repeated stops suppress the duplicate request while keeping the graph block fail-closed. Claude retries after a response-write failure by invalidating its newly-created marker; Codex emits a fallback block response and likewise never allows an output failure to clear the stop.
 - **`loop_state_guard` and `loop_stall_guard`** only enforce discipline when an `agentic-loop` Skill invocation appears in the transcript. Outside an agentic loop session they are silent no-ops.
 - **`unregistered_loop_guard`** is the inverse case: it fires precisely when NO `agentic-loop` Skill invocation appears in the transcript, but dispatch behaviour looks loop-like. It never blocks — only a nudge — so it carries no bypass mechanism.
 - **`offload_push_guard`** requires BOTH a push-to-main/master token and an offload cue in the same final message — a plain "I pushed to main" or a suggestion to run `/coderails:push` never matches, since neither carries the offload cue. Like `unregistered_loop_guard`, it never blocks and has no bypass mechanism.

@@ -129,6 +129,25 @@ graph_shape_valid() {
       (.graph.nodes | type) == "object" and (.graph.nodes | length) > 0 and
       (.graph.edges | type) == "array" and
       (.graph.joins | type) == "object" and
+      ([.graph.nodes | to_entries[] | select(
+        (.key | type) != "string" or (.key | length) == 0 or
+        (.value | type) != "object" or
+        (.value.status | type) != "string" or
+        (.value.status | IN("pending", "running", "done", "skipped", "hard-stop") | not)
+      )] | length) == 0 and
+      ([.graph.edges[] | select(
+        (type) != "object" or
+        (.from | type) != "string" or (.from | length) == 0 or
+        (.to | type) != "string" or (.to | length) == 0
+      )] | length) == 0 and
+      ([.graph.joins | to_entries[] | select(
+        (.key | type) != "string" or (.key | length) == 0 or
+        (.value | type) != "object" or
+        (.value.mode != "all") or
+        ((.value.released | type) != "boolean") or
+        ((.value.inputs | type) != "array") or (.value.inputs | length) == 0 or
+        ([.value.inputs[] | select((type) != "string" or length == 0)] | length) > 0
+      )] | length) == 0 and
       (.graph | has("active_wave") and has("hard_stop")) and
       (.graph.active_wave == null or (.graph.active_wave | type) == "object") and
       (.graph.hard_stop == null or (.graph.hard_stop | type) == "object")
@@ -144,20 +163,29 @@ emit_graph_human_request() {
       ([.graph.joins[] | select(.released != true)] | length) > 0 or
       .graph.active_wave != null or .graph.hard_stop != null
     ' "$ALS_PATH" >/dev/null 2>&1 || return 1
-    local loop revision safe marker message
+    local loop revision safe marker message marker_created=0
     loop=$(jq -r '.loop_id // empty' "$ALS_PATH" 2>/dev/null)
     revision=$(jq -r '.revision // empty' "$ALS_PATH" 2>/dev/null)
     [[ -n "$loop" && "$revision" =~ ^[0-9]+$ ]] || return 1
     safe=$(printf '%s' "$loop" | tr -c '[:alnum:]_.-' '_')
     marker="$(dirname "$ALS_PATH")/.human-approval-${safe}-${revision}"
     message="Human approval required: the native graph is unresolved. Approve the next action or resume the loop; stopping remains blocked until the graph is complete."
-    if ! mkdir "$marker" 2>/dev/null; then
+    if mkdir "$marker" 2>/dev/null; then
+        marker_created=1
+    else
         [[ -d "$marker" ]] && return 0
         # A marker write failure must not weaken the graph block; repeat the
         # notice rather than silently hiding a required human escalation.
         als_log "hook=loop_stall_guard session=$session_id human_request=dedupe_write_failed"
     fi
-    jq -n --arg m "$message" '{systemMessage: $m}' 2>/dev/null || true # best-effort: message output cannot weaken the block
+    if ! jq -n --arg m "$message" '{systemMessage: $m}' 2>/dev/null; then
+        # Do not leave a successful-looking dedupe marker after a failed
+        # response write: the next blocked stop must be able to retry.
+        if [ "$marker_created" -eq 1 ]; then
+            rmdir "$marker" 2>/dev/null || true
+        fi
+        als_log "hook=loop_stall_guard session=$session_id output=human_request_failed blocked=1"
+    fi
     return 0
 }
 

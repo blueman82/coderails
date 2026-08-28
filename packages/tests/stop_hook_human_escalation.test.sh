@@ -90,6 +90,10 @@ chmod +x "$claude_output_failure_bin/jq"
 PATH="$claude_output_failure_bin:$PATH" run_claude
 check "Claude output-generation failure stays blocked" 2 "$CLAUDE_RC"
 check "Claude output-generation failure does not expose raw prompt" 0 "$(printf '%s' "$CLAUDE_OUT$CLAUDE_ERR" | grep -c 'Active agentic loop\|Continue the loop\|LOOP-STOP:' || true)"
+check "Claude output-generation failure does not leave a dedupe marker" 0 "$(test -e "$claude_root/$slug/S1/.human-approval-loop-4-1" && echo 1 || echo 0)"
+run_claude
+check "Claude retry after output failure stays blocked" 2 "$CLAUDE_RC"
+check "Claude retry after output failure emits the request" 1 "$(printf '%s' "$CLAUDE_OUT" | jq -e -s 'length == 1 and .[0].systemMessage != null' >/dev/null 2>&1 && echo 1 || echo 0)"
 
 jq '.loop_id = null' "$claude_root/$slug/S1/progress.json" >"$TMP/progress.json" &&
   mv "$TMP/progress.json" "$claude_root/$slug/S1/progress.json"
@@ -144,6 +148,39 @@ run_claude
 check "Claude malformed joins stay blocked" 2 "$CLAUDE_RC"
 check "Claude malformed joins emit no approval request" "" "$CLAUDE_OUT"
 check "Claude malformed joins explain graph repair" 1 "$(printf '%s' "$CLAUDE_ERR" | grep -qi 'graph shape' && echo 1 || echo 0)"
+
+jq '.loop_id = "loop-11" | .graph.nodes = {A:"done"} | .graph.edges = [] | .graph.joins = {} | .graph.active_wave = null | .graph.hard_stop = null' \
+  "$claude_root/$slug/S1/progress.json" >"$TMP/progress.json" &&
+  mv "$TMP/progress.json" "$claude_root/$slug/S1/progress.json"
+jq -n '{session_id:"S1",loop_id:"loop-11",revision:1,result:"GO"}' >"$claude_root/$slug/S1/evals.json"
+jq '.loop_id = "loop-11"' "$claude_root/$slug/S1/retro.json" >"$TMP/retro.json" &&
+  mv "$TMP/retro.json" "$claude_root/$slug/S1/retro.json"
+run_claude
+check "Claude malformed node member stays blocked" 2 "$CLAUDE_RC"
+check "Claude malformed node member emits no approval request" "" "$CLAUDE_OUT"
+check "Claude malformed node member explains graph repair" 1 "$(printf '%s' "$CLAUDE_ERR" | grep -qi 'graph shape' && echo 1 || echo 0)"
+
+jq '.loop_id = "loop-12" | .graph.nodes = {A:{status:"done"}} | .graph.edges = ["edge"] | .graph.joins = {}' \
+  "$claude_root/$slug/S1/progress.json" >"$TMP/progress.json" &&
+  mv "$TMP/progress.json" "$claude_root/$slug/S1/progress.json"
+jq -n '{session_id:"S1",loop_id:"loop-12",revision:1,result:"GO"}' >"$claude_root/$slug/S1/evals.json"
+jq '.loop_id = "loop-12"' "$claude_root/$slug/S1/retro.json" >"$TMP/retro.json" &&
+  mv "$TMP/retro.json" "$claude_root/$slug/S1/retro.json"
+run_claude
+check "Claude malformed edge member stays blocked" 2 "$CLAUDE_RC"
+check "Claude malformed edge member emits no approval request" "" "$CLAUDE_OUT"
+check "Claude malformed edge member explains graph repair" 1 "$(printf '%s' "$CLAUDE_ERR" | grep -qi 'graph shape' && echo 1 || echo 0)"
+
+jq '.loop_id = "loop-13" | .graph.nodes = {A:{status:"done"}} | .graph.edges = [] | .graph.joins = {A:"join"}' \
+  "$claude_root/$slug/S1/progress.json" >"$TMP/progress.json" &&
+  mv "$TMP/progress.json" "$claude_root/$slug/S1/progress.json"
+jq -n '{session_id:"S1",loop_id:"loop-13",revision:1,result:"GO"}' >"$claude_root/$slug/S1/evals.json"
+jq '.loop_id = "loop-13"' "$claude_root/$slug/S1/retro.json" >"$TMP/retro.json" &&
+  mv "$TMP/retro.json" "$claude_root/$slug/S1/retro.json"
+run_claude
+check "Claude malformed join member stays blocked" 2 "$CLAUDE_RC"
+check "Claude malformed join member emits no approval request" "" "$CLAUDE_OUT"
+check "Claude malformed join member explains graph repair" 1 "$(printf '%s' "$CLAUDE_ERR" | grep -qi 'graph shape' && echo 1 || echo 0)"
 
 jq '.loop_id = "loop-10" | del(.graph.active_wave) | del(.graph.hard_stop)' \
   "$claude_root/$slug/S1/progress.json" >"$TMP/progress.json" &&
