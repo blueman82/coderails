@@ -710,7 +710,7 @@ legacy paths.
 
 | Artifact | Location | Committed? | Notes |
 |---|---|---|---|
-| `workflow.config.yaml` | first `.coderails/workflow.config.yaml` found walking from cwd up to git root (`$(pwd)/.coderails/` for `/init`) | Yes | Project-specific config for jira, wiki, worktree, engineering-principles, and sandbox workers. Created or migrated by `/coderails:init`. |
+| `workflow.config.yaml` | first `.coderails/workflow.config.yaml` found walking from cwd up to git root (`$(pwd)/.coderails/` for `/init`) | No — local project setup, ignored by Git | Project-specific config for jira, wiki, worktree, engineering-principles, and sandbox workers. Created or migrated by `/coderails:init`; share its values through your normal project configuration process. |
 | `.claude/test_command` | Project working directory | Yes (project-local) | Plain-text file containing the test command. Created by `/coderails:test-gate-setup`. Activates `test_gate.sh`. |
 | Specs from brainstorming | Session-local scratch path (`docs/coderails/specs/` is gitignored) | No — ephemeral, never tracked | Written by `superpowers:brainstorming` after design resolution. Owner decision 2026-07-11: use `coderails:handoff` or a wiki page for a durable record instead. |
 | Plans from writing-plans | Session-local scratch path (`docs/coderails/plans/` is gitignored) | No — ephemeral, never tracked | Written by `superpowers:writing-plans`. Same owner decision, 2026-07-11. |

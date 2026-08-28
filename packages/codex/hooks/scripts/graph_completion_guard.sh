@@ -55,11 +55,21 @@ revision=$(jq -r '.revision // empty' "$state" 2>/dev/null)
 safe_loop=$(printf '%s' "$loop_id" | tr -c '[:alnum:]_.-' '_')
 marker="$(dirname "$state")/.human-approval-${safe_loop}-${revision}"
 hook::log "hook=graph_completion_guard session=$session_id blocked=1"
-if [[ -n "$loop_id" && "$revision" =~ ^[0-9]+$ ]] && mkdir "$marker" 2>/dev/null; then
-    jq -n --arg reason "Native graph unresolved; stopping remains blocked." --arg message "$message" \
-        '{decision:"block",reason:$reason,systemMessage:$message}'
+if [[ -n "$loop_id" && "$revision" =~ ^[0-9]+$ ]]; then
+    if mkdir "$marker" 2>/dev/null; then
+        :
+    elif [[ -d "$marker" ]]; then
+        hook::continue_turn "Native graph unresolved; stopping remains blocked."
+        exit 0
+    else
+        hook::log "hook=graph_completion_guard session=$session_id human_request=dedupe_write_failed"
+    fi
 else
-    # Keep repeated, invalid, or unwriteable state fail-closed and visible.
+    # Keep invalid state fail-closed and visible without claiming it is a valid
+    # unresolved graph.
     hook::continue_turn "Native graph unresolved; stopping remains blocked."
+    exit 0
 fi
+jq -n --arg reason "Native graph unresolved; stopping remains blocked." --arg message "$message" \
+    '{decision:"block",reason:$reason,systemMessage:$message}' || rmdir "$marker" 2>/dev/null || true
 exit 0

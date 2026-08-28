@@ -67,6 +67,13 @@ run_claude
 check "Claude repeated missing declaration stays blocked" 2 "$CLAUDE_RC"
 check "Claude repeated missing declaration does not repeat request" "" "$CLAUDE_OUT"
 
+jq '.loop_id = null' "$claude_root/$slug/S1/progress.json" >"$TMP/progress.json" &&
+  mv "$TMP/progress.json" "$claude_root/$slug/S1/progress.json"
+claude_transcript="$TMP/claude.jsonl"
+run_claude
+check "Claude malformed graph identity stays blocked" 2 "$CLAUDE_RC"
+check "Claude malformed graph identity explains repair" 1 "$(printf '%s' "$CLAUDE_ERR" | grep -qi 'graph identity' && echo 1 || echo 0)"
+
 codex_root="$TMP/codex-loops"
 mkdir -p "$codex_root/$slug/S1"
 jq -n '{schema_version:2,session_id:"S1",loop_id:"loop-1",revision:1,status:"in-progress",graph:{nodes:{A:{status:"pending",outcome:"pending",retry:{attempts:0,max:2},evidence:[]}},edges:[],joins:{},active_wave:null,hard_stop:null}}' \
@@ -80,6 +87,13 @@ run_codex() {
   CODEX_OUT=$(cat "$out")
 }
 
+run_codex_at() {
+  local root="$1" session="$2" out="$3"
+  printf '%s' "$(jq -cn --arg cwd "$TMP/repo" --arg session "$session" '{session_id:$session,cwd:$cwd,last_assistant_message:"done",hook_event_name:"Stop"}')" |
+    CODERAILS_AGENTIC_LOOP_DIR="$root" PLUGIN_ROOT="$ROOT/packages/codex" \
+    CODERAILS_DISCIPLINE_LOG="$TMP/codex-marker-failure.log" "$ROOT/packages/codex/hooks/scripts/graph_completion_guard.sh" >"$out"
+}
+
 run_codex
 check "Codex unresolved graph stays blocked" 1 "$(printf '%s' "$CODEX_OUT" | jq -e '.decision == "block"' >/dev/null 2>&1 && echo 1 || echo 0)"
 check "Codex first block emits one human request" 1 "$(printf '%s' "$CODEX_OUT" | jq -e '.systemMessage != null' >/dev/null 2>&1 && echo 1 || echo 0)"
@@ -89,6 +103,25 @@ run_codex
 check "Codex repeated unresolved graph stays blocked" 1 "$(printf '%s' "$CODEX_OUT" | jq -e '.decision == "block"' >/dev/null 2>&1 && echo 1 || echo 0)"
 check "Codex repeated block does not repeat human request" "" "$(printf '%s' "$CODEX_OUT" | jq -r '.systemMessage // empty')"
 check "Codex repeated block does not repeat raw graph dump" 0 "$(printf '%s' "$CODEX_OUT" | grep -c 'progress.json\|active_wave\|nodes' || true)"
+
+codex_marker_failure_root="$TMP/codex-marker-failure"
+mkdir -p "$codex_marker_failure_root/$slug/S3"
+jq '.session_id = "S3" | .loop_id = "loop-3" | .revision = 3' "$codex_root/$slug/S1/progress.json" >"$codex_marker_failure_root/$slug/S3/progress.json"
+: >"$codex_marker_failure_root/$slug/S3/.human-approval-loop-3-3"
+codex_marker_failure_out="$TMP/codex-marker-failure.out"
+run_codex_at "$codex_marker_failure_root" S3 "$codex_marker_failure_out"
+CODEX_OUT=$(cat "$codex_marker_failure_out")
+check "Codex marker write failure stays blocked" 1 "$(printf '%s' "$CODEX_OUT" | jq -e '.decision == "block"' >/dev/null 2>&1 && echo 1 || echo 0)"
+check "Codex marker write failure still requests human approval" 1 "$(printf '%s' "$CODEX_OUT" | jq -e '.systemMessage != null' >/dev/null 2>&1 && echo 1 || echo 0)"
+
+codex_malformed_root="$TMP/codex-malformed"
+mkdir -p "$codex_malformed_root/$slug/S4"
+printf '{not-json\n' >"$codex_malformed_root/$slug/S4/progress.json"
+codex_malformed_out="$TMP/codex-malformed.out"
+run_codex_at "$codex_malformed_root" S4 "$codex_malformed_out"
+CODEX_OUT=$(cat "$codex_malformed_out")
+check "Codex malformed state stays blocked" 1 "$(printf '%s' "$CODEX_OUT" | jq -e '.decision == "block"' >/dev/null 2>&1 && echo 1 || echo 0)"
+check "Codex malformed state explains repair" 1 "$(printf '%s' "$CODEX_OUT" | jq -r '.reason // empty' | grep -qi 'invalid' && echo 1 || echo 0)"
 
 codex_evidence_root="$TMP/codex-evidence"
 mkdir -p "$codex_evidence_root/$slug/S2"
