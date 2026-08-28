@@ -42,11 +42,6 @@ export function createFactoryServer({ keepaliveMs = 15_000, store = createRunSto
       }
       return;
     }
-    if (request.method === "POST" && url.pathname === "/api/demo") {
-      const run = store.createDemo();
-      sendJson(response, { runId: run.id }, 201);
-      return;
-    }
     if (request.method !== "GET") {
       response.writeHead(405).end();
       return;

@@ -16,8 +16,8 @@ test("Factory stores the exact prompt separately from safe evidence", () => {
       provider: "codex",
       prompt: "Fix the auth timeout",
       status: "queued",
-      graph: { state: "unavailable", message: "No progress graph available" },
-      evidence: [{ runId: "run-1", order: 1, type: "message", source: "provider", timestamp: "2026-08-27T10:00:00Z", redacted: true, payload: { text: "[redacted]" } }],
+      graph: { state: "waiting", message: "Waiting for the native Coderails graph…" },
+      evidence: [{ runId: "run-1", order: 1, type: "message", source: "provider", timestamp: "2026-08-27T10:00:00Z", redacted: false, payload: '{"text":"secret"}' }],
     },
   });
 });
@@ -44,13 +44,10 @@ test("publishes run status changes for the live Factory view", () => {
   assert.deepEqual(events, [{ type: "status", runId: "run-1", status: "running" }]);
 });
 
-test("creates a server-owned demo run with a selectable graph and activity", () => {
+test("updates a run only from its observed native progress record", () => {
   const store = createRunStore();
-  const run = store.createDemo();
-  const snapshot = store.snapshot();
-
-  assert.equal(run.id, "demo-factory-run");
-  assert.equal(snapshot.selectedRun.graph.state, "ready");
-  assert.equal(snapshot.selectedRun.graph.nodes.length, 3);
-  assert.ok(snapshot.selectedRun.evidence.length > 3);
+  store.create({ id: "run-1", projectId: "coderails", provider: "codex", prompt: "test" });
+  store.setProgress("run-1", { graph: { nodes: { check: { status: "running" } }, edges: [], joins: {} } });
+  assert.equal(store.snapshot().selectedRun.graph.state, "ready");
+  assert.equal(store.snapshot().selectedRun.graph.nodes[0].id, "check");
 });

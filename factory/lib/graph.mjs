@@ -1,4 +1,4 @@
-const unavailable = { state: "unavailable", message: "No progress graph available" };
+const waiting = { state: "waiting", message: "Waiting for the native Coderails graph…" };
 
 function namedList(node, id, name) {
   const value = node[name] ?? [];
@@ -7,7 +7,7 @@ function namedList(node, id, name) {
 }
 
 export function parseProgressGraph(progress) {
-  if (!progress) return unavailable;
+  if (!progress) return waiting;
   const graph = progress.graph;
   if (!graph || typeof graph !== "object" || Array.isArray(graph)) return { state: "malformed", message: "graph must be an object" };
   if (!graph.nodes || typeof graph.nodes !== "object" || Array.isArray(graph.nodes)) return { state: "malformed", message: "graph.nodes must be an object" };
@@ -38,11 +38,11 @@ export function parseProgressGraph(progress) {
         readiness: node.status === "running" ? "active" : node.status === "pending" && required.every((dependency) => ["done", "skipped"].includes(graph.nodes[dependency].outcome)) ? "ready" : "waiting",
         outcome: node.outcome || node.status || "unknown",
         retries: { attempts: node.retry?.attempts ?? 0, max: node.retry?.max ?? 0 },
-        prompt: node.prompt ?? null,
-        activity: namedList(node, id, "activity"),
-        checks: namedList(node, id, "checks"),
-        outputs: namedList(node, id, "outputs"),
-        attempts: namedList(node, id, "attempts"),
+        prompt: node.prompt == null ? null : maskValue(node.prompt),
+        activity: maskValue(namedList(node, id, "activity")),
+        checks: maskValue(namedList(node, id, "checks")),
+        outputs: maskValue(namedList(node, id, "outputs")),
+        attempts: maskValue(namedList(node, id, "attempts")),
       };
       }),
     };
@@ -50,3 +50,4 @@ export function parseProgressGraph(progress) {
     return { state: "malformed", message: error.message };
   }
 }
+import { maskValue } from "./evidence.mjs";

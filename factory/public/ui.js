@@ -44,6 +44,6 @@ export function cycleTheme(theme) {
 
 export function activityLines(evidence) {
   return evidence.length
-    ? [...evidence].sort((left, right) => left.timestamp.localeCompare(right.timestamp) || left.order - right.order).map((item) => `${item.timestamp.slice(11, 19)} ${item.source} ${item.type}: ${item.payload}`)
+    ? [...evidence].sort((left, right) => left.timestamp.localeCompare(right.timestamp) || left.order - right.order).map((item) => `${item.timestamp.slice(11, 19)} ${item.source} ${item.type}: ${item.payload}${item.redacted ? " (credential masked)" : ""}`)
     : ["Waiting for Factory activity…"];
 }

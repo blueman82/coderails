@@ -76,12 +76,7 @@ form.addEventListener("submit", async (event) => {
   if (!response.ok) { text(activity, "Run was not started."); return; }
   form.reset(); await refresh((await response.json()).runId);
 });
-document.querySelector(".demo").addEventListener("click", async () => {
-  const response = await fetch("/api/demo", { method: "POST" });
-  if (!response.ok) { text(activity, "Demo graph is unavailable."); return; }
-  await refresh((await response.json()).runId);
-});
 themeButton.addEventListener("click", () => { theme = cycleTheme(theme); localStorage.setItem("factory-theme", theme); applyTheme(); });
 applyTheme(); refresh().catch(() => text(queue, "Factory is loading"));
 const events = new EventSource("/api/events");
-["evidence", "status"].forEach((type) => events.addEventListener(type, () => refresh(snapshot.selectedRunId).catch(() => {})));
+["evidence", "status", "graph"].forEach((type) => events.addEventListener(type, () => refresh(snapshot.selectedRunId).catch(() => {})));

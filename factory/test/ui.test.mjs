@@ -43,9 +43,10 @@ test("cycles the persisted display theme", () => {
   assert.equal(cycleTheme("dark"), "system");
 });
 
-test("formats redacted evidence as scrollable activity", () => {
+test("formats visible activity and notes only actual masking", () => {
   assert.deepEqual(activityLines([
-    { timestamp: "2026-08-27T10:00:00Z", source: "provider", type: "provider_stdout", payload: "[redacted]" },
-  ]), ["10:00:00 provider provider_stdout: [redacted]"]);
+    { timestamp: "2026-08-27T10:00:00Z", source: "provider", type: "provider_stdout", payload: "working", redacted: false },
+    { timestamp: "2026-08-27T10:00:01Z", source: "provider", type: "provider_stdout", payload: "token=[credential masked]", redacted: true },
+  ]), ["10:00:00 provider provider_stdout: working", "10:00:01 provider provider_stdout: token=[credential masked] (credential masked)"]);
   assert.deepEqual(activityLines([]), ["Waiting for Factory activity…"]);
 });

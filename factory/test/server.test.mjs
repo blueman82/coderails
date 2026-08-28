@@ -44,7 +44,7 @@ test("keeps one localhost SSE stream alive", async (t) => {
   await reader.cancel();
 });
 
-test("streams redacted Factory evidence through the one SSE endpoint", async (t) => {
+test("streams readable Factory evidence through the one SSE endpoint", async (t) => {
   const store = createRunStore();
   store.create({ id: "run-1", projectId: "coderails", provider: "codex", prompt: "test" });
   const server = await startFactoryServer({ store, keepaliveMs: 5 });
@@ -58,8 +58,7 @@ test("streams redacted Factory evidence through the one SSE endpoint", async (t)
   const { value } = await reader.read();
   const event = new TextDecoder().decode(value);
   assert.match(event, /event: evidence/);
-  assert.match(event, /\[redacted\]/);
-  assert.doesNotMatch(event, /secret/);
+  assert.match(event, /secret/);
   await reader.cancel();
 });
 
@@ -76,7 +75,7 @@ test("returns the selected Factory record without a raw progress dump", async (t
     selectedRunId: "run-1",
     selectedRun: {
       id: "run-1", projectId: "coderails", provider: "codex", prompt: "Keep this exact", status: "queued",
-      graph: { state: "unavailable", message: "No progress graph available" }, evidence: [],
+      graph: { state: "waiting", message: "Waiting for the native Coderails graph…" }, evidence: [],
     },
   });
 });
@@ -107,19 +106,12 @@ test("accepts only project, provider, and prompt when launching a Factory run", 
   assert.deepEqual(store.snapshot(), { runs: [], selectedRunId: null });
 });
 
-test("creates only the server-owned demo graph fixture", async (t) => {
+test("does not expose a fake demo graph route", async (t) => {
   const { server, baseUrl } = await startFactory();
   t.after(() => server.close());
 
   const response = await fetch(`${baseUrl}/api/demo`, { method: "POST" });
-  assert.equal(response.status, 201);
-  assert.deepEqual(await response.json(), { runId: "demo-factory-run" });
-
-  const snapshot = await fetch(`${baseUrl}/api/snapshot?run=demo-factory-run`);
-  const selected = (await snapshot.json()).selectedRun;
-  assert.equal(selected.graph.state, "ready");
-  assert.equal(selected.graph.nodes.length, 3);
-  assert.ok(selected.evidence.length > 3);
+  assert.equal(response.status, 405);
 });
 
 test("Factory server does not import either dashboard tree", async () => {

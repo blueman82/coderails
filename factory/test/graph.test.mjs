@@ -41,8 +41,18 @@ test("rejects malformed named inspector fields", () => {
   }), { state: "malformed", message: "graph node plan activity must be an array" });
 });
 
-test("makes malformed and unavailable progress records visible", () => {
-  assert.deepEqual(parseProgressGraph(null), { state: "unavailable", message: "No progress graph available" });
+test("makes malformed and waiting native progress records visible", () => {
+  assert.deepEqual(parseProgressGraph(null), { state: "waiting", message: "Waiting for the native Coderails graph…" });
   assert.deepEqual(parseProgressGraph({ graph: { nodes: [] } }), { state: "malformed", message: "graph.nodes must be an object" });
   assert.deepEqual(parseProgressGraph({ graph: { nodes: { plan: null }, edges: [], joins: {} } }), { state: "malformed", message: "graph node plan is invalid" });
+});
+
+test("masks credentials in graph inspector fields without hiding the graph", () => {
+  const graph = parseProgressGraph({
+    graph: { nodes: { plan: { status: "running", prompt: "token=sentinel", outputs: [{ name: "result", value: "password=secret" }, { name: "token", value: "SENTINEL_graph_secret" }] } }, edges: [], joins: {} },
+  });
+  assert.equal(graph.state, "ready");
+  assert.equal(graph.nodes[0].prompt, "token=[credential masked]");
+  assert.equal(graph.nodes[0].outputs[0].value, "password=[credential masked]");
+  assert.equal(graph.nodes[0].outputs[1].value, "[credential masked]");
 });
