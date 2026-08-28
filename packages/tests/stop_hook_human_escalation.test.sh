@@ -118,7 +118,7 @@ codex_output_failure_bin="$TMP/codex-output-failure-bin"
 mkdir -p "$codex_output_failure_bin"
 cat >"$codex_output_failure_bin/jq" <<'EOF'
 #!/usr/bin/env bash
-if [[ "$*" == *'--arg message'* ]]; then
+if [[ "$1" == "-n" ]]; then
   exit 1
 fi
 exec /usr/bin/jq "$@"
@@ -138,6 +138,11 @@ run_codex_at "$codex_malformed_root" S4 "$codex_malformed_out"
 CODEX_OUT=$(cat "$codex_malformed_out")
 check "Codex malformed state stays blocked" 1 "$(printf '%s' "$CODEX_OUT" | jq -e '.decision == "block"' >/dev/null 2>&1 && echo 1 || echo 0)"
 check "Codex malformed state explains repair" 1 "$(printf '%s' "$CODEX_OUT" | jq -r '.reason // empty' | grep -qi 'invalid' && echo 1 || echo 0)"
+
+codex_malformed_output_out="$TMP/codex-malformed-output.out"
+PATH="$codex_output_failure_bin:$PATH" run_codex_at "$codex_malformed_root" S4 "$codex_malformed_output_out"
+CODEX_OUT=$(cat "$codex_malformed_output_out")
+check "Codex malformed-state output failure stays blocked" 1 "$(printf '%s' "$CODEX_OUT" | jq -e '.decision == "block"' >/dev/null 2>&1 && echo 1 || echo 0)"
 
 codex_evidence_root="$TMP/codex-evidence"
 mkdir -p "$codex_evidence_root/$slug/S2"
