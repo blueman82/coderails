@@ -65,12 +65,17 @@ gate_graph_complete() {
         echo "[loop-stall-guard] LOOP-STOP: complete refused: graph identity is missing or malformed." >&2
         exit 2
     fi
+    if ! graph_shape_valid; then
+        echo "[loop-stall-guard] LOOP-STOP: complete refused: graph shape is missing or malformed. Repair progress.json before declaring complete." >&2
+        exit 2
+    fi
     if ! jq -e '
-      (.graph | type) == "object" and .graph.active_wave == null and .graph.hard_stop == null
+      .graph.active_wave == null and .graph.hard_stop == null
       and ([.graph.nodes[] | select(.status | IN("done","skipped") | not)] | length) == 0
       and ([.graph.joins[] | select(.released != true)] | length) == 0
     ' "$ALS_PATH" >/dev/null 2>&1; then
-        echo "[loop-stall-guard] LOOP-STOP: complete refused: the durable graph is unfinished." >&2
+        emit_graph_human_request
+        echo "[loop-stall-guard] Native graph unresolved; stopping remains blocked." >&2
         exit 2
     fi
     local loop_dir
@@ -118,6 +123,86 @@ gate_graph_complete() {
     }
 }
 
+graph_shape_valid() {
+    jq -e '
+      (.graph) as $graph
+      | ($graph.nodes) as $nodes
+      | ($graph.edges + [$graph.joins | to_entries[] as $join
+          | $join.value.inputs[]? | {from:.,to:$join.key}]) as $dependencies
+      | (.graph | type) == "object" and
+      (.graph.nodes | type) == "object" and (.graph.nodes | length) > 0 and
+      (.graph.edges | type) == "array" and
+      (.graph.joins | type) == "object" and
+      ([$nodes | to_entries[] | select(
+        (.key | type) != "string" or (.key | length) == 0 or
+        (.value | type) != "object" or
+        (.value.status | type) != "string" or
+        (.value.status | IN("pending", "ready", "running", "blocked", "done", "skipped", "failed", "hard-stop", "stale") | not)
+      )] | length) == 0 and
+      ([.graph.edges[] as $edge | select(
+        ($edge | type) != "object" or
+        ($edge.from | type) != "string" or ($edge.from | length) == 0 or
+        ($edge.to | type) != "string" or ($edge.to | length) == 0 or
+        ($nodes | has($edge.from) | not) or ($nodes | has($edge.to) | not)
+      )] | length) == 0 and
+      ([.graph.joins | to_entries[] as $join | select(
+        ($join.key | type) != "string" or ($join.key | length) == 0 or
+        ($join.value | type) != "object" or
+        ($join.value.mode != "all") or
+        (($join.value | has("released")) and ($join.value.released | type) != "boolean") or
+        (($join.value.inputs | type) != "array") or ($join.value.inputs | length) == 0 or
+        ($nodes | has($join.key) | not) or
+        ([$join.value.inputs[] as $input
+          | select(($input | type) != "string" or ($input | length) == 0 or ($nodes | has($input) | not))] | length) > 0
+      )] | length) == 0 and
+      ([$dependencies[] | select(.from == .to)] | length) == 0 and
+      (((reduce range(0; ($nodes | length)) as $i ($dependencies;
+          . + [.[] as $left
+            | .[] as $right
+            | select($left.to == $right.from)
+            | {from:$left.from,to:$right.to}]
+        ) | unique_by([.from,.to])) | any(.from == .to)) | not) and
+      (.graph | has("active_wave") and has("hard_stop")) and
+      (.graph.active_wave == null or (.graph.active_wave | type) == "object") and
+      (.graph.hard_stop == null or (.graph.hard_stop | type) == "object")
+    ' "$ALS_PATH" >/dev/null 2>&1
+}
+
+emit_graph_human_request() {
+    command -v jq >/dev/null 2>&1 || return 1
+    [ -n "$ALS_PATH" ] && [ -f "$ALS_PATH" ] || return 1
+    graph_shape_valid || return 1
+    jq -e '
+      ([.graph.nodes[] | select((.status // "") | IN("done","skipped") | not)] | length) > 0 or
+      ([.graph.joins[] | select(.released != true)] | length) > 0 or
+      .graph.active_wave != null or .graph.hard_stop != null
+    ' "$ALS_PATH" >/dev/null 2>&1 || return 1
+    local loop revision safe marker message marker_created=0
+    loop=$(jq -r '.loop_id // empty' "$ALS_PATH" 2>/dev/null)
+    revision=$(jq -r '.revision // empty' "$ALS_PATH" 2>/dev/null)
+    [[ -n "$loop" && "$revision" =~ ^[0-9]+$ ]] || return 1
+    safe=$(printf '%s' "$loop" | tr -c '[:alnum:]_.-' '_')
+    marker="$(dirname "$ALS_PATH")/.human-approval-${safe}-${revision}"
+    message="Human approval required: the native graph is unresolved. Approve the next action or resume the loop; stopping remains blocked until the graph is complete."
+    if mkdir "$marker" 2>/dev/null; then
+        marker_created=1
+    else
+        [[ -d "$marker" ]] && return 0
+        # A marker write failure must not weaken the graph block; repeat the
+        # notice rather than silently hiding a required human escalation.
+        als_log "hook=loop_stall_guard session=$session_id human_request=dedupe_write_failed"
+    fi
+    if ! jq -n --arg m "$message" '{systemMessage: $m}' 2>/dev/null; then
+        # Do not leave a successful-looking dedupe marker after a failed
+        # response write: the next blocked stop must be able to retry.
+        if [ "$marker_created" -eq 1 ]; then
+            rmdir "$marker" 2>/dev/null || true
+        fi
+        als_log "hook=loop_stall_guard session=$session_id output=human_request_failed blocked=1"
+    fi
+    return 0
+}
+
 gate_loop_stop_declared() {
     # Stable extract rides out the transcript-flush race (shared with voice_announce.sh).
     text=$(als_stable_last_text "$transcript" "$TAIL_LINES" "$MAX_ATTEMPTS" "$SLEEP_S")
@@ -143,7 +228,11 @@ gate_loop_stop_declared() {
         # parse. This is the ONE place either message reaches the human: emitted
         # ONLY here, ONLY once, AFTER both gates above have had their chance to
         # append.
-        [ -n "$ALS_PENDING_SYSMSG" ] && jq -n --arg m "$ALS_PENDING_SYSMSG" '{systemMessage: $m}' 2>/dev/null
+        if [ -n "$ALS_PENDING_SYSMSG" ] && ! jq -n --arg m "$ALS_PENDING_SYSMSG" '{systemMessage: $m}' 2>/dev/null; then
+            als_log "hook=loop_stall_guard session=$session_id output=system_message_failed blocked=1"
+            echo "[loop-stall-guard] Stop response output failed; stopping remains blocked." >&2
+            exit 2
+        fi
         bump_loop_stop_count "$category"
         als_log "hook=loop_stall_guard session=$session_id invocations=$ALS_INVOCATIONS declared=1 blocked=0"
         exit 0
@@ -151,7 +240,17 @@ gate_loop_stop_declared() {
 }
 
 block_missing_declaration() {
-    als_log "hook=loop_stall_guard session=$session_id invocations=$ALS_INVOCATIONS declared=0 blocked=1"
+    if command -v jq >/dev/null 2>&1 && [ -n "$ALS_PATH" ] && [ -f "$ALS_PATH" ] &&
+        jq -e '(.graph | type) == "object"' "$ALS_PATH" >/dev/null 2>&1 && ! graph_shape_valid; then
+        echo "[loop-stall-guard] Native graph shape is missing or malformed; repair progress.json before stopping." >&2
+        exit 2
+    fi
+    if emit_graph_human_request; then
+        als_log "hook=loop_stall_guard session=$session_id invocations=$ALS_INVOCATIONS declared=0 blocked=1 graph_unresolved=1"
+        echo "[loop-stall-guard] Native graph unresolved; stopping remains blocked." >&2
+        exit 2
+    fi
+    als_log "hook=loop-stall_guard session=$session_id invocations=$ALS_INVOCATIONS declared=0 blocked=1"
     echo "[loop-stall-guard] Active agentic loop, no LOOP-STOP declaration in your last message.
 Continue the loop, OR declare your stop by ending your message with a line:
   LOOP-STOP: <${LOOP_STOP_VOCAB}> — <reason>

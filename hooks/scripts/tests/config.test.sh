@@ -112,10 +112,11 @@ git -C "$LEGACY" init -q
 : >"$LEGACY/.codex/workflow.config.yaml"
 check "legacy configs are ignored" "" "$(resolve "$LEGACY")"
 
-# Runtime state stays ignored at root and in nested project scopes, while the
-# canonical config remains committable at both levels.
+# Runtime state and workflow config stay ignored at root and in nested project
+# scopes; all .coderails/ contents are machine-local.
 IGNORES="$TMP/ignores"
 mkdir -p "$IGNORES/.coderails" "$IGNORES/nested/.coderails"
+mkdir -p "$IGNORES/.tmp" "$IGNORES/nested/.tmp"
 git -C "$IGNORES" init -q
 cp "$ROOT/.gitignore" "$IGNORES/.gitignore"
 : >"$IGNORES/.coderails/progress.json"
@@ -123,9 +124,11 @@ cp "$ROOT/.gitignore" "$IGNORES/.gitignore"
 : >"$IGNORES/nested/.coderails/progress.json"
 : >"$IGNORES/nested/.coderails/workflow.config.yaml"
 check "root runtime state is ignored" ignored "$(git -C "$IGNORES" check-ignore -q .coderails/progress.json && printf ignored || printf committable)"
-check "root canonical config is committable" committable "$(git -C "$IGNORES" check-ignore -q .coderails/workflow.config.yaml && printf ignored || printf committable)"
+check "root canonical config is ignored" ignored "$(git -C "$IGNORES" check-ignore -q .coderails/workflow.config.yaml && printf ignored || printf committable)"
 check "nested runtime state is ignored" ignored "$(git -C "$IGNORES" check-ignore -q nested/.coderails/progress.json && printf ignored || printf committable)"
-check "nested canonical config is committable" committable "$(git -C "$IGNORES" check-ignore -q nested/.coderails/workflow.config.yaml && printf ignored || printf committable)"
+check "nested canonical config is ignored" ignored "$(git -C "$IGNORES" check-ignore -q nested/.coderails/workflow.config.yaml && printf ignored || printf committable)"
+check "root scratch directory is ignored" ignored "$(git -C "$IGNORES" check-ignore -q .tmp/scratch && printf ignored || printf committable)"
+check "nested scratch directory is ignored" ignored "$(git -C "$IGNORES" check-ignore -q nested/.tmp/scratch && printf ignored || printf committable)"
 
 if [ "$fails" -eq 0 ]; then
     echo "PASS"

@@ -17,7 +17,9 @@ hook::deny() {
 }
 
 hook::continue_turn() {
-    jq -n --arg reason "$1" '{decision: "block", reason: $reason}'
+    jq -n --arg reason "$1" '{decision: "block", reason: $reason}' ||
+        printf '%s\n' '{"decision":"block","reason":"Coderails hook output failed; stopping remains blocked."}' ||
+        exit 2
 }
 
 hook::data_dir() {
