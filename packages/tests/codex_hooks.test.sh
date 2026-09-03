@@ -11,19 +11,19 @@ source "$ROOT/packages/tests/lib/codex_transcript_fixture.sh"
 fails=0
 
 check() {
-  local label="$1"
-  shift
-  if "$@" >/dev/null 2>&1; then
-    printf 'ok   - %s\n' "$label"
-  else
-    printf 'FAIL - %s\n' "$label"
-    fails=$((fails + 1))
-  fi
+    local label="$1"
+    shift
+    if "$@" >/dev/null 2>&1; then
+        printf 'ok   - %s\n' "$label"
+    else
+        printf 'FAIL - %s\n' "$label"
+        fails=$((fails + 1))
+    fi
 }
 
 run_bash_hook() {
-  local hook="$1" cwd="$2" command="$3" workdir="${4:-}"
-  jq -nc --arg cwd "$cwd" --arg command "$command" --arg workdir "$workdir" '{
+    local hook="$1" cwd="$2" command="$3" workdir="${4:-}" agent_id="${5:-}" include_agent_id="${6:-0}"
+    jq -nc --arg cwd "$cwd" --arg command "$command" --arg workdir "$workdir" --arg agent_id "$agent_id" --argjson include_agent_id "$include_agent_id" 'if $include_agent_id then {agent_id: $agent_id} elif $agent_id == "" then {} else {agent_id: $agent_id} end + {
     session_id: "s1",
     cwd: $cwd,
     hook_event_name: "PreToolUse",
@@ -50,15 +50,15 @@ check "shared and cross-provider hooks stay absent" sh -c '! grep -R -E "paralle
 
 missing=0
 while IFS= read -r command; do
-  relative=$(printf '%s' "$command" | sed -e 's#^"${PLUGIN_ROOT}/##' -e 's#"$##')
-  [[ -x "$PACKAGE/$relative" ]] || missing=1
+    relative=$(printf '%s' "$command" | sed -e 's#^"${PLUGIN_ROOT}/##' -e 's#"$##')
+    [[ -x "$PACKAGE/$relative" ]] || missing=1
 done < <(jq -r '.hooks[][] | .hooks[] | .command' "$HOOKS/hooks.json")
 check "hook command paths exist" test "$missing" -eq 0
 
 bootstrap_repo=$(mktemp -d "${TMPDIR:-/tmp}/coderails-codex-bootstrap.XXXXXX")
 git -C "$bootstrap_repo" init -q
 mkdir -p "$bootstrap_repo/.codex"
-printf 'sandbox_workers: true\n' > "$bootstrap_repo/.codex/workflow.config.yaml"
+printf 'sandbox_workers: true\n' >"$bootstrap_repo/.codex/workflow.config.yaml"
 bootstrap_before=$(shasum "$bootstrap_repo/.codex/workflow.config.yaml")
 bootstrap=$(printf '%s' "{\"session_id\":\"s1\",\"cwd\":\"$bootstrap_repo\",\"hook_event_name\":\"SessionStart\",\"source\":\"startup\"}" | PLUGIN_ROOT="$PACKAGE" "$HOOKS/scripts/inject_bootstrap.sh")
 check "bootstrap returns native orchestration and graph guidance" sh -c 'printf "%s" "$1" | jq -e ".hookSpecificOutput.additionalContext | contains(\"using-coderails\") and contains(\"top-level session as the orchestrator\") and contains(\"delegate do-work tool calls with spawn_agent\") and contains(\"Native graph resume\")"' sh "$bootstrap"
@@ -71,7 +71,7 @@ compact=$(printf '%s' "{\"cwd\":\"$bootstrap_repo\",\"source\":\"compact\"}" | P
 check "compact does not nudge" sh -c '! printf "%s" "$1" | jq -r ".hookSpecificOutput.additionalContext" | grep -Fq '\''$coderails-codex:init'\''' sh "$compact"
 check "startup does not alter config" test "$bootstrap_before" = "$(shasum "$bootstrap_repo/.codex/workflow.config.yaml")"
 mkdir -p "$bootstrap_repo/.coderails"
-printf 'sandbox_workers: true\n' > "$bootstrap_repo/.coderails/workflow.config.yaml"
+printf 'sandbox_workers: true\n' >"$bootstrap_repo/.coderails/workflow.config.yaml"
 configured=$(printf '%s' "{\"cwd\":\"$bootstrap_repo\",\"source\":\"startup\"}" | PLUGIN_ROOT="$PACKAGE" "$HOOKS/scripts/inject_bootstrap.sh")
 check "canonical config suppresses nudge" sh -c '! printf "%s" "$1" | jq -r ".hookSpecificOutput.additionalContext" | grep -Fq '\''$coderails-codex:init'\''' sh "$configured"
 rm -rf "$bootstrap_repo"
@@ -79,11 +79,11 @@ rm -rf "$bootstrap_repo"
 config_repo=$(mktemp -d "${TMPDIR:-/tmp}/coderails-codex-config.XXXXXX")
 git -C "$config_repo" init -q
 mkdir -p "$config_repo/.codex"
-printf 'project: legacy\n' > "$config_repo/.codex/workflow.config.yaml"
+printf 'project: legacy\n' >"$config_repo/.codex/workflow.config.yaml"
 legacy_result=$(bash -c '. "$1"; coderails::resolve_config "$2"' sh "$PACKAGE/scripts/lib/config.sh" "$config_repo")
 check "legacy config is not a runtime fallback" test "$legacy_result" = "NO_CONFIG"
 mkdir -p "$config_repo/.coderails"
-printf 'project: canonical\n' > "$config_repo/.coderails/workflow.config.yaml"
+printf 'project: canonical\n' >"$config_repo/.coderails/workflow.config.yaml"
 canonical_result=$(bash -c '. "$1"; coderails::resolve_config "$2"' sh "$PACKAGE/scripts/lib/config.sh" "$config_repo")
 check "native resolver reads canonical config" test "$canonical_result" = "project: canonical"
 rm -rf "$config_repo"
@@ -116,17 +116,22 @@ git init -q "$feature_repo"
 git -C "$feature_repo" symbolic-ref HEAD refs/heads/feature/e5
 git init -q "$pwd_repo"
 git -C "$pwd_repo" symbolic-ref HEAD refs/heads/feature/pwd
+agent_output=$(PLUGIN_DATA="$ceiling_data" run_bash_hook "$HOOKS/scripts/verification_volume_ceiling.sh" "$main_repo" "packages/tests/codex_hooks.test.sh" "" "agent-1")
 workdir_output=$(PLUGIN_DATA="$ceiling_data" run_bash_hook "$HOOKS/scripts/verification_volume_ceiling.sh" "$main_repo" "packages/tests/codex_hooks.test.sh" "$feature_repo")
-cwd_output=$(PLUGIN_DATA="$ceiling_data" run_bash_hook "$HOOKS/scripts/verification_volume_ceiling.sh" "$main_repo" "packages/tests/codex_hooks.test.sh")
+empty_agent_output=$(PLUGIN_DATA="$ceiling_data" run_bash_hook "$HOOKS/scripts/verification_volume_ceiling.sh" "$main_repo" "packages/tests/codex_hooks.test.sh" "" "" 1)
+missing_agent_output=$(PLUGIN_DATA="$ceiling_data" run_bash_hook "$HOOKS/scripts/verification_volume_ceiling.sh" "$main_repo" "packages/tests/codex_hooks.test.sh")
+third_main_output=$(PLUGIN_DATA="$ceiling_data" run_bash_hook "$HOOKS/scripts/verification_volume_ceiling.sh" "$main_repo" "packages/tests/codex_hooks.test.sh")
 pwd_output=$(cd "$pwd_repo" && PLUGIN_DATA="$ceiling_data" run_bash_hook "$HOOKS/scripts/verification_volume_ceiling.sh" "" "packages/tests/codex_hooks.test.sh")
-if [[ -z "$workdir_output$cwd_output$pwd_output" ]] &&
-  grep -qx 1 "$ceiling_data/verification-ceiling/feature-e5__full-suite.count" &&
-  grep -qx 1 "$ceiling_data/verification-ceiling/main__full-suite.count" &&
-  grep -qx 1 "$ceiling_data/verification-ceiling/feature-pwd__full-suite.count"; then
-  printf 'ok   - verification ceiling uses workdir, cwd, then PWD\n'
+if [[ -z "$agent_output$workdir_output$empty_agent_output$missing_agent_output$pwd_output" ]] &&
+    [[ "$(printf '%s' "$third_main_output" | jq -r '.decision // empty')" == "block" ]] &&
+    grep -qx 1 "$ceiling_data/verification-ceiling/feature-e5__full-suite.count" &&
+    grep -qx 3 "$ceiling_data/verification-ceiling/main__full-suite.count" &&
+    grep -qx 1 "$ceiling_data/verification-ceiling/feature-pwd__full-suite.count" &&
+    ! test -e "$ceiling_data/verification-ceiling/main__full-suite.count.lock"; then
+    printf 'ok   - verification ceiling exempts only non-empty agent_id and uses workdir, cwd, then PWD\n'
 else
-  printf 'FAIL - verification ceiling uses workdir, cwd, then PWD\n'
-  fails=$((fails + 1))
+    printf 'FAIL - verification ceiling exempts only non-empty agent_id and uses workdir, cwd, then PWD\n'
+    fails=$((fails + 1))
 fi
 
 mkdir -p "$test_repo/.codex"
@@ -152,35 +157,35 @@ check "trusted failing test command denies commit" sh -c 'printf "%s" "$1" | jq 
 
 protected_writes_denied=1
 for protected_command in \
-  'python3 -c '\''open(".codex/config.toml").read()'\''' \
-  'python -c '\''from pathlib import Path; Path("./.codex/requirements.toml").write_text("x")'\''' \
-  'pip install -r .codex/requirements.toml' \
-  'uv pip install --requirements=./.codex/requirements.toml' \
-  'awk '\''{print}'\'' .codex/config.toml' \
-  'cat .codex/requirements.toml' \
-  'printf x > ./.codex/../.codex/config.toml' \
-  'printf x | tee .codex/requirements.toml' \
-  'cp source .codex/config.toml' \
-  'mv source .codex/requirements.toml' \
-  'dd of=.codex/config.toml' \
-  'sed -i s/x/y/ .codex/requirements.toml' \
-  'perl -i -pe s/x/y/ .codex/config.toml'; do
-  protected_output=$(run_bash_hook "$HOOKS/scripts/destructive_bash_gate.sh" "$test_repo" "$protected_command")
-  printf '%s' "$protected_output" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null 2>&1 ||
-    protected_writes_denied=0
+    'python3 -c '\''open(".codex/config.toml").read()'\''' \
+    'python -c '\''from pathlib import Path; Path("./.codex/requirements.toml").write_text("x")'\''' \
+    'pip install -r .codex/requirements.toml' \
+    'uv pip install --requirements=./.codex/requirements.toml' \
+    'awk '\''{print}'\'' .codex/config.toml' \
+    'cat .codex/requirements.toml' \
+    'printf x > ./.codex/../.codex/config.toml' \
+    'printf x | tee .codex/requirements.toml' \
+    'cp source .codex/config.toml' \
+    'mv source .codex/requirements.toml' \
+    'dd of=.codex/config.toml' \
+    'sed -i s/x/y/ .codex/requirements.toml' \
+    'perl -i -pe s/x/y/ .codex/config.toml'; do
+    protected_output=$(run_bash_hook "$HOOKS/scripts/destructive_bash_gate.sh" "$test_repo" "$protected_command")
+    printf '%s' "$protected_output" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null 2>&1 ||
+        protected_writes_denied=0
 done
 absolute_config_output=$(run_bash_hook "$HOOKS/scripts/destructive_bash_gate.sh" "$test_repo" "cat $test_repo/.codex/config.toml")
 printf '%s' "$absolute_config_output" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null 2>&1 ||
-  protected_writes_denied=0
+    protected_writes_denied=0
 check "literal native config paths are denied on every branch" test "$protected_writes_denied" -eq 1
 
 lookalikes_allowed=1
 for lookalike_command in \
-  'printf x > .codex/config.toml.bak' \
-  'cat .codex/requirements.toml.bak' \
-  'cat .codexish/config.toml'; do
-  lookalike_output=$(run_bash_hook "$HOOKS/scripts/destructive_bash_gate.sh" "$test_repo" "$lookalike_command")
-  [[ -z "$lookalike_output" ]] || lookalikes_allowed=0
+    'printf x > .codex/config.toml.bak' \
+    'cat .codex/requirements.toml.bak' \
+    'cat .codexish/config.toml'; do
+    lookalike_output=$(run_bash_hook "$HOOKS/scripts/destructive_bash_gate.sh" "$test_repo" "$lookalike_command")
+    [[ -z "$lookalike_output" ]] || lookalikes_allowed=0
 done
 check "similar non-config paths remain allowed" test "$lookalikes_allowed" -eq 1
 
@@ -200,7 +205,7 @@ codex_fixture::init s-complete
 python3 "$PACKAGE/skills/agentic-loop/scripts/graph.py" begin-wave "$graph_dir/progress.json" >/dev/null
 codex_fixture::append_wave "$graph_dir/progress.json"
 python3 "$PACKAGE/skills/agentic-loop/scripts/graph.py" record-wave "$graph_dir/progress.json" \
-  '{"wave_id":"wave-2","results":{"A":{"outcome":"done","evidence":"hook fixture"}}}' >/dev/null
+    '{"wave_id":"wave-2","results":{"A":{"outcome":"done","evidence":"hook fixture"}}}' >/dev/null
 graph_revision=$(jq -r '.revision' "$graph_dir/progress.json")
 git_head=$(git -C "$ROOT" rev-parse HEAD)
 jq -n --arg sha "$git_head" --argjson revision "$graph_revision" '{schema_version:1,scope:"loop",task_ref:"loop-1",verification_level:0,verification_justification:"hook fixture",frozen_at:"2026-08-20T00:00:00Z",frozen_sha:$sha,head_sha:$sha,session_id:"s-complete",loop_id:"loop-1",revision:$revision,evals:[],amendments:[],result:null,graded_at:null}' >"$graph_dir/evals.json"
@@ -219,9 +224,9 @@ jq -cn '{type:"turn_context",payload:{session_id:"s-complete",loop_id:"loop-old"
 jq -cn '{type:"response_item",payload:{type:"custom_tool_call",name:"exec",call_id:"old-proof",input:"const r = await tools.exec_command({cmd:\"true\"}); text(JSON.stringify({loop_id:\"loop-old\",exit_code:r.exit_code,output:r.output}));"}}' >>"$replay_transcript"
 jq -cn '{type:"response_item",payload:{type:"custom_tool_call_output",call_id:"old-proof",output:[{type:"input_text",text:"{\"loop_id\":\"loop-old\",\"exit_code\":0,\"output\":\"\"}"}]}}' >>"$replay_transcript"
 check "completed native graph rejects earlier-loop proof replay" \
-  sh -c '! python3 "$1" verify-completion "$2" --session s-complete --evals "$3" --proof "$4" --retro "$5" --transcript "$6" >/dev/null 2>&1' sh \
-  "$PACKAGE/skills/agentic-loop/scripts/graph.py" "$graph_dir/progress.json" "$graph_dir/evals.json" \
-  "$graph_dir/proof.json" "$graph_dir/retro.json" "$replay_transcript"
+    sh -c '! python3 "$1" verify-completion "$2" --session s-complete --evals "$3" --proof "$4" --retro "$5" --transcript "$6" >/dev/null 2>&1' sh \
+    "$PACKAGE/skills/agentic-loop/scripts/graph.py" "$graph_dir/progress.json" "$graph_dir/evals.json" \
+    "$graph_dir/proof.json" "$graph_dir/retro.json" "$replay_transcript"
 jq -cn '{type:"response_item",payload:{type:"custom_tool_call",name:"exec",call_id:"proof-outer-only",input:"const r = await tools.exec_command({cmd:\"true\"}); text(r.output);"}}' >>"$proof_transcript"
 jq -cn '{type:"response_item",payload:{type:"custom_tool_call_output",call_id:"proof-outer-only",output:[{type:"input_text",text:"Script completed\nWall time 0.1 seconds\nProcess exited with code 1\nFinal output:"}]}}' >>"$proof_transcript"
 outer_only_stop=$(jq -cn --arg transcript "$proof_transcript" '{session_id:"s-complete",cwd:"/tmp",hook_event_name:"Stop",last_assistant_message:"done",transcript_path:$transcript}' | CODERAILS_AGENTIC_LOOP_DIR="$graph_root" PLUGIN_ROOT="$PACKAGE" "$HOOKS/scripts/graph_completion_guard.sh")
@@ -231,12 +236,12 @@ jq -cn '{type:"response_item",payload:{type:"custom_tool_call_output",call_id:"p
 failed_proof_stop=$(jq -cn --arg transcript "$proof_transcript" '{session_id:"s-complete",cwd:"/tmp",hook_event_name:"Stop",last_assistant_message:"done",transcript_path:$transcript}' | CODERAILS_AGENTIC_LOOP_DIR="$graph_root" PLUGIN_ROOT="$PACKAGE" "$HOOKS/scripts/graph_completion_guard.sh")
 check "completed native graph rejects a last-failed proof command" sh -c 'printf "%s" "$1" | jq -e ".decision == \"block\""' sh "$failed_proof_stop"
 
-check "unsupported subagent detection is absent" sh -c '! grep -R -E "agent_id" "$1"' sh "$HOOKS"
+check "verification ceiling keeps empty or missing agent_id subject to its cap" test -z "$agent_output$empty_agent_output$missing_agent_output"
 check "hook text names only native orchestration" sh -c '! grep -R -E "[Aa]gent tool" "$1"' sh "$HOOKS"
 
 if [[ "$fails" -eq 0 ]]; then
-  printf 'PASS\n'
-  exit 0
+    printf 'PASS\n'
+    exit 0
 fi
 printf 'FAILED (%s)\n' "$fails"
 exit 1

@@ -17,6 +17,9 @@ else
     exit 0
 fi
 
+agent_id=$(printf '%s' "$HOOK_INPUT" | jq -r '.agent_id | strings | select(length > 0)' 2>/dev/null)
+[[ -z "$agent_id" ]] || exit 0
+
 cwd=$(printf '%s' "$HOOK_INPUT" | jq -r '(.tool_input.workdir | select(type == "string" and length > 0)) // (.cwd | select(type == "string" and length > 0)) // empty' 2>/dev/null)
 [[ -n "$cwd" ]] || cwd="$PWD"
 branch=$(git -C "$cwd" branch --show-current 2>/dev/null)

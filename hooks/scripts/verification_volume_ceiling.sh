@@ -43,12 +43,15 @@ post_evals_re='(^|[&;|]|&&|\|\|)[[:space:]]*(bash[[:space:]]+|sh[[:space:]]+|\./
 
 target=""
 if printf '%s' "$cmd_flat" | grep -qE "$run_all_re"; then
-  target="run_all"
+    target="run_all"
 elif printf '%s' "$cmd_flat" | grep -qE "$post_evals_re"; then
-  target="post_evals"
+    target="post_evals"
 else
-  exit 0
+    exit 0
 fi
+
+agent_id=$(printf '%s' "$input" | jq -r '.agent_id | strings | select(length > 0)' 2>/dev/null)
+[ -z "$agent_id" ] || exit 0
 
 branch=$(git -C "$cwd" branch --show-current 2>/dev/null)
 [ -z "$branch" ] && branch="(no-branch)"
@@ -58,21 +61,21 @@ base="${CLAUDE_AGENTIC_LOOP_DIR:-$HOME/.coderails/agentic-loop}"
 state_dir="$base/verification-ceiling"
 
 deny_state_failure() {
-  # Fail closed: this is a hard-block hook, so if the count can't be reliably
-  # read/written/locked, the safe default is to deny rather than silently let
-  # the cap disappear (matches crack_on_gate.sh's write-check convention).
-  jq -n --arg r "$1" '{
+    # Fail closed: this is a hard-block hook, so if the count can't be reliably
+    # read/written/locked, the safe default is to deny rather than silently let
+    # the cap disappear (matches crack_on_gate.sh's write-check convention).
+    jq -n --arg r "$1" '{
     hookSpecificOutput: {
       hookEventName: "PreToolUse",
       permissionDecision: "deny",
       permissionDecisionReason: $r
     }
   }'
-  exit 0
+    exit 0
 }
 
 if ! mkdir -p "$state_dir" 2>/dev/null; then
-  deny_state_failure "Verification-volume ceiling: could not create its state directory ($state_dir) to track invocation counts, so the count for this work-unit branch cannot be reliably tracked. Failing closed (deny) rather than silently letting the ceiling disappear."
+    deny_state_failure "Verification-volume ceiling: could not create its state directory ($state_dir) to track invocation counts, so the count for this work-unit branch cannot be reliably tracked. Failing closed (deny) rather than silently letting the ceiling disappear."
 fi
 
 count_file="$state_dir/${branch_slug}__${target}.count"
@@ -85,25 +88,25 @@ lock_dir="${count_file}.lock"
 lock_acquired=0
 attempt=0
 while [ "$attempt" -lt 15 ]; do
-  if mkdir "$lock_dir" 2>/dev/null; then
-    lock_acquired=1
-    break
-  fi
-  attempt=$((attempt + 1))
-  sleep 0.1
+    if mkdir "$lock_dir" 2>/dev/null; then
+        lock_acquired=1
+        break
+    fi
+    attempt=$((attempt + 1))
+    sleep 0.1
 done
 
 if [ "$lock_acquired" -ne 1 ]; then
-  script_name="hooks/scripts/tests/run_all.sh"
-  [ "$target" = "post_evals" ] && script_name="scripts/post_evals.sh validate-structure"
-  deny_state_failure "Verification-volume ceiling: could not acquire the per-target lock for $script_name on work-unit branch '$branch' within the timeout — a concurrent invocation is holding it. Failing closed (deny) rather than risk an undercounted read-modify-write."
+    script_name="hooks/scripts/tests/run_all.sh"
+    [ "$target" = "post_evals" ] && script_name="scripts/post_evals.sh validate-structure"
+    deny_state_failure "Verification-volume ceiling: could not acquire the per-target lock for $script_name on work-unit branch '$branch' within the timeout — a concurrent invocation is holding it. Failing closed (deny) rather than risk an undercounted read-modify-write."
 fi
 trap 'rmdir "$lock_dir" 2>/dev/null' EXIT
 
 count=0
 [ -f "$count_file" ] && count=$(cat "$count_file" 2>/dev/null)
 case "$count" in
-  ''|*[!0-9]*) count=0 ;;
+'' | *[!0-9]*) count=0 ;;
 esac
 
 # Single write of count+1, done up front so it covers both the allow and the
@@ -111,22 +114,22 @@ esac
 # reset the count) — matches the previous behaviour with one write instead of
 # two, since emitting deny JSON and THEN writing would put two JSON values on
 # stdout if the second write also needed to emit on failure.
-if ! printf '%s' "$((count + 1))" > "$count_file" 2>/dev/null; then
-  deny_state_failure "Verification-volume ceiling: could not write its invocation-count file ($count_file) for work-unit branch '$branch'. Failing closed (deny) rather than silently letting the ceiling reset to 0 on every call."
+if ! printf '%s' "$((count + 1))" >"$count_file" 2>/dev/null; then
+    deny_state_failure "Verification-volume ceiling: could not write its invocation-count file ($count_file) for work-unit branch '$branch'. Failing closed (deny) rather than silently letting the ceiling reset to 0 on every call."
 fi
 
 if [ "$count" -ge 2 ]; then
-  script_name="hooks/scripts/tests/run_all.sh"
-  [ "$target" = "post_evals" ] && script_name="scripts/post_evals.sh validate-structure"
-  reason="Verification-volume ceiling: this is the $((count + 1))th invocation of $script_name on work-unit branch '$branch' — the 3rd+ re-run of the same suite/ceremony per work-unit is hard-blocked (no override). Delegate further re-verification to a verifier agent that returns a one-line verdict instead of re-running the full suite/ceremony in-context; re-reading the same output repeatedly at growing context is the exact cost pattern this cap exists to stop."
-  jq -n --arg r "$reason" '{
+    script_name="hooks/scripts/tests/run_all.sh"
+    [ "$target" = "post_evals" ] && script_name="scripts/post_evals.sh validate-structure"
+    reason="Verification-volume ceiling: this is the $((count + 1))th invocation of $script_name on work-unit branch '$branch' — the 3rd+ re-run of the same suite/ceremony per work-unit is hard-blocked (no override). Delegate further re-verification to a verifier agent that returns a one-line verdict instead of re-running the full suite/ceremony in-context; re-reading the same output repeatedly at growing context is the exact cost pattern this cap exists to stop."
+    jq -n --arg r "$reason" '{
     hookSpecificOutput: {
       hookEventName: "PreToolUse",
       permissionDecision: "deny",
       permissionDecisionReason: $r
     }
   }'
-  exit 0
+    exit 0
 fi
 
 exit 0
