@@ -16,6 +16,26 @@ This supersedes the wiki's historical independent-runtime policy for graph seman
 - No change to Codex `spawn_agent` dispatch, Codex evidence, or Codex hooks. (verified)
 - No reconciliation between `work_units` and `graph.nodes`. They remain separate views with separate lifecycle consumers. (verified)
 - No migration, rewriting, or reinterpretation of historical state files. (verified)
+- No grandfathered semantic branch, legacy fallback, compatibility shim,
+  dual-reader, dual-writer, automatic conversion, or mixed-version wave.
+  (verified)
+
+## Functional preservation and clean break
+
+The migration must preserve every existing provider capability and safety
+property: validation, readiness, wave transitions, joins, retry exhaustion,
+stale handling, hard stops, locks, atomic writes, native dispatch, raw-evidence
+binding, evaluation gates, proof gates, retrospective gates, and completion
+gates. A refactor is not accepted because tests are green if it silently drops
+one of those behaviours. (verified)
+
+The preserved behaviour is implemented once in the aligned schema-v3 contract,
+not retained through legacy compatibility. Before deleting or replacing a
+semantic path, the implementation must identify its consumers, cover its
+observable behaviour in the frozen corpus or provider-local tests, and remove
+the obsolete path in the same change. Historical v1/v2 state files are data,
+not a compatibility surface: leave them untouched and reject them clearly.
+(verified)
 
 ## Canonical graph contract
 
@@ -155,6 +175,35 @@ Each provider remains responsible for its existing state-path resolution and loc
 
 Only one orchestrator may mutate a given state file at a time. (verified) The design does not introduce cross-provider locks because providers do not share a state file or scheduler. (inferred)
 
+## Python quality contract
+
+Every Python file in the repository, including the five pre-existing files and
+all migration output, must pass the same hard quality gate before this work is
+complete. No existing Python violation is grandfathered, waived, or converted
+into a permanent exception. (verified)
+
+`pyproject.toml` must be the authoritative Python-tool configuration. The
+strict pre-commit quality path must require: Ruff linting with PEP 8,
+import-order, modernization, bugbear, simplification, annotation, naming, and
+Google-style PEP 257 docstring rules; Black formatting; Pyright strict typing;
+and mypy strict typing. Missing required Python tools must fail strict mode,
+not downgrade to advisory output. The graph-semantic runtime itself remains
+standard-library-only; these are development checks, not runtime imports.
+(inferred)
+
+Public Python modules, classes, functions, and methods require complete
+Google-style docstrings. Private implementation details receive a docstring
+only when their contract is not obvious from a typed signature and name.
+Comments must explain a durable why, constraint, safety property, or
+non-obvious trade-off; they must not narrate code, cite a transient session, or
+leave commented-out code. PEP 20 compliance is a review requirement alongside
+the mechanical checks because no formatter can prove it. (inferred)
+
+The quality baseline work must first inventory every current violation, repair
+all of them, then add regression coverage that makes a representative violation
+fail the commit gate. Every later migration phase runs the same strict gate.
+(verified)
+
 ## Test strategy
 
 `packages/tests/provider_graph_parity.test.sh` remains provider-local for its existing raw-evidence checks. (verified) A separate canonical fixture corpus is the authoritative provider-neutral contract seam, limited to core and adapter semantics; it does not inspect raw provider evidence. (inferred)
@@ -167,13 +216,14 @@ Only one orchestrator may mutate a given state file at a time. (verified) The de
 
 ## Implementation work units and dependencies
 
-1. Freeze the schema-v3 canonical fixture corpus with ID, label, join-ID, accepted-token, persisted-`failed` rejection, exact `stale_check`, `respawn_stale` generation/intent, `hard_stop`, provider `work_units` eligibility, and `wave_id` assertions. This is the prerequisite for all implementation. (inferred)
-2. Extract the pure core into the single maintained package and direct unit tests at the frozen corpus. Depends on 1. (inferred)
-3. Add the Claude thin adapter, preserving its native locks, evidence, hooks, and `Agent` handoff. Depends on 1 and 2. (inferred)
-4. Add the Codex thin adapter, preserving its native evidence, hooks, and `spawn_agent` handoff. Depends on 1 and 2. (inferred)
-5. Package the one source into both standalone provider bundles and run parity, provider-local tests, and negative controls. Depends on 3 and 4. (inferred)
+1. Establish the Python quality baseline: configure and enforce the quality contract, remediate every existing Python violation, and prove the commit gate rejects representative violations. This is the prerequisite for all implementation. (verified)
+2. Freeze the schema-v3 canonical fixture corpus with ID, label, join-ID, accepted-token, persisted-`failed` rejection, exact `stale_check`, `respawn_stale` generation/intent, `hard_stop`, provider `work_units` eligibility, and `wave_id` assertions. (inferred)
+3. Extract the pure core into the single maintained package and direct unit tests at the frozen corpus. Depends on 1 and 2. (inferred)
+4. Add the Claude thin adapter, preserving its native locks, evidence, hooks, and `Agent` handoff. Depends on 1, 2, and 3. (inferred)
+5. Add the Codex thin adapter, preserving its native evidence, hooks, and `spawn_agent` handoff. Depends on 1, 2, and 3. (inferred)
+6. Package the one source into both standalone provider bundles and run parity, provider-local tests, and negative controls. Depends on 4 and 5. (inferred)
 
-Steps 3 and 4 may proceed in parallel after step 2; steps 1, 2, and 5 are serial gates. (inferred)
+Steps 4 and 5 may proceed in parallel after step 3; steps 1, 2, 3, and 6 are serial gates. (inferred)
 
 ## Risks and rollback
 
@@ -196,6 +246,10 @@ Rollback never rewrites schema-v3 state automatically. A provider encountering s
 - The frozen canonical fixture corpus passes for the core and both adapters; provider-local `provider_graph_parity` raw-evidence checks remain provider-local; the active-wave negative control fails. (inferred)
 - `install.sh` materializes both generated copies before provider installation, and installer plus test/CI `cmp`-verify them against `packages/graph-semantics/`. (inferred)
 - Historical states are neither migrated nor rewritten, and the aligned runtime rejects v1/v2. (verified)
+- Every existing and migrated Python file passes the enforced Python quality contract; no Python exception list grows. (verified)
+- The capability inventory has a frozen test or provider-local acceptance
+  assertion for every retired semantic path; no functional loss or legacy
+  compatibility branch remains. (verified)
 
 ## Did Not Verify
 

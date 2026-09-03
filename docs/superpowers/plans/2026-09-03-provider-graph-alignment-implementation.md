@@ -21,6 +21,9 @@ raw evidence, hooks, and provider completion gates. (verified)
 - Do not change Claude `Agent` dispatch or Codex `spawn_agent` dispatch. (verified)
 - Do not map `work_units` to `graph.nodes`, migrate v1/v2 files, dual-write,
   or run mixed schema-version waves. (verified)
+- Preserve every current provider capability and safety gate, then delete the
+  replaced semantic path in the same change. Do not retain a legacy fallback,
+  compatibility shim, dual reader, or dual writer. (verified)
 - Do not hand-edit either generated bundle copy:
   `skills/agentic-loop/scripts/graph_semantics.py` or
   `packages/codex/skills/agentic-loop/scripts/graph_semantics.py`. (verified)
@@ -30,14 +33,33 @@ raw evidence, hooks, and provider completion gates. (verified)
 
 | Phase | Owner/worktree | Prerequisite | Deliverable |
 | --- | --- | --- | --- |
-| 1. Freeze fixtures | Codex, integration worktree | none | Frozen provider-neutral semantic corpus and runner |
-| 2. Extract core | Codex, integration worktree | Phase 1 | `packages/graph-semantics/` pure Python core |
-| 3A. Claude adapter | Claude headless, Claude-only worktree | Phases 1–2 | Python adapter behind existing Claude Bash/hook boundaries |
-| 3B. Codex adapter | Codex, Codex-only worktree | Phases 1–2 | `graph.py` becomes an I/O adapter over the core |
+| 0. Python quality baseline | Codex, integration worktree | none | Enforced tools and zero existing Python violations |
+| 1. Freeze fixtures | Codex, integration worktree | Phase 0 | Frozen provider-neutral semantic corpus and runner |
+| 2. Extract core | Codex, integration worktree | Phases 0–1 | `packages/graph-semantics/` pure Python core |
+| 3A. Claude adapter | Claude headless, Claude-only worktree | Phases 0–2 | Python adapter behind existing Claude Bash/hook boundaries |
+| 3B. Codex adapter | Codex, Codex-only worktree | Phases 0–2 | `graph.py` becomes an I/O adapter over the core |
 | 4. Materialize and parity | Codex, integration worktree | 3A and 3B | Installer generation and cross-adapter corpus parity |
 | 5. Native acceptance | Both providers, integration worktree | Phase 4 | Provider-native acceptance evidence |
 
-Phases 1, 2, 4, and 5 are serial gates. Only 3A and 3B run in parallel. (verified)
+Phases 0, 1, 2, 4, and 5 are serial gates. Only 3A and 3B run in parallel. (verified)
+
+## Phase 0 — enforce the Python quality baseline
+
+1. Inventory every existing Python file and run the selected tools before
+   changing graph semantics. Fix every violation; do not add exemptions.
+2. Add authoritative `pyproject.toml` configuration for Ruff, Black, Pyright,
+   and mypy. Enforce PEP 8, PEP 20 review discipline, PEP 257 Google-style
+   public docstrings, strict typing, import order, and the project’s existing
+   no-commented-code rule.
+3. Modify the existing strict quality entry point, not a parallel workflow, so
+   missing Python tools fail strict mode and every later commit validates all
+   Python files touched by the migration.
+4. Add focused quality-gate tests: a bad formatter/linter/type/docstring case
+   must fail; a compliant Google-docstring fixture must pass.
+
+**Phase check:** the strict quality command passes for every Python file;
+Ruff, Black, Pyright, and mypy all pass; the negative controls fail; no Python
+file is listed in a LOC or function-size exception solely to avoid remediation.
 
 ## Phase 1 — freeze the canonical fixture corpus
 
@@ -63,6 +85,9 @@ Phases 1, 2, 4, and 5 are serial gates. Only 3A and 3B run in parallel. (verifie
      predicate: absent, `null`, and `{}` pass; `done` and reasoned `dropped`
      pass; arrays, malformed entries, unknown statuses, and unreasoned
      `dropped` block. (verified)
+   - Inventory each retired Claude and Codex semantic behaviour and map it to
+     one frozen fixture or provider-local test before its old implementation is
+     deleted; an unmapped behaviour blocks retirement. (verified)
 3. Store a deliberate negative-control fixture with a mismatched active-wave
    result set and assert the runner fails while the source state is byte
    unchanged. (verified)
@@ -91,6 +116,8 @@ the negative-control invocation fails; `git diff --check` passes. (inferred)
    `_begin_wave`, `_record_wave`, `_inspect`, and `_validate_completion` into
    this pure API. Do not move Codex `_load`, `_write`, `_locked`,
    `_authorize_dispatch`, or anything in `graph_evidence.py`. (verified)
+   Delete the corresponding retired semantic implementation after the corpus
+   proves equivalent behaviour; do not leave a fallback branch. (verified)
 4. Define deterministic error text/codes in the core and have the fixture
    runner compare them exactly, including immutability after rejected requests.
    The core copies before mutation so invalid input cannot be partially changed.
@@ -259,6 +286,8 @@ control and confirm it fails. (verified)
    provider-local raw-evidence tests pass; no v1/v2 conversion exists; no
    shared installed runtime/scheduler/dispatch/evidence path exists; and the
    two native acceptance runs pass. (verified)
+   Confirm the capability inventory is complete and every retired path is
+   removed rather than grandfathered. (verified)
 
 ## Implementation handoff checklist
 

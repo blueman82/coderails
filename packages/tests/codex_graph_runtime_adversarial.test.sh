@@ -83,7 +83,6 @@ command_rejected_unchanged() {
 		return 1
 	fi
 }
-
 reset_transcript() {
 	rm -r "$HOME/.codex/sessions"
 	codex_fixture::init session-test
@@ -95,7 +94,6 @@ record_payload() {
 	jq -cn --arg wave "$wave" --arg outcome "$outcome" \
 		'{wave_id:$wave,results:{A:{outcome:$outcome,evidence:"checked"}}}'
 }
-
 test_transcript_evidence_rejections() {
 	local state reference child parent call old_agent payload
 
@@ -121,7 +119,7 @@ test_transcript_evidence_rejections() {
 	python3 "$GRAPH" begin-wave "$state" >/dev/null
 	reference=$(codex_fixture::append_attempt session-test loop_worker_41 1 wave-2)
 	child="$(dirname "$(codex_fixture::parent session-test)")/rollout-fixture-$(jq -r '.agent_thread_id' <<<"$reference").jsonl"
-	jq -c 'if .type == "session_meta" then .payload.parent_thread_id="foreign" else . end' "$child" >"$child.tmp"
+	jq -c 'if .type == "session_meta" then .payload.source.subagent.thread_spawn.parent_thread_id="foreign" else . end' "$child" >"$child.tmp"
 	mv "$child.tmp" "$child"
 	payload=$(record_payload "$state")
 	command_rejected_unchanged "$state" python3 "$GRAPH" record-wave "$state" "$payload"
@@ -157,12 +155,11 @@ test_transcript_evidence_rejections() {
 	call=$(jq -r '.spawn_call_id' <<<"$reference")
 	parent=$(codex_fixture::parent session-test)
 	jq -c --arg call "$call" --arg agent "$old_agent" \
-		'if .payload.item.id == $call then .payload.item.agent_thread_id=$agent else . end' "$parent" >"$parent.tmp"
+		'if .payload.item.id == $call then .payload.item.receiver_thread_ids[0]=$agent else . end' "$parent" >"$parent.tmp"
 	mv "$parent.tmp" "$parent"
 	payload=$(record_payload "$state")
 	command_rejected_unchanged "$state" python3 "$GRAPH" record-wave "$state" "$payload"
 }
-
 validate_worker_refs() {
 	PYTHONPATH="$(dirname "$GRAPH")" python3 -c \
 		'import json,sys; from graph_evidence import validate_worker_evidence; validate_worker_evidence(json.load(open(sys.argv[1], encoding="utf-8")))' "$1"
@@ -236,7 +233,10 @@ dispatch_input() {
 	local task="$1"
 	jq -cn --arg cwd "$ROOT" --arg task "$task" '{
       hook_event_name:"PreToolUse",tool_name:"spawn_agent",session_id:"session-test",cwd:$cwd,
-      tool_input:{task_name:$task,message:"Implement the owned native graph node."}
+      tool_input:(if $task | startswith("loop_worker_")
+                  then {agent_type:"loop-worker",message:("CODERAILS_GRAPH_TASK=" + $task + "\nImplement the owned native graph node.")}
+                  else {agent_type:"source-auditor",message:"Inspect the requested source."}
+                  end)
     }'
 }
 

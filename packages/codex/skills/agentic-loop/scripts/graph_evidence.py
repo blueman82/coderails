@@ -45,48 +45,65 @@ def _thread_transcript(thread_id: str) -> Path:
     return matches[0]
 def transcript_cursor(session_id: str) -> int:
     return len(_records(_thread_transcript(session_id), "parent transcript"))
+
+
 def _payload(record: dict[str, Any]) -> dict[str, Any]:
     payload = record.get("payload", record)
     return payload if isinstance(payload, dict) else {}
-def _spawn(payload: dict[str, Any]) -> tuple[str, str] | None:
-    if payload.get("type") != "function_call" or payload.get("name") != "spawn_agent":
-        return None
-    arguments = payload.get("arguments")
-    try:
-        parsed = json.loads(arguments) if isinstance(arguments, str) else arguments
-    except json.JSONDecodeError:
-        return None
-    call_id = payload.get("call_id")
-    if isinstance(parsed, dict) and isinstance(call_id, str) and isinstance(parsed.get("task_name"), str):
-        return call_id, parsed["task_name"]
-    return None
-def _spawn_result(payload: dict[str, Any]) -> tuple[str, str] | None:
-    if payload.get("type") != "function_call_output":
-        return None
-    call_id, output = payload.get("call_id"), payload.get("output")
-    if not isinstance(call_id, str) or not isinstance(output, str):
-        return None
-    try:
-        parsed = json.loads(output)
-    except json.JSONDecodeError:
-        return None
-    if isinstance(parsed, dict) and isinstance(parsed.get("task_name"), str):
-        return call_id, parsed["task_name"]
-    return None
-def _activity(record: dict[str, Any]) -> dict[str, Any] | None:
+
+
+def _dispatch(record: dict[str, Any]) -> tuple[str, str, str, str] | None:
     payload = _payload(record)
     item = payload.get("item") if record.get("type") == "event_msg" else None
-    return item if isinstance(item, dict) and item.get("type") == "SubAgentActivity" else None
-def _child_terminal(parent_session: str, expected_task: str, agent_thread_id: str) -> str:
+    if not isinstance(item, dict) or item.get("type") != "CollabAgentToolCall":
+        return None
+    dispatch_id, prompt = item.get("id"), item.get("prompt")
+    receivers, agents = item.get("receiver_thread_ids"), item.get("receiver_agents")
+    if (
+        item.get("tool") != "spawn_agent"
+        or item.get("status") != "completed"
+        or not isinstance(dispatch_id, str)
+        or not isinstance(prompt, str)
+        or not isinstance(receivers, list)
+        or len(receivers) != 1
+        or not isinstance(receivers[0], str)
+        or not isinstance(agents, list)
+        or len(agents) != 1
+        or not isinstance(agents[0], dict)
+        or agents[0].get("thread_id") != receivers[0]
+        or agents[0].get("agent_role") != "loop-worker"
+        or not isinstance(agents[0].get("agent_nickname"), str)
+    ):
+        return None
+    marker = prompt.split("\n", 1)[0]
+    match = re.fullmatch(r"CODERAILS_GRAPH_TASK=(loop_worker_[0-9a-f]+(?:_a[2-9][0-9]*)?)", marker)
+    if match is None:
+        return None
+    return dispatch_id, match.group(1), receivers[0], agents[0]["agent_nickname"]
+
+
+def _child_terminal(parent_session: str, agent_thread_id: str, agent_nickname: str) -> str:
     records = _records(_thread_transcript(agent_thread_id), f"child {agent_thread_id} transcript")
     metadata = _payload(records[0][1])
     if (
         metadata.get("parent_thread_id") != parent_session
         or metadata.get("session_id") != parent_session
         or metadata.get("thread_source") != "subagent"
-        or metadata.get("agent_path") != f"/root/{expected_task}"
+        or metadata.get("agent_nickname") != agent_nickname
+        or metadata.get("agent_role") != "loop-worker"
     ):
         raise GraphError(f"child {agent_thread_id} belongs to a different graph dispatch")
+    source = _object(metadata.get("source"), f"child {agent_thread_id}.source")
+    spawn = _object(_object(source.get("subagent"), f"child {agent_thread_id}.source.subagent").get("thread_spawn"),
+                    f"child {agent_thread_id}.source.subagent.thread_spawn")
+    if (
+        spawn.get("parent_thread_id") != parent_session
+        or spawn.get("depth") != 1
+        or spawn.get("agent_nickname") != agent_nickname
+        or spawn.get("agent_role") != "loop-worker"
+        or spawn.get("agent_path") is not None
+    ):
+        raise GraphError(f"child {agent_thread_id} has invalid graph dispatch metadata")
     started_at = records[0][1].get("timestamp")
     if not isinstance(started_at, str):
         raise GraphError(f"child {agent_thread_id} has invalid session metadata")
@@ -114,47 +131,27 @@ def _reference(value: Any, label: str) -> dict[str, Any]:
     return reference
 def _parent_indexes(
     records: list[tuple[int, dict[str, Any]]],
-) -> tuple[dict[str, list[tuple[int, str]]], dict[str, list[str]],
-           dict[str, list[dict[str, Any]]]]:
-    spawns: dict[str, list[tuple[int, str]]] = {}
-    results: dict[str, list[str]] = {}
-    activities: dict[str, list[dict[str, Any]]] = {}
+) -> dict[str, list[tuple[int, str, str, str]]]:
+    spawns: dict[str, list[tuple[int, str, str, str]]] = {}
     for line_number, record in records:
-        payload = _payload(record)
-        if spawn := _spawn(payload):
-            spawns.setdefault(spawn[0], []).append((line_number, spawn[1]))
-        if result := _spawn_result(payload):
-            results.setdefault(result[0], []).append(result[1])
-        if activity := _activity(record):
-            call_id = activity.get("id")
-            if isinstance(call_id, str):
-                activities.setdefault(call_id, []).append(activity)
-    return spawns, results, activities
+        if dispatch := _dispatch(record):
+            spawns.setdefault(dispatch[0], []).append((line_number, *dispatch[1:]))
+    return spawns
 def _verify_reference(
     state: dict[str, Any],
     node_id: str,
     reference: dict[str, Any],
-    indexes: tuple[dict[str, list[tuple[int, str]]], dict[str, list[str]], dict[str, list[dict[str, Any]]]],
+    indexes: dict[str, list[tuple[int, str, str, str]]],
 ) -> int:
-    spawns, results, activities = indexes
+    spawns = indexes
     expected_task = task_name(node_id, reference["attempt"])
     call_id = reference["spawn_call_id"]
     if len(spawns.get(call_id, [])) != 1:
         raise GraphError(f"node {node_id} spawn reference is missing or duplicate")
-    spawn_line, observed_task = spawns[call_id][0]
-    if observed_task != expected_task or results.get(call_id) != [f"/root/{expected_task}"]:
+    spawn_line, observed_task, observed_agent, nickname = spawns[call_id][0]
+    if observed_task != expected_task or observed_agent != reference["agent_thread_id"]:
         raise GraphError(f"node {node_id} spawn reference has the wrong task")
-    activity_items = activities.get(call_id, [])
-    if len(activity_items) != 1:
-        raise GraphError(f"node {node_id} SubAgentActivity is missing or duplicate")
-    activity = activity_items[0]
-    if (
-        activity.get("kind") != "started"
-        or activity.get("agent_path") != f"/root/{expected_task}"
-        or activity.get("agent_thread_id") != reference["agent_thread_id"]
-    ):
-        raise GraphError(f"node {node_id} SubAgentActivity does not match its spawn")
-    terminal = _child_terminal(state["session_id"], expected_task, reference["agent_thread_id"])
+    terminal = _child_terminal(state["session_id"], reference["agent_thread_id"], nickname)
     if terminal != reference["task_complete_turn_id"]:
         raise GraphError(f"node {node_id} task_complete reference does not match its child")
     return spawn_line
@@ -218,17 +215,13 @@ def bind_worker_evidence(state: dict[str, Any], active_wave: dict[str, Any]
     for node_id in active_wave["nodes"]:
         attempt = state["graph"]["nodes"][node_id]["retry"]["attempts"] + 1
         expected_task = task_name(node_id, attempt)
-        matching = [(call_id, items[0][0]) for call_id, items in indexes[0].items()
+        matching = [(call_id, items[0]) for call_id, items in indexes.items()
                     if len(items) == 1 and items[0][0] > cursor
                     and items[0][1] == expected_task]
         if len(matching) != 1:
             raise GraphError(f"node {node_id} must have exactly one current-wave spawn")
-        call_id, _ = matching[0]
-        activity_items = indexes[2].get(call_id, [])
-        if len(activity_items) != 1 or not isinstance(activity_items[0].get("agent_thread_id"), str):
-            raise GraphError(f"node {node_id} SubAgentActivity is missing or duplicate")
-        agent_thread_id = activity_items[0]["agent_thread_id"]
-        terminal = _child_terminal(state["session_id"], expected_task, agent_thread_id)
+        call_id, (_, _, agent_thread_id, nickname) = matching[0]
+        terminal = _child_terminal(state["session_id"], agent_thread_id, nickname)
         reference = {
             "kind": "codex_agent",
             "attempt": attempt,

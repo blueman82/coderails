@@ -19,32 +19,28 @@ codex_fixture::init() {
 
 codex_fixture::append_attempt() {
 	local session="$1" task="$2" attempt="$3" wave="$4"
-	local parent token call agent turn child path
+	local parent token call agent nickname turn child
 	parent=$(codex_fixture::parent "$session")
 	token=$(printf '%s:%s:%s' "$task" "$attempt" "$(wc -l <"$parent")" | shasum -a 256 | awk '{print substr($1,1,16)}')
 	call="call_fixture_$token"
 	agent="agent-fixture-$token"
 	turn="turn-fixture-$token"
-	path="/root/$task"
+	nickname="fixture-$token"
 	{
-		jq -cn --arg task "$task" --arg call "$call" '{
-          type:"response_item",payload:{type:"function_call",name:"spawn_agent",
-          arguments:({task_name:$task}|tojson),call_id:$call}}
-        '
-		jq -cn --arg path "$path" --arg call "$call" '{
-          type:"response_item",payload:{type:"function_call_output",call_id:$call,
-          output:({task_name:$path}|tojson)}}
-        '
-		jq -cn --arg path "$path" --arg call "$call" --arg agent "$agent" '{
-          type:"event_msg",payload:{item:{type:"SubAgentActivity",id:$call,kind:"started",
-          agent_thread_id:$agent,agent_path:$path}}}
+		jq -cn --arg task "$task" --arg call "$call" --arg session "$session" --arg agent "$agent" --arg nickname "$nickname" '{
+          type:"event_msg",payload:{type:"item_completed",item:{type:"CollabAgentToolCall",id:$call,
+          tool:"spawn_agent",status:"completed",sender_thread_id:$session,receiver_thread_ids:[$agent],
+          receiver_agents:[{thread_id:$agent,agent_nickname:$nickname,agent_role:"loop-worker"}],
+          prompt:("CODERAILS_GRAPH_TASK=" + $task + "\nfixture")}}}
         '
 	} >>"$parent"
 	child="$(dirname "$parent")/rollout-fixture-$agent.jsonl"
-	jq -cn --arg session "$session" --arg agent "$agent" --arg path "$path" '{
+	jq -cn --arg session "$session" --arg agent "$agent" --arg nickname "$nickname" '{
       timestamp:"2026-08-21T00:00:01Z",type:"session_meta",
       payload:{id:$agent,session_id:$session,parent_thread_id:$session,
-      thread_source:"subagent",agent_path:$path}
+      thread_source:"subagent",agent_nickname:$nickname,agent_role:"loop-worker",
+      source:{subagent:{thread_spawn:{parent_thread_id:$session,depth:1,agent_path:null,
+      agent_nickname:$nickname,agent_role:"loop-worker"}}}}
     }' >"$child"
 	jq -cn --arg turn "$turn" '{
       timestamp:"2026-08-21T00:00:02Z",type:"event_msg",
