@@ -88,7 +88,9 @@ canonical_result=$(bash -c '. "$1"; coderails::resolve_config "$2"' sh "$PACKAGE
 check "native resolver reads canonical config" test "$canonical_result" = "project: canonical"
 rm -rf "$config_repo"
 
-missing_dispatch=$(printf '%s' '{"session_id":"missing","cwd":"/tmp","hook_event_name":"PreToolUse","tool_name":"spawn_agent","tool_input":{"task_name":"loop-worker-A","message":"work"}}' | CODERAILS_AGENTIC_LOOP_DIR="${TMPDIR:-/tmp}/coderails-codex-hooks-missing-$$" PLUGIN_ROOT="$PACKAGE" "$HOOKS/scripts/loop_dispatch_guard.sh")
+missing_dispatch_dir=$(mktemp -d "${TMPDIR:-/tmp}/coderails-codex-hooks-missing.XXXXXX")
+missing_dispatch=$(printf '%s' '{"session_id":"missing","cwd":"/tmp","hook_event_name":"PreToolUse","tool_name":"spawn_agent","tool_input":{"agent_type":"loop-worker","message":"CODERAILS_GRAPH_TASK=loop_worker_41\nwork"}}' | CODERAILS_AGENTIC_LOOP_DIR="$missing_dispatch_dir" CODERAILS_DISCIPLINE_LOG="$missing_dispatch_dir/discipline.log" PLUGIN_ROOT="$PACKAGE" "$HOOKS/scripts/loop_dispatch_guard.sh")
+rm -rf "$missing_dispatch_dir"
 check "native worker dispatch without loop state is denied" sh -c 'printf "%s" "$1" | jq -e ".hookSpecificOutput.permissionDecision == \"deny\""' sh "$missing_dispatch"
 
 destructive=$(printf '%s' '{"session_id":"s1","cwd":"/tmp","hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"rm -rf /tmp/example"}}' | "$HOOKS/scripts/destructive_bash_gate.sh")

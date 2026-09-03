@@ -1,0 +1,37 @@
+path	group	success	failure	stream	exit	environment	invocation
+hooks/scripts/check_confidence_labels.sh	hook	labelled response allows	unlabelled response blocks	Stop stderr reason	Stop/SubagentStop: 0/2	stdin JSON TRANSCRIPT_PATH	Stop,SubagentStop
+hooks/scripts/comment_citation_gate.sh	hook	ordinary comment allows	transcript citation denies	stdout deny JSON	PreToolUse: 0	stdin JSON PLUGIN_ROOT	PreToolUse ^apply_patch$
+hooks/scripts/crack_on_gate.sh	hook	non-crack prompt allows	request_user_input during crack-on denies	stdout deny JSON	PreToolUse: 0	stdin JSON CLAUDE_AGENTIC_LOOP_DIR	UserPromptSubmit,PreToolUse ^request_user_input$
+hooks/scripts/crack_on_prose_gate.sh	hook	non-question completion allows	crack-on prose question blocks	Stop stderr reason	Stop: 0/2	stdin JSON CLAUDE_AGENTIC_LOOP_DIR	Stop
+hooks/scripts/destructive_bash_gate.sh	hook	safe command allows	blocked destructive command denies	stdout deny JSON	PreToolUse: 0	stdin JSON	PreToolUse ^Bash$
+hooks/scripts/graph_completion_guard.sh	hook	complete graph allows	incomplete graph blocks	Stop stderr reason	Stop: 0/2	stdin JSON CLAUDE_AGENTIC_LOOP_DIR	Stop
+hooks/scripts/inject_bootstrap.sh	hook	startup injects context	invalid input degrades	stdout hook JSON	SessionStart: 0	stdin JSON PLUGIN_ROOT	SessionStart startup|resume|clear|compact
+hooks/scripts/inject_context.sh	hook	prompt injects context	invalid input degrades	stdout hook JSON	UserPromptSubmit: 0	stdin JSON	UserPromptSubmit
+hooks/scripts/lib/hook_common.sh	hook-helper	helper emits hook output	helper degrades safely	stdout hook JSON	caller-defined	PLUGIN_ROOT jq	imported by hook entries
+hooks/scripts/loop_dispatch_guard.sh	hook	authorized dispatch allows	missing graph state denies	stdout deny JSON	PreToolUse: 0	stdin JSON CLAUDE_AGENTIC_LOOP_DIR	PreToolUse ^spawn_agent$
+hooks/scripts/no_edit_on_main.sh	hook	allowed write allows	protected write denies	stdout deny JSON	PreToolUse: 0	stdin JSON	PreToolUse ^apply_patch$
+hooks/scripts/quality_feedback.sh	hook	quality feedback emits	invalid input degrades	stdout hook JSON	PostToolUse: 0	stdin JSON PLUGIN_ROOT	PostToolUse ^apply_patch$
+hooks/scripts/test_gate.sh	hook	passing trusted test allows	failing trusted test denies	stdout deny JSON	PreToolUse: 0	stdin JSON PLUGIN_ROOT	PreToolUse ^Bash$
+hooks/scripts/verification_volume_ceiling.sh	hook	first two checks allow	third check denies	stdout deny JSON	PreToolUse: 0	stdin JSON CLAUDE_AGENTIC_LOOP_DIR	PreToolUse ^Bash$
+hooks/scripts/wiki_taxonomy_gate.sh	hook	approved wiki path allows	unsanctioned top-level denies	stdout deny JSON	PreToolUse: 0	stdin JSON PLUGIN_ROOT	PreToolUse ^apply_patch$
+scripts/lib/config.sh	workflow-helper	canonical config resolves	missing config reports NO_CONFIG	stdout config/NO_CONFIG	caller-defined	PWD	imported by workflow CLIs
+scripts/lib/eval-artifact.sh	workflow-helper	valid eval artifact reads	missing or invalid artifact fails	stdout artifact/stderr reason	caller-defined	gh PATH	imported by git-common and post-evals
+scripts/lib/git-common.sh	workflow-helper	valid git/gh precondition passes	invalid precondition fails	stdout data/stderr reason	caller-defined	git gh PATH	imported by push and merge
+scripts/lib/review-artifact.sh	workflow-helper	valid review artifact reads	missing or invalid artifact fails	stdout artifact/stderr reason	caller-defined	gh PATH	imported by git-common
+scripts/merge.sh	workflow-cli	merge gate succeeds	missing evidence or gh failure blocks	stdout status/stderr reason	0/1	git gh PWD	merge skill
+scripts/post_evals.sh	workflow-cli	valid eval posts	invalid eval fails	stdout artifact/stderr reason	0/1	git gh PWD	post-evals skill and merge import
+scripts/post_review.sh	workflow-cli	valid review posts	invalid review fails	stdout artifact/stderr reason	0/1	git gh PWD	post-review skill
+scripts/push.sh	workflow-cli	valid feature push creates or updates PR	invalid precondition fails	stdout PR URL/stderr reason	0/1	git gh PWD	push skill
+skills/dashboard/runner/bin/dashboard-server.sh	dashboard-launcher	starts runner server	missing node entry fails	stdout server/stderr reason	0/1	CODERAILS_BUILDER_WRAPPER	spawned by dashboard runner
+skills/dashboard/runner/bin/seed-and-sweep.sh	dashboard-launcher	seeds then sweeps	seed or sweep failure fails	stdout runner output/stderr reason	0/1	CODERAILS_BUILDER_WRAPPER	spawned by dashboard runner
+skills/dashboard/runner/bin/sweeper.sh	dashboard-launcher	starts sweeper	missing node entry fails	stdout runner output/stderr reason	0/1	CODERAILS_BUILDER_WRAPPER	spawned by dashboard runner
+skills/dashboard/scripts/run-builder.sh	dashboard-launcher	starts builder	bad wrapper fails	stdout builder output/stderr reason	0/1	CODERAILS_BUILDER_WRAPPER	spawned by dashboard app
+skills/dashboard/scripts/start-dashboard.sh	dashboard-launcher	starts dashboard	missing app fails	stdout dashboard output/stderr reason	0/1	PWD	 dashboard skill
+skills/dashboard/scripts/stop-dashboard.sh	dashboard-launcher	stops dashboard	missing pid is harmless	stdout status/stderr reason	0/1	PWD	 dashboard skill
+skills/workflow-audit/scripts/cluster_ngrams.sh	workflow-audit	clusters valid JSONL	malformed input fails	stdout JSONL/stderr reason	0/1	PATH	workflow-audit pipeline
+skills/workflow-audit/scripts/scan_transcripts.sh	workflow-audit	filters private transcript data	missing input fails	stdout JSONL/stderr reason	0/1	HOME PATH	workflow-audit pipeline
+skills/workflow-audit/scripts/tests/cluster_ngrams.test.sh	workflow-audit-test	cluster unit runner passes	malformed JSONL assertion fails	stdout test output/stderr failure	0/1	TMPDIR	called directly
+skills/workflow-audit/scripts/tests/e2e.test.sh	workflow-audit-test	scan-to-cluster runner passes	pipeline assertion fails	stdout test output/stderr failure	0/1	TMPDIR HOME	called directly
+skills/workflow-audit/scripts/tests/scan_transcripts.test.sh	workflow-audit-test	scan unit runner passes	privacy assertion fails	stdout test output/stderr failure	0/1	TMPDIR HOME	called directly
+skills/workflow-audit/scripts/tests/write_queue_entry.test.sh	workflow-audit-test	queue unit runner passes	write-error assertion fails	stdout test output/stderr failure	0/1	TMPDIR	called directly
+skills/workflow-audit/scripts/write_queue_entry.sh	workflow-audit	writes valid queue proposal	invalid proposal or write error fails	stdout queue path/stderr reason	0/1	HOME PATH	workflow-audit pipeline
