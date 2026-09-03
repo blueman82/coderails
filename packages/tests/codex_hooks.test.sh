@@ -191,6 +191,8 @@ jq -n '{
 }' >"$graph_dir/progress.json"
 incomplete_stop=$(printf '%s' '{"session_id":"s-complete","cwd":"/tmp","hook_event_name":"Stop","last_assistant_message":"done"}' | CODERAILS_AGENTIC_LOOP_DIR="$graph_root" PLUGIN_ROOT="$PACKAGE" "$HOOKS/scripts/graph_completion_guard.sh")
 check "incomplete native graph blocks Stop" sh -c 'printf "%s" "$1" | jq -e ".decision == \"block\""' sh "$incomplete_stop"
+recursive_stop=$(printf '%s' '{"session_id":"s-complete","cwd":"/tmp","hook_event_name":"Stop","stop_hook_active":true,"last_assistant_message":"done"}' | CODERAILS_AGENTIC_LOOP_DIR="$graph_root" PLUGIN_ROOT="$PACKAGE" "$HOOKS/scripts/graph_completion_guard.sh")
+check "recursive native graph Stop does not block again" test -z "$recursive_stop"
 export HOME="$security_tmp/home"
 codex_fixture::init s-complete
 python3 "$PACKAGE/skills/agentic-loop/scripts/graph.py" begin-wave "$graph_dir/progress.json" >/dev/null

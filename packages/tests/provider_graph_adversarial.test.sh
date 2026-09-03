@@ -174,10 +174,12 @@ expect_hook_allowed() {
 	if "$@"; then fail "$name" "guard blocked an allowed stop"; else pass "$name"; fi
 }
 dispatch_input() {
-	local tool="$1" task="$2"
-	jq -cn --arg tool "$tool" --arg task "$task" --arg cwd "$ROOT" '{
+	local tool="$1" task="$2" agent_type="${3:-loop-worker}" marker="${4:-yes}"
+	local message="Implement the owned native graph node."
+	[[ "$marker" != "yes" ]] || message="CODERAILS_GRAPH_TASK=$task\n$message"
+	jq -cn --arg tool "$tool" --arg task "$task" --arg agent_type "$agent_type" --arg message "$message" --arg cwd "$ROOT" '{
       tool_name:$tool,session_id:"session-test",cwd:$cwd,
-      tool_input:{task_name:$task,message:"node=A wave_id=wave-2"}
+      tool_input:{task_name:"forged_legacy_task",agent_type:$agent_type,message:$message}
     }'
 }
 dispatch_fixture() {
@@ -200,13 +202,16 @@ test_codex_dispatch_guard() {
 	input=$(dispatch_input spawn_agent loop_worker_41)
 	expect_hook_allowed "canonical owned spawn_agent is allowed" hook_denied "$guard" "$root" "$input"
 	expect_denied "Claude Agent is never a Codex matcher alias" hook_denied "$guard" "$root" "$(dispatch_input Agent loop-worker-A)"
+	expect_denied "loop-worker without the task marker is denied" hook_denied "$guard" "$root" "$(dispatch_input spawn_agent loop_worker_41 loop-worker no)"
+	expect_denied "noncanonical task marker is denied" hook_denied "$guard" "$root" "$(dispatch_input spawn_agent loop_worker_425950415353)"
+	expect_hook_allowed "unrelated native agent stays outside the graph gate" hook_denied "$guard" "$root" "$(dispatch_input spawn_agent loop_worker_41 source-auditor no)"
 
 	root="$TMP/dispatch.no-wave"
 	dispatch_fixture "$root" no
 	expect_denied "dispatch requires an active wave" hook_denied "$guard" "$root" "$input"
 	root="$TMP/dispatch.task"
 	dispatch_fixture "$root"
-	expect_denied "caller-chosen task name cannot bypass node ownership" hook_denied "$guard" "$root" "$(dispatch_input spawn_agent loop_worker_425950415353)"
+	expect_denied "wrong graph task marker cannot bypass node ownership" hook_denied "$guard" "$root" "$(dispatch_input spawn_agent loop_worker_425950415353)"
 	root="$TMP/dispatch.pr"
 	dispatch_fixture "$root" yes pr
 	expect_denied "PR-scope evals do not authorize loop dispatch" hook_denied "$guard" "$root" "$input"

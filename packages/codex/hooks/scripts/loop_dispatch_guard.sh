@@ -11,11 +11,17 @@ tool_name=$(printf '%s' "$HOOK_INPUT" | jq -r '.tool_name // empty' 2>/dev/null)
     hook::deny "Codex graph workers must use native spawn_agent."
     exit 0
 }
-task_name=$(printf '%s' "$HOOK_INPUT" | jq -r '.tool_input.task_name // empty' 2>/dev/null)
+agent_type=$(printf '%s' "$HOOK_INPUT" | jq -r '.tool_input.agent_type // empty' 2>/dev/null)
+[[ "$agent_type" == "loop-worker" ]] || exit 0
+message=$(printf '%s' "$HOOK_INPUT" | jq -r '.tool_input.message // empty' 2>/dev/null)
+task_name=$(printf '%s\n' "$message" | sed -n '1s/^CODERAILS_GRAPH_TASK=\(loop_worker_[0-9a-f][0-9a-f]*\(_a[2-9][0-9]*\)\{0,1\}\)$/\1/p')
+[[ -n "$task_name" ]] || {
+    hook::deny "Graph worker dispatch requires a canonical CODERAILS_GRAPH_TASK marker on the first message line."
+    exit 0
+}
 session_id=$(printf '%s' "$HOOK_INPUT" | jq -r '.session_id // empty' 2>/dev/null)
 cwd=$(printf '%s' "$HOOK_INPUT" | jq -r '.cwd // empty' 2>/dev/null)
 [[ -n "$session_id" && -n "$cwd" ]] || {
-    [[ "$task_name" == loop_worker_* || "$task_name" == loop-worker-* ]] || exit 0
     hook::deny "Graph worker dispatch requires a session id and working directory."
     exit 0
 }
@@ -24,7 +30,6 @@ state=$(hook::loop_state_path "$cwd" "$session_id") || {
     exit 0
 }
 if [[ ! -f "$state" ]]; then
-    [[ "$task_name" == loop_worker_* || "$task_name" == loop-worker-* ]] || exit 0
     hook::deny "Graph worker dispatch requires this session's progress.json. Start the native graph before spawn_agent."
     exit 0
 fi
@@ -41,9 +46,7 @@ inspection=$(python3 "$graph" inspect "$state" 2>/dev/null) || {
     exit 0
 }
 if [[ $(printf '%s' "$inspection" | jq -r '.status // empty') == "complete" ]]; then
-    case "$task_name" in
-    loop_worker_* | loop-worker-*) hook::deny "A completed graph cannot dispatch graph workers." ;;
-    esac
+    hook::deny "A completed graph cannot dispatch graph workers."
     exit 0
 fi
 authorization=$(python3 "$graph" authorize-dispatch "$state" \

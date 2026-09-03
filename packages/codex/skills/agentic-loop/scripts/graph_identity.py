@@ -120,6 +120,37 @@ def task_node(name: str) -> str:
     return node_id
 
 
+def is_frozen_loop_evals(evals: dict[str, Any]) -> bool:
+    """Return whether an ungraded loop suite is safe to authorize dispatch."""
+    level = evals.get("verification_level")
+    frozen_sha = evals.get("frozen_sha")
+    raw_evals = evals.get("evals")
+    if (
+        isinstance(level, bool)
+        or not isinstance(level, (int, float))
+        or level < 1
+        or not isinstance(frozen_sha, str)
+        or not frozen_sha.strip()
+        or evals.get("result") is not None
+        or evals.get("grading") is not None
+        or not isinstance(raw_evals, list)
+        or not any(isinstance(item, dict) and item.get("priority") == "P0" for item in raw_evals)
+    ):
+        return False
+    for item in raw_evals:
+        if not isinstance(item, dict) or not isinstance(item.get("id"), str) or not item["id"].strip():
+            return False
+        mode = item.get("mode")
+        if mode not in {"scripted", "agent-run"}:
+            return False
+        if mode == "scripted" and not all(
+            isinstance(item.get(field), str) and item[field].strip()
+            for field in ("cmd", "negative_control")
+        ):
+            return False
+    return True
+
+
 def active_nodes(active_wave: Any, nodes: dict[str, Any], revision: int) -> set[str]:
     if active_wave is None:
         return set()
