@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Coderails Factory</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <main class="factory-shell">
+      <header class="header">
+        <strong>Coderails Factory</strong>
+        <span id="project-label">Project: coderails</span><span id="provider-label">Provider: Codex</span><span class="connected">● connected</span>
+        <button type="button" class="theme-toggle">System theme</button>
+      </header>
+      <form class="launch-bar">
+        <label>Project <select name="projectId"><option value="coderails">coderails</option></select></label>
+        <label>Provider <select name="provider"><option value="codex">Codex</option><option value="claude">Claude</option></select></label>
+        <label class="prompt">Prompt <input name="prompt" required placeholder="Describe the work to run"></label>
+        <button type="submit">Start run</button>
+      </form>
+      <section class="workspace">
+        <aside class="queue panel"><p class="eyebrow">RUN QUEUE</p><div class="run-list"><p>Nothing queued</p></div></aside>
+        <section class="workflow panel"><p class="eyebrow">WORKFLOW MAP</p><div class="workflow-map" aria-label="Workflow map"></div><p class="eyebrow">LIVE AGENT ACTIVITY · SCROLLABLE</p><div class="activity" aria-live="polite">Waiting for Factory activity…</div></section>
+        <aside class="inspector panel" aria-live="polite"></aside>
+      </section>
+    </main>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>
