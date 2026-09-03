@@ -1,38 +1,58 @@
+"""Validate Codex-native transcript and completion evidence for graph state."""
+
 from __future__ import annotations
 
 import hashlib
 import json
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
-from graph_identity import GraphError, REFERENCE_KEYS, classify_worker_evidence, is_frozen_loop_evals, task_name
-def _object(value: Any, label: str) -> dict[str, Any]:
+from graph_identity import REFERENCE_KEYS, GraphError, classify_worker_evidence, is_frozen_loop_evals, task_name
+from json_types import JsonValue
+
+
+def _object(value: object, label: str) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise GraphError(f"{label} must be an object")
-    return value
-def _nonempty(value: Any, label: str) -> str:
+    return cast(dict[str, Any], value)
+
+
+def _array(value: object, label: str) -> list[JsonValue]:
+    if not isinstance(value, list):
+        raise GraphError(f"{label} must be an array")
+    return cast(list[JsonValue], value)
+
+
+def _nonempty(value: object, label: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise GraphError(f"{label} must be a non-empty string")
     return value
+
+
 def _load(path: Path, label: str) -> dict[str, Any]:
     try:
         with path.open(encoding="utf-8") as handle:
-            return _object(json.load(handle), label)
+            parsed: JsonValue = cast(JsonValue, json.load(handle))
+            return _object(cast(object, parsed), label)
     except (OSError, json.JSONDecodeError) as error:
         raise GraphError(f"{label} is missing or invalid: {error}") from error
+
+
 def _records(path: Path, label: str) -> list[tuple[int, dict[str, Any]]]:
-    records = []
+    records: list[tuple[int, dict[str, Any]]] = []
     try:
         with path.open(encoding="utf-8") as transcript:
             for line_number, line in enumerate(transcript, 1):
-                record = json.loads(line)
-                records.append((line_number, _object(record, f"{label} line {line_number}")))
+                record: JsonValue = cast(JsonValue, json.loads(line))
+                records.append((line_number, _object(cast(object, record), f"{label} line {line_number}")))
     except (OSError, json.JSONDecodeError) as error:
         raise GraphError(f"{label} is missing or invalid: {error}") from error
     if not records:
         raise GraphError(f"{label} is empty")
     return records
+
+
 def _thread_transcript(thread_id: str) -> Path:
     root = Path.home() / ".codex" / "sessions"
     matches = list(root.rglob(f"*-{thread_id}.jsonl")) if root.is_dir() else []
@@ -40,22 +60,31 @@ def _thread_transcript(thread_id: str) -> Path:
         raise GraphError(f"thread {thread_id} must resolve to exactly one Codex transcript")
     first = _records(matches[0], f"thread {thread_id} transcript")[0][1]
     payload = first.get("payload")
-    if first.get("type") != "session_meta" or not isinstance(payload, dict) or payload.get("id") != thread_id:
+    if first.get("type") != "session_meta" or not isinstance(payload, dict):
+        raise GraphError(f"thread {thread_id} transcript has foreign session metadata")
+    payload = cast(dict[str, Any], payload)
+    if payload.get("id") != thread_id:
         raise GraphError(f"thread {thread_id} transcript has foreign session metadata")
     return matches[0]
+
+
 def transcript_cursor(session_id: str) -> int:
+    """Return the current native transcript record count for a session."""
     return len(_records(_thread_transcript(session_id), "parent transcript"))
 
 
 def _payload(record: dict[str, Any]) -> dict[str, Any]:
     payload = record.get("payload", record)
-    return payload if isinstance(payload, dict) else {}
+    return cast(dict[str, Any], payload) if isinstance(payload, dict) else {}
 
 
 def _dispatch(record: dict[str, Any]) -> tuple[str, str, str, str] | None:
     payload = _payload(record)
-    item = payload.get("item") if record.get("type") == "event_msg" else None
-    if not isinstance(item, dict) or item.get("type") != "CollabAgentToolCall":
+    raw_item = payload.get("item") if record.get("type") == "event_msg" else None
+    if not isinstance(raw_item, dict):
+        return None
+    item = cast(dict[str, Any], raw_item)
+    if item.get("type") != "CollabAgentToolCall":
         return None
     dispatch_id, prompt = item.get("id"), item.get("prompt")
     receivers, agents = item.get("receiver_thread_ids"), item.get("receiver_agents")
@@ -65,21 +94,24 @@ def _dispatch(record: dict[str, Any]) -> tuple[str, str, str, str] | None:
         or not isinstance(dispatch_id, str)
         or not isinstance(prompt, str)
         or not isinstance(receivers, list)
-        or len(receivers) != 1
-        or not isinstance(receivers[0], str)
         or not isinstance(agents, list)
-        or len(agents) != 1
-        or not isinstance(agents[0], dict)
-        or agents[0].get("thread_id") != receivers[0]
-        or agents[0].get("agent_role") != "loop-worker"
-        or not isinstance(agents[0].get("agent_nickname"), str)
+    ):
+        return None
+    receivers, agents = cast(list[object], receivers), cast(list[object], agents)
+    if len(receivers) != 1 or not isinstance(receivers[0], str) or len(agents) != 1 or not isinstance(agents[0], dict):
+        return None
+    agent = cast(dict[str, Any], agents[0])
+    if (
+        agent.get("thread_id") != receivers[0]
+        or agent.get("agent_role") != "loop-worker"
+        or not isinstance(agent.get("agent_nickname"), str)
     ):
         return None
     marker = prompt.split("\n", 1)[0]
     match = re.fullmatch(r"CODERAILS_GRAPH_TASK=(loop_worker_[0-9a-f]+(?:_a[2-9][0-9]*)?)", marker)
     if match is None:
         return None
-    return dispatch_id, match.group(1), receivers[0], agents[0]["agent_nickname"]
+    return dispatch_id, match.group(1), receivers[0], agent["agent_nickname"]
 
 
 def _child_terminal(parent_session: str, agent_thread_id: str, agent_nickname: str) -> str:
@@ -94,8 +126,10 @@ def _child_terminal(parent_session: str, agent_thread_id: str, agent_nickname: s
     ):
         raise GraphError(f"child {agent_thread_id} belongs to a different graph dispatch")
     source = _object(metadata.get("source"), f"child {agent_thread_id}.source")
-    spawn = _object(_object(source.get("subagent"), f"child {agent_thread_id}.source.subagent").get("thread_spawn"),
-                    f"child {agent_thread_id}.source.subagent.thread_spawn")
+    spawn = _object(
+        _object(source.get("subagent"), f"child {agent_thread_id}.source.subagent").get("thread_spawn"),
+        f"child {agent_thread_id}.source.subagent.thread_spawn",
+    )
     if (
         spawn.get("parent_thread_id") != parent_session
         or spawn.get("depth") != 1
@@ -107,8 +141,11 @@ def _child_terminal(parent_session: str, agent_thread_id: str, agent_nickname: s
     started_at = records[0][1].get("timestamp")
     if not isinstance(started_at, str):
         raise GraphError(f"child {agent_thread_id} has invalid session metadata")
-    events = [_payload(record) for _, record in records[1:]
-              if isinstance(record.get("timestamp"), str) and record["timestamp"] >= started_at]
+    events = [
+        _payload(record)
+        for _, record in records[1:]
+        if isinstance(record.get("timestamp"), str) and record["timestamp"] >= started_at
+    ]
     terminals = [event for event in events if event.get("type") in {"task_complete", "turn_aborted"}]
     if not terminals or terminals[-1].get("type") != "task_complete":
         raise GraphError(f"child {agent_thread_id} did not finish successfully")
@@ -119,7 +156,9 @@ def _child_terminal(parent_session: str, agent_thread_id: str, agent_nickname: s
     if len(starts) != 1 or sum(event.get("turn_id") == turn_id for event in terminals) != 1:
         raise GraphError(f"child {agent_thread_id} task_complete has no unique matching task_started")
     return turn_id
-def _reference(value: Any, label: str) -> dict[str, Any]:
+
+
+def _reference(value: object, label: str) -> dict[str, Any]:
     reference = _object(value, label)
     if set(reference) != REFERENCE_KEYS or reference.get("kind") != "codex_agent":
         raise GraphError(f"{label} has invalid transcript reference fields")
@@ -129,6 +168,8 @@ def _reference(value: Any, label: str) -> dict[str, Any]:
     for key in REFERENCE_KEYS - {"kind", "attempt"}:
         _nonempty(reference.get(key), f"{label}.{key}")
     return reference
+
+
 def _parent_indexes(
     records: list[tuple[int, dict[str, Any]]],
 ) -> dict[str, list[tuple[int, str, str, str]]]:
@@ -137,6 +178,8 @@ def _parent_indexes(
         if dispatch := _dispatch(record):
             spawns.setdefault(dispatch[0], []).append((line_number, *dispatch[1:]))
     return spawns
+
+
 def _verify_reference(
     state: dict[str, Any],
     node_id: str,
@@ -155,8 +198,11 @@ def _verify_reference(
     if terminal != reference["task_complete_turn_id"]:
         raise GraphError(f"node {node_id} task_complete reference does not match its child")
     return spawn_line
-def _stored_references(state: dict[str, Any], require_complete: bool,
-                       known_identifiers: set[str] | None = None) -> set[str]:
+
+
+def _stored_references(
+    state: dict[str, Any], require_complete: bool, known_identifiers: set[str] | None = None
+) -> set[str]:
     indexes = _parent_indexes(_records(_thread_transcript(state["session_id"]), "parent transcript"))
     used = set(known_identifiers or ())
     waves: set[int] = set()
@@ -165,7 +211,7 @@ def _stored_references(state: dict[str, Any], require_complete: bool,
         if node_id in state["graph"]["joins"]:
             ordinary.extend(node["evidence"])
             continue
-        references = []
+        references: list[tuple[dict[str, Any], set[str]]] = []
         for index, item in enumerate(node["evidence"]):
             shaped, identifiers = classify_worker_evidence(item)
             if not shaped:
@@ -194,7 +240,10 @@ def _stored_references(state: dict[str, Any], require_complete: bool,
             previous_line = spawn_line
     if waves:
         completion = state.get("completion") if state.get("status") == "complete" else None
-        revision = completion.get("revision") if isinstance(completion, dict) else state["revision"]
+        completion = cast(dict[str, Any], completion) if isinstance(completion, dict) else None
+        revision = completion.get("revision") if completion is not None else state["revision"]
+        if isinstance(revision, bool) or not isinstance(revision, int):
+            raise GraphError("graph revision must be an integer")
         last_wave = revision - (2 if state["graph"]["active_wave"] is not None else 1)
         expected = set(range(last_wave - 2 * (len(waves) - 1), last_wave + 1, 2))
         if waves != expected:
@@ -202,8 +251,11 @@ def _stored_references(state: dict[str, Any], require_complete: bool,
     if any(classify_worker_evidence(item, used)[0] for item in ordinary):
         raise GraphError("stored evidence contains noncanonical worker evidence")
     return used
-def bind_worker_evidence(state: dict[str, Any], active_wave: dict[str, Any]
-                         ) -> tuple[dict[str, dict[str, Any]], set[str]]:
+
+
+def bind_worker_evidence(
+    state: dict[str, Any], active_wave: dict[str, Any]
+) -> tuple[dict[str, dict[str, Any]], set[str]]:
     """Bind current-wave transcript records to each dispatched worker node."""
     used: set[str] = set()
     parent = _records(_thread_transcript(state["session_id"]), "parent transcript")
@@ -215,9 +267,11 @@ def bind_worker_evidence(state: dict[str, Any], active_wave: dict[str, Any]
     for node_id in active_wave["nodes"]:
         attempt = state["graph"]["nodes"][node_id]["retry"]["attempts"] + 1
         expected_task = task_name(node_id, attempt)
-        matching = [(call_id, items[0]) for call_id, items in indexes.items()
-                    if len(items) == 1 and items[0][0] > cursor
-                    and items[0][1] == expected_task]
+        matching = [
+            (call_id, items[0])
+            for call_id, items in indexes.items()
+            if len(items) == 1 and items[0][0] > cursor and items[0][1] == expected_task
+        ]
         if len(matching) != 1:
             raise GraphError(f"node {node_id} must have exactly one current-wave spawn")
         call_id, (_, _, agent_thread_id, nickname) = matching[0]
@@ -238,17 +292,21 @@ def bind_worker_evidence(state: dict[str, Any], active_wave: dict[str, Any]
         references[node_id] = reference
     used = _stored_references(state, False, used)
     return references, used
+
+
 def validate_worker_evidence(state: dict[str, Any]) -> None:
     """Validate all stored worker evidence against native transcripts."""
     _stored_references(state, True)
+
+
 def _matching(evidence: dict[str, Any], state: dict[str, Any], label: str) -> None:
     if evidence.get("session_id") != state["session_id"] or evidence.get("loop_id") != state["loop_id"]:
         raise GraphError(f"{label} belongs to a different loop")
+
+
 def _grading_checksum(evals: dict[str, Any], result: str) -> str:
-    raw_evals = evals.get("evals")
-    if not isinstance(raw_evals, list):
-        raise GraphError("evals.evals must be an array")
-    canonical = []
+    raw_evals = _array(evals.get("evals"), "evals.evals")
+    canonical: list[dict[str, Any]] = []
     for index, raw_eval in enumerate(raw_evals):
         item = _object(raw_eval, f"evals.evals[{index}]")
         canonical.append({key: item.get(key) for key in ("id", "priority", "status")})
@@ -257,6 +315,7 @@ def _grading_checksum(evals: dict[str, Any], result: str) -> str:
 
 
 def validate_evals(state: dict[str, Any], revision: int | None, path: Path) -> None:
+    """Validate a loop eval suite before dispatch or completion."""
     evals = _load(path, "evals")
     _matching(evals, state, "evals")
     if evals.get("scope") != "loop" or evals.get("task_ref") != state["loop_id"]:
@@ -269,11 +328,11 @@ def validate_evals(state: dict[str, Any], revision: int | None, path: Path) -> N
         return
     if result not in {"GO", "VERIFICATION_LEVEL0"}:
         raise GraphError("evals are not graded GO")
-    raw_evals = evals.get("evals")
-    if not isinstance(raw_evals, list):
-        raise GraphError("evals.evals must be an array")
-    p0_statuses = [item.get("status") for item in raw_evals
-                   if isinstance(item, dict) and item.get("priority") == "P0"]
+    raw_evals = _array(evals.get("evals"), "evals.evals")
+    p0_statuses = [_object(item, "evals.evals").get("status") for item in raw_evals]
+    p0_statuses = [
+        status for item, status in zip(raw_evals, p0_statuses) if _object(item, "evals.evals").get("priority") == "P0"
+    ]
     if result == "GO" and any(status != "pass" for status in p0_statuses):
         raise GraphError("evals result disagrees with its P0 statuses")
     if result == "VERIFICATION_LEVEL0" and (evals.get("verification_level") != 0 or raw_evals):
@@ -283,9 +342,10 @@ def validate_evals(state: dict[str, Any], revision: int | None, path: Path) -> N
         raise GraphError("evals grading stamp is missing")
     if grading.get("checksum") != _grading_checksum(evals, result):
         raise GraphError("evals grading checksum is invalid")
-    amendments = evals.get("amendments")
-    if not isinstance(amendments, list) or grading.get("amendments_at_grade") != len(amendments):
+    amendments = _array(evals.get("amendments"), "evals.amendments")
+    if grading.get("amendments_at_grade") != len(amendments):
         raise GraphError("evals grading amendment count is stale")
+
 
 def validate_completion_evidence(
     state: dict[str, Any],
@@ -295,13 +355,14 @@ def validate_completion_evidence(
     retro_path: Path,
     transcript_path: Path | None,
 ) -> None:
+    """Validate proof, retrospective, eval, and transcript completion evidence."""
     proof = _load(proof_path, "proof")
     retro = _load(retro_path, "retro")
     for label, evidence in (("proof", proof), ("retro", retro)):
         _matching(evidence, state, label)
     validate_evals(state, revision, evals_path)
-    proofs = proof.get("proofs")
-    if not isinstance(proofs, list) or not proofs:
+    proofs = _array(proof.get("proofs"), "proof.proofs")
+    if not proofs:
         raise GraphError("proof evidence is missing or not passing")
     for index, raw_proof in enumerate(proofs):
         item = _object(raw_proof, f"proof.proofs[{index}]")
@@ -317,23 +378,30 @@ def validate_completion_evidence(
     if retro.get("status") != "complete":
         raise GraphError("retro evidence is incomplete")
 
+
 def _exec_command(payload: dict[str, Any]) -> tuple[str, str] | None:
     if payload.get("type") == "function_call" and payload.get("name") == "exec_command":
         arguments = payload.get("arguments")
         try:
-            parsed = json.loads(arguments) if isinstance(arguments, str) else arguments
+            parsed: object = (
+                cast(object, cast(JsonValue, json.loads(arguments))) if isinstance(arguments, str) else arguments
+            )
         except json.JSONDecodeError:
             return None
-        if isinstance(parsed, dict) and isinstance(parsed.get("cmd"), str):
-            return str(payload.get("call_id", "")), parsed["cmd"].strip()
+        if isinstance(parsed, dict):
+            parsed = cast(dict[str, Any], parsed)
+            command = parsed.get("cmd")
+            if isinstance(command, str):
+                return str(payload.get("call_id", "")), command.strip()
     if payload.get("type") == "custom_tool_call" and payload.get("name") == "exec":
         source = payload.get("input")
         if not isinstance(source, str) or "tools.exec_command" not in source:
             return None
         match = re.search(r'\bcmd\s*:\s*("(?:\\.|[^"\\])*")', source)
         if match:
-            return str(payload.get("call_id", "")), json.loads(match.group(1)).strip()
+            return str(payload.get("call_id", "")), cast(str, json.loads(match.group(1))).strip()
     return None
+
 
 def _exec_result(payload: dict[str, Any]) -> tuple[str, bool, str | None] | None:
     if payload.get("type") not in {"function_call_output", "custom_tool_call_output"}:
@@ -344,24 +412,28 @@ def _exec_result(payload: dict[str, Any]) -> tuple[str, bool, str | None] | None
     output = payload.get("output")
     if isinstance(output, list):
         output = "".join(
-            item.get("text", "")
-            for item in output
-            if isinstance(item, dict) and isinstance(item.get("text"), str)
+            item["text"]
+            for raw_item in cast(list[object], output)
+            if isinstance(raw_item, dict)
+            for item in (cast(dict[str, Any], raw_item),)
+            if isinstance(item.get("text"), str)
         )
     if not isinstance(output, str):
         return call_id, False, None
     try:
-        parsed = json.loads(output)
+        parsed: object = cast(JsonValue, json.loads(output))
     except json.JSONDecodeError:
         return call_id, False, None
     if not isinstance(parsed, dict):
         return call_id, False, None
+    parsed = cast(dict[str, Any], parsed)
     exit_code = parsed.get("exit_code")
     passed = isinstance(exit_code, int) and not isinstance(exit_code, bool) and exit_code == 0
     result_loop = parsed.get("loop_id")
     if "loop_id" in parsed and not isinstance(result_loop, str):
         passed = False
     return call_id, passed, result_loop if isinstance(result_loop, str) else None
+
 
 def _validate_observed_proofs(proofs: list[Any], transcript_path: Path | None, loop_id: str) -> None:
     if transcript_path is None:
@@ -373,6 +445,7 @@ def _validate_observed_proofs(proofs: list[Any], transcript_path: Path | None, l
         if record.get("type") == "turn_context":
             context = record.get("payload")
             if isinstance(context, dict) and "loop_id" in context:
+                context = cast(dict[str, Any], context)
                 observed_loop = context["loop_id"]
                 transcript_loop = observed_loop if isinstance(observed_loop, str) else ""
             continue
@@ -382,12 +455,13 @@ def _validate_observed_proofs(proofs: list[Any], transcript_path: Path | None, l
         if result := _exec_result(payload):
             results[result[0]] = (result[1], result[2])
     for raw_proof in proofs:
+        raw_proof = _object(raw_proof, "proof")
         command = raw_proof["cmd"].strip()
         matching = [
             call_id
             for call_id, observed, observed_loop in calls
             if observed == command and observed_loop in {None, loop_id}
         ]
-        result = results.get(matching[-1]) if matching else None
-        if result is None or result[0] is not True or result[1] not in {None, loop_id}:
+        proof_result = results.get(matching[-1]) if matching else None
+        if proof_result is None or proof_result[0] is not True or proof_result[1] not in {None, loop_id}:
             raise GraphError(f"proof command was unexecuted or last-failed: {command}")

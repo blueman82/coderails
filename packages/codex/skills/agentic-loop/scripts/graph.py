@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+"""Operate the filesystem-backed native Codex agentic-loop graph."""
+
 from __future__ import annotations
 
 import argparse
@@ -8,31 +10,44 @@ import os
 import sys
 import tempfile
 from collections import deque
+from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any, cast
 
-from graph_evidence import (bind_worker_evidence, transcript_cursor,
-                            validate_completion_evidence, validate_evals,
-                            validate_worker_evidence)
+from graph_evidence import (
+    bind_worker_evidence,
+    transcript_cursor,
+    validate_completion_evidence,
+    validate_evals,
+    validate_worker_evidence,
+)
 from graph_identity import GraphError, active_nodes, classify_worker_evidence, task_name, task_node
-
+from json_types import JsonValue
 
 STATUSES = {"pending", "ready", "running", "blocked", "done", "skipped", "failed", "hard-stop", "stale"}
 SUCCESS = {"done", "skipped"}
 
 
-def _object(value: Any, label: str) -> dict[str, Any]:
+def _object(value: object, label: str) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise GraphError(f"{label} must be an object")
-    return value
+    return cast(dict[str, Any], value)
 
-def _nonempty(value: Any, label: str) -> str:
+
+def _array(value: object, label: str) -> list[JsonValue]:
+    if not isinstance(value, list):
+        raise GraphError(f"{label} must be an array")
+    return cast(list[JsonValue], value)
+
+
+def _nonempty(value: object, label: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise GraphError(f"{label} must be a non-empty string")
     return value
 
-def _validate_state(state: Any) -> dict[str, Any]:
+
+def _validate_state(state: object) -> dict[str, Any]:
     root = _object(state, "state")
     if root.get("schema_version") != 2:
         raise GraphError("schema_version must be 2")
@@ -58,13 +73,12 @@ def _validate_state(state: Any) -> dict[str, Any]:
         attempts, maximum = retry.get("attempts"), retry.get("max")
         if any(isinstance(value, bool) or not isinstance(value, int) for value in (attempts, maximum)):
             raise GraphError(f"node {node_id} retry counts must be integers")
+        attempts, maximum = cast(int, attempts), cast(int, maximum)
         if attempts < 0 or not 1 <= maximum <= 5 or attempts > maximum:
             raise GraphError(f"node {node_id} has invalid retry bounds")
         if not isinstance(node.get("evidence"), list):
             raise GraphError(f"node {node_id}.evidence must be an array")
-    edges = graph.get("edges")
-    if not isinstance(edges, list):
-        raise GraphError("graph.edges must be an array")
+    edges = _array(graph.get("edges"), "graph.edges")
     dependencies: dict[str, set[str]] = {node_id: set() for node_id in nodes}
     for index, raw_edge in enumerate(edges):
         edge = _object(raw_edge, f"edge {index}")
@@ -80,18 +94,19 @@ def _validate_state(state: Any) -> dict[str, Any]:
         join = _object(raw_join, f"join {join_id}")
         if join.get("mode") != "all" or not isinstance(join.get("released"), bool):
             raise GraphError(f"join {join_id} must be an all-input join")
-        inputs = join.get("inputs")
-        if not isinstance(inputs, list) or not inputs or any(not isinstance(item, str) for item in inputs):
+        inputs = _array(join.get("inputs"), f"join {join_id}.inputs")
+        if not inputs or any(not isinstance(item, str) for item in inputs):
             raise GraphError(f"join {join_id}.inputs must be a non-empty unique array")
-        if len(inputs) != len(set(inputs)):
+        input_nodes = cast(list[str], inputs)
+        if len(input_nodes) != len(set(input_nodes)):
             raise GraphError(f"join {join_id}.inputs must be a non-empty unique array")
-        if any(item not in nodes or item == join_id for item in inputs):
+        if any(item not in nodes or item == join_id for item in input_nodes):
             raise GraphError(f"join {join_id} references an unknown or identical input")
-        dependencies[join_id].update(inputs)
+        dependencies[join_id].update(input_nodes)
         released = join["released"]
         if released != (nodes[join_id]["status"] == "done"):
             raise GraphError(f"join {join_id} release state disagrees with its node")
-        if released and not all(nodes[node_id]["status"] in SUCCESS for node_id in inputs):
+        if released and not all(nodes[node_id]["status"] in SUCCESS for node_id in input_nodes):
             raise GraphError(f"join {join_id} released before every input succeeded")
     outgoing: dict[str, set[str]] = {node_id: set() for node_id in nodes}
     indegree = {node_id: len(required) for node_id, required in dependencies.items()}
@@ -127,12 +142,15 @@ def _validate_state(state: Any) -> dict[str, Any]:
         raise GraphError("graph hard-stop state disagrees with its nodes")
     return root
 
+
 def _load(path: Path) -> dict[str, Any]:
     try:
         with path.open(encoding="utf-8") as handle:
-            return _validate_state(json.load(handle))
+            parsed: JsonValue = cast(JsonValue, json.load(handle))
+            return _validate_state(cast(object, parsed))
     except (OSError, json.JSONDecodeError) as error:
         raise GraphError(f"cannot read valid state: {error}") from error
+
 
 def _write(path: Path, state: dict[str, Any]) -> None:
     mode = path.stat().st_mode & 0o777
@@ -145,8 +163,9 @@ def _write(path: Path, state: dict[str, Any]) -> None:
     os.chmod(temporary, mode)
     os.replace(temporary, path)
 
+
 @contextmanager
-def _locked(path: Path) -> Iterator[None]:
+def _locked(path: Path) -> Generator[None, None, None]:
     try:
         with Path(f"{path}.lock").open("a+", encoding="utf-8") as lock:
             fcntl.flock(lock, fcntl.LOCK_EX)
@@ -154,17 +173,19 @@ def _locked(path: Path) -> Iterator[None]:
     except OSError as error:
         raise GraphError(f"cannot lock state: {error}") from error
 
+
 def _dependencies(state: dict[str, Any]) -> dict[str, set[str]]:
     graph = state["graph"]
-    required = {node_id: set() for node_id in graph["nodes"]}
+    required: dict[str, set[str]] = {node_id: set() for node_id in graph["nodes"]}
     for edge in graph["edges"]:
         required[edge["to"]].add(edge["from"])
     for join_id, join in graph["joins"].items():
         required[join_id].update(join["inputs"])
     return required
 
+
 def _release_joins(state: dict[str, Any]) -> list[str]:
-    graph, released = state["graph"], []
+    graph, released = state["graph"], cast(list[str], [])
     for join_id in sorted(graph["joins"]):
         join = graph["joins"][join_id]
         if join["released"]:
@@ -176,6 +197,7 @@ def _release_joins(state: dict[str, Any]) -> list[str]:
             released.append(join_id)
     return released
 
+
 def _ready(state: dict[str, Any]) -> list[str]:
     graph, required = state["graph"], _dependencies(state)
     return sorted(
@@ -185,6 +207,7 @@ def _ready(state: dict[str, Any]) -> list[str]:
         and node["status"] == "pending"
         and all(graph["nodes"][source]["status"] in SUCCESS for source in required[node_id])
     )
+
 
 def _begin_wave(path: Path) -> dict[str, Any]:
     with _locked(path):
@@ -204,14 +227,16 @@ def _begin_wave(path: Path) -> dict[str, Any]:
         for node_id in nodes:
             graph["nodes"][node_id]["status"] = "running"
             graph["nodes"][node_id]["outcome"] = "running"
-        task_names = {node_id: task_name(node_id, graph["nodes"][node_id]["retry"]["attempts"] + 1) for node_id in nodes}
-        graph["active_wave"] = {"id": wave_id, "revision": revision, "nodes": nodes,
-                                "transcript_cursor": cursor}
+        task_names = {
+            node_id: task_name(node_id, graph["nodes"][node_id]["retry"]["attempts"] + 1) for node_id in nodes
+        }
+        graph["active_wave"] = {"id": wave_id, "revision": revision, "nodes": nodes, "transcript_cursor": cursor}
         state["revision"] = revision
         _write(path, state)
         return {"wave_id": wave_id, "nodes": nodes, "task_names": task_names, "revision": revision}
 
-def _results(raw: Any, active_wave: dict[str, Any]) -> dict[str, Any]:
+
+def _results(raw: object, active_wave: dict[str, Any]) -> dict[str, Any]:
     envelope = _object(raw, "results")
     if set(envelope) != {"wave_id", "results"}:
         raise GraphError("results must contain exactly wave_id and results")
@@ -229,9 +254,10 @@ def _results(raw: Any, active_wave: dict[str, Any]) -> dict[str, Any]:
         _nonempty(result.get("evidence"), f"result {node_id}.evidence")
     return results
 
+
 def _record_wave(path: Path, raw_results: str) -> dict[str, Any]:
     try:
-        parsed_results = json.loads(raw_results)
+        parsed_results: JsonValue = cast(JsonValue, json.loads(raw_results))
     except json.JSONDecodeError as error:
         raise GraphError(f"results are not valid JSON: {error}") from error
     with _locked(path):
@@ -239,7 +265,7 @@ def _record_wave(path: Path, raw_results: str) -> dict[str, Any]:
         graph = state["graph"]
         if graph["active_wave"] is None:
             raise GraphError("no active wave exists")
-        results = _results(parsed_results, graph["active_wave"])
+        results = _results(cast(object, parsed_results), graph["active_wave"])
         references, identifiers = bind_worker_evidence(state, graph["active_wave"])
         if any(classify_worker_evidence(result["evidence"], identifiers)[0] for result in results.values()):
             raise GraphError("result evidence must not contain worker evidence")
@@ -265,17 +291,29 @@ def _record_wave(path: Path, raw_results: str) -> dict[str, Any]:
         _write(path, state)
         return {"revision": state["revision"], "released_joins": released, "ready": _ready(state)}
 
+
 def _inspect(path: Path) -> dict[str, Any]:
     state = _load(path)
     graph = state["graph"]
     return {
-        "session_id": state["session_id"], "loop_id": state["loop_id"], "revision": state["revision"],
-        "status": state.get("status"), "active_wave": graph["active_wave"],
-        "task_names": ({node_id: task_name(node_id, graph["nodes"][node_id]["retry"]["attempts"] + 1) for node_id in graph["active_wave"]["nodes"]}
-                       if graph["active_wave"] is not None else {}),
+        "session_id": state["session_id"],
+        "loop_id": state["loop_id"],
+        "revision": state["revision"],
+        "status": state.get("status"),
+        "active_wave": graph["active_wave"],
+        "task_names": (
+            {
+                node_id: task_name(node_id, graph["nodes"][node_id]["retry"]["attempts"] + 1)
+                for node_id in graph["active_wave"]["nodes"]
+            }
+            if graph["active_wave"] is not None
+            else {}
+        ),
         "running": sorted(node_id for node_id, node in graph["nodes"].items() if node["status"] == "running"),
-        "ready": _ready(state) if graph["active_wave"] is None and graph["hard_stop"] is None else [], "hard_stop": graph["hard_stop"],
+        "ready": _ready(state) if graph["active_wave"] is None and graph["hard_stop"] is None else [],
+        "hard_stop": graph["hard_stop"],
     }
+
 
 def _validate_completion(
     state: dict[str, Any],
@@ -305,8 +343,9 @@ def _validate_completion(
     validate_completion_evidence(state, revision, evals_path, proof_path, retro_path, transcript_path)
 
 
-def _complete(path: Path, session: str, evals_path: Path, proof_path: Path,
-              retro_path: Path, transcript_path: Path | None) -> dict[str, Any]:
+def _complete(
+    path: Path, session: str, evals_path: Path, proof_path: Path, retro_path: Path, transcript_path: Path | None
+) -> dict[str, Any]:
     with _locked(path):
         state = _load(path)
         if state["status"] == "complete":
@@ -320,11 +359,14 @@ def _complete(path: Path, session: str, evals_path: Path, proof_path: Path,
         return {"status": "complete", "loop_id": state["loop_id"], "revision": state["revision"]}
 
 
-def _verify_completion(path: Path, session: str, evals_path: Path, proof_path: Path,
-                       retro_path: Path, transcript_path: Path | None) -> dict[str, Any]:
+def _verify_completion(
+    path: Path, session: str, evals_path: Path, proof_path: Path, retro_path: Path, transcript_path: Path | None
+) -> dict[str, Any]:
     state = _load(path)
     completion = _object(state.get("completion"), "completion")
     revision = completion.get("revision")
+    if isinstance(revision, bool) or not isinstance(revision, int):
+        raise GraphError("graph completion revision must be an integer")
     if state["status"] != "complete" or revision != state["revision"] - 1:
         raise GraphError("graph has no valid completion record")
     _validate_completion(state, session, revision, evals_path, proof_path, retro_path, transcript_path)
@@ -346,9 +388,13 @@ def _authorize_dispatch(path: Path, session: str, task: str, evals_path: Path) -
         raise GraphError("graph worker task name does not match the active attempt")
     validate_evals(state, None, evals_path)
     return {
-        "loop_id": state["loop_id"], "node": node_id, "task_name": task,
-        "wave_id": active_wave["id"], "revision": state["revision"],
+        "loop_id": state["loop_id"],
+        "node": node_id,
+        "task_name": task,
+        "wave_id": active_wave["id"],
+        "revision": state["revision"],
     }
+
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Operate one native Codex agentic-loop graph.")
@@ -375,6 +421,7 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def main() -> int:
+    """Run the requested graph command and print its JSON response."""
     args = _parser().parse_args()
     try:
         if args.command == "begin-wave":

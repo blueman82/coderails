@@ -4,15 +4,60 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "$0")/../.." && pwd)"
 strict=0
 changed_only=0
+quality_root="$repo_root"
+next_is_root=0
 for arg in "$@"; do
     [[ "$arg" == "--strict" ]] && strict=1
     [[ "$arg" == "--changed" ]] && changed_only=1
+    if ((next_is_root)); then
+        quality_root="$arg"
+        next_is_root=0
+    elif [[ "$arg" == "--root" ]]; then
+        next_is_root=1
+    fi
 done
 
 python3 "$repo_root/scripts/quality/check.py" "$@"
 
 findings=0
 shell_files=()
+python_files=()
+
+read_python_files() {
+    python_files=()
+    if ((changed_only)); then
+        while IFS= read -r python_file; do
+            [[ "$python_file" == *.py && -f "$quality_root/$python_file" ]] || continue
+            python_files+=("$quality_root/$python_file")
+        done < <((
+            git -C "$quality_root" diff --name-only HEAD
+            git -C "$quality_root" diff --cached --name-only
+        ) | sort -u)
+        return
+    fi
+    while IFS= read -r python_file; do
+        python_files+=("$python_file")
+    done < <(find "$quality_root" -type f -name '*.py' \
+        ! -path '*/assets/*' ! -path '*/dist/*' ! -path '*/fixtures/*' ! -path '*/node_modules/*')
+}
+
+run_python_quality() {
+    read_python_files
+    ((${#python_files[@]} == 0)) && return
+    for tool in ruff black pyright mypy; do
+        if ! python3 -m "$tool" --version >/dev/null 2>&1; then
+            printf 'quality: required Python tool unavailable: %s\n' "$tool" >&2
+            findings=1
+            return
+        fi
+    done
+    python3 -m ruff check --no-cache --config "$repo_root/pyproject.toml" "${python_files[@]}" || findings=1
+    python3 -m black --check --config "$repo_root/pyproject.toml" "${python_files[@]}" || findings=1
+    python3 -m pyright --project "$repo_root/pyproject.toml" "${python_files[@]}" || findings=1
+    python3 -m mypy --config-file "$repo_root/pyproject.toml" "${python_files[@]}" || findings=1
+}
+
+run_python_quality
 
 read_shell_files() {
     shell_files=()
@@ -30,7 +75,7 @@ read_shell_files() {
     else
         while IFS= read -r shell_file; do
             shell_files+=("$shell_file")
-        done < <(find "$repo_root/hooks" "$repo_root/scripts" -type f \( -name '*.sh' -o -name '*.bash' \) -print)
+        done < <(find "$quality_root" -type f \( -name '*.sh' -o -name '*.bash' \) -print)
     fi
 }
 

@@ -1,0 +1,27 @@
+[tool.black]
+line-length = 120
+target-version = ["py39"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py39"
+exclude = ["assets", "dist", "fixtures", "node_modules"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "ANN", "N", "D"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.pyright]
+pythonVersion = "3.9"
+typeCheckingMode = "strict"
+include = [
+  "scripts/quality/check.py",
+  "packages/codex/hooks/scripts/lib/quality_check.py",
+  "packages/codex/skills/agentic-loop/scripts",
+]
+
+[tool.mypy]
+python_version = "3.9"
+strict = true

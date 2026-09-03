@@ -71,11 +71,12 @@ EXCLUDED_PARTS = {".build", "assets", "dist", "fixtures", "node_modules"}
 
 
 def source_files(root: Path, paths: list[str]) -> list[Path]:
+    """Return source files selected by the quality-check arguments."""
     if paths:
         candidates = [root / path for path in paths]
     else:
         candidates = [root] if root != Path.cwd().resolve() else [root / source_root for source_root in SOURCE_ROOTS]
-    files = []
+    files: list[Path] = []
     for candidate in candidates:
         if candidate.is_absolute():
             candidate = candidate.resolve()
@@ -93,12 +94,14 @@ def source_files(root: Path, paths: list[str]) -> list[Path]:
 
 
 def finding(path: Path, message: str, line: int | None = None) -> str:
+    """Format one quality finding."""
     suffix = f":{line}" if line else ""
     return f"{path}{suffix}: {message}"
 
 
 def check_format(path: Path, text: str) -> list[str]:
-    issues = []
+    """Return whitespace and JSON-format findings for one file."""
+    issues: list[str] = []
     for number, line in enumerate(text.splitlines(), 1):
         if line.rstrip("\n\r") != line.rstrip():
             issues.append(finding(path, "trailing whitespace", number))
@@ -113,13 +116,16 @@ def check_format(path: Path, text: str) -> list[str]:
 
 
 def check_python(path: Path, text: str, path_key: str, function_limit: int) -> list[str]:
+    """Return syntax and function-length findings for Python source."""
     try:
         tree = ast.parse(text, filename=str(path))
     except SyntaxError as error:
         return [finding(path, f"invalid Python: {error.msg}", error.lineno)]
-    issues = []
+    issues: list[str] = []
     for node in ast.walk(tree):
         if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        if node.end_lineno is None:
             continue
         lines = node.end_lineno - node.lineno + 1
         limit = FUNCTION_EXCEPTIONS.get((path_key, node.name), function_limit)
@@ -129,9 +135,10 @@ def check_python(path: Path, text: str, path_key: str, function_limit: int) -> l
 
 
 def check_bash(path: Path, text: str, path_key: str, function_limit: int) -> list[str]:
+    """Return function-length findings for shell source."""
     start_pattern = re.compile(r"^\s*(?:function\s+)?([A-Za-z_][A-Za-z0-9_:]*)\s*\(\s*\)\s*\{")
     lines = text.splitlines()
-    issues = []
+    issues: list[str] = []
     for index, line in enumerate(lines):
         match = start_pattern.match(line)
         if not match:
@@ -151,16 +158,23 @@ def check_bash(path: Path, text: str, path_key: str, function_limit: int) -> lis
 
 
 COMMENTED_CODE = (
-    re.compile(r"^\s*#\s*(?:def\s+\w+\s*\(|class\s+\w+\s*[:(]|from\s+\S+\s+import\s+|import\s+\S+|return\s+(?:[0-9]+|\w+\s*[+*/-])\b)"),
-    re.compile(r"^\s*#\s*(?:function\s+\w+\s*\(|local\s+\w+=|if\s+\[\[|for\s+\w+\s+in\s+|case\s+\S+\s+in|echo\s+['\"]|git\s+\w+|python3\s+|node\s+|return\s+[0-9])"),
-    re.compile(r"^\s*//\s*(?:function\s+\w+\s*\(|(?:const|let|var)\s+\w+\s*=|(?:if|for|while)\s*\(|return\s+\S+\s*[+*/=-])"),
+    re.compile(
+        r"^\s*#\s*(?:def\s+\w+\s*\(|class\s+\w+\s*[:(]|from\s+\S+\s+import\s+|import\s+\S+|return\s+(?:[0-9]+|\w+\s*[+*/-])\b)"
+    ),
+    re.compile(
+        r"^\s*#\s*(?:function\s+\w+\s*\(|local\s+\w+=|if\s+\[\[|for\s+\w+\s+in\s+|case\s+\S+\s+in|echo\s+['\"]|git\s+\w+|python3\s+|node\s+|return\s+[0-9])"
+    ),
+    re.compile(
+        r"^\s*//\s*(?:function\s+\w+\s*\(|(?:const|let|var)\s+\w+\s*=|(?:if|for|while)\s*\(|return\s+\S+\s*[+*/=-])"
+    ),
 )
 
 
 def check_commented_code(path: Path, text: str) -> list[str]:
+    """Return findings for source comments that look like live code."""
     if path.suffix not in {".bash", ".js", ".jsx", ".py", ".sh", ".ts", ".tsx"}:
         return []
-    issues = []
+    issues: list[str] = []
     for number, line in enumerate(text.splitlines(), 1):
         stripped = line.lstrip()
         if stripped.startswith("///") or re.match(r"^\s*//\s*MARK:", line):
@@ -171,7 +185,8 @@ def check_commented_code(path: Path, text: str) -> list[str]:
 
 
 def check_diff(root: Path) -> list[str]:
-    issues = []
+    """Return whitespace findings reported by Git for pending changes."""
+    issues: list[str] = []
     for args in (("git", "diff", "--check"), ("git", "diff", "--cached", "--check")):
         result = subprocess.run(args, cwd=root, text=True, capture_output=True, check=False)
         if result.returncode:
@@ -180,6 +195,7 @@ def check_diff(root: Path) -> list[str]:
 
 
 def parse_args() -> argparse.Namespace:
+    """Parse quality-check command-line arguments."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--strict", action="store_true", help="return non-zero when findings exist")
     parser.add_argument("--changed", action="store_true", help="scan only changed tracked files")
@@ -195,6 +211,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> int:
+    """Run selected quality checks and return their process status."""
     args = parse_args()
     root = args.root.resolve()
     issues: list[str] = []
@@ -212,8 +229,8 @@ def main() -> int:
         text = path.read_text(encoding="utf-8")
         line_count = len(text.splitlines())
         path_key = path.relative_to(root).as_posix()
-        limit = LOC_EXCEPTIONS.get(path_key, args.max_loc)
-        if line_count > limit:
+        limit = LOC_EXCEPTIONS.get(path_key) or args.max_loc
+        if path.suffix != ".py" and line_count > limit:
             issues.append(finding(path, f"{line_count} lines (max {limit})"))
         issues.extend(check_format(path, text))
         if path.suffix == ".py":

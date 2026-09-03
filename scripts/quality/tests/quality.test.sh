@@ -10,9 +10,36 @@ trap 'rm -rf "$fixture"' EXIT
 printf 'short = 1\n' >"$fixture/good.py"
 python3 "$checker" --strict --root "$fixture" >/dev/null
 
+python_fixture="$fixture/python-quality"
+mkdir -p "$python_fixture"
+cat >"$python_fixture/compliant.py" <<'PY'
+"""Compliant fixture module."""
+
+
+def format_label(label: str) -> str:
+    """Format a label.
+
+    Args:
+        label: Label to format.
+
+    Returns:
+        The formatted label.
+    """
+    return label.strip()
+PY
+"$wrapper" --strict --root "$python_fixture" >/dev/null
+
+printf 'def missing_docstring() -> None:\n    pass\n' >"$python_fixture/violating.py"
+if "$wrapper" --strict --root "$python_fixture" >/dev/null 2>&1; then
+    echo 'quality.test: Python docstring negative control unexpectedly passed' >&2
+    exit 1
+fi
+rm "$python_fixture/violating.py"
+
 markdown_repo="$fixture/markdown-only"
 mkdir -p "$markdown_repo/hooks" "$markdown_repo/scripts/quality" "$markdown_repo/skills"
 cp "$wrapper" "$checker" "$markdown_repo/scripts/quality/"
+cp "$repo_root/pyproject.toml" "$markdown_repo/"
 printf '# note\n' >"$markdown_repo/skills/note.md"
 git -C "$markdown_repo" init -q
 git -C "$markdown_repo" config user.email test@example.com
@@ -138,6 +165,7 @@ fi
 changed_only_repo="$fixture/changed-only"
 mkdir -p "$changed_only_repo/scripts/quality" "$changed_only_repo/docs"
 cp "$repo_root/scripts/quality/check.sh" "$checker" "$changed_only_repo/scripts/quality/"
+cp "$repo_root/pyproject.toml" "$changed_only_repo/"
 printf 'baseline\n' >"$changed_only_repo/docs/note.md"
 git -C "$changed_only_repo" init -q
 git -C "$changed_only_repo" config user.email 'quality.test@example.invalid'

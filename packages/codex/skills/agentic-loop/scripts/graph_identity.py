@@ -1,9 +1,11 @@
+"""Validate stable native graph identifiers and worker evidence shape."""
+
 from __future__ import annotations
 
 import json
 import re
 import unicodedata
-from typing import Any
+from typing import Any, Union, cast
 
 
 class GraphError(ValueError):
@@ -73,15 +75,16 @@ def classify_worker_evidence(
             try:
                 decoded = json.loads(normalized)
             except json.JSONDecodeError:
-                matches = _reserved_matches(normalized)
-                shaped = shaped or bool(matches)
+                reserved_matches = _reserved_matches(normalized)
+                shaped = shaped or bool(reserved_matches)
             except RecursionError as error:
                 raise GraphError("worker evidence exceeds classifier limits") from error
             else:
-                stack.append((decoded, False, is_identifier))
+                stack.append((cast(object, decoded), False, is_identifier))
             continue
         if not isinstance(item, (dict, list)):
             continue
+        item = cast(Union[dict[object, object], list[object]], item)
         identity = id(item)
         if identity in seen_containers:
             raise GraphError("worker evidence contains a repeated container")
@@ -90,13 +93,13 @@ def classify_worker_evidence(
             stack.extend((nested, is_input, is_identifier) for nested in item)
             continue
         for raw_key, nested in item.items():
-            matches = _reserved_matches(raw_key) if isinstance(raw_key, str) else set()
-            stack.extend(((raw_key, is_input, False),
-                          (nested, is_input, bool(matches & IDENTIFIER_KEYS))))
+            key_matches: set[str] = _reserved_matches(raw_key) if isinstance(raw_key, str) else set()
+            stack.extend(((raw_key, is_input, False), (nested, is_input, bool(key_matches & IDENTIFIER_KEYS))))
     return shaped, identifiers
 
 
-def task_name(node_id: str, attempt: int = 1) -> str:
+def task_name(node_id: str, attempt: object = 1) -> str:
+    """Return the canonical worker task name for one node attempt."""
     if isinstance(attempt, bool) or not isinstance(attempt, int) or attempt < 1:
         raise GraphError("graph worker attempt must be a positive integer")
     suffix = "" if attempt == 1 else f"_a{attempt}"
@@ -104,6 +107,7 @@ def task_name(node_id: str, attempt: int = 1) -> str:
 
 
 def task_node(name: str) -> str:
+    """Decode and validate a canonical worker task name."""
     match = re.fullmatch(r"loop_worker_([0-9a-f]+)(?:_a([2-9][0-9]*))?", name)
     if match is None:
         raise GraphError("graph worker task name must use the native lowercase format")
@@ -134,38 +138,47 @@ def is_frozen_loop_evals(evals: dict[str, Any]) -> bool:
         or evals.get("result") is not None
         or evals.get("grading") is not None
         or not isinstance(raw_evals, list)
-        or not any(isinstance(item, dict) and item.get("priority") == "P0" for item in raw_evals)
     ):
         return False
-    for item in raw_evals:
-        if not isinstance(item, dict) or not isinstance(item.get("id"), str) or not item["id"].strip():
+    has_p0 = False
+    for raw_item in cast(list[object], raw_evals):
+        item = raw_item
+        if not isinstance(item, dict):
+            return False
+        item = cast(dict[str, Any], item)
+        has_p0 = has_p0 or item.get("priority") == "P0"
+        if not isinstance(item.get("id"), str) or not item["id"].strip():
             return False
         mode = item.get("mode")
         if mode not in {"scripted", "agent-run"}:
             return False
         if mode == "scripted" and not all(
-            isinstance(item.get(field), str) and item[field].strip()
-            for field in ("cmd", "negative_control")
+            isinstance(item.get(field), str) and item[field].strip() for field in ("cmd", "negative_control")
         ):
             return False
-    return True
+    return has_p0
 
 
-def active_nodes(active_wave: Any, nodes: dict[str, Any], revision: int) -> set[str]:
+def active_nodes(active_wave: object, nodes: dict[str, Any], revision: int) -> set[str]:
+    """Validate an active wave and return the nodes it owns."""
     if active_wave is None:
         return set()
     if not isinstance(active_wave, dict):
         raise GraphError("graph.active_wave must be an object")
+    active_wave = cast(dict[str, Any], active_wave)
     if active_wave.get("id") != f"wave-{revision}" or active_wave.get("revision") != revision:
         raise GraphError("graph.active_wave identity must match the root revision")
     wave_nodes = active_wave.get("nodes")
+    if not isinstance(wave_nodes, list):
+        raise GraphError("graph.active_wave.nodes must be a non-empty unique array")
+    wave_nodes = cast(list[object], wave_nodes)
     if (
-        not isinstance(wave_nodes, list)
-        or not wave_nodes
+        not wave_nodes
         or any(not isinstance(item, str) for item in wave_nodes)
         or len(wave_nodes) != len(set(wave_nodes))
     ):
         raise GraphError("graph.active_wave.nodes must be a non-empty unique array")
+    wave_nodes = cast(list[str], wave_nodes)
     if any(node_id not in nodes or nodes[node_id]["status"] != "running" for node_id in wave_nodes):
         raise GraphError("graph.active_wave must contain known running nodes")
     return set(wave_nodes)
