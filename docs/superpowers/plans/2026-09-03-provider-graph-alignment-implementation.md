@@ -31,6 +31,92 @@ raw evidence, hooks, and provider completion gates. (verified)
 
 ## Worktree ownership and order
 
+## Codex Python clean-break amendment
+
+This amendment is authoritative for every Codex-owned shell path named below
+and supersedes earlier plan wording that retains a Codex `.sh` path. The user
+has selected Python as the common provider language. The immediate work is the
+complete Codex migration; converting the separate root Claude plugin is a
+later bounded phase, not implied authorization to change Claude code here.
+(verified)
+
+### End state and constraints
+
+`find packages/codex packages/tests -type f -name '*.sh'` returns no Codex
+shell path: no launcher, helper, test shim, compatibility wrapper, or
+grandfathered path remains.
+Each same-batch replacement preserves CLI, stdin/stdout/stderr, exit status,
+timeout, environment, filesystem effects, and failure modes. Use Python
+stdlib (`argparse`, `json`, `pathlib`, `subprocess`, `tempfile`, `fcntl`, and
+`unittest`) first; retain existing external commands only where their current
+contract requires them, and add no runtime package. Entry points use
+`#!/usr/bin/env python3`; callers name `.py` paths. The maintained
+`packages/graph-semantics/graph_semantics.py` remains installer-materialized
+into its two generated copies; migrated operational scripts are maintained
+Python, never generated. (verified)
+
+### Frozen inventory and invocation edges
+
+The read-only inventory found 36 `.sh` files below `packages/codex`. The first
+four groups are production code (32 files); the final group is test runners
+(4 files). This list is the retirement roster; a missing mapping blocks
+deletion. (verified)
+
+| Group | Current files | Invocation edge that must move with it |
+| --- | --- | --- |
+| Hook entry points | `hooks/scripts/{check_confidence_labels,comment_citation_gate,crack_on_gate,crack_on_prose_gate,destructive_bash_gate,graph_completion_guard,inject_bootstrap,inject_context,loop_dispatch_guard,no_edit_on_main,quality_feedback,test_gate,verification_volume_ceiling,wiki_taxonomy_gate}.sh` | Every entry is named by `hooks/hooks.json`; keep the same event, matcher, timeout, stdin JSON contract, and deny/allow output while changing its command to the `.py` entry point. |
+| Hook helper | `hooks/scripts/lib/hook_common.sh` | Imported by all current hook entry points; replace it with one private Python module imported by those entry points, with no public shell-source contract. |
+| Workflow CLI and helpers | `scripts/{push,merge,post_evals,post_review}.sh`, `scripts/lib/{config,eval-artifact,git-common,review-artifact}.sh` | `push`, `merge`, `post-evals`, and `post-review` skills resolve and execute these files; `merge` imports config, git-common, and post-evals; git-common imports both artifact helpers; post-evals imports eval-artifact; push imports git-common. Move those imports to Python modules and update every skill command/reference atomically. |
+| Dashboard launchers | `skills/dashboard/runner/bin/{dashboard-server,seed-and-sweep,sweeper}.sh`, `skills/dashboard/scripts/{run-builder,start-dashboard,stop-dashboard}.sh` | Dashboard skill invokes start/stop; runner binaries start Node entry points and set `CODERAILS_BUILDER_WRAPPER`; the dashboard app discovers/spawns `run-builder.sh`; runner/app tests assert these paths. Rename the discovery constant, environment value, identity marker, tests, and documentation to `.py` in the same batch. |
+| Workflow-audit production | `skills/workflow-audit/scripts/{scan_transcripts,cluster_ngrams,write_queue_entry}.sh` | `workflow-audit/SKILL.md` pipes scan to cluster and pipes judge output to queue writer. Preserve JSONL and privacy filtering, but invoke the three Python entry points directly. |
+| Workflow-audit test runners | `skills/workflow-audit/scripts/tests/{cluster_ngrams,e2e,scan_transcripts,write_queue_entry}.test.sh` | Each directly runs one or more workflow-audit production scripts. Convert them to Python tests before deleting the production shell files; retain unit and scan-to-cluster integration coverage. |
+
+The Codex package test surface outside the package directory is also retired:
+`packages/tests/{codex_frozen_evals,codex_graph_evidence_shapes,codex_graph_runtime_adversarial,codex_hooks,codex_installer,codex_native_package,provider_graph_adversarial,provider_graph_final_adversarial,provider_graph_lifecycle_adversarial,provider_graph_parity,stop_hook_human_escalation}.test.sh`
+and `packages/tests/lib/codex_transcript_fixture.sh` become Python tests/module
+in C3. Root Claude-hook shell tests remain outside this authorized migration.
+(verified)
+
+### Ordered migration batches and gates
+
+**C0 — freeze contracts.** Add a failing no-`.sh` inventory check and map every
+row to success/failure, stream, exit-code, and environment coverage; hooks
+also cover allow/deny JSON, timeout/degrade, event, and matcher. Replacement
+tests must demonstrate red then green before deletion. (verified)
+
+**C1 — hooks and workflow.** Replace `hook_common` plus 14 hook entries, then
+the four workflow helpers and four CLI programs; change `hooks.json`, skills,
+and command-recognizing hook patterns atomically. Gate: hook and CLI tests
+pass through Python and no caller resolves an operational `.sh`. (verified)
+
+**C2 — dashboard and audit.** Migrate six dashboard launchers and three audit
+programs with their TypeScript discovery, runner/app tests, skill commands,
+JSONL privacy boundary, diagnostics, and queue contract. Gate: dashboard and
+audit unit/e2e tests preserve wrong-wrapper, malformed-input, and write-error
+failures through `.py` entry points. (verified)
+
+**C3 — tests and retirement.** Convert four workflow-audit runners and the
+Codex-owned `packages/tests` shell runners that exercise migrated paths;
+preserve fixture bytes, negative controls, exit assertions, and HOME/temp
+isolation. Gate: focused Python tests and `py_compile` pass, the inventory is
+empty under both Codex roots, and no Codex config, skill, TypeScript source/test, or package test
+mentions an executable `.sh` path. (verified)
+
+**C4 — graph integration.** Run Phases 0–5 with Python Codex commands. `cmp`
+validates installer-materialized graph copies from the maintained source; they
+are not operational-script wrappers. Gate: graph fixtures, evidence/parity,
+materialization, native acceptance, full Codex Python suite, and no-Bash
+check pass with no waived preservation case. (verified)
+
+### Claude-wide follow-up (not this work unit)
+
+After C4 is accepted, schedule a distinct, Claude-owned migration phase for
+the root plugin's Bash hooks, helpers, workflow scripts, installer interaction,
+and their tests. It must repeat C0's independent inventory and contract
+freeze, preserve Claude `Agent` and lock/evidence ownership, and make its own
+clean-break decision. This plan does not authorize Claude runtime, test,
+installer, or Factory edits. (verified)
+
 | Phase | Owner/worktree | Prerequisite | Deliverable |
 | --- | --- | --- | --- |
 | 0. Python quality baseline | Codex, integration worktree | none | Enforced tools and zero existing Python violations |
