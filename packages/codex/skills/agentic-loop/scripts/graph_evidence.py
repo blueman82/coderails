@@ -6,9 +6,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from graph_identity import GraphError, REFERENCE_KEYS, classify_worker_evidence, task_name
-
-
+from graph_identity import GraphError, REFERENCE_KEYS, classify_worker_evidence, is_frozen_loop_evals, task_name
 def _object(value: Any, label: str) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise GraphError(f"{label} must be an object")
@@ -104,7 +102,6 @@ def _child_terminal(parent_session: str, expected_task: str, agent_thread_id: st
     if len(starts) != 1 or sum(event.get("turn_id") == turn_id for event in terminals) != 1:
         raise GraphError(f"child {agent_thread_id} task_complete has no unique matching task_started")
     return turn_id
-
 def _reference(value: Any, label: str) -> dict[str, Any]:
     reference = _object(value, label)
     if set(reference) != REFERENCE_KEYS or reference.get("kind") != "codex_agent":
@@ -265,6 +262,7 @@ def _grading_checksum(evals: dict[str, Any], result: str) -> str:
     encoded = json.dumps(canonical, separators=(",", ":"), sort_keys=True)
     return hashlib.sha256(f"{encoded}\n{result}".encode()).hexdigest()
 
+
 def validate_evals(state: dict[str, Any], revision: int | None, path: Path) -> None:
     evals = _load(path, "evals")
     _matching(evals, state, "evals")
@@ -274,6 +272,8 @@ def validate_evals(state: dict[str, Any], revision: int | None, path: Path) -> N
         raise GraphError("evals revision does not match the graph")
     _nonempty(evals.get("verification_justification"), "evals.verification_justification")
     result = evals.get("result")
+    if revision is None and is_frozen_loop_evals(evals):
+        return
     if result not in {"GO", "VERIFICATION_LEVEL0"}:
         raise GraphError("evals are not graded GO")
     raw_evals = evals.get("evals")
