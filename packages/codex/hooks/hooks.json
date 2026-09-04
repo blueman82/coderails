@@ -131,7 +131,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${PLUGIN_ROOT}/hooks/scripts/quality_feedback.sh\"",
+            "command": "\"${PLUGIN_ROOT}/hooks/scripts/quality_feedback.py\"",
             "timeout": 15,
             "additionalContextLimit": 1000
           }

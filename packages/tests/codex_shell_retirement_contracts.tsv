@@ -10,7 +10,7 @@ hooks/scripts/inject_context.py	hook	prompt injects context	invalid input degrad
 hooks/scripts/lib/hook_common.sh	hook-helper	helper emits hook output	helper degrades safely	stdout hook JSON	caller-defined	PLUGIN_ROOT jq	imported by hook entries
 hooks/scripts/loop_dispatch_guard.sh	hook	authorized dispatch allows	missing graph state denies	stdout deny JSON	PreToolUse: 0	stdin JSON CLAUDE_AGENTIC_LOOP_DIR	PreToolUse ^spawn_agent$
 hooks/scripts/no_edit_on_main.sh	hook	allowed write allows	protected write denies	stdout deny JSON	PreToolUse: 0	stdin JSON	PreToolUse ^apply_patch$
-hooks/scripts/quality_feedback.sh	hook	quality feedback emits	invalid input degrades	stdout hook JSON	PostToolUse: 0	stdin JSON PLUGIN_ROOT	PostToolUse ^apply_patch$
+hooks/scripts/quality_feedback.py	hook	quality feedback emits	invalid input degrades	stdout hook JSON	PostToolUse: 0	stdin JSON PLUGIN_ROOT	PostToolUse ^apply_patch$
 hooks/scripts/test_gate.sh	hook	passing trusted test allows	failing trusted test denies	stdout deny JSON	PreToolUse: 0	stdin JSON PLUGIN_ROOT	PreToolUse ^Bash$
 hooks/scripts/verification_volume_ceiling.sh	hook	first two checks allow	third check denies	stdout deny JSON	PreToolUse: 0	stdin JSON CLAUDE_AGENTIC_LOOP_DIR	PreToolUse ^Bash$
 hooks/scripts/wiki_taxonomy_gate.sh	hook	approved wiki path allows	unsanctioned top-level denies	stdout deny JSON	PreToolUse: 0	stdin JSON PLUGIN_ROOT	PreToolUse ^apply_patch$
