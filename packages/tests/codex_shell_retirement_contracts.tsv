@@ -6,7 +6,7 @@ hooks/scripts/crack_on_prose_gate.sh	hook	non-question completion allows	crack-o
 hooks/scripts/destructive_bash_gate.sh	hook	safe command allows	blocked destructive command denies	stdout deny JSON	PreToolUse: 0	stdin JSON	PreToolUse ^Bash$
 hooks/scripts/graph_completion_guard.sh	hook	complete graph allows	incomplete graph blocks	Stop stderr reason	Stop: 0/2	stdin JSON CLAUDE_AGENTIC_LOOP_DIR	Stop
 hooks/scripts/inject_bootstrap.sh	hook	startup injects context	invalid input degrades	stdout hook JSON	SessionStart: 0	stdin JSON PLUGIN_ROOT	SessionStart startup|resume|clear|compact
-hooks/scripts/inject_context.sh	hook	prompt injects context	invalid input degrades	stdout hook JSON	UserPromptSubmit: 0	stdin JSON	UserPromptSubmit
+hooks/scripts/inject_context.py	hook	prompt injects context	invalid input degrades	stdout hook JSON	UserPromptSubmit: 0	stdin JSON	UserPromptSubmit
 hooks/scripts/lib/hook_common.sh	hook-helper	helper emits hook output	helper degrades safely	stdout hook JSON	caller-defined	PLUGIN_ROOT jq	imported by hook entries
 hooks/scripts/loop_dispatch_guard.sh	hook	authorized dispatch allows	missing graph state denies	stdout deny JSON	PreToolUse: 0	stdin JSON CLAUDE_AGENTIC_LOOP_DIR	PreToolUse ^spawn_agent$
 hooks/scripts/no_edit_on_main.sh	hook	allowed write allows	protected write denies	stdout deny JSON	PreToolUse: 0	stdin JSON	PreToolUse ^apply_patch$

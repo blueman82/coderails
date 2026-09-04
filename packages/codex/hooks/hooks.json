@@ -19,7 +19,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${PLUGIN_ROOT}/hooks/scripts/inject_context.sh\"",
+            "command": "\"${PLUGIN_ROOT}/hooks/scripts/inject_context.py\"",
             "timeout": 10,
             "additionalContextLimit": 500
           },
