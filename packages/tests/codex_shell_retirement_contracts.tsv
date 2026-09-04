@@ -28,10 +28,7 @@ skills/dashboard/runner/bin/sweeper.sh	dashboard-launcher	starts sweeper	missing
 skills/dashboard/scripts/run-builder.sh	dashboard-launcher	starts builder	bad wrapper fails	stdout builder output/stderr reason	0/1	CODERAILS_BUILDER_WRAPPER	spawned by dashboard app
 skills/dashboard/scripts/start-dashboard.sh	dashboard-launcher	starts dashboard	missing app fails	stdout dashboard output/stderr reason	0/1	PWD	 dashboard skill
 skills/dashboard/scripts/stop-dashboard.sh	dashboard-launcher	stops dashboard	missing pid is harmless	stdout status/stderr reason	0/1	PWD	 dashboard skill
-skills/workflow-audit/scripts/cluster_ngrams.sh	workflow-audit	clusters valid JSONL	malformed input fails	stdout JSONL/stderr reason	0/1	PATH	workflow-audit pipeline
-skills/workflow-audit/scripts/scan_transcripts.sh	workflow-audit	filters private transcript data	missing input fails	stdout JSONL/stderr reason	0/1	HOME PATH	workflow-audit pipeline
-skills/workflow-audit/scripts/tests/cluster_ngrams.test.sh	workflow-audit-test	cluster unit runner passes	malformed JSONL assertion fails	stdout test output/stderr failure	0/1	TMPDIR	called directly
-skills/workflow-audit/scripts/tests/e2e.test.sh	workflow-audit-test	scan-to-cluster runner passes	pipeline assertion fails	stdout test output/stderr failure	0/1	TMPDIR HOME	called directly
-skills/workflow-audit/scripts/tests/scan_transcripts.test.sh	workflow-audit-test	scan unit runner passes	privacy assertion fails	stdout test output/stderr failure	0/1	TMPDIR HOME	called directly
-skills/workflow-audit/scripts/tests/write_queue_entry.test.sh	workflow-audit-test	queue unit runner passes	write-error assertion fails	stdout test output/stderr failure	0/1	TMPDIR	called directly
-skills/workflow-audit/scripts/write_queue_entry.sh	workflow-audit	writes valid queue proposal	invalid proposal or write error fails	stdout queue path/stderr reason	0/1	HOME PATH	workflow-audit pipeline
+skills/workflow-audit/scripts/cluster_ngrams.py	workflow-audit	clusters valid JSONL	malformed input fails	stdout JSONL/stderr reason	0/1	PATH	workflow-audit pipeline
+skills/workflow-audit/scripts/scan_transcripts.py	workflow-audit	filters private transcript data	missing input fails	stdout JSONL/stderr reason	0/1	HOME PATH	workflow-audit pipeline
+skills/workflow-audit/scripts/tests/test_workflow_audit.py	workflow-audit-test	cluster, scan, pipeline, and queue tests pass	any workflow-audit assertion fails	stdout test output/stderr failure	0/1	TMPDIR HOME	called directly
+skills/workflow-audit/scripts/write_queue_entry.py	workflow-audit	writes valid queue proposal	invalid proposal or write error fails	stdout queue path/stderr reason	0/1	HOME PATH	workflow-audit pipeline
