@@ -29,7 +29,12 @@ run_bash_hook() {
     hook_event_name: "PreToolUse",
     tool_name: "Bash",
     tool_input: {command: $command, workdir: $workdir}
-  }' | "$hook"
+  }' | {
+    case "$hook" in
+      *.py) python3 "$hook" ;;
+      *) "$hook" ;;
+    esac
+  }
 }
 
 check "hooks.json parses" jq -e . "$HOOKS/hooks.json"
