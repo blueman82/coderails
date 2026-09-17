@@ -25,7 +25,7 @@
           },
           {
             "type": "command",
-            "command": "\"${PLUGIN_ROOT}/hooks/scripts/crack_on_gate.sh\"",
+        "command": "\"${PLUGIN_ROOT}/hooks/scripts/crack_on_gate.py\"",
             "timeout": 10
           }
         ]
@@ -89,7 +89,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${PLUGIN_ROOT}/hooks/scripts/crack_on_gate.sh\"",
+        "command": "\"${PLUGIN_ROOT}/hooks/scripts/crack_on_gate.py\"",
             "timeout": 10
           }
         ]

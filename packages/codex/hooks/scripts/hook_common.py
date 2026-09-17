@@ -8,6 +8,7 @@ import select
 import sys
 import time
 from contextlib import suppress
+from datetime import datetime
 from pathlib import Path
 from typing import cast
 
@@ -63,3 +64,37 @@ def log(message: str) -> None:
 def continue_turn(reason: str) -> None:
     """Emit the established Stop-hook block response."""
     print(json.dumps({"decision": "block", "reason": reason}))
+
+
+def deny(reason: str) -> None:
+    """Emit the native PreToolUse denial envelope."""
+    print(
+        json.dumps(
+            {
+                "hookSpecificOutput": {
+                    "hookEventName": "PreToolUse",
+                    "permissionDecision": "deny",
+                    "permissionDecisionReason": reason,
+                }
+            }
+        )
+    )
+
+
+def session_dir(session_id: str) -> Path | None:
+    """Return the session-only data directory, or none for an empty identity."""
+    safe_session = session_id.replace("/", "_").replace("..", "")
+    if not safe_session:
+        return None
+    data_dir = Path(os.environ.get("PLUGIN_DATA", str(Path.home() / ".coderails" / "codex")))
+    return data_dir / "sessions" / safe_session
+
+
+def stamp(path: Path) -> bool:
+    """Write the established local timestamp, returning false on any I/O failure."""
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(f"{datetime.now().astimezone().isoformat(timespec='seconds')}\n", encoding="utf-8")
+    except OSError:
+        return False
+    return True
