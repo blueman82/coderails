@@ -142,7 +142,7 @@ fi
 mkdir -p "$test_repo/.codex"
 repo_marker="$security_tmp/repo-command-ran"
 printf 'printf compromised > "%s"\n' "$repo_marker" >"$test_repo/.codex/test_command"
-repo_config_output=$(run_bash_hook "$HOOKS/scripts/test_gate.sh" "$test_repo" "git commit -m test")
+repo_config_output=$(run_bash_hook "$HOOKS/scripts/test_gate.py" "$test_repo" "git commit -m test")
 check "repository test command is ignored" test ! -e "$repo_marker"
 check "missing trusted test command allows commit" test -z "$repo_config_output"
 
@@ -151,14 +151,16 @@ case "$trusted_config" in /*) ;; *) trusted_config="$test_repo/$trusted_config" 
 mkdir -p "$(dirname "$trusted_config")"
 trusted_marker="$security_tmp/trusted-command-ran"
 printf 'printf trusted > "%s" && test -s "%s"\n' "$trusted_marker" "$trusted_marker" >"$trusted_config"
-trusted_output=$(run_bash_hook "$HOOKS/scripts/test_gate.sh" "$test_repo" "git commit -m test")
+trusted_output=$(run_bash_hook "$HOOKS/scripts/test_gate.py" "$test_repo" "git commit -m test")
 check "trusted per-worktree test command supports shell syntax" test -e "$trusted_marker"
 check "trusted passing test command allows commit" test -z "$trusted_output"
 check "trusted command does not fall back to repository file" test ! -e "$repo_marker"
-check "test gate does not use eval" sh -c '! grep -Eq "(^|[[:space:]])eval([[:space:]]|$)" "$1"' sh "$HOOKS/scripts/test_gate.sh"
+check "test gate uses bash command runner" grep -Fq '"/bin/bash", "-c", test_command' "$HOOKS/scripts/test_gate.py"
 printf 'false\n' >"$trusted_config"
-failing_output=$(run_bash_hook "$HOOKS/scripts/test_gate.sh" "$test_repo" "git commit -m test")
+failing_output=$(run_bash_hook "$HOOKS/scripts/test_gate.py" "$test_repo" "git commit -m test")
 check "trusted failing test command denies commit" sh -c 'printf "%s" "$1" | jq -e ".hookSpecificOutput.permissionDecision == \"deny\""' sh "$failing_output"
+non_commit_output=$(run_bash_hook "$HOOKS/scripts/test_gate.py" "$test_repo" "git status")
+check "non-commit command allows" test -z "$non_commit_output"
 
 protected_writes_denied=1
 for protected_command in \

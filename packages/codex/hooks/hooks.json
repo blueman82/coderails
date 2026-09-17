@@ -74,7 +74,7 @@
           },
           {
             "type": "command",
-            "command": "\"${PLUGIN_ROOT}/hooks/scripts/test_gate.sh\"",
+            "command": "\"${PLUGIN_ROOT}/hooks/scripts/test_gate.py\"",
             "timeout": 120
           },
           {
