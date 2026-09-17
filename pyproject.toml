@@ -20,6 +20,8 @@ include = [
   "scripts/quality/check.py",
   "packages/codex/hooks/scripts/lib/quality_check.py",
   "packages/codex/skills/agentic-loop/scripts",
+  "hooks/scripts/test_gate.py",
+  "hooks/scripts/tests/test_gate_test.py",
 ]
 
 [tool.mypy]

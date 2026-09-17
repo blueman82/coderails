@@ -19,24 +19,28 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 HOOKS_JSON="${1:-$REPO_ROOT/hooks/hooks.json}"
 READ_T_FLOOR=5
-EXPECTED_BACKSTOP_COUNT=20
+EXPECTED_BACKSTOP_COUNT=19
 
 fails=0
 
 check() { # desc expected actual
-  if [ "$2" = "$3" ]; then printf 'ok   - %s\n' "$1"
-  else printf 'FAIL - %s (expected %s, got %s)\n' "$1" "$2" "$3"; fails=$((fails+1)); fi
+    if [ "$2" = "$3" ]; then
+        printf 'ok   - %s\n' "$1"
+    else
+        printf 'FAIL - %s (expected %s, got %s)\n' "$1" "$2" "$3"
+        fails=$((fails + 1))
+    fi
 }
 
 # --- Validate prerequisites ---
 if ! command -v jq >/dev/null 2>&1; then
-  printf 'FAIL - jq is required but not found in PATH\n'
-  exit 1
+    printf 'FAIL - jq is required but not found in PATH\n'
+    exit 1
 fi
 
 if [ ! -f "$HOOKS_JSON" ]; then
-  printf 'FAIL - hooks.json not found: %s\n' "$HOOKS_JSON"
-  exit 1
+    printf 'FAIL - hooks.json not found: %s\n' "$HOOKS_JSON"
+    exit 1
 fi
 
 # --- Extract declared timeouts for hooks/scripts/ commands via jq ---
@@ -59,18 +63,23 @@ below_floor=$(echo "$jq_result" | awk '{print $3}')
 
 # --- Guard: non-empty extraction required ---
 if [ "$count" -eq 0 ]; then
-  printf 'FAIL - no hooks/scripts/ timeouts found — jq filter may be broken or hooks.json structure changed\n'
-  fails=$((fails+1))
-  [ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails)"; exit 1; }
+    printf 'FAIL - no hooks/scripts/ timeouts found — jq filter may be broken or hooks.json structure changed\n'
+    fails=$((fails + 1))
+    if [ "$fails" -eq 0 ]; then
+        echo "PASS"
+        exit 0
+    fi
+    echo "FAILED ($fails)"
+    exit 1
 fi
 
 # --- Assert each declared timeout >= READ_T_FLOOR (comparison done in jq, float-safe) ---
 if [ "$below_floor" = "true" ]; then
-  printf 'FAIL - hooks.json declares a timeout (%s) below the read -t %d in-process backstop floor — lower the read -t bound or raise the timeout\n' \
-    "$min_timeout" "$READ_T_FLOOR"
-  fails=$((fails+1))
+    printf 'FAIL - hooks.json declares a timeout (%s) below the read -t %d in-process backstop floor — lower the read -t bound or raise the timeout\n' \
+        "$min_timeout" "$READ_T_FLOOR"
+    fails=$((fails + 1))
 else
-  check "min declared hooks/scripts/ timeout ($min_timeout) >= read -t $READ_T_FLOOR floor" "ok" "ok"
+    check "min declared hooks/scripts/ timeout ($min_timeout) >= read -t $READ_T_FLOOR floor" "ok" "ok"
 fi
 
 # --- Half B: assert every hook's `read -t N` backstop matches READ_T_FLOOR ---
@@ -79,35 +88,45 @@ fi
 SCRIPTS_DIR="$REPO_ROOT/hooks/scripts"
 
 # Collect hook files containing the backstop idiom; one file per line.
-backstop_files=$(grep -rl "IFS= read -r -d '' -t" "$SCRIPTS_DIR" --include="*.sh" \
-  | grep -v "/tests/" | grep -v "/lib/" | sort)
+backstop_files=$(grep -rl "IFS= read -r -d '' -t" "$SCRIPTS_DIR" --include="*.sh" |
+    grep -v "/tests/" | grep -v "/lib/" | sort)
 
 backstop_count=$(echo "$backstop_files" | grep -c . 2>/dev/null)
 
 # Assert backstop count == EXPECTED_BACKSTOP_COUNT (14 known hooks).
 if [ "$backstop_count" -ne "$EXPECTED_BACKSTOP_COUNT" ]; then
-  printf 'FAIL - expected %d hook scripts with the bounded-read backstop, found %d — a hook may have gained or lost the backstop unexpectedly\n' \
-    "$EXPECTED_BACKSTOP_COUNT" "$backstop_count"
-  fails=$((fails+1))
+    printf 'FAIL - expected %d hook scripts with the bounded-read backstop, found %d — a hook may have gained or lost the backstop unexpectedly\n' \
+        "$EXPECTED_BACKSTOP_COUNT" "$backstop_count"
+    fails=$((fails + 1))
 else
-  check "exactly $EXPECTED_BACKSTOP_COUNT hook scripts carry the bounded-read backstop" "ok" "ok"
+    check "exactly $EXPECTED_BACKSTOP_COUNT hook scripts carry the bounded-read backstop" "ok" "ok"
 fi
 
 # Assert every hook's read -t value equals READ_T_FLOOR.
 while IFS= read -r hook_file; do
-  [ -z "$hook_file" ] && continue
-  # Extract the integer N from `IFS= read -r -d '' -t N` — tolerates end-of-line (no trailing token).
-  n=$(grep "IFS= read -r -d '' -t" "$hook_file" \
-      | grep -oE "read -r -d '' -t [0-9]+" | grep -oE '[0-9]+$' | head -1)
-  hook_name=$(basename "$hook_file")
-  if [ "$n" != "$READ_T_FLOOR" ]; then
-    printf 'FAIL - %s uses read -t %s but floor is %d — both halves of the timeout invariant must match\n' \
-      "$hook_name" "$n" "$READ_T_FLOOR"
-    fails=$((fails+1))
-  else
-    check "$hook_name: read -t $n == floor ($READ_T_FLOOR)" "ok" "ok"
-  fi
-done <<< "$backstop_files"
+    [ -z "$hook_file" ] && continue
+    # Extract the integer N from `IFS= read -r -d '' -t N` — tolerates end-of-line (no trailing token).
+    n=$(grep "IFS= read -r -d '' -t" "$hook_file" |
+        grep -oE "read -r -d '' -t [0-9]+" | grep -oE '[0-9]+$' | head -1)
+    hook_name=$(basename "$hook_file")
+    if [ "$n" != "$READ_T_FLOOR" ]; then
+        printf 'FAIL - %s uses read -t %s but floor is %d — both halves of the timeout invariant must match\n' \
+            "$hook_name" "$n" "$READ_T_FLOOR"
+        fails=$((fails + 1))
+    else
+        check "$hook_name: read -t $n == floor ($READ_T_FLOOR)" "ok" "ok"
+    fi
+done <<<"$backstop_files"
+
+# test_gate.py replaces the retired shell hook and enforces the same five-second
+# bound with select(), so it is checked separately from the shell-only count.
+PYTHON_TEST_GATE="$SCRIPTS_DIR/test_gate.py"
+if grep -qF 'def read_payload(timeout_seconds: float = 5.0)' "$PYTHON_TEST_GATE" &&
+    grep -qF 'select.select([descriptor], [], [], remaining)' "$PYTHON_TEST_GATE"; then
+    check "test_gate.py uses the five-second select() bounded read" "ok" "ok"
+else
+    check "test_gate.py uses the five-second select() bounded read" "ok" "missing"
+fi
 
 # --- Guard: UserPromptSubmit registers exactly two hooks (inject_context.sh,
 # crack_on_gate.sh) ---
@@ -131,12 +150,12 @@ ups_cmd1=$(echo "$ups_result" | awk '{print $3}')
 
 check "UserPromptSubmit[0].hooks length" "2" "$ups_count"
 case "$ups_cmd0" in
-  *inject_context.sh*) check "UserPromptSubmit[0] hook 1 references inject_context.sh" "ok" "ok" ;;
-  *) check "UserPromptSubmit[0] hook 1 references inject_context.sh" "ok" "FAIL:$ups_cmd0" ;;
+*inject_context.sh*) check "UserPromptSubmit[0] hook 1 references inject_context.sh" "ok" "ok" ;;
+*) check "UserPromptSubmit[0] hook 1 references inject_context.sh" "ok" "FAIL:$ups_cmd0" ;;
 esac
 case "$ups_cmd1" in
-  *crack_on_gate.sh*) check "UserPromptSubmit[0] hook 2 references crack_on_gate.sh" "ok" "ok" ;;
-  *) check "UserPromptSubmit[0] hook 2 references crack_on_gate.sh" "ok" "FAIL:$ups_cmd1" ;;
+*crack_on_gate.sh*) check "UserPromptSubmit[0] hook 2 references crack_on_gate.sh" "ok" "ok" ;;
+*) check "UserPromptSubmit[0] hook 2 references crack_on_gate.sh" "ok" "FAIL:$ups_cmd1" ;;
 esac
 
 # --- Guard: plugin.json and marketplace.json versions stay in lockstep ---
@@ -152,13 +171,18 @@ plugin_version=$(jq -r '.version' "$PLUGIN_JSON" 2>/dev/null)
 marketplace_version=$(jq -r '.plugins[0].version' "$MARKETPLACE_JSON" 2>/dev/null)
 
 if [ -z "$plugin_version" ] || [ "$plugin_version" = "null" ]; then
-  printf 'FAIL - could not read a version from %s (got [%s])\n' "$PLUGIN_JSON" "$plugin_version"
-  fails=$((fails+1))
+    printf 'FAIL - could not read a version from %s (got [%s])\n' "$PLUGIN_JSON" "$plugin_version"
+    fails=$((fails + 1))
 elif [ -z "$marketplace_version" ] || [ "$marketplace_version" = "null" ]; then
-  printf 'FAIL - could not read a version from %s (got [%s])\n' "$MARKETPLACE_JSON" "$marketplace_version"
-  fails=$((fails+1))
+    printf 'FAIL - could not read a version from %s (got [%s])\n' "$MARKETPLACE_JSON" "$marketplace_version"
+    fails=$((fails + 1))
 else
-  check "plugin.json version ($plugin_version) matches marketplace.json plugin version ($marketplace_version)" "$plugin_version" "$marketplace_version"
+    check "plugin.json version ($plugin_version) matches marketplace.json plugin version ($marketplace_version)" "$plugin_version" "$marketplace_version"
 fi
 
-[ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails)"; exit 1; }
+if [ "$fails" -eq 0 ]; then
+    echo "PASS"
+    exit 0
+fi
+echo "FAILED ($fails)"
+exit 1

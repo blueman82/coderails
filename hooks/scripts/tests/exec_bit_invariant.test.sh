@@ -82,7 +82,7 @@ manifest_paths=(
     hooks/scripts/no_edit_on_main.sh
     hooks/scripts/offload_push_guard.sh
     hooks/scripts/remember_inject_cap_guard.sh
-    hooks/scripts/test_gate.sh
+    hooks/scripts/test_gate.py
     hooks/scripts/unregistered_loop_guard.sh
     hooks/scripts/verification_volume_ceiling.sh
     hooks/scripts/voice_announce.sh

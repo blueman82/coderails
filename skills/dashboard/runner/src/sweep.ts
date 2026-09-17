@@ -16,7 +16,7 @@
 //
 // PreToolUse hooks were separately probed (2026-07-07, this worktree, a
 // disposable scratch git repo) and found NOT to fire under `claude -p`:
-// with `.claude/test_command` set to `exit 1` (test_gate.sh's own opt-in
+// with `.claude/test_command` set to `exit 1` (test_gate.py's own opt-in
 // trigger, verified to return exit 1/deny when the identical stdin is
 // piped to the script directly), `claude -p "Run the bash command: git
 // commit -m '...'"` committed successfully — the gate never blocked it.
@@ -27,8 +27,8 @@
 // commit` or `git push` is not protected by test_gate/enforce_pr_workflow
 // the way an interactive session would be.
 
-import { readdirSync, readFileSync, renameSync, mkdirSync, existsSync, statSync, appendFileSync } from "node:fs";
-import { join, basename, dirname } from "node:path";
+import { readdirSync, readFileSync, renameSync, mkdirSync, existsSync, statSync } from "node:fs";
+import { join, basename } from "node:path";
 import { randomBytes } from "node:crypto";
 import { parseIntent } from "@coderails/dashboard-lib";
 import type { DashboardConfig, RoutineDef } from "@coderails/dashboard-lib";
@@ -36,8 +36,9 @@ import type { ButtonDef } from "../../app/src/lib/config.ts";
 import { buildArgv } from "../../app/src/lib/argv.ts";
 import { runClaude } from "./exec.ts";
 import { appendRun, type RunRecord } from "./runlog.ts";
-import { checkArtifact, resolveArtifactPath, type ArtifactCheckContext } from "./artifactGate.ts";
+import { checkArtifact } from "./artifactGate.ts";
 import { escalate, checkForeignSkillExists, writeRunNote, defaultNotify } from "./escalate.ts";
+import { localDateIso, recordTimeoutMarker } from "./timeoutMarker.ts";
 
 export interface SweepOptions {
   queueDir: string;
@@ -55,38 +56,6 @@ export interface SweepOptions {
   clock?: () => Date;
 }
 
-// Local calendar date (YYYY-MM-DD), not UTC — `toISOString()` is always UTC
-// regardless of process.env.TZ, which is exactly the mismatch this
-// resolves: the producer writes the artifact keyed to its local date.
-function localDateIso(date: Date): string {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
-
-// A routine killed by the exec timeout (SIGKILL, see exec.ts) never gets to
-// run its own terminal-marker-writing step, so its `last-marker` artifact
-// (e.g. docs-sync's run-{date}.log) is left with no terminal marker at all —
-// indistinguishable from a run that never started. Only `last-marker`
-// artifacts have a defined notion of a "failure marker" line; the other
-// predicate kinds (exists/contains/json-field) have no such convention and
-// this must not blindly append text into e.g. a json-field artifact that
-// expects valid JSON. Best-effort and non-fatal: a failure to record this
-// marker must not mask or replace the exec-error escalation the caller
-// already performs.
-function recordTimeoutMarker(routine: RoutineDef, ctx: ArtifactCheckContext): void {
-  const predicate = routine.expectedArtifact.predicate;
-  if (predicate.kind !== "last-marker") return;
-  const path = resolveArtifactPath(routine.expectedArtifact.artifactPath, ctx);
-  const marker = resolveArtifactPath(predicate.failures[0], ctx);
-  try {
-    mkdirSync(dirname(path), { recursive: true });
-    appendFileSync(path, `${new Date().toISOString()} ${marker}runner-timeout-kill\n`);
-  } catch (err) {
-    console.error("recordTimeoutMarker: failed to append terminal marker, continuing:", err);
-  }
-}
 
 export interface SweepResult {
   claimed: number;
