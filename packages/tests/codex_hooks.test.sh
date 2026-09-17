@@ -121,21 +121,22 @@ git init -q "$feature_repo"
 git -C "$feature_repo" symbolic-ref HEAD refs/heads/feature/e5
 git init -q "$pwd_repo"
 git -C "$pwd_repo" symbolic-ref HEAD refs/heads/feature/pwd
+commit_output=$(PLUGIN_DATA="$ceiling_data" run_bash_hook "$HOOKS/scripts/verification_volume_ceiling.py" "$main_repo" "git commit -m test")
 agent_output=$(PLUGIN_DATA="$ceiling_data" run_bash_hook "$HOOKS/scripts/verification_volume_ceiling.py" "$main_repo" "packages/tests/codex_hooks.test.sh" "" "agent-1")
 workdir_output=$(PLUGIN_DATA="$ceiling_data" run_bash_hook "$HOOKS/scripts/verification_volume_ceiling.py" "$main_repo" "packages/tests/codex_hooks.test.sh" "$feature_repo")
 empty_agent_output=$(PLUGIN_DATA="$ceiling_data" run_bash_hook "$HOOKS/scripts/verification_volume_ceiling.py" "$main_repo" "packages/tests/codex_hooks.test.sh" "" "" 1)
 missing_agent_output=$(PLUGIN_DATA="$ceiling_data" run_bash_hook "$HOOKS/scripts/verification_volume_ceiling.py" "$main_repo" "packages/tests/codex_hooks.test.sh")
 third_main_output=$(PLUGIN_DATA="$ceiling_data" run_bash_hook "$HOOKS/scripts/verification_volume_ceiling.py" "$main_repo" "packages/tests/codex_hooks.test.sh")
 pwd_output=$(cd "$pwd_repo" && PLUGIN_DATA="$ceiling_data" run_bash_hook "$HOOKS/scripts/verification_volume_ceiling.py" "" "packages/tests/codex_hooks.test.sh")
-if [[ -z "$agent_output$workdir_output$empty_agent_output$missing_agent_output$pwd_output" ]] &&
+if [[ -z "$commit_output$agent_output$workdir_output$empty_agent_output$missing_agent_output$pwd_output" ]] &&
     [[ "$(printf '%s' "$third_main_output" | jq -r '.hookSpecificOutput.permissionDecision // empty')" == "deny" ]] &&
     grep -qx 1 "$ceiling_data/verification-ceiling/feature-e5__full-suite.count" &&
     grep -qx 3 "$ceiling_data/verification-ceiling/main__full-suite.count" &&
     grep -qx 1 "$ceiling_data/verification-ceiling/feature-pwd__full-suite.count" &&
     ! test -e "$ceiling_data/verification-ceiling/main__full-suite.count.lock"; then
-    printf 'ok   - verification ceiling exempts only non-empty agent_id and uses workdir, cwd, then PWD\n'
+    printf 'ok   - verification ceiling leaves Git commits uncounted, exempts only non-empty agent_id, and uses workdir, cwd, then PWD\n'
 else
-    printf 'FAIL - verification ceiling exempts only non-empty agent_id and uses workdir, cwd, then PWD\n'
+    printf 'FAIL - verification ceiling leaves Git commits uncounted, exempts only non-empty agent_id, and uses workdir, cwd, then PWD\n'
     fails=$((fails + 1))
 fi
 

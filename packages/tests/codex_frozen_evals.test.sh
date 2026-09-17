@@ -65,6 +65,46 @@ if python3 "$GRAPH" acknowledge-cancelled-wave "$TMP/legacy-cancel.json" --sessi
 	exit 1
 fi
 
+jq -n '{
+  schema_version:2,session_id:"session-test",loop_id:"loop-test",revision:4,status:"in-progress",
+  graph:{nodes:{A:{status:"done",outcome:"done",retry:{attempts:0,max:1},evidence:[]},B:{status:"hard-stop",outcome:"hard-stop",retry:{attempts:1,max:1},evidence:["failed"]},C:{status:"pending",outcome:"pending",retry:{attempts:0,max:1},evidence:[]}},
+         edges:[{from:"A",to:"B"},{from:"B",to:"C"}],joins:{},active_wave:null,hard_stop:{node:"B",reason:"retry exhaustion",evidence:"failed"}}
+}' >"$TMP/remediation.json"
+python3 "$GRAPH" add-remediation-node "$TMP/remediation.json" --session session-test --source B --node B-remediation >/dev/null
+jq -e '.graph.nodes.B.status == "failed" and .graph.nodes["B-remediation"].status == "pending" and .graph.edges == [{"from":"A","to":"B-remediation"},{"from":"B-remediation","to":"C"}] and .graph.hard_stop == null' "$TMP/remediation.json" >/dev/null
+
+PYTHONPATH="$(dirname "$GRAPH")" python3 - <<'PY'
+from pathlib import Path
+
+import graph_evidence
+
+reference = {
+    "kind": "codex_agent",
+    "attempt": 1,
+    "spawn_call_id": "spawn",
+    "agent_thread_id": "thread",
+    "task_complete_turn_id": "turn",
+}
+state = {
+    "session_id": "session-test",
+    "revision": 7,
+    "status": "in-progress",
+    "graph": {
+        "active_wave": None,
+        "cancelled_waves": [{"id": "wave-4", "revision": 4}],
+        "joins": {},
+        "nodes": {
+            "A": {"status": "done", "retry": {"attempts": 0}, "evidence": [{**reference, "wave_id": "wave-2"}]},
+            "B": {"status": "done", "retry": {"attempts": 0}, "evidence": [{**reference, "spawn_call_id": "spawn-b", "agent_thread_id": "thread-b", "task_complete_turn_id": "turn-b", "wave_id": "wave-6"}]},
+        },
+    },
+}
+graph_evidence._thread_transcript = lambda _: Path("unused")
+graph_evidence._records = lambda *_: []
+graph_evidence._verify_reference = lambda *_: 1
+assert graph_evidence._stored_references(state, False) == {"spawn", "thread", "turn", "spawn-b", "thread-b", "turn-b"}
+PY
+
 jq '.frozen_sha = ""' "$evals" >"$evals.tmp" && mv "$evals.tmp" "$evals"
 if python3 "$GRAPH" authorize-dispatch "$state" --session session-test --task loop_worker_41 --evals "$evals" >/dev/null 2>&1; then
   printf 'FAIL - malformed frozen suite authorized dispatch\n' >&2

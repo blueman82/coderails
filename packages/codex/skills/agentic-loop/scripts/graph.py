@@ -321,6 +321,44 @@ def _acknowledge_cancelled_wave(path: Path, session: str, wave_id: str) -> dict[
         return {"acknowledged_wave": wave_id, "revision": state["revision"]}
 
 
+def _add_remediation_node(path: Path, session: str, source_id: str, node_id: str) -> dict[str, Any]:
+    with _locked(path):
+        state = _load(path)
+        graph = state["graph"]
+        source = graph["nodes"].get(source_id)
+        source = cast(dict[str, Any], source) if isinstance(source, dict) else None
+        hard_stop = cast(dict[str, Any], graph["hard_stop"]) if isinstance(graph["hard_stop"], dict) else None
+        if (
+            state["session_id"] != session
+            or graph["active_wave"] is not None
+            or hard_stop is None
+            or hard_stop.get("node") != source_id
+            or hard_stop.get("reason") != "retry exhaustion"
+            or source is None
+            or source.get("status") != "hard-stop"
+            or source["retry"]["attempts"] != source["retry"]["max"]
+            or node_id in graph["nodes"]
+            or not node_id.strip()
+        ):
+            raise GraphError("only an exhausted hard-stop node can receive one remediation successor")
+        graph["nodes"][node_id] = {
+            "status": "pending",
+            "outcome": "pending",
+            "retry": {"attempts": 0, "max": source["retry"]["max"]},
+            "evidence": [],
+        }
+        for edge in graph["edges"]:
+            if edge["to"] == source_id:
+                edge["to"] = node_id
+            if edge["from"] == source_id:
+                edge["from"] = node_id
+        source["status"] = "failed"
+        source["outcome"] = "failed"
+        graph["hard_stop"] = None
+        _write(path, state)
+        return {"remediation_node": node_id, "source_node": source_id, "revision": state["revision"]}
+
+
 def _record_wave(path: Path, raw_results: str) -> dict[str, Any]:
     try:
         parsed_results: JsonValue = cast(JsonValue, json.loads(raw_results))
@@ -475,6 +513,11 @@ def _parser() -> argparse.ArgumentParser:
     acknowledge.add_argument("state", type=Path)
     acknowledge.add_argument("--session", required=True)
     acknowledge.add_argument("--wave", required=True)
+    remediate = commands.add_parser("add-remediation-node")
+    remediate.add_argument("state", type=Path)
+    remediate.add_argument("--session", required=True)
+    remediate.add_argument("--source", required=True)
+    remediate.add_argument("--node", required=True)
     record = commands.add_parser("record-wave")
     record.add_argument("state", type=Path)
     record.add_argument("results_json")
@@ -509,6 +552,8 @@ def main() -> int:
             output = _cancel_unspawned_wave(args.state, args.session)
         elif args.command == "acknowledge-cancelled-wave":
             output = _acknowledge_cancelled_wave(args.state, args.session, args.wave)
+        elif args.command == "add-remediation-node":
+            output = _add_remediation_node(args.state, args.session, args.source, args.node)
         elif args.command == "complete":
             output = _complete(args.state, args.session, args.evals, args.proof, args.retro, args.transcript)
         else:
