@@ -225,7 +225,7 @@ hook_output() {
 }
 hook_denied() {
 	local root="$1" input="$2" output
-	output=$(hook_output "$HOOKS/loop_dispatch_guard.sh" "$root" "$input")
+	output=$(hook_output "$HOOKS/loop_dispatch_guard.py" "$root" "$input")
 	printf '%s' "$output" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null 2>&1
 }
 
@@ -242,7 +242,7 @@ dispatch_input() {
 
 stop_blocked() {
 	local root="$1" message="$2" output
-	output=$(hook_output "$HOOKS/graph_completion_guard.sh" "$root" \
+	output=$(hook_output "$HOOKS/graph_completion_guard.py" "$root" \
 		"$(jq -cn --arg cwd "$ROOT" --arg message "$message" '{
           hook_event_name:"Stop",session_id:"session-test",cwd:$cwd,last_assistant_message:$message
         }')")
@@ -352,8 +352,7 @@ mutation_control() {
 	local mutation="$TMP/mutated-production" original="$TMP/control-original.json"
 	local mutated="$TMP/control-mutated.json" envelope wave
 	mkdir -p "$mutation"
-	cp "$PACKAGE/skills/agentic-loop/scripts/graph_evidence.py" "$mutation/graph_evidence.py"
-	cp "$PACKAGE/skills/agentic-loop/scripts/graph_identity.py" "$mutation/graph_identity.py"
+	cp "$PACKAGE/skills/agentic-loop/scripts/graph_evidence.py" "$PACKAGE/skills/agentic-loop/scripts/graph_identity.py" "$PACKAGE/skills/agentic-loop/scripts/json_types.py" "$mutation"
 	sed 's/if set(results) != set(active_wave\["nodes"\]):/if False:/' "$GRAPH" >"$mutation/graph.py"
 	chmod +x "$mutation/graph.py"
 	if ! grep -q 'if False:' "$mutation/graph.py"; then

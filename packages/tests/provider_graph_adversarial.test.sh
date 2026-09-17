@@ -59,6 +59,7 @@ graph_call() {
 		record-wave) graph_dispatch_record "$@" ;;
 		esac
 	else
+		[[ "$operation" != "begin-wave" ]] || write_evals "$(dirname "$1")/evals.json" "$(jq -r '.revision' "$1")"
 		[[ "$operation" != "record-wave" ]] || codex_fixture::append_wave "$1"
 		python3 "$ROOT/packages/codex/skills/agentic-loop/scripts/graph.py" "$operation" "$@"
 	fi
@@ -198,7 +199,7 @@ dispatch_fixture() {
 	fi
 }
 test_codex_dispatch_guard() {
-	local guard="$ROOT/packages/codex/hooks/scripts/loop_dispatch_guard.sh" root input
+	local guard="$ROOT/packages/codex/hooks/scripts/loop_dispatch_guard.py" root input
 	root="$TMP/dispatch.valid"
 	dispatch_fixture "$root"
 	input=$(dispatch_input spawn_agent loop_worker_41)
@@ -230,7 +231,7 @@ test_codex_dispatch_guard() {
 
 stop_blocked() {
 	local root="$1" message="$2" output
-	output=$(hook_output "$ROOT/packages/codex/hooks/scripts/graph_completion_guard.sh" "$root" \
+	output=$(hook_output "$ROOT/packages/codex/hooks/scripts/graph_completion_guard.py" "$root" \
 		"$(jq -cn --arg cwd "$ROOT" --arg msg "$message" '{session_id:"session-test",cwd:$cwd,hook_event_name:"Stop",last_assistant_message:$msg}')")
 	printf '%s' "$output" | jq -e '.decision == "block"' >/dev/null 2>&1
 }

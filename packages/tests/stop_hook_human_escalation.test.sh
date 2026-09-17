@@ -282,7 +282,7 @@ run_codex() {
   local out="$TMP/codex.out"
   printf '%s' "$(jq -cn --arg cwd "$TMP/repo" '{session_id:"S1",cwd:$cwd,last_assistant_message:"done",hook_event_name:"Stop"}')" |
     CODERAILS_AGENTIC_LOOP_DIR="$codex_root" PLUGIN_ROOT="$ROOT/packages/codex" \
-    CODERAILS_DISCIPLINE_LOG="$TMP/codex.log" "$ROOT/packages/codex/hooks/scripts/graph_completion_guard.sh" >"$out"
+    CODERAILS_DISCIPLINE_LOG="$TMP/codex.log" "$ROOT/packages/codex/hooks/scripts/graph_completion_guard.py" >"$out"
   CODEX_OUT=$(cat "$out")
 }
 
@@ -290,7 +290,7 @@ run_codex_at() {
   local root="$1" session="$2" out="$3"
   printf '%s' "$(jq -cn --arg cwd "$TMP/repo" --arg session "$session" '{session_id:$session,cwd:$cwd,last_assistant_message:"done",hook_event_name:"Stop"}')" |
     CODERAILS_AGENTIC_LOOP_DIR="$root" PLUGIN_ROOT="$ROOT/packages/codex" \
-    CODERAILS_DISCIPLINE_LOG="$TMP/codex-marker-failure.log" "$ROOT/packages/codex/hooks/scripts/graph_completion_guard.sh" >"$out"
+    CODERAILS_DISCIPLINE_LOG="$TMP/codex-marker-failure.log" "$ROOT/packages/codex/hooks/scripts/graph_completion_guard.py" >"$out"
 }
 
 run_codex
@@ -360,7 +360,7 @@ jq -n '{schema_version:2,session_id:"S2",loop_id:"loop-2",revision:2,status:"com
   >"$codex_evidence_root/$slug/S2/progress.json"
 codex_evidence_out=$(printf '%s' "$(jq -cn --arg cwd "$TMP/repo" '{session_id:"S2",cwd:$cwd,last_assistant_message:"done",hook_event_name:"Stop"}')" |
   CODERAILS_AGENTIC_LOOP_DIR="$codex_evidence_root" PLUGIN_ROOT="$ROOT/packages/codex" \
-  CODERAILS_DISCIPLINE_LOG="$TMP/codex-evidence.log" "$ROOT/packages/codex/hooks/scripts/graph_completion_guard.sh")
+  CODERAILS_DISCIPLINE_LOG="$TMP/codex-evidence.log" "$ROOT/packages/codex/hooks/scripts/graph_completion_guard.py")
 check "Codex invalid completion evidence stays blocked" 1 "$(printf '%s' "$codex_evidence_out" | jq -e '.decision == "block"' >/dev/null 2>&1 && echo 1 || echo 0)"
 check "Codex invalid completion evidence is not called unresolved graph" "" "$(printf '%s' "$codex_evidence_out" | jq -r '.systemMessage // empty')"
 check "Codex invalid completion evidence explains the repair" 1 "$(printf '%s' "$codex_evidence_out" | jq -r '.reason // empty' | grep -qi 'completion evidence' && echo 1 || echo 0)"

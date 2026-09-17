@@ -36,7 +36,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${PLUGIN_ROOT}/hooks/scripts/graph_completion_guard.sh\"",
+            "command": "\"${PLUGIN_ROOT}/hooks/scripts/graph_completion_guard.py\"",
             "timeout": 10
           },
           {
@@ -99,7 +99,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${PLUGIN_ROOT}/hooks/scripts/loop_dispatch_guard.sh\"",
+            "command": "\"${PLUGIN_ROOT}/hooks/scripts/loop_dispatch_guard.py\"",
             "timeout": 10
           }
         ]

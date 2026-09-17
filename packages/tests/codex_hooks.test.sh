@@ -48,8 +48,8 @@ check "all commands use PLUGIN_ROOT" jq -e '
 check "no legacy plugin-root variables" sh -c '! grep -R -E "CLAUDE_PLUGIN_ROOT|CODEX_PLUGIN_ROOT" "$1"' sh "$HOOKS"
 check "no lifecycle adapter" test ! -e "$HOOKS/lifecycle.py"
 check "native graph hooks are registered" jq -e '
-  ([.hooks.Stop[].hooks[].command] | index("\"${PLUGIN_ROOT}/hooks/scripts/graph_completion_guard.sh\"")) != null and
-  ([.hooks.PreToolUse[] | select(.matcher == "^spawn_agent$") | .hooks[].command] == ["\"${PLUGIN_ROOT}/hooks/scripts/loop_dispatch_guard.sh\""])
+  ([.hooks.Stop[].hooks[].command] | index("\"${PLUGIN_ROOT}/hooks/scripts/graph_completion_guard.py\"")) != null and
+  ([.hooks.PreToolUse[] | select(.matcher == "^spawn_agent$") | .hooks[].command] == ["\"${PLUGIN_ROOT}/hooks/scripts/loop_dispatch_guard.py\""])
 ' "$HOOKS/hooks.json"
 check "shared and cross-provider hooks stay absent" sh -c '! grep -R -E "parallel-review|parallel_review|enforce_pr_workflow|claude -p|codex exec" "$1"' sh "$HOOKS"
 
@@ -94,7 +94,7 @@ check "native resolver reads canonical config" test "$canonical_result" = "proje
 rm -rf "$config_repo"
 
 missing_dispatch_dir=$(mktemp -d "${TMPDIR:-/tmp}/coderails-codex-hooks-missing.XXXXXX")
-missing_dispatch=$(printf '%s' '{"session_id":"missing","cwd":"/tmp","hook_event_name":"PreToolUse","tool_name":"spawn_agent","tool_input":{"agent_type":"loop-worker","message":"CODERAILS_GRAPH_TASK=loop_worker_41\nwork"}}' | CODERAILS_AGENTIC_LOOP_DIR="$missing_dispatch_dir" CODERAILS_DISCIPLINE_LOG="$missing_dispatch_dir/discipline.log" PLUGIN_ROOT="$PACKAGE" "$HOOKS/scripts/loop_dispatch_guard.sh")
+missing_dispatch=$(printf '%s' '{"session_id":"missing","cwd":"/tmp","hook_event_name":"PreToolUse","tool_name":"spawn_agent","tool_input":{"agent_type":"loop-worker","message":"CODERAILS_GRAPH_TASK=loop_worker_41\nwork"}}' | CODERAILS_AGENTIC_LOOP_DIR="$missing_dispatch_dir" CODERAILS_DISCIPLINE_LOG="$missing_dispatch_dir/discipline.log" PLUGIN_ROOT="$PACKAGE" "$HOOKS/scripts/loop_dispatch_guard.py")
 rm -rf "$missing_dispatch_dir"
 check "native worker dispatch without loop state is denied" sh -c 'printf "%s" "$1" | jq -e ".hookSpecificOutput.permissionDecision == \"deny\""' sh "$missing_dispatch"
 
@@ -203,18 +203,19 @@ jq -n '{
   schema_version:2,session_id:"s-complete",loop_id:"loop-1",revision:1,status:"in-progress",
   graph:{nodes:{A:{status:"pending",outcome:"pending",retry:{attempts:0,max:2},evidence:[]}},edges:[],joins:{},active_wave:null,hard_stop:null}
 }' >"$graph_dir/progress.json"
-incomplete_stop=$(printf '%s' '{"session_id":"s-complete","cwd":"/tmp","hook_event_name":"Stop","last_assistant_message":"done"}' | CODERAILS_AGENTIC_LOOP_DIR="$graph_root" PLUGIN_ROOT="$PACKAGE" "$HOOKS/scripts/graph_completion_guard.sh")
+incomplete_stop=$(printf '%s' '{"session_id":"s-complete","cwd":"/tmp","hook_event_name":"Stop","last_assistant_message":"done"}' | CODERAILS_AGENTIC_LOOP_DIR="$graph_root" PLUGIN_ROOT="$PACKAGE" "$HOOKS/scripts/graph_completion_guard.py")
 check "incomplete native graph blocks Stop" sh -c 'printf "%s" "$1" | jq -e ".decision == \"block\""' sh "$incomplete_stop"
-recursive_stop=$(printf '%s' '{"session_id":"s-complete","cwd":"/tmp","hook_event_name":"Stop","stop_hook_active":true,"last_assistant_message":"done"}' | CODERAILS_AGENTIC_LOOP_DIR="$graph_root" PLUGIN_ROOT="$PACKAGE" "$HOOKS/scripts/graph_completion_guard.sh")
+recursive_stop=$(printf '%s' '{"session_id":"s-complete","cwd":"/tmp","hook_event_name":"Stop","stop_hook_active":true,"last_assistant_message":"done"}' | CODERAILS_AGENTIC_LOOP_DIR="$graph_root" PLUGIN_ROOT="$PACKAGE" "$HOOKS/scripts/graph_completion_guard.py")
 check "recursive native graph Stop does not block again" test -z "$recursive_stop"
 export HOME="$security_tmp/home"
 codex_fixture::init s-complete
+git_head=$(git -C "$ROOT" rev-parse HEAD)
+jq -n --arg sha "$git_head" '{schema_version:1,scope:"loop",task_ref:"loop-1",verification_level:1,verification_justification:"hook fixture",frozen_at:"2026-08-20T00:00:00Z",frozen_sha:$sha,head_sha:$sha,session_id:"s-complete",loop_id:"loop-1",revision:1,evals:[{id:"P0",priority:"P0",mode:"agent-run"}],amendments:[],result:null,graded_at:null}' >"$graph_dir/evals.json"
 python3 "$PACKAGE/skills/agentic-loop/scripts/graph.py" begin-wave "$graph_dir/progress.json" >/dev/null
 codex_fixture::append_wave "$graph_dir/progress.json"
 python3 "$PACKAGE/skills/agentic-loop/scripts/graph.py" record-wave "$graph_dir/progress.json" \
     '{"wave_id":"wave-2","results":{"A":{"outcome":"done","evidence":"hook fixture"}}}' >/dev/null
 graph_revision=$(jq -r '.revision' "$graph_dir/progress.json")
-git_head=$(git -C "$ROOT" rev-parse HEAD)
 jq -n --arg sha "$git_head" --argjson revision "$graph_revision" '{schema_version:1,scope:"loop",task_ref:"loop-1",verification_level:0,verification_justification:"hook fixture",frozen_at:"2026-08-20T00:00:00Z",frozen_sha:$sha,head_sha:$sha,session_id:"s-complete",loop_id:"loop-1",revision:$revision,evals:[],amendments:[],result:null,graded_at:null}' >"$graph_dir/evals.json"
 "$ROOT/scripts/post_evals.sh" grade-loop "$graph_dir/evals.json" >/dev/null
 jq -n '{session_id:"s-complete",loop_id:"loop-1",proofs:[{id:"P1",cmd:"true",status:"pass",evidence:"observed"}]}' >"$graph_dir/proof.json"
@@ -224,7 +225,7 @@ jq -cn '{type:"turn_context",payload:{session_id:"s-complete",loop_id:"loop-1"}}
 jq -cn '{type:"response_item",payload:{type:"custom_tool_call",name:"exec",call_id:"proof-call",input:"const r = await tools.exec_command({cmd:\"true\"}); text(JSON.stringify({loop_id:\"loop-1\",exit_code:r.exit_code,output:r.output}));"}}' >>"$proof_transcript"
 jq -cn '{type:"response_item",payload:{type:"custom_tool_call_output",call_id:"proof-call",output:[{type:"input_text",text:"{\"loop_id\":\"loop-1\",\"exit_code\":0,\"output\":\"\"}"}]}}' >>"$proof_transcript"
 python3 "$PACKAGE/skills/agentic-loop/scripts/graph.py" complete "$graph_dir/progress.json" --session s-complete --evals "$graph_dir/evals.json" --proof "$graph_dir/proof.json" --retro "$graph_dir/retro.json" --transcript "$proof_transcript" >/dev/null
-complete_stop=$(jq -cn --arg transcript "$proof_transcript" '{session_id:"s-complete",cwd:"/tmp",hook_event_name:"Stop",last_assistant_message:"done",transcript_path:$transcript}' | CODERAILS_AGENTIC_LOOP_DIR="$graph_root" PLUGIN_ROOT="$PACKAGE" "$HOOKS/scripts/graph_completion_guard.sh")
+complete_stop=$(jq -cn --arg transcript "$proof_transcript" '{session_id:"s-complete",cwd:"/tmp",hook_event_name:"Stop",last_assistant_message:"done",transcript_path:$transcript}' | CODERAILS_AGENTIC_LOOP_DIR="$graph_root" PLUGIN_ROOT="$PACKAGE" "$HOOKS/scripts/graph_completion_guard.py")
 check "completed native graph allows Stop" test -z "$complete_stop"
 replay_transcript="$graph_dir/replay.jsonl"
 jq -cn '{type:"turn_context",payload:{session_id:"s-complete",loop_id:"loop-old"}}' >"$replay_transcript"
@@ -236,11 +237,11 @@ check "completed native graph rejects earlier-loop proof replay" \
     "$graph_dir/proof.json" "$graph_dir/retro.json" "$replay_transcript"
 jq -cn '{type:"response_item",payload:{type:"custom_tool_call",name:"exec",call_id:"proof-outer-only",input:"const r = await tools.exec_command({cmd:\"true\"}); text(r.output);"}}' >>"$proof_transcript"
 jq -cn '{type:"response_item",payload:{type:"custom_tool_call_output",call_id:"proof-outer-only",output:[{type:"input_text",text:"Script completed\nWall time 0.1 seconds\nProcess exited with code 1\nFinal output:"}]}}' >>"$proof_transcript"
-outer_only_stop=$(jq -cn --arg transcript "$proof_transcript" '{session_id:"s-complete",cwd:"/tmp",hook_event_name:"Stop",last_assistant_message:"done",transcript_path:$transcript}' | CODERAILS_AGENTIC_LOOP_DIR="$graph_root" PLUGIN_ROOT="$PACKAGE" "$HOOKS/scripts/graph_completion_guard.sh")
+outer_only_stop=$(jq -cn --arg transcript "$proof_transcript" '{session_id:"s-complete",cwd:"/tmp",hook_event_name:"Stop",last_assistant_message:"done",transcript_path:$transcript}' | CODERAILS_AGENTIC_LOOP_DIR="$graph_root" PLUGIN_ROOT="$PACKAGE" "$HOOKS/scripts/graph_completion_guard.py")
 check "completed native graph rejects outer-only Script completed proof" sh -c 'printf "%s" "$1" | jq -e ".decision == \"block\""' sh "$outer_only_stop"
 jq -cn '{type:"response_item",payload:{type:"custom_tool_call",name:"exec",call_id:"proof-failed",input:"const r = await tools.exec_command({cmd:\"true\"}); text(JSON.stringify({exit_code:r.exit_code,output:r.output}));"}}' >>"$proof_transcript"
 jq -cn '{type:"response_item",payload:{type:"custom_tool_call_output",call_id:"proof-failed",output:[{type:"input_text",text:"{\"exit_code\":1,\"output\":\"\"}"}]}}' >>"$proof_transcript"
-failed_proof_stop=$(jq -cn --arg transcript "$proof_transcript" '{session_id:"s-complete",cwd:"/tmp",hook_event_name:"Stop",last_assistant_message:"done",transcript_path:$transcript}' | CODERAILS_AGENTIC_LOOP_DIR="$graph_root" PLUGIN_ROOT="$PACKAGE" "$HOOKS/scripts/graph_completion_guard.sh")
+failed_proof_stop=$(jq -cn --arg transcript "$proof_transcript" '{session_id:"s-complete",cwd:"/tmp",hook_event_name:"Stop",last_assistant_message:"done",transcript_path:$transcript}' | CODERAILS_AGENTIC_LOOP_DIR="$graph_root" PLUGIN_ROOT="$PACKAGE" "$HOOKS/scripts/graph_completion_guard.py")
 check "completed native graph rejects a last-failed proof command" sh -c 'printf "%s" "$1" | jq -e ".decision == \"block\""' sh "$failed_proof_stop"
 
 check "verification ceiling keeps empty or missing agent_id subject to its cap" test -z "$agent_output$empty_agent_output$missing_agent_output"

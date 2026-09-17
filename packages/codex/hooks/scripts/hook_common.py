@@ -94,6 +94,63 @@ def session_dir(session_id: str) -> Path | None:
     return data_dir / "sessions" / safe_session
 
 
+def loop_state_path(cwd: str, session_id: str) -> Path | None:
+    """Return the session-owned graph state path using the established fallback order."""
+    safe_session = session_id.replace("/", "_").replace("..", "")
+    if not safe_session:
+        return None
+    root = Path(os.environ.get("CODERAILS_AGENTIC_LOOP_DIR") or Path.home() / ".coderails" / "agentic-loop")
+    try:
+        result = subprocess.run(
+            ["git", "-C", cwd, "rev-parse", "--path-format=absolute", "--git-common-dir"],
+            capture_output=True,
+            check=False,
+            text=True,
+        )
+    except OSError:
+        result = None
+    source = result.stdout.strip() if result is not None and result.returncode == 0 else cwd
+    canonical = root / source.replace("/", "-") / safe_session / "progress.json"
+    if canonical.exists():
+        return canonical
+    try:
+        matches = sorted(
+            candidate / safe_session / "progress.json"
+            for candidate in root.iterdir()
+            if (candidate / safe_session / "progress.json").exists()
+        )
+    except OSError:
+        matches = []
+    return matches[0] if matches else canonical
+
+
+def graph_path() -> Path:
+    """Return the provider-local graph adapter path."""
+    root = Path(os.environ.get("PLUGIN_ROOT") or Path(__file__).resolve().parents[2])
+    return root / "skills" / "agentic-loop" / "scripts" / "graph.py"
+
+
+def graph_output(graph: Path, *arguments: str) -> dict[str, object] | None:
+    """Run one graph command and return its object output when valid."""
+    try:
+        result = subprocess.run(
+            ["python3", str(graph), *arguments],
+            stdout=subprocess.PIPE,
+            check=False,
+            stderr=subprocess.DEVNULL,
+            text=True,
+        )
+    except OSError:
+        return None
+    if result.returncode != 0:
+        return None
+    try:
+        decoded: object = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return None
+    return cast(dict[str, object], decoded) if isinstance(decoded, dict) else None
+
+
 def stamp(path: Path) -> bool:
     """Write the established local timestamp, returning false on any I/O failure."""
     try:
