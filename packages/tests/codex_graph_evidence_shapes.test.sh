@@ -22,6 +22,13 @@ write_graph() {
       schema_version:2,session_id:"session-test",loop_id:"loop-test",revision:1,status:"in-progress",
       graph:{nodes:$nodes,edges:[],joins:{},active_wave:null,hard_stop:null}
     }' >"$path"
+	jq -n --arg sha "$(git -C "$ROOT" rev-parse HEAD)" '{
+      schema_version:1,scope:"loop",task_ref:"loop-test",verification_level:1,
+      verification_justification:"evidence-shape fixture",frozen_sha:$sha,
+      session_id:"session-test",loop_id:"loop-test",revision:1,
+      evals:[{id:"E1",priority:"P0",mode:"agent-run",status:"pending",evidence:""}],
+      amendments:[],result:null,grading:null
+    }' >"$(dirname "$path")/evals.json"
 }
 
 record_payload() {

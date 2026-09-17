@@ -7,7 +7,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${PLUGIN_ROOT}/hooks/scripts/inject_bootstrap.sh\"",
+            "command": "\"${PLUGIN_ROOT}/hooks/scripts/inject_bootstrap.py\"",
             "timeout": 10,
             "additionalContextLimit": 1200
           }
@@ -19,13 +19,13 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${PLUGIN_ROOT}/hooks/scripts/inject_context.sh\"",
+            "command": "\"${PLUGIN_ROOT}/hooks/scripts/inject_context.py\"",
             "timeout": 10,
             "additionalContextLimit": 500
           },
           {
             "type": "command",
-            "command": "\"${PLUGIN_ROOT}/hooks/scripts/crack_on_gate.sh\"",
+        "command": "\"${PLUGIN_ROOT}/hooks/scripts/crack_on_gate.py\"",
             "timeout": 10
           }
         ]
@@ -36,12 +36,12 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${PLUGIN_ROOT}/hooks/scripts/graph_completion_guard.sh\"",
+            "command": "\"${PLUGIN_ROOT}/hooks/scripts/graph_completion_guard.py\"",
             "timeout": 10
           },
           {
             "type": "command",
-            "command": "\"${PLUGIN_ROOT}/hooks/scripts/check_confidence_labels.sh\"",
+        "command": "\"${PLUGIN_ROOT}/hooks/scripts/check_confidence_labels.py\"",
             "timeout": 10
           },
           {
@@ -57,7 +57,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${PLUGIN_ROOT}/hooks/scripts/check_confidence_labels.sh\"",
+        "command": "\"${PLUGIN_ROOT}/hooks/scripts/check_confidence_labels.py\"",
             "timeout": 10
           }
         ]
@@ -74,12 +74,12 @@
           },
           {
             "type": "command",
-            "command": "\"${PLUGIN_ROOT}/hooks/scripts/test_gate.sh\"",
+            "command": "\"${PLUGIN_ROOT}/hooks/scripts/test_gate.py\"",
             "timeout": 120
           },
           {
             "type": "command",
-            "command": "\"${PLUGIN_ROOT}/hooks/scripts/verification_volume_ceiling.sh\"",
+            "command": "\"${PLUGIN_ROOT}/hooks/scripts/verification_volume_ceiling.py\"",
             "timeout": 10
           }
         ]
@@ -89,7 +89,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${PLUGIN_ROOT}/hooks/scripts/crack_on_gate.sh\"",
+        "command": "\"${PLUGIN_ROOT}/hooks/scripts/crack_on_gate.py\"",
             "timeout": 10
           }
         ]
@@ -99,7 +99,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${PLUGIN_ROOT}/hooks/scripts/loop_dispatch_guard.sh\"",
+            "command": "\"${PLUGIN_ROOT}/hooks/scripts/loop_dispatch_guard.py\"",
             "timeout": 10
           }
         ]
@@ -109,12 +109,12 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${PLUGIN_ROOT}/hooks/scripts/no_edit_on_main.sh\"",
+        "command": "\"${PLUGIN_ROOT}/hooks/scripts/no_edit_on_main.py\"",
             "timeout": 10
           },
           {
             "type": "command",
-            "command": "\"${PLUGIN_ROOT}/hooks/scripts/comment_citation_gate.sh\"",
+        "command": "\"${PLUGIN_ROOT}/hooks/scripts/comment_citation_gate.py\"",
             "timeout": 10
           },
           {
@@ -131,7 +131,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${PLUGIN_ROOT}/hooks/scripts/quality_feedback.sh\"",
+            "command": "\"${PLUGIN_ROOT}/hooks/scripts/quality_feedback.py\"",
             "timeout": 15,
             "additionalContextLimit": 1000
           }

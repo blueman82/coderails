@@ -22,14 +22,19 @@ check() {
 }
 
 run_bash_hook() {
-    local hook="$1" cwd="$2" command="$3" workdir="${4:-}" agent_id="${5:-}" include_agent_id="${6:-0}"
-    jq -nc --arg cwd "$cwd" --arg command "$command" --arg workdir "$workdir" --arg agent_id "$agent_id" --argjson include_agent_id "$include_agent_id" 'if $include_agent_id then {agent_id: $agent_id} elif $agent_id == "" then {} else {agent_id: $agent_id} end + {
+    local hook="$1" cwd="$2" command="$3" workdir="${4:-}" agent_id="${5:-}" include_agent_id="${6:-0}" command_field="${7:-command}"
+    jq -nc --arg cwd "$cwd" --arg command "$command" --arg workdir "$workdir" --arg agent_id "$agent_id" --arg command_field "$command_field" --argjson include_agent_id "$include_agent_id" 'if $include_agent_id then {agent_id: $agent_id} elif $agent_id == "" then {} else {agent_id: $agent_id} end + {
     session_id: "s1",
     cwd: $cwd,
     hook_event_name: "PreToolUse",
     tool_name: "Bash",
-    tool_input: {command: $command, workdir: $workdir}
-  }' | "$hook"
+    tool_input: ({workdir: $workdir} + {($command_field): $command})
+  }' | {
+    case "$hook" in
+      *.py) python3 "$hook" ;;
+      *) "$hook" ;;
+    esac
+  }
 }
 
 check "hooks.json parses" jq -e . "$HOOKS/hooks.json"
@@ -43,8 +48,8 @@ check "all commands use PLUGIN_ROOT" jq -e '
 check "no legacy plugin-root variables" sh -c '! grep -R -E "CLAUDE_PLUGIN_ROOT|CODEX_PLUGIN_ROOT" "$1"' sh "$HOOKS"
 check "no lifecycle adapter" test ! -e "$HOOKS/lifecycle.py"
 check "native graph hooks are registered" jq -e '
-  ([.hooks.Stop[].hooks[].command] | index("\"${PLUGIN_ROOT}/hooks/scripts/graph_completion_guard.sh\"")) != null and
-  ([.hooks.PreToolUse[] | select(.matcher == "^spawn_agent$") | .hooks[].command] == ["\"${PLUGIN_ROOT}/hooks/scripts/loop_dispatch_guard.sh\""])
+  ([.hooks.Stop[].hooks[].command] | index("\"${PLUGIN_ROOT}/hooks/scripts/graph_completion_guard.py\"")) != null and
+  ([.hooks.PreToolUse[] | select(.matcher == "^spawn_agent$") | .hooks[].command] == ["\"${PLUGIN_ROOT}/hooks/scripts/loop_dispatch_guard.py\""])
 ' "$HOOKS/hooks.json"
 check "shared and cross-provider hooks stay absent" sh -c '! grep -R -E "parallel-review|parallel_review|enforce_pr_workflow|claude -p|codex exec" "$1"' sh "$HOOKS"
 
@@ -60,19 +65,19 @@ git -C "$bootstrap_repo" init -q
 mkdir -p "$bootstrap_repo/.codex"
 printf 'sandbox_workers: true\n' >"$bootstrap_repo/.codex/workflow.config.yaml"
 bootstrap_before=$(shasum "$bootstrap_repo/.codex/workflow.config.yaml")
-bootstrap=$(printf '%s' "{\"session_id\":\"s1\",\"cwd\":\"$bootstrap_repo\",\"hook_event_name\":\"SessionStart\",\"source\":\"startup\"}" | PLUGIN_ROOT="$PACKAGE" "$HOOKS/scripts/inject_bootstrap.sh")
+bootstrap=$(printf '%s' "{\"session_id\":\"s1\",\"cwd\":\"$bootstrap_repo\",\"hook_event_name\":\"SessionStart\",\"source\":\"startup\"}" | PLUGIN_ROOT="$PACKAGE" python3 "$HOOKS/scripts/inject_bootstrap.py")
 check "bootstrap returns native orchestration and graph guidance" sh -c 'printf "%s" "$1" | jq -e ".hookSpecificOutput.additionalContext | contains(\"using-coderails\") and contains(\"top-level session as the orchestrator\") and contains(\"delegate do-work tool calls with spawn_agent\") and contains(\"Native graph resume\")"' sh "$bootstrap"
 check "startup nudges for legacy config" sh -c 'printf "%s" "$1" | jq -r ".hookSpecificOutput.additionalContext" | grep -Fq '\''$coderails-codex:init'\''' sh "$bootstrap"
-resume=$(printf '%s' "{\"cwd\":\"$bootstrap_repo\",\"source\":\"resume\"}" | PLUGIN_ROOT="$PACKAGE" "$HOOKS/scripts/inject_bootstrap.sh")
+resume=$(printf '%s' "{\"cwd\":\"$bootstrap_repo\",\"source\":\"resume\"}" | PLUGIN_ROOT="$PACKAGE" python3 "$HOOKS/scripts/inject_bootstrap.py")
 check "resume does not nudge" sh -c '! printf "%s" "$1" | jq -r ".hookSpecificOutput.additionalContext" | grep -Fq '\''$coderails-codex:init'\''' sh "$resume"
-clear=$(printf '%s' "{\"cwd\":\"$bootstrap_repo\",\"source\":\"clear\"}" | PLUGIN_ROOT="$PACKAGE" "$HOOKS/scripts/inject_bootstrap.sh")
+clear=$(printf '%s' "{\"cwd\":\"$bootstrap_repo\",\"source\":\"clear\"}" | PLUGIN_ROOT="$PACKAGE" python3 "$HOOKS/scripts/inject_bootstrap.py")
 check "clear does not nudge" sh -c '! printf "%s" "$1" | jq -r ".hookSpecificOutput.additionalContext" | grep -Fq '\''$coderails-codex:init'\''' sh "$clear"
-compact=$(printf '%s' "{\"cwd\":\"$bootstrap_repo\",\"source\":\"compact\"}" | PLUGIN_ROOT="$PACKAGE" "$HOOKS/scripts/inject_bootstrap.sh")
+compact=$(printf '%s' "{\"cwd\":\"$bootstrap_repo\",\"source\":\"compact\"}" | PLUGIN_ROOT="$PACKAGE" python3 "$HOOKS/scripts/inject_bootstrap.py")
 check "compact does not nudge" sh -c '! printf "%s" "$1" | jq -r ".hookSpecificOutput.additionalContext" | grep -Fq '\''$coderails-codex:init'\''' sh "$compact"
 check "startup does not alter config" test "$bootstrap_before" = "$(shasum "$bootstrap_repo/.codex/workflow.config.yaml")"
 mkdir -p "$bootstrap_repo/.coderails"
 printf 'sandbox_workers: true\n' >"$bootstrap_repo/.coderails/workflow.config.yaml"
-configured=$(printf '%s' "{\"cwd\":\"$bootstrap_repo\",\"source\":\"startup\"}" | PLUGIN_ROOT="$PACKAGE" "$HOOKS/scripts/inject_bootstrap.sh")
+configured=$(printf '%s' "{\"cwd\":\"$bootstrap_repo\",\"source\":\"startup\"}" | PLUGIN_ROOT="$PACKAGE" python3 "$HOOKS/scripts/inject_bootstrap.py")
 check "canonical config suppresses nudge" sh -c '! printf "%s" "$1" | jq -r ".hookSpecificOutput.additionalContext" | grep -Fq '\''$coderails-codex:init'\''' sh "$configured"
 rm -rf "$bootstrap_repo"
 
@@ -89,7 +94,7 @@ check "native resolver reads canonical config" test "$canonical_result" = "proje
 rm -rf "$config_repo"
 
 missing_dispatch_dir=$(mktemp -d "${TMPDIR:-/tmp}/coderails-codex-hooks-missing.XXXXXX")
-missing_dispatch=$(printf '%s' '{"session_id":"missing","cwd":"/tmp","hook_event_name":"PreToolUse","tool_name":"spawn_agent","tool_input":{"agent_type":"loop-worker","message":"CODERAILS_GRAPH_TASK=loop_worker_41\nwork"}}' | CODERAILS_AGENTIC_LOOP_DIR="$missing_dispatch_dir" CODERAILS_DISCIPLINE_LOG="$missing_dispatch_dir/discipline.log" PLUGIN_ROOT="$PACKAGE" "$HOOKS/scripts/loop_dispatch_guard.sh")
+missing_dispatch=$(printf '%s' '{"session_id":"missing","cwd":"/tmp","hook_event_name":"PreToolUse","tool_name":"spawn_agent","tool_input":{"agent_type":"loop-worker","message":"CODERAILS_GRAPH_TASK=loop_worker_41\nwork"}}' | CODERAILS_AGENTIC_LOOP_DIR="$missing_dispatch_dir" CODERAILS_DISCIPLINE_LOG="$missing_dispatch_dir/discipline.log" PLUGIN_ROOT="$PACKAGE" "$HOOKS/scripts/loop_dispatch_guard.py")
 rm -rf "$missing_dispatch_dir"
 check "native worker dispatch without loop state is denied" sh -c 'printf "%s" "$1" | jq -e ".hookSpecificOutput.permissionDecision == \"deny\""' sh "$missing_dispatch"
 
@@ -116,28 +121,29 @@ git init -q "$feature_repo"
 git -C "$feature_repo" symbolic-ref HEAD refs/heads/feature/e5
 git init -q "$pwd_repo"
 git -C "$pwd_repo" symbolic-ref HEAD refs/heads/feature/pwd
-agent_output=$(PLUGIN_DATA="$ceiling_data" run_bash_hook "$HOOKS/scripts/verification_volume_ceiling.sh" "$main_repo" "packages/tests/codex_hooks.test.sh" "" "agent-1")
-workdir_output=$(PLUGIN_DATA="$ceiling_data" run_bash_hook "$HOOKS/scripts/verification_volume_ceiling.sh" "$main_repo" "packages/tests/codex_hooks.test.sh" "$feature_repo")
-empty_agent_output=$(PLUGIN_DATA="$ceiling_data" run_bash_hook "$HOOKS/scripts/verification_volume_ceiling.sh" "$main_repo" "packages/tests/codex_hooks.test.sh" "" "" 1)
-missing_agent_output=$(PLUGIN_DATA="$ceiling_data" run_bash_hook "$HOOKS/scripts/verification_volume_ceiling.sh" "$main_repo" "packages/tests/codex_hooks.test.sh")
-third_main_output=$(PLUGIN_DATA="$ceiling_data" run_bash_hook "$HOOKS/scripts/verification_volume_ceiling.sh" "$main_repo" "packages/tests/codex_hooks.test.sh")
-pwd_output=$(cd "$pwd_repo" && PLUGIN_DATA="$ceiling_data" run_bash_hook "$HOOKS/scripts/verification_volume_ceiling.sh" "" "packages/tests/codex_hooks.test.sh")
-if [[ -z "$agent_output$workdir_output$empty_agent_output$missing_agent_output$pwd_output" ]] &&
-    [[ "$(printf '%s' "$third_main_output" | jq -r '.decision // empty')" == "block" ]] &&
+commit_output=$(PLUGIN_DATA="$ceiling_data" run_bash_hook "$HOOKS/scripts/verification_volume_ceiling.py" "$main_repo" "git commit -m test")
+agent_output=$(PLUGIN_DATA="$ceiling_data" run_bash_hook "$HOOKS/scripts/verification_volume_ceiling.py" "$main_repo" "packages/tests/codex_hooks.test.sh" "" "agent-1")
+workdir_output=$(PLUGIN_DATA="$ceiling_data" run_bash_hook "$HOOKS/scripts/verification_volume_ceiling.py" "$main_repo" "packages/tests/codex_hooks.test.sh" "$feature_repo" "" 0 cmd)
+empty_agent_output=$(PLUGIN_DATA="$ceiling_data" run_bash_hook "$HOOKS/scripts/verification_volume_ceiling.py" "$main_repo" "packages/tests/codex_hooks.test.sh" "" "" 1)
+missing_agent_output=$(PLUGIN_DATA="$ceiling_data" run_bash_hook "$HOOKS/scripts/verification_volume_ceiling.py" "$main_repo" "packages/tests/codex_hooks.test.sh")
+third_main_output=$(PLUGIN_DATA="$ceiling_data" run_bash_hook "$HOOKS/scripts/verification_volume_ceiling.py" "$main_repo" "packages/tests/codex_hooks.test.sh")
+pwd_output=$(cd "$pwd_repo" && PLUGIN_DATA="$ceiling_data" run_bash_hook "$HOOKS/scripts/verification_volume_ceiling.py" "" "packages/tests/codex_hooks.test.sh")
+if [[ -z "$commit_output$agent_output$workdir_output$empty_agent_output$missing_agent_output$pwd_output" ]] &&
+    [[ "$(printf '%s' "$third_main_output" | jq -r '.hookSpecificOutput.permissionDecision // empty')" == "deny" ]] &&
     grep -qx 1 "$ceiling_data/verification-ceiling/feature-e5__full-suite.count" &&
     grep -qx 3 "$ceiling_data/verification-ceiling/main__full-suite.count" &&
     grep -qx 1 "$ceiling_data/verification-ceiling/feature-pwd__full-suite.count" &&
     ! test -e "$ceiling_data/verification-ceiling/main__full-suite.count.lock"; then
-    printf 'ok   - verification ceiling exempts only non-empty agent_id and uses workdir, cwd, then PWD\n'
+    printf 'ok   - verification ceiling accepts cmd and command, and uses workdir, cwd, then PWD\n'
 else
-    printf 'FAIL - verification ceiling exempts only non-empty agent_id and uses workdir, cwd, then PWD\n'
+    printf 'FAIL - verification ceiling accepts cmd and command, and uses workdir, cwd, then PWD\n'
     fails=$((fails + 1))
 fi
 
 mkdir -p "$test_repo/.codex"
 repo_marker="$security_tmp/repo-command-ran"
 printf 'printf compromised > "%s"\n' "$repo_marker" >"$test_repo/.codex/test_command"
-repo_config_output=$(run_bash_hook "$HOOKS/scripts/test_gate.sh" "$test_repo" "git commit -m test")
+repo_config_output=$(run_bash_hook "$HOOKS/scripts/test_gate.py" "$test_repo" "git commit -m test")
 check "repository test command is ignored" test ! -e "$repo_marker"
 check "missing trusted test command allows commit" test -z "$repo_config_output"
 
@@ -146,14 +152,16 @@ case "$trusted_config" in /*) ;; *) trusted_config="$test_repo/$trusted_config" 
 mkdir -p "$(dirname "$trusted_config")"
 trusted_marker="$security_tmp/trusted-command-ran"
 printf 'printf trusted > "%s" && test -s "%s"\n' "$trusted_marker" "$trusted_marker" >"$trusted_config"
-trusted_output=$(run_bash_hook "$HOOKS/scripts/test_gate.sh" "$test_repo" "git commit -m test")
+trusted_output=$(run_bash_hook "$HOOKS/scripts/test_gate.py" "$test_repo" "git commit -m test")
 check "trusted per-worktree test command supports shell syntax" test -e "$trusted_marker"
 check "trusted passing test command allows commit" test -z "$trusted_output"
 check "trusted command does not fall back to repository file" test ! -e "$repo_marker"
-check "test gate does not use eval" sh -c '! grep -Eq "(^|[[:space:]])eval([[:space:]]|$)" "$1"' sh "$HOOKS/scripts/test_gate.sh"
+check "test gate uses bash command runner" grep -Fq '"/bin/bash", "-c", test_command' "$HOOKS/scripts/test_gate.py"
 printf 'false\n' >"$trusted_config"
-failing_output=$(run_bash_hook "$HOOKS/scripts/test_gate.sh" "$test_repo" "git commit -m test")
+failing_output=$(run_bash_hook "$HOOKS/scripts/test_gate.py" "$test_repo" "git commit -m test")
 check "trusted failing test command denies commit" sh -c 'printf "%s" "$1" | jq -e ".hookSpecificOutput.permissionDecision == \"deny\""' sh "$failing_output"
+non_commit_output=$(run_bash_hook "$HOOKS/scripts/test_gate.py" "$test_repo" "git status")
+check "non-commit command allows" test -z "$non_commit_output"
 
 protected_writes_denied=1
 for protected_command in \
@@ -196,18 +204,19 @@ jq -n '{
   schema_version:2,session_id:"s-complete",loop_id:"loop-1",revision:1,status:"in-progress",
   graph:{nodes:{A:{status:"pending",outcome:"pending",retry:{attempts:0,max:2},evidence:[]}},edges:[],joins:{},active_wave:null,hard_stop:null}
 }' >"$graph_dir/progress.json"
-incomplete_stop=$(printf '%s' '{"session_id":"s-complete","cwd":"/tmp","hook_event_name":"Stop","last_assistant_message":"done"}' | CODERAILS_AGENTIC_LOOP_DIR="$graph_root" PLUGIN_ROOT="$PACKAGE" "$HOOKS/scripts/graph_completion_guard.sh")
+incomplete_stop=$(printf '%s' '{"session_id":"s-complete","cwd":"/tmp","hook_event_name":"Stop","last_assistant_message":"done"}' | CODERAILS_AGENTIC_LOOP_DIR="$graph_root" PLUGIN_ROOT="$PACKAGE" "$HOOKS/scripts/graph_completion_guard.py")
 check "incomplete native graph blocks Stop" sh -c 'printf "%s" "$1" | jq -e ".decision == \"block\""' sh "$incomplete_stop"
-recursive_stop=$(printf '%s' '{"session_id":"s-complete","cwd":"/tmp","hook_event_name":"Stop","stop_hook_active":true,"last_assistant_message":"done"}' | CODERAILS_AGENTIC_LOOP_DIR="$graph_root" PLUGIN_ROOT="$PACKAGE" "$HOOKS/scripts/graph_completion_guard.sh")
+recursive_stop=$(printf '%s' '{"session_id":"s-complete","cwd":"/tmp","hook_event_name":"Stop","stop_hook_active":true,"last_assistant_message":"done"}' | CODERAILS_AGENTIC_LOOP_DIR="$graph_root" PLUGIN_ROOT="$PACKAGE" "$HOOKS/scripts/graph_completion_guard.py")
 check "recursive native graph Stop does not block again" test -z "$recursive_stop"
 export HOME="$security_tmp/home"
 codex_fixture::init s-complete
+git_head=$(git -C "$ROOT" rev-parse HEAD)
+jq -n --arg sha "$git_head" '{schema_version:1,scope:"loop",task_ref:"loop-1",verification_level:1,verification_justification:"hook fixture",frozen_at:"2026-08-20T00:00:00Z",frozen_sha:$sha,head_sha:$sha,session_id:"s-complete",loop_id:"loop-1",revision:1,evals:[{id:"P0",priority:"P0",mode:"agent-run"}],amendments:[],result:null,graded_at:null}' >"$graph_dir/evals.json"
 python3 "$PACKAGE/skills/agentic-loop/scripts/graph.py" begin-wave "$graph_dir/progress.json" >/dev/null
 codex_fixture::append_wave "$graph_dir/progress.json"
 python3 "$PACKAGE/skills/agentic-loop/scripts/graph.py" record-wave "$graph_dir/progress.json" \
     '{"wave_id":"wave-2","results":{"A":{"outcome":"done","evidence":"hook fixture"}}}' >/dev/null
 graph_revision=$(jq -r '.revision' "$graph_dir/progress.json")
-git_head=$(git -C "$ROOT" rev-parse HEAD)
 jq -n --arg sha "$git_head" --argjson revision "$graph_revision" '{schema_version:1,scope:"loop",task_ref:"loop-1",verification_level:0,verification_justification:"hook fixture",frozen_at:"2026-08-20T00:00:00Z",frozen_sha:$sha,head_sha:$sha,session_id:"s-complete",loop_id:"loop-1",revision:$revision,evals:[],amendments:[],result:null,graded_at:null}' >"$graph_dir/evals.json"
 "$ROOT/scripts/post_evals.sh" grade-loop "$graph_dir/evals.json" >/dev/null
 jq -n '{session_id:"s-complete",loop_id:"loop-1",proofs:[{id:"P1",cmd:"true",status:"pass",evidence:"observed"}]}' >"$graph_dir/proof.json"
@@ -217,7 +226,7 @@ jq -cn '{type:"turn_context",payload:{session_id:"s-complete",loop_id:"loop-1"}}
 jq -cn '{type:"response_item",payload:{type:"custom_tool_call",name:"exec",call_id:"proof-call",input:"const r = await tools.exec_command({cmd:\"true\"}); text(JSON.stringify({loop_id:\"loop-1\",exit_code:r.exit_code,output:r.output}));"}}' >>"$proof_transcript"
 jq -cn '{type:"response_item",payload:{type:"custom_tool_call_output",call_id:"proof-call",output:[{type:"input_text",text:"{\"loop_id\":\"loop-1\",\"exit_code\":0,\"output\":\"\"}"}]}}' >>"$proof_transcript"
 python3 "$PACKAGE/skills/agentic-loop/scripts/graph.py" complete "$graph_dir/progress.json" --session s-complete --evals "$graph_dir/evals.json" --proof "$graph_dir/proof.json" --retro "$graph_dir/retro.json" --transcript "$proof_transcript" >/dev/null
-complete_stop=$(jq -cn --arg transcript "$proof_transcript" '{session_id:"s-complete",cwd:"/tmp",hook_event_name:"Stop",last_assistant_message:"done",transcript_path:$transcript}' | CODERAILS_AGENTIC_LOOP_DIR="$graph_root" PLUGIN_ROOT="$PACKAGE" "$HOOKS/scripts/graph_completion_guard.sh")
+complete_stop=$(jq -cn --arg transcript "$proof_transcript" '{session_id:"s-complete",cwd:"/tmp",hook_event_name:"Stop",last_assistant_message:"done",transcript_path:$transcript}' | CODERAILS_AGENTIC_LOOP_DIR="$graph_root" PLUGIN_ROOT="$PACKAGE" "$HOOKS/scripts/graph_completion_guard.py")
 check "completed native graph allows Stop" test -z "$complete_stop"
 replay_transcript="$graph_dir/replay.jsonl"
 jq -cn '{type:"turn_context",payload:{session_id:"s-complete",loop_id:"loop-old"}}' >"$replay_transcript"
@@ -229,11 +238,11 @@ check "completed native graph rejects earlier-loop proof replay" \
     "$graph_dir/proof.json" "$graph_dir/retro.json" "$replay_transcript"
 jq -cn '{type:"response_item",payload:{type:"custom_tool_call",name:"exec",call_id:"proof-outer-only",input:"const r = await tools.exec_command({cmd:\"true\"}); text(r.output);"}}' >>"$proof_transcript"
 jq -cn '{type:"response_item",payload:{type:"custom_tool_call_output",call_id:"proof-outer-only",output:[{type:"input_text",text:"Script completed\nWall time 0.1 seconds\nProcess exited with code 1\nFinal output:"}]}}' >>"$proof_transcript"
-outer_only_stop=$(jq -cn --arg transcript "$proof_transcript" '{session_id:"s-complete",cwd:"/tmp",hook_event_name:"Stop",last_assistant_message:"done",transcript_path:$transcript}' | CODERAILS_AGENTIC_LOOP_DIR="$graph_root" PLUGIN_ROOT="$PACKAGE" "$HOOKS/scripts/graph_completion_guard.sh")
+outer_only_stop=$(jq -cn --arg transcript "$proof_transcript" '{session_id:"s-complete",cwd:"/tmp",hook_event_name:"Stop",last_assistant_message:"done",transcript_path:$transcript}' | CODERAILS_AGENTIC_LOOP_DIR="$graph_root" PLUGIN_ROOT="$PACKAGE" "$HOOKS/scripts/graph_completion_guard.py")
 check "completed native graph rejects outer-only Script completed proof" sh -c 'printf "%s" "$1" | jq -e ".decision == \"block\""' sh "$outer_only_stop"
 jq -cn '{type:"response_item",payload:{type:"custom_tool_call",name:"exec",call_id:"proof-failed",input:"const r = await tools.exec_command({cmd:\"true\"}); text(JSON.stringify({exit_code:r.exit_code,output:r.output}));"}}' >>"$proof_transcript"
 jq -cn '{type:"response_item",payload:{type:"custom_tool_call_output",call_id:"proof-failed",output:[{type:"input_text",text:"{\"exit_code\":1,\"output\":\"\"}"}]}}' >>"$proof_transcript"
-failed_proof_stop=$(jq -cn --arg transcript "$proof_transcript" '{session_id:"s-complete",cwd:"/tmp",hook_event_name:"Stop",last_assistant_message:"done",transcript_path:$transcript}' | CODERAILS_AGENTIC_LOOP_DIR="$graph_root" PLUGIN_ROOT="$PACKAGE" "$HOOKS/scripts/graph_completion_guard.sh")
+failed_proof_stop=$(jq -cn --arg transcript "$proof_transcript" '{session_id:"s-complete",cwd:"/tmp",hook_event_name:"Stop",last_assistant_message:"done",transcript_path:$transcript}' | CODERAILS_AGENTIC_LOOP_DIR="$graph_root" PLUGIN_ROOT="$PACKAGE" "$HOOKS/scripts/graph_completion_guard.py")
 check "completed native graph rejects a last-failed proof command" sh -c 'printf "%s" "$1" | jq -e ".decision == \"block\""' sh "$failed_proof_stop"
 
 check "verification ceiling keeps empty or missing agent_id subject to its cap" test -z "$agent_output$empty_agent_output$missing_agent_output"

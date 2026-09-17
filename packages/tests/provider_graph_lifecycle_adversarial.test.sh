@@ -64,6 +64,7 @@ graph_call() {
 		inspect) graph_dispatch_inspect "$@" ;;
 		esac
 	else
+		[[ "$operation" != "begin-wave" ]] || write_evals "$(dirname "$1")/evals.json" "$(jq -r '.revision' "$1")"
 		python3 "$CODEX_GRAPH" "$operation" "$@"
 	fi
 }
@@ -195,13 +196,13 @@ codex_dispatch_input() {
 	local task="$1"
 	jq -cn --arg cwd "$ROOT" --arg task "$task" '{
       tool_name:"spawn_agent",session_id:"session-test",cwd:$cwd,
-      tool_input:{task_name:$task,message:"graph work"}
+      tool_input:{agent_type:"loop-worker",message:("CODERAILS_GRAPH_TASK=" + $task + "\ngraph work")}
     }'
 }
 codex_hook_denied() {
 	local root="$1" input="$2" output
 	output=$(printf '%s' "$input" | CODERAILS_AGENTIC_LOOP_DIR="$root" PLUGIN_ROOT="$ROOT/packages/codex" \
-		CODERAILS_DISCIPLINE_LOG="$TMP/codex.log" "$ROOT/packages/codex/hooks/scripts/loop_dispatch_guard.sh")
+		CODERAILS_DISCIPLINE_LOG="$TMP/codex.log" "$ROOT/packages/codex/hooks/scripts/loop_dispatch_guard.py")
 	printf '%s' "$output" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null 2>&1
 }
 test_codex_dispatch_names() {
@@ -289,7 +290,7 @@ test_codex_proof_observation() {
 	local output
 	output=$(printf '%s' "$(jq -cn --arg cwd "$ROOT" '{session_id:"session-test",cwd:$cwd,hook_event_name:"Stop",last_assistant_message:"complete"}')" |
 		CODERAILS_AGENTIC_LOOP_DIR="$root" PLUGIN_ROOT="$ROOT/packages/codex" \
-			"$ROOT/packages/codex/hooks/scripts/graph_completion_guard.sh")
+			"$ROOT/packages/codex/hooks/scripts/graph_completion_guard.py")
 	if printf '%s' "$output" | jq -e '.decision == "block"' >/dev/null 2>&1; then
 		pass "Stop rejects proof with no current-session observed result"
 	else

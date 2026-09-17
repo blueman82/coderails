@@ -19,9 +19,16 @@ if [[ "${1:-}" == "--assert-no-shell" ]]; then
   exit
 fi
 
-[[ "$(tail -n +2 "$CONTRACTS" | cut -f1 | sort | wc -l | tr -d ' ')" -eq 36 ]]
-[[ "$(find "$PACKAGE" -type f -name '*.sh' | wc -l | tr -d ' ')" -eq 36 ]]
-diff -u <(tail -n +2 "$CONTRACTS" | cut -f1 | sort) <(find "$PACKAGE" -type f -name '*.sh' | sed "s#^$PACKAGE/##" | sort)
+contract_shells=$(awk -F '\t' 'NR > 1 && $1 ~ /\.sh$/ { print $1 }' "$CONTRACTS" | sort)
+actual_shells=$(find "$PACKAGE" -type f -name '*.sh' | sed "s#^$PACKAGE/##" | sort)
+diff -u <(printf '%s\n' "$contract_shells") <(printf '%s\n' "$actual_shells")
+
+while IFS= read -r python_path; do
+  [[ -z "$python_path" || -f "$PACKAGE/$python_path" ]] || {
+    printf 'missing migrated Python contract path: %s\n' "$python_path" >&2
+    exit 1
+  }
+done < <(awk -F '\t' 'NR > 1 && $1 ~ /\.py$/ { print $1 }' "$CONTRACTS")
 awk -F '\t' 'NR > 1 && (NF != 8 || $3 == "" || $4 == "" || $5 == "" || $6 == "" || $7 == "" || $8 == "") { exit 1 }' "$CONTRACTS"
 
 if "$0" --assert-no-shell >/dev/null 2>&1; then

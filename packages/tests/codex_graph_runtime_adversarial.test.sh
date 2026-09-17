@@ -46,7 +46,7 @@ write_graph() {
 	jq -n --argjson nodes "$nodes" --argjson edges "$edges" --argjson joins "$joins" '{
       schema_version:2,session_id:"session-test",loop_id:"loop-test",revision:1,status:"in-progress",
       graph:{nodes:$nodes,edges:$edges,joins:$joins,active_wave:null,hard_stop:null}
-    }' >"$path"
+    }' >"$path"; write_evals "$(dirname "$path")/evals.json" 1
 }
 
 write_evals() {
@@ -218,14 +218,14 @@ install_state() {
 
 hook_output() {
 	local hook="$1" root="$2" input="$3"
-	printf '%s' "$input" | HOME="$TMP/home" PLUGIN_DATA="$TMP/plugin-data" \
-		CODERAILS_AGENTIC_LOOP_DIR="$root" CODERAILS_DISCIPLINE_LOG="$TMP/discipline.log" \
-		PLUGIN_ROOT="$PACKAGE" "$hook"
+	printf '%s' "$input" | (
+		export HOME="$TMP/home" PLUGIN_DATA="$TMP/plugin-data" CODERAILS_AGENTIC_LOOP_DIR="$root" CODERAILS_DISCIPLINE_LOG="$TMP/discipline.log" PLUGIN_ROOT="$PACKAGE"
+		case "$hook" in *.py) python3 "$hook" ;; *) "$hook" ;; esac
+	)
 }
-
 hook_denied() {
 	local root="$1" input="$2" output
-	output=$(hook_output "$HOOKS/loop_dispatch_guard.sh" "$root" "$input")
+	output=$(hook_output "$HOOKS/loop_dispatch_guard.py" "$root" "$input")
 	printf '%s' "$output" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null 2>&1
 }
 
@@ -242,7 +242,7 @@ dispatch_input() {
 
 stop_blocked() {
 	local root="$1" message="$2" output
-	output=$(hook_output "$HOOKS/graph_completion_guard.sh" "$root" \
+	output=$(hook_output "$HOOKS/graph_completion_guard.py" "$root" \
 		"$(jq -cn --arg cwd "$ROOT" --arg message "$message" '{
           hook_event_name:"Stop",session_id:"session-test",cwd:$cwd,last_assistant_message:$message
         }')")
@@ -317,7 +317,7 @@ test_bootstrap_exact_path() {
 	write_graph "$state" "$(jq -cn --argjson a "$(node)" '{A:$a}')"
 	install_state "$state" "$root"
 	installed="$root/fixture/session-test/progress.json"
-	output=$(hook_output "$HOOKS/inject_bootstrap.sh" "$root" \
+	output=$(hook_output "$HOOKS/inject_bootstrap.py" "$root" \
 		"$(jq -cn --arg cwd "$ROOT" '{hook_event_name:"SessionStart",session_id:"session-test",cwd:$cwd}')")
 	context=$(printf '%s' "$output" | jq -r '.hookSpecificOutput.additionalContext // empty')
 	if [[ "$context" != *"$installed"* ]]; then
@@ -352,8 +352,7 @@ mutation_control() {
 	local mutation="$TMP/mutated-production" original="$TMP/control-original.json"
 	local mutated="$TMP/control-mutated.json" envelope wave
 	mkdir -p "$mutation"
-	cp "$PACKAGE/skills/agentic-loop/scripts/graph_evidence.py" "$mutation/graph_evidence.py"
-	cp "$PACKAGE/skills/agentic-loop/scripts/graph_identity.py" "$mutation/graph_identity.py"
+	cp "$PACKAGE/skills/agentic-loop/scripts/graph_evidence.py" "$PACKAGE/skills/agentic-loop/scripts/graph_identity.py" "$PACKAGE/skills/agentic-loop/scripts/json_types.py" "$mutation"
 	sed 's/if set(results) != set(active_wave\["nodes"\]):/if False:/' "$GRAPH" >"$mutation/graph.py"
 	chmod +x "$mutation/graph.py"
 	if ! grep -q 'if False:' "$mutation/graph.py"; then

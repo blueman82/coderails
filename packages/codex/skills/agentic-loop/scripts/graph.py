@@ -17,6 +17,7 @@ from typing import Any, cast
 
 from graph_evidence import (
     bind_worker_evidence,
+    has_current_wave_dispatch,
     transcript_cursor,
     validate_completion_evidence,
     validate_evals,
@@ -45,6 +46,26 @@ def _nonempty(value: object, label: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise GraphError(f"{label} must be a non-empty string")
     return value
+
+
+def _validate_cancelled_waves(graph: dict[str, Any]) -> None:
+    cancelled_waves = _array(graph.get("cancelled_waves", []), "graph.cancelled_waves")
+    cancelled_ids: set[str] = set()
+    for index, raw_cancelled in enumerate(cancelled_waves):
+        cancelled = _object(raw_cancelled, f"graph.cancelled_waves[{index}]")
+        if set(cancelled) != {"id", "revision"}:
+            raise GraphError("cancelled wave must contain exactly id and revision")
+        wave_id = _nonempty(cancelled.get("id"), f"graph.cancelled_waves[{index}].id")
+        wave_revision = cancelled.get("revision")
+        if (
+            isinstance(wave_revision, bool)
+            or not isinstance(wave_revision, int)
+            or wave_revision < 1
+            or wave_id != f"wave-{wave_revision}"
+            or wave_id in cancelled_ids
+        ):
+            raise GraphError("cancelled wave is invalid or duplicated")
+        cancelled_ids.add(wave_id)
 
 
 def _validate_state(state: object) -> dict[str, Any]:
@@ -126,6 +147,7 @@ def _validate_state(state: object) -> dict[str, Any]:
         raise GraphError("graph contains a dependency cycle")
     if "active_wave" not in graph or "hard_stop" not in graph:
         raise GraphError("graph must declare active_wave and hard_stop")
+    _validate_cancelled_waves(graph)
     active_wave = graph["active_wave"]
     running = {node_id for node_id, node in nodes.items() if node["status"] == "running"}
     active = active_nodes(active_wave, nodes, revision)
@@ -217,6 +239,7 @@ def _begin_wave(path: Path) -> dict[str, Any]:
             raise GraphError("an active wave already exists")
         if graph["hard_stop"] is not None:
             raise GraphError("the graph is hard-stopped")
+        validate_evals(state, None, path.with_name("evals.json"))
         _release_joins(state)
         nodes = _ready(state)
         if not nodes:
@@ -253,6 +276,87 @@ def _results(raw: object, active_wave: dict[str, Any]) -> dict[str, Any]:
             raise GraphError(f"result {node_id} has invalid outcome")
         _nonempty(result.get("evidence"), f"result {node_id}.evidence")
     return results
+
+
+def _cancel_unspawned_wave(path: Path, session: str) -> dict[str, Any]:
+    with _locked(path):
+        state = _load(path)
+        if state["session_id"] != session:
+            raise GraphError("session does not own this loop")
+        active_wave = state["graph"]["active_wave"]
+        if active_wave is None:
+            raise GraphError("no active wave exists")
+        if has_current_wave_dispatch(state, active_wave):
+            raise GraphError("an active wave with a worker spawn cannot be cancelled")
+        for node_id in active_wave["nodes"]:
+            node = state["graph"]["nodes"][node_id]
+            node["status"] = "pending"
+            node["outcome"] = "pending"
+        state["graph"].setdefault("cancelled_waves", []).append(
+            {"id": active_wave["id"], "revision": active_wave["revision"]}
+        )
+        state["graph"]["active_wave"] = None
+        state["revision"] += 1
+        _write(path, state)
+        return {"cancelled_wave": active_wave["id"], "revision": state["revision"]}
+
+
+def _acknowledge_cancelled_wave(path: Path, session: str, wave_id: str) -> dict[str, Any]:
+    with _locked(path):
+        state = _load(path)
+        if state["session_id"] != session:
+            raise GraphError("session does not own this loop")
+        active_wave = state["graph"]["active_wave"]
+        expected_revision = state["revision"] - 2
+        expected_wave = f"wave-{expected_revision}"
+        if (
+            active_wave is None
+            or active_wave["revision"] != state["revision"]
+            or state["graph"].get("cancelled_waves")
+            or wave_id != expected_wave
+        ):
+            raise GraphError("only the immediately preceding unledgered wave can be acknowledged")
+        state["graph"]["cancelled_waves"] = [{"id": wave_id, "revision": expected_revision}]
+        _write(path, state)
+        return {"acknowledged_wave": wave_id, "revision": state["revision"]}
+
+
+def _add_remediation_node(path: Path, session: str, source_id: str, node_id: str) -> dict[str, Any]:
+    with _locked(path):
+        state = _load(path)
+        graph = state["graph"]
+        source = graph["nodes"].get(source_id)
+        source = cast(dict[str, Any], source) if isinstance(source, dict) else None
+        hard_stop = cast(dict[str, Any], graph["hard_stop"]) if isinstance(graph["hard_stop"], dict) else None
+        if (
+            state["session_id"] != session
+            or graph["active_wave"] is not None
+            or hard_stop is None
+            or hard_stop.get("node") != source_id
+            or hard_stop.get("reason") != "retry exhaustion"
+            or source is None
+            or source.get("status") != "hard-stop"
+            or source["retry"]["attempts"] != source["retry"]["max"]
+            or node_id in graph["nodes"]
+            or not node_id.strip()
+        ):
+            raise GraphError("only an exhausted hard-stop node can receive one remediation successor")
+        graph["nodes"][node_id] = {
+            "status": "pending",
+            "outcome": "pending",
+            "retry": {"attempts": 0, "max": source["retry"]["max"]},
+            "evidence": [],
+        }
+        for edge in graph["edges"]:
+            if edge["to"] == source_id:
+                edge["to"] = node_id
+            if edge["from"] == source_id:
+                edge["from"] = node_id
+        source["status"] = "failed"
+        source["outcome"] = "failed"
+        graph["hard_stop"] = None
+        _write(path, state)
+        return {"remediation_node": node_id, "source_node": source_id, "revision": state["revision"]}
 
 
 def _record_wave(path: Path, raw_results: str) -> dict[str, Any]:
@@ -402,6 +506,18 @@ def _parser() -> argparse.ArgumentParser:
     for name in ("begin-wave", "inspect"):
         command = commands.add_parser(name)
         command.add_argument("state", type=Path)
+    cancel = commands.add_parser("cancel-unspawned-wave")
+    cancel.add_argument("state", type=Path)
+    cancel.add_argument("--session", required=True)
+    acknowledge = commands.add_parser("acknowledge-cancelled-wave")
+    acknowledge.add_argument("state", type=Path)
+    acknowledge.add_argument("--session", required=True)
+    acknowledge.add_argument("--wave", required=True)
+    remediate = commands.add_parser("add-remediation-node")
+    remediate.add_argument("state", type=Path)
+    remediate.add_argument("--session", required=True)
+    remediate.add_argument("--source", required=True)
+    remediate.add_argument("--node", required=True)
     record = commands.add_parser("record-wave")
     record.add_argument("state", type=Path)
     record.add_argument("results_json")
@@ -432,6 +548,12 @@ def main() -> int:
             output = _inspect(args.state)
         elif args.command == "authorize-dispatch":
             output = _authorize_dispatch(args.state, args.session, args.task, args.evals)
+        elif args.command == "cancel-unspawned-wave":
+            output = _cancel_unspawned_wave(args.state, args.session)
+        elif args.command == "acknowledge-cancelled-wave":
+            output = _acknowledge_cancelled_wave(args.state, args.session, args.wave)
+        elif args.command == "add-remediation-node":
+            output = _add_remediation_node(args.state, args.session, args.source, args.node)
         elif args.command == "complete":
             output = _complete(args.state, args.session, args.evals, args.proof, args.retro, args.transcript)
         else:

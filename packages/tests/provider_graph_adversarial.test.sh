@@ -59,6 +59,7 @@ graph_call() {
 		record-wave) graph_dispatch_record "$@" ;;
 		esac
 	else
+		[[ "$operation" != "begin-wave" ]] || write_evals "$(dirname "$1")/evals.json" "$(jq -r '.revision' "$1")"
 		[[ "$operation" != "record-wave" ]] || codex_fixture::append_wave "$1"
 		python3 "$ROOT/packages/codex/skills/agentic-loop/scripts/graph.py" "$operation" "$@"
 	fi
@@ -155,8 +156,10 @@ install_hook_state() {
 }
 hook_output() {
 	local hook="$1" root="$2" input="$3"
-	printf '%s' "$input" | CODERAILS_AGENTIC_LOOP_DIR="$root" PLUGIN_ROOT="$ROOT/packages/codex" \
-		CODERAILS_DISCIPLINE_LOG="$TMP/discipline.log" "$hook"
+	printf '%s' "$input" | (
+		export CODERAILS_AGENTIC_LOOP_DIR="$root" PLUGIN_ROOT="$ROOT/packages/codex" CODERAILS_DISCIPLINE_LOG="$TMP/discipline.log"
+		case "$hook" in *.py) python3 "$hook" ;; *) "$hook" ;; esac
+	)
 }
 hook_denied() {
 	local hook="$1" root="$2" input="$3" output
@@ -176,7 +179,7 @@ expect_hook_allowed() {
 dispatch_input() {
 	local tool="$1" task="$2" agent_type="${3:-loop-worker}" marker="${4:-yes}"
 	local message="Implement the owned native graph node."
-	[[ "$marker" != "yes" ]] || message="CODERAILS_GRAPH_TASK=$task\n$message"
+	[[ "$marker" != "yes" ]] || message=$'CODERAILS_GRAPH_TASK='"$task"$'\n'"$message"
 	jq -cn --arg tool "$tool" --arg task "$task" --arg agent_type "$agent_type" --arg message "$message" --arg cwd "$ROOT" '{
       tool_name:$tool,session_id:"session-test",cwd:$cwd,
       tool_input:{task_name:"forged_legacy_task",agent_type:$agent_type,message:$message}
@@ -196,7 +199,7 @@ dispatch_fixture() {
 	fi
 }
 test_codex_dispatch_guard() {
-	local guard="$ROOT/packages/codex/hooks/scripts/loop_dispatch_guard.sh" root input
+	local guard="$ROOT/packages/codex/hooks/scripts/loop_dispatch_guard.py" root input
 	root="$TMP/dispatch.valid"
 	dispatch_fixture "$root"
 	input=$(dispatch_input spawn_agent loop_worker_41)
@@ -228,7 +231,7 @@ test_codex_dispatch_guard() {
 
 stop_blocked() {
 	local root="$1" message="$2" output
-	output=$(hook_output "$ROOT/packages/codex/hooks/scripts/graph_completion_guard.sh" "$root" \
+	output=$(hook_output "$ROOT/packages/codex/hooks/scripts/graph_completion_guard.py" "$root" \
 		"$(jq -cn --arg cwd "$ROOT" --arg msg "$message" '{session_id:"session-test",cwd:$cwd,hook_event_name:"Stop",last_assistant_message:$msg}')")
 	printf '%s' "$output" | jq -e '.decision == "block"' >/dev/null 2>&1
 }
@@ -243,7 +246,7 @@ test_codex_lifecycle_hooks() {
 	install_hook_state "$state" "$root"
 	expect_hook_allowed "hard-stop report-and-wait may stop without fake completion" stop_blocked "$root" \
 		$'Hard-stop recorded; report and wait.\nLOOP-STOP: waiting-on-human'
-	output=$(hook_output "$ROOT/packages/codex/hooks/scripts/inject_bootstrap.sh" "$root" \
+	output=$(hook_output "$ROOT/packages/codex/hooks/scripts/inject_bootstrap.py" "$root" \
 		"$(jq -cn --arg cwd "$ROOT" '{session_id:"session-test",cwd:$cwd,hook_event_name:"SessionStart"}')")
 	if printf '%s' "$output" | jq -e '.hookSpecificOutput.additionalContext | contains("loop-test") and contains("hard_stop")' >/dev/null; then
 		pass "SessionStart exposes provider-local hard-stop resume state"
