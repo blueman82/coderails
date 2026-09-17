@@ -4,13 +4,17 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import select
+import subprocess
 import sys
 import time
 from contextlib import suppress
 from datetime import datetime
 from pathlib import Path
 from typing import cast
+
+PATCH_PATH = re.compile(r"^\*\*\* (?:Add|Update|Delete) File: (.*)$|^\*\*\* Move to: (.*)$")
 
 
 def read_input(timeout_seconds: float = 5.0) -> str:
@@ -98,3 +102,35 @@ def stamp(path: Path) -> bool:
     except OSError:
         return False
     return True
+
+
+def patch_paths(payload: dict[str, object]) -> list[str]:
+    """Return target paths declared by an apply-patch payload."""
+    tool_input = payload.get("tool_input")
+    if not isinstance(tool_input, dict):
+        return []
+    command = cast(dict[str, object], tool_input).get("command")
+    if not isinstance(command, str):
+        return []
+    return [
+        next(value for value in match.groups() if value is not None)
+        for line in command.splitlines()
+        if (match := PATCH_PATH.match(line))
+    ]
+
+
+def repo_for_path(path: Path) -> Path | None:
+    """Return the owning Git worktree root for a file path when available."""
+    probe = path
+    while not probe.is_dir() and probe != probe.parent:
+        probe = probe.parent
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(probe), "rev-parse", "--show-toplevel"],
+            capture_output=True,
+            check=False,
+            text=True,
+        )
+    except OSError:
+        return None
+    return Path(result.stdout.strip()) if result.returncode == 0 and result.stdout.strip() else None
