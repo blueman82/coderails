@@ -46,7 +46,7 @@ write_graph() {
 	jq -n --argjson nodes "$nodes" --argjson edges "$edges" --argjson joins "$joins" '{
       schema_version:2,session_id:"session-test",loop_id:"loop-test",revision:1,status:"in-progress",
       graph:{nodes:$nodes,edges:$edges,joins:$joins,active_wave:null,hard_stop:null}
-    }' >"$path"
+    }' >"$path"; write_evals "$(dirname "$path")/evals.json" 1
 }
 
 write_evals() {

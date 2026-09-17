@@ -5,9 +5,14 @@ ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 GRAPH="$ROOT/packages/codex/skills/agentic-loop/scripts/graph.py"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
+export HOME="$TMP/home"
+# shellcheck source=packages/tests/lib/codex_transcript_fixture.sh
+source "$ROOT/packages/tests/lib/codex_transcript_fixture.sh"
+codex_fixture::init session-test
 state="$TMP/progress.json"
 evals="$TMP/evals.json"
 
+mkdir "$TMP/no-evals"
 jq -n '{
   schema_version:2,session_id:"session-test",loop_id:"loop-test",revision:2,status:"in-progress",
   graph:{nodes:{A:{status:"running",outcome:"running",retry:{attempts:0,max:1},evidence:[]}},
@@ -22,6 +27,30 @@ jq -n --arg sha "$(git -C "$ROOT" rev-parse HEAD)" '{
 }' >"$evals"
 
 python3 "$GRAPH" authorize-dispatch "$state" --session session-test --task loop_worker_41 --evals "$evals" >/dev/null
+
+jq -n '{
+  schema_version:2,session_id:"session-test",loop_id:"loop-test",revision:1,status:"in-progress",
+  graph:{nodes:{A:{status:"pending",outcome:"pending",retry:{attempts:0,max:1},evidence:[]}},
+         edges:[],joins:{},active_wave:null,hard_stop:null}
+}' >"$TMP/no-evals/begin.json"
+if python3 "$GRAPH" begin-wave "$TMP/no-evals/begin.json" >/dev/null 2>&1; then
+  printf 'FAIL - begin-wave accepted missing dispatch evals\n' >&2
+  exit 1
+fi
+
+jq -n '{
+  schema_version:2,session_id:"session-test",loop_id:"loop-test",revision:1,status:"in-progress",
+  graph:{nodes:{A:{status:"pending",outcome:"pending",retry:{attempts:0,max:1},evidence:[]}},
+         edges:[],joins:{},active_wave:null,hard_stop:null}
+}' >"$TMP/cancel.json"
+python3 "$GRAPH" begin-wave "$TMP/cancel.json" >/dev/null
+python3 "$GRAPH" cancel-unspawned-wave "$TMP/cancel.json" --session session-test >/dev/null
+python3 "$GRAPH" begin-wave "$TMP/cancel.json" >/dev/null
+codex_fixture::append_attempt session-test loop_worker_41 1 wave-4 >/dev/null
+if python3 "$GRAPH" cancel-unspawned-wave "$TMP/cancel.json" --session session-test >/dev/null 2>&1; then
+  printf 'FAIL - cancel-unspawned-wave accepted a spawned worker\n' >&2
+  exit 1
+fi
 
 jq '.frozen_sha = ""' "$evals" >"$evals.tmp" && mv "$evals.tmp" "$evals"
 if python3 "$GRAPH" authorize-dispatch "$state" --session session-test --task loop_worker_41 --evals "$evals" >/dev/null 2>&1; then

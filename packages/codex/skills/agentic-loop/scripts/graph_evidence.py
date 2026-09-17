@@ -294,6 +294,31 @@ def bind_worker_evidence(
     return references, used
 
 
+def has_current_wave_dispatch(state: dict[str, Any], active_wave: dict[str, Any]) -> bool:
+    """Return whether the current wave has a matching native spawn attempt."""
+    cursor = active_wave.get("transcript_cursor")
+    if isinstance(cursor, bool) or not isinstance(cursor, int) or cursor < 1:
+        raise GraphError("active wave has no valid transcript cursor")
+    expected = {
+        task_name(node_id, state["graph"]["nodes"][node_id]["retry"]["attempts"] + 1)
+        for node_id in active_wave["nodes"]
+    }
+    for line_number, record in _records(_thread_transcript(state["session_id"]), "parent transcript"):
+        raw_item = _payload(record).get("item")
+        if not isinstance(raw_item, dict) or line_number <= cursor:
+            continue
+        item = cast(dict[str, Any], raw_item)
+        prompt = item.get("prompt")
+        if (
+            item.get("type") == "CollabAgentToolCall"
+            and item.get("tool") == "spawn_agent"
+            and isinstance(prompt, str)
+            and prompt.split("\n", 1)[0].removeprefix("CODERAILS_GRAPH_TASK=") in expected
+        ):
+            return True
+    return False
+
+
 def validate_worker_evidence(state: dict[str, Any]) -> None:
     """Validate all stored worker evidence against native transcripts."""
     _stored_references(state, True)
