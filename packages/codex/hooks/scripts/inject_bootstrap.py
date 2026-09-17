@@ -5,10 +5,34 @@ from __future__ import annotations
 
 import json
 import os
+import select
 import subprocess
 import sys
+import time
+from contextlib import suppress
 from pathlib import Path
 from typing import cast
+
+
+def read_input(timeout_seconds: float = 5.0) -> str:
+    """Read available stdin bytes for at most the established hook timeout."""
+    descriptor = sys.stdin.fileno()
+    chunks = bytearray()
+    deadline = time.monotonic() + timeout_seconds
+    with suppress(OSError):
+        os.set_blocking(descriptor, False)
+    while (remaining := deadline - time.monotonic()) > 0:
+        readable, _, _ = select.select([descriptor], [], [], remaining)
+        if not readable:
+            break
+        try:
+            chunk = os.read(descriptor, 65536)
+        except BlockingIOError:
+            continue
+        if not chunk:
+            break
+        chunks.extend(chunk)
+    return chunks.decode(errors="replace")
 
 
 def payload_object(raw_payload: str) -> dict[str, object]:
@@ -89,7 +113,7 @@ def legacy_config_found(cwd: str) -> bool:
 
 def main() -> int:
     """Emit the SessionStart additional-context envelope."""
-    payload = payload_object(sys.stdin.read())
+    payload = payload_object(read_input())
     plugin_root = Path(os.environ.get("PLUGIN_ROOT", str(Path(__file__).resolve().parents[2])))
     skill = plugin_root / "skills" / "using-coderails" / "SKILL.md"
     cwd = text_field(payload, "cwd")
