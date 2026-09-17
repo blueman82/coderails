@@ -113,7 +113,7 @@ def main() -> int:
     payload = payload_object(sys.stdin.read())
     tool_input = payload.get("tool_input")
     typed_tool_input = cast(dict[str, object], tool_input) if isinstance(tool_input, dict) else {}
-    command = typed_tool_input.get("command")
+    command = typed_tool_input.get("cmd", typed_tool_input.get("command"))
     target = target_for(command)
     if target is None or isinstance(payload.get("agent_id"), str) and payload["agent_id"]:
         return 0
