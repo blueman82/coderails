@@ -1,6 +1,6 @@
 path	group	success	failure	stream	exit	environment	invocation
 hooks/scripts/check_confidence_labels.py	hook	labelled response allows	unlabelled response blocks	Stop stderr reason	Stop/SubagentStop: 0/2	stdin JSON TRANSCRIPT_PATH	Stop,SubagentStop
-hooks/scripts/comment_citation_gate.sh	hook	ordinary comment allows	transcript citation denies	stdout deny JSON	PreToolUse: 0	stdin JSON PLUGIN_ROOT	PreToolUse ^apply_patch$
+hooks/scripts/comment_citation_gate.py	hook	ordinary comment allows	transcript citation denies	stdout deny JSON	PreToolUse: 0	stdin JSON PLUGIN_ROOT	PreToolUse ^apply_patch$
 hooks/scripts/crack_on_gate.py	hook	non-crack prompt allows	request_user_input during crack-on denies	stdout deny JSON	PreToolUse: 0	stdin JSON CLAUDE_AGENTIC_LOOP_DIR	UserPromptSubmit,PreToolUse ^request_user_input$
 hooks/scripts/crack_on_prose_gate.sh	hook	non-question completion allows	crack-on prose question blocks	Stop stderr reason	Stop: 0/2	stdin JSON CLAUDE_AGENTIC_LOOP_DIR	Stop
 hooks/scripts/destructive_bash_gate.sh	hook	safe command allows	blocked destructive command denies	stdout deny JSON	PreToolUse: 0	stdin JSON	PreToolUse ^Bash$

@@ -114,7 +114,7 @@
           },
           {
             "type": "command",
-            "command": "\"${PLUGIN_ROOT}/hooks/scripts/comment_citation_gate.sh\"",
+        "command": "\"${PLUGIN_ROOT}/hooks/scripts/comment_citation_gate.py\"",
             "timeout": 10
           },
           {
