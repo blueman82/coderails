@@ -65,19 +65,19 @@ git -C "$bootstrap_repo" init -q
 mkdir -p "$bootstrap_repo/.codex"
 printf 'sandbox_workers: true\n' >"$bootstrap_repo/.codex/workflow.config.yaml"
 bootstrap_before=$(shasum "$bootstrap_repo/.codex/workflow.config.yaml")
-bootstrap=$(printf '%s' "{\"session_id\":\"s1\",\"cwd\":\"$bootstrap_repo\",\"hook_event_name\":\"SessionStart\",\"source\":\"startup\"}" | PLUGIN_ROOT="$PACKAGE" "$HOOKS/scripts/inject_bootstrap.sh")
+bootstrap=$(printf '%s' "{\"session_id\":\"s1\",\"cwd\":\"$bootstrap_repo\",\"hook_event_name\":\"SessionStart\",\"source\":\"startup\"}" | PLUGIN_ROOT="$PACKAGE" python3 "$HOOKS/scripts/inject_bootstrap.py")
 check "bootstrap returns native orchestration and graph guidance" sh -c 'printf "%s" "$1" | jq -e ".hookSpecificOutput.additionalContext | contains(\"using-coderails\") and contains(\"top-level session as the orchestrator\") and contains(\"delegate do-work tool calls with spawn_agent\") and contains(\"Native graph resume\")"' sh "$bootstrap"
 check "startup nudges for legacy config" sh -c 'printf "%s" "$1" | jq -r ".hookSpecificOutput.additionalContext" | grep -Fq '\''$coderails-codex:init'\''' sh "$bootstrap"
-resume=$(printf '%s' "{\"cwd\":\"$bootstrap_repo\",\"source\":\"resume\"}" | PLUGIN_ROOT="$PACKAGE" "$HOOKS/scripts/inject_bootstrap.sh")
+resume=$(printf '%s' "{\"cwd\":\"$bootstrap_repo\",\"source\":\"resume\"}" | PLUGIN_ROOT="$PACKAGE" python3 "$HOOKS/scripts/inject_bootstrap.py")
 check "resume does not nudge" sh -c '! printf "%s" "$1" | jq -r ".hookSpecificOutput.additionalContext" | grep -Fq '\''$coderails-codex:init'\''' sh "$resume"
-clear=$(printf '%s' "{\"cwd\":\"$bootstrap_repo\",\"source\":\"clear\"}" | PLUGIN_ROOT="$PACKAGE" "$HOOKS/scripts/inject_bootstrap.sh")
+clear=$(printf '%s' "{\"cwd\":\"$bootstrap_repo\",\"source\":\"clear\"}" | PLUGIN_ROOT="$PACKAGE" python3 "$HOOKS/scripts/inject_bootstrap.py")
 check "clear does not nudge" sh -c '! printf "%s" "$1" | jq -r ".hookSpecificOutput.additionalContext" | grep -Fq '\''$coderails-codex:init'\''' sh "$clear"
-compact=$(printf '%s' "{\"cwd\":\"$bootstrap_repo\",\"source\":\"compact\"}" | PLUGIN_ROOT="$PACKAGE" "$HOOKS/scripts/inject_bootstrap.sh")
+compact=$(printf '%s' "{\"cwd\":\"$bootstrap_repo\",\"source\":\"compact\"}" | PLUGIN_ROOT="$PACKAGE" python3 "$HOOKS/scripts/inject_bootstrap.py")
 check "compact does not nudge" sh -c '! printf "%s" "$1" | jq -r ".hookSpecificOutput.additionalContext" | grep -Fq '\''$coderails-codex:init'\''' sh "$compact"
 check "startup does not alter config" test "$bootstrap_before" = "$(shasum "$bootstrap_repo/.codex/workflow.config.yaml")"
 mkdir -p "$bootstrap_repo/.coderails"
 printf 'sandbox_workers: true\n' >"$bootstrap_repo/.coderails/workflow.config.yaml"
-configured=$(printf '%s' "{\"cwd\":\"$bootstrap_repo\",\"source\":\"startup\"}" | PLUGIN_ROOT="$PACKAGE" "$HOOKS/scripts/inject_bootstrap.sh")
+configured=$(printf '%s' "{\"cwd\":\"$bootstrap_repo\",\"source\":\"startup\"}" | PLUGIN_ROOT="$PACKAGE" python3 "$HOOKS/scripts/inject_bootstrap.py")
 check "canonical config suppresses nudge" sh -c '! printf "%s" "$1" | jq -r ".hookSpecificOutput.additionalContext" | grep -Fq '\''$coderails-codex:init'\''' sh "$configured"
 rm -rf "$bootstrap_repo"
 

@@ -7,7 +7,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${PLUGIN_ROOT}/hooks/scripts/inject_bootstrap.sh\"",
+            "command": "\"${PLUGIN_ROOT}/hooks/scripts/inject_bootstrap.py\"",
             "timeout": 10,
             "additionalContextLimit": 1200
           }

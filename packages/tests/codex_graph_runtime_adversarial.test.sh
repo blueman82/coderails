@@ -218,11 +218,11 @@ install_state() {
 
 hook_output() {
 	local hook="$1" root="$2" input="$3"
-	printf '%s' "$input" | HOME="$TMP/home" PLUGIN_DATA="$TMP/plugin-data" \
-		CODERAILS_AGENTIC_LOOP_DIR="$root" CODERAILS_DISCIPLINE_LOG="$TMP/discipline.log" \
-		PLUGIN_ROOT="$PACKAGE" "$hook"
+	printf '%s' "$input" | (
+		export HOME="$TMP/home" PLUGIN_DATA="$TMP/plugin-data" CODERAILS_AGENTIC_LOOP_DIR="$root" CODERAILS_DISCIPLINE_LOG="$TMP/discipline.log" PLUGIN_ROOT="$PACKAGE"
+		case "$hook" in *.py) python3 "$hook" ;; *) "$hook" ;; esac
+	)
 }
-
 hook_denied() {
 	local root="$1" input="$2" output
 	output=$(hook_output "$HOOKS/loop_dispatch_guard.sh" "$root" "$input")
@@ -317,7 +317,7 @@ test_bootstrap_exact_path() {
 	write_graph "$state" "$(jq -cn --argjson a "$(node)" '{A:$a}')"
 	install_state "$state" "$root"
 	installed="$root/fixture/session-test/progress.json"
-	output=$(hook_output "$HOOKS/inject_bootstrap.sh" "$root" \
+	output=$(hook_output "$HOOKS/inject_bootstrap.py" "$root" \
 		"$(jq -cn --arg cwd "$ROOT" '{hook_event_name:"SessionStart",session_id:"session-test",cwd:$cwd}')")
 	context=$(printf '%s' "$output" | jq -r '.hookSpecificOutput.additionalContext // empty')
 	if [[ "$context" != *"$installed"* ]]; then
