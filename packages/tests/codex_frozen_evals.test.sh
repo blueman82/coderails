@@ -45,11 +45,24 @@ jq -n '{
 }' >"$TMP/cancel.json"
 python3 "$GRAPH" begin-wave "$TMP/cancel.json" >/dev/null
 python3 "$GRAPH" cancel-unspawned-wave "$TMP/cancel.json" --session session-test >/dev/null
+jq -e '.graph.cancelled_waves == [{"id":"wave-2","revision":2}]' "$TMP/cancel.json" >/dev/null
 python3 "$GRAPH" begin-wave "$TMP/cancel.json" >/dev/null
 codex_fixture::append_attempt session-test loop_worker_41 1 wave-4 >/dev/null
 if python3 "$GRAPH" cancel-unspawned-wave "$TMP/cancel.json" --session session-test >/dev/null 2>&1; then
   printf 'FAIL - cancel-unspawned-wave accepted a spawned worker\n' >&2
   exit 1
+fi
+
+jq -n '{
+  schema_version:2,session_id:"session-test",loop_id:"loop-test",revision:4,status:"in-progress",
+  graph:{nodes:{A:{status:"running",outcome:"running",retry:{attempts:0,max:1},evidence:[]}},
+         edges:[],joins:{},active_wave:{id:"wave-4",revision:4,nodes:["A"],transcript_cursor:1},hard_stop:null}
+}' >"$TMP/legacy-cancel.json"
+python3 "$GRAPH" acknowledge-cancelled-wave "$TMP/legacy-cancel.json" --session session-test --wave wave-2 >/dev/null
+jq -e '.graph.cancelled_waves == [{"id":"wave-2","revision":2}]' "$TMP/legacy-cancel.json" >/dev/null
+if python3 "$GRAPH" acknowledge-cancelled-wave "$TMP/legacy-cancel.json" --session session-test --wave wave-2 >/dev/null 2>&1; then
+	printf 'FAIL - acknowledge-cancelled-wave accepted a duplicate repair\n' >&2
+	exit 1
 fi
 
 jq '.frozen_sha = ""' "$evals" >"$evals.tmp" && mv "$evals.tmp" "$evals"

@@ -48,6 +48,26 @@ def _nonempty(value: object, label: str) -> str:
     return value
 
 
+def _validate_cancelled_waves(graph: dict[str, Any]) -> None:
+    cancelled_waves = _array(graph.get("cancelled_waves", []), "graph.cancelled_waves")
+    cancelled_ids: set[str] = set()
+    for index, raw_cancelled in enumerate(cancelled_waves):
+        cancelled = _object(raw_cancelled, f"graph.cancelled_waves[{index}]")
+        if set(cancelled) != {"id", "revision"}:
+            raise GraphError("cancelled wave must contain exactly id and revision")
+        wave_id = _nonempty(cancelled.get("id"), f"graph.cancelled_waves[{index}].id")
+        wave_revision = cancelled.get("revision")
+        if (
+            isinstance(wave_revision, bool)
+            or not isinstance(wave_revision, int)
+            or wave_revision < 1
+            or wave_id != f"wave-{wave_revision}"
+            or wave_id in cancelled_ids
+        ):
+            raise GraphError("cancelled wave is invalid or duplicated")
+        cancelled_ids.add(wave_id)
+
+
 def _validate_state(state: object) -> dict[str, Any]:
     root = _object(state, "state")
     if root.get("schema_version") != 2:
@@ -127,6 +147,7 @@ def _validate_state(state: object) -> dict[str, Any]:
         raise GraphError("graph contains a dependency cycle")
     if "active_wave" not in graph or "hard_stop" not in graph:
         raise GraphError("graph must declare active_wave and hard_stop")
+    _validate_cancelled_waves(graph)
     active_wave = graph["active_wave"]
     running = {node_id for node_id, node in nodes.items() if node["status"] == "running"}
     active = active_nodes(active_wave, nodes, revision)
@@ -271,10 +292,33 @@ def _cancel_unspawned_wave(path: Path, session: str) -> dict[str, Any]:
             node = state["graph"]["nodes"][node_id]
             node["status"] = "pending"
             node["outcome"] = "pending"
+        state["graph"].setdefault("cancelled_waves", []).append(
+            {"id": active_wave["id"], "revision": active_wave["revision"]}
+        )
         state["graph"]["active_wave"] = None
         state["revision"] += 1
         _write(path, state)
         return {"cancelled_wave": active_wave["id"], "revision": state["revision"]}
+
+
+def _acknowledge_cancelled_wave(path: Path, session: str, wave_id: str) -> dict[str, Any]:
+    with _locked(path):
+        state = _load(path)
+        if state["session_id"] != session:
+            raise GraphError("session does not own this loop")
+        active_wave = state["graph"]["active_wave"]
+        expected_revision = state["revision"] - 2
+        expected_wave = f"wave-{expected_revision}"
+        if (
+            active_wave is None
+            or active_wave["revision"] != state["revision"]
+            or state["graph"].get("cancelled_waves")
+            or wave_id != expected_wave
+        ):
+            raise GraphError("only the immediately preceding unledgered wave can be acknowledged")
+        state["graph"]["cancelled_waves"] = [{"id": wave_id, "revision": expected_revision}]
+        _write(path, state)
+        return {"acknowledged_wave": wave_id, "revision": state["revision"]}
 
 
 def _record_wave(path: Path, raw_results: str) -> dict[str, Any]:
@@ -427,6 +471,10 @@ def _parser() -> argparse.ArgumentParser:
     cancel = commands.add_parser("cancel-unspawned-wave")
     cancel.add_argument("state", type=Path)
     cancel.add_argument("--session", required=True)
+    acknowledge = commands.add_parser("acknowledge-cancelled-wave")
+    acknowledge.add_argument("state", type=Path)
+    acknowledge.add_argument("--session", required=True)
+    acknowledge.add_argument("--wave", required=True)
     record = commands.add_parser("record-wave")
     record.add_argument("state", type=Path)
     record.add_argument("results_json")
@@ -459,6 +507,8 @@ def main() -> int:
             output = _authorize_dispatch(args.state, args.session, args.task, args.evals)
         elif args.command == "cancel-unspawned-wave":
             output = _cancel_unspawned_wave(args.state, args.session)
+        elif args.command == "acknowledge-cancelled-wave":
+            output = _acknowledge_cancelled_wave(args.state, args.session, args.wave)
         elif args.command == "complete":
             output = _complete(args.state, args.session, args.evals, args.proof, args.retro, args.transcript)
         else:

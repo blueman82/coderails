@@ -245,7 +245,28 @@ def _stored_references(
         if isinstance(revision, bool) or not isinstance(revision, int):
             raise GraphError("graph revision must be an integer")
         last_wave = revision - (2 if state["graph"]["active_wave"] is not None else 1)
-        expected = set(range(last_wave - 2 * (len(waves) - 1), last_wave + 1, 2))
+        cancelled = _array(state["graph"].get("cancelled_waves", []), "graph.cancelled_waves")
+        cancelled_waves: set[int] = set()
+        for index, raw_cancelled in enumerate(cancelled):
+            item = _object(raw_cancelled, f"graph.cancelled_waves[{index}]")
+            if set(item) != {"id", "revision"}:
+                raise GraphError("cancelled wave must contain exactly id and revision")
+            raw_wave = item.get("revision")
+            if (
+                isinstance(raw_wave, bool)
+                or not isinstance(raw_wave, int)
+                or raw_wave < 1
+                or item.get("id") != f"wave-{raw_wave}"
+                or raw_wave in cancelled_waves
+            ):
+                raise GraphError("cancelled wave is invalid or duplicated")
+            wave = raw_wave
+            if wave > last_wave or (last_wave - wave) % 2:
+                raise GraphError("cancelled wave does not match graph revisions")
+            cancelled_waves.add(wave)
+        expected = (
+            set(range(last_wave - 2 * (len(waves) + len(cancelled_waves) - 1), last_wave + 1, 2)) - cancelled_waves
+        )
         if waves != expected:
             raise GraphError("stored worker wave evidence does not match graph revisions")
     if any(classify_worker_evidence(item, used)[0] for item in ordinary):
