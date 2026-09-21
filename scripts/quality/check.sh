@@ -28,6 +28,9 @@ read_python_files() {
     if ((changed_only)); then
         while IFS= read -r python_file; do
             [[ "$python_file" == *.py && -f "$quality_root/$python_file" ]] || continue
+            case "$python_file" in
+            skills/agentic-loop/scripts/graph_semantics.py | packages/codex/skills/agentic-loop/scripts/graph_semantics.py) continue ;;
+            esac
             python_files+=("$quality_root/$python_file")
         done < <((
             git -C "$quality_root" diff --name-only HEAD
@@ -36,6 +39,9 @@ read_python_files() {
         return
     fi
     while IFS= read -r python_file; do
+        case "$python_file" in
+        "$quality_root"/skills/agentic-loop/scripts/graph_semantics.py | "$quality_root"/packages/codex/skills/agentic-loop/scripts/graph_semantics.py) continue ;;
+        esac
         python_files+=("$python_file")
     done < <(find "$quality_root" -type f -name '*.py' \
         ! -path '*/assets/*' ! -path '*/dist/*' ! -path '*/fixtures/*' ! -path '*/node_modules/*')
@@ -58,6 +64,18 @@ run_python_quality() {
 }
 
 run_python_quality
+
+if ((strict)); then
+    graph_source="$quality_root/packages/graph-semantics/graph_semantics.py"
+    if [[ -f "$graph_source" ]]; then
+        for graph_copy in "$quality_root/skills/agentic-loop/scripts/graph_semantics.py" "$quality_root/packages/codex/skills/agentic-loop/scripts/graph_semantics.py"; do
+            cmp -s "$graph_source" "$graph_copy" || {
+                printf 'quality: generated graph semantics drift: %s\n' "$graph_copy" >&2
+                findings=1
+            }
+        done
+    fi
+fi
 
 read_shell_files() {
     shell_files=()

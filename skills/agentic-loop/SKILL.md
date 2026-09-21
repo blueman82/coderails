@@ -35,7 +35,7 @@ its prerequisites and readiness predicate are true.
 
 **Read [execution-graph.md](execution-graph.md) in full before dispatching any node.** It has the
 full node table (every phase's true prerequisites, readiness predicate, and skip condition), the
-ASCII shape diagram, and the `graph_readiness.sh` usage contract — the read-only query that gates
+ASCII shape diagram, and the `graph_readiness.py` usage contract — the read-only query that gates
 every dispatch decision below. Node IDs (`S*` run once, `U<i>*` run once per work-unit, `J*`/`G*`
 are joins/cross-cutting guards) are referenced by these names throughout the rest of this file.
 

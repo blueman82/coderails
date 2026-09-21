@@ -1,10 +1,10 @@
 #!/bin/bash
-# Behavioural test for verification_volume_ceiling.sh -- feeds synthetic
+# Behavioural test for verification_volume_ceiling.py -- feeds synthetic
 # PreToolUse Bash payloads and asserts the 1st/2nd invocation of
 # hooks/scripts/tests/run_all.sh or a post_evals.sh validate-structure
 # ceremony is allowed, and the 3rd+ is denied, per git branch.
 set -u
-HOOK="$(cd "$(dirname "$0")/.." && pwd)/verification_volume_ceiling.sh"
+HOOK="$(cd "$(dirname "$0")/.." && pwd)/verification_volume_ceiling.py"
 TMP=$(mktemp -d)
 trap 'unlink_tree_exit' EXIT
 fails=0
@@ -28,7 +28,7 @@ new_fixture() { # branch_name -> prints fixture dir path
 
 raw_output() { # cwd cmd [agent_id] -> raw stdout of the hook
     local cwd="$1" cmd="$2" agent_id="${3:-}"
-    jq -n --arg cwd "$cwd" --arg cmd "$cmd" --arg agent_id "$agent_id" 'if $agent_id == "" then {} else {agent_id: $agent_id} end + {tool_name:"Bash",tool_input:{command:$cmd},cwd:$cwd}' | bash "$HOOK" 2>/dev/null
+    jq -n --arg cwd "$cwd" --arg cmd "$cmd" --arg agent_id "$agent_id" 'if $agent_id == "" then {} else {agent_id: $agent_id} end + {tool_name:"Bash",tool_input:{command:$cmd},cwd:$cwd}' | "$HOOK" 2>/dev/null
 }
 
 decision() { # cwd cmd -> "allow" | "deny"

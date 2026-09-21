@@ -1,7 +1,7 @@
 #!/bin/bash
 # shellcheck disable=SC2016 # jq programs use single quotes so shell variables stay jq variables.
 # graph_dispatch.sh — Claude dispatch layer on top of
-# graph_executor.sh/graph_readiness.sh (both reused verbatim).
+# graph_executor.sh/graph_readiness.py (both reused verbatim).
 #
 # SOURCED, not executed directly. This script itself CANNOT call the
 # `Agent` tool — that tool exists only in an active Claude Code

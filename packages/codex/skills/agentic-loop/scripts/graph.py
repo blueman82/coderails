@@ -13,6 +13,7 @@ from collections import deque
 from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
+from types import ModuleType
 from typing import Any, cast
 
 from graph_evidence import (
@@ -165,12 +166,25 @@ def _validate_state(state: object) -> dict[str, Any]:
     return root
 
 
+def _core() -> ModuleType:
+    """Load the installer-materialized v3 semantic core on demand."""
+    try:
+        import graph_semantics
+    except ImportError as error:
+        raise GraphError("schema-v3 graph semantics are not materialized; run install.sh") from error
+    return graph_semantics
+
+
 def _load(path: Path) -> dict[str, Any]:
     try:
         with path.open(encoding="utf-8") as handle:
             parsed: JsonValue = cast(JsonValue, json.load(handle))
+            parsed_state = cast(object, parsed)
+            root = cast(dict[str, Any], parsed_state) if isinstance(parsed_state, dict) else None
+            if root is not None and root.get("schema_version") == 3:
+                return cast(dict[str, Any], _core().validate(root))
             return _validate_state(cast(object, parsed))
-    except (OSError, json.JSONDecodeError) as error:
+    except (OSError, json.JSONDecodeError, ValueError) as error:
         raise GraphError(f"cannot read valid state: {error}") from error
 
 
@@ -234,6 +248,22 @@ def _ready(state: dict[str, Any]) -> list[str]:
 def _begin_wave(path: Path) -> dict[str, Any]:
     with _locked(path):
         state = _load(path)
+        if state["schema_version"] == 3:
+            transition = _core().begin_wave(state)
+            proposed = cast(dict[str, Any], transition["state"])
+            wave = cast(dict[str, Any], transition["wave"])
+            proposed["graph"]["active_wave"]["transcript_cursor"] = transcript_cursor(proposed["session_id"])
+            task_names = {
+                node_id: task_name(node_id, proposed["graph"]["nodes"][node_id]["retry"]["attempts"] + 1)
+                for node_id in wave["nodes"]
+            }
+            _write(path, proposed)
+            return {
+                "wave_id": wave["wave_id"],
+                "nodes": wave["nodes"],
+                "task_names": task_names,
+                "revision": proposed["revision"],
+            }
         graph = state["graph"]
         if graph["active_wave"] is not None:
             raise GraphError("an active wave already exists")
@@ -369,6 +399,32 @@ def _record_wave(path: Path, raw_results: str) -> dict[str, Any]:
         graph = state["graph"]
         if graph["active_wave"] is None:
             raise GraphError("no active wave exists")
+        if state["schema_version"] == 3:
+            active = cast(dict[str, Any], graph["active_wave"])
+            evidence_wave = dict(active)
+            evidence_wave["id"] = active["wave_id"]
+            references, identifiers = bind_worker_evidence(state, evidence_wave)
+            envelope = _object(cast(object, parsed_results), "results")
+            results = _object(envelope.get("results"), "results.results")
+            if any(
+                classify_worker_evidence(cast(dict[str, Any], result).get("evidence"), identifiers)[0]
+                for result in results.values()
+                if isinstance(result, dict)
+            ):
+                raise GraphError("result evidence must not contain worker evidence")
+            try:
+                transition = _core().record_wave(state, envelope.get("wave_id"), results)
+            except ValueError as error:
+                raise GraphError(str(error)) from error
+            proposed = cast(dict[str, Any], transition["state"])
+            for node_id, reference in references.items():
+                proposed["graph"]["nodes"][node_id]["evidence"].append(reference)
+            _write(path, proposed)
+            return {
+                "revision": proposed["revision"],
+                "released_joins": transition["released_joins"],
+                "ready": transition["ready"],
+            }
         results = _results(cast(object, parsed_results), graph["active_wave"])
         references, identifiers = bind_worker_evidence(state, graph["active_wave"])
         if any(classify_worker_evidence(result["evidence"], identifiers)[0] for result in results.values()):
@@ -394,6 +450,24 @@ def _record_wave(path: Path, raw_results: str) -> dict[str, Any]:
         state["revision"] += 1
         _write(path, state)
         return {"revision": state["revision"], "released_joins": released, "ready": _ready(state)}
+
+
+def _v3_transition(path: Path, session: str, operation: str, node: str, reason: str) -> dict[str, Any]:
+    """Apply one v3-only core transition while retaining Codex file ownership."""
+    with _locked(path):
+        state = _load(path)
+        if state["schema_version"] != 3:
+            raise GraphError(f"{operation} is supported only for schema-v3 graphs")
+        if state.get("session_id") != session:
+            raise GraphError("session does not own this loop")
+        try:
+            transition = getattr(_core(), operation)(state, node, reason)
+        except ValueError as error:
+            raise GraphError(str(error)) from error
+        proposed = cast(dict[str, Any], transition["state"])
+        _write(path, proposed)
+        key = "respawn" if operation == "respawn_stale" else "hard_stop"
+        return cast(dict[str, Any], transition[key])
 
 
 def _inspect(path: Path) -> dict[str, Any]:
@@ -521,6 +595,12 @@ def _parser() -> argparse.ArgumentParser:
     record = commands.add_parser("record-wave")
     record.add_argument("state", type=Path)
     record.add_argument("results_json")
+    for name in ("respawn_stale", "hard_stop"):
+        transition = commands.add_parser(name.replace("_", "-"))
+        transition.add_argument("state", type=Path)
+        transition.add_argument("--session", required=True)
+        transition.add_argument("--node", required=True)
+        transition.add_argument("--reason", required=True)
     dispatch = commands.add_parser("authorize-dispatch")
     dispatch.add_argument("state", type=Path)
     for option in ("session", "task"):
@@ -544,6 +624,8 @@ def main() -> int:
             output = _begin_wave(args.state)
         elif args.command == "record-wave":
             output = _record_wave(args.state, args.results_json)
+        elif args.command in {"respawn-stale", "hard-stop"}:
+            output = _v3_transition(args.state, args.session, args.command.replace("-", "_"), args.node, args.reason)
         elif args.command == "inspect":
             output = _inspect(args.state)
         elif args.command == "authorize-dispatch":

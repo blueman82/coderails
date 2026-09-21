@@ -44,181 +44,90 @@
 #   transcripts but absent from the price table: tokens still counted,
 #   usd_estimate 0, id appended to unpriced_models (never dropped, never
 #   crashed on).
-dc_mine_token_usage() {
-  local session="${1:-}"
-  local projects_dir="${CLAUDE_PROJECTS_DIR:-$HOME/.claude/projects}"
+dc_loop_cost_json_safe_string() {
+    local value="$1"
+    value="${value//\\/}"
+    value="${value//\"/}"
+    printf '%s' "$value"
+}
 
-  # Self-path resolution, cross-shell. ${BASH_SOURCE[0]} is bash-only — under
-  # zsh it is empty inside a function, which would silently resolve
-  # dirname's fallback to '.' (cwd) instead of this file's real directory.
-  # zsh's own self-path idiom is ${(%):-%x}, but that syntax is a bash PARSE
-  # error (not just a runtime one), so it can't appear directly in a script
-  # bash also sources — it's routed through eval so bash's parser never sees
-  # the literal token, and only the zsh branch (guarded by $ZSH_VERSION)
-  # ever evaluates it.
-  local self_path="${BASH_SOURCE[0]:-}"
-  if [ -z "$self_path" ] && [ -n "${ZSH_VERSION:-}" ]; then
-    self_path="$(eval 'echo ${(%):-%x}')"
-  fi
-  local prices_file="${CLAUDE_MODEL_PRICES_FILE:-$(dirname "$self_path")/model_prices.json}"
+dc_loop_cost_headless_window() {
+    local window="$1"
+    case "$window" in '' | *[!0-9]*) window=3600 ;; esac
+    printf '%s' "$window"
+}
 
-  # Caller error, not an environmental fail-open: unlike the five bails
-  # below (missing/invalid price file, jq/mining failures — all things that
-  # can be true of a CORRECT call), an empty session id can only happen when
-  # the caller forgot the argument. That distinction must survive a caller
-  # piping stderr to /dev/null (the reflex when calling a documented
-  # fail-open helper) — a bare `{}` here is indistinguishable from "mined
-  # successfully, nothing to report" on stdout alone, which is exactly the
-  # ambiguity that once hid a real $28.91/49.3M-token loop cost behind a
-  # silently-dropped caller error. So this bail additionally emits a
-  # self-describing JSON object on STDOUT (not just stderr): an `error` field
-  # naming the problem, and a `hint` naming the fix. It still has no
-  # `total_tokens`/`total_usd_estimate`/`schema_version` keys, so any consumer
-  # checking `jq -e '.error'` or the absence of `total_tokens` can tell this
-  # apart from both a real mine and the plain `{}` the five environmental
-  # bails still return. Exit 0 unchanged — this is additive to the fail-open
-  # contract, not a departure from it.
-  #
-  # Placed ABOVE the `command -v jq` check below (not after, as originally
-  # written): this guard has no jq dependency (plain `[ -n ]`), so ordering it
-  # after the jq check would let a jq-absent environment shadow a genuine
-  # zero-argument caller error behind the jq bail's plain `{}` instead of this
-  # self-describing object — the caller error must win regardless of what else
-  # is broken in the environment.
-  [ -n "$session" ] || {
+dc_loop_cost_abs_difference() {
+    local difference=$(($1 - $2))
+    ((difference < 0)) && difference=$((-difference))
+    printf '%s' "$difference"
+}
+
+dc_loop_cost_orchestrator_transcript() {
+    local projects_dir="$1" session="$2" transcript
+    setopt local_options null_glob 2>/dev/null
+    for transcript in "$projects_dir"/*/"$session.jsonl"; do
+        [ -f "$transcript" ] || continue
+        printf '%s' "$transcript"
+        return 0
+    done
+}
+
+dc_loop_cost_price_models() {
+    local mined="$1" prices_file="$2" scanned="$3" headless_count="$4"
+    jq -sn --slurpfile per_model <(printf '%s' "$mined") --slurpfile prices "$prices_file" --argjson scanned "$scanned" --argjson headless_excluded "$headless_count" '($per_model[0]) as $pm | ($prices[0]) as $pt | ($pt.per_mtok // {}) as $rates | ($pm | to_entries | map(.key as $model | ($model | sub("-[0-9]{8}$"; "")) as $lookup_key | .value as $t | ($rates[$model] // $rates[$lookup_key]) as $r | if $r == null then { model: $model, priced: (.value + {usd_estimate: 0}), unpriced: true } else ($t.input_tokens/1000000*$r.input + $t.output_tokens/1000000*$r.output + $t.cache_read_tokens/1000000*$r.cache_read + $t.cache_write_5m_tokens/1000000*$r.cache_write_5m + $t.cache_write_1h_tokens/1000000*$r.cache_write_1h) as $usd | { model: $model, priced: (.value + {usd_estimate: $usd}), unpriced: false } end)) as $priced_entries | ($priced_entries | map({(.model): .priced}) | add // {}) as $per_model_out | ($priced_entries | map(select(.unpriced) | .model)) as $unpriced_models | {schema_version: 1, prices_as_of: ($pt.prices_as_of // ""), price_source: ($pt.price_source // ""), per_model: $per_model_out, total_tokens: ([$per_model_out[] | .input_tokens + .output_tokens + .cache_read_tokens + .cache_write_5m_tokens + .cache_write_1h_tokens] | add // 0), total_usd_estimate: ([$per_model_out[] | .usd_estimate] | add // 0), transcripts_scanned: $scanned, unpriced_models: $unpriced_models, models_used: ($per_model_out | keys | sort), headless_children_excluded_count: $headless_excluded, notes: "headless claude -p child sessions excluded from per_model/total_tokens (own top-level session, no parent linkage to attribute their tokens) — see headless_children_excluded_count for how many candidates were detected in the same project dir within the activity window"}' 2>/dev/null
+}
+
+dc_loop_cost_self_path() {
+    local self_path="${BASH_SOURCE[0]:-}"
+    [ -n "$self_path" ] || [ -z "${ZSH_VERSION:-}" ] || self_path="$(eval 'echo ${(%):-%x}')"
+    printf '%s' "$self_path"
+}
+
+dc_loop_cost_session_or_error() {
+    [ -n "$1" ] && return 0
     echo "loop_cost: empty session id" >&2
     printf '{"error":"loop_cost: empty session id","hint":"dc_mine_token_usage requires a session id as its first argument"}'
-    return 0
-  }
+    return 1
+}
 
-  command -v jq >/dev/null 2>&1 || { echo "loop_cost: jq not found on PATH" >&2; printf '{}'; return 0; }
-  [ -f "$prices_file" ] || { echo "loop_cost: prices file not found at $prices_file" >&2; printf '{}'; return 0; }
+dc_loop_cost_sanitise_session() {
+    local session="$1" self_path="$2"
+    # shellcheck disable=SC1091 # Runtime-relative library path is intentionally dynamic.
+    declare -f als_sanitise_session_id >/dev/null 2>&1 || . "$(dirname "$self_path")/loop_state_common.sh" 2>/dev/null
+    declare -f als_sanitise_session_id >/dev/null 2>&1 && als_sanitise_session_id "$session" || printf '%s' "$session"
+}
 
-  # session_id is harness-owned (caller-supplied), not attacker-controlled —
-  # defence-in-depth against path traversal, not a security boundary (same
-  # framing as als_sanitise_session_id's own comment). Reuse that helper's
-  # exact strip-"/"-and-collapse-".." transform rather than duplicating it,
-  # since $session is already known non-empty here (checked above), its
-  # empty/"?" fresh-fallback branch never fires for this call site.
-  if ! declare -f als_sanitise_session_id >/dev/null 2>&1; then
-    # shellcheck source=/dev/null
-    # Reuse $self_path (resolved above) rather than ${BASH_SOURCE[0]} again —
-    # under zsh that expands empty inside a function, so dirname's fallback
-    # would silently resolve to '.' (cwd) instead of this file's real
-    # directory, degrading (not crashing, thanks to the 2>/dev/null + the
-    # declare -f fallback below) to an unsanitised session id.
-    . "$(dirname "$self_path")/loop_state_common.sh" 2>/dev/null
-  fi
-  if declare -f als_sanitise_session_id >/dev/null 2>&1; then
-    session="$(als_sanitise_session_id "$session")"
-  fi
+dc_loop_cost_transcripts() {
+    local orch_transcript="$1" proj="$2" session="$3" f
+    printf '%s\0' "$orch_transcript"
+    [ -d "$proj/$session/subagents" ] || return
+    find "$proj/$session/subagents" -type f -name '*.jsonl' -print0 2>/dev/null
+}
 
-  # Resolve <proj> — the directory containing <session>.jsonl.
-  # Under zsh, nomatch is on by default: an unmatched glob is a HARD ERROR,
-  # not a silent empty expansion like bash. A session with no transcript
-  # would crash the for loop before the orch_transcript fail-open guard
-  # below ever ran. null_glob makes the unmatched glob expand to nothing
-  # instead, so the loop body simply never runs — scoped to this function via
-  # local_options so it doesn't leak into the caller's shell. Under bash,
-  # setopt is not a builtin: it exits 127 to /dev/null and behaviour is
-  # unchanged (bash already expands to the literal pattern, which the
-  # existing `[ -f "$f" ] || continue` below then skips). That 127 is
-  # discarded here, but it WOULD abort a caller running under `set -e` —
-  # no such caller exists (guard scripts deliberately don't use set -e).
-  setopt local_options null_glob 2>/dev/null
-  local orch_transcript="" proj=""
-  for f in "$projects_dir"/*/"$session.jsonl"; do
-    [ -f "$f" ] || continue
-    orch_transcript="$f"
-    proj="$(dirname "$f")"
-    break
-  done
-  # Caller error, not an environmental fail-open, same class as the empty-
-  # session-id bail above: a session id that resolves to NO transcript
-  # anywhere under the projects dir is not a correct call — a wrong/stale/
-  # typo'd session id is easier to pass than no id at all, and is the same
-  # failure class (silently ambiguous {} on stdout) that once hid a real
-  # $28.91/49.3M-token loop cost. Self-describing on STDOUT for the same
-  # reason as the empty-session-id bail: survives 2>/dev/null, no
-  # total_tokens/total_usd_estimate/schema_version keys.
-  #
-  # $session is caller-supplied (see the path-traversal comment above — it's
-  # harness-owned, not attacker-controlled, and als_sanitise_session_id
-  # already strips "/" and collapses ".." before this point) but is NOT
-  # guaranteed free of a literal `"` or `\`, either of which would corrupt
-  # the JSON string below if interpolated raw. Strip both from the value
-  # embedded in the JSON only (the raw, unstripped $session still goes to
-  # stderr, which isn't JSON) — belt-and-braces alongside the printf '%s'
-  # format-arg substitution (never embedded directly in the format string).
-  [ -n "$orch_transcript" ] || {
-    echo "loop_cost: no transcript found for session $session under $projects_dir" >&2
-    local json_safe_session="${session//\\/}"
-    json_safe_session="${json_safe_session//\"/}"
-    printf '{"error":"loop_cost: no transcript found for session %s","hint":"check the session id is the live orchestrator session and CLAUDE_PROJECTS_DIR points at the right projects dir"}' "$json_safe_session"
-    return 0
-  }
-
-  # Collect transcripts: the orchestrator file, plus every .jsonl found by
-  # recursing under <proj>/<session>/subagents/ (find handles arbitrary
-  # nesting depth for free — mirrors listJsonlFiles's recursive descent).
-  local -a transcripts=("$orch_transcript")
-  local subagents_dir="$proj/$session/subagents"
-  if [ -d "$subagents_dir" ]; then
+dc_loop_cost_headless_count() {
+    local orch_transcript="$1" proj="$2" f orch_mtime f_mtime diff count=0
+    local window
+    window="$(dc_loop_cost_headless_window "${CLAUDE_HEADLESS_WINDOW_SECS:-3600}")"
+    orch_mtime=$(stat -c %Y "$orch_transcript" 2>/dev/null || stat -f %m "$orch_transcript" 2>/dev/null)
+    [ -n "$orch_mtime" ] || {
+        printf '0'
+        return
+    }
     while IFS= read -r -d '' f; do
-      transcripts+=("$f")
-    done < <(find "$subagents_dir" -type f -name '*.jsonl' -print0 2>/dev/null)
-  fi
-
-  local scanned=${#transcripts[@]}
-
-  # Headless `claude -p` children (skills/dashboard/scripts/run-builder.sh's
-  # bypass spawn) land as their OWN top-level <proj>/<other-session>.jsonl
-  # with no subagents/ linkage back to this orchestrator session — no sound
-  # attribution path exists (see notes field below), so their tokens are
-  # never folded into per_model/total_tokens. But silently dropping them
-  # entirely was the bug this change exists to fix: SURFACE a count of
-  # candidate orphans instead, so a reader sees the undercount rather than
-  # trusting a silently-low total.
-  #
-  # Candidate = a top-level *.jsonl sibling in the SAME <proj> dir as the
-  # orchestrator transcript (excluding the orchestrator transcript itself),
-  # whose mtime falls within a window around the orchestrator transcript's
-  # own mtime (approximates "was active around the same time" — a bare
-  # sibling count with no time filter would include every unrelated session
-  # ever run against this repo, which is noise, not signal). Window is
-  # symmetric and overridable via CLAUDE_HEADLESS_WINDOW_SECS for tests;
-  # default 1h covers a single build's wall-clock budget
-  # (BUILDER_WALL_CLOCK_SECS default 2700s in run-builder.sh) with margin.
-  local headless_window="${CLAUDE_HEADLESS_WINDOW_SECS:-3600}"
-  # Guard a non-numeric override so the -le comparison below never leaks a raw
-  # "[: integer expression expected" to stderr — fall back to the default rather
-  # than mining a garbage window (still fail-open either way).
-  case "$headless_window" in ''|*[!0-9]*) headless_window=3600 ;; esac
-  local headless_count=0
-  # Portable mtime-in-epoch-seconds: GNU stat first, BSD/macOS stat second.
-  # f_mtime/diff are declared here, NOT inside the loop body — a `local`
-  # redeclared on each iteration makes zsh 5.9 echo "name=value" to stdout on
-  # the 2nd+ pass, corrupting this function's single-JSON-object output
-  # contract (the file has explicit zsh-compat support, so this matters).
-  local orch_mtime f_mtime diff
-  orch_mtime=$(stat -c %Y "$orch_transcript" 2>/dev/null || stat -f %m "$orch_transcript" 2>/dev/null)
-  if [ -n "$orch_mtime" ]; then
-    while IFS= read -r -d '' f; do
-      [ "$f" = "$orch_transcript" ] && continue
-      f_mtime=$(stat -c %Y "$f" 2>/dev/null || stat -f %m "$f" 2>/dev/null)
-      [ -n "$f_mtime" ] || continue
-      diff=$(( f_mtime - orch_mtime ))
-      [ "$diff" -lt 0 ] && diff=$(( -diff ))
-      [ "$diff" -le "$headless_window" ] && headless_count=$((headless_count + 1))
+        [ "$f" = "$orch_transcript" ] && continue
+        f_mtime=$(stat -c %Y "$f" 2>/dev/null || stat -f %m "$f" 2>/dev/null)
+        [ -n "$f_mtime" ] || continue
+        diff="$(dc_loop_cost_abs_difference "$f_mtime" "$orch_mtime")"
+        [ "$diff" -le "$window" ] && count=$((count + 1))
     done < <(find "$proj" -maxdepth 1 -type f -name '*.jsonl' -print0 2>/dev/null)
-  fi
+    printf '%s' "$count"
+}
 
-  # Per-line tolerant parse (stage 1: drop malformed lines) then aggregate
-  # over the survivors (stage 2), same two-stage style as dc_extract_last_text.
-  local mined
-  mined=$(
-    for t in "${transcripts[@]}"; do
-      jq -R 'fromjson? // empty' "$t" 2>/dev/null
+dc_loop_cost_mine_transcripts() {
+    local transcript
+    for transcript in "$@"; do
+        jq -R 'fromjson? // empty' "$transcript" 2>/dev/null
     done | jq -s '
       [ .[]
         | select(.type == "assistant")
@@ -260,64 +169,55 @@ dc_mine_token_usage() {
             }
         )
     ' 2>/dev/null
-  )
-  [ -n "$mined" ] || { echo "loop_cost: mining produced no output" >&2; printf '{}'; return 0; }
-  echo "$mined" | jq -e . >/dev/null 2>&1 || { echo "loop_cost: mining produced invalid JSON" >&2; printf '{}'; return 0; }
+}
 
-  # Price each model. jq -s with two inputs (mined per-model, price table).
-  local result
-  result=$(jq -sn \
-    --slurpfile per_model <(printf '%s' "$mined") \
-    --slurpfile prices "$prices_file" \
-    --argjson scanned "$scanned" \
-    --argjson headless_excluded "$headless_count" \
-    '
-    ($per_model[0]) as $pm
-    | ($prices[0]) as $pt
-    | ($pt.per_mtok // {}) as $rates
-    | (
-        $pm | to_entries | map(
-          .key as $model
-          # Rate lookup only, never the emitted key: transcripts record the
-          # resolved dated snapshot (e.g. claude-haiku-4-5-20251001) while
-          # the price table is keyed by the bare alias (claude-haiku-4-5).
-          # Strip a trailing -YYYYMMDD before indexing $rates so a dated
-          # snapshot still finds the alias rate; per_model/models_used
-          # below keep the raw $model string so they match transcript
-          # reality exactly.
-          | ($model | sub("-[0-9]{8}$"; "")) as $lookup_key
-          | .value as $t
-          | ($rates[$model] // $rates[$lookup_key]) as $r
-          | if $r == null then
-              { model: $model, priced: (.value + {usd_estimate: 0}), unpriced: true }
-            else
-              ($t.input_tokens/1000000*$r.input
-                + $t.output_tokens/1000000*$r.output
-                + $t.cache_read_tokens/1000000*$r.cache_read
-                + $t.cache_write_5m_tokens/1000000*$r.cache_write_5m
-                + $t.cache_write_1h_tokens/1000000*$r.cache_write_1h) as $usd
-              | { model: $model, priced: (.value + {usd_estimate: $usd}), unpriced: false }
-            end
-        )
-      ) as $priced_entries
-    | ($priced_entries | map({(.model): .priced}) | add // {}) as $per_model_out
-    | ($priced_entries | map(select(.unpriced) | .model)) as $unpriced_models
-    | {
-        schema_version: 1,
-        prices_as_of: ($pt.prices_as_of // ""),
-        price_source: ($pt.price_source // ""),
-        per_model: $per_model_out,
-        total_tokens: ([$per_model_out[] | .input_tokens + .output_tokens + .cache_read_tokens + .cache_write_5m_tokens + .cache_write_1h_tokens] | add // 0),
-        total_usd_estimate: ([$per_model_out[] | .usd_estimate] | add // 0),
-        transcripts_scanned: $scanned,
-        unpriced_models: $unpriced_models,
-        models_used: ($per_model_out | keys | sort),
-        headless_children_excluded_count: $headless_excluded,
-        notes: "headless claude -p child sessions excluded from per_model/total_tokens (own top-level session, no parent linkage to attribute their tokens) — see headless_children_excluded_count for how many candidates were detected in the same project dir within the activity window"
-      }
-    ' 2>/dev/null)
-
-  [ -n "$result" ] || { echo "loop_cost: pricing produced no output" >&2; printf '{}'; return 0; }
-  printf '%s' "$result"
-  return 0
+dc_mine_token_usage() {
+    local session="${1:-}" projects_dir="${CLAUDE_PROJECTS_DIR:-$HOME/.claude/projects}"
+    dc_loop_cost_session_or_error "$session" || return 0
+    local self_path
+    self_path="$(dc_loop_cost_self_path)"
+    local prices_file="${CLAUDE_MODEL_PRICES_FILE:-$(dirname "$self_path")/model_prices.json}"
+    command -v jq >/dev/null 2>&1 || {
+        echo "loop_cost: jq not found on PATH" >&2
+        printf '{}'
+        return 0
+    }
+    [ -f "$prices_file" ] || {
+        echo "loop_cost: prices file not found at $prices_file" >&2
+        printf '{}'
+        return 0
+    }
+    session="$(dc_loop_cost_sanitise_session "$session" "$self_path")"
+    local orch_transcript
+    orch_transcript="$(dc_loop_cost_orchestrator_transcript "$projects_dir" "$session")"
+    [ -n "$orch_transcript" ] || {
+        echo "loop_cost: no transcript found for session $session under $projects_dir" >&2
+        printf '{"error":"loop_cost: no transcript found for session %s","hint":"check the session id is the live orchestrator session and CLAUDE_PROJECTS_DIR points at the right projects dir"}' "$(dc_loop_cost_json_safe_string "$session")"
+        return 0
+    }
+    local proj
+    proj="$(dirname "$orch_transcript")"
+    local transcript
+    local -a transcripts=()
+    while IFS= read -r -d '' transcript; do transcripts+=("$transcript"); done < <(dc_loop_cost_transcripts "$orch_transcript" "$proj" "$session")
+    local mined
+    mined="$(dc_loop_cost_mine_transcripts "${transcripts[@]}")"
+    [ -n "$mined" ] || {
+        echo "loop_cost: mining produced no output" >&2
+        printf '{}'
+        return 0
+    }
+    printf '%s' "$mined" | jq -e . >/dev/null 2>&1 || {
+        echo "loop_cost: mining produced invalid JSON" >&2
+        printf '{}'
+        return 0
+    }
+    local result
+    result="$(dc_loop_cost_price_models "$mined" "$prices_file" "${#transcripts[@]}" "$(dc_loop_cost_headless_count "$orch_transcript" "$proj")")"
+    [ -n "$result" ] || {
+        echo "loop_cost: pricing produced no output" >&2
+        printf '{}'
+        return 0
+    }
+    printf '%s' "$result"
 }

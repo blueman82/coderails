@@ -6,16 +6,16 @@ predicate, or skip condition; the phase prose in SKILL.md covers what to *do*, t
 what makes a node *ready*.
 
 Before dispatching any candidate node, run the read-only readiness query
-`${PLUGIN_ROOT}/hooks/scripts/lib/graph_readiness.sh <path-to-progress.json> <node-id>`,
+`${PLUGIN_ROOT}/hooks/scripts/lib/graph_readiness.py <path-to-progress.json> <node-id>`,
 where `PLUGIN_ROOT` resolves as follows. Prefer `${CLAUDE_PLUGIN_ROOT}` when
 it is set in your shell — it is substituted in command frontmatter and in
 `hooks.json`'s own hook command strings, for both a directory-marketplace and
 a packaged install, but it is normally unset in an orchestrator-issued Bash
 call, since it is not substituted into your own Bash tool calls. Before
 dispatching against whatever it resolves to, confirm the script actually
-exists at that path (e.g. `[ -f "$PLUGIN_ROOT/hooks/scripts/lib/graph_readiness.sh" ]`)
+exists at that path (e.g. `[ -f "$PLUGIN_ROOT/hooks/scripts/lib/graph_readiness.py" ]`)
 — a packaged install's cache copy can predate this script's introduction, and
-`graph_readiness.sh`'s own `blocked` output is indistinguishable from a real
+`graph_readiness.py`'s own `blocked` output is indistinguishable from a real
 non-terminal predecessor, so a missing-script call would silently read as
 every node being blocked rather than as a resolution failure. If the file is
 missing, stop and report that PLUGIN_ROOT resolved to a directory without this
@@ -45,7 +45,7 @@ read-modify-write before releasing its join. Inside an authorised loop, the
 
 **Resolving and recording a wave — `graph_dispatch.sh`.** Use
 `${PLUGIN_ROOT}/hooks/scripts/lib/graph_dispatch.sh` (same `PLUGIN_ROOT`
-resolution as the `graph_readiness.sh` path above — prefer
+resolution as the `graph_readiness.py` path above — prefer
 `${CLAUDE_PLUGIN_ROOT}` when set, otherwise reuse the plugin root already
 visible in this session's rendered context; never guessed, never the invoking
 repo's toplevel, never the versioned plugin cache) for the S2.5/S2.6 fork
@@ -80,7 +80,7 @@ unlocked `jq` read of `progress.json`, before handing the folded result to
 `graph_executor_apply_wave`'s locked read-modify-write. Two orchestrator
 sessions calling `graph_dispatch_record` concurrently against the same
 `progress.json` could both read a stale `attempts` value, undercounting the
-retry bound. `graph_executor.sh`/`graph_readiness.sh` are the frozen,
+retry bound. `graph_executor.sh`/`graph_readiness.py` are the frozen,
 byte-verified contract this loop was scoped never to touch, so the fix is
 deferred rather than made here: single-orchestrator-per-`progress.json` (the
 existing "orchestrator is the only writer" rule two paragraphs up) is the
@@ -92,7 +92,7 @@ progress.json ever becomes a real scenario.`
 
 **`S9-wiki -> S9-docs` and the `J12-all-units` release — `graph_dispatch.sh`.**
 Use `${PLUGIN_ROOT}/hooks/scripts/lib/graph_dispatch.sh` (same `PLUGIN_ROOT`
-resolution as the `graph_readiness.sh` path above — prefer
+resolution as the `graph_readiness.py` path above — prefer
 `${CLAUDE_PLUGIN_ROOT}` when set, otherwise reuse the plugin root already
 visible in this session's rendered context; never guessed, never the invoking
 repo's toplevel, never the versioned plugin cache) for the tail of the graph,
@@ -105,7 +105,7 @@ past the last unit's merge gate:
    `Agent` call, then call `graph_dispatch_record` with the returned `wave_id`
    and `S9-wiki` under `results`. Only after that
    record call does a fresh `graph_dispatch_plan` resolve `S9-docs` to
-   `docs-auditor` — `graph_readiness.sh` reports `S9-docs` `blocked` until
+   `docs-auditor` — `graph_readiness.py` reports `S9-docs` `blocked` until
    `S9-wiki`'s outcome lands as `done`/`skipped`, same as any other sequential
    edge in this graph.
 2. `J12-all-units` is never dispatched. The exact wave record containing its

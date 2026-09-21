@@ -10,7 +10,7 @@
 #      rule actually matters, not just showing the green path.
 #   2. A sequential U3[i]->U4[i] link: graph_dispatch_plan resolves U3 to a
 #      real dispatch target (loop-worker), graph_dispatch_record folds a
-#      "done" result for it, and graph_readiness.sh then reports U4 ready.
+#      "done" result for it, and graph_readiness.py then reports U4 ready.
 #      U4 itself is orchestrator-internal (no Claude role-map entry) and is
 #      NOT dispatched via graph_dispatch_plan
 #      — this test does not invent one.
@@ -74,7 +74,7 @@ s26_id=$(printf '%s' "$plan_out" | jq -r 'select(.node_id=="S2.6") | .skill_id')
 # --- 1b: recording the exact active wave releases its satisfied join in
 # the same locked write, so downstream work becomes ready deterministically. ---
 record_ready_wave "$TMP/j2.json" '{"S2.5":{"outcome":"done"},"S2.6":{"outcome":"done"}}' >/dev/null
-post_release=$(bash "$LIB_DIR/graph_readiness.sh" "$TMP/j2.json" "S2.7a")
+post_release=$(python3 "$LIB_DIR/graph_readiness.py" "$TMP/j2.json" "S2.7a")
 j2_released=$(jq -r '.graph.joins.J2.released' "$TMP/j2.json")
 [ "$post_release" = "ready" ] && [ "$j2_released" = "true" ] &&
     ok "acceptance: exact wave result releases J2 and makes S2.7a ready" ||
@@ -96,9 +96,9 @@ u4_listed=$(printf '%s' "$plan_u3" | jq -r 'select(.node_id=="U4") | .node_id')
 
 # --- 2b: U4 blocked before U3 reports; U4 ready after graph_dispatch_record
 # folds a real "done" result for U3 (sequential link proven end to end) ---
-pre_u4=$(bash "$LIB_DIR/graph_readiness.sh" "$TMP/u34.json" "U4")
+pre_u4=$(python3 "$LIB_DIR/graph_readiness.py" "$TMP/u34.json" "U4")
 record_ready_wave "$TMP/u34.json" '{"U3":{"outcome":"done","evidence":"acceptance-test throwaway PR"}}' >/dev/null
-post_u4=$(bash "$LIB_DIR/graph_readiness.sh" "$TMP/u34.json" "U4")
+post_u4=$(python3 "$LIB_DIR/graph_readiness.py" "$TMP/u34.json" "U4")
 [ "$pre_u4" = "blocked" ] && [ "$post_u4" = "ready" ] &&
     ok "acceptance: U3->U4 sequential link — U4 blocked pre-U3, ready post-U3-done" ||
     fail "acceptance: U3->U4 sequential link" "pre_u4=$pre_u4 post_u4=$post_u4"
@@ -124,14 +124,14 @@ j28_skill=$(printf '%s' "$plan_j28" | jq -r 'select(.node_id=="J2.8") | .skill_i
 
 # --- 3b: U3 is BLOCKED before the explicit J2.8-release write, even though
 # S2.8/S2.7d are already done. NOTE: this does NOT exercise J2.8's own join
-# logic the way block 1's red half exercises J2 — graph_readiness.sh only
+# logic the way block 1's red half exercises J2 — graph_readiness.py only
 # consults the joins map for the QUERIED node, and U3 itself has no joins
 # entry (only J2.8 does), so this assertion takes the plain-edges branch
 # unconditionally and would report "blocked" regardless of whether J2.8's
 # join-release logic is correct. It only proves U3's own edge from J2.8 is
 # still unsatisfied pre-release — real join-release coverage for J2.8 lives
 # in 3a (kind:join, never a dispatch target) and 3c (ready post-release). ---
-pre_u3=$(bash "$LIB_DIR/graph_readiness.sh" "$TMP/j28.json" "U3")
+pre_u3=$(python3 "$LIB_DIR/graph_readiness.py" "$TMP/j28.json" "U3")
 [ "$pre_u3" = "blocked" ] &&
     ok "acceptance: U3's edge from J2.8 still unsatisfied pre-release (not a join-logic test, see comment above)" ||
     fail "acceptance: U3 should be blocked pre-release" "got=$pre_u3"
@@ -141,7 +141,7 @@ jq '.graph.nodes["J2.8"].status = "done"
     | .graph.nodes["J2.8"].outcome = "done"
     | .graph.joins["J2.8"].released = true' \
     "$TMP/j28.json" >"$TMP/j28.json.tmp" && mv "$TMP/j28.json.tmp" "$TMP/j28.json"
-post_u3=$(bash "$LIB_DIR/graph_readiness.sh" "$TMP/j28.json" "U3")
+post_u3=$(python3 "$LIB_DIR/graph_readiness.py" "$TMP/j28.json" "U3")
 [ "$post_u3" = "ready" ] &&
     ok "acceptance: second join beyond J2 — U3 ready after explicit J2.8 release write" ||
     fail "acceptance: U3 should be ready post-J2.8-release" "got=$post_u3"

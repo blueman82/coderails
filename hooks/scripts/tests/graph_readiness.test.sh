@@ -1,5 +1,5 @@
 #!/bin/bash
-# Unit test for graph_readiness.sh — pure read-only readiness query over
+# Unit test for graph_readiness.py — pure read-only readiness query over
 # progress.json's durable execution graph. Each case is paired with an
 # explicit negative control: a fixture built the same way, with only the
 # one deciding field flipped, so each assertion is proven to actually
@@ -7,7 +7,7 @@
 # shellcheck disable=SC2015 # Final assertion chain is the suite's established tally idiom.
 set -u
 
-HELPER="$(cd "$(dirname "$0")/.." && pwd)/lib/graph_readiness.sh"
+HELPER="$(cd "$(dirname "$0")/.." && pwd)/lib/graph_readiness.py"
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 
@@ -15,7 +15,7 @@ fails=0
 run_check() { # desc, fixture, node, expected_stdout, expected_exit
     local desc="$1" fixture="$2" node="$3" want_out="$4" want_exit="$5"
     local out rc
-    out=$(bash "$HELPER" "$fixture" "$node")
+    out=$(python3 "$HELPER" "$fixture" "$node")
     rc=$?
     if [ "$out" = "$want_out" ] && [ "$rc" = "$want_exit" ]; then
         printf 'ok   - %s\n' "$desc"
@@ -132,10 +132,10 @@ fi
 
 # The real assertion: SKILL.md's Execution-graph section names the script as
 # the pre-dispatch readiness mechanism.
-if section "$SKILL" | grep -q 'graph_readiness.sh'; then
-    printf 'ok   - %s\n' "SKILL.md's Execution-graph section names graph_readiness.sh as the pre-dispatch readiness mechanism"
+if section "$SKILL" | grep -q 'graph_readiness.py'; then
+    printf 'ok   - %s\n' "SKILL.md's Execution-graph section names graph_readiness.py as the pre-dispatch readiness mechanism"
 else
-    printf 'FAIL - %s\n' "graph_readiness.sh not found within SKILL.md's Execution-graph section"
+    printf 'FAIL - %s\n' "graph_readiness.py not found within SKILL.md's Execution-graph section"
     fails=$((fails + 1))
 fi
 

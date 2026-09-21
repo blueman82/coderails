@@ -55,6 +55,36 @@ codex_fixture::append_attempt() {
 	      wave_id:$wave,spawn_call_id:$call,agent_thread_id:$agent,task_complete_turn_id:$turn}'
 }
 
+codex_fixture::append_native_attempt() {
+	local session="$1" task="$2" attempt="$3" wave="$4"
+	local parent token call agent turn child
+	parent=$(codex_fixture::parent "$session")
+	token=$(printf 'native:%s:%s:%s' "$task" "$attempt" "$(wc -l <"$parent")" | shasum -a 256 | awk '{print substr($1,1,16)}')
+	call="call_native_$token"
+	agent="agent-native-$token"
+	turn="turn-native-$token"
+	jq -cn --arg task "$task" --arg call "$call" '{
+      type:"response_item",payload:{type:"function_call",name:"spawn_agent",call_id:$call,
+      arguments:({task_name:$task,agent_type:"loop-worker"}|tojson)}}' >>"$parent"
+	jq -cn --arg call "$call" --arg agent "$agent" --arg task "$task" '{
+      type:"event_msg",payload:{type:"item_completed",item:{type:"SubAgentActivity",kind:"started",
+      id:$call,agent_thread_id:$agent,agent_path:("/root/" + $task)}}}' >>"$parent"
+	child="$(dirname "$parent")/rollout-fixture-$agent.jsonl"
+	jq -cn --arg session "$session" --arg agent "$agent" --arg task "$task" '{
+      timestamp:"2026-08-21T00:00:01Z",type:"session_meta",
+      payload:{id:$agent,session_id:$session,parent_thread_id:$session,
+      thread_source:"subagent",agent_role:"loop-worker",
+      source:{subagent:{thread_spawn:{parent_thread_id:$session,depth:1,agent_path:("/root/" + $task),
+      agent_role:"loop-worker"}}}}' >"$child"
+	jq -cn --arg turn "$turn" '{timestamp:"2026-08-21T00:00:02Z",type:"event_msg",
+      payload:{type:"task_started",turn_id:$turn}}' >>"$child"
+	jq -cn --arg turn "$turn" '{timestamp:"2026-08-21T00:00:03Z",type:"event_msg",
+      payload:{type:"task_complete",turn_id:$turn}}' >>"$child"
+	jq -cn --argjson attempt "$attempt" --arg wave "$wave" --arg call "$call" \
+		--arg agent "$agent" --arg turn "$turn" '{kind:"codex_agent",attempt:$attempt,
+	      wave_id:$wave,spawn_call_id:$call,agent_thread_id:$agent,task_complete_turn_id:$turn}'
+}
+
 codex_fixture::append_followup() {
 	local session="$1" reference="$2" terminal="${3:-task_complete}" agent child turn
 	agent=$(jq -r '.agent_thread_id' <<<"$reference")

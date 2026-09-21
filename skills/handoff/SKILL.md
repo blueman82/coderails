@@ -109,7 +109,7 @@ Format:
 
 ````
 ```prompt
-Read memory file `project_<name>.md` for full context. 
+Read memory file `project_<name>.md` for full context.
 
 <1-2 sentence summary of where we are>
 

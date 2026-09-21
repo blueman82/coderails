@@ -58,28 +58,6 @@ if [[ "$PROVIDER" == codex && ("$MEMORY_TARGET_SET" -eq 1 || "$INTEGRITY_GATE_SE
     exit 1
 fi
 
-materialize_graph_semantics() {
-    local source="$PLUGIN_DIR/packages/graph-semantics/graph_semantics.py" target target_dir temporary
-    [[ -f "$source" ]] || {
-        printf 'Missing graph semantics source: %s\n' "$source" >&2
-        return 1
-    }
-    for target in "$PLUGIN_DIR/skills/agentic-loop/scripts/graph_semantics.py" "$PLUGIN_DIR/packages/codex/skills/agentic-loop/scripts/graph_semantics.py"; do
-        target_dir=$(dirname "$target")
-        mkdir -p "$target_dir"
-        temporary=$(mktemp "$target_dir/.graph-semantics.XXXXXX")
-        cp "$source" "$temporary"
-        chmod 644 "$temporary"
-        mv "$temporary" "$target"
-        cmp -s "$source" "$target" || {
-            printf 'Graph semantics materialization mismatch: %s\n' "$target" >&2
-            return 1
-        }
-    done
-}
-
-[[ "$DRY_RUN" -eq 1 ]] || materialize_graph_semantics
-
 # ── ANSI ──────────────────────────────────────────────────────────────────────
 R='\033[0;31m' BR='\033[1;31m'
 G='\033[0;32m' BG='\033[1;32m'

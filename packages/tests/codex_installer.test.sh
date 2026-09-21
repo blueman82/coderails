@@ -24,6 +24,9 @@ check() {
     if "$@"; then pass "$label"; else fail "$label"; fi
 }
 
+check "Claude generated graph semantics matches maintained source" cmp -s "$GRAPH_SOURCE" "$CLAUDE_GRAPH"
+check "Codex generated graph semantics matches maintained source" cmp -s "$GRAPH_SOURCE" "$CODEX_GRAPH"
+
 mkdir -p "$FAKE_BIN"
 for tool in gh git jq; do
     printf '#!/usr/bin/env bash\nexit 0\n' >"$FAKE_BIN/$tool"
@@ -91,8 +94,6 @@ registered_path=$(jq -r '.extraKnownMarketplaces.coderails.source.path // "null"
 check "default Claude install succeeds with an empty HOME" test "$empty_claude_rc" -eq 0
 check "default Claude install registers its marketplace" test "$registered_path" = "$ROOT"
 check "default Claude install does not create Codex state" test ! -e "$home/.codex"
-check "Claude install materializes graph semantics" test -f "$CLAUDE_GRAPH"
-check "Claude graph semantics matches maintained source" cmp -s "$GRAPH_SOURCE" "$CLAUDE_GRAPH"
 check "Claude install leaves graph source unchanged" test "$(cksum "$GRAPH_SOURCE")" = "$GRAPH_SOURCE_CHECKSUM"
 
 # Codex install stays isolated from Claude state and installs every packaged agent.
@@ -113,8 +114,6 @@ check "Codex install explains skipped hooks" \
     grep -Fxq "Codex skips plugin hooks until you review and trust them." "$TMP/codex.out"
 check "Codex install explains hook trust" \
     grep -Fxq "Start a fresh Codex session, run /hooks, then review and trust the Coderails hooks." "$TMP/codex.out"
-check "Codex install materializes graph semantics" test -f "$CODEX_GRAPH"
-check "Codex graph semantics matches maintained source" cmp -s "$GRAPH_SOURCE" "$CODEX_GRAPH"
 check "Codex install leaves graph source unchanged" test "$(cksum "$GRAPH_SOURCE")" = "$GRAPH_SOURCE_CHECKSUM"
 
 # An explicit, absent CODEX_HOME exists before either plugin command runs.

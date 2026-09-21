@@ -243,7 +243,7 @@ a_after_s5=$(jq -c '.graph.nodes.A' "$TMP/s5_fixture.json")
     fail "non-object node value fails closed" "rc=$rc7 a_after=$a_after_s5"
 
 # --- S4: ready_nodes fails closed on unparseable progress.json (symmetry
-# with graph_readiness.sh and apply_wave, both of which fail closed on the
+# with graph_readiness.py and apply_wave, both of which fail closed on the
 # same input) instead of silently reporting zero ready nodes.
 printf 'not json' >"$TMP/corrupt.json"
 ready3=$(graph_executor_ready_nodes "$TMP/corrupt.json")

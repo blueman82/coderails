@@ -144,6 +144,8 @@ fi
 
 mkdir -p "$fixture/prose"
 printf '# return value = 1\n' >"$fixture/prose/prose.py"
+printf '# git merge conflict-resolution operations are exempt\n' >"$fixture/prose/security-comment.sh"
+printf '#   git push --force origin main\n' >"$fixture/prose/documented-examples.sh"
 python3 "$checker" --strict --root "$fixture/prose" >/dev/null
 
 printf '# def removed():\n' >"$fixture/commented.py"
@@ -153,6 +155,25 @@ if python3 "$checker" --strict --root "$fixture" >/dev/null 2>&1; then
 else
     :
 fi
+rm "$fixture/commented.py"
+
+printf '# git status --short\n' >"$fixture/commented-git.sh"
+if python3 "$checker" --strict --root "$fixture" >/dev/null 2>&1; then
+    echo 'quality.test: commented Git command negative control unexpectedly passed' >&2
+    exit 1
+else
+    :
+fi
+rm "$fixture/commented-git.sh"
+
+printf '# echo "removed"\n# return 1\n' >"$fixture/commented-shell.sh"
+if python3 "$checker" --strict --root "$fixture" >/dev/null 2>&1; then
+    echo 'quality.test: commented shell command negative control unexpectedly passed' >&2
+    exit 1
+else
+    :
+fi
+rm "$fixture/commented-shell.sh"
 
 printf 'return value = 1\n' >"$fixture/bad.py"
 if python3 "$checker" --strict --root "$fixture" >/dev/null 2>&1; then

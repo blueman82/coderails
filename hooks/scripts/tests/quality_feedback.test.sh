@@ -2,7 +2,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "$0")/../../.." && pwd)"
-hook="$repo_root/hooks/scripts/quality_feedback.sh"
+hook="$repo_root/hooks/scripts/quality_feedback.py"
 fixture="$(mktemp -d "${TMPDIR:-/tmp}/coderails-quality-feedback.XXXXXX")"
 trap 'rm -rf "$fixture"' EXIT
 

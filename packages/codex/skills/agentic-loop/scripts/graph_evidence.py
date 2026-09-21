@@ -8,7 +8,14 @@ import re
 from pathlib import Path
 from typing import Any, cast
 
-from graph_identity import REFERENCE_KEYS, GraphError, classify_worker_evidence, is_frozen_loop_evals, task_name
+from graph_identity import (
+    REFERENCE_KEYS,
+    GraphError,
+    classify_worker_evidence,
+    is_frozen_loop_evals,
+    task_name,
+    task_node,
+)
 from json_types import JsonValue
 
 
@@ -78,7 +85,17 @@ def _payload(record: dict[str, Any]) -> dict[str, Any]:
     return cast(dict[str, Any], payload) if isinstance(payload, dict) else {}
 
 
-def _dispatch(record: dict[str, Any]) -> tuple[str, str, str, str] | None:
+def _canonical_task(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    try:
+        task_node(value)
+    except GraphError:
+        return None
+    return value
+
+
+def _legacy_dispatch(record: dict[str, Any]) -> tuple[str, str, str, str, str | None] | None:
     payload = _payload(record)
     raw_item = payload.get("item") if record.get("type") == "event_msg" else None
     if not isinstance(raw_item, dict):
@@ -107,21 +124,62 @@ def _dispatch(record: dict[str, Any]) -> tuple[str, str, str, str] | None:
         or not isinstance(agent.get("agent_nickname"), str)
     ):
         return None
-    marker = prompt.split("\n", 1)[0]
-    match = re.fullmatch(r"CODERAILS_GRAPH_TASK=(loop_worker_[0-9a-f]+(?:_a[2-9][0-9]*)?)", marker)
-    if match is None:
+    task = _canonical_task(prompt.split("\n", 1)[0].removeprefix("CODERAILS_GRAPH_TASK="))
+    if task is None:
         return None
-    return dispatch_id, match.group(1), receivers[0], agent["agent_nickname"]
+    return dispatch_id, task, receivers[0], agent["agent_nickname"], None
 
 
-def _child_terminal(parent_session: str, agent_thread_id: str, agent_nickname: str) -> str:
+def _native_function_call(record: dict[str, Any]) -> tuple[str, str] | None:
+    if record.get("type") != "response_item":
+        return None
+    item = _payload(record)
+    if item.get("type") != "function_call" or item.get("name") != "spawn_agent":
+        return None
+    call_id, arguments = item.get("call_id"), item.get("arguments")
+    if not isinstance(call_id, str) or not isinstance(arguments, str):
+        return None
+    try:
+        parsed = json.loads(arguments)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    parsed_object = cast(dict[str, Any], parsed)
+    if parsed_object.get("agent_type") != "loop-worker":
+        return None
+    task = _canonical_task(parsed_object.get("task_name"))
+    return (call_id, task) if task is not None else None
+
+
+def _native_activity(record: dict[str, Any]) -> tuple[str, str, str] | None:
+    payload = _payload(record)
+    item = payload.get("item") if record.get("type") == "event_msg" else None
+    if not isinstance(item, dict):
+        return None
+    item = cast(dict[str, Any], item)
+    call_id, agent_thread_id, agent_path = item.get("id"), item.get("agent_thread_id"), item.get("agent_path")
+    if (
+        item.get("type") != "SubAgentActivity"
+        or item.get("kind") != "started"
+        or not isinstance(call_id, str)
+        or not isinstance(agent_thread_id, str)
+        or not isinstance(agent_path, str)
+    ):
+        return None
+    return call_id, agent_thread_id, agent_path
+
+
+def _child_terminal(
+    parent_session: str, agent_thread_id: str, agent_nickname: str | None, expected_path: str | None
+) -> str:
     records = _records(_thread_transcript(agent_thread_id), f"child {agent_thread_id} transcript")
     metadata = _payload(records[0][1])
     if (
         metadata.get("parent_thread_id") != parent_session
         or metadata.get("session_id") != parent_session
         or metadata.get("thread_source") != "subagent"
-        or metadata.get("agent_nickname") != agent_nickname
+        or (agent_nickname is not None and metadata.get("agent_nickname") != agent_nickname)
         or metadata.get("agent_role") != "loop-worker"
     ):
         raise GraphError(f"child {agent_thread_id} belongs to a different graph dispatch")
@@ -133,9 +191,9 @@ def _child_terminal(parent_session: str, agent_thread_id: str, agent_nickname: s
     if (
         spawn.get("parent_thread_id") != parent_session
         or spawn.get("depth") != 1
-        or spawn.get("agent_nickname") != agent_nickname
+        or (agent_nickname is not None and spawn.get("agent_nickname") != agent_nickname)
         or spawn.get("agent_role") != "loop-worker"
-        or spawn.get("agent_path") is not None
+        or spawn.get("agent_path") != expected_path
     ):
         raise GraphError(f"child {agent_thread_id} has invalid graph dispatch metadata")
     started_at = records[0][1].get("timestamp")
@@ -172,11 +230,27 @@ def _reference(value: object, label: str) -> dict[str, Any]:
 
 def _parent_indexes(
     records: list[tuple[int, dict[str, Any]]],
-) -> dict[str, list[tuple[int, str, str, str]]]:
-    spawns: dict[str, list[tuple[int, str, str, str]]] = {}
+) -> dict[str, list[tuple[int, str, str, str | None, str | None]]]:
+    """Index legacy dispatches and native function-call/activity joins."""
+    spawns: dict[str, list[tuple[int, str, str, str | None, str | None]]] = {}
+    native_calls: dict[str, list[tuple[int, str]]] = {}
+    native_activities: dict[str, list[tuple[int, str, str]]] = {}
     for line_number, record in records:
-        if dispatch := _dispatch(record):
+        if dispatch := _legacy_dispatch(record):
             spawns.setdefault(dispatch[0], []).append((line_number, *dispatch[1:]))
+        if call := _native_function_call(record):
+            native_calls.setdefault(call[0], []).append((line_number, call[1]))
+        if activity := _native_activity(record):
+            native_activities.setdefault(activity[0], []).append((line_number, *activity[1:]))
+    for call_id, calls in native_calls.items():
+        activities = native_activities.get(call_id, [])
+        if len(calls) != 1 or not activities:
+            continue
+        call_line, observed_task = calls[0]
+        for activity_line, agent_thread_id, agent_path in activities:
+            if activity_line <= call_line or agent_path != f"/root/{observed_task}":
+                continue
+            spawns.setdefault(call_id, []).append((call_line, observed_task, agent_thread_id, None, agent_path))
     return spawns
 
 
@@ -184,17 +258,17 @@ def _verify_reference(
     state: dict[str, Any],
     node_id: str,
     reference: dict[str, Any],
-    indexes: dict[str, list[tuple[int, str, str, str]]],
+    indexes: dict[str, list[tuple[int, str, str, str | None, str | None]]],
 ) -> int:
     spawns = indexes
     expected_task = task_name(node_id, reference["attempt"])
     call_id = reference["spawn_call_id"]
     if len(spawns.get(call_id, [])) != 1:
         raise GraphError(f"node {node_id} spawn reference is missing or duplicate")
-    spawn_line, observed_task, observed_agent, nickname = spawns[call_id][0]
+    spawn_line, observed_task, observed_agent, nickname, expected_path = spawns[call_id][0]
     if observed_task != expected_task or observed_agent != reference["agent_thread_id"]:
         raise GraphError(f"node {node_id} spawn reference has the wrong task")
-    terminal = _child_terminal(state["session_id"], reference["agent_thread_id"], nickname)
+    terminal = _child_terminal(state["session_id"], reference["agent_thread_id"], nickname, expected_path)
     if terminal != reference["task_complete_turn_id"]:
         raise GraphError(f"node {node_id} task_complete reference does not match its child")
     return spawn_line
@@ -295,8 +369,8 @@ def bind_worker_evidence(
         ]
         if len(matching) != 1:
             raise GraphError(f"node {node_id} must have exactly one current-wave spawn")
-        call_id, (_, _, agent_thread_id, nickname) = matching[0]
-        terminal = _child_terminal(state["session_id"], agent_thread_id, nickname)
+        call_id, (_, _, agent_thread_id, nickname, expected_path) = matching[0]
+        terminal = _child_terminal(state["session_id"], agent_thread_id, nickname, expected_path)
         reference = {
             "kind": "codex_agent",
             "attempt": attempt,
@@ -324,20 +398,10 @@ def has_current_wave_dispatch(state: dict[str, Any], active_wave: dict[str, Any]
         task_name(node_id, state["graph"]["nodes"][node_id]["retry"]["attempts"] + 1)
         for node_id in active_wave["nodes"]
     }
-    for line_number, record in _records(_thread_transcript(state["session_id"]), "parent transcript"):
-        raw_item = _payload(record).get("item")
-        if not isinstance(raw_item, dict) or line_number <= cursor:
-            continue
-        item = cast(dict[str, Any], raw_item)
-        prompt = item.get("prompt")
-        if (
-            item.get("type") == "CollabAgentToolCall"
-            and item.get("tool") == "spawn_agent"
-            and isinstance(prompt, str)
-            and prompt.split("\n", 1)[0].removeprefix("CODERAILS_GRAPH_TASK=") in expected
-        ):
-            return True
-    return False
+    return any(
+        len(items) == 1 and items[0][0] > cursor and items[0][1] in expected
+        for items in _parent_indexes(_records(_thread_transcript(state["session_id"]), "parent transcript")).values()
+    )
 
 
 def validate_worker_evidence(state: dict[str, Any]) -> None:

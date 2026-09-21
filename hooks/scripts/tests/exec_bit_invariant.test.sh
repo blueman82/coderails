@@ -49,7 +49,7 @@ manifest_paths=(
     hooks/scripts/lib/discipline_common.sh
     hooks/scripts/lib/loop_cost.sh
     hooks/scripts/lib/loop_state_common.sh
-    hooks/scripts/lib/graph_readiness.sh
+    hooks/scripts/lib/graph_readiness.py
     hooks/scripts/lib/graph_executor.sh
     hooks/scripts/lib/graph_dispatch.sh
     hooks/scripts/lib/graph_evidence.sh
@@ -65,33 +65,33 @@ manifest_paths=(
     scripts/post_review.sh
     scripts/post_evals.sh
     scripts/push.sh
-    hooks/scripts/agent_model_routing_nudge.sh
-    hooks/scripts/agent_only_gate.sh
+    hooks/scripts/agent_model_routing_nudge.py
+    hooks/scripts/agent_only_gate.py
     hooks/scripts/check_confidence_labels.sh
     hooks/scripts/check_verify_loop.sh
-    hooks/scripts/comment_citation_gate.sh
-    hooks/scripts/crack_on_gate.sh
-    hooks/scripts/crack_on_prose_gate.sh
+    hooks/scripts/comment_citation_gate.py
+    hooks/scripts/crack_on_gate.py
+    hooks/scripts/crack_on_prose_gate.py
     hooks/scripts/destructive_bash_gate.sh
     hooks/scripts/enforce_pr_workflow.sh
-    hooks/scripts/inject_bootstrap.sh
-    hooks/scripts/inject_context.sh
+    hooks/scripts/inject_bootstrap.py
+    hooks/scripts/inject_context.py
     hooks/scripts/loop_stall_guard.sh
     hooks/scripts/loop_dispatch_guard.sh
     hooks/scripts/loop_state_guard.sh
-    hooks/scripts/no_edit_on_main.sh
-    hooks/scripts/offload_push_guard.sh
+    hooks/scripts/no_edit_on_main.py
+    hooks/scripts/offload_push_guard.py
     hooks/scripts/remember_inject_cap_guard.sh
     hooks/scripts/test_gate.py
     hooks/scripts/unregistered_loop_guard.sh
-    hooks/scripts/verification_volume_ceiling.sh
+    hooks/scripts/verification_volume_ceiling.py
     hooks/scripts/voice_announce.sh
     hooks/scripts/wiki_taxonomy_gate.sh
     skills/dashboard/runner/bin/sweeper.sh
     skills/dashboard/runner/bin/seed-and-sweep.sh
     launchd/install-routines.sh
     launchd/uninstall-routines.sh
-    hooks/scripts/quality_feedback.sh
+    hooks/scripts/quality_feedback.py
     scripts/quality/check.sh
 )
 manifest_modes=(

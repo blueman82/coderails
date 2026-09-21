@@ -85,7 +85,7 @@ whose worker went idle without reporting — currently only exercised by `graph_
 enum allowlist and `graph_readiness.test.sh`'s non-terminal-treatment cases; no code path in this
 repo writes it to `progress.json` today. Like every value other than `done`/`skipped`, it is not
 terminal-success, so it cannot satisfy a dependent edge or a `mode:"all"` join's readiness (see
-`hooks/scripts/lib/graph_readiness.sh`, which treats it generically as non-terminal). Per
+`hooks/scripts/lib/graph_readiness.py`, which treats it generically as non-terminal). Per
 `SKILL.md`'s Phase 4 ("idle is not failure"), any future producer of this value must not treat a
 bare idle signal as sufficient evidence — it must be paired with an artifact check.
 `hooks/scripts/lib/graph_executor.sh` enforces this structurally: any node whose merged `status`

@@ -30,7 +30,7 @@ without making an unrelated edit uncommittable.
   Bash lint/format findings when those tools are installed, the shell test
   suites.
 - Warn-only during local iteration: full-tree inventory and `PostToolUse`
-  feedback from `hooks/scripts/quality_feedback.sh`. The edit hook always exits
+  feedback from `hooks/scripts/quality_feedback.py`. The edit hook always exits
   successfully and cannot block a write.
 - Existing Coderails workflow, integrity, task-eval, and
   protected-file hooks remain authoritative and are not bypassed.

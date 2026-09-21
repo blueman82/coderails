@@ -1,7 +1,7 @@
 #!/bin/bash
 # shellcheck disable=SC2015  # test assertions intentionally use condition && ok || fail
 # Tests for graph_dispatch.sh (Claude-provider dispatch layer on top of
-# graph_executor.sh/graph_readiness.sh, reused verbatim). Covers:
+# graph_executor.sh/graph_readiness.py, reused verbatim). Covers:
 #   1. plan: ready-wave computation resolves each ready node's graph_role
 #      through the Claude plugin's fixed role map.
 #   2. plan: an unmapped graph_role fails closed as unresolved, never

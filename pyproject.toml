@@ -22,8 +22,14 @@ include = [
   "packages/codex/skills/agentic-loop/scripts",
   "hooks/scripts/test_gate.py",
   "hooks/scripts/tests/test_gate_test.py",
+  "hooks/scripts/agent_model_routing_nudge.py",
+  "hooks/scripts/inject_bootstrap.py",
+  "hooks/scripts/inject_context.py",
+  "hooks/scripts/lib/graph_readiness.py",
 ]
 
 [tool.mypy]
 python_version = "3.9"
 strict = true
+explicit_package_bases = true
+mypy_path = "hooks/scripts"

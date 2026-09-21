@@ -3,18 +3,39 @@
 #  push.sh │ stage → commit → push → PR
 #═══════════════════════════════════════════════════════════════════════════════
 set -euo pipefail
+# shellcheck disable=SC1091 # Runtime-relative library path is intentionally dynamic.
 source "$(dirname "$0")/lib/git-common.sh"
+
+push::commit() {
+    local msg="$1" jira_key="$2"
+    shift 2
+
+    dirty || return 0
+    git add -u
+    if (($# > 0)); then
+        git add -- "$@"
+    fi
+    local untracked
+    untracked=$(git status --porcelain | grep '^??' | cut -c4- || true)
+    if [[ -n "$untracked" ]]; then
+        warn "Untracked files not staged (run 'git add' explicitly to include them):"
+        while IFS= read -r file; do warn "  $file"; done <<<"$untracked"
+    fi
+    [[ -n $(git diff --cached --name-only) ]] || return 0
+    if [[ -z "$msg" ]]; then
+        local file_count
+        file_count=$(git diff --cached --name-only | wc -l | tr -d ' ')
+        msg="Update ${file_count} files"
+    fi
+    [[ -n "$jira_key" ]] && msg="${jira_key} ${msg}"
+    git commit -m "$msg" && ok "Committed: $msg"
+}
 
 push::main() {
     local force_with_lease=0 msg="" want_add=0
     local -a add_paths=()
-    # --force-with-lease is a long-form-only opt-in flag (no -f alias — -f
-    # collides with git's own short force flag). require::feature below
-    # already guarantees a non-main branch before the push step runs.
-    # --add <path> is repeatable (--add a --add b, not --add a b) — a for-loop
-    # over "$@" can't consume "the next token" for a multi-value flag, but a
-    # one-value-per-flag repeat is trivial: a `want_add` latch consumes
-    # exactly the arg immediately following each `--add`.
+    # --force-with-lease has no -f alias; require::feature ensures a non-main branch.
+    # --add <path> is repeatable; want_add consumes the token after each --add.
     for arg in "$@"; do
         if [[ "$want_add" -eq 1 ]]; then
             add_paths+=("$arg")
@@ -27,7 +48,8 @@ push::main() {
             msg="$arg"
         fi
     done
-    local br=$(branch)
+    local br
+    br=$(branch)
 
     require::feature
     require::repo
@@ -38,28 +60,14 @@ push::main() {
 
     step "$(repo) ─ $br → $(main)${jira_key:+ [$jira_key]}"
 
-    # ─── Commit ───────────────────────────────────────────────────────────────
-    if dirty; then
-        git add -u
-        [[ ${#add_paths[@]} -gt 0 ]] && git add -- "${add_paths[@]}"
-        local untracked; untracked=$(git status --porcelain | grep '^??' | cut -c4- || true)
-        if [[ -n "$untracked" ]]; then
-            warn "Untracked files not staged (run 'git add' explicitly to include them):"
-            while IFS= read -r f; do warn "  $f"; done <<< "$untracked"
-        fi
-        if [[ -n $(git diff --cached --name-only) ]]; then
-            if [[ -z "$msg" ]]; then
-                local file_count; file_count=$(git diff --cached --name-only | wc -l | tr -d ' ')
-                msg="Update ${file_count} files"
-            fi
-            # Prefix commit message with JIRA key so it appears in GitHub commit list
-            # and JIRA's GitHub integration links it even after squash merge
-            [[ -n "$jira_key" ]] && msg="${jira_key} ${msg}"
-            git commit -m "$msg" && ok "Committed: $msg"
-        fi
+    # Prefix commit messages with the configured Jira key for GitHub/Jira linking.
+    if ((${#add_paths[@]} > 0)); then
+        push::commit "$msg" "$jira_key" "${add_paths[@]}"
+    else
+        push::commit "$msg" "$jira_key"
     fi
     if [[ $(ahead) -eq 0 ]]; then
-        pr::exists && ok "Up to date │ $(pr::url)" || info "Nothing to push"
+        if pr::exists; then ok "Up to date │ $(pr::url)"; else info "Nothing to push"; fi
         return 0
     fi
 
@@ -93,13 +101,14 @@ push::main() {
     # Positive verification: confirm the push actually landed. `git push`
     # updates the remote-tracking ref on success, so origin/$br should already
     # be current without a separate fetch.
-    [[ "$(git rev-parse "origin/$br")" == "$(git rev-parse HEAD)" ]] \
-        || err "Push reported success but origin/$br does not match local HEAD"
+    [[ "$(git rev-parse "origin/$br")" == "$(git rev-parse HEAD)" ]] ||
+        err "Push reported success but origin/$br does not match local HEAD"
     ok "Pushed $(ahead) commit(s)"
 
     # ─── PR ───────────────────────────────────────────────────────────────────
     if pr::exists; then
-        local num=$(pr::num)
+        local num
+        num=$(pr::num)
         gh pr comment "$num" -b "🔄 Pushed" &>/dev/null || true
         ok "Updated PR #$num │ $(pr::url)"
     else
@@ -110,7 +119,8 @@ push::main() {
         title=${title#fix/}
         # Prefix PR title with JIRA key — JIRA GitHub app picks this up for linking
         [[ -n "$jira_key" ]] && title="${jira_key} ${title}"
-        local url=$(gh pr create -t "$title" -b "$(ahead_list | head -10)" -B "$(main)")
+        local url
+        url=$(gh pr create -t "$title" -b "$(ahead_list | head -10)" -B "$(main)")
         ok "Created │ $url"
     fi
 

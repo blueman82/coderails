@@ -7,7 +7,7 @@
 # progress.json and the real Claude role map. Covers:
 #   1. S9-wiki -> S9-docs sequential resolution: graph_dispatch_plan
 #      resolves S9-wiki to wiki-writer, graph_dispatch_record folds a
-#      "done" result for it, graph_readiness.sh then reports S9-docs
+#      "done" result for it, graph_readiness.py then reports S9-docs
 #      ready (it wasn't before), and graph_dispatch_plan resolves S9-docs
 #      to docs-auditor. Plain sequential edge, no join involved.
 #   2/3. J12-all-units join, red half then green half: two
@@ -69,9 +69,9 @@ s9docs_listed=$(printf '%s' "$plan1" | jq -r 'select(.node_id=="S9-docs") | .nod
 
 # --- 1b: S9-docs blocked before S9-wiki reports; ready after
 # graph_dispatch_record folds a real "done" result for S9-wiki ---
-pre_s9docs=$(bash "$LIB_DIR/graph_readiness.sh" "$TMP/s9.json" "S9-docs")
+pre_s9docs=$(python3 "$LIB_DIR/graph_readiness.py" "$TMP/s9.json" "S9-docs")
 record_ready_wave "$TMP/s9.json" '{"S9-wiki":{"outcome":"done","evidence":"acceptance-test throwaway wiki ingest"}}' >/dev/null
-post_s9docs=$(bash "$LIB_DIR/graph_readiness.sh" "$TMP/s9.json" "S9-docs")
+post_s9docs=$(python3 "$LIB_DIR/graph_readiness.py" "$TMP/s9.json" "S9-docs")
 [ "$pre_s9docs" = "blocked" ] && [ "$post_s9docs" = "ready" ] &&
     ok "S9-wiki -> S9-docs sequential link — S9-docs blocked pre-S9-wiki, ready post-S9-wiki-done" ||
     fail "S9-wiki->S9-docs sequential link" "pre_s9docs=$pre_s9docs post_s9docs=$post_s9docs"
@@ -95,7 +95,7 @@ jq -n '{ graph: { nodes: {
      joins: {"J12-all-units":{mode:"all", inputs:["U4b-merge-gate[1]","U4b-merge-gate[2]"]}} } }' >"$TMP/j12.json"
 stamp_identity "$TMP/j12.json"
 record_ready_wave "$TMP/j12.json" '{"U4b-merge-gate[1]":{"outcome":"done"},"U4b-merge-gate[2]":{"outcome":"done"}}' >/dev/null
-post_release=$(bash "$LIB_DIR/graph_readiness.sh" "$TMP/j12.json" "S9-wiki")
+post_release=$(python3 "$LIB_DIR/graph_readiness.py" "$TMP/j12.json" "S9-wiki")
 j12_released=$(jq -r '.graph.joins["J12-all-units"].released' "$TMP/j12.json")
 [ "$post_release" = "ready" ] && [ "$j12_released" = "true" ] &&
     ok "completed wave releases J12-all-units and makes S9-wiki ready" ||

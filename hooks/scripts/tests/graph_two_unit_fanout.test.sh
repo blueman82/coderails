@@ -1,6 +1,6 @@
 #!/bin/bash
 # Integration test: A || B -> C fan-out/join shape, proven end-to-end via
-# actual graph_readiness.sh invocations (not hand-asserted join logic) — the
+# actual graph_readiness.py invocations (not hand-asserted join logic) — the
 # acceptance shape for U3_graph_executor's fan-out/join contract.
 #
 # Shape: P (predecessor) -> A, P -> B (fan-out); A -> C, B -> C, joined by a
@@ -12,7 +12,7 @@
 # shellcheck disable=SC2015 # Final assertion chain is the suite's established tally idiom.
 set -u
 
-HELPER="$(cd "$(dirname "$0")/.." && pwd)/lib/graph_readiness.sh"
+HELPER="$(cd "$(dirname "$0")/.." && pwd)/lib/graph_readiness.py"
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 
@@ -20,7 +20,7 @@ fails=0
 run_check() { # desc, fixture, node, expected_stdout, expected_exit
     local desc="$1" fixture="$2" node="$3" want_out="$4" want_exit="$5"
     local out rc
-    out=$(bash "$HELPER" "$fixture" "$node")
+    out=$(python3 "$HELPER" "$fixture" "$node")
     rc=$?
     if [ "$out" = "$want_out" ] && [ "$rc" = "$want_exit" ]; then
         printf 'ok   - %s\n' "$desc"

@@ -19,7 +19,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 HOOKS_JSON="${1:-$REPO_ROOT/hooks/hooks.json}"
 READ_T_FLOOR=5
-EXPECTED_BACKSTOP_COUNT=19
+EXPECTED_BACKSTOP_COUNT=10
 
 fails=0
 
@@ -128,11 +128,11 @@ else
     check "test_gate.py uses the five-second select() bounded read" "ok" "missing"
 fi
 
-# --- Guard: UserPromptSubmit registers exactly two hooks (inject_context.sh,
-# crack_on_gate.sh) ---
+# --- Guard: UserPromptSubmit registers exactly two hooks (inject_context.py,
+# crack_on_gate.py) ---
 # discipline_catchup.sh was retired with no shim/flag/fallback (clean break);
 # this pins the registration so a re-add or a stray extra entry fails loud.
-# crack_on_gate.sh joined as the deliberate second entry (raw-prompt crack-on
+# crack_on_gate.py joined as the deliberate second entry (raw-prompt crack-on
 # stamping — a SEPARATE hook, not a change to inject_context's job).
 # Checks the matcher-array length too — a re-add as a SECOND matcher object
 # (UserPromptSubmit[1]) would otherwise sail past a check that only looks
@@ -150,12 +150,12 @@ ups_cmd1=$(echo "$ups_result" | awk '{print $3}')
 
 check "UserPromptSubmit[0].hooks length" "2" "$ups_count"
 case "$ups_cmd0" in
-*inject_context.sh*) check "UserPromptSubmit[0] hook 1 references inject_context.sh" "ok" "ok" ;;
-*) check "UserPromptSubmit[0] hook 1 references inject_context.sh" "ok" "FAIL:$ups_cmd0" ;;
+*inject_context.py*) check "UserPromptSubmit[0] hook 1 references inject_context.py" "ok" "ok" ;;
+*) check "UserPromptSubmit[0] hook 1 references inject_context.py" "ok" "FAIL:$ups_cmd0" ;;
 esac
 case "$ups_cmd1" in
-*crack_on_gate.sh*) check "UserPromptSubmit[0] hook 2 references crack_on_gate.sh" "ok" "ok" ;;
-*) check "UserPromptSubmit[0] hook 2 references crack_on_gate.sh" "ok" "FAIL:$ups_cmd1" ;;
+*crack_on_gate.py*) check "UserPromptSubmit[0] hook 2 references crack_on_gate.py" "ok" "ok" ;;
+*) check "UserPromptSubmit[0] hook 2 references crack_on_gate.py" "ok" "FAIL:$ups_cmd1" ;;
 esac
 
 # --- Guard: plugin.json and marketplace.json versions stay in lockstep ---

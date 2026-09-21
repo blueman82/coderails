@@ -11,7 +11,7 @@
 #
 #   graph_executor_ready_nodes <progress.json path>
 #     Enumerates graph.nodes and prints one ready node-id per line, by
-#     calling graph_readiness.sh (existing, read-only, reused verbatim)
+#     calling graph_readiness.py (existing, read-only, reused verbatim)
 #     for each. Never writes. Contract: exit 0 (regardless of how many/few
 #     nodes are ready), UNLESS path is missing OR unparseable (exit 1, no
 #     stdout) — fails closed on a corrupt file the same way apply_wave
@@ -132,7 +132,7 @@ graph_executor_ready_nodes() {
     graph_executor_graph_valid "$path" || return 1
     local node
     jq -e -r '(.graph.nodes // {}) | keys[]' "$path" 2>/dev/null | while IFS= read -r node; do
-        [ "$(bash "$GRAPH_EXECUTOR_DIR/graph_readiness.sh" "$path" "$node")" = "ready" ] && printf '%s\n' "$node"
+        [ "$(python3 "$GRAPH_EXECUTOR_DIR/graph_readiness.py" "$path" "$node")" = "ready" ] && printf '%s\n' "$node"
     done
     local jq_rc="${PIPESTATUS[0]}"
     [ "$jq_rc" -eq 0 ] || [ "$jq_rc" -eq 4 ] || return 1

@@ -159,14 +159,20 @@ def check_bash(path: Path, text: str, path_key: str, function_limit: int) -> lis
 
 COMMENTED_CODE = (
     re.compile(
-        r"^\s*#\s*(?:def\s+\w+\s*\(|class\s+\w+\s*[:(]|from\s+\S+\s+import\s+|import\s+\S+|return\s+(?:[0-9]+|\w+\s*[+*/-])\b)"
+        r"^\s*#\s*(?:def\s+\w+\s*\(|class\s+\w+\s*[:(]|from\s+\S+\s+import\s+|import\s+\S+|return\s+\w+\s*[+*/-]\b)"
     ),
-    re.compile(
-        r"^\s*#\s*(?:function\s+\w+\s*\(|local\s+\w+=|if\s+\[\[|for\s+\w+\s+in\s+|case\s+\S+\s+in|echo\s+['\"]|git\s+\w+|python3\s+|node\s+|return\s+[0-9])"
-    ),
+    re.compile(r"^\s*#\s*(?:function\s+\w+\s*\(|local\s+\w+=|if\s+\[\[|for\s+\w+\s+in\s+|case\s+\S+\s+in|python3\s+)"),
     re.compile(
         r"^\s*//\s*(?:function\s+\w+\s*\(|(?:const|let|var)\s+\w+\s*=|(?:if|for|while)\s*\(|return\s+\S+\s*[+*/=-])"
     ),
+)
+
+GIT_COMMENTED_COMMAND = re.compile(
+    r"^\s*# git (?:add|branch|clean|checkout|commit|diff|fetch|init|log|merge|pull|push|rebase|"
+    r"reset|restore|status|switch|tag)(?: [A-Za-z0-9_+./:=@~-]+){0,2}$"
+)
+SHELL_COMMENTED_COMMAND = re.compile(
+    r"^\s*# (?:echo (?:\"[^\"]*\"|'[^']*')|node (?:--[A-Za-z0-9-]+|[./][A-Za-z0-9_+./-]+)|return [0-9]+;?)$"
 )
 
 
@@ -179,7 +185,11 @@ def check_commented_code(path: Path, text: str) -> list[str]:
         stripped = line.lstrip()
         if stripped.startswith("///") or re.match(r"^\s*//\s*MARK:", line):
             continue
-        if any(pattern.match(line) for pattern in COMMENTED_CODE):
+        if (
+            any(pattern.match(line) for pattern in COMMENTED_CODE)
+            or GIT_COMMENTED_COMMAND.match(line)
+            or SHELL_COMMENTED_COMMAND.match(line)
+        ):
             issues.append(finding(path, "looks like commented-out code", number))
     return issues
 

@@ -1,5 +1,5 @@
 #!/bin/bash
-# Behavioural test for crack_on_gate.sh — feeds synthetic UserPromptSubmit and
+# Behavioural test for crack_on_gate.py — feeds synthetic UserPromptSubmit and
 # PreToolUse payloads and asserts the two-event contract:
 #   UserPromptSubmit: "crack on" in the RAW submitted prompt (payload .prompt)
 #     stamps a per-session crack_on_active flag; anything else does not.
@@ -10,7 +10,7 @@
 # agentic-loop skill body and injected memory of essentially every session, so
 # a transcript scan would brick AskUserQuestion fleet-wide.
 set -u
-HOOK="$(cd "$(dirname "$0")/.." && pwd)/crack_on_gate.sh"
+HOOK="$(cd "$(dirname "$0")/.." && pwd)/crack_on_gate.py"
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 fails=0
@@ -23,41 +23,45 @@ CWD="$TMP/project"
 mkdir -p "$CWD"
 
 ups_payload() { # prompt session_id -> UserPromptSubmit json
-  jq -n --arg prompt "$1" --arg sid "$2" --arg cwd "$CWD" \
-    '{"hook_event_name":"UserPromptSubmit","session_id":$sid,"cwd":$cwd,"prompt":$prompt}'
+    jq -n --arg prompt "$1" --arg sid "$2" --arg cwd "$CWD" \
+        '{"hook_event_name":"UserPromptSubmit","session_id":$sid,"cwd":$cwd,"prompt":$prompt}'
 }
 
 # ups_payload_with_transcript <prompt> <session_id> <transcript_path>
 ups_payload_with_transcript() {
-  jq -n --arg prompt "$1" --arg sid "$2" --arg cwd "$CWD" --arg tp "$3" \
-    '{"hook_event_name":"UserPromptSubmit","session_id":$sid,"cwd":$cwd,"prompt":$prompt,"transcript_path":$tp}'
+    jq -n --arg prompt "$1" --arg sid "$2" --arg cwd "$CWD" --arg tp "$3" \
+        '{"hook_event_name":"UserPromptSubmit","session_id":$sid,"cwd":$cwd,"prompt":$prompt,"transcript_path":$tp}'
 }
 
 ptu_payload() { # tool_name session_id -> PreToolUse json
-  jq -n --arg tool "$1" --arg sid "$2" --arg cwd "$CWD" \
-    '{"hook_event_name":"PreToolUse","session_id":$sid,"cwd":$cwd,"tool_name":$tool,"tool_input":{}}'
+    jq -n --arg tool "$1" --arg sid "$2" --arg cwd "$CWD" \
+        '{"hook_event_name":"PreToolUse","session_id":$sid,"cwd":$cwd,"tool_name":$tool,"tool_input":{}}'
 }
 
 run_ups() { # json -> exit code (UserPromptSubmit must always exit 0)
-  printf '%s' "$1" | bash "$HOOK" >/dev/null 2>/dev/null
-  echo $?
+    printf '%s' "$1" | python3 "$HOOK" >/dev/null 2>/dev/null
+    echo $?
 }
 
 run_ptu() { # json -> DENY|ALLOW
-  local out
-  out=$(printf '%s' "$1" | bash "$HOOK" 2>/dev/null)
-  if printf '%s' "$out" | grep -q '"permissionDecision": *"deny"'; then echo DENY; else echo ALLOW; fi
+    local out
+    out=$(printf '%s' "$1" | python3 "$HOOK" 2>/dev/null)
+    if printf '%s' "$out" | grep -q '"permissionDecision": *"deny"'; then echo DENY; else echo ALLOW; fi
 }
 
 # flag_count <session_id> -> number of crack_on_active files stamped under
 # the isolated loop dir for that session (0 or 1 in every case below).
 flag_count() {
-  find "$CLAUDE_AGENTIC_LOOP_DIR" -path "*/$1/crack_on_active" 2>/dev/null | grep -c .
+    find "$CLAUDE_AGENTIC_LOOP_DIR" -path "*/$1/crack_on_active" 2>/dev/null | grep -c .
 }
 
 check() { # desc expected actual
-  if [ "$2" = "$3" ]; then printf 'ok   - %s\n' "$1"
-  else printf 'FAIL - %s (expected %s, got %s)\n' "$1" "$2" "$3"; fails=$((fails+1)); fi
+    if [ "$2" = "$3" ]; then
+        printf 'ok   - %s\n' "$1"
+    else
+        printf 'FAIL - %s (expected %s, got %s)\n' "$1" "$2" "$3"
+        fails=$((fails + 1))
+    fi
 }
 
 # --- Baseline: no flag, AskUserQuestion allowed ---
@@ -91,15 +95,15 @@ check "sess-neg3: AskUserQuestion -> allow" ALLOW "$(run_ptu "$(ptu_payload AskU
 # NOT be stamped and AskUserQuestion must stay ALLOWED. This is the assertion
 # that proves detection is raw-prompt, not transcript-scan.
 TRANSCRIPT="$TMP/transcript-negctl.jsonl"
-cat > "$TRANSCRIPT" <<'EOF'
+cat >"$TRANSCRIPT" <<'EOF'
 {"type":"user","message":{"content":"load the agentic-loop skill"}}
 {"type":"assistant","message":{"content":[{"type":"text","text":"Loaded skills/agentic-loop/SKILL.md: when the user says crack on, no human gates apply. Memory feedback_crack_on_no_gates.md: crack on means proceed autonomously. crack on appears throughout this context."}]}}
 EOF
 check "UPS benign prompt + 'crack on'-laden transcript exits 0" 0 \
-  "$(run_ups "$(ups_payload_with_transcript "please fix the failing test in auth.py" sess-negctl "$TRANSCRIPT")")"
+    "$(run_ups "$(ups_payload_with_transcript "please fix the failing test in auth.py" sess-negctl "$TRANSCRIPT")")"
 check "NEGATIVE CONTROL: no flag stamped from transcript-only 'crack on'" 0 "$(flag_count sess-negctl)"
 check "NEGATIVE CONTROL: sess-negctl AskUserQuestion -> allow" ALLOW \
-  "$(run_ptu "$(ptu_payload AskUserQuestion sess-negctl)")"
+    "$(run_ptu "$(ptu_payload AskUserQuestion sess-negctl)")"
 
 # --- HARD-STOP PRESERVED: the deny is scoped to AskUserQuestion only. Even
 # with the crack-on flag stamped, every other tool passes through untouched —
@@ -111,13 +115,16 @@ check "sess-pos (flag live): Task -> allow" ALLOW "$(run_ptu "$(ptu_payload Task
 
 # --- Session isolation: one session's flag never leaks into another ---
 check "sess-other (never said crack on): AskUserQuestion -> allow" ALLOW \
-  "$(run_ptu "$(ptu_payload AskUserQuestion sess-other)")"
+    "$(run_ptu "$(ptu_payload AskUserQuestion sess-other)")"
 
 # --- Degenerate payloads: gate stands aside (exit 0, no stamp, no deny) ---
 check "UPS empty prompt exits 0" 0 "$(run_ups "$(ups_payload "" sess-empty)")"
 check "no flag for sess-empty" 0 "$(flag_count sess-empty)"
 check "UPS no prompt field exits 0" 0 "$(run_ups '{"hook_event_name":"UserPromptSubmit","session_id":"sess-nofield"}')"
-check "empty stdin exits 0" 0 "$(printf '' | bash "$HOOK" >/dev/null 2>/dev/null; echo $?)"
+check "empty stdin exits 0" 0 "$(
+    printf '' | python3 "$HOOK" >/dev/null 2>/dev/null
+    echo $?
+)"
 # Missing session_id: unkeyable — must not stamp anything or deny anything.
 check "UPS crack on, no session_id -> exits 0" 0 "$(run_ups "$(jq -n --arg cwd "$CWD" '{"hook_event_name":"UserPromptSubmit","cwd":$cwd,"prompt":"crack on"}')")"
 check "PTU AskUserQuestion, no session_id -> allow" ALLOW "$(run_ptu "$(jq -n --arg cwd "$CWD" '{"hook_event_name":"PreToolUse","cwd":$cwd,"tool_name":"AskUserQuestion","tool_input":{}}')")"
@@ -127,7 +134,7 @@ check "PTU AskUserQuestion, no session_id -> allow" ALLOW "$(run_ptu "$(jq -n --
 # dir by progress.json EXISTENCE (canonical-then-probe), so a flag routed
 # through it can be stamped under one slug and read under another whenever
 # progress.json's location changes between the two events (e.g. a mid-session
-# git init changing the git-common-dir slug) — silently ALLOWING AskUserQuestion
+# repository initialization changing the git-common-dir slug) — silently ALLOWING AskUserQuestion
 # despite an active envelope. Session-only keying removes that class entirely;
 # these cases fail against any resolver-derived flag path.
 
@@ -135,46 +142,56 @@ check "PTU AskUserQuestion, no session_id -> allow" ALLOW "$(run_ptu "$(jq -n --
 # <base>/<session_id>/crack_on_active, no slug segment in between.
 check "UPS stamp lands at session-only path (no slug segment)" 0 "$(run_ups "$(ups_payload "crack on" sess-exact)")"
 check "flag exists at <base>/<sid>/crack_on_active exactly" yes \
-  "$([ -f "$CLAUDE_AGENTIC_LOOP_DIR/sess-exact/crack_on_active" ] && echo yes || echo no)"
+    "$([ -f "$CLAUDE_AGENTIC_LOOP_DIR/sess-exact/crack_on_active" ] && echo yes || echo no)"
 
 # R1: a progress.json appearing under a DIFFERENT slug for this session after
 # the stamp (the shape the resolver's probe would chase) must not move the
 # flag out from under the deny.
 check "UPS stamp for drift case exits 0" 0 "$(run_ups "$(ups_payload "crack on" sess-drift)")"
 mkdir -p "$CLAUDE_AGENTIC_LOOP_DIR/-some-other-slug/sess-drift"
-printf '{}' > "$CLAUDE_AGENTIC_LOOP_DIR/-some-other-slug/sess-drift/progress.json"
+printf '{}' >"$CLAUDE_AGENTIC_LOOP_DIR/-some-other-slug/sess-drift/progress.json"
 check "REGRESSION: progress.json under another slug -> AskUserQuestion still deny" DENY \
-  "$(run_ptu "$(ptu_payload AskUserQuestion sess-drift)")"
+    "$(run_ptu "$(ptu_payload AskUserQuestion sess-drift)")"
 
 # R2: repo-ness of the cwd changing between stamp and read (git init after the
 # stamp — the concrete slug-drift trigger) must not affect the deny.
 GITLESS="$TMP/gitless-cwd"
 mkdir -p "$GITLESS"
 check "UPS stamp with non-git cwd exits 0" 0 \
-  "$(run_ups "$(jq -n --arg cwd "$GITLESS" '{"hook_event_name":"UserPromptSubmit","session_id":"sess-gitinit","cwd":$cwd,"prompt":"crack on"}')")"
+    "$(run_ups "$(jq -n --arg cwd "$GITLESS" '{"hook_event_name":"UserPromptSubmit","session_id":"sess-gitinit","cwd":$cwd,"prompt":"crack on"}')")"
 git init -q "$GITLESS"
 check "REGRESSION: cwd git-inited after stamp -> AskUserQuestion still deny" DENY \
-  "$(run_ptu "$(jq -n --arg cwd "$GITLESS" '{"hook_event_name":"PreToolUse","session_id":"sess-gitinit","cwd":$cwd,"tool_name":"AskUserQuestion","tool_input":{}}')")"
+    "$(run_ptu "$(jq -n --arg cwd "$GITLESS" '{"hook_event_name":"PreToolUse","session_id":"sess-gitinit","cwd":$cwd,"tool_name":"AskUserQuestion","tool_input":{}}')")"
 
 # --- Write failure must not log a lie: stamped=1 only on a successful write ---
 # Point the base at a regular FILE so mkdir -p and the flag write both fail.
 BADBASE="$TMP/base-is-a-file"
-printf 'x' > "$BADBASE"
+printf 'x' >"$BADBASE"
 check "UPS with unwritable base exits 0" 0 \
-  "$(printf '%s' "$(ups_payload "crack on" sess-badwrite)" | CLAUDE_AGENTIC_LOOP_DIR="$BADBASE" bash "$HOOK" >/dev/null 2>/dev/null; echo $?)"
+    "$(
+        printf '%s' "$(ups_payload "crack on" sess-badwrite)" | CLAUDE_AGENTIC_LOOP_DIR="$BADBASE" python3 "$HOOK" >/dev/null 2>/dev/null
+        echo $?
+    )"
 check "write failure logged as stamped=0 err=write_failed" yes \
-  "$(grep -q 'hook=crack_on_gate .*session=sess-badwrite stamped=0 err=write_failed' "$CLAUDE_DISCIPLINE_LOG" && echo yes || echo no)"
+    "$(grep -q 'hook=crack_on_gate .*session=sess-badwrite stamped=0 err=write_failed' "$CLAUDE_DISCIPLINE_LOG" && echo yes || echo no)"
 check "write failure never logged as stamped=1" no \
-  "$(grep -q 'session=sess-badwrite stamped=1' "$CLAUDE_DISCIPLINE_LOG" && echo yes || echo no)"
+    "$(grep -q 'session=sess-badwrite stamped=1' "$CLAUDE_DISCIPLINE_LOG" && echo yes || echo no)"
 check "unwritable base: AskUserQuestion -> allow (no flag ever landed)" ALLOW \
-  "$(printf '%s' "$(ptu_payload AskUserQuestion sess-badwrite)" | CLAUDE_AGENTIC_LOOP_DIR="$BADBASE" bash "$HOOK" 2>/dev/null | grep -q '"permissionDecision": *"deny"' && echo DENY || echo ALLOW)"
+    "$(printf '%s' "$(ptu_payload AskUserQuestion sess-badwrite)" | CLAUDE_AGENTIC_LOOP_DIR="$BADBASE" python3 "$HOOK" 2>/dev/null | grep -q '"permissionDecision": *"deny"' && echo DENY || echo ALLOW)"
 
 # --- UserPromptSubmit stays well-behaved: no deny JSON on its stdout ---
-ups_out=$(printf '%s' "$(ups_payload "crack on" sess-stdout)" | bash "$HOOK" 2>/dev/null)
+ups_out=$(printf '%s' "$(ups_payload "crack on" sess-stdout)" | python3 "$HOOK" 2>/dev/null)
 if printf '%s' "$ups_out" | grep -q 'permissionDecision'; then
-  check "UPS emits no permissionDecision JSON" clean dirty
+    check "UPS emits no permissionDecision JSON" clean dirty
 else
-  check "UPS emits no permissionDecision JSON" clean clean
+    check "UPS emits no permissionDecision JSON" clean clean
 fi
 
-[ "$fails" -eq 0 ] && { echo "PASS"; exit 0; } || { echo "FAILED ($fails)"; exit 1; }
+# shellcheck disable=SC2015 # The group exits, so this is a terminal test-result idiom.
+[ "$fails" -eq 0 ] && {
+    echo "PASS"
+    exit 0
+} || {
+    echo "FAILED ($fails)"
+    exit 1
+}
