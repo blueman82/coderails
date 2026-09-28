@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Operate the filesystem-backed current native Codex agentic-loop graph."""
+
 from __future__ import annotations
 
 import argparse
@@ -87,6 +88,7 @@ def transition(path: Path, session: str, operation: str, node: str, reason: str)
         except ValueError as error:
             raise GraphError(str(error)) from error
         proposed = cast(dict[str, Any], transition["state"])
+        graph_semantics.validate(proposed)
         _write(path, proposed)
         key = "respawn" if operation == "respawn_stale" else "hard_stop"
         return cast(dict[str, Any], transition[key])

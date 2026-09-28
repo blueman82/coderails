@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import json
 import sys
 import tempfile
@@ -15,6 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "codex/skills/agentic-loop/scripts"))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "codex/hooks/scripts"))
 import graph
+import graph_semantics
 from graph_completion import validate_work_units
 from graph_evidence import validate_worker_evidence
 from graph_identity import GraphError, task_name, task_node
@@ -157,6 +159,20 @@ class GraphRuntimeTests(unittest.TestCase):
         spawn(self.parent, read_json(self.path))
         self.assert_unchanged(graph.record_wave, self.path, '{"wave_id":"wrong","results":{}}')
         self.assert_unchanged(self.record, "stale", stale_check={"checked": False})
+
+    def test_transition_rejects_invalid_core_proposal_before_write(self) -> None:
+        """The native boundary rejects a bad semantic proposal without replacing state."""
+        graph.begin_wave(self.path)
+        proposed = copy.deepcopy(read_json(self.path))
+        proposed["revision"] += 1
+        with patch.object(graph_semantics, "hard_stop", return_value={"state": proposed, "hard_stop": {}}):
+            self.assert_unchanged(graph.transition, self.path, "parent", "hard_stop", "U3[1]", "owner decision")
+
+    def test_hard_stop_writes_valid_singleton_result(self) -> None:
+        """A successful native transition persists a complete schema-v3 graph."""
+        graph.begin_wave(self.path)
+        graph.transition(self.path, "parent", "hard_stop", "U3[1]", "owner decision")
+        graph_semantics.validate(read_json(self.path))
 
 
 if __name__ == "__main__":
