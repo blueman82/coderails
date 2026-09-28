@@ -1,0 +1,23 @@
+[
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bash \"scripts/merge.sh\" \"19\" \"note: \\`rm -rf /\\` should never run\""
+      },
+      "cwd": "{sandbox}/feat_repo"
+    },
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_workflow.test.sh",
+    "expected": {
+      "hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": "Destructive pattern detected: rm -rf\nFull command: bash \"scripts/merge.sh\" \"19\" \"note: \\`rm -rf /\\` should never run\"\nThis command is permanently blocked. Safe route: for a single file, use 'unlink <file>' instead of rm -rf. For a directory or multiple files, move the target into a temp dir (e.g. 'mkdir -p /tmp/trash && mv <target> /tmp/trash/') instead of deleting it outright.",
+        "patternId": "rm-rf"
+      }
+    },
+    "fixture_index": 324
+  }
+]

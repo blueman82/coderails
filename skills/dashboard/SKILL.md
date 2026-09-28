@@ -51,7 +51,7 @@ Seven panels:
 ## Starting
 
 ```
-scripts/start-dashboard.sh
+scripts/start_dashboard.py
 ```
 
 First run installs dependencies (`npm ci`) and builds the app (`npm run
@@ -64,7 +64,7 @@ browser.
 Override the port with `DASHBOARD_PORT`:
 
 ```
-DASHBOARD_PORT=4200 scripts/start-dashboard.sh
+DASHBOARD_PORT=4200 scripts/start_dashboard.py
 ```
 
 ## LAN access (opt-in)
@@ -75,7 +75,7 @@ Host/Origin resolve to loopback — nothing on the network can reach it. Set
 network to reach it too:
 
 ```
-DASHBOARD_HOST=192.168.50.140 scripts/start-dashboard.sh
+DASHBOARD_HOST=192.168.50.140 scripts/start_dashboard.py
 ```
 
 This does two things together, from the one variable: the server binds to
@@ -87,7 +87,7 @@ Host and Origin headers. From any other device on the LAN, open
 For the persistent launchd agent, set `DASHBOARD_HOST` in the `plist`'s
 `EnvironmentVariables` dict (it ships with an empty `DASHBOARD_HOST` entry —
 fill in your LAN IP), then reinstall the agent
-(`launchd/install-dashboard-agent.sh`) so launchd picks it up.
+(`launchd/install_dashboard_agent.py`) so launchd picks it up.
 
 Leaving `DASHBOARD_HOST` unset (or empty) is unchanged from before this
 option existed: bind and guard are loopback-only, identical to today.
@@ -108,7 +108,7 @@ fail to bind on next start rather than break silently.
 ## Stopping
 
 ```
-scripts/stop-dashboard.sh
+scripts/stop_dashboard.py
 ```
 
 Kills the process recorded in the pidfile and removes it. The dashboard keeps
@@ -121,18 +121,18 @@ launchd LaunchAgent, mirroring the routine-sweeper agents in
 `docs/routines.md`:
 
 ```
-launchd/install-dashboard-agent.sh     # copy plist + bootstrap into gui/$(id -u)
-launchd/uninstall-dashboard-agent.sh   # bootout + remove the copy
+launchd/install_dashboard_agent.py     # copy plist + bootstrap into gui/$(id -u)
+launchd/uninstall_dashboard_agent.py   # bootout + remove the copy
 ```
 
 The installer copies `launchd/com.coderails.dashboard.plist` into
 `~/Library/LaunchAgents/` and bootstraps from that copy, not from the repo
 path — launchd only auto-loads plists that live in `~/Library/LaunchAgents/`,
 so bootstrapping straight from the repo would silently stop surviving
-reboots. The plist runs `skills/dashboard/runner/bin/dashboard-server.sh`
+reboots. The plist runs `skills/dashboard/runner/bin/dashboard_server.py`
 with `RunAtLoad` and `KeepAlive` set — launchd starts it at login and
 restarts it if it dies. Logs go to `~/.claude/coderails-dashboard/dashboard.log`,
-same path `start-dashboard.sh` uses.
+same path `start_dashboard.py` uses.
 
 The plist also sets `SoftResourceLimits.NumberOfFiles` to 4096. A
 launchd-spawned process inherits `launchctl limit maxfiles` — 256 on stock
@@ -146,17 +146,17 @@ panels sit on "loading…" forever. If you ever see that shape, check
 `lsof -p <pid> | wc -l` against the limit — a count that climbs across
 requests and never falls is a leak, not load.
 
-**Once the agent is installed, `stop-dashboard.sh` does not stop it** — the
-agent-owned server has no pidfile for `stop-dashboard.sh` to find. Stop it
+**Once the agent is installed, `stop_dashboard.py` does not stop it** — the
+agent-owned server has no pidfile for `stop_dashboard.py` to find. Stop it
 with:
 
 ```
 launchctl bootout gui/$(id -u)/com.coderails.dashboard
 ```
 
-Likewise, stop any manual server (`bash skills/dashboard/scripts/stop-dashboard.sh`)
-**before** running `install-dashboard-agent.sh` — the installer also refuses
-to bootstrap if port 4173 is already held. Hand-running `start-dashboard.sh`
+Likewise, stop any manual server (`python3 skills/dashboard/scripts/stop_dashboard.py`)
+**before** running `install_dashboard_agent.py` — the installer also refuses
+to bootstrap if port 4173 is already held. Hand-running `start_dashboard.py`
 while the agent's server is healthy fails cleanly instead (its own lsof guard
 refuses and exits 1, no fight). The real crash-loop risk is the reverse:
 installing the agent while a manual server holds the port causes

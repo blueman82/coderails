@@ -6,11 +6,11 @@ description: Add, commit, push changes and create PR
 
 ## Project config
 
-Config: !`source "${CLAUDE_PLUGIN_ROOT}/scripts/lib/config.sh" && coderails::resolve_config`
+Config: !`python3 "${CLAUDE_PLUGIN_ROOT}/scripts/lib/config.py" resolve-config`
 
 ## Pre-flight: engineering-principles check
 
-**Skip condition**: If `$ARGUMENTS` contains `--quick`, skip this section entirely and go straight to push. Strip `--quick` from the arguments before passing to push.sh.
+**Skip condition**: If `$ARGUMENTS` contains `--quick`, skip this section entirely and go straight to push. Strip `--quick` from the arguments before passing to push.py.
 
 **Skip condition**: If `config.engineering_principles_paths` is null or empty (or config is `NO_CONFIG`), skip this section entirely and go straight to push.
 
@@ -39,12 +39,12 @@ If no blocking findings, proceed silently.
 
 Execute the push workflow script. Remove `--quick` from arguments if present.
 
-`push.sh` stages tracked-modified files automatically (`git add -u`) but never sweeps up new, untracked files — that's deliberate, to avoid dragging unrelated working-tree files into the PR. If you (the actor running this command) created NEW files that belong in this PR, list them explicitly and pass each one via a repeatable `--add <path>` flag. You know what you created; don't stage new files with a separate `git add` sweep — name them to push.sh instead.
+`push.py` stages tracked-modified files automatically (`git add -u`) but never sweeps up new, untracked files — that's deliberate, to avoid dragging unrelated working-tree files into the PR. If you (the actor running this command) created NEW files that belong in this PR, list them explicitly and pass each one via a repeatable `--add <path>` flag. You know what you created; don't stage new files with a separate `git add` sweep — name them to push.py instead.
 
 Use a separate `--add` flag per file, one path per occurrence — never a space-separated variable like `--add $FILES`. `--add` consumes exactly one token, so `--add $FILES` would stage only the first file and the rest would be silently misparsed as extra arguments (the next token becomes part of the commit message). Name individual files, not directories or globs — a directory would stage everything under it, including files that aren't yours. Example shape:
 
 ```bash
-bash "${CLAUDE_PLUGIN_ROOT}/scripts/push.sh" "$ARGUMENTS" --add path/to/newfile --add path/to/another
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/push.py" "$ARGUMENTS" --add path/to/newfile --add path/to/another
 ```
 
 The script handles:

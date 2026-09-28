@@ -1,0 +1,137 @@
+[
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "echo x > bar.ts"
+      },
+      "cwd": "{sandbox}/main_repo"
+    },
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_workflow.test.sh",
+    "expected": {
+      "hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": "In-Bash source edit on main branch blocked.\nFull command: echo x > bar.ts\nEditing source files via sed/perl/redirect/tee on main is blocked. Switch to a feature branch or use the Edit tool."
+      }
+    },
+    "fixture_index": 283
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "echo x > bar.ts"
+      },
+      "cwd": "{sandbox}/feat_repo"
+    },
+    "stdout": "",
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_workflow.test.sh",
+    "expected": {},
+    "fixture_index": 292
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "echo 'foo' >> app.js"
+      },
+      "cwd": "{sandbox}/main_repo"
+    },
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_workflow.test.sh",
+    "expected": {
+      "hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": "In-Bash source edit on main branch blocked.\nFull command: echo 'foo' >> app.js\nEditing source files via sed/perl/redirect/tee on main is blocked. Switch to a feature branch or use the Edit tool."
+      }
+    },
+    "fixture_index": 295
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "echo x > output.go.log"
+      },
+      "cwd": "{sandbox}/main_repo"
+    },
+    "stdout": "",
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_workflow.test.sh",
+    "expected": {},
+    "fixture_index": 307
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "echo x > foo.py.bak"
+      },
+      "cwd": "{sandbox}/main_repo"
+    },
+    "stdout": "",
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_workflow.test.sh",
+    "expected": {},
+    "fixture_index": 308
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "echo x > changes.py.txt"
+      },
+      "cwd": "{sandbox}/main_repo"
+    },
+    "stdout": "",
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_workflow.test.sh",
+    "expected": {},
+    "fixture_index": 309
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "echo x > real.py"
+      },
+      "cwd": "{sandbox}/main_repo"
+    },
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_workflow.test.sh",
+    "expected": {
+      "hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": "In-Bash source edit on main branch blocked.\nFull command: echo x > real.py\nEditing source files via sed/perl/redirect/tee on main is blocked. Switch to a feature branch or use the Edit tool."
+      }
+    },
+    "fixture_index": 310
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "echo \"just a note about \\`code\\` formatting\""
+      },
+      "cwd": "{sandbox}/feat_repo"
+    },
+    "stdout": "",
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_workflow.test.sh",
+    "expected": {},
+    "fixture_index": 329
+  }
+]

@@ -1,0 +1,338 @@
+[
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git push origin main"
+      },
+      "cwd": "{sandbox}/repo_main",
+      "transcript_path": "{sandbox}/t_4496.jsonl"
+    },
+    "files": {
+      "{sandbox}/t_4496.jsonl": "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Skill\",\"input\":{\"skill\":\"coderails:push\"}}]}}\n{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Skill\",\"input\":{\"skill\":\"pr-review-toolkit:review-pr\"}}]}}\n",
+      "{sandbox}/repo_master/.coderails/workflow.config.yaml": "jira: null\n",
+      "{sandbox}/repo_main/.coderails/workflow.config.yaml": "jira: null\n",
+      "{sandbox}/repo/.coderails/workflow.config.yaml": "jira: null\n",
+      "{sandbox}/repo_feat/.coderails/workflow.config.yaml": "jira: null\n"
+    },
+    "repositories": {
+      "{sandbox}/repo_master": "master",
+      "{sandbox}/repo_main": "main",
+      "{sandbox}/repo_noconfig": "main",
+      "{sandbox}/repo": "main",
+      "{sandbox}/repo_feat": "feature/my-thing"
+    },
+    "env": {},
+    "returncode": 0,
+    "denied": false,
+    "fixture_index": 21
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git push origin feature-x"
+      },
+      "cwd": "{sandbox}/repo_feat",
+      "transcript_path": "{sandbox}/t_803.jsonl"
+    },
+    "files": {
+      "{sandbox}/t_803.jsonl": "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Skill\",\"input\":{\"skill\":\"coderails:push\"}}]}}\n",
+      "{sandbox}/repo_master/.coderails/workflow.config.yaml": "jira: null\n",
+      "{sandbox}/repo_main/.coderails/workflow.config.yaml": "jira: null\n",
+      "{sandbox}/repo/.coderails/workflow.config.yaml": "jira: null\n",
+      "{sandbox}/repo_feat/.coderails/workflow.config.yaml": "jira: null\n"
+    },
+    "repositories": {
+      "{sandbox}/repo_master": "master",
+      "{sandbox}/repo_main": "main",
+      "{sandbox}/repo_noconfig": "main",
+      "{sandbox}/repo": "main",
+      "{sandbox}/repo_feat": "feature/my-thing"
+    },
+    "env": {},
+    "returncode": 0,
+    "denied": false,
+    "fixture_index": 22
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git push --dry-run origin main"
+      },
+      "cwd": "{sandbox}/repo_main",
+      "transcript_path": "{sandbox}/t_4805.jsonl"
+    },
+    "files": {
+      "{sandbox}/t_4805.jsonl": "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Skill\",\"input\":{\"skill\":\"coderails:push\"}}]}}\n",
+      "{sandbox}/repo_master/.coderails/workflow.config.yaml": "jira: null\n",
+      "{sandbox}/repo_main/.coderails/workflow.config.yaml": "jira: null\n",
+      "{sandbox}/repo/.coderails/workflow.config.yaml": "jira: null\n",
+      "{sandbox}/repo_feat/.coderails/workflow.config.yaml": "jira: null\n"
+    },
+    "repositories": {
+      "{sandbox}/repo_master": "master",
+      "{sandbox}/repo_main": "main",
+      "{sandbox}/repo_noconfig": "main",
+      "{sandbox}/repo": "main",
+      "{sandbox}/repo_feat": "feature/my-thing"
+    },
+    "env": {},
+    "returncode": 0,
+    "denied": false,
+    "fixture_index": 24
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git push origin HEAD:main"
+      },
+      "cwd": "{sandbox}/repo_feat",
+      "transcript_path": "{sandbox}/t_15651.jsonl"
+    },
+    "files": {
+      "{sandbox}/t_15651.jsonl": "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Skill\",\"input\":{\"skill\":\"coderails:push\"}}]}}\n{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Skill\",\"input\":{\"skill\":\"pr-review-toolkit:review-pr\"}}]}}\n",
+      "{sandbox}/repo_master/.coderails/workflow.config.yaml": "jira: null\n",
+      "{sandbox}/repo_main/.coderails/workflow.config.yaml": "jira: null\n",
+      "{sandbox}/repo/.coderails/workflow.config.yaml": "jira: null\n",
+      "{sandbox}/repo_feat/.coderails/workflow.config.yaml": "jira: null\n"
+    },
+    "repositories": {
+      "{sandbox}/repo_master": "master",
+      "{sandbox}/repo_main": "main",
+      "{sandbox}/repo_noconfig": "main",
+      "{sandbox}/repo": "main",
+      "{sandbox}/repo_feat": "feature/my-thing"
+    },
+    "env": {},
+    "returncode": 0,
+    "denied": false,
+    "fixture_index": 26
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git push origin HEAD:my-feature"
+      },
+      "cwd": "{sandbox}/repo_feat",
+      "transcript_path": "{sandbox}/t_6448.jsonl"
+    },
+    "files": {
+      "{sandbox}/t_6448.jsonl": "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Skill\",\"input\":{\"skill\":\"coderails:push\"}}]}}\n",
+      "{sandbox}/repo_master/.coderails/workflow.config.yaml": "jira: null\n",
+      "{sandbox}/repo_main/.coderails/workflow.config.yaml": "jira: null\n",
+      "{sandbox}/repo/.coderails/workflow.config.yaml": "jira: null\n",
+      "{sandbox}/repo_feat/.coderails/workflow.config.yaml": "jira: null\n"
+    },
+    "repositories": {
+      "{sandbox}/repo_master": "master",
+      "{sandbox}/repo_main": "main",
+      "{sandbox}/repo_noconfig": "main",
+      "{sandbox}/repo": "main",
+      "{sandbox}/repo_feat": "feature/my-thing"
+    },
+    "env": {},
+    "returncode": 0,
+    "denied": false,
+    "fixture_index": 28
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git push origin HEAD:maintenance;echo hi"
+      },
+      "cwd": "{sandbox}/repo_feat",
+      "transcript_path": "{sandbox}/t_3066.jsonl"
+    },
+    "files": {
+      "{sandbox}/t_3066.jsonl": "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Skill\",\"input\":{\"skill\":\"coderails:push\"}}]}}\n",
+      "{sandbox}/repo_master/.coderails/workflow.config.yaml": "jira: null\n",
+      "{sandbox}/repo_main/.coderails/workflow.config.yaml": "jira: null\n",
+      "{sandbox}/repo/.coderails/workflow.config.yaml": "jira: null\n",
+      "{sandbox}/repo_feat/.coderails/workflow.config.yaml": "jira: null\n"
+    },
+    "repositories": {
+      "{sandbox}/repo_master": "master",
+      "{sandbox}/repo_main": "main",
+      "{sandbox}/repo_noconfig": "main",
+      "{sandbox}/repo": "main",
+      "{sandbox}/repo_feat": "feature/my-thing"
+    },
+    "env": {},
+    "returncode": 0,
+    "denied": false,
+    "fixture_index": 32
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git push origin main"
+      },
+      "cwd": "{sandbox}/repo_feat",
+      "transcript_path": "{sandbox}/t_17585.jsonl"
+    },
+    "files": {
+      "{sandbox}/t_17585.jsonl": "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Skill\",\"input\":{\"skill\":\"coderails:push\"}}]}}\n{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Skill\",\"input\":{\"skill\":\"pr-review-toolkit:review-pr\"}}]}}\n",
+      "{sandbox}/repo_master/.coderails/workflow.config.yaml": "jira: null\n",
+      "{sandbox}/repo_main/.coderails/workflow.config.yaml": "jira: null\n",
+      "{sandbox}/repo/.coderails/workflow.config.yaml": "jira: null\n",
+      "{sandbox}/repo_feat/.coderails/workflow.config.yaml": "jira: null\n"
+    },
+    "repositories": {
+      "{sandbox}/repo_master": "master",
+      "{sandbox}/repo_main": "main",
+      "{sandbox}/repo_noconfig": "main",
+      "{sandbox}/repo": "main",
+      "{sandbox}/repo_feat": "feature/my-thing"
+    },
+    "env": {},
+    "returncode": 0,
+    "denied": false,
+    "fixture_index": 48
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git push origin feature-x"
+      },
+      "cwd": "{sandbox}/repo_feat",
+      "transcript_path": "{sandbox}/t_12017.jsonl"
+    },
+    "files": {
+      "{sandbox}/t_12017.jsonl": "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Skill\",\"input\":{\"skill\":\"coderails:push\"}}]}}\n",
+      "{sandbox}/repo_master/.coderails/workflow.config.yaml": "jira: null\n",
+      "{sandbox}/repo_main/.coderails/workflow.config.yaml": "jira: null\n",
+      "{sandbox}/repo/.coderails/workflow.config.yaml": "jira: null\n",
+      "{sandbox}/repo_feat/.coderails/workflow.config.yaml": "jira: null\n"
+    },
+    "repositories": {
+      "{sandbox}/repo_master": "master",
+      "{sandbox}/repo_main": "main",
+      "{sandbox}/repo_noconfig": "main",
+      "{sandbox}/repo": "main",
+      "{sandbox}/repo_feat": "feature/my-thing"
+    },
+    "env": {},
+    "returncode": 0,
+    "denied": false,
+    "fixture_index": 50
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git push origin main-fix"
+      },
+      "cwd": "{sandbox}/repo_feat",
+      "transcript_path": "{sandbox}/t_17451.jsonl"
+    },
+    "files": {
+      "{sandbox}/t_17451.jsonl": "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Skill\",\"input\":{\"skill\":\"coderails:push\"}}]}}\n",
+      "{sandbox}/repo_master/.coderails/workflow.config.yaml": "jira: null\n",
+      "{sandbox}/repo_main/.coderails/workflow.config.yaml": "jira: null\n",
+      "{sandbox}/repo/.coderails/workflow.config.yaml": "jira: null\n",
+      "{sandbox}/repo_feat/.coderails/workflow.config.yaml": "jira: null\n"
+    },
+    "repositories": {
+      "{sandbox}/repo_master": "master",
+      "{sandbox}/repo_main": "main",
+      "{sandbox}/repo_noconfig": "main",
+      "{sandbox}/repo": "main",
+      "{sandbox}/repo_feat": "feature/my-thing"
+    },
+    "env": {},
+    "returncode": 0,
+    "denied": false,
+    "fixture_index": 63
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git push origin maintenance"
+      },
+      "cwd": "{sandbox}/repo_feat",
+      "transcript_path": "{sandbox}/t_26962.jsonl"
+    },
+    "files": {
+      "{sandbox}/t_26962.jsonl": "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Skill\",\"input\":{\"skill\":\"coderails:push\"}}]}}\n",
+      "{sandbox}/repo_master/.coderails/workflow.config.yaml": "jira: null\n",
+      "{sandbox}/repo_main/.coderails/workflow.config.yaml": "jira: null\n",
+      "{sandbox}/repo/.coderails/workflow.config.yaml": "jira: null\n",
+      "{sandbox}/repo_feat/.coderails/workflow.config.yaml": "jira: null\n"
+    },
+    "repositories": {
+      "{sandbox}/repo_master": "master",
+      "{sandbox}/repo_main": "main",
+      "{sandbox}/repo_noconfig": "main",
+      "{sandbox}/repo": "main",
+      "{sandbox}/repo_feat": "feature/my-thing"
+    },
+    "env": {},
+    "returncode": 0,
+    "denied": false,
+    "fixture_index": 64
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git push origin feature"
+      },
+      "cwd": "{sandbox}/repo_feat",
+      "transcript_path": "{sandbox}/t_19635.jsonl"
+    },
+    "files": {
+      "{sandbox}/t_19635.jsonl": "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Skill\",\"input\":{\"skill\":\"coderails:push\"}}]}}\n",
+      "{sandbox}/repo_master/.coderails/workflow.config.yaml": "jira: null\n",
+      "{sandbox}/repo_main/.coderails/workflow.config.yaml": "jira: null\n",
+      "{sandbox}/repo/.coderails/workflow.config.yaml": "jira: null\n",
+      "{sandbox}/repo_feat/.coderails/workflow.config.yaml": "jira: null\n"
+    },
+    "repositories": {
+      "{sandbox}/repo_master": "master",
+      "{sandbox}/repo_main": "main",
+      "{sandbox}/repo_noconfig": "main",
+      "{sandbox}/repo": "main",
+      "{sandbox}/repo_feat": "feature/my-thing"
+    },
+    "env": {},
+    "returncode": 0,
+    "denied": false,
+    "fixture_index": 65
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git push -u origin feature-x"
+      },
+      "cwd": "{sandbox}/repo_feat",
+      "transcript_path": "{sandbox}/t_11323.jsonl"
+    },
+    "files": {
+      "{sandbox}/t_11323.jsonl": "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Skill\",\"input\":{\"skill\":\"coderails:push\"}}]}}\n",
+      "{sandbox}/repo_master/.coderails/workflow.config.yaml": "jira: null\n",
+      "{sandbox}/repo_main/.coderails/workflow.config.yaml": "jira: null\n",
+      "{sandbox}/repo/.coderails/workflow.config.yaml": "jira: null\n",
+      "{sandbox}/repo_feat/.coderails/workflow.config.yaml": "jira: null\n"
+    },
+    "repositories": {
+      "{sandbox}/repo_master": "master",
+      "{sandbox}/repo_main": "main",
+      "{sandbox}/repo_noconfig": "main",
+      "{sandbox}/repo": "main",
+      "{sandbox}/repo_feat": "feature/my-thing"
+    },
+    "env": {},
+    "returncode": 0,
+    "denied": false,
+    "fixture_index": 79
+  }
+]

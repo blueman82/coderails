@@ -5,8 +5,8 @@ import { join } from "node:path";
 // out-of-vocabulary or missing `state` is rejected, never defaulted, and any
 // unreadable/malformed file degrades to "skip this entry", never throws.
 // This is the frozen sidecar contract (builds/<hash>/state.json,
-// schemaVersion 1) — verified against the shipped run-builder.sh's actual
-// jq -n state.json writes (skills/dashboard/scripts/run-builder.sh).
+// schemaVersion 1) — verified against the shipped run_builder.py's actual
+// atomic state.json writes (skills/dashboard/scripts/run_builder.py).
 export interface BuildEntry {
   schemaVersion: number;
   hash: string;
@@ -20,7 +20,7 @@ export interface BuildEntry {
   // Absolute epoch-ms mtime of the heartbeat touch-file (not a pre-computed
   // age): a relative "age as of collection time" would freeze at its
   // last-collected value if the build dies without triggering any further
-  // fs.watch event (e.g. SIGKILL/power-loss skips run-builder.sh's EXIT
+  // fs.watch event (e.g. SIGKILL/power-loss skips run_builder.py's finalization
   // trap, so the heartbeat simply stops being touched and nothing else in
   // the builds dir changes to re-trigger a collect). An absolute timestamp
   // lets the client recompute staleness against its own live clock on every

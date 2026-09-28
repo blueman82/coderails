@@ -1,0 +1,17 @@
+[
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "rm${IFSx}-rf /tmp/x"
+      },
+      "cwd": "{sandbox}/feat_repo"
+    },
+    "stdout": "",
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_tabs.test.sh",
+    "expected": {},
+    "fixture_index": 264
+  }
+]

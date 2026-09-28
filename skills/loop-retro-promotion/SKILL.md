@@ -16,7 +16,7 @@ Every scheduled run evaluates the graduation predicate first, before doing
 anything else:
 
 1. Resolve the repo-key dir: `dirname` of `dirname` of the path printed by
-   `hooks/scripts/lib/agentic_loop_path.sh`.
+   `hooks/scripts/lib/agentic_loop_path.py`.
 2. Count `<repo-key-dir>/*/retro.json` — must be **>= 10**.
 3. Confirm `standing-orders.md` has **>= 1** entry whose `last_recurred` !=
    `created` — one full lifecycle (created, then recurred at least once).
@@ -146,4 +146,4 @@ marker for a completed delivery.
 
 ## 5. Prohibitions
 
-This pipeline writes exactly one repo file. It never edits SKILL.md, hook scripts, gate logic, its own skill definition, the routine config, or the graduation predicate. It never relaxes, reorders, or skips a gate. It merges ONLY via /coderails:merge — never raw gh pr merge: PreToolUse hooks do not fire in this headless execution mode, so merge.sh's script-internal artifact gates are the merge rail.
+This pipeline writes exactly one repo file. It never edits SKILL.md, hook scripts, gate logic, its own skill definition, the routine config, or the graduation predicate. It never relaxes, reorders, or skips a gate. It merges ONLY via /coderails:merge — never raw gh pr merge: PreToolUse hooks do not fire in this headless execution mode, so merge.py's script-internal artifact gates are the merge rail.

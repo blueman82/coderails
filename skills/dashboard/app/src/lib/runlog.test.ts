@@ -14,7 +14,7 @@ function run(overrides: Partial<RunRecord> = {}): RunRecord {
     button: "some-button",
     argv: [],
     cwd: "/tmp",
-    profile: "default",
+    profile: "standard",
     startedAt: 100,
     outputPath: "/tmp/out.log",
     ...overrides,

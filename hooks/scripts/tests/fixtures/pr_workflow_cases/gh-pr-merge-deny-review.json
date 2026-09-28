@@ -1,0 +1,220 @@
+[
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "gh pr merge 42 --squash"
+      },
+      "cwd": "{sandbox}/repo",
+      "transcript_path": "{sandbox}/t_12402.jsonl"
+    },
+    "files": {
+      "{sandbox}/t_12402.jsonl": "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Skill\",\"input\":{\"skill\":\"coderails:push\"}}]}}\n",
+      "{sandbox}/repo/.coderails/workflow.config.yaml": "jira: null\n"
+    },
+    "repositories": {
+      "{sandbox}/repo_noconfig": "main",
+      "{sandbox}/repo": "main"
+    },
+    "env": {},
+    "returncode": 0,
+    "denied": true,
+    "fixture_index": 6
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "gh pr merge 42 --squash"
+      },
+      "cwd": "{sandbox}/repo",
+      "transcript_path": "{sandbox}/t_18416.jsonl"
+    },
+    "files": {
+      "{sandbox}/t_18416.jsonl": "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Skill\",\"input\":{\"skill\":\"coderails:push\"}}]}}\n{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Skill\",\"input\":{\"skill\":\"pr-review-toolkit:review-pr\",\"args\":\"43\"}}]}}\n",
+      "{sandbox}/repo_master/.coderails/workflow.config.yaml": "jira: null\n",
+      "{sandbox}/repo_main/.coderails/workflow.config.yaml": "jira: null\n",
+      "{sandbox}/repo/.coderails/workflow.config.yaml": "jira: null\n",
+      "{sandbox}/repo_feat/.coderails/workflow.config.yaml": "jira: null\n"
+    },
+    "repositories": {
+      "{sandbox}/repo_master": "master",
+      "{sandbox}/repo_main": "main",
+      "{sandbox}/repo_noconfig": "main",
+      "{sandbox}/repo": "main",
+      "{sandbox}/repo_feat": "feature/my-thing"
+    },
+    "env": {},
+    "returncode": 0,
+    "denied": true,
+    "fixture_index": 42
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "gh pr merge 42 --squash"
+      },
+      "cwd": "{sandbox}/repo",
+      "transcript_path": "{sandbox}/t_14723.jsonl"
+    },
+    "files": {
+      "{sandbox}/t_14723.jsonl": "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Skill\",\"input\":{\"skill\":\"coderails:push\"}}]}}\n{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Skill\",\"input\":{\"skill\":\"pr-review-toolkit:review-pr\"}}]}}\n",
+      "{sandbox}/repo_master/.coderails/workflow.config.yaml": "jira: null\n",
+      "{sandbox}/repo_main/.coderails/workflow.config.yaml": "jira: null\n",
+      "{sandbox}/repo/.coderails/workflow.config.yaml": "jira: null\n",
+      "{sandbox}/repo_feat/.coderails/workflow.config.yaml": "jira: null\n"
+    },
+    "repositories": {
+      "{sandbox}/repo_master": "master",
+      "{sandbox}/repo_main": "main",
+      "{sandbox}/repo_noconfig": "main",
+      "{sandbox}/repo": "main",
+      "{sandbox}/repo_feat": "feature/my-thing"
+    },
+    "env": {},
+    "returncode": 0,
+    "denied": true,
+    "fixture_index": 43
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "gh pr merge 1 --dry-run-data"
+      },
+      "cwd": "{sandbox}/repo",
+      "transcript_path": "{sandbox}/t_19538.jsonl"
+    },
+    "files": {
+      "{sandbox}/t_19538.jsonl": "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Skill\",\"input\":{\"skill\":\"coderails:prep\"}}]}}\n",
+      "{sandbox}/repo_master/.coderails/workflow.config.yaml": "jira: null\n",
+      "{sandbox}/repo_main/.coderails/workflow.config.yaml": "jira: null\n",
+      "{sandbox}/repo/.coderails/workflow.config.yaml": "jira: null\n",
+      "{sandbox}/repo_feat/.coderails/workflow.config.yaml": "jira: null\n"
+    },
+    "repositories": {
+      "{sandbox}/repo_master": "master",
+      "{sandbox}/repo_main": "main",
+      "{sandbox}/repo_noconfig": "main",
+      "{sandbox}/repo": "main",
+      "{sandbox}/repo_feat": "feature/my-thing"
+    },
+    "env": {},
+    "returncode": 0,
+    "denied": true,
+    "fixture_index": 52
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "gh pr merge --squash 42"
+      },
+      "cwd": "{sandbox}/repo",
+      "transcript_path": "{sandbox}/t_5716.jsonl"
+    },
+    "files": {
+      "{sandbox}/t_5716.jsonl": "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Skill\",\"input\":{\"skill\":\"coderails:push\"}}]}}\n{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Skill\",\"input\":{\"skill\":\"pr-review-toolkit:review-pr\",\"args\":\"99\"}}]}}\n",
+      "{sandbox}/repo_master/.coderails/workflow.config.yaml": "jira: null\n",
+      "{sandbox}/repo_main/.coderails/workflow.config.yaml": "jira: null\n",
+      "{sandbox}/repo/.coderails/workflow.config.yaml": "jira: null\n",
+      "{sandbox}/repo_feat/.coderails/workflow.config.yaml": "jira: null\n"
+    },
+    "repositories": {
+      "{sandbox}/repo_master": "master",
+      "{sandbox}/repo_main": "main",
+      "{sandbox}/repo_noconfig": "main",
+      "{sandbox}/repo": "main",
+      "{sandbox}/repo_feat": "feature/my-thing"
+    },
+    "env": {},
+    "returncode": 0,
+    "denied": true,
+    "fixture_index": 69
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "gh pr merge 12"
+      },
+      "cwd": "{sandbox}/repo",
+      "transcript_path": "{sandbox}/t_16813.jsonl"
+    },
+    "files": {
+      "{sandbox}/t_16813.jsonl": "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Skill\",\"input\":{\"skill\":\"coderails:push\"}}]}}\n{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Skill\",\"input\":{\"skill\":\"pr-review-toolkit:review-pr\",\"args\":\"fixed 12 bugs\"}}]}}\n",
+      "{sandbox}/repo_master/.coderails/workflow.config.yaml": "jira: null\n",
+      "{sandbox}/repo_main/.coderails/workflow.config.yaml": "jira: null\n",
+      "{sandbox}/repo/.coderails/workflow.config.yaml": "jira: null\n",
+      "{sandbox}/repo_feat/.coderails/workflow.config.yaml": "jira: null\n"
+    },
+    "repositories": {
+      "{sandbox}/repo_master": "master",
+      "{sandbox}/repo_main": "main",
+      "{sandbox}/repo_noconfig": "main",
+      "{sandbox}/repo": "main",
+      "{sandbox}/repo_feat": "feature/my-thing"
+    },
+    "env": {},
+    "returncode": 0,
+    "denied": true,
+    "fixture_index": 72
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "gh pr merge 42"
+      },
+      "cwd": "{sandbox}/repo",
+      "transcript_path": "{sandbox}/t_27001.jsonl"
+    },
+    "files": {
+      "{sandbox}/t_27001.jsonl": "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Skill\",\"input\":{\"skill\":\"coderails:push\"}}]}}\n{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Skill\",\"input\":{\"skill\":\"pr-review-toolkit:review-pr\",\"args\":\"420\"}}]}}\n",
+      "{sandbox}/repo_master/.coderails/workflow.config.yaml": "jira: null\n",
+      "{sandbox}/repo_main/.coderails/workflow.config.yaml": "jira: null\n",
+      "{sandbox}/repo/.coderails/workflow.config.yaml": "jira: null\n",
+      "{sandbox}/repo_feat/.coderails/workflow.config.yaml": "jira: null\n"
+    },
+    "repositories": {
+      "{sandbox}/repo_master": "master",
+      "{sandbox}/repo_main": "main",
+      "{sandbox}/repo_noconfig": "main",
+      "{sandbox}/repo": "main",
+      "{sandbox}/repo_feat": "feature/my-thing"
+    },
+    "env": {},
+    "returncode": 0,
+    "denied": true,
+    "fixture_index": 75
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "gh pr merge 42"
+      },
+      "cwd": "{sandbox}/repo",
+      "transcript_path": "{sandbox}/t_6471.jsonl"
+    },
+    "files": {
+      "{sandbox}/t_6471.jsonl": "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Skill\",\"input\":{\"skill\":\"coderails:push\"}}]}}\n{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Skill\",\"input\":{\"skill\":\"pr-review-toolkit:review-pr\",\"args\":\"142\"}}]}}\n",
+      "{sandbox}/repo_master/.coderails/workflow.config.yaml": "jira: null\n",
+      "{sandbox}/repo_main/.coderails/workflow.config.yaml": "jira: null\n",
+      "{sandbox}/repo/.coderails/workflow.config.yaml": "jira: null\n",
+      "{sandbox}/repo_feat/.coderails/workflow.config.yaml": "jira: null\n"
+    },
+    "repositories": {
+      "{sandbox}/repo_master": "master",
+      "{sandbox}/repo_main": "main",
+      "{sandbox}/repo_noconfig": "main",
+      "{sandbox}/repo": "main",
+      "{sandbox}/repo_feat": "feature/my-thing"
+    },
+    "env": {},
+    "returncode": 0,
+    "denied": true,
+    "fixture_index": 76
+  }
+]

@@ -1,0 +1,23 @@
+[
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "find .\t-delete"
+      },
+      "cwd": "{sandbox}/feat_repo"
+    },
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_tabs.test.sh",
+    "expected": {
+      "hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": "Destructive pattern detected: find -delete\nFull command: find .\t-delete\nThis command is permanently blocked. Safe route: there is no safe equivalent for the deletion itself. Preview the exact match set first by replacing -delete with -print (or -print0 piped to xargs -0 ls) and reviewing the list before deleting any other way. To allow this pattern, add a Bash permission rule to settings.json.",
+        "patternId": "find-delete"
+      }
+    },
+    "fixture_index": 235
+  }
+]

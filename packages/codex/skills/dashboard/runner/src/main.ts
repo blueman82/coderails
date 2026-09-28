@@ -68,7 +68,7 @@ export async function run(deps: RunDeps = {}): Promise<number> {
 // process.exit tearing down the test runner. The guard below keeps this
 // from firing (and exiting the process) when main.test.ts imports run()
 // directly — only firing when this file is the actual entry point, e.g.
-// via bin/sweeper.sh invoking src/main.ts.
+// via bin/sweeper.py invoking src/main.ts.
 //
 // Comparing realpaths (rather than import.meta.url against process.argv[1]
 // verbatim) is required because import.meta.url always resolves through

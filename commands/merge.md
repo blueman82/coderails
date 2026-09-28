@@ -13,7 +13,7 @@ description: Merge approved PR, switch to main, and pull latest changes
 Execute the merge workflow script:
 
 ```bash
-bash "${CLAUDE_PLUGIN_ROOT}/scripts/merge.sh" "$ARGUMENTS"
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/merge.py" "$ARGUMENTS"
 ```
 
 The script handles:

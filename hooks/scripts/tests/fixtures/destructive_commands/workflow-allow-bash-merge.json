@@ -1,0 +1,177 @@
+[
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bash \"scripts/merge.sh\" \"19\""
+      },
+      "cwd": "{sandbox}/feat_repo"
+    },
+    "stdout": "",
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_workflow.test.sh",
+    "expected": {},
+    "fixture_index": 328
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bash scripts/merge.sh \"19\" && bash scripts/post_evals.sh post 19 \"note with $(whoami)\""
+      },
+      "cwd": "{sandbox}/feat_repo"
+    },
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_workflow.test.sh",
+    "expected": {
+      "hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": "Command-substitution character (backtick, $(...), or process substitution <(...)/>(...)) detected inside a push.sh/merge.sh/post_review.sh/post_evals.sh argument.\nFull command: bash scripts/merge.sh \"19\" && bash scripts/post_evals.sh post 19 \"note with $(whoami)\"\nThese scripts take a free-text message that becomes a commit/PR title or comment body \u2014 a backtick, $(...), or <(...)/>(...) in it executes as live shell substitution when this line runs, not literal text. None of these scripts read a body from a file, so there is no -F body=@file escape hatch here \u2014 rewrite the argument in plain prose with no backticks, $(), or <()/>() (e.g. \"git rev-parse show-toplevel\" instead of wrapping it in backticks)."
+      }
+    },
+    "fixture_index": 339
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bash scripts/merge.sh 19 \"a || `id`\""
+      },
+      "cwd": "{sandbox}/feat_repo"
+    },
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_workflow.test.sh",
+    "expected": {
+      "hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": "Command-substitution character (backtick, $(...), or process substitution <(...)/>(...)) detected inside a push.sh/merge.sh/post_review.sh/post_evals.sh argument.\nFull command: bash scripts/merge.sh 19 \"a || `id`\"\nThese scripts take a free-text message that becomes a commit/PR title or comment body \u2014 a backtick, $(...), or <(...)/>(...) in it executes as live shell substitution when this line runs, not literal text. None of these scripts read a body from a file, so there is no -F body=@file escape hatch here \u2014 rewrite the argument in plain prose with no backticks, $(), or <()/>() (e.g. \"git rev-parse show-toplevel\" instead of wrapping it in backticks)."
+      }
+    },
+    "fixture_index": 342
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bash scripts/merge.sh 19 \"see scripts/merge.sh docs for $(cmd) syntax\""
+      },
+      "cwd": "{sandbox}/feat_repo"
+    },
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_workflow.test.sh",
+    "expected": {
+      "hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": "Command-substitution character (backtick, $(...), or process substitution <(...)/>(...)) detected inside a push.sh/merge.sh/post_review.sh/post_evals.sh argument.\nFull command: bash scripts/merge.sh 19 \"see scripts/merge.sh docs for $(cmd) syntax\"\nThese scripts take a free-text message that becomes a commit/PR title or comment body \u2014 a backtick, $(...), or <(...)/>(...) in it executes as live shell substitution when this line runs, not literal text. None of these scripts read a body from a file, so there is no -F body=@file escape hatch here \u2014 rewrite the argument in plain prose with no backticks, $(), or <()/>() (e.g. \"git rev-parse show-toplevel\" instead of wrapping it in backticks)."
+      }
+    },
+    "fixture_index": 343
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bash scripts/merge.sh 19 \"note >(touch /tmp/pwned)\""
+      },
+      "cwd": "{sandbox}/feat_repo"
+    },
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_workflow.test.sh",
+    "expected": {
+      "hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": "Command-substitution character (backtick, $(...), or process substitution <(...)/>(...)) detected inside a push.sh/merge.sh/post_review.sh/post_evals.sh argument.\nFull command: bash scripts/merge.sh 19 \"note >(touch /tmp/pwned)\"\nThese scripts take a free-text message that becomes a commit/PR title or comment body \u2014 a backtick, $(...), or <(...)/>(...) in it executes as live shell substitution when this line runs, not literal text. None of these scripts read a body from a file, so there is no -F body=@file escape hatch here \u2014 rewrite the argument in plain prose with no backticks, $(), or <()/>() (e.g. \"git rev-parse show-toplevel\" instead of wrapping it in backticks)."
+      }
+    },
+    "fixture_index": 350
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bash scripts/merge.sh 19 \"note\" > >(cat > /tmp/exfil)"
+      },
+      "cwd": "{sandbox}/feat_repo"
+    },
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_workflow.test.sh",
+    "expected": {
+      "hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": "Command-substitution character (backtick, $(...), or process substitution <(...)/>(...)) detected inside a push.sh/merge.sh/post_review.sh/post_evals.sh argument.\nFull command: bash scripts/merge.sh 19 \"note\" > >(cat > /tmp/exfil)\nThese scripts take a free-text message that becomes a commit/PR title or comment body \u2014 a backtick, $(...), or <(...)/>(...) in it executes as live shell substitution when this line runs, not literal text. None of these scripts read a body from a file, so there is no -F body=@file escape hatch here \u2014 rewrite the argument in plain prose with no backticks, $(), or <()/>() (e.g. \"git rev-parse show-toplevel\" instead of wrapping it in backticks)."
+      }
+    },
+    "fixture_index": 351
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bash scripts/merge.sh \"19\" && bash scripts/post_evals.sh post 19 \"note <(touch pwned)\""
+      },
+      "cwd": "{sandbox}/feat_repo"
+    },
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_workflow.test.sh",
+    "expected": {
+      "hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": "Command-substitution character (backtick, $(...), or process substitution <(...)/>(...)) detected inside a push.sh/merge.sh/post_review.sh/post_evals.sh argument.\nFull command: bash scripts/merge.sh \"19\" && bash scripts/post_evals.sh post 19 \"note <(touch pwned)\"\nThese scripts take a free-text message that becomes a commit/PR title or comment body \u2014 a backtick, $(...), or <(...)/>(...) in it executes as live shell substitution when this line runs, not literal text. None of these scripts read a body from a file, so there is no -F body=@file escape hatch here \u2014 rewrite the argument in plain prose with no backticks, $(), or <()/>() (e.g. \"git rev-parse show-toplevel\" instead of wrapping it in backticks)."
+      }
+    },
+    "fixture_index": 356
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bash scripts/merge.sh 19 \"clean\" <<EOF\nscripts/merge.sh <(touch pwned)\nEOF"
+      },
+      "cwd": "{sandbox}/feat_repo"
+    },
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_workflow.test.sh",
+    "expected": {
+      "hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": "Command-substitution character (backtick, $(...), or process substitution <(...)/>(...)) detected inside a push.sh/merge.sh/post_review.sh/post_evals.sh argument.\nFull command: bash scripts/merge.sh 19 \"clean\" <<EOF\nscripts/merge.sh <(touch pwned)\nEOF\nThese scripts take a free-text message that becomes a commit/PR title or comment body \u2014 a backtick, $(...), or <(...)/>(...) in it executes as live shell substitution when this line runs, not literal text. None of these scripts read a body from a file, so there is no -F body=@file escape hatch here \u2014 rewrite the argument in plain prose with no backticks, $(), or <()/>() (e.g. \"git rev-parse show-toplevel\" instead of wrapping it in backticks)."
+      }
+    },
+    "fixture_index": 357
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bash scripts/merge.sh \\\n19 \"note $(whoami)\""
+      },
+      "cwd": "{sandbox}/feat_repo"
+    },
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_workflow.test.sh",
+    "expected": {
+      "hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": "Command-substitution character (backtick, $(...), or process substitution <(...)/>(...)) detected inside a push.sh/merge.sh/post_review.sh/post_evals.sh argument.\nFull command: bash scripts/merge.sh \\\n19 \"note $(whoami)\"\nThese scripts take a free-text message that becomes a commit/PR title or comment body \u2014 a backtick, $(...), or <(...)/>(...) in it executes as live shell substitution when this line runs, not literal text. None of these scripts read a body from a file, so there is no -F body=@file escape hatch here \u2014 rewrite the argument in plain prose with no backticks, $(), or <()/>() (e.g. \"git rev-parse show-toplevel\" instead of wrapping it in backticks)."
+      }
+    },
+    "fixture_index": 361
+  }
+]

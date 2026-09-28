@@ -1,0 +1,38 @@
+[tool.black]
+line-length = 120
+target-version = ["py39"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py39"
+exclude = ["assets", "dist", "fixtures", "node_modules"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "ANN", "N", "D"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.pyright]
+pythonVersion = "3.9"
+typeCheckingMode = "strict"
+include = ["."]
+executionEnvironments = [
+  { root = "skills/workflow-audit/scripts", extraPaths = ["skills/workflow-audit/scripts", "skills/workflow-audit/scripts/tests", "skills/dashboard/scripts", "."] },
+  { root = "packages/codex/hooks/scripts", extraPaths = ["packages/codex/hooks/scripts", "packages/codex/skills/agentic-loop/scripts", "packages/codex"] },
+  { root = "packages/codex/skills/agentic-loop/scripts", extraPaths = ["packages/codex/skills/agentic-loop/scripts", "packages/codex/hooks/scripts", "packages/codex"] },
+  { root = "packages/codex", extraPaths = ["packages/codex"] },
+  { root = "packages/tests", extraPaths = ["packages/codex", "packages/codex/hooks/scripts", "packages/codex/skills/agentic-loop/scripts", "."] },
+  { root = "hooks/scripts/tests", extraPaths = ["hooks/scripts/tests/lib", "hooks/scripts/tests", "hooks/scripts", "skills/agentic-loop/scripts", "scripts/integrity-gate", "launchd", "."] },
+  { root = "hooks/scripts", extraPaths = ["hooks/scripts", "skills/agentic-loop/scripts", "."] },
+  { root = "skills/agentic-loop/scripts", extraPaths = ["skills/agentic-loop/scripts", "hooks/scripts", "."] },
+  { root = "scripts/integrity-gate", extraPaths = ["scripts/integrity-gate", "."] },
+  { root = "launchd", extraPaths = ["launchd", "."] },
+  { root = ".", extraPaths = ["."] },
+]
+
+[tool.mypy]
+python_version = "3.9"
+strict = true
+explicit_package_bases = true
+mypy_path = "."

@@ -1,0 +1,102 @@
+[
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "sed -i 's/a/b/' foo.py"
+      },
+      "cwd": "{sandbox}/main_repo"
+    },
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_workflow.test.sh",
+    "expected": {
+      "hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": "In-Bash source edit on main branch blocked.\nFull command: sed -i 's/a/b/' foo.py\nEditing source files via sed/perl/redirect/tee on main is blocked. Switch to a feature branch or use the Edit tool."
+      }
+    },
+    "fixture_index": 282
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "sed -i 's/a/b/' README.md"
+      },
+      "cwd": "{sandbox}/main_repo"
+    },
+    "stdout": "",
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_workflow.test.sh",
+    "expected": {},
+    "fixture_index": 290
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "sed -i 's/a/b/' foo.py"
+      },
+      "cwd": "{sandbox}/feat_repo"
+    },
+    "stdout": "",
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_workflow.test.sh",
+    "expected": {},
+    "fixture_index": 291
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "sed -i 's/a/b/' foo.py"
+      }
+    },
+    "stdout": "",
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_workflow.test.sh",
+    "expected": {},
+    "execution_cwd": "{sandbox}/feat_repo",
+    "fixture_index": 304
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "sed -i 's/a/b/' foo.py"
+      }
+    },
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_workflow.test.sh",
+    "expected": {
+      "hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": "In-Bash source edit on main branch blocked.\nFull command: sed -i 's/a/b/' foo.py\nEditing source files via sed/perl/redirect/tee on main is blocked. Switch to a feature branch or use the Edit tool."
+      }
+    },
+    "execution_cwd": "{sandbox}/main_repo",
+    "fixture_index": 305
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "sed -i 's/a/b/' {sandbox}/feat_repo/foo.py"
+      },
+      "cwd": "{sandbox}/main_repo"
+    },
+    "stdout": "",
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_workflow.test.sh",
+    "expected": {},
+    "fixture_index": 306
+  }
+]

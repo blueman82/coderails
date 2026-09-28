@@ -1,0 +1,274 @@
+[
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "gh pr create --title foo"
+      },
+      "cwd": "{sandbox}/repo",
+      "transcript_path": ""
+    },
+    "files": {
+      "{sandbox}/repo/.coderails/workflow.config.yaml": "jira: null\n"
+    },
+    "repositories": {
+      "{sandbox}/repo_noconfig": "main",
+      "{sandbox}/repo": "main"
+    },
+    "env": {},
+    "returncode": 0,
+    "denied": false,
+    "fixture_index": 0
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "gh pr create --title foo"
+      },
+      "cwd": "{sandbox}/repo",
+      "transcript_path": "{sandbox}/nope.jsonl"
+    },
+    "files": {
+      "{sandbox}/repo/.coderails/workflow.config.yaml": "jira: null\n"
+    },
+    "repositories": {
+      "{sandbox}/repo_noconfig": "main",
+      "{sandbox}/repo": "main"
+    },
+    "env": {},
+    "returncode": 0,
+    "denied": false,
+    "fixture_index": 1
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "gh pr create --title foo"
+      },
+      "cwd": "{sandbox}/repo",
+      "transcript_path": "{sandbox}/t_10701.jsonl"
+    },
+    "files": {
+      "{sandbox}/t_10701.jsonl": "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Skill\",\"input\":{\"skill\":\"coderails:push\"}}]}}\n",
+      "{sandbox}/repo/.coderails/workflow.config.yaml": "jira: null\n"
+    },
+    "repositories": {
+      "{sandbox}/repo_noconfig": "main",
+      "{sandbox}/repo": "main"
+    },
+    "env": {},
+    "returncode": 0,
+    "denied": false,
+    "fixture_index": 3
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "gh pr create --title foo"
+      },
+      "cwd": "{sandbox}/repo",
+      "transcript_path": "{sandbox}/t_16578.jsonl"
+    },
+    "files": {
+      "{sandbox}/t_16578.jsonl": "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Skill\",\"input\":{\"skill\":\"push\"}}]}}\n",
+      "{sandbox}/repo/.coderails/workflow.config.yaml": "jira: null\n"
+    },
+    "repositories": {
+      "{sandbox}/repo_noconfig": "main",
+      "{sandbox}/repo": "main"
+    },
+    "env": {},
+    "returncode": 0,
+    "denied": false,
+    "fixture_index": 4
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "gh pr create --title foo"
+      },
+      "cwd": "{sandbox}/repo",
+      "transcript_path": "{sandbox}/t_6525.jsonl"
+    },
+    "files": {
+      "{sandbox}/t_6525.jsonl": "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Bash\",\"input\":{\"command\":\"bash scripts\\/push.sh main\"}}]}}\n",
+      "{sandbox}/repo/.coderails/workflow.config.yaml": "jira: null\n"
+    },
+    "repositories": {
+      "{sandbox}/repo_noconfig": "main",
+      "{sandbox}/repo": "main"
+    },
+    "env": {},
+    "returncode": 0,
+    "denied": false,
+    "fixture_index": 5
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "gh pr create --title foo"
+      },
+      "cwd": "{sandbox}/repo_noconfig",
+      "transcript_path": "{sandbox}/t_28100.jsonl"
+    },
+    "files": {
+      "{sandbox}/t_28100.jsonl": "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Skill\",\"input\":{\"skill\":\"coderails:prep\"}}]}}\n",
+      "{sandbox}/repo/.coderails/workflow.config.yaml": "jira: null\n"
+    },
+    "repositories": {
+      "{sandbox}/repo_noconfig": "main",
+      "{sandbox}/repo": "main"
+    },
+    "env": {},
+    "returncode": 0,
+    "denied": false,
+    "fixture_index": 11
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "gh pr create --help"
+      },
+      "cwd": "{sandbox}/repo",
+      "transcript_path": "{sandbox}/t_13504.jsonl"
+    },
+    "files": {
+      "{sandbox}/t_13504.jsonl": "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Skill\",\"input\":{\"skill\":\"coderails:prep\"}}]}}\n",
+      "{sandbox}/repo/.coderails/workflow.config.yaml": "jira: null\n"
+    },
+    "repositories": {
+      "{sandbox}/repo_noconfig": "main",
+      "{sandbox}/repo": "main"
+    },
+    "env": {},
+    "returncode": 0,
+    "denied": false,
+    "fixture_index": 12
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "gh pr create --title foo"
+      },
+      "cwd": "{sandbox}/repo",
+      "transcript_path": "{sandbox}/t_19247.jsonl",
+      "agent_transcript_path": "{sandbox}/t_20155.jsonl"
+    },
+    "files": {
+      "{sandbox}/t_20155.jsonl": "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Bash\",\"input\":{\"command\":\"bash scripts\\/push.sh main\"}}]}}\n",
+      "{sandbox}/t_19247.jsonl": "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Skill\",\"input\":{\"skill\":\"coderails:prep\"}}]}}\n",
+      "{sandbox}/repo_master/.coderails/workflow.config.yaml": "jira: null\n",
+      "{sandbox}/repo_main/.coderails/workflow.config.yaml": "jira: null\n",
+      "{sandbox}/repo/.coderails/workflow.config.yaml": "jira: null\n",
+      "{sandbox}/repo_feat/.coderails/workflow.config.yaml": "jira: null\n"
+    },
+    "repositories": {
+      "{sandbox}/repo_master": "master",
+      "{sandbox}/repo_main": "main",
+      "{sandbox}/repo_noconfig": "main",
+      "{sandbox}/repo": "main",
+      "{sandbox}/repo_feat": "feature/my-thing"
+    },
+    "env": {},
+    "returncode": 0,
+    "denied": false,
+    "fixture_index": 37
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "gh pr create --title foo"
+      },
+      "cwd": "{sandbox}/repo",
+      "transcript_path": "{sandbox}/t_29667.jsonl",
+      "agent_transcript_path": "{sandbox}/t_30575.jsonl"
+    },
+    "files": {
+      "{sandbox}/t_29667.jsonl": "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Bash\",\"input\":{\"command\":\"bash scripts\\/push.sh main\"}}]}}\n",
+      "{sandbox}/t_30575.jsonl": "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Skill\",\"input\":{\"skill\":\"coderails:prep\"}}]}}\n",
+      "{sandbox}/repo_master/.coderails/workflow.config.yaml": "jira: null\n",
+      "{sandbox}/repo_main/.coderails/workflow.config.yaml": "jira: null\n",
+      "{sandbox}/repo/.coderails/workflow.config.yaml": "jira: null\n",
+      "{sandbox}/repo_feat/.coderails/workflow.config.yaml": "jira: null\n"
+    },
+    "repositories": {
+      "{sandbox}/repo_master": "master",
+      "{sandbox}/repo_main": "main",
+      "{sandbox}/repo_noconfig": "main",
+      "{sandbox}/repo": "main",
+      "{sandbox}/repo_feat": "feature/my-thing"
+    },
+    "env": {},
+    "returncode": 0,
+    "denied": false,
+    "fixture_index": 38
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "gh pr create --help"
+      },
+      "cwd": "{sandbox}/repo",
+      "transcript_path": "{sandbox}/t_17063.jsonl"
+    },
+    "files": {
+      "{sandbox}/t_17063.jsonl": "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Skill\",\"input\":{\"skill\":\"coderails:prep\"}}]}}\n",
+      "{sandbox}/repo_master/.coderails/workflow.config.yaml": "jira: null\n",
+      "{sandbox}/repo_main/.coderails/workflow.config.yaml": "jira: null\n",
+      "{sandbox}/repo/.coderails/workflow.config.yaml": "jira: null\n",
+      "{sandbox}/repo_feat/.coderails/workflow.config.yaml": "jira: null\n"
+    },
+    "repositories": {
+      "{sandbox}/repo_master": "master",
+      "{sandbox}/repo_main": "main",
+      "{sandbox}/repo_noconfig": "main",
+      "{sandbox}/repo": "main",
+      "{sandbox}/repo_feat": "feature/my-thing"
+    },
+    "env": {},
+    "returncode": 0,
+    "denied": false,
+    "fixture_index": 55
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "gh pr create --help"
+      },
+      "cwd": "{sandbox}/repo",
+      "transcript_path": "{sandbox}/t_22731.jsonl"
+    },
+    "files": {
+      "{sandbox}/t_22731.jsonl": "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Skill\",\"input\":{\"skill\":\"coderails:prep\"}}]}}\n",
+      "{sandbox}/repo_master/.coderails/workflow.config.yaml": "jira: null\n",
+      "{sandbox}/repo_main/.coderails/workflow.config.yaml": "jira: null\n",
+      "{sandbox}/repo_eval/.coderails/workflow.config.yaml": "jira: null\n",
+      "{sandbox}/worktree_feat/.coderails/workflow.config.yaml": "jira: null\n",
+      "{sandbox}/repo/.coderails/workflow.config.yaml": "jira: null\n",
+      "{sandbox}/repo_feat/.coderails/workflow.config.yaml": "jira: null\n"
+    },
+    "repositories": {
+      "{sandbox}/repo_master": "master",
+      "{sandbox}/repo_main": "main",
+      "{sandbox}/repo_eval": "main",
+      "{sandbox}/worktree_feat": "feature/worktree-thing",
+      "{sandbox}/repo_noconfig": "main",
+      "{sandbox}/repo": "main",
+      "{sandbox}/repo_feat": "feature/my-thing"
+    },
+    "env": {},
+    "returncode": 0,
+    "denied": false,
+    "fixture_index": 111
+  }
+]

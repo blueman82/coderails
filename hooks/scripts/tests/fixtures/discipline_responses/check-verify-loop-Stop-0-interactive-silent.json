@@ -1,0 +1,318 @@
+[
+  {
+    "request": {
+      "transcript_path": "/nonexistent.jsonl",
+      "session_id": "S1",
+      "stop_hook_active": false
+    },
+    "files": {},
+    "env": {
+      "CLAUDE_DISCIPLINE_LOG": "{sandbox}/discipline.log",
+      "CLAUDE_HOOK_MAX_ATTEMPTS": "1",
+      "CLAUDE_AGENTIC_LOOP_DIR": "{sandbox}/state",
+      "CLAUDE_HOOK_SLEEP_S": "0"
+    },
+    "stdout": "",
+    "returncode": 0,
+    "source": "check_verify_loop",
+    "fixture_index": 31
+  },
+  {
+    "request": {
+      "transcript_path": "{sandbox}/t_ne_21236.jsonl",
+      "session_id": "S1",
+      "cwd": "/work/project",
+      "stop_hook_active": false
+    },
+    "files": {
+      "{sandbox}/t_ne_21236.jsonl": "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"Some text. (verified)\"}]}}\n"
+    },
+    "env": {
+      "CLAUDE_DISCIPLINE_LOG": "{sandbox}/discipline.log",
+      "CLAUDE_HOOK_MAX_ATTEMPTS": "1",
+      "CLAUDE_AGENTIC_LOOP_DIR": "{sandbox}/state",
+      "CLAUDE_HOOK_SLEEP_S": "0"
+    },
+    "stdout": "",
+    "returncode": 0,
+    "source": "check_verify_loop",
+    "fixture_index": 32
+  },
+  {
+    "request": {
+      "transcript_path": "{sandbox}/t_ne_12943.jsonl",
+      "session_id": "S1",
+      "cwd": "/work/project",
+      "stop_hook_active": false
+    },
+    "files": {
+      "{sandbox}/t_ne_12943.jsonl": "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"Some text. (verified)\\n## Did Not Verify\\n- (unverifiable: prod-only observation) whether the deploy actually succeeded\"}]}}\n"
+    },
+    "env": {
+      "CLAUDE_DISCIPLINE_LOG": "{sandbox}/discipline.log",
+      "CLAUDE_HOOK_MAX_ATTEMPTS": "1",
+      "CLAUDE_AGENTIC_LOOP_DIR": "{sandbox}/state",
+      "CLAUDE_HOOK_SLEEP_S": "0"
+    },
+    "stdout": "",
+    "returncode": 0,
+    "source": "check_verify_loop",
+    "fixture_index": 34
+  },
+  {
+    "request": {
+      "transcript_path": "{sandbox}/t_21545.jsonl",
+      "session_id": "S1",
+      "cwd": "/work/project",
+      "stop_hook_active": true
+    },
+    "files": {
+      "{sandbox}/t_21545.jsonl": "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Edit\",\"input\":{\"file_path\":\"/tmp/f.py\"}}]}}\n{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"Some text.\\n## Did Not Verify\\n- untagged item about something\"}]}}\n"
+    },
+    "env": {
+      "CLAUDE_DISCIPLINE_LOG": "{sandbox}/discipline.log",
+      "CLAUDE_HOOK_MAX_ATTEMPTS": "1",
+      "CLAUDE_AGENTIC_LOOP_DIR": "{sandbox}/state",
+      "CLAUDE_HOOK_SLEEP_S": "0"
+    },
+    "stdout": "",
+    "returncode": 0,
+    "source": "check_verify_loop",
+    "fixture_index": 35
+  },
+  {
+    "request": {
+      "transcript_path": "{sandbox}/t_6041.jsonl",
+      "session_id": "S1",
+      "cwd": "/work/project",
+      "stop_hook_active": false
+    },
+    "files": {
+      "{sandbox}/t_6041.jsonl": "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Edit\",\"input\":{\"file_path\":\"/tmp/f.py\"}}]}}\n{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"This is a response that edits files but has no Did Not Verify section. (verified)\"}]}}\n"
+    },
+    "env": {
+      "CLAUDE_DISCIPLINE_LOG": "{sandbox}/discipline.log",
+      "CLAUDE_HOOK_MAX_ATTEMPTS": "1",
+      "CLAUDE_AGENTIC_LOOP_DIR": "{sandbox}/state",
+      "CLAUDE_HOOK_SLEEP_S": "0"
+    },
+    "stdout": "",
+    "returncode": 0,
+    "source": "check_verify_loop",
+    "fixture_index": 36
+  },
+  {
+    "request": {
+      "transcript_path": "{sandbox}/t_11860.jsonl",
+      "session_id": "S1",
+      "cwd": "/work/project",
+      "stop_hook_active": false
+    },
+    "files": {
+      "{sandbox}/t_11860.jsonl": "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Edit\",\"input\":{\"file_path\":\"/tmp/f.py\"}}]}}\n{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"Some text here. (verified)\\n## Did Not Verify\\n- (unverifiable: prod-only observation) whether the deploy actually succeeded\"}]}}\n"
+    },
+    "env": {
+      "CLAUDE_DISCIPLINE_LOG": "{sandbox}/discipline.log",
+      "CLAUDE_HOOK_MAX_ATTEMPTS": "1",
+      "CLAUDE_AGENTIC_LOOP_DIR": "{sandbox}/state",
+      "CLAUDE_HOOK_SLEEP_S": "0"
+    },
+    "stdout": "",
+    "returncode": 0,
+    "source": "check_verify_loop",
+    "fixture_index": 38
+  },
+  {
+    "request": {
+      "transcript_path": "{sandbox}/t_9869.jsonl",
+      "session_id": "S1",
+      "cwd": "/work/project",
+      "stop_hook_active": false
+    },
+    "files": {
+      "{sandbox}/t_9869.jsonl": "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Edit\",\"input\":{\"file_path\":\"/tmp/f.py\"}}]}}\n{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"Some text here. (verified)\\n## Did Not Verify\\n- \"}]}}\n"
+    },
+    "env": {
+      "CLAUDE_DISCIPLINE_LOG": "{sandbox}/discipline.log",
+      "CLAUDE_HOOK_MAX_ATTEMPTS": "1",
+      "CLAUDE_AGENTIC_LOOP_DIR": "{sandbox}/state",
+      "CLAUDE_HOOK_SLEEP_S": "0"
+    },
+    "stdout": "",
+    "returncode": 0,
+    "source": "check_verify_loop",
+    "fixture_index": 41
+  },
+  {
+    "request": {
+      "transcript_path": "{sandbox}/t_nf_28834.jsonl",
+      "session_id": "S1",
+      "cwd": "/work/project",
+      "stop_hook_active": false
+    },
+    "files": {
+      "{sandbox}/t_nf_28834.jsonl": "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Edit\",\"input\":{\"file_path\":\"/tmp/f1.py\"}}]}}\n{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Edit\",\"input\":{\"file_path\":\"/tmp/f2.py\"}}]}}\n{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Edit\",\"input\":{\"file_path\":\"/tmp/f3.py\"}}]}}\n{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"Done, all changes applied. (verified)\\n## Did Not Verify\\n- (unverifiable: prod-only observation) whether the deploy actually succeeded\"}]}}\n"
+    },
+    "env": {
+      "CLAUDE_DISCIPLINE_LOG": "{sandbox}/discipline.log",
+      "CLAUDE_HOOK_MAX_ATTEMPTS": "1",
+      "CLAUDE_AGENTIC_LOOP_DIR": "{sandbox}/state",
+      "CLAUDE_HOOK_SLEEP_S": "0"
+    },
+    "stdout": "",
+    "returncode": 0,
+    "source": "check_verify_loop",
+    "fixture_index": 44
+  },
+  {
+    "request": {
+      "transcript_path": "{sandbox}/t_nf_21507.jsonl",
+      "session_id": "S1",
+      "cwd": "/work/project",
+      "stop_hook_active": false
+    },
+    "files": {
+      "{sandbox}/t_nf_21507.jsonl": "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Edit\",\"input\":{\"file_path\":\"/tmp/f1.py\"}}]}}\n{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Edit\",\"input\":{\"file_path\":\"/tmp/f2.py\"}}]}}\n{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"Done. (verified)\"}]}}\n"
+    },
+    "env": {
+      "CLAUDE_DISCIPLINE_LOG": "{sandbox}/discipline.log",
+      "CLAUDE_HOOK_MAX_ATTEMPTS": "1",
+      "CLAUDE_AGENTIC_LOOP_DIR": "{sandbox}/state",
+      "CLAUDE_HOOK_SLEEP_S": "0"
+    },
+    "stdout": "",
+    "returncode": 0,
+    "source": "check_verify_loop",
+    "fixture_index": 45
+  },
+  {
+    "request": {
+      "transcript_path": "{sandbox}/t_nf_8729.jsonl",
+      "session_id": "S1",
+      "cwd": "/work/project",
+      "stop_hook_active": true
+    },
+    "files": {
+      "{sandbox}/t_nf_8729.jsonl": "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Edit\",\"input\":{\"file_path\":\"/tmp/f1.py\"}}]}}\n{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Edit\",\"input\":{\"file_path\":\"/tmp/f2.py\"}}]}}\n{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Edit\",\"input\":{\"file_path\":\"/tmp/f3.py\"}}]}}\n{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"Done, all changes applied. (verified)\"}]}}\n"
+    },
+    "env": {
+      "CLAUDE_DISCIPLINE_LOG": "{sandbox}/discipline.log",
+      "CLAUDE_HOOK_MAX_ATTEMPTS": "1",
+      "CLAUDE_AGENTIC_LOOP_DIR": "{sandbox}/state",
+      "CLAUDE_HOOK_SLEEP_S": "0"
+    },
+    "stdout": "",
+    "returncode": 0,
+    "source": "check_verify_loop",
+    "fixture_index": 46
+  },
+  {
+    "request": {
+      "transcript_path": "{sandbox}/t_earlier_turn_22459.jsonl",
+      "session_id": "S1",
+      "cwd": "/work/project",
+      "stop_hook_active": false
+    },
+    "files": {
+      "{sandbox}/state/-work-project/S1/progress.json": "{\"schema_version\": 3, \"status\": \"in-progress\", \"session_id\": \"S1\", \"completed_marker\": 0}",
+      "{sandbox}/t_earlier_turn_22459.jsonl": "{\"type\":\"user\",\"message\":{\"content\":\"first prompt\"}}\n{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Edit\",\"input\":{\"file_path\":\"/tmp/a.py\"}}]}}\n{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Edit\",\"input\":{\"file_path\":\"/tmp/b.py\"}}]}}\n{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Edit\",\"input\":{\"file_path\":\"/tmp/c.py\"}}]}}\n{\"type\":\"user\",\"message\":{\"content\":\"second prompt\"}}\n{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"Done, no edits this turn. (verified)\"}]}}\n"
+    },
+    "env": {
+      "CLAUDE_DISCIPLINE_LOG": "{sandbox}/discipline.log",
+      "CLAUDE_HOOK_MAX_ATTEMPTS": "1",
+      "CLAUDE_AGENTIC_LOOP_DIR": "{sandbox}/state",
+      "CLAUDE_HOOK_SLEEP_S": "0"
+    },
+    "stdout": "",
+    "returncode": 0,
+    "source": "check_verify_loop",
+    "fixture_index": 51
+  },
+  {
+    "request": {
+      "transcript_path": "{sandbox}/t_nf_17722.jsonl",
+      "session_id": "S1",
+      "cwd": "/work/project",
+      "stop_hook_active": false
+    },
+    "files": {
+      "{sandbox}/state/-work-project/S1/progress.json": "{\"schema_version\": 3, \"status\": \"in-progress\", \"session_id\": \"S1\", \"completed_marker\": 0}",
+      "{sandbox}/t_nf_17722.jsonl": "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Edit\",\"input\":{\"file_path\":\"/tmp/f1.py\"}}]}}\n{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Edit\",\"input\":{\"file_path\":\"/tmp/f2.py\"}}]}}\n{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Edit\",\"input\":{\"file_path\":\"/tmp/f3.py\"}}]}}\n{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"Done, all changes applied. (verified)\\n## Did Not Verify\\nNothing outstanding \u2014 every claim above was checked directly.\"}]}}\n"
+    },
+    "env": {
+      "CLAUDE_DISCIPLINE_LOG": "{sandbox}/discipline.log",
+      "CLAUDE_HOOK_MAX_ATTEMPTS": "1",
+      "CLAUDE_AGENTIC_LOOP_DIR": "{sandbox}/state",
+      "CLAUDE_HOOK_SLEEP_S": "0"
+    },
+    "stdout": "",
+    "returncode": 0,
+    "source": "check_verify_loop",
+    "fixture_index": 53
+  },
+  {
+    "request": {
+      "transcript_path": "{sandbox}/nope.jsonl",
+      "session_id": "S1",
+      "cwd": "/work/project",
+      "stop_hook_active": false,
+      "hook_event_name": "Stop"
+    },
+    "files": {},
+    "env": {
+      "CLAUDE_DISCIPLINE_LOG": "{sandbox}/discipline.log",
+      "CLAUDE_HOOK_MAX_ATTEMPTS": "1",
+      "CLAUDE_AGENTIC_LOOP_DIR": "{sandbox}/state",
+      "CLAUDE_HOOK_SLEEP_S": "0"
+    },
+    "stdout": "",
+    "returncode": 0,
+    "source": "check_verify_loop",
+    "fixture_index": 65
+  },
+  {
+    "request": {
+      "transcript_path": "{sandbox}/lt_20847.jsonl",
+      "session_id": "S1",
+      "cwd": "/work/project",
+      "stop_hook_active": false,
+      "hook_event_name": "Stop"
+    },
+    "files": {
+      "{sandbox}/state/-work-project/S1/progress.json": "{\"schema_version\": 3, \"status\": \"in-progress\", \"session_id\": \"S1\", \"completed_marker\": 0}",
+      "{sandbox}/lt_20847.jsonl": "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Skill\",\"input\":{\"skill\":\"coderails:agentic-loop\"}}]}}\n{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Edit\",\"input\":{\"file_path\":\"/tmp/f.py\"}}]}}\n{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"This is a response that edits files but has no Did Not Verify section. (verified)\"}]}}\n"
+    },
+    "env": {
+      "CLAUDE_DISCIPLINE_LOG": "{sandbox}/discipline.log",
+      "CLAUDE_HOOK_MAX_ATTEMPTS": "1",
+      "CLAUDE_AGENTIC_LOOP_DIR": "{sandbox}/state",
+      "CLAUDE_HOOK_SLEEP_S": "0"
+    },
+    "stdout": "",
+    "returncode": 0,
+    "source": "check_verify_loop",
+    "fixture_index": 70
+  },
+  {
+    "request": {
+      "transcript_path": "{sandbox}/t_nf_4859.jsonl",
+      "session_id": "S1",
+      "cwd": "/work/project",
+      "stop_hook_active": false
+    },
+    "files": {
+      "{sandbox}/state/-work-project/S1/progress.json": "{\"schema_version\": 3, \"status\": \"in-progress\", \"session_id\": \"S1\", \"completed_marker\": 0}",
+      "{sandbox}/t_nf_4859.jsonl": "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Edit\",\"input\":{\"file_path\":\"/tmp/f1.py\"}}]}}\n{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Edit\",\"input\":{\"file_path\":\"/tmp/f2.py\"}}]}}\n{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Edit\",\"input\":{\"file_path\":\"/tmp/f3.py\"}}]}}\n{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"\"}]}}\n"
+    },
+    "env": {
+      "CLAUDE_DISCIPLINE_LOG": "{sandbox}/discipline.log",
+      "CLAUDE_HOOK_MAX_ATTEMPTS": "1",
+      "CLAUDE_AGENTIC_LOOP_DIR": "{sandbox}/state",
+      "CLAUDE_HOOK_SLEEP_S": "0"
+    },
+    "stdout": "",
+    "returncode": 0,
+    "source": "check_verify_loop",
+    "fixture_index": 72
+  }
+]

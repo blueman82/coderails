@@ -1,5 +1,5 @@
 ---
-allowed-tools: ["Bash(gh pr view*)", "Bash(gh api*)", "Bash(gh repo view*)", "Bash(./scripts/post_review.sh*)", "Bash(cat*)", "Bash(bash*)"]
+allowed-tools: ["Bash(gh pr view*)", "Bash(gh api*)", "Bash(gh repo view*)", "Bash(./scripts/post_review.py*)", "Bash(cat*)", "Bash(python3*)"]
 argument-hint: <PR#>
 description: Validate and post a SHA-bound review summary as a durable PR artifact
 ---
@@ -37,7 +37,7 @@ Example valid body (findings present):
 None
 
 ## Important
-- The merge gate in merge.sh has no test for the gh-fetch-failure path.
+- The merge gate in merge.py has no test for the gh-fetch-failure path.
 
 ## Suggestions
 - Consider extracting the comment-body iteration into a named helper.
@@ -54,7 +54,7 @@ Example valid body (no findings):
 Run the validator before posting. Abort if it fails.
 
 ```bash
-./scripts/post_review.sh validate /tmp/coderails-review-summary-$$.md
+./scripts/post_review.py validate /tmp/coderails-review-summary-$$.md
 ```
 
 If exit code is non-zero, print the validation error and **stop** — do not post.
@@ -67,11 +67,10 @@ HEAD_SHA=$(gh pr view "$ARGUMENTS" --json headRefOid -q .headRefOid)
 
 ## Step 4 — Build the marker and prepend to summary
 
-Source the review-artifact lib to build the marker:
+Run the review marker helper:
 
 ```bash
-source "${CLAUDE_PLUGIN_ROOT}/scripts/lib/review-artifact.sh"
-MARKER=$(review_artifact::marker "$ARGUMENTS" "$HEAD_SHA")
+MARKER=$(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/lib/review_artifact.py" "$ARGUMENTS" "$HEAD_SHA")
 ```
 
 Prepend the marker to the body file so the posted comment begins with the marker line:
@@ -105,9 +104,9 @@ comment's metadata:
 
 ```bash
 if [[ -n "$EXISTING" && "$EXISTING" != "null" ]]; then
-  COMMENT_URL=$(printf '%s' "$EXISTING" | jq -r .url)
-  COMMENT_AUTHOR=$(printf '%s' "$EXISTING" | jq -r .author)
-  COMMENT_CREATED=$(printf '%s' "$EXISTING" | jq -r .created)
+  COMMENT_URL=$(printf '%s' "$EXISTING" | python3 -c 'import json, sys; print(json.load(sys.stdin)["url"])')
+  COMMENT_AUTHOR=$(printf '%s' "$EXISTING" | python3 -c 'import json, sys; print(json.load(sys.stdin)["author"])')
+  COMMENT_CREATED=$(printf '%s' "$EXISTING" | python3 -c 'import json, sys; print(json.load(sys.stdin)["created"])')
   printf 'Artifact already posted for SHA %s — skipping duplicate post.\nExisting: %s\n' "$HEAD_SHA" "$COMMENT_URL"
 else
 ```
@@ -118,9 +117,9 @@ Post the comment and capture the returned metadata:
   RESULT=$(gh api "repos/${REPO}/issues/${ARGUMENTS}/comments" \
     -F body=@/tmp/coderails-review-body-$$.md \
     --jq '{url:.html_url,id:.id,author:.user.login,created:.created_at}')
-  COMMENT_URL=$(printf '%s' "$RESULT" | jq -r .url)
-  COMMENT_AUTHOR=$(printf '%s' "$RESULT" | jq -r .author)
-  COMMENT_CREATED=$(printf '%s' "$RESULT" | jq -r .created)
+  COMMENT_URL=$(printf '%s' "$RESULT" | python3 -c 'import json, sys; print(json.load(sys.stdin)["url"])')
+  COMMENT_AUTHOR=$(printf '%s' "$RESULT" | python3 -c 'import json, sys; print(json.load(sys.stdin)["author"])')
+  COMMENT_CREATED=$(printf '%s' "$RESULT" | python3 -c 'import json, sys; print(json.load(sys.stdin)["created"])')
 fi
 ```
 
@@ -129,9 +128,9 @@ fi
 Locate the progress.json (if any) and write the review cache block. The helper resolves this session's own file (keyed on cwd + `$CLAUDE_CODE_SESSION_ID`):
 
 ```bash
-PROGRESS_PATH=$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/lib/agentic_loop_path.sh" 2>/dev/null || true)
+PROGRESS_PATH=$(python3 "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/lib/agentic_loop_path.py" 2>/dev/null || true)
 if [[ -n "$PROGRESS_PATH" ]]; then
-  ./scripts/post_review.sh write-cache "$PROGRESS_PATH" "$ARGUMENTS" "$HEAD_SHA" \
+  ./scripts/post_review.py write-cache "$PROGRESS_PATH" "$ARGUMENTS" "$HEAD_SHA" \
     "$COMMENT_URL" "$COMMENT_AUTHOR" "$COMMENT_CREATED"
 fi
 ```

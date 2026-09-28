@@ -73,7 +73,7 @@
       //     ~/.claude/hooks must be denied too, or denying settings.json only
       //     protects the pointer while the target stays writable. (Verified
       //     live: a sandboxed worker wrote into ~/.claude/hooks/ — the very
-      //     directory holding destructive_bash_gate.sh and test_gate.sh, the
+      //     directory holding destructive_bash_gate.sh and test_gate.py, the
       //     gates that police this repo.)
       //   plugin manifests under ~/.claude/plugins declare their own hooks.
       // This mirrors srt's OWN unconditional block on .claude/commands and

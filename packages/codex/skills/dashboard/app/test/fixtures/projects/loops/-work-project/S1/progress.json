@@ -1,11 +1,17 @@
 {
-  "schema_version": 1,
+  "schema_version": 3,
   "status": "complete",
   "session_id": "S1",
   "completed_marker": 1,
   "work_units": {
-    "wu1": { "status": "done" },
-    "wu2": { "status": "done" },
-    "wu3": { "status": "in-progress" }
+    "wu1": {
+      "status": "done"
+    },
+    "wu2": {
+      "status": "done"
+    },
+    "wu3": {
+      "status": "in-progress"
+    }
   }
 }

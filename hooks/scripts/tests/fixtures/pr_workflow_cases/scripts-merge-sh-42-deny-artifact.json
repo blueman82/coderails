@@ -1,0 +1,37 @@
+[
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "scripts/merge.sh 42"
+      },
+      "cwd": "{sandbox}/repo_eval",
+      "transcript_path": "{sandbox}/t_11788.jsonl"
+    },
+    "files": {
+      "{sandbox}/t_11788.jsonl": "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Skill\",\"input\":{\"skill\":\"coderails:push\"}}]}}\n{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Skill\",\"input\":{\"skill\":\"pr-review-toolkit:review-pr\",\"args\":\"42\"}}]}}\n",
+      "{sandbox}/repo_master/.coderails/workflow.config.yaml": "jira: null\n",
+      "{sandbox}/repo_main/.coderails/workflow.config.yaml": "jira: null\n",
+      "{sandbox}/repo_eval/.coderails/workflow.config.yaml": "jira: null\n",
+      "{sandbox}/worktree_feat/.coderails/workflow.config.yaml": "jira: null\n",
+      "{sandbox}/repo/.coderails/workflow.config.yaml": "jira: null\n",
+      "{sandbox}/repo_feat/.coderails/workflow.config.yaml": "jira: null\n"
+    },
+    "repositories": {
+      "{sandbox}/repo_master": "master",
+      "{sandbox}/repo_main": "main",
+      "{sandbox}/repo_eval": "main",
+      "{sandbox}/worktree_feat": "feature/worktree-thing",
+      "{sandbox}/repo_noconfig": "main",
+      "{sandbox}/repo": "main",
+      "{sandbox}/repo_feat": "feature/my-thing"
+    },
+    "env": {
+      "MOCK_GH_COMMENT_BODY": "<!-- coderails-eval-summary v1 pr=42 head_sha={head_sha} result=NO-GO verification_level=1 -->\n```json\n{\"verification_level\":0,\"verification_justification\":\"stub\",\"head_sha\":\"{head_sha}\",\"evals\":[]}\n```",
+      "MOCK_GH_HEAD_SHA": "{head_sha}"
+    },
+    "returncode": 0,
+    "denied": true,
+    "fixture_index": 93
+  }
+]

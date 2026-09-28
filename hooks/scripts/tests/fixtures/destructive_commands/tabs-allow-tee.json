@@ -1,0 +1,22 @@
+[
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "tee skills/mything/SKILL.md\textra"
+      },
+      "cwd": "{sandbox}/main_repo"
+    },
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_tabs.test.sh",
+    "expected": {
+      "hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": "In-Bash source edit on main branch blocked.\nFull command: tee skills/mything/SKILL.md\textra\nEditing source files via sed/perl/redirect/tee on main is blocked. Switch to a feature branch or use the Edit tool."
+      }
+    },
+    "fixture_index": 243
+  }
+]

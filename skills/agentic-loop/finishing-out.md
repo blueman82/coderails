@@ -16,7 +16,7 @@ completion claim that requires fresh verification evidence, not recall.
 Concretely, before declaring `complete`, re-run the evidence the claim rests on:
 - each merged PR's `mergedAt` via `gh pr view` — the single final aggregate check that
   every unit's terminal artifact actually exists;
-- the loop-scope eval `result` from `post_evals.sh grade-loop`;
+- the loop-scope eval `result` from `post_evals.py grade-loop`;
 - the wiki/sync-docs artifacts landed on origin/main.
 
 **Scoping.** This gates ONLY the Phase 13 `complete` declaration, NOT each per-unit merge

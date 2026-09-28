@@ -1,5 +1,5 @@
 // Scheduled routines enter execution as intent PRODUCERS, not as a runner
-// scheduling engine: seed() runs before sweepOnce() (see bin/seed-and-sweep.sh)
+// scheduling engine: seed() runs before sweepOnce() (see bin/seed_and_sweep.py)
 // and, for each due routine, drops one intent file into queue/ using the
 // same Intent shape any other producer (obsidian, web, cli) writes. The
 // runner itself (sweep.ts/main.ts) stays a pure executor — it has no idea
@@ -140,7 +140,7 @@ export function seedDueRoutines(opts: SeedOptions): SeedResult {
       // writeFileSync() below (the act) are not atomic — two seed runs for
       // the same routine racing here could both pass the check and both
       // write an intent. In practice this is narrow: seed only runs from
-      // the CALENDAR plist (see bin/seed-and-sweep.sh), and launchd
+      // the CALENDAR plist (see bin/seed_and_sweep.py), and launchd
       // serialises a single calendar job's fires, so two seed passes for
       // the same routine can't overlap in the deployed setup. Worst case if
       // that assumption is ever violated (e.g. a manual second invocation)

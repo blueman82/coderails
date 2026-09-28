@@ -5,7 +5,7 @@ description: Commit intended changes, push the current feature branch, and creat
 
 # Push a feature branch
 
-Use the package-local [push helper](../../scripts/push.sh) for the final stage, commit, push, and pull-request operation.
+Use the package-local [push helper](../../scripts/push.py) for the final stage, commit, push, and pull-request operation.
 
 ## Before pushing
 

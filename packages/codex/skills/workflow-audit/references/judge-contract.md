@@ -1,14 +1,14 @@
 # Workflow-audit judge contract
 
 The prompt template handed to a fresh sonnet judge at the propose stage of the
-workflow-audit skill. The judge turns `cluster_ngrams.sh` output into
+workflow-audit skill. The judge turns `cluster_ngrams.py` output into
 propose/reject verdicts for candidate skills.
 
 ## What the judge receives
 
 Exactly two inputs, nothing else:
 
-1. **The cluster JSON** — the full stdout object from `cluster_ngrams.sh`
+1. **The cluster JSON** — the full stdout object from `cluster_ngrams.py`
    (`{"scanned_sessions","clusters":[{"ngram","n","count","sessions"}],"diagnostics"}`).
 2. **A list of existing skill names and descriptions** — the `name` and
    `description` frontmatter fields of every skill already in the repo (e.g.
@@ -17,7 +17,7 @@ Exactly two inputs, nothing else:
 The judge must not request, infer, or reconstruct any content beyond these
 two inputs. Its fixed vocabulary is limited to what appears in the cluster
 JSON: tool names, `head` strings (already privacy-whitelisted by
-`scan_transcripts.sh`), counts, session ids, and n-gram lengths. It has no
+`scan_transcripts.py`), counts, session ids, and n-gram lengths. It has no
 access to transcript content, prose, file contents, or any other detail —
 if a judgement would require knowing what a command's arguments *meant*
 beyond its whitelisted head, the judge cannot make that judgement and must

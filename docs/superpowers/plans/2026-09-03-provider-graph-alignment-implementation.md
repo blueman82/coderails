@@ -1,5 +1,7 @@
 # Provider graph-alignment implementation plan
 
+> Current implementation note (2026-09-21): retain the shell rosters and earlier phase commands below as the frozen migration baseline. The clean-break amendment supersedes every instruction to execute or retain those old paths. Current delivery uses `install.py` and `scripts/installer/files.py`; current entrypoints and tests are Python, including `hooks/scripts/tests/run_all.py`, `packages/tests/test_graph_semantics_fixtures.py`, and `packages/tests/test_provider_graph_parity.py`. Follow [the component reference](../../REFERENCE.md) and [installation guide](../../../INSTALLATION.md) for operational commands. No shell wrapper or schema-v1/v2 graph reader remains.
+
 ## Purpose and fixed boundaries
 
 Implement the approved schema-v3 graph contract from
@@ -30,6 +32,90 @@ raw evidence, hooks, and provider completion gates. (verified)
 - Do not change Factory code or behaviour. (verified)
 
 ## Worktree ownership and order
+
+## Two-provider Python clean-break amendment
+
+This amendment is authoritative for every Coderails-owned Claude and Codex
+shell path named below and supersedes earlier wording that retains a `.sh`
+path. The end state is one implementation language, Python, across both
+providers. No legacy Bash wrapper, compatibility fallback, dual reader/writer,
+or grandfathered path remains. Claude native `Agent` and Codex native
+`multi_agent_v1__spawn_agent` dispatch remain provider-native; only
+provider-owned operational code changes language. (verified)
+
+### End state and constraints
+
+`find hooks/scripts scripts packages/codex packages/tests -type f -name '*.sh'`
+returns no Coderails-owned shell path: no launcher, helper, test shim,
+compatibility wrapper, or grandfathered path remains.
+Each same-batch replacement preserves CLI, stdin/stdout/stderr, exit status,
+timeout, environment, filesystem effects, and failure modes. Use Python
+stdlib (`argparse`, `json`, `pathlib`, `subprocess`, `tempfile`, `fcntl`, and
+`unittest`) first; retain existing external commands only where their current
+contract requires them, and add no runtime package. Entry points use
+`#!/usr/bin/env python3`; callers name `.py` paths. The maintained
+`packages/graph-semantics/graph_semantics.py` remains installer-materialized
+into its two generated copies; migrated operational scripts are maintained
+Python, never generated. (verified)
+
+### Root Claude inventory and invocation edges
+
+The source-derived root roster is 53 production and 78 test paths (131 total).
+It is retired with the Codex roster below; an unmapped path blocks deletion.
+(verified)
+
+| Group | Current paths | Invocation edge that moves atomically |
+| --- | --- | --- |
+| Hook entries | `hooks/scripts/{agent_model_routing_nudge,agent_only_gate,check_confidence_labels,check_verify_loop,comment_citation_gate,crack_on_gate,crack_on_prose_gate,destructive_bash_gate,enforce_pr_workflow,inject_bootstrap,inject_context,loop_dispatch_guard,loop_stall_guard,loop_state_guard,no_edit_on_main,offload_push_guard,quality_feedback,remember_inject_cap_guard,test_gate,unregistered_loop_guard,verification_volume_ceiling,voice_announce,wiki_taxonomy_gate}.sh` | `hooks/hooks.json`: preserve event, matcher, timeout, stdin JSON, deny/allow, and fail-open/fail-closed contracts. |
+| Hook helpers | `hooks/scripts/lib/{agentic_loop_path,discipline_common,graph_dispatch,graph_evidence,graph_evidence_bind,graph_evidence_revalidate,graph_executor,graph_readiness,loop_cost,loop_state_common}.sh` | Imports from hook entries, graph skills, and guards: retain Claude state-path, lock, evidence, and `Agent` handoff ownership. |
+| Workflow, quality, sandbox, integrity | `scripts/{merge,post_evals,post_review,push}.sh`; `scripts/lib/{config,eval-artifact,git-common,post_evals_freeze,post_evals_smoke_freeze,post_evals_smoke_gate,post_evals_smoke_run,post_evals_structure,review-artifact}.sh`; `scripts/{quality/check,sandbox/render-settings,sandbox/sandbox-probe,sandbox/spawn-sandboxed-worker,integrity-gate/install,integrity-gate/integrity-gate-runner,integrity-gate/setup}.sh` | Root commands, skills, hook recognizers, `install.sh`, launchd/docs, and focused tests must name Python together. |
+| Root tests | `hooks/scripts/tests/{agent_model_routing_nudge,agent_only_gate,agentic_loop_path,ceiling_note,check_confidence_labels,check_verify_loop,cli_antipatterns,codex_eval_authority,comment_citation_gate,config,crack_on_gate,crack_on_prose_gate,dashboard_agent,destructive_bash_gate,discipline_common,discriminate,docs_sync_routine,enforce_pr_workflow,eval-artifact,exec_bit_invariant,git-common,graph_contract,graph_dispatch,graph_dispatch_acceptance,graph_dispatch_complete,graph_dispatch_j12_s9,graph_evidence,graph_evidence_forgery,graph_evidence_mailbox,graph_evidence_notifications,graph_executor,graph_executor_concurrency,graph_executor_stale_check,graph_readiness,graph_two_unit_fanout,hooks_json_timeout_floor,init_yaml_validation,inject_bootstrap,inject_context,install_mode_sweep,install_routines,integrity_gate_install,loop_cost,loop_dispatch_guard,loop_stall_guard,loop_stall_guard_graph_complete,loop_state_guard,loop_state_guard_evals,merge,merge_evals_gate,merge_wiki_debt_gate,no_edit_on_main,offload_push_guard,post_evals,post_review,post_review_command,push_staging,quality_feedback,remember_inject_cap_guard,review-artifact,routine_runner_bin_targets,run_all,run_all_skip,sandbox_probe,sandbox_settings,seed_and_sweep_resilience,spawn_sandboxed_worker,stdin_bounded_read,stop_hook_human_escalation,test_gate,unregistered_loop_guard,verification_volume_ceiling,voice_announce,wiki_taxonomy_gate}.test.sh`; `hooks/scripts/tests/lib/claude_transcript_fixture.sh`; `scripts/{integrity-gate/tests/integrity-gate,integrity-gate/tests/setup,quality/tests/quality}.test.sh` | `run_all`, installer, graph, hook, quality, sandbox, and integrity composition: retain fixtures, negative controls, exits, and HOME/temp isolation. |
+
+### Frozen inventory and invocation edges
+
+The package-local inventory is 32 production and four test paths. With the 13
+`packages/tests` paths listed below, Codex owns 49 retirement paths. A missing
+mapping blocks deletion. (verified)
+
+| Group | Current files | Invocation edge that must move with it |
+| --- | --- | --- |
+| Hook entry points | `hooks/scripts/{check_confidence_labels,comment_citation_gate,crack_on_gate,crack_on_prose_gate,destructive_bash_gate,graph_completion_guard,inject_bootstrap,inject_context,loop_dispatch_guard,no_edit_on_main,quality_feedback,test_gate,verification_volume_ceiling,wiki_taxonomy_gate}.sh` | Every entry is named by `hooks/hooks.json`; keep the same event, matcher, timeout, stdin JSON contract, and deny/allow output while changing its command to the `.py` entry point. |
+| Hook helper | `hooks/scripts/lib/hook_common.sh` | Imported by all current hook entry points; replace it with one private Python module imported by those entry points, with no public shell-source contract. |
+| Workflow CLI and helpers | `scripts/{push,merge,post_evals,post_review}.sh`, `scripts/lib/{config,eval-artifact,git-common,review-artifact}.sh` | `push`, `merge`, `post-evals`, and `post-review` skills resolve and execute these files; `merge` imports config, git-common, and post-evals; git-common imports both artifact helpers; post-evals imports eval-artifact; push imports git-common. Move those imports to Python modules and update every skill command/reference atomically. |
+| Dashboard launchers | `skills/dashboard/runner/bin/{dashboard-server,seed-and-sweep,sweeper}.sh`, `skills/dashboard/scripts/{run-builder,start-dashboard,stop-dashboard}.sh` | Dashboard skill invokes start/stop; runner binaries start Node entry points and set `CODERAILS_BUILDER_WRAPPER`; the dashboard app discovers/spawns `run-builder.sh`; runner/app tests assert these paths. Rename the discovery constant, environment value, identity marker, tests, and documentation to `.py` in the same batch. |
+| Workflow-audit production | `skills/workflow-audit/scripts/{scan_transcripts,cluster_ngrams,write_queue_entry}.sh` | `workflow-audit/SKILL.md` pipes scan to cluster and pipes judge output to queue writer. Preserve JSONL and privacy filtering, but invoke the three Python entry points directly. |
+| Workflow-audit test runners | `skills/workflow-audit/scripts/tests/{cluster_ngrams,e2e,scan_transcripts,write_queue_entry}.test.sh` | Each directly runs one or more workflow-audit production scripts. Convert them to Python tests before deleting the production shell files; retain unit and scan-to-cluster integration coverage. |
+
+The Codex package test surface outside the package directory is also retired:
+`packages/tests/{codex_frozen_evals,codex_graph_evidence_shapes,codex_graph_runtime_adversarial,codex_hooks,codex_installer,codex_native_package,codex_shell_retirement_contracts,provider_graph_adversarial,provider_graph_final_adversarial,provider_graph_lifecycle_adversarial,provider_graph_parity,stop_hook_human_escalation}.test.sh`
+and `packages/tests/lib/codex_transcript_fixture.sh` become Python tests/module
+in M2X. (verified)
+
+### Ordered migration batches and gates
+
+**M0 — freeze contracts and baseline (integration worktree).** Add a failing
+two-provider no-`.sh` inventory check, map every path to stream/exit/environment
+coverage, inventory the known 67 non-Python quality findings and five stale
+`provider_graph_parity` fixtures, and do not repair shell lint that deletion
+removes. (verified)
+
+**M1 — semantic prerequisites (integration worktree).** Complete Phases 0–2:
+quality baseline, frozen corpus, and maintained core. (verified)
+
+**M2C/M2X — provider migration (parallel Claude-only/Codex-only worktrees).**
+M2C converts all 131 root paths while preserving Claude locks, evidence, hooks,
+and `Agent`; M2X converts all 49 Codex paths while preserving Codex hooks,
+evidence, and `spawn_agent`. Move hook configuration, skills, source/imports,
+installer references, TypeScript discovery, and tests atomically with each
+entry point. (verified)
+
+**M3 — integration (integration worktree; after M2C/M2X).** Complete Phases
+4–5, materialize the semantic core, remove every `.sh`, and run cross-provider
+parity and native acceptance. **M4 — final gates (integration worktree; after
+M3).** The strict non-bypassed quality gate has zero unresolved findings,
+including all 67; all five parity fixtures pass with their provider-local
+raw-evidence purpose; no executable `.sh` reference remains in config, skills,
+source, tests, installers, or docs. (verified)
 
 | Phase | Owner/worktree | Prerequisite | Deliverable |
 | --- | --- | --- | --- |

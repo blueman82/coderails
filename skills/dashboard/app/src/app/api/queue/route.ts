@@ -17,7 +17,7 @@ const DEFAULT_QUEUE_DIR = join(homedir(), ".claude", "coderails-dashboard", "app
 // Resolved once at module load, anchored to spawn.ts's own compiled
 // location (not process.cwd()) — a production Next.js server's cwd is not
 // guaranteed to be the app root, which the prior cwd-relative join would
-// have silently gotten wrong. null means no scripts/run-builder.sh sibling
+// have silently gotten wrong. null means no scripts/run_builder.py sibling
 // was found; the production POST handler below fails the request loudly
 // in that case rather than spawning a bogus path.
 const WRAPPER_PATH = resolveDefaultWrapperPath();
@@ -103,13 +103,13 @@ export function createQueueActionHandler(deps: QueueActionHandlerDeps) {
 // the wrapper_not_found fallback path is unit-testable directly: a test can
 // call this with wrapperPath=null without needing to mock module-load-time
 // resolution or import the bare POST export (which always sees a resolved
-// path in dev/CI, since the real scripts/run-builder.sh is always present
+// path in dev/CI, since the real scripts/run_builder.py is always present
 // there — the null branch would otherwise be untestable).
 export function makeClaimAndSpawnBuild(
   wrapperPath: string | null
 ): (entry: QueueEntrySnapshot) => ClaimAndSpawnBuildResult {
   if (!wrapperPath) {
-    // wrapperPath is null only if scripts/run-builder.sh cannot be found
+    // wrapperPath is null only if scripts/run_builder.py cannot be found
     // relative to spawn.ts's own location — a deployment/packaging
     // misconfiguration, not a per-request condition. Reported via the
     // distinct wrapper_not_found error rather than crashing every

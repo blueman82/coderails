@@ -1,5 +1,5 @@
 // Routine seeding is an on-demand intent producer, not a scheduling engine:
-// seed() runs before sweepOnce() when bin/seed-and-sweep.sh is invoked and,
+// seed() runs before sweepOnce() when bin/seed_and_sweep.py is invoked and,
 // for each due routine, drops one intent file into queue/ using the same Intent
 // shape any other producer (obsidian, web, cli) writes. The runner itself
 // (sweep.ts/main.ts) stays a pure executor.

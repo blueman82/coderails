@@ -23,9 +23,9 @@ project structure, traditional audit, generate a drift report) to detect
 drift between this repo's documentation and its actual code.
 
 **Scope of docs this routine may fix: git-tracked `.md` files only** —
-`README.md`, `AGENTS.md`, `AGENTS.md`, and tracked files under `docs/`
+`README.md`, `AGENTS.md`, `CLAUDE.md`, and tracked files under `docs/`
 — **except the self-governance deny-list in step 4 below**
-(`skills/**/SKILL.md`, `AGENTS.md`, `AGENTS.md`, `docs/routines.md`,
+(`skills/**/SKILL.md`, `AGENTS.md`, `CLAUDE.md`, `docs/routines.md`,
 anything under `.codex/`, `examples/dashboard-config.json`). Yes, this
 means `AGENTS.md` and `AGENTS.md` are named in both the general scope
 above and the deny-list — read the deny-list as an override: if the
@@ -167,7 +167,7 @@ Any of steps 5–9 can REFUSE rather than the routine choosing to abort.
 **The trigger is the mechanism, not the reason: if the step's command
 exits non-zero, that is a refusal.** This is deliberately keyed on the
 exit code rather than on a list of rejecting reasons, because a list
-only covers the outcomes someone thought to enumerate. `$SKILL_DIR/../../scripts/merge.sh`
+only covers the outcomes someone thought to enumerate. `$SKILL_DIR/../../scripts/merge.py`
 alone has more than thirty distinct non-zero exits through one shared
 `err` function, PLUS failures that bypass `err` entirely — it runs under
 `set -euo pipefail`, so an unguarded command aborts the script directly
@@ -273,14 +273,14 @@ surface for this routine, same as every other routine in this file.
 
 This pipeline writes ONLY git-tracked documentation `.md` files. It
 NEVER edits: hook scripts, gate logic, anything under `scripts/`,
-`install.sh`, its own `SKILL.md`, the routine config
+`install.py`, its own `SKILL.md`, the routine config
 (`~/.codex/coderails-dashboard.json` or
 `examples/dashboard-config.json`), `.codex/settings.json`, or any code.
 
 **This is mechanically enforced, not merely stated.** The
 self-governance deny-list in step 4 is checked by the same manifest
 assertion that rejects a non-`.md` path — an edit to `skills/**/SKILL.md`
-(including this file), `AGENTS.md`, `AGENTS.md`, `docs/routines.md`, or
+(including this file), `AGENTS.md`, `CLAUDE.md`, `docs/routines.md`, or
 anything under `.codex/` aborts the run exactly like a code change
 would, before push. It is not left to this prose alone to be honoured.
 That said, be honest about the limit: this enforcement lives in the
@@ -293,10 +293,12 @@ It never relaxes, reorders, or skips a gate. It merges only via
 `$coderails-codex:merge`, never raw `gh pr merge`, so the package-local merge
 script's artifact checks remain in force.
 
-It must NEVER edit `INSTALLATION.md`'s workflow-tools/codex-guardrails
-migration section — those names document live installer behaviour
-(`install.sh:232` hard-exits on them) and are not documentation drift for
-this routine to "fix."
+It must NEVER edit `INSTALLATION.md`'s workflow-tools/claude-guardrails
+migration section. The root installer
+(`scripts/installer/claude.py`, `preflight`) refuses those superseded Claude
+plugins; the native Codex install path is independent. Those historical plugin
+names describe current migration checks, not documentation drift for this routine
+to "fix."
 
 It never "fixes" a doc to match code it has not read — no guessing. If
 the audit is uncertain, it reports rather than edits.

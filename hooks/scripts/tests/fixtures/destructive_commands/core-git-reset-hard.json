@@ -1,0 +1,44 @@
+[
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git reset --hard HEAD~1"
+      },
+      "cwd": "{sandbox}/feat_repo"
+    },
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_core.test.sh",
+    "expected": {
+      "hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": "Destructive pattern detected: git reset --hard\nFull command: git reset --hard HEAD~1\nThis command is permanently blocked. Safe route: park the commits first with 'git branch backup/<desc> <ref>', then use 'git reset --keep <ref>' instead of --hard \u2014 --keep applies the same move but REFUSES (errors out) rather than clobbering when it would discard uncommitted working-tree changes, and the backup branch keeps the moved-past commits recoverable either way.",
+        "patternId": "git-reset-hard"
+      }
+    },
+    "fixture_index": 47
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git reset --hard HEAD~1"
+      },
+      "cwd": "{sandbox}/feat_repo"
+    },
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_core.test.sh",
+    "expected": {
+      "hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": "Destructive pattern detected: git reset --hard\nFull command: git reset --hard HEAD~1\nThis command is permanently blocked. Safe route: park the commits first with 'git branch backup/<desc> <ref>', then use 'git reset --keep <ref>' instead of --hard \u2014 --keep applies the same move but REFUSES (errors out) rather than clobbering when it would discard uncommitted working-tree changes, and the backup branch keeps the moved-past commits recoverable either way.",
+        "patternId": "git-reset-hard"
+      }
+    },
+    "fixture_index": 55
+  }
+]

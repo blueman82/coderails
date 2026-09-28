@@ -26,3 +26,18 @@ Set up the test gate hook for the current project. This makes `git commit` autom
 5. Run the test command once to verify it works. Report the result.
 
 6. Confirm: "Test gate is active. Every `git commit` in this project will run `<command>` first. Remove `.claude/test_command` to disable."
+
+7. Explain that every hook execution of the configured command retains complete
+   stdout/stderr in a unique run under `~/.coderails/test-output/` (override with
+   `CODERAILS_TEST_OUTPUT_DIR`). A run may contain many tests. On failure, follow
+   the reported reader command: add `--all`, `--start N --end M` (one-based,
+   inclusive), or `--search TEXT --before N --after N` for literal search.
+   Without flags, reads always return metadata and guidance. Expand requests
+   explicitly as needed; there is no cross-run line-range prediction.
+   Completed logs compress automatically under a 1 GiB compressed-log budget
+   (`CODERAILS_TEST_LOG_BUDGET_BYTES` overrides it). Oldest completed logs expire
+   first; active and just-completed runs are protected and may exceed the budget.
+   Compact measurement and expiry records persist separately. Emitted bytes are
+   not proof of model delivery;
+   ordinary log-file reads bypass retrieval telemetry. See
+   [the output reference](../docs/REFERENCE.md#retained-test-gate-output).

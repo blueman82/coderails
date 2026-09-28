@@ -1,0 +1,107 @@
+[
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "chmod\t-R\t777 /var/www"
+      },
+      "cwd": "{sandbox}/feat_repo"
+    },
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_tabs.test.sh",
+    "expected": {
+      "hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": "Destructive pattern detected: chmod\t-R\t777\nFull command: chmod\t-R\t777 /var/www\nThis command is permanently blocked. Safe route: use narrower recursive bits instead of a blanket 777 \u2014 'chmod -R u+rwX,go+rX <path>' grants the owner read/write (and execute only on directories/already-executable files) while giving group/other read access, without making everything world-writable and world-executable.",
+        "patternId": "chmod-r-777"
+      }
+    },
+    "fixture_index": 230
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "chmod${IFS}-R${IFS}777 /var/www"
+      },
+      "cwd": "{sandbox}/feat_repo"
+    },
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_tabs.test.sh",
+    "expected": {
+      "hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": "Destructive pattern detected: chmod -R 777\nFull command: chmod -R 777 /var/www\nThis command is permanently blocked. Safe route: use narrower recursive bits instead of a blanket 777 \u2014 'chmod -R u+rwX,go+rX <path>' grants the owner read/write (and execute only on directories/already-executable files) while giving group/other read access, without making everything world-writable and world-executable.",
+        "patternId": "chmod-r-777"
+      }
+    },
+    "fixture_index": 252
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "chmod${IFS:0:1}-R${IFS:0:1}777 /var/www"
+      },
+      "cwd": "{sandbox}/feat_repo"
+    },
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_tabs.test.sh",
+    "expected": {
+      "hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": "Destructive pattern detected: chmod -R 777\nFull command: chmod -R 777 /var/www\nThis command is permanently blocked. Safe route: use narrower recursive bits instead of a blanket 777 \u2014 'chmod -R u+rwX,go+rX <path>' grants the owner read/write (and execute only on directories/already-executable files) while giving group/other read access, without making everything world-writable and world-executable.",
+        "patternId": "chmod-r-777"
+      }
+    },
+    "fixture_index": 253
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "chmod${IFS:-y}-R${IFS:-y}777 /var/www"
+      },
+      "cwd": "{sandbox}/feat_repo"
+    },
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_tabs.test.sh",
+    "expected": {
+      "hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": "Destructive pattern detected: chmod -R 777\nFull command: chmod -R 777 /var/www\nThis command is permanently blocked. Safe route: use narrower recursive bits instead of a blanket 777 \u2014 'chmod -R u+rwX,go+rX <path>' grants the owner read/write (and execute only on directories/already-executable files) while giving group/other read access, without making everything world-writable and world-executable.",
+        "patternId": "chmod-r-777"
+      }
+    },
+    "fixture_index": 255
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "chmod${IFS:+ }-R${IFS:+ }777 /var/www"
+      },
+      "cwd": "{sandbox}/feat_repo"
+    },
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_tabs.test.sh",
+    "expected": {
+      "hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": "Destructive pattern detected: chmod -R 777\nFull command: chmod -R 777 /var/www\nThis command is permanently blocked. Safe route: use narrower recursive bits instead of a blanket 777 \u2014 'chmod -R u+rwX,go+rX <path>' grants the owner read/write (and execute only on directories/already-executable files) while giving group/other read access, without making everything world-writable and world-executable.",
+        "patternId": "chmod-r-777"
+      }
+    },
+    "fixture_index": 271
+  }
+]

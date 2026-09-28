@@ -1,0 +1,44 @@
+[
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "mkfs.ext4 /dev/sdb1"
+      },
+      "cwd": "{sandbox}/feat_repo"
+    },
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_ids.test.sh",
+    "expected": {
+      "hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": "Destructive pattern detected: mkfs.\nFull command: mkfs.ext4 /dev/sdb1\nThis command is permanently blocked. Safe route: there is no safe equivalent \u2014 mkfs reformats a filesystem and destroys existing data on it. Confirm the target device is correct (not a mounted or in-use disk) before running it directly. To allow this pattern, add a Bash permission rule to settings.json.",
+        "patternId": "mkfs-format"
+      }
+    },
+    "fixture_index": 214
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "mkfs.ext4 /dev/sdb1"
+      },
+      "cwd": "{sandbox}/feat_repo"
+    },
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_ids.test.sh",
+    "expected": {
+      "hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": "Destructive pattern detected: mkfs.\nFull command: mkfs.ext4 /dev/sdb1\nThis command is permanently blocked. Safe route: there is no safe equivalent \u2014 mkfs reformats a filesystem and destroys existing data on it. Confirm the target device is correct (not a mounted or in-use disk) before running it directly. To allow this pattern, add a Bash permission rule to settings.json.",
+        "patternId": "mkfs-format"
+      }
+    },
+    "fixture_index": 215
+  }
+]

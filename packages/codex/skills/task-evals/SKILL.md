@@ -13,7 +13,7 @@ Ordinary implementation checks are often written, run, and graded by the same pr
 
 Set `SKILL_DIR` to the absolute directory containing this `SKILL.md`. Every
 helper command below uses the package-local
-`$SKILL_DIR/../../scripts/post_evals.sh`.
+`$SKILL_DIR/../../scripts/post_evals.py`.
 
 ## Prerequisite: gather context before generating evals
 
@@ -50,7 +50,7 @@ A broken instrument looks like this in the raw output: a reporter-loading error 
 
 What to do on discovery depends on timing: at freeze time the file is not yet frozen, so a broken `cmd` or `negative_control` is simply rewritten and re-run — no amendment needed, nothing to record. Discovered after `frozen_at`/`frozen_sha` are stamped, it goes through the amendment path instead: recorded reason, assertion left unchanged, and if a grader verdict already exists for that eval, a fresh re-grade per rule 5.
 
-**The result is computed, not attested.** Do not hand-write the smoke evidence. Run `"$SKILL_DIR/../../scripts/post_evals.sh" smoke-run <evals.json>` immediately before freezing: it executes every scripted eval's `cmd` and `negative_control`, and writes the observed exit codes and output excerpts into a `smoke` object on each eval, overwriting whatever was there. The same script's `validate-structure` command (check 9) then refuses any pr-scope verification_level≥1 scripted eval lacking one.
+**The result is computed, not attested.** Do not hand-write the smoke evidence. Run `"$SKILL_DIR/../../scripts/post_evals.py" smoke-run <evals.json>` immediately before freezing: it executes every scripted eval's `cmd` and `negative_control`, and writes the observed exit codes and output excerpts into a `smoke` object on each eval, overwriting whatever was there. The same script's `validate-structure` command (check 9) then refuses any pr-scope verification_level≥1 scripted eval lacking one.
 
 The split matters. A checker that merely *reads* recorded exit codes is not enough, because the agent writes those numbers — and an agent freezing a command for a script it intends to create records the code it *expects* (`1`, "the assertion fails until I build it"), never having run the command. That is precisely how the real defect happened. This is rule 5 applied to smoke evidence: a neutral script computes it, the author never hand-writes it. `smoke-run` records without judging — it returns 0 even when what it observed is damning, because refusing is check 9's job.
 
@@ -77,7 +77,7 @@ An eval may carry an optional `fixtures` object on top of the schema below:
 "fixtures": { "good": "<sample stdin that SHOULD pass>", "bad": "<sample stdin that SHOULD fail>", "formula": "<optional: the verdict-stage command; if absent, derived as the segment after the LAST top-level pipe in cmd>" }
 ```
 
-When present, `"$SKILL_DIR/../../scripts/post_evals.sh" validate-discriminating` pipes `fixtures.good` and `fixtures.bad` into the formula and requires opposite outcomes (good exits 0, bad exits non-zero) — rejecting the eval, by name, if both fixtures produce the same exit code (non-discriminating) or if the formula can't be reasonably derived from `cmd` (fail-closed, asks the author to supply `fixtures.formula` explicitly). The derivation splits on the last top-level pipe by text position, not shell syntax — a quoted pipe (e.g. inside an `awk` or `grep` pattern) forces `fixtures.formula` to be supplied explicitly, since the split would otherwise land inside the quoted string.
+When present, `"$SKILL_DIR/../../scripts/post_evals.py" validate-discriminating` pipes `fixtures.good` and `fixtures.bad` into the formula and requires opposite outcomes (good exits 0, bad exits non-zero) — rejecting the eval, by name, if both fixtures produce the same exit code (non-discriminating) or if the formula can't be reasonably derived from `cmd` (fail-closed, asks the author to supply `fixtures.formula` explicitly). The derivation splits on the last top-level pipe by text position, not shell syntax — a quoted pipe (e.g. inside an `awk` or `grep` pattern) forces `fixtures.formula` to be supplied explicitly, since the split would otherwise land inside the quoted string.
 
 **Honest boundary, stated plainly:** this gate validates only checks that carry `fixtures`. Checks without `fixtures` are grandfathered — validated exactly as they were before this gate existed, with zero behaviour change. Adding `fixtures` to an eval is opt-in, never retroactive: freezing this gate does NOT retroactively validate any existing eval or evals.json that predates it, and an author who never adds `fixtures` gets no discrimination proof at all. And even where `fixtures` is present, a pass only proves the formula CAN discriminate between these two specific inputs — it proves nothing about whether the formula tests the RIGHT claim, whether `cmd` and `fixtures.formula` stay in sync after edits, or whether the fixtures themselves are representative. This gate closes the "never fails" class of defect; it is not a general correctness proof of the check.
 
@@ -89,7 +89,7 @@ Use concrete predicates, not vibes.
 - **Verification level 1 (standard):** anything above verification_level 0 that doesn't meet a verification_level-2 predicate — 3–5 end-state evals, ≥1 negative control, P0/P1 split.
 - **Verification level 2 (full suite):** ≥3 work-units OR any irreversible/outward surface (publish, deploy, migration, data deletion, external send). Full suite with pre+post surfaces where applicable and the GO/NO-GO rule stated in the artifact.
 
-`verification_justification` is required at every verification_level, not only verification_level 0: at verification_level 0 it states why the exemption is legitimate; at verification_level 1/2 it names which predicate fired (e.g. "2 work-units, no irreversible surface" or "≥3 work-units"). A blank justification is refused by `"$SKILL_DIR/../../scripts/post_evals.sh" validate-structure` (check 2) at PR scope. At loop scope, the native agentic-loop orchestrator must reject a blank justification before completion; no loop hook supplies that check.
+`verification_justification` is required at every verification_level, not only verification_level 0: at verification_level 0 it states why the exemption is legitimate; at verification_level 1/2 it names which predicate fired (e.g. "2 work-units, no irreversible surface" or "≥3 work-units"). A blank justification is refused by `"$SKILL_DIR/../../scripts/post_evals.py" validate-structure` (check 2) at PR scope. At loop scope, the native agentic-loop orchestrator must reject a blank justification before completion; no loop hook supplies that check.
 
 Verification level fields remain planning metadata for selecting an appropriate eval set, but they are not authorization decisions. The root-owned daemon does not judge verification_level semantics; it mechanically attests the current SHA's review/eval evidence, provenance fields, policy paths, and bounded diff. Merge authorization depends on that `integrity-review` attestation, not on a semantic verification_level verdict.
 
@@ -134,7 +134,7 @@ GO requires all P0 evals to pass. P1 failures don't block the gate but must be l
       "negative_control": "<command proving the check can fail — required, scripted mode>",
       "fixtures": "<OPTIONAL, scripted mode only: {good, bad, formula?} — see 'Discriminating-check gate' above. Absent = grandfathered, unvalidated by that gate>",
       "smoke": {
-        "_comment": "WRITTEN BY `post_evals.sh smoke-run`, never by hand — see 'Freeze-time smoke-run' above",
+        "_comment": "WRITTEN BY `post_evals.py smoke-run`, never by hand — see 'Freeze-time smoke-run' above",
         "cmd_exit": "<observed exit code of cmd at freeze. Non-zero for a content reason is expected (freeze-before-build); 126/127/142/>=128 is refused>",
         "negative_control_exit": "<observed exit code of negative_control at freeze. Must be non-zero AND not environmental>",
         "cmd_output": "<excerpt of the raw output, captured by smoke-run>",
@@ -151,20 +151,20 @@ GO requires all P0 evals to pass. P1 failures don't block the gate but must be l
 }
 ```
 
-`grading` (`{by, checksum, amendments_at_grade}`) is write-time provenance, absent at freeze and written only when `post_evals.sh grade-loop` grades a loop-scope file (see the Verifier agent contract below) — optional and additive; pr-scope files and every existing reader tolerate its absence. Adding it does not bump `schema_version` past 1.
+`grading` (`{by, checksum, amendments_at_grade}`) is write-time provenance, absent at freeze and written only when `post_evals.py grade-loop` grades a loop-scope file (see the Verifier agent contract below) — optional and additive; pr-scope files and every existing reader tolerate its absence. Adding it does not bump `schema_version` past 1.
 
 `smoke` is required on scripted evals at PR scope (check 9) and carries no `schema_version` bump: it is additive, and loop-scope files tolerate its absence. The native agentic-loop orchestrator owns loop-scope verification; there is no loop-state hook.
 
-This file is the schema's only tracked copy. The package-local `$SKILL_DIR/../../scripts/lib/eval-artifact.sh` defines the marker/result format, and `$SKILL_DIR/../../scripts/post_evals.sh` performs structural validation, result computation, and fixture discrimination for `$coderails-codex:post-evals`. At loop scope, the native agentic-loop orchestrator must read and verify the artifact before reporting completion.
+This file is the schema's only tracked copy. The package-local `$SKILL_DIR/../../scripts/lib/eval_artifact.py` defines the marker/result format, and `$SKILL_DIR/../../scripts/post_evals.py` performs structural validation, result computation, and fixture discrimination for `$coderails-codex:post-evals`. At loop scope, the native agentic-loop orchestrator must read and verify the artifact before reporting completion.
 
 ## Where evals.json lives
 
 - **Loop scope** → the task-specific scratch directory beside the native agentic loop's optional `progress.json`, outside the repo and never committed.
-- **PR scope** → the file is working material only. The durable artifact is the SHA-bound PR comment posted by `$SKILL_DIR/../../scripts/post_evals.sh` (marker `<!-- coderails-eval-summary v1 pr=<N> head_sha=<SHA> result=<GO|NO-GO> verification_level=<0|1|2> -->`) — see the invocation contract below.
+- **PR scope** → the file is working material only. The durable artifact is the SHA-bound PR comment posted by `$SKILL_DIR/../../scripts/post_evals.py` (marker `<!-- coderails-eval-summary v1 pr=<N> head_sha=<SHA> result=<GO|NO-GO> verification_level=<0|1|2> -->`) — see the invocation contract below.
 
 ## Invocation contract
 
-The package-local `$SKILL_DIR/../../scripts/merge.sh` reads the PR-scope artifact posted by `$coderails-codex:post-evals`. For loop scope, the native agentic-loop orchestrator reads the `evals.json` beside its optional `progress.json`; no custom loop hook is claimed.
+The package-local `$SKILL_DIR/../../scripts/merge.py` reads the PR-scope artifact posted by `$coderails-codex:post-evals`. For loop scope, the native agentic-loop orchestrator reads the `evals.json` beside its optional `progress.json`; no custom loop hook is claimed.
 
 This skill is invoked at four points:
 
@@ -177,4 +177,4 @@ A plan's or loop's per-work-unit eval refs must travel in worker prompts. A ref 
 
 ## Verifier agent contract (agent-run evals)
 
-For agent-run evals, spawn a fresh Codex subagent with `spawn_agent`. Its prompt contains the `evals.json` content, artifact references (PR number, clone path, artifact path or local endpoint, deployed surface), and the confidence-label contract — and explicitly nothing else. It must not receive the implementation conversation, the implementer's summary, or the orchestrator's opinion. Collect the result with `wait_agent`, use `send_input` only for missing evidence, then `close_agent`. The verifier returns per-eval status plus evidence; the orchestrator folds those statuses into `evals.json` — nothing more. Computing and stamping `result` is a separate neutral step: `$SKILL_DIR/../../scripts/post_evals.sh` for PR scope, or the same script's `grade-loop` command for loop scope. The orchestrator never writes `result`. An amended eval goes to a fresh grader, and `grade-loop` records checksum and amendment-count provenance. The stamp detects accidental drift, not deliberate tampering; the native agentic-loop's final audit remains the backstop.
+For agent-run evals, spawn a fresh Codex subagent with `spawn_agent`. Its prompt contains the `evals.json` content, artifact references (PR number, clone path, artifact path or local endpoint, deployed surface), and the confidence-label contract — and explicitly nothing else. It must not receive the implementation conversation, the implementer's summary, or the orchestrator's opinion. Collect the result with `wait_agent`, use `send_input` only for missing evidence, then `close_agent`. The verifier returns per-eval status plus evidence; the orchestrator folds those statuses into `evals.json` — nothing more. Computing and stamping `result` is a separate neutral step: `$SKILL_DIR/../../scripts/post_evals.py` for PR scope, or the same script's `grade-loop` command for loop scope. The orchestrator never writes `result`. An amended eval goes to a fresh grader, and `grade-loop` records checksum and amendment-count provenance. The stamp detects accidental drift, not deliberate tampering; the native agentic-loop's final audit remains the backstop.

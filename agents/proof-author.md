@@ -117,7 +117,7 @@ can't use your proof:
   proof command is only as honest as its own exit code, so don't chain a
   command whose exit status doesn't track the thing you're actually checking.
 - **No command substitution mixed into the gated script's own invocation
-  line** if `cmd` itself invokes a gated script (e.g. `push.sh`, `merge.sh`) —
+  line** if `cmd` itself invokes a gated script (e.g. `push.py`, `merge.py`) —
   those scripts block lines that mix the script call with `$(...)`.
 - **No destructive pattern** — no writes, no deletes, no state mutation. A
   proof command reads and reports; it does not change anything it's proving.

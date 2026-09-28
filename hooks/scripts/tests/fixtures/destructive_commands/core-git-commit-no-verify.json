@@ -1,0 +1,44 @@
+[
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git commit -m 'wip' --no-verify"
+      },
+      "cwd": "{sandbox}/feat_repo"
+    },
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_core.test.sh",
+    "expected": {
+      "hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": "Destructive pattern detected: git commit -m 'wip' --no-verify\nFull command: git commit -m 'wip' --no-verify\nThis command is permanently blocked. Safe route: fix the failing pre-commit hook and re-run 'git commit' without --no-verify, rather than bypassing it \u2014 the hook exists to catch something before commit. If the hook itself is broken (not the change), fix the hook, don't skip it.",
+        "patternId": "git-commit-no-verify"
+      }
+    },
+    "fixture_index": 54
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git commit -m 'wip' --no-verify"
+      },
+      "cwd": "{sandbox}/feat_repo"
+    },
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_core.test.sh",
+    "expected": {
+      "hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": "Destructive pattern detected: git commit -m 'wip' --no-verify\nFull command: git commit -m 'wip' --no-verify\nThis command is permanently blocked. Safe route: fix the failing pre-commit hook and re-run 'git commit' without --no-verify, rather than bypassing it \u2014 the hook exists to catch something before commit. If the hook itself is broken (not the change), fix the hook, don't skip it.",
+        "patternId": "git-commit-no-verify"
+      }
+    },
+    "fixture_index": 69
+  }
+]

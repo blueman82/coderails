@@ -1,0 +1,34 @@
+path	group	success	failure	stream	exit	environment	invocation
+hooks/scripts/check_confidence_labels.py	hook	labelled response allows	unlabelled response blocks	Stop stderr reason	Stop/SubagentStop: 0/2	stdin JSON TRANSCRIPT_PATH	Stop,SubagentStop
+hooks/scripts/comment_citation_gate.py	hook	ordinary comment allows	transcript citation denies	stdout deny JSON	PreToolUse: 0	stdin JSON PLUGIN_ROOT	PreToolUse ^apply_patch$
+hooks/scripts/crack_on_gate.py	hook	non-crack prompt allows	request_user_input during crack-on denies	stdout deny JSON	PreToolUse: 0	stdin JSON CLAUDE_AGENTIC_LOOP_DIR	UserPromptSubmit,PreToolUse ^request_user_input$
+hooks/scripts/crack_on_prose_gate.py	hook	non-question completion allows	crack-on prose question blocks	Stop stderr reason	Stop: 0/2	stdin JSON CLAUDE_AGENTIC_LOOP_DIR	Stop
+hooks/scripts/destructive_bash_gate.py	hook	safe command allows	blocked destructive command denies	stdout deny JSON	PreToolUse: 0	stdin JSON	PreToolUse ^Bash$
+hooks/scripts/graph_completion_guard.py	hook	complete graph allows	incomplete graph blocks	Stop stderr reason	Stop: 0/2	stdin JSON CLAUDE_AGENTIC_LOOP_DIR	Stop
+hooks/scripts/inject_bootstrap.py	hook	startup injects context	invalid input degrades	stdout hook JSON	SessionStart: 0	stdin JSON PLUGIN_ROOT	SessionStart startup|resume|clear|compact
+hooks/scripts/inject_context.py	hook	prompt injects context	invalid input degrades	stdout hook JSON	UserPromptSubmit: 0	stdin JSON	UserPromptSubmit
+hooks/scripts/hook_common.py	hook-helper	helper emits hook output	helper degrades safely	stdout hook JSON	caller-defined	PLUGIN_ROOT jq	imported by hook entries
+hooks/scripts/loop_dispatch_guard.py	hook	authorized dispatch allows	missing graph state denies	stdout deny JSON	PreToolUse: 0	stdin JSON CLAUDE_AGENTIC_LOOP_DIR	PreToolUse ^spawn_agent$
+hooks/scripts/no_edit_on_main.py	hook	allowed write allows	protected write denies	stdout deny JSON	PreToolUse: 0	stdin JSON	PreToolUse ^apply_patch$
+hooks/scripts/quality_feedback.py	hook	quality feedback emits	invalid input degrades	stdout hook JSON	PostToolUse: 0	stdin JSON PLUGIN_ROOT	PostToolUse ^apply_patch$
+hooks/scripts/test_gate.py	hook	passing trusted test allows	failing trusted test denies	stdout deny JSON	PreToolUse: 0	stdin JSON	PreToolUse ^Bash$
+hooks/scripts/verification_volume_ceiling.py	hook	first two checks allow	third check denies	stdout deny JSON	PreToolUse: 0	stdin JSON PLUGIN_DATA	PreToolUse ^Bash$
+hooks/scripts/wiki_taxonomy_gate.py	hook	approved wiki path allows	unsanctioned top-level denies	stdout deny JSON	PreToolUse: 0	stdin JSON PLUGIN_ROOT	PreToolUse ^apply_patch$
+scripts/lib/config.py	workflow-helper	canonical config resolves	missing config reports NO_CONFIG	stdout config/NO_CONFIG	caller-defined	PWD	imported by workflow CLIs
+scripts/lib/eval_artifact.py	workflow-helper	valid eval artifact reads	missing or invalid artifact fails	stdout artifact/stderr reason	caller-defined	gh PATH	imported by git-common and post-evals
+scripts/lib/git_common.py	workflow-helper	valid git/gh precondition passes	invalid precondition fails	stdout data/stderr reason	caller-defined	git gh PATH	imported by push and merge
+scripts/lib/review_artifact.py	workflow-helper	valid review artifact reads	missing or invalid artifact fails	stdout artifact/stderr reason	caller-defined	gh PATH	imported by git-common
+scripts/merge.py	workflow-cli	merge gate succeeds	missing evidence or gh failure blocks	stdout status/stderr reason	0/1	git gh PWD	merge skill
+scripts/post_evals.py	workflow-cli	valid eval posts	invalid eval fails	stdout artifact/stderr reason	0/1	git gh PWD	post-evals skill and merge import
+scripts/post_review.py	workflow-cli	valid review posts	invalid review fails	stdout artifact/stderr reason	0/1	git gh PWD	post-review skill
+scripts/push.py	workflow-cli	valid feature push creates or updates PR	invalid precondition fails	stdout PR URL/stderr reason	0/1	git gh PWD	push skill
+skills/dashboard/runner/bin/dashboard_server.py	dashboard-launcher	starts runner server	missing node entry fails	stdout server/stderr reason	0/1	CODERAILS_BUILDER_WRAPPER	spawned by dashboard runner
+skills/dashboard/runner/bin/seed_and_sweep.py	dashboard-launcher	seeds then sweeps	seed or sweep failure fails	stdout runner output/stderr reason	0/1	CODERAILS_BUILDER_WRAPPER	spawned by dashboard runner
+skills/dashboard/runner/bin/sweeper.py	dashboard-launcher	starts sweeper	missing node entry fails	stdout runner output/stderr reason	0/1	CODERAILS_BUILDER_WRAPPER	spawned by dashboard runner
+skills/dashboard/scripts/run_builder.py	dashboard-launcher	starts builder	bad wrapper fails	stdout builder output/stderr reason	0/1	CODERAILS_BUILDER_WRAPPER	spawned by dashboard app
+skills/dashboard/scripts/start_dashboard.py	dashboard-launcher	starts dashboard	missing app fails	stdout dashboard output/stderr reason	0/1	PWD	 dashboard skill
+skills/dashboard/scripts/stop_dashboard.py	dashboard-launcher	stops dashboard	missing pid is harmless	stdout status/stderr reason	0/1	PWD	 dashboard skill
+skills/workflow-audit/scripts/cluster_ngrams.py	workflow-audit	clusters valid JSONL	malformed input fails	stdout JSONL/stderr reason	0/1	PATH	workflow-audit pipeline
+skills/workflow-audit/scripts/scan_transcripts.py	workflow-audit	filters private transcript data	missing input fails	stdout JSONL/stderr reason	0/1	HOME PATH	workflow-audit pipeline
+skills/workflow-audit/scripts/tests/test_workflow_audit.py	workflow-audit-test	cluster, scan, pipeline, and queue tests pass	any workflow-audit assertion fails	stdout test output/stderr failure	0/1	TMPDIR HOME	called directly
+skills/workflow-audit/scripts/write_queue_entry.py	workflow-audit	writes valid queue proposal	invalid proposal or write error fails	stdout queue path/stderr reason	0/1	HOME PATH	workflow-audit pipeline

@@ -6,7 +6,7 @@ import type { DashboardConfig } from "../src/lib/config";
 const versions = readMarkerVersions();
 if (!versions.eval || !versions.review) {
   throw new Error(
-    "Could not read marker versions from scripts/lib/{eval,review}-artifact.sh — fixtures cannot be built"
+    "Could not read marker versions from scripts/lib/{eval,review}_artifact.py — fixtures cannot be built"
   );
 }
 const EVAL_VER = versions.eval;

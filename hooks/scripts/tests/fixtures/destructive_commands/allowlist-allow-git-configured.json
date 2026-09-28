@@ -1,0 +1,167 @@
+[
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git push --force-with-lease"
+      },
+      "cwd": "{sandbox}/allowlist_repo"
+    },
+    "stdout": "",
+    "returncode": 0,
+    "allowlist": "git-push-force-with-lease\n",
+    "source": "destructive_bash_gate_allowlist.test.sh",
+    "expected": {},
+    "fixture_index": 1
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git push -u origin main --force-with-lease"
+      },
+      "cwd": "{sandbox}/allowlist_repo"
+    },
+    "stdout": "",
+    "returncode": 0,
+    "allowlist": "git-push-force-with-lease\n",
+    "source": "destructive_bash_gate_allowlist.test.sh",
+    "expected": {},
+    "fixture_index": 10
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git push --force-with-lease"
+      },
+      "cwd": "{sandbox}/allowlist_repo"
+    },
+    "stdout": "",
+    "returncode": 0,
+    "allowlist": "git-push-force-with-lease\n",
+    "source": "destructive_bash_gate_allowlist.test.sh",
+    "expected": {},
+    "fixture_index": 11
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git push -u\t--force-with-lease"
+      },
+      "cwd": "{sandbox}/allowlist_repo"
+    },
+    "stdout": "",
+    "returncode": 0,
+    "allowlist": "git-push-force-with-lease\n",
+    "source": "destructive_bash_gate_allowlist.test.sh",
+    "expected": {},
+    "fixture_index": 15
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git push --force-with-lease"
+      },
+      "cwd": "{sandbox}/allowlist_repo"
+    },
+    "stdout": "",
+    "returncode": 0,
+    "allowlist": "git-push-force-with-lease\n",
+    "source": "destructive_bash_gate_allowlist.test.sh",
+    "expected": {},
+    "fixture_index": 16
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git push --force-with-\\\nlease"
+      },
+      "cwd": "{sandbox}/no_intra_repo"
+    },
+    "stdout": "",
+    "returncode": 0,
+    "allowlist": "git-push-force-with-lease\n",
+    "source": "destructive_bash_gate_allowlist.test.sh",
+    "expected": {},
+    "fixture_index": 21
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git push --force-with-lease"
+      },
+      "cwd": "{sandbox}/allowlist_repo"
+    },
+    "stdout": "",
+    "returncode": 0,
+    "allowlist": "# comment\n\ngit-push-force-with-lease\n",
+    "source": "destructive_bash_gate_allowlist.test.sh",
+    "expected": {},
+    "fixture_index": 24
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git -c push.followTags=true push --force-with-lease origin main"
+      },
+      "cwd": "{sandbox}/opt_repo"
+    },
+    "stdout": "",
+    "returncode": 0,
+    "allowlist": "git-push-force-with-lease\n",
+    "source": "destructive_bash_gate_allowlist.test.sh",
+    "expected": {},
+    "fixture_index": 35
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git push --force-with-lease"
+      },
+      "cwd": "{sandbox}/opt_repo"
+    },
+    "stdout": "",
+    "returncode": 0,
+    "allowlist": "git-push-force-with-lease\n",
+    "source": "destructive_bash_gate_allowlist.test.sh",
+    "expected": {},
+    "fixture_index": 36
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git -c color.ui=always status"
+      },
+      "cwd": "{sandbox}/opt_repo"
+    },
+    "stdout": "",
+    "returncode": 0,
+    "allowlist": "git-push-force-with-lease\n",
+    "source": "destructive_bash_gate_allowlist.test.sh",
+    "expected": {},
+    "fixture_index": 38
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git --no-pager log -1"
+      },
+      "cwd": "{sandbox}/opt_repo"
+    },
+    "stdout": "",
+    "returncode": 0,
+    "allowlist": "git-push-force-with-lease\n",
+    "source": "destructive_bash_gate_allowlist.test.sh",
+    "expected": {},
+    "fixture_index": 39
+  }
+]

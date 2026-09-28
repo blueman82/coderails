@@ -1,0 +1,163 @@
+[
+  {
+    "request": {
+      "transcript_path": "{sandbox}/lnf_10971.jsonl",
+      "session_id": "S1",
+      "cwd": "/work/project",
+      "stop_hook_active": false,
+      "hook_event_name": "Stop"
+    },
+    "files": {
+      "{sandbox}/state/-work-project/S1/progress.json": "{\"schema_version\": 3, \"status\": \"in-progress\", \"session_id\": \"S1\", \"completed_marker\": 0}",
+      "{sandbox}/lnf_10971.jsonl": "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Skill\",\"input\":{\"skill\":\"coderails:agentic-loop\"}}]}}\n{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Edit\",\"input\":{\"file_path\":\"/tmp/lf1.py\"}}]}}\n{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Edit\",\"input\":{\"file_path\":\"/tmp/lf2.py\"}}]}}\n{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Edit\",\"input\":{\"file_path\":\"/tmp/lf3.py\"}}]}}\n{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"Done, all changes applied. (verified)\"}]}}\n"
+    },
+    "env": {
+      "CLAUDE_DISCIPLINE_LOG": "{sandbox}/discipline.log",
+      "CLAUDE_HOOK_MAX_ATTEMPTS": "1",
+      "CLAUDE_AGENTIC_LOOP_DIR": "{sandbox}/state",
+      "CLAUDE_HOOK_SLEEP_S": "0"
+    },
+    "stdout": "{\n  \"hookSpecificOutput\": {\n    \"hookEventName\": \"Stop\",\n    \"additionalContext\": \"[discipline-warn(loop)] session modified 3 files but the response has no \\\"## Did Not Verify\\\" section. Rule (CLAUDE.md): after any response that edits files, end with a ## Did Not Verify section \u2014 resolve each item or tag it (unverifiable: <reason>). Add the section before stopping.\"\n  }\n}\n",
+    "returncode": 0,
+    "source": "check_verify_loop",
+    "fixture_index": 47
+  },
+  {
+    "request": {
+      "transcript_path": "{sandbox}/lnf_13040.jsonl",
+      "session_id": "S1",
+      "cwd": "/work/project",
+      "stop_hook_active": false,
+      "hook_event_name": "Stop"
+    },
+    "files": {
+      "{sandbox}/state/-work-project/S1/progress.json": "{\"schema_version\": 3, \"status\": \"in-progress\", \"session_id\": \"S1\", \"completed_marker\": 0}",
+      "{sandbox}/lnf_13040.jsonl": "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Skill\",\"input\":{\"skill\":\"coderails:agentic-loop\"}}]}}\n{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Edit\",\"input\":{\"file_path\":\"/tmp/lf1.py\"}}]}}\n{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Edit\",\"input\":{\"file_path\":\"/tmp/lf2.py\"}}]}}\n{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Edit\",\"input\":{\"file_path\":\"/tmp/lf3.py\"}}]}}\n{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"Done, all changes applied. (verified)\"}]}}\n"
+    },
+    "env": {
+      "CLAUDE_DISCIPLINE_LOG": "{sandbox}/discipline.log",
+      "CLAUDE_HOOK_MAX_ATTEMPTS": "1",
+      "CLAUDE_AGENTIC_LOOP_DIR": "{sandbox}/state",
+      "CLAUDE_HOOK_SLEEP_S": "0"
+    },
+    "stdout": "{\n  \"hookSpecificOutput\": {\n    \"hookEventName\": \"Stop\",\n    \"additionalContext\": \"[discipline-warn(loop)] session modified 3 files but the response has no \\\"## Did Not Verify\\\" section. Rule (CLAUDE.md): after any response that edits files, end with a ## Did Not Verify section \u2014 resolve each item or tag it (unverifiable: <reason>). Add the section before stopping.\"\n  }\n}\n",
+    "returncode": 0,
+    "source": "check_verify_loop",
+    "fixture_index": 50
+  },
+  {
+    "request": {
+      "transcript_path": "{sandbox}/lt_28753.jsonl",
+      "session_id": "S1",
+      "cwd": "/work/project",
+      "stop_hook_active": false,
+      "hook_event_name": "Stop"
+    },
+    "files": {
+      "{sandbox}/state/-work-project/S1/progress.json": "{\"schema_version\": 3, \"status\": \"in-progress\", \"session_id\": \"S1\", \"completed_marker\": 0}",
+      "{sandbox}/lt_28753.jsonl": "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Skill\",\"input\":{\"skill\":\"coderails:agentic-loop\"}}]}}\n{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Edit\",\"input\":{\"file_path\":\"/tmp/f.py\"}}]}}\n{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"Some text here. (verified)\\n## Did Not Verify\\n- the integration test was not run\"}]}}\n"
+    },
+    "env": {
+      "CLAUDE_DISCIPLINE_LOG": "{sandbox}/discipline.log",
+      "CLAUDE_HOOK_MAX_ATTEMPTS": "1",
+      "CLAUDE_AGENTIC_LOOP_DIR": "{sandbox}/state",
+      "CLAUDE_HOOK_SLEEP_S": "0"
+    },
+    "stdout": "{\n  \"hookSpecificOutput\": {\n    \"hookEventName\": \"Stop\",\n    \"additionalContext\": \"[discipline-warn(loop)] Your '## Did Not Verify' section has untagged items \u2014 anything not\\nexplicitly marked uncheckable is treated as something you could have resolved:\\n- the integration test was not run\\nResolve each before stopping: read the file, run the check (Read/Grep/Bash), or delete the bullet.\\nIf an item GENUINELY cannot be checked from source (a REPL-only action, external-system\\nbehaviour, prod-only observation, or user intent), keep it but tag its leading clause:\\n  - (unverifiable: <reason>) <the item>\\nThat tag is the only escape hatch \u2014 every untagged bullet blocks outside a loop and is flagged inside one.\"\n  }\n}\n",
+    "returncode": 0,
+    "source": "check_verify_loop",
+    "fixture_index": 61
+  },
+  {
+    "request": {
+      "transcript_path": "{sandbox}/lt_14409.jsonl",
+      "session_id": "S1",
+      "cwd": "/work/project",
+      "stop_hook_active": false,
+      "hook_event_name": "Stop"
+    },
+    "files": {
+      "{sandbox}/state/-work-project/S1/progress.json": "{\"schema_version\": 3, \"status\": \"complete\", \"session_id\": \"OTHER-SESSION\", \"completed_marker\": 1}",
+      "{sandbox}/lt_14409.jsonl": "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Skill\",\"input\":{\"skill\":\"coderails:agentic-loop\"}}]}}\n{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Edit\",\"input\":{\"file_path\":\"/tmp/f.py\"}}]}}\n{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"Some text here. (verified)\\n## Did Not Verify\\n- the integration test was not run\"}]}}\n"
+    },
+    "env": {
+      "CLAUDE_DISCIPLINE_LOG": "{sandbox}/discipline.log",
+      "CLAUDE_HOOK_MAX_ATTEMPTS": "1",
+      "CLAUDE_AGENTIC_LOOP_DIR": "{sandbox}/state",
+      "CLAUDE_HOOK_SLEEP_S": "0"
+    },
+    "stdout": "{\n  \"hookSpecificOutput\": {\n    \"hookEventName\": \"Stop\",\n    \"additionalContext\": \"[discipline-warn(loop)] Your '## Did Not Verify' section has untagged items \u2014 anything not\\nexplicitly marked uncheckable is treated as something you could have resolved:\\n- the integration test was not run\\nResolve each before stopping: read the file, run the check (Read/Grep/Bash), or delete the bullet.\\nIf an item GENUINELY cannot be checked from source (a REPL-only action, external-system\\nbehaviour, prod-only observation, or user intent), keep it but tag its leading clause:\\n  - (unverifiable: <reason>) <the item>\\nThat tag is the only escape hatch \u2014 every untagged bullet blocks outside a loop and is flagged inside one.\"\n  }\n}\n",
+    "returncode": 0,
+    "source": "check_verify_loop",
+    "fixture_index": 64
+  },
+  {
+    "request": {
+      "transcript_path": "{sandbox}/lt_22045.jsonl",
+      "session_id": "S1",
+      "cwd": "/work/project",
+      "stop_hook_active": false,
+      "hook_event_name": "Stop"
+    },
+    "files": {
+      "{sandbox}/state/-work-project/S1/progress.json": "{not valid json",
+      "{sandbox}/lt_22045.jsonl": "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Skill\",\"input\":{\"skill\":\"coderails:agentic-loop\"}}]}}\n{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Edit\",\"input\":{\"file_path\":\"/tmp/f.py\"}}]}}\n{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"Some text here. (verified)\\n## Did Not Verify\\n- the integration test was not run\"}]}}\n"
+    },
+    "env": {
+      "CLAUDE_DISCIPLINE_LOG": "{sandbox}/discipline.log",
+      "CLAUDE_HOOK_MAX_ATTEMPTS": "1",
+      "CLAUDE_AGENTIC_LOOP_DIR": "{sandbox}/state",
+      "CLAUDE_HOOK_SLEEP_S": "0"
+    },
+    "stdout": "{\n  \"hookSpecificOutput\": {\n    \"hookEventName\": \"Stop\",\n    \"additionalContext\": \"[discipline-warn(loop)] Your '## Did Not Verify' section has untagged items \u2014 anything not\\nexplicitly marked uncheckable is treated as something you could have resolved:\\n- the integration test was not run\\nResolve each before stopping: read the file, run the check (Read/Grep/Bash), or delete the bullet.\\nIf an item GENUINELY cannot be checked from source (a REPL-only action, external-system\\nbehaviour, prod-only observation, or user intent), keep it but tag its leading clause:\\n  - (unverifiable: <reason>) <the item>\\nThat tag is the only escape hatch \u2014 every untagged bullet blocks outside a loop and is flagged inside one.\"\n  }\n}\n",
+    "returncode": 0,
+    "source": "check_verify_loop",
+    "fixture_index": 66
+  },
+  {
+    "request": {
+      "transcript_path": "{sandbox}/lt_3757.jsonl",
+      "session_id": "S1",
+      "cwd": "/work/project",
+      "stop_hook_active": false,
+      "hook_event_name": "Stop"
+    },
+    "files": {
+      "{sandbox}/state/-work-project/S1/progress.json": "{\"schema_version\": 3, \"status\": \"complete\", \"session_id\": \"S1\", \"completed_marker\": 1}",
+      "{sandbox}/lt_3757.jsonl": "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Skill\",\"input\":{\"skill\":\"coderails:agentic-loop\"}}]}}\n{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Skill\",\"input\":{\"skill\":\"coderails:agentic-loop\"}}]}}\n{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Edit\",\"input\":{\"file_path\":\"/tmp/f.py\"}}]}}\n{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"Some text here. (verified)\\n## Did Not Verify\\n- the integration test was not run\"}]}}\n"
+    },
+    "env": {
+      "CLAUDE_DISCIPLINE_LOG": "{sandbox}/discipline.log",
+      "CLAUDE_HOOK_MAX_ATTEMPTS": "1",
+      "CLAUDE_AGENTIC_LOOP_DIR": "{sandbox}/state",
+      "CLAUDE_HOOK_SLEEP_S": "0"
+    },
+    "stdout": "{\n  \"hookSpecificOutput\": {\n    \"hookEventName\": \"Stop\",\n    \"additionalContext\": \"[discipline-warn(loop)] Your '## Did Not Verify' section has untagged items \u2014 anything not\\nexplicitly marked uncheckable is treated as something you could have resolved:\\n- the integration test was not run\\nResolve each before stopping: read the file, run the check (Read/Grep/Bash), or delete the bullet.\\nIf an item GENUINELY cannot be checked from source (a REPL-only action, external-system\\nbehaviour, prod-only observation, or user intent), keep it but tag its leading clause:\\n  - (unverifiable: <reason>) <the item>\\nThat tag is the only escape hatch \u2014 every untagged bullet blocks outside a loop and is flagged inside one.\"\n  }\n}\n",
+    "returncode": 0,
+    "source": "check_verify_loop",
+    "fixture_index": 67
+  },
+  {
+    "request": {
+      "transcript_path": "{sandbox}/lt_22297.jsonl",
+      "session_id": "S1",
+      "cwd": "/work/project",
+      "stop_hook_active": false,
+      "hook_event_name": "Stop"
+    },
+    "files": {
+      "{sandbox}/state/-work-project/S1/progress.json": "{\"schema_version\": 3, \"status\": \"in-progress\", \"session_id\": \"S1\", \"completed_marker\": 0}",
+      "{sandbox}/lt_22297.jsonl": "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Skill\",\"input\":{\"skill\":\"coderails:agentic-loop\"}}]}}\n{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Edit\",\"input\":{\"file_path\":\"/tmp/f.py\"}}]}}\n{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"Some text here. (verified)\\n## Did Not Verify\\n- the integration test was not run\"}]}}\n"
+    },
+    "env": {
+      "CLAUDE_DISCIPLINE_LOG": "{sandbox}/discipline.log",
+      "CLAUDE_HOOK_MAX_ATTEMPTS": "1",
+      "CLAUDE_AGENTIC_LOOP_DIR": "{sandbox}/state",
+      "CLAUDE_HOOK_SLEEP_S": "0"
+    },
+    "stdout": "{\n  \"hookSpecificOutput\": {\n    \"hookEventName\": \"Stop\",\n    \"additionalContext\": \"[discipline-warn(loop)] Your '## Did Not Verify' section has untagged items \u2014 anything not\\nexplicitly marked uncheckable is treated as something you could have resolved:\\n- the integration test was not run\\nResolve each before stopping: read the file, run the check (Read/Grep/Bash), or delete the bullet.\\nIf an item GENUINELY cannot be checked from source (a REPL-only action, external-system\\nbehaviour, prod-only observation, or user intent), keep it but tag its leading clause:\\n  - (unverifiable: <reason>) <the item>\\nThat tag is the only escape hatch \u2014 every untagged bullet blocks outside a loop and is flagged inside one.\"\n  }\n}\n",
+    "returncode": 0,
+    "source": "check_verify_loop",
+    "fixture_index": 69
+  }
+]

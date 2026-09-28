@@ -7,25 +7,27 @@ description: Coordinate autonomous multi-step work with native Codex subagents a
 
 Keep the main Codex session as orchestrator. Workers implement; the orchestrator owns one durable graph and is its only writer. `update_plan` is display only and never decides readiness, resume, or completion.
 
-The graph helper is `scripts/graph.py` beside this skill. It uses only the Python standard library. It calculates and records work but never starts agents, another provider, a nested session, or a scheduler.
+Set `SKILL_DIR` to the absolute directory containing this `SKILL.md`. The graph helper is `scripts/graph.py` beside this skill. It uses only the Python standard library. It calculates and records work but never starts agents, another provider, a nested session, or a scheduler.
 
 ## Start or resume
 
 Read the SessionStart bootstrap text first. It reports either the active state path and inspection or the path for a new `progress.json`. Reuse that exact path after compaction or resume.
 
-For a new loop, record the user's authorised outcome, session id, unique loop id, success checks, work-unit nodes, dependency edges, and all-input joins. Write schema version 2 before any worker dispatch:
+For a new loop, record the user's authorised outcome, session id, unique loop id, success checks, work-unit nodes, dependency edges, and all-input joins. Write schema version 3 before any worker dispatch:
 
 ```json
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "session_id": "current-session-id",
   "loop_id": "unique-loop-id",
   "revision": 1,
   "status": "in-progress",
   "scope": "authorised outcome",
+  "authorising_prompt_raw": "verbatim user authorization",
+  "work_units": {"1": {"status": "pending"}},
   "graph": {
     "nodes": {
-      "A": {"status":"pending","outcome":"pending","retry":{"attempts":0,"max":5},"evidence":[]}
+      "U3[1]": {"label":"Build unit 1","status":"pending","outcome":"pending","retry":{"attempts":0,"max":5},"respawn":{"generation":0,"intent":null},"evidence":[]}
     },
     "edges": [],
     "joins": {},
@@ -35,9 +37,11 @@ For a new loop, record the user's authorised outcome, session id, unique loop id
 }
 ```
 
-An all-input join is a node plus an entry such as `"J":{"mode":"all","inputs":["A","B"],"released":false}`. Downstream edges originate at `J`. Unknown nodes, malformed state, cycles, inconsistent joins, or running nodes outside an active wave fail closed.
+Use registered node IDs and their exact registered labels, including joins such as `J12-all-units`; every node carries `respawn` as above. An all-input join has an entry in `graph.joins` with `id` equal to the join key, `mode: "all"`, its registered input node IDs, and `released: false`. Downstream edges originate at that join. Active waves use `wave_id`. Unknown nodes, malformed state, cycles, inconsistent joins, or running nodes outside an active wave fail closed.
 
-Create and grade loop-local `evals.json` beside `progress.json` before build. It must carry this exact `session_id` and `loop_id`; those stable fields authorize dispatch across waves, so `begin-wave` does not invalidate the loop's eval authority. Keep its revision field as the revision it graded. The provider-local dispatch hook blocks native worker calls when graph ownership or graded loop evidence is missing or foreign.
+Keep the top-level `work_units` roster independent of `graph.nodes`: graph nodes record dispatch and control steps, while work units record the authorized deliverables. Completion requires every registered work unit to be `done` or `dropped` with a nonblank `dropped_reason`; never infer unit completion solely from graph-node status.
+
+Create and freeze ungraded loop-local `evals.json` beside `progress.json` before build. The frozen suite must carry a nonblank `frozen_sha`, a positive verification level, at least one P0, valid eval modes and scripted command/negative-control fields, and null `result`/`grading`. Grade against actual outcomes at completion; do not fabricate a pre-build GO. It must carry this exact `session_id` and `loop_id`; those stable fields authorize dispatch across waves, so `begin-wave` does not invalidate the loop's eval authority. Keep its revision field as the revision at freeze or grading. The provider-local dispatch hook accepts valid frozen ungraded evidence before build or genuinely graded evidence, and blocks when graph ownership or loop evidence is missing or foreign.
 
 For a graph with three or more work units, or any cross-unit dependency, apply `superpowers:brainstorming`'s design-quality discipline without its interactive human-approval gate. Write or reuse `spec.md` beside `progress.json`, then invoke `superpowers:writing-plans` to produce durable `plan.md` beside it, outside the code repository. `plan.md` is the static source of truth for scope and decomposition; `progress.json` is the dynamic record of position and outcomes. Derive node scope from the plan, and reread `spec.md` and `plan.md` on resume. Do not create these files for one or two self-contained units.
 
@@ -51,15 +55,17 @@ Every dispatch wave follows this order:
 
 1. Run `graph.py begin-wave "$STATE"`. This fully validates the graph, refuses an existing active wave, records the complete deterministic ready set as running, increments the revision, and prints the wave id, node list, and `task_names` mapping. Calling `begin-wave` is mandatory before `spawn_agent`. `inspect` repeats the mapping while a wave is active.
 2. For a ready wave with two or more independent nodes, invoke `superpowers:dispatching-parallel-agents` for its parallel-dispatch guidance. It is advisory: `graph.py` still determines readiness and native `spawn_agent` remains the sole dispatcher.
-3. Call native `spawn_agent` exactly once for each printed node with `agent_type: "loop-worker"`. Its message must begin with `CODERAILS_GRAPH_TASK=<exact printed task name>` on a line by itself. Attempt 1 keeps `loop_worker_` plus the lowercase UTF-8 hex encoding of the node id; retries append `_aN`, so every attempt has a new native task identity while remaining reversible. Give each worker a self-contained prompt containing its node id, exact scope, allowed paths, worktree, exclusions, checks, required artifact, and concise evidence report. For testable code, require `superpowers:test-driven-development`; require `superpowers:subagent-driven-development` for worker construction and `superpowers:verification-before-completion` before its report. Do not use another provider or start a nested Codex session.
-4. Use `wait_agent` until every node in the active wave has a terminal report. `wait_agent` reports only timeout or completion; `record-wave` resolves each task marker through the native `CollabAgentToolCall`, its one receiver thread, child `source.subagent.thread_spawn` metadata, and successful `task_complete`. A quiet worker is not proof of failure: inspect its artifact, then use `send_input` for one focused correction if needed.
+3. Call native `spawn_agent` exactly once for each printed node. Use the provider-native `task_name` from the printed mapping when supported. If this runtime exposes `agent_type`, select an available native role suitable for the work; a custom `loop-worker` role is optional, never required. If the tool has no role parameter, omit it rather than fabricating one. Its message must begin with `CODERAILS_GRAPH_TASK=<exact printed task name>` on a line by itself. Attempt 1 keeps `loop_worker_` plus the lowercase UTF-8 hex encoding of the node id; retries and stale respawns append `_aN` (N is failed retries plus respawn generation plus one), so every attempt has a new native task identity while remaining reversible. Read `../../agents/loop-worker.toml` relative to this skill and include its `developer_instructions` text explicitly after the graph marker, followed by the task brief and current user restrictions. Explicitly require scoped implementation, test-first for testable changes, verification with actual command results, self-review, and an honest report; never assume a native label loads these instructions. User restrictions on commits, remote writes, or test scope override the template. Give each worker a self-contained prompt containing its node id, exact scope, allowed paths, worktree, exclusions, checks, required artifact, and concise evidence report. For testable code, require `superpowers:test-driven-development`; require `superpowers:subagent-driven-development` for worker construction and `superpowers:verification-before-completion` before its report. Do not use another provider or start a nested Codex session.
+4. Use the exposed native wait tool (`wait_agent` in the collaboration surface) until every node in the active wave has a terminal report. A wakeup or mailbox notification alone is not a terminal result; `record-wave` resolves each task marker through either legacy `CollabAgentToolCall` evidence or the native `spawn_agent` function call joined to its one `SubAgentActivity`, then child `source.subagent.thread_spawn` metadata and successful `task_complete`. A quiet worker is not proof of failure: inspect its artifact, then use the exposed native message/follow-up tool for one focused correction if needed (`send_message` for a running worker, or `followup_task` to resume an idle worker on the collaboration surface).
 5. Verify each report against the actual diff, test output, PR state, or other current artifact. A worker summary alone is not evidence.
 6. Build one result object containing exactly every active-wave node and no other key. Each result is `{"outcome":"done|skipped|failed","evidence":"observed evidence"}`. Record it with:
 
 ```bash
 python3 "$SKILL_DIR/scripts/graph.py" record-wave "$STATE" \
-  '{"wave_id":"wave-N","results":{"A":{"outcome":"done","evidence":"check passed"}}}'
+  '{"wave_id":"wave-N","results":{"U3[1]":{"outcome":"done","evidence":"check passed"}}}'
 ```
+
+The graph marker correlates a node and attempt; it does not attest a custom agent role. Native task paths, child/thread IDs, and any actual requested role are bound to provider transcript evidence. A supplied native role must match both child role fields; role-less dispatch is accepted only for the recognized `collaboration` function-call/activity shape with an explicit null nested spawn role; the top-level role may be absent or null, and any populated top-level path must agree. Parent/session, depth, unique dispatch, terminal completion for completed attempts, cursor, and reuse checks remain mandatory. A checked stale result verifies its unique native spawn and child ownership without inventing a successful terminal; subsequent completion rechecks every abandoned attempt from native transcripts. `loop_dispatch_guard.py` routes graph tasks through state, session, active-wave, and eval authorization before dispatch; an ambiguous marker is denied.
 
 Partial, extra, malformed, wrong-wave, stale, failed, duplicate, foreign-session, or reused worker evidence is rejected without changing state. `record-wave` atomically adds compact transcript references to the existing node evidence array; workers never write graph state. A failed node increments its attempts and preserves a separate reference for that attempt. It returns to pending while attempts remain; exhaustion becomes a durable hard-stop. Successful all-input joins release deterministically after every input succeeds. Repeat from `inspect`, then `begin-wave`.
 

@@ -6,16 +6,16 @@ predicate, or skip condition; the phase prose in SKILL.md covers what to *do*, t
 what makes a node *ready*.
 
 Before dispatching any candidate node, run the read-only readiness query
-`${PLUGIN_ROOT}/hooks/scripts/lib/graph_readiness.sh <path-to-progress.json> <node-id>`,
+`python3 "${PLUGIN_ROOT}/hooks/scripts/lib/graph_readiness.py" <path-to-progress.json> <node-id>`,
 where `PLUGIN_ROOT` resolves as follows. Prefer `${CLAUDE_PLUGIN_ROOT}` when
 it is set in your shell — it is substituted in command frontmatter and in
 `hooks.json`'s own hook command strings, for both a directory-marketplace and
 a packaged install, but it is normally unset in an orchestrator-issued Bash
 call, since it is not substituted into your own Bash tool calls. Before
 dispatching against whatever it resolves to, confirm the script actually
-exists at that path (e.g. `[ -f "$PLUGIN_ROOT/hooks/scripts/lib/graph_readiness.sh" ]`)
+exists at that path (e.g. `[ -f "$PLUGIN_ROOT/hooks/scripts/lib/graph_readiness.py" ]`)
 — a packaged install's cache copy can predate this script's introduction, and
-`graph_readiness.sh`'s own `blocked` output is indistinguishable from a real
+`graph_readiness.py`'s own `blocked` output is indistinguishable from a real
 non-terminal predecessor, so a missing-script call would silently read as
 every node being blocked rather than as a resolution failure. If the file is
 missing, stop and report that PLUGIN_ROOT resolved to a directory without this
@@ -43,76 +43,60 @@ The orchestrator is the only writer of `progress.json`: collect a wave's results
 read-modify-write before releasing its join. Inside an authorised loop, the
 `U*` lane below repeats per work-unit.
 
-**Resolving and recording a wave — `graph_dispatch.sh`.** Use
-`${PLUGIN_ROOT}/hooks/scripts/lib/graph_dispatch.sh` (same `PLUGIN_ROOT`
-resolution as the `graph_readiness.sh` path above — prefer
-`${CLAUDE_PLUGIN_ROOT}` when set, otherwise reuse the plugin root already
-visible in this session's rendered context; never guessed, never the invoking
-repo's toplevel, never the versioned plugin cache) for the S2.5/S2.6 fork
-through the `J2` join, and for any other fork/join wave in the graph:
+**Resolving and recording a wave — the native Python CLI.** Use
+`python3 "${PLUGIN_ROOT}/skills/agentic-loop/scripts/graph.py"` with the same
+verified plugin-root resolution above. The CLI uses the provider's own lock,
+transcript parser and independently installed pure graph semantics.
 
-1. Source the script and call `graph_dispatch_plan <path-to-progress.json>`
-   to resolve the current ready wave's Claude dispatch
-   targets — one JSON-lines object per ready node — BEFORE running any real
-   `Agent` dispatch. A `kind:"join"` line (e.g. `J2`) is not a dispatch
-   target; only `kind:"dispatch"` lines with `unresolved:false` are.
-2. Call `graph_dispatch_begin_wave <path-to-progress.json>` immediately before
-   dispatch. Keep its returned `wave_id`; this atomically records the exact
-   ready nodes as running. If it fails, do not dispatch.
-3. Dispatch each real `Agent` call with this exact first prompt line, followed
-   by the worker instructions: `CODERAILS_GRAPH_DISPATCH={"session_id":"<session-id>","loop_id":"<loop-id>","revision":<revision>,"wave_id":"<wave-id>","node_id":"<node-id>"}`.
-   The `loop_dispatch_guard` denies a missing, malformed, stale, or foreign
-   envelope. Graph waves use the orchestrator's own Agent tool calls only.
-4. **Wave-completeness — confirm before recording.** Before recording, confirm
-   every node in the active wave has a result in hand. A skipped branch still
-   records an explicit skip, same convention as this file's skip column. Do
-   not call `graph_dispatch_record` with a partial wave.
-5. Call `graph_dispatch_record <path-to-progress.json>
-   '{"wave_id":"<wave-id>","results":<wave-results-json>}'` once the full
-   wave is collected. Missing, stale, partial, or extra results are rejected
-   without changing state. The same locked write applies retry/hard-stop
-   bookkeeping and releases every newly satisfied all-input join, including
-   `J2`; never hand-edit a join node.
+1. Run `plan <path-to-progress.json>` before dispatch. It returns a JSON array
+   of instruction sources. A source with `unresolved:true` must be resolved
+   before executing that node. Joins are automatic and are never Agent calls.
+2. Run `begin-wave <path-to-progress.json>` immediately before dispatch. It
+   records exactly the ready nodes as running, captures the native transcript
+   cursor, and returns the current `wave_id` and each dispatch's `prompt_prefix`.
+   A failure means no dispatch is authorized.
+3. Use the returned prefix as the exact first prompt line, then a newline and
+   the explicit instruction body from the resolved source plus the task brief.
+   User restrictions take precedence. Use Claude's available native
+   `subagent_type`, normally `general-purpose`, or a custom type actually installed
+   in this session. Graph IDs and instruction sources do not rename provider
+   workers or require `coderails:loop-worker`. The envelope is
+   `CODERAILS_GRAPH_DISPATCH={"session_id":"<session>","loop_id":"<loop>","revision":4,"wave_id":"wave-4","node_id":"U3[1]"}`.
+   `loop_dispatch_guard.py` checks exact current session, loop, revision, wave
+   and node ownership. Its resolution path is a successful `begin-wave` and
+   the returned prefix, never hand-edited ownership or a renamed worker.
+4. Collect every node's result before recording. Run
+   `record-wave <path-to-progress.json> '{"wave_id":"<wave>","results":{"<node>":{"outcome":"done","evidence":"<artifact result>"}}}'`
+   with exactly the active node set. Evidence supplied by the caller is prose;
+   do not insert native identities, including nested or serialized copies.
+   The adapter derives them from actual parent Agent requests/results, child
+   transcripts, role attribution and harness terminal notifications. Every
+   child in a fan-out must qualify. Worker claims and echoed notification text
+   cannot establish completion.
+5. The sole locked read/validate/write applies the whole wave, retry bounds and
+   every newly satisfied all-input join. Partial, extra, stale or foreign results
+   leave state unchanged. Never edit joins or increment retry counts yourself.
 
-**Known ceiling — `retry.attempts` read is outside the write lock.**
-`graph_dispatch_record` computes each node's `retry.attempts` via its own
-unlocked `jq` read of `progress.json`, before handing the folded result to
-`graph_executor_apply_wave`'s locked read-modify-write. Two orchestrator
-sessions calling `graph_dispatch_record` concurrently against the same
-`progress.json` could both read a stale `attempts` value, undercounting the
-retry bound. `graph_executor.sh`/`graph_readiness.sh` are the frozen,
-byte-verified contract this loop was scoped never to touch, so the fix is
-deferred rather than made here: single-orchestrator-per-`progress.json` (the
-existing "orchestrator is the only writer" rule two paragraphs up) is the
-current mitigation, not a real fix for true concurrent writers.
-`# ponytail: unlocked pre-read of retry.attempts in graph_dispatch_record,
-race under concurrent writers — move the read inside
-graph_executor_apply_wave's lock if concurrent orchestrators on one
-progress.json ever becomes a real scenario.`
+**Eval ownership differs from dispatch ownership.** Frozen dispatch evals bind
+`session_id` + `loop_id` only. Their frozen revision can precede the active graph
+revision: beginning a wave must not invalidate the suite. The dispatch envelope
+still binds the exact current revision, wave and node. Nonempty `work_units`
+requires valid frozen loop evals before implementation. Completion requires the
+final revision's neutral grading and identity-bound completion artifacts.
 
-**`S9-wiki -> S9-docs` and the `J12-all-units` release — `graph_dispatch.sh`.**
-Use `${PLUGIN_ROOT}/hooks/scripts/lib/graph_dispatch.sh` (same `PLUGIN_ROOT`
-resolution as the `graph_readiness.sh` path above — prefer
-`${CLAUDE_PLUGIN_ROOT}` when set, otherwise reuse the plugin root already
-visible in this session's rendered context; never guessed, never the invoking
-repo's toplevel, never the versioned plugin cache) for the tail of the graph,
-past the last unit's merge gate:
+**Failure and replacement.** A `failed` wave result increments the bounded
+retry counter and returns the node to pending, or hard-stops at its limit.
+A `stale` result also requires `stale_check: {"checked":true,"method":"<artifact check>","result":"<observation>"}`
+in that same result. Idle alone is insufficient. After checking the actual
+artifact, run `respawn-stale <state> --session <session> --node <node> --reason <reason>`
+for a new generation; preserve all prior native evidence. The provider supplies
+fresh worker identity on the next dispatch. A fake generation or reused child
+cannot satisfy completion.
 
-1. `S9-wiki -> S9-docs` is a plain sequential edge, not a join — no second
-   write is needed for it. Call `graph_dispatch_plan` once `J12-all-units` is
-   terminal-success; it resolves `S9-wiki` to `wiki-writer`
-   (`kind:"dispatch"`, `unresolved:false`). Begin the wave, dispatch the real
-   `Agent` call, then call `graph_dispatch_record` with the returned `wave_id`
-   and `S9-wiki` under `results`. Only after that
-   record call does a fresh `graph_dispatch_plan` resolve `S9-docs` to
-   `docs-auditor` — `graph_readiness.sh` reports `S9-docs` `blocked` until
-   `S9-wiki`'s outcome lands as `done`/`skipped`, same as any other sequential
-   edge in this graph.
-2. `J12-all-units` is never dispatched. The exact wave record containing its
-   final `U4b-merge-gate[i]` input releases it automatically in the same locked
-   write. **No unit may be silently omitted from what `J12-all-units` waits
-   on** — every unit's merge-gate node remains a declared join input, and the
-   join releases only when every input is terminal-success.
+**Sequential tail and joins.** `S9-wiki -> S9-docs` remains a plain dependency:
+record the wiki outcome before a new plan can dispatch docs. `J12-all-units`
+is never dispatched; recording its final successful input releases it in the
+same locked write. Every unit's merge-gate node must remain an explicit input.
 
 Node IDs are stable documentation identifiers. `S*` nodes run once; `U<i>*`
 nodes run once per work-unit `i`; `J*` nodes are explicit joins. A skipped node

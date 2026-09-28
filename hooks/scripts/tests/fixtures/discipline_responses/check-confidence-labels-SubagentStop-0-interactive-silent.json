@@ -1,0 +1,90 @@
+[
+  {
+    "request": {
+      "hook_event_name": "SubagentStop",
+      "session_id": "S_sub",
+      "agent_id": "agent-test",
+      "transcript_path": "/nonexistent/parent.jsonl",
+      "agent_transcript_path": "/nonexistent/subagent.jsonl",
+      "stop_hook_active": false,
+      "last_assistant_message": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx (verified) claim"
+    },
+    "files": {},
+    "env": {
+      "CLAUDE_DISCIPLINE_LOG": "{sandbox}/discipline.log",
+      "CLAUDE_HOOK_MAX_ATTEMPTS": "1",
+      "CLAUDE_AGENTIC_LOOP_DIR": "{sandbox}/state",
+      "CLAUDE_HOOK_SLEEP_S": "0"
+    },
+    "stdout": "",
+    "returncode": 0,
+    "source": "check_confidence_labels",
+    "fixture_index": 8
+  },
+  {
+    "request": {
+      "hook_event_name": "SubagentStop",
+      "session_id": "S_sub",
+      "agent_id": "agent-test",
+      "transcript_path": "/nonexistent/parent.jsonl",
+      "agent_transcript_path": "/nonexistent/subagent.jsonl",
+      "stop_hook_active": false,
+      "last_assistant_message": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx (inferred) claim"
+    },
+    "files": {},
+    "env": {
+      "CLAUDE_DISCIPLINE_LOG": "{sandbox}/discipline.log",
+      "CLAUDE_HOOK_MAX_ATTEMPTS": "1",
+      "CLAUDE_AGENTIC_LOOP_DIR": "{sandbox}/state",
+      "CLAUDE_HOOK_SLEEP_S": "0"
+    },
+    "stdout": "",
+    "returncode": 0,
+    "source": "check_confidence_labels",
+    "fixture_index": 10
+  },
+  {
+    "request": {
+      "hook_event_name": "SubagentStop",
+      "session_id": "S_sub",
+      "agent_id": "agent-test",
+      "transcript_path": "/nonexistent/parent.jsonl",
+      "agent_transcript_path": "/nonexistent/subagent.jsonl",
+      "stop_hook_active": false,
+      "last_assistant_message": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx (guess) claim"
+    },
+    "files": {},
+    "env": {
+      "CLAUDE_DISCIPLINE_LOG": "{sandbox}/discipline.log",
+      "CLAUDE_HOOK_MAX_ATTEMPTS": "1",
+      "CLAUDE_AGENTIC_LOOP_DIR": "{sandbox}/state",
+      "CLAUDE_HOOK_SLEEP_S": "0"
+    },
+    "stdout": "",
+    "returncode": 0,
+    "source": "check_confidence_labels",
+    "fixture_index": 11
+  },
+  {
+    "request": {
+      "hook_event_name": "SubagentStop",
+      "session_id": "S_sub",
+      "agent_id": "agent-test",
+      "transcript_path": "/nonexistent/parent.jsonl",
+      "agent_transcript_path": "/nonexistent/subagent.jsonl",
+      "stop_hook_active": false,
+      "last_assistant_message": "Short subagent reply."
+    },
+    "files": {},
+    "env": {
+      "CLAUDE_DISCIPLINE_LOG": "{sandbox}/discipline.log",
+      "CLAUDE_HOOK_MAX_ATTEMPTS": "1",
+      "CLAUDE_AGENTIC_LOOP_DIR": "{sandbox}/state",
+      "CLAUDE_HOOK_SLEEP_S": "0"
+    },
+    "stdout": "",
+    "returncode": 0,
+    "source": "check_confidence_labels",
+    "fixture_index": 12
+  }
+]

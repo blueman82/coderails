@@ -18,7 +18,6 @@ vi.mock("@/lib/config", async () => {
   const config: DashboardConfig = {
     repos: [],
     wikiPaths: [],
-    memoryPaths: [],
     buttons: [
       {
         name: "visible-button",

@@ -1,0 +1,65 @@
+[
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "shred secret.key"
+      },
+      "cwd": "{sandbox}/feat_repo"
+    },
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_core.test.sh",
+    "expected": {
+      "hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": "Destructive pattern detected: shred\nFull command: shred secret.key\nThis command is permanently blocked. Safe route: there is no safe equivalent \u2014 shred exists specifically to make content unrecoverable. If you only meant to delete the file (not securely wipe it), move it to a temp dir instead ('mkdir -p /tmp/trash && mv <file> /tmp/trash/'). To allow shred itself, add a Bash permission rule to settings.json.",
+        "patternId": "secure-wipe-delete"
+      }
+    },
+    "fixture_index": 61
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "shred secret.key"
+      },
+      "cwd": "{sandbox}/feat_repo"
+    },
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_core.test.sh",
+    "expected": {
+      "hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": "Destructive pattern detected: shred\nFull command: shred secret.key\nThis command is permanently blocked. Safe route: there is no safe equivalent \u2014 shred exists specifically to make content unrecoverable. If you only meant to delete the file (not securely wipe it), move it to a temp dir instead ('mkdir -p /tmp/trash && mv <file> /tmp/trash/'). To allow shred itself, add a Bash permission rule to settings.json.",
+        "patternId": "secure-wipe-delete"
+      }
+    },
+    "fixture_index": 175
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "shred -u credentials.txt"
+      },
+      "cwd": "{sandbox}/feat_repo"
+    },
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_core.test.sh",
+    "expected": {
+      "hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": "Destructive pattern detected: shred\nFull command: shred -u credentials.txt\nThis command is permanently blocked. Safe route: there is no safe equivalent \u2014 shred exists specifically to make content unrecoverable. If you only meant to delete the file (not securely wipe it), move it to a temp dir instead ('mkdir -p /tmp/trash && mv <file> /tmp/trash/'). To allow shred itself, add a Bash permission rule to settings.json.",
+        "patternId": "secure-wipe-delete"
+      }
+    },
+    "fixture_index": 176
+  }
+]

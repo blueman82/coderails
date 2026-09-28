@@ -23,8 +23,8 @@ engineering_principles_skill: /engineering-principles-python
 # Default/absent = false (today's in-process dispatch, unchanged).
 sandbox_workers: false
 # integrity_review.machine_user: the GitHub login of the dedicated machine-user
-# identity that posts `integrity-review` commit statuses. When set, scripts/merge.sh
-# and hooks/scripts/enforce_pr_workflow.sh additionally require, for any PR
+# identity that posts `integrity-review` commit statuses. When set, scripts/merge.py
+# and hooks/scripts/enforce_pr_workflow.py additionally require, for any PR
 # that the newest `integrity-review` status on the head SHA be
 # state=success AND posted by this exact login — a mismatch blocks
 # the merge as a misconfiguration-or-forgery signal. This is a redundant local

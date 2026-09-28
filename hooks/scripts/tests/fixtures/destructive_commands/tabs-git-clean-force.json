@@ -1,0 +1,44 @@
+[
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git\tclean\t-f"
+      },
+      "cwd": "{sandbox}/feat_repo"
+    },
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_tabs.test.sh",
+    "expected": {
+      "hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": "Destructive pattern detected: git clean (force)\nFull command: git\tclean\t-f\nThis command is permanently blocked. Safe route: preview what would be removed first with 'git clean -n' (dry-run \u2014 lists targets, deletes nothing), or use 'git clean -i' for an interactive prompt per file/directory. Both are already permitted by this hook; only the force forms (-f/--force) are blocked.",
+        "patternId": "git-clean-force"
+      }
+    },
+    "fixture_index": 232
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git\tclean\t--force"
+      },
+      "cwd": "{sandbox}/feat_repo"
+    },
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_tabs.test.sh",
+    "expected": {
+      "hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": "Destructive pattern detected: git clean (force)\nFull command: git\tclean\t--force\nThis command is permanently blocked. Safe route: preview what would be removed first with 'git clean -n' (dry-run \u2014 lists targets, deletes nothing), or use 'git clean -i' for an interactive prompt per file/directory. Both are already permitted by this hook; only the force forms (-f/--force) are blocked.",
+        "patternId": "git-clean-force"
+      }
+    },
+    "fixture_index": 233
+  }
+]

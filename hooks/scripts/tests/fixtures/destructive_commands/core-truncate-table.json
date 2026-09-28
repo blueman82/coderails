@@ -1,0 +1,44 @@
+[
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "TRUNCATE TABLE logs;"
+      },
+      "cwd": "{sandbox}/feat_repo"
+    },
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_core.test.sh",
+    "expected": {
+      "hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": "Destructive pattern detected: TRUNCATE TABLE\nFull command: TRUNCATE TABLE logs;\nThis command is permanently blocked. Safe route: there is no safe equivalent \u2014 TRUNCATE TABLE removes all rows and is not equivalent in safety to a scoped DELETE. Take a backup/dump first if the data must be recoverable. To allow this pattern, add a Bash permission rule to settings.json.",
+        "patternId": "truncate-table"
+      }
+    },
+    "fixture_index": 50
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "TRUNCATE TABLE logs;"
+      },
+      "cwd": "{sandbox}/feat_repo"
+    },
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_core.test.sh",
+    "expected": {
+      "hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": "Destructive pattern detected: TRUNCATE TABLE\nFull command: TRUNCATE TABLE logs;\nThis command is permanently blocked. Safe route: there is no safe equivalent \u2014 TRUNCATE TABLE removes all rows and is not equivalent in safety to a scoped DELETE. Take a backup/dump first if the data must be recoverable. To allow this pattern, add a Bash permission rule to settings.json.",
+        "patternId": "truncate-table"
+      }
+    },
+    "fixture_index": 65
+  }
+]
