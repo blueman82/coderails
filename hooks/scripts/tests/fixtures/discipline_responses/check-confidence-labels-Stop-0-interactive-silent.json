@@ -1,0 +1,183 @@
+[
+  {
+    "request": {
+      "transcript_path": "{sandbox}/t_5807.jsonl",
+      "session_id": "S1",
+      "cwd": "/work/project",
+      "stop_hook_active": false
+    },
+    "files": {
+      "{sandbox}/t_5807.jsonl": "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx (verified) and more text here\"}]}}\n"
+    },
+    "env": {
+      "CLAUDE_DISCIPLINE_LOG": "{sandbox}/discipline.log",
+      "CLAUDE_HOOK_MAX_ATTEMPTS": "1",
+      "CLAUDE_AGENTIC_LOOP_DIR": "{sandbox}/state",
+      "CLAUDE_HOOK_SLEEP_S": "0"
+    },
+    "stdout": "",
+    "returncode": 0,
+    "source": "check_confidence_labels",
+    "fixture_index": 0
+  },
+  {
+    "request": {
+      "transcript_path": "{sandbox}/t_22162.jsonl",
+      "session_id": "S1",
+      "cwd": "/work/project",
+      "stop_hook_active": false
+    },
+    "files": {
+      "{sandbox}/t_22162.jsonl": "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx (inferred) something\"}]}}\n"
+    },
+    "env": {
+      "CLAUDE_DISCIPLINE_LOG": "{sandbox}/discipline.log",
+      "CLAUDE_HOOK_MAX_ATTEMPTS": "1",
+      "CLAUDE_AGENTIC_LOOP_DIR": "{sandbox}/state",
+      "CLAUDE_HOOK_SLEEP_S": "0"
+    },
+    "stdout": "",
+    "returncode": 0,
+    "source": "check_confidence_labels",
+    "fixture_index": 1
+  },
+  {
+    "request": {
+      "transcript_path": "{sandbox}/t_5749.jsonl",
+      "session_id": "S1",
+      "cwd": "/work/project",
+      "stop_hook_active": false
+    },
+    "files": {
+      "{sandbox}/t_5749.jsonl": "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx (guess) something\"}]}}\n"
+    },
+    "env": {
+      "CLAUDE_DISCIPLINE_LOG": "{sandbox}/discipline.log",
+      "CLAUDE_HOOK_MAX_ATTEMPTS": "1",
+      "CLAUDE_AGENTIC_LOOP_DIR": "{sandbox}/state",
+      "CLAUDE_HOOK_SLEEP_S": "0"
+    },
+    "stdout": "",
+    "returncode": 0,
+    "source": "check_confidence_labels",
+    "fixture_index": 2
+  },
+  {
+    "request": {
+      "transcript_path": "{sandbox}/t_665.jsonl",
+      "session_id": "S1",
+      "cwd": "/work/project",
+      "stop_hook_active": false
+    },
+    "files": {
+      "{sandbox}/t_665.jsonl": "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"Short response without labels.\"}]}}\n"
+    },
+    "env": {
+      "CLAUDE_DISCIPLINE_LOG": "{sandbox}/discipline.log",
+      "CLAUDE_HOOK_MAX_ATTEMPTS": "1",
+      "CLAUDE_AGENTIC_LOOP_DIR": "{sandbox}/state",
+      "CLAUDE_HOOK_SLEEP_S": "0"
+    },
+    "stdout": "",
+    "returncode": 0,
+    "source": "check_confidence_labels",
+    "fixture_index": 4
+  },
+  {
+    "request": {
+      "transcript_path": "/nonexistent/path.jsonl",
+      "session_id": "S1"
+    },
+    "files": {},
+    "env": {
+      "CLAUDE_DISCIPLINE_LOG": "{sandbox}/discipline.log",
+      "CLAUDE_HOOK_MAX_ATTEMPTS": "1",
+      "CLAUDE_AGENTIC_LOOP_DIR": "{sandbox}/state",
+      "CLAUDE_HOOK_SLEEP_S": "0"
+    },
+    "stdout": "",
+    "returncode": 0,
+    "source": "check_confidence_labels",
+    "fixture_index": 5
+  },
+  {
+    "request": {
+      "transcript_path": "{sandbox}/t_25197.jsonl",
+      "session_id": "S1",
+      "cwd": "/work/project",
+      "stop_hook_active": true
+    },
+    "files": {
+      "{sandbox}/t_25197.jsonl": "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"}]}}\n"
+    },
+    "env": {
+      "CLAUDE_DISCIPLINE_LOG": "{sandbox}/discipline.log",
+      "CLAUDE_HOOK_MAX_ATTEMPTS": "1",
+      "CLAUDE_AGENTIC_LOOP_DIR": "{sandbox}/state",
+      "CLAUDE_HOOK_SLEEP_S": "0"
+    },
+    "stdout": "",
+    "returncode": 0,
+    "source": "check_confidence_labels",
+    "fixture_index": 6
+  },
+  {
+    "request": {
+      "session_id": "S1"
+    },
+    "files": {},
+    "env": {
+      "CLAUDE_DISCIPLINE_LOG": "{sandbox}/discipline.log",
+      "CLAUDE_HOOK_MAX_ATTEMPTS": "1",
+      "CLAUDE_AGENTIC_LOOP_DIR": "{sandbox}/state",
+      "CLAUDE_HOOK_SLEEP_S": "0"
+    },
+    "stdout": "",
+    "returncode": 0,
+    "source": "check_confidence_labels",
+    "fixture_index": 7
+  },
+  {
+    "request": {
+      "transcript_path": "{sandbox}/nope.jsonl",
+      "session_id": "S1",
+      "cwd": "/work/project",
+      "stop_hook_active": false,
+      "hook_event_name": "Stop"
+    },
+    "files": {},
+    "env": {
+      "CLAUDE_DISCIPLINE_LOG": "{sandbox}/discipline.log",
+      "CLAUDE_HOOK_MAX_ATTEMPTS": "1",
+      "CLAUDE_AGENTIC_LOOP_DIR": "{sandbox}/state",
+      "CLAUDE_HOOK_SLEEP_S": "0"
+    },
+    "stdout": "",
+    "returncode": 0,
+    "source": "check_confidence_labels",
+    "fixture_index": 18
+  },
+  {
+    "request": {
+      "transcript_path": "{sandbox}/lt_15416.jsonl",
+      "session_id": "S1",
+      "cwd": "/work/project",
+      "stop_hook_active": false,
+      "hook_event_name": "Stop"
+    },
+    "files": {
+      "{sandbox}/state/-work-project/S1/progress.json": "{\"schema_version\": 3, \"status\": \"in-progress\", \"session_id\": \"S1\", \"completed_marker\": 0}",
+      "{sandbox}/lt_15416.jsonl": "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Skill\",\"input\":{\"skill\":\"coderails:agentic-loop\"}}]}}\n{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy (verified) claim\"}]}}\n"
+    },
+    "env": {
+      "CLAUDE_DISCIPLINE_LOG": "{sandbox}/discipline.log",
+      "CLAUDE_HOOK_MAX_ATTEMPTS": "1",
+      "CLAUDE_AGENTIC_LOOP_DIR": "{sandbox}/state",
+      "CLAUDE_HOOK_SLEEP_S": "0"
+    },
+    "stdout": "",
+    "returncode": 0,
+    "source": "check_confidence_labels",
+    "fixture_index": 23
+  }
+]

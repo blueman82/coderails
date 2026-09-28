@@ -5,10 +5,12 @@ from __future__ import annotations
 
 import os
 import re
+import sys
 from pathlib import Path
 from typing import Any
 
-from hook_common import deny, log, read_payload
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from hooks.scripts.hook_common import deny, log, read_payload
 
 CRACK_ON = re.compile(r"(^|[^a-z0-9])crack\s+on([^a-z0-9]|$)", re.IGNORECASE)
 DENIAL = (

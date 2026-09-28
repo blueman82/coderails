@@ -1,0 +1,92 @@
+[
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git status"
+      },
+      "cwd": "{sandbox}/feat_repo"
+    },
+    "stdout": "",
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_core.test.sh",
+    "expected": {},
+    "fixture_index": 154
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git push origin main"
+      },
+      "cwd": "{sandbox}/feat_repo"
+    },
+    "stdout": "",
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_core.test.sh",
+    "expected": {},
+    "fixture_index": 155
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git reset --soft HEAD~1"
+      },
+      "cwd": "{sandbox}/feat_repo"
+    },
+    "stdout": "",
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_core.test.sh",
+    "expected": {},
+    "fixture_index": 156
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git commit -m 'fix'"
+      },
+      "cwd": "{sandbox}/feat_repo"
+    },
+    "stdout": "",
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_core.test.sh",
+    "expected": {},
+    "fixture_index": 157
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git clean -n"
+      },
+      "cwd": "{sandbox}/feat_repo"
+    },
+    "stdout": "",
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_core.test.sh",
+    "expected": {},
+    "fixture_index": 167
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git clean -n -d"
+      },
+      "cwd": "{sandbox}/feat_repo"
+    },
+    "stdout": "",
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_core.test.sh",
+    "expected": {},
+    "fixture_index": 168
+  }
+]

@@ -1,0 +1,191 @@
+[
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "cat .env*"
+      },
+      "cwd": "{sandbox}/feat_repo"
+    },
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_core.test.sh",
+    "expected": {
+      "hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": "Destructive pattern detected: .env access\nFull command: cat .env*\nThis command is permanently blocked. Safe route: don't read or write the secret file itself. To check whether a key is SET without revealing it, test the variable after loading it in a subshell (e.g. 'set -a; . ./.env; set +a; [ -n \"$MY_KEY\" ] && echo set') \u2014 note that still requires an allow rule, so prefer asking the owner. To see the SHAPE of the file without its values, read the committed template instead ('cat .env.example'), which this hook already permits. To add or change a value, edit the file by hand outside the session. To allow this pattern, add a Bash permission rule to settings.json.",
+        "patternId": "dotenv-access"
+      }
+    },
+    "fixture_index": 112
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "cat .en?"
+      },
+      "cwd": "{sandbox}/feat_repo"
+    },
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_core.test.sh",
+    "expected": {
+      "hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": "Destructive pattern detected: .env access\nFull command: cat .en?\nThis command is permanently blocked. Safe route: don't read or write the secret file itself. To check whether a key is SET without revealing it, test the variable after loading it in a subshell (e.g. 'set -a; . ./.env; set +a; [ -n \"$MY_KEY\" ] && echo set') \u2014 note that still requires an allow rule, so prefer asking the owner. To see the SHAPE of the file without its values, read the committed template instead ('cat .env.example'), which this hook already permits. To add or change a value, edit the file by hand outside the session. To allow this pattern, add a Bash permission rule to settings.json.",
+        "patternId": "dotenv-access"
+      }
+    },
+    "fixture_index": 115
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "cat .e*v"
+      },
+      "cwd": "{sandbox}/feat_repo"
+    },
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_core.test.sh",
+    "expected": {
+      "hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": "Destructive pattern detected: .env access\nFull command: cat .e*v\nThis command is permanently blocked. Safe route: don't read or write the secret file itself. To check whether a key is SET without revealing it, test the variable after loading it in a subshell (e.g. 'set -a; . ./.env; set +a; [ -n \"$MY_KEY\" ] && echo set') \u2014 note that still requires an allow rule, so prefer asking the owner. To see the SHAPE of the file without its values, read the committed template instead ('cat .env.example'), which this hook already permits. To add or change a value, edit the file by hand outside the session. To allow this pattern, add a Bash permission rule to settings.json.",
+        "patternId": "dotenv-access"
+      }
+    },
+    "fixture_index": 116
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "cat .en[v]"
+      },
+      "cwd": "{sandbox}/feat_repo"
+    },
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_core.test.sh",
+    "expected": {
+      "hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": "Destructive pattern detected: .env access\nFull command: cat .en[v]\nThis command is permanently blocked. Safe route: don't read or write the secret file itself. To check whether a key is SET without revealing it, test the variable after loading it in a subshell (e.g. 'set -a; . ./.env; set +a; [ -n \"$MY_KEY\" ] && echo set') \u2014 note that still requires an allow rule, so prefer asking the owner. To see the SHAPE of the file without its values, read the committed template instead ('cat .env.example'), which this hook already permits. To add or change a value, edit the file by hand outside the session. To allow this pattern, add a Bash permission rule to settings.json.",
+        "patternId": "dotenv-access"
+      }
+    },
+    "fixture_index": 117
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "cat .en[a-z]"
+      },
+      "cwd": "{sandbox}/feat_repo"
+    },
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_core.test.sh",
+    "expected": {
+      "hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": "Destructive pattern detected: .env access\nFull command: cat .en[a-z]\nThis command is permanently blocked. Safe route: don't read or write the secret file itself. To check whether a key is SET without revealing it, test the variable after loading it in a subshell (e.g. 'set -a; . ./.env; set +a; [ -n \"$MY_KEY\" ] && echo set') \u2014 note that still requires an allow rule, so prefer asking the owner. To see the SHAPE of the file without its values, read the committed template instead ('cat .env.example'), which this hook already permits. To add or change a value, edit the file by hand outside the session. To allow this pattern, add a Bash permission rule to settings.json.",
+        "patternId": "dotenv-access"
+      }
+    },
+    "fixture_index": 118
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "cat .[e]nv"
+      },
+      "cwd": "{sandbox}/feat_repo"
+    },
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_core.test.sh",
+    "expected": {
+      "hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": "Destructive pattern detected: .env access\nFull command: cat .[e]nv\nThis command is permanently blocked. Safe route: don't read or write the secret file itself. To check whether a key is SET without revealing it, test the variable after loading it in a subshell (e.g. 'set -a; . ./.env; set +a; [ -n \"$MY_KEY\" ] && echo set') \u2014 note that still requires an allow rule, so prefer asking the owner. To see the SHAPE of the file without its values, read the committed template instead ('cat .env.example'), which this hook already permits. To add or change a value, edit the file by hand outside the session. To allow this pattern, add a Bash permission rule to settings.json.",
+        "patternId": "dotenv-access"
+      }
+    },
+    "fixture_index": 119
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "cat .e[n]v"
+      },
+      "cwd": "{sandbox}/feat_repo"
+    },
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_core.test.sh",
+    "expected": {
+      "hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": "Destructive pattern detected: .env access\nFull command: cat .e[n]v\nThis command is permanently blocked. Safe route: don't read or write the secret file itself. To check whether a key is SET without revealing it, test the variable after loading it in a subshell (e.g. 'set -a; . ./.env; set +a; [ -n \"$MY_KEY\" ] && echo set') \u2014 note that still requires an allow rule, so prefer asking the owner. To see the SHAPE of the file without its values, read the committed template instead ('cat .env.example'), which this hook already permits. To add or change a value, edit the file by hand outside the session. To allow this pattern, add a Bash permission rule to settings.json.",
+        "patternId": "dotenv-access"
+      }
+    },
+    "fixture_index": 120
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "cat .[e][n][v]"
+      },
+      "cwd": "{sandbox}/feat_repo"
+    },
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_core.test.sh",
+    "expected": {
+      "hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": "Destructive pattern detected: .env access\nFull command: cat .[e][n][v]\nThis command is permanently blocked. Safe route: don't read or write the secret file itself. To check whether a key is SET without revealing it, test the variable after loading it in a subshell (e.g. 'set -a; . ./.env; set +a; [ -n \"$MY_KEY\" ] && echo set') \u2014 note that still requires an allow rule, so prefer asking the owner. To see the SHAPE of the file without its values, read the committed template instead ('cat .env.example'), which this hook already permits. To add or change a value, edit the file by hand outside the session. To allow this pattern, add a Bash permission rule to settings.json.",
+        "patternId": "dotenv-access"
+      }
+    },
+    "fixture_index": 121
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "cat .en*"
+      },
+      "cwd": "{sandbox}/feat_repo"
+    },
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_core.test.sh",
+    "expected": {
+      "hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": "Destructive pattern detected: .env access\nFull command: cat .en*\nThis command is permanently blocked. Safe route: don't read or write the secret file itself. To check whether a key is SET without revealing it, test the variable after loading it in a subshell (e.g. 'set -a; . ./.env; set +a; [ -n \"$MY_KEY\" ] && echo set') \u2014 note that still requires an allow rule, so prefer asking the owner. To see the SHAPE of the file without its values, read the committed template instead ('cat .env.example'), which this hook already permits. To add or change a value, edit the file by hand outside the session. To allow this pattern, add a Bash permission rule to settings.json.",
+        "patternId": "dotenv-access"
+      }
+    },
+    "fixture_index": 123
+  }
+]

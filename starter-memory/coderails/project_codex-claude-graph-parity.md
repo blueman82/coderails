@@ -1,10 +1,20 @@
 ---
 name: codex-claude-graph-parity
-description: Handoff for giving the independent Codex plugin the same graph contract and safeguards as Claude without restoring shared or cross-provider machinery.
+description: Historical graph-parity baseline; current Python graph semantics and native provider contracts supersede its implementation notes.
 type: project
 ---
 
 # Codex and Claude graph parity
+
+> Historical baseline. The current implementation follows
+> `docs/superpowers/plans/2026-09-03-provider-graph-alignment-implementation.md`
+> and `skills/agentic-loop/execution-graph.md`: one maintained pure Python
+> semantic core at `packages/graph-semantics/graph_semantics.py`, exact copies
+> inside each independent plugin, and provider-local dispatch, locks and native
+> evidence. Stored progress uses schema 3 only. Native provider role labels and
+> explicit instruction delivery replace mandatory custom worker names. The
+> shell paths, initial checkout constraints and defect inventory below record
+> the earlier baseline; they are not current runtime instructions.
 
 ## Goal
 

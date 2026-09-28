@@ -1,0 +1,47 @@
+[
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git clean"
+      },
+      "cwd": "{sandbox}/feat_repo"
+    },
+    "stdout": "",
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_workflow.test.sh",
+    "expected": {},
+    "fixture_index": 299
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git clean --dry-run"
+      },
+      "cwd": "{sandbox}/feat_repo"
+    },
+    "stdout": "",
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_workflow.test.sh",
+    "expected": {},
+    "fixture_index": 300
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git clean -i"
+      },
+      "cwd": "{sandbox}/feat_repo"
+    },
+    "stdout": "",
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_workflow.test.sh",
+    "expected": {},
+    "fixture_index": 301
+  }
+]

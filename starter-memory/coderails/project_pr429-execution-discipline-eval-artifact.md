@@ -6,6 +6,8 @@ type: project
 
 # PR #429 Execution Discipline Eval Artifact
 
+> Supersession note (2026-09-21): This is a historical PR #429 handoff, not current authorization to post or merge. Its Bash checker paths were replaced by scripts/quality/check.py and focused Python tests. Re-fetch exact-head state only when a current task authorizes work on that PR; do not treat the pending-artifact claim below as current.
+
 ## Goal
 
 Finish the clean-break rename of the `fable-mode` skill to `execution-discipline` while preserving its behavior, and include the related Bash quality-script fix authorized by the user. The implementation and verification are complete; the only remaining delivery step is posting the frozen eval result as a SHA-bound PR artifact.

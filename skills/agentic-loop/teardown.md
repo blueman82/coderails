@@ -12,8 +12,7 @@ last-failed — so every proof cmd must be run, in the foreground, in the orches
 session, before the declaration too (Step 1 below).
 
 **Graph dispatch boundary.** `S13-proof`, `S13-retro`, and `S13-complete` deliberately have no
-entry in the Claude role map, so `graph_dispatch_plan` reports them as `unresolved:true`. They are
-orchestrator-authored proof, retro, standing-order, and completion writes — not agent dispatches.
+entry in the Claude role map, so the native graph CLI `plan` command reports them as `unresolved:true`. These are orchestrator actions. Keep them in the phase/artifact record; do not create fake worker-completed graph nodes for them. An actual graph dispatch requires a resolved instruction source and native worker evidence.
 
 ## Contents
 
@@ -41,9 +40,9 @@ than an honest unscored list because it is more likely to be trusted uncriticall
 **Also report, unscored:**
 
 - **Artifacts produced** — PRs merged, deploys done, each with the verifying check (Phase 12), not the agent's claim.
-- **Loop cost** — the per-model token + dated-USD breakdown mined into `retro.json`'s `cost` field, printed to the human WITH a price-staleness age: "prices as of `<cost.prices_as_of>`, N days old". This is a human-facing report deliverable, not just a stored artifact. `loop_stall_guard`'s `als_report_cost_on_complete` now prints it mechanically via `systemMessage` on every `complete` declaration, the same way `check_verify_loop.sh` mechanically enforces the CLAUDE.md DNV rule — but the prose obligation below is still the floor, not something the hook replaces: the hook reports `retro.cost` verbatim (silent on a legacy pre-cost-miner retro, and never blocking on a miner failure), it does not relieve the orchestrator of assembling and writing that field correctly in the first place. The price table (`hooks/scripts/lib/model_prices.json`) is HAND-MAINTAINED — there is no pricing API, so nothing auto-updates it. Past `ALS_PRICE_STALE_DAYS` (14) days old, the reporter also nags a human to go check the rates; the nag verifies the DATE only, never the rates themselves, since staleness of a self-reported date can't prove the rates are wrong.
+- **Loop cost** — the per-model token + dated-USD breakdown mined into `retro.json`'s `cost` field, printed to the human WITH a price-staleness age: "prices as of `<cost.prices_as_of>`, N days old". This is a human-facing report deliverable, not just a stored artifact. `loop_stall_guard`'s cost reporter now prints it mechanically via `systemMessage` on every `complete` declaration, the same way `check_verify_loop.py` mechanically enforces the CLAUDE.md DNV rule — but the prose obligation below is still the floor, not something the hook replaces: the hook reports `retro.cost` verbatim (silent on a legacy pre-cost-miner retro, and never blocking on a miner failure), it does not relieve the orchestrator of assembling and writing that field correctly in the first place. The price table (`hooks/scripts/lib/model_prices.json`) is HAND-MAINTAINED — there is no pricing API, so nothing auto-updates it. Past `ALS_PRICE_STALE_DAYS` (14) days old, the reporter also nags a human to go check the rates; the nag verifies the DATE only, never the rates themselves, since staleness of a self-reported date can't prove the rates are wrong.
 - **Disposition violations** — work-units where `clean-break` was recorded in `progress.json` but a shim/compat path shipped anyway (caught at the Phase 4b gate, or by the human afterward). Audit as a diff between the `progress.json` disposition record and the merged artifact. Critically, distinguish **"0 violations"** from **"no disposition record found"**: the latter is an **audit failure** — the record was not maintained — not a pass, otherwise the report reads "clean" when the record was simply absent. Separately, surface any `preserve-compat` unit whose `removal_ticket` is still **open at loop end** as a compat-debt drift signal, so deferred removals cannot silently rot.
-- **Loop-scope eval result** — graded via `post_evals.sh grade-loop` (never hand-written into `evals.json`), the loop's final `evals.json` `result` (`GO`/`NO-GO`/a verification_level-0-exemption-with-justification), reported unscored, plus any `amendments` entries (post-freeze eval edits with recorded reasons). An amendment made after a grader verdict must carry its fresh re-grade (`regraded_by` recorded; `grade-loop` refuses otherwise): a verdict flipped by an orchestrator-written status is an audit failure, not a pass. **"No `evals.json` record found" for a ≥1-work-unit loop is an audit failure, not a pass** — distinguish it from a genuine `GO` the same way "0 disposition violations" is distinguished from "no disposition record found".
+- **Loop-scope eval result** — graded via `post_evals.py grade-loop` (never hand-written into `evals.json`), the loop's final `evals.json` `result` (`GO`/`NO-GO`/a verification_level-0-exemption-with-justification), reported unscored, plus any `amendments` entries (post-freeze eval edits with recorded reasons). An amendment made after a grader verdict must carry its fresh re-grade (`regraded_by` recorded; `grade-loop` refuses otherwise): a verdict flipped by an orchestrator-written status is an audit failure, not a pass. **"No `evals.json` record found" for a ≥1-work-unit loop is an audit failure, not a pass** — distinguish it from a genuine `GO` the same way "0 disposition violations" is distinguished from "no disposition record found".
 
 ## Step 1 — Run every `proof.json` cmd
 
@@ -64,14 +63,14 @@ Written at `schema_version` 2, beside `progress.json`.
 |---|---|
 | `session_id`, `created` | Identity and timestamp. |
 | `loop_id` | Copied **verbatim** from `progress.json`. |
-| `loop_ordinal` | = `completed_marker` after `als_mark_complete` stamps it (the live agentic-loop invocation count, not a running loop-number ordinal — see `loop-state.md`). |
+| `loop_ordinal` | = `completed_marker` after the native `mark-complete` helper stamps it (the live agentic-loop invocation count, not a running loop-number ordinal — see `loop-state.md`). |
 | `envelope` | Verbatim from `progress.json`'s `authorising_prompt_raw`. |
 | `loop_stop_counts` | Copied **verbatim** from `progress.json` — HOOK-OWNED, never recomputed. |
 | `decisions_absorbed` | Copied **verbatim** from `progress.json`'s array, not reconstructed from conversation memory. |
 | `disposition_record` | Distinguish "0 violations" from "no-record" (an audit failure, not a pass). |
 | `evals` | `result` / `amendments` / unresolved P1s. |
 | `artifacts` | PRs + the verifying check (Phase 12), not the agent's claim. |
-| `hook_blocks` | Via `bash -c 'source "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/lib/discipline_common.sh" && dc_mine_hook_blocks "<session_id>"'`. |
+| `hook_blocks` | Via `python3 "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/lib/discipline_common.py" "<session_id>"`. |
 | `review_themes`, `raw_notes` | Free-form. |
 | `models_used` | Top-level array of model ids observed this loop — lifted out of the cost-miner's output. |
 | `cost` | The dated per-model token/USD breakdown. |
@@ -81,8 +80,7 @@ retro records what happened, it does not grade it.
 
 ## Cost-mining sub-step
 
-Same step 1, after assembling the fields above. Source `hooks/scripts/lib/loop_cost.sh` and run
-`dc_mine_token_usage <session_id>`. It enumerates this loop's transcripts (the orchestrator's own
+Same step 1, after assembling the fields above. Run `python3 "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/lib/loop_cost.py" <session_id>`. It enumerates this loop's transcripts (the orchestrator's own
 `~/.claude/projects/<slug>/<sid>.jsonl` plus every worker transcript under
 `<proj>/<sid>/subagents/`, recursively), dedupes by `message.id` so a transcript read twice isn't
 double-counted, sums per-model token usage, prices it from a dated price table, and returns a
@@ -95,7 +93,7 @@ nested `schema_version` 1, independent of the retro's), then lift its `models_us
 inside `cost`. This split is what bumps the retro's own `schema_version` to 2; the
 `cost`/`models_used` fields don't exist under `schema_version` 1.
 
-**Fail-open.** The miner never blocks teardown — on any environmental error (no jq, missing/invalid
+**Fail-open.** The miner never blocks teardown — on any environmental error (missing/invalid
 price file) it returns `{}`, so both `retro.cost` and `retro.models_used` end up empty and a
 `complete` declaration proceeds exactly as it would with populated values. `loop_stall_guard`
 checks the retro's presence and `schema_version`, never the cost field's correctness, so a miner
@@ -130,10 +128,10 @@ This step is additive-or-recurrence-only: no metric-based removal anywhere.
 ## Steps 4 and 5
 
 4. **Write feedback-type auto-memories** for lessons that generalise beyond this loop.
-5. **Only then** call `als_mark_complete <cwd> <session_id>` (from `lib/loop_state_common.sh`) to
+5. **Only then** run `python3 "${CLAUDE_PLUGIN_ROOT}/skills/agentic-loop/scripts/graph.py" verify-completion <state> --session <session_id>` to validate the current native graph and identity-bound artifacts. Then run `loop_state_common.py mark-complete <cwd> <session_id>` to
    set `progress.json` `status: "complete"` and stamp `completed_marker` together — e.g.
-   `bash -c 'source "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/lib/loop_state_common.sh" && als_mark_complete "$PWD" "<session_id>"'`.
-   Never write `status: "complete"` via a bare `als_atomic_progress_update` call — that leaves
+   `python3 "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/lib/loop_state_common.py" mark-complete "$PWD" "<session_id>"`.
+   Never write `status: "complete"` via a bare atomic update — that leaves
    `completed_marker` unstamped at its prior value (permanently 0 for a loop's first completion),
    which false-positives `loop_state_guard`'s `stale_complete_rearmed` block on every later turn of
    the same session. Then declare `LOOP-STOP: complete`. First apply

@@ -19,7 +19,7 @@ does not advance the edge.
 verification failure turns out to be multiple independent broken things, don't fix them one at a
 time. A single test run failing across 2+ unrelated files/subsystems with different root causes
 (not "fixing one might fix the others") is exactly that skill's trigger condition. Dispatch one
-focused agent per independent failure domain, `subagent_type: coderails:loop-worker`, in parallel, each scoped to its own file/subsystem
+focused agent per independent failure domain, `subagent_type: general-purpose` with explicit instructions from `agents/loop-worker.md`, in parallel, each scoped to its own file/subsystem
 with an explicit "don't touch other code" constraint; integrate and re-run the full suite once
 they all report back. This is a parallelisation tactic inside one retry-until-green cycle, not a
 substitute for it — the bound is per failure (as stated above), so each independent failure domain

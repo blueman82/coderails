@@ -1,0 +1,28 @@
+[
+  {
+    "request": {
+      "tool_input": {
+        "command": ""
+      },
+      "cwd": "{sandbox}/feat_repo"
+    },
+    "stdout": "",
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_core.test.sh",
+    "expected": {},
+    "fixture_index": 160
+  },
+  {
+    "request": {
+      "tool_input": {},
+      "cwd": "{sandbox}/feat_repo"
+    },
+    "stdout": "",
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_core.test.sh",
+    "expected": {},
+    "fixture_index": 161
+  }
+]

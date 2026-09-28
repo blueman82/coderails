@@ -26,16 +26,16 @@ Corpus root is `WORKFLOW_AUDIT_ROOT` (default `~/.claude/projects`) — override
 
 ## 2. Size sanity
 
-`scan_transcripts.sh` prints a `scanning file_count=<N> total_mb=<M>` line to stderr before it scans anything. Surface this line to the user so they know the scale of what's being read before results come back.
+`scan_transcripts.py` prints a `scanning file_count=<N> total_mb=<M>` line to stderr before it scans anything. Surface this line to the user so they know the scale of what's being read before results come back.
 
 ## 3. Mechanical pipeline
 
 ```bash
-bash skills/workflow-audit/scripts/scan_transcripts.sh <scan args> \
-  | bash skills/workflow-audit/scripts/cluster_ngrams.sh --min-sessions 3
+python3 skills/workflow-audit/scripts/scan_transcripts.py <scan args> \
+  | python3 skills/workflow-audit/scripts/cluster_ngrams.py --min-sessions 3
 ```
 
-`scan_transcripts.sh` (full contract: `--help`) emits one JSON line per session: tool names plus a privacy-whitelisted `head` (first two Bash command tokens, the Skill name, or the Agent subagent_type — nothing else). `cluster_ngrams.sh` (full contract: `--help`) consumes that stream and emits one JSON object: n-grams (n=2..5) that recur across `--min-sessions` (default 3) distinct sessions, capped at `--top` (default 50) clusters.
+`scan_transcripts.py` (full contract: `--help`) emits one JSON line per session: tool names plus a privacy-whitelisted `head` (first two Bash command tokens, the Skill name, or the Agent subagent_type — nothing else). `cluster_ngrams.py` (full contract: `--help`) consumes that stream and emits one JSON object: n-grams (n=2..5) that recur across `--min-sessions` (default 3) distinct sessions, capped at `--top` (default 50) clusters.
 
 **Diagnostics are not noise.** `jq_parse_error:<file>` or `jq_parse_error:<line-no>` lines on stderr are real parse failures — surface them, don't swallow them. An empty `clusters` array is a legitimate result ("no repeated patterns found at this threshold") — report it plainly and stop; don't lower the threshold or invent candidates to fill the gap.
 
@@ -43,10 +43,10 @@ bash skills/workflow-audit/scripts/scan_transcripts.sh <scan args> \
 
 Read `references/judge-contract.md` in full, then spawn exactly one fresh sonnet subagent to apply it. Construct the judge's prompt from that file's template verbatim, filling in:
 
-1. The cluster JSON — the full stdout object from `cluster_ngrams.sh`.
+1. The cluster JSON — the full stdout object from `cluster_ngrams.py`.
 2. The existing-skill list — the `name` and `description` frontmatter lines from every `skills/*/SKILL.md` in the repo.
 
-**The judge receives nothing else.** No transcript content, no conversation history, no orchestrator commentary. This is a deliberate privacy boundary: the judge's entire vocabulary is tool names, whitelisted heads, counts, session ids, and n-gram lengths — the same boundary `scan_transcripts.sh` and `cluster_ngrams.sh` already enforce on their own output. The judge returns one propose/reject verdict per cluster per the contract's schema.
+**The judge receives nothing else.** No transcript content, no conversation history, no orchestrator commentary. This is a deliberate privacy boundary: the judge's entire vocabulary is tool names, whitelisted heads, counts, session ids, and n-gram lengths — the same boundary `scan_transcripts.py` and `cluster_ngrams.py` already enforce on their own output. The judge returns one propose/reject verdict per cluster per the contract's schema.
 
 ## 5. Queue-mode output (optional) — mutually exclusive with in-session creation
 
@@ -63,7 +63,7 @@ To run in queue-mode, pipe each `verdict: "propose"` judge output through
 the writer script, once per candidate, instead of proceeding to section 8:
 
 ```bash
-echo "$JUDGE_VERDICT_JSON" | bash skills/workflow-audit/scripts/write_queue_entry.sh \
+echo "$JUDGE_VERDICT_JSON" | python3 skills/workflow-audit/scripts/write_queue_entry.py \
   --queue-dir ~/.claude/coderails-dashboard/approvals \
   --count "$CLUSTER_COUNT" \
   --sessions "$CLUSTER_SESSIONS_JSON"

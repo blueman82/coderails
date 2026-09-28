@@ -6,6 +6,8 @@ type: project
 
 # Coderails Graph-Engineering Walkthrough
 
+> Supersession note (2026-09-21): This is the pre-cutover walkthrough baseline. Absolute checkout paths, shell filenames, and provider-role assumptions below are historical. The current implementation uses schema 3, independent work_units, provider-native dispatch with explicit instruction bodies, and Python graph adapters over independently materialized pure semantics. Use current source and skills for runnable examples.
+
 ## Goal
 
 Teach the user the complete current Coderails graph-engineering loop until they can explain it confidently to another person. Cover the working examples first, then every relevant code path, document, hook, script, node, edge, wave, retry, evidence link, and every field in every JSON file created or consumed by the loop.

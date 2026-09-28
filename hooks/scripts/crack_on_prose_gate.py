@@ -12,7 +12,8 @@ from contextlib import suppress
 from pathlib import Path
 from typing import cast
 
-from hook_common import JsonValue, log, read_payload
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from hooks.scripts.hook_common import JsonValue, log, read_payload
 
 MODAL = re.compile(r"(^|[^a-z0-9])(should|shall|could|can|may|must|do|would) (i|we) [^?]*\?\s*$", re.IGNORECASE)
 ASK_PATTERNS = tuple(

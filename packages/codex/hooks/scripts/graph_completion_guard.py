@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import json
 import re
+import sys
+from contextlib import suppress
 from pathlib import Path
 from typing import cast
 
@@ -71,9 +73,19 @@ def request_human_approval(state: Path, session_id: str, inspection: dict[str, o
         return
     safe_loop = re.sub(r"[^A-Za-z0-9_.-]", "_", loop_id)
     marker = state.parent / f".human-approval-{safe_loop}-{revision}"
+    message = json.dumps(
+        {
+            "decision": "block",
+            "reason": "Native graph unresolved; stopping remains blocked.",
+            "systemMessage": "Human approval required: the native graph is unresolved. Approve the next action "
+            "or resume the loop; stopping remains blocked until the graph is complete.",
+        }
+    )
     log(f"hook=graph_completion_guard session={session_id} blocked=1")
+    created = False
     try:
         marker.mkdir()
+        created = True
     except FileExistsError:
         if marker.is_dir():
             continue_turn("Native graph unresolved; stopping remains blocked.")
@@ -81,19 +93,13 @@ def request_human_approval(state: Path, session_id: str, inspection: dict[str, o
         log(f"hook=graph_completion_guard session={session_id} human_request=dedupe_write_failed")
     except OSError:
         log(f"hook=graph_completion_guard session={session_id} human_request=dedupe_write_failed")
-    reason = "Native graph unresolved; stopping remains blocked."
-    print(
-        json.dumps(
-            {
-                "decision": "block",
-                "reason": reason,
-                "systemMessage": (
-                    "Human approval required: the native graph is unresolved. Approve the next action or resume the "
-                    "loop; stopping remains blocked until the graph is complete."
-                ),
-            }
-        )
-    )
+    try:
+        print(message)
+    except (OSError, ValueError):
+        if created:
+            with suppress(OSError):
+                marker.rmdir()
+        raise
 
 
 def main() -> int:
@@ -144,7 +150,11 @@ def main() -> int:
             "Repair evals, proof, or retro evidence before stopping."
         )
         return 0
-    request_human_approval(state, session_id, inspection)
+    try:
+        request_human_approval(state, session_id, inspection)
+    except (OSError, ValueError):
+        print("Native graph unresolved; required notice could not be emitted. Retry stopping.", file=sys.stderr)
+        return 2
     return 0
 
 

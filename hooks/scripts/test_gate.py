@@ -13,8 +13,10 @@ import time
 from pathlib import Path
 from typing import cast
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from hooks.scripts.test_output import begin_run, finish_run
+
 COMMIT_COMMAND = re.compile(r"\bgit +commit\b")
-LOG_PATH = Path("/tmp/claude_test_gate.log")
 
 
 def read_payload(timeout_seconds: float = 5.0) -> str:
@@ -72,9 +74,7 @@ def deny(command: str, output: str) -> None:
                 "hookSpecificOutput": {
                     "hookEventName": "PreToolUse",
                     "permissionDecision": "deny",
-                    "permissionDecisionReason": (
-                        f"Test gate failed. Project test_command: {command}\n\nLast 20 lines of output:\n{output}"
-                    ),
+                    "permissionDecisionReason": (f"Test gate failed. Project test_command: {command}\n\n{output}"),
                 }
             }
         )
@@ -88,20 +88,17 @@ def main() -> int:
     if not (test_command := configured_test_command()):
         return 0
     try:
-        with LOG_PATH.open("wb") as log_file:
+        run = begin_run("claude", Path.cwd(), test_command)
+        with (run / "output.log").open("wb") as log_file:
             result = subprocess.run(
                 ["/bin/bash", "-c", test_command], stdout=log_file, stderr=subprocess.STDOUT, check=False
             )
-    except OSError:
-        deny(test_command, "")
+        notice = finish_run(run, result.returncode)
+    except (OSError, ValueError):
+        deny(test_command, "Test output could not be captured or recorded; commit blocked.")
         return 0
     if result.returncode != 0:
-        try:
-            output_lines = LOG_PATH.read_text(encoding="utf-8", errors="replace").splitlines()
-            output = "\n".join(output_lines[-20:]).encode()[:1500]
-        except OSError:
-            output = b""
-        deny(test_command, output.decode(errors="replace"))
+        deny(test_command, notice)
     return 0
 
 

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { createEventsHandler } from "../src/app/api/events/route";
-import type { Aggregator, AggregatorDeps } from "../src/lib/collect";
+import type { Aggregator } from "../src/lib/collect";
 import type { DashboardConfig } from "../src/lib/config";
 
 // Teardown guard for the SSE route.
@@ -35,7 +35,7 @@ function req(signal?: AbortSignal): Request {
 /** Records start/stop calls so a test can assert the aggregator was released. */
 function countingAggregator() {
   const calls = { start: 0, stop: 0, unsubscribed: 0 };
-  const impl = (_deps: AggregatorDeps): Aggregator => ({
+  const impl = (): Aggregator => ({
     getSnapshot: () => ({
       sessions: [], loops: [], gates: [], health: [], runs: [], queue: [], builds: [],
       contextTrend: undefined,

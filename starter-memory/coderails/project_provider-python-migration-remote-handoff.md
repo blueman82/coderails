@@ -6,6 +6,8 @@ type: project
 
 # Provider Python migration remote handoff
 
+> Supersession note (2026-09-21): This is a historical remote-machine handoff. Its branch, graph path, unfinished-work claims, and shell test commands describe that checkpoint only. Never resume or mutate the referenced old graph from this memory; inspect the current checkout and owned session state. The current cutover uses Python entrypoints and schema 3 only.
+
 ## Goal
 
 Complete the approved clean cutover: Python for all Coderails-owned Claude and Codex runtime paths, schema v3 only, provider-native dispatch/evidence retained, strict quality/parity/native acceptance green. Do not publish, create a PR, or merge without a new authorization.

@@ -6,7 +6,7 @@ description: Orchestrate the full feature workflow — prep → code → push �
 
 ## Project config
 
-Config: !`source "${CLAUDE_PLUGIN_ROOT}/scripts/lib/config.sh" && coderails::resolve_config`
+Config: !`python3 "${CLAUDE_PLUGIN_ROOT}/scripts/lib/config.py" resolve-config`
 
 If the config block above says `NO_CONFIG`, do NOT stop. Run in minimal mode:
 - Skip Phase 2 (Orient/wiki-query) and Phase 5's wiki steps — `config.wiki_path` is null.
@@ -154,7 +154,7 @@ Execute in order — do not pause between these:
    - **Cosmetic/subjective** (skip, note in PR body): style preferences, naming opinions without a concrete defect
 4. Post a ledger comment on the PR summarising what was applied vs. skipped and why.
 5. `/coderails:post-review <PR#>` — post the SHA-bound review artifact on the PR. This converts the ephemeral review output into a durable, machine-verifiable GitHub comment that `/merge` requires before merging. Run this after all findings are applied and the follow-up commit is pushed, so the artifact is stamped against the final head SHA. The chain is: `review-pr → (apply findings) → post-review → (Phase 4 ship-it pause) → /merge`.
-6. Also run `/coderails:task-evals` (if not already generated+frozen at plan completion per `superpowers:writing-plans`' "Freeze evals after stress-test, before implementation" step) then `/coderails:post-evals <PR#>` to post the eval artifact `/merge` additionally requires. This is ADDITIONAL to, and does not satisfy, the `enforce_pr_workflow` hook's `review-pr` requirement — the eval gate lives in `merge.sh`, a separate enforcement seam from the `PreToolUse` hook documented in the "What this command is NOT" section below.
+6. Also run `/coderails:task-evals` (if not already generated+frozen at plan completion per `superpowers:writing-plans`' "Freeze evals after stress-test, before implementation" step) then `/coderails:post-evals <PR#>` to post the eval artifact `/merge` additionally requires. This is ADDITIONAL to, and does not satisfy, the `enforce_pr_workflow` hook's `review-pr` requirement — the eval gate lives in `merge.py`, a separate enforcement seam from the `PreToolUse` hook documented in the "What this command is NOT" section below.
 
 Report the PR URL, review summary, and resolved JIRA key (if applicable).
 
@@ -188,13 +188,13 @@ If `git branch -d` refuses because the branch is not fully merged into local `ma
 
 ## Escape hatches
 
-- **Docs-only change:** skip `/workflow` and edit on `main` directly. The `no_edit_on_main.sh` hook blocks code files (`.py/.ts/.tsx/.js/.jsx/.go`) on `main`/`master`, plus plugin source carried in markdown (`skills/*/SKILL.md`, `commands/*.md`) when you're in a plugin repo — so *plain* docs and config (README, `docs/*.md`, JSON) pass freely, but editing a `SKILL.md` or a command `.md` on `main` is blocked. A one-line *code* (or plugin-source) hotfix still needs a branch (run `/coderails:prep`) or a `settings.json` Write/Edit permission override — the hook blocks regardless of size.
+- **Docs-only change:** skip `/workflow` and edit on `main` directly. The `no_edit_on_main.py` hook blocks code files (`.py/.ts/.tsx/.js/.jsx/.go`) on `main`/`master`, plus plugin source carried in markdown (`skills/*/SKILL.md`, `commands/*.md`) when you're in a plugin repo — so *plain* docs and config (README, `docs/*.md`, JSON) pass freely, but editing a `SKILL.md` or a command `.md` on `main` is blocked. A one-line *code* (or plugin-source) hotfix still needs a branch (run `/coderails:prep`) or a `settings.json` Write/Edit permission override — the hook blocks regardless of size.
 - **Phase skip:** The user can interrupt at any time and tell you to skip a specific phase or re-enter a prior phase. Obey; don't argue for the canonical sequence.
 - **Standalone sub-commands:** every phase's sub-command (`/coderails:prep`, `/coderails:push`, `/pr-review-toolkit:review-pr`, `/coderails:merge`, `/wiki-ingest`, `/wiki-lint`) remains callable on its own for edge cases. `/coderails:workflow` is the happy path, not the only path.
 
 ## What this command is NOT
 
-- Not enforcement. Slash commands are advisory — Claude has to choose to invoke them. Mechanical enforcement belongs in `PreToolUse` hooks: `enforce_pr_workflow.sh` blocks `gh pr create` unless `/coderails:push` ran this session, and blocks `gh pr merge` unless `/pr-review-toolkit:review-pr` ran this session.
-- Not where the eval gate lives. `/coderails:task-evals` and `/coderails:post-evals` are invoked from this command (Phase 3, step 6), but the gate itself is enforced by `scripts/merge.sh` inside `/coderails:merge` — a separate enforcement seam from the `PreToolUse` hooks above, not something this command checks.
+- Not enforcement. Slash commands are advisory — Claude has to choose to invoke them. Mechanical enforcement belongs in `PreToolUse` hooks: `enforce_pr_workflow.py` blocks `gh pr create` unless `/coderails:push` ran this session, and blocks `gh pr merge` unless `/pr-review-toolkit:review-pr` ran this session.
+- Not where the eval gate lives. `/coderails:task-evals` and `/coderails:post-evals` are invoked from this command (Phase 3, step 6), but the gate itself is enforced by `scripts/merge.py` inside `/coderails:merge` — a separate enforcement seam from the `PreToolUse` hooks above, not something this command checks.
 - Not a replacement for reading CLAUDE.md. This command encodes the workflow; the authoritative spec for project-specific standards still lives in `projects/<name>/CLAUDE.md`.
 - Not interactive for the branch name. If the user doesn't provide a branch, ask once — don't invent one.

@@ -1,0 +1,62 @@
+[
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "ls .[a-z]*"
+      },
+      "cwd": "{sandbox}/feat_repo"
+    },
+    "stdout": "",
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_core.test.sh",
+    "expected": {},
+    "fixture_index": 122
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "ls .*"
+      },
+      "cwd": "{sandbox}/feat_repo"
+    },
+    "stdout": "",
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_core.test.sh",
+    "expected": {},
+    "fixture_index": 124
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "ls .envrc*"
+      },
+      "cwd": "{sandbox}/feat_repo"
+    },
+    "stdout": "",
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_core.test.sh",
+    "expected": {},
+    "fixture_index": 129
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "ls -la"
+      },
+      "cwd": "{sandbox}/feat_repo"
+    },
+    "stdout": "",
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_core.test.sh",
+    "expected": {},
+    "fixture_index": 153
+  }
+]

@@ -1,5 +1,7 @@
 # install.sh Verification Run — 2026-07-20
 
+> Historical verification record: this documents the July 2026 shell installer, not the current runtime. The Python cutover replaced `install.sh` with `install.py` and its provider-local installer modules. Current commands and dependencies are documented in [INSTALLATION.md](../INSTALLATION.md); the observations below are retained as dated evidence and must not be used as current installation instructions.
+
 ## Summary
 
 Ran `bash install.sh` on macOS (Darwin 25.3.0) to verify the root install script works end-to-end.

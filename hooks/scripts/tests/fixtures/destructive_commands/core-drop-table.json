@@ -1,0 +1,107 @@
+[
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "DROP TABLE users;"
+      },
+      "cwd": "{sandbox}/feat_repo"
+    },
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_core.test.sh",
+    "expected": {
+      "hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": "Destructive pattern detected: DROP TABLE\nFull command: DROP TABLE users;\nThis command is permanently blocked. Safe route: there is no safe equivalent \u2014 DROP permanently destroys the object and its data. Take a backup/dump first if the data must be recoverable, and confirm you're pointed at the intended database before running any destructive DDL directly. To allow this pattern, add a Bash permission rule to settings.json.",
+        "patternId": "drop-table"
+      }
+    },
+    "fixture_index": 48
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "DROP DATABASE mydb;"
+      },
+      "cwd": "{sandbox}/feat_repo"
+    },
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_core.test.sh",
+    "expected": {
+      "hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": "Destructive pattern detected: DROP DATABASE\nFull command: DROP DATABASE mydb;\nThis command is permanently blocked. Safe route: there is no safe equivalent \u2014 DROP permanently destroys the object and its data. Take a backup/dump first if the data must be recoverable, and confirm you're pointed at the intended database before running any destructive DDL directly. To allow this pattern, add a Bash permission rule to settings.json.",
+        "patternId": "drop-table"
+      }
+    },
+    "fixture_index": 49
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "DROP TABLE users;"
+      },
+      "cwd": "{sandbox}/feat_repo"
+    },
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_core.test.sh",
+    "expected": {
+      "hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": "Destructive pattern detected: DROP TABLE\nFull command: DROP TABLE users;\nThis command is permanently blocked. Safe route: there is no safe equivalent \u2014 DROP permanently destroys the object and its data. Take a backup/dump first if the data must be recoverable, and confirm you're pointed at the intended database before running any destructive DDL directly. To allow this pattern, add a Bash permission rule to settings.json.",
+        "patternId": "drop-table"
+      }
+    },
+    "fixture_index": 62
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "DROP DATABASE mydb;"
+      },
+      "cwd": "{sandbox}/feat_repo"
+    },
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_core.test.sh",
+    "expected": {
+      "hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": "Destructive pattern detected: DROP DATABASE\nFull command: DROP DATABASE mydb;\nThis command is permanently blocked. Safe route: there is no safe equivalent \u2014 DROP permanently destroys the object and its data. Take a backup/dump first if the data must be recoverable, and confirm you're pointed at the intended database before running any destructive DDL directly. To allow this pattern, add a Bash permission rule to settings.json.",
+        "patternId": "drop-table"
+      }
+    },
+    "fixture_index": 63
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "DROP SCHEMA public CASCADE;"
+      },
+      "cwd": "{sandbox}/feat_repo"
+    },
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_core.test.sh",
+    "expected": {
+      "hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": "Destructive pattern detected: DROP SCHEMA\nFull command: DROP SCHEMA public CASCADE;\nThis command is permanently blocked. Safe route: there is no safe equivalent \u2014 DROP permanently destroys the object and its data. Take a backup/dump first if the data must be recoverable, and confirm you're pointed at the intended database before running any destructive DDL directly. To allow this pattern, add a Bash permission rule to settings.json.",
+        "patternId": "drop-table"
+      }
+    },
+    "fixture_index": 64
+  }
+]

@@ -6,6 +6,8 @@ type: project
 
 # Provider Python Migration: Clean Cutover
 
+> Supersession note (2026-09-21): This records the migration requirements and earlier work-unit position. The current checkout uses maintained Python entrypoints and schema 3 only; its old shell paths and active-node/resume details are historical, not a current dispatch plan. Use the owned session graph for current progress and the implementation plan for the preserved acceptance contract.
+
 ## Goal
 
 Migrate all Coderails-owned Bash runtime scripts for the root Claude plugin and `packages/codex` plugin to Python. Align both providers on one current graph contract while preserving provider-native dispatch, evidence binding, and safety gates.

@@ -17,12 +17,12 @@ const DEFAULT_BUILDS_DIR = join(homedir(), ".codex", "coderails-dashboard", "bui
 const MAX_ANCESTORS = 10;
 
 // A distinctive line from this exact wrapper script (not a generic
-// "coderails" string match) — checked against any scripts/run-builder.sh
+// "coderails" string match) — checked against any scripts/run_builder.py
 // candidate found during the walk-up below, so an unrelated tree that
-// happens to share the same relative scripts/run-builder.sh path (a nested
+// happens to share the same relative scripts/run_builder.py path (a nested
 // checkout, a monorepo, some other project's own differently-shaped
 // wrapper script) is rejected rather than silently accepted.
-const WRAPPER_IDENTITY_MARKER = "Owns the build lifecycle state machine for one approved";
+const WRAPPER_IDENTITY_MARKER = "Own the provider-local approved builder lock, validation, watchdog and terminal artifacts.";
 
 const WRAPPER_ENV_OVERRIDE = "CODERAILS_BUILDER_WRAPPER";
 
@@ -39,16 +39,16 @@ function isIdentifiedWrapper(candidate: string): boolean {
   }
 }
 
-// Walks upward from startDir looking for a sibling scripts/run-builder.sh,
+// Walks upward from startDir looking for a sibling scripts/run_builder.py,
 // matching the same find-the-repo-root-by-walking-up technique already
 // used by collect/markerVersions.ts's findRepoRoot — with the same
 // content-identity check as isIdentifiedWrapper (existence alone isn't
 // enough: a nested checkout or monorepo could have its own unrelated
-// scripts/run-builder.sh at a shallower ancestor level).
+// scripts/run_builder.py at a shallower ancestor level).
 function walkUpForWrapper(startDir: string): string | null {
   let dir = startDir;
   for (let i = 0; i < MAX_ANCESTORS; i++) {
-    const candidate = join(dir, "scripts", "run-builder.sh");
+    const candidate = join(dir, "scripts", "run_builder.py");
     if (isIdentifiedWrapper(candidate)) {
       return candidate;
     }
@@ -60,7 +60,7 @@ function walkUpForWrapper(startDir: string): string | null {
 }
 
 // route.ts previously resolved the wrapper path via
-// join(process.cwd(), "..", "scripts", "run-builder.sh") — cwd-relative,
+// join(process.cwd(), "..", "scripts", "run_builder.py") — cwd-relative,
 // the exact class of bug design-loop2.md's premortem #8 flags (a
 // production Next.js server's cwd is not guaranteed to be the app root).
 //
@@ -159,7 +159,7 @@ export function claimAndSpawnBuild(
   );
 
   const spawnImpl = deps.spawnImpl ?? (spawnReal as unknown as SpawnFn);
-  const child = spawnImpl("bash", [deps.wrapperPath, buildDir], {
+  const child = spawnImpl("python3", [deps.wrapperPath, buildDir], {
     detached: true,
     stdio: "ignore",
     env: { ...process.env, CODERAILS_BUILDER: "1" },

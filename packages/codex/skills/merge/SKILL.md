@@ -20,7 +20,7 @@ Do not merge when GitHub state cannot be fetched, approval is missing when requi
 
 ## Merge and synchronize
 
-Resolve [merge.sh](../../scripts/merge.sh) relative to this `SKILL.md`, then run it with exactly one target: the pull request number, branch name, or `auto` for the current branch. Do not reconstruct the helper's checks manually or bypass a failure.
+Resolve [merge.py](../../scripts/merge.py) relative to this `SKILL.md`, then run it with exactly one target: the pull request number, branch name, or `auto` for the current branch. Do not reconstruct the helper's checks manually or bypass a failure.
 
 The package-local helper must:
 

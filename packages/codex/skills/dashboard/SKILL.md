@@ -53,7 +53,7 @@ Set `SKILL_DIR` to the absolute directory containing this `SKILL.md`, then run
 the bundled script from that directory:
 
 ```
-"$SKILL_DIR/scripts/start-dashboard.sh"
+"$SKILL_DIR/scripts/start_dashboard.py"
 ```
 
 First run installs dependencies (`npm ci`) and builds the app (`npm run
@@ -66,7 +66,7 @@ browser.
 Override the port with `DASHBOARD_PORT`:
 
 ```
-DASHBOARD_PORT=4200 "$SKILL_DIR/scripts/start-dashboard.sh"
+DASHBOARD_PORT=4200 "$SKILL_DIR/scripts/start_dashboard.py"
 ```
 
 ## LAN access (opt-in)
@@ -77,7 +77,7 @@ Host/Origin resolve to loopback — nothing on the network can reach it. Set
 network to reach it too:
 
 ```
-DASHBOARD_HOST=192.168.50.140 "$SKILL_DIR/scripts/start-dashboard.sh"
+DASHBOARD_HOST=192.168.50.140 "$SKILL_DIR/scripts/start_dashboard.py"
 ```
 
 This does two things together, from the one variable: the server binds to
@@ -105,7 +105,7 @@ fail to bind on next start rather than break silently.
 ## Stopping
 
 ```
-"$SKILL_DIR/scripts/stop-dashboard.sh"
+"$SKILL_DIR/scripts/stop_dashboard.py"
 ```
 
 Kills the process recorded in the pidfile and removes it. The dashboard keeps

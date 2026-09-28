@@ -1,283 +1,84 @@
-"""Validate Codex-native transcript and completion evidence for graph state."""
+"""Bind and revalidate native worker evidence against graph attempts."""
 
 from __future__ import annotations
 
-import hashlib
-import json
 import re
-from pathlib import Path
 from typing import Any, cast
 
-from graph_identity import (
-    REFERENCE_KEYS,
-    GraphError,
-    classify_worker_evidence,
-    is_frozen_loop_evals,
-    task_name,
-    task_node,
-)
-from json_types import JsonValue
-
-
-def _object(value: object, label: str) -> dict[str, Any]:
-    if not isinstance(value, dict):
-        raise GraphError(f"{label} must be an object")
-    return cast(dict[str, Any], value)
-
-
-def _array(value: object, label: str) -> list[JsonValue]:
-    if not isinstance(value, list):
-        raise GraphError(f"{label} must be an array")
-    return cast(list[JsonValue], value)
-
-
-def _nonempty(value: object, label: str) -> str:
-    if not isinstance(value, str) or not value.strip():
-        raise GraphError(f"{label} must be a non-empty string")
-    return value
-
-
-def _load(path: Path, label: str) -> dict[str, Any]:
-    try:
-        with path.open(encoding="utf-8") as handle:
-            parsed: JsonValue = cast(JsonValue, json.load(handle))
-            return _object(cast(object, parsed), label)
-    except (OSError, json.JSONDecodeError) as error:
-        raise GraphError(f"{label} is missing or invalid: {error}") from error
-
-
-def _records(path: Path, label: str) -> list[tuple[int, dict[str, Any]]]:
-    records: list[tuple[int, dict[str, Any]]] = []
-    try:
-        with path.open(encoding="utf-8") as transcript:
-            for line_number, line in enumerate(transcript, 1):
-                record: JsonValue = cast(JsonValue, json.loads(line))
-                records.append((line_number, _object(cast(object, record), f"{label} line {line_number}")))
-    except (OSError, json.JSONDecodeError) as error:
-        raise GraphError(f"{label} is missing or invalid: {error}") from error
-    if not records:
-        raise GraphError(f"{label} is empty")
-    return records
-
-
-def _thread_transcript(thread_id: str) -> Path:
-    root = Path.home() / ".codex" / "sessions"
-    matches = list(root.rglob(f"*-{thread_id}.jsonl")) if root.is_dir() else []
-    if len(matches) != 1:
-        raise GraphError(f"thread {thread_id} must resolve to exactly one Codex transcript")
-    first = _records(matches[0], f"thread {thread_id} transcript")[0][1]
-    payload = first.get("payload")
-    if first.get("type") != "session_meta" or not isinstance(payload, dict):
-        raise GraphError(f"thread {thread_id} transcript has foreign session metadata")
-    payload = cast(dict[str, Any], payload)
-    if payload.get("id") != thread_id:
-        raise GraphError(f"thread {thread_id} transcript has foreign session metadata")
-    return matches[0]
-
-
-def transcript_cursor(session_id: str) -> int:
-    """Return the current native transcript record count for a session."""
-    return len(_records(_thread_transcript(session_id), "parent transcript"))
-
-
-def _payload(record: dict[str, Any]) -> dict[str, Any]:
-    payload = record.get("payload", record)
-    return cast(dict[str, Any], payload) if isinstance(payload, dict) else {}
-
-
-def _canonical_task(value: object) -> str | None:
-    if not isinstance(value, str):
-        return None
-    try:
-        task_node(value)
-    except GraphError:
-        return None
-    return value
-
-
-def _legacy_dispatch(record: dict[str, Any]) -> tuple[str, str, str, str, str | None] | None:
-    payload = _payload(record)
-    raw_item = payload.get("item") if record.get("type") == "event_msg" else None
-    if not isinstance(raw_item, dict):
-        return None
-    item = cast(dict[str, Any], raw_item)
-    if item.get("type") != "CollabAgentToolCall":
-        return None
-    dispatch_id, prompt = item.get("id"), item.get("prompt")
-    receivers, agents = item.get("receiver_thread_ids"), item.get("receiver_agents")
-    if (
-        item.get("tool") != "spawn_agent"
-        or item.get("status") != "completed"
-        or not isinstance(dispatch_id, str)
-        or not isinstance(prompt, str)
-        or not isinstance(receivers, list)
-        or not isinstance(agents, list)
-    ):
-        return None
-    receivers, agents = cast(list[object], receivers), cast(list[object], agents)
-    if len(receivers) != 1 or not isinstance(receivers[0], str) or len(agents) != 1 or not isinstance(agents[0], dict):
-        return None
-    agent = cast(dict[str, Any], agents[0])
-    if (
-        agent.get("thread_id") != receivers[0]
-        or agent.get("agent_role") != "loop-worker"
-        or not isinstance(agent.get("agent_nickname"), str)
-    ):
-        return None
-    task = _canonical_task(prompt.split("\n", 1)[0].removeprefix("CODERAILS_GRAPH_TASK="))
-    if task is None:
-        return None
-    return dispatch_id, task, receivers[0], agent["agent_nickname"], None
-
-
-def _native_function_call(record: dict[str, Any]) -> tuple[str, str] | None:
-    if record.get("type") != "response_item":
-        return None
-    item = _payload(record)
-    if item.get("type") != "function_call" or item.get("name") != "spawn_agent":
-        return None
-    call_id, arguments = item.get("call_id"), item.get("arguments")
-    if not isinstance(call_id, str) or not isinstance(arguments, str):
-        return None
-    try:
-        parsed = json.loads(arguments)
-    except json.JSONDecodeError:
-        return None
-    if not isinstance(parsed, dict):
-        return None
-    parsed_object = cast(dict[str, Any], parsed)
-    if parsed_object.get("agent_type") != "loop-worker":
-        return None
-    task = _canonical_task(parsed_object.get("task_name"))
-    return (call_id, task) if task is not None else None
-
-
-def _native_activity(record: dict[str, Any]) -> tuple[str, str, str] | None:
-    payload = _payload(record)
-    item = payload.get("item") if record.get("type") == "event_msg" else None
-    if not isinstance(item, dict):
-        return None
-    item = cast(dict[str, Any], item)
-    call_id, agent_thread_id, agent_path = item.get("id"), item.get("agent_thread_id"), item.get("agent_path")
-    if (
-        item.get("type") != "SubAgentActivity"
-        or item.get("kind") != "started"
-        or not isinstance(call_id, str)
-        or not isinstance(agent_thread_id, str)
-        or not isinstance(agent_path, str)
-    ):
-        return None
-    return call_id, agent_thread_id, agent_path
-
-
-def _child_terminal(
-    parent_session: str, agent_thread_id: str, agent_nickname: str | None, expected_path: str | None
-) -> str:
-    records = _records(_thread_transcript(agent_thread_id), f"child {agent_thread_id} transcript")
-    metadata = _payload(records[0][1])
-    if (
-        metadata.get("parent_thread_id") != parent_session
-        or metadata.get("session_id") != parent_session
-        or metadata.get("thread_source") != "subagent"
-        or (agent_nickname is not None and metadata.get("agent_nickname") != agent_nickname)
-        or metadata.get("agent_role") != "loop-worker"
-    ):
-        raise GraphError(f"child {agent_thread_id} belongs to a different graph dispatch")
-    source = _object(metadata.get("source"), f"child {agent_thread_id}.source")
-    spawn = _object(
-        _object(source.get("subagent"), f"child {agent_thread_id}.source.subagent").get("thread_spawn"),
-        f"child {agent_thread_id}.source.subagent.thread_spawn",
-    )
-    if (
-        spawn.get("parent_thread_id") != parent_session
-        or spawn.get("depth") != 1
-        or (agent_nickname is not None and spawn.get("agent_nickname") != agent_nickname)
-        or spawn.get("agent_role") != "loop-worker"
-        or spawn.get("agent_path") != expected_path
-    ):
-        raise GraphError(f"child {agent_thread_id} has invalid graph dispatch metadata")
-    started_at = records[0][1].get("timestamp")
-    if not isinstance(started_at, str):
-        raise GraphError(f"child {agent_thread_id} has invalid session metadata")
-    events = [
-        _payload(record)
-        for _, record in records[1:]
-        if isinstance(record.get("timestamp"), str) and record["timestamp"] >= started_at
-    ]
-    terminals = [event for event in events if event.get("type") in {"task_complete", "turn_aborted"}]
-    if not terminals or terminals[-1].get("type") != "task_complete":
-        raise GraphError(f"child {agent_thread_id} did not finish successfully")
-    turn_id = terminals[-1].get("turn_id")
-    if not isinstance(turn_id, str):
-        raise GraphError(f"child {agent_thread_id} has an invalid final task_complete")
-    starts = [event for event in events if event.get("type") == "task_started" and event.get("turn_id") == turn_id]
-    if len(starts) != 1 or sum(event.get("turn_id") == turn_id for event in terminals) != 1:
-        raise GraphError(f"child {agent_thread_id} task_complete has no unique matching task_started")
-    return turn_id
+from graph_artifacts import validate_completion_evidence as validate_completion_evidence
+from graph_artifacts import validate_evals as validate_evals
+from graph_data import nonempty, object_value, read_records
+from graph_identity import REFERENCE_KEYS, GraphError, classify_worker_evidence, next_attempt, task_name
+from graph_transcript import child_read_records, child_terminal, parent_indexes, thread_transcript
+from graph_transcript import transcript_cursor as transcript_cursor
 
 
 def _reference(value: object, label: str) -> dict[str, Any]:
-    reference = _object(value, label)
+    reference = object_value(value, label)
     if set(reference) != REFERENCE_KEYS or reference.get("kind") != "codex_agent":
         raise GraphError(f"{label} has invalid transcript reference fields")
     attempt = reference.get("attempt")
     if isinstance(attempt, bool) or not isinstance(attempt, int) or attempt < 1:
         raise GraphError(f"{label}.attempt must be a positive integer")
     for key in REFERENCE_KEYS - {"kind", "attempt"}:
-        _nonempty(reference.get(key), f"{label}.{key}")
+        nonempty(reference.get(key), f"{label}.{key}")
     return reference
-
-
-def _parent_indexes(
-    records: list[tuple[int, dict[str, Any]]],
-) -> dict[str, list[tuple[int, str, str, str | None, str | None]]]:
-    """Index legacy dispatches and native function-call/activity joins."""
-    spawns: dict[str, list[tuple[int, str, str, str | None, str | None]]] = {}
-    native_calls: dict[str, list[tuple[int, str]]] = {}
-    native_activities: dict[str, list[tuple[int, str, str]]] = {}
-    for line_number, record in records:
-        if dispatch := _legacy_dispatch(record):
-            spawns.setdefault(dispatch[0], []).append((line_number, *dispatch[1:]))
-        if call := _native_function_call(record):
-            native_calls.setdefault(call[0], []).append((line_number, call[1]))
-        if activity := _native_activity(record):
-            native_activities.setdefault(activity[0], []).append((line_number, *activity[1:]))
-    for call_id, calls in native_calls.items():
-        activities = native_activities.get(call_id, [])
-        if len(calls) != 1 or not activities:
-            continue
-        call_line, observed_task = calls[0]
-        for activity_line, agent_thread_id, agent_path in activities:
-            if activity_line <= call_line or agent_path != f"/root/{observed_task}":
-                continue
-            spawns.setdefault(call_id, []).append((call_line, observed_task, agent_thread_id, None, agent_path))
-    return spawns
 
 
 def _verify_reference(
     state: dict[str, Any],
     node_id: str,
     reference: dict[str, Any],
-    indexes: dict[str, list[tuple[int, str, str, str | None, str | None]]],
+    indexes: dict[str, list[tuple[int, str, str, str | None, str | None, str | None]]],
 ) -> int:
     spawns = indexes
     expected_task = task_name(node_id, reference["attempt"])
     call_id = reference["spawn_call_id"]
     if len(spawns.get(call_id, [])) != 1:
         raise GraphError(f"node {node_id} spawn reference is missing or duplicate")
-    spawn_line, observed_task, observed_agent, nickname, expected_path = spawns[call_id][0]
+    spawn_line, observed_task, observed_agent, nickname, expected_path, expected_role = spawns[call_id][0]
     if observed_task != expected_task or observed_agent != reference["agent_thread_id"]:
         raise GraphError(f"node {node_id} spawn reference has the wrong task")
-    terminal = _child_terminal(state["session_id"], reference["agent_thread_id"], nickname, expected_path)
+    terminal = child_terminal(state["session_id"], reference["agent_thread_id"], nickname, expected_path, expected_role)
     if terminal != reference["task_complete_turn_id"]:
         raise GraphError(f"node {node_id} task_complete reference does not match its child")
     return spawn_line
 
 
+def _validate_missing_attempts(
+    state: dict[str, Any],
+    node_id: str,
+    maximum: int,
+    references: list[tuple[dict[str, Any], set[str]]],
+    indexes: dict[str, list[tuple[int, str, str, str | None, str | None, str | None]]],
+    used: set[str],
+) -> None:
+    completed = {reference["attempt"]: reference for reference, _ in references}
+    previous_line = 0
+    for attempt in range(1, maximum + 1):
+        if attempt in completed:
+            line = _verify_reference(state, node_id, completed[attempt], indexes)
+        else:
+            expected = task_name(node_id, attempt)
+            matches = [
+                (call, items[0]) for call, items in indexes.items() if len(items) == 1 and items[0][1] == expected
+            ]
+            if len(matches) != 1:
+                raise GraphError(f"node {node_id} stale attempt has no unique native spawn")
+            call, (line, _, child, nickname, path, role) = matches[0]
+            if used & {call, child}:
+                raise GraphError(f"node {node_id} stale attempt reuses native identity")
+            child_read_records(state["session_id"], child, nickname, path, role)
+            used.update({call, child})
+        if line <= previous_line:
+            raise GraphError(f"node {node_id} native attempts are stale or out of order")
+        previous_line = line
+
+
 def _stored_references(
     state: dict[str, Any], require_complete: bool, known_identifiers: set[str] | None = None
 ) -> set[str]:
-    indexes = _parent_indexes(_records(_thread_transcript(state["session_id"]), "parent transcript"))
+    indexes = parent_indexes(read_records(thread_transcript(state["session_id"]), "parent transcript"))
     used = set(known_identifiers or ())
     waves: set[int] = set()
     ordinary: list[object] = []
@@ -293,7 +94,14 @@ def _stored_references(
                 continue
             references.append((_reference(item, f"node {node_id}.evidence[{index}]"), identifiers))
         expected_count = node["retry"]["attempts"] + (1 if node["status"] in {"done", "skipped"} else 0)
-        if sorted(item[0]["attempt"] for item in references) != list(range(1, expected_count + 1)):
+        attempts = sorted(item[0]["attempt"] for item in references)
+        maximum = next_attempt(node) if node["status"] in {"done", "skipped", "stale"} else next_attempt(node) - 1
+        if (
+            len(attempts) != expected_count
+            or len(set(attempts)) != len(attempts)
+            or any(attempt > maximum for attempt in attempts)
+            or (node["status"] in {"done", "skipped"} and (not attempts or attempts[-1] != maximum))
+        ):
             raise GraphError(f"node {node_id} transcript attempts do not match its graph state")
         if require_complete and node["status"] not in {"done", "skipped"}:
             raise GraphError(f"node {node_id} has no completed transcript-backed attempt")
@@ -312,6 +120,7 @@ def _stored_references(
             if spawn_line <= previous_line:
                 raise GraphError(f"node {node_id} transcript attempts are stale or out of order")
             previous_line = spawn_line
+        _validate_missing_attempts(state, node_id, maximum, references, indexes, used)
     if waves:
         completion = state.get("completion") if state.get("status") == "complete" else None
         completion = cast(dict[str, Any], completion) if isinstance(completion, dict) else None
@@ -319,29 +128,15 @@ def _stored_references(
         if isinstance(revision, bool) or not isinstance(revision, int):
             raise GraphError("graph revision must be an integer")
         last_wave = revision - (2 if state["graph"]["active_wave"] is not None else 1)
-        cancelled = _array(state["graph"].get("cancelled_waves", []), "graph.cancelled_waves")
-        cancelled_waves: set[int] = set()
-        for index, raw_cancelled in enumerate(cancelled):
-            item = _object(raw_cancelled, f"graph.cancelled_waves[{index}]")
-            if set(item) != {"id", "revision"}:
-                raise GraphError("cancelled wave must contain exactly id and revision")
-            raw_wave = item.get("revision")
-            if (
-                isinstance(raw_wave, bool)
-                or not isinstance(raw_wave, int)
-                or raw_wave < 1
-                or item.get("id") != f"wave-{raw_wave}"
-                or raw_wave in cancelled_waves
-            ):
-                raise GraphError("cancelled wave is invalid or duplicated")
-            wave = raw_wave
-            if wave > last_wave or (last_wave - wave) % 2:
-                raise GraphError("cancelled wave does not match graph revisions")
-            cancelled_waves.add(wave)
-        expected = (
-            set(range(last_wave - 2 * (len(waves) + len(cancelled_waves) - 1), last_wave + 1, 2)) - cancelled_waves
-        )
-        if waves != expected:
+        generations = sum(node["respawn"]["generation"] for node in state["graph"]["nodes"].values())
+        ordered = sorted(waves)
+        # Respawn transitions advance revisions without dispatching a wave.
+        gaps = sum(right - left - 2 for left, right in zip(ordered, ordered[1:]))
+        if max(waves) > last_wave or any(right - left < 2 for left, right in zip(ordered, ordered[1:])):
+            raise GraphError("stored worker wave evidence does not match graph revisions")
+        if gaps < 0 or gaps + last_wave - max(waves) > 3 * generations + (
+            2 if any(node["status"] == "stale" for node in state["graph"]["nodes"].values()) else 0
+        ):
             raise GraphError("stored worker wave evidence does not match graph revisions")
     if any(classify_worker_evidence(item, used)[0] for item in ordinary):
         raise GraphError("stored evidence contains noncanonical worker evidence")
@@ -349,18 +144,18 @@ def _stored_references(
 
 
 def bind_worker_evidence(
-    state: dict[str, Any], active_wave: dict[str, Any]
+    state: dict[str, Any], active_wave: dict[str, Any], stale_nodes: frozenset[str] = frozenset()
 ) -> tuple[dict[str, dict[str, Any]], set[str]]:
     """Bind current-wave transcript records to each dispatched worker node."""
     used: set[str] = set()
-    parent = _records(_thread_transcript(state["session_id"]), "parent transcript")
-    indexes = _parent_indexes(parent)
+    parent = read_records(thread_transcript(state["session_id"]), "parent transcript")
+    indexes = parent_indexes(parent)
     cursor = active_wave.get("transcript_cursor")
     if isinstance(cursor, bool) or not isinstance(cursor, int) or cursor < 1:
         raise GraphError("active wave has no valid transcript cursor")
     references: dict[str, dict[str, Any]] = {}
     for node_id in active_wave["nodes"]:
-        attempt = state["graph"]["nodes"][node_id]["retry"]["attempts"] + 1
+        attempt = next_attempt(state["graph"]["nodes"][node_id])
         expected_task = task_name(node_id, attempt)
         matching = [
             (call_id, items[0])
@@ -369,12 +164,15 @@ def bind_worker_evidence(
         ]
         if len(matching) != 1:
             raise GraphError(f"node {node_id} must have exactly one current-wave spawn")
-        call_id, (_, _, agent_thread_id, nickname, expected_path) = matching[0]
-        terminal = _child_terminal(state["session_id"], agent_thread_id, nickname, expected_path)
+        call_id, (_, _, agent_thread_id, nickname, expected_path, expected_role) = matching[0]
+        if node_id in stale_nodes:
+            child_read_records(state["session_id"], agent_thread_id, nickname, expected_path, expected_role)
+            continue
+        terminal = child_terminal(state["session_id"], agent_thread_id, nickname, expected_path, expected_role)
         reference = {
             "kind": "codex_agent",
             "attempt": attempt,
-            "wave_id": active_wave["id"],
+            "wave_id": active_wave["wave_id"],
             "spawn_call_id": call_id,
             "agent_thread_id": agent_thread_id,
             "task_complete_turn_id": terminal,
@@ -389,189 +187,6 @@ def bind_worker_evidence(
     return references, used
 
 
-def has_current_wave_dispatch(state: dict[str, Any], active_wave: dict[str, Any]) -> bool:
-    """Return whether the current wave has a matching native spawn attempt."""
-    cursor = active_wave.get("transcript_cursor")
-    if isinstance(cursor, bool) or not isinstance(cursor, int) or cursor < 1:
-        raise GraphError("active wave has no valid transcript cursor")
-    expected = {
-        task_name(node_id, state["graph"]["nodes"][node_id]["retry"]["attempts"] + 1)
-        for node_id in active_wave["nodes"]
-    }
-    return any(
-        len(items) == 1 and items[0][0] > cursor and items[0][1] in expected
-        for items in _parent_indexes(_records(_thread_transcript(state["session_id"]), "parent transcript")).values()
-    )
-
-
 def validate_worker_evidence(state: dict[str, Any]) -> None:
     """Validate all stored worker evidence against native transcripts."""
     _stored_references(state, True)
-
-
-def _matching(evidence: dict[str, Any], state: dict[str, Any], label: str) -> None:
-    if evidence.get("session_id") != state["session_id"] or evidence.get("loop_id") != state["loop_id"]:
-        raise GraphError(f"{label} belongs to a different loop")
-
-
-def _grading_checksum(evals: dict[str, Any], result: str) -> str:
-    raw_evals = _array(evals.get("evals"), "evals.evals")
-    canonical: list[dict[str, Any]] = []
-    for index, raw_eval in enumerate(raw_evals):
-        item = _object(raw_eval, f"evals.evals[{index}]")
-        canonical.append({key: item.get(key) for key in ("id", "priority", "status")})
-    encoded = json.dumps(canonical, separators=(",", ":"), sort_keys=True)
-    return hashlib.sha256(f"{encoded}\n{result}".encode()).hexdigest()
-
-
-def validate_evals(state: dict[str, Any], revision: int | None, path: Path) -> None:
-    """Validate a loop eval suite before dispatch or completion."""
-    evals = _load(path, "evals")
-    _matching(evals, state, "evals")
-    if evals.get("scope") != "loop" or evals.get("task_ref") != state["loop_id"]:
-        raise GraphError("evals are not scoped to this loop")
-    if revision is not None and evals.get("revision") != revision:
-        raise GraphError("evals revision does not match the graph")
-    _nonempty(evals.get("verification_justification"), "evals.verification_justification")
-    result = evals.get("result")
-    if revision is None and is_frozen_loop_evals(evals):
-        return
-    if result not in {"GO", "VERIFICATION_LEVEL0"}:
-        raise GraphError("evals are not graded GO")
-    raw_evals = _array(evals.get("evals"), "evals.evals")
-    p0_statuses = [_object(item, "evals.evals").get("status") for item in raw_evals]
-    p0_statuses = [
-        status for item, status in zip(raw_evals, p0_statuses) if _object(item, "evals.evals").get("priority") == "P0"
-    ]
-    if result == "GO" and any(status != "pass" for status in p0_statuses):
-        raise GraphError("evals result disagrees with its P0 statuses")
-    if result == "VERIFICATION_LEVEL0" and (evals.get("verification_level") != 0 or raw_evals):
-        raise GraphError("verification-level-0 result is invalid")
-    grading = _object(evals.get("grading"), "evals.grading")
-    if grading.get("by") != "post_evals.sh grade-loop":
-        raise GraphError("evals grading stamp is missing")
-    if grading.get("checksum") != _grading_checksum(evals, result):
-        raise GraphError("evals grading checksum is invalid")
-    amendments = _array(evals.get("amendments"), "evals.amendments")
-    if grading.get("amendments_at_grade") != len(amendments):
-        raise GraphError("evals grading amendment count is stale")
-
-
-def validate_completion_evidence(
-    state: dict[str, Any],
-    revision: int,
-    evals_path: Path,
-    proof_path: Path,
-    retro_path: Path,
-    transcript_path: Path | None,
-) -> None:
-    """Validate proof, retrospective, eval, and transcript completion evidence."""
-    proof = _load(proof_path, "proof")
-    retro = _load(retro_path, "retro")
-    for label, evidence in (("proof", proof), ("retro", retro)):
-        _matching(evidence, state, label)
-    validate_evals(state, revision, evals_path)
-    proofs = _array(proof.get("proofs"), "proof.proofs")
-    if not proofs:
-        raise GraphError("proof evidence is missing or not passing")
-    for index, raw_proof in enumerate(proofs):
-        item = _object(raw_proof, f"proof.proofs[{index}]")
-        if item.get("status") != "pass":
-            raise GraphError("proof evidence is missing or not passing")
-        _nonempty(item.get("id"), f"proof.proofs[{index}].id")
-        _nonempty(item.get("cmd"), f"proof.proofs[{index}].cmd")
-        _nonempty(item.get("evidence"), f"proof.proofs[{index}].evidence")
-    _validate_observed_proofs(proofs, transcript_path, state["loop_id"])
-    schema_version = retro.get("schema_version")
-    if isinstance(schema_version, bool) or not isinstance(schema_version, int) or schema_version < 1:
-        raise GraphError("retro evidence is incomplete")
-    if retro.get("status") != "complete":
-        raise GraphError("retro evidence is incomplete")
-
-
-def _exec_command(payload: dict[str, Any]) -> tuple[str, str] | None:
-    if payload.get("type") == "function_call" and payload.get("name") == "exec_command":
-        arguments = payload.get("arguments")
-        try:
-            parsed: object = (
-                cast(object, cast(JsonValue, json.loads(arguments))) if isinstance(arguments, str) else arguments
-            )
-        except json.JSONDecodeError:
-            return None
-        if isinstance(parsed, dict):
-            parsed = cast(dict[str, Any], parsed)
-            command = parsed.get("cmd")
-            if isinstance(command, str):
-                return str(payload.get("call_id", "")), command.strip()
-    if payload.get("type") == "custom_tool_call" and payload.get("name") == "exec":
-        source = payload.get("input")
-        if not isinstance(source, str) or "tools.exec_command" not in source:
-            return None
-        match = re.search(r'\bcmd\s*:\s*("(?:\\.|[^"\\])*")', source)
-        if match:
-            return str(payload.get("call_id", "")), cast(str, json.loads(match.group(1))).strip()
-    return None
-
-
-def _exec_result(payload: dict[str, Any]) -> tuple[str, bool, str | None] | None:
-    if payload.get("type") not in {"function_call_output", "custom_tool_call_output"}:
-        return None
-    call_id = payload.get("call_id")
-    if not isinstance(call_id, str) or not call_id:
-        return None
-    output = payload.get("output")
-    if isinstance(output, list):
-        output = "".join(
-            item["text"]
-            for raw_item in cast(list[object], output)
-            if isinstance(raw_item, dict)
-            for item in (cast(dict[str, Any], raw_item),)
-            if isinstance(item.get("text"), str)
-        )
-    if not isinstance(output, str):
-        return call_id, False, None
-    try:
-        parsed: object = cast(JsonValue, json.loads(output))
-    except json.JSONDecodeError:
-        return call_id, False, None
-    if not isinstance(parsed, dict):
-        return call_id, False, None
-    parsed = cast(dict[str, Any], parsed)
-    exit_code = parsed.get("exit_code")
-    passed = isinstance(exit_code, int) and not isinstance(exit_code, bool) and exit_code == 0
-    result_loop = parsed.get("loop_id")
-    if "loop_id" in parsed and not isinstance(result_loop, str):
-        passed = False
-    return call_id, passed, result_loop if isinstance(result_loop, str) else None
-
-
-def _validate_observed_proofs(proofs: list[Any], transcript_path: Path | None, loop_id: str) -> None:
-    if transcript_path is None:
-        raise GraphError("proof commands were not observed in this session")
-    calls: list[tuple[str, str, str | None]] = []
-    results: dict[str, tuple[bool, str | None]] = {}
-    transcript_loop: str | None = None
-    for _, record in _records(transcript_path, "proof transcript"):
-        if record.get("type") == "turn_context":
-            context = record.get("payload")
-            if isinstance(context, dict) and "loop_id" in context:
-                context = cast(dict[str, Any], context)
-                observed_loop = context["loop_id"]
-                transcript_loop = observed_loop if isinstance(observed_loop, str) else ""
-            continue
-        payload = _payload(record)
-        if call := _exec_command(payload):
-            calls.append((*call, transcript_loop))
-        if result := _exec_result(payload):
-            results[result[0]] = (result[1], result[2])
-    for raw_proof in proofs:
-        raw_proof = _object(raw_proof, "proof")
-        command = raw_proof["cmd"].strip()
-        matching = [
-            call_id
-            for call_id, observed, observed_loop in calls
-            if observed == command and observed_loop in {None, loop_id}
-        ]
-        proof_result = results.get(matching[-1]) if matching else None
-        if proof_result is None or proof_result[0] is not True or proof_result[1] not in {None, loop_id}:
-            raise GraphError(f"proof command was unexecuted or last-failed: {command}")

@@ -1,0 +1,34 @@
+[
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "scripts/merge.sh --help"
+      },
+      "cwd": "{sandbox}/repo",
+      "transcript_path": "{sandbox}/t_22731.jsonl"
+    },
+    "files": {
+      "{sandbox}/t_22731.jsonl": "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Skill\",\"input\":{\"skill\":\"coderails:prep\"}}]}}\n",
+      "{sandbox}/repo_master/.coderails/workflow.config.yaml": "jira: null\n",
+      "{sandbox}/repo_main/.coderails/workflow.config.yaml": "jira: null\n",
+      "{sandbox}/repo_eval/.coderails/workflow.config.yaml": "jira: null\n",
+      "{sandbox}/worktree_feat/.coderails/workflow.config.yaml": "jira: null\n",
+      "{sandbox}/repo/.coderails/workflow.config.yaml": "jira: null\n",
+      "{sandbox}/repo_feat/.coderails/workflow.config.yaml": "jira: null\n"
+    },
+    "repositories": {
+      "{sandbox}/repo_master": "master",
+      "{sandbox}/repo_main": "main",
+      "{sandbox}/repo_eval": "main",
+      "{sandbox}/worktree_feat": "feature/worktree-thing",
+      "{sandbox}/repo_noconfig": "main",
+      "{sandbox}/repo": "main",
+      "{sandbox}/repo_feat": "feature/my-thing"
+    },
+    "env": {},
+    "returncode": 0,
+    "denied": true,
+    "fixture_index": 109
+  }
+]

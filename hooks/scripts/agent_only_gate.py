@@ -5,11 +5,15 @@ from __future__ import annotations
 
 import os
 import re
+import sys
+from pathlib import Path
 
-from hook_common import deny, log, output, read_payload
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from hooks.scripts.hook_common import deny, log, output, read_payload
 
 CARVE = re.compile(
-    r"^\s*(?:gh|git|(?:bash|sh|\./)?\s*(?:\S*/)?scripts/(?:push|merge|post_review|post_evals)\.sh)(?:\s+.*)?$"
+    r"^\s*(?:gh|git|(?:bash|sh|python3?|\./)?\s*(?:\S*/)?scripts/"
+    r"(?:push|merge|post_review|post_evals)\.(?:sh|py))(?:\s+.*)?$"
 )
 META = re.compile(r"[&;|`<>]|\$\(")
 

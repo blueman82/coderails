@@ -1,17 +1,36 @@
-#!/usr/bin/env bash
-set -euo pipefail
+#!/usr/bin/env python3
+"""Run strict changed-source checks and isolated Python suites before a commit."""
 
-repo_root="$(git rev-parse --show-toplevel)"
-cd "$repo_root"
+from __future__ import annotations
 
-# Test fixtures create their own repositories; never leak the committing
-# repository's Git hook environment into those fixtures.
-unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_PREFIX
+import os
+import subprocess
+import sys
+from pathlib import Path
 
-echo 'pre-commit: strict source-quality checks'
-scripts/quality/check.sh --strict --changed
 
-echo 'pre-commit: shell test suites'
-bash hooks/scripts/tests/run_all.sh
+def main() -> int:
+    """Preserve check ordering and stop immediately on either quality or test failure."""
+    repository = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True, check=False)
+    if repository.returncode:
+        print(repository.stderr, file=sys.stderr, end="")
+        return repository.returncode
+    root = Path(repository.stdout.strip())
+    environment = os.environ.copy()
+    for key in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_PREFIX"):
+        environment.pop(key, None)
+    commands = (
+        ("strict source-quality checks", [sys.executable, "scripts/quality/check.py", "--strict", "--changed"]),
+        ("Python test suites", [sys.executable, "hooks/scripts/tests/run_all.py"]),
+    )
+    for label, command in commands:
+        print(f"pre-commit: {label}", flush=True)
+        code = subprocess.run(command, cwd=root, env=environment, check=False).returncode
+        if code:
+            return code if code > 0 else 128 - code
+    print("pre-commit: OK")
+    return 0
 
-echo 'pre-commit: OK'
+
+if __name__ == "__main__":
+    raise SystemExit(main())

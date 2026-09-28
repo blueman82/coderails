@@ -22,7 +22,7 @@ Use `/coderails:agentic-loop` with a typical task (2–3 implementation units):
 ### Step 2: Examine Loop Artifacts
 
 After loop completion, find:
-- **`~/.coderails/agentic-loop/<session_id>/retro.json`** — contains `cost.total_tokens` (as of schema_version ≥ 2)
+- **`retro.json` beside the current session's `progress.json`** — resolve the state directory with `python3 "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/lib/agentic_loop_path.py"`; the retrospective records the once-frozen `cost` breakdown at its own schema version 2. The graph itself uses schema 3.
 - **Dashboard metrics** — `/coderails:dashboard` live-shows cost per dispatch
 - **PR comment artifact** — `/coderails:post-evals` posts grading info with final token/USD spend
 

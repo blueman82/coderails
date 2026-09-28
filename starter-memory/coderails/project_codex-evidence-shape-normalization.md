@@ -6,6 +6,8 @@ type: project
 
 # Codex evidence tampering closure
 
+> Supersession note (2026-09-21): This is a historical evidence-normalization handoff. Current native transcript parsers and Python adversarial suites supersede its old shell paths and open-repair status. Keep raw provider evidence checks distinct from the pure schema-3 semantic core, and derive any new audit from current source and current owned state.
+
 ## Goal
 
 Fix only the native Codex graph-evidence tampering gap under `packages/codex/`. PR #446 closed the six known single-layer shapes and nested identity reuse, but a fresh executed probe found that a twice-encoded JSON reference still bypasses classification and allows one worker identity to be reused across nodes through completion.

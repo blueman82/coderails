@@ -6,6 +6,8 @@ type: project
 
 # Codex graph evidence binding
 
+> Supersession note (2026-09-21): This is a historical native-evidence implementation handoff. The current graph is schema 3 only and uses provider-native dispatch with explicit agent instruction bodies; worker labels alone are never evidence. Retired shell test paths below are baseline references, not executable instructions. Read the current native agentic-loop skill and graph evidence modules before changing them.
+
 ## Goal
 
 Make Codex graph execution mechanically auditable without adding an automatic scheduler. Codex already performs real manually operated graph engineering; this change binds each graph node attempt to the native worker events already stored in the Codex session transcript.

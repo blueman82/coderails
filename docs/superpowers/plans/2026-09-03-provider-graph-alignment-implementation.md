@@ -1,5 +1,7 @@
 # Provider graph-alignment implementation plan
 
+> Current implementation note (2026-09-21): retain the shell rosters and earlier phase commands below as the frozen migration baseline. The clean-break amendment supersedes every instruction to execute or retain those old paths. Current delivery uses `install.py` and `scripts/installer/files.py`; current entrypoints and tests are Python, including `hooks/scripts/tests/run_all.py`, `packages/tests/test_graph_semantics_fixtures.py`, and `packages/tests/test_provider_graph_parity.py`. Follow [the component reference](../../REFERENCE.md) and [installation guide](../../../INSTALLATION.md) for operational commands. No shell wrapper or schema-v1/v2 graph reader remains.
+
 ## Purpose and fixed boundaries
 
 Implement the approved schema-v3 graph contract from

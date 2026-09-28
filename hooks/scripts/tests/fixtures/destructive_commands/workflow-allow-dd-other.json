@@ -1,0 +1,37 @@
+[
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "dd of=foo.py if=/tmp/x"
+      },
+      "cwd": "{sandbox}/main_repo"
+    },
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_workflow.test.sh",
+    "expected": {
+      "hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": "In-Bash source write (cp/mv/dd) on main branch blocked.\nFull command: dd of=foo.py if=/tmp/x\nWriting source files via cp/mv/dd on main is blocked. Switch to a feature branch."
+      }
+    },
+    "fixture_index": 315
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "dd of=foo.py if=/tmp/x"
+      },
+      "cwd": "{sandbox}/feat_repo"
+    },
+    "stdout": "",
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_workflow.test.sh",
+    "expected": {},
+    "fixture_index": 318
+  }
+]

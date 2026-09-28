@@ -1,0 +1,163 @@
+#!/usr/bin/env python3
+"""Require an explicit loop stop and validate completion evidence before release."""
+
+from __future__ import annotations
+
+import json
+import os
+import re
+import sys
+from contextlib import suppress
+from pathlib import Path
+from typing import Any, cast
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from hooks.scripts.hook_common import read_payload
+from hooks.scripts.lib.agentic_loop_path import sanitise_session_id
+from hooks.scripts.lib.discipline_common import stable_text
+from hooks.scripts.lib.graph_dispatch import validate_graph_completion, validate_graph_shape
+from hooks.scripts.lib.loop_completion import validate_completion
+from hooks.scripts.lib.loop_evals import read_loop_evals_result
+from hooks.scripts.lib.loop_state_common import (
+    LOOP_STOP_VOCAB,
+    LoopState,
+    atomic_progress_update,
+    load_progress,
+    log,
+    read_state,
+    stable_invocations,
+    stop_category,
+    unstubbed_grace,
+)
+
+
+def graph_unresolved(state: LoopState) -> bool:
+    """Report unresolved validated graph nodes, joins, waves, or hard stops."""
+    graph = state.data.get("graph")
+    if not isinstance(graph, dict):
+        return False
+    graph = cast(dict[str, Any], graph)
+    validate_graph_shape(state.path)
+    return (
+        graph.get("active_wave") is not None
+        or graph.get("hard_stop") is not None
+        or any(node.get("status") not in {"done", "skipped"} for node in graph["nodes"].values())
+        or any(join.get("released") is not True for join in graph["joins"].values())
+    )
+
+
+def emit_human_request(state: LoopState) -> None:
+    """Deduplicate the unresolved graph notice without weakening its blocking gate."""
+    loop = str(state.data.get("loop_id") or "")
+    revision = state.data.get("revision")
+    if not loop or not isinstance(revision, int) or isinstance(revision, bool):
+        return
+    safe = re.sub(r"[^a-zA-Z0-9_.-]", "_", loop)
+    marker = state.path.parent / f".human-approval-{safe}-{revision}"
+    message = json.dumps(
+        {
+            "systemMessage": "Human approval required: the native graph is unresolved. Approve the next action "
+            "or resume the loop; stopping remains blocked until the graph is complete."
+        }
+    )
+    created = False
+    try:
+        marker.mkdir()
+        created = True
+    except FileExistsError:
+        if marker.is_dir():
+            return
+    except OSError:
+        log(f"hook=loop_stall_guard session={state.session} human_request=dedupe_write_failed")
+    try:
+        print(message)
+    except (OSError, ValueError) as error:
+        if created:
+            with suppress(OSError):
+                marker.rmdir()
+        raise ValueError("could not emit the required human request; retry stopping") from error
+
+
+def complete(state: LoopState, transcript: str) -> list[str]:
+    """Check completion artifacts, current eval bindings, and native graph evidence."""
+    messages = validate_completion(state, transcript)
+    if not isinstance(state.data.get("graph"), dict):
+        raise ValueError("graph shape is missing or malformed")
+    validate_graph_completion(state.path, state.session)
+    suite = read_state(state.path.parent / "evals.json")
+    verdict = read_loop_evals_result(state.path.parent)
+    if any(suite.get(key) != state.data.get(key) for key in ("session_id", "loop_id", "revision")):
+        verdict = "STALE"
+    if verdict not in {"GO", "VERIFICATION_LEVEL0"}:
+        raise ValueError(f"loop evals are {verdict}; run and grade the frozen suite via post_evals.py grade-loop")
+    for name in ("proof.json", "retro.json"):
+        path = state.path.parent / name
+        if name == "proof.json" and not path.is_file():
+            continue
+        artifact = read_state(path)
+        if any(artifact.get(key) != state.data.get(key) for key in ("session_id", "loop_id")):
+            raise ValueError(f"{name} belongs to another loop")
+    return messages
+
+
+def main() -> int:
+    """Block undeclared stops and refuse incomplete or unaudited completion."""
+    payload = read_payload()
+    transcript = str(payload.get("transcript_path") or "")
+    if not transcript or not Path(transcript).is_file() or payload.get("stop_hook_active") is True:
+        return 0
+    session = sanitise_session_id(str(payload.get("session_id") or "?"))
+    count = stable_invocations(transcript)
+    if not count:
+        return 0
+    state = load_progress(str(payload.get("cwd") or os.getcwd()), session, count)
+    if unstubbed_grace(state, "loop_stall_guard"):
+        return 0
+    text, _ = stable_text(
+        transcript,
+        int(os.environ.get("CLAUDE_HOOK_TAIL_LINES", "300")),
+        int(os.environ.get("CLAUDE_HOOK_MAX_ATTEMPTS", "5")),
+        float(os.environ.get("CLAUDE_HOOK_SLEEP_S", "0.3")),
+    )
+    category = stop_category(text)
+    try:
+        if category:
+            if category.lower() == "complete" and graph_unresolved(state):
+                emit_human_request(state)
+                raise ValueError("Native graph unresolved; stopping remains blocked.")
+            messages = complete(state, transcript) if category.lower() == "complete" else []
+            if messages:
+                print(json.dumps({"systemMessage": "\n".join(messages)}))
+
+            def increment(data: dict[str, Any]) -> dict[str, Any]:
+                counters = data.setdefault("loop_stop_counts", {})
+                if not isinstance(counters, dict):
+                    raise ValueError("loop_stop_counts must be an object")
+                counters = cast(dict[str, Any], counters)
+                counters[category] = counters.get(category, 0) + 1
+                return data
+
+            if not atomic_progress_update(state.path, increment):
+                log(f"hook=loop_stall_guard session={session} counter_write=json_failed category={category}")
+            log(f"hook=loop_stall_guard session={session} invocations={count} declared=1 blocked=0")
+            return 0
+        if state.complete:
+            return 0
+        if graph_unresolved(state):
+            emit_human_request(state)
+            raise ValueError("Native graph unresolved; stopping remains blocked.")
+    except ValueError as error:
+        print(f"[loop-stall-guard] {error}", file=sys.stderr)
+        return 2
+    log(f"hook=loop_stall_guard session={session} invocations={count} declared=0 blocked=1")
+    print(
+        "[loop-stall-guard] Active agentic loop, no LOOP-STOP declaration in your last message.\n"
+        f"Continue the loop, OR end your message with:\n  LOOP-STOP: <{LOOP_STOP_VOCAB}> — <reason>\n"
+        'Declaring complete means the loop is done: set progress.json status to "complete" and run Phase 13.',
+        file=sys.stderr,
+    )
+    return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -11,7 +11,7 @@
   </dict>
   <key>ProgramArguments</key>
   <array>
-    <string>/Users/harrison/Github/coderails/skills/dashboard/runner/bin/sweeper.sh</string>
+    <string>/Users/harrison/Github/coderails/skills/dashboard/runner/bin/sweeper.py</string>
   </array>
   <key>WatchPaths</key>
   <array>

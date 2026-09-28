@@ -5,11 +5,13 @@ from __future__ import annotations
 
 import os
 import re
+import sys
 from json import JSONDecodeError, loads
 from pathlib import Path
 from typing import cast
 
-from hook_common import JsonValue, log, output, read_payload
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from hooks.scripts.hook_common import JsonValue, log, output, read_payload
 
 PUSH = re.compile(r"git(?: +-C +[^ ]+)? +push\b.*\b(?:origin +)?(?:main|master)\b", re.I)
 OFFLOAD = re.compile(

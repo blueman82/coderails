@@ -1,0 +1,275 @@
+[
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git push --force-with-lease"
+      },
+      "cwd": "{sandbox}/allowlist_repo"
+    },
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_allowlist.test.sh",
+    "expected": {
+      "hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": "Destructive pattern detected: git push --force\nFull command: git push --force-with-lease\nThis command is permanently blocked. Safe route: use 'git push --force-with-lease' instead of a naked --force \u2014 it refuses to overwrite a remote ref that has moved since your last fetch. Note --force-with-lease is ALSO blocked by this hook by default; add the exact line 'git-push-force-with-lease' to .claude/destructive_allowlist in the target repo to opt in before using it.",
+        "patternId": "git-push-force"
+      }
+    },
+    "fixture_index": 0
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git push --for\\\nce origin main"
+      },
+      "cwd": "{sandbox}/no_intra_repo"
+    },
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_allowlist.test.sh",
+    "expected": {
+      "hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": "Destructive pattern detected: git push --force\nFull command: git push --for\\\nce origin main\nThis command is permanently blocked. Safe route: use 'git push --force-with-lease' instead of a naked --force \u2014 it refuses to overwrite a remote ref that has moved since your last fetch. Note --force-with-lease is ALSO blocked by this hook by default; add the exact line 'git-push-force-with-lease' to .claude/destructive_allowlist in the target repo to opt in before using it.",
+        "patternId": "git-push-force"
+      }
+    },
+    "fixture_index": 19
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git push --force-with-\\\nlease"
+      },
+      "cwd": "{sandbox}/no_intra_repo"
+    },
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_allowlist.test.sh",
+    "expected": {
+      "hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": "Destructive pattern detected: git push --force\nFull command: git push --force-with-\\\nlease\nThis command is permanently blocked. Safe route: use 'git push --force-with-lease' instead of a naked --force \u2014 it refuses to overwrite a remote ref that has moved since your last fetch. Note --force-with-lease is ALSO blocked by this hook by default; add the exact line 'git-push-force-with-lease' to .claude/destructive_allowlist in the target repo to opt in before using it.",
+        "patternId": "git-push-force"
+      }
+    },
+    "fixture_index": 20
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git push --force-with-lease"
+      },
+      "cwd": "{sandbox}/allowlist_repo"
+    },
+    "returncode": 0,
+    "allowlist": "",
+    "source": "destructive_bash_gate_allowlist.test.sh",
+    "expected": {
+      "hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": "Destructive pattern detected: git push --force\nFull command: git push --force-with-lease\nThis command is permanently blocked. Safe route: use 'git push --force-with-lease' instead of a naked --force \u2014 it refuses to overwrite a remote ref that has moved since your last fetch. Note --force-with-lease is ALSO blocked by this hook by default; add the exact line 'git-push-force-with-lease' to .claude/destructive_allowlist in the target repo to opt in before using it.",
+        "patternId": "git-push-force"
+      }
+    },
+    "fixture_index": 22
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git push --force-with-lease"
+      },
+      "cwd": "{sandbox}/no_allowlist_repo"
+    },
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_allowlist.test.sh",
+    "expected": {
+      "hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": "Destructive pattern detected: git push --force\nFull command: git push --force-with-lease\nThis command is permanently blocked. Safe route: use 'git push --force-with-lease' instead of a naked --force \u2014 it refuses to overwrite a remote ref that has moved since your last fetch. Note --force-with-lease is ALSO blocked by this hook by default; add the exact line 'git-push-force-with-lease' to .claude/destructive_allowlist in the target repo to opt in before using it.",
+        "patternId": "git-push-force"
+      }
+    },
+    "fixture_index": 26
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git -c push.followTags=true push --force origin main"
+      },
+      "cwd": "{sandbox}/opt_repo"
+    },
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_allowlist.test.sh",
+    "expected": {
+      "hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": "Destructive pattern detected: git push --force\nFull command: git -c push.followTags=true push --force origin main\nThis command is permanently blocked. Safe route: use 'git push --force-with-lease' instead of a naked --force \u2014 it refuses to overwrite a remote ref that has moved since your last fetch. Note --force-with-lease is ALSO blocked by this hook by default; add the exact line 'git-push-force-with-lease' to .claude/destructive_allowlist in the target repo to opt in before using it.",
+        "patternId": "git-push-force"
+      }
+    },
+    "fixture_index": 27
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git --no-pager push --force origin main"
+      },
+      "cwd": "{sandbox}/opt_repo"
+    },
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_allowlist.test.sh",
+    "expected": {
+      "hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": "Destructive pattern detected: git push --force\nFull command: git --no-pager push --force origin main\nThis command is permanently blocked. Safe route: use 'git push --force-with-lease' instead of a naked --force \u2014 it refuses to overwrite a remote ref that has moved since your last fetch. Note --force-with-lease is ALSO blocked by this hook by default; add the exact line 'git-push-force-with-lease' to .claude/destructive_allowlist in the target repo to opt in before using it.",
+        "patternId": "git-push-force"
+      }
+    },
+    "fixture_index": 28
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git -c core.pager=less push -f origin main"
+      },
+      "cwd": "{sandbox}/opt_repo"
+    },
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_allowlist.test.sh",
+    "expected": {
+      "hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": "Destructive pattern detected: git push --force\nFull command: git -c core.pager=less push -f origin main\nThis command is permanently blocked. Safe route: use 'git push --force-with-lease' instead of a naked --force \u2014 it refuses to overwrite a remote ref that has moved since your last fetch. Note --force-with-lease is ALSO blocked by this hook by default; add the exact line 'git-push-force-with-lease' to .claude/destructive_allowlist in the target repo to opt in before using it.",
+        "patternId": "git-push-force"
+      }
+    },
+    "fixture_index": 29
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git -C /tmp/somerepo push --force origin main"
+      },
+      "cwd": "{sandbox}/opt_repo"
+    },
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_allowlist.test.sh",
+    "expected": {
+      "hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": "Destructive pattern detected: git push --force\nFull command: git -C /tmp/somerepo push --force origin main\nThis command is permanently blocked. Safe route: use 'git push --force-with-lease' instead of a naked --force \u2014 it refuses to overwrite a remote ref that has moved since your last fetch. Note --force-with-lease is ALSO blocked by this hook by default; add the exact line 'git-push-force-with-lease' to .claude/destructive_allowlist in the target repo to opt in before using it.",
+        "patternId": "git-push-force"
+      }
+    },
+    "fixture_index": 30
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git --git-dir=/tmp/somerepo/.git push --force origin main"
+      },
+      "cwd": "{sandbox}/opt_repo"
+    },
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_allowlist.test.sh",
+    "expected": {
+      "hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": "Destructive pattern detected: git push --force\nFull command: git --git-dir=/tmp/somerepo/.git push --force origin main\nThis command is permanently blocked. Safe route: use 'git push --force-with-lease' instead of a naked --force \u2014 it refuses to overwrite a remote ref that has moved since your last fetch. Note --force-with-lease is ALSO blocked by this hook by default; add the exact line 'git-push-force-with-lease' to .claude/destructive_allowlist in the target repo to opt in before using it.",
+        "patternId": "git-push-force"
+      }
+    },
+    "fixture_index": 31
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git -c a=b -c c=d --no-pager push -f origin main"
+      },
+      "cwd": "{sandbox}/opt_repo"
+    },
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_allowlist.test.sh",
+    "expected": {
+      "hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": "Destructive pattern detected: git push --force\nFull command: git -c a=b -c c=d --no-pager push -f origin main\nThis command is permanently blocked. Safe route: use 'git push --force-with-lease' instead of a naked --force \u2014 it refuses to overwrite a remote ref that has moved since your last fetch. Note --force-with-lease is ALSO blocked by this hook by default; add the exact line 'git-push-force-with-lease' to .claude/destructive_allowlist in the target repo to opt in before using it.",
+        "patternId": "git-push-force"
+      }
+    },
+    "fixture_index": 32
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git -c a.a=1 -c a.b=2 -c a.c=3 -c a.d=4 -c a.e=5 -c a.f=6 -c a.g=7 push --force origin main"
+      },
+      "cwd": "{sandbox}/opt_repo"
+    },
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_allowlist.test.sh",
+    "expected": {
+      "hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": "Destructive pattern detected: git push --force\nFull command: git -c a.a=1 -c a.b=2 -c a.c=3 -c a.d=4 -c a.e=5 -c a.f=6 -c a.g=7 push --force origin main\nThis command is permanently blocked. Safe route: use 'git push --force-with-lease' instead of a naked --force \u2014 it refuses to overwrite a remote ref that has moved since your last fetch. Note --force-with-lease is ALSO blocked by this hook by default; add the exact line 'git-push-force-with-lease' to .claude/destructive_allowlist in the target repo to opt in before using it.",
+        "patternId": "git-push-force"
+      }
+    },
+    "fixture_index": 33
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git \\\npush --force origin main"
+      },
+      "cwd": "{sandbox}/opt_repo"
+    },
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_allowlist.test.sh",
+    "expected": {
+      "hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": "Destructive pattern detected: git push --force\nFull command: git \\\npush --force origin main\nThis command is permanently blocked. Safe route: use 'git push --force-with-lease' instead of a naked --force \u2014 it refuses to overwrite a remote ref that has moved since your last fetch. Note --force-with-lease is ALSO blocked by this hook by default; add the exact line 'git-push-force-with-lease' to .claude/destructive_allowlist in the target repo to opt in before using it.",
+        "patternId": "git-push-force"
+      }
+    },
+    "fixture_index": 34
+  }
+]

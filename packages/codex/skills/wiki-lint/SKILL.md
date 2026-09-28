@@ -67,8 +67,8 @@ Resolve each `sources:` entry, in this order. Stop at the first hit:
 
 1. **It exists in the repo**, either as `$repo/<entry>` or as
    `$repo/<entry-without-.md>/SKILL.md` → use it. The first covers full paths
-   like `hooks/scripts/lib/loop_cost.sh` and bare repo-root files like
-   `AGENTS.md` or `install.sh`; the second covers the `skills/foo.md` shorthand
+   like `hooks/scripts/graph_completion_guard.py` and bare repo-root files like
+   `AGENTS.md` or `install.py`; the second covers the `skills/foo.md` shorthand
    for `skills/foo/SKILL.md`.
 
    **Try both repo forms before testing the vault.** A wiki page that mirrors a

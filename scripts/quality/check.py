@@ -12,49 +12,12 @@ import subprocess
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from scripts.quality.quality_tools import external_checks
+from scripts.quality.source_kind import is_python_source
+
 DEFAULT_LOC = 400
 DEFAULT_FUNCTION_LINES = 100
-LOC_EXCEPTIONS = {
-    "hooks/scripts/tests/enforce_pr_workflow.test.sh": 1149,
-    "hooks/scripts/lib/graph_dispatch.sh": 412,
-    "hooks/scripts/tests/graph_dispatch_complete.test.sh": 1221,
-    "hooks/scripts/tests/merge_wiki_debt_gate.test.sh": 567,
-    "hooks/scripts/lib/loop_state_common.sh": 1606,
-    "hooks/scripts/tests/loop_stall_guard.test.sh": 2323,
-    "packages/codex/hooks/scripts/destructive_bash_gate.sh": 903,
-    "packages/codex/scripts/merge.sh": 512,
-    "packages/codex/scripts/post_evals.sh": 1229,
-    "packages/codex/skills/dashboard/app/src/components/AssistantLinkPanel.tsx": 418,
-    "packages/codex/skills/dashboard/app/src/components/OutputViewerPanel.client.test.tsx": 406,
-    "packages/codex/skills/dashboard/app/test/AssistantLinkPanel.test.ts": 707,
-    "packages/codex/skills/dashboard/app/test/events.test.ts": 694,
-    "packages/codex/skills/dashboard/app/test/run.test.ts": 693,
-    "packages/codex/skills/dashboard/app/test/runBuilder.test.ts": 558,
-    "packages/codex/skills/dashboard/app/test/sessions.test.ts": 612,
-    "packages/codex/skills/dashboard/app/test/usage.test.ts": 449,
-    "packages/codex/skills/dashboard/runner/test/artifactGate.test.ts": 492,
-    "packages/codex/skills/dashboard/runner/test/sweep.test.ts": 714,
-    "scripts/merge.sh": 512,
-}
-FUNCTION_EXCEPTIONS = {
-    ("packages/codex/hooks/scripts/destructive_bash_gate.sh", "deny"): 107,
-    ("packages/codex/scripts/merge.sh", "merge::has_wiki_ingest_for_merged_prs"): 185,
-    ("packages/codex/scripts/merge.sh", "merge::main"): 209,
-    ("packages/codex/scripts/post_evals.sh", "post_evals::validate_structure"): 122,
-    ("packages/codex/scripts/post_evals.sh", "post_evals::validate_smoke_execution"): 113,
-    ("packages/codex/scripts/post_evals.sh", "post_evals::smoke_verify"): 152,
-    ("packages/codex/scripts/post_evals.sh", "post_evals::validate_discriminating"): 105,
-    ("packages/codex/scripts/push.sh", "push::main"): 120,
-    ("hooks/scripts/lib/loop_state_common.sh", "als_gate_proofs_on_complete"): 364,
-    ("hooks/scripts/lib/loop_state_common.sh", "als_report_cost_on_complete"): 165,
-    ("hooks/scripts/tests/loop_stall_guard.test.sh", "mk_malformed_transcript"): 2066,
-    ("scripts/merge.sh", "merge::has_wiki_ingest_for_merged_prs"): 185,
-    ("scripts/merge.sh", "merge::main"): 209,
-    ("scripts/lib/post_evals_structure.sh", "post_evals::validate_structure"): 188,
-    ("scripts/lib/post_evals_smoke_freeze.sh", "post_evals::validate_smoke_execution"): 113,
-    ("scripts/lib/post_evals_smoke_gate.sh", "post_evals::smoke_verify"): 147,
-    ("scripts/lib/post_evals_freeze.sh", "post_evals::validate_discriminating"): 105,
-}
 SOURCE_ROOTS = (
     ".claude-plugin",
     "agents",
@@ -76,6 +39,7 @@ def source_files(root: Path, paths: list[str]) -> list[Path]:
         candidates = [root / path for path in paths]
     else:
         candidates = [root] if root != Path.cwd().resolve() else [root / source_root for source_root in SOURCE_ROOTS]
+        candidates.extend(root / name for name in ("install.py", "uninstall.py"))
     files: list[Path] = []
     for candidate in candidates:
         if candidate.is_absolute():
@@ -87,9 +51,9 @@ def source_files(root: Path, paths: list[str]) -> list[Path]:
     return sorted(
         path
         for path in set(files)
-        if path.suffix in EXTENSIONS
-        and path.name not in EXCLUDED_NAMES
-        and not EXCLUDED_PARTS.intersection(path.relative_to(root).parts)
+        if path.name not in EXCLUDED_NAMES
+        and not EXCLUDED_PARTS.intersection(path.parts)
+        and (path.suffix in EXTENSIONS or is_python_source(path))
     )
 
 
@@ -115,7 +79,7 @@ def check_format(path: Path, text: str) -> list[str]:
     return issues
 
 
-def check_python(path: Path, text: str, path_key: str, function_limit: int) -> list[str]:
+def check_python(path: Path, text: str, function_limit: int) -> list[str]:
     """Return syntax and function-length findings for Python source."""
     try:
         tree = ast.parse(text, filename=str(path))
@@ -128,13 +92,12 @@ def check_python(path: Path, text: str, path_key: str, function_limit: int) -> l
         if node.end_lineno is None:
             continue
         lines = node.end_lineno - node.lineno + 1
-        limit = FUNCTION_EXCEPTIONS.get((path_key, node.name), function_limit)
-        if lines > limit:
-            issues.append(finding(path, f"function {node.name} is {lines} lines (max {limit})", node.lineno))
+        if lines > function_limit:
+            issues.append(finding(path, f"function {node.name} is {lines} lines (max {function_limit})", node.lineno))
     return issues
 
 
-def check_bash(path: Path, text: str, path_key: str, function_limit: int) -> list[str]:
+def check_bash(path: Path, text: str, function_limit: int) -> list[str]:
     """Return function-length findings for shell source."""
     start_pattern = re.compile(r"^\s*(?:function\s+)?([A-Za-z_][A-Za-z0-9_:]*)\s*\(\s*\)\s*\{")
     lines = text.splitlines()
@@ -151,9 +114,8 @@ def check_bash(path: Path, text: str, path_key: str, function_limit: int) -> lis
                 break
         lines_used = end - index + 1
         name = match.group(1)
-        limit = FUNCTION_EXCEPTIONS.get((path_key, name), function_limit)
-        if lines_used > limit:
-            issues.append(finding(path, f"function {name} is {lines_used} lines (max {limit})", index + 1))
+        if lines_used > function_limit:
+            issues.append(finding(path, f"function {name} is {lines_used} lines (max {function_limit})", index + 1))
     return issues
 
 
@@ -178,7 +140,7 @@ SHELL_COMMENTED_COMMAND = re.compile(
 
 def check_commented_code(path: Path, text: str) -> list[str]:
     """Return findings for source comments that look like live code."""
-    if path.suffix not in {".bash", ".js", ".jsx", ".py", ".sh", ".ts", ".tsx"}:
+    if path.suffix not in {".bash", ".js", ".jsx", ".sh", ".ts", ".tsx"} and not is_python_source(path, text):
         return []
     issues: list[str] = []
     for number, line in enumerate(text.splitlines(), 1):
@@ -238,22 +200,22 @@ def main() -> int:
     for path in files:
         text = path.read_text(encoding="utf-8")
         line_count = len(text.splitlines())
-        path_key = path.relative_to(root).as_posix()
-        limit = LOC_EXCEPTIONS.get(path_key) or args.max_loc
-        if path.suffix != ".py" and line_count > limit:
+        limit = args.max_loc
+        if line_count > limit:
             issues.append(finding(path, f"{line_count} lines (max {limit})"))
         issues.extend(check_format(path, text))
-        if path.suffix == ".py":
-            issues.extend(check_python(path, text, path_key, args.max_function_lines))
+        if is_python_source(path, text):
+            issues.extend(check_python(path, text, args.max_function_lines))
         elif path.suffix in {".bash", ".sh"}:
-            issues.extend(check_bash(path, text, path_key, args.max_function_lines))
+            issues.extend(check_bash(path, text, args.max_function_lines))
         issues.extend(check_commented_code(path, text))
     if root == Path.cwd().resolve() and not args.paths:
         issues.extend(check_diff(root))
     for issue in issues:
         print(issue, file=sys.stderr)
     print(f"quality: scanned {len(files)} file(s), {len(issues)} finding(s)")
-    return 1 if args.strict and issues else 0
+    tools_passed = external_checks(files, root, args.strict)
+    return 1 if args.strict and (issues or not tools_passed) else 0
 
 
 if __name__ == "__main__":

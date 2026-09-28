@@ -44,7 +44,7 @@ describe("runCodex", () => {
   it("passes the real CLI shape to an executable stub that rejects codex --json", () => {
     const dir = mkdtempSync(join(tmpdir(), "dashboard-codex-shape-"));
     const stubPath = join(dir, "codex");
-    writeFileSync(stubPath, "#!/bin/sh\n[ \"$1\" = exec ] || exit 64\n[ \"$2\" = --json ] || exit 65\n");
+    writeFileSync(stubPath, "#!/usr/bin/env python3\nimport sys\nif sys.argv[1] != 'exec': sys.exit(64)\nif sys.argv[2] != '--json': sys.exit(65)\n");
     chmodSync(stubPath, 0o700);
 
     return runCodex(["--json", "prompt"], "/tmp", { codexPath: stubPath }).then((result) => {
@@ -87,7 +87,7 @@ describe("runCodex", () => {
   it("really closes a spawned process's stdin — the stub exits 0 instead of blocking (real execFile, no mock)", () => {
     const dir = mkdtempSync(join(tmpdir(), "dashboard-codex-stdin-"));
     const stubPath = join(dir, "codex");
-    writeFileSync(stubPath, "#!/bin/sh\n[ \"$1\" = exec ] || exit 64\ncat >/dev/null\n");
+    writeFileSync(stubPath, "#!/usr/bin/env python3\nimport sys\nif sys.argv[1] != 'exec': sys.exit(64)\nsys.stdin.read()\n");
     chmodSync(stubPath, 0o700);
 
     return runCodex([], "/tmp", {

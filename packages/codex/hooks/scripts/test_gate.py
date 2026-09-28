@@ -9,11 +9,12 @@ import re
 import select
 import subprocess
 import sys
-import tempfile
 import time
 from contextlib import suppress
 from pathlib import Path
 from typing import cast
+
+from test_output import begin_run, finish_run
 
 COMMIT_COMMAND = re.compile(r"(^|[\s;&|])git\s+commit(\s|$)")
 TEMPFILE_ERROR = "Test gate could not create a temporary output file, so the commit is blocked."
@@ -109,15 +110,6 @@ def deny(reason: str) -> None:
     )
 
 
-def failure_output(log_path: Path) -> str:
-    """Return the final 20 output lines, capped at the established byte limit."""
-    try:
-        lines = log_path.read_text(encoding="utf-8", errors="replace").splitlines()
-    except OSError:
-        return ""
-    return "\n".join(lines[-20:]).encode()[:1500].decode(errors="replace")
-
-
 def main() -> int:
     """Run the trusted command for Git commits and deny a failed command."""
     payload = payload_object(read_input())
@@ -129,13 +121,12 @@ def main() -> int:
     if repo_root is None or not (test_command := configured_command(repo_root)):
         return 0
     try:
-        with tempfile.NamedTemporaryFile(prefix="coderails-test-gate.", delete=False) as output_file:
-            log_path = Path(output_file.name)
+        run = begin_run("codex", repo_root, test_command)
     except OSError:
         deny(TEMPFILE_ERROR)
         return 0
     try:
-        with log_path.open("wb") as output_file:
+        with (run / "output.log").open("wb") as output_file:
             result = subprocess.run(
                 ["/bin/bash", "-c", test_command],
                 cwd=repo_root,
@@ -143,11 +134,11 @@ def main() -> int:
                 stderr=subprocess.STDOUT,
                 stdout=output_file,
             )
+        notice = finish_run(run, result.returncode)
         if result.returncode != 0:
-            deny(f"Test gate failed for: {test_command}\n\nLast output:\n{failure_output(log_path)}")
-    finally:
-        with suppress(OSError):
-            log_path.unlink()
+            deny(f"Test gate failed for: {test_command}\n\n{notice}")
+    except (OSError, ValueError):
+        deny("Test output could not be captured or recorded; commit blocked.")
     return 0
 
 

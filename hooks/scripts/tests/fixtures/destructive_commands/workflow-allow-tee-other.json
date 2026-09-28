@@ -1,0 +1,122 @@
+[
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "tee skills/mything/SKILL.md"
+      },
+      "cwd": "{sandbox}/main_repo"
+    },
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_workflow.test.sh",
+    "expected": {
+      "hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": "In-Bash source edit on main branch blocked.\nFull command: tee skills/mything/SKILL.md\nEditing source files via sed/perl/redirect/tee on main is blocked. Switch to a feature branch or use the Edit tool."
+      }
+    },
+    "fixture_index": 284
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "tee commands/prep.md"
+      },
+      "cwd": "{sandbox}/main_repo"
+    },
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_workflow.test.sh",
+    "expected": {
+      "hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": "In-Bash source edit on main branch blocked.\nFull command: tee commands/prep.md\nEditing source files via sed/perl/redirect/tee on main is blocked. Switch to a feature branch or use the Edit tool."
+      }
+    },
+    "fixture_index": 285
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "tee xcommands/prep.md"
+      },
+      "cwd": "{sandbox}/main_repo"
+    },
+    "stdout": "",
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_workflow.test.sh",
+    "expected": {},
+    "fixture_index": 286
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "tee not-skills/x/SKILL.md"
+      },
+      "cwd": "{sandbox}/main_repo"
+    },
+    "stdout": "",
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_workflow.test.sh",
+    "expected": {},
+    "fixture_index": 287
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "tee docs/notcommands/x.md"
+      },
+      "cwd": "{sandbox}/main_repo"
+    },
+    "stdout": "",
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_workflow.test.sh",
+    "expected": {},
+    "fixture_index": 288
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "tee vendor/skills/x/SKILL.md"
+      },
+      "cwd": "{sandbox}/main_repo"
+    },
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_workflow.test.sh",
+    "expected": {
+      "hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": "In-Bash source edit on main branch blocked.\nFull command: tee vendor/skills/x/SKILL.md\nEditing source files via sed/perl/redirect/tee on main is blocked. Switch to a feature branch or use the Edit tool."
+      }
+    },
+    "fixture_index": 289
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "tee skills/mything/SKILL.md"
+      },
+      "cwd": "{sandbox}/feat_repo"
+    },
+    "stdout": "",
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_workflow.test.sh",
+    "expected": {},
+    "fixture_index": 293
+  }
+]

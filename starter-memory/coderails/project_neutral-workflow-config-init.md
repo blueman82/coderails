@@ -6,6 +6,8 @@ type: project
 
 # Neutral workflow config init
 
+> Supersession note (2026-09-21): This is a historical configuration-migration handoff. The canonical .coderails/workflow.config.yaml contract remains current, but the shell runtime/test filenames below were retired. Both providers now resolve configuration through their own scripts/lib/config.py, and current hook/test commands use Python.
+
 ## Goal
 
 Implement the previously selected clean-break migration from provider-specific workflow configuration to one canonical `.coderails/workflow.config.yaml`. Keep the Claude and Codex plugins independent: each provider owns its own SessionStart behavior and init instructions, while both read the same project configuration path.

@@ -1,0 +1,27 @@
+[
+  {
+    "request": {
+      "hook_event_name": "SubagentStop",
+      "session_id": "S_sub",
+      "agent_id": "agent-test",
+      "transcript_path": "/nonexistent/parent.jsonl",
+      "agent_transcript_path": "{sandbox}/at_4995.jsonl",
+      "stop_hook_active": false,
+      "last_assistant_message": "Work. (verified)\n## Did Not Verify\n- untagged item"
+    },
+    "files": {
+      "{sandbox}/state/-work-project/S1/progress.json": "{\"schema_version\": 3, \"status\": \"in-progress\", \"session_id\": \"S1\", \"completed_marker\": 1}"
+    },
+    "env": {
+      "CODERAILS_HEADLESS_RUN": "1",
+      "CLAUDE_DISCIPLINE_LOG": "{sandbox}/discipline.log",
+      "CLAUDE_HOOK_MAX_ATTEMPTS": "1",
+      "CLAUDE_AGENTIC_LOOP_DIR": "{sandbox}/state",
+      "CLAUDE_HOOK_SLEEP_S": "0"
+    },
+    "stdout": "",
+    "returncode": 2,
+    "source": "check_verify_loop",
+    "fixture_index": 79
+  }
+]

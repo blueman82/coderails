@@ -6,6 +6,8 @@ type: project
 
 # Stop-hook human escalation
 
+> Supersession note (2026-09-21): This is a historical Stop-hook repair handoff. Current root Stop gates are hooks/scripts/loop_state_guard.py and loop_stall_guard.py; Codex uses packages/codex/hooks/scripts/graph_completion_guard.py. The shell paths and proposed shared names below are not current entrypoints. Preserve the distinct provider-native response contracts.
+
 ## Goal
 
 Fix the rough edge shared by the Claude and Codex plugins: an incomplete agentic-loop graph must result in one clear, human-readable escalation, not repeated raw Stop-hook prompts.

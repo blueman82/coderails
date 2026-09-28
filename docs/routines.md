@@ -260,7 +260,7 @@ whole surface.
 `loop-retro-promotion-weekly`) to use a non-`read-only` button profile
 (`bypass`). Its mitigation is the same shape as that routine's: no hook
 protects a `claude -p` run, so the entire merge rail is the manifest
-lock (docs-only, three-dot-scoped) plus `scripts/merge.sh`'s own
+lock (docs-only, three-dot-scoped) plus `scripts/merge.py`'s own
 script-internal artifact gates and `/pr-review-toolkit:review-pr` — not
 any hook or server-side check.
 
@@ -317,7 +317,7 @@ the predicate graduates, the routine opens and merges its own PR with no
 human in the loop, and — as that warning documents — `PreToolUse` hooks
 do not fire under `claude -p`, so `test_gate`/`enforce_pr_workflow` do
 not protect this run either. Its merge rail is entirely
-`scripts/merge.sh`'s own script-internal artifact gates, plus
+`scripts/merge.py`'s own script-internal artifact gates, plus
 `/pr-review-toolkit:review-pr` and the manifest assertion the skill
 itself runs before pushing (abort-with-cleanup if the diff isn't exactly
 `skills/agentic-loop/learned-failure-modes.md`) — no hook and no
@@ -329,21 +329,21 @@ design, on the script-internal gates named above.
 ## Install / uninstall
 
 Two launchd jobs drive the runner, both installed by
-`launchd/install-routines.sh` (idempotent — safe to re-run):
+`launchd/install_routines.py` (idempotent — safe to re-run):
 
 - **`com.coderails.routine-sweeper.calendar`** — fires daily at 03:00,
-  runs `skills/dashboard/runner/bin/seed-and-sweep.sh`, which seeds any
+  runs `skills/dashboard/runner/bin/seed_and_sweep.py`, which seeds any
   due routines into `queue/` and then sweeps. The seed step's own exit
   code never blocks the sweep that follows it — a seeding failure still
   lets any already-queued (e.g. button-pressed) intents get processed.
 - **`com.coderails.routine-sweeper.watch`** — fires on any write under
   `~/.claude/coderails-dashboard/queue`, runs
-  `skills/dashboard/runner/bin/sweeper.sh` (sweep only, no seed step —
+  `skills/dashboard/runner/bin/sweeper.py` (sweep only, no seed step —
   a button press already wrote its own intent, nothing to seed).
 
 ```bash
-launchd/install-routines.sh     # copy both plists into ~/Library/LaunchAgents and bootstrap into gui/$UID
-launchd/uninstall-routines.sh   # bootout both plists and remove the LaunchAgents copies
+launchd/install_routines.py     # copy both plists into ~/Library/LaunchAgents and bootstrap into gui/$UID
+launchd/uninstall_routines.py   # bootout both plists and remove the LaunchAgents copies
 ```
 
 Install **copies** each plist into `~/Library/LaunchAgents/` and bootstraps
@@ -468,7 +468,7 @@ directories: `~/.claude/coderails-dashboard/routines/workflow-audit/`
 completion marker) and `~/.claude/coderails-dashboard/approvals/`
 (queue entries for each proposed skill, carrying only the judge's D2-whitelisted
 fields, never full transcript content). The scan's privacy boundary — structural
-extraction only, no full-text content — is enforced at the `scan_transcripts.sh`
+extraction only, no full-text content — is enforced at the `scan_transcripts.py`
 level and is unchanged by this routine.
 
 ## See also

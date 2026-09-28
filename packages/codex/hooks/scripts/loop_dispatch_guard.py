@@ -17,7 +17,7 @@ from hook_common import (
     text_field,
 )
 
-TASK_NAME = re.compile(r"loop_worker_[0-9a-f]+(?:_a[2-9][0-9]*)?$")
+TASK_NAME = re.compile(r"loop_worker_[0-9a-f]+(?:_a(?:[2-9]|[1-9][0-9]+))?$")
 
 
 def object_field(payload: dict[str, object], name: str) -> dict[str, object]:
@@ -33,13 +33,27 @@ def main() -> int:
         deny("Codex graph workers must use native spawn_agent.")
         return 0
     tool_input = object_field(payload, "tool_input")
-    if tool_input.get("agent_type") != "loop-worker":
-        return 0
+    task = tool_input.get("task_name")
     message = tool_input.get("message")
     first_line = message.splitlines()[0] if isinstance(message, str) and message else ""
     marker = first_line.removeprefix("CODERAILS_GRAPH_TASK=")
+    graph_task = isinstance(task, str) and TASK_NAME.fullmatch(task)
+    if (
+        tool_input.get("agent_type") != "loop-worker"
+        and not graph_task
+        and not first_line.startswith("CODERAILS_GRAPH_TASK=")
+    ):
+        return 0
+    if "agent_type" in tool_input and (
+        not isinstance(tool_input["agent_type"], str) or not tool_input["agent_type"].strip()
+    ):
+        deny("Graph worker dispatch requires a nonblank native role when agent_type is supplied.")
+        return 0
     if not TASK_NAME.fullmatch(marker) or first_line != f"CODERAILS_GRAPH_TASK={marker}":
         deny("Graph worker dispatch requires a canonical CODERAILS_GRAPH_TASK marker on the first message line.")
+        return 0
+    if ("task_name" in tool_input or "agent_type" not in tool_input) and task != marker:
+        deny("Graph worker task_name must exactly match its CODERAILS_GRAPH_TASK marker.")
         return 0
     session_id = text_field(payload, "session_id")
     cwd = text_field(payload, "cwd")

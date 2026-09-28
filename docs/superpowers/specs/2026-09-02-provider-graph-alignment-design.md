@@ -1,5 +1,7 @@
 # Provider graph-alignment design
 
+> Implementation supersession note (2026-09-21): the approved design below is retained as the pre-cutover specification. Its shell filenames and proposed `cmp` delivery wording are superseded by the two-provider Python clean-break amendment in [the implementation plan](../plans/2026-09-03-provider-graph-alignment-implementation.md). Current delivery is `install.py` using `scripts/installer/files.py`; current provider parity tests are `packages/tests/test_provider_graph_parity.py`. The semantic source remains `packages/graph-semantics/graph_semantics.py`, independently materialized byte-for-byte into both provider bundles. This note does not change the frozen semantic contract.
+
 ## Problem and decision
 
 The Claude graph contract is defined by `skills/agentic-loop/loop-state.md` and `skills/agentic-loop/execution-graph.md`, while the Codex contract is implemented in `packages/codex/skills/agentic-loop/scripts/graph.py`. (verified) Their current state shapes differ, including the active-wave identifier. (verified)

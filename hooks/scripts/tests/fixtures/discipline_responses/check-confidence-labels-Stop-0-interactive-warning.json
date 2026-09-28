@@ -1,0 +1,117 @@
+[
+  {
+    "request": {
+      "transcript_path": "{sandbox}/lt_4551.jsonl",
+      "session_id": "S1",
+      "cwd": "/work/project",
+      "stop_hook_active": false,
+      "hook_event_name": "Stop"
+    },
+    "files": {
+      "{sandbox}/state/-work-project/S1/progress.json": "{\"schema_version\": 3, \"status\": \"in-progress\", \"session_id\": \"S1\", \"completed_marker\": 0}",
+      "{sandbox}/lt_4551.jsonl": "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Skill\",\"input\":{\"skill\":\"coderails:agentic-loop\"}}]}}\n{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy\"}]}}\n"
+    },
+    "env": {
+      "CLAUDE_DISCIPLINE_LOG": "{sandbox}/discipline.log",
+      "CLAUDE_HOOK_MAX_ATTEMPTS": "1",
+      "CLAUDE_AGENTIC_LOOP_DIR": "{sandbox}/state",
+      "CLAUDE_HOOK_SLEEP_S": "0"
+    },
+    "stdout": "{\n  \"hookSpecificOutput\": {\n    \"hookEventName\": \"Stop\",\n    \"additionalContext\": \"[discipline-warn(loop)] response made substantive claims without (verified)/(inferred)/(guess) labels. Add them before stopping.\"\n  }\n}\n",
+    "returncode": 0,
+    "source": "check_confidence_labels",
+    "fixture_index": 14
+  },
+  {
+    "request": {
+      "transcript_path": "{sandbox}/lt_13463.jsonl",
+      "session_id": "S1",
+      "cwd": "/work/project",
+      "stop_hook_active": false,
+      "hook_event_name": "Stop"
+    },
+    "files": {
+      "{sandbox}/state/-work-project/S1/progress.json": "{\"schema_version\": 3, \"status\": \"complete\", \"session_id\": \"OTHER-SESSION\", \"completed_marker\": 1}",
+      "{sandbox}/lt_13463.jsonl": "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Skill\",\"input\":{\"skill\":\"coderails:agentic-loop\"}}]}}\n{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy\"}]}}\n"
+    },
+    "env": {
+      "CLAUDE_DISCIPLINE_LOG": "{sandbox}/discipline.log",
+      "CLAUDE_HOOK_MAX_ATTEMPTS": "1",
+      "CLAUDE_AGENTIC_LOOP_DIR": "{sandbox}/state",
+      "CLAUDE_HOOK_SLEEP_S": "0"
+    },
+    "stdout": "{\n  \"hookSpecificOutput\": {\n    \"hookEventName\": \"Stop\",\n    \"additionalContext\": \"[discipline-warn(loop)] response made substantive claims without (verified)/(inferred)/(guess) labels. Add them before stopping.\"\n  }\n}\n",
+    "returncode": 0,
+    "source": "check_confidence_labels",
+    "fixture_index": 17
+  },
+  {
+    "request": {
+      "transcript_path": "{sandbox}/lt_29760.jsonl",
+      "session_id": "S1",
+      "cwd": "/work/project",
+      "stop_hook_active": false,
+      "hook_event_name": "Stop"
+    },
+    "files": {
+      "{sandbox}/state/-work-project/S1/progress.json": "{not valid json",
+      "{sandbox}/lt_29760.jsonl": "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Skill\",\"input\":{\"skill\":\"coderails:agentic-loop\"}}]}}\n{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy\"}]}}\n"
+    },
+    "env": {
+      "CLAUDE_DISCIPLINE_LOG": "{sandbox}/discipline.log",
+      "CLAUDE_HOOK_MAX_ATTEMPTS": "1",
+      "CLAUDE_AGENTIC_LOOP_DIR": "{sandbox}/state",
+      "CLAUDE_HOOK_SLEEP_S": "0"
+    },
+    "stdout": "{\n  \"hookSpecificOutput\": {\n    \"hookEventName\": \"Stop\",\n    \"additionalContext\": \"[discipline-warn(loop)] response made substantive claims without (verified)/(inferred)/(guess) labels. Add them before stopping.\"\n  }\n}\n",
+    "returncode": 0,
+    "source": "check_confidence_labels",
+    "fixture_index": 19
+  },
+  {
+    "request": {
+      "transcript_path": "{sandbox}/lt_3294.jsonl",
+      "session_id": "S1",
+      "cwd": "/work/project",
+      "stop_hook_active": false,
+      "hook_event_name": "Stop"
+    },
+    "files": {
+      "{sandbox}/state/-work-project/S1/progress.json": "{\"schema_version\": 3, \"status\": \"complete\", \"session_id\": \"S1\", \"completed_marker\": 1}",
+      "{sandbox}/lt_3294.jsonl": "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Skill\",\"input\":{\"skill\":\"coderails:agentic-loop\"}}]}}\n{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Skill\",\"input\":{\"skill\":\"coderails:agentic-loop\"}}]}}\n{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy\"}]}}\n"
+    },
+    "env": {
+      "CLAUDE_DISCIPLINE_LOG": "{sandbox}/discipline.log",
+      "CLAUDE_HOOK_MAX_ATTEMPTS": "1",
+      "CLAUDE_AGENTIC_LOOP_DIR": "{sandbox}/state",
+      "CLAUDE_HOOK_SLEEP_S": "0"
+    },
+    "stdout": "{\n  \"hookSpecificOutput\": {\n    \"hookEventName\": \"Stop\",\n    \"additionalContext\": \"[discipline-warn(loop)] response made substantive claims without (verified)/(inferred)/(guess) labels. Add them before stopping.\"\n  }\n}\n",
+    "returncode": 0,
+    "source": "check_confidence_labels",
+    "fixture_index": 20
+  },
+  {
+    "request": {
+      "transcript_path": "{sandbox}/lt_25043.jsonl",
+      "session_id": "S1",
+      "cwd": "/work/project",
+      "stop_hook_active": false,
+      "hook_event_name": "Stop"
+    },
+    "files": {
+      "{sandbox}/state/-work-project/S1/progress.json": "{\"schema_version\": 3, \"status\": \"in-progress\", \"session_id\": \"S1\", \"completed_marker\": 0}",
+      "{sandbox}/lt_25043.jsonl": "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Skill\",\"input\":{\"skill\":\"coderails:agentic-loop\"}}]}}\n{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy\"}]}}\n"
+    },
+    "env": {
+      "CLAUDE_DISCIPLINE_LOG": "{sandbox}/discipline.log",
+      "CLAUDE_HOOK_MAX_ATTEMPTS": "1",
+      "CLAUDE_AGENTIC_LOOP_DIR": "{sandbox}/state",
+      "CLAUDE_HOOK_SLEEP_S": "0"
+    },
+    "stdout": "{\n  \"hookSpecificOutput\": {\n    \"hookEventName\": \"Stop\",\n    \"additionalContext\": \"[discipline-warn(loop)] response made substantive claims without (verified)/(inferred)/(guess) labels. Add them before stopping.\"\n  }\n}\n",
+    "returncode": 0,
+    "source": "check_confidence_labels",
+    "fixture_index": 22
+  }
+]

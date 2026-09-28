@@ -6,7 +6,7 @@ description: Create safety branch, new feature/bug branch, and create a Jira tic
 
 ## Project config
 
-Config: !`source "${CLAUDE_PLUGIN_ROOT}/scripts/lib/config.sh" && coderails::resolve_config`
+Config: !`python3 "${CLAUDE_PLUGIN_ROOT}/scripts/lib/config.py" resolve-config`
 
 If the config block above says `NO_CONFIG`, do NOT stop. Run in minimal mode with these defaults:
 - `config.jira` = null → skip all Jira steps (Task Part 2)
@@ -79,24 +79,34 @@ Feature and bug work must be isolated in a git worktree — never branch off or 
 
 ## Task Part 1b: Progress Stub (best-effort, non-blocking)
 
-After the worktree is created, write a `progress.json` stub for the new branch. This is purely a nicety — a failure here does **not** abort `/prep`. No other command depends on this file; it is a run record, not a gate.
+After the worktree is created, initialize a current-schema `progress.json` only if the resolved path does not already exist. This optional bootstrap must not overwrite an active or completed loop. Existing state belongs to the agentic-loop workflow: leave it unchanged, including its ownership, graph, review cache, and hook-owned fields. A failure here does **not** abort `/prep`; later graph dispatch and completion still enforce their own gates.
 
 Resolve the path by running the path helper — do NOT compute the path yourself. It keys the path on cwd and `$CLAUDE_CODE_SESSION_ID` (read automatically; no argument needed):
 
 ```bash
-bash "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/lib/agentic_loop_path.sh"
+python3 "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/lib/agentic_loop_path.py"
 ```
 
-Write the stub at the printed path with these fields:
+If that path is absent, write the stub with these fields:
 
 ```json
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "session_id": "<this session's id>",
+  "loop_id": "<a unique non-blank id for this loop>",
+  "revision": 1,
   "status": "in-progress",
   "created": "<ISO8601 timestamp>",
   "authorising_prompt_raw": "<the user's /prep invocation, verbatim>",
-  "work": [],
+  "completed_marker": 0,
+  "work_units": {},
+  "graph": {
+    "nodes": {},
+    "edges": [],
+    "joins": {},
+    "active_wave": null,
+    "hard_stop": null
+  },
   "review": {
     "ran": false,
     "pr": null,

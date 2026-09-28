@@ -1,0 +1,96 @@
+[
+  {
+    "request": {
+      "hook_event_name": "SubagentStop",
+      "session_id": "S_sub",
+      "agent_id": "agent-test",
+      "transcript_path": "/nonexistent/parent.jsonl",
+      "agent_transcript_path": "/nonexistent/subagent.jsonl",
+      "stop_hook_active": false,
+      "last_assistant_message": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    },
+    "files": {},
+    "env": {
+      "CLAUDE_DISCIPLINE_LOG": "{sandbox}/discipline.log",
+      "CLAUDE_HOOK_MAX_ATTEMPTS": "1",
+      "CLAUDE_AGENTIC_LOOP_DIR": "{sandbox}/state",
+      "CLAUDE_HOOK_SLEEP_S": "0"
+    },
+    "stdout": "",
+    "returncode": 2,
+    "source": "check_confidence_labels",
+    "fixture_index": 9
+  },
+  {
+    "request": {
+      "hook_event_name": "SubagentStop",
+      "session_id": "S_reg",
+      "agent_id": "agent-reg",
+      "transcript_path": "{sandbox}/t_5942.jsonl",
+      "agent_transcript_path": "/nonexistent/subagent.jsonl",
+      "stop_hook_active": false,
+      "last_assistant_message": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    },
+    "files": {
+      "{sandbox}/t_5942.jsonl": "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx (verified) parent content\"}]}}\n"
+    },
+    "env": {
+      "CLAUDE_DISCIPLINE_LOG": "{sandbox}/discipline.log",
+      "CLAUDE_HOOK_MAX_ATTEMPTS": "1",
+      "CLAUDE_AGENTIC_LOOP_DIR": "{sandbox}/state",
+      "CLAUDE_HOOK_SLEEP_S": "0"
+    },
+    "stdout": "",
+    "returncode": 2,
+    "source": "check_confidence_labels",
+    "fixture_index": 13
+  },
+  {
+    "request": {
+      "hook_event_name": "SubagentStop",
+      "session_id": "S1",
+      "transcript_path": "{sandbox}/lt_26435.jsonl",
+      "cwd": "/work/project",
+      "stop_hook_active": false,
+      "last_assistant_message": "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"
+    },
+    "files": {
+      "{sandbox}/state/-work-project/S1/progress.json": "{\"schema_version\": 3, \"status\": \"in-progress\", \"session_id\": \"S1\", \"completed_marker\": 0}",
+      "{sandbox}/lt_26435.jsonl": "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Skill\",\"input\":{\"skill\":\"coderails:agentic-loop\"}}]}}\n{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy\"}]}}\n"
+    },
+    "env": {
+      "CLAUDE_DISCIPLINE_LOG": "{sandbox}/discipline.log",
+      "CLAUDE_HOOK_MAX_ATTEMPTS": "1",
+      "CLAUDE_AGENTIC_LOOP_DIR": "{sandbox}/state",
+      "CLAUDE_HOOK_SLEEP_S": "0"
+    },
+    "stdout": "",
+    "returncode": 2,
+    "source": "check_confidence_labels",
+    "fixture_index": 21
+  },
+  {
+    "request": {
+      "hook_event_name": "SubagentStop",
+      "session_id": "S_sub",
+      "agent_id": "agent-test",
+      "transcript_path": "/nonexistent/parent.jsonl",
+      "agent_transcript_path": "/nonexistent/subagent.jsonl",
+      "stop_hook_active": false,
+      "last_assistant_message": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    },
+    "files": {
+      "{sandbox}/state/-work-project/S1/progress.json": "{\"schema_version\": 3, \"status\": \"in-progress\", \"session_id\": \"S1\", \"completed_marker\": 0}"
+    },
+    "env": {
+      "CLAUDE_DISCIPLINE_LOG": "{sandbox}/discipline.log",
+      "CLAUDE_HOOK_MAX_ATTEMPTS": "1",
+      "CLAUDE_AGENTIC_LOOP_DIR": "{sandbox}/state",
+      "CLAUDE_HOOK_SLEEP_S": "0"
+    },
+    "stdout": "",
+    "returncode": 2,
+    "source": "check_confidence_labels",
+    "fixture_index": 25
+  }
+]

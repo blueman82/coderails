@@ -263,7 +263,7 @@ export function createRunHandler(deps: RunHandlerDeps) {
       }
 
       // CODERAILS_HEADLESS_RUN=1 tells the discipline Stop hooks
-      // (check_confidence_labels.sh / check_verify_loop.sh) to exempt this
+      // (check_confidence_labels.py / check_verify_loop.py) to exempt this
       // run — a headless `claude -p` run has no way to satisfy a repair-turn
       // block, so the gate would otherwise displace the run's answer with
       // gate text. Must never be set anywhere else (see AGENTS.md ceilings note).

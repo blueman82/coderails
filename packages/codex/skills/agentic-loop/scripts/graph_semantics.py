@@ -5,25 +5,12 @@ from __future__ import annotations
 
 import copy
 import re
-from collections import deque
+from graphlib import CycleError, TopologicalSorter
 from typing import Any, NoReturn, cast
 
 STATUSES = frozenset({"pending", "ready", "running", "blocked", "done", "skipped", "failed", "hard-stop", "stale"})
 SUCCESS = frozenset({"done", "skipped"})
 PERSISTED_STATUSES = STATUSES - {"failed"}
-ID_PATTERNS = (
-    r"S-(?:2|1)",
-    r"S0(?:\.[45])?",
-    r"S1",
-    r"S2(?:\.[5678][a-e]?)?",
-    r"J2(?:\.8)?",
-    r"U(?:3|4|4b-review|5|5-repair|6|7/8|4b-merge-gate|10-respawn)\[[1-9][0-9]*\]",
-    r"J12-all-units",
-    r"G1[0-2]",
-    r"S9-(?:wiki|docs)",
-    r"S13-(?:proof|retro|complete)",
-)
-STABLE_ID = re.compile("(?:" + "|".join(ID_PATTERNS) + ")$")
 LABELS = {
     "S-2": "Initialize loop state",
     "S-1": "Improve prompt",
@@ -115,8 +102,6 @@ def _label_for(node_id: str) -> str:
 
 
 def _validate_node(node_id: str, value: object) -> dict[str, Any]:
-    if not STABLE_ID.fullmatch(node_id):
-        _error("node_id", f"node id {node_id} is not a stable schema-v3 id")
     node = _object(value, f"node {node_id}")
     if node.get("label") != _label_for(node_id):
         _error("node_label", f"node {node_id} label must match the registry")
@@ -194,21 +179,9 @@ def _dependencies(graph: dict[str, Any]) -> dict[str, set[str]]:
 
 
 def _validate_cycle(dependencies: dict[str, set[str]]) -> None:
-    outgoing: dict[str, set[str]] = {node_id: set() for node_id in dependencies}
-    indegree = {node_id: len(inputs) for node_id, inputs in dependencies.items()}
-    for target, inputs in dependencies.items():
-        for source in inputs:
-            outgoing[source].add(target)
-    queue: deque[str] = deque(sorted(node_id for node_id, degree in indegree.items() if degree == 0))
-    seen = 0
-    while queue:
-        source = queue.popleft()
-        seen += 1
-        for target in sorted(outgoing[source]):
-            indegree[target] -= 1
-            if indegree[target] == 0:
-                queue.append(target)
-    if seen != len(dependencies):
+    try:
+        tuple(TopologicalSorter(dependencies).static_order())
+    except CycleError:
         _error("cycle", "graph contains a dependency cycle")
 
 
@@ -221,8 +194,8 @@ def _validate_active_wave(graph: dict[str, Any], revision: int) -> None:
         return
     wave = _object(active, "active_wave")
     wave_id = wave.get("wave_id")
-    if not isinstance(wave_id, str) or not re.fullmatch(r"wave-[1-9][0-9]*", wave_id):
-        _error("active_wave", "active_wave.wave_id must be a wave identifier")
+    if wave_id != f"wave-{revision}":
+        _error("active_wave", "active_wave.wave_id must match its revision")
     if wave.get("revision") != revision:
         _error("active_wave", "active_wave revision must equal state revision")
     nodes = _array(wave.get("nodes"), "active_wave.nodes")
@@ -261,8 +234,7 @@ def _release_joins(state: dict[str, Any]) -> list[str]:
         join = graph["joins"][join_id]
         if not join["released"] and all(graph["nodes"][node_id]["status"] in SUCCESS for node_id in join["inputs"]):
             join["released"] = True
-            graph["nodes"][join_id]["status"] = "done"
-            graph["nodes"][join_id]["outcome"] = "done"
+            graph["nodes"][join_id].update(status="done", outcome="done")
             released.append(join_id)
     return released
 
@@ -297,8 +269,7 @@ def begin_wave(state: object) -> dict[str, Any]:
         _error("ready", "no graph nodes are ready")
     root["revision"] += 1
     for node_id in nodes:
-        graph["nodes"][node_id]["status"] = "running"
-        graph["nodes"][node_id]["outcome"] = "running"
+        graph["nodes"][node_id].update(status="running", outcome="running")
     wave = {"wave_id": f"wave-{root['revision']}", "revision": root["revision"], "nodes": nodes}
     graph["active_wave"] = wave
     return {"state": root, "wave": copy.deepcopy(wave)}
@@ -310,10 +281,9 @@ def _result(value: object, node_id: str) -> dict[str, Any]:
     if outcome not in {"done", "skipped", "failed", "stale"}:
         _error("result", f"result {node_id} has invalid outcome")
     _text(result.get("evidence"), f"result {node_id}.evidence")
-    if outcome == "stale":
-        _stale_check(result.get("stale_check"), f"result {node_id}")
     keys: set[str] = {"outcome", "evidence"}
     if outcome == "stale":
+        _stale_check(result.get("stale_check"), f"result {node_id}")
         keys.add("stale_check")
     if set(result) != keys:
         _error("result", f"result {node_id} has invalid fields")
@@ -342,12 +312,9 @@ def record_wave(state: object, wave_id: object, results: object) -> dict[str, An
         node["evidence"].append(result["evidence"])
         outcome = result["outcome"]
         if outcome in SUCCESS:
-            node["status"] = outcome
-            node["outcome"] = outcome
+            node.update(status=outcome, outcome=outcome)
         elif outcome == "stale":
-            node["status"] = "stale"
-            node["outcome"] = "stale"
-            node["stale_check"] = result["stale_check"]
+            node.update(status="stale", outcome="stale", stale_check=result["stale_check"])
         else:
             node["retry"]["attempts"] += 1
             exhausted = node["retry"]["attempts"] >= node["retry"]["max"]
@@ -376,8 +343,7 @@ def respawn_stale(state: object, node_id: object, reason: object) -> dict[str, A
     node["respawn"]["generation"] += 1
     generation = node["respawn"]["generation"]
     node["respawn"]["intent"] = {"generation": generation, "reason": reason_text}
-    node["status"] = "pending"
-    node["outcome"] = "pending"
+    node.update(status="pending", outcome="pending")
     root["revision"] += 1
     return {"state": root, "respawn": {"node_id": node_key, "generation": generation, "reason": reason_text}}
 
@@ -391,14 +357,13 @@ def hard_stop(state: object, node_id: object, reason: object) -> dict[str, Any]:
     if node_key not in graph["nodes"] or graph["nodes"][node_key]["status"] in SUCCESS:
         _error("hard_stop", "hard_stop requires an unfinished node")
     node = graph["nodes"][node_key]
-    node["status"] = "hard-stop"
-    node["outcome"] = "hard-stop"
+    node.update(status="hard-stop", outcome="hard-stop")
     graph["hard_stop"] = {"node": node_key, "reason": reason_text}
     active = graph["active_wave"]
     if active is not None and node_key in active["nodes"]:
         active["nodes"] = [item for item in active["nodes"] if item != node_key]
         if active["nodes"]:
-            active["revision"] = root["revision"] + 1
+            active.update(revision=root["revision"] + 1, wave_id=f"wave-{root['revision'] + 1}")
         else:
             graph["active_wave"] = None
     root["revision"] += 1
@@ -420,13 +385,8 @@ def inspect(state: object) -> dict[str, Any]:
 
 def can_complete(state: object) -> dict[str, Any]:
     """Return canonical completion eligibility, excluding provider work-unit gates."""
-    root = validate(state)
-    graph = root["graph"]
-    blockers: list[str] = []
-    if graph["active_wave"] is not None:
-        blockers.append("active_wave")
-    if graph["hard_stop"] is not None:
-        blockers.append("hard_stop")
+    graph = validate(state)["graph"]
+    blockers = [key for key in ("active_wave", "hard_stop") if graph[key] is not None]
     unfinished = sorted(node_id for node_id, node in graph["nodes"].items() if node["status"] not in SUCCESS)
     if unfinished:
         blockers.append("unfinished:" + ",".join(unfinished))

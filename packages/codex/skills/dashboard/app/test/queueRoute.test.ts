@@ -280,7 +280,7 @@ describe("POST /api/queue — pending-only guard + build spawn seam", () => {
 describe("makeClaimAndSpawnBuild", () => {
   // Exercises the production wiring's wrapper_not_found fallback directly.
   // The bare POST export always sees a real, resolved WRAPPER_PATH in
-  // dev/CI (scripts/run-builder.sh genuinely exists there), so this branch
+  // dev/CI (scripts/run_builder.py genuinely exists there), so this branch
   // is otherwise untestable through POST/createQueueActionHandler alone —
   // this test targets the extracted, parameterised function instead.
   it("returns {claimed:false, error:'wrapper_not_found'} when wrapperPath is null, without ever calling the real spawn", () => {

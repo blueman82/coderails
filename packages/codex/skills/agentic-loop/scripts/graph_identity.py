@@ -98,6 +98,11 @@ def classify_worker_evidence(
     return shaped, identifiers
 
 
+def next_attempt(node: dict[str, Any]) -> int:
+    """Allocate a unique native dispatch attempt across retries and stale respawns."""
+    return int(node["retry"]["attempts"]) + int(node["respawn"]["generation"]) + 1
+
+
 def task_name(node_id: str, attempt: object = 1) -> str:
     """Return the canonical worker task name for one node attempt."""
     if isinstance(attempt, bool) or not isinstance(attempt, int) or attempt < 1:
@@ -108,7 +113,7 @@ def task_name(node_id: str, attempt: object = 1) -> str:
 
 def task_node(name: str) -> str:
     """Decode and validate a canonical worker task name."""
-    match = re.fullmatch(r"loop_worker_([0-9a-f]+)(?:_a([2-9][0-9]*))?", name)
+    match = re.fullmatch(r"loop_worker_([0-9a-f]+)(?:_a([1-9][0-9]*))?", name)
     if match is None:
         raise GraphError("graph worker task name must use the native lowercase format")
     encoded, retry = match.groups()
@@ -157,28 +162,3 @@ def is_frozen_loop_evals(evals: dict[str, Any]) -> bool:
         ):
             return False
     return has_p0
-
-
-def active_nodes(active_wave: object, nodes: dict[str, Any], revision: int) -> set[str]:
-    """Validate an active wave and return the nodes it owns."""
-    if active_wave is None:
-        return set()
-    if not isinstance(active_wave, dict):
-        raise GraphError("graph.active_wave must be an object")
-    active_wave = cast(dict[str, Any], active_wave)
-    if active_wave.get("id") != f"wave-{revision}" or active_wave.get("revision") != revision:
-        raise GraphError("graph.active_wave identity must match the root revision")
-    wave_nodes = active_wave.get("nodes")
-    if not isinstance(wave_nodes, list):
-        raise GraphError("graph.active_wave.nodes must be a non-empty unique array")
-    wave_nodes = cast(list[object], wave_nodes)
-    if (
-        not wave_nodes
-        or any(not isinstance(item, str) for item in wave_nodes)
-        or len(wave_nodes) != len(set(wave_nodes))
-    ):
-        raise GraphError("graph.active_wave.nodes must be a non-empty unique array")
-    wave_nodes = cast(list[str], wave_nodes)
-    if any(node_id not in nodes or nodes[node_id]["status"] != "running" for node_id in wave_nodes):
-        raise GraphError("graph.active_wave must contain known running nodes")
-    return set(wave_nodes)

@@ -1,0 +1,72 @@
+[
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "cp /tmp/x foo.py"
+      },
+      "cwd": "{sandbox}/main_repo"
+    },
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_workflow.test.sh",
+    "expected": {
+      "hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": "In-Bash source write (cp/mv/dd) on main branch blocked.\nFull command: cp /tmp/x foo.py\nWriting source files via cp/mv/dd on main is blocked. Switch to a feature branch."
+      }
+    },
+    "fixture_index": 313
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "cp /tmp/x foo.py"
+      },
+      "cwd": "{sandbox}/feat_repo"
+    },
+    "stdout": "",
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_workflow.test.sh",
+    "expected": {},
+    "fixture_index": 316
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "cp /tmp/x skills/mything/SKILL.md"
+      },
+      "cwd": "{sandbox}/main_repo"
+    },
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_workflow.test.sh",
+    "expected": {
+      "hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": "In-Bash source write (cp/mv/dd) on main branch blocked.\nFull command: cp /tmp/x skills/mything/SKILL.md\nWriting source files via cp/mv/dd on main is blocked. Switch to a feature branch."
+      }
+    },
+    "fixture_index": 319
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "cp /tmp/x README.md"
+      },
+      "cwd": "{sandbox}/main_repo"
+    },
+    "stdout": "",
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_workflow.test.sh",
+    "expected": {},
+    "fixture_index": 321
+  }
+]

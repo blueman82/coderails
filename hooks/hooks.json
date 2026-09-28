@@ -11,7 +11,7 @@
           },
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/remember_inject_cap_guard.sh\"",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/remember_inject_cap_guard.py\"",
             "async": false
           }
         ]
@@ -38,18 +38,18 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/voice_announce.sh\"",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/voice_announce.py\"",
             "timeout": 15,
             "async": true
           },
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/check_confidence_labels.sh\"",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/check_confidence_labels.py\"",
             "timeout": 15
           },
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/check_verify_loop.sh\"",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/check_verify_loop.py\"",
             "timeout": 15
           },
           {
@@ -59,17 +59,17 @@
           },
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/loop_state_guard.sh\"",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/loop_state_guard.py\"",
             "timeout": 15
           },
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/loop_stall_guard.sh\"",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/loop_stall_guard.py\"",
             "timeout": 15
           },
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/unregistered_loop_guard.sh\"",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/unregistered_loop_guard.py\"",
             "timeout": 15
           },
           {
@@ -85,12 +85,12 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/check_confidence_labels.sh\"",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/check_confidence_labels.py\"",
             "timeout": 15
           },
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/check_verify_loop.sh\"",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/check_verify_loop.py\"",
             "timeout": 15
           },
           {
@@ -107,12 +107,12 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/destructive_bash_gate.sh\"",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/destructive_bash_gate.py\"",
             "timeout": 5
           },
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/enforce_pr_workflow.sh\"",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/enforce_pr_workflow.py\"",
             "timeout": 10
           },
           {
@@ -157,7 +157,7 @@
           },
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/loop_dispatch_guard.sh\"",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/loop_dispatch_guard.py\"",
             "timeout": 10
           }
         ]
@@ -177,7 +177,7 @@
           },
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/wiki_taxonomy_gate.sh\"",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/wiki_taxonomy_gate.py\"",
             "timeout": 5
           }
         ]

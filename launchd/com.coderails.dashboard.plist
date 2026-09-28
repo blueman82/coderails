@@ -6,7 +6,7 @@
   <string>com.coderails.dashboard</string>
   <key>ProgramArguments</key>
   <array>
-    <string>/Users/harrison/Github/coderails/skills/dashboard/runner/bin/dashboard-server.sh</string>
+    <string>/Users/harrison/Github/coderails/skills/dashboard/runner/bin/dashboard_server.py</string>
   </array>
   <key>EnvironmentVariables</key>
   <dict>

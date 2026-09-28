@@ -6,6 +6,7 @@ import json
 import os
 import select
 import sys
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Union, cast
@@ -14,11 +15,21 @@ JsonScalar = Union[None, bool, int, float, str]
 JsonValue = Union[JsonScalar, list["JsonValue"], dict[str, "JsonValue"]]
 
 
-def read_payload() -> dict[str, JsonValue]:
+def read_payload(timeout_seconds: float = 5.0) -> dict[str, JsonValue]:
     """Read hook stdin for at most five seconds; malformed input fails open."""
     try:
-        ready, _, _ = select.select([sys.stdin], [], [], 5)
-        raw = sys.stdin.read() if ready else ""
+        descriptor = sys.stdin.fileno()
+        chunks = bytearray()
+        deadline = time.monotonic() + timeout_seconds
+        while (remaining := deadline - time.monotonic()) > 0:
+            ready, _, _ = select.select([descriptor], [], [], remaining)
+            if not ready:
+                break
+            chunk = os.read(descriptor, 65536)
+            if not chunk:
+                break
+            chunks.extend(chunk)
+        raw = chunks.decode(errors="replace")
         decoded = cast(JsonValue, json.loads(raw)) if raw else {}
     except (OSError, ValueError, json.JSONDecodeError):
         return {}

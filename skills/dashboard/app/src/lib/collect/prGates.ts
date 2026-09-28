@@ -33,7 +33,7 @@ function escapeRegExp(value: string): string {
 
 // Matches a comment body against the eval-marker grammar for `pr`, at ANY
 // result/verification_level, mirroring eval_artifact::parse_result/parse_verification_level
-// (scripts/lib/eval-artifact.sh) EXACTLY: those functions anchor the WHOLE
+// (scripts/lib/eval_artifact.py) EXACTLY: those functions anchor the WHOLE
 // LINE (`^<!-- ... -->$`) and restrict result to GO|NO-GO, verification_level to a single
 // digit [0-2] — a marker embedded mid-sentence, or carrying an out-of-range
 // verification_level or non-vocabulary result, fails closed in the shell and must fail
@@ -62,7 +62,7 @@ function matchEvalMarkers(
 }
 
 // Mirrors review_artifact::matches_marker's exact-equality approach
-// (scripts/lib/review-artifact.sh): that function compares a LINE against
+// (scripts/lib/review_artifact.py): that function compares a LINE against
 // the marker with string equality (`[ "$line" = "$(marker ...)" ]`), not a
 // substring grep, so junk prefix/suffix on the line fails to match. We test
 // each line of the body against a whole-line-anchored pattern for the same

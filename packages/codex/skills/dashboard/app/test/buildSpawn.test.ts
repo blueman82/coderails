@@ -68,7 +68,7 @@ describe("claimAndSpawnBuild", () => {
   it("valid claim creates buildDir with snapshot.json (byte-identical to entry), state.json (state:'claimed'), and prompt.md, and calls spawnImpl with [wrapperPath, buildDir] and CODERAILS_BUILDER=1 env", () => {
     const buildsDir = tmpDir("dashboard-build-spawn-valid-");
     const entry = makeEntry();
-    const wrapperPath = "/path/to/run-builder.sh";
+    const wrapperPath = "/path/to/run_builder.py";
     const { fn, calls } = makeFakeSpawn();
 
     const result = claimAndSpawnBuild(entry, { buildsDir, wrapperPath, spawnImpl: fn });
@@ -81,7 +81,7 @@ describe("claimAndSpawnBuild", () => {
     expect(existsSync(join(buildDir, "prompt.md"))).toBe(true);
 
     expect(calls).toHaveLength(1);
-    expect(calls[0].command).toBe("bash");
+    expect(calls[0].command).toBe("python3");
     expect(calls[0].args).toEqual([wrapperPath, buildDir]);
     expect(calls[0].options).toMatchObject({
       detached: true,
@@ -144,12 +144,12 @@ describe("claimAndSpawnBuild", () => {
 
 describe("resolveDefaultWrapperPath", () => {
   // route.ts previously resolved the wrapper path via
-  // join(process.cwd(), "..", "scripts", "run-builder.sh") — cwd-relative,
+  // join(process.cwd(), "..", "scripts", "run_builder.py") — cwd-relative,
   // which breaks under a production Next.js server whose cwd is not
   // guaranteed to be the app root (the exact class of bug the
   // prod-prerender war story documents in project memory). This walks
   // upward from the module's own location (not cwd) looking for the known
-  // sibling scripts/run-builder.sh, so it's stable regardless of the
+  // sibling scripts/run_builder.py, so it's stable regardless of the
   // server process's working directory.
   it("resolves an absolute path that exists on disk, independent of process.cwd()", () => {
     const originalCwd = process.cwd();
@@ -159,17 +159,17 @@ describe("resolveDefaultWrapperPath", () => {
       expect(resolved).not.toBeNull();
       if (resolved) {
         expect(existsSync(resolved)).toBe(true);
-        expect(resolved.endsWith("run-builder.sh")).toBe(true);
+        expect(resolved.endsWith("run_builder.py")).toBe(true);
       }
     } finally {
       process.chdir(originalCwd);
     }
   });
 
-  it("returns null (not a wrong guess) when no scripts/run-builder.sh sibling can be found from the given start directory or cwd", () => {
+  it("returns null (not a wrong guess) when no scripts/run_builder.py sibling can be found from the given start directory or cwd", () => {
     const isolatedDir = tmpDir("dashboard-resolve-wrapper-isolated-");
     const isolatedCwd = tmpDir("dashboard-resolve-wrapper-isolated-cwd-");
-    // An isolated tmp dir has no ancestor containing scripts/run-builder.sh
+    // An isolated tmp dir has no ancestor containing scripts/run_builder.py
     // within the search bound (for either the startDir walk or the cwd
     // fallback walk), so this must fail closed rather than fabricate a
     // nonexistent path.
@@ -183,30 +183,30 @@ describe("resolveDefaultWrapperPath", () => {
     }
   });
 
-  it("finds scripts/run-builder.sh by walking up from a nested start directory that has it as a sibling further up", () => {
+  it("finds scripts/run_builder.py by walking up from a nested start directory that has it as a sibling further up", () => {
     const fakeRepoRoot = tmpDir("dashboard-resolve-wrapper-fakeroot-");
     mkdirSync(join(fakeRepoRoot, "scripts"), { recursive: true });
     writeFileSync(
-      join(fakeRepoRoot, "scripts", "run-builder.sh"),
-      "#!/bin/bash\n# Owns the build lifecycle state machine for one approved\n"
+      join(fakeRepoRoot, "scripts", "run_builder.py"),
+      "#!/usr/bin/env python3\n# Own the provider-local approved builder lock, validation, watchdog and terminal artifacts.\n"
     );
     const nestedStart = join(fakeRepoRoot, "app", "src", "lib", "build");
     mkdirSync(nestedStart, { recursive: true });
 
     const resolved = resolveDefaultWrapperPath(nestedStart);
-    expect(resolved).toBe(join(fakeRepoRoot, "scripts", "run-builder.sh"));
+    expect(resolved).toBe(join(fakeRepoRoot, "scripts", "run_builder.py"));
   });
 
-  it("rejects a scripts/run-builder.sh that exists but lacks the identity marker, continuing the walk-up rather than accepting a false-positive match (silent-failure-hunter finding: monorepo/nested-checkout collision)", () => {
+  it("rejects a scripts/run_builder.py that exists but lacks the identity marker, continuing the walk-up rather than accepting a false-positive match (silent-failure-hunter finding: monorepo/nested-checkout collision)", () => {
     const outerRoot = tmpDir("dashboard-resolve-wrapper-outer-");
     // An unrelated file that happens to share the exact relative path
-    // scripts/run-builder.sh but is NOT this repo's wrapper — e.g. a
+    // scripts/run_builder.py but is NOT this repo's wrapper — e.g. a
     // nested checkout or monorepo sibling project with its own script of
     // the same name.
     mkdirSync(join(outerRoot, "unrelated-project", "scripts"), { recursive: true });
     writeFileSync(
-      join(outerRoot, "unrelated-project", "scripts", "run-builder.sh"),
-      "#!/bin/bash\necho 'this is an unrelated script, not the coderails builder wrapper'\n"
+      join(outerRoot, "unrelated-project", "scripts", "run_builder.py"),
+      "#!/usr/bin/env python3\nprint('this is an unrelated script, not the coderails builder wrapper')\n"
     );
     const nestedStart = join(outerRoot, "unrelated-project", "app", "src");
     mkdirSync(nestedStart, { recursive: true });
@@ -226,7 +226,7 @@ describe("resolveDefaultWrapperPath", () => {
   // bundler virtualises __dirname into a chunk path like
   // "[root-of-the-server]__foo.js" that doesn't exist on disk, so the
   // __dirname-anchored walk-up above finds nothing even though the real
-  // scripts/run-builder.sh is right there on the deployed filesystem.
+  // scripts/run_builder.py is right there on the deployed filesystem.
   // These tests exercise the fallback chain that makes resolution
   // production-safe: env override first, then the __dirname walk (already
   // covered above), then a process.cwd()-anchored walk as a last resort —
@@ -246,10 +246,10 @@ describe("resolveDefaultWrapperPath", () => {
 
     it("prefers CODERAILS_BUILDER_WRAPPER env override when it points at a file passing the identity check", () => {
       const envDir = tmpDir("dashboard-resolve-wrapper-env-");
-      const envWrapper = join(envDir, "run-builder.sh");
+      const envWrapper = join(envDir, "run_builder.py");
       writeFileSync(
         envWrapper,
-        "#!/bin/bash\n# Owns the build lifecycle state machine for one approved\n"
+        "#!/usr/bin/env python3\n# Own the provider-local approved builder lock, validation, watchdog and terminal artifacts.\n"
       );
       process.env[ENV_VAR] = envWrapper;
 
@@ -261,8 +261,8 @@ describe("resolveDefaultWrapperPath", () => {
 
     it("rejects a CODERAILS_BUILDER_WRAPPER override that fails the identity check, falling through to the next verification_level rather than trusting it blindly", () => {
       const envDir = tmpDir("dashboard-resolve-wrapper-env-bad-");
-      const badWrapper = join(envDir, "run-builder.sh");
-      writeFileSync(badWrapper, "#!/bin/bash\necho 'not the real wrapper'\n");
+      const badWrapper = join(envDir, "run_builder.py");
+      writeFileSync(badWrapper, "#!/usr/bin/env python3\nprint('not the real wrapper')\n");
       process.env[ENV_VAR] = badWrapper;
 
       // No valid sibling exists from an isolated start dir OR an isolated
@@ -281,7 +281,7 @@ describe("resolveDefaultWrapperPath", () => {
     });
 
     it("rejects a CODERAILS_BUILDER_WRAPPER override pointing at a nonexistent file, falling through", () => {
-      process.env[ENV_VAR] = join(tmpdir(), "does-not-exist-run-builder.sh");
+      process.env[ENV_VAR] = join(tmpdir(), "does-not-exist-run_builder.py");
       const isolatedDir = tmpDir("dashboard-resolve-wrapper-env-missing-isolated-");
       const isolatedCwd = tmpDir("dashboard-resolve-wrapper-env-missing-cwd-");
       const originalCwd = process.cwd();
@@ -299,20 +299,20 @@ describe("resolveDefaultWrapperPath", () => {
       const fakeRepoRoot = tmpDir("dashboard-resolve-wrapper-cwd-fallback-");
       mkdirSync(join(fakeRepoRoot, "scripts"), { recursive: true });
       writeFileSync(
-        join(fakeRepoRoot, "scripts", "run-builder.sh"),
-        "#!/bin/bash\n# Owns the build lifecycle state machine for one approved\n"
+        join(fakeRepoRoot, "scripts", "run_builder.py"),
+        "#!/usr/bin/env python3\n# Own the provider-local approved builder lock, validation, watchdog and terminal artifacts.\n"
       );
       // A start dir that does NOT exist on disk at all — the closest
       // realistic stand-in for a bundler-virtualised __dirname value like
       // "[root-of-the-server]__foo.js", which also resolves to a path with
-      // no real ancestors containing scripts/run-builder.sh.
+      // no real ancestors containing scripts/run_builder.py.
       const virtualStartDir = join(fakeRepoRoot, "__virtual__", "chunk", "does", "not", "exist");
 
       const originalCwd = process.cwd();
       try {
         process.chdir(fakeRepoRoot);
         const resolved = resolveDefaultWrapperPath(virtualStartDir);
-        expect(resolved).toBe(join(fakeRepoRoot, "scripts", "run-builder.sh"));
+        expect(resolved).toBe(join(fakeRepoRoot, "scripts", "run_builder.py"));
       } finally {
         process.chdir(originalCwd);
       }

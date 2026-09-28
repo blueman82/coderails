@@ -14,11 +14,11 @@ from pathlib import Path
 from typing import cast
 
 FULL_SUITE = re.compile(
-    r"(^|[&;|])\s*(bash\s+|sh\s+|\./)?([^\s]*/)?"
-    r"(hooks/scripts/tests/run_all|packages/tests/codex_hooks\.test)\.sh(\s|$)"
+    r"(^|[&;|])\s*(python3?\s+|\./)?([^\s]*/)?"
+    r"(hooks/scripts/tests/run_all|packages/tests/test_codex_hooks)\.py(\s|$)"
 )
 EVAL_CEREMONY = re.compile(
-    r"(^|[&;|])\s*(bash\s+|sh\s+|\./)?([^\s]*/)?" r"scripts/post_evals\.sh\s+validate-structure(\s|$)"
+    r"(^|[&;|])\s*(python3?\s+|\./)?([^\s]*/)?" r"scripts/post_evals\.py\s+validate-structure(\s|$)"
 )
 STATE_ERROR = "Verification-volume ceiling cannot create its state directory, so it is failing closed."
 LOCK_ERROR = "Verification-volume ceiling could not acquire its branch lock, so it is failing closed."

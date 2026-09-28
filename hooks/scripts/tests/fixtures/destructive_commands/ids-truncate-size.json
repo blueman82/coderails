@@ -1,0 +1,44 @@
+[
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "truncate -s0 logfile.txt"
+      },
+      "cwd": "{sandbox}/feat_repo"
+    },
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_ids.test.sh",
+    "expected": {
+      "hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": "Destructive pattern detected: truncate -s/--size\nFull command: truncate -s0 logfile.txt\nThis command is permanently blocked. Safe route: there is no safe equivalent \u2014 truncate destroys file content in place. Back up the file first ('cp <file> <file>.bak') if you need to recover it, or find a non-destructive way to achieve the goal (e.g. rotate the log instead of truncating it). To allow this pattern, add a Bash permission rule to settings.json.",
+        "patternId": "truncate-size"
+      }
+    },
+    "fixture_index": 193
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "truncate -s0 logfile.txt"
+      },
+      "cwd": "{sandbox}/feat_repo"
+    },
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_ids.test.sh",
+    "expected": {
+      "hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": "Destructive pattern detected: truncate -s/--size\nFull command: truncate -s0 logfile.txt\nThis command is permanently blocked. Safe route: there is no safe equivalent \u2014 truncate destroys file content in place. Back up the file first ('cp <file> <file>.bak') if you need to recover it, or find a non-destructive way to achieve the goal (e.g. rotate the log instead of truncating it). To allow this pattern, add a Bash permission rule to settings.json.",
+        "patternId": "truncate-size"
+      }
+    },
+    "fixture_index": 194
+  }
+]

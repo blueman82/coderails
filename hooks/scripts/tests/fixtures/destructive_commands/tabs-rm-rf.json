@@ -1,0 +1,338 @@
+[
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "rm\t-rf /tmp/x"
+      },
+      "cwd": "{sandbox}/feat_repo"
+    },
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_tabs.test.sh",
+    "expected": {
+      "hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": "Destructive pattern detected: rm\t-rf\nFull command: rm\t-rf /tmp/x\nThis command is permanently blocked. Safe route: for a single file, use 'unlink <file>' instead of rm -rf. For a directory or multiple files, move the target into a temp dir (e.g. 'mkdir -p /tmp/trash && mv <target> /tmp/trash/') instead of deleting it outright.",
+        "patternId": "rm-rf"
+      }
+    },
+    "fixture_index": 225
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "rm${IFS}-rf /tmp/x"
+      },
+      "cwd": "{sandbox}/feat_repo"
+    },
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_tabs.test.sh",
+    "expected": {
+      "hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": "Destructive pattern detected: rm -rf\nFull command: rm -rf /tmp/x\nThis command is permanently blocked. Safe route: for a single file, use 'unlink <file>' instead of rm -rf. For a directory or multiple files, move the target into a temp dir (e.g. 'mkdir -p /tmp/trash && mv <target> /tmp/trash/') instead of deleting it outright.",
+        "patternId": "rm-rf"
+      }
+    },
+    "fixture_index": 248
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "rm$IFS-rf /tmp/x"
+      },
+      "cwd": "{sandbox}/feat_repo"
+    },
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_tabs.test.sh",
+    "expected": {
+      "hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": "Destructive pattern detected: rm -rf\nFull command: rm -rf /tmp/x\nThis command is permanently blocked. Safe route: for a single file, use 'unlink <file>' instead of rm -rf. For a directory or multiple files, move the target into a temp dir (e.g. 'mkdir -p /tmp/trash && mv <target> /tmp/trash/') instead of deleting it outright.",
+        "patternId": "rm-rf"
+      }
+    },
+    "fixture_index": 249
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "rm${IFS:0:1}-rf /tmp/x"
+      },
+      "cwd": "{sandbox}/feat_repo"
+    },
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_tabs.test.sh",
+    "expected": {
+      "hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": "Destructive pattern detected: rm -rf\nFull command: rm -rf /tmp/x\nThis command is permanently blocked. Safe route: for a single file, use 'unlink <file>' instead of rm -rf. For a directory or multiple files, move the target into a temp dir (e.g. 'mkdir -p /tmp/trash && mv <target> /tmp/trash/') instead of deleting it outright.",
+        "patternId": "rm-rf"
+      }
+    },
+    "fixture_index": 250
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "rm${IFS:-y}-rf /tmp/x"
+      },
+      "cwd": "{sandbox}/feat_repo"
+    },
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_tabs.test.sh",
+    "expected": {
+      "hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": "Destructive pattern detected: rm -rf\nFull command: rm -rf /tmp/x\nThis command is permanently blocked. Safe route: for a single file, use 'unlink <file>' instead of rm -rf. For a directory or multiple files, move the target into a temp dir (e.g. 'mkdir -p /tmp/trash && mv <target> /tmp/trash/') instead of deleting it outright.",
+        "patternId": "rm-rf"
+      }
+    },
+    "fixture_index": 254
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "rm${IFS: -1}-rf /tmp/x"
+      },
+      "cwd": "{sandbox}/feat_repo"
+    },
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_tabs.test.sh",
+    "expected": {
+      "hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": "Destructive pattern detected: rm -rf\nFull command: rm -rf /tmp/x\nThis command is permanently blocked. Safe route: for a single file, use 'unlink <file>' instead of rm -rf. For a directory or multiple files, move the target into a temp dir (e.g. 'mkdir -p /tmp/trash && mv <target> /tmp/trash/') instead of deleting it outright.",
+        "patternId": "rm-rf"
+      }
+    },
+    "fixture_index": 258
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "rm${IFS:(-1)}-rf /tmp/x"
+      },
+      "cwd": "{sandbox}/feat_repo"
+    },
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_tabs.test.sh",
+    "expected": {
+      "hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": "Destructive pattern detected: rm -rf\nFull command: rm -rf /tmp/x\nThis command is permanently blocked. Safe route: for a single file, use 'unlink <file>' instead of rm -rf. For a directory or multiple files, move the target into a temp dir (e.g. 'mkdir -p /tmp/trash && mv <target> /tmp/trash/') instead of deleting it outright.",
+        "patternId": "rm-rf"
+      }
+    },
+    "fixture_index": 259
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "rm${IFS:+ }-rf /tmp/x"
+      },
+      "cwd": "{sandbox}/feat_repo"
+    },
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_tabs.test.sh",
+    "expected": {
+      "hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": "Destructive pattern detected: rm -rf\nFull command: rm -rf /tmp/x\nThis command is permanently blocked. Safe route: for a single file, use 'unlink <file>' instead of rm -rf. For a directory or multiple files, move the target into a temp dir (e.g. 'mkdir -p /tmp/trash && mv <target> /tmp/trash/') instead of deleting it outright.",
+        "patternId": "rm-rf"
+      }
+    },
+    "fixture_index": 268
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "rm${IFS+ }-rf /tmp/x"
+      },
+      "cwd": "{sandbox}/feat_repo"
+    },
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_tabs.test.sh",
+    "expected": {
+      "hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": "Destructive pattern detected: rm -rf\nFull command: rm -rf /tmp/x\nThis command is permanently blocked. Safe route: for a single file, use 'unlink <file>' instead of rm -rf. For a directory or multiple files, move the target into a temp dir (e.g. 'mkdir -p /tmp/trash && mv <target> /tmp/trash/') instead of deleting it outright.",
+        "patternId": "rm-rf"
+      }
+    },
+    "fixture_index": 269
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "rm${IFS:+  }-rf /tmp/x"
+      },
+      "cwd": "{sandbox}/feat_repo"
+    },
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_tabs.test.sh",
+    "expected": {
+      "hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": "Destructive pattern detected: rm  -rf\nFull command: rm  -rf /tmp/x\nThis command is permanently blocked. Safe route: for a single file, use 'unlink <file>' instead of rm -rf. For a directory or multiple files, move the target into a temp dir (e.g. 'mkdir -p /tmp/trash && mv <target> /tmp/trash/') instead of deleting it outright.",
+        "patternId": "rm-rf"
+      }
+    },
+    "fixture_index": 270
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "rm${IFS:+ -r}f /tmp/x"
+      },
+      "cwd": "{sandbox}/feat_repo"
+    },
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_tabs.test.sh",
+    "expected": {
+      "hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": "Destructive pattern detected: rm -rf\nFull command: rm -rf /tmp/x\nThis command is permanently blocked. Safe route: for a single file, use 'unlink <file>' instead of rm -rf. For a directory or multiple files, move the target into a temp dir (e.g. 'mkdir -p /tmp/trash && mv <target> /tmp/trash/') instead of deleting it outright.",
+        "patternId": "rm-rf"
+      }
+    },
+    "fixture_index": 272
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "rm ${IFS:+-rf} /tmp/x"
+      },
+      "cwd": "{sandbox}/feat_repo"
+    },
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_tabs.test.sh",
+    "expected": {
+      "hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": "Destructive pattern detected: rm -rf\nFull command: rm -rf /tmp/x\nThis command is permanently blocked. Safe route: for a single file, use 'unlink <file>' instead of rm -rf. For a directory or multiple files, move the target into a temp dir (e.g. 'mkdir -p /tmp/trash && mv <target> /tmp/trash/') instead of deleting it outright.",
+        "patternId": "rm-rf"
+      }
+    },
+    "fixture_index": 274
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "rm${IFS}${IFS:+-rf} /tmp/x"
+      },
+      "cwd": "{sandbox}/feat_repo"
+    },
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_tabs.test.sh",
+    "expected": {
+      "hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": "Destructive pattern detected: rm -rf\nFull command: rm -rf /tmp/x\nThis command is permanently blocked. Safe route: for a single file, use 'unlink <file>' instead of rm -rf. For a directory or multiple files, move the target into a temp dir (e.g. 'mkdir -p /tmp/trash && mv <target> /tmp/trash/') instead of deleting it outright.",
+        "patternId": "rm-rf"
+      }
+    },
+    "fixture_index": 275
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "rm${IFS:=y}-rf /tmp/x"
+      },
+      "cwd": "{sandbox}/feat_repo"
+    },
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_tabs.test.sh",
+    "expected": {
+      "hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": "Destructive pattern detected: rm -rf\nFull command: rm -rf /tmp/x\nThis command is permanently blocked. Safe route: for a single file, use 'unlink <file>' instead of rm -rf. For a directory or multiple files, move the target into a temp dir (e.g. 'mkdir -p /tmp/trash && mv <target> /tmp/trash/') instead of deleting it outright.",
+        "patternId": "rm-rf"
+      }
+    },
+    "fixture_index": 277
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "rm${IFS=y}-rf /tmp/x"
+      },
+      "cwd": "{sandbox}/feat_repo"
+    },
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_tabs.test.sh",
+    "expected": {
+      "hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": "Destructive pattern detected: rm -rf\nFull command: rm -rf /tmp/x\nThis command is permanently blocked. Safe route: for a single file, use 'unlink <file>' instead of rm -rf. For a directory or multiple files, move the target into a temp dir (e.g. 'mkdir -p /tmp/trash && mv <target> /tmp/trash/') instead of deleting it outright.",
+        "patternId": "rm-rf"
+      }
+    },
+    "fixture_index": 278
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "rm${IFS:+\t-r}f /tmp/x"
+      },
+      "cwd": "{sandbox}/feat_repo"
+    },
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_tabs.test.sh",
+    "expected": {
+      "hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": "Destructive pattern detected: rm\t-rf\nFull command: rm\t-rf /tmp/x\nThis command is permanently blocked. Safe route: for a single file, use 'unlink <file>' instead of rm -rf. For a directory or multiple files, move the target into a temp dir (e.g. 'mkdir -p /tmp/trash && mv <target> /tmp/trash/') instead of deleting it outright.",
+        "patternId": "rm-rf"
+      }
+    },
+    "fixture_index": 281
+  }
+]

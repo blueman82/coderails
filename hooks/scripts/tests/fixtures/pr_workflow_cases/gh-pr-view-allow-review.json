@@ -1,0 +1,24 @@
+[
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "gh pr view 5"
+      },
+      "cwd": "{sandbox}/repo",
+      "transcript_path": "{sandbox}/t_17254.jsonl"
+    },
+    "files": {
+      "{sandbox}/t_17254.jsonl": "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Skill\",\"input\":{\"skill\":\"coderails:prep\"}}]}}\n",
+      "{sandbox}/repo/.coderails/workflow.config.yaml": "jira: null\n"
+    },
+    "repositories": {
+      "{sandbox}/repo_noconfig": "main",
+      "{sandbox}/repo": "main"
+    },
+    "env": {},
+    "returncode": 0,
+    "denied": false,
+    "fixture_index": 8
+  }
+]

@@ -174,7 +174,7 @@ Any of steps 5–9 can REFUSE rather than the routine choosing to abort.
 **The trigger is the mechanism, not the reason: if the step's command
 exits non-zero, that is a refusal.** This is deliberately keyed on the
 exit code rather than on a list of rejecting reasons, because a list
-only covers the outcomes someone thought to enumerate. `scripts/merge.sh`
+only covers the outcomes someone thought to enumerate. `scripts/merge.py`
 alone has more than thirty distinct non-zero exits through one shared
 `err` function, PLUS failures that bypass `err` entirely — it runs under
 `set -euo pipefail`, so an unguarded command aborts the script directly
@@ -286,7 +286,7 @@ surface for this routine, same as every other routine in this file.
 
 This pipeline writes ONLY git-tracked documentation `.md` files. It
 NEVER edits: hook scripts, gate logic, anything under `scripts/`,
-`install.sh`, its own `SKILL.md`, the routine config
+`install.py`, its own `SKILL.md`, the routine config
 (`~/.claude/coderails-dashboard.json` or
 `examples/dashboard-config.json`), `.claude/settings.json`, or any code.
 
@@ -307,12 +307,12 @@ It never relaxes, reorders, or skips a gate. It merges ONLY via
 `/coderails:merge` — never raw `gh pr merge`: `PreToolUse` hooks do not
 fire in this headless execution mode (`claude -p`), so
 `test_gate`/`enforce_pr_workflow` do not protect this routine's runs
-either — `scripts/merge.sh`'s own script-internal artifact gates are the
+either — `scripts/merge.py`'s own script-internal artifact gates are the
 merge rail.
 
 It must NEVER edit `INSTALLATION.md`'s workflow-tools/claude-guardrails
 migration section — those names document live installer behaviour
-(`install.sh:232` hard-exits on them) and are not documentation drift for
+(`install.py:232` hard-exits on them) and are not documentation drift for
 this routine to "fix."
 
 It never "fixes" a doc to match code it has not read — no guessing. If

@@ -8,9 +8,9 @@
 // Result: SessionStart, UserPromptSubmit, and Stop hooks DO fire under
 // `claude -p` non-interactive. The first invocation printed exactly
 // `BOOTSTRAP_HOOK_FIRED`, confirming the coderails plugin's own
-// SessionStart hook (inject_bootstrap.sh, which injects the
+// SessionStart hook (inject_bootstrap.py, which injects the
 // using-coderails skill) ran. The second invocation's response showed the
-// Stop-hook chain (check_confidence_labels.sh) and UserPromptSubmit hooks
+// Stop-hook chain (check_confidence_labels.py) and UserPromptSubmit hooks
 // ([ctx] injection) both fired and visibly influenced the agent's own
 // output.
 //

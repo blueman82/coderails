@@ -3,7 +3,7 @@
     # today-*/now.md can't bloat every session's context. Overridable via env.
     # NOTE: this file lives in the version-pinned plugin cache, so a plugin
     # update installs a fresh copy and wipes this patch. coderails re-applies it
-    # automatically at session start (hooks/scripts/remember_inject_cap_guard.sh;
+    # automatically at session start (hooks/scripts/remember_inject_cap_guard.py;
     # canonical text in hooks/patches/). Hand re-application is only needed if
     # that guard warns it could not recognise this file's shape.
     REMEMBER_INJECT_MAX_BYTES="${REMEMBER_INJECT_MAX_BYTES:-8000}"

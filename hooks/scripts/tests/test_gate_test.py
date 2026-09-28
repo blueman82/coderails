@@ -3,7 +3,9 @@
 
 from __future__ import annotations
 
+import gzip
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -23,7 +25,13 @@ def run(project: Path, command: str) -> dict[str, object]:
     """Invoke the hook from a project and return its decoded output envelope."""
     payload = {"tool_name": "Bash", "tool_input": {"command": command}}
     result = subprocess.run(
-        ["python3", str(HOOK)], input=json.dumps(payload), text=True, capture_output=True, check=False, cwd=project
+        ["python3", str(HOOK)],
+        input=json.dumps(payload),
+        text=True,
+        capture_output=True,
+        check=False,
+        cwd=project,
+        env=os.environ | {"CODERAILS_TEST_OUTPUT_DIR": str(project / "logs")},
     )
     if result.returncode != 0:
         fail(f"hook exited {result.returncode}: {result.stderr}")
@@ -86,8 +94,12 @@ def main() -> int:
         assert_decision(failing, "git commit -m 'fix'", "DENY")
         assert_decision(failing, "git push origin main", "ALLOW")
         denial_reason = reason(failing, "git commit -m 'fix'")
-        if "failure output" not in denial_reason:
-            fail(f"denial omitted test output: {denial_reason!r}")
+        if "Full log:" not in denial_reason:
+            fail(f"denial omitted retained log location: {denial_reason!r}")
+        if not any(
+            gzip.decompress(path.read_bytes()) == b"failure output\n" for path in failing.rglob("output.log.gz")
+        ):
+            fail("complete failure output was not retained")
 
         empty = root / "empty"
         empty.mkdir()

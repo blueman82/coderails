@@ -1,25 +1,48 @@
 # Installing coderails
 
-A Claude Code plugin, installed from a GitHub clone. It bundles the workflow
-command chain, the planning/orchestration skills, and a self-checking
-discipline loop. This is a GitHub/`gh`-based workflow, not a generic git-host
-one — `/push` and `/merge` shell out to `gh`.
+Two independent plugins are installed from this clone: Claude Code at the
+root, and Codex under `packages/codex/`. Both provide workflow commands,
+planning/orchestration skills, and discipline hooks. `/push` and `/merge`
+invoke GitHub's `gh` CLI.
 
 ## Requirements
 
 - macOS
-- Claude Code 2.1.x
-- `git`, `gh`, `jq` on your PATH (the installer checks and stops if any are missing)
+- Python 3.9 or newer; runtime code uses only the standard library
+- Claude Code 2.1.x for the default provider, or the Codex CLI for `--provider codex`
+- `git` and `gh` on your PATH for workflow operations (checked by the Claude installer); `jq` is not required by the Python runtime
 - An authenticated GitHub CLI (`gh auth login`). For enterprise GitHub: `gh auth login --hostname <your-git-host>` (e.g. `git.example.com`)
 - `pr-review-toolkit@claude-plugins-official` installed — required for the review stage of `/workflow`
 - `superpowers@claude-plugins-official` installed — required for dev-workflow skills (planning, TDD, systematic debugging, code review, git worktrees)
 - **For Jira features** (`/prep`, `/workflow`, `/push` auto-resolve): a Jira MCP server, reachable via your configured MCP tool namespace. Jira is optional — leave `jira: null` in `workflow.config.yaml` unless you've configured a Jira MCP server. The commands build Jira tool names at runtime from `config.jira.mcp_namespace` in `workflow.config.yaml` (default: `jira`, giving `mcp__jira__*`). Set `mcp_namespace` to match your server (e.g. `acme-jira`, `atlassian`) — no edits to command files needed. For non-default namespaces, add a `permissions.allow` rule to `.claude/settings.json` so calls run without prompting: `"mcp__<namespace>__*"`. Without a Jira MCP, `/prep` still creates branches and `/push` still opens PRs — only the Jira ticket/resolve steps no-op.
 
-## Migrating from the old separate plugins
+## Choose the provider
+
+The four-step walkthrough below installs Claude. For Codex, run:
+
+```bash
+python3 install.py --provider codex --dry-run
+python3 install.py --provider codex
+```
+
+This registers `coderails-codex@coderails` and installs the bundled native
+agent definitions under `${CODEX_HOME:-~/.codex}/agents`. It refuses unrelated
+agent-name collisions and backs up changed managed definitions. Start a fresh
+Codex session, run `/hooks`, and review and trust the Coderails hooks. Initialize
+each project with `$coderails-codex:init`. The memory-target and integrity-gate
+installer flags apply only to Claude.
+
+Both providers use graph schema 3, with provider-local dispatch, evidence and
+locks. The shared pure graph semantics are materialized into each installation.
+Retired `.sh` entrypoints and schema-2 graph readers are not installed; invoke
+the current Python commands shown here. Existing schema-2 loop state must not
+be passed to the current graph helpers.
+
+## Migrating from the old separate Claude plugins
 
 If you previously installed `workflow-tools` and/or `claude-guardrails` as separate
 plugins, remove them first — **inside Claude Code**, because only `/plugin uninstall`
-deregisters a plugin and clears its cached files (a shell script can't):
+deregisters a plugin and clears its cached files (the installer does not):
 
 ```
 /plugin uninstall workflow-tools
@@ -29,7 +52,7 @@ deregisters a plugin and clears its cached files (a shell script can't):
 The installer enforces this. On launch it scans `~/.claude/plugins/installed_plugins.json`
 for either plugin; if it finds one still installed it prints the exact
 `/plugin uninstall` command and exits without changing anything. Run the uninstall
-in Claude Code, then re-run `install.sh`. Once they're gone, the installer also
+in Claude Code, then re-run `install.py`. Once they're gone, the installer also
 strips the stale `workflow-tools`/`claude-guardrails` keys from `settings.json` so
 you don't have to touch it.
 
@@ -54,12 +77,12 @@ unzip coderails.zip -d ~/Documents/Github/
 
 ```bash
 cd ~/Documents/Github/coderails
-bash install.sh --dry-run
-bash install.sh
+python3 install.py --dry-run
+python3 install.py
 ```
 
 It does everything that has to happen outside Claude Code:
-- checks `gh`/`jq`/`git`
+- checks `gh` and `git`
 - registers the plugin as a local marketplace in `~/.claude/settings.json`
   (`extraKnownMarketplaces.coderails`, directory source — this is what makes the
   next step resolve on 2.1.x)
@@ -71,7 +94,7 @@ It does everything that has to happen outside Claude Code:
   marketplaces are never at risk). Backups are written before each edit.
 - appends the discipline rules to `~/.claude/CLAUDE.md` (idempotent)
 - seeds four feedback memories (won't overwrite)
-- aligns script permissions with their git index mode (tracked executables get `+x`, tracked sourced-only libs stay non-executable; untracked files default to `+x`)
+- aligns Python script permissions with their git index mode (tracked executables get `+x`, tracked import-only modules stay non-executable; untracked files default to `+x`)
 
 The installer also offers the optional integrity gate. It never runs `sudo`,
 reads a token, or grants privileged access to Claude, Codex, or any other
@@ -79,15 +102,15 @@ agent. If you choose it, the installer prints one command for you to run
 yourself:
 
 ```bash
-bash scripts/integrity-gate/setup.sh
+python3 scripts/integrity-gate/setup.py
 ```
 
 That owner-run helper first uses your current `gh` login to create or verify an
 active `coderails-integrity-review` ruleset on `main`, with an explicit
 confirmation before creation. It then prompts for the dedicated GitHub
 machine-user token and installs the independent root-owned launchd validator.
-To select the prompt non-interactively, use `bash install.sh --integrity-gate`;
-to suppress it, use `bash install.sh --no-integrity-gate`.
+To select the prompt non-interactively, use `python3 install.py --integrity-gate`;
+to suppress it, use `python3 install.py --no-integrity-gate`.
 
 **3. Restart Claude Code, then run in order:**
 
@@ -110,6 +133,17 @@ then `install`.
 /coderails:test-gate-setup     # optional — blocks commits when tests fail
 ```
 
+Both providers retain complete output from each configured test-command run in
+`~/.coderails/test-output/`; set `CODERAILS_TEST_OUTPUT_DIR` in the hook environment
+to choose another storage root. One run may execute many tests. Failure notices
+provide the log path, measurements and a reader command rather than a fixed
+excerpt. Completed logs, including passing runs, rotate and compress
+automatically. The default compressed-log budget is 1 GiB; override it with
+`CODERAILS_TEST_LOG_BUDGET_BYTES`. Oldest completed logs expire first, while
+active and just-completed runs are protected and may exceed the budget.
+Compact measurement and expiry records persist separately. See [retrieval examples and delivery
+measurement limits](docs/REFERENCE.md#retained-test-gate-output).
+
 `/coderails:init` writes `.coderails/workflow.config.yaml` in the current
 directory. It scaffolds new settings when no legacy config exists. When migrating,
 it preserves the legacy contents, schema, and values, validates the canonical
@@ -124,7 +158,7 @@ git config core.hooksPath scripts/git-hooks
 ```
 
 See [docs/CODE-QUALITY.md](./docs/CODE-QUALITY.md) for the strict and warn-only
-commands, threshold overrides, optional Bash tools, and known coverage ceiling.
+commands, required Python check tools, test-only dependencies, and coverage limits.
 
 ## What you get
 
@@ -172,16 +206,9 @@ code enforces; `.md` files are exempt), `wiki_taxonomy_gate` (blocks a write int
 an LLM wiki vault's top-level directory that isn't sanctioned by the vault's own
 `AGENTS.md` "## Page types" table; fails open on any ambiguity),
 `verification_volume_ceiling` (hard-blocks, with no override, the 3rd+
-invocation per work-unit of `hooks/scripts/tests/run_all.sh` or a
-`scripts/post_evals.sh` validate-structure ceremony), `loop_dispatch_guard` on `Agent` dispatches
-(for a `coderails:loop-worker`, or for a graph-backed dispatch at a
-non-exempt node — the two conditions are a union, not a substitution —
-denies when the loop's `progress.json` lists one or more work-units and
-its loop-scope `evals.json` does not read `GO`, `VERIFICATION_LEVEL0`, or
-`FROZEN`; downstream and unrecognised graph nodes are gated too, so it
-fails closed. It also denies an implementation worker that has no
-session-owned loop state at all. A non-worker `Agent` call in a non-graph
-loop is not gated on the roster at all), the
+invocation per work-unit of `hooks/scripts/tests/run_all.py` or a
+`scripts/post_evals.py` validate-structure ceremony), `loop_dispatch_guard` on `Agent` dispatches
+(validates current graph schema, native ownership envelope and available provider role; nonempty work-unit rosters require owned frozen or valid graded evals before implementation), the
 opt-in `agent_only_gate` (nudges by default; blocks the orchestrator's own
 inline do-work tool calls only under `AGENT_ONLY_GATE_ENFORCE=1`), and
 `crack_on_gate` on
@@ -201,10 +228,10 @@ stamped — proceed autonomously instead of asking).
 - **`jira.mcp_namespace`** sets the MCP tool namespace used by all Jira calls (default: `jira`). Commands build tool names like `mcp__<mcp_namespace>__create_jira_issue` at runtime, so pointing at a different Jira MCP server requires only a config change — not a command edit. If you use a non-default namespace, add `"mcp__<namespace>__*"` to `.claude/settings.json` under `permissions.allow` to avoid per-call permission prompts. Background: the `allowed-tools` frontmatter is parsed statically before config substitution runs, so it always lists the default `mcp__jira__*` tools; the `permissions.allow` rule is the machine-local home for granting non-default MCP namespaces.
 - **`/merge`'s review/eval artifact gates trust rule:** artifact comments are trusted only from the merging identity, which must hold write access on the repo — identical on personal and org-owned repos. Concretely: a PR comment only counts as a coderails review/eval artifact if (a) its author's GitHub login matches the identity `gh` is authenticated as, AND (b) that identity holds write access or better (`ADMIN`/`MAINTAIN`/`WRITE`) on the current repo, checked via `viewerPermission`. This replaced an earlier rule that additionally required the comment's `author_association` to be `OWNER`, which failed closed on org-owned repos — the same authenticated user's own comments there carry `MEMBER`/`COLLABORATOR`, never `OWNER`. The login-match half of the check is unchanged and is the actual anti-spoof property: a different login can never pass regardless of permission level. If the permission lookup itself fails (network/auth), the gate fails closed (blocks the merge) the same way an identity-fetch failure does; insufficient permission (e.g. `READ`) is treated as "no trusted comment found," not a fetch failure. This does not change what the artifact comments assert — a compromised identity that holds write access can still post a false artifact; the gate proves *who* posted a marker, not that its contents are truthful.
 
-## Uninstall
+## Uninstall Claude
 
 ```bash
-bash ~/Documents/Github/coderails/uninstall.sh   # reverses CLAUDE.md + settings changes
+python3 ~/Documents/Github/coderails/uninstall.py   # reverses CLAUDE.md + settings changes
 ```
 
 then in Claude Code:

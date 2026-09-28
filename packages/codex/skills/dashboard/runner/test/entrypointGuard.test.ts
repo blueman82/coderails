@@ -94,9 +94,9 @@ describe("entrypoint guard: runs when invoked through a symlinked path", () => {
 describe("native runner packaging", () => {
   it("does not claim a bundled background scheduler", () => {
     const files = [
-      "bin/dashboard-server.sh",
-      "bin/seed-and-sweep.sh",
-      "bin/sweeper.sh",
+      "bin/dashboard_server.py",
+      "bin/seed_and_sweep.py",
+      "bin/sweeper.py",
       "src/exec.ts",
       "src/seed.ts",
       "test/exec.test.ts",

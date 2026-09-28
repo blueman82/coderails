@@ -201,7 +201,7 @@ describe("POST /api/queue — pending-only guard + build spawn seam", () => {
     const calls: unknown[] = [];
     const claimAndSpawnBuild = (entry: unknown) => {
       calls.push(entry);
-      return { claimed: true };
+      return { claimed: true as const, runId: "fixture-run" };
     };
     const { handler, queueDir } = makeHandler({ claimAndSpawnBuild });
     writeEntry(queueDir, HASH_A, { toolName: "workflow-audit:propose-skill" });
@@ -214,7 +214,7 @@ describe("POST /api/queue — pending-only guard + build spawn seam", () => {
     const calls: unknown[] = [];
     const claimAndSpawnBuild = (entry: unknown) => {
       calls.push(entry);
-      return { claimed: true };
+      return { claimed: true as const, runId: "fixture-run" };
     };
     const { handler, queueDir } = makeHandler({ claimAndSpawnBuild });
     writeEntry(queueDir, HASH_A, { toolName: "mcp__claude_ai_Slack__slack_send_message" });
@@ -280,7 +280,7 @@ describe("POST /api/queue — pending-only guard + build spawn seam", () => {
 describe("makeClaimAndSpawnBuild", () => {
   // Exercises the production wiring's wrapper_not_found fallback directly.
   // The bare POST export always sees a real, resolved WRAPPER_PATH in
-  // dev/CI (scripts/run-builder.sh genuinely exists there), so this branch
+  // dev/CI (scripts/run_builder.py genuinely exists there), so this branch
   // is otherwise untestable through POST/createQueueActionHandler alone —
   // this test targets the extracted, parameterised function instead.
   it("returns {claimed:false, error:'wrapper_not_found'} when wrapperPath is null, without ever calling the real spawn", () => {

@@ -1,0 +1,107 @@
+[
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git clean -fdx"
+      },
+      "cwd": "{sandbox}/feat_repo"
+    },
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_core.test.sh",
+    "expected": {
+      "hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": "Destructive pattern detected: git clean (force)\nFull command: git clean -fdx\nThis command is permanently blocked. Safe route: preview what would be removed first with 'git clean -n' (dry-run \u2014 lists targets, deletes nothing), or use 'git clean -i' for an interactive prompt per file/directory. Both are already permitted by this hook; only the force forms (-f/--force) are blocked.",
+        "patternId": "git-clean-force"
+      }
+    },
+    "fixture_index": 58
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git clean -fdx"
+      },
+      "cwd": "{sandbox}/feat_repo"
+    },
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_core.test.sh",
+    "expected": {
+      "hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": "Destructive pattern detected: git clean (force)\nFull command: git clean -fdx\nThis command is permanently blocked. Safe route: preview what would be removed first with 'git clean -n' (dry-run \u2014 lists targets, deletes nothing), or use 'git clean -i' for an interactive prompt per file/directory. Both are already permitted by this hook; only the force forms (-f/--force) are blocked.",
+        "patternId": "git-clean-force"
+      }
+    },
+    "fixture_index": 162
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git clean -f ."
+      },
+      "cwd": "{sandbox}/feat_repo"
+    },
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_core.test.sh",
+    "expected": {
+      "hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": "Destructive pattern detected: git clean (force)\nFull command: git clean -f .\nThis command is permanently blocked. Safe route: preview what would be removed first with 'git clean -n' (dry-run \u2014 lists targets, deletes nothing), or use 'git clean -i' for an interactive prompt per file/directory. Both are already permitted by this hook; only the force forms (-f/--force) are blocked.",
+        "patternId": "git-clean-force"
+      }
+    },
+    "fixture_index": 163
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git clean -fd src/"
+      },
+      "cwd": "{sandbox}/feat_repo"
+    },
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_core.test.sh",
+    "expected": {
+      "hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": "Destructive pattern detected: git clean (force)\nFull command: git clean -fd src/\nThis command is permanently blocked. Safe route: preview what would be removed first with 'git clean -n' (dry-run \u2014 lists targets, deletes nothing), or use 'git clean -i' for an interactive prompt per file/directory. Both are already permitted by this hook; only the force forms (-f/--force) are blocked.",
+        "patternId": "git-clean-force"
+      }
+    },
+    "fixture_index": 164
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git clean -xf"
+      },
+      "cwd": "{sandbox}/feat_repo"
+    },
+    "returncode": 0,
+    "allowlist": null,
+    "source": "destructive_bash_gate_core.test.sh",
+    "expected": {
+      "hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": "Destructive pattern detected: git clean (force)\nFull command: git clean -xf\nThis command is permanently blocked. Safe route: preview what would be removed first with 'git clean -n' (dry-run \u2014 lists targets, deletes nothing), or use 'git clean -i' for an interactive prompt per file/directory. Both are already permitted by this hook; only the force forms (-f/--force) are blocked.",
+        "patternId": "git-clean-force"
+      }
+    },
+    "fixture_index": 165
+  }
+]

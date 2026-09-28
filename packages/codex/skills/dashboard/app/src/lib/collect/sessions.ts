@@ -183,7 +183,7 @@ function readLastUpdatedMs(record: Record<string, unknown>, progressPath: string
 // ABSENT, wrong scope, or malformed JSON do not. An explicit NO-GO wins over
 // the verification_level-0 exemption, same precedence as the bash SSOT.
 // Also mirrors the hook's UNSTAMPED check: GO/VERIFICATION_LEVEL0 additionally require a
-// `.grading` stamp (post_evals.sh grade-loop's provenance record) to read as
+// `.grading` stamp (post_evals.py grade-loop's provenance record) to read as
 // frozen — both `.grading.by` and `.grading.checksum` must be present AND
 // non-empty, matching the bash reader's `[ -z "$stamped_by" ] || [ -z
 // "$stamped_checksum" ]` check. This is presence-only — no checksum
@@ -217,7 +217,8 @@ export function collectLoops(baseDir: string): LoopInfo[] {
       const loopDir = join(projectDir, sessionId);
       const progressPath = join(loopDir, "progress.json");
       const progress = readJson(progressPath);
-      const record = isRecord(progress) ? progress : {};
+      if (!isRecord(progress) || progress.schema_version !== 3) continue;
+      const record = progress;
       const units = readUnits(record.work_units);
       loops.push({
         slug,

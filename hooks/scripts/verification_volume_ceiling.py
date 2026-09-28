@@ -6,14 +6,20 @@ from __future__ import annotations
 import os
 import re
 import subprocess
+import sys
 import time
 from contextlib import suppress
 from pathlib import Path
 
-from hook_common import deny, read_payload
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from hooks.scripts.hook_common import deny, read_payload
 
-RUN_ALL = re.compile(r"(^|[&;|])\s*(?:bash\s+|sh\s+|\./)?(?:\S*/)?hooks/scripts/tests/run_all\.sh(?:\s|$)")
-POST = re.compile(r"(^|[&;|])\s*(?:bash\s+|sh\s+|\./)?(?:\S*/)?scripts/post_evals\.sh\s+validate-structure(?:\s|$)")
+RUN_ALL = re.compile(
+    r"(^|[&;|])\s*(?:(?:bash|sh|python3?)\s+|\./)?(?:\S*/)?hooks/scripts/tests/run_all\.(?:sh|py)(?:\s|$)"
+)
+POST = re.compile(
+    r"(^|[&;|])\s*(?:(?:bash|sh|python3?)\s+|\./)?(?:\S*/)?scripts/post_evals\.(?:sh|py)\s+validate-structure(?:\s|$)"
+)
 
 
 def main() -> int:

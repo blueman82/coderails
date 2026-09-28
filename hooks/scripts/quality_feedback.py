@@ -4,9 +4,11 @@
 from __future__ import annotations
 
 import subprocess
+import sys
 from pathlib import Path
 
-from hook_common import read_payload
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from hooks.scripts.hook_common import read_payload
 
 SUFFIXES = {".bash", ".cfg", ".js", ".json", ".jsx", ".md", ".py", ".sh", ".toml", ".ts", ".tsx", ".yaml", ".yml"}
 
