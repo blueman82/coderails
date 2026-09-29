@@ -5,6 +5,21 @@ import { fixture } from "./sessionTraceFixture";
 import { collectCodexSessionTrace, listCodexSessions, readCodexTraceDetail, readCodexTracePage } from "../src/lib/collect/sessionTrace";
 
 describe("Codex native session trace", () => {
+  it("decodes source backed loop and node identities from a canonical native dispatch", async () => {
+    const { deps } = await fixture();
+    const page = await readCodexTracePage("parent", null, 30, deps);
+    const dispatch = page.events.find((event) => event.attributes["coderails.native.call_id"] === "call-one");
+    const worker = page.events.find((event) => event.attributes["coderails.actor.id"] === "child-one");
+    for (const event of [dispatch, worker]) {
+      expect(event?.attributes).toMatchObject({
+        "coderails.loop.id": "loop",
+        "coderails.node.id": "U3[1]",
+        "coderails.attempt": 1,
+      });
+    }
+    expect(worker?.parentSpanId).toBe(dispatch?.spanId);
+  });
+
   it("orders cross-source timestamps and records the source-backed worker parent join", async () => {
     const { deps, parent, child, rows, children, save } = await fixture();
     await save(parent, [{ ...rows[0], timestamp: "2026-09-28T12:00:00Z" },
@@ -206,7 +221,14 @@ describe("Codex native session trace", () => {
     await save(child, [{ ...children[0], payload: { ...meta, agent_role: "worker", agent_nickname: "Nick", agent_path: null, source: { subagent: { ...subagent, thread_spawn: { parent_thread_id: "parent", depth: 1, agent_role: "worker", agent_nickname: "Nick", agent_path: null } } } } }, ...children.slice(1)]);
     const result = await collectCodexSessionTrace("parent", deps);
     expect(result.complete).toBe(true);
-    expect((await readCodexTracePage("parent", null, 30, deps)).events.some((e) => e.attributes["coderails.child.id"] === "child-one")).toBe(true);
+    const events = (await readCodexTracePage("parent", null, 30, deps)).events;
+    const linked = events.filter((event) => event.attributes["coderails.child.id"] === "child-one");
+    expect(linked.length).toBeGreaterThan(0);
+    for (const event of linked) {
+      expect(event.attributes["coderails.loop.id"]).toBeUndefined();
+      expect(event.attributes["coderails.node.id"]).toBeUndefined();
+      expect(event.attributes["coderails.attempt"]).toBeUndefined();
+    }
   });
 
   it("invalidates same-size rewrite, truncation, and malformed JSONL", async () => {

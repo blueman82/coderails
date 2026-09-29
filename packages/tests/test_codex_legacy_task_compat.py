@@ -13,7 +13,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "codex/skills/agentic-loop/scripts"))
 import graph
 from graph_evidence import validate_worker_evidence
-from graph_identity import GraphError
+from graph_identity import GraphError, legacy_task_name, task_node
 
 
 class LegacyTaskCompatibilityTests(unittest.TestCase):
@@ -126,10 +126,81 @@ class LegacyTaskCompatibilityTests(unittest.TestCase):
         for name, records in (("fixture-parent.jsonl", parent_records), ("fixture-child.jsonl", child_records)):
             (sessions / name).write_text("".join(json.dumps(record) + "\n" for record in records), encoding="utf-8")
 
+    def _second_attempt_state(self) -> dict[str, Any]:
+        """Build owned historical transcripts and a completed second attempt."""
+        self._write_legacy_transcripts()
+        task = legacy_task_name("U3[1]", 2)
+        sessions = self.home / ".codex/sessions"
+        parent = sessions / "fixture-parent.jsonl"
+        retry_spawn = [
+            {
+                "type": "response_item",
+                "payload": {
+                    "type": "function_call",
+                    "name": "spawn_agent",
+                    "namespace": "collaboration",
+                    "call_id": "call-2",
+                    "arguments": json.dumps({"task_name": task}),
+                },
+            },
+            {
+                "type": "event_msg",
+                "payload": {
+                    "item": {
+                        "type": "SubAgentActivity",
+                        "kind": "started",
+                        "id": "call-2",
+                        "agent_thread_id": "child-2",
+                        "agent_path": f"/root/{task}",
+                    }
+                },
+            },
+        ]
+        with parent.open("a", encoding="utf-8") as stream:
+            stream.write("".join(json.dumps(record) + "\n" for record in retry_spawn))
+        child_records = [json.loads(line) for line in (sessions / "fixture-child.jsonl").read_text().splitlines()]
+        child_records[0]["payload"]["id"] = "child-2"
+        child_records[0]["payload"]["source"]["subagent"]["thread_spawn"]["agent_path"] = f"/root/{task}"
+        child_records[1]["payload"]["turn_id"] = "turn-2"
+        child_records[2]["payload"]["turn_id"] = "turn-2"
+        (sessions / "fixture-child-2.jsonl").write_text(
+            "".join(json.dumps(record) + "\n" for record in child_records), encoding="utf-8"
+        )
+        state = self._state()
+        state["revision"] = 4
+        node = state["graph"]["nodes"]["U3[1]"]
+        node["retry"]["attempts"] = 1
+        node["evidence"].append(
+            {
+                "kind": "codex_agent",
+                "attempt": 2,
+                "wave_id": "wave-3",
+                "spawn_call_id": "call-2",
+                "agent_thread_id": "child-2",
+                "task_complete_turn_id": "turn-2",
+            }
+        )
+        return state
+
     def test_owned_stored_legacy_identity_remains_verifiable(self) -> None:
         """Validate old task spelling only through an existing owned evidence reference."""
         self._write_legacy_transcripts()
         validate_worker_evidence(self._state())
+
+    def test_owned_legacy_stale_attempt_without_reference_remains_verifiable(self) -> None:
+        """A historical stale spawn without a completion reference remains valid."""
+        state = self._second_attempt_state()
+        node = state["graph"]["nodes"]["U3[1]"]
+        node["retry"]["attempts"] = 0
+        node["respawn"]["generation"] = 1
+        node["evidence"] = node["evidence"][1:]
+        validate_worker_evidence(state)
+
+    def test_owned_legacy_retry_identity_remains_verifiable(self) -> None:
+        """A historical retry suffix remains decodable in stored worker evidence."""
+        self.assertEqual(task_node(legacy_task_name("U3[1]", 2)), (None, "U3[1]"))
+        state = self._second_attempt_state()
+        validate_worker_evidence(state)
 
     def test_legacy_identity_cannot_authorize_fresh_dispatch(self) -> None:
         """A node-only historical task name cannot authorize a new loop dispatch."""

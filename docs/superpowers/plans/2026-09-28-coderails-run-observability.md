@@ -105,7 +105,7 @@
 **Interfaces:**
 - `GET /api/sessions` returns lightweight native session summaries; it never uses project-directory mtime as native event time.
 - `GET /api/sessions/<id>/trace` accepts an opaque cursor and bounded limit and returns page metadata/provenance only. `GET /api/sessions/<id>/trace/detail` resolves one validated source reference and returns that detail only after explicit request.
-- Every route enforces `isLocalOrigin`, the dashboard token via `tokensEqual`, a UUID-shaped native-ID pattern, and source-reference containment under the provider’s transcript root. Trace assembly runs on request, outside the fast activity/KPI frame.
+- Every route enforces `isLocalOrigin`, the dashboard token via `tokensEqual`, and a UUID-shaped native-ID pattern. Detail routes validate the source-reference shape, session ownership, indexed reference and source fingerprint before reading one record. Native transcript details stay under the provider's transcript root; hook details come only from the configured audit path; graph details come only from allowlisted artifacts in the uniquely discovered, session-owned graph root under the configured loops root. Trace assembly runs on request, outside the fast activity/KPI frame.
 
 - [ ] **Step 1: Add failing route tests** proving bad origin/token/session/source refs are rejected, pagination is stable, no detail is returned by list/trace routes, and explicit detail requests return only the referenced record.
 - [ ] **Step 2: Run `npm test -- test/sessionTrace.route.test.ts`** in both packages; expected: FAIL until the routes exist.

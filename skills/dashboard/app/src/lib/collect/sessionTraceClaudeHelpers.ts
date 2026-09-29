@@ -254,8 +254,8 @@ export function completedNotification(parent: Source, callId: string, agentId: s
     }
   }
   const matches = notices.filter((item) => item.call === callId);
-  return matches.length === 1 && matches[0].agent === agentId &&
-    matches[0].status === "completed" && matches[0].result.trim().length > 0;
+  return matches.length > 0 && matches.every((item) => item.agent === agentId &&
+    item.status === "completed" && item.result.trim().length > 0);
 }
 
 export function terminalChild(child: Source, role: string): boolean {

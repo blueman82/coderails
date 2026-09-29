@@ -68,9 +68,9 @@ def _validate_missing_attempts(
         if attempt in completed:
             line = _verify_reference(state, node_id, completed[attempt], indexes, allow_legacy=True)
         else:
-            expected = task_name(state["loop_id"], node_id, attempt)
+            expected = {task_name(state["loop_id"], node_id, attempt), legacy_task_name(node_id, attempt)}
             matches = [
-                (call, items[0]) for call, items in indexes.items() if len(items) == 1 and items[0][1] == expected
+                (call, items[0]) for call, items in indexes.items() if len(items) == 1 and items[0][1] in expected
             ]
             if len(matches) != 1:
                 raise GraphError(f"node {node_id} stale attempt has no unique native spawn")

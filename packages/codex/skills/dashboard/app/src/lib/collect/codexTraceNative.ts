@@ -3,7 +3,7 @@ import { open, readdir } from "node:fs/promises";
 import { basename, join, relative, sep } from "node:path";
 import { TRACE_SCHEMA_VERSION, record, type SourceRef, type TraceAttribute, type TraceCollectionDeps, type TraceEvent } from "./traceSchema";
 
-export const CODEX_PARSER_VERSION = 3;
+export const CODEX_PARSER_VERSION = 4;
 export const MAX_SOURCE_SCAN_BYTES = 64 * 1024 * 1024;
 export function safeReadError(error: unknown): string {
   return error instanceof Error && error.message.startsWith("source exceeds trace scan limit:")
@@ -99,6 +99,18 @@ function task(value: unknown): value is string {
     const decoded = Buffer.from(hex, "hex").toString("utf8");
     return decoded.length > 0 && Buffer.from(decoded).toString("hex") === hex;
   });
+}
+function canonicalTask(value: string): { loopId: string; nodeId: string; attempt: number } | null {
+  if (/^loop_worker_[0-9a-f]+_a[1-9][0-9]*$/.test(value)) return null;
+  const match = /^loop_worker_([0-9a-f]+)_([0-9a-f]+)(?:_a([1-9][0-9]*))?$/.exec(value);
+  if (!match || match[1].length % 2 || match[2].length % 2) return null;
+  const loopId = Buffer.from(match[1], "hex").toString("utf8");
+  const nodeId = Buffer.from(match[2], "hex").toString("utf8");
+  const attempt = match[3] ? Number(match[3]) : 1;
+  if (!loopId || !nodeId || !Number.isSafeInteger(attempt) || attempt < 1 ||
+    Buffer.from(loopId).toString("hex") !== match[1] || Buffer.from(nodeId).toString("hex") !== match[2] ||
+    `loop_worker_${match[1]}_${match[2]}${attempt === 1 ? "" : `_a${attempt}`}` !== value) return null;
+  return { loopId, nodeId, attempt };
 }
 function currentCall(row: Row, ordinal: number): { callId: string; task: string; role: string | null; ordinal: number } | null {
   const item = payload(row);
@@ -211,7 +223,12 @@ export function nativeEvent(sessionId: string, src: NativeSource, ordinal: numbe
   if (typeof item.call_id === "string") attributes["coderails.native.call_id"] = item.call_id;
   if (dispatch) {
     attributes["coderails.child.id"] = dispatch.childId;
-    if (dispatch.task && task(dispatch.task)) attributes["coderails.node.id"] = dispatch.task;
+    const identity = dispatch.task ? canonicalTask(dispatch.task) : null;
+    if (identity) {
+      attributes["coderails.loop.id"] = identity.loopId;
+      attributes["coderails.node.id"] = identity.nodeId;
+      attributes["coderails.attempt"] = identity.attempt;
+    }
   }
   if (actor === "worker" && actorId) attributes["coderails.actor.id"] = actorId;
   const model = obj(item.info)?.model ?? item.model;

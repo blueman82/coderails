@@ -256,4 +256,35 @@ describe("Claude native session trace detail and evidence", () => {
     expect(manifest.complete).toBe(false);
     expect(manifest.errors.join(" ")).toMatch(/completion notification/i);
   });
+
+  it("accepts mirrored native completion notices but rejects conflicting notices", async () => {
+    const { deps, parent, rows } = await fixture();
+    const notice = "<task-notification><tool-use-id>tool-1</tool-use-id><task-id>a1</task-id>" +
+      "<status>completed</status><result>Finished</result></task-notification>";
+    const queue = { type: "queue-operation", sessionId: "s1", content: notice };
+    const harness = { type: "user", sessionId: "s1", origin: { kind: "task-notification" },
+      message: { content: notice } };
+    const graphRoot = join(deps.cacheRoot, "graph-state");
+    await mkdir(graphRoot, { recursive: true });
+    deps.graphRoot = graphRoot;
+    await writeFile(join(graphRoot, "progress.json"), JSON.stringify({
+      schema_version: 3, session_id: "s1", loop_id: "l1", revision: 1,
+      graph: { hard_stop: null, nodes: { U1: { status: "done", retry: { attempts: 0 },
+        respawn: { generation: 0 }, evidence: [{ kind: "claude_agent", attempt: 1, wave_id: "w1",
+          tool_use_id: "tool-1", record_uuid: "r1", subagent_type: "worker", outcome: "done", agent_id: "a1" }] } } },
+    }));
+    const writeRows = async (extra: Record<string, unknown>[]) =>
+      writeFile(parent, [...rows, ...extra].map((row) => JSON.stringify(row)).join("\n") + "\n");
+    await writeRows([{ type: "user", sessionId: "s1", message: { content: notice } }]);
+    expect((await collectClaudeSessionTrace("s1", deps)).complete).toBe(false);
+    await writeRows([queue, harness]);
+    expect((await collectClaudeSessionTrace("s1", deps)).complete).toBe(true);
+
+    const conflicting = { ...harness, message: { content: notice.replace("<task-id>a1</task-id>",
+      "<task-id>other</task-id>") } };
+    await writeRows([queue, harness, conflicting]);
+    const invalid = await collectClaudeSessionTrace("s1", deps);
+    expect(invalid.complete).toBe(false);
+    expect(invalid.errors.join(" ")).toMatch(/completion notification/i);
+  });
 });

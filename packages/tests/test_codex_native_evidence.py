@@ -14,7 +14,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "codex/skills/agentic-loop/scripts"))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "codex/hooks/scripts"))
 from graph_evidence import bind_worker_evidence, validate_worker_evidence
-from graph_identity import GraphError, task_name
+from graph_identity import GraphError, legacy_task_name, task_name
 
 
 class NativeEvidenceTests(unittest.TestCase):
@@ -131,6 +131,14 @@ class NativeEvidenceTests(unittest.TestCase):
         self._write_transcripts()
         with self.assertRaises(GraphError):
             validate_worker_evidence(self.state)
+
+    def test_current_wave_rejects_legacy_task_identity(self) -> None:
+        """Historical names remain ineligible for newly bound native spawns."""
+        self.task = legacy_task_name("U3[1]")
+        self.arguments["task_name"] = self.task
+        self.activity["agent_path"] = f"/root/{self.task}"
+        self.spawn["agent_path"] = f"/root/{self.task}"
+        self._reject()
 
     def test_typed_native_binding(self) -> None:
         """Preserve the typed native dispatch contract."""

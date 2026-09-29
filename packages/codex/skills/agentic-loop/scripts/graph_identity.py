@@ -128,7 +128,8 @@ def legacy_task_name(node_id: str, attempt: object = 1) -> str:
 
 def task_node(name: str) -> tuple[str | None, str]:
     """Decode task identity, using None for a pre-loop-scoped historical identity."""
-    match = re.fullmatch(r"loop_worker_([0-9a-f]+)_([0-9a-f]+)(?:_a([1-9][0-9]*))?", name)
+    legacy_retry = re.fullmatch(r"loop_worker_([0-9a-f]+)_a([1-9][0-9]*)", name)
+    match = None if legacy_retry else re.fullmatch(r"loop_worker_([0-9a-f]+)_([0-9a-f]+)(?:_a([1-9][0-9]*))?", name)
     if match is not None:
         encoded_loop, encoded_node, retry = match.groups()
         attempt = int(retry) if retry else 1
@@ -142,7 +143,7 @@ def task_node(name: str) -> tuple[str | None, str]:
         if not loop_id or not node_id or task_name(loop_id, node_id, attempt) != name:
             raise GraphError("graph worker task name is not canonical")
         return loop_id, node_id
-    match = re.fullmatch(r"loop_worker_([0-9a-f]+)(?:_a([1-9][0-9]*))?", name)
+    match = legacy_retry or re.fullmatch(r"loop_worker_([0-9a-f]+)(?:_a([1-9][0-9]*))?", name)
     if match is None:
         raise GraphError("graph worker task name must use the native lowercase format")
     encoded_node, retry = match.groups()
