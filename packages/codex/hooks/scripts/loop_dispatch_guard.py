@@ -17,7 +17,7 @@ from hook_common import (
     text_field,
 )
 
-TASK_NAME = re.compile(r"loop_worker_[0-9a-f]+(?:_a(?:[2-9]|[1-9][0-9]+))?$")
+TASK_NAME = re.compile(r"loop_worker_[0-9a-f]+_[0-9a-f]+(?:_a(?:[2-9]|[1-9][0-9]+))?$")
 
 
 def object_field(payload: dict[str, object], name: str) -> dict[str, object]:

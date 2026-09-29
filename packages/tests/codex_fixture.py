@@ -77,7 +77,7 @@ def transcripts(home: Path) -> Path:
 def spawn(parent: Path, graph: dict[str, Any], node_id: str = "U3[1]", terminal: bool = True) -> Path:
     """Append a role-less provider-native spawn and its independently owned child."""
     attempt = next_attempt(graph["graph"]["nodes"][node_id])
-    task = task_name(node_id, attempt)
+    task = task_name(graph["loop_id"], node_id, attempt)
     child_id = f"child-{task}"
     call_id = f"call-{task}"
     path = f"/root/{task}"

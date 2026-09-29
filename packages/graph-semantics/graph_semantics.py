@@ -356,16 +356,14 @@ def hard_stop(state: object, node_id: object, reason: object) -> dict[str, Any]:
     reason_text = _text(reason, "reason")
     if node_key not in graph["nodes"] or graph["nodes"][node_key]["status"] in SUCCESS:
         _error("hard_stop", "hard_stop requires an unfinished node")
+    active = graph["active_wave"]
+    if active is not None and (active["nodes"] != [node_key]):
+        _error("active_wave", "cannot hard-stop while other nodes are dispatched in the active wave")
     node = graph["nodes"][node_key]
     node.update(status="hard-stop", outcome="hard-stop")
     graph["hard_stop"] = {"node": node_key, "reason": reason_text}
-    active = graph["active_wave"]
-    if active is not None and node_key in active["nodes"]:
-        active["nodes"] = [item for item in active["nodes"] if item != node_key]
-        if active["nodes"]:
-            active.update(revision=root["revision"] + 1, wave_id=f"wave-{root['revision'] + 1}")
-        else:
-            graph["active_wave"] = None
+    if active is not None:
+        graph["active_wave"] = None
     root["revision"] += 1
     return {"state": root, "hard_stop": copy.deepcopy(graph["hard_stop"])}
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import json
 import sys
 import tempfile
@@ -15,6 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "codex/skills/agentic-loop/scripts"))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "codex/hooks/scripts"))
 import graph
+import graph_semantics
 from graph_completion import validate_work_units
 from graph_evidence import validate_worker_evidence
 from graph_identity import GraphError, task_name, task_node
@@ -89,7 +91,7 @@ class GraphRuntimeTests(unittest.TestCase):
         """Retry failures receive unique native identities and stop at the configured cap."""
         for attempt in (1, 2):
             wave = graph.begin_wave(self.path)
-            self.assertEqual(wave["task_names"]["U3[1]"], task_name("U3[1]", attempt))
+            self.assertEqual(wave["task_names"]["U3[1]"], task_name("loop", "U3[1]", attempt))
             spawn(self.parent, read_json(self.path))
             self.record("failed")
         current = read_json(self.path)
@@ -103,7 +105,7 @@ class GraphRuntimeTests(unittest.TestCase):
         self.record("stale", stale_check={"checked": True, "method": "native status", "result": "stalled"})
         graph.transition(self.path, "parent", "respawn_stale", "U3[1]", "checked stale child")
         wave = graph.begin_wave(self.path)
-        self.assertEqual(wave["task_names"]["U3[1]"], task_name("U3[1]", 2))
+        self.assertEqual(wave["task_names"]["U3[1]"], task_name("loop", "U3[1]", 2))
         spawn(self.parent, read_json(self.path))
         self.record()
         validate_worker_evidence(read_json(self.path))
@@ -146,10 +148,21 @@ class GraphRuntimeTests(unittest.TestCase):
     def test_task_attempt_roundtrip(self) -> None:
         """Native attempt identities remain canonical across decimal boundaries."""
         for attempt in (1, 2, 9, 10, 11, 99, 100):
-            self.assertEqual(task_node(task_name("U3[1]", attempt)), "U3[1]")
+            self.assertEqual(task_node(task_name("loop", "U3[1]", attempt)), ("loop", "U3[1]"))
         for suffix in ("_a1", "_a01", "_a0", "_a-1"):
             with self.assertRaises(GraphError):
-                task_node(task_name("U3[1]") + suffix)
+                task_node(task_name("loop", "U3[1]") + suffix)
+
+    def test_task_names_are_unique_across_loops(self) -> None:
+        """The same node and attempt in separate loops have distinct native identities."""
+        self.assertNotEqual(task_name("loop-a", "U3[1]"), task_name("loop-b", "U3[1]"))
+
+    def test_dispatch_rejects_foreign_loop_task_identity(self) -> None:
+        """A valid task identity from another loop cannot authorize this graph's dispatch."""
+        graph.begin_wave(self.path)
+        foreign_task = task_name("foreign-loop", "U3[1]")
+        with self.assertRaises(GraphError):
+            graph.authorize_dispatch(self.path, "parent", foreign_task, self.path.with_name("evals.json"))
 
     def test_exact_result_envelope(self) -> None:
         """Reject wrong wave, partial results, and malformed stale evidence atomically."""
@@ -157,6 +170,20 @@ class GraphRuntimeTests(unittest.TestCase):
         spawn(self.parent, read_json(self.path))
         self.assert_unchanged(graph.record_wave, self.path, '{"wave_id":"wrong","results":{}}')
         self.assert_unchanged(self.record, "stale", stale_check={"checked": False})
+
+    def test_transition_rejects_invalid_core_proposal_before_write(self) -> None:
+        """The native boundary rejects a bad semantic proposal without replacing state."""
+        graph.begin_wave(self.path)
+        proposed = copy.deepcopy(read_json(self.path))
+        proposed["revision"] += 1
+        with patch.object(graph_semantics, "hard_stop", return_value={"state": proposed, "hard_stop": {}}):
+            self.assert_unchanged(graph.transition, self.path, "parent", "hard_stop", "U3[1]", "owner decision")
+
+    def test_hard_stop_writes_valid_singleton_result(self) -> None:
+        """A successful native transition persists a complete schema-v3 graph."""
+        graph.begin_wave(self.path)
+        graph.transition(self.path, "parent", "hard_stop", "U3[1]", "owner decision")
+        graph_semantics.validate(read_json(self.path))
 
 
 if __name__ == "__main__":

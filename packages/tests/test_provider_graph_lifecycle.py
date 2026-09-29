@@ -94,6 +94,47 @@ class ProviderLifecycleTests(unittest.TestCase):
             )
             self.assertNotEqual(provider.call("begin-wave").returncode, 0)
 
+    def test_hard_stop_refuses_outside_active_wave_without_changing_state(self) -> None:
+        """An unrelated stop cannot advance the revision of dispatched work."""
+        for provider in self.providers:
+            state = provider.state(("U3[1]", "U3[2]"))
+            state["graph"]["nodes"]["U3[2]"].update(status="blocked", outcome="blocked")
+            provider.write(state)
+            wave = provider.success("begin-wave")
+            before = provider.path.read_bytes()
+            result = provider.call(
+                "hard-stop", "--node", "U3[2]", "--session", provider.session, "--reason", "owner decision"
+            )
+            self.assertNotEqual(result.returncode, 0, result.stdout)
+            self.assertEqual(provider.path.read_bytes(), before)
+            self.assertEqual(provider.success("inspect")["active_wave"]["wave_id"], wave["wave_id"])
+
+    def test_hard_stop_refuses_surviving_workers_without_retagging(self) -> None:
+        """A stop cannot change a surviving worker's wave identity."""
+        for provider in self.providers:
+            provider.write(provider.state(("U3[1]", "U3[2]")))
+            wave = provider.success("begin-wave")
+            before = provider.path.read_bytes()
+            result = provider.call(
+                "hard-stop", "--node", "U3[1]", "--session", provider.session, "--reason", "owner decision"
+            )
+            self.assertNotEqual(result.returncode, 0, result.stdout)
+            self.assertEqual(provider.path.read_bytes(), before)
+            self.assertEqual(provider.success("inspect")["active_wave"]["wave_id"], wave["wave_id"])
+
+    def test_hard_stop_singleton_active_wave_persists_valid_state(self) -> None:
+        """Stopping the only dispatched node clears its wave and advances revision."""
+        for provider in self.providers:
+            provider.write(provider.state())
+            wave = provider.success("begin-wave")
+            provider.success(
+                "hard-stop", "--node", "U3[1]", "--session", provider.session, "--reason", "owner decision"
+            )
+            inspected = provider.success("inspect")
+            self.assertIsNone(inspected["active_wave"])
+            self.assertEqual(inspected["revision"], wave["revision"] + 1)
+            self.assertEqual(inspected["hard_stop"]["node"], "U3[1]")
+
     def test_codex_stop_and_bootstrap_trust_actual_state(self) -> None:
         """Typed completion does not stop; recorded hard-stop can wait and resumes visibly."""
         provider = self.providers[1]

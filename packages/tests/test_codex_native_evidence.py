@@ -14,7 +14,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "codex/skills/agentic-loop/scripts"))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "codex/hooks/scripts"))
 from graph_evidence import bind_worker_evidence, validate_worker_evidence
-from graph_identity import GraphError, task_name
+from graph_identity import GraphError, legacy_task_name, task_name
 
 
 class NativeEvidenceTests(unittest.TestCase):
@@ -29,7 +29,7 @@ class NativeEvidenceTests(unittest.TestCase):
         patch("pathlib.Path.home", return_value=self.home).start()
         self.directory = self.home / ".codex/sessions"
         self.directory.mkdir(parents=True)
-        self.task = task_name("U3[1]", 1)
+        self.task = task_name("loop", "U3[1]", 1)
         self.arguments: dict[str, Any] = {"task_name": self.task}
         self.call: dict[str, Any] = {
             "type": "function_call",
@@ -63,6 +63,7 @@ class NativeEvidenceTests(unittest.TestCase):
         self.state: dict[str, Any] = {
             "schema_version": 3,
             "session_id": "parent",
+            "loop_id": "loop",
             "revision": 2,
             "status": "in-progress",
             "graph": {
@@ -131,6 +132,14 @@ class NativeEvidenceTests(unittest.TestCase):
         with self.assertRaises(GraphError):
             validate_worker_evidence(self.state)
 
+    def test_current_wave_rejects_legacy_task_identity(self) -> None:
+        """Historical names remain ineligible for newly bound native spawns."""
+        self.task = legacy_task_name("U3[1]")
+        self.arguments["task_name"] = self.task
+        self.activity["agent_path"] = f"/root/{self.task}"
+        self.spawn["agent_path"] = f"/root/{self.task}"
+        self._reject()
+
     def test_typed_native_binding(self) -> None:
         """Preserve the typed native dispatch contract."""
         self.arguments["agent_type"] = "worker"
@@ -179,7 +188,7 @@ class NativeEvidenceTests(unittest.TestCase):
             (self.arguments, "agent_type", "explorer"),
             (self.arguments, "agent_type", None),
             (self.arguments, "task_name", "unregistered"),
-            (self.arguments, "task_name", task_name("U3[2]", 1)),
+            (self.arguments, "task_name", task_name("loop", "U3[2]", 1)),
             (self.activity, "agent_path", f"/other/{self.task}"),
             (self.activity, "agent_thread_id", "other-child"),
             (self.metadata, "parent_thread_id", "other"),

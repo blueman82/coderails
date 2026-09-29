@@ -8,7 +8,14 @@ from typing import Any, cast
 from graph_artifacts import validate_completion_evidence as validate_completion_evidence
 from graph_artifacts import validate_evals as validate_evals
 from graph_data import nonempty, object_value, read_records
-from graph_identity import REFERENCE_KEYS, GraphError, classify_worker_evidence, next_attempt, task_name
+from graph_identity import (
+    REFERENCE_KEYS,
+    GraphError,
+    classify_worker_evidence,
+    legacy_task_name,
+    next_attempt,
+    task_name,
+)
 from graph_transcript import child_read_records, child_terminal, parent_indexes, thread_transcript
 from graph_transcript import transcript_cursor as transcript_cursor
 
@@ -30,14 +37,16 @@ def _verify_reference(
     node_id: str,
     reference: dict[str, Any],
     indexes: dict[str, list[tuple[int, str, str, str | None, str | None, str | None]]],
+    allow_legacy: bool = False,
 ) -> int:
     spawns = indexes
-    expected_task = task_name(node_id, reference["attempt"])
+    expected_task = task_name(state["loop_id"], node_id, reference["attempt"])
     call_id = reference["spawn_call_id"]
     if len(spawns.get(call_id, [])) != 1:
         raise GraphError(f"node {node_id} spawn reference is missing or duplicate")
     spawn_line, observed_task, observed_agent, nickname, expected_path, expected_role = spawns[call_id][0]
-    if observed_task != expected_task or observed_agent != reference["agent_thread_id"]:
+    legacy_match = allow_legacy and observed_task == legacy_task_name(node_id, reference["attempt"])
+    if (observed_task != expected_task and not legacy_match) or observed_agent != reference["agent_thread_id"]:
         raise GraphError(f"node {node_id} spawn reference has the wrong task")
     terminal = child_terminal(state["session_id"], reference["agent_thread_id"], nickname, expected_path, expected_role)
     if terminal != reference["task_complete_turn_id"]:
@@ -57,11 +66,11 @@ def _validate_missing_attempts(
     previous_line = 0
     for attempt in range(1, maximum + 1):
         if attempt in completed:
-            line = _verify_reference(state, node_id, completed[attempt], indexes)
+            line = _verify_reference(state, node_id, completed[attempt], indexes, allow_legacy=True)
         else:
-            expected = task_name(node_id, attempt)
+            expected = {task_name(state["loop_id"], node_id, attempt), legacy_task_name(node_id, attempt)}
             matches = [
-                (call, items[0]) for call, items in indexes.items() if len(items) == 1 and items[0][1] == expected
+                (call, items[0]) for call, items in indexes.items() if len(items) == 1 and items[0][1] in expected
             ]
             if len(matches) != 1:
                 raise GraphError(f"node {node_id} stale attempt has no unique native spawn")
@@ -116,7 +125,7 @@ def _stored_references(
             if used & identifiers:
                 raise GraphError(f"node {node_id} reuses transcript evidence")
             used.update(identifiers)
-            spawn_line = _verify_reference(state, node_id, reference, indexes)
+            spawn_line = _verify_reference(state, node_id, reference, indexes, allow_legacy=True)
             if spawn_line <= previous_line:
                 raise GraphError(f"node {node_id} transcript attempts are stale or out of order")
             previous_line = spawn_line
@@ -156,7 +165,7 @@ def bind_worker_evidence(
     references: dict[str, dict[str, Any]] = {}
     for node_id in active_wave["nodes"]:
         attempt = next_attempt(state["graph"]["nodes"][node_id])
-        expected_task = task_name(node_id, attempt)
+        expected_task = task_name(state["loop_id"], node_id, attempt)
         matching = [
             (call_id, items[0])
             for call_id, items in indexes.items()

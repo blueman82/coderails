@@ -1,0 +1,5 @@
+# Real parallel worker fixtures
+
+These records were reduced from the sanitized native samples used in the final independent run-observability review. The samples represented an actual overlapping two-worker Claude session and an actual overlapping two-worker Codex session. Only dispatch calls, child identity links, lifecycle rows, and relevant source timestamps remain. Native session, child, and call IDs are retained solely where the adapter uses them to correlate records. Prompts, instructions, tool argument and result bodies, model names, unrelated rows, original row UUIDs, and other incidental metadata were removed. The harmless HTML-shaped text is a synthetic rendering sentinel.
+
+The tests copy these fixtures into temporary native source layouts and use the provider collector, authenticated route handlers, and React panel. They do not replay the original full session or attest task success. Broken-link controls alter a child identity in a copied fixture and confirm that the correctness assertion rejects it.

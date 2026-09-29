@@ -214,6 +214,8 @@ Before unblocking the next dependent task in the chain:
 
 **Re-check at the moment of action, not at the moment the report arrived.** State changes in the gap. If the worker says "PR is CONFLICTING" or "ready to merge" and you queue a corrective instruction (rebase, redo, wait), the artifact may have moved by the time the message lands. Always re-run `gh pr view` (or equivalent) at the moment you act on the report, not when you first read it. Past failure: a CONFLICTING state self-healed via an intervening merge before the queued rebase instruction landed — stale on arrival, it triggered redundant work. One extra `gh pr view` between report and instruction is cheap.
 
+After independently verifying a deliverable and recording its graph wave, run `python3 "${CLAUDE_PLUGIN_ROOT}/skills/agentic-loop/scripts/graph.py" record-unit <state> --session <session_id> --unit <id> --status done --evidence "<observed check>"`. For an authorized withdrawal, use `--status dropped --reason "<reason>"`. The command requires a pending registered unit and no active wave and updates state atomically. The graph revision remains unchanged so stored wave evidence stays valid. Do not infer a work-unit decision from graph-node status; grade final evals against the current graph revision.
+
 The cost of one extra tool call before unblocking the next phase is small. The cost of unblocking on a false report is hours.
 
 ### Phase 13 — Confirm the factory actually ran (terminal self-audit)

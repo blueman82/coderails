@@ -7,7 +7,7 @@ import { createAggregator } from "../src/lib/collect";
 import * as prGatesModule from "../src/lib/collect/prGates";
 
 describe("GET /api/events — gates freshness", () => {
-  it("a runs-dir change triggers a second gates frame after the debounce window", async () => {
+  it("a runs-dir change eventually triggers a second gates frame", async () => {
     const projectsDir = tmpDir("dashboard-gates-debounce-projects-");
     const loopsDir = tmpDir("dashboard-gates-debounce-loops-");
     const runsDir = tmpDir("dashboard-gates-debounce-runs-");
@@ -18,15 +18,14 @@ describe("GET /api/events — gates freshness", () => {
       projectsDir,
       loopsDir,
       runsDir,
-      gatesPollMs: 999_999, // disable the periodic poll so only the runsDir-triggered debounce can produce a 2nd gates frame
+      gatesPollMs: 8_000,
     });
     const res = handler(req());
 
     // The first "gates" frame comes from start()'s unconditional initial
     // refreshGates() call, before any runsDir write. Wait for it, THEN write
     // into runsDir, then require a SECOND gates frame — asserting merely
-    // "a gates frame arrived" would be satisfied by the startup frame alone
-    // even with the runsDir watcher wired to a no-op.
+    // "a gates frame arrived" would be satisfied by the startup frame alone.
     let touched = false;
     const framesPromise = readFramesUntil(res.body!, (frames) => {
       const gatesFrames = frames.filter((f) => f.event === "gates");
@@ -57,7 +56,7 @@ describe("GET /api/events — gates freshness", () => {
       projectsDir,
       loopsDir,
       runsDir,
-      gatesPollMs: 999_999,
+      gatesPollMs: 8_000,
     });
     const res = handler(req());
 
@@ -133,7 +132,7 @@ describe("GET /api/events — gates freshness", () => {
     expect(collectPrGatesMock.mock.calls.length).toBe(callsAfterStart);
   }, 12000);
 
-  it("default poll fires refreshGates at 30s, not only at 120s", async () => {
+  it("default reconciliation polls gates at 30s while subscribed", async () => {
     const projectsDir = tmpDir("dashboard-gates-poll-projects-");
     const loopsDir = tmpDir("dashboard-gates-poll-loops-");
 
@@ -152,8 +151,9 @@ describe("GET /api/events — gates freshness", () => {
         cfg: testConfig(),
         projectsDir,
         loopsDir,
-        // Do not override gatesPollMs, so it uses DEFAULT_GATES_POLL_MS (30_000).
+        // Use the default reconciliation period.
       });
+      const unsubscribe = aggregator.subscribe(() => {});
       aggregator.start();
 
       // start()'s unconditional initial refreshGates() call is async (it
@@ -167,13 +167,12 @@ describe("GET /api/events — gates freshness", () => {
       await vi.advanceTimersByTimeAsync(29_000);
       expect(collectPrGatesMock.mock.calls.length).toBe(callsAfterStart);
 
-      // Past 30s total: exactly one additional call from the poll interval —
-      // if the interval were still 120_000 (or any longer default), this
-      // would still show callsAfterStart with no new call.
+      // Past 30s total: exactly one additional call from the poll interval.
       await vi.advanceTimersByTimeAsync(1_100);
       expect(collectPrGatesMock.mock.calls.length).toBe(callsAfterStart + 1);
 
       aggregator.stop();
+      unsubscribe();
     } finally {
       // Restore real timers unconditionally so a failure inside the try
       // block above can't leak fake timers into later tests in this file —

@@ -24,7 +24,7 @@ class DispatchGuardTests(unittest.TestCase):
         self.addCleanup(self.scratch.cleanup)
         self.state = Path(self.scratch.name) / "progress.json"
         self.state.touch()
-        self.task = "loop_worker_55335b315d"
+        self.task = "loop_worker_6c6f6f70_55335b315d"
         self.tool_input: dict[str, Any] = {
             "task_name": self.task,
             "message": f"CODERAILS_GRAPH_TASK={self.task}\nImplement the node.",
