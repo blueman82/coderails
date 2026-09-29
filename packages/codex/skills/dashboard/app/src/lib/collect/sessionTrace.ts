@@ -1,7 +1,43 @@
 import { basename, join, resolve, sep } from "node:path";
 import { TRACE_SCHEMA_VERSION, serializeTraceEvent, type NativeSessionSummary, type SourceRef, type TraceCollectionDeps, type TraceDetail, type TraceEvent, type TraceManifest, type TracePage } from "./traceSchema";
-import { CODEX_PARSER_VERSION, TranscriptResolutionError, addElapsedGaps, cacheDir, dispatches, isSubagentTranscript, nativeEvent, obj, orderEvents, paths, payload, safeId, safeReadError, source, terminalTurn, transcript, validChild, type Dispatch, type NativeSource } from "./codexTraceNative";
+import { CODEX_PARSER_VERSION, MAX_SOURCE_SCAN_BYTES, TranscriptResolutionError, addElapsedGaps, cacheDir, dispatches, isSubagentTranscript, nativeEvent, obj, orderEvents, paths, payload, safeId, safeReadError, source, terminalTurn, transcript, validChild, type Dispatch, type NativeSource } from "./codexTraceNative";
 import { auditEvents, auditSource, cacheEventPath, graphEvent, graphSource, pointer, saveCache } from "./codexTraceSupport";
+
+function unavailableSummary(nativeSessionId: string, projectLabel = "unavailable"): NativeSessionSummary {
+  const shortId = nativeSessionId.length > 12 ? nativeSessionId.slice(0, 8) : nativeSessionId;
+  return { nativeSessionId, provider: "codex", projectLabel, displayLabel: `${projectLabel} · ${shortId}`,
+    lastActivity: { value: null, basis: "unavailable" } };
+}
+
+function sessionSummary(nativeSessionId: string, text: string): NativeSessionSummary {
+  let projectLabel = "unavailable";
+  let latest: number | null = null;
+  let first = true;
+  for (const line of text.split("\n")) {
+    if (!line.trim()) continue;
+    let row: Record<string, unknown>;
+    try {
+      const parsed: unknown = JSON.parse(line);
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return unavailableSummary(nativeSessionId);
+      row = parsed as Record<string, unknown>;
+    } catch { return unavailableSummary(nativeSessionId); }
+    if (first) {
+      first = false;
+      const meta = payload(row);
+      if (row.type === "session_meta" && meta.id === nativeSessionId && typeof meta.cwd === "string") {
+        const candidate = basename(meta.cwd);
+        if (candidate && candidate !== "." && candidate !== "/") projectLabel = candidate;
+      }
+    }
+    if (typeof row.timestamp !== "string") continue;
+    const milliseconds = Date.parse(row.timestamp);
+    if (Number.isFinite(milliseconds) && (latest === null || milliseconds > latest)) latest = milliseconds;
+  }
+  const shortId = nativeSessionId.length > 12 ? nativeSessionId.slice(0, 8) : nativeSessionId;
+  return { nativeSessionId, provider: "codex", projectLabel, displayLabel: `${projectLabel} · ${shortId}`,
+    lastActivity: latest === null ? { value: null, basis: "unavailable" } :
+      { value: new Date(latest).toISOString(), basis: "observed" } };
+}
 
 export { TRACE_SCHEMA_VERSION, isTraceEvent, serializeTraceEvent } from "./traceSchema";
 export type { TraceProvider, EvidenceBasis, TraceAttribute, SourceRef, TraceProvenance, TraceSpanEvent, TraceEvent, TraceManifest, TracePage, NativeSessionSummary, TraceCollectionDeps, TraceDetail } from "./traceSchema";
@@ -13,8 +49,16 @@ export async function listCodexSessions(deps: TraceCollectionDeps): Promise<Nati
     const dated = /^rollout-\d{4}-\d{2}-\d{2}T[^/]+-([0-9a-f-]{36})\.jsonl$/.exec(name);
     const id = dated?.[1] ?? (/^rollout-([A-Za-z0-9_-]+)\.jsonl$/.exec(name)?.[1]);
     if (!id || !safeId(id) || await isSubagentTranscript(path)) continue;
-    sessions.push({ nativeSessionId: id, provider: "codex", projectLabel: "Codex sessions", displayLabel: id,
-      lastActivity: { value: null, basis: "unavailable" } });
+    let summary: NativeSessionSummary;
+    try {
+      const info = await deps.fs.stat(path) as { size?: number };
+      if (typeof info.size === "number" && info.size > MAX_SOURCE_SCAN_BYTES) summary = unavailableSummary(id);
+      else {
+        const text = await deps.fs.readFile(path);
+        summary = Buffer.byteLength(text, "utf8") > MAX_SOURCE_SCAN_BYTES ? unavailableSummary(id) : sessionSummary(id, text);
+      }
+    } catch { summary = unavailableSummary(id); }
+    sessions.push(summary);
   }
   return sessions.sort((a, b) => a.nativeSessionId.localeCompare(b.nativeSessionId));
 }

@@ -122,11 +122,21 @@ describe("Claude native session trace", () => {
     expect(page.complete).toBe(false);
     expect(page.errors).toContain("multiple matching graph roots (2)");
   });
-  it("keeps a selectable session's last activity unavailable without native event time", async () => {
+  it("derives a selectable session's last activity from valid native event time", async () => {
     const { deps } = await fixture();
     const sessions = await listClaudeSessions(deps);
     expect(sessions.map((session) => session.nativeSessionId)).toEqual(["s1"]);
-    expect(sessions[0].lastActivity).toEqual({ value: null, basis: "unavailable" });
+    expect(sessions[0].lastActivity).toEqual({ value: "2026-09-28T12:00:00.000Z", basis: "observed" });
+  });
+  it("uses valid native timestamps for activity and labels sessions with the source project", async () => {
+    const { deps, parent, rows } = await fixture();
+    rows[2].timestamp = "2026-09-28T12:34:56Z";
+    rows.push({ type: "user", timestamp: "invalid", message: { content: "should not become a label" } });
+    await writeFile(parent, rows.map((row) => JSON.stringify(row)).join("\n") + "\n");
+    const [session] = await listClaudeSessions(deps);
+    expect(session.projectLabel).toBe("project");
+    expect(session.displayLabel).toBe("project · s1");
+    expect(session.lastActivity).toEqual({ value: "2026-09-28T12:34:56.000Z", basis: "observed" });
   });
   it("emits each native tool block with its own stable identity and source backed failure", async () => {
     const { deps, parent, rows } = await fixture();

@@ -56,7 +56,7 @@ describe("SessionTracePanel", () => {
     await screen.findByRole("option", { name: /session/ });
     fireEvent.change(screen.getByLabelText("Native session"), { target: { value: "s1" } });
     await screen.findByText(/request\/result elapsed gap: 1000 ms \(derived from source timestamps; cause unknown\)/);
-    expect(screen.getByText(/Project directory label: project \(derived from local directory name\)/)).toBeTruthy();
+    expect(screen.getByText(/Project: project/)).toBeTruthy();
     expect(screen.getByText(/Indexed source records: 5 \(derived from local source scan\).*Emitted events: 5 \(derived from local trace index; not a native event count\)/)).toBeTruthy();
     expect(screen.getAllByText(/duration: unavailable/).length).toBeGreaterThan(0);
     expect(screen.getByText(/gap source refs:/)).toBeTruthy();
@@ -127,16 +127,61 @@ describe("SessionTracePanel", () => {
     await screen.findByRole("option", { name: /first/ });
     fireEvent.change(screen.getByLabelText("Native session"), { target: { value: FIRST } });
     await screen.findByText("graph_hard_stop");
-    expect(screen.getByText(/agent-a/)).toBeTruthy();
-    expect(screen.getByText(/agent-b/)).toBeTruthy();
+    expect(screen.getByText(/Actor: Worker agent-a/)).toBeTruthy();
+    expect(screen.getByText(/Actor: Worker agent-b/)).toBeTruthy();
     expect(screen.getAllByText(/parent:.*join unavailable; method: unavailable; parent source: unavailable; child source: unavailable/)).toHaveLength(2);
     expect(screen.getByText(/unresolved trace/i)).toBeTruthy();
     expect(screen.getByText(/multiple matching graph roots \(3\)/)).toBeTruthy();
     expect(screen.getByText(/display tie break/)).toBeTruthy();
+    expect(screen.getByRole("list", { name: "Trace timeline" })).toBeTruthy();
     expect(screen.getAllByText(/usage unavailable/).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/cost unavailable/).length).toBeGreaterThan(0);
     expect(fetcher.mock.calls.some(([url]) => String(url).includes(`/api/sessions/${FIRST}/trace?`))).toBe(true);
     expect(fetcher.mock.calls.some(([url]) => String(url).includes("run-123/trace"))).toBe(false);
+  });
+
+  it("filters sessions by source metadata and presents a globally ordered actor timeline", async () => {
+    const earlier = event("worker_earlier", 1, { startTimeUnixNano: "1000000000",
+      attributes: { "coderails.actor.kind": "worker", "coderails.actor.id": "worker-1" } });
+    const later = event("parent_later", 2, { startTimeUnixNano: "2000000000" });
+    vi.stubGlobal("fetch", vi.fn(async (input: string) => {
+      const path = new URL(input, "http://localhost");
+      if (path.pathname === "/api/sessions") return response({ sessions: [
+        { nativeSessionId: FIRST, provider: "claude", projectLabel: "alpha-project", displayLabel: "alpha-project · 11111111",
+          lastActivity: { value: "2026-09-29T10:00:00.000Z", basis: "observed" } },
+        { nativeSessionId: SECOND, provider: "claude", projectLabel: "beta-project", displayLabel: "beta-project · 22222222",
+          lastActivity: { value: null, basis: "unavailable" } },
+      ] });
+      return response({ events: [earlier, later], nextCursor: null, complete: true });
+    }));
+    render(<SessionTracePanel token="secret" />);
+    await screen.findByRole("option", { name: /alpha-project · 11111111/ });
+    expect(screen.queryByRole("option", { name: new RegExp(FIRST) })).toBeNull();
+    fireEvent.change(screen.getByLabelText("Filter sessions"), { target: { value: "beta-project" } });
+    expect(screen.getByRole("option", { name: /beta-project/ })).toBeTruthy();
+    expect(screen.queryByRole("option", { name: /alpha-project/ })).toBeNull();
+    fireEvent.change(screen.getByLabelText("Filter sessions"), { target: { value: "2026-09-29" } });
+    expect(screen.getByRole("option", { name: /alpha-project/ })).toBeTruthy();
+    expect(screen.queryByRole("option", { name: /beta-project/ })).toBeNull();
+    fireEvent.change(screen.getByLabelText("Filter sessions"), { target: { value: "alpha-project" } });
+    fireEvent.change(screen.getByLabelText("Native session"), { target: { value: FIRST } });
+    await screen.findByText("parent_later");
+    const timeline = screen.getByRole("list", { name: "Trace timeline" });
+    expect([...timeline.querySelectorAll("li")].map((row) => row.textContent?.match(/(?:worker_earlier|parent_later)/)?.[0]))
+      .toEqual(["worker_earlier", "parent_later"]);
+    expect(screen.getByText(/Actor: Worker worker-1/)).toBeTruthy();
+    expect(screen.getByText(/Actor: Orchestrator and evidence/)).toBeTruthy();
+  });
+
+  it("does not use UUID project metadata as a session label", async () => {
+    const projectId = "33333333-3333-4333-8333-333333333333";
+    vi.stubGlobal("fetch", vi.fn(async (input: string) => new URL(input, "http://localhost").pathname === "/api/sessions"
+      ? response({ sessions: [{ nativeSessionId: FIRST, provider: "claude", projectLabel: projectId,
+        displayLabel: `${projectId} · 11111111`, lastActivity: { value: null, basis: "unavailable" } }] })
+      : response({ events: [], nextCursor: null, complete: true })));
+    render(<SessionTracePanel token="secret" />);
+    await screen.findByRole("option", { name: /unavailable · 11111111/ });
+    expect(screen.queryByRole("option", { name: new RegExp(projectId) })).toBeNull();
   });
 
   it("loads source detail only on expansion and renders source text without HTML", async () => {

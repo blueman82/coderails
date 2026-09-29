@@ -31,6 +31,23 @@ function timeLabel(nanos: string | null): string {
   return Number.isFinite(milliseconds) ? new Date(milliseconds).toISOString() : "time unavailable; source order only";
 }
 
+function actorLabel(event: TraceEvent): string {
+  const kind = attribute(event, "coderails.actor.kind");
+  if (kind === "worker") return `Worker ${attribute(event, "coderails.actor.id") ?? "unknown"}`;
+  return kind === "orchestrator" ? "Orchestrator and evidence" : "Actor unavailable";
+}
+
+function isUuid(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
+function sessionLabel(session: NativeSessionSummary): string {
+  const displayLabel = session.displayLabel.trim();
+  if (displayLabel && !isUuid(displayLabel) && !isUuid(session.projectLabel)) return displayLabel;
+  const project = session.projectLabel.trim();
+  return `${!project || isUuid(project) ? "unavailable" : project} · ${session.nativeSessionId.slice(0, 8)}`;
+}
+
 function basisLabel(basis: string, derivation?: { method: string; sourceIds: string[] }): string {
   return basis === "derived" && derivation
     ? `derived: ${derivation.method} from ${derivation.sourceIds.join(", ")}`
@@ -80,6 +97,9 @@ function EventRow({ event, token, nativeSessionId, parentName }: {
     const value = attribute(event, key);
     return value === null ? [] : [`${key.replace("coderails.", "")}: ${value}`];
   });
+  if (event.provenance.provider === "codex" && attribute(event, "coderails.node.id") !== null &&
+    attribute(event, "coderails.wave.id") === null)
+    refs.splice(refs.findIndex((ref) => ref.startsWith("node.id:")) + 1, 0, "wave: unavailable");
 
   async function toggle() {
     const request = ++detailRequest.current;
@@ -100,6 +120,7 @@ function EventRow({ event, token, nativeSessionId, parentName }: {
 
   return <li style={{ borderTop: "1px solid #45515e", padding: "0.65rem 0" }}>
     <div><strong>{event.name}</strong></div>
+    <div>Actor: {actorLabel(event)}</div>
     <div>start time: {timeLabel(event.startTimeUnixNano)} ({timeBasisLabel(event, "start_time")})</div>
     <div>end time: {timeLabel(event.endTimeUnixNano)} ({timeBasisLabel(event, "end_time")})</div>
     <div>status: {event.status.value} ({basisLabel(event.status.basis, event.status.derivation)})</div>
@@ -128,6 +149,7 @@ function EventRow({ event, token, nativeSessionId, parentName }: {
 
 export function SessionTracePanel({ token, dashboardRunId }: { token: string; dashboardRunId?: string | null }) {
   const [sessions, setSessions] = useState<NativeSessionSummary[]>([]);
+  const [sessionFilter, setSessionFilter] = useState("");
   const [selected, setSelected] = useState("");
   const [events, setEvents] = useState<TraceEvent[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
@@ -190,13 +212,10 @@ export function SessionTracePanel({ token, dashboardRunId }: { token: string; da
   }
 
   const selectedSession = sessions.find((session) => session.nativeSessionId === selected);
+  const normalizedFilter = sessionFilter.trim().toLocaleLowerCase();
+  const filteredSessions = sessions.filter((session) => [session.projectLabel, session.displayLabel,
+    session.nativeSessionId, session.lastActivity.value ?? ""].some((value) => value.toLocaleLowerCase().includes(normalizedFilter)));
   const spans = new Map(events.map((event) => [event.spanId, event.name]));
-  const lanes = new Map<string, TraceEvent[]>();
-  for (const event of events) {
-    const actor = attribute(event, "coderails.actor.kind") === "worker"
-      ? `Worker ${attribute(event, "coderails.actor.id") ?? "unknown"}` : "Orchestrator and evidence";
-    lanes.set(actor, [...(lanes.get(actor) ?? []), event]);
-  }
   const ambiguity = events.some((event) => event.startTimeUnixNano === null) ||
     new Set(events.map((event) => event.startTimeUnixNano).filter((value) => value !== null)).size <
       events.filter((event) => event.startTimeUnixNano !== null).length;
@@ -204,14 +223,18 @@ export function SessionTracePanel({ token, dashboardRunId }: { token: string; da
   return <section aria-label="Native session trace" style={{ color: "#e9eef4", background: "#17212b", padding: "1rem", overflow: "auto", maxHeight: "75vh" }}>
     <h2>Native session trace</h2>
     {dashboardRunId && <p>Dashboard run: {dashboardRunId}. Select a native session separately.</p>}
+    <label htmlFor="native-session-filter">Filter sessions</label>{" "}
+    <input id="native-session-filter" value={sessionFilter} onChange={(event) => setSessionFilter(event.target.value)}
+      placeholder="Project, session ID, or date" />
     <label htmlFor="native-session">Native session</label>{" "}
     <select id="native-session" value={selected} onChange={(event) => choose(event.target.value)}>
       <option value="">Select a native session</option>
-      {sessions.map((session) => <option key={session.nativeSessionId} value={session.nativeSessionId}>
-        {session.displayLabel} ({session.provider}, {session.nativeSessionId})
+      {filteredSessions.map((session) => <option key={session.nativeSessionId} value={session.nativeSessionId}>
+        {sessionLabel(session)}
       </option>)}
     </select>
-    {selectedSession && <p>Project directory label: {selectedSession.projectLabel} (derived from local directory name). Last activity: {selectedSession.lastActivity.value ?? "unavailable"}
+    {selectedSession && <p>Project: {!selectedSession.projectLabel || isUuid(selectedSession.projectLabel)
+      ? "unavailable" : selectedSession.projectLabel}. Last activity: {selectedSession.lastActivity.value ?? "unavailable"}
       {` (${basisLabel(selectedSession.lastActivity.basis, selectedSession.lastActivity.derivation)})`}</p>}
     {error && <p role="alert">{error}</p>}
     {stale && selected && <button type="button" disabled={loading} onClick={() => void loadPage(selected, null, true)}>Restart trace</button>}
@@ -223,13 +246,10 @@ export function SessionTracePanel({ token, dashboardRunId }: { token: string; da
       {coverage && <p>Indexed source records: {coverage.scannedRecords === null ? "unavailable" : `${coverage.scannedRecords} (derived from local source scan)`}. Emitted events: {coverage.emittedEvents === null ? "unavailable" : `${coverage.emittedEvents} (derived from local trace index; not a native event count)`}.
         {coverage.truncated && " Source scan stopped at the size limit; this trace is incomplete."}</p>}
       {ambiguity && <p>Time is missing or tied for some records; source order is a display tie break, not a causal order.</p>}
-      {[...lanes].map(([actor, rows]) => <section key={actor} aria-label={actor} style={{ marginTop: "1rem" }}>
-        <h3>{actor}</h3>
-        <ol style={{ listStyle: "none", paddingLeft: actor.startsWith("Worker") ? "1rem" : 0 }}>
-          {rows.map((event) => <EventRow key={event.eventId} event={event} token={token} nativeSessionId={selected}
-            parentName={event.parentSpanId ? spans.get(event.parentSpanId) ?? null : null} />)}
-        </ol>
-      </section>)}
+      <ol aria-label="Trace timeline" style={{ listStyle: "none", paddingLeft: 0, marginTop: "1rem" }}>
+        {events.map((event) => <EventRow key={event.eventId} event={event} token={token} nativeSessionId={selected}
+          parentName={event.parentSpanId ? spans.get(event.parentSpanId) ?? null : null} />)}
+      </ol>
       {nextCursor && <button type="button" disabled={loading} onClick={() => void loadPage(selected, nextCursor, false)}>
         Load more trace events
       </button>}
