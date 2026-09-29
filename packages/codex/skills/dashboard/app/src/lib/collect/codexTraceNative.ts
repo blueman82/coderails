@@ -3,7 +3,7 @@ import { open, readdir } from "node:fs/promises";
 import { basename, join, relative, sep } from "node:path";
 import { TRACE_SCHEMA_VERSION, record, type SourceRef, type TraceAttribute, type TraceCollectionDeps, type TraceEvent } from "./traceSchema";
 
-export const CODEX_PARSER_VERSION = 4;
+export const CODEX_PARSER_VERSION = 5;
 export const MAX_SOURCE_SCAN_BYTES = 64 * 1024 * 1024;
 export function safeReadError(error: unknown): string {
   return error instanceof Error && error.message.startsWith("source exceeds trace scan limit:")
@@ -91,14 +91,14 @@ export async function transcript(sessionId: string, deps: TraceCollectionDeps): 
 }
 function task(value: unknown): value is string {
   if (typeof value !== "string") return false;
-  const parts = /^loop_worker_([0-9a-f]+)(?:_([0-9a-f]+))?(?:_a([1-9][0-9]*))?$/.exec(value);
-  if (!parts || parts[3] === "1") return false;
-  const encoded = parts[2] ? [parts[1], parts[2]] : [parts[1]];
-  return encoded.every((hex) => {
-    if (hex.length % 2) return false;
-    const decoded = Buffer.from(hex, "hex").toString("utf8");
-    return decoded.length > 0 && Buffer.from(decoded).toString("hex") === hex;
-  });
+  if (canonicalTask(value)) return true;
+  const legacy = /^loop_worker_([0-9a-f]+)(?:_a([1-9][0-9]*))?$/.exec(value);
+  if (!legacy || legacy[2] === "1") return false;
+  const attempt = legacy[2] ? Number(legacy[2]) : 1;
+  const hex = legacy[1];
+  if (!Number.isSafeInteger(attempt) || hex.length % 2) return false;
+  const decoded = Buffer.from(hex, "hex").toString("utf8");
+  return decoded.length > 0 && Buffer.from(decoded).toString("hex") === hex;
 }
 function canonicalTask(value: string): { loopId: string; nodeId: string; attempt: number } | null {
   if (/^loop_worker_[0-9a-f]+_a[1-9][0-9]*$/.test(value)) return null;
@@ -160,6 +160,9 @@ export function dispatches(parent: NativeSource, errors: string[], parentPath: s
     if (started) activities.set(started.callId, [...(activities.get(started.callId) ?? []), started]);
     const old = legacy(row, ordinal);
     if (old) legacyRows.push(old);
+    else if (row.type === "event_msg" && eventItem(row)?.type === "CollabAgentToolCall" &&
+      eventItem(row)?.tool === "spawn_agent" && eventItem(row)?.status === "completed")
+      errors.push(`unsupported legacy spawn at ${ordinal}`);
   });
   const resolved = [...legacyRows];
   for (const [id, matches] of calls) {
