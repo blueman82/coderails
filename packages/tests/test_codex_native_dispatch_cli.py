@@ -60,7 +60,7 @@ class NativeDispatchCliTests(unittest.TestCase):
             }
             evals_path = state_path.with_name("evals.json")
             evals_path.write_text(json.dumps(evals), encoding="utf-8")
-            task = "loop_worker_55335b375d"
+            task = "loop_worker_6c6f6f70_55335b375d"
             payload: dict[str, Any] = {
                 "tool_name": "spawn_agent",
                 "session_id": "parent",
@@ -90,7 +90,8 @@ class NativeDispatchCliTests(unittest.TestCase):
                 altered = json.loads(json.dumps(payload))
                 if mutation == "task":
                     altered["tool_input"].update(
-                        task_name="loop_worker_55335b385d", message="CODERAILS_GRAPH_TASK=loop_worker_55335b385d"
+                        task_name="loop_worker_6c6f6f70_55335b385d",
+                        message="CODERAILS_GRAPH_TASK=loop_worker_6c6f6f70_55335b385d",
                     )
                 elif mutation == "session":
                     altered["session_id"] = "other"

@@ -4,6 +4,7 @@ import type { DashboardConfig } from "../config";
 import { readMarkerVersions } from "./markerVersions";
 
 const execFileAsync = promisify(execFile);
+const GH_TIMEOUT_MS = 15_000;
 
 export type GateState = "merge-ready" | "blocked" | "stale";
 
@@ -149,22 +150,21 @@ export function parseGates(prJson: unknown, comments: unknown[]): PrGate {
   return gate;
 }
 
-async function fetchOpenPrGates(repo: string, env: NodeJS.ProcessEnv): Promise<PrGate[]> {
+async function fetchOpenPrGates(repo: string, env: NodeJS.ProcessEnv, signal?: AbortSignal): Promise<PrGate[]> {
   const { stdout: listOut } = await execFileAsync(
     "gh",
     ["pr", "list", "--repo", repo, "--state", "open", "--json", "number"],
-    { env }
+    { env, signal, timeout: GH_TIMEOUT_MS }
   );
   const list: unknown = JSON.parse(listOut);
   const numbers = Array.isArray(list)
     ? list.filter(isRecord).map((p) => p.number).filter((n): n is number => typeof n === "number")
     : [];
 
-  // Per-PR `gh pr view` calls run in parallel; Promise.all preserves the
-  // list order, and a single failing call rejects the whole repo so it
-  // degrades to its {repo, error} entry in collectPrGates — identical error
-  // semantics to the sequential loop this replaced.
-  return Promise.all(
+  // Wait for every view before releasing the repository sweep. An early
+  // failure must not strand sibling commands outside the caller's abort and
+  // single-flight ownership.
+  const settled = await Promise.allSettled(
     numbers.map(async (number): Promise<PrGate> => {
       const { stdout: viewOut } = await execFileAsync(
         "gh",
@@ -177,7 +177,7 @@ async function fetchOpenPrGates(repo: string, env: NodeJS.ProcessEnv): Promise<P
           "--json",
           "number,title,headRefOid,comments",
         ],
-        { env }
+        { env, signal, timeout: GH_TIMEOUT_MS }
       );
       const view: unknown = JSON.parse(viewOut);
       const comments = isRecord(view) && Array.isArray(view.comments) ? view.comments : [];
@@ -186,6 +186,9 @@ async function fetchOpenPrGates(repo: string, env: NodeJS.ProcessEnv): Promise<P
       return gate;
     })
   );
+  const failed = settled.find((result) => result.status === "rejected");
+  if (failed?.status === "rejected") throw failed.reason;
+  return settled.map((result) => (result as PromiseFulfilledResult<PrGate>).value);
 }
 
 // collectPrGates shells out to `gh` via execFile (never a shell string) for
@@ -196,13 +199,14 @@ async function fetchOpenPrGates(repo: string, env: NodeJS.ProcessEnv): Promise<P
 // real environment.
 export function collectPrGates(
   cfg: DashboardConfig,
-  envOverride?: Record<string, string | undefined>
+  envOverride?: Record<string, string | undefined>,
+  signal?: AbortSignal
 ): Promise<(PrGate | PrGateError)[]> {
   const env = envOverride ? { ...process.env, ...envOverride } : process.env;
   return Promise.all(
     cfg.repos.map(async (repo): Promise<(PrGate | PrGateError)[]> => {
       try {
-        return await fetchOpenPrGates(repo, env);
+        return await fetchOpenPrGates(repo, env, signal);
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         return [{ repo, error: message }];

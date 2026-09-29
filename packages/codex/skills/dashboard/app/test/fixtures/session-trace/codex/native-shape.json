@@ -1,0 +1,13 @@
+{
+  "parent": [
+    {"type":"session_meta","payload":{"id":"parent","cwd":"/project"}},
+    {"type":"response_item","payload":{"type":"function_call","name":"spawn_agent","namespace":"collaboration","call_id":"call-one","arguments":"{\"task_name\":\"loop_worker_6c6f6f70_55335b315d\",\"message\":\"Sensitive prompt\"}"}},
+    {"type":"event_msg","payload":{"item":{"type":"SubAgentActivity","kind":"started","id":"call-one","agent_thread_id":"child-one","agent_path":"/root/loop_worker_6c6f6f70_55335b315d"}}},
+    {"timestamp":"2026-09-28T12:00:00Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":3,"output_tokens":2}}}}
+  ],
+  "child": [
+    {"timestamp":"2026-09-28T12:00:01Z","type":"session_meta","payload":{"id":"child-one","session_id":"parent","parent_thread_id":"parent","thread_source":"subagent","agent_role":null,"agent_path":"/root/loop_worker_6c6f6f70_55335b315d","source":{"subagent":{"thread_spawn":{"parent_thread_id":"parent","depth":1,"agent_role":null,"agent_path":"/root/loop_worker_6c6f6f70_55335b315d"}}}}},
+    {"timestamp":"2026-09-28T12:00:02Z","type":"event_msg","payload":{"type":"task_started","turn_id":"turn-one"}},
+    {"timestamp":"2026-09-28T12:00:03Z","type":"event_msg","payload":{"type":"task_complete","turn_id":"turn-one"}}
+  ]
+}

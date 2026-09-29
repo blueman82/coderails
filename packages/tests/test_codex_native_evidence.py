@@ -29,7 +29,7 @@ class NativeEvidenceTests(unittest.TestCase):
         patch("pathlib.Path.home", return_value=self.home).start()
         self.directory = self.home / ".codex/sessions"
         self.directory.mkdir(parents=True)
-        self.task = task_name("U3[1]", 1)
+        self.task = task_name("loop", "U3[1]", 1)
         self.arguments: dict[str, Any] = {"task_name": self.task}
         self.call: dict[str, Any] = {
             "type": "function_call",
@@ -63,6 +63,7 @@ class NativeEvidenceTests(unittest.TestCase):
         self.state: dict[str, Any] = {
             "schema_version": 3,
             "session_id": "parent",
+            "loop_id": "loop",
             "revision": 2,
             "status": "in-progress",
             "graph": {
@@ -179,7 +180,7 @@ class NativeEvidenceTests(unittest.TestCase):
             (self.arguments, "agent_type", "explorer"),
             (self.arguments, "agent_type", None),
             (self.arguments, "task_name", "unregistered"),
-            (self.arguments, "task_name", task_name("U3[2]", 1)),
+            (self.arguments, "task_name", task_name("loop", "U3[2]", 1)),
             (self.activity, "agent_path", f"/other/{self.task}"),
             (self.activity, "agent_thread_id", "other-child"),
             (self.metadata, "parent_thread_id", "other"),

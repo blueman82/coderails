@@ -30,8 +30,10 @@ def begin_wave(path: Path) -> dict[str, Any]:
         wave = cast(dict[str, Any], transition["wave"])
         proposed["graph"]["active_wave"]["transcript_cursor"] = transcript_cursor(proposed["session_id"])
         task_names = {
-            node_id: task_name(node_id, next_attempt(proposed["graph"]["nodes"][node_id])) for node_id in wave["nodes"]
+            node_id: task_name(proposed["loop_id"], node_id, next_attempt(proposed["graph"]["nodes"][node_id]))
+            for node_id in wave["nodes"]
         }
+        graph_semantics.validate(proposed)
         _write(path, proposed)
         return {
             "wave_id": wave["wave_id"],
@@ -69,6 +71,7 @@ def record_wave(path: Path, raw_results: str) -> dict[str, Any]:
         proposed = cast(dict[str, Any], transition["state"])
         for node_id, reference in references.items():
             proposed["graph"]["nodes"][node_id]["evidence"].append(reference)
+        graph_semantics.validate(proposed)
         _write(path, proposed)
         return {
             "revision": proposed["revision"],
@@ -94,6 +97,32 @@ def transition(path: Path, session: str, operation: str, node: str, reason: str)
         return cast(dict[str, Any], transition[key])
 
 
+def record_unit(path: Path, session: str, unit_id: str, status: str, detail: str) -> dict[str, Any]:
+    """Record an independently checked work-unit decision under the state lock."""
+    with _locked(path):
+        state = _load(path)
+        if state["session_id"] != session:
+            raise GraphError("session does not own this loop")
+        if state["status"] != "in-progress" or state["graph"]["active_wave"] is not None:
+            raise GraphError("work unit requires an in-progress graph without an active wave")
+        units = cast(object, state.get("work_units"))
+        if not isinstance(cast(object, unit_id), str) or not unit_id.strip() or not isinstance(units, dict):
+            raise GraphError("work unit must be registered")
+        unit = cast(dict[str, object], units).get(unit_id)
+        if not isinstance(unit, dict):
+            raise GraphError("work unit must be registered and pending")
+        record = cast(dict[str, object], unit)
+        if record.get("status") != "pending":
+            raise GraphError("work unit must be registered and pending")
+        if status not in {"done", "dropped"} or not isinstance(cast(object, detail), str) or not detail.strip():
+            raise GraphError("work unit decision requires a status and nonblank evidence or reason")
+        record["status"] = status
+        record["evidence" if status == "done" else "dropped_reason"] = detail.strip()
+        graph_semantics.validate(state)
+        _write(path, state)
+        return {"unit": unit_id, "status": status, "revision": state["revision"]}
+
+
 def inspect(path: Path) -> dict[str, Any]:
     """Read core readiness and native task identities without mutating state."""
     state = _load(path)
@@ -106,7 +135,7 @@ def inspect(path: Path) -> dict[str, Any]:
         "active_wave": graph["active_wave"],
         "task_names": (
             {
-                node_id: task_name(node_id, next_attempt(graph["nodes"][node_id]))
+                node_id: task_name(state["loop_id"], node_id, next_attempt(graph["nodes"][node_id]))
                 for node_id in graph["active_wave"]["nodes"]
             }
             if graph["active_wave"] is not None
@@ -125,12 +154,14 @@ def authorize_dispatch(path: Path, session: str, task: str, evals_path: Path) ->
         raise GraphError("session does not own this loop")
     if state["status"] == "complete":
         raise GraphError("completed graph does not own worker dispatch")
-    node_id = task_node(task)
+    loop_id, node_id = task_node(task)
+    if loop_id != state["loop_id"]:
+        raise GraphError("graph worker task name belongs to another loop")
     active_wave = state["graph"]["active_wave"]
     if active_wave is None or node_id not in active_wave["nodes"]:
         raise GraphError("graph worker node is not in the active wave")
     attempt = next_attempt(state["graph"]["nodes"][node_id])
-    if task_name(node_id, attempt) != task:
+    if task_name(state["loop_id"], node_id, attempt) != task:
         raise GraphError("graph worker task name does not match the active attempt")
     validate_evals(state, None, evals_path)
     return {
@@ -151,6 +182,14 @@ def _parser() -> argparse.ArgumentParser:
     record = commands.add_parser("record-wave")
     record.add_argument("state", type=Path)
     record.add_argument("results_json")
+    unit = commands.add_parser("record-unit")
+    unit.add_argument("state", type=Path)
+    unit.add_argument("--session", required=True)
+    unit.add_argument("--unit", required=True)
+    unit.add_argument("--status", required=True, choices=("done", "dropped"))
+    detail = unit.add_mutually_exclusive_group(required=True)
+    detail.add_argument("--evidence")
+    detail.add_argument("--reason")
     for name in ("respawn_stale", "hard_stop"):
         transition = commands.add_parser(name.replace("_", "-"))
         transition.add_argument("state", type=Path)
@@ -180,6 +219,10 @@ def main() -> int:
             output = begin_wave(args.state)
         elif args.command == "record-wave":
             output = record_wave(args.state, args.results_json)
+        elif args.command == "record-unit":
+            if (args.status == "done") != (args.evidence is not None):
+                raise GraphError("done requires --evidence; dropped requires --reason")
+            output = record_unit(args.state, args.session, args.unit, args.status, args.evidence or args.reason)
         elif args.command in {"respawn-stale", "hard-stop"}:
             output = transition(args.state, args.session, args.command.replace("-", "_"), args.node, args.reason)
         elif args.command == "inspect":

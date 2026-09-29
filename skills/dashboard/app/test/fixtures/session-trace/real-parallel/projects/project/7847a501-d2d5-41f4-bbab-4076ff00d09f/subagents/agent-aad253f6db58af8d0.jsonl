@@ -1,0 +1,2 @@
+{"type":"user","sessionId":"7847a501-d2d5-41f4-bbab-4076ff00d09f","agentId":"aad253f6db58af8d0","isSidechain":true,"timestamp":"2026-08-23T02:10:47.081Z","message":{"role":"user","content":"fixture worker 0"}}
+{"type":"assistant","sessionId":"7847a501-d2d5-41f4-bbab-4076ff00d09f","agentId":"aad253f6db58af8d0","isSidechain":true,"attributionAgent":"pr-review-toolkit:comment-analyzer","timestamp":"2026-08-23T02:17:18.567Z","message":{"role":"assistant","stop_reason":"end_turn","content":[{"type":"text","text":"<img src=x onerror=alert(1)>"}]}}

@@ -1,0 +1,62 @@
+{
+  "parent": [
+    {
+      "type": "assistant",
+      "sessionId": "s1",
+      "uuid": "r1",
+      "timestamp": "2026-09-28T12:00:00Z",
+      "message": {
+        "role": "assistant",
+        "model": "claude-test",
+        "content": [
+          {
+            "type": "tool_use",
+            "id": "tool-1",
+            "name": "Agent",
+            "input": {
+              "prompt": "CODERAILS_GRAPH_DISPATCH={\"session_id\":\"s1\",\"loop_id\":\"l1\",\"revision\":1,\"wave_id\":\"w1\",\"node_id\":\"U1\"}\nSensitive prompt",
+              "subagent_type": "worker"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "type": "user",
+      "sessionId": "s1",
+      "uuid": "r2",
+      "message": { "content": [{ "type": "tool_result", "tool_use_id": "tool-1", "content": "Sensitive result" }] },
+      "toolUseResult": { "agentId": "a1", "status": "running" }
+    },
+    {
+      "type": "assistant",
+      "sessionId": "s1",
+      "uuid": "r3",
+      "message": { "role": "assistant", "content": [{ "type": "text", "text": "Sensitive answer" }] }
+    }
+  ],
+  "child": [
+    {
+      "type": "user",
+      "sessionId": "s1",
+      "agentId": "a1",
+      "isSidechain": true,
+      "message": {
+        "role": "user",
+        "content": "CODERAILS_GRAPH_DISPATCH={\"session_id\":\"s1\",\"loop_id\":\"l1\",\"revision\":1,\"wave_id\":\"w1\",\"node_id\":\"U1\"}\nSensitive prompt"
+      }
+    },
+    {
+      "type": "assistant",
+      "sessionId": "s1",
+      "agentId": "a1",
+      "isSidechain": true,
+      "attributionAgent": "worker",
+      "message": {
+        "role": "assistant",
+        "stop_reason": "end_turn",
+        "content": [{ "type": "text", "text": "Sensitive child answer" }]
+      }
+    }
+  ]
+}
