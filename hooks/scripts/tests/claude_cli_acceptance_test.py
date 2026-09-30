@@ -22,7 +22,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from hooks.scripts.lib import graph_dispatch as dispatch
 from hooks.scripts.lib.agentic_loop_path import resolve_path
-from hooks.scripts.lib.graph_evidence import notifications, transcript
+from hooks.scripts.lib.graph_evidence import notifications, spawns, transcript
 from hooks.scripts.lib.graph_executor import load
 from hooks.scripts.tests.lib import claude_transcript_fixture as fixture
 from hooks.scripts.tests.lib.native_api_fixture import NativeAPIFixture
@@ -136,6 +136,20 @@ class ClaudeCLIAcceptanceTest(unittest.TestCase):
         self.assertFalse(server.errors, server.errors)
         self.assertLessEqual(server.requests, 16)
         return result, server
+
+    def test_real_native_children_bind_and_revalidate(self) -> None:
+        """Real native Agent results and child transcripts satisfy the production adapter."""
+        result, _ = self.run_cli()
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout[-2000:])
+        graph = load(self.path)
+        native = transcript(self.session)
+        self.assertEqual(len(spawns(native, self.session)), 2)
+        self.assertEqual(len(notifications(native, self.session)), 2)
+        dispatch.record_wave(self.path, fixture.report(graph))
+        dispatch.validate_graph_completion(self.path, self.session)
+        refs = [node["evidence"][-1] for node in load(self.path)["graph"]["nodes"].values()]
+        self.assertEqual({ref["subagent_type"] for ref in refs}, {"general-purpose"})
+        self.assertEqual(len({ref["agent_id"] for ref in refs}), 2)
 
     def test_real_native_hook_refuses_foreign_wave(self) -> None:
         """The real CLI obeys a production hook denial and creates no child completion."""

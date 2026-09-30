@@ -199,31 +199,6 @@ def child_identity(
     return agent
 
 
-def handback_delivered(entries: list[dict[str, Any]], last: dict[str, Any], blocks: list[dict[str, Any]]) -> bool:
-    """The harness ends a child with a SubagentHandback tool_use plus its non-error tool_result."""
-    calls = [block for block in blocks if block.get("type") == "tool_use"]
-    if len(calls) != 1 or calls[0].get("name") != "SubagentHandback" or last.get("isApiErrorMessage"):
-        return False
-    report = calls[0].get("input")
-    if not isinstance(report, dict) or not str(cast(dict[str, Any], report).get("message", "")).strip():
-        return False
-    for item in entries[entries.index(last) + 1 :]:
-        if item.get("type") != "user":
-            continue
-        value = object_value(item.get("message", {}), "message").get("content")
-        for block in cast(list[object], value) if isinstance(value, list) else []:
-            if not isinstance(block, dict):
-                continue
-            result = cast(dict[str, Any], block)
-            if (
-                result.get("type") == "tool_result"
-                and result.get("tool_use_id") == calls[0].get("id")
-                and result.get("is_error") is not True
-            ):
-                return True
-    return False
-
-
 def validate_child_terminal(entries: list[dict[str, Any]]) -> None:
     """Require a real final assistant message rather than attribution alone."""
     assistants = [item for item in entries if item.get("type") == "assistant"]
@@ -232,8 +207,6 @@ def validate_child_terminal(entries: list[dict[str, Any]]) -> None:
     last = assistants[-1]
     message = object_value(last.get("message"), "native child terminal message")
     blocks = content(last)
-    if handback_delivered(entries, last, blocks):
-        return
     text = any(
         block.get("type") == "text" and isinstance(block.get("text"), str) and block["text"].strip() for block in blocks
     )

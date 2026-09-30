@@ -112,63 +112,6 @@ class NativeGraphTest(unittest.TestCase):
         dispatch.record_wave(self.path, fixture.report(graph))
         dispatch.validate_graph_completion(self.path, "fixture-session")
 
-    def test_child_ending_in_subagent_handback_completes(self) -> None:
-        """A child that delivers its report via SubagentHandback is a real terminal."""
-        self.handback(True, "report")
-
-    def test_undelivered_or_empty_handback_is_not_a_terminal(self) -> None:
-        """A handback with no tool_result, or an empty report, cannot complete a child."""
-        self.handback(False, "report")
-
-    def test_empty_handback_report_is_not_a_terminal(self) -> None:
-        """A whitespace-only handback report is not a delivered report."""
-        self.handback(True, "  ")
-
-    def handback(self, delivered: bool, message: str) -> None:
-        """End a fresh child with a SubagentHandback and assert the wave records only if it was delivered."""
-        graph = self.opened()
-        tool, agent = fixture.spawn(self.parent, graph, "U3[1]", completed=False)
-        child = self.parent.with_suffix("") / "subagents" / f"agent-{agent}.jsonl"
-        base = {"sessionId": "fixture-session", "isSidechain": True, "agentId": agent}
-        fixture.append(
-            child,
-            {
-                **base,
-                "type": "assistant",
-                "attributionAgent": "general-purpose",
-                "message": {
-                    "role": "assistant",
-                    "stop_reason": "tool_use",
-                    "content": [
-                        {
-                            "type": "tool_use",
-                            "id": "hb_" + agent,
-                            "name": "SubagentHandback",
-                            "input": {"message": message},
-                        }
-                    ],
-                },
-            },
-        )
-        if delivered:
-            fixture.append(
-                child,
-                {
-                    **base,
-                    "type": "user",
-                    "message": {
-                        "role": "user",
-                        "content": [{"type": "tool_result", "tool_use_id": "hb_" + agent, "content": "ok"}],
-                    },
-                },
-            )
-        fixture.notify(self.parent, tool, agent)
-        if delivered and message.strip():
-            dispatch.record_wave(self.path, fixture.report(graph))
-        else:
-            with self.assertRaises(ValueError):
-                dispatch.record_wave(self.path, fixture.report(graph))
-
     def test_nested_forgery_and_deleted_evidence(self) -> None:
         """Removing or disguising a previously bound reference is refused."""
         graph = self.finished()
