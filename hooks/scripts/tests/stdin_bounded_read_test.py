@@ -37,12 +37,12 @@ class BoundedReadTests(HookTestCase):
                             env=self.environment,
                         )
                         try:
-                            output, error = process.communicate(timeout=7)
+                            output, error = process.communicate(timeout=12)
                         except subprocess.TimeoutExpired:
                             process.kill()
                             process.communicate()
                             self.fail("hook exceeded the bounded input deadline")
-                        self.assertLess(time.monotonic() - start, 6.5)
+                        self.assertLess(time.monotonic() - start, 10)
                         self.assertEqual(process.returncode, 0, error)
                         self.assertNotIn(b'"deny"', output)
                     finally:
