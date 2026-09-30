@@ -1,37 +1,10 @@
 import { basename, dirname, join, resolve, sep } from "node:path";
 import { readdir } from "node:fs/promises";
 import { TRACE_SCHEMA_VERSION, serializeTraceEvent, nonempty, type SourceRef, type TraceCollectionDeps, type TraceDetail, type TraceEvent, type TraceManifest, type TracePage, type NativeSessionSummary } from "./sessionTraceSchema";
-import { CLAUDE_PARSER_VERSION, safeReadError, type NativeRecord, type Source, obj, safeSession, cacheDir, parentPath, source, artifactSource, auditSource, auditEvents, toolBlocks, dispatch, makeEvent, childValid, graphEvent, pointerPart, completedNotification, terminalChild, saveCache, clearCache, cacheEventPath } from "./sessionTraceClaudeHelpers";
+import { CLAUDE_PARSER_VERSION, safeReadError, type NativeRecord, type Source, obj, safeSession, cacheDir, parentPath, source, artifactSource, auditSource, auditEvents, toolBlocks, dispatch, makeEvent, childValid, graphEvent, pointerPart, completedNotification, terminalChild, saveCache, clearCache, cacheEventPath, teammateChild, explicitBlockedLaunch, claudeSessionSummary, claudeUnavailableSummary } from "./sessionTraceClaudeHelpers";
 export * from "./sessionTraceSchema";
 
 const SESSION_SUMMARY_MAX_BYTES = 64 * 1024 * 1024;
-
-function sessionSummary(nativeSessionId: string, projectLabel: string, text: string): NativeSessionSummary {
-  let latest: number | null = null;
-  for (const line of text.split("\n")) {
-    if (!line.trim()) continue;
-    let row: Record<string, unknown>;
-    try {
-      const parsed: unknown = JSON.parse(line);
-      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return unavailableSummary(nativeSessionId, projectLabel);
-      row = parsed as Record<string, unknown>;
-    } catch { return unavailableSummary(nativeSessionId, projectLabel); }
-    if (typeof row.timestamp !== "string") continue;
-    const milliseconds = Date.parse(row.timestamp);
-    if (Number.isFinite(milliseconds) && (latest === null || milliseconds > latest)) latest = milliseconds;
-  }
-  const shortId = nativeSessionId.length > 12 ? nativeSessionId.slice(0, 8) : nativeSessionId;
-  return { nativeSessionId, provider: "claude", projectLabel,
-    displayLabel: `${projectLabel} · ${shortId}`,
-    lastActivity: latest === null ? { value: null, basis: "unavailable" } :
-      { value: new Date(latest).toISOString(), basis: "observed" } };
-}
-
-function unavailableSummary(nativeSessionId: string, projectLabel: string): NativeSessionSummary {
-  const shortId = nativeSessionId.length > 12 ? nativeSessionId.slice(0, 8) : nativeSessionId;
-  return { nativeSessionId, provider: "claude", projectLabel, displayLabel: `${projectLabel} · ${shortId}`,
-    lastActivity: { value: null, basis: "unavailable" } };
-}
 
 export async function listClaudeSessions(deps: TraceCollectionDeps): Promise<NativeSessionSummary[]> {
   const projects = await readdir(deps.sourceRoot, { withFileTypes: true });
@@ -48,13 +21,13 @@ export async function listClaudeSessions(deps: TraceCollectionDeps): Promise<Nat
         const path = join(dir, entry.name);
         const info = await deps.fs.stat(path) as { size?: number };
         if (typeof info.size === "number" && info.size > SESSION_SUMMARY_MAX_BYTES)
-          summary = unavailableSummary(nativeSessionId, project.name);
+          summary = claudeUnavailableSummary(nativeSessionId, project.name);
         else {
           const text = await deps.fs.readFile(path);
           summary = Buffer.byteLength(text, "utf8") > SESSION_SUMMARY_MAX_BYTES
-            ? unavailableSummary(nativeSessionId, project.name) : sessionSummary(nativeSessionId, project.name, text);
+            ? claudeUnavailableSummary(nativeSessionId, project.name) : claudeSessionSummary(nativeSessionId, project.name, text);
         }
-      } catch { summary = unavailableSummary(nativeSessionId, project.name); }
+      } catch { summary = claudeUnavailableSummary(nativeSessionId, project.name); }
       sessions.push(summary);
     }
   }
@@ -166,6 +139,30 @@ export async function collectClaudeSessionTrace(sessionId: string, deps: TraceCo
       for (const [callId, use] of localUses) {
         if (localDuplicates.has(callId)) { duplicateCalls.add(callId); continue; }
         const values = localResults.get(callId) ?? [];
+        if (values.length === 1 && explicitBlockedLaunch(native, callId, values[0])) continue;
+        if (values.length === 1 && values[0].status === "teammate_spawned") {
+          const result = values[0];
+          if (result.prompt !== use.prompt || result.agent_type !== use.role ||
+            typeof result.name !== "string" || typeof result.team_name !== "string" ||
+            result.agent_id !== `${result.name}@${result.team_name}` || result.teammate_id !== result.agent_id) {
+            errors.push(`unresolved child for Agent call ${callId}`); continue;
+          }
+          try {
+            const { childId, child, metadataSources } = await teammateChild(path, sessionId,
+              result.name, result.team_name, use.prompt, deps);
+            sources.push(...metadataSources);
+            if (agents.has(childId)) { errors.push(`ambiguous child identity ${childId}`); continue; }
+            agents.add(childId);
+            sources.push(child);
+            validatedAgents.add(childId);
+            childSources.set(childId, child);
+            await scan(child, "worker", childId, use.spanId, use.owner ?? ownership, use.sourceRef);
+          } catch (error) {
+            const reason = error instanceof Error ? error.message : safeReadError(error);
+            errors.push(`${reason} for Agent call ${callId}`);
+          }
+          continue;
+        }
         const agentId = values.length === 1 ? values[0].agentId : undefined;
         if (typeof agentId !== "string" || !/^[A-Za-z0-9_-]+$/.test(agentId)) {
           errors.push(`unresolved child for Agent call ${callId}`); continue;
