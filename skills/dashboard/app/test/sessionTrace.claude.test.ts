@@ -122,11 +122,21 @@ describe("Claude native session trace", () => {
     expect(page.complete).toBe(false);
     expect(page.errors).toContain("multiple matching graph roots (2)");
   });
-  it("keeps a selectable session's last activity unavailable without native event time", async () => {
+  it("derives a selectable session's last activity from valid native event time", async () => {
     const { deps } = await fixture();
     const sessions = await listClaudeSessions(deps);
     expect(sessions.map((session) => session.nativeSessionId)).toEqual(["s1"]);
-    expect(sessions[0].lastActivity).toEqual({ value: null, basis: "unavailable" });
+    expect(sessions[0].lastActivity).toEqual({ value: "2026-09-28T12:00:00.000Z", basis: "observed" });
+  });
+  it("uses valid native timestamps for activity and labels sessions with the source project", async () => {
+    const { deps, parent, rows } = await fixture();
+    rows[2].timestamp = "2026-09-28T12:34:56Z";
+    rows.push({ type: "user", timestamp: "invalid", message: { content: "should not become a label" } });
+    await writeFile(parent, rows.map((row) => JSON.stringify(row)).join("\n") + "\n");
+    const [session] = await listClaudeSessions(deps);
+    expect(session.projectLabel).toBe("project");
+    expect(session.displayLabel).toBe("project · s1");
+    expect(session.lastActivity).toEqual({ value: "2026-09-28T12:34:56.000Z", basis: "observed" });
   });
   it("emits each native tool block with its own stable identity and source backed failure", async () => {
     const { deps, parent, rows } = await fixture();
@@ -170,6 +180,102 @@ describe("Claude native session trace", () => {
     expect(page.events.filter((event) => event.attributes["coderails.actor.id"] === "a2")).toHaveLength(2);
     expect(page.events.filter((event) => event.attributes["coderails.actor.id"] === "a1").every((event) => event.parentSpanId === parentCall.spanId)).toBe(true);
     expect(page.events.filter((event) => event.attributes["coderails.actor.id"] === "a2").every((event) => event.parentSpanId === nested.spanId)).toBe(true);
+  });
+
+  it("joins teammate_spawned results through their unique sidecar and exact message wrapper", async () => {
+    const { deps, parent, rows, children } = await fixture();
+    const call = fixtureBlocks(rows[0])[0];
+    const prompt = "A real teammate prompt";
+    (call.input as Record<string, unknown>).prompt = prompt;
+    (call.input as Record<string, unknown>).subagent_type = "worker";
+    rows[1].toolUseResult = { status: "teammate_spawned", agent_id: "worker@team-1", teammate_id: "worker@team-1",
+      name: "worker", team_name: "team-1", prompt, agent_type: "worker" };
+    const childId = "child-from-sidecar";
+    const childDir = join(deps.sourceRoot, "project", "s1", "subagents");
+    await mkdir(childDir, { recursive: true });
+    await writeFile(join(childDir, `agent-${childId}.meta.json`), JSON.stringify({ name: "worker", teamName: "team-1" }));
+    const wrapped = structuredClone(children);
+    for (const row of wrapped) { row.agentId = childId; row.isSidechain = true; }
+    wrapped[0].message = { role: "user", content: `<teammate-message teammate_id="worker@team-1">\n${prompt}\n</teammate-message>` };
+    await writeFile(parent, rows.map((row) => JSON.stringify(row)).join("\n") + "\n");
+    await writeFile(join(childDir, `agent-${childId}.jsonl`), wrapped.map((row) => JSON.stringify(row)).join("\n") + "\n");
+    const page = await readClaudeTracePage("s1", null, 30, deps);
+    const callEvent = page.events.find((event) => event.name === "tool_request" && event.attributes["coderails.native.call_id"] === "tool-1")!;
+    const workerEvents = page.events.filter((event) => event.attributes["coderails.actor.id"] === childId);
+    expect(workerEvents).toHaveLength(2);
+    expect(workerEvents.every((event) => event.parentSpanId === callEvent.spanId)).toBe(true);
+    expect(page.complete).toBe(true);
+  });
+
+  it("does not join teammate_spawned results when the linked native tool result is an error", async () => {
+    const { deps, parent, rows, children } = await fixture();
+    const call = fixtureBlocks(rows[0])[0];
+    const prompt = "A real teammate prompt";
+    (call.input as Record<string, unknown>).prompt = prompt;
+    (call.input as Record<string, unknown>).subagent_type = "worker";
+    rows[1].toolUseResult = { status: "teammate_spawned", agent_id: "worker@team-1", teammate_id: "worker@team-1",
+      name: "worker", team_name: "team-1", prompt, agent_type: "worker" };
+    fixtureBlocks(rows[1])[0].is_error = true;
+    fixtureBlocks(rows[1])[0].content = "Native launch failed";
+    const childId = "child-from-sidecar";
+    const childDir = join(deps.sourceRoot, "project", "s1", "subagents");
+    await mkdir(childDir, { recursive: true });
+    await writeFile(join(childDir, `agent-${childId}.meta.json`), JSON.stringify({ name: "worker", teamName: "team-1" }));
+    const wrapped = structuredClone(children);
+    for (const row of wrapped) { row.agentId = childId; row.isSidechain = true; }
+    wrapped[0].message = { role: "user", content: `<teammate-message teammate_id="worker@team-1">\n${prompt}\n</teammate-message>` };
+    await writeFile(parent, rows.map((row) => JSON.stringify(row)).join("\n") + "\n");
+    await writeFile(join(childDir, `agent-${childId}.jsonl`), wrapped.map((row) => JSON.stringify(row)).join("\n") + "\n");
+
+    const page = await readClaudeTracePage("s1", null, 30, deps);
+    const result = page.events.find((event) => event.name === "tool_result" &&
+      event.attributes["coderails.native.call_id"] === "tool-1")!;
+    expect(page.complete).toBe(false);
+    expect(result.status).toEqual({ value: "error", basis: "source" });
+    expect(result.provenance.sourceOrdinal).toBe(2);
+    expect(page.events.some((event) => event.attributes["coderails.actor.id"] === childId)).toBe(false);
+  });
+
+  it("keeps explicit dispatch-guard blocks as failed tool results without missing-child errors", async () => {
+    const { deps, parent, rows } = await fixture();
+    rows[1].toolUseResult = { is_error: true, content: "[loop-dispatch-guard] Blocked: no owned progress.json was found." };
+    fixtureBlocks(rows[1])[0].is_error = true;
+    fixtureBlocks(rows[1])[0].content = "[loop-dispatch-guard] Blocked: no owned progress.json was found.";
+    await writeFile(parent, rows.map((row) => JSON.stringify(row)).join("\n") + "\n");
+    const page = await readClaudeTracePage("s1", null, 30, deps);
+    const result = page.events.find((event) => event.name === "tool_result")!;
+    expect(result.status).toEqual({ value: "error", basis: "source" });
+    expect(page.errors?.join(" ")).not.toMatch(/unresolved child for Agent call tool-1/);
+    expect(page.events.some((event) => event.attributes["coderails.actor.kind"] === "worker")).toBe(false);
+  });
+
+  it("keeps ambiguous teammate sidecars and mismatched child identities incomplete", async () => {
+    const { deps, parent, rows, children } = await fixture();
+    const prompt = "A real teammate prompt";
+    const call = fixtureBlocks(rows[0])[0];
+    (call.input as Record<string, unknown>).prompt = prompt;
+    (call.input as Record<string, unknown>).subagent_type = "worker";
+    rows[1].toolUseResult = { status: "teammate_spawned", agent_id: "worker@team-1", teammate_id: "worker@team-1",
+      name: "worker", team_name: "team-1", prompt, agent_type: "worker" };
+    const childDir = join(deps.sourceRoot, "project", "s1", "subagents");
+    await mkdir(childDir, { recursive: true });
+    const sidecar = { name: "worker", teamName: "team-1" };
+    await writeFile(join(childDir, "agent-child-one.meta.json"), JSON.stringify(sidecar));
+    await writeFile(join(childDir, "agent-child-two.meta.json"), JSON.stringify(sidecar));
+    await writeFile(parent, rows.map((row) => JSON.stringify(row)).join("\n") + "\n");
+    const ambiguous = await collectClaudeSessionTrace("s1", deps);
+    expect(ambiguous.complete).toBe(false);
+    expect(ambiguous.errors.join(" ")).toMatch(/ambiguous or missing teammate sidecar/);
+
+    await writeFile(join(childDir, "agent-child-one.meta.json"), JSON.stringify(sidecar));
+    await writeFile(join(childDir, "agent-child-two.meta.json"), "{");
+    const wrongRows = structuredClone(children);
+    for (const row of wrongRows) { row.agentId = "some-other-id"; row.isSidechain = true; }
+    wrongRows[0].message = { role: "user", content: `<teammate-message>\n${prompt}\n</teammate-message>` };
+    await writeFile(join(childDir, "agent-child-one.jsonl"), wrongRows.map((row) => JSON.stringify(row)).join("\n") + "\n");
+    const mismatched = await collectClaudeSessionTrace("s1", deps);
+    expect(mismatched.complete).toBe(false);
+    expect(mismatched.errors.join(" ")).toMatch(/foreign child identity or prompt/);
   });
 
   it("attaches parallel workers to different Agent blocks in one parent message", async () => {

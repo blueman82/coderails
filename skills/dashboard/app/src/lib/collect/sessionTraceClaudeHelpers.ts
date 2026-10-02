@@ -1,11 +1,11 @@
-import { TRACE_SCHEMA_VERSION, serializeTraceEvent, type SourceRef, type TraceAttribute, type TraceCollectionDeps, type TraceEvent, type TraceManifest } from "./sessionTraceSchema";
+import { TRACE_SCHEMA_VERSION, serializeTraceEvent, type SourceRef, type TraceAttribute, type TraceCollectionDeps, type TraceEvent, type TraceManifest, type NativeSessionSummary } from "./sessionTraceSchema";
 import { record, nonempty } from "./sessionTraceSchema";
 
 // Claude's index is deliberately disposable. Native transcript bytes are read
 // again for detail requests and are never copied into the index.
 import { createHash } from "node:crypto";
 import { mkdir, readdir, rename, rmdir, stat as nodeStat, unlink, writeFile as nodeWriteFile } from "node:fs/promises";
-import { basename, join, relative, sep } from "node:path";
+import { basename, dirname, join, relative, sep } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 
 export const CLAUDE_PARSER_VERSION = 4;
@@ -30,6 +30,33 @@ export function hash(value: string): string {
 
 export function safeSession(sessionId: string): boolean {
   return /^[A-Za-z0-9_-]+$/.test(sessionId);
+}
+
+export function claudeUnavailableSummary(nativeSessionId: string, projectLabel: string): NativeSessionSummary {
+  const shortId = nativeSessionId.length > 12 ? nativeSessionId.slice(0, 8) : nativeSessionId;
+  return { nativeSessionId, provider: "claude", projectLabel, displayLabel: `${projectLabel} · ${shortId}`,
+    lastActivity: { value: null, basis: "unavailable" } };
+}
+
+export function claudeSessionSummary(nativeSessionId: string, projectLabel: string, text: string): NativeSessionSummary {
+  let latest: number | null = null;
+  for (const line of text.split("\n")) {
+    if (!line.trim()) continue;
+    let row: NativeRecord;
+    try {
+      const parsed: unknown = JSON.parse(line);
+      const value = obj(parsed);
+      if (!value) return claudeUnavailableSummary(nativeSessionId, projectLabel);
+      row = value;
+    } catch { return claudeUnavailableSummary(nativeSessionId, projectLabel); }
+    if (typeof row.timestamp !== "string") continue;
+    const milliseconds = Date.parse(row.timestamp);
+    if (Number.isFinite(milliseconds) && (latest === null || milliseconds > latest)) latest = milliseconds;
+  }
+  const shortId = nativeSessionId.length > 12 ? nativeSessionId.slice(0, 8) : nativeSessionId;
+  return { nativeSessionId, provider: "claude", projectLabel, displayLabel: `${projectLabel} · ${shortId}`,
+    lastActivity: latest === null ? { value: null, basis: "unavailable" } :
+      { value: new Date(latest).toISOString(), basis: "observed" } };
 }
 
 export function cacheDir(sessionId: string, deps: TraceCollectionDeps): string {
@@ -75,6 +102,35 @@ export async function source(path: string, deps: TraceCollectionDeps): Promise<S
   }
   const identity = [metadata.dev, metadata.ino, metadata.size, metadata.mtimeMs].join(":");
   return { path, id, text, rows, ordinals, fingerprint: `sha256:${hash(text)};identity:${identity}`, cursor: String(lines.length) };
+}
+
+export async function teammateChild(parentTranscriptPath: string, sessionId: string, name: string,
+  teamName: string, prompt: string, deps: TraceCollectionDeps): Promise<{ childId: string; child: Source; metadataSources: Source[] }> {
+  const subagentsDir = join(dirname(parentTranscriptPath), sessionId, "subagents");
+  const entries = (await readdir(subagentsDir)).filter((entry) => /^agent-[A-Za-z0-9_-]+\.meta\.json$/.test(entry));
+  const matches: Array<{ childId: string; transcriptPath: string }> = [];
+  const metadataSources: Source[] = [];
+  for (const entry of entries) {
+    const match = /^agent-([A-Za-z0-9_-]+)\.meta\.json$/.exec(entry);
+    if (!match) continue;
+    try {
+      const metadata = await source(join(subagentsDir, entry), deps);
+      metadataSources.push(metadata);
+      if (metadata.rows.length === 1 && metadata.rows[0].name === name && metadata.rows[0].teamName === teamName)
+        matches.push({ childId: match[1], transcriptPath: join(subagentsDir, `agent-${match[1]}.jsonl`) });
+    } catch { /* malformed sidecars cannot authorize a child join */ }
+  }
+  if (matches.length !== 1) throw new Error("ambiguous or missing teammate sidecar");
+  const [{ childId, transcriptPath }] = matches;
+  const child = await source(transcriptPath, deps);
+  if (child.rows.some((row) => row.sessionId !== sessionId || row.agentId !== childId || row.isSidechain !== true))
+    throw new Error("foreign child identity or prompt");
+  const first = obj(child.rows[0]?.message);
+  const wrapper = typeof first?.content === "string"
+    ? /^<teammate-message(?:\s[^>]*)?>\n([\s\S]*)\n<\/teammate-message>$/.exec(first.content) : null;
+  if (first?.role !== "user" || !wrapper || wrapper[1] !== prompt)
+    throw new Error("foreign child identity or prompt");
+  return { childId, child, metadataSources };
 }
 
 export async function artifactSource(path: string, name: string, deps: TraceCollectionDeps): Promise<Source> {
@@ -138,6 +194,14 @@ export function toolBlocks(row: NativeRecord): Array<{ block: NativeRecord; item
     const block = obj(value);
     return block && (block.type === "tool_use" || block.type === "tool_result") ? [{ block, item }] : [];
   });
+}
+
+export function explicitBlockedLaunch(src: Source, callId: string, result: NativeRecord): boolean {
+  if (result.is_error !== true) return false;
+  const matches = src.rows.flatMap((row) => toolBlocks(row).filter(({ block }) =>
+    block.type === "tool_result" && block.tool_use_id === callId).map(({ block }) => block));
+  return matches.length === 1 && matches[0].is_error === true && typeof matches[0].content === "string" &&
+    matches[0].content.includes("[loop-dispatch-guard] Blocked");
 }
 
 export function dispatch(block: NativeRecord, sessionId: string): NativeRecord | null {

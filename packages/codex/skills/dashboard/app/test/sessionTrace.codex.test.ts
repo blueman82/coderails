@@ -120,10 +120,23 @@ describe("Codex native session trace", () => {
     deps.fs.readFile = async (path) => { if (path.startsWith(deps.sourceRoot)) nativeReads++; return read(path); };
     deps.fs.stat = async (path) => path === huge ? { size: 1_000_000_000 } : path === parent ? Promise.reject(new Error("Sensitive failure")) : stat(path);
     const sessions = await listCodexSessions(deps);
-    expect(nativeReads).toBe(0);
+    expect(nativeReads).toBe(1);
     expect(sessions.find((s) => s.nativeSessionId === "huge")?.lastActivity.basis).toBe("unavailable");
     expect(sessions.find((s) => s.nativeSessionId === "parent")?.lastActivity.basis).toBe("unavailable");
     expect(sessions.find((s) => s.nativeSessionId === "untimed")?.lastActivity).toEqual({ value: null, basis: "unavailable" });
+  });
+
+  it("uses session metadata cwd and valid native timestamps without reading prompt text", async () => {
+    const { deps, parent, rows, save } = await fixture();
+    rows[0].payload = { ...((rows[0].payload ?? {}) as object), cwd: "/Users/example/project-alpha" };
+    rows.push({ timestamp: "2026-09-28T12:34:56Z", type: "event_msg", payload: { type: "note", message: "private prompt" } });
+    rows.push({ timestamp: "invalid", type: "event_msg", payload: { type: "note", message: "private prompt" } });
+    await save(parent, rows);
+    const [session] = (await listCodexSessions(deps)).filter((item) => item.nativeSessionId === "parent");
+    expect(session.projectLabel).toBe("project-alpha");
+    expect(session.displayLabel).toBe("project-alpha · parent");
+    expect(session.lastActivity).toEqual({ value: "2026-09-28T12:34:56.000Z", basis: "observed" });
+    expect(JSON.stringify(session)).not.toContain("private prompt");
   });
 
   it("retires superseded cache generations and keeps concurrent page readers safe", async () => {

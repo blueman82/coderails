@@ -192,8 +192,10 @@ export function dispatches(parent: NativeSource, errors: string[], parentPath: s
 }
 export function validChild(src: NativeSource, root: string, parent: string, depth: number, dispatch: Dispatch): boolean {
   const meta = payload(src.rows[0]), spawn = obj(obj(obj(meta.source)?.subagent)?.thread_spawn);
+  const roleMatches = meta.agent_role === dispatch.role ||
+    (dispatch.role === null && meta.agent_role === undefined && spawn?.agent_role === null);
   return meta.id === dispatch.childId && meta.session_id === root && meta.parent_thread_id === parent &&
-    meta.thread_source === "subagent" && meta.agent_role === dispatch.role &&
+    meta.thread_source === "subagent" && roleMatches &&
     (dispatch.nickname === null || meta.agent_nickname === dispatch.nickname) &&
     (meta.agent_path === undefined || meta.agent_path === dispatch.path) &&
     spawn?.parent_thread_id === parent && spawn.depth === depth && spawn.agent_role === dispatch.role &&
