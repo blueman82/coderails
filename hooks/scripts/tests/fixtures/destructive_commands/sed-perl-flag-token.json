@@ -1,0 +1,34 @@
+[
+  {
+    "request": {"tool_name": "Bash", "tool_input": {"command": "sed -n 95,160p install/context.py"}, "cwd": "{sandbox}/main_repo"},
+    "returncode": 0,
+    "allowlist": null,
+    "source": "sed_flag_false_positive",
+    "expected": {},
+    "fixture_index": 364
+  },
+  {
+    "request": {"tool_name": "Bash", "tool_input": {"command": "sed -n '1,5p' src/main.py"}, "cwd": "{sandbox}/main_repo"},
+    "returncode": 0,
+    "allowlist": null,
+    "source": "sed_flag_false_positive",
+    "expected": {},
+    "fixture_index": 365
+  },
+  {
+    "request": {"tool_name": "Bash", "tool_input": {"command": "sed -i s/a/b/ src/x.py"}, "cwd": "{sandbox}/main_repo"},
+    "returncode": 0,
+    "allowlist": null,
+    "source": "sed_flag_false_positive",
+    "expected": {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": "In-Bash source edit on main branch blocked.\nFull command: sed -i s/a/b/ src/x.py\nEditing source files via sed/perl/redirect/tee on main is blocked. Switch to a feature branch or use the Edit tool."}},
+    "fixture_index": 366
+  },
+  {
+    "request": {"tool_name": "Bash", "tool_input": {"command": "perl -pi -e 's/a/b/' src/x.py"}, "cwd": "{sandbox}/main_repo"},
+    "returncode": 0,
+    "allowlist": null,
+    "source": "sed_flag_false_positive",
+    "expected": {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": "In-Bash source edit on main branch blocked.\nFull command: perl -pi -e 's/a/b/' src/x.py\nEditing source files via sed/perl/redirect/tee on main is blocked. Switch to a feature branch or use the Edit tool."}},
+    "fixture_index": 367
+  }
+]
