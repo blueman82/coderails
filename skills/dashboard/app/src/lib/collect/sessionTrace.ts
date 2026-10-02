@@ -62,6 +62,7 @@ export async function collectClaudeSessionTrace(sessionId: string, deps: TraceCo
       const toolRequests = new Map<string, TraceEvent[]>();
       const toolResults = new Map<string, TraceEvent[]>();
       const localResults = new Map<string, NativeRecord[]>();
+      const localNativeResults = new Map<string, NativeRecord[]>();
       const localDuplicates = new Set<string>();
       for (const [index, row] of native.rows.entries()) {
         if (row.sessionId !== undefined && row.sessionId !== sessionId) {
@@ -92,6 +93,8 @@ export async function collectClaudeSessionTrace(sessionId: string, deps: TraceCo
               errors.push(`invalid graph dispatch at ${native.id}:${ordinal}`);
           }
           if (row.type === "user" && block.type === "tool_result" && typeof block.tool_use_id === "string") {
+            localNativeResults.set(block.tool_use_id,
+              [...(localNativeResults.get(block.tool_use_id) ?? []), block]);
             const value = obj(row.toolUseResult);
             if (value || block.is_error === true) {
               const result = value ?? { is_error: true };
@@ -142,6 +145,10 @@ export async function collectClaudeSessionTrace(sessionId: string, deps: TraceCo
         if (values.length === 1 && explicitBlockedLaunch(native, callId, values[0])) continue;
         if (values.length === 1 && values[0].status === "teammate_spawned") {
           const result = values[0];
+          const nativeResults = localNativeResults.get(callId) ?? [];
+          if (nativeResults.length !== 1 || nativeResults[0].is_error === true) {
+            errors.push(`unresolved child for Agent call ${callId}`); continue;
+          }
           if (result.prompt !== use.prompt || result.agent_type !== use.role ||
             typeof result.name !== "string" || typeof result.team_name !== "string" ||
             result.agent_id !== `${result.name}@${result.team_name}` || result.teammate_id !== result.agent_id) {

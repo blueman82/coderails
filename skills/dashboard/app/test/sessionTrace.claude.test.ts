@@ -207,6 +207,35 @@ describe("Claude native session trace", () => {
     expect(page.complete).toBe(true);
   });
 
+  it("does not join teammate_spawned results when the linked native tool result is an error", async () => {
+    const { deps, parent, rows, children } = await fixture();
+    const call = fixtureBlocks(rows[0])[0];
+    const prompt = "A real teammate prompt";
+    (call.input as Record<string, unknown>).prompt = prompt;
+    (call.input as Record<string, unknown>).subagent_type = "worker";
+    rows[1].toolUseResult = { status: "teammate_spawned", agent_id: "worker@team-1", teammate_id: "worker@team-1",
+      name: "worker", team_name: "team-1", prompt, agent_type: "worker" };
+    fixtureBlocks(rows[1])[0].is_error = true;
+    fixtureBlocks(rows[1])[0].content = "Native launch failed";
+    const childId = "child-from-sidecar";
+    const childDir = join(deps.sourceRoot, "project", "s1", "subagents");
+    await mkdir(childDir, { recursive: true });
+    await writeFile(join(childDir, `agent-${childId}.meta.json`), JSON.stringify({ name: "worker", teamName: "team-1" }));
+    const wrapped = structuredClone(children);
+    for (const row of wrapped) { row.agentId = childId; row.isSidechain = true; }
+    wrapped[0].message = { role: "user", content: `<teammate-message teammate_id="worker@team-1">\n${prompt}\n</teammate-message>` };
+    await writeFile(parent, rows.map((row) => JSON.stringify(row)).join("\n") + "\n");
+    await writeFile(join(childDir, `agent-${childId}.jsonl`), wrapped.map((row) => JSON.stringify(row)).join("\n") + "\n");
+
+    const page = await readClaudeTracePage("s1", null, 30, deps);
+    const result = page.events.find((event) => event.name === "tool_result" &&
+      event.attributes["coderails.native.call_id"] === "tool-1")!;
+    expect(page.complete).toBe(false);
+    expect(result.status).toEqual({ value: "error", basis: "source" });
+    expect(result.provenance.sourceOrdinal).toBe(2);
+    expect(page.events.some((event) => event.attributes["coderails.actor.id"] === childId)).toBe(false);
+  });
+
   it("keeps explicit dispatch-guard blocks as failed tool results without missing-child errors", async () => {
     const { deps, parent, rows } = await fixture();
     rows[1].toolUseResult = { is_error: true, content: "[loop-dispatch-guard] Blocked: no owned progress.json was found." };
