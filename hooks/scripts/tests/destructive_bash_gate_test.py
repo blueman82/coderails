@@ -64,7 +64,7 @@ class DestructiveGateTests(unittest.TestCase):
                     self.assertEqual(actual.get("patternId"), expected.get("patternId"))
                     if actual.get("patternId"):
                         self.assertEqual(actual["permissionDecisionReason"], expected["permissionDecisionReason"])
-            self.assertEqual(len(cases), 380)
+            self.assertEqual(len(cases), 384)
 
     def test_python_workflow_substitution(self) -> None:
         """The migrated workflow names retain the same process-substitution gate."""
