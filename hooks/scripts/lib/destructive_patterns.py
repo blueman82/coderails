@@ -115,7 +115,7 @@ def source_write(command: str, cwd: str) -> str:
         )
     editing = False
     # perl switches are case-sensitive and -I/-M/-e/... take arguments, so only a bare `i` in the cluster counts.
-    in_place = r"(?:sed\b[^;|&\n]*?\s(?:-[a-zA-Z0-9]*i|--in)|perl\b[^;|&\n]*?\s(?-i:-[^\sCdDeEfFIMmxX-]*i))"
+    in_place = r"(?:sed\b[^;|&\n]*?\s(?:-[a-zA-Z0-9]*i|--in)|perl\b[^;|&\n]*?\s(?-i:-[^\sCDeEFIMmx-]*i))"
     if re.search(rf"\b{in_place}\S*[^;|&\n]*({source})", command, re.I):
         target, editing = command.split()[-1], True
     elif re.search(rf">+\s*['\"]?[^ '\"]*({source})", command, re.I):
