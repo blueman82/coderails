@@ -214,5 +214,85 @@
       }
     },
     "fixture_index": 375
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "sed -i2 s/a/b/ src/x.py"
+      },
+      "cwd": "{sandbox}/main_repo"
+    },
+    "returncode": 0,
+    "allowlist": null,
+    "source": "sed_flag_false_positive",
+    "expected": {
+      "hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": "In-Bash source edit on main branch blocked.\nFull command: sed -i2 s/a/b/ src/x.py\nEditing source files via sed/perl/redirect/tee on main is blocked. Switch to a feature branch or use the Edit tool."
+      }
+    },
+    "fixture_index": 376
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "sed -i_bak s/a/b/ src/x.py"
+      },
+      "cwd": "{sandbox}/main_repo"
+    },
+    "returncode": 0,
+    "allowlist": null,
+    "source": "sed_flag_false_positive",
+    "expected": {
+      "hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": "In-Bash source edit on main branch blocked.\nFull command: sed -i_bak s/a/b/ src/x.py\nEditing source files via sed/perl/redirect/tee on main is blocked. Switch to a feature branch or use the Edit tool."
+      }
+    },
+    "fixture_index": 377
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "perl -0pi -e 's/a/b/' src/x.py"
+      },
+      "cwd": "{sandbox}/main_repo"
+    },
+    "returncode": 0,
+    "allowlist": null,
+    "source": "sed_flag_false_positive",
+    "expected": {
+      "hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": "In-Bash source edit on main branch blocked.\nFull command: perl -0pi -e 's/a/b/' src/x.py\nEditing source files via sed/perl/redirect/tee on main is blocked. Switch to a feature branch or use the Edit tool."
+      }
+    },
+    "fixture_index": 378
+  },
+  {
+    "request": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "sed --in s/a/b/ src/x.py"
+      },
+      "cwd": "{sandbox}/main_repo"
+    },
+    "returncode": 0,
+    "allowlist": null,
+    "source": "sed_flag_false_positive",
+    "expected": {
+      "hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": "In-Bash source edit on main branch blocked.\nFull command: sed --in s/a/b/ src/x.py\nEditing source files via sed/perl/redirect/tee on main is blocked. Switch to a feature branch or use the Edit tool."
+      }
+    },
+    "fixture_index": 379
   }
 ]
