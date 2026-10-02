@@ -114,7 +114,7 @@ def source_write(command: str, cwd: str) -> str:
             "Writing source files via cp/mv/dd on main is blocked. Switch to a feature branch."
         )
     editing = False
-    if re.search(rf"\b(sed|perl)\b.*?\s(-[a-zA-Z]*i[a-zA-Z]*|--in-place)\b.*({source})", command, re.I):
+    if re.search(rf"\b(sed|perl)\b[^;|&\n]*?\s(-[a-zA-Z]*i[a-zA-Z]*|--in-place)\b[^;|&\n]*({source})", command, re.I):
         target, editing = command.split()[-1], True
     elif re.search(rf">+\s*['\"]?[^ '\"]*({source})", command, re.I):
         match = re.search(r">+\s*([^ \n]+)", command)
