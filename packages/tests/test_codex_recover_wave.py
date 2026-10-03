@@ -200,6 +200,84 @@ class RecoverWaveTests(unittest.TestCase):
         with self.assertRaises(GraphError):
             graph.recover_wave(self.path, "parent", LEASE, now=LAST_ACTIVITY + LEASE, apply=False)
 
+    def _trace(self) -> list[dict[str, Any]]:
+        """Read the sidecar trace."""
+        trace = self.path.with_name("recovery-trace.jsonl")
+        if not trace.exists():
+            return []
+        return [json.loads(line) for line in trace.read_text(encoding="utf-8").splitlines()]
+
+    def test_recovery_writes_one_non_authoritative_trace_row_per_node(self) -> None:
+        """Each recovered node leaves a closed-schema row carrying the stable reason code."""
+        graph.begin_wave(self.path)
+        self._spawn_all()
+        report = self._recover(LAST_ACTIVITY + LEASE)
+        self.assertEqual(report["reason_code"], "recovered")
+        rows = self._trace()
+        self.assertEqual([r["node_id"] for r in rows], ["U3[1]", "U3[2]"])
+        for row in rows:
+            self.assertEqual(
+                set(row),
+                {
+                    "schema_version", "session_id", "loop_id", "wave_id", "node_id", "attempt", "revision",
+                    "command", "outcome", "reason_code", "inputs_sha256",
+                },
+            )  # fmt: skip
+            self.assertEqual((row["reason_code"], row["outcome"]), ("recovered", "recovered"))
+
+    def test_trace_write_failure_fails_open(self) -> None:
+        """An unwritable trace never alters or fails the transition."""
+        self.path.with_name("recovery-trace.jsonl").mkdir()
+        graph.begin_wave(self.path)
+        self._spawn_all()
+        report = self._recover(LAST_ACTIVITY + LEASE)
+        self.assertTrue(report["recovered"])
+        self.assertIsNone(read_json(self.path)["graph"]["active_wave"])
+
+    def test_each_refusal_and_report_carries_a_distinct_code(self) -> None:
+        """Foreign session, no wave, budget, finished worker and waiting worker each emit one code."""
+        with self.assertRaises(GraphError) as no_wave:
+            self._recover(LAST_ACTIVITY)
+        self.assertEqual(getattr(no_wave.exception, "reason_code", None), "no_active_wave")
+        graph.begin_wave(self.path)
+        with self.assertRaises(GraphError) as foreign:
+            graph.recover_wave(self.path, "other", LEASE, now=LAST_ACTIVITY)
+        self.assertEqual(getattr(foreign.exception, "reason_code", None), "foreign_session")
+        self.assertEqual(self._recover(LAST_ACTIVITY)["reason_code"], "no_spawn_dispatch")
+        self._spawn_all()
+        self.assertEqual(self._recover(LAST_ACTIVITY)["reason_code"], "worker_waiting")
+        codes = [r["reason_code"] for r in self._trace()]
+        self.assertEqual(codes[:2], ["no_active_wave", "foreign_session"])
+        self.assertEqual(sorted(set(codes[2:])), ["no_spawn_dispatch", "worker_waiting"])
+
+    def test_exhaustion_and_late_completion_codes(self) -> None:
+        """A finished worker is reported for recording; an exhausted budget refuses with its own code."""
+        graph.begin_wave(self.path)
+        for unit in ("U3[1]", "U3[2]"):
+            spawn(self.parent, read_json(self.path), unit, terminal=True)
+        self.assertEqual(self._recover(LAST_ACTIVITY + LEASE)["reason_code"], "worker_finished_record")
+
+    def test_budget_refusal_code(self) -> None:
+        """The cap refusal is its own code."""
+        self._cycle()
+        self._cycle()
+        graph.begin_wave(self.path)
+        self._spawn_all()
+        with self.assertRaises(GraphError) as refused:
+            self._recover(LAST_ACTIVITY + LEASE)
+        self.assertEqual(getattr(refused.exception, "reason_code", None), "recovery_budget_exhausted")
+        self.assertEqual(self._trace()[-1]["reason_code"], "recovery_budget_exhausted")
+
+    def test_unreadable_transcript_code(self) -> None:
+        """An unreadable child refuses with its own code."""
+        graph.begin_wave(self.path)
+        self._spawn_all()
+        for child in self.parent.parent.glob("fixture-child-*.jsonl"):
+            child.write_text("", encoding="utf-8")
+        with self.assertRaises(GraphError) as refused:
+            self._recover(LAST_ACTIVITY + LEASE)
+        self.assertEqual(getattr(refused.exception, "reason_code", None), "unreadable_transcript")
+
 
 if __name__ == "__main__":
     unittest.main()

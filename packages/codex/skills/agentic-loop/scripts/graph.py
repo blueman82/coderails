@@ -7,20 +7,18 @@ import argparse
 import json
 import sys
 import time
-from datetime import datetime
 from pathlib import Path
 from typing import Any, cast
 
 import graph_semantics
 from graph_completion import complete, verify_completion
-from graph_data import event_payload, read_records
 from graph_evidence import bind_worker_evidence, transcript_cursor, validate_evals
 from graph_identity import GraphError, classify_worker_evidence, next_attempt, task_name, task_node
 from graph_io import load as _load
 from graph_io import locked as _locked
 from graph_io import object_value as _object
 from graph_io import write as _write
-from graph_transcript import child_read_records, parent_indexes, thread_transcript
+from graph_recovery import NODE_CODES, RecoveryRefusedError, node_lease, trace
 from json_types import JsonValue
 
 
@@ -158,69 +156,43 @@ def inspect(path: Path) -> dict[str, Any]:
     }
 
 
-class RecoveryRefusedError(GraphError):
-    """A fail-closed recover-wave refusal carrying one stable, low-cardinality reason code."""
-
-    def __init__(self, reason_code: str, message: str) -> None:
-        """Keep the closed-enum code beside the human message."""
-        super().__init__(message)
-        self.reason_code = reason_code
-
-
-def _node_lease(state: dict[str, Any], node_id: str, active: dict[str, Any], now: float, lease: int) -> str:
-    """Classify one active-wave node: dispatch, record, waiting or stalled. Anything unreadable is refused."""
-    try:
-        parent = read_records(thread_transcript(state["session_id"]), "parent transcript")
-        expected = task_name(state["loop_id"], node_id, next_attempt(state["graph"]["nodes"][node_id]))
-        cursor = active["transcript_cursor"]
-        found = [
-            item
-            for calls in parent_indexes(parent).values()
-            for item in calls
-            if item[0] > cursor and item[1] == expected
-        ]
-        if not found:
-            return "dispatch"
-        if len(found) > 1:
-            raise GraphError(f"node {node_id} has more than one spawn for {expected}")
-        _, _, child, nickname, path, role = found[0]
-        records = child_read_records(state["session_id"], child, nickname, path, role)
-        if any(event_payload(record).get("type") == "task_complete" for _, record in records):
-            return "record"
-        stamp = datetime.fromisoformat(str(records[-1][1]["timestamp"]).replace("Z", "+00:00")).timestamp()
-    except (GraphError, KeyError, IndexError, ValueError, TypeError) as error:
-        message = f"node {node_id} transcript is unreadable: {error}"
-        raise RecoveryRefusedError("unreadable_transcript", message) from error
-    return "stalled" if now - stamp >= lease else "waiting"
-
-
-NODE_CODES = {"dispatch": "no_spawn_dispatch", "record": "worker_finished_record", "waiting": "worker_waiting"}
+def _refuse(path: Path, state: dict[str, Any], code: str, message: str, inputs: object = None) -> RecoveryRefusedError:
+    """Trace a refusal, then return the coded error for the caller to raise."""
+    trace(path, state, "refused", code, inputs, {})
+    return RecoveryRefusedError(code, message)
 
 
 def _recover_locked(path: Path, session: str, lease: int, clock: float, apply: bool) -> dict[str, Any]:
     """Classify, record `stale` and request every respawn inside one read-modify-write."""
     with _locked(path):
         state = _load(path)
+        inputs: dict[str, object] = {"session": session, "lease": lease, "now": clock, "apply": apply}
         if state["session_id"] != session:
-            raise RecoveryRefusedError("foreign_session", "session does not own this loop")
+            raise _refuse(path, state, "foreign_session", "session does not own this loop", inputs)
         active = state["graph"]["active_wave"]
         if active is None:
-            raise RecoveryRefusedError("no_active_wave", "no active wave exists")
-        nodes = {node_id: _node_lease(state, node_id, active, clock, lease) for node_id in active["nodes"]}
+            raise _refuse(path, state, "no_active_wave", "no active wave exists", inputs)
+        try:
+            nodes = {node_id: node_lease(state, node_id, active, clock, lease) for node_id in active["nodes"]}
+        except RecoveryRefusedError as error:
+            raise _refuse(path, state, error.reason_code, str(error), inputs) from error
+        inputs["nodes"] = nodes
         kinds = set(nodes.values())
         uniform = len(kinds) == 1 and "stalled" not in kinds
+        graph = state["graph"]
+        attempts: dict[str, int | None] = {n: next_attempt(graph["nodes"][n]) for n in nodes}
         report: dict[str, Any] = {
             "wave_id": active["wave_id"],
             "nodes": {node_id: {"action": action} for node_id, action in nodes.items()},
             "recovered": False,
             "reason_code": NODE_CODES[next(iter(kinds))] if uniform else "mixed_wave",
-            "revision": state["revision"],
         }
         if not apply or kinds != {"stalled"}:
+            trace(path, state, "reported", report["reason_code"], inputs, attempts)
             return report
-        graph = state["graph"]
         if any(graph["nodes"][n]["respawn"]["generation"] >= graph["nodes"][n]["retry"]["max"] for n in nodes):
-            raise RecoveryRefusedError("recovery_budget_exhausted", "recovery budget exhausted: waiting for human")
+            message = "recovery budget exhausted: waiting for human"
+            raise _refuse(path, state, "recovery_budget_exhausted", message, inputs)
         check = {"checked": True, "method": f"lease {lease}s expired", "result": "no worker activity"}
         results = {n: {"outcome": "stale", "evidence": "lease expired", "stale_check": check} for n in nodes}
         proposed, _ = _apply_record(state, json.dumps({"wave_id": active["wave_id"], "results": results}))
@@ -232,7 +204,8 @@ def _recover_locked(path: Path, session: str, lease: int, clock: float, apply: b
                 raise GraphError(str(error)) from error
         graph_semantics.validate(proposed)
         _write(path, proposed)
-        report.update(recovered=True, reason_code="recovered", revision=proposed["revision"])
+        report.update(recovered=True, reason_code="recovered")
+        trace(path, state, "recovered", "recovered", inputs, attempts)
         return report
 
 
