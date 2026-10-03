@@ -166,8 +166,13 @@ def child_terminal(
     agent_nickname: str | None,
     expected_path: str | None,
     expected_role: str | None,
+    turn_id: str | None = None,
 ) -> str:
-    """Require a uniquely started successful final child turn."""
+    """Require a uniquely started successful turn, and a successful latest child activity.
+
+    Without `turn_id` the final terminal turn is returned. With it, that earlier recorded turn is accepted
+    only if it is a uniquely started task_complete and the child's latest lifecycle event is a task_complete.
+    """
     records = child_read_records(parent_session, agent_thread_id, agent_nickname, expected_path, expected_role)
     started_at = records[0][1].get("timestamp")
     if not isinstance(started_at, str):
@@ -181,15 +186,25 @@ def child_terminal(
     if not lifecycle or lifecycle[-1].get("type") != "task_complete":
         raise GraphError(f"child {agent_thread_id} did not finish successfully")
     terminals = [event for event in lifecycle if event.get("type") != "task_started"]
-    turn_id = terminals[-1].get("turn_id")
+    turn_id = turn_id if turn_id is not None else terminals[-1].get("turn_id")
     if not isinstance(turn_id, str):
         raise GraphError(f"child {agent_thread_id} has an invalid final task_complete")
-    starts = [event for event in events if event.get("type") == "task_started" and event.get("turn_id") == turn_id]
-    latest_start = next((event for event in reversed(lifecycle) if event.get("type") == "task_started"), None)
+    starts = [
+        i
+        for i, event in enumerate(lifecycle)
+        if event.get("type") == "task_started" and event.get("turn_id") == turn_id
+    ]
+    ends = [
+        i
+        for i, event in enumerate(lifecycle)
+        if event.get("type") != "task_started" and event.get("turn_id") == turn_id
+    ]
     if (
         len(starts) != 1
-        or latest_start != starts[0]
-        or sum(event.get("turn_id") == turn_id for event in terminals) != 1
+        or len(ends) != 1
+        or lifecycle[ends[0]].get("type") != "task_complete"
+        or starts[0] > ends[0]
+        or any(event.get("type") == "task_started" for event in lifecycle[starts[0] + 1 : ends[0]])
     ):
         raise GraphError(f"child {agent_thread_id} task_complete has no unique matching task_started")
     return turn_id
@@ -227,3 +242,34 @@ def parent_indexes(
                 (call_line, observed_task, agent_thread_id, None, agent_path, expected_role)
             )
     return spawns
+
+
+def refused_launches(records: list[tuple[int, dict[str, Any]]]) -> dict[str, tuple[int, str]]:
+    """Index native spawn_agent calls answered by an output but never backed by any SubAgentActivity."""
+    calls: dict[str, list[tuple[int, str]]] = {}
+    call_counts: dict[str, int] = {}
+    outputs: dict[str, int] = {}
+    activities: set[str] = set()
+    for line_number, record in records:
+        item = event_payload(record)
+        if record.get("type") == "response_item" and item.get("type") == "function_call":
+            call_id = item.get("call_id")
+            if isinstance(call_id, str):
+                call_counts[call_id] = call_counts.get(call_id, 0) + 1
+            if call := _native_function_call(record):
+                calls.setdefault(call[0], []).append((line_number, call[1]))
+        elif record.get("type") == "response_item" and item.get("type") == "function_call_output":
+            if isinstance(item.get("call_id"), str):
+                outputs.setdefault(item["call_id"], line_number)
+        elif record.get("type") == "event_msg":
+            nested = item.get("item")
+            if isinstance(nested, dict) and cast(dict[str, Any], nested).get("type") == "SubAgentActivity":
+                activities.add(str(cast(dict[str, Any], nested).get("id")))
+    return {
+        call_id: rows[0]
+        for call_id, rows in calls.items()
+        if len(rows) == 1
+        and call_counts[call_id] == 1
+        and call_id not in activities
+        and outputs.get(call_id, 0) > rows[0][0]
+    }
