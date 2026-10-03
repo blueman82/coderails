@@ -105,6 +105,17 @@ class GradingTests(ArtifactCase):
         with self.assertRaisesRegex(ValueError, "regraded_by"):
             grade_loop(self.path)
 
+    def test_unparseable_progress_refuses_grading_and_leaves_suite_unchanged(self) -> None:
+        """An unreadable sibling progress.json must not yield a grade without loop identity."""
+        progress = Path(self.path).with_name("progress.json")
+        progress.write_text("{not json", encoding="utf-8")
+        before = Path(self.path).read_bytes()
+        with self.assertRaisesRegex(ValueError, "does not parse"):
+            grade_loop(self.path)
+        self.assertEqual(Path(self.path).read_bytes(), before)
+        progress.unlink()
+        self.assertEqual(grade_loop(self.path), "GO")
+
     def test_malformed_or_mixed_amendments(self) -> None:
         """Malformed amendment collections and partially attested batches fail closed."""
         grade_loop(self.path)
