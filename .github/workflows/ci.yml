@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # 3.9 is pyproject.toml's target (ruff/black/pyright/mypy all pin py39) and the lowest
+      # version the code supports: it uses Path.is_relative_to, which needs 3.9.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.9"
+
+      # Tools the quality checker requires (scripts/quality/quality_tools.py). Unpinned: pyproject.toml
+      # carries the config, not versions. No pyyaml: no repo code imports it.
+      - name: Install quality tools
+        run: python3 -m pip install ruff black pyright mypy
+
+      - name: Quality checks (strict)
+        run: python3 scripts/quality/check.py --strict
+
+      - name: Python test suites
+        run: python3 hooks/scripts/tests/run_all.py
+
+      - name: Graph semantics copies match the source
+        run: |
+          cmp packages/graph-semantics/graph_semantics.py skills/agentic-loop/scripts/graph_semantics.py
+          cmp packages/graph-semantics/graph_semantics.py packages/codex/skills/agentic-loop/scripts/graph_semantics.py
