@@ -11,6 +11,8 @@ from pathlib import Path
 from typing import cast
 
 from hook_common import (
+    RESOURCE_MESSAGE,
+    HostResourceError,
     continue_turn,
     graph_output,
     graph_path,
@@ -115,7 +117,11 @@ def main() -> int:
     if state is None or not state.is_file():
         return 0
     graph = graph_path()
-    inspection = graph_output(graph, "inspect", str(state))
+    try:
+        inspection = graph_output(graph, "inspect", str(state))
+    except HostResourceError:
+        continue_turn(RESOURCE_MESSAGE)
+        return 0
     if inspection is None:
         continue_turn("The active Codex graph state is invalid. Repair progress.json before stopping.")
         return 0
@@ -125,24 +131,29 @@ def main() -> int:
     message = text_field(payload, "last_assistant_message")
     if inspection.get("hard_stop") is not None and hard_stop_declaration(message):
         return 0
-    if (
-        graph_output(
-            graph,
-            "verify-completion",
-            str(state),
-            "--session",
-            session_id,
-            "--evals",
-            str(state.parent / "evals.json"),
-            "--proof",
-            str(state.parent / "proof.json"),
-            "--retro",
-            str(state.parent / "retro.json"),
-            "--transcript",
-            text_field(payload, "transcript_path"),
+    try:
+        verified = (
+            graph_output(
+                graph,
+                "verify-completion",
+                str(state),
+                "--session",
+                session_id,
+                "--evals",
+                str(state.parent / "evals.json"),
+                "--proof",
+                str(state.parent / "proof.json"),
+                "--retro",
+                str(state.parent / "retro.json"),
+                "--transcript",
+                text_field(payload, "transcript_path"),
+            )
+            is not None
         )
-        is not None
-    ):
+    except HostResourceError:
+        continue_turn(RESOURCE_MESSAGE)
+        return 0
+    if verified:
         return 0
     if not unresolved(state):
         continue_turn(

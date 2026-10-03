@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import errno
 import json
 import os
 import re
@@ -13,6 +14,17 @@ from contextlib import suppress
 from datetime import datetime
 from pathlib import Path
 from typing import cast
+
+RESOURCE_ERRNOS = frozenset({errno.EMFILE, errno.ENFILE, errno.EAGAIN, errno.ENOMEM})
+RESOURCE_MESSAGE = (
+    "Host resource exhaustion (for example too many open files) prevented reading the graph state. "
+    "The state is not known to be invalid: retry, and do not repair progress.json for this."
+)
+
+
+class HostResourceError(OSError):
+    """The host could not start the graph helper; this says nothing about graph validity."""
+
 
 PATCH_PATH = re.compile(r"^\*\*\* (?:Add|Update|Delete) File: (.*)$|^\*\*\* Move to: (.*)$")
 
@@ -140,7 +152,9 @@ def graph_output(graph: Path, *arguments: str) -> dict[str, object] | None:
             stderr=subprocess.DEVNULL,
             text=True,
         )
-    except OSError:
+    except OSError as error:
+        if error.errno in RESOURCE_ERRNOS:
+            raise HostResourceError(error.errno, str(error)) from error
         return None
     if result.returncode != 0:
         return None
