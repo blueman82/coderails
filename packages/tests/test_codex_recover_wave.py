@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import sys
 import tempfile
@@ -16,6 +17,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "codex/hooks/script
 import graph
 from graph_evidence import validate_worker_evidence
 from graph_identity import GraphError
+from graph_io import write as write_state
 
 from packages.tests.codex_fixture import frozen_evals, node, read_json, spawn, state, transcripts, write_json
 
@@ -116,6 +118,87 @@ class RecoverWaveTests(unittest.TestCase):
         graph.begin_wave(self.path)
         with self.assertRaises(GraphError):
             graph.recover_wave(self.path, "other", LEASE, now=LAST_ACTIVITY + LEASE)
+
+    def _cycle(self) -> None:
+        """Dispatch a wave, stall every worker, recover it."""
+        graph.begin_wave(self.path)
+        self._spawn_all()
+        self.assertTrue(self._recover(LAST_ACTIVITY + LEASE)["recovered"])
+
+    def test_recovery_is_bounded_by_the_retry_max(self) -> None:
+        """Third recovery of a max-2 node is refused and changes nothing."""
+        self._cycle()
+        self._cycle()
+        graph.begin_wave(self.path)
+        self._spawn_all()
+        before = self.path.read_text(encoding="utf-8")
+        with self.assertRaisesRegex(GraphError, "recovery budget"):
+            self._recover(LAST_ACTIVITY + LEASE)
+        self.assertEqual(self.path.read_text(encoding="utf-8"), before)
+
+    def test_a_crash_after_the_first_save_never_strands_a_stale_node(self) -> None:
+        """Recovery is one save: a second write that would crash is never reached, so no node is left stale."""
+        graph.begin_wave(self.path)
+        self._spawn_all()
+        real, calls = write_state, list[int]()
+
+        def flaky(path: Path, value: dict[str, Any]) -> None:
+            if calls:
+                raise OSError("crash between saves")
+            calls.append(1)
+            real(path, value)
+
+        with patch("graph._write", side_effect=flaky), contextlib.suppress(GraphError):
+            self._recover(LAST_ACTIVITY + LEASE)
+        statuses = {n["status"] for n in read_json(self.path)["graph"]["nodes"].values()}
+        self.assertNotIn("stale", statuses)
+
+    def test_failing_save_leaves_state_unchanged(self) -> None:
+        """A failing save leaves the wave active."""
+        graph.begin_wave(self.path)
+        self._spawn_all()
+        before = self.path.read_text(encoding="utf-8")
+        with patch("graph._write", side_effect=OSError("disk")), self.assertRaises(GraphError):
+            self._recover(LAST_ACTIVITY + LEASE)
+        self.assertEqual(self.path.read_text(encoding="utf-8"), before)
+
+    def test_second_recovery_of_the_same_wave_does_not_double_generation(self) -> None:
+        """The competing call finds no active wave and refuses."""
+        self._cycle()
+        with self.assertRaisesRegex(GraphError, "no active wave"):
+            self._recover(LAST_ACTIVITY + LEASE)
+        self.assertEqual(read_json(self.path)["graph"]["nodes"]["U3[1]"]["respawn"]["generation"], 1)
+
+    def test_empty_child_transcript_is_refused(self) -> None:
+        """An unreadable child is a GraphError, not a crash."""
+        graph.begin_wave(self.path)
+        self._spawn_all()
+        for child in self.parent.parent.glob("fixture-child-*.jsonl"):
+            child.write_text("", encoding="utf-8")
+        with self.assertRaises(GraphError):
+            graph.recover_wave(self.path, "parent", LEASE, now=LAST_ACTIVITY + LEASE, apply=False)
+
+    def test_child_without_timestamp_is_refused(self) -> None:
+        """A timestamp-less last record is a GraphError, not a KeyError."""
+        graph.begin_wave(self.path)
+        self._spawn_all()
+        for child in self.parent.parent.glob("fixture-child-*.jsonl"):
+            lines = child.read_text(encoding="utf-8").splitlines()
+            last = json.loads(lines[-1])
+            del last["timestamp"]
+            child.write_text("\n".join([*lines[:-1], json.dumps(last)]) + "\n", encoding="utf-8")
+        with self.assertRaises(GraphError):
+            self._recover(LAST_ACTIVITY + LEASE)
+
+    def test_foreign_child_transcript_is_refused(self) -> None:
+        """Ownership of the child is checked before the node is classified."""
+        graph.begin_wave(self.path)
+        self._spawn_all()
+        for child in self.parent.parent.glob("fixture-child-*.jsonl"):
+            text = child.read_text(encoding="utf-8").replace('"parent_thread_id": "parent"', '"parent_thread_id": "x"')
+            child.write_text(text, encoding="utf-8")
+        with self.assertRaises(GraphError):
+            graph.recover_wave(self.path, "parent", LEASE, now=LAST_ACTIVITY + LEASE, apply=False)
 
 
 if __name__ == "__main__":

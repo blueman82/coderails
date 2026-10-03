@@ -20,7 +20,7 @@ from graph_io import load as _load
 from graph_io import locked as _locked
 from graph_io import object_value as _object
 from graph_io import write as _write
-from graph_transcript import parent_indexes, thread_transcript
+from graph_transcript import child_read_records, parent_indexes, thread_transcript
 from json_types import JsonValue
 
 
@@ -47,35 +47,41 @@ def begin_wave(path: Path) -> dict[str, Any]:
         }
 
 
-def record_wave(path: Path, raw_results: str) -> dict[str, Any]:
-    """Bind native evidence and atomically record exactly the active wave."""
+def _apply_record(state: dict[str, Any], raw_results: str) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Bind native evidence and compute the post-record state for exactly the active wave; writes nothing."""
     try:
         parsed_results: JsonValue = cast(JsonValue, json.loads(raw_results))
     except json.JSONDecodeError as error:
         raise GraphError(f"results are not valid JSON: {error}") from error
+    graph = state["graph"]
+    if graph["active_wave"] is None:
+        raise GraphError("no active wave exists")
+    active = cast(dict[str, Any], graph["active_wave"])
+    envelope = _object(cast(object, parsed_results), "results")
+    if set(envelope) != {"wave_id", "results"}:
+        raise GraphError("results must contain exactly wave_id and results")
+    results = _object(envelope.get("results"), "results.results")
+    transition = graph_semantics.record_wave(state, envelope.get("wave_id"), results)
+    stale_nodes = frozenset(node for node, result in results.items() if result["outcome"] == "stale")
+    failed_nodes = frozenset(node for node, result in results.items() if result["outcome"] == "failed")
+    references, identifiers = bind_worker_evidence(state, active, stale_nodes, failed_nodes)
+    if any(
+        classify_worker_evidence(cast(dict[str, Any], result).get("evidence"), identifiers)[0]
+        for result in results.values()
+        if isinstance(result, dict)
+    ):
+        raise GraphError("result evidence must not contain worker evidence")
+    proposed = cast(dict[str, Any], transition["state"])
+    for node_id, reference in references.items():
+        proposed["graph"]["nodes"][node_id]["evidence"].append(reference)
+    return proposed, transition
+
+
+def record_wave(path: Path, raw_results: str) -> dict[str, Any]:
+    """Bind native evidence and atomically record exactly the active wave."""
     with _locked(path):
         state = _load(path)
-        graph = state["graph"]
-        if graph["active_wave"] is None:
-            raise GraphError("no active wave exists")
-        active = cast(dict[str, Any], graph["active_wave"])
-        envelope = _object(cast(object, parsed_results), "results")
-        if set(envelope) != {"wave_id", "results"}:
-            raise GraphError("results must contain exactly wave_id and results")
-        results = _object(envelope.get("results"), "results.results")
-        transition = graph_semantics.record_wave(state, envelope.get("wave_id"), results)
-        stale_nodes = frozenset(node for node, result in results.items() if result["outcome"] == "stale")
-        failed_nodes = frozenset(node for node, result in results.items() if result["outcome"] == "failed")
-        references, identifiers = bind_worker_evidence(state, active, stale_nodes, failed_nodes)
-        if any(
-            classify_worker_evidence(cast(dict[str, Any], result).get("evidence"), identifiers)[0]
-            for result in results.values()
-            if isinstance(result, dict)
-        ):
-            raise GraphError("result evidence must not contain worker evidence")
-        proposed = cast(dict[str, Any], transition["state"])
-        for node_id, reference in references.items():
-            proposed["graph"]["nodes"][node_id]["evidence"].append(reference)
+        proposed, transition = _apply_record(state, raw_results)
         graph_semantics.validate(proposed)
         _write(path, proposed)
         return {
@@ -152,52 +158,93 @@ def inspect(path: Path) -> dict[str, Any]:
     }
 
 
+class RecoveryRefusedError(GraphError):
+    """A fail-closed recover-wave refusal carrying one stable, low-cardinality reason code."""
+
+    def __init__(self, reason_code: str, message: str) -> None:
+        """Keep the closed-enum code beside the human message."""
+        super().__init__(message)
+        self.reason_code = reason_code
+
+
 def _node_lease(state: dict[str, Any], node_id: str, active: dict[str, Any], now: float, lease: int) -> str:
-    """Classify one active-wave node: dispatch, record, waiting or stalled."""
-    parent = read_records(thread_transcript(state["session_id"]), "parent transcript")
-    expected = task_name(state["loop_id"], node_id, next_attempt(state["graph"]["nodes"][node_id]))
-    cursor = active["transcript_cursor"]
-    found = [
-        item for calls in parent_indexes(parent).values() for item in calls if item[0] > cursor and item[1] == expected
-    ]
-    if not found:
-        return "dispatch"
-    records = read_records(thread_transcript(found[0][2]), "child transcript")
-    if any(event_payload(record).get("type") == "task_complete" for _, record in records):
-        return "record"
-    stamp = datetime.fromisoformat(str(records[-1][1]["timestamp"]).replace("Z", "+00:00")).timestamp()
+    """Classify one active-wave node: dispatch, record, waiting or stalled. Anything unreadable is refused."""
+    try:
+        parent = read_records(thread_transcript(state["session_id"]), "parent transcript")
+        expected = task_name(state["loop_id"], node_id, next_attempt(state["graph"]["nodes"][node_id]))
+        cursor = active["transcript_cursor"]
+        found = [
+            item
+            for calls in parent_indexes(parent).values()
+            for item in calls
+            if item[0] > cursor and item[1] == expected
+        ]
+        if not found:
+            return "dispatch"
+        if len(found) > 1:
+            raise GraphError(f"node {node_id} has more than one spawn for {expected}")
+        _, _, child, nickname, path, role = found[0]
+        records = child_read_records(state["session_id"], child, nickname, path, role)
+        if any(event_payload(record).get("type") == "task_complete" for _, record in records):
+            return "record"
+        stamp = datetime.fromisoformat(str(records[-1][1]["timestamp"]).replace("Z", "+00:00")).timestamp()
+    except (GraphError, KeyError, IndexError, ValueError, TypeError) as error:
+        message = f"node {node_id} transcript is unreadable: {error}"
+        raise RecoveryRefusedError("unreadable_transcript", message) from error
     return "stalled" if now - stamp >= lease else "waiting"
+
+
+NODE_CODES = {"dispatch": "no_spawn_dispatch", "record": "worker_finished_record", "waiting": "worker_waiting"}
+
+
+def _recover_locked(path: Path, session: str, lease: int, clock: float, apply: bool) -> dict[str, Any]:
+    """Classify, record `stale` and request every respawn inside one read-modify-write."""
+    with _locked(path):
+        state = _load(path)
+        if state["session_id"] != session:
+            raise RecoveryRefusedError("foreign_session", "session does not own this loop")
+        active = state["graph"]["active_wave"]
+        if active is None:
+            raise RecoveryRefusedError("no_active_wave", "no active wave exists")
+        nodes = {node_id: _node_lease(state, node_id, active, clock, lease) for node_id in active["nodes"]}
+        kinds = set(nodes.values())
+        uniform = len(kinds) == 1 and "stalled" not in kinds
+        report: dict[str, Any] = {
+            "wave_id": active["wave_id"],
+            "nodes": {node_id: {"action": action} for node_id, action in nodes.items()},
+            "recovered": False,
+            "reason_code": NODE_CODES[next(iter(kinds))] if uniform else "mixed_wave",
+            "revision": state["revision"],
+        }
+        if not apply or kinds != {"stalled"}:
+            return report
+        graph = state["graph"]
+        if any(graph["nodes"][n]["respawn"]["generation"] >= graph["nodes"][n]["retry"]["max"] for n in nodes):
+            raise RecoveryRefusedError("recovery_budget_exhausted", "recovery budget exhausted: waiting for human")
+        check = {"checked": True, "method": f"lease {lease}s expired", "result": "no worker activity"}
+        results = {n: {"outcome": "stale", "evidence": "lease expired", "stale_check": check} for n in nodes}
+        proposed, _ = _apply_record(state, json.dumps({"wave_id": active["wave_id"], "results": results}))
+        for node_id in nodes:
+            try:
+                respawned = graph_semantics.respawn_stale(proposed, node_id, "lease expired")
+                proposed = cast(dict[str, Any], respawned["state"])
+            except ValueError as error:
+                raise GraphError(str(error)) from error
+        graph_semantics.validate(proposed)
+        _write(path, proposed)
+        report.update(recovered=True, reason_code="recovered", revision=proposed["revision"])
+        return report
 
 
 def recover_wave(
     path: Path, session: str, lease_seconds: int, now: float | None = None, apply: bool = True
 ) -> dict[str, Any]:
-    """Recover an active wave whose every worker is silent past the lease, via the existing stale/respawn path.
+    """Recover an active wave whose every spawned worker is silent past the lease, in one locked save.
 
-    Never records `failed` without a stored worker reference: undispatched or finished nodes are only reported.
+    A node with no spawn is only reported ("spawn it now"): nothing is recorded for it. Bounded: a node whose
+    respawn generation has reached retry.max refuses recovery (fail closed, human decides).
     """
-    clock = time.time() if now is None else now
-    with _locked(path):
-        state = _load(path)
-        if state["session_id"] != session:
-            raise GraphError("session does not own this loop")
-        active = state["graph"]["active_wave"]
-        if active is None:
-            raise GraphError("no active wave exists")
-        nodes = {node_id: _node_lease(state, node_id, active, clock, lease_seconds) for node_id in active["nodes"]}
-    report: dict[str, Any] = {
-        "wave_id": active["wave_id"],
-        "nodes": {node_id: {"action": action} for node_id, action in nodes.items()},
-        "recovered": False,
-    }
-    if apply and set(nodes.values()) == {"stalled"}:
-        check = {"checked": True, "method": f"lease {lease_seconds}s expired", "result": "no worker activity"}
-        results = {n: {"outcome": "stale", "evidence": "lease expired", "stale_check": check} for n in nodes}
-        record_wave(path, json.dumps({"wave_id": active["wave_id"], "results": results}))
-        for node_id in nodes:
-            transition(path, session, "respawn_stale", node_id, "lease expired")
-        report["recovered"] = True
-    return report
+    return _recover_locked(path, session, lease_seconds, time.time() if now is None else now, apply)
 
 
 def summarize(path: Path) -> dict[str, Any]:
