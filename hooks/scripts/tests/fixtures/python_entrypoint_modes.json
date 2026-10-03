@@ -1,4 +1,5 @@
 {
+  "scripts/installed_parity.py": "100755",
   "scripts/installer/claude.py": "100644",
   "scripts/installer/codex.py": "100644",
   "scripts/installer/files.py": "100644",
