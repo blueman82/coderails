@@ -156,10 +156,14 @@ def inspect(path: Path) -> dict[str, Any]:
     }
 
 
-def _refuse(path: Path, state: dict[str, Any], code: str, message: str, inputs: object = None) -> RecoveryRefusedError:
-    """Trace a refusal, then return the coded error for the caller to raise."""
-    trace(path, state, "refused", code, inputs, {})
-    return RecoveryRefusedError(code, message)
+def _refuse(
+    path: Path, state: dict[str, Any], error: RecoveryRefusedError, inputs: dict[str, Any]
+) -> RecoveryRefusedError:
+    """Trace a refusal naming the implicated nodes, then return the coded error for the caller to raise."""
+    nodes = state["graph"]["nodes"]
+    rows = [(n, next_attempt(nodes[n]), None) for n in error.nodes if n in nodes]
+    trace(path, state, "refused", error.reason_code, inputs, rows)
+    return error
 
 
 def _recover_locked(path: Path, session: str, lease: int, clock: float, apply: bool) -> dict[str, Any]:
@@ -168,19 +172,20 @@ def _recover_locked(path: Path, session: str, lease: int, clock: float, apply: b
         state = _load(path)
         inputs: dict[str, object] = {"session": session, "lease": lease, "now": clock, "apply": apply}
         if state["session_id"] != session:
-            raise _refuse(path, state, "foreign_session", "session does not own this loop", inputs)
+            foreign = RecoveryRefusedError("foreign_session", "session does not own this loop")
+            raise _refuse(path, state, foreign, inputs)
         active = state["graph"]["active_wave"]
         if active is None:
-            raise _refuse(path, state, "no_active_wave", "no active wave exists", inputs)
+            raise _refuse(path, state, RecoveryRefusedError("no_active_wave", "no active wave exists"), inputs)
         try:
             nodes = {node_id: node_lease(state, node_id, active, clock, lease) for node_id in active["nodes"]}
         except RecoveryRefusedError as error:
-            raise _refuse(path, state, error.reason_code, str(error), inputs) from error
+            raise _refuse(path, state, error, inputs) from error
         inputs["nodes"] = nodes
         kinds = set(nodes.values())
         uniform = len(kinds) == 1 and "stalled" not in kinds
         graph = state["graph"]
-        attempts: dict[str, int | None] = {n: next_attempt(graph["nodes"][n]) for n in nodes}
+        rows = [(n, next_attempt(graph["nodes"][n]), action) for n, action in nodes.items()]
         report: dict[str, Any] = {
             "wave_id": active["wave_id"],
             "nodes": {node_id: {"action": action} for node_id, action in nodes.items()},
@@ -192,11 +197,11 @@ def _recover_locked(path: Path, session: str, lease: int, clock: float, apply: b
             ),
         }
         if not apply or kinds != {"stalled"}:
-            trace(path, state, "reported", report["reason_code"], inputs, attempts)
+            trace(path, state, "reported", report["reason_code"], inputs, rows)
             return report
-        if any(_budget_spent(graph["nodes"][n]) for n in nodes):
+        if spent := tuple(n for n in nodes if _budget_spent(graph["nodes"][n])):
             message = "recovery budget exhausted: waiting for human"
-            raise _refuse(path, state, "recovery_budget_exhausted", message, inputs)
+            raise _refuse(path, state, RecoveryRefusedError("recovery_budget_exhausted", message, spent), inputs)
         check = {"checked": True, "method": f"lease {lease}s expired", "result": "no worker activity"}
         results = {n: {"outcome": "stale", "evidence": "lease expired", "stale_check": check} for n in nodes}
         proposed, _ = _apply_record(state, json.dumps({"wave_id": active["wave_id"], "results": results}))
@@ -209,7 +214,7 @@ def _recover_locked(path: Path, session: str, lease: int, clock: float, apply: b
         graph_semantics.validate(proposed)
         _write(path, proposed)
         report.update(recovered=True, reason_code="recovered")
-        trace(path, state, "recovered", "recovered", inputs, attempts)
+        trace(path, state, "recovered", "recovered", inputs, rows)
         return report
 
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import io
 import json
 import sys
 import tempfile
@@ -19,7 +20,7 @@ from graph_evidence import validate_worker_evidence
 from graph_identity import GraphError
 from graph_io import write as write_state
 
-from packages.tests.codex_fixture import frozen_evals, node, read_json, spawn, state, transcripts, write_json
+from packages.tests.codex_fixture import frozen_evals, node, read_json, refuse, spawn, state, transcripts, write_json
 
 LAST_ACTIVITY = 1_789_948_802.0  # 2026-09-21T00:00:02Z, the fixture child's last record
 LEASE = 600
@@ -228,8 +229,8 @@ class RecoverWaveTests(unittest.TestCase):
             self.assertEqual(
                 set(row),
                 {
-                    "schema_version", "session_id", "loop_id", "wave_id", "node_id", "attempt", "revision",
-                    "command", "outcome", "reason_code", "inputs_sha256",
+                    "schema_version", "ts", "session_id", "caller_session", "loop_id", "wave_id", "node_id", "attempt",
+                    "node_action", "revision", "command", "outcome", "reason_code", "inputs_sha256",
                 },
             )  # fmt: skip
             self.assertEqual((row["reason_code"], row["outcome"]), ("recovered", "recovered"))
@@ -286,6 +287,89 @@ class RecoverWaveTests(unittest.TestCase):
         with self.assertRaises(GraphError) as refused:
             self._recover(LAST_ACTIVITY + LEASE)
         self.assertEqual(getattr(refused.exception, "reason_code", None), "unreadable_transcript")
+
+    def _twin(self, unit: str, terminal: bool) -> None:
+        """Spawn `unit`, then add a second independent spawn under the same task name."""
+        before = self.parent.read_text(encoding="utf-8")
+        child = spawn(self.parent, read_json(self.path), unit, terminal=terminal)
+        added = self.parent.read_text(encoding="utf-8")[len(before) :]
+        old = child.name.removeprefix("fixture-").removesuffix(".jsonl")
+        new = old.replace("child-", "child2-")
+        text = added.replace(old, new).replace("call-", "call2-")
+        with self.parent.open("a", encoding="utf-8") as stream:
+            stream.write(text)
+        twin = child.read_text(encoding="utf-8").replace(old, new)
+        child.with_name(f"fixture-{new}.jsonl").write_text(twin, encoding="utf-8")
+
+    def test_refused_spawns_classify_as_record_like_the_claude_provider(self) -> None:
+        """A refused launch (even re-refused, even beside a silent respawn) is recordable, never `dispatch`."""
+        graph.begin_wave(self.path)
+        spawn(self.parent, read_json(self.path), "U3[1]", terminal=False)
+        refuse(self.parent, read_json(self.path), "U3[2]", "first")
+        refuse(self.parent, read_json(self.path), "U3[2]", "second")
+        report = self._recover(LAST_ACTIVITY + LEASE)
+        self.assertEqual(report["nodes"]["U3[2]"]["action"], "record")
+        self.assertEqual((report["recovered"], report["reason_code"]), (False, "mixed_wave"))
+        refuse(self.parent, read_json(self.path), "U3[1]", "third")
+        self.assertEqual(self._recover(LAST_ACTIVITY + LEASE)["nodes"]["U3[1]"]["action"], "record")
+
+    def test_multiple_spawns_for_one_node_aggregate_like_the_claude_provider(self) -> None:
+        """A finished spawn wins and a live one waits; only an all-silent pair is refused, with its own code."""
+        graph.begin_wave(self.path)
+        self._twin("U3[1]", terminal=False)
+        spawn(self.parent, read_json(self.path), "U3[2]", terminal=False)
+        before = self.path.read_bytes()
+        with self.assertRaises(GraphError) as refused:
+            self._recover(LAST_ACTIVITY + LEASE)
+        self.assertEqual(getattr(refused.exception, "reason_code", None), "ambiguous_spawn")
+        self.assertEqual(self.path.read_bytes(), before)
+        self.assertEqual(self._recover(LAST_ACTIVITY + LEASE - 1)["nodes"]["U3[1]"]["action"], "waiting")
+
+    def test_two_finished_spawns_for_one_node_are_recordable(self) -> None:
+        """Duplicate spawns are not an unreadable transcript when they have finished."""
+        graph.begin_wave(self.path)
+        self._twin("U3[1]", terminal=True)
+        spawn(self.parent, read_json(self.path), "U3[2]", terminal=False)
+        report = self._recover(LAST_ACTIVITY + LEASE)
+        self.assertEqual(report["nodes"]["U3[1]"]["action"], "record")
+
+    def test_trace_rows_are_timestamped_and_name_each_nodes_action(self) -> None:
+        """An on-call can tell the finished node from the live one, and when it was recorded."""
+        graph.begin_wave(self.path)
+        spawn(self.parent, read_json(self.path), "U3[1]", terminal=True)
+        spawn(self.parent, read_json(self.path), "U3[2]", terminal=False)
+        self._recover(LAST_ACTIVITY + LEASE)
+        rows = self._trace()
+        self.assertEqual({r["node_id"]: r["node_action"] for r in rows}, {"U3[1]": "record", "U3[2]": "stalled"})
+        self.assertRegex(rows[0]["ts"], r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\+00:00$")
+
+    def test_refusal_rows_name_the_node_and_the_callers_session(self) -> None:
+        """Budget, unreadable-transcript and foreign-session rows keep their who and which."""
+        self._cycle()
+        self._cycle()
+        graph.begin_wave(self.path)
+        self._spawn_all()
+        with self.assertRaises(GraphError):
+            self._recover(LAST_ACTIVITY + LEASE)
+        budget = [r for r in self._trace() if r["reason_code"] == "recovery_budget_exhausted"]
+        self.assertEqual(({r["node_id"] for r in budget}, budget[0]["attempt"]), ({"U3[1]", "U3[2]"}, 3))
+        sorted(self.parent.parent.glob("fixture-child-*_a3.jsonl"))[-1].write_text("", encoding="utf-8")
+        with self.assertRaises(GraphError):
+            self._recover(LAST_ACTIVITY + LEASE)
+        self.assertEqual(self._trace()[-1]["reason_code"], "unreadable_transcript")
+        self.assertIsNotNone(self._trace()[-1]["node_id"])
+        with self.assertRaises(GraphError):
+            graph.recover_wave(self.path, "other", LEASE, now=LAST_ACTIVITY)
+        foreign = self._trace()[-1]
+        self.assertEqual((foreign["caller_session"], foreign["session_id"]), ("other", "parent"))
+
+    def test_the_cli_prints_the_reason_code_on_refusal(self) -> None:
+        """Operators see the stable code on stderr, not only in the sidecar."""
+        graph.begin_wave(self.path)
+        argv = ["graph.py", "recover-wave", str(self.path), "--session", "wrong"]
+        with patch("sys.argv", argv), patch("sys.stderr", new_callable=io.StringIO) as err:
+            self.assertEqual(graph.main(), 1)
+        self.assertIn("[reason_code=foreign_session]", err.getvalue())
 
 
 if __name__ == "__main__":

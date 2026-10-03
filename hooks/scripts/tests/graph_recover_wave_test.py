@@ -71,7 +71,15 @@ class RecoverWaveTests(GraphCase):
         self.assertIsNone(state["graph"]["active_wave"])
         self.assertEqual(state["graph"]["nodes"]["U3[1]"]["respawn"]["generation"], 1)
         self.assertEqual(state["graph"]["nodes"]["U3[1]"]["retry"]["attempts"], 0)
-        for tool, agent in first:  # the abandoned a1 workers finish after recovery
+        self.finish_late(first)
+        state = self.finish()
+        dispatch.validate_graph_completion(self.path, SESSION)
+        refs = [cast(dict[str, Any], e) for e in state["graph"]["nodes"]["U3[1]"]["evidence"] if isinstance(e, dict)]
+        self.assertEqual([(e["attempt"], e["outcome"]) for e in refs], [(1, "stale"), (2, "done")])
+
+    def finish_late(self, spawned: list[tuple[str, str]]) -> None:
+        """Make every spawned worker finish: a terminal child record plus its completion notification."""
+        for tool, agent in spawned:
             child = self.parent.with_suffix("") / "subagents" / f"agent-{agent}.jsonl"
             fixture.append(
                 child,
@@ -89,10 +97,65 @@ class RecoverWaveTests(GraphCase):
                 },
             )
             fixture.notify(self.parent, tool, agent)
-        state = self.finish()
-        dispatch.validate_graph_completion(self.path, SESSION)
-        refs = [cast(dict[str, Any], e) for e in state["graph"]["nodes"]["U3[1]"]["evidence"] if isinstance(e, dict)]
-        self.assertEqual([(e["attempt"], e["outcome"]) for e in refs], [(1, "stale"), (2, "done")])
+
+    def test_a_worker_finishing_after_classification_is_never_recorded_stale(self) -> None:
+        """The recheck under the lock sees the finish that landed after the unlocked classification."""
+        dispatch.begin_wave(self.path)
+        spawned = self.spawn_all()
+        before = self.path.read_bytes()
+        real, calls = graph_recovery.classify, cast("list[int]", [])
+
+        def finishing(*args: object) -> dict[str, str]:
+            result = real(*cast("tuple[Any, float, int]", args))
+            if not calls:  # the worker finishes between the unlocked classify and the lock
+                calls.append(1)
+                self.finish_late(spawned)
+            return result
+
+        with patch.object(graph_recovery, "classify", side_effect=finishing), self.assertRaises(ValueError) as refused:
+            self.recover()
+        self.assertEqual(getattr(refused.exception, "reason_code", None), "mixed_wave")
+        self.assertEqual(self.path.read_bytes(), before)
+        self.assertEqual(self.trace()[-1]["node_action"], None)
+        self.assertEqual({r["node_id"] for r in self.trace() if r["reason_code"] == "mixed_wave"}, set(UNITS))
+
+    def test_trace_rows_are_timestamped_and_name_each_nodes_action(self) -> None:
+        """An on-call can tell the finished node from the live one, and when it was recorded."""
+        state = self.opened()
+        fixture.spawn(self.parent, state, "U3[1]", completed=True)
+        fixture.spawn(self.parent, state, "U3[2]", completed=False)
+        self.recover()
+        rows = self.trace()
+        self.assertEqual({r["node_id"]: r["node_action"] for r in rows}, {"U3[1]": "record", "U3[2]": "stalled"})
+        self.assertRegex(rows[0]["ts"], r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\+00:00$")
+
+    def test_refusal_rows_name_the_node_and_the_callers_session(self) -> None:
+        """Budget, unreadable-transcript and foreign-session rows keep their who and which."""
+        self.cycle()
+        self.cycle()
+        dispatch.begin_wave(self.path)
+        spawned = self.spawn_all()
+        with self.assertRaises(ValueError):
+            self.recover()
+        budget = [r for r in self.trace() if r["reason_code"] == "recovery_budget_exhausted"]
+        self.assertEqual(({r["node_id"] for r in budget}, budget[0]["attempt"]), (set(UNITS), 3))
+        child = self.parent.with_suffix("") / "subagents" / f"agent-{spawned[1][1]}.jsonl"
+        write_records(child, [])
+        with self.assertRaises(ValueError):
+            self.recover(apply=False)
+        unreadable = self.trace()[-1]
+        self.assertEqual((unreadable["reason_code"], unreadable["node_id"]), ("unreadable_transcript", "U3[2]"))
+        with self.assertRaises(ValueError):
+            self.recover(session="other")
+        foreign = self.trace()[-1]
+        self.assertEqual((foreign["caller_session"], foreign["session_id"]), ("other", SESSION))
+
+    def test_a_refusal_shows_its_reason_code_to_the_operator(self) -> None:
+        """The CLI error text carries the stable code, not just the sidecar."""
+        dispatch.begin_wave(self.path)
+        with self.assertRaises(ValueError) as refused:
+            self.recover(session="other")
+        self.assertIn("[reason_code=foreign_session]", str(refused.exception))
 
     def test_no_spawn_node_is_reported_never_recorded_and_a_late_spawn_completes(self) -> None:
         """A node with no native spawn changes nothing; spawning it late records and completes normally."""
@@ -191,8 +254,8 @@ class RecoverWaveTests(GraphCase):
         self.assertEqual(
             set(rows[0]),
             {
-                "schema_version", "session_id", "loop_id", "wave_id", "node_id", "attempt", "revision",
-                "command", "outcome", "reason_code", "inputs_sha256",
+                "schema_version", "ts", "session_id", "caller_session", "loop_id", "wave_id", "node_id", "attempt",
+                "node_action", "revision", "command", "outcome", "reason_code", "inputs_sha256",
             },
         )  # fmt: skip
         self.path.with_name("recovery-trace.jsonl").unlink()

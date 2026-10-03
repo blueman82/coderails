@@ -9,7 +9,8 @@ from __future__ import annotations
 import hashlib
 import json
 import time
-from datetime import datetime
+from collections.abc import Sequence
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, cast
 
@@ -24,20 +25,31 @@ NODE_CODES = {"dispatch": "no_spawn_dispatch", "record": "worker_finished_record
 class RecoveryRefusedError(ValueError):
     """A fail-closed recover-wave refusal carrying one stable, low-cardinality reason code."""
 
-    def __init__(self, reason_code: str, message: str) -> None:
-        """Keep the closed-enum code beside the human message."""
-        super().__init__(message)
-        self.reason_code = reason_code
+    def __init__(self, reason_code: str, message: str, nodes: tuple[str, ...] = ()) -> None:
+        """Keep the closed-enum code, the implicated nodes and the bare message; str() shows the code to operators."""
+        super().__init__(f"{message} [reason_code={reason_code}]")
+        self.reason_code, self.message, self.nodes = reason_code, message, nodes
 
 
-def trace(path: Path, state: dict[str, Any], outcome: str, code: str, inputs: object, nodes: dict[str, int]) -> None:
+Rows = Sequence[tuple["str | None", "int | None", "str | None"]]
+
+
+def _attempt(state: dict[str, Any], node_id: str) -> int:
+    """The attempt number the node's next spawn carries."""
+    node = state["graph"]["nodes"][node_id]
+    return int(node["retry"]["attempts"] + node["respawn"]["generation"] + 1)
+
+
+def trace(path: Path, state: dict[str, Any], outcome: str, code: str, inputs: dict[str, Any], rows: Rows) -> None:
     """Append non-authoritative rows beside the state. Never read back; never raises or alters a transition."""
     try:
         active = cast("dict[str, Any] | None", state["graph"]["active_wave"])
         digest = hashlib.sha256(json.dumps(inputs, sort_keys=True, default=str).encode()).hexdigest()
         base: dict[str, Any] = {
             "schema_version": 1,
+            "ts": datetime.now(timezone.utc).isoformat(timespec="seconds"),
             "session_id": state.get("session_id"),
+            "caller_session": inputs.get("session"),
             "loop_id": state.get("loop_id"),
             "wave_id": active["wave_id"] if active else None,
             "revision": state.get("revision"),
@@ -46,19 +58,23 @@ def trace(path: Path, state: dict[str, Any], outcome: str, code: str, inputs: ob
             "reason_code": code,
             "inputs_sha256": digest,
         }
-        rows = [{**base, "node_id": node, "attempt": attempt} for node, attempt in (nodes or {"": 0}).items()]
-        for row in rows:
-            row["node_id"], row["attempt"] = row["node_id"] or None, row["attempt"] or None
+        lines = [
+            json.dumps({**base, "node_id": node, "attempt": attempt, "node_action": action}, sort_keys=True)
+            for node, attempt, action in rows or [(None, None, None)]
+        ]
         with path.with_name(TRACE_NAME).open("a", encoding="utf-8") as sidecar:
-            sidecar.write("".join(json.dumps(row, sort_keys=True) + "\n" for row in rows))
+            sidecar.write("".join(line + "\n" for line in lines))
     except Exception:  # noqa: BLE001 - fail open: the trace is advisory
         return
 
 
-def _refuse(path: Path, state: dict[str, Any], code: str, message: str, inputs: object) -> RecoveryRefusedError:
-    """Trace a refusal, then return the coded error for the caller to raise."""
-    trace(path, state, "refused", code, inputs, {})
-    return RecoveryRefusedError(code, message)
+def _refuse(
+    path: Path, state: dict[str, Any], error: RecoveryRefusedError, inputs: dict[str, Any]
+) -> RecoveryRefusedError:
+    """Trace a refusal naming the implicated nodes, then return the coded error for the caller to raise."""
+    rows: Rows = [(n, _attempt(state, n), None) for n in error.nodes if n in state["graph"]["nodes"]]
+    trace(path, state, "refused", error.reason_code, inputs, rows)
+    return error
 
 
 def _spent(node: dict[str, Any]) -> bool:
@@ -99,7 +115,11 @@ def classify(state: dict[str, Any], now: float, lease: int) -> dict[str, str]:
                 and row["wave_id"] == active["wave_id"]
                 and row["line"] > active["transcript_cursor"]
             ]
-            states = {_row_state(state["session_id"], row, path, notices, now, lease) for row in mine}
+            try:
+                states = {_row_state(state["session_id"], row, path, notices, now, lease) for row in mine}
+            except (ValueError, KeyError, IndexError, TypeError) as error:
+                message = f"transcript for {node_id} is unreadable: {error}"
+                raise RecoveryRefusedError("unreadable_transcript", message, (node_id,)) from error
             if not mine:
                 result[node_id] = "dispatch"
             elif "record" in states:
@@ -107,6 +127,8 @@ def classify(state: dict[str, Any], now: float, lease: int) -> dict[str, str]:
             else:
                 result[node_id] = "stalled" if states == {"stalled"} else "waiting"
         return result
+    except RecoveryRefusedError:
+        raise
     except (ValueError, KeyError, IndexError, TypeError) as error:
         raise RecoveryRefusedError("unreadable_transcript", f"transcript is unreadable: {error}") from error
 
@@ -116,14 +138,14 @@ def _plan(
 ) -> tuple[dict[str, str], dict[str, Any]]:
     """Classify the wave and build its report, refusing foreign sessions, absent waves and unreadable evidence."""
     if state["session_id"] != session:
-        raise _refuse(path, state, "foreign_session", "session does not own this graph", inputs)
+        raise _refuse(path, state, RecoveryRefusedError("foreign_session", "session does not own this graph"), inputs)
     active = state["graph"]["active_wave"]
     if active is None:
-        raise _refuse(path, state, "no_active_wave", "no active wave exists", inputs)
+        raise _refuse(path, state, RecoveryRefusedError("no_active_wave", "no active wave exists"), inputs)
     try:
         nodes = classify(state, clock, lease)
     except RecoveryRefusedError as error:
-        raise _refuse(path, state, error.reason_code, str(error), inputs) from error
+        raise _refuse(path, state, error, inputs) from error
     kinds = set(nodes.values())
     uniform = len(kinds) == 1 and "stalled" not in kinds
     return nodes, {
@@ -158,22 +180,22 @@ def recover_wave(
     inputs: dict[str, object] = {"session": session, "lease": lease_seconds, "now": clock, "apply": apply}
     nodes, report = _plan(path, state, session, lease_seconds, clock, inputs)
     inputs["nodes"] = nodes
-    attempts = {
-        n: state["graph"]["nodes"][n]["retry"]["attempts"] + state["graph"]["nodes"][n]["respawn"]["generation"] + 1
-        for n in nodes
-    }
+    rows: Rows = [(n, _attempt(state, n), action) for n, action in nodes.items()]
     if not apply or set(nodes.values()) != {"stalled"}:
-        trace(path, state, "reported", report["reason_code"], inputs, attempts)
+        trace(path, state, "reported", report["reason_code"], inputs, rows)
         return report
     refusal: list[RecoveryRefusedError] = []
 
     def update(locked: dict[str, Any]) -> dict[str, Any]:
         try:
             current, _ = _plan(path, locked, session, lease_seconds, clock, inputs)
-            if set(current.values()) != {"stalled"}:
-                raise RecoveryRefusedError("mixed_wave", "wave changed before recovery could be recorded")
-            if any(_spent(locked["graph"]["nodes"][n]) for n in current):
-                raise RecoveryRefusedError("recovery_budget_exhausted", "recovery budget exhausted: waiting for human")
+            moved = tuple(n for n, action in current.items() if action != "stalled")
+            if moved:
+                raise RecoveryRefusedError("mixed_wave", "wave changed before recovery could be recorded", moved)
+            spent = tuple(n for n in current if _spent(locked["graph"]["nodes"][n]))
+            if spent:
+                message = "recovery budget exhausted: waiting for human"
+                raise RecoveryRefusedError("recovery_budget_exhausted", message, spent)
             return _stale_wave(locked, current, lease_seconds)
         except RecoveryRefusedError as error:
             refusal.append(error)
@@ -183,10 +205,10 @@ def recover_wave(
         transition(path, update)
     except ValueError as error:
         if refusal:
-            raise _refuse(path, state, refusal[0].reason_code, str(refusal[0]), inputs) from error
+            raise _refuse(path, state, refusal[0], inputs) from error
         raise
     report.update(recovered=True, reason_code="recovered")
-    trace(path, state, "recovered", "recovered", inputs, attempts)
+    trace(path, state, "recovered", "recovered", inputs, rows)
     return report
 
 
