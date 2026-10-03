@@ -120,6 +120,34 @@ class NativeEvidenceTests(unittest.TestCase):
             self._bind()
         self.assertEqual(self.state, before)
 
+    def _sibling(self, status: str, attempts: int = 0) -> None:
+        """Add an unrelated second node with the given status and no worker evidence."""
+        self.state["graph"]["nodes"]["U3[2]"] = {
+            "retry": {"attempts": attempts},
+            "respawn": {"generation": 0},
+            "status": status,
+            "evidence": [],
+        }
+
+    def test_non_terminal_siblings_need_no_completion_evidence(self) -> None:
+        """Binding a wave must not demand transcript evidence from pending, ready or running siblings."""
+        for status in ("pending", "ready", "running"):
+            with self.subTest(status=status):
+                self._sibling(status)
+                self.assertEqual(self._bind()["agent_thread_id"], "child")
+
+    def test_terminal_and_failed_states_still_require_transcript_evidence(self) -> None:
+        """Done, skipped and retried nodes without references stay rejected, and so does a complete check."""
+        for status, attempts in (("done", 0), ("skipped", 0), ("pending", 1), ("stale", 0)):
+            with self.subTest(status=status, attempts=attempts):
+                self._sibling(status, attempts)
+                self._reject()
+        self._sibling("pending")
+        self.state["graph"]["active_wave"] = None
+        self.state["graph"]["nodes"]["U3[1]"].update(status="done", evidence=[self._bind()])
+        with self.assertRaises(GraphError):
+            validate_worker_evidence(self.state)
+
     def test_roleless_native_binding_and_revalidation(self) -> None:
         """Bind current native evidence and recheck its stored provenance."""
         reference = self._bind()

@@ -7,6 +7,8 @@ import re
 from typing import cast
 
 from hook_common import (
+    RESOURCE_MESSAGE,
+    HostResourceError,
     deny,
     graph_output,
     graph_path,
@@ -71,24 +73,32 @@ def main() -> int:
     if not graph.is_file():
         deny("Graph worker dispatch requires the provider-local graph helper.")
         return 0
-    inspection = graph_output(graph, "inspect", str(state))
+    try:
+        inspection = graph_output(graph, "inspect", str(state))
+    except HostResourceError:
+        deny(RESOURCE_MESSAGE)
+        return 0
     if inspection is None:
         deny("Graph worker dispatch requires valid provider-local graph state.")
         return 0
     if inspection.get("status") == "complete":
         deny("A completed graph cannot dispatch graph workers.")
         return 0
-    authorization = graph_output(
-        graph,
-        "authorize-dispatch",
-        str(state),
-        "--session",
-        session_id,
-        "--task",
-        marker,
-        "--evals",
-        str(state.parent / "evals.json"),
-    )
+    try:
+        authorization = graph_output(
+            graph,
+            "authorize-dispatch",
+            str(state),
+            "--session",
+            session_id,
+            "--task",
+            marker,
+            "--evals",
+            str(state.parent / "evals.json"),
+        )
+    except HostResourceError:
+        deny(RESOURCE_MESSAGE)
+        return 0
     if authorization is None:
         deny("Graph worker dispatch requires valid state, active-wave ownership, and graded loop evidence.")
         return 0

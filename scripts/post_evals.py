@@ -51,15 +51,18 @@ def grade_loop(path: str | Path) -> str:
     progress = Path(path).with_name("progress.json")
     try:
         identity = read_object(progress)
-        for key in ("session_id", "loop_id"):
-            if identity.get(key):
-                data[key] = identity[key]
-        revision = identity.get("revision")
-        if isinstance(revision, int) and not isinstance(revision, bool):
-            data["revision"] = revision
-    except (OSError, ValueError):
+    except (OSError, ValueError) as error:
         if progress.exists():
-            print(f"post_evals: warning — {progress} does not parse; identity fields not stamped", file=sys.stderr)
+            raise ValueError(
+                f"{progress} exists but does not parse; refusing to grade without loop identity"
+            ) from error
+        identity = {}
+    for key in ("session_id", "loop_id"):
+        if identity.get(key):
+            data[key] = identity[key]
+    revision = identity.get("revision")
+    if isinstance(revision, int) and not isinstance(revision, bool):
+        data["revision"] = revision
     write_object(path, data)
     return result
 

@@ -171,6 +171,15 @@ class HookTests(unittest.TestCase):
         self.assertEqual(record["total_bytes"], len(text.encode()))
         self.assertEqual(record["total_lines"], 52)
 
+    def test_crack_on_negation_never_stamps(self) -> None:
+        """Negated requests leave no flag; clause-separated and plain requests stamp."""
+        cases = {"don't crack on yet": False, "never crack on": False, "no problem, crack on": True, "crack on": True}
+        for index, (text, stamped) in enumerate(cases.items()):
+            session = f"neg{index}"
+            self.hook("crack_on_gate", {"session_id": session, "hook_event_name": "UserPromptSubmit", "prompt": text})
+            flags = list((self.directory / "data").rglob(f"{session}/crack_on_active"))
+            self.assertEqual(bool(flags), stamped, text)
+
     def test_crack_on_prose_and_cap(self) -> None:
         """Strip quoted/code text and keep the three-block recursion cap."""
         directory = self.directory / "data/sessions/s1"
