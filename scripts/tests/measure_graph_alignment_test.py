@@ -149,6 +149,27 @@ class MeasureTests(unittest.TestCase):
             },
         )
 
+    def test_recovery_counters(self) -> None:
+        """Recoveries, refused spawns and retries-by-cause come from state and the advisory trace, counts only."""
+        node: dict[str, Any] = {
+            "retry": {"attempts": 1, "max": 2},
+            "respawn": {"generation": 2},
+            "evidence": [{"kind": "worker", "outcome": "launch_refused"}, {"kind": "worker", "outcome": "stale"}, "x"],
+        }
+        self.progress("a", {"graph": {"nodes": {"n": node, "m": {"retry": {"attempts": 0}, "respawn": {}}}}})
+        trace = self.home / ".coderails/agentic-loop/slug/a/recovery-trace.jsonl"
+        rows = [("recovered", "recovered"), ("recovered", "recovered"), ("refused", "foreign_session")]
+        write(trace, "".join(json.dumps({"outcome": o, "reason_code": c}) + "\n" for o, c in rows) + "not json\n")
+        self.assertEqual(
+            self.measure()["recovery"],
+            {
+                "recoveries": 2,
+                "refused_spawns": 1,
+                "retries_by_cause": {"failed": 1, "stale_recovery": 2},
+                "trace_rows_by_reason_code": {"foreign_session": 1, "recovered": 2},
+            },
+        )
+
     def test_nonexistent_root_fails_closed(self) -> None:
         """A missing root exits non-zero with a stderr message and no stdout."""
         result = self.run_cli(self.root / "nope")

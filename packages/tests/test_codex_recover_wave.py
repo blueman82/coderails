@@ -113,6 +113,15 @@ class RecoverWaveTests(unittest.TestCase):
         finished = graph.summarize(self.path)
         self.assertEqual((finished["phase"], finished["done"]), ("ready to complete", ["U3[1]", "U3[2]"]))
 
+    def test_summarize_flags_an_exhausted_recovery_budget(self) -> None:
+        """Once a node's respawns reach retry.max, the active wave's summary says recovery will refuse."""
+        self._cycle()
+        self._cycle()
+        graph.begin_wave(self.path)
+        summary = graph.summarize(self.path)
+        self.assertEqual(summary["phase"], "waiting for worker")
+        self.assertIn("recovery budget exhausted", summary["detail"])
+
     def test_wrong_session_is_refused(self) -> None:
         """Wrong session is refused."""
         graph.begin_wave(self.path)

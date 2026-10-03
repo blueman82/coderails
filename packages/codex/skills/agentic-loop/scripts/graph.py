@@ -190,7 +190,7 @@ def _recover_locked(path: Path, session: str, lease: int, clock: float, apply: b
         if not apply or kinds != {"stalled"}:
             trace(path, state, "reported", report["reason_code"], inputs, attempts)
             return report
-        if any(graph["nodes"][n]["respawn"]["generation"] >= graph["nodes"][n]["retry"]["max"] for n in nodes):
+        if any(_budget_spent(graph["nodes"][n]) for n in nodes):
             message = "recovery budget exhausted: waiting for human"
             raise _refuse(path, state, "recovery_budget_exhausted", message, inputs)
         check = {"checked": True, "method": f"lease {lease}s expired", "result": "no worker activity"}
@@ -220,6 +220,11 @@ def recover_wave(
     return _recover_locked(path, session, lease_seconds, time.time() if now is None else now, apply)
 
 
+def _budget_spent(node: dict[str, Any]) -> bool:
+    """True when the node's respawn generation has reached its retry max."""
+    return bool(node["respawn"]["generation"] >= node["retry"]["max"])
+
+
 def summarize(path: Path) -> dict[str, Any]:
     """Plain-language status from graph state alone: done, active, ready, blocked and the human dependency."""
     state = _load(path)
@@ -234,6 +239,9 @@ def summarize(path: Path) -> dict[str, Any]:
         )
     elif graph["active_wave"] is not None:
         phase, detail = "waiting for worker", f"wave {graph['active_wave']['wave_id']} dispatched"
+        spent = [n for n in graph["active_wave"]["nodes"] if _budget_spent(graph["nodes"][n])]
+        if spent:
+            detail += f"; recovery budget exhausted for {', '.join(spent)}: recover-wave will refuse, a human decides"
     elif ready:
         phase, detail = "ready to dispatch", "begin-wave then spawn the ready nodes"
     elif not pending:
