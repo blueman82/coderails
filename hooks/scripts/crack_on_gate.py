@@ -20,6 +20,21 @@ DENIAL = (
 )
 
 
+NEGATION = re.compile(
+    r"^(?:don'?t|don\u2019t|dont|not|never|no|won'?t|can'?t|cannot|stop|wait|without|hold|off)$", re.IGNORECASE
+)
+CLAUSE_END = re.compile(r"[.!?;,:\n\u2014]")
+
+
+def invoked(prompt: str) -> bool:
+    """Return True when the prompt says crack on without a negation among the three words before it."""
+    for match in CRACK_ON.finditer(prompt):
+        clause = CLAUSE_END.split(prompt[: match.start()])[-1]
+        if not any(NEGATION.match(word) for word in clause.split()[-3:]):
+            return True
+    return False
+
+
 def text(payload: dict[str, Any], name: str) -> str:
     """Return a string payload field or the established empty default."""
     value = payload.get(name)
@@ -52,7 +67,7 @@ def main() -> int:
     session_id = text(payload, "session_id")
     flag = flag_path(session_id)
     if event == "UserPromptSubmit":
-        if flag is not None and CRACK_ON.search(text(payload, "prompt")):
+        if flag is not None and invoked(text(payload, "prompt")):
             if stamp(flag):
                 log(f"hook=crack_on_gate event=UserPromptSubmit session={session_id} stamped=1")
             else:

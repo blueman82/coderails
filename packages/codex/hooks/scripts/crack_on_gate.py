@@ -14,6 +14,21 @@ DENIAL = (
 )
 
 
+NEGATION = re.compile(
+    r"^(?:don'?t|don\u2019t|dont|not|never|no|won'?t|can'?t|cannot|stop|wait|without|hold|off)$", re.IGNORECASE
+)
+CLAUSE_END = re.compile(r"[.!?;,:\n\u2014]")
+
+
+def invoked(prompt: str) -> bool:
+    """Return True when the prompt says crack on without a negation among the three words before it."""
+    for match in CRACK_ON.finditer(prompt):
+        clause = CLAUSE_END.split(prompt[: match.start()])[-1]
+        if not any(NEGATION.match(word) for word in clause.split()[-3:]):
+            return True
+    return False
+
+
 def main() -> int:
     """Stamp crack-on prompts and deny native human-input requests while stamped."""
     payload = payload_object(read_input())
@@ -24,7 +39,7 @@ def main() -> int:
     flag = directory / "crack_on_active"
     event = text_field(payload, "hook_event_name")
     if event == "UserPromptSubmit":
-        if CRACK_ON.search(text_field(payload, "prompt")) and stamp(flag):
+        if invoked(text_field(payload, "prompt")) and stamp(flag):
             log(f"hook=crack_on_gate event=UserPromptSubmit session={session_id} stamped=1")
         return 0
     if event != "PreToolUse" or text_field(payload, "tool_name") != "request_user_input" or not flag.is_file():
