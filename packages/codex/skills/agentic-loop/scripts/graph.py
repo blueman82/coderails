@@ -6,17 +6,21 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import time
+from datetime import datetime
 from pathlib import Path
 from typing import Any, cast
 
 import graph_semantics
 from graph_completion import complete, verify_completion
+from graph_data import event_payload, read_records
 from graph_evidence import bind_worker_evidence, transcript_cursor, validate_evals
 from graph_identity import GraphError, classify_worker_evidence, next_attempt, task_name, task_node
 from graph_io import load as _load
 from graph_io import locked as _locked
 from graph_io import object_value as _object
 from graph_io import write as _write
+from graph_transcript import parent_indexes, thread_transcript
 from json_types import JsonValue
 
 
@@ -148,6 +152,84 @@ def inspect(path: Path) -> dict[str, Any]:
     }
 
 
+def _node_lease(state: dict[str, Any], node_id: str, active: dict[str, Any], now: float, lease: int) -> str:
+    """Classify one active-wave node: dispatch, record, waiting or stalled."""
+    parent = read_records(thread_transcript(state["session_id"]), "parent transcript")
+    expected = task_name(state["loop_id"], node_id, next_attempt(state["graph"]["nodes"][node_id]))
+    cursor = active["transcript_cursor"]
+    found = [
+        item for calls in parent_indexes(parent).values() for item in calls if item[0] > cursor and item[1] == expected
+    ]
+    if not found:
+        return "dispatch"
+    records = read_records(thread_transcript(found[0][2]), "child transcript")
+    if any(event_payload(record).get("type") == "task_complete" for _, record in records):
+        return "record"
+    stamp = datetime.fromisoformat(str(records[-1][1]["timestamp"]).replace("Z", "+00:00")).timestamp()
+    return "stalled" if now - stamp >= lease else "waiting"
+
+
+def recover_wave(
+    path: Path, session: str, lease_seconds: int, now: float | None = None, apply: bool = True
+) -> dict[str, Any]:
+    """Recover an active wave whose every worker is silent past the lease, via the existing stale/respawn path.
+
+    Never records `failed` without a stored worker reference: undispatched or finished nodes are only reported.
+    """
+    clock = time.time() if now is None else now
+    with _locked(path):
+        state = _load(path)
+        if state["session_id"] != session:
+            raise GraphError("session does not own this loop")
+        active = state["graph"]["active_wave"]
+        if active is None:
+            raise GraphError("no active wave exists")
+        nodes = {node_id: _node_lease(state, node_id, active, clock, lease_seconds) for node_id in active["nodes"]}
+    report: dict[str, Any] = {
+        "wave_id": active["wave_id"],
+        "nodes": {node_id: {"action": action} for node_id, action in nodes.items()},
+        "recovered": False,
+    }
+    if apply and set(nodes.values()) == {"stalled"}:
+        check = {"checked": True, "method": f"lease {lease_seconds}s expired", "result": "no worker activity"}
+        results = {n: {"outcome": "stale", "evidence": "lease expired", "stale_check": check} for n in nodes}
+        record_wave(path, json.dumps({"wave_id": active["wave_id"], "results": results}))
+        for node_id in nodes:
+            transition(path, session, "respawn_stale", node_id, "lease expired")
+        report["recovered"] = True
+    return report
+
+
+def summarize(path: Path) -> dict[str, Any]:
+    """Plain-language status from graph state alone: done, active, ready, blocked and the human dependency."""
+    state = _load(path)
+    graph = state["graph"]
+    statuses = {node_id: node["status"] for node_id, node in graph["nodes"].items()}
+    pending = sorted(n for n, s in statuses.items() if s not in {"done", "skipped"})
+    ready = [] if graph["active_wave"] or graph["hard_stop"] else graph_semantics.ready(state)
+    if graph["hard_stop"] is not None:
+        phase, detail = (
+            "waiting for human",
+            f"hard stop on {graph['hard_stop']['node']}: {graph['hard_stop']['reason']}",
+        )
+    elif graph["active_wave"] is not None:
+        phase, detail = "waiting for worker", f"wave {graph['active_wave']['wave_id']} dispatched"
+    elif ready:
+        phase, detail = "ready to dispatch", "begin-wave then spawn the ready nodes"
+    elif not pending:
+        phase, detail = "ready to complete", "run verify-completion"
+    else:
+        phase, detail = "waiting for evidence", "no node is ready; check pending dependencies"
+    return {
+        "phase": phase,
+        "detail": detail,
+        "done": sorted(n for n in statuses if n not in pending),
+        "active": list(graph["active_wave"]["nodes"]) if graph["active_wave"] else [],
+        "ready": ready,
+        "pending": pending,
+    }
+
+
 def authorize_dispatch(path: Path, session: str, task: str, evals_path: Path) -> dict[str, Any]:
     """Require session, active attempt, and frozen eval authority before dispatch."""
     state = _load(path)
@@ -177,9 +259,14 @@ def authorize_dispatch(path: Path, session: str, task: str, evals_path: Path) ->
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Operate one native Codex agentic-loop graph.")
     commands = parser.add_subparsers(dest="command", required=True)
-    for name in ("begin-wave", "inspect"):
+    for name in ("begin-wave", "inspect", "summarize"):
         command = commands.add_parser(name)
         command.add_argument("state", type=Path)
+    recover = commands.add_parser("recover-wave")
+    recover.add_argument("state", type=Path)
+    recover.add_argument("--session", required=True)
+    recover.add_argument("--lease-seconds", type=int, default=900)
+    recover.add_argument("--report-only", action="store_true")
     record = commands.add_parser("record-wave")
     record.add_argument("state", type=Path)
     record.add_argument("results_json")
@@ -226,6 +313,10 @@ def main() -> int:
             output = record_unit(args.state, args.session, args.unit, args.status, args.evidence or args.reason)
         elif args.command in {"respawn-stale", "hard-stop"}:
             output = transition(args.state, args.session, args.command.replace("-", "_"), args.node, args.reason)
+        elif args.command == "recover-wave":
+            output = recover_wave(args.state, args.session, args.lease_seconds, apply=not args.report_only)
+        elif args.command == "summarize":
+            output = summarize(args.state)
         elif args.command == "inspect":
             output = inspect(args.state)
         elif args.command == "authorize-dispatch":
