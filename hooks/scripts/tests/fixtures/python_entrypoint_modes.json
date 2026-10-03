@@ -19,6 +19,7 @@
   "scripts/lib/integrity_status.py": "100644",
   "scripts/lib/review_artifact.py": "100755",
   "scripts/lib/wiki_debt.py": "100644",
+  "scripts/measure_graph_alignment.py": "100755",
   "scripts/merge.py": "100755",
   "scripts/post_evals.py": "100755",
   "scripts/post_review.py": "100755",
