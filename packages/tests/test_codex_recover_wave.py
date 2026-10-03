@@ -70,6 +70,17 @@ class RecoverWaveTests(unittest.TestCase):
         graph.record_wave(self.path, json.dumps({"wave_id": wave["wave_id"], "results": results}))
         validate_worker_evidence(read_json(self.path))
 
+    def test_trace_tolerates_absent_graph_and_takes_a_command(self) -> None:
+        """A refusal on a missing or corrupt state still writes a row, under the calling command."""
+        from graph_recovery import trace
+
+        trace(self.path, {}, "refused", "start_refused_path", {"session": "s"}, [], command="start")
+        rows = [json.loads(line) for line in self.path.with_name("recovery-trace.jsonl").read_text().splitlines()]
+        row = rows[-1]
+        self.assertEqual(
+            (row["command"], row["reason_code"], row["caller_session"]), ("start", "start_refused_path", "s")
+        )
+
     def test_within_lease_is_reported_not_changed(self) -> None:
         """Within lease is reported not changed."""
         graph.begin_wave(self.path)

@@ -40,10 +40,19 @@ def _attempt(state: dict[str, Any], node_id: str) -> int:
     return int(node["retry"]["attempts"] + node["respawn"]["generation"] + 1)
 
 
-def trace(path: Path, state: dict[str, Any], outcome: str, code: str, inputs: dict[str, Any], rows: Rows) -> None:
+def trace(
+    path: Path,
+    state: dict[str, Any],
+    outcome: str,
+    code: str,
+    inputs: dict[str, Any],
+    rows: Rows,
+    command: str = "recover-wave",
+) -> None:
     """Append non-authoritative rows beside the state. Never read back; never raises or alters a transition."""
     try:
-        active = cast("dict[str, Any] | None", state["graph"]["active_wave"])
+        graph = cast("dict[str, Any]", state.get("graph") or {})
+        active = cast("dict[str, Any] | None", graph.get("active_wave"))
         digest = hashlib.sha256(json.dumps(inputs, sort_keys=True, default=str).encode()).hexdigest()
         base: dict[str, Any] = {
             "schema_version": 1,
@@ -53,7 +62,7 @@ def trace(path: Path, state: dict[str, Any], outcome: str, code: str, inputs: di
             "loop_id": state.get("loop_id"),
             "wave_id": active["wave_id"] if active else None,
             "revision": state.get("revision"),
-            "command": "recover-wave",
+            "command": command,
             "outcome": outcome,
             "reason_code": code,
             "inputs_sha256": digest,
@@ -180,7 +189,9 @@ def recover_wave(
     inputs: dict[str, object] = {"session": session, "lease": lease_seconds, "now": clock, "apply": apply}
     nodes, report = _plan(path, state, session, lease_seconds, clock, inputs)
     inputs["nodes"] = nodes
-    rows: Rows = [(n, _attempt(state, n), action) for n, action in nodes.items()]
+    rows: list[tuple[str | None, int | None, str | None]] = [
+        (n, _attempt(state, n), action) for n, action in nodes.items()
+    ]
     if not apply or set(nodes.values()) != {"stalled"}:
         trace(path, state, "reported", report["reason_code"], inputs, rows)
         return report
@@ -189,6 +200,9 @@ def recover_wave(
     def update(locked: dict[str, Any]) -> dict[str, Any]:
         try:
             current, _ = _plan(path, locked, session, lease_seconds, clock, inputs)
+            rows[:] = [
+                (n, _attempt(locked, n), action) for n, action in current.items()
+            ]  # the locked attempt, not the pre-read
             moved = tuple(n for n, action in current.items() if action != "stalled")
             if moved:
                 raise RecoveryRefusedError("mixed_wave", "wave changed before recovery could be recorded", moved)
