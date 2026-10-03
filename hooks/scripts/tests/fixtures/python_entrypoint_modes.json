@@ -47,6 +47,7 @@
   "hooks/scripts/lib/destructive_patterns.py": "100644",
   "hooks/scripts/lib/destructive_routes.py": "100644",
   "hooks/scripts/lib/discipline_common.py": "100755",
+  "hooks/scripts/lib/graph_controller.py": "100644",
   "hooks/scripts/lib/graph_dispatch.py": "100644",
   "hooks/scripts/lib/graph_evidence.py": "100644",
   "hooks/scripts/lib/graph_evidence_bind.py": "100644",
