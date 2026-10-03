@@ -135,6 +135,10 @@ def _stored_references(
             or (node["status"] in {"done", "skipped"} and (not attempts or attempts[-1] != maximum))
         ):
             raise GraphError(f"node {node_id} transcript attempts do not match its graph state")
+        if node["status"] in {"done", "skipped"} and any(
+            item[0].get("outcome") == REFUSED_OUTCOME and item[0]["attempt"] == maximum for item in references
+        ):
+            raise GraphError(f"node {node_id} completed attempt cannot rest on a refused launch")
         if require_complete and node["status"] not in {"done", "skipped"}:
             raise GraphError(f"node {node_id} has no completed transcript-backed attempt")
         previous_line = previous_wave = 0

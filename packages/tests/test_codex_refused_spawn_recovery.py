@@ -138,6 +138,21 @@ class RefusedSpawnTests(unittest.TestCase):
         append(self.parent, {"type": "event_msg", "payload": {"item": item}})
         self._rejected()
 
+    def test_stored_done_or_skipped_node_cannot_rest_on_a_refusal(self) -> None:
+        """A hand-edited done/skipped node whose final attempt is a refusal fails revalidation (fails on f0e11666)."""
+        spawn(self.parent, read_json(self.path), "U3[1]")
+        refuse(self.parent, read_json(self.path), "U3[2]")
+        self._record()
+        stored = read_json(self.path)
+        forged = stored["graph"]["nodes"]["U3[2]"]
+        self.assertEqual(forged["evidence"][-1]["outcome"], "launch_refused")
+        for status in ("done", "skipped"):
+            for attempts in (0, 1):
+                with self.subTest(status=status, attempts=attempts):
+                    forged["status"], forged["retry"]["attempts"] = status, attempts
+                    with self.assertRaises(GraphError):
+                        validate_worker_evidence(stored)
+
     def test_stored_refusal_is_revalidated_against_the_transcript(self) -> None:
         """Control: tampering with, or removing, the parent rows behind a stored refusal fails revalidation."""
         spawn(self.parent, read_json(self.path), "U3[1]")
