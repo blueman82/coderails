@@ -22,6 +22,7 @@ trace write never fails or changes a transition. Counters: `python3 scripts/meas
 | `no_spawn_dispatch` | A node has no native spawn. Nothing is recorded. | Spawn it now (or, if the spawn is refused, the `launch_refused` evidence applies). |
 | `worker_finished_record` | A worker already completed. | `record-wave` it; never recover a finished worker. |
 | `worker_waiting` | A worker is inside the lease. | Wait, or rerun with a shorter `--lease-seconds` only if you know it is dead. |
+| `stalled_report_only` | Every spawned worker is stalled and `--report-only` was given. | Rerun without `--report-only` to recover. |
 | `mixed_wave` | Some nodes are stalled, others not. All-or-nothing: nothing changes. | Handle the non-stalled nodes first (record, spawn or wait), then rerun. |
 | `recovery_budget_exhausted` | A node's respawn generation reached `retry.max`. Fails closed. | A human decides: `hard-stop --node N --reason ...` or fix the cause. |
 | `foreign_session` | `--session` does not own the loop. | Use the owning session id. |

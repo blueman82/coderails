@@ -151,6 +151,47 @@ class ProviderParityTests(unittest.TestCase):
                 result = provider.hook("loop_dispatch_guard", {**request, "session_id": session})
                 self.assertEqual(json.loads(result.stdout)["hookSpecificOutput"]["permissionDecision"], "deny")
 
+    def test_recover_wave_is_equivalent_and_bounded(self) -> None:
+        """Both CLIs report, recover once, refuse past retry.max and trace the same reason codes."""
+        for provider in self.providers:
+            state = provider.state()
+            state["graph"]["nodes"]["U3[1]"]["retry"]["max"] = 1
+            provider.write(state)
+            args = ("--session", provider.session, "--lease-seconds", "600")
+            provider.success("begin-wave")
+            before = provider.path.read_bytes()
+            self.assertEqual(provider.success("recover-wave", *args)["reason_code"], "no_spawn_dispatch")
+            provider.launch("stale")
+            self.assertEqual(provider.success("recover-wave", *args, "--report-only")["recovered"], False)
+            foreign = provider.call("recover-wave", "--session", "foreign", "--lease-seconds", "600")
+            self.assertNotEqual(foreign.returncode, 0)
+            self.assertEqual(before, provider.path.read_bytes())
+            self.assertEqual(provider.success("recover-wave", *args)["reason_code"], "recovered")
+            recovered = provider.read()["graph"]
+            self.assertIsNone(recovered["active_wave"])
+            self.assertEqual(recovered["nodes"]["U3[1]"]["respawn"]["generation"], 1)
+            provider.success("begin-wave")
+            provider.launch("stale")
+            before = provider.path.read_bytes()
+            refused = provider.call("recover-wave", *args)
+            self.assertNotEqual(refused.returncode, 0)
+            self.assertIn("recovery budget", refused.stderr)
+            self.assertEqual(before, provider.path.read_bytes())
+            rows = [
+                json.loads(line) for line in provider.path.with_name("recovery-trace.jsonl").read_text().splitlines()
+            ]
+            self.assertEqual(
+                [row["reason_code"] for row in rows],
+                [
+                    "no_spawn_dispatch",
+                    "stalled_report_only",
+                    "foreign_session",
+                    "recovered",
+                    "recovery_budget_exhausted",
+                ],
+            )
+            self.assertEqual(provider.success("summarize")["phase"], "waiting for worker")
+
     def test_native_provider_boundaries(self) -> None:
         """Skills dispatch only their native provider and no retired shared scheduler exists."""
         claude = (ROOT / "skills/agentic-loop/SKILL.md").read_text()

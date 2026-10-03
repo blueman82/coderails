@@ -67,6 +67,26 @@ class ProviderAdversarialTests(unittest.TestCase):
             provider.write(value)
             self.assertNotEqual(provider.call("inspect").returncode, 0)
 
+    def test_a_node_without_a_native_spawn_can_never_be_recorded_stale_or_recovered(self) -> None:
+        """Neither record-wave stale nor recover-wave changes state when no worker was ever spawned."""
+        for provider in self.providers:
+            provider.success("begin-wave")
+            report = {
+                "wave_id": provider.read()["graph"]["active_wave"]["wave_id"],
+                "results": {
+                    "U3[1]": {
+                        "outcome": "stale",
+                        "evidence": "x",
+                        "stale_check": {"checked": True, "method": "m", "result": "none"},
+                    }
+                },
+            }
+            before = provider.path.read_bytes()
+            self.assertNotEqual(provider.call("record-wave", json.dumps(report)).returncode, 0)
+            recovered = provider.success("recover-wave", "--session", provider.session, "--lease-seconds", "0")
+            self.assertEqual((recovered["recovered"], recovered["reason_code"]), (False, "no_spawn_dispatch"))
+            self.assertEqual(provider.path.read_bytes(), before)
+
     def test_wave_ownership_and_result_envelopes(self) -> None:
         """Bind both active-wave fields and every report to exactly the current wave."""
         for provider in self.providers:

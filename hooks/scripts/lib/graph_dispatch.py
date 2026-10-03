@@ -12,6 +12,7 @@ from .graph_evidence import ENVELOPE_KEY, cursor, envelope, object_value, transc
 from .graph_evidence_bind import bind_wave
 from .graph_evidence_revalidate import revalidate_all
 from .graph_executor import ROOT, graph_semantics, load, transition, validate_state
+from .graph_recovery import recover_wave as recover_wave
 from .loop_completion import validate_completion
 from .loop_evals import read_loop_evals_result
 from .loop_state_common import LoopState, read_state

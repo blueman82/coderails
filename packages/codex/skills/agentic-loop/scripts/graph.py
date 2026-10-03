@@ -185,7 +185,11 @@ def _recover_locked(path: Path, session: str, lease: int, clock: float, apply: b
             "wave_id": active["wave_id"],
             "nodes": {node_id: {"action": action} for node_id, action in nodes.items()},
             "recovered": False,
-            "reason_code": NODE_CODES[next(iter(kinds))] if uniform else "mixed_wave",
+            "reason_code": (
+                NODE_CODES[next(iter(kinds))]
+                if uniform
+                else ("stalled_report_only" if len(kinds) == 1 else "mixed_wave")
+            ),
         }
         if not apply or kinds != {"stalled"}:
             trace(path, state, "reported", report["reason_code"], inputs, attempts)

@@ -31,6 +31,23 @@ class ProviderLifecycleTests(unittest.TestCase):
         self.assertEqual(json.loads(result.stdout)["hookSpecificOutput"]["permissionDecision"], "deny")
         self.assertEqual(provider.path.read_bytes(), before)
 
+    def test_recovered_wave_redispatches_under_a_new_attempt_and_completes(self) -> None:
+        """Recover, re-dispatch, record done and complete; losing the stale attempt's native spawn breaks completion."""
+        for provider in self.providers:
+            provider.success("begin-wave")
+            provider.launch("stale")
+            provider.success("recover-wave", "--session", provider.session, "--lease-seconds", "600")
+            first = "wave-2" if provider.name == "claude" else "loop_worker_"
+            provider.finish_wave()
+            provider.artifacts()
+            original = provider.parent.read_text()
+            lines = original.splitlines(keepends=True)
+            provider.parent.write_text("".join(line for line in lines if first not in line or "_a2" in line))
+            self.assertNotEqual(provider.complete().returncode, 0, provider.name)
+            provider.parent.write_text(original)
+            result = provider.complete()
+            self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_dispatch_exact_owner_scope_and_retry_name(self) -> None:
         """Foreign ownership and old attempt names cannot authorize a new native worker."""
         for provider in self.providers:
