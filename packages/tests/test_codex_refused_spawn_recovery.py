@@ -124,6 +124,19 @@ class RefusedSpawnTests(unittest.TestCase):
         refuse(self.parent, future, "U3[2]")
         self._rejected()
 
+    def test_success_shaped_output_is_not_a_refusal(self) -> None:
+        """A JSON-object spawn result with no activity row is not an error, so it cannot be recorded as refused."""
+        spawn(self.parent, read_json(self.path), "U3[1]")
+        refuse(self.parent, read_json(self.path), "U3[2]", result='{"agent_id": "abc"}')
+        self._rejected()
+
+    def test_validation_error_output_is_a_refusal(self) -> None:
+        """Plain-text runtime errors other than the thread limit are error-shaped refusals."""
+        spawn(self.parent, read_json(self.path), "U3[1]")
+        refuse(self.parent, read_json(self.path), "U3[2]", result="agent_name must use only lowercase letters")
+        self._record()
+        self.assertEqual(read_json(self.path)["graph"]["nodes"]["U3[2]"]["evidence"][-1]["outcome"], "launch_refused")
+
     def test_activity_row_means_the_spawn_was_not_refused(self) -> None:
         """Control: an echoed SubAgentActivity for the call, even a mismatched one, voids the refusal claim."""
         spawn(self.parent, read_json(self.path), "U3[1]")

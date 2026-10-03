@@ -244,6 +244,16 @@ def parent_indexes(
     return spawns
 
 
+def _error_shaped(output: object) -> bool:
+    """Codex spawn errors are plain text; a success result is a JSON object such as {"task_name": ...}."""
+    if not isinstance(output, str) or not output.strip():
+        return False
+    try:
+        return not isinstance(json.loads(output), dict)
+    except ValueError:
+        return True
+
+
 def refused_launches(records: list[tuple[int, dict[str, Any]]]) -> dict[str, tuple[int, str]]:
     """Index native spawn_agent calls answered by an output but never backed by any SubAgentActivity."""
     calls: dict[str, list[tuple[int, str]]] = {}
@@ -259,7 +269,7 @@ def refused_launches(records: list[tuple[int, dict[str, Any]]]) -> dict[str, tup
             if call := _native_function_call(record):
                 calls.setdefault(call[0], []).append((line_number, call[1]))
         elif record.get("type") == "response_item" and item.get("type") == "function_call_output":
-            if isinstance(item.get("call_id"), str):
+            if isinstance(item.get("call_id"), str) and _error_shaped(item.get("output")):
                 outputs.setdefault(item["call_id"], line_number)
         elif record.get("type") == "event_msg":
             nested = item.get("item")
