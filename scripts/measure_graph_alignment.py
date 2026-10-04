@@ -206,7 +206,7 @@ def graph_vs_work_units() -> dict[str, Any]:
 def trace_counts() -> dict[str, Any]:
     """Count `<root>/*/trace.jsonl` rows once per event_id; skip torn lines and rows lacking an event_id.
 
-    Emits only counts keyed `command/reason_code`; never row inputs.
+    Emits only counts keyed `command/outcome/reason_code`; never row inputs.
     """
     seen: set[str] = set()
     by_reason: dict[str, int] = {}
@@ -232,7 +232,7 @@ def trace_counts() -> dict[str, Any]:
             else:
                 seen.add(event_id)
                 rows += 1
-                key = f"{row.get('command')}/{row.get('reason_code')}"
+                key = f"{row.get('command')}/{row.get('outcome')}/{row.get('reason_code')}"
                 by_reason[key] = by_reason.get(key, 0) + 1
     counts = {"rows": rows, "duplicates": duplicates, "malformed": malformed}
     return {**counts, "by_reason": dict(sorted(by_reason.items()))}

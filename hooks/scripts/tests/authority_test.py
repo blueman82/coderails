@@ -154,6 +154,41 @@ class CliTests(unittest.TestCase):
         """Create s1 with scope a,b and max 3 PRs."""
         return self.run_cli("create", "--session", "s1", "--scope", "a,b", "--max-prs", "3", *extra)
 
+    def test_every_refusal_has_a_stable_trace_code(self) -> None:
+        """Each refusal path writes one refused row with its own low-cardinality reason code."""
+        self.assertEqual(self.run_cli("create", "--session", "s2", "--max-prs", "1", "--scope", "a").returncode, 0)
+        self.assertEqual(self.run_cli("narrow", "--session", "s2", "--max-prs", "5").returncode, 2)
+        self.assertEqual(self.run_cli("narrow", "--session", "s2", "--scope", "z").returncode, 2)
+        self.assertEqual(self.run_cli("narrow", "--session", "s2").returncode, 2)
+        self.assertEqual(self.run_cli("create", "--session", "s2", "--max-prs", "1").returncode, 2)
+        self.assertEqual(self.run_cli("revoke", "--session", "nope").returncode, 2)
+        self.assertEqual(self.run_cli("create", "--session", "s3", "--max-prs", "1", "--not-revocable").returncode, 0)
+        self.assertEqual(self.run_cli("revoke", "--session", "s3").returncode, 2)
+        self.assertEqual(
+            self.reasons("s2"),
+            [
+                "authority_created",
+                "authority_refused_widen_max_prs",
+                "authority_refused_widen_scope",
+                "authority_refused_narrow_empty",
+                "authority_refused_exists",
+            ],
+        )
+        self.assertEqual(self.reasons("nope"), ["authority_refused_missing"])
+        self.assertEqual(self.reasons("s3")[-1], "authority_refused_not_revocable")
+
+    def test_missing_expired_malformed_are_distinct(self) -> None:
+        """The 'no valid object' refusal says why, in the trace."""
+        (self.base / "e").mkdir()
+        (self.base / "e" / "authority.json").write_text(json.dumps(good(session_id="e")))  # expired
+        (self.base / "m").mkdir()
+        (self.base / "m" / "authority.json").write_text("{torn")
+        for session in ("e", "m", "x"):
+            self.assertEqual(self.run_cli("revoke", "--session", session).returncode, 2)
+        self.assertEqual(self.reasons("e"), ["authority_refused_expired"])
+        self.assertEqual(self.reasons("m"), ["authority_refused_malformed"])
+        self.assertEqual(self.reasons("x"), ["authority_refused_missing"])
+
     def test_create_inspect_always_requires_merge(self) -> None:
         """Create writes a valid object whose approval list always has merge; a second create is refused."""
         result = self.create("--approval-for", "push")
@@ -162,7 +197,7 @@ class CliTests(unittest.TestCase):
         self.assertEqual(shown["approval_required_for"], ["merge", "push"])
         self.assertIsNone(shown["loop_id"])
         self.assertEqual(self.create().returncode, 2)
-        self.assertEqual(self.reasons(), ["authority_created"])
+        self.assertEqual(self.reasons(), ["authority_created", "authority_refused_exists"])
 
     def test_narrow_only_shrinks(self) -> None:
         """Subset scope and lower max_prs are applied; wider or larger values are refused and change nothing."""
@@ -175,7 +210,11 @@ class CliTests(unittest.TestCase):
                 self.assertEqual(self.run_cli("narrow", "--session", "s1", *args).returncode, 2)
         after = json.loads(self.run_cli("inspect", "--session", "s1").stdout)
         self.assertEqual((after["scope"], after["max_prs"]), (["a"], 2))
-        self.assertEqual(self.reasons(), ["authority_created", "authority_narrowed"])
+        self.assertEqual(
+            [r for r in self.reasons() if not r.startswith("authority_refused")],
+            ["authority_created", "authority_narrowed"],
+        )
+        self.assertEqual(len(self.reasons()), 6)  # plus one refused row per refusal above
 
     def test_revoke(self) -> None:
         """A revocable object is removed and traced; a non-revocable one is refused and stays."""
@@ -187,7 +226,7 @@ class CliTests(unittest.TestCase):
         self.assertEqual(refused.returncode, 2)
         self.assertTrue((self.base / "s2" / "authority.json").exists())
         self.assertEqual(self.reasons(), ["authority_created", "authority_revoked"])
-        self.assertEqual(self.reasons("s2"), ["authority_created"])
+        self.assertEqual(self.reasons("s2"), ["authority_created", "authority_refused_not_revocable"])
 
     def test_unsafe_session_ids_refused_not_sanitised(self) -> None:
         """A slash or dotdot id is refused outright; nothing is written."""

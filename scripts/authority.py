@@ -9,17 +9,37 @@ import sys
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from hooks.scripts.lib.trace_row import append_row
 from scripts.lib.authority_object import MERGE, authority_path, read_authority, validate, write_authority
 
 
-def refuse(message: str) -> int:
-    """Print a refusal to stderr and return the refusal exit status."""
-    print(f"authority: refused: {message}", file=sys.stderr)
+def refuse(code: str, message: str, session: str | None = None, loop: str | None = None) -> int:
+    """Print a refusal to stderr, trace it under a stable reason code (when the session id is safe), exit 2."""
+    print(f"authority: refused ({code}): {message}", file=sys.stderr)
+    if session is not None:
+        append_row("authority", "refused", code, session, loop)
     return 2
+
+
+def missing_code(session: str) -> str | None:
+    """Why read_authority returned None: missing / malformed / expired / invalid; None when foreign (already traced)."""
+    path = authority_path(session)
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8")) if path else None
+    except FileNotFoundError:
+        return "authority_refused_missing"
+    except (OSError, ValueError):
+        return "authority_refused_malformed"
+    if not isinstance(raw, dict):
+        return "authority_refused_malformed"
+    data = cast("dict[str, Any]", raw)
+    if data.get("session_id") != session:
+        return None
+    problems = validate(data, datetime.now(timezone.utc))
+    return "authority_refused_expired" if problems == ["expired"] else "authority_refused_invalid"
 
 
 def items(values: list[str] | None) -> list[str]:
@@ -31,7 +51,9 @@ def items(values: list[str] | None) -> list[str]:
 def create(args: argparse.Namespace, path: Path) -> int:
     """Write a new object; never overwrites, and merge approval is always required."""
     if path.exists():
-        return refuse("an authority object already exists for this session")
+        return refuse(
+            "authority_refused_exists", "an authority object already exists for this session", args.session, args.loop
+        )
     now = datetime.now(timezone.utc)
     obj: dict[str, Any] = {
         "authority_id": str(uuid.uuid4()),
@@ -46,9 +68,9 @@ def create(args: argparse.Namespace, path: Path) -> int:
     }
     problems = validate(obj, now)
     if problems:
-        return refuse(",".join(problems))
+        return refuse("authority_refused_create_invalid", ",".join(problems), args.session, args.loop)
     if not write_authority(path, obj):
-        return refuse("write failed")
+        return refuse("authority_refused_write_failed", "write failed", args.session, args.loop)
     append_row("authority", "created", "authority_created", args.session, obj["loop_id"])
     print(json.dumps(obj, indent=2, sort_keys=True))
     return 0
@@ -56,22 +78,24 @@ def create(args: argparse.Namespace, path: Path) -> int:
 
 def narrow(args: argparse.Namespace, current: dict[str, Any]) -> int:
     """Shrink scope (subset only) and/or max_prs (lower only); widening is refused."""
+    loop = current["loop_id"]
     scope = items(args.scope) if args.scope is not None else None
     if scope is None and args.max_prs is None:
-        return refuse("narrow needs --scope and/or --max-prs")
+        return refuse("authority_refused_narrow_empty", "narrow needs --scope and/or --max-prs", args.session, loop)
     updated = dict(current)
     if scope is not None:
         if not set(scope) <= set(current["scope"]):
-            return refuse("scope may only shrink")
+            return refuse("authority_refused_widen_scope", "scope may only shrink", args.session, loop)
         updated["scope"] = scope
     if args.max_prs is not None:
         if args.max_prs > current["max_prs"]:
-            return refuse("max_prs may only shrink")
+            return refuse("authority_refused_widen_max_prs", "max_prs may only shrink", args.session, loop)
         updated["max_prs"] = args.max_prs
     problems = validate(updated, datetime.now(timezone.utc))
     path = authority_path(args.session)
     if problems or path is None or not write_authority(path, updated):
-        return refuse(",".join(problems) or "write failed")
+        code = "authority_refused_create_invalid" if problems else "authority_refused_write_failed"
+        return refuse(code, ",".join(problems) or "write failed", args.session, loop)
     append_row("authority", "narrowed", "authority_narrowed", args.session, updated["loop_id"])
     print(json.dumps(updated, indent=2, sort_keys=True))
     return 0
@@ -80,11 +104,11 @@ def narrow(args: argparse.Namespace, current: dict[str, Any]) -> int:
 def revoke(args: argparse.Namespace, current: dict[str, Any], path: Path) -> int:
     """Delete a revocable object; a non-revocable one is refused and left in place."""
     if not current["revocable"]:
-        return refuse("object is not revocable")
+        return refuse("authority_refused_not_revocable", "object is not revocable", args.session, current["loop_id"])
     try:
         path.unlink()
     except OSError:
-        return refuse("delete failed")
+        return refuse("authority_refused_write_failed", "delete failed", args.session, current["loop_id"])
     append_row("authority", "revoked", "authority_revoked", args.session, current["loop_id"])
     print(json.dumps({"revoked": current["authority_id"]}))
     return 0
@@ -111,7 +135,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     path = authority_path(args.session)
     if path is None:
-        return refuse("session id must be nonempty and contain no '/' or '..'")
+        return refuse("authority_refused_unsafe_session", "session id must be nonempty and contain no '/' or '..'")
     if args.command == "create":
         return create(args, path)
     current = read_authority(args.session)
@@ -119,7 +143,10 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(current, indent=2, sort_keys=True))
         return 0
     if current is None:
-        return refuse("no valid authority object for this session")
+        code = missing_code(args.session)
+        if code is None:  # foreign: read_authority already traced it
+            return refuse("authority_refused_foreign", "no valid authority object for this session")
+        return refuse(code, "no valid authority object for this session", args.session)
     return narrow(args, current) if args.command == "narrow" else revoke(args, current, path)
 
 

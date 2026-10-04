@@ -91,10 +91,47 @@ class ReviewerAllowlistTests(HookCase):
                 self.assertTrue(self.denied(HOOK, request(command)))
         rows = [json.loads(x) for x in (self.loop / "s_al" / "trace.jsonl").read_text().splitlines()]
         self.assertEqual(len(rows), len(DENIED))
-        self.assertEqual(
-            {(r["command"], r["outcome"], r["reason_code"]) for r in rows}, {(HOOK, "denied", "bash_allowlist_deny")}
-        )
-        self.assertIn("bash_allowlist_deny", self.log.read_text())
+        self.assertEqual({(r["command"], r["outcome"]) for r in rows}, {(HOOK, "denied")})
+        self.assertTrue(all(r["reason_code"].startswith("bash_allowlist_deny_") for r in rows))
+        self.assertIn("bash_allowlist_deny_", self.log.read_text())
+
+    def test_each_cause_has_its_own_code_in_trace_log_and_message(self) -> None:
+        """Meta-chaining, dangerous flag, unparsable quoting and off-list argv are told apart everywhere."""
+        causes = {
+            "ls; rm x": "bash_allowlist_deny_meta",
+            "cat f > g": "bash_allowlist_deny_meta",
+            "git diff --output=x": "bash_allowlist_deny_flag",
+            "rg --hostname-bin=./sh.sh a f": "bash_allowlist_deny_flag",
+            "echo 'unterminated": "bash_allowlist_deny_parse",
+            "python3 -m pytest": "bash_allowlist_deny_argv",
+        }
+        for command, code in causes.items():
+            with self.subTest(command=command):
+                result = self.invoke(HOOK, request(command))
+                self.assertIn(code, result.stdout)
+        rows = [json.loads(x) for x in (self.loop / "s_al" / "trace.jsonl").read_text().splitlines()]
+        self.assertEqual([r["reason_code"] for r in rows], list(causes.values()))
+        log = self.log.read_text()
+        for code in set(causes.values()):
+            self.assertIn(f"reason_code={code}", log)
+        self.assertIn("argv0=python3", log)
+
+    def test_rg_unknown_long_flags_denied(self) -> None:
+        """Rg is on a per-flag allowlist: executing or writing flags, known or not yet invented, are denied."""
+        for flag in ("--hostname-bin=./sh.sh", "--pre=./x", "--some-future-exec=./x", "-z"):
+            with self.subTest(flag=flag):
+                self.assertTrue(self.denied(HOOK, request(f"rg {flag} a f")))
+        for ok in ("rg -n -i foo hooks", "rg --line-number --glob '*.py' foo", "rg -- -x f"):
+            with self.subTest(ok=ok):
+                self.assertEqual(self.output(HOOK, request(ok)), {})
+
+    def test_namespaced_agent_type_is_guarded(self) -> None:
+        """A plugin-namespaced agent_type (coderails:design-scout) gets the same restriction."""
+        for agent in ("coderails:design-scout", "coderails:source-auditor"):
+            with self.subTest(agent=agent):
+                self.assertTrue(self.denied(HOOK, request("python3 -c 1", agent)))
+                self.assertEqual(self.output(HOOK, request("ls", agent)), {})
+        self.assertEqual(self.output(HOOK, request("python3 -c 1", "coderails:loop-worker")), {})
 
     def test_other_identities_are_a_noop(self) -> None:
         """A coder agent, a foreign type, a top-level call and a non-Bash tool are never restricted."""

@@ -185,9 +185,10 @@ class MeasureTests(unittest.TestCase):
         write(self.home / ".coderails/agentic-loop" / session / "trace.jsonl", text)
 
     @staticmethod
-    def row(event_id: str, command: str = "gate", reason: str = "r1") -> str:
+    def row(event_id: str, command: str = "gate", reason: str = "r1", outcome: str = "blocked") -> str:
         """Render one trace row line."""
-        return json.dumps({"event_id": event_id, "command": command, "reason_code": reason}) + "\n"
+        row = {"event_id": event_id, "command": command, "reason_code": reason, "outcome": outcome}
+        return json.dumps(row) + "\n"
 
     def test_trace_counts_dedupe_by_event_id(self) -> None:
         """A row repeated (same event_id, even across files) is counted once; reasons are tallied."""
@@ -196,7 +197,12 @@ class MeasureTests(unittest.TestCase):
         trace = self.measure()["trace"]
         self.assertEqual(trace["rows"], 3)
         self.assertEqual(trace["duplicates"], 2)
-        self.assertEqual(trace["by_reason"], {"gate/r1": 2, "gate/r2": 1})
+        self.assertEqual(trace["by_reason"], {"gate/blocked/r1": 2, "gate/blocked/r2": 1})
+
+    def test_trace_outcome_separates_warned_from_blocked(self) -> None:
+        """Same command and reason_code with different outcomes are different counters."""
+        self.trace("s1", self.row("e1", outcome="warned") + self.row("e2", outcome="blocked"))
+        self.assertEqual(self.measure()["trace"]["by_reason"], {"gate/blocked/r1": 1, "gate/warned/r1": 1})
 
     def test_trace_torn_last_line_skipped(self) -> None:
         """A truncated final line and a row without event_id are skipped and reported, not fatal."""

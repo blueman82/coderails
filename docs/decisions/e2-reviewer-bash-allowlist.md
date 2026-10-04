@@ -16,14 +16,19 @@ Claude agents that keep `Bash` and are read-only by contract: `deploy-safety-rev
 command whose argv starts with `ls`, `cat`, `head`, `tail`, `wc`, `grep`, `rg`, `sha256sum`, `git status|log|diff|show|blame`
 or `gh pr view|list ... --json`. Denied on sight: `;` `|` `&` backtick `$(` `>` `<`, newlines, `git -c`, any other
 command (so `find -exec/-delete`, `sed -i`, `python`/`python3`/`node`/`bash -c` all fail), and the flags
-`--output`, `--pre`, `--pre-glob`, `--ext-diff`, `--textconv`. Each denial writes a log line and a trace row with
-`reason_code=bash_allowlist_deny`.
+`--output`, `--pre`, `--pre-glob`, `--ext-diff`, `--textconv`, `--hostname-bin`. `rg` is on a per-flag allowlist
+(unknown long flags and `-z` are denied) because its flag surface is open-ended. `agent_type` is matched after stripping a
+plugin namespace (`coderails:design-scout`); the namespaced form is inferred, not captured from a live payload. Each denial
+writes a log line and a trace row with `reason_code=bash_allowlist_deny_{meta,flag,parse,argv}` naming the cause.
 
 **Fail-open by design:** an absent or foreign `agent_type`, a non-Bash tool, or a malformed payload is a no-op.
 Top-level calls carry no `agent_type` (AGENTS.md, `agent_only_gate` probe on Claude Code 2.1.220), so the
 orchestrator is never restricted.
 
 **Not enforced, and not to be claimed:**
+
+- `docs-auditor` has Bash plus Edit/Task and writes by design, so it is unguarded; any other Bash-bearing agent not in
+  the guarded list is likewise unrestricted.
 
 - An allowlisted `git`, `grep`, `rg` or `cat` can still read secrets anywhere the process can read. This is a
   write and execution guard, not a confidentiality guard. `$VAR` expansion is not rejected.
