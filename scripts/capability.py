@@ -172,7 +172,61 @@ def diff_read(raw: object) -> Result:
     )
 
 
-TOOLS: dict[str, Callable[[object], Result]] = {"repo.inspect": repo_inspect, "diff.read": diff_read}
+def declared_tests() -> dict[str, list[str]]:
+    """The named argv lists tests.run may execute, from capabilities/profiles.json."""
+    data: dict[str, Any] = json.loads((ROOT / "capabilities" / "profiles.json").read_text(encoding="utf-8"))
+    return dict(data["tests"])
+
+
+def tests_run(raw: object) -> Result:
+    """Run one declared test command: bounded timeout, scrubbed env. Bounded execution of repo code, NOT read-only."""
+    a = check(raw, {"name": (str, None), "timeout_s": (int, 300)})
+    timeout = bounded(a["timeout_s"], 1, 900, "timeout_s")
+    argv = declared_tests().get(a["name"])
+    if argv is None:
+        raise RefusalError("capability_tests_unknown_name", "name is not declared in profiles.json tests")
+    root = repo_root()
+    env = {k: os.environ[k] for k in ("PATH", "HOME", "LANG", "TMPDIR") if k in os.environ}
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    try:
+        done = run(argv, root, env=env, timeout=timeout)
+        status, out, err, timed_out = done.returncode, done.stdout, done.stderr, False
+    except subprocess.TimeoutExpired as expired:
+        text = [
+            x.decode("utf-8", "replace") if isinstance(x, bytes) else (x or "")
+            for x in (expired.stdout, expired.stderr)
+        ]
+        status, out, err, timed_out = 124, text[0], text[1], True
+    head = run(GIT + ["rev-parse", "HEAD"], root).stdout.strip()
+    result = {
+        "name": a["name"],
+        "timed_out": timed_out,
+        "stdout_tail": out[-4000:],
+        "stderr_tail": err[-4000:],
+        "output_sha256": hashlib.sha256((out + err).encode()).hexdigest(),
+    }
+    return status, result, [{"kind": "command", "ref": a["name"]}, {"kind": "commit", "ref": "HEAD", "sha": head}]
+
+
+def pr_comment(raw: object) -> Result:
+    """Post one comment on a PR of the current repo via `gh` (argv list, body on stdin)."""
+    a = check(raw, {"pr": (int, None), "body": (str, None)})
+    bounded(a["pr"], 1, 10_000_000, "pr")
+    bounded(len(a["body"]), 1, 4000, "body length")
+    done = run(["gh", "pr", "comment", str(a["pr"]), "--body-file", "-"], repo_root(), stdin=a["body"])
+    return (
+        done.returncode,
+        {"url": done.stdout.strip(), "stderr_tail": done.stderr[-500:]},
+        [{"kind": "pr", "ref": str(a["pr"])}],
+    )
+
+
+TOOLS: dict[str, Callable[[object], Result]] = {
+    "repo.inspect": repo_inspect,
+    "diff.read": diff_read,
+    "tests.run": tests_run,
+    "pr.comment": pr_comment,
+}
 
 
 def trace(tool: str, outcome: str, code: str, raw: str) -> None:
