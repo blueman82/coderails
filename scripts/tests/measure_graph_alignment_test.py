@@ -180,6 +180,34 @@ class MeasureTests(unittest.TestCase):
         self.assertEqual(sorted(dup["graph_semantics_lines"].values()), [2, 2, 3])
         self.assertEqual(dup["graph_semantics_distinct_contents"], 2)
 
+    def trace(self, session: str, text: str) -> None:
+        """Write a trace.jsonl under the default loop-state root."""
+        write(self.home / ".coderails/agentic-loop" / session / "trace.jsonl", text)
+
+    @staticmethod
+    def row(event_id: str, command: str = "gate", reason: str = "r1") -> str:
+        """Render one trace row line."""
+        return json.dumps({"event_id": event_id, "command": command, "reason_code": reason}) + "\n"
+
+    def test_trace_counts_dedupe_by_event_id(self) -> None:
+        """A row repeated (same event_id, even across files) is counted once; reasons are tallied."""
+        self.trace("s1", self.row("e1") + self.row("e1") + self.row("e2", reason="r2"))
+        self.trace("s2", self.row("e1") + self.row("e3"))
+        trace = self.measure()["trace"]
+        self.assertEqual(trace["rows"], 3)
+        self.assertEqual(trace["duplicates"], 2)
+        self.assertEqual(trace["by_reason"], {"gate/r1": 2, "gate/r2": 1})
+
+    def test_trace_torn_last_line_skipped(self) -> None:
+        """A truncated final line and a row without event_id are skipped and reported, not fatal."""
+        self.trace("s1", self.row("e1") + '{"event_id": "e2", "comma' + "\n" + json.dumps({"command": "x"}) + "\n")
+        trace = self.measure()["trace"]
+        self.assertEqual((trace["rows"], trace["malformed"]), (1, 2))
+
+    def test_trace_absent_is_zero(self) -> None:
+        """No trace files gives zeros."""
+        self.assertEqual(self.measure()["trace"], {"rows": 0, "duplicates": 0, "malformed": 0, "by_reason": {}})
+
 
 if __name__ == "__main__":
     unittest.main()

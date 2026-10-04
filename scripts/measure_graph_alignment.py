@@ -203,6 +203,41 @@ def graph_vs_work_units() -> dict[str, Any]:
     return {"roots": [str(r) for r in loop_state_roots()], **totals}
 
 
+def trace_counts() -> dict[str, Any]:
+    """Count `<root>/*/trace.jsonl` rows once per event_id; skip torn lines and rows lacking an event_id.
+
+    Emits only counts keyed `command/reason_code`; never row inputs.
+    """
+    seen: set[str] = set()
+    by_reason: dict[str, int] = {}
+    rows = duplicates = malformed = 0
+    files: set[Path] = set()
+    for base in loop_state_roots():
+        files.update(p.resolve() for p in base.glob("*/trace.jsonl"))
+    for path in sorted(files):
+        try:
+            lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+        except OSError:
+            continue
+        for line in lines:
+            try:
+                row = as_dict(json.loads(line))
+            except ValueError:
+                row = {}
+            event_id = row.get("event_id")
+            if not isinstance(event_id, str) or not event_id:
+                malformed += 1
+            elif event_id in seen:
+                duplicates += 1
+            else:
+                seen.add(event_id)
+                rows += 1
+                key = f"{row.get('command')}/{row.get('reason_code')}"
+                by_reason[key] = by_reason.get(key, 0) + 1
+    counts = {"rows": rows, "duplicates": duplicates, "malformed": malformed}
+    return {**counts, "by_reason": dict(sorted(by_reason.items()))}
+
+
 def line_count(path: Path) -> int | None:
     """Return the number of lines in a file, or None when it is missing."""
     try:
@@ -239,6 +274,7 @@ def measure(root: Path) -> dict[str, Any]:
         "bootstrap_bytes": bootstrap_bytes(root),
         "gate_blocks": {provider: parse_telemetry(path) for provider, path in logs.items()},
         "graph_vs_work_units": graph_vs_work_units(),
+        "trace": trace_counts(),
         "duplication": duplication(root),
     }
 
