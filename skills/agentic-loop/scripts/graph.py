@@ -10,8 +10,8 @@ from pathlib import Path
 from typing import Any, cast
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+from hooks.scripts.lib import graph_controller, graph_recovery
 from hooks.scripts.lib import graph_dispatch as dispatch
-from hooks.scripts.lib import graph_recovery
 from hooks.scripts.lib.graph_evidence import object_value
 from hooks.scripts.lib.graph_executor import graph_semantics, load, transition
 
@@ -21,6 +21,8 @@ def parser() -> argparse.ArgumentParser:
     result = argparse.ArgumentParser(description=__doc__)
     commands = result.add_subparsers(dest="command", required=True)
     for name in (
+        "start",
+        "add-unit",
         "inspect",
         "summarize",
         "recover-wave",
@@ -44,6 +46,15 @@ def parser() -> argparse.ArgumentParser:
             detail = command.add_mutually_exclusive_group(required=True)
             detail.add_argument("--evidence")
             detail.add_argument("--reason")
+        if name in {"start", "add-unit"}:
+            command.add_argument("--session", required=True)
+            command.add_argument("--loop-id", required=True)
+        if name == "start":
+            command.add_argument("--prompt-file", required=True, type=Path)
+        if name == "add-unit":
+            command.add_argument("--unit", required=True)
+            command.add_argument("--depends-on", action="append", default=[])
+            command.add_argument("--join", action="store_true")
         if name == "recover-wave":
             command.add_argument("--lease-seconds", type=int, default=900)
             command.add_argument("--report-only", action="store_true")
@@ -115,9 +126,15 @@ def main() -> int:
     """Run one explicit graph operation with fail-closed CLI status."""
     args = parser().parse_args()
     try:
-        if args.command == "inspect":
+        if args.command == "start":
+            output: object = graph_controller.start(args.state, args.session, args.loop_id, args.prompt_file)
+        elif args.command == "add-unit":
+            output = graph_controller.add_unit(
+                args.state, args.session, args.loop_id, args.unit, args.depends_on, args.join
+            )
+        elif args.command == "inspect":
             state = load(args.state)
-            output: object = {
+            output = {
                 "session_id": state["session_id"],
                 "loop_id": state["loop_id"],
                 **graph_semantics.inspect(state),

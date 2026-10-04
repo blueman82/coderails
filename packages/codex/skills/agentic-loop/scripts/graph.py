@@ -12,6 +12,7 @@ from typing import Any, cast
 
 import graph_semantics
 from graph_completion import complete, verify_completion
+from graph_controller import add_unit, start
 from graph_evidence import bind_worker_evidence, transcript_cursor, validate_evals
 from graph_identity import GraphError, classify_worker_evidence, next_attempt, task_name, task_node
 from graph_io import load as _load
@@ -301,6 +302,17 @@ def _parser() -> argparse.ArgumentParser:
     for name in ("begin-wave", "inspect", "summarize"):
         command = commands.add_parser(name)
         command.add_argument("state", type=Path)
+    for name in ("start", "add-unit"):
+        controller = commands.add_parser(name)
+        controller.add_argument("state", type=Path)
+        controller.add_argument("--session", required=True)
+        controller.add_argument("--loop-id", required=True)
+        if name == "start":
+            controller.add_argument("--prompt-file", required=True, type=Path)
+        else:
+            controller.add_argument("--unit", required=True)
+            controller.add_argument("--depends-on", action="append", default=[])
+            controller.add_argument("--join", action="store_true")
     recover = commands.add_parser("recover-wave")
     recover.add_argument("state", type=Path)
     recover.add_argument("--session", required=True)
@@ -342,7 +354,11 @@ def main() -> int:
     """Run the requested graph command and print its JSON response."""
     args = _parser().parse_args()
     try:
-        if args.command == "begin-wave":
+        if args.command == "start":
+            output = start(args.state, args.session, args.loop_id, args.prompt_file)
+        elif args.command == "add-unit":
+            output = add_unit(args.state, args.session, args.loop_id, args.unit, args.depends_on, args.join)
+        elif args.command == "begin-wave":
             output = begin_wave(args.state)
         elif args.command == "record-wave":
             output = record_wave(args.state, args.results_json)

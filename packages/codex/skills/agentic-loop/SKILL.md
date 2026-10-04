@@ -13,31 +13,11 @@ Set `SKILL_DIR` to the absolute directory containing this `SKILL.md`. The graph 
 
 Read the SessionStart bootstrap text first. It reports either the active state path and inspection or the path for a new `progress.json`. Reuse that exact path after compaction or resume.
 
-For a new loop, record the user's authorised outcome, session id, unique loop id, success checks, work-unit nodes, dependency edges, and all-input joins. Write schema version 3 before any worker dispatch:
+For a new loop, put the user's authorised outcome, verbatim, in a file and run `python3 "$SKILL_DIR/scripts/graph.py" start "$STATE" --session "$SESSION" --loop-id "<unique loop id>" --prompt-file "$PROMPT_FILE"` before any worker dispatch. It writes the schema-v3 state atomically (`in-progress`, revision 1, empty graph), treats a repeat of the same loop id as a no-op, re-arms a completed loop, and refuses with a `[reason_code=...]` when an unfinished loop owns the session: resume it instead. `$STATE` must end `<session>/progress.json`.
 
-```json
-{
-  "schema_version": 3,
-  "session_id": "current-session-id",
-  "loop_id": "unique-loop-id",
-  "revision": 1,
-  "status": "in-progress",
-  "scope": "authorised outcome",
-  "authorising_prompt_raw": "verbatim user authorization",
-  "work_units": {"1": {"status": "pending"}},
-  "graph": {
-    "nodes": {
-      "U3[1]": {"label":"Build unit 1","status":"pending","outcome":"pending","retry":{"attempts":0,"max":5},"respawn":{"generation":0,"intent":null},"evidence":[]}
-    },
-    "edges": [],
-    "joins": {},
-    "active_wave": null,
-    "hard_stop": null
-  }
-}
-```
+Register each work unit with `python3 "$SKILL_DIR/scripts/graph.py" add-unit "$STATE" --session "$SESSION" --loop-id "<same id>" --unit N [--depends-on M ...] [--join]`; it writes the work unit, its `U3[N]` node, the dependency edges and the `J12-all-units` input in one locked save. Never edit `progress.json` by hand for these steps.
 
-Use registered node IDs and their exact registered labels, including joins such as `J12-all-units`; every node carries `respawn` as above. An all-input join has an entry in `graph.joins` with `id` equal to the join key, `mode: "all"`, its registered input node IDs, and `released: false`. Downstream edges originate at that join. Active waves use `wave_id`. Unknown nodes, malformed state, cycles, inconsistent joins, or running nodes outside an active wave fail closed.
+Nodes other than `U3[N]` and `J12-all-units` use registered node IDs and their exact registered labels; every node carries `respawn: {"generation":0,"intent":null}`. An all-input join has an entry in `graph.joins` with `id` equal to the join key, `mode: "all"`, its registered input node IDs, and `released: false`. Downstream edges originate at that join. Active waves use `wave_id`. Unknown nodes, malformed state, cycles, inconsistent joins, or running nodes outside an active wave fail closed.
 
 Keep the top-level `work_units` roster independent of `graph.nodes`: graph nodes record dispatch and control steps, while work units record the authorized deliverables. Completion requires every registered work unit to be `done` or `dropped` with a nonblank `dropped_reason`; never infer unit completion solely from graph-node status.
 

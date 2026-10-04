@@ -119,6 +119,65 @@ class RecoverWaveTests(GraphCase):
         self.assertEqual(self.trace()[-1]["node_action"], None)
         self.assertEqual({r["node_id"] for r in self.trace() if r["reason_code"] == "mixed_wave"}, set(UNITS))
 
+    def test_trace_tolerates_absent_graph_and_takes_a_command(self) -> None:
+        """A refusal on a missing or corrupt state still writes a row, under the calling command."""
+        graph_recovery.trace(self.path, {}, "refused", "start_refused_path", {"session": "s"}, [], command="start")
+        row = self.trace()[-1]
+        self.assertEqual(
+            (row["command"], row["reason_code"], row["caller_session"]), ("start", "start_refused_path", "s")
+        )
+        self.assertIsNone(row["wave_id"])
+
+    def test_trace_attempt_comes_from_the_locked_state_not_the_stale_pre_read(self) -> None:
+        """A competing writer bumping respawn.generation after the unlocked read must show in the row."""
+        dispatch.begin_wave(self.path)
+        self.spawn_all()
+        real = graph_recovery.classify
+        calls: list[int] = []
+
+        def bumping(*args: object) -> dict[str, str]:
+            result = real(*cast("tuple[Any, float, int]", args))
+            if not calls:
+                calls.append(1)
+                state = load(self.path)
+                state["graph"]["nodes"]["U3[1]"]["respawn"]["generation"] = 1
+                self.path.write_text(json.dumps(state))
+            return result
+
+        with patch.object(graph_recovery, "classify", side_effect=bumping):
+            self.assertTrue(self.recover()["recovered"])
+        rows = {r["node_id"]: r["attempt"] for r in self.trace() if r["reason_code"] == "recovered"}
+        self.assertEqual(rows["U3[1]"], 2)
+
+    def test_refusal_trace_attempt_comes_from_the_locked_state_not_the_stale_pre_read(self) -> None:
+        """A writer that bumps respawn.generation and finishes a worker before the lock must show in the refusal row."""
+        dispatch.begin_wave(self.path)
+        spawned = self.spawn_all()
+        real = graph_recovery.classify
+        calls: list[int] = []
+
+        def racing(*args: object) -> dict[str, str]:
+            result = real(*cast("tuple[Any, float, int]", args))
+            if not calls:
+                calls.append(1)
+                state = load(self.path)
+                state["graph"]["nodes"]["U3[1]"]["respawn"]["generation"] = 1
+                self.path.write_text(json.dumps(state))
+                self.finish_late(spawned)
+            return result
+
+        with patch.object(graph_recovery, "classify", side_effect=racing), self.assertRaises(ValueError):
+            self.recover()
+        locked = load(self.path)
+        refused = [r for r in self.trace() if r["outcome"] == "refused"]
+        self.assertEqual({r["reason_code"] for r in refused}, {"mixed_wave"})
+        for row in refused:
+            node = locked["graph"]["nodes"][row["node_id"]]
+            self.assertEqual(row["attempt"], node["retry"]["attempts"] + node["respawn"]["generation"] + 1)
+            self.assertEqual(row["revision"], locked["revision"])
+        self.assertEqual(len([r for r in refused if r["node_id"] == "U3[1]"]), 1)
+        self.assertEqual(len({r["event_id"] for r in refused}), 1)  # one refusal event, traced once, many rows
+
     def test_trace_rows_are_timestamped_and_name_each_nodes_action(self) -> None:
         """An on-call can tell the finished node from the live one, and when it was recorded."""
         state = self.opened()
@@ -265,7 +324,8 @@ class RecoverWaveTests(GraphCase):
         self.assertEqual(
             set(rows[0]),
             {
-                "schema_version", "ts", "session_id", "caller_session", "loop_id", "wave_id", "node_id", "attempt",
+                "schema_version", "event_id", "ts", "session_id", "caller_session", "loop_id", "wave_id", "node_id",
+                "attempt",
                 "node_action", "revision", "command", "outcome", "reason_code", "inputs_sha256",
             },
         )  # fmt: skip

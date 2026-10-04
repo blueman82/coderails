@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import copy
 import json
+import re
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -191,6 +193,86 @@ class ProviderParityTests(unittest.TestCase):
                 ],
             )
             self.assertEqual(provider.success("summarize")["phase"], "waiting for worker")
+
+    def test_controller_commands_return_the_same_reason_codes_for_the_same_inputs(self) -> None:
+        """Start and add-unit refuse identically: same exit status and reason code on both providers."""
+        outcomes: dict[str, list[tuple[int, str]]] = {}
+        for provider in self.providers:
+            provider.path.unlink()
+            session, loop = provider.session, "parity-loop"
+            prompt = provider.home / "prompt.txt"
+            prompt.write_text("go")
+            start = ("--session", session, "--loop-id", loop, "--prompt-file", str(prompt))
+            add = ("--session", session, "--loop-id", loop, "--unit")
+            calls = [
+                ("add-unit", *add, "1"),  # no state yet
+                ("start", *start),
+                ("start", *start),
+                ("start", "--session", session, "--loop-id", "other", "--prompt-file", str(prompt)),
+                ("add-unit", *add, "1"),
+                ("add-unit", *add, "1"),
+                ("add-unit", *add, " "),
+                ("add-unit", *add, "2", "--depends-on", "7"),
+            ]
+            outcomes[provider.name] = []
+            for command, *arguments in calls:
+                result = provider.call(command, *arguments)
+                found = re.search(r"reason_code=(\w+)", result.stderr) or re.search(
+                    r'"reason_code": "(\w+)"', result.stdout
+                )
+                outcomes[provider.name].append((result.returncode, found.group(1) if found else ""))
+        self.assertEqual(outcomes["claude"], outcomes["codex"])
+        self.assertEqual(
+            [code for _, code in outcomes["claude"]],
+            [
+                "add_unit_refused_state",
+                "start_created",
+                "start_noop",
+                "start_refused_active_loop",
+                "add_unit_registered",
+                "add_unit_refused_duplicate",
+                "add_unit_refused_bad_id",
+                "add_unit_refused_unknown_dep",
+            ],
+        )
+
+    def test_skill_prose_names_the_controller_commands_and_embeds_no_stub_json(self) -> None:
+        """No document tells the model to hand-write the stub: each names `start`/`add-unit` and carries no stub."""
+        named = (ROOT / "skills/agentic-loop/SKILL.md", ROOT / "packages/codex/skills/agentic-loop/SKILL.md")
+        stubbed = (
+            *named,
+            ROOT / "skills/agentic-loop/phases-setup.md",
+            ROOT / "skills/agentic-loop/loop-state.md",
+            ROOT / "commands/prep.md",
+        )
+        for path in named:
+            text = path.read_text()
+            for command in ("start", "add-unit"):
+                self.assertRegex(text, rf'graph\.py"? {command}\b', f"{path.name} must name graph.py {command}")
+        for path in stubbed:
+            text = path.read_text()
+            with self.subTest(document=str(path.relative_to(ROOT))):
+                self.assertNotIn('"schema_version": 3', text)
+                self.assertNotIn('"status": "initialising"', text)
+        for path in (ROOT / "skills/agentic-loop/phases-setup.md", ROOT / "commands/prep.md"):
+            self.assertRegex(path.read_text(), r'graph\.py"? start\b', path.name)
+
+    def test_prose_only_directs_commands_the_cli_has(self) -> None:
+        """Every `graph.py <word>` the skill prose names is a real subcommand on both providers; no `status` command."""
+        for provider, base in (
+            ("claude", ROOT / "skills/agentic-loop"),
+            ("codex", ROOT / "packages/codex/skills/agentic-loop"),
+        ):
+            usage = subprocess.run(
+                [sys.executable, str(base / "scripts/graph.py"), "-h"], capture_output=True, text=True, check=True
+            ).stdout
+            real = set(re.search(r"\{([a-z,-]+)\}", usage).group(1).split(","))  # type: ignore[union-attr]
+            for doc in sorted(base.glob("*.md")):
+                text = doc.read_text()
+                with self.subTest(provider=provider, doc=doc.name):
+                    named = set(re.findall(r'graph\.py"? ([a-z][a-z-]+)\b', text))
+                    self.assertLessEqual(named, real, f"{doc.name} names a command graph.py lacks")
+                    self.assertIsNone(re.search(r"`status`[^.;)]*commands", text), "`status` is not a graph.py command")
 
     def test_native_provider_boundaries(self) -> None:
         """Skills dispatch only their native provider and no retired shared scheduler exists."""

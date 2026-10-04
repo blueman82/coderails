@@ -41,7 +41,7 @@ are joins/cross-cutting guards) are referenced by these names throughout the res
 
 ### Phases -2 through 2.7 — setup, before any delegation
 
-Stub `progress.json`, sharpen the authorising prompt, read the envelope, run
+Start the loop state (`graph.py start`, then `graph.py add-unit` per unit), sharpen the authorising prompt, read the envelope, run
 pre-flight checks via spawned agents, resolve design forks and disposition, and
 commit the resolved design to `spec.md` and `plan.md`.
 
@@ -240,7 +240,7 @@ This is the factory's own audit — raw facts for the human to judge, not a self
 
 Do not stop work early because the context window is filling or a token budget is approaching. Context will compact and the session will continue — treat that as a non-event, not a stop condition. Never artificially truncate a task or declare "done" mid-loop because of token pressure. If a genuine stop condition (see below) is not met, keep going.
 
-**Loop state lives in a durable artifact, not in the conversation.** Maintain a single `progress.json` at the path printed by the loop-state path helper — resolve it by running the helper (Phase -2), never compute it yourself. Overwrite it (never append) at every phase boundary, recording the authorisation envelope verbatim, the `graph` node states, work-unit states, and each phase's absorbed decisions. Field-by-field schema, the stub→enrich→teardown lifecycle, the hook-owned `loop_stop_counts` carry-forward rule, and the concurrency/ownership rules: see [loop-state.md](loop-state.md).
+**Loop state lives in a durable artifact, not in the conversation.** Maintain a single `progress.json` at the path printed by the loop-state path helper — resolve it by running the helper (Phase -2), never compute it yourself. Create it with `python3 "${CLAUDE_PLUGIN_ROOT}/skills/agentic-loop/scripts/graph.py" start <state> --session <session> --loop-id <id> --prompt-file <file>` and register units with `graph.py add-unit` (never hand-write the stub). Overwrite it (never append) at every phase boundary, recording the authorisation envelope verbatim, the `graph` node states, work-unit states, and each phase's absorbed decisions. Field-by-field schema, the start→update→teardown lifecycle, the hook-owned `loop_stop_counts` rule, and the concurrency/ownership rules: see [loop-state.md](loop-state.md).
 
 After any compaction, drift, or "wait, where are we" moment, the orchestrator RE-READS `progress.json` — never the conversation — to re-orient. If the user ever has to remind the loop that it's mid-loop, the artifact wasn't being maintained. Git remains the authoritative checkpoint for code (commit all in-progress work before compaction); `progress.json` is the authoritative checkpoint for loop position.
 

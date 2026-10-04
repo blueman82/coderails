@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import uuid
 from collections.abc import Sequence
 from datetime import datetime, timezone
 from pathlib import Path
@@ -67,20 +68,30 @@ TRACE_NAME = "recovery-trace.jsonl"
 Rows = Sequence[tuple["str | None", "int | None", "str | None"]]
 
 
-def trace(path: Path, state: dict[str, Any], outcome: str, code: str, inputs: dict[str, Any], rows: Rows) -> None:
+def trace(
+    path: Path,
+    state: dict[str, Any],
+    outcome: str,
+    code: str,
+    inputs: dict[str, Any],
+    rows: Rows,
+    command: str = "recover-wave",
+) -> None:
     """Append non-authoritative rows next to the state. Never read back; never raises or alters a transition."""
     try:
-        active = cast("dict[str, Any] | None", state["graph"]["active_wave"])
+        graph = cast("dict[str, Any]", state.get("graph") or {})
+        active = cast("dict[str, Any] | None", graph.get("active_wave"))
         digest = hashlib.sha256(json.dumps(inputs, sort_keys=True, default=str).encode()).hexdigest()
         base: dict[str, Any] = {
             "schema_version": 1,
+            "event_id": uuid.uuid4().hex,  # one per event: a wave over N nodes writes N rows sharing it
             "ts": datetime.now(timezone.utc).isoformat(timespec="seconds"),
             "session_id": state.get("session_id"),
             "caller_session": inputs.get("session"),
             "loop_id": state.get("loop_id"),
             "wave_id": active["wave_id"] if active else None,
             "revision": state.get("revision"),
-            "command": "recover-wave",
+            "command": command,
             "outcome": outcome,
             "reason_code": code,
             "inputs_sha256": digest,
