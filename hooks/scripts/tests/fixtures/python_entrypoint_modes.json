@@ -1,4 +1,5 @@
 {
+  "scripts/authority.py": "100755",
   "scripts/installed_parity.py": "100755",
   "scripts/installer/claude.py": "100644",
   "scripts/installer/codex.py": "100644",
@@ -12,6 +13,7 @@
   "scripts/integrity-gate/integrity_setup.py": "100644",
   "scripts/integrity-gate/setup.py": "100755",
   "scripts/lib/artifact_io.py": "100644",
+  "scripts/lib/authority_object.py": "100644",
   "scripts/lib/config.py": "100755",
   "scripts/lib/eval_artifact.py": "100755",
   "scripts/lib/eval_execution.py": "100644",

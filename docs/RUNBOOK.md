@@ -33,3 +33,11 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
 - Query: `trace.by_reason` for `reviewer_bash_allowlist/bash_allowlist_deny`.
 - Remediation: rerun the inspection with a single allowlisted read-only command (no chaining, redirection or
   interpreters). If a legitimate command is missing, add its exact argv prefix to the allowlist with a test.
+
+## Authority object refused or changed
+
+- Symptom: `authority.py` refuses a command, or an object disappeared.
+- Query: `trace.by_reason` for `authority/authority_created`, `authority_narrowed`, `authority_revoked`,
+  `authority_refused_foreign`.
+- Remediation: inspect with `python3 scripts/authority.py inspect --session <exact id>`. A foreign-session refusal
+  means the id did not match exactly; ids are never sanitised.
