@@ -41,7 +41,7 @@ are joins/cross-cutting guards) are referenced by these names throughout the res
 
 ### Phases -2 through 2.7 — setup, before any delegation
 
-Stub `progress.json`, sharpen the authorising prompt, read the envelope, run
+Start the loop state (`graph.py start`, then `graph.py add-unit` per unit), sharpen the authorising prompt, read the envelope, run
 pre-flight checks via spawned agents, resolve design forks and disposition, and
 commit the resolved design to `spec.md` and `plan.md`.
 
@@ -214,6 +214,8 @@ Before unblocking the next dependent task in the chain:
 
 **Re-check at the moment of action, not at the moment the report arrived.** State changes in the gap. If the worker says "PR is CONFLICTING" or "ready to merge" and you queue a corrective instruction (rebase, redo, wait), the artifact may have moved by the time the message lands. Always re-run `gh pr view` (or equivalent) at the moment you act on the report, not when you first read it. Past failure: a CONFLICTING state self-healed via an intervening merge before the queued rebase instruction landed — stale on arrival, it triggered redundant work. One extra `gh pr view` between report and instruction is cheap.
 
+If every spawned worker in the active wave has been silent past a lease, run `python3 "${CLAUDE_PLUGIN_ROOT}/skills/agentic-loop/scripts/graph.py" recover-wave <state> --session <session_id> [--lease-seconds N] [--report-only]`. It reports each node as `dispatch` (never spawned: spawn it now, nothing is recorded), `record` (finished or launch refused: record it), `waiting` or `stalled`, plus one stable `reason_code`. Only when all nodes are `stalled` does it, in one locked save, record them `stale` with their native `tool_use_id` references and request the respawn. It refuses (`recovery_budget_exhausted`) once a node's respawns reach `retry.max`; a human then decides. Each outcome appends a non-authoritative row to `recovery-trace.jsonl` beside the state (see `docs/recover-wave-runbook.md`). `graph.py summarize <state>` gives a plain-language status.
+
 After independently verifying a deliverable and recording its graph wave, run `python3 "${CLAUDE_PLUGIN_ROOT}/skills/agentic-loop/scripts/graph.py" record-unit <state> --session <session_id> --unit <id> --status done --evidence "<observed check>"`. For an authorized withdrawal, use `--status dropped --reason "<reason>"`. The command requires a pending registered unit and no active wave and updates state atomically. The graph revision remains unchanged so stored wave evidence stays valid. Do not infer a work-unit decision from graph-node status; grade final evals against the current graph revision.
 
 The cost of one extra tool call before unblocking the next phase is small. The cost of unblocking on a false report is hours.
@@ -238,7 +240,7 @@ This is the factory's own audit — raw facts for the human to judge, not a self
 
 Do not stop work early because the context window is filling or a token budget is approaching. Context will compact and the session will continue — treat that as a non-event, not a stop condition. Never artificially truncate a task or declare "done" mid-loop because of token pressure. If a genuine stop condition (see below) is not met, keep going.
 
-**Loop state lives in a durable artifact, not in the conversation.** Maintain a single `progress.json` at the path printed by the loop-state path helper — resolve it by running the helper (Phase -2), never compute it yourself. Overwrite it (never append) at every phase boundary, recording the authorisation envelope verbatim, the `graph` node states, work-unit states, and each phase's absorbed decisions. Field-by-field schema, the stub→enrich→teardown lifecycle, the hook-owned `loop_stop_counts` carry-forward rule, and the concurrency/ownership rules: see [loop-state.md](loop-state.md).
+**Loop state lives in a durable artifact, not in the conversation.** Maintain a single `progress.json` at the path printed by the loop-state path helper — resolve it by running the helper (Phase -2), never compute it yourself. Create it with `python3 "${CLAUDE_PLUGIN_ROOT}/skills/agentic-loop/scripts/graph.py" start <state> --session <session> --loop-id <id> --prompt-file <file>` and register units with `graph.py add-unit` (never hand-write the stub). Overwrite it (never append) at every phase boundary, recording the authorisation envelope verbatim, the `graph` node states, work-unit states, and each phase's absorbed decisions. Field-by-field schema, the start→update→teardown lifecycle, the hook-owned `loop_stop_counts` rule, and the concurrency/ownership rules: see [loop-state.md](loop-state.md).
 
 After any compaction, drift, or "wait, where are we" moment, the orchestrator RE-READS `progress.json` — never the conversation — to re-orient. If the user ever has to remind the loop that it's mid-loop, the artifact wasn't being maintained. Git remains the authoritative checkpoint for code (commit all in-progress work before compaction); `progress.json` is the authoritative checkpoint for loop position.
 

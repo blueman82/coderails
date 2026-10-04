@@ -87,39 +87,9 @@ Resolve the path by running the path helper — do NOT compute the path yourself
 python3 "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/lib/agentic_loop_path.py"
 ```
 
-If that path is absent, write the stub with these fields:
+If that path is absent, put the user's `/prep` invocation, verbatim, in a temporary file and run `python3 "${CLAUDE_PLUGIN_ROOT}/skills/agentic-loop/scripts/graph.py" start "$STATE" --session "$CLAUDE_CODE_SESSION_ID" --loop-id "<a unique non-blank id>" --prompt-file "$PROMPT_FILE"`. `start` writes the current-schema state atomically and refuses (with a `[reason_code=...]`) to replace an unfinished loop, so it adopts existing state consistently with the agentic-loop workflow. Never hand-write `progress.json`.
 
-```json
-{
-  "schema_version": 3,
-  "session_id": "<this session's id>",
-  "loop_id": "<a unique non-blank id for this loop>",
-  "revision": 1,
-  "status": "in-progress",
-  "created": "<ISO8601 timestamp>",
-  "authorising_prompt_raw": "<the user's /prep invocation, verbatim>",
-  "completed_marker": 0,
-  "work_units": {},
-  "graph": {
-    "nodes": {},
-    "edges": [],
-    "joins": {},
-    "active_wave": null,
-    "hard_stop": null
-  },
-  "review": {
-    "ran": false,
-    "pr": null,
-    "head_sha": null,
-    "summary_url": null,
-    "summary_author": null,
-    "posted_at": null,
-    "summary_posted": false
-  }
-}
-```
-
-If the path helper is unavailable, or the write fails for any reason, log a warning to the user and continue to Task Part 2. The worktree and branches are already safe at this point.
+If the path helper is unavailable, or `start` fails for any reason, log a warning to the user and continue to Task Part 2. The worktree and branches are already safe at this point.
 
 ## Task Part 2: Jira Ticket Creation
 
