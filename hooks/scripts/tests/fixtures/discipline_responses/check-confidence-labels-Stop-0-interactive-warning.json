@@ -17,7 +17,7 @@
       "CLAUDE_AGENTIC_LOOP_DIR": "{sandbox}/state",
       "CLAUDE_HOOK_SLEEP_S": "0"
     },
-    "stdout": "{\n  \"hookSpecificOutput\": {\n    \"hookEventName\": \"Stop\",\n    \"additionalContext\": \"[discipline-warn(loop)] response made substantive claims without (verified)/(inferred)/(guess) labels. Add them before stopping.\"\n  }\n}\n",
+    "stdout": "{\n  \"hookSpecificOutput\": {\n    \"hookEventName\": \"Stop\",\n    \"additionalContext\": \"[discipline-advisory] response made substantive claims without (verified)/(inferred)/(guess) labels. Add them before stopping.\"\n  }\n}\n",
     "returncode": 0,
     "source": "check_confidence_labels",
     "fixture_index": 14
@@ -40,7 +40,7 @@
       "CLAUDE_AGENTIC_LOOP_DIR": "{sandbox}/state",
       "CLAUDE_HOOK_SLEEP_S": "0"
     },
-    "stdout": "{\n  \"hookSpecificOutput\": {\n    \"hookEventName\": \"Stop\",\n    \"additionalContext\": \"[discipline-warn(loop)] response made substantive claims without (verified)/(inferred)/(guess) labels. Add them before stopping.\"\n  }\n}\n",
+    "stdout": "{\n  \"hookSpecificOutput\": {\n    \"hookEventName\": \"Stop\",\n    \"additionalContext\": \"[discipline-advisory] response made substantive claims without (verified)/(inferred)/(guess) labels. Add them before stopping.\"\n  }\n}\n",
     "returncode": 0,
     "source": "check_confidence_labels",
     "fixture_index": 17
@@ -63,7 +63,7 @@
       "CLAUDE_AGENTIC_LOOP_DIR": "{sandbox}/state",
       "CLAUDE_HOOK_SLEEP_S": "0"
     },
-    "stdout": "{\n  \"hookSpecificOutput\": {\n    \"hookEventName\": \"Stop\",\n    \"additionalContext\": \"[discipline-warn(loop)] response made substantive claims without (verified)/(inferred)/(guess) labels. Add them before stopping.\"\n  }\n}\n",
+    "stdout": "{\n  \"hookSpecificOutput\": {\n    \"hookEventName\": \"Stop\",\n    \"additionalContext\": \"[discipline-advisory] response made substantive claims without (verified)/(inferred)/(guess) labels. Add them before stopping.\"\n  }\n}\n",
     "returncode": 0,
     "source": "check_confidence_labels",
     "fixture_index": 19
@@ -86,7 +86,7 @@
       "CLAUDE_AGENTIC_LOOP_DIR": "{sandbox}/state",
       "CLAUDE_HOOK_SLEEP_S": "0"
     },
-    "stdout": "{\n  \"hookSpecificOutput\": {\n    \"hookEventName\": \"Stop\",\n    \"additionalContext\": \"[discipline-warn(loop)] response made substantive claims without (verified)/(inferred)/(guess) labels. Add them before stopping.\"\n  }\n}\n",
+    "stdout": "{\n  \"hookSpecificOutput\": {\n    \"hookEventName\": \"Stop\",\n    \"additionalContext\": \"[discipline-advisory] response made substantive claims without (verified)/(inferred)/(guess) labels. Add them before stopping.\"\n  }\n}\n",
     "returncode": 0,
     "source": "check_confidence_labels",
     "fixture_index": 20
@@ -109,7 +109,7 @@
       "CLAUDE_AGENTIC_LOOP_DIR": "{sandbox}/state",
       "CLAUDE_HOOK_SLEEP_S": "0"
     },
-    "stdout": "{\n  \"hookSpecificOutput\": {\n    \"hookEventName\": \"Stop\",\n    \"additionalContext\": \"[discipline-warn(loop)] response made substantive claims without (verified)/(inferred)/(guess) labels. Add them before stopping.\"\n  }\n}\n",
+    "stdout": "{\n  \"hookSpecificOutput\": {\n    \"hookEventName\": \"Stop\",\n    \"additionalContext\": \"[discipline-advisory] response made substantive claims without (verified)/(inferred)/(guess) labels. Add them before stopping.\"\n  }\n}\n",
     "returncode": 0,
     "source": "check_confidence_labels",
     "fixture_index": 22

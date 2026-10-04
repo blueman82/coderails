@@ -16,10 +16,10 @@ FIXTURES = Path(__file__).with_name("fixtures") / "discipline_responses"
 
 
 class DisciplineResponseTests(unittest.TestCase):
-    """Check Stop, SubagentStop, headless scope, loop demotion, and turn-local evidence."""
+    """Check Stop, SubagentStop, headless scope, advisory demotion, and turn-local evidence."""
 
     def test_original_response_corpus(self) -> None:
-        """Every original input keeps its exit status and model-visible warning contract."""
+        """Every original input keeps its exit status and advisory contract (always exit 0)."""
         rows: list[dict[str, Any]] = sorted(
             [row for path in FIXTURES.glob("*.json") for row in json.loads(path.read_text())],
             key=lambda row: row["fixture_index"],
@@ -54,11 +54,10 @@ class DisciplineResponseTests(unittest.TestCase):
                     self.assertEqual(
                         actual["hookSpecificOutput"]["hookEventName"], expected["hookSpecificOutput"]["hookEventName"]
                     )
-                    self.assertIn("[discipline-warn(loop)]", actual["hookSpecificOutput"]["additionalContext"])
+                    self.assertIn("[discipline-advisory]", actual["hookSpecificOutput"]["additionalContext"])
                 else:
                     self.assertEqual(actual, {})
-                if result.returncode == 2:
-                    self.assertIn("block]", result.stderr)
+                self.assertEqual(result.stderr, "", "a demoted lint must not write a block message")
         self.assertEqual(len(rows), 80)
 
 

@@ -18,8 +18,8 @@
       "CLAUDE_AGENTIC_LOOP_DIR": "{sandbox}/state",
       "CLAUDE_HOOK_SLEEP_S": "0"
     },
-    "stdout": "",
-    "returncode": 2,
+    "stdout": "{\n  \"hookSpecificOutput\": {\n    \"hookEventName\": \"SubagentStop\",\n    \"additionalContext\": \"[discipline-advisory] flagged; advisory only\"\n  }\n}\n",
+    "returncode": 0,
     "source": "check_verify_loop",
     "fixture_index": 55
   },
@@ -42,8 +42,8 @@
       "CLAUDE_AGENTIC_LOOP_DIR": "{sandbox}/state",
       "CLAUDE_HOOK_SLEEP_S": "0"
     },
-    "stdout": "",
-    "returncode": 2,
+    "stdout": "{\n  \"hookSpecificOutput\": {\n    \"hookEventName\": \"SubagentStop\",\n    \"additionalContext\": \"[discipline-advisory] flagged; advisory only\"\n  }\n}\n",
+    "returncode": 0,
     "source": "check_verify_loop",
     "fixture_index": 57
   },
@@ -66,8 +66,8 @@
       "CLAUDE_AGENTIC_LOOP_DIR": "{sandbox}/state",
       "CLAUDE_HOOK_SLEEP_S": "0"
     },
-    "stdout": "",
-    "returncode": 2,
+    "stdout": "{\n  \"hookSpecificOutput\": {\n    \"hookEventName\": \"SubagentStop\",\n    \"additionalContext\": \"[discipline-advisory] flagged; advisory only\"\n  }\n}\n",
+    "returncode": 0,
     "source": "check_verify_loop",
     "fixture_index": 58
   },
@@ -98,8 +98,8 @@
       "CLAUDE_AGENTIC_LOOP_DIR": "{sandbox}/state",
       "CLAUDE_HOOK_SLEEP_S": "0"
     },
-    "stdout": "",
-    "returncode": 2,
+    "stdout": "{\n  \"hookSpecificOutput\": {\n    \"hookEventName\": \"SubagentStop\",\n    \"additionalContext\": \"[discipline-advisory] flagged; advisory only\"\n  }\n}\n",
+    "returncode": 0,
     "source": "check_verify_loop",
     "fixture_index": 60
   },
@@ -122,8 +122,8 @@
       "CLAUDE_AGENTIC_LOOP_DIR": "{sandbox}/state",
       "CLAUDE_HOOK_SLEEP_S": "0"
     },
-    "stdout": "",
-    "returncode": 2,
+    "stdout": "{\n  \"hookSpecificOutput\": {\n    \"hookEventName\": \"SubagentStop\",\n    \"additionalContext\": \"[discipline-advisory] flagged; advisory only\"\n  }\n}\n",
+    "returncode": 0,
     "source": "check_verify_loop",
     "fixture_index": 68
   },
@@ -146,8 +146,8 @@
       "CLAUDE_AGENTIC_LOOP_DIR": "{sandbox}/state",
       "CLAUDE_HOOK_SLEEP_S": "0"
     },
-    "stdout": "",
-    "returncode": 2,
+    "stdout": "{\n  \"hookSpecificOutput\": {\n    \"hookEventName\": \"SubagentStop\",\n    \"additionalContext\": \"[discipline-advisory] flagged; advisory only\"\n  }\n}\n",
+    "returncode": 0,
     "source": "check_verify_loop",
     "fixture_index": 73
   },
@@ -170,8 +170,8 @@
       "CLAUDE_AGENTIC_LOOP_DIR": "{sandbox}/state",
       "CLAUDE_HOOK_SLEEP_S": "0"
     },
-    "stdout": "",
-    "returncode": 2,
+    "stdout": "{\n  \"hookSpecificOutput\": {\n    \"hookEventName\": \"SubagentStop\",\n    \"additionalContext\": \"[discipline-advisory] flagged; advisory only\"\n  }\n}\n",
+    "returncode": 0,
     "source": "check_verify_loop",
     "fixture_index": 75
   }
