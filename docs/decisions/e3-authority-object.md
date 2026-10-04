@@ -67,3 +67,29 @@ a consumer. Those four lines are superseded by the next section; the user direct
 - A new "crack on" in a running session writes `authority.json` (24h). Revoke:
   `python3 scripts/authority.py revoke --session <session_id>` (emits `authority_revoked`).
 - Old Codex flags live under `$PLUGIN_DATA/sessions/<id>/crack_on_active` (a different directory); clear that path.
+
+## Action receipts (roadmap item 3): approval bound to one exact action
+
+- Separate schema, not authority-object fields: `validate()` rejects unknown keys and the authority object is
+  expiring and session-scoped, so mixing them would couple the schemas. Library `scripts/lib/action_receipt.py`
+  (stdlib, py3.9), CLI `scripts/action_receipt_cli.py approve-action | inspect-receipt | revoke-receipt`.
+- Storage: one write-once JSON per receipt at `<loop dir>/<session>/receipts/<receipt_id>.json` (tmp + `os.replace`,
+  never rewritten). Consume and revoke are `<id>.consumed` / `<id>.revoked` marker files created with
+  `O_CREAT|O_EXCL`, so single-use state is file existence: no read-modify-write race, and a torn write cannot
+  half-consume (a truncated receipt reads as `malformed` and is never accepted).
+- `verify(receipt, proposed, now, session_id, loop_id)` is pure and returns `(ok, reason_code)`; check order is fixed:
+  `malformed`, `revoked`, `expired`, `foreign_session`, `foreign_loop`, `consumed`, `kind_mismatch`, `hash_mismatch`,
+  `sha_mismatch`, else `ok`. The hash is sha256 of canonical JSON of the shlex-split command, cwd and branch.
+- Hook `action_authority_gate.py` (Claude, appended to the Bash group; Codex vendored subset in `hook_common.py`,
+  parity-tested): opt-in via config `action_authority` (enforce | advisory | off, default off); it does not touch
+  `pr_merge_gate`, the destructive gate or `enforce_pr_workflow`.
+- What a receipt proves: some same-user principal minted an approval for exactly this command text, cwd and branch,
+  for this session and loop, once, before it expired. What it does NOT prove: that a human approved it. A same-user
+  agent can run `approve-action`, so this is a speed bump and an audit trail, not a human-in-the-loop guarantee.
+- Limits: hash covers only the command text the hook sees (not env, aliases, `bash -c` wrappers, implicit-upstream
+  `git push`); protected branches are main/master only; (guess, unverified) a subagent's `session_id` may differ from
+  its parent's, so a receipt minted by the parent could be refused as `foreign_session` for worker-run actions.
+- Worker statuses `NEEDS_DECISION | OUTSIDE_SCOPE | IRREVERSIBLE_ACTION` ship as a standalone validator
+  (`skills/agentic-loop/scripts/worker_status.py`, Codex copy byte-identical). Wiring into `record-wave` was
+  rejected: it changes record-wave evidence demands and `graph_semantics.py` has three synced copies. Wiring point:
+  the orchestrator's U4 step and the SKILL.md report-back contract.

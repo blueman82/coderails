@@ -76,6 +76,11 @@
             "type": "command",
             "command": "\"${PLUGIN_ROOT}/hooks/scripts/verification_volume_ceiling.py\"",
             "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "\"${PLUGIN_ROOT}/hooks/scripts/action_authority_gate.py\"",
+            "timeout": 10
           }
         ]
       },

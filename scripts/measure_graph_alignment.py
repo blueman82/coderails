@@ -16,6 +16,9 @@ import sys
 from pathlib import Path
 from typing import Any, cast
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from scripts.lib.receipt_counters import receipt_summary
+
 HOOK_FIELD = re.compile(r"(?:^|\s)hook=([A-Za-z0-9_.-]+)")
 FLAG_FIELDS = ("blocked", "would_block", "warned", "demoted")
 WORK_UNIT_TERMINAL = frozenset({"done", "dropped"})
@@ -204,10 +207,7 @@ def trace_counts() -> dict[str, Any]:
     seen: set[str] = set()
     by_reason: dict[str, int] = {}
     rows = duplicates = malformed = 0
-    files: set[Path] = set()
-    for base in loop_state_roots():
-        files.update(p.resolve() for p in base.glob("*/trace.jsonl"))
-    for path in sorted(files):
+    for path in sorted({p.resolve() for base in loop_state_roots() for p in base.glob("*/trace.jsonl")}):
         try:
             lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
         except OSError:
@@ -227,7 +227,7 @@ def trace_counts() -> dict[str, Any]:
                 rows += 1
                 key = f"{row.get('command')}/{row.get('outcome')}/{row.get('reason_code')}"
                 by_reason[key] = by_reason.get(key, 0) + 1
-    counts = {"rows": rows, "duplicates": duplicates, "malformed": malformed}
+    counts = {"rows": rows, "duplicates": duplicates, "malformed": malformed, "receipts": receipt_summary(by_reason)}
     return {**counts, "by_reason": dict(sorted(by_reason.items()))}
 
 

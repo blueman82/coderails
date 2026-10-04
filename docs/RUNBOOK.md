@@ -66,3 +66,24 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
 - Baseline note: the old 103 fires / 5 blocks figure (`docs/graph-alignment-measurement.md`) came from discipline-log
   telemetry; after-numbers come from trace rows, so they are not comparable. Reproduce:
   `python3 scripts/measure_graph_alignment.py --root . --json`.
+
+## Action-authority hook denied a merge or push (or warned in advisory)
+
+- Symptom: `gh pr merge` or `git push` to main/master is denied with "needs an action receipt (<code>)" (enforce), or a
+  stderr "action_authority (advisory)" warning appears. Only when config `action_authority` is `enforce` or `advisory`;
+  absent or any other value is off.
+- Query: `jq -r 'select(.command=="action_authority" or .command=="action_receipt") | [.outcome,.reason_code]|@tsv' <loop dir>/<session>/trace.jsonl`,
+  or `trace.receipts.by_reason_code` from `python3 scripts/measure_graph_alignment.py --root . --json` (deduped by
+  event_id). Codes: `denied_<code>` / `advisory_<code>` where `<code>` is one of `no_receipt`, `hash_mismatch`,
+  `sha_mismatch`, `expired`, `revoked`, `consumed`, `foreign_session`, `foreign_loop`, `kind_mismatch`, `malformed`;
+  `receipt_consumed` (allowed); `action_authority_failed_open` (the hook itself errored and allowed);
+  `receipt_approved` / `receipt_revoked` (CLI).
+- Remediation: mint a receipt for the exact command:
+  `python3 scripts/action_receipt_cli.py approve-action --session <id> --kind merge|git_push --command '<exact command>'`
+  (receipts are single-use, 1h by default; `inspect-receipt` / `revoke-receipt` take `--receipt-id`). `hash_mismatch`
+  means args, cwd or branch differ from the minted command. `foreign_session` can also mean a worker whose
+  `session_id` differs from the minter's (unverified guess): mint under the session the hook reports. Or set
+  `action_authority: off` in `.coderails/workflow.config.yaml`.
+- Limits: a receipt binds approval to an exact action but does not prove a human approved it (a same-user agent can run
+  `approve-action`). The hash covers only the command text the hook sees, not env, aliases, `bash -c` wrappers or an
+  implicit-upstream push. Protected branches are main and master only.
