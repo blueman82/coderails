@@ -13,6 +13,9 @@ from hooks.scripts.hook_common import output, read_payload
 from hooks.scripts.lib.agentic_loop_path import sanitise_session_id
 from hooks.scripts.lib.discipline_common import file_count, stable_text
 from hooks.scripts.lib.loop_state_common import log, loop_active_incomplete
+from hooks.scripts.lib.trace_row import append_row
+
+REASON = "verify_loop_missing"
 
 
 def verification_items(text: str) -> tuple[bool, list[str], int]:
@@ -91,9 +94,11 @@ def main() -> int:
         transcript, str(payload.get("cwd") or ""), sanitise_session_id(session)
     ):
         output("Stop", additionalContext=message.replace("[verify-loop-block]", "[discipline-warn(loop)]"))
-        log(f"{fields} would_block=1 warned=1 blocked=0")
+        log(f"{fields} would_block=1 warned=1 blocked=0 reason_code={REASON}")
+        append_row("check_verify_loop", "warned", REASON, session)
         return 0
-    log(f"{fields} blocked=1")
+    log(f"{fields} blocked=1 reason_code={REASON}")
+    append_row("check_verify_loop", "blocked", REASON, session)
     print(message, file=sys.stderr)
     return 2
 

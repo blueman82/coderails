@@ -7,12 +7,11 @@ import os
 import re
 import subprocess
 import sys
-import time
-from contextlib import suppress
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from hooks.scripts.hook_common import deny, read_payload
+from hooks.scripts.lib.dir_lock import acquire_dir_lock, release_dir_lock
 
 RUN_ALL = re.compile(
     r"(^|[&;|])\s*(?:(?:bash|sh|python3?)\s+|\./)?(?:\S*/)?hooks/scripts/tests/run_all\.(?:sh|py)(?:\s|$)"
@@ -53,13 +52,7 @@ def main() -> int:
         return 0
     count_file = state / f"{branch.replace('/', '-')}__{target}.count"
     lock = Path(f"{count_file}.lock")
-    for _ in range(15):
-        try:
-            lock.mkdir()
-            break
-        except OSError:
-            time.sleep(0.1)
-    else:
+    if not acquire_dir_lock(lock, 15, 0.1)[0]:
         deny("Verification-volume ceiling: could not acquire its per-target lock; failing closed.")
         return 0
     try:
@@ -74,8 +67,7 @@ def main() -> int:
             deny("Verification-volume ceiling: could not write its count file; failing closed.")
             return 0
     finally:
-        with suppress(OSError):
-            lock.rmdir()
+        release_dir_lock(lock)
     if count >= 2:
         deny(
             f"Verification-volume ceiling: this is the {count + 1}th invocation of {target} on "

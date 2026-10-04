@@ -227,6 +227,17 @@ class RecoverWaveTests(GraphCase):
         dispatch.record_wave(self.path, fixture.report(load(self.path)))
         dispatch.validate_graph_completion(self.path, SESSION)
 
+    def test_non_positive_lease_is_refused_and_changes_nothing(self) -> None:
+        """A zero or negative lease would mark every live worker stalled, so it is refused before any read."""
+        state = self.opened()
+        fixture.spawn(self.parent, state, "U3[1]", completed=False)
+        before = self.path.read_bytes()
+        for lease in (0, -5):
+            with self.assertRaises(graph_recovery.RecoveryRefusedError) as raised:
+                dispatch.recover_wave(self.path, SESSION, lease, now=STALLED)
+            self.assertEqual(raised.exception.reason_code, "invalid_lease")
+        self.assertEqual(self.path.read_bytes(), before)
+
     def test_within_lease_and_mixed_waves_change_nothing(self) -> None:
         """A waiting worker, or one finished sibling, blocks recovery without touching state."""
         state = self.opened()

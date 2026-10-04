@@ -83,7 +83,7 @@ class ProviderAdversarialTests(unittest.TestCase):
             }
             before = provider.path.read_bytes()
             self.assertNotEqual(provider.call("record-wave", json.dumps(report)).returncode, 0)
-            recovered = provider.success("recover-wave", "--session", provider.session, "--lease-seconds", "0")
+            recovered = provider.success("recover-wave", "--session", provider.session, "--lease-seconds", "1")
             self.assertEqual((recovered["recovered"], recovered["reason_code"]), (False, "no_spawn_dispatch"))
             self.assertEqual(provider.path.read_bytes(), before)
 

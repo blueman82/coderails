@@ -174,6 +174,7 @@ class NativePackageTests(unittest.TestCase):
                 ),
                 encoding="utf-8",
             )
+            path.with_name("progress.json").write_text('{"session_id":"session-package","loop_id":"loop-package"}')
             subprocess.run(
                 [sys.executable, str(PACKAGE / "scripts/post_evals.py"), "grade-loop", str(path)],
                 check=True,
