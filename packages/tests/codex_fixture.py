@@ -140,3 +140,25 @@ def spawn(parent: Path, graph: dict[str, Any], node_id: str = "U3[1]", terminal:
             },
         )
     return child
+
+
+def refuse(
+    parent: Path,
+    graph: dict[str, Any],
+    node_id: str = "U3[1]",
+    call_id: str = "refused",
+    result: str = "collab spawn failed: limit",
+) -> str:
+    """Append a native spawn_agent call answered by `result` (default an error) with no SubAgentActivity."""
+    task = task_name(graph["loop_id"], node_id, next_attempt(graph["graph"]["nodes"][node_id]))
+    call = {
+        "type": "function_call",
+        "name": "spawn_agent",
+        "namespace": "collaboration",
+        "call_id": f"{call_id}-{task}",
+        "arguments": json.dumps({"task_name": task}),
+    }
+    append(parent, {"type": "response_item", "payload": call})
+    output = {"type": "function_call_output", "call_id": call["call_id"], "output": result}
+    append(parent, {"type": "response_item", "payload": output})
+    return str(call["call_id"])

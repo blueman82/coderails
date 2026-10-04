@@ -13,31 +13,11 @@ Set `SKILL_DIR` to the absolute directory containing this `SKILL.md`. The graph 
 
 Read the SessionStart bootstrap text first. It reports either the active state path and inspection or the path for a new `progress.json`. Reuse that exact path after compaction or resume.
 
-For a new loop, record the user's authorised outcome, session id, unique loop id, success checks, work-unit nodes, dependency edges, and all-input joins. Write schema version 3 before any worker dispatch:
+For a new loop, put the user's authorised outcome, verbatim, in a file and run `python3 "$SKILL_DIR/scripts/graph.py" start "$STATE" --session "$SESSION" --loop-id "<unique loop id>" --prompt-file "$PROMPT_FILE"` before any worker dispatch. It writes the schema-v3 state atomically (`in-progress`, revision 1, empty graph), treats a repeat of the same loop id as a no-op, re-arms a completed loop, and refuses with a `[reason_code=...]` when an unfinished loop owns the session: resume it instead. `$STATE` must end `<session>/progress.json`.
 
-```json
-{
-  "schema_version": 3,
-  "session_id": "current-session-id",
-  "loop_id": "unique-loop-id",
-  "revision": 1,
-  "status": "in-progress",
-  "scope": "authorised outcome",
-  "authorising_prompt_raw": "verbatim user authorization",
-  "work_units": {"1": {"status": "pending"}},
-  "graph": {
-    "nodes": {
-      "U3[1]": {"label":"Build unit 1","status":"pending","outcome":"pending","retry":{"attempts":0,"max":5},"respawn":{"generation":0,"intent":null},"evidence":[]}
-    },
-    "edges": [],
-    "joins": {},
-    "active_wave": null,
-    "hard_stop": null
-  }
-}
-```
+Register each work unit with `python3 "$SKILL_DIR/scripts/graph.py" add-unit "$STATE" --session "$SESSION" --loop-id "<same id>" --unit N [--depends-on M ...] [--join]`; it writes the work unit, its `U3[N]` node, the dependency edges and the `J12-all-units` input in one locked save. Never edit `progress.json` by hand for these steps.
 
-Use registered node IDs and their exact registered labels, including joins such as `J12-all-units`; every node carries `respawn` as above. An all-input join has an entry in `graph.joins` with `id` equal to the join key, `mode: "all"`, its registered input node IDs, and `released: false`. Downstream edges originate at that join. Active waves use `wave_id`. Unknown nodes, malformed state, cycles, inconsistent joins, or running nodes outside an active wave fail closed.
+Nodes other than `U3[N]` and `J12-all-units` use registered node IDs and their exact registered labels; every node carries `respawn: {"generation":0,"intent":null}`. An all-input join has an entry in `graph.joins` with `id` equal to the join key, `mode: "all"`, its registered input node IDs, and `released: false`. Downstream edges originate at that join. Active waves use `wave_id`. Unknown nodes, malformed state, cycles, inconsistent joins, or running nodes outside an active wave fail closed.
 
 Keep the top-level `work_units` roster independent of `graph.nodes`: graph nodes record dispatch and control steps, while work units record the authorized deliverables. Completion requires every registered work unit to be `done` or `dropped` with a nonblank `dropped_reason`; never infer unit completion solely from graph-node status.
 
@@ -67,7 +47,9 @@ python3 "$SKILL_DIR/scripts/graph.py" record-wave "$STATE" \
 
 The graph marker correlates a node and attempt; it does not attest a custom agent role. Native task paths, child/thread IDs, and any actual requested role are bound to provider transcript evidence. A supplied native role must match both child role fields; role-less dispatch is accepted only for the recognized `collaboration` function-call/activity shape with an explicit null nested spawn role; the top-level role may be absent or null, and any populated top-level path must agree. Parent/session, depth, unique dispatch, terminal completion for completed attempts, cursor, and reuse checks remain mandatory. A checked stale result verifies its unique native spawn and child ownership without inventing a successful terminal; subsequent completion rechecks every abandoned attempt from native transcripts. `loop_dispatch_guard.py` routes graph tasks through state, session, active-wave, and eval authorization before dispatch; an ambiguous marker is denied.
 
-Partial, extra, malformed, wrong-wave, stale, failed, duplicate, foreign-session, or reused worker evidence is rejected without changing state. `record-wave` atomically adds compact transcript references to the existing node evidence array; workers never write graph state. A failed node increments its attempts and preserves a separate reference for that attempt. It returns to pending while attempts remain; exhaustion becomes a durable hard-stop. Successful all-input joins release deterministically after every input succeeds. Repeat from `inspect`, then `begin-wave`.
+If every worker in the active wave has been silent past a lease, run `graph.py recover-wave "$STATE" --session "$SESSION" [--lease-seconds N] [--report-only]`. It reports each node as `dispatch` (never spawned: spawn it now, nothing is recorded), `record` (finished or launch refused: record it), `waiting` or `stalled`, plus one stable `reason_code`. Only when all nodes are `stalled` does it, in one locked save, record them `stale` and request the respawn, so no attempt is counted without a stored worker reference. It refuses (`recovery_budget_exhausted`) once a node's respawns reach `retry.max`; a human then decides. Each outcome appends a non-authoritative row to `recovery-trace.jsonl` beside the state (see `docs/recover-wave-runbook.md`). For a plain-language status run `graph.py summarize "$STATE"`.
+
+Partial, extra, malformed, wrong-wave, stale, failed, duplicate, foreign-session, or reused worker evidence is rejected without changing state. `record-wave` atomically adds compact transcript references to the existing node evidence array; workers never write graph state. A failed node increments its attempts and preserves a separate reference for that attempt. If a `spawn_agent` call was refused (for example "agent thread limit reached"), re-issue it with the same printed `task_name` until it succeeds; if it keeps being refused, report that node as `failed`, and `record-wave` binds the latest refused call (a call with an error output and no `SubAgentActivity`) as that attempt's reference. A refused call never satisfies `done`, `skipped`, or `stale`. A later `followup_task` turn on a recorded child does not invalidate its earlier recorded completion, but the child's latest turn must have completed successfully. It returns to pending while attempts remain; exhaustion becomes a durable hard-stop. Successful all-input joins release deterministically after every input succeeds. Repeat from `inspect`, then `begin-wave`.
 
 After independently verifying a deliverable and recording its wave, decide its registered work unit through `python3 "$SKILL_DIR/scripts/graph.py" record-unit "$STATE" --session "$SESSION" --unit "<id>" --status done --evidence "<observed check>"`. If the authorized deliverable is withdrawn, use `--status dropped --reason "<reason>"`. The command requires a pending unit and no active wave and records the decision atomically. The graph revision remains unchanged so stored wave evidence stays valid. A completed graph node never changes a work unit by itself. Grade final evals against the current graph revision.
 
