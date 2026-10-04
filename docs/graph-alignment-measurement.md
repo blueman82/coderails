@@ -101,6 +101,7 @@ Written before interpreting the data above. Each needs a minimum sample so a sma
   `blocked / decisions` of at least 10%; and, on a hand-sampled set of at least 30 of its blocks, a
   real-fix rate below 30%, where a real fix means the next turn changed substance rather than appending a
   token or acknowledgement. Without the sampled rate, no gate may be called demotable.
+  *Superseded for `confidence_labels` and `verify_loop` by a user override on 2026-10-04: both are demoted to advisory lints without meeting this rule (`docs/decisions/2026-10-04-not-in-gate-demotion.md`). The rule still governs every other gate. After the demotion `blocked / decisions` for those two gates falls to about 0; use `demoted` instead.*
 - **(b) Compact bootstrap manifest.** Justified if a provider's injected SessionStart context exceeds
   8192 bytes (roughly 2k tokens, paid on every startup, clear and compaction).
 - **(c) `work_units` / `graph.nodes` RFC.** Justified if, among at least 20 loops carrying both, at least

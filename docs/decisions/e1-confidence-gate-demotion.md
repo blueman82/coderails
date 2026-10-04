@@ -1,5 +1,7 @@
 # E1: demote the Stop discipline gates?
 
+> Superseded 2026-10-04 by `2026-10-04-not-in-gate-demotion.md`: the user overrode the unmet criteria and demoted both gates to advisory lints. The verdict below is retained as the record of why the criteria were not met.
+
 Verdict: **criteria NOT met. No behaviour change. No exit code edited. Hooks stay.**
 
 ## Rule
