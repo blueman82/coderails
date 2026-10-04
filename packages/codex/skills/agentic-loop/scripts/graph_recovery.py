@@ -5,7 +5,8 @@ from __future__ import annotations
 import hashlib
 import json
 import uuid
-from collections.abc import Sequence
+from collections.abc import Generator, Sequence
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, cast
@@ -104,3 +105,14 @@ def trace(
             sidecar.write("".join(line + "\n" for line in lines))
     except Exception:  # noqa: BLE001 - fail open: the trace is advisory
         return
+
+
+@contextmanager
+def traced_refusal(path: Path, state: dict[str, Any], command: str) -> Generator[None, None, None]:
+    """Trace any coded refusal raised inside the block as one `refused` row, then let it propagate unchanged."""
+    try:
+        yield
+    except RecoveryRefusedError as error:
+        rows = [(node, None, None) for node in error.nodes]
+        trace(path, state, "refused", error.reason_code, {"session": state.get("session_id")}, rows, command)
+        raise

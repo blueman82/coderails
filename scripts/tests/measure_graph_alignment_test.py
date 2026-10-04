@@ -169,6 +169,20 @@ class MeasureTests(unittest.TestCase):
         self.assertEqual(recovery["recoveries"], 1)
         self.assertEqual(recovery["controller"]["refusals_by_reason"], {"add_unit_refused_duplicate": 2})
 
+    def test_legacy_task_refusals_dedupe_by_event_id(self) -> None:
+        """A replayed event id, or one event's N rows, counts once; other commands and codes do not count."""
+        self.progress("a", {"graph": {"nodes": {}}})
+        trace = self.home / ".coderails/agentic-loop/slug/a/recovery-trace.jsonl"
+        code = "legacy_task_identity_refused"
+        rows = [("e1", "record-wave", code, "U1"), ("e1", "record-wave", code, "U2"), ("e1", "record-wave", code, "U1")]
+        rows += [("e2", "complete", code, "U1"), ("e3", "record-wave", "mixed_wave", "U1")]
+        lines = (
+            json.dumps({"event_id": e, "command": c, "outcome": "refused", "reason_code": r, "node_id": n}) + "\n"
+            for e, c, r, n in rows
+        )
+        write(trace, "".join(lines))
+        self.assertEqual(self.measure()["recovery"]["legacy_task_refusals"], 2)
+
     def test_recovery_counters(self) -> None:
         """Recoveries, refused spawns and retries-by-cause come from state and the advisory trace, counts only."""
         node: dict[str, Any] = {
@@ -196,6 +210,7 @@ class MeasureTests(unittest.TestCase):
             self.measure()["recovery"],
             {
                 "recoveries": 2,
+                "legacy_task_refusals": 0,
                 "refused_spawns": 1,
                 "retries_by_cause": {"failed": 1, "stale_recovery": 2},
                 "trace_rows_by_reason_code": {

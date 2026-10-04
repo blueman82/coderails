@@ -209,7 +209,7 @@ def recovery_counters() -> dict[str, Any]:
     The trace is non-authoritative and only counted here; unparseable rows are skipped. Counts only.
     """
     seen: set[Path] = set()
-    refused = failed = stale = recovered = starts = add_units = 0
+    refused = failed = stale = recovered = starts = add_units = legacy_refusals = 0
     codes: dict[str, int] = {}
     refusals: dict[str, int] = {}
     for base in loop_state_roots():
@@ -245,12 +245,14 @@ def recovery_counters() -> dict[str, Any]:
                 code = str(row.get("reason_code"))
                 codes[code] = codes.get(code, 0) + 1
                 recovered += row.get("outcome") == "recovered"
+                legacy_refusals += code == "legacy_task_identity_refused"
                 starts += row.get("command") == "start" and row.get("outcome") in {"created", "rearmed"}
                 add_units += row.get("command") == "add-unit" and row.get("outcome") == "registered"
                 if row.get("outcome") == "refused" and row.get("command") in {"start", "add-unit"}:
                     refusals[code] = refusals.get(code, 0) + 1
     return {
         "recoveries": recovered,
+        "legacy_task_refusals": legacy_refusals,
         "refused_spawns": refused,
         "retries_by_cause": {"failed": failed, "stale_recovery": stale},
         "trace_rows_by_reason_code": dict(sorted(codes.items())),

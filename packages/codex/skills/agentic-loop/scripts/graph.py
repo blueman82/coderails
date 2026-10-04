@@ -19,7 +19,7 @@ from graph_io import load as _load
 from graph_io import locked as _locked
 from graph_io import object_value as _object
 from graph_io import write as _write
-from graph_recovery import NODE_CODES, RecoveryRefusedError, node_lease, trace
+from graph_recovery import NODE_CODES, RecoveryRefusedError, node_lease, trace, traced_refusal
 from json_types import JsonValue
 
 
@@ -80,7 +80,8 @@ def record_wave(path: Path, raw_results: str) -> dict[str, Any]:
     """Bind native evidence and atomically record exactly the active wave."""
     with _locked(path):
         state = _load(path)
-        proposed, transition = _apply_record(state, raw_results)
+        with traced_refusal(path, state, "record-wave"):
+            proposed, transition = _apply_record(state, raw_results)
         graph_semantics.validate(proposed)
         _write(path, proposed)
         return {
@@ -205,7 +206,8 @@ def _recover_locked(path: Path, session: str, lease: int, clock: float, apply: b
             raise _refuse(path, state, RecoveryRefusedError("recovery_budget_exhausted", message, spent), inputs)
         check = {"checked": True, "method": f"lease {lease}s expired", "result": "no worker activity"}
         results = {n: {"outcome": "stale", "evidence": "lease expired", "stale_check": check} for n in nodes}
-        proposed, _ = _apply_record(state, json.dumps({"wave_id": active["wave_id"], "results": results}))
+        with traced_refusal(path, state, "recover-wave"):
+            proposed, _ = _apply_record(state, json.dumps({"wave_id": active["wave_id"], "results": results}))
         for node_id in nodes:
             try:
                 respawned = graph_semantics.respawn_stale(proposed, node_id, "lease expired")
