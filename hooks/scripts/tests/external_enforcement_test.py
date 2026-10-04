@@ -19,16 +19,19 @@ ROOT = Path(__file__).resolve().parents[3]
 SCRIPT = ROOT / "scripts/external_enforcement.py"
 RULESET = json.loads((ROOT / "docs/external-enforcement/ruleset.json").read_text())
 LIST = "api repos/blueman82/coderails/rulesets"
-SEEN = [
-    {"match": "commits?per_page", "stdout": "abc123\n"},
-    {"match": "commits/abc123/check-runs", "stdout": "verify\n"},
-    {"match": "commits/abc123/statuses", "stdout": ""},
-]
-UNSEEN = [
-    {"match": "commits?per_page", "stdout": "abc123\n"},
-    {"match": "commits/abc123/check-runs", "stdout": "lint\n"},
-    {"match": "commits/abc123/statuses", "stdout": ""},
-]
+
+
+def runs(line: str, statuses: str = "") -> list[dict[str, Any]]:
+    """Fake-gh routes: one recent commit whose check-runs are tab-joined `name conclusion app-slug` lines."""
+    return [
+        {"match": "commits?per_page", "stdout": "abc123\n"},
+        {"match": "commits/abc123/check-runs", "stdout": line},
+        {"match": "commits/abc123/statuses", "stdout": statuses},
+    ]
+
+
+SEEN = runs("verify\tsuccess\tgithub-actions\n")
+UNSEEN = runs("lint\tsuccess\tgithub-actions\n")
 
 
 class EnforcementTests(unittest.TestCase):
@@ -103,6 +106,20 @@ class EnforcementTests(unittest.TestCase):
         self.assertEqual(proc.returncode, 1)
         self.assertIn("REASON=CHECK_NEVER_SEEN", proc.stdout)
         self.assertFalse([c for c in fake.calls(env) if "-X" in c["argv"]])
+
+    def test_apply_refuses_red_or_foreign_check(self) -> None:
+        """A failing verify run, a non-Actions app, or a bare status named verify must not satisfy the guard."""
+        cases = {
+            "red": runs("verify\tfailure\tgithub-actions\n"),
+            "pending": runs("verify\t\tgithub-actions\n"),
+            "foreign app": runs("verify\tsuccess\tsome-bot\n"),
+            "status only": runs("", statuses="verify\n"),
+        }
+        for label, seen in cases.items():
+            with self.subTest(label):
+                proc, env = self.run_cli([{"match": LIST, "stdout": "[]"}, *seen], "apply", "--yes")
+                self.assertIn("REASON=CHECK_NEVER_SEEN", proc.stdout)
+                self.assertFalse([c for c in fake.calls(env) if "-X" in c["argv"]])
 
     def test_apply_creates_when_check_seen(self) -> None:
         """Seen check plus --yes POSTs the exact definition and reports APPLIED."""

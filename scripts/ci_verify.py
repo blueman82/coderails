@@ -10,6 +10,7 @@ The runner must pin _PR_TRUSTED_LOGIN and _PR_TRUSTED_PERMISSION: a GITHUB_TOKEN
 from __future__ import annotations
 
 import argparse
+import os
 import subprocess
 import sys
 import tempfile
@@ -22,19 +23,22 @@ from scripts.post_evals import smoke_verify
 
 ROOT = Path(__file__).resolve().parents[1]
 
-# Same two commands as scripts/git-hooks/pre-commit.
+# The pre-commit pair. The quality checker is the trusted copy (ROOT) aimed at the PR head ({head}) as data.
+# ponytail: run_all.py must be the head's own (it runs the suites beside itself), so a PR can still alter its
+# tests; only a second identity reviewing test changes closes that (see README trust analysis).
 SUITES = [
-    [sys.executable, "scripts/quality/check.py", "--strict"],
-    [sys.executable, "hooks/scripts/tests/run_all.py"],
+    [sys.executable, str(ROOT / "scripts/quality/check.py"), "--strict", "--root", "{head}"],
+    [sys.executable, "{head}/hooks/scripts/tests/run_all.py"],
 ]
 
 
-def verify(pr: str, sha: str) -> str:
-    """Return OK or the first failing reason code."""
+def verify(pr: str, sha: str, head_dir: Path = ROOT) -> str:
+    """Return OK or the first failing reason code. head_dir is the checkout of the PR head (data under test)."""
     head = pr_field(pr, "headRefOid")
-    if not head or not sha or head != sha or output("git", "-C", str(ROOT), "rev-parse", "HEAD") != sha:
+    if not head or not sha or head != sha or output("git", "-C", str(head_dir), "rev-parse", "HEAD") != sha:
         return "SHA_MISMATCH"
-    if any(subprocess.run(command, cwd=ROOT, check=False).returncode for command in SUITES):
+    commands = [[part.replace("{head}", str(head_dir)) for part in command] for command in SUITES]
+    if any(subprocess.run(command, cwd=head_dir, check=False).returncode for command in commands):
         return "SUITE_FAIL"
     status, _ = gate_review_summary_for_pr(pr, sha)
     if status:
@@ -47,6 +51,7 @@ def verify(pr: str, sha: str) -> str:
     with tempfile.TemporaryDirectory() as directory:
         path = Path(directory) / "evals.json"
         path.write_text(summary.embed)
+        os.chdir(head_dir)  # smoke_verify fetches and adds a worktree in the current repository
         return "SMOKE_FAIL" if smoke_verify(path, sha) else "OK"
 
 
@@ -55,8 +60,9 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--pr", required=True)
     parser.add_argument("--sha", required=True)
+    parser.add_argument("--head-dir", type=Path, default=ROOT, help="checkout of the PR head (default: this repo)")
     args = parser.parse_args(argv)
-    reason = verify(args.pr, args.sha)
+    reason = verify(args.pr, args.sha, args.head_dir.resolve())
     emit("ci_verify.run", reason)
     print(f"REASON={reason}")
     return 0 if reason == "OK" else 1

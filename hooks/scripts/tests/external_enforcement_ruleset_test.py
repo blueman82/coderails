@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[3]
+GITHUB_ACTIONS_APP_ID = 15368
 RULESET = ROOT / "docs/external-enforcement/ruleset.json"
 
 
@@ -16,9 +17,11 @@ def check(data: dict[str, Any]) -> list[str]:
     """Return every violated invariant of the ruleset definition."""
     types = {rule["type"]: rule.get("parameters", {}) for rule in data["rules"]}
     problems: list[str] = []
-    contexts = [c["context"] for c in types.get("required_status_checks", {}).get("required_status_checks", [])]
-    if contexts != ["verify"]:
+    checks = types.get("required_status_checks", {}).get("required_status_checks", [])
+    if [c["context"] for c in checks] != ["verify"]:
         problems.append("required_status_checks must name verify")
+    if any(c.get("integration_id") != GITHUB_ACTIONS_APP_ID for c in checks):
+        problems.append("required check must be bound to the GitHub Actions integration_id")
     if data["bypass_actors"] != []:
         problems.append("bypass_actors must be empty")
     if types.get("pull_request", {}).get("allowed_merge_methods") != ["merge"]:
@@ -52,7 +55,25 @@ class RulesetTests(unittest.TestCase):
         self.data["bypass_actors"] = [{"actor_id": 5, "actor_type": "RepositoryRole"}]
         self.data["rules"] = [r for r in self.data["rules"] if r["type"] != "deletion"]
         self.data["rules"][-1]["parameters"]["required_status_checks"] = [{"context": "other"}]
-        self.assertEqual(len(check(self.data)), 3)
+        self.assertEqual(len(check(self.data)), 4)  # bypass, deletion, check name, unbound check
+
+    def test_negative_control_unbound_check(self) -> None:
+        """A check without integration_id (any identity could post a status) goes red."""
+        del self.data["rules"][-1]["parameters"]["required_status_checks"][0]["integration_id"]
+        self.assertIn("required check must be bound to the GitHub Actions integration_id", check(self.data))
+
+    def test_template_installs_every_tool_python_checks_requires(self) -> None:
+        """The runner must install the tools quality_tools demands, or SUITE_FAIL is certain."""
+        template = (ROOT / "docs/external-enforcement/verify.yml.template").read_text()
+        for tool in ("ruff", "black", "pyright", "mypy"):
+            self.assertIn(tool, template)
+        self.assertIn("npm ci", template)
+
+    def test_readme_states_verifier_is_pr_controlled_and_status_caveat(self) -> None:
+        """The trust analysis must not overstate independence."""
+        readme = (ROOT / "docs/external-enforcement/README.md").read_text()
+        self.assertIn("verifier code is also PR-controlled", readme)
+        self.assertIn("integration_id", readme)
 
     def test_no_workflow_files_added(self) -> None:
         """Nothing under .github/workflows is added relative to origin/main."""

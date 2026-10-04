@@ -15,11 +15,31 @@ jobs:
       _PR_TRUSTED_LOGIN: blueman82
       _PR_TRUSTED_PERMISSION: WRITE
     steps:
+      # Verifier scripts come from the BASE ref (trusted); the PR head is checked out separately as data.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: base
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha }}
+          path: head
           fetch-depth: 0   # smoke_verify runs `git fetch origin <sha>` and adds a worktree
       - uses: actions/setup-python@v5
         with:
           python-version: "3.9"
-      - run: python3 scripts/ci_verify.py --pr ${{ github.event.pull_request.number }} --sha ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      # Every tool scripts/quality/check.py --strict needs, so nothing is silently skipped.
+      - run: python3 -m pip install ruff black pyright mypy
+      - run: sudo apt-get update && sudo apt-get install -y shellcheck shfmt
+      - name: npm ci for every dashboard package
+        working-directory: head
+        run: |
+          for dir in skills/dashboard packages/codex/skills/dashboard; do
+            for package in app lib runner obsidian; do
+              npm ci --prefix "$dir/$package"
+            done
+          done
+      - run: python3 base/scripts/ci_verify.py --head-dir head --pr ${{ github.event.pull_request.number }} --sha ${{ github.event.pull_request.head.sha }}

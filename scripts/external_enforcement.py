@@ -65,12 +65,15 @@ def live_ruleset(slug: str, name: str) -> dict[str, Any] | None:
 
 
 def check_seen(slug: str, context: str) -> bool:
-    """True when the required check name appears on any of the 10 most recent commits."""
+    """True when a recent commit has a COMPLETED, successful `context` check run from the GitHub Actions app.
+
+    Plain commit statuses, red/pending runs and other apps' runs never count.
+    """
+    jq = '.check_runs[] | [.name, .conclusion // "", .app.slug // ""] | @tsv'
     for sha in gh("api", f"repos/{slug}/commits?per_page=10", "--jq", ".[].sha").split():
-        runs = gh("api", f"repos/{slug}/commits/{sha}/check-runs", "--jq", ".check_runs[].name").split()
-        statuses = gh("api", f"repos/{slug}/commits/{sha}/statuses", "--jq", ".[].context").split()
-        if context in runs + statuses:
-            return True
+        for line in gh("api", f"repos/{slug}/commits/{sha}/check-runs", "--jq", jq).splitlines():
+            if line.split("\t") == [context, "success", "github-actions"]:
+                return True
     return False
 
 

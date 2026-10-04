@@ -5,7 +5,7 @@ and the integrity daemon is not used. These artifacts exist so a human can turn 
 
 | File | Role |
 | --- | --- |
-| `ruleset.json` | Main-branch ruleset: PR required, merge method `merge` only, 0 required approvals, no force-push, no deletion, required status check `verify`, empty bypass list. No `required_linear_history` (it would forbid the merge commits `scripts/merge.py` makes with `gh pr merge --merge`). |
+| `ruleset.json` | Main-branch ruleset: PR required, merge method `merge` only, 0 required approvals, no force-push, no deletion, required status check `verify` pinned to `integration_id` 15368 (the GitHub Actions app, so a forged commit status or another app cannot satisfy it), empty bypass list. No `required_linear_history` (it would forbid the merge commits `scripts/merge.py` makes with `gh pr merge --merge`). |
 | `verify.yml.template` | Workflow that runs `scripts/ci_verify.py`. Outside `.github/workflows`, so it is inert. |
 | `scripts/external_enforcement.py` | `plan` (read-only diff against the live ruleset) and `apply --yes`. |
 | `scripts/ci_verify.py` | Runs the pre-commit suites, then the existing SHA-bound review/eval gates and `smoke_verify` for an exact head. |
@@ -15,7 +15,7 @@ Approvals stay at 0 because the identity that opens a PR cannot approve it, so a
 ## Reason codes
 
 `external_enforcement.py`: `DRY_RUN`, `NO_YES`, `CHECK_NEVER_SEEN`, `TEMPLATE_MISSING`, `NO_DIFF`, `APPLIED`, `GH_FAIL`.
-`apply` refuses with `CHECK_NEVER_SEEN` unless a `verify` check or status was observed on a recent commit, because
+`apply` refuses with `CHECK_NEVER_SEEN` unless a completed, successful `verify` run from the GitHub Actions app was observed on a recent commit (a plain status, a red or pending run, or another app's run does not count), because
 requiring a check that never posts blocks every merge, including `scripts/merge.py`.
 `ci_verify.py`: `OK`, `SUITE_FAIL`, `REVIEW_ABSENT`, `EVAL_ABSENT_OR_NOGO`, `FETCH_FAIL`, `SHA_MISMATCH`, `SMOKE_FAIL`.
 "Stale" means an artifact bound to an older head SHA (existing `matches_marker` behaviour); there is no time-based expiry.
@@ -27,9 +27,15 @@ Enforced outside the agent process:
 
 - The GitHub server-side rule: no direct push to `main`, no force-push, no deletion, and no merge until `verify` is green.
 - The runner's re-execution: `ci_verify.py` re-runs the suites and `smoke_verify` on a machine the agent does not drive.
+  The template checks out the BASE ref into `base/` and runs `base/scripts/ci_verify.py` and the quality checker from
+  there, treating the PR head (`head/`) as data, so a PR cannot rewrite those scripts to pass itself.
 
 NOT enforced:
 
+- The verifier code is also PR-controlled in part: `hooks/scripts/tests/run_all.py` and the suites it runs are executed
+  from the PR head (they must run beside their own tests), and `smoke_verify` runs eval commands from the PR's own
+  comment. A PR can alter its own tests. Only a second identity reviewing test changes closes that. Likewise, once
+  the workflow file is merged, a PR that edits `.github/workflows/verify.yml` runs its own edited version.
 - The artifact trust root is still the shared `gh` login. `trusted_comment_bodies` trusts comments by the authenticated
   user with WRITE, MAINTAIN or ADMIN, and the agent and the human share that login. The agent can post a review or GO
   eval comment itself. Only `smoke_verify`'s re-execution is independent, and it runs commands that come from that
