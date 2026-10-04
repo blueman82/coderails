@@ -94,5 +94,6 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
 - Codex: the hook is vendored and parity-tested, but `scripts/action_receipt_cli.py` is NOT shipped in the Codex
   package; mint receipts from a coderails repo checkout (same session id) or leave `action_authority` off.
 - Limits: a receipt binds approval to an exact action but does not prove a human approved it (a same-user agent can run
-  `approve-action`). The hash covers only the command text the hook sees, not env, aliases, `bash -c` wrappers or an
-  implicit-upstream push. Protected branches are main and master only.
+  `approve-action`). The hash covers only the command text the hook sees, not aliases, functions, eval/xargs or scripts that
+  push (env/sudo/subshell/`bash -c`/`gh api .../merge` wrappers are unwrapped). Limits: scope 500 chars, 8 KB per receipt,
+  50 receipts per session (`receipt_refused_scope_too_long`, `receipt_refused_too_many`). Protected branches are main and master only.

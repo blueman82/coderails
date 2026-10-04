@@ -32,6 +32,9 @@ FIELDS = (
     "single_use",
     "revoked",
 )
+MAX_RECEIPTS = 50  # per session; also the most files find_valid will parse
+MAX_RECEIPT_BYTES = 8192
+MAX_SCOPE = 500
 REASONS = (
     "ok",
     "hash_mismatch",
@@ -130,6 +133,8 @@ def write_receipt(path: Path, obj: dict[str, Any]) -> bool:
 def read_receipt(path: Path) -> dict[str, Any] | None:
     """Return the parsed receipt object, or None when missing, torn or not an object."""
     try:
+        if path.stat().st_size > MAX_RECEIPT_BYTES:
+            return None
         raw: object = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
@@ -186,7 +191,7 @@ def find_valid(
     auth = authority_path(session_id, base)
     if auth is None:
         return None, "no_session" if not session_id else "malformed"
-    paths = sorted((auth.parent / "receipts").glob("*.json"))
+    paths = sorted((auth.parent / "receipts").glob("*.json"))[:MAX_RECEIPTS]
     refusals: list[str] = []
     for path in paths:
         data = effective(path)

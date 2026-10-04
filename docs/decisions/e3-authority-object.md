@@ -86,8 +86,8 @@ a consumer. Those four lines are superseded by the next section; the user direct
 - What a receipt proves: some same-user principal minted an approval for exactly this command text, cwd and branch,
   for this session and loop, once, before it expired. What it does NOT prove: that a human approved it. A same-user
   agent can run `approve-action`, so this is a speed bump and an audit trail, not a human-in-the-loop guarantee.
-- Limits: hash covers only the command text the hook sees (not env, aliases, `bash -c` wrappers, implicit-upstream
-  `git push`); protected branches are main/master only; (guess, unverified) a subagent's `session_id` may differ from
+- Limits: hash covers only the command text the hook sees (not aliases, functions, eval/xargs; common wrappers are
+  unwrapped); protected branches are main/master only; (guess, unverified) a subagent's `session_id` may differ from
   its parent's, so a receipt minted by the parent could be refused as `foreign_session` for worker-run actions.
 - Worker statuses `NEEDS_DECISION | OUTSIDE_SCOPE | IRREVERSIBLE_ACTION` ship as a standalone validator
   (`skills/agentic-loop/scripts/worker_status.py`, Codex copy byte-identical). Wiring into `record-wave` was

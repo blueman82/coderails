@@ -56,17 +56,38 @@ def targets_main(command: str, cwd: str, target: str, name: str) -> bool:
     return bool(match and re.search(r"(^|\s)\+?(refs/heads/)?(main|master)([\s;&|)]|$)", match[1]))
 
 
+_WRAPPER = re.compile(r"^(?:[A-Za-z_]\w*=\S*|env|sudo|time|command|exec|nohup)\s+")
+_SHELL_C = re.compile(r"\b(?:bash|sh|zsh)\s+-\w*c\s+([\"'])(.*?)\1")
+_API_MERGE = re.compile(r"^gh\s+api\s+\S*/pulls/\d+/merge(?:\s|$)")
+
+
+def unwrap(segment: str) -> str:
+    """Strip grouping, env assignments and env/sudo/time/command/exec/nohup prefixes to the command itself."""
+    segment = segment.strip().lstrip("({ ").rstrip(")} ")
+    while match := _WRAPPER.match(segment):
+        segment = segment[match.end() :].lstrip()
+    return segment
+
+
 def guarded_segments(command: str, cwd: str) -> list[tuple[str, str, str]]:
     """Every guarded (merge | git_push to main) segment as (operation, segment, effective cwd).
 
     A leading `cd <dir>` segment moves the effective cwd for the segments after it, so the receipt hash binds the
     directory the operation really runs in. Each segment is matched on its own: a chain is one guard per segment.
+    Wrappers are unwrapped (env/sudo/time prefixes, subshell and brace groups, `bash -c '...'`, `gh api .../merge`).
+    Still unmatched: eval, xargs, aliases, functions, scripts that push. ponytail: regex, not a shell parser.
     """
     found: list[tuple[str, str, str]] = []
+    for inner in _SHELL_C.finditer(command):
+        found.extend(guarded_segments(inner[2], cwd))
+    command = _SHELL_C.sub(" ", command)
     for segment in re.split(r"&&|\|\||[;|&\n]", command):
-        segment = segment.strip()
+        segment = unwrap(segment)
         if move := re.match(r"^cd\s+(\S+)$", segment):
             cwd = os.path.normpath(os.path.join(cwd, os.path.expanduser(move[1].strip("\"'"))))
+            continue
+        if _API_MERGE.match(segment):
+            found.append(("merge", segment, cwd))
             continue
         name, matched, target = operation(segment)
         if name in {"merge", "git_push"} and targets_main(segment, cwd, target, name):

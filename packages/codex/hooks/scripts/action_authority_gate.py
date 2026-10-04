@@ -85,10 +85,14 @@ def main() -> int:
         ]  # fmt: skip
         results = [(name, *receipt_find_valid(session, proposed, now, loop)) for name, proposed in proposals]
         missing = next(((name, code) for name, found, code in results if found is None), None)
+        if missing is None and mode_ == "enforce":
+            for name, proposed in proposals:  # the O_EXCL claim, not the verify above, decides who is allowed
+                found, code = receipt_find_valid(session, proposed, now, loop, True)
+                if found is None:
+                    missing = (name, code)
+                    break
         if missing is None:
             if mode_ == "enforce":
-                for _, proposed in proposals:
-                    receipt_find_valid(session, proposed, now, loop, True)
                 append_trace_row("action_authority", "allowed", "receipt_consumed", trace_id, {"loop_id": loop})
             return 0
         name, code = missing

@@ -2,7 +2,8 @@
 """Mint, inspect and revoke action receipts (approval bound to one exact command).
 
 A receipt binds an approval to an exact action; it does NOT prove a human approved it: a same-user agent can run
-approve-action too. Hash coverage is the command text the hook sees (not env, aliases, bash -c wrappers).
+approve-action too. Hash coverage is the command text the hook sees (not aliases, functions, eval).
+Limits: scope <= 500 chars, 50 receipts per session.
 """
 
 from __future__ import annotations
@@ -37,6 +38,8 @@ def approve(args: argparse.Namespace) -> int:
     cwd = args.cwd or str(Path.cwd())
     branch = args.branch if args.branch is not None else git_output(cwd, "branch", "--show-current")
     proposed = ar.proposed_action(args.kind, args.action_command, cwd, branch, args.artifact_sha)
+    if len(args.scope) > ar.MAX_SCOPE:
+        return refuse("receipt_refused_scope_too_long", f"scope over {ar.MAX_SCOPE} chars", args.session, args.loop)
     receipt_id = str(uuid.uuid4())
     obj: dict[str, Any] = {
         "receipt_id": receipt_id,
@@ -56,6 +59,8 @@ def approve(args: argparse.Namespace) -> int:
     ok, code = ar.verify(obj, proposed, now, args.session, args.loop)
     if path is None or not ok:
         return refuse(f"receipt_refused_{code}", "receipt would be invalid", args.session, args.loop)
+    if len(list(path.parent.glob("*.json"))) >= ar.MAX_RECEIPTS:
+        return refuse("receipt_refused_too_many", f"over {ar.MAX_RECEIPTS} receipts", args.session, args.loop)
     if not ar.write_receipt(path, obj):
         return refuse("receipt_refused_write_failed", "write failed", args.session, args.loop)
     append_row("action_receipt", "approved", "receipt_approved", args.session, args.loop)

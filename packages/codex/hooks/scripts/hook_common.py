@@ -261,9 +261,9 @@ def receipt_find_valid(
     if auth is None:
         return None, "no_session" if not session_id else "malformed"
     refusals: list[str] = []
-    for path in sorted((auth.parent / "receipts").glob("*.json")):
+    for path in sorted((auth.parent / "receipts").glob("*.json"))[:50]:  # MAX_RECEIPTS
         try:
-            raw: object = json.loads(path.read_text(encoding="utf-8"))
+            raw: object = json.loads(path.read_text(encoding="utf-8")) if path.stat().st_size <= 8192 else None
         except (OSError, ValueError):
             raw = None
         data: dict[str, object] | None = None

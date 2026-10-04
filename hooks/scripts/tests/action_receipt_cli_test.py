@@ -59,6 +59,26 @@ class CliTests(unittest.TestCase):
         self.assertEqual(ar.find_valid("s1", other, now, "L1", self.base), (None, "hash_mismatch"))
         self.assertEqual(self.reasons(), ["receipt_approved"])
 
+    def test_size_limits_refused_with_reason_codes(self) -> None:
+        """An oversized scope and a receipt beyond the per-session cap are refused and traced."""
+        args = ("approve-action", "--session", "s1", "--kind", "merge", "--command", COMMAND, "--cwd", "/repo",
+                "--branch", "feature/x")  # fmt: skip
+        result = self.run_cli(*args, "--scope", "x" * 5000)
+        self.assertEqual(result.returncode, 2)
+        self.assertEqual(self.reasons(), ["receipt_refused_scope_too_long"])
+        for _ in range(ar.MAX_RECEIPTS):
+            self.assertEqual(self.run_cli(*args).returncode, 0)
+        self.assertEqual(self.run_cli(*args).returncode, 2)
+        self.assertEqual(self.reasons()[-1], "receipt_refused_too_many")
+
+    def test_oversized_receipt_file_is_malformed(self) -> None:
+        """A hand-written huge receipt is never parsed."""
+        path = ar.receipt_path("s1", "big", self.base)
+        assert path is not None
+        path.parent.mkdir(parents=True)
+        path.write_text('{"scope": "' + "x" * (ar.MAX_RECEIPT_BYTES + 1) + '"}')
+        self.assertIsNone(ar.read_receipt(path))
+
     def test_inspect_then_revoke_then_refused(self) -> None:
         """Revoke leaves the receipt inspectable, verification then says revoked, and a second revoke is refused."""
         rid = str(self.approve()["receipt_id"])

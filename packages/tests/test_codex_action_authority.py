@@ -200,6 +200,20 @@ class HookTests(unittest.TestCase):
         path = self.loop / "s1" / "trace.jsonl"
         return [json.loads(line)["reason_code"] for line in path.read_text().splitlines()] if path.exists() else []
 
+    def test_one_receipt_cannot_authorise_two_identical_segments(self) -> None:
+        """A single-use receipt is spent once; a repeated guarded segment is denied."""
+        self.configure("enforce")
+        self.mint()
+        self.assertTrue(self.denied(f"{MERGE} && {MERGE}"))
+
+    def test_common_wrappers_are_still_guarded(self) -> None:
+        """Env prefix, sudo, subshell, bash -c and gh api merge are guarded like the bare command."""
+        self.configure("enforce")
+        for command in ("FOO=1 gh pr merge 12", "sudo gh pr merge 12", "(gh pr merge 12)",
+                        "bash -c 'git push origin main'", "gh api repos/o/r/pulls/5/merge -X PUT"):  # fmt: skip
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+
     def test_off_and_advisory(self) -> None:
         """Off is silent; advisory warns and traces but never denies."""
         for value in (None, "off", "bogus"):

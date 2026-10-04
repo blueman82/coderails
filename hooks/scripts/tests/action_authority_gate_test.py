@@ -220,6 +220,49 @@ class GateTests(HookCase):
         self.assertIn("error_class", row["inputs"])
         self.assertIn("ZeroDivisionError", "".join(c.args[0] for c in err.write.call_args_list))
 
+    def test_one_receipt_cannot_authorise_two_identical_segments(self) -> None:
+        """A single-use receipt is spent once: a chain repeating the same guarded command is denied."""
+        self.configure("enforce")
+        self.mint(PUSH, "git_push")
+        chained = f"echo x; {PUSH} && {PUSH}"
+        self.assertTrue(self.denied("action_authority_gate", self.payload(chained)))
+        self.assertNotIn("denied_no_receipt", self.reasons())
+        self.mint(PUSH, "git_push", rid="r2")
+        self.mint(PUSH, "git_push", rid="r3")
+        self.assertFalse(self.denied("action_authority_gate", self.payload(chained)))
+
+    def test_concurrent_hooks_one_receipt_exactly_one_allowed(self) -> None:
+        """Four parallel hook processes on one receipt: the O_EXCL claim decides, so one allows and three deny."""
+        self.configure("enforce")
+        self.mint(PUSH, "git_push")
+        procs = [
+            subprocess.Popen(
+                [sys.executable, str(ROOT / "hooks/scripts/action_authority_gate.py")], stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE, text=True, env=self.environment,
+            )
+            for _ in range(4)
+        ]  # fmt: skip
+        outs = [p.communicate(json.dumps(self.payload(PUSH)))[0] for p in procs]
+        self.assertEqual(sum("deny" not in out for out in outs), 1)
+        self.assertEqual(self.reasons().count("receipt_consumed"), 1)
+
+    def test_common_wrappers_are_still_guarded(self) -> None:
+        """Env prefix, env/sudo/time, subshell, brace group, bash -c and gh api merge need the same receipt."""
+        self.configure("enforce")
+        wrapped = [
+            "FOO=1 git push origin main", "env git push origin main", "sudo git push origin main",
+            "(git push origin main)", "{ git push origin main; }", "bash -c 'git push origin main'",
+            'sh -c "git push origin main"', "time git push origin main",
+        ]  # fmt: skip
+        for command in wrapped:
+            with self.subTest(command=command):
+                self.assertTrue(self.denied("action_authority_gate", self.payload(command)))
+        for command in ("sudo gh pr merge 5", "(gh pr merge 5)", "gh api repos/o/r/pulls/5/merge -X PUT"):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied("action_authority_gate", self.payload(command)))
+        self.mint(PUSH, "git_push")
+        self.assertFalse(self.denied("action_authority_gate", self.payload("FOO=1 git push origin main")))
+
     def test_registered_after_existing_gates(self) -> None:
         """Pure append: the Bash group keeps its original order with the new hook last, timeout >= 5."""
         group = json.loads((ROOT / "hooks/hooks.json").read_text())["hooks"]["PreToolUse"][0]["hooks"]

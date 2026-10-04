@@ -4,8 +4,10 @@
 Config `action_authority`: enforce | advisory; absent, unreadable or anything else is off (silent exit 0).
 Advisory traces and warns, never denies. Enforce denies only when no receipt verifies. Any own error fails open
 with reason action_authority_failed_open. It does not touch pr_merge_gate, destructive_bash_gate or
-enforce_pr_workflow. Limits: the hash covers only the command text seen here (not env, aliases, bash -c wrappers,
-implicit-upstream push); a receipt does not prove a human minted it.
+enforce_pr_workflow. Limits: the hash covers only the command text seen here (not aliases, functions, eval/xargs,
+scripts that push; env/sudo/subshell/bash -c/gh api wrappers are unwrapped by guarded_segments). Each enforce use is
+claimed by an atomic O_EXCL marker and the claim, not the verify, decides allow vs deny.
+A receipt does not prove a human minted it.
 """
 
 from __future__ import annotations
@@ -78,10 +80,14 @@ def main() -> int:
         ]  # fmt: skip
         results = [(name, *find_valid(session, proposed, now, loop_id)) for name, proposed in proposals]
         missing = next(((name, code) for name, found, code in results if found is None), None)
+        if missing is None and mode_ == "enforce":
+            for name, proposed in proposals:  # the O_EXCL claim, not the verify above, decides who is allowed
+                found, code = find_valid(session, proposed, now, loop_id, consume_it=True)
+                if found is None:
+                    missing = (name, code)
+                    break
         if missing is None:
             if mode_ == "enforce":
-                for _, proposed in proposals:  # only now spend the receipts: a later refusal costs none
-                    find_valid(session, proposed, now, loop_id, consume_it=True)
                 append_row("action_authority", "allowed", "receipt_consumed", trace_id, loop_id)
             return 0
         name, code = missing
