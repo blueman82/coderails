@@ -41,3 +41,17 @@ orchestrator is never restricted.
 - **Codex** keeps `sandbox_mode = "read-only"` on `deploy-safety-reviewer`, `design-scout`, `disposition-scout`,
   `preflight-scout`, `source-auditor` and `spec-reviewer` (`grep sandbox_mode packages/codex/agents/*.toml`). No
   per-command knob was found (inferred), so shell reads there are instruction-only. The Codex tomls are unchanged.
+
+## Addendum: capability tools close the "Known cost" without widening Bash
+
+`source-auditor` now has the `tests.run` capability (`capabilities/profiles.json`). It reaches it as
+`<abs>/scripts/capability.py tests.run --json-args '{"name":"<declared>"}'`; the hook allows that exact absolute path
+only when the caller's profile grants the tool (`capability_denied_<tool>` otherwise, `capability_unknown_agent` for a
+foreign `agent_type`). `python3 -c`, `bash -c` and `python3 <script>` stay denied. Pinned by
+`hooks/scripts/tests/capability_hook_test.py::test_e2_known_cost_closed_without_widening_bash`.
+
+What this is not: `tests.run` is bounded execution of repo code (declared argv lists, timeout, scrubbed env), not
+read-only, and a declared suite can still write caches in the repo. It is a typed argument schema plus an argv-path
+match on Bash, not a harness-level typed tool (that needs an MCP server; none ships). On Codex there is no per-agent
+Bash hook, so the same script ships in `packages/codex/scripts` but per-agent gating there is `sandbox_mode` plus
+instruction text only, and a read-only sandbox may block the suite's cache writes (inferred). See `docs/CAPABILITIES.md`.
