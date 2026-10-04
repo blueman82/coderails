@@ -26,3 +26,10 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   `check_verify_loop/verify_loop_missing`; `gate_blocks.claude.gates.<gate>` for blocked/decisions.
 - Remediation: do not demote on volume alone. Apply rule (a) in `docs/graph-alignment-measurement.md` and the
   verdict in `docs/decisions/e1-confidence-gate-demotion.md` (a hand-sampled real-fix rate is required first).
+
+## Reviewer/scout Bash command denied
+
+- Symptom: a read-only reviewer or scout reports a denied Bash call.
+- Query: `trace.by_reason` for `reviewer_bash_allowlist/bash_allowlist_deny`.
+- Remediation: rerun the inspection with a single allowlisted read-only command (no chaining, redirection or
+  interpreters). If a legitimate command is missing, add its exact argv prefix to the allowlist with a test.
