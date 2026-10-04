@@ -251,16 +251,17 @@ class CliTests(unittest.TestCase):
         self.assertEqual(self.run_cli("narrow", "--session", "s9", "--max-prs", "1").returncode, 2)
         self.assertEqual(self.reasons("s9"), ["authority_refused_foreign", "authority_refused_foreign"])
 
-    def test_crack_on_stamp_does_not_create_authority(self) -> None:
-        """Negative control: the existing stamp writes only its flag, never an authority object."""
+    def test_crack_on_creates_authority_not_legacy_flag(self) -> None:
+        """Superseded E3 control: crack on now writes a valid authority object and no legacy flag."""
         payload = {"hook_event_name": "UserPromptSubmit", "session_id": "s1", "prompt": "please crack on"}
         env = {**self.env, "CLAUDE_DISCIPLINE_LOG": str(self.base / "d.log")}
         result = subprocess.run(
             [sys.executable, str(CRACK_ON)], input=json.dumps(payload), capture_output=True, text=True, env=env
         )
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertTrue((self.base / "s1" / "crack_on_active").is_file())
-        self.assertFalse((self.base / "s1" / "authority.json").exists())
+        self.assertTrue((self.base / "s1" / "authority.json").is_file())
+        self.assertFalse((self.base / "s1" / "crack_on_active").exists())
+        self.assertIsNotNone(ao.read_authority("s1", self.base))
 
 
 if __name__ == "__main__":

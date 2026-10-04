@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -25,6 +26,7 @@ class HookTests(unittest.TestCase):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         self.directory = Path(temporary.name)
+        self.loop = self.directory / "loops"
         self.repo = self.directory / "repo"
         self.repo.mkdir()
         subprocess.run(["git", "init", "-q", str(self.repo)], check=True)
@@ -33,6 +35,7 @@ class HookTests(unittest.TestCase):
             "HOME": str(self.directory / "home"),
             "PLUGIN_ROOT": str(PACKAGE),
             "PLUGIN_DATA": str(self.directory / "data"),
+            "CODERAILS_AGENTIC_LOOP_DIR": str(self.directory / "loops"),
             "CODERAILS_TEST_OUTPUT_DIR": str(self.directory / "logs"),
         }
 
@@ -210,33 +213,133 @@ class HookTests(unittest.TestCase):
         }
         self.assertEqual(self.hook("check_confidence_labels", labeled), {})
 
-    def test_crack_on_negation_never_stamps(self) -> None:
-        """Negated requests leave no flag; clause-separated and plain requests stamp."""
-        cases = {"don't crack on yet": False, "never crack on": False, "no problem, crack on": True, "crack on": True}
-        for index, (text, stamped) in enumerate(cases.items()):
-            session = f"neg{index}"
-            self.hook("crack_on_gate", {"session_id": session, "hook_event_name": "UserPromptSubmit", "prompt": text})
-            flags = list((self.directory / "data").rglob(f"{session}/crack_on_active"))
-            self.assertEqual(bool(flags), stamped, text)
+    def prompt(self, text: str, session: str) -> dict[str, Any]:
+        """Submit a raw prompt to the Codex crack-on gate."""
+        return self.hook(
+            "crack_on_gate", {"session_id": session, "hook_event_name": "UserPromptSubmit", "prompt": text}
+        )
 
-    def test_crack_on_prose_and_cap(self) -> None:
-        """Strip quoted/code text and keep the three-block recursion cap."""
-        directory = self.directory / "data/sessions/s1"
-        directory.mkdir(parents=True)
-        (directory / "crack_on_active").touch()
-        payload: dict[str, Any] = {"session_id": "s1", "last_assistant_message": "Should I proceed?"}
-        self.assertEqual(self.hook("crack_on_prose_gate", payload)["decision"], "block")
-        payload["stop_hook_active"] = True
-        for _ in range(2):
-            self.assertEqual(self.hook("crack_on_prose_gate", payload)["decision"], "block")
-        self.assertEqual(self.hook("crack_on_prose_gate", payload), {})
-        for text in (
-            "Done.",
-            "> Should I proceed?",
-            "```\nShould I proceed?\n```",
-            "Done.\n## Did Not Verify\nCould you check?",
-        ):
-            self.assertEqual(self.hook("crack_on_prose_gate", {"session_id": "s1", "last_assistant_message": text}), {})
+    def asks(self, session: str) -> bool:
+        """True when request_user_input is denied for the session."""
+        payload: dict[str, Any] = {
+            "session_id": session,
+            "hook_event_name": "PreToolUse",
+            "tool_name": "request_user_input",
+            "tool_input": {},
+        }
+        return bool(
+            self.hook("crack_on_gate", payload).get("hookSpecificOutput", {}).get("permissionDecision") == "deny"
+        )
+
+    def authority(self, session: str) -> Path:
+        """Authority object path (loop dir, shared with scripts/authority.py)."""
+        return self.loop / session / "authority.json"
+
+    def reasons(self, session: str) -> list[str]:
+        """Trace reason codes for a session, in order."""
+        path = self.loop / session / "trace.jsonl"
+        return [json.loads(x)["reason_code"] for x in path.read_text().splitlines()] if path.is_file() else []
+
+    def expire(self, session: str) -> None:
+        """Rewrite the session authority as expired an hour ago."""
+        obj = json.loads(self.authority(session).read_text())
+        obj["expires_at"] = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+        self.authority(session).write_text(json.dumps(obj))
+
+    def test_crack_on_negation_and_quotes_never_grant(self) -> None:
+        """Negated or quoted requests grant nothing; clause-separated and plain requests do."""
+        cases = {
+            "don't crack on yet": False,
+            "never crack on": False,
+            "I wouldn't crack on yet": False,
+            "you shouldn't crack on": False,
+            "avoid crack on": False,
+            "should we crack on?": False,
+            "what does crack on mean?": False,
+            'he said "crack on"': False,
+            "the `crack on` phrase": False,
+            "no problem, crack on": True,
+            "crack on": True,
+        }
+        for index, (text, granted) in enumerate(cases.items()):
+            self.prompt(text, f"neg{index}")
+            self.assertEqual(self.authority(f"neg{index}").is_file(), granted, text)
+            self.assertEqual(self.asks(f"neg{index}"), granted, text)
+
+    def test_crack_on_grants_valid_object_with_echo_and_trace(self) -> None:
+        """Grant writes a schema-valid 24h revocable object (checked by the Claude validator) and echoes it."""
+        sys.path.insert(0, str(ROOT))
+        from scripts.lib.authority_object import validate
+
+        out = self.prompt("crack on", "g1")
+        obj = json.loads(self.authority("g1").read_text())
+        self.assertEqual(validate(obj, datetime.now(timezone.utc)), [])
+        self.assertEqual((obj["session_id"], obj["max_prs"], obj["approval_required_for"]), ("g1", 0, ["merge"]))
+        self.assertTrue(timedelta(hours=23) < datetime.fromisoformat(obj["expires_at"]) - datetime.now(timezone.utc))
+        context = out["hookSpecificOutput"]["additionalContext"]
+        self.assertIn(obj["authority_id"], context)
+        self.assertIn("authority.py revoke --session g1", context)
+        self.assertEqual(self.reasons("g1"), ["authority_granted"])
+        self.assertFalse((self.directory / "data/sessions/g1/crack_on_active").exists())
+
+    def test_crack_on_deny_expiry_revoke_and_regrant(self) -> None:
+        """Live denies (traced); expiry allows (traced); re-grant works; the shared CLI revoke ends it."""
+        self.prompt("crack on", "e1")
+        self.assertTrue(self.asks("e1"))
+        self.expire("e1")
+        self.assertFalse(self.asks("e1"))
+        self.assertEqual(self.reasons("e1"), ["authority_granted", "authority_deny", "authority_expired_allow"])
+        self.prompt("crack on", "e1")
+        self.assertTrue(self.asks("e1"))
+        cli = ROOT / "scripts/authority.py"
+        env = self.environment | {"CLAUDE_AGENTIC_LOOP_DIR": str(self.loop)}
+        subprocess.run(
+            [sys.executable, str(cli), "revoke", "--session", "e1"], env=env, check=True, capture_output=True
+        )
+        self.assertFalse(self.asks("e1"))
+
+    def test_crack_on_foreign_torn_and_unsafe(self) -> None:
+        """A copied foreign file, a truncated file and an unsafe id all fail open; foreign is traced."""
+        self.prompt("crack on", "src")
+        (self.loop / "dst").mkdir()
+        self.authority("dst").write_text(self.authority("src").read_text())
+        self.assertFalse(self.asks("dst"))
+        self.assertIn("authority_refused_foreign", self.reasons("dst"))
+        (self.loop / "t1").mkdir()
+        self.authority("t1").write_text('{"authority_id": "x", "ses')
+        self.assertFalse(self.asks("t1"))
+        self.prompt("crack on", "a/b")
+        self.assertFalse(self.asks("a/b"))
+        found = sorted(self.loop.glob("**/authority.json"))
+        self.assertEqual(found, sorted([self.authority("src"), self.authority("dst"), self.authority("t1")]))
+        self.assertFalse((self.loop / "a").exists())
+
+    def test_crack_on_legacy_flag_denies_with_traced_code(self) -> None:
+        """A pre-existing Codex crack_on_active flag still denies, never silently."""
+        legacy = self.directory / "data/sessions/old"
+        legacy.mkdir(parents=True)
+        (legacy / "crack_on_active").touch()
+        self.assertTrue(self.asks("old"))
+        self.assertEqual(self.reasons("old"), ["crack_on_legacy_flag"])
+
+    def test_crack_on_corrupt_authority_traced_and_legacy_flag_honoured(self) -> None:
+        """Corrupt authority = no valid authority: allowed alone, legacy-denied with a flag; traced, no crash."""
+        (self.loop / "c1").mkdir(parents=True)
+        self.authority("c1").write_text("{not json")
+        self.assertFalse(self.asks("c1"))
+        self.assertEqual(self.reasons("c1"), ["authority_corrupt_ignored"])
+        (self.loop / "c2").mkdir(parents=True)
+        self.authority("c2").write_text("[1]")
+        legacy = self.directory / "data/sessions/c2"
+        legacy.mkdir(parents=True)
+        (legacy / "crack_on_active").touch()
+        self.assertTrue(self.asks("c2"))
+        self.assertEqual(self.reasons("c2"), ["authority_corrupt_ignored", "crack_on_legacy_flag"])
+
+    def test_prose_gate_retired(self) -> None:
+        """Negative control: no Stop prose gate is registered or shipped."""
+        self.assertNotIn("crack_on_prose_gate", (PACKAGE / "hooks/hooks.json").read_text())
+        self.assertFalse((HOOKS / "crack_on_prose_gate.py").exists())
 
     def test_wiki_taxonomy(self) -> None:
         """Only an identified wiki Git root receives taxonomy restrictions."""

@@ -78,11 +78,81 @@ def log(message: str) -> None:
         return
 
 
+def loop_root() -> Path:
+    """Return the loop-state root shared with scripts/authority.py (CLAUDE_AGENTIC_LOOP_DIR wins)."""
+    override = os.environ.get("CLAUDE_AGENTIC_LOOP_DIR") or os.environ.get("CODERAILS_AGENTIC_LOOP_DIR")
+    return Path(override or Path.home() / ".coderails" / "agentic-loop")
+
+
+def safe_id(session_id: str) -> bool:
+    """True for a nonempty id that is path-local as written (never sanitised, so ids cannot collide)."""
+    return (
+        bool(session_id)
+        and session_id not in {"?", "."}
+        and "/" not in session_id
+        and ".." not in session_id
+        and "\0" not in session_id
+    )
+
+
+def authority_path(session_id: str) -> Path | None:
+    """Return <loop root>/<session_id>/authority.json, or None for an unsafe id."""
+    return loop_root() / session_id / "authority.json" if safe_id(session_id) else None
+
+
+def parse_expiry(value: object) -> datetime | None:
+    """Parse a timezone-aware ISO-8601 time, or None."""
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed = datetime.fromisoformat(value[:-1] + "+00:00" if value.endswith("Z") else value)
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo is not None else None
+
+
+def authority_state(session_id: str) -> tuple[str, dict[str, object]]:
+    """Classify this session's authority file as live/expired/foreign/none.
+
+    Vendored subset of scripts/lib/authority_object.validate (the Codex package ships without scripts/lib):
+    exact session binding, unexpired, merge approval-required. Anything unreadable or malformed is none.
+    """
+    path = authority_path(session_id)
+    try:
+        raw: object = json.loads(path.read_text(encoding="utf-8")) if path else None
+    except (OSError, ValueError):
+        return "none", {}
+    if not isinstance(raw, dict):
+        return "none", {}
+    data = cast(dict[str, object], raw)
+    if data.get("session_id") != session_id:
+        return "foreign", {}
+    expires = parse_expiry(data.get("expires_at"))
+    approvals = data.get("approval_required_for")
+    if expires is None or not isinstance(approvals, list) or "merge" not in approvals:
+        return "none", {}
+    return ("expired" if expires <= datetime.now(timezone.utc) else "live"), data
+
+
+def write_authority(path: Path, obj: dict[str, object]) -> bool:
+    """Write atomically (tmp + os.replace): a crash leaves the old file or none. False on any OSError."""
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp.write_text(json.dumps(obj, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        os.replace(tmp, path)
+    except OSError:
+        with suppress(OSError):
+            tmp.unlink()
+        return False
+    return True
+
+
 def append_trace_row(command: str, outcome: str, reason_code: str, session_id: str) -> bool:
     """Append one non-authoritative trace row (same fields as the Claude trace_row helper); never raises."""
     if not session_id or session_id in {"?", "."} or "/" in session_id or ".." in session_id or "\0" in session_id:
         return False
-    root = Path(os.environ.get("CODERAILS_AGENTIC_LOOP_DIR") or Path.home() / ".coderails" / "agentic-loop")
+    root = loop_root()
     row: dict[str, object] = {
         "schema_version": 1,
         "event_id": str(uuid.uuid4()),
@@ -193,16 +263,6 @@ def graph_output(graph: Path, *arguments: str) -> dict[str, object] | None:
     except json.JSONDecodeError:
         return None
     return cast(dict[str, object], decoded) if isinstance(decoded, dict) else None
-
-
-def stamp(path: Path) -> bool:
-    """Write the established local timestamp, returning false on any I/O failure."""
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(f"{datetime.now().astimezone().isoformat(timespec='seconds')}\n", encoding="utf-8")
-    except OSError:
-        return False
-    return True
 
 
 def patch_paths(payload: dict[str, object]) -> list[str]:

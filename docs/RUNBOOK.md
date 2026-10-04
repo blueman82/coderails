@@ -47,3 +47,22 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   `create_invalid`, `write_failed`, `foreign` (an unsafe session id cannot be traced; stderr only).
 - Remediation: inspect with `python3 scripts/authority.py inspect --session <exact id>`. A foreign-session refusal
   means the id did not match exactly; ids are never sanitised.
+
+## Crack-on denial wrong (stuck on, or off too early)
+
+- Symptom: `AskUserQuestion` / `request_user_input` is denied when the user no longer wants autonomy, or is allowed
+  right after "crack on".
+- Query: `trace.by_reason` for `crack_on/granted/authority_granted`, `crack_on/blocked/authority_deny`,
+  `crack_on/allowed/authority_expired_allow`, `crack_on/blocked/crack_on_legacy_flag`,
+  `crack_on/ignored/authority_corrupt_ignored` (authority.json unparseable: treated as none; legacy flag still honoured),
+  `crack_on/failed_open/authority_write_failed` (user said "crack on" but no authority was written, so nothing is
+  suppressed; if the trace dir is also unwritable only the `stamped=0 err=write_failed` discipline.log line remains),
+  `authority/refused/authority_refused_foreign`. Inspect with
+  `python3 scripts/authority.py inspect --session <exact id>`.
+- Remediation: revoke with `python3 scripts/authority.py revoke --session <id>` (also deletes any legacy flag). An old flag
+  (`crack_on_legacy_flag`) is cleared with `rm <loop dir>/<id>/crack_on_active` (Codex:
+  `$PLUGIN_DATA/sessions/<id>/crack_on_active`). Allowed right after "crack on": the phrase was quoted, backticked,
+  negated or asked as a question (by design), or `authority_expired_allow` shows the 24h object lapsed; say "crack on" again to re-grant.
+- Baseline note: the old 103 fires / 5 blocks figure (`docs/graph-alignment-measurement.md`) came from discipline-log
+  telemetry; after-numbers come from trace rows, so they are not comparable. Reproduce:
+  `python3 scripts/measure_graph_alignment.py --root . --json`.

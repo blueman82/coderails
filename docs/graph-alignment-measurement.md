@@ -53,7 +53,7 @@ Claude log: 15394 hook lines, 2026-08-04T19:36:33+01:00 to 2026-10-03T19:26:31+0
 | verify_loop | 3546 | 3546 | 153 | 6 | 6 | 4.3% |
 | loop_stall_guard | 495 | 469 | 37 | 0 | 0 | 7.9% |
 | loop_dispatch_guard | 21 | 21 | 5 | 0 | 0 | 23.8% |
-| crack_on_prose_gate | 103 | 103 | 5 | 0 | 0 | 4.9% |
+| crack_on_prose_gate (retired; historical) | 103 | 103 | 5 | 0 | 0 | 4.9% |
 | loop_state_guard | 780 | 780 | 6 | 0 | 0 | 0.8% |
 | voice_announce | 448 | 309 | 0 | 0 | 0 | 0.0% |
 | agent_only_gate, agent_model_routing_nudge, crack_on_gate, enforce_pr_workflow, no_edit_on_main, offload_push_guard, unregistered_loop_guard | 7 gates, 6289 lines combined | 0 | 0 | 0 | 0 | n/a (no `blocked=` field logged) |

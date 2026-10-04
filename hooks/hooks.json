@@ -54,11 +54,6 @@
           },
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/crack_on_prose_gate.py\"",
-            "timeout": 15
-          },
-          {
-            "type": "command",
             "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/loop_state_guard.py\"",
             "timeout": 15
           },

@@ -32,6 +32,11 @@ class HookRegistrationTests(unittest.TestCase):
         self.assertIn("os.read", source)
         self.assertNotIn("sys.stdin.read()", source)
 
+    def test_prose_gate_retired(self) -> None:
+        """Negative control: crack-on denial is the authority-backed AskUserQuestion gate only; no Stop prose gate."""
+        self.assertNotIn("crack_on_prose_gate", (ROOT / "hooks/hooks.json").read_text())
+        self.assertFalse((ROOT / "hooks/scripts/crack_on_prose_gate.py").exists())
+
     def test_event_order_and_scoping(self) -> None:
         """Prompt registration stays minimal and headless exemptions stay Stop-only."""
         hooks = json.loads((ROOT / "hooks/hooks.json").read_text())["hooks"]

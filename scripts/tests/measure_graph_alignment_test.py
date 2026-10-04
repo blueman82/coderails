@@ -320,6 +320,20 @@ class MeasureTests(unittest.TestCase):
         self.assertEqual(trace["duplicates"], 2)
         self.assertEqual(trace["by_reason"], {"gate/blocked/r1": 2, "gate/blocked/r2": 1})
 
+    def test_trace_counts_crack_on_reason_codes(self) -> None:
+        """Each crack-on reason code is tallied under command/outcome/reason_code and deduped by event_id."""
+        codes = (
+            ("granted", "authority_granted"),
+            ("blocked", "authority_deny"),
+            ("allowed", "authority_expired_allow"),
+            ("blocked", "crack_on_legacy_flag"),
+        )
+        text = "".join(self.row(f"c{i}", "crack_on", code, outcome) for i, (outcome, code) in enumerate(codes))
+        self.trace("s1", text + self.row("c0", "crack_on", "authority_granted", "granted"))
+        trace = self.measure()["trace"]
+        self.assertEqual(trace["duplicates"], 1)
+        self.assertEqual(trace["by_reason"], {f"crack_on/{o}/{c}": 1 for o, c in codes})
+
     def test_trace_outcome_separates_warned_from_blocked(self) -> None:
         """Same command and reason_code with different outcomes are different counters."""
         self.trace("s1", self.row("e1", outcome="warned") + self.row("e2", outcome="blocked"))

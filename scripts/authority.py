@@ -13,7 +13,14 @@ from typing import Any, cast
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from hooks.scripts.lib.trace_row import append_row
-from scripts.lib.authority_object import MERGE, authority_path, read_authority, validate, write_authority
+from scripts.lib.authority_object import (
+    MERGE,
+    authority_path,
+    clear_legacy_flags,
+    read_authority,
+    validate,
+    write_authority,
+)
 
 
 def refuse(code: str, message: str, session: str | None = None, loop: str | None = None) -> int:
@@ -109,6 +116,7 @@ def revoke(args: argparse.Namespace, current: dict[str, Any], path: Path) -> int
         path.unlink()
     except OSError:
         return refuse("authority_refused_write_failed", "delete failed", args.session, current["loop_id"])
+    clear_legacy_flags(args.session)
     append_row("authority", "revoked", "authority_revoked", args.session, current["loop_id"])
     print(json.dumps({"revoked": current["authority_id"]}))
     return 0
