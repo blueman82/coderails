@@ -25,6 +25,7 @@ GRAPH_SEMANTICS_COPIES = (
     "skills/agentic-loop/scripts/graph_semantics.py",
     "packages/codex/skills/agentic-loop/scripts/graph_semantics.py",
 )
+LOCK_REASONS = ("lock_busy", "lock_stolen_age", "lock_stolen_dead_owner")
 ADAPTER_DIRS = {"claude": "skills/agentic-loop/scripts", "codex": "packages/codex/skills/agentic-loop/scripts"}
 
 
@@ -227,6 +228,32 @@ def duplication(root: Path) -> dict[str, Any]:
     }
 
 
+def lock_events() -> dict[str, int]:
+    """Count non-authoritative lock events per reason code, deduped by event_id across all loop-state roots."""
+    counts: dict[str, int] = dict.fromkeys(LOCK_REASONS, 0)
+    seen: set[str] = set()
+    for root in loop_state_roots():
+        try:
+            logs = sorted(root.rglob("lock-events.jsonl"))
+        except OSError:
+            continue
+        for log in logs:
+            try:
+                lines = log.read_text(encoding="utf-8", errors="replace").splitlines()
+            except OSError:
+                continue
+            for line in lines:
+                try:
+                    row = as_dict(json.loads(line))
+                except ValueError:
+                    continue
+                event_id, reason = row.get("event_id"), row.get("reason")
+                if isinstance(event_id, str) and event_id not in seen and reason in counts:
+                    seen.add(event_id)
+                    counts[cast(str, reason)] += 1
+    return counts
+
+
 def measure(root: Path) -> dict[str, Any]:
     """Assemble the full measurement object for a repository root."""
     logs = telemetry_paths()
@@ -240,6 +267,7 @@ def measure(root: Path) -> dict[str, Any]:
         "gate_blocks": {provider: parse_telemetry(path) for provider, path in logs.items()},
         "graph_vs_work_units": graph_vs_work_units(),
         "duplication": duplication(root),
+        "lock_events": lock_events(),
     }
 
 

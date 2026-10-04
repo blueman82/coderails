@@ -149,6 +149,28 @@ class MeasureTests(unittest.TestCase):
             },
         )
 
+    def test_lock_event_counters_dedupe_by_event_id(self) -> None:
+        """Each lock reason is counted once per event_id across files; bad rows are skipped."""
+
+        def row(eid: str, reason: str) -> str:
+            return json.dumps({"event_id": eid, "reason": reason, "schema": "lock_event"})
+
+        base = self.home / ".coderails/agentic-loop"
+        write(
+            base / "a/lock-events.jsonl",
+            "\n".join([row("1", "lock_busy"), row("1", "lock_busy"), "{torn", row("2", "lock_stolen_age")]) + "\n",
+        )
+        rows = [row("1", "lock_busy"), row("3", "lock_stolen_dead_owner"), row("4", "bogus")]
+        write(base / "verification-ceiling/lock-events.jsonl", "\n".join(rows) + "\n")
+        counters = self.measure()["lock_events"]
+        self.assertEqual(counters, {"lock_busy": 1, "lock_stolen_age": 1, "lock_stolen_dead_owner": 1})
+
+    def test_lock_event_counters_zero_when_absent(self) -> None:
+        """No event logs yields explicit zeros."""
+        self.assertEqual(
+            self.measure()["lock_events"], {"lock_busy": 0, "lock_stolen_age": 0, "lock_stolen_dead_owner": 0}
+        )
+
     def test_nonexistent_root_fails_closed(self) -> None:
         """A missing root exits non-zero with a stderr message and no stdout."""
         result = self.run_cli(self.root / "nope")
