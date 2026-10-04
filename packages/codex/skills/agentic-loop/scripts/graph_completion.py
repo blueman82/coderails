@@ -12,6 +12,7 @@ from graph_io import load as _load
 from graph_io import locked as _locked
 from graph_io import object_value as _object
 from graph_io import write as _write
+from graph_recovery import traced_refusal
 
 
 def validate_work_units(state: dict[str, Any]) -> None:
@@ -61,7 +62,8 @@ def complete(
         if state["status"] == "complete":
             raise GraphError("graph is already complete")
         revision = state["revision"]
-        _validate_completion(state, session, revision, evals_path, proof_path, retro_path, transcript_path)
+        with traced_refusal(path, state, "complete", session):
+            _validate_completion(state, session, revision, evals_path, proof_path, retro_path, transcript_path)
         state["status"] = "complete"
         state["revision"] += 1
         state["completion"] = {"revision": revision}
@@ -80,5 +82,6 @@ def verify_completion(
         raise GraphError("graph completion revision must be an integer")
     if state["status"] != "complete" or revision != state["revision"] - 1:
         raise GraphError("graph has no valid completion record")
-    _validate_completion(state, session, revision, evals_path, proof_path, retro_path, transcript_path)
+    with traced_refusal(path, state, "verify-completion", session):
+        _validate_completion(state, session, revision, evals_path, proof_path, retro_path, transcript_path)
     return {"status": "complete", "loop_id": state["loop_id"], "revision": state["revision"]}

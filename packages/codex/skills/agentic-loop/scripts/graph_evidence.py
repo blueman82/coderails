@@ -14,10 +14,11 @@ from graph_identity import (
     REFUSED_OUTCOME,
     GraphError,
     classify_worker_evidence,
-    legacy_task_name,
+    is_legacy_task_name,
     next_attempt,
     task_name,
 )
+from graph_recovery import RecoveryRefusedError
 from graph_transcript import (
     child_read_records,
     child_terminal,
@@ -28,6 +29,15 @@ from graph_transcript import (
 from graph_transcript import transcript_cursor as transcript_cursor
 
 Refusals = dict[str, tuple[int, str]]
+LEGACY_REFUSED = "legacy_task_identity_refused"
+
+
+def _legacy_refusal(node_id: str, attempt: object) -> RecoveryRefusedError:
+    """Return the stable refusal for a node-only (pre-loop-scoped) task name; it is never bound or skipped."""
+    message = (
+        f"node {node_id} attempt {attempt} carries a pre-loop-scoped task name; re-dispatch under the loop-scoped name"
+    )
+    return RecoveryRefusedError(LEGACY_REFUSED, message, (node_id,), attempt if isinstance(attempt, int) else None)
 
 
 def _reference(value: object, label: str) -> dict[str, Any]:
@@ -49,7 +59,6 @@ def _verify_reference(
     reference: dict[str, Any],
     indexes: dict[str, list[tuple[int, str, str, str | None, str | None, str | None]]],
     refusals: Refusals,
-    allow_legacy: bool = False,
 ) -> int:
     spawns = indexes
     expected_task = task_name(state["loop_id"], node_id, reference["attempt"])
@@ -58,11 +67,12 @@ def _verify_reference(
         if call_id in spawns or call_id not in refusals or refusals[call_id][1] != expected_task:
             raise GraphError(f"node {node_id} refused-launch reference does not match the parent transcript")
         return refusals[call_id][0]
+    if any(is_legacy_task_name(item[1]) for item in spawns.get(call_id, [])):
+        raise _legacy_refusal(node_id, reference["attempt"])
     if len(spawns.get(call_id, [])) != 1:
         raise GraphError(f"node {node_id} spawn reference is missing or duplicate")
     spawn_line, observed_task, observed_agent, nickname, expected_path, expected_role = spawns[call_id][0]
-    legacy_match = allow_legacy and observed_task == legacy_task_name(node_id, reference["attempt"])
-    if (observed_task != expected_task and not legacy_match) or observed_agent != reference["agent_thread_id"]:
+    if observed_task != expected_task or observed_agent != reference["agent_thread_id"]:
         raise GraphError(f"node {node_id} spawn reference has the wrong task")
     child_terminal(
         state["session_id"],
@@ -88,13 +98,16 @@ def _validate_missing_attempts(
     previous_line = 0
     for attempt in range(1, maximum + 1):
         if attempt in completed:
-            line = _verify_reference(state, node_id, completed[attempt], indexes, refusals, allow_legacy=True)
+            line = _verify_reference(state, node_id, completed[attempt], indexes, refusals)
         else:
-            expected = {task_name(state["loop_id"], node_id, attempt), legacy_task_name(node_id, attempt)}
+            expected = task_name(state["loop_id"], node_id, attempt)
             matches = [
-                (call, items[0]) for call, items in indexes.items() if len(items) == 1 and items[0][1] in expected
+                (call, items[0]) for call, items in indexes.items() if len(items) == 1 and items[0][1] == expected
             ]
             if len(matches) != 1:
+                legacy = f"loop_worker_{node_id.encode().hex()}" + ("" if attempt == 1 else f"_a{attempt}")
+                if any(item[1] == legacy for items in indexes.values() for item in items):
+                    raise _legacy_refusal(node_id, attempt)
                 raise GraphError(f"node {node_id} stale attempt has no unique native spawn")
             call, (line, _, child, nickname, path, role) = matches[0]
             if used & {call, child}:
@@ -152,7 +165,7 @@ def _stored_references(
             if used & identifiers:
                 raise GraphError(f"node {node_id} reuses transcript evidence")
             used.update(identifiers)
-            spawn_line = _verify_reference(state, node_id, reference, indexes, refusals, allow_legacy=True)
+            spawn_line = _verify_reference(state, node_id, reference, indexes, refusals)
             if spawn_line <= previous_line:
                 raise GraphError(f"node {node_id} transcript attempts are stale or out of order")
             previous_line = spawn_line

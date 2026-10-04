@@ -14,7 +14,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "codex/skills/agentic-loop/scripts"))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "codex/hooks/scripts"))
 from graph_evidence import bind_worker_evidence, validate_worker_evidence
-from graph_identity import GraphError, legacy_task_name, task_name
+from graph_identity import GraphError, task_name
 
 
 class NativeEvidenceTests(unittest.TestCase):
@@ -162,7 +162,7 @@ class NativeEvidenceTests(unittest.TestCase):
 
     def test_current_wave_rejects_legacy_task_identity(self) -> None:
         """Historical names remain ineligible for newly bound native spawns."""
-        self.task = legacy_task_name("U3[1]")
+        self.task = "loop_worker_55335b315d"  # node-only literal: no helper mints it any more
         self.arguments["task_name"] = self.task
         self.activity["agent_path"] = f"/root/{self.task}"
         self.spawn["agent_path"] = f"/root/{self.task}"

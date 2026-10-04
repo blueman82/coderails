@@ -122,44 +122,28 @@ def task_name(loop_id: str, node_id: str, attempt: object = 1) -> str:
     return f"loop_worker_{loop_id.encode().hex()}_{node_id.encode().hex()}{suffix}"
 
 
-def legacy_task_name(node_id: str, attempt: object = 1) -> str:
-    """Return the pre-loop-scoped spelling used to verify already-stored evidence."""
-    if not isinstance(cast(object, node_id), str) or not node_id:
-        raise GraphError("graph worker node identity must be nonempty")
-    return f"loop_worker_{node_id.encode().hex()}{_task_suffix(attempt)}"
+def is_legacy_task_name(name: str) -> bool:
+    """Return whether a name has the retired node-only shape; such names are refused, never decoded."""
+    return re.fullmatch(r"loop_worker_[0-9a-f]+(?:_a[1-9][0-9]*)?", name) is not None
 
 
-def task_node(name: str) -> tuple[str | None, str]:
-    """Decode task identity, using None for a pre-loop-scoped historical identity."""
-    legacy_retry = re.fullmatch(r"loop_worker_([0-9a-f]+)_a([1-9][0-9]*)", name)
-    match = None if legacy_retry else re.fullmatch(r"loop_worker_([0-9a-f]+)_([0-9a-f]+)(?:_a([1-9][0-9]*))?", name)
-    if match is not None:
-        encoded_loop, encoded_node, retry = match.groups()
-        attempt = int(retry) if retry else 1
-        if len(encoded_loop) % 2 or len(encoded_node) % 2:
-            raise GraphError("graph worker task name is not reversible")
-        try:
-            loop_id = bytes.fromhex(encoded_loop).decode()
-            node_id = bytes.fromhex(encoded_node).decode()
-        except (UnicodeDecodeError, ValueError) as error:
-            raise GraphError("graph worker task name is not reversible") from error
-        if not loop_id or not node_id or task_name(loop_id, node_id, attempt) != name:
-            raise GraphError("graph worker task name is not canonical")
-        return loop_id, node_id
-    match = legacy_retry or re.fullmatch(r"loop_worker_([0-9a-f]+)(?:_a([1-9][0-9]*))?", name)
+def task_node(name: str) -> tuple[str, str]:
+    """Decode a loop-scoped task name into (loop_id, node_id); anything else, node-only names included, raises."""
+    match = re.fullmatch(r"loop_worker_([0-9a-f]+)_([0-9a-f]+)(?:_a([1-9][0-9]*))?", name)
     if match is None:
         raise GraphError("graph worker task name must use the native lowercase format")
-    encoded_node, retry = match.groups()
+    encoded_loop, encoded_node, retry = match.groups()
     attempt = int(retry) if retry else 1
-    if len(encoded_node) % 2:
+    if len(encoded_loop) % 2 or len(encoded_node) % 2:
         raise GraphError("graph worker task name is not reversible")
     try:
+        loop_id = bytes.fromhex(encoded_loop).decode()
         node_id = bytes.fromhex(encoded_node).decode()
     except (UnicodeDecodeError, ValueError) as error:
         raise GraphError("graph worker task name is not reversible") from error
-    if not node_id or legacy_task_name(node_id, attempt) != name:
+    if not loop_id or not node_id or task_name(loop_id, node_id, attempt) != name:
         raise GraphError("graph worker task name is not canonical")
-    return None, node_id
+    return loop_id, node_id
 
 
 def is_frozen_loop_evals(evals: dict[str, Any]) -> bool:

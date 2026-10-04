@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from graph_data import event_payload, object_value, read_records
-from graph_identity import GraphError, task_node
+from graph_identity import GraphError, is_legacy_task_name, task_node
 
 
 def thread_transcript(thread_id: str) -> Path:
@@ -37,7 +37,8 @@ def _canonical_task(value: object) -> str | None:
     try:
         task_node(value)
     except GraphError:
-        return None
+        # Node-only names stay in the raw spawn index so evidence validation can refuse them by reason code.
+        return value if is_legacy_task_name(value) else None
     return value
 
 

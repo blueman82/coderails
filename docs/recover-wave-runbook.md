@@ -34,6 +34,24 @@ trace write never fails or changes a transition. Counters: `python3 scripts/meas
 | `ambiguous_spawn` | Codex only: a node has several silent spawns for one attempt; stale evidence needs exactly one. | Inspect the duplicate spawns; record or hard-stop the node by hand. |
 | `no_active_wave` | There is no wave to recover (already recovered or recorded). | `summarize` and continue from its phase. |
 
+# legacy task identity runbook (Codex graph CLI)
+
+Symptom: `record-wave`, `recover-wave`, `complete` or `verify-completion` exits 1 with
+`... carries a pre-loop-scoped task name ... [reason_code=legacy_task_identity_refused]`. A stored reference or stale
+attempt binds a node-only worker name (`loop_worker_<node-hex>[_aN]`); only loop-scoped names (`loop_worker_<loop-hex>_<node-hex>[_aN]`) are accepted.
+
+```bash
+# one refusal is one event: count distinct event_id
+jq -s 'map(select(.reason_code=="legacy_task_identity_refused")) | unique_by(.event_id) | map({ts, command, node: .node_id, attempt, caller_session})' "$(dirname "$STATE")/recovery-trace.jsonl"
+python3 scripts/measure_graph_alignment.py --root . --json | jq .recovery.legacy_task_refusals
+```
+
+Same sidecar and row schema as recover-wave; the trace is advisory and a refusal never changes `progress.json`.
+
+| reason_code | Meaning | Remediation |
+| --- | --- | --- |
+| `legacy_task_identity_refused` | The node's spawn for the cited attempt carries a node-only name. No shim re-reads it. `attempt` in the trace row is the refused attempt; `caller_session` is the `--session` the command received (null for `record-wave`, which takes none). | Nothing re-opens a done node: `begin-wave` dispatches only ready nodes, so re-dispatch is not possible. The only working path is to start a fresh `--loop-id` and re-run the work; never edit evidence or the transcript. This includes **completed** loops: `verify-completion` on a loop completed under node-only names now refuses (it passed before the clean break) - that is the deliberate fail-closed cost. |
+
 # start / add-unit runbook (both providers)
 
 Symptom: `graph.py start` or `graph.py add-unit` exits 1 and prints `graph: ... [reason_code=<code>]`.
