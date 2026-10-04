@@ -18,3 +18,11 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
 - Query: the command above; then `ls ${CLAUDE_AGENTIC_LOOP_DIR:-~/.coderails/agentic-loop}/<session_id>/trace.jsonl`.
 - Remediation: the writer fails open, so an unwritable directory or an unsafe session id (contains `/` or `..`,
   or is empty) silently drops rows. Fix the directory permissions; do not make the gate depend on the write.
+
+## Discipline gate blocking too often
+
+- Symptom: `confidence_labels` or `verify_loop` blocks climb; users report repeated Stop blocks.
+- Query: `trace.by_reason` for `check_confidence_labels/confidence_label_missing` and
+  `check_verify_loop/verify_loop_missing`; `gate_blocks.claude.gates.<gate>` for blocked/decisions.
+- Remediation: do not demote on volume alone. Apply rule (a) in `docs/graph-alignment-measurement.md` and the
+  verdict in `docs/decisions/e1-confidence-gate-demotion.md` (a hand-sampled real-fix rate is required first).
