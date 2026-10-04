@@ -80,8 +80,8 @@ def main() -> int:
         "Stop",
         additionalContext=f"[unregistered-loop-guard] This session has dispatched {turns}+ separate Agent "
         "turns with no agentic-loop registration detected (no progress.json, no agentic-loop Skill invocation). "
-        "If this is a multi-step loop, register it now: invoke coderails:agentic-loop and create the progress.json "
-        "stub at the path hooks/scripts/lib/agentic_loop_path.py resolves for this session, so the loop-state guards "
+        "If this is a multi-step loop, register it now: invoke coderails:agentic-loop and run graph.py start "
+        "at the path hooks/scripts/lib/agentic_loop_path.py resolves for this session, so the loop-state guards "
         "can track it. If this is genuinely a one-off sequence of independent dispatches, no action is needed.",
     )
     return 0

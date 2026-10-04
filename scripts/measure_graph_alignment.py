@@ -238,6 +238,61 @@ def trace_counts() -> dict[str, Any]:
     return {**counts, "by_reason": dict(sorted(by_reason.items()))}
 
 
+def recovery_counters() -> dict[str, Any]:
+    """Count recoveries, controller starts, add-units, refusals and retries from loop state plus the advisory trace.
+
+    The trace is non-authoritative and only counted here; unparseable rows are skipped. Counts only.
+    """
+    seen: set[Path] = set()
+    refused = failed = stale = recovered = starts = add_units = 0
+    codes: dict[str, int] = {}
+    refusals: dict[str, int] = {}
+    for base in loop_state_roots():
+        for path in sorted(base.glob("*/*/progress.json")):
+            real = path.resolve()
+            if real in seen:
+                continue
+            seen.add(real)
+            for node in as_dict(as_dict(read_object(path).get("graph")).get("nodes")).values():
+                entry = as_dict(node)
+                failed += as_dict(entry.get("retry")).get("attempts", 0) or 0
+                stale += as_dict(entry.get("respawn")).get("generation", 0) or 0
+                refused += sum(as_dict(e).get("outcome") == "launch_refused" for e in as_list(entry.get("evidence")))
+            try:
+                lines = path.with_name("recovery-trace.jsonl").read_text(encoding="utf-8").splitlines()
+            except OSError:
+                continue
+            events: set[str] = set()
+            for line in lines:
+                try:
+                    row = as_dict(json.loads(line))
+                except ValueError:
+                    continue
+                key = row.get("event_id") or (
+                    "|".join(str(row.get(k)) for k in ("ts", "command", "outcome", "reason_code", "inputs_sha256"))
+                    if row.get("ts") and row.get("inputs_sha256")
+                    else None
+                )  # a command writes one row per node: count events, not rows; keyless legacy rows count singly
+                if key is not None:
+                    if key in events:
+                        continue
+                    events.add(str(key))
+                code = str(row.get("reason_code"))
+                codes[code] = codes.get(code, 0) + 1
+                recovered += row.get("outcome") == "recovered"
+                starts += row.get("command") == "start" and row.get("outcome") in {"created", "rearmed"}
+                add_units += row.get("command") == "add-unit" and row.get("outcome") == "registered"
+                if row.get("outcome") == "refused" and row.get("command") in {"start", "add-unit"}:
+                    refusals[code] = refusals.get(code, 0) + 1
+    return {
+        "recoveries": recovered,
+        "refused_spawns": refused,
+        "retries_by_cause": {"failed": failed, "stale_recovery": stale},
+        "trace_rows_by_reason_code": dict(sorted(codes.items())),
+        "controller": {"starts": starts, "add_units": add_units, "refusals_by_reason": dict(sorted(refusals.items()))},
+    }
+
+
 def line_count(path: Path) -> int | None:
     """Return the number of lines in a file, or None when it is missing."""
     try:
@@ -275,6 +330,7 @@ def measure(root: Path) -> dict[str, Any]:
         "gate_blocks": {provider: parse_telemetry(path) for provider, path in logs.items()},
         "graph_vs_work_units": graph_vs_work_units(),
         "trace": trace_counts(),
+        "recovery": recovery_counters(),
         "duplication": duplication(root),
     }
 
