@@ -39,7 +39,7 @@ be replayed to derive position, and that can leave a torn tail line after a cras
 | `session_id` | This session's id; the guard's ownership check compares it against the file's own path. |
 | `loop_id` | Unique non-blank identity for this loop. Preserve it during mid-loop rewrites; create a new value when re-arming for a new loop. Dispatch evals bind `session_id` + `loop_id`. |
 | `revision` | Positive integer starting at `1`. Graph operations advance it. Dispatch envelopes bind the active revision; frozen dispatch evals bind only session and loop; final neutral grading binds the completion revision. |
-| `status` | `initialising` → `in-progress` → `complete` (see Lifecycle). |
+| `status` | `in-progress` → `complete` (see Lifecycle); `graph.py start` writes `in-progress`. |
 | `authorising_prompt_raw` | The authorisation envelope, verbatim. |
 | `work_units` | JSON object keyed by unit id; each entry carries at least a `status`. In-flight values are `pending`/`in-progress`/`blocked` (with `blockedBy`); only `done` and `dropped` (with a mandatory sibling `dropped_reason`) are terminal — see below. `merged`/`complete`/other synonyms are retired: do not mint new status values. |
 | `graph` | `{nodes, edges, joins, active_wave, hard_stop}`. Nodes use stable IDs, registry labels, matching status/outcome, retry bounds, evidence arrays and `respawn: {generation, intent}`. Edges reference existing nodes; all-input joins carry `id`, `inputs`, and `released`. The native adapter owns transcript cursors and wave history. |
@@ -48,7 +48,7 @@ be replayed to derive position, and that can leave a torn tail line after a cras
 | `named_blocker` | When `preserve-compat`: the specific consumer still on the old path that justifies keeping it. |
 | `removal_ticket` | When `preserve-compat`: tracks the deferred removal. |
 | `decisions_absorbed` | Chronological (oldest-first) array of `{phase, decision}` appended at each phase boundary that absorbs an in-scope decision (Phases -1, 2.5, 2.6, 2.8, 5, 6). Phase -1 appends only in a full-autonomous envelope, where it auto-adopts the improve-prompt output instead of asking. In the Phase 2.5/2.6 graph wave, both worker results are collected and appended by the orchestrator in one read-modify-write; workers never write this field. |
-| `completed_marker` | Count of agentic-loop loops completed in this session; bumped at teardown, carried forward by the Phase -2 stub. |
+| `completed_marker` | Count of agentic-loop loops completed in this session; bumped at teardown, carried forward by `graph.py start` when it re-arms a completed loop. |
 | `last_updated` | Refreshed at each phase boundary. |
 
 **`work_units` feeds the loop-scope eval gate.** `loop_state_guard` reads `.work_units | length`
@@ -99,10 +99,9 @@ done unit does not supply missing native graph evidence. Both gates must pass;
 there is no reconciliation or automatic status copying between them.
 
 **`loop_stop_counts` is written solely by the `loop_stall_guard` hook** on each valid `LOOP-STOP`
-declaration. The orchestrator never writes or increments it. On any wholesale rewrite of the file
-you must re-read the existing `progress.json` first and carry `loop_stop_counts` forward by the
-same conditional as the Phase -2 stub rule: verbatim on a mid-loop rewrite, reset to `{}` when the
-prior file's `status` was `"complete"`.
+declaration. The orchestrator never writes or increments it. `graph.py start` never writes
+it and drops it when re-arming a completed loop (the finished loop's counts live in its `retro.json`);
+never rewrite the file wholesale.
 
 ## Lifecycle
 
@@ -113,19 +112,19 @@ the rest of that count, so a skill loaded only to read this file isn't blocked f
 invocation count re-arms the block. Session-mismatch and stale-complete-after-rearm carry no such
 grace and block every time.
 
-- **Stub-first (Phase -2):** `status: "initialising"`, stamped with this `session_id`, a new unique non-blank `loop_id`, and integer `revision: 1` — with an empty graph and no active wave. The stub is an orchestrator action, not synthetic worker evidence. See phases-setup.md's Phase -2 stub for the exact shape; it is validated, not decorative.
-- **Enrich at Phase 0:** record the envelope verbatim in `authorising_prompt_raw`; `status: "in-progress"`.
-- **Update at each phase boundary:** `graph` node states, work-unit states, disposition fields, `last_updated` — carry `loop_stop_counts` forward per the rule above.
+- **Start (Phase -2):** run `graph.py start` (see phases-setup.md). It stamps this `session_id`, your unique non-blank `loop_id`, `revision: 1` and `status: "in-progress"` with an empty graph and no active wave, then `graph.py add-unit` registers each work unit. Never hand-write these; the stub is validated, not decorative. A different `loop_id` over an unfinished loop is refused: resume it.
+- **Phase 0:** the envelope is already in `authorising_prompt_raw`; update it only when an improved envelope is adopted.
+- **Update at each phase boundary:** `graph` node states, work-unit states, disposition fields, `last_updated` — these orchestrator-written fields stay model-prose (only `start`, `add-unit` and `status` have commands); never touch `loop_stop_counts`.
 - **Teardown at Phase 13:** first run `python3 "${PLUGIN_ROOT}/skills/agentic-loop/scripts/graph.py" verify-completion <state> --session <session>` after final grading, proofs and retro exist. Then run `python3 "${PLUGIN_ROOT}/hooks/scripts/lib/loop_state_common.py" mark-complete <cwd> <session>` to set status and the live invocation-count marker together under the state lock. Never hand-derive or increment `completed_marker`.
 
 ## Recency
 
 A prior loop's `status: "complete"` must not silence the guard for a later loop in the same long
-session. Phase -2's stub-first overwrite (`status` back to `initialising`) is the primary re-arm
+session. `graph.py start` re-arming a completed loop (new `loop_id`, `status` back to `in-progress`) is the primary re-arm
 signal. `completed_marker` is the backstop: if a new loop skips its stub, the guard still sees the
 current invocation count exceed the recorded `completed_marker` and blocks, forcing
-re-initialisation. This is why teardown must run the native `mark-complete` helper (never a bare write of
-`status: "complete"`) and stub-first must carry `completed_marker` forward.
+a fresh `start`. This is why teardown must run the native `mark-complete` helper (never a bare write of
+`status: "complete"`) and `start` carries `completed_marker` forward.
 
 ## Concurrent loops in one directory
 

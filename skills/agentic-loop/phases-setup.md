@@ -18,57 +18,21 @@ git commit --allow-empty -m "Initial project"
 
 Stop and report the exact failing command if any of these commands fails (for example, Git author identity is not configured). Do not add a remote, create a hosted repository, push, or create a pull request. This is the only action before the state stub: it ensures the path helper below keys the loop to the repository it just created rather than to the pre-Git folder path.
 
-Before Phase -1 — before anything else — write a `progress.json` stub. This guarantees the loop's durable state file exists before the first stop, so the `loop_state_guard` Stop hook never trips a compliant loop; the block degrades to a backstop for a skipped stub.
+Before Phase -1 — before anything else — create the loop's durable state with the controller command. This guarantees `progress.json` exists before the first stop, so the `loop_state_guard` Stop hook never trips a compliant loop; the block degrades to a backstop for a skipped `start`. Never write or edit `progress.json` by hand for this.
 
-**Resolve the path — never compute it yourself.** A repo- or cwd-derived key cannot be reproduced by hand. Get the absolute path by running the path helper (the path is keyed to the repo's `git --git-common-dir` when your cwd is inside a git repo, falling back to the raw cwd otherwise — so a mid-loop worktree hop resolves to the SAME path as the checkout it came from). The helper is stateless and re-derives this key on every call, so a loop that changes its own cwd's repo-ness mid-session (e.g. `git init`s an until-then-non-git cwd) will see its key change too — a rare, self-inflicted edge case, not one the helper guards against:
+**Resolve the path — never compute it yourself.** Run the path helper; it keys the path to the repo's `git --git-common-dir` (falling back to the raw cwd), so a mid-loop worktree hop resolves to the SAME path:
 
 > `python3 "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/lib/agentic_loop_path.py"`
 
-It prints the absolute path. Write the stub there with the Write tool (it creates the parent directory). If `${CLAUDE_PLUGIN_ROOT}` is not set in your shell, do **not** guess the path — proceed without the stub; the `loop_state_guard` hook will block once on your first stop and hand you the exact path to use. Copy that path verbatim. Either way, the path comes from the helper (directly, or via the guard which also calls it) — never from your own derivation.
+If `${CLAUDE_PLUGIN_ROOT}` is not set, do **not** guess the path: proceed without `start`; the `loop_state_guard` hook blocks once and hands you the exact path. Put the authorising prompt, verbatim, in a file, then run `python3 "${CLAUDE_PLUGIN_ROOT}/skills/agentic-loop/scripts/graph.py" start "$STATE" --session "$CLAUDE_CODE_SESSION_ID" --loop-id "<unique non-blank id>" --prompt-file "$PROMPT_FILE"`. It writes the schema-v3 state atomically (`in-progress`, revision 1, empty graph), treats a repeat of the same loop id as a no-op, re-arms a completed loop (carrying `completed_marker` forward and dropping the finished loop's `loop_stop_counts`), and refuses with a `[reason_code=...]` when an unfinished loop already owns the session: resume it instead.
 
-**The current schema stub:**
+Then register every work unit with `python3 "${CLAUDE_PLUGIN_ROOT}/skills/agentic-loop/scripts/graph.py" add-unit "$STATE" --session "$CLAUDE_CODE_SESSION_ID" --loop-id "<same id>" --unit N [--depends-on M ...] [--join]`. It adds the work unit, its `U3[N]` node, the dependency edges and, with `--join`, the `J12-all-units` input in one locked write. Never edit `progress.json` by hand for either step.
 
-```json
-{
-  "schema_version": 3,
-  "session_id": "<this session's id>",
-  "loop_id": "<a unique non-blank id for this loop>",
-  "revision": 1,
-  "status": "initialising",
-  "created": "<ISO8601 timestamp>",
-  "authorising_prompt_raw": "<the user's authorising prompt, verbatim>",
-  "completed_marker": 0,
-  "work_units": {},
-  "graph": {
-    "nodes": {},
-    "edges": [],
-    "joins": {},
-    "active_wave": null,
-    "hard_stop": null
-  }
-}
-```
+The graph starts empty: running `start` is an orchestrator action, not a fabricated native worker dispatch. Do not create a running `S-2` wave or insert synthetic completion evidence for it.
 
-Carry the prior `completed_marker` forward when one exists; `0` above applies
-only to the first loop. The graph starts empty: writing this stub is an
-orchestrator action, not a fabricated native worker dispatch. Do not create a
-running `S-2` wave or insert synthetic completion evidence for it.
+Unit nodes (`U3[N]`) and the `J12-all-units` join come from `add-unit`; any other node is registered by the orchestrator before querying readiness, with its registry label, matching `status` and `outcome`, `retry: {"attempts":0,"max":5}`, `evidence: []`, and `respawn: {"generation":0,"intent":null}`. A fresh node is pending. Join objects need `id`, `mode:"all"`, `inputs`, and `released:false`. Keep orchestrator-only phase decisions in the phase record; graph worker completion always requires actual provider-native evidence. Use the Python CLI in `execution-graph.md` to begin and record waves. There are no schema-2 readers or hand-written synthetic wave results.
 
-Register each actual dispatch's stable node and dependency edges before querying
-readiness. Every node needs its registry label, matching `status` and `outcome`,
-`retry: {"attempts":0,"max":5}`, `evidence: []`, and
-`respawn: {"generation":0,"intent":null}`. A fresh node is pending. Join objects
-need `id`, `mode:"all"`, `inputs`, and `released:false`. Keep orchestrator-only
-phase decisions in the phase record; graph worker completion always requires
-actual provider-native evidence. Use the Python CLI in `execution-graph.md` to
-begin and record waves. There are no schema-2 readers or hand-written synthetic
-wave results.
-
-If a `progress.json` already exists at the path from an earlier loop in this session, read its `completed_marker` and carry it forward into the new stub (do not reset it to 0) — this is what lets the guard tell a genuinely-finished loop from a new one that re-armed it (see the teardown rule below). A re-armed NEW loop always gets a new `loop_id` and resets `revision` to `1` (never `0`, which the graph validator rejects); a mid-loop recovery preserves both values. Never omit or reuse the prior loop's `loop_id` for a new graph.
-
-`loop_stop_counts` gets different treatment depending on the prior file's `status`, because it is HOOK-OWNED (see Context-window persistence below):
-- Prior file `status != "complete"` (mid-loop re-stub, e.g. a recovery after a restart): carry `loop_stop_counts` forward verbatim into the new stub, so a mid-loop recovery doesn't silently reset the count the `loop_stall_guard` hook has been maintaining. Carry `authorising_prompt_raw` forward verbatim too — a re-stub refilled from conversation memory instead of the prior file's value would silently drift the eval author's canonical anchor.
-- Prior file `status == "complete"` (re-arming for a NEW loop): reset `loop_stop_counts` to `{}` (omit the field from the stub) — the completed loop's counts are already preserved in its own `retro.json`; carrying them forward would bleed the finished loop's stop counts into the new loop's Phase 13 report.
+`loop_stop_counts` is HOOK-OWNED (see Context-window persistence below): `start` never writes it, and a re-arm drops it because the completed loop's counts are already preserved in its own `retro.json`.
 
 ### `S-1` — Phase -1: Sharpen the authorising prompt
 
