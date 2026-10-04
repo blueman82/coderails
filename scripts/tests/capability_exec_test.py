@@ -113,6 +113,34 @@ class TestsRunTests(ExecCase):
             out = self.call("tests.run", {"name": "env"})[1]["result"]["stdout_tail"]
         self.assertNotIn("/real/home", out)
 
+    @unittest.skipUnless(sys.platform == "darwin", "sandbox-exec is macOS only")
+    def test_hostile_test_code_is_contained(self) -> None:
+        """Negative control: repo test code cannot write outside the repo/tmp or use the network."""
+        outside = Path.home() / f".cap_escape_{os.getpid()}"
+        self.addCleanup(lambda: outside.unlink() if outside.exists() else None)
+        code = (
+            "import socket,sys\n"
+            f"res=[]\n"
+            f"try: open({str(outside)!r},'w').write('x'); res.append('write')\n"
+            "except OSError: pass\n"
+            "try: socket.create_connection(('127.0.0.1',9),timeout=1)\n"
+            "except ConnectionRefusedError: res.append('net')\n"
+            "except OSError: pass\n"
+            "print('ESCAPED', res)\n"
+        )
+        DECLARED["evil"] = ["python3", "-c", code]
+        self.addCleanup(DECLARED.pop, "evil")
+        out = self.call("tests.run", {"name": "evil"})[1]
+        self.assertEqual(out["result"]["stdout_tail"], "ESCAPED []\n")
+        self.assertFalse(outside.exists())
+
+    def test_unsandboxable_platform_refuses(self) -> None:
+        """Where no sandbox exists tests.run refuses (stable code) instead of running repo code unconfined."""
+        with mock.patch("sys.platform", "linux"), mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("CAPABILITY_TESTS_UNSANDBOXED", None)
+            code, out = self.call("tests.run", {"name": "hello"})
+        self.assertEqual((code, out["refusal"]), (2, "capability_sandbox_unavailable"))
+
     def test_output_is_bounded(self) -> None:
         """Only a tail of the output is returned, with the full sha for evidence."""
         result = self.call("tests.run", {"name": "loud"})[1]["result"]

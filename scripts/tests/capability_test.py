@@ -149,16 +149,18 @@ class RepoInspectTests(CapabilityCase):
         self.assertEqual((code, out["ok"]), (0, True))
         self.assertIn('"outcome": "ok"', trace.read_text())
 
-    def test_no_session_means_no_row_but_still_works(self) -> None:
-        """Without a session id the call succeeds and writes nothing."""
+    def test_no_session_still_writes_unattributed_row(self) -> None:
+        """Without a session id, calls and refusals are traced under the `unattributed` bucket, not dropped."""
         env = dict(self.env)
         del env["CLAUDE_SESSION_ID"]
         self.env = env
         code, out = self.call("repo.inspect", {"op": "list"})
-        self.assertEqual(code, 0)
-        self.assertEqual(self.rows(), [])
-        self.assertFalse(out["traced"])  # the gap is visible, not silent
-        self.assertTrue(self.call("bogus", {})[1]["traced"] is False)
+        self.assertEqual((code, out["traced"]), (0, True))
+        refused = self.call("bogus", {})[1]
+        self.assertTrue(refused["traced"])
+        rows = [json.loads(x) for x in (self.loop / "unattributed" / "trace.jsonl").read_text().splitlines()]
+        self.assertEqual([r["session_id"] for r in rows], ["unattributed"] * 2)
+        self.assertEqual(rows[1]["reason_code"], "capability_unknown_tool")
 
     def test_traced_true_with_session(self) -> None:
         """With a session id the envelope says the row was written."""

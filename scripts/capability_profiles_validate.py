@@ -12,6 +12,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from hooks.scripts.lib.capability_profiles import TOOLS, load_profiles
 
 NEEDS_INSTRUCTION = ("tests.run", "pr.comment")
+# Tools a guarded (no shell.raw/worktree.write) agent may hold. Task/Skill/mcp__* would let it reach tools the hook does
+# not gate (a general-purpose child has raw shell), so anything else is drift. Skill is allowed only where listed.
+GUARDED_TOOLS = {"Read", "Grep", "Glob", "Bash"}
+GUARDED_EXTRA = {"preflight-scout": {"Skill"}}  # runs the planning/premortem skills
 
 
 def frontmatter(text: str) -> dict[str, list[str]]:
@@ -48,7 +52,14 @@ def validate(root: Path, profiles: dict[str, Any]) -> list[str]:
         if name in claude:
             text = claude[name].read_text(encoding="utf-8")
             meta = frontmatter(text)
-            tools = set(meta.get("tools", [])) - set(meta.get("disallowedTools", []))
+            if not meta.get("tools"):  # absent or empty/YAML-list form: the harness then grants ALL tools
+                errors.append(f"claude: {name} frontmatter must have an inline `tools: A, B` line")
+                continue
+            tools = set(meta["tools"]) - set(meta.get("disallowedTools", []))
+            if "shell.raw" not in caps and not write:
+                extra = tools - GUARDED_TOOLS - GUARDED_EXTRA.get(name, set())
+                if extra:
+                    errors.append(f"claude: {name} guarded agent holds ungated tools {sorted(extra)}")
             if write != bool({"Write", "Edit"} & tools):
                 errors.append(f"claude: {name} worktree.write={write} disagrees with frontmatter tools")
             if ("Bash" in tools) != (tool_caps or "shell.raw" in caps):

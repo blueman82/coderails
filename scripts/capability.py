@@ -11,6 +11,7 @@ import hashlib
 import importlib
 import json
 import os
+import pwd
 import re
 import subprocess
 import sys
@@ -180,8 +181,44 @@ def declared_tests() -> dict[str, list[str]]:
     return dict(data["tests"])
 
 
+SANDBOX_PROFILE = """(version 1)
+(allow default)
+(deny network*)
+(deny file-write*)
+(allow file-write* (subpath (param "REPO")) (subpath (param "HOME")) (subpath (param "TMP")) (subpath "/private/tmp")
+  (literal "/dev/null") (literal "/dev/dtracehelper") (literal "/dev/tty"))
+(deny file-read* (subpath (param "SSH")) (subpath (param "GH")) (subpath (param "AWS")) (subpath (param "GNUPG")))
+"""
+
+
+def sandboxed(argv: list[str], root: Path, home: str) -> list[str]:
+    """Prefix argv with a macOS sandbox-exec: no network, writes only to repo/tmp, real-home secrets unreadable.
+
+    Refuses where no sandbox exists (opt-out: CAPABILITY_TESTS_UNSANDBOXED=1, which is full user-level code execution).
+    """
+    if sys.platform != "darwin" or not Path("/usr/bin/sandbox-exec").exists():
+        if os.environ.get("CAPABILITY_TESTS_UNSANDBOXED") == "1":
+            return argv
+        raise RefusalError("capability_sandbox_unavailable", "no sandbox here; tests.run will not run unconfined")
+    real = pwd.getpwuid(os.getuid()).pw_dir  # not $HOME: repo code resolves the real home itself
+    params = {
+        "REPO": str(root),
+        "HOME": home,
+        "TMP": os.path.realpath(os.environ.get("TMPDIR", "/tmp")),
+        "SSH": real + "/.ssh",
+        "GH": real + "/.config/gh",
+        "AWS": real + "/.aws",
+        "GNUPG": real + "/.gnupg",
+    }
+    flags = [x for k, v in params.items() for x in ("-D", f"{k}={v}")]
+    return ["/usr/bin/sandbox-exec", *flags, "-p", SANDBOX_PROFILE, *argv]
+
+
 def tests_run(raw: object) -> Result:
-    """Run one declared test command: bounded timeout, scrubbed env. Bounded execution of repo code, NOT read-only."""
+    """Run one declared test command: bounded timeout, scrubbed env, macOS-sandboxed (no network, confined writes).
+
+    This executes repo code. Where the sandbox applies it is contained; it is NOT a read-only operation.
+    """
     a = check(raw, {"name": (str, None), "timeout_s": (int, 300)})
     timeout = bounded(a["timeout_s"], 1, 900, "timeout_s")
     argv = declared_tests().get(a["name"])
@@ -191,10 +228,10 @@ def tests_run(raw: object) -> Result:
     env = {k: os.environ[k] for k in ("PATH", "LANG", "TMPDIR") if k in os.environ}
     env["PYTHONDONTWRITEBYTECODE"] = "1"
     try:
-        # Throwaway HOME: the repo under test is untrusted; it must not read ~/.ssh or gh tokens. Network NOT blocked.
+        # $HOME here only keeps tools off the caller's dotfiles; real containment is the sandbox, not this variable.
         with tempfile.TemporaryDirectory() as home:
-            env["HOME"] = home
-            done = run(argv, root, env=env, timeout=timeout)
+            env["HOME"] = os.path.realpath(home)
+            done = run(sandboxed(argv, root, env["HOME"]), root, env=env, timeout=timeout)
         status, out, err, timed_out = done.returncode, done.stdout, done.stderr, False
     except subprocess.TimeoutExpired as expired:
         text = [
@@ -235,8 +272,8 @@ TOOLS: dict[str, Callable[[object], Result]] = {
 
 
 def trace(tool: str, outcome: str, code: str, raw: str) -> bool:
-    """Append one fail-open trace row; False when no session id or trace library means no row was written."""
-    session = os.environ.get("CLAUDE_SESSION_ID") or os.environ.get("CODEX_THREAD_ID") or "?"
+    """Append one fail-open trace row (session `unattributed` if the harness sets no id); False if none written."""
+    session = os.environ.get("CLAUDE_SESSION_ID") or os.environ.get("CODEX_THREAD_ID") or "unattributed"
     try:
         module = importlib.import_module("hooks.scripts.lib.trace_row")
     except ImportError:  # the Codex copy ships without the Claude hook library: no trace rows there

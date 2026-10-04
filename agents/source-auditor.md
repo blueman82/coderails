@@ -50,8 +50,8 @@ now**.
    To re-derive a number from a test run, call the absolute path of
    `scripts/capability.py` in the coderails install (the dispatcher MUST pass it in your prompt; if it did not, report UNSUPPORTED for the re-run, do not guess a path):
    `<abs>/scripts/capability.py tests.run --json-args '{"name":"scripts"}'`. It runs
-   only commands declared in `capabilities/profiles.json` (bounded, scrubbed env). That is
-   bounded execution of repo code, **not** read-only: it may write caches in the repo.
+   only commands declared in `capabilities/profiles.json` (bounded, scrubbed env, macOS sandbox with no network and repo-only writes). That is
+   execution of repo code, **not** read-only: it may write caches in the repo.
    Read `exit_status` and `artifact_sha` from its JSON as your fresh command output.
 
 ## Method
