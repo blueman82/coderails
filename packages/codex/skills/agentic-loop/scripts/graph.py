@@ -61,7 +61,8 @@ def record_wave(path: Path, raw_results: str) -> dict[str, Any]:
         results = _object(envelope.get("results"), "results.results")
         transition = graph_semantics.record_wave(state, envelope.get("wave_id"), results)
         stale_nodes = frozenset(node for node, result in results.items() if result["outcome"] == "stale")
-        references, identifiers = bind_worker_evidence(state, active, stale_nodes)
+        failed_nodes = frozenset(node for node, result in results.items() if result["outcome"] == "failed")
+        references, identifiers = bind_worker_evidence(state, active, stale_nodes, failed_nodes)
         if any(
             classify_worker_evidence(cast(dict[str, Any], result).get("evidence"), identifiers)[0]
             for result in results.values()
