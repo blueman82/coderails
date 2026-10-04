@@ -22,13 +22,16 @@ from hooks.scripts.lib.loop_state_common import (
     LOOP_STOP_VOCAB,
     LoopState,
     atomic_progress_update,
+    consume_stop,
     load_progress,
     log,
     read_state,
+    recorded_stop,
     stable_invocations,
     stop_category,
     unstubbed_grace,
 )
+from hooks.scripts.lib.trace_row import append_row
 
 
 def graph_unresolved(state: LoopState) -> bool:
@@ -113,13 +116,19 @@ def main() -> int:
     state = load_progress(str(payload.get("cwd") or os.getcwd()), session, count)
     if unstubbed_grace(state, "loop_stall_guard"):
         return 0
-    text, _ = stable_text(
-        transcript,
-        int(os.environ.get("CLAUDE_HOOK_TAIL_LINES", "300")),
-        int(os.environ.get("CLAUDE_HOOK_MAX_ATTEMPTS", "5")),
-        float(os.environ.get("CLAUDE_HOOK_SLEEP_S", "0.3")),
-    )
-    category = stop_category(text)
+    recorded = recorded_stop(state.data)
+    category = str(recorded["category"]) if recorded else ""
+    if not recorded:
+        text, _ = stable_text(
+            transcript,
+            int(os.environ.get("CLAUDE_HOOK_TAIL_LINES", "300")),
+            int(os.environ.get("CLAUDE_HOOK_MAX_ATTEMPTS", "5")),
+            float(os.environ.get("CLAUDE_HOOK_SLEEP_S", "0.3")),
+        )
+        category = stop_category(text)
+        if category and state.path.is_file():  # never fabricate loop state for a loop that has none
+            loop_id = str(state.data.get("loop_id") or "") or None
+            append_row("loop_stall_guard", "fallback", "legacy_text_parse", session, loop_id)
     try:
         if category:
             if category.lower() == "complete" and graph_unresolved(state):
@@ -135,6 +144,8 @@ def main() -> int:
                     raise ValueError("loop_stop_counts must be an object")
                 counters = cast(dict[str, Any], counters)
                 counters[category] = counters.get(category, 0) + 1
+                if recorded:  # consume in the same write that counts it, so a repeated Stop cannot double-count
+                    consume_stop(data, recorded["seq"])
                 return data
 
             if not atomic_progress_update(state.path, increment):

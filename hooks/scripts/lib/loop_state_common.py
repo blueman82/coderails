@@ -182,11 +182,38 @@ def unstubbed_grace(state: LoopState, hook: str) -> bool:
 
 
 def stop_category(text: str) -> str:
-    """Return the last declaration's category after validating a complete marker."""
-    if not re.search(rf"^\s*LOOP-STOP:\s*({LOOP_STOP_VOCAB})([^a-z0-9]|$)", text, re.I | re.M):
-        return ""
-    matches = re.findall(rf"LOOP-STOP:\s*({LOOP_STOP_VOCAB})", text, re.I)
+    """Legacy text fallback: the last anchored declaration's category; an inline mention is prose (H06)."""
+    matches = re.findall(rf"^\s*LOOP-STOP:\s*({LOOP_STOP_VOCAB})(?:[^a-z0-9]|$)", text, re.I | re.M)
     return matches[-1] if matches else ""
+
+
+def consume_stop(data: dict[str, Any], seq: object) -> None:
+    """Mark exactly one unconsumed stop row consumed; raise so the enclosing atomic write is abandoned otherwise."""
+    rows = cast(list[object], data.get("stops") or [])
+    matches = [
+        cast(dict[str, Any], r) for r in rows if isinstance(r, dict) and cast(dict[str, Any], r).get("seq") == seq
+    ]
+    if len(matches) != 1 or matches[0].get("consumed") is not False:
+        raise ValueError("recorded stop already consumed")
+    matches[0]["consumed"] = True
+
+
+def recorded_stop(data: dict[str, Any]) -> dict[str, Any] | None:
+    """Return the newest unconsumed stop row recorded at the current revision; any malformed key reads as none."""
+    rows = data.get("stops")
+    if not isinstance(rows, list):
+        return None
+    for row in reversed(cast(list[object], rows)):
+        if not isinstance(row, dict):
+            continue
+        stop = cast(dict[str, Any], row)
+        if (
+            stop.get("consumed") is False
+            and stop.get("revision") == data.get("revision")
+            and stop.get("category") in LOOP_STOP_VOCAB.split("|")
+        ):
+            return stop
+    return None
 
 
 def mark_complete(cwd: str, session: str) -> bool:
