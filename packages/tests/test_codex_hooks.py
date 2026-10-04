@@ -370,6 +370,28 @@ class HookTests(unittest.TestCase):
         reasons = [json.loads(line)["reason_code"] for line in trace.read_text().splitlines()]
         self.assertEqual(reasons, ["wiki_schema_missing", "wiki_schema_invalid", "wiki_schema_invalid"])
 
+    def test_wiki_taxonomy_legacy_vault_and_config_typo(self) -> None:
+        """Negative control: a vault with only AGENTS-wiki-schema.md was silently unpoliced; typos leave a Codex row."""
+        config = self.repo / ".coderails/workflow.config.yaml"
+        config.parent.mkdir()
+        config.write_text('wiki_path: "."\nwiki_pth: x\n', encoding="utf-8")
+        (self.repo / "AGENTS-wiki-schema.md").write_text(
+            "# S\n\n## Page types\n\n- `concepts/`\n- `projects/`\n\n## Other\n", encoding="utf-8"
+        )
+        for directory in ("concepts", "projects"):
+            (self.repo / directory).mkdir()
+        denied = self.hook(
+            "wiki_taxonomy_gate",
+            {"session_id": "s2", "cwd": str(self.repo), "tool_input": {"command": "*** Add File: wrong/new.md"}},
+        )
+        self.assertTrue(denied)
+        rows = [json.loads(line) for line in (self.loop / "s2/trace.jsonl").read_text().splitlines()]
+        self.assertEqual(
+            [(r["command"], r["reason_code"]) for r in rows],
+            [("config", "config_unknown_key"), ("wiki_taxonomy_gate", "wiki_schema_legacy")],
+        )
+        self.assertTrue(all(r["event_id"] for r in rows))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -5,12 +5,14 @@ from __future__ import annotations
 import argparse
 import copy
 import difflib
-import importlib
+import hashlib
 import json
 import os
 import re
 import subprocess
 import sys
+import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, cast
 
@@ -167,24 +169,49 @@ def load_config(path: str | Path) -> tuple[dict[str, Any], list[dict[str, str]]]
     return _typed(_entries(text), properties, "", findings), findings
 
 
-def report_findings(findings: list[dict[str, str]]) -> None:
+def _append_row(code: str, key: str, session: str) -> None:
+    """One fail-open trace row (same shape as hooks/scripts/lib/trace_row.py; shipped in both packages)."""
+    if not session or session in {"?", "."} or "/" in session or ".." in session or "\0" in session:
+        return
+    root = Path(os.environ.get("CLAUDE_AGENTIC_LOOP_DIR") or os.environ.get("CODERAILS_AGENTIC_LOOP_DIR") or "")
+    root = root if str(root) not in ("", ".") else Path.home() / ".coderails/agentic-loop"
+    row = {
+        "schema_version": 1,
+        "event_id": str(uuid.uuid4()),
+        "session_id": session,
+        "loop_id": None,
+        "ts": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "command": "config",
+        "outcome": "warned",
+        "reason_code": code,
+        "inputs": {"key": hashlib.sha256(key.encode("utf-8")).hexdigest()},
+    }
+    try:
+        path = root / session / "trace.jsonl"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        descriptor = os.open(str(path), os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o644)
+        try:
+            os.write(descriptor, (json.dumps(row, sort_keys=True) + "\n").encode("utf-8"))
+        finally:
+            os.close(descriptor)
+    except OSError:
+        return
+
+
+def report_findings(findings: list[dict[str, str]], session: str = "") -> None:
     """Non-authoritative visibility: one stderr line plus fail-open trace rows. Never changes a decision."""
     if not findings:
         return
     print("coderails config: " + ", ".join(f"{f['code']}:{f['key']}" for f in findings), file=sys.stderr)
-    session = os.environ.get("CLAUDE_CODE_SESSION_ID", "")
-    try:
-        append_row = importlib.import_module("hooks.scripts.lib.trace_row").append_row
-    except (ImportError, AttributeError):  # Codex package ships no Claude trace helper
-        return
+    who = session or os.environ.get("CLAUDE_CODE_SESSION_ID", "")
     for finding in findings:
-        append_row("config", "warned", finding["code"], session, inputs={"key": finding["key"]})
+        _append_row(finding["code"], finding["key"], who)
 
 
-def settings(path: str | Path) -> dict[str, Any]:
-    """Typed values for a gate reader, with findings reported."""
+def settings(path: str | Path, session: str = "") -> dict[str, Any]:
+    """Typed values for a gate reader, with findings reported (session: hook payload id when env has none)."""
     values, findings = load_config(path)
-    report_findings(findings)
+    report_findings(findings, session)
     return values
 
 
@@ -208,6 +235,16 @@ def wiki_page_types(path: str | Path) -> tuple[list[str], str]:
     if not all(isinstance(n, str) and re.fullmatch(r"[A-Za-z0-9_-]+", n) for n in names):
         return [], "wiki_schema_invalid"
     return [str(n) for n in names], ""
+
+
+def legacy_page_types(path: str | Path) -> list[str]:
+    """Top-level dirs from the '## Page types' section of a pre-wiki.schema.json AGENTS-wiki-schema.md, else []."""
+    try:
+        sections = re.split(r"(?m)^## ", Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    section = next((part for part in sections if part.startswith("Page types\n")), "")
+    return [name[:-1] for name in re.findall(r"`([A-Za-z0-9_-]+/)`", section)]
 
 
 def _section(path: str | Path, key: str) -> dict[str, Any]:

@@ -33,7 +33,8 @@ def main() -> int:
     absolute = probe.resolve() / path.relative_to(probe)
     plugin = Path(os.environ.get("CLAUDE_PLUGIN_ROOT", "/"))
     config = plugin / ".coderails/workflow.config.yaml"
-    wiki = str(settings(config).get("wiki_path") or "") if config.is_file() else ""
+    session = str(payload.get("session_id") or "")
+    wiki = str(settings(config, session).get("wiki_path") or "") if config.is_file() else ""
     if not wiki:
         return 0
     vault = Path(wiki) if Path(wiki).is_absolute() else plugin / wiki

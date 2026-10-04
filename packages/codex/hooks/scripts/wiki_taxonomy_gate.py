@@ -18,7 +18,7 @@ from hook_common import (
 )
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from scripts.lib.config import settings, wiki_page_types  # noqa: E402
+from scripts.lib.config import legacy_page_types, settings, wiki_page_types  # noqa: E402
 
 
 def configuration(cwd: Path, root: Path) -> Path | None:
@@ -42,11 +42,18 @@ def taxonomy(cwd: Path, session: str) -> tuple[Path, Path, list[str]] | None:
         return None
     schema = root / "wiki.schema.json"
     try:
-        value = str(settings(config).get("wiki_path") or "")
+        value = str(settings(config, session).get("wiki_path") or "")
         if not value:
             return None
         vault = (config.parent.parent / value).resolve(strict=True)
         types, problem = wiki_page_types(schema)
+        legacy = root / "AGENTS-wiki-schema.md"
+        if problem == "wiki_schema_missing" and legacy.is_file():
+            # Vaults made by older wiki-init have only the prose schema: keep policing, say so.
+            types = legacy_page_types(legacy)
+            schema, problem = legacy, "" if types else "wiki_schema_invalid"
+            if types:
+                append_trace_row("wiki_taxonomy_gate", "fallback", "wiki_schema_legacy", session)
         if problem:
             append_trace_row("wiki_taxonomy_gate", "failed_open", problem, session)
             return None
