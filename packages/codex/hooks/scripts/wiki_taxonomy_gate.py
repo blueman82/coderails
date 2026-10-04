@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 """Keep native apply-patch writes within the configured wiki taxonomy."""
-
 from __future__ import annotations
 
 import os
