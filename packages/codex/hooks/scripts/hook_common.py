@@ -79,8 +79,9 @@ def log(message: str) -> None:
 
 
 def loop_root() -> Path:
-    """Return the loop-state root shared with scripts/authority.py (match CLAUDE_AGENTIC_LOOP_DIR if overridden)."""
-    return Path(os.environ.get("CODERAILS_AGENTIC_LOOP_DIR") or Path.home() / ".coderails" / "agentic-loop")
+    """Return the loop-state root shared with scripts/authority.py (CLAUDE_AGENTIC_LOOP_DIR wins)."""
+    override = os.environ.get("CLAUDE_AGENTIC_LOOP_DIR") or os.environ.get("CODERAILS_AGENTIC_LOOP_DIR")
+    return Path(override or Path.home() / ".coderails" / "agentic-loop")
 
 
 def safe_id(session_id: str) -> bool:

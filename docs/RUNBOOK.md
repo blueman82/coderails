@@ -54,9 +54,11 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   right after "crack on".
 - Query: `trace.by_reason` for `crack_on/granted/authority_granted`, `crack_on/blocked/authority_deny`,
   `crack_on/allowed/authority_expired_allow`, `crack_on/blocked/crack_on_legacy_flag`,
+  `crack_on/failed_open/authority_write_failed` (user said "crack on" but no authority was written, so nothing is
+  suppressed; if the trace dir is also unwritable only the `stamped=0 err=write_failed` discipline.log line remains),
   `authority/refused/authority_refused_foreign`. Inspect with
   `python3 scripts/authority.py inspect --session <exact id>`.
-- Remediation: revoke with `python3 scripts/authority.py revoke --session <id>`. An old flag
+- Remediation: revoke with `python3 scripts/authority.py revoke --session <id>` (also deletes any legacy flag). An old flag
   (`crack_on_legacy_flag`) is cleared with `rm <loop dir>/<id>/crack_on_active` (Codex:
   `$PLUGIN_DATA/sessions/<id>/crack_on_active`). Allowed right after "crack on": the phrase was quoted, backticked or
   negated (by design), or `authority_expired_allow` shows the 24h object lapsed; say "crack on" again to re-grant.

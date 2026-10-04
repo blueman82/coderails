@@ -7,6 +7,7 @@ import json
 import os
 import re
 import uuid
+from contextlib import suppress
 from datetime import datetime, timedelta, timezone
 
 from hook_common import (
@@ -70,7 +71,12 @@ def grant(session_id: str) -> dict[str, object] | None:
         "approval_required_for": ["merge"],
     }
     if path is None or not write_authority(path, obj):
+        append_trace_row("crack_on", "failed_open", "authority_write_failed", session_id)
         return None
+    directory = session_dir(session_id)
+    if directory is not None:
+        with suppress(OSError):
+            (directory / "crack_on_active").unlink()
     append_trace_row("crack_on", "granted", "authority_granted", session_id)
     return obj
 

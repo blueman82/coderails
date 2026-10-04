@@ -15,7 +15,14 @@ from typing import Any, cast
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from hooks.scripts.hook_common import deny, log, output, read_payload
 from hooks.scripts.lib.trace_row import append_row
-from scripts.lib.authority_object import authority_path, read_authority, safe_session, validate, write_authority
+from scripts.lib.authority_object import (
+    authority_path,
+    clear_legacy_flags,
+    read_authority,
+    safe_session,
+    validate,
+    write_authority,
+)
 
 CRACK_ON = re.compile(r"(^|[^a-z0-9])crack\s+on([^a-z0-9]|$)", re.IGNORECASE)
 QUOTED = re.compile(r'"[^"]*"|\u201c[^\u201d]*\u201d|`[^`]*`')
@@ -80,7 +87,9 @@ def grant(session_id: str) -> dict[str, Any] | None:
         "approval_required_for": ["merge"],
     }
     if path is None or not write_authority(path, obj):
+        append_row("crack_on", "failed_open", "authority_write_failed", session_id, loop_id)
         return None
+    clear_legacy_flags(session_id)
     append_row("crack_on", "granted", "authority_granted", session_id, loop_id)
     return obj
 

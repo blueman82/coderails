@@ -14,6 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from hooks.scripts.tests.native_hook_test_support import HookCase
 from scripts.lib.authority_object import validate
 
+CODEX_GATE = Path(__file__).resolve().parents[3] / "packages/codex/hooks/scripts/crack_on_gate.py"
 AUTHORITY_CLI = Path(__file__).resolve().parents[3] / "scripts" / "authority.py"
 
 
@@ -272,6 +273,69 @@ class CrackOnTests(HookCase):
             CLAUDE_LOOP_ID="loop-9",
         )
         self.assertEqual(self.authority("l2")["loop_id"], "loop-9")
+
+    def revoke(self, session: str, **environment: str) -> None:
+        """Run the authority CLI revoke for a session."""
+        subprocess.run(
+            [sys.executable, str(AUTHORITY_CLI), "revoke", "--session", session],
+            env=self.environment | environment,
+            check=True,
+            capture_output=True,
+        )
+
+    def codex_prompt(self, session: str, **environment: str) -> None:
+        """Submit 'crack on' through the Codex gate with only the Claude loop-dir variable set."""
+        env = self.environment | {"PLUGIN_DATA": str(self.directory / "plugin")} | environment
+        subprocess.run(
+            [sys.executable, str(CODEX_GATE)],
+            input=json.dumps({"hook_event_name": "UserPromptSubmit", "session_id": session, "prompt": "crack on"}),
+            env=env,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+    def test_revoke_ends_denial_even_with_legacy_flag(self) -> None:
+        """A legacy flag present before or created after the grant must not outlive revoke."""
+        (self.loop / "lg").mkdir(parents=True)
+        (self.loop / "lg/crack_on_active").write_text("\n", encoding="utf-8")
+        self.prompt("crack on", "lg")
+        self.assertFalse((self.loop / "lg/crack_on_active").exists())
+        (self.loop / "lg/crack_on_active").write_text("\n", encoding="utf-8")
+        self.revoke("lg")
+        self.assertFalse((self.loop / "lg/crack_on_active").exists())
+        self.assertFalse(self.ask("lg"))
+
+    def test_codex_gate_shares_claude_loop_root_so_one_cli_revokes(self) -> None:
+        """With only CLAUDE_AGENTIC_LOOP_DIR set the Codex grant lands where authority.py looks."""
+        self.codex_prompt("cx")
+        self.assertTrue((self.loop / "cx/authority.json").is_file())
+        self.revoke("cx")
+        self.assertFalse((self.loop / "cx/authority.json").exists())
+
+    def test_codex_legacy_flag_cleared_by_grant_and_revoke(self) -> None:
+        """The Codex legacy flag (under PLUGIN_DATA) is removed on grant and on CLI revoke."""
+        flag = self.directory / "plugin/sessions/cl/crack_on_active"
+        flag.parent.mkdir(parents=True)
+        flag.write_text("\n", encoding="utf-8")
+        self.codex_prompt("cl")
+        self.assertFalse(flag.exists())
+        flag.write_text("\n", encoding="utf-8")
+        self.revoke("cl", PLUGIN_DATA=str(self.directory / "plugin"))
+        self.assertFalse(flag.exists())
+
+    def test_grant_write_failure_is_traced_for_both_gates(self) -> None:
+        """A failed grant fails open but leaves one authority_write_failed trace row with an event_id."""
+        for session in ("wf1", "wf2"):
+            (self.loop / session / "authority.json").mkdir(parents=True)  # os.replace onto a directory fails
+        self.prompt("crack on", "wf1")
+        self.codex_prompt("wf2")
+        for session in ("wf1", "wf2"):
+            self.assertEqual(self.reasons(session), ["authority_write_failed"])
+            row = json.loads((self.loop / session / "trace.jsonl").read_text(encoding="utf-8"))
+            self.assertEqual((row["command"], row["outcome"]), ("crack_on", "failed_open"))
+            self.assertTrue(row["event_id"])
+            self.assertFalse(self.ask(session))
 
 
 if __name__ == "__main__":
