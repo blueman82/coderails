@@ -227,17 +227,27 @@ def recovery_counters() -> dict[str, Any]:
                 lines = path.with_name("recovery-trace.jsonl").read_text(encoding="utf-8").splitlines()
             except OSError:
                 continue
+            events: set[str] = set()
             for line in lines:
                 try:
                     row = as_dict(json.loads(line))
                 except ValueError:
                     continue
+                key = row.get("event_id") or (
+                    "|".join(str(row.get(k)) for k in ("ts", "command", "outcome", "reason_code", "inputs_sha256"))
+                    if row.get("ts") and row.get("inputs_sha256")
+                    else None
+                )  # a command writes one row per node: count events, not rows; keyless legacy rows count singly
+                if key is not None:
+                    if key in events:
+                        continue
+                    events.add(str(key))
                 code = str(row.get("reason_code"))
                 codes[code] = codes.get(code, 0) + 1
                 recovered += row.get("outcome") == "recovered"
                 starts += row.get("command") == "start" and row.get("outcome") in {"created", "rearmed"}
                 add_units += row.get("command") == "add-unit" and row.get("outcome") == "registered"
-                if row.get("outcome") == "refused":
+                if row.get("outcome") == "refused" and row.get("command") in {"start", "add-unit"}:
                     refusals[code] = refusals.get(code, 0) + 1
     return {
         "recoveries": recovered,

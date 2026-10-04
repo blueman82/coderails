@@ -240,7 +240,8 @@ class RecoverWaveTests(unittest.TestCase):
             self.assertEqual(
                 set(row),
                 {
-                    "schema_version", "ts", "session_id", "caller_session", "loop_id", "wave_id", "node_id", "attempt",
+                    "schema_version", "event_id", "ts", "session_id", "caller_session", "loop_id", "wave_id", "node_id",
+                    "attempt",
                     "node_action", "revision", "command", "outcome", "reason_code", "inputs_sha256",
                 },
             )  # fmt: skip

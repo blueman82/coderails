@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import json
 import re
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -255,6 +256,23 @@ class ProviderParityTests(unittest.TestCase):
                 self.assertNotIn('"status": "initialising"', text)
         for path in (ROOT / "skills/agentic-loop/phases-setup.md", ROOT / "commands/prep.md"):
             self.assertRegex(path.read_text(), r'graph\.py"? start\b', path.name)
+
+    def test_prose_only_directs_commands_the_cli_has(self) -> None:
+        """Every `graph.py <word>` the skill prose names is a real subcommand on both providers; no `status` command."""
+        for provider, base in (
+            ("claude", ROOT / "skills/agentic-loop"),
+            ("codex", ROOT / "packages/codex/skills/agentic-loop"),
+        ):
+            usage = subprocess.run(
+                [sys.executable, str(base / "scripts/graph.py"), "-h"], capture_output=True, text=True, check=True
+            ).stdout
+            real = set(re.search(r"\{([a-z,-]+)\}", usage).group(1).split(","))  # type: ignore[union-attr]
+            for doc in sorted(base.glob("*.md")):
+                text = doc.read_text()
+                with self.subTest(provider=provider, doc=doc.name):
+                    named = set(re.findall(r'graph\.py"? ([a-z][a-z-]+)\b', text))
+                    self.assertLessEqual(named, real, f"{doc.name} names a command graph.py lacks")
+                    self.assertIsNone(re.search(r"`status`[^.;)]*commands", text), "`status` is not a graph.py command")
 
     def test_native_provider_boundaries(self) -> None:
         """Skills dispatch only their native provider and no retired shared scheduler exists."""

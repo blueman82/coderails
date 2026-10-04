@@ -92,6 +92,8 @@ def _decide(path: Path, session: str, loop_id: str, prompt: str) -> tuple[str, s
     if existing.get("session_id") != session:
         raise RecoveryRefusedError("start_refused_session", "progress.json belongs to another session")
     if existing.get("loop_id") == loop_id:
+        if existing.get("status") == "complete":
+            raise RecoveryRefusedError("start_refused_loop_complete", "loop is complete: start with a fresh --loop-id")
         return "noop", "start_noop"
     if existing.get("status") != "complete":
         message = "an unfinished loop owns this session: resume it (inspect, summarize), do not restart"
@@ -114,6 +116,7 @@ def register_unit(state: dict[str, Any], unit: str, deps: list[str], join: bool)
     if unknown:
         raise RecoveryRefusedError("add_unit_refused_unknown_dep", f"unknown dependency {unknown}", (node_id,))
     proposed = copy.deepcopy(state)
+    proposed["revision"] += 1  # the graph changed: evals frozen at the old revision must go STALE
     graph = proposed["graph"]
     proposed["work_units"][unit] = {"status": "pending"}
     fresh: dict[str, Any] = {

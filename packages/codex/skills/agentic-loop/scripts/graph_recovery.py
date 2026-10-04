@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import uuid
 from collections.abc import Sequence
 from datetime import datetime, timezone
 from pathlib import Path
@@ -83,6 +84,7 @@ def trace(
         digest = hashlib.sha256(json.dumps(inputs, sort_keys=True, default=str).encode()).hexdigest()
         base: dict[str, Any] = {
             "schema_version": 1,
+            "event_id": uuid.uuid4().hex,  # one per event: a wave over N nodes writes N rows sharing it
             "ts": datetime.now(timezone.utc).isoformat(timespec="seconds"),
             "session_id": state.get("session_id"),
             "caller_session": inputs.get("session"),

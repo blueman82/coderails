@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 import time
+import uuid
 from collections.abc import Sequence
 from datetime import datetime, timezone
 from pathlib import Path
@@ -56,6 +57,7 @@ def trace(
         digest = hashlib.sha256(json.dumps(inputs, sort_keys=True, default=str).encode()).hexdigest()
         base: dict[str, Any] = {
             "schema_version": 1,
+            "event_id": uuid.uuid4().hex,  # one per event: a wave over N nodes writes N rows sharing it
             "ts": datetime.now(timezone.utc).isoformat(timespec="seconds"),
             "session_id": state.get("session_id"),
             "caller_session": inputs.get("session"),
@@ -196,10 +198,17 @@ def recover_wave(
         trace(path, state, "reported", report["reason_code"], inputs, rows)
         return report
     refusal: list[RecoveryRefusedError] = []
+    seen: list[dict[str, Any]] = []  # the locked state, so a refusal is traced from it, never the pre-read
+    traced: list[RecoveryRefusedError] = []  # refusals _plan already traced
 
     def update(locked: dict[str, Any]) -> dict[str, Any]:
+        seen.append(locked)
         try:
-            current, _ = _plan(path, locked, session, lease_seconds, clock, inputs)
+            try:
+                current, _ = _plan(path, locked, session, lease_seconds, clock, inputs)
+            except RecoveryRefusedError as error:
+                traced.append(error)
+                raise
             rows[:] = [
                 (n, _attempt(locked, n), action) for n, action in current.items()
             ]  # the locked attempt, not the pre-read
@@ -219,7 +228,7 @@ def recover_wave(
         transition(path, update)
     except ValueError as error:
         if refusal:
-            raise _refuse(path, state, refusal[0], inputs) from error
+            raise (refusal[0] if refusal[0] in traced else _refuse(path, seen[-1], refusal[0], inputs)) from error
         raise
     report.update(recovered=True, reason_code="recovered")
     trace(path, state, "recovered", "recovered", inputs, rows)

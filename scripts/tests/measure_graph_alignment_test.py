@@ -149,6 +149,26 @@ class MeasureTests(unittest.TestCase):
             },
         )
 
+    def test_counters_count_events_not_rows_and_controller_refusals_exclude_recover_wave(self) -> None:
+        """One recover-wave over N nodes writes N rows sharing an event id: it is one event, never a controller one."""
+        self.progress("a", {"graph": {"nodes": {}}})
+        trace = self.home / ".coderails/agentic-loop/slug/a/recovery-trace.jsonl"
+
+        def event(eid: str, command: str, outcome: str, code: str, nodes: int) -> str:
+            row = {"event_id": eid, "command": command, "outcome": outcome, "reason_code": code}
+            return "".join(json.dumps({**row, "node_id": f"U{n}"}) + "\n" for n in range(nodes))
+
+        write(
+            trace,
+            event("e1", "recover-wave", "refused", "mixed_wave", 3)
+            + event("e2", "recover-wave", "recovered", "recovered", 2)
+            + event("e3", "add-unit", "refused", "add_unit_refused_duplicate", 1)
+            + event("e4", "add-unit", "refused", "add_unit_refused_duplicate", 1),
+        )
+        recovery = self.measure()["recovery"]
+        self.assertEqual(recovery["recoveries"], 1)
+        self.assertEqual(recovery["controller"]["refusals_by_reason"], {"add_unit_refused_duplicate": 2})
+
     def test_recovery_counters(self) -> None:
         """Recoveries, refused spawns and retries-by-cause come from state and the advisory trace, counts only."""
         node: dict[str, Any] = {
@@ -193,7 +213,6 @@ class MeasureTests(unittest.TestCase):
                     "add_units": 1,
                     "refusals_by_reason": {
                         "add_unit_refused_duplicate": 2,
-                        "foreign_session": 1,
                         "start_refused_active_loop": 1,
                     },
                 },

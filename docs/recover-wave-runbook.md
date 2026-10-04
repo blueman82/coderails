@@ -7,7 +7,7 @@ Symptom: a wave is `active` (`graph.py summarize STATE` says `waiting for worker
 ```bash
 python3 packages/codex/skills/agentic-loop/scripts/graph.py recover-wave "$STATE" --session "$SESSION" --report-only
 jq -r '[.ts, .reason_code, .node_id, .attempt, .node_action, .caller_session] | @tsv' "$(dirname "$STATE")/recovery-trace.jsonl"
-jq -s 'group_by(.reason_code) | map({code: .[0].reason_code, rows: length})' "$(dirname "$STATE")/recovery-trace.jsonl"
+jq -s 'unique_by(.event_id) | group_by(.reason_code) | map({code: .[0].reason_code, events: length})' "$(dirname "$STATE")/recovery-trace.jsonl"
 ```
 
 Refusals also print `[reason_code=<code>]` on stderr. Each row carries `ts` (UTC), `node_action` (`dispatch`, `record`,
@@ -39,7 +39,8 @@ trace write never fails or changes a transition. Counters: `python3 scripts/meas
 Symptom: `graph.py start` or `graph.py add-unit` exits 1 and prints `graph: ... [reason_code=<code>]`.
 
 ```bash
-jq 'select(.outcome=="refused")' "$(dirname "$STATE")/recovery-trace.jsonl" | jq -r .reason_code | sort | uniq -c
+# one event writes one row per node: count events (distinct event_id), not rows
+jq -s 'map(select(.outcome=="refused" and (.command=="start" or .command=="add-unit"))) | unique_by(.event_id) | group_by(.reason_code) | map({code: .[0].reason_code, events: length})' "$(dirname "$STATE")/recovery-trace.jsonl"
 jq -r 'select(.command=="start" or .command=="add-unit") | [.ts, .command, .outcome, .reason_code, .node_id] | @tsv' "$(dirname "$STATE")/recovery-trace.jsonl"
 ```
 
@@ -51,6 +52,7 @@ the state commit; a refusal never changes `progress.json`. Counters: `measure_gr
 | --- | --- | --- |
 | `start_created` / `start_rearmed` / `start_noop` | Created, re-armed over a completed loop, or an idempotent retry of the same loop id. | None. |
 | `start_refused_active_loop` | A different loop id over an unfinished loop. | Resume it (`inspect`, `summarize`); only a completed loop can be re-armed. |
+| `start_refused_loop_complete` | The same loop id over a loop already `complete` (a noop would leave the guard demanding `start` forever). | Run `start` again with a fresh `--loop-id`. |
 | `start_refused_session` | Blank or `?` session, or the file belongs to another session. | Use this session's id; never adopt another session's file. |
 | `start_refused_path` | STATE is not `<session>/progress.json`, or the file is locked or unreadable. | Resolve the path with the path helper; inspect or repair the file. A Claude `progress.json.lock` directory left by a killed process must be removed by hand. |
 | `add_unit_registered` | Unit, node, edges and join input written in one save. | None. |

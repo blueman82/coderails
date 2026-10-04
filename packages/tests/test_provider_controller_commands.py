@@ -142,6 +142,18 @@ class StartTests(ControllerCase):
             self.assertEqual(c.path.read_bytes(), before)
             self.assertEqual(c.codes("start"), ["start_created", "start_noop"])
 
+    def test_start_on_a_completed_loop_with_the_same_id_is_refused_with_a_code(self) -> None:
+        """Same loop id over a complete loop must not noop (the guard then demands start forever)."""
+        for c in self.each():
+            c.start()
+            state = c.read()
+            state.update(status="complete")
+            c.path.write_text(json.dumps(state))
+            before = c.path.read_bytes()
+            self.refused(c.start(), "start_refused_loop_complete")
+            self.assertEqual(c.path.read_bytes(), before)
+            self.assertEqual(c.start(loop="loop-b").returncode, 0)
+
     def test_a_live_loop_is_never_restubbed(self) -> None:
         """A different loop id over an unfinished loop is refused; resume is the answer."""
         for c in self.each():
@@ -263,7 +275,16 @@ class AddUnitTests(ControllerCase):
                 {"id": "J12-all-units", "mode": "all", "inputs": ["U3[1]", "U3[2]"], "released": False},
             )
             self.assertEqual(c.codes("add-unit"), ["add_unit_registered"] * 2)
-            self.assertEqual(state["revision"], 1)
+            self.assertEqual(state["revision"], 3)
+
+    def test_each_add_unit_bumps_revision_so_frozen_evals_go_stale(self) -> None:
+        """Evals bind (session, loop, revision): a unit added after freezing must break that binding."""
+        for c in self.each():
+            frozen = {"session_id": SESSION, "loop_id": LOOP, "revision": c.read()["revision"]}
+            self.assertEqual(c.add("1").returncode, 0)
+            state = c.read()
+            self.assertNotEqual(frozen["revision"], state["revision"])
+            self.assertTrue(any(frozen[k] != state[k] for k in frozen))
 
     def test_duplicate_blank_bad_and_unknown_dependency_are_refused_unchanged(self) -> None:
         """Each refusal carries its code and leaves the file byte-identical."""

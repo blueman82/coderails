@@ -114,7 +114,7 @@ grace and block every time.
 
 - **Start (Phase -2):** run `graph.py start` (see phases-setup.md). It stamps this `session_id`, your unique non-blank `loop_id`, `revision: 1` and `status: "in-progress"` with an empty graph and no active wave, then `graph.py add-unit` registers each work unit. Never hand-write these; the stub is validated, not decorative. A different `loop_id` over an unfinished loop is refused: resume it.
 - **Phase 0:** the envelope is already in `authorising_prompt_raw`; update it only when an improved envelope is adopted.
-- **Update at each phase boundary:** `graph` node states, work-unit states, disposition fields, `last_updated` — these orchestrator-written fields stay model-prose (only `start`, `add-unit` and `status` have commands); never touch `loop_stop_counts`.
+- **Update at each phase boundary:** `graph` node states, work-unit states, disposition fields, `last_updated` — these fields are written through the graph commands (`add-unit`, `begin-wave`, `record-wave`, `record-unit`, `hard-stop`) and read back with `inspect` or `summarize`; never hand-edit `progress.json` and never touch `loop_stop_counts`.
 - **Teardown at Phase 13:** first run `python3 "${PLUGIN_ROOT}/skills/agentic-loop/scripts/graph.py" verify-completion <state> --session <session>` after final grading, proofs and retro exist. Then run `python3 "${PLUGIN_ROOT}/hooks/scripts/lib/loop_state_common.py" mark-complete <cwd> <session>` to set status and the live invocation-count marker together under the state lock. Never hand-derive or increment `completed_marker`.
 
 ## Recency
