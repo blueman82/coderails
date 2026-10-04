@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any, cast
 
 HOOK_FIELD = re.compile(r"(?:^|\s)hook=([A-Za-z0-9_.-]+)")
-FLAG_FIELDS = ("blocked", "would_block", "warned")
+FLAG_FIELDS = ("blocked", "would_block", "warned", "demoted")
 WORK_UNIT_TERMINAL = frozenset({"done", "dropped"})
 GRAPH_SUCCESS = frozenset({"done", "skipped"})
 GRAPH_SEMANTICS_COPIES = (
@@ -98,7 +98,7 @@ def bootstrap_bytes(root: Path) -> dict[str, Any]:
 
 
 def parse_telemetry(log_path: Path) -> dict[str, Any]:
-    """Count per-gate total/decisions/blocked/would_block/warned from `hook=<name> ...` lines; zeros if missing.
+    """Count per-gate total/decisions/blocked/would_block/warned/demoted from `hook=<name> ...` lines; zeros if missing.
 
     `total` is every line naming the hook; `decisions` is the subset carrying a `blocked=0|1` field.
     """

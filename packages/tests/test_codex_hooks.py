@@ -171,6 +171,45 @@ class HookTests(unittest.TestCase):
         self.assertEqual(record["total_bytes"], len(text.encode()))
         self.assertEqual(record["total_lines"], 52)
 
+    def test_confidence_labels_is_advisory_with_trace_row(self) -> None:
+        """An unlabeled long message warns via additionalContext, never blocks, and writes one demoted trace row."""
+        loops = self.directory / "loops"
+        self.environment["CODERAILS_AGENTIC_LOOP_DIR"] = str(loops)
+        log = self.directory / "d.log"
+        self.environment["CODERAILS_DISCIPLINE_LOG"] = str(log)
+        for event in ("Stop", "SubagentStop"):
+            payload = {"session_id": f"s-{event}", "hook_event_name": event, "last_assistant_message": "x " * 150}
+            out = self.hook("check_confidence_labels", payload)
+            self.assertNotIn("decision", out)
+            special = out["hookSpecificOutput"]
+            self.assertEqual(special["hookEventName"], event)
+            self.assertIn("[discipline-advisory]", special["additionalContext"])
+            rows = [json.loads(x) for x in (loops / f"s-{event}/trace.jsonl").read_text().splitlines()]
+            self.assertEqual(
+                [(r["command"], r["outcome"], r["reason_code"]) for r in rows],
+                [("check_confidence_labels", "demoted", "confidence_label_missing")],
+            )
+            self.assertTrue(rows[0]["event_id"] and rows[0]["ts"])
+        lines = log.read_text().splitlines()
+        self.assertEqual(sum("would_block=1" in x for x in lines), 2)
+        self.assertEqual(sum("demoted=1" in x for x in lines), 2)
+        self.assertNotIn("blocked=1", log.read_text())
+
+    def test_confidence_labels_trace_failures_and_clean_pass(self) -> None:
+        """Crash control: unwritable trace store or unsafe session still exits 0 advisory; labeled text is silent."""
+        blocker = self.directory / "file"
+        blocker.write_text("x")
+        self.environment["CODERAILS_AGENTIC_LOOP_DIR"] = str(blocker)
+        for session in ("s1", "../x", "."):
+            payload = {"session_id": session, "hook_event_name": "Stop", "last_assistant_message": "x " * 150}
+            self.assertIn("additionalContext", self.hook("check_confidence_labels", payload)["hookSpecificOutput"])
+        labeled = {
+            "session_id": "s1",
+            "hook_event_name": "Stop",
+            "last_assistant_message": "ok (verified) " + "x" * 300,
+        }
+        self.assertEqual(self.hook("check_confidence_labels", labeled), {})
+
     def test_crack_on_negation_never_stamps(self) -> None:
         """Negated requests leave no flag; clause-separated and plain requests stamp."""
         cases = {"don't crack on yet": False, "never crack on": False, "no problem, crack on": True, "crack on": True}

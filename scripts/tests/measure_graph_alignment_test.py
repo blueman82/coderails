@@ -98,16 +98,28 @@ class MeasureTests(unittest.TestCase):
         )
         claude = self.measure()["gate_blocks"]["claude"]
         self.assertEqual(
-            claude["gates"]["a"], {"total": 3, "decisions": 2, "blocked": 1, "would_block": 0, "warned": 0}
+            claude["gates"]["a"],
+            {"total": 3, "decisions": 2, "blocked": 1, "would_block": 0, "warned": 0, "demoted": 0},
         )
         self.assertEqual(
-            claude["gates"]["b"], {"total": 1, "decisions": 1, "blocked": 0, "would_block": 1, "warned": 1}
+            claude["gates"]["b"],
+            {"total": 1, "decisions": 1, "blocked": 0, "would_block": 1, "warned": 1, "demoted": 0},
         )
         self.assertEqual(claude["lines"], 4)
         self.assertEqual(
             (claude["first_timestamp"], claude["last_timestamp"]),
             ("2026-01-01T00:00:00+00:00", "2026-01-01T00:00:03+00:00"),
         )
+
+    def test_telemetry_counts_demoted(self) -> None:
+        """A demoted=1 line is its own flag and still counts as a blocked=0 decision."""
+        write(
+            self.claude_log,
+            "2026-01-01T00:00:00+00:00 hook=c would_block=1 demoted=1 blocked=0\n"
+            "2026-01-01T00:00:01+00:00 hook=c demoted=10\n",
+        )
+        gate = self.measure()["gate_blocks"]["claude"]["gates"]["c"]
+        self.assertEqual((gate["demoted"], gate["would_block"], gate["decisions"], gate["blocked"]), (1, 1, 1, 0))
 
     def test_missing_and_empty_logs_yield_zeros(self) -> None:
         """A missing Claude log and an empty Codex log both give zero lines, no error."""
@@ -312,6 +324,13 @@ class MeasureTests(unittest.TestCase):
         """Same command and reason_code with different outcomes are different counters."""
         self.trace("s1", self.row("e1", outcome="warned") + self.row("e2", outcome="blocked"))
         self.assertEqual(self.measure()["trace"]["by_reason"], {"gate/blocked/r1": 1, "gate/warned/r1": 1})
+
+    def test_trace_demoted_row_repeated_counts_once(self) -> None:
+        """One demoted row seen twice (same event_id) is one count, separate from blocked and warned."""
+        self.trace("s1", self.row("e1", outcome="demoted") + self.row("e1", outcome="demoted"))
+        trace = self.measure()["trace"]
+        self.assertEqual((trace["rows"], trace["duplicates"]), (1, 1))
+        self.assertEqual(trace["by_reason"], {"gate/demoted/r1": 1})
 
     def test_trace_torn_last_line_skipped(self) -> None:
         """A truncated final line and a row without event_id are skipped and reported, not fatal."""
