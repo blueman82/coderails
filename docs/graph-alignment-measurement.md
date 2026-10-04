@@ -127,6 +127,38 @@ Written before interpreting the data above. Each needs a minimum sample so a sma
 - **Not covered.** Single machine, single user, mixed Claude and Codex loops that cannot be separated,
   logs not rotated, no transcript sampling, and `blocked=1` counts not validated as correct blocks.
 
+## Eval integrity runbook (Phase F)
+
+Sink: `eval_trace.jsonl` beside the `evals.json` it describes (loop dir for loop scope; wherever the file lives at PR
+scope, so it is not loop-safe). Rows are append-only, fail-open and NON-AUTHORITATIVE: nothing reads them to decide a
+grade. Fields: `schema_version, session_id, loop_id, timestamp, command, outcome, reason_code, event_id, inputs`
+(`inputs` are sha256 only). Every refusal also prints `reason=<code>` to stderr. Counters:
+`python3 scripts/measure_graph_alignment.py --root . --json [--eval-trace <PR-scope file>]` reports
+`eval_trace` events deduped by `event_id`.
+
+Query: `jq -r 'select(.outcome!="ok")|[.command,.outcome,.reason_code]|@tsv' <loop dir>/eval_trace.jsonl | sort | uniq -c`
+
+| reason_code | symptom | remediation |
+|---|---|---|
+| `legacy_unhashed` | suite has no `frozen_hash`; graded (outcome `legacy`) | none required; re-freeze with `post_evals.py smoke-run` before any grade to get tamper evidence |
+| `suite_hash_mismatch` | oracle text differs from `frozen_hash` or the last amendment | revert the edit, or re-apply it with `post_evals.py amend ...` then regrade |
+| `integrity_stripped` | `frozen_hash` deleted from a suite graded with one (reader shows `TAMPERED:integrity_stripped`) | restore the file; deleting hash and tombstones together is NOT detectable |
+| `cmd_env` | loop-scope `cmd` exited 126/127/>=128 at grade time | fix the command's tooling or cwd (grade-loop runs it in the caller's cwd, 10s cap) |
+| `chain_broken` | `amendment_chain` entry edited, reordered or chain without `frozen_hash` | restore the file from the loop dir backup; do not hand-edit the chain |
+| `chain_truncated` | fewer chain entries than `grading.chain_len` | restore the removed entries; regrading after truncation is not detectable |
+| `progress_missing` / `progress_unparseable` | `progress.json` absent, invalid, or lacks `session_id`/`loop_id` | restore `progress.json` beside `evals.json`; there is no bypass flag |
+| `progress_foreign` | suite stamped with different ids than `progress.json` | the suite belongs to another loop; regenerate it for this loop |
+| `control_passes` | a loop-scope `negative_control` exited 0 | rewrite the control so it fails on the unmet state |
+| `control_env` | control exited 126/127/>=128 (missing tool, timeout) | fix the control's tooling or cwd |
+| `pass_exit_nonzero` | gate: eval recorded `pass` but `cmd` exits non-zero | the PASS is wrong or the build regressed; re-grade |
+| `fixture_formula_not_in_cmd` | `fixtures.formula` is not the literal tail of `cmd` | make the fixtures run the real checker text |
+
+Rows are deduped at write time per (evals.json sha256, command, outcome, reason_code) and the sink stops growing at 1 MiB, so hook polling does not inflate counters; `smoke-run|ok|frozen` records each freeze.
+
+Behaviour changes to know before paging: `grade-loop` without a sibling `progress.json` (archived or hand-built suites) now refuses `progress_missing` (decision: fail closed on both providers, no bypass); a symlinked or blank-id `progress.json` is refused; a PR-scope eval recorded `pass` whose `cmd` exits non-zero is refused `pass_exit_nonzero` by `smoke-verify`; `smoke-run` after an unrecorded oracle edit refuses `suite_hash_mismatch` (use `post_evals.py amend`). Stop-hook text for a tampered suite prints `reason=<code>`; re-running grade-loop will not clear it.
+
+Also traced as `outcome=legacy`: `legacy_progress_schema` (progress.json schema_version != 3, still allowed).
+
 ## Reproduce
 
 ```
@@ -135,6 +167,13 @@ python3 scripts/tests/measure_graph_alignment_test.py
 ```
 
 Telemetry and loop-state numbers will differ on re-run because both sources keep growing.
+
+Eval integrity (no `timeout`, it does not exist on macOS):
+
+```
+python3 -m unittest hooks.scripts.tests.eval_integrity_test hooks.scripts.tests.post_evals_grading_test scripts.tests.measure_graph_alignment_test
+PYTHONPATH=. python3 -m unittest packages/tests/test_codex_grading_encoding.py
+```
 
 ## Stale mkdir lock recovery (runbook)
 

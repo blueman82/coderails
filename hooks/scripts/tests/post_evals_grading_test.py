@@ -114,7 +114,9 @@ class GradingTests(ArtifactCase):
             grade_loop(self.path)
         self.assertEqual(Path(self.path).read_bytes(), before)
         progress.unlink()
-        self.assertEqual(grade_loop(self.path), "GO")
+        with self.assertRaisesRegex(ValueError, "progress_missing"):
+            grade_loop(self.path)
+        self.assertEqual(Path(self.path).read_bytes(), before)
 
     def test_malformed_or_mixed_amendments(self) -> None:
         """Malformed amendment collections and partially attested batches fail closed."""

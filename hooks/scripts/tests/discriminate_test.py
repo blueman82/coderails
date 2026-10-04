@@ -66,6 +66,9 @@ class DiscriminateTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "fixtures.formula"):
             self.evaluate([derived])
         derived["fixtures"] = {"good": "x", "bad": "y", "formula": "grep -q x"}
+        with self.assertRaisesRegex(ValueError, "fixture_formula_not_in_cmd"):
+            self.evaluate([derived])
+        derived["cmd"] = "echo x | grep -q x"
         self.evaluate([derived])
 
     def test_all_entries_and_required_shapes(self) -> None:

@@ -37,7 +37,7 @@ class TrustedHeadTests(ArtifactCase):
         super().setUp()
         self.repository()
         for name, source in (
-            ("check.py", "print('real check'); raise SystemExit(1)\n"),
+            ("check.py", "print('real check')\n"),
             ("control.py", "print('real control'); raise SystemExit(1)\n"),
             ("vacuous.py", "print('vacuous control')\n"),
         ):
