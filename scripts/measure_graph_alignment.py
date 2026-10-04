@@ -180,14 +180,9 @@ def classify(state: dict[str, Any]) -> dict[str, bool]:
 def graph_vs_work_units() -> dict[str, Any]:
     """Scan `<root>/*/*/progress.json` read-only and count loops by work_units/graph/divergence."""
     seen: set[Path] = set()
-    totals = {
-        "loops": 0,
-        "with_work_units": 0,
-        "with_graph_nodes": 0,
-        "with_both": 0,
-        "divergent": 0,
-        "divergent_lenient": 0,
-    }
+    totals = dict.fromkeys(
+        ("loops", "with_work_units", "with_graph_nodes", "with_both", "divergent", "divergent_lenient"), 0
+    )
     for base in loop_state_roots():
         for path in sorted(base.glob("*/*/progress.json")):
             real = path.resolve()
@@ -205,10 +200,7 @@ def graph_vs_work_units() -> dict[str, Any]:
 
 
 def trace_counts() -> dict[str, Any]:
-    """Count `<root>/*/trace.jsonl` rows once per event_id; skip torn lines and rows lacking an event_id.
-
-    Emits only counts keyed `command/outcome/reason_code`; never row inputs.
-    """
+    """Count `<root>/*/trace.jsonl` rows once per event_id (torn/keyless skipped); counts only, never row inputs."""
     seen: set[str] = set()
     by_reason: dict[str, int] = {}
     rows = duplicates = malformed = 0
@@ -240,10 +232,7 @@ def trace_counts() -> dict[str, Any]:
 
 
 def recovery_counters() -> dict[str, Any]:
-    """Count recoveries, controller starts, add-units, refusals and retries from loop state plus the advisory trace.
-
-    The trace is non-authoritative and only counted here; unparseable rows are skipped. Counts only.
-    """
+    """Count recoveries, controller starts/add-units/refusals, retries from loop state and advisory trace."""
     seen: set[Path] = set()
     refused = failed = stale = recovered = starts = add_units = 0
     codes: dict[str, int] = {}
@@ -373,7 +362,6 @@ def eval_trace_counts(extra: list[Path]) -> dict[str, Any]:
 
 def measure(root: Path, extra_traces: list[Path] | None = None) -> dict[str, Any]:
     """Assemble the full measurement object for a repository root."""
-    logs = telemetry_paths()
     return {
         "root": str(root),
         "hook_counts": {
@@ -381,7 +369,7 @@ def measure(root: Path, extra_traces: list[Path] | None = None) -> dict[str, Any
             "codex": hook_counts(root / "packages/codex/hooks/hooks.json"),
         },
         "bootstrap_bytes": bootstrap_bytes(root),
-        "gate_blocks": {provider: parse_telemetry(path) for provider, path in logs.items()},
+        "gate_blocks": {provider: parse_telemetry(path) for provider, path in telemetry_paths().items()},
         "graph_vs_work_units": graph_vs_work_units(),
         "trace": trace_counts(),
         "recovery": recovery_counters(),

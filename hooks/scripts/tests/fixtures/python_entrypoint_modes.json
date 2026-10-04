@@ -18,6 +18,7 @@
   "scripts/lib/eval_artifact.py": "100755",
   "scripts/lib/eval_execution.py": "100644",
   "scripts/lib/eval_integrity.py": "100644",
+  "scripts/lib/eval_signing.py": "100644",
   "scripts/lib/eval_trace.py": "100644",
   "scripts/lib/eval_validation.py": "100644",
   "scripts/lib/git_common.py": "100644",

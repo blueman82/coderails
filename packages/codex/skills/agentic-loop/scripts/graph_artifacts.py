@@ -66,7 +66,8 @@ def validate_evals(state: dict[str, Any], revision: int | None, path: Path) -> N
     if grading.get("amendments_at_grade") != len(amendments):
         raise GraphError("evals grading amendment count is stale")
     try:
-        verify_suite(evals, stamped=True)  # additive: legacy_unhashed suites pass, _grading_checksum is untouched
+        # additive: legacy_unhashed suites pass, _grading_checksum is untouched
+        verify_suite(evals, stamped=True, path=path)
     except IntegrityError as error:
         raise GraphError(f"evals oracle integrity: {error}") from error
 

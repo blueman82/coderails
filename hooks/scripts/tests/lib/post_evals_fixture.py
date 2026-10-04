@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import json
+import os
 import shlex
 import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from scripts.lib.artifact_io import JsonObject, read_object, write_object
 
@@ -43,6 +45,10 @@ class ArtifactCase(unittest.TestCase):
         """Allocate a fresh suite for every test."""
         self.temporary = tempfile.TemporaryDirectory(prefix="coderails-eval-contract-", dir=self.temporary_parent)
         self.addCleanup(self.temporary.cleanup)
+        # Signing keys are created on first freeze: keep them out of the real ~/.coderails/keys.
+        keys = patch.dict(os.environ, {"CODERAILS_KEYS_DIR": str(Path(self.temporary.name) / "keys")})
+        keys.start()
+        self.addCleanup(keys.stop)
         self.directory = Path(self.temporary.name)
         self.path = self.directory / "evals.json"
         self.data: JsonObject = {
