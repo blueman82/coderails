@@ -277,6 +277,14 @@ class AddUnitTests(ControllerCase):
             self.assertEqual(c.codes("add-unit"), ["add_unit_registered"] * 2)
             self.assertEqual(state["revision"], 3)
 
+    def test_a_repeated_dependency_is_reported_once_matching_the_single_edge(self) -> None:
+        """The reply must describe what was written: one edge, one depends_on entry."""
+        for c in self.each():
+            c.add("1")
+            reply = json.loads(c.add("2", "--depends-on", "1", "--depends-on", "1").stdout)
+            self.assertEqual(reply["depends_on"], ["1"])
+            self.assertEqual(c.read()["graph"]["edges"], [{"from": "U3[1]", "to": "U3[2]"}])
+
     def test_each_add_unit_bumps_revision_so_frozen_evals_go_stale(self) -> None:
         """Evals bind (session, loop, revision): a unit added after freezing must break that binding."""
         for c in self.each():

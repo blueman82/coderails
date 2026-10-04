@@ -169,7 +169,7 @@ def add_unit(path: Path, session: str, loop_id: str, unit: str, deps: list[str],
     return {
         "unit": unit,
         "node": node_id,
-        "depends_on": deps,
+        "depends_on": list(dict.fromkeys(deps)),
         "joined": join,
         "revision": proposed["revision"],
         "reason_code": "add_unit_registered",
