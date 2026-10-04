@@ -315,6 +315,7 @@ def _parser() -> argparse.ArgumentParser:
             controller.add_argument("--unit", required=True)
             controller.add_argument("--depends-on", action="append", default=[])
             controller.add_argument("--join", action="store_true")
+            controller.add_argument("--manifest", action="append", default=[])
     recover = commands.add_parser("recover-wave")
     recover.add_argument("state", type=Path)
     recover.add_argument("--session", required=True)
@@ -359,7 +360,9 @@ def main() -> int:
         if args.command == "start":
             output = start(args.state, args.session, args.loop_id, args.prompt_file)
         elif args.command == "add-unit":
-            output = add_unit(args.state, args.session, args.loop_id, args.unit, args.depends_on, args.join)
+            output = add_unit(
+                args.state, args.session, args.loop_id, args.unit, args.depends_on, args.join, args.manifest
+            )
         elif args.command == "begin-wave":
             output = begin_wave(args.state)
         elif args.command == "record-wave":
