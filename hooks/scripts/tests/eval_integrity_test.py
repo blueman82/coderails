@@ -177,21 +177,25 @@ class LegacyTests(ArtifactCase):
             self.data = self.reload()
             self.data["evals"][0]["cmd"] = command("raise SystemExit(0)")
             self.save()
-            self.assertEqual(read_loop_evals_result(self.directory), "UNSTAMPED")
+            self.assertEqual(read_loop_evals_result(self.directory), "TAMPERED:suite_hash_mismatch")
 
 
 class HashedReaderTests(Base):
     """The merge/completion reader re-verifies hashed suites."""
 
-    def test_reader_detects_oracle_edit_after_grade(self) -> None:
-        """Test reader detects oracle edit after grade."""
+    def setUp(self) -> None:
+        """Freeze a loop-scope suite (scope is part of the hashed oracle)."""
+        ArtifactCase.setUp(self)
         self.data.update(scope="loop")
         self.save()
         self.freeze()
+
+    def test_reader_detects_oracle_edit_after_grade(self) -> None:
+        """Test reader detects oracle edit after grade."""
         grade_loop(self.path)
         self.assertEqual(read_loop_evals_result(self.directory), "GO")
         self.edit_cmd(command("raise SystemExit(0)"))
-        self.assertEqual(read_loop_evals_result(self.directory), "UNSTAMPED")
+        self.assertEqual(read_loop_evals_result(self.directory), "TAMPERED:suite_hash_mismatch")
 
 
 class IdentityTests(ArtifactCase):
@@ -328,9 +332,9 @@ class TraceTests(ArtifactCase):
 
     def test_mirror_is_byte_identical(self) -> None:
         """Test mirror is byte identical."""
-        for name in ("eval_integrity.py", "eval_trace.py"):
+        for name in ("lib/eval_integrity.py", "lib/eval_trace.py", "lib/eval_execution.py", "post_evals.py"):
             self.assertEqual(
-                (ROOT / "scripts/lib" / name).read_bytes(), (ROOT / "packages/codex/scripts/lib" / name).read_bytes()
+                (ROOT / "scripts" / name).read_bytes(), (ROOT / "packages/codex/scripts" / name).read_bytes()
             )
 
 

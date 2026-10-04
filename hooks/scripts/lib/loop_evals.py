@@ -85,7 +85,7 @@ def read_loop_evals_result(loop_dir: Path) -> str:
         integrity = verify_suite(document, stamped=True)
     except IntegrityError as error:
         emit(path, "loop-evals-read", "refuse", error.code)
-        return "UNSTAMPED"
+        return f"TAMPERED:{error.code}"
     if integrity == LEGACY_UNHASHED:
         emit(path, "loop-evals-read", "legacy", LEGACY_UNHASHED)
     return verdict

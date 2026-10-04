@@ -11,7 +11,16 @@ from pathlib import Path
 from typing import cast
 
 from .artifact_io import JsonObject, array_value, object_value, read_object, write_object
-from .eval_integrity import CONTROL_PASSES, PASS_EXIT_NONZERO, IntegrityError, suite_hash
+from .eval_integrity import (
+    CMD_ENV,
+    CONTROL_ENV,
+    CONTROL_PASSES,
+    PASS_EXIT_NONZERO,
+    IntegrityError,
+    suite_hash,
+    verify_suite,
+)
+from .eval_trace import emit
 
 
 def is_environmental_rc(code: int | float) -> bool:
@@ -76,8 +85,9 @@ def verify_execution(data: JsonObject, timeout: float = 10, cwd: str | Path | No
                 raise ValueError(f"scripted eval {item.get('id', '<unnamed>')} has empty {key}")
             code, output = run_recorded(command.strip(), timeout, cwd)
             if is_environmental_rc(code):
-                raise ValueError(
-                    f"eval {item.get('id')} {key} did not execute at the gate (exit {code}). Output: {output}"
+                raise IntegrityError(
+                    CMD_ENV if key == "cmd" else CONTROL_ENV,
+                    f"eval {item.get('id')} {key} did not execute at the gate (exit {code}). Output: {output}",
                 )
             if key == "negative_control" and code == 0:
                 raise IntegrityError(
@@ -94,6 +104,8 @@ def verify_execution(data: JsonObject, timeout: float = 10, cwd: str | Path | No
 def record_smoke(path: str | Path) -> None:
     """Record actual command outcomes atomically without claiming their validity."""
     data = read_object(path)
+    if data.get("frozen_hash"):
+        verify_suite(data)  # raises suite_hash_mismatch/chain_* if the oracle moved since freeze
     for item in scripted_evals(data):
         if not isinstance(item.get("id"), str):
             raise ValueError("a scripted eval has a non-string id")
@@ -104,9 +116,13 @@ def record_smoke(path: str | Path) -> None:
             smoke[f"{prefix}_exit"] = code
             smoke[f"{prefix}_output"] = output
         item["smoke"] = smoke
-    # Re-stamping after a grade or an amendment would launder an edited oracle into the frozen hash.
-    if not data.get("grading") and not data.get("amendment_chain"):
+    # Stamp only a never-frozen, never-graded suite: re-stamping would launder an edited oracle. An edit after
+    # the first freeze was refused above; record it with post_evals.py amend.
+    if not data.get("frozen_hash") and not data.get("grading") and not data.get("amendment_chain"):
         data["frozen_hash"] = suite_hash(data)
+        write_object(path, data)
+        emit(path, "smoke-run", "ok", "frozen")
+        return
     write_object(path, data)
 
 

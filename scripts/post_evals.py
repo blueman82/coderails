@@ -15,16 +15,8 @@ from typing import Any, cast
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from scripts.lib.artifact_io import array_value, object_value, read_object, write_object
 from scripts.lib.eval_artifact import compute_go, grading_checksum
-from scripts.lib.eval_execution import (
-    is_environmental_rc,
-    record_smoke,
-    run_recorded,
-    scripted_evals,
-    verify_execution,
-)
+from scripts.lib.eval_execution import record_smoke, scripted_evals, verify_execution
 from scripts.lib.eval_integrity import (
-    CONTROL_ENV,
-    CONTROL_PASSES,
     LEGACY_UNHASHED,
     PROGRESS_FOREIGN,
     PROGRESS_MISSING,
@@ -44,35 +36,20 @@ def compute_and_validate_result(path: str | Path) -> str:
 
 
 def _progress_identity(progress: Path, data: dict[str, Any]) -> dict[str, Any]:
-    """Require a parseable sibling progress.json whose ids match any ids already on the suite."""
+    """Require a regular, parseable sibling progress.json whose ids match any ids already on the suite."""
+    if progress.is_symlink():
+        raise IntegrityError(PROGRESS_FOREIGN, f"{progress} is a symlink; identity must come from the loop's own file")
     try:
         identity = read_object(progress)
     except FileNotFoundError as error:
         raise IntegrityError(PROGRESS_MISSING, f"{progress} is missing; restore it to grade") from error
     except (OSError, ValueError) as error:
         raise IntegrityError(PROGRESS_UNPARSEABLE, f"{progress} does not parse") from error
-    if not all(isinstance(identity.get(key), str) and identity[key] for key in ("session_id", "loop_id")):
+    if not all(isinstance(identity.get(key), str) and identity[key].strip() for key in ("session_id", "loop_id")):
         raise IntegrityError(PROGRESS_UNPARSEABLE, f"{progress} does not parse or lacks session_id/loop_id")
     if any(data.get(key) not in (None, identity[key]) for key in ("session_id", "loop_id")):
         raise IntegrityError(PROGRESS_FOREIGN, "suite is stamped for a different session/loop than progress.json")
     return identity
-
-
-def _execute_controls(data: dict[str, Any]) -> None:
-    """Run every scripted negative_control: it must fail for a content reason."""
-    if str(data.get("verification_level")) == "0":
-        return
-    for item in array_value(data.get("evals", [])):
-        control = object_value(item).get("negative_control")
-        if object_value(item).get("mode") != "scripted" or not isinstance(control, str) or not control.strip():
-            continue
-        code, output = run_recorded(control.strip())
-        if code == 0:
-            raise IntegrityError(CONTROL_PASSES, f"eval {item.get('id')} negative_control exited 0")
-        if is_environmental_rc(code):
-            raise IntegrityError(
-                CONTROL_ENV, f"eval {item.get('id')} negative_control did not execute (exit {code}): {output}"
-            )
 
 
 def grade_loop(path: str | Path) -> str:
@@ -94,7 +71,7 @@ def grade_loop(path: str | Path) -> str:
     progress = Path(path).with_name("progress.json")
     identity = _progress_identity(progress, data)
     integrity = verify_suite(data)
-    _execute_controls(data)
+    verify_execution(data)  # cmd of a recorded pass must still pass; control must fail for a content reason
     if integrity == LEGACY_UNHASHED:
         print(
             "post_evals: reason=legacy_unhashed — suite has no frozen_hash; graded without tamper evidence",

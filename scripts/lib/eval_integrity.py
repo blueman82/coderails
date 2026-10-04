@@ -23,6 +23,8 @@ PROGRESS_FOREIGN = "progress_foreign"
 PROGRESS_UNPARSEABLE = "progress_unparseable"
 CONTROL_PASSES = "control_passes"
 CONTROL_ENV = "control_env"
+CMD_ENV = "cmd_env"
+INTEGRITY_STRIPPED = "integrity_stripped"
 PASS_EXIT_NONZERO = "pass_exit_nonzero"
 FIXTURE_FORMULA_NOT_IN_CMD = "fixture_formula_not_in_cmd"
 
@@ -92,6 +94,8 @@ def verify_suite(data: JsonObject, stamped: bool = False) -> str:
     if not data.get("frozen_hash"):
         if data.get("amendment_chain"):
             raise IntegrityError(CHAIN_BROKEN, "amendment_chain present without frozen_hash")
+        if grading.get("integrity") == "verified":
+            raise IntegrityError(INTEGRITY_STRIPPED, "frozen_hash removed from a suite that was graded with one")
         if stamped and grading.get("suite_hash") not in (None, current):
             raise IntegrityError(SUITE_HASH_MISMATCH, "oracle changed since grading")
         return LEGACY_UNHASHED

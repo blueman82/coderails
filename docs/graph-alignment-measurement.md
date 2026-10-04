@@ -142,6 +142,8 @@ Query: `jq -r 'select(.outcome!="ok")|[.command,.outcome,.reason_code]|@tsv' <lo
 |---|---|---|
 | `legacy_unhashed` | suite has no `frozen_hash`; graded (outcome `legacy`) | none required; re-freeze with `post_evals.py smoke-run` before any grade to get tamper evidence |
 | `suite_hash_mismatch` | oracle text differs from `frozen_hash` or the last amendment | revert the edit, or re-apply it with `post_evals.py amend ...` then regrade |
+| `integrity_stripped` | `frozen_hash` deleted from a suite graded with one (reader shows `TAMPERED:integrity_stripped`) | restore the file; deleting hash and tombstones together is NOT detectable |
+| `cmd_env` | loop-scope `cmd` exited 126/127/>=128 at grade time | fix the command's tooling or cwd (grade-loop runs it in the caller's cwd, 10s cap) |
 | `chain_broken` | `amendment_chain` entry edited, reordered or chain without `frozen_hash` | restore the file from the loop dir backup; do not hand-edit the chain |
 | `chain_truncated` | fewer chain entries than `grading.chain_len` | restore the removed entries; regrading after truncation is not detectable |
 | `progress_missing` / `progress_unparseable` | `progress.json` absent, invalid, or lacks `session_id`/`loop_id` | restore `progress.json` beside `evals.json`; there is no bypass flag |
@@ -150,6 +152,10 @@ Query: `jq -r 'select(.outcome!="ok")|[.command,.outcome,.reason_code]|@tsv' <lo
 | `control_env` | control exited 126/127/>=128 (missing tool, timeout) | fix the control's tooling or cwd |
 | `pass_exit_nonzero` | gate: eval recorded `pass` but `cmd` exits non-zero | the PASS is wrong or the build regressed; re-grade |
 | `fixture_formula_not_in_cmd` | `fixtures.formula` is not the literal tail of `cmd` | make the fixtures run the real checker text |
+
+Rows are deduped at write time per (evals.json sha256, command, outcome, reason_code) and the sink stops growing at 1 MiB, so hook polling does not inflate counters; `smoke-run|ok|frozen` records each freeze.
+
+Behaviour changes to know before paging: `grade-loop` without a sibling `progress.json` (archived or hand-built suites) now refuses `progress_missing` (decision: fail closed on both providers, no bypass); a symlinked or blank-id `progress.json` is refused; a PR-scope eval recorded `pass` whose `cmd` exits non-zero is refused `pass_exit_nonzero` by `smoke-verify`; `smoke-run` after an unrecorded oracle edit refuses `suite_hash_mismatch` (use `post_evals.py amend`). Stop-hook text for a tampered suite prints `reason=<code>`; re-running grade-loop will not clear it.
 
 Also traced as `outcome=legacy`: `legacy_progress_schema` (progress.json schema_version != 3, still allowed).
 

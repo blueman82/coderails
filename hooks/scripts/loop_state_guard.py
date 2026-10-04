@@ -44,6 +44,13 @@ def completion_evals(state: LoopState) -> str:
         "STALE": "STALE: does not belong to the current loop revision",
     }
     explanation = reasons.get(verdict, f"no passing loop-scope evals.json ({verdict})")
+    if verdict.startswith("TAMPERED:"):
+        return (
+            f"[loop-state-guard] Loop complete with {count} work-units, but evals.json at:\n"
+            f"  {state.path.parent / 'evals.json'}\nfailed its tamper check reason={verdict[9:]}. "
+            f"Re-running grade-loop will refuse with the same code. Revert the oracle edit, or re-apply it with "
+            f"post_evals.py amend, then regrade. Trace row: eval_trace.jsonl beside evals.json."
+        )
     return (
         f"[loop-state-guard] Loop complete with {count} work-units, but evals.json at:\n"
         f"  {state.path.parent / 'evals.json'}\nhas {explanation}.\n"
