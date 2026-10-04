@@ -142,7 +142,7 @@ Before this change a SIGKILLed hook left `progress.json.lock` (or `verification-
 forever: every later `atomic_progress_update` returned `False` and the verification ceiling denied every command.
 Both sites now take the lock through `hooks/scripts/lib/dir_lock.py`.
 
-**Policy.** The lock dir holds `owner` = `{pid, start, ts}` (`start` is `ps -o lstart=`). A lock is stolen only when
+**Policy.** The lock dir holds `owner` = `{pid, host, start, ts}` (`start` is `ps -o lstart=`). A lock is stolen only when
 the owner is provably dead: `os.kill(pid, 0)` raises `ProcessLookupError`, or the pid is alive with a different
 start time (pid reuse). `PermissionError` means alive and never steals. An absent, empty or torn owner file is not
 dead on its own (it is the mkdir-then-write window); it is stolen only when the lock dir's mtime is older than
@@ -152,7 +152,7 @@ counts as young. The steal is `os.rename(lock, lock.stale.<pid>.<uuid>)`: one ra
 Release removes the lock only if `owner.pid` is the caller's.
 
 **Reason codes** (appended as non-authoritative rows `{ts, event_id, reason, schema:"lock_event",
-non_authoritative:true}` to `lock-events.jsonl` beside the lock; fail-open, a write failure never changes the
+non_authoritative:true, lock, owner_pid, pid}` (lock path, judged owner pid or null, acquirer pid) to `lock-events.jsonl` beside the lock; fail-open, a write failure never changes the
 lock result):
 
 | Code | Meaning |
@@ -169,13 +169,16 @@ lock result):
 whose pid is alive.
 
 **Known ceiling.** If a new holder wins between the steal's judgement and its rename, and a third process takes the
-vacated name before the rename-back, two holders can briefly coexist. The Codex copy
-(`packages/codex/hooks/scripts/verification_volume_ceiling.py`, `acquire_lock`) still has the bare mkdir lock; it
-is a named follow-up because it has its own `lib/` and would need a vendored copy.
+vacated name before the rename-back, two holders can briefly coexist. A pid recorded by a different `host`
+is never judged by `kill -0` (shared state dirs over NFS or containers); such a lock is stolen only by age.
+Same-second pid reuse with an identical `lstart` is not detectable. The Codex hook uses a byte-identical vendored
+copy (`packages/codex/hooks/scripts/lib/dir_lock.py`, guarded by `dir_lock_test`); its events land in
+`$PLUGIN_DATA/verification-ceiling/lock-events.jsonl`, which the measurement script does not yet scan.
 
 **Reproduce.**
 
 ```
 python3 -m unittest hooks.scripts.tests.dir_lock_test hooks.scripts.tests.lock_recovery_test
+python3 packages/tests/test_codex_ceiling_lock.py
 python3 -m unittest scripts.tests.measure_graph_alignment_test
 ```

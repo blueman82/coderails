@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import signal
+import socket
 import subprocess
 import sys
 import tempfile
@@ -199,6 +200,45 @@ class DirLockTests(unittest.TestCase):
             self.assertEqual(row["schema"], "lock_event")
             self.assertIs(row["non_authoritative"], True)
             self.assertIn("ts", row)
+
+    def test_malformed_stale_env_is_fail_open(self) -> None:
+        """A garbage CLAUDE_LOCK_STALE_S falls back to the default bound instead of raising."""
+        self.make_lock("{}")
+        self.old(3600)
+        with patch.dict(os.environ, {"CLAUDE_LOCK_STALE_S": "abc"}):
+            self.assertEqual(self.acquire(), (True, "lock_stolen_age"))
+
+    def test_foreign_host_owner_not_judged_by_local_pid(self) -> None:
+        """A pid invisible locally but recorded by another host is not dead; only age can steal it."""
+        owner = json.dumps({"pid": 4000000, "host": "some-other-host", "start": "", "ts": time.time()})
+        self.make_lock(owner)
+        self.assertEqual(self.acquire(), (False, "lock_busy"))
+        self.old(3600)
+        self.assertEqual(self.acquire(), (True, "lock_stolen_age"))
+
+    def test_owner_records_host(self) -> None:
+        """The owner file names the host so other hosts can refuse the pid check."""
+        self.assertTrue(self.acquire()[0])
+        self.assertEqual(json.loads((self.lock / "owner").read_text())["host"], socket.gethostname())
+
+    def test_event_rows_identify_lock_and_parties(self) -> None:
+        """Steal and busy rows name the lock, the judged owner pid and the acquirer pid."""
+        self.make_lock(json.dumps({"pid": 4000000, "start": "", "ts": 0}))
+        self.assertEqual(self.acquire(), (True, "lock_stolen_dead_owner"))
+        release_dir_lock(self.lock)
+        self.make_lock(None)
+        self.acquire()
+        rows = [json.loads(x) for x in (self.lock.parent / "lock-events.jsonl").read_text().splitlines()]
+        self.assertEqual([r["lock"] for r in rows], [str(self.lock)] * 2)
+        self.assertEqual(rows[0]["owner_pid"], 4000000)
+        self.assertEqual(rows[0]["pid"], os.getpid())
+        self.assertIsNone(rows[1]["owner_pid"])
+
+    def test_codex_copy_is_byte_identical(self) -> None:
+        """The vendored Codex copy cannot drift from the Claude primitive."""
+        a = ROOT / "hooks/scripts/lib/dir_lock.py"
+        b = ROOT / "packages/codex/hooks/scripts/lib/dir_lock.py"
+        self.assertEqual(a.read_bytes(), b.read_bytes())
 
 
 if __name__ == "__main__":
