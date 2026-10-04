@@ -203,6 +203,45 @@ def graph_vs_work_units() -> dict[str, Any]:
     return {"roots": [str(r) for r in loop_state_roots()], **totals}
 
 
+def recovery_counters() -> dict[str, Any]:
+    """Count recoveries, refused spawns and retries by cause from loop state plus the advisory recovery trace.
+
+    The trace is non-authoritative and only counted here; unparseable rows are skipped. Counts only.
+    """
+    seen: set[Path] = set()
+    refused = failed = stale = recovered = 0
+    codes: dict[str, int] = {}
+    for base in loop_state_roots():
+        for path in sorted(base.glob("*/*/progress.json")):
+            real = path.resolve()
+            if real in seen:
+                continue
+            seen.add(real)
+            for node in as_dict(as_dict(read_object(path).get("graph")).get("nodes")).values():
+                entry = as_dict(node)
+                failed += as_dict(entry.get("retry")).get("attempts", 0) or 0
+                stale += as_dict(entry.get("respawn")).get("generation", 0) or 0
+                refused += sum(as_dict(e).get("outcome") == "launch_refused" for e in as_list(entry.get("evidence")))
+            try:
+                lines = path.with_name("recovery-trace.jsonl").read_text(encoding="utf-8").splitlines()
+            except OSError:
+                continue
+            for line in lines:
+                try:
+                    row = as_dict(json.loads(line))
+                except ValueError:
+                    continue
+                code = str(row.get("reason_code"))
+                codes[code] = codes.get(code, 0) + 1
+                recovered += row.get("outcome") == "recovered"
+    return {
+        "recoveries": recovered,
+        "refused_spawns": refused,
+        "retries_by_cause": {"failed": failed, "stale_recovery": stale},
+        "trace_rows_by_reason_code": dict(sorted(codes.items())),
+    }
+
+
 def line_count(path: Path) -> int | None:
     """Return the number of lines in a file, or None when it is missing."""
     try:
@@ -239,6 +278,7 @@ def measure(root: Path) -> dict[str, Any]:
         "bootstrap_bytes": bootstrap_bytes(root),
         "gate_blocks": {provider: parse_telemetry(path) for provider, path in logs.items()},
         "graph_vs_work_units": graph_vs_work_units(),
+        "recovery": recovery_counters(),
         "duplication": duplication(root),
     }
 

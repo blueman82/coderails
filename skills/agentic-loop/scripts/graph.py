@@ -11,6 +11,7 @@ from typing import Any, cast
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from hooks.scripts.lib import graph_dispatch as dispatch
+from hooks.scripts.lib import graph_recovery
 from hooks.scripts.lib.graph_evidence import object_value
 from hooks.scripts.lib.graph_executor import graph_semantics, load, transition
 
@@ -21,6 +22,8 @@ def parser() -> argparse.ArgumentParser:
     commands = result.add_subparsers(dest="command", required=True)
     for name in (
         "inspect",
+        "summarize",
+        "recover-wave",
         "plan",
         "begin-wave",
         "record-wave",
@@ -41,7 +44,18 @@ def parser() -> argparse.ArgumentParser:
             detail = command.add_mutually_exclusive_group(required=True)
             detail.add_argument("--evidence")
             detail.add_argument("--reason")
-        if name in {"respawn-stale", "hard-stop", "authorize-dispatch", "record-unit", "complete", "verify-completion"}:
+        if name == "recover-wave":
+            command.add_argument("--lease-seconds", type=int, default=900)
+            command.add_argument("--report-only", action="store_true")
+        if name in {
+            "respawn-stale",
+            "hard-stop",
+            "authorize-dispatch",
+            "record-unit",
+            "complete",
+            "verify-completion",
+            "recover-wave",
+        }:
             command.add_argument("--session", required=True)
         if name in {"respawn-stale", "hard-stop"}:
             command.add_argument("--node", required=True)
@@ -108,6 +122,10 @@ def main() -> int:
                 "loop_id": state["loop_id"],
                 **graph_semantics.inspect(state),
             }
+        elif args.command == "summarize":
+            output = graph_recovery.summarize(load(args.state))
+        elif args.command == "recover-wave":
+            output = dispatch.recover_wave(args.state, args.session, args.lease_seconds, apply=not args.report_only)
         elif args.command == "plan":
             output = dispatch.plan(args.state)
         elif args.command == "begin-wave":
