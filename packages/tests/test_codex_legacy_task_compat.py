@@ -15,7 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "codex/skills/agent
 import graph
 from graph_evidence import validate_worker_evidence
 from graph_identity import GraphError, is_legacy_task_name, task_node
-from graph_recovery import RecoveryRefusedError
+from graph_recovery import RecoveryRefusedError, traced_refusal
 
 from packages.tests.codex_fixture import append, frozen_evals, node, read_json, spawn, state, transcripts, write_json
 
@@ -245,6 +245,22 @@ class LegacyRefusalTraceTests(unittest.TestCase):
         )
         self.assertEqual(rows[0]["session_id"], "parent")
         self.assertTrue(rows[0]["event_id"] and rows[0]["inputs_sha256"])
+
+    def test_row_names_the_refused_attempt_and_no_false_caller(self) -> None:
+        """The row carries the refused node and attempt; record-wave has no caller session, so it is null."""
+        with self.assertRaises(RecoveryRefusedError):
+            graph.record_wave(self.path, self.results)
+        row = self._rows()[0]
+        self.assertEqual((row["node_id"], row["attempt"]), ("U3[2]", 1))
+        self.assertIsNone(row["caller_session"])
+
+    def test_session_argument_is_traced_as_caller_not_owner(self) -> None:
+        """A coded refusal under a foreign --session records that caller, never the loop owner's session."""
+        loaded = read_json(self.path)
+        with self.assertRaises(RecoveryRefusedError), traced_refusal(self.path, loaded, "complete", "OTHER"):
+            raise RecoveryRefusedError(CODE, "x", ("U3[2]",), 3)
+        row = self._rows()[0]
+        self.assertEqual((row["caller_session"], row["session_id"], row["attempt"]), ("OTHER", "parent", 3))
 
     def test_unwritable_trace_does_not_change_the_refusal(self) -> None:
         """Unwritable trace storage is fail-open: the same coded refusal and no extra exception."""

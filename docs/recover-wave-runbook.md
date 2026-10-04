@@ -42,7 +42,7 @@ attempt binds a node-only worker name (`loop_worker_<node-hex>[_aN]`); only loop
 
 ```bash
 # one refusal is one event: count distinct event_id
-jq -s 'map(select(.reason_code=="legacy_task_identity_refused")) | unique_by(.event_id) | map({ts, command, node: .node_id})' "$(dirname "$STATE")/recovery-trace.jsonl"
+jq -s 'map(select(.reason_code=="legacy_task_identity_refused")) | unique_by(.event_id) | map({ts, command, node: .node_id, attempt, caller_session})' "$(dirname "$STATE")/recovery-trace.jsonl"
 python3 scripts/measure_graph_alignment.py --root . --json | jq .recovery.legacy_task_refusals
 ```
 
@@ -50,7 +50,7 @@ Same sidecar and row schema as recover-wave; the trace is advisory and a refusal
 
 | reason_code | Meaning | Remediation |
 | --- | --- | --- |
-| `legacy_task_identity_refused` | The node's spawn for the cited attempt carries a node-only name. No shim re-reads it. | Re-dispatch the node under the loop-scoped name (`begin-wave` prints it); never edit evidence or the transcript. A loop that cannot be redone is finished by a human (`hard-stop`) or restarted with a fresh `--loop-id`. |
+| `legacy_task_identity_refused` | The node's spawn for the cited attempt carries a node-only name. No shim re-reads it. `attempt` in the trace row is the refused attempt; `caller_session` is the `--session` the command received (null for `record-wave`, which takes none). | Nothing re-opens a done node: `begin-wave` dispatches only ready nodes, so re-dispatch is not possible. The only working path is to start a fresh `--loop-id` and re-run the work; never edit evidence or the transcript. This includes **completed** loops: `verify-completion` on a loop completed under node-only names now refuses (it passed before the clean break) - that is the deliberate fail-closed cost. |
 
 # start / add-unit runbook (both providers)
 

@@ -206,7 +206,7 @@ def _recover_locked(path: Path, session: str, lease: int, clock: float, apply: b
             raise _refuse(path, state, RecoveryRefusedError("recovery_budget_exhausted", message, spent), inputs)
         check = {"checked": True, "method": f"lease {lease}s expired", "result": "no worker activity"}
         results = {n: {"outcome": "stale", "evidence": "lease expired", "stale_check": check} for n in nodes}
-        with traced_refusal(path, state, "recover-wave"):
+        with traced_refusal(path, state, "recover-wave", session):
             proposed, _ = _apply_record(state, json.dumps({"wave_id": active["wave_id"], "results": results}))
         for node_id in nodes:
             try:

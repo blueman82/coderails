@@ -62,7 +62,7 @@ def complete(
         if state["status"] == "complete":
             raise GraphError("graph is already complete")
         revision = state["revision"]
-        with traced_refusal(path, state, "complete"):
+        with traced_refusal(path, state, "complete", session):
             _validate_completion(state, session, revision, evals_path, proof_path, retro_path, transcript_path)
         state["status"] = "complete"
         state["revision"] += 1
@@ -82,6 +82,6 @@ def verify_completion(
         raise GraphError("graph completion revision must be an integer")
     if state["status"] != "complete" or revision != state["revision"] - 1:
         raise GraphError("graph has no valid completion record")
-    with traced_refusal(path, state, "verify-completion"):
+    with traced_refusal(path, state, "verify-completion", session):
         _validate_completion(state, session, revision, evals_path, proof_path, retro_path, transcript_path)
     return {"status": "complete", "loop_id": state["loop_id"], "revision": state["revision"]}

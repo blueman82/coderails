@@ -37,7 +37,7 @@ def _legacy_refusal(node_id: str, attempt: object) -> RecoveryRefusedError:
     message = (
         f"node {node_id} attempt {attempt} carries a pre-loop-scoped task name; re-dispatch under the loop-scoped name"
     )
-    return RecoveryRefusedError(LEGACY_REFUSED, message, (node_id,))
+    return RecoveryRefusedError(LEGACY_REFUSED, message, (node_id,), attempt if isinstance(attempt, int) else None)
 
 
 def _reference(value: object, label: str) -> dict[str, Any]:

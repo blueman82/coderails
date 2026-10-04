@@ -19,10 +19,10 @@ from graph_transcript import child_read_records, parent_indexes, refused_launche
 class RecoveryRefusedError(GraphError):
     """A fail-closed recover-wave refusal carrying one stable, low-cardinality reason code."""
 
-    def __init__(self, reason_code: str, message: str, nodes: tuple[str, ...] = ()) -> None:
-        """Keep the closed-enum code, the implicated nodes and the bare message; str() shows the code to operators."""
+    def __init__(self, reason_code: str, message: str, nodes: tuple[str, ...] = (), attempt: int | None = None) -> None:
+        """Keep the closed-enum code, the implicated nodes, the refused attempt (if known) and the bare message."""
         super().__init__(f"{message} [reason_code={reason_code}]")
-        self.reason_code, self.message, self.nodes = reason_code, message, nodes
+        self.reason_code, self.message, self.nodes, self.attempt = reason_code, message, nodes, attempt
 
 
 def node_lease(state: dict[str, Any], node_id: str, active: dict[str, Any], now: float, lease: int) -> str:
@@ -108,11 +108,13 @@ def trace(
 
 
 @contextmanager
-def traced_refusal(path: Path, state: dict[str, Any], command: str) -> Generator[None, None, None]:
+def traced_refusal(
+    path: Path, state: dict[str, Any], command: str, session: str | None = None
+) -> Generator[None, None, None]:
     """Trace any coded refusal raised inside the block as one `refused` row, then let it propagate unchanged."""
     try:
         yield
     except RecoveryRefusedError as error:
-        rows = [(node, None, None) for node in error.nodes]
-        trace(path, state, "refused", error.reason_code, {"session": state.get("session_id")}, rows, command)
+        rows = [(node, error.attempt, None) for node in error.nodes]
+        trace(path, state, "refused", error.reason_code, {"session": session}, rows, command)
         raise
