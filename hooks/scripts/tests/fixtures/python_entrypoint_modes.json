@@ -39,7 +39,6 @@
   "hooks/scripts/check_verify_loop.py": "100755",
   "hooks/scripts/comment_citation_gate.py": "100755",
   "hooks/scripts/crack_on_gate.py": "100755",
-  "hooks/scripts/crack_on_prose_gate.py": "100755",
   "hooks/scripts/destructive_bash_gate.py": "100755",
   "hooks/scripts/enforce_pr_workflow.py": "100755",
   "hooks/scripts/hook_common.py": "100644",
