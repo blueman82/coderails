@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import re
 import shlex
 import sys
@@ -11,11 +12,13 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from hooks.scripts.hook_common import deny, log, read_payload
+from hooks.scripts.lib.capability_profiles import TOOLS, guarded_agents, load_profiles, may_use
 from hooks.scripts.lib.trace_row import append_row
 
-GUARDED = frozenset(
-    {"deploy-safety-reviewer", "design-scout", "disposition-scout", "preflight-scout", "source-auditor"}
-)
+ROOT = Path(__file__).resolve().parents[2]
+PROFILES = load_profiles(ROOT)
+GUARDED = guarded_agents(PROFILES)
+CAPABILITY = os.path.realpath(ROOT / "scripts" / "capability.py")
 REASON = "bash_allowlist_deny"
 # Rejected on sight, before any parsing: chaining, substitution, redirection, newlines.
 META = re.compile(r"[;|&`<>\n\r]|\$\(")
@@ -109,20 +112,49 @@ def agent_name(value: object) -> str:
     return value.rsplit(":", 1)[-1] if isinstance(value, str) else ""
 
 
+def capability_call(agent: str, command: str) -> tuple[str | None, str | None]:
+    """Return (tool, deny code) for the exact absolute path of scripts/capability.py, else (None, None).
+
+    Allowed only as `<abs path> <tool> --json-args <json>` by an agent whose profile grants the tool.
+    """
+    if META.search(command):
+        return None, None
+    try:
+        argv = shlex.split(command)
+    except ValueError:
+        return None, None
+    if not argv or not os.path.isabs(argv[0]) or os.path.realpath(argv[0]) != CAPABILITY:
+        return None, None
+    tool = argv[1] if len(argv) > 1 else ""
+    if agent not in PROFILES["agents"]:
+        return tool, "capability_unknown_agent"
+    if tool not in TOOLS:
+        return tool, "capability_unknown_tool"
+    if len(argv) != 4 or argv[2] != "--json-args":
+        return tool, "capability_bad_argv"
+    return tool, None if may_use(PROFILES, agent, tool) else f"capability_denied_{tool}"
+
+
 def main() -> int:
-    """Deny non-allowlisted Bash from guarded agent types; every other caller is untouched."""
+    """Deny non-allowlisted Bash from guarded agent types and ungranted capability calls; others are untouched."""
     payload = read_payload()
-    if payload.get("tool_name") != "Bash" or agent_name(payload.get("agent_type")) not in GUARDED:
-        return 0
+    agent = agent_name(payload.get("agent_type"))
     data = payload.get("tool_input")
     command = data.get("command") if isinstance(data, dict) else None
-    if not isinstance(command, str) or not command:
-        return 0
-    code = verdict(command)
-    if code is None:
+    if payload.get("tool_name") != "Bash" or not agent or not isinstance(command, str) or not command:
         return 0
     session = str(payload.get("session_id") or "?")
-    agent = agent_name(payload["agent_type"])
+    tool, code = capability_call(agent, command)
+    if tool is None:
+        if agent not in GUARDED:
+            return 0
+        code = verdict(command)
+    if code is None:
+        if tool is not None:
+            append_row(
+                "reviewer_bash_allowlist", "allowed", f"capability_allowed_{tool}", session, inputs={"command": command}
+            )
+        return 0
     argv0 = (command.split() or ["?"])[0][:40]
     digest = hashlib.sha256(command.encode("utf-8")).hexdigest()[:12]
     log(
