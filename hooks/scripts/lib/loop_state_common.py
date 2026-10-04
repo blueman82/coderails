@@ -41,9 +41,17 @@ def read_state(path: Path) -> dict[str, Any]:
     return cast(dict[str, Any], value) if isinstance(value, dict) else {}
 
 
-def atomic_progress_update(path: Path, update: Callable[[dict[str, Any]], dict[str, Any]]) -> bool:
-    """Serialize one provider-local read, transform, and atomic file replacement."""
-    if not path.is_file():
+def atomic_progress_update(
+    path: Path, update: Callable[[dict[str, Any]], dict[str, Any]], create: bool = False
+) -> bool:
+    """Serialize one provider-local read, transform, and atomic file replacement.
+
+    With `create`, an absent file is read as `{}` so the lock serialises the create-or-exists decision.
+    """
+    if create:
+        with suppress(OSError):
+            path.parent.mkdir(parents=True, exist_ok=True)
+    if not path.is_file() and not create:
         return False
     lock = Path(f"{path}.lock")
     attempts = int(os.environ.get("CLAUDE_HOOK_MAX_ATTEMPTS", "5"))
@@ -52,7 +60,7 @@ def atomic_progress_update(path: Path, update: Callable[[dict[str, Any]], dict[s
         return False
     temporary = ""
     try:
-        state = json.loads(path.read_text(encoding="utf-8"))
+        state: object = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
         if not isinstance(state, dict):
             return False
         proposed = update(cast(dict[str, Any], state))
