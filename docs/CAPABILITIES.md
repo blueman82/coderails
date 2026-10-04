@@ -20,7 +20,7 @@ a capability tool but no `shell.raw` is "guarded": the Bash allowlist hook deriv
 So the capability tools are typed arguments plus an argv-path match on Bash, not harness-level typed tools. Interpreters
 (`python`, `node`, `bash -c`) stay denied for guarded agents; execution is only via a declared name in `profiles.json`
 `tests`. The hook allows the call only when the caller's profile grants that tool, and refuses with
-`capability_denied_<tool>`, `capability_unknown_agent`, `capability_unknown_tool` or `capability_bad_argv`.
+`capability_denied_<tool>`, `capability_unknown_tool` or `capability_bad_argv`. An `agent_type` absent from `profiles.json` (including `general-purpose`) is not this hook's concern and passes through unchanged.
 
 Known gaps: the agent must be handed the absolute script path (the hook does not expand `$CLAUDE_PLUGIN_ROOT`); a
-missing or malformed `profiles.json` makes the hook raise (non-blocking hook error), so the validator test is the guard.
+missing or malformed `profiles.json` makes the hook fall back to the original hard-coded guarded set (allowlist stays on, capability calls then deny as plain Bash). `tests.run` executes repo code with a throwaway HOME and scrubbed env but **no network block**: treat the repo under review as untrusted and run it only where that is acceptable. The documented `general-purpose` source-auditor dispatch is not gated by profiles (it already has full Bash), so only a dispatch as `subagent_type: source-auditor` gets the tighter allowlist.

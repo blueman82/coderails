@@ -42,7 +42,7 @@ now**.
    and there is no safe dry-run path, mark that part UNSUPPORTED and say why.
 7. **Re-running tests goes through `capability.py`.** To re-derive a number from a
    test run, call the absolute path of `scripts/capability.py` in the Codex plugin
-   (your dispatch prompt gives it):
+   (the dispatcher MUST pass it in your prompt; if it did not, report UNSUPPORTED for the re-run, do not guess a path):
    `<abs>/scripts/capability.py tests.run --json-args '{"name":"scripts"}'`. It runs
    only commands declared in `capabilities/profiles.json` (bounded, scrubbed env). That is
    bounded execution of repo code, not read-only; the read-only sandbox may block its

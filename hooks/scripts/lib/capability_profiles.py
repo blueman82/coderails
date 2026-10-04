@@ -13,8 +13,13 @@ TOOLS = ("repo.inspect", "diff.read", "tests.run", "pr.comment")
 def load_profiles(root: Path) -> dict[str, Any]:
     """Return the parsed profiles under root; raises on a missing or malformed file."""
     data: dict[str, Any] = json.loads((root / "capabilities" / "profiles.json").read_text(encoding="utf-8"))
-    if not isinstance(data["agents"], dict):
-        raise ValueError("capabilities/profiles.json: 'agents' object required")
+    agents: Any = data.get("agents") if isinstance(data, dict) else None  # pyright: ignore[reportUnnecessaryIsInstance]
+    ok = isinstance(agents, dict)
+    values: list[Any] = list(agents.values()) if ok else []
+    for caps in values:
+        ok = ok and isinstance(caps, list) and all(type(cap) is str for cap in caps)  # pyright: ignore
+    if not ok:
+        raise ValueError("capabilities/profiles.json: 'agents' must map names to lists of strings")
     return data
 
 

@@ -14,6 +14,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
@@ -187,10 +188,13 @@ def tests_run(raw: object) -> Result:
     if argv is None:
         raise RefusalError("capability_tests_unknown_name", "name is not declared in profiles.json tests")
     root = repo_root()
-    env = {k: os.environ[k] for k in ("PATH", "HOME", "LANG", "TMPDIR") if k in os.environ}
+    env = {k: os.environ[k] for k in ("PATH", "LANG", "TMPDIR") if k in os.environ}
     env["PYTHONDONTWRITEBYTECODE"] = "1"
     try:
-        done = run(argv, root, env=env, timeout=timeout)
+        # Throwaway HOME: the repo under test is untrusted; it must not read ~/.ssh or gh tokens. Network NOT blocked.
+        with tempfile.TemporaryDirectory() as home:
+            env["HOME"] = home
+            done = run(argv, root, env=env, timeout=timeout)
         status, out, err, timed_out = done.returncode, done.stdout, done.stderr, False
     except subprocess.TimeoutExpired as expired:
         text = [
@@ -230,14 +234,14 @@ TOOLS: dict[str, Callable[[object], Result]] = {
 }
 
 
-def trace(tool: str, outcome: str, code: str, raw: str) -> None:
-    """Append one fail-open trace row when a session id and the trace library are available."""
+def trace(tool: str, outcome: str, code: str, raw: str) -> bool:
+    """Append one fail-open trace row; False when no session id or trace library means no row was written."""
     session = os.environ.get("CLAUDE_SESSION_ID") or os.environ.get("CODEX_THREAD_ID") or "?"
     try:
         module = importlib.import_module("hooks.scripts.lib.trace_row")
     except ImportError:  # the Codex copy ships without the Claude hook library: no trace rows there
-        return
-    module.append_row("capability", outcome, code, session, inputs={"tool": tool, "args": raw})
+        return False
+    return bool(module.append_row("capability", outcome, code, session, inputs={"tool": tool, "args": raw}))
 
 
 def main(argv: list[str]) -> int:
@@ -256,7 +260,7 @@ def main(argv: list[str]) -> int:
             raise RefusalError("capability_args_invalid", "args are not valid JSON") from None
         status, result, evidence = TOOLS[tool](parsed)
     except RefusalError as refusal:
-        trace(tool[:40], "refused", refusal.code, raw)
+        traced = trace(tool[:40], "refused", refusal.code, raw)
         print(
             json.dumps(
                 {
@@ -264,6 +268,7 @@ def main(argv: list[str]) -> int:
                     "ok": False,
                     "exit_status": 2,
                     "ts": now,
+                    "traced": traced,
                     "refusal": refusal.code,
                     "detail": refusal.detail,
                 }
@@ -271,7 +276,7 @@ def main(argv: list[str]) -> int:
         )
         return 2
     except OSError as error:
-        trace(tool, "refused", "capability_io_error", raw)
+        traced = trace(tool, "refused", "capability_io_error", raw)
         print(
             json.dumps(
                 {
@@ -279,6 +284,7 @@ def main(argv: list[str]) -> int:
                     "ok": False,
                     "exit_status": 2,
                     "ts": now,
+                    "traced": traced,
                     "refusal": "capability_io_error",
                     "detail": error.strerror or "",
                 }
@@ -286,7 +292,7 @@ def main(argv: list[str]) -> int:
         )
         return 2
     sha = hashlib.sha256(json.dumps(result, sort_keys=True).encode()).hexdigest()
-    trace(tool, "ok", tool, raw)
+    traced = trace(tool, "ok", tool, raw)
     print(
         json.dumps(
             {
@@ -294,6 +300,7 @@ def main(argv: list[str]) -> int:
                 "ok": True,
                 "exit_status": status,
                 "ts": now,
+                "traced": traced,
                 "artifact_sha": sha,
                 "evidence": evidence,
                 "result": result,

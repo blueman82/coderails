@@ -4,7 +4,11 @@
 from __future__ import annotations
 
 import json
+import os
+import shutil
+import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from typing import Any
@@ -66,10 +70,9 @@ class CapabilityHookTests(HookCase):
                 with self.subTest(agent=agent, tool=tool):
                     self.assertEqual(self.denied(HOOK, request(command, agent)), tool not in profiles[agent])
 
-    def test_unknown_agent_refused_raw_agent_and_top_level_untouched(self) -> None:
-        """A foreign agent_type is refused; shell.raw agents and top-level calls are not restricted."""
-        result = self.invoke(HOOK, request(INSPECT, "general-purpose"))
-        self.assertIn("capability_unknown_agent", result.stdout)
+    def test_unknown_agent_raw_agent_and_top_level_untouched(self) -> None:
+        """The documented general-purpose source-auditor dispatch, shell.raw agents and top-level calls pass."""
+        self.assertEqual(self.output(HOOK, request(TESTS_RUN, "general-purpose")), {})
         self.assertEqual(self.output(HOOK, request(COMMENT, "loop-worker")), {})
         self.assertEqual(self.output(HOOK, request(COMMENT, None)), {})
 
@@ -104,15 +107,38 @@ class CapabilityHookTests(HookCase):
         """One row per decision: allowed rows name the tool, denials carry the stable reason."""
         self.output(HOOK, request(TESTS_RUN, "source-auditor"))
         self.output(HOOK, request(TESTS_RUN, "design-scout"))
-        self.output(HOOK, request(INSPECT, "general-purpose"))
         self.assertEqual(
             [(r["command"], r["outcome"], r["reason_code"]) for r in self.rows()],
             [
                 (HOOK, "allowed", "capability_allowed_tests.run"),
                 (HOOK, "denied", "capability_denied_tests.run"),
-                (HOOK, "denied", "capability_unknown_agent"),
             ],
         )
+
+    def run_copy(self, profiles: str, command: str, agent: str) -> dict[str, Any]:
+        """Run a copy of the hook against a doctored profiles.json and return its parsed stdout."""
+        with tempfile.TemporaryDirectory() as tmp:
+            shutil.copytree(ROOT / "hooks", Path(tmp) / "hooks", ignore=shutil.ignore_patterns("__pycache__"))
+            (Path(tmp) / "capabilities").mkdir()
+            (Path(tmp) / "capabilities" / "profiles.json").write_text(profiles)
+            done = subprocess.run(
+                [sys.executable, str(Path(tmp) / "hooks/scripts/reviewer_bash_allowlist.py")],
+                input=json.dumps(request(command, agent)),
+                capture_output=True,
+                text=True,
+                check=False,
+                env={"PATH": os.environ["PATH"], "CLAUDE_AGENTIC_LOOP_DIR": str(self.loop)},
+            )
+        return json.loads(done.stdout) if done.stdout.strip() else ({"rc": done.returncode} if done.returncode else {})
+
+    def test_corrupt_or_missing_profiles_fail_closed_for_guarded_agents(self) -> None:
+        """Negative control: a broken profiles.json must not turn the old allowlist off (was a traceback, no deny)."""
+        for profiles in ("{", "[]", '{"agents": []}', '{"agents": {"design-scout": "repo.inspect"}}'):
+            with self.subTest(profiles=profiles):
+                out = self.run_copy(profiles, "python3 -c 1", "design-scout")
+                self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny", out)
+                self.assertEqual(self.run_copy(profiles, "ls", "design-scout"), {})
+                self.assertEqual(self.run_copy(profiles, "python3 -c 1", "loop-worker"), {})
 
 
 if __name__ == "__main__":

@@ -43,12 +43,14 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
 
 - Symptom: a reviewer/scout (usually `source-auditor` running `tests.run`) is refused a `scripts/capability.py` call.
 - Query: `trace.by_reason` for `reviewer_bash_allowlist/denied/capability_denied_<tool>`,
-  `capability_unknown_agent`, `capability_unknown_tool` or `capability_bad_argv` (hook side, one row per decision;
+  `capability_unknown_tool` or `capability_bad_argv` (hook side, one row per decision;
   `reviewer_bash_allowlist/allowed/capability_allowed_<tool>` counts grants), and `capability/refused/capability_*`
   (script side: `args_invalid`, `path_denied`, `bad_ref`, `no_repo`, `tests_unknown_name`, `io_error`). Narrow with
   `python3 scripts/measure_graph_alignment.py --root . --json | jq '.trace.by_reason | with_entries(select(.key|test("capability")))'`.
-  Script-side rows need `CLAUDE_SESSION_ID` (or `CODEX_THREAD_ID`) in the tool's environment (unverified that the
-  harness sets it); the hook rows are always written.
+  Both hook and script rows need a session id (hook payload `session_id`; script env `CLAUDE_SESSION_ID` or
+  `CODEX_THREAD_ID`, unverified that the harness sets it). Without one no row is written: the script envelope then
+  says `"traced": false` and the hook still logs `denied=1 reason_code=...` to its log, so an empty query is not proof
+  of no refusals.
 - Remediation: `capability_denied_*` means the agent's profile lacks the tool; change `capabilities/profiles.json`
   deliberately (the validator test keeps frontmatter and Codex sandboxes in step), never widen Bash. `bad_argv` means
   the call was not exactly `<abs path>/scripts/capability.py <tool> --json-args '<json>'`; the path must be absolute.

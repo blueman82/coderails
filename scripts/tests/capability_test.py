@@ -154,8 +154,15 @@ class RepoInspectTests(CapabilityCase):
         env = dict(self.env)
         del env["CLAUDE_SESSION_ID"]
         self.env = env
-        self.assertEqual(self.call("repo.inspect", {"op": "list"})[0], 0)
+        code, out = self.call("repo.inspect", {"op": "list"})
+        self.assertEqual(code, 0)
         self.assertEqual(self.rows(), [])
+        self.assertFalse(out["traced"])  # the gap is visible, not silent
+        self.assertTrue(self.call("bogus", {})[1]["traced"] is False)
+
+    def test_traced_true_with_session(self) -> None:
+        """With a session id the envelope says the row was written."""
+        self.assertTrue(self.call("repo.inspect", {"op": "list"})[1]["traced"])
 
 
 if __name__ == "__main__":

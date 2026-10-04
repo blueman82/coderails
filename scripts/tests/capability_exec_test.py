@@ -20,7 +20,7 @@ from scripts import capability  # noqa: E402
 DECLARED = {
     "hello": ["python3", "-c", "print('hi')"],
     "fails": ["python3", "-c", "import sys; print('boom'); sys.exit(3)"],
-    "env": ["python3", "-c", "import os; print(sorted(os.environ))"],
+    "env": ["python3", "-c", "import os; print(sorted(os.environ), os.environ.get('HOME'))"],
     "slow": ["python3", "-c", "import time; time.sleep(30)"],
     "loud": ["python3", "-c", "print('x' * 20000)"],
 }
@@ -106,6 +106,12 @@ class TestsRunTests(ExecCase):
         self.assertNotIn("SECRET_TOKEN", out)
         self.assertNotIn("GH_TOKEN", out)
         self.assertIn("PYTHONDONTWRITEBYTECODE", out)
+
+    def test_home_is_not_the_callers(self) -> None:
+        """Repo code under test must not see the caller's real HOME (ssh keys, gh tokens)."""
+        with mock.patch.dict(os.environ, {"HOME": "/real/home"}):
+            out = self.call("tests.run", {"name": "env"})[1]["result"]["stdout_tail"]
+        self.assertNotIn("/real/home", out)
 
     def test_output_is_bounded(self) -> None:
         """Only a tail of the output is returned, with the full sha for evidence."""

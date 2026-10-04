@@ -30,6 +30,17 @@ class ProfileTests(unittest.TestCase):
         """Bash-bearing agents without shell.raw are exactly the pre-existing hard-coded set."""
         self.assertEqual(set(guarded_agents(self.profiles)), OLD_GUARDED)
 
+    def test_string_capability_value_is_rejected_at_load(self) -> None:
+        """A string where a list belongs would turn `in` into a substring test; refuse it."""
+        import json
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "capabilities").mkdir()
+            (Path(tmp) / "capabilities" / "profiles.json").write_text(json.dumps({"agents": {"a": "shell.raw"}}))
+            with self.assertRaises(ValueError):
+                load_profiles(Path(tmp))
+
     def test_missing_profile_is_red(self) -> None:
         """Negative control: deleting a profile is reported for both harnesses."""
         broken = copy.deepcopy(self.profiles)

@@ -48,7 +48,7 @@ now**.
 7. **Re-running tests goes through `capability.py`, not an interpreter.** A hook
    limits your Bash to single read-only commands; `python`/`bash -c` stay denied.
    To re-derive a number from a test run, call the absolute path of
-   `scripts/capability.py` in the coderails install (your dispatch prompt gives it):
+   `scripts/capability.py` in the coderails install (the dispatcher MUST pass it in your prompt; if it did not, report UNSUPPORTED for the re-run, do not guess a path):
    `<abs>/scripts/capability.py tests.run --json-args '{"name":"scripts"}'`. It runs
    only commands declared in `capabilities/profiles.json` (bounded, scrubbed env). That is
    bounded execution of repo code, **not** read-only: it may write caches in the repo.
