@@ -3,10 +3,22 @@
 from __future__ import annotations
 
 import os
-import re
+import sys
 from pathlib import Path
 
-from hook_common import deny, log, patch_paths, payload_object, read_input, repo_for_path, text_field
+from hook_common import (
+    append_trace_row,
+    deny,
+    log,
+    patch_paths,
+    payload_object,
+    read_input,
+    repo_for_path,
+    text_field,
+)
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from scripts.lib.config import settings, wiki_page_types  # noqa: E402
 
 
 def configuration(cwd: Path, root: Path) -> Path | None:
@@ -20,7 +32,7 @@ def configuration(cwd: Path, root: Path) -> Path | None:
     return None
 
 
-def taxonomy(cwd: Path) -> tuple[Path, Path, list[str]] | None:
+def taxonomy(cwd: Path, session: str) -> tuple[Path, Path, list[str]] | None:
     """Resolve a positively identified vault and schema, failing open on ambiguity."""
     root = repo_for_path(cwd)
     if root is None:
@@ -28,16 +40,17 @@ def taxonomy(cwd: Path) -> tuple[Path, Path, list[str]] | None:
     config = configuration(cwd, root)
     if config is None:
         return None
-    schema = root / "AGENTS-wiki-schema.md"
+    schema = root / "wiki.schema.json"
     try:
-        sections = re.split(r"(?m)^## ", schema.read_text(encoding="utf-8"))
-        section = next((part for part in sections if part.startswith("Page types\n")), "")
-        sanctioned = re.findall(r"`([A-Za-z0-9_-]+/)`", section)
-        match = re.search(r"(?m)^wiki_path:\s*(\S+)", config.read_text(encoding="utf-8"))
-        value = match.group(1).strip("\"'") if match else ""
-        if not sanctioned or value in {"", "null", "~"}:
+        value = str(settings(config).get("wiki_path") or "")
+        if not value:
             return None
         vault = (config.parent.parent / value).resolve(strict=True)
+        types, problem = wiki_page_types(schema)
+        if problem:
+            append_trace_row("wiki_taxonomy_gate", "failed_open", problem, session)
+            return None
+        sanctioned = [name + "/" for name in types]
         if sum((vault / directory).is_dir() for directory in sanctioned) < 2:
             return None
         return vault, schema, sanctioned
@@ -49,7 +62,7 @@ def main() -> None:
     """Deny only a patch path in an identified vault's unsanctioned directory."""
     payload = payload_object(read_input())
     cwd = Path(text_field(payload, "cwd", os.getcwd()))
-    resolved = taxonomy(cwd)
+    resolved = taxonomy(cwd, text_field(payload, "session_id", ""))
     if resolved is None:
         return
     vault, schema, sanctioned = resolved

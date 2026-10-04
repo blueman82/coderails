@@ -188,6 +188,28 @@ def settings(path: str | Path) -> dict[str, Any]:
     return values
 
 
+def wiki_page_types(path: str | Path) -> tuple[list[str], str]:
+    """Allowed wiki top-level dirs (page_types + structural_dirs) from wiki.schema.json.
+
+    Returns (names, "") or ([], wiki_schema_missing|wiki_schema_invalid).
+    """
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+    except OSError:
+        return [], "wiki_schema_missing"
+    except ValueError:
+        return [], "wiki_schema_invalid"
+    fields = cast("dict[str, Any]", data) if isinstance(data, dict) else {}
+    types = fields.get("page_types")
+    extra = fields.get("structural_dirs", [])
+    if not isinstance(types, list) or not types or not isinstance(extra, list):
+        return [], "wiki_schema_invalid"
+    names = cast("list[object]", types) + cast("list[object]", extra)
+    if not all(isinstance(n, str) and re.fullmatch(r"[A-Za-z0-9_-]+", n) for n in names):
+        return [], "wiki_schema_invalid"
+    return [str(n) for n in names], ""
+
+
 def _section(path: str | Path, key: str) -> dict[str, Any]:
     """One typed nested section of the config at path, or {}."""
     value = settings(path).get(key)

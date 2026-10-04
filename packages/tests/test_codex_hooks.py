@@ -346,9 +346,8 @@ class HookTests(unittest.TestCase):
         config = self.repo / ".coderails/workflow.config.yaml"
         config.parent.mkdir()
         config.write_text('wiki_path: "."\n', encoding="utf-8")
-        (self.repo / "AGENTS-wiki-schema.md").write_text(
-            "## Page types\n`concepts/`\n`projects/`\n## Other\n", encoding="utf-8"
-        )
+        schema = self.repo / "wiki.schema.json"
+        schema.write_text(json.dumps({"page_types": ["concepts", "projects"]}), encoding="utf-8")
         for directory in ("concepts", "projects"):
             (self.repo / directory).mkdir()
         for path in ("wrong/new.md", "concepts/new.md", "raw/source.md", "index.md", ".codex/test.md"):
@@ -356,6 +355,20 @@ class HookTests(unittest.TestCase):
                 "wiki_taxonomy_gate", {"cwd": str(self.repo), "tool_input": {"command": f"*** Add File: {path}"}}
             )
             self.assertEqual(bool(result), path.startswith("wrong"))
+        trace = self.loop / "s1/trace.jsonl"
+        self.assertFalse(trace.exists())
+        for bad in (None, "not json", '{"page_types": []}'):
+            if bad is None:
+                schema.unlink()
+            else:
+                schema.write_text(bad, encoding="utf-8")
+            result = self.hook(
+                "wiki_taxonomy_gate",
+                {"session_id": "s1", "cwd": str(self.repo), "tool_input": {"command": "*** Add File: wrong/new.md"}},
+            )
+            self.assertEqual(result, {}, bad)
+        reasons = [json.loads(line)["reason_code"] for line in trace.read_text().splitlines()]
+        self.assertEqual(reasons, ["wiki_schema_missing", "wiki_schema_invalid", "wiki_schema_invalid"])
 
 
 if __name__ == "__main__":
