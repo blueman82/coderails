@@ -1,5 +1,8 @@
 {
   "scripts/authority.py": "100755",
+  "scripts/ci_verify.py": "100755",
+  "scripts/enforcement_trace.py": "100644",
+  "scripts/external_enforcement.py": "100755",
   "scripts/installed_parity.py": "100755",
   "scripts/installer/claude.py": "100644",
   "scripts/installer/codex.py": "100644",
