@@ -28,7 +28,7 @@ def entry(identity: str = "E1") -> JsonObject:
         "mode": "scripted",
         "status": "pass",
         "evidence": "Observed command and negative control",
-        "cmd": command("print('check'); raise SystemExit(1)"),
+        "cmd": command("print('check')"),
         "negative_control": command("print('control'); raise SystemExit(1)"),
         "smoke": {"cmd_exit": 1, "negative_control_exit": 1},
     }
@@ -53,6 +53,7 @@ class ArtifactCase(unittest.TestCase):
             "evals": [entry()],
         }
         self.save()
+        self.directory.joinpath("progress.json").write_text('{"schema_version":3,"session_id":"s","loop_id":"l"}')
 
     def save(self) -> None:
         """Persist the current test input without invoking the grader."""

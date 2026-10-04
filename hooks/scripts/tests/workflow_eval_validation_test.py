@@ -121,11 +121,13 @@ class EvalValidationTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     validate_smoke(data)
             data = fixture()
+            data["evals"][0]["cmd"] = "echo yes | grep -q yes"
             data["evals"][0]["fixtures"] = {"good": "yes", "bad": "no", "formula": "grep -q yes"}
             path.write_text(json.dumps(data))
             validate_discriminating(path)
             for formula in ("true", "false", "missing-coderails-command-xyz", "exit 137"):
                 data["evals"][0]["fixtures"]["formula"] = formula
+                data["evals"][0]["cmd"] = f"echo yes | {formula}"
                 path.write_text(json.dumps(data))
                 with self.assertRaises(ValueError):
                     validate_discriminating(path)
