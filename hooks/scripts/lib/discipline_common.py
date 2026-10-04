@@ -131,7 +131,9 @@ def mine_hook_blocks(session: str, log_file: str = "") -> dict[str, dict[str, in
         if hook:
             counts = result.setdefault(hook, {"events": 0, "flagged": 0})
             counts["events"] += 1
-            counts["flagged"] += int(any(token in {"blocked=1", "would_block=1", "nudged=1"} for token in tokens))
+            counts["flagged"] += int(
+                any(token in {"blocked=1", "would_block=1", "nudged=1", "demoted=1"} for token in tokens)
+            )
     return result
 
 

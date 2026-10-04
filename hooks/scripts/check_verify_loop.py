@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Block silently deferred verification and omitted verification sections."""
+"""Advise (never block) on silently deferred verification and omitted verification sections."""
 
 from __future__ import annotations
 
@@ -10,9 +10,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from hooks.scripts.hook_common import output, read_payload
-from hooks.scripts.lib.agentic_loop_path import sanitise_session_id
 from hooks.scripts.lib.discipline_common import file_count, stable_text
-from hooks.scripts.lib.loop_state_common import log, loop_active_incomplete
+from hooks.scripts.lib.loop_state_common import log
 from hooks.scripts.lib.trace_row import append_row
 
 REASON = "verify_loop_missing"
@@ -68,13 +67,13 @@ def main() -> int:
     presence = not header and count >= 3
     if presence:
         message = (
-            f'[verify-loop-block] session modified {count} files but the response has no "## Did Not Verify" '
+            f'[discipline-advisory] session modified {count} files but the response has no "## Did Not Verify" '
             "section. Rule (CLAUDE.md): after any response that edits files, end with a ## Did Not Verify "
-            "section — resolve each item or tag it (unverifiable: <reason>). Add the section before stopping."
+            "section — resolve each item or tag it (unverifiable: <reason>). Consider adding it; advisory only."
         )
     elif untagged:
         message = (
-            "[verify-loop-block] Your '## Did Not Verify' section has untagged items — anything not\n"
+            "[discipline-advisory] Your '## Did Not Verify' section has untagged items — anything not\n"
             "explicitly marked uncheckable is treated as something you could have resolved:\n"
             + "\n".join(bullets)
             + "\n"
@@ -82,7 +81,8 @@ def main() -> int:
             "If an item GENUINELY cannot be checked from source (a REPL-only action, external-system\n"
             "behaviour, prod-only observation, or user intent), keep it but tag its leading clause:\n"
             "  - (unverifiable: <reason>) <the item>\n"
-            "That tag is the only escape hatch — every untagged bullet blocks, file-naming or not."
+            "That tag marks an item as genuinely uncheckable; every untagged bullet is flagged, file-naming or not.\n"
+            "Advisory only; this lint does not block."
         )
     fields += f" dnv_items={len(bullets)} resolvable_dnv_items={untagged}"
     if presence:
@@ -90,17 +90,10 @@ def main() -> int:
     if not message:
         log(f"{fields} blocked=0")
         return 0
-    if event == "Stop" and loop_active_incomplete(
-        transcript, str(payload.get("cwd") or ""), sanitise_session_id(session)
-    ):
-        output("Stop", additionalContext=message.replace("[verify-loop-block]", "[discipline-warn(loop)]"))
-        log(f"{fields} would_block=1 warned=1 blocked=0 reason_code={REASON}")
-        append_row("check_verify_loop", "warned", REASON, session)
-        return 0
-    log(f"{fields} blocked=1 reason_code={REASON}")
-    append_row("check_verify_loop", "blocked", REASON, session)
-    print(message, file=sys.stderr)
-    return 2
+    output(event, additionalContext=message)
+    log(f"{fields} would_block=1 demoted=1 blocked=0 reason_code={REASON}")
+    append_row("check_verify_loop", "demoted", REASON, session)
+    return 0
 
 
 if __name__ == "__main__":

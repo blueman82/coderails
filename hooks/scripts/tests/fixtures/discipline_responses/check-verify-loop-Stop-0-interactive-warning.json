@@ -17,7 +17,7 @@
       "CLAUDE_AGENTIC_LOOP_DIR": "{sandbox}/state",
       "CLAUDE_HOOK_SLEEP_S": "0"
     },
-    "stdout": "{\n  \"hookSpecificOutput\": {\n    \"hookEventName\": \"Stop\",\n    \"additionalContext\": \"[discipline-warn(loop)] session modified 3 files but the response has no \\\"## Did Not Verify\\\" section. Rule (CLAUDE.md): after any response that edits files, end with a ## Did Not Verify section \u2014 resolve each item or tag it (unverifiable: <reason>). Add the section before stopping.\"\n  }\n}\n",
+    "stdout": "{\n  \"hookSpecificOutput\": {\n    \"hookEventName\": \"Stop\",\n    \"additionalContext\": \"[discipline-advisory] session modified 3 files but the response has no \\\"## Did Not Verify\\\" section. Rule (CLAUDE.md): after any response that edits files, end with a ## Did Not Verify section \u2014 resolve each item or tag it (unverifiable: <reason>). Consider adding it; advisory only.\"\n  }\n}\n",
     "returncode": 0,
     "source": "check_verify_loop",
     "fixture_index": 47
@@ -40,7 +40,7 @@
       "CLAUDE_AGENTIC_LOOP_DIR": "{sandbox}/state",
       "CLAUDE_HOOK_SLEEP_S": "0"
     },
-    "stdout": "{\n  \"hookSpecificOutput\": {\n    \"hookEventName\": \"Stop\",\n    \"additionalContext\": \"[discipline-warn(loop)] session modified 3 files but the response has no \\\"## Did Not Verify\\\" section. Rule (CLAUDE.md): after any response that edits files, end with a ## Did Not Verify section \u2014 resolve each item or tag it (unverifiable: <reason>). Add the section before stopping.\"\n  }\n}\n",
+    "stdout": "{\n  \"hookSpecificOutput\": {\n    \"hookEventName\": \"Stop\",\n    \"additionalContext\": \"[discipline-advisory] session modified 3 files but the response has no \\\"## Did Not Verify\\\" section. Rule (CLAUDE.md): after any response that edits files, end with a ## Did Not Verify section \u2014 resolve each item or tag it (unverifiable: <reason>). Consider adding it; advisory only.\"\n  }\n}\n",
     "returncode": 0,
     "source": "check_verify_loop",
     "fixture_index": 50
@@ -63,7 +63,7 @@
       "CLAUDE_AGENTIC_LOOP_DIR": "{sandbox}/state",
       "CLAUDE_HOOK_SLEEP_S": "0"
     },
-    "stdout": "{\n  \"hookSpecificOutput\": {\n    \"hookEventName\": \"Stop\",\n    \"additionalContext\": \"[discipline-warn(loop)] Your '## Did Not Verify' section has untagged items \u2014 anything not\\nexplicitly marked uncheckable is treated as something you could have resolved:\\n- the integration test was not run\\nResolve each before stopping: read the file, run the check (Read/Grep/Bash), or delete the bullet.\\nIf an item GENUINELY cannot be checked from source (a REPL-only action, external-system\\nbehaviour, prod-only observation, or user intent), keep it but tag its leading clause:\\n  - (unverifiable: <reason>) <the item>\\nThat tag is the only escape hatch \u2014 every untagged bullet blocks outside a loop and is flagged inside one.\"\n  }\n}\n",
+    "stdout": "{\n  \"hookSpecificOutput\": {\n    \"hookEventName\": \"Stop\",\n    \"additionalContext\": \"[discipline-advisory] Your '## Did Not Verify' section has untagged items \u2014 anything not\\nexplicitly marked uncheckable is treated as something you could have resolved:\\n- the integration test was not run\\nResolve each before stopping: read the file, run the check (Read/Grep/Bash), or delete the bullet.\\nIf an item GENUINELY cannot be checked from source (a REPL-only action, external-system\\nbehaviour, prod-only observation, or user intent), keep it but tag its leading clause:\\n  - (unverifiable: <reason>) <the item>\\nThat tag is the only escape hatch \u2014 every untagged bullet blocks outside a loop and is flagged inside one.\"\n  }\n}\n",
     "returncode": 0,
     "source": "check_verify_loop",
     "fixture_index": 61
@@ -86,7 +86,7 @@
       "CLAUDE_AGENTIC_LOOP_DIR": "{sandbox}/state",
       "CLAUDE_HOOK_SLEEP_S": "0"
     },
-    "stdout": "{\n  \"hookSpecificOutput\": {\n    \"hookEventName\": \"Stop\",\n    \"additionalContext\": \"[discipline-warn(loop)] Your '## Did Not Verify' section has untagged items \u2014 anything not\\nexplicitly marked uncheckable is treated as something you could have resolved:\\n- the integration test was not run\\nResolve each before stopping: read the file, run the check (Read/Grep/Bash), or delete the bullet.\\nIf an item GENUINELY cannot be checked from source (a REPL-only action, external-system\\nbehaviour, prod-only observation, or user intent), keep it but tag its leading clause:\\n  - (unverifiable: <reason>) <the item>\\nThat tag is the only escape hatch \u2014 every untagged bullet blocks outside a loop and is flagged inside one.\"\n  }\n}\n",
+    "stdout": "{\n  \"hookSpecificOutput\": {\n    \"hookEventName\": \"Stop\",\n    \"additionalContext\": \"[discipline-advisory] Your '## Did Not Verify' section has untagged items \u2014 anything not\\nexplicitly marked uncheckable is treated as something you could have resolved:\\n- the integration test was not run\\nResolve each before stopping: read the file, run the check (Read/Grep/Bash), or delete the bullet.\\nIf an item GENUINELY cannot be checked from source (a REPL-only action, external-system\\nbehaviour, prod-only observation, or user intent), keep it but tag its leading clause:\\n  - (unverifiable: <reason>) <the item>\\nThat tag is the only escape hatch \u2014 every untagged bullet blocks outside a loop and is flagged inside one.\"\n  }\n}\n",
     "returncode": 0,
     "source": "check_verify_loop",
     "fixture_index": 64
@@ -109,7 +109,7 @@
       "CLAUDE_AGENTIC_LOOP_DIR": "{sandbox}/state",
       "CLAUDE_HOOK_SLEEP_S": "0"
     },
-    "stdout": "{\n  \"hookSpecificOutput\": {\n    \"hookEventName\": \"Stop\",\n    \"additionalContext\": \"[discipline-warn(loop)] Your '## Did Not Verify' section has untagged items \u2014 anything not\\nexplicitly marked uncheckable is treated as something you could have resolved:\\n- the integration test was not run\\nResolve each before stopping: read the file, run the check (Read/Grep/Bash), or delete the bullet.\\nIf an item GENUINELY cannot be checked from source (a REPL-only action, external-system\\nbehaviour, prod-only observation, or user intent), keep it but tag its leading clause:\\n  - (unverifiable: <reason>) <the item>\\nThat tag is the only escape hatch \u2014 every untagged bullet blocks outside a loop and is flagged inside one.\"\n  }\n}\n",
+    "stdout": "{\n  \"hookSpecificOutput\": {\n    \"hookEventName\": \"Stop\",\n    \"additionalContext\": \"[discipline-advisory] Your '## Did Not Verify' section has untagged items \u2014 anything not\\nexplicitly marked uncheckable is treated as something you could have resolved:\\n- the integration test was not run\\nResolve each before stopping: read the file, run the check (Read/Grep/Bash), or delete the bullet.\\nIf an item GENUINELY cannot be checked from source (a REPL-only action, external-system\\nbehaviour, prod-only observation, or user intent), keep it but tag its leading clause:\\n  - (unverifiable: <reason>) <the item>\\nThat tag is the only escape hatch \u2014 every untagged bullet blocks outside a loop and is flagged inside one.\"\n  }\n}\n",
     "returncode": 0,
     "source": "check_verify_loop",
     "fixture_index": 66
@@ -132,7 +132,7 @@
       "CLAUDE_AGENTIC_LOOP_DIR": "{sandbox}/state",
       "CLAUDE_HOOK_SLEEP_S": "0"
     },
-    "stdout": "{\n  \"hookSpecificOutput\": {\n    \"hookEventName\": \"Stop\",\n    \"additionalContext\": \"[discipline-warn(loop)] Your '## Did Not Verify' section has untagged items \u2014 anything not\\nexplicitly marked uncheckable is treated as something you could have resolved:\\n- the integration test was not run\\nResolve each before stopping: read the file, run the check (Read/Grep/Bash), or delete the bullet.\\nIf an item GENUINELY cannot be checked from source (a REPL-only action, external-system\\nbehaviour, prod-only observation, or user intent), keep it but tag its leading clause:\\n  - (unverifiable: <reason>) <the item>\\nThat tag is the only escape hatch \u2014 every untagged bullet blocks outside a loop and is flagged inside one.\"\n  }\n}\n",
+    "stdout": "{\n  \"hookSpecificOutput\": {\n    \"hookEventName\": \"Stop\",\n    \"additionalContext\": \"[discipline-advisory] Your '## Did Not Verify' section has untagged items \u2014 anything not\\nexplicitly marked uncheckable is treated as something you could have resolved:\\n- the integration test was not run\\nResolve each before stopping: read the file, run the check (Read/Grep/Bash), or delete the bullet.\\nIf an item GENUINELY cannot be checked from source (a REPL-only action, external-system\\nbehaviour, prod-only observation, or user intent), keep it but tag its leading clause:\\n  - (unverifiable: <reason>) <the item>\\nThat tag is the only escape hatch \u2014 every untagged bullet blocks outside a loop and is flagged inside one.\"\n  }\n}\n",
     "returncode": 0,
     "source": "check_verify_loop",
     "fixture_index": 67
@@ -155,7 +155,7 @@
       "CLAUDE_AGENTIC_LOOP_DIR": "{sandbox}/state",
       "CLAUDE_HOOK_SLEEP_S": "0"
     },
-    "stdout": "{\n  \"hookSpecificOutput\": {\n    \"hookEventName\": \"Stop\",\n    \"additionalContext\": \"[discipline-warn(loop)] Your '## Did Not Verify' section has untagged items \u2014 anything not\\nexplicitly marked uncheckable is treated as something you could have resolved:\\n- the integration test was not run\\nResolve each before stopping: read the file, run the check (Read/Grep/Bash), or delete the bullet.\\nIf an item GENUINELY cannot be checked from source (a REPL-only action, external-system\\nbehaviour, prod-only observation, or user intent), keep it but tag its leading clause:\\n  - (unverifiable: <reason>) <the item>\\nThat tag is the only escape hatch \u2014 every untagged bullet blocks outside a loop and is flagged inside one.\"\n  }\n}\n",
+    "stdout": "{\n  \"hookSpecificOutput\": {\n    \"hookEventName\": \"Stop\",\n    \"additionalContext\": \"[discipline-advisory] Your '## Did Not Verify' section has untagged items \u2014 anything not\\nexplicitly marked uncheckable is treated as something you could have resolved:\\n- the integration test was not run\\nResolve each before stopping: read the file, run the check (Read/Grep/Bash), or delete the bullet.\\nIf an item GENUINELY cannot be checked from source (a REPL-only action, external-system\\nbehaviour, prod-only observation, or user intent), keep it but tag its leading clause:\\n  - (unverifiable: <reason>) <the item>\\nThat tag is the only escape hatch \u2014 every untagged bullet blocks outside a loop and is flagged inside one.\"\n  }\n}\n",
     "returncode": 0,
     "source": "check_verify_loop",
     "fixture_index": 69

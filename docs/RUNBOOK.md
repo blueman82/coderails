@@ -19,13 +19,16 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
 - Remediation: the writer fails open, so an unwritable directory or an unsafe session id (contains `/` or `..`,
   or is empty) silently drops rows. Fix the directory permissions; do not make the gate depend on the write.
 
-## Discipline gate blocking too often
+## Discipline lint advisories climbing
 
-- Symptom: `confidence_labels` or `verify_loop` blocks climb; users report repeated Stop blocks.
-- Query: `trace.by_reason` for `check_confidence_labels/blocked/confidence_label_missing` and
-  `check_verify_loop/blocked/verify_loop_missing` (keys are `command/outcome/reason_code`; `warned` rows are separate and are not blocks); `gate_blocks.claude.gates.<gate>` for blocked/decisions.
-- Remediation: do not demote on volume alone. Apply rule (a) in `docs/graph-alignment-measurement.md` and the
-  verdict in `docs/decisions/e1-confidence-gate-demotion.md` (a hand-sampled real-fix rate is required first).
+- Symptom: `confidence_labels` or `verify_loop` advisories climb. These two hooks no longer block (demoted by user
+  override, `docs/decisions/2026-10-04-not-in-gate-demotion.md`); the pre-demotion `blocked` series is history.
+- Query: `trace.by_reason` for `check_confidence_labels/demoted/confidence_label_missing` and
+  `check_verify_loop/demoted/verify_loop_missing` (keys are `command/outcome/reason_code`; `blocked` and `warned`
+  rows are the older series and are separate); `gate_blocks.claude.gates.<gate>` for `demoted`/`would_block`.
+  `blocked / decisions` now falls to about 0 by construction; compare `demoted / decisions` instead.
+- Remediation: a rising `demoted` count means the model is skipping labels or DNV tags, not that a gate is stuck.
+  Fix the prompt or instruction text; there is nothing to unblock.
 
 ## Reviewer/scout Bash command denied
 
@@ -44,3 +47,22 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   `create_invalid`, `write_failed`, `foreign` (an unsafe session id cannot be traced; stderr only).
 - Remediation: inspect with `python3 scripts/authority.py inspect --session <exact id>`. A foreign-session refusal
   means the id did not match exactly; ids are never sanitised.
+
+## Crack-on denial wrong (stuck on, or off too early)
+
+- Symptom: `AskUserQuestion` / `request_user_input` is denied when the user no longer wants autonomy, or is allowed
+  right after "crack on".
+- Query: `trace.by_reason` for `crack_on/granted/authority_granted`, `crack_on/blocked/authority_deny`,
+  `crack_on/allowed/authority_expired_allow`, `crack_on/blocked/crack_on_legacy_flag`,
+  `crack_on/ignored/authority_corrupt_ignored` (authority.json unparseable: treated as none; legacy flag still honoured),
+  `crack_on/failed_open/authority_write_failed` (user said "crack on" but no authority was written, so nothing is
+  suppressed; if the trace dir is also unwritable only the `stamped=0 err=write_failed` discipline.log line remains),
+  `authority/refused/authority_refused_foreign`. Inspect with
+  `python3 scripts/authority.py inspect --session <exact id>`.
+- Remediation: revoke with `python3 scripts/authority.py revoke --session <id>` (also deletes any legacy flag). An old flag
+  (`crack_on_legacy_flag`) is cleared with `rm <loop dir>/<id>/crack_on_active` (Codex:
+  `$PLUGIN_DATA/sessions/<id>/crack_on_active`). Allowed right after "crack on": the phrase was quoted, backticked,
+  negated or asked as a question (by design), or `authority_expired_allow` shows the 24h object lapsed; say "crack on" again to re-grant.
+- Baseline note: the old 103 fires / 5 blocks figure (`docs/graph-alignment-measurement.md`) came from discipline-log
+  telemetry; after-numbers come from trace rows, so they are not comparable. Reproduce:
+  `python3 scripts/measure_graph_alignment.py --root . --json`.

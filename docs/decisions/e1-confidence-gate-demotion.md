@@ -1,5 +1,7 @@
 # E1: demote the Stop discipline gates?
 
+> Superseded 2026-10-04 by `2026-10-04-not-in-gate-demotion.md`: the user overrode the unmet criteria and demoted both gates to advisory lints. The verdict below is retained as the record of why the criteria were not met.
+
 Verdict: **criteria NOT met. No behaviour change. No exit code edited. Hooks stay.**
 
 ## Rule
@@ -25,7 +27,7 @@ The earlier 194/258 baseline is stale. The log is a live append-only file, so fi
 - Read on all evaluations the doc says `confidence_labels` would not cross 10%.
 - `verify_loop` fails the ratio leg regardless of any sample, so it stays blocking.
 
-## Current behaviour (read from source)
+## Behaviour at time of writing (read from source; superseded, outside-loop `Stop` is now an advisory exit 0 for both hooks)
 
 - Outside a loop, `Stop` exits 2 (both hooks).
 - Inside an active loop, `Stop` already emits a `[discipline-warn(loop)]` `additionalContext` and exits 0

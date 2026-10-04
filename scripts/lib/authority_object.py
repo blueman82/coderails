@@ -135,3 +135,14 @@ def read_authority(session_id: str, base: Path | None = None, now: datetime | No
         append_row("authority", "refused", "authority_refused_foreign", session_id, base=base)
         return None
     return None if validate(data, now or datetime.now(timezone.utc)) else data
+
+
+def clear_legacy_flags(session_id: str) -> None:
+    """Remove the pre-authority crack_on_active flags (Claude loop dir and Codex PLUGIN_DATA) for a safe session id."""
+    path = authority_path(session_id)
+    if path is None:
+        return
+    codex = Path(os.environ.get("PLUGIN_DATA", str(Path.home() / ".coderails" / "codex")))
+    for flag in (path.with_name("crack_on_active"), codex / "sessions" / session_id / "crack_on_active"):
+        with suppress(OSError):
+            flag.unlink()
