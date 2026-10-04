@@ -48,21 +48,23 @@ class GateTests(HookCase):
             "tool_input": {"command": command},
         }
 
-    def mint(self, command: str, kind: str, session: str = "s1", **over: object) -> str:
-        """Write a receipt matching the hook's view of `command` in the repo on main."""
+    def mint(
+        self, command: str, kind: str, session: str = "s1", cwd: Path | None = None, rid: str = "r1", **over: object
+    ) -> str:
+        """Write a receipt matching the hook's view of `command` run in `cwd` (default the repo) on main."""
         now = datetime.now(timezone.utc)
-        proposed = ar.proposed_action(kind, command, str(self.repo), "main")
+        proposed = ar.proposed_action(kind, command, str(cwd or self.repo), "main")
         obj: dict[str, Any] = {
-            "receipt_id": "r1", "authority_id": None, "session_id": session, "loop_id": None, "action": kind,
+            "receipt_id": rid, "authority_id": None, "session_id": session, "loop_id": None, "action": kind,
             "exact_payload_hash": proposed["exact_payload_hash"], "artifact_sha": None, "scope": "",
             "issued_at": now.isoformat(), "expires_at": (now + timedelta(hours=1)).isoformat(),
             "single_use": True, "revoked": False,
         }  # fmt: skip
         obj.update(over)
-        path = ar.receipt_path(session, "r1", self.loop)
+        path = ar.receipt_path(session, rid, self.loop)
         assert path is not None
         ar.write_receipt(path, obj)
-        return "r1"
+        return rid
 
     def reasons(self, session: str = "s1") -> list[str]:
         """Reason codes traced for a session."""
@@ -134,6 +136,89 @@ class GateTests(HookCase):
         self.mint(MERGE, "merge", session="parent")
         self.assertTrue(self.denied("action_authority_gate", self.payload(MERGE, "worker")))
         self.assertEqual(self.reasons("worker"), ["denied_no_receipt"])
+
+    def second_repo(self) -> Path:
+        """A second repo, also on main."""
+        other = self.directory / "other"
+        other.mkdir()
+        subprocess.run(["git", "init", "-q", "-b", "main", str(other)], check=True)
+        return other
+
+    def test_chained_second_guarded_op_needs_its_own_receipt(self) -> None:
+        """A receipt for the first segment never authorises a chained second guarded operation."""
+        self.configure("enforce")
+        self.mint("git push origin feature", "git_push")
+        self.assertTrue(
+            self.denied("action_authority_gate", self.payload("git push origin feature && git push origin main"))
+        )
+        self.mint("gh pr merge 1", "merge", rid="r2")
+        self.assertTrue(self.denied("action_authority_gate", self.payload("gh pr merge 1 && gh pr merge 2")))
+        self.mint("gh pr merge 2", "merge", rid="r3")
+        self.assertFalse(self.denied("action_authority_gate", self.payload("gh pr merge 1 && gh pr merge 2")))
+
+    def test_cd_into_other_repo_binds_the_real_directory(self) -> None:
+        """A receipt for `git push` in repoA does not authorise `cd repoB && git push`; one minted for repoB does."""
+        self.configure("enforce")
+        other = self.second_repo()
+        self.mint("git push", "git_push")
+        self.assertTrue(self.denied("action_authority_gate", self.payload(f"cd {other} && git push")))
+        self.mint("git push", "git_push", cwd=other, rid="r2")
+        self.assertFalse(self.denied("action_authority_gate", self.payload(f"cd {other} && git push")))
+
+    def test_artifact_sha_is_checked_against_real_head(self) -> None:
+        """A push receipt bound to HEAD's sha verifies; a wrong sha is refused sha_mismatch."""
+        self.configure("enforce")
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(self.repo),
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@t",
+                "commit",
+                "-q",
+                "--allow-empty",
+                "-m",
+                "x",
+            ],
+            check=True,
+        )
+        head = subprocess.run(
+            ["git", "-C", str(self.repo), "rev-parse", "HEAD"], capture_output=True, text=True, check=True
+        ).stdout.strip()
+        self.mint(PUSH, "git_push", artifact_sha="0" * 40)
+        self.assertTrue(self.denied("action_authority_gate", self.payload(PUSH)))
+        self.assertEqual(self.reasons(), ["denied_sha_mismatch"])
+        self.mint(PUSH, "git_push", rid="r2", artifact_sha=head)
+        self.assertFalse(self.denied("action_authority_gate", self.payload(PUSH)))
+
+    def test_missing_session_denied_as_no_session_and_traced(self) -> None:
+        """No session_id: deny code no_session (not malformed), a trace row exists, no blank --session in the hint."""
+        self.configure("enforce")
+        payload = self.payload(PUSH)
+        del payload["session_id"]
+        result = self.invoke("action_authority_gate", payload)
+        self.assertIn("no_session", result.stdout)
+        self.assertNotIn("--session  ", result.stdout)
+        self.assertEqual(self.reasons("_no_session"), ["denied_no_session"])
+
+    def test_failed_open_row_carries_error_class_and_loop(self) -> None:
+        """The failed-open row records the error class (hashed input) and stderr names the class and message."""
+        self.configure("enforce")
+        payload = self.payload(MERGE)
+        with (
+            mock.patch.object(gate, "read_payload", return_value=payload),
+            mock.patch.object(gate, "read_authority", side_effect=ZeroDivisionError("boom")),
+            mock.patch.dict("os.environ", {"CLAUDE_AGENTIC_LOOP_DIR": str(self.loop)}),
+            mock.patch("sys.stderr") as err,
+        ):
+            self.assertEqual(gate.main(), 0)
+        row = json.loads((self.loop / "s1" / "trace.jsonl").read_text().splitlines()[-1])
+        self.assertEqual(row["reason_code"], "action_authority_failed_open")
+        self.assertIn("error_class", row["inputs"])
+        self.assertIn("ZeroDivisionError", "".join(c.args[0] for c in err.write.call_args_list))
 
     def test_registered_after_existing_gates(self) -> None:
         """Pure append: the Bash group keeps its original order with the new hook last, timeout >= 5."""

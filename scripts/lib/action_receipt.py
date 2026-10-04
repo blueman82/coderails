@@ -42,6 +42,7 @@ REASONS = (
     "foreign_session",
     "foreign_loop",
     "malformed",
+    "no_session",
     "kind_mismatch",
     "no_receipt",
 )
@@ -184,7 +185,7 @@ def find_valid(
     """
     auth = authority_path(session_id, base)
     if auth is None:
-        return None, "malformed"
+        return None, "no_session" if not session_id else "malformed"
     paths = sorted((auth.parent / "receipts").glob("*.json"))
     refusals: list[str] = []
     for path in paths:

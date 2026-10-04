@@ -16,7 +16,7 @@ import uuid
 from contextlib import suppress
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 RESOURCE_ERRNOS = frozenset({errno.EMFILE, errno.ENFILE, errno.EAGAIN, errno.ENOMEM})
 RESOURCE_MESSAGE = (
@@ -150,7 +150,9 @@ def write_authority(path: Path, obj: dict[str, object]) -> bool:
     return True
 
 
-def append_trace_row(command: str, outcome: str, reason_code: str, session_id: str) -> bool:
+def append_trace_row(
+    command: str, outcome: str, reason_code: str, session_id: str, extra: dict[str, Any] | None = None
+) -> bool:
     """Append one non-authoritative trace row (same fields as the Claude trace_row helper); never raises."""
     if not session_id or session_id in {"?", "."} or "/" in session_id or ".." in session_id or "\0" in session_id:
         return False
@@ -159,12 +161,14 @@ def append_trace_row(command: str, outcome: str, reason_code: str, session_id: s
         "schema_version": 1,
         "event_id": str(uuid.uuid4()),
         "session_id": session_id,
-        "loop_id": None,
+        "loop_id": (extra or {}).get("loop_id"),
         "ts": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "command": command,
         "outcome": outcome,
         "reason_code": reason_code,
-        "inputs": {},
+        "inputs": {
+            k: hashlib.sha256(v.encode("utf-8")).hexdigest() for k, v in (extra or {}).get("inputs", {}).items()
+        },
     }
     try:
         path = root / session_id / "trace.jsonl"
@@ -255,7 +259,7 @@ def receipt_find_valid(
     """Vendored subset of scripts/lib/action_receipt.find_valid (revoke/consume are O_EXCL marker files)."""
     auth = authority_path(session_id)
     if auth is None:
-        return None, "malformed"
+        return None, "no_session" if not session_id else "malformed"
     refusals: list[str] = []
     for path in sorted((auth.parent / "receipts").glob("*.json")):
         try:

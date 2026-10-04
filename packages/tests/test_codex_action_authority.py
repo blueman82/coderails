@@ -18,6 +18,8 @@ HOOKS = ROOT / "packages/codex/hooks/scripts"
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(HOOKS))
 import hook_common as codex  # noqa: E402  # isort: skip
+from lib import action_match as codex_match  # noqa: E402  # isort: skip
+from hooks.scripts.lib import pr_workflow_match as claude_match  # noqa: E402  # isort: skip
 from scripts.lib import action_receipt as claude  # noqa: E402  # isort: skip
 
 NOW = datetime(2026, 1, 1, tzinfo=timezone.utc)
@@ -100,6 +102,29 @@ class ParityTests(unittest.TestCase):
             path.with_suffix(".consumed").unlink()
             claude.revoke_receipt(path)  # Claude tombstone is visible to Codex
             self.assertEqual(codex.receipt_find_valid("s1", good, NOW, "L1"), (None, "revoked"))
+
+
+class MatchParityTests(unittest.TestCase):
+    """The vendored command matcher must guard exactly what the Claude one guards."""
+
+    CORPUS = (
+        "git push origin main", "git push", "git -C . push origin main",
+        "git push origin feature && git push origin main",
+        "cd sub && git push", "gh pr merge 5", "gh -R o/r pr merge 5", "gh pr merge 1 && gh pr merge 2",
+        "git push --dry-run origin main", "ls", "git push origin HEAD:main", "git merge main", "bash merge.py 7",
+    )  # fmt: skip
+
+    def test_guarded_segments_identical_on_main_and_feature(self) -> None:
+        """Same corpus, same repo state, same (operation, segment, cwd) answers."""
+        for branch in ("main", "feature/x"):
+            with tempfile.TemporaryDirectory() as tmp:
+                subprocess.run(["git", "init", "-q", "-b", branch, tmp], check=True)
+                (Path(tmp) / "sub").mkdir()
+                for command in self.CORPUS:
+                    with self.subTest(branch=branch, command=command):
+                        self.assertEqual(
+                            claude_match.guarded_segments(command, tmp), codex_match.guarded_segments(command, tmp)
+                        )
 
 
 class HookTests(unittest.TestCase):
@@ -205,6 +230,70 @@ class HookTests(unittest.TestCase):
         self.assertTrue(self.denied("git push origin main"))
         subprocess.run(["git", "-C", str(self.repo), "symbolic-ref", "HEAD", "refs/heads/feature/x"], check=True)
         self.assertFalse(self.denied("git push origin feature/x"))
+
+    def mint_for(self, command: str, kind: str, cwd: Path, rid: str = "r1", **over: object) -> None:
+        """Write a receipt for `command` run in `cwd` on main."""
+        now = datetime.now(timezone.utc)
+        proposed = claude.proposed_action(kind, command, str(cwd), "main")
+        path = claude.receipt_path("s1", rid, self.loop)
+        assert path is not None
+        claude.write_receipt(
+            path,
+            receipt(
+                loop_id=None, action=kind, exact_payload_hash=proposed["exact_payload_hash"], receipt_id=rid,
+                issued_at=now.isoformat(), expires_at=(now + timedelta(hours=1)).isoformat(), **over,
+            ),
+        )  # fmt: skip
+
+    def test_chain_cd_and_dash_c_are_guarded(self) -> None:
+        """Chained second op, `cd other && git push` and `git -C . push origin main` all need their own receipt."""
+        self.configure("enforce")
+        other = self.directory / "other"
+        other.mkdir()
+        subprocess.run(["git", "init", "-q", "-b", "main", str(other)], check=True)
+        self.mint_for("git push origin feature", "git_push", self.repo)
+        self.assertTrue(self.denied("git push origin feature && git push origin main"))
+        self.mint_for("git push", "git_push", self.repo, rid="r2")
+        self.assertTrue(self.denied(f"cd {other} && git push"))
+        self.assertTrue(self.denied("git -C . push origin main"))
+
+    def test_artifact_sha_checked_against_head(self) -> None:
+        """A sha-bound push receipt verifies only against the real HEAD."""
+        self.configure("enforce")
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(self.repo),
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@t",
+                "commit",
+                "-q",
+                "--allow-empty",
+                "-m",
+                "x",
+            ],
+            check=True,
+        )
+        head = subprocess.run(
+            ["git", "-C", str(self.repo), "rev-parse", "HEAD"], capture_output=True, text=True, check=True
+        ).stdout.strip()
+        self.mint_for("git push origin main", "git_push", self.repo, artifact_sha="0" * 40)
+        self.assertTrue(self.denied("git push origin main"))
+        self.mint_for("git push origin main", "git_push", self.repo, rid="r2", artifact_sha=head)
+        self.assertFalse(self.denied("git push origin main"))
+
+    def test_missing_session_and_cli_honesty(self) -> None:
+        """No session_id: no_session denial that is traced; the hint says the CLI is not in the Codex package."""
+        self.configure("enforce")
+        result = self.run_hook("git push origin main", session="")
+        self.assertIn("no_session", result.stdout)
+        self.assertNotIn("--session  ", result.stdout)
+        rows = (self.loop / "_no_session" / "trace.jsonl").read_text().splitlines()
+        self.assertEqual(json.loads(rows[0])["reason_code"], "denied_no_session")
+        self.assertIn("NOT shipped", self.run_hook("git push origin main").stdout)
 
     def test_registered_with_timeout(self) -> None:
         """Appended last to the ^Bash$ group with a timeout of at least 5."""

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 import re
+import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -25,9 +26,8 @@ from hook_common import (
     receipt_proposed,
     text_field,
 )
+from lib.action_match import guarded_segments
 from lib.destructive_patterns import git_output
-
-GUARDED = (("merge", r"^gh\s+pr\s+merge(?:\s|$)"), ("git_push", r"^git\s+push(?:\s|$)"))
 
 
 def mode(cwd: str) -> str:
@@ -43,54 +43,76 @@ def mode(cwd: str) -> str:
     return "off"
 
 
-def guarded(command: str, cwd: str) -> tuple[str, str]:
-    """Return (operation, segment) for gh pr merge, or git push targeting main/master; else empty strings."""
-    for segment in re.split(r"&&|\|\||[;|&\n]", command):
-        segment = segment.lstrip()
-        for name, pattern in GUARDED:
-            if not re.search(pattern, segment):
-                continue
-            if name == "merge" or git_output(cwd, "branch", "--show-current") in {"main", "master"}:
-                return name, segment
-            if re.search(r"(^|\s)\+?(refs/heads/)?(main|master)([\s;&|)]|$)|:(refs/heads/)?(main|master)", segment):
-                return name, segment
-    return "", ""
+def artifact_sha(name: str, segment: str, cwd: str) -> str | None:
+    """HEAD for a push, the PR head (via gh) for a merge; None when unknowable (a sha-bound receipt then fails)."""
+    if name == "git_push":
+        return git_output(cwd, "rev-parse", "HEAD") or None
+    number = next((t.strip("\"'") for t in segment.split()[3:] if re.match(r"^[\"']?[0-9]", t)), "")
+    if not number:
+        return None
+    try:
+        out = subprocess.run(
+            ["gh", "pr", "view", number, "--json", "headRefOid", "-q", ".headRefOid"],
+            cwd=cwd, capture_output=True, text=True, timeout=4, check=False,
+        ).stdout.strip()  # fmt: skip
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return out or None
 
 
 def main() -> int:
-    """Check one Bash payload; fail open on any own error."""
+    """Check one Bash payload; every guarded segment needs its own receipt; fail open on any own error."""
     payload = payload_object(read_input())
     session = text_field(payload, "session_id")
+    trace_id = session or "_no_session"
+    loop: str | None = None
     try:
         data = payload.get("tool_input")
         command = cast(dict[str, object], data).get("command") if isinstance(data, dict) else None
         cwd = text_field(payload, "cwd") or os.getcwd()
         if not isinstance(command, str) or not command or (mode_ := mode(cwd)) == "off":
             return 0
-        name, segment = guarded(command, cwd)
-        if not name:
+        if not (segments := guarded_segments(command, cwd)):
             return 0
         state, authority = authority_state(session)
         loop_id = authority.get("loop_id") if state == "live" else None
-        proposed = receipt_proposed(name, segment, cwd, git_output(cwd, "branch", "--show-current"))
         loop = loop_id if isinstance(loop_id, str) else None
-        found, code = receipt_find_valid(session, proposed, datetime.now(timezone.utc), loop, mode_ == "enforce")
-        if found is not None:
+        now = datetime.now(timezone.utc)
+        proposals = [
+            (name, receipt_proposed(name, segment, where, git_output(where, "branch", "--show-current"),
+                                    artifact_sha(name, segment, where)))
+            for name, segment, where in segments
+        ]  # fmt: skip
+        results = [(name, *receipt_find_valid(session, proposed, now, loop)) for name, proposed in proposals]
+        missing = next(((name, code) for name, found, code in results if found is None), None)
+        if missing is None:
             if mode_ == "enforce":
-                append_trace_row("action_authority", "allowed", "receipt_consumed", session)
+                for _, proposed in proposals:
+                    receipt_find_valid(session, proposed, now, loop, True)
+                append_trace_row("action_authority", "allowed", "receipt_consumed", trace_id, {"loop_id": loop})
             return 0
+        name, code = missing
         if mode_ == "advisory":
-            append_trace_row("action_authority", "advisory", f"advisory_{code}", session)
+            append_trace_row("action_authority", "advisory", f"advisory_{code}", trace_id, {"loop_id": loop})
             print(f"action_authority (advisory): no valid receipt for {name} ({code}); not blocked.", file=sys.stderr)
             return 0
-        append_trace_row("action_authority", "denied", f"denied_{code}", session)
-        deny(
-            f"Blocked: {name.replace('_', ' ')} needs an action receipt ({code}). Mint one for this exact command: "
-            f"python3 scripts/action_receipt_cli.py approve-action --session {session} --kind {name} "
-            f"--command '<exact command>'. Or set action_authority to off."
+        append_trace_row("action_authority", "denied", f"denied_{code}", trace_id, {"loop_id": loop})
+        how = (
+            "The payload has no session_id, so no receipt can be bound."
+            if code == "no_session"
+            else "The receipt CLI (scripts/action_receipt_cli.py) is NOT shipped in the Codex package: run it from a "
+            f"coderails repo checkout: approve-action --session {session} --kind {name} --command '<exact command>' "
+            "--cwd <directory it runs in>."
         )
-    except Exception:  # noqa: BLE001 - the gate must never break a session; trace and fail open
-        append_trace_row("action_authority", "failed_open", "action_authority_failed_open", session)
+        deny(
+            f"Blocked: {name.replace('_', ' ')} needs an action receipt ({code}). {how} Or set action_authority to off."
+        )
+    except Exception as error:  # noqa: BLE001 - the gate must never break a session; trace and fail open
+        append_trace_row(
+            "action_authority", "failed_open", "action_authority_failed_open", trace_id,
+            {"loop_id": loop, "inputs": {"error_class": type(error).__name__}},
+        )  # fmt: skip
+        print(f"action_authority failed open: {type(error).__name__}: {error}", file=sys.stderr)
     return 0
 
 
