@@ -10,8 +10,9 @@ import select
 import subprocess
 import sys
 import time
+import uuid
 from contextlib import suppress
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import cast
 
@@ -75,6 +76,35 @@ def log(message: str) -> None:
             output.write(f"{time.strftime('%Y-%m-%dT%H:%M:%S%z')} {message}\n")
     except OSError:
         return
+
+
+def append_trace_row(command: str, outcome: str, reason_code: str, session_id: str) -> bool:
+    """Append one non-authoritative trace row (same fields as the Claude trace_row helper); never raises."""
+    if not session_id or session_id in {"?", "."} or "/" in session_id or ".." in session_id or "\0" in session_id:
+        return False
+    root = Path(os.environ.get("CODERAILS_AGENTIC_LOOP_DIR") or Path.home() / ".coderails" / "agentic-loop")
+    row: dict[str, object] = {
+        "schema_version": 1,
+        "event_id": str(uuid.uuid4()),
+        "session_id": session_id,
+        "loop_id": None,
+        "ts": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "command": command,
+        "outcome": outcome,
+        "reason_code": reason_code,
+        "inputs": {},
+    }
+    try:
+        path = root / session_id / "trace.jsonl"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        descriptor = os.open(str(path), os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o644)
+        try:
+            os.write(descriptor, (json.dumps(row, sort_keys=True) + "\n").encode("utf-8"))
+        finally:
+            os.close(descriptor)
+    except OSError:
+        return False
+    return True
 
 
 def continue_turn(reason: str) -> None:

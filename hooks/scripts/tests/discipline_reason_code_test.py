@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import os
+import runpy
 import subprocess
 import sys
 import tempfile
@@ -75,12 +76,23 @@ class DisciplineReasonCodeTests(unittest.TestCase):
                     flagged = [line for line in log.splitlines() if " demoted=1" in line]
                     self.assertEqual(len(flagged), 1)
                     self.assertIn(f"reason_code={reason}", flagged[0])
-                    self.assertIn("would_block=1", flagged[0])
+                    self.assertEqual(sum(" would_block=1" in line for line in log.splitlines()), 1)
                     self.assertIn("blocked=0", flagged[0])
                     self.assertNotIn(" blocked=1", log)
                     self.assertEqual(
                         [(r["command"], r["outcome"], r["reason_code"]) for r in rows], [(name, "demoted", reason)]
                     )
+
+    def test_counters_count_one_event_once(self) -> None:
+        """Dedupe control: parse_telemetry reads would_block==1 and demoted==1 per flagged event (not 2x)."""
+        measure = runpy.run_path(str(SCRIPTS.parents[1] / "scripts/measure_graph_alignment.py"))
+
+        for name, _, text in CASES:
+            with self.subTest(hook=name), tempfile.TemporaryDirectory() as directory:
+                self.run_hook(name, text, directory)
+                telemetry = measure["parse_telemetry"](Path(f"{directory}/discipline.log"))
+                gate = telemetry["gates"][name.replace("check_", "")]
+                self.assertEqual((gate["would_block"], gate["demoted"], gate["blocked"]), (1, 1, 0))
 
     def test_unwritable_trace_store_still_exits_zero(self) -> None:
         """Crash control: the trace row is non-authoritative, so a state dir that is a file cannot change the exit."""

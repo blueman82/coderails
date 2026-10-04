@@ -54,7 +54,7 @@ def main() -> int:
         '(verified)/(inferred)/(guess) labels (rule: CLAUDE.md), e.g. "the cache matches the repo (verified: '
         'diffed both trees)". Advisory only; this lint does not block.',
     )
-    log(f"{fields} would_block=1 demoted=1 blocked=0 reason_code={REASON}")
+    log(f"{fields} demoted=1 blocked=0 reason_code={REASON}")
     append_row("check_confidence_labels", "demoted", REASON, session)
     return 0
 
