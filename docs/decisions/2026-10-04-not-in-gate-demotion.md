@@ -37,5 +37,7 @@ The real-fix-rate leg was never sampled for either gate. The logs are live and a
   Do not call the advisory "model-visible" until a live session shows it. Until then the change is
   "advisory plus trace". If a live run shows it is dropped, the lint is a pure logger; the user then chooses between
   a logger-only lint, a `systemMessage` fallback, or reintroducing a blocking path.
-- The Codex copy (`packages/codex/hooks/scripts/check_confidence_labels.py`) is a separate implementation with no
-  trace rows; see the PR for its status.
+- The Codex copy (`packages/codex/hooks/scripts/check_confidence_labels.py`) is a separate implementation. It is
+  demoted the same way (advisory via `hookSpecificOutput.additionalContext`, always exit 0, a fail-open `demoted`
+  trace row via its own `append_trace_row`). Codex has no `verify_loop` hook. Codex host handling of
+  `additionalContext` at Stop/SubagentStop is unverified, same caveat as above.
