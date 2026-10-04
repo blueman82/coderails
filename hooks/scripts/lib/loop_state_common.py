@@ -18,6 +18,7 @@ from typing import Any, cast
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from hooks.scripts.lib.agentic_loop_path import resolve_path
+from hooks.scripts.lib.dir_lock import acquire_dir_lock, release_dir_lock
 from hooks.scripts.lib.discipline_common import content, records, tool_uses
 
 LOOP_STOP_VOCAB = "hard-stop|approval-gate|awaiting-input|complete"
@@ -47,14 +48,7 @@ def atomic_progress_update(path: Path, update: Callable[[dict[str, Any]], dict[s
     lock = Path(f"{path}.lock")
     attempts = int(os.environ.get("CLAUDE_HOOK_MAX_ATTEMPTS", "5"))
     delay = float(os.environ.get("CLAUDE_HOOK_SLEEP_S", "0.3"))
-    for attempt in range(attempts):
-        try:
-            lock.mkdir()
-            break
-        except OSError:
-            if attempt + 1 < attempts:
-                time.sleep(delay)
-    else:
+    if not acquire_dir_lock(lock, attempts, delay)[0]:
         return False
     temporary = ""
     try:
@@ -76,8 +70,7 @@ def atomic_progress_update(path: Path, update: Callable[[dict[str, Any]], dict[s
         if temporary:
             with suppress(OSError):
                 Path(temporary).unlink()
-        with suppress(OSError):
-            lock.rmdir()
+        release_dir_lock(lock)
 
 
 def count_invocations(transcript: str) -> tuple[int, str, int]:
