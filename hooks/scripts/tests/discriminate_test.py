@@ -17,7 +17,7 @@ from scripts.lib.eval_validation import validate_discriminating, validate_struct
 ROOT = Path(__file__).resolve().parents[3]
 BROKEN = "awk -F'[ /]' '/suites passed/ {found=1; ok=($(NF-3) == $(NF-2))} END {exit (found && ok) ? 0 : 1}'"
 REPAIRED = (
-    'awk \'/suites passed/ {found=1; split($3,a,"/"); ok=(a[1]==a[2] && a[1]>0)} ' "END {exit (found && ok) ? 0 : 1}'"
+    "awk '/suites passed/ {found=1; split($3,a,\"/\"); ok=(a[1]==a[2] && a[1]>0)} END {exit (found && ok) ? 0 : 1}'"
 )
 
 

@@ -149,6 +149,28 @@ class MeasureTests(unittest.TestCase):
             },
         )
 
+    def test_lock_event_counters_dedupe_by_event_id(self) -> None:
+        """Each lock reason is counted once per event_id across files; bad rows are skipped."""
+
+        def row(eid: str, reason: str) -> str:
+            return json.dumps({"event_id": eid, "reason": reason, "schema": "lock_event"})
+
+        base = self.home / ".coderails/agentic-loop"
+        write(
+            base / "a/lock-events.jsonl",
+            "\n".join([row("1", "lock_busy"), row("1", "lock_busy"), "{torn", row("2", "lock_stolen_age")]) + "\n",
+        )
+        rows = [row("1", "lock_busy"), row("3", "lock_stolen_dead_owner"), row("4", "bogus")]
+        write(base / "verification-ceiling/lock-events.jsonl", "\n".join(rows) + "\n")
+        counters = self.measure()["lock_events"]
+        self.assertEqual(counters, {"lock_busy": 1, "lock_stolen_age": 1, "lock_stolen_dead_owner": 1})
+
+    def test_lock_event_counters_zero_when_absent(self) -> None:
+        """No event logs yields explicit zeros."""
+        self.assertEqual(
+            self.measure()["lock_events"], {"lock_busy": 0, "lock_stolen_age": 0, "lock_stolen_dead_owner": 0}
+        )
+
     def test_eval_trace_counts_dedupe_by_event_id(self) -> None:
         """Duplicate event_ids count once; malformed lines are counted; no row content is emitted."""
         row = {"event_id": "e1", "command": "grade-loop", "outcome": "refuse", "reason_code": "control_passes"}
@@ -266,6 +288,40 @@ class MeasureTests(unittest.TestCase):
         dup = self.measure()["duplication"]
         self.assertEqual(sorted(dup["graph_semantics_lines"].values()), [2, 2, 3])
         self.assertEqual(dup["graph_semantics_distinct_contents"], 2)
+
+    def trace(self, session: str, text: str) -> None:
+        """Write a trace.jsonl under the default loop-state root."""
+        write(self.home / ".coderails/agentic-loop" / session / "trace.jsonl", text)
+
+    @staticmethod
+    def row(event_id: str, command: str = "gate", reason: str = "r1", outcome: str = "blocked") -> str:
+        """Render one trace row line."""
+        row = {"event_id": event_id, "command": command, "reason_code": reason, "outcome": outcome}
+        return json.dumps(row) + "\n"
+
+    def test_trace_counts_dedupe_by_event_id(self) -> None:
+        """A row repeated (same event_id, even across files) is counted once; reasons are tallied."""
+        self.trace("s1", self.row("e1") + self.row("e1") + self.row("e2", reason="r2"))
+        self.trace("s2", self.row("e1") + self.row("e3"))
+        trace = self.measure()["trace"]
+        self.assertEqual(trace["rows"], 3)
+        self.assertEqual(trace["duplicates"], 2)
+        self.assertEqual(trace["by_reason"], {"gate/blocked/r1": 2, "gate/blocked/r2": 1})
+
+    def test_trace_outcome_separates_warned_from_blocked(self) -> None:
+        """Same command and reason_code with different outcomes are different counters."""
+        self.trace("s1", self.row("e1", outcome="warned") + self.row("e2", outcome="blocked"))
+        self.assertEqual(self.measure()["trace"]["by_reason"], {"gate/blocked/r1": 1, "gate/warned/r1": 1})
+
+    def test_trace_torn_last_line_skipped(self) -> None:
+        """A truncated final line and a row without event_id are skipped and reported, not fatal."""
+        self.trace("s1", self.row("e1") + '{"event_id": "e2", "comma' + "\n" + json.dumps({"command": "x"}) + "\n")
+        trace = self.measure()["trace"]
+        self.assertEqual((trace["rows"], trace["malformed"]), (1, 2))
+
+    def test_trace_absent_is_zero(self) -> None:
+        """No trace files gives zeros."""
+        self.assertEqual(self.measure()["trace"], {"rows": 0, "duplicates": 0, "malformed": 0, "by_reason": {}})
 
 
 if __name__ == "__main__":

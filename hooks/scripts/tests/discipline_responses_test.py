@@ -38,7 +38,7 @@ class DisciplineResponseTests(unittest.TestCase):
                     if not key.startswith("CLAUDE_HOOK_") and key != "CODERAILS_HEADLESS_RUN"
                 }
                 environment.update(case["env"])
-                hook = Path(__file__).resolve().parents[1] / f'{case["source"]}.py'
+                hook = Path(__file__).resolve().parents[1] / f"{case['source']}.py"
                 result = subprocess.run(
                     [sys.executable, str(hook)],
                     input=json.dumps(case["request"]),

@@ -25,6 +25,7 @@ GRAPH_SEMANTICS_COPIES = (
     "skills/agentic-loop/scripts/graph_semantics.py",
     "packages/codex/skills/agentic-loop/scripts/graph_semantics.py",
 )
+LOCK_REASONS = ("lock_busy", "lock_stolen_age", "lock_stolen_dead_owner")
 ADAPTER_DIRS = {"claude": "skills/agentic-loop/scripts", "codex": "packages/codex/skills/agentic-loop/scripts"}
 
 
@@ -179,14 +180,9 @@ def classify(state: dict[str, Any]) -> dict[str, bool]:
 def graph_vs_work_units() -> dict[str, Any]:
     """Scan `<root>/*/*/progress.json` read-only and count loops by work_units/graph/divergence."""
     seen: set[Path] = set()
-    totals = {
-        "loops": 0,
-        "with_work_units": 0,
-        "with_graph_nodes": 0,
-        "with_both": 0,
-        "divergent": 0,
-        "divergent_lenient": 0,
-    }
+    totals = dict.fromkeys(
+        ("loops", "with_work_units", "with_graph_nodes", "with_both", "divergent", "divergent_lenient"), 0
+    )
     for base in loop_state_roots():
         for path in sorted(base.glob("*/*/progress.json")):
             real = path.resolve()
@@ -203,11 +199,40 @@ def graph_vs_work_units() -> dict[str, Any]:
     return {"roots": [str(r) for r in loop_state_roots()], **totals}
 
 
-def recovery_counters() -> dict[str, Any]:
-    """Count recoveries, controller starts, add-units, refusals and retries from loop state plus the advisory trace.
+def trace_counts() -> dict[str, Any]:
+    """Count `<root>/*/trace.jsonl` rows once per event_id (torn/keyless skipped); counts only, never row inputs."""
+    seen: set[str] = set()
+    by_reason: dict[str, int] = {}
+    rows = duplicates = malformed = 0
+    files: set[Path] = set()
+    for base in loop_state_roots():
+        files.update(p.resolve() for p in base.glob("*/trace.jsonl"))
+    for path in sorted(files):
+        try:
+            lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+        except OSError:
+            continue
+        for line in lines:
+            try:
+                row = as_dict(json.loads(line))
+            except ValueError:
+                row = {}
+            event_id = row.get("event_id")
+            if not isinstance(event_id, str) or not event_id:
+                malformed += 1
+            elif event_id in seen:
+                duplicates += 1
+            else:
+                seen.add(event_id)
+                rows += 1
+                key = f"{row.get('command')}/{row.get('outcome')}/{row.get('reason_code')}"
+                by_reason[key] = by_reason.get(key, 0) + 1
+    counts = {"rows": rows, "duplicates": duplicates, "malformed": malformed}
+    return {**counts, "by_reason": dict(sorted(by_reason.items()))}
 
-    The trace is non-authoritative and only counted here; unparseable rows are skipped. Counts only.
-    """
+
+def recovery_counters() -> dict[str, Any]:
+    """Count recoveries, controller starts/add-units/refusals, retries from loop state and advisory trace."""
     seen: set[Path] = set()
     refused = failed = stale = recovered = starts = add_units = 0
     codes: dict[str, int] = {}
@@ -282,6 +307,32 @@ def duplication(root: Path) -> dict[str, Any]:
     }
 
 
+def lock_events() -> dict[str, int]:
+    """Count non-authoritative lock events per reason code, deduped by event_id across all loop-state roots."""
+    counts: dict[str, int] = dict.fromkeys(LOCK_REASONS, 0)
+    seen: set[str] = set()
+    for root in loop_state_roots():
+        try:
+            logs = sorted(root.rglob("lock-events.jsonl"))
+        except OSError:
+            continue
+        for log in logs:
+            try:
+                lines = log.read_text(encoding="utf-8", errors="replace").splitlines()
+            except OSError:
+                continue
+            for line in lines:
+                try:
+                    row = as_dict(json.loads(line))
+                except ValueError:
+                    continue
+                event_id, reason = row.get("event_id"), row.get("reason")
+                if isinstance(event_id, str) and event_id not in seen and reason in counts:
+                    seen.add(event_id)
+                    counts[cast(str, reason)] += 1
+    return counts
+
+
 def eval_trace_counts(extra: list[Path]) -> dict[str, Any]:
     """Count eval_trace.jsonl rows (command|outcome|reason_code) deduped by event_id; no row content is kept."""
     files = [f for root in loop_state_roots() for f in sorted(root.glob("*/*/eval_trace.jsonl"))] + extra
@@ -311,7 +362,6 @@ def eval_trace_counts(extra: list[Path]) -> dict[str, Any]:
 
 def measure(root: Path, extra_traces: list[Path] | None = None) -> dict[str, Any]:
     """Assemble the full measurement object for a repository root."""
-    logs = telemetry_paths()
     return {
         "root": str(root),
         "hook_counts": {
@@ -319,10 +369,12 @@ def measure(root: Path, extra_traces: list[Path] | None = None) -> dict[str, Any
             "codex": hook_counts(root / "packages/codex/hooks/hooks.json"),
         },
         "bootstrap_bytes": bootstrap_bytes(root),
-        "gate_blocks": {provider: parse_telemetry(path) for provider, path in logs.items()},
+        "gate_blocks": {provider: parse_telemetry(path) for provider, path in telemetry_paths().items()},
         "graph_vs_work_units": graph_vs_work_units(),
+        "trace": trace_counts(),
         "recovery": recovery_counters(),
         "duplication": duplication(root),
+        "lock_events": lock_events(),
         "eval_trace": eval_trace_counts(extra_traces or []),
     }
 
