@@ -55,12 +55,14 @@ def main(arguments: list[str] | None = None) -> int:
         if manifest is None:
             mp.trace(label, "legacy", "manifest_legacy_absent")
     base = args.base or f"origin/{git.main()}"
-    diff = git.run("git", "diff", "--name-status", "-M", f"{base}...{args.head}")
+    diff = git.run("git", "diff", "--raw", "-z", "-M", f"{base}...{args.head}")
     if diff.returncode:
         mp.trace(label, "failed_open", "manifest_unreadable")
         return finish({"ok": True, "violations": [], "reason_code": "manifest_unreadable"}, 0)
     linked = mp.linked_worktree() if policy.get("require_linked_worktree") else None
-    result = mp.check(mp.parse_name_status(diff.stdout), policy, manifest, linked)
+    result = mp.check(mp.parse_raw_z(diff.stdout), policy, manifest, linked)
+    if result["ok"]:
+        mp.trace(label, "ok", "diff_manifest_ok")
     for violation in result["violations"]:
         mp.trace(label, "refused", violation["code"])
     return finish(result, 0 if result["ok"] else 1)

@@ -232,7 +232,7 @@ class GateTests(RepoCase):
         self.cfg.write_text(f"diff_manifest_policy: {self.policy_path}\n")
         with mock.patch.object(manifest_policy, "config_path", return_value=str(self.cfg)):
             manifest_policy.gate()
-        self.assertEqual([r["outcome"] for r in self.rows()], ["warned"])
+        self.assertEqual([r["outcome"] for r in self.rows() if r["outcome"] != "legacy"], ["warned"])
 
     def test_off_and_no_policy_do_nothing(self) -> None:
         """Off, or no policy file, skips the check and writes nothing."""

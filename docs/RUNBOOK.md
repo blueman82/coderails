@@ -73,9 +73,9 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   (config `diff_manifest: enforce`). `scripts/diff_manifest.py --policy FILE` shows the same verdict without hooks.
 - Query: `trace.by_reason` for `diff-manifest/ok/diff_manifest_ok`, `diff-manifest/warned|refused/<code>` (rows are keyed by
   `<repo>@<branch>` or `<repo>@pr-<N>`), plus `diff-manifest/failed_open/manifest_unreadable`,
-  `diff-manifest/legacy/manifest_legacy_absent` and `diff-manifest/refused/foreign_session`. Tally them with
+  `diff-manifest/legacy/manifest_legacy_absent` (policy file without a manifest key; also written by the gate) and `diff-manifest/refused/foreign_session`. Tally them with
   `python3 scripts/measure_graph_alignment.py --root . | python3 scripts/lib/manifest_counters.py`.
-- Codes: `out_of_manifest`, `denied_path`, `docs_sync_deny`, `docs_sync_deletion`, `not_linked_worktree`.
+- Codes: `out_of_manifest`, `denied_path`, `docs_sync_deny`, `docs_sync_deletion`, `not_linked_worktree`, `special_file_type` (type change, symlink or gitlink).
 - Remediation: a real violation means the diff left its declared scope; fix the diff, or widen `unit.manifest`
   (re-register with `add-unit --manifest`) or the policy file on purpose. `manifest_unreadable` means the policy file,
   progress.json or diff could not be read (fails open when advisory; refuses under enforce); fix the path. Set
