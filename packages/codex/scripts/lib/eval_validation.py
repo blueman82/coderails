@@ -11,6 +11,7 @@ from typing import cast
 from .artifact_io import JsonObject, array_value, object_value, read_object
 from .eval_artifact import parse_verification_level
 from .eval_execution import is_environmental_rc, run_recorded, scripted_evals, validate_smoke, verify_execution
+from .eval_integrity import FIXTURE_FORMULA_NOT_IN_CMD, IntegrityError
 
 
 def git_output(directory: Path, *arguments: str) -> subprocess.CompletedProcess[str]:
@@ -145,6 +146,10 @@ def validate_discriminating(path: str | Path) -> None:
             formula = command.rsplit("|", 1)[1].strip()
         if not isinstance(formula, str):
             raise ValueError(f"{identity} fixtures.formula must be a string")
+        if not formula.strip() or not str(item.get("cmd") or "").rstrip().endswith(formula.strip()):
+            raise IntegrityError(
+                FIXTURE_FORMULA_NOT_IN_CMD, f"{identity} fixtures.formula is not the literal tail of cmd"
+            )
         good_rc, _ = run_recorded(formula, input_text=good)
         bad_rc, _ = run_recorded(formula, input_text=bad)
         outcomes = f"good exit={good_rc}, bad exit={bad_rc}"

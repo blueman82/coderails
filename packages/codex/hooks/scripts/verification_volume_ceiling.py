@@ -8,10 +8,10 @@ import os
 import re
 import subprocess
 import sys
-import time
-from contextlib import suppress
 from pathlib import Path
 from typing import cast
+
+from lib.dir_lock import acquire_dir_lock, release_dir_lock
 
 FULL_SUITE = re.compile(
     r"(^|[&;|])\s*(python3?\s+|\./)?([^\s]*/)?"
@@ -87,18 +87,6 @@ def deny(reason: str) -> None:
     )
 
 
-def acquire_lock(lock_path: Path) -> bool:
-    """Acquire the established directory lock within its bounded retry budget."""
-    for attempt in range(15):
-        try:
-            lock_path.mkdir()
-            return True
-        except OSError:
-            if attempt < 14:
-                time.sleep(0.1)
-    return False
-
-
 def count_for(count_path: Path) -> int:
     """Read a valid first-line counter, treating missing or corrupt state as zero."""
     try:
@@ -130,7 +118,7 @@ def main() -> int:
 
     count_path = state_dir / f"{branch_slug}__{target}.count"
     lock_path = Path(f"{count_path}.lock")
-    if not acquire_lock(lock_path):
+    if not acquire_dir_lock(lock_path, 15, 0.1)[0]:
         deny(LOCK_ERROR)
         return 0
     try:
@@ -141,8 +129,7 @@ def main() -> int:
             deny(WRITE_ERROR)
             return 0
     finally:
-        with suppress(OSError):
-            lock_path.rmdir()
+        release_dir_lock(lock_path)
 
     if count >= 2:
         deny(
