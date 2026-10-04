@@ -105,12 +105,18 @@ class DisciplineCommonTests(HookTestCase):
                     "ts=4 session=sess-a hook=beta nudged=1",
                     "ts=5 session=sess-a hook=beta would_block=1",
                     "ts=6 hook=beta blocked=1",
+                    "ts=7 session=sess-a hook=gamma demoted=1",
+                    "ts=8 session=sess-a hook=gamma blocked=0",
                     "garbage",
                     "session=sess-a no_hook",
                 ]
             )
         )
-        expected = {"alpha": {"events": 2, "flagged": 1}, "beta": {"events": 2, "flagged": 2}}
+        expected = {
+            "alpha": {"events": 2, "flagged": 1},
+            "beta": {"events": 2, "flagged": 2},
+            "gamma": {"events": 2, "flagged": 1},
+        }
         self.assertEqual(mine_hook_blocks("sess-a", str(path)), expected)
         self.assertNotEqual(mine_hook_blocks("sess-a", str(path)), {"alpha": {"events": 99, "flagged": 99}})
         self.assertEqual(mine_hook_blocks("", str(path)), {})
