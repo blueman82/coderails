@@ -227,7 +227,34 @@ def duplication(root: Path) -> dict[str, Any]:
     }
 
 
-def measure(root: Path) -> dict[str, Any]:
+def eval_trace_counts(extra: list[Path]) -> dict[str, Any]:
+    """Count eval_trace.jsonl rows (command|outcome|reason_code) deduped by event_id; no row content is kept."""
+    files = [f for root in loop_state_roots() for f in sorted(root.glob("*/*/eval_trace.jsonl"))] + extra
+    seen: set[str] = set()
+    by_reason: dict[str, int] = {}
+    duplicates = malformed = 0
+    for file in dict.fromkeys(files):
+        try:
+            lines = file.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            continue
+        for line in lines:
+            try:
+                row = as_dict(json.loads(line))
+                event_id = str(row["event_id"])
+                key = "|".join(str(row[k]) for k in ("command", "outcome", "reason_code"))
+            except (ValueError, KeyError):
+                malformed += 1
+                continue
+            if event_id in seen:
+                duplicates += 1
+                continue
+            seen.add(event_id)
+            by_reason[key] = by_reason.get(key, 0) + 1
+    return {"events": len(seen), "duplicates": duplicates, "malformed": malformed, "by_reason": by_reason}
+
+
+def measure(root: Path, extra_traces: list[Path] | None = None) -> dict[str, Any]:
     """Assemble the full measurement object for a repository root."""
     logs = telemetry_paths()
     return {
@@ -240,6 +267,7 @@ def measure(root: Path) -> dict[str, Any]:
         "gate_blocks": {provider: parse_telemetry(path) for provider, path in logs.items()},
         "graph_vs_work_units": graph_vs_work_units(),
         "duplication": duplication(root),
+        "eval_trace": eval_trace_counts(extra_traces or []),
     }
 
 
@@ -248,12 +276,13 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", required=True, help="repository root to measure")
     parser.add_argument("--json", action="store_true", help="print JSON (the only supported format)")
+    parser.add_argument("--eval-trace", action="append", default=[], help="extra eval_trace.jsonl (PR-scope sinks)")
     args = parser.parse_args(argv)
     root = Path(args.root)
     if not root.is_dir():
         print(f"measure_graph_alignment: root is not a directory: {root}", file=sys.stderr)
         return 2
-    print(json.dumps(measure(root.resolve()), indent=2, sort_keys=True))
+    print(json.dumps(measure(root.resolve(), [Path(p) for p in args.eval_trace]), indent=2, sort_keys=True))
     return 0
 
 

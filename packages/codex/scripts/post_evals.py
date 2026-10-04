@@ -10,18 +10,69 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from scripts.lib.artifact_io import array_value, object_value, read_object, write_object
 from scripts.lib.eval_artifact import compute_go, grading_checksum
-from scripts.lib.eval_execution import record_smoke, scripted_evals, verify_execution
+from scripts.lib.eval_execution import (
+    is_environmental_rc,
+    record_smoke,
+    run_recorded,
+    scripted_evals,
+    verify_execution,
+)
+from scripts.lib.eval_integrity import (
+    CONTROL_ENV,
+    CONTROL_PASSES,
+    LEGACY_UNHASHED,
+    PROGRESS_FOREIGN,
+    PROGRESS_MISSING,
+    PROGRESS_UNPARSEABLE,
+    IntegrityError,
+    append_amendment,
+    stamp,
+    verify_suite,
+)
+from scripts.lib.eval_trace import emit
 from scripts.lib.eval_validation import validate_discriminating, validate_embed, validate_structure
 
 
 def compute_and_validate_result(path: str | Path) -> str:
     """Derive GO or NO-GO exclusively from actual P0 statuses."""
     return "GO" if compute_go(path) else "NO-GO"
+
+
+def _progress_identity(progress: Path, data: dict[str, Any]) -> dict[str, Any]:
+    """Require a parseable sibling progress.json whose ids match any ids already on the suite."""
+    try:
+        identity = read_object(progress)
+    except FileNotFoundError as error:
+        raise IntegrityError(PROGRESS_MISSING, f"{progress} is missing; restore it to grade") from error
+    except (OSError, ValueError) as error:
+        raise IntegrityError(PROGRESS_UNPARSEABLE, f"{progress} does not parse") from error
+    if not all(isinstance(identity.get(key), str) and identity[key] for key in ("session_id", "loop_id")):
+        raise IntegrityError(PROGRESS_UNPARSEABLE, f"{progress} does not parse or lacks session_id/loop_id")
+    if any(data.get(key) not in (None, identity[key]) for key in ("session_id", "loop_id")):
+        raise IntegrityError(PROGRESS_FOREIGN, "suite is stamped for a different session/loop than progress.json")
+    return identity
+
+
+def _execute_controls(data: dict[str, Any]) -> None:
+    """Run every scripted negative_control: it must fail for a content reason."""
+    if str(data.get("verification_level")) == "0":
+        return
+    for item in array_value(data.get("evals", [])):
+        control = object_value(item).get("negative_control")
+        if object_value(item).get("mode") != "scripted" or not isinstance(control, str) or not control.strip():
+            continue
+        code, output = run_recorded(control.strip())
+        if code == 0:
+            raise IntegrityError(CONTROL_PASSES, f"eval {item.get('id')} negative_control exited 0")
+        if is_environmental_rc(code):
+            raise IntegrityError(
+                CONTROL_ENV, f"eval {item.get('id')} negative_control did not execute (exit {code}): {output}"
+            )
 
 
 def grade_loop(path: str | Path) -> str:
@@ -40,6 +91,18 @@ def grade_loop(path: str | Path) -> str:
             identity = amendment.get("regraded_by")
             if not isinstance(identity, str) or not identity.strip():
                 raise ValueError("amendment(s) added after the prior grade lack a non-blank regraded_by")
+    progress = Path(path).with_name("progress.json")
+    identity = _progress_identity(progress, data)
+    integrity = verify_suite(data)
+    _execute_controls(data)
+    if integrity == LEGACY_UNHASHED:
+        print(
+            "post_evals: reason=legacy_unhashed — suite has no frozen_hash; graded without tamper evidence",
+            file=sys.stderr,
+        )
+        emit(path, "grade-loop", "legacy", LEGACY_UNHASHED)
+    if identity.get("schema_version") != 3:
+        emit(path, "grade-loop", "legacy", "legacy_progress_schema")
     result = compute_and_validate_result(path)
     data["result"] = result
     data["graded_at"] = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -47,19 +110,12 @@ def grade_loop(path: str | Path) -> str:
         "by": "post_evals.py grade-loop",
         "checksum": grading_checksum(path, result),
         "amendments_at_grade": len(amendments),
+        **stamp(data),
     }
-    progress = Path(path).with_name("progress.json")
-    try:
-        identity = read_object(progress)
-        for key in ("session_id", "loop_id"):
-            if identity.get(key):
-                data[key] = identity[key]
-        revision = identity.get("revision")
-        if isinstance(revision, int) and not isinstance(revision, bool):
-            data["revision"] = revision
-    except (OSError, ValueError):
-        if progress.exists():
-            print(f"post_evals: warning — {progress} does not parse; identity fields not stamped", file=sys.stderr)
+    data["session_id"], data["loop_id"] = identity["session_id"], identity["loop_id"]
+    revision = identity.get("revision")
+    if isinstance(revision, int) and not isinstance(revision, bool):
+        data["revision"] = revision
     write_object(path, data)
     return result
 
@@ -94,6 +150,8 @@ def smoke_verify(path: str | Path, head_sha: str) -> int:
         return 0
     except (OSError, ValueError, subprocess.SubprocessError) as error:
         print(f"post_evals: smoke_verify: {error}", file=sys.stderr)
+        if isinstance(error, IntegrityError):
+            emit(path, "smoke-verify", "refuse", error.code)
         return 1
 
 
@@ -110,6 +168,7 @@ def main(argv: list[str] | None = None) -> int:
             "compute-result",
             "validate-embed",
             "grade-loop",
+            "amend",
         ),
     )
     parser.add_argument("path")
@@ -135,6 +194,12 @@ def main(argv: list[str] | None = None) -> int:
             print(compute_and_validate_result(args.path), end="")
         elif args.operation == "grade-loop":
             print(grade_loop(args.path), end="")
+        elif args.operation == "amend":
+            if len(args.arguments) not in (3, 4):
+                raise ValueError("amend requires <path> <eval_id> <reason> <actor> [regraded_by]")
+            document = read_object(args.path)
+            append_amendment(document, *args.arguments)
+            write_object(args.path, document)
         else:
             if len(args.arguments) != 1:
                 raise ValueError("validate-embed requires <path> <body_path>")
@@ -142,6 +207,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     except (OSError, ValueError, TypeError, subprocess.SubprocessError) as error:
         print(f"post_evals: {error}", file=sys.stderr)
+        if isinstance(error, IntegrityError):
+            emit(args.path, args.operation, "refuse", error.code)
         return 1
 
 

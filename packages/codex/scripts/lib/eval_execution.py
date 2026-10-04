@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import cast
 
 from .artifact_io import JsonObject, array_value, object_value, read_object, write_object
+from .eval_integrity import CONTROL_PASSES, PASS_EXIT_NONZERO, IntegrityError, suite_hash
 
 
 def is_environmental_rc(code: int | float) -> bool:
@@ -79,9 +80,14 @@ def verify_execution(data: JsonObject, timeout: float = 10, cwd: str | Path | No
                     f"eval {item.get('id')} {key} did not execute at the gate (exit {code}). Output: {output}"
                 )
             if key == "negative_control" and code == 0:
-                raise ValueError(
+                raise IntegrityError(
+                    CONTROL_PASSES,
                     f"eval {item.get('id')} negative_control exited 0 at the gate — "
-                    "a control that passes proves nothing"
+                    "a control that passes proves nothing",
+                )
+            if key == "cmd" and code != 0 and item.get("status") == "pass":
+                raise IntegrityError(
+                    PASS_EXIT_NONZERO, f"eval {item.get('id')} is recorded pass but its cmd exits {code} at the gate"
                 )
 
 
@@ -98,7 +104,10 @@ def record_smoke(path: str | Path) -> None:
             smoke[f"{prefix}_exit"] = code
             smoke[f"{prefix}_output"] = output
         item["smoke"] = smoke
-        write_object(path, data)
+    # Re-stamping after a grade or an amendment would launder an edited oracle into the frozen hash.
+    if not data.get("grading") and not data.get("amendment_chain"):
+        data["frozen_hash"] = suite_hash(data)
+    write_object(path, data)
 
 
 def validate_smoke(data: JsonObject) -> None:

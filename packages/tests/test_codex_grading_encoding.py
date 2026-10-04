@@ -11,6 +11,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "packages/codex/skills/agentic-loop/scripts"))
 from graph_artifacts import validate_evals
+from graph_identity import GraphError
+
+from scripts.lib.eval_integrity import suite_hash
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -56,6 +59,39 @@ class GradingEncodingTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(result.stdout, "GO")
             validate_evals(state, 2, path)
+
+    def test_oracle_edit_after_grade_is_caught_by_suite_hash_not_old_checksum(self) -> None:
+        """An oracle field outside the id/priority/status checksum is still bound by suite_hash."""
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            state = {"schema_version": 3, "session_id": "session", "loop_id": "loop", "revision": 2}
+            (directory / "progress.json").write_text(json.dumps(state))
+            path = directory / "evals.json"
+            document = {
+                "scope": "loop",
+                "task_ref": "loop",
+                "head_sha": "head",
+                "verification_level": 1,
+                "verification_justification": "Native suite hash",
+                "evals": [{"id": "E1", "priority": "P0", "mode": "agent-run", "status": "pass", "evidence": "x"}],
+                "amendments": [],
+            }
+            document["frozen_hash"] = suite_hash(document)
+            path.write_text(json.dumps(document))
+            result = subprocess.run(
+                [sys.executable, str(ROOT / "scripts/post_evals.py"), "grade-loop", str(path)],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=5,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            validate_evals(state, 2, path)
+            graded = json.loads(path.read_text())
+            graded["evals"][0]["expected"] = "substituted"
+            path.write_text(json.dumps(graded))
+            with self.assertRaisesRegex(GraphError, "suite_hash_mismatch"):
+                validate_evals(state, 2, path)
 
 
 if __name__ == "__main__":
