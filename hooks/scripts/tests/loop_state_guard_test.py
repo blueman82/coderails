@@ -48,6 +48,42 @@ class LoopStateGuardTests(HookTestCase):
         payload = self.payload(self.transcript(invocations=2))
         self.assertEqual(self.run_hook("loop_state_guard", payload).returncode, 2)
 
+    def hook_state(self) -> Path:
+        """Return the typed hook-state path beside the session's progress file."""
+        return self.directory / "state/-work-project" / self.session / "hook_state.json"
+
+    def trace_reasons(self) -> list[str]:
+        """Return trace reason codes written for this session."""
+        path = self.directory / "state" / self.session / "trace.jsonl"
+        return [json.loads(row)["reason_code"] for row in path.read_text().splitlines()] if path.is_file() else []
+
+    def test_absent_grace_reads_typed_state_not_the_log(self) -> None:
+        """The absent block is recorded as ordinals.absent_blocked; grace needs no log (negative control)."""
+        payload = self.payload(self.transcript())
+        self.assertEqual(self.run_hook("loop_state_guard", payload).returncode, 2)
+        self.assertEqual(json.loads(self.hook_state().read_text()), {"ordinals": {"absent_blocked": 1}})
+        (self.directory / "discipline.log").unlink()
+        self.assertEqual(self.run_hook("loop_state_guard", payload).returncode, 0)
+        self.assertEqual(self.trace_reasons(), [])
+        payload = self.payload(self.transcript(invocations=2))
+        self.assertEqual(self.run_hook("loop_state_guard", payload).returncode, 2)
+        self.assertEqual(json.loads(self.hook_state().read_text())["ordinals"]["absent_blocked"], 2)
+
+    def test_torn_or_missing_hook_state_falls_back_to_the_log_with_a_trace(self) -> None:
+        """No usable state means the legacy log regex decides, and the fallback is traced."""
+        payload = self.payload(self.transcript())
+        for contents in (None, "{torn", '{"ordinals": "x"}', '{"ordinals": {"absent_blocked": "1"}}'):
+            self.hook_state().parent.mkdir(parents=True, exist_ok=True)
+            if contents is None:
+                self.hook_state().unlink(missing_ok=True)
+            else:
+                self.hook_state().write_text(contents)
+            (self.directory / "discipline.log").write_text(
+                "hook=loop_state_guard session=S1 invocations=1 reason=absent blocked=1\n"
+            )
+            self.assertEqual(self.run_hook("loop_state_guard", payload).returncode, 0)
+        self.assertEqual(self.trace_reasons(), ["legacy_log_parse"] * 4)
+
     def test_wrong_owner_and_rearmed_completion_never_get_absent_grace(self) -> None:
         """Wrong session and completion ordinal mismatch block repeatedly."""
         path = self.progress("complete", 0)

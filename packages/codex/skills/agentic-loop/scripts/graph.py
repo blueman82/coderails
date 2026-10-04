@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any, cast
 
 import graph_semantics
+import graph_stops
 from graph_completion import complete, verify_completion
 from graph_controller import add_unit, start
 from graph_evidence import bind_worker_evidence, transcript_cursor, validate_evals
@@ -337,6 +338,7 @@ def _parser() -> argparse.ArgumentParser:
         transition.add_argument("--session", required=True)
         transition.add_argument("--node", required=True)
         transition.add_argument("--reason", required=True)
+    graph_stops.add_parsers(commands.add_parser)
     dispatch = commands.add_parser("authorize-dispatch")
     dispatch.add_argument("state", type=Path)
     for option in ("session", "task"):
@@ -368,6 +370,8 @@ def main() -> int:
             if (args.status == "done") != (args.evidence is not None):
                 raise GraphError("done requires --evidence; dropped requires --reason")
             output = record_unit(args.state, args.session, args.unit, args.status, args.evidence or args.reason)
+        elif args.command in {"stop", "consume-stop"}:
+            output = graph_stops.run(args)
         elif args.command in {"respawn-stale", "hard-stop"}:
             output = transition(args.state, args.session, args.command.replace("-", "_"), args.node, args.reason)
         elif args.command == "recover-wave":
