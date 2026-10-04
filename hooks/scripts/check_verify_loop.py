@@ -69,7 +69,7 @@ def main() -> int:
         message = (
             f'[discipline-advisory] session modified {count} files but the response has no "## Did Not Verify" '
             "section. Rule (CLAUDE.md): after any response that edits files, end with a ## Did Not Verify "
-            "section — resolve each item or tag it (unverifiable: <reason>). Add the section before stopping."
+            "section — resolve each item or tag it (unverifiable: <reason>). Consider adding it; advisory only."
         )
     elif untagged:
         message = (
