@@ -23,9 +23,11 @@ from scripts.lib.eval_integrity import (
     PROGRESS_UNPARSEABLE,
     IntegrityError,
     append_amendment,
+    sign_suite,
     stamp,
     verify_suite,
 )
+from scripts.lib.eval_signing import KEY_MISSING, remember, report
 from scripts.lib.eval_trace import emit
 from scripts.lib.eval_validation import validate_discriminating, validate_embed, validate_structure
 
@@ -70,7 +72,12 @@ def grade_loop(path: str | Path) -> str:
                 raise ValueError("amendment(s) added after the prior grade lack a non-blank regraded_by")
     progress = Path(path).with_name("progress.json")
     identity = _progress_identity(progress, data)
-    integrity = verify_suite(data)
+    integrity = verify_suite(data, path=path)
+    if "signature" in data and integrity != "verified":  # re-signing below would launder it into a local attestation
+        raise IntegrityError(KEY_MISSING, "existing signature is unverifiable here; refusing to grade and re-sign it")
+    report(path, "verify", integrity)
+    if integrity == "verified":
+        emit(path, "verify", "ok", "verified")
     verify_execution(data)  # cmd of a recorded pass must still pass; control must fail for a content reason
     if integrity == LEGACY_UNHASHED:
         print(
@@ -90,10 +97,17 @@ def grade_loop(path: str | Path) -> str:
         **stamp(data),
     }
     data["session_id"], data["loop_id"] = identity["session_id"], identity["loop_id"]
+    resigned = "signature" in data  # ids are part of the signed payload; verified above, so re-signing is safe
+    if resigned:
+        sign_suite(data, strict=True)
+        data["grading"]["signed"] = True
     revision = identity.get("revision")
     if isinstance(revision, int) and not isinstance(revision, bool):
         data["revision"] = revision
     write_object(path, data)
+    if resigned:  # after the write, so the row's sha is the signed file's
+        remember(path)
+        emit(path, "sign", "ok", "signed")
     return result
 
 
@@ -175,8 +189,11 @@ def main(argv: list[str] | None = None) -> int:
             if len(args.arguments) not in (3, 4):
                 raise ValueError("amend requires <path> <eval_id> <reason> <actor> [regraded_by]")
             document = read_object(args.path)
-            append_amendment(document, *args.arguments)
+            eval_id, reason, actor, *rest = args.arguments
+            append_amendment(document, eval_id, reason, actor, rest[0] if rest else "", args.path)
             write_object(args.path, document)
+            if "signature" in document:
+                emit(args.path, "sign", "ok", "signed")
         else:
             if len(args.arguments) != 1:
                 raise ValueError("validate-embed requires <path> <body_path>")
