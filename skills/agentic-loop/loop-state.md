@@ -1,7 +1,7 @@
 # Loop state — `progress.json` reference
 
 Detail-carrier for the loop's durable state artifact, referenced from the main skill's
-"Context-window persistence" section. The imperatives stay in SKILL.md (stub it at Phase -2,
+"Context-window persistence" section. The imperatives stay in SKILL.md (start it with `graph.py start` at Phase -2,
 resolve the path via the helper, overwrite at every phase boundary, re-read it to re-orient);
 this file is the field-by-field spec, the lifecycle, and the concurrency/ownership rules —
 consult it when writing or repairing the file.
@@ -121,7 +121,7 @@ grace and block every time.
 
 A prior loop's `status: "complete"` must not silence the guard for a later loop in the same long
 session. `graph.py start` re-arming a completed loop (new `loop_id`, `status` back to `in-progress`) is the primary re-arm
-signal. `completed_marker` is the backstop: if a new loop skips its stub, the guard still sees the
+signal. `completed_marker` is the backstop: if a new loop skips `graph.py start`, the guard still sees the
 current invocation count exceed the recorded `completed_marker` and blocks, forcing
 a fresh `start`. This is why teardown must run the native `mark-complete` helper (never a bare write of
 `status: "complete"`) and `start` carries `completed_marker` forward.

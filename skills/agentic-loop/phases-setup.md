@@ -1,12 +1,12 @@
 # Agentic loop — setup phases (-2 through 2.7)
 
-Everything before routing and delegation: stubbing `progress.json`, sharpening the
+Everything before routing and delegation: starting `progress.json` via `graph.py start`, sharpening the
 authorising prompt, reading the envelope, pre-flight checks, resolving design forks
 and disposition, and committing the design to `spec.md`/`plan.md`.
 
 Read this in full at loop start. Phase 2.8 onward lives in SKILL.md.
 
-### `S-2` — Phase -2: Bootstrap a local repo, then stub `progress.json`
+### `S-2` — Phase -2: Bootstrap a local repo, then start `progress.json`
 
 Before resolving the loop-state path, check whether the current folder is inside a Git repository with `git rev-parse --show-toplevel`. If it is not, create the local-only base required for worktree isolation:
 
@@ -78,7 +78,7 @@ On **A**: the improved prompt becomes the authorisation envelope. Phase 0 reads 
 On **B**: apply the user's tweak, re-present the revised prompt via (a) or (b) again, and ask again (bounded to two revision passes — if a third is needed, something is wrong with the envelope itself; surface that).
 On **C**: proceed with the original prompt unchanged; Phase 0 reads it verbatim.
 
-On adopting an improved envelope (outcome **A** or **B**), update `progress.json.authorising_prompt_raw` to the adopted text so the field stays the canonical post-Phase-0 envelope. Outcome **C** needs no update — the Phase -2 stub already wrote the original prompt verbatim.
+On adopting an improved envelope (outcome **A** or **B**), update `progress.json.authorising_prompt_raw` to the adopted text so the field stays the canonical post-Phase-0 envelope. Outcome **C** needs no update — `graph.py start` at Phase -2 already wrote the original prompt verbatim.
 
 The improved-and-approved prompt (or the original, if C was chosen; or the auto-adopted improved prompt, in a full-autonomous envelope) is what Phase 0 treats as the authorisation envelope. Phase 0's `<thinking>` block quotes it verbatim from here.
 
