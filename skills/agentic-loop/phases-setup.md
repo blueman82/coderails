@@ -16,7 +16,7 @@ git add -A
 git commit --allow-empty -m "Initial project"
 ```
 
-Stop and report the exact failing command if any of these commands fails (for example, Git author identity is not configured). Do not add a remote, create a hosted repository, push, or create a pull request. This is the only action before the state stub: it ensures the path helper below keys the loop to the repository it just created rather than to the pre-Git folder path.
+Stop and report the exact failing command if any of these commands fails (for example, Git author identity is not configured). Do not add a remote, create a hosted repository, push, or create a pull request. This is the only action before the loop's initial state is created: it ensures the path helper below keys the loop to the repository it just created rather than to the pre-Git folder path.
 
 Before Phase -1 — before anything else — create the loop's durable state with the controller command. This guarantees `progress.json` exists before the first stop, so the `loop_state_guard` Stop hook never trips a compliant loop; the block degrades to a backstop for a skipped `start`. Never write or edit `progress.json` by hand for this.
 
