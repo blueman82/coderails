@@ -138,7 +138,7 @@ ambiguous.
 
 | ID | Node / true prerequisites | Ready when | Conditional skip or join |
 |---|---|---|---|
-| `S-2` | Stub state | path helper returns the session-owned state path | never skipped |
+| `S-2` | Start state (`graph.py start`) | path helper returns the session-owned state path | never skipped |
 | `S-1` | Improve prompt | prompt is adopted, revised, or explicit opt-out is recorded | full-autonomous auto-adopts; otherwise one bounded input point |
 | `S0` | Read envelope | envelope class and stop conditions are recorded | never skipped |
 | `S0.4` | Model-cost notice | notice emitted | never a gate; no model switch is performed by the orchestrator |

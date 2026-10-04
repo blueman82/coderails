@@ -31,23 +31,29 @@ def load(path: Path) -> dict[str, Any]:
         raise GraphError(f"cannot read valid state: {error}") from error
 
 
-def write(path: Path, state: dict[str, Any]) -> None:
-    """Atomically replace state while preserving its file permissions."""
-    mode = path.stat().st_mode & 0o777
+def write(path: Path, state: dict[str, Any], create: bool = False) -> None:
+    """Atomically replace state while preserving its file permissions; `create` allows an absent file."""
+    mode = 0o644 if create and not path.exists() else path.stat().st_mode & 0o777
     with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=path.parent, delete=False) as handle:
         temporary = Path(handle.name)
         json.dump(state, handle, indent=2, sort_keys=True)
         handle.write("\n")
         handle.flush()
         os.fsync(handle.fileno())
-    os.chmod(temporary, mode)
-    os.replace(temporary, path)
+    try:
+        os.chmod(temporary, mode)
+        os.replace(temporary, path)
+    except OSError:
+        temporary.unlink(missing_ok=True)
+        raise
 
 
 @contextmanager
-def locked(path: Path) -> Generator[None, None, None]:
-    """Serialize provider state mutations with a local advisory lock."""
+def locked(path: Path, create: bool = False) -> Generator[None, None, None]:
+    """Serialize provider state mutations with a local advisory lock; `create` makes the parent directory first."""
     try:
+        if create:
+            path.parent.mkdir(parents=True, exist_ok=True)
         with Path(f"{path}.lock").open("a+", encoding="utf-8") as lock:
             fcntl.flock(lock, fcntl.LOCK_EX)
             yield
