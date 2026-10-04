@@ -21,7 +21,7 @@ from .eval_integrity import (
     suite_hash,
     verify_suite,
 )
-from .eval_signing import report
+from .eval_signing import remember, report
 from .eval_trace import emit
 
 
@@ -107,7 +107,7 @@ def record_smoke(path: str | Path) -> None:
     """Record actual command outcomes atomically without claiming their validity."""
     data = read_object(path)
     if data.get("frozen_hash"):
-        verify_suite(data)  # raises suite_hash_mismatch/chain_* if the oracle moved since freeze
+        verify_suite(data, path=path)  # raises suite_hash_mismatch/chain_* if the oracle moved since freeze
     for item in scripted_evals(data):
         if not isinstance(item.get("id"), str):
             raise ValueError("a scripted eval has a non-string id")
@@ -126,6 +126,7 @@ def record_smoke(path: str | Path) -> None:
         write_object(path, data)
         emit(path, "smoke-run", "ok", "frozen")
         if signed == "signed":
+            remember(path)
             emit(path, "sign", "ok", "signed")
         else:
             report(path, "sign", signed)

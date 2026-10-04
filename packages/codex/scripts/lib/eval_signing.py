@@ -113,6 +113,25 @@ def check(block: object, text: str) -> str:
     return VERIFIED
 
 
+def remember(path: str | Path) -> None:
+    """Record on this host (in the keys dir) that this suite path was signed; fail-open, detection aid only."""
+    try:
+        if not was_signed(path):
+            with open(keys_dir() / "signed_suites", "a", encoding="utf-8") as ledger:
+                ledger.write(os.path.realpath(path) + "\n")
+    except OSError:
+        return
+
+
+def was_signed(path: object) -> bool:
+    """True when this host signed a suite at this path, so a later strip is a downgrade, not a legacy suite."""
+    try:
+        text = (keys_dir() / "signed_suites").read_text(encoding="utf-8")
+    except OSError:
+        return False
+    return path is not None and os.path.realpath(cast(str, path)) in text.splitlines()
+
+
 def report(path: str | Path, command: str, result: str) -> None:
     """Make a non-verified outcome loud: stderr reason line plus a fail-open trace row (never silent)."""
     if result in (LEGACY_UNSIGNED, KEY_MISSING):

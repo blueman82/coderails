@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import importlib
 import io
 import json
@@ -21,7 +22,7 @@ from hooks.scripts.lib.loop_evals import read_loop_evals_result
 from hooks.scripts.tests.lib.post_evals_fixture import ROOT, ArtifactCase, command
 from scripts.lib import eval_signing
 from scripts.lib.eval_execution import record_smoke
-from scripts.lib.eval_integrity import IntegrityError, append_amendment, suite_hash, verify_suite
+from scripts.lib.eval_integrity import IntegrityError, append_amendment, stamp, suite_hash, verify_suite
 from scripts.post_evals import grade_loop, main
 
 HAVE_SSH = shutil.which("ssh-keygen") is not None
@@ -284,6 +285,47 @@ class SuiteTests(ArtifactCase):
         data = self.reload()
         del data["signature"]
         self.assertEqual(code_of(self, lambda: append_amendment(data, "E1", "why", "me", "x")), "signature_missing")
+
+    def test_pregrade_strip_and_swap_is_signature_missing(self) -> None:
+        """Blocker: strip + swap + recomputed frozen_hash before the first grade must not read as legacy."""
+        data = self.reload()
+        del data["signature"]
+        data["evals"][0]["cmd"] = command("raise SystemExit(0)")
+        data["frozen_hash"] = suite_hash(data)
+        self.data = data
+        self.save()
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            self.assertEqual(main(["grade-loop", str(self.path)]), 1)
+        self.assertIn("reason=signature_missing", err.getvalue())
+        self.assertNotIn("result", self.reload())
+
+    def test_unverifiable_signature_is_never_resigned(self) -> None:
+        """Blocker: key_missing (allowed_signers gone) must refuse grade and amend, not mint a new key trust."""
+        os.remove(Path(self.keys.name) / "allowed_signers")
+        before = self.path.read_bytes()
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            self.assertEqual(main(["grade-loop", str(self.path)]), 1)
+        self.assertIn("reason=key_missing", err.getvalue())
+        self.assertEqual(self.path.read_bytes(), before)
+        self.assertFalse((Path(self.keys.name) / "allowed_signers").exists())
+        data = self.reload()
+        self.assertEqual(code_of(self, lambda: append_amendment(data, "E1", "why", "me")), "key_missing")
+
+    def test_stamp_never_claims_signed(self) -> None:
+        """Major: stamp() must not set signed just because a signature dict exists."""
+        self.assertNotIn("signed", stamp(self.reload()))
+
+    def test_sign_row_carries_post_write_sha(self) -> None:
+        """Minor: the grade-loop sign row is emitted after the write, so it hashes the signed file."""
+        grade_loop(self.path)
+        rows = [json.loads(x) for x in (self.directory / "eval_trace.jsonl").read_text().splitlines()]
+        sign_rows = [r for r in rows if (r["command"], r["reason_code"]) == ("sign", "signed")]
+        self.assertEqual(len(sign_rows), 2)
+        final = hashlib.sha256(self.path.read_bytes()).hexdigest()
+        self.assertEqual(sign_rows[-1]["inputs"]["evals_sha256"], final)
+        self.assertTrue(self.reload()["grading"]["signed"])
 
     def test_readers_and_trace(self) -> None:
         """Reader maps new codes to TAMPERED and the counter picks up the rows once per event_id."""

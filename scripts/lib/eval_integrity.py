@@ -94,9 +94,11 @@ def _payload(data: JsonObject, head: str, length: int) -> str:
     return _canon({"frozen_hash": data.get("frozen_hash"), "chain_head": head, "chain_len": length, **ids})
 
 
-def _signed_before(data: JsonObject) -> bool:
+def _signed_before(data: JsonObject, path: object = None) -> bool:
+    """Signed per grading.signed, this host's signed-suites ledger (needs path), or required config."""
     raw = data.get("grading")
-    return (isinstance(raw, dict) and cast(JsonObject, raw).get("signed") is True) or eval_signing.required()
+    graded = isinstance(raw, dict) and cast(JsonObject, raw).get("signed") is True
+    return graded or eval_signing.was_signed(path) or eval_signing.required()
 
 
 def sign_suite(data: JsonObject, strict: bool = False) -> str:
@@ -114,9 +116,9 @@ def sign_suite(data: JsonObject, strict: bool = False) -> str:
     return "signed"
 
 
-def _check_signature(data: JsonObject, head: str, length: int) -> str:
+def _check_signature(data: JsonObject, head: str, length: int, path: object = None) -> str:
     if "signature" not in data:
-        if _signed_before(data):
+        if _signed_before(data, path):
             raise IntegrityError(SIGNATURE_MISSING, "signature removed from a suite that was signed or must be")
         return LEGACY_UNSIGNED
     try:
@@ -128,7 +130,13 @@ def _check_signature(data: JsonObject, head: str, length: int) -> str:
     return result
 
 
-def verify_suite(data: JsonObject, stamped: bool = False) -> str:
+def require_verified(data: JsonObject, head: str, length: int) -> None:
+    """Refuse to re-sign a signature this host could not verify (key_missing would launder a forgery)."""
+    if _check_signature(data, head, length) != eval_signing.VERIFIED:
+        raise IntegrityError(KEY_MISSING, "existing signature is unverifiable here; refusing to re-sign it")
+
+
+def verify_suite(data: JsonObject, stamped: bool = False, path: object = None) -> str:
     """Return "verified", LEGACY_UNHASHED, LEGACY_UNSIGNED or KEY_MISSING (degraded), or raise IntegrityError.
 
     stamped=True (merge/completion readers) also requires grading.suite_hash to equal the current hash,
@@ -156,10 +164,12 @@ def verify_suite(data: JsonObject, stamped: bool = False) -> str:
     expected = chain[-1]["suite_hash_after"] if chain else data["frozen_hash"]
     if current != expected or (stamped and grading.get("suite_hash") not in (None, current)):
         raise IntegrityError(SUITE_HASH_MISMATCH, "oracle differs from the frozen/amended hash")
-    return _check_signature(data, head, len(chain))
+    return _check_signature(data, head, len(chain), path)
 
 
-def append_amendment(data: JsonObject, eval_id: str, reason: str, actor: str, regraded_by: str = "") -> None:
+def append_amendment(
+    data: JsonObject, eval_id: str, reason: str, actor: str, regraded_by: str = "", path: object = None
+) -> None:
     """Record an already-made oracle edit on the chain and on the legacy amendments array."""
     legacy: JsonObject = {"eval": eval_id, "why": reason, "actor": actor}
     if regraded_by:
@@ -168,8 +178,10 @@ def append_amendment(data: JsonObject, eval_id: str, reason: str, actor: str, re
         head = _walk(data)
         chain = _chain(data)
         signed = "signature" in data
-        if not signed and _signed_before(data):  # a stripped signature must not be laundered by re-signing
+        if not signed and _signed_before(data, path):  # a stripped signature must not be laundered by re-signing
             raise IntegrityError(SIGNATURE_MISSING, "signature removed from a suite that was signed or must be")
+        if signed:
+            require_verified(data, head, len(chain))
         entry: JsonObject = {
             "seq": len(chain) + 1,
             "eval": eval_id,
@@ -195,5 +207,4 @@ def stamp(data: JsonObject) -> JsonObject:
         "integrity": "verified" if data.get("frozen_hash") else LEGACY_UNHASHED,
         "chain_len": len(chain),
         "chain_head": chain[-1]["hash"] if chain else data.get("frozen_hash"),
-        **({"signed": True} if isinstance(data.get("signature"), dict) else {}),
     }

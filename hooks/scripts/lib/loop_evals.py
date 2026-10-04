@@ -83,7 +83,7 @@ def read_loop_evals_result(loop_dir: Path) -> str:
     if verdict == "GO" and not compute_go(path):
         return "NO-GO"
     try:
-        integrity = verify_suite(document, stamped=True)
+        integrity = verify_suite(document, stamped=True, path=path)
     except IntegrityError as error:
         emit(path, "loop-evals-read", "refuse", error.code)
         return f"TAMPERED:{error.code}"
