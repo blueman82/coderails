@@ -30,7 +30,14 @@ MERGE = "merge"
 
 def safe_session(session_id: object) -> bool:
     """Accept only a nonempty id that is path-local as written; never sanitise, so ids cannot collide."""
-    return isinstance(session_id, str) and bool(session_id) and "/" not in session_id and ".." not in session_id
+    return (
+        isinstance(session_id, str)
+        and bool(session_id)
+        and session_id != "."
+        and "/" not in session_id
+        and ".." not in session_id
+        and "\0" not in session_id
+    )
 
 
 def authority_path(session_id: str, base: Path | None = None) -> Path | None:

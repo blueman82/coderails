@@ -115,6 +115,12 @@ class StorageTests(unittest.TestCase):
             with self.subTest(session=session):
                 self.assertIsNone(ao.read_authority(session, self.base))
 
+    def test_nul_and_dot_ids_are_unsafe(self) -> None:
+        """NUL (ValueError in os calls) and '.' (aliases the loop root) are refused as session ids."""
+        for bad in ("a\0b", "."):
+            self.assertFalse(ao.safe_session(bad))
+            self.assertIsNone(ao.authority_path(bad, self.base))
+
     def test_crash_mid_write_keeps_old_file(self) -> None:
         """If os.replace fails, the old file is intact and no temp file is left; with no old file, none appears."""
         path = self.base / "s1" / "authority.json"

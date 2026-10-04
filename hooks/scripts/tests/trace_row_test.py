@@ -37,6 +37,12 @@ class TraceRowTests(unittest.TestCase):
         self.assertIsNone(row["loop_id"])
         self.assertEqual(row["session_id"], "s1")
 
+    def test_nul_and_dot_ids_refused_without_raising(self) -> None:
+        """A NUL byte or '.' id must return False (never raise ValueError, never alias the root file)."""
+        for bad in ("a\0b", ".", "?"):
+            self.assertIsNone(trace_path(bad, self.base))
+            self.assertFalse(append_row("gate", "blocked", "r", bad, base=self.base))
+
     def test_event_ids_unique_and_append_only(self) -> None:
         """Two appends give two lines with different event ids."""
         append_row("g", "o", "r", "s1", base=self.base)
