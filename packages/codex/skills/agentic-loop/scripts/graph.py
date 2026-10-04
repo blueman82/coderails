@@ -226,6 +226,8 @@ def recover_wave(
     A node with no spawn is only reported ("spawn it now"): nothing is recorded for it. Bounded: a node whose
     respawn generation has reached retry.max refuses recovery (fail closed, human decides).
     """
+    if lease_seconds <= 0:  # a non-positive lease marks every live worker stalled
+        raise RecoveryRefusedError("invalid_lease", "lease_seconds must be positive")
     return _recover_locked(path, session, lease_seconds, time.time() if now is None else now, apply)
 
 

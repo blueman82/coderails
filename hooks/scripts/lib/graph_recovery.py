@@ -175,6 +175,8 @@ def recover_wave(
     path: Path, session: str, lease_seconds: int, now: float | None = None, apply: bool = True
 ) -> dict[str, Any]:
     """Recover an active wave whose every spawned worker is silent past the lease, in one locked save."""
+    if lease_seconds <= 0:  # a non-positive lease marks every live worker stalled
+        raise RecoveryRefusedError("invalid_lease", "lease_seconds must be positive")
     clock = time.time() if now is None else now
     state = load(path)
     inputs: dict[str, object] = {"session": session, "lease": lease_seconds, "now": clock, "apply": apply}

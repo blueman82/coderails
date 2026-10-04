@@ -123,6 +123,16 @@ class RecoverWaveTests(unittest.TestCase):
         self.assertEqual(summary["phase"], "waiting for worker")
         self.assertIn("recovery budget exhausted", summary["detail"])
 
+    def test_non_positive_lease_is_refused_and_changes_nothing(self) -> None:
+        """A zero or negative lease would mark every live worker stalled, so it is refused."""
+        graph.begin_wave(self.path)
+        before = self.path.read_bytes()
+        for lease in (0, -5):
+            with self.assertRaises(GraphError) as raised:
+                graph.recover_wave(self.path, "parent", lease, now=LAST_ACTIVITY)
+            self.assertIn("invalid_lease", str(raised.exception))
+        self.assertEqual(self.path.read_bytes(), before)
+
     def test_wrong_session_is_refused(self) -> None:
         """Wrong session is refused."""
         graph.begin_wave(self.path)
