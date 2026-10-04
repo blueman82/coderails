@@ -113,6 +113,9 @@ class DowngradeTests(Base):
         self.data.pop("frozen_hash")
         for key in ("suite_hash", "integrity", "chain_len", "chain_head"):
             self.data["grading"].pop(key)
+        if "signature" in self.data:  # a leftover signature is now refused; the residual is the fully unsigned strip
+            self.assertEqual(code_of(self, lambda: verify_suite(self.data, stamped=True)), "integrity_stripped")
+            self.data.pop("signature")
         self.assertEqual(verify_suite(self.data, stamped=True), "legacy_unhashed")
 
 

@@ -209,6 +209,12 @@ class SuiteTests(ArtifactCase):
         del data["signature"]
         self.assertEqual(verify_suite(data), "legacy_unsigned")
 
+    def test_frozen_hash_stripped_with_signature_left_is_refused(self) -> None:
+        """Downgrade: deleting frozen_hash must not turn a signed suite into a legacy_unhashed pass."""
+        data = self.reload()
+        del data["frozen_hash"]
+        self.assertEqual(self.refusal(data), "integrity_stripped")
+
     def test_strip_after_grade_is_signature_missing(self) -> None:
         """Downgrade: grading.signed makes a stripped signature an error, never legacy_unsigned."""
         self.assertEqual(grade_loop(self.path), "GO")

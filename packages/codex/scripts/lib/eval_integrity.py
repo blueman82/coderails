@@ -148,8 +148,8 @@ def verify_suite(data: JsonObject, stamped: bool = False, path: object = None) -
     if not data.get("frozen_hash"):
         if data.get("amendment_chain"):
             raise IntegrityError(CHAIN_BROKEN, "amendment_chain present without frozen_hash")
-        if grading.get("integrity") == "verified":
-            raise IntegrityError(INTEGRITY_STRIPPED, "frozen_hash removed from a suite that was graded with one")
+        if grading.get("integrity") == "verified" or "signature" in data:
+            raise IntegrityError(INTEGRITY_STRIPPED, "frozen_hash removed from a graded or signed suite")
         if stamped and grading.get("suite_hash") not in (None, current):
             raise IntegrityError(SUITE_HASH_MISMATCH, "oracle changed since grading")
         return LEGACY_UNHASHED
