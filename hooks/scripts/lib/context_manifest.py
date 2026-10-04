@@ -11,6 +11,7 @@ import hashlib
 import importlib.util
 import json
 import os
+import re
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -20,9 +21,11 @@ from typing import Any, cast
 FAILSAFE = "skills: list via the Skill tool / native skill list"
 CONSTRAINTS = (
     "constraints: orchestrate and delegate tool work; no merge without owner sign-off; "
-    "no edits on main; label claims (verified)/(inferred)/(guess)"
+    "no edits on main; label claims (verified)/(inferred)/(guess); "
+    "if a skill applies you must invoke it before acting, process skills first; subagents skip"
 )
 FALLBACK = "coderails: active=yes\nauthority: unknown\nloop: unknown\n" + CONSTRAINTS + "\n" + FAILSAFE
+NEGATION = re.compile(r"\b(not|no|never|without|dont|don't|skip)\s+(\w+\s+)?$")
 MAX_ROUTE_SKILLS = 4
 MAX_LISTED_NODES = 6
 
@@ -35,6 +38,8 @@ ROUTES = (
     ("slash", "/push", ("push",)),
     ("slash", "/merge", ("merge",)),
     ("slash", "/handoff", ("handoff",)),
+    ("kw", "merge", ("merge",)),
+    ("kw", "git push", ("push",)),
     ("kw", "agentic loop", ("agentic-loop",)),
     ("kw", "spawn a team", ("agentic-loop",)),
     ("kw", "crack on", ("agentic-loop",)),
@@ -48,9 +53,11 @@ ROUTES = (
 )
 
 
-def loop_root() -> Path:
-    """Return the loop-state root with hook_common precedence: CLAUDE_ first, then CODERAILS_."""
-    override = os.environ.get("CLAUDE_AGENTIC_LOOP_DIR") or os.environ.get("CODERAILS_AGENTIC_LOOP_DIR")
+def loop_root(prefix: str = "coderails") -> Path:
+    """Return the loop-state root. Claude: CLAUDE_ then CODERAILS_ (hook_common order). Codex: CODERAILS_ only."""
+    override = os.environ.get("CODERAILS_AGENTIC_LOOP_DIR")
+    if prefix == "coderails":
+        override = os.environ.get("CLAUDE_AGENTIC_LOOP_DIR") or override
     return Path(override or Path.home() / ".coderails" / "agentic-loop")
 
 
@@ -65,8 +72,22 @@ def safe_id(session_id: str) -> bool:
     )
 
 
-def find_state(root: Path, session_id: str) -> Path | None:
-    """Return the progress.json under any slug dir for this exact session id, or None."""
+def find_state(root: Path, session_id: str, cwd: str = "") -> Path | None:
+    """Return progress.json for this exact session id: the cwd's canonical slug dir first, else any slug dir."""
+    if cwd:
+        try:
+            common = subprocess.run(
+                ["git", "-C", cwd, "rev-parse", "--path-format=absolute", "--git-common-dir"],
+                capture_output=True,
+                check=False,
+                text=True,
+                timeout=5,
+            ).stdout.strip()
+        except (OSError, subprocess.SubprocessError):
+            common = ""
+        canonical = root / (common if common.startswith("/") else cwd).replace("/", "-") / session_id / "progress.json"
+        if canonical.is_file():
+            return canonical
     # ponytail: first slug dir holding this exact session id; same-session loops under two slugs are not told apart.
     return next((p for p in sorted(root.glob("*/*/progress.json")) if p.parent.name == session_id), None)
 
@@ -85,10 +106,10 @@ def route_for_payload(raw: str, prefix: str) -> tuple[str, str, str]:
     data = parse_object(raw)
     if data is None:
         return "", "route_payload_malformed", ""
-    prompt, sid = data.get("prompt"), data.get("session_id")
+    prompt, sid, cwd = data.get("prompt"), data.get("session_id"), data.get("cwd")
     sid = sid if isinstance(sid, str) else ""
     try:
-        active = safe_id(sid) and find_state(loop_root(), sid) is not None
+        active = safe_id(sid) and find_state(loop_root(prefix), sid, cwd if isinstance(cwd, str) else "") is not None
     except OSError:
         active = False
     text = route(prompt if isinstance(prompt, str) else "", active, prefix)
@@ -105,16 +126,25 @@ def session_manifest(raw: str, plugin_root: Path, prefix: str) -> str:
     text, reason = manifest_with_reason(cwd, sid, source, plugin_root, prefix)
     if data is None:
         text, reason = FALLBACK, "manifest_payload_malformed"
-    trace("context_manifest", "ok" if reason == "manifest_ok" else "fail_open", reason, sid)
+    trace("context_manifest", "ok" if reason == "manifest_ok" else "fail_open", reason, sid, prefix)
     return text
+
+
+def phrase_hit(text: str, trigger: str, slash: bool) -> bool:
+    """True when trigger occurs as a whole word (slash: at a token start) and is not negated just before it."""
+    lead = r"(?<![\w/])" if slash else r"\b"
+    for match in re.finditer(lead + re.escape(trigger) + r"\b", text):
+        if not NEGATION.search(text[max(0, match.start() - 20) : match.start()]):
+            return True
+    return False
 
 
 def route(prompt: str, loop_active: bool, prefix: str) -> str:
     """Return 'route: p:a, p:b' for matching triggers, or '' when nothing matches."""
-    text = prompt.lstrip().lower()
+    text = prompt.lower()
     names: list[str] = []
     for kind, trigger, skills in ROUTES:
-        hit = loop_active if kind == "loop" else text.startswith(trigger) if kind == "slash" else trigger in text
+        hit = loop_active if kind == "loop" else phrase_hit(text, trigger, kind == "slash")
         names += [f"{prefix}:{s}" for s in skills if hit and f"{prefix}:{s}" not in names]
     return f"route: {', '.join(names[:MAX_ROUTE_SKILLS])}" if names else ""
 
@@ -145,9 +175,9 @@ def inspect_graph(plugin_root: Path, state: Path) -> dict[str, Any] | None:
         return None
 
 
-def loop_lines(root: Path, session_id: str, plugin_root: Path) -> tuple[list[str], str, bool]:
+def loop_lines(root: Path, session_id: str, plugin_root: Path, cwd: str = "") -> tuple[list[str], str, bool]:
     """Return (lines, reason, active) for this session's loop. Raises ValueError/OSError on unreadable state."""
-    state = find_state(root, session_id)
+    state = find_state(root, session_id, cwd)
     if state is None:
         return ["loop: none"], "manifest_ok", False
     raw = parse_object(state.read_text(encoding="utf-8"))
@@ -183,15 +213,14 @@ def manifest_with_reason(
     cwd: str, session_id: str, source: str, plugin_root: Path, prefix: str = "coderails"
 ) -> tuple[str, str]:
     """Return (manifest text, reason code). Never raises: any failure yields the static fallback manifest."""
-    del cwd  # state is located by exact session id; kept so both providers share one call shape
     try:
-        root = loop_root()
+        root = loop_root(prefix)
         head = f"coderails: active=yes source={source or 'unknown'}"
         if not safe_id(session_id):
             body, reason = [head, "authority: none", "loop: none"], "manifest_no_session"
         else:
             try:
-                loop, reason, active = loop_lines(root, session_id, plugin_root)
+                loop, reason, active = loop_lines(root, session_id, plugin_root, cwd)
             except (OSError, ValueError, AttributeError, TypeError):
                 return FALLBACK, "manifest_state_unreadable"
             body = [head, authority_line(root, session_id)] + loop
@@ -209,12 +238,16 @@ def build_manifest(
     return manifest_with_reason(cwd, session_id, source, plugin_root or Path(__file__).resolve().parents[3], prefix)[0]
 
 
-def trace(command: str, outcome: str, reason: str, session_id: str) -> bool:
-    """Append a non-authoritative trace row via the sibling trace_row.py; False on any problem (never raises)."""
+def trace(command: str, outcome: str, reason: str, session_id: str, prefix: str = "coderails") -> bool:
+    """Append a non-authoritative trace row via the sibling trace_row.py; False on any problem (never raises).
+
+    A missing or unsafe session id is bucketed under `_unattributed` so fail-open events are still counted.
+    """
+    session_id = session_id if safe_id(session_id) else "_unattributed"
     try:
         spec = importlib.util.spec_from_file_location("trace_row", Path(__file__).with_name("trace_row.py"))
         module = importlib.util.module_from_spec(spec)  # type: ignore[arg-type]
         spec.loader.exec_module(module)  # type: ignore[union-attr]
-        return bool(module.append_row(command, outcome, reason, session_id, base=loop_root()))
+        return bool(module.append_row(command, outcome, reason, session_id, base=loop_root(prefix)))
     except Exception:
         return False

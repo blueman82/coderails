@@ -160,21 +160,96 @@ class ContextManifestTests(unittest.TestCase):
                 text = context(provider, raw)
                 self.assertIn("skills: list via", text, (provider.name, raw))
 
-    def test_loop_dir_env_precedence_matches_hook_common(self) -> None:
-        """CLAUDE_AGENTIC_LOOP_DIR wins over CODERAILS_; CODERAILS_ alone still resolves."""
+    def test_loop_dir_env_precedence_matches_each_provider(self) -> None:
+        """Claude: CLAUDE_ wins over CODERAILS_. Codex reads only CODERAILS_ (as before the manifest)."""
         for provider in self.providers:
             state_dir = provider.environment["CODERAILS_AGENTIC_LOOP_DIR"]
             empty = str(provider.home / "empty")
             Path(empty).mkdir()
             base = {k: v for k, v in provider.environment.items() if "AGENTIC_LOOP_DIR" not in k}
-            claude_wins = context(
-                provider,
-                self.payload(provider),
-                {**base, "CLAUDE_AGENTIC_LOOP_DIR": empty, "CODERAILS_AGENTIC_LOOP_DIR": state_dir},
-            )
-            self.assertIn("loop: none", claude_wins, provider.name)
+            both = {**base, "CLAUDE_AGENTIC_LOOP_DIR": empty, "CODERAILS_AGENTIC_LOOP_DIR": state_dir}
+            expected = "loop: none" if provider.name == "claude" else "id=fixture-loop"
+            self.assertIn(expected, context(provider, self.payload(provider), both), provider.name)
             only_codex = context(provider, self.payload(provider), {**base, "CODERAILS_AGENTIC_LOOP_DIR": state_dir})
             self.assertIn("id=fixture-loop", only_codex, provider.name)
+            only_claude = {**base, "CLAUDE_AGENTIC_LOOP_DIR": state_dir, "HOME": str(provider.home / "nohome")}
+            expected = "id=fixture-loop" if provider.name == "claude" else "loop: none"
+            self.assertIn(expected, context(provider, self.payload(provider), only_claude), provider.name)
+
+    def test_canonical_slug_wins_over_glob_order(self) -> None:
+        """The cwd's canonical slug dir is preferred to an earlier-sorting slug dir holding the same session id."""
+        for provider in self.providers:
+            repo = provider.home / "repo"
+            subprocess.run(["git", "init", "-q", str(repo)], check=True)
+            common = subprocess.run(
+                ["git", "-C", str(repo), "rev-parse", "--path-format=absolute", "--git-common-dir"],
+                capture_output=True,
+                text=True,
+                check=True,
+            ).stdout.strip()
+            root = Path(provider.environment["CODERAILS_AGENTIC_LOOP_DIR"])
+            for slug, loop_id in (("--decoy", "decoy-loop"), (common.replace("/", "-"), "canonical-loop")):
+                target = root / slug / provider.session / "progress.json"
+                target.parent.mkdir(parents=True)
+                state = provider.read() | {"loop_id": loop_id}
+                target.write_text(json.dumps(state), encoding="utf-8")
+            payload = self.payload(provider) | {"cwd": str(repo)}
+            self.assertIn("id=canonical-loop", context(provider, payload), provider.name)
+
+    def test_hard_rules_survive_in_the_manifest(self) -> None:
+        """Skills-mandatory, process-first and subagent-skip stay in the injected text (without the 1% wording)."""
+        for provider in self.providers:
+            text = context(provider, self.payload(provider))
+            for rule in ("must invoke", "process skills first", "subagents skip"):
+                self.assertIn(rule, text, (provider.name, rule))
+
+    def test_route_phrasing_variants_and_negation(self) -> None:
+        """Mid-prompt slash commands and plain verbs route; a negated keyword does not."""
+        cases = (
+            ("please MERGE it", "merge"),
+            ("git push the thing", "push"),
+            ("run /workflow", "workflow"),
+            ("/Merge", "merge"),
+            ("do not ingest anything", None),
+            ("don't merge yet", None),
+            ("please ingest PR 5", "wiki-ingest"),
+        )
+        for provider in self.providers:
+            prefix = "coderails" if provider.name == "claude" else "coderails-codex"
+            for prompt, skill in cases:
+                payload = {"session_id": "no-loop-session", "cwd": str(provider.home), "prompt": prompt}
+                text = str(run_hook(provider, "inject_context", payload)["additionalContext"])
+                if skill is None:
+                    self.assertNotIn("route:", text, (provider.name, prompt))
+                else:
+                    self.assertIn(f"{prefix}:{skill}", text, (provider.name, prompt))
+
+    def test_unattributed_fail_open_events_leave_trace_rows(self) -> None:
+        """Malformed payloads and a missing session_id are still counted (under the _unattributed bucket)."""
+        for provider in self.providers:
+            context(provider, "{bad")
+            context(provider, {"cwd": "/x", "source": "startup"})
+            path = self.session_dir(provider).parent / "_unattributed" / "trace.jsonl"
+            reasons = [json.loads(x)["reason_code"] for x in path.read_text().splitlines()]
+            self.assertEqual(reasons, ["manifest_payload_malformed", "manifest_no_session"], provider.name)
+            if provider.name == "claude":
+                run_hook(provider, "inject_context", "{bad")
+                last = json.loads(path.read_text().splitlines()[-1])
+                self.assertEqual(last["reason_code"], "route_payload_malformed")
+
+    def test_runbook_lists_every_reason_code(self) -> None:
+        """Code and RUNBOOK agree on the reason-code set."""
+        source = (ROOT / LIB / "context_manifest.py").read_text()
+        codes = set(re.findall(r'"((?:manifest|route)_[a-z_]+)"', source))
+        runbook = (ROOT / "docs/RUNBOOK.md").read_text()
+        for code in codes:
+            self.assertIn(f"`{code}`", runbook, code)
+
+    def test_claude_resume_matcher_matches_codex(self) -> None:
+        """Resumed sessions get the manifest on both providers."""
+        for path in ("hooks/hooks.json", "packages/codex/hooks/hooks.json"):
+            matcher = json.loads((ROOT / path).read_text())["hooks"]["SessionStart"][0]["matcher"]
+            self.assertIn("resume", matcher.split("|"), path)
 
     def test_user_prompt_route_is_small_and_only_on_a_match(self) -> None:
         """Table-driven triggers; no match adds nothing; every output stays under the Codex cap."""
