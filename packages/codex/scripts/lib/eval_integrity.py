@@ -1,7 +1,8 @@
 """Tamper-evident suite hash and amendment hash chain for frozen eval suites.
 
-Detection only: there is no signing key and no attestation. An actor who can rewrite the whole file
-(oracle, chain and grading stamp together) is not caught; accidental and in-place edits are.
+Detection only. A suite-level ssh-keygen signature (eval_signing) binds frozen_hash, chain head and ids to a
+key; an actor holding that key (any same-user process) can still rewrite the whole file and re-sign, and a
+rollback to an earlier validly-signed state is not detected beyond grading.chain_len.
 Script files a cmd references are not hashed; only cmd/control text and inline fixtures are.
 """
 
@@ -12,7 +13,9 @@ import hashlib
 import json
 from typing import cast
 
+from . import eval_signing
 from .artifact_io import JsonObject
+from .eval_signing import KEY_MISSING, LEGACY_UNSIGNED, SIGNATURE_MISSING, SigningError
 
 LEGACY_UNHASHED = "legacy_unhashed"
 SUITE_HASH_MISMATCH = "suite_hash_mismatch"
@@ -40,9 +43,12 @@ class IntegrityError(ValueError):
         self.code = code
 
 
+def _canon(value: object) -> str:
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+
+
 def _sha(value: object) -> str:
-    text = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-    return hashlib.sha256(text.encode()).hexdigest()
+    return hashlib.sha256(_canon(value).encode()).hexdigest()
 
 
 def suite_hash(data: JsonObject) -> str:
@@ -82,8 +88,48 @@ def _walk(data: JsonObject) -> str:
     return head
 
 
+def _payload(data: JsonObject, head: str, length: int) -> str:
+    """Canonical text the suite signature covers; signature itself lives outside suite_hash and every entry."""
+    ids = {k: data.get(k) for k in ("loop_id", "session_id")}
+    return _canon({"frozen_hash": data.get("frozen_hash"), "chain_head": head, "chain_len": length, **ids})
+
+
+def _signed_before(data: JsonObject) -> bool:
+    raw = data.get("grading")
+    return (isinstance(raw, dict) and cast(JsonObject, raw).get("signed") is True) or eval_signing.required()
+
+
+def sign_suite(data: JsonObject, strict: bool = False) -> str:
+    """Sign the current chain head into data["signature"]; return "signed" or KEY_MISSING (degraded).
+
+    Raises IntegrityError on any failure when strict, or when config requires signatures.
+    """
+    text = _payload(data, _walk(data), len(_chain(data)))
+    try:
+        data["signature"] = eval_signing.sign(text)
+    except SigningError as error:
+        if error.code == KEY_MISSING and not strict and not eval_signing.required():
+            return KEY_MISSING
+        raise IntegrityError(error.code, str(error)) from error
+    return "signed"
+
+
+def _check_signature(data: JsonObject, head: str, length: int) -> str:
+    if "signature" not in data:
+        if _signed_before(data):
+            raise IntegrityError(SIGNATURE_MISSING, "signature removed from a suite that was signed or must be")
+        return LEGACY_UNSIGNED
+    try:
+        result = eval_signing.check(data["signature"], _payload(data, head, length))
+    except SigningError as error:
+        raise IntegrityError(error.code, str(error)) from error
+    if result == KEY_MISSING and eval_signing.required():
+        raise IntegrityError(KEY_MISSING, "no ssh-keygen/allowed_signers here and evals.require_signatures is set")
+    return result
+
+
 def verify_suite(data: JsonObject, stamped: bool = False) -> str:
-    """Return "verified" or LEGACY_UNHASHED, or raise IntegrityError.
+    """Return "verified", LEGACY_UNHASHED, LEGACY_UNSIGNED or KEY_MISSING (degraded), or raise IntegrityError.
 
     stamped=True (merge/completion readers) also requires grading.suite_hash to equal the current hash,
     which makes an amendment after grading stale until regraded; grade time passes False.
@@ -99,7 +145,7 @@ def verify_suite(data: JsonObject, stamped: bool = False) -> str:
         if stamped and grading.get("suite_hash") not in (None, current):
             raise IntegrityError(SUITE_HASH_MISMATCH, "oracle changed since grading")
         return LEGACY_UNHASHED
-    _walk(data)
+    head = _walk(data)
     chain = _chain(data)
     length = grading.get("chain_len")
     if isinstance(length, int) and not isinstance(length, bool):
@@ -110,7 +156,7 @@ def verify_suite(data: JsonObject, stamped: bool = False) -> str:
     expected = chain[-1]["suite_hash_after"] if chain else data["frozen_hash"]
     if current != expected or (stamped and grading.get("suite_hash") not in (None, current)):
         raise IntegrityError(SUITE_HASH_MISMATCH, "oracle differs from the frozen/amended hash")
-    return "verified"
+    return _check_signature(data, head, len(chain))
 
 
 def append_amendment(data: JsonObject, eval_id: str, reason: str, actor: str, regraded_by: str = "") -> None:
@@ -121,6 +167,9 @@ def append_amendment(data: JsonObject, eval_id: str, reason: str, actor: str, re
     if data.get("frozen_hash"):
         head = _walk(data)
         chain = _chain(data)
+        signed = "signature" in data
+        if not signed and _signed_before(data):  # a stripped signature must not be laundered by re-signing
+            raise IntegrityError(SIGNATURE_MISSING, "signature removed from a suite that was signed or must be")
         entry: JsonObject = {
             "seq": len(chain) + 1,
             "eval": eval_id,
@@ -133,6 +182,8 @@ def append_amendment(data: JsonObject, eval_id: str, reason: str, actor: str, re
         entry["hash"] = _entry_hash(entry)
         data["amendment_chain"] = [*chain, entry]
         legacy["ts"] = entry["ts"]
+        if signed:
+            sign_suite(data, strict=True)  # re-sign the new head; a stale signature must never survive
     data["amendments"] = [*data.get("amendments", []), legacy]
 
 
@@ -144,4 +195,5 @@ def stamp(data: JsonObject) -> JsonObject:
         "integrity": "verified" if data.get("frozen_hash") else LEGACY_UNHASHED,
         "chain_len": len(chain),
         "chain_head": chain[-1]["hash"] if chain else data.get("frozen_hash"),
+        **({"signed": True} if isinstance(data.get("signature"), dict) else {}),
     }

@@ -17,9 +17,11 @@ from .eval_integrity import (
     CONTROL_PASSES,
     PASS_EXIT_NONZERO,
     IntegrityError,
+    sign_suite,
     suite_hash,
     verify_suite,
 )
+from .eval_signing import report
 from .eval_trace import emit
 
 
@@ -120,8 +122,13 @@ def record_smoke(path: str | Path) -> None:
     # the first freeze was refused above; record it with post_evals.py amend.
     if not data.get("frozen_hash") and not data.get("grading") and not data.get("amendment_chain"):
         data["frozen_hash"] = suite_hash(data)
+        signed = sign_suite(data)  # raises when evals.require_signatures is set and signing is impossible
         write_object(path, data)
         emit(path, "smoke-run", "ok", "frozen")
+        if signed == "signed":
+            emit(path, "sign", "ok", "signed")
+        else:
+            report(path, "sign", signed)
         return
     write_object(path, data)
 

@@ -23,9 +23,11 @@ from scripts.lib.eval_integrity import (
     PROGRESS_UNPARSEABLE,
     IntegrityError,
     append_amendment,
+    sign_suite,
     stamp,
     verify_suite,
 )
+from scripts.lib.eval_signing import report
 from scripts.lib.eval_trace import emit
 from scripts.lib.eval_validation import validate_discriminating, validate_embed, validate_structure
 
@@ -71,6 +73,9 @@ def grade_loop(path: str | Path) -> str:
     progress = Path(path).with_name("progress.json")
     identity = _progress_identity(progress, data)
     integrity = verify_suite(data)
+    report(path, "verify", integrity)
+    if integrity == "verified":
+        emit(path, "verify", "ok", "verified")
     verify_execution(data)  # cmd of a recorded pass must still pass; control must fail for a content reason
     if integrity == LEGACY_UNHASHED:
         print(
@@ -90,6 +95,9 @@ def grade_loop(path: str | Path) -> str:
         **stamp(data),
     }
     data["session_id"], data["loop_id"] = identity["session_id"], identity["loop_id"]
+    if "signature" in data:  # ids are part of the signed payload; verify_suite above already vouched for the state
+        sign_suite(data, strict=True)
+        emit(path, "sign", "ok", "signed")
     revision = identity.get("revision")
     if isinstance(revision, int) and not isinstance(revision, bool):
         data["revision"] = revision
@@ -177,6 +185,8 @@ def main(argv: list[str] | None = None) -> int:
             document = read_object(args.path)
             append_amendment(document, *args.arguments)
             write_object(args.path, document)
+            if "signature" in document:
+                emit(args.path, "sign", "ok", "signed")
         else:
             if len(args.arguments) != 1:
                 raise ValueError("validate-embed requires <path> <body_path>")

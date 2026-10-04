@@ -11,6 +11,7 @@ from .loop_state_common import read_state
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from scripts.lib.eval_artifact import compute_go, grading_checksum
 from scripts.lib.eval_integrity import LEGACY_UNHASHED, IntegrityError, verify_suite
+from scripts.lib.eval_signing import report
 from scripts.lib.eval_trace import emit
 
 
@@ -88,4 +89,5 @@ def read_loop_evals_result(loop_dir: Path) -> str:
         return f"TAMPERED:{error.code}"
     if integrity == LEGACY_UNHASHED:
         emit(path, "loop-evals-read", "legacy", LEGACY_UNHASHED)
+    report(path, "loop-evals-read", integrity)  # legacy_unsigned / key_missing are loud, never silent
     return verdict
