@@ -158,15 +158,45 @@ class MeasureTests(unittest.TestCase):
         }
         self.progress("a", {"graph": {"nodes": {"n": node, "m": {"retry": {"attempts": 0}, "respawn": {}}}}})
         trace = self.home / ".coderails/agentic-loop/slug/a/recovery-trace.jsonl"
-        rows = [("recovered", "recovered"), ("recovered", "recovered"), ("refused", "foreign_session")]
-        write(trace, "".join(json.dumps({"outcome": o, "reason_code": c}) + "\n" for o, c in rows) + "not json\n")
+        rows = [
+            ("recover-wave", "recovered", "recovered"),
+            ("recover-wave", "recovered", "recovered"),
+            ("recover-wave", "refused", "foreign_session"),
+            ("start", "created", "start_created"),
+            ("start", "rearmed", "start_rearmed"),
+            ("start", "noop", "start_noop"),
+            ("start", "refused", "start_refused_active_loop"),
+            ("add-unit", "registered", "add_unit_registered"),
+            ("add-unit", "refused", "add_unit_refused_duplicate"),
+            ("add-unit", "refused", "add_unit_refused_duplicate"),
+        ]
+        lines = (json.dumps({"command": k, "outcome": o, "reason_code": c}) + "\n" for k, o, c in rows)
+        write(trace, "".join(lines) + "not json\n")
         self.assertEqual(
             self.measure()["recovery"],
             {
                 "recoveries": 2,
                 "refused_spawns": 1,
                 "retries_by_cause": {"failed": 1, "stale_recovery": 2},
-                "trace_rows_by_reason_code": {"foreign_session": 1, "recovered": 2},
+                "trace_rows_by_reason_code": {
+                    "add_unit_refused_duplicate": 2,
+                    "add_unit_registered": 1,
+                    "foreign_session": 1,
+                    "recovered": 2,
+                    "start_created": 1,
+                    "start_noop": 1,
+                    "start_refused_active_loop": 1,
+                    "start_rearmed": 1,
+                },
+                "controller": {
+                    "starts": 2,
+                    "add_units": 1,
+                    "refusals_by_reason": {
+                        "add_unit_refused_duplicate": 2,
+                        "foreign_session": 1,
+                        "start_refused_active_loop": 1,
+                    },
+                },
             },
         )
 

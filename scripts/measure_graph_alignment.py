@@ -204,13 +204,14 @@ def graph_vs_work_units() -> dict[str, Any]:
 
 
 def recovery_counters() -> dict[str, Any]:
-    """Count recoveries, refused spawns and retries by cause from loop state plus the advisory recovery trace.
+    """Count recoveries, controller starts, add-units, refusals and retries from loop state plus the advisory trace.
 
     The trace is non-authoritative and only counted here; unparseable rows are skipped. Counts only.
     """
     seen: set[Path] = set()
-    refused = failed = stale = recovered = 0
+    refused = failed = stale = recovered = starts = add_units = 0
     codes: dict[str, int] = {}
+    refusals: dict[str, int] = {}
     for base in loop_state_roots():
         for path in sorted(base.glob("*/*/progress.json")):
             real = path.resolve()
@@ -234,11 +235,16 @@ def recovery_counters() -> dict[str, Any]:
                 code = str(row.get("reason_code"))
                 codes[code] = codes.get(code, 0) + 1
                 recovered += row.get("outcome") == "recovered"
+                starts += row.get("command") == "start" and row.get("outcome") in {"created", "rearmed"}
+                add_units += row.get("command") == "add-unit" and row.get("outcome") == "registered"
+                if row.get("outcome") == "refused":
+                    refusals[code] = refusals.get(code, 0) + 1
     return {
         "recoveries": recovered,
         "refused_spawns": refused,
         "retries_by_cause": {"failed": failed, "stale_recovery": stale},
         "trace_rows_by_reason_code": dict(sorted(codes.items())),
+        "controller": {"starts": starts, "add_units": add_units, "refusals_by_reason": dict(sorted(refusals.items()))},
     }
 
 
