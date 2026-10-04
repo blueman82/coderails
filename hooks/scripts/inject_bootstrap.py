@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""SessionStart hook: inject the using-coderails skill into every new session.
+"""SessionStart hook: inject the compact context manifest (lib/context_manifest.py) into every session.
 
 Also nudges toward `/coderails:init` when a legacy `.claude/workflow.config.yaml`
 or `.codex/workflow.config.yaml` is found between the session cwd and its git
@@ -14,6 +14,9 @@ import subprocess
 import sys
 from pathlib import Path
 from typing import cast
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from hooks.scripts.lib.context_manifest import session_manifest  # noqa: E402
 
 MIGRATION_NUDGE = (
     "\n\nLegacy Coderails workflow configuration found. "
@@ -122,34 +125,12 @@ def compute_nudge(source_kind: str, cwd: str) -> str:
     return MIGRATION_NUDGE if scan_for_legacy_config(start, git_root) else ""
 
 
-def load_skill_content(skill_file: Path) -> str:
-    """Return the using-coderails SKILL.md content, or a not-found placeholder."""
-    if skill_file.is_file():
-        return skill_file.read_text(encoding="utf-8").rstrip("\n")
-    return f"(coderails: using-coderails skill not found at {skill_file})"
-
-
-def build_session_context(skill_content: str, nudge: str) -> str:
-    """Build the additionalContext string wrapping the skill content and any nudge."""
-    return (
-        "<EXTREMELY_IMPORTANT>\n"
-        "You have coderails.\n\n"
-        "**Below is the full content of your 'coderails:using-coderails' skill "
-        "— your introduction to using coderails skills. For all other skills, "
-        "use the 'Skill' tool:**\n\n"
-        f"{skill_content}\n"
-        f"</EXTREMELY_IMPORTANT>{nudge}"
-    )
-
-
 def main() -> int:
     """Print the SessionStart hookSpecificOutput JSON and return 0."""
-    data = parse_payload(read_stdin_payload())
-    plugin_root = resolve_plugin_root()
-    skill_file = plugin_root / "skills" / "using-coderails" / "SKILL.md"
-
+    raw = read_stdin_payload()
+    data = parse_payload(raw)
     nudge = compute_nudge(string_field(data, "source"), string_field(data, "cwd"))
-    context = build_session_context(load_skill_content(skill_file), nudge)
+    context = session_manifest(raw, resolve_plugin_root(), "coderails") + nudge
 
     output = {"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": context}}
     print(json.dumps(output, ensure_ascii=False))

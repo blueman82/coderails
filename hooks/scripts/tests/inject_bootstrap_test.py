@@ -44,7 +44,9 @@ def context(output: dict[str, object]) -> str:
 
 def main() -> int:
     """Run the focused bootstrap-hook contract checks."""
-    assert "using-coderails" in context(run({}))
+    manifest = context(run({}))
+    assert "coderails: active=yes" in manifest and "skills: list via" in manifest, manifest
+    assert "1%" not in manifest and len(manifest.encode()) < 1200, manifest
     with tempfile.TemporaryDirectory() as raw:
         repo = Path(raw)
         subprocess.run(["git", "init", "-q", str(repo)], check=True)

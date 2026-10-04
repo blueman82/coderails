@@ -119,6 +119,11 @@ Written before interpreting the data above. Each needs a minimum sample so a sma
 - **(b) Not crossed.** Claude injects 6288 bytes (1904 under the line); Codex injects 225 (5089 more are
   loaded on demand, 5314 combined, also under). The multiplier (how many startup, clear and compaction
   events fire) is not in any log, so total injected volume is unmeasured.
+  *Superseded 2026-10-05 (`docs/decisions/2026-10-05-dynamic-context-manifest.md`): the manifest was built anyway.
+  `bootstrap_bytes` before: Claude 6288, Codex 225. After, with an empty payload (static floor): 258 and 258;
+  with an active loop: Claude 499, Codex 486 (measured by running each hook on the fixture loop used in
+  `packages/tests/test_context_manifest.py`; the script's empty payload cannot show the loop-active size).
+  Manifest and route trace rows are counted under `context` in the script output, deduped by event_id.*
 - **(c) Not crossed, and the sample is too small to say it never would be.** 2 divergent of 14 loops with
   both (14.3%), strict and lenient agreeing. That fails the count (2 < 5), the share (14.3% < 25%) and the
   sample floor (14 < 20). Unrelated to the thresholds: 25 loops (39 with a graph, 14 with both) have a graph and no work_units, so

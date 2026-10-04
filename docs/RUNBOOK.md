@@ -48,6 +48,18 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
 - Remediation: inspect with `python3 scripts/authority.py inspect --session <exact id>`. A foreign-session refusal
   means the id did not match exactly; ids are never sanitised.
 
+## Manifest says no loop, or the wrong loop
+
+- Symptom: the SessionStart manifest shows `loop: none` or `loop: unknown` although a loop is running, or the
+  session injected the static fallback.
+- Query: `python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import sys,json;print(json.load(sys.stdin)['context'])"`,
+  or `jq 'select(.command|startswith("context_"))|.reason_code' ${CLAUDE_AGENTIC_LOOP_DIR:-~/.coderails/agentic-loop}/<session_id>/trace.jsonl`.
+  Reason codes: `manifest_ok`, `manifest_graph_invalid`, `manifest_no_session`, `manifest_state_unreadable`,
+  `manifest_payload_malformed`, `manifest_error`, `route_match`, `route_payload_malformed`.
+- Remediation: `loop: none` for a foreign or unsafe session id is correct (ids match exactly, never sanitised). For
+  `manifest_state_unreadable` repair progress.json; for `manifest_graph_invalid` run `graph.py inspect <state>`.
+  Check `CLAUDE_AGENTIC_LOOP_DIR` (wins) versus `CODERAILS_AGENTIC_LOOP_DIR`. Routes are advisory text only.
+
 ## Crack-on denial wrong (stuck on, or off too early)
 
 - Symptom: `AskUserQuestion` / `request_user_input` is denied when the user no longer wants autonomy, or is allowed

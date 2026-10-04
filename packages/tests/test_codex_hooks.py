@@ -88,7 +88,8 @@ class HookTests(unittest.TestCase):
         for source in ("startup", "resume", "clear", "compact"):
             output = self.hook("inject_bootstrap", {"session_id": "s1", "cwd": str(self.repo), "source": source})
             context = output["hookSpecificOutput"]["additionalContext"]
-            self.assertIn("using-coderails", context)
+            self.assertIn("coderails: active=yes", context)
+            self.assertIn("skills: list via", context)
             self.assertEqual("$coderails-codex:init" in context, source == "startup")
         self.assertEqual(legacy.read_text(encoding="utf-8"), "sandbox_workers: true\n")
         config = self.repo / ".coderails/workflow.config.yaml"
