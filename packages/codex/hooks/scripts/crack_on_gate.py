@@ -38,16 +38,19 @@ LEGACY_DENIAL = (
 
 
 NEGATION = re.compile(
-    r"^(?:don'?t|don\u2019t|dont|not|never|no|won'?t|can'?t|cannot|stop|wait|without|hold|off)$", re.IGNORECASE
+    r"^(?:don'?t|don\u2019t|dont|not|never|no|avoid|cannot|stop|wait|without|hold|off|[a-z]+n['’]t)$", re.IGNORECASE
 )
 CLAUSE_END = re.compile(r"[.!?;,:\n\u2014]")
+QUESTION_TAIL = re.compile(r"^[^.!;\n]*\?")
 
 
 def invoked(prompt: str) -> bool:
-    """Return True for crack on outside quotes/backticks with no negation in the three words before it."""
+    """Return True for crack on outside quotes/backticks, not negated in the 3 words before, not asked as a question."""
     prompt = QUOTED.sub(" ", prompt)
     for match in CRACK_ON.finditer(prompt):
         clause = CLAUSE_END.split(prompt[: match.start()])[-1]
+        if QUESTION_TAIL.match(prompt[match.end() - 1 :]):
+            continue
         if not any(NEGATION.match(word) for word in clause.split()[-3:]):
             return True
     return False
@@ -79,6 +82,17 @@ def grant(session_id: str) -> dict[str, object] | None:
             (directory / "crack_on_active").unlink()
     append_trace_row("crack_on", "granted", "authority_granted", session_id)
     return obj
+
+
+def corrupt(session_id: str) -> bool:
+    """True when this session's authority file exists but is not a parseable JSON object (treated as no authority)."""
+    path = authority_path(session_id)
+    try:
+        return not isinstance(json.loads(path.read_text(encoding="utf-8")), dict) if path else False
+    except ValueError:
+        return True
+    except OSError:
+        return False
 
 
 def main() -> int:
@@ -115,6 +129,8 @@ def main() -> int:
     if event != "PreToolUse" or text_field(payload, "tool_name") != "request_user_input":
         return 0
     state, obj = authority_state(session_id)
+    if state == "none" and corrupt(session_id):
+        append_trace_row("crack_on", "ignored", "authority_corrupt_ignored", session_id)
     if state == "foreign":
         append_trace_row("authority", "refused", "authority_refused_foreign", session_id)
     if state == "live":

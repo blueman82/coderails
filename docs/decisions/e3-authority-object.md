@@ -38,13 +38,14 @@ a consumer. Those four lines are superseded by the next section; the user direct
 
 ## Superseded: crack-on grants and enforces through the authority object; the prose gate is retired
 
-- `crack_on_gate.py` UserPromptSubmit: "crack on" (outside `"..."`/backticks, no negation in the three words before
-  it) writes a 24h revocable object for the exact session id (scope `autonomous_decisions`, denied
+- `crack_on_gate.py` UserPromptSubmit: "crack on" (outside `"..."`/backticks, no negation (`don't`/any `n't`, `not`, `never`, `avoid`, ...) in the three words
+  before it, and not a question, i.e. no `?` later in the same sentence) writes a 24h revocable object for the exact session id (scope `autonomous_decisions`, denied
   `destructive_shell`, `max_prs` 0, `merge` approval-required, `loop_id` from `CLAUDE_LOOP_ID`) and echoes it to the
   model. It calls `write_authority` directly because `authority.py create` refuses when a file exists, which would
   block re-granting after expiry.
 - PreToolUse `AskUserQuestion`: denied only while `read_authority` returns a live object. Expired -> allowed and
-  traced `authority_expired_allow`. Revoked/torn/foreign -> allowed (foreign traced by the library).
+  traced `authority_expired_allow`. Revoked/foreign -> allowed (foreign traced by the library). Corrupt (unparseable or non-object) = no valid
+  authority: traced `authority_corrupt_ignored`, never a crash, and a legacy flag, if any, is still honoured.
 - Migration: a pre-existing `crack_on_active` flag (exact, path-safe id only) still denies, traced
   `crack_on_legacy_flag` with a message naming the `rm` that clears it. It is never converted to an object silently.
   Remove the fallback in the next release; the removal is a delete of `legacy_flag()` and its branch.
@@ -54,7 +55,7 @@ a consumer. Those four lines are superseded by the next section; the user direct
   `docs/graph-alignment-measurement.md` is the cost of that retirement.
 - Codex mirror: the package has no `scripts/lib`, so `hook_common.py` vendors a validator subset (exact session
   binding, unexpiry, merge approval-required). Storage is the shared loop dir, so one CLI revokes both providers.
-- Reason codes: `authority_granted`, `authority_deny`, `authority_expired_allow`, `crack_on_legacy_flag` (command
+- Reason codes: `authority_granted`, `authority_deny`, `authority_expired_allow`, `crack_on_legacy_flag`, `authority_corrupt_ignored` (command
   `crack_on`); `authority_refused_foreign` (command `authority`).
 
 ### Effect on a live running session

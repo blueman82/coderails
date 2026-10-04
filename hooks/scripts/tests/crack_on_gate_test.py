@@ -196,6 +196,23 @@ class CrackOnTests(HookCase):
             self.prompt(text, f"neg-{index}")
             self.assertFalse(self.ask(f"neg-{index}"), text)
 
+    def test_contractions_avoid_and_questions_never_grant(self) -> None:
+        """Any n't contraction, 'avoid', or a question about crack on is not a grant."""
+        for index, text in enumerate(
+            (
+                "I wouldn't crack on yet",
+                "you shouldn't crack on",
+                "we mustn't crack on",
+                "avoid crack on",
+                "should we crack on?",
+                "what does crack on mean?",
+                "crack on? no",
+            )
+        ):
+            self.prompt(text, f"contr-{index}")
+            self.assertFalse(self.ask(f"contr-{index}"), text)
+            self.assertFalse((self.loop / f"contr-{index}/authority.json").exists(), text)
+
     def test_unsafe_ids_refused_and_distinct_ids_never_collide(self) -> None:
         """Exact ids only: 'a/b' is refused outright, 'a..b' and 'ab' are not conflated."""
         self.prompt("crack on", "a/b")
@@ -242,6 +259,18 @@ class CrackOnTests(HookCase):
         self.assertFalse(self.ask("t1"))
         self.prompt("crack on", "t1")
         self.assertTrue(self.ask("t1"))
+
+    def test_corrupt_authority_is_traced_and_legacy_flag_still_honoured(self) -> None:
+        """Corrupt authority = no valid authority: allowed without a flag, legacy-denied with one; traced, no crash."""
+        (self.loop / "c1").mkdir(parents=True)
+        (self.loop / "c1/authority.json").write_text("{not json", encoding="utf-8")
+        self.assertFalse(self.ask("c1"))
+        self.assertEqual(self.reasons("c1"), ["authority_corrupt_ignored"])
+        (self.loop / "c2").mkdir(parents=True)
+        (self.loop / "c2/authority.json").write_text("[1]", encoding="utf-8")
+        (self.loop / "c2/crack_on_active").write_text("\n", encoding="utf-8")
+        self.assertTrue(self.ask("c2"))
+        self.assertEqual(self.reasons("c2"), ["authority_corrupt_ignored", "crack_on_legacy_flag"])
 
     def test_legacy_flag_denies_with_traced_migration_code(self) -> None:
         """A legacy-stamped session stays denied with a traced code and a clear-it message, never silently."""

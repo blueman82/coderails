@@ -251,6 +251,11 @@ class HookTests(unittest.TestCase):
         cases = {
             "don't crack on yet": False,
             "never crack on": False,
+            "I wouldn't crack on yet": False,
+            "you shouldn't crack on": False,
+            "avoid crack on": False,
+            "should we crack on?": False,
+            "what does crack on mean?": False,
             'he said "crack on"': False,
             "the `crack on` phrase": False,
             "no problem, crack on": True,
@@ -316,6 +321,20 @@ class HookTests(unittest.TestCase):
         (legacy / "crack_on_active").touch()
         self.assertTrue(self.asks("old"))
         self.assertEqual(self.reasons("old"), ["crack_on_legacy_flag"])
+
+    def test_crack_on_corrupt_authority_traced_and_legacy_flag_honoured(self) -> None:
+        """Corrupt authority = no valid authority: allowed alone, legacy-denied with a flag; traced, no crash."""
+        (self.loop / "c1").mkdir(parents=True)
+        self.authority("c1").write_text("{not json")
+        self.assertFalse(self.asks("c1"))
+        self.assertEqual(self.reasons("c1"), ["authority_corrupt_ignored"])
+        (self.loop / "c2").mkdir(parents=True)
+        self.authority("c2").write_text("[1]")
+        legacy = self.directory / "data/sessions/c2"
+        legacy.mkdir(parents=True)
+        (legacy / "crack_on_active").touch()
+        self.assertTrue(self.asks("c2"))
+        self.assertEqual(self.reasons("c2"), ["authority_corrupt_ignored", "crack_on_legacy_flag"])
 
     def test_prose_gate_retired(self) -> None:
         """Negative control: no Stop prose gate is registered or shipped."""
