@@ -3,9 +3,16 @@
 from __future__ import annotations
 
 import argparse
+import copy
+import difflib
+import importlib
+import json
+import os
 import re
 import subprocess
+import sys
 from pathlib import Path
+from typing import Any, cast
 
 
 def config_path(start_dir: str | Path | None = None) -> str:
@@ -56,9 +63,160 @@ def config_value(path: str | Path, key: str, section: str = "") -> str:
     return ""
 
 
+SCHEMA_PATH = Path(__file__).resolve().parents[2] / "config.schema.json"
+KEY_LINE = re.compile(r"(\s*)([A-Za-z_][\w-]*):[ \t]*(.*)")
+NULLS = frozenset({"null", "~"})
+
+
+def _schema() -> dict[str, Any]:
+    """Return the schema; on any failure an empty one, so every key stays a raw (still readable) unknown."""
+    try:
+        data = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
+        return cast("dict[str, Any]", data) if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _entries(text: str) -> dict[str, dict[str, Any]]:
+    """Parse the single-level grammar plus one nested level: {key: {raw, items, children}}."""
+    top: dict[str, dict[str, Any]] = {}
+    current: dict[str, Any] | None = None
+    indent = None
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if not line[0].isspace():
+            match = KEY_LINE.fullmatch(line)
+            current = {"raw": "", "items": [], "children": {}} if match else None
+            indent = None
+            if match and current is not None:
+                current["raw"] = match[3].split("#", 1)[0].strip().strip("\"'")
+                top[match[2]] = current
+        elif current is not None and stripped.startswith("- "):
+            current["items"].append(stripped[2:].split("#", 1)[0].strip().strip("\"'"))
+        elif current is not None and (match := KEY_LINE.fullmatch(line)):
+            indent = len(match[1]) if indent is None else indent
+            if len(match[1]) == indent:
+                current["children"][match[2]] = {"raw": match[3].split("#", 1)[0].strip().strip("\"'")}
+    return top
+
+
+def _coerce(entry: dict[str, Any], spec: dict[str, Any]) -> tuple[Any, bool]:
+    """Return (value, ok); a value that fits no allowed type is returned raw with ok False."""
+    types = spec.get("type", [])
+    raw = entry["raw"]
+    if entry.get("children") and "object" in types:
+        return {key: child["raw"] for key, child in entry["children"].items()}, True
+    if entry.get("items") and "array" in types:
+        return list(entry["items"]), True
+    if raw == "":
+        return None, not (entry.get("items") or entry.get("children"))
+    if raw in NULLS:
+        return (None, True) if "null" in types else (raw, False)
+    if "boolean" in types and raw.lower() in ("true", "false"):
+        return raw.lower() == "true", True
+    if "integer" in types and re.fullmatch(r"[0-9]+", raw):
+        return int(raw), True
+    if "array" in types and raw.startswith("[") and raw.endswith("]"):
+        return [item.strip().strip("\"'") for item in raw[1:-1].split(",") if item.strip()], True
+    return raw, "string" in types
+
+
+def _hint(key: str, known: dict[str, Any]) -> str:
+    """Closest known key, or empty text."""
+    close = difflib.get_close_matches(key, list(known), n=1, cutoff=0.6)
+    return close[0] if close else ""
+
+
+def _typed(
+    entries: dict[str, dict[str, Any]], properties: dict[str, Any], prefix: str, findings: list[dict[str, str]]
+) -> dict[str, Any]:
+    """Coerce one level against its properties; unknown keys stay raw and are reported."""
+    values: dict[str, Any] = {}
+    for key, entry in entries.items():
+        spec = properties.get(key)
+        if spec is None:
+            hint = _hint(key, properties)
+            findings.append({"code": "config_unknown_key", "key": prefix + key, "hint": prefix + hint if hint else ""})
+            values[key] = entry["raw"]
+            continue
+        value, ok = _coerce(entry, spec)
+        if not ok:
+            findings.append({"code": "config_bad_type", "key": prefix + key, "hint": "/".join(spec["type"])})
+        elif isinstance(value, dict) and spec.get("properties"):
+            nested = cast("dict[str, Any]", value)
+            value = _typed({k: {"raw": v} for k, v in nested.items()}, spec["properties"], prefix + key + ".", findings)
+        values[key] = value
+    for key, spec in properties.items():
+        if key not in values:
+            values[key] = copy.deepcopy(spec.get("default"))
+    return values
+
+
+def load_config(path: str | Path) -> tuple[dict[str, Any], list[dict[str, str]]]:
+    """Parse path against config.schema.json: (typed values with defaults, reason-coded findings). Never raises."""
+    properties: dict[str, Any] = _schema().get("properties", {})
+    findings: list[dict[str, str]] = []
+    text = ""
+    if path:
+        try:
+            text = Path(path).read_text(encoding="utf-8")
+        except (OSError, ValueError):
+            findings.append({"code": "config_unreadable", "key": "", "hint": ""})
+    return _typed(_entries(text), properties, "", findings), findings
+
+
+def report_findings(findings: list[dict[str, str]]) -> None:
+    """Non-authoritative visibility: one stderr line plus fail-open trace rows. Never changes a decision."""
+    if not findings:
+        return
+    print("coderails config: " + ", ".join(f"{f['code']}:{f['key']}" for f in findings), file=sys.stderr)
+    session = os.environ.get("CLAUDE_CODE_SESSION_ID", "")
+    try:
+        append_row = importlib.import_module("hooks.scripts.lib.trace_row").append_row
+    except (ImportError, AttributeError):  # Codex package ships no Claude trace helper
+        return
+    for finding in findings:
+        append_row("config", "warned", finding["code"], session, inputs={"key": finding["key"]})
+
+
+def settings(path: str | Path) -> dict[str, Any]:
+    """Typed values for a gate reader, with findings reported."""
+    values, findings = load_config(path)
+    report_findings(findings)
+    return values
+
+
+def _section(path: str | Path, key: str) -> dict[str, Any]:
+    """One typed nested section of the config at path, or {}."""
+    value = settings(path).get(key)
+    return cast("dict[str, Any]", value) if isinstance(value, dict) else {}
+
+
 def integrity_machine_user(path: str | Path) -> str:
-    """Read the configured root-owned attestor login."""
-    return config_value(path, "machine_user", "integrity_review")
+    """Read the configured root-owned attestor login; null or absent means inactive."""
+    return str(_section(path, "integrity_review").get("machine_user") or "")
+
+
+def require_signatures(path: str | Path) -> bool:
+    """True when evals.require_signatures is true."""
+    return str(_section(path, "evals").get("require_signatures")).lower() == "true"
+
+
+def resolve_config_json(start_dir: str | Path | None = None) -> dict[str, Any]:
+    """Typed view of the discovered config: path, values, defaults applied, unknown keys, findings."""
+    path = config_path(start_dir)
+    values, findings = load_config(path)
+    present = set(_entries(Path(path).read_text(encoding="utf-8", errors="replace")) if path else ())
+    properties = _schema().get("properties", {})
+    return {
+        "path": path,
+        "values": values,
+        "defaults_applied": sorted(set(properties) - present),
+        "unknown_keys": [f["key"] for f in findings if f["code"] == "config_unknown_key"],
+        "findings": findings,
+    }
 
 
 def main() -> int:
@@ -66,7 +224,11 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("operation", choices=("config-path", "resolve-config"))
     parser.add_argument("start_dir", nargs="?")
+    parser.add_argument("--json", action="store_true", help="resolve-config: print the typed view as JSON")
     args = parser.parse_args()
+    if args.json and args.operation == "resolve-config":
+        print(json.dumps(resolve_config_json(args.start_dir), indent=2, sort_keys=True))
+        return 0
     result = config_path(args.start_dir) if args.operation == "config-path" else resolve_config(args.start_dir)
     print(result, end="" if result.endswith("\n") else "\n")
     return 0

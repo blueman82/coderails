@@ -1,0 +1,79 @@
+{
+  "$comment": "Source of truth for .coderails/workflow.config.yaml. status: enforced_by_code | read_by_prose_only | unused. Generated key table in docs/REFERENCE.md is rendered from this file (scripts/lib/config_schema_docs.py).",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "project": {
+      "type": ["string", "null"], "default": null, "status": "read_by_prose_only",
+      "description": "Project name written by /coderails:init; read by command prose only."
+    },
+    "wiki_path": {
+      "type": ["string", "null"], "default": null, "status": "enforced_by_code",
+      "description": "LLM wiki vault directory (relative to the project dir, or absolute). null disables the wiki gate and the wiki-debt merge gate."
+    },
+    "wiki_supervision": {
+      "type": ["string", "null"], "default": "discuss", "status": "read_by_prose_only",
+      "description": "wiki-ingest mode: discuss (pause before writing) or autonomous."
+    },
+    "wiki_git_worktree": {
+      "type": ["boolean", "null"], "default": true, "status": "read_by_prose_only",
+      "description": "true = PR flow for wiki commits; false = commit directly to the vault."
+    },
+    "wiki_git_bypass_flag": {
+      "type": ["string", "null"], "default": null, "status": "read_by_prose_only",
+      "description": "Env var set when creating or merging the wiki's own PRs, for example BYPASS_REVIEW=1."
+    },
+    "wiki_git_pull_path": {
+      "type": ["string", "null"], "default": null, "status": "read_by_prose_only",
+      "description": "Source repo pulled after a wiki PR merges."
+    },
+    "wiki_debt_epoch_pr": {
+      "type": ["integer"], "default": null, "status": "enforced_by_code",
+      "description": "First PR number the wiki-ingest debt merge gate covers; absent or empty disables the gate. A literal null is rejected as a bad type, as before."
+    },
+    "worktree_base": {
+      "type": ["string", "null"], "default": null, "status": "read_by_prose_only",
+      "description": "Parent directory for sibling worktrees."
+    },
+    "worktree_script": {
+      "type": ["string", "null"], "default": null, "status": "read_by_prose_only",
+      "description": "Project script that creates a worktree."
+    },
+    "jira": {
+      "type": ["object", "null"], "default": null, "status": "read_by_prose_only",
+      "description": "Jira settings (project, epic, component_name, component_id, epic_field, points_field, fix_version, mcp_namespace, transitions). Nested keys are not type-checked."
+    },
+    "engineering_principles_paths": {
+      "type": ["array", "null"], "default": null, "status": "read_by_prose_only",
+      "description": "Glob patterns that trigger the engineering-principles pre-flight in /coderails:push."
+    },
+    "engineering_principles_skill": {
+      "type": ["string", "null"], "default": "/engineering-principles-python", "status": "read_by_prose_only",
+      "description": "Slash command run by the pre-flight; null skips it."
+    },
+    "sandbox_workers": {
+      "type": ["boolean", "null"], "default": false, "status": "read_by_prose_only",
+      "description": "true = agentic-loop dispatches implementation workers as OS-sandboxed processes. No script reads it; the orchestrator reads it from the resolve-config text (skills/agentic-loop/SKILL.md)."
+    },
+    "integrity_review": {
+      "type": ["object", "null"], "default": null, "status": "enforced_by_code",
+      "description": "Integrity attestation settings.",
+      "properties": {
+        "machine_user": {
+          "type": ["string", "null"], "default": null, "status": "enforced_by_code",
+          "description": "GitHub login that must post the integrity-review status; null or absent = local gate inactive."
+        }
+      }
+    },
+    "evals": {
+      "type": ["object", "null"], "default": null, "status": "enforced_by_code",
+      "description": "Eval settings.",
+      "properties": {
+        "require_signatures": {
+          "type": ["boolean", "null"], "default": false, "status": "enforced_by_code",
+          "description": "true = eval artifacts must be signed; refuse when signing is impossible."
+        }
+      }
+    }
+  }
+}
