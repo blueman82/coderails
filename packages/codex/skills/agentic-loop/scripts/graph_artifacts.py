@@ -5,12 +5,16 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import sys
 from pathlib import Path
 from typing import Any, cast
 
 from graph_data import array_value, event_payload, load_evidence, nonempty, object_value, read_records
 from graph_identity import GraphError, is_frozen_loop_evals
 from json_types import JsonValue
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+from scripts.lib.eval_integrity import IntegrityError, verify_suite  # noqa: E402
 
 
 def _matching(evidence: dict[str, Any], state: dict[str, Any], label: str) -> None:
@@ -61,6 +65,11 @@ def validate_evals(state: dict[str, Any], revision: int | None, path: Path) -> N
     amendments = array_value(evals.get("amendments"), "evals.amendments")
     if grading.get("amendments_at_grade") != len(amendments):
         raise GraphError("evals grading amendment count is stale")
+    try:
+        # additive: legacy_unhashed suites pass, _grading_checksum is untouched
+        verify_suite(evals, stamped=True, path=path)
+    except IntegrityError as error:
+        raise GraphError(f"evals oracle integrity: {error}") from error
 
 
 def validate_completion_evidence(

@@ -12,6 +12,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from scripts.lib.artifact_io import JsonObject
@@ -44,6 +45,14 @@ def fixture() -> JsonObject:
 
 class EvalValidationTests(unittest.TestCase):
     """Exercise strict input structure and actual command behavior independently."""
+
+    def setUp(self) -> None:
+        """Keep freeze-time signing keys out of the real ~/.coderails/keys."""
+        self.keys = tempfile.TemporaryDirectory()
+        self.addCleanup(self.keys.cleanup)
+        patcher = patch.dict(os.environ, {"CODERAILS_KEYS_DIR": self.keys.name})
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def test_justification_control_evidence_sha_and_p0(self) -> None:
         """Reject each structural refusal using one independently mutated valid artifact."""
@@ -121,11 +130,13 @@ class EvalValidationTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     validate_smoke(data)
             data = fixture()
+            data["evals"][0]["cmd"] = "echo yes | grep -q yes"
             data["evals"][0]["fixtures"] = {"good": "yes", "bad": "no", "formula": "grep -q yes"}
             path.write_text(json.dumps(data))
             validate_discriminating(path)
             for formula in ("true", "false", "missing-coderails-command-xyz", "exit 137"):
                 data["evals"][0]["fixtures"]["formula"] = formula
+                data["evals"][0]["cmd"] = f"echo yes | {formula}"
                 path.write_text(json.dumps(data))
                 with self.assertRaises(ValueError):
                     validate_discriminating(path)

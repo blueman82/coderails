@@ -128,6 +128,47 @@ Written before interpreting the data above. Each needs a minimum sample so a sma
 - **Not covered.** Single machine, single user, mixed Claude and Codex loops that cannot be separated,
   logs not rotated, no transcript sampling, and `blocked=1` counts not validated as correct blocks.
 
+## Eval integrity runbook (Phase F)
+
+Sink: `eval_trace.jsonl` beside the `evals.json` it describes (loop dir for loop scope; wherever the file lives at PR
+scope, so it is not loop-safe). Rows are append-only, fail-open and NON-AUTHORITATIVE: nothing reads them to decide a
+grade. Fields: `schema_version, session_id, loop_id, timestamp, command, outcome, reason_code, event_id, inputs`
+(`inputs` are sha256 only). Every refusal also prints `reason=<code>` to stderr. Counters:
+`python3 scripts/measure_graph_alignment.py --root . --json [--eval-trace <PR-scope file>]` reports
+`eval_trace` events deduped by `event_id`.
+
+Query: `jq -r 'select(.outcome!="ok")|[.command,.outcome,.reason_code]|@tsv' <loop dir>/eval_trace.jsonl | sort | uniq -c`
+
+| reason_code | symptom | remediation |
+|---|---|---|
+| `legacy_unhashed` | suite has no `frozen_hash`; graded (outcome `legacy`) | none required; re-freeze with `post_evals.py smoke-run` before any grade to get tamper evidence |
+| `suite_hash_mismatch` | oracle text differs from `frozen_hash` or the last amendment | revert the edit, or re-apply it with `post_evals.py amend ...` then regrade |
+| `integrity_stripped` | `frozen_hash` deleted from a suite graded with one (reader shows `TAMPERED:integrity_stripped`) | restore the file; deleting hash and tombstones together is NOT detectable |
+| `legacy_unsigned` | frozen suite carries no `signature` and was never signed (outcome `legacy`, command `verify`/`loop-evals-read`) | none required; re-freeze a new suite with `post_evals.py smoke-run` under a key to get a signature |
+| `signature_invalid` | signature does not verify, signs a different payload (suite head, chain head/length, loop_id, session_id) or the chain was truncated and re-hashed | restore the file; amendments must go through `post_evals.py amend`, which re-signs |
+| `signer_unknown` | signature is cryptographically valid but its key is not in `allowed_signers` | add the signer's public key line to `~/.coderails/keys/allowed_signers` only if you trust it; otherwise the suite was signed by another key |
+| `signature_missing` | `signature` removed from a suite with `grading.signed: true`, listed in this host's `signed_suites` ledger (keys dir; catches a pre-grade strip + swap on the signing host only) or under `evals.require_signatures: true` (reader shows `TAMPERED:signature_missing`) | restore the file; `amend` refuses to re-sign a stripped suite |
+| `key_missing` | no ssh-keygen or no `allowed_signers` where the suite is verified (outcome `degraded`, non-blocking; command `sign` when freezing unsigned); blocks when `evals.require_signatures: true`; `grade-loop` and `amend` refuse (`key_missing`) to re-sign a signature they could not verify, so a forged or foreign signature is never laundered into a local one | install OpenSSH or copy the public `allowed_signers` to `$CODERAILS_KEYS_DIR`/`~/.coderails/keys` |
+| `key_perms` | private key `evals_ed25519` is group/world accessible | `chmod 600 ~/.coderails/keys/evals_ed25519` |
+| `sign_failed` | ssh-keygen could not create a key or sign | run `ssh-keygen -Y sign` by hand to see the error |
+| `cmd_env` | loop-scope `cmd` exited 126/127/>=128 at grade time | fix the command's tooling or cwd (grade-loop runs it in the caller's cwd, 10s cap) |
+| `chain_broken` | `amendment_chain` entry edited, reordered or chain without `frozen_hash` | restore the file from the loop dir backup; do not hand-edit the chain |
+| `chain_truncated` | fewer chain entries than `grading.chain_len` | restore the removed entries; regrading after truncation is not detectable |
+| `progress_missing` / `progress_unparseable` | `progress.json` absent, invalid, or lacks `session_id`/`loop_id` | restore `progress.json` beside `evals.json`; there is no bypass flag |
+| `progress_foreign` | suite stamped with different ids than `progress.json` | the suite belongs to another loop; regenerate it for this loop |
+| `control_passes` | a loop-scope `negative_control` exited 0 | rewrite the control so it fails on the unmet state |
+| `control_env` | control exited 126/127/>=128 (missing tool, timeout) | fix the control's tooling or cwd |
+| `pass_exit_nonzero` | gate: eval recorded `pass` but `cmd` exits non-zero | the PASS is wrong or the build regressed; re-grade |
+| `fixture_formula_not_in_cmd` | `fixtures.formula` is not the literal tail of `cmd` | make the fixtures run the real checker text |
+
+**Signing trust boundary.** Signing detects edits made without the key. It binds the suite hash, the chain head and loop_id/session_id to the signer. It lets a different party who holds only the public key (an `allowed_signers` entry) verify. It does NOT stop a same-user agent, which can read the 0600 key and re-sign. It does NOT detect a rollback to an earlier validly-signed state (the `grading.chain_len` check is the only partial guard). Keys: `$CODERAILS_KEYS_DIR` or `~/.coderails/keys` (`evals_ed25519`, `.pub`, `allowed_signers`, all 0600, created on first sign). Config: `evals:` section, `require_signatures: true` in `.coderails/workflow.config.yaml` (default false) makes unsigned and key-less verification block. Sign rows: `command=sign` (`ok|signed`, `degraded|key_missing`); verify rows: `command=verify` (`ok|verified`, `legacy|legacy_unsigned`, `degraded|key_missing`); refusals keep the existing command names. Counters need no change: `eval_trace_counts` keys on `command|outcome|reason_code` and dedupes by `event_id`.
+
+Rows are deduped at write time per (evals.json sha256, command, outcome, reason_code) and the sink stops growing at 1 MiB, so hook polling does not inflate counters; `smoke-run|ok|frozen` records each freeze.
+
+Behaviour changes to know before paging: `grade-loop` without a sibling `progress.json` (archived or hand-built suites) now refuses `progress_missing` (decision: fail closed on both providers, no bypass); a symlinked or blank-id `progress.json` is refused; a PR-scope eval recorded `pass` whose `cmd` exits non-zero is refused `pass_exit_nonzero` by `smoke-verify`; `smoke-run` after an unrecorded oracle edit refuses `suite_hash_mismatch` (use `post_evals.py amend`). Stop-hook text for a tampered suite prints `reason=<code>`; re-running grade-loop will not clear it.
+
+Also traced as `outcome=legacy`: `legacy_progress_schema` (progress.json schema_version != 3, still allowed).
+
 ## Reproduce
 
 ```
@@ -136,3 +177,57 @@ python3 scripts/tests/measure_graph_alignment_test.py
 ```
 
 Telemetry and loop-state numbers will differ on re-run because both sources keep growing.
+
+Eval integrity (no `timeout`, it does not exist on macOS):
+
+```
+python3 -m unittest hooks.scripts.tests.eval_integrity_test hooks.scripts.tests.post_evals_grading_test scripts.tests.measure_graph_alignment_test
+PYTHONPATH=. python3 -m unittest packages/tests/test_codex_grading_encoding.py
+```
+
+## Stale mkdir lock recovery (runbook)
+
+Before this change a SIGKILLed hook left `progress.json.lock` (or `verification-ceiling/*.count.lock`) behind
+forever: every later `atomic_progress_update` returned `False` and the verification ceiling denied every command.
+Both sites now take the lock through `hooks/scripts/lib/dir_lock.py`.
+
+**Policy.** The lock dir holds `owner` = `{pid, host, start, ts}` (`start` is `ps -o lstart=`). A lock is stolen only when
+the owner is provably dead: `os.kill(pid, 0)` raises `ProcessLookupError`, or the pid is alive with a different
+start time (pid reuse). `PermissionError` means alive and never steals. An absent, empty or torn owner file is not
+dead on its own (it is the mkdir-then-write window); it is stolen only when the lock dir's mtime is older than
+`CLAUDE_LOCK_STALE_S` (default 60). An old lock with a live owner is never stolen. A future mtime (clock skew)
+counts as young. The steal is `os.rename(lock, lock.stale.<pid>.<uuid>)`: one racing stealer wins, losers retry
+`mkdir`; the renamed owner is rechecked against the one judged, and a mismatch is given back as `lock_busy`.
+Release removes the lock only if `owner.pid` is the caller's.
+
+**Reason codes** (appended as non-authoritative rows `{ts, event_id, reason, schema:"lock_event",
+non_authoritative:true, lock, owner_pid, pid}` (lock path, judged owner pid or null, acquirer pid) to `lock-events.jsonl` beside the lock; fail-open, a write failure never changes the
+lock result):
+
+| Code | Meaning |
+| --- | --- |
+| `lock_stolen_dead_owner` | Owner pid gone or reused; lock stolen. |
+| `lock_stolen_age` | Owner unreadable and lock older than the bound; stolen. |
+| `lock_busy` | Retry budget exhausted against a live, young or ambiguous lock. |
+
+`python3 scripts/measure_graph_alignment.py --root . --json` reports `lock_events` counts per code, deduped by
+`event_id` across all loop-state roots.
+
+**Manual recovery** (only if a lock never clears): confirm the owner is gone with
+`cat <lock>/owner; ps -p <pid>`, then move the directory aside (`mv <lock> /tmp/trash/`); do not delete a lock
+whose pid is alive.
+
+**Known ceiling.** If a new holder wins between the steal's judgement and its rename, and a third process takes the
+vacated name before the rename-back, two holders can briefly coexist. A pid recorded by a different `host`
+is never judged by `kill -0` (shared state dirs over NFS or containers); such a lock is stolen only by age.
+Same-second pid reuse with an identical `lstart` is not detectable. The Codex hook uses a byte-identical vendored
+copy (`packages/codex/hooks/scripts/lib/dir_lock.py`, guarded by `dir_lock_test`); its events land in
+`$PLUGIN_DATA/verification-ceiling/lock-events.jsonl`, which the measurement script does not yet scan.
+
+**Reproduce.**
+
+```
+python3 -m unittest hooks.scripts.tests.dir_lock_test hooks.scripts.tests.lock_recovery_test
+python3 packages/tests/test_codex_ceiling_lock.py
+python3 -m unittest scripts.tests.measure_graph_alignment_test
+```

@@ -10,6 +10,9 @@ from .loop_state_common import read_state
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from scripts.lib.eval_artifact import compute_go, grading_checksum
+from scripts.lib.eval_integrity import LEGACY_UNHASHED, IntegrityError, verify_suite
+from scripts.lib.eval_signing import report
+from scripts.lib.eval_trace import emit
 
 
 def evals_are_frozen(document: dict[str, Any]) -> bool:
@@ -79,4 +82,12 @@ def read_loop_evals_result(loop_dir: Path) -> str:
         return "UNSTAMPED"
     if verdict == "GO" and not compute_go(path):
         return "NO-GO"
+    try:
+        integrity = verify_suite(document, stamped=True, path=path)
+    except IntegrityError as error:
+        emit(path, "loop-evals-read", "refuse", error.code)
+        return f"TAMPERED:{error.code}"
+    if integrity == LEGACY_UNHASHED:
+        emit(path, "loop-evals-read", "legacy", LEGACY_UNHASHED)
+    report(path, "loop-evals-read", integrity)  # legacy_unsigned / key_missing are loud, never silent
     return verdict

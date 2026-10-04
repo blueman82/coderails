@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import json
+import os
 import shlex
 import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from scripts.lib.artifact_io import JsonObject, read_object, write_object
 
@@ -28,7 +30,7 @@ def entry(identity: str = "E1") -> JsonObject:
         "mode": "scripted",
         "status": "pass",
         "evidence": "Observed command and negative control",
-        "cmd": command("print('check'); raise SystemExit(1)"),
+        "cmd": command("print('check')"),
         "negative_control": command("print('control'); raise SystemExit(1)"),
         "smoke": {"cmd_exit": 1, "negative_control_exit": 1},
     }
@@ -43,6 +45,10 @@ class ArtifactCase(unittest.TestCase):
         """Allocate a fresh suite for every test."""
         self.temporary = tempfile.TemporaryDirectory(prefix="coderails-eval-contract-", dir=self.temporary_parent)
         self.addCleanup(self.temporary.cleanup)
+        # Signing keys are created on first freeze: keep them out of the real ~/.coderails/keys.
+        keys = patch.dict(os.environ, {"CODERAILS_KEYS_DIR": str(Path(self.temporary.name) / "keys")})
+        keys.start()
+        self.addCleanup(keys.stop)
         self.directory = Path(self.temporary.name)
         self.path = self.directory / "evals.json"
         self.data: JsonObject = {
@@ -53,6 +59,7 @@ class ArtifactCase(unittest.TestCase):
             "evals": [entry()],
         }
         self.save()
+        self.directory.joinpath("progress.json").write_text('{"schema_version":3,"session_id":"s","loop_id":"l"}')
 
     def save(self) -> None:
         """Persist the current test input without invoking the grader."""

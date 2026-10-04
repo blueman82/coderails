@@ -154,8 +154,9 @@ class ExecutionTests(ArtifactCase):
                 with self.assertRaisesRegex(ValueError, f"E1.*{reason}"):
                     validate_structure(self.path, "192", "head")
                 validate_structure(self.path, scope="loop")
-        for code in (0, 1):
-            verify_execution({**self.data, "evals": [{**entry(), "cmd": command(f"raise SystemExit({code})")}]})
+        verify_execution({**self.data, "evals": [{**entry(), "cmd": command("raise SystemExit(0)")}]})
+        with self.assertRaisesRegex(ValueError, "pass_exit_nonzero"):
+            verify_execution({**self.data, "evals": [{**entry(), "cmd": command("raise SystemExit(1)")}]})
 
     def test_duplicate_ids_and_stdin_eaters_do_not_skip_later_entries(self) -> None:
         """Visit every entry by position and prove the second control actually ran."""

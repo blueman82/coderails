@@ -672,7 +672,8 @@ and readers without installed provider accounts.
 | `hooks/scripts/hook_common.py` | Bounded payload reads and native hook responses. |
 | `hooks/scripts/lib/agentic_loop_path.py` | Resolve the repository/session-owned loop state path. |
 | `hooks/scripts/lib/discipline_common.py` | Read native Claude transcript tools, final text and edited-file count. |
-| `hooks/scripts/lib/loop_state_common.py` | Loop detection, ownership, sole mkdir lock and atomic state update; live completion marker. |
+| `hooks/scripts/lib/loop_state_common.py` | Loop detection, ownership, atomic state update behind the `dir_lock` mkdir lock; live completion marker. |
+| `hooks/scripts/lib/dir_lock.py` | Stdlib-only mkdir lock with owner pid and start time; steals a dead owner's lock atomically (see `docs/graph-alignment-measurement.md`, stale-lock policy). |
 | `hooks/scripts/lib/loop_evals.py` | Frozen dispatch authority and checksum-bound neutral completion verdicts. |
 | `hooks/scripts/lib/loop_completion.py`, `loop_proofs.py`, `loop_cost.py` | Independent work-unit, retrospective, observed proof execution and dated cost checks. |
 | `hooks/scripts/lib/graph_executor.py` | Provider-local lock around the installed pure schema-3 semantic operations. |
