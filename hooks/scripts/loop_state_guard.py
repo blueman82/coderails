@@ -44,6 +44,13 @@ def completion_evals(state: LoopState) -> str:
         "STALE": "STALE: does not belong to the current loop revision",
     }
     explanation = reasons.get(verdict, f"no passing loop-scope evals.json ({verdict})")
+    if verdict.startswith("TAMPERED:"):
+        return (
+            f"[loop-state-guard] Loop complete with {count} work-units, but evals.json at:\n"
+            f"  {state.path.parent / 'evals.json'}\nfailed its tamper check reason={verdict[9:]}. "
+            f"Re-running grade-loop will refuse with the same code. Revert the oracle edit, or re-apply it with "
+            f"post_evals.py amend, then regrade. Trace row: eval_trace.jsonl beside evals.json."
+        )
     return (
         f"[loop-state-guard] Loop complete with {count} work-units, but evals.json at:\n"
         f"  {state.path.parent / 'evals.json'}\nhas {explanation}.\n"
@@ -80,8 +87,8 @@ def main() -> int:
         message = (
             f"[loop-state-guard] Agentic loop active but no progress.json found.\n"
             f"Create it at this exact path (copy it verbatim — never compute the path yourself):\n  {state.path}\n"
-            "Create a schema_version 3 initialising stub with session_id, loop_id, revision 1, created, "
-            "authorising_prompt_raw and completed_marker 0, then enrich it as the loop progresses.\n"
+            "Create it with the controller command, never by hand: graph.py start <that path> --session <session> "
+            "--loop-id <id> --prompt-file <file>, then graph.py add-unit per work unit.\n"
             "If you loaded the agentic-loop skill only to read it or answer a question about it — no loop is "
             "running — do NOT create this file; this guard stands down after this one block."
         )
@@ -102,7 +109,7 @@ def main() -> int:
         reason = "stale_complete_rearmed"
         message = (
             f"[loop-state-guard] A new agentic loop has started, but progress.json at:\n  {state.path}\n"
-            "still records the previous loop as complete. Re-initialise the stub for the new loop before stopping."
+            "still records the previous loop as complete. Run graph.py start for the new loop before stopping."
         )
     log(
         f"hook=loop_state_guard session={session} invocations={count} "

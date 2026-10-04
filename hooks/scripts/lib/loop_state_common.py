@@ -18,6 +18,7 @@ from typing import Any, cast
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from hooks.scripts.lib.agentic_loop_path import resolve_path
+from hooks.scripts.lib.dir_lock import acquire_dir_lock, release_dir_lock
 from hooks.scripts.lib.discipline_common import content, records, tool_uses
 
 LOOP_STOP_VOCAB = "hard-stop|approval-gate|awaiting-input|complete"
@@ -40,25 +41,26 @@ def read_state(path: Path) -> dict[str, Any]:
     return cast(dict[str, Any], value) if isinstance(value, dict) else {}
 
 
-def atomic_progress_update(path: Path, update: Callable[[dict[str, Any]], dict[str, Any]]) -> bool:
-    """Serialize one provider-local read, transform, and atomic file replacement."""
-    if not path.is_file():
+def atomic_progress_update(
+    path: Path, update: Callable[[dict[str, Any]], dict[str, Any]], create: bool = False
+) -> bool:
+    """Serialize one provider-local read, transform, and atomic file replacement.
+
+    With `create`, an absent file is read as `{}` so the lock serialises the create-or-exists decision.
+    """
+    if create:
+        with suppress(OSError):
+            path.parent.mkdir(parents=True, exist_ok=True)
+    if not path.is_file() and not create:
         return False
     lock = Path(f"{path}.lock")
     attempts = int(os.environ.get("CLAUDE_HOOK_MAX_ATTEMPTS", "5"))
     delay = float(os.environ.get("CLAUDE_HOOK_SLEEP_S", "0.3"))
-    for attempt in range(attempts):
-        try:
-            lock.mkdir()
-            break
-        except OSError:
-            if attempt + 1 < attempts:
-                time.sleep(delay)
-    else:
+    if not acquire_dir_lock(lock, attempts, delay)[0]:
         return False
     temporary = ""
     try:
-        state = json.loads(path.read_text(encoding="utf-8"))
+        state: object = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
         if not isinstance(state, dict):
             return False
         proposed = update(cast(dict[str, Any], state))
@@ -76,8 +78,7 @@ def atomic_progress_update(path: Path, update: Callable[[dict[str, Any]], dict[s
         if temporary:
             with suppress(OSError):
                 Path(temporary).unlink()
-        with suppress(OSError):
-            lock.rmdir()
+        release_dir_lock(lock)
 
 
 def count_invocations(transcript: str) -> tuple[int, str, int]:

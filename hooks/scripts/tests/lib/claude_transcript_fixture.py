@@ -124,7 +124,7 @@ def spawn(
         },
     )
     child = path.with_suffix("") / "subagents" / f"agent-{agent}.jsonl"
-    common = {"sessionId": session, "isSidechain": True, "agentId": agent}
+    common = {"sessionId": session, "isSidechain": True, "agentId": agent, "timestamp": "2026-09-21T00:00:02Z"}
     append(child, {**common, "type": "user", "message": {"role": "user", "content": prompt}})
     if completed:
         append(

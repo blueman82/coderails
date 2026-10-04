@@ -58,6 +58,9 @@ def validate_work_units(state: dict[str, Any]) -> None:
         raise ValueError("work_units must be an object under schema v3")
     offenders: list[str] = []
     for identifier, unit in cast(dict[str, Any], units).items():
+        if not str(identifier).strip():
+            offenders.append(repr(identifier))
+            continue
         if isinstance(unit, dict) and cast(dict[str, Any], unit).get("status") == "done":
             continue
         if isinstance(unit, dict) and cast(dict[str, Any], unit).get("status") == "dropped":

@@ -37,6 +37,8 @@ BLOCKING: dict[str, Any] = {
     "non-object entry": {"work_units": {"1": "done"}},
     "array container": {"work_units": [{"status": "done"}]},
     "string container": {"work_units": "done"},
+    "blank id": {"work_units": {"": {"status": "done"}}},
+    "whitespace id": {"work_units": {"  ": {"status": "done"}}},
     "one unfinished among done": {"work_units": {"1": {"status": "done"}, "2": {"status": "pending"}}},
 }
 
