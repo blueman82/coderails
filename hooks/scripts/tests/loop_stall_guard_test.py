@@ -103,6 +103,31 @@ class StallGuardTests(HookTestCase):
         self.assertEqual(json.loads(path.read_text())["loop_stop_counts"], {"awaiting-input": 1})
         self.assertEqual(self.trace_reasons(), ["legacy_text_parse"])
 
+    def stopped(self, text: str) -> Path:
+        """Transcript whose current turn ran graph.py stop, as a real recorded stop would."""
+        path = self.transcript(text)
+        call = {"type": "tool_use", "name": "Bash", "input": {"command": "python3 graph.py stop --category x"}}
+        row = {"type": "assistant", "message": {"content": [call]}}
+        path.write_text(path.read_text() + json.dumps(row) + "\n")
+        return path
+
+    def test_stale_row_from_an_earlier_turn_never_releases(self) -> None:
+        """A row recorded before the last user prompt is stale: chatting afterwards stays blocked (finding 1)."""
+        path = self.progress(stops=[self.stop(1, "awaiting-input")])
+        old = self.stopped("done")
+        prompt = {"type": "user", "message": {"content": "carry on"}}
+        old.write_text(old.read_text() + json.dumps(prompt) + "\n")
+        chat = {"type": "assistant", "message": {"content": [{"type": "text", "text": "just chatting"}]}}
+        old.write_text(old.read_text() + json.dumps(chat) + "\n")
+        self.assertEqual(self.run_hook("loop_stall_guard", self.payload(old)).returncode, 2)
+        self.assertEqual(
+            self.run_hook("loop_stall_guard", self.payload(self.transcript("just chatting"))).returncode, 2
+        )
+        after = json.loads(path.read_text())
+        self.assertFalse(after["stops"][0]["consumed"])
+        self.assertNotIn("loop_stop_counts", after)
+        self.assertIn("stale_stop_row", self.trace_reasons())
+
     @staticmethod
     def stop(seq: int, category: str, revision: int = 1, consumed: bool = False) -> dict[str, Any]:
         """Build one recorded stop row exactly as graph.py stop writes it."""
@@ -118,7 +143,7 @@ class StallGuardTests(HookTestCase):
     def test_recorded_stop_wins_over_text_and_is_consumed_once(self) -> None:
         """A recorded stop decides the category, is consumed with the count, and never double-counts."""
         path = self.progress(stops=[self.stop(1, "approval-gate")])
-        payload = self.payload(self.transcript("LOOP-STOP: hard-stop — conflicting text"))
+        payload = self.payload(self.stopped("LOOP-STOP: hard-stop — conflicting text"))
         self.assertEqual(self.run_hook("loop_stall_guard", payload).returncode, 0)
         after = json.loads(path.read_text())
         self.assertEqual(after["loop_stop_counts"], {"approval-gate": 1})

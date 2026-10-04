@@ -241,6 +241,30 @@ def recorded_stop(data: dict[str, Any]) -> dict[str, Any] | None:
     return None
 
 
+def stop_ran_this_turn(transcript: str) -> bool:
+    """Report whether `graph.py stop` ran after the last user prompt, so an old row cannot release a later turn."""
+    ran = False
+    for record in records(transcript):
+        value = content(record)
+        if record.get("type") == "user" and (
+            (isinstance(value, str) and value)
+            or (
+                isinstance(value, list)
+                and any(
+                    isinstance(b, dict) and cast(dict[str, Any], b).get("type") == "text"
+                    for b in cast(list[object], value)
+                )
+            )
+        ):
+            ran = False
+        for tool in tool_uses(record):
+            data = tool.get("input")
+            command = cast(dict[str, Any], data).get("command") if isinstance(data, dict) else None
+            if tool.get("name") == "Bash" and isinstance(command, str) and re.search(r"graph\.py\s+stop\b", command):
+                ran = True
+    return ran
+
+
 def mark_complete(cwd: str, session: str) -> bool:
     """Stamp completion with this session's actual native loop-invocation ordinal."""
     projects = Path(os.environ.get("CLAUDE_PROJECTS_DIR", str(Path.home() / ".claude/projects")))

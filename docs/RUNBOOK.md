@@ -78,7 +78,8 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   missing or torn). Inspect one loop with `python3 -c "import json;print(json.load(open('<progress.json>')).get('stops'))"`.
 - Remediation: a high `legacy_text_parse` against `stops_consumed` means agents are not running `graph.py stop`: fix
   the prompt, and if it persists tighten the text parse rather than retiring it. An unconsumed row at the current
-  revision releases the next Stop once; a row at an older revision is ignored by design. A refused `graph.py stop`
+  revision releases the next Stop once, and only when `graph.py stop` ran after the last user prompt (an older row is
+  ignored with trace `stale_stop_row`, so recording a stop early cannot excuse later undeclared turns); a row at an older revision is ignored by design. A refused `graph.py stop`
   prints the refusal on stderr (foreign session, unknown category or reason code, `complete` while the graph is
   unresolved); fix the argument, never edit `stops` by hand. Codex records the same row but only a `hard-stop` row on a
   typed hard-stopped graph releases its guard (`consume-stop`); other categories are recorded and ignored there.

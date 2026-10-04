@@ -131,6 +131,14 @@ class ProviderStopRecordTests(unittest.TestCase):
         self.assertTrue(provider.read()["stops"][0]["consumed"])
         self.assertEqual(json.loads(self.guard(provider))["decision"], "block")  # consumed: no second free pass
         self.assertEqual(self.guard(provider, "LOOP-STOP: waiting-on-human"), "")  # legacy text fallback still works
+        trace = (
+            provider.home / "state" / provider.session / "trace.jsonl"
+        )  # and is observable, like Claude's (finding 2)
+        rows = [json.loads(line) for line in trace.read_text().splitlines()]
+        self.assertEqual(
+            [(r["command"], r["reason_code"]) for r in rows], [("graph_completion_guard", "legacy_text_parse")]
+        )
+        self.assertTrue(rows[0]["event_id"])
 
     def test_codex_guard_ignores_foreign_stale_and_non_hard_rows(self) -> None:
         """Stops for another revision or category never release the guard."""

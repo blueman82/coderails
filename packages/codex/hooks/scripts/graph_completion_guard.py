@@ -13,6 +13,7 @@ from typing import cast
 from hook_common import (
     RESOURCE_MESSAGE,
     HostResourceError,
+    append_trace_row,
     continue_turn,
     graph_output,
     graph_path,
@@ -139,6 +140,7 @@ def main() -> int:
             return 0
         if hard_stop_declaration(message):
             log(f"hook=graph_completion_guard session={session_id} legacy_text_parse=1 blocked=0")
+            append_trace_row("graph_completion_guard", "fallback", "legacy_text_parse", session_id)
             return 0
     try:
         verified = (

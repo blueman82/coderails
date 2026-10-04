@@ -237,8 +237,10 @@ python3 -m unittest scripts.tests.measure_graph_alignment_test
 `graph.py stop` records a `progress.stops[]` row; `loop_stall_guard` consumes the newest unconsumed row at the current
 revision in the same atomic write that increments the hook-owned `loop_stop_counts`, and falls back to the final
 anchored `LOOP-STOP:` line (trace `legacy_text_parse`). Absent-state grace reads `hook_state.json`
-`ordinals.absent_blocked`, falling back to the discipline.log regex (trace `legacy_log_parse`). Counters live in
-`scripts/graph_alignment_stops.py`. Flip condition: if `legacy_text_parse` still dominates `stops_consumed` over the
+`ordinals.absent_blocked`, falling back to the discipline.log regex (trace `legacy_log_parse`). The Claude hook honours a recorded row only if `graph.py stop` ran after the last user prompt (else trace
+`stale_stop_row`). The Codex guard writes the same `legacy_text_parse` trace row (command `graph_completion_guard`), so the
+ratio covers both providers; before this change Codex fallbacks appeared only in discipline.log and were not counted.
+Counters live in `scripts/graph_alignment_stops.py`. Flip condition: if `legacy_text_parse` still dominates `stops_consumed` over the
 first few loops, agents are not recording stops; tighten the parse and block text-only stops instead.
 
 **Reproduce.**
