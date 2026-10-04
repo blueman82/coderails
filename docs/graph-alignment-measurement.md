@@ -135,3 +135,47 @@ python3 scripts/tests/measure_graph_alignment_test.py
 ```
 
 Telemetry and loop-state numbers will differ on re-run because both sources keep growing.
+
+## Stale mkdir lock recovery (runbook)
+
+Before this change a SIGKILLed hook left `progress.json.lock` (or `verification-ceiling/*.count.lock`) behind
+forever: every later `atomic_progress_update` returned `False` and the verification ceiling denied every command.
+Both sites now take the lock through `hooks/scripts/lib/dir_lock.py`.
+
+**Policy.** The lock dir holds `owner` = `{pid, start, ts}` (`start` is `ps -o lstart=`). A lock is stolen only when
+the owner is provably dead: `os.kill(pid, 0)` raises `ProcessLookupError`, or the pid is alive with a different
+start time (pid reuse). `PermissionError` means alive and never steals. An absent, empty or torn owner file is not
+dead on its own (it is the mkdir-then-write window); it is stolen only when the lock dir's mtime is older than
+`CLAUDE_LOCK_STALE_S` (default 60). An old lock with a live owner is never stolen. A future mtime (clock skew)
+counts as young. The steal is `os.rename(lock, lock.stale.<pid>.<uuid>)`: one racing stealer wins, losers retry
+`mkdir`; the renamed owner is rechecked against the one judged, and a mismatch is given back as `lock_busy`.
+Release removes the lock only if `owner.pid` is the caller's.
+
+**Reason codes** (appended as non-authoritative rows `{ts, event_id, reason, schema:"lock_event",
+non_authoritative:true}` to `lock-events.jsonl` beside the lock; fail-open, a write failure never changes the
+lock result):
+
+| Code | Meaning |
+| --- | --- |
+| `lock_stolen_dead_owner` | Owner pid gone or reused; lock stolen. |
+| `lock_stolen_age` | Owner unreadable and lock older than the bound; stolen. |
+| `lock_busy` | Retry budget exhausted against a live, young or ambiguous lock. |
+
+`python3 scripts/measure_graph_alignment.py --root . --json` reports `lock_events` counts per code, deduped by
+`event_id` across all loop-state roots.
+
+**Manual recovery** (only if a lock never clears): confirm the owner is gone with
+`cat <lock>/owner; ps -p <pid>`, then move the directory aside (`mv <lock> /tmp/trash/`); do not delete a lock
+whose pid is alive.
+
+**Known ceiling.** If a new holder wins between the steal's judgement and its rename, and a third process takes the
+vacated name before the rename-back, two holders can briefly coexist. The Codex copy
+(`packages/codex/hooks/scripts/verification_volume_ceiling.py`, `acquire_lock`) still has the bare mkdir lock; it
+is a named follow-up because it has its own `lib/` and would need a vendored copy.
+
+**Reproduce.**
+
+```
+python3 -m unittest hooks.scripts.tests.dir_lock_test hooks.scripts.tests.lock_recovery_test
+python3 -m unittest scripts.tests.measure_graph_alignment_test
+```
