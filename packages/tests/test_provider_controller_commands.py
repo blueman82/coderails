@@ -224,7 +224,7 @@ class StartTests(ControllerCase):
                 prompt.write_text(PROMPT)
                 with patch("os.replace", side_effect=OSError("torn")), self.assertRaises(ValueError):
                     module.start(path, SESSION, LOOP, prompt)
-                debris = {"progress.json.lock", "recovery-trace.jsonl"}
+                debris = {"progress.json.lock", "recovery-trace.jsonl", "lock-events.jsonl"}
                 self.assertEqual([p.name for p in path.parent.iterdir() if p.name not in debris], [])
                 module.start(path, SESSION, LOOP, prompt)
                 state = json.loads(path.read_text())

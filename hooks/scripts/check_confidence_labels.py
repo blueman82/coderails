@@ -13,6 +13,9 @@ from hooks.scripts.hook_common import output, read_payload
 from hooks.scripts.lib.agentic_loop_path import sanitise_session_id
 from hooks.scripts.lib.discipline_common import stable_text
 from hooks.scripts.lib.loop_state_common import log, loop_active_incomplete
+from hooks.scripts.lib.trace_row import append_row
+
+REASON = "confidence_label_missing"
 
 
 def main() -> int:
@@ -54,9 +57,11 @@ def main() -> int:
             additionalContext="[discipline-warn(loop)] response made substantive claims without "
             "(verified)/(inferred)/(guess) labels. Add them before stopping.",
         )
-        log(f"{fields} would_block=1 warned=1 blocked=0")
+        log(f"{fields} would_block=1 warned=1 blocked=0 reason_code={REASON}")
+        append_row("check_confidence_labels", "warned", REASON, session)
         return 0
-    log(f"{fields} blocked=1")
+    log(f"{fields} blocked=1 reason_code={REASON}")
+    append_row("check_confidence_labels", "blocked", REASON, session)
     print(
         f"[discipline-block] response >={minimum} chars with no confidence label. Rule (CLAUDE.md): "
         "tag each substantive claim (verified)/(inferred)/(guess) — e.g. "
