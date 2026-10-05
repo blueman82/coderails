@@ -1,0 +1,4 @@
+{
+  "deny": ["**/.env", "**/*.pem", "**/id_rsa*"],
+  "require_linked_worktree": false
+}

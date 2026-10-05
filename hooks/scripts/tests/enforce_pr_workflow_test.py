@@ -44,13 +44,18 @@ class WorkflowGateTests(HookTestCase):
         for raw, branch in repositories.items():
             name = raw.replace("{sandbox}/", "")
             repo = self.git_repo(name, branch)
+            # fixed dates make every fixture repo's init commit the same sha, so the PR head exists in each one;
+            # origin/main at that commit gives the publication gate a computable (empty) diff and no network fetch
+            date = "2026-01-01T00:00:00Z"
+            fixed = {**os.environ, "GIT_AUTHOR_DATE": date, "GIT_COMMITTER_DATE": date}
             for command in (
                 ("config", "user.email", "t@t.t"),
                 ("config", "user.name", "t"),
                 ("remote", "add", "origin", "https://github.com/acme/widgets.git"),
                 ("commit", "-q", "--allow-empty", "-m", "init"),
+                ("update-ref", "refs/remotes/origin/main", "HEAD"),
             ):
-                subprocess.run(["git", "-C", str(repo), *command], check=True)
+                subprocess.run(["git", "-C", str(repo), *command], check=True, env=fixed)
         fixture_sha = subprocess.check_output(
             ["git", "-C", str(self.directory / "repo"), "rev-parse", "HEAD"], text=True
         ).strip()

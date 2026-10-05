@@ -145,17 +145,26 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
 
 ## Diff-manifest check warned or refused
 
-- Symptom: `push.py` or `merge.py` prints `! diff_manifest <code>: <path>`, or refuses with `diff_manifest:<code>`
-  (config `diff_manifest: enforce`). `scripts/diff_manifest.py --policy FILE` shows the same verdict without hooks.
+- Symptom: `push.py`, `merge.py`, a direct `gh pr merge` (Claude `enforce_pr_workflow`, Codex `pr_publication_gate`)
+  refuses with `diff_manifest:<code>` and prints `! diff_manifest <code>: <path>` on stderr. The check is ON by default
+  (`diff_manifest: enforce`, no config file needed, shipped policy `policy/diff-policy.default.json`); `off` and
+  `advisory` (warn only) are the explicit switches. `scripts/diff_manifest.py [--policy FILE]` shows the same verdict
+  without hooks.
 - Query: `trace.by_reason` for `diff-manifest/ok/diff_manifest_ok`, `diff-manifest/warned|refused/<code>` (rows are keyed by
-  `<repo>@<branch>` or `<repo>@pr-<N>`), plus `diff-manifest/failed_open/manifest_unreadable`,
+  `<repo>@<branch>` or `<repo>@pr-<N>`), `publication/refused/diff_manifest:<code>` (one row per refusal from the single
+  publication gate, every path), plus `diff-manifest/failed_open/manifest_unreadable` (advisory only),
   `diff-manifest/legacy/manifest_legacy_absent` (policy file without a manifest key; also written by the gate) and `diff-manifest/refused/foreign_session`. Tally them with
-  `python3 scripts/measure_graph_alignment.py --root . | python3 scripts/lib/manifest_counters.py`.
-- Codes: `out_of_manifest`, `denied_path`, `docs_sync_deny`, `docs_sync_deletion`, `not_linked_worktree`, `special_file_type` (type change, symlink or gitlink).
+  `python3 scripts/measure_graph_alignment.py --root . | python3 scripts/lib/workflow_gate_counters.py`
+  (`manifest_counters.py` still tallies only `diff-manifest`). See `docs/workflow-gates-measurement.md`.
+- Codes: `out_of_manifest`, `denied_path`, `docs_sync_deny`, `docs_sync_deletion`, `not_linked_worktree`, `special_file_type` (type change, symlink or gitlink), `status_not_allowed` (policy `statuses`), `too_many_paths` (policy `max_paths`), `manifest_unreadable`, `manifest_internal_error`, `diff_manifest_mode_invalid` (unknown mode, treated as enforce).
 - Remediation: a real violation means the diff left its declared scope; fix the diff, or widen `unit.manifest`
-  (re-register with `add-unit --manifest`) or the policy file on purpose. `manifest_unreadable` means the policy file,
-  progress.json or diff could not be read (fails open when advisory; refuses under enforce); fix the path. Set
-  `diff_manifest: off` to disable.
+  (re-register with `add-unit --manifest`) or the policy file on purpose. `push.py`/`merge.py --unit N --progress PATH`
+  bound the diff to that unit's manifest. `manifest_unreadable` means the policy file, progress.json or diff (or an
+  unresolved PR head) could not be read: it refuses under enforce (fails open only under advisory); fix the path.
+  `manifest_internal_error` is a bug in the gate and refuses under enforce. Set `diff_manifest: off` to disable.
+- Limits: a cooperating-agent safeguard. A same-user agent can edit the config to `off`; the Codex hook only sees merges
+  `guarded_segments` can match; Codex hooks need `/hooks` trust before they run; Claude's direct arm needs a
+  `workflow.config.yaml` in the repo.
 
 ## Action-authority hook denied a merge or push (or warned in advisory)
 

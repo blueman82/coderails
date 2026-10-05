@@ -17,7 +17,7 @@ REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO))
 from scripts import merge  # noqa: E402
 from scripts.lib import git_common as git  # noqa: E402
-from scripts.lib import manifest_counters, manifest_policy  # noqa: E402
+from scripts.lib import manifest_counters, manifest_policy, publication_gate  # noqa: E402
 
 CLI = REPO / "scripts" / "diff_manifest.py"
 
@@ -227,20 +227,24 @@ class GateTests(RepoCase):
             manifest_policy.gate()
         self.assertEqual(str(caught.exception), "diff_manifest:denied_path")
 
-    def test_default_is_advisory(self) -> None:
-        """No mode key means advisory: warning on stdout, trace row, no raise."""
+    def test_default_is_enforce(self) -> None:
+        """No mode key means enforce (the old default was advisory, which only warned)."""
         self.cfg.write_text(f"diff_manifest_policy: {self.policy_path}\n")
-        with mock.patch.object(manifest_policy, "config_path", return_value=str(self.cfg)):
+        with (
+            mock.patch.object(manifest_policy, "config_path", return_value=str(self.cfg)),
+            self.assertRaises(git.WorkflowError),
+        ):
             manifest_policy.gate()
-        self.assertEqual([r["outcome"] for r in self.rows() if r["outcome"] != "legacy"], ["warned"])
+        self.assertEqual([r["outcome"] for r in self.rows() if r["outcome"] != "legacy"], ["refused"])
 
-    def test_off_and_no_policy_do_nothing(self) -> None:
-        """Off, or no policy file, skips the check and writes nothing."""
+    def test_off_does_nothing_and_no_policy_uses_the_shipped_one(self) -> None:
+        """Off skips the check and writes nothing; no policy file means the shipped default, which passes a doc edit."""
         with self.configure("off"):
             manifest_policy.gate()
+        self.assertEqual(self.rows(), [])
         with self.configure("enforce", policy=False):
             manifest_policy.gate()
-        self.assertEqual(self.rows(), [])
+        self.assertEqual([r["outcome"] for r in self.rows() if r["outcome"] != "legacy"], ["ok"])
 
     def test_counters(self) -> None:
         """manifest_counters tallies only diff-manifest rows from a by_reason map."""
@@ -267,10 +271,10 @@ class MergeCallTests(unittest.TestCase):
             mock.patch.object(git, "protected", return_value=False),
             mock.patch.object(git, "run", side_effect=fake_run),
             mock.patch.object(merge, "cleanup"),
-            mock.patch.object(manifest_policy, "gate", side_effect=gate_effect) as gate,
+            mock.patch.object(publication_gate, "enforce", side_effect=gate_effect) as gate,
         ):
             status = merge.main(["7"])
-        gate.assert_called_once_with("7")
+        gate.assert_called_once_with("7", "OPEN", unit="", progress="")
         return status, [a for a in seen if a[:3] == ("gh", "pr", "merge")]
 
     def test_enforce_refusal_blocks_merge(self) -> None:
@@ -290,7 +294,7 @@ class WiringTests(unittest.TestCase):
     def test_call_sites_present(self) -> None:
         """Negative control target: removing a call site fails this test."""
         self.assertIn("manifest_policy.gate(", (REPO / "scripts/push.py").read_text())
-        self.assertIn("manifest_policy.gate(", (REPO / "scripts/merge.py").read_text())
+        self.assertIn("publication_gate.enforce(", (REPO / "scripts/merge.py").read_text())
 
     def test_codex_mirror_is_byte_identical(self) -> None:
         """Lib, CLI and push are byte-identical in the Codex package."""

@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any, cast
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+from scripts.lib import publication_gate
 from scripts.lib.config import config_path, integrity_machine_user
 from scripts.lib.git_common import branch, gate_eval_summary_for_pr, pr_field, pr_num, repo, run
 from scripts.post_evals import smoke_verify
@@ -132,5 +133,11 @@ def merge_reason(number: str, cwd: str) -> str:
         return (
             prefix + "local temporary file allocation failed for the smoke-verify gate. Check /tmp "
             "disk space or permissions, then retry."
+        )
+    if violations := publication_gate.evaluate(number, sha):
+        first = violations[0]
+        return (
+            f"{first['code']}: {prefix}the publication gate refused this head ({first['detail'] or 'no detail'}). "
+            "Fix the diff or the policy; set diff_manifest: off only on purpose."
         )
     return integrity_reason(number, sha, cwd)

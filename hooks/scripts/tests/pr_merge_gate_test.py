@@ -58,7 +58,11 @@ class MergeEvidenceTests(HookTestCase):
         """Missing head, fetch failure, NO-GO, missing embeds and failed verification all deny."""
         before = Path.cwd()
         self.addCleanup(os.chdir, before)
-        with patch(MODULE + ".pr_field", return_value="head"), patch(MODULE + ".integrity_reason", return_value=""):
+        with (
+            patch(MODULE + ".pr_field", return_value="head"),
+            patch(MODULE + ".integrity_reason", return_value=""),
+            patch(MODULE + ".publication_gate.evaluate", return_value=[]),
+        ):
             for summary in (
                 EvalSummary(2, "", "", "identity"),
                 EvalSummary(2, "", "", "permission"),
@@ -80,6 +84,26 @@ class MergeEvidenceTests(HookTestCase):
         with patch(MODULE + ".pr_field", return_value=""):
             self.assertIn("head SHA", merge_reason("1", str(self.directory)))
         self.assertIn("valid repo", merge_reason("1", str(self.directory / "missing")))
+
+    def test_publication_gate_violation_denies_with_code_first(self) -> None:
+        """Direct Claude path: a publication violation denies, reason code first; no violation passes."""
+        before = Path.cwd()
+        self.addCleanup(os.chdir, before)
+        summary = EvalSummary(0, "1", '{"head_sha":"head","evals":[]}', "")
+        violation = [{"code": "diff_manifest:denied_path", "detail": "secret"}]
+        with (
+            patch(MODULE + ".pr_field", return_value="head"),
+            patch(MODULE + ".gate_eval_summary_for_pr", return_value=summary),
+            patch(MODULE + ".smoke_verify", return_value=0),
+            patch(MODULE + ".integrity_reason", return_value=""),
+        ):
+            with patch(MODULE + ".publication_gate.evaluate", return_value=violation) as evaluate:
+                reason = merge_reason("1", str(self.directory))
+            self.assertTrue(reason.startswith("diff_manifest:denied_path"), reason)
+            self.assertIn("gh pr merge 1", reason)
+            self.assertEqual(evaluate.call_args.args[:2], ("1", "head"))
+            with patch(MODULE + ".publication_gate.evaluate", return_value=[]):
+                self.assertEqual(merge_reason("1", str(self.directory)), "")
 
 
 if __name__ == "__main__":

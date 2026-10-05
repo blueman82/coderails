@@ -55,7 +55,8 @@ def parse_arguments(arguments: list[str]) -> tuple[bool, str, list[str]]:
 
 def main(arguments: list[str] | None = None) -> int:
     """Run the feature-branch push workflow with positive remote-ref verification."""
-    force, message, paths = parse_arguments(sys.argv[1:] if arguments is None else arguments)
+    arguments, unit, progress = manifest_policy.unit_flags(sys.argv[1:] if arguments is None else arguments)
+    force, message, paths = parse_arguments(arguments)
     try:
         current = git.branch()
         git.require_feature()
@@ -67,7 +68,7 @@ def main(arguments: list[str] | None = None) -> int:
             number = git.pr_num()
             print(f"✓ Up to date │ {git.pr_field(number, 'url')}" if number else "• Nothing to push")
             return 0
-        manifest_policy.gate()
+        manifest_policy.gate(unit=unit, progress=progress)
         arguments = ["git", "push"] + (["--force-with-lease"] if force else []) + ["-u", "origin", current]
         pushed = git.run(*arguments)
         combined = pushed.stdout + pushed.stderr

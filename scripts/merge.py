@@ -9,7 +9,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from scripts.lib import git_common as git
-from scripts.lib import manifest_policy
+from scripts.lib import manifest_policy, publication_gate
 from scripts.lib.config import config_path, integrity_machine_user
 from scripts.lib.integrity_status import verify_integrity_status
 from scripts.lib.wiki_debt import has_wiki_ingest_for_merged_prs
@@ -70,7 +70,7 @@ def cleanup(number: str, default: str) -> None:
 
 def main(arguments: list[str] | None = None) -> int:
     """Resolve the PR and preserve all gates before calling the remote merge."""
-    arguments = sys.argv[1:] if arguments is None else arguments
+    arguments, unit, progress = manifest_policy.unit_flags(sys.argv[1:] if arguments is None else arguments)
     argument = arguments[0] if arguments else "auto"
     try:
         git.require_repo()
@@ -89,7 +89,8 @@ def main(arguments: list[str] | None = None) -> int:
             if git.protected() and git.pr_field(number, "reviewDecision", "NONE") != "APPROVED":
                 raise git.WorkflowError("Not approved")
             verify_gates(number)
-            manifest_policy.gate(number)
+            head = git.pr_field(number, "headRefOid")
+            publication_gate.enforce(number, head, unit=unit, progress=progress)
             git.run("gh", "pr", "merge", number, "--merge", check=True)
             print("✓ Merged")
         elif state == "MERGED":

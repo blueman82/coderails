@@ -3,7 +3,8 @@
 
 Needs no hooks, so headless `claude -p` routines can run it. The manifest comes from --progress/--unit
 (work_units[unit].manifest) or from a "manifest" key in the policy file. Unreadable inputs fail open (exit 0,
-reason_code manifest_unreadable); a progress file owned by another --session is refused (exit 2).
+reason_code manifest_unreadable; this CLI is a verdict printer, the enforcing callers are push.py, merge.py and the
+direct-merge hooks); a progress file owned by another --session is refused (exit 2).
 """
 
 from __future__ import annotations
@@ -22,7 +23,7 @@ from scripts.lib import manifest_policy as mp
 def main(arguments: list[str] | None = None) -> int:
     """Evaluate the current branch diff and print the JSON verdict."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--policy", required=True)
+    parser.add_argument("--policy", default=str(mp.DEFAULT_POLICY), help="default: shipped diff-policy.default.json")
     parser.add_argument("--base")
     parser.add_argument("--head", default="HEAD")
     parser.add_argument("--progress")

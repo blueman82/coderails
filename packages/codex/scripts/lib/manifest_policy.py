@@ -1,8 +1,10 @@
 """Check a diff against a declared manifest and an allow/deny policy; shared by diff_manifest.py, push.py, merge.py.
 
-`check` is pure. `gate` is the one guarded call push.py and merge.py make: it reads the opt-in config keys
-`diff_manifest` (off|advisory|enforce, default advisory) and `diff_manifest_policy` (a JSON file), then warns or
-refuses. Trace rows are non-authoritative and fail open (Codex ships no trace_row, so the import is optional).
+`check` is pure. `violations` is the one policy evaluation every publication path shares: it reads the typed config
+keys `diff_manifest` (off|advisory|enforce, default enforce) and `diff_manifest_policy` (a JSON file; null means the
+shipped policy/diff-policy.default.json), then returns the refusals. `gate` raises on them (push.py), and
+publication_gate registers `violations` for merge.py and the direct-merge hooks. Trace rows are non-authoritative and
+fail open: a failure to write one never decides anything.
 """
 
 from __future__ import annotations
@@ -10,12 +12,15 @@ from __future__ import annotations
 import importlib
 import json
 import re
+import sys
 from pathlib import Path
 from typing import Any, cast
 
 from . import git_common as git
-from .config import config_path, config_value
+from .config import config_path, load_config
 
+DEFAULT_POLICY = Path(__file__).resolve().parents[2] / "policy" / "diff-policy.default.json"
+MODES = ("off", "advisory", "enforce")
 Changes = list[tuple[str, list[str]]]
 
 
@@ -84,13 +89,18 @@ def check(
     allow, deny = strings(policy.get("allow")), strings(policy.get("deny"))
     raw = policy.get("docs_sync")
     docs = cast(dict[str, Any], raw) if isinstance(raw, dict) else None
+    statuses, limit = strings(policy.get("statuses")), policy.get("max_paths")
     found: list[dict[str, str]] = []
 
     def add(code: str, path: str) -> None:
         if {"code": code, "path": path} not in found:
             found.append({"code": code, "path": path})
 
+    if isinstance(limit, int) and not isinstance(limit, bool) and len(changes) > limit:
+        add("too_many_paths", changes[limit][1][-1])
     for status, paths in changes:
+        if statuses and status[0] not in statuses:
+            add("status_not_allowed", paths[-1])
         for path in paths:
             if matches(path, deny):
                 add("denied_path", path)
@@ -123,11 +133,11 @@ def load_json(path: str | Path) -> dict[str, Any] | None:
     return cast(dict[str, Any], data) if isinstance(data, dict) else None
 
 
-def trace(label: str, outcome: str, code: str) -> None:
+def trace(label: str, outcome: str, code: str, command: str = "diff-manifest") -> None:
     """Append one non-authoritative row keyed by the label (repo and branch); never raises."""
-    try:  # Codex ships no trace_row: the sink is simply absent, and any failure is swallowed
+    try:  # both packages ship hooks/scripts/lib/trace_row.py; any failure to import or write is swallowed
         module = importlib.import_module("hooks.scripts.lib.trace_row")
-        module.append_row("diff-manifest", outcome, code, re.sub(r"[^A-Za-z0-9_.@-]", "_", label))
+        module.append_row(command, outcome, code, re.sub(r"[^A-Za-z0-9_.@-]", "_", label))
     except Exception:  # fail open: a trace row never decides anything
         return
 
@@ -142,42 +152,88 @@ def diff_changes(head: str, fetch: str = "") -> Changes | None:
     return None if result.returncode else parse_raw_z(result.stdout)
 
 
-def gate(pr: str = "") -> None:
-    """Opt-in additional check: no policy file or mode off does nothing; advisory warns; enforce raises.
+def unit_manifest(progress: str, unit: str) -> list[str] | None:
+    """The unit's manifest from progress.json: None when the unit has none; ValueError when the file is unusable."""
+    state = load_json(progress)
+    units = (state or {}).get("work_units")
+    if state is None or not isinstance(units, dict):
+        raise ValueError("progress unreadable")
+    entry = cast(dict[str, Any], units).get(unit)
+    return (strings(cast(dict[str, Any], entry).get("manifest")) or None) if isinstance(entry, dict) else None
 
-    With a PR number the diff is the PR's own head (fetched if absent); otherwise it is the local HEAD.
-    """
-    config = config_path()
-    mode = (config_value(config, "diff_manifest") if config else "") or "advisory"
-    policy_file = config_value(config, "diff_manifest_policy") if config else ""
-    if mode == "off" or not policy_file:
-        return
-    head = git.pr_field(pr, "headRefOid") if pr else "HEAD"
-    label = f"{git.repo()}@pr-{pr}" if pr else f"{git.repo()}@{git.branch()}"
-    try:  # advisory must never abort push or merge on an unexpected error
-        policy, changes = load_json(policy_file), diff_changes(head, f"pull/{pr}/head" if pr else "")
-        found: list[dict[str, str]] = []
-        if policy is None or changes is None or not isinstance(policy.get("manifest", []), list):
-            unreadable = True
-            found = [{"code": "manifest_unreadable", "path": policy_file}]
+
+def unit_flags(arguments: list[str]) -> tuple[list[str], str, str]:
+    """Split `--unit N --progress PATH` out of an argument list: (remaining arguments, unit, progress)."""
+    rest: list[str] = []
+    flags = {"--unit": "", "--progress": ""}
+    items = iter(arguments)
+    for argument in items:
+        if argument in flags:
+            flags[argument] = next(items, "")
         else:
-            unreadable = False
-            manifest = strings(policy["manifest"]) if "manifest" in policy else None
-            if manifest is None:
-                trace(label, "legacy", "manifest_legacy_absent")
-            linked = linked_worktree() if policy.get("require_linked_worktree") else None
-            found = check(changes, policy, manifest, linked)["violations"]
-    except Exception:  # fail open: a bug here is not a policy verdict
-        trace(label, "failed_open", "manifest_unreadable")
-        print("! diff_manifest manifest_unreadable: internal error")
-        return
+            rest.append(argument)
+    return rest, flags["--unit"], flags["--progress"]
+
+
+def settings() -> tuple[str, str, bool]:
+    """(mode, policy file, mode_invalid) from the typed config; no config file means the defaults."""
+    values, _ = load_config(config_path() or "")
+    mode = str(values.get("diff_manifest") or "enforce")
+    policy = str(values.get("diff_manifest_policy") or DEFAULT_POLICY)
+    return (mode if mode in MODES else "enforce"), policy, mode not in MODES
+
+
+def _evaluate(pr: str, head: str, policy_file: str, unit: str, progress: str, label: str) -> list[dict[str, str]]:
+    """Check the diff against the policy; unusable inputs yield one manifest_unreadable violation."""
+    policy = load_json(policy_file)
+    changes = diff_changes(head or (git.pr_field(pr, "headRefOid") if pr else "HEAD"), f"pull/{pr}/head" if pr else "")
+    if policy is None or changes is None or not isinstance(policy.get("manifest", []), list):
+        return [{"code": "manifest_unreadable", "path": policy_file}]
+    manifest = strings(policy["manifest"]) if "manifest" in policy else None
+    if unit and progress:
+        try:
+            manifest = unit_manifest(progress, unit) or manifest
+        except ValueError:
+            return [{"code": "manifest_unreadable", "path": progress}]
+    if manifest is None:
+        trace(label, "legacy", "manifest_legacy_absent")
+    linked = linked_worktree() if policy.get("require_linked_worktree") else None
+    return cast(list[dict[str, str]], check(changes, policy, manifest, linked)["violations"])
+
+
+def violations(pr: str = "", unit: str = "", progress: str = "", head: str = "") -> list[dict[str, str]]:
+    """Refusals as {code: "diff_manifest:<code>", detail}; off and advisory return none (advisory warns and traces).
+
+    With a PR number the diff is the PR's own head (fetched if absent); otherwise it is the local HEAD. An internal
+    error refuses with manifest_internal_error under enforce and fails open under advisory.
+    """
+    mode, policy_file, invalid = settings()
+    if mode == "off":
+        return []
+    label = f"{git.repo()}@pr-{pr}" if pr else f"{git.repo()}@{git.branch()}"
+    if invalid:
+        trace(label, "warned", "diff_manifest_mode_invalid")
+        print("! diff_manifest diff_manifest_mode_invalid: treated as enforce", file=sys.stderr)
+    try:
+        found = _evaluate(pr, head, policy_file, unit, progress, label)
+    except Exception:  # noqa: BLE001 - a bug here is manifest_internal_error, not a policy verdict
+        found = [{"code": "manifest_internal_error", "path": "internal error"}]
     if not found:
         trace(label, "ok", "diff_manifest_ok")
-        return
-    code = found[0]["code"]
+        return []
+    unusable = found[0]["code"].startswith("manifest_")
+    outcome = "refused" if mode == "enforce" else "failed_open" if unusable else "warned"
     for violation in found:
-        outcome = "refused" if mode == "enforce" else "failed_open" if unreadable else "warned"
         trace(label, outcome, violation["code"])
-        print(f"! diff_manifest {violation['code']}: {violation['path']}")
-    if mode == "enforce":
-        raise git.WorkflowError(f"diff_manifest:{code}")
+        # stderr, because stdout is a hook's JSON reply
+        print(f"! diff_manifest {violation['code']}: {violation['path']}", file=sys.stderr)
+    if mode != "enforce":
+        return []
+    return [{"code": f"diff_manifest:{v['code']}", "detail": v["path"]} for v in found]
+
+
+def gate(pr: str = "", unit: str = "", progress: str = "") -> None:
+    """Raise WorkflowError("diff_manifest:<code>") for the first refusal; push.py calls this before pushing."""
+    found = violations(pr, unit, progress)
+    if found:
+        raise git.WorkflowError(found[0]["code"])
