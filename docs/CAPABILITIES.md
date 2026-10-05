@@ -116,6 +116,24 @@ Codex's `mcpServers` handling could not be exercised offline here, so a native C
 shell off and no capability tools and must report file/history checks UNSUPPORTED; route real work through the role
 session.
 
+Stated limits of the Codex path (not hidden): (1) The role session is the built alternative, not a forced route. Nothing
+in the installer or the agent flow stops an orchestrator running a native Codex child or a plain `codex exec`, and Codex
+PreToolUse carries no `agent_type`, so no hook can backstop it; the plan accepts "separate contained sessions where a
+sandbox/MCP boundary is required" and the installer deliberately adds no per-role `mcpServers` block (it would be
+inherited by every native child). (2) `--ignore-user-config` skips `$CODEX_HOME/config.toml` only. Project `.codex/`
+config discovered from the cwd up to the repo root is NOT skipped, so the launcher refuses a `--cwd` (or working
+directory) whose tree holds a `.codex` directory; "exactly one `mcp_servers` entry" is then true of the effective
+config for that tree, and the live test observes the tools array for the repo cwd only. Project `AGENTS.md` still loads
+as instructions; it grants no tools.
+
+`subagent_identity_gate` is ON by default; `subagent_identity_gate: off` in `.coderails/workflow.config.yaml` disables
+it (any other value leaves it on). Trace rows `subagent_identity_gate/denied/bash_agent_type_absent` show it firing.
+
+`preflight-scout` keeps `Skill`. Skills such as `engineering-principles-*` declare `allowed-tools` that include Bash,
+Write and Edit. Whether invoking one grants a tool the subagent's `tools:` list omits is UNVERIFIED (no probe re-lists
+tools after a Skill call). If it did, the remaining controls are `reviewer_bash_allowlist` (agent_type present) and
+`subagent_identity_gate`; treat "no shell for preflight-scout" as probe-observed for the initial tools array only.
+
 **Codex observation.** `scripts/tests/codex_role_session_live_test.py` runs the real `codex exec` with the launcher's
 argv against a loopback Responses fixture that answers with an `exec_command` call. With the launcher's argv the request's
 `tools` array holds no `exec_command`/`write_stdin`, the call returns `unsupported call: exec_command`, and only the

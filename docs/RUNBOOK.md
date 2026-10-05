@@ -67,7 +67,9 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   preflight-scout). If the tools are missing entirely, `.claude-plugin/plugin.json` lacks `mcpServers` or
   `capabilities/mcp.json` is stale: run `python3 scripts/capability_profiles_validate.py --check`, and `--write-mcp` to
   regenerate. Codex: launch the role with `scripts/codex_role_session.py`; a native Codex child of a guarded role has no
-  shell and no capability tools.
+  shell and no capability tools. The launcher refuses a cwd under a project `.codex/` directory
+  (move the audit elsewhere or remove it). Set `subagent_identity_gate: off` in the repo config to disable the
+  identity gate (default ON).
 
 ## Capability tool refused or denied
 

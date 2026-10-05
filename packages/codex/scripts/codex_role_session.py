@@ -40,10 +40,24 @@ def guarded_roles(root: Path) -> set[str]:
         raise ValueError(f"capabilities/profiles.json unreadable or malformed: {error}") from error
 
 
+def project_codex_dir(start: Path) -> Path | None:
+    """The first `.codex` directory from start up to and including the repo root (the dir holding `.git`), if any."""
+    here = start.resolve()
+    for directory in (here, *here.parents):
+        if (directory / ".codex").exists():
+            return directory / ".codex"
+        if (directory / ".git").exists():
+            return None
+    return None
+
+
 def build_argv(role: str, root: Path, cwd: str | None = None) -> list[str]:
     """The exact command line; refuses any role that is not a guarded profile entry."""
     if not ROLE.match(role) or role not in guarded_roles(root):
         raise ValueError(f"{role!r} is not a guarded role in capabilities/profiles.json")
+    project_config = project_codex_dir(Path(cwd or os.getcwd()))
+    if project_config:
+        raise ValueError(f"{project_config} is project Codex config that --ignore-user-config does not skip")
     command = json.dumps(sys.executable)
     args = json.dumps([str(root / "scripts" / "capability_mcp.py"), "--role", role])
     # JSON string syntax is valid TOML basic-string syntax, so json.dumps quotes the inline table safely.

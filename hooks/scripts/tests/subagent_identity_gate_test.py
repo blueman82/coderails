@@ -88,6 +88,26 @@ class SubagentIdentityGateTests(HookCase):
         self.graph_bound()
         self.assertFalse(self.denied(HOOK, request(agent_id="a1") | {"tool_name": "Read"}))
 
+    def test_config_off_switch_disables_the_gate(self) -> None:
+        """`subagent_identity_gate: off` in the repo config lets the call through; unset or any other value stays ON."""
+        import subprocess
+
+        repo = self.directory / "repo"
+        repo.mkdir()
+        subprocess.run(["git", "init", "-q", "-b", "main", str(repo)], check=True)
+        (repo / ".coderails").mkdir()
+        body = request(agent_id="a1") | {"cwd": str(repo)}
+        with patch.dict(os.environ, {"CLAUDE_AGENTIC_LOOP_DIR": str(self.loop)}):
+            path = resolve_path(str(repo), SESSION)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"session_id": SESSION, "graph": {"nodes": {}}}))
+        config = repo / ".coderails/workflow.config.yaml"
+        cases = (("", True), ("subagent_identity_gate: on\n", True), ("subagent_identity_gate: off\n", False))
+        for line, expect in cases:
+            with self.subTest(config=line):
+                config.write_text(line)
+                self.assertEqual(self.denied(HOOK, body), expect)
+
     def test_malformed_payload_does_not_crash(self) -> None:
         """A non-object or garbage payload exits 0 with no decision (the harness treats a crash as allow anyway)."""
         for raw in ("", "not json", "[]"):

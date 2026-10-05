@@ -133,6 +133,18 @@ class EnvAndRunTests(IsolatedTrace):
             run.assert_not_called()
             self.assertIn("not a guarded role", err.getvalue())
 
+    def test_project_codex_config_in_cwd_is_refused(self) -> None:
+        """--ignore-user-config keeps project .codex/ config: a cwd tree (to the repo root) holding one is refused."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / ".git").mkdir()
+            sub = root / "a" / "b"
+            sub.mkdir(parents=True)
+            self.assertIn("-C", crs.build_argv("source-auditor", REPO, str(sub)))  # negative control: clean tree passes
+            (root / ".codex").mkdir()
+            with self.assertRaises(ValueError):
+                crs.build_argv("source-auditor", REPO, str(sub))
+
 
 if __name__ == "__main__":
     unittest.main()

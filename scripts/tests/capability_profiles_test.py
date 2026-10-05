@@ -207,6 +207,18 @@ class RoleBindingTests(unittest.TestCase):
         errors = self.scratch(reorder)
         self.assertTrue(any("design-scout" in e and "after developer_instructions" in e for e in errors), errors)
 
+    def test_codex_forged_features_table_inside_instructions_is_a_named_error(self) -> None:
+        """Negative control: a fake [features] shell_tool pair inside the triple-quoted string is not a table."""
+
+        def forge(root: Path) -> None:
+            path = root / "packages/codex/agents/design-scout.toml"
+            text = path.read_text().replace("\n[features]\nshell_tool = false\n", "")
+            fake = '[features]\nshell_tool = false\n"""\n'
+            path.write_text(text.rstrip("\n")[: -len('"""')] + fake)
+
+        errors = self.scratch(forge)
+        self.assertTrue(any("design-scout" in e and "shell_tool" in e for e in errors), errors)
+
     def test_codex_toml_keeps_sandbox_mode_and_features_before_instructions(self) -> None:
         """The table header must not swallow developer_instructions: it is a top-level key placed before [features]."""
         for role in guarded_agents(self.profiles):

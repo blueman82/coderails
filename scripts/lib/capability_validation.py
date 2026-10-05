@@ -121,11 +121,17 @@ def length_errors(name: str, caps: list[str]) -> list[str]:
 
 
 def codex_errors(name: str, text: str) -> list[str]:
-    """A guarded Codex agent must switch the shell tool off; sandbox_mode alone does not bind a child."""
+    """A guarded Codex agent must switch the shell tool off; sandbox_mode alone does not bind a child.
+
+    Multi-line strings are blanked first so a forged `[features]` / `sandbox_mode` line inside developer_instructions
+    cannot satisfy the line checks (tomllib is not available on every supported Python).
+    """
+    text = re.sub(r'(?s)""".*?"""|\'\'\'.*?\'\'\'', '""', text)
     on = re.search(r"(?ms)^\[features\]\s*\n(.*?)(?=^\[|\Z)", text)
     if not on or not re.search(r"(?m)^shell_tool\s*=\s*false\s*$", on.group(1)):
         return [f"codex: {name} guarded agent needs [features] shell_tool = false"]
-    if "developer_instructions" in text and text.index("developer_instructions") > on.start():
+    key = re.search(r"(?m)^developer_instructions\s*=", text)
+    if key and key.start() > on.start():
         return [f"codex: {name} [features] must come after developer_instructions (a table before it swallows the key)"]
     if not re.search(r'(?m)^sandbox_mode\s*=\s*"read-only"', text):
         return [f'codex: {name} guarded agent must keep sandbox_mode = "read-only"']
