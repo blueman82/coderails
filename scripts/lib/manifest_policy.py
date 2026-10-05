@@ -80,7 +80,7 @@ def strings(value: object) -> list[str]:
 def check(
     changes: Changes, policy: dict[str, Any], manifest: list[str] | None = None, linked: bool | None = None
 ) -> dict[str, Any]:
-    """Return {ok, violations[{code, path}]} for name-status changes; every rename path is checked."""
+    """Return {ok, violations[{code, path}]} for parsed changes; every rename path is checked."""
     allow, deny = strings(policy.get("allow")), strings(policy.get("deny"))
     raw = policy.get("docs_sync")
     docs = cast(dict[str, Any], raw) if isinstance(raw, dict) else None
@@ -133,7 +133,7 @@ def trace(label: str, outcome: str, code: str) -> None:
 
 
 def diff_changes(head: str, fetch: str = "") -> Changes | None:
-    """Return name-status changes for origin/<main>...head, or None when the diff cannot be computed."""
+    """Return parsed raw -z changes for origin/<main>...head, or None when the diff cannot be computed."""
     if fetch and git.run("git", "cat-file", "-e", head).returncode:
         git.run("git", "fetch", "-q", "origin", fetch)
     if not head:
