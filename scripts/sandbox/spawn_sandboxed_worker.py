@@ -18,6 +18,7 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -33,6 +34,15 @@ from scripts.sandbox.render_settings import render_settings
 
 PROTECTED = ("main", "master")
 PASS_THROUGH = ("PATH", "LANG", "TERM")
+SECRET_PATTERNS = tuple(
+    (name, re.compile(regex))
+    for name, regex in (
+        ("an Anthropic key", r"sk-ant-[A-Za-z0-9_-]{20,}"),
+        ("a GitHub token", r"(?:gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,})"),
+        ("an AWS access key id", r"AKIA[0-9A-Z]{16}"),
+        ("a private key", r"-----BEGIN [A-Z ]*PRIVATE KEY-----"),
+    )
+)
 GIT_SAFE = ["-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null"]  # the clone's config is worker-written
 
 
@@ -123,8 +133,21 @@ def stream_child(arguments: list[str], cwd: str, env: dict[str, str], log: IO[by
     return code if code >= 0 else 128 - code
 
 
-def import_and_push(worktree: str, clone: Path, branch: str, before: dict[str, str]) -> None:
-    """Fast-forward the worktree branch to the clone's, refusing any other moved branch; then push it."""
+def committed_secret(clone: Path, old: str | None, new: str, credential_value: str) -> str | None:
+    """Name of the first secret found in any line the worker added between old and new (all commits), else None."""
+    revisions = f"{old}..{new}" if old else new
+    added = git(clone, "log", "-p", "--format=", "--no-textconv", "--no-ext-diff", revisions, hardened=True)
+    lines = [line[1:] for line in added.splitlines() if line.startswith("+") and not line.startswith("+++")]
+    text = "\n".join(lines)
+    if credential_value and credential_value in text:
+        return "the worker credential"
+    return next((name for name, pattern in SECRET_PATTERNS if pattern.search(text)), None)
+
+
+def import_and_push(
+    worktree: str, clone: Path, branch: str, before: dict[str, str], credential_value: str = ""
+) -> None:
+    """Fast-forward the worktree branch to the clone's, refusing any other moved branch or committed secret; push it."""
     after = branch_heads(clone)
     moved = sorted(name for name in before.keys() | after.keys() if before.get(name) != after.get(name))
     other = [name for name in moved if name != f"refs/heads/{branch}"]
@@ -132,6 +155,10 @@ def import_and_push(worktree: str, clone: Path, branch: str, before: dict[str, s
         raise refuse("branch_import_refused", f"worker moved {', '.join(other)}; only {branch} may change")
     if not moved:
         return
+    ref = f"refs/heads/{branch}"
+    found = committed_secret(clone, before.get(ref), after[ref], credential_value)
+    if found:
+        raise refuse("branch_import_refused", f"secret found in the worker's commits ({found}); nothing pushed")
     private = f"refs/coderails/import/{branch}"
     try:
         git(worktree, "fetch", "--quiet", str(clone), f"+refs/heads/{branch}:{private}")
@@ -199,7 +226,7 @@ def launch(worktree: str, prompt_file: str, model: str) -> int:
     if code:
         print(f"spawn-sandboxed-worker: worker exited {code}; nothing imported, work left in {clone}", file=sys.stderr)
         return code
-    import_and_push(worktree, clone, branch, before)
+    import_and_push(worktree, clone, branch, before, credential[1])
     return 0
 
 

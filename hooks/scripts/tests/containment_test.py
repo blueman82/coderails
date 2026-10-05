@@ -156,6 +156,28 @@ class ResolveTableTests(unittest.TestCase):
             (["*"], True),
             (["./agents/loop-worker.md"], True),
             ([], True),
+            # normalisation holes: traversal, absolute, case, brace globs, backslash and non-ASCII are all high risk
+            (["src/../hooks/x.py"], True),
+            (["docs/../scripts/a"], True),
+            (["docs/*/../../hooks/a"], True),
+            (["./docs/../scripts/x"], True),
+            (["/abs/hooks/x"], True),
+            (["Hooks/x.py"], True),
+            (["{hooks,docs}/x"], True),
+            (["hooks\\x.py"], True),
+            (["ho​oks/x.py"], True),
+            # trees that govern or execute the control
+            ([".coderails/workflow.config.yaml"], True),
+            (["workflow.config.yaml"], True),
+            (["skills/agentic-loop/SKILL.md"], True),
+            (["commands/init.md"], True),
+            ([".github/workflows/ci.yml"], True),
+            (["install.sh"], True),
+            (["AGENTS.md"], True),
+            (["CLAUDE.md"], True),
+            (["packages/codex/scripts/x.py"], True),
+            (["packages/codex/agents/loop-worker.toml"], True),
+            (["docs/a.md", "src/b.py"], False),
         ):
             with self.subTest(manifest=manifest):
                 self.assertIs(containment.is_high_risk(manifest), risky)

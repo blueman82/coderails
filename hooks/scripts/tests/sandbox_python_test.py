@@ -256,6 +256,23 @@ class LauncherFlowTests(unittest.TestCase):
         self.assertEqual(self.refs(self.primary), before)
         self.assertEqual(git(self.origin, "for-each-ref", "refs/heads"), pushed)
 
+    def test_committed_credential_is_refused_before_import_and_push(self) -> None:
+        """A worker that commits the worker credential (or a secret pattern) cannot get it pushed to origin."""
+        for secret in ("sk-worker", "ghp_" + "a" * 36, "-----BEGIN OPENSSH PRIVATE KEY-----"):
+            with self.subTest(secret=secret[:8]):
+                before, pushed = self.refs(self.primary), git(self.origin, "for-each-ref", "refs/heads")
+
+                def worker(clone: Path, secret: str = secret) -> None:
+                    git(clone, "checkout", "-q", "-B", "feature/x")
+                    (clone / "leak.txt").write_text(f"key={secret}\n")
+                    git(clone, "add", "leak.txt")
+                    git(clone, "commit", "-q", "-m", "leak")
+
+                with self.assertRaisesRegex(ValueError, "branch_import_refused.*secret"):
+                    self.run_launcher(worker)
+                self.assertEqual(self.refs(self.primary), before)
+                self.assertEqual(git(self.origin, "for-each-ref", "refs/heads"), pushed)
+
     def test_main_worktree_and_rewritten_history_are_refused(self) -> None:
         """A launch on main is refused up front; a worker that rewrites the branch cannot fast-forward the import."""
         with self.assertRaisesRegex(ValueError, "branch_import_refused"):

@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 import os
 import platform
+import posixpath
 import shutil
 import sys
 from collections.abc import Callable
@@ -40,10 +41,17 @@ HIGH_RISK_PREFIXES = (
     "scripts/",
     "capabilities/",
     "agents/",
+    "skills/",
+    "commands/",
     ".claude-plugin/",
-    "packages/codex/hooks",
+    ".coderails/",
+    ".github/",
+    "packages/codex/",
+    "workflow.config",
     "config.schema.json",
-    "packages/codex/config.schema.json",
+    "install.sh",
+    "agents.md",
+    "claude.md",
 )
 
 
@@ -117,13 +125,17 @@ def main(arguments: list[str] | None = None) -> int:
     return 0
 
 
-def _literal_prefix(entry: str) -> str:
-    """The glob-free head of a manifest entry ('./' removed): 'src/**' -> 'src/'."""
+def _literal_prefix(entry: str) -> str | None:
+    """The glob-free, normalised, casefolded head of a manifest entry ('src/**' -> 'src'); None if it cannot be trusted.
+
+    Absolute paths, '..' components, backslashes and non-ASCII text are untrustworthy (None = high risk).
+    """
     text = entry.strip()
-    while text.startswith("./"):
-        text = text[2:]
-    cut = min((i for i in (text.find(c) for c in "*?[") if i >= 0), default=len(text))
-    return text[:cut]
+    if not text.isascii() or "\\" in text or text.startswith("/") or ".." in text.split("/"):
+        return None
+    cut = min((i for i in (text.find(c) for c in "*?[{") if i >= 0), default=len(text))
+    head = posixpath.normpath(text[:cut]) if text[:cut] else ""
+    return "" if head == "." else head.casefold()
 
 
 def is_high_risk(manifest: list[str]) -> bool:
@@ -131,7 +143,7 @@ def is_high_risk(manifest: list[str]) -> bool:
     if not manifest:
         return True
     heads = [_literal_prefix(entry) for entry in manifest]
-    return any(p.startswith(head) or head.startswith(p) for head in heads for p in HIGH_RISK_PREFIXES)
+    return any(head is None or p.startswith(head) or head.startswith(p) for head in heads for p in HIGH_RISK_PREFIXES)
 
 
 if __name__ == "__main__":
