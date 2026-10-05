@@ -132,6 +132,16 @@ class VerifyMergedTests(VerifyMergedCase):
         self.assertEqual((code, verdict["confirmed"]), (1, False))
         self.assertIn("content_absent", verdict["reasons"])
 
+    def test_needle_already_on_the_base_parent_is_not_proof_of_this_pr(self) -> None:
+        """A string present before the PR (here `base`, in a.txt) must not confirm a MERGED PR."""
+        for squash in (True, False):
+            with self.subTest(squash=squash):
+                self.setUp()
+                merge_commit = self.land(squash=squash)
+                code, verdict = self.verify(merge_commit, "MERGED", "2026-10-01T00:00:00Z", "--grep", "base")
+                self.assertEqual((code, verdict["confirmed"]), (1, False))
+                self.assertIn("content_preexisting", verdict["reasons"])
+
     def test_every_verdict_writes_one_trace_row(self) -> None:
         """Confirmed -> verify-merged/ok/verified; refused -> verify-merged/refused/<first reason>."""
         merge_commit = self.land(squash=True)

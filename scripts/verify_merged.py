@@ -2,9 +2,11 @@
 """Confirm a PR really landed: `verify_merged.py <PR> [--grep STR --path P] [--repo DIR]` prints a JSON verdict.
 
 One rule set for merge commits and squash merges: state MERGED plus mergedAt; fetch the base; the mergeCommit is
-reachable from origin/<base>; then content (`git grep` at origin/<base>). Ancestry of the PR head is trusted only for a
-true merge commit (two parents) and only when no content check was given; a squash rewrites the SHA, so it is never
-required of one. Exit 0 when confirmed, 1 otherwise. `method` is `content` or `merge-commit-ancestry`.
+reachable from origin/<base>; then content (`git grep` finds the needle at origin/<base> and not at the merge commit's
+first parent, so the needle must be unique to the change; a pre-existing string is refused as content_preexisting).
+Ancestry of the PR head is trusted only for a true merge commit (two parents) and only when no content check was
+given; a squash rewrites the SHA, so it is never required of one.
+Exit 0 when confirmed, 1 otherwise. `method` is `content` or `merge-commit-ancestry`.
 """
 
 from __future__ import annotations
@@ -68,7 +70,11 @@ def verify(repo: Path, number: str, needle: str, path: str) -> dict[str, object]
     if needle:
         found = run(repo, "git", "grep", "-q", "-F", "-e", needle, tip, *(["--", path] if path else []))
         verdict["content_found"] = found.returncode == 0
-        if found.returncode == 0:
+        # the needle must be new in this PR: present at the base parent means it proves nothing about the change
+        before = run(repo, "git", "grep", "-q", "-F", "-e", needle, f"{oid}^1", *(["--", path] if path else []))
+        if found.returncode == 0 and before.returncode == 0:
+            reasons.append("content_preexisting")
+        elif found.returncode == 0:
             verdict.update(confirmed=True, method="content")
         else:
             reasons.append("content_absent")
@@ -95,7 +101,11 @@ def main(argv: list[str] | None = None) -> int:
     """CLI entry."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("pr")
-    parser.add_argument("--grep", default="", help="string unique to the change, searched at origin/<base>")
+    parser.add_argument(
+        "--grep",
+        default="",
+        help="string unique to the change: present at origin/<base>, absent at the merge commit's first parent",
+    )
     parser.add_argument("--path", default="", help="limit the grep to this path")
     parser.add_argument("--repo", type=Path, default=Path.cwd())
     args = parser.parse_args(argv)
