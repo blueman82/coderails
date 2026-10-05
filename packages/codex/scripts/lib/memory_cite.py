@@ -14,7 +14,7 @@ from __future__ import annotations
 import re
 from typing import Any, Protocol, cast
 
-QUOTE_MIN, QUOTE_MAX = 12, 300
+QUOTE_MIN, QUOTE_MAX, APPROVAL_MAX = 12, 300, 80
 REF = re.compile(r"(claude|codex):(.+):(\d+)\.(\d+)")
 
 
@@ -86,7 +86,7 @@ def role_of(payload: dict[str, Any], ref: str) -> tuple[str, str]:
 def approved_reply(payload: dict[str, Any], approval_ref: str) -> tuple[str, str, str] | str:
     """Resolve an approval prompt to (reply_ref, reply_quote, approval_quote), or a reason code.
 
-    The approval must be a user prompt and a reply must precede it in the session.
+    The approval must be a short user prompt, and the reply must be the event right before it (no user prompt between).
     """
     if role_of(payload, approval_ref) != ("user", "prompt"):
         return "cite_not_user" if role_of(payload, approval_ref) != ("", "") else "cite_unresolved"
@@ -96,4 +96,32 @@ def approved_reply(payload: dict[str, Any], approval_ref: str) -> tuple[str, str
         return "cite_unresolved"
     reply = max(replies, key=lambda e: _key(str(e["ref"])))
     approval = next(e for e in _events(payload) if e.get("ref") == approval_ref)
+    between = [e for e in _events(payload) if _key(str(reply["ref"])) < _key(str(e.get("ref"))) < here]
+    user_between = any(role_of(payload, str(e.get("ref"))) == ("user", "prompt") for e in between)
+    if user_between or len(_text(approval)) > APPROVAL_MAX:
+        return "cite_bad_approval"  # not adjacent to the reply it answers, or too long to be an approval
     return str(reply["ref"]), _text(reply)[:QUOTE_MAX], _text(approval)[:QUOTE_MAX]
+
+
+def prompt_has(payload: dict[str, Any], quote: str) -> bool:
+    """True when `quote` sits inside a user prompt of the session payload (the caller's own session)."""
+    want = collapse(quote)
+    return bool(want) and any(
+        (e.get("role"), e.get("kind")) == ("user", "prompt") and want in _text(e) for e in _events(payload)
+    )
+
+
+def resolve(r: Any, payload: dict[str, Any], approval: bool, session_id: str) -> str | None:  # noqa: ANN401
+    """Set the record's cite role/kind (and an approval's reply) from the caller's session; a reason code on refusal."""
+    if r.cite and session_of(r.cite) != session_id:
+        return "cite_not_own_session"  # only the caller's own session may anchor a write
+    if not r.cite:
+        r.cite_role, r.cite_kind = ("user", "prompt") if prompt_has(payload, r.quote) else ("", "")
+        return None
+    r.cite_role, r.cite_kind = role_of(payload, r.cite)
+    if approval and (r.cite_role, r.cite_kind) == ("user", "prompt"):
+        got = approved_reply(payload, r.cite)
+        if isinstance(got, str):
+            return got
+        r.reply_cite, r.reply_quote, r.quote = got
+    return None

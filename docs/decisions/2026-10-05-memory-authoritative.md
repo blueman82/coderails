@@ -41,6 +41,20 @@ stored with `confidence=inferred`; Muninn marks them pull-only, which is correct
 - Cooperating-agent boundary: library callers declare the cite role; the CLI verifies it from the session. Muninn
   re-verifies every quote against the transcript, but a caller that lies about a ref it controls is not stopped. This
   is a cooperating-agent safeguard, not a security boundary.
+- Own session only: the CLI resolves every add (quote-only too) from `muninn session <caller session id>`. A cite ref
+  in another session is `cite_not_own_session`; a quote-only quote must sit inside a user prompt of the caller's
+  session (else `cite_not_user`); an approval must be a prompt of 80 chars or fewer directly after the reply
+  (`cite_bad_approval`). The library default for `Record.cite_role/cite_kind` is empty (`cite_not_user`), so a
+  programmatic caller must declare the anchor. Not stopped: text an agent injected that the transcript records as a
+  user prompt of the caller's own session (hook or tool output), and an approval that is short and adjacent but about
+  something else (the claim is not bound to the reply text).
+- Same-user boundaries: the agent can run `muninn know add|retract` directly, bypassing the adapter (readers only check
+  a non-empty cite and quote, not the anchor), and can set `memory.backend: off` in the workflow config. The off switch
+  is visible (`memory_backend_off` degrade and a trace row) but not gated. No Bash-gate denial for direct muninn writes
+  is built; this is not a security boundary.
+- Supersede and contradict: `--supersedes`/`--contradicts` must be `K<n>` (`bad_record` otherwise). Muninn itself
+  refuses a supersede across scopes (`refused_bad_supersedes`); inside one scope a user-quoted record can retire a
+  standing order, which is intended. `list_records` keeps only entries of the requested scope (global for `user`).
 - Contract parity: `scripts/tests/muninn_contract_test.py` runs the same scenario table against the real `muninn`
   (temp `MUNINN_HOME`, `MUNINN_ROOTS`, `HOME`) and the sqlite fake, so the fake cannot drift unnoticed. It is skipped,
   with a message, only when `muninn` is not on PATH or lacks the Part A flags. It never touches the live store.

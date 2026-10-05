@@ -79,8 +79,8 @@ class Record:
     sensitivity: str = "normal"
     id: str | None = None
     created_at: str | None = None
-    cite_role: str = "user"  # declared anchor of `cite`; the CLI resolves it from the session
-    cite_kind: str = "prompt"
+    cite_role: str = ""  # declared anchor of `cite`; empty is cite_not_user. The CLI resolves it from the session
+    cite_kind: str = ""
     reply_cite: str = ""  # approved_reply form: the proposing reply (cite/quote then hold the approval)
     reply_quote: str = ""
 
@@ -100,6 +100,7 @@ def validate(r: Record) -> str | None:
         and (r.valid_until is None or DATE.fullmatch(r.valid_until) is not None)
         and all(TAG.fullmatch(t) for t in r.tags)
         and (r.scope != "loop" or bool(r.loop_id))
+        and all(k is None or KID.fullmatch(k) for k in (r.supersedes, r.contradicts))
     )
     return memory_cite.check(r) if ok else "bad_record"
 
@@ -264,6 +265,9 @@ def list_records(
                 continue  # fail closed: anything not provably normal and current is dropped
             if not cites or not str(cites[0].get("ref", "")).strip() or not str(cites[0].get("quote", "")).strip():
                 continue  # uncited is never current
+            label = e.get("scope")  # without --scope-loop muninn lists global plus repo: keep the asked scope
+            if scope in ("project", "repository") and label == "global" or scope == "user" and label != "global":
+                continue
             if tags and not set(tags) <= set(e.get("tags") or []):
                 continue
             if wanted is not None and str(e["id"]) not in wanted:
@@ -321,9 +325,9 @@ def write_view(path: Path, text: str, session_id: str = "") -> Degraded | None:
 
 
 def resolve_cite(r: Record, approval: bool, session_id: str = "") -> Degraded | None:
-    """CLI path: set the cite role/kind (and for an approval the preceding reply) from `muninn session <root>`."""
+    """CLI path: set the cite role/kind (and an approval's reply) from the caller's own `muninn session <id>`."""
     down = probe()
-    root = memory_cite.session_of(r.cite)
+    root = memory_cite.session_of(r.cite) if r.cite else session_id
     out = down or (_run(["session", root]) if root else Degraded("cite_unresolved"))
     if isinstance(out, Degraded):
         return _fail("add", out, session_id, r.loop_id)
@@ -331,13 +335,8 @@ def resolve_cite(r: Record, approval: bool, session_id: str = "") -> Degraded | 
         payload = cast("dict[str, Any]", json.loads(out))
     except ValueError:
         return _fail("add", "muninn_error", session_id, r.loop_id)
-    r.cite_role, r.cite_kind = memory_cite.role_of(payload, r.cite)
-    if approval and (r.cite_role, r.cite_kind) == ("user", "prompt"):
-        got = memory_cite.approved_reply(payload, r.cite)
-        if isinstance(got, str):
-            return _fail("add", got, session_id, r.loop_id)
-        r.reply_cite, r.reply_quote, r.quote = got
-    return None
+    bad = memory_cite.resolve(r, payload, approval, session_id)
+    return _fail("add", bad, session_id, r.loop_id) if bad else None
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -354,7 +353,8 @@ def main(argv: list[str] | None = None) -> int:
     for flag in ("--confidence", "--valid-until", "--supersedes", "--contradicts", "--query"):
         ap.add_argument(flag)
     ap.add_argument("--tag", action="append", default=[])
-    ap.add_argument("--session", default=os.environ.get("CLAUDE_SESSION_ID", ""))
+    sid = os.environ.get("CLAUDE_SESSION_ID") or os.environ.get("CLAUDE_CODE_SESSION_ID", "")
+    ap.add_argument("--session", default=sid)
     ap.add_argument("--memory-md", action="store_true")
     ap.add_argument("--standing-orders", action="store_true")
     ap.add_argument("--write", metavar="PATH")
@@ -367,8 +367,7 @@ def main(argv: list[str] | None = None) -> int:
         rec = Record(a.scope, a.type or "", a.claim or "", a.approval or a.cite, a.quote, tags, a.loop)
         for name in ("confidence", "valid_until", "supersedes", "contradicts"):
             setattr(rec, name, getattr(a, name))
-        if rec.cite:
-            res = resolve_cite(rec, bool(a.approval), a.session)
+        res = resolve_cite(rec, bool(a.approval), a.session)  # always: a quote-only cite is verified too
         res = res or add(rec, a.session)
     else:
         found = list_records(a.scope, a.loop, "lesson" if a.standing_orders else a.type, tags, a.query, a.session)

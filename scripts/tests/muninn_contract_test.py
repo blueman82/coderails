@@ -232,12 +232,30 @@ class Contract(unittest.TestCase):
             ma.PROBE_CACHE.clear()
             self.addCleanup(ma.PROBE_CACHE.clear)
             self.assertIsNone(ma.probe())
-            rec = ma.Record("loop", "lesson", "adapter on real", f"claude:{SESSION}:1.1", PROMPT, loop_id="L1")
+            rec = ma.Record(
+                "loop",
+                "lesson",
+                "adapter on real",
+                f"claude:{SESSION}:1.1",
+                PROMPT,
+                loop_id="L1",
+                cite_role="user",
+                cite_kind="prompt",
+            )
             self.assertEqual(ma.add(rec, "s1"), ma.Written("K1"))
             got = ma.list_records("loop", "L1")
             assert isinstance(got, list)
             self.assertEqual([(r.id, r.cite) for r in got], [("K1", f"claude:{SESSION}:1.1")])
-            short = ma.Record("loop", "decision", "x", f"claude:{SESSION}:3.1", "yes", loop_id="L1")
+            short = ma.Record(
+                "loop",
+                "decision",
+                "x",
+                f"claude:{SESSION}:3.1",
+                "yes",
+                loop_id="L1",
+                cite_role="user",
+                cite_kind="prompt",
+            )
             self.assertEqual(ma.add(short, "s1"), ma.Degraded("refused_approval_needs_reply"))
             self.assertEqual([r.id for r in ma.list_records("loop", "L1", query="adapter")], ["K1"])  # type: ignore[union-attr]
 

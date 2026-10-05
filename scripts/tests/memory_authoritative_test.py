@@ -216,7 +216,7 @@ class RefusalMapping(Base):
         p = subprocess.run([*base, "--cite", REPLY, "--quote", PROPOSAL], capture_output=True, text=True)
         self.assertEqual((p.returncode, json.loads(p.stdout)), (3, {"degraded": "cite_not_user"}))
         p = subprocess.run([*base, "--cite", "claude:nope:1.1", "--quote", PROMPT], capture_output=True, text=True)
-        self.assertEqual(json.loads(p.stdout), {"degraded": "cite_not_user"})  # unknown session: no verified anchor
+        self.assertEqual(json.loads(p.stdout), {"degraded": "cite_not_own_session"})  # another session never anchors
 
 
 class UserAnchoredCites(Base):
