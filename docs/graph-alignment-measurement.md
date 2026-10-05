@@ -185,6 +185,14 @@ python3 -m unittest hooks.scripts.tests.eval_integrity_test hooks.scripts.tests.
 PYTHONPATH=. python3 -m unittest packages/tests/test_codex_grading_encoding.py
 ```
 
+## External enforcement counters
+
+`python3 scripts/measure_graph_alignment.py --root . --json` reports `external_enforcement`
+(`events`, `duplicates`, `malformed`, `by_reason` keyed `command/REASON_CODE`), read from
+`<loop-state-root>/external-enforcement/trace.jsonl` and deduped by `event_id`. Rows are advisory and fail-open.
+Counters live in `scripts/enforcement_trace.py` because `measure_graph_alignment.py` sits at the 400-line limit.
+Reproduce: `python3 scripts/tests/measure_graph_alignment_test.py`.
+
 ## Stale mkdir lock recovery (runbook)
 
 Before this change a SIGKILLed hook left `progress.json.lock` (or `verification-ceiling/*.count.lock`) behind

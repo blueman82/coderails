@@ -1,8 +1,5 @@
 #!/usr/bin/env python3
-"""Measure provider graph-alignment evidence: hook counts, bootstrap bytes, gate telemetry, state divergence.
-
-Read-only. Emits counts and paths only; never reads or prints transcript, prompt or log-message content.
-"""
+"""Measure graph-alignment evidence (read-only): counts and paths only, never transcript, prompt or log content."""
 
 from __future__ import annotations
 
@@ -15,6 +12,9 @@ import subprocess
 import sys
 from pathlib import Path
 from typing import Any, cast
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from scripts.enforcement_trace import enforcement_counts
 
 HOOK_FIELD = re.compile(r"(?:^|\s)hook=([A-Za-z0-9_.-]+)")
 FLAG_FIELDS = ("blocked", "would_block", "warned", "demoted")
@@ -204,9 +204,7 @@ def trace_counts() -> dict[str, Any]:
     seen: set[str] = set()
     by_reason: dict[str, int] = {}
     rows = duplicates = malformed = 0
-    files: set[Path] = set()
-    for base in loop_state_roots():
-        files.update(p.resolve() for p in base.glob("*/trace.jsonl"))
+    files = {p.resolve() for base in loop_state_roots() for p in base.glob("*/trace.jsonl")}
     for path in sorted(files):
         try:
             lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
@@ -227,8 +225,7 @@ def trace_counts() -> dict[str, Any]:
                 rows += 1
                 key = f"{row.get('command')}/{row.get('outcome')}/{row.get('reason_code')}"
                 by_reason[key] = by_reason.get(key, 0) + 1
-    counts = {"rows": rows, "duplicates": duplicates, "malformed": malformed}
-    return {**counts, "by_reason": dict(sorted(by_reason.items()))}
+    return dict(rows=rows, duplicates=duplicates, malformed=malformed, by_reason=dict(sorted(by_reason.items())))
 
 
 def recovery_counters() -> dict[str, Any]:
@@ -378,6 +375,7 @@ def measure(root: Path, extra_traces: list[Path] | None = None) -> dict[str, Any
         "duplication": duplication(root),
         "lock_events": lock_events(),
         "eval_trace": eval_trace_counts(extra_traces or []),
+        "external_enforcement": enforcement_counts(loop_state_roots()),
     }
 
 
