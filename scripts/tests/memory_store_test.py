@@ -29,11 +29,13 @@ from scripts.tests.fake_muninn_case import LATER, PROMPT, PROPOSAL, SESSION, Sto
 
 
 class AdapterOverFakeStore(StoreCase):
-    """The existing adapter, unchanged, against the fake."""
+    """The adapter against the fake; the store exists first (probe() reads its schema, as after `muninn ingest`)."""
+
+    with_store = True
 
     def test_round_trip(self) -> None:
         """(a) add then list returns the K-id, cite ref and quote."""
-        self.assertIsNone(ma.add(self.record("Run targeted tests first", tags=["run-a"])))
+        self.written(ma.add(self.record("Run targeted tests first", tags=["run-a"])))
         (got,) = self.listed()
         self.assertEqual(
             (got.id, got.cite, got.quote, got.claim),
@@ -43,8 +45,8 @@ class AdapterOverFakeStore(StoreCase):
 
     def test_restart_keeps_ids_cites_quotes(self) -> None:
         """(b) a fresh process with a cleared probe cache sees the same rows."""
-        self.assertIsNone(ma.add(self.record("first")))
-        self.assertIsNone(ma.add(self.record("second", quote=LATER, cite=f"claude:{SESSION}:4.1")))
+        self.written(ma.add(self.record("first")))
+        self.written(ma.add(self.record("second", quote=LATER, cite=f"claude:{SESSION}:4.1")))
         before = [(r.id, r.cite, r.quote) for r in self.listed()]
         ma.PROBE_CACHE.clear()
         p = subprocess.run(
@@ -60,8 +62,8 @@ class AdapterOverFakeStore(StoreCase):
 
     def test_search_finds_only_the_written_record(self) -> None:
         """(c) a claim word reaches knowledge through `search --all-projects` and matches one record only."""
-        self.assertIsNone(ma.add(self.record("zebrafish migration notes")))
-        self.assertIsNone(ma.add(self.record("unrelated adapter lesson")))
+        self.written(ma.add(self.record("zebrafish migration notes")))
+        self.written(ma.add(self.record("unrelated adapter lesson")))
         rc, out = self.muninn("search", "zebrafish", "--all-projects")
         self.assertEqual(rc, 0)
         self.assertEqual([k["id"] for k in out["knowledge"]], ["K1"])
@@ -73,7 +75,7 @@ class AdapterOverFakeStore(StoreCase):
         self.assertEqual((rc, out), (2, {"error": "bad_valid_until"}))
         self.assertEqual(self.listed(), [])
         future = time.strftime("%Y-%m-%d", time.gmtime(time.time() + 86400 * 400))
-        self.assertIsNone(ma.add(self.record("fresh", valid_until=future)))
+        self.written(ma.add(self.record("fresh", valid_until=future)))
         (got,) = self.listed()
         self.assertEqual(got.valid_until, f"{future}T00:00:00Z")
         self.sql("UPDATE knowledge SET valid_until = ? WHERE id = 1", time.time() - 60)
@@ -92,8 +94,8 @@ class AdapterOverFakeStore(StoreCase):
 
     def test_supersession(self) -> None:
         """(f) K2 supersedes K1: only K2 is listed and `know show K1` reports superseded_by=K2."""
-        self.assertIsNone(ma.add(self.record("v1 wording")))
-        self.assertIsNone(ma.add(self.record("v2 wording", supersedes="K1")))
+        self.written(ma.add(self.record("v1 wording")))
+        self.written(ma.add(self.record("v2 wording", supersedes="K1")))
         self.assertEqual([r.id for r in self.listed()], ["K2"])
         rc, out = self.muninn("know", "show", "K1")
         self.assertEqual(rc, 0)
@@ -120,8 +122,8 @@ class AdapterOverFakeStore(StoreCase):
 
     def test_search_stays_fresh_after_supersede_and_edit(self) -> None:
         """Index freshness: a direct text edit after a supersede is searchable (needs the knowledge_au trigger)."""
-        self.assertIsNone(ma.add(self.record("alpha wording")))
-        self.assertIsNone(ma.add(self.record("beta wording", supersedes="K1")))
+        self.written(ma.add(self.record("alpha wording")))
+        self.written(ma.add(self.record("beta wording", supersedes="K1")))
         self.sql("UPDATE knowledge SET text = 'gamma wording' WHERE id = 2")
         self.assertEqual([k["id"] for k in self.muninn("search", "gamma", "--all-projects")[1]["knowledge"]], ["K2"])
         self.assertEqual(self.muninn("search", "beta", "--all-projects")[1]["knowledge"], [])
@@ -355,19 +357,20 @@ class SchemaProbe(StoreCase):
         """Negative control 3: without knowledge_au a text edit is invisible to search."""
         fs.create(self.home, drop_triggers=("knowledge_au",))
         self.assertEqual(memory_schema.check(self.home), "muninn_schema_incomplete")
-        self.assertIsNone(ma.add(self.record("alpha wording")))
-        self.assertIsNone(ma.add(self.record("beta wording", supersedes="K1")))
+        self.assertEqual(ma.add(self.record("alpha wording")), ma.Degraded("muninn_schema_incomplete"))
+        self.assertEqual(self.muninn(*self.add_argv_for("lesson"))[0], 0)
+        self.assertEqual(self.muninn(*self.add_argv_for("lesson"), "--supersedes", "K1")[0], 0)
         self.sql("UPDATE knowledge SET text = 'gamma wording' WHERE id = 2")
         self.assertEqual(
             self.muninn("search", "gamma", "--all-projects")[1]["knowledge"], [], "stale index must miss the new word"
         )
 
-    def test_live_help_shape_is_a_known_adapter_defect(self) -> None:
-        """Known defect for U2: live --help goes to stderr with rc 2, which probe() reads as muninn_old_ledger."""
+    def test_live_help_shape_is_accepted(self) -> None:
+        """The live --help goes to stderr with rc 2; probe() judges the text, so both shapes pass."""
         fs.create(self.home)
         with mock.patch.dict(os.environ, {"FAKE_MUNINN_HELP": "real"}):
             ma.PROBE_CACHE.clear()
-            self.assertEqual(ma.probe(), ma.Degraded("muninn_old_ledger"))
+            self.assertIsNone(ma.probe())
         ma.PROBE_CACHE.clear()
         self.assertIsNone(ma.probe())
 

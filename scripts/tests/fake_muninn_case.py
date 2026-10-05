@@ -34,6 +34,8 @@ LINES = [
 class StoreCase(unittest.TestCase):
     """A temp MUNINN_HOME, synthetic transcripts and a `muninn` wrapper for the fake first on PATH."""
 
+    with_store = False  # True: create the schema-v2 store up front (a real store exists after `muninn ingest`)
+
     def setUp(self) -> None:
         """Build the sandbox and point the adapter at it with a cleared probe cache."""
         self.tmp = Path(tempfile.mkdtemp())
@@ -58,6 +60,8 @@ class StoreCase(unittest.TestCase):
         self.addCleanup(patch.stop)
         ma.PROBE_CACHE.clear()
         self.addCleanup(ma.PROBE_CACHE.clear)
+        if self.with_store:
+            fs.create(self.home)
 
     def muninn(self, *args: str, extra_env: dict[str, str] | None = None) -> tuple[int, dict[str, Any]]:
         """Run the fake CLI; return (rc, stdout JSON)."""
@@ -70,6 +74,12 @@ class StoreCase(unittest.TestCase):
             scope="loop", type="lesson", claim=claim, cite=f"claude:{SESSION}:1.1", quote=PROMPT, loop_id="L1"
         )
         return ma.Record(**{**base, **kw})
+
+    def written(self, result: object) -> ma.Written:
+        """Assert an add succeeded and return the Written value."""
+        self.assertIsInstance(result, ma.Written, result)
+        assert isinstance(result, ma.Written)
+        return result
 
     def listed(self) -> list[ma.Record]:
         """Adapter listing for loop L1; fails the test on a degrade."""

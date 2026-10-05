@@ -203,7 +203,7 @@ def cmd_search(home: Path, argv: list[str]) -> int:
                 (fts, time.time()),
             ).fetchall()
             hits = [
-                {k: e[k] for k in ("id", "kind", "text", "sensitivity", "tags")}
+                {k: e[k] for k in ("id", "kind", "text", "sensitivity", "tags", "scope")}
                 | {"cites": [c["ref"] for c in e["cites"]]}
                 for e in (entry(conn, r["id"]) for r in rows)
             ]
