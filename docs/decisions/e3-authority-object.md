@@ -118,6 +118,7 @@ The phrase heuristics (`invoked()`, negation, question and quote handling, about
 - Limit (cooperating-agent safeguard): an agent with shell access can also run `authority.py grant` (for Codex the skill is itself an
   instruction to do so). The change stops accidental, negated and pasted-text grants and removes the false precision of a prose
   matcher; it does not stop a hostile same-user agent. A human-only mint (receipt signing) is a separate unit.
+- Same-user boundary: `granted_by` is an unsigned, self-asserted label. Besides running `grant`, an agent can write `authority.json` directly (Write or a shell redirect, with any `granted_by` or none) or touch the legacy `crack_on_active` flag (no expiry, still honoured), and nothing guards those paths; the crack-on hint tells agents not to grant.
 - Not verified: that `${CLAUDE_SESSION_ID}` is substituted before the `!` pre-execution runs in Claude Code 2.1.289 (strings in the binary show
   substitution in the skill body, ordering vs shell execution not observed); the env fallback covers an empty expansion. The
   UserPromptSubmit prefix-match fallback named in the plan was not built.

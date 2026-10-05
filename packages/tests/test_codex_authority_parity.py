@@ -107,6 +107,7 @@ class CodexCrackOnGateTests(unittest.TestCase):
             context = self.prompt(text, session)["hookSpecificOutput"]["additionalContext"]
             self.assertIn(f"authority.py grant --session {session} --max-prs N", context, text)
             self.assertIn("$coderails-codex:authorize", context)
+            self.assertIn("Agents must not run", context)
             self.assertFalse((self.loop / session / "authority.json").exists(), text)
             self.assertFalse(self.asks(session), text)
             self.assertEqual(self.reasons(session), ["authority_phrase_ignored"], text)
