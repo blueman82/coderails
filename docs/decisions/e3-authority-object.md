@@ -77,15 +77,19 @@ a consumer. Those four lines are superseded by the next section; the user direct
   never rewritten). Consume and revoke are `<id>.consumed` / `<id>.revoked` marker files created with
   `O_CREAT|O_EXCL`, so single-use state is file existence: no read-modify-write race, and a torn write cannot
   half-consume (a truncated receipt reads as `malformed` and is never accepted).
-- `verify(receipt, proposed, now, session_id, loop_id)` is pure and returns `(ok, reason_code)`; check order is fixed:
-  `malformed`, `revoked`, `expired`, `foreign_session`, `foreign_loop`, `consumed`, `kind_mismatch`, `hash_mismatch`,
-  `sha_mismatch`, else `ok`. The hash is sha256 of canonical JSON of the shlex-split command, cwd and branch.
-- Hook `action_authority_gate.py` (Claude, appended to the Bash group; Codex vendored subset in `hook_common.py`,
-  parity-tested): opt-in via config `action_authority` (enforce | advisory | off, default off); it does not touch
+- `verify(receipt, proposed, now, session_id, loop_id, consumed, signers)` is pure and returns `(ok, reason_code)`; check order is fixed:
+  `malformed`, signature (`signature_missing`, `signature_invalid`, `signer_unknown`, `trust_root_missing`), `revoked`, `expired`,
+  `foreign_session`, `foreign_loop`, `consumed`, `kind_mismatch`, `hash_mismatch`, `repository_mismatch`, `ref_mismatch`,
+  `sha_mismatch`, else `ok`. The hash is sha256 of canonical JSON of the shlex-split command, cwd, branch, repository and ref.
+  Receipts are v2: signed, bound to repository+ref+SHA (`artifact_sha` is mandatory), always single-use; v1/unsigned receipts
+  are rejected with no downgrade path. See [p3-human-only-minting.md](p3-human-only-minting.md).
+- Hook `action_authority_gate.py` (Claude, appended to the Bash group; Codex imports the byte-identical mirrored
+  `scripts/lib/{action_receipt,receipt_signing,action_binding}.py`): opt-in via config `action_authority` (enforce | advisory | off, default off); it does not touch
   `pr_merge_gate`, the destructive gate or `enforce_pr_workflow`.
-- What a receipt proves: some same-user principal minted an approval for exactly this command text, cwd and branch,
-  for this session and loop, once, before it expired. What it does NOT prove: that a human approved it. A same-user
-  agent can run `approve-action`, so this is a speed bump and an audit trail, not a human-in-the-loop guarantee.
+- What a receipt proves: the holder of the passphrase-protected owner key signed an approval for exactly this command text,
+  cwd, branch, repository, ref and SHA, for this session and loop, once, before it expired. `approve-action` is owner-run: it
+  refuses without a tty (`receipt_refused_no_tty`). With the user-tier trust root (agent-writable) this is a
+  cooperating-agent safeguard; only the root-owned tier (owner-run sudo install, not performed here) is a real boundary.
 - Limits: hash covers only the command text the hook sees (not aliases, functions, eval/xargs; common wrappers are
   unwrapped); protected branches are main/master only; (guess, unverified) a subagent's `session_id` may differ from
   its parent's, so a receipt minted by the parent could be refused as `foreign_session` for worker-run actions.

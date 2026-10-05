@@ -1,6 +1,9 @@
 {
   "scripts/action_receipt_cli.py": "100755",
   "scripts/authority.py": "100755",
+  "scripts/authority_keys.py": "100755",
+  "scripts/lib/action_binding.py": "100644",
+  "scripts/lib/receipt_signing.py": "100644",
   "scripts/capability.py": "100755",
   "scripts/capability_mcp.py": "100755",
   "scripts/capability_profiles_validate.py": "100755",

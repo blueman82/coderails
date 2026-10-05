@@ -7,13 +7,13 @@ with reason action_authority_failed_open. It does not touch pr_merge_gate, destr
 enforce_pr_workflow. Limits: the hash covers only the command text seen here (not aliases, functions, eval/xargs,
 scripts that push; env/sudo/subshell/bash -c/gh api wrappers are unwrapped by guarded_segments). Each enforce use is
 claimed by an atomic O_EXCL marker and the claim, not the verify, decides allow vs deny.
-A receipt does not prove a human minted it.
+A receipt is signed (ssh-keygen, namespace coderails-receipt) and bound to repository+ref+sha; with the user-tier
+trust root that is a cooperating-agent safeguard, not a boundary (docs/decisions/p3-human-only-minting.md).
 """
 
 from __future__ import annotations
 
 import os
-import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -21,11 +21,13 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from hooks.scripts.hook_common import deny, read_payload
 from hooks.scripts.lib.destructive_patterns import git_output
-from hooks.scripts.lib.pr_workflow_match import guarded_segments, pr_number
+from hooks.scripts.lib.pr_workflow_match import guarded_segments
 from hooks.scripts.lib.trace_row import append_row
+from scripts.lib.action_binding import binding
 from scripts.lib.action_receipt import find_valid, proposed_action
 from scripts.lib.authority_object import read_authority
 from scripts.lib.config import config_path, config_value
+from scripts.lib.receipt_signing import USER_TIER, resolve_trust_root
 
 
 def mode(cwd: str) -> str:
@@ -33,26 +35,6 @@ def mode(cwd: str) -> str:
     path = config_path(cwd)
     value = config_value(path, "action_authority") if path else ""
     return value if value in {"enforce", "advisory"} else "off"
-
-
-def artifact_sha(name: str, segment: str, cwd: str) -> str | None:
-    """The real artifact at enforcement time: HEAD for a push, the PR head for a merge; None when unknowable.
-
-    A receipt minted with --artifact-sha verifies only when this equals it, so an unknowable sha fails closed.
-    """
-    if name == "git_push":
-        return git_output(cwd, "rev-parse", "HEAD") or None
-    number = pr_number(segment)
-    if not number:
-        return None
-    try:
-        out = subprocess.run(
-            ["gh", "pr", "view", number, "--json", "headRefOid", "-q", ".headRefOid"],
-            cwd=cwd, capture_output=True, text=True, timeout=4, check=False,
-        ).stdout.strip()  # fmt: skip
-    except (OSError, subprocess.SubprocessError):
-        return None
-    return out or None
 
 
 def main() -> int:
@@ -75,19 +57,25 @@ def main() -> int:
         now = datetime.now(timezone.utc)
         proposals = [
             (name, proposed_action(name, segment, where, git_output(where, "branch", "--show-current"),
-                                   artifact_sha(name, segment, where)))
+                                   binding(name, segment, where)))
             for name, segment, where in segments
         ]  # fmt: skip
-        results = [(name, *find_valid(session, proposed, now, loop_id)) for name, proposed in proposals]
-        missing = next(((name, code) for name, found, code in results if found is None), None)
+        signers, tier = resolve_trust_root()
+        unbound = next((name for name, proposed in proposals if proposed["artifact_sha"] is None), None)
+        missing = (unbound, "binding_unknown") if unbound else None  # unknowable repository+ref+sha fails closed
+        if missing is None:
+            results = [(name, *find_valid(session, p, now, loop_id, signers=signers)) for name, p in proposals]
+            missing = next(((name, code) for name, found, code in results if found is None), None)
         if missing is None and mode_ == "enforce":
             for name, proposed in proposals:  # the O_EXCL claim, not the verify above, decides who is allowed
-                found, code = find_valid(session, proposed, now, loop_id, consume_it=True)
+                found, code = find_valid(session, proposed, now, loop_id, consume_it=True, signers=signers)
                 if found is None:
                     missing = (name, code)
                     break
         if missing is None:
             if mode_ == "enforce":
+                if tier == USER_TIER:  # the allow rests on the agent-writable tier: a cooperating-agent safeguard
+                    append_row("action_authority", "allowed", USER_TIER, trace_id, loop_id)
                 append_row("action_authority", "allowed", "receipt_consumed", trace_id, loop_id)
             return 0
         name, code = missing
@@ -99,8 +87,10 @@ def main() -> int:
         how = (
             "The payload has no session_id, so no receipt can be bound."
             if code == "no_session"
-            else f"Mint one for this exact command: python3 scripts/action_receipt_cli.py approve-action "
-            f"--session {session} --kind {name} --command '<exact command>' --cwd <directory it runs in>."
+            else "The OWNER mints one at a terminal (it is signed with their passphrase key; an agent cannot): "
+            f"python3 scripts/action_receipt_cli.py approve-action --session {session} --kind {name} "
+            "--command '<exact command>' --cwd <directory it runs in>. "
+            "One-time key setup: scripts/authority_keys.py init."
         )
         deny(
             f"Blocked: {name.replace('_', ' ')} needs an action receipt ({code}). {how} Or set action_authority to off."

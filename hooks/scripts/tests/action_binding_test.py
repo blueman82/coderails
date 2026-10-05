@@ -1,0 +1,129 @@
+#!/usr/bin/env python3
+"""Pin action_binding: push binds the refspec source and destination ref; merge binds the live PR; else None."""
+
+from __future__ import annotations
+
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+from unittest import mock
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+from hooks.scripts.tests.receipt_test_support import ORIGIN, REPOSITORY, git, make_repo
+from scripts.lib import action_binding as ab
+
+
+class RepositoryTests(unittest.TestCase):
+    """Remote URLs normalise to lower-case host/owner/name or to None."""
+
+    def test_normalise(self) -> None:
+        """https, scp-style and ssh forms agree; paths and bare names are unknowable."""
+        for url in (
+            ORIGIN,
+            "git@github.com:Acme/Widgets.git",
+            "ssh://git@github.com/acme/widgets",
+            "https://github.com/acme/widgets/",
+        ):
+            self.assertEqual(ab.normalise_repository(url), REPOSITORY, url)
+        for url in ("/tmp/x/y.git", "origin", "", "file:///tmp/x/y.git"):
+            self.assertIsNone(ab.normalise_repository(url), url)
+
+
+class PushTests(unittest.TestCase):
+    """git push binds (remote repository, destination full ref, rev-parse of the refspec source)."""
+
+    def setUp(self) -> None:
+        """Repo on main with a diverging feature branch checked out."""
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.repo = make_repo(Path(tmp.name) / "r")
+        self.main = git(self.repo, "rev-parse", "main")
+        git(self.repo, "switch", "-q", "-c", "feature")
+        git(self.repo, "commit", "-q", "--allow-empty", "-m", "two")
+        git(self.repo, "switch", "-q", "main")
+        git(self.repo, "switch", "-q", "-c", "other")
+        git(self.repo, "commit", "-q", "--allow-empty", "-m", "three")
+        self.feature = git(self.repo, "rev-parse", "feature")
+        self.head = git(self.repo, "rev-parse", "HEAD")
+
+    def bind(self, command: str) -> dict[str, str] | None:
+        """Binding for a push command run in the repo."""
+        return ab.binding("git_push", command, str(self.repo))
+
+    def test_refspec_source_not_head(self) -> None:
+        """`git push origin feature:main` pushes feature to refs/heads/main even though HEAD is elsewhere."""
+        want = {"repository": REPOSITORY, "ref": "refs/heads/main", "sha": self.feature}
+        self.assertEqual(self.bind("git push origin feature:main"), want)
+        self.assertNotEqual(self.feature, self.head)
+
+    def test_other_forms(self) -> None:
+        """Bare name, HEAD:dst, +force prefix, full ref, -C, implicit and remote-only pushes."""
+        self.assertEqual(
+            self.bind("git push origin main"), {"repository": REPOSITORY, "ref": "refs/heads/main", "sha": self.main}
+        )
+        self.assertEqual(self.bind("git push origin HEAD:main")["sha"], self.head)  # type: ignore[index]
+        self.assertEqual(self.bind("git push origin +feature:release/x")["ref"], "refs/heads/release/x")  # type: ignore[index]
+        self.assertEqual(self.bind("git push origin feature:refs/heads/main")["ref"], "refs/heads/main")  # type: ignore[index]
+        self.assertEqual(self.bind("git push -o ci.skip origin main")["sha"], self.main)  # type: ignore[index]
+        self.assertEqual(ab.binding("git_push", "git -C r push origin main", str(self.repo.parent))["sha"], self.main)  # type: ignore[index]
+        implicit = {"repository": REPOSITORY, "ref": "refs/heads/other", "sha": self.head}
+        self.assertEqual(self.bind("git push"), implicit)
+        self.assertEqual(self.bind("git push origin"), implicit)
+
+    def test_unknowable_is_none(self) -> None:
+        """Deletes, several refspecs, --all/--mirror/--tags, unknown remote/source, detached HEAD and junk give None."""
+        for command in (
+            "git push origin :main", "git push --delete origin main", "git push --all origin", "git push --mirror",
+            "git push origin --tags", "git push origin a b", "git push upstream main", "git push origin nosuch:main",
+            "git push 'origin", "git push origin main extra extra",
+        ):  # fmt: skip
+            self.assertIsNone(self.bind(command), command)
+        git(self.repo, "checkout", "-q", "--detach")
+        self.assertIsNone(self.bind("git push"))
+
+    def test_wrong_remote_changes_repository(self) -> None:
+        """A second remote with another owner binds that repository, not origin's."""
+        git(self.repo, "remote", "add", "fork", "git@github.com:evil/widgets.git")
+        self.assertEqual(self.bind("git push fork main")["repository"], "github.com/evil/widgets")  # type: ignore[index]
+
+
+class MergeTests(unittest.TestCase):
+    """gh pr merge binds the PR base and the live head sha; any failure is None."""
+
+    def setUp(self) -> None:
+        """Repo with origin."""
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.repo = make_repo(Path(tmp.name) / "r")
+
+    def test_live_pr(self) -> None:
+        """Base and head come from pr_view; origin supplies the repository."""
+        with mock.patch.object(ab, "pr_view", return_value=("main", "a" * 40)) as view:
+            got = ab.binding("merge", "gh pr merge 12 --squash", str(self.repo))
+        self.assertEqual(got, {"repository": REPOSITORY, "ref": "refs/heads/main", "sha": "a" * 40})
+        view.assert_called_once_with("12", str(self.repo), None)
+
+    def test_forms(self) -> None:
+        """PR URL, gh api merge and -R are parsed; release bases bind their own ref."""
+        with mock.patch.object(ab, "pr_view", return_value=("release/x", "b" * 40)) as view:
+            by_url = ab.binding("merge", "gh pr merge https://github.com/acme/widgets/pull/7", str(self.repo))
+            self.assertEqual(by_url and by_url["ref"], "refs/heads/release/x")
+            self.assertIsNotNone(ab.binding("merge", "gh api repos/acme/widgets/pulls/9/merge -X PUT", str(self.repo)))
+            got = ab.binding("merge", "gh pr merge 3 -R other/repo", str(self.repo))
+        self.assertEqual(got["repository"], "github.com/other/repo")  # type: ignore[index]
+        self.assertEqual([c.args[0] for c in view.call_args_list], ["7", "9", "3"])
+
+    def test_unknowable_is_none(self) -> None:
+        """No PR number, a failed gh call, or no origin give None."""
+        with mock.patch.object(ab, "pr_view", return_value=None):
+            self.assertIsNone(ab.binding("merge", "gh pr merge 12", str(self.repo)))
+        with mock.patch.object(ab, "pr_view", return_value=("main", "c" * 40)):
+            self.assertIsNone(ab.binding("merge", "gh pr merge --squash", str(self.repo)))
+            git(self.repo, "remote", "remove", "origin")
+            self.assertIsNone(ab.binding("merge", "gh pr merge 12", str(self.repo)))
+        self.assertIsNone(ab.binding("other", "x", str(self.repo)))
+
+
+if __name__ == "__main__":
+    unittest.main()
