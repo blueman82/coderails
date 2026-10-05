@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -41,6 +42,31 @@ class QualityCliTests(unittest.TestCase):
             result = self.invoke(root, "--strict", "--paths", str(module))
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("D103", result.stdout + result.stderr)
+
+    def test_json_output_is_pure_json_with_structured_findings(self) -> None:
+        """--json prints one JSON object even when the external tools fail and write to stdout."""
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            module = root / "bad.py"
+            module.write_text("x = 1 \n")
+            result = self.invoke(root, "--json", "--paths", str(module))
+            self.assertEqual(result.returncode, 0, result.stderr)
+            data = json.loads(result.stdout)
+            self.assertEqual(data["scanned"], 1)
+            self.assertFalse(data["external_ok"], "ruff/black must reject the fixture")
+            self.assertEqual(
+                [(Path(f["path"]).name, f["line"], f["message"]) for f in data["findings"]],
+                [("bad.py", 1, "trailing whitespace")],
+            )
+
+    def test_json_clean_file_has_no_findings(self) -> None:
+        """A compliant file reports no findings and external_ok true."""
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            module = root / "ok.py"
+            module.write_text('"""Compliant fixture."""\n\nVALUE = 1\n')
+            data = json.loads(self.invoke(root, "--json", "--paths", str(module)).stdout)
+            self.assertEqual((data["scanned"], data["findings"], data["external_ok"]), (1, [], True))
 
     def test_changed_markdown_only(self) -> None:
         """A Git repository whose only changed file is Markdown needs no source tools."""

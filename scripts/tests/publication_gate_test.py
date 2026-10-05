@@ -335,6 +335,7 @@ class CounterTests(unittest.TestCase):
         by_reason["eval-level/refused/level_below_derived"] = 4
         by_reason["argv/denied/ceiling_exceeded"] = 2
         by_reason["routine/run_abort/docs_sync_deny"] = 1
+        by_reason["verify-merged/refused/content_absent"] = 2
         self.assertEqual(
             workflow_gate_counters.counts(by_reason),
             {
@@ -344,6 +345,7 @@ class CounterTests(unittest.TestCase):
                 "publication": {"refused/diff_manifest:denied_path": 2},
                 "argv": {"denied/ceiling_exceeded": 2},
                 "routine": {"run_abort/docs_sync_deny": 1},
+                "verify-merged": {"refused/content_absent": 2},
             },
         )
 

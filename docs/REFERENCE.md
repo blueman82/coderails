@@ -739,6 +739,7 @@ no script does) or `unused`. Regenerate the table with `python3 scripts/lib/conf
 | `wiki_git_bypass_flag` | string/null | `null` | read_by_prose_only | Env var set when creating or merging the wiki's own PRs, for example BYPASS_REVIEW=1. |
 | `wiki_git_pull_path` | string/null | `null` | read_by_prose_only | Source repo pulled after a wiki PR merges. |
 | `wiki_debt_epoch_pr` | integer | `null` | enforced_by_code | First PR number the wiki-ingest debt merge gate covers; absent or empty disables the gate. A literal null is rejected as a bad type, as before. |
+| `wiki_stale_days` | integer | `30` | enforced_by_code | Age in days after which a wiki page becomes a staleness candidate; scripts/wiki_lint.py stale reads it. Age alone never makes a page stale (a source must also have moved). |
 | `worktree_base` | string/null | `null` | read_by_prose_only | Parent directory for sibling worktrees. |
 | `worktree_script` | string/null | `null` | read_by_prose_only | Project script that creates a worktree. |
 | `jira` | object/null | `null` | read_by_prose_only | Jira settings (project, epic, component_name, component_id, epic_field, points_field, fix_version, mcp_namespace, transitions). Nested keys are not type-checked. |

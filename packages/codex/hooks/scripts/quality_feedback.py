@@ -45,6 +45,14 @@ def patch_paths(command: object) -> list[str]:
     return [next(value for value in match.groups() if value is not None) for match in PATCH_PATH.finditer(command)]
 
 
+def finding_lines(result: subprocess.CompletedProcess[str]) -> list[str]:
+    """One line per finding from the checker's --json; a checker that printed no JSON is itself reported."""
+    try:
+        return [f"{i['path']}:{i['line'] or ''}: {i['message']}" for i in json.loads(result.stdout)["findings"]]
+    except (ValueError, KeyError, TypeError):
+        return [f"quality check produced no JSON: {result.stderr.strip()[:500]}"]
+
+
 def repo_for(path: Path) -> Path | None:
     """Find the Git root containing a changed file, if one exists."""
     probe = path.parent
@@ -78,14 +86,12 @@ def main() -> int:
         if repo is None:
             continue
         result = subprocess.run(
-            [sys.executable, str(checker), "--root", str(repo), "--paths", str(changed)],
+            [sys.executable, str(checker), "--json", "--root", str(repo), "--paths", str(changed)],
             text=True,
             capture_output=True,
             check=False,
         )
-        output = result.stdout + result.stderr
-        if "0 finding(s)" not in output:
-            feedback.append(output)
+        feedback.extend(finding_lines(result))
     if not feedback:
         return 0
     context = "coderails quality feedback (warn-only):\n" + "\n".join(feedback)

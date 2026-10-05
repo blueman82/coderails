@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -27,14 +28,18 @@ def main() -> int:
         return 0
     root = Path(__file__).resolve().parents[2]
     result = subprocess.run(
-        ["python3", str(root / "scripts/quality/check.py"), "--root", str(root), "--paths", file],
+        ["python3", str(root / "scripts/quality/check.py"), "--json", "--root", str(root), "--paths", file],
         capture_output=True,
         text=True,
         check=False,
     )
-    text = result.stdout + result.stderr
-    if "0 finding(s)" not in text:
-        print(f"coderails quality feedback (warn-only): {text}")
+    try:
+        lines = [f"{i['path']}:{i['line'] or ''}: {i['message']}" for i in json.loads(result.stdout)["findings"]]
+    except (ValueError, KeyError, TypeError):
+        # the checker itself broke: say so rather than reading silence as "clean"
+        lines = [f"quality check produced no JSON: {result.stderr.strip()[:500]}"]
+    if lines:
+        print("coderails quality feedback (warn-only): " + "\n".join(lines))
     return 0
 
 

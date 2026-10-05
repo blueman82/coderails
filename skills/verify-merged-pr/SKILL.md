@@ -37,15 +37,13 @@ Confirm `state` is `MERGED`, `mergedAt` is non-null, and note `mergeCommit.oid`,
 
 ### 2. Confirm the CONTENT is actually on origin/main
 
-A merge commit existing is not the same as its changes being present on the branch you build from. Fetch first — never trust the local snapshot.
+A merge commit existing is not the same as its changes being present on the branch you build from. `scripts/verify_merged.py` applies the one rule set (it also re-runs check 1 and fetches, so never trust the local snapshot):
 
 ```bash
-git fetch origin <base> --quiet
-git merge-base --is-ancestor <mergeCommit.oid> origin/<base> && echo "on origin/<base>" || echo "NOT on origin/<base>"
-git grep -n '<string unique to the change>' origin/<base> -- <expected path>
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/verify_merged.py" <N> --grep '<string unique to the change>' --path <expected path>
 ```
 
-Ancestry proves the merge commit is reachable from the branch tip. The `git grep` proves the substantive change — not just a merge marker — is in the tree. If the grep finds nothing, the claim is not confirmed even if state says MERGED.
+It prints a JSON verdict (`confirmed`, `method`, `reasons`) and exits 0 only when confirmed. State must be `MERGED` with `mergedAt` set; the base is fetched; the merge commit must be reachable from `origin/<base>`; then `git grep` at `origin/<base>` proves the substantive change is in the tree (`method: content`). Without `--grep` it can confirm only a true merge commit (two parents) whose PR head is an ancestor of `origin/<base>` (`method: merge-commit-ancestry`). A squash merge rewrites the SHA, so the PR head is never an ancestor of it and ancestry is never required of one: with no `--grep` a squash is `content_check_required`, not confirmed. If the grep finds nothing (`content_absent`), the claim is not confirmed even if state says MERGED.
 
 ### 3. Enumerate SIBLING PRs by author and time window
 
@@ -64,14 +62,14 @@ Read the `mergedAt` timestamps. PRs clustered tightly around the named one (minu
 | Check | Command | Confirms |
 |---|---|---|
 | State | `gh pr view <N> --json state,mergedAt,mergeCommit,author,baseRefName` | The PR is MERGED, into the base you expect |
-| Content | `git fetch origin <base>` → `git merge-base --is-ancestor <oid> origin/<base>` + `git grep '<change>' origin/<base>` | The actual change is on the branch, not just a marker |
+| Content | `scripts/verify_merged.py <N> --grep '<change>' --path <path>` (fetch, reachability, `git grep` at `origin/<base>`) | The actual change is on the branch, not just a marker |
 | Siblings | `gh pr list --state merged --search "author:<login> sort:updated-desc"` | No unreported PRs landed in the same window |
 
 ## Reporting the Verdict
 
 State the verdict as CONFIRMED or NOT CONFIRMED, then:
 - The merge commit and `mergedAt` for the named PR.
-- Whether its content is present on `origin/<base>` (ancestry + grep result).
+- Whether its content is present on `origin/<base>` (the script's `method` and `reasons`).
 - **Every sibling PR** in the same author/time cluster, with numbers and timestamps — call out any the reporter did not mention.
 - Anything you could not check from source (e.g. runtime behaviour of the change — verifying content is present is not verifying it works).
 

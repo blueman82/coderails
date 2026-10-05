@@ -375,3 +375,31 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   `approve-action`). The hash covers only the command text the hook sees, not aliases, functions, eval/xargs or scripts that
   push (env/sudo/subshell/`bash -c`/`gh api .../merge` wrappers are unwrapped). Limits: scope 500 chars, 8 KB per receipt,
   50 receipts per session (`receipt_refused_scope_too_long`, `receipt_refused_too_many`). Protected branches are main and master only.
+
+## A procedure script (wiki_lint, verify_merged, merge --describe, memory_dir, detect_test_command, check --json) answered unexpectedly
+
+- Symptom: a skill or command that used to carry a procedure in prose now prints JSON that surprises you: a page you
+  expected stale is not, `verify_merged.py` exits 1 on a PR you watched merge, `merge.py --describe` lists a gate you
+  did not expect, or quality feedback appeared (or not) for a file.
+- `wiki_lint.py stale --repo R --vault V`: `stale_days` in the output is the typed `wiki_stale_days` (default 30,
+  `.coderails/workflow.config.yaml`). A candidate is stale only when a repo source's last commit date
+  (`git log -1 --format=%cs`) is more than 7 days after `last_updated` (`basis: sources`), or when no source resolves
+  to a repo file (`basis: date-only`). `data_gaps` lists unresolvable sources, missing commit dates and pages with no
+  `last_updated`; a gap never clears a page. `sources/`, `investigations/`, `templates/`, `inbox/` are skipped.
+- `verify_merged.py <PR> [--grep STR --path P]`: exit 0 only when confirmed. `reasons` is one of `gh_failed`,
+  `not_merged`, `merged_at_missing`, `fetch_failed`, `merge_commit_unreachable`, `content_absent` (the grep found
+  nothing at `origin/<base>`), `content_check_required` (no `--grep` and not a true two-parent merge whose head is
+  an ancestor: always the case for a squash). `method` is `content` or `merge-commit-ancestry`. Rows:
+  `verify-merged/<ok|refused>/<reason>` in `trace.by_reason`, tallied under key `verify-merged`. Remedy: pass a string
+  unique to the change as `--grep`.
+- `merge.py --describe`: JSON of `VERIFY_STAGES` then `publication_gate.CHECKS`, built from the same lists
+  `verify_gates` and `publication_gate.evaluate` iterate; it contacts no remote. A gate missing there is not run.
+- `memory_dir.py [--provider claude|codex]` prints the folder whether or not it exists (slug: every character outside
+  `[A-Za-z0-9]` becomes `-`, from the realpath). `detect_test_command.py` prints `command: null` for zero or several
+  candidates; the caller asks the user.
+- `scripts/quality/check.py --json` prints `{scanned, findings[{path,line,message}], external_ok}`; external tool
+  output is redirected to stderr in that mode. Both `quality_feedback.py` hooks warn when `findings` is non-empty or the
+  checker printed no JSON; they ignore `external_ok` (the tools' own output is not shown to the model).
+- Limits: the helpers are read-only except the `verify_merged` trace row; they trust `gh` and the local clone as the
+  caller supplied them, and the skills still have to choose to run them (nothing forces a skill to call a script). The
+  quality check's `external_ok` is not part of the warn decision.
