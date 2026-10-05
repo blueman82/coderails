@@ -32,3 +32,11 @@ sandbox_workers: false
 # Absent/omitted (default) = this check is inactive; other installs unaffected.
 # integrity_review:
 #   machine_user: null
+# diff_manifest / diff_manifest_policy: opt-in additional check run by scripts/push.py
+# (before `git push`) and scripts/merge.py (after the existing gates). The policy is a
+# JSON file {allow:[glob], deny:[glob], manifest:[glob], docs_sync:{allow,deny},
+# require_linked_worktree:bool}; the diff is `git diff --raw -z -M origin/<main>...<head>`.
+# diff_manifest: off | advisory | enforce (default advisory = warning + trace row;
+# enforce refuses with diff_manifest:<reason_code>). No policy file = the check is inactive.
+# diff_manifest: advisory
+# diff_manifest_policy: .coderails/diff-policy.json

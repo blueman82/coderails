@@ -718,12 +718,46 @@ and emit `NO_CONFIG` when absent. No legacy runtime fallback or config merging
 occurs. Init validates preserved configuration before moving legacy files to
 Trash; it never silently overwrites user values.
 
+### Workflow config keys
+
+`config.schema.json` (repo root, mirrored at `packages/codex/config.schema.json`) is the source of truth for
+`.coderails/workflow.config.yaml`. `load_config(path)` in `scripts/lib/config.py` applies the defaults, coerces
+types and returns reason-coded findings (`config_unknown_key` with a did-you-mean hint, `config_bad_type`,
+`config_unreadable`); findings are non-authoritative trace rows plus one stderr line and never change a gate's
+decision. `python3 scripts/lib/config.py resolve-config --json` prints
+`{path, values, defaults_applied, unknown_keys, findings}`; plain `resolve-config` is unchanged. Status says who
+reads a key: `enforced_by_code`, `read_by_prose_only` (skills and commands read it from the resolve-config text,
+no script does) or `unused`. Regenerate the table with `python3 scripts/lib/config_schema_docs.py --write`.
+
+<!-- config-schema:start -->
+| Key | Type | Default | Status | Description |
+|---|---|---|---|---|
+| `project` | string/null | `null` | read_by_prose_only | Project name written by /coderails:init; read by command prose only. |
+| `wiki_path` | string/null | `null` | enforced_by_code | LLM wiki vault directory (relative to the project dir, or absolute). null disables the wiki gate and the wiki-debt merge gate. |
+| `wiki_supervision` | string/null | `"discuss"` | read_by_prose_only | wiki-ingest mode: discuss (pause before writing) or autonomous. |
+| `wiki_git_worktree` | boolean/null | `true` | read_by_prose_only | true = PR flow for wiki commits; false = commit directly to the vault. |
+| `wiki_git_bypass_flag` | string/null | `null` | read_by_prose_only | Env var set when creating or merging the wiki's own PRs, for example BYPASS_REVIEW=1. |
+| `wiki_git_pull_path` | string/null | `null` | read_by_prose_only | Source repo pulled after a wiki PR merges. |
+| `wiki_debt_epoch_pr` | integer | `null` | enforced_by_code | First PR number the wiki-ingest debt merge gate covers; absent or empty disables the gate. A literal null is rejected as a bad type, as before. |
+| `worktree_base` | string/null | `null` | read_by_prose_only | Parent directory for sibling worktrees. |
+| `worktree_script` | string/null | `null` | read_by_prose_only | Project script that creates a worktree. |
+| `jira` | object/null | `null` | read_by_prose_only | Jira settings (project, epic, component_name, component_id, epic_field, points_field, fix_version, mcp_namespace, transitions). Nested keys are not type-checked. |
+| `engineering_principles_paths` | array/null | `null` | read_by_prose_only | Glob patterns that trigger the engineering-principles pre-flight in /coderails:push. |
+| `engineering_principles_skill` | string/null | `"/engineering-principles-python"` | read_by_prose_only | Slash command run by the pre-flight; null skips it. |
+| `sandbox_workers` | boolean/null | `false` | read_by_prose_only | true = agentic-loop dispatches implementation workers as OS-sandboxed processes. No script reads it; the orchestrator reads it from the resolve-config text (skills/agentic-loop/SKILL.md). |
+| `integrity_review` | object/null | `null` | enforced_by_code | Integrity attestation settings. |
+| `integrity_review.machine_user` | string/null | `null` | enforced_by_code | GitHub login that must post the integrity-review status; null or absent = local gate inactive. |
+| `evals` | object/null | `null` | enforced_by_code | Eval settings. |
+| `evals.require_signatures` | boolean/null | `false` | enforced_by_code | true = eval artifacts must be signed; refuse when signing is impossible. |
+<!-- config-schema:end -->
+
 ## Scripts and Libraries
 
 | Entrypoint/module | Responsibility |
 |---|---|
 | `scripts/push.py`, `merge.py` | Explicit staging/commit/PR workflow and current-head review, eval, integrity and wiki-debt merge gates. |
 | `scripts/post_review.py`, `post_evals.py` | Review grammar/cache, structural eval validation, neutral grading and observed smoke execution. |
+| `scripts/external_enforcement.py`, `ci_verify.py`, `enforcement_trace.py` | Opt-in, inert-by-default external enforcement: ruleset `plan`/`apply --yes`, an independent-runner verifier reusing the merge-gate functions, and advisory trace rows/counters. See `docs/external-enforcement/README.md`. |
 | `scripts/lib/git_common.py` | GitHub repository/PR operations and newest trusted exact-head artifact selection. Requires a `github.com` remote. |
 | `scripts/lib/{config,review_artifact,eval_artifact,artifact_io}.py` | Shared root-provider config and structured artifact operations. |
 | `scripts/lib/{eval_validation,eval_execution}.py` | Eval criteria and command/control verification. Gate smoke runs in a detached worktree at the trusted SHA. |

@@ -19,19 +19,28 @@ class WikiTaxonomyTests(HookTestCase):
         super().setUp()
         self.plugin = self.git_repo("plugin")
         self.vault = self.git_repo("vault")
-        self.schema = self.plugin / "AGENTS.md"
-        self.schema.write_text("## Page types\n| `investigations/` | pages |\n| `concepts/` | pages |\n")
+        self.schema = self.plugin / "wiki.schema.json"
+        self.set_types(["investigations", "concepts"])
         (self.vault / "investigations").mkdir()
         (self.vault / "concepts").mkdir()
         (self.plugin / ".coderails").mkdir()
         self.config = self.plugin / ".coderails/workflow.config.yaml"
         self.config.write_text(f"wiki_path: {self.vault}\n")
 
+    def set_types(self, types: object) -> None:
+        """Write the plugin's wiki.schema.json."""
+        self.schema.write_text(json.dumps({"page_types": types}))
+
+    def reasons(self) -> list[str]:
+        """Trace reason codes written for session S1."""
+        trace = self.directory / "state/S1/trace.jsonl"
+        return [json.loads(line)["reason_code"] for line in trace.read_text().splitlines()] if trace.exists() else []
+
     def decision(self, file: Path) -> dict[str, object]:
         """Evaluate one target path using the live plugin schema and configuration."""
         result = self.run_hook(
             "wiki_taxonomy_gate",
-            {"cwd": str(self.vault), "tool_input": {"file_path": str(file)}},
+            {"session_id": "S1", "cwd": str(self.vault), "tool_input": {"file_path": str(file)}},
             CLAUDE_PLUGIN_ROOT=str(self.plugin),
         )
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -59,17 +68,30 @@ class WikiTaxonomyTests(HookTestCase):
         """Adding one page type changes the decision without editing the hook."""
         target = self.vault / "newtype/a.md"
         self.assertEqual(self.decision(target)["permissionDecision"], "deny")
-        self.schema.write_text(self.schema.read_text() + "| `newtype/` | new |\n")
+        self.set_types(["investigations", "concepts", "newtype"])
         self.assertEqual(self.decision(target), {})
 
-    def test_ambiguous_schema_and_identity_fail_open(self) -> None:
-        """Missing metadata or an unrelated Git root cannot activate vault policing."""
+    def test_ambiguous_identity_fail_open(self) -> None:
+        """An unrelated Git root cannot activate vault policing, and says nothing."""
         self.assertEqual(self.decision(self.plugin / "hooks/new.py"), {})
-        for source in ("# no schema", "## Page types\nno parseable paths\n", "## Other\n`investigations/`\n"):
-            self.schema.write_text(source)
-            self.assertEqual(self.decision(self.vault / "decisions/a.md"), {})
+        self.assertEqual(self.reasons(), [])
+
+    def test_schema_problems_fail_open_with_reason(self) -> None:
+        """Negative control: the old gate returned 0 silently; now missing/invalid/empty schema leaves a reason row."""
+        target = self.vault / "decisions/a.md"
         self.schema.unlink()
+        self.assertEqual(self.decision(target), {})
+        for bad in ("not json", "[]", '{"page_types": "x"}', '{"page_types": []}', '{"page_types": [1, "../x"]}'):
+            self.schema.write_text(bad)
+            self.assertEqual(self.decision(target), {}, bad)
+        self.assertEqual(self.reasons(), ["wiki_schema_missing"] + ["wiki_schema_invalid"] * 5)
+
+    def test_unconfigured_wiki_is_silent(self) -> None:
+        """Inert (no wiki_path) stays silent even with a broken schema."""
+        self.schema.write_text("not json")
+        self.config.write_text("wiki_path: null\n")
         self.assertEqual(self.decision(self.vault / "decisions/a.md"), {})
+        self.assertEqual(self.reasons(), [])
 
     def test_configuration_and_directory_threshold(self) -> None:
         """Missing, null, unresolved, or mismatching vault paths and sparse dirs pass."""
