@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import errno
 import hashlib
 import json
 import os
@@ -17,13 +18,15 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, cast
 
-from lib.hook_telemetry import RESOURCE_ERRNOS, child_failed
-from lib.hook_telemetry import HostResourceError as HostResourceError
-
+RESOURCE_ERRNOS = frozenset({errno.EMFILE, errno.ENFILE, errno.EAGAIN, errno.ENOMEM})
 RESOURCE_MESSAGE = (
     "Host resource exhaustion (for example too many open files) prevented reading the graph state. "
     "The state is not known to be invalid: retry, and do not repair progress.json for this."
 )
+
+
+class HostResourceError(OSError):
+    """The host could not start the graph helper; this says nothing about graph validity."""
 
 
 PATCH_PATH = re.compile(r"^\*\*\* (?:Add|Update|Delete) File: (.*)$|^\*\*\* Move to: (.*)$")
@@ -346,17 +349,17 @@ def graph_output(graph: Path, *arguments: str) -> dict[str, object] | None:
     """Run one graph command and return its object output when valid."""
     try:
         result = subprocess.run(
-            ["python3", str(graph), *arguments],
-            stdout=subprocess.PIPE,
-            check=False,
-            stderr=subprocess.DEVNULL,
-            text=True,
+            ["python3", graph, *arguments], stdout=subprocess.PIPE, check=False, stderr=subprocess.DEVNULL, text=True
         )
     except OSError as error:
         if error.errno in RESOURCE_ERRNOS:
             raise HostResourceError(error.errno, str(error)) from error
         return None
-    if child_failed("graph_output", result.returncode):
+    with suppress(ImportError):  # telemetry must never be able to break the hook
+        from lib.hook_telemetry import note_child
+
+        note_child("graph_output", result.returncode)
+    if result.returncode != 0:
         return None
     try:
         decoded: object = json.loads(result.stdout)

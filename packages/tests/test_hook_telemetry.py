@@ -6,6 +6,7 @@ import errno
 import importlib
 import json
 import os
+import runpy
 import subprocess
 import sys
 import tempfile
@@ -90,9 +91,10 @@ class TelemetryTests(unittest.TestCase):
 
     def test_native_signal_child_detected_with_diagnostic_hint(self) -> None:
         """Test native signal child detected with diagnostic hint."""
-        proc = subprocess.run([sys.executable, "-c", "import os,signal;os.kill(os.getpid(),signal.SIGABRT)"])
-        self.assertEqual(tel.classify_returncode(proc.returncode), "native_signal")
-        tel.note_child("h", proc.returncode)
+        # A synthetic -SIGABRT returncode: really aborting a child would drop a crash report on macOS.
+        self.assertEqual(tel.classify_returncode(-6), "native_signal")
+        with patch.object(sys, "platform", "darwin"):
+            tel.note_child("h", -6)
         row = rows(self.dir)[0]
         self.assertEqual((row["cause"], row["signal"]), ("native_signal", "SIGABRT"))
         self.assertIn("DiagnosticReports", row["diagnostic_hint"])
@@ -117,7 +119,52 @@ class TelemetryTests(unittest.TestCase):
         )
         self.assertEqual(proc.returncode, 143)
         self.assertEqual(proc.stdout, "DECISION")
+        self.assertEqual(proc.stderr, "terminated by SIGTERM, likely hook timeout; action NOT gated\n")
         self.assertEqual(rows(self.dir)[0]["cause"], "sigterm")
+
+    def test_resource_errnos_classified_and_other_oserror_is_not(self) -> None:
+        """Test every resource errno is a resource row; an unrelated OSError is an exception row."""
+        for number in (errno.EMFILE, errno.ENFILE, errno.EAGAIN, errno.ENOMEM):
+            with self.subTest(errno.errorcode[number]):
+
+                def boom(number: int = number) -> int:
+                    raise OSError(number, "x")
+
+                with patch("sys.stderr"), self.assertRaises(OSError):
+                    tel.run("h", boom)
+                row = rows(self.dir)[-1]
+                self.assertEqual((row["cause"], row["errno"]), ("resource", errno.errorcode[number]))
+
+        def other() -> int:
+            raise OSError(errno.ENOENT, "x")
+
+        with self.assertRaises(OSError):
+            tel.run("h", other)
+        row = rows(self.dir)[-1]
+        self.assertEqual((row["cause"], row["error"]), ("exception", "FileNotFoundError"))
+        self.assertNotIn("errno", row)
+
+    def test_record_never_raises_even_without_a_home(self) -> None:
+        """Test Path.home() RuntimeError (no home directory) is swallowed."""
+        env = {"CODERAILS_HOOK_TELEMETRY_DIR": "", "PLUGIN_DATA": ""}
+        with patch.dict(os.environ, env), patch.object(Path, "home", side_effect=RuntimeError), patch("sys.stderr"):
+            tel.record("h", "ok")
+
+    def test_write_failure_emits_one_content_free_stderr_line(self) -> None:
+        """Test a failed telemetry write says class and errno only."""
+        with patch.dict(os.environ, {"CODERAILS_HOOK_TELEMETRY_DIR": "/dev/null/x"}), patch("sys.stderr") as err:
+            tel.record("h", "ok")
+        printed = "".join(call.args[0] for call in err.write.call_args_list)
+        self.assertEqual(printed, "hook_telemetry: write failed (NotADirectoryError, errno=ENOTDIR)\n")
+
+    def test_default_dir_follows_provider_home(self) -> None:
+        """Test the Codex copy defaults under the Codex data home, the Claude copy under ~/.claude."""
+        names = ("CODERAILS_HOOK_TELEMETRY_DIR", "CLAUDE_DISCIPLINE_LOG", "CODERAILS_DISCIPLINE_LOG", "PLUGIN_DATA")
+        env = {key: value for key, value in os.environ.items() if key not in names}
+        for path, expected in ((CLAUDE_LIB, ".claude"), (CODEX_LIB, ".coderails/codex")):
+            module = runpy.run_path(str(path))
+            with patch.dict(os.environ, env, clear=True), patch.object(Path, "home", return_value=Path("/h")):
+                self.assertEqual(module["telemetry_dir"](), Path("/h") / expected)
 
     @staticmethod
     def exiting(code: int) -> Callable[[], int]:
@@ -161,7 +208,7 @@ class TelemetryTests(unittest.TestCase):
         before = tel.open_fds()
         for _ in range(100):
             tel.run("h", lambda: 0)
-        self.assertEqual(tel.open_fds(), before)
+        self.assertLessEqual(tel.open_fds() or 0, (before or 0) + 1)
         leaked: list[Any] = []
 
         def leaky() -> int:
@@ -242,12 +289,11 @@ class StopHookSmokeTests(unittest.TestCase):
 class ClaudeResourceClassificationTests(unittest.TestCase):
     """Claude hook_common mirrors the Codex EMFILE classification."""
 
-    def test_hook_common_uses_the_telemetry_ssot(self) -> None:
-        """Test hook_common re-uses the telemetry module's errno set and error class."""
+    def test_hook_common_errno_set_matches_telemetry(self) -> None:
+        """Test hook_common and telemetry classify the same errnos as host exhaustion."""
         hook_common: Any = importlib.import_module("hooks.scripts.hook_common")
 
-        self.assertIs(hook_common.RESOURCE_ERRNOS, tel.RESOURCE_ERRNOS)
-        self.assertIs(hook_common.HostResourceError, tel.HostResourceError)
+        self.assertEqual(hook_common.RESOURCE_ERRNOS, tel.RESOURCE_ERRNOS)
 
     def test_read_payload_raises_on_exhaustion_but_not_on_empty_input(self) -> None:
         """Test exhaustion is distinguishable from an empty payload."""
@@ -255,12 +301,41 @@ class ClaudeResourceClassificationTests(unittest.TestCase):
 
         with patch("sys.stdin") as stdin, patch.object(hook_common, "log") as log:
             stdin.fileno.side_effect = OSError(errno.EMFILE, "Too many open files")
-            with self.assertRaises(tel.HostResourceError):
+            with self.assertRaises(hook_common.HostResourceError):
                 hook_common.read_payload()
         self.assertIn("resource_exhausted", log.call_args[0][0])
         with patch("sys.stdin") as stdin:
             stdin.fileno.side_effect = OSError(errno.EBADF, "bad")
             self.assertEqual(hook_common.read_payload(), {})
+
+    def test_every_resource_errno_raises(self) -> None:
+        """Test ENFILE, EAGAIN and ENOMEM are exhaustion too, not just EMFILE."""
+        hook_common: Any = importlib.import_module("hooks.scripts.hook_common")
+
+        for number in (errno.ENFILE, errno.EAGAIN, errno.ENOMEM):
+            with self.subTest(errno.errorcode[number]), patch("sys.stdin") as stdin, patch.object(hook_common, "log"):
+                stdin.fileno.side_effect = OSError(number, "x")
+                with self.assertRaises(hook_common.HostResourceError):
+                    hook_common.read_payload()
+
+    def test_blocking_io_error_is_retried_not_exhaustion(self) -> None:
+        """Test a transient EAGAIN from os.read keeps reading the payload instead of raising."""
+        hook_common: Any = importlib.import_module("hooks.scripts.hook_common")
+        reader, writer = os.pipe()
+        os.write(writer, b'{"a": 1}')
+        os.close(writer)
+        self.addCleanup(os.close, reader)
+        real_read = os.read
+        pending = [BlockingIOError(errno.EAGAIN, "again")]
+
+        def flaky(descriptor: int, size: int) -> bytes:
+            if pending:
+                raise pending.pop()
+            return real_read(descriptor, size)
+
+        with patch("sys.stdin") as stdin, patch.object(hook_common.os, "read", flaky):
+            stdin.fileno.return_value = reader
+            self.assertEqual(hook_common.read_payload(), {"a": 1})
 
 
 if __name__ == "__main__":

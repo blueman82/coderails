@@ -14,7 +14,14 @@ from pathlib import Path
 from typing import cast
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from hooks.scripts.lib.hook_telemetry import note_child
+try:
+    from hooks.scripts.lib.hook_telemetry import note_child
+except ImportError:  # telemetry must never be able to break the hook
+
+    def note_child(hook: str, returncode: int) -> None:
+        """Telemetry unavailable: no-op."""
+
+
 from hooks.scripts.test_output import begin_run, finish_run
 
 COMMIT_COMMAND = re.compile(r"\bgit +commit\b")

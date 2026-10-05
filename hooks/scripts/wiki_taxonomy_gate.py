@@ -27,7 +27,7 @@ def main() -> int:
     probe = path.parent
     while not probe.is_dir() and probe != probe.parent:
         probe = probe.parent
-    root = git_output(str(probe), "rev-parse", "--show-toplevel")
+    root = git_output(str(probe), "rev-parse", "--show-toplevel", hook="wiki_taxonomy_gate")
     if not root:
         return 0
     absolute = probe.resolve() / path.relative_to(probe)

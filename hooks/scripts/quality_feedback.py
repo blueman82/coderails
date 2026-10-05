@@ -9,7 +9,14 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from hooks.scripts.hook_common import read_payload
-from hooks.scripts.lib.hook_telemetry import note_child
+
+try:
+    from hooks.scripts.lib.hook_telemetry import note_child
+except ImportError:  # telemetry must never be able to break the hook
+
+    def note_child(hook: str, returncode: int) -> None:
+        """Telemetry unavailable: no-op."""
+
 
 SUFFIXES = {".bash", ".cfg", ".js", ".json", ".jsx", ".md", ".py", ".sh", ".toml", ".ts", ".tsx", ".yaml", ".yml"}
 

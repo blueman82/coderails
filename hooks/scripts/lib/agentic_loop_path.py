@@ -9,7 +9,12 @@ import sys
 import time
 from pathlib import Path
 
-from hooks.scripts.lib.hook_telemetry import note_child
+try:
+    from hooks.scripts.lib.hook_telemetry import note_child
+except ImportError:  # telemetry must never be able to break the hook
+
+    def note_child(hook: str, returncode: int) -> None:
+        """Telemetry unavailable: no-op."""
 
 
 def sanitise_session_id(raw: str) -> str:

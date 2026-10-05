@@ -19,7 +19,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from hooks.scripts.hook_common import deny, read_payload
+from hooks.scripts.hook_common import RESOURCE_MESSAGE, HostResourceError, deny, read_payload
 from hooks.scripts.lib.destructive_patterns import git_output
 from hooks.scripts.lib.pr_workflow_match import guarded_segments, pr_number
 from hooks.scripts.lib.trace_row import append_row
@@ -41,7 +41,7 @@ def artifact_sha(name: str, segment: str, cwd: str) -> str | None:
     A receipt minted with --artifact-sha verifies only when this equals it, so an unknowable sha fails closed.
     """
     if name == "git_push":
-        return git_output(cwd, "rev-parse", "HEAD") or None
+        return git_output(cwd, "rev-parse", "HEAD", hook="action_authority_gate") or None
     number = pr_number(segment)
     if not number:
         return None
@@ -57,7 +57,11 @@ def artifact_sha(name: str, segment: str, cwd: str) -> str | None:
 
 def main() -> int:
     """Check one Bash payload; every guarded segment needs its own receipt; fail open on any own error."""
-    payload = read_payload()
+    try:
+        payload = read_payload()
+    except HostResourceError:
+        deny(RESOURCE_MESSAGE)  # fail closed: a gate that cannot read its input must not allow the action
+        return 0
     session = str(payload.get("session_id") or "")
     trace_id = session or "_no_session"  # append_row refuses an empty id; keep the denial countable
     loop_id: str | None = None

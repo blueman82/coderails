@@ -6,7 +6,12 @@ import re
 import subprocess
 from pathlib import Path
 
-from hooks.scripts.lib.hook_telemetry import note_child
+try:
+    from hooks.scripts.lib.hook_telemetry import note_child
+except ImportError:  # telemetry must never be able to break the hook
+
+    def note_child(hook: str, returncode: int) -> None:
+        """Telemetry unavailable: no-op."""
 
 
 def normalize_ifs(command: str) -> str:
@@ -19,13 +24,13 @@ def normalize_ifs(command: str) -> str:
     return "\n".join(lines)
 
 
-def git_output(cwd: str, *arguments: str) -> str:
+def git_output(cwd: str, *arguments: str, hook: str = "destructive_patterns") -> str:
     """Read a Git property, returning empty on repository or command failures."""
     try:
         result = subprocess.run(["git", "-C", cwd, *arguments], capture_output=True, text=True, check=False)
     except OSError:
         return ""
-    note_child("destructive_bash_gate", result.returncode)
+    note_child(hook, result.returncode)
     return result.stdout.strip() if result.returncode == 0 else ""
 
 

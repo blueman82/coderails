@@ -9,15 +9,26 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from hooks.scripts.hook_common import deny, log, read_payload
-from hooks.scripts.lib.hook_telemetry import note_child
+from hooks.scripts.hook_common import RESOURCE_MESSAGE, HostResourceError, deny, log, read_payload
+
+try:
+    from hooks.scripts.lib.hook_telemetry import note_child
+except ImportError:  # telemetry must never be able to break the hook
+
+    def note_child(hook: str, returncode: int) -> None:
+        """Telemetry unavailable: no-op."""
+
 
 ALLOWED = {".md", ".txt", ".rst", ".yaml", ".yml", ".json", ".toml", ".ini", ".cfg"}
 
 
 def main() -> int:
     """Deny protected source edits made from a main or master checkout."""
-    payload = read_payload()
+    try:
+        payload = read_payload()
+    except HostResourceError:
+        deny(RESOURCE_MESSAGE)  # fail closed: a gate that cannot read its input must not allow the action
+        return 0
     data = payload.get("tool_input")
     if not isinstance(data, dict):
         return 0

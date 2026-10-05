@@ -17,7 +17,14 @@ from typing import cast
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from hooks.scripts.lib.context_manifest import session_manifest  # noqa: E402
-from hooks.scripts.lib.hook_telemetry import note_child  # noqa: E402
+
+try:
+    from hooks.scripts.lib.hook_telemetry import note_child
+except ImportError:  # telemetry must never be able to break the hook
+
+    def note_child(hook: str, returncode: int) -> None:
+        """Telemetry unavailable: no-op."""
+
 
 MIGRATION_NUDGE = (
     "\n\nLegacy Coderails workflow configuration found. "

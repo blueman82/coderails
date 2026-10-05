@@ -12,14 +12,16 @@ from datetime import datetime
 from pathlib import Path
 from typing import Union, cast
 
-try:
-    from hooks.scripts.lib.hook_telemetry import RESOURCE_ERRNOS, RESOURCE_MESSAGE, HostResourceError
-except ImportError:  # imported as a top-level module from the scripts directory
-    from lib.hook_telemetry import (  # type: ignore[import-not-found,no-redef]
-        RESOURCE_ERRNOS,
-        RESOURCE_MESSAGE,
-        HostResourceError,
-    )
+RESOURCE_ERRNOS = frozenset({errno.EMFILE, errno.ENFILE, errno.EAGAIN, errno.ENOMEM})
+RESOURCE_MESSAGE = (
+    "Host resource exhaustion (for example too many open files) prevented reading hook state. "
+    "The state is not known to be invalid: retry, and do not repair progress.json for this."
+)
+
+
+class HostResourceError(OSError):
+    """The host could not deliver hook input; this says nothing about the guarded action."""
+
 
 JsonScalar = Union[None, bool, int, float, str]
 JsonValue = Union[JsonScalar, list["JsonValue"], dict[str, "JsonValue"]]
@@ -35,7 +37,10 @@ def read_payload(timeout_seconds: float = 5.0) -> dict[str, JsonValue]:
             ready, _, _ = select.select([descriptor], [], [], remaining)
             if not ready:
                 break
-            chunk = os.read(descriptor, 65536)
+            try:
+                chunk = os.read(descriptor, 65536)
+            except BlockingIOError:  # EAGAIN on a nonblocking pipe is not host exhaustion
+                continue
             if not chunk:
                 break
             chunks.extend(chunk)

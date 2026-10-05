@@ -9,14 +9,18 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from hooks.scripts.hook_common import deny, read_payload
+from hooks.scripts.hook_common import RESOURCE_MESSAGE, HostResourceError, deny, read_payload
 from hooks.scripts.lib.destructive_patterns import normalize_ifs, permanent_pattern, source_write, workflow_substitution
 from hooks.scripts.lib.destructive_routes import ROUTES
 
 
 def main() -> int:
     """Evaluate the input command without running any of its contents."""
-    payload = read_payload()
+    try:
+        payload = read_payload()
+    except HostResourceError:
+        deny(RESOURCE_MESSAGE)  # fail closed: a gate that cannot read its input must not allow the action
+        return 0
     tool_input = payload.get("tool_input")
     raw = tool_input.get("command") if isinstance(tool_input, dict) else None
     if not isinstance(raw, str) or not raw:

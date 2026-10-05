@@ -19,16 +19,8 @@ from typing import Callable
 RESOURCE_ERRNOS = frozenset({errno.EMFILE, errno.ENFILE, errno.EAGAIN, errno.ENOMEM})
 DIAGNOSTIC_HINT = "~/Library/Logs/DiagnosticReports (macOS crash reports: look for python*.ips near this ts)"
 RESOURCE_NOTICE = "Host resource exhaustion (for example too many open files) hit this hook; not a graph-state fault."
-RESOURCE_MESSAGE = (
-    "Host resource exhaustion (for example too many open files) prevented reading hook state. "
-    "The state is not known to be invalid: retry, and do not repair progress.json for this."
-)
 ALLOWED_EXTRA = frozenset({"errno", "signal", "error", "diagnostic_hint"})  # content-free keys only
 MAX_BYTES = 1_000_000  # ponytail: one rotated generation (.1); add more only if history is needed
-
-
-class HostResourceError(OSError):
-    """The host could not start or read for a hook; this says nothing about graph validity."""
 
 
 def telemetry_dir() -> Path:
@@ -38,7 +30,9 @@ def telemetry_dir() -> Path:
     for name in ("CLAUDE_DISCIPLINE_LOG", "CODERAILS_DISCIPLINE_LOG"):
         if os.environ.get(name):
             return Path(os.environ[name]).parent
-    return Path(os.environ.get("PLUGIN_DATA") or Path.home() / ".claude")
+    # one file serves both providers, so pick the default home from where this copy lives
+    home = Path(".coderails", "codex") if "codex" in Path(__file__).parts else Path(".claude")
+    return Path(os.environ.get("PLUGIN_DATA") or Path.home() / home)
 
 
 def open_fds() -> int | None:
@@ -57,18 +51,18 @@ def classify_returncode(returncode: int) -> str:
 
 
 def record(hook: str, cause: str, duration_ms: int = 0, exit_code: int | None = None, **extra: object) -> None:
-    """Append one row; any failure is swallowed so telemetry can never break a hook."""
-    row = {
-        "ts": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        "hook": hook,
-        "cause": cause,
-        "exit": exit_code,
-        "duration_ms": duration_ms,
-        "open_fds": open_fds(),
-        "pid": os.getpid(),
-        **{key: value for key, value in extra.items() if key in ALLOWED_EXTRA and value is not None},
-    }
+    """Append one row; never raises, so telemetry can never break a hook."""
     try:
+        row = {
+            "ts": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "hook": hook,
+            "cause": cause,
+            "exit": exit_code,
+            "duration_ms": duration_ms,
+            "open_fds": open_fds(),
+            "pid": os.getpid(),
+            **{key: value for key, value in extra.items() if key in ALLOWED_EXTRA and value is not None},
+        }
         directory = telemetry_dir()
         directory.mkdir(parents=True, exist_ok=True)
         target = directory / "hook_telemetry.jsonl"
@@ -76,8 +70,12 @@ def record(hook: str, cause: str, duration_ms: int = 0, exit_code: int | None = 
             os.replace(target, target.with_suffix(".jsonl.1"))
         with target.open("a", encoding="utf-8") as stream:
             stream.write(json.dumps(row) + "\n")
-    except (OSError, ValueError):
-        pass
+    except (
+        Exception
+    ) as error:  # noqa: BLE001 - broad on purpose: Path.home() RuntimeError, OSError, TypeError all fail open
+        with suppress(Exception):
+            code = errno.errorcode.get(getattr(error, "errno", None) or 0, "-")
+            print(f"hook_telemetry: write failed ({type(error).__name__}, errno={code})", file=sys.stderr)
 
 
 def note_child(hook: str, returncode: int) -> None:
@@ -105,12 +103,13 @@ def run(hook: str, main: Callable[[], int]) -> int:
     def elapsed() -> int:
         return int((time.monotonic() - start) * 1000)
 
+    terminated = False
+
     def on_term(_signum: int, _frame: object) -> None:
-        record(hook, "sigterm", elapsed(), 143)
-        for stream in (sys.stdout, sys.stderr):
-            with suppress(Exception):
-                stream.flush()
-        os._exit(143)
+        nonlocal terminated
+        terminated = True
+        os.write(2, b"terminated by SIGTERM, likely hook timeout; action NOT gated\n")
+        raise SystemExit(143)  # unwind normally so the row and buffered output are written outside the handler
 
     with suppress(ValueError, OSError):
         signal.signal(signal.SIGTERM, on_term)
@@ -118,7 +117,8 @@ def run(hook: str, main: Callable[[], int]) -> int:
         code = main()
     except SystemExit as exit_:
         code = exit_.code if isinstance(exit_.code, int) else (0 if exit_.code is None else 1)
-        record(hook, "ok" if code == 0 else "block" if code == 2 else "exit", elapsed(), code)
+        cause = "sigterm" if terminated else "ok" if code == 0 else "block" if code == 2 else "exit"
+        record(hook, cause, elapsed(), code)
         raise
     except OSError as error:
         if error.errno in RESOURCE_ERRNOS:
