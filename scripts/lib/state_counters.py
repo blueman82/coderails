@@ -30,7 +30,8 @@ REASONS = (
     "attest_not_success",
     "attest_wrong_creator",
     "attest_not_bound",
-    "readiness_resolution_failed",
+    "predecessor_pending",
+    "node_unknown",
     *(f"eval_verdict_{s.lower()}" for s in EVAL_STATUSES),
 )
 

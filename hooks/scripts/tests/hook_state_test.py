@@ -1,0 +1,101 @@
+#!/usr/bin/env python3
+"""Typed hook_state.json: exact-session nudge dedupe, log-proof grace, torn state, persisted ordinals and arms."""
+
+from __future__ import annotations
+
+import json
+import os
+import sys
+import unittest
+from pathlib import Path
+from typing import Any
+from unittest.mock import patch
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+from hooks.scripts.lib import hook_state
+from hooks.scripts.lib.loop_state_common import LoopState
+from hooks.scripts.tests.lib.hook_test_support import HookTestCase
+from scripts.lib.state_counters import count_reasons
+
+OFFLOAD = "Please run git push origin main yourself from your own shell."
+
+
+class HookStateTests(HookTestCase):
+    """Nudge dedupe and grace come from the typed file, never from discipline.log text."""
+
+    def offload(self, session: str) -> str:
+        """Run offload_push_guard for a session; return its additionalContext ('' when silent)."""
+        transcript = self.directory / f"{session}.jsonl"
+        message = {"type": "assistant", "message": {"content": [{"type": "text", "text": OFFLOAD}]}}
+        transcript.write_text(json.dumps(message) + "\n")
+        payload = {"transcript_path": str(transcript), "session_id": session, "hook_event_name": "Stop"}
+        result = self.run_hook("offload_push_guard", payload)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return json.loads(result.stdout)["hookSpecificOutput"]["additionalContext"] if result.stdout.strip() else ""
+
+    def state_file(self, session: str) -> Path:
+        """Return the session's hook_state.json."""
+        return self.directory / "state" / session / "hook_state.json"
+
+    def test_prefix_sessions_each_nudge_once(self) -> None:
+        """Sessions 'ab' and 'abc' both nudge once; 'ab' state never suppresses 'abc'."""
+        self.assertTrue(self.offload("ab"))
+        self.assertEqual(self.offload("ab"), "")
+        self.assertTrue(self.offload("abc"))
+        self.assertEqual(self.offload("abc"), "")
+        self.assertEqual(json.loads(self.state_file("ab").read_text())["nudged"], {"offload_push_guard": True})
+        self.assertEqual(json.loads(self.state_file("abc").read_text())["nudged"], {"offload_push_guard": True})
+        counts = count_reasons(self.directory / "state")
+        self.assertEqual((counts["nudge_first"], counts["nudge_suppressed"]), (2, 2))
+
+    def test_discipline_log_cannot_suppress_a_nudge(self) -> None:
+        """A forged 'nudged=1' log line has no effect on the nudge decision."""
+        (self.directory / "discipline.log").write_text("hook=offload_push_guard session=ab nudged=1\n")
+        self.assertTrue(self.offload("ab"))
+
+    def test_discipline_log_cannot_release_grace(self) -> None:
+        """A forged absent-block log line leaves the first absent-state Stop blocked."""
+        (self.directory / "discipline.log").write_text(
+            "hook=loop_state_guard session=S1 invocations=1 reason=absent blocked=1\n"
+        )
+        payload = self.payload(self.transcript())
+        self.assertEqual(self.run_hook("loop_state_guard", payload).returncode, 2)
+        self.assertEqual(self.run_hook("loop_state_guard", payload).returncode, 0)  # the real record releases once
+
+    def test_torn_state_does_not_release_grace_or_nudge(self) -> None:
+        """A torn file blocks (grace) and suppresses (nudge); both are traced hook_state_unreadable."""
+        self.state_file("S1").parent.mkdir(parents=True)
+        self.state_file("S1").write_text("{torn")
+        payload = self.payload(self.transcript())
+        for _ in range(2):
+            self.assertEqual(self.run_hook("loop_state_guard", payload).returncode, 2)
+        self.state_file("ab").parent.mkdir(parents=True)
+        self.state_file("ab").write_text("{torn")
+        self.assertEqual(self.offload("ab"), "")
+        counts = count_reasons(self.directory / "state")
+        self.assertEqual((counts["hook_state_unreadable"], counts["nudge_first"]), (3, 0))
+
+    def test_ordinals_and_arms_persist(self) -> None:
+        """record_absent_block stores the ordinal and appends an arms row each time; nudged is untouched."""
+        with patch.dict(os.environ, self.environment):
+            for ordinal in (1, 2):
+                hook_state.record_absent_block(LoopState(self.directory / "p.json", "S1", ordinal, {}))
+            self.assertTrue(hook_state.mark_nudged("S1", "unregistered_loop_guard"))
+            self.assertFalse(hook_state.mark_nudged("S1", "unregistered_loop_guard"))
+        state: dict[str, Any] = json.loads(self.state_file("S1").read_text())
+        self.assertEqual(state["schema_version"], 1)
+        self.assertEqual(state["ordinals"], {"absent_blocked": 2})
+        self.assertEqual(
+            state["arms"],
+            [{"hook": "loop_state_guard", "ordinal": 1}, {"hook": "loop_state_guard", "ordinal": 2}],
+        )
+        self.assertEqual(state["nudged"], {"unregistered_loop_guard": True})
+
+    def test_unsafe_session_ids_have_no_state_path(self) -> None:
+        """An id that is not path-local gets no file (and so no grace, no dedupe) rather than a shared one."""
+        for session in ("", "?", "a/b", "x..y"):
+            self.assertIsNone(hook_state.state_path(session))
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -14,10 +14,10 @@ a packaged install, but it is normally unset in an orchestrator-issued Bash
 call, since it is not substituted into your own Bash tool calls. Before
 dispatching against whatever it resolves to, confirm the script actually
 exists at that path (e.g. `[ -f "$PLUGIN_ROOT/hooks/scripts/lib/graph_readiness.py" ]`)
-— a packaged install's cache copy can predate this script's introduction, and
-`graph_readiness.py`'s own `blocked` output is indistinguishable from a real
-non-terminal predecessor, so a missing-script call would silently read as
-every node being blocked rather than as a resolution failure. If the file is
+— a packaged install's cache copy can predate this script's introduction. The
+script prints JSON `{"ready": bool, "reason_code": ...}`; a missing script, or
+output that is not that JSON, is a resolution failure and is distinct from a
+typed not-ready verdict. If the file is
 missing, stop and report that PLUGIN_ROOT resolved to a directory without this
 script — do not dispatch. When `${CLAUDE_PLUGIN_ROOT}` is unset, do not
 construct or guess a path — reuse the plugin root you already have from this
@@ -33,10 +33,11 @@ file-existence check above is what catches a stale one, not a blanket ban on
 the directory. If neither `${CLAUDE_PLUGIN_ROOT}` nor a plugin-root path is
 available anywhere in this session's rendered context, stop — report that the
 plugin root is unresolvable and do not dispatch the node.
-Dispatch only nodes it reports `ready` for. Its `blocked` output means "not
-yet ready to dispatch" — it fail-closes the same way on missing or malformed
-`progress.json` as on a real non-terminal predecessor, so it cannot distinguish
-the two. Conversely, a node with no recorded incoming edges is vacuously
+Dispatch only nodes it reports `"ready": true` for (exit 0 iff ready). Its
+`reason_code` is exactly one of `ready`, `predecessor_pending` (a real
+non-terminal predecessor), `node_unknown` (the node is not in the graph) or
+`state_unreadable` (missing or malformed `progress.json`); treat each non-ready
+code as a different next step, never as one undifferentiated "blocked". Conversely, a node with no recorded incoming edges is vacuously
 `ready` — register the candidate's node and edges before querying, not after.
 Run ready independent nodes in one wave, but preserve every listed dependency.
 The orchestrator is the only writer of `progress.json`: collect a wave's results, then do one

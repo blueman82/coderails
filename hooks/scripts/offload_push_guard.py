@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import os
 import re
 import sys
 from json import JSONDecodeError, loads
@@ -12,6 +11,7 @@ from typing import cast
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from hooks.scripts.hook_common import JsonValue, log, output, read_payload
+from hooks.scripts.lib.hook_state import mark_nudged
 
 PUSH = re.compile(r"git(?: +-C +[^ ]+)? +push\b.*\b(?:origin +)?(?:main|master)\b", re.I)
 OFFLOAD = re.compile(
@@ -61,12 +61,8 @@ def main() -> int:
     )
     if not PUSH.search(text) or not OFFLOAD.search(text):
         return 0
-    log_path = Path(os.environ.get("CLAUDE_DISCIPLINE_LOG", str(Path.home() / ".claude/discipline.log")))
-    try:
-        if f"session={sid} nudged=1" in log_path.read_text(encoding="utf-8"):
-            return 0
-    except OSError:
-        pass
+    if not mark_nudged(sid, "offload_push_guard"):
+        return 0
     log(f"hook=offload_push_guard session={sid} nudged=1")
     output(
         "Stop",

@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import os
-import re
 import sys
 from pathlib import Path
 from typing import Any, cast
@@ -13,6 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from hooks.scripts.hook_common import output, read_payload
 from hooks.scripts.lib.agentic_loop_path import resolve_path, sanitise_session_id
 from hooks.scripts.lib.discipline_common import records, tool_uses
+from hooks.scripts.lib.hook_state import mark_nudged
 from hooks.scripts.lib.loop_state_common import count_invocations, log
 
 
@@ -62,16 +62,8 @@ def main() -> int:
         reason = "registered"
     elif count_invocations(transcript)[0]:
         reason = "skill_invoked"
-    else:
-        path = Path(os.environ.get("CLAUDE_DISCIPLINE_LOG", str(Path.home() / ".claude/discipline.log")))
-        try:
-            already = re.search(
-                r"hook=unregistered_loop_guard .*session=" + re.escape(session) + r" .*nudged=1", path.read_text()
-            )
-        except OSError:
-            already = None
-        if already:
-            reason = "already_nudged_this_session"
+    elif not mark_nudged(session, "unregistered_loop_guard"):
+        reason = "already_nudged_this_session"
     if reason:
         log(f"{prefix} dispatch_turns={turns} nudged=0 reason={reason}")
         return 0

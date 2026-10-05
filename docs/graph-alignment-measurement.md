@@ -242,7 +242,8 @@ python3 -m unittest scripts.tests.measure_graph_alignment_test
 `graph.py stop` records a `progress.stops[]` row; `loop_stall_guard` consumes the newest unconsumed row at the current
 revision in the same atomic write that increments the hook-owned `loop_stop_counts`, and falls back to the final
 anchored `LOOP-STOP:` line (trace `legacy_text_parse`). Absent-state grace reads `hook_state.json`
-`ordinals.absent_blocked`, falling back to the discipline.log regex (trace `legacy_log_parse`). The Claude hook honours a recorded row only if `graph.py stop` ran after the last user prompt (else trace
+`ordinals.absent_blocked` only; there is no discipline.log fallback any more (`legacy_log_parse` is no longer emitted, the
+name stays in `FALLBACKS` so history counts). The Claude hook honours a recorded row only if `graph.py stop` ran after the last user prompt (else trace
 `stale_stop_row`). The Codex guard writes the same `legacy_text_parse` trace row (command `graph_completion_guard`), so the
 ratio covers both providers; before this change Codex fallbacks appeared only in discipline.log and were not counted.
 Counters live in `scripts/graph_alignment_stops.py`. Flip condition: if `legacy_text_parse` still dominates `stops_consumed` over the
@@ -302,4 +303,22 @@ not wired to the parser (separately installed); `merge.py` itself writes no trac
 ```
 python3 scripts/tests/integrity_attestation_test.py
 python3 scripts/lib/state_counters.py
+```
+
+## Typed hook state, verdicts and readiness (measurement note)
+
+`hook_state.json` (hooks/scripts/lib/hook_state.py) replaces `discipline.log` greps for grace and nudge dedupe:
+`hook_state_unreadable` (outcome `missing` | `torn`), `nudge_first` and `nudge_suppressed` are trace rows; `arms[]` records
+each absent-state block. `EvalVerdict` blocked completions write `eval_verdict_<status>`; graph readiness writes
+`predecessor_pending` / `node_unknown`. All tally with `python3 scripts/lib/state_counters.py` (own module because
+`scripts/measure_graph_alignment.py` is at its line limit; integration into that script is a handoff). Flip condition:
+`hook_state_unreadable` with outcome `torn` above zero means a state write is failing (grace can no longer release);
+`nudge_suppressed` far above `nudge_first` is normal (one nudge per session). Limits: GO verdicts and `state_unreadable`
+readiness are not traced; first-Stop `missing` is expected once per unregistered loop session.
+
+**Reproduce.**
+
+```
+python3 scripts/lib/state_counters.py
+python3 hooks/scripts/tests/hook_state_test.py && python3 hooks/scripts/tests/graph_readiness_test.py
 ```
