@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check capabilities/profiles.json against Claude agent frontmatter and Codex agent sandbox modes."""
+"""Check capabilities/profiles.json against Claude agent frontmatter, Codex agent TOMLs and capabilities/mcp.json."""
 
 from __future__ import annotations
 
@@ -10,12 +10,9 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from hooks.scripts.lib.capability_profiles import TOOLS, load_profiles
+from scripts.lib.capability_validation import check_mcp, claude_errors, codex_errors, guarded, length_errors, write_mcp
 
 NEEDS_INSTRUCTION = ("tests.run", "pr.comment")
-# Tools a guarded (no shell.raw/worktree.write) agent may hold. Task/Skill/mcp__* would let it reach tools the hook does
-# not gate (a general-purpose child has raw shell), so anything else is drift. Skill is allowed only where listed.
-GUARDED_TOOLS = {"Read", "Grep", "Glob", "Bash"}
-GUARDED_EXTRA = {"preflight-scout": {"Skill"}}  # runs the planning/premortem skills
 
 
 def frontmatter(text: str) -> dict[str, list[str]]:
@@ -46,8 +43,8 @@ def validate(root: Path, profiles: dict[str, Any]) -> list[str]:
             if name in agents and name not in files:
                 errors.append(f"{harness}: profile {name} has no agent file")
     for name, caps in agents.items():
+        errors += length_errors(name, caps)
         write = "worktree.write" in caps
-        tool_caps = any(cap in TOOLS for cap in caps)
         needs = [cap for cap in caps if cap in NEEDS_INSTRUCTION]
         if name in claude:
             text = claude[name].read_text(encoding="utf-8")
@@ -56,14 +53,12 @@ def validate(root: Path, profiles: dict[str, Any]) -> list[str]:
                 errors.append(f"claude: {name} frontmatter must have an inline `tools: A, B` line")
                 continue
             tools = set(meta["tools"]) - set(meta.get("disallowedTools", []))
-            if "shell.raw" not in caps and not write:
-                extra = tools - GUARDED_TOOLS - GUARDED_EXTRA.get(name, set())
-                if extra:
-                    errors.append(f"claude: {name} guarded agent holds ungated tools {sorted(extra)}")
+            if guarded(caps):  # exact derived MCP names, no shell, no native read/edit tools (decision D4)
+                errors += claude_errors(name, caps, meta["tools"])
             if write != bool({"Write", "Edit"} & tools):
                 errors.append(f"claude: {name} worktree.write={write} disagrees with frontmatter tools")
-            if ("Bash" in tools) != (tool_caps or "shell.raw" in caps):
-                errors.append(f"claude: {name} Bash tool disagrees with shell.raw/capability tools in profile")
+            if ("Bash" in tools) != ("shell.raw" in caps):
+                errors.append(f"claude: {name} Bash tool disagrees with shell.raw in profile")
             if needs and "capability.py" not in text:
                 errors.append(f"claude: {name} profile grants {needs} but agent text never names capability.py")
         if name in codex:
@@ -71,18 +66,26 @@ def validate(root: Path, profiles: dict[str, Any]) -> list[str]:
             sandbox = re.search(r'^sandbox_mode\s*=\s*"([^"]+)"', text, re.M)
             if write != (sandbox is None or sandbox.group(1) != "read-only"):
                 errors.append(f"codex: {name} worktree.write={write} disagrees with sandbox_mode")
+            if guarded(caps):
+                errors += codex_errors(name, text)
             if needs and "capability.py" not in text:
                 errors.append(f"codex: {name} profile grants {needs} but agent text never names capability.py")
     return errors
 
 
-def main() -> int:
-    """Print every disagreement and exit 1, or exit 0 when the profiles agree."""
+def main(argv: list[str]) -> int:
+    """`--write-mcp` regenerates capabilities/mcp.json; with or without `--check`, print every disagreement (exit 1)."""
     root = Path(__file__).resolve().parents[1]
-    errors = validate(root, load_profiles(root))
+    profiles = load_profiles(root)
+    if argv == ["--write-mcp"]:
+        print(f"wrote {write_mcp(root, profiles).relative_to(root)}")
+    elif argv not in ([], ["--check"]):
+        print("usage: capability_profiles_validate.py [--check | --write-mcp]", file=sys.stderr)
+        return 2
+    errors = validate(root, profiles) + check_mcp(root, profiles)
     print("\n".join(errors) if errors else "capability profiles OK")
     return 1 if errors else 0
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(main(sys.argv[1:]))

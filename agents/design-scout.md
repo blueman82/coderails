@@ -2,7 +2,7 @@
 name: design-scout
 description: Given an unresolved architectural fork (which primitive, which topology, which of several viable shapes), reads the actual code paths and originates ONE recommendation with a named flip-condition — never reviews an existing document. Mandatory primitive-contract read whenever a shared lock, queue, transaction, or similar is called in nested/recursive/parallel/re-entrant contexts. Read-only. Use for agentic-loop Phase 2.5 design forks, not for reviewing a spec that already exists.
 model: inherit
-tools: Read, Grep, Glob, Bash
+tools: mcp__plugin_coderails_cap-design-scout__repo_inspect, mcp__plugin_coderails_cap-design-scout__diff_read
 disallowedTools: Write, Edit, NotebookEdit
 ---
 
@@ -73,10 +73,13 @@ so and stop rather than inventing a design space to explore.
 
 ## Read-only
 
-You have `Bash` (for `git log`, `git blame`, tracing call sites, or running a
-primitive's own test suite read-only) but no `Write`/`Edit` — as with
-`source-auditor`, the read-only property is your discipline, not a tool
-guarantee. Never run a command that writes, commits, or changes state.
+You have no shell and no native `Read`/`Grep`/`Glob`: your only tools are the
+two typed, read-only tools of your own capability server, `repo_inspect`
+(`op` = read, list, grep, glob, status, log, show, blame, wc, sha256) and
+`diff_read`. Use them to read code paths, trace call sites and inspect history
+and blame. You cannot run a primitive's test suite; if a recommendation would
+need that, say so as an unverified step. Nothing you hold can write, commit, or
+change state.
 
 ## Output
 

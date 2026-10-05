@@ -271,7 +271,8 @@ class GateTests(HookCase):
             names,
             [
                 "destructive_bash_gate.py", "enforce_pr_workflow.py", "test_gate.py",
-                "verification_volume_ceiling.py", "reviewer_bash_allowlist.py", "action_authority_gate.py",
+                "verification_volume_ceiling.py", "reviewer_bash_allowlist.py", "subagent_identity_gate.py",
+                "action_authority_gate.py",
             ],
         )  # fmt: skip
         self.assertGreaterEqual(group[-1]["timeout"], 5)

@@ -1,0 +1,44 @@
+{
+  "mcpServers": {
+    "cap-deploy-safety-reviewer": {
+      "command": "python3",
+      "args": [
+        "${CLAUDE_PLUGIN_ROOT}/scripts/capability_mcp.py",
+        "--role",
+        "deploy-safety-reviewer"
+      ]
+    },
+    "cap-design-scout": {
+      "command": "python3",
+      "args": [
+        "${CLAUDE_PLUGIN_ROOT}/scripts/capability_mcp.py",
+        "--role",
+        "design-scout"
+      ]
+    },
+    "cap-disposition-scout": {
+      "command": "python3",
+      "args": [
+        "${CLAUDE_PLUGIN_ROOT}/scripts/capability_mcp.py",
+        "--role",
+        "disposition-scout"
+      ]
+    },
+    "cap-preflight-scout": {
+      "command": "python3",
+      "args": [
+        "${CLAUDE_PLUGIN_ROOT}/scripts/capability_mcp.py",
+        "--role",
+        "preflight-scout"
+      ]
+    },
+    "cap-source-auditor": {
+      "command": "python3",
+      "args": [
+        "${CLAUDE_PLUGIN_ROOT}/scripts/capability_mcp.py",
+        "--role",
+        "source-auditor"
+      ]
+    }
+  }
+}
