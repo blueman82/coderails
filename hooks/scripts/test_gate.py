@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import select
 import subprocess
 import sys
@@ -14,9 +13,8 @@ from pathlib import Path
 from typing import cast
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from hooks.scripts.lib.argv_match import git_calls
 from hooks.scripts.test_output import begin_run, finish_run
-
-COMMIT_COMMAND = re.compile(r"\bgit +commit\b")
 
 
 def read_payload(timeout_seconds: float = 5.0) -> str:
@@ -83,7 +81,7 @@ def deny(command: str, output: str) -> None:
 
 def main() -> int:
     """Deny a commit only when the configured project test command fails."""
-    if not (command := command_from(read_payload())) or not COMMIT_COMMAND.search(command):
+    if not (command := command_from(read_payload())) or not any(sub == "commit" for sub, _, _ in git_calls(command)):
         return 0
     if not (test_command := configured_test_command()):
         return 0

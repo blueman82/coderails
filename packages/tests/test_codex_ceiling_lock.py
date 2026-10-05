@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import subprocess
@@ -33,11 +34,13 @@ class CeilingLockTests(unittest.TestCase):
             state = data / "verification-ceiling"
             state.mkdir(parents=True)
             subprocess.run(["git", "-C", str(repo), "init", "-q", "-b", "b"], check=True)
-            lock = next(iter([state / "b__full-suite.count.lock"]))
+            common = os.path.realpath(repo / ".git")
+            key = hashlib.sha1((common + os.path.realpath(repo)).encode()).hexdigest()
+            lock = state / f"{key}__full-suite.count.lock"
             lock.mkdir()
             (lock / "owner").write_text(json.dumps({"pid": 4000000, "start": "", "ts": 0}))
             self.assertEqual(run_hook(data, repo), "")
-            self.assertEqual((state / "b__full-suite.count").read_text(), "1\n")
+            self.assertEqual((state / f"{key}__full-suite.count").read_text(), "1\n")
             self.assertFalse(lock.exists())
 
 

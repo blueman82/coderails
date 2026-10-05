@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 from typing import Any, cast
 
+from . import argv_match
 from .destructive_patterns import git_output
 from .discipline_common import tool_uses
 
@@ -29,14 +30,13 @@ def operation(command: str) -> tuple[str, str, str]:
         for pattern, name in (
             (r"^gh\s+pr\s+create(?:\s|$)", "create"),
             (r"^gh\s+pr\s+merge(?:\s|$)", "merge"),
-            (r"^git\s+merge(?:\s|$)", "git_merge"),
-            (r"^git\s+push(?:\s|$)", "git_push"),
             ("^" + MERGE_SCRIPT, "merge"),
         ):
             if re.search(pattern, segment):
                 return name, segment, ""
-        if match := re.search(r"^git\s+-C\s+(\S+)\s+(merge|push)(?:\s|$)", segment):
-            return f"git_{match[2]}", segment, match[1]
+        call = argv_match.git_invocation((argv_match.argvs(segment) or [[]])[0])  # git -C/-c/--no-pager, /usr/bin/git
+        if call and call[0] in {"merge", "push"}:
+            return f"git_{call[0]}", segment, call[1]
     return "", "", ""
 
 
@@ -54,8 +54,10 @@ def targets_main(command: str, cwd: str, target: str, name: str) -> bool:
         return False
     if re.search(r":(refs/heads/)?(main|master)([\s;&|)]|$)", command):
         return True
-    match = re.search(r"\bgit(?:\s+-C\s+\S+)?\s+push\s+(.*)", command)
-    return bool(match and re.search(r"(^|\s)\+?(refs/heads/)?(main|master)([\s;&|)]|$)", match[1]))
+    return any(
+        subcommand == "push" and any(re.fullmatch(r"\+?(refs/heads/)?(main|master)", token) for token in rest)
+        for subcommand, _, rest in argv_match.git_calls(command)
+    )
 
 
 _WRAPPER = re.compile(r"^(?:[A-Za-z_]\w*=\S*|env|sudo|time|command|exec|nohup)\s+")

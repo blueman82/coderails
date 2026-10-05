@@ -6,6 +6,8 @@ import re
 import subprocess
 from pathlib import Path
 
+from . import argv_match, protected_paths
+
 
 def normalize_ifs(command: str) -> str:
     """Normalize IFS expansions using the hook's bounded literal rules."""
@@ -94,14 +96,18 @@ def permanent_pattern(command: str, cwd: str) -> tuple[str, str]:
         if matches:
             _, text, identifier = min(matches)
             return text, identifier
+    for subcommand, _, rest in argv_match.git_calls(command):  # -C/-c forms, wrappers and the short -n
+        if subcommand == "commit" and {"--no-verify", "-n"} & argv_match.flags(rest, "mFCct"):
+            return "git commit --no-verify", "git-commit-no-verify"
     return "", ""
 
 
 def source_write(command: str, cwd: str) -> str:
     """Return a source-edit denial, preserving target-repository branch resolution."""
-    extension = r"\.(py|ts|tsx|js|jsx|go)([\s'\"]|$)"
-    plugin = r"(^|[\s/'\"])(skills/[^/]+/SKILL\.md|commands/[^/]+\.md)([\s'\"]|$)"
-    source = f"{extension}|{plugin}"
+    try:
+        source, unreadable = protected_paths.source_regex(protected_paths.load()), ""
+    except ValueError:  # fail closed: every target is a source file until the policy is repaired
+        source, unreadable = ".", f"{protected_paths.UNREADABLE}: "
     target = ""
     if re.search(r"^\s*(cp|mv)\b", command, re.I):
         target = command.split()[-1]
@@ -110,7 +116,7 @@ def source_write(command: str, cwd: str) -> str:
         target = match[1] if match else ""
     if target and re.search(source, target, re.I) and target_branch(target, cwd) in {"main", "master"}:
         return (
-            f"In-Bash source write (cp/mv/dd) on main branch blocked.\nFull command: {command}\n"
+            f"{unreadable}In-Bash source write (cp/mv/dd) on main branch blocked.\nFull command: {command}\n"
             "Writing source files via cp/mv/dd on main is blocked. Switch to a feature branch."
         )
     editing = False
@@ -127,7 +133,7 @@ def source_write(command: str, cwd: str) -> str:
     branch = target_branch(target, cwd) if editing else ""
     if branch in {"main", "master"}:
         return (
-            f"In-Bash source edit on {branch} branch blocked.\nFull command: {command}\n"
+            f"{unreadable}In-Bash source edit on {branch} branch blocked.\nFull command: {command}\n"
             "Editing source files via sed/perl/redirect/tee on main is blocked. "
             "Switch to a feature branch or use the Edit tool."
         )

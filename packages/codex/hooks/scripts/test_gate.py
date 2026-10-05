@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import select
 import subprocess
 import sys
@@ -14,9 +13,9 @@ from contextlib import suppress
 from pathlib import Path
 from typing import cast
 
+from lib.argv_match import git_calls
 from test_output import begin_run, finish_run
 
-COMMIT_COMMAND = re.compile(r"(^|[\s;&|])git\s+commit(\s|$)")
 TEMPFILE_ERROR = "Test gate could not create a temporary output file, so the commit is blocked."
 
 
@@ -114,7 +113,7 @@ def main() -> int:
     """Run the trusted command for Git commits and deny a failed command."""
     payload = payload_object(read_input())
     command = command_for(payload)
-    if not COMMIT_COMMAND.search(command):
+    if not any(sub == "commit" for sub, _, _ in git_calls(command)):
         return 0
     raw_cwd = payload.get("cwd")
     repo_root = repo_for(raw_cwd if isinstance(raw_cwd, str) and raw_cwd else os.getcwd())

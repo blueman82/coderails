@@ -272,6 +272,35 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   authenticated, write-permission login), not the content. Config `eval_level: off` skips the check (absent or any other
   value enforces) and records `eval-level/skipped/eval_level_off`.
 
+## Commit, push or ceiling gate behaves differently than the text suggests (argv classifier)
+
+- Symptom: `test_gate` did not run (or ran) for a `git commit`; `destructive_bash_gate` denied or allowed a
+  `--no-verify`/`-n` commit; `enforce_pr_workflow` / the Codex action hook missed a `git -C d push origin main`; the
+  verification-volume ceiling denied the 3rd `run_all.py`, `test_codex_hooks.py` or `post_evals.py post|validate-structure`
+  after a branch rename, or did not deny in a second repo; an edit on main was denied with `protected_paths_unreadable`.
+- Mechanism: `hooks/scripts/lib/argv_match.py` (byte-identical Codex copy) splits the command on `; && || | & ( )` and
+  newlines outside quotes, unwraps `env/sudo/command/exec/time/nohup/nice`, absolute paths and `bash -c '...'`, and
+  recognises git by subcommand (global options `-C dir`, `-c k=v`, `--git-dir`, `--no-pager`, `-p` skipped; `-nm` decoded) and
+  scripts by basename plus operation. Quoted text is one token, so `echo "git commit"` matches nothing. If shlex cannot
+  parse (unbalanced quote) the classifier falls back to a whitespace split, which over-matches by design.
+- Ceiling key: `sha1(realpath(git common dir) + realpath(toplevel))` plus the target, in
+  `<loop dir>/verification-ceiling/` (Codex `$PLUGIN_DATA/verification-ceiling/`). A renamed branch keeps its count; a
+  linked worktree or a second clone starts at zero. To reset, delete the one count file (the digest is printed in no
+  message; compute it, or list the directory by mtime). The count is mirrored into `progress.json`
+  `work_units[u].verification{run_all,post_evals}` when a unit's `worktree` equals the toplevel (no unit carries
+  `worktree` until `add-unit --worktree` exists, so today only the file counter applies).
+- `protected_paths_unreadable`: `policy/protected_paths.json` (both plugin copies) is missing, torn or ill-shaped, so
+  `no_edit_on_main` and the in-Bash source-write check refuse every non-owner edit on main/master until it is repaired.
+  Owner permission files stay denied on every branch. Keys: `source_extensions`, `plugin_source_globs`, `doc_extensions`,
+  `doc_names`, `settings_files`. Adding `.rs` to `source_extensions` protects `sed -i x.rs` on main with no code change;
+  `no_edit_on_main` treats every suffix not in `doc_extensions`/`doc_names` as protected already.
+- Query: `trace.by_reason` for `argv/denied/ceiling_exceeded` and `argv/denied/protected_paths_unreadable`
+  (`python3 scripts/measure_graph_alignment.py --root . | python3 scripts/lib/workflow_gate_counters.py`).
+  See `docs/workflow-gates-measurement.md`.
+- Limits: still no shell parser. `eval`, `xargs`, aliases, shell functions, `$(...)` built at run time and scripts that
+  themselves run `git commit` or `run_all.py` are not seen; `git commit --no-ver` style abbreviations of `--no-verify`
+  and `--work-tree`-relative targets are not resolved. A cooperating-agent safeguard, not a barrier.
+
 ## Action-authority hook denied a merge or push (or warned in advisory)
 
 - Symptom: `gh pr merge` or `git push` to main/master is denied with "needs an action receipt (<code>)" (enforce), or a

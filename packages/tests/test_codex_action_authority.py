@@ -127,6 +127,9 @@ class MatchParityTests(unittest.TestCase):
         "git push origin feature && git push origin main",
         "cd sub && git push", "gh pr merge 5", "gh -R o/r pr merge 5", "gh pr merge 1 && gh pr merge 2",
         "git push --dry-run origin main", "ls", "git push origin HEAD:main", "git merge main", "bash merge.py 7",
+        "git -C sub push origin main", "git -c a=b push origin main", "git --no-pager push origin main",
+        "/usr/bin/git push origin main", "env A=1 git -C sub merge x", "bash -c 'git -c a=b push origin main'",
+        'echo "git -c a=b push origin main"', "git log --grep push", "git -C sub merge --abort",
     )  # fmt: skip
 
     def test_guarded_segments_identical_on_main_and_feature(self) -> None:
