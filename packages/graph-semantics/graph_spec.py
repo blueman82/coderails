@@ -11,6 +11,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import os
 import re
 from collections.abc import Callable
 from graphlib import CycleError, TopologicalSorter
@@ -19,7 +20,8 @@ from typing import Any, cast
 
 SPEC_FILE = Path(__file__).with_name("graph-spec.yaml")
 POLICY_FILE = Path(__file__).with_name("policy.yaml")
-PROFILES = ("units-only", "full")
+PROFILES = ("units-only", "full")  # ordered: a stamped graph may not sit below the policy profile
+OFF_SWITCH = "CODERAILS_GRAPH_SPEC"  # set to off/0/false to skip `check` (default ON)
 KINDS = ("node", "join", "guard")
 PHASES = ("prep", "freeze", "build", "tail")
 INT_KEYS = ("design_doc_min_units", "loop_evals_min_units", "retry_max", "repair_attempts_max")
@@ -294,26 +296,41 @@ def lane(spec: dict[str, Any], policy: dict[str, Any], state: dict[str, Any], un
     join_id = spec["unit_join"]
     join_node = next(n for n in spec["nodes"] if n["id"] == join_id)
     inputs = _needs(join_id, _requires(join_node, profile), set(new)) if join or "spec_sha256" in graph else []
+    others = {  # other spec joins already in the graph (e.g. J2.8) that take this unit's per-unit node
+        n["id"]: _needs(n["id"], _requires(n, profile), set(new))
+        for n in spec["nodes"]
+        if n["kind"] == "join" and n["id"] != join_id and n["id"] in graph["joins"]
+    }
     return {
         "nodes": new,
         "edges": edges,
         "join": {"id": join_id, "node": fresh_node(join_node, None, policy), "inputs": inputs},
+        "other_joins": {j: found for j, found in others.items() if found},
     }
 
 
 def check(state: dict[str, Any]) -> None:
     """Refuse a graph that drifted from the spec: a missing spec edge, and for a stamped graph any node drift."""
+    if os.environ.get(OFF_SWITCH, "").lower() in ("off", "0", "false"):
+        return
     spec, graph = load_spec(), state["graph"]
     nodes = set(graph["nodes"])
     if graph.get("spec_sha256") is not None:
         profile = graph.get("spec_profile")
         if graph["spec_sha256"] != spec_sha256(spec) or profile not in PROFILES:
             raise SpecError("spec_hash_mismatch", "the graph was instantiated from a different spec")
-        wanted = set(expand(spec, load_policy(), sorted(state.get("work_units", {})), profile)["nodes"])
+        policy = load_policy()
+        if PROFILES.index(profile) < PROFILES.index(policy["graph"]["profile"]):
+            raise SpecError("spec_profile_downgrade", f"graph profile {profile} is below policy graph.profile")
+        built = expand(spec, policy, sorted(state.get("work_units", {})), profile)
+        wanted = set(built["nodes"])
         if nodes - wanted:
             raise SpecError("spec_unknown_node", f"nodes not in the spec: {sorted(nodes - wanted)}")
         if wanted - nodes:
             raise SpecError("spec_node_missing", f"spec nodes absent: {sorted(wanted - nodes)}")
+        have = {j: set(record["inputs"]) for j, record in graph["joins"].items() if j in built["joins"]}
+        if have != built["joins"]:
+            raise SpecError("spec_join_inputs", "a spec join is missing or does not take every unit it must")
     present = {(edge["from"], edge["to"]) for edge in graph["edges"]}
     for source, target in sorted(required_edges(spec, nodes)):
         if (source, target) not in present:

@@ -144,6 +144,10 @@ def register_unit(
             raise RecoveryRefusedError("add_unit_refused_state", f"{gate_id} is already released", (node_id,))
         gate["inputs"].extend(gate_spec["inputs"])
         graph["nodes"].setdefault(gate_id, gate_spec["node"])
+    for gate_id, found in added["other_joins"].items():
+        if graph["joins"][gate_id]["released"]:
+            raise RecoveryRefusedError("add_unit_refused_state", f"{gate_id} is already released", (node_id,))
+        graph["joins"][gate_id]["inputs"].extend(found)
     return proposed
 
 

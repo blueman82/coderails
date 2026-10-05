@@ -225,6 +225,46 @@ class SpecEnforcementTests(unittest.TestCase):
                     self.assertEqual(result.returncode, 1, code)
                     self.assertIn(code, result.stderr)
 
+    def test_dropped_join_input_is_refused_on_a_stamped_graph(self) -> None:
+        """Leaving a unit out of the all-units join, or removing the join, is refused with spec_join_inputs."""
+        for name in PROVIDERS:
+            with self.subTest(name), tempfile.TemporaryDirectory() as scratch:
+                controller = Controller(Path(scratch), name)
+                self.assertEqual(controller.start().returncode, 0)
+                self.assertEqual(controller.run("instantiate", *self.args("units-only", "1", "2")).returncode, 0)
+                good = controller.read()
+                short = copy.deepcopy(good)
+                short["graph"]["joins"]["J12-all-units"]["inputs"].remove("U3[2]")
+                gone = copy.deepcopy(good)
+                del gone["graph"]["joins"]["J12-all-units"]
+                for state in (short, gone):
+                    write_state(controller, state)
+                    result = controller.run("inspect")
+                    self.assertEqual(result.returncode, 1)
+                    self.assertIn("spec_join_inputs", result.stderr)
+
+    def test_stamped_profile_cannot_fall_below_the_policy_floor(self) -> None:
+        """A units-only stamp under a full policy is refused; a full stamp under units-only is fine."""
+        with tempfile.TemporaryDirectory() as scratch:
+            controller = Controller(Path(scratch), "claude")
+            self.assertEqual(controller.start().returncode, 0)
+            self.assertEqual(controller.run("instantiate", *self.args("units-only", "1")).returncode, 0)
+            state = controller.read()
+            floor = {**graph_spec.load_policy(), "graph": {"profile": "full"}}
+            with patch.object(graph_spec, "load_policy", return_value=floor):
+                self.assertRaisesRegex(graph_spec.SpecError, "spec_profile_downgrade", graph_spec.check, state)
+            graph_spec.check(state)
+
+    def test_env_off_switch_skips_the_check(self) -> None:
+        """CODERAILS_GRAPH_SPEC=off lets a spec-violating graph load on both providers; unset refuses again."""
+        for name in PROVIDERS:
+            with self.subTest(name), tempfile.TemporaryDirectory() as scratch:
+                controller = self.run_provider(name, scratch)
+                write_state(controller, inject_join(controller.read(), with_edge=False))
+                self.assertEqual(controller.run("inspect").returncode, 1)
+                controller.env["CODERAILS_GRAPH_SPEC"] = "off"
+                self.assertEqual(controller.run("inspect").returncode, 0)
+
     @staticmethod
     def args(profile: str, *units: str) -> list[str]:
         """The shared instantiate argument tail."""

@@ -19,6 +19,8 @@ REASONS = (
     "spec_unknown_node",
     "spec_node_missing",
     "spec_hash_mismatch",
+    "spec_join_inputs",
+    "spec_profile_downgrade",
     "instantiate_ok",
     "instantiate_noop",
     "instantiate_refused_foreign",

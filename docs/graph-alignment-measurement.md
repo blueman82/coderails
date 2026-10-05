@@ -365,7 +365,7 @@ instantiate_noop|instantiate_refused_*`, `plan/reported/skip_when_met`); `python
 condition: a sustained `spec_edge_missing` after the first week means hand-built or foreign graphs are loading; any
 `spec_hash_mismatch` means a spec edit landed while a stamped loop was live. `skip_when_met` against actual skipped nodes
 shows whether the machine predicate matches what orchestrators record. Limits: default profile stays `units-only`
-(switching it to `full` adds about 25 nodes per loop and needs owner approval); join inputs are not enforced on load;
+(switching it to `full` adds about 25 nodes per loop and needs owner approval); join inputs are enforced on stamped graphs only (`spec_join_inputs`) and a stamp below the policy profile is `spec_profile_downgrade`; unstamped graphs and a deleted stamp stay the weaker check (owner decision); `CODERAILS_GRAPH_SPEC=off` disables the check;
 judgement skip rules stay prose; the spec files are plain same-user files, so this is drift detection, not tamper evidence.
 
 **Reproduce.**
