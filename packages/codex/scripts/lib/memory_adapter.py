@@ -185,6 +185,8 @@ def list_records(
     session_id: str = "",
 ) -> list[Record] | Degraded:
     """Return current, non-expired, non-restricted records with provenance (id, cite, quote)."""
+    if scope == "loop" and not loop_id:
+        return _fail("list", "bad_record", session_id, loop_id)  # unfiltered rows would be mislabeled loop-scoped
     down = probe()
     if down:
         return _fail("list", down.reason, session_id, loop_id)

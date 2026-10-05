@@ -197,6 +197,13 @@ class ReadTests(Base):
         self.assertEqual(call[:4], ["know", "list", "--status", "current"])
         self.assertIn("--scope-loop", call)
 
+    def test_loop_scope_without_loop_id_refused(self) -> None:
+        """A loop-scope read with no loop id would list every scope mislabeled as loop; it degrades instead."""
+        out = ma.list_records("loop", None, session_id="s1")
+        assert isinstance(out, ma.Degraded)
+        self.assertEqual(out.reason, "bad_record")
+        self.assertEqual([c for c in self.argv() if c[:2] == ["know", "list"]], [])
+
     def test_tag_and_query_filter(self) -> None:
         """Tags and query filter client-side."""
         self.assertEqual(len(ma.list_records("loop", "L1", tags=["run-a"], session_id="s1")), 1)  # type: ignore[arg-type]
