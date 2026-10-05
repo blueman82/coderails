@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import errno
 import hashlib
 import json
 import os
@@ -18,7 +17,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, cast
 
-RESOURCE_ERRNOS = frozenset({errno.EMFILE, errno.ENFILE, errno.EAGAIN, errno.ENOMEM})
+from lib.hook_telemetry import RESOURCE_ERRNOS, child_failed
+
 RESOURCE_MESSAGE = (
     "Host resource exhaustion (for example too many open files) prevented reading the graph state. "
     "The state is not known to be invalid: retry, and do not repair progress.json for this."
@@ -359,7 +359,7 @@ def graph_output(graph: Path, *arguments: str) -> dict[str, object] | None:
         if error.errno in RESOURCE_ERRNOS:
             raise HostResourceError(error.errno, str(error)) from error
         return None
-    if result.returncode != 0:
+    if child_failed("graph_output", result.returncode):
         return None
     try:
         decoded: object = json.loads(result.stdout)

@@ -122,4 +122,6 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    from hooks.scripts.lib.hook_telemetry import run
+
+    raise SystemExit(run("loop_state_guard", main))

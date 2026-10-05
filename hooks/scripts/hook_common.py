@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import errno
 import json
 import os
 import select
@@ -10,6 +11,17 @@ import time
 from datetime import datetime
 from pathlib import Path
 from typing import Union, cast
+
+RESOURCE_ERRNOS = frozenset({errno.EMFILE, errno.ENFILE, errno.EAGAIN, errno.ENOMEM})
+RESOURCE_MESSAGE = (
+    "Host resource exhaustion (for example too many open files) prevented reading hook state. "
+    "The state is not known to be invalid: retry, and do not repair progress.json for this."
+)
+
+
+class HostResourceError(OSError):
+    """The host could not start or read for a hook; this says nothing about graph validity."""
+
 
 JsonScalar = Union[None, bool, int, float, str]
 JsonValue = Union[JsonScalar, list["JsonValue"], dict[str, "JsonValue"]]
@@ -31,7 +43,10 @@ def read_payload(timeout_seconds: float = 5.0) -> dict[str, JsonValue]:
             chunks.extend(chunk)
         raw = chunks.decode(errors="replace")
         decoded = cast(JsonValue, json.loads(raw)) if raw else {}
-    except (OSError, ValueError, json.JSONDecodeError):
+    except (OSError, ValueError, json.JSONDecodeError) as error:
+        if isinstance(error, OSError) and error.errno in RESOURCE_ERRNOS:
+            name = errno.errorcode.get(error.errno or 0, "?")
+            log(f"hook=read_payload resource_exhausted errno={name} {RESOURCE_MESSAGE}")
         return {}
     return decoded if isinstance(decoded, dict) else {}
 

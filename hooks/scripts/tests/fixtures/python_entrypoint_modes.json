@@ -80,6 +80,7 @@
   "hooks/scripts/lib/loop_state_common.py": "100755",
   "hooks/scripts/lib/pr_merge_gate.py": "100644",
   "hooks/scripts/lib/pr_workflow_match.py": "100644",
+  "hooks/scripts/lib/hook_telemetry.py": "100644",
   "hooks/scripts/lib/trace_row.py": "100644",
   "hooks/scripts/loop_dispatch_guard.py": "100755",
   "hooks/scripts/loop_stall_guard.py": "100755",

@@ -60,4 +60,6 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    from hooks.scripts.lib.hook_telemetry import run
+
+    raise SystemExit(run("check_confidence_labels", main))

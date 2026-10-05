@@ -181,4 +181,6 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    from lib.hook_telemetry import run
+
+    raise SystemExit(run("graph_completion_guard", main))
