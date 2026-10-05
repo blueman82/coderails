@@ -153,7 +153,7 @@ When a phase reaches "review the PR" (after a `/workflow` agent has pushed a PR,
 
 Before spawning a "bug fix" agent for any reported regression, use a two-agent split: spawn `subagent_type: general-purpose` with explicit instructions from `agents/source-auditor.md` FIRST to disprove-the-premise, THEN `subagent_type: general-purpose` for the fix. Keep the audit and implementation in separate native agents, each with the corresponding explicit instructions.
 
-**Disprove-the-premise agent, `subagent_type: general-purpose` with explicit instructions from `agents/source-auditor.md`, always first:** this agent's prompt must require:
+**Disprove-the-premise agent, `subagent_type: general-purpose` with explicit instructions from `agents/source-auditor.md`, always first** (if it must re-run tests, put the absolute `${CLAUDE_PLUGIN_ROOT}/scripts/capability.py` path, resolved per [execution-graph.md](execution-graph.md), in its prompt; `source-auditor.md` rule 7 depends on it): this agent's prompt must require:
 
 > Verify the symptom in the source-of-truth FIRST. Slack pin-bar / GitHub PR state / Jira board / browser tabs all cache. Reproduce the bug via API call, prod log, DDB read, or git diff before any code change. If the symptom can't be reproduced via SOT, STOP and report — don't ship a fix to a non-bug.
 
