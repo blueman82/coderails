@@ -211,7 +211,7 @@ Compact metrics and expiry records persist separately. Emitted bytes do not esta
 
 ## Sandboxed workers
 
-With `config.sandbox_workers: true` (`.coderails/workflow.config.yaml`), the
+With `config.sandbox_workers: true` (`.coderails/workflow.config.yaml`; status `read_by_prose_only`: the agentic-loop skill reads it from the resolve-config text and no script does), the
 agentic-loop dispatches implementation-unit workers via
 `@anthropic-ai/sandbox-runtime` (`scripts/sandbox/spawn_sandboxed_worker.py`),
 an OS-enforced filesystem containment layer (Seatbelt on macOS, bubblewrap on

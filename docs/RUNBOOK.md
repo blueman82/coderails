@@ -19,6 +19,18 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
 - Remediation: the writer fails open, so an unwritable directory or an unsafe session id (contains `/` or `..`,
   or is empty) silently drops rows. Fix the directory permissions; do not make the gate depend on the write.
 
+## Gate seems off (config key or wiki schema)
+
+- Symptom: a configured gate (wiki taxonomy, wiki-debt, integrity, eval signing) does nothing, or a config key seems ignored.
+- Query: `python3 scripts/lib/config.py resolve-config --json | jq .unknown_keys` (also `.findings`); counts via
+  `python3 scripts/lib/config_counters.py` for `config_unknown_key`, `config_bad_type`, `config_unreadable`,
+  `wiki_schema_missing`, `wiki_schema_invalid`, `wiki_schema_legacy` (scope with `--since 2026-10-05T00:00:00`; the same rows
+  also appear in `measure_graph_alignment.py --json` under `trace.by_reason`; trace rows: `config/warned/<code>`, `wiki_taxonomy_gate/failed_open/<code>`).
+- Remediation: fix the key (the finding carries a did-you-mean hint) or the value type; for `wiki_schema_*` restore or
+  repair `wiki.schema.json` (`page_types` non-empty list of directory names). Both are fail-open by design: findings never
+  change a gate's decision, and a stale AGENTS.md Page types table fails the build (`config_docs_drift_test.py`), not the hook. `wiki_schema_legacy` means a vault still has only
+  `AGENTS-wiki-schema.md`: policing continues from its Page types table; add `wiki.schema.json` to retire the fallback.
+
 ## Discipline lint advisories climbing
 
 - Symptom: `confidence_labels` or `verify_loop` advisories climb. These two hooks no longer block (demoted by user

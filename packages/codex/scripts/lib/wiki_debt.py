@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from . import git_common as git
-from .config import config_path, config_value
+from .config import config_path, settings
 
 
 def covered(vault: Path, ref: str, repository: str, number: int) -> bool:
@@ -98,10 +98,9 @@ def has_wiki_ingest_for_merged_prs(number: str) -> None:
             Path(config).read_text(encoding="utf-8")
         except OSError as error:
             raise git.WorkflowError("Could not read wiki-ingest debt configuration") from error
-    epoch = config_value(config, "wiki_debt_epoch_pr") if config else ""
-    relative = config_value(config, "wiki_path") if config else ""
-    if relative in ("null", "~"):
-        relative = ""
+    values = settings(config) if config else {}
+    epoch = "" if values.get("wiki_debt_epoch_pr") is None else str(values["wiki_debt_epoch_pr"])
+    relative = values.get("wiki_path") or ""
     if not epoch or not relative:
         print("• Wiki-ingest debt gate skipped — wiki_debt_epoch_pr and/or wiki_path not configured")
         return
