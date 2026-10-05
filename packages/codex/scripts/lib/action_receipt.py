@@ -182,7 +182,7 @@ def read_receipt(path: Path) -> dict[str, Any] | None:
         if path.stat().st_size > MAX_RECEIPT_BYTES:
             return None
         raw: object = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+    except (OSError, ValueError, RecursionError):  # deeply nested "[[[..." raises RecursionError: still malformed
         return None
     return cast("dict[str, Any]", raw) if isinstance(raw, dict) else None
 

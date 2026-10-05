@@ -98,7 +98,7 @@ def _fresh_hook_note(path: Path, number: str) -> dict[str, Any] | None:
     try:
         raw: object = json.loads(marker.read_text(encoding="utf-8"))
         recent = time.time() - marker.stat().st_mtime <= HOOK_WINDOW_S
-    except (OSError, ValueError):
+    except (OSError, ValueError, RecursionError):
         return None
     note = cast("dict[str, Any]", raw) if isinstance(raw, dict) else {}
     return note if note.get("number") == number and recent and not ar.is_executed(path) else None

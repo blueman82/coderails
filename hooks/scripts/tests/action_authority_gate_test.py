@@ -292,7 +292,12 @@ class GateTests(ReceiptHookCase):
         for command in wrapped:
             with self.subTest(command=command):
                 self.assertTrue(self.denied("action_authority_gate", self.payload(command)))
-        for command in ("sudo gh pr merge 5", "(gh pr merge 5)", "gh api repos/o/r/pulls/5/merge -X PUT"):
+        for command in (
+            "sudo gh pr merge 5", "(gh pr merge 5)", "gh api repos/o/r/pulls/5/merge -X PUT",
+            "gh api -X PUT repos/o/r/pulls/5/merge", "gh api --method PUT -f sha=abc repos/o/r/pulls/5/merge",
+            "gh api graphql -f query='mutation { mergePullRequest(input: {pullRequestId: \"x\"}) { id } }'",
+            "gh api graphql -f query='mutation { enablePullRequestAutoMerge(input: {}) { id } }'",
+        ):  # fmt: skip
             with self.subTest(command=command):
                 self.assertTrue(self.denied("action_authority_gate", self.payload(command)))
         self.mint(PUSH, "git_push")

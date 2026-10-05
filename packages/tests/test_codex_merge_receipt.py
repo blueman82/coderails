@@ -82,6 +82,12 @@ class CodexDestructiveLeaseTests(unittest.TestCase):
         self.assertIn("authority_denied_destructive_shell", (self.loop / "s1" / "trace.jsonl").read_text())
         self.assertEqual(self.run_hook("rm -rf build")["patternId"], "rm-rf")
         self.assertEqual(self.run_hook("ls -la"), {})
+        for split in (
+            "git push origin \\\n  --force-with-lease feat/x",
+            "git \\\n push --force-with-lease origin feat/x",
+            "git push \\\n--force-with-lease=feat/x origin feat/x",
+        ):  # a continuation line must not split the lease check from the family permanent_pattern allowed
+            self.assertIn("authority_denied_destructive_shell", self.run_hook(split)["permissionDecisionReason"], split)
 
 
 if __name__ == "__main__":

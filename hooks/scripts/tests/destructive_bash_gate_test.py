@@ -135,6 +135,12 @@ class AuthorityDeniedLeaseTests(unittest.TestCase):
         self.assertIn("authority_denied_destructive_shell", out["permissionDecisionReason"])
         rows = (self.loop / "s1" / "trace.jsonl").read_text()
         self.assertIn("authority_denied_destructive_shell", rows)
+        for split in (
+            "git push origin \\\n  --force-with-lease feat/x",
+            "git \\\n push --force-with-lease origin feat/x",
+            "git push \\\n--force-with-lease=feat/x origin feat/x",
+        ):  # a continuation line must not split the lease check from the family permanent_pattern allowed
+            self.assertIn("authority_denied_destructive_shell", self.run_hook(split)["permissionDecisionReason"], split)
 
     def test_permanent_blocklist_is_unchanged_and_unrelated_commands_untouched(self) -> None:
         """The rm -rf pattern is blocked by id either way; an ordinary command stays allowed."""

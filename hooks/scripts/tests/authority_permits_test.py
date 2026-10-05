@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import filecmp
 import json
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -15,7 +16,7 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from scripts.lib import action_receipt as ar
 from scripts.lib import authority_permits as ap
-from scripts.lib.authority_object import authority_path, write_authority
+from scripts.lib.authority_object import authority_path, read_authority, write_authority
 
 ROOT = Path(__file__).resolve().parents[3]
 NOW = datetime.now(timezone.utc)
@@ -84,14 +85,13 @@ class PermitsTests(unittest.TestCase):
         self.assertTrue(self.permits("deploy")["requires_approval"])
         self.assertFalse(self.permits("destructive_shell")["requires_approval"])
 
-    def test_max_prs_counts_executed_markers_of_this_authority(self) -> None:
-        """Only .executed markers of merge receipts carrying this authority_id count; 0 allows none (D2)."""
+    def test_max_prs_counts_every_executed_merge_whatever_its_authority_id(self) -> None:
+        """Executed merge markers count even when minted before (null id) or under another authority; pushes do not."""
         self.grant(max_prs=2)
-        self.execute("r1")
-        self.execute("r2", authority_id="other")
         self.execute("r3", action="git_push")
+        self.execute("r1", authority_id=None)  # type: ignore[arg-type]
         self.assertTrue(self.permits("merge")["allow"])
-        self.execute("r4")
+        self.execute("r2", authority_id="other")
         refused = self.permits("merge")
         self.assertEqual((refused["allow"], refused["reason"]), (False, "max_prs_exceeded"))
         self.assertTrue(self.permits("push_main")["allow"])
@@ -128,9 +128,32 @@ class PermitsTests(unittest.TestCase):
             "authority_denied_destructive_shell": 1, "no_receipt": 4, "merge_py_receipt_executed": 5,
         })  # fmt: skip
 
+    def test_counters_cli_prints_the_gate_object(self) -> None:
+        """The documented pipeline reaches gate_summary: stdin from measure_graph_alignment, `gate` in the output."""
+        rows = {"trace": {"by_reason": {"action_authority/denied/denied_max_prs_exceeded": 2}}}
+        done = subprocess.run(
+            [sys.executable, str(ROOT / "scripts/lib/receipt_counters.py")], input=json.dumps(rows),
+            capture_output=True, text=True, check=True,
+        )  # fmt: skip
+        self.assertEqual(json.loads(done.stdout)["gate"]["max_prs_exceeded"], 2)
+
+    def test_deeply_nested_json_is_malformed_not_a_crash(self) -> None:
+        """'[' * 7000 raises RecursionError in json.loads; it must read as none/malformed, never escape (fail-open)."""
+        poison = "[" * 7000
+        path = authority_path("s1", self.base)
+        assert path is not None
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(poison)
+        self.assertIsNone(read_authority("s1", self.base, NOW))
+        receipt = path.parent / "receipts" / "0.json"
+        receipt.parent.mkdir()
+        receipt.write_text(poison)
+        self.assertIsNone(ar.read_receipt(receipt))
+        self.assertEqual(self.permits("merge")["reason"], "no_authority")
+
     def test_mirror_is_byte_identical(self) -> None:
         """The Codex copy is the Claude file."""
-        for name in ("authority_permits.py", "receipt_gate.py"):
+        for name in ("authority_permits.py", "receipt_gate.py", "action_receipt.py", "authority_object.py"):
             self.assertTrue(
                 filecmp.cmp(ROOT / "scripts/lib" / name, ROOT / "packages/codex/scripts/lib" / name, shallow=False)
             )

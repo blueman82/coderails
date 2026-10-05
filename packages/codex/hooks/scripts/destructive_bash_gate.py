@@ -64,7 +64,8 @@ def main() -> int:
         )
         return 0
     session = text_field(payload, "session_id")
-    if LEASE.search(command) and not (verdict := permits(session, "destructive_shell"))["allow"]:
+    flat = command.replace("\\\n", "").replace("\n", " ")  # the same flattening permanent_pattern decides on
+    if LEASE.search(flat) and not (verdict := permits(session, "destructive_shell"))["allow"]:
         append_trace_row("action_authority", "denied", "authority_denied_destructive_shell", session)
         deny(
             "authority_denied_destructive_shell: this session's authority denies destructive_shell, so the allowlisted "

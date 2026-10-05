@@ -83,4 +83,5 @@ def gate_summary(by_reason: dict[str, int]) -> dict[str, int]:
 if __name__ == "__main__":
     # Reads the JSON that scripts/measure_graph_alignment.py prints on stdin (see docs/RUNBOOK.md).
     rows = json.load(sys.stdin).get("trace", {}).get("by_reason", {})
-    print(json.dumps({"receipts": receipt_summary(rows), "trust": trust_summary(rows)}, indent=2))
+    out = {"receipts": receipt_summary(rows), "trust": trust_summary(rows), "gate": gate_summary(rows)}
+    print(json.dumps(out, indent=2))

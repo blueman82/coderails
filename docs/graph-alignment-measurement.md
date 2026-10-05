@@ -255,3 +255,23 @@ python3 scripts/graph_alignment_stops.py --json
 python3 hooks/scripts/tests/loop_stall_guard_test.py && python3 hooks/scripts/tests/loop_state_guard_test.py
 PYTHONPATH=. python3 -m unittest packages/tests/test_provider_stop_record.py scripts/tests/graph_alignment_stops_test.py
 ```
+
+## Gate counters (measurement note)
+
+`python3 scripts/measure_graph_alignment.py --root . | python3 scripts/lib/receipt_counters.py` prints a `gate` object next
+to `receipts` and `trust`: `authority_denied`, `max_prs_exceeded`, `action_authority_bad_mode`,
+`authority_denied_destructive_shell`, `no_receipt` and `merge_py_receipt_executed`. The hook, `enforce_pr_workflow` and
+`scripts/merge.py` all land in the same counters (`denied_`, `advisory_` and `merge_py_` prefixes are stripped).
+Baseline: none yet on a real loop (the gates went default-on with this change), so every counter starts at 0.
+What to read: `authority_denied` / `max_prs_exceeded` above 0 mean the authority is refusing actions it should (inspect it
+with `authority.py inspect`); `no_receipt` dominating `merge_py_receipt_executed` means owners are not minting receipts
+(or the agent is trying unreceipted merges); `action_authority_bad_mode` above 0 means a config typo (treated as enforce).
+Wiring `gate_summary` into `measure_graph_alignment.py` itself is a handoff to the lane that owns that file; until then
+the stdin CLI above is the supported route.
+
+**Reproduce.**
+
+```
+python3 scripts/measure_graph_alignment.py --root . | python3 scripts/lib/receipt_counters.py
+PYTHONPATH=. python3 -m unittest hooks/scripts/tests/authority_permits_test.py
+```

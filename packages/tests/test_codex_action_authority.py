@@ -174,7 +174,11 @@ class HookTests(unittest.TestCase):
         """Env prefix, sudo, subshell, bash -c and gh api merge are guarded like the bare command."""
         self.configure("enforce")
         for command in ("FOO=1 gh pr merge 12", "sudo gh pr merge 12", "(gh pr merge 12)",
-                        "bash -c 'git push origin main'", "gh api repos/o/r/pulls/5/merge -X PUT"):  # fmt: skip
+                        "bash -c 'git push origin main'", "gh api repos/o/r/pulls/5/merge -X PUT",
+                        "gh api -X PUT repos/o/r/pulls/5/merge",
+                        "gh api graphql -f query='mutation { mergePullRequest(input: {}) { id } }'",
+                        "gh api graphql -f query='mutation { enablePullRequestAutoMerge(input: {}) { id } }'",
+                        ):  # fmt: skip
             with self.subTest(command=command):
                 self.assertTrue(self.denied(command))
 
