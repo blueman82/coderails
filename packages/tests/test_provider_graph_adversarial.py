@@ -129,13 +129,14 @@ class ProviderAdversarialTests(unittest.TestCase):
                 provider.write(document, filename)
             proof = provider.read("proof.json")
             altered = copy.deepcopy(proof)
-            altered["proofs"][0]["evidence"] = "   "
+            altered["proofs"][0]["cmd"] = "false"
             provider.write(altered, "proof.json")
-            self.assertEqual(provider.complete().returncode == 0, provider.name == "claude")
+            self.assertNotEqual(provider.complete().returncode, 0)
             provider.write(baseline)
             provider.write(proof, "proof.json")
-            records = provider.parent.read_text().splitlines()
-            provider.parent.write_text("\n".join(line for line in records if "proof-1" not in line) + "\n")
+            results = provider.path.with_name("proof_results.jsonl")
+            rows = results.read_text().splitlines()
+            results.write_text(rows[0] + "\n")
             self.assertNotEqual(provider.complete().returncode, 0)
 
     def test_clean_cache_codex_lifecycle(self) -> None:

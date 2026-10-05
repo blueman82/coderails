@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import copy
 import json
 import os
 import sys
@@ -65,12 +64,12 @@ class CompletionTests(HookTestCase):
         self.state.data.pop("proof_disposition")
         with self.assertRaisesRegex(ValueError, "no proof.json"):
             validate_completion(self.state, str(self.trace))
-        dispositions: list[object] = ["expected", "None", "", [], 1]
+        dispositions: list[object] = ["expected", "None", "", [], 1, "none", "none:", "none:  "]
         for disposition in dispositions:
             self.state.data["proof_disposition"] = disposition
             with self.assertRaises(ValueError):
                 validate_proofs(self.proof, self.state.data, str(self.trace))
-        for disposition in ("none", "none: reason"):
+        for disposition in ("none: reason", {"kind": "none", "reason_code": "docs", "reason": "docs only"}):
             self.state.data["proof_disposition"] = disposition
             self.assertEqual(validate_proofs(self.proof, self.state.data, str(self.trace)), "")
         self.retro.unlink()
@@ -121,52 +120,11 @@ class CompletionTests(HookTestCase):
         self.proof.write_text('{"schema_version":1,"proofs":null,"withdrawn_proofs":null}')
         self.assertEqual(validate_proofs(self.proof, self.state.data, str(self.trace)), "")
 
-    def test_exact_foreground_and_final_attempt_provenance(self) -> None:
-        """Missing, background, command mismatch, and latest-failed proof attempts block."""
+    def test_matching_transcript_no_longer_satisfies_a_proof(self) -> None:
+        """A perfectly matching foreground Bash call in the transcript is ignored: only controller run rows count."""
         self.proof.write_text(json.dumps({"schema_version": 1, "proofs": [{"id": "P1", "cmd": "python3 verify.py"}]}))
-        for label in ("unexecuted", "background", "wrong_command"):
-            if label == "background":
-                self.execution("a", "python3 verify.py", background=True)
-            elif label == "wrong_command":
-                self.execution("b", "python3 other.py")
-            with self.assertRaisesRegex(ValueError, "unexecuted"):
-                validate_proofs(self.proof, self.state.data, str(self.trace))
-        self.execution("c", "  python3 verify.py  ")
-        self.assertEqual(validate_proofs(self.proof, self.state.data, str(self.trace)), "")
-        self.execution("d", "python3 verify.py", error=True)
-        with self.assertRaisesRegex(ValueError, "failed"):
-            validate_proofs(self.proof, self.state.data, str(self.trace))
-        self.execution("e", "python3 verify.py", error=None)
-        self.assertEqual(validate_proofs(self.proof, self.state.data, str(self.trace)), "")
-
-    def test_withdrawn_proofs_require_failure_reason_and_distinct_id(self) -> None:
-        """Withdrawal requires an observed last failure and contributes one human disclosure."""
-        document: dict[str, Any] = {
-            "schema_version": 1,
-            "proofs": [],
-            "withdrawn_proofs": [
-                {"id": "W1", "cmd": "python3 control.py", "withdrawn_reason": "invalid assumption\nmore context"}
-            ],
-        }
-        self.proof.write_text(json.dumps(document))
-        with self.assertRaisesRegex(ValueError, "unexecuted"):
-            validate_proofs(self.proof, self.state.data, str(self.trace))
-        self.execution("a", "python3 control.py", error=False)
-        with self.assertRaisesRegex(ValueError, "not_failed"):
-            validate_proofs(self.proof, self.state.data, str(self.trace))
-        self.execution("b", "python3 control.py", error=True)
-        self.assertEqual(
-            validate_proofs(self.proof, self.state.data, str(self.trace)), "Withdrawn proofs: W1: invalid assumption"
-        )
-        for change, reason in (({"withdrawn_reason": ""}, "badreason"), ({"cmd": ""}, "badcmd")):
-            changed = copy.deepcopy(document)
-            changed["withdrawn_proofs"][0].update(change)
-            self.proof.write_text(json.dumps(changed))
-            with self.assertRaisesRegex(ValueError, reason):
-                validate_proofs(self.proof, self.state.data, str(self.trace))
-        document["proofs"] = [{"id": "W1", "cmd": "python3 control.py"}]
-        self.proof.write_text(json.dumps(document))
-        with self.assertRaisesRegex(ValueError, "duplicate_id"):
+        self.execution("a", "python3 verify.py")
+        with self.assertRaisesRegex(ValueError, r"P1\(proof_stale_cmd\)"):
             validate_proofs(self.proof, self.state.data, str(self.trace))
 
     def test_frozen_evals_do_not_pass_completion_and_stamps_detect_drift(self) -> None:

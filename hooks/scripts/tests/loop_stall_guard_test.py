@@ -12,6 +12,7 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from hooks.scripts.lib.loop_state_common import count_invocations
 from hooks.scripts.tests.lib.hook_test_support import HookTestCase
+from scripts.lib import proof_results as pr
 from scripts.lib.eval_artifact import grading_checksum
 
 
@@ -42,7 +43,7 @@ class StallGuardTests(HookTestCase):
             "hard_stop": None,
             "wave_history": {},
         }
-        path = self.progress(graph=graph, proof_disposition="none", work_units={})
+        path = self.progress(graph=graph, proof_disposition="none: no executable surface", work_units={})
         identity = {"session_id": self.session, "loop_id": "loop-test"}
         path.with_name("retro.json").write_text(json.dumps({"schema_version": 2, **identity}))
         suite_path = path.with_name("evals.json")
@@ -284,6 +285,34 @@ class StallGuardTests(HookTestCase):
         )
         self.assertEqual(self.run_hook("loop_stall_guard", payload).returncode, 2)
         self.assertNotIn("loop_stop_counts", json.loads(path.read_text()))
+
+    def test_controller_run_row_releases_the_stall_guard_without_a_transcript_call(self) -> None:
+        """A satisfied proof_results row releases `complete` though the transcript has no matching Bash call."""
+        path = self.complete_fixture()
+        payload = self.payload(self.transcript("LOOP-STOP: complete"))
+        cmd = "python3 never_called_in_transcript.py"
+        document: dict[str, Any] = {
+            "schema_version": 2,
+            "session_id": self.session,
+            "loop_id": "loop-test",
+            "proofs": [{"id": "P1", "cmd": cmd, "expect": {"exit_code": 0}}],
+        }
+        path.with_name("proof.json").write_text(json.dumps(document))
+        self.assertEqual(self.run_hook("loop_stall_guard", payload).returncode, 2)
+        results = path.with_name(pr.RESULTS_NAME)
+        identity = {"session_id": self.session, "loop_id": "loop-test"}
+        digest = pr.doc_sha(document)
+        pr.append(results, kind="freeze", proof_json_sha256=digest, **identity)
+        pr.append(
+            results,
+            kind="run",
+            proof_id="P1",
+            cmd_sha256=pr.sha(cmd),
+            proof_json_sha256=digest,
+            verdict="satisfied",
+            **identity,
+        )
+        self.assertEqual(self.run_hook("loop_stall_guard", payload).returncode, 0)
 
     def test_shared_absent_grace_and_complete_off_switch(self) -> None:
         """Only matching absent-state grace releases; existing active state stays policed."""

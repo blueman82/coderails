@@ -71,3 +71,22 @@ not retroactively invented. Captured null cannot authorize a delayed replacement
 exact validated acknowledgement; even an unchanged null-source predecessor cannot prove authorship. Direct completed
 explicit record remains available. Publication followed by a lost receipt and then another authored replacement can remain
 honestly pending: the latest source and predecessor do not establish that historical application.
+
+## Proof results (`proof_results.jsonl`)
+
+| Measure | Before | After | How measured |
+| --- | ---: | ---: | --- |
+| Who executes a frozen proof cmd | the model, as its own Bash call; the gate string-matched the transcript | the controller: `proof.py run` via `/bin/bash -c`, verbatim | `scripts/tests/proof_run_test.py` (verbatim nested-quote cmd gives exit 3, the same `cmd_sha256`) |
+| Evidence the gate reads | a transcript tool pair (Claude) or an exec result frame plus `status == pass` (Codex) | hash-chained run rows on both providers | `proof_run_test.py` (a perfectly matching transcript no longer satisfies a proof) |
+| `expect` | prose, never evaluated | `{exit_code, stdout_contains, stdout_not_contains}`, evaluated | `proof_run_test.py` expect tests; skipping the evaluation fails them |
+| Tamper detection | none | edited proof.json, wrong cmd hash and deleted row each block (`proof_stale_cmd`, `proof_chain_broken`) | `proof_run_test.py` mutation controls |
+| Codex loop with no executable surface | could not complete | completes with `none: <reason>` or the typed disposition | `packages/tests/test_codex_completion.py` |
+
+Counters: `proof.freeze|run|gate` trace rows are counted by `scripts/lib/memory_counters.py` (prefix `proof.`), embedded under
+the `memory` key of `scripts/measure_graph_alignment.py`; no edit to that script. Runbook entry: `docs/RUNBOOK.md`
+"Proof gate blocked a `complete` declaration".
+
+Limits (written, not hidden): a same-user agent can forge rows and recompute the chain (cooperating-agent safeguard);
+the gate checks the frozen command ran and matched `expect`, not that it is a good proof; the freeze hashes the canonical
+JSON, so a re-freeze after an edit is the sanctioned (and traced) way to change a proof; `graph.py complete --transcript`
+is accepted and ignored; a legacy schema 1 proof only has its exit code checked (flagged `expect_unstructured`).

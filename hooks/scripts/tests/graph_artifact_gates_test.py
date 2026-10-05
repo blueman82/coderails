@@ -93,11 +93,14 @@ class ArtifactGateTests(GraphCase):
         self.path.with_name("proof.json").unlink()
         with self.assertRaisesRegex(ValueError, "no proof_disposition"):
             dispatch.complete(self.path, "fixture-session", write=False)
-        for disposition in ("none", "none: no executable surface"):
+        self.save({**state, "proof_disposition": "none"})
+        with self.assertRaisesRegex(ValueError, "no proof_disposition"):
+            dispatch.complete(self.path, "fixture-session", write=False)
+        for disposition in ("none: no executable surface", {"kind": "none", "reason_code": "docs", "reason": "docs"}):
             self.save({**state, "proof_disposition": disposition})
             dispatch.complete(self.path, "fixture-session", write=False)
         for version in (1, 2):
-            self.save({**state, "schema_version": version, "proof_disposition": "none"})
+            self.save({**state, "schema_version": version, "proof_disposition": "none: x"})
             with self.assertRaisesRegex(ValueError, "schema_version must be 3"):
                 dispatch.complete(self.path, "fixture-session", write=False)
 

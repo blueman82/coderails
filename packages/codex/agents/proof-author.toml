@@ -62,7 +62,7 @@ Schema (write exactly this shape):
 
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "frozen_at": "<ISO 8601 timestamp, this invocation>",
   "frozen_sha": "<git rev-parse HEAD, run this invocation>",
   "proofs": [
@@ -70,12 +70,17 @@ Schema (write exactly this shape):
       "id": "<short stable id>",
       "claim": "<the claim, in the authorising prompt's own terms>",
       "cmd": "<single self-contained shell command>",
-      "expect": "<what output/exit code counts as satisfied>",
+      "expect": {"exit_code": 0, "stdout_contains": ["<token the output must contain>"], "stdout_not_contains": []},
+      "timeout_s": 120,
       "status": "pending"
     }
   ]
 }
 ```
+
+`expect` is structured and machine-evaluated: the controller runs `cmd` and compares the real exit code
+(`exit_code`, default 0) and stdout (`stdout_contains` / `stdout_not_contains`, plain substrings). Prose `expect`
+(schema_version 1) is legacy and is checked for exit 0 only. `timeout_s` is optional.
 
 `status` is always `"pending"` when you write it. You never run a proof to
 completion and never set it to pass/fail — that would make you the grader of
@@ -86,8 +91,8 @@ and issue no verdict at all.
 
 ## Rules for every `cmd`
 
-Each `cmd` will later be run verbatim, in the foreground, by the orchestrator —
-never by a worker, never in this session. Get these wrong and the gate silently
+Each `cmd` will later be run verbatim (`/bin/bash -c`), in the foreground, by the
+controller via `scripts/lib/proof.py run` — never by a worker, never in this session. Get these wrong and the gate silently
 can't use your proof:
 
 - **Single self-contained shell command** — no multi-step scripts, no reliance
@@ -95,8 +100,8 @@ can't use your proof:
 - **Runnable verbatim as its own Bash call**, with absolute paths — no `cd`
   relative to an assumed cwd.
 - **Foreground only.** Never background it (`&`, `nohup`, `disown` or
-  equivalent) — the gate's transcript miner excludes backgrounded launches, so
-  a backgrounded proof is invisible to it, not merely slower.
+  equivalent) — the controller runs `cmd` in the foreground and waits, so a
+  backgrounded proof reports the launcher's exit code, not the work's.
 - **Exits 0 on success, nonzero on failure.** Watch the grep trap specifically:
   bare `grep pattern file` exits nonzero on no-match, which is often what you
   want, but a `grep ... | other-command` pipeline can mask that exit code —

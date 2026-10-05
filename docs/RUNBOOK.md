@@ -309,6 +309,27 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   unresolved); fix the argument, never edit `stops` by hand. Codex records the same row but only a `hard-stop` row on a
   typed hard-stopped graph releases its guard (`consume-stop`); other categories are recorded and ignored there.
 
+## Proof gate blocked a `complete` declaration
+
+- Symptom: `loop_stall_guard` (Claude) or `graph.py complete` / `verify-completion` (Codex) names frozen proofs as
+  `P1(proof_...)`. The gate reads only `proof_results.jsonl` beside `proof.json`, written by the controller via
+  `scripts/lib/proof.py`; the transcript and the `status` field are never consulted.
+- Query: `python3 scripts/lib/proof.py status <state-dir>` (latest verdict per proof), or
+  `python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import sys,json;print(json.load(sys.stdin)['memory'])"`
+  (`by_reason_code` over `proof.freeze|run|gate` rows), or `grep '"command": "proof\.' <agentic-loop dir>/<session_id>/trace.jsonl`.
+- Remediation (reason code: fix, single source `scripts/lib/proof_results.py` `REASONS`):
+  `proof_unexecuted`: run `proof.py run <state-dir> --all`. `proof_failed`: the latest run exited nonzero or timed
+  out; fix the cause, re-run. `proof_expect_mismatch`: exit code or stdout did not match the frozen `expect`.
+  `proof_stale_cmd`: proof.json changed after the freeze row, or the run row hashes a different cmd; run
+  `proof.py freeze` then `run`. `proof_chain_broken`: `proof_results.jsonl` was edited or lost rows; never hand-edit it,
+  re-freeze and re-run (a fresh file). `proof_cmd_destructive`: the cmd matches the destructive classifier and was never
+  executed; reword the proof. `proof_disposition_no_reason`: with no proof.json record `proof.py disposition <state-dir>
+  --none --reason-code <code> --reason <text>`; a bare `none` is rejected. `proof_disposition_legacy` is a trace note
+  only (string `none: <reason>` accepted). `proof_withdrawn_unobserved`: a withdrawn proof needs a failed/timeout run row
+  and a reason.
+- Limit: a same-user agent can forge rows and recompute the chain, as it could forge a transcript; this is a
+  cooperating-agent safeguard, not a trust boundary.
+
 ## Diff-manifest check warned or refused
 
 - Symptom: `push.py` or `merge.py` prints `! diff_manifest <code>: <path>`, or refuses with `diff_manifest:<code>`
