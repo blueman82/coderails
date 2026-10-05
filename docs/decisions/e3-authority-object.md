@@ -122,3 +122,10 @@ The phrase heuristics (`invoked()`, negation, question and quote handling, about
 - Not verified: that `${CLAUDE_SESSION_ID}` is substituted before the `!` pre-execution runs in Claude Code 2.1.289 (strings in the binary show
   substitution in the skill body, ordering vs shell execution not observed); the env fallback covers an empty expansion. The
   UserPromptSubmit prefix-match fallback named in the plan was not built.
+- Live-probe record (2026-10-05): a live `/coderails:authorize` run could not be made from the non-interactive build session, so the
+  substitution and `!` ordering stay unverified. What is verified: the tool environment of a Claude session exports
+  `CLAUDE_CODE_SESSION_ID` (the fallback source), and `grant` now refuses any session id containing `$` or `{` (a literal
+  `${CLAUDE_SESSION_ID}` from a failed substitution) or an empty id with the env var unset, each with
+  `authority_refused_unsafe_session` and nothing written (`scripts/tests/authority_session_guard_test.py`). A failed substitution
+  therefore fails loudly instead of reporting a grant no hook can see. Human action to close: run `/coderails:authorize` once in a
+  live session and confirm the printed result names the real session id.
