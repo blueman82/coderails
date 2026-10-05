@@ -40,6 +40,7 @@ class ArtifactCase(unittest.TestCase):
     """Create an artifact in a directory outside the source repository."""
 
     temporary_parent: str | None = None
+    stub_level_gate = True  # real-repository tests of the level gate set this False
 
     def setUp(self) -> None:
         """Allocate a fresh suite for every test."""
@@ -49,6 +50,12 @@ class ArtifactCase(unittest.TestCase):
         keys = patch.dict(os.environ, {"CODERAILS_KEYS_DIR": str(Path(self.temporary.name) / "keys")})
         keys.start()
         self.addCleanup(keys.stop)
+        # These fixtures are unfrozen suites on a fake PR head: the derived-level and frozen-suite gate has no diff
+        # to read here and is covered with real repositories in scripts/tests/eval_level_test.py.
+        if self.stub_level_gate:
+            level_gate = patch("scripts.lib.eval_validation.validate_level")
+            level_gate.start()
+            self.addCleanup(level_gate.stop)
         self.directory = Path(self.temporary.name)
         self.path = self.directory / "evals.json"
         self.data: JsonObject = {

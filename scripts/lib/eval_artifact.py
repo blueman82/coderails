@@ -25,6 +25,25 @@ def marker(pr: str, head_sha: str, result: str, verification_level: str) -> str:
     )
 
 
+_FACTS = re.compile(
+    r"<!-- coderails-eval-facts v1 derived_min_level=([0-2]) late_freeze=([01]) suite=([0-9a-f]{16}) -->"
+)
+
+
+def facts_line(derived_min_level: int, late_freeze: bool, suite: str) -> str:
+    """Line 2 of the body (additive: line 1 stays the v1 marker the dashboard and integrity gate parse)."""
+    return (
+        f"<!-- coderails-eval-facts v1 derived_min_level={derived_min_level} "
+        f"late_freeze={int(late_freeze)} suite={suite} -->"
+    )
+
+
+def parse_facts(line: str) -> tuple[int, bool, str] | None:
+    """(derived_min_level, late_freeze, suite) of a well-formed facts line, else None."""
+    match = _FACTS.fullmatch(line)
+    return (int(match[1]), match[2] == "1", match[3]) if match else None
+
+
 def matches_marker(line: str, pr: str, head_sha: str) -> bool:
     """Require a literal PR/head prefix and the closed marker grammar."""
     prefix = f"<!-- coderails-eval-summary {EVAL_ARTIFACT_MARKER_VERSION} pr={pr} head_sha={head_sha} result="

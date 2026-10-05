@@ -20,7 +20,9 @@ tallied by `measure_graph_alignment.py` into `trace.by_reason` keyed
 | `diff-manifest/warned/diff_manifest_mode_invalid` | an unknown `diff_manifest` value was treated as enforce |
 | `review-passes/ok/review_passes_ok` | the artifact's passes covered every pass the diff requires |
 | `review-passes/refused/<code>` | `<code>` is `required_review_missing:<name>`, `required_review_failed:<name>`, `review_passes_malformed`, `review_artifact_missing` or `review_policy_unreadable` |
-| `publication/refused/<code>` | the single gate refused; `<code>` is `diff_manifest:<code>` or a review code, and later units add theirs |
+| `eval-level/ok/eval_level_ok` | the posted eval's level covered the diff-derived minimum, the late-freeze stamp matched and the suite verified |
+| `eval-level/refused/<code>` | `<code>` is `level_below_derived`, `late_freeze_unstamped`, `suite_hash_mismatch`, `suite_hash_marker_mismatch`, `chain_broken`, `chain_truncated`, `integrity_stripped`, `not_frozen`, `eval_facts_missing`, `eval_artifact_missing`, `eval_artifact_unreadable`, `eval_embed_malformed` or `eval_level_diff_unavailable` |
+| `publication/refused/<code>` | the single gate refused; `<code>` is `diff_manifest:<code>`, a review code or an eval-level code |
 
 Manifest codes are `out_of_manifest`, `denied_path`, `docs_sync_deny`, `docs_sync_deletion`, `not_linked_worktree`,
 `special_file_type`, `mode_change`, `status_not_allowed`, `too_many_paths`, `manifest_unreadable` and
@@ -32,7 +34,7 @@ shape and worktree equality; it does not authenticate those owner fields.
 
     python3 scripts/measure_graph_alignment.py --root . | python3 scripts/lib/workflow_gate_counters.py
 
-prints `{command: {outcome/reason_code: count}}` for `diff-manifest`, `review-passes` and `publication`. Add a command name to
+prints `{command: {outcome/reason_code: count}}` for `diff-manifest`, `review-passes`, `eval-level` and `publication`. Add a command name to
 `COMMANDS` in that file when a unit adds a new row family; `measure_graph_alignment.py` is at its line limit and is not
 edited.
 

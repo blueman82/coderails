@@ -8,11 +8,14 @@ writes a `publication/refused/<code>` trace row; rows never decide anything.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 
+from . import eval_artifact, eval_level, manifest_policy, review_passes
 from . import git_common as git
-from . import manifest_policy, review_passes
+from .artifact_io import object_value
 from .config import config_path, load_config
+from .eval_integrity import IntegrityError, suite_hash
 
 Violation = dict[str, str]
 Check = Callable[[str, str, str, str], list[Violation]]
@@ -63,7 +66,50 @@ def review_passes_check(number: str, sha: str, unit: str, progress: str) -> list
     return problems
 
 
-CHECKS: list[Check] = [manifest_check, review_passes_check]
+def eval_level_check(number: str, sha: str, unit: str, progress: str) -> list[Violation]:
+    """Recompute the minimum verification level, late freeze and suite integrity from the live PR and the posted eval.
+
+    The marker level must be >= the level derived from the PR diff (policy/surface_policy.json, raised by progress.json
+    units and the embed's declared facts); the facts line must carry the recomputed late_freeze and the embed's own
+    suite hash; verify_suite(stamped) must pass and a level >= 1 suite must be frozen. A v1 artifact with no facts line
+    is refused when the diff needs level >= 1. Fails closed; no off switch.
+    """
+    found = git.gate_eval_summary_for_pr(number, sha)
+    if found.status == 2:
+        return [{"code": "eval_artifact_unreadable", "detail": found.failure_reason}]
+    if found.status or not found.embed:
+        return [{"code": "eval_artifact_missing", "detail": "no GO eval artifact for this head"}]
+    try:
+        data = object_value(json.loads(found.embed))
+    except ValueError:  # JSONDecodeError and the non-object case
+        return [{"code": "eval_embed_malformed", "detail": ""}]
+    changes = eval_level.pr_changes(number, sha)
+    if changes is None:
+        return [{"code": "eval_level_diff_unavailable", "detail": ""}]
+    _, minimum = eval_level.derive(changes, eval_level.progress_units(progress), data, eval_level.load_policy())
+    late = eval_level.late_freeze(str(data.get("frozen_sha") or ""), eval_level.branch_base(sha))
+    codes: list[str] = []
+    if int(found.verification_level) < minimum:
+        codes.append("level_below_derived")
+    stamped = eval_artifact.parse_facts(found.facts)
+    if stamped is None:
+        codes += ["eval_facts_missing"] if minimum or late else []
+    elif stamped[1] != late:
+        codes.append("late_freeze_unstamped")
+    try:
+        eval_level.check_suite(data, found.verification_level, stamped=True)
+    except IntegrityError as error:
+        codes.append(error.code)
+    if stamped is not None and stamped[2] != suite_hash(data)[:16]:
+        codes.append("suite_hash_marker_mismatch")
+    label = f"{git.repo()}@pr-{number}"
+    for code in codes or ["eval_level_ok"]:
+        manifest_policy.trace(label, "refused" if codes else "ok", code, command="eval-level")
+    detail = f"derived_min_level={minimum} marker={found.verification_level}"
+    return [{"code": code, "detail": detail} for code in codes]
+
+
+CHECKS: list[Check] = [manifest_check, review_passes_check, eval_level_check]
 
 
 def remediation(code: str) -> str:
@@ -76,6 +122,8 @@ def remediation(code: str) -> str:
         return "Fix the diff or the policy; set diff_manifest: off only on purpose."
     if code.startswith("required_review_") or code in ("review_artifact_missing", "review_passes_malformed"):
         return "Run the required reviews, then re-post: post_review.py post <PR> --summary F --pass NAME=F."
+    if code.startswith(("eval_", "level_", "late_freeze", "suite_", "chain_", "integrity_", "not_frozen")):
+        return "Re-run and re-post the evals: post_evals.py post <PR> <evals.json> (record an oracle edit with amend)."
     return "Resolve the reported publication-check refusal, then retry."
 
 

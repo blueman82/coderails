@@ -222,6 +222,37 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   required pass. The Codex hook only sees merges `guarded_segments` can match and needs `/hooks` trust. Row-9 wording in
   the closure matrix (`.json` policy file) is not recorded in this repo: the matrix lives outside it.
 
+## Eval level or suite integrity refused a merge
+
+- Symptom: `post_evals.py post`, `merge.py`, a direct `gh pr merge` (Claude `enforce_pr_workflow`, Codex
+  `pr_publication_gate`) refuses with `level_below_derived`, `late_freeze_unstamped`, `suite_hash_mismatch`,
+  `suite_hash_marker_mismatch`, `chain_broken`, `chain_truncated`, `integrity_stripped`, `not_frozen`,
+  `eval_facts_missing`, `eval_artifact_missing`, `eval_artifact_unreadable`, `eval_embed_malformed` or
+  `eval_level_diff_unavailable`. The check is the third entry of the single publication gate, ON by default; there is no
+  config switch. The minimum level comes from `policy/surface_policy.json` applied to the PR diff
+  (`scripts/lib/eval_level.py`): level 2 for an irreversible path (`install.py`, `launchd/`, `.github/workflows/`,
+  `hooks/hooks.json`, ...) or three work units, level 1 for any outward path (`hooks/`, `scripts/`, `skills/`, ...) or two
+  units, else 0; docs and tests are neutral.
+- Artifact: line 1 is the unchanged v1 marker, line 2 is `<!-- coderails-eval-facts v1 derived_min_level=N
+  late_freeze=0|1 suite=<16 hex> -->`, then the summary and the fenced embed whose `gate_facts` block is stamped by
+  `post_evals.py post <PR> <evals.json> [--progress PROGRESS]`. The merge side ignores the stamped level and recomputes it
+  from the live diff, the embed's declared `facts` (a lower bound) and the optional `--unit N --progress PATH` flags of
+  `merge.py`.
+- Query: `trace.by_reason` for `eval-level/ok/eval_level_ok` and `eval-level/refused/<code>`, plus
+  `publication/refused/<code>`. Tally with `python3 scripts/measure_graph_alignment.py --root . | python3 scripts/lib/workflow_gate_counters.py`.
+- Remediation: `level_below_derived` means the suite was frozen at a lower level than the diff needs; write a suite at the
+  derived level (the level is part of the suite hash, so editing it after the freeze is `suite_hash_mismatch`), smoke-run
+  it and re-post. `suite_hash_mismatch` after an intentional oracle edit: `post_evals.py amend <evals.json> <eval_id>
+  <reason> <actor>`, then re-post. `late_freeze_unstamped`/`eval_facts_missing`: re-post with the current
+  `post_evals.py post` (an artifact posted by the old recipe has no facts line and is refused for outward diffs).
+  `eval_artifact_unreadable` is a failed trusted-comment fetch (identity, permission, comments): retry or check `gh auth`.
+- Limits: a cooperating-agent safeguard. The work-unit count of a diff cannot be derived from the diff, so the floor
+  without `--progress` (and without a declared lower bound) assumes one unit; the PR author can omit the progress file.
+  `verify_suite` is tamper-evident, not tamper-proof (a same-user agent holding the signing key can rewrite and re-sign the
+  suite, see `skills/task-evals/SKILL.md`). The surface classes are globs: a path outside them is neutral, so a new
+  control directory must be added to `policy/surface_policy.json` (both copies). The gate trusts the posted comment's
+  author (the authenticated, write-permission login), not the content.
+
 ## Action-authority hook denied a merge or push (or warned in advisory)
 
 - Symptom: `gh pr merge` or `git push` to main/master is denied with "needs an action receipt (<code>)" (enforce), or a

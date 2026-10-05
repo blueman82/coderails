@@ -40,6 +40,8 @@ MERGE_DRIVER = (
     "merge.verify_gates = lambda number: merge.git.pr_field(number, 'headRefOid')\n"
     "from scripts.lib import git_common\n"
     "git_common.review_passes_for_pr = lambda number, sha: git_common.ReviewPasses(0, ())  # manifest under test\n"
+    "git_common.gate_eval_summary_for_pr = lambda number, sha: git_common.EvalSummary(\n"
+    '    0, \'0\', \'{"verification_level": 0, "task_ref": "1", "evals": []}\')  # eval level has its own tests\n'
     "merge.cleanup = lambda number, default: None\n"
     "raise SystemExit(merge.main(['7']))\n"
 )
@@ -329,11 +331,13 @@ class CounterTests(unittest.TestCase):
         by_reason = {"publication/refused/diff_manifest:denied_path": 2, "diff-manifest/ok/diff_manifest_ok": 1}
         by_reason["x/y/z"] = 9
         by_reason["review-passes/refused/required_review_missing:security-review"] = 3
+        by_reason["eval-level/refused/level_below_derived"] = 4
         self.assertEqual(
             workflow_gate_counters.counts(by_reason),
             {
                 "diff-manifest": {"ok/diff_manifest_ok": 1},
                 "review-passes": {"refused/required_review_missing:security-review": 3},
+                "eval-level": {"refused/level_below_derived": 4},
                 "publication": {"refused/diff_manifest:denied_path": 2},
             },
         )

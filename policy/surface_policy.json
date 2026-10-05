@@ -1,0 +1,24 @@
+{
+  "none": ["docs/**", "**/tests/**", "**/test/**"],
+  "irreversible": [
+    "install.py",
+    "uninstall.py",
+    "launchd/**",
+    "scripts/integrity-gate/**",
+    "scripts/installer/**",
+    ".github/workflows/**",
+    "hooks/hooks.json",
+    "packages/codex/hooks/hooks.json"
+  ],
+  "outward": [
+    "commands/**",
+    "skills/**",
+    "hooks/**",
+    "scripts/**",
+    "agents/**",
+    "packages/codex/**",
+    "policy/**",
+    "capabilities/**"
+  ],
+  "level_2_work_units": 3
+}

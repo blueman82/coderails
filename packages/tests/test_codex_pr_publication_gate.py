@@ -15,6 +15,9 @@ from typing import cast
 # Not importing scripts.tests.*: that would bind the root `scripts` package and break the Codex tests that need
 # packages/codex/scripts under the same name.
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT))
+from packages.tests.eval_artifact_fixture import write_comment  # noqa: E402
+
 HOOK = ROOT / "packages/codex/hooks/scripts/pr_publication_gate.py"
 SECRET = ".en" + "v"  # two parts so no source line spells the secret-file name
 GH_SHIM = """#!/bin/sh
@@ -31,7 +34,10 @@ case "$1 $2" in
     case "$2" in */issues/1/comments) number=1; sha="$CLEAN_SHA" ;; *) number=7; sha="$FAKE_SHA" ;; esac
     { printf '<!-- coderails-review-summary v1 pr=%s head_sha=%s -->\\n' "$number" "$sha"; echo '## No findings'; } \\
       | base64 | tr -d '\\n'
-    echo ;;
+    echo
+    # and the eval artifact (docs-level by default; the eval-level gate has its own tests)
+    [ -n "$FAKE_EVAL_FILE" ] && { base64 < "$FAKE_EVAL_FILE" | tr -d '\\n'; echo; }
+    ;;
 esac
 exit 0
 """
@@ -81,6 +87,7 @@ class CodexPublicationGateTests(unittest.TestCase):
             "PATH": f"{install_gh_shim(self.dir.parent)}{os.pathsep}{os.environ['PATH']}",
             "FAKE_SHA": self.sha,
             "CLEAN_SHA": git_cmd(self.dir, "rev-parse", "origin/main").strip(),
+            "FAKE_EVAL_FILE": str(write_comment(self.dir.parent, self.sha, 0)),
             "CODERAILS_AGENTIC_LOOP_DIR": str(self.loop),
             "CLAUDE_AGENTIC_LOOP_DIR": str(self.loop),
         }
@@ -147,6 +154,7 @@ class CodexPublicationGateTests(unittest.TestCase):
         git_cmd(self.dir, "add", "-A")
         git_cmd(self.dir, "commit", "-qm", "docs")
         self.env["FAKE_SHA"] = git_cmd(self.dir, "rev-parse", "HEAD").strip()
+        self.env["FAKE_EVAL_FILE"] = str(write_comment(self.dir.parent, self.env["FAKE_SHA"], 0))
         self.assertEqual(self.reason("gh pr merge 7"), "")
 
     def test_unreadable_policy_fails_closed(self) -> None:

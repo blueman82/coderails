@@ -53,6 +53,10 @@ class EvalValidationTests(unittest.TestCase):
         patcher = patch.dict(os.environ, {"CODERAILS_KEYS_DIR": self.keys.name})
         patcher.start()
         self.addCleanup(patcher.stop)
+        # unfrozen fixtures on a fake head: the derived-level gate is covered in scripts/tests/eval_level_test.py
+        level_gate = patch("scripts.lib.eval_validation.validate_level")
+        level_gate.start()
+        self.addCleanup(level_gate.stop)
 
     def test_justification_control_evidence_sha_and_p0(self) -> None:
         """Reject each structural refusal using one independently mutated valid artifact."""

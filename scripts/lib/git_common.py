@@ -146,6 +146,7 @@ class EvalSummary:
     verification_level: str = ""
     embed: str = ""
     failure_reason: str = ""
+    facts: str = ""  # line 2 of the body when it is a coderails-eval-facts line, else empty
 
 
 def gate_eval_summary_for_pr(number: str, sha: str) -> EvalSummary:
@@ -156,12 +157,15 @@ def gate_eval_summary_for_pr(number: str, sha: str) -> EvalSummary:
         return EvalSummary(2, failure_reason=str(error))
     summary = EvalSummary(1)
     for body in bodies:
-        for line in body.splitlines():
+        lines = body.splitlines()
+        for index, line in enumerate(lines):
             if eval_artifact.matches_marker(line, number, sha):
+                following = lines[index + 1] if index + 1 < len(lines) else ""
                 summary = EvalSummary(
                     0 if eval_artifact.parse_result(line) == "GO" else 1,
                     eval_artifact.parse_verification_level(line),
                     extract_json_block(body),
+                    facts=following if eval_artifact.parse_facts(following) else "",
                 )
     return summary
 

@@ -17,6 +17,9 @@ from typing import cast
 # packages/codex/scripts under the same name. Everything below runs the Codex files as subprocesses.
 ROOT = Path(__file__).resolve().parents[2]
 CODEX = ROOT / "packages/codex"
+sys.path.insert(0, str(ROOT))
+from packages.tests.eval_artifact_fixture import write_comment  # noqa: E402
+
 HOOK = CODEX / "hooks/scripts/pr_publication_gate.py"
 POST = CODEX / "scripts/post_review.py"
 CLEAN = "## No findings\n"
@@ -33,7 +36,9 @@ case "$1 $2" in
       [ -n "$FAKE_PASSES" ] && printf '<!-- coderails-review-passes v1 {"head_sha": "%s", "passes": %s} -->\\n' \\
         "${FAKE_PASSES_SHA:-$FAKE_SHA}" "$FAKE_PASSES"
       printf '%s\\n' "${FAKE_TAIL:-## No findings}"; } | base64 | tr -d '\\n'
-    echo ;;
+    echo
+    [ -n "$FAKE_EVAL_FILE" ] && { base64 < "$FAKE_EVAL_FILE" | tr -d '\\n'; echo; }
+    ;;
 esac
 exit 0
 """
@@ -116,6 +121,7 @@ class Repo(unittest.TestCase):
     """A temp repo with origin/main and a feature commit; subclasses choose the file the PR touches."""
 
     touched = "hooks/x.py"
+    eval_level = 1  # a hooks/ diff is outward: the derived minimum verification level
 
     def setUp(self) -> None:
         """Base commit on origin/main, then one feature commit touching `touched`."""
@@ -138,6 +144,7 @@ class Repo(unittest.TestCase):
         git_cmd(self.dir, "add", "-A")
         git_cmd(self.dir, "commit", "-qm", "change")
         self.sha = git_cmd(self.dir, "rev-parse", "HEAD").strip()
+        self.eval_file = write_comment(self.tmp, self.sha, self.eval_level)
 
 
 class HookTests(Repo):
@@ -146,7 +153,8 @@ class HookTests(Repo):
     def reason(self, policy: str = "", **env: str) -> str:
         """Permission-decision reason for `gh pr merge 7`, or empty when allowed."""
         environment = {**os.environ, "PATH": f"{shim(self.tmp, HOOK_SHIM)}{os.pathsep}{os.environ['PATH']}"}
-        environment |= {"FAKE_SHA": self.sha, "CODERAILS_AGENTIC_LOOP_DIR": str(self.tmp / "loops"), **env}
+        environment |= {"FAKE_SHA": self.sha, "CODERAILS_AGENTIC_LOOP_DIR": str(self.tmp / "loops")}
+        environment |= {"FAKE_EVAL_FILE": str(self.eval_file), **env}
         command = {"command": "gh pr merge 7"}
         payload = {"session_id": "s", "cwd": str(self.dir), "tool_name": "Bash", "tool_input": command}
         argv = [sys.executable, str(HOOK)]
@@ -233,11 +241,13 @@ class DocsOnlyTests(Repo):
     """A docs-only PR needs only review-pr."""
 
     touched = "docs/a.md"
+    eval_level = 0
 
     def test_docs_only_needs_review_pr_only(self) -> None:
         """The bare v1 artifact is enough for docs."""
         environment = {**os.environ, "PATH": f"{shim(self.tmp, HOOK_SHIM)}{os.pathsep}{os.environ['PATH']}"}
         environment |= {"FAKE_SHA": self.sha, "CODERAILS_AGENTIC_LOOP_DIR": str(self.tmp / "loops")}
+        environment["FAKE_EVAL_FILE"] = str(self.eval_file)
         command = {"command": "gh pr merge 7"}
         payload = {"session_id": "s", "cwd": str(self.dir), "tool_name": "Bash", "tool_input": command}
         result = subprocess.run(
