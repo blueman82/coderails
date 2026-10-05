@@ -156,7 +156,7 @@ ambiguous.
 | `S2.8` | `S2` and `S2.7b` when triggered | every build unit has one recorded model role | may run beside independent evidence branches; never releases a unit without its required inputs |
 | `J2.8` | `S2.8`, plus `S2.7d[i]`/`S2.7e` where required | all inputs for the first eligible unit are present | later units wait on their own true prerequisites |
 | `U3[i]` | `J2.8`, unit dependencies, and required eval/proof inputs | worker produced the unit's committed artifact/OPEN PR terminal state | units with `blockedBy` dependencies wait; independent units may run in waves |
-| `U4[i]` | `U3[i]` | artifact, worktree, PR, and worker report were checked by the orchestrator | idle is not failure; failed artifact check enters repair |
+| `U4[i]` | `U3[i]` | artifact, worktree, PR, and worker report were checked by the orchestrator (a `NEEDS_DECISION`/`OUTSIDE_SCOPE`/`IRREVERSIBLE_ACTION` report is validated with `scripts/worker_status.py` and surfaced by the orchestrator only; not a `record-wave` outcome) | idle is not failure; failed artifact check enters repair |
 | `U4b-review[i]` | `U4[i]` | required review Skill, security/deploy review when triggered, and SHA-bound post-review artifact exist | review findings go to `U5[i]`; no merge on a missing artifact |
 | `U5[i]` | `U4b-review[i]` | source-of-truth premise is confirmed and diagnosis is disconfirmed | premise disproven is a hard-stop; otherwise spawn the repair worker |
 | `U5-repair[i]` | `U5[i]` | distinct fix attempt applied and locally verified | back to `U4[i]`; at most 5 distinct attempts per failure |

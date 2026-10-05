@@ -335,6 +335,23 @@ class MeasureTests(unittest.TestCase):
         self.assertEqual(trace["duplicates"], 2)
         self.assertEqual(trace["by_reason"], {"gate/blocked/r1": 2, "gate/blocked/r2": 1})
 
+    def test_trace_receipts_summary_dedupes_and_ignores_other_commands(self) -> None:
+        """Receipt/hook rows are grouped by reason_code and outcome, duplicate event_ids counted once."""
+        text = (
+            self.row("a1", "action_authority", "denied_no_receipt", "denied")
+            + self.row("a1", "action_authority", "denied_no_receipt", "denied")
+            + self.row("a2", "action_authority", "denied_no_receipt", "denied")
+            + self.row("a3", "action_authority", "receipt_consumed", "allowed")
+            + self.row("a4", "action_receipt", "receipt_approved", "approved")
+            + self.row("g1", "gate", "r1", "blocked")
+        )
+        self.trace("s1", text)
+        receipts = self.measure()["trace"]["receipts"]
+        self.assertEqual(
+            receipts["by_reason_code"], {"denied_no_receipt": 2, "receipt_approved": 1, "receipt_consumed": 1}
+        )
+        self.assertEqual(receipts["by_outcome"], {"allowed": 1, "approved": 1, "denied": 2})
+
     def test_trace_counts_crack_on_reason_codes(self) -> None:
         """Each crack-on reason code is tallied under command/outcome/reason_code and deduped by event_id."""
         codes = (
@@ -369,7 +386,10 @@ class MeasureTests(unittest.TestCase):
 
     def test_trace_absent_is_zero(self) -> None:
         """No trace files gives zeros."""
-        self.assertEqual(self.measure()["trace"], {"rows": 0, "duplicates": 0, "malformed": 0, "by_reason": {}})
+        empty: dict[str, dict[str, int]] = {"by_reason_code": {}, "by_outcome": {}}
+        self.assertEqual(
+            self.measure()["trace"], {"rows": 0, "duplicates": 0, "malformed": 0, "by_reason": {}, "receipts": empty}
+        )
 
 
 if __name__ == "__main__":

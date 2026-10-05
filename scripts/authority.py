@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Create, inspect, narrow and revoke a session's authority object. Nothing consumes it yet (additive)."""
+"""Create, inspect, narrow and revoke a session's authority object.
+
+crack_on_gate consumes it; per-action approvals live in action_receipt_cli.py.
+"""
 
 from __future__ import annotations
 
