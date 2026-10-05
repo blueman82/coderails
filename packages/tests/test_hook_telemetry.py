@@ -92,7 +92,6 @@ class TelemetryTests(unittest.TestCase):
     def test_native_signal_child_detected_with_diagnostic_hint(self) -> None:
         """Test native signal child detected with diagnostic hint."""
         # A synthetic -SIGABRT returncode: really aborting a child would drop a crash report on macOS.
-        self.assertEqual(tel.classify_returncode(-6), "native_signal")
         with patch.object(sys, "platform", "darwin"):
             tel.note_child("h", -6)
         row = rows(self.dir)[0]
@@ -221,12 +220,11 @@ class TelemetryTests(unittest.TestCase):
 
     def test_every_entrypoint_is_wrapped_with_a_guarded_import(self) -> None:
         """Test hook entrypoints run through telemetry and survive a missing telemetry module."""
-        exempt = {"loop_dispatch_guard", "test_output", "voice_announce"}  # lane-A / CLI / detached
+        exempt = {"loop_dispatch_guard", "test_output"}  # lane-A / CLI
         for base in (ROOT / "hooks/scripts", ROOT / "packages/codex/hooks/scripts"):
             for path in sorted(base.glob("*.py")):
                 text = path.read_text()
-                codex_wiki = path.name == "wiki_taxonomy_gate.py" and "codex" in str(base)
-                if "__main__" not in text or path.stem in exempt or codex_wiki:
+                if "__main__" not in text or path.stem in exempt:
                     continue
                 with self.subTest(str(path.relative_to(ROOT))):
                     self.assertIn("except ImportError", text)
@@ -295,18 +293,18 @@ class ClaudeResourceClassificationTests(unittest.TestCase):
 
         self.assertEqual(hook_common.RESOURCE_ERRNOS, tel.RESOURCE_ERRNOS)
 
-    def test_read_payload_raises_on_exhaustion_but_not_on_empty_input(self) -> None:
+    def test_strict_read_raises_on_exhaustion_but_not_on_empty_input(self) -> None:
         """Test exhaustion is distinguishable from an empty payload."""
         hook_common: Any = importlib.import_module("hooks.scripts.hook_common")
 
         with patch("sys.stdin") as stdin, patch.object(hook_common, "log") as log:
             stdin.fileno.side_effect = OSError(errno.EMFILE, "Too many open files")
             with self.assertRaises(hook_common.HostResourceError):
-                hook_common.read_payload()
+                hook_common.read_payload_strict()
         self.assertIn("resource_exhausted", log.call_args[0][0])
         with patch("sys.stdin") as stdin:
             stdin.fileno.side_effect = OSError(errno.EBADF, "bad")
-            self.assertEqual(hook_common.read_payload(), {})
+            self.assertEqual(hook_common.read_payload_strict(), {})
 
     def test_every_resource_errno_raises(self) -> None:
         """Test ENFILE, EAGAIN and ENOMEM are exhaustion too, not just EMFILE."""
@@ -316,7 +314,7 @@ class ClaudeResourceClassificationTests(unittest.TestCase):
             with self.subTest(errno.errorcode[number]), patch("sys.stdin") as stdin, patch.object(hook_common, "log"):
                 stdin.fileno.side_effect = OSError(number, "x")
                 with self.assertRaises(hook_common.HostResourceError):
-                    hook_common.read_payload()
+                    hook_common.read_payload_strict()
 
     def test_blocking_io_error_is_retried_not_exhaustion(self) -> None:
         """Test a transient EAGAIN from os.read keeps reading the payload instead of raising."""

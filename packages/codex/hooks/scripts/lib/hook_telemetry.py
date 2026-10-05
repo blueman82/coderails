@@ -1,6 +1,7 @@
 """Content-free, fail-open JSONL telemetry for hook invocations (shared byte-identically by both providers).
 
-Rows carry hook name, duration, exit cause and open-fd count only. Never prompt, payload or exception text.
+Rows carry ts, hook, cause, exit, duration_ms, open_fds and pid, plus allow-listed content-free extras
+(errno, signal, error class name, diagnostic_hint). Never prompt, payload or exception text.
 """
 
 from __future__ import annotations
@@ -45,9 +46,18 @@ def open_fds() -> int | None:
     return None
 
 
-def classify_returncode(returncode: int) -> str:
-    """Negative child returncode means killed by a signal (native crash/abort)."""
-    return "native_signal" if returncode < 0 else ("ok" if returncode == 0 else "child_exit")
+_denied = False
+
+
+def exit_cause(code: int) -> str:
+    """Name a clean-return exit code: a deny decision (exit 0 plus deny JSON), ok, block (2) or other."""
+    return "deny" if _denied and code == 0 else "ok" if code == 0 else "block" if code == 2 else "exit"
+
+
+def mark_deny() -> None:
+    """Called by deny(): the hook is emitting a deny decision, so run() records cause deny rather than ok."""
+    global _denied
+    _denied = True
 
 
 def record(hook: str, cause: str, duration_ms: int = 0, exit_code: int | None = None, **extra: object) -> None:
@@ -75,7 +85,8 @@ def record(hook: str, cause: str, duration_ms: int = 0, exit_code: int | None = 
     ) as error:  # noqa: BLE001 - broad on purpose: Path.home() RuntimeError, OSError, TypeError all fail open
         with suppress(Exception):
             code = errno.errorcode.get(getattr(error, "errno", None) or 0, "-")
-            print(f"hook_telemetry: write failed ({type(error).__name__}, errno={code})", file=sys.stderr)
+            if exit_code != 2:  # on exit 2 stderr IS the model-visible block reason; never pollute it
+                print(f"hook_telemetry: write failed ({type(error).__name__}, errno={code})", file=sys.stderr)
 
 
 def note_child(hook: str, returncode: int) -> None:
@@ -90,14 +101,10 @@ def note_child(hook: str, returncode: int) -> None:
     record(hook, "native_signal", exit_code=returncode, signal=name, diagnostic_hint=hint)
 
 
-def child_failed(hook: str, returncode: int) -> bool:
-    """Record a signal-killed child, then report whether the child failed at all."""
-    note_child(hook, returncode)
-    return returncode != 0
-
-
 def run(hook: str, main: Callable[[], int]) -> int:
     """Run a hook main(), recording one row; every failure is recorded and re-raised, never turned into success."""
+    global _denied
+    _denied = False
     start = time.monotonic()
 
     def elapsed() -> int:
@@ -108,7 +115,8 @@ def run(hook: str, main: Callable[[], int]) -> int:
     def on_term(_signum: int, _frame: object) -> None:
         nonlocal terminated
         terminated = True
-        os.write(2, b"terminated by SIGTERM, likely hook timeout; action NOT gated\n")
+        with suppress(OSError):  # a dead stderr must not replace SystemExit(143)
+            os.write(2, b"terminated by SIGTERM, likely hook timeout; action NOT gated\n")
         raise SystemExit(143)  # unwind normally so the row and buffered output are written outside the handler
 
     with suppress(ValueError, OSError):
@@ -117,7 +125,7 @@ def run(hook: str, main: Callable[[], int]) -> int:
         code = main()
     except SystemExit as exit_:
         code = exit_.code if isinstance(exit_.code, int) else (0 if exit_.code is None else 1)
-        cause = "sigterm" if terminated else "ok" if code == 0 else "block" if code == 2 else "exit"
+        cause = "sigterm" if terminated else exit_cause(code)
         record(hook, cause, elapsed(), code)
         raise
     except OSError as error:
@@ -131,5 +139,5 @@ def run(hook: str, main: Callable[[], int]) -> int:
         record(hook, "exception", elapsed(), 1, error=type(error).__name__)
         raise
     code = code or 0
-    record(hook, "ok" if code == 0 else "block" if code == 2 else "exit", elapsed(), code)
+    record(hook, exit_cause(code), elapsed(), code)
     return code

@@ -65,13 +65,13 @@ def taxonomy(cwd: Path, session: str) -> tuple[Path, Path, list[str]] | None:
         return None
 
 
-def main() -> None:
+def main() -> int:
     """Deny only a patch path in an identified vault's unsanctioned directory."""
     payload = payload_object(read_input())
     cwd = Path(text_field(payload, "cwd", os.getcwd()))
     resolved = taxonomy(cwd, text_field(payload, "session_id", ""))
     if resolved is None:
-        return
+        return 0
     vault, schema, sanctioned = resolved
     for file in patch_paths(payload):
         absolute = (cwd / file).resolve()
@@ -91,8 +91,13 @@ def main() -> None:
             f"'{topdir}' is not a sanctioned wiki directory for '{file}'. "
             f"Allowed directories from {schema}: {' '.join(sanctioned)}"
         )
-        return
+        return 0
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        from lib.hook_telemetry import run
+    except ImportError:  # telemetry must never be able to break the hook
+        raise SystemExit(main()) from None
+    raise SystemExit(run("wiki_taxonomy_gate", main))

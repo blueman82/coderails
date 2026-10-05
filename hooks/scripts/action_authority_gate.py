@@ -2,8 +2,10 @@
 """Opt-in action-receipt gate: gh pr merge and git push to main/master need a matching receipt.
 
 Config `action_authority`: enforce | advisory; absent, unreadable or anything else is off (silent exit 0).
-Advisory traces and warns, never denies. Enforce denies only when no receipt verifies. Any own error fails open
-with reason action_authority_failed_open. It does not touch pr_merge_gate, destructive_bash_gate or
+Advisory traces and warns, never denies. Enforce denies only when no receipt verifies.
+Host-resource exhaustion reading the payload (EMFILE etc.) also denies;
+any other own error fails open with reason action_authority_failed_open.
+It does not touch pr_merge_gate, destructive_bash_gate or
 enforce_pr_workflow. Limits: the hash covers only the command text seen here (not aliases, functions, eval/xargs,
 scripts that push; env/sudo/subshell/bash -c/gh api wrappers are unwrapped by guarded_segments). Each enforce use is
 claimed by an atomic O_EXCL marker and the claim, not the verify, decides allow vs deny.
@@ -19,7 +21,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from hooks.scripts.hook_common import RESOURCE_MESSAGE, HostResourceError, deny, read_payload
+from hooks.scripts.hook_common import RESOURCE_MESSAGE, HostResourceError, deny, read_payload_strict
 from hooks.scripts.lib.destructive_patterns import git_output
 from hooks.scripts.lib.pr_workflow_match import guarded_segments, pr_number
 from hooks.scripts.lib.trace_row import append_row
@@ -58,7 +60,7 @@ def artifact_sha(name: str, segment: str, cwd: str) -> str | None:
 def main() -> int:
     """Check one Bash payload; every guarded segment needs its own receipt; fail open on any own error."""
     try:
-        payload = read_payload()
+        payload = read_payload_strict()
     except HostResourceError:
         deny(RESOURCE_MESSAGE)  # fail closed: a gate that cannot read its input must not allow the action
         return 0

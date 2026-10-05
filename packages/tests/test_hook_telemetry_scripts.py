@@ -134,7 +134,7 @@ class GateFailClosedTests(unittest.TestCase):
                 module: Any = importlib.import_module(f"hooks.scripts.{name}")
                 buffer = io.StringIO()
                 exhausted = common.HostResourceError(errno.EMFILE, "x")
-                with patch.object(module, "read_payload", side_effect=exhausted), redirect_stdout(buffer):
+                with patch.object(module, "read_payload_strict", side_effect=exhausted), redirect_stdout(buffer):
                     self.assertEqual(module.main(), 0)
                 decision = json.loads(buffer.getvalue())["hookSpecificOutput"]
                 self.assertEqual(decision["permissionDecision"], "deny")

@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from hooks.scripts.hook_common import RESOURCE_MESSAGE, HostResourceError, deny, read_payload
+from hooks.scripts.hook_common import RESOURCE_MESSAGE, HostResourceError, deny, read_payload_strict
 from hooks.scripts.lib.loop_state_common import log
 from hooks.scripts.lib.pr_merge_gate import merge_reason
 from hooks.scripts.lib.pr_workflow_match import operation, pr_number, step_found, targets_main, transcript_entries
@@ -20,7 +20,7 @@ from scripts.lib.config import config_path
 def main() -> int:
     """Redirect missing workflow steps and fail closed on live merge evidence failure."""
     try:
-        payload = read_payload()
+        payload = read_payload_strict()
     except HostResourceError:
         deny(RESOURCE_MESSAGE)  # fail closed: a gate that cannot read its input must not allow the action
         return 0

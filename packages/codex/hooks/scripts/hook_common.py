@@ -287,17 +287,12 @@ def continue_turn(reason: str) -> None:
 
 def deny(reason: str) -> None:
     """Emit the native PreToolUse denial envelope."""
-    print(
-        json.dumps(
-            {
-                "hookSpecificOutput": {
-                    "hookEventName": "PreToolUse",
-                    "permissionDecision": "deny",
-                    "permissionDecisionReason": reason,
-                }
-            }
-        )
-    )
+    envelope = {"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": reason}
+    print(json.dumps({"hookSpecificOutput": envelope}))
+    with suppress(ImportError):  # telemetry must never be able to break the hook
+        from lib.hook_telemetry import mark_deny
+
+        mark_deny()
 
 
 def session_dir(session_id: str) -> Path | None:

@@ -22,6 +22,7 @@ except ImportError:  # telemetry must never be able to break the hook
         """Telemetry unavailable: no-op."""
 
 
+from hooks.scripts.hook_common import output as hook_output
 from hooks.scripts.test_output import begin_run, finish_run
 
 COMMIT_COMMAND = re.compile(r"\bgit +commit\b")
@@ -76,16 +77,10 @@ def configured_test_command() -> str:
 
 def deny(command: str, output: str) -> None:
     """Emit the established PreToolUse denial envelope."""
-    print(
-        json.dumps(
-            {
-                "hookSpecificOutput": {
-                    "hookEventName": "PreToolUse",
-                    "permissionDecision": "deny",
-                    "permissionDecisionReason": (f"Test gate failed. Project test_command: {command}\n\n{output}"),
-                }
-            }
-        )
+    hook_output(
+        "PreToolUse",
+        permissionDecision="deny",
+        permissionDecisionReason=f"Test gate failed. Project test_command: {command}\n\n{output}",
     )
 
 

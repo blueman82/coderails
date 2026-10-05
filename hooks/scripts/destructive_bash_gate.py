@@ -3,13 +3,12 @@
 
 from __future__ import annotations
 
-import json
 import os
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from hooks.scripts.hook_common import RESOURCE_MESSAGE, HostResourceError, deny, read_payload
+from hooks.scripts.hook_common import RESOURCE_MESSAGE, HostResourceError, deny, output, read_payload_strict
 from hooks.scripts.lib.destructive_patterns import normalize_ifs, permanent_pattern, source_write, workflow_substitution
 from hooks.scripts.lib.destructive_routes import ROUTES
 
@@ -17,7 +16,7 @@ from hooks.scripts.lib.destructive_routes import ROUTES
 def main() -> int:
     """Evaluate the input command without running any of its contents."""
     try:
-        payload = read_payload()
+        payload = read_payload_strict()
     except HostResourceError:
         deny(RESOURCE_MESSAGE)  # fail closed: a gate that cannot read its input must not allow the action
         return 0
@@ -30,19 +29,13 @@ def main() -> int:
     cwd = cwd_value if isinstance(cwd_value, str) and cwd_value else os.getcwd()
     pattern, identifier = permanent_pattern(command, cwd)
     if pattern:
-        print(
-            json.dumps(
-                {
-                    "hookSpecificOutput": {
-                        "hookEventName": "PreToolUse",
-                        "permissionDecision": "deny",
-                        "patternId": identifier,
-                        "permissionDecisionReason": f"Destructive pattern detected: {pattern}\n"
-                        f"Full command: {command}\n"
-                        f"This command is permanently blocked. {ROUTES[identifier]}",
-                    }
-                }
-            )
+        output(
+            "PreToolUse",
+            permissionDecision="deny",
+            patternId=identifier,
+            permissionDecisionReason=f"Destructive pattern detected: {pattern}\n"
+            f"Full command: {command}\n"
+            f"This command is permanently blocked. {ROUTES[identifier]}",
         )
         return 0
     if reason := source_write(command, cwd):

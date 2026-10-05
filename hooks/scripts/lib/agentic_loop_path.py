@@ -7,11 +7,16 @@ import os
 import subprocess
 import sys
 import time
+from contextlib import suppress
 from pathlib import Path
 
 try:
     from hooks.scripts.lib.hook_telemetry import note_child
 except ImportError:  # telemetry must never be able to break the hook
+    with suppress(Exception):  # record the loss once per process instead of silently disabling telemetry
+        from hooks.scripts.hook_common import log
+
+        log("hook_telemetry unavailable (ImportError); telemetry disabled for this process")
 
     def note_child(hook: str, returncode: int) -> None:
         """Telemetry unavailable: no-op."""
