@@ -8,6 +8,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from scripts.lib import git_common as git
+from scripts.lib import manifest_policy
 
 
 def commit(message: str, jira_key: str, paths: list[str]) -> None:
@@ -66,6 +67,7 @@ def main(arguments: list[str] | None = None) -> int:
             number = git.pr_num()
             print(f"✓ Up to date │ {git.pr_field(number, 'url')}" if number else "• Nothing to push")
             return 0
+        manifest_policy.gate()
         arguments = ["git", "push"] + (["--force-with-lease"] if force else []) + ["-u", "origin", current]
         pushed = git.run(*arguments)
         combined = pushed.stdout + pushed.stderr

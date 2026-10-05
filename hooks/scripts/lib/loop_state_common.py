@@ -20,6 +20,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from hooks.scripts.lib.agentic_loop_path import resolve_path
 from hooks.scripts.lib.dir_lock import acquire_dir_lock, release_dir_lock
 from hooks.scripts.lib.discipline_common import content, records, tool_uses
+from hooks.scripts.lib.trace_row import append_row
 
 LOOP_STOP_VOCAB = "hard-stop|approval-gate|awaiting-input|complete"
 
@@ -165,28 +166,103 @@ def loop_active_incomplete(transcript: str, cwd: str, session: str) -> bool:
     return count > 0 and not load_progress(cwd, session, count).complete
 
 
+def record_absent_block(state: LoopState) -> None:
+    """Persist the invocation ordinal of an absent-state block in hook_state.json; fail open, never raise."""
+
+    def update(data: dict[str, Any]) -> dict[str, Any]:
+        ordinals = data.setdefault("ordinals", {})
+        if not isinstance(ordinals, dict):
+            raise ValueError("ordinals must be an object")
+        cast(dict[str, Any], ordinals)["absent_blocked"] = state.invocations
+        return data
+
+    atomic_progress_update(state.path.with_name("hook_state.json"), update, create=True)
+
+
 def unstubbed_grace(state: LoopState, hook: str) -> bool:
-    """Release only an absent-file block already logged at this invocation ordinal."""
+    """Release only an absent-file block already recorded at this invocation ordinal.
+
+    Typed hook_state.json decides when it holds an integer ordinal; the discipline.log regex is the legacy
+    fallback (traced as legacy_log_parse) for a missing or torn state file.
+    """
     if state.path.is_file():
         return False
-    path = Path(os.environ.get("CLAUDE_DISCIPLINE_LOG", str(Path.home() / ".claude/discipline.log")))
-    try:
-        lines = path.read_text()
-    except OSError:
-        return False
-    prefix = f"hook=loop_state_guard session={state.session} invocations={state.invocations} "
-    if re.search(re.escape(prefix) + r".*reason=absent blocked=1", lines):
+    ordinals = read_state(state.path.with_name("hook_state.json")).get("ordinals")
+    recorded = cast(dict[str, Any], ordinals).get("absent_blocked") if isinstance(ordinals, dict) else None
+    if isinstance(recorded, int) and not isinstance(recorded, bool):
+        released = recorded == state.invocations
+    else:
+        path = Path(os.environ.get("CLAUDE_DISCIPLINE_LOG", str(Path.home() / ".claude/discipline.log")))
+        try:
+            lines = path.read_text()
+        except OSError:
+            return False
+        prefix = f"hook=loop_state_guard session={state.session} invocations={state.invocations} "
+        released = bool(re.search(re.escape(prefix) + r".*reason=absent blocked=1", lines))
+        if released:
+            append_row(hook, "fallback", "legacy_log_parse", state.session)
+    if released:
         log(f"hook={hook} session={state.session} invocations={state.invocations} unstubbed_grace=released blocked=0")
-        return True
-    return False
+    return released
 
 
 def stop_category(text: str) -> str:
-    """Return the last declaration's category after validating a complete marker."""
-    if not re.search(rf"^\s*LOOP-STOP:\s*({LOOP_STOP_VOCAB})([^a-z0-9]|$)", text, re.I | re.M):
-        return ""
-    matches = re.findall(rf"LOOP-STOP:\s*({LOOP_STOP_VOCAB})", text, re.I)
+    """Legacy text fallback: the last anchored declaration's category; an inline mention is prose (H06)."""
+    matches = re.findall(rf"^\s*LOOP-STOP:\s*({LOOP_STOP_VOCAB})(?:[^a-z0-9]|$)", text, re.I | re.M)
     return matches[-1] if matches else ""
+
+
+def consume_stop(data: dict[str, Any], seq: object) -> None:
+    """Mark exactly one unconsumed stop row consumed; raise so the enclosing atomic write is abandoned otherwise."""
+    rows = cast(list[object], data.get("stops") or [])
+    matches = [
+        cast(dict[str, Any], r) for r in rows if isinstance(r, dict) and cast(dict[str, Any], r).get("seq") == seq
+    ]
+    if len(matches) != 1 or matches[0].get("consumed") is not False:
+        raise ValueError("recorded stop already consumed")
+    matches[0]["consumed"] = True
+
+
+def recorded_stop(data: dict[str, Any]) -> dict[str, Any] | None:
+    """Return the newest unconsumed stop row recorded at the current revision; any malformed key reads as none."""
+    rows = data.get("stops")
+    if not isinstance(rows, list):
+        return None
+    for row in reversed(cast(list[object], rows)):
+        if not isinstance(row, dict):
+            continue
+        stop = cast(dict[str, Any], row)
+        if (
+            stop.get("consumed") is False
+            and stop.get("revision") == data.get("revision")
+            and stop.get("category") in LOOP_STOP_VOCAB.split("|")
+        ):
+            return stop
+    return None
+
+
+def stop_ran_this_turn(transcript: str) -> bool:
+    """Report whether `graph.py stop` ran after the last user prompt, so an old row cannot release a later turn."""
+    ran = False
+    for record in records(transcript):
+        value = content(record)
+        if record.get("type") == "user" and (
+            (isinstance(value, str) and value)
+            or (
+                isinstance(value, list)
+                and any(
+                    isinstance(b, dict) and cast(dict[str, Any], b).get("type") == "text"
+                    for b in cast(list[object], value)
+                )
+            )
+        ):
+            ran = False
+        for tool in tool_uses(record):
+            data = tool.get("input")
+            command = cast(dict[str, Any], data).get("command") if isinstance(data, dict) else None
+            if tool.get("name") == "Bash" and isinstance(command, str) and re.search(r"graph\.py\s+stop\b", command):
+                ran = True
+    return ran
 
 
 def mark_complete(cwd: str, session: str) -> bool:

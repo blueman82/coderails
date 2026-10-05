@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import errno
+import hashlib
 import json
 import os
 import re
 import select
+import shlex
 import subprocess
 import sys
 import time
@@ -14,7 +16,7 @@ import uuid
 from contextlib import suppress
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 RESOURCE_ERRNOS = frozenset({errno.EMFILE, errno.ENFILE, errno.EAGAIN, errno.ENOMEM})
 RESOURCE_MESSAGE = (
@@ -148,7 +150,9 @@ def write_authority(path: Path, obj: dict[str, object]) -> bool:
     return True
 
 
-def append_trace_row(command: str, outcome: str, reason_code: str, session_id: str) -> bool:
+def append_trace_row(
+    command: str, outcome: str, reason_code: str, session_id: str, extra: dict[str, Any] | None = None
+) -> bool:
     """Append one non-authoritative trace row (same fields as the Claude trace_row helper); never raises."""
     if not session_id or session_id in {"?", "."} or "/" in session_id or ".." in session_id or "\0" in session_id:
         return False
@@ -157,12 +161,14 @@ def append_trace_row(command: str, outcome: str, reason_code: str, session_id: s
         "schema_version": 1,
         "event_id": str(uuid.uuid4()),
         "session_id": session_id,
-        "loop_id": None,
+        "loop_id": (extra or {}).get("loop_id"),
         "ts": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "command": command,
         "outcome": outcome,
         "reason_code": reason_code,
-        "inputs": {},
+        "inputs": {
+            k: hashlib.sha256(v.encode("utf-8")).hexdigest() for k, v in (extra or {}).get("inputs", {}).items()
+        },
     }
     try:
         path = root / session_id / "trace.jsonl"
@@ -175,6 +181,103 @@ def append_trace_row(command: str, outcome: str, reason_code: str, session_id: s
     except OSError:
         return False
     return True
+
+
+RECEIPT_FIELDS = (
+    "receipt_id", "authority_id", "session_id", "loop_id", "action", "exact_payload_hash",
+    "artifact_sha", "scope", "issued_at", "expires_at", "single_use", "revoked",
+)  # fmt: skip
+
+
+def receipt_proposed(
+    kind: str, segment: str, cwd: str, branch: str, artifact_sha: str | None = None
+) -> dict[str, object]:
+    """Vendored subset of scripts/lib/action_receipt.proposed_action (parity-tested)."""
+    try:
+        argv = shlex.split(segment)
+    except ValueError:
+        argv = [segment.strip()]
+    blob = json.dumps({"argv": argv, "cwd": cwd, "branch": branch}, sort_keys=True, separators=(",", ":"))
+    digest = hashlib.sha256(blob.encode("utf-8")).hexdigest()
+    return {"action": kind, "exact_payload_hash": digest, "artifact_sha": artifact_sha}
+
+
+def receipt_verify(
+    rec: object,
+    proposed: dict[str, object],
+    now: datetime,
+    session_id: str,
+    loop_id: str | None,
+    consumed: bool = False,
+) -> tuple[bool, str]:
+    """Vendored subset of scripts/lib/action_receipt.verify: same checks, same order, same reason codes."""
+    if not isinstance(rec, dict):
+        return False, "malformed"
+    data = cast(dict[str, object], rec)
+    if set(data) != set(RECEIPT_FIELDS):
+        return False, "malformed"
+    names = ("receipt_id", "session_id", "action", "exact_payload_hash")
+    text = all(isinstance(data[n], str) and data[n] for n in names)
+    nullable = ("authority_id", "loop_id", "artifact_sha")
+    optional = all(data[n] is None or (isinstance(data[n], str) and data[n]) for n in nullable)
+    flags = isinstance(data["single_use"], bool) and isinstance(data["revoked"], bool)
+    expires = parse_expiry(data["expires_at"])
+    shaped = text and optional and flags and isinstance(data["scope"], str)
+    if not (shaped and expires and parse_expiry(data["issued_at"])):
+        return False, "malformed"
+    if data["revoked"]:
+        return False, "revoked"
+    if expires <= now:
+        return False, "expired"
+    if data["session_id"] != session_id:
+        return False, "foreign_session"
+    if data["loop_id"] is not None and data["loop_id"] != loop_id:
+        return False, "foreign_loop"
+    if consumed:
+        return False, "consumed"
+    if data["action"] != proposed.get("action"):
+        return False, "kind_mismatch"
+    if data["exact_payload_hash"] != proposed.get("exact_payload_hash"):
+        return False, "hash_mismatch"
+    if data["artifact_sha"] is not None and data["artifact_sha"] != proposed.get("artifact_sha"):
+        return False, "sha_mismatch"
+    return True, "ok"
+
+
+def _receipt_claim(path: Path, suffix: str) -> bool:
+    """O_CREAT|O_EXCL marker beside the receipt; True only for the one caller that created it."""
+    try:
+        os.close(os.open(str(path.with_suffix(suffix)), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644))
+    except OSError:
+        return False
+    return True
+
+
+def receipt_find_valid(
+    session_id: str, proposed: dict[str, object], now: datetime, loop_id: str | None, consume_it: bool = False
+) -> tuple[dict[str, object] | None, str]:
+    """Vendored subset of scripts/lib/action_receipt.find_valid (revoke/consume are O_EXCL marker files)."""
+    auth = authority_path(session_id)
+    if auth is None:
+        return None, "no_session" if not session_id else "malformed"
+    refusals: list[str] = []
+    for path in sorted((auth.parent / "receipts").glob("*.json"))[:50]:  # MAX_RECEIPTS
+        try:
+            raw: object = json.loads(path.read_text(encoding="utf-8")) if path.stat().st_size <= 8192 else None
+        except (OSError, ValueError):
+            raw = None
+        data: dict[str, object] | None = None
+        if isinstance(raw, dict):
+            fields = cast(dict[str, object], raw)
+            data = {**fields, "revoked": fields.get("revoked") is True or path.with_suffix(".revoked").exists()}
+        ok, code = receipt_verify(data, proposed, now, session_id, loop_id, path.with_suffix(".consumed").exists())
+        if not ok:
+            refusals.append(code)
+        elif data is not None and data["single_use"] and consume_it and not _receipt_claim(path, ".consumed"):
+            refusals.append("consumed")
+        elif data is not None:
+            return data, "ok"
+    return None, next((c for c in refusals if c != "malformed"), refusals[0] if refusals else "no_receipt")
 
 
 def continue_turn(reason: str) -> None:

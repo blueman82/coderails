@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any, cast
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
-from hooks.scripts.lib import graph_controller, graph_recovery
+from hooks.scripts.lib import graph_controller, graph_recovery, graph_stops
 from hooks.scripts.lib import graph_dispatch as dispatch
 from hooks.scripts.lib.graph_evidence import object_value
 from hooks.scripts.lib.graph_executor import graph_semantics, load, transition
@@ -32,6 +32,7 @@ def parser() -> argparse.ArgumentParser:
         "record-unit",
         "respawn-stale",
         "hard-stop",
+        "stop",
         "authorize-dispatch",
         "complete",
         "verify-completion",
@@ -55,10 +56,16 @@ def parser() -> argparse.ArgumentParser:
             command.add_argument("--unit", required=True)
             command.add_argument("--depends-on", action="append", default=[])
             command.add_argument("--join", action="store_true")
+            command.add_argument("--manifest", action="append", default=[])
         if name == "recover-wave":
             command.add_argument("--lease-seconds", type=int, default=900)
             command.add_argument("--report-only", action="store_true")
+        if name == "stop":
+            command.add_argument("--category", required=True, choices=graph_stops.STOP_CATEGORIES)
+            command.add_argument("--reason-code", required=True, choices=graph_stops.STOP_REASON_CODES)
+            command.add_argument("--reason", required=True)
         if name in {
+            "stop",
             "respawn-stale",
             "hard-stop",
             "authorize-dispatch",
@@ -87,6 +94,19 @@ def native_transition(path: Path, session: str, operation: str, node: str, reaso
         transform = graph_semantics.respawn_stale if operation == "respawn_stale" else graph_semantics.hard_stop
         proposal = transform(state, node, reason)
         output.update({key: value for key, value in proposal.items() if key != "state"})
+        return object_value(proposal["state"], "proposed graph")
+
+    transition(path, update)
+    return output
+
+
+def record_stop(path: Path, session: str, category: str, reason_code: str, reason: str) -> dict[str, Any]:
+    """Append one stop-intent row under the sole Claude lock and owner check."""
+    output: dict[str, Any] = {}
+
+    def update(state: dict[str, Any]) -> dict[str, Any]:
+        proposal = graph_stops.record_stop(state, session, category, reason_code, reason)
+        output.update(proposal["stop"])
         return object_value(proposal["state"], "proposed graph")
 
     transition(path, update)
@@ -130,7 +150,7 @@ def main() -> int:
             output: object = graph_controller.start(args.state, args.session, args.loop_id, args.prompt_file)
         elif args.command == "add-unit":
             output = graph_controller.add_unit(
-                args.state, args.session, args.loop_id, args.unit, args.depends_on, args.join
+                args.state, args.session, args.loop_id, args.unit, args.depends_on, args.join, args.manifest
             )
         elif args.command == "inspect":
             state = load(args.state)
@@ -155,6 +175,8 @@ def main() -> int:
             output = record_unit(args.state, args.session, args.unit, args.status, args.evidence or args.reason)
         elif args.command in {"respawn-stale", "hard-stop"}:
             output = native_transition(args.state, args.session, args.command.replace("-", "_"), args.node, args.reason)
+        elif args.command == "stop":
+            output = record_stop(args.state, args.session, args.category, args.reason_code, args.reason)
         elif args.command == "authorize-dispatch":
             output = dispatch.authorize_dispatch(args.state, args.session, args.prompt, args.subagent_type)
         else:

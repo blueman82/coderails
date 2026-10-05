@@ -9,6 +9,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from scripts.lib import git_common as git
+from scripts.lib import manifest_policy
 from scripts.lib.config import config_path, integrity_machine_user
 from scripts.lib.integrity_status import verify_integrity_status
 from scripts.lib.wiki_debt import has_wiki_ingest_for_merged_prs
@@ -90,6 +91,7 @@ def main(arguments: list[str] | None = None) -> int:
             if git.protected() and git.pr_field(number, "reviewDecision", "NONE") != "APPROVED":
                 raise git.WorkflowError("Not approved")
             verify_gates(number)
+            manifest_policy.gate(number)
             git.run("gh", "pr", "merge", number, "--merge", check=True)
             print("✓ Merged")
         elif state == "MERGED":

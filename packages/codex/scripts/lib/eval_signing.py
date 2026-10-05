@@ -13,7 +13,7 @@ import tempfile
 from pathlib import Path
 from typing import Any, cast
 
-from .config import config_path, config_value
+from .config import config_path, require_signatures
 from .eval_trace import emit
 
 NAMESPACE = "coderails-evals"
@@ -44,8 +44,7 @@ def keys_dir() -> Path:
 
 def required() -> bool:
     """True when workflow.config.yaml sets evals.require_signatures: true (default false)."""
-    path = config_path()
-    return bool(path) and config_value(path, "require_signatures", "evals").lower() == "true"
+    return require_signatures(config_path())
 
 
 def _run(args: list[str], stdin: str) -> subprocess.CompletedProcess[str]:
