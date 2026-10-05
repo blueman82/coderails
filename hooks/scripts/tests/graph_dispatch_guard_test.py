@@ -36,6 +36,8 @@ def check(request: dict[str, Any]) -> None:
 class DispatchGuardTests(GraphCase):
     """Use current graph state while replacing only obsolete legacy acceptance cases."""
 
+    consume_on_begin = False
+
     def setup_request(self, identifier: str = "U3[1]", units: int = 1) -> dict[str, Any]:
         """Open a real wave, then seed planned work units for the dispatch gate."""
         self.path = resolve_path(str(self.home), "fixture-session")
@@ -138,7 +140,7 @@ class DispatchGuardTests(GraphCase):
             self.denied(request, "envelope")
         request = copy.deepcopy(original)
         request["tool_input"]["subagent_type"] = ""
-        self.denied(request, "provider subagent_type")
+        check(request)  # a blank type is Claude's general-purpose, allowed for an unguarded role
         for key in ("loop_id", "revision"):
             state = load(self.path)
             del state[key]

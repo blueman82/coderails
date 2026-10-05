@@ -384,7 +384,14 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   out: paste `prompt_sections` verbatim), `role_mismatch` (dispatch a guarded scout as `coderails:<role>` / Codex
   `agent_type: <role>`; other roles accept their own type or `general-purpose` on Claude, any unnamed role on Codex),
   `dispatch_state_unconverted` (`state_minor` < 2: run `graph.py convert --check` then `convert`; it refuses while a wave
-  is open, `convert_refused_active_wave_in_flight`, so finish or `recover-wave` first).
+  is open, `convert_refused_active_wave_in_flight`, so finish or `recover-wave` first), `dispatch_unauthorized` (Claude
+  `record-wave` / completion found a bound spawn whose record the PreToolUse guard never consumed, i.e. a spawn the hook did
+  not see: re-dispatch it through the guard via `recover-wave`). A Claude `Agent` call with no `subagent_type` is treated as
+  `general-purpose` (allowed for unguarded roles, `role_mismatch` for a scout).
+- Off-switch: `CODERAILS_GRAPH_DISPATCH=off` (also `0` or `false`) in the environment of the hooks and the graph CLI sends
+  every spawn down the pre-envelope pass-through route on both providers (no envelope, role or single-use check, and no
+  evidence-side re-check); each such spawn leaves an `authorize-dispatch/reported/dispatch_check_off` trace row. Default ON;
+  unset to re-enable. Use it only to rescue a loop wedged by a bad contract or an uninstalled plugin agent.
 - Bad `add-unit --model-role` is `add_unit_refused_bad_field` (allowed: `fast-mechanical`, `default`, `frontier`).
 - Limits: a plugin agent that is not installed in the session cannot run a guarded scout (refused, never downgraded); the
   sandboxed Bash launcher carries no agent type, so the role is asserted on the `Agent` and `spawn_agent` routes only
@@ -392,3 +399,16 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   a consumed flag, so a hook retried without an id reads as a replay; Codex role containment (no shell, per-role MCP) is
   not asserted, only `agent_type == role`; `progress.json` and the sections are plain same-user data, so this is drift and
   substitution detection for a cooperating agent, not tamper evidence.
+- Limits, coverage: (1) the contract is advisory to the worker: the envelope proves the dispatch was authorized and the
+  rendered block is present as a substring, not that the rest of the prompt is faithful; text before, after or around the
+  block is unconstrained and `write_scope` is prompt text only, not enforced. (2) Only the five capability-guarded roles
+  (`deploy-safety-reviewer`, `design-scout`, `disposition-scout`, `preflight-scout`, `source-auditor`) are role-contained;
+  `spec-reviewer` (empty capability list), the `shell.raw` roles (`docs-auditor`, `wiki-writer`, `proof-author`) and nodes
+  with no `agent_role` (default `loop-worker`) may run as `general-purpose` on Claude, and any non-role `agent_type` on
+  Codex, with full tools. (3) Re-entry is not covered: the matchers are `Agent` and `spawn_agent` only, so `SendMessage` on
+  Claude and resume / `send_input` on Codex can give a finished or running worker a fresh prompt outside any envelope.
+  (4) Codex has no evidence-side re-check: `record-wave` and completion bind by `task_name` and never re-verify the dispatch
+  record or `authorized`, and `graph_transcript._legacy_dispatch` (first-line `CODERAILS_GRAPH_TASK`) stays on the live
+  binding path, so a spawn that bypassed the hook still binds on Codex. Claude re-checks record, digest, role,
+  consumption and one-spawn-per-id for waves at or after `contract_from_revision`; Claude hooks still fail open if the
+  hook times out (10 s in `hooks.json`) before it denies.

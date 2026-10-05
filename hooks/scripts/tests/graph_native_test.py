@@ -17,6 +17,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from hooks.scripts.lib import graph_dispatch as dispatch
 from hooks.scripts.lib.graph_evidence import notifications, records, transcript
 from hooks.scripts.lib.graph_executor import graph_semantics, load, transition
+from hooks.scripts.tests.claude_graph_test_support import consume_records
 from hooks.scripts.tests.lib import claude_transcript_fixture as fixture
 
 
@@ -40,6 +41,7 @@ class NativeGraphTest(unittest.TestCase):
     def opened(self) -> dict[str, Any]:
         """Begin a wave and return the state actually persisted under its lock."""
         dispatch.begin_wave(self.path)
+        consume_records(self.path)
         return load(self.path)
 
     def finished(self) -> dict[str, Any]:
@@ -86,9 +88,8 @@ class NativeGraphTest(unittest.TestCase):
         self.assertEqual([item["attempt"] for item in refs], [1, 2, 3])
 
     def test_fanout_requires_all_children_to_finish(self) -> None:
-        """Every native worker actually launched for a node must complete."""
+        """The native worker actually launched for a node must complete (one spawn per dispatch id)."""
         graph = self.opened()
-        fixture.spawn(self.parent, graph, "U3[1]", suffix="a")
         tool, agent = fixture.spawn(self.parent, graph, "U3[1]", suffix="b", completed=False)
         with self.assertRaises(ValueError):
             dispatch.record_wave(self.path, fixture.report(graph))

@@ -125,6 +125,9 @@ def authorize_dispatch(
             raise GraphError("completed graph does not own worker dispatch")
         named: str | None = None
         inputs = {"session": session, "role": agent_type}
+        if graph_contract.dispatch_off():
+            trace(path, state, "reported", "dispatch_check_off", inputs, [(None, None, None)], "authorize-dispatch")
+            return {"loop_id": state["loop_id"], "task_name": task, "dispatch_id": dispatch_id, "off": True}
         try:
             graph_contract.require_converted(state)
             message = message_file.read_text(encoding="utf-8")

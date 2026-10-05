@@ -161,12 +161,14 @@ def authorize_dispatch(
     state = load(path)
     if state["session_id"] != session or state["status"] == "complete":
         raise ValueError("this session does not own an active loop")
-    if not role.strip():
-        raise ValueError("native Agent requires its provider subagent_type")
+    role = role.strip() or "general-purpose"  # Claude Code runs an omitted subagent_type as general-purpose
+    inputs = {"session": session, "role": role}
+    if graph_contract.dispatch_off():
+        trace(path, state, "reported", "dispatch_check_off", inputs, [(None, None, None)], "authorize-dispatch")
+        return {}
     denied: list[graph_contract.DispatchDeniedError] = []
     granted: list[dict[str, Any]] = []
     named: list[str | None] = [None]  # the envelope's node, once it parses, for the trace row
-    inputs = {"session": session, "role": role}
 
     def update(current: dict[str, Any]) -> dict[str, Any]:
         try:

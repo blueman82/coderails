@@ -177,16 +177,16 @@ class BindingTests(GraphCase):
         fixture.notify(self.parent, tool, "foreign-agent")
         self.refuse_report(fixture.report(state), "completed notification")
         write_records(self.parent, original)
-        fixture.spawn(self.parent, state, "U3[1]", suffix="second")
-        fixture.spawn(self.parent, state, "U3[1]", suffix="third")
+        fixture.spawn(self.parent, state, "U3[1]", suffix="second")  # a second spawn of one dispatch id is a replay
+        self.refuse_report(fixture.report(state), "reason_code=dispatch_replayed")
+        write_records(self.parent, original)
         dispatch.record_wave(self.path, fixture.report(state))
         refs = [
             cast(dict[str, Any], entry)
             for entry in load(self.path)["graph"]["nodes"]["U3[1]"]["evidence"]
             if isinstance(entry, dict)
         ]
-        self.assertEqual(len(refs), 3)
-        self.assertEqual(len({entry["agent_id"] for entry in refs}), 3)
+        self.assertEqual(len(refs), 1)
         dispatch.validate_graph_completion(self.path, "fixture-session")
 
     def test_one_native_child_cannot_bind_two_fanout_requests(self) -> None:
@@ -201,7 +201,7 @@ class BindingTests(GraphCase):
             if entry.get("type") == "queue-operation" and second in entry["content"]:
                 entry["content"] = entry["content"].replace(second_agent, agent)
         write_records(self.parent, entries)
-        self.refuse_report(fixture.report(state), "child identity has already been bound")
+        self.refuse_report(fixture.report(state), "child identity has already been bound|reason_code=dispatch_replayed")
 
     def test_seeded_bound_identity_cannot_hide_inside_nested_evidence(self) -> None:
         """A nested previously bound worker cannot silently be consumed again."""

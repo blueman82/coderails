@@ -94,6 +94,10 @@ class Provider:
     def launch(self, outcome: str = "done") -> dict[str, Any]:
         """Emit actual provider-shaped local fixture authority for every active node."""
         state = self.read()
+        if self.name == "claude":  # the PreToolUse guard consumes each record before the spawn; completion re-checks it
+            for record in state["graph"]["dispatches"].values():
+                record["authorized"] = record["authorized"] or {"tool_use_id": None}
+            self.write(state)
         for identifier in state["graph"]["active_wave"]["nodes"]:
             if self.name == "claude":
                 claude.spawn(self.parent, state, identifier, completed=outcome == "done")

@@ -19,7 +19,14 @@ def check_record(state: dict[str, Any], row: dict[str, Any]) -> None:
         raise graph_contract.DispatchDeniedError(
             "dispatch_missing_envelope", "native spawn lacks a v2 dispatch envelope"
         )
-    graph_contract.check_dispatch(state, row, row["prompt"], live=False)
+    if graph_contract.dispatch_off():
+        return
+    record = graph_contract.check_dispatch(state, row, row["prompt"], live=False)
+    graph_contract.assert_role(record["contract"], row["subagent_type"], "coderails:", graph_contract.CLAUDE_TYPES)
+    if record.get("authorized") is None:
+        raise graph_contract.DispatchDeniedError(
+            "dispatch_unauthorized", "native spawn has no consumed dispatch authorization (the guard never saw it)"
+        )
 
 
 def provenance(value: object, depth: int = 0) -> bool:
@@ -90,6 +97,7 @@ def bind_wave(state: dict[str, Any], results: dict[str, Any]) -> dict[str, list[
     rows, notices = spawns(path, session), notifications(path, session)
     tools, agents = used_references(state)
     bound: dict[str, list[dict[str, Any]]] = {}
+    ids: set[str] = set()
     for node_id, result in results.items():
         if provenance(result.get("evidence")):
             raise ValueError("caller evidence must not assert native worker provenance")
@@ -107,6 +115,10 @@ def bind_wave(state: dict[str, Any], results: dict[str, Any]) -> dict[str, list[
             if any(row[key] != state[key] for key in ("session_id", "loop_id", "revision")):
                 raise ValueError("native spawn envelope does not own this session/loop/revision")
             check_record(state, row)
+            if "dispatch_id" in row:
+                if row["dispatch_id"] in ids:
+                    raise graph_contract.DispatchDeniedError("dispatch_replayed", "two spawns carry one dispatch id")
+                ids.add(row["dispatch_id"])
             tool = row["tool_use_id"]
             if tool in tools:
                 raise ValueError("native tool identity has already been bound")

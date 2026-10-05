@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import subprocess
 from pathlib import Path
 from typing import Any, cast
@@ -43,7 +44,9 @@ CODES = (
     "dispatch_sections_missing",
     "dispatch_state_unconverted",
     "role_mismatch",
+    "dispatch_unauthorized",
 )
+OFF_SWITCH = "CODERAILS_GRAPH_DISPATCH"  # off/0/false: pre-envelope pass-through (default ON)
 BEGIN, END = "CODERAILS_GRAPH_CONTRACT v2", "END CODERAILS_GRAPH_CONTRACT"
 CAPABILITY_TOOLS = ("repo.inspect", "diff.read", "tests.run", "pr.comment")  # mirrors hooks capability_profiles.TOOLS
 CLAUDE_TYPES = ("general-purpose",)  # unguarded roles may also run as this untyped native agent
@@ -57,6 +60,11 @@ class DispatchDeniedError(ValueError):
         """Keep the closed code beside the human message and show both in str()."""
         super().__init__(f"{message} [reason_code={code}]")
         self.code, self.message = code, message
+
+
+def dispatch_off() -> bool:
+    """True when the operator set the dispatch off-switch in the hook/CLI environment."""
+    return os.environ.get(OFF_SWITCH, "").strip().lower() in ("off", "0", "false")
 
 
 def load_profiles() -> dict[str, Any]:

@@ -402,7 +402,9 @@ compare only the first line, skip the digest recompute, drop the replay record, 
 PreToolUse `tool_use_id` is unverified, so single use falls back to a consumed flag; a plugin agent that is not installed
 cannot run a guarded scout; Codex role containment is out of scope (`agent_type == role` only); the stored record is a
 plain same-user file (drift detection, not tamper evidence); `graph_transcript`'s `CollabAgentToolCall` first-line reader is
-a historical-transcript path, live Codex binding stays on `task_name`.
+a historical-transcript path, live Codex binding stays on `task_name`. Off-switch `CODERAILS_GRAPH_DISPATCH=off|0|false`
+(default ON) bypasses the guards, counted as `dispatch_check_off` (high = workaround). Claude evidence re-asserts role,
+consumption, one spawn per id; Codex has none; prompt body, `write_scope`, non-scouts, `SendMessage`/resume: RUNBOOK limits.
 
 **Reproduce.**
 

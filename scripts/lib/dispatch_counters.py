@@ -17,7 +17,7 @@ from typing import Any, cast
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "packages/graph-semantics"))
 from graph_contract import CODES
 
-REASONS = (*CODES, "dispatch_authorized")
+REASONS = (*CODES, "dispatch_authorized", "dispatch_check_off")
 
 
 def count_reasons(root: Path, since: str = "") -> dict[str, int]:

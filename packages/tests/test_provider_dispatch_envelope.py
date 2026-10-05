@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from hooks.scripts.tests.lib import claude_transcript_fixture as claude
 from packages.tests.provider_fixture import Provider
 
 SECTIONS = 'model_role: "default"'
@@ -241,6 +242,68 @@ class DispatchEnvelopeTests(unittest.TestCase):
                 request = provider.request()
                 self.typed(provider, request, "source-auditor")
                 self.refuse(provider, request, "role_mismatch")
+
+    def test_omitted_subagent_type_is_general_purpose(self) -> None:
+        """An omitted subagent_type is general-purpose: allowed for an unguarded role, role_mismatch for a scout."""
+        provider = self.opened("claude")
+        request = provider.request()
+        del request["tool_input"]["subagent_type"]
+        self.assertFalse(self.verdict(provider, request))
+        self.assertEqual(self.reason(provider), "dispatch_authorized")
+        scout = self.opened("claude", ("S2",))
+        request = scout.request()
+        del request["tool_input"]["subagent_type"]
+        self.refuse(scout, request, "role_mismatch")
+
+    def test_off_switch_passes_every_spawn_through_with_a_trace_row(self) -> None:
+        """CODERAILS_GRAPH_DISPATCH=off lets a role-mismatched, envelope-less spawn through on both providers."""
+        for name in ("claude", "codex"):
+            with self.subTest(provider=name):
+                provider = self.opened(name, ("S2",))
+                request = provider.request()
+                self.untyped(provider, request, "general-purpose")
+                self.assertTrue(self.verdict(provider, request))  # control: denied while the switch is unset
+                provider.environment = {**provider.environment, "CODERAILS_GRAPH_DISPATCH": "off"}
+                request["tool_input"][field(provider)] = "Read the documentation."
+                self.assertFalse(self.verdict(provider, request))
+                self.assertEqual(self.reason(provider), "dispatch_check_off")
+
+    def launched(self, nodes: tuple[str, ...] = ("U3[1]",)) -> tuple[Provider, dict[str, Any]]:
+        """A Claude provider whose wave was begun and spawned, plus the wave report."""
+        provider = self.opened("claude", nodes)
+        return provider, provider.launch()
+
+    def unauthorize(self, provider: Provider) -> None:
+        """Forget the guard's consumption, as if the PreToolUse hook never saw the spawn."""
+        state = provider.read()
+        for record in state["graph"]["dispatches"].values():
+            record["authorized"] = None
+        provider.write(state)
+
+    def test_evidence_side_rejects_spawns_the_guard_never_authorized(self) -> None:
+        """Claude record-wave and completion re-check consumption, role and single use; the off-switch bypasses them."""
+        provider, report = self.launched()
+        self.unauthorize(provider)
+        failed = provider.call("record-wave", json.dumps(report))
+        self.assertNotEqual(failed.returncode, 0)
+        self.assertIn("dispatch_unauthorized", failed.stderr)
+        provider.environment = {**provider.environment, "CODERAILS_GRAPH_DISPATCH": "off"}
+        provider.success("record-wave", json.dumps(report))
+
+    def test_evidence_side_rejects_a_scout_that_ran_untyped(self) -> None:
+        """A guarded scout whose spawn was general-purpose fails binding even though the record is authorized."""
+        provider, report = self.launched(("S2",))
+        failed = provider.call("record-wave", json.dumps(report))
+        self.assertNotEqual(failed.returncode, 0)
+        self.assertIn("role_mismatch", failed.stderr)
+
+    def test_evidence_side_rejects_two_spawns_of_one_dispatch_id(self) -> None:
+        """A replayed envelope with a distinct tool_use id cannot bind a second time."""
+        provider, report = self.launched()
+        claude.spawn(provider.parent, provider.read(), "U3[1]", suffix="_again")
+        failed = provider.call("record-wave", json.dumps(report))
+        self.assertNotEqual(failed.returncode, 0)
+        self.assertIn("dispatch_replayed", failed.stderr)
 
     def test_unconverted_state_cannot_begin_a_wave(self) -> None:
         """begin-wave needs state_minor >= 2."""

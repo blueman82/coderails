@@ -25,7 +25,7 @@ class DispatchCounterTests(unittest.TestCase):
 
     def test_every_contract_code_is_counted(self) -> None:
         """The counter's vocabulary is the contract's closed codes plus the allow row."""
-        self.assertEqual(set(REASONS), {*CODES, "dispatch_authorized"})
+        self.assertEqual(set(REASONS), {*CODES, "dispatch_authorized", "dispatch_check_off"})
 
     def test_counts_each_code_once_per_event(self) -> None:
         """A shared event id counts once; torn lines, unknown codes and rows before --since are ignored."""
