@@ -16,12 +16,13 @@ worktree_script: null
 jira: null
 engineering_principles_paths: null
 engineering_principles_skill: /engineering-principles-python
-# When true, agentic-loop dispatches implementation-unit workers as separate
-# OS-sandboxed processes (@anthropic-ai/sandbox-runtime) instead of in-process
-# Agent calls — write containment outside the agent's trust domain. Requires
-# node/npx and a supported platform (macOS Seatbelt, Linux/WSL2 bubblewrap).
-# Default/absent = false (today's in-process dispatch, unchanged).
-sandbox_workers: false
+# true or absent (default) = agentic-loop dispatches implementation-unit workers
+# as separate OS-sandboxed processes (@anthropic-ai/sandbox-runtime) in a scratch
+# clone with an isolated HOME and no GH_TOKEN, instead of in-process Agent calls.
+# Needs node/npx, macOS Seatbelt or Linux/WSL2 bubblewrap, and the owner's
+# ~/.coderails/worker_credential (mode 0600); without them it falls back to
+# in-process dispatch. false = off. A cooperating-agent safeguard.
+sandbox_workers: true
 # action_authority: enforce (default; also when this key or the whole config is
 # absent) = gh pr merge, scripts/merge.py and git push to main/master need an
 # owner-signed, single-use receipt bound to repository+ref+SHA, and honour the

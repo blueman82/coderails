@@ -258,7 +258,7 @@ class MirrorTests(unittest.TestCase):
                 walk(spec.get("properties", {}))  # type: ignore[arg-type]
 
         walk(schema["properties"])
-        self.assertEqual(schema["properties"]["sandbox_workers"]["status"], "read_by_prose_only")
+        self.assertEqual(schema["properties"]["sandbox_workers"]["status"], "enforced_by_code")
 
 
 if __name__ == "__main__":

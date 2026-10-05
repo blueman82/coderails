@@ -196,6 +196,7 @@ and explicitly defers code-level error-handling correctness to `silent-failure-h
 | `PreToolUse` (Bash/Edit/Write/MultiEdit/Read/Grep/Glob/WebFetch/NotebookEdit) | `agent_only_gate.py` | **nudge by default; block opt-in** (`AGENT_ONLY_GATE_ENFORCE=1`) — steers the top-level orchestrator away from inline do-work tool calls; always silent for calls made inside a dispatched subagent or for a whole-command workflow-chain carve-out (`gh`, `git`, `scripts/push\|merge\|post_review\|post_evals.py`) |
 | `PreToolUse` (Agent) | `agent_model_routing_nudge.py` | **advisory nudge only** — when no `model` is set and the dispatch description/prompt matches a mechanical or complex/architectural word list, suggests `haiku` or `opus` respectively; never blocks |
 | `PreToolUse` (Agent) | `loop_dispatch_guard.py` | **block** — validates graph schema 3, session/loop ownership, current revision, active wave, node and `CODERAILS_GRAPH_DISPATCH` envelope against the native request. Available native roles are accepted; custom Coderails roles are optional. With a nonempty work-unit roster, implementation dispatch requires owned frozen or valid graded evals; frozen evals bind session + loop, not the changing graph revision. Preparation nodes remain exempt from that eval check. Missing state blocks marked/custom-worker dispatch; foreign state blocks every Agent request. The Python sandbox launcher invokes the same guard before allocating scratch. |
+| `PreToolUse` (Agent) | `worker_containment_gate.py` | block, ON by default — in a graph-bound session, an in-process `coderails:loop-worker` dispatch while `containment.resolve()` is `sandboxed` is allowed only for a low-risk unit (`containment_fallback_low_risk`); a unit whose manifest can touch `HIGH_RISK_PREFIXES` (or has none) is denied `containment_ack_required` unless an owner-signed single-use `worker_fallback` receipt verifies (`containment_ack_receipt`). Mode fallback/off and non-graph sessions are untouched; own errors fail open (`containment_gate_failed_open`). Cooperating-agent safeguard. |
 | `PreToolUse` (Write/Edit/MultiEdit) | `no_edit_on_main.py` | **block** — on main/master, blocks edits to any file EXCEPT an explicit allowlist (`.md`/`.txt`/`.rst`, `.yaml`/`.yml`/`.json`/`.toml`/`.ini`/`.cfg`, `.gitignore`, `LICENSE`); plugin-source markdown (`skills/*/SKILL.md`, `commands/*.md`) is also blocked. Also blocks `.claude/settings.json` / `.claude/settings.local.json` edits on **any** branch (the permission files that can bypass every gate) |
 | `PreToolUse` (Write/Edit/MultiEdit) | `comment_citation_gate.py` | **block** — blocks new comment content that cites a session-artifact label (`E#:`, `F# fix`, `CHANGE B#`/`C#`, `Task A#`, `TA-I#`, "reviewer finding", "per the plan", etc.) instead of stating the constraint the code enforces; `.md` files exempt; fails open |
 | `PreToolUse` (Write/Edit/MultiEdit) | `wiki_taxonomy_gate.py` | **block** — inert until `.coderails/workflow.config.yaml` exists at the plugin root (absent on a fresh clone until `/coderails:init` scaffolds it); once present, in an LLM wiki vault (identified positively: the write's repo root must equal `wiki_path`, resolved relative to `CLAUDE_PLUGIN_ROOT` unless absolute, corroborated by ≥2 of the parsed "## Page types" directories existing on disk as a secondary sanity check), blocks a write into a top-level directory not sanctioned by that section (read from the plugin's `AGENTS.md`); taxonomy is parsed live, never hardcoded; fails open on any ambiguity (schema absent, no config, the vault not being a git repo, `wiki_path` unresolvable, no section, unparseable, write outside the configured vault, or <2 directories present) |
@@ -214,16 +215,25 @@ Compact metrics and expiry records persist separately. Emitted bytes do not esta
 
 ## Sandboxed workers
 
-With `config.sandbox_workers: true` (`.coderails/workflow.config.yaml`; status `read_by_prose_only`: the agentic-loop skill reads it from the resolve-config text and no script does), the
-agentic-loop dispatches implementation-unit workers via
-`@anthropic-ai/sandbox-runtime` (`scripts/sandbox/spawn_sandboxed_worker.py`),
-an OS-enforced filesystem containment layer (Seatbelt on macOS, bubblewrap on
-Linux) that restricts writes to an explicit per-worker allowlist — the
-worktree, per-worker scratch, the primary repo's `.git` (with its `hooks` and
-`config` subpaths denied), the per-user `$TMPDIR`, and a narrowed slice of
-Claude Code's own `~/.claude` config state (a named residual — worker
-containment excludes claude-home) — never the orchestrator, which is
-unaffected. Requires `node`/`npx`, macOS or Linux/WSL2.
+`config.sandbox_workers` is ON by default (`true` or absent; status `enforced_by_code`, read by
+`scripts/sandbox/containment.py`). When the OS sandbox, `node`/`npx`, the pinned
+`@anthropic-ai/sandbox-runtime` and an owner-provisioned worker credential
+(`~/.coderails/worker_credential`, mode 0600, one line `ANTHROPIC_API_KEY=...` or
+`CLAUDE_CODE_OAUTH_TOKEN=...`) all exist, the agentic-loop dispatches
+implementation-unit workers via `scripts/sandbox/spawn_sandboxed_worker.py`:
+an OS-enforced containment layer (Seatbelt on macOS, bubblewrap on Linux) in
+which the worker runs in a scratch `git clone` with an isolated HOME and a
+scrubbed environment (no `GH_TOKEN`), can write only its scratch directory, and
+never touches the primary `.git`, `~/.claude` or `~/.claude.json`. The worker no
+longer pushes: the launcher imports exactly its branch and pushes it from
+outside the sandbox. Until the credential exists, or when the sandbox is
+missing, dispatch falls back to in-process workers (the decision is traced by
+`scripts/sandbox/containment.py`); while sandboxing is available, an in-process
+dispatch of a high-risk unit needs an owner-signed `worker_fallback` receipt. This is a
+cooperating-agent safeguard, not absolute isolation: reads, `github.com` and
+`api.anthropic.com` egress, and the orchestrator itself are not restricted (see
+`AGENTS.md`, "Sandboxed workers"). Requires `node`/`npx`, macOS or Linux/WSL2;
+`false` switches it off.
 
 ## Requirements
 
@@ -233,7 +243,7 @@ unaffected. Requires `node`/`npx`, macOS or Linux/WSL2.
 - For `/push` / `/merge`: a **GitHub**-hosted repo with an authenticated `gh` CLI (`gh auth login`) — the workflow uses `gh`, so non-GitHub remotes (GitLab/Bitbucket/Gitea) are not supported.
 - `pr-review-toolkit@claude-plugins-official` for the review stage of `/workflow`
 - `superpowers@claude-plugins-official` for dev-workflow skills (planning, TDD, debugging, code review, worktrees)
-- For sandboxed workers (opt-in): `node`/`npx`, macOS or Linux/WSL2
+- For sandboxed workers (default on, falls back without these): `node`/`npx`, macOS or Linux/WSL2, an owner-provisioned worker credential
 
 ## Uninstall Claude
 

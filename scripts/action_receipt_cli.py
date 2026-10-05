@@ -25,7 +25,7 @@ from scripts.lib import receipt_signing as rs
 from scripts.lib.action_binding import binding, git_out
 from scripts.lib.authority_object import read_authority
 
-KINDS = ("merge", "git_push")
+KINDS = ("merge", "git_push", "worker_fallback")  # worker_fallback: acknowledge an in-process high-risk worker
 
 
 def refuse(code: str, message: str, session: str | None = None, loop: str | None = None) -> int:
