@@ -69,10 +69,13 @@ human-owned, not something a pre-flight pass talks its way into.
 
 ## Tools
 
-Your agent sandbox is read-only. Shell commands are available because the
-skills you run may need inspection commands, such as wiki searches. Never run
-a command that changes external state. Your output is the report you return,
-not a file you create.
+The shell tool is switched off for this role (`[features] shell_tool = false`) and the
+sandbox is read-only. Inspect only through the role's typed MCP tools (`repo_inspect`,
+`diff_read`) when your session registers them; a native child inherits no per-role
+server, so without them mark each check that needs file or history access UNSUPPORTED
+instead of looking for another way to run a command. A skill that wants to shell
+out (a wiki search) is reported as UNSUPPORTED. Your output is the report you
+return, not a file you create.
 
 ## Report
 
@@ -106,3 +109,6 @@ Consolidate everything into ONE report, not five disconnected skill outputs:
 State plainly if any of the five skills could not be run (missing skill,
 missing file) rather than silently omitting its section.
 """
+
+[features]
+shell_tool = false
