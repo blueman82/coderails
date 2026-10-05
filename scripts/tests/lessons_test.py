@@ -12,7 +12,7 @@ from typing import Any
 
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO))
-from scripts.tests.fake_muninn_case import PROMPT, SESSION, StoreCase  # noqa: E402
+from scripts.tests.fake_muninn_case import LINES, PROMPT, SESSION, StoreCase  # noqa: E402
 
 LESSONS = REPO / "scripts/lib/lessons.py"
 ORDERS = REPO / "scripts/lib/orders.py"
@@ -38,8 +38,9 @@ class LessonsCli(StoreCase):
     def add(self, mode: str, scope: str = "repo", sessions: tuple[str, ...] = ("s1",)) -> None:
         """Record an order, once per session (so a later session is a recurrence)."""
         for n, sid in enumerate(sessions):
-            args = ["record", "--failure-mode", mode, "--lesson", f"Lesson for {mode}.", "--loop", f"{mode}{n}"]
-            args += ["--scope", scope, "--quote", PROMPT, "--evidence-session", sid]
+            (self.tmp / "projects" / "p" / f"{sid}.jsonl").write_text("\n".join(json.dumps(x) for x in LINES) + "\n")
+            args = ["--session", sid, "record", "--failure-mode", mode, "--lesson", f"Lesson for {mode}.", "--loop"]
+            args += [f"{mode}{n}", "--scope", scope, "--quote", PROMPT]
             self.assertIn(self.call(ORDERS, *args)[0], (0, 3))
 
     def test_contract_list_is_stable_sorted_and_verbatim(self) -> None:
@@ -82,5 +83,5 @@ class LessonsCli(StoreCase):
         self.assertEqual(out["graduation"]["recurred"], 2)
         for n in range(10):
             (self.dir / f"sess{n}").mkdir()
-            (self.dir / f"sess{n}" / "retro.json").write_text("{}")
+            (self.dir / f"sess{n}" / "retro.json").write_text(json.dumps({"schema_version": 2, "loop_id": f"L{n}"}))
         self.assertEqual(self.call(LESSONS, "predicate")[1]["graduation"]["retro_count"], 10)

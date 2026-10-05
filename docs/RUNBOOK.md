@@ -169,6 +169,7 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
 | `order_blank_field` | an order needs a non-blank failure mode and lesson; nothing was written. |
 | `order_not_found` | no order with that id in orders.json; check the id with `orders.py lessons`. |
 | `order_state_error` | orders.json could not be read, locked or written; check the repo-key dir and orders.lock. |
+| `order_loop_unknown` | tick --loop names a loop with no <repo-key dir>/<loop>/progress.json; use the real loop/session id. |
 | `order_already_ticked` | this loop id was already counted; the tick was skipped (informational, not an error). |
 | `no_user_cite` | the order was stored without a user quote; attach it with `orders.py cite <id> --quote <verbatim owner prompt text>`. |
 | `legacy_uncited` | an imported hand-written order has no cite yet; attach one with `orders.py cite <id> --quote`. |
@@ -193,7 +194,7 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   teardown run `flush_pending(path, session, transition=..., cite_quote="<a substantive sentence the owner typed>")`;
   the same `seq` is patched to `written`. Rows are never deleted or rewritten to clear a degrade.
 - Limits: the chain is a cooperating-agent safeguard (a same-user agent can rewrite file and chain), and dropping the
-  last row is undetectable. Measurement note: `docs/typed-records-measurement.md`.
+  last row is detected only by the in-file head anchor, which the same agent can also rewrite. Measurement note: `docs/typed-records-measurement.md`.
 
 ## Standing order stored without a cite, or a lesson missing from dispatch
 
@@ -211,7 +212,16 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   adopt the old hand-written file run `orders.py import-legacy` once (it moves the original to
   `standing-orders.legacy.md`, never deletes it), then `orders.py render`.
 - Limits: counters and decay are the typed ledger's; Muninn has no touch primitive, so only the first cite is in Muninn.
-  The chain is a cooperating-agent safeguard. A recurrence revives a decayed order (the tombstone record is kept).
+  The chain and head anchor are a cooperating-agent safeguard (a same-user agent can rewrite file, chain and head).
+  A recurrence revives a decayed order (the tombstone record is kept) and `record` with an existing id by any caller
+  resets its counter; a recurrence does not update the stored lesson or the Muninn claim. Uncited orders are listed by
+  `orders.py lessons` (`cited: false`) but are not in `lessons.py query --format contract` and are never promotion
+  candidates. `render` and `lessons` exit 3 with Muninn down (no ledger text). A retracted order recovers by re-recording
+  with a fresh `--quote`. The caller is advisory: the record/tick/render sequence is instructed in
+  `skills/agentic-loop/teardown.md` (Claude) and `packages/codex/skills/agentic-loop/SKILL.md` (Codex) and no completion
+  hook runs it (the completion path, `graph.py complete`, belongs to the graph lane and is not extended by a second
+  enforcement route), so decay and recurrence happen only when the model follows that step. `retro_count` counts
+  distinct `loop_id` values in parseable `retro.json` files; it is still unauthenticated against a same-user agent.
   Measurement note: `docs/typed-records-measurement.md`; overlap decision:
   `docs/decisions/2026-10-05-orders-vs-muninn-overlap.md`.
 

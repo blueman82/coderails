@@ -130,9 +130,11 @@ class Lifecycle(unittest.TestCase):
 
     def test_candidates_need_two_recurrences_two_sessions_and_agnostic(self) -> None:
         """Only an agnostic order recurred >= 2 times across >= 2 distinct sessions is a candidate."""
-        ledger = new_ledger("g", "r", "one", scope="agnostic")
+        ledger = new_ledger("g", "r", "one", "unc", scope="agnostic")
         order(ledger, "r")["scope"] = "repo"
-        for oid, sessions in (("g", ("s2", "s3")), ("r", ("s2", "s3")), ("one", ("s1", "s1"))):
+        for oid in ("g", "r", "one"):  # "unc" stays uncited: the control for the muninn-written requirement
+            order(ledger, oid)["muninn"]["state"] = "written"
+        for oid, sessions in (("g", ("s2", "s3")), ("r", ("s2", "s3")), ("one", ("s1", "s1")), ("unc", ("s2", "s3"))):
             for n, sid in enumerate(sessions):
                 ledger = ol.record(ledger, oid, "x", session_id=sid, loop_id=f"{oid}{n}", now="2026-03-01")["ledger"]
         self.assertEqual([o["id"] for o in ol.candidates(ledger)], ["g"])
@@ -287,6 +289,8 @@ class Cli(StoreCase):
         """(a)(e) five ticks decay it; render writes both views with the marker, mode 0444, decayed only in its file."""
         self.rec("--quote", PROMPT)
         for n in range(5):
+            (self.dir / f"T{n}").mkdir()
+            (self.dir / f"T{n}" / "progress.json").write_text("{}")  # a tick needs a real loop
             self.assertEqual(self.run_cli("tick", "--loop", f"T{n}")[0], 0)
         self.assertEqual(order(self.ledger(), FM)["status"], "decayed")
         rc, _ = self.run_cli("render")

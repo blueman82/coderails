@@ -90,6 +90,9 @@ REASONS: dict[str, str] = {
     "order_blank_field": "an order needs a non-blank failure mode and lesson; nothing was written.",
     "order_not_found": "no order with that id in orders.json; check the id with `orders.py lessons`.",
     "order_state_error": "orders.json could not be read, locked or written; check the repo-key dir and orders.lock.",
+    "order_loop_unknown": (
+        "tick --loop names a loop with no <repo-key dir>/<loop>/progress.json; use the real loop/session id."
+    ),
     "order_already_ticked": "this loop id was already counted; the tick was skipped (informational, not an error).",
     "no_user_cite": (
         "the order was stored without a user quote; attach it with `orders.py cite <id> --quote <verbatim owner "

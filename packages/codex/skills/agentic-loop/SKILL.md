@@ -69,6 +69,8 @@ Before completion, update and regrade `evals.json` against the graph's exact cur
 - non-empty `proof.json` for the same session and loop, with every proof carrying a nonblank executable `cmd` and `status: "pass"`;
 - `retro.json` for the same session and loop, schema version 1 or newer, with `status: "complete"`.
 
+Update the standing orders from the retro with code, never by editing Markdown. With `D` the repo-key dir (the grandparent of `$STATE`) and `O="python3 $SKILL_DIR/../../scripts/lib/orders.py --dir $D --session $SESSION"`: for each failure mode in the retro run `$O record --failure-mode "<mode>" --lesson "<imperative lesson>" --loop "$SESSION" --quote "<verbatim words of the owner's own prompt, 12-300 chars>"` (add `--scope agnostic` for a lesson that applies to any repo; an id match is a recurrence; re-recording after a Muninn retract writes a fresh entry), then `$O tick --loop "$SESSION"` once, then `$O render`. Exit 3 prints a `reason_code`: report it in the retro and never write the lesson to Markdown instead. `memory.backend: off` is the only opt-out. Limit: this step is instructed here and in `skills/agentic-loop/teardown.md`; no hook or `graph.py complete` runs it, so it is advisory (see `docs/RUNBOOK.md`, "Standing order stored without a cite").
+
 Apply `superpowers:verification-before-completion` to the orchestrator's completion claim. Then run:
 
 ```bash

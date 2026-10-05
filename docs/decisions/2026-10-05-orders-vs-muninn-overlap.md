@@ -31,14 +31,24 @@ that joins it with Muninn. `standing-orders.md` and `standing-orders-decayed.md`
 ## Consequences and limits
 
 - K=5 is a code constant (`orders_ledger.K`), not config.
+- The enforcing caller is advisory on both providers: the record/tick/render sequence is instructed in
+  `skills/agentic-loop/teardown.md` and `packages/codex/skills/agentic-loop/SKILL.md`; no hook or completion command
+  runs it, and none is added here (no second enforcement route beside the integrity gate).
+- `tick --loop` is accepted only for a loop with `<repo-key dir>/<loop>/progress.json`; `record` with an existing id by
+  any caller still resets that order's counter, and a recurrence does not update the stored lesson or Muninn claim.
+- Uncited orders are diagnostic only: `lessons` lists them `cited: false`, `query --format contract` and the promotion
+  `predicate` exclude them, and candidate text is Muninn's claim. `render` exits 3 with Muninn down (no ledger text).
+- `orders.json` carries a `head` anchor (count, last hash, ticks hash) so a dropped tail or edited ticks are named, and a
+  missing ledger beside a generated view is an error; a same-user agent can still rewrite the file, chain and head.
+  `retro_count` counts distinct loop ids in parseable `retro.json` files; it is not authenticated.
 - A recurrence revives a decayed order (status back to `active`, record kept), so the predicate's "one decayed order"
   is a snapshot, not a history.
 - Muninn holds only the first cite of an order; recurrences add evidence to the ledger, not a new Muninn record.
 - The chain is a cooperating-agent safeguard: a same-user agent can rewrite `orders.json` and recompute every hash, and
   `muninn` and `ticked_loops` sit outside the hash.
 - A lesson longer than 500 characters is truncated (with an ellipsis) in Muninn, which caps claims at 500.
-- `render` omits orders Muninn no longer holds as current when Muninn answers; with Muninn unreachable it renders the
-  ledger as it is, so a view can lag a Muninn retraction until the next render.
+- `render` omits orders Muninn no longer holds as current; with Muninn unreachable it exits 3 and leaves the existing
+  view untouched, so a view can lag a Muninn retraction until the next successful render.
 - Import of the old hand-written `standing-orders-decayed.md` is not provided; it was never created in this repo.
 
 Runbook: `docs/RUNBOOK.md` "Standing order stored without a cite, or a lesson missing from dispatch". Measurement:

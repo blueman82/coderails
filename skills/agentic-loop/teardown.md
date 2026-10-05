@@ -129,6 +129,11 @@ orchestrator session (`O="python3 ${CLAUDE_PLUGIN_ROOT}/scripts/lib/orders.py --
    tick for the same loop id is a no-op.
 3. `$O render` regenerates both views (a decayed order appears only in `standing-orders-decayed.md`).
 
+`tick --loop` must name a real loop: `<repo-key dir>/<loop>/progress.json` must exist or the tick is refused with
+`order_loop_unknown`. This step is **advisory**: no hook or completion script runs it (a second enforcement route is
+deliberately not added), so decay and recurrence depend on the orchestrator following it; the Codex equivalent is in
+`packages/codex/skills/agentic-loop/SKILL.md`.
+
 The graduation predicate and the promotion selection are `$O predicate` and `lessons.py predicate`. This step is
 additive-or-recurrence-only: no metric-based removal anywhere.
 

@@ -8,7 +8,8 @@ Only active, non-decayed orders are served. An order written to Muninn is served
 is excluded (and traced `lesson.query/excluded/lesson_not_current`) when its entry is retracted, expired or superseded
 with no current replacement; a current entry carrying the order's own `ord-` tag replaces it. With Muninn down this
 exits 3 with the reason and prints NO ledger text (`memory.backend: off` is the explicit switch: ledger text, exit 0).
-Orders that never reached Muninn (no cite yet, legacy import) are served flagged `cited: false`.
+Orders that never reached Muninn (no cite yet, legacy import) are listed flagged `cited: false` by `orders.py lessons`
+(diagnostic) but are NOT in `query --format contract` and are never promotion candidates.
 Exit 0 ok, 2 refused, 3 degraded.
 """
 
@@ -89,24 +90,37 @@ def serve(ledger: ol.Ledger, session: str) -> tuple[dict[str, Any], int]:
 
 
 def contract(payload: dict[str, Any]) -> dict[str, Any]:
-    """The dispatch list: rows sorted by order id, plus the sha256 of their canonical JSON."""
-    rows = sorted(payload["lessons"], key=lambda r: str(r["id"]))
+    """The dispatch list: cited rows sorted by order id (uncited ones stay diagnostic), plus their canonical sha256.
+
+    memory.backend off is the explicit ledger-only switch, so there every row is served.
+    """
+    keep = payload.get("state") == "memory_backend_off"
+    rows = sorted((r for r in payload["lessons"] if keep or r["cited"]), key=lambda r: str(r["id"]))
     return {"lessons": rows, "sha256": hashlib.sha256(json.dumps(rows, sort_keys=True).encode()).hexdigest()}
 
 
 def selection(ledger: ol.Ledger, repo_dir: Path) -> dict[str, Any]:
-    """Graduation result plus the promotion candidates (agnostic, >= 2 recurrences, >= 2 distinct sessions)."""
+    """Graduation result plus the promotion candidates (cited, agnostic, >= 2 recurrences, >= 2 distinct sessions).
+
+    The lesson text is Muninn's cited claim; with Muninn down or the entry not current there is no candidate.
+    """
+    got = joined(ledger)
+    texts = {r["id"]: r["text"] for r in got.get("lessons", []) if r["cited"]}
     picked = [
         {
             "id": o["id"],
             "failure_mode": o["failure_mode"],
-            "lesson": o["lesson"],
+            "lesson": texts[o["id"]],
             "recurrences": len(o["evidence"]) - 1,
             "sessions": sorted({e["session_id"] for e in o["evidence"]}),
         }
         for o in ol.candidates(ledger)
+        if o["id"] in texts
     ]
-    return {"graduation": ol.predicate(ledger, ol.retro_count(repo_dir)), "candidates": picked}
+    out: dict[str, Any] = {"graduation": ol.predicate(ledger, ol.retro_count(repo_dir)), "candidates": picked}
+    if "degraded" in got:
+        out["degraded"] = got["degraded"]
+    return out
 
 
 def main(argv: list[str] | None = None) -> int:

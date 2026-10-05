@@ -42,6 +42,8 @@ Counters: `order.record|tick|render|import|cite` and `lesson.query|predicate` tr
 under the `memory` key; no edit to that script is needed. Runbook entry: `docs/RUNBOOK.md` "Standing order stored without
 a cite, or a lesson missing from dispatch". Decision: `docs/decisions/2026-10-05-orders-vs-muninn-overlap.md`.
 
-Limits (written, not hidden): the chain is a cooperating-agent safeguard; Muninn holds only an order's first cite;
+Limits (written, not hidden): the record/tick/render caller is advisory prose on both providers (Claude `teardown.md`, Codex
+`agentic-loop/SKILL.md`), with no hook enforcing it; uncited orders are excluded from the dispatch contract and from
+promotion; the chain and its head anchor are a cooperating-agent safeguard; Muninn holds only an order's first cite;
 a recurrence revives a decayed order; claims over 500 characters are truncated in Muninn; orders without a user quote stay
 `cited: false` until `orders.py cite`. The hand-written file was imported once (5 entries, all `legacy_uncited`).
