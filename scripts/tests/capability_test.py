@@ -10,8 +10,12 @@ import tempfile
 import unittest
 from pathlib import Path
 from typing import Any
+from unittest import mock
 
 REPO = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(REPO))
+from scripts import capability  # noqa: E402
+
 SCRIPT = REPO / "scripts" / "capability.py"
 
 
@@ -165,6 +169,25 @@ class RepoInspectTests(CapabilityCase):
     def test_traced_true_with_session(self) -> None:
         """With a session id the envelope says the row was written."""
         self.assertTrue(self.call("repo.inspect", {"op": "list"})[1]["traced"])
+
+    def test_read_max_bytes_checked_before_reading(self) -> None:
+        """An out-of-range max_bytes is refused as typed JSON, not honoured."""
+        code, out = self.call("repo.inspect", {"op": "read", "path": "a.txt", "max_bytes": 10**9})
+        self.assertEqual((code, out["refusal"]), (2, "capability_args_invalid"))
+
+    def test_malformed_profiles_is_typed_refusal(self) -> None:
+        """A profiles.json without a usable tests table refuses tests.run instead of crashing with a traceback."""
+        for text in ("{not json", "{}", '{"tests": 3}'):
+            with self.subTest(text=text), tempfile.TemporaryDirectory() as tmp:
+                (Path(tmp) / "capabilities").mkdir()
+                (Path(tmp) / "capabilities/profiles.json").write_text(text)
+
+                with (
+                    mock.patch.object(capability, "ROOT", Path(tmp)),
+                    self.assertRaises(capability.RefusalError) as ctx,
+                ):
+                    capability.declared_tests()
+                self.assertEqual(ctx.exception.code, "capability_profiles_invalid")
 
 
 if __name__ == "__main__":

@@ -127,7 +127,9 @@ def repo_inspect(raw: object) -> Result:
     root = repo_root()
     if probe == "read":
         path = safe_path(root, a["path"])
-        data = path.read_bytes()[: bounded(a["max_bytes"], 1, 65536, "max_bytes")]
+        limit = bounded(a["max_bytes"], 1, 65536, "max_bytes")
+        with path.open("rb") as handle:
+            data = handle.read(limit)
         rel = str(path.relative_to(root))
         evidence = [{"kind": "file", "ref": rel, "sha256": hashlib.sha256(data).hexdigest()}]
         return 0, {"text": data.decode("utf-8", "replace")}, evidence
@@ -177,8 +179,13 @@ def diff_read(raw: object) -> Result:
 
 def declared_tests() -> dict[str, list[str]]:
     """The named argv lists tests.run may execute, from capabilities/profiles.json."""
-    data: dict[str, Any] = json.loads((ROOT / "capabilities" / "profiles.json").read_text(encoding="utf-8"))
-    return dict(data["tests"])
+    try:
+        data: dict[str, Any] = json.loads((ROOT / "capabilities" / "profiles.json").read_text(encoding="utf-8"))
+        return dict(data["tests"])
+    except (OSError, ValueError, KeyError, TypeError):
+        raise RefusalError(
+            "capability_profiles_invalid", "capabilities/profiles.json unreadable or has no tests"
+        ) from None
 
 
 SANDBOX_PROFILE = """(version 1)
