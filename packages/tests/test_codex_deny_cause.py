@@ -25,7 +25,12 @@ class DenyCauseTests(unittest.TestCase):
 
     def run_hook(self, name: str, payload: Mapping[str, object], data: str) -> tuple[int, str, list[str]]:
         """Run a hook as a real process and return exit code, stdout and recorded causes."""
-        env = {**os.environ, "CODERAILS_HOOK_TELEMETRY_DIR": data, "PLUGIN_DATA": data}
+        env = {
+            **os.environ,
+            "CODERAILS_HOOK_TELEMETRY_DIR": data,
+            "CODERAILS_TEST_OUTPUT_DIR": str(Path(data) / "test-output"),
+            "PLUGIN_DATA": data,
+        }
         proc = subprocess.run(
             [sys.executable, str(SCRIPTS / f"{name}.py")],
             input=json.dumps(payload),
