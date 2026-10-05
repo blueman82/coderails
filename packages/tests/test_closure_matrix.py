@@ -6,7 +6,9 @@ import copy
 import json
 import sys
 import unittest
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
@@ -71,13 +73,51 @@ class ClosureMatrixTest(unittest.TestCase):
         """A gap without a phase is rejected."""
         m = copy.deepcopy(DATA)
         next(g for g in m["gaps"] if g["id"] == "gap2").pop("phase")
-        self.assertIn("gap2 is unmapped (no phase)", cm.validate(m))
+        self.assertIn("gap2 is unmapped (no phase 1-6)", cm.validate(m))
 
     def test_rejects_gap1_without_exception(self) -> None:
         """Gap1 without its exception is rejected."""
         m = copy.deepcopy(DATA)
         next(g for g in m["gaps"] if g["id"] == "gap1").pop("exception")
         self.assertTrue(any("gap1" in e for e in cm.validate(m)))
+
+    def _bad(self, mutate: Callable[[dict[str, Any]], object], needle: str) -> None:
+        m = copy.deepcopy(DATA)
+        mutate(m)
+        self.assertTrue(any(needle in e for e in cm.validate(m)), cm.validate(m))
+
+    def test_rejects_wrong_types(self) -> None:
+        """Null/non-string text and bool or out-of-range phases are rejected."""
+        self._bad(lambda m: m["rows"][0].update(acceptance_test=None), "empty acceptance_test")
+        self._bad(lambda m: m["rows"][0].update(acceptance_test=[]), "empty acceptance_test")
+        self._bad(lambda m: m["rows"][0].update(phase=True), "no phase")
+        self._bad(lambda m: m["rows"][0].update(phase=7), "no phase")
+        self._bad(lambda m: m["gaps"][1].update(phase=99), "gap2 is unmapped")
+        self._bad(lambda m: m["gaps"][1].update(phase=True), "gap2 is unmapped")
+        self._bad(lambda m: m["gaps"][0].update(exception=None), "gap1 has no exception")
+        self._bad(lambda m: m["gaps"][0].update(exception="something else"), "gap1 has no exception")
+
+    def test_rejects_duplicate_and_extra_ids(self) -> None:
+        """Duplicate or unexpected row and gap ids are rejected."""
+        self._bad(lambda m: m["rows"].append(copy.deepcopy(m["rows"][0])), "duplicated")
+        self._bad(lambda m: m["rows"].append({**m["rows"][0], "id": "99"}), "unexpected")
+        self._bad(lambda m: m["gaps"].append({**m["gaps"][1], "id": "gap6"}), "unexpected")
+        self._bad(lambda m: m["gaps"].append(copy.deepcopy(m["gaps"][1])), "duplicated")
+        self._bad(lambda m: m["rows"].append("junk"), "not an object")
+
+    def test_rejects_blank_required_fields(self) -> None:
+        """Blank or missing defect, refs, record, status and gap title are rejected."""
+
+        def drop_row_key(k: str) -> Callable[[dict[str, Any]], object]:
+            return lambda m: m["rows"][2].pop(k)
+
+        def blank_gap_key(k: str) -> Callable[[dict[str, Any]], object]:
+            return lambda m: m["gaps"][2].update({k: " "})
+
+        for k in cm.ROW_STR:
+            self._bad(drop_row_key(k), f"empty {k}")
+        for k in cm.GAP_STR:
+            self._bad(blank_gap_key(k), f"empty {k}")
 
 
 if __name__ == "__main__":

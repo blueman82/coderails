@@ -37,32 +37,66 @@ Phase 0 and Phase 7 are cross-cutting. Phase 7 is the live cutover and closure a
 """
 
 
+ROW_STR = ("defect", "target_typed_record", "source_refs", "acceptance_test", "status")
+GAP_STR = ("title", "acceptance_test", "status")
+
+
+def _blank(v: object) -> bool:
+    return not (isinstance(v, str) and v.strip())
+
+
+def _phase_ok(v: object) -> bool:
+    return type(v) is int and 1 <= v <= 6
+
+
+def _check_ids(
+    kind: str, items: list[dict[str, Any] | str], expected: list[str], errs: list[str]
+) -> dict[str, dict[str, Any]]:
+    """Collect dict items by id, flagging non-dicts, duplicates and unexpected ids."""
+    by_id: dict[str, dict[str, Any]] = {}
+    for it in items:
+        if not isinstance(it, dict):
+            errs.append(f"{kind} entry is not an object")
+            continue
+        i = it.get("id")
+        if i in by_id:
+            errs.append(f"{kind} {i} duplicated")
+        elif i not in expected:
+            errs.append(f"{kind} {i!r} unexpected")
+        else:
+            by_id[i] = it
+    return by_id
+
+
 def validate(data: dict[str, Any]) -> list[str]:
     """Return a list of problems; empty means the data is complete."""
     errs: list[str] = []
-    rows = {r.get("id"): r for r in data.get("rows", [])}
-    gaps = {g.get("id"): g for g in data.get("gaps", [])}
+    rows = _check_ids("row", data.get("rows") or [], ROW_IDS, errs)
+    gaps = _check_ids("gap", data.get("gaps") or [], GAP_IDS, errs)
     for i in ROW_IDS:
         r = rows.get(i)
         if r is None:
             errs.append(f"row {i} missing")
             continue
-        if not isinstance(r.get("phase"), int) or not 1 <= r["phase"] <= 6:
+        if not _phase_ok(r.get("phase")):
             errs.append(f"row {i} has no phase 1-6")
-        if not str(r.get("acceptance_test", "")).strip():
-            errs.append(f"row {i} has empty acceptance_test")
+        for k in ROW_STR:
+            if _blank(r.get(k)):
+                errs.append(f"row {i} has empty {k}")
     for i in GAP_IDS:
         g = gaps.get(i)
         if g is None:
             errs.append(f"{i} missing")
             continue
-        if not str(g.get("acceptance_test", "")).strip():
-            errs.append(f"{i} has empty acceptance_test")
+        for k in GAP_STR:
+            if _blank(g.get(k)):
+                errs.append(f"{i} has empty {k}")
         if i == "gap1":
-            if not str(g.get("exception", "")).strip():
+            ex = str(g.get("exception"))
+            if _blank(g.get("exception")) or "opt-in" not in ex or "INTEGRITY-GATE" not in ex:
                 errs.append("gap1 has no exception (opt-in integrity gate)")
-        elif not isinstance(g.get("phase"), int):
-            errs.append(f"{i} is unmapped (no phase)")
+        elif not _phase_ok(g.get("phase")):
+            errs.append(f"{i} is unmapped (no phase 1-6)")
     return errs
 
 
