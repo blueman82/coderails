@@ -16,11 +16,21 @@ DOCS = (
 REQUIRED = (
     "Scout spawn refusal",
     "not_found",
-    "agent thread limit reached",
     "non_independent",
     "never satisfies an independent-review requirement",
     "halt for the human",
-    "retire",
+    "What consumes the thread limit",
+    "do not silently downgrade",
+    "Record the refusal",
+)
+# Must sit together in the single rule paragraph, not merely somewhere in the file.
+RULE_PARAGRAPH = (
+    "agent thread limit reached",
+    "do not silently downgrade",
+    "Record the refusal",
+    "non_independent",
+    "never satisfies an independent-review requirement",
+    "halt for the human",
 )
 
 
@@ -31,6 +41,10 @@ class ScoutRefusalRuleTests(unittest.TestCase):
         """Each doc carries every required phrase."""
         for path in DOCS:
             text = path.read_text()
+            self.assertIn("Scout spawn refusal fails closed", text)
+            rule = text.split("Scout spawn refusal fails closed", 1)[1].split("\n\n", 1)[0]
+            for phrase in RULE_PARAGRAPH:
+                self.assertIn(phrase, rule, f"{path.relative_to(ROOT)} rule paragraph missing {phrase!r}")
             for phrase in REQUIRED:
                 self.assertIn(phrase, text, f"{path.relative_to(ROOT)} missing {phrase!r}")
 
