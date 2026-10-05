@@ -74,7 +74,7 @@ class EvidenceStateTests(GraphCase):
         for ref in variant["graph"]["nodes"]["U3[1]"]["evidence"]:
             if provenance(ref):
                 ref["outcome"] = "failed"
-        with self.assertRaises(ValueError):
+        with self.assertRaisesRegex(ValueError, r"node U3\[1\] lacks successful final native evidence"):
             revalidate_all(variant)
 
     def test_corrupt_wave_history_is_not_masked_by_default(self) -> None:
@@ -84,11 +84,14 @@ class EvidenceStateTests(GraphCase):
         for bad in bad_values:
             variant = copy.deepcopy(state)
             variant["graph"]["wave_history"] = bad
-            with self.subTest(wave_history=bad), self.assertRaisesRegex(ValueError, "must be an object"):
+            with (
+                self.subTest(wave_history=bad),
+                self.assertRaisesRegex(ValueError, "^native wave history must be an object$"),
+            ):
                 revalidate_all(variant)
         variant = copy.deepcopy(state)
         variant["graph"].pop("wave_history")
-        with self.assertRaises(ValueError):
+        with self.assertRaisesRegex(ValueError, "^native wave history entry must be an object$"):
             revalidate_all(variant)
 
     def test_stale_transcript_reference_fails_closed(self) -> None:
