@@ -55,6 +55,7 @@ def parser() -> argparse.ArgumentParser:
             command.add_argument("--unit", required=True)
             command.add_argument("--depends-on", action="append", default=[])
             command.add_argument("--join", action="store_true")
+            command.add_argument("--manifest", action="append", default=[])
         if name == "recover-wave":
             command.add_argument("--lease-seconds", type=int, default=900)
             command.add_argument("--report-only", action="store_true")
@@ -130,7 +131,7 @@ def main() -> int:
             output: object = graph_controller.start(args.state, args.session, args.loop_id, args.prompt_file)
         elif args.command == "add-unit":
             output = graph_controller.add_unit(
-                args.state, args.session, args.loop_id, args.unit, args.depends_on, args.join
+                args.state, args.session, args.loop_id, args.unit, args.depends_on, args.join, args.manifest
             )
         elif args.command == "inspect":
             state = load(args.state)

@@ -112,5 +112,8 @@
   "packages/codex/skills/dashboard/scripts/canonical_json.py": "100644",
   "packages/codex/skills/dashboard/runner/bin/seed_and_sweep.py": "100755",
   "packages/codex/skills/dashboard/runner/bin/sweeper.py": "100755",
-  "packages/codex/skills/dashboard/runner/bin/dashboard_server.py": "100755"
+  "packages/codex/skills/dashboard/runner/bin/dashboard_server.py": "100755",
+  "scripts/diff_manifest.py": "100755",
+  "scripts/lib/manifest_policy.py": "100644",
+  "scripts/lib/manifest_counters.py": "100644"
 }
