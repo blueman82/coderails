@@ -71,7 +71,14 @@ class StoreCase(unittest.TestCase):
     def record(self, claim: str, **kw: Any) -> ma.Record:  # noqa: ANN401
         """A loop-scoped lesson citing the first transcript prompt."""
         base: dict[str, Any] = dict(
-            scope="loop", type="lesson", claim=claim, cite=f"claude:{SESSION}:1.1", quote=PROMPT, loop_id="L1"
+            scope="loop",
+            type="lesson",
+            claim=claim,
+            cite=f"claude:{SESSION}:1.1",
+            quote=PROMPT,
+            loop_id="L1",
+            cite_role="user",
+            cite_kind="prompt",  # library callers declare the anchor
         )
         return ma.Record(**{**base, **kw})
 

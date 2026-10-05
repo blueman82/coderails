@@ -175,7 +175,9 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
 | `handwritten_protected` | the render target is hand-written (no generator marker); render to a new path. |
 | `cite_not_user` | the cite must anchor in a user prompt; cite the owner's own words or use the approved-reply form. |
 | `cite_too_short` | a quote-only cite needs 12 to 300 characters; quote more of the user's prompt or cite an approval with its reply. |
-| `cite_unresolved` | the cite ref was not found in `muninn session <root>`, or the approval has no reply before it; check the ref. |
+| `cite_unresolved` | the cite ref (or the quote, for a quote-only cite) was not found in `muninn session <root>`, or the approval has no reply before it, or no session id was given; check the ref. |
+| `cite_not_own_session` | the cite ref belongs to another session; only a prompt of the caller's own session (--session) can anchor a write. |
+| `cite_bad_approval` | the approval must be a short user prompt (80 chars or fewer) that directly follows the reply it answers. |
 | `refused_uncited` | muninn got no citation; pass --cite/--quote. |
 | `refused_not_found` | the cite ref does not resolve; run `muninn ingest` and check the ref. |
 | `refused_not_citable` | the cited event is a subagent thread; only the orchestrator session can write typed records. |

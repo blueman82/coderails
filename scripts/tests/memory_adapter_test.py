@@ -109,7 +109,10 @@ def rec(
     valid_until: str | None = None,
 ) -> ma.Record:
     """Build a record, defaulting to a valid cited loop lesson."""
-    return ma.Record(scope, type, "c", cite, quote, ["run-ab"] if tags is None else tags, loop_id, None, valid_until)
+    tag_list = ["run-ab"] if tags is None else tags
+    return ma.Record(
+        scope, type, "c", cite, quote, tag_list, loop_id, None, valid_until, cite_role="user", cite_kind="prompt"
+    )
 
 
 class WriteTests(Base):

@@ -46,6 +46,13 @@ REASONS: dict[str, str] = {
         "the cite ref was not found in `muninn session <root>`, or the approval has no reply before it; "
         "check the ref."
     ),
+    "cite_not_own_session": (
+        "the cite ref belongs to another session; only a prompt of the caller's own session (--session) can "
+        "anchor a write."
+    ),
+    "cite_bad_approval": (
+        "the approval must be a short user prompt (80 chars or fewer) that directly follows the reply it answers."
+    ),
     "refused_uncited": "muninn got no citation; pass --cite/--quote.",
     "refused_not_found": "the cite ref does not resolve; run `muninn ingest` and check the ref.",
     "refused_not_citable": (
