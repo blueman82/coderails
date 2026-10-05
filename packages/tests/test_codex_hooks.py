@@ -247,50 +247,27 @@ class HookTests(unittest.TestCase):
         obj["expires_at"] = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
         self.authority(session).write_text(json.dumps(obj))
 
-    def test_crack_on_negation_and_quotes_never_grant(self) -> None:
-        """Negated or quoted requests grant nothing; clause-separated and plain requests do."""
-        cases = {
-            "don't crack on yet": False,
-            "never crack on": False,
-            "I wouldn't crack on yet": False,
-            "you shouldn't crack on": False,
-            "avoid crack on": False,
-            "should we crack on?": False,
-            "what does crack on mean?": False,
-            'he said "crack on"': False,
-            "the `crack on` phrase": False,
-            "no problem, crack on": True,
-            "crack on": True,
-        }
-        for index, (text, granted) in enumerate(cases.items()):
-            self.prompt(text, f"neg{index}")
-            self.assertEqual(self.authority(f"neg{index}").is_file(), granted, text)
-            self.assertEqual(self.asks(f"neg{index}"), granted, text)
-
-    def test_crack_on_grants_valid_object_with_echo_and_trace(self) -> None:
-        """Grant writes a schema-valid 24h revocable object (checked by the Claude validator) and echoes it."""
-        sys.path.insert(0, str(ROOT))
-        from scripts.lib.authority_object import validate
-
-        out = self.prompt("crack on", "g1")
-        obj = json.loads(self.authority("g1").read_text())
-        self.assertEqual(validate(obj, datetime.now(timezone.utc)), [])
-        self.assertEqual((obj["session_id"], obj["max_prs"], obj["approval_required_for"]), ("g1", 0, ["merge"]))
-        self.assertTrue(timedelta(hours=23) < datetime.fromisoformat(obj["expires_at"]) - datetime.now(timezone.utc))
-        context = out["hookSpecificOutput"]["additionalContext"]
-        self.assertIn(obj["authority_id"], context)
-        self.assertIn("authority.py revoke --session g1", context)
-        self.assertEqual(self.reasons("g1"), ["authority_granted"])
-        self.assertFalse((self.directory / "data/sessions/g1/crack_on_active").exists())
+    def grant(self, session: str, *extra: str, ok: bool = True) -> subprocess.CompletedProcess[str]:
+        """Mint through the mirrored typed command (the only route; the hook never mints)."""
+        result = subprocess.run(
+            [sys.executable, str(PACKAGE / "scripts/authority.py"), "grant", "--session", session]
+            + ["--max-prs", "0", *extra],
+            env=self.environment | {"CLAUDE_AGENTIC_LOOP_DIR": str(self.loop)},
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode == 0, ok, result.stderr)
+        return result
 
     def test_crack_on_deny_expiry_revoke_and_regrant(self) -> None:
         """Live denies (traced); expiry allows (traced); re-grant works; the shared CLI revoke ends it."""
-        self.prompt("crack on", "e1")
+        self.grant("e1")
         self.assertTrue(self.asks("e1"))
         self.expire("e1")
         self.assertFalse(self.asks("e1"))
-        self.assertEqual(self.reasons("e1"), ["authority_granted", "authority_deny", "authority_expired_allow"])
-        self.prompt("crack on", "e1")
+        self.assertEqual(self.reasons("e1"), ["authority_granted_command", "authority_deny", "authority_expired_allow"])
+        self.grant("e1")
         self.assertTrue(self.asks("e1"))
         cli = ROOT / "scripts/authority.py"
         env = self.environment | {"CLAUDE_AGENTIC_LOOP_DIR": str(self.loop)}
@@ -301,7 +278,7 @@ class HookTests(unittest.TestCase):
 
     def test_crack_on_foreign_torn_and_unsafe(self) -> None:
         """A copied foreign file, a truncated file and an unsafe id all fail open; foreign is traced."""
-        self.prompt("crack on", "src")
+        self.grant("src")
         (self.loop / "dst").mkdir()
         self.authority("dst").write_text(self.authority("src").read_text())
         self.assertFalse(self.asks("dst"))
@@ -309,7 +286,7 @@ class HookTests(unittest.TestCase):
         (self.loop / "t1").mkdir()
         self.authority("t1").write_text('{"authority_id": "x", "ses')
         self.assertFalse(self.asks("t1"))
-        self.prompt("crack on", "a/b")
+        self.grant("a/b", ok=False)
         self.assertFalse(self.asks("a/b"))
         found = sorted(self.loop.glob("**/authority.json"))
         self.assertEqual(found, sorted([self.authority("src"), self.authority("dst"), self.authority("t1")]))

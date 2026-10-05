@@ -46,7 +46,7 @@ It surfaces ambiguities, fills gaps with grounded assumptions, and produces a re
 
 **Step 2 — Adopt the improved prompt. Ask only outside a full-autonomous envelope.**
 
-Step 2 has two paths. Which one applies is decided by the authorising prompt's envelope class (the same classification Phase 0 makes): "crack on", "human is dead", "ship N PRs without asking", "no human gates", or equivalent means full-autonomous.
+Step 2 has two paths. Which one applies is decided by the authorising prompt's envelope class (the same classification Phase 0 makes): "crack on", "human is dead", "ship N PRs without asking", "no human gates", or equivalent means full-autonomous. These words still select the envelope class for your reasoning, but they no longer create authority: the `AskUserQuestion` denial exists only after the user types `/coderails:authorize` (or `authority.py grant` runs); on the phrase alone the hook just prints that command.
 
 **Full-autonomous envelope → auto-adopt, do not ask.** An `AskUserQuestion` here is a human gate, and a full-autonomous envelope has already withdrawn consent for gates. Do not resolve that contradiction by skipping Phase -1 — the improve-prompt output is worth more in autonomous operation, not less, because there is no human downstream to catch a vague envelope. Instead: run Step 1, auto-adopt outcome **A** without asking, and emit the improved prompt so it stays on the record. Concretely:
 
