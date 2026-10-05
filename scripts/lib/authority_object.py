@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Pure authority-object validation plus exact-id, atomic storage. Additive: no gate consults it yet."""
+"""Pure authority-object validation plus exact-id, atomic storage.
+
+Consumed by crack_on_gate (AskUserQuestion); action receipts are a separate schema (action_receipt.py).
+"""
 
 from __future__ import annotations
 

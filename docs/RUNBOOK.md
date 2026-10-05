@@ -83,3 +83,34 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
 - Baseline note: the old 103 fires / 5 blocks figure (`docs/graph-alignment-measurement.md`) came from discipline-log
   telemetry; after-numbers come from trace rows, so they are not comparable. Reproduce:
   `python3 scripts/measure_graph_alignment.py --root . --json`.
+
+## Action-authority hook denied a merge or push (or warned in advisory)
+
+- Symptom: `gh pr merge` or `git push` to main/master is denied with "needs an action receipt (<code>)" (enforce), or a
+  stderr "action_authority (advisory)" warning appears. Only when config `action_authority` is `enforce` or `advisory`;
+  absent or any other value is off.
+- Query: `jq -r 'select(.command=="action_authority" or .command=="action_receipt") | [.outcome,.reason_code]|@tsv' <loop dir>/<session>/trace.jsonl`,
+  or `trace.receipts.by_reason_code` from `python3 scripts/measure_graph_alignment.py --root . --json` (deduped by
+  event_id). Codes: `denied_<code>` / `advisory_<code>` where `<code>` is one of `no_receipt`, `hash_mismatch`,
+  `sha_mismatch`, `expired`, `revoked`, `consumed`, `foreign_session`, `foreign_loop`, `kind_mismatch`, `no_session` (payload had no session_id; traced under session dir `_no_session`), `malformed`;
+  `receipt_consumed` (allowed); `action_authority_failed_open` (the hook itself errored and allowed);
+  `receipt_approved` / `receipt_revoked` (CLI).
+- `action_authority_failed_open`: the row carries `inputs.error_class` (sha256 of the exception class name; compare with
+  `printf ZeroDivisionError | shasum -a 256`) and `loop_id` when known; the hook's stderr (hook log) prints
+  `action_authority failed open: <Class>: <message>`. A session-less failure is traced under `_no_session`.
+- Remediation: mint a receipt for the exact command:
+  `python3 scripts/action_receipt_cli.py approve-action --session <id> --kind merge|git_push --command '<exact command>' --cwd <directory it runs in>`
+  (receipts are single-use, 1h by default; `inspect-receipt` / `revoke-receipt` take `--receipt-id`). `hash_mismatch`
+  means args, cwd or branch differ from the minted command. `foreign_session` can also mean a worker whose
+  `session_id` differs from the minter's (unverified guess): mint under the session the hook reports. Or set
+  `action_authority: off` in `.coderails/workflow.config.yaml`.
+- Scope of one receipt: each guarded segment of a chained command (`a && b`) needs its own receipt; a leading
+  `cd <dir>` moves the directory the hash binds (mint with `--cwd` set to where the command really runs). A receipt
+  minted with `--artifact-sha` verifies only against the real HEAD (push) or PR head via `gh pr view` (merge, 4s
+  timeout; unknowable means `sha_mismatch`, fail closed).
+- Codex: the hook is vendored and parity-tested, but `scripts/action_receipt_cli.py` is NOT shipped in the Codex
+  package; mint receipts from a coderails repo checkout (same session id) or leave `action_authority` off.
+- Limits: a receipt binds approval to an exact action but does not prove a human approved it (a same-user agent can run
+  `approve-action`). The hash covers only the command text the hook sees, not aliases, functions, eval/xargs or scripts that
+  push (env/sudo/subshell/`bash -c`/`gh api .../merge` wrappers are unwrapped). Limits: scope 500 chars, 8 KB per receipt,
+  50 receipts per session (`receipt_refused_scope_too_long`, `receipt_refused_too_many`). Protected branches are main and master only.

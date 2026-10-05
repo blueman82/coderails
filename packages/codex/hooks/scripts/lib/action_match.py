@@ -1,15 +1,15 @@
-"""Match guarded Git operations and native Claude review invocations."""
+"""Vendored subset of hooks/scripts/lib/pr_workflow_match.py (operation, targets_main, guarded_segments).
+
+Parity-tested against the Claude copy in packages/tests/test_codex_action_authority.py: change both together.
+"""
 
 from __future__ import annotations
 
-import json
 import os
 import re
 from pathlib import Path
-from typing import Any, cast
 
-from .destructive_patterns import git_output
-from .discipline_common import tool_uses
+from lib.destructive_patterns import git_output
 
 MERGE_SCRIPT = r"""(?:(?:bash|sh|python3?)\s+)?["']?(?:[^\s"']*/)?merge\.(?:py|sh)["']?(?:\s|$)"""
 
@@ -93,64 +93,3 @@ def guarded_segments(command: str, cwd: str) -> list[tuple[str, str, str]]:
         if name in {"merge", "git_push"} and targets_main(segment, cwd, target, name):
             found.append((name, matched, cwd))
     return found
-
-
-def pr_number(segment: str) -> str:
-    """Read the explicit PR argument while excluding option tokens."""
-    match = re.search(r"gh\s+pr\s+merge(.*)", segment)
-    arguments = match[1] if match else re.sub(r"^.*?merge\.(?:sh|py)", "", segment)
-    return next((token.strip("\"'") for token in arguments.split() if re.match(r"^[0-9]", token.strip("\"'"))), "")
-
-
-def transcript_entries(paths: list[str]) -> list[dict[str, Any]]:
-    """Read complete transcripts; a malformed transcript cannot establish a prerequisite."""
-    result: list[dict[str, Any]] = []
-    for path in paths:
-        try:
-            entries = [json.loads(line) for line in Path(path).read_text().splitlines() if line.strip()]
-            if all(isinstance(entry, dict) for entry in entries):
-                result.extend(entries)
-        except (OSError, ValueError):
-            continue
-    return result
-
-
-def step_found(entries: list[dict[str, Any]], name: str, number: str) -> bool:
-    """Verify native Skill evidence, consuming raw-main-merge review evidence once."""
-    if name == "git_merge":
-        entries = sorted(entries, key=lambda entry: str(entry.get("timestamp") or ""))
-        last = max(
-            (
-                index
-                for index, entry in enumerate(entries)
-                for tool in tool_uses(entry)
-                if tool.get("name") == "Bash"
-                and isinstance(tool.get("input"), dict)
-                and re.search(r"\bgit\s+merge\b", str(tool["input"].get("command") or ""))
-            ),
-            default=-1,
-        )
-        entries = entries[last + 1 :]
-    for entry in entries:
-        for tool in tool_uses(entry):
-            data = tool.get("input")
-            if not isinstance(data, dict):
-                continue
-            skill = str(cast(dict[str, Any], data).get("skill") or "")
-            if name == "create":
-                if tool.get("name") == "Skill" and re.search(r"(^|:)push$", skill):
-                    return True
-                if tool.get("name") == "Bash" and re.search(
-                    r"push\.(?:sh|py)", str(cast(dict[str, Any], data).get("command") or "")
-                ):
-                    return True
-            elif tool.get("name") == "Skill" and skill.endswith("review-pr"):
-                if (
-                    name != "merge"
-                    or not number
-                    or re.search(
-                        r"^" + re.escape(number) + r"([^0-9]|$)", str(cast(dict[str, Any], data).get("args") or "")
-                    )
-                ):
-                    return True
-    return False
