@@ -288,11 +288,12 @@ The gate is a `last-marker` predicate (`success: "run=ok"`, `failures:
 ["abort=", "delivery=started"]`), not `exists` — `promotion-runs.log` is
 append-only, so a file-present check would keep reading green off an old
 run's line forever. Keying on the last terminal marker makes each run's
-own outcome decide. `delivery=started` is a failure marker because the
-met-path writes it immediately after `predicate=met`, before mining: any
-death anywhere in mining, drafting, or delivery leaves it as the last
-marker and the gate reads that run RED, without having to enumerate every
-failure exit.
+own outcome decide. The met-path is guarded by `routine_run.py begin`, which
+writes a provisional `run_incomplete` row (derived marker
+`abort=incomplete-run`) before mining: any death anywhere in mining, drafting,
+or delivery leaves it as the last marker and the gate reads that run RED,
+without having to enumerate every failure exit. (`delivery=started` stays in
+the failures list for logs written before the state machine.)
 
 **Its full self-merge chain has never actually fired.** As of this
 writing `promotion-runs.log` holds exactly one line
@@ -325,6 +326,57 @@ server-side check backs any of this up. This repo deliberately does not
 enable GitHub branch protection (2026-07-15) — that's a standing
 decision, not a TODO — so this routine's merge rail rests entirely, by
 design, on the script-internal gates named above.
+
+## Routine state machine and event log (`docs-sync`, `loop-retro-promotion`)
+
+Both delivery routines run one script, `scripts/routine_run.py` (Codex copy:
+`packages/codex/scripts/`), instead of repeating a nine-stage prose chain. It
+needs no hooks, so it works under `claude -p`. Specs: `routines/docs-sync.json`
+and `routines/loop-retro-promotion.json` (ordered stages `fetch_branch`,
+`evals_frozen`, `edit_made`, `manifest_check`, `push`, `review`, `post_review`,
+`post_evals`, `merge`; the policy file from `policy/`; the log path; the cleanup
+spec; the closed reason codes). Commands: `begin`, `stage NAME`,
+`run-gate STAGE -- ARGV`, `abort CODE`, `refuse GATE`, `finish ok|no_drift`.
+
+- `begin` writes a state file and a provisional `run_incomplete` row. A session
+  that ends mid-sequence leaves it standing, so the log reads
+  `abort=incomplete-run` (red), which is distinguishable from a run that never
+  started. This replaces the old prose instruction to write that marker by hand.
+- `stage` and `run-gate` enforce the order; a call out of order aborts the run
+  (`stage_out_of_order`). `stage manifest_check` runs
+  `scripts/diff_manifest.py --policy <spec policy>` itself and aborts on any
+  violation. `run-gate` maps any non-zero exit of the gate command (`push.py`,
+  `post_review.py post`, `post_evals.py post`, `merge.py`) to `run_refused` for
+  that gate: the exit code is the trigger, in code.
+- `abort`, `refuse` and every failed check clean up once with `git` and `gh`
+  only: close the PR, delete the remote branch, delete the local branch, never
+  the default branch. No `rm`.
+- The event log is `routine_log.py emit`: one JSONL row
+  `{v,ts,run_id,routine,stage,outcome,reason_code}` per event under a file lock,
+  next to the human run log (same path, `.jsonl`). The outcome enum is closed
+  (`stage_ok`, `run_ok`, `run_abort`, `run_refused`, `run_incomplete`) and reason
+  codes are a closed list per routine; anything else exits 2 and appends nothing.
+  The legacy marker line (`run=ok`, `abort=<code>`, `refused=<gate>`,
+  `abort=incomplete-run`) is derived from the row, so the dashboard's
+  `last-marker` predicate is unchanged.
+- The runner (`skills/dashboard/runner/src/sweep.ts`, `timeoutMarker.ts`; the
+  Codex mirror in its `sweep.ts`) checks the JSONL after every routine child
+  exit, including exit 0. If the run has no terminal row it appends
+  `run_abort` `runner_exit_no_terminal` (and the `abort=` line). The JSONL makes
+  "finished but did not log it" distinguishable from "failed silently".
+- Counters: trace rows `routine/<outcome>/<reason_code>` (see
+  `docs/workflow-gates-measurement.md`). Runbook: "A routine run ended
+  incomplete, aborted or refused" in `docs/RUNBOOK.md`.
+
+Limits: the state machine runs inside the agent session, so an agent that never
+calls it is caught only by the standing `run_incomplete` row and the runner
+check, not prevented. The run is found by the latest `run_id` in the JSONL since
+the runner started it, not by an id the runner hands the child. Cleanup does not
+force-switch a dirty tree: a failed step prints `cleanup_failed: <step>` and the
+branch is left for a human. `skills/dashboard/` is one of the integrity daemon's
+policy paths, so a daemon-attested PR touching the runner needs a human merge.
+The Codex docs-sync policy copy names `.claude/**`, not `.codex/**`, in its
+deny-list (it must stay a byte mirror).
 
 ## Install / uninstall
 

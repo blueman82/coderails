@@ -143,6 +143,27 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   unresolved); fix the argument, never edit `stops` by hand. Codex records the same row but only a `hard-stop` row on a
   typed hard-stopped graph releases its guard (`consume-stop`); other categories are recorded and ignored there.
 
+## A routine run ended incomplete, aborted or refused
+
+- Symptom: the dashboard gate for `docs-sync` or `loop-retro-promotion` reads red; the run log's last marker is
+  `abort=incomplete-run`, `abort=<code>` or `refused=<gate>`.
+- Query: the JSONL beside the run log (`run-{date}.jsonl`, `promotion-runs.jsonl`): the last row for the newest
+  `run_id` gives `stage`, `outcome` (`stage_ok`, `run_ok`, `run_abort`, `run_refused`, `run_incomplete`) and
+  `reason_code`. Counters: `trace.by_reason` keys `routine/<outcome>/<reason_code>`, tallied by
+  `python3 scripts/measure_graph_alignment.py --root . | python3 scripts/lib/workflow_gate_counters.py` (key `routine`).
+- Codes: `incomplete-run` (the session ended after `begin`), `stage_out_of_order`, `runner_exit_no_terminal` (the runner
+  saw the child exit with no terminal row), `audit_failed`/`mining_failed`, the diff-manifest codes from the
+  `manifest_check` stage (`out_of_manifest`, `denied_path`, `docs_sync_deny`, `docs_sync_deletion`, `special_file_type`,
+  `status_not_allowed`, `too_many_paths`, `manifest_unreadable`, `manifest_internal_error`), and a gate name
+  (`push`, `review`, `post_review`, `post_evals`, `merge`) for `run_refused`.
+- Remediation: `incomplete-run` and `runner_exit_no_terminal` mean the agent session stopped early; read the run
+  output under the runner's runs dir, fix the cause and let the next scheduled run start fresh (`begin` always opens a
+  new run). A refusal names the gate that exited non-zero: run that gate by hand to see why. Cleanup prints
+  `cleanup_failed: <step>` when a PR, remote branch or local branch could not be removed; delete it with `gh pr close`
+  and `git push origin --delete` / `git branch -D`. `routine_unknown`/`reason_code_invalid`/`outcome_invalid` (exit 2)
+  mean a caller used a value outside the closed lists.
+- Limits: see `docs/routines.md` "Routine state machine and event log".
+
 ## Diff-manifest check warned or refused
 
 - Symptom: `push.py`, `merge.py`, a direct `gh pr merge` (Claude `enforce_pr_workflow`, Codex `pr_publication_gate`)

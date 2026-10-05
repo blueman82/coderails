@@ -138,5 +138,7 @@
   "packages/codex/scripts/lib/publication_gate.py": "100644",
   "packages/codex/hooks/scripts/pr_publication_gate.py": "100755",
   "scripts/lib/config_counters.py": "100644",
-  "scripts/lib/config_schema_docs.py": "100644"
+  "scripts/lib/config_schema_docs.py": "100644",
+  "scripts/routine_log.py": "100755",
+  "scripts/routine_run.py": "100755"
 }

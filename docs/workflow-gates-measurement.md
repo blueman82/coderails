@@ -23,6 +23,7 @@ tallied by `measure_graph_alignment.py` into `trace.by_reason` keyed
 | `eval-level/ok/eval_level_ok` | the selected suite named the current PR head and every P0 passed, its level covered the live diff and declared/posted work-unit floor, the late-freeze stamp matched, and the suite verified with a full frozen SHA at level 1 or 2 |
 | `eval-level/refused/<code>` | `<code>` is `level_below_derived`, `late_freeze_unstamped`, `suite_hash_mismatch`, `suite_hash_marker_mismatch`, `chain_broken`, `chain_truncated`, `integrity_stripped`, `not_frozen`, `eval_facts_missing`, `eval_artifact_missing`, `eval_artifact_unreadable`, `eval_embed_malformed`, `eval_head_mismatch`, `eval_result_mismatch` or `eval_level_diff_unavailable` |
 | `publication/refused/<code>` | the single gate refused; `<code>` is `diff_manifest:<code>`, a review code or an eval-level code |
+| `routine/<outcome>/<code>` | a routine event from `scripts/routine_log.py`: `<outcome>` is `stage_ok`, `run_ok`, `run_abort`, `run_refused` or `run_incomplete`; `<code>` is the closed per-routine reason code (`none` for `stage_ok`/`run_ok`), e.g. `routine/run_abort/docs_sync_deny`, `routine/run_refused/merge`, `routine/run_incomplete/incomplete-run`; keyed by the routine name as session id |
 | `argv/denied/ceiling_exceeded` | the verification-volume ceiling denied a 3rd+ full suite or `post_evals.py post\|validate-structure` in one worktree (keyed by the session that ran it) |
 | `argv/denied/protected_paths_unreadable` | `policy/protected_paths.json` was missing or ill-shaped and an edit on main was refused (fail closed) |
 
@@ -36,7 +37,7 @@ shape and worktree equality; it does not authenticate those owner fields.
 
     python3 scripts/measure_graph_alignment.py --root . | python3 scripts/lib/workflow_gate_counters.py
 
-prints `{command: {outcome/reason_code: count}}` for `diff-manifest`, `review-passes`, `eval-level`, `publication` and `argv`. Add a command name to
+prints `{command: {outcome/reason_code: count}}` for `diff-manifest`, `review-passes`, `eval-level`, `publication`, `argv` and `routine`. Add a command name to
 `COMMANDS` in that file when a unit adds a new row family; `measure_graph_alignment.py` is at its line limit and is not
 edited.
 

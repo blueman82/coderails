@@ -38,7 +38,7 @@ import { runClaude } from "./exec.ts";
 import { appendRun, type RunRecord } from "./runlog.ts";
 import { checkArtifact } from "./artifactGate.ts";
 import { escalate, checkForeignSkillExists, writeRunNote, defaultNotify } from "./escalate.ts";
-import { localDateIso, recordTimeoutMarker } from "./timeoutMarker.ts";
+import { ensureTerminalRow, localDateIso, recordTimeoutMarker } from "./timeoutMarker.ts";
 
 export interface SweepOptions {
   queueDir: string;
@@ -261,6 +261,18 @@ export async function sweepOnce(opts: SweepOptions): Promise<SweepResult> {
       // leaves no transcript to diagnose (the motivating gap). See exec.ts.
       const execResult = await runClaudeImpl(argv, button.cwd, { outputPath: startRecord.outputPath });
       appendRun({ ...startRecord, endedAt: Date.now(), exitCode: execResult.exitCode }, { runsDir: opts.runsDir });
+
+      // Every routine child exit, including exit 0, must leave a terminal row in the routine's JSONL event log;
+      // if it did not (the session ended mid-sequence), the runner records run_abort runner_exit_no_terminal.
+      // A timeout kill already gets its own text marker below, so only the row is added for it.
+      if (routine && execResult.spawnFailure !== "spawn-failed") {
+        ensureTerminalRow(
+          routine,
+          { date: localDateIso(opts.clock?.() ?? new Date()), runId: outputRunId, vault: (opts.config.wikiPaths ?? [])[0] ?? "" },
+          startedAt,
+          execResult.spawnFailure !== "timeout",
+        );
+      }
 
       if (execResult.spawnFailure) {
         // Distinct from a routine's own non-zero exit ("exec-error"): the
