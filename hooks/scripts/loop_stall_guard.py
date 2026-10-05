@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import sys
 from contextlib import suppress
 from pathlib import Path
@@ -32,6 +31,7 @@ from hooks.scripts.lib.loop_state_common import (
     stop_ran_this_turn,
     unstubbed_grace,
 )
+from hooks.scripts.lib.stall_notice import marker_name, status_notice
 from hooks.scripts.lib.trace_row import append_row
 
 
@@ -52,18 +52,15 @@ def graph_unresolved(state: LoopState) -> bool:
 
 def emit_human_request(state: LoopState) -> None:
     """Deduplicate the unresolved graph notice without weakening its blocking gate."""
-    loop = str(state.data.get("loop_id") or "")
-    revision = state.data.get("revision")
-    if not loop or not isinstance(revision, int) or isinstance(revision, bool):
+    name = marker_name(state.data, state.session)
+    if name is None:
         return
-    safe = re.sub(r"[^a-zA-Z0-9_.-]", "_", loop)
-    marker = state.path.parent / f".human-approval-{safe}-{revision}"
-    message = json.dumps(
-        {
-            "systemMessage": "Human approval required: the native graph is unresolved. Approve the next action "
-            "or resume the loop; stopping remains blocked until the graph is complete."
-        }
+    marker = state.path.parent / name
+    base = (
+        "Human approval required: the native graph is unresolved. Approve the next action "
+        "or resume the loop; stopping remains blocked until the graph is complete."
     )
+    graph_cli = Path(__file__).resolve().parents[2] / "skills/agentic-loop/scripts/graph.py"
     created = False
     try:
         marker.mkdir()
@@ -74,7 +71,8 @@ def emit_human_request(state: LoopState) -> None:
     except OSError:
         log(f"hook=loop_stall_guard session={state.session} human_request=dedupe_write_failed")
     try:
-        print(message)
+        status = status_notice(graph_cli, state.path, state.session)
+        print(json.dumps({"systemMessage": f"{base}\n{status}" if status else base}))
     except (OSError, ValueError) as error:
         if created:
             with suppress(OSError):

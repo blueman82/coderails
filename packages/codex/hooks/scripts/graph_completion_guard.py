@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import json
-import re
 import sys
 from contextlib import suppress
 from pathlib import Path
@@ -23,6 +22,7 @@ from hook_common import (
     read_input,
     text_field,
 )
+from lib.stall_notice import marker_name, status_notice
 
 
 def unresolved(state: Path) -> bool:
@@ -69,20 +69,17 @@ def hard_stop_declaration(message: str) -> bool:
 
 def request_human_approval(state: Path, session_id: str, inspection: dict[str, object]) -> None:
     """Emit the established deduplicated unresolved-graph Stop response."""
-    loop_id = text_field(inspection, "loop_id")
-    revision = inspection.get("revision")
-    if not loop_id or not isinstance(revision, int):
+    try:
+        name = marker_name(json.loads(state.read_text(encoding="utf-8")), session_id)
+    except (OSError, ValueError):
+        name = None
+    if name is None:
         continue_turn("Native graph unresolved; stopping remains blocked.")
         return
-    safe_loop = re.sub(r"[^A-Za-z0-9_.-]", "_", loop_id)
-    marker = state.parent / f".human-approval-{safe_loop}-{revision}"
-    message = json.dumps(
-        {
-            "decision": "block",
-            "reason": "Native graph unresolved; stopping remains blocked.",
-            "systemMessage": "Human approval required: the native graph is unresolved. Approve the next action "
-            "or resume the loop; stopping remains blocked until the graph is complete.",
-        }
+    marker = state.parent / name
+    base = (
+        "Human approval required: the native graph is unresolved. Approve the next action "
+        "or resume the loop; stopping remains blocked until the graph is complete."
     )
     log(f"hook=graph_completion_guard session={session_id} blocked=1")
     created = False
@@ -97,7 +94,16 @@ def request_human_approval(state: Path, session_id: str, inspection: dict[str, o
     except OSError:
         log(f"hook=graph_completion_guard session={session_id} human_request=dedupe_write_failed")
     try:
-        print(message)
+        status = status_notice(graph_path(), state, session_id)
+        print(
+            json.dumps(
+                {
+                    "decision": "block",
+                    "reason": "Native graph unresolved; stopping remains blocked.",
+                    "systemMessage": f"{base}\n{status}" if status else base,
+                }
+            )
+        )
     except (OSError, ValueError):
         if created:
             with suppress(OSError):
