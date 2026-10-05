@@ -39,6 +39,10 @@ Phase 0 and Phase 7 are cross-cutting. Phase 7 is the live cutover and closure a
 
 ROW_STR = ("defect", "target_typed_record", "source_refs", "acceptance_test", "status")
 GAP_STR = ("title", "acceptance_test", "status")
+# Plan section 5 phase map; the validator fails a row or gap moved to another phase.
+PHASES = {1: "6 10 16 19", 2: "1 4 5 5a 7 22", 3: "2 3", 4: "8 9 17 18 20 21", 5: "13 14 15", 6: "11 12 23"}
+ROW_PHASE = {i: p for p, ids in PHASES.items() for i in ids.split()}
+GAP_PHASE = {"gap2": 3, "gap3": 3, "gap4": 6, "gap5": 5}
 
 
 def _blank(v: object) -> bool:
@@ -80,6 +84,10 @@ def validate(data: dict[str, Any]) -> list[str]:
             continue
         if not _phase_ok(r.get("phase")):
             errs.append(f"row {i} has no phase 1-6")
+        elif r["phase"] != ROW_PHASE[i]:
+            errs.append(f"row {i} is in phase {r['phase']}, plan says {ROW_PHASE[i]}")
+        if "blocked_on" in r and _blank(r["blocked_on"]):
+            errs.append(f"row {i} has empty blocked_on")
         for k in ROW_STR:
             if _blank(r.get(k)):
                 errs.append(f"row {i} has empty {k}")
@@ -97,6 +105,8 @@ def validate(data: dict[str, Any]) -> list[str]:
                 errs.append("gap1 has no exception (opt-in integrity gate)")
         elif not _phase_ok(g.get("phase")):
             errs.append(f"{i} is unmapped (no phase 1-6)")
+        elif g["phase"] != GAP_PHASE[i]:
+            errs.append(f"{i} is in phase {g['phase']}, plan says {GAP_PHASE[i]}")
     return errs
 
 
@@ -107,11 +117,11 @@ def _cell(v: object) -> str:
 def render(data: dict[str, Any]) -> str:
     """Render the data as the generated markdown document."""
     out = [HEADER, "## Inventory rows\n"]
-    out.append("| id | phase | defect | target record | source refs | acceptance test | status |")
-    out.append("|---|---|---|---|---|---|---|")
+    out.append("| id | phase | defect | target record | source refs | acceptance test | blocked on | status |")
+    out.append("|---|---|---|---|---|---|---|---|")
     for r in data["rows"]:
         cols = [r["id"], r["phase"], r["defect"], r["target_typed_record"], r["source_refs"]]
-        cols += [r["acceptance_test"], r["status"]]
+        cols += [r["acceptance_test"], r.get("blocked_on", ""), r["status"]]
         out.append("| " + " | ".join(_cell(c) for c in cols) + " |")
     out.append("\n## Gaps\n")
     out.append("| id | gap | phase or exception | acceptance test | status |")

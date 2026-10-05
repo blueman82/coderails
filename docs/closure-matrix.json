@@ -24,8 +24,9 @@
       "defect": "Gates ignore the authority fields; SKILL.md:169 says self-merge is standard while the authority object says merge needs approval",
       "target_typed_record": "`authority.permits(action)` returns `{allow,reason,requires_approval}`; `max_prs` is counted from receipts",
       "phase": 3,
-      "acceptance_test": "A test shows enforce_pr_workflow, merge.py and destructive_bash_gate consult authority.permits(action) and deny merge without approval and past max_prs (counted from receipts), after the SKILL.md:169 conflict is decided by a human.",
-      "status": "open"
+      "acceptance_test": "A test shows enforce_pr_workflow, merge.py and destructive_bash_gate consult authority.permits(action) and deny merge without approval and past max_prs (counted from receipts).",
+      "status": "open",
+      "blocked_on": "A human decides the SKILL.md:169 conflict (self-merge is standard vs authority says merge needs approval)."
     },
     {
       "id": "4",
@@ -67,7 +68,7 @@
       "id": "7",
       "source_refs": "P12, A18, S18",
       "defect": "Disposition (clean-break / preserve-compat, `named_blocker`, `removal_ticket`) has zero code readers",
-      "target_typed_record": "`add-unit --disposition \u2026`; refuse preserve-compat without blocker and ticket; `compat_findings:int` in the review artifact; `disposition-audit`",
+      "target_typed_record": "`add-unit --disposition …`; refuse preserve-compat without blocker and ticket; `compat_findings:int` in the review artifact; `disposition-audit`",
       "phase": 2,
       "acceptance_test": "A test shows add-unit --disposition refuses preserve-compat without named_blocker and removal_ticket, merge.py reads compat_findings from the review artifact, and grep for removal_ticket in hooks/scripts/skills is non-empty.",
       "status": "open"
@@ -132,8 +133,9 @@
       "defect": "`standing-orders.md` is used as a database (K=5 decay, promotion predicate) by an LLM",
       "target_typed_record": "`orders.py record|tick|predicate|lessons`; `standing-orders.md` generated read-only",
       "phase": 5,
-      "acceptance_test": "A test shows orders.py record|tick|predicate|lessons implements K=5 decay and the promotion predicate in code, standing-orders.md is generated read-only, after the Muninn overlap check is recorded.",
-      "status": "open"
+      "acceptance_test": "A test shows orders.py record|tick|predicate|lessons implements K=5 decay and the promotion predicate in code and standing-orders.md is generated read-only.",
+      "status": "open",
+      "blocked_on": "The Muninn overlap check is recorded."
     },
     {
       "id": "15",
@@ -222,35 +224,35 @@
       "id": "gap1",
       "title": "external trust enforcement",
       "exception": "EXCEPTION: closed by the existing opt-in integrity gate (docs/INTEGRITY-GATE.md). It stays opt-in, is not installed here, and gets no second enforcement route.",
-      "acceptance_test": "docs/INTEGRITY-GATE.md remains the single enforcement route and stays opt-in; no new always-on enforcement path is added.",
+      "acceptance_test": "A test fails if any enforcement hook or route is registered outside the existing integrity-gate installer (scripts/integrity-gate/setup.py); the gate stays opt-in (inactive without integrity_review.machine_user) and is not installed here.",
       "status": "open"
     },
     {
       "id": "gap2",
       "title": "capability-based tools",
       "phase": 3,
-      "acceptance_test": "A test shows tool access is granted by declared capability and an undeclared tool call is denied, in both providers.",
+      "acceptance_test": "Per-role capability MCP servers (scripts/capability.py + capabilities/profiles.json) expose only profile tools; a test shows a reviewer session lists no shell tool, a wrong-role tool call and an arbitrary command are denied, in both providers; the profile file and the servers cannot drift.",
       "status": "open"
     },
     {
       "id": "gap3",
       "title": "HITL / action authority",
       "phase": 3,
-      "acceptance_test": "A test shows human-in-the-loop approval is required by authority.permits(action) for approval-gated actions and a missing approval denies, in both providers.",
+      "acceptance_test": "A test shows the authority grant command and receipts bound to repository+ref+SHA gate gh pr merge and git push to main by default: a stale SHA, a replayed receipt and a self-minted receipt are rejected, in both providers.",
       "status": "open"
     },
     {
       "id": "gap4",
       "title": "dynamic task-specific context",
       "phase": 6,
-      "acceptance_test": "A test shows begin-wave renders task-specific context into the dispatch envelope and a worker prompt lacking it is rejected, in both providers.",
+      "acceptance_test": "A test shows controller-supplied mandatory context and budgets are rendered into the dispatch envelope and removing a trigger keyword cannot omit a required skill or check; a worker prompt lacking the mandatory context is rejected, in both providers.",
       "status": "open"
     },
     {
       "id": "gap5",
       "title": "typed memory (Muninn)",
       "phase": 5,
-      "acceptance_test": "A test shows memory records are written and read through a typed schema, and an untyped record is rejected, in both providers.",
+      "acceptance_test": "A test shows the Muninn adapter is authoritative by default: records round-trip through the typed schema after a restart, an untyped record is rejected, and a missing or refusing Muninn fails with a reason code and never falls back silently to Markdown.",
       "status": "open"
     }
   ]

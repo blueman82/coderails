@@ -105,6 +105,19 @@ class ClosureMatrixTest(unittest.TestCase):
         self._bad(lambda m: m["gaps"].append(copy.deepcopy(m["gaps"][1])), "duplicated")
         self._bad(lambda m: m["rows"].append("junk"), "not an object")
 
+    def test_rejects_wrong_phase_map(self) -> None:
+        """A row or gap moved to a different valid phase is rejected."""
+        self._bad(lambda m: m["rows"][0].update(phase=4), "plan says 2")
+        self._bad(lambda m: m["gaps"][1].update(phase=5), "gap2 is in phase 5, plan says 3")
+
+    def test_blocked_on_is_separate_and_not_blank(self) -> None:
+        """Human-decision preconditions live in blocked_on, not in the acceptance text."""
+        rows = {r["id"]: r for r in DATA["rows"]}
+        for i in ("3", "14"):
+            self.assertTrue(rows[i]["blocked_on"].strip())
+            self.assertNotIn("after the", rows[i]["acceptance_test"])
+        self._bad(lambda m: m["rows"][2].update(blocked_on=" "), "empty blocked_on")
+
     def test_rejects_blank_required_fields(self) -> None:
         """Blank or missing defect, refs, record, status and gap title are rejected."""
 
