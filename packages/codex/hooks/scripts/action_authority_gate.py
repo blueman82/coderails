@@ -18,7 +18,6 @@ from typing import cast
 
 from hook_common import (
     append_trace_row,
-    authority_state,
     deny,
     payload_object,
     read_input,
@@ -28,6 +27,8 @@ from hook_common import (
 )
 from lib.action_match import guarded_segments
 from lib.destructive_patterns import git_output
+
+from scripts.lib.authority_object import read_authority
 
 
 def mode(cwd: str) -> str:
@@ -74,8 +75,8 @@ def main() -> int:
             return 0
         if not (segments := guarded_segments(command, cwd)):
             return 0
-        state, authority = authority_state(session)
-        loop_id = authority.get("loop_id") if state == "live" else None
+        authority = read_authority(session) or {}
+        loop_id = authority.get("loop_id")
         loop = loop_id if isinstance(loop_id, str) else None
         now = datetime.now(timezone.utc)
         proposals = [

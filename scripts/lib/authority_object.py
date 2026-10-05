@@ -6,6 +6,7 @@ Consumed by crack_on_gate (AskUserQuestion); action receipts are a separate sche
 
 from __future__ import annotations
 
+import importlib
 import json
 import os
 import sys
@@ -15,7 +16,6 @@ from pathlib import Path
 from typing import Any, cast
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from hooks.scripts.lib.trace_row import append_row
 
 FIELDS = (
     "authority_id",
@@ -28,7 +28,17 @@ FIELDS = (
     "revocable",
     "approval_required_for",
 )
+OPTIONAL_FIELDS = ("granted_by",)
+GRANTED_BY = ("command", "legacy_phrase")  # objects without the field read as legacy_phrase
 MERGE = "merge"
+
+
+def append_row(
+    command: str, outcome: str, reason_code: str, session_id: str, loop_id: str | None = None, base: Path | None = None
+) -> bool:
+    """Trace via hooks.scripts.lib.trace_row, imported by name so Codex type-checks see one module name."""
+    module = importlib.import_module("hooks.scripts.lib.trace_row")
+    return bool(module.append_row(command, outcome, reason_code, session_id, loop_id, base=base))
 
 
 def safe_session(session_id: object) -> bool:
@@ -47,7 +57,8 @@ def authority_path(session_id: str, base: Path | None = None) -> Path | None:
     """Return <loop dir>/<session_id>/authority.json, or None for an unsafe id."""
     if not safe_session(session_id):
         return None
-    root = base or Path(os.environ.get("CLAUDE_AGENTIC_LOOP_DIR", str(Path.home() / ".coderails/agentic-loop")))
+    override = os.environ.get("CLAUDE_AGENTIC_LOOP_DIR") or os.environ.get("CODERAILS_AGENTIC_LOOP_DIR")
+    root = base or Path(override or Path.home() / ".coderails/agentic-loop")
     return root / session_id / "authority.json"
 
 
@@ -74,7 +85,7 @@ def validate(obj: object, now: datetime) -> list[str]:
         return ["not_an_object"]
     data = cast("dict[str, Any]", obj)
     errors = [f"missing:{name}" for name in FIELDS if name not in data]
-    errors += [f"unknown:{name}" for name in data if name not in FIELDS]
+    errors += [f"unknown:{name}" for name in data if name not in FIELDS + OPTIONAL_FIELDS]
     if errors:
         return errors
     if not isinstance(data["authority_id"], str) or not data["authority_id"]:
@@ -89,6 +100,8 @@ def validate(obj: object, now: datetime) -> list[str]:
     max_prs = data["max_prs"]
     if isinstance(max_prs, bool) or not isinstance(max_prs, int) or max_prs < 0:
         errors.append("max_prs")
+    if "granted_by" in data and data["granted_by"] not in GRANTED_BY:
+        errors.append("granted_by")
     if not isinstance(data["revocable"], bool):
         errors.append("revocable")
     expires = parse_time(data["expires_at"])
