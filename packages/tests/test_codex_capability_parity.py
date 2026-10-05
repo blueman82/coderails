@@ -24,8 +24,8 @@ class CodexCapabilityTests(unittest.TestCase):
                 self.assertEqual((ROOT / relative).read_bytes(), (CODEX / relative).read_bytes())
         self.assertTrue(os.access(CODEX / "scripts/capability.py", os.X_OK))
 
-    def test_codex_copy_runs_untraced_from_its_own_root(self) -> None:
-        """Without the Claude trace library the copy still works, refuses undeclared tests, and writes no rows."""
+    def test_codex_copy_runs_from_its_own_root(self) -> None:
+        """From its own root the copy works, refuses undeclared tests, and traces only to the session's own file."""
         with tempfile.TemporaryDirectory() as loop:
             env = {"PATH": os.environ["PATH"], "CLAUDE_AGENTIC_LOOP_DIR": loop, "CLAUDE_SESSION_ID": "s_codex"}
             for tool, args, status in (
@@ -41,7 +41,8 @@ class CodexCapabilityTests(unittest.TestCase):
                     check=False,
                 )
                 self.assertEqual(done.returncode, status, done.stdout)
-            self.assertEqual(list(Path(loop).iterdir()), [])
+            # the Codex package now ships its own trace_row, so rows land in <loop>/<session>/ and nowhere else
+            self.assertEqual([p.name for p in Path(loop).iterdir()], ["s_codex"])
 
     def test_no_codex_hook_claims_per_agent_bash_gating(self) -> None:
         """Codex registers no allowlist hook: per-agent gating there is sandbox_mode plus instruction text only."""
