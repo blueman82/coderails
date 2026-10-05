@@ -19,20 +19,6 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
 - Remediation: the writer fails open, so an unwritable directory or an unsafe session id (contains `/` or `..`,
   or is empty) silently drops rows. Fix the directory permissions; do not make the gate depend on the write.
 
-## External enforcement refusals (opt-in, inert by default)
-
-- Symptom: `external_enforcement.py` or `ci_verify.py` prints a `REASON=` code other than `OK`, `DRY_RUN`, `NO_DIFF`
-  or `APPLIED`, or `external_enforcement.by_reason` in the measurement JSON shows refusals climbing.
-- Query: `python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import sys,json;print(json.load(sys.stdin)['external_enforcement'])"`;
-  rerun the failing command and read its last stdout line.
-- Remediation by code: `NO_YES` add `--yes` only after reading `plan`. `TEMPLATE_MISSING` restore
-  `docs/external-enforcement/verify.yml.template`. `CHECK_NEVER_SEEN` Actions is off or the `verify` job never ran:
-  follow `docs/external-enforcement/README.md` step 3; never bypass. `SHA_MISMATCH` the checkout or PR head moved: rerun
-  on the current head. `REVIEW_ABSENT` / `EVAL_ABSENT_OR_NOGO` post the review/evals for that exact head (an artifact
-  for an older head is stale by design). `FETCH_FAIL` check `gh auth` and the pinned `_PR_TRUSTED_*` variables.
-  `SMOKE_FAIL` an eval command did not reproduce on the runner. `SUITE_FAIL` fix the failing suite. `GH_FAIL` check
-  `gh` auth/network. Trace rows are advisory and fail-open; they never gate anything.
-
 ## Discipline lint advisories climbing
 
 - Symptom: `confidence_labels` or `verify_loop` advisories climb. These two hooks no longer block (demoted by user

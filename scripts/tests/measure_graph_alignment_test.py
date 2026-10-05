@@ -183,17 +183,6 @@ class MeasureTests(unittest.TestCase):
             self.measure()["lock_events"], {"lock_busy": 0, "lock_stolen_age": 0, "lock_stolen_dead_owner": 0}
         )
 
-    def test_external_enforcement_counts_dedupe_by_event_id(self) -> None:
-        """Rows from external_enforcement/ci_verify count once per event_id; foreign commands are malformed."""
-        row = {"event_id": "e1", "command": "ci_verify.run", "outcome": "refused", "reason_code": "SHA_MISMATCH"}
-        rows = [row, row, {**row, "event_id": "e2", "command": "external_enforcement.apply", "reason_code": "NO_YES"}]
-        rows.append({**row, "event_id": "e3", "command": "other"})
-        text = "\n".join(json.dumps(r) for r in rows) + "\nnot json\n"
-        write(self.home / ".coderails/agentic-loop/external-enforcement/trace.jsonl", text)
-        counts = self.measure()["external_enforcement"]
-        self.assertEqual((counts["events"], counts["duplicates"], counts["malformed"]), (2, 1, 2))
-        self.assertEqual(counts["by_reason"], {"ci_verify.run/SHA_MISMATCH": 1, "external_enforcement.apply/NO_YES": 1})
-
     def test_eval_trace_counts_dedupe_by_event_id(self) -> None:
         """Duplicate event_ids count once; malformed lines are counted; no row content is emitted."""
         row = {"event_id": "e1", "command": "grade-loop", "outcome": "refuse", "reason_code": "control_passes"}
