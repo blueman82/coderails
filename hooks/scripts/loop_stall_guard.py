@@ -30,7 +30,7 @@ from hooks.scripts.lib.loop_state_common import (
     stop_ran_this_turn,
     unstubbed_grace,
 )
-from hooks.scripts.lib.stall_notice import marker_name, record_notice, status_notice
+from hooks.scripts.lib.stall_notice import marker_name, record_notice, seen, status_notice
 from hooks.scripts.lib.trace_row import append_row
 
 
@@ -58,14 +58,19 @@ def emit_human_request(state: LoopState) -> str:
     )
     if name is None:
         log(f"hook=loop_stall_guard session={state.session} human_request=no_marker_key")
-        print(json.dumps({"systemMessage": base}))
+        try:
+            print(json.dumps({"systemMessage": base}))
+            sys.stdout.flush()
+        except (OSError, ValueError) as error:
+            raise ValueError("could not emit the required human request; retry stopping") from error
         return ""
-    if (state.path.parent / name).is_dir():
+    if seen(state.path, name):
         return ""
     graph_cli = Path(__file__).resolve().parents[2] / "skills/agentic-loop/scripts/graph.py"
     status = status_notice(graph_cli, state.path, state.session, log)  # never raises
     try:
         print(json.dumps({"systemMessage": f"{base}\n{status}"}))
+        sys.stdout.flush()  # the marker must not outlive an undelivered notice
     except (OSError, ValueError) as error:
         raise ValueError("could not emit the required human request; retry stopping") from error
     record_notice(state.path, state.session, name, log)  # only after the notice is out

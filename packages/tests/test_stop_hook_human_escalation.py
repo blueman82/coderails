@@ -62,6 +62,11 @@ class StopEscalationTests(unittest.TestCase):
             self.assertEqual(output.get("decision"), "block", output)
         return output
 
+    def inspection(self, provider: Provider) -> dict[str, Any]:
+        """The identity fields graph.py inspect would report for this state."""
+        state = provider.read()
+        return {"loop_id": state["loop_id"], "revision": state["revision"]}
+
     def test_unresolved_first_repeat_and_marker_failure(self) -> None:
         """First notice explains human approval; repeat stays blocked without another notice."""
         for provider in self.providers:
@@ -142,7 +147,7 @@ class StopEscalationTests(unittest.TestCase):
             patch("graph_completion_guard.json.dumps", side_effect=ValueError("output unavailable")),
             suppress(ValueError),
         ):
-            codex_stop.request_human_approval(provider.path, provider.session)
+            codex_stop.request_human_approval(provider.path, provider.session, self.inspection(provider))
         self.assertEqual(list(provider.path.parent.glob(".human-approval-*")), [])
         self.assertIn("systemMessage", self.stop(provider))
 
@@ -161,7 +166,7 @@ class StopEscalationTests(unittest.TestCase):
                 if provider.name == "claude":
                     loop_stall_guard.emit_human_request(LoopState(provider.path, provider.session, 1, provider.read()))
                 else:
-                    codex_stop.request_human_approval(provider.path, provider.session)
+                    codex_stop.request_human_approval(provider.path, provider.session, self.inspection(provider))
             self.assertEqual(list(provider.path.parent.glob(".human-approval-*")), [])
             self.assertIn("systemMessage", self.stop(provider))
             marker = next(provider.path.parent.glob(".human-approval-*"))
@@ -174,7 +179,7 @@ class StopEscalationTests(unittest.TestCase):
                 if provider.name == "claude":
                     loop_stall_guard.emit_human_request(LoopState(provider.path, provider.session, 1, provider.read()))
                 else:
-                    codex_stop.request_human_approval(provider.path, provider.session)
+                    codex_stop.request_human_approval(provider.path, provider.session, self.inspection(provider))
             self.assertTrue(marker.is_dir())
 
     def test_running_stale_and_connected_work_escalate(self) -> None:

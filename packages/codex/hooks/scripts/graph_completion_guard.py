@@ -21,7 +21,7 @@ from hook_common import (
     read_input,
     text_field,
 )
-from lib.stall_notice import marker_name, record_notice, status_notice
+from lib.stall_notice import marker_name, record_notice, seen, status_notice
 
 
 def unresolved(state: Path) -> bool:
@@ -66,24 +66,35 @@ def hard_stop_declaration(message: str) -> bool:
     }
 
 
-def request_human_approval(state: Path, session_id: str) -> None:
+def request_human_approval(state: Path, session_id: str, inspection: dict[str, object]) -> None:
     """Emit the established deduplicated unresolved-graph Stop response."""
-    try:
-        name = marker_name(json.loads(state.read_text(encoding="utf-8")), session_id)
-    except (OSError, ValueError):
-        name = None
+    log(f"hook=graph_completion_guard session={session_id} blocked=1")
+    # the key comes from the validated inspection, so an unreadable state file cannot drop the notice
+    name = marker_name(
+        {
+            "loop_id": inspection.get("loop_id"),
+            "revision": inspection.get("revision"),
+            "graph": {"active_wave": inspection.get("active_wave"), "hard_stop": inspection.get("hard_stop")},
+        },
+        session_id,
+    )
     blocked = "Native graph unresolved; stopping remains blocked."
-    if name is None or (state.parent / name).is_dir():
-        continue_turn(blocked)
-        return
     base = (
         "Human approval required: the native graph is unresolved. Approve the next action "
         "or resume the loop; stopping remains blocked until the graph is complete."
     )
-    log(f"hook=graph_completion_guard session={session_id} blocked=1")
+    if name is None:
+        log(f"hook=graph_completion_guard session={session_id} human_request=no_marker_key")
+        print(json.dumps({"decision": "block", "reason": blocked, "systemMessage": base}))
+        sys.stdout.flush()
+        return
+    if seen(state, name):
+        continue_turn(blocked)
+        return
     status = status_notice(graph_path(), state, session_id, log)  # never raises
     print(json.dumps({"decision": "block", "reason": f"{blocked}\n{status}", "systemMessage": f"{base}\n{status}"}))
-    record_notice(state, session_id, name, log)  # only after the notice is out
+    sys.stdout.flush()  # the marker must not outlive an undelivered notice
+    record_notice(state, session_id, name, log)
 
 
 def main() -> int:
@@ -154,7 +165,7 @@ def main() -> int:
         )
         return 0
     try:
-        request_human_approval(state, session_id)
+        request_human_approval(state, session_id, inspection)
     except (OSError, ValueError):
         print("Native graph unresolved; required notice could not be emitted. Retry stopping.", file=sys.stderr)
         return 2

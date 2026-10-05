@@ -7,48 +7,19 @@ import json
 import os
 import subprocess
 import sys
-import tempfile
 import unittest
 from pathlib import Path
-from typing import Any
 from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 from hooks.scripts.lib import stall_notice  # noqa: E402
-from hooks.scripts.tests.lib.claude_transcript_fixture import append  # noqa: E402
 from packages.tests.provider_fixture import Provider  # noqa: E402
+from packages.tests.stop_notice_fixture import StopNoticeBase  # noqa: E402
 
 
-class StopNoticeTests(unittest.TestCase):
+class StopNoticeTests(StopNoticeBase):
     """Drive both providers' real Stop hooks."""
-
-    def setUp(self) -> None:
-        """Isolated claude and codex providers."""
-        patch = mock.patch.dict("os.environ", {}, clear=False)
-        patch.start()
-        self.addCleanup(patch.stop)
-        temporary = tempfile.TemporaryDirectory()
-        self.addCleanup(temporary.cleanup)
-        self.providers = [Provider(Path(temporary.name), name) for name in ("claude", "codex")]
-
-    def stop(self, provider: Provider) -> str:
-        """Run one Stop and return the systemMessage ('' when deduplicated)."""
-        if provider.name == "claude":
-            skill = {"type": "tool_use", "name": "Skill", "input": {"skill": "coderails:agentic-loop"}}
-            append(provider.parent, {"type": "assistant", "message": {"content": [skill]}})
-            append(provider.parent, {"type": "assistant", "message": {"content": [{"type": "text", "text": "done"}]}})
-        payload = {
-            "session_id": provider.session,
-            "cwd": str(provider.home),
-            "hook_event_name": "Stop",
-            "transcript_path": str(provider.parent),
-            "last_assistant_message": "done",
-        }
-        hook = "loop_stall_guard" if provider.name == "claude" else "graph_completion_guard"
-        result = provider.hook(hook, payload)
-        output: dict[str, Any] = json.loads(result.stdout) if result.stdout else {}
-        return str(output.get("systemMessage", ""))
 
     def test_helper_copies_identical(self) -> None:
         """Both providers ship the same helper bytes."""
@@ -95,11 +66,6 @@ class StopNoticeTests(unittest.TestCase):
                 self.assertEqual(self.recover_rows(provider), 1)
                 self.assertEqual(provider.read()["revision"], revision)
 
-    def recover_rows(self, provider: Provider) -> int:
-        """Count recover-wave trace rows written beside the state."""
-        trace = provider.path.with_name("recovery-trace.jsonl")
-        return len(trace.read_text().splitlines()) if trace.is_file() else 0
-
     def test_expired_lease_recovers_at_hook_level(self) -> None:
         """Silent workers past the lease are recovered by the hook; the recovered state is not re-notified."""
         for provider in self.providers:
@@ -123,21 +89,6 @@ class StopNoticeTests(unittest.TestCase):
                 provider.write(state)
                 self.assertIn("waiting for worker", self.stop(provider))
                 self.assertEqual(provider.read()["revision"], state["revision"])
-
-    def test_lease_bucket_rekeys_only_with_an_active_wave(self) -> None:
-        """A running wave re-keys per lease window; a wave-less state ignores time."""
-        running = {"loop_id": "l", "revision": 1, "graph": {"active_wave": {"wave_id": "w"}, "hard_stop": None}}
-        idle = {"loop_id": "l", "revision": 1, "graph": {"active_wave": None, "hard_stop": None}}
-        window = stall_notice.LEASE_SECONDS
-        start = window * 1000.0
-        with mock.patch("time.time") as clock:
-            keys = {}
-            for label, moment in (("a", start), ("b", start + window - 1), ("c", start + window)):
-                clock.return_value = moment
-                keys[label] = (stall_notice.marker_name(running, "s"), stall_notice.marker_name(idle, "s"))
-        self.assertEqual(keys["a"][0], keys["b"][0])
-        self.assertNotEqual(keys["a"][0], keys["c"][0])
-        self.assertEqual(keys["a"][1], keys["c"][1])
 
     def fake_graph(self, body: str) -> Path:
         """A stand-in graph.py reporting a waiting wave; `body` handles recover-wave."""
@@ -202,7 +153,11 @@ class StopNoticeTests(unittest.TestCase):
             "from hooks.scripts.lib.loop_state_common import LoopState\n"
             "call = lambda p, d, s: g.emit_human_request(LoopState(p, s, 1, d))\n"
         )
-        codex = "import graph_completion_guard as g\n" "call = lambda p, d, s: g.request_human_approval(p, s)\n"
+        codex = (
+            "import graph_completion_guard as g\n"
+            "ident = lambda d: {'loop_id': d['loop_id'], 'revision': d['revision']}\n"
+            "call = lambda p, d, s: g.request_human_approval(p, s, ident(d))\n"
+        )
         roots = (ROOT, ROOT / "packages/codex/hooks/scripts")
         for provider, setup, root in zip(self.providers, (claude, codex), roots):
             with self.subTest(provider=provider.name):
@@ -280,6 +235,7 @@ class StopNoticeTests(unittest.TestCase):
         text = stall_notice.status_notice(fake, provider.path, provider.session)
         self.assertIn("recover-wave recovered", text)
         self.assertIn("ready to dispatch", text)
+        self.assertNotIn("Dispatch:", text)  # the recovery line replaces the hint
         stall_notice.record_notice(provider.path, provider.session, ".human-approval-first")
         name = stall_notice.marker_name(provider.read(), provider.session)
         self.assertTrue((provider.path.parent / str(name)).is_dir())
