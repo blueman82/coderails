@@ -209,7 +209,7 @@ conditional skip and let `J2` release without this branch.
 - **Full-autonomous:** adopt clean-break by default, record it, proceed. Surface a preserve-compat choice (with its named blocker) at the next approval-gate; do not stall.
 - **Narrow-fix / diagnostic / ambiguous:** surface the disposition as one decision — "clean-break recommended, here's why" — bounded like Phase 1 (ask once, don't loop).
 
-**Record** per work-unit in `progress.json`: `disposition`, and when `preserve-compat`, the `named_blocker` and a mandatory `removal_ticket`. The disposition decision also appends `{phase: "2.6", decision: "<clean-break or preserve-compat, with named_blocker if applicable>"}` to `progress.json`'s `decisions_absorbed` array.
+**Record** per work-unit in `progress.json` with `graph.py add-unit ... --disposition clean-break` or `--disposition preserve-compat --named-blocker <consumer> --removal-ticket <ticket>` (the CLI refuses preserve-compat without both, and clean-break with either; `graph.py disposition-audit` re-checks a hand-edited state). The disposition decision also appends `{phase: "2.6", decision: "<clean-break or preserve-compat, with named_blocker if applicable>"}` to `progress.json`'s `decisions_absorbed` array.
 
 ### `S2.7` — Phase 2.7: Commit the resolved design to durable `spec.md` and `plan.md`
 

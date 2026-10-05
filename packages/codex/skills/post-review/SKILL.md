@@ -59,7 +59,7 @@ The helpers must exist and load successfully. Stop if either is missing or fails
 3. Run the resolved `post_review.py validate <summary-file>`. Stop on any non-zero result.
 4. Fetch `headRefOid` again and require exact equality with the reviewed SHA.
 5. Run `python3 <resolved review_artifact.py> <PR> <reviewed-SHA>`. Require a non-empty marker.
-6. Prepend the marker as the first line of the body file.
+6. Prepend the marker as the first line of the body file. Then run the resolved `post_review.py compat-line <PR> <reviewed-SHA> --count <K> --disposition <D>` and insert its single output line directly after the marker. `K` is the number of reviewer findings that flag retained backward-compatibility code; `D` is `preserve-compat` when a work unit of this change was registered with `--disposition preserve-compat`, else `clean-break`. Both are reviewer judgement, not measurements. The merge gate refuses `clean-break` with `K > 0` (`compat_findings_nonzero`); an artifact without the line still passes.
 7. Resolve `nameWithOwner` with `gh repo view`. Require a non-empty value.
 8. Fetch all issue comments for the PR with `gh api`. Treat any fetch or parse failure as fatal. If an existing comment starts with the exact marker, do not post a duplicate; use its URL.
 9. Fetch `headRefOid` once more and require exact equality with the reviewed SHA.

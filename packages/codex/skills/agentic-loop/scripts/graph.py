@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any, cast
 
 import graph_convert
+import graph_ledger
 import graph_semantics
 import graph_spec
 import graph_stops
@@ -25,6 +26,7 @@ from graph_io import load as _load
 from graph_io import locked as _locked
 from graph_io import write as _write
 from graph_recovery import NODE_CODES, RecoveryRefusedError, node_lease, trace, traced_refusal
+from graph_vocab import DISPOSITION_KINDS
 
 
 def transition(path: Path, session: str, operation: str, node: str, reason: str) -> dict[str, Any]:
@@ -257,6 +259,10 @@ def _parser() -> argparse.ArgumentParser:
             controller.add_argument("--write-scope", action="append", default=[], help="path the worker may write")
             controller.add_argument("--lesson", action="append", default=[], help="lesson the worker prompt must carry")
             controller.add_argument("--scope", help="one-line scope statement for the worker")
+            controller.add_argument("--disposition", choices=DISPOSITION_KINDS, help="clean-break | preserve-compat")
+            controller.add_argument("--named-blocker", help="what blocks removal (preserve-compat only)")
+            controller.add_argument("--removal-ticket", help="ticket that removes it (preserve-compat only)")
+    graph_ledger.add_parsers(commands.add_parser)
     spec = commands.add_parser("instantiate")
     spec.add_argument("state", type=Path)
     spec.add_argument("--session", required=True)
@@ -316,7 +322,8 @@ def main() -> int:
         if args.command == "start":
             output = start(args.state, args.session, args.loop_id, args.prompt_file)
         elif args.command == "add-unit":
-            fields = {"model_role": args.model_role, "write_scope": args.write_scope, "lessons": args.lesson}
+            fields: dict[str, Any] = {"model_role": args.model_role, "write_scope": args.write_scope}
+            fields.update(lessons=args.lesson, disposition=(args.disposition, args.named_blocker, args.removal_ticket))
             output = add_unit(
                 args.state,
                 args.session,
@@ -339,6 +346,12 @@ def main() -> int:
             output = record_unit(args.state, args.session, args.unit, args.status, args.evidence or args.reason)
         elif args.command in {"stop", "consume-stop"}:
             output = graph_stops.run(args)
+        elif args.command in graph_ledger.COMMANDS:
+            output, code = graph_ledger.run(args)
+            if code:
+                print(json.dumps(output, sort_keys=True))
+                print("graph: preserve-compat units must carry a named blocker and removal ticket", file=sys.stderr)
+                return code
         elif args.command in {"respawn-stale", "hard-stop"}:
             output = transition(args.state, args.session, args.command.replace("-", "_"), args.node, args.reason)
         elif args.command == "convert":

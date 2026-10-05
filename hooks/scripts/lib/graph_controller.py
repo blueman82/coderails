@@ -19,6 +19,7 @@ from .loop_state_common import atomic_progress_update
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "skills/agentic-loop/scripts"))
 from graph_convert import STATE_MINOR
+from graph_vocab import validate_disposition
 
 UNIT_ID = re.compile(r"[1-9][0-9]*")
 
@@ -177,7 +178,8 @@ def add_unit(
 ) -> dict[str, Any]:
     """Register one work unit and its graph wiring in one locked, kernel-validated save.
 
-    `contract` holds the optional dispatch inputs model_role, write_scope, lessons and scope.
+    `contract` holds the optional dispatch inputs model_role, write_scope, lessons and scope, plus `disposition`:
+    a (kind, named_blocker, removal_ticket) triple validated by graph_vocab.
     """
     inputs: dict[str, Any] = {"session": session, "loop_id": loop_id, "unit": unit, "deps": deps, "join": join}
     ident = {"session_id": session, "loop_id": loop_id}
@@ -192,6 +194,13 @@ def add_unit(
     except ValueError as error:
         coded = RecoveryRefusedError("add_unit_refused_bad_field", str(error))
         raise _refused("add-unit", path, ident, coded, inputs) from error
+    try:
+        stored = validate_disposition(*given.get("disposition", (None, None, None)))
+    except ValueError as error:
+        coded = RecoveryRefusedError("add_unit_refused_disposition", str(error))
+        raise _refused("add-unit", path, ident, coded, inputs) from error
+    if stored:
+        fields["disposition"] = stored
 
     def update(state: dict[str, Any]) -> dict[str, Any]:
         try:

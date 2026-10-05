@@ -12,7 +12,7 @@ from typing import Any, cast
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 import graph_convert
 import graph_spec
-from graph_vocab import STOP_CATEGORIES, STOP_REASON_CODES
+from graph_vocab import DISPOSITION_KINDS, STOP_CATEGORIES, STOP_REASON_CODES, disposition_report
 
 from hooks.scripts.lib import graph_controller, graph_recovery, graph_stops
 from hooks.scripts.lib import graph_dispatch as dispatch
@@ -44,6 +44,7 @@ def parser() -> argparse.ArgumentParser:
         "complete",
         "verify-completion",
         "convert",
+        "disposition-audit",
     ):
         command = commands.add_parser(name)
         command.add_argument("state", type=Path)
@@ -72,6 +73,9 @@ def parser() -> argparse.ArgumentParser:
             command.add_argument("--write-scope", action="append", default=[], help="path the worker may write")
             command.add_argument("--lesson", action="append", default=[], help="lesson the worker prompt must carry")
             command.add_argument("--scope", help="one-line scope statement for the worker")
+            command.add_argument("--disposition", choices=DISPOSITION_KINDS, help="clean-break | preserve-compat")
+            command.add_argument("--named-blocker", help="what blocks removal (preserve-compat only)")
+            command.add_argument("--removal-ticket", help="ticket that removes it (preserve-compat only)")
         if name == "convert":
             mode = command.add_mutually_exclusive_group()
             mode.add_argument("--check", action="store_true", help="report the conversion without writing")
@@ -209,7 +213,8 @@ def main() -> int:
         if args.command == "start":
             output: object = graph_controller.start(args.state, args.session, args.loop_id, args.prompt_file)
         elif args.command == "add-unit":
-            fields = {"model_role": args.model_role, "write_scope": args.write_scope, "lessons": args.lesson}
+            fields: dict[str, Any] = {"model_role": args.model_role, "write_scope": args.write_scope}
+            fields.update(lessons=args.lesson, disposition=(args.disposition, args.named_blocker, args.removal_ticket))
             output = graph_controller.add_unit(
                 args.state,
                 args.session,
@@ -231,6 +236,13 @@ def main() -> int:
             }
         elif args.command == "summarize":
             output = graph_recovery.summarize(load(args.state))
+        elif args.command == "disposition-audit":
+            report = disposition_report(load(args.state).get("work_units"))
+            output = report
+            if report["offenders"]:
+                print(json.dumps(report, sort_keys=True))
+                print("graph: preserve-compat units must carry a named blocker and removal ticket", file=sys.stderr)
+                return 1
         elif args.command == "recover-wave":
             output = dispatch.recover_wave(args.state, args.session, args.lease_seconds, apply=not args.report_only)
         elif args.command == "plan":

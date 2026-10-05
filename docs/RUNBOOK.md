@@ -389,3 +389,21 @@ See [graph specification recovery](RUNBOOK-GRAPH-SPEC.md).
   supplies no id, it retains the consumed flag and one-spawn-per-id check without claiming call-id proof. Historical
   pre-contract attempts retain their original evidence rules. Claude hooks can still fail open if the hook times out
   (10 s in `hooks.json`) before it denies.
+
+## Disposition refused, compat findings blocked a merge, or a worker status stopped the loop
+
+- `add-unit` says `add_unit_refused_disposition`: `--disposition preserve-compat` needs both a non-blank `--named-blocker`
+  and `--removal-ticket`; `--disposition clean-break` takes neither; either flag without `--disposition` is refused. The
+  unit is stored as `work_units[u].disposition = {kind, named_blocker?, removal_ticket?}` and is what the dispatch
+  contract carries. `graph.py disposition-audit <state>` prints every unit's kind and exits 1 on a hand-edited unit that
+  broke the rule; `complete` / `verify-completion` refuse the same unit on both providers (default ON, no switch).
+- `/coderails:merge` says `compat_findings_nonzero`: the posted review artifact carries a second line
+  `<!-- coderails-compat-findings v1 pr=N head_sha=S count=K disposition=D -->` (built by
+  `post_review.py compat-line <pr> <sha> --count K --disposition D`) with `disposition=clean-break` and `K > 0`. Remove the
+  retained compatibility code and re-post the review, or register the unit `preserve-compat` with a blocker and ticket.
+  `compat_findings_malformed` means a line with that prefix is not exactly the typed form; an artifact with no such line
+  passes (legacy). The v1 review marker the root-owned integrity daemon matches is unchanged. Any refusing line for the
+  head wins; the merge refusal is a stderr reason code, not a trace row (merge.py has no loop session).
+- Limits: `K` and `D` are the reviewer's own judgement, not a measurement, and a same-user agent can write any line, so
+  this is drift detection for a cooperating reviewer, not tamper evidence. The gate reads the PR's artifact only; it does
+  not cross-check `D` against `work_units[u].disposition`.
