@@ -26,11 +26,11 @@ def main() -> int:
         if os.environ.get("MOCK_GH_COMMENTS_FAIL"):
             return 1
         body = os.environ.get("MOCK_GH_COMMENT_BODY")
+        number = re.search(r"/issues/([0-9]+)/comments", arguments)
+        sha = os.environ.get("MOCK_GH_HEAD_SHA", os.environ["FIXTURE_HEAD_SHA"])
         if body is None:
-            number = re.search(r"/issues/([0-9]+)/comments", arguments)
             if number is None:
                 return 1
-            sha = os.environ.get("MOCK_GH_HEAD_SHA", os.environ["FIXTURE_HEAD_SHA"])
             suite: dict[str, Any] = {
                 "verification_level": 0,
                 "verification_justification": "stub",
@@ -43,6 +43,10 @@ def main() -> int:
             )
         if body:
             print(base64.b64encode(body.encode()).decode())
+        if number and not os.environ.get("MOCK_GH_NO_REVIEW"):
+            # the review artifact (v1 marker, no passes line: enough for the empty fixture diff) the publication gate reads
+            review = f"<!-- coderails-review-summary v1 pr={number[1]} head_sha={sha} -->\n## No findings\n"
+            print(base64.b64encode(review.encode()).decode())
     elif "/statuses" in arguments:
         if os.environ.get("MOCK_TR_STATUSES_FAIL"):
             return 1

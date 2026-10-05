@@ -1,0 +1,27 @@
+{
+  "always": ["review-pr"],
+  "rules": [
+    {
+      "pass": "security-review",
+      "paths": [
+        "hooks/**",
+        "scripts/**",
+        "install.py",
+        "uninstall.py",
+        ".claude-plugin/**",
+        "packages/codex/hooks/**",
+        "packages/codex/scripts/**"
+      ]
+    },
+    {
+      "pass": "deploy-safety",
+      "paths": [
+        "launchd/**",
+        "scripts/integrity-gate/**",
+        "scripts/installer/**",
+        ".github/workflows/**",
+        "skills/dashboard/runner/**"
+      ]
+    }
+  ]
+}

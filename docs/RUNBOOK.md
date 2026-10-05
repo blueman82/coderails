@@ -189,6 +189,33 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   worktree. It does not compare a worker's session with its parent's. Claude's direct arm also requires a readable transcript;
   `NO_CONFIG`, raw Git operations and unseen aliases remain outside this manifest arm.
 
+## Required review passes refused a merge
+
+- Symptom: `merge.py`, a direct `gh pr merge` (Claude `enforce_pr_workflow`, Codex `pr_publication_gate`) refuses with
+  `required_review_missing:<name>`, `required_review_failed:<name>`, `review_passes_malformed`,
+  `review_artifact_missing` or `review_policy_unreadable`. The check is the second entry of the single publication gate
+  (`scripts/lib/publication_gate.py`), ON by default with no config. The required names come only from
+  `policy/review_policy.json` (`review-pr` always; `security-review` for `hooks/`, `scripts/`, `install.py`,
+  `uninstall.py`, `.claude-plugin/`, `packages/codex/hooks/`, `packages/codex/scripts/`; `deploy-safety` for `launchd/`,
+  `scripts/integrity-gate/`, `scripts/installer/`, `.github/workflows/`, `skills/dashboard/runner/`), matched against
+  the PR diff (renames count both sides). There is no config switch; the policy file is the control, and deleting or
+  corrupting it refuses (`review_policy_unreadable`), it does not allow.
+- Artifact: line 1 is the unchanged v1 marker; line 2 is `<!-- coderails-review-passes v1 {"head_sha":...,"passes":[...]} -->`
+  with `{name, verdict, blocking, summary_sha256}` per pass. `post_review.py post <PR> --summary FILE [--pass NAME=FILE ...]`
+  validates each summary, derives each verdict from the text (a bullet under `## Critical` is `fail`) and posts it. A v1
+  artifact with no passes line counts as no passes: `review-pr` is satisfied by the marker, but a `hooks/` PR is refused
+  until it is re-posted. A passes line naming another `head_sha` is ignored.
+- Query: `trace.by_reason` for `review-passes/ok/review_passes_ok` and `review-passes/refused/<code>`, plus
+  `publication/refused/<code>`. Tally with `python3 scripts/measure_graph_alignment.py --root . | python3 scripts/lib/workflow_gate_counters.py`.
+- Remediation: spawn the missing reviewer (`security-reviewer`, `deploy-safety-reviewer`; both providers ship them),
+  write its findings to a file in the post-review grammar, re-run `post_review.py post` with `--pass NAME=FILE`. A
+  `failed` pass needs the Critical finding fixed and the artifact re-posted for the new head. `review_artifact_missing`
+  also covers a failed trusted-comment fetch (identity, permission, comments): retry or check `gh auth`.
+- Limits: a pass proves a validated summary was posted for that name, not that the review was substantive; the same
+  user can write any summary, so this is a cooperating-agent safeguard. `blocking` is derived and never waives a
+  required pass. The Codex hook only sees merges `guarded_segments` can match and needs `/hooks` trust. Row-9 wording in
+  the closure matrix (`.json` policy file) is not recorded in this repo: the matrix lives outside it.
+
 ## Action-authority hook denied a merge or push (or warned in advisory)
 
 - Symptom: `gh pr merge` or `git push` to main/master is denied with "needs an action receipt (<code>)" (enforce), or a

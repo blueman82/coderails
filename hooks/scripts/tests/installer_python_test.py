@@ -82,7 +82,7 @@ class InstallerTests(unittest.TestCase):
                 run.assert_not_called()
                 codex.install(ROOT, home, dry_run=False)
                 self.assertEqual(run.call_count, 2)
-                self.assertEqual(len(list((home / "agents").glob("*.toml"))), 10)
+                self.assertEqual(len(list((home / "agents").glob("*.toml"))), 11)
                 for target in (home / "agents").glob("*.toml"):
                     self.assertEqual(target.stat().st_mode & 0o777, 0o644)
 

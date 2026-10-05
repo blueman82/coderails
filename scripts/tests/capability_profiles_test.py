@@ -16,7 +16,14 @@ sys.path.insert(0, str(REPO))
 from hooks.scripts.lib.capability_profiles import guarded_agents, load_profiles  # noqa: E402
 from scripts.capability_profiles_validate import validate  # noqa: E402
 
-OLD_GUARDED = {"deploy-safety-reviewer", "design-scout", "disposition-scout", "preflight-scout", "source-auditor"}
+OLD_GUARDED = {
+    "deploy-safety-reviewer",
+    "design-scout",
+    "disposition-scout",
+    "preflight-scout",
+    "security-reviewer",
+    "source-auditor",
+}
 
 
 def drop_tools(text: str) -> str:

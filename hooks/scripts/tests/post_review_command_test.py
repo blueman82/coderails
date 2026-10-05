@@ -16,13 +16,13 @@ class PostReviewCommandTests(unittest.TestCase):
         post = (ROOT / "commands/post-review.md").read_text()
         workflow = (ROOT / "commands/workflow.md").read_text()
         for phrase in (
-            "-F body=@",
-            "select(. != null)",
+            "post_review.py",
+            "post <PR#> --summary",
             "## Step 0",
             "- Open PRs: !`gh pr list --state open --limit 10`",
         ):
             self.assertIn(phrase, post)
-        self.assertNotIn("-f body=@", post)
+        self.assertNotIn("gh api", post)  # posting moved into the script (argv-list gh, `-F body=@tmp`)
         self.assertLess(post.index("## Step 0"), post.index("## Step 1"))
         self.assertNotIn("`/pr-review-toolkit:review-pr all`", workflow)
         self.assertIn("/pr-review-toolkit:review-pr <PR#>", workflow)

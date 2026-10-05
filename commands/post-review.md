@@ -1,12 +1,12 @@
 ---
-allowed-tools: ["Bash(gh pr view*)", "Bash(gh api*)", "Bash(gh repo view*)", "Bash(./scripts/post_review.py*)", "Bash(cat*)", "Bash(python3*)"]
+allowed-tools: ["Bash(gh pr view*)", "Bash(./scripts/post_review.py*)", "Bash(python3*)", "Write"]
 argument-hint: <PR#>
 description: Validate and post a SHA-bound review summary as a durable PR artifact
 ---
 
-Post a machine-marked, SHA-bound review summary comment to the PR. This creates
-the durable artifact that `/coderails:merge` verifies before merging. Run this
-after `/pr-review-toolkit:review-pr` completes.
+Post a machine-marked, SHA-bound review artifact to the PR. This creates the durable
+artifact that `/coderails:merge` verifies before merging. Run this after
+`/pr-review-toolkit:review-pr` completes (and after any findings are fixed and pushed).
 
 ## Current PR State
 
@@ -15,128 +15,38 @@ after `/pr-review-toolkit:review-pr` completes.
 
 ## Step 0 — Argument gate
 
-Before any step: verify the argument is a plain PR number — digits only, non-empty. Check by INSPECTION, never by pasting it into a shell command. If it is empty or non-numeric, stop and tell the user. Do not proceed to any step, and never interpolate a non-validated argument into any command.
+The argument must be a plain PR number: digits only, non-empty. Check it by INSPECTION and put it into the command in Step 2 only if it is. The script validates it again in code (`pr_number_invalid`) before any `gh` call; never paste a non-numeric argument into any command.
 
-## Step 1 — Write the review summary
+## Step 1 — Write the summary files (Write tool, not a shell heredoc)
 
-Write the findings from the just-completed `review-pr` run into a temp file at
-`/tmp/coderails-review-summary-$$.md`.
+Write the `review-pr` findings to a new file in the system temp directory, for example
+`/tmp/coderails-review-summary.md`. Grammar (required): either a line `## No findings`
+(write this if there were no findings; never fabricate findings), or all three headings
+`## Critical`, `## Important`, `## Suggestions`, each followed by at least one bullet
+(`- …`) or the literal line `None`. Include `review-pr`'s own finding counts so a hollow
+summary is visibly inconsistent with the review that ran.
 
-**Grammar (required):** the body MUST satisfy one of:
-- A line `## No findings` (if review-pr found nothing) — **write this if there were no findings; never fabricate findings.**
-- OR all three headings in order: `## Critical`, `## Important`, `## Suggestions`, each followed by at least one bullet (`- …`) or the literal line `None` if the section is empty.
+The merge gate computes which further reviews the diff needs from `policy/review_policy.json`:
+a diff touching `hooks/`, `scripts/`, `install.py`, `uninstall.py`, `.claude-plugin/` or the Codex
+hook/script trees needs a `security-review` pass (spawn the `security-reviewer` agent);
+`launchd/`, `scripts/integrity-gate/`, `scripts/installer/`, `.github/workflows/` or
+`skills/dashboard/runner/` needs a `deploy-safety` pass (spawn `deploy-safety-reviewer`).
+Write each such reviewer's findings to its own file in the same grammar. Its verdict is derived
+from the text (a bullet under `## Critical` fails the pass), never asserted by you.
 
-**Anti-fabrication rule:** if `review-pr` reported no findings, write `## No findings` and nothing else. Do NOT invent placeholder findings.
+## Step 2 — Post
 
-**Completeness floor:** include the finding counts from `review-pr`'s own output (e.g. "0 critical, 2 important, 1 suggestion") so a thin or hollow summary is visibly inconsistent with the review that ran.
-
-Example valid body (findings present):
-
-```
-## Critical
-None
-
-## Important
-- The merge gate in merge.py has no test for the gh-fetch-failure path.
-
-## Suggestions
-- Consider extracting the comment-body iteration into a named helper.
-```
-
-Example valid body (no findings):
-
-```
-## No findings
-```
-
-## Step 2 — Validate the summary
-
-Run the validator before posting. Abort if it fails.
+Replace `<PR#>` with the validated number and run the one command. It validates every file,
+resolves the head, builds the marker and passes line, reuses an identical existing artifact,
+refuses if the head moved while posting, and writes the progress cache:
 
 ```bash
-./scripts/post_review.py validate /tmp/coderails-review-summary-$$.md
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/post_review.py" post <PR#> --summary /tmp/coderails-review-summary.md --pass security-review=/tmp/coderails-security-review.md
 ```
 
-If exit code is non-zero, print the validation error and **stop** — do not post.
+Omit `--pass NAME=FILE` for passes the diff does not need. A non-zero exit means nothing was
+posted (or, for `stale`, the posted artifact belongs to an old head): fix the cause and re-run.
 
-## Step 3 — Resolve head SHA
+## Step 3 — Report
 
-```bash
-HEAD_SHA=$(gh pr view "$ARGUMENTS" --json headRefOid -q .headRefOid)
-```
-
-## Step 4 — Build the marker and prepend to summary
-
-Run the review marker helper:
-
-```bash
-MARKER=$(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/lib/review_artifact.py" "$ARGUMENTS" "$HEAD_SHA")
-```
-
-Prepend the marker to the body file so the posted comment begins with the marker line:
-
-```bash
-{
-  printf '%s\n' "$MARKER"
-  cat /tmp/coderails-review-summary-$$.md
-} > /tmp/coderails-review-body-$$.md
-```
-
-## Step 5 — Post via gh api (NOT gh pr comment)
-
-Resolve the owner/repo:
-
-```bash
-REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner)
-```
-
-Before posting, check for an existing artifact comment for this PR+SHA to avoid duplicate
-artifacts:
-
-```bash
-EXISTING=$(gh api "repos/${REPO}/issues/${ARGUMENTS}/comments" \
-  --jq "[.[] | select(.body | startswith(\"$MARKER\"))] | first | select(. != null) | {url:.html_url,id:.id,author:.user.login,created:.created_at}" 2>/dev/null || true)
-```
-
-If `EXISTING` is non-null and contains a url, the artifact already exists for this SHA. Skip
-posting, report the existing URL, and still run Step 6 (cache write) with the existing
-comment's metadata:
-
-```bash
-if [[ -n "$EXISTING" && "$EXISTING" != "null" ]]; then
-  COMMENT_URL=$(printf '%s' "$EXISTING" | python3 -c 'import json, sys; print(json.load(sys.stdin)["url"])')
-  COMMENT_AUTHOR=$(printf '%s' "$EXISTING" | python3 -c 'import json, sys; print(json.load(sys.stdin)["author"])')
-  COMMENT_CREATED=$(printf '%s' "$EXISTING" | python3 -c 'import json, sys; print(json.load(sys.stdin)["created"])')
-  printf 'Artifact already posted for SHA %s — skipping duplicate post.\nExisting: %s\n' "$HEAD_SHA" "$COMMENT_URL"
-else
-```
-
-Post the comment and capture the returned metadata:
-
-```bash
-  RESULT=$(gh api "repos/${REPO}/issues/${ARGUMENTS}/comments" \
-    -F body=@/tmp/coderails-review-body-$$.md \
-    --jq '{url:.html_url,id:.id,author:.user.login,created:.created_at}')
-  COMMENT_URL=$(printf '%s' "$RESULT" | python3 -c 'import json, sys; print(json.load(sys.stdin)["url"])')
-  COMMENT_AUTHOR=$(printf '%s' "$RESULT" | python3 -c 'import json, sys; print(json.load(sys.stdin)["author"])')
-  COMMENT_CREATED=$(printf '%s' "$RESULT" | python3 -c 'import json, sys; print(json.load(sys.stdin)["created"])')
-fi
-```
-
-## Step 6 — Best-effort cache write
-
-Locate the progress.json (if any) and write the review cache block. The helper resolves this session's own file (keyed on cwd + `$CLAUDE_CODE_SESSION_ID`):
-
-```bash
-PROGRESS_PATH=$(python3 "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/lib/agentic_loop_path.py" 2>/dev/null || true)
-if [[ -n "$PROGRESS_PATH" ]]; then
-  ./scripts/post_review.py write-cache "$PROGRESS_PATH" "$ARGUMENTS" "$HEAD_SHA" \
-    "$COMMENT_URL" "$COMMENT_AUTHOR" "$COMMENT_CREATED"
-fi
-```
-
-A missing progress.json is not an error — the PR artifact is the authority.
-
-## Step 7 — Report
-
-Print the posted comment URL so the user can verify the artifact on the PR.
+Print the comment URL the script returned so the user can verify the artifact on the PR.

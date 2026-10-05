@@ -1,14 +1,20 @@
 #!/usr/bin/env python3
-"""Validate review summaries and cache posted review identity atomically."""
+"""Validate review summaries, post the SHA-bound review artifact with its passes, and cache posted identity."""
 
 from __future__ import annotations
 
 import argparse
+import json
+import re
 import sys
+import tempfile
 from pathlib import Path
+from typing import cast
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from hooks.scripts.lib.loop_state_common import atomic_progress_update
+from scripts.lib import git_common as git
+from scripts.lib import review_artifact, review_passes
 from scripts.lib.artifact_io import JsonObject
 
 
@@ -63,8 +69,110 @@ def write_cache(path: str | Path, pr: str, head_sha: str, url: str, author: str,
     return 0
 
 
+def cache_path() -> Path | None:
+    """This session's progress.json, or None when it cannot be resolved."""
+    try:
+        from hooks.scripts.lib.agentic_loop_path import resolve_path
+
+        return resolve_path()
+    except Exception:  # noqa: BLE001 - the PR artifact is the authority; the cache is best effort
+        return None
+
+
+def pr_number(text: str) -> int:
+    """Argparse type: a positive decimal integer only, checked before any gh call."""
+    if not re.fullmatch(r"[1-9][0-9]*", text):
+        raise argparse.ArgumentTypeError("pr_number_invalid")
+    return int(text)
+
+
+def sections(summary: Path, extra: list[str]) -> list[tuple[str, str]]:
+    """(name, validated text) for review-pr and each NAME=FILE pass; names are plain, unique, never review-pr."""
+    found = [("review-pr", summary)]
+    for item in extra:
+        name, separator, filename = item.partition("=")
+        if not separator or not re.fullmatch(r"[a-z][a-z0-9-]*", name) or name in dict(found):
+            raise ValueError(f"--pass must be NAME=FILE with a new lowercase name, got {item!r}")
+        found.append((name, Path(filename)))
+    for _, source in found:
+        validate_summary(source)
+    return [(name, source.read_text()) for name, source in found]
+
+
+def comment_for(repo: str, number: int, login: str, top: list[str]) -> dict[str, str] | None:
+    """The author's existing comment whose first two lines equal `top` (marker and passes line), if any."""
+    listing = git.run(
+        "gh", "api", f"repos/{repo}/issues/{number}/comments", "--paginate",
+        "--jq", ".[] | {url:.html_url,author:.user.login,created:.created_at,body:.body}",
+        check=True,
+    )  # fmt: skip
+    for line in filter(None, listing.stdout.splitlines()):
+        comment = cast(dict[str, str], json.loads(line))
+        if comment["author"] == login and comment["body"].splitlines()[:2] == top:
+            return comment
+    return None
+
+
+def post(number: int, summary: Path, extra: list[str]) -> int:
+    """Post (or reuse) the artifact for the PR's current head; a head that moves mid-post is refused as stale."""
+    texts = sections(summary, extra)
+    head = git.pr_field(str(number), "headRefOid")
+    if not head:
+        raise ValueError("could not resolve the PR head SHA")
+    passes = [
+        {"name": n, "verdict": (v := review_passes.verdict_from_summary(t)), "blocking": v == "fail",
+         "summary_sha256": review_passes.summary_sha256(t)}
+        for n, t in texts
+    ]  # fmt: skip
+    top = [review_artifact.marker(str(number), head), review_passes.render(head, passes)]
+    repo = git.repo()
+    login = git.output("gh", "api", "user", "-q", ".login", check=True)
+    comment = comment_for(repo, number, login, top)
+    if git.pr_field(str(number), "headRefOid") != head:
+        raise ValueError(f"stale: PR head moved from {head} before posting; review the new head")
+    if comment:
+        print(f"Artifact already posted for SHA {head} — skipping duplicate post.\nExisting: {comment['url']}")
+    else:
+        body = "\n".join(top + [texts[0][1]] + [f"<!-- coderails-review-pass {n} -->\n{t}" for n, t in texts[1:]])
+        with tempfile.TemporaryDirectory(prefix="coderails-review-") as directory:
+            path = Path(directory) / "body.md"
+            path.write_text(body)
+            reply = git.run(
+                "gh", "api", f"repos/{repo}/issues/{number}/comments", "-F", f"body=@{path}",
+                "--jq", "{url:.html_url,author:.user.login,created:.created_at}",
+                check=True,
+            )  # fmt: skip
+        comment = json.loads(reply.stdout)
+        print(f"Posted: {comment['url']}")
+    if git.pr_field(str(number), "headRefOid") != head:
+        raise ValueError(f"stale: PR head moved from {head} during posting; this artifact must not be used")
+    if destination := cache_path():
+        write_cache(destination, str(number), head, comment["url"], comment["author"], comment["created"])
+    return 0
+
+
+def post_main(arguments: list[str]) -> int:
+    """Parse and run `post <int> --summary FILE [--pass NAME=FILE ...]`."""
+    parser = argparse.ArgumentParser(prog="post_review.py post")
+    parser.add_argument("pr", type=pr_number)
+    parser.add_argument("--summary", type=Path, required=True)
+    parser.add_argument("--pass", dest="passes", action="append", default=[], metavar="NAME=FILE")
+    try:
+        args = parser.parse_args(arguments)
+    except SystemExit as error:
+        return int(bool(error.code))
+    try:
+        return post(args.pr, args.summary, args.passes)
+    except (OSError, ValueError, KeyError, git.WorkflowError) as error:
+        print(f"post: {error}", file=sys.stderr)
+        return 1
+
+
 def main(arguments: list[str] | None = None) -> int:
-    """Dispatch summary validation and best-effort cache writes."""
+    """Dispatch summary validation, posting and best-effort cache writes."""
+    arguments = sys.argv[1:] if arguments is None else arguments
+    if arguments[:1] == ["post"]:
+        return post_main(arguments[1:])
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("operation", choices=("validate", "write-cache"))
     parser.add_argument("path")

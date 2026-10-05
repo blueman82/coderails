@@ -24,6 +24,14 @@ case "$1 $2" in
       headRefOid) if [ "$3" = 1 ]; then echo "$CLEAN_SHA"; else echo "$FAKE_SHA"; fi ;;
       number) case "$3" in https://github.com/o/r/pull/*) echo "${3##*/}" ;; feat-b) echo 7 ;; esac ;;
     esac ;;
+  "api user") echo me ;;
+  "repo view") echo WRITE ;;
+  "api repos/"*)
+    # the review artifact the gate also reads: a v1 marker for the fake head, no passes line
+    case "$2" in */issues/1/comments) number=1; sha="$CLEAN_SHA" ;; *) number=7; sha="$FAKE_SHA" ;; esac
+    { printf '<!-- coderails-review-summary v1 pr=%s head_sha=%s -->\\n' "$number" "$sha"; echo '## No findings'; } \\
+      | base64 | tr -d '\\n'
+    echo ;;
 esac
 exit 0
 """

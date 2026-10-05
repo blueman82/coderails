@@ -65,7 +65,7 @@ class NativePackageTests(unittest.TestCase):
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def test_agents(self) -> None:
-        """Retain ten native instruction files and read-only reviewer boundaries."""
+        """Retain eleven native instruction files and read-only reviewer boundaries."""
         expected = {
             "deploy-safety-reviewer",
             "design-scout",
@@ -74,6 +74,7 @@ class NativePackageTests(unittest.TestCase):
             "loop-worker",
             "preflight-scout",
             "proof-author",
+            "security-reviewer",
             "source-auditor",
             "spec-reviewer",
             "wiki-writer",
@@ -83,6 +84,7 @@ class NativePackageTests(unittest.TestCase):
             "design-scout",
             "disposition-scout",
             "preflight-scout",
+            "security-reviewer",
             "source-auditor",
             "spec-reviewer",
         }

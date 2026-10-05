@@ -14,7 +14,14 @@ from hooks.scripts.tests.native_hook_test_support import HookCase
 
 ROOT = Path(__file__).resolve().parents[3]
 HOOK = "reviewer_bash_allowlist"
-GUARDED = ("deploy-safety-reviewer", "design-scout", "disposition-scout", "preflight-scout", "source-auditor")
+GUARDED = (
+    "deploy-safety-reviewer",
+    "design-scout",
+    "disposition-scout",
+    "preflight-scout",
+    "security-reviewer",
+    "source-auditor",
+)
 ALLOWED = (
     "ls -la hooks",
     "cat README.md",
