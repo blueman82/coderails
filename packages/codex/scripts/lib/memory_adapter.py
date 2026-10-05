@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import dataclasses
+import datetime
 import json
 import os
 import re
@@ -19,6 +20,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 from typing import Any, cast
 
@@ -39,6 +41,7 @@ ADD_FLAGS = (
 )
 TAG = re.compile(r"[a-z0-9_-]{1,32}")  # muninn's own tag rule
 DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
+NO_SESSION = "memory-adapter-nosession"  # trace dir used when no session id is given
 PROBE_CACHE: dict[str, str | None] = {}
 
 
@@ -90,6 +93,7 @@ def validate(r: Record) -> str | None:
 
 def _trace(op: str, reason: str, session_id: str, loop_id: str | None) -> None:
     """Append a fail-open trace row via hooks/scripts/lib/trace_row.py when this layout ships it."""
+    session_id = session_id or NO_SESSION
     try:
         path = Path(__file__).resolve().parents[2] / "hooks/scripts/lib/trace_row.py"
         runpy.run_path(str(path))["append_row"](f"memory.{op}", "degraded", reason, session_id, loop_id)
@@ -97,7 +101,19 @@ def _trace(op: str, reason: str, session_id: str, loop_id: str | None) -> None:
         return
 
 
-def _run(args: list[str]) -> str | Degraded:
+def _expired(valid_until: object) -> bool:
+    """True when valid_until (epoch number or YYYY-MM-DD) is in the past; unparseable counts as expired."""
+    if valid_until in (None, ""):
+        return False
+    try:
+        if isinstance(valid_until, (int, float)):
+            return float(valid_until) <= time.time()
+        return datetime.date.fromisoformat(str(valid_until)[:10]) <= datetime.date.today()
+    except ValueError:
+        return True
+
+
+def _run(args: list[str], help_probe: bool = False) -> str | Degraded:
     exe = shutil.which("muninn")
     if exe is None:
         return Degraded("muninn_absent")
@@ -107,14 +123,17 @@ def _run(args: list[str]) -> str | Degraded:
         return Degraded("muninn_timeout")
     except OSError:
         return Degraded("muninn_error")
-    return p.stdout if p.returncode == 0 else Degraded("muninn_error")
+    if p.returncode == 0:
+        return p.stdout
+    # muninn 0.1.0 rejects the new subcommand shape with rc 2 on --help: that is an old ledger, not a failure
+    return Degraded("muninn_old_ledger" if help_probe else "muninn_error")
 
 
 def probe() -> Degraded | None:
     """Check once per process that `muninn know add|list --help` advertises every Part A flag."""
     key = shutil.which("muninn") or ""
     if key not in PROBE_CACHE:
-        add_help, list_help = _run(["know", "add", "--help"]), _run(["know", "list", "--help"])
+        add_help, list_help = _run(["know", "add", "--help"], True), _run(["know", "list", "--help"], True)
         if isinstance(add_help, Degraded):
             PROBE_CACHE[key] = add_help.reason
         elif isinstance(list_help, Degraded):
@@ -179,13 +198,17 @@ def list_records(
         entries: list[dict[str, Any]] = json.loads(out)["entries"]
         found: list[Record] = []
         for e in entries:
-            if e.get("sensitivity") == "restricted" or e.get("expired"):
-                continue
+            cites = cast("list[dict[str, str]]", e.get("cites") or [])
+            current = e.get("status", "current") == "current"
+            if e.get("sensitivity") != "normal" or e.get("expired") or not current or _expired(e.get("valid_until")):
+                continue  # fail closed: anything not provably normal and current is dropped
+            if not cites or not str(cites[0].get("ref", "")).strip() or not str(cites[0].get("quote", "")).strip():
+                continue  # uncited is never current
             if tags and not set(tags) <= set(e.get("tags") or []):
                 continue
             if query and query.lower() not in e["text"].lower():
                 continue
-            cite = cast("dict[str, str]", (e.get("cites") or [{}])[0])
+            cite = cites[0]
             found.append(
                 Record(
                     scope=scope,

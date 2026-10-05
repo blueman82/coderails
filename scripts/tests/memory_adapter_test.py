@@ -30,7 +30,7 @@ if os.environ.get("FAKE_SLEEP"):
 if "--help" in sys.argv:
     sys.stdout.write("usage: kinds {decision,fact,preference,procedure}" if mode == "old"
                      else "usage: kinds lesson constraint @FLAGS@")
-    sys.exit(0)
+    sys.exit(int(os.environ.get("FAKE_HELP_RC", "0")))
 if sys.argv[2] == "list":
     sys.stdout.write(open(os.environ["FAKE_LIST"]).read()); sys.exit(0)
 sys.stdout.write("{}")
@@ -179,7 +179,7 @@ class DegradeTests(Base):
     def test_unsafe_session_no_row_no_raise(self) -> None:
         """A foreign or unsafe session id degrades normally but writes no trace row."""
         os.environ["FAKE_MODE"] = "old"
-        for sid in ("../x", "a/b", "", "?"):
+        for sid in ("../x", "a/b", "?"):
             self.assertEqual(self.reason(ma.add(rec(), sid)), "muninn_old_ledger")
         self.assertEqual(list((self.tmp / "loops").glob("**/trace.jsonl")), [])
 
@@ -209,6 +209,61 @@ class ReadTests(Base):
         out = ma.list_records("loop", "L1", session_id="s1")
         assert isinstance(out, ma.Degraded)
         self.assertEqual(out.reason, "muninn_error")
+
+
+class HardeningTests(Base):
+    """Read-path fail-closed filters, probe code stability and default-session tracing."""
+
+    def listed(self, entry: dict[str, Any]) -> list[str]:
+        """Return the ids a single fake entry yields through list_records."""
+        (self.tmp / "list.json").write_text(json.dumps({"entries": [entry]}))
+        out = ma.list_records("loop", "L1", session_id="s1")
+        assert isinstance(out, list)
+        return [r.id or "" for r in out]
+
+    def test_uncited_current_record_not_returned(self) -> None:
+        """A record with no cites is never current, even when muninn returns it."""
+        base = {"id": "a", "kind": "lesson", "text": "nocite", "sensitivity": "normal"}
+        self.assertEqual(self.listed({**base, "cites": []}), [])
+        self.assertEqual(self.listed({**base, "cites": [{"ref": "", "quote": ""}]}), [])
+        self.assertEqual(self.listed({**base, "cites": [{"ref": "r", "quote": "q"}]}), ["a"])  # negative control
+
+    def test_filters_fail_closed(self) -> None:
+        """Missing sensitivity, non-current status and a past valid_until are all dropped."""
+        ok = {"id": "b", "kind": "fact", "text": "t", "cites": [{"ref": "r", "quote": "q"}], "sensitivity": "normal"}
+        self.assertEqual(self.listed(ok), ["b"])
+        self.assertEqual(self.listed({k: v for k, v in ok.items() if k != "sensitivity"}), [])
+        self.assertEqual(self.listed({**ok, "status": "superseded"}), [])
+        self.assertEqual(self.listed({**ok, "status": "current"}), ["b"])
+        self.assertEqual(self.listed({**ok, "valid_until": "2000-01-01"}), [])
+        self.assertEqual(self.listed({**ok, "valid_until": 946684800.0}), [])
+        self.assertEqual(self.listed({**ok, "valid_until": "2999-01-01"}), ["b"])
+
+    def test_help_nonzero_is_old_ledger(self) -> None:
+        """A help that exits nonzero (muninn 0.1.0 exits 2) is an old ledger, not muninn_error."""
+        os.environ["FAKE_HELP_RC"] = "2"
+        self.assertEqual(ma.probe(), ma.Degraded("muninn_old_ledger"))
+
+    def test_default_session_still_traces(self) -> None:
+        """With no session id the degrade still lands a trace row under a fixed fallback id."""
+        os.environ["FAKE_MODE"] = "old"
+        ma.add(rec(), "")
+        self.assertIn("muninn_old_ledger", [x["reason_code"] for x in self.rows(ma.NO_SESSION)])
+
+    def test_runbook_covers_every_reason_code(self) -> None:
+        """Each code the adapter emits has a remediation line in the runbook."""
+        text = (REPO / "docs/RUNBOOK.md").read_text()
+        remediation = text.split("## Memory silently using Markdown", 1)[1].split("- Remediation:", 1)[1]
+        for code in ("muninn_absent", "muninn_old_ledger", "muninn_timeout", "muninn_error", "bad_record"):
+            self.assertIn(f"`{code}`", remediation, code)
+        self.assertIn("unset", text)
+
+    def test_codex_handoff_resolves_paths(self) -> None:
+        """The Codex handoff names resolvable paths and where state and session come from."""
+        text = (REPO / "packages/codex/skills/handoff/SKILL.md").read_text()
+        self.assertIn("$SKILL_DIR/../../scripts/lib/memory_adapter.py", text)
+        self.assertIn("$SKILL_DIR/../agentic-loop/scripts/graph.py", text)
+        self.assertIn("bootstrap", text)
 
 
 class RenderTests(Base):
