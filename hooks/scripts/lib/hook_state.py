@@ -4,6 +4,9 @@ Shape: {schema_version: 1, ordinals: {absent_blocked: int}, arms: [{hook, ordina
 Keyed by the exact session directory, so session 'ab' can never read or suppress session 'abc'. The discipline.log
 is audit output only: nothing here parses it. A missing or torn file never releases grace and is traced
 `hook_state_unreadable` (outcome `missing` or `torn`).
+
+Limit: the file is a plain same-user file, so the state is advisory, not tamper-evident; a same-user agent can
+pre-create it to release grace or set `nudged` to silence a nudge.
 """
 
 from __future__ import annotations

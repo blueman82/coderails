@@ -306,6 +306,10 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   `hook_state_unreadable` (outcome `missing` on the first Stop of a session, which is expected once; `torn` is a fault).
   A torn file also suppresses the nudge, traced the same way: an advisory must not repeat unrecorded. Nudges trace
   `nudge_first` / `nudge_suppressed`. Remediation for `torn`: delete the file by hand (the hook will not repair it).
+  Limit (same-user boundary): `hook_state.json` is a plain file owned by the session user, so state is advisory, not
+  tamper-evident. An agent with Bash/Write can pre-create it (an `ordinals.absent_blocked` equal to the current
+  invocation count releases absent-state grace with no prior block) or set `nudged.<hook>=true` to silence a nudge.
+  Grace and nudge dedupe are guard-rails against accident, not a defence against a hostile same-user agent.
 - Limits: Codex has no corresponding hooks (`hooks.json` carries no `loop_state_guard`, `offload_push_guard` or
   `unregistered_loop_guard`), so hook state, `EvalVerdict` and `CostReport` are Claude-side; Codex gets the shared
   attestation parser and the `updated_at` stamp. `mine_hook_blocks` still counts the log's exact `session=` token;
