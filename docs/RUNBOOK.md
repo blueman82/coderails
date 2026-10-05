@@ -110,6 +110,22 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   telemetry; after-numbers come from trace rows, so they are not comparable. Reproduce:
   `python3 scripts/measure_graph_alignment.py --root . --json`.
 
+## Memory silently using Markdown
+
+- Symptom: retro lessons or handoffs never appear as typed records; `memory_adapter.py probe` exits 3.
+- Query: `python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import sys,json;print(json.load(sys.stdin)['memory'])"`
+  (`by_reason_code`, deduped by `event_id`), or `grep '"command": "memory\.' <agentic-loop dir>/<session_id>/trace.jsonl`.
+  Codes: `muninn_absent`, `muninn_old_ledger`, `muninn_timeout`, `muninn_error`, `uncited_write`, `restricted_refused`,
+  `bad_record`, `handwritten_protected`. An unsafe session id writes no row; an unset or empty session id
+  (CLI without `CLAUDE_SESSION_ID` or `--session`) writes rows under the fixed id `memory-adapter-nosession`.
+- Remediation: `muninn_absent`/`muninn_old_ledger`: install a muninn release with the typed-ledger flags (Part A, muninn
+  PR #9); the Markdown path keeps working meanwhile. `uncited_write`: pass `--cite` and a verbatim `--quote`.
+  `handwritten_protected`: the target is hand-written; render to a new path. `muninn_timeout`: muninn hung past 10s;
+  run `muninn know list` by hand and check ledger locks. `muninn_error`: muninn exited nonzero or returned unparseable
+  JSON on add/list; run the same `muninn know ...` command by hand and read its stderr. `bad_record`: the typed record
+  failed validation (type, scope, tag, date or missing loop id). A help probe that exits nonzero is reported as
+  `muninn_old_ledger`, not `muninn_error`.
+
 ## Stop declared in text instead of recorded, or a stop released unexpectedly
 
 - Symptom: the Stop hook releases or blocks a loop and the model says it recorded nothing; or `progress.json`

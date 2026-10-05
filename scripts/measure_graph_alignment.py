@@ -11,6 +11,7 @@ import hashlib
 import json
 import os
 import re
+import runpy
 import subprocess
 import sys
 from pathlib import Path
@@ -20,6 +21,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from scripts.lib import trace_counters  # noqa: E402
 from scripts.lib.receipt_counters import receipt_summary  # noqa: E402
 
+MEMORY_COUNTERS = Path(__file__).with_name("lib") / "memory_counters.py"
 HOOK_FIELD = re.compile(r"(?:^|\s)hook=([A-Za-z0-9_.-]+)")
 FLAG_FIELDS = ("blocked", "would_block", "warned", "demoted")
 WORK_UNIT_TERMINAL = frozenset({"done", "dropped"})
@@ -355,6 +357,7 @@ def measure(root: Path, extra_traces: list[Path] | None = None) -> dict[str, Any
         "gate_blocks": {provider: parse_telemetry(path) for provider, path in telemetry_paths().items()},
         "graph_vs_work_units": graph_vs_work_units(),
         "trace": trace_counts(),
+        "memory": runpy.run_path(str(MEMORY_COUNTERS))["memory_counts"](loop_state_roots()),
         "recovery": recovery_counters(),
         "duplication": duplication(root),
         "lock_events": lock_events(),
