@@ -6,6 +6,9 @@ which is already deduped by event_id, so this adds only the action_authority / a
 
 from __future__ import annotations
 
+import json
+import sys
+
 RECEIPT_COMMANDS = ("action_authority", "action_receipt")
 
 
@@ -31,7 +34,9 @@ SIGNATURE_CODES = (
     "binding_unknown",
     "receipt_refused_no_tty",
 )
-BINDING_CODES = ("hash_mismatch", "repository_mismatch", "ref_mismatch", "sha_mismatch", "consumed")
+BINDING_CODES = (
+    "hash_mismatch", "repository_mismatch", "ref_mismatch", "sha_mismatch", "consumed", "state_mutated_before_guard",
+)  # fmt: skip
 
 
 def trust_summary(by_reason: dict[str, int]) -> dict[str, int]:
@@ -47,3 +52,9 @@ def trust_summary(by_reason: dict[str, int]) -> dict[str, int]:
         if command in RECEIPT_COMMANDS and code in counts:
             counts[code] += count
     return counts
+
+
+if __name__ == "__main__":
+    # Reads the JSON that scripts/measure_graph_alignment.py prints on stdin (see docs/RUNBOOK.md).
+    rows = json.load(sys.stdin).get("trace", {}).get("by_reason", {})
+    print(json.dumps({"receipts": receipt_summary(rows), "trust": trust_summary(rows)}, indent=2))

@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Opt-in action-receipt gate: gh pr merge and git push to main/master need a matching receipt.
+"""Action-receipt gate, ON by default: gh pr merge and git push to main/master need a matching receipt.
 
-Config `action_authority`: enforce | advisory; absent, unreadable or anything else is off (silent exit 0).
-Advisory traces and warns, never denies. Enforce denies only when no receipt verifies. Any own error fails open
-with reason action_authority_failed_open. It does not touch pr_merge_gate, destructive_bash_gate or
-enforce_pr_workflow. Limits: the hash covers only the command text seen here (not aliases, functions, eval/xargs,
-scripts that push; env/sudo/subshell/bash -c/gh api wrappers are unwrapped by guarded_segments). Each enforce use is
+Config `action_authority`: off | advisory | enforce; absent, unreadable or anything else is enforce.
+Only `off` is silent (exit 0). Advisory traces and warns, never denies. Enforce denies only when no receipt
+verifies. Any own error fails open with reason action_authority_failed_open. It does not touch pr_merge_gate,
+destructive_bash_gate or enforce_pr_workflow. Limits: the hash covers only the command text seen here (not aliases,
+functions, eval/xargs, scripts that push; sudo/subshell/bash -c/gh api wrappers are unwrapped by guarded_segments, an
+env assignment prefix is kept and makes the command unbindable). Each enforce use is
 claimed by an atomic O_EXCL marker and the claim, not the verify, decides allow vs deny.
 A receipt is signed (ssh-keygen, namespace coderails-receipt) and bound to repository+ref+sha; with the user-tier
 trust root that is a cooperating-agent safeguard, not a boundary (docs/decisions/p3-human-only-minting.md).
@@ -21,7 +22,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from hooks.scripts.hook_common import deny, read_payload
 from hooks.scripts.lib.destructive_patterns import git_output
-from hooks.scripts.lib.pr_workflow_match import guarded_segments
+from hooks.scripts.lib.pr_workflow_match import guarded_segments, state_mutated_before_guard
 from hooks.scripts.lib.trace_row import append_row
 from scripts.lib.action_binding import binding
 from scripts.lib.action_receipt import find_valid, proposed_action
@@ -31,10 +32,10 @@ from scripts.lib.receipt_signing import USER_TIER, resolve_trust_root
 
 
 def mode(cwd: str) -> str:
-    """Return enforce, advisory or off, never raising."""
+    """Return enforce (the default, also for absent or unreadable config), advisory or off, never raising."""
     path = config_path(cwd)
     value = config_value(path, "action_authority") if path else ""
-    return value if value in {"enforce", "advisory"} else "off"
+    return value if value in {"advisory", "off"} else "enforce"
 
 
 def main() -> int:
@@ -63,6 +64,8 @@ def main() -> int:
         signers, tier = resolve_trust_root()
         unbound = next((name for name, proposed in proposals if proposed["artifact_sha"] is None), None)
         missing = (unbound, "binding_unknown") if unbound else None  # unknowable repository+ref+sha fails closed
+        if missing is None and state_mutated_before_guard(command):  # the bound sha/ref would be stale at execution
+            missing = (proposals[0][0], "state_mutated_before_guard")
         if missing is None:
             results = [(name, *find_valid(session, p, now, loop_id, signers=signers)) for name, p in proposals]
             missing = next(((name, code) for name, found, code in results if found is None), None)
@@ -87,10 +90,15 @@ def main() -> int:
         how = (
             "The payload has no session_id, so no receipt can be bound."
             if code == "no_session"
-            else "The OWNER mints one at a terminal (it is signed with their passphrase key; an agent cannot): "
-            f"python3 scripts/action_receipt_cli.py approve-action --session {session} --kind {name} "
-            "--command '<exact command>' --cwd <directory it runs in>. "
-            "One-time key setup: scripts/authority_keys.py init."
+            else (
+                "Use the exact forms `git push <remote> <ref>` (no env prefix, -c or --git-dir) and `gh pr merge <n> "
+                "--match-head-commit <head sha>`, with no earlier ref-moving step in the same command."
+                if code in {"binding_unknown", "state_mutated_before_guard"}
+                else "The OWNER mints one at a terminal (it is signed with their passphrase key; an agent cannot): "
+                f"python3 scripts/action_receipt_cli.py approve-action --session {session} --kind {name} "
+                "--command '<exact command>' --cwd <directory it runs in>. "
+                "One-time key setup: scripts/authority_keys.py init."
+            )
         )
         deny(
             f"Blocked: {name.replace('_', ' ')} needs an action receipt ({code}). {how} Or set action_authority to off."

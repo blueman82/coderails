@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 import tempfile
@@ -81,6 +82,19 @@ class TrustRootTests(unittest.TestCase):
         for fake in (self.stat(501), self.stat(0, 0o664), self.stat(0, 0o666)):
             self.assertEqual(rs.resolve_trust_root(self.root, self.user, fake), (self.user, "trust_root_user_tier"))
 
+    def test_every_ancestor_must_be_root_owned(self) -> None:
+        """Negative control: a root-owned file under a user-owned ancestor directory is not the root tier."""
+        self.user.write_text("y\n")
+
+        user_owned = str(self.root.parent.parent)  # an ancestor of the file and of its directory
+
+        def stat(path: str) -> SimpleNamespace:
+            """Everything root-owned except one ancestor."""
+            return SimpleNamespace(st_uid=501 if path == user_owned else 0, st_mode=0o644)
+
+        self.assertEqual(rs.resolve_trust_root(self.root, self.user, stat), (self.user, "trust_root_user_tier"))
+        self.assertEqual(rs.resolve_trust_root(self.root, self.user, self.stat(0)), (self.root, rs.ROOT_TIER))
+
     def test_user_tier_label_and_missing(self) -> None:
         """Without a root tier the user file is used and labelled; with neither the answer is trust_root_missing."""
         self.root.unlink()
@@ -145,6 +159,21 @@ class CounterTests(unittest.TestCase):
         )  # fmt: skip
 
 
+class CounterCliTests(unittest.TestCase):
+    """receipt_counters has a CLI over measure_graph_alignment's trace.by_reason, like manifest_counters."""
+
+    def test_cli_prints_receipt_and_trust_summaries(self) -> None:
+        """Piped by_reason in, JSON receipts + trust out; the new state_mutated_before_guard code is counted."""
+        rows = {"trace": {"by_reason": {"action_authority/denied/denied_state_mutated_before_guard": 2}}}
+        done = subprocess.run(
+            [sys.executable, str(ROOT / "scripts/lib/receipt_counters.py")], input=json.dumps(rows),
+            capture_output=True, text=True, check=True,
+        )  # fmt: skip
+        out = json.loads(done.stdout)
+        self.assertEqual(out["trust"]["state_mutated_before_guard"], 2)
+        self.assertEqual(out["receipts"]["by_outcome"], {"denied": 2})
+
+
 class DocsTests(unittest.TestCase):
     """The honest limit is written where readers look, and the mechanism is not oversold."""
 
@@ -153,7 +182,8 @@ class DocsTests(unittest.TestCase):
         record = (ROOT / "docs/decisions/p3-human-only-minting.md").read_text()
         for text in (record, (ROOT / "AGENTS.md").read_text(), (ROOT / "docs/RUNBOOK.md").read_text()):
             self.assertIn("cooperating-agent safeguard", text)
-        for residual in ("agent-writable", "Accessibility", "NOT verified", "command text the hook sees"):
+        for residual in ("agent-writable", "Accessibility", "NOT verified", "command text the hook sees",
+                         ".consumed", "fills the receipts directory", "fails open", "default ON"):  # fmt: skip
             self.assertIn(residual, record)
 
 

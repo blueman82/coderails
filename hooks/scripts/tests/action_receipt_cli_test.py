@@ -104,7 +104,8 @@ class CliTests(unittest.TestCase):
     def test_merge_binding_uses_live_pr(self) -> None:
         """A merge receipt binds the PR base ref and live head sha from pr_view."""
         with mock.patch.object(ab, "pr_view", return_value=("main", "d" * 40)):
-            argv = ["approve-action", "--session", "s1", "--kind", "merge", "--command", "gh pr merge 5",
+            command = f"gh pr merge 5 --match-head-commit {'d' * 40}"
+            argv = ["approve-action", "--session", "s1", "--kind", "merge", "--command", command,
                     "--cwd", str(self.repo), "--key", str(self.key), "--signers", str(self.signers)]  # fmt: skip
             with contextlib.redirect_stdout(io.StringIO()) as out:
                 self.assertEqual(cli.main(argv, tty_ok=lambda: True), 0)

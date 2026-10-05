@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Opt-in action-receipt gate (Codex copy of hooks/scripts/action_authority_gate.py).
+"""Action-receipt gate, ON by default (Codex copy of hooks/scripts/action_authority_gate.py).
 
-Config `action_authority`: enforce | advisory; anything else is off (silent). Advisory traces and warns, never
-denies; enforce denies only when no receipt verifies; any own error fails open (action_authority_failed_open).
+Config `action_authority`: off | advisory | enforce; absent or anything else is enforce, only `off` is silent.
+Advisory traces and warns, never denies; enforce denies only when no receipt verifies; any own error fails open
+(action_authority_failed_open).
 Receipts are signed and bound to repository+ref+sha (mirrored scripts/lib); with the user-tier trust root that is a
 cooperating-agent safeguard, not a boundary. The hash covers only the command text seen here.
 """
@@ -17,7 +18,7 @@ from pathlib import Path
 from typing import cast
 
 from hook_common import append_trace_row, deny, payload_object, read_input, text_field
-from lib.action_match import guarded_segments
+from lib.action_match import guarded_segments, state_mutated_before_guard
 from lib.destructive_patterns import git_output
 
 from scripts.lib.action_binding import binding
@@ -27,16 +28,16 @@ from scripts.lib.receipt_signing import USER_TIER, resolve_trust_root
 
 
 def mode(cwd: str) -> str:
-    """Return enforce, advisory or off from the nearest .coderails/workflow.config.yaml, never raising."""
+    """Return enforce (the default), advisory or off from the nearest .coderails/workflow.config.yaml, never raising."""
     probe = Path(cwd).resolve()
     for directory in (probe, *probe.parents):
         candidate = directory / ".coderails" / "workflow.config.yaml"
         if candidate.is_file():
             match = re.search(r"^action_authority:\s*[\"']?(\w+)", candidate.read_text(), re.MULTILINE)
-            return match[1] if match and match[1] in {"enforce", "advisory"} else "off"
+            return match[1] if match and match[1] in {"advisory", "off"} else "enforce"
         if (directory / ".git").exists():
             break
-    return "off"
+    return "enforce"
 
 
 def main() -> int:
@@ -65,6 +66,8 @@ def main() -> int:
         signers, tier = resolve_trust_root()
         unbound = next((name for name, proposed in proposals if proposed["artifact_sha"] is None), None)
         missing = (unbound, "binding_unknown") if unbound else None  # unknowable repository+ref+sha fails closed
+        if missing is None and state_mutated_before_guard(command):  # the bound sha/ref would be stale at execution
+            missing = (proposals[0][0], "state_mutated_before_guard")
         if missing is None:
             results = [(name, *find_valid(session, p, now, loop, signers=signers)) for name, p in proposals]
             missing = next(((name, code) for name, found, code in results if found is None), None)
@@ -89,10 +92,15 @@ def main() -> int:
         how = (
             "The payload has no session_id, so no receipt can be bound."
             if code == "no_session"
-            else "The OWNER mints one at a terminal (signed with their passphrase key; an agent cannot): run "
-            f"scripts/action_receipt_cli.py approve-action --session {session} --kind {name} "
-            "--command '<exact command>' --cwd <directory it runs in>. "
-            "One-time key setup: scripts/authority_keys.py init."
+            else (
+                "Use the exact forms `git push <remote> <ref>` (no env prefix, -c or --git-dir) and `gh pr merge <n> "
+                "--match-head-commit <head sha>`, with no earlier ref-moving step in the same command."
+                if code in {"binding_unknown", "state_mutated_before_guard"}
+                else "The OWNER mints one at a terminal (signed with their passphrase key; an agent cannot): run "
+                f"scripts/action_receipt_cli.py approve-action --session {session} --kind {name} "
+                "--command '<exact command>' --cwd <directory it runs in>. "
+                "One-time key setup: scripts/authority_keys.py init."
+            )
         )
         deny(
             f"Blocked: {name.replace('_', ' ')} needs an action receipt ({code}). {how} Or set action_authority to off."

@@ -12,6 +12,8 @@ from pathlib import Path
 from lib.destructive_patterns import git_output
 
 MERGE_SCRIPT = r"""(?:(?:bash|sh|python3?)\s+)?["']?(?:[^\s"']*/)?merge\.(?:py|sh)["']?(?:\s|$)"""
+_GIT_OPT = r"(?:-C\s+\S+|-c\s+\S+|--[\w-]+=\S+|--(?:git-dir|work-tree|namespace|exec-path)\s+\S+|--[\w-]+|-[pP])"
+_GIT = re.compile(r"^git((?:\s+" + _GIT_OPT + r")*)\s+(merge|push)(?:\s|$)")
 
 
 def operation(command: str) -> tuple[str, str, str]:
@@ -27,14 +29,13 @@ def operation(command: str) -> tuple[str, str, str]:
         for pattern, name in (
             (r"^gh\s+pr\s+create(?:\s|$)", "create"),
             (r"^gh\s+pr\s+merge(?:\s|$)", "merge"),
-            (r"^git\s+merge(?:\s|$)", "git_merge"),
-            (r"^git\s+push(?:\s|$)", "git_push"),
             ("^" + MERGE_SCRIPT, "merge"),
         ):
             if re.search(pattern, segment):
                 return name, segment, ""
-        if match := re.search(r"^git\s+-C\s+(\S+)\s+(merge|push)(?:\s|$)", segment):
-            return f"git_{match[2]}", segment, match[1]
+        if match := _GIT.match(segment):  # git global options (-c, -C, --git-dir, --no-pager ...) before the subcommand
+            directory = re.search(r"-C\s+(\S+)", match[1])
+            return f"git_{match[2]}", segment, directory[1] if directory else ""
     return "", "", ""
 
 
@@ -52,7 +53,7 @@ def targets_main(command: str, cwd: str, target: str, name: str) -> bool:
         return False
     if re.search(r":(refs/heads/)?(main|master)([\s;&|)]|$)", command):
         return True
-    match = re.search(r"\bgit(?:\s+-C\s+\S+)?\s+push\s+(.*)", command)
+    match = re.search(r"\bgit\b[^;&|]*?\bpush\s+(.*)", command)
     return bool(match and re.search(r"(^|\s)\+?(refs/heads/)?(main|master)([\s;&|)]|$)", match[1]))
 
 
@@ -81,15 +82,43 @@ def guarded_segments(command: str, cwd: str) -> list[tuple[str, str, str]]:
     for inner in _SHELL_C.finditer(command):
         found.extend(guarded_segments(inner[2], cwd))
     command = _SHELL_C.sub(" ", command)
-    for segment in re.split(r"&&|\|\||[;|&\n]", command):
-        segment = unwrap(segment)
+    for raw in re.split(r"&&|\|\||[;|&\n]", command):
+        segment = unwrap(raw)
+        # An env assignment (GIT_DIR=, GH_REPO=, GIT_CONFIG_*=) can retarget the action: keep the prefix in the
+        # segment so action_binding refuses it (binding None -> denied) instead of binding the approved repo.
+        stripped = raw.strip().lstrip("({ ")
+        tainted = bool(re.search(r"(?:^|\s)[A-Za-z_]\w*=", stripped[: max(stripped.find(segment), 0)]))
         if move := re.match(r"^cd\s+(\S+)$", segment):
             cwd = os.path.normpath(os.path.join(cwd, os.path.expanduser(move[1].strip("\"'"))))
             continue
         if _API_MERGE.match(segment):
-            found.append(("merge", segment, cwd))
+            found.append(("merge", stripped.rstrip(")} ") if tainted else segment, cwd))
             continue
         name, matched, target = operation(segment)
         if name in {"merge", "git_push"} and targets_main(segment, cwd, target, name):
-            found.append((name, matched, cwd))
+            found.append((name, stripped.rstrip(")} ") if tainted else matched, cwd))
     return found
+
+
+_MUTATOR = re.compile(
+    r"^git(?:\s+" + _GIT_OPT + r")*\s+(?:branch|reset|checkout|switch|update-ref|commit|merge|rebase|cherry-pick|pull"
+    r"|fetch|tag|symbolic-ref|revert|am|replace|config|remote|restore|stash)(?:\s|$)"
+)
+
+
+def state_mutated_before_guard(command: str) -> bool:
+    """True when a guarded segment follows a segment that can move a ref, HEAD or the remote config.
+
+    The receipt binds the sha/ref/remote as they are when the hook runs, so `git branch -f x <sha> && git push origin
+    x:main` would push a different sha than the one approved. Such a chain is refused; run the steps separately.
+    Scripts, aliases and functions that mutate are not seen. ponytail: regex, not a shell parser.
+    """
+    mutated = False
+    for inner in _SHELL_C.finditer(command):
+        mutated = mutated or state_mutated_before_guard(inner[2])
+    for raw in re.split(r"&&|\|\||[;|&\n]", _SHELL_C.sub(" ", command)):
+        segment = unwrap(raw)
+        if mutated and (_API_MERGE.match(segment) or operation(segment)[0] in {"merge", "git_push"}):
+            return True
+        mutated = mutated or bool(_MUTATOR.match(segment))
+    return False

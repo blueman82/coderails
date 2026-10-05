@@ -64,14 +64,50 @@ The minting step is a separate OWNER-RUN command, signed with a passphrase-prote
 - The hash covers only the command text the hook sees (not aliases, functions, `eval`/`xargs`, scripts that
   push). Binding is the repository, ref and SHA computed at hook time; a push by another route is not seen.
 - A subagent whose `session_id` differs from the minter's is refused as `foreign_session` (documented limit).
+- Single-use and revocation live in unsigned `<id>.consumed` / `<id>.revoked` marker files in the agent-writable
+  receipts directory. `O_EXCL` stops races, not `unlink`: a same-user agent can delete `<id>.consumed` to replay a
+  receipt until it expires (owner-chosen, default 1 h) or delete `<id>.revoked` to un-revoke it. Only a consumed
+  ledger outside the agent's write reach (root-owned or append-only) would close this; it is not built.
+- An agent that fills the receipts directory with junk `*.json` sorted ahead of the real one can push the real
+  receipt past the 50-receipt cap (`MAX_RECEIPTS`). That denies, never allows (a denial-of-service, not a bypass).
+- The hook fails open on its own exceptions (`action_authority_failed_open`, traced and written to stderr), so an
+  input that makes `binding()` or `guarded_segments()` raise would allow. No such input is known; `binding()`
+  returns None rather than raising for malformed commands. Fail-closed for enforce mode is not built.
+- The root tier now checks the file and every ancestor directory (uid 0, not group/other writable), but it is not
+  installed here, so the real boundary is not active until the owner runs the sudo install.
+
+## Binding rules and default
+
+The gate is default ON: absent or unreadable config, or any value other than `off` / `advisory`, is `enforce`
+(`action_authority: off` is the explicit switch). To keep the repository+ref+SHA binding honest, a guarded command is
+unbindable (`binding_unknown`, denied) when it:
+
+- carries an env assignment prefix (`GIT_DIR=`, `GIT_CONFIG_*=`, `GH_REPO=`, any `NAME=value`), `git -c`, `--git-dir` or
+  `--work-tree` (they retarget the action; the prefix is kept in the hashed segment so it is never silently stripped);
+- is a bare or remote-only `git push` (push.default, `branch.*.remote` and `remote.*.push` decide the destination);
+- is `gh pr merge` without `--match-head-commit <live head sha>` (or `gh api .../merge` without `sha=`). GitHub then
+  refuses a merge whose head moved after the hook ran. `scripts/merge.py` pins the sha its own gates verified;
+- names the PR ambiguously (a branch name, two PRs, a `-R` that disagrees with the PR URL, a combined short flag
+  hiding a value option). The repository comes from `-R`, the PR URL or the api path, else `origin`.
+
+`git push origin HEAD` binds the current branch (a detached HEAD is unbindable); the repository is the PUSH url
+(`git remote get-url --push`), so `remote.<n>.pushurl` / `pushInsteadOf` are seen. A guarded segment that follows a
+ref-, HEAD- or remote-moving segment in the same command (`branch`, `reset`, `checkout`, `switch`, `update-ref`,
+`commit`, `merge`, `rebase`, `cherry-pick`, `pull`, `fetch`, `tag`, `config`, `remote`, ...) is denied
+`state_mutated_before_guard`: the bound sha would be stale at execution. Scripts and aliases that mutate are not seen.
+Git global options before the subcommand (`-c`, `-C`, `--git-dir`, `--no-pager`) no longer hide a push from the
+matcher, which also tightens `enforce_pr_workflow`. Codex has no `receipt_counters` mirror on purpose: the counters
+read trace rows through the shared measurement script, which is provider independent.
 
 ## Counters and reason codes
 
 Trace reason codes: `denied_signature_missing`, `denied_signature_invalid`, `denied_signer_unknown`,
 `denied_trust_root_missing`, `denied_binding_unknown`, `denied_{hash,repository,ref,sha}_mismatch`,
 `denied_consumed`, `trust_root_user_tier` (allow resting on the agent-writable tier), `receipt_consumed`,
-`receipt_refused_no_tty`. `scripts/lib/receipt_counters.py: trust_summary()` counts them from trace counts; wiring
-it into `measure_graph_alignment.py` is an integration step (that file is at its line limit).
+`receipt_refused_no_tty`, `denied_state_mutated_before_guard`. `scripts/lib/receipt_counters.py: trust_summary()` counts
+them from trace counts. It has its own CLI, so the counters are reachable without editing the measurement script:
+`python3 scripts/measure_graph_alignment.py --root . | python3 scripts/lib/receipt_counters.py` (prints `receipts` and
+`trust`). Folding the same call into `measure_graph_alignment.py` itself is a handoff (that file is at its line limit).
 
 ## Measurement note
 

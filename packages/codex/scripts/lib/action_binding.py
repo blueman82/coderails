@@ -1,11 +1,15 @@
 #!/usr/bin/env python3
 """The one place that computes (repository, ref, sha) for a guarded action; None means unknowable (callers deny).
 
-git push: repository = the named remote's normalised host/owner/name, ref = the DESTINATION full ref, sha = the
-rev-parse of the refspec SOURCE (`git push origin feature:main` pushes feature, never HEAD).
-gh pr merge / gh api .../merge: ref = the PR base, sha = the live PR headRefOid, repository = origin (or -R).
-Used by the hook, the receipt CLI and merge.py. Refuses (None) --all/--mirror/--tags/--delete, several refspecs,
-deletes, a detached HEAD with no refspec, and remotes that are not host/owner/name.
+git push: needs `git [-C dir] push [opts] <remote> <refspec>`. repository = the remote's PUSH url (host/owner/name),
+ref = the DESTINATION full ref (`HEAD` alone means the current branch; a detached HEAD is unknowable), sha = the
+rev-parse of the refspec SOURCE. A bare or remote-only push, `-c`/`--git-dir`/`--work-tree`, and env-prefixed commands
+are None (push.default, branch.*.remote, pushurl and GIT_* could redirect them).
+gh pr merge / gh api .../merge: ref = the PR base, sha = the live PR headRefOid, repository = origin, -R, the PR URL or
+the api path. The command must pin that sha (`--match-head-commit <sha>` / `sha=<sha>`) so a head that moves after the
+hook is refused by GitHub; the merge.py script pins it itself. Option values are skipped when finding the PR argument.
+Used by the hook and the receipt CLI; merge.py is not a binding() caller (it pins the sha it verified).
+Refuses (None) --all/--mirror/--tags/--delete, several refspecs, deletes, and remotes that are not host/owner/name.
 """
 
 from __future__ import annotations
@@ -18,8 +22,12 @@ import subprocess
 from typing import Any
 
 _URL = re.compile(r"^(?:[a-z][a-z0-9+.-]*://)?(?:[^@/\s]+@)?([^:/\s]+)[:/]([^/\s]+/[^\s]+?)(?:\.git)?/?$", re.I)
+_PR_URL = re.compile(r"^https://([^/\s]+)/([^/\s]+/[^/\s]+)/pull/(\d+)/?$")
+_SCRIPT = re.compile(r"(?:^|/)merge\.(?:py|sh)$")
+_SHA = re.compile(r"^[0-9a-f]{40}$")
 _VALUE_OPTS = {"-o", "--push-option", "--repo", "--receive-pack", "--exec"}
 _REFUSED = {"--all", "--mirror", "--tags", "--delete", "-d", "--prune"}
+_MERGE_VALUE_OPTS = {"-R", "--repo", "-b", "--body", "-F", "--body-file", "-t", "--subject", "-A", "--author-email"}
 
 
 def git_out(cwd: str, *args: str) -> str:
@@ -53,13 +61,15 @@ def _full_ref(name: str) -> str:
 
 
 def _push(tokens: list[str], cwd: str) -> dict[str, str] | None:
-    if "-C" in tokens[: tokens.index("push")]:
-        at = tokens.index("-C")
-        cwd = os.path.normpath(os.path.join(cwd, tokens[at + 1])) if at + 1 < len(tokens) else cwd
-    rest = tokens[tokens.index("push") + 1 :]
+    at = tokens.index("push")
+    head = tokens[:at]
+    if head[:1] != ["git"] or (len(head) != 1 and not (len(head) == 3 and head[1] == "-C")):
+        return None  # env prefix, -c, --git-dir, --work-tree ... can retarget the push
+    if len(head) == 3:
+        cwd = os.path.normpath(os.path.join(cwd, head[2]))
     positional: list[str] = []
     skip = False
-    for token in rest:
+    for token in tokens[at + 1 :]:
         if skip:
             skip = False
         elif token in _REFUSED:
@@ -68,30 +78,71 @@ def _push(tokens: list[str], cwd: str) -> dict[str, str] | None:
             skip = True
         elif not token.startswith("-"):
             positional.append(token)
-    if len(positional) > 2:
-        return None
-    remote = positional[0] if positional else "origin"
-    branch = git_out(cwd, "branch", "--show-current")
-    refspec = positional[1].lstrip("+") if len(positional) == 2 else branch
-    source, _, dest = refspec.partition(":")
-    dest = dest if ":" in refspec else source
+    if len(positional) != 2:
+        return None  # bare / remote-only pushes follow push.default and branch.*.remote: unknowable here
+    remote, refspec = positional[0], positional[1].lstrip("+")
+    source, colon, dest = refspec.partition(":")
+    if not colon and source == "HEAD":
+        dest = git_out(cwd, "branch", "--show-current")  # empty on a detached HEAD
+    elif not colon:
+        dest = source
     if not source or not dest:
         return None
-    repository = normalise_repository(git_out(cwd, "remote", "get-url", remote) or remote)
+    repository = normalise_repository(git_out(cwd, "remote", "get-url", "--push", remote) or remote)
     sha = git_out(cwd, "rev-parse", "--verify", "--quiet", f"{source}^{{commit}}")
     return {"repository": repository, "ref": _full_ref(dest), "sha": sha} if repository and sha else None
 
 
-def _merge(tokens: list[str], segment: str, cwd: str) -> dict[str, str] | None:
-    repo = next((tokens[i + 1] for i, t in enumerate(tokens[:-1]) if t in {"-R", "--repo"}), None)
-    api = re.search(r"/pulls/(\d+)/merge", segment)
-    number = api[1] if api else next((m[1] for t in tokens[3:] if (m := re.search(r"(?:^|/pull/)(\d+)$", t))), "")
-    view = pr_view(number, cwd, repo) if number else None
-    if view is None:
+def _pr_target(tokens: list[str], segment: str) -> tuple[str, str | None, str | None] | None:
+    """(PR number, repo spec or None, pinned sha or None) for gh pr merge | gh api .../merge | merge script."""
+    if (api := re.search(r"repos/([^/\s]+/[^/\s]+)/pulls/(\d+)/merge", segment)) and tokens[:2] == ["gh", "api"]:
+        pin = next((t[4:] for t in tokens if t.startswith("sha=")), None)
+        return api[2], api[1], pin
+    script = next((i for i, t in enumerate(tokens[:2]) if _SCRIPT.search(t)), None)
+    if script is not None:  # merge.py/.sh verify the gates and pin the head sha they verified
+        arg = tokens[script + 1] if len(tokens) > script + 1 else ""
+        return (arg, None, "pinned") if arg.isdigit() else None
+    if tokens[:3] != ["gh", "pr", "merge"]:
         return None
+    args, i = tokens[3:], 0
+    positional: list[str] = []
+    repo = pin = None
+    while i < len(args):
+        name, eq, value = args[i].partition("=")
+        if re.match(r"^-[A-Za-z]{2,}", args[i]) and re.search(r"[RbFtA]", args[i][1:]):
+            return None  # combined short flags hide a value option
+        if name in _MERGE_VALUE_OPTS | {"--match-head-commit"}:
+            if not eq:
+                i += 1
+                if i >= len(args):
+                    return None
+                value = args[i]
+            if name in {"-R", "--repo"}:
+                repo = value
+            elif name == "--match-head-commit":
+                pin = value
+        elif not name.startswith("-"):
+            positional.append(args[i])
+        i += 1
+    if len(positional) != 1:
+        return None
+    if url := _PR_URL.match(positional[0]):
+        spec = f"{url[1]}/{url[2]}"
+        return (url[3], spec, pin) if repo in {None, spec, url[2]} else None
+    return (positional[0], repo, pin) if positional[0].isdigit() else None
+
+
+def _merge(tokens: list[str], segment: str, cwd: str) -> dict[str, str] | None:
+    target = _pr_target(tokens, segment)
+    if target is None:
+        return None
+    number, repo, pin = target
+    view = pr_view(number, cwd, repo)
+    if view is None or not _SHA.match(view[1]) or (pin != "pinned" and pin != view[1]):
+        return None  # unknown PR, or the command does not pin the live head sha
     where = repo or git_out(cwd, "remote", "get-url", "origin")
     repository = normalise_repository(f"github.com/{where}" if repo and repo.count("/") == 1 else where)
-    return {"repository": repository, "ref": _full_ref(view[0]), "sha": view[1]} if repository and view[1] else None
+    return {"repository": repository, "ref": _full_ref(view[0]), "sha": view[1]} if repository else None
 
 
 def binding(kind: str, segment: str, cwd: str) -> dict[str, str] | None:

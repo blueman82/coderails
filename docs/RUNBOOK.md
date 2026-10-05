@@ -200,12 +200,12 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
 ## Action-authority hook denied a merge or push (or warned in advisory)
 
 - Symptom: `gh pr merge` or `git push` to main/master is denied with "needs an action receipt (<code>)" (enforce), or a
-  stderr "action_authority (advisory)" warning appears. Only when config `action_authority` is `enforce` or `advisory`;
-  absent or any other value is off.
+  stderr "action_authority (advisory)" warning appears. The gate is default ON (a "default ON" enforce): absent config or any value
+  other than `off` / `advisory` is `enforce`; `action_authority: off` is the explicit switch.
 - Query: `jq -r 'select(.command=="action_authority" or .command=="action_receipt") | [.outcome,.reason_code]|@tsv' <loop dir>/<session>/trace.jsonl`,
   or `trace.receipts.by_reason_code` from `python3 scripts/measure_graph_alignment.py --root . --json` (deduped by
   event_id). Codes: `denied_<code>` / `advisory_<code>` where `<code>` is one of `no_receipt`, `hash_mismatch`,
-  `repository_mismatch`, `ref_mismatch`, `sha_mismatch`, `signature_missing`, `signature_invalid`, `signer_unknown`, `trust_root_missing`, `binding_unknown` (repository+ref+sha not computable: fail closed), `expired`, `revoked`, `consumed`, `foreign_session`, `foreign_loop`, `kind_mismatch`, `no_session` (payload had no session_id; traced under session dir `_no_session`), `malformed`;
+  `repository_mismatch`, `ref_mismatch`, `sha_mismatch`, `signature_missing`, `signature_invalid`, `signer_unknown`, `trust_root_missing`, `binding_unknown` (repository+ref+sha not computable: fail closed), `state_mutated_before_guard` (a ref/HEAD/remote-moving step precedes the guarded one in the same command), `expired`, `revoked`, `consumed`, `foreign_session`, `foreign_loop`, `kind_mismatch`, `no_session` (payload had no session_id; traced under session dir `_no_session`), `malformed`;
   `receipt_consumed` (allowed); `trust_root_user_tier` (an allow that rested on the agent-writable trust root: cooperating-agent safeguard); `action_authority_failed_open` (the hook itself errored and allowed);
   `receipt_approved` / `receipt_revoked` / `receipt_refused_no_tty` (CLI).
 - `action_authority_failed_open`: the row carries `inputs.error_class` (sha256 of the exception class name; compare with
@@ -223,12 +223,21 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
 - Scope of one receipt: each guarded segment of a chained command (`a && b`) needs its own receipt; a leading
   `cd <dir>` moves the directory the hash binds (mint with `--cwd` set to where the command really runs). The binding comes from
   `scripts/lib/action_binding.py` (push: refspec source sha and destination ref; merge: live PR head via `gh pr view`, 4s timeout);
-  unknowable means `binding_unknown`, fail closed.
+  unknowable means `binding_unknown`, fail closed. Bindable forms only: `git [-C dir] push <remote> <ref>` (no env prefix,
+  `-c`, `--git-dir`; bare `git push` is `binding_unknown`; `HEAD` alone means the current branch; the repository is the push url) and
+  `gh pr merge <n> --match-head-commit <live head sha>` (or `gh api .../merge -f sha=<sha>`; `scripts/merge.py` pins the sha its gates
+  verified). Run ref-moving steps (`commit`, `branch -f`, `reset`, `config`, ...) as separate commands before the guarded one.
+- Counters: `python3 scripts/measure_graph_alignment.py --root . | python3 scripts/lib/receipt_counters.py` prints `receipts`
+  and `trust` (signature, trust-root, binding and `state_mutated_before_guard` counts). Measurement: one hook run is well under 1 s
+  with one receipt (single run, not a benchmark; 50 receipts could approach the 10 s hook timeout).
+- Residuals (docs/decisions/p3-human-only-minting.md): `.consumed`/`.revoked` markers are agent-writable files, so unlinking one
+  replays or un-revokes a receipt until it expires; junk files can crowd the 50-receipt cap (deny, not allow); the hook fails open on
+  its own exceptions.
 - Codex: the hook imports the byte-identical mirrored libs and the package ships `scripts/action_receipt_cli.py` and
   `scripts/authority_keys.py` (same owner-run rules).
 - Limits: the trust root has two tiers. The root tier (`/Library/Application Support/Coderails/receipt_signers`, uid 0, not group/other
   writable, owner-installed with sudo, not installed by this repo) is the real boundary; the user tier (`~/.coderails/keys/receipt_signers`)
   is agent-writable, so it is a cooperating-agent safeguard. An agent with Accessibility or control of the owner's terminal is out of scope
   (docs/decisions/p3-human-only-minting.md). The hash covers only the command text the hook sees, not aliases, functions, eval/xargs or scripts that
-  push (env/sudo/subshell/`bash -c`/`gh api .../merge` wrappers are unwrapped). Limits: scope 500 chars, 8 KB per receipt,
+  push (sudo/time/subshell/`bash -c`/`gh api .../merge` wrappers are unwrapped; an env assignment prefix is kept and makes the command unbindable). Limits: scope 500 chars, 8 KB per receipt,
   50 receipts per session (`receipt_refused_scope_too_long`, `receipt_refused_too_many`). Protected branches are main and master only.

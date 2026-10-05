@@ -67,20 +67,36 @@ class PushTests(unittest.TestCase):
         self.assertEqual(self.bind("git push origin feature:refs/heads/main")["ref"], "refs/heads/main")  # type: ignore[index]
         self.assertEqual(self.bind("git push -o ci.skip origin main")["sha"], self.main)  # type: ignore[index]
         self.assertEqual(ab.binding("git_push", "git -C r push origin main", str(self.repo.parent))["sha"], self.main)  # type: ignore[index]
-        implicit = {"repository": REPOSITORY, "ref": "refs/heads/other", "sha": self.head}
-        self.assertEqual(self.bind("git push"), implicit)
-        self.assertEqual(self.bind("git push origin"), implicit)
+
+    def test_head_without_dest_binds_the_current_branch(self) -> None:
+        """`git push origin HEAD` pushes to the current branch's ref, never refs/heads/HEAD; detached is unknowable."""
+        want = {"repository": REPOSITORY, "ref": "refs/heads/other", "sha": self.head}
+        self.assertEqual(self.bind("git push origin HEAD"), want)
+        git(self.repo, "checkout", "-q", "--detach")
+        self.assertIsNone(self.bind("git push origin HEAD"))
 
     def test_unknowable_is_none(self) -> None:
-        """Deletes, several refspecs, --all/--mirror/--tags, unknown remote/source, detached HEAD and junk give None."""
+        """Deletes, several refspecs, --all/--mirror/--tags, bare pushes, unknown remote/source and junk give None."""
         for command in (
             "git push origin :main", "git push --delete origin main", "git push --all origin", "git push --mirror",
             "git push origin --tags", "git push origin a b", "git push upstream main", "git push origin nosuch:main",
-            "git push 'origin", "git push origin main extra extra",
+            "git push 'origin", "git push origin main extra extra", "git push", "git push origin",
         ):  # fmt: skip
             self.assertIsNone(self.bind(command), command)
-        git(self.repo, "checkout", "-q", "--detach")
-        self.assertIsNone(self.bind("git push"))
+
+    def test_retargeting_forms_are_none(self) -> None:
+        """Env prefixes, -c, --git-dir and --work-tree could point the push elsewhere: unknowable, so denied."""
+        for command in (
+            "GIT_DIR=/x git push origin main", "GIT_CONFIG_COUNT=1 git push origin main",
+            "git -c remote.origin.pushurl=https://evil/x.git push origin main", "git --git-dir=/x push origin main",
+            "git --work-tree /x push origin main", "env GIT_DIR=/x git push origin main",
+        ):  # fmt: skip
+            self.assertIsNone(self.bind(command), command)
+
+    def test_push_url_redirect_is_seen(self) -> None:
+        """remote.<n>.pushurl is where the push really goes, so the repository follows it (negative control)."""
+        git(self.repo, "config", "remote.origin.pushurl", "git@github.com:evil/widgets.git")
+        self.assertEqual(self.bind("git push origin main")["repository"], "github.com/evil/widgets")  # type: ignore[index]
 
     def test_wrong_remote_changes_repository(self) -> None:
         """A second remote with another owner binds that repository, not origin's."""
@@ -99,29 +115,57 @@ class MergeTests(unittest.TestCase):
 
     def test_live_pr(self) -> None:
         """Base and head come from pr_view; origin supplies the repository."""
-        with mock.patch.object(ab, "pr_view", return_value=("main", "a" * 40)) as view:
-            got = ab.binding("merge", "gh pr merge 12 --squash", str(self.repo))
-        self.assertEqual(got, {"repository": REPOSITORY, "ref": "refs/heads/main", "sha": "a" * 40})
+        a = "a" * 40
+        with mock.patch.object(ab, "pr_view", return_value=("main", a)) as view:
+            got = ab.binding("merge", f"gh pr merge 12 --squash --match-head-commit {a}", str(self.repo))
+        self.assertEqual(got, {"repository": REPOSITORY, "ref": "refs/heads/main", "sha": a})
         view.assert_called_once_with("12", str(self.repo), None)
 
+    def test_head_must_be_pinned(self) -> None:
+        """No --match-head-commit, or a stale one, is unknowable (a head that moves later merges unreviewed code)."""
+        a = "a" * 40
+        with mock.patch.object(ab, "pr_view", return_value=("main", a)):
+            for command in ("gh pr merge 12", f"gh pr merge 12 --match-head-commit {'b' * 40}"):
+                self.assertIsNone(ab.binding("merge", command, str(self.repo)), command)
+            self.assertIsNotNone(ab.binding("merge", f"gh pr merge --match-head-commit={a} 12", str(self.repo)))
+            self.assertIsNone(ab.binding("merge", "gh api repos/acme/widgets/pulls/9/merge -X PUT", str(self.repo)))
+            self.assertIsNotNone(
+                ab.binding("merge", f"gh api repos/acme/widgets/pulls/9/merge -f sha={a}", str(self.repo))
+            )
+            self.assertIsNotNone(ab.binding("merge", "python3 scripts/merge.py 12", str(self.repo)))  # pins itself
+
     def test_forms(self) -> None:
-        """PR URL, gh api merge and -R are parsed; release bases bind their own ref."""
-        with mock.patch.object(ab, "pr_view", return_value=("release/x", "b" * 40)) as view:
-            by_url = ab.binding("merge", "gh pr merge https://github.com/acme/widgets/pull/7", str(self.repo))
+        """PR URL, gh api path and -R pick the repository; option values are never mistaken for the PR."""
+        b = "b" * 40
+        pin = f"--match-head-commit {b}"
+        with mock.patch.object(ab, "pr_view", return_value=("release/x", b)) as view:
+            by_url = ab.binding("merge", f"gh pr merge https://github.com/other/repo/pull/7 {pin}", str(self.repo))
             self.assertEqual(by_url and by_url["ref"], "refs/heads/release/x")
-            self.assertIsNotNone(ab.binding("merge", "gh api repos/acme/widgets/pulls/9/merge -X PUT", str(self.repo)))
-            got = ab.binding("merge", "gh pr merge 3 -R other/repo", str(self.repo))
-        self.assertEqual(got["repository"], "github.com/other/repo")  # type: ignore[index]
-        self.assertEqual([c.args[0] for c in view.call_args_list], ["7", "9", "3"])
+            self.assertEqual(by_url and by_url["repository"], "github.com/other/repo")
+            api = ab.binding("merge", f"gh api repos/acme/gadgets/pulls/9/merge -f sha={b}", str(self.repo))
+            self.assertEqual(api and api["repository"], "github.com/acme/gadgets")
+            got = ab.binding("merge", f"gh pr merge 3 -R other/repo {pin}", str(self.repo))
+            body = ab.binding("merge", f"gh pr merge --body 7 5 {pin}", str(self.repo))
+        self.assertEqual(got and got["repository"], "github.com/other/repo")
+        self.assertIsNotNone(body)
+        self.assertEqual([c.args[:3] for c in view.call_args_list][0], ("7", str(self.repo), "github.com/other/repo"))
+        self.assertEqual([c.args[0] for c in view.call_args_list], ["7", "9", "3", "5"])
 
     def test_unknowable_is_none(self) -> None:
-        """No PR number, a failed gh call, or no origin give None."""
+        """No PR number, a branch name, two PRs, a URL/-R clash, a failed gh call, an env prefix or no origin: None."""
+        c = "c" * 40
+        pin = f"--match-head-commit {c}"
         with mock.patch.object(ab, "pr_view", return_value=None):
-            self.assertIsNone(ab.binding("merge", "gh pr merge 12", str(self.repo)))
-        with mock.patch.object(ab, "pr_view", return_value=("main", "c" * 40)):
-            self.assertIsNone(ab.binding("merge", "gh pr merge --squash", str(self.repo)))
+            self.assertIsNone(ab.binding("merge", f"gh pr merge 12 {pin}", str(self.repo)))
+        with mock.patch.object(ab, "pr_view", return_value=("main", c)):
+            for command in (
+                f"gh pr merge --squash {pin}", f"gh pr merge my-branch {pin}", f"gh pr merge 1 2 {pin}",
+                f"gh pr merge https://github.com/o/r/pull/5 -R x/y {pin}", f"GH_REPO=evil/x gh pr merge 5 {pin}",
+                f"gh pr merge -bR 5 {pin}", "python3 scripts/merge.py",
+            ):  # fmt: skip
+                self.assertIsNone(ab.binding("merge", command, str(self.repo)), command)
             git(self.repo, "remote", "remove", "origin")
-            self.assertIsNone(ab.binding("merge", "gh pr merge 12", str(self.repo)))
+            self.assertIsNone(ab.binding("merge", f"gh pr merge 12 {pin}", str(self.repo)))
         self.assertIsNone(ab.binding("other", "x", str(self.repo)))
 
 

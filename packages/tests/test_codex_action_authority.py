@@ -30,8 +30,9 @@ from hooks.scripts.tests.receipt_test_support import (  # noqa: E402  # isort: s
 )
 from scripts.lib import action_binding as ab  # noqa: E402  # isort: skip
 
-MERGE = "gh pr merge 12 --squash"
 MERGE_SHA = "f" * 40
+PIN = f"--match-head-commit {MERGE_SHA}"
+MERGE = f"gh pr merge 12 --squash {PIN}"
 MIRRORS = (
     "scripts/lib/action_receipt.py", "scripts/lib/receipt_signing.py", "scripts/lib/action_binding.py",
     "scripts/action_receipt_cli.py", "scripts/authority_keys.py",
@@ -69,9 +70,8 @@ class MirrorTests(unittest.TestCase):
     def test_hook_common_has_no_vendored_receipt_code(self) -> None:
         """The vendored receipt_* functions are gone and the file is under its 400-line ceiling."""
         text = (HOOKS / "hook_common.py").read_text()
-        self.assertNotIn("def receipt_", text)
-        self.assertNotIn("RECEIPT_FIELDS", text)
-        self.assertNotIn("_receipt_claim", text)
+        for vendored in ("def receipt_", "RECEIPT_FIELDS", "_receipt_claim"):
+            self.assertNotIn(vendored, text)
         self.assertLess(len(text.splitlines()), 400)
 
 
@@ -149,21 +149,8 @@ class CodexModuleTests(unittest.TestCase):
             self.assertEqual(self.probe(**args), "NONE:consumed")
             (base / "s1" / "receipts" / f"{rec['receipt_id']}.consumed").unlink()
             gate = f"import time, pathlib\nwhile not pathlib.Path({str(base / 'go')!r}).exists(): time.sleep(0.005)\n"
-            procs = [
-                subprocess.Popen(
-                    [
-                        sys.executable,
-                        "-c",
-                        gate + PROBE,
-                        str(CODEX),
-                        json.dumps({**args, "signers": str(self.signers)}),
-                    ],
-                    stdout=subprocess.PIPE,
-                    text=True,
-                    cwd=tmp,
-                )
-                for _ in range(16)
-            ]
+            argv = [sys.executable, "-c", gate + PROBE, str(CODEX), json.dumps({**args, "signers": str(self.signers)})]
+            procs = [subprocess.Popen(argv, stdout=subprocess.PIPE, text=True, cwd=tmp) for _ in range(16)]
             time.sleep(0.5)
             (base / "go").write_text("")
             outs = [p.communicate()[0].strip() for p in procs]
@@ -179,6 +166,8 @@ class MatchParityTests(unittest.TestCase):
         "git push origin feature && git push origin main",
         "cd sub && git push", "gh pr merge 5", "gh -R o/r pr merge 5", "gh pr merge 1 && gh pr merge 2",
         "git push --dry-run origin main", "ls", "git push origin HEAD:main", "git merge main", "bash merge.py 7",
+        "GIT_DIR=x git push origin main", "git -c a=b push origin main", "git --no-pager push origin main",
+        "git commit -m x && git push origin main", "git config a b; gh pr merge 5",
     )  # fmt: skip
 
     def test_guarded_segments_identical_on_main_and_feature(self) -> None:
@@ -189,9 +178,9 @@ class MatchParityTests(unittest.TestCase):
                 (Path(tmp) / "sub").mkdir()
                 for command in self.CORPUS:
                     with self.subTest(branch=branch, command=command):
-                        self.assertEqual(
-                            claude_match.guarded_segments(command, tmp), codex_match.guarded_segments(command, tmp)
-                        )
+                        for fn in ("guarded_segments", "state_mutated_before_guard"):
+                            args = (command, tmp)[: 2 if fn == "guarded_segments" else 1]
+                            self.assertEqual(getattr(claude_match, fn)(*args), getattr(codex_match, fn)(*args))
 
 
 class HookTests(unittest.TestCase):
@@ -284,32 +273,29 @@ class HookTests(unittest.TestCase):
                 self.assertTrue(self.denied(command))
 
     def test_off_and_advisory(self) -> None:
-        """Off is silent; advisory warns and traces but never denies."""
-        for value in (None, "off", "bogus"):
-            self.configure(value)
-            result = self.run_hook(MERGE)
-            self.assertEqual((result.returncode, result.stdout, result.stderr), (0, "", ""))
-        self.assertEqual(self.reasons(), [])
+        """Only `off` is silent; no config or junk is enforce (default ON); advisory warns and traces, never denies."""
+        self.assertTrue(self.denied(MERGE))  # no config at all
+        self.configure("bogus")
+        self.assertTrue(self.denied(MERGE))
+        self.assertEqual(set(self.reasons()), {"denied_no_receipt"})
+        self.configure("off")
+        result = self.run_hook(MERGE, session="s2")
+        self.assertEqual((result.returncode, result.stdout, result.stderr), (0, "", ""))
         self.configure("advisory")
         result = self.run_hook(MERGE)
         self.assertEqual((result.stdout, "advisory" in result.stderr), ("", True))
-        self.assertEqual(self.reasons(), ["advisory_no_receipt"])
+        self.assertEqual(self.reasons()[-1], "advisory_no_receipt")
 
     def test_enforce_deny_allow_consume_once(self) -> None:
         """No receipt denied; matching signed receipt allowed and consumed; replay denied; other args denied."""
         self.configure("enforce")
         self.assertTrue(self.denied(MERGE))
         self.mint()
-        self.assertTrue(self.denied("gh pr merge 13 --squash"))
+        self.assertTrue(self.denied(f"gh pr merge 13 --squash {PIN}"))
         self.assertFalse(self.denied(MERGE))
         self.assertTrue(self.denied(MERGE))
-        expected = [
-            "denied_no_receipt",
-            "denied_hash_mismatch",
-            "trust_root_user_tier",
-            "receipt_consumed",
-            "denied_consumed",
-        ]
+        expected = ["denied_no_receipt", "denied_hash_mismatch", "trust_root_user_tier", "receipt_consumed"]
+        expected.append("denied_consumed")
         self.assertEqual(self.reasons(), expected)
         self.assertFalse(self.denied("ls -la"))
 
@@ -372,9 +358,19 @@ class HookTests(unittest.TestCase):
         git(self.repo, "branch", "feature")
         self.mint("git push origin feature", "git_push")
         self.assertTrue(self.denied("git push origin feature && git push origin main"))
-        self.mint("git push", "git_push", rid="r2")
-        self.assertTrue(self.denied(f"cd {other} && git push"))
+        self.mint("git push origin main", "git_push", rid="r2")
+        self.assertTrue(self.denied(f"cd {other} && git push origin main"))
         self.assertTrue(self.denied("git -C . push origin main"))
+
+    def test_env_prefix_global_options_and_moved_refs_are_denied(self) -> None:
+        """Negative controls: env prefix, `-c`, and a ref moved earlier in the chain are denied despite a receipt."""
+        self.configure("enforce")
+        self.mint("git push origin main", "git_push")
+        for command in ("GIT_DIR=/x git push origin main", "git -c a=b push origin main",
+                        "git branch -f main HEAD~0 && git push origin main"):  # fmt: skip
+            self.assertTrue(self.denied(command), command)
+        self.assertEqual(self.reasons(), ["denied_binding_unknown"] * 2 + ["denied_state_mutated_before_guard"])
+        self.assertFalse(self.denied("git push origin main"))
 
     def test_missing_session_and_owner_hint(self) -> None:
         """No session_id: a traced no_session denial; the hint says the OWNER mints at a terminal."""

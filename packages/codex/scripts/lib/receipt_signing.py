@@ -47,8 +47,8 @@ def user_signers() -> Path:
 
 
 def _root_owned(path: Path, stat: Callable[[str], Any]) -> bool:
-    try:
-        return all(s.st_uid == 0 and not s.st_mode & 0o022 for s in (stat(str(path)), stat(str(path.parent))))
+    try:  # the file and EVERY ancestor directory: a user-writable ancestor could swap the root-owned directory
+        return all(s.st_uid == 0 and not s.st_mode & 0o022 for s in map(stat, map(str, (path, *path.parents))))
     except OSError:
         return False
 

