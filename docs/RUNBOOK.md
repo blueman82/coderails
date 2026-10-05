@@ -141,7 +141,9 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   `$PLUGIN_DATA/sessions/<id>/crack_on_active`). Allowed right after "crack on": by design, the phrase only prints the grant command
   (`authority_phrase_ignored`); type `/coderails:authorize` (fixed defaults, `max_prs` 0; Codex: `$coderails-codex:authorize`) or run
   `python3 <abs>/scripts/authority.py grant --session <id> --max-prs N` to grant. `authority_expired_allow` shows the 24h object lapsed;
-  grant again (an expired file is replaced; a live one is refused `authority_refused_exists`). Objects written before this change have no `granted_by`
+  grant again (an expired file is replaced; a live one is refused `authority_refused_exists`). `authority_refused_unsafe_session` also
+  means `/coderails:authorize` got an empty or unsubstituted (`${...}`) session id: the substitution in the command file is not
+  live-probed (see `docs/decisions/e3-authority-object.md`), so run `authority.py grant --session <id>` yourself. Objects written before this change have no `granted_by`
   (read as `legacy_phrase`) and are honoured until expiry. Limit: an agent with shell access can also run `grant`
   (cooperating-agent safeguard against accidental or pasted-text grants, not a hostile same-user agent). Same-user boundary: `granted_by` is an unsigned, self-asserted label. Besides running `grant`, an agent can write `authority.json` directly (Write or a shell redirect, with any `granted_by` or none) or touch the legacy `crack_on_active` flag (no expiry, still honoured), and nothing guards those paths; the crack-on hint tells agents not to grant.
 - Baseline note: the old 103 fires / 5 blocks figure (`docs/graph-alignment-measurement.md`) came from discipline-log

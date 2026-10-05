@@ -50,6 +50,8 @@ def safe_session(session_id: object) -> bool:
         and "/" not in session_id
         and ".." not in session_id
         and "\0" not in session_id
+        and "$" not in session_id  # an unsubstituted ${CLAUDE_SESSION_ID} must fail loudly, not bind a dead id
+        and "{" not in session_id
     )
 
 

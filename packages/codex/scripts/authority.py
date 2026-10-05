@@ -158,7 +158,7 @@ def main(argv: list[str] | None = None) -> int:
         args.session = args.session or os.environ.get("CLAUDE_CODE_SESSION_ID") or ""
     path = authority_path(args.session)
     if path is None:
-        return refuse("authority_refused_unsafe_session", "session id must be nonempty and contain no '/' or '..'")
+        return refuse("authority_refused_unsafe_session", "session id must be nonempty, without '/', '..', '$', '{'")
     if args.command in ("grant", "create"):
         return grant(args, path)
     current = read_authority(args.session)
