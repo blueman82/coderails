@@ -101,7 +101,12 @@ agent text tells it to report that step UNSUPPORTED; it is never handed a shell.
 **Identity gate.** `hooks/scripts/subagent_identity_gate.py` (registered right after `reviewer_bash_allowlist`) denies a Bash
 call with `agent_id` present and `agent_type` absent/blank in a graph-bound session: reason `bash_agent_type_absent`. It
 lives in its own hook; `loop_dispatch_guard.py` is not touched. Claude only. It is a cooperating-agent safeguard: it
-relies on the harness populating `agent_id`, and a session with no `progress.json` is out of its scope.
+relies on the harness populating `agent_id`, and a session with no `progress.json` is out of its scope. It denies only
+when tool is Bash, `agent_id` is present, `agent_type` is blank and the session is graph-bound; it allows when
+`session_id` is missing/`?`, `progress.json` is missing/unreadable/without `graph`, `agent_id` is omitted, or the tool is
+not Bash. It is not "fail-closed" in general. Claude role binding is also not a forced route: a present `agent_type`
+(including `general-purpose`, which keeps Bash) passes untouched, so dispatching a guarded role by `subagent_type`
+depends on lane A's `loop_dispatch_guard` (not changed here) and is otherwise a cooperating-orchestrator convention.
 
 **Codex.** Each guarded role TOML carries `[features]` / `shell_tool = false` after the instructions string (a table
 before `developer_instructions` would swallow it) and keeps `sandbox_mode = "read-only"`; the validator requires both.
@@ -115,6 +120,10 @@ The Codex plugin manifest declares no `mcpServers`: a manifest server would be i
 Codex's `mcpServers` handling could not be exercised offline here, so a native Codex child of a guarded role has the
 shell off and no capability tools and must report file/history checks UNSUPPORTED; route real work through the role
 session.
+
+Accepted limit (review finding): `scripts/installer/codex.py` is untouched, so the launcher is the only Codex route to
+the typed tools; the plan's installer-managed read-only reviewer `mcp_servers` block is not built because it would be
+inherited by every native child. The role-TOML `[features]` block is config asserted, not observed.
 
 Stated limits of the Codex path (not hidden): (1) The role session is the built alternative, not a forced route. Nothing
 in the installer or the agent flow stops an orchestrator running a native Codex child or a plain `codex exec`, and Codex
