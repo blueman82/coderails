@@ -14,7 +14,7 @@ import graph_convert
 import graph_spec
 from graph_vocab import DISPOSITION_KINDS, STOP_CATEGORIES, STOP_REASON_CODES, disposition_report
 
-from hooks.scripts.lib import graph_controller, graph_recovery, graph_stops
+from hooks.scripts.lib import graph_controller, graph_decisions, graph_recovery, graph_stops
 from hooks.scripts.lib import graph_dispatch as dispatch
 from hooks.scripts.lib.graph_evidence import object_value
 from hooks.scripts.lib.graph_executor import graph_semantics, load, transition, validate_state
@@ -45,6 +45,7 @@ def parser() -> argparse.ArgumentParser:
         "verify-completion",
         "convert",
         "disposition-audit",
+        "record-decision",
     ):
         command = commands.add_parser(name)
         command.add_argument("state", type=Path)
@@ -93,6 +94,7 @@ def parser() -> argparse.ArgumentParser:
             "hard-stop",
             "authorize-dispatch",
             "record-unit",
+            "record-decision",
             "complete",
             "verify-completion",
             "recover-wave",
@@ -102,6 +104,11 @@ def parser() -> argparse.ArgumentParser:
         if name in {"respawn-stale", "hard-stop"}:
             command.add_argument("--node", required=True)
             command.add_argument("--reason", required=True)
+        if name == "record-decision":
+            for flag in ("--phase", "--decision", "--chosen"):
+                command.add_argument(flag, required=True)
+            command.add_argument("--flip-condition", help="what would change this decision")
+            command.add_argument("--worker-status-seq", type=int, help="mark this worker_statuses row resolved")
         if name == "authorize-dispatch":
             command.add_argument("--prompt", required=True)
             command.add_argument("--subagent-type", required=True)
@@ -236,6 +243,10 @@ def main() -> int:
             }
         elif args.command == "summarize":
             output = graph_recovery.summarize(load(args.state))
+        elif args.command == "record-decision":
+            typed: dict[str, str | None] = {"phase": args.phase, "decision": args.decision, "chosen": args.chosen}
+            typed["flip_condition"] = args.flip_condition
+            output = graph_decisions.record_decision(args.state, args.session, typed, args.worker_status_seq)
         elif args.command == "disposition-audit":
             report = disposition_report(load(args.state).get("work_units"))
             output = report

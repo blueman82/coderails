@@ -3,7 +3,8 @@
 
 Pure (stdlib, py3.9) and mirrored byte-for-byte into the Codex plugin. graph_semantics stays untouched: both providers'
 `record_wave` call `prepare()` first, hand the translated results to the unchanged core, then `record_into()` and a
-`graph_stops` row on the post-record state, all inside the one locked write.
+`graph_stops` row on the post-record state, all inside the one locked write. `append_decision()` is the pure core of
+`graph.py record-decision`, which answers a recorded status.
 
 A worker that must stop for a human returns one of STATUSES instead of an {outcome, evidence} result. `prepare()`
 rejects a malformed one (the whole report, atomically) and translates a valid one to core outcome `failed`, which
@@ -13,6 +14,8 @@ record has `final_report_required` must carry a valid `final_report`; it is stri
 
 from __future__ import annotations
 
+import copy
+from datetime import datetime, timezone
 from typing import Any, cast
 
 STATUSES = ("NEEDS_DECISION", "OUTSIDE_SCOPE", "IRREVERSIBLE_ACTION")
@@ -209,6 +212,40 @@ def stop_for(statuses: list[dict[str, Any]]) -> tuple[str, str, str]:
     category, code = next((pair for pair in pairs if pair[0] == "approval-gate"), pairs[0])
     reason = "worker status: " + "; ".join(f"{s['node']} {s['status']} ({s['payload']['summary']})" for s in statuses)
     return category, code, reason
+
+
+def append_decision(
+    state: dict[str, Any], session: str, fields: dict[str, str | None], worker_status_seq: int | None = None
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Return (proposed state, row) with one typed row appended to `decisions_absorbed`; writes nothing.
+
+    `fields` carries phase, decision, chosen and optionally flip_condition (all typed flags, no prose parsing). With
+    `worker_status_seq` the named `worker_statuses` row is marked resolved. The revision is not bumped: a decision
+    is not a graph change. Raises WorkerResultError with a `record_decision_refused_*` code.
+    """
+    if state.get("session_id") != session:
+        raise WorkerResultError("record_decision_refused_foreign", "session does not own this graph")
+    for name, value in fields.items():
+        if (value is not None or name != "flip_condition") and not _text(value):
+            raise WorkerResultError("record_decision_refused_field", f"--{name.replace('_', '-')} must be non-blank")
+    ledger = state.get("decisions_absorbed", [])
+    if not isinstance(ledger, list) or not all(isinstance(row, dict) for row in cast("list[object]", ledger)):
+        raise WorkerResultError("record_decision_refused_state", "decisions_absorbed must be an array of objects")
+    proposed = copy.deepcopy(state)
+    rows = cast("list[dict[str, Any]]", proposed.setdefault("decisions_absorbed", []))
+    seq = max((row["seq"] for row in rows if isinstance(row.get("seq"), int)), default=0) + 1
+    row: dict[str, Any] = {"seq": seq}
+    row.update({key: value.strip() for key, value in fields.items() if value is not None})
+    if worker_status_seq is not None:
+        row["worker_status_seq"] = worker_status_seq
+        statuses = _items(proposed.get("worker_statuses") or []) or []
+        named = [status for status in statuses if status.get("seq") == worker_status_seq]
+        if not named or named[0].get("decision_pending") is not True:
+            raise WorkerResultError("record_decision_refused_status", f"no pending worker status {worker_status_seq}")
+        named[0].update(decision_pending=False, resolved_by_decision=seq)
+    row.update(revision=state["revision"], recorded_at=datetime.now(timezone.utc).isoformat(timespec="seconds"))
+    rows.append(row)
+    return proposed, row
 
 
 def to_decision_request(result: dict[str, Any]) -> dict[str, Any]:

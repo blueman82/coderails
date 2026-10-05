@@ -417,8 +417,15 @@ See [graph specification recovery](RUNBOOK-GRAPH-SPEC.md).
   `failed` (one retry consumed: the core has no needs-a-human outcome, so three such stops exhaust the node) and ONE typed
   stop row is written in the same save (`awaiting-input/needs_human_input` for `NEEDS_DECISION`, `approval-gate/needs_approval`
   for `OUTSIDE_SCOPE` and `IRREVERSIBLE_ACTION`; approval outranks input when a wave returns both). The Stop guard releases
-  that row once. Ask the human with `to_decision_request()`; `python3 scripts/lib/worker_counters.py` reports
-  `pending_statuses` (rows still `decision_pending`).
+  that row once. Ask the human with `to_decision_request()`, then log the answer with `graph.py record-decision <state>
+  --session S --phase P --decision D --chosen C [--flip-condition F] --worker-status-seq <seq>`: it appends one typed row
+  to `decisions_absorbed` and marks that status resolved. `python3 scripts/lib/worker_counters.py` reports
+  `pending_statuses` (rows still `decision_pending`) and `decision_recorded`.
+- `record-decision` says `record_decision_refused_<foreign|field|state|status>`: the session does not own the graph, a
+  flag is blank, `decisions_absorbed` is not an array of objects, or `--worker-status-seq` names no pending status
+  (unknown or already resolved). Nothing is written. It does not bump the revision. Limits: `phase`, `decision` and
+  `chosen` are free text the caller types (no enum, no check against the graph); hand-appended `{phase, decision}` rows
+  stay valid and unnumbered; a same-user agent can write any row.
 - Limits: shape is checked, truth is not (a worker can write any claim); only results of dispatches with a begin-wave
   record require the report, so a pre-conversion state behaves as before; `check_confidence_labels` and
   `check_verify_loop` stay advisory lints on the orchestrator's own text.

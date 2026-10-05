@@ -164,6 +164,36 @@ class FinalReportAndPrepareTests(unittest.TestCase):
         self.assertEqual(ws.stop_for(statuses)[:2], ("approval-gate", "needs_approval"))
         self.assertEqual(ws.stop_for(statuses[:1])[:2], ("awaiting-input", "needs_human_input"))
 
+    def test_append_decision_row_and_refusals(self) -> None:
+        """The pure ledger core: typed row, resolved status, no input mutation, and each refusal code."""
+        state: dict[str, Any] = {
+            "session_id": "s",
+            "revision": 4,
+            "worker_statuses": [{"seq": 1, "decision_pending": True}],
+        }
+        fields: dict[str, str | None] = {"phase": " 2.6 ", "decision": "d", "chosen": "c", "flip_condition": None}
+        proposed, row = ws.append_decision(state, "s", fields, 1)
+        self.assertEqual(
+            list(row), ["seq", "phase", "decision", "chosen", "worker_status_seq", "revision", "recorded_at"]
+        )
+        self.assertEqual((row["seq"], row["phase"], row["revision"]), (1, "2.6", 4))
+        self.assertEqual(
+            proposed["worker_statuses"][0], {"seq": 1, "decision_pending": False, "resolved_by_decision": 1}
+        )
+        self.assertNotIn("decisions_absorbed", state)
+        bad: list[tuple[dict[str, Any], str, dict[str, str | None], int | None]] = [
+            (state, "other", fields, None),
+            (state, "s", {**fields, "chosen": " "}, None),
+            ({**state, "decisions_absorbed": "torn"}, "s", fields, None),
+            (state, "s", fields, 7),
+            (proposed, "s", fields, 1),
+        ]
+        codes = ["foreign", "field", "state", "status", "status"]
+        for (current, session, given, seq), code in zip(bad, codes):
+            with self.assertRaises(ws.WorkerResultError) as caught:
+                ws.append_decision(current, session, given, seq)
+            self.assertEqual(caught.exception.code, f"record_decision_refused_{code}")
+
     def test_both_record_wave_paths_call_prepare(self) -> None:
         """Negative control anchor: deleting the pre-processor call from a provider fails here and in the CLI tests."""
         for path in (

@@ -350,7 +350,6 @@ def main() -> int:
             output, code = graph_ledger.run(args)
             if code:
                 print(json.dumps(output, sort_keys=True))
-                print("graph: preserve-compat units must carry a named blocker and removal ticket", file=sys.stderr)
                 return code
         elif args.command in {"respawn-stale", "hard-stop"}:
             output = transition(args.state, args.session, args.command.replace("-", "_"), args.node, args.reason)
