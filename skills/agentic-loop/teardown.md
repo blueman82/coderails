@@ -4,7 +4,7 @@ Detail-carrier for Phase 13's teardown. The main skill keeps the imperative (run
 order, before the `complete` declaration); this file is the field spec and the mechanics you
 consult **while writing the retro**.
 
-`loop_stall_guard` blocks a `complete` declaration when `retro.json` is absent, malformed, or
+`loop_stall_guard` blocks a recorded `complete` stop (`graph.py stop --category complete`; the final line is a rendering that hooks never read) when `retro.json` is absent, malformed, or
 below `schema_version` 1 (the hook accepts `schema_version >= 1`, forward-compatible with the cost
 fields added at 2) — so the retro must be written before the declaration. It separately blocks
 when a sibling `proof.json` exists but any of its frozen proofs is unexecuted-in-transcript or
@@ -34,7 +34,7 @@ than an honest unscored list because it is more likely to be trusted uncriticall
 
 **The two core facts:**
 
-- **`LOOP-STOP` category counts, broken down by type** — the per-category counts of this loop's `LOOP-STOP` declarations (`progress.json` `loop_stop_counts`: `hard-stop`, `approval-gate`, `awaiting-input`, `complete`). HOOK-OWNED — the `loop_stall_guard` hook increments it on every consumed stop (a recorded `progress.json` `stops[]` row, else the legacy text declaration); `stops[]` is the model-written intent, `loop_stop_counts` is the hook-owned count of consumed stops. Read it as-is, do not compute or edit it yourself. Report the raw breakdown with no verdict attached. A high `awaiting-input` count is worth the human's attention, but this section states the count, not a judgement on it.
+- **`LOOP-STOP` category counts, broken down by type** — the per-category counts of this loop's recorded stops (`progress.json` `loop_stop_counts`: `hard-stop`, `approval-gate`, `awaiting-input`, `complete`). HOOK-OWNED — the `loop_stall_guard` hook increments it on every consumed stop (a recorded `progress.json` `stops[]` row; there is no text fallback); `stops[]` is the model-written intent, `loop_stop_counts` is the hook-owned count of consumed stops. Read it as-is, do not compute or edit it yourself. Report the raw breakdown with no verdict attached. A high `awaiting-input` count is worth the human's attention, but this section states the count, not a judgement on it.
 - **Decisions absorbed** — a flat, unscored list of in-scope decisions the loop made autonomously without asking (e.g. a Phase 2.5 design-fork auto-adopted, a Phase 2.6 disposition defaulted to clean-break, a Phase 2.8 routing assignment set, a Phase 5 disconfirm-skip, a Phase 6 in-scope action taken without a check-in). No self-justification text per entry, no automated "this looks calibrated" stamp — just what was decided and where (phase/work-unit). COPIED VERBATIM from `progress.json`'s `decisions_absorbed` array, chronological (oldest first) — never reconstructed from conversation memory, which is exactly the kind of after-the-fact self-report this phase exists to avoid.
 
 **Also report, unscored:**
@@ -144,7 +144,7 @@ path. Runbook: `docs/RUNBOOK.md`, "Memory silently using Markdown".
    Never write `status: "complete"` via a bare atomic update — that leaves
    `completed_marker` unstamped at its prior value (permanently 0 for a loop's first completion),
    which false-positives `loop_state_guard`'s `stale_complete_rearmed` block on every later turn of
-   the same session. Then run `graph.py stop <state> --session <session_id> --category complete --reason-code work_complete --reason "<reason>"` and declare `LOOP-STOP: complete`. First apply
+   the same session. Then run `graph.py stop <state> --session <session_id> --category complete --reason-code work_complete --reason "<reason>"` and end with the rendering line `LOOP-STOP: complete`. First apply
    `superpowers:verification-before-completion` to the orchestrator's own completion claim
    (SKILL.md's Phase 13 links the `finishing-out.md` detail). The `loop_stall_guard` proof gate
    blocks the declaration itself if Step 1 was skipped or left a proof unexecuted/failed — it does

@@ -27,7 +27,7 @@ For a graph with three or more work units, or any cross-unit dependency, apply `
 
 Before dispatching a writing node, invoke `superpowers:using-git-worktrees`. Use Coderails `prep` to perform the resulting worktree setup; it creates the worktree and, for a non-Git folder, the local `main` repository and initial commit it needs. Do not add a remote.
 
-Before ending a turn on a hard-stopped graph, record the stop: `python3 "$SKILL_DIR/scripts/graph.py" stop "$STATE" --session "$SESSION" --category hard-stop --reason-code node_hard_stop --reason "<reason>"`. The Stop guard consumes that recorded row once; the final `LOOP-STOP: waiting-on-human` line is the legacy fallback. Run `python3 "$SKILL_DIR/scripts/graph.py" inspect "$STATE"`. Inspection is the resume source of truth: loop and session identity, revision, active wave, running nodes, ready nodes, and hard-stop reason. Never reconstruct these from chat history.
+Before ending any turn that pauses an active loop, run `graph.py stop`: `python3 "$SKILL_DIR/scripts/graph.py" stop "$STATE" --session "$SESSION" --category <hard-stop|approval-gate|awaiting-input> --reason-code <code> --reason "<reason>"`. The Stop guard consumes that recorded row once (same vocabulary as Claude, from the shared `graph_vocab.py`); a `complete` row is never consumed and goes through `complete` / `verify-completion`. The final line is a rendering that hooks never read: without a row the guard blocks and traces `stop_row_missing`. Run `python3 "$SKILL_DIR/scripts/graph.py" inspect "$STATE"`. Inspection is the resume source of truth: loop and session identity, revision, active wave, running nodes, ready nodes, and hard-stop reason. Never reconstruct these from chat history.
 
 ## Run one wave
 

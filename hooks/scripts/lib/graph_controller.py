@@ -8,6 +8,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import re
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -15,6 +16,9 @@ from typing import Any
 from .graph_executor import graph_semantics, transition
 from .graph_recovery import RecoveryRefusedError, trace
 from .loop_state_common import atomic_progress_update
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "skills/agentic-loop/scripts"))
+from graph_convert import STATE_MINOR
 
 UNIT_ID = re.compile(r"[1-9][0-9]*")
 JOIN = "J12-all-units"
@@ -45,7 +49,16 @@ def _stub(session: str, loop_id: str, prompt: str, marker: object) -> dict[str, 
         "authorising_prompt_raw": prompt,
         "completed_marker": marker,
         "work_units": {},
-        "graph": {"nodes": {}, "edges": [], "joins": {}, "active_wave": None, "hard_stop": None},
+        "stops": [],
+        "state_minor": STATE_MINOR,
+        "graph": {
+            "nodes": {},
+            "edges": [],
+            "joins": {},
+            "active_wave": None,
+            "hard_stop": None,
+            "wave_history": {},
+        },
     }
 
 

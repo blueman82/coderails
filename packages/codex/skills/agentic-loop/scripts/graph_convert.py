@@ -1,0 +1,109 @@
+"""Versioned progress.json conversion shared by both providers; materialized byte-for-byte.
+
+Pure: `convert` maps one parsed state to the current minor or refuses with a closed code. It never guesses: any state
+whose meaning is not certain is refused and the provider CLI leaves the file untouched.
+"""
+
+from __future__ import annotations
+
+import copy
+from collections.abc import Callable
+from pathlib import Path
+from typing import Any, cast
+
+STATE_MINOR = 1
+CODES = (
+    "state_not_object",
+    "unknown_schema",
+    "minor_invalid",
+    "minor_future",
+    "foreign_session",
+    "graph_not_object",
+    "malformed_stops",
+    "malformed_work_units",
+    "active_wave_ambiguous",
+    "backup_exists",
+    "invalid_result",
+)
+BACKUP_SUFFIX = ".pre-convert"
+
+
+class ConvertRefusedError(ValueError):
+    """A deterministic refusal; `code` is one of CODES and the trace reason is convert_refused_<code>."""
+
+    def __init__(self, code: str, message: str) -> None:
+        """Keep the closed code beside the human message."""
+        super().__init__(f"{code}: {message}")
+        self.code = code
+
+
+def _graph(state: dict[str, Any]) -> dict[str, Any]:
+    graph = state.get("graph")
+    if not isinstance(graph, dict):
+        raise ConvertRefusedError("graph_not_object", "graph must be an object")
+    return cast(dict[str, Any], graph)
+
+
+def _v0_to_v1(state: dict[str, Any]) -> None:
+    """Add the typed containers v1 readers rely on; an in-flight wave has no recoverable history, so refuse."""
+    graph = _graph(state)
+    history = graph.get("wave_history", {})
+    active = graph.get("active_wave")
+    if not isinstance(history, dict):
+        raise ConvertRefusedError("active_wave_ambiguous", "wave_history must be an object")
+    if active is not None and (
+        not isinstance(active, dict) or cast(dict[str, Any], active).get("wave_id") not in history
+    ):
+        raise ConvertRefusedError(
+            "active_wave_ambiguous", "a wave is in flight with no wave_history entry: record or recover it first"
+        )
+    graph.setdefault("wave_history", {})
+    state.setdefault("stops", [])
+    if not isinstance(state["stops"], list):
+        raise ConvertRefusedError("malformed_stops", "stops must be an array")
+    if "updated_at" not in state and isinstance(state.get("created"), str):
+        state["updated_at"] = state["created"]
+
+
+CONVERSIONS: tuple[tuple[int, Callable[[dict[str, Any]], None]], ...] = ((0, _v0_to_v1),)
+
+
+def convert(state: object, session: str | None = None) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Return (converted copy, report); the input is never mutated and a current state is returned unchanged."""
+    if not isinstance(state, dict):
+        raise ConvertRefusedError("state_not_object", "state must be an object")
+    source = cast(dict[str, Any], state)
+    if source.get("schema_version") != 3:
+        raise ConvertRefusedError("unknown_schema", f"unknown schema_version {source.get('schema_version')!r}")
+    if session is not None and source.get("session_id") != session:
+        raise ConvertRefusedError("foreign_session", "session does not own this state")
+    minor = source.get("state_minor", 0)
+    if type(minor) is not int or minor < 0:
+        raise ConvertRefusedError("minor_invalid", "state_minor must be a non-negative integer")
+    if minor > STATE_MINOR:
+        raise ConvertRefusedError("minor_future", f"state_minor {minor} is newer than this tool ({STATE_MINOR})")
+    _graph(source)
+    stops, units = source.get("stops", []), source.get("work_units", {})
+    if not isinstance(stops, list) or not all(isinstance(row, dict) for row in cast(list[object], stops)):
+        raise ConvertRefusedError("malformed_stops", "stops must be an array of objects")
+    if not isinstance(units, dict):
+        raise ConvertRefusedError("malformed_work_units", "work_units must be an object")
+    result = copy.deepcopy(source)
+    steps = [f"v{at}->v{at + 1}" for at, _ in CONVERSIONS if at >= minor]
+    for at, step in CONVERSIONS:
+        if at >= minor:
+            step(result)
+    if steps:
+        result["state_minor"] = STATE_MINOR
+    return result, {"from": minor, "to": STATE_MINOR, "changed": bool(steps), "steps": steps}
+
+
+def write_backup(path: Path) -> Path:
+    """Exclusively create <path>.pre-convert holding the original bytes; refuse if it exists, never delete."""
+    backup = path.with_name(path.name + BACKUP_SUFFIX)
+    try:
+        with backup.open("xb") as stream:
+            stream.write(path.read_bytes())
+    except FileExistsError as error:
+        raise ConvertRefusedError("backup_exists", f"{backup.name} already exists: inspect it first") from error
+    return backup

@@ -10,10 +10,15 @@ from pathlib import Path
 from typing import Any, cast
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+import graph_convert
+from graph_vocab import STOP_CATEGORIES, STOP_REASON_CODES
+
 from hooks.scripts.lib import graph_controller, graph_recovery, graph_stops
 from hooks.scripts.lib import graph_dispatch as dispatch
 from hooks.scripts.lib.graph_evidence import object_value
-from hooks.scripts.lib.graph_executor import graph_semantics, load, transition
+from hooks.scripts.lib.graph_executor import graph_semantics, load, transition, validate_state
+from hooks.scripts.lib.graph_recovery import trace
+from hooks.scripts.lib.loop_state_common import atomic_progress_update
 
 
 def parser() -> argparse.ArgumentParser:
@@ -36,6 +41,7 @@ def parser() -> argparse.ArgumentParser:
         "authorize-dispatch",
         "complete",
         "verify-completion",
+        "convert",
     ):
         command = commands.add_parser(name)
         command.add_argument("state", type=Path)
@@ -57,12 +63,16 @@ def parser() -> argparse.ArgumentParser:
             command.add_argument("--depends-on", action="append", default=[])
             command.add_argument("--join", action="store_true")
             command.add_argument("--manifest", action="append", default=[])
+        if name == "convert":
+            mode = command.add_mutually_exclusive_group()
+            mode.add_argument("--check", action="store_true", help="report the conversion without writing")
+            mode.add_argument("--write", action="store_true", help="convert in place (the default)")
         if name == "recover-wave":
             command.add_argument("--lease-seconds", type=int, default=900)
             command.add_argument("--report-only", action="store_true")
         if name == "stop":
-            command.add_argument("--category", required=True, choices=graph_stops.STOP_CATEGORIES)
-            command.add_argument("--reason-code", required=True, choices=graph_stops.STOP_REASON_CODES)
+            command.add_argument("--category", required=True, choices=STOP_CATEGORIES)
+            command.add_argument("--reason-code", required=True, choices=STOP_REASON_CODES)
             command.add_argument("--reason", required=True)
         if name in {
             "stop",
@@ -73,6 +83,7 @@ def parser() -> argparse.ArgumentParser:
             "complete",
             "verify-completion",
             "recover-wave",
+            "convert",
         }:
             command.add_argument("--session", required=True)
         if name in {"respawn-stale", "hard-stop"}:
@@ -111,6 +122,45 @@ def record_stop(path: Path, session: str, category: str, reason_code: str, reaso
 
     transition(path, update)
     return output
+
+
+class _NoWriteError(ValueError):
+    """Abort the locked update without writing: a check run or an already-current state."""
+
+
+def convert_state(path: Path, session: str, check: bool) -> dict[str, Any]:
+    """Convert progress.json to the current minor under the sole Claude lock; refuse ambiguity, never guess."""
+    inputs: dict[str, Any] = {"session": session, "check": check}
+    report: dict[str, Any] = {}
+    backup: list[Path] = []
+    refusal: list[graph_convert.ConvertRefusedError] = []
+
+    def update(raw: dict[str, Any]) -> dict[str, Any]:
+        try:
+            converted, found = graph_convert.convert(raw, session)
+            report.update(found)
+            if check or not found["changed"]:
+                raise _NoWriteError
+            try:
+                validate_state(converted)
+            except ValueError as error:
+                raise graph_convert.ConvertRefusedError("invalid_result", str(error)) from error
+            backup.append(graph_convert.write_backup(path))
+            return converted
+        except graph_convert.ConvertRefusedError as error:
+            refusal.append(error)
+            raise
+
+    saved = atomic_progress_update(path, update)
+    if refusal:
+        trace(path, {"session_id": session}, "refused", f"convert_refused_{refusal[0].code}", inputs, [], "convert")
+        raise refusal[0]
+    if not saved and not report:
+        raise ValueError("progress.json is locked, unreadable or not an object")
+    if saved:
+        load(path)  # re-validate what was just written; the .pre-convert backup remains for manual recovery
+    trace(path, {"session_id": session}, "ok", "convert_ok", inputs, [], "convert")
+    return {**report, "check": check, "backup": backup[0].name if backup else None}
 
 
 def record_unit(path: Path, session: str, unit_id: str, status: str, detail: str) -> dict[str, Any]:
@@ -177,6 +227,8 @@ def main() -> int:
             output = native_transition(args.state, args.session, args.command.replace("-", "_"), args.node, args.reason)
         elif args.command == "stop":
             output = record_stop(args.state, args.session, args.category, args.reason_code, args.reason)
+        elif args.command == "convert":
+            output = convert_state(args.state, args.session, args.check)
         elif args.command == "authorize-dispatch":
             output = dispatch.authorize_dispatch(args.state, args.session, args.prompt, args.subagent_type)
         else:

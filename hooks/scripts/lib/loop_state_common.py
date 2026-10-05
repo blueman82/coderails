@@ -21,7 +21,8 @@ from hooks.scripts.lib.agentic_loop_path import resolve_path
 from hooks.scripts.lib.dir_lock import acquire_dir_lock, release_dir_lock
 from hooks.scripts.lib.discipline_common import content, records, tool_uses
 
-LOOP_STOP_VOCAB = "hard-stop|approval-gate|awaiting-input|complete"
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "skills/agentic-loop/scripts"))
+from graph_vocab import STOP_CATEGORIES  # the one shared enum, materialized beside graph_semantics
 
 
 def log(message: str) -> None:
@@ -167,12 +168,6 @@ def loop_active_incomplete(transcript: str, cwd: str, session: str) -> bool:
     return count > 0 and not load_progress(cwd, session, count).complete
 
 
-def stop_category(text: str) -> str:
-    """Legacy text fallback: the last anchored declaration's category; an inline mention is prose (H06)."""
-    matches = re.findall(rf"^\s*LOOP-STOP:\s*({LOOP_STOP_VOCAB})(?:[^a-z0-9]|$)", text, re.I | re.M)
-    return matches[-1] if matches else ""
-
-
 def consume_stop(data: dict[str, Any], seq: object) -> None:
     """Mark exactly one unconsumed stop row consumed; raise so the enclosing atomic write is abandoned otherwise."""
     rows = cast(list[object], data.get("stops") or [])
@@ -196,7 +191,7 @@ def recorded_stop(data: dict[str, Any]) -> dict[str, Any] | None:
         if (
             stop.get("consumed") is False
             and stop.get("revision") == data.get("revision")
-            and stop.get("category") in LOOP_STOP_VOCAB.split("|")
+            and stop.get("category") in STOP_CATEGORIES
         ):
             return stop
     return None

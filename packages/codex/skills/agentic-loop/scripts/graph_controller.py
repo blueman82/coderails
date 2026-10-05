@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any, cast
 
 import graph_semantics
+from graph_convert import STATE_MINOR
 from graph_io import load as _load
 from graph_io import locked as _locked
 from graph_io import write as _write
@@ -44,7 +45,16 @@ def _stub(session: str, loop_id: str, prompt: str) -> dict[str, Any]:
         "created": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "authorising_prompt_raw": prompt,
         "work_units": {},
-        "graph": {"nodes": {}, "edges": [], "joins": {}, "active_wave": None, "hard_stop": None},
+        "stops": [],
+        "state_minor": STATE_MINOR,
+        "graph": {
+            "nodes": {},
+            "edges": [],
+            "joins": {},
+            "active_wave": None,
+            "hard_stop": None,
+            "wave_history": {},
+        },
     }
 
 
