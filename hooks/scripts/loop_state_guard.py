@@ -17,6 +17,7 @@ from hooks.scripts.lib.loop_state_common import (
     load_progress,
     log,
     read_state,
+    record_absent_block,
     stable_invocations,
     unstubbed_grace,
 )
@@ -84,6 +85,7 @@ def main() -> int:
         return 0
     if not state.path.is_file():
         reason = "absent"
+        record_absent_block(state)
         message = (
             f"[loop-state-guard] Agentic loop active but no progress.json found.\n"
             f"Create it at this exact path (copy it verbatim — never compute the path yourself):\n  {state.path}\n"

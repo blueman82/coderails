@@ -17,6 +17,9 @@ from datetime import date
 from pathlib import Path
 from typing import cast
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from hooks.scripts.lib.context_manifest import route_for_payload, trace  # noqa: E402
+
 READ_TIMEOUT_SECONDS = 5.0
 
 DISCIPLINE_REMINDER = (
@@ -87,7 +90,17 @@ def build_context(payload: str, cwd: str) -> str:
 def main() -> int:
     """Print the UserPromptSubmit hookSpecificOutput JSON and return 0."""
     payload = read_stdin_payload()
-    ctx = build_context(payload, os.getcwd())
+    try:
+        data: object = json.loads(payload) if payload else {}
+    except json.JSONDecodeError:
+        data = {}
+    cwd = cast(dict[str, object], data).get("cwd") if isinstance(data, dict) else None
+    ctx = build_context(payload, cwd if isinstance(cwd, str) and cwd else os.getcwd())
+    hint, reason, session_id = route_for_payload(payload, "coderails")
+    if hint:
+        ctx = f"{ctx} | {hint}"
+    if reason != "route_none":  # ponytail: no row per unrouted prompt; unbounded trace growth for no signal
+        trace("context_route", "ok" if hint else "fail_open", reason, session_id)
     output = {"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": ctx}}
     print(json.dumps(output))
     return 0

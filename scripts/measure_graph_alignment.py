@@ -17,6 +17,10 @@ import sys
 from pathlib import Path
 from typing import Any, cast
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from scripts.lib import trace_counters  # noqa: E402
+from scripts.lib.receipt_counters import receipt_summary  # noqa: E402
+
 MEMORY_COUNTERS = Path(__file__).with_name("lib") / "memory_counters.py"
 HOOK_FIELD = re.compile(r"(?:^|\s)hook=([A-Za-z0-9_.-]+)")
 FLAG_FIELDS = ("blocked", "would_block", "warned", "demoted")
@@ -206,8 +210,7 @@ def trace_counts() -> dict[str, Any]:
     seen: set[str] = set()
     by_reason: dict[str, int] = {}
     rows = duplicates = malformed = 0
-    files = {p.resolve() for base in loop_state_roots() for p in base.glob("*/trace.jsonl")}
-    for path in sorted(files):
+    for path in sorted({p.resolve() for base in loop_state_roots() for p in base.glob("*/trace.jsonl")}):
         try:
             lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
         except OSError:
@@ -227,7 +230,8 @@ def trace_counts() -> dict[str, Any]:
                 rows += 1
                 key = f"{row.get('command')}/{row.get('outcome')}/{row.get('reason_code')}"
                 by_reason[key] = by_reason.get(key, 0) + 1
-    return {"rows": rows, "duplicates": duplicates, "malformed": malformed, "by_reason": by_reason}
+    counts = {"rows": rows, "duplicates": duplicates, "malformed": malformed, "receipts": receipt_summary(by_reason)}
+    return {**counts, "by_reason": dict(sorted(by_reason.items()))}
 
 
 def recovery_counters() -> dict[str, Any]:
@@ -336,29 +340,9 @@ def lock_events() -> dict[str, int]:
 
 def eval_trace_counts(extra: list[Path]) -> dict[str, Any]:
     """Count eval_trace.jsonl rows (command|outcome|reason_code) deduped by event_id; no row content is kept."""
-    files = [f for root in loop_state_roots() for f in sorted(root.glob("*/*/eval_trace.jsonl"))] + extra
-    seen: set[str] = set()
-    by_reason: dict[str, int] = {}
-    duplicates = malformed = 0
-    for file in dict.fromkeys(files):
-        try:
-            lines = file.read_text(encoding="utf-8").splitlines()
-        except OSError:
-            continue
-        for line in lines:
-            try:
-                row = as_dict(json.loads(line))
-                event_id = str(row["event_id"])
-                key = "|".join(str(row[k]) for k in ("command", "outcome", "reason_code"))
-            except (ValueError, KeyError):
-                malformed += 1
-                continue
-            if event_id in seen:
-                duplicates += 1
-                continue
-            seen.add(event_id)
-            by_reason[key] = by_reason.get(key, 0) + 1
-    return {"events": len(seen), "duplicates": duplicates, "malformed": malformed, "by_reason": by_reason}
+    return trace_counters.eval_trace_counts(
+        [f for r in loop_state_roots() for f in sorted(r.glob("*/*/eval_trace.jsonl"))] + extra
+    )
 
 
 def measure(root: Path, extra_traces: list[Path] | None = None) -> dict[str, Any]:
@@ -378,6 +362,9 @@ def measure(root: Path, extra_traces: list[Path] | None = None) -> dict[str, Any
         "duplication": duplication(root),
         "lock_events": lock_events(),
         "eval_trace": eval_trace_counts(extra_traces or []),
+        "context": trace_counters.context_counts(
+            [f for r in loop_state_roots() for f in sorted(r.glob("*/trace.jsonl"))]
+        ),
     }
 
 

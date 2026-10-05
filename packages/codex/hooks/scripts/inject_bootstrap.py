@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Inject native Codex skill and graph-resume context at session start."""
+"""Inject the compact context manifest (lib/context_manifest.py) at Codex session start."""
 
 from __future__ import annotations
 
@@ -12,6 +12,8 @@ import time
 from contextlib import suppress
 from pathlib import Path
 from typing import cast
+
+from lib.context_manifest import session_manifest
 
 
 def read_input(timeout_seconds: float = 5.0) -> str:
@@ -59,38 +61,6 @@ def git_output(arguments: list[str]) -> str:
     return result.stdout.strip() if result.returncode == 0 else ""
 
 
-def loop_state_path(cwd: str, session_id: str) -> Path:
-    """Return the canonical graph-state path, with the legacy-state fallback."""
-    safe_session = session_id.replace("/", "_").replace("..", "")
-    root = Path(os.environ.get("CODERAILS_AGENTIC_LOOP_DIR", str(Path.home() / ".coderails" / "agentic-loop")))
-    git_dir = git_output(["-C", cwd, "rev-parse", "--path-format=absolute", "--git-common-dir"])
-    slug_source = git_dir if git_dir.startswith("/") else cwd
-    slug = slug_source.replace("/", "-")
-    canonical = root / slug / safe_session / "progress.json"
-    if canonical.is_file():
-        return canonical
-    candidates = sorted(root.glob(f"*/{safe_session}/progress.json"))
-    return candidates[0] if candidates else canonical
-
-
-def graph_resume(plugin_root: Path, cwd: str, session_id: str) -> str:
-    """Return the established graph-resume text for a valid session and cwd."""
-    if not session_id or not cwd:
-        return ""
-    state = loop_state_path(cwd, session_id)
-    if not state.is_file():
-        return f"no active graph; new graph path: {state}"
-    graph = plugin_root / "skills" / "agentic-loop" / "scripts" / "graph.py"
-    try:
-        result = subprocess.run(
-            [sys.executable, str(graph), "inspect", str(state)], capture_output=True, check=False, text=True
-        )
-    except OSError:
-        result = None
-    inspection = result.stdout.strip() if result is not None and result.returncode == 0 else ""
-    return f"{state}: {inspection or 'invalid graph state; repair before dispatch'}"
-
-
 def legacy_config_found(cwd: str) -> bool:
     """Return whether a startup path has legacy, but no canonical, configuration."""
     git_root = git_output(["-C", cwd, "rev-parse", "--show-toplevel"])
@@ -113,23 +83,11 @@ def legacy_config_found(cwd: str) -> bool:
 
 def main() -> int:
     """Emit the SessionStart additional-context envelope."""
-    payload = payload_object(read_input())
+    raw = read_input()
+    payload = payload_object(raw)
     plugin_root = Path(os.environ.get("PLUGIN_ROOT", str(Path(__file__).resolve().parents[2])))
-    skill = plugin_root / "skills" / "using-coderails" / "SKILL.md"
     cwd = text_field(payload, "cwd")
-    resume = graph_resume(plugin_root, cwd, text_field(payload, "session_id"))
-    if skill.is_file():
-        context = (
-            "Coderails is active. Load coderails-codex:using-coderails before acting, then every "
-            "relevant native skill. Keep the top-level session as the orchestrator and delegate do-work "
-            "tool calls with spawn_agent. "
-            f"Native graph resume: {resume}"
-        )
-    else:
-        context = (
-            "Coderails is active, but its native using-coderails skill is missing at "
-            f"{skill}. Report this before substantive work. Native graph resume: {resume}"
-        )
+    context = session_manifest(raw, plugin_root, "coderails-codex")
     if text_field(payload, "source") == "startup" and cwd and legacy_config_found(cwd):
         context += (
             "\n\nLegacy Coderails workflow configuration found. Run $coderails-codex:init to "

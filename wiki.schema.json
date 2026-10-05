@@ -1,0 +1,5 @@
+{
+  "$comment": "Source of truth for the wiki top-level directories the wiki_taxonomy_gate.py copies allow. AGENTS.md '## Page types' and its structural-directory table must list exactly these (drift test: hooks/scripts/tests/config_docs_drift_test.py).",
+  "page_types": ["commands", "hooks", "skills", "design", "investigations", "sources"],
+  "structural_dirs": ["templates", "assets", "dashboard-runs"]
+}

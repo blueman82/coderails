@@ -175,6 +175,7 @@ class ReviewerAllowlistTests(HookCase):
                 "test_gate.py",
                 "verification_volume_ceiling.py",
                 f"{HOOK}.py",
+                "action_authority_gate.py",  # later pure append; must not precede or reorder the entries above
             ],
         )
 

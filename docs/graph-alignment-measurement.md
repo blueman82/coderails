@@ -119,6 +119,11 @@ Written before interpreting the data above. Each needs a minimum sample so a sma
 - **(b) Not crossed.** Claude injects 6288 bytes (1904 under the line); Codex injects 225 (5089 more are
   loaded on demand, 5314 combined, also under). The multiplier (how many startup, clear and compaction
   events fire) is not in any log, so total injected volume is unmeasured.
+  *Superseded 2026-10-05 (`docs/decisions/2026-10-05-dynamic-context-manifest.md`): the manifest was built anyway.
+  `bootstrap_bytes` before: Claude 6288, Codex 225. After, with an empty payload (static floor): 258 and 258;
+  with an active loop: Claude 499, Codex 486 (measured by running each hook on the fixture loop used in
+  `packages/tests/test_context_manifest.py`; the script's empty payload cannot show the loop-active size).
+  Manifest and route trace rows are counted under `context` in the script output, deduped by event_id.*
 - **(c) Not crossed, and the sample is too small to say it never would be.** 2 divergent of 14 loops with
   both (14.3%), strict and lenient agreeing. That fails the count (2 < 5), the share (14.3% < 25%) and the
   sample floor (14 < 20). Unrelated to the thresholds: 25 loops (39 with a graph, 14 with both) have a graph and no work_units, so
@@ -230,4 +235,23 @@ copy (`packages/codex/hooks/scripts/lib/dir_lock.py`, guarded by `dir_lock_test`
 python3 -m unittest hooks.scripts.tests.dir_lock_test hooks.scripts.tests.lock_recovery_test
 python3 packages/tests/test_codex_ceiling_lock.py
 python3 -m unittest scripts.tests.measure_graph_alignment_test
+```
+
+## Typed stop intent and hook state (measurement note)
+
+`graph.py stop` records a `progress.stops[]` row; `loop_stall_guard` consumes the newest unconsumed row at the current
+revision in the same atomic write that increments the hook-owned `loop_stop_counts`, and falls back to the final
+anchored `LOOP-STOP:` line (trace `legacy_text_parse`). Absent-state grace reads `hook_state.json`
+`ordinals.absent_blocked`, falling back to the discipline.log regex (trace `legacy_log_parse`). The Claude hook honours a recorded row only if `graph.py stop` ran after the last user prompt (else trace
+`stale_stop_row`). The Codex guard writes the same `legacy_text_parse` trace row (command `graph_completion_guard`), so the
+ratio covers both providers; before this change Codex fallbacks appeared only in discipline.log and were not counted.
+Counters live in `scripts/graph_alignment_stops.py`. Flip condition: if `legacy_text_parse` still dominates `stops_consumed` over the
+first few loops, agents are not recording stops; tighten the parse and block text-only stops instead.
+
+**Reproduce.**
+
+```
+python3 scripts/graph_alignment_stops.py --json
+python3 hooks/scripts/tests/loop_stall_guard_test.py && python3 hooks/scripts/tests/loop_state_guard_test.py
+PYTHONPATH=. python3 -m unittest packages/tests/test_provider_stop_record.py scripts/tests/graph_alignment_stops_test.py
 ```

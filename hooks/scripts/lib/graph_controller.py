@@ -106,7 +106,9 @@ def start(path: Path, session: str, loop_id: str, prompt_file: Path) -> dict[str
     return {"status": status, "reason_code": code, "session_id": session, "loop_id": loop_id, "revision": 1}
 
 
-def register_unit(state: dict[str, Any], unit: str, deps: list[str], join: bool) -> dict[str, Any]:
+def register_unit(
+    state: dict[str, Any], unit: str, deps: list[str], join: bool, manifest: list[str] | None = None
+) -> dict[str, Any]:
     """Return a copy of `state` with the work unit, its U3 node, dependency edges and optional J12 input added."""
     node_id = f"U3[{unit}]"
     if not UNIT_ID.fullmatch(unit):
@@ -122,7 +124,7 @@ def register_unit(state: dict[str, Any], unit: str, deps: list[str], join: bool)
     proposed = copy.deepcopy(state)
     proposed["revision"] += 1  # the graph changed: evals frozen at the old revision must go STALE
     graph = proposed["graph"]
-    proposed["work_units"][unit] = {"status": "pending"}
+    proposed["work_units"][unit] = {"status": "pending", **({"manifest": manifest} if manifest else {})}
     fresh: dict[str, Any] = {
         "status": "pending",
         "outcome": "pending",
@@ -143,7 +145,9 @@ def register_unit(state: dict[str, Any], unit: str, deps: list[str], join: bool)
     return proposed
 
 
-def add_unit(path: Path, session: str, loop_id: str, unit: str, deps: list[str], join: bool) -> dict[str, Any]:
+def add_unit(
+    path: Path, session: str, loop_id: str, unit: str, deps: list[str], join: bool, manifest: list[str] | None = None
+) -> dict[str, Any]:
     """Register one work unit and its graph wiring in one locked, kernel-validated save."""
     inputs: dict[str, Any] = {"session": session, "loop_id": loop_id, "unit": unit, "deps": deps, "join": join}
     ident = {"session_id": session, "loop_id": loop_id}
@@ -157,7 +161,7 @@ def add_unit(path: Path, session: str, loop_id: str, unit: str, deps: list[str],
             if state["status"] != "in-progress" or state["graph"]["active_wave"] is not None:
                 message = "add-unit needs an in-progress loop with no active wave"
                 raise RecoveryRefusedError("add_unit_refused_state", message)
-            proposed = register_unit(state, unit, deps, join)
+            proposed = register_unit(state, unit, deps, join, manifest)
             try:
                 graph_semantics.validate(proposed)
             except graph_semantics.GraphSemanticError as error:
