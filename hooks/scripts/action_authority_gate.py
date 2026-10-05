@@ -5,8 +5,9 @@ Config `action_authority`: off | advisory | enforce; absent, unreadable or anyth
 Only `off` is silent (exit 0). Advisory traces and warns, never denies. Enforce denies only when no receipt
 verifies. Any own error fails open with reason action_authority_failed_open. It does not touch pr_merge_gate,
 destructive_bash_gate or enforce_pr_workflow. Limits: the hash covers only the command text seen here (not aliases,
-functions, eval/xargs, scripts that push; sudo/subshell/bash -c/gh api wrappers are unwrapped by guarded_segments, an
-env assignment prefix is kept and makes the command unbindable). Each enforce use is
+functions, xargs, scripts that push; sudo/subshell/bash -c/eval/gh api wrappers, quoting and absolute program paths
+are normalised by guarded_segments, an env assignment prefix is kept and makes the command unbindable). The mode is
+read from the in-repo config, which the agent can edit: `off` is a same-user switch, not a boundary. Each enforce use is
 claimed by an atomic O_EXCL marker and the claim, not the verify, decides allow vs deny.
 A receipt is signed (ssh-keygen, namespace coderails-receipt) and bound to repository+ref+sha; with the user-tier
 trust root that is a cooperating-agent safeguard, not a boundary (docs/decisions/p3-human-only-minting.md).
@@ -100,9 +101,7 @@ def main() -> int:
                 "One-time key setup: scripts/authority_keys.py init."
             )
         )
-        deny(
-            f"Blocked: {name.replace('_', ' ')} needs an action receipt ({code}). {how} Or set action_authority to off."
-        )
+        deny(f"Blocked: {name.replace('_', ' ')} needs an action receipt ({code}). {how}")
     except Exception as error:  # noqa: BLE001 - the gate must never break a session; trace and fail open
         append_row(
             "action_authority", "failed_open", "action_authority_failed_open", trace_id, loop_id,

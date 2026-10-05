@@ -102,9 +102,7 @@ def main() -> int:
                 "One-time key setup: scripts/authority_keys.py init."
             )
         )
-        deny(
-            f"Blocked: {name.replace('_', ' ')} needs an action receipt ({code}). {how} Or set action_authority to off."
-        )
+        deny(f"Blocked: {name.replace('_', ' ')} needs an action receipt ({code}). {how}")
     except Exception as error:  # noqa: BLE001 - the gate must never break a session; trace and fail open
         append_trace_row(
             "action_authority", "failed_open", "action_authority_failed_open", trace_id,

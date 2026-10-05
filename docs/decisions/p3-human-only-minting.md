@@ -61,8 +61,18 @@ The minting step is a separate OWNER-RUN command, signed with a passphrase-prote
 - An agent with Accessibility permission or control of the owner's terminal (pty injection, a tty it shares) can
   answer the passphrase prompt or type the command. The tty rule excludes headless agents, not a hostile process
   in the owner's session. A key loaded in `ssh-agent` could also sign without a prompt.
-- The hash covers only the command text the hook sees (not aliases, functions, `eval`/`xargs`, scripts that
-  push). Binding is the repository, ref and SHA computed at hook time; a push by another route is not seen.
+- The hash covers only the command text the hook sees (not aliases, functions, `xargs`, scripts that push).
+  Quoting, absolute program paths (`/usr/bin/git`), `env`/`sudo` wrappers, `bash -c` and `eval '...'` strings are
+  normalised by `guarded_segments`; a non-literal push destination (`HEAD:$B`, a glob, `$(...)`), `--all` and
+  `--mirror` are guarded and unbindable (denied). Binding is the repository, ref and SHA computed at hook time; a push
+  by another route is not seen.
+- Out of scope, so not guarded: `gh api` writes that move a protected branch without a PR merge (`PATCH
+  repos/o/r/git/refs/heads/main`, the contents API `PUT`, graphql merge mutations); pushes to protected branches other
+  than `main`/`master` (release branches); merges through the web UI or another host.
+- The mode switch lives in `.coderails/workflow.config.yaml` inside the repository, which the agent can edit with
+  Edit/Write (no hook guards that key). `action_authority: off` therefore disables the gate for a hostile same-user
+  agent; it is an honest same-user boundary like the user-tier trust root. The deny text no longer suggests it. A
+  mode read from a root-tier or user-level file outside the repo is not built.
 - A subagent whose `session_id` differs from the minter's is refused as `foreign_session` (documented limit).
 - Single-use and revocation live in unsigned `<id>.consumed` / `<id>.revoked` marker files in the agent-writable
   receipts directory. `O_EXCL` stops races, not `unlink`: a same-user agent can delete `<id>.consumed` to replay a
@@ -91,10 +101,17 @@ unbindable (`binding_unknown`, denied) when it:
   hiding a value option). The repository comes from `-R`, the PR URL or the api path, else `origin`.
 
 `git push origin HEAD` binds the current branch (a detached HEAD is unbindable); the repository is the PUSH url
-(`git remote get-url --push`), so `remote.<n>.pushurl` / `pushInsteadOf` are seen. A guarded segment that follows a
-ref-, HEAD- or remote-moving segment in the same command (`branch`, `reset`, `checkout`, `switch`, `update-ref`,
-`commit`, `merge`, `rebase`, `cherry-pick`, `pull`, `fetch`, `tag`, `config`, `remote`, ...) is denied
-`state_mutated_before_guard`: the bound sha would be stale at execution. Scripts and aliases that mutate are not seen.
+(`git remote get-url --push --all`), so `remote.<n>.pushurl` / `pushInsteadOf` are seen, and a remote with more than one
+push url is unbindable (it would push to all of them while the receipt names one). A guarded segment that follows ANY
+segment that is not a known read-only command in the same command (allowlist: `status`, `log`, `diff`, `show`,
+`rev-parse`, `ls-remote`, `cd`, `echo`, `grep`, a `git push` to a remote other than `.`, a `gh pr merge`, ...; a
+redirect, command substitution or unknown program is a mover) is denied `state_mutated_before_guard`: the bound sha
+would be stale at execution (`git push . evil:feature`, `git worktree add -B`, `git filter-branch`, a write into
+`.git`, ...). Scripts and aliases that mutate are seen only as unknown commands, and only within the same command: a
+ref moved by an earlier, separate command is the state the hook binds.
+A `cd` is parsed like a shell: a plain existing path moves the bound directory; a variable, `cd -`, a missing path, a
+`( cd x && ... )` group, or a `cd` before `bash -c`/`eval` makes later guards unbindable (a pipeline `cd` is a subshell
+and moves nothing).
 Git global options before the subcommand (`-c`, `-C`, `--git-dir`, `--no-pager`) no longer hide a push from the
 matcher, which also tightens `enforce_pr_workflow`. Codex has no `receipt_counters` mirror on purpose: the counters
 read trace rows through the shared measurement script, which is provider independent.
