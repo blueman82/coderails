@@ -123,6 +123,18 @@ class CiVerifyTests(unittest.TestCase):
             code, out = self.verify([comments(review(HEAD), evals(HEAD))])
         self.assertEqual((code != 0, self.reason(out)), (True, "SMOKE_FAIL"))
 
+    def test_every_gh_call_runs_inside_head_dir(self) -> None:
+        """The runner's cwd is not a git repo; gh must still resolve the repo from --head-dir (not SHA_MISMATCH)."""
+        start = os.getcwd()
+        self.addCleanup(os.chdir, start)
+        elsewhere = self.tmp / "workspace"
+        elsewhere.mkdir()
+        os.chdir(elsewhere)
+        code, out = self.verify([comments(review(HEAD), evals(HEAD))])
+        self.assertEqual((code, self.reason(out)), (0, "OK"))
+        cwds = {Path(c["cwd"]).resolve() for c in fake.calls({"FAKE_GH_LOG": str(self.tmp / "gh.log")})}
+        self.assertEqual(cwds, {ROOT.resolve()})
+
     def test_trace_row_written(self) -> None:
         """One advisory row carries the reason code."""
         self.verify([comments(evals(HEAD))])

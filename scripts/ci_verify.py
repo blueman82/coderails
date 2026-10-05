@@ -34,6 +34,7 @@ SUITES = [
 
 def verify(pr: str, sha: str, head_dir: Path = ROOT) -> str:
     """Return OK or the first failing reason code. head_dir is the checkout of the PR head (data under test)."""
+    os.chdir(head_dir)  # gh and git resolve the repository from cwd; the runner's workspace root is not a repo
     head = pr_field(pr, "headRefOid")
     if not head or not sha or head != sha or output("git", "-C", str(head_dir), "rev-parse", "HEAD") != sha:
         return "SHA_MISMATCH"
@@ -51,7 +52,6 @@ def verify(pr: str, sha: str, head_dir: Path = ROOT) -> str:
     with tempfile.TemporaryDirectory() as directory:
         path = Path(directory) / "evals.json"
         path.write_text(summary.embed)
-        os.chdir(head_dir)  # smoke_verify fetches and adds a worktree in the current repository
         return "SMOKE_FAIL" if smoke_verify(path, sha) else "OK"
 
 

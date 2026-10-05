@@ -15,7 +15,7 @@ argv = sys.argv[1:]
 joined = " ".join(argv)
 stdin = sys.stdin.read() if "--input" in argv else ""
 with open(os.environ["FAKE_GH_LOG"], "a") as log:
-    log.write(json.dumps({{"argv": argv, "stdin": stdin}}) + "\\n")
+    log.write(json.dumps({{"argv": argv, "stdin": stdin, "cwd": os.getcwd()}}) + "\\n")
 for route in json.load(open(os.environ["FAKE_GH_ROUTES"])):
     if route["match"] in joined:
         sys.stdout.write(route.get("stdout", ""))
