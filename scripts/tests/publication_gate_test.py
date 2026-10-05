@@ -340,6 +340,7 @@ class CounterTests(unittest.TestCase):
         by_reason["x/y/z"] = 9
         by_reason["review-passes/refused/required_review_missing:security-review"] = 3
         by_reason["eval-level/refused/level_below_derived"] = 4
+        by_reason["argv/denied/ceiling_exceeded"] = 2
         self.assertEqual(
             workflow_gate_counters.counts(by_reason),
             {
@@ -347,6 +348,7 @@ class CounterTests(unittest.TestCase):
                 "review-passes": {"refused/required_review_missing:security-review": 3},
                 "eval-level": {"refused/level_below_derived": 4},
                 "publication": {"refused/diff_manifest:denied_path": 2},
+                "argv": {"denied/ceiling_exceeded": 2},
             },
         )
 

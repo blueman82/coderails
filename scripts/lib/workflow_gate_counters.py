@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import sys
 
-COMMANDS = ("diff-manifest", "review-passes", "eval-level", "publication")
+COMMANDS = ("diff-manifest", "review-passes", "eval-level", "publication", "argv")
 
 
 def counts(by_reason: dict[str, int]) -> dict[str, dict[str, int]]:

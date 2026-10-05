@@ -10,6 +10,7 @@ import sys
 from pathlib import Path
 from typing import Any, cast
 
+from . import argv_match
 from .destructive_patterns import git_output
 from .discipline_common import tool_uses
 
@@ -36,9 +37,9 @@ def operation(command: str) -> tuple[str, str, str]:
         ):
             if re.search(pattern, segment):
                 return name, segment, ""
-        if match := _GIT.match(segment):  # git global options (-c, -C, --git-dir, --no-pager ...) before the subcommand
-            directory = re.search(r"-C\s+(\S+)", match[1])
-            return f"git_{match[2]}", segment, directory[1] if directory else ""
+        call = argv_match.git_invocation((argv_match.argvs(segment) or [[]])[0])  # git -C/-c/--no-pager, /usr/bin/git
+        if call and call[0] in {"merge", "push"}:
+            return f"git_{call[0]}", segment, call[1]
     return "", "", ""
 
 
@@ -60,8 +61,10 @@ def targets_main(command: str, cwd: str, target: str, name: str, *, implicit_pus
             return True
     if re.search(r":(refs/heads/)?(main|master)([\s;&|)]|$)", command):
         return True
-    match = re.search(r"\bgit\b[^;&|]*?\bpush\s+(.*)", command)
-    return bool(match and re.search(r"(^|\s)\+?(refs/heads/)?(main|master)([\s;&|)]|$)", match[1]))
+    return any(
+        subcommand == "push" and any(re.fullmatch(r"\+?(refs/heads/)?(main|master)", token) for token in rest)
+        for subcommand, _, rest in argv_match.git_calls(command)
+    )
 
 
 _PUSH_VALUE_OPTS = {"-o", "--push-option", "--repo", "--receive-pack", "--exec"}
