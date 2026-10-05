@@ -13,6 +13,7 @@ from typing import cast
 from hook_common import (
     RESOURCE_MESSAGE,
     HostResourceError,
+    append_trace_row,
     continue_turn,
     graph_output,
     graph_path,
@@ -129,8 +130,18 @@ def main() -> int:
         continue_turn("The active Codex graph belongs to another session. Repair the state path before stopping.")
         return 0
     message = text_field(payload, "last_assistant_message")
-    if inspection.get("hard_stop") is not None and hard_stop_declaration(message):
-        return 0
+    if inspection.get("hard_stop") is not None:
+        try:
+            recorded = graph_output(graph, "consume-stop", str(state), "--session", session_id)
+        except HostResourceError:
+            recorded = None
+        if recorded is not None and recorded.get("stop") is not None:
+            log(f"hook=graph_completion_guard session={session_id} recorded_stop=consumed blocked=0")
+            return 0
+        if hard_stop_declaration(message):
+            log(f"hook=graph_completion_guard session={session_id} legacy_text_parse=1 blocked=0")
+            append_trace_row("graph_completion_guard", "fallback", "legacy_text_parse", session_id)
+            return 0
     try:
         verified = (
             graph_output(

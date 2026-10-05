@@ -98,8 +98,9 @@ a graph node. Graph completion does not make an unfinished unit terminal, and a
 done unit does not supply missing native graph evidence. Both gates must pass;
 there is no reconciliation or automatic status copying between them.
 
-**`loop_stop_counts` is written solely by the `loop_stall_guard` hook** on each valid `LOOP-STOP`
-declaration. The orchestrator never writes or increments it. `graph.py start` never writes
+**`loop_stop_counts` is written solely by the `loop_stall_guard` hook** on each consumed stop
+(a `stops[]` row written by `graph.py stop`, marked `consumed` in the same atomic write that counts it,
+or else a legacy `LOOP-STOP` text declaration; `stops[]` is intent, `loop_stop_counts` the count). The orchestrator never writes or increments it. `graph.py start` never writes
 it and drops it when re-arming a completed loop (the finished loop's counts live in its `retro.json`);
 never rewrite the file wholesale.
 

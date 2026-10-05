@@ -89,6 +89,102 @@ class StallGuardTests(HookTestCase):
         self.assertEqual(self.run_hook("loop_stall_guard", payload).returncode, 0)
         self.assertEqual(json.loads(path.read_text())["loop_stop_counts"], {"awaiting-input": 2, "approval-gate": 1})
 
+    def trace_reasons(self) -> list[str]:
+        """Return the non-authoritative trace reason codes written for this session."""
+        path = self.directory / "state" / self.session / "trace.jsonl"
+        rows = path.read_text().splitlines() if path.is_file() else []
+        return [json.loads(row)["reason_code"] for row in rows]
+
+    def test_inline_mention_never_flips_the_declared_category(self) -> None:
+        """Only an anchored declaration line picks the category; a later inline mention is prose (H06)."""
+        path = self.progress()
+        text = "LOOP-STOP: awaiting-input — need a decision\nearlier I wrote LOOP-STOP: hard-stop inline"
+        self.assertEqual(self.run_hook("loop_stall_guard", self.payload(self.transcript(text))).returncode, 0)
+        self.assertEqual(json.loads(path.read_text())["loop_stop_counts"], {"awaiting-input": 1})
+        self.assertEqual(self.trace_reasons(), ["legacy_text_parse"])
+
+    def stopped(self, text: str) -> Path:
+        """Transcript whose current turn ran graph.py stop, as a real recorded stop would."""
+        path = self.transcript(text)
+        call = {"type": "tool_use", "name": "Bash", "input": {"command": "python3 graph.py stop --category x"}}
+        row = {"type": "assistant", "message": {"content": [call]}}
+        path.write_text(path.read_text() + json.dumps(row) + "\n")
+        return path
+
+    def test_stale_row_from_an_earlier_turn_never_releases(self) -> None:
+        """A row recorded before the last user prompt is stale: chatting afterwards stays blocked (finding 1)."""
+        path = self.progress(stops=[self.stop(1, "awaiting-input")])
+        old = self.stopped("done")
+        prompt = {"type": "user", "message": {"content": "carry on"}}
+        old.write_text(old.read_text() + json.dumps(prompt) + "\n")
+        chat = {"type": "assistant", "message": {"content": [{"type": "text", "text": "just chatting"}]}}
+        old.write_text(old.read_text() + json.dumps(chat) + "\n")
+        self.assertEqual(self.run_hook("loop_stall_guard", self.payload(old)).returncode, 2)
+        self.assertEqual(
+            self.run_hook("loop_stall_guard", self.payload(self.transcript("just chatting"))).returncode, 2
+        )
+        after = json.loads(path.read_text())
+        self.assertFalse(after["stops"][0]["consumed"])
+        self.assertNotIn("loop_stop_counts", after)
+        self.assertIn("stale_stop_row", self.trace_reasons())
+
+    @staticmethod
+    def stop(seq: int, category: str, revision: int = 1, consumed: bool = False) -> dict[str, Any]:
+        """Build one recorded stop row exactly as graph.py stop writes it."""
+        return {
+            "seq": seq,
+            "category": category,
+            "reason_code": "other",
+            "reason": "r",
+            "revision": revision,
+            "consumed": consumed,
+        }
+
+    def test_recorded_stop_wins_over_text_and_is_consumed_once(self) -> None:
+        """A recorded stop decides the category, is consumed with the count, and never double-counts."""
+        path = self.progress(stops=[self.stop(1, "approval-gate")])
+        payload = self.payload(self.stopped("LOOP-STOP: hard-stop — conflicting text"))
+        self.assertEqual(self.run_hook("loop_stall_guard", payload).returncode, 0)
+        after = json.loads(path.read_text())
+        self.assertEqual(after["loop_stop_counts"], {"approval-gate": 1})
+        self.assertTrue(after["stops"][0]["consumed"])
+        self.assertEqual(self.trace_reasons(), [])
+        # repeated Stop: the row is consumed, so the text path runs and its hard-stop is counted instead
+        self.assertEqual(self.run_hook("loop_stall_guard", payload).returncode, 0)
+        self.assertEqual(json.loads(path.read_text())["loop_stop_counts"], {"approval-gate": 1, "hard-stop": 1})
+        self.assertEqual(self.trace_reasons(), ["legacy_text_parse"])
+        bare = self.payload(self.transcript("no declaration"))
+        self.assertEqual(self.run_hook("loop_stall_guard", bare).returncode, 2)
+
+    def test_stale_or_torn_stops_fall_back_to_text(self) -> None:
+        """A stale-revision row, a consumed row, and malformed stops keys never fail the hook or release a Stop."""
+        bare = self.payload(self.transcript("no declaration"))
+        stale, spent = self.stop(1, "hard-stop", revision=0), self.stop(1, "hard-stop", consumed=True)
+        for stops in ([stale], [spent], "torn", [1, None]):
+            self.progress(stops=stops)
+            self.assertEqual(self.run_hook("loop_stall_guard", bare).returncode, 2)
+        path = self.progress(stops="torn")
+        text = self.payload(self.transcript("LOOP-STOP: awaiting-input — x"))
+        self.assertEqual(self.run_hook("loop_stall_guard", text).returncode, 0)
+        self.assertEqual(json.loads(path.read_text())["loop_stop_counts"], {"awaiting-input": 1})
+
+    def test_recorded_complete_still_requires_a_resolved_graph(self) -> None:
+        """A recorded complete stop is refused while the graph is unresolved and stays unconsumed."""
+        graph: dict[str, Any] = {
+            "nodes": {"S1": {"status": "pending"}},
+            "edges": [],
+            "joins": {},
+            "active_wave": None,
+            "hard_stop": None,
+            "wave_history": {},
+        }
+        path = self.progress(graph=graph, stops=[self.stop(1, "complete")])
+        bare = self.payload(self.transcript("no declaration"))
+        self.assertEqual(self.run_hook("loop_stall_guard", bare).returncode, 2)
+        after = json.loads(path.read_text())
+        self.assertFalse(after["stops"][0]["consumed"])
+        self.assertNotIn("loop_stop_counts", after)
+
     def test_counter_failure_never_fabricates_state_or_leaks_temporary_files(self) -> None:
         """Absent/corrupt/locked/unwritable state leaves declared-stop release advisory."""
         payload = self.payload(self.transcript("LOOP-STOP: hard-stop"))
