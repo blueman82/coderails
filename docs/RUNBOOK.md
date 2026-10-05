@@ -196,10 +196,13 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   `review_artifact_missing` or `review_policy_unreadable`. The check is the second entry of the single publication gate
   (`scripts/lib/publication_gate.py`), ON by default with no config. The required names come only from
   `policy/review_policy.json` (`review-pr` always; `security-review` for `hooks/`, `scripts/`, `install.py`,
-  `uninstall.py`, `.claude-plugin/`, `packages/codex/hooks/`, `packages/codex/scripts/`; `deploy-safety` for `launchd/`,
+  `uninstall.py`, `.claude-plugin/`, `packages/codex/hooks/`, `packages/codex/scripts/`, and the control files
+  `policy/`, `capabilities/`, `agents/`, `commands/`, `AGENTS.md`, `workflow.config.yaml`, `.coderails/`, their Codex
+  copies and the Codex post-review/merge skills; `deploy-safety` for `launchd/`,
   `scripts/integrity-gate/`, `scripts/installer/`, `.github/workflows/`, `skills/dashboard/runner/`), matched against
-  the PR diff (renames count both sides). There is no config switch; the policy file is the control, and deleting or
-  corrupting it refuses (`review_policy_unreadable`), it does not allow.
+  the PR diff (renames count both sides). Config `review_passes: off` skips the check (absent or any other value
+  enforces; `diff_manifest: off` does not touch it). The policy file is the control, and deleting or corrupting it
+  refuses (`review_policy_unreadable`), it does not allow.
 - Artifact: line 1 is the unchanged v1 marker; line 2 is `<!-- coderails-review-passes v1 {"head_sha":...,"passes":[...]} -->`
   with `{name, verdict, blocking, summary_sha256}` per pass. `post_review.py post <PR> --summary FILE [--pass NAME=FILE ...]`
   validates each summary, derives each verdict from the text (a bullet under `## Critical` is `fail`) and posts it. A v1
@@ -211,8 +214,11 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   write its findings to a file in the post-review grammar, re-run `post_review.py post` with `--pass NAME=FILE`. A
   `failed` pass needs the Critical finding fixed and the artifact re-posted for the new head. `review_artifact_missing`
   also covers a failed trusted-comment fetch (identity, permission, comments): retry or check `gh auth`.
-- Limits: a pass proves a validated summary was posted for that name, not that the review was substantive; the same
-  user can write any summary, so this is a cooperating-agent safeguard. `blocking` is derived and never waives a
+- Limits: the gate re-derives each pass from the posted sections (hash and verdict; a mismatch is
+  `review_passes_malformed`), so a hand-posted passes line without its text is refused. A pass still proves only that a
+  summary was posted for that name, not that a reviewer wrote it or that the review was substantive: `post_review.py`
+  takes any file for any pass, so the PR author can self-issue a `## No findings` security-review or deploy-safety
+  pass. The same user can write any summary, so this is a cooperating-agent safeguard. `blocking` is derived and never waives a
   required pass. The Codex hook only sees merges `guarded_segments` can match and needs `/hooks` trust. Row-9 wording in
   the closure matrix (`.json` policy file) is not recorded in this repo: the matrix lives outside it.
 

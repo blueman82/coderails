@@ -10,7 +10,19 @@
         "uninstall.py",
         ".claude-plugin/**",
         "packages/codex/hooks/**",
-        "packages/codex/scripts/**"
+        "packages/codex/scripts/**",
+        "policy/**",
+        "packages/codex/policy/**",
+        "capabilities/**",
+        "packages/codex/capabilities/**",
+        "agents/**",
+        "packages/codex/agents/**",
+        "commands/**",
+        "packages/codex/skills/post-review/**",
+        "packages/codex/skills/merge/**",
+        "AGENTS.md",
+        "workflow.config.yaml",
+        ".coderails/**"
       ]
     },
     {

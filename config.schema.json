@@ -69,6 +69,10 @@
       "type": ["string"], "default": "enforce", "status": "enforced_by_code",
       "description": "Diff-manifest publication gate run by push.py, merge.py and the direct-merge hooks: off, advisory or enforce (default). Any other value is treated as enforce and reported as diff_manifest_mode_invalid."
     },
+    "review_passes": {
+      "type": ["string"], "default": "enforce", "status": "enforced_by_code",
+      "description": "Required-reviewer check in the publication gate (policy/review_policy.json): off skips it; enforce (default) and any other value apply it."
+    },
     "diff_manifest_policy": {
       "type": ["string", "null"], "default": null, "status": "enforced_by_code",
       "description": "Path to a diff policy JSON file; null = the shipped policy/diff-policy.default.json."

@@ -12,6 +12,7 @@ from collections.abc import Callable
 
 from . import git_common as git
 from . import manifest_policy, review_passes
+from .config import config_path, load_config
 
 Violation = dict[str, str]
 Check = Callable[[str, str, str, str], list[Violation]]
@@ -26,8 +27,13 @@ def review_passes_check(number: str, sha: str, unit: str, progress: str) -> list
     """Required reviewers for the diff (policy/review_policy.json) against the passes in the SHA-bound artifact.
 
     `review-pr` is satisfied by the v1 marker itself; a v1 artifact with no passes line has passes=[]. A pass counts
-    only with verdict `pass`; the artifact's `blocking` flag never waives a required pass. Fails closed.
+    only with verdict `pass`; the artifact's `blocking` flag never waives a required pass. Fails closed. Config
+    `review_passes: off` skips the check; absent or any other value enforces.
     """
+    values, _ = load_config(config_path() or "")
+    if str(values.get("review_passes") or "enforce") == "off":
+        manifest_policy.trace(f"{git.repo()}@pr-{number}", "skipped", "review_passes_off", command="review-passes")
+        return []
     found = git.review_passes_for_pr(number, sha)
     if found.status:
         return [{"code": "review_artifact_missing", "detail": found.failure_reason or "no artifact for this head"}]

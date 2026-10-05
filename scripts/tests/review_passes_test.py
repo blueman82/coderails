@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import sys
 import tempfile
@@ -34,17 +33,21 @@ def entry(name: str, text: str = CLEAN, **over: object) -> dict[str, object]:
         "name": name,
         "verdict": verdict,
         "blocking": verdict == "fail",
-        "summary_sha256": hashlib.sha256(text.encode()).hexdigest(),
+        "summary_sha256": review_passes.summary_sha256(text),
     }
     return {**base, **over}
 
 
-def body(passes: list[dict[str, object]] | None, sha: str = SHA, pr: str = "7") -> str:
-    """A posted artifact body: v1 marker, optional passes line, summary text."""
+def body(
+    passes: list[dict[str, object]] | None, sha: str = SHA, pr: str = "7", texts: dict[str, str] | None = None
+) -> str:
+    """A posted artifact body: v1 marker, optional passes line, then the summaries the passes were derived from."""
     lines = [review_artifact.marker(pr, sha)]
     if passes is not None:
         lines.append(review_passes.render(sha, passes))
-    return "\n".join(lines + [CLEAN])
+    names = ["review-pr"] + [str(p["name"]) for p in passes or [] if p["name"] != "review-pr"]
+    given = texts or {}
+    return "\n".join(lines + [review_passes.tail([(n, given.get(n, CLEAN)) for n in names])])
 
 
 class PolicyTests(unittest.TestCase):
@@ -71,6 +74,25 @@ class PolicyTests(unittest.TestCase):
         ):
             with self.subTest(path=path):
                 self.assertEqual(review_passes.required([("M", [path])], self.policy), ["review-pr", "security-review"])
+
+    def test_control_files_require_security_review(self) -> None:
+        """The policy and the other control files cannot be changed on review-pr alone."""
+        for path in (
+            "policy/review_policy.json",
+            "packages/codex/policy/review_policy.json",
+            "capabilities/profiles.json",
+            "packages/codex/capabilities/profiles.json",
+            "agents/security-reviewer.md",
+            "packages/codex/agents/x.toml",
+            "commands/post-review.md",
+            "packages/codex/skills/post-review/SKILL.md",
+            "packages/codex/skills/merge/SKILL.md",
+            "AGENTS.md",
+            "workflow.config.yaml",
+            ".coderails/workflow.config.yaml",
+        ):
+            with self.subTest(path=path):
+                self.assertIn("security-review", review_passes.required([("M", [path])], self.policy))
 
     def test_deploy_paths_require_deploy_safety(self) -> None:
         """Deploy paths pull in deploy-safety; scripts/installer also needs security-review."""
@@ -138,6 +160,27 @@ class LineTests(unittest.TestCase):
         no_critical = CRITICAL.replace("- injection in hooks/x.py", "None")
         self.assertEqual(review_passes.verdict_from_summary(no_critical), "pass")
         self.assertEqual(review_passes.verdict_from_summary(CRITICAL), "fail")
+
+    def test_prose_cannot_hide_a_critical_finding(self) -> None:
+        """Any Critical line other than the single token None is a finding, whatever its bullet style."""
+        for finding in ("* SQL injection", "1. RCE", "-\tbad", "  - indented", "prose finding"):
+            with self.subTest(finding=finding):
+                text = f"## Critical\nNone\n{finding}\n\n## Important\nNone\n\n## Suggestions\nNone\n"
+                self.assertEqual(review_passes.verdict_from_summary(text), "fail")
+        self.assertEqual(review_passes.verdict_from_summary("## Critical\n\n## Important\nNone\n"), "fail")
+
+    def test_forged_pass_is_not_accepted(self) -> None:
+        """The gate re-derives passes from the text: a forged hash, flipped verdict or missing section is malformed."""
+        good = [entry("review-pr"), entry("security-review")]
+        self.assertEqual(review_passes.parse(body(good), "7", SHA), good)
+        forged = [entry("review-pr"), entry("security-review", summary_sha256="0" * 64)]
+        self.assertIsNone(review_passes.parse(body(forged), "7", SHA))
+        flipped = [entry("review-pr"), entry("security-review", CRITICAL, verdict="pass", blocking=False)]
+        self.assertIsNone(review_passes.parse(body(flipped, texts={"security-review": CRITICAL}), "7", SHA))
+        swapped = [entry("review-pr"), entry("security-review", CLEAN)]
+        self.assertIsNone(review_passes.parse(body(swapped, texts={"security-review": CRITICAL}), "7", SHA))
+        lines = body(good).splitlines()
+        self.assertIsNone(review_passes.parse("\n".join(lines[:3]), "7", SHA))  # security-review section absent
 
     def test_first_line_is_still_the_v1_marker(self) -> None:
         """Compat: the dashboard and integrity-gate parsers only read the first line, which is unchanged."""
@@ -211,6 +254,20 @@ class CheckTests(unittest.TestCase):
         """Negative control: an unreadable policy refuses review_policy_unreadable, never allows."""
         with mock.patch.object(review_passes, "load_policy", side_effect=ValueError("review_policy_unreadable")):
             self.assertEqual(self.codes(found([entry("review-pr")]), DOCS), ["review_policy_unreadable"])
+
+    def test_off_switch_skips_only_the_review_check(self) -> None:
+        """review_passes: off skips the check; absent, enforce and unknown values enforce (default ON)."""
+        for values, expected in (
+            ({}, ["required_review_missing:security-review"]),
+            ({"review_passes": "enforce"}, ["required_review_missing:security-review"]),
+            ({"review_passes": "bogus"}, ["required_review_missing:security-review"]),
+            ({"review_passes": "off"}, []),
+        ):
+            with (
+                self.subTest(values=values),
+                mock.patch.object(publication_gate, "load_config", return_value=(values, [])),
+            ):
+                self.assertEqual(self.codes(found([entry("review-pr")])), expected)
 
     def test_check_is_registered(self) -> None:
         """The check runs through the one gate, so every publication path gets it."""

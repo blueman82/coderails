@@ -162,6 +162,14 @@ class PostTests(unittest.TestCase):
             self.assertNotEqual(code, 0)
             self.assertEqual(fake.calls, [])
 
+    def test_none_mixed_with_findings_is_rejected(self) -> None:
+        """A Critical section that says None and also lists a finding is ambiguous and not postable."""
+        mixed = self.dir / "mixed.md"
+        mixed.write_text("## Critical\nNone\n* SQL injection\n\n## Important\nNone\n\n## Suggestions\nNone\n")
+        with self.assertRaises(ValueError):
+            post_review.validate_summary(mixed)
+        post_review.validate_summary(self.critical)  # negative control: a plain bullet is still valid
+
     def test_pass_name_must_be_plain_and_unique(self) -> None:
         """Pass names are lowercase words; review-pr and duplicates are rejected."""
         for pass_arg in (f"Bad Name={self.clean}", f"review-pr={self.clean}", f"a={self.clean}"):

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import stat
@@ -31,7 +32,7 @@ case "$1 $2" in
     { printf '<!-- coderails-review-summary v1 pr=7 head_sha=%s -->\\n' "$FAKE_SHA"
       [ -n "$FAKE_PASSES" ] && printf '<!-- coderails-review-passes v1 {"head_sha": "%s", "passes": %s} -->\\n' \\
         "${FAKE_PASSES_SHA:-$FAKE_SHA}" "$FAKE_PASSES"
-      printf '## No findings\\n'; } | base64 | tr -d '\\n'
+      printf '%s\\n' "${FAKE_TAIL:-## No findings}"; } | base64 | tr -d '\\n'
     echo ;;
 esac
 exit 0
@@ -51,9 +52,21 @@ elif a[0] == "api" and "-F" in a:
 """
 
 
-def entry(name: str, verdict: str = "pass") -> dict[str, object]:
+def entry(name: str, verdict: str = "pass", digest: str = "") -> dict[str, object]:
     """A passes[] entry, hand-built so the wire format is checked independently of review_passes.py."""
-    return {"name": name, "verdict": verdict, "blocking": verdict == "fail", "summary_sha256": ZERO}
+    text = CLEAN if verdict == "pass" else CRITICAL
+    real = hashlib.sha256(text.strip().encode()).hexdigest()
+    return {"name": name, "verdict": verdict, "blocking": verdict == "fail", "summary_sha256": digest or real}
+
+
+def artifact(*passes: dict[str, object]) -> dict[str, str]:
+    """Env for the fake gh: the passes line plus the posted sections each pass was derived from."""
+    parts = [CLEAN.strip()]  # the review-pr summary comes first
+    for item in passes:
+        if item["name"] != "review-pr":
+            parts.append(f"<!-- coderails-review-pass {item['name']} -->")
+            parts.append((CLEAN if item["verdict"] == "pass" else CRITICAL).strip())
+    return {"FAKE_PASSES": json.dumps(list(passes)), "FAKE_TAIL": "\n".join(parts)}
 
 
 def git_cmd(cwd: Path, *args: str) -> str:
@@ -123,24 +136,31 @@ class HookTests(Repo):
         self.assertTrue(reason.startswith("required_review_missing:security-review"), reason)
         self.assertIn("post_review.py post", reason)
         self.assertNotIn("diff_manifest: off", reason)
-        only_review_pr = json.dumps([entry("review-pr")])
-        self.assertTrue(self.reason(FAKE_PASSES=only_review_pr).startswith("required_review_missing:security-review"))
+        only_review_pr = artifact(entry("review-pr"))
+        self.assertTrue(self.reason(**only_review_pr).startswith("required_review_missing:security-review"))
 
     def test_security_pass_present_proceeds(self) -> None:
         """Negative control: with the pass the same hook call allows, so the denial came from the policy."""
-        self.assertEqual(self.reason(FAKE_PASSES=json.dumps([entry("review-pr"), entry("security-review")])), "")
+        self.assertEqual(self.reason(**artifact(entry("review-pr"), entry("security-review"))), "")
+
+    def test_forged_pass_is_refused(self) -> None:
+        """Negative control: a made-up hash, or a verdict the posted text does not support, is malformed."""
+        forged = artifact(entry("review-pr"), entry("security-review", digest=ZERO))
+        self.assertTrue(self.reason(**forged).startswith("review_passes_malformed"))
+        lying = artifact(entry("review-pr"), entry("security-review", "fail"))
+        lying["FAKE_PASSES"] = lying["FAKE_PASSES"].replace('"verdict": "fail"', '"verdict": "pass"')
+        self.assertTrue(self.reason(**lying).startswith("review_passes_malformed"))
 
     def test_failed_pass_and_missing_artifact_are_refused(self) -> None:
         """A failed security pass, a missing artifact and a malformed passes line each deny."""
-        failed = json.dumps([entry("review-pr"), entry("security-review", "fail")])
-        self.assertTrue(self.reason(FAKE_PASSES=failed).startswith("required_review_failed:security-review"))
+        failed = artifact(entry("review-pr"), entry("security-review", "fail"))
+        self.assertTrue(self.reason(**failed).startswith("required_review_failed:security-review"))
         self.assertTrue(self.reason(FAKE_NO_ARTIFACT="1").startswith("review_artifact_missing"))
         self.assertTrue(self.reason(FAKE_PASSES='"nope"').startswith("review_passes_malformed"))
 
     def test_passes_line_for_another_head_is_ignored(self) -> None:
         """A passes line carrying a different head_sha does not satisfy the policy."""
-        passes = json.dumps([entry("review-pr"), entry("security-review")])
-        reason = self.reason(FAKE_PASSES=passes, FAKE_PASSES_SHA="stale")
+        reason = self.reason(**artifact(entry("review-pr"), entry("security-review")), FAKE_PASSES_SHA="stale")
         self.assertTrue(reason.startswith("required_review_missing:security-review"), reason)
 
 

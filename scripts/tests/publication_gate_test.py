@@ -232,8 +232,12 @@ class HeadlessTests(RepoCase):
         self.assertIn("publication/refused/diff_manifest:denied_path", self.rows())
 
     def test_merge_off_control_merges(self) -> None:
-        """Negative control: diff_manifest off lets the same diff reach gh pr merge."""
-        self.config("diff_manifest: off\n")
+        """Negative control: diff_manifest off lets the same diff reach gh pr merge.
+
+        The config file is itself a committed control file (.coderails/** needs security-review), so the review
+        check is switched off too; this test is about the manifest only.
+        """
+        self.config("diff_manifest: off\nreview_passes: off\n")
         result = self.merge(self.commit_secret())
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertTrue(self.ghlog.exists())

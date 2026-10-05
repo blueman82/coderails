@@ -41,6 +41,9 @@ def validate_summary(path: str | Path) -> None:
                 break
         if not populated:
             raise ValueError(f'section "{heading}" has no bullet or None')
+    critical = review_passes.critical_lines("\n".join(lines))
+    if "None" in critical and critical != ["None"]:
+        raise ValueError('section "## Critical" says None and also lists other lines')
 
 
 def write_cache(path: str | Path, pr: str, head_sha: str, url: str, author: str, posted_at: str) -> int:
@@ -133,7 +136,7 @@ def post(number: int, summary: Path, extra: list[str]) -> int:
     if comment:
         print(f"Artifact already posted for SHA {head} — skipping duplicate post.\nExisting: {comment['url']}")
     else:
-        body = "\n".join(top + [texts[0][1]] + [f"<!-- coderails-review-pass {n} -->\n{t}" for n, t in texts[1:]])
+        body = "\n".join(top + [review_passes.tail(texts)])
         with tempfile.TemporaryDirectory(prefix="coderails-review-") as directory:
             path = Path(directory) / "body.md"
             path.write_text(body)

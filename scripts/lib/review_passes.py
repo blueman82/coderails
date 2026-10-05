@@ -3,8 +3,9 @@
 The artifact body is: line 1 the unchanged v1 marker (the dashboard and the integrity gate parse only that line),
 line 2 `<!-- coderails-review-passes v1 {"head_sha":..., "passes":[...]} -->`, then the posted summaries. Which passes
 a diff needs comes only from policy/review_policy.json (`required`), never from the marker; a pass's verdict is
-derived from the validated summary text (`verdict_from_summary`), never self-asserted. A pass proves a validated
-summary was posted for that name, not that the review was substantive.
+derived from the summary text (`verdict_from_summary`), never self-asserted: `parse` recomputes each pass's hash and
+verdict from the posted sections and treats a mismatch as malformed. A pass proves a summary was posted for that
+name, not that a reviewer wrote it or that the review was substantive.
 """
 
 from __future__ import annotations
@@ -57,23 +58,50 @@ def required(changes: Changes, policy: dict[str, Any]) -> list[str]:
     return names
 
 
-def verdict_from_summary(text: str) -> str:
-    """`pass` iff the summary says `## No findings` or its Critical section holds no bullet; else `fail`."""
+def critical_lines(text: str) -> list[str]:
+    """Stripped non-blank lines of the `## Critical` section ([] if the heading is absent)."""
     lines = text.splitlines()
-    if "## No findings" in lines:
-        return "pass"
+    if "## Critical" not in lines:
+        return []
     section: list[str] = []
-    if "## Critical" in lines:
-        for line in lines[lines.index("## Critical") + 1 :]:
-            if line.startswith("## "):
-                break
-            section.append(line)
-    return "fail" if any(line.startswith("- ") for line in section) or "## Critical" not in lines else "pass"
+    for line in lines[lines.index("## Critical") + 1 :]:
+        if line.startswith("## "):
+            break
+        section.append(line.strip())
+    return [line for line in section if line]
+
+
+def verdict_from_summary(text: str) -> str:
+    """`pass` iff the summary says `## No findings` or its Critical section is exactly the token `None`; else `fail`.
+
+    Any other Critical line is a finding whatever its bullet style, so prose cannot hide one.
+    """
+    if "## No findings" in text.splitlines():
+        return "pass"
+    return "pass" if critical_lines(text) == ["None"] else "fail"
 
 
 def summary_sha256(text: str) -> str:
-    """Hex digest of the summary text a pass was derived from."""
-    return hashlib.sha256(text.encode()).hexdigest()
+    """Hex digest of the summary text a pass was derived from (line endings and outer whitespace are normalised)."""
+    return hashlib.sha256(text.replace("\r\n", "\n").strip().encode()).hexdigest()
+
+
+def tail(sections: list[tuple[str, str]]) -> str:
+    """Artifact body after the two marker lines: the review-pr summary, then each other pass under its marker."""
+    first, *rest = sections
+    return "\n".join([first[1]] + [f"<!-- coderails-review-pass {name} -->\n{text}" for name, text in rest])
+
+
+def _bound(rest: str, passes: Passes) -> bool:
+    """Every pass names a posted section whose hash and derived verdict match what the line claims."""
+    parts = re.split(r"^<!-- coderails-review-pass ([a-z][a-z0-9-]*) -->\r?\n", rest, flags=re.MULTILINE)
+    texts = {"review-pr": parts[0], **dict(zip(parts[1::2], parts[2::2]))}
+    return all(
+        p["name"] in texts
+        and p["summary_sha256"] == summary_sha256(texts[p["name"]])
+        and p["verdict"] == verdict_from_summary(texts[p["name"]])
+        for p in passes
+    )
 
 
 def render(head_sha: str, passes: Passes) -> str:
@@ -112,4 +140,5 @@ def parse(body: str, pr: str, head_sha: str) -> Passes | None:
     if cast(dict[str, Any], data).get("head_sha") != head_sha:
         return []
     passes = cast(Passes, cast(dict[str, Any], data)["passes"])
-    return passes if all(_valid(item) for item in passes) else None
+    rest = "\n".join(lines[marker + 2 :])
+    return passes if all(_valid(item) for item in passes) and _bound(rest, passes) else None
