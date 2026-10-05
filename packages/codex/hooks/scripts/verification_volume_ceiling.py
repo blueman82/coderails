@@ -8,6 +8,7 @@ import os
 import re
 import subprocess
 import sys
+from contextlib import suppress
 from pathlib import Path
 from typing import cast
 
@@ -85,6 +86,10 @@ def deny(reason: str) -> None:
             }
         )
     )
+    with suppress(ImportError):  # telemetry must never be able to break the hook
+        from lib.hook_telemetry import mark_deny
+
+        mark_deny()
 
 
 def count_for(count_path: Path) -> int:

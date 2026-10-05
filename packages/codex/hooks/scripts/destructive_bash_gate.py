@@ -6,11 +6,20 @@ from __future__ import annotations
 import json
 import os
 import re
+from contextlib import suppress
 from typing import cast
 
 from hook_common import deny, payload_object, read_input
 from lib.destructive_patterns import normalize_ifs, permanent_pattern, source_write, workflow_substitution
 from lib.destructive_routes import ROUTES
+
+
+def mark() -> None:
+    """Flag the deny printed by this hook so telemetry records cause deny, not ok."""
+    with suppress(ImportError):  # telemetry must never be able to break the hook
+        from lib.hook_telemetry import mark_deny
+
+        mark_deny()
 
 
 def main() -> int:
@@ -41,6 +50,7 @@ def main() -> int:
                     }
                 )
             )
+            mark()
             return 0
     pattern, identifier = permanent_pattern(command, cwd)
     if pattern:
@@ -58,6 +68,7 @@ def main() -> int:
                 }
             )
         )
+        mark()
         return 0
     if reason := source_write(command, cwd):
         deny(reason)
