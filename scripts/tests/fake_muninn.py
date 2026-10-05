@@ -194,7 +194,7 @@ def main(argv: list[str]) -> int:
                         "ref": f"claude:{e['thread']}:{e['line']}.{e['part']}",
                         "role": e["role"],
                         "kind": e["kind"],
-                        "text": e["text"],
+                        "preview": e["text"],  # the real binary names it preview
                     }
                     for e in evs
                 ],
