@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import copy
 import difflib
 import hashlib
@@ -267,7 +268,9 @@ def resolve_config_json(start_dir: str | Path | None = None) -> dict[str, Any]:
     """Typed view of the discovered config: path, values, defaults applied, unknown keys, findings."""
     path = config_path(start_dir)
     values, findings = load_config(path)
-    present = set(_entries(Path(path).read_text(encoding="utf-8", errors="replace")) if path else ())
+    present: set[str] = set()
+    with contextlib.suppress(OSError):
+        present = set(_entries(Path(path).read_text(encoding="utf-8", errors="replace"))) if path else present
     properties = _schema().get("properties", {})
     return {
         "path": path,

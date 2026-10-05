@@ -21,6 +21,7 @@ from scripts.lib.config import (
     load_config,
     report_findings,
     require_signatures,
+    resolve_config_json,
 )
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -206,6 +207,15 @@ class CliTests(ConfigCase):
         self.assertEqual(data["unknown_keys"], ["wiki_pth"])
         self.assertIn("wiki_path", data["defaults_applied"])
         self.assertNotIn("sandbox_workers", data["defaults_applied"])
+
+    def test_json_unreadable_path_never_raises(self) -> None:
+        """A discovered path that cannot be read yields JSON with a config_unreadable finding, not a traceback."""
+        with (
+            tempfile.TemporaryDirectory() as temporary,
+            patch("scripts.lib.config.config_path", return_value=temporary),
+        ):
+            data = resolve_config_json()
+        self.assertEqual([f["code"] for f in data["findings"]], ["config_unreadable"])
 
     def test_json_without_config(self) -> None:
         """NO_CONFIG still yields valid JSON and exit 0."""
