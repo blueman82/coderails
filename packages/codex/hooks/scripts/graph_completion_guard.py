@@ -4,9 +4,7 @@
 from __future__ import annotations
 
 import json
-import re
 import sys
-from contextlib import suppress
 from pathlib import Path
 from typing import cast
 
@@ -23,6 +21,7 @@ from hook_common import (
     read_input,
     text_field,
 )
+from lib.stall_notice import marker_name, record_notice, seen, status_notice
 
 
 def unresolved(state: Path) -> bool:
@@ -69,40 +68,33 @@ def hard_stop_declaration(message: str) -> bool:
 
 def request_human_approval(state: Path, session_id: str, inspection: dict[str, object]) -> None:
     """Emit the established deduplicated unresolved-graph Stop response."""
-    loop_id = text_field(inspection, "loop_id")
-    revision = inspection.get("revision")
-    if not loop_id or not isinstance(revision, int):
-        continue_turn("Native graph unresolved; stopping remains blocked.")
-        return
-    safe_loop = re.sub(r"[^A-Za-z0-9_.-]", "_", loop_id)
-    marker = state.parent / f".human-approval-{safe_loop}-{revision}"
-    message = json.dumps(
-        {
-            "decision": "block",
-            "reason": "Native graph unresolved; stopping remains blocked.",
-            "systemMessage": "Human approval required: the native graph is unresolved. Approve the next action "
-            "or resume the loop; stopping remains blocked until the graph is complete.",
-        }
-    )
     log(f"hook=graph_completion_guard session={session_id} blocked=1")
-    created = False
-    try:
-        marker.mkdir()
-        created = True
-    except FileExistsError:
-        if marker.is_dir():
-            continue_turn("Native graph unresolved; stopping remains blocked.")
-            return
-        log(f"hook=graph_completion_guard session={session_id} human_request=dedupe_write_failed")
-    except OSError:
-        log(f"hook=graph_completion_guard session={session_id} human_request=dedupe_write_failed")
-    try:
-        print(message)
-    except (OSError, ValueError):
-        if created:
-            with suppress(OSError):
-                marker.rmdir()
-        raise
+    # the key comes from the validated inspection, so an unreadable state file cannot drop the notice
+    name = marker_name(
+        {
+            "loop_id": inspection.get("loop_id"),
+            "revision": inspection.get("revision"),
+            "graph": {"active_wave": inspection.get("active_wave"), "hard_stop": inspection.get("hard_stop")},
+        },
+        session_id,
+    )
+    blocked = "Native graph unresolved; stopping remains blocked."
+    base = (
+        "Human approval required: the native graph is unresolved. Approve the next action "
+        "or resume the loop; stopping remains blocked until the graph is complete."
+    )
+    if name is None:
+        log(f"hook=graph_completion_guard session={session_id} human_request=no_marker_key")
+        print(json.dumps({"decision": "block", "reason": blocked, "systemMessage": base}))
+        sys.stdout.flush()
+        return
+    if seen(state, name):
+        continue_turn(blocked)
+        return
+    status = status_notice(graph_path(), state, session_id, log)  # never raises
+    print(json.dumps({"decision": "block", "reason": f"{blocked}\n{status}", "systemMessage": f"{base}\n{status}"}))
+    sys.stdout.flush()  # the marker must not outlive an undelivered notice
+    record_notice(state, session_id, name, log)
 
 
 def main() -> int:
