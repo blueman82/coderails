@@ -403,7 +403,13 @@ Subagent definitions in `agents/`, auto-discovered when the plugin is enabled an
 referenced by their namespaced name (`coderails:<name>`). Skills dispatch these
 by name instead of pasting a prompt into a `general-purpose` subagent: the model
 and tool set travel with the definition, so they survive even if the dispatching
-prose is ignored.
+prose is ignored. Inside a graph-bound loop this is enforced: `begin-wave` stores
+each node's contract role and `loop_dispatch_guard.py` requires the guarded
+read-only scouts (`preflight-scout`, `design-scout`, `disposition-scout`,
+`source-auditor`, `deploy-safety-reviewer`) to be dispatched as `coderails:<role>`;
+other roles accept that or `general-purpose`, and anything else is `role_mismatch`.
+A plugin agent that is not installed cannot run a guarded scout, and the sandboxed
+Bash launcher carries no agent type.
 
 How strong that guarantee is varies per agent, and the difference matters:
 

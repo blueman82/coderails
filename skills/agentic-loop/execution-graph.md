@@ -65,18 +65,28 @@ transcript parser and independently installed pure graph semantics.
    rejects unknown nodes, missing spec nodes and a changed spec.
 2. Run `begin-wave <path-to-progress.json>` immediately before dispatch. It
    records exactly the ready nodes as running, captures the native transcript
-   cursor, and returns the current `wave_id` and each dispatch's `prompt_prefix`.
-   A failure means no dispatch is authorized.
-3. Use the returned prefix as the exact first prompt line, then a newline and
-   the explicit instruction body from the resolved source plus the task brief.
-   User restrictions take precedence. Use Claude's available native
-   `subagent_type`, normally `general-purpose`, or a custom type actually installed
-   in this session. Graph IDs and instruction sources do not rename provider
-   workers or require `coderails:loop-worker`. The envelope is
-   `CODERAILS_GRAPH_DISPATCH={"session_id":"<session>","loop_id":"<loop>","revision":4,"wave_id":"wave-4","node_id":"U3[1]"}`.
-   `loop_dispatch_guard.py` checks exact current session, loop, revision, wave
-   and node ownership. Its resolution path is a successful `begin-wave` and
-   the returned prefix, never hand-edited ownership or a renamed worker.
+   cursor, stores one single-use dispatch record per node in `graph.dispatches`
+   (its closed contract: role, model_role, base_ref, manifest, disposition,
+   lessons, write_scope, skip_phases, scope) and returns each dispatch's
+   `dispatch_id`, `prompt_prefix` and `prompt_sections`. A failure means no
+   dispatch is authorized; a state older than `state_minor` 2 must be converted
+   first (`graph.py convert`, which refuses while a wave is open).
+3. Paste, verbatim, the returned `prompt_prefix` as the first prompt line, then
+   `prompt_sections`, then the instruction body from the resolved source plus
+   the task brief. User restrictions take precedence. The envelope is
+   `CODERAILS_GRAPH_DISPATCH={"dispatch_id":"disp_...","envelope_version":2,"loop_id":"<loop>","node_id":"U3[1]","revision":4,"session_id":"<session>","wave_id":"wave-4"}`.
+   `loop_dispatch_guard.py` looks the id up in `graph.dispatches`, cross-checks
+   every ownership field against the record and state, recomputes the sections
+   digest from the stored contract, requires the rendered sections verbatim in
+   the prompt and consumes the id (a second use is `dispatch_replayed`). It then
+   asserts the role: dispatch as `subagent_type: coderails:<role>` for the
+   node's contract role. Roles that run read-only scouts (profiles `guarded_agents`:
+   preflight-scout, design-scout, disposition-scout, source-auditor,
+   deploy-safety-reviewer) accept only that typed agent; other roles also accept
+   `general-purpose`; anything else is `role_mismatch`. Resolution is a correct
+   `begin-wave` paste, never hand-edited ownership or a substituted role. A
+   plugin agent that is not installed in the session cannot run a guarded
+   scout, and the sandboxed Bash launcher carries no agent type (handoff H3).
 4. Collect every node's result before recording. Run
    `record-wave <path-to-progress.json> '{"wave_id":"<wave>","results":{"<node>":{"outcome":"done","evidence":"<artifact result>"}}}'`
    with exactly the active node set. Evidence supplied by the caller is prose;

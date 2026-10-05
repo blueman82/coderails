@@ -367,3 +367,28 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   `no PR` units) stay prose: `skip_when_met` is only the machine predicate and is a hint, not a recorded skip. Same-user
   boundary: the spec, policy and `progress.json` are plain files the session user can edit; this is drift detection for a
   cooperating agent, not tamper evidence.
+
+## Dispatch refused: `dispatch_*` or `role_mismatch`
+
+- Symptom: `loop_dispatch_guard` (Claude `Agent`, Codex `spawn_agent`) denies a spawn in a graph-bound session, or
+  `begin-wave` / `graph.py authorize-dispatch` fails. The hook message names the failure; the reason code is a row in the
+  loop's `recovery-trace.jsonl` (`authorize-dispatch/refused/<code>`, allowed spawns are `authorized/dispatch_authorized`).
+- Query: `python3 scripts/lib/dispatch_counters.py [--since <ISO ts>]` counts `dispatch_authorized` and every refusal code.
+- Codes and fixes: `dispatch_missing_envelope` (no/old/garbled first-line `CODERAILS_GRAPH_DISPATCH` envelope: paste the
+  `prompt_prefix` from `plan` or `begin-wave`; on Codex this includes a spawn with any `task_name` and no envelope),
+  `dispatch_unknown_id` (the id was never issued: run `begin-wave`), `dispatch_foreign` (session, loop, node, wave or Codex
+  `task_name` is not the record's), `dispatch_stale_revision` (the envelope predates the graph's current revision:
+  re-run `begin-wave` after `recover-wave`), `dispatch_replayed` (the id was already used: one spawn per id; a retry needs a
+  new wave), `dispatch_contract_altered` (the stored contract no longer matches its digest or lost a field: the state was
+  edited, restart the wave via `recover-wave`), `dispatch_sections_missing` (the pasted contract block was edited or left
+  out: paste `prompt_sections` verbatim), `role_mismatch` (dispatch a guarded scout as `coderails:<role>` / Codex
+  `agent_type: <role>`; other roles accept their own type or `general-purpose` on Claude, any unnamed role on Codex),
+  `dispatch_state_unconverted` (`state_minor` < 2: run `graph.py convert --check` then `convert`; it refuses while a wave
+  is open, `convert_refused_active_wave_in_flight`, so finish or `recover-wave` first).
+- Bad `add-unit --model-role` is `add_unit_refused_bad_field` (allowed: `fast-mechanical`, `default`, `frontier`).
+- Limits: a plugin agent that is not installed in the session cannot run a guarded scout (refused, never downgraded); the
+  sandboxed Bash launcher carries no agent type, so the role is asserted on the `Agent` and `spawn_agent` routes only
+  (handoff H3); single use is keyed on the PreToolUse `tool_use_id` when the payload has one (unverified) and otherwise on
+  a consumed flag, so a hook retried without an id reads as a replay; Codex role containment (no shell, per-role MCP) is
+  not asserted, only `agent_type == role`; `progress.json` and the sections are plain same-user data, so this is drift and
+  substitution detection for a cooperating agent, not tamper evidence.
