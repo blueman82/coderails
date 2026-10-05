@@ -55,7 +55,7 @@ class EvidenceStateTests(GraphCase):
         state = self.finish()
         revalidate_all(state)
         write_records(self.parent, [])
-        with self.assertRaises(ValueError):
+        with self.assertRaisesRegex(ValueError, "no longer resolves uniquely"):
             revalidate_all(state)
 
     def test_never_dispatched_graph_without_wave_history(self) -> None:
