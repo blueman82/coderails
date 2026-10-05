@@ -180,6 +180,10 @@ Spawn one design agent, `subagent_type: general-purpose` with explicit instructi
 
 **Carry the design-scout instructions explicitly.** Use an available native role and require actual code-path reading and tradeoff evidence. A custom label is not proof that these actions occurred.
 
+**Scout spawn refusal fails closed.** If the design scout (or any independent reviewer) cannot be spawned (`agent thread limit reached`, `not_found` on a reused name, or any other capacity refusal), do not silently downgrade to the orchestrator's or a worker's own read. Record the refusal (error text and attempted name) in `progress.json`, then either halt for the human or record the fallback explicitly as `non_independent` in the plan/review artifact. A `non_independent` fallback never satisfies an independent-review requirement: the review, eval, and proof gates still need a genuinely independent result. Hooks cannot spawn agents, so this is an orchestrator rule, not a hook-enforced one.
+
+**What consumes the thread limit.** Every spawned agent thread, including completed and idle ones, counts until it is retired. Before a scout spawn, retire completed threads (close them through the provider's agent-lifecycle tool); reuse an idle named scout only if it is still listed, since inherited names can return `not_found`.
+
 What happens with that recommendation depends on the envelope class (Phase 0) — this phase resolves the fork, it does NOT add a new human gate:
 - **Full-autonomous ("crack on / ship N PRs without asking"):** auto-adopt the design agent's recommendation, record the chosen shape and the flip-condition in `progress.json` — append `{phase: "2.5", decision: "<chosen shape + flip-condition>"}` to `progress.json`'s `decisions_absorbed` array — and note it at the next approval-gate. Do NOT stall for sign-off — a design fork is neither a verification failure nor a destructive action, so Phase 0 says the loop proceeds.
 - **Narrow-fix / diagnostic / ambiguous envelope:** surface the one recommendation as a single decision — "here's the shape, here's why, approve or redirect" — bounded like Phase 1 (ask once, don't loop), then enter Phase 3.
