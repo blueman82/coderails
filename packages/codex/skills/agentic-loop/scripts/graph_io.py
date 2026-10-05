@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any, cast
 
 import graph_semantics
+import graph_spec
 from graph_identity import GraphError
 
 
@@ -27,6 +28,13 @@ def load(path: Path) -> dict[str, Any]:
                 raise GraphError(f"{name} must be a non-empty string")
         if state.get("status") not in {"initialising", "in-progress", "complete"}:
             raise GraphError("state has invalid status")
+        try:
+            graph_spec.check(state)
+        except graph_spec.SpecError as error:
+            from graph_recovery import trace  # lazy: graph_recovery is a sibling that never imports this module
+
+            trace(path, state, "refused", error.code, {}, [], "load")
+            raise
         return state
     except (OSError, json.JSONDecodeError, ValueError) as error:
         raise GraphError(f"cannot read valid state: {error}") from error

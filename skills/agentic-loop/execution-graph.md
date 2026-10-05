@@ -54,6 +54,15 @@ transcript parser and independently installed pure graph semantics.
 1. Run `plan <path-to-progress.json>` before dispatch. It returns a JSON array
    of instruction sources. A source with `unresolved:true` must be resolved
    before executing that node. Joins are automatic and are never Agent calls.
+   Instruction sources, roles and `skip_when_met` come from the machine-readable
+   spec (`packages/graph-semantics/graph-spec.yaml`, thresholds in `policy.yaml`):
+   a node whose `skip_when_met` is `true` (for example `S2.7a` below the
+   `design_doc_min_units` threshold) is recorded as skipped, not dispatched. Every
+   load refuses a graph that omits an edge the spec requires between two nodes it
+   holds (`spec_edge_missing`). `graph.py instantiate <state> --session <s> --loop-id <l>
+   [--profile units-only|full] [--unit <n>]...` builds the spec's graph into an
+   empty started loop and stamps `graph.spec_sha256`; a stamped graph also
+   rejects unknown nodes, missing spec nodes and a changed spec.
 2. Run `begin-wave <path-to-progress.json>` immediately before dispatch. It
    records exactly the ready nodes as running, captures the native transcript
    cursor, and returns the current `wave_id` and each dispatch's `prompt_prefix`.
@@ -106,39 +115,89 @@ nodes run once per work-unit `i`; `J*` nodes are explicit joins. A skipped node
 is still recorded as `skipped: <predicate>` in loop state; it is not a failed
 node and cannot satisfy a prerequisite by omission.
 
-```text
-S-2 -> S-1 -> S0 -> S0.4 -> S0.5 -> S1 -> S2
-                                      |       |
-                                      |       +--> S2.5 --+
-                                      |       +--> S2.6 --+--> J2 --> S2.7a --> S2.7b --+
-                                      |       +--> S2.7c -------------------------------+
-                                      |       +--> S2.7d[i] -----------------------------+--> S2.8 --> J2.8
-                                      |       +--> S2.7e -------------------------------+
-                                      |                                                    |
-                                      +----------------------------------------------------+
-                                                                                           v
-                  +--> U3[i] --> U4[i] --> U4b-review[i] --> U5[i] --> U6[i] --> U7/8[i]
-                  |       ^                 |                 |          |
-J2.8 ------------+       |                 +--> U5-repair[i] +----------+
-                  |       |                                      |
-                  |       +-------------------- retry-until-green ----------+
-                  |                                                            v
-                  |                                                     U4b-merge-gate[i]
-                  |                                                            |
-                  +<-- U10-respawn[i] <---------------------------------------+
-                                                                               v
-                                                                        J12-all-units
-                                                                               |
-                                                                    S9-wiki -> S9-docs
-                                                                               |
-                                                                    S13-proof -> S13-retro
-                                                                               |
-                                                                        S13-complete
+<!-- BEGIN GENERATED graph-spec:diagram -->
+```mermaid
+flowchart TD
+    n_S_2["S-2"]
+    n_S_1["S-1"]
+    n_S0["S0"]
+    n_S0_4["S0.4"]
+    n_S0_5["S0.5"]
+    n_S1["S1"]
+    n_S2["S2"]
+    n_S2_5["S2.5"]
+    n_S2_6["S2.6"]
+    n_J2(["J2"])
+    n_S2_7a["S2.7a"]
+    n_S2_7b["S2.7b"]
+    n_S2_7c["S2.7c"]
+    n_S2_7d_i_["S2.7d[i]"]
+    n_S2_7e["S2.7e"]
+    n_S2_8["S2.8"]
+    n_J2_8(["J2.8"])
+    n_U3_i_["U3[i]"]
+    n_U4_i_["U4[i]"]
+    n_U4b_review_i_["U4b-review[i]"]
+    n_U5_i_["U5[i]"]
+    n_U5_repair_i_["U5-repair[i]"]
+    n_U6_i_["U6[i]"]
+    n_U7_8_i_["U7/8[i]"]
+    n_U4b_merge_gate_i_["U4b-merge-gate[i]"]
+    n_U10_respawn_i_["U10-respawn[i]"]
+    n_J12_all_units(["J12-all-units"])
+    n_S9_wiki["S9-wiki"]
+    n_S9_docs["S9-docs"]
+    n_S13_proof["S13-proof"]
+    n_S13_retro["S13-retro"]
+    n_S13_complete["S13-complete"]
+    n_S_2 --> n_S_1
+    n_S_1 --> n_S0
+    n_S0 --> n_S0_4
+    n_S0_4 --> n_S0_5
+    n_S0_5 --> n_S1
+    n_S1 --> n_S2
+    n_S2 --> n_S2_5
+    n_S2 --> n_S2_6
+    n_S2_5 --> n_J2
+    n_S2_6 --> n_J2
+    n_J2 --> n_S2_7a
+    n_S2_7a --> n_S2_7b
+    n_S2 --> n_S2_7c
+    n_S2 --> n_S2_7d_i_
+    n_S2 --> n_S2_7e
+    n_S2 --> n_S2_8
+    n_S2_7b --> n_S2_8
+    n_S2_8 --> n_J2_8
+    n_S2_7c --> n_J2_8
+    n_S2_7d_i_ --> n_J2_8
+    n_S2_7e --> n_J2_8
+    n_J2_8 --> n_U3_i_
+    n_U3_i_ --> n_U4_i_
+    n_U4_i_ --> n_U4b_review_i_
+    n_U4b_review_i_ --> n_U5_i_
+    n_U5_i_ --> n_U5_repair_i_
+    n_U4b_review_i_ --> n_U6_i_
+    n_U6_i_ --> n_U7_8_i_
+    n_U4b_review_i_ --> n_U4b_merge_gate_i_
+    n_U6_i_ --> n_U4b_merge_gate_i_
+    n_U7_8_i_ --> n_U4b_merge_gate_i_
+    n_U4_i_ --> n_U10_respawn_i_
+    n_U4b_merge_gate_i_ --> n_J12_all_units
+    n_J12_all_units --> n_S9_wiki
+    n_S9_wiki --> n_S9_docs
+    n_S9_docs --> n_S13_proof
+    n_S13_proof --> n_S13_retro
+    n_S13_retro --> n_S13_complete
 ```
+<!-- END GENERATED graph-spec:diagram -->
 
-The diagram is a shape guide; the table is authoritative where a line would be
-ambiguous.
+The diagram and the table below are generated from
+`packages/graph-semantics/graph-spec.yaml` and `policy.yaml` by
+`python3 scripts/gen_graph_docs.py` (`--check` fails the test run on drift);
+edit the spec, never the generated regions. The diagram is a shape guide; the
+table is authoritative where a line would be ambiguous.
 
+<!-- BEGIN GENERATED graph-spec:table -->
 | ID | Node / true prerequisites | Ready when | Conditional skip or join |
 |---|---|---|---|
 | `S-2` | Start state (`graph.py start`) | path helper returns the session-owned state path | never skipped |
@@ -176,6 +235,7 @@ ambiguous.
 | `S13-proof` | `S9-docs` | every frozen proof command ran verbatim in the orchestrator session and passed | absent proof requires the recorded no-executable disposition |
 | `S13-retro` | `S13-proof` | Phase 13 report, cost, decisions, artifacts, eval result, standing orders, and feedback are written | never a mid-loop checkpoint |
 | `S13-complete` | `S13-retro` | final aggregate verification passes; `progress.json` is complete and `retro.json` is valid | terminal node; emits `LOOP-STOP: complete` |
+<!-- END GENERATED graph-spec:table -->
 
 `S0.5`, `U4`, `U4b-review`, `U6`, and `S13-complete` carry the Phase 11/12
 confidence-label and fresh-evidence rules; they are guards on the nodes above,

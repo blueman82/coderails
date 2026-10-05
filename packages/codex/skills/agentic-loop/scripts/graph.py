@@ -12,9 +12,10 @@ from typing import Any, cast
 
 import graph_convert
 import graph_semantics
+import graph_spec
 import graph_stops
 from graph_completion import complete, verify_completion
-from graph_controller import add_unit, start
+from graph_controller import add_unit, instantiate, start
 from graph_dispatch import apply_record, authorize_dispatch, begin_wave, record_wave
 from graph_identity import GraphError, next_attempt, task_name
 from graph_io import load as _load
@@ -249,6 +250,12 @@ def _parser() -> argparse.ArgumentParser:
             controller.add_argument("--depends-on", action="append", default=[])
             controller.add_argument("--join", action="store_true")
             controller.add_argument("--manifest", action="append", default=[])
+    spec = commands.add_parser("instantiate")
+    spec.add_argument("state", type=Path)
+    spec.add_argument("--session", required=True)
+    spec.add_argument("--loop-id", required=True)
+    spec.add_argument("--profile", choices=graph_spec.PROFILES, help="default: policy graph.profile")
+    spec.add_argument("--unit", action="append", default=[], help="work unit id to register (repeatable)")
     convert = commands.add_parser("convert")
     convert.add_argument("state", type=Path)
     convert.add_argument("--session", required=True)
@@ -303,6 +310,8 @@ def main() -> int:
             output = add_unit(
                 args.state, args.session, args.loop_id, args.unit, args.depends_on, args.join, args.manifest
             )
+        elif args.command == "instantiate":
+            output = instantiate(args.state, args.session, args.loop_id, args.profile, args.unit)
         elif args.command == "begin-wave":
             output = begin_wave(args.state)
         elif args.command == "record-wave":

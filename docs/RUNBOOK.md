@@ -334,3 +334,28 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   `unregistered_loop_guard`), so hook state, `EvalVerdict` and `CostReport` are Claude-side; Codex gets the shared
   attestation parser and the `updated_at` stamp. `mine_hook_blocks` still counts the log's exact `session=` token;
   moving it to trace rows needs every gate to emit rows (Phase 6).
+
+## Graph refused with `spec_*`, or `instantiate` refused
+
+- Symptom: any graph command (`inspect`, `begin-wave`, `add-unit`, `complete`, ...) fails with `spec_edge_missing`,
+  `spec_unknown_node`, `spec_node_missing` or `spec_hash_mismatch`; or `graph.py instantiate` fails with
+  `instantiate_refused_<foreign|state|nonempty|bad_id>`.
+- Query: `python3 scripts/lib/spec_counters.py [--since <ISO ts>]` counts those codes plus `instantiate_ok`,
+  `instantiate_noop` and `skip_when_met` (one count per `plan` call in which a node's skip predicate held). Each refused
+  load also leaves a `load/refused/<code>` row in the loop's `recovery-trace.jsonl`.
+- Remediation: `spec_edge_missing` names the missing edge (for example `J2.8 -> U3[2]`): the spec requires it whenever both
+  nodes exist, so add the edge by registering units with `graph.py add-unit` (which wires it) rather than editing
+  `progress.json`. For a graph stamped by `instantiate`: `spec_hash_mismatch` means `graph-spec.yaml` changed after the
+  graph was built (finish that loop on the old spec checkout, or start a new loop); `spec_unknown_node` /
+  `spec_node_missing` mean nodes were added or removed by hand. `instantiate` builds only into an empty started loop
+  (`instantiate_refused_nonempty` otherwise); a re-run with the same profile and units is `instantiate_noop`.
+- Edit the graph structure in `packages/graph-semantics/graph-spec.yaml` / `policy.yaml` (JSON syntax) and run
+  `python3 scripts/gen_graph_docs.py`; `scripts/tests/gen_graph_docs_test.py` fails the run when the generated tables drift.
+  The installer materializes both files next to `graph_spec.py` in each provider's `agentic-loop/scripts`.
+- Limits: `policy.yaml` default `graph.profile` is `units-only` (the unit lane `U3[i]` plus `J12-all-units`); `full`
+  (about 25 preparation nodes per loop) is opt-in via `instantiate --profile full` pending an owner decision. Spec edges are
+  enforced only between nodes that exist, and join inputs are not enforced on load (the pure core validates joins).
+  `loop_evals_min_units` is documented but not read by any hook yet. Judgement skip rules (irreversible-surface triggers,
+  `no PR` units) stay prose: `skip_when_met` is only the machine predicate and is a hint, not a recorded skip. Same-user
+  boundary: the spec, policy and `progress.json` are plain files the session user can edit; this is drift detection for a
+  cooperating agent, not tamper evidence.

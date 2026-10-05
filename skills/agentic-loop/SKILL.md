@@ -77,6 +77,8 @@ even when it skipped Phase 2.7.
 
 ### Phase 3 — Delegate all implementation to routed workers; spawn a team when work has ≥3 sequential units or dependency chains
 
+The "3+" team line is the `design_doc_min_units` threshold in the generated block at `phases-setup.md` `S2.7` (policy: `packages/graph-semantics/policy.yaml`), not a number to retype here.
+
 **Default: main context never implements.** It orchestrates — plans, delegates, verifies. Every implementation unit (even a single-file edit, even a tight sequential step) goes to a spawned worker at the role Phase 2.8 assigned it — the `default` role unless Phase 2.8 routed otherwise. The two reasons, in order: keep main context clean (frontier-verification_level context is scarce and fills fast in long sessions), and keep cost down (`default` does the typing, not `frontier`). Treat a `frontier`-role worker, or a file edit done directly in main context, as the exception that needs a reason, not the default.
 
 The delegation decision is a two-rung ladder, not "delegate vs. do it yourself":
