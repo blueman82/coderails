@@ -1,8 +1,5 @@
 #!/usr/bin/env python3
-"""Measure provider graph-alignment evidence: hook counts, bootstrap bytes, gate telemetry, state divergence.
-
-Read-only. Emits counts and paths only; never reads or prints transcript, prompt or log-message content.
-"""
+"""Measure graph-alignment evidence (read-only): counts and paths only, never transcript, prompt or log content."""
 
 from __future__ import annotations
 
@@ -17,6 +14,7 @@ from pathlib import Path
 from typing import Any, cast
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from scripts.enforcement_trace import enforcement_counts
 from scripts.lib.receipt_counters import receipt_summary
 
 HOOK_FIELD = re.compile(r"(?:^|\s)hook=([A-Za-z0-9_.-]+)")
@@ -378,6 +376,7 @@ def measure(root: Path, extra_traces: list[Path] | None = None) -> dict[str, Any
         "duplication": duplication(root),
         "lock_events": lock_events(),
         "eval_trace": eval_trace_counts(extra_traces or []),
+        "external_enforcement": enforcement_counts(loop_state_roots()),
     }
 
 

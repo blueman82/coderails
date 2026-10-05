@@ -40,6 +40,13 @@ now**.
    commands only to inspect and re-derive evidence; never run a command that
    changes external state. If confirming a claim would require changing state
    and there is no safe dry-run path, mark that part UNSUPPORTED and say why.
+7. **Re-running tests goes through `capability.py`.** To re-derive a number from a
+   test run, call the absolute path of `scripts/capability.py` in the Codex plugin
+   (the dispatcher MUST pass it in your prompt; if it did not, report UNSUPPORTED for the re-run, do not guess a path):
+   `<abs>/scripts/capability.py tests.run --json-args '{"name":"scripts"}'`. It runs
+   only commands declared in `capabilities/profiles.json` (bounded, scrubbed env, macOS sandbox with no network and repo-only writes). That is
+   execution of repo code, not read-only; the read-only sandbox may block its
+   cache writes. Codex has no per-agent Bash hook, so this is instruction-only.
 
 ## Method
 

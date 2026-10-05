@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "capabilities": ["repo.inspect", "diff.read", "tests.run", "pr.comment", "worktree.write", "shell.raw"],
+  "agents": {
+    "deploy-safety-reviewer": ["repo.inspect", "diff.read"],
+    "design-scout": ["repo.inspect", "diff.read"],
+    "disposition-scout": ["repo.inspect", "diff.read"],
+    "preflight-scout": ["repo.inspect", "diff.read"],
+    "source-auditor": ["repo.inspect", "diff.read", "tests.run"],
+    "spec-reviewer": [],
+    "docs-auditor": ["shell.raw", "worktree.write"],
+    "loop-worker": ["shell.raw", "worktree.write"],
+    "proof-author": ["shell.raw", "worktree.write"],
+    "wiki-writer": ["shell.raw", "worktree.write"]
+  },
+  "tests": {
+    "scripts": ["python3", "-m", "unittest", "discover", "-s", "scripts/tests", "-p", "*_test.py"],
+    "packages": ["python3", "-m", "unittest", "discover", "-s", "packages/tests", "-p", "*test*.py"],
+    "reviewer-allowlist": ["python3", "hooks/scripts/tests/reviewer_bash_allowlist_test.py"]
+  }
+}
