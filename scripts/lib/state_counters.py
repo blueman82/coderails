@@ -32,7 +32,7 @@ REASONS = (
     "attest_not_bound",
     "predecessor_pending",
     "node_unknown",
-    *(f"eval_verdict_{s.lower()}" for s in EVAL_STATUSES),
+    *(f"eval_verdict_{s.lower().replace('-', '_')}" for s in EVAL_STATUSES),
 )
 
 

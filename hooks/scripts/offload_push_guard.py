@@ -11,6 +11,7 @@ from typing import cast
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from hooks.scripts.hook_common import JsonValue, log, output, read_payload
+from hooks.scripts.lib.agentic_loop_path import sanitise_session_id
 from hooks.scripts.lib.hook_state import mark_nudged
 
 PUSH = re.compile(r"git(?: +-C +[^ ]+)? +push\b.*\b(?:origin +)?(?:main|master)\b", re.I)
@@ -50,8 +51,8 @@ def main() -> int:
     payload = read_payload()
     event_value = payload.get("hook_event_name", "Stop")
     event = event_value if isinstance(event_value, str) else "Stop"
-    sid_value = payload.get("session_id", "?")
-    sid = str(sid_value).replace("/", "_").replace("..", "")
+    # A missing id gets a unique unknown-* key (as unregistered_loop_guard does) so the nudge still fires once.
+    sid = sanitise_session_id(str(payload.get("session_id") or "?"))
     message = payload.get("last_assistant_message", "")
     transcript = payload.get("transcript_path", "")
     text = (

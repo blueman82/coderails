@@ -14,6 +14,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from hooks.scripts.lib import hook_state
 from hooks.scripts.lib.loop_state_common import LoopState
+from hooks.scripts.lib.trace_row import append_row
 from hooks.scripts.tests.lib.hook_test_support import HookTestCase
 from scripts.lib.state_counters import count_reasons
 
@@ -47,6 +48,23 @@ class HookStateTests(HookTestCase):
         self.assertEqual(json.loads(self.state_file("abc").read_text())["nudged"], {"offload_push_guard": True})
         counts = count_reasons(self.directory / "state")
         self.assertEqual((counts["nudge_first"], counts["nudge_suppressed"]), (2, 2))
+
+    def test_payload_without_session_id_still_nudges_and_is_counted(self) -> None:
+        """No session_id must not silently suppress the nudge; the unkeyed session is traced nudge_first."""
+        transcript = self.directory / "t.jsonl"
+        message = {"type": "assistant", "message": {"content": [{"type": "text", "text": OFFLOAD}]}}
+        transcript.write_text(json.dumps(message) + "\n")
+        result = self.run_hook("offload_push_guard", {"transcript_path": str(transcript), "hook_event_name": "Stop"})
+        self.assertIn("offload-guard", result.stdout)
+        self.assertEqual(count_reasons(self.directory / "state")["nudge_first"], 1)
+
+    def test_no_go_block_is_counted(self) -> None:
+        """The NO-GO verdict emitted by loop_state_guard (eval_verdict_no_go) has a live counter key."""
+        with patch.dict(os.environ, self.environment):
+            append_row("loop_state_guard", "blocked", "eval_verdict_no_go", "S1")
+        counts = count_reasons(self.directory / "state")
+        self.assertEqual(counts["eval_verdict_no_go"], 1)
+        self.assertNotIn("eval_verdict_no-go", counts)
 
     def test_discipline_log_cannot_suppress_a_nudge(self) -> None:
         """A forged 'nudged=1' log line has no effect on the nudge decision."""

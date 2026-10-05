@@ -17,7 +17,9 @@ exists at that path (e.g. `[ -f "$PLUGIN_ROOT/hooks/scripts/lib/graph_readiness.
 — a packaged install's cache copy can predate this script's introduction. The
 script prints JSON `{"ready": bool, "reason_code": ...}`; a missing script, or
 output that is not that JSON, is a resolution failure and is distinct from a
-typed not-ready verdict. If the file is
+typed not-ready verdict. This script is an orchestrator preflight and is advisory by
+design: the enforcing check is `begin-wave`, which opens only core-ready nodes
+whatever this script says. If the file is
 missing, stop and report that PLUGIN_ROOT resolved to a directory without this
 script — do not dispatch. When `${CLAUDE_PLUGIN_ROOT}` is unset, do not
 construct or guess a path — reuse the plugin root you already have from this
