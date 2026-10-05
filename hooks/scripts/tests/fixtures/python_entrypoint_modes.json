@@ -23,6 +23,8 @@
   "scripts/lib/eval_validation.py": "100644",
   "scripts/lib/git_common.py": "100644",
   "scripts/lib/integrity_status.py": "100644",
+  "scripts/lib/memory_adapter.py": "100755",
+  "scripts/lib/memory_counters.py": "100644",
   "scripts/lib/review_artifact.py": "100755",
   "scripts/lib/wiki_debt.py": "100644",
   "scripts/measure_graph_alignment.py": "100755",

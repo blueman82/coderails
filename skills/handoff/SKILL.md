@@ -20,6 +20,15 @@ Generate two artefacts that allow a fresh Claude Code session to continue the cu
 
 ## Instructions
 
+### Step 0: Prefer recorded state (optional)
+
+If a native loop graph exists for this session, first run
+`python3 "${CLAUDE_PLUGIN_ROOT}/skills/agentic-loop/scripts/graph.py" summarize <state>` (JSON: `phase`, `detail`, `done`,
+`active`, `ready`, `pending`) and `... graph.py inspect <state>` (JSON: `revision`, `active_wave`, `running`, `ready`,
+`hard_stop`), plus `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/lib/memory_adapter.py" list --type decision --scope loop --loop <session_id>`
+(JSON records with `cite`). Use them for Goal, Decisions, Done and Next steps. If any command is unavailable or exits
+nonzero (the adapter prints `{"degraded": "<reason_code>"}`), skip this step and run Step 1 unchanged.
+
 ### Step 1: Extract from current session
 
 Scan the conversation for these categories. Be thorough — the new session has ZERO context from this one:

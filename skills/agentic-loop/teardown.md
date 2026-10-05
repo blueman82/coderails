@@ -125,6 +125,16 @@ At the repo-key dir. Match this loop's retro failure modes against existing entr
 
 This step is additive-or-recurrence-only: no metric-based removal anywhere.
 
+**Typed lessons (optional, degrades to the manual text above).** First run
+`python3 "${CLAUDE_PLUGIN_ROOT}/scripts/lib/memory_adapter.py" probe`. Exit 0 means a Part A `muninn` is installed: emit
+each new or recurred lesson as a record with
+`python3 "${CLAUDE_PLUGIN_ROOT}/scripts/lib/memory_adapter.py" add --type lesson --scope loop --loop <session_id> --run <session_id> --claim "<lesson>" --cite <muninn ref> --quote "<verbatim quote>"`
+(an uncited write is refused with reason `uncited_write`), then regenerate the view with
+`... memory_adapter.py render --standing-orders --loop <session_id> --write <repo-key dir>/standing-orders-generated.md`
+(it only overwrites a file whose first line is the generator marker, never the hand-written `standing-orders.md`). Any
+nonzero exit prints `{"degraded": "<reason_code>"}` and a trace row is appended; keep the manual edits above as the only
+path. Runbook: `docs/RUNBOOK.md`, "Memory silently using Markdown".
+
 ## Steps 4 and 5
 
 4. **Write feedback-type auto-memories** for lessons that generalise beyond this loop.

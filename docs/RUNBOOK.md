@@ -66,3 +66,14 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
 - Baseline note: the old 103 fires / 5 blocks figure (`docs/graph-alignment-measurement.md`) came from discipline-log
   telemetry; after-numbers come from trace rows, so they are not comparable. Reproduce:
   `python3 scripts/measure_graph_alignment.py --root . --json`.
+
+## Memory silently using Markdown
+
+- Symptom: retro lessons or handoffs never appear as typed records; `memory_adapter.py probe` exits 3.
+- Query: `python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import sys,json;print(json.load(sys.stdin)['memory'])"`
+  (`by_reason_code`, deduped by `event_id`), or `grep '"command": "memory\.' <agentic-loop dir>/<session_id>/trace.jsonl`.
+  Codes: `muninn_absent`, `muninn_old_ledger`, `muninn_timeout`, `muninn_error`, `uncited_write`, `restricted_refused`,
+  `bad_record`, `handwritten_protected`. An unsafe session id writes no row.
+- Remediation: `muninn_absent`/`muninn_old_ledger`: install a muninn release with the typed-ledger flags (Part A, muninn
+  PR #9); the Markdown path keeps working meanwhile. `uncited_write`: pass `--cite` and a verbatim `--quote`.
+  `handwritten_protected`: the target is hand-written; render to a new path.
