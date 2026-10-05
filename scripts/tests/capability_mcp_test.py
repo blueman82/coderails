@@ -235,6 +235,13 @@ class McpCase(unittest.TestCase):
         env = server.envelope("repo_inspect", {"op": "list", "worktree": str(self.base)})
         self.assertEqual(env["refusal"], "capability_path_denied")
 
+    def test_lone_surrogate_path_is_refused_and_server_survives(self) -> None:
+        """(h) a lone-surrogate path yields an isError envelope, not a dead server."""
+        server = self.start("design-scout")
+        env = server.envelope("repo_inspect", {"op": "sha256", "path": "\ud800x"})
+        self.assertEqual(env["refusal"], "capability_args_invalid")
+        self.assertIn("repo_inspect", server.tools())
+
     def test_python39_syntax_and_import(self) -> None:
         """(g) the three new modules parse as 3.9 and import under this interpreter."""
         for rel in (

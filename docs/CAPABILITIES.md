@@ -65,6 +65,12 @@ deliberately NOT offered, so reviewers work from `diff.read` and dispatcher-supp
 an agent that holds a raw shell from bypassing it; that is what removing Bash from the agent achieves. Same-user policy
 files are agent-writable: this is a cooperating-agent safeguard, not an absolute boundary.
 
+Further stated limits: (1) `cmd.run` and `tests.run` read `capabilities/profiles.json` on every call, and `tests.run`
+executes repo code in a sandbox that can write the repo, so that code can edit the command table within a session
+(the same-user "tests.run executes repo code" boundary; `tools/list` is fixed at launch, the command tables are not).
+(2) The `worktree` argument accepts any entry of `git worktree list`, not only the dispatched tree, so a granted role can
+read, and via `tests.run`/`cmd.run` execute in, another agent's worktree of the same repo.
+
 Measurement note: the success signal is the `capability_wrong_role`, `capability_args_invalid`, `capability_path_denied`
 and `capability_bad_ref` counts staying near zero for well-behaved roles, with `ok` rising once agents are bound to the
 servers. A sustained `capability_wrong_role` rate means a prompt or profile asks a role for a tool it does not hold.

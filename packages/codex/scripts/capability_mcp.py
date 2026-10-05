@@ -92,8 +92,9 @@ def call(role: str, allowed: dict[str, str], raw: object) -> tuple[Any, Any]:
     now = datetime.now(timezone.utc).isoformat(timespec="seconds")
     try:
         status, result, evidence = cap.TOOLS[tool](params.get("arguments", {}))
-    except (cap.RefusalError, OSError, subprocess.SubprocessError) as error:
-        code = error.code if isinstance(error, cap.RefusalError) else "capability_io_error"
+    except (cap.RefusalError, OSError, ValueError, subprocess.SubprocessError) as error:
+        other = "capability_args_invalid" if isinstance(error, ValueError) else "capability_io_error"
+        code = error.code if isinstance(error, cap.RefusalError) else other
         detail = error.detail if isinstance(error, cap.RefusalError) else str(getattr(error, "strerror", "") or "")
         traced = emit("refused", code, tool, role)
         body = envelope(tool, now, traced, ok=False, exit_status=2, refusal=code, detail=detail)
