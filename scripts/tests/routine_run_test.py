@@ -66,6 +66,11 @@ class RoutineCase(unittest.TestCase):
         shim = self.bin / "gh"
         shim.write_text(GH_SHIM)
         shim.chmod(0o755)
+        for name in ("push", "post_review", "post_evals", "merge"):
+            gate = self.bin / f"{name}.py"
+            gate.write_text('#!/bin/sh\necho ran >> "$(dirname "$0")/ran"\nexit ${1:-0}\n')
+            gate.chmod(0o755)
+        self.ran = self.bin / "ran"
         self.gh_log = root / "gh.log"
         self.log = root / "logs" / "run.log"
         self.jsonl = self.log.with_suffix(".jsonl")
@@ -100,7 +105,9 @@ class RoutineCase(unittest.TestCase):
     def stage(self, name: str) -> subprocess.CompletedProcess[str]:
         """Perform a stage: gates through run-gate with `true`, the rest through stage."""
         gates = ("push", *LATER)
-        return self.run_tool("run-gate", name, "--", "true") if name in gates else self.run_tool("stage", name)
+        if name in gates:
+            return self.run_tool("run-gate", name, "--", str(self.bin / f"{name}.py"))
+        return self.run_tool("stage", name)
 
     def advance_to_manifest_check(self) -> subprocess.CompletedProcess[str]:
         """Begin, perform the first three stages, then run manifest_check and return its result."""
@@ -179,7 +186,7 @@ class DocsSyncRunTests(RoutineCase):
         self.assertEqual(self.advance_to_manifest_check().returncode, 0)
         for name in STAGES[4:] + LATER[:-1]:
             self.assertEqual(self.stage(name).returncode, 0, name)
-        result = self.run_tool("run-gate", "merge", "--", "sh", "-c", "exit 1")
+        result = self.run_tool("run-gate", "merge", "--", str(self.bin / "merge.py"), "1")
         self.assertNotEqual(result.returncode, 0)
         last = self.rows()[-1]
         self.assertEqual((last["outcome"], last["reason_code"], last["stage"]), ("run_refused", "merge", "merge"))
@@ -191,11 +198,10 @@ class DocsSyncRunTests(RoutineCase):
         self.assertEqual(self.run_tool("begin").returncode, 0)
         for name in STAGES[:3]:
             self.assertEqual(self.stage(name).returncode, 0)
-        marker = Path(self.tmp.name) / "ran"
-        result = self.run_tool("run-gate", "push", "--", "touch", str(marker))
+        result = self.run_tool("run-gate", "push", "--", str(self.bin / "push.py"))
         self.assertEqual(result.returncode, 2)
         self.assertIn("stage_out_of_order", result.stderr)
-        self.assertFalse(marker.exists())
+        self.assertFalse(self.ran.exists())
         self.assertEqual(self.rows()[-1]["reason_code"], "stage_out_of_order")
         self.assert_cleaned_once()
 
@@ -214,6 +220,68 @@ class DocsSyncRunTests(RoutineCase):
         self.run_tool("abort", "audit_failed")
         self.assertNotIn("pr close 7", self.gh_calls())
         self.assertNotEqual(git(self.work, "ls-remote", "--heads", "origin", "main").strip(), "")
+
+    def test_run_gate_pins_the_script_per_stage(self) -> None:
+        """Negative control: a no-op argv for a gate, or any argv for a non-gate stage, aborts and runs nothing."""
+        self.write("docs/a.md", "x\n")
+        self.commit()
+        self.assertEqual(self.advance_to_manifest_check().returncode, 0)
+        self.assertEqual(self.run_tool("run-gate", "push", "--", "true").returncode, 2)
+        self.assertEqual(self.rows()[-1]["reason_code"], "gate_argv_not_allowed")
+        self.assert_cleaned_once()
+
+    def test_run_gate_rejects_non_gate_stage(self) -> None:
+        """run-gate manifest_check -- true cannot stand in for the policy check."""
+        self.assertEqual(self.run_tool("begin").returncode, 0)
+        for name in STAGES[:3]:
+            self.assertEqual(self.stage(name).returncode, 0, name)
+        self.assertEqual(self.run_tool("run-gate", "manifest_check", "--", "true").returncode, 2)
+        self.assertEqual(self.rows()[-1]["reason_code"], "gate_argv_not_allowed")
+        self.assertFalse(last_marker_is_green(self.log))
+
+    def test_python_interpreter_form_of_the_pinned_script_is_allowed(self) -> None:
+        """The SKILL spells gates as python3 PATH/push.py; that form passes the pin."""
+        self.write("docs/a.md", "x\n")
+        self.commit()
+        self.assertEqual(self.advance_to_manifest_check().returncode, 0)
+        self.assertEqual(self.run_tool("run-gate", "push", "--", "python3", "/p/push.py", "--version").returncode, 1)
+
+    def test_uncommitted_edit_fails_manifest_check(self) -> None:
+        """An edit left uncommitted at manifest_check is not an empty diff."""
+        self.write("docs/a.md", "x\n")
+        self.commit()
+        self.write("scripts/x.py", "print(1)\n")
+        self.assertEqual(self.advance_to_manifest_check().returncode, 1)
+        self.assertEqual(self.rows()[-1]["reason_code"], "dirty_worktree")
+        self.assert_cleaned_once()
+
+    def test_edit_between_manifest_check_and_push_is_rechecked(self) -> None:
+        """The manifest runs again inside run-gate push, before the gate command."""
+        self.write("docs/a.md", "x\n")
+        self.commit()
+        self.assertEqual(self.advance_to_manifest_check().returncode, 0)
+        self.write("scripts/x.py", "print(1)\n")
+        self.commit("late edit")
+        self.assertEqual(self.run_tool("run-gate", "push", "--", str(self.bin / "push.py")).returncode, 1)
+        self.assertEqual(self.rows()[-1]["reason_code"], "docs_sync_deny")
+        self.assertFalse(self.ran.exists())
+        self.assert_cleaned_once()
+
+    def test_stray_brace_in_log_does_not_crash(self) -> None:
+        """A {bad} placeholder in --log is literal text, not a KeyError."""
+        self.log = Path(self.tmp.name) / "{bad}" / "run.log"
+        self.jsonl = self.log.with_suffix(".jsonl")
+        result = self.run_tool("begin")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
+
+    def test_begin_cannot_launder_a_failed_or_open_run(self) -> None:
+        """Begin is refused while a run is open or after a same-day abort, unless --new."""
+        self.assertEqual(self.run_tool("begin").returncode, 0)
+        self.assertEqual(self.run_tool("begin").returncode, 2)
+        self.assertEqual(self.run_tool("abort", "audit_failed").returncode, 0)
+        self.assertEqual(self.run_tool("begin").returncode, 2)
+        self.assertEqual(self.run_tool("begin", "--new").returncode, 0)
 
 
 class RetroPromotionRunTests(RoutineCase):

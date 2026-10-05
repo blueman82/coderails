@@ -375,6 +375,20 @@ the runner started it, not by an id the runner hands the child. Cleanup does not
 force-switch a dirty tree: a failed step prints `cleanup_failed: <step>` and the
 branch is left for a human. `skills/dashboard/` is one of the integrity daemon's
 policy paths, so a daemon-attested PR touching the runner needs a human merge.
+Gate pinning: `run-gate STAGE` accepts only the stage's script from the
+spec's `gates` map (`push.py`, `post_review.py`, `post_evals.py`, `merge.py`,
+directly or as `python3 PATH/script`); any other argv, or run-gate on a
+non-gate stage, ends the run `gate_argv_not_allowed`. The manifest is also
+re-checked inside `run-gate push`, and a dirty tree fails it (`dirty_worktree`).
+`begin` is refused while a run is open or after a same-day abort/refusal
+unless `--new`. State access is flock-serialised. Same-user honest boundary:
+the state file, the logs, `--log` and `routine_log.py emit` are writable by the
+same user who runs the agent, so an agent that edits them directly (or emits a
+`run_ok` row by hand) can forge a green run; these controls stop accidents and
+shortcuts through the runner, not a hostile same-user process. Cleanup deletes
+the branch recorded at `fetch_branch` (the branch checked out then), with no
+naming-prefix check, so a wrong checkout at that stage aims cleanup at that
+branch.
 The Codex docs-sync policy copy names `.claude/**`, not `.codex/**`, in its
 deny-list (it must stay a byte mirror).
 

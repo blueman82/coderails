@@ -15,10 +15,13 @@ local branch, never the default branch), once. `finish` emits run_ok. Exit: 0 ok
 from __future__ import annotations
 
 import argparse
+import fcntl
 import json
 import subprocess
 import sys
 import uuid
+from collections.abc import Generator
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import Any, cast
@@ -42,14 +45,22 @@ class Run:
         if not template or "{repo_key_dir}" in template:
             raise SystemExit("log_path_required: pass --log PATH")
         self.spec, self.routine = spec, routine
-        self.human = Path(template.format(date=datetime.now().strftime("%Y-%m-%d"))).expanduser()
-        self.jsonl, self.state_path = self.human.with_suffix(".jsonl"), self.human.with_suffix(".state.json")
+        self.today = datetime.now().strftime("%Y-%m-%d")
+        self.human = Path(template.replace("{date}", self.today)).expanduser()
+        # the state file is keyed by the template, not the date, so a run that crosses midnight keeps its state
+        keyed = Path(template.replace("{date}", "active")).expanduser()
+        self.jsonl, self.state_path = self.human.with_suffix(".jsonl"), keyed.with_suffix(".state.json")
         self.state: dict[str, Any] = {}
 
     @property
     def stages(self) -> list[str]:
         """The spec's ordered stage names."""
         return [str(s) for s in cast(list[object], self.spec.get("stages", []))]
+
+    @property
+    def gates(self) -> dict[str, str]:
+        """The spec's gate stages mapped to the one script each may run."""
+        return cast(dict[str, str], self.spec.get("gates", {}))
 
     def load(self) -> bool:
         """Load the active run's state; False (with a message) when there is none."""
@@ -58,6 +69,9 @@ class Run:
         except (OSError, ValueError):
             print("no_active_run: call begin first", file=sys.stderr)
             return False
+        if self.state.get("human"):  # the log paths pinned at begin
+            self.human = Path(str(self.state["human"]))
+            self.jsonl = self.human.with_suffix(".jsonl")
         return True
 
     def save(self) -> None:
@@ -75,7 +89,7 @@ class Run:
         refusal = self.emit(stage, outcome, code)
         if refusal:
             return refusal
-        self.state["ended"] = True
+        self.state["ended"], self.state["outcome"] = True, outcome
         self.save()
         if outcome != "run_ok":
             self.cleanup()
@@ -125,8 +139,10 @@ def report(step: str, done: subprocess.CompletedProcess[str]) -> None:
         print(f"cleanup_failed: {step}: {done.stderr.strip()}", file=sys.stderr)
 
 
-def manifest_check(run: Run) -> int:
-    """Run diff_manifest.py with the spec's policy; any violation, unreadable input or crash aborts."""
+def manifest_code(run: Run) -> str:
+    """Run diff_manifest.py with the spec's policy over a clean tree; '' when it passes, else the reason code."""
+    if git.output("git", "status", "--porcelain"):
+        return "dirty_worktree"
     policy = ROOT / str(run.spec.get("policy", ""))
     done = git.run(sys.executable, str(Path(__file__).with_name("diff_manifest.py")), "--policy", str(policy))
     code, ok = "", False
@@ -138,17 +154,33 @@ def manifest_check(run: Run) -> int:
     except (ValueError, IndexError, KeyError, TypeError, AttributeError):
         pass
     if ok:
-        return run.advance("manifest_check")
+        return ""
     print(done.stdout.strip(), file=sys.stderr)
-    known = code in cast(list[str], run.spec.get("reason_codes", []))
-    run.end("manifest_check", "run_abort", code if known else "manifest_internal_error")
-    return 1
+    return code if code in cast(list[str], run.spec.get("reason_codes", [])) else "manifest_internal_error"
+
+
+def manifest_check(run: Run, stage: str) -> int:
+    """Check the manifest at `stage`; a violation aborts the run, a pass at manifest_check advances it."""
+    code = manifest_code(run)
+    if code:
+        run.end(stage, "run_abort", code)
+        return 1
+    return run.advance(stage) if stage == "manifest_check" else 0
 
 
 def cmd_begin(run: Run, args: argparse.Namespace) -> int:
-    """Start a run: write the state and the provisional run_incomplete row; print the run id."""
-    del args
+    """Start a run: write the state and the provisional run_incomplete row; print the run id.
+
+    Refused while a run is open, or after a same-day abort/refusal, unless --new (no laundering a failed run).
+    """
+    if not args.new and run.load():
+        old = run.state
+        failed = old.get("outcome") in ("run_abort", "run_refused")
+        if old.get("date") == run.today and (failed or not old.get("ended")):
+            print("run_in_progress_or_failed: pass --new to start over", file=sys.stderr)
+            return 2
     run.state = {"v": 1, "run_id": uuid.uuid4().hex[:12], "next": 0, "branch": "", "ended": False}
+    run.state |= {"date": run.today, "human": str(run.human)}
     run.save()
     refusal = run.emit("begin", "run_incomplete", "incomplete-run")
     print(refusal or run.state["run_id"], file=sys.stderr if refusal else sys.stdout)
@@ -163,7 +195,18 @@ def cmd_stage(run: Run, args: argparse.Namespace) -> int:
         return run.out_of_order(args.name)
     if args.name == "fetch_branch":
         run.state["branch"] = git.branch()
-    return manifest_check(run) if args.name == "manifest_check" else run.advance(args.name)
+    if args.name in run.gates:
+        print(f"{args.name} is a gate: use run-gate", file=sys.stderr)
+        return run.out_of_order(args.name)
+    return manifest_check(run, args.name) if args.name == "manifest_check" else run.advance(args.name)
+
+
+def gate_allowed(script: str, argv: list[str]) -> bool:
+    """True when argv runs the stage's pinned script directly or as `python* SCRIPT ...`."""
+    if not script:
+        return False
+    names = [Path(a).name for a in argv[:2]]
+    return names[0] == script or (names[0].startswith("python") and len(names) > 1 and names[1] == script)
 
 
 def cmd_run_gate(run: Run, args: argparse.Namespace) -> int:
@@ -176,11 +219,19 @@ def cmd_run_gate(run: Run, args: argparse.Namespace) -> int:
         return 2
     if run.state.get("ended") or run.next_stage() != args.stage:
         return run.out_of_order(args.stage)
+    if not gate_allowed(run.gates.get(args.stage, ""), argv):
+        pinned = run.gates.get(args.stage) or "no command"
+        print(f"gate_argv_not_allowed: {args.stage} runs only {pinned}", file=sys.stderr)
+        run.end(args.stage, "run_abort", "gate_argv_not_allowed")
+        return 2
+    if args.stage == "push" and manifest_check(run, "push"):  # a late edit is caught before it is pushed
+        return 1
     code = subprocess.run(argv, check=False).returncode
     if code == 0:
         return run.advance(args.stage)
     print(f"refused: gate {args.stage} exited {code}", file=sys.stderr)
-    run.end(args.stage, "run_refused", args.stage)
+    if run.end(args.stage, "run_refused", args.stage):  # code not in the spec: still end the run, never swallow it
+        run.end(args.stage, "run_abort", "runner_exit_no_terminal")
     return 1
 
 
@@ -212,13 +263,22 @@ def cmd_finish(run: Run, args: argparse.Namespace) -> int:
     return 2 if refusal else 0
 
 
+@contextmanager
+def locked(run: Run) -> Generator[None]:
+    """Serialise load..save across concurrent calls on one routine's state."""
+    run.state_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(run.state_path.with_suffix(".lock"), "w") as handle:
+        fcntl.flock(handle, fcntl.LOCK_EX)
+        yield
+
+
 def main(arguments: list[str] | None = None) -> int:
     """CLI entry."""
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--log", help="human run log path; default is the spec's log with {date} expanded")
     parser.add_argument("routine")
     sub = parser.add_subparsers(dest="command", required=True)
-    sub.add_parser("begin")
+    sub.add_parser("begin").add_argument("--new", action="store_true")
     sub.add_parser("stage").add_argument("name")
     gate = sub.add_parser("run-gate")
     gate.add_argument("stage")
@@ -235,7 +295,9 @@ def main(arguments: list[str] | None = None) -> int:
         "refuse": cmd_end,
         "finish": cmd_finish,
     }
-    return handlers[args.command](Run(args.routine, args.log), args)
+    run = Run(args.routine, args.log)
+    with locked(run):
+        return handlers[args.command](run, args)
 
 
 if __name__ == "__main__":

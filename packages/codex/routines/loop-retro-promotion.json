@@ -3,11 +3,12 @@
   "stages": ["fetch_branch", "evals_frozen", "edit_made", "manifest_check", "push", "review", "post_review", "post_evals", "merge"],
   "policy": "policy/retro-promotion.policy.json",
   "log": "{repo_key_dir}/promotion-runs.log",
+  "gates": {"push": "push.py", "post_review": "post_review.py", "post_evals": "post_evals.py", "merge": "merge.py"},
   "cleanup": ["close_pr", "delete_remote_branch", "delete_local_branch"],
   "reason_codes": [
     "incomplete-run", "stage_out_of_order", "runner_exit_no_terminal", "mining_failed",
     "out_of_manifest", "denied_path", "special_file_type", "status_not_allowed", "too_many_paths",
-    "not_linked_worktree", "manifest_unreadable", "manifest_internal_error",
+    "not_linked_worktree", "manifest_unreadable", "manifest_internal_error", "dirty_worktree", "gate_argv_not_allowed",
     "push", "review", "post_review", "post_evals", "merge"
   ]
 }
