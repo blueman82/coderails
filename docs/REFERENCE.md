@@ -762,6 +762,7 @@ no script does) or `unused`. Regenerate the table with `python3 scripts/lib/conf
 | `scripts/lib/git_common.py` | GitHub repository/PR operations and newest trusted exact-head artifact selection. Requires a `github.com` remote. |
 | `scripts/lib/{config,review_artifact,eval_artifact,artifact_io}.py` | Shared root-provider config and structured artifact operations. |
 | `scripts/lib/memory_adapter.py` (+ byte-identical `packages/codex/scripts/lib/` mirrors of it, `memory_cite.py`, `memory_reasons.py`, `memory_schema.py`), `memory_counters.py` | Authoritative typed-memory adapter over the `muninn` CLI (subprocess only; never imported, muninn needs py3.12). `add\|list\|render\|probe`. Config `memory.backend: muninn\|off` (default `muninn`): `off` is the only no-Muninn mode (`memory_backend_off`, traced); an invalid value is `memory_backend_invalid`. `probe()` checks the backend, muninn on PATH, the Part A help flags, the store schema (`memory_schema.check`, never `--version`) and one read smoke. `add()` returns `Written(id='K<n>')` or a reason-coded `Degraded` (exit 3); a muninn refusal (rc 2) is `refused_<code>`. Cites must anchor in a user prompt (`memory_cite`: `quote_only` 12-300 chars, or `approved_reply` via `--approval REF`), else `cite_not_user`. `list` with `--query` uses `muninn search --all-projects` filtered to `loop:<id>`. Reason codes and fixes: `memory_reasons.REASONS`, mirrored in `docs/RUNBOOK.md`. There is no Markdown fallback; `render --write PATH` only replaces an absent or marker-stamped file. `memory_counters.memory_counts` counts `memory./decision./order./lesson./proof./retro./teardown./handoff.` trace rows (`rows`, `by_reason_code`, `by_command`). Limits (orchestrator-only writes, user-anchored cites, cooperating-agent boundary): `docs/decisions/2026-10-05-memory-authoritative.md`. The Codex copy cannot trace (no `trace_row.py` ships there); it fails open. |
+| `scripts/lib/decision_record.py` (+ byte-identical `packages/codex/scripts/lib/` mirror) | Typed, hash-chained loop decisions; the only writer of `decisions_absorbed`. `add_decision` (pure), `verify_chain`, `sync_row` (Muninn `kind=decision`, `scope=loop`, tag `run-<loop_id[:28]>`, `confidence=inferred`, cite = a quote of `authorising_prompt_raw` or a caller `cite_quote`), `mark_synced`, `record` and `flush_pending`. Entry point section below. Limits: cooperating-agent safeguard, last-row deletion undetectable, a short prompt like "yes" degrades visibly. Reasons: `decision_*` in `memory_reasons.REASONS`. |
 | `scripts/lib/{eval_validation,eval_execution}.py` | Eval criteria and command/control verification. Gate smoke runs in a detached worktree at the trusted SHA. |
 | `scripts/sandbox/spawn_sandboxed_worker.py` | Guard dispatch before scratch allocation; run a separate Claude process through pinned srt and retain its exit status. |
 | `scripts/sandbox/{render_settings,sandbox_probe}.py` | Render explicit write containment and discriminate allowed versus forbidden filesystem writes. |
@@ -793,3 +794,26 @@ no script does) or `unused`. Regenerate the table with `python3 scripts/lib/conf
 ### The ephemeral vs committed boundary
 
 The loop's `spec.md`, `plan.md`, and `progress.json` live in `~/.coderails/agentic-loop/` — **outside** the code repo and Claude's configuration tree. They are loop state keyed to this orchestrator run, not shareable design records. If work needs handing to a human, `coderails:handoff` is the right tool. Durable records belong in the wiki or an explicitly authorized repository document, not these session-local scratch files.
+
+### Record-decision entry point (lane A wiring)
+
+`decision_record.record(path, session, phase, decision, *, transition, ...)` is the one call behind a
+`graph.py record-decision` subcommand. `transition(path, fn)` is the provider's lock wrapper: Claude passes
+`hooks.scripts.lib.graph_executor.transition`; Codex wraps `graph_io.locked/load/write` into the same shape
+(`with locked(path): new = fn(load(path)); write(path, new); return new`). The exact six lines lane A adds to graph.py:
+
+```python
+from scripts.lib import decision_record
+...
+def record_decision(args):
+    out = decision_record.record(args.path, args.session, args.phase, args.decision, transition=transition,
+                                 flip_condition=args.flip_condition, unit=args.unit, cite_quote=args.cite_quote)
+    print(json.dumps(out)); return out["exit_code"]
+```
+
+Order: (1) under the lock the local row is appended (`seq`, `prev_sha256`, `row_sha256`, `muninn: {state: pending}`);
+(2) outside the lock Muninn is written; (3) under the lock again the row's `muninn` field is patched. Return
+`{recorded, seq, muninn: {state, id, reason_code}, exit_code}`; exit 0 written or disabled, 3 degraded (loud reason
+code, trace `decision.sync/degraded/<code>`, local row kept), 2 refused (wrong session, blank phase or decision: nothing
+written). Teardown calls `flush_pending(path, session, transition=transition, cite_quote=...)` to retry pending and
+degraded rows. Trace commands: `decision.record`, `decision.sync` (counted by `memory_counters.memory_counts`).
