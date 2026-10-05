@@ -7,6 +7,7 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -239,6 +240,37 @@ class StopNoticeTests(StopNoticeBase):
         stall_notice.record_notice(provider.path, provider.session, ".human-approval-first")
         name = stall_notice.marker_name(provider.read(), provider.session)
         self.assertTrue((provider.path.parent / str(name)).is_dir())
+
+    def test_key_revision_and_loop_sanitising(self) -> None:
+        """Revision alone changes the key; a hostile loop_id cannot escape the marker directory."""
+        base = {"loop_id": "l", "revision": 3, "graph": {"active_wave": None, "hard_stop": None}}
+        self.assertNotEqual(stall_notice.marker_name(base, "s"), stall_notice.marker_name({**base, "revision": 4}, "s"))
+        name = str(stall_notice.marker_name({**base, "loop_id": "../x"}, "s"))
+        self.assertNotIn("/", name)
+        self.assertEqual(name.split("-")[2], ".._x")
+
+    def test_old_revision_markers_pruned_with_real_names(self) -> None:
+        """Marking revision N+1 removes the revision N marker of the same loop only."""
+        graph = {"active_wave": None, "hard_stop": None}
+        old, new, other = (
+            str(stall_notice.marker_name({"loop_id": loop, "revision": rev, "graph": graph}, "s"))
+            for loop, rev in (("l", 3), ("l", 4), ("m", 1))
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            for name in (old, other):
+                (Path(tmp) / name).mkdir()
+            stall_notice.record_notice(Path(tmp) / "state.json", "s", new)  # premark fails quietly: no state file
+            self.assertEqual(sorted(p.name for p in Path(tmp).iterdir()), sorted([new, other]))
+
+    def test_record_notice_never_raises_on_corrupt_state(self) -> None:
+        """A corrupt state file is logged by the premark, not raised."""
+        with tempfile.TemporaryDirectory() as tmp:
+            state = Path(tmp) / "state.json"
+            state.write_text("{not json", encoding="utf-8")
+            logged: list[str] = []
+            stall_notice.record_notice(state, "s", ".human-approval-x", logged.append)
+            self.assertTrue((Path(tmp) / ".human-approval-x").is_dir())
+            self.assertTrue(any("premark_failed=JSONDecodeError" in line for line in logged))
 
 
 if __name__ == "__main__":
