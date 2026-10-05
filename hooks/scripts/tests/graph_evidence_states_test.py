@@ -1,4 +1,4 @@
-"""All-node-state regression for Claude completion-time evidence revalidation (mirrors Codex native evidence)."""
+"""All-node-state regression for Claude completion-time evidence revalidation (Claude-only)."""
 
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+from hooks.scripts.lib.graph_evidence_bind import provenance
 from hooks.scripts.lib.graph_evidence_revalidate import revalidate_all
 from hooks.scripts.tests.claude_graph_test_support import GraphCase, load, write_records
 
@@ -38,7 +39,10 @@ class EvidenceStateTests(GraphCase):
         """Done, skipped, stale and retried nodes without evidence are rejected."""
         state = self.finish()
         for status, attempts in (("done", 0), ("skipped", 0), ("stale", 0), ("pending", 1)):
-            with self.subTest(status=status, attempts=attempts), self.assertRaisesRegex(ValueError, "attempt history"):
+            with (
+                self.subTest(status=status, attempts=attempts),
+                self.assertRaisesRegex(ValueError, r"node U3\[2\] has missing or forged"),
+            ):
                 revalidate_all(self._sibling(state, status, attempts))
 
     def test_retry_exhausted_without_attempt_evidence_fails_closed(self) -> None:
@@ -47,7 +51,44 @@ class EvidenceStateTests(GraphCase):
         node = variant["graph"]["nodes"]["U3[1]"]
         node.update(status="failed", outcome="failed", evidence=[])
         node["retry"]["attempts"] = 3
-        with self.assertRaisesRegex(ValueError, "attempt history"):
+        with self.assertRaisesRegex(ValueError, r"node U3\[1\] has missing or forged native attempt history"):
+            revalidate_all(variant)
+
+    def test_running_with_attempts_fails_closed(self) -> None:
+        """A running node with attempts>0 demands attempt evidence."""
+        with self.assertRaisesRegex(ValueError, r"node U3\[2\] has missing"):
+            revalidate_all(self._sibling(self.finish(), "running", 1))
+
+    def test_respawn_generation_demands_extra_attempt_evidence(self) -> None:
+        """Each respawn generation adds one expected attempt."""
+        state = self.finish()
+        for generation in (1, 2):
+            variant = copy.deepcopy(state)
+            variant["graph"]["nodes"]["U3[1]"]["respawn"]["generation"] = generation
+            with self.subTest(generation=generation), self.assertRaisesRegex(ValueError, r"node U3\[1\] has missing"):
+                revalidate_all(variant)
+
+    def test_done_lacking_successful_final_evidence_fails_closed(self) -> None:
+        """A done node whose final attempt outcome is not done is rejected."""
+        variant = self.finish()
+        for ref in variant["graph"]["nodes"]["U3[1]"]["evidence"]:
+            if provenance(ref):
+                ref["outcome"] = "failed"
+        with self.assertRaises(ValueError):
+            revalidate_all(variant)
+
+    def test_corrupt_wave_history_is_not_masked_by_default(self) -> None:
+        """Explicit None or list wave_history raises; a missing key with evidence also fails closed."""
+        state = self.finish()
+        bad_values: tuple[Any, ...] = (None, [])
+        for bad in bad_values:
+            variant = copy.deepcopy(state)
+            variant["graph"]["wave_history"] = bad
+            with self.subTest(wave_history=bad), self.assertRaisesRegex(ValueError, "must be an object"):
+                revalidate_all(variant)
+        variant = copy.deepcopy(state)
+        variant["graph"].pop("wave_history")
+        with self.assertRaises(ValueError):
             revalidate_all(variant)
 
     def test_stale_transcript_reference_fails_closed(self) -> None:
