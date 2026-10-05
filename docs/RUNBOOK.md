@@ -200,14 +200,20 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
 ## Action-authority hook denied a merge or push (or warned in advisory)
 
 - Symptom: `gh pr merge` or `git push` to main/master is denied with "needs an action receipt (<code>)" (enforce), or a
-  stderr "action_authority (advisory)" warning appears. The gate is default ON (a "default ON" enforce): absent config or any value
-  other than `off` / `advisory` is `enforce`; `action_authority: off` is the explicit switch.
+  stderr "action_authority (advisory)" warning appears. ON by default: config `action_authority` absent, no config file, or any unrecognised
+  value is `enforce` (an unrecognised value also traces `action_authority_bad_mode`); only an explicit `off` silences it, `advisory` warns without blocking.
 - Query: `jq -r 'select(.command=="action_authority" or .command=="action_receipt") | [.outcome,.reason_code]|@tsv' <loop dir>/<session>/trace.jsonl`,
   or `trace.receipts.by_reason_code` from `python3 scripts/measure_graph_alignment.py --root . --json` (deduped by
   event_id). Codes: `denied_<code>` / `advisory_<code>` where `<code>` is one of `no_receipt`, `hash_mismatch`,
   `repository_mismatch`, `ref_mismatch`, `sha_mismatch`, `signature_missing`, `signature_invalid`, `signer_unknown`, `trust_root_missing`, `binding_unknown` (repository+ref+sha not computable: fail closed), `state_mutated_before_guard` (a ref/HEAD/remote-moving step precedes the guarded one in the same command), `expired`, `revoked`, `consumed`, `foreign_session`, `foreign_loop`, `kind_mismatch`, `no_session` (payload had no session_id; traced under session dir `_no_session`), `malformed`;
   `receipt_consumed` (allowed); `trust_root_user_tier` (an allow that rested on the agent-writable trust root: cooperating-agent safeguard); `action_authority_failed_open` (the hook itself errored and allowed);
   `receipt_approved` / `receipt_revoked` / `receipt_refused_no_tty` (CLI).
+  Authority codes (also from `enforce_pr_workflow`, which denies before consuming anything): `denied_authority_denied` (the session's authority lists the category in `denied`; a receipt cannot override it),
+  `denied_max_prs_exceeded` (executed merges under the authority reached `max_prs`; 0 = none; narrow/grant again with `authority.py`), `authority_denied_destructive_shell` (destructive gate, force-with-lease family),
+  `action_authority_bad_mode` (typo in the config value, treated as enforce). `scripts/merge.py` rows are `merge_py_<code>` (refused: `no_receipt`, `no_session`, `binding_unknown`, `sha_mismatch`, `consumed`, ...)
+  and `merge_py_receipt_executed` (allowed). Counters: `scripts/lib/receipt_counters.py` `gate_summary(by_reason)` (feed it `trace_counts()["by_reason"]`; integrating it into `measure_graph_alignment.py` is a handoff).
+  Owner mint command for a merge: `python3 scripts/action_receipt_cli.py approve-action --session <id> --kind merge --command 'python3 scripts/merge.py <N>' --cwd <repo dir>` (the receipt carries the live
+  authority's id automatically, which is what `max_prs` counts); `gh pr merge <N>` works the same with that exact command text.
 - `action_authority_failed_open`: the row carries `inputs.error_class` (sha256 of the exception class name; compare with
   `printf ZeroDivisionError | shasum -a 256`) and `loop_id` when known; the hook's stderr (hook log) prints
   `action_authority failed open: <Class>: <message>`. A session-less failure is traced under `_no_session`.
@@ -218,8 +224,7 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   `receipt_refused_no_tty`; `inspect-receipt` / `revoke-receipt` take `--receipt-id`). `signer_unknown` / `trust_root_missing`
   mean the signers file does not list the key that signed (or does not exist). `hash_mismatch` means args, cwd or branch differ from the minted
   command; `sha_mismatch` means HEAD (push source) or the PR head moved since minting: re-mint. `git push origin feature:main` binds
-  the sha of `feature`, not HEAD. `foreign_session` can also mean a worker whose `session_id` differs from the minter's
-  (unverified guess): mint under the session the hook reports. Or set `action_authority: off` in `.coderails/workflow.config.yaml`.
+  the sha of `feature`, not HEAD. `foreign_session` means the receipt was minted for a different `session_id`: subagents share their parent's `session_id`, so mint under the session the hook reports. Or set `action_authority: off` in `.coderails/workflow.config.yaml`.
 - Scope of one receipt: each guarded segment of a chained command (`a && b`) needs its own receipt; a leading
   `cd <dir>` moves the directory the hash binds (mint with `--cwd` set to where the command really runs). The binding comes from
   `scripts/lib/action_binding.py` (push: refspec source sha and destination ref; merge: live PR head via `gh pr view`, 4s timeout);

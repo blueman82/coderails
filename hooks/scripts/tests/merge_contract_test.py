@@ -67,6 +67,7 @@ class MergeContractTests(unittest.TestCase):
             stack.enter_context(patch.object(merge, "smoke_verify", return_value=smoke))
             stack.enter_context(patch.object(merge, "config_path", return_value=""))
             stack.enter_context(patch.object(merge, "has_wiki_ingest_for_merged_prs"))
+            stack.enter_context(patch.object(merge, "require_merge_receipt"))  # the receipt seam has its own suite
             if temporary_failure:
                 stack.enter_context(
                     patch(

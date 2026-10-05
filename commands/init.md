@@ -73,6 +73,7 @@ engineering_principles_paths:
 # or: engineering_principles_paths: null
 engineering_principles_skill: "/engineering-principles-python"   # nil = skip engineering-principles entirely; /engineering-principles-go, /engineering-principles-ts, /engineering-principles-bash also supported
 sandbox_workers: false   # true = agentic-loop dispatches implementation-unit workers via @anthropic-ai/sandbox-runtime (OS write containment); requires node/npx, macOS or Linux/WSL2
+action_authority: enforce   # enforce (default, also when omitted) = gh pr merge, merge.py and git push to main need an owner-signed receipt; advisory = warn only; off = gate off
 integrity_review:
   machine_user: null   # GitHub login of the integrity machine user; null/omitted = local gate inactive
 ```

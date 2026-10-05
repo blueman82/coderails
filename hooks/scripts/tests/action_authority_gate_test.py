@@ -8,73 +8,18 @@ import subprocess
 import sys
 import unittest
 from pathlib import Path
-from typing import Any
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from hooks.scripts import action_authority_gate as gate
-from hooks.scripts.tests.native_hook_test_support import HookCase
-from hooks.scripts.tests.receipt_test_support import REPOSITORY, git, make_owner, make_repo, signed_receipt, store
-from scripts.lib import action_binding as ab
+from hooks.scripts.tests.receipt_hook_case import MERGE, PIN, PUSH, ReceiptHookCase
+from hooks.scripts.tests.receipt_test_support import git, make_repo
 
 ROOT = Path(__file__).resolve().parents[3]
-MERGE_SHA = "f" * 40
-PIN = f"--match-head-commit {MERGE_SHA}"
-MERGE = f"gh pr merge 12 --squash {PIN}"
-PUSH = "git push origin main"
 
 
-class GateTests(HookCase):
-    """A real temp repo on main with a config file drives the hook as a subprocess."""
-
-    def setUp(self) -> None:
-        """Repo on main with an origin and a commit, a fake gh, and an owner key in the user-tier trust root."""
-        super().setUp()
-        self.repo = make_repo(self.directory / "repo")
-        keys = self.directory / "home" / ".coderails" / "keys"
-        self.key, signers = make_owner(keys)
-        signers.rename(keys / "receipt_signers")
-        self.agent_key, _ = make_owner(self.directory / "agent")
-        gh = self.directory / "bin" / "gh"
-        gh.parent.mkdir()
-        gh.write_text(f'#!/bin/sh\necho \'{{"baseRefName":"main","headRefOid":"{MERGE_SHA}"}}\'\n')
-        gh.chmod(0o755)
-        self.environment = self.environment | {"PATH": f"{gh.parent}:{self.environment['PATH']}"}
-
-    def configure(self, value: str | None) -> None:
-        """Write (or skip) the action_authority config line."""
-        if value is not None:
-            (self.repo / ".coderails").mkdir(exist_ok=True)
-            (self.repo / ".coderails/workflow.config.yaml").write_text(f"action_authority: {value}\n")
-
-    def payload(self, command: str, session: str = "s1") -> dict[str, Any]:
-        """A Bash PreToolUse payload."""
-        return {
-            "hook_event_name": "PreToolUse",
-            "session_id": session,
-            "cwd": str(self.repo),
-            "tool_name": "Bash",
-            "tool_input": {"command": command},
-        }
-
-    def mint(
-        self, command: str, kind: str, session: str = "s1", cwd: Path | None = None, rid: str = "r1",
-        key: Path | None = None, **over: object,
-    ) -> str:  # fmt: skip
-        """Store a signed receipt matching the hook's view of `command` run in `cwd` (default the repo) on main."""
-        where = str(cwd or self.repo)
-        bind = (
-            {"repository": REPOSITORY, "ref": "refs/heads/main", "sha": MERGE_SHA}
-            if kind == "merge" else ab.binding(kind, command, where)
-        )  # fmt: skip
-        rec = signed_receipt(key or self.key, kind, command, where, "main", bind, session, receipt_id=rid, **over)
-        store(self.loop, rec, session)
-        return rid
-
-    def reasons(self, session: str = "s1") -> list[str]:
-        """Reason codes traced for a session."""
-        path = self.loop / session / "trace.jsonl"
-        return [json.loads(line)["reason_code"] for line in path.read_text().splitlines()] if path.exists() else []
+class GateTests(ReceiptHookCase):
+    """Drive the hook as a subprocess against the shared receipt fixture."""
 
     def test_only_explicit_off_is_silent(self) -> None:
         """`off` never denies, warns or traces; absent config, junk and empty values are enforce (default ON)."""
@@ -88,7 +33,7 @@ class GateTests(HookCase):
                 if value is None:
                     (self.repo / ".coderails/workflow.config.yaml").unlink()
                 self.assertTrue(self.denied("action_authority_gate", self.payload(MERGE)))
-        self.assertEqual(set(self.reasons()), {"denied_no_receipt"})
+        self.assertEqual(set(self.reasons()), {"denied_no_receipt", "action_authority_bad_mode"})  # "yes" is junk
 
     def test_default_is_enforce_without_any_config_file(self) -> None:
         """No .coderails directory at all: an unreceipted merge and push to main are denied."""
@@ -97,6 +42,43 @@ class GateTests(HookCase):
         self.assertTrue(self.denied("action_authority_gate", self.payload(PUSH)))
         self.mint(PUSH, "git_push")
         self.assertFalse(self.denied("action_authority_gate", self.payload(PUSH)))
+
+    def test_default_is_enforce_without_config_or_key(self) -> None:
+        """(b) No config file at all, and a config lacking the key, deny merge, merge.py and push to main."""
+        for value in (None, "other_key: 1\n"):
+            if value:
+                (self.repo / ".coderails").mkdir(exist_ok=True)
+                (self.repo / ".coderails/workflow.config.yaml").write_text(value)
+            for command in (MERGE, PUSH, "python3 scripts/merge.py 12"):
+                with self.subTest(config=value, command=command):
+                    self.assertTrue(self.denied("action_authority_gate", self.payload(command)))
+        self.assertNotIn("action_authority_bad_mode", self.reasons())
+
+    def test_unknown_value_denies_and_traces_bad_mode(self) -> None:
+        """An unrecognised value is enforce, and the typo is visible as action_authority_bad_mode."""
+        self.configure("yes")
+        self.assertTrue(self.denied("action_authority_gate", self.payload(MERGE)))
+        self.assertEqual(self.reasons(), ["action_authority_bad_mode", "denied_no_receipt"])
+
+    def test_authority_denied_and_max_prs_refuse_even_with_a_valid_receipt(self) -> None:
+        """(a) A valid signed receipt does not override authority.denied or a spent max_prs, and is not consumed."""
+        self.grant(denied=["merge", "push_main"])
+        self.mint(MERGE, "merge")
+        self.mint(PUSH, "git_push", rid="r2")
+        for command in (MERGE, PUSH):
+            self.assertTrue(self.denied("action_authority_gate", self.payload(command)))
+        self.assertEqual(self.reasons(), ["denied_authority_denied", "denied_authority_denied"])
+        self.assertFalse((self.loop / "s1/receipts/r1.consumed").exists())
+        self.grant(denied=[], max_prs=0)
+        self.assertTrue(self.denied("action_authority_gate", self.payload(MERGE)))
+        self.assertEqual(self.reasons()[-1], "denied_max_prs_exceeded")
+
+    def test_subagent_payload_is_the_same_session(self) -> None:
+        """(d) A subagent call (agent_id/agent_type set, same session_id) uses the parent's receipt."""
+        self.mint(MERGE, "merge")
+        sub = self.payload(MERGE) | {"agent_id": "a-1", "agent_type": "loop-worker"}
+        self.assertFalse(self.denied("action_authority_gate", sub))
+        self.assertEqual(self.reasons(), ["trust_root_user_tier", "receipt_consumed"])
 
     def test_advisory_warns_and_traces_never_denies(self) -> None:
         """Advisory without a receipt: stderr warning plus a trace row, no denial."""
@@ -199,15 +181,15 @@ class GateTests(HookCase):
         payload = self.payload(MERGE)
         with (
             mock.patch.object(gate, "read_payload", return_value=payload),
-            mock.patch.object(gate, "find_valid", side_effect=RuntimeError("boom")),
+            mock.patch.object(gate, "check_and_consume", side_effect=RuntimeError("boom")),
             mock.patch.object(gate, "binding", return_value={"repository": "r", "ref": "f", "sha": "s"}),
             mock.patch.dict("os.environ", {"CLAUDE_AGENTIC_LOOP_DIR": str(self.loop)}),
         ):
             self.assertEqual(gate.main(), 0)
         self.assertEqual(self.reasons(), ["action_authority_failed_open"])
 
-    def test_subagent_session_id_differs_is_foreign(self) -> None:
-        """A worker whose session_id differs from the minter's is refused (documented limit)."""
+    def test_a_different_session_id_is_a_different_session(self) -> None:
+        """Only a different session_id matters (agent_id/agent_type do not): another session's receipt is refused."""
         self.configure("enforce")
         self.mint(MERGE, "merge", session="parent")
         self.assertTrue(self.denied("action_authority_gate", self.payload(MERGE, "worker")))

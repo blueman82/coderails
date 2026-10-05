@@ -17,6 +17,13 @@ _GIT_OPT = r"(?:-C\s+\S+|-c\s+\S+|--[\w-]+=\S+|--(?:git-dir|work-tree|namespace|
 _GIT = re.compile(r"^git((?:\s+" + _GIT_OPT + r")*)\s+(merge|push)(?:\s|$)")
 
 
+def pr_number(segment: str) -> str:
+    """Read the explicit PR argument of a merge segment while excluding option tokens."""
+    match = re.search(r"gh\s+pr\s+merge(.*)", segment)
+    arguments = match[1] if match else re.sub(r"^.*?merge\.(?:sh|py)", "", segment)
+    return next((token.strip("\"'") for token in arguments.split() if re.match(r"^[0-9]", token.strip("\"'"))), "")
+
+
 def operation(command: str) -> tuple[str, str, str]:
     """Return guarded operation, matched segment, and optional Git target directory."""
     if re.search(r"(^|[^-a-zA-Z0-9])(--dry-run|--help)([^-a-zA-Z0-9]|$)", command) and not re.search(

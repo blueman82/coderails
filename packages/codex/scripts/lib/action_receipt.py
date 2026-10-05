@@ -216,6 +216,16 @@ def consume(path: Path) -> bool:
     return _claim(path, ".consumed")
 
 
+def execute(path: Path) -> bool:
+    """Atomically mark the action as about to run (.executed); exactly one caller gets True."""
+    return _claim(path, ".executed")
+
+
+def is_executed(path: Path) -> bool:
+    """True when the executed marker exists."""
+    return path.with_suffix(".executed").exists()
+
+
 def effective(path: Path) -> dict[str, Any] | None:
     """The receipt with its revoked flag derived from the tombstone, or None when unreadable."""
     data = read_receipt(path)

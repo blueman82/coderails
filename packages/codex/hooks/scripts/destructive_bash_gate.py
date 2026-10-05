@@ -8,9 +8,13 @@ import os
 import re
 from typing import cast
 
-from hook_common import deny, payload_object, read_input
+from hook_common import append_trace_row, deny, payload_object, read_input, text_field
 from lib.destructive_patterns import normalize_ifs, permanent_pattern, source_write, workflow_substitution
 from lib.destructive_routes import ROUTES
+
+from scripts.lib.authority_permits import permits
+
+LEASE = re.compile(r"\bgit\b.*\bpush\b.*--force-with-lease\b", re.I)  # the one family permanent_pattern can allow
 
 
 def main() -> int:
@@ -57,6 +61,14 @@ def main() -> int:
                     }
                 }
             )
+        )
+        return 0
+    session = text_field(payload, "session_id")
+    if LEASE.search(command) and not (verdict := permits(session, "destructive_shell"))["allow"]:
+        append_trace_row("action_authority", "denied", "authority_denied_destructive_shell", session)
+        deny(
+            "authority_denied_destructive_shell: this session's authority denies destructive_shell, so the allowlisted "
+            f"git push --force-with-lease is refused too ({verdict['reason']}). Full command: {command}"
         )
         return 0
     if reason := source_write(command, cwd):

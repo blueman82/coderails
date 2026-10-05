@@ -8,8 +8,8 @@ import os
 import subprocess
 import sys
 import tempfile
-import time
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -35,27 +35,9 @@ PIN = f"--match-head-commit {MERGE_SHA}"
 MERGE = f"gh pr merge 12 --squash {PIN}"
 MIRRORS = (
     "scripts/lib/action_receipt.py", "scripts/lib/receipt_signing.py", "scripts/lib/action_binding.py",
-    "scripts/action_receipt_cli.py", "scripts/authority_keys.py",
+    "scripts/action_receipt_cli.py", "scripts/authority_keys.py", "scripts/lib/authority_permits.py",
+    "scripts/lib/receipt_gate.py",
 )  # fmt: skip
-
-# Runs with ONLY the Codex package on sys.path, so every import resolves to packages/codex/scripts/lib.
-PROBE = """
-import json, sys
-from datetime import datetime, timezone
-from pathlib import Path
-sys.path.insert(0, sys.argv[1])
-from scripts.lib import action_receipt as ar, receipt_signing as rs
-assert "packages/codex" in ar.__file__, ar.__file__
-case = json.loads(sys.argv[2])
-rec, prop, signers = case["rec"], case["prop"], Path(case["signers"])
-now = datetime.now(timezone.utc)
-if case["mode"] == "verify":
-    print(json.dumps(ar.verify(rec, prop, now, "s1", None, signers=signers)))
-else:
-    base = Path(case["base"])
-    r, c = ar.find_valid("s1", prop, now, None, base, True, signers)
-    print(r["receipt_id"] if r else "NONE:" + c)
-"""
 
 
 class MirrorTests(unittest.TestCase):
@@ -73,89 +55,6 @@ class MirrorTests(unittest.TestCase):
         for vendored in ("def receipt_", "RECEIPT_FIELDS", "_receipt_claim"):
             self.assertNotIn(vendored, text)
         self.assertLess(len(text.splitlines()), 400)
-
-
-class CodexModuleTests(unittest.TestCase):
-    """(b)-(e) through the Codex package modules only, in a child process whose path has no Claude scripts/lib."""
-
-    tmp: tempfile.TemporaryDirectory[str]
-    key: Path
-    signers: Path
-    agent_key: Path
-    bind: dict[str, str]
-    command: str
-
-    @classmethod
-    def setUpClass(cls) -> None:
-        """Owner and agent keys."""
-        cls.tmp = tempfile.TemporaryDirectory()
-        cls.addClassCleanup(cls.tmp.cleanup)
-        base = Path(cls.tmp.name)
-        cls.key, cls.signers = make_owner(base / "owner")
-        cls.agent_key, _ = make_owner(base / "agent")
-        cls.bind = {"repository": REPOSITORY, "ref": "refs/heads/main", "sha": "a" * 40}
-        cls.command = "git push origin feature:main"
-
-    def receipt(self, key: Path | None = None, /, **over: object) -> dict[str, Any]:
-        """A signed receipt for the command."""
-        return signed_receipt(key or self.key, "git_push", self.command, "/repo", "feature", self.bind, **over)
-
-    def proposed(self, **over: object) -> dict[str, Any]:
-        """The action as the Codex hook would compute it, with overrides."""
-        from scripts.lib import action_receipt as claude  # the hash function is identical in the mirror
-
-        return {**claude.proposed_action("git_push", self.command, "/repo", "feature", self.bind), **over}
-
-    def probe(self, **case: object) -> str:
-        """Run PROBE against the Codex package only."""
-        case.setdefault("signers", str(self.signers))
-        env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
-        done = subprocess.run(
-            [sys.executable, "-c", PROBE, str(CODEX), json.dumps(case)], capture_output=True, text=True, env=env,
-            cwd=self.tmp.name, check=False,
-        )  # fmt: skip
-        self.assertEqual(done.returncode, 0, done.stderr)
-        return done.stdout.strip()
-
-    def verify(self, rec: object, prop: dict[str, Any] | None = None) -> list[Any]:
-        """Return the (ok, code) pair that the Codex copy of verify gives."""
-        out: list[Any] = json.loads(self.probe(mode="verify", rec=rec, prop=prop or self.proposed()))
-        return out
-
-    def test_valid_and_self_minted(self) -> None:
-        """(a)+(b) a signed receipt verifies; unsigned, agent-key and edited receipts do not."""
-        self.assertEqual(self.verify(self.receipt()), [True, "ok"])
-        self.assertEqual(self.verify({**self.receipt(), "signature": None}), [False, "signature_missing"])
-        self.assertEqual(self.verify(self.receipt(self.agent_key)), [False, "signer_unknown"])
-        self.assertEqual(self.verify({**self.receipt(), "ref": "refs/heads/release/x"}), [False, "signature_invalid"])
-
-    def test_binding_and_malformed(self) -> None:
-        """(c) stale sha, wrong repository/ref, missing artifact_sha."""
-        for field, value, code in (
-            ("artifact_sha", "b" * 40, "sha_mismatch"), ("repository", "github.com/evil/w", "repository_mismatch"),
-            ("ref", "refs/heads/release/x", "ref_mismatch"),
-        ):  # fmt: skip
-            self.assertEqual(self.verify(self.receipt(**{field: value})), [False, code])
-        self.assertEqual(self.verify(self.receipt(artifact_sha=None)), [False, "malformed"])
-
-    def test_replay_and_concurrent_double_use(self) -> None:
-        """(d)+(e) a second consume is refused; 16 Codex-module processes on one receipt give exactly one winner."""
-        rec = self.receipt()
-        with tempfile.TemporaryDirectory() as tmp:
-            base = Path(tmp)
-            store(base, rec)
-            args = {"mode": "find", "rec": rec, "prop": self.proposed(), "base": tmp}
-            self.assertEqual(self.probe(**args), rec["receipt_id"])
-            self.assertEqual(self.probe(**args), "NONE:consumed")
-            (base / "s1" / "receipts" / f"{rec['receipt_id']}.consumed").unlink()
-            gate = f"import time, pathlib\nwhile not pathlib.Path({str(base / 'go')!r}).exists(): time.sleep(0.005)\n"
-            argv = [sys.executable, "-c", gate + PROBE, str(CODEX), json.dumps({**args, "signers": str(self.signers)})]
-            procs = [subprocess.Popen(argv, stdout=subprocess.PIPE, text=True, cwd=tmp) for _ in range(16)]
-            time.sleep(0.5)
-            (base / "go").write_text("")
-            outs = [p.communicate()[0].strip() for p in procs]
-        self.assertEqual(outs.count(rec["receipt_id"]), 1, outs)
-        self.assertEqual(sum(o.startswith("NONE:") for o in outs), 15, outs)
 
 
 class MatchParityTests(unittest.TestCase):
@@ -257,7 +156,8 @@ class HookTests(unittest.TestCase):
             {"repository": REPOSITORY, "ref": "refs/heads/main", "sha": MERGE_SHA}
             if kind == "merge" else ab.binding(kind, command, where)
         )  # fmt: skip
-        store(self.loop, signed_receipt(key or self.key, kind, command, where, "main", bind, receipt_id=rid, **over))
+        rec = signed_receipt(key or self.key, kind, command, where, "main", bind, receipt_id=rid, **over)
+        store(self.loop, rec, "s1")  # a foreign-session receipt still lives in s1's directory
 
     def reasons(self) -> list[str]:
         """Reason codes traced for s1."""
@@ -279,18 +179,73 @@ class HookTests(unittest.TestCase):
                 self.assertTrue(self.denied(command))
 
     def test_off_and_advisory(self) -> None:
-        """Only `off` is silent; no config or junk is enforce (default ON); advisory warns and traces, never denies."""
-        self.assertTrue(self.denied(MERGE))  # no config at all
-        self.configure("bogus")
-        self.assertTrue(self.denied(MERGE))
-        self.assertEqual(set(self.reasons()), {"denied_no_receipt"})
+        """Explicit off is silent; advisory warns and traces but never denies."""
         self.configure("off")
-        result = self.run_hook(MERGE, session="s2")
+        result = self.run_hook(MERGE)
         self.assertEqual((result.returncode, result.stdout, result.stderr), (0, "", ""))
+        self.assertEqual(self.reasons(), [])
         self.configure("advisory")
         result = self.run_hook(MERGE)
         self.assertEqual((result.stdout, "advisory" in result.stderr), ("", True))
         self.assertEqual(self.reasons()[-1], "advisory_no_receipt")
+
+    def test_default_is_enforce_and_unknown_value_is_traced(self) -> None:
+        """(b) No config, a config without the key and an unknown value all deny; the unknown value is traced."""
+        for command in (MERGE, "git push origin main", "python3 scripts/merge.py 12"):
+            self.assertTrue(self.denied(command), command)
+        (self.repo / ".coderails").mkdir()
+        (self.repo / ".coderails/workflow.config.yaml").write_text("other: 1\n")
+        self.assertTrue(self.denied(MERGE))
+        self.assertNotIn("action_authority_bad_mode", self.reasons())
+        self.configure("bogus")
+        self.assertTrue(self.denied(MERGE))
+        self.assertIn("action_authority_bad_mode", self.reasons())
+
+    def test_rejected_set(self) -> None:
+        """(c) wrong repository, wrong ref, stale sha, unsigned, agent-signed, expired and foreign-session receipts."""
+        past = datetime.now(timezone.utc) - timedelta(hours=1)
+        cases: tuple[tuple[str, dict[str, Any]], ...] = (
+            ("repository_mismatch", {"repository": "github.com/evil/w"}), ("ref_mismatch", {"ref": "refs/heads/x"}),
+            ("sha_mismatch", {"artifact_sha": "b" * 40}), ("signature_missing", {"signature": None}),
+            ("signer_unknown", {"key": self.agent_key}),
+            ("expired", {"expires_at": (past + timedelta(minutes=1)).isoformat(), "issued_at": past.isoformat()}),
+            ("foreign_session", {"session_id": "other"}),
+        )  # fmt: skip
+        for code, over in cases:
+            with self.subTest(code=code):
+                self.mint(rid=code, **over)
+                self.assertTrue(self.denied(MERGE))
+                self.assertEqual(self.reasons()[-1], f"denied_{code}")
+                (self.loop / "s1" / "receipts" / f"{code}.json").unlink()
+
+    def test_authority_denied_and_max_prs_beat_a_valid_receipt(self) -> None:
+        """(a) authority.denied and a spent max_prs refuse before any receipt is consumed."""
+        obj: dict[str, Any] = {
+            "authority_id": "auth-1", "loop_id": None, "session_id": "s1", "scope": ["code"], "denied": ["merge"],
+            "max_prs": 0, "expires_at": "2999-01-01T00:00:00+00:00", "revocable": True,
+            "approval_required_for": ["merge"], "granted_by": "command",
+        }  # fmt: skip
+        path = self.loop / "s1" / "authority.json"
+        path.parent.mkdir(parents=True)
+        path.write_text(json.dumps(obj))
+        self.mint()
+        self.assertTrue(self.denied(MERGE))
+        path.write_text(json.dumps(obj | {"denied": []}))
+        self.assertTrue(self.denied(MERGE))
+        self.assertEqual(self.reasons(), ["denied_authority_denied", "denied_max_prs_exceeded"])
+        self.assertFalse((self.loop / "s1" / "receipts" / "r1.consumed").exists())
+
+    def test_subagent_payload_is_the_same_session(self) -> None:
+        """(d) Extra agent_id/agent_type fields do not change the session: the parent's receipt is honoured."""
+        self.mint()
+        payload = {"session_id": "s1", "cwd": str(self.repo), "tool_input": {"command": MERGE},
+                   "agent_id": "a-1", "agent_type": "loop-worker"}  # fmt: skip
+        done = subprocess.run(
+            [sys.executable, str(HOOKS / "action_authority_gate.py")], input=json.dumps(payload), capture_output=True,
+            text=True, env=self.environment, check=False,
+        )  # fmt: skip
+        self.assertEqual((done.returncode, done.stdout), (0, ""))
+        self.assertEqual(self.reasons(), ["trust_root_user_tier", "receipt_consumed"])
 
     def test_enforce_deny_allow_consume_once(self) -> None:
         """No receipt denied; matching signed receipt allowed and consumed; replay denied; other args denied."""

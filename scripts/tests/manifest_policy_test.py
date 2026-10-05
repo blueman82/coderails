@@ -261,6 +261,7 @@ class MergeCallTests(unittest.TestCase):
 
         with (
             mock.patch.object(merge, "verify_gates"),
+            mock.patch.object(merge, "require_merge_receipt"),  # the receipt seam has its own suite
             mock.patch.object(git, "require_repo"),
             mock.patch.object(git, "main", return_value="main"),
             mock.patch.object(git, "pr_field", return_value="OPEN"),

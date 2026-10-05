@@ -54,6 +54,32 @@ def trust_summary(by_reason: dict[str, int]) -> dict[str, int]:
     return counts
 
 
+GATE_CODES = (
+    "authority_denied",
+    "max_prs_exceeded",
+    "action_authority_bad_mode",
+    "authority_denied_destructive_shell",
+    "no_receipt",
+    "merge_py_receipt_executed",
+)
+
+
+def gate_summary(by_reason: dict[str, int]) -> dict[str, int]:
+    """Count default-on gate outcomes: authority refusals, bad mode values, merge.py refusals and executed merges.
+
+    denied_ / advisory_ / merge_py_ prefixes are stripped, so the hook, enforce_pr_workflow and merge.py add up.
+    """
+    counts: dict[str, int] = dict.fromkeys(GATE_CODES, 0)
+    for key, count in by_reason.items():
+        command, _, rest = key.partition("/")
+        code = rest.partition("/")[2]
+        if code != "merge_py_receipt_executed":
+            code = code.removeprefix("denied_").removeprefix("advisory_").removeprefix("merge_py_")
+        if command in RECEIPT_COMMANDS and code in counts:
+            counts[code] += count
+    return counts
+
+
 if __name__ == "__main__":
     # Reads the JSON that scripts/measure_graph_alignment.py prints on stdin (see docs/RUNBOOK.md).
     rows = json.load(sys.stdin).get("trace", {}).get("by_reason", {})

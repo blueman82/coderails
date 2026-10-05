@@ -84,15 +84,20 @@ a consumer. Those four lines are superseded by the next section; the user direct
   Receipts are v2: signed, bound to repository+ref+SHA (`artifact_sha` is mandatory), always single-use; v1/unsigned receipts
   are rejected with no downgrade path. See [p3-human-only-minting.md](p3-human-only-minting.md).
 - Hook `action_authority_gate.py` (Claude, appended to the Bash group; Codex imports the byte-identical mirrored
-  `scripts/lib/{action_receipt,receipt_signing,action_binding}.py`): opt-in via config `action_authority` (enforce | advisory | off, default off); it does not touch
-  `pr_merge_gate`, the destructive gate or `enforce_pr_workflow`.
+  `scripts/lib/{action_receipt,receipt_signing,action_binding}.py`): ON by default via config `action_authority` (enforce | advisory | off; absent key, no config and unknown values are enforce, the last traced `action_authority_bad_mode`). Gates consume the authority
+  fields through `scripts/lib/authority_permits.py` `permits(session, action, now)` -> `{allow, reason, requires_approval, authority_id}`: `denied` refuses a category (`authority_denied`), merge also refuses
+  `max_prs_exceeded` (count = `.executed` markers of merge receipts carrying the authority_id; 0 = none under it; consumed-only receipts never count), `merge` and `push_main` always require a signed
+  receipt, with or without an authority. Callers: the hook, `enforce_pr_workflow` (early, consumes nothing), `scripts/merge.py` (one seam call before `gh pr merge`, fail-closed) and `destructive_bash_gate`
+  (`destructive_shell` denied refuses the allowlisted `--force-with-lease` family, `authority_denied_destructive_shell`). Decisions taken: D1 authority wins over the old SKILL.md "self-merge is in the envelope" line:
+  self-merge needs `max_prs` > 0 plus an owner-signed receipt; D2 `max_prs` caps executed merge receipts, 0 = none; D3 default-on applies to every repo including `NO_CONFIG` ones (`action_authority: off` is the switch).
 - What a receipt proves: the holder of the passphrase-protected owner key signed an approval for exactly this command text,
   cwd, branch, repository, ref and SHA, for this session and loop, once, before it expired. `approve-action` is owner-run: it
   refuses without a tty (`receipt_refused_no_tty`). With the user-tier trust root (agent-writable) this is a
   cooperating-agent safeguard; only the root-owned tier (owner-run sudo install, not performed here) is a real boundary.
 - Limits: hash covers only the command text the hook sees (not aliases, functions, eval/xargs; common wrappers are
-  unwrapped); protected branches are main/master only; (guess, unverified) a subagent's `session_id` may differ from
-  its parent's, so a receipt minted by the parent could be refused as `foreign_session` for worker-run actions.
+  unwrapped); protected branches are main/master only. Subagent identity is settled by the `agent_only_gate` evidence (same `session_id`, differing `agent_id`/`agent_type`) and a payload test, so the parent's
+  receipt is honoured by a subagent. `scripts/merge.py` cannot see the shell's command text; when no hook ran it binds PR number + repository+ref+SHA instead of the text hash, and a hook-consumed receipt must be
+  within 300 s. `action_authority: off` and the user-tier trust root are agent-writable: cooperating-agent safeguard, not a boundary.
 - Worker statuses `NEEDS_DECISION | OUTSIDE_SCOPE | IRREVERSIBLE_ACTION` ship as a standalone validator
   (`skills/agentic-loop/scripts/worker_status.py`, Codex copy byte-identical). Wiring into `record-wave` was
   rejected: it changes record-wave evidence demands and `graph_semantics.py` has three synced copies. Wiring point:

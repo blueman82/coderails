@@ -166,7 +166,7 @@ This is a specific application of `/coderails:cite-check` — the same "re-deriv
 Inside an authorised loop:
 - Do NOT ask "want me to spawn for X?" if X is in the obvious scope of the authorisation envelope
 - Do NOT ask "do you agree this is the right approach?" after you've already justified the approach in the same turn
-- Self-merge, self-deploy, self-cleanup are included in the standard envelope
+- Self-deploy and self-cleanup are included in the standard envelope. Self-merge is NOT free: `approval_required_for` always contains `merge`, so a merge needs a live authority with `max_prs` > 0 (typed `authority.py grant`; 0 = none under it) AND an owner-signed receipt (`action_receipt_cli.py approve-action`, owner terminal). The default-on `action_authority_gate` (hook), `enforce_pr_workflow` and `scripts/merge.py` all enforce this; the same receipt gate guards `git push` to main/master. When it denies, stop and ask the owner to mint; do not route around it. `action_authority: off` is the owner's switch, not the agent's.
 - Only break the loop on:
   - Verification failure (Phase 4 artifact check failed)
   - Ambiguity outside the envelope (genuinely new question, not covered by standing instruction)
