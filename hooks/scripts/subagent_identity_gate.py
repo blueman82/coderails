@@ -1,8 +1,15 @@
 #!/usr/bin/env python3
-"""Fail closed on Bash from a subagent that carries no usable agent_type inside a graph-bound session.
+"""Deny Bash from an untyped subagent in a graph-bound session.
 
-reviewer_bash_allowlist keys on agent_type; a call with agent_id but no agent_type would skip it. Claude only: Codex
-PreToolUse payloads carry neither field, so Codex has no equivalent (see docs/CAPABILITIES.md).
+Denies only when ALL hold: tool_name is Bash, agent_id is present, agent_type is absent/blank, and the
+session is graph-bound (session_id known and progress.json carries 'graph').
+
+It is NOT fail-closed in general: it allows when session_id is missing or '?', when progress.json is missing/unreadable
+or lacks 'graph', when the harness omits agent_id, and for every tool other than Bash. It also does not force role
+dispatch: any present agent_type (even general-purpose) passes; forcing typed dispatch belongs to lane A's
+loop_dispatch_guard. reviewer_bash_allowlist keys on agent_type; a call with agent_id but no agent_type would skip it,
+which is the one gap this closes. Claude only: Codex PreToolUse payloads carry neither field, so Codex has no
+equivalent (see docs/CAPABILITIES.md).
 ON by default; `subagent_identity_gate: off` in workflow.config.yaml disables it.
 """
 
