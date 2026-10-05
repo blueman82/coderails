@@ -6,7 +6,6 @@ from __future__ import annotations
 import json
 import os
 import sys
-from contextlib import suppress
 from pathlib import Path
 from typing import Any, cast
 
@@ -31,7 +30,7 @@ from hooks.scripts.lib.loop_state_common import (
     stop_ran_this_turn,
     unstubbed_grace,
 )
-from hooks.scripts.lib.stall_notice import marker_name, status_notice
+from hooks.scripts.lib.stall_notice import marker_name, record_notice, status_notice
 from hooks.scripts.lib.trace_row import append_row
 
 
@@ -50,34 +49,32 @@ def graph_unresolved(state: LoopState) -> bool:
     )
 
 
-def emit_human_request(state: LoopState) -> None:
-    """Deduplicate the unresolved graph notice without weakening its blocking gate."""
+def emit_human_request(state: LoopState) -> str:
+    """Emit the deduplicated unresolved-graph notice; return the status text for the model-facing stderr."""
     name = marker_name(state.data, state.session)
-    if name is None:
-        return
-    marker = state.path.parent / name
     base = (
         "Human approval required: the native graph is unresolved. Approve the next action "
         "or resume the loop; stopping remains blocked until the graph is complete."
     )
+    if name is None:
+        log(f"hook=loop_stall_guard session={state.session} human_request=no_marker_key")
+        print(json.dumps({"systemMessage": base}))
+        return ""
+    if (state.path.parent / name).is_dir():
+        return ""
     graph_cli = Path(__file__).resolve().parents[2] / "skills/agentic-loop/scripts/graph.py"
-    created = False
+    status = status_notice(graph_cli, state.path, state.session, log)  # never raises
     try:
-        marker.mkdir()
-        created = True
-    except FileExistsError:
-        if marker.is_dir():
-            return
-    except OSError:
-        log(f"hook=loop_stall_guard session={state.session} human_request=dedupe_write_failed")
-    try:
-        status = status_notice(graph_cli, state.path, state.session)
-        print(json.dumps({"systemMessage": f"{base}\n{status}" if status else base}))
+        print(json.dumps({"systemMessage": f"{base}\n{status}"}))
     except (OSError, ValueError) as error:
-        if created:
-            with suppress(OSError):
-                marker.rmdir()
         raise ValueError("could not emit the required human request; retry stopping") from error
+    record_notice(state.path, state.session, name, log)  # only after the notice is out
+    return status
+
+
+def blocked_message(status: str) -> str:
+    """Stop-block reason; carries the status line and dispatch hint, since the model sees only stderr."""
+    return "Native graph unresolved; stopping remains blocked." + (f"\n{status}" if status else "")
 
 
 def complete(state: LoopState, transcript: str) -> list[str]:
@@ -137,8 +134,7 @@ def main() -> int:
     try:
         if category:
             if category.lower() == "complete" and graph_unresolved(state):
-                emit_human_request(state)
-                raise ValueError("Native graph unresolved; stopping remains blocked.")
+                raise ValueError(blocked_message(emit_human_request(state)))
             messages = complete(state, transcript) if category.lower() == "complete" else []
             if messages:
                 print(json.dumps({"systemMessage": "\n".join(messages)}))
@@ -160,8 +156,7 @@ def main() -> int:
         if state.complete:
             return 0
         if graph_unresolved(state):
-            emit_human_request(state)
-            raise ValueError("Native graph unresolved; stopping remains blocked.")
+            raise ValueError(blocked_message(emit_human_request(state)))
     except ValueError as error:
         print(f"[loop-stall-guard] {error}", file=sys.stderr)
         return 2

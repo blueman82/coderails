@@ -142,7 +142,7 @@ class StopEscalationTests(unittest.TestCase):
             patch("graph_completion_guard.json.dumps", side_effect=ValueError("output unavailable")),
             suppress(ValueError),
         ):
-            codex_stop.request_human_approval(provider.path, provider.session, provider.read())
+            codex_stop.request_human_approval(provider.path, provider.session)
         self.assertEqual(list(provider.path.parent.glob(".human-approval-*")), [])
         self.assertIn("systemMessage", self.stop(provider))
 
@@ -161,7 +161,7 @@ class StopEscalationTests(unittest.TestCase):
                 if provider.name == "claude":
                     loop_stall_guard.emit_human_request(LoopState(provider.path, provider.session, 1, provider.read()))
                 else:
-                    codex_stop.request_human_approval(provider.path, provider.session, provider.read())
+                    codex_stop.request_human_approval(provider.path, provider.session)
             self.assertEqual(list(provider.path.parent.glob(".human-approval-*")), [])
             self.assertIn("systemMessage", self.stop(provider))
             marker = next(provider.path.parent.glob(".human-approval-*"))
@@ -174,7 +174,7 @@ class StopEscalationTests(unittest.TestCase):
                 if provider.name == "claude":
                     loop_stall_guard.emit_human_request(LoopState(provider.path, provider.session, 1, provider.read()))
                 else:
-                    codex_stop.request_human_approval(provider.path, provider.session, provider.read())
+                    codex_stop.request_human_approval(provider.path, provider.session)
             self.assertTrue(marker.is_dir())
 
     def test_running_stale_and_connected_work_escalate(self) -> None:

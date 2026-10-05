@@ -9,10 +9,17 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Callable, cast
 
-LEASE_SECONDS = 900  # graph.py recover-wave default lease
-TIMEOUT = 2  # per graph.py call; three calls stay well under the 10s Stop hook budget
+LEASE_SECONDS = 900  # graph.py recover-wave default lease; passed explicitly so the bucket and the lease agree
+TIMEOUT = 2  # per graph.py call cap
+DEADLINE = 4  # all status calls together; Codex Stop budget is 10s, its inspect/verify-completion are unbounded
+TIMED_OUT = "timed out"
+NOT_RUN = "status deadline reached"
+
+
+def _quiet(message: str) -> None:
+    """Default log sink."""
 
 
 def marker_name(data: dict[str, Any], session: str) -> str | None:
@@ -28,12 +35,17 @@ def marker_name(data: dict[str, Any], session: str) -> str | None:
     return f".human-approval-{safe}-{revision}-{hashlib.sha256(shape.encode()).hexdigest()[:12]}"
 
 
-def _graph(graph: Path, *args: str) -> tuple[bool, str]:
+def _graph(graph: Path, deadline: float, *args: str) -> tuple[bool, str]:
     """Run one graph.py command; (ok, stdout on success, short stderr on failure). Never raises."""
+    left = min(TIMEOUT, deadline - time.monotonic())
+    if left <= 0:
+        return False, NOT_RUN
     try:
         done = subprocess.run(
-            [sys.executable, str(graph), *args], capture_output=True, text=True, check=False, timeout=TIMEOUT
+            [sys.executable, str(graph), *args], capture_output=True, text=True, check=False, timeout=left
         )
+    except subprocess.TimeoutExpired:
+        return False, TIMED_OUT
     except (OSError, subprocess.SubprocessError):
         return False, "graph command could not run"
     if done.returncode == 0:
@@ -50,46 +62,86 @@ def _json(ok: bool, text: str) -> dict[str, Any] | None:
     return cast("dict[str, Any]", decoded) if isinstance(decoded, dict) else None
 
 
-def _premark(state: Path, session: str) -> None:
-    """Consume the marker of the post-recovery state so our own mutation does not re-notify."""
+def _premark(state: Path, session: str, log: Callable[[str], None]) -> None:
+    """Consume the marker of the current state so our own recovery mutation does not re-notify."""
     try:
         name = marker_name(json.loads(state.read_text(encoding="utf-8")), session)
         if name:
             (state.parent / name).mkdir(exist_ok=True)
-    except (OSError, ValueError):
-        pass
+    except (OSError, ValueError) as error:
+        log(f"stall_notice session={session} premark_failed={type(error).__name__}")
 
 
-def status_notice(graph: Path, state: Path, session: str) -> str:
+def record_notice(state: Path, session: str, name: str, log: Callable[[str], None] = _quiet) -> None:
+    """Write the dedupe markers AFTER the notice is printed, so a failed or killed hook re-notifies. Never raises."""
+    try:
+        (state.parent / name).mkdir(exist_ok=True)
+    except OSError as error:
+        log(f"stall_notice session={session} dedupe_write_failed={type(error).__name__}")
+    _premark(state, session, log)
+
+
+def _names(summary: dict[str, Any], key: str) -> str:
+    """Comma-joined list field; '-' when absent, empty or not a list."""
+    value = summary.get(key)
+    if not isinstance(value, list):
+        return "-"
+    return ", ".join(str(item) for item in cast("list[object]", value)) or "-"
+
+
+def status_notice(graph: Path, state: Path, session: str, log: Callable[[str], None] = _quiet) -> str:
     """Compact status from `graph.py summarize`; a lost-worker wave gets one bounded `recover-wave` attempt.
 
-    Hooks cannot spawn agents, so a ready node only gets the exact dispatch command. Call once per new state.
+    Never raises. Hooks cannot spawn agents, so a ready node only gets the exact dispatch command.
     """
-    summary = _json(*_graph(graph, "summarize", str(state)))
+    try:
+        return _status(graph, state, session, log)
+    except Exception as error:  # noqa: BLE001 - the required human notice must survive any failure here
+        log(f"stall_notice session={session} status_failed={type(error).__name__}")
+        return "Graph status unavailable: internal error; run graph.py summarize."
+
+
+def _status(graph: Path, state: Path, session: str, log: Callable[[str], None]) -> str:
+    deadline = time.monotonic() + DEADLINE
+    ok, text = _graph(graph, deadline, "summarize", str(state))
+    summary = _json(ok, text)
     if summary is None:
-        return "Graph status unavailable: graph.py summarize failed."
+        return f"Graph status unavailable: graph.py summarize failed ({text if not ok else 'unreadable output'})."
     recovery = ""
+    stale = ""
     if summary.get("phase") == "waiting for worker":
-        ok, text = _graph(graph, "recover-wave", str(state), "--session", session)
+        ok, text = _graph(
+            graph, deadline, "recover-wave", str(state), "--session", session, "--lease-seconds", str(LEASE_SECONDS)
+        )
         report = _json(ok, text)
-        if report is None:
+        if text in {TIMED_OUT, NOT_RUN} and not ok:
+            recovery = (
+                "recover-wave outcome unknown (timed out); run graph.py summarize"
+                if text == TIMED_OUT
+                else "recover-wave not attempted (status deadline reached); run graph.py summarize"
+            )
+        elif report is None:
             recovery = f"recover-wave refused: {text}"
         elif report.get("recovered") is True:
             recovery = "recover-wave recovered: lease expired, stale nodes respawn."
-            _premark(state, session)
-            summary = _json(*_graph(graph, "summarize", str(state))) or summary
+            fresh = _json(*_graph(graph, deadline, "summarize", str(state)))
+            if fresh is None:
+                stale = "post-recovery status unavailable; the summary above predates recovery."
+            else:
+                summary = fresh
         else:
             recovery = f"recover-wave did nothing: {report.get('reason_code')}."
-
-    def names(key: str) -> str:
-        return ", ".join(str(item) for item in cast("list[object]", summary.get(key) or [])) or "-"
+        log(f"stall_notice session={session} recovery={recovery}")
 
     lines = [
         f"Graph status: {summary.get('phase')}. {summary.get('detail')}",
-        f"done: {names('done')}; active: {names('active')}; ready: {names('ready')}; pending: {names('pending')}",
+        f"done: {_names(summary, 'done')}; active: {_names(summary, 'active')}; "
+        f"ready: {_names(summary, 'ready')}; pending: {_names(summary, 'pending')}",
     ]
     if recovery:
         lines.append(recovery)
-    elif summary.get("phase") == "ready to dispatch":
+    if stale:
+        lines.append(stale)
+    elif not recovery and summary.get("phase") == "ready to dispatch":
         lines.append(f"Dispatch: python3 {graph} begin-wave {state}, then spawn the ready nodes.")
     return "\n".join(lines)

@@ -5,6 +5,7 @@ from __future__ import annotations
 import filecmp
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -68,26 +69,157 @@ class StopNoticeTests(unittest.TestCase):
     def test_hard_stop_change_without_revision_bump_renotifies(self) -> None:
         """Same revision, new hard_stop: notice again; unchanged: silent."""
         for provider in self.providers:
-            first = self.stop(provider)
-            self.assertIn("ready to dispatch", first)
-            self.assertIn("begin-wave", first)
-            self.assertEqual(self.stop(provider), "")
-            state = provider.read()
-            state["graph"]["hard_stop"] = {"node": "U3[1]", "reason": "needs a human decision", "ts": "t"}
-            provider.write(state)
-            second = self.stop(provider)
-            self.assertIn("waiting for human", second)
-            self.assertIn("needs a human decision", second)
-            self.assertEqual(self.stop(provider), "")
+            with self.subTest(provider=provider.name):
+                first = self.stop(provider)
+                self.assertIn("ready to dispatch", first)
+                self.assertIn("begin-wave", first)
+                self.assertEqual(self.stop(provider), "")
+                state = provider.read()
+                state["graph"]["hard_stop"] = {"node": "U3[1]", "reason": "needs a human decision", "ts": "t"}
+                provider.write(state)
+                second = self.stop(provider)
+                self.assertIn("waiting for human", second)
+                self.assertIn("needs a human decision", second)
+                self.assertEqual(self.stop(provider), "")
 
     def test_running_wave_runs_recover_once(self) -> None:
         """A running wave with no worker gets one recover-wave result in the notice."""
         for provider in self.providers:
-            provider.success("begin-wave")
-            first = self.stop(provider)
-            self.assertIn("waiting for worker", first)
-            self.assertIn("recover-wave", first)
-            self.assertEqual(self.stop(provider), "")
+            with self.subTest(provider=provider.name):
+                provider.success("begin-wave")
+                revision = provider.read()["revision"]
+                first = self.stop(provider)
+                self.assertIn("waiting for worker", first)
+                self.assertIn("recover-wave", first)
+                self.assertEqual(self.stop(provider), "")
+                self.assertEqual(self.recover_rows(provider), 1)
+                self.assertEqual(provider.read()["revision"], revision)
+
+    def recover_rows(self, provider: Provider) -> int:
+        """Count recover-wave trace rows written beside the state."""
+        trace = provider.path.with_name("recovery-trace.jsonl")
+        return len(trace.read_text().splitlines()) if trace.is_file() else 0
+
+    def test_expired_lease_recovers_at_hook_level(self) -> None:
+        """Silent workers past the lease are recovered by the hook; the recovered state is not re-notified."""
+        for provider in self.providers:
+            with self.subTest(provider=provider.name):
+                provider.success("begin-wave")
+                provider.launch("stale")
+                first = self.stop(provider)
+                self.assertIn("recover-wave recovered", first)
+                self.assertIsNone(provider.read()["graph"]["active_wave"])
+                self.assertEqual(self.stop(provider), "")
+
+    def test_active_wave_change_without_revision_bump_renotifies(self) -> None:
+        """Same revision, different active_wave (written directly): the hook notifies again."""
+        for provider in self.providers:
+            with self.subTest(provider=provider.name):
+                provider.success("begin-wave")
+                self.assertIn("waiting for worker", self.stop(provider))
+                self.assertEqual(self.stop(provider), "")
+                state = provider.read()
+                state["graph"]["active_wave"] = {**state["graph"]["active_wave"], "transcript_cursor": 0}
+                provider.write(state)
+                self.assertIn("waiting for worker", self.stop(provider))
+                self.assertEqual(provider.read()["revision"], state["revision"])
+
+    def test_lease_bucket_rekeys_only_with_an_active_wave(self) -> None:
+        """A running wave re-keys per lease window; a wave-less state ignores time."""
+        running = {"loop_id": "l", "revision": 1, "graph": {"active_wave": {"wave_id": "w"}, "hard_stop": None}}
+        idle = {"loop_id": "l", "revision": 1, "graph": {"active_wave": None, "hard_stop": None}}
+        window = stall_notice.LEASE_SECONDS
+        start = window * 1000.0
+        with mock.patch("time.time") as clock:
+            keys = {}
+            for label, moment in (("a", start), ("b", start + window - 1), ("c", start + window)):
+                clock.return_value = moment
+                keys[label] = (stall_notice.marker_name(running, "s"), stall_notice.marker_name(idle, "s"))
+        self.assertEqual(keys["a"][0], keys["b"][0])
+        self.assertNotEqual(keys["a"][0], keys["c"][0])
+        self.assertEqual(keys["a"][1], keys["c"][1])
+
+    def fake_graph(self, body: str) -> Path:
+        """A stand-in graph.py reporting a waiting wave; `body` handles recover-wave."""
+        fake = self.providers[0].home / "fake_graph.py"
+        fake.write_text(
+            "import json, sys, time\n"
+            "if sys.argv[1] == 'summarize':\n"
+            "    print(json.dumps({'phase': 'waiting for worker', 'detail': 'd', " + self.summary_fields + "}))\n"
+            "else:\n"
+            "    " + body + "\n"
+        )
+        return fake
+
+    summary_fields = "'done': [], 'active': [], 'ready': [], 'pending': []"
+
+    def test_recover_wave_timeout_is_unknown_not_refused(self) -> None:
+        """A recover-wave that outlives the cap says the outcome is unknown."""
+        fake = self.fake_graph("time.sleep(30)")
+        provider = self.providers[0]
+        with mock.patch.object(stall_notice, "TIMEOUT", 1):
+            text = stall_notice.status_notice(fake, provider.path, provider.session)
+        self.assertIn("outcome unknown (timed out)", text)
+        self.assertNotIn("refused", text)
+
+    def test_summarize_failure_keeps_its_reason(self) -> None:
+        """A failing summarize reports its stderr line."""
+        fake = self.providers[0].home / "bad_graph.py"
+        fake.write_text("import sys\nsys.stderr.write('state is corrupt\\n')\nsys.exit(1)\n")
+        text = stall_notice.status_notice(fake, self.providers[0].path, "s")
+        self.assertIn("unavailable", text)
+        self.assertIn("state is corrupt", text)
+
+    def test_non_list_summarize_fields_do_not_raise(self) -> None:
+        """Malformed list fields render as '-' instead of raising."""
+        self.summary_fields = "'done': 5, 'active': None, 'ready': {'a': 1}, 'pending': 'x'"
+        fake = self.fake_graph("print(json.dumps({'recovered': False, 'reason_code': 'within_lease'}))")
+        text = stall_notice.status_notice(fake, self.providers[0].path, "s")
+        self.assertIn("done: -; active: -; ready: -; pending: -", text)
+
+    def test_failed_resummarize_is_labelled_stale(self) -> None:
+        """If the post-recovery summarize fails, the notice says so rather than reusing the old summary silently."""
+        provider = self.providers[0]
+        fake = provider.home / "flaky_graph.py"
+        fake.write_text(
+            "import json, os, sys\n"
+            "flag = sys.argv[2] + '.recovered'\n"
+            "if sys.argv[1] == 'recover-wave':\n"
+            "    open(flag, 'w').close()\n"
+            "    print(json.dumps({'recovered': True, 'reason_code': 'recovered'}))\n"
+            "elif os.path.exists(flag):\n"
+            "    sys.exit(1)\n"
+            "else:\n"
+            "    print(json.dumps({'phase': 'waiting for worker', 'detail': 'd'}))\n"
+        )
+        text = stall_notice.status_notice(fake, provider.path, provider.session)
+        self.assertIn("post-recovery status unavailable", text)
+
+    def test_failing_notice_leaves_no_marker(self) -> None:
+        """If building the notice fails, no dedupe marker exists, so the next Stop re-notifies."""
+        claude = (
+            "from hooks.scripts import loop_stall_guard as g\n"
+            "from hooks.scripts.lib.loop_state_common import LoopState\n"
+            "call = lambda p, d, s: g.emit_human_request(LoopState(p, s, 1, d))\n"
+        )
+        codex = "import graph_completion_guard as g\n" "call = lambda p, d, s: g.request_human_approval(p, s)\n"
+        roots = (ROOT, ROOT / "packages/codex/hooks/scripts")
+        for provider, setup, root in zip(self.providers, (claude, codex), roots):
+            with self.subTest(provider=provider.name):
+                code = (
+                    "import json, sys\nfrom pathlib import Path\nfrom unittest import mock\n"
+                    f"sys.path.insert(0, {str(root)!r})\n"
+                    + setup
+                    + f"p = Path({str(provider.path)!r}); d = json.loads(p.read_text())\n"
+                    "with mock.patch.object(g, 'status_notice', side_effect=RuntimeError('boom')):\n"
+                    f"    try: call(p, d, {provider.session!r})\n"
+                    "    except RuntimeError: pass\n"
+                    "print([x.name for x in p.parent.iterdir() if x.name.startswith('.human-approval')])\n"
+                )
+                done = subprocess.run(
+                    [sys.executable, "-c", code], capture_output=True, text=True, env=provider.environment, check=False
+                )
+                self.assertEqual(done.stdout.strip().splitlines()[-1], "[]", done.stderr)
 
     def graph_cli(self, provider: Provider) -> Path:
         """The provider's real graph.py."""
@@ -116,7 +248,6 @@ class StopNoticeTests(unittest.TestCase):
             os.environ.update(provider.environment)
             text = stall_notice.status_notice(self.graph_cli(provider), provider.path, provider.session)
             self.assertIn("did nothing", text)
-            self.assertNotIn("applied", text)
 
     def test_foreign_session_is_refused(self) -> None:
         """A different session's recover-wave is shown as refused with its reason."""
@@ -128,7 +259,7 @@ class StopNoticeTests(unittest.TestCase):
             self.assertIn("does not own", text)
 
     def test_recovery_premarks_new_state_and_resummarizes(self) -> None:
-        """An applied recovery shows the post-recovery summary and consumes the new state's marker."""
+        """A recovery shows the post-recovery summary; record_notice then consumes the new state's marker."""
         provider = self.providers[0]
         provider.success("begin-wave")
         fake = provider.home / "fake_graph.py"
@@ -149,6 +280,7 @@ class StopNoticeTests(unittest.TestCase):
         text = stall_notice.status_notice(fake, provider.path, provider.session)
         self.assertIn("recover-wave recovered", text)
         self.assertIn("ready to dispatch", text)
+        stall_notice.record_notice(provider.path, provider.session, ".human-approval-first")
         name = stall_notice.marker_name(provider.read(), provider.session)
         self.assertTrue((provider.path.parent / str(name)).is_dir())
 
