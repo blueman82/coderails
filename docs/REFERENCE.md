@@ -757,7 +757,6 @@ no script does) or `unused`. Regenerate the table with `python3 scripts/lib/conf
 |---|---|
 | `scripts/push.py`, `merge.py` | Explicit staging/commit/PR workflow and current-head review, eval, integrity and wiki-debt merge gates. |
 | `scripts/post_review.py`, `post_evals.py` | Review grammar/cache, structural eval validation, neutral grading and observed smoke execution. |
-| `scripts/external_enforcement.py`, `ci_verify.py`, `enforcement_trace.py` | Opt-in, inert-by-default external enforcement: ruleset `plan`/`apply --yes`, an independent-runner verifier reusing the merge-gate functions, and advisory trace rows/counters. See `docs/external-enforcement/README.md`. |
 | `scripts/lib/git_common.py` | GitHub repository/PR operations and newest trusted exact-head artifact selection. Requires a `github.com` remote. |
 | `scripts/lib/{config,review_artifact,eval_artifact,artifact_io}.py` | Shared root-provider config and structured artifact operations. |
 | `scripts/lib/{eval_validation,eval_execution}.py` | Eval criteria and command/control verification. Gate smoke runs in a detached worktree at the trusted SHA. |
