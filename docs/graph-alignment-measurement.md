@@ -288,3 +288,18 @@ PYTHONPATH=. python3 -m unittest hooks/scripts/tests/authority_permits_test.py
 python3 scripts/lib/config_counters.py
 python3 hooks/scripts/tests/config_strict_test.py && python3 hooks/scripts/tests/wiki_taxonomy_gate_test.py
 ```
+
+## One attestation parser (measurement note)
+
+`scripts/lib/integrity_attestation.py` replaces two hand-written regex copies (merge.py path and the PreToolUse merge
+hook). Each denial under a session writes trace `pr_merge_gate/denied/<attest_code>`; `scripts/lib/state_counters.py`
+tallies them. Flip condition: a nonzero `attest_not_bound` with a green daemon means the daemon's description format
+drifted from `format_attestation` (the daemon-description test should fail first). Limits: the root-owned daemon is
+not wired to the parser (separately installed); `merge.py` itself writes no trace row.
+
+**Reproduce.**
+
+```
+python3 scripts/tests/integrity_attestation_test.py
+python3 scripts/lib/state_counters.py
+```

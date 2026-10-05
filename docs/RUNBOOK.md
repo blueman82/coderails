@@ -275,3 +275,18 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   (docs/decisions/p3-human-only-minting.md). The hash covers only the command text the hook sees, not aliases, functions, eval/xargs or scripts that
   push (sudo/time/subshell/`bash -c`/`gh api .../merge` wrappers are unwrapped; an env assignment prefix is kept and makes the command unbindable). Limits: scope 500 chars, 8 KB per receipt,
   50 receipts per session (`receipt_refused_scope_too_long`, `receipt_refused_too_many`). Protected branches are main and master only.
+
+## Typed state, verdicts and attestation (merge blocked by `attest_*`, eval verdict, hook state)
+
+- Symptom: `gh pr merge` or `merge.py` is refused with `attest_missing`, `attest_not_success`, `attest_wrong_creator`
+  or `attest_not_bound`. One parser (`scripts/lib/integrity_attestation.py`, mirrored byte-identically into
+  `packages/codex/scripts/lib/`) is the only code that knows `integrity=pass` / `sha=`; `integrity_status.py` (merge.py)
+  and `pr_merge_gate.py` (hook) fetch with `gh` and render the message from its closed code.
+- Query: `python3 scripts/lib/state_counters.py [--since <ISO ts>]` counts `attest_*` (trace `pr_merge_gate/denied/<code>`,
+  written when the hook payload carries a session id), `hook_state_unreadable`, `nudge_first`/`nudge_suppressed` and
+  `eval_verdict_<status>`.
+- Remediation: `attest_missing`/`attest_not_success` mean the root-owned daemon has not attested this head yet (wait or
+  push a fresh head); `attest_wrong_creator` means `integrity_review.machine_user` disagrees with the status poster;
+  `attest_not_bound` means the description is not exactly `integrity=pass sha=<head>` as whole tokens. Never bypass.
+- Limit: the daemon (`scripts/integrity-gate`, root-installed separately) does not import the parser; a test asserts the
+  daemon's real success description parses. Codex has no PreToolUse merge hook; only `integrity_status.py` applies there.

@@ -136,5 +136,7 @@
   "scripts/lib/manifest_counters.py": "100644",
   "scripts/lib/config_counters.py": "100644",
   "scripts/lib/config_strict.py": "100644",
-  "scripts/lib/config_schema_docs.py": "100644"
+  "scripts/lib/config_schema_docs.py": "100644",
+  "scripts/lib/state_counters.py": "100644",
+  "scripts/lib/integrity_attestation.py": "100644"
 }
