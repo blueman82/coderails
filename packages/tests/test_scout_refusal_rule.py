@@ -21,6 +21,9 @@ COMMON = (
     "A `non_independent` fallback requires explicit human approval.",
     "Only after the human approves, record `S2.5` as `skipped` with evidence beginning "
     "`non_independent: human approved`",
+    "append a `decisions_absorbed` entry "
+    '`{phase: "<current phase>", decision: "scout refused: <error text>, adopted non_independent"}`.',
+    "That `skipped` record is the only exit that lets `J2` release without an independent scout;",
     "a `non_independent` read never counts as an independent review or as `done`.",
     "no gate reads `non_independent`, so this is an orchestrator rule, not a hook-enforced one.",
 )
