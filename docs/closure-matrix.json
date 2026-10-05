@@ -1,0 +1,257 @@
+{
+  "rows": [
+    {
+      "id": "1",
+      "source_refs": "H06, P04, S1, CDC-12, P07inj",
+      "defect": "`LOOP-STOP:` regex over transcript text decides stop release, which gates run, and counts",
+      "target_typed_record": "`progress.stops[]{seq,category:enum,reason_code:enum,reason,revision,consumed}` written by `graph.py stop`, one enum shared by both providers",
+      "phase": 2,
+      "acceptance_test": "A regression test feeds 'LOOP-STOP: complete - x\\nLOOP-STOP: hard-stop inline' and the Stop hook decides from progress.stops[] (graph.py stop), not transcript text, in both providers, with a negative control that the regex path is gone.",
+      "status": "open"
+    },
+    {
+      "id": "2",
+      "source_refs": "H01, CDC-14, P14, S12",
+      "defect": "Prose regex on the user's prompt mints a 24h authority that denies AskUserQuestion",
+      "target_typed_record": "`authority.py grant` and `/coderails:authorize`; `granted_by:enum[command,legacy_phrase]`; the phrase only prints the command to run",
+      "phase": 3,
+      "acceptance_test": "A test shows invoked('do not, under any circumstances, crack on') no longer mints authority; only /coderails:authorize or authority.py grant does (granted_by enum), in both providers, with a negative control for the pasted-text mint.",
+      "status": "open"
+    },
+    {
+      "id": "3",
+      "source_refs": "H28, P07",
+      "defect": "Gates ignore the authority fields; SKILL.md:169 says self-merge is standard while the authority object says merge needs approval",
+      "target_typed_record": "`authority.permits(action)` returns `{allow,reason,requires_approval}`; `max_prs` is counted from receipts",
+      "phase": 3,
+      "acceptance_test": "A test shows enforce_pr_workflow, merge.py and destructive_bash_gate consult authority.permits(action) and deny merge without approval and past max_prs (counted from receipts), after the SKILL.md:169 conflict is decided by a human.",
+      "status": "open"
+    },
+    {
+      "id": "4",
+      "source_refs": "P01, P02, P03, H16, A15, S17",
+      "defect": "The node table in `execution-graph.md` is the only spec. Code builds U3[N]+J12 only, and prep nodes are classified by an id-prefix regex",
+      "target_typed_record": "`graph-spec.yaml{nodes[{id,kind,requires,source,ready_when,skip_when,retry_max,phase,graph_role}],joins}`, `policy.yaml` thresholds, `graph.py instantiate`, generated doc table and diagram",
+      "phase": 2,
+      "acceptance_test": "A test shows graph_semantics.validate refuses a graph missing a graph-spec.yaml edge and graph.py instantiate builds from the spec; policy.yaml thresholds are compared in code; the generated doc table passes gen --check.",
+      "status": "open"
+    },
+    {
+      "id": "5",
+      "source_refs": "A8, P09, A7, A9, A10, S20, A19, A20, A21, H14",
+      "defect": "Worker contract (~14 \"must travel in the prompt\" items) is prose, and the guard checks only line 1",
+      "target_typed_record": "Envelope `contract{role,model_role,base_ref,manifest,disposition,lessons[],write_scope,skip_phases,scope}`, rendered by `begin-wave` with `prompt_sections_sha256`, `envelope_version`, and a `dispatch_id` looked up in `progress.json`",
+      "phase": 2,
+      "acceptance_test": "A test shows loop_dispatch_guard recomputes prompt_sections_sha256 from the progress.json dispatch_id envelope and rejects a prompt missing any contract field, in both Claude and Codex, with a negative control of a tampered section.",
+      "status": "open"
+    },
+    {
+      "id": "5a",
+      "source_refs": "A1 (quick win)",
+      "defect": "Guarded roles dispatched as `general-purpose` skip the agent frontmatter and the reviewer allowlist",
+      "target_typed_record": "`envelope.role` enum; guard asserts `subagent_type=='coderails:'+role`",
+      "phase": 2,
+      "acceptance_test": "A test shows authorize_dispatch denies sed -i for a guarded role dispatched as agent_type=general-purpose and requires subagent_type == 'coderails:' + role, matching the coderails:source-auditor deny.",
+      "status": "open"
+    },
+    {
+      "id": "6",
+      "source_refs": "H07, H08, H09, S3, S4, P18, H26",
+      "defect": "Arm state, grace and nudge dedupe come from grepping `discipline.log` and the transcript",
+      "target_typed_record": "`hook_state.json{arms[],ordinals{absent_blocked,grace},nudged}` plus authoritative trace rows; `mine_hook_blocks` reads rows",
+      "phase": 1,
+      "acceptance_test": "A test shows arm state, grace and nudge dedupe are read from hook_state.json and trace rows (not discipline.log), including a session=ab prefix-collision case that no longer cross-matches.",
+      "status": "open"
+    },
+    {
+      "id": "7",
+      "source_refs": "P12, A18, S18",
+      "defect": "Disposition (clean-break / preserve-compat, `named_blocker`, `removal_ticket`) has zero code readers",
+      "target_typed_record": "`add-unit --disposition \u2026`; refuse preserve-compat without blocker and ticket; `compat_findings:int` in the review artifact; `disposition-audit`",
+      "phase": 2,
+      "acceptance_test": "A test shows add-unit --disposition refuses preserve-compat without named_blocker and removal_ticket, merge.py reads compat_findings from the review artifact, and grep for removal_ticket in hooks/scripts/skills is non-empty.",
+      "status": "open"
+    },
+    {
+      "id": "8",
+      "source_refs": "P10, P19, P11",
+      "defect": "Manifest and scope assertion, the docs-sync allow/deny diff rules, and linked-worktree checks are all run by the model from prose. Headless bypass-permission routines get no hooks.",
+      "target_typed_record": "`diff_manifest.py --policy` returns `{ok,violations[]}`; `unit.manifest`; routine policy JSON",
+      "phase": 4,
+      "acceptance_test": "A test shows diff_manifest.py --policy returns {ok,violations[]} for an out-of-manifest file and docs-sync deny paths, and push.py and merge.py re-check the PR diff, including under a headless bypass-permission run.",
+      "status": "open"
+    },
+    {
+      "id": "9",
+      "source_refs": "P13",
+      "defect": "Required reviewers (`/security-review` for `hooks/`, `scripts/`; deploy-safety) are unenforced",
+      "target_typed_record": "`review_policy.yaml` path triggers; `post_review` emits `passes[]{name,verdict,blocking}` into the SHA-bound marker",
+      "phase": 4,
+      "acceptance_test": "A test shows merge.py computes required passes from gh pr diff --name-only via review_policy.yaml and refuses a PR touching hooks/ without a passing security-review entry in the SHA-bound marker passes[].",
+      "status": "open"
+    },
+    {
+      "id": "10",
+      "source_refs": "CDC-01, 02, 06, 07, 19, P23, P22, H24/CDC-03/P30(wiki)",
+      "defect": "Regex config parser; a second divergent parser in `wiki_taxonomy_gate`; keys documented only in `init.md`; `sandbox_workers` read by no code; the wiki allowlist is scraped from an AGENTS.md table",
+      "target_typed_record": "`config.schema.json` (`additionalProperties:false`) and `load_config()`; `resolve-config --json` with defaults; `wiki.schema.json`",
+      "phase": 1,
+      "acceptance_test": "A test shows config.schema.json (additionalProperties:false) makes a mistyped key fail loudly in load_config(), resolve-config --json emits defaults, sandbox_workers is read by code, and the wiki gate fails closed on a heading rename.",
+      "status": "open"
+    },
+    {
+      "id": "11",
+      "source_refs": "CDC-04, 05, 08, 21, 22, H29, P33, P34",
+      "defect": "Hook tables, mode (block/nudge/advisory), thresholds and provider parity are prose",
+      "target_typed_record": "`hooks/registry.json{id,event,matcher,mode,params,providers,protocol,fail}`; generates `hooks.json` and the AGENTS.md / README tables; contract test",
+      "phase": 6,
+      "acceptance_test": "A test shows hooks/registry.json generates hooks.json and the AGENTS.md/README hook tables, a contract test covers provider parity (quality_feedback listed, Codex gaps declared), and CI gen --check fails on drift.",
+      "status": "open"
+    },
+    {
+      "id": "12",
+      "source_refs": "P01inj, P09inj, P10inj, P13inj, P20, CDC-20",
+      "defect": "Deny and nudge text is prose; 21 gates emit no row",
+      "target_typed_record": "`messages.json` catalog and `DecisionRecord{hook,decision,reason_code,params,remediation}` with `reason_code` first in the text; `RUNBOOK` reason table generated",
+      "phase": 6,
+      "acceptance_test": "A test shows every gate emits a DecisionRecord{hook,decision,reason_code,params,remediation} via hook_common.emit with reason_code first in the text, the RUNBOOK reason table is generated, and Codex Stop surfaces the failing check's stderr.",
+      "status": "open"
+    },
+    {
+      "id": "13",
+      "source_refs": "S5, S6, S7, P16",
+      "defect": "`decisions_absorbed` has no writer, and retro `verbatim` copies are unchecked",
+      "target_typed_record": "`graph.py record-decision`; `retro.py assemble` with `source_hashes`; `teardown.steps_done`",
+      "phase": 5,
+      "acceptance_test": "A test shows graph.py record-decision writes decisions_absorbed and loop_completion rejects a retro whose source_hashes do not match progress.json, with teardown.steps_done recorded.",
+      "status": "open"
+    },
+    {
+      "id": "14",
+      "source_refs": "S8, S9, P17, P39",
+      "defect": "`standing-orders.md` is used as a database (K=5 decay, promotion predicate) by an LLM",
+      "target_typed_record": "`orders.py record|tick|predicate|lessons`; `standing-orders.md` generated read-only",
+      "phase": 5,
+      "acceptance_test": "A test shows orders.py record|tick|predicate|lessons implements K=5 decay and the promotion predicate in code, standing-orders.md is generated read-only, after the Muninn overlap check is recorded.",
+      "status": "open"
+    },
+    {
+      "id": "15",
+      "source_refs": "S13, H17(b,c), P15",
+      "defect": "Proofs are satisfied by exact-string match against the transcript; `expect` and `status` are never read; `none` has no reason",
+      "target_typed_record": "`proof.py run` (controller executes the frozen cmd, `cmd_sha256`); `proof_results.jsonl`; `disposition{kind,reason_code}`",
+      "phase": 5,
+      "acceptance_test": "A test shows proof.py run executes the frozen cmd with cmd_sha256 into proof_results.jsonl, the stall guard reads results (expect and status are honored), and a disposition 'none' requires reason_code.",
+      "status": "open"
+    },
+    {
+      "id": "16",
+      "source_refs": "H18, P10inj, H17a, P11, P32, S21, S23",
+      "defect": "String verdicts with prefix slicing (`'TAMPERED:'[9:]`), cost outcome from `startswith`, and `blocked` conflating a missing script with a real blocker",
+      "target_typed_record": "`EvalVerdict{status,tamper_code}`, `CostReport{state}`, readiness `{ready,reason_code}`, `updated_at` stamped",
+      "phase": 1,
+      "acceptance_test": "A test shows callers match on EvalVerdict{status,tamper_code}, CostReport{state} and readiness {ready,reason_code} enums instead of 'TAMPERED:'[9:] slicing or startswith, and a missing script is distinct from a real blocker.",
+      "status": "open"
+    },
+    {
+      "id": "17",
+      "source_refs": "P24/S14, P25, P08adj",
+      "defect": "Verification level and late freeze are self-assigned or unchecked",
+      "target_typed_record": "`evals.facts{work_units,surfaces}`; `derived_min_level`; `late_freeze` stamped in the marker",
+      "phase": 4,
+      "acceptance_test": "A test shows post_evals and merge.py enforce derived_min_level from evals.facts{work_units,surfaces} and stamp late_freeze in the marker, with a negative control of a self-assigned lower level.",
+      "status": "open"
+    },
+    {
+      "id": "18",
+      "source_refs": "P18, P20, P38",
+      "defect": "Routine success is last-marker text; the same 9-stage chain is written twice in prose",
+      "target_typed_record": "`routine_log.py emit` JSONL with a closed outcome enum; `routine_run.py` state machine with cleanup in code",
+      "phase": 4,
+      "acceptance_test": "A test shows routine_log.py emit writes JSONL with a closed outcome enum, routine_run.py is the single state machine with cleanup in code, and the runner writes run_abort on exit; an invented marker is rejected.",
+      "status": "open"
+    },
+    {
+      "id": "19",
+      "source_refs": "H05, S15, P22inj, CDC-18",
+      "defect": "Integrity and eval attestation regex is duplicated in `integrity_status.py` and `pr_merge_gate.py`",
+      "target_typed_record": "one shared parser now; later a signed JSON attestation",
+      "phase": 1,
+      "acceptance_test": "A test shows integrity_status.py and pr_merge_gate.py import one shared attestation parser, and a mutated attestation line is rejected identically by both.",
+      "status": "open"
+    },
+    {
+      "id": "20",
+      "source_refs": "H19, P29, H20, H22, H23, H25, CDC-24",
+      "defect": "Commit regex misses `git -C x commit`; ceiling keyed by branch name; hardcoded protected suffixes; stdout substring match",
+      "target_typed_record": "argv classifier (`shlex`); `check.py --json`; `protected_paths.json`; ceiling counted at source (`work_unit.verification`)",
+      "phase": 4,
+      "acceptance_test": "A test shows the argv (shlex) classifier flags 'git -C /r commit -m x', ceiling is counted from work_unit.verification not branch name, and protected_paths.json replaces hardcoded suffixes.",
+      "status": "open"
+    },
+    {
+      "id": "21",
+      "source_refs": "P27/S16, P28, P33(vm), P35, P37, P21, P22, P29",
+      "defect": "Prose recipes for deterministic logic: post-review argument \"inspection\" with `$ARGUMENTS` interpolated into shell, wiki-lint staleness, verify-merged, merge gate list, memory dir",
+      "target_typed_record": "`post_review.py post <int>`, `wiki_lint.py`, `verify_merged.py`, `merge.py --describe`, `memory_dir.py`, `detect_test_command.py`",
+      "phase": 4,
+      "acceptance_test": "A test shows post_review.py post <int> takes no shell-interpolated $ARGUMENTS, wiki_lint.py reads wiki_stale_days, verify_merged.py applies one ancestry rule, and merge.py --describe lists the gates.",
+      "status": "open"
+    },
+    {
+      "id": "22",
+      "source_refs": "H10, H11, P05, P06, P31, A13, CDC-13",
+      "defect": "Confidence-label and DNV regex (advisory)",
+      "target_typed_record": "`final_report{claims[],did_not_verify[]}`",
+      "phase": 2,
+      "acceptance_test": "A test shows worker final_report{claims[],did_not_verify[]} is validated at worker level via the typed-statuses track while orchestrator-level confidence-label checks stay advisory.",
+      "status": "open"
+    },
+    {
+      "id": "23",
+      "source_refs": "P36, A10, P08, S2",
+      "defect": "The Codex tree is hand-maintained and the two providers use different stop vocabularies",
+      "target_typed_record": "specs plus provider overlay templates; `gen --check`",
+      "phase": 6,
+      "acceptance_test": "A test shows the Codex tree is generated from specs plus provider overlay templates, a shared stop vocabulary is used by both providers, and gen --check fails on hand-edited drift.",
+      "status": "open"
+    }
+  ],
+  "gaps": [
+    {
+      "id": "gap1",
+      "title": "external trust enforcement",
+      "exception": "EXCEPTION: closed by the existing opt-in integrity gate (docs/INTEGRITY-GATE.md). It stays opt-in, is not installed here, and gets no second enforcement route.",
+      "acceptance_test": "docs/INTEGRITY-GATE.md remains the single enforcement route and stays opt-in; no new always-on enforcement path is added.",
+      "status": "open"
+    },
+    {
+      "id": "gap2",
+      "title": "capability-based tools",
+      "phase": 3,
+      "acceptance_test": "A test shows tool access is granted by declared capability and an undeclared tool call is denied, in both providers.",
+      "status": "open"
+    },
+    {
+      "id": "gap3",
+      "title": "HITL / action authority",
+      "phase": 3,
+      "acceptance_test": "A test shows human-in-the-loop approval is required by authority.permits(action) for approval-gated actions and a missing approval denies, in both providers.",
+      "status": "open"
+    },
+    {
+      "id": "gap4",
+      "title": "dynamic task-specific context",
+      "phase": 6,
+      "acceptance_test": "A test shows begin-wave renders task-specific context into the dispatch envelope and a worker prompt lacking it is rejected, in both providers.",
+      "status": "open"
+    },
+    {
+      "id": "gap5",
+      "title": "typed memory (Muninn)",
+      "phase": 5,
+      "acceptance_test": "A test shows memory records are written and read through a typed schema, and an untyped record is rejected, in both providers.",
+      "status": "open"
+    }
+  ]
+}

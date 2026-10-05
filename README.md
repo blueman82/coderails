@@ -13,6 +13,8 @@ agents, and hooks; neither dispatches to the other. They provide:
 - **Integrity gate** — A three-layer evidence check (local gate, root-owned attestor,
   GitHub ruleset) that blocks stale, missing, or malformed review/eval evidence.
   See [`docs/INTEGRITY-GATE.md`](./docs/INTEGRITY-GATE.md) for details.
+- **Closure matrix** — Per-defect and per-gap phase map and acceptance test for
+  closing the provider-graph gaps; see [`docs/closure-matrix.md`](./docs/closure-matrix.md).
 
 ## Install
 

@@ -11,6 +11,7 @@
   "scripts/installer/modes.py": "100644",
   "scripts/integrity-gate/install.py": "100755",
   "scripts/integrity-gate/integrity_gate_runner.py": "100755",
+  "scripts/closure_matrix.py": "100755",
   "scripts/integrity-gate/integrity_http.py": "100644",
   "scripts/integrity-gate/integrity_install.py": "100644",
   "scripts/integrity-gate/integrity_policy.py": "100644",

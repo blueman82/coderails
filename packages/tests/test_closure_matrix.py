@@ -1,0 +1,84 @@
+"""The Phase 0 closure matrix data must be complete and its generated md fresh."""
+
+from __future__ import annotations
+
+import copy
+import json
+import sys
+import unittest
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT))
+from scripts import closure_matrix as cm  # noqa: E402
+
+DATA = json.loads(cm.DATA.read_text())
+
+
+class ClosureMatrixTest(unittest.TestCase):
+    """The closure data is complete, the md is fresh, and mutated data is rejected."""
+
+    def test_data_is_complete(self) -> None:
+        """The checked-in data has no validation problems."""
+        self.assertEqual(cm.validate(DATA), [])
+
+    def test_exactly_the_24_inventory_rows(self) -> None:
+        """Ids are exactly 1-23 plus 5a."""
+        self.assertEqual(sorted(r["id"] for r in DATA["rows"]), sorted(cm.ROW_IDS))
+
+    def test_gap1_is_the_opt_in_exception(self) -> None:
+        """Gap1 is mapped only as the opt-in integrity-gate exception."""
+        gap1 = next(g for g in DATA["gaps"] if g["id"] == "gap1")
+        self.assertIn("opt-in", gap1["exception"])
+        self.assertIn("INTEGRITY-GATE", gap1["exception"])
+
+    def test_generated_md_is_fresh(self) -> None:
+        """The md equals what the generator renders from the data."""
+        self.assertEqual(cm.MD.read_text(), cm.render(DATA), "run scripts/closure_matrix.py")
+
+    def test_stale_md_is_detected(self) -> None:
+        """Changing the data changes the render, so a stale md would differ."""
+        mutated = copy.deepcopy(DATA)
+        mutated["rows"][0]["acceptance_test"] += " changed"
+        self.assertNotEqual(cm.MD.read_text(), cm.render(mutated))
+
+    # Negative controls: a mutated copy of the data must be rejected.
+    def test_rejects_dropped_row(self) -> None:
+        """Dropping a row is rejected."""
+        m = copy.deepcopy(DATA)
+        m["rows"] = [r for r in m["rows"] if r["id"] != "5a"]
+        self.assertIn("row 5a missing", cm.validate(m))
+
+    def test_rejects_blank_acceptance_test(self) -> None:
+        """A blank acceptance_test is rejected."""
+        m = copy.deepcopy(DATA)
+        m["rows"][3]["acceptance_test"] = "  "
+        self.assertTrue(any("empty acceptance_test" in e for e in cm.validate(m)))
+
+    def test_rejects_missing_phase(self) -> None:
+        """A row without a phase is rejected."""
+        m = copy.deepcopy(DATA)
+        del m["rows"][0]["phase"]
+        self.assertTrue(any("no phase" in e for e in cm.validate(m)))
+
+    def test_rejects_deleted_gap(self) -> None:
+        """A deleted gap is rejected."""
+        m = copy.deepcopy(DATA)
+        m["gaps"] = [g for g in m["gaps"] if g["id"] != "gap4"]
+        self.assertIn("gap4 missing", cm.validate(m))
+
+    def test_rejects_unmapped_gap(self) -> None:
+        """A gap without a phase is rejected."""
+        m = copy.deepcopy(DATA)
+        next(g for g in m["gaps"] if g["id"] == "gap2").pop("phase")
+        self.assertIn("gap2 is unmapped (no phase)", cm.validate(m))
+
+    def test_rejects_gap1_without_exception(self) -> None:
+        """Gap1 without its exception is rejected."""
+        m = copy.deepcopy(DATA)
+        next(g for g in m["gaps"] if g["id"] == "gap1").pop("exception")
+        self.assertTrue(any("gap1" in e for e in cm.validate(m)))
+
+
+if __name__ == "__main__":
+    unittest.main()
