@@ -179,6 +179,31 @@ class MuninnSync(Base):
         again = dr.flush_pending(self.path, SESSION, transition=claude_transition)
         self.assertEqual(again["synced"], [])  # written rows are not retried
 
+    def test_flush_refuses_a_foreign_session(self) -> None:
+        """A session that does not own the state cannot sync or mark its rows; nothing is written."""
+        with mock.patch.object(ma, "backend", return_value="off"):
+            self.rec()
+        self.put({**self.state(), "decisions_absorbed": [{**self.decisions()[0], "muninn": {"state": "pending"}}]})
+        before = self.state()
+        out = dr.flush_pending(self.path, "other", transition=claude_transition)
+        self.assertEqual((out["exit_code"], out["reason_code"], out["synced"]), (2, "decision_wrong_session", []))
+        self.assertEqual(self.state()["decisions_absorbed"], before["decisions_absorbed"])
+        self.assertEqual(self.listed(), [])
+
+    def test_flush_skips_legacy_rows_and_still_syncs_hashed_ones(self) -> None:
+        """A hand-written string or seq-less dict in decisions_absorbed does not crash the teardown flush."""
+        with mock.patch.object(ma, "backend", return_value="off"):
+            self.rec()
+        rows = [
+            "legacy string",
+            {"phase": "-1", "decision": "legacy dict"},
+            {**self.decisions()[0], "seq": 3, "muninn": {"state": "pending"}},
+        ]
+        self.put({**self.state(), "decisions_absorbed": rows})
+        out = dr.flush_pending(self.path, SESSION, transition=claude_transition)
+        self.assertEqual([x["seq"] for x in out["synced"]], [3])
+        self.assertEqual(self.decisions()[:2], rows[:2])
+
     def test_quote_must_come_from_a_user_prompt(self) -> None:
         """(6) an authorising prompt that is not in the session transcript cannot be cited: refused, row kept."""
         self.put({**self.state(), "authorising_prompt_raw": "Words the owner never typed anywhere in this session."})
@@ -249,6 +274,22 @@ class ChainTamper(Base):
         hand = [*rows, {"phase": "6", "decision": "by hand"}]
         self.assertEqual([o["reason"] for o in dr.verify_chain(hand)], ["unhashed_row"])
         self.assertEqual(dr.verify_chain([{"phase": "-1", "decision": "legacy"}]), [])
+
+    def test_stripping_every_hash_is_caught_with_the_state_marker(self) -> None:
+        """Unhashed rows at or after chain_started_seq are offenders; control: without the marker the list passes."""
+        rows = self.chain()
+        marker = self.state()["chain_started_seq"]
+        stripped = [{k: v for k, v in r.items() if k != "row_sha256"} | {"decision": "forged"} for r in rows]
+        self.assertEqual(marker, 1)
+        self.assertEqual(dr.verify_chain(stripped), [])  # the hole the marker closes
+        self.assertEqual([o["seq"] for o in dr.verify_chain(stripped, marker)], [1, 2, 3])
+        self.assertEqual(dr.verify_chain(rows, marker), [])
+
+    def test_muninn_field_is_outside_the_hash(self) -> None:
+        """Documented boundary: forging muninn.state leaves the chain clean (and flush will not retry it)."""
+        rows = self.chain()
+        rows[0]["muninn"] = {"state": "written", "id": "K-fake"}
+        self.assertEqual(dr.verify_chain(rows), [])
 
     def test_recomputed_hash_of_an_edited_row_breaks_the_next_link(self) -> None:
         """An editor who recomputes row 2's hash still breaks row 3's prev link (the chain's point)."""

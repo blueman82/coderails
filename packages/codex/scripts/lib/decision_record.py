@@ -6,6 +6,8 @@ dashboard's `{phase, decision}` keys are unchanged. `row_sha256` covers every fi
 `prev_sha256` names the previous row's hash (64 zeros for the first hashed row), so an edited, dropped, swapped or
 unhashed row is named by `verify_chain`. Cooperating-agent safeguard: a same-user agent can rewrite the file and
 recompute the whole chain; this is tamper-evidence, not a security boundary, and dropping the LAST row is undetectable.
+The `muninn` field is OUTSIDE the hash: a same-user agent can set `{state: written}` by hand and `flush_pending`
+will not retry it, so "synced to Muninn" is unauthenticated here; check the id against Muninn `list_records`.
 
 Entry point for lane A (`graph.py record-decision`), `transition(path, fn)` being the provider's lock wrapper
 (Claude `hooks.scripts.lib.graph_executor.transition`; Codex `graph_io.locked/load/write` wrapped to the same shape):
@@ -100,18 +102,24 @@ def add_decision(
     row["muninn"] = {"state": "pending"}
     new = copy.deepcopy(state)
     new["decisions_absorbed"] = [*rows, row]
+    new.setdefault("chain_started_seq", row["seq"])  # first hashed row of this loop; see verify_chain
     return {"state": new, "decision": row}
 
 
-def verify_chain(rows: list[Any]) -> list[dict[str, Any]]:
-    """Return offenders `{seq, reason}`; empty means clean. Rows before the first hashed row are legacy and ignored."""
+def verify_chain(rows: list[Any], chain_start: int | None = None) -> list[dict[str, Any]]:
+    """Return offenders `{seq, reason}`; empty means clean. Rows before the first hashed row are legacy and ignored.
+
+    Pass the state's `chain_started_seq` as `chain_start` so unhashed rows at or after it are offenders even when every
+    hash was stripped; without it an all-unhashed list verifies clean (the marker lives in the same file, so a
+    same-user agent that also deletes it is the documented boundary).
+    """
     bad: list[dict[str, Any]] = []
     hashed = False
     prev = GENESIS
     for index, item in enumerate(rows, start=1):
         row = _as_row(item)
         if not row.get("row_sha256"):
-            if hashed:
+            if hashed or (chain_start is not None and index >= chain_start):
                 bad.append({"seq": index, "reason": "unhashed_row"})
             prev = GENESIS
             continue
@@ -236,8 +244,13 @@ def flush_pending(
 ) -> dict[str, Any]:
     """Retry every row still pending or degraded (teardown). Returns {synced: [{seq, muninn}], exit_code}."""
     state = transition(path, lambda s: s)  # identity transition: a read under the provider's lock
+    if state.get("session_id") != session:
+        _trace("decision.flush", "refused", "decision_wrong_session", session, None)
+        return {"synced": [], "reason_code": "decision_wrong_session", "exit_code": 2}
     synced: list[dict[str, Any]] = []
     for row in map(_as_row, _rows(state)):
+        if not row.get("row_sha256") or not isinstance(row.get("seq"), int):
+            continue  # legacy or hand-written row: not ours to sync
         if _as_row(row.get("muninn")).get("state", "pending") not in ("pending", "degraded"):
             continue
         field = _sync_safely(row, state, session, prompt_raw, cite_quote)
