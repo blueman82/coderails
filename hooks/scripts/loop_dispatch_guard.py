@@ -53,7 +53,8 @@ def check(payload: dict[str, Any]) -> None:
     if state.get("session_id") != session:
         raise ValueError("progress.json belongs to another session")
     if agent and ("graph" in state or marked):
-        authorize_dispatch(path, session, prompt, role)
+        use = payload.get("tool_use_id")  # unverified: a PreToolUse payload may omit it, then single use is by flag
+        authorize_dispatch(path, session, prompt, role, use if isinstance(use, str) and use else None)
     elif worker:
         if state.get("schema_version") != 3 or not state.get("loop_id"):
             raise ValueError("implementation workers require current loop identity")

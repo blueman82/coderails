@@ -3,15 +3,14 @@
 from __future__ import annotations
 
 import copy
-import json
 import sys
 from pathlib import Path
 from typing import Any
 
-from .graph_evidence import ENVELOPE_KEY, cursor, envelope, object_value, transcript
+from .graph_evidence import cursor, object_value, transcript
 from .graph_evidence_bind import bind_wave
 from .graph_evidence_revalidate import revalidate_all
-from .graph_executor import ROOT, graph_semantics, graph_spec, load, transition, validate_state
+from .graph_executor import ROOT, graph_contract, graph_semantics, graph_spec, load, transition, validate_state
 from .graph_recovery import recover_wave as recover_wave
 from .graph_recovery import trace
 from .loop_completion import validate_completion
@@ -40,16 +39,32 @@ def validate_dispatch_evals(path: Path, state: dict[str, Any], node_id: str, wor
         raise ValueError(f"dispatch requires frozen loop evals before build; current verdict: {verdict.label}")
 
 
-def ownership(state: dict[str, Any], node_id: str) -> dict[str, Any]:
-    """Describe the exact native wave and node a worker is authorized to execute."""
-    active = object_value(state["graph"]["active_wave"], "active wave")
-    return {
-        "session_id": state["session_id"],
-        "loop_id": state["loop_id"],
-        "revision": state["revision"],
-        "wave_id": active["wave_id"],
-        "node_id": node_id,
-    }
+def wave_record(state: dict[str, Any], node_id: str) -> tuple[str, dict[str, Any]] | None:
+    """The begin-wave dispatch record (id, record) for a node of the active wave, or None."""
+    active = state["graph"]["active_wave"]
+    records = state["graph"].get("dispatches", {})
+    return next(
+        (
+            (identifier, record)
+            for identifier, record in records.items()
+            if active and record["node_id"] == node_id and record["wave_id"] == active["wave_id"]
+        ),
+        None,
+    )
+
+
+def add_records(proposed: dict[str, Any], base: str, mode: str) -> None:
+    """Store one dispatch record (contract, sections digest, single-use slot) per node of the just-opened wave."""
+    graph = proposed["graph"]
+    wave = graph["active_wave"]
+    for node_id in wave["nodes"]:
+        node = graph["nodes"][node_id]
+        attempt = node["retry"]["attempts"] + node["respawn"]["generation"] + 1
+        contract = graph_contract.build_contract(proposed, node_id, base)
+        identifier, record = graph_contract.make_record(
+            proposed, node_id, wave["wave_id"], attempt, contract, mode if contract["role"] == "loop-worker" else None
+        )
+        graph.setdefault("dispatches", {})[identifier] = record
 
 
 def plan(path: Path) -> list[dict[str, Any]]:
@@ -76,8 +91,11 @@ def plan(path: Path) -> list[dict[str, Any]]:
         spec_node = graph_spec.node_for(spec, node_id)
         if spec_node and spec_node["skip_when"]:
             item["skip_when_met"] = graph_spec.skip_when_met(state, spec, policy, node_id)
-        if state["graph"]["active_wave"]:
-            item["prompt_prefix"] = ENVELOPE_KEY + "=" + json.dumps(ownership(state, node_id), sort_keys=True)
+        found = wave_record(state, node_id)
+        if found:
+            item["dispatch_id"] = found[0]
+            item["prompt_prefix"] = graph_contract.prompt_prefix(state, *found)
+            item["prompt_sections"] = graph_contract.render_sections(found[1]["contract"])
         result.append(item)
     met = [(item["node_id"], None, None) for item in result if item.get("skip_when_met")]
     if met:  # counted by scripts/lib/spec_counters.py: one row per node whose skip predicate held at plan time
@@ -87,8 +105,10 @@ def plan(path: Path) -> list[dict[str, Any]]:
 
 def begin_wave(path: Path) -> dict[str, Any]:
     """Open exactly the core-ready wave and capture its native transcript boundary."""
+    base, mode = graph_contract.base_ref(), sandbox_mode(load_config(config_path())[0])
 
     def update(state: dict[str, Any]) -> dict[str, Any]:
+        graph_contract.require_converted(state)
         for node in graph_semantics.ready(state):
             validate_dispatch_evals(path, state, node)
         proposed = object_value(graph_semantics.begin_wave(state)["state"], "proposed graph")
@@ -101,6 +121,7 @@ def begin_wave(path: Path) -> dict[str, Any]:
             "nodes": list(active["nodes"]),
             "revision": active["revision"],
         }
+        add_records(proposed, base, mode)
         return proposed
 
     state = transition(path, update)
@@ -129,20 +150,51 @@ def record_wave(path: Path, report: dict[str, Any]) -> dict[str, Any]:
     return response
 
 
-def authorize_dispatch(path: Path, session: str, prompt: str, role: str) -> dict[str, Any]:
-    """Validate the actual native Agent request against the active graph owner."""
+def authorize_dispatch(
+    path: Path, session: str, prompt: str, role: str, tool_use_id: str | None = None
+) -> dict[str, Any]:
+    """Validate the actual native Agent request against its begin-wave record, assert the role, consume the id.
+
+    Every check runs under the state lock before anything is written; a refusal leaves progress.json untouched and
+    leaves one coded trace row. `tool_use_id` (from the PreToolUse payload, unverified) makes a hook retry idempotent.
+    """
     state = load(path)
     if state["session_id"] != session or state["status"] == "complete":
         raise ValueError("this session does not own an active loop")
     if not role.strip():
         raise ValueError("native Agent requires its provider subagent_type")
-    request = envelope(prompt)
-    active = object_value(state["graph"]["active_wave"], "active wave")
-    node_id = request["node_id"]
-    if node_id not in active["nodes"] or request != ownership(state, node_id):
-        raise ValueError("dispatch envelope does not own an exact node in the active wave")
-    validate_dispatch_evals(path, state, node_id, role == "coderails:loop-worker")
-    return request
+    denied: list[graph_contract.DispatchDeniedError] = []
+    granted: list[dict[str, Any]] = []
+    named: list[str | None] = [None]  # the envelope's node, once it parses, for the trace row
+    inputs = {"session": session, "role": role}
+
+    def update(current: dict[str, Any]) -> dict[str, Any]:
+        try:
+            graph_contract.require_converted(current)
+            request = graph_contract.parse_envelope(prompt)
+            named[0] = request["node_id"]
+            record = graph_contract.check_dispatch(current, request, prompt, live=True)
+            graph_contract.assert_role(record["contract"], role, "coderails:", graph_contract.CLAUDE_TYPES)
+            validate_dispatch_evals(path, current, request["node_id"], role == "coderails:loop-worker")
+            used = record["authorized"]
+            if used is not None and not (tool_use_id and used.get("tool_use_id") == tool_use_id):
+                raise graph_contract.DispatchDeniedError("dispatch_replayed", "dispatch envelope was already used")
+            record["authorized"] = {"tool_use_id": tool_use_id}
+            granted.append(request)
+        except graph_contract.DispatchDeniedError as error:
+            denied.append(error)
+            raise
+        return current
+
+    try:
+        transition(path, update)
+    except ValueError:
+        if not denied:
+            raise
+        trace(path, state, "refused", denied[0].code, inputs, [(named[0], None, None)], "authorize-dispatch")
+        raise denied[0] from None
+    trace(path, state, "authorized", "dispatch_authorized", inputs, [(named[0], None, None)], "authorize-dispatch")
+    return granted[0]
 
 
 def validate_graph_shape(path: Path) -> None:

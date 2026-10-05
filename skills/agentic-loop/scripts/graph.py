@@ -68,6 +68,10 @@ def parser() -> argparse.ArgumentParser:
             command.add_argument("--depends-on", action="append", default=[])
             command.add_argument("--join", action="store_true")
             command.add_argument("--manifest", action="append", default=[])
+            command.add_argument("--model-role", help="dispatch model class: fast-mechanical | default | frontier")
+            command.add_argument("--write-scope", action="append", default=[], help="path the worker may write")
+            command.add_argument("--lesson", action="append", default=[], help="lesson the worker prompt must carry")
+            command.add_argument("--scope", help="one-line scope statement for the worker")
         if name == "convert":
             mode = command.add_mutually_exclusive_group()
             mode.add_argument("--check", action="store_true", help="report the conversion without writing")
@@ -97,6 +101,7 @@ def parser() -> argparse.ArgumentParser:
         if name == "authorize-dispatch":
             command.add_argument("--prompt", required=True)
             command.add_argument("--subagent-type", required=True)
+            command.add_argument("--tool-use-id", help="PreToolUse tool_use_id; makes a retried hook idempotent")
     return result
 
 
@@ -204,8 +209,16 @@ def main() -> int:
         if args.command == "start":
             output: object = graph_controller.start(args.state, args.session, args.loop_id, args.prompt_file)
         elif args.command == "add-unit":
+            fields = {"model_role": args.model_role, "write_scope": args.write_scope, "lessons": args.lesson}
             output = graph_controller.add_unit(
-                args.state, args.session, args.loop_id, args.unit, args.depends_on, args.join, args.manifest
+                args.state,
+                args.session,
+                args.loop_id,
+                args.unit,
+                args.depends_on,
+                args.join,
+                args.manifest,
+                {**fields, "scope": args.scope},
             )
         elif args.command == "instantiate":
             output = graph_controller.instantiate(args.state, args.session, args.loop_id, args.profile, args.unit)
@@ -237,7 +250,9 @@ def main() -> int:
         elif args.command == "convert":
             output = convert_state(args.state, args.session, args.check)
         elif args.command == "authorize-dispatch":
-            output = dispatch.authorize_dispatch(args.state, args.session, args.prompt, args.subagent_type)
+            output = dispatch.authorize_dispatch(
+                args.state, args.session, args.prompt, args.subagent_type, args.tool_use_id
+            )
         else:
             output = dispatch.complete(args.state, args.session, args.command == "complete")
     except (ValueError, OSError, TypeError, KeyError) as error:

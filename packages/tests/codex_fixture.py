@@ -29,7 +29,16 @@ def state() -> dict[str, Any]:
         "loop_id": "loop",
         "revision": 1,
         "status": "in-progress",
-        "graph": {"nodes": {"U3[1]": node()}, "edges": [], "joins": {}, "active_wave": None, "hard_stop": None},
+        "state_minor": 2,
+        "graph": {
+            "nodes": {"U3[1]": node()},
+            "edges": [],
+            "joins": {},
+            "active_wave": None,
+            "hard_stop": None,
+            "dispatches": {},
+            "contract_from_revision": 1,
+        },
     }
 
 

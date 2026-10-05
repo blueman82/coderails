@@ -53,12 +53,18 @@ def run_semantic(module: ModuleType, fixture: dict[str, Any]) -> tuple[object, d
 
 def native_state(provider: Provider, fixture: dict[str, Any]) -> dict[str, Any]:
     """Add only the provider owner fields absent from pure semantic fixtures."""
-    return {
+    state: dict[str, Any] = {
         **copy.deepcopy(fixture["state"]),
         "session_id": provider.session,
         "loop_id": "fixture-loop",
         "status": "in-progress",
+        "state_minor": 2,
     }
+    if isinstance(state.get("graph"), dict):
+        # a hand-built state with a wave already open has no begin-wave record: that wave predates the contract
+        opened = state["graph"].get("active_wave") is not None
+        state["graph"].update(dispatches={}, contract_from_revision=state["revision"] + 1 if opened else 1)
+    return state
 
 
 def semantic_graph(state: dict[str, Any]) -> dict[str, Any]:
@@ -66,6 +72,8 @@ def semantic_graph(state: dict[str, Any]) -> dict[str, Any]:
     result = copy.deepcopy(state)
     graph = result["graph"]
     graph.pop("wave_history", None)
+    graph.pop("dispatches", None)
+    graph.pop("contract_from_revision", None)
     wave = graph["active_wave"]
     if wave is not None:
         wave.pop("transcript_cursor", None)

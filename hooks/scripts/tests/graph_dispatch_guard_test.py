@@ -15,9 +15,22 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from hooks.scripts.lib.agentic_loop_path import resolve_path
 from hooks.scripts.lib.loop_evals import EvalStatus, EvalVerdict
-from hooks.scripts.loop_dispatch_guard import check
+from hooks.scripts.loop_dispatch_guard import check as guard_check
 from hooks.scripts.tests.claude_graph_test_support import ROOT, GraphCase, dispatch, fixture, load, node
 from scripts.post_evals import grade_loop
+
+
+def check(request: dict[str, Any]) -> None:
+    """Run the guard; on success release the consumed dispatch id so a case may dispatch the same prompt again."""
+    guard_check(request)
+    path = resolve_path(request["cwd"], request["session_id"])
+    if not path.is_file():
+        return
+    state: dict[str, Any] = json.loads(path.read_text())
+    records: dict[str, dict[str, Any]] = state["graph"].get("dispatches", {})
+    for record in records.values():
+        record["authorized"] = None
+    path.write_text(json.dumps(state))
 
 
 class DispatchGuardTests(GraphCase):
@@ -32,16 +45,22 @@ class DispatchGuardTests(GraphCase):
         state = self.opened()
         state["work_units"] = {f"unit-{number}": {"status": "pending"} for number in range(units)}
         self.save(state)
-        owner = dispatch.ownership(state, identifier)
         return {
             "tool_name": "Agent",
             "session_id": "fixture-session",
             "cwd": str(self.home),
             "tool_input": {
                 "subagent_type": "general-purpose",
-                "prompt": "CODERAILS_GRAPH_DISPATCH=" + json.dumps(owner) + "\nWorker instructions.",
+                "prompt": fixture.dispatch_prompt(state, identifier, "Worker instructions."),
             },
         }
+
+    def reseal(self, request: dict[str, Any], **changes: object) -> None:
+        """Rewrite fields of the request's first-line envelope in place."""
+        first, rest = request["tool_input"]["prompt"].split("\n", 1)
+        parsed = json.loads(first.split("=", 1)[1])
+        parsed.update(changes)
+        request["tool_input"]["prompt"] = "CODERAILS_GRAPH_DISPATCH=" + json.dumps(parsed) + "\n" + rest
 
     def frozen(self) -> dict[str, Any]:
         """Write a true ungraded scripted suite with all freeze-time fields."""
@@ -96,10 +115,13 @@ class DispatchGuardTests(GraphCase):
         """Native roles are allowed while wrong session/loop/node/wave/revision deny."""
         request = self.setup_request()
         self.frozen()
-        for role in ("general-purpose", "Plan", "coderails:loop-worker"):
+        for role in ("general-purpose", "coderails:loop-worker"):
             request["tool_input"]["subagent_type"] = role
             check(request)
         original = copy.deepcopy(request)
+        for role in ("Plan", "coderails:preflight-scout", "coderails:source-auditor"):
+            request["tool_input"]["subagent_type"] = role
+            self.denied(request, "role_mismatch")
         for key, value in (
             ("session_id", "foreign"),
             ("loop_id", "foreign"),
@@ -108,9 +130,7 @@ class DispatchGuardTests(GraphCase):
             ("revision", 99),
         ):
             request = copy.deepcopy(original)
-            owner = dispatch.ownership(load(self.path), "U3[1]")
-            owner[key] = value
-            request["tool_input"]["prompt"] = "CODERAILS_GRAPH_DISPATCH=" + json.dumps(owner)
+            self.reseal(request, **{key: value})
             self.denied(request, "envelope")
         for prompt in ("", "CODERAILS_GRAPH_DISPATCH={}", "prefix CODERAILS_GRAPH_DISPATCH={}"):
             request = copy.deepcopy(original)
@@ -200,6 +220,9 @@ class DispatchGuardTests(GraphCase):
         """Eval authors can run before freeze; every downstream native role remains gated."""
         for identifier in ("S2", "S2.7c", "S2.7e"):
             request = self.setup_request(identifier)
+            request["tool_input"]["subagent_type"] = (
+                "coderails:preflight-scout" if identifier == "S2" else "general-purpose"
+            )
             self.path.with_name("evals.json").unlink(missing_ok=True)
             check(request)
             request["tool_input"]["subagent_type"] = "coderails:loop-worker"
@@ -231,6 +254,54 @@ class DispatchGuardTests(GraphCase):
         self.assertEqual(json.loads(result.stdout)["hookSpecificOutput"]["permissionDecision"], "deny")
         self.assertEqual(before, self.path.read_bytes())
         self.assertIn("hook=loop_dispatch_guard blocked=1", (self.home / "discipline.log").read_text())
+
+    def test_guarded_scout_node_needs_its_typed_agent_and_a_read_only_shell(self) -> None:
+        """Row 5a: a preflight-scout (S2) node cannot run as general-purpose; the typed scout stays read-only."""
+        request = self.setup_request("S2")
+        for role in ("general-purpose", "coderails:loop-worker", "coderails:source-auditor"):
+            request["tool_input"]["subagent_type"] = role
+            self.denied(request, "role_mismatch")
+        request["tool_input"]["subagent_type"] = "coderails:preflight-scout"
+        check(request)
+        edit = {
+            "hook_event_name": "PreToolUse",
+            "session_id": "s_al",
+            "cwd": str(self.home),
+            "tool_name": "Bash",
+            "tool_input": {"command": "sed -i s/a/b/ f"},
+            "agent_id": "a1",
+            "agent_type": "coderails:source-auditor",
+        }
+        result = subprocess.run(
+            [sys.executable, str(ROOT / "hooks/scripts/reviewer_bash_allowlist.py")],
+            input=json.dumps(edit),
+            capture_output=True,
+            text=True,
+            check=False,
+            env=os.environ,
+        )
+        self.assertEqual(json.loads(result.stdout)["hookSpecificOutput"]["permissionDecision"], "deny")
+
+    def test_single_use_by_tool_use_id_then_consumed_flag(self) -> None:
+        """A retried hook with the same tool_use_id is idempotent; a distinct one, or none, is a replay."""
+        request = self.setup_request()
+        self.frozen()
+        prompt, role = request["tool_input"]["prompt"], "general-purpose"
+        path = self.path
+        dispatch.authorize_dispatch(path, "fixture-session", prompt, role, "toolu_a")
+        dispatch.authorize_dispatch(path, "fixture-session", prompt, role, "toolu_a")
+        for other in ("toolu_b", None):
+            self.denied_call(path, prompt, role, other)
+        self.assertEqual(
+            next(iter(load(path)["graph"]["dispatches"].values()))["authorized"], {"tool_use_id": "toolu_a"}
+        )
+
+    def denied_call(self, path: Path, prompt: str, role: str, tool_use_id: str | None) -> None:
+        """authorize_dispatch raises dispatch_replayed and leaves the bytes alone."""
+        before = path.read_bytes()
+        with self.assertRaisesRegex(ValueError, "dispatch_replayed"):
+            dispatch.authorize_dispatch(path, "fixture-session", prompt, role, tool_use_id)
+        self.assertEqual(before, path.read_bytes())
 
     def test_dispatch_eval_gate_reads_verdict_fields(self) -> None:
         """validate_dispatch_evals matches on EvalVerdict.status and names tamper_code from its field."""

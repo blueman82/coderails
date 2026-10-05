@@ -5,10 +5,14 @@ from __future__ import annotations
 import json
 import os
 import re
+import sys
 from pathlib import Path
 from typing import Any, cast
 
-ENVELOPE_KEY = "CODERAILS_GRAPH_DISPATCH"
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "skills/agentic-loop/scripts"))
+import graph_contract
+
+ENVELOPE_KEY = graph_contract.ENVELOPE_KEY
 
 
 def object_value(value: object, label: str) -> dict[str, Any]:
@@ -51,23 +55,9 @@ def cursor(session: str) -> int:
     return len(records(transcript(session)))
 
 
-def envelope(prompt: object) -> dict[str, Any]:
-    """Read a complete graph ownership envelope from the first prompt line."""
-    if not isinstance(prompt, str) or not prompt.startswith(ENVELOPE_KEY + "="):
-        raise ValueError("missing graph dispatch envelope")
-    raw = prompt.split("\n", 1)[0].split("=", 1)[1]
-    try:
-        result = object_value(json.loads(raw), "dispatch envelope")
-    except ValueError as error:
-        raise ValueError("malformed graph dispatch envelope") from error
-    if set(result) != {"session_id", "loop_id", "revision", "wave_id", "node_id"}:
-        raise ValueError("invalid dispatch envelope fields")
-    for key in ("session_id", "loop_id", "wave_id", "node_id"):
-        if not isinstance(result[key], str) or not result[key].strip():
-            raise ValueError(f"invalid dispatch envelope {key}")
-    if type(result["revision"]) is not int or result["revision"] < 1:
-        raise ValueError("invalid dispatch envelope revision")
-    return result
+def envelope(prompt: object, allow_legacy: bool = True) -> dict[str, Any]:
+    """Read a graph ownership envelope from the first prompt line: v2, or (history only) the five-field v1."""
+    return graph_contract.parse_envelope(prompt, allow_legacy)
 
 
 def content(record: dict[str, Any]) -> list[dict[str, Any]]:

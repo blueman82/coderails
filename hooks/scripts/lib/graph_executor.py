@@ -11,6 +11,7 @@ from typing import Any
 from .loop_state_common import atomic_progress_update
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "skills/agentic-loop/scripts"))
+import graph_contract as graph_contract
 import graph_semantics as graph_semantics
 import graph_spec as graph_spec
 

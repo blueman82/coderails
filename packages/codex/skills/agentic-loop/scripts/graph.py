@@ -16,7 +16,10 @@ import graph_spec
 import graph_stops
 from graph_completion import complete, verify_completion
 from graph_controller import add_unit, instantiate, start
-from graph_dispatch import apply_record, authorize_dispatch, begin_wave, record_wave
+from graph_dispatch import apply_record
+from graph_dispatch import authorize_dispatch as authorize_dispatch
+from graph_dispatch import begin_wave as begin_wave
+from graph_dispatch import record_wave as record_wave
 from graph_identity import GraphError, next_attempt, task_name
 from graph_io import load as _load
 from graph_io import locked as _locked
@@ -250,6 +253,10 @@ def _parser() -> argparse.ArgumentParser:
             controller.add_argument("--depends-on", action="append", default=[])
             controller.add_argument("--join", action="store_true")
             controller.add_argument("--manifest", action="append", default=[])
+            controller.add_argument("--model-role", help="dispatch model class: fast-mechanical | default | frontier")
+            controller.add_argument("--write-scope", action="append", default=[], help="path the worker may write")
+            controller.add_argument("--lesson", action="append", default=[], help="lesson the worker prompt must carry")
+            controller.add_argument("--scope", help="one-line scope statement for the worker")
     spec = commands.add_parser("instantiate")
     spec.add_argument("state", type=Path)
     spec.add_argument("--session", required=True)
@@ -287,9 +294,11 @@ def _parser() -> argparse.ArgumentParser:
     graph_stops.add_parsers(commands.add_parser)
     dispatch = commands.add_parser("authorize-dispatch")
     dispatch.add_argument("state", type=Path)
-    for option in ("session", "task"):
+    for option in ("session", "dispatch-id", "task-name"):
         dispatch.add_argument(f"--{option}", required=True)
-    dispatch.add_argument("--evals", required=True, type=Path)
+    dispatch.add_argument("--message-file", required=True, type=Path)
+    dispatch.add_argument("--agent-type", default="", help="the spawn_agent agent_type; empty when none was given")
+    dispatch.add_argument("--evals", type=Path, help="default: evals.json beside the state")
     for name in ("complete", "verify-completion"):
         complete = commands.add_parser(name)
         complete.add_argument("state", type=Path)
@@ -307,8 +316,16 @@ def main() -> int:
         if args.command == "start":
             output = start(args.state, args.session, args.loop_id, args.prompt_file)
         elif args.command == "add-unit":
+            fields = {"model_role": args.model_role, "write_scope": args.write_scope, "lessons": args.lesson}
             output = add_unit(
-                args.state, args.session, args.loop_id, args.unit, args.depends_on, args.join, args.manifest
+                args.state,
+                args.session,
+                args.loop_id,
+                args.unit,
+                args.depends_on,
+                args.join,
+                args.manifest,
+                {**fields, "scope": args.scope},
             )
         elif args.command == "instantiate":
             output = instantiate(args.state, args.session, args.loop_id, args.profile, args.unit)
@@ -333,7 +350,15 @@ def main() -> int:
         elif args.command == "inspect":
             output = inspect(args.state)
         elif args.command == "authorize-dispatch":
-            output = authorize_dispatch(args.state, args.session, args.task, args.evals)
+            output = authorize_dispatch(
+                args.state,
+                args.session,
+                args.dispatch_id,
+                args.message_file,
+                args.agent_type,
+                args.task_name,
+                args.evals or args.state.with_name("evals.json"),
+            )
         elif args.command == "complete":
             output = complete(args.state, args.session, args.evals, args.proof, args.retro, args.transcript)
         else:

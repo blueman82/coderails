@@ -7,6 +7,19 @@ import re
 from typing import Any, cast
 
 from .graph_evidence import child_identity, notifications, object_value, spawns, transcript
+from .graph_executor import graph_contract
+
+
+def check_record(state: dict[str, Any], row: dict[str, Any]) -> None:
+    """A spawn in a wave at or after contract_from_revision must match its begin-wave record and sections digest."""
+    start = state["graph"].get("contract_from_revision")
+    if type(start) is not int or row["revision"] < start:
+        return  # history from before the dispatch contract (the converter stamps the first contract revision)
+    if "dispatch_id" not in row:
+        raise graph_contract.DispatchDeniedError(
+            "dispatch_missing_envelope", "native spawn lacks a v2 dispatch envelope"
+        )
+    graph_contract.check_dispatch(state, row, row["prompt"], live=False)
 
 
 def provenance(value: object, depth: int = 0) -> bool:
@@ -93,6 +106,7 @@ def bind_wave(state: dict[str, Any], results: dict[str, Any]) -> dict[str, list[
         for row in candidates:
             if any(row[key] != state[key] for key in ("session_id", "loop_id", "revision")):
                 raise ValueError("native spawn envelope does not own this session/loop/revision")
+            check_record(state, row)
             tool = row["tool_use_id"]
             if tool in tools:
                 raise ValueError("native tool identity has already been bound")

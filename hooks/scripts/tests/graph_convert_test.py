@@ -30,6 +30,21 @@ def v0_state() -> dict[str, Any]:
     """A schema-3 state exactly as the old `start` plus one unit wrote it: no state_minor, stops or wave_history."""
     state = claude.state(1)
     state.update(session_id=SESSION, loop_id="L")
+    state.pop("state_minor")
+    for key in ("dispatches", "contract_from_revision"):
+        state["graph"].pop(key)
+    return state
+
+
+def v1_state(revision: int = 3, active: bool = False) -> dict[str, Any]:
+    """A state as minor 1 wrote it: history present, no dispatch records yet."""
+    state = v0_state()
+    state.update(state_minor=1, stops=[], revision=revision)
+    state["graph"]["wave_history"] = {}
+    if active:
+        state["graph"]["active_wave"] = {"wave_id": "wave-3", "nodes": ["U3[1]"], "revision": 3}
+        state["graph"]["wave_history"]["wave-3"] = {"cursor": 0, "nodes": ["U3[1]"], "revision": 3}
+        state["graph"]["nodes"]["U3[1]"].update(status="running", outcome="running")
     return state
 
 
@@ -97,9 +112,10 @@ class GraphConvertTests(unittest.TestCase):
             result = case.graph("convert")
             self.assertEqual(result.returncode, 0, (case.name, result.stderr))
             report = json.loads(result.stdout)
-            self.assertEqual((report["changed"], report["from"], report["to"]), (True, 0, 1))
+            self.assertEqual((report["changed"], report["from"], report["to"]), (True, 0, 2))
             state = case.read()
-            self.assertEqual((state["state_minor"], state["stops"], state["graph"]["wave_history"]), (1, [], {}))
+            self.assertEqual((state["state_minor"], state["stops"], state["graph"]["wave_history"]), (2, [], {}))
+            self.assertEqual((state["graph"]["dispatches"], state["graph"]["contract_from_revision"]), ({}, 1))
             self.assertIn("updated_at", state)
             self.assertEqual(case.backup.read_bytes(), original)
             self.assertEqual(case.inspect().returncode, 0, case.name)  # the real reader still accepts it
@@ -110,6 +126,26 @@ class GraphConvertTests(unittest.TestCase):
             self.assertEqual(case.path.read_bytes(), after)
             self.assertEqual(case.backup.read_bytes(), original)
             self.assertEqual(case.reasons(), ["convert_ok", "convert_ok"])
+
+    def test_v1_gains_dispatch_records_from_its_current_revision(self) -> None:
+        """v1 -> v2 adds an empty dispatches object and stamps contract_from_revision; an active wave is refused."""
+        for case in self.cases:
+            case.write(v1_state(revision=3))
+            result = case.graph("convert")
+            self.assertEqual(result.returncode, 0, (case.name, result.stderr))
+            self.assertEqual(json.loads(result.stdout)["steps"], ["v1->v2"])
+            state = case.read()
+            self.assertEqual((state["state_minor"], state["graph"]["dispatches"]), (2, {}))
+            self.assertEqual(state["graph"]["contract_from_revision"], 3)
+            case.backup.unlink()
+            case.write(v1_state(active=True))
+            before = case.path.read_bytes()
+            refused = case.graph("convert")
+            self.assertNotEqual(refused.returncode, 0, case.name)
+            self.assertIn("active_wave_in_flight", refused.stderr)
+            self.assertEqual(case.path.read_bytes(), before)
+            self.assertFalse(case.backup.exists())
+            self.assertEqual(case.reasons()[-1], "convert_refused_active_wave_in_flight")
 
     def test_check_never_writes(self) -> None:
         """--check reports the pending conversion and leaves the file and the backup alone."""

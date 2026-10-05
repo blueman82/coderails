@@ -58,7 +58,7 @@ class ProviderLifecycleTests(unittest.TestCase):
                 "start", "--session", provider.session, "--loop-id", "fixture-loop", "--prompt-file", str(prompt)
             )
             state = provider.read()
-            self.assertEqual((state["stops"], state["state_minor"]), ([], 1))
+            self.assertEqual((state["stops"], state["state_minor"]), ([], 2))
             self.assertEqual(state["graph"]["wave_history"], {})
             state["graph"].pop("wave_history")  # a graph written by the old `start`, before the key existed
             provider.write(state)
@@ -107,7 +107,7 @@ class ProviderLifecycleTests(unittest.TestCase):
         self.denied(provider, {**request, "tool_name": "Agent"})
         altered = copy.deepcopy(request)
         altered["tool_input"].update(task_name="ordinary", message="Read documentation.")
-        self.assertEqual(provider.hook("loop_dispatch_guard", altered).stdout, "")
+        self.denied(provider, altered)  # a graph-bound session binds every spawn: no envelope, no dispatch
         provider.write(baseline)
         self.denied(provider, request)
 

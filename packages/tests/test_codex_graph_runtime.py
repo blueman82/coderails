@@ -159,10 +159,14 @@ class GraphRuntimeTests(unittest.TestCase):
 
     def test_dispatch_rejects_foreign_loop_task_identity(self) -> None:
         """A valid task identity from another loop cannot authorize this graph's dispatch."""
-        graph.begin_wave(self.path)
+        opened = graph.begin_wave(self.path)["dispatches"][0]
+        message = self.path.with_name("message.txt")
+        message.write_text(opened["prompt_prefix"] + "\n" + opened["prompt_sections"] + "\nwork", encoding="utf-8")
+        evals, identifier = self.path.with_name("evals.json"), opened["dispatch_id"]
         foreign_task = task_name("foreign-loop", "U3[1]")
         with self.assertRaises(GraphError):
-            graph.authorize_dispatch(self.path, "parent", foreign_task, self.path.with_name("evals.json"))
+            graph.authorize_dispatch(self.path, "parent", identifier, message, "", foreign_task, evals)
+        graph.authorize_dispatch(self.path, "parent", identifier, message, "", opened["task_name"], evals)
 
     def test_exact_result_envelope(self) -> None:
         """Reject wrong wave, partial results, and malformed stale evidence atomically."""
