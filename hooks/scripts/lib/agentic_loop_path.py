@@ -9,6 +9,8 @@ import sys
 import time
 from pathlib import Path
 
+from hooks.scripts.lib.hook_telemetry import note_child
+
 
 def sanitise_session_id(raw: str) -> str:
     """Keep malformed harness identifiers path-local and missing IDs independent."""
@@ -30,6 +32,7 @@ def resolve_path(cwd: str = "", session_id: str = "") -> Path:
             text=True,
             check=False,
         )
+        note_child("agentic_loop_path", result.returncode)
         if result.returncode == 0 and result.stdout.startswith("/"):
             common = result.stdout.strip()
     except OSError:

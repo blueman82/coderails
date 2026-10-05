@@ -18,15 +18,12 @@ from pathlib import Path
 from typing import Any, cast
 
 from lib.hook_telemetry import RESOURCE_ERRNOS, child_failed
+from lib.hook_telemetry import HostResourceError as HostResourceError
 
 RESOURCE_MESSAGE = (
     "Host resource exhaustion (for example too many open files) prevented reading the graph state. "
     "The state is not known to be invalid: retry, and do not repair progress.json for this."
 )
-
-
-class HostResourceError(OSError):
-    """The host could not start the graph helper; this says nothing about graph validity."""
 
 
 PATCH_PATH = re.compile(r"^\*\*\* (?:Add|Update|Delete) File: (.*)$|^\*\*\* Move to: (.*)$")

@@ -10,6 +10,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from hooks.scripts.hook_common import deny, log, read_payload
+from hooks.scripts.lib.hook_telemetry import note_child
 
 ALLOWED = {".md", ".txt", ".rst", ".yaml", ".yml", ".json", ".toml", ".ini", ".cfg"}
 
@@ -49,6 +50,7 @@ def main() -> int:
     result = subprocess.run(
         ["git", "-C", str(probe), "branch", "--show-current"], capture_output=True, text=True, check=False
     )
+    note_child("no_edit_on_main", result.returncode)
     branch = result.stdout.strip()
     if branch not in {"main", "master"}:
         return 0
@@ -64,4 +66,8 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        from hooks.scripts.lib.hook_telemetry import run
+    except ImportError:  # telemetry must never be able to break the hook
+        raise SystemExit(main()) from None
+    raise SystemExit(run("no_edit_on_main", main))

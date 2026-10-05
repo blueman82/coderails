@@ -19,6 +19,7 @@ from typing import cast
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from hooks.scripts.lib.context_manifest import route_for_payload, trace  # noqa: E402
+from hooks.scripts.lib.hook_telemetry import note_child  # noqa: E402
 
 READ_TIMEOUT_SECONDS = 5.0
 
@@ -52,6 +53,7 @@ def git_branch(cwd: str) -> str:
         )
     except OSError:
         return "none"
+    note_child("inject_context", result.returncode)
     if result.returncode != 0:
         return "none"
     return result.stdout.rstrip("\n")
@@ -107,4 +109,8 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        from hooks.scripts.lib.hook_telemetry import run
+    except ImportError:  # telemetry must never be able to break the hook
+        raise SystemExit(main()) from None
+    raise SystemExit(run("inject_context", main))

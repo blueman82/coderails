@@ -11,7 +11,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -61,14 +61,15 @@ class TelemetryTests(unittest.TestCase):
         self.assertEqual(set(row), {"ts", "hook", "cause", "exit", "duration_ms", "open_fds", "pid"})
 
     def test_resource_exception_is_classified_not_swallowed(self) -> None:
-        """Test resource exception is classified not swallowed."""
+        """Test resource exception is recorded then re-raised, never converted to success."""
 
         def boom() -> int:
             raise OSError(errno.EMFILE, "Too many open files")
 
-        with patch("sys.stderr"):
-            self.assertEqual(tel.run("h", boom), 0)
-        self.assertEqual(rows(self.dir)[0]["cause"], "resource")
+        with patch("sys.stderr"), self.assertRaises(OSError):
+            tel.run("h", boom)
+        row = rows(self.dir)[0]
+        self.assertEqual((row["cause"], row["exit"], row["errno"]), ("resource", 1, "EMFILE"))
 
     def test_other_exception_recorded_and_reraised(self) -> None:
         """Test other exception recorded and reraised."""
@@ -101,25 +102,106 @@ class TelemetryTests(unittest.TestCase):
         tel.note_child("h", 1)
         self.assertEqual(rows(self.dir), [])
 
-    def test_sigterm_records_timeout(self) -> None:
-        """Test sigterm records timeout."""
+    def test_sigterm_records_sigterm_flushes_stdout_and_exits_143(self) -> None:
+        """Test sigterm is named as sigterm, not timeout; buffered decision output survives; exit is 143."""
         code = (
             f"import os,signal,sys;sys.path.insert(0,{str(ROOT)!r});"
             "from hooks.scripts.lib import hook_telemetry as t;"
-            "t.run('slow', lambda: os.kill(os.getpid(), signal.SIGTERM) or 0)"
+            "t.run('slow', lambda: print('DECISION', end='') or os.kill(os.getpid(), signal.SIGTERM) or 0)"
         )
         proc = subprocess.run(
-            [sys.executable, "-c", code], env={**os.environ, "CODERAILS_HOOK_TELEMETRY_DIR": self.dir}
+            [sys.executable, "-c", code],
+            env={**os.environ, "CODERAILS_HOOK_TELEMETRY_DIR": self.dir},
+            capture_output=True,
+            text=True,
         )
-        self.assertNotEqual(proc.returncode, 0)
-        self.assertEqual(rows(self.dir)[0]["cause"], "timeout")
+        self.assertEqual(proc.returncode, 143)
+        self.assertEqual(proc.stdout, "DECISION")
+        self.assertEqual(rows(self.dir)[0]["cause"], "sigterm")
+
+    @staticmethod
+    def exiting(code: int) -> Callable[[], int]:
+        """Build a main() that exits with code."""
+
+        def main() -> int:
+            raise SystemExit(code)
+
+        return main
+
+    def test_gate_block_is_distinguishable_from_failure(self) -> None:
+        """Test exit 2 records block while other non-zero exits record exit."""
+        for code, cause in ((2, "block"), (1, "exit")):
+            with self.assertRaises(SystemExit):
+                tel.run("h", self.exiting(code))
+            self.assertEqual(rows(self.dir)[-1]["cause"], cause)
+
+    def test_extra_fields_are_allow_listed(self) -> None:
+        """Test record drops any extra key that is not on the content-free allow-list."""
+        tel.record("h", "ok", prompt="secret prompt", signal="SIGABRT")
+        row = rows(self.dir)[0]
+        self.assertNotIn("prompt", row)
+        self.assertEqual(row["signal"], "SIGABRT")
+
+    def test_diagnostic_hint_only_on_macos(self) -> None:
+        """Test the macOS crash-report hint is omitted on other platforms."""
+        with patch.object(sys, "platform", "linux"):
+            tel.note_child("h", -6)
+        self.assertNotIn("diagnostic_hint", rows(self.dir)[0])
+
+    def test_log_rotates_past_cap(self) -> None:
+        """Test the telemetry log rotates once instead of growing forever."""
+        path = Path(self.dir) / "hook_telemetry.jsonl"
+        path.write_text("x" * (tel.MAX_BYTES + 1))
+        tel.record("h", "ok")
+        self.assertTrue(path.with_suffix(".jsonl.1").exists())
+        self.assertEqual(len(rows(self.dir)), 1)
+
+    def test_record_is_fd_neutral_in_process(self) -> None:
+        """Test 100 in-process runs do not accumulate descriptors, and a leaky main would be seen."""
+        before = tel.open_fds()
+        for _ in range(100):
+            tel.run("h", lambda: 0)
+        self.assertEqual(tel.open_fds(), before)
+        leaked: list[Any] = []
+
+        def leaky() -> int:
+            leaked.append(open(os.devnull))  # noqa: SIM115
+            return 0
+
+        tel.run("leaky", leaky)
+        self.addCleanup(leaked[0].close)
+        self.assertGreater(tel.open_fds() or 0, before or 0)
+
+    def test_every_entrypoint_is_wrapped_with_a_guarded_import(self) -> None:
+        """Test hook entrypoints run through telemetry and survive a missing telemetry module."""
+        exempt = {"loop_dispatch_guard", "test_output", "voice_announce"}  # lane-A / CLI / detached
+        for base in (ROOT / "hooks/scripts", ROOT / "packages/codex/hooks/scripts"):
+            for path in sorted(base.glob("*.py")):
+                text = path.read_text()
+                codex_wiki = path.name == "wiki_taxonomy_gate.py" and "codex" in str(base)
+                if "__main__" not in text or path.stem in exempt or codex_wiki:
+                    continue
+                with self.subTest(str(path.relative_to(ROOT))):
+                    self.assertIn("except ImportError", text)
+                    self.assertIn(f'run("{path.stem}", main)', text)
+
+    def test_claude_call_sites_record_native_signal_children(self) -> None:
+        """Test a signal-killed git child inside a Claude hook leaves a native_signal row."""
+        inject_context: Any = importlib.import_module("hooks.scripts.inject_context")
+        killed = subprocess.CompletedProcess([], -6, stdout="", stderr="")
+        with patch.object(inject_context.subprocess, "run", return_value=killed):
+            self.assertEqual(inject_context.git_branch("."), "none")
+        row = rows(self.dir)[0]
+        self.assertEqual((row["hook"], row["cause"], row["signal"]), ("inject_context", "native_signal", "SIGABRT"))
 
 
-class StopHookStressTests(unittest.TestCase):
-    """Each Stop hook fired 100x (fresh process each) keeps its recorded fd count bounded."""
+class StopHookSmokeTests(unittest.TestCase):
+    """Each Stop hook, run as a real process, exits cleanly and leaves exactly one ok row per invocation."""
+
+    runs = 3
 
     def check(self, script: Path) -> None:
-        """Fire one hook 100 times and bound its recorded fd count."""
+        """Fire one hook a few times against an empty home; assert exit codes and rows."""
         with tempfile.TemporaryDirectory() as tmp:
             env = {
                 **os.environ,
@@ -130,8 +212,8 @@ class StopHookStressTests(unittest.TestCase):
                 "PLUGIN_DATA": tmp,
                 "HOME": tmp,
             }
-            for _ in range(100):
-                subprocess.run(
+            for _ in range(self.runs):
+                proc = subprocess.run(
                     [sys.executable, str(script)],
                     input='{"hook_event_name":"Stop","session_id":"s"}',
                     text=True,
@@ -139,10 +221,10 @@ class StopHookStressTests(unittest.TestCase):
                     env=env,
                     timeout=30,
                 )
-            fds = [r["open_fds"] for r in rows(tmp)]
-            self.assertEqual(len(fds), 100, script.name)
-            self.assertLessEqual(max(fds), min(fds) + 2, script.name)
-            self.assertLess(max(fds), 16, script.name)
+                self.assertEqual(proc.returncode, 0, f"{script.name}: {proc.stderr}")
+            got = rows(tmp)
+            self.assertEqual([r["cause"] for r in got], ["ok"] * self.runs, script.name)
+            self.assertEqual({r["hook"] for r in got}, {script.stem})
 
     def test_claude_stop_hooks(self) -> None:
         """Test claude stop hooks."""
@@ -160,21 +242,25 @@ class StopHookStressTests(unittest.TestCase):
 class ClaudeResourceClassificationTests(unittest.TestCase):
     """Claude hook_common mirrors the Codex EMFILE classification."""
 
-    def test_hook_common_exposes_resource_classification(self) -> None:
-        """Test hook common exposes resource classification."""
+    def test_hook_common_uses_the_telemetry_ssot(self) -> None:
+        """Test hook_common re-uses the telemetry module's errno set and error class."""
         hook_common: Any = importlib.import_module("hooks.scripts.hook_common")
 
-        self.assertIn(errno.EMFILE, hook_common.RESOURCE_ERRNOS)
-        self.assertEqual(hook_common.HostResourceError.__mro__[1], OSError)
+        self.assertIs(hook_common.RESOURCE_ERRNOS, tel.RESOURCE_ERRNOS)
+        self.assertIs(hook_common.HostResourceError, tel.HostResourceError)
 
-    def test_read_payload_reports_resource_errno(self) -> None:
-        """Test read payload reports resource errno."""
+    def test_read_payload_raises_on_exhaustion_but_not_on_empty_input(self) -> None:
+        """Test exhaustion is distinguishable from an empty payload."""
         hook_common: Any = importlib.import_module("hooks.scripts.hook_common")
 
         with patch("sys.stdin") as stdin, patch.object(hook_common, "log") as log:
             stdin.fileno.side_effect = OSError(errno.EMFILE, "Too many open files")
+            with self.assertRaises(tel.HostResourceError):
+                hook_common.read_payload()
+        self.assertIn("resource_exhausted", log.call_args[0][0])
+        with patch("sys.stdin") as stdin:
+            stdin.fileno.side_effect = OSError(errno.EBADF, "bad")
             self.assertEqual(hook_common.read_payload(), {})
-        self.assertIn("resource exhaustion", log.call_args[0][0])
 
 
 if __name__ == "__main__":

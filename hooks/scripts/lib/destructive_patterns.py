@@ -6,6 +6,8 @@ import re
 import subprocess
 from pathlib import Path
 
+from hooks.scripts.lib.hook_telemetry import note_child
+
 
 def normalize_ifs(command: str) -> str:
     """Normalize IFS expansions using the hook's bounded literal rules."""
@@ -23,6 +25,7 @@ def git_output(cwd: str, *arguments: str) -> str:
         result = subprocess.run(["git", "-C", cwd, *arguments], capture_output=True, text=True, check=False)
     except OSError:
         return ""
+    note_child("destructive_bash_gate", result.returncode)
     return result.stdout.strip() if result.returncode == 0 else ""
 
 

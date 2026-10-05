@@ -19,13 +19,22 @@ from typing import Callable
 RESOURCE_ERRNOS = frozenset({errno.EMFILE, errno.ENFILE, errno.EAGAIN, errno.ENOMEM})
 DIAGNOSTIC_HINT = "~/Library/Logs/DiagnosticReports (macOS crash reports: look for python*.ips near this ts)"
 RESOURCE_NOTICE = "Host resource exhaustion (for example too many open files) hit this hook; not a graph-state fault."
+RESOURCE_MESSAGE = (
+    "Host resource exhaustion (for example too many open files) prevented reading hook state. "
+    "The state is not known to be invalid: retry, and do not repair progress.json for this."
+)
+ALLOWED_EXTRA = frozenset({"errno", "signal", "error", "diagnostic_hint"})  # content-free keys only
+MAX_BYTES = 1_000_000  # ponytail: one rotated generation (.1); add more only if history is needed
+
+
+class HostResourceError(OSError):
+    """The host could not start or read for a hook; this says nothing about graph validity."""
 
 
 def telemetry_dir() -> Path:
     """Discipline-log directory, overridable for tests."""
-    for name in ("CODERAILS_HOOK_TELEMETRY_DIR",):
-        if os.environ.get(name):
-            return Path(os.environ[name])
+    if override := os.environ.get("CODERAILS_HOOK_TELEMETRY_DIR"):
+        return Path(override)
     for name in ("CLAUDE_DISCIPLINE_LOG", "CODERAILS_DISCIPLINE_LOG"):
         if os.environ.get(name):
             return Path(os.environ[name]).parent
@@ -57,12 +66,15 @@ def record(hook: str, cause: str, duration_ms: int = 0, exit_code: int | None = 
         "duration_ms": duration_ms,
         "open_fds": open_fds(),
         "pid": os.getpid(),
-        **extra,
+        **{key: value for key, value in extra.items() if key in ALLOWED_EXTRA and value is not None},
     }
     try:
         directory = telemetry_dir()
         directory.mkdir(parents=True, exist_ok=True)
-        with (directory / "hook_telemetry.jsonl").open("a", encoding="utf-8") as stream:
+        target = directory / "hook_telemetry.jsonl"
+        if target.exists() and target.stat().st_size > MAX_BYTES:
+            os.replace(target, target.with_suffix(".jsonl.1"))
+        with target.open("a", encoding="utf-8") as stream:
             stream.write(json.dumps(row) + "\n")
     except (OSError, ValueError):
         pass
@@ -76,7 +88,8 @@ def note_child(hook: str, returncode: int) -> None:
         name = signal.Signals(-returncode).name
     except ValueError:
         name = f"SIG{-returncode}"
-    record(hook, "native_signal", exit_code=returncode, signal=name, diagnostic_hint=DIAGNOSTIC_HINT)
+    hint = DIAGNOSTIC_HINT if sys.platform == "darwin" else None
+    record(hook, "native_signal", exit_code=returncode, signal=name, diagnostic_hint=hint)
 
 
 def child_failed(hook: str, returncode: int) -> bool:
@@ -86,14 +99,17 @@ def child_failed(hook: str, returncode: int) -> bool:
 
 
 def run(hook: str, main: Callable[[], int]) -> int:
-    """Run a hook main(), recording one row; resource errors are reported and fail open."""
+    """Run a hook main(), recording one row; every failure is recorded and re-raised, never turned into success."""
     start = time.monotonic()
 
     def elapsed() -> int:
         return int((time.monotonic() - start) * 1000)
 
     def on_term(_signum: int, _frame: object) -> None:
-        record(hook, "timeout", elapsed(), 143)
+        record(hook, "sigterm", elapsed(), 143)
+        for stream in (sys.stdout, sys.stderr):
+            with suppress(Exception):
+                stream.flush()
         os._exit(143)
 
     with suppress(ValueError, OSError):
@@ -102,18 +118,18 @@ def run(hook: str, main: Callable[[], int]) -> int:
         code = main()
     except SystemExit as exit_:
         code = exit_.code if isinstance(exit_.code, int) else (0 if exit_.code is None else 1)
-        record(hook, "ok" if code == 0 else "exit", elapsed(), code)
+        record(hook, "ok" if code == 0 else "block" if code == 2 else "exit", elapsed(), code)
         raise
     except OSError as error:
         if error.errno in RESOURCE_ERRNOS:
-            record(hook, "resource", elapsed(), 0, errno=errno.errorcode.get(error.errno or 0, "?"))
+            record(hook, "resource", elapsed(), 1, errno=errno.errorcode.get(error.errno or 0, "?"))
             print(RESOURCE_NOTICE, file=sys.stderr)
-            return 0
+            raise
         record(hook, "exception", elapsed(), 1, error=type(error).__name__)
         raise
     except Exception as error:
         record(hook, "exception", elapsed(), 1, error=type(error).__name__)
         raise
     code = code or 0
-    record(hook, "ok" if code == 0 else "exit", elapsed(), code)
+    record(hook, "ok" if code == 0 else "block" if code == 2 else "exit", elapsed(), code)
     return code

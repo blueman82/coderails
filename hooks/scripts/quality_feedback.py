@@ -9,6 +9,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from hooks.scripts.hook_common import read_payload
+from hooks.scripts.lib.hook_telemetry import note_child
 
 SUFFIXES = {".bash", ".cfg", ".js", ".json", ".jsx", ".md", ".py", ".sh", ".toml", ".ts", ".tsx", ".yaml", ".yml"}
 
@@ -32,6 +33,7 @@ def main() -> int:
         text=True,
         check=False,
     )
+    note_child("quality_feedback", result.returncode)
     text = result.stdout + result.stderr
     if "0 finding(s)" not in text:
         print(f"coderails quality feedback (warn-only): {text}")
@@ -39,4 +41,8 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        from hooks.scripts.lib.hook_telemetry import run
+    except ImportError:  # telemetry must never be able to break the hook
+        raise SystemExit(main()) from None
+    raise SystemExit(run("quality_feedback", main))
