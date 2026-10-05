@@ -17,7 +17,17 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "codex/hooks/script
 import graph
 from graph_completion import complete, verify_completion
 
-from packages.tests.codex_fixture import append, frozen_evals, node, read_json, spawn, state, transcripts, write_json
+from packages.tests.codex_fixture import (
+    append,
+    done_result,
+    frozen_evals,
+    node,
+    read_json,
+    spawn,
+    state,
+    transcripts,
+    write_json,
+)
 
 LEASE = 600
 STALLED = 1_789_948_802.0 + LEASE
@@ -48,7 +58,7 @@ class RecoverChainTests(unittest.TestCase):
     def _record_done(self) -> None:
         """Record every unit done."""
         wave = read_json(self.path)["graph"]["active_wave"]["wave_id"]
-        results = {unit: {"outcome": "done", "evidence": "ok"} for unit in UNITS}
+        results = {unit: done_result("ok") for unit in UNITS}
         graph.record_wave(self.path, json.dumps({"wave_id": wave, "results": results}))
 
     def _verify(self) -> dict[str, Any]:

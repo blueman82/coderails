@@ -407,3 +407,18 @@ See [graph specification recovery](RUNBOOK-GRAPH-SPEC.md).
 - Limits: `K` and `D` are the reviewer's own judgement, not a measurement, and a same-user agent can write any line, so
   this is drift detection for a cooperating reviewer, not tamper evidence. The gate reads the PR's artifact only; it does
   not cross-check `D` against `work_units[u].disposition`.
+- `record-wave` says `worker_status_<code>` (`not_an_object`, `unknown_status`, `missing_field`, `unknown_field`,
+  `bad_field`): a result carrying a `status` key is not a valid typed worker status, so the WHOLE report was rejected and
+  `progress.json` is byte-identical; fix the worker's result (the schema is in `scripts/worker_status.py`) and record
+  again. `final_report_invalid`: a `done` result for a dispatch with `final_report_required` lacks a valid
+  `final_report {claims: [{text, label, source?}], did_not_verify: [{item, tag, reason}]}` (non-empty claims, a `verified`
+  claim cites a source, tags `resolved|unverifiable`). Both leave a `record-wave/refused/<code>` trace row.
+- A valid typed status is recorded, not refused: `worker_statuses[]` gets a `decision_pending` row, the node is recorded
+  `failed` (one retry consumed: the core has no needs-a-human outcome, so three such stops exhaust the node) and ONE typed
+  stop row is written in the same save (`awaiting-input/needs_human_input` for `NEEDS_DECISION`, `approval-gate/needs_approval`
+  for `OUTSIDE_SCOPE` and `IRREVERSIBLE_ACTION`; approval outranks input when a wave returns both). The Stop guard releases
+  that row once. Ask the human with `to_decision_request()`; `python3 scripts/lib/worker_counters.py` reports
+  `pending_statuses` (rows still `decision_pending`).
+- Limits: shape is checked, truth is not (a worker can write any claim); only results of dispatches with a begin-wave
+  record require the report, so a pre-conversion state behaves as before; `check_confidence_labels` and
+  `check_verify_loop` stay advisory lints on the orchestrator's own text.

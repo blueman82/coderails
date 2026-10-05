@@ -21,7 +21,7 @@ from graph_completion import validate_work_units
 from graph_evidence import validate_worker_evidence
 from graph_identity import GraphError, task_name, task_node
 
-from packages.tests.codex_fixture import frozen_evals, read_json, spawn, state, transcripts, write_json
+from packages.tests.codex_fixture import done_result, frozen_evals, read_json, spawn, state, transcripts, write_json
 
 
 class GraphRuntimeTests(unittest.TestCase):
@@ -47,7 +47,14 @@ class GraphRuntimeTests(unittest.TestCase):
             json.dumps(
                 {
                     "wave_id": current["graph"]["active_wave"]["wave_id"],
-                    "results": {"U3[1]": {"outcome": outcome, "evidence": "checked", **extra}},
+                    "results": {
+                        "U3[1]": {
+                            **(done_result() if outcome == "done" else {}),
+                            "outcome": outcome,
+                            "evidence": "checked",
+                            **extra,
+                        }
+                    },
                 }
             ),
         )

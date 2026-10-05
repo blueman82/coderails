@@ -21,7 +21,16 @@ from graph_artifacts import validate_evals
 from graph_completion import complete, verify_completion
 from graph_identity import GraphError
 
-from packages.tests.codex_fixture import append, frozen_evals, read_json, spawn, state, transcripts, write_json
+from packages.tests.codex_fixture import (
+    append,
+    done_result,
+    frozen_evals,
+    read_json,
+    spawn,
+    state,
+    transcripts,
+    write_json,
+)
 
 
 class CompletionTests(unittest.TestCase):
@@ -44,7 +53,7 @@ class CompletionTests(unittest.TestCase):
         self.child = spawn(parent, read_json(self.path))
         graph.record_wave(
             self.path,
-            json.dumps({"wave_id": "wave-2", "results": {"U3[1]": {"outcome": "done", "evidence": "checked"}}}),
+            json.dumps({"wave_id": "wave-2", "results": {"U3[1]": done_result()}}),
         )
         suite: dict[str, Any] = frozen_evals() | {
             "verification_level": 0,

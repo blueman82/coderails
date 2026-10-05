@@ -9,6 +9,16 @@ from typing import Any, cast
 import graph_contract
 from graph_identity import next_attempt, task_name
 
+FINAL_REPORT: dict[str, Any] = {
+    "claims": [{"text": "unit checks ran", "label": "verified", "source": "fixture command: OK"}],
+    "did_not_verify": [],
+}
+
+
+def done_result(evidence: object = "checked") -> dict[str, Any]:
+    """A `done` wave result carrying the final_report every begin-wave dispatch record requires."""
+    return {"outcome": "done", "evidence": evidence, "final_report": FINAL_REPORT}
+
 
 def node(number: int = 1, status: str = "pending") -> dict[str, Any]:
     """Return a canonical build-unit node."""
