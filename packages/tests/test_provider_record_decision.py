@@ -90,7 +90,15 @@ class RecordDecisionTests(ControllerCase):
         for c in self.each():
             self.started(c)
             state = c.read()
-            state["worker_statuses"] = [{"seq": n, "decision_pending": True} for n in (1, 2)]
+            state["worker_statuses"] = [
+                {
+                    "seq": n,
+                    "status": "NEEDS_DECISION",
+                    "payload": {"options": ["allow", "deny"]},
+                    "decision_pending": True,
+                }
+                for n in (1, 2)
+            ]
             c.path.write_text(json.dumps(state), encoding="utf-8")
             done = decide(c, "--chosen", "allow", "--worker-status-seq", "2")
             self.assertEqual(done.returncode, 0, done.stderr)
@@ -98,6 +106,27 @@ class RecordDecisionTests(ControllerCase):
             self.assertEqual([s["decision_pending"] for s in after["worker_statuses"]], [True, False])
             self.assertEqual(after["worker_statuses"][1]["resolved_by_decision"], 1)
             self.assertEqual(after["decisions_absorbed"][0]["worker_status_seq"], 2)
+
+    def test_status_answers_are_bound_to_the_pending_question(self) -> None:
+        """A chosen outside the status options, or an approval-gate answer without --human-answer, refuses unchanged."""
+        for c in self.each():
+            self.started(c)
+            state = c.read()
+            state["worker_statuses"] = [
+                {"seq": 1, "status": "NEEDS_DECISION", "payload": {"options": ["a", "b"]}, "decision_pending": True},
+                {"seq": 2, "status": "OUTSIDE_SCOPE", "payload": {}, "decision_pending": True},
+            ]
+            c.path.write_text(json.dumps(state), encoding="utf-8")
+            cases = (
+                (decide(c, "--chosen", "invented", "--worker-status-seq", "1"), "record_decision_refused_chosen"),
+                (decide(c, "--chosen", "allow", "--worker-status-seq", "2"), "record_decision_refused_human"),
+            )
+            for result, code in cases:
+                before = c.path.read_bytes()
+                self.refused(result, code)
+                self.assertEqual(c.path.read_bytes(), before, code)
+            self.assertEqual(decide(c, "--chosen", "a", "--worker-status-seq", "1").returncode, 0)
+            self.assertEqual(decide(c, "--chosen", "allow", "--worker-status-seq", "2", "--human-answer").returncode, 0)
 
     def test_concurrent_appends_all_land_with_distinct_seqs(self) -> None:
         """Six simultaneous CLI calls under the state lock: six rows, seq 1..6, no lost update."""

@@ -194,6 +194,25 @@ class FinalReportAndPrepareTests(unittest.TestCase):
                 ws.append_decision(current, session, given, seq)
             self.assertEqual(caught.exception.code, f"record_decision_refused_{code}")
 
+    def test_append_decision_binds_answer_to_the_status(self) -> None:
+        """The answer must be a NEEDS_DECISION option; approval-gate statuses need the human-answer marker."""
+        pending = {"decision_pending": True}
+        state: dict[str, Any] = {
+            "session_id": "s",
+            "revision": 1,
+            "worker_statuses": [
+                {"seq": 1, "status": "NEEDS_DECISION", "payload": {"options": ["a", "b"]}, **pending},
+                {"seq": 2, "status": "IRREVERSIBLE_ACTION", "payload": {}, **pending},
+            ],
+        }
+        fields: dict[str, str | None] = {"phase": "p", "decision": "d", "chosen": "z"}
+        for seq, human, code in ((1, False, "chosen"), (2, False, "human")):
+            with self.assertRaises(ws.WorkerResultError) as caught:
+                ws.append_decision(state, "s", fields, seq, human)
+            self.assertEqual(caught.exception.code, f"record_decision_refused_{code}")
+        ws.append_decision(state, "s", {**fields, "chosen": "b"}, 1)
+        ws.append_decision(state, "s", fields, 2, True)
+
     def test_both_record_wave_paths_call_prepare(self) -> None:
         """Negative control anchor: deleting the pre-processor call from a provider fails here and in the CLI tests."""
         for path in (

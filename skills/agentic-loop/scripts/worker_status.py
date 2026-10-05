@@ -215,13 +215,19 @@ def stop_for(statuses: list[dict[str, Any]]) -> tuple[str, str, str]:
 
 
 def append_decision(
-    state: dict[str, Any], session: str, fields: dict[str, str | None], worker_status_seq: int | None = None
+    state: dict[str, Any],
+    session: str,
+    fields: dict[str, str | None],
+    worker_status_seq: int | None = None,
+    human_answer: bool = False,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Return (proposed state, row) with one typed row appended to `decisions_absorbed`; writes nothing.
 
     `fields` carries phase, decision, chosen and optionally flip_condition (all typed flags, no prose parsing). With
-    `worker_status_seq` the named `worker_statuses` row is marked resolved. The revision is not bumped: a decision
-    is not a graph change. Raises WorkerResultError with a `record_decision_refused_*` code.
+    `worker_status_seq` the named `worker_statuses` row is marked resolved: for NEEDS_DECISION `chosen` must be one of
+    its options, and an approval-gate status (OUTSIDE_SCOPE, IRREVERSIBLE_ACTION) needs `human_answer`. That flag is
+    self-asserted (documented limit: a same-user agent can pass it; it makes forgery deliberate, not impossible). The
+    revision is not bumped: a decision is not a graph change. Raises WorkerResultError `record_decision_refused_*`.
     """
     if state.get("session_id") != session:
         raise WorkerResultError("record_decision_refused_foreign", "session does not own this graph")
@@ -242,7 +248,14 @@ def append_decision(
         named = [status for status in statuses if status.get("seq") == worker_status_seq]
         if not named or named[0].get("decision_pending") is not True:
             raise WorkerResultError("record_decision_refused_status", f"no pending worker status {worker_status_seq}")
-        named[0].update(decision_pending=False, resolved_by_decision=seq)
+        status = named[0]
+        if status.get("status") == "NEEDS_DECISION":
+            payload = cast("dict[str, Any]", status.get("payload") or {})
+            if row["chosen"] not in payload.get("options", []):
+                raise WorkerResultError("record_decision_refused_chosen", "--chosen is not one of the status options")
+        elif status.get("status") in STOP_FOR and not human_answer:
+            raise WorkerResultError("record_decision_refused_human", "approval-gate status needs --human-answer")
+        status.update(decision_pending=False, resolved_by_decision=seq)
     row.update(revision=state["revision"], recorded_at=datetime.now(timezone.utc).isoformat(timespec="seconds"))
     rows.append(row)
     return proposed, row

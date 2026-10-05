@@ -22,6 +22,7 @@ def record_decision(
     session: str,
     fields: dict[str, str | None],
     worker_status_seq: int | None = None,
+    human_answer: bool = False,
 ) -> dict[str, Any]:
     """Append one ledger row under the Claude lock; a refusal writes nothing and leaves one coded trace row."""
     ident: dict[str, Any] = {"session_id": session, "graph": {}}
@@ -32,7 +33,7 @@ def record_decision(
     def update(state: dict[str, Any]) -> dict[str, Any]:
         ident.update(loop_id=state["loop_id"], revision=state["revision"])
         try:
-            proposed, new = worker_status.append_decision(state, session, fields, worker_status_seq)
+            proposed, new = worker_status.append_decision(state, session, fields, worker_status_seq, human_answer)
         except worker_status.WorkerResultError as error:
             refusal.append(error)
             raise

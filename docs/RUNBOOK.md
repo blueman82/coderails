@@ -421,11 +421,15 @@ See [graph specification recovery](RUNBOOK-GRAPH-SPEC.md).
   --session S --phase P --decision D --chosen C [--flip-condition F] --worker-status-seq <seq>`: it appends one typed row
   to `decisions_absorbed` and marks that status resolved. `python3 scripts/lib/worker_counters.py` reports
   `pending_statuses` (rows still `decision_pending`) and `decision_recorded`.
-- `record-decision` says `record_decision_refused_<foreign|field|state|status>`: the session does not own the graph, a
-  flag is blank, `decisions_absorbed` is not an array of objects, or `--worker-status-seq` names no pending status
-  (unknown or already resolved). Nothing is written. It does not bump the revision. Limits: `phase`, `decision` and
-  `chosen` are free text the caller types (no enum, no check against the graph); hand-appended `{phase, decision}` rows
-  stay valid and unnumbered; a same-user agent can write any row.
+- `record-decision` says `record_decision_refused_<foreign|field|state|status|chosen|human>`: the session does not own the
+  graph, a flag is blank, `decisions_absorbed` is not an array of objects, `--worker-status-seq` names no pending status
+  (unknown or already resolved), `--chosen` is not one of a `NEEDS_DECISION` status's options, or the status is an
+  approval gate (`OUTSIDE_SCOPE`, `IRREVERSIBLE_ACTION`) and `--human-answer` was not passed. Nothing is written. It does
+  not bump the revision. Limits: `phase`, `decision` and `chosen` are free text outside a status-linked answer (no enum,
+  no check against the graph); hand-appended `{phase, decision}` rows stay valid and unnumbered. There is no caller
+  authentication: `--session` and `--human-answer` are self-asserted, so a same-user agent can still forge a human
+  answer (or write any row); the flag makes that a deliberate act, not tamper evidence. Only the orchestrator should
+  pass `--human-answer`, and only after the human replied.
 - Limits: shape is checked, truth is not (a worker can write any claim); only results of dispatches with a begin-wave
   record require the report, so a pre-conversion state behaves as before; `check_confidence_labels` and
   `check_verify_loop` stay advisory lints on the orchestrator's own text.

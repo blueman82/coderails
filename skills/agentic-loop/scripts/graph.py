@@ -109,6 +109,9 @@ def parser() -> argparse.ArgumentParser:
                 command.add_argument(flag, required=True)
             command.add_argument("--flip-condition", help="what would change this decision")
             command.add_argument("--worker-status-seq", type=int, help="mark this worker_statuses row resolved")
+            command.add_argument(
+                "--human-answer", action="store_true", help="a human answered (approval-gate statuses)"
+            )
         if name == "authorize-dispatch":
             command.add_argument("--prompt", required=True)
             command.add_argument("--subagent-type", required=True)
@@ -246,7 +249,9 @@ def main() -> int:
         elif args.command == "record-decision":
             typed: dict[str, str | None] = {"phase": args.phase, "decision": args.decision, "chosen": args.chosen}
             typed["flip_condition"] = args.flip_condition
-            output = graph_decisions.record_decision(args.state, args.session, typed, args.worker_status_seq)
+            output = graph_decisions.record_decision(
+                args.state, args.session, typed, args.worker_status_seq, args.human_answer
+            )
         elif args.command == "disposition-audit":
             report = disposition_report(load(args.state).get("work_units"))
             output = report
