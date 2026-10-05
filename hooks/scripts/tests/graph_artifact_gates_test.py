@@ -151,6 +151,7 @@ class ArtifactGateTests(GraphCase):
             "reason": "verified",
             "revision": state["revision"],
             "consumed": False,
+            "at": 1.0e9,
         }
         payload = {
             "session_id": "fixture-session",

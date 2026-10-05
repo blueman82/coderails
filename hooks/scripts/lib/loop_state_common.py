@@ -197,9 +197,9 @@ def recorded_stop(data: dict[str, Any]) -> dict[str, Any] | None:
     return None
 
 
-def stop_ran_this_turn(transcript: str) -> bool:
-    """Report whether `graph.py stop` ran after the last user prompt, so an old row cannot release a later turn."""
-    ran = False
+def stop_in_this_turn(transcript: str, stop: dict[str, Any]) -> bool:
+    """Report whether the row was recorded after the last user prompt (row `at` vs prompt timestamp)."""
+    prompt_at = 0.0
     for record in records(transcript):
         value = content(record)
         if record.get("type") == "user" and (
@@ -212,13 +212,14 @@ def stop_ran_this_turn(transcript: str) -> bool:
                 )
             )
         ):
-            ran = False
-        for tool in tool_uses(record):
-            data = tool.get("input")
-            command = cast(dict[str, Any], data).get("command") if isinstance(data, dict) else None
-            if tool.get("name") == "Bash" and isinstance(command, str) and re.search(r"graph\.py\s+stop\b", command):
-                ran = True
-    return ran
+            if "timestamp" not in record:
+                continue  # synthetic records without a clock cannot move the bound
+            try:
+                prompt_at = datetime.fromisoformat(str(record["timestamp"]).replace("Z", "+00:00")).timestamp()
+            except ValueError:
+                prompt_at = float("inf")  # an unreadable prompt time fails closed
+    at = stop.get("at")
+    return isinstance(at, (int, float)) and not isinstance(at, bool) and at >= prompt_at
 
 
 def mark_complete(cwd: str, session: str) -> bool:

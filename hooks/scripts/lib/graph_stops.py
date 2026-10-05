@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import sys
+import time
 from pathlib import Path
 from typing import Any, cast
 
@@ -42,6 +43,7 @@ def record_stop(state: object, session: str, category: str, reason_code: str, re
         "reason": reason,
         "revision": root["revision"],
         "consumed": False,
+        "at": time.time(),  # lets the Claude Stop guard bind the row to the turn that recorded it
     }
     rows.append(row)
     return {"state": root, "stop": copy.deepcopy(row)}

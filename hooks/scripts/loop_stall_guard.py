@@ -27,7 +27,7 @@ from hooks.scripts.lib.loop_state_common import (
     read_state,
     recorded_stop,
     stable_invocations,
-    stop_ran_this_turn,
+    stop_in_this_turn,
 )
 from hooks.scripts.lib.trace_row import append_row
 
@@ -124,7 +124,7 @@ def main() -> int:
         return 0
     recorded = recorded_stop(state.data)
     loop_id = str(state.data.get("loop_id") or "") or None
-    if recorded and not stop_ran_this_turn(transcript):  # a row from an earlier turn is stale, never a release
+    if recorded and not stop_in_this_turn(transcript, recorded):  # a row from an earlier turn is stale, never a release
         if state.path.is_file():
             append_row("loop_stall_guard", "fallback", "stale_stop_row", session, loop_id)
         recorded = None

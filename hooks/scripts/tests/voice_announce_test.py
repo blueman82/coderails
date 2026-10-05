@@ -54,6 +54,7 @@ class VoiceAnnounceTests(HookTestCase):
             "reason": "r",
             "revision": 1,
             "consumed": False,
+            "at": 1.0e9,
         }
 
     def test_all_categories_come_from_the_recorded_row(self) -> None:

@@ -159,21 +159,37 @@ class StallGuardTests(HookTestCase):
         """A row recorded before the last user prompt is stale: chatting afterwards stays blocked (finding 1)."""
         path = self.progress(stops=[self.stop(1, "awaiting-input")])
         old = self.stopped("done")
-        prompt = {"type": "user", "message": {"content": "carry on"}}
+        prompt = {"type": "user", "timestamp": "2033-05-18T03:33:21Z", "message": {"content": "carry on"}}
         old.write_text(old.read_text() + json.dumps(prompt) + "\n")
         chat = {"type": "assistant", "message": {"content": [{"type": "text", "text": "just chatting"}]}}
         old.write_text(old.read_text() + json.dumps(chat) + "\n")
         self.assertEqual(self.run_hook("loop_stall_guard", self.payload(old)).returncode, 2)
-        self.assertEqual(
-            self.run_hook("loop_stall_guard", self.payload(self.transcript("just chatting"))).returncode, 2
-        )
         after = json.loads(path.read_text())
         self.assertFalse(after["stops"][0]["consumed"])
         self.assertNotIn("loop_stop_counts", after)
         self.assertIn("stale_stop_row", self.trace_reasons())
 
+    def test_stop_row_is_bound_to_the_turn_by_time_not_by_command_text(self) -> None:
+        """Mentioning graph.py stop never releases an older row; a row recorded after the prompt does."""
+        path = self.progress(stops=[self.stop(1, "awaiting-input", at=1.0e9)])
+        trace = self.transcript("working")
+        for record in (
+            {"type": "user", "timestamp": "2033-05-18T03:33:21Z", "message": {"content": "next"}},
+            {
+                "type": "assistant",
+                "message": {
+                    "content": [{"type": "tool_use", "name": "Bash", "input": {"command": "echo graph.py stop"}}]
+                },
+            },
+        ):
+            trace.write_text(trace.read_text() + json.dumps(record) + "\n")
+        self.assertEqual(self.run_hook("loop_stall_guard", self.payload(trace)).returncode, 2)
+        self.assertFalse(json.loads(path.read_text())["stops"][0]["consumed"])
+        self.arm(path, self.stop(2, "awaiting-input", at=2.0e9 + 2.0e9))
+        self.assertEqual(self.run_hook("loop_stall_guard", self.payload(trace)).returncode, 0)
+
     @staticmethod
-    def stop(seq: int, category: str, revision: int = 1, consumed: bool = False) -> dict[str, Any]:
+    def stop(seq: int, category: str, revision: int = 1, consumed: bool = False, at: float = 1.0e9) -> dict[str, Any]:
         """Build one recorded stop row exactly as graph.py stop writes it."""
         return {
             "seq": seq,
@@ -182,6 +198,7 @@ class StallGuardTests(HookTestCase):
             "reason": "r",
             "revision": revision,
             "consumed": consumed,
+            "at": at,
         }
 
     def test_recorded_stop_decides_the_category_and_is_consumed_once(self) -> None:

@@ -201,12 +201,17 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   missing or torn file is `hook_state_unreadable`, never a log fallback). Inspect one loop with `python3 -c "import json;print(json.load(open('<progress.json>')).get('stops'))"`.
 - Remediation: a high `stop_row_missing` against `stops_consumed` means agents are ending turns without running
   `graph.py stop`: fix the prompt (the block message names the exact command); there is no text parse left to tighten. An unconsumed row at the current
-  revision releases the next Stop once, and only when `graph.py stop` ran after the last user prompt (an older row is
+  revision releases the next Stop once, and only when the row's own `at` time is not before the last user prompt's transcript timestamp (an older row is
   ignored with trace `stale_stop_row`, so recording a stop early cannot excuse later undeclared turns); a row at an older revision is ignored by design. A refused `graph.py stop`
   prints the refusal on stderr (foreign session, unknown category or reason code, `complete` while the graph is
   unresolved); fix the argument, never edit `stops` by hand. Codex releases on the same `hard-stop`, `approval-gate` and `awaiting-input` rows
   (`consume-stop`, once each, no `graph.hard_stop` needed); a `complete` row is never consumed there and goes through
   `complete` / `verify-completion`. Both providers import one vocabulary file (`graph_vocab.py`).
+  Limit (same-user boundary): stop rows are self-attested. Claude binds a row to its turn by timestamp, but Codex has no
+  per-turn binding: a Codex agent can record a row (including `approval-gate` or `awaiting-input`) and have the next Stop
+  released without a human request, and rows recorded early at an unchanged revision stay releasable until a state change bumps
+  the revision. Each row is released once and is visible in `progress.stops` and the `stops_recorded`/`stops_consumed`
+  counters; this is an audit boundary, not a privilege boundary.
 
 ## progress.json is older than the tools (convert, or a never-dispatched loop cannot complete)
 

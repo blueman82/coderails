@@ -52,6 +52,8 @@ class ProviderStopRecordTests(unittest.TestCase):
             self.assertEqual(self.stop(provider, "hard-stop", "node_hard_stop", "boom").returncode, 0)
             after = provider.read()
             self.assertEqual(after["revision"], before["revision"])
+            for row in after["stops"]:  # `at` is the wall-clock turn binding the Claude guard reads
+                self.assertIsInstance(row.pop("at"), float)
             self.assertEqual(
                 after["stops"],
                 [
@@ -128,6 +130,7 @@ class ProviderStopRecordTests(unittest.TestCase):
             "reason": "r",
             "revision": 1,
             "consumed": False,
+            "at": 1.0e9,
         }
 
     def guard(self, provider: Provider, message: str = "stopping") -> str:
