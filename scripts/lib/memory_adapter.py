@@ -356,7 +356,6 @@ def main(argv: list[str] | None = None) -> int:
     sid = os.environ.get("CLAUDE_SESSION_ID") or os.environ.get("CLAUDE_CODE_SESSION_ID", "")
     ap.add_argument("--session", default=sid)
     ap.add_argument("--memory-md", action="store_true")
-    ap.add_argument("--standing-orders", action="store_true")
     ap.add_argument("--write", metavar="PATH")
     a = ap.parse_args(argv)
     tags: list[str] = a.tag + ([f"run-{a.run[:28].lower()}"] if a.run else [])
@@ -370,13 +369,13 @@ def main(argv: list[str] | None = None) -> int:
         res = resolve_cite(rec, bool(a.approval), a.session)  # always: a quote-only cite is verified too
         res = res or add(rec, a.session)
     else:
-        found = list_records(a.scope, a.loop, "lesson" if a.standing_orders else a.type, tags, a.query, a.session)
+        found = list_records(a.scope, a.loop, a.type, tags, a.query, a.session)
         if isinstance(found, Degraded):
             res = found
         elif a.cmd == "list":
             print(json.dumps([dataclasses.asdict(r) for r in found], indent=2))
         else:
-            text = render(found, "Standing Orders" if a.standing_orders else "Memory Index")
+            text = render(found, "Memory Index")
             if a.write:
                 res = write_view(Path(a.write), text, a.session)
             else:

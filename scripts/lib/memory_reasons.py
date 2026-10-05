@@ -83,4 +83,26 @@ REASONS: dict[str, str] = {
     "decision_blank_phase": "a decision needs a non-blank phase (for example 2.5).",
     "decision_blank_decision": "a decision needs a non-blank decision text; nothing was written.",
     "decision_state_error": "the loop state could not be read, validated or locked; nothing was written.",
+    "order_chain_broken": (
+        "orders.json was edited by hand (the hash chain names the order); restore it from backup or review the "
+        "named order, then re-seal by recording through orders.py."
+    ),
+    "order_blank_field": "an order needs a non-blank failure mode and lesson; nothing was written.",
+    "order_not_found": "no order with that id in orders.json; check the id with `orders.py lessons`.",
+    "order_state_error": "orders.json could not be read, locked or written; check the repo-key dir and orders.lock.",
+    "order_already_ticked": "this loop id was already counted; the tick was skipped (informational, not an error).",
+    "no_user_cite": (
+        "the order was stored without a user quote; attach it with `orders.py cite <id> --quote <verbatim owner "
+        "prompt text>`."
+    ),
+    "legacy_uncited": "an imported hand-written order has no cite yet; attach one with `orders.py cite <id> --quote`.",
+    "legacy_parse_error": (
+        "a hand-written entry has no parseable loops_since_recurrence line (the entry is named); fix it and "
+        "rerun import-legacy, nothing was imported."
+    ),
+    "legacy_missing": "there is no hand-written standing-orders.md to import (absent, empty or already generated).",
+    "lesson_not_current": (
+        "the order's Muninn entry is retracted, expired or superseded without a replacement and was left out "
+        "of lessons; re-record the order with a fresh quote."
+    ),
 }

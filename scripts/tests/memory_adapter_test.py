@@ -380,10 +380,16 @@ class ProbeAndParity(Base):
         self.assertEqual(Path(ADAPTER).read_bytes(), mirror.read_bytes())
 
     def test_docs_carry_helper(self) -> None:
-        """Teardown and both handoff skills name the helper command."""
-        docs = ("skills/agentic-loop/teardown.md", "skills/handoff/SKILL.md", "packages/codex/skills/handoff/SKILL.md")
-        for rel in docs:
+        """Both handoff skills name the helper command; teardown calls orders.py (standing orders left the adapter)."""
+        for rel in ("skills/handoff/SKILL.md", "packages/codex/skills/handoff/SKILL.md"):
             self.assertIn("memory_adapter.py", (REPO / rel).read_text(), rel)
+        self.assertIn("orders.py", (REPO / "skills/agentic-loop/teardown.md").read_text())
+
+    def test_standing_orders_render_flag_is_gone(self) -> None:
+        """The superseded --standing-orders flag is rejected by the adapter CLI (argparse exit 2)."""
+        out = subprocess.run([sys.executable, ADAPTER, "render", "--standing-orders"], capture_output=True, text=True)
+        self.assertEqual(out.returncode, 2)
+        self.assertIn("unrecognized arguments", out.stderr)
 
 
 if __name__ == "__main__":

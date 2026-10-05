@@ -270,10 +270,12 @@ Unlike the other three read-only routines, `loop-retro-promotion-weekly`'s own
 skill (`skills/loop-retro-promotion/SKILL.md`) evaluates a 3-part
 graduation predicate every time it runs, before doing anything else: (1)
 at least 10 `retro.json` files exist under the repo-key dir, (2)
-`standing-orders.md` has at least one entry whose `last_recurred` differs
+the typed ledger `orders.json` has at least one order whose `last_recurred` differs
 from its `created` date (one lesson has recurred at least once), and (3)
-`standing-orders-decayed.md` has at least one entry (one lesson has
-completed a full create → recur → decay lifecycle). Until all three
+at least one order has `status: decayed` (one lesson has
+completed a full create → recur → decay lifecycle). The routine evaluates
+this with `scripts/lib/lessons.py --dir <repo-key dir> predicate` (code, not
+prose; the same result also lists the promotion candidates). Until all three
 hold, the routine is dormant.
 
 A dormant run appends its predicate line to `promotion-runs.log`

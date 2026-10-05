@@ -21,7 +21,7 @@ entry in the Claude role map, so the native graph CLI `plan` command reports the
 - [Step 2 — Assemble `retro.json`](#step-2--assemble-retrojson)
 - [Cost-mining sub-step](#cost-mining-sub-step)
 - [Pricing is computed once and frozen](#pricing-is-computed-once-and-frozen)
-- [Step 3 — Update `standing-orders.md`](#step-3--update-standing-ordersmd)
+- [Step 3 — Update the standing orders (code, not prose)](#step-3--update-the-standing-orders-code-not-prose)
 - [Steps 4 and 5](#steps-4-and-5)
 
 ## The Phase 13 self-audit report
@@ -114,30 +114,33 @@ NEVER re-derive them from token counts against a live price table. If a second p
 ever tempting (e.g. a dashboard-side "current price" toggle), that is out of contract — the frozen
 number at teardown is the number.
 
-## Step 3 — Update `standing-orders.md`
+## Step 3 — Update the standing orders (code, not prose)
 
-At the repo-key dir. Match this loop's retro failure modes against existing entries:
+Standing orders are typed records in `<repo-key dir>/orders.json` (the grandparent of the `progress.json` path), changed
+only by `scripts/lib/orders.py`; `standing-orders.md` and `standing-orders-decayed.md` are generated, read-only views.
+Never write those files by hand (`render` refuses an unmarked file with `handwritten_protected`). Run, in order, from the
+orchestrator session (`O="python3 ${CLAUDE_PLUGIN_ROOT}/scripts/lib/orders.py --dir <repo-key dir>"`):
 
-- A **match** resets that entry's `loops_since_recurrence` to 0, updates `last_recurred`, and appends evidence.
-- A genuinely **new** failure mode appends a new entry (fields: `id`, `created`, `failure_mode`, `lesson`, `evidence`, `last_recurred`, `loops_since_recurrence`).
-- **Increment** `loops_since_recurrence` on every non-matched surviving entry.
-- When an entry's `loops_since_recurrence` reaches **K=5** (a constant stated here, not config), MOVE it to `standing-orders-decayed.md` — a tombstone, **never a delete**; the graduation predicate's "one clean decay" is checked against this file.
+1. For each failure mode in this loop's retro, `$O record --failure-mode "<mode>" --lesson "<imperative lesson>" --loop <session_id> --quote "<verbatim words of the owner's own prompt, 12-300 chars>"`. An id match is a **recurrence**: it resets
+   `loops_since_recurrence` to 0, sets `last_recurred` and appends evidence. A genuinely new mode appends a new order.
+   Add `--scope agnostic` for a lesson that would apply to any repo (only those can be promoted).
+2. `$O tick --loop <session_id>` once: every active order this loop did not record gains 1, and at **K=5** (a code
+   constant in `orders_ledger.py`, not config) it becomes `status: decayed` — a tombstone, **never a delete**. A second
+   tick for the same loop id is a no-op.
+3. `$O render` regenerates both views (a decayed order appears only in `standing-orders-decayed.md`).
 
-This step is additive-or-recurrence-only: no metric-based removal anywhere.
+The graduation predicate and the promotion selection are `$O predicate` and `lessons.py predicate`. This step is
+additive-or-recurrence-only: no metric-based removal anywhere.
 
-**Typed lessons (Muninn authoritative).** Typed lessons are recorded in Muninn; there is no Markdown substitute. First run
-`python3 "${CLAUDE_PLUGIN_ROOT}/scripts/lib/memory_adapter.py" probe`. Exit 0 means Muninn is ready: emit each new or
-recurred lesson as a record with
-`python3 "${CLAUDE_PLUGIN_ROOT}/scripts/lib/memory_adapter.py" add --type lesson --scope loop --loop <session_id> --run <session_id> --claim "<lesson>" --quote "<verbatim quote of the owner's own prompt, 12-300 chars>"`
-(or `--approval <ref of the owner's approval prompt>` to cite a short approval together with the reply
-it answers). The cite must anchor in a user prompt: an agent-only cite is refused with `cite_not_user`, an uncited write
-with `uncited_write`. Only the orchestrator session can write. Then regenerate the read-only view with
-`... memory_adapter.py render --standing-orders --loop <session_id> --write <repo-key dir>/standing-orders-generated.md`
-(it only overwrites a file whose first line is the generator marker, never the hand-written `standing-orders.md`).
-Any nonzero exit prints `{"degraded": "<reason_code>"}` and appends a trace row: **report that reason code in the
-retro and stop that write; never skip it silently and never write the lesson to Markdown instead.** `memory.backend: off`
-(reason `memory_backend_off`) is the only explicit opt-out. Runbook: `docs/RUNBOOK.md`, "Memory degraded (Muninn
-authoritative)"; decision record: `docs/decisions/2026-10-05-memory-authoritative.md`.
+**Typed lessons (Muninn authoritative).** The cited claim of each order lives in Muninn as a `lesson` tagged `order` and
+`ord-<id>`; `record` writes the ledger first and then syncs to Muninn. The cite must anchor in a user prompt (`--quote`):
+with none, the order is kept active with `muninn.state=degraded` and reason `no_user_cite`, exit 3, and
+`$O cite <id> --quote "<owner's words>"` attaches it later. Exit 3 prints `{"muninn": {... "reason_code": ...}}`:
+**report that reason code in the retro; never skip it silently and never write the lesson to Markdown instead.**
+`memory.backend: off` (reason `memory_backend_off`, exit 0) is the only explicit opt-out. A first-time adoption of an old
+hand-written file is `$O import-legacy` (the original is moved to `standing-orders.legacy.md`, not deleted). Runbook:
+`docs/RUNBOOK.md`, "Standing order stored without a cite"; decision records:
+`docs/decisions/2026-10-05-memory-authoritative.md`, `docs/decisions/2026-10-05-orders-vs-muninn-overlap.md`.
 
 ## Steps 4 and 5
 

@@ -162,9 +162,9 @@ is still your job; the guard only catches its absence.
   **Declaration boundary:** the gate checks that the no-proof disposition exists, not whether its reason is true. It also checks execution, not whether the frozen command is a good proof. These remain auditable declarations, not an external trust boundary.
 
   **Honest boundary:** the gate verifies a command RAN in this session's transcript and did not error — it cannot verify it was the RIGHT command. A weak, poorly-chosen proof set still passes trivially. What it buys is that the proof CHOICE is auditable and time-stamped (frozen before implementation, authored blind to the plan), and that EXECUTION can no longer be self-reported. **Trust boundary:** the gate treats the transcript as harness-written — a session that deliberately appends forged tool_use/tool_result records to its own (ordinary, writable) transcript file can defeat it; no transcript-reading hook can stop that. The gate's actual target is honest self-deception and lazy self-reporting, not adversarial transcript forgery.
-- **`standing-orders.md` / `standing-orders-decayed.md`** — repo-keyed, one dir up (the grandparent of the `progress.json` path), shared across every session and loop against that repo.
+- **`orders.json`** (the typed ledger, written only by `scripts/lib/orders.py`) and its generated views **`standing-orders.md` / `standing-orders-decayed.md`** — repo-keyed, one dir up (the grandparent of the `progress.json` path), shared across every session and loop against that repo. The views are read-only (mode 0444, marker-stamped); read lessons with `scripts/lib/lessons.py query --format contract`.
 
 The asymmetry is deliberate: a retro belongs to the loop that produced it, but a lesson is meant
-to outlive any single loop. Two concurrent loops updating `standing-orders.md` at once is
-last-writer-wins, and self-correcting rather than a data-loss risk — a lesson lost to the race
-re-adds itself the next time its failure mode recurs.
+to outlive any single loop. Two concurrent loops updating `orders.json` are serialised by
+`orders.py` under `dir_lock` (a lock failure is `order_state_error`, nothing written), so a recorded
+lesson is no longer lost to a last-writer-wins race.

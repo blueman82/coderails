@@ -165,6 +165,16 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
 | `decision_blank_phase` | a decision needs a non-blank phase (for example 2.5). |
 | `decision_blank_decision` | a decision needs a non-blank decision text; nothing was written. |
 | `decision_state_error` | the loop state could not be read, validated or locked; nothing was written. |
+| `order_chain_broken` | orders.json was edited by hand (the hash chain names the order); restore it from backup or review the named order, then re-seal by recording through orders.py. |
+| `order_blank_field` | an order needs a non-blank failure mode and lesson; nothing was written. |
+| `order_not_found` | no order with that id in orders.json; check the id with `orders.py lessons`. |
+| `order_state_error` | orders.json could not be read, locked or written; check the repo-key dir and orders.lock. |
+| `order_already_ticked` | this loop id was already counted; the tick was skipped (informational, not an error). |
+| `no_user_cite` | the order was stored without a user quote; attach it with `orders.py cite <id> --quote <verbatim owner prompt text>`. |
+| `legacy_uncited` | an imported hand-written order has no cite yet; attach one with `orders.py cite <id> --quote`. |
+| `legacy_parse_error` | a hand-written entry has no parseable loops_since_recurrence line (the entry is named); fix it and rerun import-legacy, nothing was imported. |
+| `legacy_missing` | there is no hand-written standing-orders.md to import (absent, empty or already generated). |
+| `lesson_not_current` | the order's Muninn entry is retracted, expired or superseded without a replacement and was left out of lessons; re-record the order with a fresh quote. |
 
 - Limits: only the orchestrator session can write (subagent threads are not citable); cites must anchor in a user
   prompt; the hash-chained ledgers are a cooperating-agent safeguard, not a security boundary. Measurement note: compare
@@ -184,6 +194,26 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   the same `seq` is patched to `written`. Rows are never deleted or rewritten to clear a degrade.
 - Limits: the chain is a cooperating-agent safeguard (a same-user agent can rewrite file and chain), and dropping the
   last row is undetectable. Measurement note: `docs/typed-records-measurement.md`.
+
+## Standing order stored without a cite, or a lesson missing from dispatch
+
+- Symptom: `orders.py record` exited 3 with `muninn.reason_code` (`no_user_cite`, `muninn_absent`, `cite_*`), or
+  `lessons.py query` / `orders.py lessons` exited 3 with `{"degraded": ...}`, or an order you recorded is absent from the
+  list. The order is already in `orders.json` (written first, under dir_lock) and counts and decays normally; only its
+  Muninn copy is missing. `lessons` never prints ledger text when Muninn is down (`memory.backend: off` is the explicit
+  switch). Trace rows: `order.record|tick|render|import|cite`, `lesson.query|predicate`.
+- Query: `python3 scripts/lib/orders.py --dir <repo-key dir> lessons` (the `excluded` list names orders whose Muninn entry
+  is retracted, expired or superseded, reason `lesson_not_current`), or
+  `grep -E '"command": "(order|lesson)\.' <agentic-loop dir>/<session_id>/trace.jsonl`. A hand edit of `orders.json` is
+  refused with `order_chain_broken` naming the order.
+- Fix: read the reason in the table above. For `no_user_cite` / `legacy_uncited` run
+  `orders.py --dir <repo-key dir> cite <id> --quote "<verbatim words the owner typed>"` from the owning session. To
+  adopt the old hand-written file run `orders.py import-legacy` once (it moves the original to
+  `standing-orders.legacy.md`, never deletes it), then `orders.py render`.
+- Limits: counters and decay are the typed ledger's; Muninn has no touch primitive, so only the first cite is in Muninn.
+  The chain is a cooperating-agent safeguard. A recurrence revives a decayed order (the tombstone record is kept).
+  Measurement note: `docs/typed-records-measurement.md`; overlap decision:
+  `docs/decisions/2026-10-05-orders-vs-muninn-overlap.md`.
 
 ## Stop declared in text instead of recorded, or a stop released unexpectedly
 
