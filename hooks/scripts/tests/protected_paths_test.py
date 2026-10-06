@@ -99,6 +99,11 @@ class PolicyDrivenHookTests(unittest.TestCase):
         self.edit_policy("source_extensions", [*json.loads(self.policy.read_text())["source_extensions"], ".rs"])
         self.assertIn("source edit on main", self.sed("x.rs"))
 
+    def test_the_policy_file_cannot_be_edited_on_main(self) -> None:
+        """Negative control: another .json is a document; the policy file itself is treated as source."""
+        self.assertEqual(self.edit("config/other.json"), "")
+        self.assertIn("source file", self.edit("policy/protected_paths.json"))
+
     def test_edit_on_main_follows_doc_extensions(self) -> None:
         """Edit of x.rs is denied until .rs is declared a document extension, and .md loses its exemption on removal."""
         self.assertIn("source file", self.edit("x.rs"))

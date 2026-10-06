@@ -14,6 +14,7 @@ from typing import cast
 POLICY = Path(__file__).resolve().parents[3] / "policy" / "protected_paths.json"
 KEYS = ("source_extensions", "plugin_source_globs", "doc_extensions", "doc_names", "settings_files")
 UNREADABLE = "protected_paths_unreadable"
+POLICY_NAME = "policy/protected_paths.json"  # hardcoded: always source, never a document, in every package
 # Used only when the policy is unreadable: owner permission files stay denied on every branch.
 FALLBACK_SETTINGS = (
     ".claude/settings.json",
@@ -63,6 +64,8 @@ def is_plugin_source(path: str, data: dict[str, list[str]]) -> bool:
 
 def is_document(path: str, data: dict[str, list[str]]) -> bool:
     """Whether the path is a document/config file that may be edited on main."""
+    if path == POLICY_NAME or path.endswith(f"/{POLICY_NAME}"):  # the policy cannot exempt itself
+        return False
     name = path.rsplit("/", 1)[-1]
     return name in data["doc_names"] or Path(path).suffix in data["doc_extensions"]
 
