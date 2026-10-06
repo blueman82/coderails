@@ -244,7 +244,16 @@ class ProtectedPathsTests(CodexHookCase):
     def test_the_policy_file_cannot_be_edited_on_main(self) -> None:
         """Negative control: another .json is a document; the policy file itself is not."""
         self.assertEqual(self.patch("config/other.json"), "")
-        self.assertIn("Blocked edit", self.patch("policy/protected_paths.json"))
+        (self.repo / "policy/nested").mkdir(parents=True)
+        for target in (
+            "policy/protected_paths.json",
+            "policy/./protected_paths.json",
+            "policy//protected_paths.json",
+            "policy/nested/../protected_paths.json",
+            f"{self.repo}/policy/./protected_paths.json",
+        ):
+            with self.subTest(target=target):
+                self.assertIn("Blocked edit", self.patch(target))
 
     def test_deleted_policy_fails_closed_on_main(self) -> None:
         """A missing file denies with protected_paths_unreadable on main and not on a feature branch."""

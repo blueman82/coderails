@@ -7,6 +7,7 @@ A missing, torn or ill-shaped file raises ValueError("protected_paths_unreadable
 from __future__ import annotations
 
 import json
+import os
 import re
 from pathlib import Path
 from typing import cast
@@ -64,6 +65,7 @@ def is_plugin_source(path: str, data: dict[str, list[str]]) -> bool:
 
 def is_document(path: str, data: dict[str, list[str]]) -> bool:
     """Whether the path is a document/config file that may be edited on main."""
+    path = os.path.normpath(path)
     if path == POLICY_NAME or path.endswith(f"/{POLICY_NAME}"):  # the policy cannot exempt itself
         return False
     name = path.rsplit("/", 1)[-1]
