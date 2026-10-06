@@ -11,9 +11,9 @@ from pathlib import Path
 from typing import Any, cast
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
-from scripts.lib import publication_gate
+from scripts.lib import merge_target, publication_gate
 from scripts.lib.config import config_path, integrity_machine_user
-from scripts.lib.git_common import branch, gate_eval_summary_for_pr, pr_field, pr_num, repo, run
+from scripts.lib.git_common import gate_eval_summary_for_pr, pr_field, repo, run
 from scripts.post_evals import smoke_verify
 
 
@@ -81,7 +81,7 @@ def merge_reason(number: str, cwd: str) -> str:
             "Blocked: could not resolve working directory to verify the eval artifact for "
             "gh pr merge. Retry from a valid repo directory."
         )
-    number = number or pr_num(branch())
+    number = merge_target.resolve(number)  # no target = this branch's PR; "?", other-repo URL, unknown branch = none
     if not number:
         return (
             "Blocked: gh pr merge — could not resolve a PR number to verify the eval "

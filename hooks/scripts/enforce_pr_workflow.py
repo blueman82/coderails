@@ -14,6 +14,7 @@ from hooks.scripts.lib.pr_merge_gate import merge_reason
 from hooks.scripts.lib.pr_workflow_match import operation, pr_number, step_found, targets_main, transcript_entries
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from scripts.lib import merge_target
 from scripts.lib.config import config_path
 
 
@@ -36,6 +37,15 @@ def main() -> int:
     if not paths:
         return 0
     number = pr_number(segment) if name == "merge" else ""
+    if name == "merge" and number:
+        try:
+            os.chdir(cwd)
+            number = merge_target.resolve(number)
+        except (OSError, ValueError, RuntimeError):
+            number = ""
+        if not number:
+            deny("pr_number_invalid: Blocked: gh pr merge — could not resolve the target PR.")
+            return 0
     if not step_found(transcript_entries(paths), name, number):
         required = "/coderails:push" if name == "create" else "/pr-review-toolkit:review-pr"
         action = {

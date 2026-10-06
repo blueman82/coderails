@@ -123,6 +123,8 @@
   "scripts/lib/manifest_policy.py": "100644",
   "scripts/lib/manifest_counters.py": "100644",
   "scripts/lib/publication_gate.py": "100644",
+  "scripts/lib/merge_target.py": "100644",
+  "packages/codex/scripts/lib/merge_target.py": "100644",
   "scripts/lib/workflow_gate_counters.py": "100644",
   "packages/codex/scripts/lib/publication_gate.py": "100644",
   "packages/codex/hooks/scripts/pr_publication_gate.py": "100755",

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import sys
 from pathlib import Path
 from typing import Any, cast
 
@@ -96,10 +97,12 @@ def guarded_segments(command: str, cwd: str) -> list[tuple[str, str, str]]:
 
 
 def pr_number(segment: str) -> str:
-    """Read the explicit PR argument while excluding option tokens."""
-    match = re.search(r"gh\s+pr\s+merge(.*)", segment)
-    arguments = match[1] if match else re.sub(r"^.*?merge\.(?:sh|py)", "", segment)
-    return next((token.strip("\"'") for token in arguments.split() if re.match(r"^[0-9]", token.strip("\"'"))), "")
+    """The merge target: a number, URL or branch as written, "" for none, "?" when unresolvable (-R, two targets)."""
+    sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+    # Import at use time so a Claude lookup cannot bind the independently installed Codex scripts package.
+    from scripts.lib import merge_target
+
+    return merge_target.parse(segment)[0]
 
 
 def transcript_entries(paths: list[str]) -> list[dict[str, Any]]:

@@ -12,6 +12,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+from hooks.scripts import enforce_pr_workflow
 from hooks.scripts.lib.pr_merge_gate import integrity_reason, merge_reason
 from hooks.scripts.tests.lib.hook_test_support import HookTestCase
 from scripts.lib.git_common import EvalSummary
@@ -84,6 +85,41 @@ class MergeEvidenceTests(HookTestCase):
         with patch(MODULE + ".pr_field", return_value=""):
             self.assertIn("head SHA", merge_reason("1", str(self.directory)))
         self.assertIn("valid repo", merge_reason("1", str(self.directory / "missing")))
+
+    def test_target_is_parsed_not_guessed(self) -> None:
+        """Claude arm: a flag value is not the PR, and an unresolvable target denies instead of using this branch."""
+        from hooks.scripts.lib.pr_workflow_match import pr_number
+
+        self.assertEqual(pr_number("gh pr merge --body 1 42"), "42")
+        self.assertEqual(pr_number("gh pr merge --repo o/r 42"), "?")
+        before = Path.cwd()
+        self.addCleanup(os.chdir, before)
+        with patch("scripts.lib.git_common.pr_num", return_value="9"):
+            self.assertIn("could not resolve a PR number", merge_reason("?", str(self.directory)))
+
+    def test_review_prerequisite_uses_resolved_number(self) -> None:
+        """A reviewed PR can be selected by branch or URL without changing its prerequisite."""
+        before = Path.cwd()
+        self.addCleanup(os.chdir, before)
+        module = "hooks.scripts.enforce_pr_workflow"
+        for target in ("feature", "https://github.com/o/r/pull/42"):
+            payload = {
+                "cwd": str(self.directory),
+                "transcript_path": __file__,
+                "tool_input": {"command": f"gh pr merge {target}"},
+            }
+            with (
+                patch(module + ".read_payload", return_value=payload),
+                patch(module + ".config_path", return_value="config"),
+                patch(module + ".transcript_entries", return_value=[]),
+                patch(module + ".merge_target.resolve", return_value="42"),
+                patch(module + ".step_found", return_value=True) as prerequisite,
+                patch(module + ".merge_reason", return_value=""),
+                patch(module + ".deny") as deny,
+            ):
+                enforce_pr_workflow.main()
+                prerequisite.assert_called_once_with([], "merge", "42")
+                deny.assert_not_called()
 
     def test_publication_gate_violation_denies_with_code_first(self) -> None:
         """Direct Claude path: a publication violation denies, reason code first; no violation passes."""

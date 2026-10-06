@@ -37,7 +37,7 @@ exit 0
 MERGE_DRIVER = (
     "import sys; sys.path.insert(0, %r)\n"
     "from scripts import merge\n"
-    "merge.verify_gates = lambda number: None\n"
+    "merge.verify_gates = lambda number: merge.git.pr_field(number, 'headRefOid')\n"
     "merge.cleanup = lambda number, default: None\n"
     "raise SystemExit(merge.main(['7']))\n"
 )
@@ -115,8 +115,9 @@ class MergeCallTests(unittest.TestCase):
             if effect:
                 raise effect
 
-        def evidence(number: str) -> None:
+        def evidence(number: str) -> str:
             order.append("evidence")
+            return "sha7"
 
         with (
             mock.patch.object(merge, "verify_gates", side_effect=evidence),
@@ -147,7 +148,7 @@ class MergeCallTests(unittest.TestCase):
             return "OPEN" if name == "state" else "sha7"
 
         with (
-            mock.patch.object(merge, "verify_gates"),
+            mock.patch.object(merge, "verify_gates", return_value="sha7"),
             mock.patch.object(git, "require_repo"),
             mock.patch.object(git, "main", return_value="main"),
             mock.patch.object(git, "pr_field", side_effect=field),

@@ -264,7 +264,7 @@ class MergeCallTests(unittest.TestCase):
             return subprocess.CompletedProcess(argv, 0, "", "")
 
         with (
-            mock.patch.object(merge, "verify_gates"),
+            mock.patch.object(merge, "verify_gates", return_value="sha7"),
             mock.patch.object(git, "require_repo"),
             mock.patch.object(git, "main", return_value="main"),
             mock.patch.object(git, "pr_field", return_value="OPEN"),
@@ -274,7 +274,7 @@ class MergeCallTests(unittest.TestCase):
             mock.patch.object(publication_gate, "enforce", side_effect=gate_effect) as gate,
         ):
             status = merge.main(["7"])
-        gate.assert_called_once_with("7", "OPEN", unit="", progress="")
+        gate.assert_called_once_with("7", "sha7", unit="", progress="")
         return status, [a for a in seen if a[:3] == ("gh", "pr", "merge")]
 
     def test_enforce_refusal_blocks_merge(self) -> None:

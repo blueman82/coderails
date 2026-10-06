@@ -57,11 +57,13 @@ def parse_raw_z(text: str) -> Changes:
     rows: Changes = []
     while i < len(tokens) and tokens[i].startswith(":"):
         meta = tokens[i].split()
-        status, new_mode = meta[4], meta[1]
+        status, old_mode, new_mode = meta[4], meta[0][1:], meta[1]
         count = 2 if status[0] in "RC" else 1
         paths = tokens[i + 1 : i + 1 + count]
         if new_mode in ("120000", "160000") and not status.startswith("D"):
             status += ":" + new_mode
+        elif status[0] in "MRC" and old_mode != new_mode and "000000" not in (old_mode, new_mode):
+            status += ":mode"  # a chmod (100644 <-> 100755) rides in a change that may look like a plain edit
         rows.append((status, paths))
         i += 1 + count
     return rows
@@ -102,7 +104,7 @@ def check(
         if statuses and status[0] not in statuses:
             add("status_not_allowed", paths[-1])
         for path in paths:
-            if matches(path, deny):
+            if matches(path, deny) and not status.startswith("D"):  # removing a secret is the safe direction
                 add("denied_path", path)
             if (manifest is not None and not matches(path, manifest)) or (allow and not matches(path, allow)):
                 add("out_of_manifest", path)
@@ -112,6 +114,8 @@ def check(
                 add("docs_sync_deny", path)
         if status.startswith("T") or status.endswith((":120000", ":160000")):
             add("special_file_type", paths[-1])
+        if status.endswith(":mode"):
+            add("mode_change", paths[-1])
         if docs is not None and status.startswith("D"):
             add("docs_sync_deletion", paths[0])
     if policy.get("require_linked_worktree") and linked is False:
@@ -159,7 +163,15 @@ def unit_manifest(progress: str, unit: str) -> list[str] | None:
     if state is None or not isinstance(units, dict):
         raise ValueError("progress unreadable")
     entry = cast(dict[str, Any], units).get(unit)
-    return (strings(cast(dict[str, Any], entry).get("manifest")) or None) if isinstance(entry, dict) else None
+    if not isinstance(entry, dict):
+        raise ValueError("unit missing")
+    fields = cast(dict[str, Any], entry)
+    if "manifest" not in fields:
+        return None
+    manifest = fields["manifest"]
+    if not isinstance(manifest, list) or not all(isinstance(path, str) for path in cast(list[object], manifest)):
+        raise ValueError("unit manifest invalid")
+    return strings(cast(list[object], manifest))
 
 
 def unit_flags(arguments: list[str]) -> tuple[list[str], str, str]:
@@ -177,7 +189,9 @@ def unit_flags(arguments: list[str]) -> tuple[list[str], str, str]:
 
 def settings() -> tuple[str, str, bool]:
     """(mode, policy file, mode_invalid) from the typed config; no config file means the defaults."""
-    values, _ = load_config(config_path() or "")
+    values, findings = load_config(config_path() or "")
+    if any(finding["code"] == "config_unreadable" for finding in findings):
+        raise ValueError("config unreadable")
     mode = str(values.get("diff_manifest") or "enforce")
     policy = str(values.get("diff_manifest_policy") or DEFAULT_POLICY)
     return (mode if mode in MODES else "enforce"), policy, mode not in MODES
@@ -186,19 +200,27 @@ def settings() -> tuple[str, str, bool]:
 def _evaluate(pr: str, head: str, policy_file: str, unit: str, progress: str, label: str) -> list[dict[str, str]]:
     """Check the diff against the policy; unusable inputs yield one manifest_unreadable violation."""
     policy = load_json(policy_file)
+    default = load_json(DEFAULT_POLICY)
     changes = diff_changes(head or (git.pr_field(pr, "headRefOid") if pr else "HEAD"), f"pull/{pr}/head" if pr else "")
-    if policy is None or changes is None or not isinstance(policy.get("manifest", []), list):
+    if policy is None or default is None or changes is None or not isinstance(policy.get("manifest", []), list):
         return [{"code": "manifest_unreadable", "path": policy_file}]
+    policy["deny"] = strings(default.get("deny")) + strings(policy.get("deny"))
     manifest = strings(policy["manifest"]) if "manifest" in policy else None
-    if unit and progress:
+    if bool(unit) != bool(progress):  # a lone flag would otherwise be silently ignored
+        return [{"code": "manifest_unreadable", "path": "--unit and --progress must be given together"}]
+    scoped = None
+    if unit:  # legacy entries without a manifest retain the policy's own bound
         try:
-            manifest = unit_manifest(progress, unit) or manifest
+            scoped = unit_manifest(progress, unit)
         except ValueError:
             return [{"code": "manifest_unreadable", "path": progress}]
     if manifest is None:
         trace(label, "legacy", "manifest_legacy_absent")
     linked = linked_worktree() if policy.get("require_linked_worktree") else None
-    return cast(list[dict[str, str]], check(changes, policy, manifest, linked)["violations"])
+    found = cast(list[dict[str, str]], check(changes, policy, manifest, linked)["violations"])
+    if scoped is not None:
+        found += [v for v in check(changes, {}, scoped)["violations"] if v not in found]
+    return found
 
 
 def violations(pr: str = "", unit: str = "", progress: str = "", head: str = "") -> list[dict[str, str]]:
@@ -207,7 +229,12 @@ def violations(pr: str = "", unit: str = "", progress: str = "", head: str = "")
     With a PR number the diff is the PR's own head (fetched if absent); otherwise it is the local HEAD. An internal
     error refuses with manifest_internal_error under enforce and fails open under advisory.
     """
-    mode, policy_file, invalid = settings()
+    try:
+        mode, policy_file, invalid = settings()
+    except Exception:  # noqa: BLE001 - unreadable config must not turn the default-ON gate off or raise raw
+        trace(f"pr-{pr}" if pr else "config", "refused", "manifest_internal_error")
+        print("! diff_manifest manifest_internal_error: config unreadable", file=sys.stderr)
+        return [{"code": "diff_manifest:manifest_internal_error", "detail": "config unreadable"}]
     if mode == "off":
         return []
     label = f"{git.repo()}@pr-{pr}" if pr else f"{git.repo()}@{git.branch()}"

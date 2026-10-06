@@ -19,7 +19,11 @@ HOOK = ROOT / "packages/codex/hooks/scripts/pr_publication_gate.py"
 SECRET = ".en" + "v"  # two parts so no source line spells the secret-file name
 GH_SHIM = """#!/bin/sh
 case "$1 $2" in
-  "pr view") [ "$5" = headRefOid ] && echo "$FAKE_SHA" ;;
+  "pr view")
+    case "$5" in
+      headRefOid) if [ "$3" = 1 ]; then echo "$CLEAN_SHA"; else echo "$FAKE_SHA"; fi ;;
+      number) case "$3" in https://github.com/o/r/pull/*) echo "${3##*/}" ;; feat-b) echo 7 ;; esac ;;
+    esac ;;
 esac
 exit 0
 """
@@ -68,6 +72,7 @@ class CodexPublicationGateTests(unittest.TestCase):
             **os.environ,
             "PATH": f"{install_gh_shim(self.dir.parent)}{os.pathsep}{os.environ['PATH']}",
             "FAKE_SHA": self.sha,
+            "CLEAN_SHA": git_cmd(self.dir, "rev-parse", "origin/main").strip(),
             "CODERAILS_AGENTIC_LOOP_DIR": str(self.loop),
             "CLAUDE_AGENTIC_LOOP_DIR": str(self.loop),
         }
@@ -120,6 +125,41 @@ class CodexPublicationGateTests(unittest.TestCase):
         """A policy file that cannot be read denies with manifest_unreadable."""
         self.config(f"diff_manifest_policy: {self.dir}/missing.json\n")
         self.assertTrue(self.reason("gh pr merge 7").startswith("diff_manifest:manifest_unreadable"))
+
+    def test_the_merged_pr_is_the_one_checked(self) -> None:
+        """PR 7 is violating and PR 1 is clean: a flag value, a URL or a branch name never swaps the target."""
+        for command in (
+            "gh pr merge --body 1 7",
+            "gh pr merge --body=1 7 --squash",
+            "gh pr merge https://github.com/o/r/pull/7",
+            "gh pr merge feat-b",
+        ):
+            with self.subTest(command=command):
+                self.assertTrue(self.reason(command).startswith("diff_manifest:denied_path"), command)
+        self.assertEqual(self.reason("gh pr merge 1"), "")  # control: the clean PR itself is allowed
+
+    def test_unresolvable_target_denies(self) -> None:
+        """-R/--repo, another repo's URL and an unknown branch deny instead of using the current branch's PR."""
+        for command in (
+            "gh pr merge --repo other/repo 1",
+            "gh pr merge https://github.com/x/y/pull/1",
+            "gh pr merge no-such-branch",
+        ):
+            with self.subTest(command=command):
+                self.assertTrue(self.reason(command).startswith("pr_number_invalid"), command)
+
+    def test_unit_flags_are_enforced_on_the_merge_script(self) -> None:
+        """merge.py --unit 2 --progress P 7 gates PR 7 (not PR 2) against unit 2's manifest."""
+        git_cmd(self.dir, "reset", "-q", "--hard", "origin/main")
+        (self.dir / "docs.md").write_text("x\n")
+        git_cmd(self.dir, "add", "-A")
+        git_cmd(self.dir, "commit", "-qm", "docs")
+        self.env["FAKE_SHA"] = git_cmd(self.dir, "rev-parse", "HEAD").strip()
+        progress = self.dir.parent / "progress.json"
+        progress.write_text(json.dumps({"session_id": "s", "work_units": {"2": {"manifest": ["src/**"]}}}))
+        flags = f"--unit 2 --progress {progress}"
+        self.assertTrue(self.reason(f"python3 scripts/merge.py {flags} 7").startswith("diff_manifest:out_of_manifest"))
+        self.assertEqual(self.reason("python3 scripts/merge.py 7"), "")  # control: no unit, clean docs diff passes
 
     def test_unresolvable_head_fails_closed(self) -> None:
         """No head SHA from gh means the diff cannot be read: deny, not allow."""

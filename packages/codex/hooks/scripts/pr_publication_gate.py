@@ -5,13 +5,15 @@ A PreToolUse ^Bash$ hook: every `gh pr merge N`, `gh api .../pulls/N/merge` and 
 parity-tested lib/action_match.guarded_segments) is checked with scripts/lib/publication_gate.evaluate on the PR head.
 A violation denies with its reason code first; an unresolvable PR or any internal error also denies, never allows.
 The check is artifact-based and needs no transcript. Limit: a merge by a script or alias that guarded_segments cannot
-see is not covered; scripts/merge.py still enforces the same gate itself.
+see is not covered; scripts/merge.py still enforces the same gate itself. The target is parsed by lib merge_target
+(flag values skipped, URL and branch forms resolved through gh, -R/--repo and other-repo URLs denied). Limit: the
+hook cannot pin the head, so a push between this check and the agent's own `gh pr merge` is not caught there
+(merge.py pins it with --match-head-commit).
 """
 
 from __future__ import annotations
 
 import os
-import re
 import sys
 from pathlib import Path
 from typing import cast
@@ -21,16 +23,7 @@ from lib.action_match import guarded_segments
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from scripts.lib import git_common as git  # noqa: E402
-from scripts.lib import publication_gate  # noqa: E402
-
-
-def pr_number(segment: str) -> str:
-    """The PR number named in a merge segment, or empty text."""
-    if match := re.search(r"/pulls/(\d+)/merge", segment):
-        return match[1]
-    tokens = segment.split()
-    start = next((i for i, token in enumerate(tokens) if re.search(r"merge(\.py|\.sh)?[\"']?$", token)), len(tokens))
-    return next((t.strip("\"'") for t in tokens[start + 1 :] if re.fullmatch(r"[\"']?\d+[\"']?", t)), "")
+from scripts.lib import merge_target, publication_gate  # noqa: E402
 
 
 def main() -> int:
@@ -46,11 +39,12 @@ def main() -> int:
             if name != "merge":
                 continue
             os.chdir(where)
-            number = pr_number(segment) or git.pr_num(git.branch())
+            target, unit, progress = merge_target.parse(segment)
+            number = merge_target.resolve(target)
             if not number:
                 deny("pr_number_invalid: Blocked: merge — could not resolve a PR number for the publication gate.")
                 return 0
-            if violations := publication_gate.evaluate(number, git.pr_field(number, "headRefOid")):
+            if violations := publication_gate.evaluate(number, git.pr_field(number, "headRefOid"), unit, progress):
                 first = violations[0]
                 deny(
                     f"{first['code']}: Blocked: merge of PR {number} — the publication gate refused this head "

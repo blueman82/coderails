@@ -16,7 +16,7 @@ from scripts.lib.wiki_debt import has_wiki_ingest_for_merged_prs
 from scripts.post_evals import smoke_verify
 
 
-def verify_gates(number: str) -> None:
+def verify_gates(number: str) -> str:
     """Require trusted artifacts and actual eval execution before any merge."""
     sha = git.pr_field(number, "headRefOid")
     if not sha:
@@ -53,6 +53,7 @@ def verify_gates(number: str) -> None:
     if machine_user:
         verify_integrity_status(sha, machine_user)
     has_wiki_ingest_for_merged_prs(number)
+    return sha
 
 
 def cleanup(number: str, default: str) -> None:
@@ -90,10 +91,9 @@ def main(arguments: list[str] | None = None) -> int:
         if state == "OPEN":
             if git.protected() and git.pr_field(number, "reviewDecision", "NONE") != "APPROVED":
                 raise git.WorkflowError("Not approved")
-            verify_gates(number)
-            head = git.pr_field(number, "headRefOid")
+            head = verify_gates(number)
             publication_gate.enforce(number, head, unit=unit, progress=progress)
-            git.run("gh", "pr", "merge", number, "--merge", check=True)
+            git.run("gh", "pr", "merge", number, "--merge", "--match-head-commit", head, check=True)
             print("✓ Merged")
         elif state == "MERGED":
             print("! Already merged")

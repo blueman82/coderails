@@ -156,7 +156,7 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   `diff-manifest/legacy/manifest_legacy_absent` (policy file without a manifest key; also written by the gate) and `diff-manifest/refused/foreign_session`. Tally them with
   `python3 scripts/measure_graph_alignment.py --root . | python3 scripts/lib/workflow_gate_counters.py`
   (`manifest_counters.py` still tallies only `diff-manifest`). See `docs/workflow-gates-measurement.md`.
-- Codes: `out_of_manifest`, `denied_path`, `docs_sync_deny`, `docs_sync_deletion`, `not_linked_worktree`, `special_file_type` (type change, symlink or gitlink), `status_not_allowed` (policy `statuses`), `too_many_paths` (policy `max_paths`), `manifest_unreadable`, `manifest_internal_error`, `diff_manifest_mode_invalid` (unknown mode, treated as enforce).
+- Codes: `out_of_manifest`, `denied_path`, `docs_sync_deny`, `docs_sync_deletion`, `not_linked_worktree`, `special_file_type` (type change, symlink or gitlink), `mode_change`, `status_not_allowed` (policy `statuses`), `too_many_paths` (policy `max_paths`), `manifest_unreadable`, `manifest_internal_error`, `diff_manifest_mode_invalid` (unknown mode, treated as enforce).
 - Remediation: a real violation means the diff left its declared scope; fix the diff, or widen `unit.manifest`
   (re-register with `add-unit --manifest`) or the policy file on purpose. `push.py`/`merge.py --unit N --progress PATH`
   bound the diff to that unit's manifest. `manifest_unreadable` means the policy file, progress.json or diff (or an
@@ -165,6 +165,19 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
 - Limits: a cooperating-agent safeguard. A same-user agent can edit the config to `off`; the Codex hook only sees merges
   `guarded_segments` can match; Codex hooks need `/hooks` trust before they run; Claude's direct arm needs a
   `workflow.config.yaml` in the repo.
+- Hardening notes: `mode_change` refuses a chmod (100644 to 100755). The default denylist is best-effort secret shapes
+  (`.env*`, `*.pem`, `*.key`, `*.p12`, `credentials*.json`, `.npmrc`, `.netrc`, `.git-credentials`, `id_rsa|dsa|ecdsa|ed25519*`)
+  and the gate's own files (`.coderails/workflow.config.yaml`, `policy/diff-policy*.json`, the Codex copy), so a PR that
+  edits them is refused; deleting a denied path is not. It cannot catch a secret under another name. The gate reads config
+  and policy from the local checkout: a same-user boundary, not a defence against someone who controls that checkout.
+  `--unit` without `--progress` (or the reverse) refuses `manifest_unreadable`; a unit entry with no manifest falls back to
+  the policy's own manifest (legacy row); a missing or malformed requested unit refuses. Unit and policy manifests both
+  apply, so a unit cannot widen policy scope. Custom policies retain the default denylist. Unit scoping is opt-in through
+  the paired flags. An unreadable config refuses `manifest_internal_error` and emits its refusal trace. Direct-merge hooks parse
+  the target with `scripts/lib/merge_target.py` (flag values skipped, URL and branch resolved through gh); `-R/--repo`, another
+  repo's URL or an unknown branch deny `pr_number_invalid`. `merge.py` pins all gates and the merge to the same head
+  with `--match-head-commit`; a hook
+  cannot pin the agent's own `gh pr merge`, so a push between the hook check and that merge is a known gap.
 
 ## Action-authority hook denied a merge or push (or warned in advisory)
 

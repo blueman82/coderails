@@ -1,4 +1,20 @@
 {
-  "deny": ["**/.env", "**/*.pem", "**/id_rsa*"],
+  "deny": [
+    "**/.env*",
+    "**/*.pem",
+    "**/*.key",
+    "**/*.p12",
+    "**/credentials*.json",
+    "**/.npmrc",
+    "**/.netrc",
+    "**/.git-credentials",
+    "**/id_rsa*",
+    "**/id_dsa*",
+    "**/id_ecdsa*",
+    "**/id_ed25519*",
+    ".coderails/workflow.config.yaml",
+    "policy/diff-policy*.json",
+    "packages/codex/policy/diff-policy*.json"
+  ],
   "require_linked_worktree": false
 }
