@@ -110,7 +110,9 @@ def permanent_pattern(command: str, cwd: str) -> tuple[str, str]:
             _, text, identifier = min(matches)
             return text, identifier
     for subcommand, _, rest in argv_match.git_calls(command):  # -C/-c forms, wrappers and the short -n
-        if subcommand == "commit" and {"--no-verify", "-n"} & argv_match.flags(rest, "mFCct"):
+        given = argv_match.flags(rest, "mFCct")  # git accepts any unambiguous prefix, so --no-ver is --no-verify
+        abbreviated = any("--no-verify".startswith(f) and f.startswith("--no-v") for f in given)
+        if subcommand == "commit" and ("-n" in given or abbreviated):
             return "git commit --no-verify", "git-commit-no-verify"
     return "", ""
 

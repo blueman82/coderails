@@ -100,6 +100,13 @@ class TestGateTests(CodexHookCase):
         trusted.parent.mkdir(parents=True, exist_ok=True)
         trusted.write_text("false\n", encoding="utf-8")
         denied = [
+            "command -p git commit -m x",
+            "sudo -n git commit -m x",
+            "{ git commit -m x; }",
+            "if true; then git commit -m x; fi",
+            "timeout 60 git commit -m x",
+            "2>&1 git commit -m x",
+            "bash -c 'git commit -m x' # \"",
             "git -C /r commit -m x",
             "git -c user.name=x commit -m x",
             "/usr/bin/git commit -m x",
@@ -120,7 +127,14 @@ class DestructiveTests(CodexHookCase):
 
     def test_no_verify_forms_are_denied(self) -> None:
         """--no-verify and -n are denied behind global options; ordinary commits and quoted text are not."""
-        denied = ("git -C d commit --no-verify", "git commit -n", "git -c a=b commit -nm x", "env A=1 git commit -n")
+        denied = (
+            "git commit --no-verif -m x",
+            "git -C d commit --no-ver",
+            "git -C d commit --no-verify",
+            "git commit -n",
+            "git -c a=b commit -nm x",
+            "env A=1 git commit -n",
+        )
         for command in denied:
             with self.subTest(command=command):
                 self.assertTrue(self.bash("destructive_bash_gate", command))
@@ -156,6 +170,13 @@ class CeilingTests(CodexHookCase):
         validate = "python3 scripts/post_evals.py validate-structure e.json 5 abc"
         decisions = [self.bash("verification_volume_ceiling", c, self.repo) for c in (validate, POST, POST)]
         self.assertEqual(decisions, [False, False, True])
+
+    def test_operation_mentions_do_not_consume_the_ceiling(self) -> None:
+        """A body path called post cannot exhaust the actual post ceremony's allowance."""
+        mention = "python3 scripts/post_evals.py validate-embed evals.json post"
+        self.assertEqual(self.runs(mention, self.repo, 3), [False] * 3)
+        leading = "python3 scripts/post_evals.py --progress=p post 5 evals.json"
+        self.assertEqual(self.runs(leading, self.repo, 3), [False, False, True])
 
     def test_wrapped_runs_count_and_mentions_do_not(self) -> None:
         """Argv matching counts wrapped runs and ignores quoted or non-executing mentions."""
@@ -219,6 +240,11 @@ class ProtectedPathsTests(CodexHookCase):
         self.assertEqual(self.patch("README.md"), "")
         self.edit_policy("doc_extensions", lambda values: [v for v in values if v != ".md"])
         self.assertIn("Blocked edit", self.patch("README.md"))
+
+    def test_the_policy_file_cannot_be_edited_on_main(self) -> None:
+        """Negative control: another .json is a document; the policy file itself is not."""
+        self.assertEqual(self.patch("config/other.json"), "")
+        self.assertIn("Blocked edit", self.patch("policy/protected_paths.json"))
 
     def test_deleted_policy_fails_closed_on_main(self) -> None:
         """A missing file denies with protected_paths_unreadable on main and not on a feature branch."""

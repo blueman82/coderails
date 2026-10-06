@@ -1,10 +1,14 @@
 """Argv-level command classifier shared by the Claude and Codex gates (byte-identical copies).
 
-Splits a Bash command into argv lists on ; && || | & ( ) and newline outside quotes, unwraps
-env/sudo/command/exec/time/nohup/nice, absolute paths and `bash -c '...'`, and recognises git subcommands and
-scripts by argv, so quoted text (`echo "git commit"`) is one token and never matches.
-Limits (no shell parser): eval, xargs, aliases, functions and scripts that themselves commit are not seen.
-A shlex failure (unbalanced quote) falls back to a whitespace split of the raw segments, which over-matches.
+Splits a Bash command into argv lists on ; && || | & ( ) backtick and newline outside quotes (a `#` comment is
+dropped), unwraps assignments, leading redirections, shell keywords ({ } ! if then do ...), per-wrapper options
+(env sudo command exec time nohup nice timeout stdbuf setsid xargs builtin uv run), absolute paths and
+`bash [-o x] -c '...'`, and recognises git subcommands and scripts by argv, so quoted text (`echo "git commit"`)
+is one token and never matches.
+Limits (no shell parser): eval, aliases (`git -c alias.ci=commit ci`), functions, `$'git'` quoting, backticks
+inside double quotes and scripts that themselves commit are not seen. A shlex failure (unbalanced quote) falls
+back to a whitespace split of the raw segments: plain words over-match, but a `-c` body split by that fallback
+is seen only as its first word.
 """
 
 from __future__ import annotations
@@ -14,8 +18,24 @@ import re
 import shlex
 
 _ASSIGN = re.compile(r"[A-Za-z_]\w*=")
-_WRAPPERS = {"env", "sudo", "command", "exec", "time", "nohup", "nice"}
-_WRAPPER_ARG = {"-u", "-g", "-h", "-p", "-C", "-D", "-n", "-o", "-a"}
+_REDIRECT = re.compile(r"\d*(?:[<>]|&>)")
+_BARE_REDIRECT = re.compile(r"\d*(?:>>?|<|>\||&>>?)")
+_KEYWORDS = {"{", "}", "!", "if", "then", "else", "elif", "do", "while", "until", "builtin"}
+# wrapper -> (short options taking a value, long options taking a value, leading positionals to skip)
+_WRAPPERS: dict[str, tuple[str, tuple[str, ...], int]] = {
+    "env": ("uCS", ("--unset", "--chdir", "--split-string"), 0),
+    "sudo": ("ugphCDRT", ("--user", "--group", "--host", "--prompt", "--chdir", "--chroot", "--close-from"), 0),
+    "command": ("", (), 0),
+    "time": ("", (), 0),
+    "nohup": ("", (), 0),
+    "nice": ("n", ("--adjustment",), 0),
+    "exec": ("a", (), 0),
+    "timeout": ("sk", ("--signal", "--kill-after"), 1),
+    "stdbuf": ("ioe", (), 0),
+    "setsid": ("", (), 0),
+    "xargs": ("InPsLdEa", (), 0),
+    "uv": ("pw", ("--with", "--python", "--project", "--directory"), 1),
+}
 _SHELLS = {"bash", "sh", "zsh", "dash", "ksh"}
 _GIT_ARG = {"-C", "-c", "--git-dir", "--work-tree", "--namespace", "--super-prefix", "--config-env"}
 _LONG_ARG = {"--message", "--file", "--author", "--date", "--template", "--reuse-message", "--reedit-message"}
@@ -40,7 +60,11 @@ def _raw_segments(command: str) -> list[str]:
         elif char in "'\"":
             quote = char
             current.append(char)
-        elif char in ";&|()\n":
+        elif char == "#" and (not current or current[-1] in " \t"):  # comment: drop to end of line
+            index = command.find("\n", index) - 1 if "\n" in command[index:] else len(command)
+        elif char in ";&|()\n`" and not (
+            char == "&" and (current[-1:] in (["<"], [">"]) or command[index + 1 : index + 2] == ">")
+        ):
             segments.append("".join(current))
             current = []
         else:
@@ -63,13 +87,13 @@ def _split_all(command: str) -> list[list[str]]:
 def _unwrap(argv: list[str], found: list[list[str]], depth: int) -> None:
     """Strip wrappers and assignments, record the command with a basename argv[0], and recurse into shell -c."""
     while argv:
-        if _ASSIGN.match(argv[0]):
+        head = argv[0]
+        if _ASSIGN.match(head) or head in _KEYWORDS:
             argv = argv[1:]
-        elif os.path.basename(argv[0]) in _WRAPPERS:
-            argv = argv[1:]
-            while argv and (argv[0].startswith("-") or _ASSIGN.match(argv[0])):
-                skip = 2 if argv[0] in _WRAPPER_ARG and len(argv) > 1 else 1
-                argv = argv[skip:]
+        elif _REDIRECT.match(head):
+            argv = argv[2 if _BARE_REDIRECT.fullmatch(head) else 1 :]
+        elif os.path.basename(head) in _WRAPPERS:
+            argv = _strip_wrapper(os.path.basename(head), argv[1:])
         else:
             break
     if not argv:
@@ -77,13 +101,41 @@ def _unwrap(argv: list[str], found: list[list[str]], depth: int) -> None:
     argv = [os.path.basename(argv[0]), *argv[1:]]
     found.append(argv)
     if argv[0] in _SHELLS and depth < 5:
-        for position, token in enumerate(argv[1:], 1):
-            if not token.startswith("-"):
-                break
-            if not token.startswith("--") and "c" in token and position + 1 < len(argv):
+        position = 1
+        while position < len(argv) and argv[position].startswith(("-", "+")):
+            token = argv[position]
+            if token in ("-o", "+o", "-O", "+O"):  # option with a value
+                position += 1
+            elif not token.startswith("--") and "c" in token and position + 1 < len(argv):
                 for inner in _split_all(argv[position + 1]):
                     _unwrap(inner, found, depth + 1)
                 break
+            position += 1
+
+
+def _strip_wrapper(name: str, argv: list[str]) -> list[str]:
+    """Drop a wrapper's options (and the values of those that take one), assignments and leading positionals."""
+    short, long_options, positionals = _WRAPPERS[name]
+    while argv:
+        token = argv[0]
+        if name == "env" and token in ("-S", "--split-string") and len(argv) > 1:
+            try:
+                return [*shlex.split(argv[1]), *argv[2:]]
+            except ValueError:
+                return [*argv[1].split(), *argv[2:]]
+        if token.startswith("--") and token != "--":
+            skip = 2 if token in long_options else 1
+        elif token.startswith("-") and len(token) > 1:
+            skip = 2 if len(token) == 2 and token[1] in short else 1
+        elif _ASSIGN.match(token):
+            skip = 1
+        elif positionals:
+            positionals -= 1
+            skip = 1
+        else:
+            break
+        argv = argv[skip:]
+    return argv
 
 
 def argvs(command: str) -> list[list[str]]:
@@ -141,8 +193,32 @@ def is_script(argv: list[str], names: str | tuple[str, ...], ops: str | tuple[st
     allowed = {ops} if isinstance(ops, str) else set(ops)
     rest = argv[1:]
     script = argv[0] if argv else ""
-    if re.fullmatch(r"python[\d.]*", script) or script in _SHELLS:
-        while rest and rest[0].startswith("-"):
+    python = bool(re.fullmatch(r"python[\d.]*", script))
+    if python or script in _SHELLS:
+        valued = ("-W", "-X") if python else ("-o", "-O")
+        script = ""
+        while rest:
+            token, rest = rest[0], rest[1:]
+            if token == "-c":
+                return False
+            if token == "-m" and python and rest:
+                script, rest = rest[0].replace(".", "/") + ".py", rest[1:]
+            elif token in valued:
+                rest = rest[1:]
+            elif not token.startswith("-"):
+                script = token
+            if script:
+                break
+    if os.path.basename(script) not in wanted:
+        return False
+    if not allowed:
+        return True
+    while rest and rest[0].startswith("-"):
+        if rest[0] == "--":
             rest = rest[1:]
-        script, rest = (rest[0], rest[1:]) if rest else ("", [])
-    return os.path.basename(script) in wanted and (not allowed or bool(rest) and rest[0] in allowed)
+            break
+        option = rest[0].split("=")[0]
+        if not option.startswith("--") or not "--progress".startswith(option):
+            return False
+        rest = rest[1 if "=" in rest[0] else 2 :]
+    return bool(rest) and rest[0] in allowed
