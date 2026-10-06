@@ -27,6 +27,19 @@ class LoaderTests(unittest.TestCase):
         self.assertIn(".py", data["source_extensions"])
         self.assertIn(".md", data["doc_extensions"])
 
+    def test_equivalent_policy_paths_are_never_documents(self) -> None:
+        """Dot components, repeated separators and parent components cannot exempt the policy."""
+        data = protected_paths.load()
+        for path in (
+            "policy/./protected_paths.json",
+            "policy//protected_paths.json",
+            "policy/../policy/protected_paths.json",
+            "packages/codex/policy/./protected_paths.json",
+        ):
+            with self.subTest(path=path):
+                self.assertFalse(protected_paths.is_document(path, data))
+        self.assertTrue(protected_paths.is_document("config/./other.json", data))
+
     def test_missing_torn_and_ill_shaped_files_raise_the_reason_code(self) -> None:
         """Every unreadable form raises protected_paths_unreadable."""
         with tempfile.TemporaryDirectory() as scratch:
@@ -102,7 +115,16 @@ class PolicyDrivenHookTests(unittest.TestCase):
     def test_the_policy_file_cannot_be_edited_on_main(self) -> None:
         """Negative control: another .json is a document; the policy file itself is treated as source."""
         self.assertEqual(self.edit("config/other.json"), "")
-        self.assertIn("source file", self.edit("policy/protected_paths.json"))
+        (self.repo / "policy/nested").mkdir(parents=True)
+        for target in (
+            "policy/protected_paths.json",
+            "policy/./protected_paths.json",
+            "policy//protected_paths.json",
+            "policy/nested/../protected_paths.json",
+            f"{self.repo}/policy/./protected_paths.json",
+        ):
+            with self.subTest(target=target):
+                self.assertIn("source file", self.edit(target))
 
     def test_edit_on_main_follows_doc_extensions(self) -> None:
         """Edit of x.rs is denied until .rs is declared a document extension, and .md loses its exemption on removal."""
